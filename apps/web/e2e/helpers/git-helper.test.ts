@@ -111,7 +111,7 @@ describe("createStandardProfile", () => {
     } as unknown as ApiClient;
 
     await expect(createStandardProfile(apiClient, "file-viewer")).rejects.toThrow(
-      "mock-agent unavailable in test fixtures",
+      "No mock-agent available in E2E test fixtures",
     );
     expect(createAgentProfile).not.toHaveBeenCalled();
   });

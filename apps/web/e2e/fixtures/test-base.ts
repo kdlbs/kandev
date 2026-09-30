@@ -361,7 +361,24 @@ export const test = backendFixture.extend<
       // agent profile so the worker-scoped seedData fixture remains valid.
       await apiClient.e2eReset(seedData.workspaceId, [seedData.workflowId]);
       await apiClient.updateWorkspace(seedData.workspaceId, { default_agent_profile_id: "" });
-      await apiClient.cleanupTestProfiles([seedData.agentProfileId]);
+      const keepProfileIds = [seedData.agentProfileId];
+      const { agents } = await apiClient.listAgents();
+      const hasDynamicProfilesToClean = agents.some(
+        (agent) =>
+          agent.id === "dynamic" &&
+          agent.profiles?.some((profile) => {
+            const workspaceId = (profile as unknown as { workspace_id?: string }).workspace_id;
+            return !workspaceId && !keepProfileIds.includes(profile.id);
+          }),
+      );
+      const releaseDynamicRouting = hasDynamicProfilesToClean
+        ? await backend.useEnv({ KANDEV_FEATURES_DYNAMIC_AGENT_ROUTING: "true" })
+        : undefined;
+      try {
+        await apiClient.cleanupTestProfiles(keepProfileIds, agents);
+      } finally {
+        await releaseDynamicRouting?.();
+      }
 
       await apiClient.saveUserSettings({
         workspace_id: seedData.workspaceId,

@@ -4,7 +4,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { execSync } from "node:child_process";
 import type { ApiClient } from "./api-client";
-import { getMockAgent } from "./agent-fixtures";
+import { getMockAgentId } from "./mock-agent";
 import { KanbanPage } from "../pages/kanban-page";
 import { SessionPage } from "../pages/session-page";
 
@@ -121,14 +121,14 @@ export async function createStandardProfile(
   preferredProfileId?: string,
 ) {
   const { agents } = await apiClient.listAgents();
-  const agent = getMockAgent(
+  const candidates =
     preferredProfileId
       ? agents.filter((candidate) =>
           candidate.profiles.some((profile) => profile.id === preferredProfileId),
         )
-      : agents,
-  );
-  return apiClient.createAgentProfile(agent.id, name, {
+      : agents;
+  const agentId = getMockAgentId(candidates);
+  return apiClient.createAgentProfile(agentId, name, {
     model: "mock-fast",
     auto_approve: true,
     cli_passthrough: false,

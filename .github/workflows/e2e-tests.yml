@@ -15,13 +15,7 @@ on:
     types: [checks_requested]
   # Manual trigger for verifying CI on draft PRs and ad-hoc reruns. The
   # default sharded run uses the same ref the user picks in the dispatch UI.
-  workflow_dispatch:
-    inputs:
-      fail_on_flaky:
-        description: "Fail the run when Playwright needs a retry"
-        required: false
-        type: boolean
-        default: false
+  workflow_dispatch: {}
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -445,6 +439,7 @@ jobs:
     # Playwright fixtures and backend readiness polling.
     env:
       NODE_OPTIONS: --dns-result-order=ipv4first
+      E2E_FAIL_ON_FLAKY: "1"
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.runner_plan.outputs.plan).e2e_matrix }}
@@ -496,10 +491,6 @@ jobs:
       - name: Extract web build
         working-directory: apps/web
         run: tar -xf web-dist.tar && rm web-dist.tar
-
-      - name: Enable strict flaky-test diagnostics
-        if: github.event_name == 'workflow_dispatch' && inputs.fail_on_flaky
-        run: echo "E2E_FAIL_ON_FLAKY=1" >> "$GITHUB_ENV"
 
       - name: Download E2E shard manifests
         uses: ./.github/actions/download-artifact-retry
@@ -599,6 +590,8 @@ jobs:
     # browsers out of the kandev-ci image — see the extract step below.
     runs-on: ubuntu-latest
     timeout-minutes: 50
+    env:
+      E2E_FAIL_ON_FLAKY: "1"
     strategy:
       fail-fast: false
       matrix:
@@ -845,10 +838,6 @@ jobs:
       - name: Extract web build
         working-directory: apps/web
         run: tar -xf web-dist.tar && rm web-dist.tar
-
-      - name: Enable strict flaky-test diagnostics
-        if: github.event_name == 'workflow_dispatch' && inputs.fail_on_flaky
-        run: echo "E2E_FAIL_ON_FLAKY=1" >> "$GITHUB_ENV"
 
       - name: Download E2E shard manifests
         uses: ./.github/actions/download-artifact-retry
