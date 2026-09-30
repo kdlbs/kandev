@@ -197,7 +197,7 @@ export function RightSidePanel({
     return (
       <div ref={containerRef} className={containerClass}>
         <div className="flex-1 flex min-h-0 overflow-hidden">
-          <div className="min-w-0 flex-1 overflow-hidden">{main}</div>
+          <div className="flex min-w-0 flex-1 flex-col overflow-hidden">{main}</div>
           {panel}
         </div>
       </div>
