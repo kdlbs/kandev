@@ -356,5 +356,6 @@
   "providerPassthroughUnsupported": "Disable CLI passthrough to use an OpenAI-compatible provider.",
   "nativeCodexUnavailableTitle": "Native Codex app server is unavailable",
   "nativeCodexUnavailable": "This saved profile is preserved, but it cannot be edited, duplicated, enabled, or started while the Codex app-server feature is off. You can delete the profile or enable the feature in Settings.",
-  "nativeCodexUnavailableShort": "Feature off"
+  "nativeCodexUnavailableShort": "Feature off",
+  "minimaxLoginDescription": "Sign in to your MiniMax account. This terminal starts mainland China login. For a Global account, press Ctrl+C to open the shell, then rerun the displayed command with --region global. MiniMax uses ~/.minimax for credentials."
 }

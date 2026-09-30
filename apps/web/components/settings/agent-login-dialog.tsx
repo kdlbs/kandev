@@ -3,6 +3,7 @@
 import { useCallback } from "react";
 import { useTranslation } from "react-i18next";
 import { startAgentLogin } from "@/lib/api";
+import { fetchDynamicModels } from "@/lib/api/domains/settings-api";
 import { PtyTerminalDialog, type StartPtySession } from "@/components/settings/pty-terminal-dialog";
 
 type Props = {
@@ -20,8 +21,8 @@ type Props = {
 
 /**
  * Opens a PTY-backed terminal running an agent's login command on the kandev
- * host. Thin wrapper over <PtyTerminalDialog> - the only thing login-specific
- * is the start endpoint.
+ * host. MiniMax refreshes the native catalog before settings reread cached
+ * agent cards.
  */
 export function AgentLoginDialog({
   open,
@@ -36,17 +37,26 @@ export function AgentLoginDialog({
     (size, options) => startAgentLogin(agentName, size, options),
     [agentName],
   );
+  const handleLoginSuccess = useCallback(() => {
+    if (agentName !== "minimax-acp") {
+      onLoginSuccess?.();
+      return;
+    }
+    const finish = () => onLoginSuccess?.();
+    void fetchDynamicModels(agentName, { refresh: true }).then(finish, finish);
+  }, [agentName, onLoginSuccess]);
 
   return (
     <PtyTerminalDialog
       open={open}
       onOpenChange={onOpenChange}
       title={t("agents:signInToAgent", { name: agentName })}
-      description={description}
+      description={agentName === "minimax-acp" ? t("agents:minimaxLoginDescription") : description}
       command={command}
+      presentation={agentName === "minimax-acp" ? "quick" : "standard"}
       testIdPrefix="agent-login"
       startSession={startSession}
-      onDone={onLoginSuccess}
+      onDone={handleLoginSuccess}
     />
   );
 }

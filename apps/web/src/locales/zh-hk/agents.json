@@ -356,5 +356,6 @@
   "watcherKindLinear": "Linear",
   "nativeCodexUnavailableTitle": "原生 Codex app server 不可用",
   "nativeCodexUnavailable": "此已儲存的設定會保留，但 Codex app-server 功能關閉時無法編輯、複製、啓用或啓動。你可以刪除此設定，或在設定中啓用該功能。",
-  "nativeCodexUnavailableShort": "功能已關閉"
+  "nativeCodexUnavailableShort": "功能已關閉",
+  "minimaxLoginDescription": "登入您的 MiniMax 帳戶。此終端預設啓動中國大陸登入流程。使用 Global 帳戶時，按 Ctrl+C 開啟命令列，然後在顯示的命令中新增 --region global 並重新執行。MiniMax 將認證資料儲存在 ~/.minimax。"
 }
