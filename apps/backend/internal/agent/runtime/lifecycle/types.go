@@ -158,6 +158,7 @@ type AgentExecution struct {
 	agentctl                  *agentctl.Client
 	agentctlOverride          atomic.Pointer[agentctl.Client]
 	agentctlLifecycleMu       sync.RWMutex
+	agentctlSourceMu          sync.RWMutex
 	remoteInstanceLifecycleMu sync.Mutex
 	// contextResetMu owns the reset attempt boundary. While a session reset is
 	// in flight, fresh-session setup events are retained until the lifecycle
@@ -936,12 +937,30 @@ func (ae *AgentExecution) AcquireAgentCtlClient() (*agentctl.Client, func()) {
 	return client, ae.agentctlLifecycleMu.RUnlock
 }
 
+// withAgentCtlClient keeps a workspace callback scoped to the client that
+// opened its stream. Holding the read lease through callback publication
+// fences it against a concurrent client replacement or detach.
+func (ae *AgentExecution) withAgentCtlClient(client *agentctl.Client, callback func()) bool {
+	if ae == nil || client == nil || callback == nil {
+		return false
+	}
+	ae.agentctlSourceMu.RLock()
+	defer ae.agentctlSourceMu.RUnlock()
+	if ae.currentAgentCtlClient() != client {
+		return false
+	}
+	callback()
+	return true
+}
+
 // replaceAgentctlClient atomically publishes a replacement connection while
 // retaining the construction-time field for test/source compatibility.
 func (ae *AgentExecution) replaceAgentctlClient(client *agentctl.Client) *agentctl.Client {
 	if ae == nil || client == nil {
 		return nil
 	}
+	ae.agentctlSourceMu.Lock()
+	defer ae.agentctlSourceMu.Unlock()
 	previous := ae.currentAgentCtlClient()
 	ae.agentctlOverride.Store(client)
 	return previous
@@ -953,6 +972,8 @@ func (ae *AgentExecution) detachAgentctlClient() {
 	if ae == nil {
 		return
 	}
+	ae.agentctlSourceMu.Lock()
+	defer ae.agentctlSourceMu.Unlock()
 	ae.agentctl = nil
 	ae.agentctlOverride.Store(nil)
 }

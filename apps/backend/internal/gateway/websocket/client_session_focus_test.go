@@ -3,6 +3,8 @@ package websocket
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"sync"
 	"testing"
 	"time"
 
@@ -255,6 +257,72 @@ func TestSessionGitRefreshIsCanceledWithConnection(t *testing.T) {
 	if len(c.controlSend) != 0 {
 		t.Fatal("canceled refresh sent a response")
 	}
+}
+
+func TestSessionGitRefreshAdmissionIsBoundedPerConnection(t *testing.T) {
+	h := newTestHub(t)
+	started := make(chan struct{}, maxConcurrentSessionGitRefreshes+1)
+	h.SetSessionGitRefreshProvider(func(ctx context.Context, sessionID, mode string) (SessionGitRefreshResult, error) {
+		started <- struct{}{}
+		<-ctx.Done()
+		return SessionGitRefreshResult{SessionID: sessionID, Mode: mode}, nil
+	})
+	c := newTestClient("c-git-refresh-cap")
+	c.hub = h
+	c.controlSend = make(chan []byte, maxConcurrentSessionGitRefreshes+2)
+	payload, _ := json.Marshal(SessionSubscribeRequest{SessionID: "sess-git-cap"})
+	var workers sync.WaitGroup
+	for i := 0; i < maxConcurrentSessionGitRefreshes; i++ {
+		workers.Add(1)
+		go func(id int) {
+			defer workers.Done()
+			c.handleSessionGitRefresh(&ws.Message{ID: fmt.Sprintf("req-cap-%d", id), Action: ws.ActionSessionGitRefresh, Payload: payload})
+		}(i)
+	}
+	for i := 0; i < maxConcurrentSessionGitRefreshes; i++ {
+		select {
+		case <-started:
+		case <-time.After(time.Second):
+			c.cancelSessionGitRefreshes()
+			workers.Wait()
+			t.Fatalf("only %d refresh providers started", i)
+		}
+	}
+
+	c.gitRefreshMu.Lock()
+	active := len(c.gitRefreshCancels)
+	c.gitRefreshMu.Unlock()
+	if active != maxConcurrentSessionGitRefreshes {
+		t.Fatalf("active refreshes = %d, want cap %d", active, maxConcurrentSessionGitRefreshes)
+	}
+	c.handleSessionGitRefresh(&ws.Message{ID: "req-over-cap", Action: ws.ActionSessionGitRefresh, Payload: payload})
+	select {
+	case data := <-c.controlSend:
+		var response ws.Message
+		if err := json.Unmarshal(data, &response); err != nil {
+			t.Fatalf("decode capacity response: %v", err)
+		}
+		if response.Type != ws.MessageTypeError || response.ID != "req-over-cap" {
+			t.Fatalf("capacity response = %+v, want correlated error", response)
+		}
+		var body ws.ErrorPayload
+		if err := json.Unmarshal(response.Payload, &body); err != nil {
+			t.Fatalf("decode capacity error body: %v", err)
+		}
+		if body.Code != ws.ErrorCodeUnavailable {
+			t.Fatalf("capacity error code = %q, want %q", body.Code, ws.ErrorCodeUnavailable)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("refresh over the cap did not receive a correlated capacity response")
+	}
+	select {
+	case <-started:
+		t.Fatal("refresh over the cap started another provider call")
+	default:
+	}
+
+	c.cancelSessionGitRefreshes()
+	workers.Wait()
 }
 
 func TestHandleSessionSubscribe_DuplicateDoesNotReplaySnapshot(t *testing.T) {

@@ -21,18 +21,12 @@ func (wt *WorkspaceTracker) scheduleGitStatusEnrichment(job *gitStatusEnrichment
 	}
 	wt.gitStatusEnrichmentMu.Lock()
 	if wt.gitStatusEnrichmentRun {
-		if job.fingerprint == wt.gitStatusEnrichmentCurrent || (wt.gitStatusEnrichmentNext != nil && job.fingerprint == wt.gitStatusEnrichmentNext.fingerprint) {
-			wt.gitStatusEnrichmentMu.Unlock()
+		queued := wt.queueGitStatusEnrichmentLocked(job)
+		wt.gitStatusEnrichmentMu.Unlock()
+		if !queued {
 			job.indexCleanup()
 			wt.completeGitStatusEnrichment(job, nil)
-			return
 		}
-		if wt.gitStatusEnrichmentNext != nil && wt.gitStatusEnrichmentNext.indexCleanup != nil {
-			completeGitStatusEnrichmentLocked(wt.gitStatusEnrichmentNext, errGitStatusEvidenceChanged)
-			wt.gitStatusEnrichmentNext.indexCleanup()
-		}
-		wt.gitStatusEnrichmentNext = job
-		wt.gitStatusEnrichmentMu.Unlock()
 		return
 	}
 	wt.gitStatusObserveMu.Lock()
@@ -52,27 +46,66 @@ func (wt *WorkspaceTracker) scheduleGitStatusEnrichment(job *gitStatusEnrichment
 	go wt.runGitStatusEnrichmentQueue(job)
 }
 
+// queueGitStatusEnrichmentLocked keeps only the latest distinct successor and
+// lets explicit retries replace an already-published failed attempt.
+func (wt *WorkspaceTracker) queueGitStatusEnrichmentLocked(job *gitStatusEnrichmentJob) bool {
+	if next := wt.gitStatusEnrichmentNext; next != nil && job.fingerprint == next.fingerprint {
+		return false
+	}
+	if job.fingerprint == wt.gitStatusEnrichmentCurrent {
+		current := wt.gitStatusEnrichmentJob
+		if current == nil || (!current.correctionRequested && (!job.explicitRetry || !current.unavailablePublished)) {
+			return false
+		}
+	}
+	if next := wt.gitStatusEnrichmentNext; next != nil {
+		if next.indexCleanup != nil {
+			completeGitStatusEnrichmentLocked(next, errGitStatusEvidenceChanged)
+			next.indexCleanup()
+		}
+	}
+	wt.gitStatusEnrichmentNext = job
+	return true
+}
+
 func (wt *WorkspaceTracker) runGitStatusEnrichmentQueue(job *gitStatusEnrichmentJob) {
 	defer wt.gitStatusObserveWG.Done()
 	current := job
 	for current != nil {
 		err := wt.runGitStatusEnrichment(current)
-		if err != nil && (wt.cancelCtx == nil || wt.cancelCtx.Err() == nil) {
-			wt.publishGitStatusDetailsUnavailable(current)
+		if wt.cancelCtx == nil || wt.cancelCtx.Err() == nil {
+			wt.gitStatusEnrichmentMu.Lock()
+			published := false
+			if err != nil {
+				published = wt.publishGitStatusDetailsUnavailable(current)
+			} else {
+				wt.mu.RLock()
+				published = wt.gitStatusFingerprint == current.fingerprint && wt.currentStatus.DetailState == gitStatusDetailUnavailable
+				wt.mu.RUnlock()
+			}
+			var gate func()
+			if published {
+				current.unavailablePublished = true
+				gate = wt.gitStatusAfterUnavailablePublication
+			}
+			wt.gitStatusEnrichmentMu.Unlock()
+			if gate != nil {
+				gate()
+			}
 		}
 		wt.gitStatusEnrichmentMu.Lock()
-		completeGitStatusEnrichmentLocked(current, err)
 		if current.indexCleanup != nil {
 			current.indexCleanup()
 		}
+		completeGitStatusEnrichmentLocked(current, err)
 		current = wt.gitStatusEnrichmentNext
 		wt.gitStatusEnrichmentNext = nil
 		if current == nil || (wt.cancelCtx != nil && wt.cancelCtx.Err() != nil) {
 			if current != nil {
-				completeGitStatusEnrichmentLocked(current, wt.cancelCtx.Err())
 				if current.indexCleanup != nil {
 					current.indexCleanup()
 				}
+				completeGitStatusEnrichmentLocked(current, wt.cancelCtx.Err())
 			}
 			wt.gitStatusEnrichmentRun = false
 			wt.gitStatusEnrichmentCurrent = ""
@@ -87,9 +120,9 @@ func (wt *WorkspaceTracker) runGitStatusEnrichmentQueue(job *gitStatusEnrichment
 }
 
 func (wt *WorkspaceTracker) runGitStatusEnrichment(job *gitStatusEnrichmentJob) error {
-	timeout := wt.gitStatusObserveTimeout
+	timeout := wt.gitStatusEnrichmentTimeout
 	if timeout <= 0 {
-		timeout = workspaceGitStatusObserveTimeout
+		timeout = workspaceGitStatusEnrichmentTimeout
 	}
 	ctx, cancel := context.WithTimeout(wt.cancelCtxOrBackground(), timeout)
 	defer cancel()
@@ -197,14 +230,14 @@ func setPendingGitStatusFileDiffState(status *types.GitStatusUpdate, state strin
 	}
 }
 
-func (wt *WorkspaceTracker) publishGitStatusDetailsUnavailable(job *gitStatusEnrichmentJob) {
+func (wt *WorkspaceTracker) publishGitStatusDetailsUnavailable(job *gitStatusEnrichmentJob) bool {
 	status := cloneGitStatusUpdate(job.status)
 	status.StatusState = gitStatusStateReady
 	status.FilesComplete = true
 	status.DetailState = gitStatusDetailUnavailable
 	status.ErrorCode = gitStatusErrorDetailsUnavailable
 	setGitStatusFileDiffState(&status, gitStatusDiffUnavailable)
-	wt.publishEnrichedGitStatus(job, status)
+	return wt.publishEnrichedGitStatus(job, status)
 }
 
 func (wt *WorkspaceTracker) completeGitStatusEnrichment(job *gitStatusEnrichmentJob, err error) {
@@ -414,11 +447,28 @@ func (wt *WorkspaceTracker) validateGitStatusEnrichmentFiles(ctx context.Context
 }
 
 func (wt *WorkspaceTracker) requestGitStatusCorrection(job *gitStatusEnrichmentJob) {
-	if job == nil || !job.correctionPermitted || wt.cancelCtx != nil && wt.cancelCtx.Err() != nil {
+	if job == nil || !job.correctionPermitted {
 		return
 	}
+	wt.gitStatusObserveMu.Lock()
+	ctx := wt.cancelCtx
+	if ctx != nil && ctx.Err() != nil {
+		wt.gitStatusObserveMu.Unlock()
+		return
+	}
+	wt.gitStatusObserveWG.Add(1)
+	wt.gitStatusObserveMu.Unlock()
+	wt.gitStatusEnrichmentMu.Lock()
+	if wt.gitStatusEnrichmentJob == job {
+		job.correctionRequested = true
+	}
+	wt.gitStatusEnrichmentMu.Unlock()
 	go func() {
-		_, err := wt.observeGitStatusClass(wt.cancelCtxOrBackground(), subproc.GitInteractive, "basic", nil, false)
+		defer wt.gitStatusObserveWG.Done()
+		if wt.gitStatusBeforeCorrection != nil {
+			wt.gitStatusBeforeCorrection(ctx)
+		}
+		_, err := wt.observeGitStatusClass(ctx, subproc.GitInteractive, "basic", nil, false)
 		if err != nil && !wt.isGitStatusCancellation(err) {
 			wt.logger.Debug("corrective git status observation failed", zap.Error(err))
 		}

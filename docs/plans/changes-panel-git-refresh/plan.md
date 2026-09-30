@@ -248,8 +248,8 @@ During implementation, Tasks source-precedence/quality prose was reconciled with
 - Frontend unit suite passed (19 files, 188 tests), typecheck and lint passed, and i18n generation/check/ratchet passed across all six locales.
 - Backend race tests, focused package tests, and `golangci-lint` passed as recorded in Work Orders 01 through 03. The E2E runner built the backend, Vite assets, and fixture plugin.
 - `python3 scripts/list-docs.py validate`: passed (334 decisions, 1262 specifications); `python3 scripts/lint-spec-files.py --all`: passed; public-doc tests passed (62), and public-doc validation passed (47 pages).
-- ADR discovery and final `git diff --check`: passed. All implementation and documentation changes remain uncommitted.
+- ADR discovery and final `git diff --check`: passed. The implementation and documentation are tracked in PR #4087, with current CI and review state linked there.
 
 ## Task 06 review remediation results
 
-All eight review findings were addressed with deterministic regressions and contract updates. Both backend race suites passed, as did the affected-package Go lint and backend build. Thirteen frontend test files passed (156 tests); typecheck, ESLint, production Vite build, i18n checks/ratchet, and desktop/mobile recovery E2E passed. Documentation validation and final diff checks passed. See [Task 06](task-06-review-remediation.md) for exact command results.
+All eight core review findings were addressed with deterministic regressions and contract updates. Both backend race suites passed, as did the affected-package Go lint and backend build. The documented frontend suite passed (13 files, 156 tests), followed by 15 affected files and 164 tests; typecheck, ESLint, production Vite build, i18n checks/ratchet, desktop/mobile recovery E2E, and the multi-repository source-attachment E2E passed. Documentation validation and final diff checks passed. See [Task 06](task-06-review-remediation.md) for exact command results.

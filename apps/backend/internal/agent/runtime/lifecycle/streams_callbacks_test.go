@@ -131,6 +131,34 @@ func TestBuildWorkspaceCallbacksToleratesUnwiredHandlers(t *testing.T) {
 	callbacks.OnError("boom")
 }
 
+func TestBuildWorkspaceCallbacksRejectsRetiredStartupGeneration(t *testing.T) {
+	var recorded []recordedWorkspaceCallback
+	sm := newRecordingStreamManager(t, &recorded)
+	execution := &AgentExecution{ID: "exec-1", SessionID: "session-1"}
+	callbacks := sm.buildWorkspaceCallbacks(execution)
+	execution.beginStartupAttemptWithID("replacement")
+
+	callbacks.OnGitStatus(&agentctl.GitStatusUpdate{Branch: "retired"})
+
+	require.Empty(t, recorded)
+}
+
+func TestBuildWorkspaceCallbacksRejectsReplacedAgentctlClient(t *testing.T) {
+	var recorded []recordedWorkspaceCallback
+	sm := newRecordingStreamManager(t, &recorded)
+	firstClient := &agentctl.Client{}
+	replacementClient := &agentctl.Client{}
+	execution := &AgentExecution{ID: "exec-1", SessionID: "session-1", agentctl: firstClient}
+	callbacks := sm.buildWorkspaceCallbacks(execution, firstClient)
+
+	execution.agentctlLifecycleMu.Lock()
+	execution.replaceAgentctlClient(replacementClient)
+	execution.agentctlLifecycleMu.Unlock()
+	callbacks.OnGitStatus(&agentctl.GitStatusUpdate{Branch: "retired"})
+
+	require.Empty(t, recorded)
+}
+
 // TestStreamManagerStartRejectsWorkAfterWait pins the drain barrier: once Wait
 // has run, no new stream goroutine may be spawned, and a caller waiting on
 // `ready` is still released rather than blocked forever.

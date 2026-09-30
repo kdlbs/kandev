@@ -28,6 +28,10 @@ const DefaultGitPollInterval = 3 * time.Second
 // a wedged Git process cannot retain the tracker flight indefinitely.
 const workspaceGitStatusObserveTimeout = 60 * time.Second
 
+// workspaceGitStatusEnrichmentTimeout bounds validation and detail work without
+// changing the foreground deadline for basic file-membership observations.
+const workspaceGitStatusEnrichmentTimeout = 60 * time.Second
+
 // pollModeGracePeriod is how long a tracker stays at its fast construction
 // default before demoting itself to slow when no explicit mode ever arrives.
 // Long enough to cover a freshly-spawned instance being opened by the user
@@ -174,28 +178,32 @@ type WorkspaceTracker struct {
 	// gitStatusObserver is the expensive live repository observation. Keeping it
 	// as a dependency makes the concurrency contract deterministic to test while
 	// production uses computeGitStatus.
-	gitStatusObserver              func(context.Context) (types.GitStatusUpdate, error)
-	gitStatusBasicObserver         func(context.Context) (types.GitStatusUpdate, error)
-	gitStatusObserveTimeout        time.Duration
-	gitStatusGroup                 singleflight.Group
-	gitStatusObserveMu             sync.Mutex
-	gitStatusObserveWG             sync.WaitGroup
-	gitStatusEpoch                 uint64
-	gitStatusTrackerID             string
-	gitStatusRevision              uint64
-	gitStatusObservationID         atomic.Uint64
-	gitStatusLatestID              uint64
-	gitStatusFingerprint           string
-	gitStatusPublishMu             sync.Mutex
-	gitStatusEnrichmentMu          sync.Mutex
-	gitStatusEnrichmentRun         bool
-	gitStatusEnrichmentCurrent     string
-	gitStatusEnrichmentJob         *gitStatusEnrichmentJob
-	gitStatusEnrichmentNext        *gitStatusEnrichmentJob
-	gitStatusBeforeEnrich          func() // Optional test gate before a captured job starts.
-	gitStatusBeforeFinalValidation func() // Optional test gate before publishing enriched details.
-	gitStatusWaiterJoined          func() // Optional test synchronization hook; nil in production.
-	gitStatusDetailsWaitJoined     func() // Optional test synchronization hook; nil in production.
+	gitStatusObserver                    func(context.Context) (types.GitStatusUpdate, error)
+	gitStatusBasicObserver               func(context.Context) (types.GitStatusUpdate, error)
+	gitStatusObserveTimeout              time.Duration
+	gitStatusEnrichmentTimeout           time.Duration
+	gitStatusDiffOutput                  func(context.Context, string, ...string) (string, bool, error)
+	gitStatusGroup                       singleflight.Group
+	gitStatusObserveMu                   sync.Mutex
+	gitStatusObserveWG                   sync.WaitGroup
+	gitStatusEpoch                       uint64
+	gitStatusTrackerID                   string
+	gitStatusRevision                    uint64
+	gitStatusObservationID               atomic.Uint64
+	gitStatusLatestID                    uint64
+	gitStatusFingerprint                 string
+	gitStatusPublishMu                   sync.Mutex
+	gitStatusEnrichmentMu                sync.Mutex
+	gitStatusEnrichmentRun               bool
+	gitStatusEnrichmentCurrent           string
+	gitStatusEnrichmentJob               *gitStatusEnrichmentJob
+	gitStatusEnrichmentNext              *gitStatusEnrichmentJob
+	gitStatusBeforeEnrich                func()                // Optional test gate before a captured job starts.
+	gitStatusAfterUnavailablePublication func()                // Optional test gate after unavailable details publish.
+	gitStatusBeforeCorrection            func(context.Context) // Optional test gate for tracker-owned correction work.
+	gitStatusBeforeFinalValidation       func()                // Optional test gate before publishing enriched details.
+	gitStatusWaiterJoined                func()                // Optional test synchronization hook; nil in production.
+	gitStatusDetailsWaitJoined           func()                // Optional test synchronization hook; nil in production.
 	// gitStatusBetweenQueries is an optional test hook invoked between the
 	// tracked and untracked queries. It is nil in production.
 	gitStatusBetweenQueries func()
@@ -345,7 +353,7 @@ func (wt *WorkspaceTracker) SetComparisonAnchor(anchor string) {
 	defer wt.mu.Unlock()
 	wt.comparisonAnchorSet = true
 	wt.comparisonGeneration++
-	if !sha1HexPattern.MatchString(anchor) {
+	if !gitObjectIDPattern.MatchString(anchor) {
 		wt.comparisonAnchor = ""
 		wt.baseBranch = ""
 		return
@@ -458,19 +466,20 @@ func newWorkspaceTracker(resolvedWorkDir, repositoryName string, log *logger.Log
 		// gateway never speaks about scans at 2s/3s for the life of the
 		// process. Trackers created after launch inherit the workspace's
 		// current mode instead — see Manager.configurePollMode.
-		pollMode:                PollModeFast,
-		pollModeGrace:           pollModeGracePeriod,
-		monitorModeChanged:      make(chan struct{}, 1),
-		gitPollModeChanged:      make(chan struct{}, 1),
-		stopCh:                  make(chan struct{}),
-		initialScanDone:         make(chan struct{}),
-		tickDone:                make(chan struct{}, 1),
-		cancelCtx:               ctx,
-		cancelFunc:              cancel,
-		gitStatusObserveTimeout: workspaceGitStatusObserveTimeout,
-		gitStatusEpoch:          workspaceTrackerEpochCounter.Add(1),
-		gitStatusTrackerID:      uuid.NewString(),
-		filesystemWarnings:      fsdiagnostics.NewWarningLimiter(0),
+		pollMode:                   PollModeFast,
+		pollModeGrace:              pollModeGracePeriod,
+		monitorModeChanged:         make(chan struct{}, 1),
+		gitPollModeChanged:         make(chan struct{}, 1),
+		stopCh:                     make(chan struct{}),
+		initialScanDone:            make(chan struct{}),
+		tickDone:                   make(chan struct{}, 1),
+		cancelCtx:                  ctx,
+		cancelFunc:                 cancel,
+		gitStatusObserveTimeout:    workspaceGitStatusObserveTimeout,
+		gitStatusEnrichmentTimeout: workspaceGitStatusEnrichmentTimeout,
+		gitStatusEpoch:             workspaceTrackerEpochCounter.Add(1),
+		gitStatusTrackerID:         uuid.NewString(),
+		filesystemWarnings:         fsdiagnostics.NewWarningLimiter(0),
 	}
 	return tracker
 }

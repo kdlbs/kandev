@@ -34,7 +34,7 @@ The extra exclusion applies to directories named `node_modules` at any repositor
 
 The full status observer and the untracked monitor fingerprint use one shared argument definition. The monitor therefore does not stat dependency-tree files, and changes limited to an untracked dependency tree do not start a full refresh. Filtering parsed status output is not sufficient because Git and agentctl have already paid the enumeration cost at that point.
 
-The untracked exclusion and paired queries remain unchanged. The progressive refresh contract adds quality and ordering metadata to the existing status routes and events. This contract follows [ADR-2026-08-30-bound-untracked-dependency-enumeration](../../../decisions/2026-08-30-bound-untracked-dependency-enumeration.md).
+This contract follows [ADR-2026-08-30-bound-untracked-dependency-enumeration](../../../decisions/2026-08-30-bound-untracked-dependency-enumeration.md).
 
 ### Mixed index and working-tree changes
 
@@ -148,7 +148,7 @@ The worker deadline starts before pre-validation and remains active through post
 
 Jobs use the full observation fingerprint, not caller identity.
 An unchanged accepted basic observation retains current details or joins the same pending job.
-It cannot restart enrichment or downgrade ready details to pending.
+It cannot restart unavailable enrichment during ordinary polling or downgrade ready details to pending.
 A changed fingerprint cancels the obsolete job and replaces the pending slot with only the latest accepted snapshot.
 The worker drains cancellation before executing the successor. No per-file goroutine or unbounded queue is added.
 Both admission classes can have one basic flight, but share the single enrichment worker.
@@ -180,6 +180,7 @@ If a newer fingerprint replaces that job, return a superseded/unavailable result
 Caller cancellation ends only its wait. Tracker cancellation still drains the worker.
 If detail generation fails, these consumers receive an error or explicit unavailable result under their existing retry policy.
 They cannot persist pending values as a completed snapshot or confuse pending base resolution with a repository-less task.
+Missing implicit comparison refs make ancestry totals unknown; HEAD/index-based file diffs may still be ready.
 Preserve existing caller budgets. This mode never extends the normal two-second Changes probe.
 
 ## Publication and ordering
@@ -224,6 +225,7 @@ Continuously mutating files can remain pending or unavailable. They must not rec
 
 Runtime delivery captures immutable execution identity, environment binding, workspace identity, and stream generation.
 Revalidate these before publishing a delayed callback, initial-subscribe read, or HTTP result. Workspace callbacks are checked against the execution currently registered for their session.
+After root promotion, the current environment root or active `TaskEnvironmentRepo.WorktreePath` may authorize an existing execution's exact working directory. Revalidate the inventory after async refresh; reject removed paths.
 Tracker epochs from different sibling executions are not numerically ordered.
 Preserve requested-session-first source probing. Eligible siblings remain valid sources for their common environment.
 Within one current `tracker_id`, snapshot revisions order HTTP responses and stream events identically.
@@ -240,13 +242,13 @@ Once ordered state is accepted, an unordered legacy frame cannot override it.
 Extend the existing Go stream, HTTP result, runtime DTO, WebSocket, and TypeScript status types together.
 Use optional fields for decoding compatibility:
 
-| Field                                | Meaning                                                                                                     |
-| ------------------------------------ | ----------------------------------------------------------------------------------------------------------- |
-| `status_state`                       | `ready`, `loading`, or `unavailable`. Only `ready` carries an accepted observation.                         |
-| `files_complete`                     | Complete file membership, including a successful empty map. False means summary-only or unknown membership. |
-| `detail_state`                       | `pending`, `ready`, or `unavailable` for diffs and secondary Git statistics.                                |
-| `error_code`                         | Closed, sanitized failure code. Never raw Git output, credentials, or workspace paths.                      |
-| `tracker_id`, `snapshot_revision`  | Opaque source lifetime and ordering within that lifetime. `tracker_epoch` is legacy and process-local.      |
+| Field | Meaning |
+| --- | --- |
+| `status_state` | `ready`, `loading`, or `unavailable`; only `ready` carries an accepted observation. |
+| `files_complete` | Complete file membership, including an empty map; false means summary-only or unknown membership. |
+| `detail_state` | `pending`, `ready`, or `unavailable` for diffs and secondary Git statistics. |
+| `error_code` | Closed, sanitized failure code; never raw Git output, credentials, or workspace paths. |
+| `tracker_id`, `snapshot_revision` | Opaque source lifetime and within-lifetime ordering. `tracker_epoch` is legacy and process-local. |
 
 Each file/facet adds optional `diff_state` with `pending`, `ready`, or `unavailable`.
 Existing `diff_skip_reason` remains separate. A skipped binary diff can be ready with reason `binary`.
@@ -276,6 +278,7 @@ The database keeps its existing environment/repository selection and timestamp a
 
 Keep the normal backend live-source probe at two seconds.
 Preserve `resolveGitStatusSources`, environment/workspace matching, sibling source selection, and the prohibition on persisted fallback after live failure.
+Within the same probe deadline, continue to eligible siblings after failed/incomplete results and preserve those failures beside any later healthy snapshot.
 Report unavailable status when the probe cannot supply usable membership.
 A useful late tracker observation still publishes and fills its cache independently.
 
@@ -301,13 +304,14 @@ A disconnected client cancels its waiter, while tracker-owned work follows track
 
 Reuse existing desktop panel activation, mobile mount, connection, and focus ownership.
 Coalesce requests by environment, repository scope, and connection/workspace generation across sibling consumers.
-The active surface starts one initial snapshot request if subscription delivered no complete snapshot within the normal probe budget.
+Every activation starts or joins a fresh request, even with cached membership; order its correlated response with notifications.
 If the fresh response fails to supply complete membership, run `recover` once for that foreground attempt.
 If details remain pending past the worker deadline, use `replay` once to recover a missed completion or failure frame.
 If replay still reports pending with no live job, expose unavailable details.
 Every attempt terminates in accepted data or an unavailable state with Retry.
 There is no interval refresh loop. Timers clear on scope replacement, unfocus, disconnect, or unmount.
 Retry and later activation can begin a new attempt. A same-state rerender cannot.
+Allow four concurrent `session.git.refresh` operations per WebSocket; reject overflow with a correlated error before provider work.
 
 ## Frontend and mobile
 
@@ -321,14 +325,14 @@ Enrichment-only arrival must not steal focus through an empty intermediate state
 `deriveSessionGitValues` exposes membership readiness and refresh/detail state separately from `hasAnything`.
 `ChangesPanelBody` owns one scroller and selects the following states:
 
-| Condition                                         | Presentation                                                                 |
-| ------------------------------------------------- | ---------------------------------------------------------------------------- |
-| No complete snapshot and a request is active      | Loading status, without the clean empty message.                             |
-| No complete snapshot and request failed           | Unavailable status and Retry.                                                |
-| Complete clean snapshot, no other Changes content | Existing clean empty message.                                                |
-| Dirty basic snapshot                              | File rows immediately, pending line totals and diff state.                   |
-| Valid prior snapshot during refresh/failure       | Keep rows, show refreshing or last-observed notice with Retry on failure.    |
-| Partial multi-repository failure                  | Healthy rows remain, with a named failure notice for each failed repository. |
+| Condition | Presentation |
+| --- | --- |
+| No complete snapshot, request active | Loading status without the clean empty message. |
+| No complete snapshot, request failed | Unavailable status and Retry. |
+| Complete clean snapshot, no other Changes content | Existing clean empty message. |
+| Dirty basic snapshot | File rows immediately, with pending line totals and diffs. |
+| Valid prior snapshot during refresh/failure | Keep rows; show refreshing or last-observed notice and Retry on failure. |
+| Partial multi-repository failure | Keep healthy rows and name each failed repository. |
 
 Workspace restoration and comparison-target notices remain distinct from Git observation failure.
 Known PR or commit content remains available even while worktree status loads or fails.

@@ -9,7 +9,6 @@ import {
   requestGitStatusRefresh,
   retainGitRefreshScope,
   scheduleReplayIfDetailsPending,
-  shouldStartGitStatusRefresh,
 } from "./git-status-refresh-coordinator";
 
 /** Reuses the focused session stream for one finite, environment-scoped refresh attempt. */
@@ -33,11 +32,8 @@ export function useSessionGitRefresh(
 
     const release = retainGitRefreshScope(client, environmentId);
     const stopMonitoring = monitorGitStatusDetails(client, store, environmentId);
-    if (shouldStartGitStatusRefresh(store, environmentId)) {
-      void requestGitStatusRefresh(client, store, sessionId, environmentId).catch(() => undefined);
-    } else {
-      scheduleReplayIfDetailsPending(client, store, sessionId, environmentId);
-    }
+    void requestGitStatusRefresh(client, store, sessionId, environmentId).catch(() => undefined);
+    scheduleReplayIfDetailsPending(client, store, sessionId, environmentId);
     return () => {
       stopMonitoring();
       release();

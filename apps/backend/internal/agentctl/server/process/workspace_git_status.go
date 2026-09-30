@@ -193,7 +193,13 @@ func (wt *WorkspaceTracker) GetGitStatus(ctx context.Context, fresh bool) (types
 // GetGitStatusWithDetails returns a complete snapshot after its accepted
 // enrichment job settles. Cancellation ends only this waiter's wait.
 func (wt *WorkspaceTracker) GetGitStatusWithDetails(ctx context.Context, fresh bool) (types.GitStatusUpdate, error) {
-	status, err := wt.GetGitStatus(ctx, fresh)
+	var status types.GitStatusUpdate
+	var err error
+	if fresh {
+		status, err = wt.getBasicGitStatusRetryClass(ctx, subproc.GitInteractive)
+	} else {
+		status, err = wt.GetGitStatus(ctx, false)
+	}
 	if err != nil || status.DetailState == gitStatusDetailReady {
 		return status, err
 	}
@@ -239,11 +245,11 @@ func (wt *WorkspaceTracker) GetGitStatusWithDetails(ctx context.Context, fresh b
 func (wt *WorkspaceTracker) gitStatusEnrichmentForFingerprint(fingerprint string) *gitStatusEnrichmentJob {
 	wt.gitStatusEnrichmentMu.Lock()
 	defer wt.gitStatusEnrichmentMu.Unlock()
-	if wt.gitStatusEnrichmentJob != nil && wt.gitStatusEnrichmentJob.fingerprint == fingerprint {
-		return wt.gitStatusEnrichmentJob
-	}
 	if wt.gitStatusEnrichmentNext != nil && wt.gitStatusEnrichmentNext.fingerprint == fingerprint {
 		return wt.gitStatusEnrichmentNext
+	}
+	if wt.gitStatusEnrichmentJob != nil && wt.gitStatusEnrichmentJob.fingerprint == fingerprint {
+		return wt.gitStatusEnrichmentJob
 	}
 	return nil
 }
@@ -271,6 +277,14 @@ func (wt *WorkspaceTracker) getBasicGitStatusClass(ctx context.Context, class su
 		observer = wt.gitStatusObserver
 	}
 	return wt.observeGitStatusClass(ctx, class, "basic", observer, true)
+}
+
+func (wt *WorkspaceTracker) getBasicGitStatusRetryClass(ctx context.Context, class subproc.GitWorkClass) (types.GitStatusUpdate, error) {
+	observer := wt.gitStatusBasicObserver
+	if observer == nil {
+		observer = wt.gitStatusObserver
+	}
+	return wt.observeGitStatusClass(ctx, class, "basic_retry", observer, true)
 }
 
 func (wt *WorkspaceTracker) observeGitStatusClass(
@@ -327,13 +341,14 @@ func (wt *WorkspaceTracker) computeGitStatusObservation(
 	observer func(context.Context) (types.GitStatusUpdate, error),
 	correctionPermitted bool,
 ) (types.GitStatusUpdate, string, *gitStatusEnrichmentJob, error) {
-	if observer == nil && observation == "basic" {
+	if observer == nil && (observation == "basic" || observation == "basic_retry") {
 		capture, err := wt.captureBasicGitStatus(ctx)
 		if err != nil {
 			return types.GitStatusUpdate{}, "", nil, err
 		}
 		if capture.job != nil {
 			capture.job.correctionPermitted = correctionPermitted
+			capture.job.explicitRetry = observation == "basic_retry"
 		}
 		return capture.status, capture.fingerprint, capture.job, nil
 	}
@@ -354,7 +369,7 @@ func (wt *WorkspaceTracker) publishGitStatusObservation(
 	fingerprint string,
 	job *gitStatusEnrichmentJob,
 ) types.GitStatusUpdate {
-	accepted, published := wt.publishGitStatus(status, ordinal, fingerprint)
+	accepted, published := wt.publishGitStatus(status, ordinal, fingerprint, job != nil && job.explicitRetry)
 	if job == nil {
 		return accepted
 	}
@@ -589,7 +604,7 @@ func (wt *WorkspaceTracker) getGitBranchIdentity(ctx context.Context, update *ty
 // analysis sees the regex barrier inline with the `git` invocation.
 func (wt *WorkspaceTracker) computeBaseCommit(ctx context.Context, baseBranch string) string {
 	if wt.IsSubmodule() {
-		if !sha1HexPattern.MatchString(baseBranch) {
+		if !gitObjectIDPattern.MatchString(baseBranch) {
 			return ""
 		}
 		out, err := wt.runGitOutput(ctx, "rev-parse", "--verify", baseBranch+"^{commit}")
@@ -692,7 +707,6 @@ func (wt *WorkspaceTracker) getAheadBehindCounts(ctx context.Context, update *ty
 			return
 		}
 		carryAheadBehind(update, prior)
-		markGitStatusDetailsUnavailable(update)
 		return
 	}
 	countOut, err := wt.runGitOutput(ctx, "rev-list", "--left-right", "--count", update.Branch+"..."+compareRef)

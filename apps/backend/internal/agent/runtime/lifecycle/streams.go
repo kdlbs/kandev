@@ -398,63 +398,81 @@ func (sm *StreamManager) connectMCPStream(execution *AgentExecution) {
 	}
 }
 
-// buildWorkspaceCallbacks creates the WorkspaceStreamCallbacks for a given execution,
-// wiring each callback to the StreamManager's registered handlers.
-func (sm *StreamManager) buildWorkspaceCallbacks(execution *AgentExecution) agentctl.WorkspaceStreamCallbacks {
+// buildWorkspaceCallbacks creates callbacks scoped to the startup generation
+// and optional agentctl client that owns the workspace stream.
+func (sm *StreamManager) buildWorkspaceCallbacks(execution *AgentExecution, streamClient ...*agentctl.Client) agentctl.WorkspaceStreamCallbacks {
+	startupGeneration := execution.StartupAttemptGeneration()
+	var sourceClient *agentctl.Client
+	if len(streamClient) > 0 {
+		sourceClient = streamClient[0]
+	}
+	forward := func(callback func()) {
+		execution.withStartupAttempt(startupGeneration, func(string) {
+			if sourceClient == nil {
+				callback()
+				return
+			}
+			execution.withAgentCtlClient(sourceClient, callback)
+		})
+	}
 	return agentctl.WorkspaceStreamCallbacks{
 		OnShellOutput: func(data string) {
 			if sm.callbacks.OnShellOutput != nil {
-				sm.callbacks.OnShellOutput(execution, data)
+				forward(func() { sm.callbacks.OnShellOutput(execution, data) })
 			}
 		},
 		OnShellExit: func(code int) {
 			if sm.callbacks.OnShellExit != nil {
-				sm.callbacks.OnShellExit(execution, code)
+				forward(func() { sm.callbacks.OnShellExit(execution, code) })
 			}
 		},
 		OnGitStatus: func(update *agentctl.GitStatusUpdate) {
 			if sm.callbacks.OnGitStatus != nil {
-				sm.callbacks.OnGitStatus(execution, update)
+				forward(func() { sm.callbacks.OnGitStatus(execution, update) })
 			}
 		},
 		OnGitCommit: func(commit *agentctl.GitCommitNotification) {
 			if sm.callbacks.OnGitCommit != nil {
-				sm.callbacks.OnGitCommit(execution, commit)
+				forward(func() { sm.callbacks.OnGitCommit(execution, commit) })
 			}
 		},
 		OnGitReset: func(reset *agentctl.GitResetNotification) {
 			if sm.callbacks.OnGitReset != nil {
-				sm.callbacks.OnGitReset(execution, reset)
+				forward(func() { sm.callbacks.OnGitReset(execution, reset) })
 			}
 		},
 		OnBranchSwitch: func(branchSwitch *agentctl.GitBranchSwitchNotification) {
 			if sm.callbacks.OnBranchSwitch != nil {
-				sm.callbacks.OnBranchSwitch(execution, branchSwitch)
+				forward(func() { sm.callbacks.OnBranchSwitch(execution, branchSwitch) })
 			}
 		},
 		OnFileChange: func(notification *agentctl.FileChangeNotification) {
 			if sm.callbacks.OnFileChange != nil {
-				sm.callbacks.OnFileChange(execution, notification)
+				forward(func() { sm.callbacks.OnFileChange(execution, notification) })
 			}
 		},
 		OnProcessOutput: func(output *agentctl.ProcessOutput) {
 			if sm.callbacks.OnProcessOutput != nil {
-				sm.callbacks.OnProcessOutput(execution, output)
+				forward(func() { sm.callbacks.OnProcessOutput(execution, output) })
 			}
 		},
 		OnProcessStatus: func(status *agentctl.ProcessStatusUpdate) {
 			if sm.callbacks.OnProcessStatus != nil {
-				sm.callbacks.OnProcessStatus(execution, status)
+				forward(func() { sm.callbacks.OnProcessStatus(execution, status) })
 			}
 		},
 		OnConnected: func() {
-			sm.logger.Debug("workspace stream connected",
-				zap.String("instance_id", execution.ID))
+			forward(func() {
+				sm.logger.Debug("workspace stream connected",
+					zap.String("instance_id", execution.ID))
+			})
 		},
 		OnError: func(err string) {
-			sm.logger.Debug("workspace stream error",
-				zap.String("instance_id", execution.ID),
-				zap.String("error", err))
+			forward(func() {
+				sm.logger.Debug("workspace stream error",
+					zap.String("instance_id", execution.ID),
+					zap.String("error", err))
+			})
 		},
 	}
 }
@@ -497,11 +515,11 @@ func (sm *StreamManager) connectWorkspaceStream(execution *AgentExecution, ready
 			return
 		}
 
-		callbacks := sm.buildWorkspaceCallbacks(execution)
 		client, releaseClient := execution.AcquireAgentCtlClient()
 		if client == nil {
 			return
 		}
+		callbacks := sm.buildWorkspaceCallbacks(execution, client)
 		ws, err := client.StreamWorkspace(ctx, callbacks)
 		releaseClient()
 		if err != nil {

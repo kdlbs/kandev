@@ -18,14 +18,14 @@ import (
 	"go.uber.org/zap"
 )
 
-// sha1HexPattern matches a full-length git SHA-1 (40 lowercase or
-// uppercase hex characters). Used inline at the few sinks that consume
+// gitObjectIDPattern matches a full-length SHA-1 or SHA-256 Git object ID.
+// Used inline at the few sinks that consume
 // `update.BaseCommit` so CodeQL's `go/command-injection` taint tracker
 // sees the allowlist barrier co-located with the subprocess call — the
 // taint flowed in through the merge-base/rev-parse call upstream whose
 // argument list contained a (sanitised) user-controlled branch ref, and
 // the analyser otherwise treats that command's output as still tainted.
-var sha1HexPattern = regexp.MustCompile(`^[0-9a-fA-F]{40}$`)
+var gitObjectIDPattern = regexp.MustCompile(`^(?:[0-9a-fA-F]{40}|[0-9a-fA-F]{64})$`)
 
 const (
 	// maxDiffFileSize is the maximum file size for which we generate diffs.
@@ -72,7 +72,7 @@ func (wt *WorkspaceTracker) enrichWithDiffDataAgainst(
 	prior types.GitStatusUpdate,
 	headCommit string,
 ) error {
-	if headCommit == "" || (headCommit != "HEAD" && !sha1HexPattern.MatchString(headCommit)) {
+	if headCommit == "" || (headCommit != "HEAD" && !gitObjectIDPattern.MatchString(headCommit)) {
 		return fmt.Errorf("invalid observed HEAD for git status enrichment")
 	}
 	budget, err := newDiffBudget(ctx, update)
@@ -121,7 +121,7 @@ func (wt *WorkspaceTracker) enrichWithBranchDiff(
 	// here so the sanitiser barrier sits in the same function as the
 	// downstream `wt.runGitOutput` call and the value flowing into the
 	// next `git` invocation is provably a hex SHA, not user input.
-	if !sha1HexPattern.MatchString(update.BaseCommit) {
+	if !gitObjectIDPattern.MatchString(update.BaseCommit) {
 		return nil
 	}
 
@@ -394,6 +394,13 @@ func capDiffOutput(ctx context.Context, workDir string, args ...string) (string,
 	return string(data), truncated, nil
 }
 
+func (wt *WorkspaceTracker) capDiffOutput(ctx context.Context, args ...string) (string, bool, error) {
+	if wt.gitStatusDiffOutput != nil {
+		return wt.gitStatusDiffOutput(ctx, wt.workDir, args...)
+	}
+	return capDiffOutput(ctx, wt.workDir, args...)
+}
+
 // resolveNumstatPath resolves a numstat path that may contain rename notation
 // (e.g. "old.txt => new.txt" or "{old => new}/file.txt") to the new file path.
 // For non-rename paths, returns the input unchanged.
@@ -495,7 +502,7 @@ func (wt *WorkspaceTracker) enrichUnstagedFileDiff(ctx context.Context, update *
 	}
 
 	previousDiff := fileInfo.Diff
-	diffOut, truncated, diffErr := capDiffOutput(ctx, wt.workDir, "diff", baseRef, "--", entry.path)
+	diffOut, truncated, diffErr := wt.capDiffOutput(ctx, "diff", baseRef, "--", entry.path)
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -600,7 +607,7 @@ func (wt *WorkspaceTracker) enrichMixedUnstagedFileDiff(
 	}
 
 	previousDiff := change.Diff
-	diffOut, truncated, diffErr := capDiffOutput(ctx, wt.workDir, "diff", "--", entry.path)
+	diffOut, truncated, diffErr := wt.capDiffOutput(ctx, "diff", "--", entry.path)
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -718,7 +725,7 @@ func (wt *WorkspaceTracker) enrichStagedFileDiff(ctx context.Context, update *ty
 		return nil
 	}
 
-	diffOut, truncated, diffErr := capDiffOutput(ctx, wt.workDir, "diff", "--cached", baseRef, "--", entry.path)
+	diffOut, truncated, diffErr := wt.capDiffOutput(ctx, "diff", "--cached", baseRef, "--", entry.path)
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -764,7 +771,7 @@ func (wt *WorkspaceTracker) enrichMixedStagedFileDiff(
 	}
 
 	previousDiff := change.Diff
-	diffOut, truncated, diffErr := capDiffOutput(ctx, wt.workDir, "diff", "--cached", baseRef, "--", entry.path)
+	diffOut, truncated, diffErr := wt.capDiffOutput(ctx, "diff", "--cached", baseRef, "--", entry.path)
 	if err := ctx.Err(); err != nil {
 		return err
 	}

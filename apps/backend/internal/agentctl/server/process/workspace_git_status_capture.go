@@ -55,7 +55,10 @@ type gitStatusEnrichmentJob struct {
 	environmentGeneration   uint64
 	fileEvidence            map[string]gitStatusFileEvidence
 	correctionPermitted     bool
+	correctionRequested     bool
 	contentEvidenceComplete bool
+	explicitRetry           bool
+	unavailablePublished    bool
 }
 
 type gitStatusFileEvidence struct {
@@ -140,7 +143,8 @@ func gitStatusValueFingerprint(status types.GitStatusUpdate) string {
 	return hex.EncodeToString(digest[:])
 }
 
-func (wt *WorkspaceTracker) publishGitStatus(status types.GitStatusUpdate, ordinal uint64, fingerprint string) (types.GitStatusUpdate, bool) {
+func (wt *WorkspaceTracker) publishGitStatus(status types.GitStatusUpdate, ordinal uint64, fingerprint string, retryOption ...bool) (types.GitStatusUpdate, bool) {
+	explicitRetry := len(retryOption) > 0 && retryOption[0]
 	wt.gitStatusPublishMu.Lock()
 	defer wt.gitStatusPublishMu.Unlock()
 
@@ -168,6 +172,13 @@ func (wt *WorkspaceTracker) publishGitStatus(status types.GitStatusUpdate, ordin
 			wt.currentStatus = cloneGitStatusUpdate(status)
 			wt.mu.Unlock()
 			return status, false
+		}
+		if wt.currentStatus.DetailState == gitStatusDetailUnavailable && status.DetailState == gitStatusDetailPending && !explicitRetry {
+			current := cloneGitStatusUpdate(wt.currentStatus)
+			current.Timestamp = status.Timestamp
+			wt.currentStatus = cloneGitStatusUpdate(current)
+			wt.mu.Unlock()
+			return current, false
 		}
 	}
 
@@ -453,7 +464,7 @@ func (wt *WorkspaceTracker) gitRefOID(ctx context.Context, ref string) (string, 
 	if ref == "" {
 		return "", nil
 	}
-	if !sha1HexPattern.MatchString(ref) {
+	if !gitObjectIDPattern.MatchString(ref) {
 		rest, hasOriginPrefix := strings.CutPrefix(ref, "origin/")
 		check := ref
 		if hasOriginPrefix {
@@ -587,7 +598,7 @@ func captureGitSubmoduleHead(ctx context.Context, wt *WorkspaceTracker, relative
 		return gitStatusFileEvidence{}, err
 	}
 	evidence.SubmoduleHead = strings.TrimSpace(string(out))
-	if !sha1HexPattern.MatchString(evidence.SubmoduleHead) {
+	if !gitObjectIDPattern.MatchString(evidence.SubmoduleHead) {
 		return gitStatusFileEvidence{}, errGitStatusEvidenceChanged
 	}
 	return evidence, nil

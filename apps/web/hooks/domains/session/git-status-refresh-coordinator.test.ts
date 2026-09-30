@@ -1,21 +1,29 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { WebSocketClient, SessionGitRefreshResponse } from "@/lib/ws/client";
+import type { GitStatusUpdateEvent } from "@/lib/types/git-events";
 import { createAppStore } from "@/lib/state/store";
 import { requestGitStatusRefresh, retainGitRefreshScope } from "./git-status-refresh-coordinator";
 
 const SESSION = "session-a";
+const TRACKER_ID = "tracker-a";
+const CURRENT_FILE = "current.txt";
+const EARLIER_TIMESTAMP = "2026-09-30T10:00:01.000Z";
+const CURRENT_TIMESTAMP = "2026-09-30T10:00:02.000Z";
 
 type Deferred<T> = {
   promise: Promise<T>;
   resolve: (value: T) => void;
+  reject: (reason?: unknown) => void;
 };
 
 function deferred<T>(): Deferred<T> {
   let resolve!: (value: T) => void;
-  const promise = new Promise<T>((done) => {
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((done, fail) => {
     resolve = done;
+    reject = fail;
   });
-  return { promise, resolve };
+  return { promise, resolve, reject };
 }
 
 function statusResponse(
@@ -61,6 +69,24 @@ function statusResponse(
   };
 }
 
+function orderedResponse(
+  revision: number,
+  timestamp: string,
+  state: "ready" | "unavailable" | "loading" = "ready",
+): SessionGitRefreshResponse {
+  const response = statusResponse("stale.txt");
+  const event = response.snapshots[0].payload as GitStatusUpdateEvent;
+  event.timestamp = timestamp;
+  event.status.status_state = state;
+  event.status.files_complete = state === "ready";
+  event.status.detail_state = state === "ready" ? "ready" : "unavailable";
+  event.status.error_code = state === "ready" ? undefined : "status_unavailable";
+  event.status.tracker_id = TRACKER_ID;
+  event.status.tracker_epoch = 1;
+  event.status.snapshot_revision = revision;
+  return response;
+}
+
 function refreshClient(requests: Deferred<SessionGitRefreshResponse>[]) {
   const statusListeners: Array<(status: "connected") => void> = [];
   return {
@@ -77,7 +103,7 @@ function refreshClient(requests: Deferred<SessionGitRefreshResponse>[]) {
   } as unknown as WebSocketClient;
 }
 
-describe("Git status refresh coordinator", () => {
+describe("Git status refresh coordinator scope ownership", () => {
   beforeEach(() => {
     vi.useRealTimers();
   });
@@ -101,11 +127,9 @@ describe("Git status refresh coordinator", () => {
     expect(store.getState().gitStatus.byEnvironmentId[SESSION]).toBeUndefined();
     expect(store.getState().gitStatus.refreshByEnvironmentId?.[SESSION]?.state).toBe("pending");
 
-    requests[1].resolve(statusResponse("current.txt"));
+    requests[1].resolve(statusResponse(CURRENT_FILE));
     await replacementAttempt;
-    expect(store.getState().gitStatus.byEnvironmentId[SESSION]?.files).toHaveProperty(
-      "current.txt",
-    );
+    expect(store.getState().gitStatus.byEnvironmentId[SESSION]?.files).toHaveProperty(CURRENT_FILE);
     expect(store.getState().gitStatus.byEnvironmentId[SESSION]?.files).not.toHaveProperty(
       "stale.txt",
     );
@@ -137,4 +161,130 @@ describe("Git status refresh coordinator", () => {
     );
     releaseSibling();
   });
+});
+
+describe("Git status refresh coordinator snapshot ordering", () => {
+  beforeEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("keeps newer unavailable quality when correlated responses carry only older snapshots", async () => {
+    const store = createAppStore();
+    const requests: Deferred<SessionGitRefreshResponse>[] = [];
+    const client = refreshClient(requests);
+    store.getState().setGitStatusRefresh(SESSION, "", {
+      state: "unavailable",
+      error_code: "details_unavailable",
+      tracker_id: TRACKER_ID,
+      tracker_epoch: 1,
+      snapshot_revision: 7,
+      timestamp: CURRENT_TIMESTAMP,
+    });
+    const release = retainGitRefreshScope(client, SESSION);
+    const attempt = requestGitStatusRefresh(client, store, SESSION, SESSION);
+
+    requests[0].resolve(orderedResponse(6, EARLIER_TIMESTAMP));
+    await vi.waitFor(() => expect(requests).toHaveLength(2));
+    requests[1].resolve(orderedResponse(6, EARLIER_TIMESTAMP));
+    await attempt;
+
+    expect(store.getState().gitStatus.byEnvironmentId[SESSION]).toBeUndefined();
+    expect(store.getState().gitStatus.refreshByEnvironmentRepo?.[SESSION]?.[""]).toMatchObject({
+      state: "unavailable",
+      error_code: "details_unavailable",
+      tracker_id: TRACKER_ID,
+      snapshot_revision: 7,
+    });
+    release();
+  });
+});
+
+describe("Git status refresh coordinator replay cancellation", () => {
+  beforeEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("marks pending details unavailable when replay is cancelled with a nullable branch", async () => {
+    vi.useFakeTimers();
+    const store = createAppStore();
+    const requests: Deferred<SessionGitRefreshResponse>[] = [];
+    const client = refreshClient(requests);
+    const release = retainGitRefreshScope(client, SESSION);
+    let released = false;
+    try {
+      const attempt = requestGitStatusRefresh(client, store, SESSION, SESSION);
+      const pending = statusResponse("pending.txt");
+      const event = pending.snapshots[0].payload as GitStatusUpdateEvent;
+      event.status.detail_state = "pending";
+      event.status.branch = null as unknown as string;
+      requests[0].resolve(pending);
+      await attempt;
+
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(requests).toHaveLength(2);
+      release();
+      released = true;
+
+      expect(store.getState().gitStatus.byEnvironmentId[SESSION]).toMatchObject({
+        branch: null,
+        detail_state: "pending",
+      });
+      await vi.waitFor(() =>
+        expect(store.getState().gitStatus.refreshByEnvironmentRepo?.[SESSION]?.[""]).toMatchObject({
+          state: "unavailable",
+          error_code: "details_unavailable",
+        }),
+      );
+    } finally {
+      if (!released) release();
+      vi.useRealTimers();
+    }
+  });
+});
+
+describe("Git status refresh coordinator stale quality responses", () => {
+  beforeEach(() => {
+    vi.useRealTimers();
+  });
+
+  it.each(["unavailable", "loading"] as const)(
+    "keeps a newer ready snapshot when a correlated %s response is older",
+    async (state) => {
+      const store = createAppStore();
+      const requests: Deferred<SessionGitRefreshResponse>[] = [];
+      const client = refreshClient(requests);
+      store.getState().setGitStatus(SESSION, {
+        status_state: "ready",
+        files_complete: true,
+        detail_state: "ready",
+        branch: "main",
+        remote_branch: null,
+        modified: [CURRENT_FILE],
+        added: [],
+        deleted: [],
+        untracked: [],
+        renamed: [],
+        ahead: 0,
+        behind: 0,
+        files: { [CURRENT_FILE]: { path: CURRENT_FILE, status: "modified", staged: false } },
+        tracker_id: TRACKER_ID,
+        tracker_epoch: 1,
+        snapshot_revision: 8,
+        timestamp: CURRENT_TIMESTAMP,
+      });
+      const release = retainGitRefreshScope(client, SESSION);
+      const attempt = requestGitStatusRefresh(client, store, SESSION, SESSION);
+
+      requests[0].resolve(orderedResponse(7, EARLIER_TIMESTAMP, state));
+      await vi.waitFor(() => expect(requests).toHaveLength(2));
+      requests[1].resolve(orderedResponse(7, EARLIER_TIMESTAMP, state));
+      await attempt;
+
+      expect(store.getState().gitStatus.byEnvironmentId[SESSION]?.files).toHaveProperty(
+        CURRENT_FILE,
+      );
+      expect(store.getState().gitStatus.refreshByEnvironmentId?.[SESSION]).toBeUndefined();
+      release();
+    },
+  );
 });

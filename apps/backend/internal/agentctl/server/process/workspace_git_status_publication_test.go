@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 )
 
@@ -48,6 +50,7 @@ func TestWorkspaceTrackerRejectsChangedGitIdentityDuringEnrichment(t *testing.T)
 				t.Cleanup(cleanup)
 				runGit(t, repo, "-c", "protocol.file.allow=always", "submodule", "add", submoduleDir, "nested")
 				runGit(t, repo, "commit", "-m", "add nested submodule")
+				configureNestedTestGitIdentity(t, repo)
 				runGit(t, repo, "-C", "nested", "commit", "--allow-empty", "-m", "initial nested head")
 			},
 			mutate: func(t *testing.T, repo string) {
@@ -96,6 +99,7 @@ func TestWorkspaceTrackerCapturesNestedSubmoduleHead(t *testing.T) {
 	defer cleanupSubmodule()
 	runGit(t, parent, "-c", "protocol.file.allow=always", "submodule", "add", submodule, "nested")
 	runGit(t, parent, "commit", "-m", "add nested submodule")
+	configureNestedTestGitIdentity(t, parent)
 	runGit(t, parent, "-C", "nested", "commit", "--allow-empty", "-m", "advance submodule")
 	wantHead := strings.TrimSpace(runGit(t, parent, "-C", "nested", "rev-parse", "HEAD"))
 
@@ -129,6 +133,7 @@ func TestWorkspaceTrackerRejectsSubmoduleHeadMoveBeforeFinalPublication(t *testi
 	defer cleanupSubmodule()
 	runGit(t, parent, "-c", "protocol.file.allow=always", "submodule", "add", submodule, "nested")
 	runGit(t, parent, "commit", "-m", "add nested submodule")
+	configureNestedTestGitIdentity(t, parent)
 	runGit(t, parent, "-C", "nested", "commit", "--allow-empty", "-m", "initial nested head")
 
 	tracker := NewWorkspaceTracker(parent, newTestLogger(t))
@@ -162,4 +167,74 @@ func TestWorkspaceTrackerRejectsSubmoduleHeadMoveBeforeFinalPublication(t *testi
 	if current.SnapshotRevision != accepted.SnapshotRevision || current.DetailState != gitStatusDetailPending {
 		t.Fatalf("stale enrichment changed accepted status: %+v", current)
 	}
+}
+
+func TestWorkspaceTrackerCorrectsSubmoduleHeadMoveBeforeEnrichment(t *testing.T) {
+	parent, cleanupParent := setupTestRepo(t)
+	defer cleanupParent()
+	submodule, cleanupSubmodule := setupTestRepo(t)
+	defer cleanupSubmodule()
+	runGit(t, parent, "-c", "protocol.file.allow=always", "submodule", "add", submodule, "nested")
+	runGit(t, parent, "commit", "-m", "add nested submodule")
+	configureNestedTestGitIdentity(t, parent)
+	runGit(t, parent, "-C", "nested", "commit", "--allow-empty", "-m", "advance before capture")
+
+	tracker := NewWorkspaceTracker(parent, newTestLogger(t))
+	t.Cleanup(tracker.Stop)
+	firstStarted := make(chan struct{})
+	releaseFirst := make(chan struct{})
+	var releaseFirstOnce sync.Once
+	defer releaseFirstOnce.Do(func() { close(releaseFirst) })
+	secondStarted := make(chan struct{})
+	var starts atomic.Int32
+	tracker.gitStatusBeforeEnrich = func() {
+		switch starts.Add(1) {
+		case 1:
+			close(firstStarted)
+			<-releaseFirst
+		case 2:
+			close(secondStarted)
+		}
+	}
+	initial, err := tracker.GetGitStatus(context.Background(), true)
+	if err != nil {
+		t.Fatalf("initial status: %v", err)
+	}
+	waitForSignal(t, firstStarted, "initial submodule enrichment")
+	tracker.mu.RLock()
+	firstFingerprint := tracker.gitStatusFingerprint
+	tracker.mu.RUnlock()
+	firstEvidence := tracker.gitStatusEnrichmentForFingerprint(firstFingerprint)
+	if firstEvidence == nil || firstEvidence.fileEvidence["nested"].SubmoduleHead == "" {
+		t.Fatal("initial enrichment did not capture the dirty submodule HEAD")
+	}
+	runGit(t, parent, "-C", "nested", "commit", "--allow-empty", "-m", "advance while enrichment is gated")
+	wantHead := strings.TrimSpace(runGit(t, parent, "-C", "nested", "rev-parse", "HEAD"))
+	releaseFirstOnce.Do(func() { close(releaseFirst) })
+	waitForSignal(t, secondStarted, "corrective submodule enrichment")
+
+	tracker.gitStatusEnrichmentMu.Lock()
+	correctedJob := tracker.gitStatusEnrichmentJob
+	tracker.gitStatusEnrichmentMu.Unlock()
+	if correctedJob == nil || correctedJob.fingerprint == firstEvidence.fingerprint || correctedJob.fileEvidence["nested"].SubmoduleHead != wantHead {
+		t.Fatalf("corrective evidence = %+v, want new submodule HEAD %s", correctedJob, wantHead)
+	}
+	if correctedJob.status.SnapshotRevision <= initial.SnapshotRevision {
+		t.Fatalf("corrective revision = %d, want after initial revision %d", correctedJob.status.SnapshotRevision, initial.SnapshotRevision)
+	}
+
+	final, err := tracker.GetGitStatusWithDetails(context.Background(), false)
+	if err != nil {
+		t.Fatalf("corrected enrichment: %v", err)
+	}
+	if final.DetailState != gitStatusDetailReady || final.SnapshotRevision <= correctedJob.status.SnapshotRevision ||
+		!strings.Contains(final.Files["nested"].Diff, wantHead) {
+		t.Fatalf("final status = %+v, want ready enrichment for corrected snapshot revision %d and nested HEAD %s", final, correctedJob.status.SnapshotRevision, wantHead)
+	}
+}
+
+func configureNestedTestGitIdentity(t *testing.T, parent string) {
+	t.Helper()
+	runGit(t, parent, "-C", "nested", "config", "user.name", "Test User")
+	runGit(t, parent, "-C", "nested", "config", "user.email", "test@test.com")
 }

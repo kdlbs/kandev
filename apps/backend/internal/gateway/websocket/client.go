@@ -15,6 +15,8 @@ import (
 	"go.uber.org/zap"
 )
 
+const maxConcurrentSessionGitRefreshes = 4
+
 const (
 	// Time allowed to write a message to the peer
 	writeWait = 10 * time.Second
@@ -691,8 +693,11 @@ func (c *Client) handleSessionGitRefresh(msg *ws.Message) {
 		c.sendError(msg.ID, msg.Action, ws.ErrorCodeValidation, "mode must be fresh, recover, or replay", nil)
 		return
 	}
-	ctx, finish, ok := c.beginSessionGitRefresh()
+	ctx, finish, ok, atCapacity := c.beginSessionGitRefresh()
 	if !ok {
+		if atCapacity {
+			c.sendError(msg.ID, msg.Action, ws.ErrorCodeUnavailable, "Git status refresh capacity reached", nil)
+		}
 		return
 	}
 	defer finish()
@@ -729,16 +734,21 @@ func (c *Client) handleSessionGitRefresh(msg *ws.Message) {
 	}
 }
 
-func (c *Client) beginSessionGitRefresh() (context.Context, func(), bool) {
+func (c *Client) beginSessionGitRefresh() (context.Context, func(), bool, bool) {
 	ctx, cancel := context.WithCancel(c.dispatchContext())
 	c.gitRefreshMu.Lock()
 	if c.gitRefreshClosed {
 		c.gitRefreshMu.Unlock()
 		cancel()
-		return ctx, func() {}, false
+		return ctx, func() {}, false, false
 	}
 	if c.gitRefreshCancels == nil {
 		c.gitRefreshCancels = make(map[uint64]context.CancelFunc)
+	}
+	if len(c.gitRefreshCancels) >= maxConcurrentSessionGitRefreshes {
+		c.gitRefreshMu.Unlock()
+		cancel()
+		return ctx, func() {}, false, true
 	}
 	c.gitRefreshNextID++
 	refreshID := c.gitRefreshNextID
@@ -750,7 +760,7 @@ func (c *Client) beginSessionGitRefresh() (context.Context, func(), bool) {
 		c.gitRefreshMu.Unlock()
 		cancel()
 	}
-	return ctx, finish, true
+	return ctx, finish, true, false
 }
 
 func (c *Client) cancelSessionGitRefreshes() {

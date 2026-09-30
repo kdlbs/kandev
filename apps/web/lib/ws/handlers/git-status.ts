@@ -100,8 +100,17 @@ export function applyGitStatusUpdate(
   store: StoreApi<AppState>,
   event: GitStatusUpdateEvent,
 ): boolean {
+  return applyGitStatusUpdateWithOutcome(store, event).changed;
+}
+
+export type GitStatusUpdateOutcome = { accepted: boolean; changed: boolean };
+
+export function applyGitStatusUpdateWithOutcome(
+  store: StoreApi<AppState>,
+  event: GitStatusUpdateEvent,
+): GitStatusUpdateOutcome {
   const taskEnvironmentId = event.task_environment_id;
-  if (!taskEnvironmentId) return false;
+  if (!taskEnvironmentId) return { accepted: false, changed: false };
   const state = store.getState();
 
   const repositoryName = event.status.repository_name ?? "";
@@ -112,9 +121,12 @@ export function applyGitStatusUpdate(
     !acceptsGitStatusOrdering(existing, ordering) ||
     !acceptsGitStatusOrdering(refresh, ordering)
   ) {
-    return false;
+    return { accepted: false, changed: false };
   }
-  return applyAcceptedGitStatus(store, event, taskEnvironmentId, repositoryName, ordering);
+  return {
+    accepted: true,
+    changed: applyAcceptedGitStatus(store, event, taskEnvironmentId, repositoryName, ordering),
+  };
 }
 
 function getAcceptedGitStatus(state: AppState, environmentId: string, repositoryName: string) {

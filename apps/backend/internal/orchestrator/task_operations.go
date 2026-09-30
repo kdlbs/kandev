@@ -5990,16 +5990,16 @@ func (s *Service) captureArchiveDiff(ctx context.Context, sessionID, baseCommit 
 		s.logger.Warn("failed to capture git status metadata for archive",
 			zap.String("session_id", sessionID),
 			zap.Error(statusErr))
-		return
+	} else if status == nil || !status.Success || !gitStatusDetailsReady(status) {
+		s.logger.Warn("git status metadata is unavailable for archive",
+			zap.String("session_id", sessionID))
+	} else {
+		snapshot.Branch = status.Branch
+		snapshot.RemoteBranch = status.RemoteBranch
+		snapshot.Ahead = status.Ahead
+		snapshot.Behind = status.Behind
+		snapshot.Metadata = archiveGitStatusMetadata(status, diffResult.Files)
 	}
-	if status == nil || !status.Success || !gitStatusDetailsReady(status) {
-		return
-	}
-	snapshot.Branch = status.Branch
-	snapshot.RemoteBranch = status.RemoteBranch
-	snapshot.Ahead = status.Ahead
-	snapshot.Behind = status.Behind
-	snapshot.Metadata = archiveGitStatusMetadata(status, diffResult.Files)
 
 	if err := s.repo.CreateGitSnapshot(ctx, snapshot); err != nil {
 		s.logger.Warn("failed to save archive snapshot",

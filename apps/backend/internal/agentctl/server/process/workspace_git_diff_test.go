@@ -35,6 +35,38 @@ func TestIsBinaryContent(t *testing.T) {
 	}
 }
 
+func TestGitObjectIDPatternAcceptsSHA1AndSHA256(t *testing.T) {
+	for _, length := range []int{40, 64} {
+		if !gitObjectIDPattern.MatchString(strings.Repeat("a", length)) {
+			t.Errorf("object ID with %d hex characters was rejected", length)
+		}
+	}
+}
+
+func TestWorkspaceTrackerEnrichmentAcceptsSHA256Repository(t *testing.T) {
+	repoDir := t.TempDir()
+	runGit(t, repoDir, "init", "--object-format=sha256", "--initial-branch=main")
+	runGit(t, repoDir, "config", "user.email", "test@test.com")
+	runGit(t, repoDir, "config", "user.name", "Test User")
+	runGit(t, repoDir, "config", "core.hooksPath", "/dev/null")
+	writeFile(t, repoDir, "README.md", "base\n")
+	runGit(t, repoDir, "add", "README.md")
+	runGit(t, repoDir, "commit", "-m", "initial sha256 commit")
+	runGit(t, repoDir, "update-ref", "refs/remotes/origin/main", "HEAD")
+	writeFile(t, repoDir, "README.md", "base\nchanged\n")
+
+	tracker := NewWorkspaceTracker(repoDir, newTestLogger(t))
+	t.Cleanup(tracker.Stop)
+	status, err := tracker.GetGitStatusWithDetails(context.Background(), true)
+	if err != nil {
+		t.Fatalf("SHA-256 status details: %v", err)
+	}
+	if len(status.HeadCommit) != 64 || status.DetailState != gitStatusDetailReady ||
+		status.Files["README.md"].DiffState != gitStatusDiffReady {
+		t.Fatalf("SHA-256 enriched status = %+v, want 64-character HEAD and ready diff", status)
+	}
+}
+
 func TestTotalDiffBytes(t *testing.T) {
 	update := &streams.GitStatusUpdate{
 		Files: map[string]streams.FileInfo{

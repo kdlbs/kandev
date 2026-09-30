@@ -219,7 +219,9 @@ func refreshGitStatusFromSources(ctx context.Context, taskRepo *sqliterepo.Repos
 			continue
 		}
 		appendGitStatusRefreshSnapshots(&result, sources, sessionID, multi)
-		return result
+		if result.Success {
+			return result
+		}
 	}
 	if live && rpcCtx.Err() != nil {
 		result.ErrorCode = "status_timeout"
@@ -355,7 +357,18 @@ func requestedSessionUsesGitStatusSource(ctx context.Context, taskRepo *sqlitere
 }
 
 func sameGitStatusRefreshScope(currentSources, expected *gitStatusSources, ok bool) bool {
-	return ok && currentSources.environmentID == expected.environmentID && currentSources.workspacePath == expected.workspacePath
+	if !ok || currentSources.environmentID != expected.environmentID || currentSources.workspacePath != expected.workspacePath {
+		return false
+	}
+	if len(currentSources.workspacePaths) != len(expected.workspacePaths) {
+		return false
+	}
+	for path := range currentSources.workspacePaths {
+		if _, exists := expected.workspacePaths[path]; !exists {
+			return false
+		}
+	}
+	return true
 }
 
 func sourceSessionStillEligible(sessionIDs []string, sourceSessionID string) bool {
@@ -575,6 +588,9 @@ func executionMatchesGitStatusSource(sources *gitStatusSources, execution *lifec
 		return false
 	}
 	if execution.WorkspacePath != sources.workspacePath {
+		if _, allowed := sources.workspacePaths[execution.WorkspacePath]; allowed {
+			return true
+		}
 		log.Debug("rejecting live git status source",
 			zap.String("source_session_id", sessionID),
 			zap.String("task_environment_id", sources.environmentID),

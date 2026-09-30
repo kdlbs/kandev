@@ -79,6 +79,24 @@ function useSelectedPRCommits(selectedPR: TaskPR | null) {
   );
 }
 
+function hasReadyGitStatusDetails(
+  selectedPR: TaskPR | null,
+  gitStatus: ReturnType<typeof useSessionGitStatusByRepo>[number]["status"] | undefined,
+  statuses: ReturnType<typeof useSessionGitStatusByRepo>,
+): boolean {
+  if (selectedPR) {
+    return Boolean(
+      gitStatus && gitStatus.detail_state !== "pending" && gitStatus.detail_state !== "unavailable",
+    );
+  }
+  return (
+    statuses.length > 0 &&
+    statuses.every(
+      ({ status }) => status.detail_state !== "pending" && status.detail_state !== "unavailable",
+    )
+  );
+}
+
 export function useRemoteContributionRelation(
   sessionId: string | null | undefined,
 ): RemoteContributionRelationState {
@@ -109,7 +127,9 @@ export function useRemoteContributionRelation(
     const refreshed = await commitsState.refresh();
     return refreshed?.providerHead ?? null;
   }, [commitsState.refresh]);
-  const gitStatus = selection?.gitStatus;
+  const gitStatus =
+    selection?.gitStatus ??
+    (!selectedPR && statusByRepo.length === 1 ? statusByRepo[0].status : undefined);
   const contributionHistoryTarget = useMemo(
     () =>
       buildContributionHistoryTarget(sessionId, selectedPR, gitStatus, commitsState.providerHead),
@@ -117,13 +137,10 @@ export function useRemoteContributionRelation(
   );
 
   const relation = useMemo(() => {
-    const detailsReady =
-      Boolean(gitStatus) &&
-      gitStatus?.detail_state !== "pending" &&
-      gitStatus?.detail_state !== "unavailable";
+    const detailsReady = hasReadyGitStatusDetails(selectedPR, gitStatus, statusByRepo);
     if (!detailsReady) return unavailableContributionRelation(commitsState.providerHead);
     return classifyContributionRelation({
-      hasSelectedPR: Boolean(selectedPR),
+      hasSelectedPR: selectedPR !== null,
       providerCommits: commitsState.authoritativeCommits,
       providerHead: commitsState.providerHead,
       providerCommitsComplete: commitsState.providerCommitsComplete,
@@ -144,6 +161,8 @@ export function useRemoteContributionRelation(
     commitsState.loading,
     commitsState.error,
     gitStatus,
+    selectedPR,
+    statusByRepo,
   ]);
 
   return {

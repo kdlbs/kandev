@@ -29,6 +29,11 @@ const queryParamTrue = "true"
 
 const gitStatusDetailsUnavailableErrorCode = "details_unavailable"
 
+const (
+	gitStatusReadyState       = "ready"
+	gitStatusUnavailableState = "unavailable"
+)
+
 // sortCommitsByCommittedAtDesc sorts commits newest-first using committed_at.
 // Commits with unparseable timestamps preserve their original relative order
 // (sort.SliceStable). Used when merging logs from multiple repos so the
@@ -1583,7 +1588,7 @@ func (s *Server) collectStatusForRepo(ctx context.Context, sub string, fresh, de
 	}
 	if err != nil {
 		result := unavailableGitStatusResult(err)
-		if status.StatusState == "ready" && status.FilesComplete {
+		if status.StatusState == gitStatusReadyState && status.FilesComplete {
 			markGitStatusDetailsUnavailable(&status)
 			result = gitStatusResult(status, sub)
 			result.Success = false
@@ -1606,7 +1611,7 @@ func unavailableGitStatusResult(err error) GitStatusResult {
 		code = "status_canceled"
 		message = "Git status request canceled."
 	}
-	return GitStatusResult{Success: false, StatusState: "unavailable", DetailState: "unavailable", ErrorCode: code, Error: message}
+	return GitStatusResult{Success: false, StatusState: gitStatusUnavailableState, DetailState: gitStatusUnavailableState, ErrorCode: code, Error: message}
 }
 
 func gitStatusResult(status types.GitStatusUpdate, repositoryName string) GitStatusResult {
@@ -1615,7 +1620,7 @@ func gitStatusResult(status types.GitStatusUpdate, repositoryName string) GitSta
 		filesMap[k] = v
 	}
 	return GitStatusResult{
-		Success:             status.StatusState == "ready",
+		Success:             status.StatusState == gitStatusReadyState,
 		StatusState:         status.StatusState,
 		FilesComplete:       status.FilesComplete,
 		DetailState:         status.DetailState,
@@ -1650,18 +1655,18 @@ func gitStatusResult(status types.GitStatusUpdate, repositoryName string) GitSta
 }
 
 func markGitStatusDetailsUnavailable(status *types.GitStatusUpdate) {
-	status.DetailState = "unavailable"
+	status.DetailState = gitStatusUnavailableState
 	status.ErrorCode = gitStatusDetailsUnavailableErrorCode
 	for path, file := range status.Files {
-		file.DiffState = "unavailable"
+		file.DiffState = gitStatusUnavailableState
 		if file.StagedChange != nil {
 			facet := *file.StagedChange
-			facet.DiffState = "unavailable"
+			facet.DiffState = gitStatusUnavailableState
 			file.StagedChange = &facet
 		}
 		if file.UnstagedChange != nil {
 			facet := *file.UnstagedChange
-			facet.DiffState = "unavailable"
+			facet.DiffState = gitStatusUnavailableState
 			file.UnstagedChange = &facet
 		}
 		status.Files[path] = file
@@ -1709,7 +1714,7 @@ func (s *Server) handleGitStatus(c *gin.Context) {
 	if err != nil {
 		s.logger.Error("git status failed", zap.Error(err))
 		result := unavailableGitStatusResult(err)
-		if status.StatusState == "ready" && status.FilesComplete {
+		if status.StatusState == gitStatusReadyState && status.FilesComplete {
 			markGitStatusDetailsUnavailable(&status)
 			result = gitStatusResult(status, c.Query("repo"))
 			result.Success = false

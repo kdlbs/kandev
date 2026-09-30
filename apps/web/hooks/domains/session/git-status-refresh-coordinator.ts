@@ -2,7 +2,7 @@ import type { StoreApi } from "zustand";
 import type { AppState } from "@/lib/state/store";
 import type { GitStatusEntry } from "@/lib/state/slices/session-runtime/types";
 import type { GitStatusUpdateEvent } from "@/lib/types/git-events";
-import { applyGitStatusUpdate } from "@/lib/ws/handlers/git-status";
+import { applyGitStatusUpdateWithOutcome } from "@/lib/ws/handlers/git-status";
 import type {
   SessionGitRefreshMode,
   SessionGitRefreshResponse,
@@ -17,10 +17,11 @@ type ActiveAttempt = {
   onCancel?: () => void;
 };
 type SnapshotOutcome = {
+  received: number;
   count: number;
   complete: number;
-  incompleteRepositories: Set<string>;
-  pendingDetails: Set<string>;
+  incompleteRepositories: Map<string, GitStatusUpdateEvent>;
+  pendingDetails: Map<string, GitStatusUpdateEvent>;
 };
 type GitRefreshContext = {
   client: WebSocketClient;
@@ -73,22 +74,6 @@ function activeAttemptKey(scopeKey: string, generation: number, mode: SessionGit
 
 function completeMembership(status: GitStatusEntry | undefined): boolean {
   return Boolean(status && status.files !== undefined && status.files_complete !== false);
-}
-
-function hasCompleteMembership(store: StoreApi<AppState>, environmentId: string): boolean {
-  const state = store.getState().gitStatus;
-  const statuses = Object.values(state.byEnvironmentRepo[environmentId] ?? {});
-  return (
-    statuses.some(completeMembership) || completeMembership(state.byEnvironmentId[environmentId])
-  );
-}
-
-function hasUnavailableRefresh(store: StoreApi<AppState>, environmentId: string): boolean {
-  const state = store.getState().gitStatus;
-  if (state.refreshByEnvironmentId?.[environmentId]?.state === "unavailable") return true;
-  return Object.values(state.refreshByEnvironmentRepo?.[environmentId] ?? {}).some(
-    (refresh) => refresh.state === "unavailable",
-  );
 }
 
 function hasPendingDetails(store: StoreApi<AppState>, environmentId: string): boolean {
@@ -165,10 +150,11 @@ function applyRefreshSnapshots(
   response: SessionGitRefreshResponse,
 ): SnapshotOutcome {
   const outcome: SnapshotOutcome = {
+    received: 0,
     count: 0,
     complete: 0,
-    incompleteRepositories: new Set(),
-    pendingDetails: new Set(),
+    incompleteRepositories: new Map(),
+    pendingDetails: new Map(),
   };
   for (const snapshot of response.snapshots ?? []) {
     if (snapshot.action !== "session.git.event" || snapshot.payload.type !== "status_update")
@@ -177,18 +163,21 @@ function applyRefreshSnapshots(
     if (event.session_id !== sessionId || event.task_environment_id !== environmentId) {
       continue;
     }
-    outcome.count += 1;
+    outcome.received += 1;
     const repositoryName = event.status.repository_name ?? "";
+    const applied = applyGitStatusUpdateWithOutcome(store, event);
+    if (!applied.accepted) continue;
+    outcome.count += 1;
     const complete =
       event.status.status_state !== "unavailable" &&
       event.status.status_state !== "loading" &&
       (event.status.files_complete ?? event.status.files !== undefined);
-    applyGitStatusUpdate(store, event);
     if (complete) {
       outcome.complete += 1;
-      if (event.status.detail_state === "pending") outcome.pendingDetails.add(repositoryName);
+      if (event.status.detail_state === "pending")
+        outcome.pendingDetails.set(repositoryName, event);
     } else {
-      outcome.incompleteRepositories.add(repositoryName);
+      outcome.incompleteRepositories.set(repositoryName, event);
     }
   }
   return outcome;
@@ -196,13 +185,18 @@ function applyRefreshSnapshots(
 
 function setIncompleteRepositoriesUnavailable(
   store: StoreApi<AppState>,
-  environmentId: string,
-  repositories: Iterable<string>,
+  snapshots: Iterable<GitStatusUpdateEvent>,
 ) {
-  for (const repositoryName of repositories) {
-    store.getState().setGitStatusRefresh(environmentId, repositoryName, {
-      state: "unavailable",
-      error_code: "status_unavailable",
+  for (const snapshot of snapshots) {
+    applyGitStatusUpdateWithOutcome(store, {
+      ...snapshot,
+      status: {
+        ...snapshot.status,
+        status_state: "unavailable",
+        files_complete: false,
+        detail_state: "unavailable",
+        error_code: snapshot.status.error_code ?? "status_unavailable",
+      },
     });
   }
 }
@@ -218,15 +212,38 @@ async function requestSnapshot(
   return request;
 }
 
-function setPendingDetailsUnavailable(store: StoreApi<AppState>, environmentId: string) {
-  const statuses = Object.entries(
-    store.getState().gitStatus.byEnvironmentRepo[environmentId] ?? {},
-  );
+function setPendingDetailsUnavailable(
+  store: StoreApi<AppState>,
+  environmentId: string,
+  sessionId: string,
+) {
+  const state = store.getState();
+  const statuses = Object.entries(state.gitStatus.byEnvironmentRepo[environmentId] ?? {});
+  const legacy = state.gitStatus.byEnvironmentId[environmentId];
+  if (
+    legacy &&
+    !statuses.some(([repositoryName]) => repositoryName === (legacy.repository_name ?? ""))
+  ) {
+    statuses.push([legacy.repository_name ?? "", legacy]);
+  }
   for (const [repositoryName, status] of statuses) {
     if (status.detail_state === "pending") {
-      store.getState().setGitStatusRefresh(environmentId, repositoryName, {
-        state: "unavailable",
-        error_code: "details_unavailable",
+      applyGitStatusUpdateWithOutcome(store, {
+        type: "status_update",
+        session_id: sessionId,
+        task_environment_id: environmentId,
+        timestamp: status.timestamp ?? "",
+        status: {
+          ...status,
+          branch: status.branch ?? "",
+          remote_ahead: status.remote_ahead ?? 0,
+          remote_behind: status.remote_behind ?? 0,
+          repository_name: repositoryName,
+          status_state: "unavailable",
+          files_complete: false,
+          detail_state: "unavailable",
+          error_code: "details_unavailable",
+        },
       });
     }
   }
@@ -245,7 +262,7 @@ async function runReplay(context: GitRefreshScopeContext) {
     controller,
     requestId,
     promise: Promise.resolve(),
-    onCancel: () => setPendingDetailsUnavailable(store, environmentId),
+    onCancel: () => setPendingDetailsUnavailable(store, environmentId, sessionId),
   };
   attempt.promise = (async () => {
     try {
@@ -256,14 +273,14 @@ async function runReplay(context: GitRefreshScopeContext) {
       const outcome = applyRefreshSnapshots(store, sessionId, environmentId, response);
       if (hasPendingDetails(store, environmentId)) {
         if (outcome.pendingDetails.size > 0) {
-          setIncompleteRepositoriesUnavailable(store, environmentId, outcome.pendingDetails);
+          setIncompleteRepositoriesUnavailable(store, outcome.pendingDetails.values());
         } else {
-          setPendingDetailsUnavailable(store, environmentId);
+          setPendingDetailsUnavailable(store, environmentId, sessionId);
         }
       }
     } catch {
       if (!controller.signal.aborted && isCurrentRequest(attemptContext)) {
-        setPendingDetailsUnavailable(store, environmentId);
+        setPendingDetailsUnavailable(store, environmentId, sessionId);
       }
     }
   })().finally(() => {
@@ -322,9 +339,8 @@ function setRefreshForAttempt(
   requestId: string,
   refresh: { state: "pending" | "unavailable"; error_code?: string } | null,
 ) {
-  if (
-    store.getState().gitStatus.refreshByEnvironmentId?.[environmentId]?.request_id !== requestId
-  ) {
+  const current = store.getState().gitStatus.refreshByEnvironmentId?.[environmentId];
+  if (current?.request_id !== requestId) {
     return;
   }
   store
@@ -332,26 +348,69 @@ function setRefreshForAttempt(
     .setGitStatusRefresh(
       environmentId,
       undefined,
-      refresh && { ...refresh, request_id: requestId },
+      refresh && { ...current, ...refresh, request_id: requestId },
     );
+}
+
+function markRefreshPendingForAttempt(
+  store: StoreApi<AppState>,
+  environmentId: string,
+  requestId: string,
+) {
+  const current = store.getState().gitStatus.refreshByEnvironmentId?.[environmentId];
+  store.getState().setGitStatusRefresh(environmentId, undefined, {
+    ...current,
+    state: "pending",
+    error_code: undefined,
+    request_id: requestId,
+  });
+}
+
+function restorePreviousRefreshForAttempt(
+  store: StoreApi<AppState>,
+  environmentId: string,
+  requestId: string,
+  previousRefresh: NonNullable<AppState["gitStatus"]["refreshByEnvironmentId"]>[string] | undefined,
+) {
+  if (
+    store.getState().gitStatus.refreshByEnvironmentId?.[environmentId]?.request_id !== requestId
+  ) {
+    return;
+  }
+  store.getState().setGitStatusRefresh(environmentId, undefined, previousRefresh ?? null);
+}
+
+function onlyRejectedSnapshots(outcome: SnapshotOutcome | null): boolean {
+  return outcome !== null && outcome.received > 0 && outcome.count === 0;
+}
+
+function acceptedSnapshotOutcome(outcome: SnapshotOutcome | null): SnapshotOutcome | null {
+  return outcome && outcome.count > 0 ? outcome : null;
+}
+
+function refreshScopeIsActive(controller: AbortController, scopeKey: string): boolean {
+  return !controller.signal.aborted && ownsScope(scopeKey);
 }
 
 async function performForegroundRefresh(context: GitRefreshContext, controller: AbortController) {
   const { store, environmentId, scopeKey, requestId } = context;
-  const state = store.getState();
-  state.setGitStatusRefresh(environmentId, undefined, { state: "pending", request_id: requestId });
-  let finalOutcome: SnapshotOutcome | null = null;
-  for (const mode of ["fresh", "recover"] as const) {
-    const snapshot = await readRefreshSnapshot(context, mode, controller);
-    if (!snapshot) return;
-    finalOutcome = snapshot.outcome;
-    if (mode === "fresh" && needsFreshRecovery(snapshot)) continue;
-    break;
-  }
+  const previousRefresh = store.getState().gitStatus.refreshByEnvironmentId?.[environmentId];
+  markRefreshPendingForAttempt(store, environmentId, requestId);
+  const freshSnapshot = await readRefreshSnapshot(context, "fresh", controller);
+  if (!freshSnapshot) return;
+  const finalSnapshot = needsFreshRecovery(freshSnapshot)
+    ? await readRefreshSnapshot(context, "recover", controller)
+    : freshSnapshot;
+  if (!finalSnapshot) return;
 
-  if (controller.signal.aborted || !ownsScope(scopeKey)) return;
-  const outcome = finalOutcome;
-  if (!outcome || outcome.count === 0) {
+  if (!refreshScopeIsActive(controller, scopeKey)) return;
+  const receivedOutcome = finalSnapshot.outcome;
+  if (onlyRejectedSnapshots(receivedOutcome)) {
+    restorePreviousRefreshForAttempt(store, environmentId, requestId, previousRefresh);
+    return;
+  }
+  const outcome = acceptedSnapshotOutcome(receivedOutcome);
+  if (!outcome) {
     setRefreshForAttempt(store, environmentId, requestId, {
       state: "unavailable",
       error_code: "status_unavailable",
@@ -360,7 +419,7 @@ async function performForegroundRefresh(context: GitRefreshContext, controller: 
   }
 
   setRefreshForAttempt(store, environmentId, requestId, null);
-  setIncompleteRepositoriesUnavailable(store, environmentId, outcome.incompleteRepositories);
+  setIncompleteRepositoriesUnavailable(store, outcome.incompleteRepositories.values());
   if (hasPendingDetails(store, environmentId)) {
     scheduleDetailsReplay(context);
   }
@@ -406,15 +465,6 @@ export function requestGitStatusRefresh(
   });
   attempts.set(attemptKey, attempt);
   return attempt.promise;
-}
-
-export function shouldStartGitStatusRefresh(
-  store: StoreApi<AppState>,
-  environmentId: string,
-): boolean {
-  return (
-    !hasCompleteMembership(store, environmentId) || hasUnavailableRefresh(store, environmentId)
-  );
 }
 
 export function monitorGitStatusDetails(
