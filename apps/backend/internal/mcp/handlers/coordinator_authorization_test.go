@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"encoding/json"
 	"slices"
 	"testing"
 	"time"
@@ -388,4 +389,36 @@ func TestAuthorizeCoordinatorRequest_NoAutonomySettingAction(t *testing.T) {
 		require.NoError(t, err)
 		assertWSError(t, guarded, ws.ErrorCodeUnknownAction)
 	}
+}
+
+// With phase 3 effective, the improvement handler reaches the service, which answers its own validation error instead of the
+// unknown-action refusal that phase 3 off produces.
+func TestProposeImprovement_Phase3OnReachesTheService(t *testing.T) {
+	conn, err := sqlx.Open("sqlite3", ":memory:")
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = conn.Close() })
+	store, err := coordinator.NewStore(conn, conn)
+	require.NoError(t, err)
+	svc := coordinator.NewService(store, coordinator.NewValidator(nil, nil), nil, testLogger(t),
+		coordinator.WithPhase2(true), coordinator.WithPhase3(true))
+	h := &Handlers{logger: testLogger(t).WithFields()}
+	h.SetCoordinatorService(svc)
+
+	ctx := mcpscope.WithPrincipal(context.Background(), coordinatorTestPrincipal("ws-1"))
+	msg := makeWSMessage(t, coordinator.ActionProposeImprovement, map[string]interface{}{})
+
+	response, err := h.handleProposeImprovement(ctx, msg)
+	require.NoError(t, err)
+	require.NotEqual(t, ws.ErrorCodeUnknownAction, errorCodeOf(t, response))
+}
+
+func errorCodeOf(t *testing.T, resp *ws.Message) string {
+	t.Helper()
+	require.NotNil(t, resp)
+	if resp.Type != ws.MessageTypeError {
+		return ""
+	}
+	var ep ws.ErrorPayload
+	require.NoError(t, json.Unmarshal(resp.Payload, &ep))
+	return ep.Code
 }
