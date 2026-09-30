@@ -141,3 +141,4 @@ Fixup corrected projection precedence: a compact task summary overrides cached f
 - `python3 scripts/lint-spec-files.test.py`: 36 tests passed; `python3 scripts/lint-spec-files.py --all`: passed.
 - Desktop E2E: `(cd apps/web && pnpm e2e:run --host --shards 1 --project chromium tests/pr/pr-status-badge.spec.ts -- --retries=0)`: 11 tests passed. The clearing assertion now expects the explicit false projection.
 - `git diff --check`: passed.
+- CI fixup: `(cd apps && pnpm --filter @kandev/web test -- --run components/task/task-session-sidebar-item.test.ts components/task/mobile/session-task-switcher-sheet-hooks.test.ts)`: 39 tests passed. Updated three exact task-PR projection expectations to include the existing summary freshness timestamp and optional aggregate-state field; no production behavior changed.
