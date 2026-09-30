@@ -203,10 +203,18 @@ with `detected_at` older than 30 days. There is no timer.
   loaded, neither state renders; if its read fails, the route shows "Could not
   load coordinators." with **Try again**, which re-reads the list
   (`listCoordinators`). The sidebar entries are unaffected.
-- `components/app-sidebar/app-sidebar-primary-nav.tsx` renders the entries
-  inside `AppSidebarFixedNav` after the Inbox row and before the
-  collapsed-sidebar Quick Chat row (so before New Task), using
-  `AppSidebarNavItem` with its badge; `MobileRequiredRows` in
+- `components/app-sidebar/sections/coordinators-section.tsx` renders the
+  entries as a `CoordinatorsSection` built on `AppSidebarSection`, the way
+  `AutomationsSection` is: id `coordinators` in `APP_SIDEBAR_SECTION_IDS`,
+  mounted immediately above the Automations section (in `app-sidebar.tsx` and,
+  for a saved layout, beside the automations node in
+  `sidebar-layout-navigation.tsx`). It self-gates on the flag and an active
+  workspace and renders nothing until the list has loaded. Rows link to the
+  Needs you screen with the open-proposal badge; `defaultExpanded` is true, and
+  the folded `collapsedSummary` is the badge sum when above zero, otherwise the
+  coordinator count. The header shortcut links to `/workspaces/:id/coordinator`;
+  with no coordinator the body is one "Set up a coordinator" row
+  (`sidebar-coordinators-empty`) linking to the settings list. `MobileRequiredRows` in
   `components/navigation/mobile-sidebar-layout-navigation.tsx` renders the same
   rows. Badge values come from a small store keyed by coordinator id, seeded by
   the list route's `open_proposals` field and replaced by each
