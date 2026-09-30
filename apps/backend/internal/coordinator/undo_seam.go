@@ -38,12 +38,20 @@ type UndoMoveOptions struct {
 	SkipStepPrompt     bool
 }
 
+// UndoMoveResult is what a move committed: whether the destination step
+// admitted the task, and the step the task left in the move's own write
+// transaction (empty when the task service reports none).
+type UndoMoveResult struct {
+	Admitted   bool
+	FromStepID string
+}
+
 // UndoTaskService is the one task-service seam undo (and the move executor)
 // use. Implementations return the sentinel errors above.
 type UndoTaskService interface {
 	ArchiveTask(ctx context.Context, id string) error
 	GetTask(ctx context.Context, id string) (*UndoTask, error)
-	MoveTaskWithOptions(ctx context.Context, id, workflowID, stepID string, position int, opts UndoMoveOptions) (admitted bool, err error)
+	MoveTaskWithOptions(ctx context.Context, id, workflowID, stepID string, position int, opts UndoMoveOptions) (UndoMoveResult, error)
 	GetStep(ctx context.Context, stepID string) (*UndoStep, error)
 	// ListSteps reads every step of a workflow, the graph StartsAgentOnEnter walks.
 	ListSteps(ctx context.Context, workflowID string) ([]StepNode, error)

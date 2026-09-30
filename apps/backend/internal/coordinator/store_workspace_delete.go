@@ -44,6 +44,9 @@ func (s *Store) DeleteWorkspaceState(ctx context.Context, workspaceID string) er
 	if _, err := tx.ExecContext(ctx, tx.Rebind(`DELETE FROM coordinator_proposals WHERE workspace_id = ?`), workspaceID); err != nil {
 		return fmt.Errorf("delete workspace proposals: %w", err)
 	}
+	if s.beforeCoordinatorRowDelete != nil {
+		s.beforeCoordinatorRowDelete()
+	}
 	if _, err := tx.ExecContext(ctx, tx.Rebind(`DELETE FROM coordinators WHERE workspace_id = ?`), workspaceID); err != nil {
 		return fmt.Errorf("delete workspace coordinators: %w", err)
 	}

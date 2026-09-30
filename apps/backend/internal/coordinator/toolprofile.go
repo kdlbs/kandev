@@ -61,6 +61,7 @@ var actionTools = map[string]string{
 	ws.ActionMCPListWorkflowSteps:    "list_workflow_steps_kandev",
 	ws.ActionMCPListRepositories:     "list_repositories_kandev",
 	mcpcontract.ActionGetItem:        "get_coordinator_item_kandev",
+	mcpcontract.ActionListActivity:   activityTool,
 	mcpcontract.ActionProposeTask:    "propose_task_kandev",
 	mcpcontract.ActionProposeResume:  "propose_resume_kandev",
 	mcpcontract.ActionProposeMessage: "propose_message_kandev",

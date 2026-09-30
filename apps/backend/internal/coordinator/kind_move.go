@@ -128,7 +128,7 @@ func (k *moveKind) checkTask(ctx context.Context, u UndoTaskService, claim Claim
 }
 
 func (k *moveKind) move(ctx context.Context, u UndoTaskService, taskID string, spec *moveSpec, fromStepID string) (Outcome, error) {
-	admitted, err := u.MoveTaskWithOptions(ctx, taskID, spec.WorkflowID, spec.ToStepID, 0, UndoMoveOptions{ExpectedWorkflowID: spec.WorkflowID})
+	res, err := u.MoveTaskWithOptions(ctx, taskID, spec.WorkflowID, spec.ToStepID, 0, UndoMoveOptions{ExpectedWorkflowID: spec.WorkflowID})
 	switch {
 	case errors.Is(err, ErrWIPLimitExceeded):
 		return Outcome{}, failWith(failStepFull)
@@ -139,8 +139,13 @@ func (k *moveKind) move(ctx context.Context, u UndoTaskService, taskID string, s
 	case err != nil:
 		return Outcome{}, err
 	}
-	out := Outcome{TaskID: taskID, OutcomeJSON: moveOutcomeJSON(fromStepID, spec.ToStepID, !admitted), Detail: "Moved"}
-	if !admitted {
+	// Undo reverses to the step the move actually left, read from the move's
+	// own write transaction; the pre-read step is only the pre-move fence.
+	if res.FromStepID != "" {
+		fromStepID = res.FromStepID
+	}
+	out := Outcome{TaskID: taskID, OutcomeJSON: moveOutcomeJSON(fromStepID, spec.ToStepID, !res.Admitted), Detail: "Moved"}
+	if !res.Admitted {
 		out.Detail = detailMoveQueued
 	}
 	return out, nil

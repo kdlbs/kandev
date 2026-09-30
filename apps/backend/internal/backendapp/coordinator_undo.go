@@ -60,7 +60,7 @@ func (a *coordinatorUndoSeam) GetTask(ctx context.Context, id string) (*coordina
 	}, nil
 }
 
-func (a *coordinatorUndoSeam) MoveTaskWithOptions(ctx context.Context, id, workflowID, stepID string, position int, opts coordinator.UndoMoveOptions) (bool, error) {
+func (a *coordinatorUndoSeam) MoveTaskWithOptions(ctx context.Context, id, workflowID, stepID string, position int, opts coordinator.UndoMoveOptions) (coordinator.UndoMoveResult, error) {
 	moveOpts := taskservice.MoveTaskOptions{}
 	if opts.ExpectedWorkflowID != "" {
 		expected := opts.ExpectedWorkflowID
@@ -72,15 +72,21 @@ func (a *coordinatorUndoSeam) MoveTaskWithOptions(ctx context.Context, id, workf
 	result, err := a.tasks.MoveTaskWithOptions(ctx, id, workflowID, stepID, position, moveOpts)
 	switch {
 	case errors.Is(err, taskservice.ErrWIPLimitExceeded):
-		return false, coordinator.ErrWIPLimitExceeded
+		return coordinator.UndoMoveResult{}, coordinator.ErrWIPLimitExceeded
 	case errors.Is(err, taskservice.ErrWorkflowResolutionConflict), errors.Is(err, workflowmove.ErrMoveConflict):
-		return false, coordinator.ErrMoveConflict
+		return coordinator.UndoMoveResult{}, coordinator.ErrMoveConflict
 	case errors.Is(err, repoerrors.ErrTaskNotFound):
-		return false, coordinator.ErrTaskNotFound
+		return coordinator.UndoMoveResult{}, coordinator.ErrTaskNotFound
 	case err != nil:
-		return false, err
+		return coordinator.UndoMoveResult{}, err
 	}
-	return result != nil && result.Task != nil && result.Task.WIPAdmitted, nil
+	if result == nil {
+		return coordinator.UndoMoveResult{}, nil
+	}
+	return coordinator.UndoMoveResult{
+		Admitted:   result.Task != nil && result.Task.WIPAdmitted,
+		FromStepID: result.FromStepID,
+	}, nil
 }
 
 func (a *coordinatorUndoSeam) GetStep(ctx context.Context, stepID string) (*coordinator.UndoStep, error) {

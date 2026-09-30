@@ -61,3 +61,7 @@ func TestInsertProposal_Postgres_ConcurrentCapEnforcement(t *testing.T) {
 		t.Fatalf("CountOpenProposals = %d, want %d", count, maxOpenProposals)
 	}
 }
+
+func TestListProposals_Postgres_PendingReturnsEveryOpenProposalBeyondNewestFifty(t *testing.T) {
+	assertListPendingReturnsEveryOpenProposal(t, newTestStorePostgres(t))
+}

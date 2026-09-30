@@ -39,6 +39,12 @@ type Store struct {
 	// afterUnattendedLookup is a test-only hook run between RecordUnattendedDenial's
 	// turn lookup and its write transaction. nil in production.
 	afterUnattendedLookup func()
+
+	// beforeCoordinatorRowDelete is a test-only hook invoked by
+	// DeleteCoordinator and DeleteWorkspaceState after the coordinator row
+	// lock is held and before the coordinator rows are deleted. nil in
+	// production.
+	beforeCoordinatorRowDelete func()
 }
 
 // NewStore creates the coordinator store and initializes its schema.
@@ -317,6 +323,9 @@ func (s *Store) DeleteCoordinator(ctx context.Context, workspaceID, id string) e
 			id, workspaceID); err != nil {
 			return fmt.Errorf("delete coordinator %s: %w", table, err)
 		}
+	}
+	if s.beforeCoordinatorRowDelete != nil {
+		s.beforeCoordinatorRowDelete()
 	}
 	res, err := tx.ExecContext(ctx, tx.Rebind(`
 		DELETE FROM coordinators WHERE id = ? AND workspace_id = ?`), id, workspaceID)

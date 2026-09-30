@@ -774,3 +774,95 @@ func TestGetProposal_WrongCoordinatorOrWorkspaceIsNotFound(t *testing.T) {
 		t.Fatalf("GetProposal(wrong workspace): err = %v, want ErrNotFound", err)
 	}
 }
+
+// assertListPendingReturnsEveryOpenProposal seeds one pending, one approving
+// and one failed proposal, then buries them under more terminal proposals than
+// ListProposalsAll's cap of 50 returns, and requires ListProposalsPending to
+// return exactly the three open rows, oldest first.
+func assertListPendingReturnsEveryOpenProposal(t *testing.T, store *Store) {
+	t.Helper()
+	ctx := context.Background()
+	c := newTestCoordinator(t, store, "ws-1")
+
+	clock := time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC)
+	store.now = func() time.Time {
+		clock = clock.Add(time.Second)
+		return clock
+	}
+	insert := func() *Proposal {
+		t.Helper()
+		p := &Proposal{CoordinatorID: c.ID, WorkspaceID: "ws-1", Spec: sampleSpec()}
+		if err := store.InsertProposal(ctx, p, false); err != nil {
+			t.Fatalf("InsertProposal: %v", err)
+		}
+		return p
+	}
+	claim := func(p *Proposal, token string) {
+		t.Helper()
+		ok, err := store.ClaimProposal(ctx, p.ID, token, sampleSpec(), "user-1", store.now())
+		if err != nil || !ok {
+			t.Fatalf("ClaimProposal(%s) = %v, %v; want true, nil", p.ID, ok, err)
+		}
+	}
+
+	pending := insert()
+	approving := insert()
+	claim(approving, "token-approving")
+	failed := insert()
+	claim(failed, "token-failed")
+	if ok, err := store.FailProposal(ctx, failed.ID, "token-failed", "boom", store.now()); err != nil || !ok {
+		t.Fatalf("FailProposal = %v, %v; want true, nil", ok, err)
+	}
+
+	// 54 rejected plus one approved proposal, all newer than the open ones,
+	// each closed as created so the open count never nears the 25 cap.
+	for i := 0; i < 54; i++ {
+		p := insert()
+		if ok, err := store.RejectProposal(ctx, p.ID, "no", "user-1", store.now()); err != nil || !ok {
+			t.Fatalf("RejectProposal(%d) = %v, %v; want true, nil", i, ok, err)
+		}
+	}
+	approved := insert()
+	claim(approved, "token-approved")
+	if ok, err := store.CompleteProposal(ctx, approved.ID, "token-approved", "task-1", store.now()); err != nil || !ok {
+		t.Fatalf("CompleteProposal = %v, %v; want true, nil", ok, err)
+	}
+
+	list, err := store.ListProposals(ctx, "ws-1", c.ID, ListProposalsPending, false)
+	if err != nil {
+		t.Fatalf("ListProposals(pending): %v", err)
+	}
+	want := []struct {
+		id     string
+		status ProposalStatus
+	}{
+		{pending.ID, ProposalStatusPending},
+		{approving.ID, ProposalStatusApproving},
+		{failed.ID, ProposalStatusFailed},
+	}
+	if len(list) != len(want) {
+		t.Fatalf("ListProposals(pending) returned %d rows, want %d", len(list), len(want))
+	}
+	for i, w := range want {
+		if list[i].ID != w.id || list[i].Status != w.status {
+			t.Fatalf("list[%d] = %s/%s, want %s/%s", i, list[i].ID, list[i].Status, w.id, w.status)
+		}
+	}
+
+	all, err := store.ListProposals(ctx, "ws-1", c.ID, ListProposalsAll, false)
+	if err != nil {
+		t.Fatalf("ListProposals(all): %v", err)
+	}
+	if len(all) != 50 {
+		t.Fatalf("ListProposals(all) returned %d rows, want the 50-row cap", len(all))
+	}
+	for _, p := range all {
+		if p.ID == pending.ID || p.ID == approving.ID || p.ID == failed.ID {
+			t.Fatalf("open proposal %s inside the newest-50 window; the seed no longer buries it", p.ID)
+		}
+	}
+}
+
+func TestListProposals_PendingReturnsEveryOpenProposalBeyondNewestFifty(t *testing.T) {
+	assertListPendingReturnsEveryOpenProposal(t, newTestStore(t))
+}

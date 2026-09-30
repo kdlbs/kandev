@@ -13,25 +13,28 @@ import (
 )
 
 type fakeUndoTasks struct {
-	tasks     map[string]*UndoTask
-	steps     map[string]*UndoStep
-	taskErr   error
-	stepErr   error
-	archived  []string
-	moves     []fakeMove
-	archErr   error
-	moveErr   error
-	admitted  bool
-	sessions  bool
-	sessErr   error
-	onMove    func()
-	onMoveCtx func(ctx context.Context) error
-	onArchive func()
-	getTasks  int
-	getSteps  int
-	nodes     []StepNode
-	nodesErr  error
-	onGetStep func()
+	tasks    map[string]*UndoTask
+	steps    map[string]*UndoStep
+	taskErr  error
+	stepErr  error
+	archived []string
+	moves    []fakeMove
+	archErr  error
+	moveErr  error
+	admitted bool
+	// committedFrom, when set, is the FromStepID the move reports; otherwise
+	// the fake reports the step the task was on before the move.
+	committedFrom string
+	sessions      bool
+	sessErr       error
+	onMove        func()
+	onMoveCtx     func(ctx context.Context) error
+	onArchive     func()
+	getTasks      int
+	getSteps      int
+	nodes         []StepNode
+	nodesErr      error
+	onGetStep     func()
 }
 
 type fakeMove struct {
@@ -59,23 +62,27 @@ func (f *fakeUndoTasks) GetTask(_ context.Context, id string) (*UndoTask, error)
 	return nil, ErrTaskNotFound
 }
 
-func (f *fakeUndoTasks) MoveTaskWithOptions(ctx context.Context, id, wf, step string, _ int, opts UndoMoveOptions) (bool, error) {
+func (f *fakeUndoTasks) MoveTaskWithOptions(ctx context.Context, id, wf, step string, _ int, opts UndoMoveOptions) (UndoMoveResult, error) {
 	f.moves = append(f.moves, fakeMove{id, wf, step, opts})
 	if f.onMove != nil {
 		f.onMove()
 	}
 	if f.onMoveCtx != nil {
 		if err := f.onMoveCtx(ctx); err != nil {
-			return false, err
+			return UndoMoveResult{}, err
 		}
 	}
 	if f.moveErr != nil {
-		return false, f.moveErr
+		return UndoMoveResult{}, f.moveErr
 	}
+	from := f.committedFrom
 	if t, ok := f.tasks[id]; ok {
+		if from == "" {
+			from = t.WorkflowStepID
+		}
 		t.WorkflowStepID = step
 	}
-	return f.admitted, nil
+	return UndoMoveResult{Admitted: f.admitted, FromStepID: from}, nil
 }
 
 func (f *fakeUndoTasks) GetStep(_ context.Context, id string) (*UndoStep, error) {
