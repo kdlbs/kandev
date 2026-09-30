@@ -9,23 +9,6 @@ function nextActiveWorkspaceRevision(workspaces: WorkspaceState, activeId: strin
   return workspaces.activeId === activeId ? revision : revision + 1;
 }
 
-/**
- * Merges a field whose absence must preserve the current value. An older
- * backend omits the key entirely; reading it as any default would silently
- * overwrite the policy this tab already knows.
- */
-function applyUnlessMissing<K extends keyof WorkspaceItem>(
-  item: WorkspaceItem,
-  key: K,
-  payload: Record<string, unknown>,
-  fallback: NonNullable<WorkspaceItem[K]>,
-): WorkspaceItem[K] {
-  if (!(key in payload)) return item[key];
-  const value = payload[key];
-  const resolved = value === undefined ? fallback : (value as NonNullable<WorkspaceItem[K]>);
-  return resolved as WorkspaceItem[K];
-}
-
 function handleWorkspaceDeleted(store: StoreApi<AppState>, workspaceId: string): void {
   const currentState = store.getState();
   const workspaceTaskIds = new Set(
@@ -117,20 +100,19 @@ export function registerWorkspacesHandlers(store: StoreApi<AppState>): WsHandler
                       : (item.default_config_agent_profile_id ?? null),
                   // Placement decides who reaches this workspace, so a move
                   // made in another tab has to land here.
-                  unit_id: applyUnlessMissing(item, "unit_id", message.payload, ""),
-                  // Idle-suspension policy, same presence check as unit_id.
-                  acp_idle_suspension_enabled: applyUnlessMissing(
-                    item,
-                    "acp_idle_suspension_enabled",
-                    message.payload,
-                    false,
-                  ),
-                  acp_idle_timeout_minutes: applyUnlessMissing(
-                    item,
-                    "acp_idle_timeout_minutes",
-                    message.payload,
-                    120,
-                  ),
+                  unit_id:
+                    "unit_id" in message.payload
+                      ? (message.payload.unit_id ?? "")
+                      : (item.unit_id ?? ""),
+                  // Omitted policy fields preserve the current values.
+                  acp_idle_suspension_enabled:
+                    "acp_idle_suspension_enabled" in message.payload
+                      ? (message.payload.acp_idle_suspension_enabled ?? false)
+                      : item.acp_idle_suspension_enabled,
+                  acp_idle_timeout_minutes:
+                    "acp_idle_timeout_minutes" in message.payload
+                      ? (message.payload.acp_idle_timeout_minutes ?? 120)
+                      : item.acp_idle_timeout_minutes,
                   updated_at: message.payload.updated_at ?? item.updated_at,
                 }
               : item,

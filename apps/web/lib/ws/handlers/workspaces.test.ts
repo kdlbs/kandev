@@ -91,6 +91,21 @@ describe("workspace.updated placement", () => {
 });
 
 describe("workspace.updated ACP idle-suspension policy", () => {
+  it("applies an explicit false without resetting an omitted timeout", () => {
+    const store = storeWith([
+      workspace({ acp_idle_suspension_enabled: true, acp_idle_timeout_minutes: 45 }),
+    ]);
+    const handlers = registerWorkspacesHandlers(store);
+
+    dispatch(handlers, WORKSPACE_UPDATED, {
+      ...BASE_UPDATED_PAYLOAD,
+      acp_idle_suspension_enabled: false,
+    });
+
+    expect(store.getState().workspaces.items[0].acp_idle_suspension_enabled).toBe(false);
+    expect(store.getState().workspaces.items[0].acp_idle_timeout_minutes).toBe(45);
+  });
+
   // The policy round-trips between tabs: a save in one tab must land in the
   // other tab's store, or the settings form there re-saves stale values.
   it("applies updated policy fields", () => {
