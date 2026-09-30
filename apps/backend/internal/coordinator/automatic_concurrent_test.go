@@ -3,11 +3,18 @@ package coordinator
 import (
 	"context"
 	"fmt"
+	"net/url"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
+	"github.com/jmoiron/sqlx"
+
+	internaldb "github.com/kandev/kandev/internal/db"
 	taskmodels "github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/testutil"
 	workflowmodels "github.com/kandev/kandev/internal/workflow/models"
 )
 
@@ -94,6 +101,44 @@ func TestAutomaticApproval_ConcurrentTenthSQLite(t *testing.T) {
 	runConcurrentTenth(t, newTestStore(t))
 }
 
+// newPooledPostgresStore opens a multi-connection pool whose search_path is a
+// connection parameter, so a transaction and a read on the same pool do not
+// wait on each other the way they do on the single-connection test helper.
+func newPooledPostgresStore(t *testing.T) *Store {
+	t.Helper()
+	dsn := testutil.PostgresDSNFromEnv(t)
+	schema := "kandev_test_" + strings.ReplaceAll(uuid.NewString(), "-", "")
+	admin, err := internaldb.OpenPostgres(dsn, 1, 1)
+	if err != nil {
+		t.Fatalf("open postgres: %v", err)
+	}
+	if _, err := admin.Exec("CREATE SCHEMA " + schema); err != nil {
+		t.Fatalf("create schema: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = admin.Exec("DROP SCHEMA IF EXISTS " + schema + " CASCADE")
+		_ = admin.Close()
+	})
+	u, err := url.Parse(dsn)
+	if err != nil {
+		t.Fatalf("parse dsn: %v", err)
+	}
+	q := u.Query()
+	q.Set("search_path", schema)
+	u.RawQuery = q.Encode()
+	raw, err := internaldb.OpenPostgres(u.String(), 8, 2)
+	if err != nil {
+		t.Fatalf("open pooled postgres: %v", err)
+	}
+	t.Cleanup(func() { _ = raw.Close() })
+	pg := sqlx.NewDb(raw, "pgx")
+	store, err := NewStore(pg, pg)
+	if err != nil {
+		t.Fatalf("new store: %v", err)
+	}
+	return store
+}
+
 func TestAutomaticApproval_ConcurrentTenthPostgres(t *testing.T) {
-	runConcurrentTenth(t, newTestStorePostgres(t))
+	runConcurrentTenth(t, newPooledPostgresStore(t))
 }
