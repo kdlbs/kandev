@@ -143,6 +143,7 @@ func (s *Service) requestCeilingStop(ctx context.Context, coord *Coordinator, tu
 	if marked {
 		ceilingStopTotal.Add(reason, 1)
 		s.logCeilingStop(coord.ID, reason, reading, ceiling)
+		s.publishCoordinatorUpdatedWith(ctx, coord.WorkspaceID, coord.ID, true)
 		return true, nil
 	}
 	current, err := s.store.ceilingTurnByID(ctx, turn.ID)

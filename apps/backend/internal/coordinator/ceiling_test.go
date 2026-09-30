@@ -316,6 +316,31 @@ func TestCheckCeiling_FailedCancelLeavesMarkedRowAndNextCallRetriesWhateverSpend
 	}
 }
 
+func TestCheckCeiling_MarkPublishesAutonomyChangedOnceAndRetryPublishesNothing(t *testing.T) {
+	f := newCeilingFixture(t, 1000)
+	f.window = 1000
+	f.canceller.fn = func(context.Context, string, string) error { return errors.New("agentctl unreachable") }
+
+	if err := f.env.svc.CheckCeiling(t.Context(), f.env.c.ID); err == nil {
+		t.Fatal("want the cancel error")
+	}
+	waitForEvents(t, &f.env.events, 1)
+	if ev := f.env.events.snapshot()[0]; !ev.AutonomyChanged || ev.CoordinatorID != f.env.c.ID {
+		t.Fatalf("event = %+v, want autonomy_changed for the coordinator", ev)
+	}
+	if len(f.env.kicks) != 0 {
+		t.Fatalf("kicks = %v, a mark wakes nothing", f.env.kicks)
+	}
+
+	if err := f.env.svc.CheckCeiling(t.Context(), f.env.c.ID); err == nil {
+		t.Fatal("want the cancel error on the retry")
+	}
+	time.Sleep(20 * time.Millisecond)
+	if n := len(f.env.events.snapshot()); n != 1 {
+		t.Fatalf("retry over a marked row published %d events in total, want 1", n)
+	}
+}
+
 func TestCheckCeiling_CancelInFlightCountsAsFailedButTurnNotActiveDoesNot(t *testing.T) {
 	f := newCeilingFixture(t, 1000)
 	f.window = 1000
@@ -389,8 +414,8 @@ func TestCheckCeiling_TurnEndSettlingBetweenCancelAndSettleChangesTheRowOnce(t *
 	if r := f.row(t, ceilingTurnRow); r.Outcome.String != "stopped_at_ceiling" || r.Cost.Valid {
 		t.Fatalf("row = %+v, the first settle owns the row", r)
 	}
-	if settled.delta() != 0 || len(f.env.kicks) != 0 || len(f.env.events.snapshot()) != 0 {
-		t.Fatalf("the losing settle counted/kicked/published: delta %d kicks %v events %d",
+	if settled.delta() != 0 || len(f.env.kicks) != 0 || len(f.env.events.snapshot()) != 1 {
+		t.Fatalf("the losing settle counted/kicked/published beyond the mark's one event: delta %d kicks %v events %d",
 			settled.delta(), f.env.kicks, len(f.env.events.snapshot()))
 	}
 }
