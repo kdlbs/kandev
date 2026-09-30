@@ -1,0 +1,113 @@
+#!/usr/bin/env python3
+"""Verify a managed PR walkthrough output pair without changing it."""
+
+import hashlib
+import json
+import os
+import runpy
+import stat
+import sys
+from pathlib import Path
+
+
+SKILL_DIR = Path(__file__).resolve().parents[1]
+RENDERER_PATH = SKILL_DIR / "scripts" / "pr-walkthrough-render"
+TRUSTED_DIR = Path(".pr-walkthrough")
+RECEIPT_PATH = TRUSTED_DIR / "render-complete.json"
+
+
+def read_regular_file(path: Path, label: str) -> bytes:
+    try:
+        mode = path.lstat().st_mode
+    except FileNotFoundError as exc:
+        raise ValueError(f"{label} is missing: {path}") from exc
+    if not stat.S_ISREG(mode):
+        raise ValueError(f"{label} must be a regular file: {path}")
+    try:
+        content = path.read_bytes()
+    except OSError as exc:
+        raise ValueError(f"cannot read {label}: {path}") from exc
+    if not content:
+        raise ValueError(f"{label} is empty: {path}")
+    return content
+
+
+def read_json(content: bytes, label: str) -> object:
+    try:
+        return json.loads(content)
+    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+        raise ValueError(f"{label} is not valid JSON") from exc
+
+
+def verify() -> tuple[Path, Path]:
+    if len(sys.argv) != 1:
+        raise ValueError("verifier does not accept command arguments")
+
+    receipt_bytes = read_regular_file(RECEIPT_PATH, "completion receipt")
+    receipt = read_json(receipt_bytes, "completion receipt")
+    if not isinstance(receipt, dict):
+        raise ValueError("completion receipt must be an object")
+    if type(receipt.get("version")) is not int or receipt["version"] != 1:
+        raise ValueError("completion receipt version is unsupported")
+
+    sys.dont_write_bytecode = True
+    renderer = runpy.run_path(str(RENDERER_PATH))
+    identity = renderer["trusted_identity"]()
+    head_sha = renderer["managed_head_sha"]()
+    json_path = Path("docs/pr-walkthrough") / f"pr-{identity['number']}.json"
+    html_path = Path("docs/pr-walkthrough") / f"pr-{identity['number']}.html"
+    if (
+        type(receipt.get("pr_number")) is not int
+        or receipt.get("pr_number") != identity["number"]
+        or receipt.get("head_sha") != head_sha
+    ):
+        raise ValueError("receipt identity does not match the trusted event")
+    if (
+        receipt.get("json_path") != json_path.as_posix()
+        or receipt.get("html_path") != html_path.as_posix()
+    ):
+        raise ValueError("receipt output paths do not match the fixed paths")
+
+    json_bytes = read_regular_file(json_path, "JSON output")
+    html_bytes = read_regular_file(html_path, "html output")
+    if hashlib.sha256(json_bytes).hexdigest() != receipt.get("json_sha256"):
+        raise ValueError("JSON output hash does not match the completion receipt")
+    if hashlib.sha256(html_bytes).hexdigest() != receipt.get("html_sha256"):
+        raise ValueError("HTML output hash does not match the completion receipt")
+
+    data = read_json(json_bytes, "JSON output")
+    if not isinstance(data, dict) or not isinstance(data.get("pr"), dict):
+        raise ValueError("JSON output has no pull request identity")
+    for key, value in identity.items():
+        if data["pr"].get(key) != value:
+            raise ValueError("JSON output identity does not match the trusted event")
+
+    changed_paths = renderer["validate_managed_draft"](data)
+    sys.path.insert(0, str(SKILL_DIR / "references"))
+    import build as trusted_build  # noqa: PLC0415
+
+    try:
+        expected_html = trusted_build.build(
+            data,
+            require_impact=True,
+            changed_paths=changed_paths,
+        ).encode("utf-8")
+    except trusted_build.BuildError as exc:
+        raise ValueError(str(exc)) from exc
+    if html_bytes != expected_html:
+        raise ValueError("HTML output does not match the trusted renderer")
+    return json_path, html_path
+
+
+def main() -> int:
+    try:
+        json_path, html_path = verify()
+    except (KeyError, OSError, TypeError, ValueError) as exc:
+        print(f"walkthrough verification failed: {exc}", file=sys.stderr)
+        return 1
+    print(f"verified {json_path} and {html_path}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

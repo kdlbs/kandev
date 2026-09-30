@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Render agent-supplied walkthrough JSON with trusted pull-request identity."""
 
+import hashlib
 import json
 import os
 import re
@@ -14,6 +15,7 @@ SKILL_DIR = Path(__file__).resolve().parents[1]
 TRUSTED_DIR = Path(".pr-walkthrough")
 DRAFT_PATH = TRUSTED_DIR / "draft.json"
 MANIFEST_PATH = TRUSTED_DIR / "head-context" / "manifest.json"
+RECEIPT_PATH = TRUSTED_DIR / "render-complete.json"
 OUTPUT_DIR = Path("docs/pr-walkthrough")
 REPO_RE = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 
@@ -22,6 +24,13 @@ def required_env(name: str) -> str:
     value = os.environ.get(name, "").strip()
     if not value:
         raise ValueError(f"{name} is required")
+    return value
+
+
+def managed_head_sha() -> str:
+    value = os.environ.get("HEAD_SHA", "")
+    if not re.fullmatch(r"[0-9a-f]{40}", value):
+        raise ValueError("HEAD_SHA must be a full lowercase 40-character SHA")
     return value
 
 
@@ -70,10 +79,13 @@ def load_draft() -> object:
     try:
         return json.loads(DRAFT_PATH.read_text(encoding="utf-8"))
     except json.JSONDecodeError as exc:
-        raise ValueError(f"fixed draft is not valid JSON: {DRAFT_PATH}") from exc
+        raise ValueError(
+            f"fixed draft is not valid JSON: {DRAFT_PATH}: {exc.msg} "
+            f"(line {exc.lineno}, column {exc.colno})"
+        ) from exc
 
 
-def validate_managed_draft(data: dict[str, object]) -> None:
+def validate_managed_draft(data: dict[str, object]) -> set[str]:
     """Apply the new walkthrough contract against the trusted file inventory."""
     if not MANIFEST_PATH.is_file():
         raise ValueError(f"prepared context manifest is missing: {MANIFEST_PATH}")
@@ -95,6 +107,7 @@ def validate_managed_draft(data: dict[str, object]) -> None:
         trusted_build.validate(data, require_impact=True, changed_paths=changed_paths)
     except trusted_build.BuildError as exc:
         raise ValueError(str(exc)) from exc
+    return changed_paths
 
 
 def render(data: dict[str, object]) -> tuple[Path, Path]:
@@ -129,14 +142,44 @@ def render(data: dict[str, object]) -> tuple[Path, Path]:
     return json_path, html_path
 
 
+def write_completion_receipt(
+    pr_number: int,
+    head_sha: str,
+    json_path: Path,
+    html_path: Path,
+) -> None:
+    receipt = {
+        "version": 1,
+        "pr_number": pr_number,
+        "head_sha": head_sha,
+        "json_path": json_path.as_posix(),
+        "html_path": html_path.as_posix(),
+        "json_sha256": hashlib.sha256(json_path.read_bytes()).hexdigest(),
+        "html_sha256": hashlib.sha256(html_path.read_bytes()).hexdigest(),
+    }
+    RECEIPT_PATH.parent.mkdir(parents=True, exist_ok=True)
+    fd, temp_name = tempfile.mkstemp(prefix=".render-complete-", dir=RECEIPT_PATH.parent)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as stream:
+            stream.write(json.dumps(receipt, indent=2) + "\n")
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temp_name, RECEIPT_PATH)
+    finally:
+        Path(temp_name).unlink(missing_ok=True)
+
+
 def main() -> int:
     try:
+        RECEIPT_PATH.unlink(missing_ok=True)
         if len(sys.argv) != 1:
             raise ValueError("renderer does not accept command arguments")
+        head_sha = managed_head_sha()
         data = load_draft()
         bound = bind_trusted_metadata(data)
         validate_managed_draft(bound)
         json_path, html_path = render(bound)
+        write_completion_receipt(int(bound["pr"]["number"]), head_sha, json_path, html_path)
     except (OSError, ValueError) as exc:
         print(f"walkthrough render failed: {exc}", file=sys.stderr)
         return 1
