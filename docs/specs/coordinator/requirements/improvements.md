@@ -78,9 +78,10 @@ with the runs that show why.
 - **AC-COORDINATOR-IMPROVEMENTS-001.4:** While phase 3 is not effective,
   improvement proposals shall be hidden from every read and decision route: not
   listed, not counted toward the limit, and not decidable (a decision on one
-  answers as an absent proposal). A claim left `approving` on one shall still be
-  settled by the stale-claim sweep, and an Approve already past its claim shall
-  still complete, exactly as for phase 2 kinds. They shall appear again, with
+  answers as an absent proposal), except that a claim left `approving` on one
+  shall still be settled by the stale-claim sweep or by a manager's Approve on
+  it, and an Approve already past its claim shall still complete, exactly as
+  for phase 2 kinds. They shall appear again, with
   their stored status, when phase 3 is effective again.
 
 ### REQ-COORDINATOR-IMPROVEMENTS-002: The improvement card
@@ -99,11 +100,11 @@ Mockup:
   cost and each task's identifier and title; a run whose record has been
   pruned shall read "Run record expired".
 - **AC-COORDINATOR-IMPROVEMENTS-002.2:** **Show the change** shall reveal the
-  current and proposed context as a line diff. For managers,
-  **Approve as a reviewable change** shall stay disabled until the change has
-  been shown in this card, with **Reject** and **Reply with a condition**
-  available on a `pending` improvement, and **Reject** on a `failed` one. There
-  shall be no **Edit**.
+  context as it was when proposed and the proposed context as a line diff. For
+  managers on a `pending` or `failed` improvement, **Approve as a reviewable
+  change** shall stay disabled until the change has been shown in this card,
+  with **Reject** available on both, **Reply with a condition** available on a
+  `pending` one only, and no **Edit**.
 - **AC-COORDINATOR-IMPROVEMENTS-002.3:** An improvement proposal shall never be
   approved automatically, whatever the D17 settings say.
 

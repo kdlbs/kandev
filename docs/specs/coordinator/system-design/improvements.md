@@ -57,11 +57,20 @@ rows: it takes the phase 3 flag beside phase 2, and every query that uses it
 (count, list and the single read behind the decision routes) excludes those
 rows, so they are not listed, not counted and not decidable (approve, reject and
 reply answer an absent proposal, 404). The stale-claim sweep, the startup
-recovery and the read that completes a claim already held keep passing the
-literal `true` phase 2 passes today, so a claim left `approving` on an
-improvement settles `failed`/`outcome_unknown` whatever the flag, and an
-Approve whose claim is held when phase 3 turns off still completes; both
-touch only rows the fence already owns. `registerKinds` stays unconditional, so a row that reappears with phase
+recovery, the read that completes a claim already held and the fallback read
+of `readForApprove` (the second read it makes with the literal `true` when
+the filtered read misses) keep passing the literal `true` phase 2 passes
+today. So a claim left `approving` on an improvement settles
+`failed`/`outcome_unknown` whatever the flag, and an Approve whose claim is
+held when phase 3 turns off still completes. A manager's Approve on a hidden
+improvement that is `approving` goes through that fallback exactly as it does
+for a hidden phase 2 kind: a claim that is not yet stale answers 409 with the
+proposal, a stale one is settled `failed`/`outcome_unknown` and the settled
+proposal is returned, as for a phase 2 kind. An Approve on a hidden
+improvement in any other status answers 404, as do reject and reply for every
+status. The builder extends the existing fallback condition from "phase 2 off"
+to "phase 2 off or phase 3 off"; all of this touches only rows the fence
+already owns. `registerKinds` stays unconditional, so a row that reappears with phase
 3 is recovered like any other. A `coordinator_pending_changes` row is
 unaffected by the flag, but its routes are unregistered while phase 3 is off
 (see [Pending changes](#pending-changes)). Turning phase 3 back on shows every
@@ -119,7 +128,11 @@ storing nothing (`AC-COORDINATOR-IMPROVEMENTS-001.2`):
    text; blanking them is a manager's edit). A value equal to the context stored at that moment is refused naming
    `context`; the comparison uses the value read inside the limit transaction
    (step 5's `context_before`), so a PATCH landing between validation and
-   insert cannot leave a proposal whose before equals its after.
+   insert cannot leave a proposal whose before equals its after. That read
+   happens after step 4 and the limit check, so this refusal is made last: a
+   call that has an equal context and also invalid evidence names `evidence`,
+   and one over the limit answers the limit error; only a call valid in every
+   other respect is refused naming `context` here.
 4. `evidence` is an array of 1 to 10 objects, in the order given, stored in
    that order. Each object has exactly one key, `run_id` or `task_id`, with a
    non-empty string value; any other shape (both keys, neither, an extra key,
@@ -181,10 +194,13 @@ does, so no bound-list read and no activity row happens
   available" when the task is not in them. Entries load independently; the
   order shown is the stored order whatever the completion order of the reads.
 - **Show the change** reveals a line diff of `context_before` and
-  `context_after` using the existing diff viewer component (a two-string
-  component that needs no file context); the left side is labelled "Context
-  when proposed", not "current", because the coordinator's context may have
-  changed since. The card records that it was shown in component state.
+  `context_after` rendered by one small shared component,
+  `apps/web/components/coordinators/context-diff.tsx`, built on the existing
+  `lineDiff` and `DiffLine` of `components/task/task-plan-diff.ts` (the file
+  diff viewers need file context and the plan dialog is bound to revisions, so
+  neither fits); the card and the settings rows both use it. Its left side is
+  labelled "Context when proposed", not "current", because the coordinator's
+  context may have changed since; the two labels are new copy in six locales. The card records that it was shown in component state.
 - For managers on a `pending` improvement (a `failed` one shows only
   **Approve as a reviewable change** and **Reject**, with no **Reply**, because
   the reply route answers 409 for `failed`; the diff gate applies to its Approve
@@ -343,11 +359,15 @@ server's message. A 409 `context_changed` shows "The context changed since this
 was proposed. Discard it, or ask the coordinator to propose again." A 409
 without that reason shows "This change was already settled." The section
 follows the list order and keeps it after a refetch; a lower `created_at`
-change is never moved. After a successful Apply the page refetches the coordinator and resets the
-Identity form's draft to the fetched context, discarding an unsaved edit there
-(the draft was written against the base Apply just replaced), and shows the
-existing "saved" confirmation of a context edit beside the section; a page
-that does not hold the Identity form needs no reset. It is rendered in the phase 3 Autonomy body of settings
+change is never moved. After a successful Apply the page refetches the coordinator and sets the
+context field of the Identity form's draft and of its saved baseline to the
+fetched context, discarding an unsaved context edit there (the draft was written
+against the base Apply just replaced). Unsaved edits to the name and the two
+profile fields are kept, and the page's dirty state then reflects only those.
+Apply adds no confirmation copy of its own: the row leaving the list and the
+Identity context showing the applied text are the confirmation, so this design
+adds no locale key for it (the error and 409 messages above are the only new
+copy). A page that does not hold the Identity form needs no reset. It is rendered in the phase 3 Autonomy body of settings
 ([integration](integration.md#settings-layout)), only while phase 3 is
 effective.
 
