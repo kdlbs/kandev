@@ -1,5 +1,9 @@
 import type { TFunction } from "i18next";
-import type { KindProposal, StoredProposal } from "@/lib/api/domains/coordinator-api";
+import type {
+  ImprovementProposal,
+  KindProposal,
+  StoredProposal,
+} from "@/lib/api/domains/coordinator-api";
 
 const FAILURE_KEYS: Record<string, string> = {
   outcome_unknown: "coordinator:outcomeUnknown",
@@ -84,7 +88,10 @@ const POLICY_KEYS: Record<PolicyAction, string> = {
 };
 
 /** "Policy: <action> requires approval", fixed text from the stored kind. */
-export function policyLineText(proposal: StoredProposal, t: TFunction): string {
+export function policyLineText(
+  proposal: Exclude<StoredProposal, ImprovementProposal>,
+  t: TFunction,
+): string {
   const action: PolicyAction =
     proposal.kind === undefined || proposal.kind === "create_task" ? "create" : proposal.kind;
   return t(POLICY_KEYS[action]);
