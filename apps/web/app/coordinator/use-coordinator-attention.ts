@@ -2,7 +2,14 @@
 
 import { useCallback, useMemo } from "react";
 import type { TaskPR } from "@/lib/types/github";
-import { classify, type AttentionTask, type ClassifyResult } from "@/lib/coordinator/attention";
+import {
+  classify,
+  type AttentionAutonomyInput,
+  type AttentionTask,
+  type ClassifyResult,
+} from "@/lib/coordinator/attention";
+import { useAutonomy, type AutonomyInput } from "@/hooks/domains/coordinator/use-autonomy";
+import { useCoordinatorPhase3Effective } from "@/hooks/domains/settings/use-coordinator-phase3-effective";
 import {
   isOpenProposal,
   isVisibleProposal,
@@ -50,6 +57,10 @@ export type UseCoordinatorAttentionResult = {
   watchSet: WatchSet | undefined;
   /** Per-input status, in the banner order tasks, stall records, proposals. */
   inputs: CoordinatorInputStatus[];
+  /** The phase-3 autonomy read. It is not one of `inputs`: it has its own error line and retry. */
+  autonomy: AutonomyInput;
+  /** Whether the autonomy surface exists (coordinator, phase 2 and phase 3 all on). */
+  phase3Effective: boolean;
   /** Re-issues only the reads currently in an error state, in parallel. */
   retryFailed: () => void;
   /**
@@ -61,6 +72,25 @@ export type UseCoordinatorAttentionResult = {
    */
   computeNeedsYouCount: () => number;
 };
+
+/** The held-autonomy classify() input, absent while the read is missing or failed (fail closed). */
+function autonomyClassifyInput(
+  coordinatorId: string | null,
+  autonomy: AutonomyInput,
+): AttentionAutonomyInput | null {
+  const { value, loadedAt, error } = autonomy;
+  if (!coordinatorId || !value || loadedAt === null || error) return null;
+  return {
+    coordinatorId,
+    enabled: value.autonomy_enabled,
+    reason: value.admission?.reason,
+    detail: value.admission?.detail ?? "",
+    pendingWakes: value.pending_wakes,
+    oldestPendingAt: value.oldest_pending_at,
+    loadedAt,
+    conditions: value.containment.conditions,
+  };
+}
 
 /**
  * Combines the coordinator's three screen inputs (tasks, stall records,
@@ -81,6 +111,17 @@ export function useCoordinatorAttention(
     retryFailed: retryStallsAndProposals,
   } = useCoordinatorInputs(workspaceId, coordinatorId, phase2);
   const now = useNowTick();
+  const phase3Effective = useCoordinatorPhase3Effective();
+  const autonomy = useAutonomy(
+    workspaceId ?? "",
+    coordinatorId ?? "",
+    phase3Effective && !!workspaceId && !!coordinatorId,
+  );
+  const autonomyInput = useMemo(
+    () => autonomyClassifyInput(coordinatorId, autonomy),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- `autonomy` is a fresh object each render; its value, loadedAt and error are the inputs
+    [coordinatorId, autonomy.value, autonomy.loadedAt, autonomy.error],
+  );
   const watchSet = useCoordinatorWatchSet(workspaceId, coordinatorId, phase2);
   const watchValue = watchSet.input.value;
   const watchSetUnavailable = phase2 && watchValue === undefined;
@@ -92,8 +133,8 @@ export function useCoordinatorAttention(
   }, [phase2, watchValue, tasksInput.tasks, stalls.value]);
 
   const classification = useMemo(
-    () => classify(watchedTasks, watchedStalls, proposals.value ?? [], now),
-    [watchedTasks, watchedStalls, proposals.value, now],
+    () => classify(watchedTasks, watchedStalls, proposals.value ?? [], now, autonomyInput),
+    [watchedTasks, watchedStalls, proposals.value, now, autonomyInput],
   );
 
   const openTasksById = useMemo(
@@ -133,9 +174,10 @@ export function useCoordinatorAttention(
           (proposal) => isOpenProposal(proposal) && isVisibleProposal(proposal, phase2),
         )
       : [];
-    return classify(tasks, stallValues ?? [], freshProposals, Date.now()).needsYou.length;
+    return classify(tasks, stallValues ?? [], freshProposals, Date.now(), autonomyInput).needsYou
+      .length;
     // eslint-disable-next-line react-hooks/exhaustive-deps -- classification.needsYou.length is only the no-coordinator fallback, not a dependency of the fresh read
-  }, [coordinatorId, tasks, stallValues, phase2]);
+  }, [coordinatorId, tasks, stallValues, phase2, autonomyInput]);
 
   return {
     classification,
@@ -151,6 +193,8 @@ export function useCoordinatorAttention(
     watchSetUnavailable,
     watchSet: phase2 ? watchValue : undefined,
     inputs,
+    autonomy,
+    phase3Effective,
     retryFailed,
     computeNeedsYouCount,
   };

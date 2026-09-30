@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next";
 import { Badge } from "@kandev/ui/badge";
 import { Card, CardAction, CardContent, CardFooter, CardHeader, CardTitle } from "@kandev/ui/card";
 import { cn } from "@/lib/utils";
-import type { AttentionTask, NeedsYouItem } from "@/lib/coordinator/attention";
+import type { AttentionTask, NeedsYouAskableItem, NeedsYouItem } from "@/lib/coordinator/attention";
 import { useProposalRow } from "@/hooks/domains/coordinator/use-proposals";
 import { useRelayItem } from "@/hooks/domains/coordinator/use-relay-item";
 import { useCoordinatorPhase3Effective } from "@/hooks/domains/settings/use-coordinator-phase3-effective";
@@ -15,7 +15,7 @@ import { AskAboutThisButton, NeedsYouItemPrimaryActions } from "./needs-you-item
 import { RelayAnswer } from "./relay-answer";
 
 export type NeedsYouItemCardProps = {
-  item: NeedsYouItem;
+  item: NeedsYouAskableItem;
   workspaceId: string;
   stepNameByTaskId: Map<string, string>;
   workflowNameById: Map<string, string>;
@@ -39,7 +39,7 @@ export function needsYouItemHeadingId(itemId: string): string {
 }
 
 function useItemRelay(
-  item: NeedsYouItem,
+  item: NeedsYouAskableItem,
   workspaceId: string,
   coordinatorId: string,
   canManage: boolean,
@@ -56,14 +56,14 @@ function useItemRelay(
 }
 
 /** Changes whenever the task's status summary changes, which re-reads the relay. */
-function relayRefreshKey(item: NeedsYouItem): string {
+function relayRefreshKey(item: NeedsYouAskableItem): string {
   if (item.kind !== "question") return "";
   const summary = item.task.statusSummary;
   return [summary?.pending_action, summary?.last_activity_at, item.task.updatedAt].join("|");
 }
 
 function headFor(
-  item: NeedsYouItem,
+  item: NeedsYouAskableItem,
   stepNameByTaskId: Map<string, string>,
   openTasksById: Map<string, AttentionTask>,
   newTaskLabel: string,

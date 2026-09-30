@@ -92,6 +92,8 @@ function readyContextWith(classification: ClassifyResult): CoordinatorReadyConte
         { kind: "stalls", error: false, loadedAt: 1 },
         { kind: "proposals", error: false, loadedAt: 1 },
       ],
+      autonomy: { value: null, loadedAt: null, error: false, loading: false, retry: vi.fn() },
+      phase3Effective: false,
       retryFailed: vi.fn(),
       computeNeedsYouCount: vi.fn(() => 0),
     },

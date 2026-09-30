@@ -93,6 +93,14 @@ function emptyClassification(): ClassifyResult {
   };
 }
 
+const FAILED_AUTONOMY = {
+  value: null,
+  loadedAt: null,
+  error: true,
+  loading: false,
+  retry: vi.fn(),
+};
+
 function attention(
   overrides: Partial<UseCoordinatorAttentionResult> = {},
 ): UseCoordinatorAttentionResult {
@@ -115,6 +123,8 @@ function attention(
     watchSetUnavailable: false,
     watchSet: undefined,
     inputs,
+    autonomy: { value: null, loadedAt: null, error: false, loading: false, retry: vi.fn() },
+    phase3Effective: false,
     retryFailed: retryFailedMock,
     computeNeedsYouCount: vi.fn(() => 0),
     ...overrides,
@@ -128,6 +138,8 @@ beforeEach(() => {
   activeWorkspaceId = "ws-1";
   attentionResult = attention();
 });
+
+const COUNT_STRIP = "coordinator-count-strip";
 
 describe("CoordinatorRouteContent", () => {
   it("shows a loading indicator while the coordinator list is unresolved", () => {
@@ -195,7 +207,7 @@ describe("CoordinatorRouteContent", () => {
       </CoordinatorRouteContent>,
     );
     expect(screen.getByTestId("stub-topbar-title-slot").textContent).toContain("Planner");
-    expect(screen.getByTestId("coordinator-count-strip")).not.toBeNull();
+    expect(screen.getByTestId(COUNT_STRIP)).not.toBeNull();
     expect(screen.getByTestId("ready-content").textContent).toBe("Planner");
     expect(screen.getByTestId("coordinator-copilot-marker")).not.toBeNull();
     expect(coordinatorCopilotCalls[0]).toMatchObject({
@@ -249,7 +261,7 @@ describe("CoordinatorRouteContent - tasks never loaded", () => {
         {() => <div data-testid="ready-content" />}
       </CoordinatorRouteContent>,
     );
-    expect(screen.queryByTestId("coordinator-count-strip")).toBeNull();
+    expect(screen.queryByTestId(COUNT_STRIP)).toBeNull();
     expect(screen.queryByTestId("ready-content")).toBeNull();
     expect(screen.getByText("Could not load this workspace's tasks.")).not.toBeNull();
   });
@@ -354,5 +366,49 @@ describe("CoordinatorRouteContent page chrome", () => {
     expect(screen.getByTestId("stub-page-shell").getAttribute("data-title")).toBe("Queue");
     expect(screen.getByTestId("stub-topbar-title-slot").textContent).toBe("");
     expect(screen.getByTestId("stub-topbar-actions").textContent).toBe("");
+  });
+});
+
+describe("CoordinatorRouteContent autonomy strip", () => {
+  function renderView(view: "needs-you" | "queue") {
+    resolvedState = {
+      status: "ready",
+      coordinator: coordinator(),
+      coordinators: [coordinator()],
+    };
+    return render(
+      <CoordinatorRouteContent workspaceId="ws-1" coordinatorId="co-1" view={view}>
+        {() => <div data-testid="ready-content" />}
+      </CoordinatorRouteContent>,
+    );
+  }
+
+  it.each(["needs-you", "queue"] as const)(
+    "renders above the count strip on %s whenever phase 3 is effective",
+    (view) => {
+      attentionResult = attention({ phase3Effective: true, autonomy: FAILED_AUTONOMY });
+      renderView(view);
+      const strip = screen.getByTestId("autonomy-strip");
+      const counts = screen.getByTestId(COUNT_STRIP);
+      expect(strip.compareDocumentPosition(counts) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    },
+  );
+
+  it("is absent when phase 3 is not effective", () => {
+    attentionResult = attention({ phase3Effective: false });
+    renderView("needs-you");
+    expect(screen.queryByTestId("autonomy-strip")).toBeNull();
+    expect(screen.getByTestId(COUNT_STRIP)).not.toBeNull();
+  });
+
+  it("still renders where the count strip is hidden, and fails closed without data", () => {
+    attentionResult = attention({
+      phase3Effective: true,
+      autonomy: FAILED_AUTONOMY,
+      watchSetUnavailable: true,
+    });
+    renderView("needs-you");
+    expect(screen.queryByTestId(COUNT_STRIP)).toBeNull();
+    expect(screen.getByTestId("autonomy-strip")).not.toBeNull();
   });
 });

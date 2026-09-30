@@ -1,4 +1,4 @@
-import type { AttentionTask, NeedsYouItem, QueueItem } from "./attention";
+import type { AttentionTask, NeedsYouAskableItem, QueueItem } from "./attention";
 import { resolveProposalSourceTask } from "./item-text";
 
 /**
@@ -16,7 +16,7 @@ export function normalizeCopilotItemId(raw: string): string {
 }
 
 function rawCopilotItemId(
-  item: NeedsYouItem | QueueItem,
+  item: NeedsYouAskableItem | QueueItem,
   openTasksById: Map<string, AttentionTask>,
 ): string {
   if ("group" in item) return item.task.identifier ?? item.task.title;
@@ -37,7 +37,7 @@ function rawCopilotItemId(
  * fallback, unlike the card head).
  */
 export function deriveCopilotItemId(
-  item: NeedsYouItem | QueueItem,
+  item: NeedsYouAskableItem | QueueItem,
   openTasksById: Map<string, AttentionTask>,
 ): string {
   return normalizeCopilotItemId(rawCopilotItemId(item, openTasksById));
@@ -56,7 +56,7 @@ export type CopilotItemRef = { kind: CopilotItemRefKind; id: string };
  * which for a proposal with a source task is that task's identifier, not the
  * proposal id.
  */
-export function deriveCopilotItemRef(item: NeedsYouItem | QueueItem): CopilotItemRef {
+export function deriveCopilotItemRef(item: NeedsYouAskableItem | QueueItem): CopilotItemRef {
   if ("group" in item) return { kind: "task", id: item.task.id };
   if (item.kind === "proposal") return { kind: "proposal", id: item.proposal.id };
   if (item.kind === "stall") return { kind: "stall", id: item.task.id };

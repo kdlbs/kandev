@@ -20,6 +20,7 @@ import {
   CoordinatorTitleSlot,
   type CoordinatorHeaderView,
 } from "./components/coordinator-header";
+import { AutonomyStrip } from "./components/autonomy-strip";
 import { CountStrip } from "./components/count-strip";
 import { InputFailureBanner } from "./components/input-failure-banner";
 import { ListErrorState } from "./components/list-error-state";
@@ -79,6 +80,9 @@ function CoordinatorScreenList({
 }: CoordinatorScreenListProps) {
   return (
     <div className="h-full min-h-0 overflow-y-auto">
+      {attention.phase3Effective && (
+        <AutonomyStrip autonomy={attention.autonomy} canManage={canManage} />
+      )}
       {/* Full width under the topbar, not inside the content column: the
           derived-facts caption sits beside the counts, which only fits when
           the strip spans the window (mockup v2.1 `.strip`). */}
