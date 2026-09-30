@@ -30,9 +30,8 @@ test.describe("Completed conversation resume on mobile", () => {
     await session.waitForLoad();
     await expect(session.completedSessionBanner()).toBeVisible({ timeout: 30_000 });
 
-    await testPage.getByRole("button", { name: "Files" }).tap();
-    const fileNode = session.fileTreeNode(RETAINED_WORKSPACE_FILE);
-    await expect(fileNode).toBeVisible({ timeout: 60_000 });
+    await testPage.getByRole("button", { name: "Files", exact: true }).tap();
+    const fileNode = await session.fileTree.waitForFileTreeNode(RETAINED_WORKSPACE_FILE, 60_000);
     await fileNode.tap();
     const viewer = testPage.getByTestId("mobile-file-viewer-panel");
     await expect(viewer).toBeVisible({ timeout: 15_000 });
@@ -43,7 +42,7 @@ test.describe("Completed conversation resume on mobile", () => {
         .filter({ hasText: RETAINED_WORKSPACE_CONTENT }),
     ).toBeVisible();
     await viewer.getByRole("button", { name: "Close" }).tap();
-    await testPage.getByRole("button", { name: "Chat" }).tap();
+    await testPage.getByRole("button", { name: "Chat", exact: true }).tap();
 
     const resume = session.completedSessionResumeButton();
     const newAgent = session.completedSessionNewAgentButton();

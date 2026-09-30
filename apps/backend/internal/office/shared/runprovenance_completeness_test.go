@@ -55,6 +55,7 @@ var unattendedForTest = map[string]bool{
 	"agent_error":           true,
 	"budget_alert":          true,
 	"heartbeat":             true,
+	"queue_run":             true,
 	"routine_dispatch":      true,
 	"routine_dispatch_cron": true,
 	"routine_trigger":       true,

@@ -45,7 +45,8 @@ func latestQueuedAt(first, second time.Time) time.Time {
 }
 
 func autoMergeAllowed(target, source *QueuedMessage) bool {
-	if target == nil || source == nil || target.IsDurableDelivery() || source.IsDurableDelivery() {
+	if target == nil || source == nil || isManagedInputQueueEntry(target) || isManagedInputQueueEntry(source) ||
+		target.IsDurableDelivery() || source.IsDurableDelivery() {
 		return false
 	}
 	if target.TaskID != source.TaskID || target.Model != source.Model || target.PlanMode != source.PlanMode {
@@ -58,6 +59,14 @@ func autoMergeAllowed(target, source *QueuedMessage) bool {
 			sourceSenderTaskID == metadataString(target.Metadata, MetadataSenderTaskID)
 	}
 	return source.QueuedBy != "" && source.QueuedBy == target.QueuedBy && !IsReservedQueuedBy(source.QueuedBy)
+}
+
+func isManagedInputQueueEntry(message *QueuedMessage) bool {
+	if message == nil || message.Metadata == nil {
+		return false
+	}
+	managed, _ := message.Metadata[MetadataManagedInput].(bool)
+	return managed
 }
 
 func joinAutoMergeContent(target, source string) string {

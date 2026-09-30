@@ -1,6 +1,9 @@
 package sqlite
 
-import "testing"
+import (
+	"context"
+	"testing"
+)
 
 // clarification_resolutions was a durable-claim table designed during this
 // feature's spec review but retired before ever shipping in favor of
@@ -27,7 +30,7 @@ func TestClarificationResolutionsTableNeverCreated(t *testing.T) {
 	}
 
 	// Migrations replay on every boot; the second pass must not resurrect it.
-	if err := repo.runMigrations(); err != nil {
+	if err := repo.runMigrations(context.Background()); err != nil {
 		t.Fatalf("runMigrations replay: %v", err)
 	}
 	if err := repo.db.QueryRow(

@@ -18,6 +18,12 @@ type MachineState struct {
 	TaskDescription string
 	IsPassthrough   bool
 	Data            map[string]any
+	// AgentProfileID is the session's agent profile, when a session
+	// exists. Actions that create a child task or queue a run
+	// (create_child_task, queue_run) forward it as the causing agent so
+	// a carrier lookup can be scoped to the agent actually executing
+	// this turn, not just the task.
+	AgentProfileID string
 }
 
 // ActionInput is provided to action callbacks.

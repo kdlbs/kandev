@@ -1,5 +1,4 @@
 import type {
-  SystemInfo,
   DiskUsageResponse,
   DatabaseStats,
   SnapshotInfo,
@@ -23,7 +22,6 @@ export type SystemJobsMap = Record<string, SystemJob>;
 
 export type SystemSliceState = {
   system: {
-    info: SystemInfo | null;
     diskUsage: DiskUsageResponse | null;
     database: DatabaseStats | null;
     retention: RetentionStatus | null;
@@ -36,6 +34,7 @@ export type SystemSliceState = {
       overview: StorageOverviewResponse | null;
       analysisRevision: number;
       disk: StorageDiskCapacityResponse | null;
+      diskIdentity: string | null;
       runs: StorageMaintenanceRun[];
       quarantine: StorageQuarantineEntry[];
     };
@@ -43,7 +42,6 @@ export type SystemSliceState = {
 };
 
 export type SystemSliceActions = {
-  setSystemInfo: (info: SystemInfo) => void;
   setSystemDiskUsage: (usage: DiskUsageResponse) => void;
   setSystemDatabase: (stats: DatabaseStats) => void;
   setSystemRetention: (status: RetentionStatus) => void;
@@ -55,7 +53,7 @@ export type SystemSliceActions = {
   setSystemStoragePolicy: (policy: StoragePolicyResponse) => void;
   setSystemStorageOverview: (overview: StorageOverviewResponse) => void;
   bumpSystemStorageAnalysisRevision: () => void;
-  setSystemStorageDisk: (disk: StorageDiskCapacityResponse) => void;
+  setSystemStorageDisk: (disk: StorageDiskCapacityResponse | null, identity: string | null) => void;
   setSystemStorageRuns: (runs: StorageMaintenanceRun[]) => void;
   setSystemStorageQuarantine: (entries: StorageQuarantineEntry[]) => void;
 };

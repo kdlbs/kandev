@@ -11,6 +11,7 @@ import type {
   TaskPriority,
   TaskState,
   TaskSessionState,
+  WorkflowAgentOverrides,
 } from "@/lib/types/http";
 import type { TaskStatusSummary } from "@/lib/types/task-status-summary";
 
@@ -31,6 +32,7 @@ export type TaskLike = {
   workspace_id?: string;
   workflow_id?: string;
   workflow_step_id?: string;
+  workflow_agent_overrides?: WorkflowAgentOverrides;
   title?: string;
   description?: string | null;
   autopilot?: boolean;
@@ -276,6 +278,7 @@ export function toKanbanTask(source: TaskLike): KanbanTask {
     workspaceId: source.workspace_id,
     workflowId: source.workflow_id,
     workflowStepId: source.workflow_step_id ?? "",
+    workflowAgentOverrides: source.workflow_agent_overrides,
     title: source.title ?? "",
     description: source.description ?? undefined,
     autopilot: source.autopilot,

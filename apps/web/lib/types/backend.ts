@@ -44,6 +44,7 @@ import type {
 } from "@/lib/types/github";
 import type { TaskMR, TaskMRDeletedEvent, TaskMRAutomationOptions } from "@/lib/types/gitlab";
 import type { TaskStatusSummary } from "@/lib/types/task-status-summary";
+import type { SSHReachabilityRecord } from "@/lib/types/http-ssh";
 import type { AgentProfileRecentUseApiRecord } from "@/lib/types/http-agent-profile-recent-use";
 import type { SystemMetricsSnapshot, StorageAnalysisUpdatedPayload } from "./system";
 import type { AgentRuntimeAvailability } from "./agent-runtime";
@@ -52,6 +53,7 @@ import type {
   ExecutorProfilePayload,
   PrepareProgressPayload,
   PrepareCompletedPayload,
+  LaunchWarningPayload,
   EnvironmentPayload,
 } from "./executor-payloads";
 
@@ -309,6 +311,7 @@ export type StepPayload = {
   agent_profile_id?: string;
   profile_session_start_policy?: WorkflowProfileSessionStartPolicy;
   profile_session_end_policy?: WorkflowProfileSessionEndPolicy;
+  disable_unclassified_fallback?: boolean;
   wip_limit?: number;
   pull_from_step_id?: string | null;
   /** Phase 2 (ADR-0004) UX hint — frontend-only. */
@@ -358,6 +361,7 @@ export {
   type ExecutorProfilePayload,
   type PrepareProgressPayload,
   type PrepareCompletedPayload,
+  type LaunchWarningPayload,
   type EnvironmentPayload,
 } from "./executor-payloads";
 
@@ -374,6 +378,10 @@ export type AgentProfilePayload = {
   dangerously_skip_permissions: boolean;
   allow_indexing: boolean;
   cli_passthrough?: boolean;
+  cursor_mcp_auth_enabled?: boolean;
+  cursor_plugins_mcp_enabled?: boolean;
+  mcp_selection_mode?: "inherit" | "selected";
+  mcp_selected_servers?: string[];
   plan: string;
   created_at?: string;
   updated_at?: string;
@@ -430,6 +438,8 @@ export type TaskStatusSummaryUpdatedPayload = {
 
 export type CanvasLifecyclePayload = {
   type?: string;
+  title?: string;
+  updated_at?: string;
   canvas_id: string;
   plugin_instance_id?: string;
   workspace_id?: string;
@@ -444,6 +454,7 @@ export type BackendMessageMap = SessionBackendMessageMap &
   OfficeBackendMessageMap &
   import("@/lib/types/http").WalkthroughBackendMessageMap &
   import("@/lib/types/review").ReviewBackendMessageMap & {
+    "prompts.changed": BackendMessage<"prompts.changed", Record<string, never>>;
     "kanban.update": BackendMessage<"kanban.update", KanbanUpdatePayload>;
     "task.reordered": BackendMessage<"task.reordered", TaskReorderedPayload>;
     "task.created": BackendMessage<"task.created", TaskEventPayload>;
@@ -460,6 +471,10 @@ export type BackendMessageMap = SessionBackendMessageMap &
     "task.plan.comments.changed": BackendMessage<
       "task.plan.comments.changed",
       TaskPlanCommentEventPayload
+    >;
+    "task.preview_feedback.changed": BackendMessage<
+      "task.preview_feedback.changed",
+      import("@/lib/types/http").TaskPreviewFeedbackSnapshot
     >;
     "task.plan.revision.created": BackendMessage<
       "task.plan.revision.created",
@@ -526,6 +541,7 @@ export type BackendMessageMap = SessionBackendMessageMap &
     "workflow.step.deleted": BackendMessage<"workflow.step.deleted", WorkflowStepEventPayload>;
 
     "canvas.created": BackendMessage<"canvas.created", CanvasLifecyclePayload>;
+    "canvas.updated": BackendMessage<"canvas.updated", CanvasLifecyclePayload>;
     "canvas.release.activated": BackendMessage<"canvas.release.activated", CanvasLifecyclePayload>;
     "canvas.release.permission_required": BackendMessage<
       "canvas.release.permission_required",
@@ -552,6 +568,11 @@ export type BackendMessageMap = SessionBackendMessageMap &
       "executor.prepare.completed",
       PrepareCompletedPayload
     >;
+    "executor.reachability.changed": BackendMessage<
+      "executor.reachability.changed",
+      SSHReachabilityRecord
+    >;
+    "session.launch.warning": BackendMessage<"session.launch.warning", LaunchWarningPayload>;
     "environment.created": BackendMessage<"environment.created", EnvironmentPayload>;
     "environment.updated": BackendMessage<"environment.updated", EnvironmentPayload>;
     "environment.deleted": BackendMessage<"environment.deleted", EnvironmentPayload>;

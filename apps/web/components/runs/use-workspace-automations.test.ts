@@ -62,6 +62,14 @@ describe("useWorkspaceAutomations", () => {
     expect(result.current.automations).toEqual([]);
   });
 
+  it("does not call the API for an inactive navigation surface", async () => {
+    const { result } = renderHook(() => useWorkspaceAutomations(WORKSPACE, { active: false }));
+
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(mockList).not.toHaveBeenCalled();
+    expect(result.current.automations).toEqual([]);
+  });
+
   it("surfaces a load failure instead of an empty list", async () => {
     mockList.mockRejectedValue(new Error("ws down"));
 

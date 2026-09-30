@@ -4,6 +4,7 @@ system: agents
 requirements:
   - REQ-AGENTS-MANAGED-RUNTIME-RECOVERY-001
   - REQ-AGENTS-MANAGED-RUNTIME-RECOVERY-002
+  - REQ-AGENTS-MANAGED-RUNTIME-RECOVERY-003
 ---
 
 # Managed npm runtime recovery system design
@@ -25,6 +26,7 @@ Kandev backend.
 | --- | --- |
 | `REQ-AGENTS-MANAGED-RUNTIME-RECOVERY-001` | [Recovery flow](#recovery-flow) |
 | `REQ-AGENTS-MANAGED-RUNTIME-RECOVERY-002` | [Executor-local cache contract](#executor-local-cache-contract) |
+| `REQ-AGENTS-MANAGED-RUNTIME-RECOVERY-003` | [Project-independent npm configuration](#project-independent-npm-configuration); [Release-date policy failure](#release-date-policy-failure) |
 
 ## Components and responsibilities
 
@@ -38,6 +40,40 @@ Kandev backend.
 - `agentctl/server/utility.ACPInferenceExecutor` validates the exact managed package in the trusted command, classifies captured probe stderr, and returns only a stable failure code to the backend.
 - `agentctl/server/process.Manager` runs `npm config get cache` with the configured agent environment.
 - `agent/managedruntime` validates the package specification and removes one deterministic `_npx` tree.
+
+## Project-independent npm configuration
+
+Managed npm command construction adds the canonical marker
+`--prefix ~/.kandev/managed-npm-runtime`. Before the command starts, the
+execution host replaces that marker with a private, user-scoped directory
+under its system temporary root and creates the directory. The path is
+resolved where npm runs, so the same trusted command works on the backend
+host, in Docker, and over SSH without embedding a backend-host path.
+
+The project root must stay outside both the task workspace and the mounted
+agent session home. Some container agents, including OpenCode, mount their
+whole home from host-managed session state. Creating the project root under
+that home can leave root-owned files in a host temporary directory. The
+system temporary root avoids that mount while remaining local to the npm
+execution host. A missing or unavailable prefix fails safely before npm
+starts.
+Apply the same prefix to exact-version cache preparation, capability probes,
+one-shot prompts, normal task launches, and online-preferred retries. The
+Kandev-owned prefix is independent of both the task workspace and an optional
+`KANDEV_HOME_DIR` override for Kandev state and logs.
+
+The child process still starts in the task workspace, and ACP receives that
+workspace as its session cwd. Only npm's project configuration root changes.
+User-level and global npm configuration, the selected registry, and explicit
+environment overrides remain in force. The command's top-level package spec
+and npm cache remain the same. Cache discovery for a failed launch must use the
+same prefix and effective environment as that launch; otherwise a repository
+`.npmrc` can direct repair to a different cache. A prefix preparation failure
+stops startup with a sanitized runtime error before launching npm.
+
+Keep exact-command recognition in lifecycle recovery, host utility recovery,
+and agentctl probe classification aligned with the new argument shape. Their
+trusted package and version checks continue to reject arbitrary commands.
 
 ## Probe failure contract
 
@@ -109,14 +145,48 @@ second npm attempt fails, Kandev emits `managed_runtime_npm_resolution`.
 Both errors contain bounded sanitized details. The UI keeps the existing
 single **Retry runtime** action. Kandev does not change the active version.
 
-Unsupported runtime types do not call the repair endpoint. Native commands,
-passthrough commands, unrelated npm errors, and repeated failures remain on the
-normal terminal error path.
+Unsupported runtime types do not call the repair endpoint for ordinary npm
+resolution failures. Kandev classifies an exact release-date policy failure
+before checking repair support when the bounded diagnostic is available.
+Native commands, passthrough commands, unrelated npm errors, and repeated
+failures remain on the normal terminal error path.
 
 A host capability probe that cannot repair or fails its online retry publishes
 the final failure normally. Kandev does not hide a runtime that still cannot
 start, change its version, or substitute a stale capability catalogue from a
 different runtime generation.
+
+## Release-date policy failure
+
+The agentctl stderr projection recognizes npm's exact top-level `notarget`
+line with the bounded `with a date before` suffix. It accepts the observed npm
+11.16 date form (`M/D/YYYY, h:mm:ss AM/PM`) and retains RFC3339-shaped dates
+for compatibility. Invalid calendar or time values are rejected. Agentctl
+preserves a canonical date-qualified marker without copying the raw date or
+any other stderr line.
+
+For task startup, the lifecycle manager passes the trusted package spec with
+the bounded diagnostic to `routingerr`. Classification checks the raw line
+against that exact spec before generic diagnostic redaction can treat the
+scoped package or locale-formatted date as a path or opaque token. The persisted
+excerpt contains only a fixed policy message and the canonical date marker.
+Ordinary exact-version `ETARGET` retains the stale metadata repair path. The
+same distinction applies to host capability probes.
+
+Settings update jobs classify bounded output against the trusted exact package
+spec before invalidating the execution cache. Both legacy and exact-candidate
+updates fail with a safe policy error when the diagnostic matches; they do not
+retry or expose the raw locale-formatted date in the job error. Ordinary update
+failures retain the existing cache-repair path.
+
+The lifecycle manager publishes a stable policy failure code before cache
+repair. The orchestrator persists one sanitized recovery entry with a localized
+policy explanation and an ordinary retry action. The entry must not use the
+existing stale-metadata card, whose copy says Kandev repaired the cache.
+Office consumes the same code and explanation. Desktop and phone reuse the
+current inline recovery presentation, collapsed details, transcript scroll
+owner, and phone touch targets from the session recovery design. No new page,
+dialog, or storage table is needed.
 
 ## Observability
 
@@ -132,3 +202,4 @@ No database migration is necessary.
 - [Validate and persist managed runtime version selection](../../../decisions/2026-08-12-validated-managed-runtime-version-selection.md)
 - [Run cache repair where npm runs](../../../decisions/2026-08-24-agentctl-local-managed-runtime-cache-repair.md)
 - [Recover host capability probes before publishing failure](../../../decisions/2026-09-07-host-utility-managed-runtime-recovery.md)
+- [Isolate managed npm runtime project configuration](../../../decisions/2026-09-24-isolate-managed-npm-project-config.md)

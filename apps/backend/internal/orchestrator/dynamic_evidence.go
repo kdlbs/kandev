@@ -2,13 +2,16 @@ package orchestrator
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"sync"
 
+	dynamicruntime "github.com/kandev/kandev/internal/agent/runtime/dynamic"
 	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/orchestrator/watcher"
 	"github.com/kandev/kandev/internal/task/models"
+	"go.uber.org/zap"
 )
 
 // promptAttemptEvidence is deliberately process-local. It fences recovery to
@@ -32,6 +35,8 @@ type promptAttemptEvidence struct {
 	providerDiagnosticText string
 	effect                 bool
 	dynamic                bool
+	streakResetInProgress  bool
+	streakResetComplete    bool
 }
 
 // normalizeDiagnosticText applies streams.SanitizeProviderMessage so a raw
@@ -194,11 +199,13 @@ func (s *Service) observePromptAttempt(
 func (s *Service) observeProviderDiagnostic(
 	sessionID, executionID string,
 	promptGeneration uint64,
+	providerID string,
 	message string,
 ) {
 	classified := routingerr.Classify(routingerr.Input{
-		Phase:  routingerr.PhasePromptSend,
-		Stderr: message,
+		Phase:      routingerr.PhasePromptSend,
+		ProviderID: providerID,
+		Stderr:     message,
 	})
 	if classified.Confidence != routingerr.ConfHigh || !classified.FallbackAllowed {
 		s.observePromptAttempt(sessionID, executionID, promptGeneration, true, false)
@@ -287,7 +294,7 @@ func (s *Service) withPromptAttemptEvidenceLocked(data watcher.AgentEventData) w
 		data.DynamicRouteAttempt = true
 	}
 	if lifecycleEvidenceKnown && lifecycleDiagnosticCandidate && !evidence.output && !evidence.effect {
-		s.observeLifecycleProviderDiagnosticLocked(evidence, lifecycleDiagnosticText)
+		s.observeLifecycleProviderDiagnosticLocked(evidence, data.AgentID, lifecycleDiagnosticText)
 	}
 	outputObserved := evidence.outputObservedLocked(data)
 	if lifecycleEvidenceKnown {
@@ -307,7 +314,7 @@ func (s *Service) withPromptAttemptEvidenceLocked(data watcher.AgentEventData) w
 // event may arrive after the terminal failure because those events use
 // separate subscriptions, so an absent or unclassifiable diagnostic fails
 // closed as ordinary output.
-func (s *Service) observeLifecycleProviderDiagnosticLocked(evidence *promptAttemptEvidence, message string) {
+func (s *Service) observeLifecycleProviderDiagnosticLocked(evidence *promptAttemptEvidence, providerID, message string) {
 	message = normalizeDiagnosticText(message)
 	if message == "" {
 		evidence.output = true
@@ -316,8 +323,9 @@ func (s *Service) observeLifecycleProviderDiagnosticLocked(evidence *promptAttem
 		return
 	}
 	classified := routingerr.Classify(routingerr.Input{
-		Phase:  routingerr.PhasePromptSend,
-		Stderr: message,
+		Phase:      routingerr.PhasePromptSend,
+		ProviderID: providerID,
+		Stderr:     message,
 	})
 	if classified.Confidence != routingerr.ConfHigh || !classified.FallbackAllowed {
 		evidence.output = true
@@ -363,8 +371,9 @@ func matchingProviderFailureCode(data watcher.AgentEventData) routingerr.Code {
 		return ""
 	}
 	return routingerr.Classify(routingerr.Input{
-		Phase:  routingerr.PhasePromptSend,
-		Stderr: message,
+		Phase:      routingerr.PhasePromptSend,
+		ProviderID: data.AgentID,
+		Stderr:     message,
 	}).Code
 }
 
@@ -458,4 +467,135 @@ func (e *promptAttemptEvidence) promptIdentityMatchesForClearLocked(executionID 
 
 func dynamicPreResultSafe(data watcher.AgentEventData) bool {
 	return data.DynamicRouteAttempt && data.EvidenceKnown && !data.OutputObserved && !data.EffectObserved
+}
+
+func (s *Service) clearDynamicUnclassifiedStreakForEvent(
+	ctx context.Context,
+	data watcher.AgentEventData,
+	requireLocalEvidence bool,
+) {
+	if s.repo == nil || s.profileExecutionResolver == nil || !s.currentUnclassifiedStreakEvent(data, requireLocalEvidence) {
+		return
+	}
+	attempt, ok := s.claimUnclassifiedStreakReset(data, requireLocalEvidence)
+	if !ok {
+		return
+	}
+	resetComplete := false
+	defer func() {
+		attempt.mu.Lock()
+		attempt.streakResetInProgress = false
+		attempt.streakResetComplete = resetComplete
+		attempt.mu.Unlock()
+	}()
+	session, err := s.repo.GetTaskSession(ctx, data.SessionID)
+	if err != nil || !validUnclassifiedStreakEventSession(session, data) {
+		return
+	}
+	if !s.taskAllowsUnclassifiedStreakClear(ctx, data.TaskID) {
+		return
+	}
+	resetComplete = s.clearUnclassifiedStreak(ctx, session, false, "current activity")
+}
+
+func (s *Service) claimUnclassifiedStreakReset(
+	data watcher.AgentEventData,
+	requireLocalEvidence bool,
+) (*promptAttemptEvidence, bool) {
+	attempt, ok := s.promptAttemptForSession(data.SessionID)
+	if !ok {
+		return nil, false
+	}
+	attempt.mu.Lock()
+	defer attempt.mu.Unlock()
+	if !attempt.promptIdentityMatchesForClearLocked(data.AgentExecutionID, data.PromptGeneration) ||
+		requireLocalEvidence && (!attempt.dynamic || !attempt.evidenceKnown) ||
+		attempt.streakResetInProgress || attempt.streakResetComplete {
+		return nil, false
+	}
+	attempt.streakResetInProgress = true
+	return attempt, true
+}
+
+func (s *Service) currentUnclassifiedStreakEvent(data watcher.AgentEventData, requireLocalEvidence bool) bool {
+	if data.OwnerKind != queueStatusScopeTask || data.TaskID == "" || data.SessionID == "" ||
+		data.AgentExecutionID == "" || data.PromptGeneration == 0 {
+		return false
+	}
+	if requireLocalEvidence {
+		return s.currentDynamicPromptAttempt(data.SessionID, data.AgentExecutionID, data.PromptGeneration)
+	}
+	generationOwner, ok := s.agentManager.(interface {
+		OwnsPromptGeneration(sessionID, executionID string, generation uint64) bool
+	})
+	return ok && generationOwner.OwnsPromptGeneration(data.SessionID, data.AgentExecutionID, data.PromptGeneration)
+}
+
+func validUnclassifiedStreakEventSession(session *models.TaskSession, data watcher.AgentEventData) bool {
+	return session != nil && session.TaskID == data.TaskID && session.AgentExecutionID == data.AgentExecutionID &&
+		session.RouteGeneration > 0 && session.ExecutionProfileID != ""
+}
+
+func (s *Service) taskAllowsUnclassifiedStreakClear(ctx context.Context, taskID string) bool {
+	task, err := s.repo.GetTask(ctx, taskID)
+	return err == nil && task != nil && task.ID == taskID && !task.IsFromOffice
+}
+
+func (s *Service) clearDynamicUnclassifiedStreakForStop(ctx context.Context, sessionID string) {
+	if s.repo == nil || s.profileExecutionResolver == nil || sessionID == "" {
+		return
+	}
+	session, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil || session == nil || session.TaskID == "" || session.AgentProfileID == "" ||
+		session.ExecutionProfileID == "" || session.RouteGeneration <= 0 {
+		return
+	}
+	if !s.taskAllowsUnclassifiedStreakClear(ctx, session.TaskID) {
+		return
+	}
+	s.clearUnclassifiedStreak(ctx, session, false, "stop")
+}
+
+func (s *Service) clearDynamicStartupStreakForBootReady(
+	ctx context.Context,
+	data watcher.AgentEventData,
+	session *models.TaskSession,
+) {
+	if s.repo == nil || s.profileExecutionResolver == nil || session == nil || data.OwnerKind != queueStatusScopeTask ||
+		data.TaskID == "" || data.TaskID != session.TaskID || data.AgentExecutionID == "" ||
+		data.AgentExecutionID != session.AgentExecutionID || session.RouteGeneration <= 0 ||
+		session.ExecutionProfileID == "" {
+		return
+	}
+	if !s.taskAllowsUnclassifiedStreakClear(ctx, data.TaskID) {
+		return
+	}
+	s.clearUnclassifiedStreak(ctx, session, true, "boot-ready")
+}
+
+func (s *Service) clearUnclassifiedStreak(
+	ctx context.Context,
+	session *models.TaskSession,
+	startup bool,
+	reason string,
+) bool {
+	var err error
+	if startup {
+		err = s.profileExecutionResolver.ClearUnclassifiedStartupStreak(
+			ctx, session.ID, session.RouteGeneration, session.ExecutionProfileID,
+		)
+	} else {
+		err = s.profileExecutionResolver.ClearUnclassifiedStreak(
+			ctx, session.ID, session.RouteGeneration, session.ExecutionProfileID,
+		)
+	}
+	if errors.Is(err, dynamicruntime.ErrStaleGeneration) || errors.Is(err, dynamicruntime.ErrRouteStateNotFound) {
+		return true
+	}
+	if err != nil {
+		s.logger.Debug("could not clear dynamic unclassified streak after "+reason,
+			zap.String("session_id", session.ID), zap.Error(err))
+		return false
+	}
+	return true
 }

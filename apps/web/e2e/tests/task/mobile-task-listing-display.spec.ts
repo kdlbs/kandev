@@ -48,11 +48,18 @@ test.describe("Mobile task listing display preferences", () => {
       checks_state: "success",
       mergeable_state: "clean",
     });
+    await apiClient.saveUserSettings({
+      workspace_id: seedData.workspaceId,
+      tasks_list_show_details: false,
+    });
+    await expect
+      .poll(async () => (await apiClient.getUserSettings()).settings.tasks_list_show_details)
+      .toBe(false);
 
     const mobile = new MobileKanbanPage(testPage);
     await mobile.goto();
-    await mobile.mobileMenuButton.click();
-    const menu = testPage.getByRole("dialog", { name: "Menu" });
+    await mobile.viewOptionsButton.click();
+    const menu = testPage.getByRole("dialog", { name: "View options" });
     await menu.getByRole("radio", { name: "List", exact: true }).click();
     await expect(testPage).toHaveURL(/\/tasks/);
     await expect(testPage.getByTestId("tasks-list")).toBeVisible();
@@ -80,10 +87,12 @@ test.describe("Mobile task listing display preferences", () => {
     await testPage.goto("/");
     await taskListLoaded;
     await expect(testPage).toHaveURL(/\/tasks/);
-    await testPage.getByRole("button", { name: "Open menu" }).tap();
-    const tasksMenu = testPage.getByRole("dialog", { name: "Menu" });
+    await testPage.getByTestId("mobile-topbar-page-context").tap();
+    const tasksMenu = testPage.getByRole("dialog", { name: "View options" });
     await expandDisplaySettingsGroup(testPage, "list-rows", "mobile");
-    await tasksMenu.getByText("Show task details", { exact: true }).click();
+    const taskDetailsToggle = tasksMenu.getByTestId("mobile-display-task-details-toggle");
+    await taskDetailsToggle.tap();
+    await expect(taskDetailsToggle).toHaveAttribute("aria-checked", "true");
     await expect
       .poll(async () => (await apiClient.getUserSettings()).settings.tasks_list_show_details, {
         message: "task detail preference was not persisted",

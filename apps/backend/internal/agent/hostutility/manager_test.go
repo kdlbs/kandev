@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -50,6 +51,26 @@ func TestBuildProbeRequestIncludesRuntimeEnv(t *testing.T) {
 	}
 	require.NoError(t, json.Unmarshal(payload, &decoded))
 	require.Equal(t, "1", decoded.InferenceConfig.Env[envKey])
+}
+
+func TestBuildProbeRequestUsesHostUtilityInferenceConfig(t *testing.T) {
+	dir := t.TempDir()
+	name := "opencode"
+	if runtime.GOOS == "windows" {
+		name += ".exe"
+	}
+	if err := os.WriteFile(filepath.Join(dir, name), []byte("native"), 0o755); err != nil {
+		t.Fatalf("write native executable: %v", err)
+	}
+	t.Setenv("PATH", dir)
+
+	req := buildProbeRequest(
+		&instance{agentType: "opencode-acp", workDir: t.TempDir()},
+		agents.NewOpenCodeACP(),
+		false,
+		agents.Command{},
+	)
+	require.Equal(t, []string{"opencode", "acp", "--print-logs", "--log-level", "ERROR"}, req.InferenceConfig.Command)
 }
 
 func TestExecutePromptWithMCPIncludesRuntimeEnv(t *testing.T) {

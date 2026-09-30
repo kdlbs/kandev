@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useRef, useState } from "react";
 import {
   IconArrowBackUp,
   IconCopy,
@@ -34,7 +34,7 @@ import {
   ExternalVcsFileMenuItem,
 } from "@/components/editors/external-vcs-file-link";
 import { useGlobalViewMode } from "@/hooks/use-global-view-mode";
-import { copyToClipboard } from "@/lib/utils/copy-to-clipboard";
+import { useCopyRepositoryPath } from "@/hooks/use-copy-repository-path";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { isMarkdownFile } from "@/lib/utils/file-types";
 import { useTranslation } from "react-i18next";
@@ -47,7 +47,6 @@ const mobileMenuItem = "cursor-pointer gap-3 text-sm";
 const mobileMenuIcon = "size-4 text-muted-foreground";
 
 export type FileDiffToolbarProps = {
-  diff: string;
   filePath: string;
   previousPath?: string | null;
   status?: string | null;
@@ -196,8 +195,8 @@ function MobileDiffViewMenuItems({
 
 function MobileFileMenuItems(props: FileDiffToolbarProps) {
   const { t } = useTranslation();
+  const copyRepositoryPath = useCopyRepositoryPath();
   const {
-    diff,
     filePath,
     previousPath,
     status,
@@ -217,14 +216,14 @@ function MobileFileMenuItems(props: FileDiffToolbarProps) {
     onToggleWordWrap,
     repo,
   } = props;
-  const handleCopyDiff = useCallback(() => {
-    void copyToClipboard(diff || "");
-  }, [diff]);
   return (
     <>
-      <DropdownMenuItem className={mobileMenuItem} onSelect={handleCopyDiff}>
+      <DropdownMenuItem
+        className={`${mobileMenuItem} min-h-11`}
+        onSelect={() => void copyRepositoryPath(filePath)}
+      >
         <IconCopy className={mobileMenuIcon} />
-        {t("review:copyDiff")}
+        {t("task:copyPath")}
       </DropdownMenuItem>
       {onOpenFile && (
         <DropdownMenuItem className={mobileMenuItem} onSelect={() => onOpenFile(filePath, repo)}>
@@ -249,7 +248,7 @@ function MobileFileMenuItems(props: FileDiffToolbarProps) {
         publishedBranch={publishedBranch}
         baseBranch={baseBranch}
       />
-      <FileActionsMenuItems filePath={filePath} sessionId={sessionId} />
+      <FileActionsMenuItems filePath={filePath} sessionId={sessionId} includeCopyPath={false} />
       <MobileDiffViewMenuItems
         expandUnchanged={expandUnchanged}
         wordWrap={wordWrap}
@@ -273,7 +272,7 @@ function MobileFileActionsMenu(props: FileDiffToolbarProps) {
   const { t } = useTranslation();
   const { filePath, onCommentFile } = props;
   const [open, setOpen] = useState(false);
-  const [commentSelected, setCommentSelected] = useState(false);
+  const commentSelectedRef = useRef(false);
 
   return (
     <DropdownMenu open={open} onOpenChange={setOpen}>
@@ -294,11 +293,10 @@ function MobileFileActionsMenu(props: FileDiffToolbarProps) {
       </DropdownMenuTrigger>
       <DropdownMenuContent
         onCloseAutoFocus={(event) => {
-          if (commentSelected) {
-            event.preventDefault();
-            setCommentSelected(false);
-            onCommentFile?.();
-          }
+          if (!commentSelectedRef.current) return;
+          event.preventDefault();
+          commentSelectedRef.current = false;
+          requestAnimationFrame(() => onCommentFile?.());
         }}
         data-testid="review-file-actions-menu"
         aria-label={t("review:actionsFor", { filePath })}
@@ -311,7 +309,9 @@ function MobileFileActionsMenu(props: FileDiffToolbarProps) {
         {onCommentFile && (
           <DropdownMenuItem
             className={`${mobileMenuItem} min-h-11`}
-            onSelect={() => setCommentSelected(true)}
+            onSelect={() => {
+              commentSelectedRef.current = true;
+            }}
           >
             <IconMessagePlus className={mobileMenuIcon} />
             {t("review:commentOnFile")}
@@ -325,8 +325,8 @@ function MobileFileActionsMenu(props: FileDiffToolbarProps) {
 
 function DesktopFileDiffToolbar(props: FileDiffToolbarProps) {
   const { t } = useTranslation();
+  const copyRepositoryPath = useCopyRepositoryPath();
   const {
-    diff,
     filePath,
     previousPath,
     status,
@@ -348,13 +348,8 @@ function DesktopFileDiffToolbar(props: FileDiffToolbarProps) {
     repo,
   } = props;
   const [globalViewMode, setGlobalViewMode] = useGlobalViewMode();
-  const handleCopyDiff = useCallback(() => {
-    void copyToClipboard(diff || "");
-  }, [diff]);
-  const handleToggleViewMode = useCallback(
-    () => setGlobalViewMode(globalViewMode === "split" ? "unified" : "split"),
-    [globalViewMode, setGlobalViewMode],
-  );
+  const handleToggleViewMode = () =>
+    setGlobalViewMode(globalViewMode === "split" ? "unified" : "split");
 
   return (
     <div className="flex items-center gap-0.5">
@@ -371,7 +366,10 @@ function DesktopFileDiffToolbar(props: FileDiffToolbarProps) {
           <IconMessagePlus className="size-4" />
         </Button>
       )}
-      <ToolbarIconBtn onClick={handleCopyDiff} tooltip={t("review:copyDiff")}>
+      <ToolbarIconBtn
+        onClick={() => void copyRepositoryPath(filePath)}
+        tooltip={t("task:copyPath")}
+      >
         <IconCopy className="h-3.5 w-3.5" />
       </ToolbarIconBtn>
       <ExternalVcsFileLink
@@ -407,7 +405,12 @@ function DesktopFileDiffToolbar(props: FileDiffToolbarProps) {
           <IconPencil className="h-3.5 w-3.5" />
         </ToolbarIconBtn>
       )}
-      <FileActionsDropdown filePath={filePath} sessionId={sessionId} size="xs" />
+      <FileActionsDropdown
+        filePath={filePath}
+        sessionId={sessionId}
+        size="xs"
+        includeCopyPath={false}
+      />
       {source === "uncommitted" && (
         <ToolbarIconBtn
           onClick={onDiscard}

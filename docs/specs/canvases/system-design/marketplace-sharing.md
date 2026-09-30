@@ -28,7 +28,7 @@ this additive distribution profile fits this design; a separate ADR is not
 needed. The [existing lifecycle](agent-authored-web-apps.md) still owns authoring,
 promotion, editing, rollback, and deletion. The
 [plugin web-app contract](../../plugins/system-design/isolated-web-app-contributions.md)
-owns runtime isolation. This document adds portable distribution to both.
+owns the runtime trust boundary. This document adds portable distribution to both.
 
 ## Requirement mapping
 
@@ -43,7 +43,7 @@ owns runtime isolation. This document adds portable distribution to both.
 
 ## Existing implementation and additive changes
 
-- `internal/plugins/manifest.Manifest` already supports isolated `ui.web_apps`.
+- `internal/plugins/manifest.Manifest` already supports packaged `ui.web_apps`.
   `IsStaticWebAppOnly` identifies the static runtime form, but the distribution
   validator must also reject every non-canvas contribution and managed field.
 - `internal/plugins/pkgtar.validateInstallManifest` requires a managed binary.
@@ -477,7 +477,7 @@ and URL queries. Use content-free diagnostics; add no usage telemetry service.
 The [implementation plan](../../../plans/canvas-marketplace/plan.md) maps each
 criterion to proposed unit, integration, registry, and desktop/mobile tests.
 Tests must prove export-to-import round trips, project-source recovery after
-executor cleanup, digest-bound review, concurrent retry receipts, isolation,
+executor cleanup, digest-bound review, concurrent retry receipts, runtime policies,
 registry URL validation, screenshot-free export/import, plugin galleries,
 gate-off behavior, and native installer compatibility.
 

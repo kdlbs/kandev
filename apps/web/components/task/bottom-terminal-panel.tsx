@@ -5,6 +5,7 @@ import { IconMinus } from "@tabler/icons-react";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { useEnvironmentId } from "@/hooks/use-environment-session-id";
 import { PassthroughTerminal } from "./passthrough-terminal";
+import { PanelHeaderBar } from "./panel-primitives";
 import { Button } from "@kandev/ui/button";
 import { cn } from "@/lib/utils";
 import { useTranslation } from "react-i18next";
@@ -87,13 +88,17 @@ export function BottomTerminalPanel() {
         className="absolute top-0 left-0 right-0 h-1 cursor-ns-resize hover:bg-primary/20 z-10"
         onMouseDown={handleMouseDown}
       />
-      {/* Header */}
-      <div className="flex items-center justify-between px-3 py-1 border-b border-border bg-muted/30 shrink-0">
+      <PanelHeaderBar className="justify-between bg-muted/30 px-3">
         <span className="text-xs font-medium text-muted-foreground">{t("task:terminal")}</span>
-        <Button variant="ghost" size="icon" className="h-5 w-5 cursor-pointer" onClick={toggle}>
+        <Button
+          variant="ghost"
+          size="icon"
+          className="h-6 w-6 cursor-pointer max-md:h-11 [@media(pointer:coarse)]:h-11 max-md:w-11 [@media(pointer:coarse)]:w-11"
+          onClick={toggle}
+        >
           <IconMinus className="h-3 w-3" />
         </Button>
-      </div>
+      </PanelHeaderBar>
       {/* Terminal content */}
       <div className="flex-1 min-h-0 overflow-hidden">
         <PassthroughTerminal

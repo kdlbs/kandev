@@ -75,6 +75,24 @@ destination entry, whereas a ceiling can delay a session already selected by ent
   authorization, archive, and terminal-session rules. It shall preserve conversation
   context without sending a new prompt or transferring workflow ownership.
 
+- **AC-TASKS-QUEUED-SESSION-OWNERSHIP-001.10:** When recovery supplies todo
+  snapshots or session-status events without an active prompt turn, those events
+  shall not create an open conversational turn or trigger workflow turn-start
+  actions. Todo snapshots shall update the live todo indicator and persist the
+  latest list, including an empty list, in a completed lifecycle-only turn so a
+  reload can restore it. A lifecycle-only turn shall not be available for a
+  later prompt to adopt.
+- **AC-TASKS-QUEUED-SESSION-OWNERSHIP-001.11:** When a workflow reuses that
+  recovered conversation, its next prompt shall start a turn on the current step.
+  Resume metadata shall not cause the prompt to inherit an earlier step stamp.
+  Existing completion-signal and clarification checks shall remain effective.
+- **AC-TASKS-QUEUED-SESSION-OWNERSHIP-001.12:** When a prompt turn already exists,
+  todo updates shall retain that active or reserved turn and persist normally,
+  including empty lists. With no active or reserved prompt turn, a recovery
+  snapshot shall persist in a completed lifecycle-only turn. Reload shall use
+  the latest persisted todo snapshot while preserving earlier todo messages.
+  A genuine active turn shall retain its original step stamp.
+
 ### REQ-TASKS-QUEUED-SESSION-OWNERSHIP-002: Deferred work survives sibling lifecycle events
 
 **Intent:** A queued launch must remain owned and retryable until its own outcome is known.

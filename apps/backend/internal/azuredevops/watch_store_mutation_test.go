@@ -359,6 +359,7 @@ func TestStoreAssignWatchTaskIDDistinguishesOwnershipLossFromMissingReservation(
 	if ok, err := store.ReserveWorkItemWatchTask(t.Context(), work.ID, work.Generation, "project-1", 101, "https://azure/101"); err != nil || !ok {
 		t.Fatalf("reserve work item: ok=%v err=%v", ok, err)
 	}
+	seedAzureTask(t, store, "task-1", "ws-1")
 	if err := store.AssignWorkItemWatchTaskID(t.Context(), work.ID, work.Generation, "project-1", 101, "task-1"); err != nil {
 		t.Fatalf("assign task id: %v", err)
 	}
@@ -394,6 +395,7 @@ func TestStoreAssignPullRequestWatchTaskIDResolvesGenerationFromTheSecondTable(t
 	if ok, err := store.ReservePullRequestWatchTask(t.Context(), pr.ID, pr.Generation, "project-1", "azure-repo-1", 42, "https://azure/pr/42"); err != nil || !ok {
 		t.Fatalf("reserve pull request: ok=%v err=%v", ok, err)
 	}
+	seedAzureTask(t, store, "task-42", "ws-1")
 	if err := store.AssignPullRequestWatchTaskID(t.Context(), pr.ID, pr.Generation, "project-1", "azure-repo-1", 42, "task-42"); err != nil {
 		t.Fatalf("assign task id: %v", err)
 	}

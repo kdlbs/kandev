@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/google/uuid"
 	"go.uber.org/zap"
@@ -13,6 +14,7 @@ import (
 	"github.com/kandev/kandev/internal/common/constants"
 	"github.com/kandev/kandev/internal/common/logger"
 	taskmodels "github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 	"github.com/kandev/kandev/internal/workflow/models"
 	"github.com/kandev/kandev/internal/workflow/repository"
 )
@@ -377,27 +379,28 @@ func (s *Service) CreateStepsFromTemplate(ctx context.Context, workflowID, templ
 	for _, stepDef := range template.Steps {
 		events := models.RemapStepEvents(stepDef.Events, idMap)
 		step := &models.WorkflowStep{
-			ID:                         idMap[stepDef.ID],
-			WorkflowID:                 workflowID,
-			Name:                       stepDef.Name,
-			Position:                   stepDef.Position,
-			Color:                      stepDef.Color,
-			Prompt:                     stepDef.Prompt,
-			Events:                     events,
-			AllowManualMove:            stepDef.AllowManualMove,
-			IsStartStep:                stepDef.IsStartStep,
-			ShowInCommandPanel:         stepDef.ShowInCommandPanel,
-			AutoArchiveAfterHours:      stepDef.AutoArchiveAfterHours,
-			AgentProfileID:             stepDef.AgentProfileID,
-			ProfileSessionStartPolicy:  taskmodels.NormalizeWorkflowProfileSessionStartPolicy(string(stepDef.ProfileSessionStartPolicy)),
-			ProfileSessionEndPolicy:    taskmodels.NormalizeWorkflowProfileSessionEndPolicy(string(stepDef.ProfileSessionEndPolicy)),
-			SessionTarget:              models.RemapWorkflowSessionTarget(stepDef.SessionTarget, idMap),
-			AutoAdvanceRequiresSignal:  stepDef.AutoAdvanceRequiresSignal,
-			CancelTriggersTurnComplete: stepDef.CancelTriggersTurnComplete,
-			CompleteTaskOnEnter:        stepDef.CompleteTaskOnEnter,
-			WIPLimit:                   stepDef.WIPLimit,
-			PullFromStepID:             models.RemapStepID(stepDef.PullFromStepID, idMap),
-			StageType:                  stepDef.StageType,
+			ID:                          idMap[stepDef.ID],
+			WorkflowID:                  workflowID,
+			Name:                        stepDef.Name,
+			Position:                    stepDef.Position,
+			Color:                       stepDef.Color,
+			Prompt:                      stepDef.Prompt,
+			Events:                      events,
+			AllowManualMove:             stepDef.AllowManualMove,
+			IsStartStep:                 stepDef.IsStartStep,
+			ShowInCommandPanel:          stepDef.ShowInCommandPanel,
+			AutoArchiveAfterHours:       stepDef.AutoArchiveAfterHours,
+			AgentProfileID:              stepDef.AgentProfileID,
+			ProfileSessionStartPolicy:   taskmodels.NormalizeWorkflowProfileSessionStartPolicy(string(stepDef.ProfileSessionStartPolicy)),
+			ProfileSessionEndPolicy:     taskmodels.NormalizeWorkflowProfileSessionEndPolicy(string(stepDef.ProfileSessionEndPolicy)),
+			DisableUnclassifiedFallback: stepDef.DisableUnclassifiedFallback,
+			SessionTarget:               models.RemapWorkflowSessionTarget(stepDef.SessionTarget, idMap),
+			AutoAdvanceRequiresSignal:   stepDef.AutoAdvanceRequiresSignal,
+			CancelTriggersTurnComplete:  stepDef.CancelTriggersTurnComplete,
+			CompleteTaskOnEnter:         stepDef.CompleteTaskOnEnter,
+			WIPLimit:                    stepDef.WIPLimit,
+			PullFromStepID:              models.RemapStepID(stepDef.PullFromStepID, idMap),
+			StageType:                   stepDef.StageType,
 		}
 
 		if err := models.ValidateWorkflowStep(step); err != nil {
@@ -507,6 +510,29 @@ func (s *Service) CreateStepWithStartStepUpdates(ctx context.Context, step *mode
 	return demoted, nil
 }
 
+// CreateStepWithStartStepUpdatesIfWorkflowUnchanged creates a step only while
+// the workflow still has the version observed by an exact Host command.
+func (s *Service) CreateStepWithStartStepUpdatesIfWorkflowUnchanged(
+	ctx context.Context, step *models.WorkflowStep, expectedWorkflow time.Time,
+) ([]*models.WorkflowStep, error) {
+	if err := s.AuthorizeWorkflow(ctx, step.WorkflowID); err != nil {
+		return nil, err
+	}
+	if err := models.ValidateWorkflowStep(step); err != nil {
+		return nil, err
+	}
+	if step.ID == "" {
+		step.ID = uuid.New().String()
+	}
+	demoted, err := s.repo.CreateStepWithDemotedStartStepsIfWorkflowUnchanged(ctx, step, expectedWorkflow)
+	if err != nil {
+		s.logger.Error("failed to create step", zap.String("workflow_id", step.WorkflowID), zap.Error(err))
+		return nil, err
+	}
+	s.logger.Info("created workflow step", zap.String("step_id", step.ID), zap.String("workflow_id", step.WorkflowID))
+	return demoted, nil
+}
+
 // UpdateStep updates an existing workflow step.
 func (s *Service) UpdateStep(ctx context.Context, step *models.WorkflowStep) error {
 	_, err := s.UpdateStepWithStartStepUpdates(ctx, step)
@@ -520,6 +546,26 @@ func (s *Service) UpdateStepWithStartStepUpdates(ctx context.Context, step *mode
 		return nil, err
 	}
 	demoted, err := s.repo.UpdateStepWithDemotedStartSteps(ctx, step)
+	if err != nil {
+		s.logger.Error("failed to update step", zap.String("step_id", step.ID), zap.Error(err))
+		return nil, err
+	}
+	s.logger.Info("updated workflow step", zap.String("step_id", step.ID))
+	return demoted, nil
+}
+
+// UpdateStepWithStartStepUpdatesIfUnchanged updates a step only while its
+// workflow and step still have the versions observed by an exact Host command.
+func (s *Service) UpdateStepWithStartStepUpdatesIfUnchanged(
+	ctx context.Context, step *models.WorkflowStep, expectedWorkflow, expectedStep time.Time,
+) ([]*models.WorkflowStep, error) {
+	if err := s.AuthorizeWorkflow(ctx, step.WorkflowID); err != nil {
+		return nil, err
+	}
+	if err := models.ValidateWorkflowStep(step); err != nil {
+		return nil, err
+	}
+	demoted, err := s.repo.UpdateStepWithDemotedStartStepsIfUnchanged(ctx, step, expectedWorkflow, expectedStep)
 	if err != nil {
 		s.logger.Error("failed to update step", zap.String("step_id", step.ID), zap.Error(err))
 		return nil, err
@@ -602,6 +648,40 @@ func (s *Service) ReorderSteps(ctx context.Context, workflowID string, stepIDs [
 	}
 	s.logger.Info("reordered workflow steps", zap.String("workflow_id", workflowID), zap.Int("count", len(stepIDs)))
 	return nil
+}
+
+// ReorderStepsIfUnchanged applies a complete step order only while the workflow
+// and each step still have the versions observed by an exact Host command.
+func (s *Service) ReorderStepsIfUnchanged(
+	ctx context.Context, workflowID string, stepIDs []string, expectedWorkflow time.Time, expectedByID map[string]time.Time,
+) error {
+	if err := s.AuthorizeWorkflow(ctx, workflowID); err != nil {
+		return err
+	}
+	steps, err := s.repo.ListStepsByWorkflow(ctx, workflowID)
+	if err != nil {
+		return err
+	}
+	if len(steps) == 0 || len(steps) != len(stepIDs) || len(stepIDs) != len(expectedByID) {
+		return repoerrors.ErrTaskVersionConflict
+	}
+	existing := make(map[string]time.Time, len(steps))
+	for _, step := range steps {
+		existing[step.ID] = step.UpdatedAt
+	}
+	seen := make(map[string]struct{}, len(stepIDs))
+	for _, id := range stepIDs {
+		if _, duplicate := seen[id]; duplicate {
+			return repoerrors.ErrTaskVersionConflict
+		}
+		current, exists := existing[id]
+		expected, hasVersion := expectedByID[id]
+		if !exists || !hasVersion || !current.Equal(expected) {
+			return repoerrors.ErrTaskVersionConflict
+		}
+		seen[id] = struct{}{}
+	}
+	return s.repo.ReorderStepsIfUnchanged(ctx, workflowID, stepIDs, expectedWorkflow, expectedByID)
 }
 
 // ============================================================================
@@ -918,25 +998,26 @@ func (s *Service) stepFromPortableWithMatcherOptions(
 	matchDirectProfile bool,
 ) *models.WorkflowStep {
 	step := &models.WorkflowStep{
-		ID:                         posToID[sp.Position],
-		WorkflowID:                 workflowID,
-		Name:                       sp.Name,
-		Position:                   sp.Position,
-		Color:                      sp.Color,
-		Prompt:                     sp.Prompt,
-		Events:                     models.ConvertReviewProfileToID(models.ConvertPositionToStepID(sp.Events, posToID), matchProfile),
-		IsStartStep:                sp.IsStartStep,
-		ShowInCommandPanel:         sp.ShowInCommandPanel,
-		AllowManualMove:            sp.AllowManualMove,
-		AutoArchiveAfterHours:      sp.AutoArchiveAfterHours,
-		ProfileSessionStartPolicy:  taskmodels.NormalizeWorkflowProfileSessionStartPolicy(string(sp.ProfileSessionStartPolicy)),
-		ProfileSessionEndPolicy:    taskmodels.NormalizeWorkflowProfileSessionEndPolicy(string(sp.ProfileSessionEndPolicy)),
-		SessionTarget:              sp.WorkflowSessionTarget(posToID),
-		AutoAdvanceRequiresSignal:  sp.AutoAdvanceRequiresSignal,
-		CancelTriggersTurnComplete: sp.CancelTriggersTurnComplete,
-		CompleteTaskOnEnter:        sp.CompleteTaskOnEnter,
-		WIPLimit:                   sp.WIPLimit,
-		PullFromStepID:             sp.PullFromStepID(posToID),
+		ID:                          posToID[sp.Position],
+		WorkflowID:                  workflowID,
+		Name:                        sp.Name,
+		Position:                    sp.Position,
+		Color:                       sp.Color,
+		Prompt:                      sp.Prompt,
+		Events:                      models.ConvertReviewProfileToID(models.ConvertPositionToStepID(sp.Events, posToID), matchProfile),
+		IsStartStep:                 sp.IsStartStep,
+		ShowInCommandPanel:          sp.ShowInCommandPanel,
+		AllowManualMove:             sp.AllowManualMove,
+		AutoArchiveAfterHours:       sp.AutoArchiveAfterHours,
+		ProfileSessionStartPolicy:   taskmodels.NormalizeWorkflowProfileSessionStartPolicy(string(sp.ProfileSessionStartPolicy)),
+		ProfileSessionEndPolicy:     taskmodels.NormalizeWorkflowProfileSessionEndPolicy(string(sp.ProfileSessionEndPolicy)),
+		DisableUnclassifiedFallback: sp.DisableUnclassifiedFallback,
+		SessionTarget:               sp.WorkflowSessionTarget(posToID),
+		AutoAdvanceRequiresSignal:   sp.AutoAdvanceRequiresSignal,
+		CancelTriggersTurnComplete:  sp.CancelTriggersTurnComplete,
+		CompleteTaskOnEnter:         sp.CompleteTaskOnEnter,
+		WIPLimit:                    sp.WIPLimit,
+		PullFromStepID:              sp.PullFromStepID(posToID),
 	}
 	if matchDirectProfile && sp.AgentProfile != nil && matchProfile != nil {
 		step.AgentProfileID = matchProfile(sp.AgentProfile.AgentName, sp.AgentProfile.Model, sp.AgentProfile.Mode, existingProfileID)

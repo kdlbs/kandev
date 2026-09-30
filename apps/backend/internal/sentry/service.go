@@ -501,8 +501,14 @@ func (s *Service) ListProjects(ctx context.Context, workspaceID, instanceID stri
 	return client.ListProjects(ctx)
 }
 
-// SearchIssues runs a filtered search against one instance's client.
+// SearchIssues runs a filtered search against one instance's client. The
+// lookback is validated here because browse requests do not pass through the
+// issue-watch write validation path.
 func (s *Service) SearchIssues(ctx context.Context, workspaceID, instanceID string, filter SearchFilter, cursor string) (*SearchResult, error) {
+	filter.StatsPeriod = strings.TrimSpace(filter.StatsPeriod)
+	if err := validateFilterStatsPeriod(filter); err != nil {
+		return nil, err
+	}
 	client, err := s.browseClient(ctx, workspaceID, instanceID)
 	if err != nil {
 		return nil, err

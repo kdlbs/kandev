@@ -55,11 +55,38 @@ func TestPluginsTaskWriter_MoveStepHistoryOptions(t *testing.T) {
 	require.NotEqual(t, wfmodels.StepTransitionActorHuman, svc.lastMoveOpts.StepHistoryActor)
 	require.False(t, svc.lastMoveOpts.AllowActivePrimarySession,
 		"a plugin move must take the agent-shaped option and reject a live session (AC-001.8), not the board's AllowActivePrimarySession")
+	require.NotNil(t, svc.lastMoveOpts.ExactOperation, "legacy plugin moves must still pass through the atomic claim fence")
+	require.Empty(t, svc.lastMoveOpts.ExactOperation.ClaimFence, "legacy writes have no manager generation")
+}
+
+func TestPluginsTaskWriter_LegacyMoveUsesReleasedClaimGeneration(t *testing.T) {
+	svc := &fakePluginTaskWriteService{claimResult: &taskmodels.TaskManagementClaim{Generation: 7}}
+	wf := "wf-1"
+	_, err := (pluginsTaskWriterAdapter{svc: svc}).MoveTask(context.Background(), plugins.TaskMoveInput{
+		TaskID: "task-1", WorkflowStepID: "step-2", WorkflowID: &wf,
+	})
+	require.NoError(t, err)
+	require.NotNil(t, svc.lastMoveOpts.ExactOperation)
+	require.Equal(t, int64(7), svc.lastMoveOpts.ExactOperation.ClaimFence.Generation)
+}
+
+func TestPluginsTaskWriter_LegacyMoveRejectsActiveManager(t *testing.T) {
+	svc := &fakePluginTaskWriteService{claimResult: &taskmodels.TaskManagementClaim{
+		OwnerKind: "human", OwnerActorID: "user-1", Generation: 3,
+	}}
+	wf := "wf-1"
+	_, err := (pluginsTaskWriterAdapter{svc: svc}).MoveTask(context.Background(), plugins.TaskMoveInput{
+		TaskID: "task-1", WorkflowStepID: "step-2", WorkflowID: &wf,
+	})
+	require.Equal(t, codes.Aborted, status.Code(err))
+	require.Zero(t, svc.moveCalls)
 }
 
 // TestPluginsTaskWriter_MoveExplicitWorkflowIDPassesThrough pins that a
 // caller-supplied workflow_id is used as-is and never overridden by the
-// task's current workflow.
+// task's current workflow. The task read below supplies the resource version
+// and claim state for the atomic legacy-write fence; it does not resolve the
+// explicit workflow ID.
 func TestPluginsTaskWriter_MoveExplicitWorkflowIDPassesThrough(t *testing.T) {
 	svc := &fakePluginTaskWriteService{getTaskResult: &taskmodels.Task{ID: "task-1", WorkflowID: "wf-current"}}
 	a := pluginsTaskWriterAdapter{svc: svc}
@@ -68,7 +95,7 @@ func TestPluginsTaskWriter_MoveExplicitWorkflowIDPassesThrough(t *testing.T) {
 	_, err := a.MoveTask(context.Background(), plugins.TaskMoveInput{TaskID: "task-1", WorkflowStepID: "step-2", WorkflowID: &wf})
 	require.NoError(t, err)
 	require.Equal(t, "wf-explicit", svc.lastMoveWfID)
-	require.Equal(t, "", svc.lastGetTaskID, "an explicit workflow_id needs no task read to resolve it")
+	require.Equal(t, "task-1", svc.lastGetTaskID, "legacy moves read the task to fence the write against its current claim")
 }
 
 // TestPluginsTaskWriter_MoveNilWorkflowIDInheritsCurrent pins AC-005.4: an

@@ -39,12 +39,13 @@ func (h *canvasHTTPHandler) runtimeBinding(c *gin.Context, canvas canvasservice.
 		WebAppKey:       app.Key,
 		Placement:       placement,
 		ScopeKind:       instance.ScopeKind,
+		DataScopeKind:   instance.EffectiveDataScopeKind(),
 		WorkspaceID:     instance.WorkspaceID,
 		TaskID:          instance.TaskID,
 		SessionID:       instance.SessionID,
 		RepositoryID:    instance.RepositoryID,
 		GrantGeneration: instance.GrantGeneration,
-		Permissions:     runtimeGrantedPermissions(appManifest, instance.ScopeKind, grants),
+		Permissions:     runtimeGrantedPermissions(appManifest, instance.EffectiveDataScopeKind(), grants),
 		Artifact: webapp.Artifact{
 			Digest:       release.PackageDigest,
 			RelativePath: release.ArtifactPath,
@@ -52,7 +53,7 @@ func (h *canvasHTTPHandler) runtimeBinding(c *gin.Context, canvas canvasservice.
 			Available:    true,
 		},
 		Entry:          app.Entry,
-		NetworkOrigins: runtimeNetworkOrigins(app, instance.ScopeKind, grants),
+		NetworkOrigins: runtimeNetworkOrigins(app, instance.EffectiveDataScopeKind(), grants),
 	}
 	runtime := h.plugins.WebRuntime()
 	if runtime == nil {
@@ -141,6 +142,10 @@ func (h *canvasHTTPHandler) writeError(c *gin.Context, err error) {
 		status, code = http.StatusBadRequest, canvasErrorCodeInvalid
 	case errors.Is(err, canvasservice.ErrStalePromotionReview):
 		status, code = http.StatusConflict, "promotion_review_stale"
+	case errors.Is(err, canvasservice.ErrStaleWorkspaceDataReview):
+		status, code = http.StatusConflict, "workspace_data_review_stale"
+	case errors.Is(err, instances.ErrWorkspaceOwnerRequired):
+		status, code = http.StatusForbidden, "workspace_owner_required"
 	case errors.Is(err, canvasservice.ErrStaleCanvasEdit):
 		status, code = http.StatusConflict, "canvas_edit_stale"
 	case errors.Is(err, canvasservice.ErrInvalidCanvas), errors.Is(err, canvasservice.ErrInvalidCanvasState):

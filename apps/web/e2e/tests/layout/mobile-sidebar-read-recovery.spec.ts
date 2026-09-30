@@ -49,7 +49,7 @@ test("mobile task drawer retains rows while workspace context refresh recovers",
   await failedWorkflowRead;
   await session.waitForLoad();
   const drawer = testPage.getByRole("dialog", { name: "Tasks", exact: true });
-  await testPage.getByTestId("mobile-session-menu").tap();
+  await testPage.getByTestId("mobile-task-picker-trigger").tap();
   await expect(drawer).toBeVisible();
   await expect(drawer.getByText("Mobile retained task", { exact: true })).toBeVisible();
   await expect(drawer.getByTestId("sidebar-task-load-error")).toBeVisible();
@@ -68,26 +68,45 @@ test("mobile task drawer retains rows while workspace context refresh recovers",
   await expect(drawer.getByText("Mobile retained task", { exact: true })).toBeVisible();
 });
 
-test("mobile task drawer surfaces a failed workflow snapshot and recovers", async ({
+test("mobile task drawer surfaces a failed sidebar page and recovers", async ({
   testPage,
   apiClient,
   seedData,
 }) => {
-  const task = await apiClient.createTask(seedData.workspaceId, "Mobile snapshot retained task", {
+  const task = await apiClient.createTask(seedData.workspaceId, "Mobile page retained task", {
     workflow_id: seedData.workflowId,
     workflow_step_id: seedData.startStepId,
   });
-  let snapshotUnavailable = true;
+  await apiClient.archiveTask(task.id);
+  await apiClient.saveUserSettings({
+    sidebar_view_state: {
+      workspace_id: seedData.workspaceId,
+      views: [
+        {
+          id: "cold-archive",
+          name: "Cold archive",
+          filters: [{ id: "archive", dimension: "archived", op: "is", value: true }],
+          sort: { key: "title", direction: "asc" },
+          group: "none",
+          collapsed_groups: [],
+        },
+      ],
+      active_view_id: "cold-archive",
+      draft: null,
+    },
+  });
+  let sidebarPageUnavailable = true;
   await testPage.route("**/api/v1/**", async (route) => {
     const url = new URL(route.request().url());
     if (
-      snapshotUnavailable &&
-      url.pathname === `/api/v1/workflows/${seedData.workflowId}/snapshot`
+      sidebarPageUnavailable &&
+      route.request().method() === "POST" &&
+      url.pathname === `/api/v1/workspaces/${seedData.workspaceId}/sidebar/query`
     ) {
       await route.fulfill({
         status: 503,
         contentType: "application/json",
-        json: { error: "workflow snapshot temporarily unavailable" },
+        json: { error: "sidebar page temporarily unavailable" },
       });
       return;
     }
@@ -97,39 +116,39 @@ test("mobile task drawer surfaces a failed workflow snapshot and recovers", asyn
   const workflowListLoaded = waitForHttp(testPage, "GET", /^\/api\/v1\/workflows$/, {
     predicate: (response) => response.ok(),
   });
-  const failedSnapshotRead = waitForHttp(
-    testPage,
-    "GET",
-    new RegExp(`^/api/v1/workflows/${seedData.workflowId}/snapshot$`),
-    { predicate: (response) => response.status() === 503 },
-  );
   await testPage.goto(`/t/${task.id}`);
   const session = new SessionPage(testPage);
   await session.waitForLoad();
   await expect(testPage.getByTestId("mobile-task-layout")).toBeVisible();
   await workflowListLoaded;
-  await failedSnapshotRead;
 
   const drawer = testPage.getByRole("dialog", { name: "Tasks", exact: true });
-  await testPage.getByTestId("mobile-session-menu").tap();
+  const failedSidebarPageRead = waitForHttp(
+    testPage,
+    "POST",
+    new RegExp(`^/api/v1/workspaces/${seedData.workspaceId}/sidebar/query$`),
+    { predicate: (response) => response.status() === 503 },
+  );
+  await testPage.getByTestId("mobile-task-picker-trigger").tap();
   await expect(drawer).toBeVisible();
-  await expect(drawer.getByTestId("sidebar-task-load-error")).toBeVisible();
+  await failedSidebarPageRead;
+  await expect(drawer.getByTestId("sidebar-task-page-load-error")).toBeVisible();
   await expect(drawer.getByText("No tasks yet.", { exact: true })).toHaveCount(0);
 
-  const retry = drawer.getByRole("button", { name: "Retry", exact: true });
+  const retry = drawer.getByRole("alert").getByRole("button", { name: "Retry", exact: true });
   const retryBox = await retry.boundingBox();
   if (!retryBox) throw new Error("mobile sidebar retry control is not visible");
   expect(retryBox.height).toBeGreaterThanOrEqual(44);
 
-  snapshotUnavailable = false;
-  const recoveredSnapshotRead = waitForHttp(
+  sidebarPageUnavailable = false;
+  const recoveredSidebarPageRead = waitForHttp(
     testPage,
-    "GET",
-    new RegExp(`^/api/v1/workflows/${seedData.workflowId}/snapshot$`),
+    "POST",
+    new RegExp(`^/api/v1/workspaces/${seedData.workspaceId}/sidebar/query$`),
     { predicate: (response) => response.ok() },
   );
   await retry.tap();
-  await recoveredSnapshotRead;
-  await expect(drawer.getByTestId("sidebar-task-load-error")).toHaveCount(0);
-  await expect(drawer.getByText("Mobile snapshot retained task", { exact: true })).toBeVisible();
+  await recoveredSidebarPageRead;
+  await expect(drawer.getByTestId("sidebar-task-page-load-error")).toHaveCount(0);
+  await expect(drawer.getByText("Mobile page retained task", { exact: true })).toBeVisible();
 });

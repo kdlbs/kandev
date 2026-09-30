@@ -121,5 +121,21 @@
   "newViewNumbered": "新视图 {{suffix}}",
   "untitledView": "未命名视图",
   "workspaceContextRefreshFailed": "无法刷新任务。",
-  "workspaceContextAccessDenied": "您已无法访问此工作区。"
+  "workspaceContextAccessDenied": "您已无法访问此工作区。",
+  "continuedFrom": "从 {{title}} 继续",
+  "continuationLabel": "续",
+  "selectedTaskCount_one": "已选择 {{count}} 项任务",
+  "selectedTaskCount_other": "已选择 {{count}} 项任务",
+  "clearSelection": "清除选择",
+  "nextPage": "下一页",
+  "pageLoadFailed": "无法加载此页面。",
+  "pageStatus": "第 {{page}} 页，共 {{total}} 页",
+  "previousPage": "上一页",
+  "queryRefreshing": "正在更新任务...",
+  "queryRefreshFailed": "无法刷新任务。",
+  "queryInvalid": "无法加载此任务视图。请检查筛选条件和视图设置。",
+  "filterListLimit": "筛选条件 {{filter}} 的选项过多。最多可选择 {{limit}} 项。",
+  "filterValueLimit": "筛选条件 {{filter}} 中的值过长。请限制在 {{limit}} 字节以内。",
+  "filterInvalid": "筛选条件 {{filter}} 无效。请检查其值和运算符。",
+  "filterCountLimit": "此视图的筛选条件过多。最多可使用 {{limit}} 个。"
 }

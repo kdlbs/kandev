@@ -588,6 +588,37 @@ func TestExecutor_Prompt_PassthroughSubmitDelaySplitsWrites(t *testing.T) {
 	}
 }
 
+func TestExecutor_Prompt_PassthroughCancellationStopsDelayedSubmit(t *testing.T) {
+	repo := newMockRepository()
+	ctx, cancel := context.WithCancel(context.Background())
+	agentManager := &mockAgentManager{
+		isPassthroughSessionFunc: func(_ context.Context, _ string) bool { return true },
+		resolvePassthroughConfigFunc: func(_ context.Context, _ string) (agents.PassthroughConfig, error) {
+			return agents.PassthroughConfig{
+				Supported:             true,
+				SubmitSequence:        "\r",
+				DisableBracketedPaste: true,
+				SubmitDelay:           time.Second,
+			}, nil
+		},
+		writePassthroughStdinFunc: func(_ context.Context, _ string, data string) error {
+			if data == "hello agent" {
+				cancel()
+			}
+			return nil
+		},
+	}
+	seedPassthroughSession(t, repo, agentManager, "task-1", "sess-1", "exec-1")
+	exec := newTestExecutor(t, agentManager, repo)
+
+	if _, err := exec.Prompt(ctx, "task-1", "sess-1", "hello agent", nil, false); !errors.Is(err, context.Canceled) {
+		t.Fatalf("Prompt error = %v, want context cancellation", err)
+	}
+	if got := len(agentManager.writePassthroughStdinCalls); got != 1 {
+		t.Fatalf("stdin calls after cancellation = %d, want 1", got)
+	}
+}
+
 func TestExecutor_Prompt_ACPPathUnchanged(t *testing.T) {
 	repo := newMockRepository()
 	agentManager := &mockAgentManager{
@@ -629,6 +660,35 @@ func TestExecutor_PromptWithDispatchCallback_RequiresCapableManager(t *testing.T
 	}
 	if called {
 		t.Fatal("callback must not run after a fallback PromptAgent completion")
+	}
+	if agentManager.promptAgentCallCount != 0 {
+		t.Fatalf("PromptAgent fallback must not run, got %d calls", agentManager.promptAgentCallCount)
+	}
+}
+
+func TestExecutor_PromptWithAdmissionCallback_RequiresCapableManager(t *testing.T) {
+	repo := newMockRepository()
+	agentManager := &mockAgentManager{
+		isPassthroughSessionFunc: func(_ context.Context, _ string) bool { return false },
+	}
+	seedPassthroughSession(t, repo, agentManager, "task-1", "sess-1", "exec-1")
+	exec := newTestExecutor(t, agentManager, repo)
+
+	beforeAdmissionCalled := false
+	onDispatchedCalled := false
+	_, err := exec.PromptWithAdmissionCallback(
+		context.Background(), "task-1", "sess-1", "hello", nil, false,
+		func() error {
+			beforeAdmissionCalled = true
+			return nil
+		},
+		func() { onDispatchedCalled = true },
+	)
+	if !errors.Is(err, ErrPromptAdmissionCallbackUnsupported) {
+		t.Fatalf("expected explicit prompt admission capability error, got: %v", err)
+	}
+	if beforeAdmissionCalled || onDispatchedCalled {
+		t.Fatal("callbacks must not run when the agent manager cannot revalidate admission")
 	}
 	if agentManager.promptAgentCallCount != 0 {
 		t.Fatalf("PromptAgent fallback must not run, got %d calls", agentManager.promptAgentCallCount)

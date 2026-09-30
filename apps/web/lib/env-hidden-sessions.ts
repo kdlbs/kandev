@@ -37,3 +37,16 @@ export function setEnvHiddenSessions(envId: string, sessionIds: string[]): void 
     sessionIds.map((id) => `${id}@${owners.get(id) ?? ""}`),
   );
 }
+
+/** Keep implicit selection on a visible session without clearing explicit hide records. */
+export function resolveVisibleSessionId(
+  activeSessionId: string | null,
+  sessionIds: readonly string[],
+  hiddenSessionIds: Iterable<string>,
+): string | null {
+  if (!activeSessionId) return null;
+  const hidden = new Set(hiddenSessionIds);
+  return hidden.has(activeSessionId)
+    ? (sessionIds.find((sessionId) => !hidden.has(sessionId)) ?? null)
+    : activeSessionId;
+}

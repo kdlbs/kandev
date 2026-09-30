@@ -14,6 +14,7 @@ import type {
   WorkflowSessionTarget,
   TaskPriority,
   SidebarTaskColorPatchApi,
+  WorkflowAgentOverrides,
 } from "../../lib/types/http";
 import type { Agent, AgentProfile, AvailableAgent } from "../../lib/types/http-agents";
 import type { SidebarTaskColorAutomation } from "../../lib/task-color-automation-settings";
@@ -207,6 +208,7 @@ type WorkflowStepCreateOpts = {
   is_start_step?: boolean;
   agent_profile_id?: string;
   session_target?: WorkflowSessionTarget | null;
+  disable_unclassified_fallback?: boolean;
   profile_session_start_policy?: WorkflowProfileSessionStartPolicy;
   profile_session_end_policy?: WorkflowProfileSessionEndPolicy;
   auto_advance_requires_signal?: boolean;
@@ -225,23 +227,42 @@ function buildWorkflowStepCreateBody(
   opts?: WorkflowStepCreateOpts,
 ): Record<string, unknown> {
   const body: Record<string, unknown> = { workflow_id: workflowId, name, position };
+  setWorkflowStepCreateFields(body, opts);
+  return body;
+}
+
+function setWorkflowStepCreateFields(body: Record<string, unknown>, opts?: WorkflowStepCreateOpts) {
+  if (!opts) return;
   if (opts?.is_start_step !== undefined) body.is_start_step = opts.is_start_step;
   setIf(body, "agent_profile_id", opts?.agent_profile_id);
   if (opts?.session_target !== undefined) body.session_target = opts.session_target;
+  if (opts?.disable_unclassified_fallback !== undefined) {
+    body.disable_unclassified_fallback = opts.disable_unclassified_fallback;
+  }
+  setWorkflowStepCreatePolicies(body, opts);
+  setWorkflowStepCreateSignals(body, opts);
+  setIf(body, "events", opts.events);
+}
+
+function setWorkflowStepCreatePolicies(
+  body: Record<string, unknown>,
+  opts: WorkflowStepCreateOpts,
+) {
   if (opts?.profile_session_start_policy) {
     body.profile_session_start_policy = opts.profile_session_start_policy;
   }
   if (opts?.profile_session_end_policy) {
     body.profile_session_end_policy = opts.profile_session_end_policy;
   }
+}
+
+function setWorkflowStepCreateSignals(body: Record<string, unknown>, opts: WorkflowStepCreateOpts) {
   if (opts?.auto_advance_requires_signal !== undefined) {
     body.auto_advance_requires_signal = opts.auto_advance_requires_signal;
   }
   if (opts?.complete_task_on_enter !== undefined) {
     body.complete_task_on_enter = opts.complete_task_on_enter;
   }
-  setIf(body, "events", opts?.events);
-  return body;
 }
 
 type CreateRepositoryOpts = {
@@ -279,6 +300,7 @@ type CreateTaskOpts = {
   description?: string;
   workflow_id?: string;
   workflow_step_id?: string;
+  workflow_agent_overrides?: Record<string, string>;
   agent_profile_id?: string;
   /** Prepare a CREATED session without launching the agent. */
   prepare_session?: boolean;
@@ -350,6 +372,7 @@ function buildCreateTaskBody(
   };
   setIf(body, "workflow_id", options.workflow_id);
   setIf(body, "workflow_step_id", options.workflow_step_id);
+  setIf(body, "workflow_agent_overrides", options.workflow_agent_overrides);
   setIf(body, "priority", options.priority);
   setIf(body, "agent_profile_id", options.agent_profile_id);
   if (options.prepare_session) body.prepare_session = true;
@@ -386,6 +409,7 @@ type MessageAttachmentInput = {
 type OptionalAgentTaskOpts = {
   workflow_id?: string;
   workflow_step_id?: string;
+  workflow_agent_overrides?: Record<string, string>;
   repository_ids?: string[];
   repositories?: TaskRepositoryInput[];
   executor_id?: string;
@@ -417,6 +441,7 @@ function buildOptionalAgentTaskFields(opts?: OptionalAgentTaskOpts): Record<stri
   if (!opts) return fields;
   setIf(fields, "workflow_id", opts.workflow_id);
   setIf(fields, "workflow_step_id", opts.workflow_step_id);
+  setIf(fields, "workflow_agent_overrides", opts.workflow_agent_overrides);
   setIf(fields, "repositories", pickRepositories(opts));
   setIf(fields, "executor_id", opts.executor_id);
   setIf(fields, "executor_profile_id", opts.executor_profile_id);
@@ -433,6 +458,8 @@ function buildOptionalAgentTaskFields(opts?: OptionalAgentTaskOpts): Record<stri
   return fields;
 }
 
+const MAX_TASK_DELETE_PREVIEW_ATTEMPTS = 3;
+
 /**
  * HTTP API client for seeding test data via the backend REST API.
  */
@@ -444,20 +471,26 @@ export class ApiClient {
     method: string,
     path: string,
     body?: unknown,
-    options?: Pick<RequestInit, "redirect">,
+    options?: Pick<RequestInit, "redirect"> & { extraHeaders?: Record<string, string> },
   ): Promise<Response> {
+    const { extraHeaders, ...requestOptions } = options ?? {};
     return fetch(`${this.baseUrl}${path}`, {
       method,
-      headers: await this.requestHeaders(method, body),
+      headers: { ...(await this.requestHeaders(method, body)), ...extraHeaders },
       body: body ? JSON.stringify(body) : undefined,
-      ...options,
+      ...requestOptions,
     });
   }
 
-  private async request<T>(method: string, path: string, body?: unknown): Promise<T> {
+  private async request<T>(
+    method: string,
+    path: string,
+    body?: unknown,
+    extraHeaders?: Record<string, string>,
+  ): Promise<T> {
     const res = await fetch(`${this.baseUrl}${path}`, {
       method,
-      headers: await this.requestHeaders(method, body),
+      headers: { ...(await this.requestHeaders(method, body)), ...extraHeaders },
       body: body ? JSON.stringify(body) : undefined,
     });
     if (!res.ok) {
@@ -471,7 +504,12 @@ export class ApiClient {
     method: string,
     body?: unknown,
   ): Promise<Record<string, string> | undefined> {
-    const headers: Record<string, string> = body ? { "Content-Type": "application/json" } : {};
+    // This client is worker-scoped, but its backend can restart during a test.
+    // Do not let fetch reuse an idle keep-alive socket from the previous process.
+    const headers: Record<string, string> = {
+      Connection: "close",
+      ...(body ? { "Content-Type": "application/json" } : {}),
+    };
     if (["POST", "PUT", "PATCH", "DELETE"].includes(method.toUpperCase())) {
       headers["X-Kandev-Interim-Settings-Interlock"] = await loadInterimSettingsInterlockToken(
         this.baseUrl,
@@ -635,6 +673,31 @@ export class ApiClient {
     return this.request("GET", "/api/v1/agents/available");
   }
 
+  async createCustomTUIAgent(options: {
+    display_name: string;
+    command: string;
+    model?: string;
+    description?: string;
+    mcp_strategy?: string;
+    protocol?: "acp";
+  }): Promise<Agent> {
+    const created = await this.request<{ name: string }>("POST", "/api/v1/agents/tui", options);
+    const { agents } = await this.listAgents();
+    const agent = agents.find((candidate) => candidate.name === created.name);
+    if (!agent)
+      throw new Error(`Custom TUI agent ${created.name} was not returned by the agent list`);
+    return agent;
+  }
+
+  /** Removes a custom agent by slug, so a spec that creates one leaves the
+   * worker's agent list as it found it. Missing is not an error. */
+  async deleteCustomAgentByName(name: string): Promise<void> {
+    const { agents } = await this.listAgents();
+    const agent = agents.find((candidate) => candidate.name === name);
+    if (!agent) return;
+    await this.request("DELETE", `/api/v1/agents/${agent.id}`);
+  }
+
   async deleteAgentProfile(profileId: string, force?: boolean): Promise<void> {
     const qs = force ? "?force=true" : "";
     await this.request("DELETE", `/api/v1/agent-profiles/${profileId}${qs}`);
@@ -647,7 +710,7 @@ export class ApiClient {
   /**
    * Delete kanban-only agent profiles except the ones in keepIds.
    *
-   * Office-scoped profiles (those with a non-empty `workspace_id`) are
+   * Office-scoped profiles (those with a non-empty `workspaceId`) are
    * always preserved — they belong to onboarded office workspaces and
    * are managed via the office agent endpoints, not by this helper.
    * Without this guard the per-test cleanup deletes the seeded CEO and
@@ -657,8 +720,7 @@ export class ApiClient {
     const { agents } = await this.listAgents();
     for (const agent of agents) {
       for (const profile of agent.profiles ?? []) {
-        const wsId = (profile as unknown as { workspace_id?: string }).workspace_id;
-        if (wsId) continue;
+        if (profile.workspaceId) continue;
         if (!keepIds.includes(profile.id)) {
           await this.deleteTestProfile(profile.id);
         }
@@ -745,6 +807,46 @@ export class ApiClient {
     return normalizeAgentProfile(response);
   }
 
+  async createDynamicAgentProfile(
+    name: string,
+    candidates: Array<{
+      executionProfileId: string;
+      enabled: boolean;
+      unclassifiedEnabled: boolean;
+      consecutiveFailureThreshold: number;
+    }>,
+  ): Promise<AgentProfile> {
+    const errorPolicy = {
+      retry: { enabled: false, max_retries: 0, initial_interval_seconds: 0 },
+      wait_for_reset: { enabled: false, max_wait_seconds: 0 },
+      on_exhausted: "stop",
+    };
+    const response = await this.request<unknown>("POST", "/api/v1/agents/dynamic/profiles", {
+      name,
+      model: "",
+      dynamic: {
+        version: 1,
+        candidates: candidates.map((candidate, position) => ({
+          position,
+          execution_profile_id: candidate.executionProfileId,
+          enabled: candidate.enabled,
+          policies: {
+            version: 1,
+            transient: errorPolicy,
+            hard: errorPolicy,
+            unclassified: {
+              enabled: candidate.unclassifiedEnabled,
+              consecutive_failure_threshold: candidate.unclassifiedEnabled
+                ? candidate.consecutiveFailureThreshold
+                : 0,
+            },
+          },
+        })),
+      },
+    });
+    return normalizeAgentProfile(response);
+  }
+
   async getAgentProfile(profileId: string): Promise<AgentProfile> {
     // The profile does not have its own GET endpoint; fetch via listAgents
     // and find the matching row. Keeps the helper surface small.
@@ -818,6 +920,7 @@ export class ApiClient {
       description?: string;
       workflow_id?: string;
       workflow_step_id?: string;
+      workflow_agent_overrides?: Record<string, string>;
       repository_ids?: string[];
       /** Full repository entries with optional checkout_branch / base_branch / pr_number. */
       repositories?: TaskRepositoryInput[];
@@ -1058,6 +1161,9 @@ export class ApiClient {
   async updateRepository(
     repositoryId: string,
     updates: {
+      source_type?: string;
+      local_path?: string;
+      provider_scope?: string;
       default_branch?: string;
       pull_before_worktree?: boolean;
       provider?: string;
@@ -1065,6 +1171,7 @@ export class ApiClient {
       provider_host?: string;
       provider_owner?: string;
       provider_name?: string;
+      remote_url?: string;
       dev_script?: string;
       setup_script?: string;
       cleanup_script?: string;
@@ -1182,6 +1289,7 @@ export class ApiClient {
       name: string;
       type: string;
       profiles?: Array<{ id: string; name: string }>;
+      provider?: { plugin_id?: string; key?: string };
     }>;
   }> {
     return this.request("GET", "/api/v1/executors");
@@ -1227,6 +1335,9 @@ export class ApiClient {
       terminal_font_family?: string;
       terminal_font_size?: number;
       startup_page?: "task_overview" | "last_task" | "threads";
+      sidebar_hover_enabled?: boolean;
+      sidebar_hover_delay_ms?: number;
+      sidebar_layouts_by_workspace?: Record<string, { revision: number; [key: string]: unknown }>;
       mcp_task_agent_profile_default?: MCPTaskAgentProfileDefault;
       tasks_list_show_details?: boolean;
       show_transcript_auto_scroll_control?: boolean;
@@ -1259,15 +1370,27 @@ export class ApiClient {
     terminal_font_family?: string;
     terminal_font_size?: number;
     startup_page?: "task_overview" | "last_task" | "threads";
+    sidebar_hover_enabled?: boolean;
+    sidebar_hover_delay_ms?: number;
     keyboard_shortcuts?: Record<string, unknown>;
     default_utility_agent_id?: string;
     default_utility_model?: string;
     default_utility_agent_profile_id?: string;
+    sidebar_task_prefs?: {
+      pinned_task_ids?: string[];
+      ordered_task_ids?: string[];
+      subtask_order_by_parent_id?: Record<string, string[]>;
+    };
     sidebar_view_state?: {
       workspace_id: string;
       views?: unknown[];
       active_view_id?: string;
       draft?: unknown;
+    };
+    sidebar_layout_state?: {
+      workspace_id: string;
+      expected_revision: number;
+      layout?: unknown;
     };
     thread_views?: unknown[];
     thread_active_view_id?: string;
@@ -1351,6 +1474,7 @@ export class ApiClient {
       profile_session_start_policy?: WorkflowProfileSessionStartPolicy;
       profile_session_end_policy?: WorkflowProfileSessionEndPolicy;
       session_target?: WorkflowSessionTarget | null;
+      disable_unclassified_fallback?: boolean;
     },
   ): Promise<void> {
     await this.request("PUT", `/api/v1/workflow/steps/${stepId}`, { id: stepId, ...updates });
@@ -1397,12 +1521,53 @@ export class ApiClient {
     return res.json() as Promise<{ created: string[]; skipped: string[] }>;
   }
 
-  async deleteTask(taskId: string): Promise<void> {
-    await this.request("DELETE", `/api/v1/tasks/${taskId}`);
+  async deleteTask(
+    taskId: string,
+    options?: { cascade?: boolean; discardWorktreeChanges?: boolean },
+  ): Promise<void> {
+    const cascade = options?.cascade ?? false;
+    const discardWorktreeChanges = options?.discardWorktreeChanges ?? false;
+    const query = new URLSearchParams();
+    if (cascade) query.set("cascade", "true");
+    if (discardWorktreeChanges) query.set("discard_worktree_changes", "true");
+    const queryString = query.toString() ? `?${query.toString()}` : "";
+    const deletePath = `/api/v1/tasks/${taskId}${queryString}`;
+    for (let attempt = 0; attempt < MAX_TASK_DELETE_PREVIEW_ATTEMPTS; attempt += 1) {
+      const preview = await this.request<{ confirmation_id: string }>(
+        "POST",
+        "/api/v1/tasks/delete-preflight",
+        { task_ids: [taskId], cascade, discard_worktree_changes: discardWorktreeChanges },
+      );
+      const response = await this.rawRequest("DELETE", deletePath, undefined, {
+        extraHeaders: { "X-Kandev-Task-Delete-Confirmation": preview.confirmation_id },
+      });
+      if (response.ok) {
+        await response.json();
+        return;
+      }
+
+      const text = await response.text();
+      let isStalePreview = false;
+      if (response.status === 409) {
+        try {
+          const payload = JSON.parse(text) as { error?: unknown };
+          isStalePreview = payload.error === "task deletion preview is no longer current";
+        } catch {
+          isStalePreview = false;
+        }
+      }
+      if (!isStalePreview || attempt === MAX_TASK_DELETE_PREVIEW_ATTEMPTS - 1) {
+        throw new Error(`API DELETE ${deletePath} failed (${response.status}): ${text}`);
+      }
+    }
   }
 
   async archiveTask(taskId: string): Promise<void> {
     await this.request("POST", `/api/v1/tasks/${taskId}/archive`);
+  }
+
+  async unarchiveTask(taskId: string): Promise<void> {
+    await this.request("POST", `/api/v1/tasks/${taskId}/unarchive`);
   }
 
   async getAgentProfileMcpConfig(
@@ -1422,7 +1587,31 @@ export class ApiClient {
 
   async e2eReset(workspaceId: string, keepWorkflowIds?: string[]): Promise<void> {
     const params = keepWorkflowIds?.length ? `?keep_workflows=${keepWorkflowIds.join(",")}` : "";
-    await this.request("DELETE", `/api/v1/e2e/reset/${workspaceId}${params}`);
+    const path = `/api/v1/e2e/reset/${workspaceId}${params}`;
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+      const response = await this.rawRequest("DELETE", path);
+      if (response.ok) return;
+
+      const body = await response.text();
+      const transientWorktreeInspection =
+        response.status === 500 &&
+        body.includes("exit status 128") &&
+        (body.includes("inspect worktrees before delete") ||
+          body.includes("capture worktree cleanup identities") ||
+          body.includes("capture cleanup identity"));
+      if (!transientWorktreeInspection || attempt === 3) {
+        throw new Error(`API DELETE ${path} failed (${response.status}): ${body}`);
+      }
+
+      // A task cleanup worker can remove a checkout between the reset's
+      // inventory read and its dirty-worktree inspection. Retry the complete
+      // reset after the worker has had time to publish its deletion.
+      await dwell(
+        250 * (attempt + 1),
+        "poll-interval",
+        "retry interval for the E2E reset after a transient worktree inspection race",
+      );
+    }
   }
 
   /**
@@ -2040,6 +2229,7 @@ export class ApiClient {
     review_state?: string;
     checks_state?: string;
     mergeable_state?: string;
+    has_merge_conflicts?: boolean;
     merge_queue_state?: string;
     merge_queue_position?: number | null;
     merge_queue_entry_id?: string;
@@ -2097,6 +2287,7 @@ export class ApiClient {
     review_state: string;
     checks_state: string;
     mergeable_state: string;
+    has_merge_conflicts?: boolean | null;
     merge_queue_state?: string;
     merge_queue_position?: number | null;
     merge_queue_estimated_time_to_merge_seconds?: number | null;
@@ -2492,9 +2683,38 @@ export class ApiClient {
       turn_id?: string;
       raw_content?: string;
       metadata?: Record<string, unknown>;
+      created_at?: string;
+      updated_at?: string;
     }>;
   }> {
-    return this.request("GET", `/api/v1/task-sessions/${sessionId}/messages`);
+    // The production endpoint intentionally caps explicit pages at 100. E2E
+    // callers use this helper for authoritative fixture inspection, so follow
+    // the cursor explicitly instead of relying on the bounded default page.
+    const messages: Array<{
+      id: string;
+      content: string;
+      author_type: string;
+      type?: string;
+      turn_id?: string;
+      raw_content?: string;
+      metadata?: Record<string, unknown>;
+      created_at?: string;
+      updated_at?: string;
+    }> = [];
+    let after = "";
+    for (;;) {
+      const query = new URLSearchParams({ limit: "100", sort: "asc" });
+      if (after) query.set("after", after);
+      const page = await this.request<{
+        messages: typeof messages;
+        has_more?: boolean;
+        cursor?: string;
+      }>("GET", `/api/v1/task-sessions/${sessionId}/messages?${query.toString()}`);
+      messages.push(...page.messages);
+      if (!page.has_more || !page.cursor || page.cursor === after) break;
+      after = page.cursor;
+    }
+    return { messages };
   }
 
   async listSessionTurns(sessionId: string): Promise<{
@@ -2556,6 +2776,10 @@ export class ApiClient {
       agent_profile_id?: string;
       executor_id?: string;
       executor_profile_id?: string;
+      execution_profile_id?: string;
+      route_generation?: number;
+      route_state?: string;
+      route_reason?: string;
       state: string;
       is_primary: boolean;
       started_at: string;
@@ -2565,13 +2789,30 @@ export class ApiClient {
       workspace_path?: string;
       worktree_path?: string;
       worktree_branch?: string;
-      worktrees?: Array<{ repository_id?: string; worktree_path?: string }>;
+      worktrees?: Array<{
+        id?: string;
+        worktree_id?: string;
+        repository_id?: string;
+        worktree_path?: string;
+      }>;
       error_message?: string;
       metadata?: Record<string, unknown>;
     }>;
     total: number;
   }> {
     return this.request("GET", `/api/v1/tasks/${taskId}/sessions`);
+  }
+
+  async getTaskSession(sessionId: string): Promise<{
+    session: {
+      id: string;
+      task_id: string;
+      agent_profile_id?: string;
+      agent_profile_snapshot?: Record<string, unknown> | null;
+      state: string;
+    };
+  }> {
+    return this.request("GET", `/api/v1/task-sessions/${sessionId}`);
   }
 
   async getQueueSessionIdentity(
@@ -2665,6 +2906,8 @@ export class ApiClient {
 
   async getTask(taskId: string): Promise<{
     id: string;
+    workspace_id?: string;
+    workflow_id?: string;
     title: string;
     description?: string;
     autopilot?: boolean;
@@ -2672,6 +2915,7 @@ export class ApiClient {
     primary_executor_type?: string | null;
     state?: string;
     workflow_step_id?: string;
+    workflow_agent_overrides?: WorkflowAgentOverrides;
     wip_admitted?: boolean;
     queued_for_step_id?: string;
     priority?: TaskPriority;
@@ -2922,6 +3166,10 @@ export class ApiClient {
     });
   }
 
+  async renameSession(sessionId: string, name: string): Promise<void> {
+    await this.wsRequest("session.rename", { session_id: sessionId, name });
+  }
+
   async setSessionMode(sessionId: string, modeId: string): Promise<void> {
     await this.request("POST", `/api/v1/task-sessions/${sessionId}/set-mode`, {
       mode_id: modeId,
@@ -2958,9 +3206,16 @@ export class ApiClient {
     });
   }
 
-  async getQueueStatus(
-    identity: QueueSessionIdentityInput,
-  ): Promise<{ count: number; auto_run: boolean; auto_merge_enabled: boolean }> {
+  async getQueueStatus(identity: QueueSessionIdentityInput): Promise<{
+    count: number;
+    entries: Array<{
+      content: string;
+      queued_by: string;
+      metadata?: Record<string, unknown>;
+    }>;
+    auto_run: boolean;
+    auto_merge_enabled: boolean;
+  }> {
     return this.wsRequest("message.queue.get", {
       task_id: identity.taskId,
       session_id: identity.sessionId,
@@ -3670,6 +3925,11 @@ export class ApiClient {
     return this.request("POST", "/api/v1/ssh/test", req);
   }
 
+  /** Remote Docker connection test: SSH reachability plus the daemon steps. */
+  async testRemoteDockerConnection(req: SSHTestRequest): Promise<SSHTestResult> {
+    return this.request("POST", "/api/v1/remote-docker/test", req);
+  }
+
   async listSSHSessions(executorId: string): Promise<SSHSession[]> {
     return this.request("GET", `/api/v1/ssh/executors/${executorId}/sessions`);
   }
@@ -3694,7 +3954,8 @@ export class ApiClient {
     name: string;
     workflowId?: string;
     workflowStepId?: string;
-    taskMode?: "automation_run" | "normal_task";
+    taskMode?: "automation_run" | "normal_task" | "managed_conversation";
+    managedDestination?: { plugin_id: string; instance_key: string; revision: number };
     repositoryMode?: "workspace_default" | "selected" | "none";
     repositoryIds?: string[];
     repositories?: Array<{ repository_id: string; base_branch: string }>;
@@ -3734,6 +3995,7 @@ export class ApiClient {
       workflow_id: opts.workflowId ?? "",
       workflow_step_id: opts.workflowStepId ?? "",
       task_mode: opts.taskMode,
+      managed_destination: opts.managedDestination,
       repository_mode: opts.repositoryMode,
       repository_ids: opts.repositoryIds,
       repositories: opts.repositories,
@@ -3824,9 +4086,13 @@ export class ApiClient {
    * Returns { skipped, reason } when the automation is at its concurrency cap.
    * Only works when KANDEV_MOCK_AGENT is active.
    */
-  async triggerAutomationManual(
-    automationId: string,
-  ): Promise<{ run_task_id?: string; skipped?: boolean; reason?: string }> {
+  async triggerAutomationManual(automationId: string): Promise<{
+    run_task_id?: string;
+    run_id?: string;
+    delivery_status?: string;
+    skipped?: boolean;
+    reason?: string;
+  }> {
     return this.request("POST", `/api/v1/e2e/automations/${automationId}/trigger`, {});
   }
 

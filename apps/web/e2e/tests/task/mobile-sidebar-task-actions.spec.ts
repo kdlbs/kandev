@@ -33,7 +33,7 @@ test.describe("Mobile sidebar task actions", () => {
     await testPage.goto(`/t/${source.id}`);
     const session = new SessionPage(testPage);
     await session.waitForLoad();
-    await testPage.getByTestId("mobile-session-menu").tap();
+    await testPage.getByTestId("mobile-task-picker-trigger").tap();
     const drawer = testPage.getByRole("dialog", { name: "Tasks" });
     const targetRow = drawer.getByTestId("sidebar-task-item").filter({ hasText: target.title });
     await expect(targetRow).toBeVisible();
@@ -41,7 +41,9 @@ test.describe("Mobile sidebar task actions", () => {
     await targetRow.tap();
 
     await expect(drawer).toBeHidden();
-    await expect(testPage).toHaveURL(new RegExp(`/t/${target.id}$`));
+    await expect(testPage).toHaveURL(
+      new RegExp(`/t/${target.id}\\?sessionId=${target.clarificationSessionId}$`),
+    );
     await expect.poll(() => activeSessionId(testPage)).toBe(target.clarificationSessionId);
     await expect(session.clarificationOverlay()).toBeVisible();
     await expect(session.clarificationOverlay()).toContainText(
@@ -198,7 +200,7 @@ test.describe("Mobile sidebar task actions", () => {
       timeout: 30_000,
     });
 
-    await testPage.getByTestId("mobile-session-menu").tap();
+    await testPage.getByTestId("mobile-task-picker-trigger").tap();
     const drawer = testPage.getByRole("dialog", { name: "Tasks" });
     const destinationRow = drawer
       .getByTestId("sidebar-task-item")
@@ -209,7 +211,7 @@ test.describe("Mobile sidebar task actions", () => {
     await expect(drawer).toBeHidden();
     await expect(testPage).toHaveURL(new RegExp(`/t/${destination.id}$`));
     const mobileTopBar = testPage
-      .getByTestId("mobile-session-menu")
+      .getByTestId("mobile-task-picker-trigger")
       .locator("xpath=ancestor::header");
     await expect(mobileTopBar.getByText(destinationTitle, { exact: true })).toBeVisible();
     await expect(session.chat.getByText(destinationResponse).last()).toBeVisible({
@@ -263,7 +265,7 @@ test.describe("Mobile sidebar task actions", () => {
     await testPage.goto(`/t/${task.id}`);
     const session = new SessionPage(testPage);
     await session.waitForLoad();
-    await testPage.getByTestId("mobile-session-menu").tap();
+    await testPage.getByTestId("mobile-task-picker-trigger").tap();
 
     const drawer = testPage.getByRole("dialog", { name: "Tasks" });
     const row = drawer.getByTestId("sidebar-task-item").filter({ hasText: task.title });
@@ -285,7 +287,7 @@ test.describe("Mobile sidebar task actions", () => {
     await testPage.goto(`/t/${task.task_id}`);
     const session = new SessionPage(testPage);
     await session.waitForLoad();
-    await testPage.getByTestId("mobile-session-menu").click();
+    await testPage.getByTestId("mobile-task-picker-trigger").click();
 
     const surface = testPage.getByRole("dialog", { name: "Tasks" });
     await expect(surface).toBeVisible();
@@ -322,7 +324,7 @@ test.describe("Mobile sidebar task actions", () => {
     await testPage.goto(`/t/${task.task_id}`);
     const session = new SessionPage(testPage);
     await session.waitForLoad();
-    await testPage.getByTestId("mobile-session-menu").tap();
+    await testPage.getByTestId("mobile-task-picker-trigger").tap();
 
     const drawer = testPage.getByRole("dialog", { name: "Tasks" });
     const drawerId = await drawer.getAttribute("id");
@@ -387,7 +389,7 @@ test.describe("Mobile sidebar task actions", () => {
     const session = new SessionPage(testPage);
     await session.waitForLoad();
     await waitForActiveSessionForegroundActivity(testPage, "generating");
-    await testPage.getByTestId("mobile-session-menu").tap();
+    await testPage.getByTestId("mobile-task-picker-trigger").tap();
 
     const drawer = testPage.getByRole("dialog", { name: "Tasks" });
     const drawerId = await drawer.getAttribute("id");
@@ -533,7 +535,7 @@ test.describe("Mobile sidebar task actions", () => {
       timeout: 60_000,
     });
 
-    await testPage.getByTestId("mobile-session-menu").click();
+    await testPage.getByTestId("mobile-task-picker-trigger").click();
     const sheet = testPage.getByRole("dialog", { name: "Tasks" });
     const taskRow = sheet.getByTestId("sidebar-task-item").filter({ hasText: taskTitle });
     const diffStats = taskRow.getByTestId("sidebar-task-diff-stats");
@@ -656,7 +658,7 @@ test.describe("Mobile sidebar task actions", () => {
     await testPage.goto(`/t/${task.id}`);
     const session = new SessionPage(testPage);
     await session.waitForLoad();
-    await testPage.getByTestId("mobile-session-menu").tap();
+    await testPage.getByTestId("mobile-task-picker-trigger").tap();
 
     const drawer = testPage.getByRole("dialog", { name: "Tasks" });
     const taskRow = drawer
@@ -745,7 +747,7 @@ test.describe("Mobile sidebar task actions", () => {
     const session = new SessionPage(testPage);
     await session.waitForLoad();
     await session.waitForChatIdle({ timeout: 30_000 });
-    await testPage.getByTestId("mobile-session-menu").click();
+    await testPage.getByTestId("mobile-task-picker-trigger").click();
 
     const taskSheet = testPage.getByRole("dialog", { name: "Tasks" });
     const taskRow = taskSheet.getByTestId("sidebar-task-item").filter({ hasText: parentTitle });
@@ -843,7 +845,7 @@ test.describe("Mobile sidebar task actions", () => {
     await testPage.goto(`/t/${activeTask.id}`);
     const session = new SessionPage(testPage);
     await session.waitForLoad();
-    await testPage.getByTestId("mobile-session-menu").click();
+    await testPage.getByTestId("mobile-task-picker-trigger").click();
 
     const taskSheet = testPage.getByRole("dialog", { name: "Tasks" });
     const parentRow = taskSheet
@@ -877,7 +879,7 @@ test.describe("Mobile sidebar task actions", () => {
     await testPage.goto(`/t/${task.task_id}`);
     const session = new SessionPage(testPage);
     await session.waitForLoad();
-    await testPage.getByTestId("mobile-session-menu").click();
+    await testPage.getByTestId("mobile-task-picker-trigger").click();
 
     const sheet = testPage.getByRole("dialog", { name: "Tasks" });
     const taskRow = sheet
@@ -930,6 +932,11 @@ test.describe("Mobile sidebar task actions", () => {
       test.skip(true, "No local executor available");
       return;
     }
+    const localProfile = localExecutor.profiles?.[0];
+    if (!localProfile) {
+      test.skip(true, "No local executor profile available");
+      return;
+    }
 
     const policy = await apiClient.createRepositoryBranchPolicy(seedData.repositoryId, {
       name: `Mobile subtask policy ${Date.now()}`,
@@ -937,15 +944,10 @@ test.describe("Mobile sidebar task actions", () => {
       branch_template: "feature/{title}-{suffix}",
       pull_request_target: "develop",
     });
-    let localProfile: { id: string; name: string } | undefined;
     const parentTitle = `Mobile policy subtask parent ${Date.now()}`;
     const childTitle = `Mobile policy subtask child ${Date.now()}`;
 
     try {
-      localProfile = await apiClient.createExecutorProfile(
-        localExecutor.id,
-        `E2E Mobile Subtask Local ${Date.now()}`,
-      );
       const parent = await apiClient.createTaskWithAgent(
         seedData.workspaceId,
         parentTitle,
@@ -963,7 +965,7 @@ test.describe("Mobile sidebar task actions", () => {
       const session = new SessionPage(testPage);
       await session.waitForLoad();
       await session.waitForChatIdle({ timeout: 30_000 });
-      await testPage.getByTestId("mobile-session-menu").tap();
+      await testPage.getByTestId("mobile-task-picker-trigger").tap();
       const taskSheet = testPage.getByRole("dialog", { name: "Tasks" });
       const taskRow = taskSheet.getByTestId("sidebar-task-item").filter({ hasText: parentTitle });
       await taskRow.getByRole("button", { name: "Task actions" }).tap();
@@ -972,13 +974,15 @@ test.describe("Mobile sidebar task actions", () => {
       const dialog = testPage.getByTestId("new-subtask-dialog");
       await dialog.getByTestId("subtask-workspace-mode-new").tap();
       const executorSelector = dialog.getByTestId("executor-profile-selector");
-      await expect(async () => {
-        await executorSelector.tap();
-        await testPage
-          .getByRole("option", { name: new RegExp(localProfile.name) })
-          .tap({ force: true });
-        await expect(executorSelector).toContainText(localProfile.name, { timeout: 1_000 });
-      }).toPass({ timeout: 10_000 });
+      await executorSelector.tap();
+      const executorDrawer = testPage.getByTestId("executor-profile-selector-dropdown");
+      await expect(executorDrawer).toBeVisible();
+      const localProfileOption = executorDrawer.getByRole("option", {
+        name: new RegExp(localProfile.name),
+      });
+      await expect(localProfileOption).toBeVisible();
+      await localProfileOption.tap();
+      await expect(executorSelector).toContainText(localProfile.name);
       await dialog.getByTestId("branch-chip-trigger").tap();
       await testPage.getByRole("option", { name: new RegExp(policy.name) }).tap({ force: true });
       await expect(dialog.getByTestId("fresh-branch-toggle")).toHaveAttribute(
@@ -1041,7 +1045,6 @@ test.describe("Mobile sidebar task actions", () => {
         )
         .toBe(repository!.base_branch);
     } finally {
-      if (localProfile) await apiClient.deleteExecutorProfile(localProfile.id).catch(() => {});
       await apiClient.deleteRepositoryBranchPolicy(policy.id).catch(() => {});
       normalizeSeedRepository();
     }

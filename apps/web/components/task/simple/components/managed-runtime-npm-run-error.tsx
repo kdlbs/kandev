@@ -20,6 +20,7 @@ export function ManagedRuntimeNpmRunError({
 }) {
   const { t } = useTranslation();
   const [showDetails, setShowDetails] = useState(false);
+  const isPolicyFailure = error.failureCode === "managed_runtime_npm_policy";
   const technicalDetails = error.failureDetails;
 
   return (
@@ -34,13 +35,17 @@ export function ManagedRuntimeNpmRunError({
           <span className="text-sm font-medium">{agentName}</span>
           <span className="inline-flex items-center gap-1 text-xs text-amber-600 dark:text-amber-400">
             <IconAlertTriangle className="h-3.5 w-3.5" aria-hidden="true" />
-            {t("chat:managedRuntimeNpmTitle")}
+            {t(
+              isPolicyFailure ? "chat:managedRuntimeNpmPolicyTitle" : "chat:managedRuntimeNpmTitle",
+            )}
           </span>
           <span className="text-xs text-muted-foreground">
             {formatRelativeTime(error.failedAt)}
           </span>
         </div>
-        <p className="mt-1 text-sm text-muted-foreground">{t("chat:managedRuntimeNpmBody")}</p>
+        <p className="mt-1 text-sm text-muted-foreground">
+          {t(isPolicyFailure ? "chat:managedRuntimeNpmPolicyBody" : "chat:managedRuntimeNpmBody")}
+        </p>
         {technicalDetails && (
           <Collapsible open={showDetails} onOpenChange={setShowDetails} className="mt-2">
             <CollapsibleTrigger className="flex min-h-11 cursor-pointer items-center gap-1 text-xs text-muted-foreground transition-colors hover:text-foreground sm:min-h-8">

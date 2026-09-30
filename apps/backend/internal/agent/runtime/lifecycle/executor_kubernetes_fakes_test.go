@@ -66,7 +66,9 @@ func newFakeKubernetesExecutorWithForwarder(
 			streams:   kubeexecutor.NewStreamOperations(execs, forwards),
 		}, nil
 	}
-	executor.resolveBinary = func(kubeexecutor.Platform) ([]byte, error) { return []byte("agentctl"), nil }
+	executor.resolveBinary = func(context.Context, *ExecutorCreateRequest, kubeexecutor.Platform) ([]byte, error) {
+		return []byte("agentctl"), nil
+	}
 	return executor
 }
 

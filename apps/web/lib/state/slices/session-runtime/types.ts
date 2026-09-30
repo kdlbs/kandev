@@ -1,3 +1,4 @@
+import type { WorkloadRunObservation, WorkloadOutputChunk } from "@/lib/types/background-work";
 import type {
   WorkspaceRestorationAttempt,
   WorkspaceRestorationState,
@@ -230,6 +231,13 @@ export type SessionModeState = {
     {
       currentModeId: string;
       availableModes: SessionModeEntry[];
+      /** Marks the effective selector snapshot restored after explicit recovery. */
+      settingsPolicy?: "provider_restored";
+      /**
+       * The mode Kandev asked for when the session did not end up in it. Set
+       * so a clamped mode is distinguishable from an applied one.
+       */
+      requestedModeId?: string;
     }
   >;
 };
@@ -288,6 +296,8 @@ export type SessionModelsState = {
       configOptions: ConfigOptionEntry[];
       configOptionsSettled?: boolean;
       configBaseline?: Record<string, string>;
+      /** Marks the effective selector snapshot restored after explicit recovery. */
+      settingsPolicy?: "provider_restored";
       /** Set when the session started on the profile's fallback model. */
       fallbackModel?: string;
     }
@@ -397,6 +407,11 @@ export type UserShellsState = {
 
 export type PrepareStepInfo = {
   name: string;
+  kind?: string;
+  remotePlatform?: string;
+  mcpServerId?: string;
+  mcpProvider?: string;
+  failureCode?: string;
   command?: string;
   status: string;
   output?: string;
@@ -410,6 +425,8 @@ export type PrepareStepInfo = {
 export type SessionPrepareState = {
   sessionId: string;
   status: string;
+  preparationId?: string;
+  preparationStartedAt?: string;
   steps: PrepareStepInfo[];
   errorMessage?: string;
   durationMs?: number;
@@ -445,6 +462,28 @@ export type EmbeddedVscodeSupportState = {
   bySessionId: Record<string, boolean>;
 };
 
+/**
+ * Applied verbatim from a session.launch.warning event — no field is ever
+ * re-derived from the reachability settings store. See launch-warning.tsx.
+ */
+export type LaunchWarningEntry = {
+  executorId: string;
+  host: string;
+  state: string;
+  reason: string;
+  lastSuccessAt?: string;
+};
+
+export type LaunchWarningState = {
+  bySessionId: Record<string, LaunchWarningEntry>;
+};
+
+export type BackgroundWorkState = {
+  workloadsBySessionId: Record<string, WorkloadRunObservation[]>;
+  activeWorkIdBySessionId: Record<string, string>;
+  loadingBySessionId: Record<string, boolean>;
+};
+
 export type SessionRuntimeSliceState = {
   terminal: TerminalState;
   shell: ShellState;
@@ -462,13 +501,16 @@ export type SessionRuntimeSliceState = {
   sessionModels: SessionModelsState;
   sessionMcpStatus: SessionMCPStatusState;
   promptUsage: PromptUsageState;
+  usageInvalidation: { bySessionId: Record<string, number> };
   sessionTodos: SessionTodosState;
   userShells: UserShellsState;
   prepareProgress: PrepareProgressState;
+  launchWarning: LaunchWarningState;
   sessionPollMode: SessionPollModeState;
   embeddedVscodeSupport: EmbeddedVscodeSupportState;
   workspaceFilesRefresh: { bySessionId: Record<string, number> };
   workspaceRestoration: WorkspaceRestorationState;
+  backgroundWork: BackgroundWorkState;
 };
 
 export type SessionRuntimeSliceActions = {
@@ -513,7 +555,13 @@ export type SessionRuntimeSliceActions = {
   setAvailableCommands: (sessionId: string, commands: AvailableCommand[]) => void;
   clearAvailableCommands: (sessionId: string) => void;
   // Session mode actions
-  setSessionMode: (sessionId: string, modeId: string, availableModes?: SessionModeEntry[]) => void;
+  setSessionMode: (
+    sessionId: string,
+    modeId: string,
+    availableModes?: SessionModeEntry[],
+    requestedModeId?: string,
+    settingsPolicy?: "provider_restored" | "strict",
+  ) => void;
   clearSessionMode: (sessionId: string) => void;
   // Agent capabilities actions
   setAgentCapabilities: (sessionId: string, caps: AgentCapabilitiesEntry) => void;
@@ -525,6 +573,7 @@ export type SessionRuntimeSliceActions = {
       models: SessionModelEntry[];
       configOptions: ConfigOptionEntry[];
       configBaseline?: Record<string, string>;
+      settingsPolicy?: "provider_restored";
       /** Set when the session started on the profile's fallback model
        *  because the configured start model was unavailable. */
       fallbackModel?: string;
@@ -533,6 +582,7 @@ export type SessionRuntimeSliceActions = {
   setSessionMCPStatus: (sessionId: string, history: MCPAttachmentHistory) => void;
   // Prompt usage actions
   setPromptUsage: (sessionId: string, usage: PromptUsageEntry) => void;
+  bumpSessionUsageInvalidation: (sessionId: string) => void;
   // Session todos actions
   setSessionTodos: (sessionId: string, entries: TodoEntry[]) => void;
   // User shells actions — env-scoped (sessions in the same task share one shell list)
@@ -558,6 +608,14 @@ export type SessionRuntimeSliceActions = {
   completeWorkspaceRestoration: (attempt: WorkspaceRestorationAttempt) => boolean;
   failWorkspaceRestoration: (attempt: WorkspaceRestorationAttempt, details: string) => boolean;
   clearWorkspaceRestoration: (attempt: WorkspaceRestorationAttempt) => boolean;
+  setLaunchWarning: (sessionId: string, entry: LaunchWarningEntry) => void;
+  clearLaunchWarning: (sessionId: string) => void;
+  setBackgroundWorkloads: (sessionId: string, workloads: WorkloadRunObservation[]) => void;
+  updateBackgroundWorkload: (sessionId: string, workload: WorkloadRunObservation) => void;
+  appendBackgroundWorkloadOutput: (sessionId: string, chunk: WorkloadOutputChunk) => void;
+  setActiveBackgroundWorkload: (sessionId: string, workId: string) => void;
+  clearBackgroundWork: (sessionId: string) => void;
+  setBackgroundWorkLoading: (sessionId: string, loading: boolean) => void;
 };
 
 export type SessionRuntimeSlice = SessionRuntimeSliceState & SessionRuntimeSliceActions;

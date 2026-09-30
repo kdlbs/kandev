@@ -8,6 +8,7 @@ import { Button } from "@kandev/ui/button";
 import Link from "@/components/routing/app-link";
 import { PageTopbar } from "@/components/page-topbar";
 import { useRouter } from "@/lib/routing/client-router";
+import { linkToTask } from "@/lib/links";
 import type { WorkspaceAutomationRun } from "@/lib/types/automation";
 import { RunFeedItem } from "./run-feed-item";
 import { ANY_AUTOMATION, RunFilters, isDefaultFilters } from "./run-filters";
@@ -191,7 +192,7 @@ export function RunsPageClient({ workspaceId }: RunsPageClientProps) {
             loading={loading}
             error={error}
             onClearFilters={clearFilters}
-            onOpen={(taskId) => router.push(`/tasks/${taskId}`)}
+            onOpen={(taskId) => router.push(linkToTask(taskId))}
           />
         </div>
       </div>

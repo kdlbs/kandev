@@ -17,7 +17,12 @@ artifact set.
 - Git tag: `vX.Y.Z` (three-part; legacy `vM.m` tags normalize to `M.m.0`)
 - Homebrew formula: `kdlbs/homebrew-kandev` `Formula/kandev.rb` `version "X.Y.Z"`
 - Scoop bucket: `kdlbs/scoop-kandev` `bucket/kandev.json` version, URL, and hash
-- GitHub release: `vX.Y.Z` with platform tarballs `kandev-{platform}.tar.gz` + `.sha256`
+- GitHub release: `vX.Y.Z` with standard platform archives `kandev-{platform}.tar.gz`, full offline archives `kandev-{platform}-full.tar.gz`, checksums, Windows ZIP equivalents, remote helper assets, and `runtime-size-report.md`
+
+Stable default archive names contain the standard runtime: host `kandev`, host `agentctl`, and
+`remote-helpers.json`. The `-full` archives also contain all four remote helper executables. Stable
+npm packages, Homebrew, Scoop, winget, Chocolatey, and Desktop use standard archives. Containers
+and npm Nightlies stay full. Desktop keeps one standard installer and updater track.
 
 **npm, Homebrew, and Scoop are sibling channels**, not chained. All three consume the same GitHub release artifacts; none depends on another package-manager channel.
 
@@ -32,8 +37,8 @@ Stable runs entirely in CI via `.github/workflows/release.yml`, triggered by a m
 
 1. Maintainer clicks "Run workflow" → keeps `channel=stable` → picks `bump` (patch/minor/major) → optional `dry_run` or `desktop_validation_only`.
 2. `prepare` job bumps version + regenerates CHANGELOG, opens release PR, squash-merges, tags `vX.Y.Z`.
-3. `build-web` + `build-cli` + `build-bundles` (5 platforms) build the release artifacts.
-4. `publish-release` creates the GitHub release with platform tarballs + sha256 + auto-generated notes.
+3. `build-web`, `build-bundles`, `build-remote-helpers`, `build-desktop`, and both Docker builds create the channel inputs.
+4. `publish-release` promotes staged standard archives to the existing default names, publishes full archives and helper assets, then attaches checksums, the size report, desktop artifacts, and notes.
 5. `publish-npm` publishes 5 `@kdlbs/runtime-*` packages + main `kandev` package to npmjs.
 6. `update-homebrew-tap` pushes updated `Formula/kandev.rb` to `kdlbs/homebrew-kandev` via SSH deploy key.
 7. `update-scoop-bucket` pushes updated `bucket/kandev.json` to `kdlbs/scoop-kandev` via its SSH deploy key.
@@ -62,6 +67,15 @@ For a partial Stable release, preserve the existing signed tag and rerun with
 complete only after `publish-release`, `publish-npm`, `update-homebrew-tap`, and
 `update-scoop-bucket` each succeed and their artifacts are verified—an aggregate
 green run can hide skipped publication jobs.
+
+Required web, runtime, and desktop artifact uploads attempt up to three times,
+with waits of 30 seconds and 60 seconds between attempts. They fail explicitly
+when an expected file is missing. Desktop matrix targets use `fail-fast: false`
+so a transient upload failure does not cancel sibling targets, but publication
+still requires the complete matrix to succeed. Rerun a failed producer job in
+the same workflow run after a transient failure. If the signed tag already
+exists and the run remains partial, use `backfill_tag` for that tag after
+checking which channels already succeeded.
 
 Stable has no local release driver; the entire Stable flow runs in GHA. The Nightly metadata and
 publication revalidation state machine lives in `scripts/release/nightly-release.sh`, which GHA
@@ -121,6 +135,8 @@ When adding, renaming, or removing bundled helper binaries such as `agentctl-<go
 - `.github/workflows/release.yml` bundle, macOS signing, and notarization loops
 - `scripts/release/prepare-desktop-runtime.sh`
 - `scripts/release/verify-desktop-runtime.sh`
+- `scripts/release/remote-helper-assets.mjs`
+- `apps/backend/internal/agent/runtime/lifecycle/remote_helper_manifest.go` and the cache resolver
 - `scripts/release-desktop.test.sh`
 - `apps/desktop/AGENTS.md` runtime resource list
 

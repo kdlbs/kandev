@@ -9,10 +9,9 @@ import (
 )
 
 // TestPostgresRetentionIndexes_CreatedFreshAndReplaySafe is the PostgreSQL
-// half of TestRetentionIndexes_CreatedFreshAndReplaySafe: the two
-// expression indexes the retention sweep depends on must exist there too,
-// with identical CREATE INDEX IF NOT EXISTS replay safety. Skips unless
-// KANDEV_TEST_POSTGRES_DSN is set.
+// half of TestRetentionIndexes_CreatedFreshAndReplaySafe. The run-history and
+// assignment-wake indexes must exist there too, with identical CREATE INDEX IF
+// NOT EXISTS replay safety. Skips unless KANDEV_TEST_POSTGRES_DSN is set.
 func TestPostgresRetentionIndexes_CreatedFreshAndReplaySafe(t *testing.T) {
 	dsn := testutil.PostgresDSNFromEnv(t)
 	conn := testutil.OpenIsolatedPostgres(t, dsn)
@@ -28,6 +27,7 @@ func TestPostgresRetentionIndexes_CreatedFreshAndReplaySafe(t *testing.T) {
 	assertPostgresIndexExists(t, conn, "idx_office_routine_runs_retention")
 	assertPostgresIndexExists(t, conn, "idx_runs_retention")
 	assertPostgresIndexExists(t, conn, "idx_office_agent_pause_recoveries_failed_run")
+	assertPostgresIndexExists(t, conn, "idx_runs_assignment_rate_reason_requested")
 
 	if _, err := sqlite.NewWithDB(conn, conn, nil); err != nil {
 		t.Fatalf("replay NewWithDB: %v", err)
@@ -35,6 +35,7 @@ func TestPostgresRetentionIndexes_CreatedFreshAndReplaySafe(t *testing.T) {
 	assertPostgresIndexExists(t, conn, "idx_office_routine_runs_retention")
 	assertPostgresIndexExists(t, conn, "idx_runs_retention")
 	assertPostgresIndexExists(t, conn, "idx_office_agent_pause_recoveries_failed_run")
+	assertPostgresIndexExists(t, conn, "idx_runs_assignment_rate_reason_requested")
 }
 
 func assertPostgresIndexExists(t *testing.T, conn interface {

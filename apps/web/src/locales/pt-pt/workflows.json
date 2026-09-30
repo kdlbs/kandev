@@ -308,6 +308,7 @@
   "workflowName": "Nome do fluxo de trabalho",
   "workflowsReadOnlyImprove": "Os fluxos de trabalho desta área de trabalho são geridos pelo Melhorar o Kandev e não podem ser alterados.",
   "workflowNameIsRequired": "O nome do fluxo de trabalho é obrigatório",
+  "workflowPreviewStatusAnnouncement": "{{workflowName}}: {{status}}",
   "workflowNamePlaceholder": "Fluxo de trabalho do meu projeto",
   "workflows": "Fluxos de trabalho",
   "workflowsSectionDescription": "Crie pipelines autónomas com transições automáticas ou fluxos de trabalho manuais em que é o utilizador a mover as tarefas",

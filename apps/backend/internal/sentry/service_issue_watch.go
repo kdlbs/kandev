@@ -143,6 +143,9 @@ func (s *Service) UpdateIssueWatch(ctx context.Context, id string, req *UpdateIs
 		if err := validateFilterStatuses(w.Filter); err != nil {
 			return nil, err
 		}
+		if err := validateFilterStatsPeriod(w.Filter); err != nil {
+			return nil, err
+		}
 	}
 	if w.WorkflowID == "" || w.WorkflowStepID == "" {
 		return nil, fmt.Errorf("%w: workflowId and workflowStepId cannot be empty", ErrInvalidConfig)
@@ -237,6 +240,19 @@ func (s *Service) CheckIssueWatch(ctx context.Context, w *IssueWatch) (string, [
 		err := fmt.Errorf("%w: watch has no configured project", ErrInvalidConfig)
 		s.stampWatchError(w.ID, err.Error())
 		return "", nil, err
+	}
+	if w.Filter.StatsPeriod != "" {
+		if _, _, ok := parseStatsPeriodUnits(w.Filter.StatsPeriod); !ok {
+			// A stored lookback outside the supported syntax has no `age:` term
+			// to constrain the search, so fail the poll closed instead of
+			// matching (and creating tasks for) issues of any age. Watch rows
+			// created before the write guard reject such a value, and they are
+			// never rewritten here.
+			err := fmt.Errorf("%w: watch lookback period %q is not a whole number of hours, days, or weeks",
+				ErrInvalidConfig, w.Filter.StatsPeriod)
+			s.stampWatchError(w.ID, err.Error())
+			return "", nil, err
+		}
 	}
 	instanceID, err := s.resolveWatchInstanceID(ctx, w)
 	if err != nil {
@@ -464,6 +480,9 @@ func validateIssueWatchCreate(req *CreateIssueWatchRequest) error {
 	if err := validateFilterStatuses(nf); err != nil {
 		return err
 	}
+	if err := validateFilterStatsPeriod(nf); err != nil {
+		return err
+	}
 	if err := validateMaxInflightTasks(req.MaxInflightTasks); err != nil {
 		return err
 	}
@@ -509,6 +528,21 @@ func validateFilter(f SearchFilter) error {
 func validateFilterStatuses(f SearchFilter) error {
 	if len(f.Statuses) > 1 {
 		return fmt.Errorf("%w: filter.statuses must contain at most one status because Sentry has no OR form for the is keyword", ErrInvalidConfig)
+	}
+	return nil
+}
+
+// validateFilterStatsPeriod rejects a non-empty lookback value that the shared
+// accepted syntax (see parseStatsPeriodUnits) cannot express. The field is
+// optional, so an empty value stays valid; like validateFilterStatuses this is
+// applied only when a filter is created or changed, never against an unchanged
+// stored one, so a legacy row cannot block an unrelated update.
+func validateFilterStatsPeriod(f SearchFilter) error {
+	if f.StatsPeriod == "" {
+		return nil
+	}
+	if _, _, ok := parseStatsPeriodUnits(f.StatsPeriod); !ok {
+		return fmt.Errorf("%w: filter.statsPeriod must be a whole number of hours, days, or weeks such as 24h or 7d", ErrInvalidConfig)
 	}
 	return nil
 }

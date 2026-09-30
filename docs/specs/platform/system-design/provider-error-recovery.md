@@ -133,19 +133,13 @@ The policy layer has two configurable classes:
 | `transient` | The provider, network, transport, or selected model is temporarily unable to serve the request. | `network_unavailable`, `provider_unavailable`, `provider_overloaded`, `model_capacity`, confirmed short `rate_limited`, and launch-safe `agent_transport_lost` |
 | `hard` | The selected account, subscription, credentials, provider configuration, or model cannot continue without a longer reset or user/configuration change. | `quota_limited`, `subscription_required`, `auth_required`, `missing_credentials`, `provider_not_configured`, and `model_unavailable` |
 
-The semantic code remains authoritative diagnostic detail. The class is the
-stable policy input. A catalogue revision can add new codes and signatures,
-but it must assign every recoverable code to exactly one class.
+Semantic codes retain diagnostic detail. Every recoverable catalogue code maps to one policy class.
+Task, repository, permission, local-runtime, cancellation, and resume-state errors remain outside classified provider policy.
 
-Task, repository, permission, local runtime, cancellation, and resume-state
-errors are not provider errors. They retain their existing owner and cannot
-trigger candidate switching through this policy.
-
-Unrecognized, low-confidence, stale, or conflicting evidence has classification
-state `unclassified`. It is not a third configurable class. It stops automatic
-recovery and surfaces manual recovery so an unknown string cannot silently
-repeat work or change providers. Historical attempts retain the semantic code,
-class, rule ID, and catalogue version assigned when the attempt occurred.
+Unknown, low-confidence, stale, or conflicting evidence is `unclassified`, not a third configurable class.
+It requires manual recovery except for the task-scoped
+[repeated-failure extension](../../agents/system-design/dynamic-unclassified-fallback.md), which also admits proven agent startup failures.
+An unknown string alone never authorizes recovery. Historical attempts retain their code, class, rule ID, and catalogue version.
 
 ### Replay and effect-safety gate
 
@@ -239,7 +233,8 @@ uses the same limits, while the backend remains authoritative.
 
 Policy evaluation follows this order:
 
-1. Reject stale, unclassified, or effect-unsafe failures.
+1. Reject stale or effect-unsafe failures. Reject unclassified failures unless
+   the separate task-scoped repeated-failure extension admits them.
 2. If reset waiting is enabled, has not already been used for this candidate
    and class in the current route cycle, and a validated future `retry_after`
    or `reset_at` is no later than `max_wait_seconds`, persist a wait for that
@@ -467,7 +462,7 @@ relocated there at the size limit, and extended since.
 | `active` | Current, classified, effect-safe failure with eligible reset wait | `waiting_for_reset` |
 | `active` | Current, classified, effect-safe failure with retry budget | `retry_wait` |
 | `active` | Recovery exhausted with `skip` | `switching` |
-| `active` | Recovery exhausted with `stop`, or unsafe/unclassified failure | `action_required` |
+| `active` | Recovery exhausted with `stop`, unsafe failure, or ineligible unclassified failure | `action_required` |
 | `waiting_for_reset` | Deadline reached and generation current | `retrying` |
 | `retry_wait` | Deadline reached and generation current | `retrying` |
 | `waiting_for_reset` or `retry_wait` | Skip now | `switching` |

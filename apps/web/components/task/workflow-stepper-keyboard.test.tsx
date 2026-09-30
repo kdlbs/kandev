@@ -13,6 +13,11 @@ const { appStoreState, moveTaskMock, previewWorkflowMoveMock } = vi.hoisted(() =
     workspaceContextGeneration: 1,
     workflows: { items: [], activeId: null },
     tasks: { activeSessionId: null },
+    taskRemoval: { navigationRevision: 0 },
+    beginWorkflowSessionFocus: vi.fn(() => 1),
+    bindWorkflowSessionFocus: vi.fn(),
+    reconcileWorkflowSessionFocus: vi.fn(),
+    cancelWorkflowSessionFocus: vi.fn(),
     chatInput: { planModeBySessionId: {} },
     kanban: {
       tasks: [

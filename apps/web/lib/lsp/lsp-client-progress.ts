@@ -7,9 +7,22 @@ export function beginLspProgressTracking(
   rpc: JsonRpcConnection,
   isCurrent: () => boolean,
   notifyChange: () => void,
+  resumeState?: { progressTokens?: unknown[]; progress?: unknown[] },
 ): void {
-  connection.progress = createLspProgressSnapshot(Date.now());
+  connection.progress = createLspProgressSnapshot(resumeState ? null : Date.now());
+  connection.registeredProgressTokens.clear();
   connection.registeredProgressTokens.add(connection.ownerId);
+  for (const token of resumeState?.progressTokens ?? []) {
+    if (isLspProgressToken(token)) connection.registeredProgressTokens.add(token);
+  }
+  for (const progress of resumeState?.progress ?? []) {
+    connection.progress = applyLspProgress(
+      connection.progress,
+      connection.registeredProgressTokens,
+      progress,
+      Date.now(),
+    );
+  }
   notifyChange();
 
   rpc.onRequest("window/workDoneProgress/create", (params: unknown) => {

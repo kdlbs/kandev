@@ -95,6 +95,10 @@ describe("toAgentProfilePatch", () => {
       allow_indexing: true,
       auto_approve: true,
       cli_passthrough: true,
+      cursor_mcp_auth_enabled: false,
+      cursor_plugins_mcp_enabled: false,
+      mcp_selection_mode: "selected",
+      mcp_selected_servers: ["server-a"],
       cli_flags: [{ flag: ALLOW_ALL_TOOLS_FLAG, enabled: true, description: "" }],
     };
     expect(toAgentProfilePatch(patch)).toEqual({
@@ -104,6 +108,10 @@ describe("toAgentProfilePatch", () => {
       allowIndexing: true,
       autoApprove: true,
       cliPassthrough: true,
+      cursorMcpAuthEnabled: false,
+      cursorPluginsMcpEnabled: false,
+      mcpSelectionMode: "selected",
+      mcpSelectedServers: ["server-a"],
       cliFlags: [{ flag: ALLOW_ALL_TOOLS_FLAG, enabled: true, description: "" }],
     });
   });
@@ -140,6 +148,12 @@ describe("toAgentProfilePatch", () => {
 describe("isProfileDirty", () => {
   it("returns false when draft equals saved", () => {
     expect(isProfileDirty(draftFrom(baseProfile), baseProfile)).toBe(false);
+  });
+
+  it("returns true when only the Cursor MCP auth preference changes", () => {
+    expect(
+      isProfileDirty(draftFrom(baseProfile, { cursorMcpAuthEnabled: false }), baseProfile),
+    ).toBe(true);
   });
 
   it("returns true when only mode changes", () => {
@@ -464,35 +478,77 @@ describe("command prefix save payloads", () => {
   });
 });
 
-describe("fallback model save payloads", () => {
-  it("includes fallback_model and auto_fallback when saving a dirty existing profile", async () => {
-    const savedAgent = agentWithProfiles([baseProfile]);
-    const draftProfile = draftFrom(baseProfile, {
-      fallbackModel: "gpt-5",
-      autoFallback: true,
-    });
+describe("Cursor MCP auth preference save payloads", () => {
+  it("omits an unchanged preference when saving another existing profile field", async () => {
+    const savedProfile = { ...baseProfile, cursorMcpAuthEnabled: true };
+    const savedAgent = agentWithProfiles([savedProfile]);
+    const draftProfile = draftFrom(savedProfile, { name: "Renamed profile" });
     const draftAgent = agentWithProfiles([draftProfile]);
     const { callbacks } = createTestCallbacks(draftAgent);
-    vi.mocked(updateAgentProfileAction).mockResolvedValue({
-      ...baseProfile,
-      fallbackModel: "gpt-5",
-      autoFallback: true,
-    });
+    vi.mocked(updateAgentProfileAction).mockResolvedValue(draftProfile);
 
     await saveExistingAgent(draftAgent, savedAgent, false, callbacks);
 
     expect(updateAgentProfileAction).toHaveBeenCalledWith(
       baseProfile.id,
-      expect.objectContaining({ fallback_model: "gpt-5", auto_fallback: true }),
+      expect.objectContaining({ cursor_mcp_auth_enabled: undefined }),
     );
   });
 
-  it("includes the fallback fields when creating a new agent's profile", async () => {
-    const draftProfile = draftFrom(baseProfile, {
-      id: DRAFT_PROFILE_ID,
-      fallbackModel: "gpt-5",
-      autoFallback: true,
+  it("preserves false when updating an existing profile", async () => {
+    const savedProfile = {
+      ...baseProfile,
+      cursorMcpAuthEnabled: true,
+      cursorPluginsMcpEnabled: true,
+    };
+    const savedAgent = agentWithProfiles([savedProfile]);
+    const draftProfile = draftFrom(savedProfile, {
+      cursorMcpAuthEnabled: false,
+      cursorPluginsMcpEnabled: false,
     });
+    const draftAgent = agentWithProfiles([draftProfile]);
+    const { callbacks } = createTestCallbacks(draftAgent);
+    vi.mocked(updateAgentProfileAction).mockResolvedValue(draftProfile);
+
+    await saveExistingAgent(draftAgent, savedAgent, false, callbacks);
+
+    expect(updateAgentProfileAction).toHaveBeenCalledWith(
+      baseProfile.id,
+      expect.objectContaining({
+        cursor_mcp_auth_enabled: false,
+        cursor_plugins_mcp_enabled: false,
+      }),
+    );
+  });
+
+  it("saves an explicit selected-server set and omits unchanged selection fields", async () => {
+    const savedProfile = {
+      ...baseProfile,
+      mcpSelectionMode: "inherit" as const,
+      mcpSelectedServers: [],
+    };
+    const selectedProfile = draftFrom(savedProfile, {
+      mcpSelectionMode: "selected",
+      mcpSelectedServers: ["server-b", "server-a"],
+    });
+    const savedAgent = agentWithProfiles([savedProfile]);
+    const draftAgent = agentWithProfiles([selectedProfile]);
+    const { callbacks } = createTestCallbacks(draftAgent);
+    vi.mocked(updateAgentProfileAction).mockResolvedValue(selectedProfile);
+
+    await saveExistingAgent(draftAgent, savedAgent, false, callbacks);
+
+    expect(updateAgentProfileAction).toHaveBeenCalledWith(
+      baseProfile.id,
+      expect.objectContaining({
+        mcp_selection_mode: "selected",
+        mcp_selected_servers: ["server-b", "server-a"],
+      }),
+    );
+  });
+
+  it("defaults new agent profile payloads to enabled", async () => {
+    const draftProfile = draftFrom(baseProfile, { id: DRAFT_PROFILE_ID });
     const draftAgent = agentWithProfiles([draftProfile]);
     const { callbacks } = createTestCallbacks(draftAgent);
     vi.mocked(createAgentAction).mockResolvedValue(
@@ -503,18 +559,23 @@ describe("fallback model save payloads", () => {
 
     expect(createAgentAction).toHaveBeenCalledWith(
       expect.objectContaining({
-        profiles: [expect.objectContaining({ fallback_model: "gpt-5", auto_fallback: true })],
+        profiles: [
+          expect.objectContaining({
+            cursor_mcp_auth_enabled: true,
+            mcp_selection_mode: "inherit",
+            mcp_selected_servers: [],
+          }),
+        ],
       }),
     );
   });
 
-  it("includes the fallback fields when adding a new profile to an existing agent", async () => {
+  it("preserves false when creating an additional profile", async () => {
     const savedAgent = agentWithProfiles([baseProfile]);
     const newProfile = draftFrom(baseProfile, {
       id: NEW_PROFILE_ID,
       name: NEW_PROFILE_NAME,
-      fallbackModel: "gpt-5",
-      autoFallback: true,
+      cursorMcpAuthEnabled: false,
     });
     const draftAgent = agentWithProfiles([baseProfile, newProfile]);
     const { callbacks } = createTestCallbacks(draftAgent);
@@ -527,66 +588,7 @@ describe("fallback model save payloads", () => {
 
     expect(createAgentProfileAction).toHaveBeenCalledWith(
       savedAgent.id,
-      expect.objectContaining({ fallback_model: "gpt-5", auto_fallback: true }),
-    );
-  });
-});
-
-describe("provider config save payloads", () => {
-  const OPENAI_COMPATIBLE = "openai_compatible";
-  const BASE_URL = "http://localhost:20128/v1";
-
-  it("returns true when a provider field changes", () => {
-    const draft = draftFrom(baseProfile, {
-      providerKind: OPENAI_COMPATIBLE,
-      providerBaseUrl: BASE_URL,
-    });
-    expect(isProfileDirty(draft, baseProfile)).toBe(true);
-  });
-
-  it("includes provider fields when saving a dirty existing profile", async () => {
-    const savedAgent = agentWithProfiles([baseProfile]);
-    const draftProfile = draftFrom(baseProfile, {
-      providerKind: OPENAI_COMPATIBLE,
-      providerBaseUrl: BASE_URL,
-      providerApiKeySecretId: "sec_1",
-    });
-    const draftAgent = agentWithProfiles([draftProfile]);
-    const { callbacks } = createTestCallbacks(draftAgent);
-    vi.mocked(updateAgentProfileAction).mockResolvedValue({ ...baseProfile });
-
-    await saveExistingAgent(draftAgent, savedAgent, false, callbacks);
-
-    expect(updateAgentProfileAction).toHaveBeenCalledWith(
-      baseProfile.id,
-      expect.objectContaining({
-        provider_kind: OPENAI_COMPATIBLE,
-        provider_base_url: BASE_URL,
-        provider_api_key_secret_id: "sec_1",
-      }),
-    );
-  });
-
-  it("includes provider fields when adding a new profile to an existing agent", async () => {
-    const savedAgent = agentWithProfiles([baseProfile]);
-    const newProfile = draftFrom(baseProfile, {
-      id: NEW_PROFILE_ID,
-      name: NEW_PROFILE_NAME,
-      providerKind: OPENAI_COMPATIBLE,
-      providerBaseUrl: BASE_URL,
-    });
-    const draftAgent = agentWithProfiles([baseProfile, newProfile]);
-    const { callbacks } = createTestCallbacks(draftAgent);
-    vi.mocked(createAgentProfileAction).mockResolvedValue({
-      ...newProfile,
-      id: PERSISTED_PROFILE_ID,
-    });
-
-    await saveExistingAgent(draftAgent, savedAgent, false, callbacks);
-
-    expect(createAgentProfileAction).toHaveBeenCalledWith(
-      savedAgent.id,
-      expect.objectContaining({ provider_kind: OPENAI_COMPATIBLE, provider_base_url: BASE_URL }),
+      expect.objectContaining({ cursor_mcp_auth_enabled: false }),
     );
   });
 });

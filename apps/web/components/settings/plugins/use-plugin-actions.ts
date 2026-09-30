@@ -107,9 +107,12 @@ function useEnableDisableActions(upsertPlugin: (p: PluginRecord) => void) {
   const handleDisable = async (plugin: PluginRecord) => {
     setBusyId(plugin.id);
     try {
-      await disablePlugin(plugin.id);
+      const result = await disablePlugin(plugin.id);
       unloadPlugin(plugin.id);
       upsertPlugin(withStatus(plugin, "disabled"));
+      if (result.remote_resources_may_remain) {
+        toast.info(t("plugins:remoteResourcesMayRemain"));
+      }
     } catch (err) {
       toast.error(
         err instanceof Error

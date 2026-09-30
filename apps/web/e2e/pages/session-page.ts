@@ -1,6 +1,7 @@
 import { type Locator, type Page, expect } from "@playwright/test";
 import { FileTreePage } from "./file-tree-page";
 import { NewSessionDialogPage } from "./new-session-dialog-page";
+import { ChangeWorkflowPage } from "./change-workflow-page";
 import { dwell } from "../helpers/causal-waits";
 
 function escapeRegExp(value: string): string {
@@ -49,7 +50,7 @@ export class SessionPage {
     return this.page.getByTestId("port-forwarding-menu-item");
   }
   get mobileSessionMenu() {
-    return this.page.getByTestId("mobile-session-menu");
+    return this.page.getByTestId("mobile-task-picker-trigger");
   }
   get mobilePortForwardingToggle() {
     return this.page.getByTestId("mobile-port-forwarding-toggle");
@@ -191,9 +192,10 @@ export class SessionPage {
     while (Date.now() - start < timeout) {
       const remaining = timeout - (Date.now() - start);
       const now = Date.now();
+      const reloadReadinessBudget = Math.min(2_000, Math.floor(attemptTimeout / 2));
       // Re-drive SSR hydration once per attemptTimeout slice while budget remains
       // for the reloaded page to settle.
-      if (now - lastReloadAt >= attemptTimeout && remaining > attemptTimeout) {
+      if (now - lastReloadAt >= attemptTimeout && remaining > reloadReadinessBudget) {
         lastReloadAt = now;
         await this.page.reload();
       }
@@ -387,7 +389,7 @@ export class SessionPage {
   }
 
   async openSidebarTaskContextMenu(title: string): Promise<void> {
-    const taskRow = this.sidebarTaskItem(title).first();
+    const taskRow = this.sidebarTaskItem(title);
     await taskRow.waitFor({ state: "visible" });
     await taskRow.click({ button: "right" });
   }
@@ -402,9 +404,12 @@ export class SessionPage {
     stepId: string,
   ): Promise<void> {
     await this.openSidebarTaskContextMenu(title);
-    await this.page.getByTestId("task-context-send-to-workflow").hover();
-    await this.page.getByTestId(`task-context-workflow-${workflowId}`).hover();
-    await this.page.getByTestId(`task-context-step-${stepId}`).click();
+    await this.page.getByTestId("task-context-change-workflow").click();
+    const changeWorkflow = new ChangeWorkflowPage(this.page);
+    await changeWorkflow.form.waitFor({ state: "visible" });
+    await changeWorkflow.chooseWorkflow(workflowId);
+    await changeWorkflow.chooseStep(stepId);
+    await changeWorkflow.submit();
   }
 
   /**
@@ -772,16 +777,20 @@ export class SessionPage {
    * React re-render (e.g. WS-driven sidebar update) between open and click.
    */
   async openSidebarMenuAndClick(title: string, itemName: string, retries = 3): Promise<void> {
-    const taskRow = this.sidebar.locator('[role="button"]').filter({ hasText: title });
-    for (let attempt = 0; attempt < retries; attempt++) {
+    const taskRow = this.sidebarTaskItem(title);
+    const attempts = Math.max(1, retries);
+    await taskRow.waitFor({ state: "visible", timeout: 10_000 });
+    for (let attempt = 0; attempt < attempts; attempt++) {
       try {
-        await taskRow.hover();
-        await taskRow.getByRole("button", { name: "Task actions" }).click();
+        await taskRow.scrollIntoViewIfNeeded({ timeout: 3_000 });
+        await taskRow.hover({ timeout: 3_000 });
+        await taskRow.getByRole("button", { name: "Task actions" }).click({ timeout: 3_000 });
         const menuItem = this.page.getByRole("menuitem", { name: itemName });
         await menuItem.waitFor({ state: "visible", timeout: 3_000 });
         await menuItem.click({ timeout: 3_000 });
         return;
-      } catch {
+      } catch (error) {
+        if (attempt === attempts - 1) throw error;
         // Menu was likely detached by a re-render — dismiss and retry
         await this.page.keyboard.press("Escape");
         await dwell(
@@ -792,10 +801,6 @@ export class SessionPage {
         );
       }
     }
-    // Final attempt without catch
-    await taskRow.hover();
-    await taskRow.getByRole("button", { name: "Task actions" }).click();
-    await this.page.getByRole("menuitem", { name: itemName }).click();
   }
 
   stepperStep(name: string): Locator {
@@ -864,8 +869,10 @@ export class SessionPage {
 
   /** Tap the chip and wait for the mobile drawer to be visible. */
   async tapPRStatusChip(): Promise<void> {
-    await this.prStatusChip().tap();
-    await expect(this.prStatusChipDrawer()).toBeVisible({ timeout: 5_000 });
+    const chip = this.prStatusChip();
+    await expect(chip).toHaveAttribute("aria-haspopup", "dialog", { timeout: 15_000 });
+    await chip.tap();
+    await expect(this.prStatusChipDrawer()).toBeVisible({ timeout: 15_000 });
   }
 
   // --- GitLab MR status chip accessors: mirrors the PR status chip shape
@@ -1073,6 +1080,24 @@ export class SessionPage {
       .first();
     await expect(tab).toBeVisible();
     await tab.click(options);
+  }
+
+  /** Open the Changes Diff action in its direct or width-aware overflow presentation. */
+  async openChangesDiff(): Promise<void> {
+    const direct = this.changes.getByRole("button", { name: "Diff", exact: true });
+    const overflow = this.changes.getByTestId("panel-header-overflow").first();
+    await expect
+      .poll(async () => (await direct.isVisible()) || (await overflow.isVisible()), {
+        timeout: 15_000,
+        message: "Waiting for the Changes Diff action",
+      })
+      .toBe(true);
+    if (await direct.isVisible()) {
+      await direct.click();
+      return;
+    }
+    await overflow.click();
+    await this.page.getByRole("menuitem", { name: "Diff", exact: true }).click();
   }
 
   /**
@@ -1351,24 +1376,48 @@ export class SessionPage {
       .waitFor({ state: "hidden", timeout });
   }
 
+  /** Wait for the active shell to emit its initial prompt before sending input. */
+  async expectTerminalShellReady(timeout = 20_000): Promise<void> {
+    await expect
+      .poll(async () => (await this.readXtermBuffer("terminal-panel")).trim().length > 0, {
+        timeout,
+        message: "Waiting for terminal shell output",
+      })
+      .toBe(true);
+  }
+
   /** Wait for the terminal WebSocket to connect, then type a command and press Enter. */
   async typeInTerminal(command: string): Promise<void> {
     await this.expectTerminalConnected();
 
     const xterm = this.activePanel("terminal-panel").locator(".xterm");
     await expect(xterm).toBeVisible();
+    // The terminal WebSocket can open before the shell starts and emits its prompt.
+    await expect
+      .poll(async () => (await this.readXtermBuffer("terminal-panel")).length > 0, {
+        timeout: TERMINAL_READY_TIMEOUT,
+        message: "Waiting for the terminal shell prompt before typing",
+      })
+      .toBe(true);
     await xterm.click();
-    await this.page.keyboard.type(command);
+    const input = xterm.locator(".xterm-helper-textarea");
+    await input.focus();
+    await expect(input).toBeFocused();
+    // xterm forwards each key through a PTY. A zero-delay burst can overrun
+    // that bridge under hosted CI load, which drops characters before the
+    // shell has consumed them. A small delay keeps the command intact while
+    // remaining much faster than a fixed sleep.
+    await this.page.keyboard.type(command, { delay: 5 });
     await this.page.keyboard.press("Enter");
   }
 
   /**
    * Assert the terminal buffer contains the given text.
    */
-  async expectTerminalHasText(text: string): Promise<void> {
+  async expectTerminalHasText(text: string, timeout = 30_000): Promise<void> {
     await expect
       .poll(async () => (await this.readXtermBuffer("terminal-panel")).includes(text), {
-        timeout: 10_000,
+        timeout,
         message: `Expected terminal to contain "${text}"`,
       })
       .toBe(true);

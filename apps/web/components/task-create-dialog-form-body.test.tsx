@@ -12,8 +12,23 @@ import type { TaskCreateLaunchPreview } from "./task-create-dialog-launch-previe
 afterEach(cleanup);
 
 vi.mock("@/components/workflow-selector-row", () => ({
-  WorkflowSelectorRow: ({ selectedWorkflowId }: { selectedWorkflowId: string | null }) => (
-    <button type="button">Workflow selector {selectedWorkflowId ?? "none"}</button>
+  WorkflowSelectorRow: ({
+    selectedWorkflowId,
+    previewWorkspaceId,
+    workflows,
+  }: {
+    selectedWorkflowId: string | null;
+    previewWorkspaceId?: string | null;
+    workflows: Array<{ id: string }>;
+  }) => (
+    <button
+      type="button"
+      data-testid="workflow-selector-mock"
+      data-preview-workspace-id={previewWorkspaceId ?? ""}
+      data-workflow-ids={workflows.map((item) => item.id).join(",")}
+    >
+      Workflow selector {selectedWorkflowId ?? "none"}
+    </button>
   ),
 }));
 
@@ -77,13 +92,14 @@ describe("WorkflowSection", () => {
 
   function renderWorkflowSection(
     effectiveWorkflowId: string | null,
-    workflows = [workflow, secondWorkflow],
+    workflows: Parameters<typeof WorkflowSection>[0]["workflows"] = [workflow, secondWorkflow],
   ) {
     return render(
       <WorkflowSection
         isCreateMode
         isTaskStarted={false}
         workflows={workflows}
+        previewWorkspaceId="workspace-1"
         snapshots={{}}
         effectiveWorkflowId={effectiveWorkflowId}
         onWorkflowChange={() => {}}
@@ -111,6 +127,35 @@ describe("WorkflowSection", () => {
 
     expect(screen.getByRole("button", { name: /workflow selector wf-1/i })).toBeTruthy();
     expect(screen.queryByTestId("task-create-dependency-slot")).toBeNull();
+  });
+
+  // @covers AC-TASKS-CREATE-WORKFLOW-STEPS-001.5
+  it("passes the workspace and visible workflows while retaining locked behavior", () => {
+    renderWorkflowSection("wf-1", [
+      workflow,
+      secondWorkflow,
+      { id: "wf-hidden", name: "Hidden", hidden: true },
+    ]);
+
+    const selector = screen.getByTestId("workflow-selector-mock");
+    expect(selector.getAttribute("data-preview-workspace-id")).toBe("workspace-1");
+    expect(selector.getAttribute("data-workflow-ids")).toBe("wf-1,wf-2");
+
+    cleanup();
+    render(
+      <WorkflowSection
+        isCreateMode
+        isTaskStarted={false}
+        workflowLocked
+        workflows={[workflow, secondWorkflow]}
+        previewWorkspaceId="workspace-1"
+        snapshots={{}}
+        effectiveWorkflowId="wf-1"
+        onWorkflowChange={() => {}}
+        agentProfiles={[]}
+      />,
+    );
+    expect(screen.queryByTestId("workflow-selector-mock")).toBeNull();
   });
 });
 
@@ -157,6 +202,8 @@ function makeFs(): DialogFormState {
     setDiscoverReposLoaded: () => {},
     selectedWorkflowId: null,
     setSelectedWorkflowId: () => {},
+    workflowAgentOverrides: {},
+    setWorkflowAgentOverrides: () => {},
     fetchedSteps: null,
     setFetchedSteps: () => {},
     isCreatingSession: false,

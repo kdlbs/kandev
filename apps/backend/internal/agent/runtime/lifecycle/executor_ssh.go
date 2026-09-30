@@ -256,7 +256,11 @@ func (r *SSHExecutor) CreateInstance(ctx context.Context, req *ExecutorCreateReq
 	}
 	client, err := dialSSH(baseCtx, target)
 	if err != nil {
-		return nil, fmt.Errorf("ssh: connect to %s@%s: %w", target.User, target.Host, err)
+		// Classified from this launch's own attempt, never from a stored
+		// reachability record — that record can predate this dial by a full
+		// probe interval and would misattribute a stale cause to a fresh
+		// failure (see task-05-launch-non-gating.md).
+		return nil, fmt.Errorf("ssh: connect to %s@%s: %s: %w", target.User, target.Host, ClassifyDialError(err), err)
 	}
 	var runtimeAPITunnel *sshRuntimeAPITunnel
 	released := false
@@ -271,7 +275,7 @@ func (r *SSHExecutor) CreateInstance(ctx context.Context, req *ExecutorCreateReq
 		return nil, err
 	}
 
-	agentctlBin, platform, err := r.prepareRemoteHost(baseCtx, client, req)
+	agentctlBin, platform, err := r.prepareRemoteHost(baseCtx, client, req, ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -296,7 +300,9 @@ func (r *SSHExecutor) CreateInstance(ctx context.Context, req *ExecutorCreateReq
 		if err != nil {
 			return nil, err
 		}
-		r.maybeUploadCredentials(baseCtx, client, req, platform)
+		if err := r.maybeUploadCredentials(baseCtx, client, req, platform); err != nil {
+			return nil, fmt.Errorf("ssh: prepare initial-mode configuration: %w", err)
+		}
 		if err := r.runPrepareScript(baseCtx, client, taskDir, req, platform, agentctlBin); err != nil {
 			return nil, err
 		}
@@ -459,6 +465,7 @@ func (r *SSHExecutor) prepareRemoteHost(
 	ctx context.Context,
 	client *ssh.Client,
 	req *ExecutorCreateRequest,
+	helperContexts ...context.Context,
 ) (string, SSHRemotePlatform, error) {
 	info, err := detectRemoteInfo(ctx, client)
 	if err != nil {
@@ -471,7 +478,16 @@ func (r *SSHExecutor) prepareRemoteHost(
 	}
 	r.report(req.OnProgress, "Detecting remote OS", PrepareStepCompleted, info.UnameAll)
 
-	agentctlBin, err := ensureAgentctlOnHost(ctx, client, r.agentctlResolver, info.Platform, r.logger)
+	helperProgress := req.OnProgress
+	if helperProgress != nil {
+		callback := helperProgress
+		helperProgress = func(step PrepareStep, index, total int) { callback(step, index+1, total+1) }
+	}
+	helperCtx := ctx
+	if len(helperContexts) > 0 && helperContexts[0] != nil {
+		helperCtx = helperContexts[0]
+	}
+	agentctlBin, err := ensureAgentctlOnHostWithProgress(ctx, helperCtx, client, r.agentctlResolver, info.Platform, r.logger, helperProgress)
 	if err != nil {
 		r.report(req.OnProgress, "Uploading agent controller", PrepareStepFailed, err.Error())
 		return "", info.Platform, err
@@ -1160,7 +1176,14 @@ func (r *SSHExecutor) resetTrackedManagedBrokerResume(
 			return brokerPreflight(preflightCtx, state.client, req, SSHRemotePlatform{})
 		})
 		if err != nil {
-			if r.isTransportLost(state) {
+			// The preflight context and the transport backstop share a
+			// deadline. If the preflight's context wins the race, its SSH
+			// call can return context.DeadlineExceeded before the backstop
+			// marks the client lost. Treat either outcome as an abandoned
+			// preflight and close the client so no wedged channel survives.
+			if r.isTransportLost(state) || errors.Is(err, context.DeadlineExceeded) {
+				r.markTransportLost(state)
+				_ = r.closeClientOnce(state)
 				return ErrSSHTransportLost
 			}
 			return err
@@ -1312,7 +1335,7 @@ func (r *SSHExecutor) maybeUploadCredentials(
 	client *ssh.Client,
 	req *ExecutorCreateRequest,
 	platform SSHRemotePlatform,
-) {
+) error {
 	if err := r.uploadCredentials(ctx, client, req, platform); err != nil {
 		r.logger.Warn(
 			"ssh executor: credential upload failed; launch will proceed but agent may not authenticate",
@@ -1321,6 +1344,7 @@ func (r *SSHExecutor) maybeUploadCredentials(
 			zap.Error(err),
 		)
 	}
+	return nil
 }
 
 // preflightAgentBinary probes the remote for the agent's required binary

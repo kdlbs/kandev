@@ -107,10 +107,19 @@ function useSidebarBulkActions(
   );
 
   const bulkMove = useCallback(
-    async (ids: string[], targetWorkflowId: string, targetStepId: string) => {
+    async (
+      ids: string[],
+      targetWorkflowId: string,
+      targetStepId: string,
+      knownWorkflowByTaskId?: ReadonlyMap<string, string>,
+    ) => {
       if (ids.length === 0) return;
       try {
-        const destination = ids.every((taskId) => getWorkflowIdForTask(taskId) === targetWorkflowId)
+        const destination = ids.every(
+          (taskId) =>
+            (knownWorkflowByTaskId?.get(taskId) ?? getWorkflowIdForTask(taskId)) ===
+            targetWorkflowId,
+        )
           ? "step"
           : "workflow";
         await moveTasks(ids, targetWorkflowId, targetStepId, destination);

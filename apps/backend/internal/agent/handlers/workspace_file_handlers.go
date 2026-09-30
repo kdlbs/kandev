@@ -10,6 +10,7 @@ import (
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/common/workspacepath"
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"go.uber.org/zap"
 )
@@ -61,6 +62,9 @@ func (h *WorkspaceFileHandlers) wsGetFileTree(ctx context.Context, msg *ws.Messa
 
 	if req.SessionID == "" {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "session_id is required", nil)
+	}
+	if err := workspacepath.ValidateTreePath(req.Path); err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, err.Error(), nil)
 	}
 	// Get agent execution for this session
 	execution, err := h.lifecycle.GetOrEnsureExecution(ctx, req.SessionID)

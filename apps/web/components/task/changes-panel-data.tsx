@@ -40,7 +40,15 @@ import {
   type ReviewProgressPRSource,
   type PRCommitForMerge,
 } from "./changes-panel-helpers";
-import type { CommitDetailTarget, OpenDiffOptions } from "./changes-diff-target";
+import {
+  groupChangedFileTargetsByRepository,
+  type ChangedFileTarget,
+} from "./changes-timeline-selection";
+import type {
+  CommitDetailTarget,
+  CommitFileNavigationRequest,
+  OpenDiffOptions,
+} from "@/lib/state/diff-target-types";
 import type { PRDiffFile, TaskPR } from "@/lib/types/github";
 import { gitOperationLabel } from "@/hooks/use-git-with-feedback";
 import { getGitCredentialDisplay } from "./changes-git-credential-display";
@@ -130,16 +138,19 @@ export type ChangesPanelBodyProps = {
   dialogs: DialogsType;
   onOpenDiffFile: (path: string, options?: OpenDiffOptions) => void;
   onEditFile: (path: string, repo?: string) => void;
-  onOpenCommitDetail?: (target: CommitDetailTarget) => void;
+  onOpenCommitDetail?: (
+    target: CommitDetailTarget,
+    fileNavigation?: CommitFileNavigationRequest,
+  ) => void;
   onOpenReview?: () => void;
   onRevertCommit?: (sha: string, repo?: string) => void;
   onStageAll: () => void;
   onUnstageAll: () => void;
   onStage: (path: string, repo?: string) => Promise<void>;
   onUnstage: (path: string, repo?: string) => Promise<void>;
-  onBulkStage: (paths: string[]) => void;
-  onBulkUnstage: (paths: string[]) => void;
-  onBulkDiscard: (paths: string[], anchor?: HTMLElement) => void;
+  onBulkStage: (files: ChangedFileTarget[]) => void;
+  onBulkUnstage: (files: ChangedFileTarget[]) => void;
+  onBulkDiscard: (files: ChangedFileTarget[], anchor?: HTMLElement) => void;
   onPush: () => void;
   onForcePush: () => void;
   stagedFileCount: number;
@@ -474,7 +485,10 @@ export function useChangesPanelData() {
 type ChangesPanelCallbacks = {
   onOpenDiffFile: (path: string, options?: OpenDiffOptions) => void;
   onEditFile: (path: string, repo?: string) => void;
-  onOpenCommitDetail?: (target: CommitDetailTarget) => void;
+  onOpenCommitDetail?: (
+    target: CommitDetailTarget,
+    fileNavigation?: CommitFileNavigationRequest,
+  ) => void;
   onOpenReview?: () => void;
 };
 
@@ -527,11 +541,15 @@ function buildChangesPanelWorkspaceActions(
     onUnstageAll: git.unstageAll,
     onStage: (path, repo) => git.stageFile([path], repo).then(() => undefined),
     onUnstage: (path, repo) => git.unstageFile([path], repo).then(() => undefined),
-    onBulkStage: (paths) => {
-      git.stageFile(paths).catch(() => undefined);
+    onBulkStage: (files) => {
+      for (const group of groupChangedFileTargetsByRepository(files)) {
+        git.stageFile(group.paths, group.repositoryName).catch(() => undefined);
+      }
     },
-    onBulkUnstage: (paths) => {
-      git.unstageFile(paths).catch(() => undefined);
+    onBulkUnstage: (files) => {
+      for (const group of groupChangedFileTargetsByRepository(files)) {
+        git.unstageFile(group.paths, group.repositoryName).catch(() => undefined);
+      }
     },
     onBulkDiscard: localDialogs.handleBulkDiscardClick,
     onPush: () => gitHandlers.handlePush(),

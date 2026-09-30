@@ -27,6 +27,7 @@ import (
 	"github.com/kandev/kandev/internal/orchestrator"
 	orchestratorhandlers "github.com/kandev/kandev/internal/orchestrator/handlers"
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	taskservice "github.com/kandev/kandev/internal/task/service"
 	"github.com/kandev/kandev/internal/task/statussummary"
@@ -121,6 +122,8 @@ func provideGateway(
 	authSvc *auth.Service,
 	dataDir string,
 	registerCleanup func(func() error),
+	lspContinuityEnabled bool,
+	acquireSessionFence func(string) func(),
 	lspMaxConnections ...int,
 ) (*gateways.Gateway, *notificationservice.Service, *notificationcontroller.Controller, *terminalservice.Service, error) {
 	gateway, err := gateways.Provide(log)
@@ -146,7 +149,17 @@ func provideGateway(
 	scriptSvc := &scriptServiceAdapter{taskSvc: taskSvc}
 	if lifecycleMgr != nil {
 		gateway.SetLifecycleManager(lifecycleMgr, userSvc, scriptSvc)
+		if terminalSvc != nil {
+			gateway.SetTerminalService(terminalSvc)
+		}
 		gateway.SetLSPHandler(lifecycleMgr, userSvc, lspMaxConnections...)
+		if lspContinuityEnabled {
+			gateway.LSPHandler.EnableContinuity(acquireSessionFence, eventBus)
+			orchestratorSvc.SetLSPLeaseLifecycle(gateway.LSPHandler)
+			if registerCleanup != nil {
+				registerCleanup(gateway.LSPHandler.Close)
+			}
+		}
 		gateway.SetVscodeProxy(lifecycleMgr)
 		gateway.SetPortProxy(lifecycleMgr)
 		gateway.SetPortTunnel(lifecycleMgr)
@@ -341,7 +354,7 @@ func provideGateway(
 					return nil, err
 				}
 				if task == nil {
-					return nil, fmt.Errorf("task %q not found", taskID)
+					return nil, fmt.Errorf("%w: %s", repoerrors.ErrTaskNotFound, taskID)
 				}
 				observation, observationErr := orchestratorSvc.CurrentSessionCeilingObservation(ctx)
 				return statussummary.LaunchQueueSummaryFromTaskWithCapacity(task, &statussummary.LaunchQueueCapacityObservation{
@@ -351,13 +364,20 @@ func provideGateway(
 					Known:      observationErr == nil && observation.Known,
 				}), nil
 			},
+			LoadCompletionGate: func(ctx context.Context, taskID string) (*statussummary.CompletionGateSummary, error) {
+				gate, err := taskRepo.GetTaskCompletionGate(ctx, taskID)
+				if err != nil {
+					return nil, err
+				}
+				return statussummary.CompletionGateSummaryFromSnapshot(gate), nil
+			},
 			ResolveWorkspace: func(ctx context.Context, taskID string) (string, error) {
 				task, err := taskRepo.GetTask(ctx, taskID)
 				if err != nil {
 					return "", err
 				}
 				if task == nil {
-					return "", fmt.Errorf("task %q not found", taskID)
+					return "", fmt.Errorf("%w: %s", repoerrors.ErrTaskNotFound, taskID)
 				}
 				return task.WorkspaceID, nil
 			},

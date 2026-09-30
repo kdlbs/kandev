@@ -9,6 +9,7 @@ import {
   recoverRetentionStatusPolling,
   reloadRetentionWithFakeClock,
   resetRetention,
+  seedRetentionAnalysis,
   RETENTION_ROUTE,
   runRetention,
   seedRetentionTask,
@@ -21,6 +22,7 @@ test.describe("Tool payload retention on phones", () => {
   }) => {
     await page.setViewportSize({ width: 390, height: 844 });
     await resetRetention(page);
+    await seedRetentionAnalysis(page);
     await page.goto(RETENTION_ROUTE);
     await reloadRetentionWithFakeClock(page);
     const removeStatusRoute = await failNextRetentionStatusRead(page);
@@ -36,6 +38,7 @@ test.describe("Tool payload retention on phones", () => {
   }) => {
     await page.setViewportSize({ width: 390, height: 844 });
     await resetRetention(page);
+    await seedRetentionAnalysis(page);
     await page.goto(RETENTION_ROUTE);
     await reloadRetentionWithFakeClock(page);
     const removeStatusRoute = await failNextRetentionStatusRead(page);

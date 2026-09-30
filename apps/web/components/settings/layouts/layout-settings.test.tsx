@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   finePointer: true,
+  layoutTab: "profiles" as "profiles" | "sidebar",
   useLayoutSettings: vi.fn(),
   deleteSelected: vi.fn(),
 }));
@@ -19,16 +20,29 @@ vi.mock("@/hooks/use-responsive-breakpoint", () => ({
 
 vi.mock("@/components/settings/settings-save-provider", () => ({
   useSettingsSaveContributor: vi.fn(),
+  SettingsSaveDirtyScope: ({ children }: { children: (isDirty: boolean) => React.ReactNode }) =>
+    children(false),
 }));
 
 vi.mock("@/components/settings/settings-target", () => ({
-  SettingsTarget: ({ children, ...props }: { children: React.ReactNode }) => (
-    <div {...props}>{children}</div>
-  ),
+  SettingsTarget: ({
+    children,
+    targetId: _targetId,
+    ...props
+  }: {
+    children: React.ReactNode;
+    targetId?: string;
+  }) => <div {...props}>{children}</div>,
 }));
 
 vi.mock("./layout-editor", () => ({
   LayoutEditor: () => <div data-testid="layout-editor" />,
+}));
+
+vi.mock("../sidebar-layout-editor", () => ({
+  SidebarLayoutEditor: ({ embedded }: { embedded?: boolean }) => (
+    <div data-testid="sidebar-layout-editor-tab" data-embedded={embedded ? "true" : "false"} />
+  ),
 }));
 
 vi.mock("./layout-profile-list", () => ({
@@ -43,6 +57,10 @@ vi.mock("@kandev/ui/tooltip", () => ({
 
 vi.mock("./use-layout-settings", () => ({
   useLayoutSettings: () => mocks.useLayoutSettings(),
+}));
+
+vi.mock("@/hooks/domains/settings/use-settings-tab", () => ({
+  useSettingsTab: () => ({ value: mocks.layoutTab, selectTab: vi.fn() }),
 }));
 
 import { LayoutSettings } from "./layout-settings";
@@ -89,11 +107,29 @@ function controller() {
 
 beforeEach(() => {
   mocks.finePointer = true;
+  mocks.layoutTab = "profiles";
   mocks.deleteSelected.mockReset();
   mocks.useLayoutSettings.mockReturnValue(controller());
 });
 
 afterEach(cleanup);
+
+describe("LayoutSettings tabs", () => {
+  it("lists sidebar customization as a tab and embeds its editor", () => {
+    render(<LayoutSettings />);
+
+    expect(screen.getByRole("tab", { name: "settings:layoutProfiles" })).toBeTruthy();
+    expect(screen.getByRole("tab", { name: "settings:sidebar" })).toBeTruthy();
+
+    cleanup();
+    mocks.layoutTab = "sidebar";
+    render(<LayoutSettings />);
+
+    expect(screen.getByTestId("sidebar-layout-editor-tab").getAttribute("data-embedded")).toBe(
+      "true",
+    );
+  });
+});
 
 describe("LayoutSettings deletion confirmation", () => {
   it("anchors confirmation to the selected profile action on fine pointers", async () => {

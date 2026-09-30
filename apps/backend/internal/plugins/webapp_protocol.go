@@ -166,6 +166,7 @@ type webAppContext struct {
 	WebAppKey       string   `json:"web_app_key"`
 	Placement       string   `json:"placement"`
 	ScopeKind       string   `json:"scope_kind"`
+	DataScopeKind   string   `json:"data_scope_kind"`
 	WorkspaceID     string   `json:"workspace_id,omitempty"`
 	TaskID          string   `json:"task_id,omitempty"`
 	SessionID       string   `json:"session_id,omitempty"`
@@ -190,6 +191,7 @@ func (s *Service) handleWebAppContext(w http.ResponseWriter, r *http.Request, bi
 		WebAppKey:       binding.WebAppKey,
 		Placement:       binding.Placement,
 		ScopeKind:       binding.ScopeKind,
+		DataScopeKind:   instances.EffectiveDataScopeKind(binding.ScopeKind, binding.DataScopeKind),
 		WorkspaceID:     binding.WorkspaceID,
 		TaskID:          binding.TaskID,
 		SessionID:       binding.SessionID,
@@ -219,6 +221,8 @@ func (s *Service) handleWebAppTasks(ctx context.Context, w http.ResponseWriter, 
 		s.listWebAppTasks(ctx, w, r, host, binding)
 	case len(parts) == 1 && r.Method == http.MethodGet:
 		s.getWebAppTask(ctx, w, r, host, binding, parts[0])
+	case len(parts) == 2 && parts[1] == "step-transitions" && r.Method == http.MethodGet:
+		s.listWebAppTaskTransitions(ctx, w, r, host, binding, parts[0])
 	case len(parts) == 1 && r.Method == http.MethodPatch:
 		s.updateWebAppTask(ctx, w, r, host, binding, parts[0])
 	case len(parts) == 2 && parts[1] == "messages" && r.Method == http.MethodPost:
@@ -234,17 +238,19 @@ func (s *Service) handleWebAppWorkflows(ctx context.Context, w http.ResponseWrit
 		s.listWebAppWorkflows(ctx, w, r, host, binding)
 	case len(parts) == 2 && parts[1] == "steps" && r.Method == http.MethodGet:
 		s.listWebAppWorkflowSteps(ctx, w, r, host, binding, parts[0])
+	case len(parts) == 2 && parts[1] == "transition-groups" && r.Method == http.MethodGet:
+		s.listWebAppWorkflowTransitionGroups(ctx, w, r, host, binding, parts[0])
 	default:
 		writeWebAppError(w, http.StatusMethodNotAllowed, "method_not_allowed")
 	}
 }
 
 func (s *Service) handleWebAppAction(w http.ResponseWriter, r *http.Request, binding webapp.CapabilityBinding, parts []string) {
-	if r.Method != http.MethodPost || len(parts) != 2 || !validWebAppKey(parts[1]) {
+	if r.Method != http.MethodPost || len(parts) != 3 || parts[1] != "actions" || !validWebAppKey(parts[2]) {
 		writeWebAppError(w, http.StatusMethodNotAllowed, "method_not_allowed")
 		return
 	}
-	if !webAppHasActionPermission(binding.Permissions, parts[1]) {
+	if !webAppHasActionPermission(binding.Permissions, parts[2]) {
 		writeWebAppError(w, http.StatusForbidden, "plugin_permission_denied")
 		return
 	}
@@ -360,6 +366,9 @@ func (s *Service) validateWebAppBinding(ctx context.Context, binding webapp.Capa
 	}
 	instance, err := store.Get(ctx, binding.InstanceID)
 	if err != nil || instance.Status != instances.StatusActive || instance.PluginID != binding.PluginID ||
+		instance.ScopeKind != binding.ScopeKind ||
+		instance.EffectiveDataScopeKind() != instances.EffectiveDataScopeKind(binding.ScopeKind, binding.DataScopeKind) ||
+		instance.WorkspaceID != binding.WorkspaceID || instance.TaskID != binding.TaskID ||
 		instance.ActiveReleaseID != binding.ReleaseID || instance.GrantGeneration != binding.GrantGeneration {
 		return webapp.ErrRuntimeTokenStale
 	}
@@ -391,13 +400,14 @@ func (s *Service) validateWebAppPermissions(ctx context.Context, binding webapp.
 	if err != nil {
 		return err
 	}
+	dataScope := instances.EffectiveDataScopeKind(binding.ScopeKind, binding.DataScopeKind)
 	for _, permission := range webAppDeclaredPermissions(m, binding.WebAppKey) {
-		if !webAppGrantCovers(permission, binding.ScopeKind, grants) {
+		if !webAppGrantCovers(permission, dataScope, grants) {
 			return errors.New("web app permission grant is stale")
 		}
 	}
 	for _, origin := range binding.NetworkOrigins {
-		if !webAppOriginGranted(origin, binding.ScopeKind, grants) {
+		if !webAppOriginGranted(origin, dataScope, grants) {
 			return errors.New("web app network grant is stale")
 		}
 	}

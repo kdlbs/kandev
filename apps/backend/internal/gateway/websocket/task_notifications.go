@@ -38,6 +38,7 @@ func RegisterTaskNotifications(ctx context.Context, eventBus bus.EventBus, hub *
 	b.subscribe(eventBus, events.WorkflowStepCreated, ws.ActionWorkflowStepCreated)
 	b.subscribe(eventBus, events.WorkflowStepUpdated, ws.ActionWorkflowStepUpdated)
 	b.subscribe(eventBus, events.WorkflowStepDeleted, ws.ActionWorkflowStepDeleted)
+	b.subscribe(eventBus, events.PromptsChanged, ws.ActionPromptsChanged)
 	b.subscribe(eventBus, events.AgentProfileCreated, ws.ActionAgentProfileCreated)
 	b.subscribe(eventBus, events.AgentProfileUpdated, ws.ActionAgentProfileUpdated)
 	b.subscribe(eventBus, events.AgentProfileDeleted, ws.ActionAgentProfileDeleted)
@@ -53,6 +54,7 @@ func RegisterTaskNotifications(ctx context.Context, eventBus bus.EventBus, hub *
 	b.subscribe(eventBus, events.TaskPlanRevisionCreated, ws.ActionTaskPlanRevisionCreated)
 	b.subscribe(eventBus, events.TaskPlanReverted, ws.ActionTaskPlanReverted)
 	b.subscribe(eventBus, events.TaskPlanCommentsChanged, ws.ActionTaskPlanCommentsChanged)
+	b.subscribe(eventBus, events.TaskPreviewFeedbackChanged, ws.ActionTaskPreviewFeedbackChanged)
 	b.subscribe(eventBus, events.TaskWalkthroughCreated, ws.ActionTaskWalkthroughCreated)
 	b.subscribe(eventBus, events.TaskWalkthroughUpdated, ws.ActionTaskWalkthroughUpdated)
 	b.subscribe(eventBus, events.TaskWalkthroughDeleted, ws.ActionTaskWalkthroughDeleted)
@@ -75,6 +77,7 @@ func RegisterTaskNotifications(ctx context.Context, eventBus bus.EventBus, hub *
 	b.subscribe(eventBus, events.ExecutorCreated, ws.ActionExecutorCreated)
 	b.subscribe(eventBus, events.ExecutorUpdated, ws.ActionExecutorUpdated)
 	b.subscribe(eventBus, events.ExecutorDeleted, ws.ActionExecutorDeleted)
+	b.subscribe(eventBus, events.ExecutorReachabilityChanged, ws.ActionExecutorReachabilityChanged)
 	b.subscribe(eventBus, events.ExecutorProfileCreated, ws.ActionExecutorProfileCreated)
 	b.subscribe(eventBus, events.ExecutorProfileUpdated, ws.ActionExecutorProfileUpdated)
 	b.subscribe(eventBus, events.ExecutorProfileDeleted, ws.ActionExecutorProfileDeleted)
@@ -265,9 +268,12 @@ func (b *TaskEventBroadcaster) routeBroadcast(
 	msg *ws.Message,
 ) error {
 	switch action {
-	case ws.ActionTaskPlanCommentsChanged:
+	case ws.ActionTaskPlanCommentsChanged, ws.ActionTaskPreviewFeedbackChanged:
 		taskID := extractStringField(data, "task_id")
 		if snapshot, ok := data.(*models.TaskPlanCommentSnapshot); ok {
+			taskID = snapshot.TaskID
+		}
+		if snapshot, ok := data.(*models.TaskPreviewFeedbackSnapshot); ok {
 			taskID = snapshot.TaskID
 		}
 		if taskID != "" {
@@ -290,6 +296,9 @@ func (b *TaskEventBroadcaster) routeBroadcast(
 			return nil
 		}
 	case ws.ActionSessionStateChanged:
+		if sessionID != "" && extractStringField(data, "new_state") == string(models.TaskSessionStateRunning) {
+			b.hub.clearSessionLaunchWarning(sessionID)
+		}
 		// Broadcast beyond the session subscribers so the sidebar task
 		// switcher can track state changes for all tasks — but scoped to
 		// the owning workspace's user when auth is enabled.
@@ -304,6 +313,7 @@ func (b *TaskEventBroadcaster) routeBroadcast(
 		}
 	case ws.ActionSessionRemoved:
 		if sessionID != "" {
+			b.hub.clearSessionLaunchWarning(sessionID)
 			if _, hasReceipt := conversationReceiptFromData(data); hasReceipt {
 				b.hub.BroadcastConversationMutation(data)
 			}

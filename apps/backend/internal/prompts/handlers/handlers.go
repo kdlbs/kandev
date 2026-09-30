@@ -7,10 +7,12 @@ import (
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
 
+	"github.com/kandev/kandev/internal/authz"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/prompts/controller"
 	"github.com/kandev/kandev/internal/prompts/dto"
 	"github.com/kandev/kandev/internal/prompts/service"
+	promptstore "github.com/kandev/kandev/internal/prompts/store"
 )
 
 type Handlers struct {
@@ -33,9 +35,10 @@ func RegisterRoutes(router *gin.Engine, ctrl *controller.Controller, log *logger
 	handlers := NewHandlers(ctrl, log)
 	api := router.Group("/api/v1")
 	api.GET("/prompts", handlers.httpListPrompts)
-	api.POST("/prompts", handlers.httpCreatePrompt)
-	api.PATCH("/prompts/:id", handlers.httpUpdatePrompt)
-	api.DELETE("/prompts/:id", handlers.httpDeletePrompt)
+	manageConfig := authz.RequireOrgScope(authz.ScopeOrgConfigManage)
+	api.POST("/prompts", manageConfig, handlers.httpCreatePrompt)
+	api.PATCH("/prompts/:id", manageConfig, handlers.httpUpdatePrompt)
+	api.DELETE("/prompts/:id", manageConfig, handlers.httpDeletePrompt)
 }
 
 func (h *Handlers) httpListPrompts(c *gin.Context) {
@@ -88,6 +91,8 @@ func (h *Handlers) httpUpdatePrompt(c *gin.Context) {
 			status, message = http.StatusBadRequest, err.Error()
 		case errors.Is(err, service.ErrPromptNotFound):
 			status, message = http.StatusNotFound, err.Error()
+		case errors.Is(err, promptstore.ErrPromptWriteRejected):
+			status, message = http.StatusConflict, err.Error()
 		case errors.Is(err, service.ErrPromptAlreadyExists):
 			status, message = http.StatusConflict, err.Error()
 		}

@@ -80,6 +80,7 @@ beforeEach(() => {
 
 vi.mock("@/lib/api/domains/kanban-api", () => ({
   deleteTask: (...args: unknown[]) => deleteTask(...args),
+  deleteTaskAfterUserAction: (...args: unknown[]) => deleteTask(...args),
 }));
 
 describe("useConfigChat unified launch", () => {

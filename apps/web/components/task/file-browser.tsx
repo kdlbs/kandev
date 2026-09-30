@@ -1,5 +1,7 @@
 "use client";
 
+import { TaskFolderPicker } from "./task-folder-picker";
+
 import React, {
   useEffect,
   useMemo,
@@ -25,6 +27,7 @@ import {
   shouldShowFileTreeTouchActions,
 } from "./file-browser-parts";
 import { FileBrowserContentArea } from "./file-browser-content-area";
+import { FileTreeRefreshStatus } from "./file-browser-load-state";
 import {
   useFileBrowserTree,
   useScrollPersistence,
@@ -451,6 +454,7 @@ function FileBrowserTreeContent({
       }}
     >
       <FileBrowserContentArea
+        sessionId={data.sessionId}
         isSearchActive={search.isSearchActive}
         searchResults={search.searchResults}
         isSessionFailed={isSessionFailed}
@@ -511,6 +515,7 @@ export function FileBrowser({
   addSourcesDisabledReason,
 }: FileBrowserProps) {
   const { isMobile, isFinePointer } = useResponsiveBreakpoint();
+  const { t } = useTranslation();
   const showTouchActions = shouldShowFileTreeTouchActions(isMobile, isFinePointer);
   const scrollAreaRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -524,9 +529,10 @@ export function FileBrowser({
     scrollAreaRef,
     containerRef,
   });
-  const { openFolder, copied, copyPath, search, treeState, fullPath, displayPath } = data;
+  const { folderAction, copied, copyPath, search, treeState, fullPath, displayPath } = data;
   const workspaceBlocked =
     data.workspaceRestoration.status !== null && data.workspaceRestoration.status !== "ready";
+  const canUseTree = !workspaceBlocked && !data.isSessionFailed;
   const { openPicker, uploads, elements } = useFileUploadEntryPoints(sessionId);
   const handleToolbarUpload = useCallback(
     (mode: "files" | "folder") => openPicker(mode, handlers.activeFolderPath ?? ""),
@@ -542,7 +548,7 @@ export function FileBrowser({
         onMouseDown={handleClickOutside}
       >
         <FileBrowserHeader
-          treeLoaded={Boolean(treeState.tree && treeState.loadState === "loaded")}
+          treeLoaded={Boolean(treeState.tree && canUseTree)}
           search={search}
           displayPath={displayPath}
           fullPath={fullPath}
@@ -550,7 +556,9 @@ export function FileBrowser({
           expandedPathsSize={treeState.expandedPaths.size}
           onCopyPath={copyPath}
           onStartCreate={!workspaceBlocked && onCreateFile ? handlers.handleStartCreate : undefined}
-          onOpenFolder={openFolder}
+          onOpenFolder={folderAction.open}
+          isOpeningFolder={folderAction.isLoading}
+          isFolderDisabled={folderAction.disabled}
           onCollapseAll={treeState.collapseAll}
           showCreateButton={!workspaceBlocked && Boolean(onCreateFile)}
           onUploadFiles={!workspaceBlocked && sessionId ? handleToolbarUpload : undefined}
@@ -573,6 +581,19 @@ export function FileBrowser({
           onUploadFilesHere={sessionId ? handleUploadHere : undefined}
           showTouchActions={showTouchActions}
         />
+        {canUseTree && (
+          <FileTreeRefreshStatus
+            tree={treeState.tree}
+            loadState={treeState.loadState}
+            isLoadingTree={treeState.isLoadingTree}
+            loadError={treeState.loadError}
+            onRetry={() => treeState.loadTree({ resetRetry: true })}
+          />
+        )}
+        <span role="status" className="sr-only">
+          {folderAction.isLoading ? t("editors:openingFolder") : ""}
+        </span>
+        <TaskFolderPicker action={folderAction} />
         <FileUploadStatusList uploads={uploads} />
         {elements}
       </div>

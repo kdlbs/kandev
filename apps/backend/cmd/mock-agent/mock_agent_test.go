@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	acp "github.com/coder/acp-go-sdk"
@@ -24,6 +25,78 @@ func (u *promptCancelUpdater) SessionUpdate(context.Context, acp.SessionNotifica
 
 func (u *promptCancelUpdater) RequestPermission(context.Context, acp.RequestPermissionRequest) (acp.RequestPermissionResponse, error) {
 	return acp.RequestPermissionResponse{}, nil
+}
+
+func TestMockAgentCancelHoldDefersPromptCompletion(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		const sessionID = acp.SessionId("cancel-hold-session")
+		t.Setenv("KANDEV_E2E_CANCEL_HOLD_DURATION", "30ms")
+		const acceptanceMarker = "queued-pause-provider-accepted-test-token"
+		updater := newCapturingUpdater()
+		agent := &mockAgent{
+			model:             "mock-fast",
+			conn:              updater,
+			sessions:          map[acp.SessionId]bool{sessionID: true},
+			promptCancels:     make(map[acp.SessionId]context.CancelFunc),
+			promptCancelHolds: make(map[acp.SessionId]chan struct{}),
+			commandsEmitted:   make(map[acp.SessionId]bool),
+		}
+
+		result := make(chan struct {
+			response acp.PromptResponse
+			err      error
+		}, 1)
+		go func() {
+			response, err := agent.Prompt(context.Background(), acp.PromptRequest{
+				SessionId: sessionID,
+				Prompt:    []acp.ContentBlock{acp.TextBlock("/e2e:cancel-hold " + acceptanceMarker)},
+			})
+			result <- struct {
+				response acp.PromptResponse
+				err      error
+			}{response: response, err: err}
+		}()
+
+		synctest.Wait()
+		select {
+		case <-updater.anySeen:
+		default:
+			t.Fatal("hold prompt did not start")
+		}
+		if texts := updater.textMessages(); len(texts) != 1 || strings.TrimSpace(texts[0]) != acceptanceMarker {
+			t.Fatalf("provider acceptance text before cancellation = %v, want [%q]", texts, acceptanceMarker)
+		}
+		if err := agent.Cancel(context.Background(), acp.CancelNotification{SessionId: sessionID}); err != nil {
+			t.Fatalf("cancel prompt: %v", err)
+		}
+		synctest.Wait()
+		select {
+		case <-result:
+			t.Fatal("cancel-hold prompt completed before its configured hold elapsed")
+		default:
+		}
+
+		time.Sleep(29 * time.Millisecond)
+		synctest.Wait()
+		select {
+		case <-result:
+			t.Fatal("cancel-hold prompt completed before its configured hold elapsed")
+		default:
+		}
+
+		time.Sleep(time.Millisecond)
+		synctest.Wait()
+		outcome := <-result
+		if outcome.err != nil {
+			t.Fatalf("prompt returned error: %v", outcome.err)
+		}
+		if outcome.response.StopReason != acp.StopReasonCancelled {
+			t.Fatalf("stop reason = %q, want cancelled", outcome.response.StopReason)
+		}
+		if texts := updater.textMessages(); len(texts) != 1 || strings.TrimSpace(texts[0]) != acceptanceMarker {
+			t.Fatalf("provider acceptance text after cancellation = %v, want [%q]", texts, acceptanceMarker)
+		}
+	})
 }
 
 func TestMockAgentCancelStopsPrompt(t *testing.T) {
@@ -248,6 +321,33 @@ func (u *capturingUpdater) SessionUpdate(_ context.Context, n acp.SessionNotific
 		u.textOnce.Do(func() { close(u.textSeen) })
 	}
 	return nil
+}
+
+func TestSetSessionModeReportsAndRetainsSelectedMode(t *testing.T) {
+	sid := acp.SessionId("session-mode-test")
+	updater := &capturingUpdater{anySeen: make(chan struct{}), textSeen: make(chan struct{})}
+	agent := &mockAgent{conn: updater, sessions: map[acp.SessionId]bool{sid: true}}
+	_, err := agent.SetSessionMode(context.Background(), acp.SetSessionModeRequest{
+		SessionId: sid, ModeId: "plan-mock",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-updater.anySeen:
+	case <-time.After(time.Second):
+		t.Fatal("mode update was not reported")
+	}
+	updater.mu.Lock()
+	notes := append([]acp.SessionNotification(nil), updater.notes...)
+	updater.mu.Unlock()
+	if len(notes) != 1 || notes[0].Update.CurrentModeUpdate == nil ||
+		string(notes[0].Update.CurrentModeUpdate.CurrentModeId) != "plan-mock" {
+		t.Fatalf("mode updates = %+v", notes)
+	}
+	if got := agent.sessionModes[sid]; got != "plan-mock" {
+		t.Fatalf("stored mode = %q", got)
+	}
 }
 
 func (u *capturingUpdater) RequestPermission(context.Context, acp.RequestPermissionRequest) (acp.RequestPermissionResponse, error) {

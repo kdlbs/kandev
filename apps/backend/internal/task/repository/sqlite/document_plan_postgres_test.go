@@ -300,10 +300,10 @@ func TestPostgresPlanRevisionWorkflowColumnsReplayMigration(t *testing.T) {
 		t.Fatalf("insert legacy plan revision: %v", err)
 	}
 
-	if err := repo.runMigrations(); err != nil {
+	if err := repo.runMigrations(context.Background()); err != nil {
 		t.Fatalf("run legacy plan migrations: %v", err)
 	}
-	if err := repo.runMigrations(); err != nil {
+	if err := repo.runMigrations(context.Background()); err != nil {
 		t.Fatalf("replay legacy plan migrations: %v", err)
 	}
 	var writeVersion string

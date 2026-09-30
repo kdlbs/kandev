@@ -192,13 +192,31 @@ export type ToolCallMetadata = {
 
 // Tool names are duplicated across transport fields. Keep one scanner so
 // renderer dispatch and transcript grouping cannot disagree.
+function hasForeignKandevProvider(input: unknown): boolean {
+  if (!input || typeof input !== "object" || Array.isArray(input)) return false;
+  const rawInput = (input as Record<string, unknown>).raw_input;
+  if (!rawInput || typeof rawInput !== "object" || Array.isArray(rawInput)) return false;
+  const rawInputRecord = rawInput as Record<string, unknown>;
+  if (!Object.hasOwn(rawInputRecord, "providerIdentifier")) return false;
+  const provider = rawInputRecord.providerIdentifier;
+  return typeof provider !== "string" || provider.trim() !== "kandev";
+}
+
+function legacyKandevToolCandidates(
+  metadata: ToolCallMetadata | undefined,
+  message: Message,
+): Array<string | undefined> {
+  if (hasForeignKandevProvider(metadata?.normalized?.generic?.input)) return [];
+  return [metadata?.tool_name, metadata?.title, message.content || undefined];
+}
+
 export function kandevToolStemOf(message: Message): string | null {
   const metadata = message.metadata as ToolCallMetadata | undefined;
   const normalizedName = metadata?.normalized?.generic?.name;
   const normalizedStem = extractKandevStem(normalizedName);
   if (normalizedStem) return normalizedStem;
   if (normalizedName && /\/|__|\./.test(normalizedName)) return null;
-  const candidates = [metadata?.tool_name, metadata?.title, message.content || undefined];
+  const candidates = legacyKandevToolCandidates(metadata, message);
   for (const candidate of candidates) {
     const stem = extractKandevStem(candidate);
     if (stem) return stem;
@@ -279,7 +297,7 @@ export type StatusMetadata = {
   status?: string;
   stage?: string;
   message?: string;
-  variant?: "default" | "warning" | "error";
+  variant?: "default" | "warning" | "error" | "resume_settings_provider_restored";
   cancelled?: boolean;
   // Transient provider-error retry state. Present on the yellow "retrying"
   // status message the orchestrator emits during backoff.
@@ -322,6 +340,7 @@ export type MessageAction = {
   type: "archive_task" | "delete_task" | "ws_request";
   label: string;
   tooltip?: string;
+  tooltip_key?: string;
   variant?: "default" | "destructive";
   icon?: string;
   params?: Record<string, unknown>;

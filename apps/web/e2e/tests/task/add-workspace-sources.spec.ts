@@ -1,4 +1,5 @@
 import { expect, test } from "../../fixtures/test-base";
+import { expectControlHeight } from "../../helpers/control-sizing";
 import type { Locator, Page } from "@playwright/test";
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
@@ -7,6 +8,7 @@ import type { ApiClient } from "../../helpers/api-client";
 import { waitForHttp } from "../../helpers/causal-waits";
 import { GitHelper, makeGitEnv } from "../../helpers/git-helper";
 import { SessionPage } from "../../pages/session-page";
+import { mockFolderAvailability } from "../../helpers/open-task-folder";
 
 const WORKSPACE_SOURCES_PATH = /^\/api\/v1\/tasks\/[^/]+\/workspace-sources$/;
 
@@ -93,6 +95,13 @@ async function waitForWorkspaceReady(
 }
 
 test.describe("Attach local workspace sources", () => {
+  test.beforeEach(async ({ testPage }) => {
+    await mockFolderAvailability(testPage, true);
+    await testPage.route("**/api/v1/task-sessions/*/open-folder", (route) =>
+      route.fulfill({ json: { success: true } }),
+    );
+  });
+
   test("adds a local repository and folder successively, scopes Changes to Git, and persists", async ({
     testPage,
     apiClient,
@@ -189,6 +198,10 @@ test.describe("Attach local workspace sources", () => {
     await expect(dialog.getByTestId("source-mode-local")).toHaveCount(0);
     const addRepository = dialog.getByRole("button", { name: "Add repository" });
     const submit = dialog.getByTestId("add-workspace-sources-submit");
+    const cancel = dialog.getByRole("button", { name: "Cancel", exact: true });
+    // @covers AC-UI-CONTROL-SIZING-001.1, AC-UI-CONTROL-SIZING-001.3, AC-UI-CONTROL-SIZING-001.6
+    await expectControlHeight(cancel, 28);
+    await expectControlHeight(submit, 28);
     await expect(submit).toBeDisabled();
     await addRepository.click();
     await expect(testPage.getByRole("menuitem", { name: "Local Git repository" })).toBeVisible();
@@ -207,7 +220,10 @@ test.describe("Attach local workspace sources", () => {
     const savedRepositoryError = savedRepositoryRow.getByRole("alert");
     await expect(savedRepositoryError).toHaveText("Choose a repository and base branch.");
     await expect(savedRepositoryError).toHaveCSS("font-size", "12px");
-    await savedRepositoryRow.getByRole("button", { name: "Remove source" }).click();
+    const removeSource = savedRepositoryRow.getByRole("button", { name: "Remove source" });
+    // @covers AC-UI-CONTROL-SIZING-001.1, AC-UI-CONTROL-SIZING-001.3
+    await expectControlHeight(removeSource, 28);
+    await removeSource.click();
     await addRepository.click();
     await testPage.getByRole("menuitem", { name: "Local Git repository" }).click();
     const repositoryRow = dialog.getByTestId("workspace-source-row");

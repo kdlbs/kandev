@@ -45,11 +45,12 @@ async function seedBadgeTest(
 
 type TaskPR = NonNullable<Awaited<ReturnType<ApiClient["getTaskPR"]>>>;
 
-function visibleTaskPRSummary(page: Page) {
+function visibleTaskPRSummary(page: Page, number: number) {
   return page
     .locator(
       '[data-slot="tooltip-content"]:not([data-state="closed"]) > [data-testid="pr-task-status-summary"]',
     )
+    .filter({ hasText: `PR #${number}` })
     .first();
 }
 
@@ -110,6 +111,97 @@ test.describe("PR status badge", () => {
       workflow_filter_id: seedData.workflowId,
       enable_preview_on_click: false,
     });
+  });
+
+  test("shows and clears one conflict warning across sidebar, Home card, and pipeline row", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(120_000);
+    const title = "Cross-surface PR conflict";
+    const { workflow, task, inboxStep } = await seedBadgeTest(
+      apiClient,
+      seedData.workspaceId,
+      seedData.agentProfileId,
+      seedData.repositoryId,
+      title,
+    );
+    const pr = {
+      task_id: task.id,
+      workspace_id: seedData.workspaceId,
+      repository_id: seedData.repositoryId,
+      owner: "testorg",
+      repo: "testrepo",
+      pr_number: 191,
+      pr_url: "https://github.com/testorg/testrepo/pull/191",
+      pr_title: "Conflicted checks",
+      head_branch: "feat/conflicted-checks",
+      base_branch: "main",
+      author_login: "test-user",
+      state: "open",
+      review_state: "changes_requested",
+      checks_state: "failure",
+      mergeable_state: "dirty",
+      has_merge_conflicts: true,
+    };
+    await apiClient.mockGitHubAssociateTaskPR(pr);
+    await expect
+      .poll(async () => {
+        const response = await apiClient.listTasks(seedData.workspaceId);
+        return (
+          response.tasks.find((candidate) => candidate.id === task.id)?.status_summary
+            ?.pull_request ?? null
+        );
+      })
+      .toMatchObject({ has_merge_conflicts: true });
+
+    await testPage.goto("/tasks");
+    const sidebar = testPage.getByTestId("app-sidebar");
+    const sidebarIcon = sidebar
+      .getByTestId("sidebar-task-item")
+      .filter({ hasText: title })
+      .getByTestId(`pr-task-icon-${task.id}`);
+    await expect(sidebarIcon.getByTestId("pr-merge-conflict-warning")).toBeVisible();
+    await expect(sidebarIcon).toHaveAttribute("aria-label", /Conflicts/);
+
+    const kanban = new KanbanPage(testPage);
+    // This test navigated through /tasks; explicitly select this workflow so
+    // remembered listing preferences cannot redirect Home back to the task list.
+    await testPage.goto(`/?workflowId=${encodeURIComponent(workflow.id)}`);
+    await kanban.board.waitFor({ state: "visible" });
+    const cardIcon = kanban
+      .taskCardInColumn(title, inboxStep.id)
+      .getByTestId(`pr-task-icon-${task.id}`);
+    await expect(cardIcon.getByTestId("pr-merge-conflict-warning")).toBeVisible();
+    await kanban.switchToPipelineView();
+    const pipelineIcon = kanban.pipelineTask(task.id).getByTestId(`pr-task-icon-${task.id}`);
+    await expect(pipelineIcon.getByTestId("pr-merge-conflict-warning")).toBeVisible();
+
+    await apiClient.mockGitHubAssociateTaskPR({
+      ...pr,
+      mergeable_state: "clean",
+      has_merge_conflicts: false,
+    });
+    await expect
+      .poll(async () => {
+        const response = await apiClient.listTasks(seedData.workspaceId);
+        const pullRequest = response.tasks.find((candidate) => candidate.id === task.id)
+          ?.status_summary?.pull_request;
+        return pullRequest &&
+          pullRequest.number === pr.pr_number &&
+          pullRequest.has_merge_conflicts !== true
+          ? pullRequest
+          : null;
+      })
+      .toMatchObject({ number: pr.pr_number });
+    await expect(sidebarIcon).toBeVisible();
+    await expect(pipelineIcon).toBeVisible();
+    await expect(sidebarIcon.getByTestId("pr-merge-conflict-warning")).toHaveCount(0);
+    await expect(pipelineIcon.getByTestId("pr-merge-conflict-warning")).toHaveCount(0);
+    await kanban.viewToggleKanban.first().click();
+    await expect(cardIcon).toBeVisible();
+    await expect(cardIcon.getByTestId("pr-merge-conflict-warning")).toHaveCount(0);
   });
 
   test("hydrates the sidebar PR badge on /tasks when details are off", async ({
@@ -821,10 +913,14 @@ test.describe("PR status badge", () => {
     const icon = taskRow.getByTestId(`pr-task-icon-${task.id}`);
     await expect(icon).toHaveAttribute("data-pr-ready-to-merge", "true");
     const taskActions = taskRow.getByRole("button", { name: "Task actions" });
-    await taskRow.hover();
+    // Keep the pointer on the row's fixed left edge while the trailing slot
+    // grows, so the expanding actions do not move the hover target.
+    await taskRow.hover({ position: { x: 1, y: 1 } });
     await expect(taskActions).toBeVisible();
     const menuSlot = taskRow.getByTestId("sidebar-task-change-request-menu-slot");
+    await expect(trailingActions).toHaveCSS("gap", "4px");
     await expect(menuSlot).toHaveCSS("width", "24px");
+    await expect(taskActions).toHaveCSS("width", "24px");
     const expandedStatusBox = await trailingStatus.boundingBox();
     const taskActionsBox = await taskActions.boundingBox();
     expect(expandedStatusBox).not.toBeNull();
@@ -834,7 +930,7 @@ test.describe("PR status badge", () => {
     );
     await icon.hover();
 
-    const summary = visibleTaskPRSummary(testPage);
+    const summary = visibleTaskPRSummary(testPage, 2966);
     await expect(summary).toBeVisible();
     await expect(summary.getByTestId("pr-task-status-number")).toHaveText("PR #2966");
     const title = summary.getByTestId("pr-task-status-title");
@@ -874,7 +970,7 @@ test.describe("PR status badge", () => {
     // after the row reaches the PR badge.
     await testPage.keyboard.press("Tab");
     await expect(icon).toBeFocused();
-    const focusedSummary = visibleTaskPRSummary(testPage);
+    const focusedSummary = visibleTaskPRSummary(testPage, 2966);
     await expect(focusedSummary).toBeVisible();
     await expect(focusedSummary.getByTestId("pr-task-status-title")).toHaveText(prTitle);
 
@@ -909,7 +1005,7 @@ test.describe("PR status badge", () => {
     await testPage.keyboard.press("Tab");
     await expect(icon).toBeFocused();
 
-    const multiSummary = visibleTaskPRSummary(testPage);
+    const multiSummary = visibleTaskPRSummary(testPage, 2966);
     // The second association updates the icon while the disclosure is closed.
     // Wait for the keyboard-reopened tooltip before querying its refreshed rows.
     await expect(multiSummary).toBeVisible({ timeout: 15_000 });

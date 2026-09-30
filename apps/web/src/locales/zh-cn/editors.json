@@ -90,5 +90,9 @@
   "underlineCmdU": "下划线（Cmd+U）",
   "failedToOpenEditor": "打开编辑器失败",
   "downloadFile": "下载文件",
-  "symlink": "符号链接"
+  "symlink": "符号链接",
+  "failedToOpenFolder": "无法打开文件夹",
+  "openFolderOnHost": "在运行 Kandev 的计算机上打开文件夹",
+  "chooseFolder": "选择文件夹",
+  "openingFolder": "正在打开文件夹…"
 }

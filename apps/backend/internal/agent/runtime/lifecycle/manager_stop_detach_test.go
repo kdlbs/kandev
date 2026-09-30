@@ -8,8 +8,11 @@ import (
 
 	"github.com/kandev/kandev/internal/agent/executor"
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
+	"github.com/kandev/kandev/internal/agentruntime"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
+	"github.com/kandev/kandev/internal/task/models"
+	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
 // newDetachTestManager builds a Manager wired with a MockExecutor registered
@@ -105,6 +108,30 @@ func TestStopAgentWithReasonTerminatesOnBackendShutdownWhenSurvivalDisabled(t *t
 	require.True(t, hasAgentStoppedEvent(eventBus.PublishedEvents), "a terminating stop must still publish agent.stopped")
 }
 
+func TestStopAgentWithReasonPreservesPassthroughConversationOnBackendShutdown(t *testing.T) {
+	mgr, mockExecutor := newDetachTestManager(t, false)
+	writer := &invariantWriter{prior: &models.ExecutorRunning{
+		SessionID:        "session-passthrough",
+		TaskID:           "task-passthrough",
+		Runtime:          agentruntime.RuntimeStandalone,
+		Status:           models.ExecutorRunningStatusReady,
+		AgentExecutionID: "exec-passthrough",
+	}}
+	mgr.SetExecutorRunningWriter(writer)
+	execution := newDetachTestExecution("exec-passthrough", "session-passthrough")
+	execution.IsPassthrough = true
+	execution.Status = v1.AgentStatusReady
+	require.NoError(t, mgr.executionStore.Add(execution))
+
+	require.NoError(t, mgr.StopAgentWithReason(context.Background(), execution.ID, StopReasonBackendShutdown, false))
+
+	require.Len(t, mockExecutor.stopInstanceCalls, 1, "passthrough process must stop with its backend")
+	require.False(t, writer.deleted, "backend shutdown must retain the TUI conversation identity")
+	require.NotNil(t, writer.prior)
+	require.Equal(t, "exec-passthrough", writer.prior.AgentExecutionID)
+	require.Equal(t, models.ExecutorRunningStatusStopped, writer.prior.Status)
+}
+
 func hasAgentStoppedEvent(published []*bus.Event) bool {
 	for _, evt := range published {
 		if evt.Type == events.AgentStopped {
@@ -154,4 +181,28 @@ func TestStopAgentWithReasonTerminatesNonStandaloneRuntimeEvenWhenSurvivalEnable
 
 	_, exists := mgr.executionStore.Get(execution.ID)
 	require.False(t, exists, "a terminated (non-detached) execution must be removed from tracking")
+}
+
+func TestPluginExecutorDetachesOnBackendShutdown(t *testing.T) {
+	log := newTestLogger()
+	mockExecutor := &MockExecutor{name: executor.NamePluginRemote}
+	registry := NewExecutorRegistry(log)
+	registry.Register(mockExecutor)
+	eventBus := &MockEventBus{}
+	mgr := NewManager(newTestRegistry(), eventBus, registry, &MockCredentialsManager{}, &MockProfileResolver{}, nil,
+		ExecutorFallbackWarn, "", log)
+	cleanupManagerStopCh(t, mgr)
+	execution := &AgentExecution{
+		ID: "exec-plugin-detach", SessionID: "session-plugin-detach", TaskID: "task-plugin-detach",
+		RuntimeName: executor.NamePluginRemote, agentctl: agentctl.NewClient("127.0.0.1", 12345, log),
+	}
+	require.NoError(t, mgr.executionStore.Add(execution))
+
+	require.NoError(t, mgr.StopAgentWithReason(context.Background(), execution.ID, StopReasonBackendShutdown, false))
+	_, exists := mgr.executionStore.Get(execution.ID)
+	require.False(t, exists, "shutdown must detach local tracking")
+	require.Empty(t, mockExecutor.stopInstanceCalls, "shutdown must not stop the remote executor")
+	for _, event := range eventBus.PublishedEvents {
+		require.NotEqual(t, events.AgentStopped, event.Type, "shutdown detach must preserve the live task session")
+	}
 }

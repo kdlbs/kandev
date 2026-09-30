@@ -19,7 +19,8 @@ vi.mock("@/lib/layout/panel-portal-manager", () => ({
   panelPortalManager: { releaseByEnv: vi.fn(), reconcile: vi.fn() },
 }));
 
-vi.mock("@/lib/env-hidden-sessions", () => ({
+vi.mock("@/lib/env-hidden-sessions", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/env-hidden-sessions")>()),
   getEnvHiddenSessions: vi.fn(() => []),
 }));
 
@@ -559,6 +560,30 @@ describe("applyCustomLayout — session panel normalization", () => {
       NEW_SESSION_PANEL_ID,
     ]);
     expect(appliedState?.columns[0]?.groups[0]?.activePanel).toBe(NEW_SESSION_PANEL_ID);
+    await flushRaf();
+  });
+
+  it("uses the visible sibling when the active session is hidden", async () => {
+    const api = makeStoreApi();
+    vi.mocked(getEnvHiddenSessions).mockReturnValueOnce([NEW_SESSION_ID]);
+    useDockviewStore.setState({ api, currentLayoutEnvId: CUSTOM_ENV_ID });
+
+    (
+      useDockviewStore.getState().applyCustomLayout as (
+        layout: ApplyCustomLayoutArg,
+        opts: { activeSessionId: string; sessionIds: string[]; envId: string },
+      ) => void
+    )(staleSessionLayout() as unknown as ApplyCustomLayoutArg, {
+      activeSessionId: NEW_SESSION_ID,
+      sessionIds: [SIBLING_SESSION_ID, NEW_SESSION_ID],
+      envId: CUSTOM_ENV_ID,
+    });
+
+    const appliedState = vi.mocked(applyLayout).mock.calls.at(-1)?.[1];
+    expect(appliedState?.columns[0]?.groups[0]?.panels.map((item) => item.id)).toEqual([
+      SIBLING_SESSION_PANEL_ID,
+    ]);
+    expect(appliedState?.columns[0]?.groups[0]?.activePanel).toBe(SIBLING_SESSION_PANEL_ID);
     await flushRaf();
   });
 

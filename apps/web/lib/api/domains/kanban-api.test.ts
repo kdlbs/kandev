@@ -2,9 +2,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   attachTaskWorkspaceSources,
   detachTask,
+  deleteTaskAfterUserAction,
   deleteTask,
   getTaskDeletePreflight,
   listTasksByWorkspace,
+  querySidebarTasks,
   moveTask,
   previewWorkflowMove,
   reorderStepTasks,
@@ -15,6 +17,9 @@ import { ApiError } from "../client";
 
 const fetchSpy = vi.fn<typeof fetch>();
 const API_BASE_URL = "http://api.test";
+const CONFIRMATION_ID = "confirmation-1";
+const SECOND_CONFIRMATION_ID = "confirmation-2";
+const WORKFLOW_ID = "workflow-1";
 
 beforeEach(() => {
   fetchSpy.mockReset();
@@ -29,7 +34,11 @@ describe("deleteTask", () => {
 
     await deleteTask(
       "task-1",
-      { cascade: true, discardWorktreeChanges: true },
+      {
+        cascade: true,
+        discardWorktreeChanges: true,
+        confirmationId: CONFIRMATION_ID,
+      },
       { baseUrl: API_BASE_URL },
     );
 
@@ -39,30 +48,114 @@ describe("deleteTask", () => {
       `${API_BASE_URL}/api/v1/tasks/task-1?cascade=true&discard_worktree_changes=true`,
     );
     expect(init?.method).toBe("DELETE");
+    expect(new Headers(init?.headers).get("X-Kandev-Task-Delete-Confirmation")).toBe(
+      CONFIRMATION_ID,
+    );
+  });
+});
+
+describe("moveTask completion override", () => {
+  it("binds a human override to the selected task move", async () => {
+    const taskId = "task-1";
+    const workflowId = WORKFLOW_ID;
+    const completionStepId = "step-done";
+    const overrideReason = "Accepted by the release owner";
+    fetchSpy.mockResolvedValueOnce(
+      new Response(JSON.stringify({ task: { id: taskId, workflow_step_id: completionStepId } }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+
+    await moveTask(
+      taskId,
+      {
+        workflow_id: workflowId,
+        workflow_step_id: completionStepId,
+        completion_override: { expected_revision: 4, reason: overrideReason },
+      },
+      { baseUrl: API_BASE_URL },
+    );
+
+    expect(fetchSpy.mock.calls[0]).toMatchObject([
+      `${API_BASE_URL}/api/v1/tasks/${taskId}/move`,
+      {
+        method: "POST",
+        body: JSON.stringify({
+          workflow_id: workflowId,
+          workflow_step_id: completionStepId,
+          completion_override: { expected_revision: 4, reason: overrideReason },
+        }),
+      },
+    ]);
   });
 });
 
 describe("getTaskDeletePreflight", () => {
   it("posts the exact scope and bypasses caches", async () => {
     fetchSpy.mockResolvedValueOnce(
-      new Response(JSON.stringify({ requires_discard_consent: true }), {
-        status: 200,
-        headers: { "Content-Type": "application/json" },
-      }),
+      new Response(
+        JSON.stringify({ requires_discard_consent: true, confirmation_id: CONFIRMATION_ID }),
+        {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        },
+      ),
     );
 
     await expect(
-      getTaskDeletePreflight(["task-1", "task-2"], true, { baseUrl: API_BASE_URL }),
-    ).resolves.toEqual({ requires_discard_consent: true });
+      getTaskDeletePreflight(["task-1", "task-2"], true, true, { baseUrl: API_BASE_URL }),
+    ).resolves.toEqual({ requires_discard_consent: true, confirmation_id: CONFIRMATION_ID });
 
     expect(fetchSpy).toHaveBeenCalledOnce();
     const [url, init] = fetchSpy.mock.calls[0];
     expect(url).toBe(`${API_BASE_URL}/api/v1/tasks/delete-preflight`);
     expect(init).toMatchObject({
       method: "POST",
-      body: JSON.stringify({ task_ids: ["task-1", "task-2"], cascade: true }),
+      body: JSON.stringify({
+        task_ids: ["task-1", "task-2"],
+        cascade: true,
+        discard_worktree_changes: true,
+      }),
       cache: "no-store",
     });
+  });
+});
+
+describe("deleteTaskAfterUserAction", () => {
+  it("records a fresh native preview before a confirmed app cleanup", async () => {
+    fetchSpy
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            requires_discard_consent: false,
+            confirmation_id: SECOND_CONFIRMATION_ID,
+          }),
+          {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          },
+        ),
+      )
+      .mockResolvedValueOnce(new Response(JSON.stringify({ success: true }), { status: 200 }));
+
+    await deleteTaskAfterUserAction("task-1", { cascade: true }, { baseUrl: API_BASE_URL });
+
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+    const [, previewInit] = fetchSpy.mock.calls[0];
+    expect(previewInit).toMatchObject({
+      method: "POST",
+      body: JSON.stringify({
+        task_ids: ["task-1"],
+        cascade: true,
+        discard_worktree_changes: false,
+      }),
+    });
+    const [deleteUrl, deleteInit] = fetchSpy.mock.calls[1];
+    expect(deleteUrl).toBe(`${API_BASE_URL}/api/v1/tasks/task-1?cascade=true`);
+    expect(new Headers(deleteInit?.headers).get("X-Kandev-Task-Delete-Confirmation")).toBe(
+      SECOND_CONFIRMATION_ID,
+    );
   });
 });
 
@@ -291,8 +384,51 @@ describe("listTasksByWorkspace", () => {
   });
 });
 
+describe("querySidebarTasks", () => {
+  it("posts the bounded complete-view query to the additive route", async () => {
+    fetchSpy.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          query_key: "query-key",
+          page: 1,
+          page_size: 100,
+          total_entries: 2,
+          total_tasks: 1,
+          total_visible_tasks: 1,
+          has_previous: false,
+          has_next: false,
+          entries: [{ kind: "task", task_id: "task-1", task: { id: "task-1" } }],
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+    const query = {
+      filters: [{ dimension: "archived", op: "is", value: true }],
+      sort: { key: "updatedAt", direction: "desc" },
+      group: "none",
+      collapsed_group_keys: [],
+      collapsed_task_ids: [],
+      page: 1,
+      page_size: 100,
+      locale: "en",
+    };
+
+    await expect(
+      querySidebarTasks("ws-1", query, { baseUrl: API_BASE_URL }),
+    ).resolves.toMatchObject({
+      query_key: "query-key",
+      total_visible_tasks: 1,
+    });
+
+    expect(fetchSpy).toHaveBeenCalledOnce();
+    const [url, init] = fetchSpy.mock.calls[0];
+    expect(url).toBe(`${API_BASE_URL}/api/v1/workspaces/ws-1/sidebar/query`);
+    expect(init).toMatchObject({ method: "POST", body: JSON.stringify(query) });
+  });
+});
+
 describe("moveTask", () => {
-  const workflowId = "workflow-1";
+  const workflowId = WORKFLOW_ID;
   const workflowStepId = "step-2";
 
   it("normalizes one-shot entry options and omits blank values", async () => {
@@ -385,7 +521,7 @@ describe("previewWorkflowMove", () => {
     await previewWorkflowMove(
       "task-1",
       {
-        workflow_id: "workflow-1",
+        workflow_id: WORKFLOW_ID,
         workflow_step_id: "step-2",
         entry_options: {
           instructions: "  inspect the destination  ",
@@ -401,7 +537,7 @@ describe("previewWorkflowMove", () => {
     expect(init).toMatchObject({
       method: "POST",
       body: JSON.stringify({
-        workflow_id: "workflow-1",
+        workflow_id: WORKFLOW_ID,
         workflow_step_id: "step-2",
         entry_options: {
           reset_context: true,

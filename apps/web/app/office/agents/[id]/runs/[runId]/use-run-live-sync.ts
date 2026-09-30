@@ -24,20 +24,20 @@ type Options = {
 
 /**
  * Returns the live-merged events list and an observed status that
- * follows terminal events emitted on the bus. While `initialStatus`
- * is `claimed` (the running state), the hook subscribes to
- * `run.subscribe` over the WS and appends `run.event.appended`
- * payloads to the events list. Terminal events (`complete` /
- * `finished` / `error` / `failed`) update the local status so the
- * header reflects the new state without a snapshot refetch.
+ * follows terminal events emitted on the bus. While the hook is mounted,
+ * it subscribes to `run.subscribe` over the WS and
+ * appends `run.event.appended` payloads to the events list. Terminal
+ * events (`complete` / `finished` / `error` / `failed`) update the
+ * local status so the header reflects the new state without a snapshot
+ * refetch. The subscription stays open until unmount so a diagnostic
+ * event written after the terminal event is still visible.
  *
  * Idempotency: dedupes by event seq (Wave 1 enforces monotonic seq
  * per run id) so duplicate notifications from a reconnect or a race
  * with the snapshot fetch don't double-render rows.
  *
- * Cleanup: unsubscribes on unmount AND when the run reaches a
- * terminal status — there's no point holding the bus subscription
- * open for runs that can no longer emit events.
+ * Cleanup: unsubscribes on unmount or when the hook switches to a
+ * different run or WebSocket client.
  */
 export function useRunLiveSync(
   runId: string,
@@ -127,9 +127,6 @@ export function useRunLiveSync(
   }, [agentId, runId, status]);
 
   useEffect(() => {
-    if (status !== "claimed") return;
-    if (TERMINAL_STATUSES.has(status)) return;
-
     if (!client) return;
     const unsubscribeWs = client.subscribeRun(runId);
     const unsubscribeListener = subscribeRunEvents(runId, (payload) => {
@@ -146,7 +143,7 @@ export function useRunLiveSync(
       unsubscribeListener();
       unsubscribeWs();
     };
-  }, [client, runId, status]);
+  }, [client, runId]);
 
   return { events, status, outputSummary };
 }

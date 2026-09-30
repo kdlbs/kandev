@@ -38,10 +38,15 @@ test.describe("Mobile fork pull-request comparison target", () => {
     const session = new SessionPage(testPage);
     await session.waitForLoad();
     await session.waitForChatIdle({ timeout: 45_000 });
-    await expect(testPage.getByRole("button", { name: "Changes" })).toBeVisible({
+    await expect(
+      testPage.getByRole("navigation").getByRole("button", { name: /Changes$/ }),
+    ).toBeVisible({
       timeout: 15_000,
     });
-    await testPage.getByRole("button", { name: "Changes" }).tap();
+    await testPage
+      .getByRole("navigation")
+      .getByRole("button", { name: /Changes$/ })
+      .tap();
 
     const changes = testPage.getByTestId("mobile-changes-panel");
     await expect(changes).toBeVisible({ timeout: 15_000 });
@@ -87,10 +92,15 @@ test.describe("Mobile fork pull-request comparison target", () => {
     const session = new SessionPage(testPage);
     await session.waitForLoad();
     await session.waitForChatIdle({ timeout: 45_000 });
-    await expect(testPage.getByRole("button", { name: "Changes" })).toBeVisible({
+    await expect(
+      testPage.getByRole("navigation").getByRole("button", { name: /Changes$/ }),
+    ).toBeVisible({
       timeout: 15_000,
     });
-    await testPage.getByRole("button", { name: "Changes" }).tap();
+    await testPage
+      .getByRole("navigation")
+      .getByRole("button", { name: /Changes$/ })
+      .tap();
 
     const changes = testPage.getByTestId("mobile-changes-panel");
     await expect(changes).toBeVisible({ timeout: 15_000 });
@@ -108,8 +118,11 @@ test.describe("Mobile fork pull-request comparison target", () => {
     ).toBeVisible();
 
     comparisonTargetFixture?.setAvailable(true);
-    await testPage.getByRole("button", { name: "Chat" }).tap();
-    await testPage.getByRole("button", { name: "Changes" }).tap();
+    await testPage.getByRole("button", { name: "Chat", exact: true }).tap();
+    await testPage
+      .getByRole("navigation")
+      .getByRole("button", { name: /Changes$/ })
+      .tap();
     await expect(changes.getByTestId("comparison-target-notice")).toHaveCount(0, {
       timeout: 30_000,
     });

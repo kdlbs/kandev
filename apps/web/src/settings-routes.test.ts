@@ -211,6 +211,14 @@ describe("renderSettingsRoute", () => {
     expect(((route as ReactElement).type as { name?: string }).name).toBe("LayoutSettings");
   });
 
+  it("redirects the legacy sidebar page into the Layouts sidebar tab", () => {
+    const route = renderSettingsRoute("/settings/sidebar") as ReactElement<{ to: string }>;
+
+    expect(isValidElement(route)).toBe(true);
+    expect((route.type as { name?: string }).name).toBe("SettingsRedirect");
+    expect(route.props.to).toBe("/settings/preferences/layouts?tab=sidebar");
+  });
+
   it("redirects the legacy task actions page into Task behavior", () => {
     const route = renderSettingsRoute("/settings/general/task-actions") as ReactElement<{
       to: string;

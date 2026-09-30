@@ -78,6 +78,27 @@ func TestLocalPreparer_ReuseRequiredValidatesRepositoryIdentity(t *testing.T) {
 	}
 }
 
+// @covers AC-TASKS-ADDITIONAL-SESSION-WORKSPACE-REUSE-002.1
+func TestValidateLocalRepositoryWorkspaceAcceptsCaseAliasedCommonDirectory(t *testing.T) {
+	parent := t.TempDir()
+	repositoryPath := filepath.Join(parent, "CaseIdentity")
+	if err := os.Mkdir(repositoryPath, 0o755); err != nil {
+		t.Fatalf("create mixed-case repository directory: %v", err)
+	}
+	initGitRepoAt(t, repositoryPath)
+	caseAlias := filepath.Join(parent, "caseidentity")
+	if _, err := os.Stat(caseAlias); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			t.Skip("filesystem is case-sensitive")
+		}
+		t.Fatalf("inspect case-aliased repository path: %v", err)
+	}
+
+	if err := validateLocalRepositoryWorkspace(context.Background(), repositoryPath, caseAlias); err != nil {
+		t.Fatalf("validateLocalRepositoryWorkspace() rejected the same repository through a case alias: %v", err)
+	}
+}
+
 func TestLocalPreparer_RejectsRepoBackedNonGitWorkspace(t *testing.T) {
 	workspacePath := t.TempDir()
 	preparer := NewLocalPreparer(newTestLocalLogger())
@@ -116,6 +137,11 @@ func TestLocalPreparer_AcceptsMatchingRepoBackedGitWorkspace(t *testing.T) {
 func initGitRepo(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
+	return initGitRepoAt(t, dir)
+}
+
+func initGitRepoAt(t *testing.T, dir string) string {
+	t.Helper()
 	// Start from a clean env: filter all GIT_* vars that may leak from parent
 	// processes (e.g. pre-commit hooks set GIT_DIR, GIT_WORK_TREE, GIT_INDEX_FILE).
 	gitEnv := filterLocalTestGitEnv(os.Environ())
@@ -192,7 +218,7 @@ func isolateGitEnv(t *testing.T) {
 	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
 	// Unset vars set by git hooks that would redirect commands to the host repo.
 	// Cannot use t.Setenv("", "") because GIT_DIR="" makes git fail differently.
-	for _, key := range []string{"GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE"} {
+	for _, key := range []string{"GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_DIR", "GIT_INDEX_FILE", "GIT_OBJECT_DIRECTORY", "GIT_ALTERNATE_OBJECT_DIRECTORIES"} {
 		if val, ok := os.LookupEnv(key); ok {
 			_ = os.Unsetenv(key)
 			t.Cleanup(func() { _ = os.Setenv(key, val) })

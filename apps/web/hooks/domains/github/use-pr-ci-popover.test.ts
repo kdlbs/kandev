@@ -87,6 +87,39 @@ describe("usePRCIPopover refresh indicator", () => {
     expect(getPRFeedbackMock).not.toHaveBeenCalled();
   });
 
+  it("refreshes feedback each time the popover opens with unchanged PR metadata", async () => {
+    getPRFeedbackMock.mockResolvedValue(null);
+    const { rerender } = renderPopoverHook();
+
+    rerender({ enabled: true });
+    await flushOpen();
+    await waitFor(() => expect(getPRFeedbackMock).toHaveBeenCalledTimes(1));
+    rerender({ enabled: false });
+    rerender({ enabled: true });
+    await flushOpen();
+
+    await waitFor(() => expect(getPRFeedbackMock).toHaveBeenCalledTimes(2));
+  });
+
+  it("joins feedback already in flight when the popover reopens", async () => {
+    const feedback = deferred<null>();
+    getPRFeedbackMock.mockReturnValue(feedback.promise);
+    const { rerender } = renderPopoverHook();
+
+    rerender({ enabled: true });
+    await flushOpen();
+    expect(getPRFeedbackMock).toHaveBeenCalledTimes(1);
+    rerender({ enabled: false });
+    rerender({ enabled: true });
+    await flushOpen();
+
+    expect(getPRFeedbackMock).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      feedback.resolve(null);
+      await feedback.promise;
+    });
+  });
+
   it("reports refreshing while the feedback fetch is in flight", async () => {
     const feedback = deferred<null>();
     getPRFeedbackMock.mockReturnValue(feedback.promise);
@@ -114,8 +147,9 @@ describe("usePRCIPopover refresh indicator", () => {
     rerender({ enabled: true });
     await flushOpen();
 
-    // The feedback fetch has already resolved; the summary sync has not.
-    await waitFor(() => expect(result.current.isFetching).toBe(false));
+    // The feedback read waits for the summary sync so an explicit refresh
+    // cannot race with a stale Actions response.
+    expect(getPRFeedbackMock).not.toHaveBeenCalled();
     expect(result.current.isRefreshing).toBe(true);
 
     await act(async () => {
@@ -123,6 +157,8 @@ describe("usePRCIPopover refresh indicator", () => {
       await sync.promise;
     });
 
+    await waitFor(() => expect(getPRFeedbackMock).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(result.current.isFetching).toBe(false));
     await waitFor(() => expect(result.current.isRefreshing).toBe(false));
   });
 

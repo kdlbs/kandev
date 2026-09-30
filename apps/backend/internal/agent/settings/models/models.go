@@ -46,6 +46,13 @@ type TUIConfigJSON struct {
 	// user's CLI definition, and because tui_config is JSON: adding the field
 	// needs no migration.
 	MCPStrategy string `json:"mcp_strategy,omitempty"`
+	// Protocol selects the runtime kandev drives the command with
+	// (registry.CustomAgentProtocol*). Empty — the value every row written
+	// before this field existed decodes to — means terminal passthrough.
+	Protocol string `json:"protocol,omitempty"`
+	// DisableBracketedPaste selects paced unframed delivery for terminal TUIs
+	// that do not accept bracketed-paste delimiters.
+	DisableBracketedPaste bool `json:"disable_bracketed_paste,omitempty"`
 }
 
 type AgentProfile struct {
@@ -95,6 +102,20 @@ type AgentProfile struct {
 
 	// CLIPassthrough enables TUI-passthrough execution style. Orthogonal to ACP.
 	CLIPassthrough bool `json:"cli_passthrough" db:"cli_passthrough"`
+
+	// CursorMCPAuthEnabled shares local Cursor MCP auth files for Cursor launches.
+	CursorMCPAuthEnabled bool `json:"cursor_mcp_auth_enabled" db:"cursor_mcp_auth_enabled"`
+
+	// CursorPluginsMCPEnabled imports local Cursor plugin MCP servers for Cursor launches.
+	CursorPluginsMCPEnabled bool `json:"cursor_plugins_mcp_enabled" db:"cursor_plugins_mcp_enabled"`
+
+	// MCPSelectionMode controls automatic preparation of discovered native MCP
+	// servers. Empty is treated as inherit for legacy in-memory profile values.
+	MCPSelectionMode string `json:"mcp_selection_mode" db:"mcp_selection_mode"`
+
+	// MCPSelectedServers contains exact native server identities selected by the
+	// user. The store persists this slice as JSON in mcp_selected_servers.
+	MCPSelectedServers []string `json:"mcp_selected_servers" db:"-"`
 
 	// Enabled gates the profile from new-work selection: when false, the
 	// profile is hidden from task/session creation pickers but keeps serving
@@ -209,6 +230,13 @@ type AgentProfile struct {
 	// ExecutorPreference is a hint for which executor backend to prefer
 	// (free-form JSON or a simple type name).
 	ExecutorPreference string `json:"executor_preference,omitempty" db:"executor_preference"`
+	// ExecutionAgentProfileID binds an Office identifier profile to the
+	// execution profile that owns its launches. The Office ID stays the
+	// logical session identity; the bound profile supplies the concrete or
+	// dynamic candidate set (see docs/specs/agents/system-design/
+	// dynamic-agent-routing-01.md, "Use in Office"). Empty for ordinary
+	// profiles, which keep selecting themselves.
+	ExecutionAgentProfileID string `json:"execution_agent_profile_id,omitempty" db:"execution_agent_profile_id"`
 	// BudgetMonthlyCents is the per-agent monthly budget cap.
 	BudgetMonthlyCents int `json:"budget_monthly_cents,omitempty" db:"budget_monthly_cents"`
 	// Settings is a free-form JSON object holding office fields not promoted

@@ -1,3 +1,5 @@
+import { waitForFiniteAnimations } from "../../helpers/animations";
+import { mockFolderAvailability } from "../../helpers/open-task-folder";
 import { expect, test } from "../../fixtures/test-base";
 import type { Locator, Page } from "@playwright/test";
 import { execFileSync } from "node:child_process";
@@ -85,11 +87,12 @@ test("mobile Files drawer attaches sources with fixed controls and persisted wor
     })
     .toBeTruthy();
 
+  await mockFolderAvailability(testPage, true);
   await testPage.goto(`/t/${task.id}`);
   const session = new SessionPage(testPage);
   await session.waitForLoad();
   await session.waitForChatIdle({ timeout: 30_000 });
-  await testPage.getByRole("button", { name: "Files" }).tap();
+  await testPage.getByRole("button", { name: "Files", exact: true }).tap();
   const entryPoint = testPage.getByTestId("files-workspace-actions");
   await expect(entryPoint).toBeVisible();
   await expect(entryPoint).toBeEnabled();
@@ -126,6 +129,9 @@ test("mobile Files drawer attaches sources with fixed controls and persisted wor
   expect(addSourcesBox.height).toBeGreaterThanOrEqual(44);
   expect(openFolderBox.height).toBeGreaterThanOrEqual(44);
   if (!task.session_id) throw new Error("task creation did not return a session id");
+  await testPage.route("**/api/v1/task-sessions/*/open-folder", (route) =>
+    route.fulfill({ json: { success: true } }),
+  );
   await Promise.all([
     testPage.waitForRequest(
       (request) =>
@@ -140,6 +146,7 @@ test("mobile Files drawer attaches sources with fixed controls and persisted wor
 
   const drawer = testPage.getByTestId("add-workspace-sources-drawer");
   await expect(drawer).toBeVisible();
+  await waitForFiniteAnimations(drawer);
   const consequences = drawer.getByTestId("workspace-change-consequences");
   await expect(consequences).toBeVisible();
   await expect(consequences).toContainText("This restarts the task workspace");
@@ -155,6 +162,7 @@ test("mobile Files drawer attaches sources with fixed controls and persisted wor
     consequences.getByText(/The task root becomes the agent's working directory/),
   ).toBeVisible();
   await fullImpactDetails.tap();
+  await waitForFiniteAnimations(drawer);
   const [drawerBox, viewport] = await Promise.all([
     drawer.boundingBox(),
     testPage.evaluate(() => ({ width: innerWidth, height: innerHeight })),
@@ -267,7 +275,7 @@ test("mobile Files drawer attaches sources with fixed controls and persisted wor
   ).toBeVisible();
   await testPage.reload();
   await session.waitForLoad();
-  await testPage.getByRole("button", { name: "Files" }).tap();
+  await testPage.getByRole("button", { name: "Files", exact: true }).tap();
   await expect(
     files.getByTestId("file-tree-node").filter({ hasText: "mobile-local-repository-main" }),
   ).toBeVisible({ timeout: 30_000 });
@@ -301,7 +309,7 @@ test("mobile Files drawer attaches sources with fixed controls and persisted wor
   await testPage.reload();
   await session.waitForLoad();
   await session.waitForChatIdle({ timeout: 30_000 });
-  await testPage.getByRole("button", { name: "Chat" }).tap();
+  await testPage.getByRole("button", { name: "Chat", exact: true }).tap();
   const chatLink = session.activeChat().getByRole("link", { name: "mobile source" });
   await expect(chatLink).toBeVisible({ timeout: 15_000 });
   await chatLink.tap();

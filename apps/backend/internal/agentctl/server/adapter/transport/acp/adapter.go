@@ -267,11 +267,34 @@ type Adapter struct {
 	// frontend mode selector can render available options.
 	availableModes []streams.SessionModeInfo
 
+	// currentModeID is the mode the agent last reported, from session
+	// creation/load or a current_mode_update. SetMode compares against it
+	// rather than echoing the requested mode.
+	currentModeID string
+	// modeSessionID and modeObservationGeneration identify reports from the
+	// active provider session. SetMode captures the generation before its RPC
+	// and accepts only a later report from that session.
+	modeSessionID             string
+	modeObservationGeneration uint64
+	// modeObserved closes on each mode report so a waiter can settle.
+	modeObserved chan struct{}
+	// A timed-out set_mode can report after the next request starts. ACP mode
+	// reports have no request ID, so that next request cannot claim the report.
+	modeOutcomeUncertain bool
+	modeChangeActive     bool
+
 	// Available config options from the most recent session creation/load.
 	// Used by emitSetModelEvent to include cached options in the convergence
 	// event emitted after SetModel succeeds so the frontend doesn't lose
 	// the options list when the model is changed.
 	availableConfigOptions []streams.ConfigOption
+
+	// sessionSettingsPolicy is host-selected provenance for unsolicited
+	// settings reports from the currently loaded session. Explicit setter
+	// outcomes are emitted separately without this marker.
+	sessionSettingsPolicy streams.SessionSettingsPolicy
+	// sessionSettingsGeneration is monotonic for this adapter across session transitions.
+	sessionSettingsGeneration uint64
 
 	dialect acpDialect
 
@@ -283,6 +306,7 @@ type Adapter struct {
 	sessionTransitionMu sync.Mutex
 	sessionCleanupDone  chan struct{}
 	sessionCleanupWg    sync.WaitGroup
+	modeChangeMu        sync.Mutex
 	configChangeMu      sync.Mutex
 	configGeneration    uint64
 	contextSamples      map[string]contextWindowSample
@@ -315,6 +339,7 @@ type Adapter struct {
 	// prompt response, so sendPrompt's normal complete emission never runs.
 	asyncTurnMu         sync.Mutex
 	asyncTurnFinalizers map[string]*asyncTurnFinalizer
+	cancelJoinTimeout   time.Duration
 	asyncTurnEpochs     map[string]uint64
 
 	// turnStartedAt records, per session, the time agentctl last dispatched
@@ -344,6 +369,7 @@ type promptTurnState struct {
 	evidenceMu        sync.Mutex
 	codexSystemError  bool
 	codexCapacity     bool
+	codexUsageLimit   *streams.ProviderError
 	cursorRetriable   bool
 	cursorRetriableAt time.Time
 	allowHandoff      bool
@@ -369,6 +395,31 @@ func (t *promptTurnState) codexCapacityFailure() bool {
 	t.evidenceMu.Lock()
 	defer t.evidenceMu.Unlock()
 	return t.codexSystemError && t.codexCapacity
+}
+
+func (t *promptTurnState) observeCodexUsageLimit(providerError streams.ProviderError) {
+	if t == nil || !providerError.Valid() {
+		return
+	}
+	t.evidenceMu.Lock()
+	if t.codexUsageLimit == nil {
+		copy := providerError
+		t.codexUsageLimit = &copy
+	}
+	t.evidenceMu.Unlock()
+}
+
+func (t *promptTurnState) codexUsageLimitFailure() (*streams.ProviderError, bool) {
+	if t == nil {
+		return nil, false
+	}
+	t.evidenceMu.Lock()
+	defer t.evidenceMu.Unlock()
+	if t.codexUsageLimit == nil {
+		return nil, false
+	}
+	copy := *t.codexUsageLimit
+	return &copy, true
 }
 
 func (t *promptTurnState) hasCodexSystemError() bool {
@@ -422,8 +473,7 @@ type asyncTurnFinalizer struct {
 	promptEpoch uint64
 }
 
-// promptCancelJoinTimeout bounds how long Cancel and sendPrompt wait for a stuck
-// session/prompt RPC to end after a user cancel. Exposed as a var for tests.
+// promptCancelJoinTimeout is the production default and preserves existing direct-test behavior.
 var promptCancelJoinTimeout = 3 * time.Second
 
 // NewAdapter creates a new ACP protocol adapter.
@@ -451,6 +501,7 @@ func NewAdapter(cfg *shared.Config, log *logger.Logger) *Adapter {
 		attachMgr:                 shared.NewAttachmentManager(cfg.WorkDir, l.Zap()),
 		promptGate:                make(chan struct{}, 1),
 		asyncTurnFinalizers:       make(map[string]*asyncTurnFinalizer),
+		cancelJoinTimeout:         cfg.PromptCancelJoinTimeout,
 		asyncTurnEpochs:           make(map[string]uint64),
 		turnStartedAt:             make(map[string]time.Time),
 		lifetimeCtx:               ctx,

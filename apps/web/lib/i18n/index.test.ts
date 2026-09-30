@@ -16,7 +16,27 @@ const ZH_CN_LOCALE = "zh-cn";
 const ZH_TW_LOCALE = "zh-tw";
 const ZH_HK_LOCALE = "zh-hk";
 const PT_PT_LOCALE = "pt-pt";
+const JA_LOCALE = "ja";
+const KO_LOCALE = "ko";
 const DISPLAY_LANGUAGE_KEY = "settings:displayLanguage";
+
+const expectLocaleActivation = async (
+  requested: string,
+  canonical: string,
+  displayLanguage: string,
+  hasRealCatalog = true,
+) => {
+  const result = await activateLocale(requested);
+  expect(result).toBe(canonical);
+  expect(i18n.language).toBe(canonical);
+  expect(document.documentElement.lang).toBe(canonical);
+  expect(readLocaleCookie()).toBe(canonical);
+  if (hasRealCatalog) {
+    expect(i18n.hasResourceBundle(canonical, "settings")).toBe(true);
+    expect(i18n.getResource(canonical, "settings", "displayLanguage")).toBe(displayLanguage);
+  }
+  expect(i18n.t(DISPLAY_LANGUAGE_KEY)).toBe(displayLanguage);
+};
 
 afterEach(async () => {
   document.cookie = `${LOCALE_COOKIE}=; path=/; max-age=0`;
@@ -37,6 +57,12 @@ describe("locale predicates", () => {
     expect(isSupportedLocale("zh-HK")).toBe(true);
     expect(isSupportedLocale(PT_PT_LOCALE)).toBe(true);
     expect(isSupportedLocale("pt-PT")).toBe(true);
+    expect(isSupportedLocale(JA_LOCALE)).toBe(true);
+    expect(isSupportedLocale("ja-JP")).toBe(true);
+    expect(isSupportedLocale("  JA  ")).toBe(true);
+    expect(isSupportedLocale(KO_LOCALE)).toBe(true);
+    expect(isSupportedLocale("ko-KR")).toBe(true);
+    expect(isSupportedLocale("  KO  ")).toBe(true);
     expect(isSupportedLocale("pseudo")).toBe(true);
     expect(isSupportedLocale("fr")).toBe(false);
     expect(isSupportedLocale(42)).toBe(false);
@@ -49,6 +75,10 @@ describe("locale predicates", () => {
     expect(normalizeLocale("zh-TW")).toBe(ZH_TW_LOCALE);
     expect(normalizeLocale("zh-HK")).toBe(ZH_HK_LOCALE);
     expect(normalizeLocale("pt-PT")).toBe(PT_PT_LOCALE);
+    expect(normalizeLocale("ja")).toBe(JA_LOCALE);
+    expect(normalizeLocale("ja-JP")).toBe(JA_LOCALE);
+    expect(normalizeLocale("ko")).toBe(KO_LOCALE);
+    expect(normalizeLocale("ko-KR")).toBe(KO_LOCALE);
     expect(normalizeLocale("pseudo")).toBe("pseudo");
     expect(normalizeLocale("nope")).toBe(DEFAULT_LOCALE);
     expect(normalizeLocale(undefined)).toBe(DEFAULT_LOCALE);
@@ -56,7 +86,16 @@ describe("locale predicates", () => {
 
   it("exposes en as the default and lists every shipped locale", () => {
     expect(DEFAULT_LOCALE).toBe("en");
-    expect([...SUPPORTED_LOCALES]).toEqual(["en", "pt-pt", "zh-cn", "zh-tw", "zh-hk", "pseudo"]);
+    expect([...SUPPORTED_LOCALES]).toEqual([
+      "en",
+      "pt-pt",
+      "zh-cn",
+      "zh-tw",
+      "zh-hk",
+      "ja",
+      "ko",
+      "pseudo",
+    ]);
   });
 
   // Only the `isProd` half of the contract. `selectableLocales` also requires
@@ -64,8 +103,17 @@ describe("locale predicates", () => {
   // is fixed to `true` for the whole vitest run (config resolves in serve mode).
   // `bundling.test.ts` covers the decision that produces it, in both directions.
   it("hides the pseudo locale from production builds", () => {
-    expect(selectableLocales(false)).toEqual(["en", "pt-pt", "zh-cn", "zh-tw", "zh-hk", "pseudo"]);
-    expect(selectableLocales(true)).toEqual(["en", "pt-pt", "zh-cn", "zh-tw", "zh-hk"]);
+    expect(selectableLocales(false)).toEqual([
+      "en",
+      "pt-pt",
+      "zh-cn",
+      "zh-tw",
+      "zh-hk",
+      "ja",
+      "ko",
+      "pseudo",
+    ]);
+    expect(selectableLocales(true)).toEqual(["en", "pt-pt", "zh-cn", "zh-tw", "zh-hk", "ja", "ko"]);
   });
 
   /**
@@ -133,51 +181,19 @@ describe("activateLocale", () => {
     expect(i18n.getResource("en", "task", "cliModeYourPromptWillBe")).toBeUndefined();
   });
 
-  it("activates Simplified Chinese and resolves its real catalog", async () => {
-    const result = await activateLocale(ZH_CN_LOCALE);
-    expect(result).toBe(ZH_CN_LOCALE);
-    expect(i18n.language).toBe(ZH_CN_LOCALE);
-    expect(document.documentElement.lang).toBe(ZH_CN_LOCALE);
-    expect(readLocaleCookie()).toBe(ZH_CN_LOCALE);
-    expect(i18n.hasResourceBundle(ZH_CN_LOCALE, "settings")).toBe(true);
-    expect(i18n.getResource(ZH_CN_LOCALE, "settings", "displayLanguage")).toBe("显示语言");
-    expect(i18n.t(DISPLAY_LANGUAGE_KEY)).toBe("显示语言");
-  });
-
-  it("activates European Portuguese and resolves its real catalog", async () => {
-    const result = await activateLocale("pt-PT");
-    expect(result).toBe(PT_PT_LOCALE);
-    expect(i18n.language).toBe(PT_PT_LOCALE);
-    expect(document.documentElement.lang).toBe(PT_PT_LOCALE);
-    expect(readLocaleCookie()).toBe(PT_PT_LOCALE);
-    expect(i18n.hasResourceBundle(PT_PT_LOCALE, "settings")).toBe(true);
-    expect(i18n.getResource(PT_PT_LOCALE, "settings", "displayLanguage")).toBe(
-      "Idioma de apresentação",
-    );
-    expect(i18n.t(DISPLAY_LANGUAGE_KEY)).toBe("Idioma de apresentação");
-  });
-
-  it("activates Traditional Chinese (Taiwan) and resolves its catalog", async () => {
-    const result = await activateLocale(ZH_TW_LOCALE);
-    expect(result).toBe(ZH_TW_LOCALE);
-    expect(i18n.language).toBe(ZH_TW_LOCALE);
-    expect(document.documentElement.lang).toBe(ZH_TW_LOCALE);
-    expect(readLocaleCookie()).toBe(ZH_TW_LOCALE);
-    expect(i18n.hasResourceBundle(ZH_TW_LOCALE, "settings")).toBe(true);
-    expect(i18n.getResource(ZH_TW_LOCALE, "settings", "displayLanguage")).toBe("顯示語言");
-    expect(i18n.t(DISPLAY_LANGUAGE_KEY)).toBe("顯示語言");
-  });
-
-  it("activates Traditional Chinese (Hong Kong) and resolves its catalog", async () => {
-    const result = await activateLocale("zh-HK");
-    expect(result).toBe(ZH_HK_LOCALE);
-    expect(i18n.language).toBe(ZH_HK_LOCALE);
-    expect(document.documentElement.lang).toBe(ZH_HK_LOCALE);
-    expect(readLocaleCookie()).toBe(ZH_HK_LOCALE);
-    expect(i18n.hasResourceBundle(ZH_HK_LOCALE, "settings")).toBe(true);
-    expect(i18n.getResource(ZH_HK_LOCALE, "settings", "displayLanguage")).toBe("顯示語言");
-    expect(i18n.t(DISPLAY_LANGUAGE_KEY)).toBe("顯示語言");
-  });
+  it.each([
+    ["Simplified Chinese", ZH_CN_LOCALE, ZH_CN_LOCALE, "显示语言", true],
+    ["European Portuguese", "pt-PT", PT_PT_LOCALE, "Idioma de apresentação", true],
+    ["Traditional Chinese (Taiwan)", ZH_TW_LOCALE, ZH_TW_LOCALE, "顯示語言", true],
+    ["Traditional Chinese (Hong Kong)", "zh-HK", ZH_HK_LOCALE, "顯示語言", true],
+    ["Japanese", "ja", JA_LOCALE, "表示言語", true],
+    ["Korean", KO_LOCALE, KO_LOCALE, "Display language", false],
+  ])(
+    "activates %s and uses its available catalog",
+    async (_name, requested, canonical, displayLanguage, hasRealCatalog) => {
+      await expectLocaleActivation(requested, canonical, displayLanguage, hasRealCatalog);
+    },
+  );
 
   it("resolves reviewed product vocabulary for each Traditional Chinese region", async () => {
     await activateLocale(ZH_TW_LOCALE);

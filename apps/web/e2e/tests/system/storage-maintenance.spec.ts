@@ -207,7 +207,9 @@ test.describe("System storage maintenance", () => {
       await expect(testPage.getByTestId("storage-run-history")).toBeVisible();
       await expect(testPage.getByTestId("storage-quarantine-card")).toBeVisible();
       await expect(testPage.getByTestId("storage-disk-capacity-card")).toBeVisible();
-      await expect(testPage.getByRole("progressbar")).toBeVisible();
+      await expect(
+        testPage.getByTestId("storage-disk-capacity-card").getByRole("progressbar"),
+      ).toBeVisible();
       await expect(testPage.getByTestId("storage-dependency-allowlist")).toContainText(
         "node_modules",
       );
@@ -245,12 +247,10 @@ test.describe("System storage maintenance", () => {
     progressive.complete();
     await expect(testPage.getByTestId("storage-analysis-total")).toContainText("Total counted");
     const timingHelp = testPage.getByTestId("storage-analysis-timing-help");
-    await timingHelp.focus();
+    await timingHelp.hover();
     await expect(
       testPage.locator('[data-slot="tooltip-content"]:not([data-state="closed"])'),
     ).toContainText("Scan duration");
-    await testPage.mouse.move(4, 4);
-    await timingHelp.click();
     await expect(
       testPage.locator('[data-slot="tooltip-content"]:not([data-state="closed"])'),
     ).toContainText("Analyze refreshes this data immediately");
@@ -266,6 +266,9 @@ test.describe("System storage maintenance", () => {
     const orphan = seedOrphanWorkspace(backend.tmpDir);
     await testPage.goto("/settings/system/storage");
     await expect(testPage.getByTestId("storage-overview-card")).toBeVisible();
+    // The overview card is also rendered as a placeholder while its request is
+    // pending. Wait for loaded analysis data before reading its layout.
+    await expect(testPage.getByTestId("storage-analysis-total")).toBeVisible();
     await expect(testPage.getByTestId("storage-policy-card")).toBeVisible();
     const overviewBox = await testPage.getByTestId("storage-overview-card").boundingBox();
     const policyBox = await testPage.getByTestId("storage-policy-card").boundingBox();

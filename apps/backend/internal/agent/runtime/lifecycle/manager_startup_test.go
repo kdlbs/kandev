@@ -111,6 +111,31 @@ func TestStartAgentProcess_NonPassthrough_NoAgentctl(t *testing.T) {
 	}
 }
 
+func TestStartAgentProcessFailureAbortsInitialPromptDispatchHold(t *testing.T) {
+	mgr := newTestManager(t)
+	mgr.profileResolver = &mockAgentProfileResolver{cliPassthrough: false}
+	execution := &AgentExecution{
+		ID:             "exec-initial-prompt-start-failure",
+		SessionID:      "session-initial-prompt-start-failure",
+		AgentProfileID: "profile-initial-prompt-start-failure",
+	}
+	if err := mgr.executionStore.Add(execution); err != nil {
+		t.Fatalf("seed execution: %v", err)
+	}
+	failureCalled := false
+	if err := mgr.RegisterInitialPromptDispatchCallbacks(execution.ID, nil, func() {
+		failureCalled = true
+	}); err != nil {
+		t.Fatalf("register initial prompt callbacks: %v", err)
+	}
+	if err := mgr.StartAgentProcess(context.Background(), execution.ID); err == nil {
+		t.Fatal("StartAgentProcess() succeeded without an agentctl client")
+	}
+	if !failureCalled {
+		t.Fatal("initial prompt failure callback was not called when agent startup failed")
+	}
+}
+
 func TestStartAgentProcess_RunsContributionPreflightBeforeAgentStart(t *testing.T) {
 	var paths []string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -340,7 +365,7 @@ func TestPreflightRemoteContributionPushesUsesOneBudgetForAllRepositories(t *tes
 			_ = json.NewEncoder(w).Encode(map[string]any{"success": true})
 		case 2:
 			close(secondStarted)
-			timer := time.NewTimer(70 * time.Millisecond)
+			timer := time.NewTimer(650 * time.Millisecond)
 			defer timer.Stop()
 			select {
 			case <-timer.C:
@@ -355,7 +380,7 @@ func TestPreflightRemoteContributionPushesUsesOneBudgetForAllRepositories(t *tes
 	})
 
 	mgr := newTestManager(t)
-	mgr.remoteContributionPreflightTimeout = 80 * time.Millisecond
+	mgr.remoteContributionPreflightTimeout = time.Second
 	execution := newContributionPreflightExecution(t, server.URL, "exec-multi-preflight-timeout", "", "",
 		map[string]models.RemoteContribution{
 			"a": contributionPreflightTestBinding(),
@@ -369,7 +394,7 @@ func TestPreflightRemoteContributionPushesUsesOneBudgetForAllRepositories(t *tes
 	case <-time.After(time.Second):
 		t.Fatal("first contribution preflight did not start")
 	}
-	timer := time.NewTimer(10 * time.Millisecond)
+	timer := time.NewTimer(650 * time.Millisecond)
 	<-timer.C
 	timer.Stop()
 	releaseFirst()

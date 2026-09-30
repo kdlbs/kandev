@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 )
@@ -209,6 +210,86 @@ func TestRESTClient_SearchIssues_AllProjectsUsesOrgEndpoint(t *testing.T) {
 	}
 }
 
+// TestRESTClient_SearchIssues_ForwardsLookbackOnlyWhereAccepted locks in the
+// fix for the "only 24h and 14d work" report. The two issue endpoints accept
+// different statsPeriod sets: the project-scoped endpoint accepts only the
+// empty value, 24h, and 14d there and answers 400 for every other offered
+// lookback, while the organization-scoped endpoint takes any relative duration
+// and uses it as its request time range. The lookback must therefore reach only
+// the org-scoped request, while the `age:` term that actually limits issue
+// eligibility is sent on both.
+//
+// @covers AC-INTEGRATIONS-SENTRY-WATCHER-LOOKBACK-PERIODS-001.1, AC-INTEGRATIONS-SENTRY-WATCHER-LOOKBACK-PERIODS-001.2, AC-INTEGRATIONS-SENTRY-WATCHER-LOOKBACK-PERIODS-001.5
+func TestRESTClient_SearchIssues_ForwardsLookbackOnlyWhereAccepted(t *testing.T) {
+	type capture struct {
+		path  string
+		query url.Values
+	}
+	requests := make([]capture, 0, 4)
+	ts := newMockServer(t, func(w http.ResponseWriter, r *http.Request) {
+		requests = append(requests, capture{path: r.URL.Path, query: r.URL.Query()})
+		_, _ = w.Write([]byte(`[]`))
+	})
+	c := pointTo(NewRESTClient(&SentryConfig{}, "tok"), ts.URL)
+	search := func(filter SearchFilter) capture {
+		t.Helper()
+		before := len(requests)
+		if _, err := c.SearchIssues(context.Background(), filter, ""); err != nil {
+			t.Fatalf("search %+v: %v", filter, err)
+		}
+		if len(requests) != before+1 {
+			t.Fatalf("expected one request per search, got %d", len(requests)-before)
+		}
+		return requests[before]
+	}
+
+	// Every offered lookback token must be expressible on both paths.
+	for _, token := range []string{"1h", "24h", "7d", "14d", "30d"} {
+		projectScoped := search(SearchFilter{
+			OrgSlug:      "acme",
+			ProjectSlugs: []string{"frontend"},
+			StatsPeriod:  token,
+		})
+		if projectScoped.path != "/projects/acme/frontend/issues/" {
+			t.Errorf("%s: project-scoped path = %q", token, projectScoped.path)
+		}
+		if projectScoped.query.Has("statsPeriod") {
+			t.Errorf("%s: project-scoped request must not carry statsPeriod, got %q",
+				token, projectScoped.query.Get("statsPeriod"))
+		}
+		if got := projectScoped.query.Get("query"); !strings.Contains(got, "age:-"+token) {
+			t.Errorf("%s: project-scoped query %q missing the age:-%s term", token, got, token)
+		}
+
+		orgScoped := search(SearchFilter{OrgSlug: "acme", StatsPeriod: token})
+		if orgScoped.path != "/organizations/acme/issues/" {
+			t.Errorf("%s: org-scoped path = %q", token, orgScoped.path)
+		}
+		if got := orgScoped.query.Get("statsPeriod"); got != token {
+			t.Errorf("%s: org-scoped statsPeriod = %q, want %q", token, got, token)
+		}
+		if got := orgScoped.query.Get("query"); !strings.Contains(got, "age:-"+token) {
+			t.Errorf("%s: org-scoped query %q missing the age:-%s term", token, got, token)
+		}
+	}
+
+	// An empty lookback carries neither the parameter nor an age term, on
+	// either path. The parameter key must be absent, not merely empty: the
+	// org-scoped endpoint rejects an empty statsPeriod.
+	for _, filter := range []SearchFilter{
+		{OrgSlug: "acme", ProjectSlugs: []string{"frontend"}},
+		{OrgSlug: "acme"},
+	} {
+		got := search(filter)
+		if got.query.Has("statsPeriod") {
+			t.Errorf("empty lookback must not send statsPeriod, got %q", got.query.Get("statsPeriod"))
+		}
+		if q := got.query.Get("query"); strings.Contains(q, "age:") {
+			t.Errorf("empty lookback must not send an age term, got %q", q)
+		}
+	}
+}
+
 // TestRESTClient_GetIssue_NumericID locks in that a numeric internal id hits
 // the /issues/{id}/ endpoint directly (no org needed).
 func TestRESTClient_GetIssue_NumericID(t *testing.T) {
@@ -311,11 +392,10 @@ func TestBuildIssueQueryString(t *testing.T) {
 
 // TestBuildIssueQueryString_StatsPeriodBecomesAgeFilter locks in the fix for
 // the "older issues get processed by a watch configured for the last 24h"
-// bug: Sentry's statsPeriod query param does NOT filter which issues a
-// search returns (it only sizes the per-issue stats window — see
-// https://github.com/getsentry/sentry/issues/36375). The only way to
-// actually restrict results to recently-first-seen issues is the `age:`
-// search token, so StatsPeriod must be translated into one.
+// bug: the `statsPeriod` request param cannot express that intent on the
+// project-scoped issue endpoint, which accepts only 24h and 14d there. The
+// `age:` search token is the age constraint both endpoints honor, so
+// StatsPeriod must be translated into one.
 func TestBuildIssueQueryString_StatsPeriodBecomesAgeFilter(t *testing.T) {
 	if got := buildIssueQueryString(SearchFilter{StatsPeriod: "24h"}); got != "age:-24h" {
 		t.Errorf("expected age:-24h, got %q", got)

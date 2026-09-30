@@ -197,4 +197,65 @@ test.describe("Sentry settings — issue watchers", () => {
       caption: "Saved watcher polling both selected projects",
     });
   });
+
+  // One non-default lookback token carried end to end through the dialog, so
+  // the assertion cannot pass on the dialog's 24h default. The full token
+  // matrix is covered elsewhere: the request-shape test sends every offered
+  // token on both endpoints, and the form test pins the option values.
+  //
+  // @covers AC-INTEGRATIONS-SENTRY-WATCHER-LOOKBACK-PERIODS-001.1, AC-INTEGRATIONS-SENTRY-WATCHER-LOOKBACK-PERIODS-001.3
+  test("persists selected lookback period", async ({ testPage, apiClient, seedData }) => {
+    await apiClient.mockSentryReset();
+    const instance = await apiClient.createSentryInstance({
+      workspaceId: seedData.workspaceId,
+      name: "Lookback Sentry",
+      secret: TOKEN,
+    });
+    await apiClient.mockSentrySetAuthHealth({ instanceId: instance.id, ok: true });
+    await apiClient.mockSentrySetOrganizations(instance.id, [
+      { id: "acme", slug: "acme", name: "Acme" },
+    ]);
+    await apiClient.mockSentrySetProjects(instance.id, [
+      { id: "frontend", slug: "frontend", name: "Frontend", orgSlug: "acme" },
+    ]);
+
+    const settings = new SentrySettingsPage(testPage);
+    await settings.goto(seedData.workspaceId);
+
+    await testPage.getByRole("button", { name: "New watcher" }).click();
+    const dialog = testPage.getByRole("dialog");
+    await expect(dialog).toBeVisible();
+
+    const pick = async (label: string, option: string | RegExp) => {
+      await comboboxByLabel(dialog, label).click();
+      await testPage.getByRole("listbox").getByRole("option", { name: option }).click();
+    };
+
+    await pick("Sentry instance", "Lookback Sentry");
+    // The sole org auto-selects once the lookup resolves.
+    await expect(comboboxByLabel(dialog, "Organization slug")).toContainText("acme");
+
+    await comboboxByLabel(dialog, "Project slug").click();
+    await testPage
+      .getByRole("listbox")
+      .getByRole("option", { name: "Frontend (frontend)" })
+      .click();
+    await expect(comboboxByLabel(dialog, "Project slug")).toContainText("Frontend (frontend)");
+    await testPage.keyboard.press("Escape");
+
+    await pick("Stats period", "Last 30 days");
+
+    await pick("Workflow", "E2E Workflow");
+    await comboboxByLabel(dialog, "Workflow Step").click();
+    await testPage.getByRole("listbox").getByRole("option").first().click();
+
+    const createButton = dialog.getByRole("button", { name: "Create" });
+    await expect(createButton).toBeEnabled();
+    await createButton.click();
+    await expect(dialog).toBeHidden();
+
+    // Reload before asserting so the summary comes from the persisted row.
+    await settings.goto(seedData.workspaceId);
+    await expect(testPage.getByText("period:30d")).toBeVisible();
+  });
 });

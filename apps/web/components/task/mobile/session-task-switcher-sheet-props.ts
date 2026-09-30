@@ -25,6 +25,7 @@ export function buildMobileTaskSwitcherProps(
     stepsByWorkflowId: props.stepsByWorkflowId,
     activeTaskId: props.activeTaskId,
     selectedTaskId: props.selectedTaskId,
+    onMoveToStep: props.onMoveToStep,
     onRequestMoveOptions: props.onRequestMoveOptions,
     onBeforeMoveOptionsOpen: props.onBeforeMoveOptionsOpen,
     collapsedGroupKeys: helpers.collapsedGroupKeys,
@@ -58,6 +59,6 @@ export function buildMobileTaskSwitcherProps(
     loadError: props.loadError,
     onRetryLoad: props.onRetryLoad,
     retryLabel: props.retryLabel,
-    totalTaskCount: props.tasks.length,
+    totalTaskCount: props.page?.total_tasks ?? props.tasks.length,
   };
 }

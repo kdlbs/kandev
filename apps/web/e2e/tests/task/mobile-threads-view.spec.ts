@@ -3,11 +3,12 @@ import { test, expect } from "../../fixtures/test-base";
 import { MobileKanbanPage } from "../../pages/mobile-kanban-page";
 import { waitForFiniteAnimations } from "../../helpers/animations";
 import { seedSecondaryClarificationTask } from "../../helpers/clarification";
-import { createStandardProfile, openTaskSession } from "../../helpers/git-helper";
+import { openTaskSession } from "../../helpers/git-helper";
 import { assertNoHorizontalOverflow } from "../../helpers/session-stream-overload";
 import { waitForLatestSessionDone } from "../../helpers/session";
 import { attachGatewayTrafficCapture, type GatewayTrafficFrame } from "../../helpers/ws-traffic";
 import { requireBox } from "../../helpers/layout-assertions";
+import { expectTouchControl } from "../../helpers/control-sizing";
 import { expectContentSizedBottomConfirmation } from "../../helpers/mobile-confirmations";
 import { closeQuickTerminalTab } from "../terminal/terminal-test-helpers";
 import { swipeDeckLeft } from "./mobile-threads-swipe-helpers";
@@ -43,8 +44,8 @@ async function expectSwipeCue(page: Page, column: Locator, total: number) {
     "true",
   );
   const topbarBox = await topbar.boundingBox();
-  const viewBox = await topbar.getByTestId("threads-mobile-view-trigger").boundingBox();
-  const menuBox = await topbar.getByTestId("mobile-topbar-menu").boundingBox();
+  const viewBox = await topbar.getByTestId("mobile-topbar-page-context").boundingBox();
+  const menuBox = await topbar.getByTestId("app-nav-trigger").boundingBox();
   const cueBox = await cue.boundingBox();
   expect(topbarBox!.height).toBe(56);
   expect(cueBox!.x).toBeGreaterThanOrEqual(viewBox!.x + viewBox!.width);
@@ -119,11 +120,10 @@ test.describe("Mobile Threads view", () => {
     seedData,
   }) => {
     test.setTimeout(180_000);
-    const profile = await createStandardProfile(apiClient, "mobile-threads");
     const task = await apiClient.createTaskWithAgent(
       seedData.workspaceId,
       AGENT_TITLE,
-      profile.id,
+      seedData.agentProfileId,
       {
         description: "/e2e:simple-message",
         workflow_id: seedData.workflowId,
@@ -136,8 +136,8 @@ test.describe("Mobile Threads view", () => {
 
     const mobile = new MobileKanbanPage(testPage);
     await mobile.goto();
-    await mobile.mobileMenuButton.click();
-    const menu = testPage.getByRole("dialog", { name: "Menu" });
+    await mobile.viewOptionsButton.click();
+    const menu = testPage.getByRole("dialog", { name: "View options" });
     await menu.getByRole("radio", { name: "Threads", exact: true }).click();
     await expect(testPage).toHaveURL(/\/threads/);
 
@@ -161,12 +161,13 @@ test.describe("Mobile Threads view", () => {
     expect(columnWidth).toBeLessThanOrEqual(viewportWidth);
     await expect(testPage.getByTestId("thread-swipe-cue")).toHaveCount(0);
 
-    const viewControl = testPage.getByTestId("threads-mobile-view-trigger");
+    const viewControl = testPage.getByTestId("mobile-topbar-page-context");
     await testPage.setViewportSize({ width: 820, height: 1180 });
-    await expect(viewControl).toBeVisible();
-    await expect(viewControl.getByText("Threads", { exact: true })).toHaveCount(0);
+    const tabletViewControl = testPage.getByTestId("threads-mobile-view-trigger");
+    await expect(tabletViewControl).toBeVisible();
+    await expect(tabletViewControl.getByText("Threads", { exact: true })).toHaveCount(0);
     await expect(column.getByTestId("thread-picker-trigger")).toHaveCount(0);
-    expect((await viewControl.boundingBox())?.height ?? 0).toBeGreaterThanOrEqual(44);
+    expect((await tabletViewControl.boundingBox())?.height ?? 0).toBeGreaterThanOrEqual(44);
     await testPage.setViewportSize({ width: 360, height: 740 });
     await expect(viewControl.getByText("Threads", { exact: true })).toBeVisible();
     await expect(column.getByTestId("thread-picker-trigger")).toBeVisible();
@@ -179,7 +180,6 @@ test.describe("Mobile Threads view", () => {
     seedData,
   }) => {
     test.setTimeout(180_000);
-    const profile = await createStandardProfile(apiClient, "mobile-threads-picker");
     const titles = [
       "Review checkout accessibility across keyboard and touch",
       "Investigate a very long payment reconciliation identifier",
@@ -187,12 +187,17 @@ test.describe("Mobile Threads view", () => {
     ];
     const tasks = [];
     for (const title of titles) {
-      const task = await apiClient.createTaskWithAgent(seedData.workspaceId, title, profile.id, {
-        description: "/e2e:simple-message",
-        workflow_id: seedData.workflowId,
-        workflow_step_id: seedData.startStepId,
-        repository_ids: [seedData.repositoryId],
-      });
+      const task = await apiClient.createTaskWithAgent(
+        seedData.workspaceId,
+        title,
+        seedData.agentProfileId,
+        {
+          description: "/e2e:simple-message",
+          workflow_id: seedData.workflowId,
+          workflow_step_id: seedData.startStepId,
+          repository_ids: [seedData.repositoryId],
+        },
+      );
       await openTaskSession(testPage, title);
       await waitForLatestSessionDone(apiClient, task.id, 1, `agent turn for ${title}`);
       const { sessions } = await apiClient.listTaskSessions(task.id);
@@ -221,10 +226,10 @@ test.describe("Mobile Threads view", () => {
       );
     });
     expect(titleLines).toBeCloseTo(2, 1);
-    const viewControl = testPage.getByTestId("threads-mobile-view-trigger");
+    const viewControl = testPage.getByTestId("mobile-topbar-page-context");
     const pageLabel = await viewControl.getByText("Threads", { exact: true }).boundingBox();
-    const viewLabel = await viewControl.getByText("All threads", { exact: true }).boundingBox();
-    expect(viewLabel!.y).toBeGreaterThanOrEqual(pageLabel!.y + pageLabel!.height);
+    const viewLabel = await viewControl.getByText("E2E Workspace", { exact: true }).boundingBox();
+    expect(pageLabel!.y).toBeGreaterThanOrEqual(viewLabel!.y + viewLabel!.height);
     await firstPicker.tap();
     const picker = testPage.getByRole("dialog", { name: "Choose thread", exact: true });
     await expect(picker).toBeVisible();
@@ -256,8 +261,8 @@ test.describe("Mobile Threads view", () => {
     await expect(selectedPicker).toBeFocused();
 
     await testPage.setViewportSize({ width: 360, height: 740 });
-    const viewPicker = testPage.getByTestId("threads-mobile-view-trigger");
-    const menu = testPage.getByTestId("mobile-topbar-menu");
+    const viewPicker = testPage.getByTestId("mobile-topbar-page-context");
+    const menu = testPage.getByTestId("app-nav-trigger");
     for (const control of [viewPicker, menu, selected.getByTestId("thread-picker-trigger")]) {
       const box = await control.boundingBox();
       expect(box).not.toBeNull();
@@ -315,7 +320,7 @@ test.describe("Mobile Threads view", () => {
     await apiClient.saveUserSettings({ app_status_bar_enabled: true });
     await testPage.goto("/threads");
     await expect(testPage.getByTestId("thread-swipe-cue")).toHaveCount(0);
-    const trigger = testPage.getByTestId("mobile-topbar-menu");
+    const trigger = testPage.getByTestId("app-nav-trigger");
     const menu = testPage.getByRole("dialog", { name: "Menu", exact: true });
     await trigger.tap();
     await expect(menu.getByRole("link", { name: "Home", exact: true })).toBeVisible();
@@ -421,11 +426,10 @@ test.describe("Mobile Threads view", () => {
     seedData,
   }) => {
     test.setTimeout(180_000);
-    const profile = await createStandardProfile(apiClient, "mobile-threads-saved-view");
     const firstTask = await apiClient.createTaskWithAgent(
       seedData.workspaceId,
       "Mobile saved view first work",
-      profile.id,
+      seedData.agentProfileId,
       {
         description: "/e2e:simple-message",
         workflow_id: seedData.workflowId,
@@ -436,7 +440,7 @@ test.describe("Mobile Threads view", () => {
     const secondTask = await apiClient.createTaskWithAgent(
       seedData.workspaceId,
       "Mobile saved view second work",
-      profile.id,
+      seedData.agentProfileId,
       {
         description: "/e2e:simple-message",
         workflow_id: seedData.workflowId,
@@ -450,7 +454,7 @@ test.describe("Mobile Threads view", () => {
     await waitForLatestSessionDone(apiClient, secondTask.id, 1, "second saved view agent turn");
 
     await testPage.goto("/threads");
-    const trigger = testPage.getByTestId("threads-mobile-view-trigger");
+    const trigger = testPage.getByTestId("mobile-topbar-page-context");
     await expect(trigger).toBeVisible();
     await trigger.tap();
 
@@ -521,12 +525,12 @@ test.describe("Mobile Threads view", () => {
     await expect(board.locator("[data-thread-column-id]")).toHaveCount(1);
 
     await testPage.reload();
-    await expect(testPage.getByTestId("threads-mobile-view-trigger")).toContainText("New view");
+    await expect(testPage.getByTestId("mobile-topbar-page-context")).toContainText("Threads");
     await expect(
       testPage.getByTestId("threads-board").locator("[data-thread-column-id]"),
     ).toHaveCount(1);
 
-    const reloadedTrigger = testPage.getByTestId("threads-mobile-view-trigger");
+    const reloadedTrigger = testPage.getByTestId("mobile-topbar-page-context");
     await reloadedTrigger.tap();
     const reloadedDrawer = testPage.getByTestId("threads-mobile-view-drawer");
     await reloadedDrawer.getByTestId("threads-mobile-view-option-view-all-threads").tap();
@@ -545,14 +549,16 @@ test.describe("Mobile Threads view", () => {
     const geometryDrawer = testPage.getByTestId("threads-mobile-view-drawer");
     await expect(geometryDrawer).toBeVisible();
     await expect(geometryDrawer.getByTestId("threads-mobile-view-list")).toBeVisible();
+    await waitForFiniteAnimations(geometryDrawer);
     const buttons = geometryDrawer.locator("button:visible");
     const buttonCount = await buttons.count();
     for (let index = 0; index < buttonCount; index += 1) {
-      const box = await buttons.nth(index).boundingBox();
-      expect(box?.height ?? 0).toBeGreaterThanOrEqual(44);
+      await expectTouchControl(buttons.nth(index));
     }
     await assertNoHorizontalOverflow(testPage, "mobile Threads saved views");
-    await expect(geometryDrawer).toHaveClass(/safe-area-inset-bottom/);
+    await expect(testPage.getByTestId("mobile-home-menu-scroll")).toHaveClass(
+      /safe-area-inset-bottom/,
+    );
 
     await geometryDrawer.getByTestId("threads-mobile-view-option-view-all-threads").tap();
     await expect(geometryDrawer).toBeHidden();
@@ -587,17 +593,18 @@ test.describe("Mobile Threads view", () => {
     expect(seedResponse.ok).toBe(true);
     await testPage.goto("/threads");
 
-    const trigger = testPage.getByTestId("threads-mobile-view-trigger");
-    await expect(trigger).toContainText("Release threads");
+    const trigger = testPage.getByTestId("mobile-topbar-page-context");
+    await expect(trigger).toContainText("Threads");
     await trigger.tap();
-    const drawer = testPage.getByTestId("threads-mobile-view-drawer");
+    const drawer = testPage.locator('[data-slot="drawer-content"]');
+    await expect(drawer.getByTestId("threads-mobile-view-drawer")).toContainText("Release threads");
     await drawer.getByTestId("threads-mobile-view-settings").tap();
     const editor = drawer.getByTestId("threads-view-editor");
     // Invalid input stays local; a valid persisted draft intentionally hides Delete.
     await editor.getByTestId("threads-max-columns").fill("0");
     await expect(editor.getByTestId("threads-max-columns")).toHaveAttribute("aria-invalid", "true");
     await editor.getByTestId("threads-view-delete").scrollIntoViewIfNeeded();
-    const scrollRegion = drawer.getByTestId("threads-mobile-view-drawer-scroll-region");
+    const scrollRegion = drawer.getByTestId("mobile-home-menu-scroll");
     const scrollTop = await scrollRegion.evaluate((element) => element.scrollTop);
     expect(scrollTop).toBeGreaterThan(0);
     await waitForFiniteAnimations(drawer);
@@ -657,7 +664,12 @@ test.describe("Mobile Threads view", () => {
       .tap();
     await deletedViewResponse;
     await expect(drawer).toBeHidden();
-    await expect(trigger).toContainText("All threads");
+    await expect
+      .poll(async () => (await apiClient.getUserSettings()).settings.thread_active_view_id)
+      .toBe("view-all-threads");
     await expect(trigger).toBeFocused();
+    await trigger.tap();
+    await expect(drawer.getByTestId("threads-mobile-view-list")).toBeVisible();
+    await expect(drawer.getByTestId("threads-view-editor")).toHaveCount(0);
   });
 });

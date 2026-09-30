@@ -9,6 +9,7 @@ import (
 
 	"go.uber.org/zap"
 
+	agentruntime "github.com/kandev/kandev/internal/agent/runtime"
 	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
 	"github.com/kandev/kandev/internal/orchestrator/watcher"
 	"github.com/kandev/kandev/internal/task/models"
@@ -521,6 +522,10 @@ func (s *Service) retryTransientPrompt(ctx context.Context, taskID, sessionID, e
 		return
 	}
 	cp, _ := v.(capturedPrompt)
+	initialCreatePromptPassthrough := false
+	if session, sessionErr := s.repo.GetTaskSession(ctx, sessionID); sessionErr == nil && session != nil {
+		_, initialCreatePromptPassthrough = s.hydrateInitialCreatePromptPassthrough(session)
+	}
 
 	if execID != "" {
 		if !s.claimForcedExecutionCleanup(sessionID, execID) {
@@ -530,11 +535,14 @@ func (s *Service) retryTransientPrompt(ctx context.Context, taskID, sessionID, e
 			s.resetTransientRetry(sessionID)
 			return
 		}
-		if err := s.stopTransientRetryExecution(ctx, execID); err != nil {
+		claim, claimed := s.executionTeardownClaimFor(sessionID, execID)
+		if err := s.stopTransientRetryExecution(ctx, execID); err != nil && !agentruntime.IsNotFound(err) {
 			s.logger.Debug("failed to stop failed execution before transient retry",
 				zap.String("session_id", sessionID),
 				zap.String("execution_id", execID),
 				zap.Error(err))
+		} else if claimed {
+			s.completeExecutionTeardownClaim(sessionID, execID, claim)
 		}
 		// handleAgentFailed terminal-marked this exact execution before the
 		// retry was scheduled, so no later frame may reclaim activity even when
@@ -552,7 +560,8 @@ func (s *Service) retryTransientPrompt(ctx context.Context, taskID, sessionID, e
 	}
 
 	if _, err := s.promptTask(ctx, taskID, sessionID, cp.text, cp.model, cp.planMode, cp.attachments, false, launchOriginAutomatic, promptTaskOptions{
-		onAccepted: cp.onAccepted,
+		onAccepted:                     cp.onAccepted,
+		initialCreatePromptPassthrough: initialCreatePromptPassthrough,
 	}); err != nil {
 		if ctx.Err() != nil {
 			return
@@ -574,6 +583,9 @@ func (s *Service) retryTransientPrompt(ctx context.Context, taskID, sessionID, e
 func (s *Service) stopTransientRetryExecution(ctx context.Context, executionID string) error {
 	stopCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), transientRetryStopTimeout)
 	defer cancel()
+	if s.lspLeases != nil {
+		s.lspLeases.StopLSPLeasesForExecution(executionID)
+	}
 	return s.executor.StopExecution(stopCtx, executionID, "transient retry: relaunching agent", true)
 }
 
@@ -782,12 +794,32 @@ func classifyKanbanFailure(data watcher.AgentEventData) *routingerr.Error {
 			phase = routingerr.PhaseStreaming
 		}
 	}
-	return routingerr.Classify(routingerr.Input{
+	classified := routingerr.Classify(routingerr.Input{
 		Phase:      phase,
 		ProviderID: providerID,
 		ResetHint:  resetHint,
 		Stderr:     message,
 	})
+	if data.DynamicRouteAttempt && data.EvidenceKnown && !data.OutputObserved && !data.EffectObserved &&
+		data.ProviderError != nil && data.ProviderError.Valid() &&
+		data.ProviderError.DiagnosticIdentityComplete && completeProviderDiagnosticSource(data.ProviderError.Source) &&
+		classified.Code == routingerr.CodeAgentRuntime && classified.Class == routingerr.ClassUnclassified &&
+		classified.ClassifierRule == "phase.poststart.unknown" {
+		// An exact terminal provider diagnostic can identify the unknown result
+		// shape without changing the global post-start classifier contract.
+		classified = cloneRoutingErrorWithCode(classified, routingerr.CodeUnknownProvider)
+	}
+	return classified
+}
+
+func cloneRoutingErrorWithCode(classified *routingerr.Error, code routingerr.Code) *routingerr.Error {
+	if classified == nil {
+		return nil
+	}
+	clone := *classified
+	clone.Code = code
+	clone.Class = routingerr.ClassForCode(code)
+	return &clone
 }
 
 func transientFailureLabel(classified *routingerr.Error) string {

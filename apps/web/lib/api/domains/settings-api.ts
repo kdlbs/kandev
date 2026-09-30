@@ -42,6 +42,7 @@ export {
   startHostShell,
   stopAgentLogin,
 } from "./host-shell-api";
+export { probeAgentProfile } from "./profile-capability-api";
 export type { AgentLoginSession, HostShellStartOptions } from "./host-shell-api";
 
 // User settings
@@ -289,6 +290,11 @@ export type CommandPreviewResponse = {
   supported: boolean;
   command: string[];
   command_string: string;
+  /**
+   * Which process the profile's CLI flags are appended to. Over ACP that is the
+   * bridge, not the agent CLI it wraps.
+   */
+  flag_destination?: "agent_cli" | "acp_bridge";
 };
 
 export async function previewAgentCommand(
@@ -346,6 +352,8 @@ export async function createCustomTUIAgent(
     command: string;
     description?: string;
     mcp_strategy?: string;
+    protocol?: string;
+    disable_bracketed_paste?: boolean;
   },
   options?: ApiRequestOptions,
 ): Promise<Agent> {
@@ -471,7 +479,7 @@ export async function createPrompt(
 
 export async function updatePrompt(
   promptId: string,
-  payload: { name?: string; content?: string },
+  payload: { name?: string; content?: string; allow_agent_edits?: boolean },
   options?: ApiRequestOptions,
 ) {
   return fetchJson<CustomPrompt>(`/api/v1/prompts/${promptId}`, {

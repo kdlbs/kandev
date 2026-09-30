@@ -8,7 +8,6 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	kubeclient "k8s.io/client-go/kubernetes"
 
 	agentkubernetes "github.com/kandev/kandev/internal/agent/kubernetes"
@@ -100,11 +99,12 @@ func (h *Handler) listSessions(
 		return nil, err
 	}
 	rows := make([]SessionRow, 0, len(runs))
+	cache := newSessionStatusCache(client)
 	for _, run := range runs {
 		if !filter.matches(run) {
 			continue
 		}
-		row, visible, rowErr := h.sessionRow(ctx, client, executorID, run)
+		row, visible, rowErr := h.sessionRow(ctx, cache, executorID, run)
 		if rowErr != nil {
 			return nil, rowErr
 		}
@@ -112,7 +112,7 @@ func (h *Handler) listSessions(
 			rows = append(rows, row)
 		}
 	}
-	return rows, nil
+	return h.appendRetainedTaskPods(ctx, client, executorID, filter, rows)
 }
 
 func (f SessionFilter) matches(run *models.ExecutorRunning) bool {
@@ -162,7 +162,7 @@ func (h *Handler) sessionStatusSource(
 
 func (h *Handler) sessionRow(
 	ctx context.Context,
-	client kubeclient.Interface,
+	cache *sessionStatusCache,
 	executorID string,
 	run *models.ExecutorRunning,
 ) (SessionRow, bool, error) {
@@ -188,14 +188,19 @@ func (h *Handler) sessionRow(
 		}
 		return SessionRow{}, false, err
 	}
+	run, inventoryErr := h.canonicalTaskPodInventory(ctx, run, session, cache)
 	row := newInventorySessionRow(run)
 	row.SessionState = projectedTaskSessionState(session.State)
+	if inventoryErr != nil {
+		row.FailureReason = "Kubernetes task inventory is unavailable"
+		return row, true, nil
+	}
 	if inventoryFailure := validateSessionInventory(run, executorID, row); inventoryFailure != "" {
 		row.FailureReason = inventoryFailure
 		return row, true, nil
 	}
 	namespace := metadataString(run.Metadata, metadataNamespace)
-	pod, err := client.CoreV1().Pods(namespace).Get(ctx, row.PodName, metav1.GetOptions{})
+	pod, err := cache.pod(ctx, namespace, row.PodName)
 	if err != nil {
 		row.FailureReason = podLookupFailure(err)
 		if apierrors.IsNotFound(err) {
@@ -233,7 +238,7 @@ func validateSessionInventory(
 	identity, validIdentity := recordedResourceIdentity(run.Metadata)
 	if !validIdentity || run.ID != run.SessionID || run.ExecutorID != executorID ||
 		identity.ExecutorID != executorID || identity.TaskID != run.TaskID ||
-		identity.SessionID != run.SessionID || metadataString(run.Metadata, metadataNamespace) == "" ||
+		(!isTaskPodInventory(run.Metadata) && identity.SessionID != run.SessionID) || metadataString(run.Metadata, metadataNamespace) == "" ||
 		row.PodName == "" || metadataString(run.Metadata, metadataPodUID) == "" ||
 		metadataString(run.Metadata, metadataMainContainer) == "" || row.WorkspaceKind == "" {
 		return "Kubernetes runtime inventory is incomplete"
@@ -274,6 +279,7 @@ func matchesSessionIdentity(pod *corev1.Pod, run *models.ExecutorRunning) bool {
 
 func recordedResourceIdentity(metadata map[string]interface{}) (agentkubernetes.ResourceIdentity, bool) {
 	identity := agentkubernetes.ResourceIdentity{
+		TaskOwned:     metadataString(metadata, agentkubernetes.MetadataKeyOwnershipVersion) == agentkubernetes.TaskOwnershipVersion,
 		ExecutorID:    metadataString(metadata, metadataResourceExecutor),
 		ProfileID:     metadataString(metadata, metadataResourceProfile),
 		InstanceID:    metadataString(metadata, metadataResourceInstance),

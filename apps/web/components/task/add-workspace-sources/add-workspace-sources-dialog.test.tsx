@@ -14,18 +14,23 @@ const {
   discoverRepositoriesAction,
   getRepositoryDiscoveryAction,
   refreshRepositoryDiscoveryAction,
+  addDesktopDiscoveryRootAction,
   refreshRepositories,
 } = vi.hoisted(() => {
-  const discover = vi.fn().mockResolvedValue({ repositories: [] });
+  const discover = vi.fn().mockResolvedValue({ repositories: [], desktop_runtime: true });
   return {
     attachTaskWorkspaceSources: vi.fn(),
     discoverRepositoriesAction: discover,
     getRepositoryDiscoveryAction: discover,
     refreshRepositoryDiscoveryAction: discover,
+    addDesktopDiscoveryRootAction: vi.fn().mockResolvedValue({}),
     refreshRepositories: vi.fn().mockResolvedValue(undefined),
   };
 });
 
+vi.mock("@/components/toast-provider", () => ({
+  useToast: () => ({ toast: vi.fn() }),
+}));
 vi.mock("@/hooks/use-responsive-breakpoint", () => ({
   useResponsiveBreakpoint: () => ({ isMobile }),
 }));
@@ -52,6 +57,7 @@ vi.mock("@/app/actions/workspaces", () => ({
   discoverRepositoriesAction,
   getRepositoryDiscoveryAction,
   refreshRepositoryDiscoveryAction,
+  addDesktopDiscoveryRootAction,
 }));
 
 async function finishClose(surface: HTMLElement, isDrawer: boolean) {
@@ -201,8 +207,30 @@ describe("AddWorkspaceSourcesDialog repository discovery", () => {
     openRepositoryMenu();
     await selectRepositoryMenuItem("Workspace repository");
     fireEvent.click(screen.getByTestId("repo-chip-trigger"));
+    expect(screen.getByTestId("repository-discovery-settings-button")).toBeTruthy();
+    expect(screen.queryByTestId("repository-discovery-controls")).toBeNull();
 
+    fireEvent.click(screen.getByTestId("repository-discovery-settings-button"));
     expect(screen.getByTestId("repository-discovery-controls")).toBeTruthy();
+  });
+});
+
+describe("AddWorkspaceSourcesDialog touch activation", () => {
+  it("opens the repository menu after touch release without selecting a source", async () => {
+    isMobile = true;
+    render(<Harness />);
+    fireEvent.click(screen.getByRole("button", { name: ADD_SOURCES_LABEL }));
+    const trigger = screen.getByRole("button", { name: "Add repository" });
+    const workspaceRepository = { name: "Workspace repository" };
+    fireEvent.pointerDown(trigger, { button: 0, pointerType: "touch" });
+    expect(screen.queryByRole("menuitem", workspaceRepository)).toBeNull();
+    fireEvent.pointerUp(trigger, { button: 0, pointerType: "touch" });
+    expect(screen.queryByRole("menuitem", workspaceRepository)).toBeNull();
+    fireEvent.click(trigger);
+    expect(await screen.findByRole("menuitem", workspaceRepository)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Remove source" })).toBeNull();
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Local Git repository" }));
+    expect(screen.getByRole("button", { name: "Remove source" })).toBeTruthy();
   });
 });
 

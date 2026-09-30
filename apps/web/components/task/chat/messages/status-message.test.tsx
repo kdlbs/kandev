@@ -90,3 +90,34 @@ describe("StatusMessage branch replacement warnings", () => {
     expect(screen.getByText(/code changes.*not recovered/i)).toBeTruthy();
   });
 });
+
+describe("StatusMessage explicit resume recovery", () => {
+  it("localizes a persisted provider-restored success notice from its variant metadata", () => {
+    const backendContent =
+      "Session resumed with the provider's current settings. Saved mode and model selections were kept for future launches.";
+    const comment: Message = {
+      id: "status-resume-recovery-1",
+      session_id: toSessionId("session-1"),
+      task_id: toTaskId("task-1"),
+      author_type: "agent",
+      content: backendContent,
+      type: "status",
+      created_at: "2026-08-15T00:00:00Z",
+      metadata: {
+        variant: "resume_settings_provider_restored",
+        settings_policy: "provider_restored",
+        attempt_id: "attempt-1",
+        skipped_settings: ["mode", "model"],
+        effective_mode_known: true,
+        effective_mode_id: "safe",
+        effective_model_known: true,
+        effective_model_id: "gpt-5.6-sol",
+      },
+    };
+
+    render(<StatusMessage comment={comment} />);
+
+    expect(screen.getByText("Session resumed without mode/model overrides.")).toBeTruthy();
+    expect(screen.queryByText(backendContent)).toBeNull();
+  });
+});

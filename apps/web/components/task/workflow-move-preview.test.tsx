@@ -189,7 +189,9 @@ describe("WorkflowMovePreviewDisclosure", () => {
 
     expect(screen.getByText("Agent not started")).toBeTruthy();
   });
+});
 
+describe("WorkflowMovePreviewDisclosure model and retry states", () => {
   it("prioritizes unknown models and identifies retained overrides", () => {
     const { rerender } = render(
       <WorkflowMovePreviewDisclosure
@@ -223,6 +225,28 @@ describe("WorkflowMovePreviewDisclosure", () => {
       />,
     );
     expect(screen.getByText(/override retained/)).toBeTruthy();
+  });
+
+  it("labels a profile model as planned before a destination session exists", () => {
+    render(
+      <WorkflowMovePreviewDisclosure
+        state={makeState(
+          makePreview({
+            outcome: "create_new",
+            model: {
+              before: { known: false },
+              after: { known: true, label: "gpt-5.6-terra" },
+              after_source: "profile",
+            },
+          }),
+        )}
+        isTouchSurface={false}
+      />,
+    );
+
+    expect(screen.getByTestId("workflow-move-preview").textContent).toContain(
+      "gpt-5.6-terra (planned)",
+    );
   });
 
   it("keeps move available while loading or retrying an unavailable preview", () => {

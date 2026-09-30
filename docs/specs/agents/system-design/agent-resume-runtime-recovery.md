@@ -10,6 +10,8 @@ requirements:
 
 # Agent resume and runtime recovery system design
 
+[Explicit Auggie recovery settings](explicit-resume-settings.md) adds an optional attempt policy to Resume recovery; the identity and state-ownership guarantees below still apply.
+
 ## Purpose and boundaries
 
 This design preserves a provider conversation when session launch fails. It
@@ -183,9 +185,13 @@ request error. Existing consumers can still treat it as an `Error`.
 The executor passes the same provider resume identity to agent launch after
 workspace preparation succeeds.
 
-The existing guarded transition to `STARTING`, resume lock, failure rollback,
-and successful token replacement rules remain unchanged. Only **Start fresh**
-can intentionally remove the stored provider identity before launch.
+The guarded transition to `STARTING` and the per-session resume lock remain the
+state ownership boundary. A failed relaunch carries `STARTING` as the expected
+source state through the orchestrator callback and persistence compare-and-set.
+Rollback is rejected after any concurrent state transition, including a new
+`RUNNING` owner. If the prior state was `RUNNING` or `STARTING`, failure records
+`FAILED` because no live agent was recovered. Only **Start fresh** can
+intentionally remove the stored provider identity before launch.
 
 ## Explicit branch replacement
 

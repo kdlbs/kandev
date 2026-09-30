@@ -5,16 +5,16 @@ import { MobileKanbanPage } from "../../pages/mobile-kanban-page";
 const TASK_TITLE = "Mobile auto-hide move source";
 
 async function openMobileMenu(mobile: MobileKanbanPage) {
-  await mobile.mobileMenuButton.click();
-  await mobile.menuCard.waitFor({ state: "visible" });
+  await mobile.viewOptionsButton.click();
+  await mobile.optionsCard.waitFor({ state: "visible" });
 }
 
 async function closeMobileMenu(page: Page, mobile: MobileKanbanPage) {
   await expect(async () => {
-    if ((await mobile.menuCard.count()) > 0) {
+    if ((await mobile.optionsCard.count()) > 0) {
       await page.keyboard.press("Escape");
     }
-    await expect(mobile.menuCard).toHaveCount(0, { timeout: 1_000 });
+    await expect(mobile.optionsCard).toHaveCount(0, { timeout: 1_000 });
   }).toPass({ timeout: 15_000 });
 }
 
@@ -23,7 +23,7 @@ async function openColumnsMenu(
   mobile: MobileKanbanPage,
   workflowId: string,
 ): Promise<Locator> {
-  const trigger = mobile.menuCard.getByTestId(`columns-menu-${workflowId}`);
+  const trigger = mobile.optionsCard.getByTestId(`columns-menu-${workflowId}`);
   await trigger.click();
   await expect(trigger).toHaveAttribute("data-state", "open");
   const menu = page.locator('[role="menu"]:visible');
@@ -72,7 +72,7 @@ test("keeps auto-hide scoped and moves through the mobile card menu", async ({
   const mobile = new MobileKanbanPage(testPage);
   await mobile.goto();
   await openMobileMenu(mobile);
-  await expect(mobile.menuCard.getByTestId(`columns-menu-${otherWorkflow.id}`)).toHaveCount(0);
+  await expect(mobile.optionsCard.getByTestId(`columns-menu-${otherWorkflow.id}`)).toHaveCount(0);
   const columnsMenu = await openColumnsMenu(testPage, mobile, workflow.id);
 
   const autoHideToggle = columnsMenu.getByTestId(`columns-menu-auto-hide-empty-${workflow.id}`);

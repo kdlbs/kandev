@@ -40,7 +40,7 @@ func (s *Service) listWebAppTasks(ctx context.Context, w http.ResponseWriter, r 
 		IncludeArchived:  includeArchived,
 		IncludeEphemeral: true,
 	}
-	if binding.ScopeKind == instances.ScopeTask {
+	if instances.EffectiveDataScopeKind(binding.ScopeKind, binding.DataScopeKind) == instances.ScopeTask {
 		// Resolved via the non-attaching fetchTask, and dependencies attached
 		// only below, after the discard checks: matching the attachment rule
 		// the non-task-scope branch below already documents for itself.
@@ -278,7 +278,7 @@ func (s *Service) listWebAppWorkflows(ctx context.Context, w http.ResponseWriter
 		}
 		workflows = append(workflows, items...)
 	}
-	if binding.ScopeKind == instances.ScopeTask {
+	if instances.EffectiveDataScopeKind(binding.ScopeKind, binding.DataScopeKind) == instances.ScopeTask {
 		task, err := host.fetchTaskForScopeCheck(ctx, binding.TaskID)
 		if err != nil || task == nil {
 			writeWebAppError(w, webAppProtocolStatus(err), webAppErrorCode(err))
@@ -318,7 +318,7 @@ func (s *Service) listWebAppWorkflowSteps(ctx context.Context, w http.ResponseWr
 			}
 		}
 	}
-	if binding.ScopeKind == instances.ScopeTask {
+	if instances.EffectiveDataScopeKind(binding.ScopeKind, binding.DataScopeKind) == instances.ScopeTask {
 		task, err := host.fetchTaskForScopeCheck(ctx, binding.TaskID)
 		if err != nil || task == nil || task.WorkflowID != workflowID {
 			writeWebAppError(w, http.StatusNotFound, "not_found")
@@ -380,13 +380,14 @@ func (s *Service) webAppWorkflowWorkspaceIDs(ctx context.Context, r *http.Reques
 }
 
 func webAppTaskMatches(ctx context.Context, host *pluginHost, binding webapp.CapabilityBinding, task pluginsdk.Task) bool {
-	if binding.ScopeKind == instances.ScopeInstance {
+	dataScope := instances.EffectiveDataScopeKind(binding.ScopeKind, binding.DataScopeKind)
+	if dataScope == instances.ScopeInstance {
 		return true
 	}
 	if task.WorkspaceID != binding.WorkspaceID {
 		return false
 	}
-	switch binding.ScopeKind {
+	switch dataScope {
 	case instances.ScopeWorkspace:
 		return true
 	case instances.ScopeTask:

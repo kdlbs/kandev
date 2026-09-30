@@ -53,6 +53,9 @@ type Client struct {
 	// strand workflow step transitions on a closed client.
 	closed bool
 	mu     sync.RWMutex
+	// endpointTransport is present only for plugin-managed remote environments.
+	// It resolves a short-lived connection lease for every new request.
+	endpointTransport *endpointRoundTripper
 
 	// Shared write mutex for agent stream (used by StreamUpdates and sendStreamRequest)
 	streamWriteMu sync.Mutex
@@ -164,8 +167,12 @@ func (s *StatusResponse) IsAgentRunning() bool {
 
 // NewClient creates a new agentctl client
 func NewClient(host string, port int, log *logger.Logger, opts ...ClientOption) *Client {
+	return newClient(fmt.Sprintf("http://%s:%d", host, port), log, opts...)
+}
+
+func newClient(baseURL string, log *logger.Logger, opts ...ClientOption) *Client {
 	c := &Client{
-		baseURL: fmt.Sprintf("http://%s:%d", host, port),
+		baseURL: baseURL,
 		httpClient: &http.Client{
 			Timeout: 60 * time.Second,
 		},
@@ -195,6 +202,19 @@ func NewClient(host string, port int, log *logger.Logger, opts ...ClientOption) 
 		c.longRunningHTTPClient.Transport = &instanceIDTransport{instanceID: c.executionID, base: c.longRunningHTTPClient.Transport}
 	}
 	return c
+}
+
+// ProxyTransport returns the same authenticated upstream transport used by
+// agentctl HTTP requests. Gateway proxies use it so provider leases, host
+// authentication, and instance fencing are applied to HTTP and upgrades alike.
+func (c *Client) ProxyTransport() http.RoundTripper {
+	if c.endpointTransport != nil {
+		return c.endpointTransport
+	}
+	if c.httpClient.Transport != nil {
+		return c.httpClient.Transport
+	}
+	return http.DefaultTransport
 }
 
 // authTransport is an http.RoundTripper that injects an Authorization header.
@@ -305,21 +325,21 @@ func (c *Client) GetStatus(ctx context.Context) (*StatusResponse, error) {
 	return &status, nil
 }
 
-// ConfigureAgent configures the agent command and optional approval policy. Must be called before Start().
+// ConfigureAgent configures the agent command. Must be called before Start().
 // continueCommand is optional — when set, the adapter uses it for one-shot follow-up prompts.
-func (c *Client) ConfigureAgent(ctx context.Context, command string, agentArgs []string, env map[string]string, approvalPolicy, continueCommand string, continueArgs []string) error {
-	return c.configureAgent(ctx, command, agentArgs, env, approvalPolicy, continueCommand, continueArgs, false)
+func (c *Client) ConfigureAgent(ctx context.Context, command string, agentArgs []string, env map[string]string, continueCommand string, continueArgs []string) error {
+	return c.configureAgent(ctx, command, agentArgs, env, continueCommand, continueArgs, false)
 }
 
 // ConfigureAgentWithEnvironment configures the agent with a complete effective
 // environment. The agentctl instance replaces its indexed Git configuration
 // block while preserving ordinary instance variables. Use this when the
 // caller has already composed inherited and generated environment sources.
-func (c *Client) ConfigureAgentWithEnvironment(ctx context.Context, command string, agentArgs []string, env map[string]string, approvalPolicy, continueCommand string, continueArgs []string) error {
-	return c.configureAgent(ctx, command, agentArgs, env, approvalPolicy, continueCommand, continueArgs, true)
+func (c *Client) ConfigureAgentWithEnvironment(ctx context.Context, command string, agentArgs []string, env map[string]string, continueCommand string, continueArgs []string) error {
+	return c.configureAgent(ctx, command, agentArgs, env, continueCommand, continueArgs, true)
 }
 
-func (c *Client) configureAgent(ctx context.Context, command string, agentArgs []string, env map[string]string, approvalPolicy, continueCommand string, continueArgs []string, replaceEnv bool) error {
+func (c *Client) configureAgent(ctx context.Context, command string, agentArgs []string, env map[string]string, continueCommand string, continueArgs []string, replaceEnv bool) error {
 	ctx, span := tracing.TraceHTTPRequest(ctx, "POST", "/api/v1/agent/configure", c.executionID)
 	defer span.End()
 
@@ -330,13 +350,11 @@ func (c *Client) configureAgent(ctx context.Context, command string, agentArgs [
 		ContinueArgs    *[]string         `json:"continue_args,omitempty"`
 		Env             map[string]string `json:"env,omitempty"`
 		ReplaceEnv      bool              `json:"replace_env,omitempty"`
-		ApprovalPolicy  string            `json:"approval_policy,omitempty"`
 	}{
 		Command:         command,
 		ContinueCommand: continueCommand,
 		Env:             env,
 		ReplaceEnv:      replaceEnv,
-		ApprovalPolicy:  approvalPolicy,
 	}
 	if agentArgs != nil {
 		payload.AgentArgs = &agentArgs
@@ -805,6 +823,9 @@ func (c *Client) BaseURL() string {
 // AuthToken returns the Bearer token used for authenticating requests to agentctl.
 // Returns empty string if no token is configured.
 func (c *Client) AuthToken() string {
+	if c.endpointTransport != nil {
+		return c.endpointTransport.authTokenValue()
+	}
 	return c.authToken
 }
 

@@ -171,7 +171,7 @@ describe("RunsListPage", () => {
 
     fireEvent.click(screen.getByTestId("run-entry-run-1"));
 
-    expect(mocks.push).toHaveBeenCalledWith("/tasks/task-1");
+    expect(mocks.push).toHaveBeenCalledWith("/t/task-1");
   });
 
   it("states the scheduler constraint rather than leaving it to be discovered", async () => {

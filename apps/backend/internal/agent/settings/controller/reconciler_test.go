@@ -49,6 +49,8 @@ type fakeStore struct {
 	nextAgentID          int
 	nextProfID           int
 	getByNameErr         error
+	createAgentErr       error
+	createAgentHook      func()
 	listAgentsErr        error
 	listProfErr          map[string]error
 	duplicateProfErr     error
@@ -146,6 +148,12 @@ func (f *fakeStore) CreateAgent(_ context.Context, a *models.Agent) error {
 	if a.ID == "" {
 		f.nextAgentID++
 		a.ID = "agent-" + strconv.Itoa(f.nextAgentID)
+	}
+	if f.createAgentHook != nil {
+		f.createAgentHook()
+	}
+	if f.createAgentErr != nil {
+		return f.createAgentErr
 	}
 	stored := copyAgent(a)
 	f.agents[a.ID] = stored
@@ -291,6 +299,21 @@ func (f *fakeStore) UpdateAgentProfile(_ context.Context, p *models.AgentProfile
 	}
 	f.updated = append(f.updated, copyProfile(stored))
 	return nil
+}
+
+func (f *fakeStore) UpdateAgentProfileModelIfEmpty(
+	ctx context.Context,
+	profileID, model string,
+) (bool, error) {
+	profile, err := f.GetAgentProfile(ctx, profileID)
+	if err != nil || profile == nil || profile.Model != "" {
+		return false, err
+	}
+	profile.Model = model
+	if err := f.UpdateAgentProfile(ctx, profile); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 func (f *fakeStore) UpdateAgentProfileEnabled(ctx context.Context, id string, enabled bool) (time.Time, error) {
@@ -904,6 +927,38 @@ func TestProfileReconciler_CleansOrphanProfiles(t *testing.T) {
 	}
 	if len(st.softDeleted) != 1 || st.softDeleted[0] != orphanProfile.ID {
 		t.Fatalf("expected orphan profile to be soft-deleted, got %v", st.softDeleted)
+	}
+}
+
+func TestProfileReconcilerPreservesDisabledCodexAppServerProfiles(t *testing.T) {
+	st := newFakeStore()
+	native := &models.Agent{Name: "codex-app-server"}
+	if err := st.CreateAgent(context.Background(), native); err != nil {
+		t.Fatalf("create native agent: %v", err)
+	}
+	profile := &models.AgentProfile{AgentID: native.ID, Name: "Native Codex", Model: "gpt-5", Enabled: true}
+	if err := st.CreateAgentProfile(context.Background(), profile); err != nil {
+		t.Fatalf("create native profile: %v", err)
+	}
+	log, err := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "json"})
+	if err != nil {
+		t.Fatalf("logger: %v", err)
+	}
+	reg := registry.NewRegistry(log)
+	if err := reg.Register(&mockInferenceAgent{id: "claude-acp", displayName: "Claude", enabled: true}); err != nil {
+		t.Fatalf("register Claude: %v", err)
+	}
+	if err := reg.Register(agents.NewCodexAppServer(false)); err != nil {
+		t.Fatalf("register disabled native agent: %v", err)
+	}
+	reg.MarkLoaded()
+	r := NewProfileReconciler(&fakeCapReader{caps: map[string]hostutility.AgentCapabilities{}}, reg, st, log)
+	r.cleanupOrphans(context.Background())
+	if len(st.softDeleted) != 0 {
+		t.Fatalf("disabled native profile was orphan-cleaned: %v", st.softDeleted)
+	}
+	if got := len(st.profiles[native.ID]); got != 1 {
+		t.Fatalf("stored native profiles = %d, want 1", got)
 	}
 }
 

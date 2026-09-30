@@ -57,111 +57,125 @@ test.describe("Mobile file confirmations", () => {
     restoreRepository = undefined;
   });
 
-  test("confirms one file deletion in a sheet without changing its row", async ({
-    testPage,
-    apiClient,
-    seedData,
-    backend,
-    prCapture,
-  }) => {
-    test.setTimeout(90_000);
-    const fixture = await setupMobileFileTask(testPage, apiClient, seedData, backend);
-    const { session, filePath } = fixture;
-    restoreRepository = fixture.restoreRepository;
+  for (const width of [390, 820]) {
+    test(`confirms one file deletion in a sheet at ${width}px without changing its row`, async ({
+      testPage,
+      apiClient,
+      seedData,
+      backend,
+      prCapture,
+    }) => {
+      test.setTimeout(90_000);
+      await testPage.setViewportSize({ width, height: 900 });
+      const fixture = await setupMobileFileTask(testPage, apiClient, seedData, backend);
+      const { session, filePath } = fixture;
+      restoreRepository = fixture.restoreRepository;
 
-    expect(await testPage.evaluate(() => matchMedia("(any-pointer: coarse)").matches)).toBe(true);
-    await testPage.getByRole("button", { name: "Files" }).tap();
+      expect(await testPage.evaluate(() => matchMedia("(any-pointer: coarse)").matches)).toBe(true);
+      if (width < 768) await testPage.getByRole("button", { name: "Files", exact: true }).tap();
+      else await expect(testPage.getByTestId("tablet-task-layout")).toBeVisible();
 
-    const file = session.fileTreeNode(filePath);
-    await expect(file).toBeVisible({ timeout: 15_000 });
-    const trigger = session.fileTreeNodeActions(filePath);
-    const rowHeight = (await file.boundingBox())!.height;
-    await expect(trigger).toBeVisible();
-    const triggerBox = await trigger.boundingBox();
-    expect(triggerBox).not.toBeNull();
-    expect(triggerBox!.width).toBeGreaterThanOrEqual(44);
-    expect(triggerBox!.height).toBeGreaterThanOrEqual(44);
+      const file =
+        width < 768
+          ? session.fileTreeNode(filePath)
+          : testPage
+              .getByTestId("tablet-task-layout")
+              .locator(
+                `[data-testid="file-tree-node"][data-path=${JSON.stringify(filePath)}]:visible`,
+              );
+      await expect(file).toBeVisible({ timeout: 15_000 });
+      const trigger = session.fileTreeNodeActions(filePath);
+      const rowHeight = (await file.boundingBox())!.height;
+      await expect(trigger).toBeVisible();
+      const triggerBox = await trigger.boundingBox();
+      expect(triggerBox).not.toBeNull();
+      expect(triggerBox!.width).toBeGreaterThanOrEqual(44);
+      expect(triggerBox!.height).toBeGreaterThanOrEqual(44);
 
-    await trigger.tap();
-    const menu = session.fileTreeTouchMenu();
-    await expect(menu).toBeVisible();
-    const deleteItem = testPage.getByTestId("file-tree-touch-delete");
-    await expect(deleteItem).toBeVisible();
-    await expect
-      .poll(async () => (await deleteItem.boundingBox())?.height ?? 0, { timeout: 2_000 })
-      .toBeGreaterThanOrEqual(44);
+      await trigger.tap();
+      const menu = session.fileTreeTouchMenu();
+      await expect(menu).toBeVisible();
+      await waitForFiniteAnimations(menu);
+      const deleteItem = testPage.getByTestId("file-tree-touch-delete");
+      await expect(deleteItem).toBeVisible();
+      await expect
+        .poll(async () => (await deleteItem.boundingBox())?.height ?? 0, { timeout: 2_000 })
+        .toBeGreaterThanOrEqual(44);
 
-    const viewport = await testPage.evaluate(() => ({
-      width: window.innerWidth,
-      height: window.innerHeight,
-    }));
-    const menuBox = await menu.boundingBox();
-    expect(menuBox).not.toBeNull();
-    expect(menuBox!.x).toBeGreaterThanOrEqual(0);
-    expect(menuBox!.x + menuBox!.width).toBeLessThanOrEqual(viewport.width);
-    expect(menuBox!.y).toBeGreaterThanOrEqual(0);
-    expect(menuBox!.y + menuBox!.height).toBeLessThanOrEqual(viewport.height);
+      const viewport = await testPage.evaluate(() => ({
+        width: window.innerWidth,
+        height: window.innerHeight,
+      }));
+      const menuBox = await menu.boundingBox();
+      expect(menuBox).not.toBeNull();
+      expect(menuBox!.x).toBeGreaterThanOrEqual(0);
+      expect(menuBox!.x + menuBox!.width).toBeLessThanOrEqual(viewport.width);
+      expect(menuBox!.y).toBeGreaterThanOrEqual(0);
+      expect(menuBox!.y + menuBox!.height).toBeLessThanOrEqual(viewport.height);
 
-    await deleteItem.tap();
-    const inline = testPage.getByTestId("mobile-action-confirmation");
-    await expect(inline).toBeVisible();
-    await expect(menu).toBeHidden();
-    await expect(testPage.getByRole("dialog")).toHaveAttribute("data-slot", "drawer-content");
-    await waitForFiniteAnimations(testPage.getByRole("dialog"));
-    expect((await file.boundingBox())!.height).toBe(rowHeight);
-    await expect(testPage.getByRole("alertdialog")).toHaveCount(0);
-    const confirm = inline.getByTestId("file-delete-confirm");
-    const cancel = inline.getByRole("button", { name: "Cancel" });
-    await expect(confirm).toBeVisible();
-    await expect(cancel).toBeVisible();
-    const inlineBox = await inline.boundingBox();
-    expect(inlineBox).not.toBeNull();
-    expect(
-      inlineBox!.x,
-      `inline box: ${JSON.stringify(inlineBox)}, viewport: ${viewport.width}`,
-    ).toBeGreaterThanOrEqual(0);
-    expect(
-      inlineBox!.x + inlineBox!.width,
-      `inline box: ${JSON.stringify(inlineBox)}, viewport: ${viewport.width}`,
-    ).toBeLessThanOrEqual(viewport.width);
-    for (const button of [cancel, confirm]) {
-      const buttonBox = await button.boundingBox();
-      expect(buttonBox).not.toBeNull();
-      expect(buttonBox!.x).toBeGreaterThanOrEqual(0);
-      expect(buttonBox!.x + buttonBox!.width).toBeLessThanOrEqual(viewport.width);
-      expect(buttonBox!.y + buttonBox!.height).toBeLessThanOrEqual(viewport.height);
+      await deleteItem.tap();
+      const inline = testPage.getByTestId("mobile-action-confirmation");
+      await expect(inline).toBeVisible();
+      await expect(menu).toBeHidden();
+      await expect(testPage.getByRole("dialog")).toHaveAttribute("data-slot", "drawer-content");
+      await waitForFiniteAnimations(testPage.getByRole("dialog"));
+      expect((await file.boundingBox())!.height).toBe(rowHeight);
+      await expect(testPage.getByRole("alertdialog")).toHaveCount(0);
+      const confirm = inline.getByTestId("file-delete-confirm");
+      const cancel = inline.getByRole("button", { name: "Cancel" });
+      await expect(confirm).toBeVisible();
+      await expect(cancel).toBeVisible();
+      const inlineBox = await inline.boundingBox();
+      expect(inlineBox).not.toBeNull();
       expect(
-        await button.evaluate((element) => {
-          const bounds = element.getBoundingClientRect();
-          return element.contains(
-            document.elementFromPoint(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2),
-          );
-        }),
+        inlineBox!.x,
+        `inline box: ${JSON.stringify(inlineBox)}, viewport: ${viewport.width}`,
+      ).toBeGreaterThanOrEqual(0);
+      expect(
+        inlineBox!.x + inlineBox!.width,
+        `inline box: ${JSON.stringify(inlineBox)}, viewport: ${viewport.width}`,
+      ).toBeLessThanOrEqual(viewport.width);
+      for (const button of [cancel, confirm]) {
+        const buttonBox = await button.boundingBox();
+        expect(buttonBox).not.toBeNull();
+        expect(buttonBox!.x).toBeGreaterThanOrEqual(0);
+        expect(buttonBox!.x + buttonBox!.width).toBeLessThanOrEqual(viewport.width);
+        expect(buttonBox!.y + buttonBox!.height).toBeLessThanOrEqual(viewport.height);
+        expect(
+          await button.evaluate((element) => {
+            const bounds = element.getBoundingClientRect();
+            return element.contains(
+              document.elementFromPoint(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2),
+            );
+          }),
+        ).toBe(true);
+      }
+      await expect
+        .poll(async () => (await confirm.boundingBox())?.height ?? 0, { timeout: 2_000 })
+        .toBeGreaterThanOrEqual(44);
+      await expect
+        .poll(async () => (await cancel.boundingBox())?.height ?? 0, { timeout: 2_000 })
+        .toBeGreaterThanOrEqual(44);
+
+      expect(
+        await testPage.evaluate(
+          () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
+        ),
       ).toBe(true);
-    }
-    await expect
-      .poll(async () => (await confirm.boundingBox())?.height ?? 0, { timeout: 2_000 })
-      .toBeGreaterThanOrEqual(44);
-    await expect
-      .poll(async () => (await cancel.boundingBox())?.height ?? 0, { timeout: 2_000 })
-      .toBeGreaterThanOrEqual(44);
+      await prCapture.screenshot(`file-delete-confirmation-${width}px`, {
+        caption: `File deletion confirmation on a ${width}px touch viewport`,
+      });
 
-    expect(
-      await testPage.evaluate(
-        () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
-      ),
-    ).toBe(true);
-    await prCapture.screenshot("mobile-file-delete-confirmation", {
-      caption: "A long file name wraps inside a compact phone confirmation sheet",
+      await cancel.tap();
+      await expect(trigger).toBeFocused();
+      await expect(file).toBeVisible();
+      await trigger.tap();
+      await expect(menu).toBeVisible();
+      await waitForFiniteAnimations(menu);
+      await deleteItem.tap();
+      await expect(inline).toBeVisible();
+      await confirm.tap();
+      await expect(file).not.toBeVisible({ timeout: 15_000 });
     });
-
-    await cancel.tap();
-    await expect(trigger).toBeFocused();
-    await expect(file).toBeVisible();
-    await trigger.tap();
-    await deleteItem.tap();
-    await expect(inline).toBeVisible();
-    await confirm.tap();
-    await expect(file).not.toBeVisible({ timeout: 15_000 });
-  });
+  }
 });

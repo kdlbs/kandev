@@ -154,6 +154,7 @@ function makeDeps(overrides: Partial<SubmitHandlersDeps>): SubmitHandlersDeps {
     isEditMode: false,
     autopilot: false,
     priority: "medium",
+    workflowAgentOverrides: {},
     isPassthroughProfile: false,
     taskName: "My CLI task",
     workspaceId: "ws-1",
@@ -973,6 +974,43 @@ describe("useTaskSubmitHandlers — handleCreateWithoutAgent", () => {
     expect(buildCreateTaskPayloadMock).toHaveBeenCalledWith(
       expect.objectContaining({ withAgent: false }),
     );
+  });
+});
+
+describe("useTaskSubmitHandlers — workflow override submit guard", () => {
+  it("blocks keyboard submit when an executor change makes the replacement invalid", async () => {
+    const createTask = vi.fn().mockResolvedValue({ id: TASK_ID });
+    const deps = makeDeps({
+      createTask,
+      executorId: "remote-executor",
+      workflowAgentOverridesBlockedReason: "replacement profile is unavailable",
+      descriptionInputRef: makeRef("create this task"),
+    });
+    const { result } = renderHook(() => useTaskSubmitHandlers(deps));
+
+    await act(async () => {
+      await result.current.handleSubmit({ preventDefault() {} } as never);
+    });
+
+    expect(createTask).not.toHaveBeenCalled();
+    expect(buildCreateTaskPayloadMock).not.toHaveBeenCalled();
+  });
+
+  it("blocks keyboard submit while the workflow snapshot read has failed", async () => {
+    const createTask = vi.fn().mockResolvedValue({ id: TASK_ID });
+    const deps = makeDeps({
+      createTask,
+      workflowAgentOverridesBlockedReason: "workflow agents could not be loaded",
+      descriptionInputRef: makeRef("create this task"),
+    });
+    const { result } = renderHook(() => useTaskSubmitHandlers(deps));
+
+    await act(async () => {
+      await result.current.handleSubmit({ preventDefault() {} } as never);
+    });
+
+    expect(createTask).not.toHaveBeenCalled();
+    expect(buildCreateTaskPayloadMock).not.toHaveBeenCalled();
   });
 });
 

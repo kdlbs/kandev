@@ -21,6 +21,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { IconChevronDown, IconChevronUp, IconRefresh, IconTrash } from "@tabler/icons-react";
 import { useAutomationRuns } from "@/hooks/domains/settings/use-automation-runs";
 import { buildRunOutcomeReasonSuffix } from "@/lib/automation-run-reason";
+import { linkToTask } from "@/lib/links";
 import type { AutomationRun, RunStatus } from "@/lib/types/automation";
 import { formatRelativeTime } from "@/lib/utils";
 
@@ -64,6 +65,12 @@ function RunRow({ run, deleting, onDelete, onNavigate }: RunRowProps) {
   // keeps the task off the board, which is not a reason to withhold the only
   // route to what the run actually said.
   const rowClickable = !!run.task_id;
+  const deliveryLabelKey = run.delivery_status
+    ? `automations:deliveryStatus${run.delivery_status
+        .split("_")
+        .map((part) => part[0].toUpperCase() + part.slice(1))
+        .join("")}`
+    : null;
   return (
     <TableRow
       className={
@@ -81,6 +88,18 @@ function RunRow({ run, deleting, onDelete, onNavigate }: RunRowProps) {
       <TableCell className="text-sm">{run.trigger_type}</TableCell>
       <TableCell>
         <Badge variant={badge.variant}>{t(badge.labelKey)}</Badge>
+        {deliveryLabelKey ? (
+          <Badge
+            className="ml-1"
+            variant="outline"
+            data-testid="run-delivery-status"
+            aria-label={t("automations:deliveryStatusLabel", {
+              status: t(deliveryLabelKey),
+            })}
+          >
+            {t(deliveryLabelKey)}
+          </Badge>
+        ) : null}
       </TableCell>
       <TableCell
         className="text-sm max-w-[420px] truncate text-muted-foreground"
@@ -326,7 +345,7 @@ export function RunsSection({ automationId, workspaceId }: RunsSectionProps) {
                     run={run}
                     deleting={deleting}
                     onDelete={deleteRun}
-                    onNavigate={(id) => router.push(`/tasks/${id}`)}
+                    onNavigate={(id) => router.push(linkToTask(id))}
                   />
                 ))
               )}

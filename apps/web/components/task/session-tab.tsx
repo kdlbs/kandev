@@ -23,7 +23,6 @@ import {
 } from "@/hooks/domains/session/use-session-actions";
 import { shareableSessionStateClient } from "@/components/task/share/share-button";
 import type { HandoffPreset } from "@/components/task/new-session-dialog";
-import { usableConfigOptions } from "@/components/model-config-selector";
 import { SessionContextMenuItems, SessionTabDialogs } from "./session-tab-menu";
 import type { TaskSessionState } from "@/lib/types/http";
 import {
@@ -31,7 +30,7 @@ import {
   shouldMarkSessionTabUserActivationIntent,
 } from "./session-tab-activation-intent";
 import { isSessionActive } from "./session-sort";
-import { resolveSessionTabTitle } from "./session-tab-title";
+import { selectSessionTabTitle } from "./session-tab-title";
 import { TabRenameInput } from "./tab-rename-input";
 import { useTabMaximizeOnDoubleClick } from "./use-tab-maximize";
 import { SessionTabCloseAction } from "./session-tab-close-action";
@@ -59,37 +58,7 @@ function useSessionTabState(sessionId: string | undefined) {
   });
   const tabTitle = useAppStore((state) => {
     if (!sessionId) return null;
-    const session = state.taskSessions.items[sessionId];
-    const sessionModels = state.sessionModels.bySessionId[sessionId];
-    const activeModelId = state.activeModel.bySessionId[sessionId] || null;
-    const agentLabel = (() => {
-      if (!session?.agent_profile_id) return null;
-      const profile = state.agentProfiles.items.find(
-        (p: { id: string }) => p.id === session.agent_profile_id,
-      );
-      if (!profile) return null;
-      const parts = profile.label.split(" \u2022 ");
-      return parts[1] || parts[0] || profile.label;
-    })();
-    const snapshotModel =
-      typeof session?.agent_profile_snapshot?.model === "string"
-        ? session.agent_profile_snapshot.model
-        : null;
-    return resolveSessionTabTitle({
-      customName: session?.name ?? null,
-      agentLabel,
-      activeModelId,
-      currentModelId: sessionModels?.currentModelId || null,
-      snapshotModel,
-      modelOptions:
-        sessionModels?.models.map((model) => ({
-          id: model.modelId,
-          name: model.name,
-          description: model.description,
-          usageMultiplier: model.usageMultiplier,
-        })) ?? [],
-      configOptions: usableConfigOptions(sessionModels?.configOptions),
-    });
+    return selectSessionTabTitle(state, sessionId);
   });
   const agentName = useAppStore((state) => {
     if (!sessionId) return null;

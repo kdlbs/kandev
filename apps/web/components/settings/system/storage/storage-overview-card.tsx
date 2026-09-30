@@ -20,11 +20,14 @@ import { StorageActionButton } from "./storage-action-button";
 import { StorageSettingHelp } from "./storage-setting-help";
 import {
   storageResources,
+  SYSTEM_TEMPORARY_RESOURCE_ID,
   TEMPORARY_ARTIFACTS_RESOURCE_ID,
   type StorageResource,
   type Translate,
 } from "./storage-overview-resources";
 import { formatGigabytes } from "./storage-units";
+import { StorageTemporaryEntries } from "./storage-temporary-entries";
+import { useStorageOverviewFocus } from "./use-storage-overview-focus";
 import { storageAnalysisTotal } from "./storage-totals";
 
 interface Props {
@@ -35,6 +38,9 @@ interface Props {
   disabledReason?: string;
   onRunGoCache: () => void;
   onRunTemporaryArtifacts?: () => void;
+  onReviewTemporaryArtifacts?: () => void;
+  focusTemporaryEntries?: number;
+  focusTemporaryCleanup?: number;
 }
 
 function goCacheDisabledReason(
@@ -80,6 +86,24 @@ interface ResourceRowProps {
   onRunGoCache: () => void;
   temporaryArtifactsCleanupDisabledReason?: string;
   onRunTemporaryArtifacts: () => void;
+  onReviewTemporaryArtifacts: () => void;
+}
+
+function ResourceBar({ resource }: { resource: StorageResource }) {
+  if (resource.sizeBytes === undefined) return null;
+  return (
+    <span
+      className="order-3 block h-2 w-full min-w-0 basis-full overflow-hidden rounded-full bg-muted md:order-none md:col-start-2 md:w-auto md:basis-auto"
+      data-testid={`storage-resource-${resource.id}-bar`}
+      aria-hidden="true"
+    >
+      <span
+        className="block h-full rounded-full bg-primary"
+        data-testid={`storage-resource-${resource.id}-bar-fill`}
+        style={{ width: `${resource.barPercent ?? 0}%` }}
+      />
+    </span>
+  );
 }
 
 function ResourceRow({
@@ -88,18 +112,39 @@ function ResourceRow({
   onRunGoCache,
   temporaryArtifactsCleanupDisabledReason,
   onRunTemporaryArtifacts,
+  onReviewTemporaryArtifacts,
 }: ResourceRowProps) {
   const { t } = useTranslation();
   return (
-    <AccordionItem value={resource.id} data-testid={`storage-resource-${resource.id}`}>
+    <AccordionItem
+      value={resource.id}
+      data-testid={`storage-resource-${resource.id}`}
+      data-storage-resource-id={resource.id}
+    >
       <AccordionTrigger
-        className="min-h-11 items-center px-3 no-underline"
+        className="min-h-7 cursor-pointer items-center px-3 no-underline max-md:min-h-11 [@media(pointer:coarse)]:min-h-11"
         data-testid={`storage-resource-${resource.id}-trigger`}
+        data-storage-focus-id="trigger"
       >
-        <span className="min-w-0">
-          <span className="block text-sm">{resource.label}</span>
+        <span className="flex min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-1 md:grid md:grid-cols-[minmax(0,1fr)_minmax(8rem,16rem)_7rem] md:items-center md:gap-3">
           <span
-            className="block text-xs font-normal text-muted-foreground"
+            className="flex min-w-0 flex-1 flex-wrap items-center gap-2 break-words text-sm"
+            data-testid={`storage-resource-${resource.id}-title`}
+          >
+            <span className="min-w-0 break-words">{resource.label}</span>
+            {resource.partial && (
+              <Badge
+                variant="outline"
+                className="text-[10px] font-normal"
+                data-testid={`storage-resource-${resource.id}-partial`}
+              >
+                {t("system:storageSystemTemporaryPartial")}
+              </Badge>
+            )}
+          </span>
+          <ResourceBar resource={resource} />
+          <span
+            className="flex shrink-0 items-center gap-2 text-xs font-normal text-muted-foreground md:col-start-3 md:block md:min-w-0 md:w-full md:break-words md:text-right"
             data-testid={resource.source ? `storage-analysis-source-${resource.source}` : undefined}
           >
             {resource.value}
@@ -118,6 +163,13 @@ function ResourceRow({
           </div>
         )}
         {resource.warning && <p className="mt-2 break-words text-amber-600">{resource.warning}</p>}
+        {resource.id === SYSTEM_TEMPORARY_RESOURCE_ID && resource.systemTemporary && (
+          <StorageTemporaryEntries
+            roots={resource.systemTemporary.roots}
+            temporaryArtifacts={resource.temporaryArtifacts}
+            onReviewCleanup={onReviewTemporaryArtifacts}
+          />
+        )}
         {resource.id === "go-cache" && (
           <StorageActionButton
             variant="outline"
@@ -125,6 +177,7 @@ function ResourceRow({
             disabledReason={goCacheCleanupDisabledReason}
             onClick={onRunGoCache}
             data-testid="storage-go-cache-clean"
+            focusId="go-cache-clean"
           >
             <IconTrash className="size-4" /> {t("system:storageCleanGoCache")}
           </StorageActionButton>
@@ -136,6 +189,7 @@ function ResourceRow({
             disabledReason={temporaryArtifactsCleanupDisabledReason}
             onClick={onRunTemporaryArtifacts}
             data-testid="storage-temporary-artifacts-clean"
+            focusId="temporary-artifacts-clean"
           >
             <IconTrash className="size-4" /> {t("system:storageCleanTemporaryArtifacts")}
           </StorageActionButton>
@@ -304,6 +358,9 @@ function StorageOverviewHeader({
       <p className="text-xs text-muted-foreground" data-testid="storage-analysis-scope">
         {t("system:storageAnalysisScope")}
       </p>
+      <p className="text-xs text-muted-foreground" data-testid="storage-analysis-bars-description">
+        {t("system:storageAnalysisBarsDescription")}
+      </p>
       <div className="flex flex-wrap items-center gap-1">
         <AnalysisStatusTime overview={overview} analyzedAt={analyzedAt} />
         <AnalysisTimingDisclosure overview={overview} />
@@ -320,20 +377,44 @@ function StorageOverviewHeader({
 
 function StorageOverviewResources({
   resources,
+  focusTemporaryEntries,
+  focusTemporaryCleanup,
   cleanupDisabledReason,
   temporaryArtifactsCleanupDisabledReason,
   onRunGoCache,
   onRunTemporaryArtifacts,
+  onReviewTemporaryArtifacts,
 }: {
   resources: StorageResource[];
+  focusTemporaryEntries?: number;
+  focusTemporaryCleanup?: number;
   cleanupDisabledReason?: string;
   temporaryArtifactsCleanupDisabledReason?: string;
   onRunGoCache: () => void;
   onRunTemporaryArtifacts: () => void;
+  onReviewTemporaryArtifacts: () => void;
 }) {
+  const {
+    resourcesRef,
+    expandedResources,
+    setExpandedResources,
+    rememberFocusedTarget,
+    forgetFocusedTargetOutsideResources,
+  } = useStorageOverviewFocus({ resources, focusTemporaryEntries, focusTemporaryCleanup });
+
   return (
-    <CardContent className="min-w-0">
-      <Accordion type="multiple" className="min-w-0">
+    <CardContent
+      ref={resourcesRef}
+      className="min-w-0"
+      onFocusCapture={rememberFocusedTarget}
+      onBlurCapture={forgetFocusedTargetOutsideResources}
+    >
+      <Accordion
+        type="multiple"
+        className="min-w-0"
+        value={expandedResources}
+        onValueChange={setExpandedResources}
+      >
         {resources.map((resource) => (
           <ResourceRow
             key={resource.id}
@@ -342,6 +423,7 @@ function StorageOverviewResources({
             onRunGoCache={onRunGoCache}
             temporaryArtifactsCleanupDisabledReason={temporaryArtifactsCleanupDisabledReason}
             onRunTemporaryArtifacts={onRunTemporaryArtifacts}
+            onReviewTemporaryArtifacts={onReviewTemporaryArtifacts}
           />
         ))}
       </Accordion>
@@ -357,6 +439,9 @@ export function StorageOverviewCard({
   disabledReason,
   onRunGoCache,
   onRunTemporaryArtifacts = () => {},
+  focusTemporaryEntries,
+  focusTemporaryCleanup,
+  onReviewTemporaryArtifacts = () => {},
 }: Props) {
   const { t } = useTranslation();
   if (!overview) {
@@ -382,10 +467,13 @@ export function StorageOverviewCard({
       />
       <StorageOverviewResources
         resources={storageResources(t, overview)}
+        focusTemporaryEntries={focusTemporaryEntries}
+        focusTemporaryCleanup={focusTemporaryCleanup}
         cleanupDisabledReason={cleanupDisabledReason}
         temporaryArtifactsCleanupDisabledReason={temporaryArtifactsCleanupDisabledReason}
         onRunGoCache={onRunGoCache}
         onRunTemporaryArtifacts={onRunTemporaryArtifacts}
+        onReviewTemporaryArtifacts={onReviewTemporaryArtifacts}
       />
     </Card>
   );

@@ -37,7 +37,7 @@ test("executor capability keeps the intentional mobile topbar without desktop ed
 }) => {
   await seedTask(testPage, apiClient, seedData);
 
-  await expect(testPage.getByTestId("mobile-session-menu")).toBeVisible();
+  await expect(testPage.getByTestId("mobile-task-picker-trigger")).toBeVisible();
   await expect(testPage.getByTestId("editors-menu-list")).toHaveCount(0);
   const width = await testPage.evaluate(() => ({
     client: document.documentElement.clientWidth,

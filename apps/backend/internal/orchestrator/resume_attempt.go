@@ -2,15 +2,18 @@ package orchestrator
 
 import (
 	"context"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"strconv"
 	"strings"
 	"sync"
 
+	"github.com/google/uuid"
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/orchestrator/executor"
+	"github.com/kandev/kandev/internal/task/models"
 )
 
 // ErrResumeAttemptCancelled is returned when a startup continuation no longer
@@ -33,6 +36,12 @@ type resumeAttempt struct {
 	finishOnce  sync.Once
 	executionMu sync.Mutex
 	executionID string
+	// interruptedMarker is the marker value observed when this recovery attempt
+	// was admitted. A delayed boot callback may clear only that exact marker;
+	// a later restart must remain visible until its own attempt succeeds.
+	interruptedMarkerMu       sync.RWMutex
+	interruptedMarker         string
+	interruptedMarkerCaptured bool
 	// retained is protected by resumeAttemptRegistry.mu. A cancelled attempt
 	// can be retained when a replacement is admitted and retained again when
 	// its owner eventually returns; both paths must describe one tombstone.
@@ -41,6 +50,9 @@ type resumeAttempt struct {
 	// acceptance is recorded, explicit session cancellation no longer owns
 	// startup teardown for this attempt.
 	accepted bool
+	// settingsPolicy is protected by resumeAttemptRegistry.mu and can only be
+	// set by the current owner during startup admission.
+	settingsPolicy executor.ResumeSettingsPolicy
 	// awaitingInitialPrompt keeps startup ownership active after the model
 	// switch path returns. Its initial prompt is dispatched asynchronously by
 	// lifecycle, so promptTask's deferred finish must wait for the real provider
@@ -66,14 +78,27 @@ const maxResumeAttemptTombstones = 16
 const resumeAttemptIdentityPrefix = "resume-"
 
 type resumeAttemptTombstone struct {
-	id          uint64
-	executionID string
-	cancelled   bool
-	accepted    bool
+	id                        uint64
+	executionID               string
+	cancelled                 bool
+	accepted                  bool
+	interruptedMarker         string
+	interruptedMarkerCaptured bool
+}
+
+type interruptedMarkerSnapshot struct {
+	value    string
+	captured bool
 }
 
 func newResumeAttemptRegistry() *resumeAttemptRegistry {
+	registryID := uuid.New()
+	// Attempt IDs are persisted in selector snapshots and recovery notices, so
+	// each process needs a distinct numeric range while retaining the existing
+	// monotonically increasing identity format within that process.
+	initialID := binary.BigEndian.Uint64(registryID[8:]) & 0x7fffffffffffffff
 	return &resumeAttemptRegistry{
+		nextID:          initialID,
 		attempts:        make(map[string]*resumeAttempt),
 		tombstones:      make(map[string][]resumeAttemptTombstone),
 		recoveryHistory: make(map[string]struct{}),
@@ -116,6 +141,25 @@ func (r *resumeAttemptRegistry) begin(parent context.Context, taskID, sessionID 
 	}
 	r.attempts[sessionID] = attempt
 	return attempt, true
+}
+
+func (r *resumeAttemptRegistry) setSettingsPolicy(attempt *resumeAttempt, policy executor.ResumeSettingsPolicy) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if attempt == nil || r.attempts[attempt.sessionID] != attempt {
+		return false
+	}
+	attempt.settingsPolicy = policy
+	return true
+}
+
+func (r *resumeAttemptRegistry) settingsPolicy(attempt *resumeAttempt) executor.ResumeSettingsPolicy {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if attempt == nil || r.attempts[attempt.sessionID] != attempt {
+		return executor.ResumeSettingsPolicyStrict
+	}
+	return attempt.settingsPolicy
 }
 
 // invalidate cancels the current startup attempt. Callers pair it with the
@@ -231,6 +275,8 @@ func (r *resumeAttemptRegistry) retainLocked(attempt *resumeAttempt) {
 			}
 			if entries[index].id == attempt.id {
 				entries[index].accepted = attempt.accepted
+				entries[index].interruptedMarker = attempt.interruptedMarkerValue()
+				entries[index].interruptedMarkerCaptured = attempt.interruptedMarkerSnapshotCaptured()
 				break
 			}
 		}
@@ -240,10 +286,12 @@ func (r *resumeAttemptRegistry) retainLocked(attempt *resumeAttempt) {
 	attempt.retained = true
 	entries := r.tombstones[attempt.sessionID]
 	entries = append(entries, resumeAttemptTombstone{
-		id:          attempt.id,
-		executionID: executionID,
-		cancelled:   attempt.ctx.Err() != nil,
-		accepted:    attempt.accepted,
+		id:                        attempt.id,
+		executionID:               executionID,
+		cancelled:                 attempt.ctx.Err() != nil,
+		accepted:                  attempt.accepted,
+		interruptedMarker:         attempt.interruptedMarkerValue(),
+		interruptedMarkerCaptured: attempt.interruptedMarkerSnapshotCaptured(),
 	})
 	if len(entries) > maxResumeAttemptTombstones {
 		entries = entries[len(entries)-maxResumeAttemptTombstones:]
@@ -424,6 +472,34 @@ func (attempt *resumeAttempt) setExecutionID(executionID string) {
 	attempt.executionMu.Unlock()
 }
 
+func (attempt *resumeAttempt) setInterruptedMarkerSnapshot(marker string, captured bool) {
+	if attempt == nil {
+		return
+	}
+	attempt.interruptedMarkerMu.Lock()
+	attempt.interruptedMarker = marker
+	attempt.interruptedMarkerCaptured = captured
+	attempt.interruptedMarkerMu.Unlock()
+}
+
+func (attempt *resumeAttempt) interruptedMarkerValue() string {
+	if attempt == nil {
+		return ""
+	}
+	attempt.interruptedMarkerMu.RLock()
+	defer attempt.interruptedMarkerMu.RUnlock()
+	return attempt.interruptedMarker
+}
+
+func (attempt *resumeAttempt) interruptedMarkerSnapshotCaptured() bool {
+	if attempt == nil {
+		return false
+	}
+	attempt.interruptedMarkerMu.RLock()
+	defer attempt.interruptedMarkerMu.RUnlock()
+	return attempt.interruptedMarkerCaptured
+}
+
 func (attempt *resumeAttempt) execution() string {
 	if attempt == nil {
 		return ""
@@ -486,6 +562,19 @@ func (s *Service) beginResumeAttempt(
 	ctx context.Context,
 	taskID, sessionID string,
 ) (*resumeAttempt, bool, error) {
+	if cancelInFlightGuardHeld(ctx) {
+		if s.currentCancellation(sessionID) != nil {
+			return nil, false, ErrResumeAttemptCancelled
+		}
+		// The guard marker is only valid for this registration call. Do not
+		// carry it into lifecycle work that can outlive the guard owner.
+		attemptCtx := context.WithValue(ctx, cancelInFlightGuardHeldContextKey{}, false)
+		attempt, owner := s.resumeAttemptStore().begin(attemptCtx, taskID, sessionID)
+		if owner {
+			s.captureInterruptedMarkerForResumeAttempt(attemptCtx, attempt)
+		}
+		return attempt, owner, nil
+	}
 	for {
 		lock, release := s.acquireCancelInFlightGuard(sessionID)
 		lock.Lock()
@@ -494,6 +583,9 @@ func (s *Service) beginResumeAttempt(
 			attempt, owner := s.resumeAttemptStore().begin(ctx, taskID, sessionID)
 			lock.Unlock()
 			release()
+			if owner {
+				s.captureInterruptedMarkerForResumeAttempt(ctx, attempt)
+			}
 			return attempt, owner, nil
 		}
 		lock.Unlock()
@@ -506,6 +598,61 @@ func (s *Service) beginResumeAttempt(
 			return nil, false, fmt.Errorf("wait for session cancellation before resume: %w", err)
 		}
 	}
+}
+
+func (s *Service) captureInterruptedMarkerForResumeAttempt(ctx context.Context, attempt *resumeAttempt) {
+	if s == nil || s.repo == nil || attempt == nil || attempt.taskID == "" {
+		return
+	}
+	task, err := s.repo.GetTask(ctx, attempt.taskID)
+	if err != nil || task == nil {
+		return
+	}
+	if task.Metadata == nil {
+		attempt.setInterruptedMarkerSnapshot("", true)
+		return
+	}
+	marker, ok := task.Metadata[models.MetaKeyInterruptedAt].(string)
+	// A successful task read with no marker is still an immutable snapshot.
+	// Preserve that fact through tombstones, while the empty value remains a
+	// fail-closed generation for the recovery callback.
+	attempt.setInterruptedMarkerSnapshot(marker, ok)
+}
+
+func (s *Service) interruptedMarkerSnapshotForResumeAttempt(
+	sessionID, attemptID string,
+) (interruptedMarkerSnapshot, bool) {
+	if s == nil || sessionID == "" || attemptID == "" {
+		return interruptedMarkerSnapshot{}, false
+	}
+	id, isRecovery := parseResumeAttemptIdentity(attemptID)
+	if !isRecovery {
+		return interruptedMarkerSnapshot{}, false
+	}
+	registry := s.resumeAttemptStore()
+	registry.mu.Lock()
+	defer registry.mu.Unlock()
+	if attempt := registry.attempts[sessionID]; attempt != nil && attempt.id == id {
+		return interruptedMarkerSnapshot{
+			value:    attempt.interruptedMarkerValue(),
+			captured: attempt.interruptedMarkerSnapshotCaptured(),
+		}, true
+	}
+	if tombstone, ok := registry.tombstoneLocked(sessionID, id); ok {
+		return interruptedMarkerSnapshot{
+			value:    tombstone.interruptedMarker,
+			captured: tombstone.interruptedMarkerCaptured,
+		}, true
+	}
+	return interruptedMarkerSnapshot{}, false
+}
+
+func (s *Service) interruptedMarkerForResumeAttempt(sessionID, attemptID string) string {
+	snapshot, known := s.interruptedMarkerSnapshotForResumeAttempt(sessionID, attemptID)
+	if !known || !snapshot.captured {
+		return ""
+	}
+	return snapshot.value
 }
 
 func (s *Service) validateResumeAttempt(attempt *resumeAttempt) error {
@@ -541,6 +688,37 @@ func (s *Service) resumeAttemptAllowsExecution(sessionID, executionID string, or
 		return activeResumeAttemptAllowsExecutionLocked(registry, current, executionID, originID)
 	}
 	return resumeAttemptTombstoneAllowsExecution(registry, sessionID, executionID, originID)
+}
+
+// resumeAttemptOwnsNotice reports whether the attempt is still the session's
+// newest accepted startup owner. A completed attempt remains eligible for a
+// replay after its owner releases the registry entry, but an older event cannot
+// claim success after a successor has taken ownership.
+func (s *Service) resumeAttemptOwnsNotice(sessionID, executionID, originID string) bool {
+	if sessionID == "" || executionID == "" || originID == "" {
+		return false
+	}
+	attemptID, ok := parseResumeAttemptIdentity(originID)
+	if !ok {
+		return false
+	}
+	registry := s.resumeAttemptStore()
+	registry.mu.Lock()
+	defer registry.mu.Unlock()
+	if current := registry.attempts[sessionID]; current != nil {
+		return current.id == attemptID && current.ctx.Err() == nil &&
+			activeResumeAttemptAllowsExecutionLocked(registry, current, executionID, originID)
+	}
+	tombstone, found := registry.tombstoneLocked(sessionID, attemptID)
+	if !found || tombstone.cancelled || tombstone.executionID != executionID {
+		return false
+	}
+	for _, later := range registry.tombstones[sessionID] {
+		if later.id > attemptID {
+			return false
+		}
+	}
+	return true
 }
 
 func resumeAttemptOrigin(origin []string) string {
@@ -674,6 +852,9 @@ func (s *Service) cleanupCancelledResumeAttempt(attempt *resumeAttempt) {
 	}
 	cleanupCtx, cancel := context.WithTimeout(context.Background(), cancellationOperationTTL)
 	defer cancel()
+	if s.lspLeases != nil {
+		s.lspLeases.StopLSPLeasesForExecution(executionID)
+	}
 	if err := s.executor.StopExecution(cleanupCtx, executionID, "cancelled resume startup", true); err != nil && s.logger != nil {
 		s.logger.Debug("failed to clean up cancelled resume execution",
 			zap.String("task_id", attempt.taskID),

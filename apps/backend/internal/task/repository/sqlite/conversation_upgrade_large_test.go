@@ -17,6 +17,7 @@ import (
 	"github.com/kandev/kandev/internal/db"
 	"github.com/kandev/kandev/internal/persistence"
 	"github.com/kandev/kandev/internal/persistence/requiredstores"
+	"github.com/kandev/kandev/internal/startup"
 	"github.com/kandev/kandev/internal/task/models"
 )
 
@@ -160,7 +161,7 @@ func seedLargeLegacy(t *testing.T, repo *Repository) {
 
 func runLargeUpgradeWriterLoad(t *testing.T, repo *Repository, pool *db.Pool) {
 	t.Helper()
-	tracker, err := requiredstores.NewTracker([]requiredstores.Descriptor{{ID: "task", OwnerPackage: "internal/task", RequiredTables: []string{"tasks", "task_sessions", "task_session_messages", "task_session_turns", "conversation_session_revisions"}}})
+	tracker, err := requiredstores.NewTracker([]requiredstores.Descriptor{{ID: "task", OwnerPackage: "internal/task", RequiredTables: []string{"tasks", "task_sessions", "task_session_messages", "task_session_turns", "conversation_session_revisions"}, Sweep: startup.StepStoresRepositories}})
 	if err != nil {
 		t.Fatal(err)
 	}

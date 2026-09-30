@@ -60,12 +60,11 @@ function getCurrentResponsiveBreakpoint(): ResponsiveBreakpoint {
 
 const SERVER_SNAPSHOT = buildResponsiveBreakpoint(DESKTOP_BREAKPOINT, true);
 
-// Cached snapshot keeps getSnapshot referentially stable across re-renders —
-// useSyncExternalStore loops if getSnapshot returns a fresh object every
-// call. The cache is freshened only when the underlying viewport actually
-// changes (verified by deep-equal against the live readout), so listeners
-// firing without an effective change don't trigger spurious renders.
+// Render-time reads use the shared snapshot. Only browser change events read
+// viewport geometry, so mounting/rerendering consumers cannot force layout.
 let cachedClientSnapshot: ResponsiveBreakpoint | null = null;
+const breakpointListeners = new Set<() => void>();
+let unsubscribeMediaQueries: (() => void) | null = null;
 
 function breakpointsEqual(a: ResponsiveBreakpoint, b: ResponsiveBreakpoint): boolean {
   // breakpoint + isFinePointer fully determine every other field (see
@@ -74,18 +73,20 @@ function breakpointsEqual(a: ResponsiveBreakpoint, b: ResponsiveBreakpoint): boo
 }
 
 function getClientSnapshot(): ResponsiveBreakpoint {
-  const fresh = getCurrentResponsiveBreakpoint();
-  if (cachedClientSnapshot !== null && breakpointsEqual(cachedClientSnapshot, fresh)) {
-    return cachedClientSnapshot;
-  }
-  cachedClientSnapshot = fresh;
-  return fresh;
+  cachedClientSnapshot ??= getCurrentResponsiveBreakpoint();
+  return cachedClientSnapshot;
 }
 
-function subscribeBreakpoint(callback: () => void): () => void {
-  if (typeof window === "undefined" || typeof window.matchMedia !== "function") {
-    return () => {};
+function updateClientSnapshot(): void {
+  const fresh = getCurrentResponsiveBreakpoint();
+  if (cachedClientSnapshot !== null && breakpointsEqual(cachedClientSnapshot, fresh)) {
+    return;
   }
+  cachedClientSnapshot = fresh;
+  for (const listener of breakpointListeners) listener();
+}
+
+function subscribeMediaQueries(): () => void {
   const mediaQueries = [
     `(max-width: ${MOBILE_BREAKPOINT - 1}px)`,
     `(min-width: ${MOBILE_BREAKPOINT}px) and (max-width: ${DESKTOP_BREAKPOINT - 1}px)`,
@@ -93,9 +94,28 @@ function subscribeBreakpoint(callback: () => void): () => void {
     "(pointer: fine)",
   ];
   const mediaQueryLists = mediaQueries.map((query) => window.matchMedia(query));
-  mediaQueryLists.forEach((mql) => mql.addEventListener("change", callback));
+  mediaQueryLists.forEach((mql) => mql.addEventListener("change", updateClientSnapshot));
   return () => {
-    mediaQueryLists.forEach((mql) => mql.removeEventListener("change", callback));
+    mediaQueryLists.forEach((mql) => mql.removeEventListener("change", updateClientSnapshot));
+  };
+}
+
+function subscribeBreakpoint(callback: () => void): () => void {
+  if (typeof window === "undefined" || typeof window.matchMedia !== "function") {
+    return () => {};
+  }
+  breakpointListeners.add(callback);
+  if (!unsubscribeMediaQueries) {
+    unsubscribeMediaQueries = subscribeMediaQueries();
+    // Close the gap between the first render and installing browser listeners.
+    updateClientSnapshot();
+  }
+  return () => {
+    breakpointListeners.delete(callback);
+    if (breakpointListeners.size > 0) return;
+    unsubscribeMediaQueries?.();
+    unsubscribeMediaQueries = null;
+    cachedClientSnapshot = null;
   };
 }
 

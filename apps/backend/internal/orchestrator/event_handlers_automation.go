@@ -44,6 +44,14 @@ type automationRunBinding interface {
 	MarkRunTerminalByBinding(ctx context.Context, taskID, sessionID, turnID string, status automation.RunStatus, errMsg string) error
 }
 
+type automationDispatchReader interface {
+	GetAutomationForDispatch(ctx context.Context, id string) (*automation.Automation, error)
+}
+
+type managedAutomationRunDispatcher interface {
+	DispatchManagedAutomationRun(ctx context.Context, runID string) error
+}
+
 type automationRunDispatcher interface {
 	DispatchRun(
 		ctx context.Context,
@@ -243,6 +251,8 @@ func (s *Service) subscribeAutomationEvents() {
 }
 
 // handleAutomationTriggered creates a task when an automation trigger fires.
+//
+//nolint:nestif // The event path preserves run admission and managed-delivery reconciliation order.
 func (s *Service) handleAutomationTriggered(ctx context.Context, event *bus.Event) error {
 	evt, ok := event.Data.(*automation.AutomationTriggeredEvent)
 	if !ok {
@@ -253,8 +263,35 @@ func (s *Service) handleAutomationTriggered(ctx context.Context, event *bus.Even
 		zap.String("automation_id", evt.AutomationID),
 		zap.String("trigger_type", string(evt.TriggerType)))
 
-	if s.automationService == nil || s.reviewTaskCreator == nil {
-		s.logger.Warn("automation service or task creator not configured")
+	if s.automationService == nil {
+		s.logger.Warn("automation service not configured")
+		return nil
+	}
+	if reader, ok := s.automationService.(automationDispatchReader); ok {
+		a, loadErr := reader.GetAutomationForDispatch(ctx, evt.AutomationID)
+		if loadErr != nil {
+			s.logger.Warn("failed to inspect automation destination", zap.String("automation_id", evt.AutomationID), zap.Error(loadErr))
+			return loadErr
+		}
+		if a == nil {
+			return nil
+		}
+		if a.TaskMode == automation.TaskModeManagedConversation {
+			dispatcher, available := s.automationService.(managedAutomationRunDispatcher)
+			if !available {
+				return fmt.Errorf("managed conversation automation delivery unavailable")
+			}
+			go func() {
+				if err := dispatcher.DispatchManagedAutomationRun(context.Background(), evt.RunID); err != nil {
+					s.logger.Error("managed conversation automation delivery failed",
+						zap.String("run_id", evt.RunID), zap.Error(err))
+				}
+			}()
+			return nil
+		}
+	}
+	if s.reviewTaskCreator == nil {
+		s.logger.Warn("automation task creator not configured")
 		return nil
 	}
 

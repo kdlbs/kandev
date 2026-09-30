@@ -474,6 +474,8 @@ func (c *Controller) createDefaultProfile(ctx context.Context, agentID string, p
 		AllowIndexing:              p.allowIndexing,
 		DangerouslySkipPermissions: p.skipPermissions,
 		CLIPassthrough:             p.isPassthrough,
+		CursorMCPAuthEnabled:       true,
+		CursorPluginsMCPEnabled:    true,
 	}
 	return c.repo.CreateAgentProfile(ctx, defaultProfile)
 }

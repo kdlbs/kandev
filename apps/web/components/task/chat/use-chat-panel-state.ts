@@ -1,12 +1,10 @@
 "use client";
 
-import { useCallback, useEffect, useMemo } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useAppStore } from "@/components/state-provider";
 import { useLayoutStore } from "@/lib/state/layout-store";
 import { useDockviewStore } from "@/lib/state/dockview-store";
-import { usePanelActions } from "@/hooks/use-panel-actions";
 import { useSessionMessages } from "@/hooks/domains/session/use-session-messages";
-import { useCustomPrompts } from "@/hooks/domains/settings/use-custom-prompts";
 import { useSessionState } from "@/hooks/domains/session/use-session-state";
 import {
   deriveSessionInputMode,
@@ -25,13 +23,12 @@ import {
   usePendingWalkthroughComments,
   usePendingAgentMessageComments,
 } from "@/hooks/domains/comments/use-pending-comments";
-import { buildContextItems } from "../chat-context-items";
+import { useChatContextItems } from "./use-chat-context-items";
 import {
   useAutoDisablePlanMode,
   useAutoDisableUnsupportedPlanMode,
   usePlanLayoutHandlers,
 } from "./use-plan-mode-helpers";
-import type { ContextItem } from "@/lib/types/context";
 import type { ReviewComment } from "@/lib/state/slices/comments";
 import type {
   AgentMessageComment,
@@ -44,6 +41,7 @@ import type { BuiltInPreset } from "@/lib/state/layout-manager/presets";
 import { readLastAgentError } from "@/lib/session-last-agent-error";
 import { clarificationTurnIdForSession } from "@/lib/utils/pending-clarification";
 import { usePlanCommentMigration } from "@/hooks/domains/comments/use-plan-comment-migration";
+import { usePreviewFeedback } from "@/hooks/domains/comments/use-preview-feedback";
 
 const EMPTY_CONTEXT_FILES: ContextFile[] = [];
 const PLAN_CONTEXT_PATH = "plan:context";
@@ -351,96 +349,6 @@ export function useCommentsState(
   };
 }
 
-type ChatContextItemsOptions = {
-  planContextEnabled: boolean;
-  contextFiles: ContextFile[];
-  resolvedSessionId: string | null;
-  removeContextFile: (sid: string, path: string) => void;
-  unpinFile: (sid: string, path: string) => void;
-  comments: CommentsState;
-  taskId: string | null;
-  onOpenFile?: (path: string, repo?: string) => void;
-  onOpenFileAtLine?: (filePath: string, repositoryName?: string) => void;
-};
-
-function useChatContextItems(opts: ChatContextItemsOptions) {
-  const {
-    planContextEnabled,
-    contextFiles,
-    resolvedSessionId,
-    removeContextFile,
-    unpinFile,
-    comments,
-    taskId,
-    onOpenFile,
-    onOpenFileAtLine,
-  } = opts;
-  const { addPlan } = usePanelActions();
-  const { prompts } = useCustomPrompts();
-
-  const promptsMap = useMemo(() => {
-    const map = new Map<string, { content: string }>();
-    for (const p of prompts) map.set(p.id, { content: p.content });
-    return map;
-  }, [prompts]);
-
-  const contextItems = useMemo<ContextItem[]>(
-    () =>
-      buildContextItems({
-        planContextEnabled,
-        contextFiles,
-        resolvedSessionId,
-        removeContextFile,
-        unpinFile,
-        addPlan,
-        promptsMap,
-        onOpenFile,
-        pendingCommentsByFile: comments.pendingCommentsByFile,
-        handleRemoveCommentFile: comments.handleRemoveCommentFile,
-        handleRemoveComment: comments.handleRemoveComment,
-        onOpenFileAtLine,
-        planComments: comments.planComments,
-        handleClearPlanComments: comments.clearSessionPlanComments,
-        pendingPRFeedback: comments.pendingPRFeedback,
-        handleRemovePRFeedback: comments.handleRemovePRFeedback,
-        handleClearPRFeedback: comments.handleClearPRFeedback,
-        walkthroughComments: comments.walkthroughComments,
-        handleRemoveWalkthroughComment: comments.handleRemoveWalkthroughComment,
-        handleClearWalkthroughComments: comments.handleClearWalkthroughComments,
-        messageComments: comments.messageComments,
-        handleClearMessageComments: comments.handleClearMessageComments,
-        taskId,
-      }),
-    [
-      planContextEnabled,
-      contextFiles,
-      resolvedSessionId,
-      removeContextFile,
-      unpinFile,
-      addPlan,
-      promptsMap,
-      onOpenFile,
-      comments.pendingCommentsByFile,
-      comments.handleRemoveCommentFile,
-      comments.handleRemoveComment,
-      onOpenFileAtLine,
-      comments.planComments,
-      comments.clearSessionPlanComments,
-      comments.pendingPRFeedback,
-      comments.handleRemovePRFeedback,
-      comments.handleClearPRFeedback,
-      comments.walkthroughComments,
-      comments.handleRemoveWalkthroughComment,
-      comments.handleClearWalkthroughComments,
-      comments.messageComments,
-      comments.handleClearMessageComments,
-      taskId,
-    ],
-  );
-
-  return { contextItems, prompts };
-}
-
 function useSessionData(
   resolvedSessionId: string | null,
   session: ReturnType<typeof useSessionState>["session"],
@@ -605,7 +513,10 @@ export function useChatPanelState({
     sessionState.taskDescription,
   );
   const comments = useCommentsState(resolvedSessionId, taskId);
+  const previewFeedbackState = usePreviewFeedback(taskId);
   const planCommentMigration = usePlanCommentMigration(taskId);
+  const [previewFeedbackOpen, setPreviewFeedbackOpen] = useState(false);
+  const onOpenPreviewFeedback = useCallback(() => setPreviewFeedbackOpen(true), []);
 
   const planContextEnabled = useMemo(
     () => contextFiles.some((f) => f.path === PLAN_CONTEXT_PATH),
@@ -619,9 +530,11 @@ export function useChatPanelState({
     removeContextFile,
     unpinFile,
     comments,
+    previewFeedback: previewFeedbackState.items,
     taskId,
     onOpenFile,
     onOpenFileAtLine,
+    onOpenPreviewFeedback,
   });
 
   const todoItems = useSessionTodoItems(resolvedSessionId, sessionData.todoItems);
@@ -633,6 +546,10 @@ export function useChatPanelState({
     ...contextFilesState,
     ...sessionData,
     ...comments,
+    previewFeedback: previewFeedbackState.items,
+    previewFeedbackState,
+    previewFeedbackOpen,
+    setPreviewFeedbackOpen,
     planCommentMigration,
     contextItems,
     planContextEnabled,

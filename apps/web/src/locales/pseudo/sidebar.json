@@ -121,5 +121,21 @@
   "newViewNumbered": "Ńēŵ vĩēŵ {{suffix}}",
   "untitledView": "Ũńţĩţĺēď vĩēŵ",
   "workspaceContextRefreshFailed": "Ćōũĺď ńōţ ŕēƒŕēśĥ ţàśķś.",
-  "workspaceContextAccessDenied": "Ŷōũ ńō ĺōńĝēŕ ĥàvē àććēśś ţō ţĥĩś ŵōŕķśƥàćē."
+  "workspaceContextAccessDenied": "Ŷōũ ńō ĺōńĝēŕ ĥàvē àććēśś ţō ţĥĩś ŵōŕķśƥàćē.",
+  "continuedFrom": "Ćōńţĩńũēď ƒŕōḿ {{title}}",
+  "continuationLabel": "ćōńţĩńũēď",
+  "selectedTaskCount_one": "{{count}} ţàśķ śēĺēćţēď",
+  "selectedTaskCount_other": "{{count}} ţàśķś śēĺēćţēď",
+  "clearSelection": "Ćĺēàŕ śēĺēćţĩōń",
+  "nextPage": "Ńēxţ",
+  "pageLoadFailed": "Ćōũĺď ńōţ ĺōàď ţĥĩś ƥàĝē.",
+  "pageStatus": "Ƥàĝē {{page}} ōƒ {{total}}",
+  "previousPage": "Ƥŕēvĩōũś",
+  "queryRefreshing": "Ũƥďàţĩńĝ ţàśķś...",
+  "queryRefreshFailed": "Ţàśķś ćōũĺď ńōţ ƀē ŕēƒŕēśĥēď.",
+  "queryInvalid": "Ţĥĩś ţàśķ vĩēŵ ćōũĺď ńōţ ƀē ĺōàďēď. Ćĥēćķ ĩţś ƒĩĺţēŕś àńď vĩēŵ śēţţĩńĝś.",
+  "filterListLimit": "Ƒĩĺţēŕ {{filter}} ĥàś ţōō ḿàńŷ śēĺēćţĩōńś. Śēĺēćţ ũƥ ţō {{limit}}.",
+  "filterValueLimit": "À vàĺũē ĩń ƒĩĺţēŕ {{filter}} ĩś ţōō ĺōńĝ. Ũśē àţ ḿōśţ {{limit}} ƀŷţēś.",
+  "filterInvalid": "Ƒĩĺţēŕ {{filter}} ĩś ĩńvàĺĩď. Ćĥēćķ ĩţś vàĺũē àńď ōƥēŕàţōŕ.",
+  "filterCountLimit": "Ţĥĩś vĩēŵ ĥàś ţōō ḿàńŷ ƒĩĺţēŕś. Ũśē àţ ḿōśţ {{limit}}."
 }

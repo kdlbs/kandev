@@ -137,6 +137,91 @@ func canonicalInventoryMatches(spec RepoSpec, rows []*models.TaskEnvironmentRepo
 	return matches
 }
 
+// pinDirtyCloneRelocationToSelectedWorktrees keeps an explicitly relocated
+// resume attached to the exact worktrees selected by its session. Repository
+// branch settings can change independently of that durable selection; the
+// relocation action preserves the existing branch and files.
+func pinDirtyCloneRelocationToSelectedWorktrees(
+	ctx context.Context,
+	req *LaunchAgentRequest,
+	session *models.TaskSession,
+	env *models.TaskEnvironment,
+) {
+	if !worktree.DirtyCloneRelocationAllowed(ctx) || req == nil || session == nil || env == nil ||
+		!req.UseWorktree || !req.WorkspaceReuseRequired {
+		return
+	}
+	if len(req.Repositories) == 0 {
+		row := selectedDirtyCloneRelocationWorktree(session, env, req.RepositoryID)
+		if row == nil {
+			return
+		}
+		req.WorktreeID = row.WorktreeID
+		req.BranchIdentitySlug = row.BranchSlug
+		return
+	}
+	for index := range req.Repositories {
+		row := selectedDirtyCloneRelocationWorktree(session, env, req.Repositories[index].RepositoryID)
+		if row == nil {
+			continue
+		}
+		req.Repositories[index].WorktreeID = row.WorktreeID
+		req.Repositories[index].BranchIdentitySlug = row.BranchSlug
+	}
+}
+
+func selectedDirtyCloneRelocationWorktree(
+	session *models.TaskSession,
+	env *models.TaskEnvironment,
+	repositoryID string,
+) *models.TaskEnvironmentRepo {
+	selectedID, ok := selectedDirtyCloneRelocationWorktreeID(session, repositoryID)
+	if !ok {
+		return nil
+	}
+	return activeDirtyCloneRelocationWorktree(env, repositoryID, selectedID)
+}
+
+func selectedDirtyCloneRelocationWorktreeID(session *models.TaskSession, repositoryID string) (string, bool) {
+	if session == nil || repositoryID == "" {
+		return "", false
+	}
+	selectedID := ""
+	for _, row := range session.Worktrees {
+		if row == nil || row.RepositoryID != repositoryID || row.WorktreeID == "" {
+			continue
+		}
+		if selectedID != "" && selectedID != row.WorktreeID {
+			return "", false
+		}
+		selectedID = row.WorktreeID
+	}
+	return selectedID, selectedID != ""
+}
+
+func activeDirtyCloneRelocationWorktree(
+	env *models.TaskEnvironment,
+	repositoryID string,
+	selectedID string,
+) *models.TaskEnvironmentRepo {
+	if env == nil {
+		return nil
+	}
+	var selected *models.TaskEnvironmentRepo
+	for _, row := range env.Repos {
+		if row == nil || row.RepositoryID != repositoryID || row.WorktreeID != selectedID ||
+			row.DeletedAt != nil || row.Status == taskEnvironmentRepoStatusFailed ||
+			row.Status == taskEnvironmentRepoStatusDeleted {
+			continue
+		}
+		if selected != nil {
+			return nil
+		}
+		selected = row
+	}
+	return selected
+}
+
 // reuseExistingEnvironment carries forward worktree, container, sandbox, and
 // runtime metadata from an existing TaskEnvironment into the launch request
 // so that executor backends can reuse the prior execution.
@@ -388,8 +473,13 @@ func topLevelLaunchRepoSpec(req *LaunchAgentRequest) (RepoSpec, bool) {
 	if req.RepositoryID == "" {
 		return RepoSpec{}, false
 	}
+	branchIdentity := req.BranchIdentitySlug
+	if branchIdentity == "" {
+		branchIdentity = topLevelBranchIdentitySlug(req)
+	}
 	return RepoSpec{
 		TaskRepositoryID:           req.TaskRepositoryID,
+		CheckoutOptions:            req.CheckoutOptions,
 		RepositoryID:               req.RepositoryID,
 		RepositoryPath:             req.RepositoryPath,
 		RepositoryURL:              req.RepositoryURL,
@@ -409,7 +499,7 @@ func topLevelLaunchRepoSpec(req *LaunchAgentRequest) (RepoSpec, bool) {
 		RefreshRepositoryWithState: req.RefreshRepositoryWithState,
 		RemoteRefState:             req.RemoteRefState,
 		CopyFiles:                  req.CopyFiles,
-		BranchIdentitySlug:         topLevelBranchIdentitySlug(req),
+		BranchIdentitySlug:         branchIdentity,
 	}, true
 }
 

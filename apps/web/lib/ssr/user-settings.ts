@@ -69,6 +69,7 @@ export function createDefaultUserSettings(): UserSettingsState {
     savedLayouts: [],
     sidebarViews: [],
     sidebarViewsByWorkspace: {},
+    sidebarLayoutsByWorkspace: {},
     sidebarActiveViewId: null,
     sidebarDraft: null,
     threadViews: [DEFAULT_THREAD_VIEW],
@@ -331,6 +332,7 @@ export function buildCoreFields(
     ...buildAppearanceFields(s, current),
     savedLayouts: s.saved_layouts ?? current.savedLayouts,
     sidebarViewsByWorkspace: s.sidebar_views_by_workspace ?? current.sidebarViewsByWorkspace,
+    sidebarLayoutsByWorkspace: s.sidebar_layouts_by_workspace ?? current.sidebarLayoutsByWorkspace,
     sidebarViews: mapDefined(s.sidebar_views, current.sidebarViews, (views) =>
       views.map(fromApiSidebarView),
     ) as SidebarView[],

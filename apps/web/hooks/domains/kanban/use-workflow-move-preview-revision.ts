@@ -68,6 +68,27 @@ function projectRecord(
   return Object.keys(projection).length > 0 ? projection : undefined;
 }
 
+function projectWorkflowAgentOverrides(task: PreviewRevisionTask) {
+  const overrides = task.workflowAgentOverrides;
+  if (!overrides) return undefined;
+  const bindings = Array.isArray(overrides.steps) ? overrides.steps : [];
+  return {
+    workflow_id: overrides.workflow_id,
+    steps: [...bindings]
+      .sort(
+        (left, right) =>
+          left.step_id.localeCompare(right.step_id) ||
+          left.replacement_profile_id.localeCompare(right.replacement_profile_id) ||
+          left.source_profile_id.localeCompare(right.source_profile_id),
+      )
+      .map((binding) => ({
+        step_id: binding.step_id,
+        source_profile_id: binding.source_profile_id,
+        replacement_profile_id: binding.replacement_profile_id,
+      })),
+  };
+}
+
 function projectTask(task: PreviewRevisionTask) {
   return {
     id: task.id,
@@ -78,6 +99,7 @@ function projectTask(task: PreviewRevisionTask) {
     primary_session_state: task.primarySessionState,
     archived: task.isArchived === true,
     metadata: projectRecord(task.metadata, TASK_METADATA_KEYS),
+    workflow_agent_overrides: projectWorkflowAgentOverrides(task),
   };
 }
 
@@ -240,22 +262,37 @@ function profileIdsForRevision(
   sessions: SessionEntry[],
 ): Set<string> {
   const profileIds = new Set<string>();
-  for (const { task } of tasks) {
-    const profileId = task.metadata?.agent_profile_id;
-    if (typeof profileId === "string" && profileId !== "") profileIds.add(profileId);
-    const initialProfileId = profileIdFromMetadata(task.metadata?.workflow_initial_session);
-    if (initialProfileId) profileIds.add(initialProfileId);
-  }
-  for (const { step } of steps) {
-    if (step.agent_profile_id) profileIds.add(step.agent_profile_id);
-  }
-  for (const workflow of workflows) {
-    if (workflow.agent_profile_id) profileIds.add(workflow.agent_profile_id);
-  }
-  for (const { session } of sessions) {
-    if (session.agent_profile_id) profileIds.add(session.agent_profile_id);
-  }
+  tasks.forEach(({ task }) => addTaskProfileIds(profileIds, task));
+  steps.forEach(({ step }) => addProfileId(profileIds, step.agent_profile_id));
+  workflows.forEach((workflow) => addProfileId(profileIds, workflow.agent_profile_id));
+  sessions.forEach(({ session }) => addProfileId(profileIds, session.agent_profile_id));
   return profileIds;
+}
+
+function addProfileId(profileIds: Set<string>, profileId: unknown) {
+  if (typeof profileId === "string" && profileId) profileIds.add(profileId);
+}
+
+function addTaskProfileIds(profileIds: Set<string>, task: PreviewRevisionTask) {
+  addProfileId(profileIds, task.metadata?.agent_profile_id);
+  addProfileId(profileIds, profileIdFromMetadata(task.metadata?.workflow_initial_session));
+  const overrides = task.workflowAgentOverrides;
+  if (
+    !overrides ||
+    typeof overrides.workflow_id !== "string" ||
+    overrides.workflow_id !== task.workflowId
+  ) {
+    return;
+  }
+  const bindings = Array.isArray(overrides.steps) ? overrides.steps : [];
+  bindings.forEach((binding) => {
+    if (binding && typeof binding === "object") {
+      addProfileId(
+        profileIds,
+        (binding as { replacement_profile_id?: unknown }).replacement_profile_id,
+      );
+    }
+  });
 }
 
 function profileIdFromMetadata(value: unknown): string | undefined {

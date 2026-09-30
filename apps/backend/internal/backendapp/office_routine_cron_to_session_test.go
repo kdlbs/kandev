@@ -2,6 +2,7 @@ package backendapp
 
 import (
 	"context"
+	"fmt"
 	"path/filepath"
 	"testing"
 	"time"
@@ -11,15 +12,22 @@ import (
 	"github.com/kandev/kandev/internal/agent/agents"
 	client "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
+	settingsstore "github.com/kandev/kandev/internal/agent/settings/store"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/db"
+	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
+	officecosts "github.com/kandev/kandev/internal/office/costs"
+	officemodels "github.com/kandev/kandev/internal/office/models"
 	officesqlite "github.com/kandev/kandev/internal/office/repository/sqlite"
 	officeroutines "github.com/kandev/kandev/internal/office/routines"
+	officeservice "github.com/kandev/kandev/internal/office/service"
 	"github.com/kandev/kandev/internal/office/shared"
+	officewakeup "github.com/kandev/kandev/internal/office/wakeup"
 	"github.com/kandev/kandev/internal/orchestrator"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
+	runsservice "github.com/kandev/kandev/internal/runs/service"
 	taskrepo "github.com/kandev/kandev/internal/task/repository"
 	sqlitetaskrepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	taskservice "github.com/kandev/kandev/internal/task/service"
@@ -43,6 +51,16 @@ type routineCronHarness struct {
 	orchestrator *orchestrator.Service
 	agentMgr     *stubAgentManager
 	workspaceID  string
+	db           *sqlx.DB
+	// eventBus is the single bus the harness's real taskSvc, workflowSvc,
+	// and orchestrator subscribe to. A test needing to observe how the
+	// real orchestrator reacts to a run-owned lifecycle event must wire
+	// its own office/service.Service onto this same bus rather than
+	// standing up a private, disconnected one — TestRoutine_CronFire_LightweightReachesSession
+	// builds its own local bus for exactly that reason, so it never
+	// actually exercises what the real orchestrator does with a taskless
+	// event; this field exists so a different test can.
+	eventBus bus.EventBus
 }
 
 func newRoutineCronHarness(t *testing.T) *routineCronHarness {
@@ -65,6 +83,13 @@ func newRoutineCronHarness(t *testing.T) *routineCronHarness {
 	workflowRepo, err := workflowrepo.NewWithDB(sqlxDB, sqlxDB, nil)
 	if err != nil {
 		t.Fatalf("workflow repository: %v", err)
+	}
+	// Office agent CRUD reads/writes the merged agent_profiles table (ADR
+	// 0005 Wave C), which only the settings store schema creates —
+	// officesqlite.NewWithDB does not create it. See base_test.go's
+	// initSharedAgentProfilesSchema in internal/office/service.
+	if _, _, err := settingsstore.Provide(sqlxDB, sqlxDB, nil); err != nil {
+		t.Fatalf("settings store init: %v", err)
 	}
 	officeRepo, err := officesqlite.NewWithDB(sqlxDB, sqlxDB, nil)
 	if err != nil {
@@ -142,7 +167,21 @@ func newRoutineCronHarness(t *testing.T) *routineCronHarness {
 		orchestrator: orchestratorSvc,
 		agentMgr:     agentMgr,
 		workspaceID:  workspaces[0].ID,
+		db:           sqlxDB,
+		eventBus:     eventBus,
 	}
+}
+
+// countRows returns COUNT(*) from table, used to assert the negative half of
+// AC-OFFICE-TASKLESS-001.1: a taskless routine fire must create no tasks row
+// and no task_sessions row.
+func (h *routineCronHarness) countRows(t *testing.T, table string) int {
+	t.Helper()
+	var count int
+	if err := h.db.Get(&count, "SELECT COUNT(*) FROM "+table); err != nil {
+		t.Fatalf("count %s: %v", table, err)
+	}
+	return count
 }
 
 // awaitTaskInProgress polls until the task reaches IN_PROGRESS, the last DB
@@ -285,26 +324,156 @@ func TestRoutine_CronFire_HeavyRoutineReachesSession(t *testing.T) {
 	}
 }
 
-// TestRoutine_CronFire_LightweightReachesSession is deliberately skipped:
-// the lightweight (taskless) routine path has no session to reach at all
-// today (see card 49894d63 — gap 1, the taskless execution model). Writing
-// it out in full, rather than leaving the gap unrepresented, means the skip
-// carries the assertion that will need to pass once that card lands instead
-// of silently having no coverage for either shape.
-func TestRoutine_CronFire_LightweightReachesSession(t *testing.T) {
-	t.Skip("blocked on card 49894d63: the lightweight (taskless) routine flow has no task_sessions row to assert on yet")
+// lightweightRunLauncher is a test double for officeservice.RunSessionLauncher,
+// mirroring service_test.tasklessTestLauncher (internal/office/service/
+// taskless_lifecycle_test.go): it reserves and starts a real
+// office_run_sessions row through the same repo the scheduler under test
+// reads, rather than merely recording the call.
+type lightweightRunLauncher struct {
+	svc   *officeservice.Service
+	calls []officeservice.LaunchContext
+}
 
+func (l *lightweightRunLauncher) StartRunSession(
+	ctx context.Context, run *officemodels.Run, agent *officemodels.AgentInstance,
+	launch officeservice.LaunchContext, _ *officeservice.RouteOverride,
+) (officeservice.RunSessionLaunch, error) {
+	l.calls = append(l.calls, launch)
+	attempt := len(l.calls)
+	id := fmt.Sprintf("lightweight-run-session-%s-%d", run.ID, attempt)
+	now := time.Now().UTC()
+	session := &officemodels.RunSession{
+		ID: id, WorkspaceID: agent.WorkspaceID, AgentProfileID: agent.ID,
+		RunID: run.ID, Attempt: attempt, State: officemodels.RunSessionStatePreparing,
+		CreatedAt: now, Version: 1,
+	}
+	reserved, err := l.svc.RepoForTest().ReserveRunSession(ctx, session)
+	if err != nil || !reserved {
+		return officeservice.RunSessionLaunch{}, fmt.Errorf(
+			"reserve test run session: reserved=%v err=%w", reserved, err)
+	}
+	acpSessionID := "acp-" + id
+	if _, err := l.svc.RepoForTest().BindRunSessionExecution(
+		ctx, id, "execution-"+id, launch.ProfileID, "test-adapter", "test-model", acpSessionID,
+	); err != nil {
+		return officeservice.RunSessionLaunch{}, err
+	}
+	if _, err := l.svc.RepoForTest().MarkRunSessionStarted(
+		ctx, id, "execution-"+id, launch.ProfileID, "test-adapter", "test-model", acpSessionID,
+	); err != nil {
+		return officeservice.RunSessionLaunch{}, err
+	}
+	return officeservice.RunSessionLaunch{
+		SessionID: id, ExecutionID: "execution-" + id,
+		ExecutionProfileID: launch.ProfileID, Adapter: "test-adapter", Model: "test-model",
+		ACPSessionID: acpSessionID,
+	}, nil
+}
+
+// awaitLightweightLaunchCount polls RunSchedulerTick until the launcher has
+// been called at least `want` times, bounded by a deadline. TickScheduledTriggers
+// and RunSchedulerTick are both synchronous in this harness (no detached
+// goroutine, unlike the heavy-routine launch path above), so a single tick
+// is expected to suffice; the poll loop exists only to absorb any queue
+// interaction it would otherwise be flaky to assume away.
+func awaitLightweightLaunchCount(
+	t *testing.T, ctx context.Context, officeSvc *officeservice.Service, launcher *lightweightRunLauncher, want int,
+) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		officeservice.RunSchedulerTick(officeSvc, ctx)
+		if len(launcher.calls) >= want {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("timed out waiting for %d lightweight launch(es), got %d", want, len(launcher.calls))
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+// TestRoutine_CronFire_LightweightReachesSession proves
+// AC-OFFICE-TASKLESS-001.1 and the first clause of .2 end-to-end: a cron
+// trigger firing a lightweight routine (empty task_template) must reach a
+// real office_run_sessions row with runs.session_id bound to it — never a
+// task_sessions row, which the design forbids for a taskless run — and two
+// separate fires must produce two distinct sessions rather than reusing one.
+//
+// This exercises the exact production wiring
+// (routines.RoutineService -> routineWakeupAdapter -> wakeup.Dispatcher ->
+// service.Service's scheduler), substituting only the run-session launcher
+// (RunSessionLauncher is the seam that boundary exists for) and the budget
+// checker (a real costs.CostService, because routine_dispatch_cron
+// classifies as unattended provenance and would otherwise be cancelled at
+// the no-budget-evaluator gate).
+func TestRoutine_CronFire_LightweightReachesSession(t *testing.T) {
 	ctx := context.Background()
 	h := newRoutineCronHarness(t)
+
+	log, err := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "json", OutputPath: "stdout"})
+	if err != nil {
+		t.Fatalf("logger: %v", err)
+	}
+	eventBus := bus.NewMemoryEventBus(log)
+	officeSvc := officeservice.NewService(officeservice.ServiceOptions{
+		Repo: h.officeRepo, Logger: log, EventBus: eventBus,
+	})
+	officeSvc.SetRunsService(runsservice.New(h.officeRepo.RunsRepository(), nil, log, nil))
+	// Synchronous handlers + a real event bus let this test simulate the
+	// first attempt's completion (AgentCompleted) between the two fires
+	// below, the same way an agent process reporting done would free the
+	// agent for its next run — ClaimNextEligibleRun refuses to claim a
+	// second run for an agent that still has one in status=claimed.
+	officeSvc.SetSyncHandlers(true)
+	if err := officeSvc.RegisterEventSubscribers(eventBus); err != nil {
+		t.Fatalf("register event subscribers: %v", err)
+	}
+	activity := shared.NewActivityLogger(h.officeRepo, log)
+	officeSvc.SetBudgetChecker(officecosts.NewCostService(h.officeRepo, log, activity, officeSvc, officeSvc))
+	launcher := &lightweightRunLauncher{svc: officeSvc}
+	officeSvc.SetRunSessionLauncher(launcher)
+
+	wakeupDispatcher := officewakeup.NewDispatcher(h.officeRepo, h.officeRepo, log)
+	wakeupDispatcher.SetRoutineLookup(h.officeRepo)
+	wakeupDispatcher.SetRunQueuer(officeSvc)
+	h.routineSvc.SetWakeupEnqueuer(&routineWakeupAdapter{repo: h.officeRepo, dispatcher: wakeupDispatcher})
+
+	// agent_profiles.agent_id is a NOT NULL FK to agents (CLI tool
+	// registrations); newRoutineCronHarness opens its DB with FK
+	// enforcement on (db.OpenSQLite), unlike office/service's base_test.go
+	// (":memory:" with no _foreign_keys pragma). With no CLI tool rows
+	// seeded, CreateAgentInstance's DefaultAgentID fallback resolves to ""
+	// and the insert violates the FK, so seed one row here.
+	if _, err := h.db.Exec(
+		`INSERT INTO agents (id, name, created_at, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+		"cli-agent-lightweight", "CLI Agent",
+	); err != nil {
+		t.Fatalf("seed agents row: %v", err)
+	}
+
+	agent := &officemodels.AgentInstance{
+		WorkspaceID: h.workspaceID, Name: "lightweight-assignee",
+		Role: officemodels.AgentRoleCEO, Status: officemodels.AgentStatusIdle,
+		ExecutorPreference: `{"type":"local_pc"}`,
+	}
+	if err := officeSvc.CreateAgentInstance(ctx, agent); err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
 
 	routine := &officeroutines.Routine{
 		ID:                     "routine-light-1",
 		WorkspaceID:            h.workspaceID,
 		Name:                   "Lightweight routine",
 		TaskTemplate:           "",
-		AssigneeAgentProfileID: "routine-assignee",
+		AssigneeAgentProfileID: agent.ID,
 		Status:                 "active",
 		Variables:              "{}",
+		// always_create (normalised to wakeup.PolicyAlwaysEnqueue) so the
+		// second fire below creates its own run instead of coalescing into
+		// the first fire's still-active one — this test's whole point is
+		// asserting two fires produce two distinct sessions.
+		ConcurrencyPolicy: "always_create",
 	}
 	if err := h.routineSvc.CreateRoutine(ctx, routine); err != nil {
 		t.Fatalf("create routine: %v", err)
@@ -320,19 +489,107 @@ func TestRoutine_CronFire_LightweightReachesSession(t *testing.T) {
 	if err := h.routineSvc.CreateRoutineTrigger(ctx, trigger); err != nil {
 		t.Fatalf("create trigger: %v", err)
 	}
+
+	// First fire.
 	triggers, err := h.officeRepo.ListTriggersByRoutineID(ctx, routine.ID)
 	if err != nil || len(triggers) == 0 || triggers[0].NextRunAt == nil {
 		t.Fatalf("list triggers: triggers=%d err=%v", len(triggers), err)
 	}
 	fireTime := *triggers[0].NextRunAt
-
 	if err := h.routineSvc.TickScheduledTriggers(ctx, fireTime.Add(time.Second)); err != nil {
 		t.Fatalf("tick scheduled triggers: %v", err)
 	}
+	awaitLightweightLaunchCount(t, ctx, officeSvc, launcher, 1)
 
-	// Once card 49894d63 lands, assert a task_sessions row exists for the
-	// agent the lightweight wakeup dispatched to.
-	t.Fatal("unreachable: update this assertion when the lightweight path reaches a session")
+	runs, err := officeSvc.ListRuns(ctx, h.workspaceID)
+	if err != nil || len(runs) != 1 {
+		t.Fatalf("list runs after first fire: runs=%#v err=%v", runs, err)
+	}
+	firstRun := runs[0]
+	if firstRun.SessionID == "" {
+		t.Fatalf("run.session_id is empty after launch, want it bound to an office_run_sessions row")
+	}
+	firstSession, err := officeSvc.RepoForTest().GetRunSession(ctx, firstRun.SessionID)
+	if err != nil || firstSession == nil {
+		t.Fatalf("get run session %q: %v", firstRun.SessionID, err)
+	}
+	if firstSession.RunID != firstRun.ID {
+		t.Errorf("session.run_id = %q, want %q", firstSession.RunID, firstRun.ID)
+	}
+
+	// Negative half of AC-OFFICE-TASKLESS-001.1: the lightweight fire must
+	// create no tasks row and no task_sessions row — that is what
+	// distinguishes it from the heavy-routine path above.
+	if got := h.countRows(t, "tasks"); got != 0 {
+		t.Errorf("tasks row count = %d, want 0 (lightweight fire must not create a task)", got)
+	}
+	if got := h.countRows(t, "task_sessions"); got != 0 {
+		t.Errorf("task_sessions row count = %d, want 0 (taskless run must never create one)", got)
+	}
+
+	// Simulate the first attempt completing, the same way a real agent
+	// process finishing would: this both frees the agent for the second
+	// fire's claim (ClaimNextEligibleRun skips an agent with any run still
+	// status=claimed) and mirrors what an actual taskless run's lifecycle
+	// looks like end to end.
+	if err := eventBus.Publish(ctx, events.AgentCompleted, bus.NewEvent(events.AgentCompleted, "test", lifecycle.AgentEventPayload{
+		AgentExecutionID: firstSession.ExecutionID, AgentID: "test-adapter", AgentProfileID: agent.ID,
+		RunID: firstRun.ID, RunSessionID: firstRun.SessionID, RunAttempt: 1, OwnerKind: lifecycle.ExecutionOwnerRun,
+		WorkspaceID: h.workspaceID, Status: "COMPLETED",
+	})); err != nil {
+		t.Fatalf("publish first attempt completion: %v", err)
+	}
+
+	// Second fire: AC-OFFICE-TASKLESS-001.2's first clause — two fires
+	// produce two distinct sessions, with no ACP session id reused.
+	triggers, err = h.officeRepo.ListTriggersByRoutineID(ctx, routine.ID)
+	if err != nil || len(triggers) == 0 || triggers[0].NextRunAt == nil {
+		t.Fatalf("list triggers before second fire: triggers=%d err=%v", len(triggers), err)
+	}
+	secondFireTime := *triggers[0].NextRunAt
+	if !secondFireTime.After(fireTime) {
+		t.Fatalf("second fire's next_run_at = %v, want after first fire's %v", secondFireTime, fireTime)
+	}
+	if err := h.routineSvc.TickScheduledTriggers(ctx, secondFireTime.Add(time.Second)); err != nil {
+		t.Fatalf("tick scheduled triggers (second fire): %v", err)
+	}
+	awaitLightweightLaunchCount(t, ctx, officeSvc, launcher, 2)
+
+	runs, err = officeSvc.ListRuns(ctx, h.workspaceID)
+	if err != nil || len(runs) != 2 {
+		t.Fatalf("list runs after second fire: runs=%#v err=%v", runs, err)
+	}
+	var secondRun *officemodels.Run
+	for _, r := range runs {
+		if r.ID != firstRun.ID {
+			secondRun = r
+			break
+		}
+	}
+	if secondRun == nil {
+		t.Fatalf("expected a second, distinct run; runs=%#v", runs)
+	}
+	if secondRun.SessionID == "" {
+		t.Fatalf("second run.session_id is empty, want it bound to an office_run_sessions row")
+	}
+	if secondRun.SessionID == firstRun.SessionID {
+		t.Fatalf("second fire reused session id %q from the first fire, want a distinct session", secondRun.SessionID)
+	}
+	secondSession, err := officeSvc.RepoForTest().GetRunSession(ctx, secondRun.SessionID)
+	if err != nil || secondSession == nil {
+		t.Fatalf("get run session %q: %v", secondRun.SessionID, err)
+	}
+	if secondSession.ACPSessionID == firstSession.ACPSessionID {
+		t.Errorf("second fire reused ACP session id %q from the first fire, want distinct",
+			secondSession.ACPSessionID)
+	}
+
+	if got := h.countRows(t, "tasks"); got != 0 {
+		t.Errorf("tasks row count after second fire = %d, want 0", got)
+	}
+	if got := h.countRows(t, "task_sessions"); got != 0 {
+		t.Errorf("task_sessions row count after second fire = %d, want 0", got)
+	}
 }
 
 // stubAgentManager implements executor.AgentManagerClient with just enough

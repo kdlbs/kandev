@@ -73,12 +73,14 @@ func projectSidebarWorkspaces(settings *models.UserSettings, ids []string) *mode
 	for _, id := range ids {
 		copy.SidebarViewsByWorkspace[id] = normalizeSidebarWorkspace(settings.SidebarViewsByWorkspace[id])
 	}
+	copy.SidebarLayoutsByWorkspace = projectSidebarLayouts(settings, ids)
 	return &copy
 }
 
 func withoutSidebarWorkspaceState(settings *models.UserSettings) *models.UserSettings {
 	copy := *settings
 	copy.SidebarViewsByWorkspace = nil
+	copy.SidebarLayoutsByWorkspace = nil
 	return &copy
 }
 

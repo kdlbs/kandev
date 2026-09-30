@@ -41,7 +41,7 @@ test.describe("Office mobile navigation", () => {
     await expect(sheet.getByRole("link", { name: /Skills/ })).toBeVisible();
     // Global destinations come from the navigation manifest.
     await expect(sheet.getByRole("link", { name: "Stats" })).toBeVisible();
-    await expect(sheet.getByRole("link", { name: "Settings" })).toBeVisible();
+    await expect(sheet.getByRole("link", { name: "Settings", exact: true })).toBeVisible();
 
     // Home from inside Office lands on the office dashboard, not kanban.
     await sheet.getByRole("link", { name: "Home", exact: true }).tap();
@@ -97,7 +97,7 @@ test.describe("Office mobile navigation", () => {
     try {
       await backend.restart({ KANDEV_FEATURES_OFFICE: "false" });
       await testPage.goto(`/?home=overview&workspaceId=${officeSeed.workspaceId}`);
-      await testPage.getByTestId("mobile-topbar-menu").tap();
+      await testPage.getByTestId("app-nav-trigger").tap();
       const home = testPage
         .getByRole("dialog", { name: "Menu" })
         .getByRole("link", { name: "Home", exact: true });

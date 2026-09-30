@@ -19,11 +19,13 @@ import type { TaskPriority } from "@/lib/types/http";
 import { TaskManagementMenu, type TaskManagementMenuProps } from "./task-management-menu";
 import { TaskManagementDrawer, TaskManagementSheet } from "./task-management-drawer";
 import { TaskArchiveConfirmation } from "./task-archive-confirmation";
+import { cleanupSharesParentWorkspace } from "./task-cleanup-summary";
 import { TaskDeleteConfirmDialog } from "./task-delete-confirm-dialog";
 import { useSidebarLinkActions } from "./task-session-sidebar-link-actions";
 import { useSidebarTaskLinking } from "./task-session-sidebar-task-linking";
 import { SidebarLinkDialogs } from "./task-session-sidebar-dialogs";
 import { selectTaskLinkActions, type TaskLinkHandlers } from "./task-switcher-link-menu";
+import { ChangeWorkflowDialog } from "./change-workflow-dialog";
 
 type Flow = ReturnType<typeof useTaskManagementFlow>;
 export type TaskMenuPoint = { x: number; y: number };
@@ -215,6 +217,7 @@ function ManagementConfirmations({
         taskId={task.id}
         taskTitle={task.title}
         executorType={task.remoteExecutorType}
+        sharesParentWorkspace={cleanupSharesParentWorkspace(task.workspaceMode)}
         isDeleting={mutations.disabled}
         onCloseAutoFocus={onCloseAutoFocus}
         confirmTestId="thread-delete-confirm"
@@ -295,6 +298,7 @@ function TaskManagementChoices({
         disabled: mutations.disabled,
         onPriority: mutations.onPriority,
         onMove: mutations.onMove,
+        onChangeWorkflow: () => flow.setStage("change-workflow"),
         onArchive: () => flow.setStage("archive"),
         onDelete: () => flow.setStage("delete"),
         closeMenu,
@@ -323,6 +327,18 @@ function TaskManagementChoices({
         onCloseAutoFocus={onCloseAutoFocus}
         touch={touch}
       />
+      {flow.stage === "change-workflow" && flow.identity && (
+        <ChangeWorkflowDialog
+          open
+          onOpenChange={(open) => {
+            if (!open) flow.close();
+          }}
+          taskId={flow.identity.taskId}
+          workspaceId={flow.identity.workspaceId}
+          focusReturnRef={focusReturnRef}
+          onSuccess={flow.close}
+        />
+      )}
       {flow.stage === "link" && (
         <SidebarLinkDialogs
           actions={links.actions}

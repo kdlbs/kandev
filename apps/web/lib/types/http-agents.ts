@@ -17,7 +17,15 @@ export type {
 } from "./agent-profile";
 
 import type { AgentProfile } from "./agent-profile";
+import type { CLIFlag } from "./agent-profile";
 import type { BackendMessage } from "./backend-message";
+
+/**
+ * How kandev drives a custom agent's command. Absent means terminal
+ * passthrough, which is what every definition stored before the field existed
+ * decodes to.
+ */
+export type CustomAgentProtocol = "acp";
 
 export type TUIConfig = {
   command: string;
@@ -33,6 +41,15 @@ export type TUIConfig = {
    * list here, or a strategy added in Go silently stops being selectable.
    */
   mcp_strategy?: string;
+  /**
+   * Runtime kandev drives the command with. Absent means terminal passthrough;
+   * `"acp"` means kandev speaks the Agent Client Protocol to it on standard
+   * input and output, which is what gives the agent structured chat, tool
+   * calls, models, and modes.
+   */
+  protocol?: CustomAgentProtocol;
+  /** Use paced unframed writes for TUIs that reject bracketed-paste markers. */
+  disable_bracketed_paste?: boolean;
 };
 
 /** One selectable MCP injection mechanism, served by the backend. */
@@ -149,7 +166,20 @@ export type CapabilityStatus =
   | "auth_required"
   | "not_installed"
   | "failed"
-  | "not_configured";
+  | "not_configured"
+  | "unsupported";
+
+export type ProfileLaunchSettingsRequest = {
+  env_vars: { key: string; value?: string; secret_id?: string }[];
+  cli_flags: CLIFlag[];
+  command_prefix: string;
+};
+
+export type ProfileCapabilityRequest = {
+  profile_id?: string;
+  launch_settings?: ProfileLaunchSettingsRequest;
+  refresh?: boolean;
+};
 
 export type ModelConfig = {
   default_model: string;
@@ -173,6 +203,7 @@ export type DynamicModelsResponse = {
   current_mode_id?: string;
   commands?: CommandEntry[];
   error: string | null;
+  context_revision?: string;
 };
 
 export type ResolveAgentModelConfigRequest = {
@@ -180,6 +211,8 @@ export type ResolveAgentModelConfigRequest = {
   mode?: string;
   config_options?: Record<string, string>;
   refresh?: boolean;
+  profile_id?: string;
+  launch_settings?: ProfileLaunchSettingsRequest;
 };
 
 export type AgentModelConfigResponse = {
@@ -188,6 +221,7 @@ export type AgentModelConfigResponse = {
   status: CapabilityStatus;
   config_options: ConfigOptionEntry[];
   error: string | null;
+  context_revision?: string;
 };
 
 export type PermissionSetting = {
@@ -285,6 +319,8 @@ export type ClarificationQuestion = {
   title: string;
   prompt: string;
   options: ClarificationOption[];
+  /** Omitted for existing agents, which retain the custom-answer field. */
+  allow_custom_text?: boolean;
 };
 
 // Each per-question chat message carries its own metadata. For multi-question
@@ -358,6 +394,90 @@ export type TaskPlanCommentSnapshot = {
 };
 
 export type TaskPlanCommentRef = Pick<TaskPlanComment, "id" | "version">;
+
+export type PreviewCaptureRect = {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  document_x?: number;
+  document_y?: number;
+  scroll_x?: number;
+  scroll_y?: number;
+  viewport_width?: number;
+  viewport_height?: number;
+  device_pixel_ratio?: number;
+};
+
+export type PreviewElementSnapshot = {
+  tag: string;
+  id?: string;
+  classes: string[];
+  role?: string;
+  accessible_label?: string;
+  visible_text?: string;
+  selector?: string;
+  outer_html: string;
+};
+
+export type PreviewTextEndpoint = {
+  selector?: string;
+  node_path: number[];
+  offset: number;
+};
+
+export type PreviewTextAnchor = {
+  start: PreviewTextEndpoint;
+  end: PreviewTextEndpoint;
+  rects?: PreviewCaptureRect[];
+  union_rect?: PreviewCaptureRect;
+  scroll_x?: number;
+  scroll_y?: number;
+  viewport_width?: number;
+  viewport_height?: number;
+  device_pixel_ratio?: number;
+  containing_element?: PreviewElementSnapshot;
+};
+
+export type TaskPreviewScreenshot = {
+  attachment_id: string;
+  name: string;
+  mime_type: string;
+  kind: string;
+  delivery_mode: string;
+  size_bytes: number;
+  state: string;
+};
+
+export type TaskPreviewFeedback = {
+  id: string;
+  task_id: string;
+  kind: "text" | "element" | "screenshot";
+  comment: string;
+  source_kind: "browser" | "html_file";
+  source_session_id?: string;
+  source_label: string;
+  source_path?: string;
+  page_route: string;
+  page_title: string;
+  selected_text?: string;
+  text_anchor?: PreviewTextAnchor;
+  element_snapshot?: PreviewElementSnapshot;
+  capture_rect?: PreviewCaptureRect;
+  screenshot_attachment_id?: string;
+  screenshot_attachment?: TaskPreviewScreenshot;
+  version: number;
+  created_at: string;
+  updated_at: string;
+};
+
+export type TaskPreviewFeedbackSnapshot = {
+  task_id: string;
+  revision: number;
+  items: TaskPreviewFeedback[];
+};
+
+export type TaskPreviewFeedbackRef = Pick<TaskPreviewFeedback, "id" | "version">;
 
 /** A single anchored stop in a code walkthrough. */
 export type WalkthroughStep = {

@@ -15,6 +15,7 @@ import {
 import { syncQuickChatFromTaskEvent } from "@/lib/ws/handlers/quick-chat";
 import {
   archivedTaskWorkspaceId,
+  bumpSidebarTaskQueryRevision,
   findArchivedTaskInCache,
   removeTaskFromActiveKanbans,
   removeTaskFromBothKanbans,
@@ -32,6 +33,8 @@ import {
   updateTaskStatusSummaryInBothKanbans,
 } from "@/lib/ws/handlers/task-status-summary";
 import { taskRemovalOwnsDepartureForTask } from "@/lib/state/task-removal";
+import { applyTaskOverviewEvent, applyTaskOverviewPatch } from "./task-overview";
+import { taskOverviewPatch } from "@/lib/state/slices/task-overview-patch";
 const lifecycleDebug = createDebugLogger("task-lifecycle:ws");
 
 function upsertTask(
@@ -40,7 +43,8 @@ function upsertTask(
   payload: TaskEventPayload,
 ): KanbanTask[] {
   const existing = tasks.find((task) => task.id === nextTask.id);
-  const merged = mergeTaskUpdate(existing, nextTask, payload);
+  const incoming = existing ? { ...existing, ...taskOverviewPatch(payload) } : nextTask;
+  const merged = mergeTaskUpdate(existing, incoming, payload);
   return existing
     ? tasks.map((task) => (task.id === nextTask.id ? merged : task))
     : [...tasks, merged];
@@ -95,12 +99,17 @@ function upsertTaskInBothKanbans(
   payload: TaskEventPayload,
 ): AppState {
   // Skip ephemeral tasks - they should never be added to kanban
-  if (payload.is_ephemeral) {
+  if (
+    payload.is_ephemeral ||
+    (payload.workspace_id &&
+      state.workspaces?.activeId &&
+      payload.workspace_id !== state.workspaces.activeId)
+  ) {
     return state;
   }
 
   const nextTask = toKanbanTask(payload);
-  let next = state;
+  let next = applyTaskOverviewEvent(state, payload);
 
   if (state.kanban.workflowId === wfId) {
     next = {
@@ -197,24 +206,23 @@ function upsertArchivedTaskInCache(
   };
   const items = sidebarArchivedTasks.itemsByWorkspaceId[workspaceId] ?? [];
   const existing = items.find((item) => item.id === task.id);
-  const merged = mergeTaskUpdate(existing, task, payload);
-  const revisions = sidebarArchivedTasks.revisionByWorkspaceId ?? {};
-  return {
-    ...state,
-    sidebarArchivedTasks: {
-      ...sidebarArchivedTasks,
-      itemsByWorkspaceId: {
-        ...sidebarArchivedTasks.itemsByWorkspaceId,
-        [workspaceId]: existing
-          ? items.map((item) => (item.id === task.id ? merged : item))
-          : [...items, merged],
-      },
-      revisionByWorkspaceId: {
-        ...revisions,
-        [workspaceId]: (revisions[workspaceId] ?? 0) + 1,
-      },
-    },
-  };
+  const next = existing
+    ? {
+        ...state,
+        sidebarArchivedTasks: {
+          ...sidebarArchivedTasks,
+          itemsByWorkspaceId: {
+            ...sidebarArchivedTasks.itemsByWorkspaceId,
+            [workspaceId]: items.map((item) =>
+              item.id === task.id
+                ? mergeTaskUpdate(item, { ...item, ...taskOverviewPatch(payload) }, payload)
+                : item,
+            ),
+          },
+        },
+      }
+    : state;
+  return next;
 }
 
 type TaskUpdatedMessage = Parameters<NonNullable<WsHandlers["task.updated"]>>[0];
@@ -246,7 +254,7 @@ function applyTaskUpdatedCache({
   archivedAt,
   archivedWorkspaceId,
 }: TaskUpdatedCacheContext): AppState {
-  let next = state;
+  let next = isArchivedUpdate ? applyTaskOverviewEvent(state, payload) : state;
 
   if (isArchivedUpdate) {
     next =
@@ -355,18 +363,26 @@ function handleTaskUpdated(store: StoreApi<AppState>, message: TaskUpdatedMessag
   }
 
   store.setState((state) =>
-    applyTaskUpdatedCache({
-      state,
-      taskId,
-      workflowId: message.payload.workflow_id,
-      oldWorkflowId: message.payload.old_workflow_id,
-      payload: message.payload,
-      isArchivedUpdate,
-      partialArchivedTask,
-      archivedAt,
-      archivedWorkspaceId,
-    }),
+    bumpSidebarTaskQueryRevision(
+      applyTaskUpdatedCache({
+        state,
+        taskId,
+        workflowId: message.payload.workflow_id,
+        oldWorkflowId: message.payload.old_workflow_id,
+        payload: message.payload,
+        isArchivedUpdate,
+        partialArchivedTask,
+        archivedAt,
+        archivedWorkspaceId,
+      }),
+      message.payload.workspace_id ??
+        archivedTaskWorkspaceId(state, message.payload) ??
+        state.workspaces?.activeId ??
+        undefined,
+    ),
   );
+
+  store.getState().reconcileWorkflowSessionFocus?.(taskId);
 
   if (archivedAt) {
     if (!localRemovalOwnsDeparture) redirectAwayFromRemovedTask(taskId);
@@ -389,7 +405,13 @@ function handleTaskUpsert(
 
   const beforeState = store.getState();
   store.setState((state) =>
-    upsertTaskInBothKanbans(state, message.payload.workflow_id, message.payload),
+    bumpSidebarTaskQueryRevision(
+      upsertTaskInBothKanbans(state, message.payload.workflow_id, message.payload),
+      message.payload.workspace_id ??
+        archivedTaskWorkspaceId(state, message.payload) ??
+        state.workspaces?.activeId ??
+        undefined,
+    ),
   );
   logTaskMerge(action, beforeState, store.getState(), message.payload);
 }
@@ -403,6 +425,7 @@ export function registerTasksHandlers(store: StoreApi<AppState>): WsHandlers {
     "task.deleted": (message) => {
       const deletedId = message.payload.task_id;
       const currentState = store.getState();
+      currentState.cancelWorkflowSessionFocus?.({ taskId: deletedId });
       removeRecentTask(deletedId);
       // A quick chat closed on another device must not linger here as a tab
       // pointing at a task the backend already deleted.
@@ -443,9 +466,21 @@ export function registerTasksHandlers(store: StoreApi<AppState>): WsHandlers {
       const wasActive = currentState.tasks.activeTaskId === deletedId;
 
       store.setState((state) =>
-        clearDeletedTaskWalkthrough(
-          clearRemovedTaskSelection(removeTaskFromBothKanbans(state, deletedId), deletedId),
-          deletedId,
+        bumpSidebarTaskQueryRevision(
+          clearDeletedTaskWalkthrough(
+            clearRemovedTaskSelection(
+              removeTaskFromBothKanbans(
+                applyTaskOverviewPatch(state, deletedId, null, message.payload.workspace_id),
+                deletedId,
+              ),
+              deletedId,
+            ),
+            deletedId,
+          ),
+          message.payload.workspace_id ??
+            archivedTaskWorkspaceId(state, message.payload) ??
+            state.workspaces?.activeId ??
+            undefined,
         ),
       );
 
@@ -476,7 +511,20 @@ export function registerTasksHandlers(store: StoreApi<AppState>): WsHandlers {
       handleTaskUpsert("task.state_changed", store, message);
     },
     "task.status_summary.updated": (message) => {
-      store.setState((state) => updateTaskStatusSummaryInBothKanbans(state, message));
+      store.setState((state) =>
+        updateTaskStatusSummaryInBothKanbans(
+          applyTaskOverviewPatch(
+            state,
+            message.payload.task_id,
+            {
+              id: message.payload.task_id,
+              statusSummary: message.payload.status_summary,
+            },
+            message.payload.workspace_id,
+          ),
+          message,
+        ),
+      );
     },
   };
 }

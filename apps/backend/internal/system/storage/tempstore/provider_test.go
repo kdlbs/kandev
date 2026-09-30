@@ -3,6 +3,7 @@ package tempstore
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -84,6 +85,80 @@ func TestAnalyzeTemporaryRootsScopesAndCollapsesAliases(t *testing.T) {
 	}
 	if len(analysis.Roots[0].Aliases) != 1 || analysis.Roots[0].Path != effective {
 		t.Fatalf("collapsed root = %#v", analysis.Roots[0])
+	}
+}
+
+func TestCapacityRootsReuseCanonicalTemporaryRootResolution(t *testing.T) {
+	effective := t.TempDir()
+	alias := filepath.Join(t.TempDir(), "alias")
+	if err := os.Symlink(effective, alias); err != nil {
+		t.Fatal(err)
+	}
+	provider := NewProvider(Config{
+		GOOS:   "linux",
+		Mounts: testMountReader{},
+		RootResolver: func(context.Context) ([]RootCandidate, error) {
+			return []RootCandidate{{RequestedPath: alias}, {RequestedPath: effective}}, nil
+		},
+	})
+
+	roots, err := provider.CapacityRoots(context.Background())
+	if err != nil {
+		t.Fatalf("CapacityRoots: %v", err)
+	}
+	if len(roots) != 1 || roots[0].Path != effective || roots[0].RequestedPath != alias {
+		t.Fatalf("capacity roots = %#v, want one canonical root", roots)
+	}
+	if len(roots[0].Aliases) != 1 || roots[0].Aliases[0] != effective {
+		t.Fatalf("capacity aliases = %#v, want the collapsed effective path", roots[0].Aliases)
+	}
+}
+
+func TestAnalyzeIncludesBoundedEntryBreakdownAndOwnership(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "small"), []byte("abc"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "large"), []byte("1234567"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	registeredPath := filepath.Join(root, "large")
+	provider := New(Config{
+		GOOS: "windows", EffectiveRoot: root, Mounts: testMountReader{},
+		RootResolver: func(context.Context) ([]RootCandidate, error) {
+			return []RootCandidate{{RequestedPath: root}}, nil
+		},
+		Scanner: filescan.NewLimiter(1),
+		ClassifyOwnership: func(_ context.Context, paths []string) map[string]EntryOwnership {
+			classified := map[string]EntryOwnership{}
+			for _, path := range paths {
+				if path == registeredPath {
+					classified[path] = EntryOwnershipRegisteredKandev
+				} else {
+					classified[path] = EntryOwnershipUntracked
+				}
+			}
+			return classified
+		},
+	})
+
+	analysis, err := provider.Analyze(context.Background())
+	if err != nil {
+		t.Fatalf("Analyze: %v", err)
+	}
+	if len(analysis.Roots) != 1 || analysis.Roots[0].Breakdown == nil {
+		t.Fatalf("roots = %#v, want one root with a breakdown", analysis.Roots)
+	}
+	breakdown := analysis.Roots[0].Breakdown
+	if breakdown.Status != StatusMeasured || len(breakdown.Entries) != 2 {
+		t.Fatalf("breakdown = %#v, want two measured entries", breakdown)
+	}
+	if breakdown.Entries[0].Name != "large" || breakdown.Entries[0].Ownership != EntryOwnershipRegisteredKandev ||
+		breakdown.Entries[0].SizeBytes == nil || *breakdown.Entries[0].SizeBytes != 7 {
+		t.Fatalf("largest entry = %#v, want registered large entry with 7 bytes", breakdown.Entries[0])
+	}
+	if breakdown.Entries[1].Name != "small" || breakdown.Entries[1].Ownership != EntryOwnershipUntracked {
+		t.Fatalf("second entry = %#v, want untracked small entry", breakdown.Entries[1])
 	}
 }
 
@@ -285,5 +360,70 @@ func TestAnalyzeTemporaryDeadlineReturnsPartialSample(t *testing.T) {
 	}
 	if analysis.Reason != "deadline" || analysis.Roots[0].Reason != "deadline" {
 		t.Fatalf("analysis = %#v, want deadline reason", analysis)
+	}
+}
+
+func TestAnalyzeTemporaryDeadlineNormalizesJoinedWarnings(t *testing.T) {
+	firstRoot := t.TempDir()
+	secondRoot := t.TempDir()
+	provider := NewProvider(Config{
+		GOOS:     "linux",
+		Mounts:   testMountReader{},
+		Deadline: time.Nanosecond,
+		RootResolver: func(context.Context) ([]RootCandidate, error) {
+			return []RootCandidate{
+				{RequestedPath: firstRoot},
+				{RequestedPath: secondRoot},
+			}, nil
+		},
+		Scanner: testScanner{measure: func(
+			ctx context.Context,
+			_ []filescan.Root,
+			_ filescan.MeasureOptions,
+			_ func(filescan.Progress),
+		) []filescan.Result {
+			<-ctx.Done()
+			return []filescan.Result{
+				{
+					Bytes:        17,
+					SkippedCount: 2,
+					Err: fmt.Errorf(
+						"wrapped scan result: %w",
+						errors.Join(context.DeadlineExceeded, errors.New("permission denied")),
+					),
+				},
+				{
+					Bytes:        23,
+					SkippedCount: 3,
+					Err: errors.Join(
+						context.DeadlineExceeded,
+						errors.New("permission denied"),
+						errors.New("root disappeared"),
+					),
+				},
+			}
+		}},
+	})
+
+	analysis, err := provider.Analyze(context.Background())
+	if err != nil {
+		t.Fatalf("Analyze: %v", err)
+	}
+	if analysis.Status != StatusPartial || analysis.SizeBytes == nil || *analysis.SizeBytes != 40 {
+		t.Fatalf("analysis = %#v, want a 40-byte partial sample", analysis)
+	}
+	if analysis.Warnings == nil || len(analysis.Warnings) != 2 {
+		t.Fatalf("analysis warnings = %#v, want two distinct diagnostics", analysis.Warnings)
+	}
+	if analysis.Warnings[0] != "permission denied" || analysis.Warnings[1] != "root disappeared" {
+		t.Fatalf("analysis warnings = %#v, want normalized diagnostics", analysis.Warnings)
+	}
+	for _, warning := range analysis.Warnings {
+		if warning == context.DeadlineExceeded.Error() {
+			t.Fatalf("analysis warnings contain the deadline marker: %#v", analysis.Warnings)
+		}
+	}
+	if analysis.Roots[0].SkippedCount != 2 || analysis.Roots[1].SkippedCount != 3 {
+		t.Fatalf("root skipped counts = %#v, want 2 and 3", analysis.Roots)
 	}
 }

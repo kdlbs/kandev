@@ -5,7 +5,7 @@ import (
 	"expvar"
 	"testing"
 
-	runsservice "github.com/kandev/kandev/internal/runs/service"
+	"github.com/kandev/kandev/internal/office/shared"
 )
 
 // windowedDedupCounterValue reads the current value of one
@@ -51,7 +51,7 @@ func TestSchedulerService_QueueRun_ReportsWindowedDedupOutcome(t *testing.T) {
 	if err != nil {
 		t.Fatalf("first enqueue: %v", err)
 	}
-	if first != runsservice.QueueOutcomeQueued {
+	if first != shared.QueueOutcomeQueued {
 		t.Fatalf("first outcome = %v, want QueueOutcomeQueued", first)
 	}
 
@@ -61,7 +61,7 @@ func TestSchedulerService_QueueRun_ReportsWindowedDedupOutcome(t *testing.T) {
 	if err != nil {
 		t.Fatalf("second enqueue: %v", err)
 	}
-	if second != runsservice.QueueOutcomeDeduped {
+	if second != shared.QueueOutcomeDeduped {
 		t.Fatalf("second outcome = %v, want QueueOutcomeDeduped", second)
 	}
 

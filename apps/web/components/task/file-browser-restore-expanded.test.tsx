@@ -16,7 +16,7 @@ vi.mock("@/hooks/domains/session/use-session-agentctl", () => ({
   useSessionAgentctl: () => ({ isReady: true }),
 }));
 
-import { useFileBrowserTree } from "./file-browser-hooks";
+import { loadNodeChildren, useFileBrowserTree } from "./file-browser-hooks";
 
 const ROOT_PATH = "";
 const CODEX_PATH = ".codex";
@@ -31,23 +31,23 @@ const SESSION = "session-1";
 const ENVIRONMENT = "environment-1";
 const STORAGE_KEY = `kandev.filesPanel.expanded.${ENVIRONMENT}`;
 
-describe("useFileBrowserTree persisted expansion", () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-    sessionStorage.clear();
-    sessionStorage.setItem(STORAGE_KEY, JSON.stringify(EXPANDED_PATHS));
-    requestFileTreeMock.mockImplementation((_client: unknown, _sessionId: string, path: string) => {
-      if (path === ROOT_PATH) return Promise.resolve({ root: { ...ROOT, children: [CODEX] } });
-      if (path === CODEX_PATH) return Promise.resolve({ root: { ...CODEX, children: [AGENTS] } });
-      if (path === AGENTS_PATH) {
-        return Promise.resolve({ root: { ...AGENTS, children: [CONFIG] } });
-      }
-      throw new Error(`Unexpected path: ${path}`);
-    });
+beforeEach(() => {
+  vi.clearAllMocks();
+  sessionStorage.clear();
+  sessionStorage.setItem(STORAGE_KEY, JSON.stringify(EXPANDED_PATHS));
+  requestFileTreeMock.mockImplementation((_client: unknown, _sessionId: string, path: string) => {
+    if (path === ROOT_PATH) return Promise.resolve({ root: { ...ROOT, children: [CODEX] } });
+    if (path === CODEX_PATH) return Promise.resolve({ root: { ...CODEX, children: [AGENTS] } });
+    if (path === AGENTS_PATH) {
+      return Promise.resolve({ root: { ...AGENTS, children: [CONFIG] } });
+    }
+    throw new Error(`Unexpected path: ${path}`);
   });
+});
 
-  afterEach(() => vi.useRealTimers());
+afterEach(() => vi.useRealTimers());
 
+describe("useFileBrowserTree persisted expansion", () => {
   it("hydrates every persisted expanded ancestor before marking the tree loaded", async () => {
     const { result } = renderHook(() => useFileBrowserTree(SESSION, ENVIRONMENT));
 
@@ -70,6 +70,22 @@ describe("useFileBrowserTree persisted expansion", () => {
     ["deep-first", [AGENTS_PATH, CODEX_PATH]],
   ])("synthesizes ancestor expansion for %s saved paths", async (_label, savedPaths) => {
     sessionStorage.setItem(STORAGE_KEY, JSON.stringify(savedPaths));
+    const { result } = renderHook(() => useFileBrowserTree(SESSION, ENVIRONMENT));
+
+    await waitFor(() => expect(result.current.loadState).toBe("loaded"));
+
+    expect(requestFileTreeMock.mock.calls.map((call) => call[2])).toEqual([
+      ROOT_PATH,
+      ...EXPANDED_PATHS,
+    ]);
+    expect(result.current.expandedPaths).toEqual(new Set(EXPANDED_PATHS));
+  });
+
+  it("discards invalid persisted paths while restoring valid siblings", async () => {
+    sessionStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify([CODEX_PATH, AGENTS_PATH, "/home/jcfs/project/public/assets"]),
+    );
     const { result } = renderHook(() => useFileBrowserTree(SESSION, ENVIRONMENT));
 
     await waitFor(() => expect(result.current.loadState).toBe("loaded"));
@@ -127,3 +143,36 @@ describe("useFileBrowserTree persisted expansion", () => {
     expect(sessionStorage.getItem(STORAGE_KEY)).toBe("[]");
   });
 });
+
+// @covers AC-UI-TASK-NAVIGATION-RESPONSIVENESS-001.5
+it.each(["empty", "missing"])(
+  "discards retained descendants after an authoritative %s folder response",
+  async (responseKind) => {
+    const { result, rerender } = renderHook(
+      ({ sessionId }) => useFileBrowserTree(sessionId, ENVIRONMENT),
+      { initialProps: { sessionId: SESSION } },
+    );
+    await waitFor(() => expect(result.current.loadState).toBe("loaded"));
+    expect(result.current.visibleRows.map((row) => row.path)).toContain(CONFIG_PATH);
+    requestFileTreeMock.mockImplementation((_client: unknown, _sessionId: string, path: string) => {
+      if (path === ROOT_PATH) return Promise.resolve({ root: { ...ROOT, children: [CODEX] } });
+      if (path === CODEX_PATH) return Promise.resolve({ root: { ...CODEX, children: [AGENTS] } });
+      // Empty directories omit children on the backend wire response.
+      return Promise.resolve({ root: responseKind === "empty" ? AGENTS : null });
+    });
+    rerender({ sessionId: "session-2" });
+    await waitFor(() => expect(result.current.loadState).toBe("loaded"));
+    const folder = result.current.visibleRows.find((row) => row.path === AGENTS_PATH)!.node;
+    expect(folder.children ?? []).toEqual([]);
+    expect(result.current.visibleRows.map((row) => row.path)).not.toContain(CONFIG_PATH);
+
+    const fresh = { ...CONFIG, name: "fresh.toml", path: `${AGENTS_PATH}/fresh.toml` };
+    requestFileTreeMock.mockResolvedValue({ root: { ...AGENTS, children: [fresh] } });
+    await act(async () => {
+      result.current.setExpandedPaths((previous) => new Set([...previous, AGENTS_PATH]));
+      await loadNodeChildren(folder, "session-2", result.current);
+    });
+    expect(result.current.visibleRows.map((row) => row.path)).toContain(fresh.path);
+    expect(result.current.visibleRows.map((row) => row.path)).not.toContain(CONFIG_PATH);
+  },
+);

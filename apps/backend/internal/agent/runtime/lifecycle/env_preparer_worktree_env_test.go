@@ -99,3 +99,26 @@ func TestBuildWorktreeCreateRequestAllowsExplicitBranchReplacement(t *testing.T)
 		t.Fatal("explicit branch replacement must not use attach-only ReuseRequired")
 	}
 }
+
+func TestBuildWorktreeCreateRequestScopesCheckoutCredentials(t *testing.T) {
+	env := map[string]string{
+		"GIT_DIR": "/profile/git", "PROFILE_SECRET": "not-for-git",
+		githubauth.CredentialBrokerURLEnv: "https://broker.example/resolve",
+		githubauth.CredentialLeaseEnv:     "lease", githubauth.CredentialHelperPathEnv: "/opt/agentctl",
+		"GIT_CONFIG_COUNT": "4",
+		"GIT_CONFIG_KEY_0": "core.hooksPath", "GIT_CONFIG_VALUE_0": "/profile/hooks",
+		"GIT_CONFIG_KEY_1": "credential.https://github.com.helper", "GIT_CONFIG_VALUE_1": "",
+		"GIT_CONFIG_KEY_2": "credential.https://github.com.helper", "GIT_CONFIG_VALUE_2": githubauth.ManagedGitCredentialHelper,
+		"GIT_CONFIG_KEY_3": "credential.https://github.com.useHttpPath", "GIT_CONFIG_VALUE_3": "true",
+	}
+	got := buildWorktreeCreateRequest(&EnvPrepareRequest{Env: env}).CheckoutEnv
+	if got["GIT_DIR"] != "" || got["PROFILE_SECRET"] != "" {
+		t.Fatal("profile environment reached checkout")
+	}
+	if got[githubauth.CredentialLeaseEnv] != "lease" || got[githubauth.CredentialHelperPathEnv] != "/opt/agentctl" {
+		t.Fatal("managed authentication lost")
+	}
+	if got["GIT_CONFIG_COUNT"] != "3" || got["GIT_CONFIG_KEY_0"] != "credential.https://github.com.helper" || got["GIT_CONFIG_VALUE_1"] != githubauth.ManagedGitCredentialHelper || got["GIT_CONFIG_KEY_2"] != "credential.https://github.com.useHttpPath" {
+		t.Fatalf("checkout config = %#v", got)
+	}
+}

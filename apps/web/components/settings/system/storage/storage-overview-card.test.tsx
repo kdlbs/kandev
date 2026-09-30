@@ -68,6 +68,9 @@ const DATABASE_BACKUP_PATH = "/data/backups";
 const DATABASE_TRIGGER_TEST_ID = "storage-resource-database-trigger";
 const DATABASE_BACKUPS_TRIGGER_TEST_ID = "storage-resource-database-backups-trigger";
 const STORAGE_ANALYSIS_TOTAL_TEST_ID = "storage-analysis-total";
+const SYSTEM_TEMPORARY_RESOURCE_TEST_ID = "storage-resource-system-temporary";
+const SYSTEM_TEMPORARY_TRIGGER_TEST_ID = "storage-resource-system-temporary-trigger";
+const PERMISSION_DENIED_WARNING = "permission denied";
 
 afterEach(cleanup);
 
@@ -208,19 +211,135 @@ describe("StorageOverviewCard system temporary resources", () => {
 
     render(<StorageOverviewCard overview={overview} onRunGoCache={vi.fn()} />);
 
-    const trigger = screen.getByTestId("storage-resource-system-temporary-trigger");
+    const trigger = screen.getByTestId(SYSTEM_TEMPORARY_TRIGGER_TEST_ID);
     expect(trigger.textContent).toContain("100 GB");
     fireEvent.click(trigger);
-    expect(screen.getByTestId("storage-resource-system-temporary").textContent).toContain("/tmp");
-    expect(screen.getByTestId("storage-resource-system-temporary").textContent).toContain(
-      "Partial",
-    );
-    expect(screen.getByTestId("storage-resource-system-temporary").textContent).toContain(
+    expect(screen.getByTestId(SYSTEM_TEMPORARY_RESOURCE_TEST_ID).textContent).toContain("/tmp");
+    expect(screen.getByTestId(SYSTEM_TEMPORARY_RESOURCE_TEST_ID).textContent).toContain("Partial");
+    expect(screen.getByTestId(SYSTEM_TEMPORARY_RESOURCE_TEST_ID).textContent).toContain(
       "2 entries skipped",
     );
     expect(screen.getByTestId(STORAGE_ANALYSIS_TOTAL_TEST_ID).textContent).toContain(
       "Total counted: 14 GB",
     );
+  });
+
+  it("shows one localized timeout and preserves unrelated older diagnostics", () => {
+    const overview = {
+      ...degradedOverview,
+      summary: {
+        ...degradedOverview.summary,
+        system_temporary: {
+          status: "partial",
+          size_bytes: 24,
+          included_in_total: false,
+          reason: "deadline",
+          roots: [
+            {
+              requested_path: "/tmp",
+              path: "/tmp",
+              status: "partial",
+              size_bytes: 24,
+              skipped_count: 1,
+              warnings: [
+                "context deadline exceeded",
+                "context deadline exceeded\ncontext deadline exceeded",
+                PERMISSION_DENIED_WARNING,
+              ],
+            },
+          ],
+          warnings: [
+            "context deadline exceeded",
+            PERMISSION_DENIED_WARNING,
+            PERMISSION_DENIED_WARNING,
+          ],
+        },
+      },
+    } satisfies StorageOverviewResponse;
+
+    render(<StorageOverviewCard overview={overview} onRunGoCache={vi.fn()} />);
+
+    fireEvent.click(screen.getByTestId(SYSTEM_TEMPORARY_TRIGGER_TEST_ID));
+    const resource = screen.getByTestId(SYSTEM_TEMPORARY_RESOURCE_TEST_ID);
+    expect(resource.textContent).toContain("Scan timed out. Showing partial usage.");
+    expect(resource.textContent).toContain(PERMISSION_DENIED_WARNING);
+    expect(resource.textContent).not.toContain("context deadline exceeded");
+    expect(resource.textContent?.match(/Scan timed out\. Showing partial usage\./g)).toHaveLength(
+      1,
+    );
+  });
+});
+
+describe("StorageOverviewCard temporary entry breakdown", () => {
+  it("renders bounded entry sizes and ownership without starting cleanup", () => {
+    const onReviewTemporaryArtifacts = vi.fn();
+    const onRunTemporaryArtifacts = vi.fn();
+    const overview = {
+      ...degradedOverview,
+      capabilities: { ...degradedOverview.capabilities, temporary_artifacts_available: true },
+      summary: {
+        ...degradedOverview.summary,
+        temporary_artifacts: {
+          available: true,
+          stale_count: 2,
+          stale_bytes: 128,
+        },
+        system_temporary: {
+          status: "partial",
+          included_in_total: false,
+          roots: [
+            {
+              requested_path: "/tmp",
+              path: "/tmp",
+              status: "partial",
+              breakdown: {
+                status: "partial",
+                entries: [
+                  {
+                    name: "build-output",
+                    kind: "directory",
+                    size_bytes: 900,
+                    completeness: "measured",
+                    ownership: "untracked",
+                  },
+                  {
+                    name: "active-profile",
+                    kind: "directory",
+                    completeness: "partial",
+                    ownership: "unknown",
+                  },
+                ],
+                other_observed_bytes: 12,
+                other_observed_count: 3,
+              },
+            },
+          ],
+        },
+      },
+    } satisfies StorageOverviewResponse;
+
+    render(
+      <StorageOverviewCard
+        overview={overview}
+        onRunGoCache={vi.fn()}
+        onRunTemporaryArtifacts={onRunTemporaryArtifacts}
+        onReviewTemporaryArtifacts={onReviewTemporaryArtifacts}
+      />,
+    );
+
+    fireEvent.click(screen.getByTestId(SYSTEM_TEMPORARY_TRIGGER_TEST_ID));
+    const entries = screen.getByTestId("storage-temporary-entries");
+    expect(entries.textContent).toContain("build-output");
+    expect(entries.textContent).toContain("900 B");
+    expect(entries.textContent).toContain("Not tracked by Kandev");
+    expect(entries.textContent).toContain("active-profile");
+    expect(entries.textContent).toContain("Unavailable");
+    expect(entries.textContent).toContain("Ownership unknown");
+    expect(entries.textContent).toContain("3 other observed entries");
+    expect(entries.textContent).toContain("2 stale candidates");
+    fireEvent.click(screen.getByTestId("storage-temporary-review-cleanup"));
+    expect(onReviewTemporaryArtifacts).toHaveBeenCalledTimes(1);
+    expect(onRunTemporaryArtifacts).not.toHaveBeenCalled();
   });
 });
 

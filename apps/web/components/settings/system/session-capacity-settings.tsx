@@ -5,10 +5,11 @@ import { Badge } from "@kandev/ui/badge";
 import { Button } from "@kandev/ui/button";
 import { CardContent, CardHeader, CardTitle } from "@kandev/ui/card";
 import { Input } from "@kandev/ui/input";
-import { Label } from "@kandev/ui/label";
+import { SettingsRow } from "../settings-group";
+import { SettingsInfo } from "../settings-info";
 import { Spinner } from "@kandev/ui/spinner";
 import { Switch } from "@kandev/ui/switch";
-import { IconAlertCircle, IconInfoCircle, IconLock } from "@tabler/icons-react";
+import { IconAlertCircle, IconLock } from "@tabler/icons-react";
 import { useTranslation } from "react-i18next";
 import { SettingsCard } from "@/components/settings/settings-card";
 import {
@@ -22,23 +23,33 @@ import {
 
 const ENVIRONMENT_VARIABLE = "KANDEV_MAX_CONCURRENT_SESSIONS";
 
-function SessionCapacityLoadError({ onRetry }: { onRetry: () => void }) {
+function SessionCapacityLoadError({
+  onRetry,
+  withinGroup = false,
+}: {
+  onRetry: () => void;
+  withinGroup?: boolean;
+}) {
   const { t } = useTranslation();
+  const content = (
+    <div className="space-y-3 py-6">
+      <Alert variant="destructive">
+        <IconAlertCircle className="size-4" />
+        <AlertDescription>{t("system:sessionCapacityLoadFailed")}</AlertDescription>
+      </Alert>
+      <Button
+        variant="outline"
+        className={settingsActionClassName("cursor-pointer")}
+        onClick={onRetry}
+      >
+        {t("system:sessionCapacityRetry")}
+      </Button>
+    </div>
+  );
+  if (withinGroup) return <div data-testid="session-capacity-settings">{content}</div>;
   return (
     <SettingsCard data-testid="session-capacity-settings">
-      <CardContent className="space-y-3 py-6">
-        <Alert variant="destructive">
-          <IconAlertCircle className="size-4" />
-          <AlertDescription>{t("system:sessionCapacityLoadFailed")}</AlertDescription>
-        </Alert>
-        <Button
-          variant="outline"
-          className={settingsActionClassName("cursor-pointer")}
-          onClick={onRetry}
-        >
-          {t("system:sessionCapacityRetry")}
-        </Button>
-      </CardContent>
+      <CardContent>{content}</CardContent>
     </SettingsCard>
   );
 }
@@ -55,22 +66,19 @@ function SessionCapacitySwitch({
   const { t } = useTranslation();
   const label = t("system:sessionCapacityEnabledLabel");
   return (
-    <div className="flex flex-wrap items-start justify-between gap-3">
-      <div className="min-w-0 flex-1 space-y-1">
-        <Label
-          htmlFor="session-capacity-enabled"
-          className="inline-flex min-h-11 items-center py-2"
-        >
-          {label}
-        </Label>
-        <p className="text-sm text-muted-foreground">
-          {t("system:sessionCapacityEnabledDescription")}
-        </p>
-      </div>
-      <div
-        data-testid="session-capacity-enabled-touch-target"
-        className="flex min-h-11 min-w-11 shrink-0 items-center justify-center"
-      >
+    <SettingsRow
+      label={label}
+      description={t("settings:sessionLimitShort")}
+      controlId="session-capacity-enabled"
+      touchTarget="switch"
+      controlWrapperTestId="session-capacity-enabled-touch-target"
+      info={
+        <SettingsInfo label={label}>
+          <p>{t("system:sessionCapacityEnabledDescription")}</p>
+          <p>{t("system:sessionCapacityBehaviorHelp")}</p>
+        </SettingsInfo>
+      }
+      control={
         <Switch
           id="session-capacity-enabled"
           data-testid="session-capacity-enabled"
@@ -78,10 +86,10 @@ function SessionCapacitySwitch({
           disabled={disabled}
           onCheckedChange={onChange}
           aria-label={label}
-          className="cursor-pointer [@media(pointer:coarse)]:after:-inset-y-3.5 disabled:cursor-not-allowed"
+          className="cursor-pointer disabled:cursor-not-allowed"
         />
-      </div>
-    </div>
+      }
+    />
   );
 }
 
@@ -97,34 +105,41 @@ function MaximumField({
   onChange: (value: string) => void;
 }) {
   const { t } = useTranslation();
-  const describedBy = error
-    ? "session-capacity-maximum-help session-capacity-maximum-error"
-    : "session-capacity-maximum-help";
   return (
-    <div className="min-w-0 space-y-2 border-t border-border/70 pt-5">
-      <Label htmlFor="session-capacity-maximum">{t("system:sessionCapacityMaximumLabel")}</Label>
-      <Input
-        id="session-capacity-maximum"
-        data-testid="session-capacity-maximum"
-        type="number"
-        inputMode="numeric"
-        min={1}
-        max={2147483647}
-        step={1}
-        value={value}
-        disabled={disabled}
-        aria-invalid={error ? true : undefined}
-        aria-describedby={describedBy}
-        onChange={(event) => onChange(event.target.value)}
-        className={settingsControlClassName("w-full max-w-xs")}
+    <div className="space-y-2">
+      <SettingsRow
+        label={t("system:sessionCapacityMaximumLabel")}
+        description={t("settings:sessionMaximumShort")}
+        descriptionId="session-capacity-maximum-help"
+        controlId="session-capacity-maximum"
+        info={
+          <SettingsInfo label={t("system:sessionCapacityMaximumLabel")}>
+            {t("system:sessionCapacityMaximumHelp")}
+          </SettingsInfo>
+        }
+        control={
+          <Input
+            id="session-capacity-maximum"
+            data-testid="session-capacity-maximum"
+            type="number"
+            inputMode="numeric"
+            min={1}
+            max={2147483647}
+            step={1}
+            value={value}
+            disabled={disabled}
+            aria-invalid={error ? true : undefined}
+            aria-describedby={error ? "session-capacity-maximum-error" : undefined}
+            onChange={(event) => onChange(event.target.value)}
+            className={settingsControlClassName("w-full md:w-40")}
+          />
+        }
       />
-      <p id="session-capacity-maximum-help" className="text-xs text-muted-foreground">
-        {t("system:sessionCapacityMaximumHelp")}
-      </p>
       {error && (
         <p
           id="session-capacity-maximum-error"
           data-testid="session-capacity-maximum-error"
+          role="alert"
           className="text-sm text-destructive"
         >
           {error}
@@ -148,7 +163,7 @@ function EffectiveCapacity({
   const { t } = useTranslation();
   const current = enabled ? String(maximum) : t("system:sessionCapacityNoLimit");
   return (
-    <div className="rounded-md border border-border/70 bg-muted/20 p-3 text-sm">
+    <div className="text-xs text-muted-foreground">
       <div className="flex flex-wrap items-center gap-2">
         <span className="text-muted-foreground">{t("system:sessionCapacityCurrent")}</span>
         <strong data-testid="session-capacity-effective-value">{current}</strong>
@@ -159,7 +174,6 @@ function EffectiveCapacity({
           <span className="text-muted-foreground">({t("system:sessionCapacityUnsaved")})</span>
         )}
       </div>
-      <p className="mt-2 text-xs text-muted-foreground">{t("system:sessionCapacityScope")}</p>
     </div>
   );
 }
@@ -194,26 +208,40 @@ function sessionCapacityMaximumError({
   return invalidReason;
 }
 
-export function SessionCapacitySettings() {
+function SessionCapacityLoadingState({ withinGroup }: { withinGroup: boolean }) {
   const { t } = useTranslation();
+  const loadingContent = (
+    <div className="flex items-center gap-2 py-6 text-sm text-muted-foreground">
+      <Spinner className="size-4" />
+      {t("system:sessionCapacityLoading")}
+    </div>
+  );
+  if (withinGroup) return <div data-testid="session-capacity-settings">{loadingContent}</div>;
+  return (
+    <SettingsCard data-testid="session-capacity-settings">
+      <CardContent>{loadingContent}</CardContent>
+    </SettingsCard>
+  );
+}
+
+type SessionCapacitySettingsContentProps = {
+  state: ReturnType<typeof useSessionCapacitySettings>;
+  withinGroup?: boolean;
+};
+
+export function SessionCapacitySettings() {
   const state = useSessionCapacitySettings();
+  return <SessionCapacitySettingsContent state={state} />;
+}
 
-  if (state.loading && !state.snapshot) {
-    return (
-      <SettingsCard data-testid="session-capacity-settings">
-        <CardContent className="flex items-center gap-2 py-6 text-sm text-muted-foreground">
-          <Spinner className="size-4" />
-          {t("system:sessionCapacityLoading")}
-        </CardContent>
-      </SettingsCard>
-    );
-  }
-  if (state.loadFailed && !state.snapshot) {
-    return <SessionCapacityLoadError onRetry={() => void state.reload()} />;
-  }
-  if (!state.snapshot) return null;
-
-  const { effective, settings } = state.snapshot;
+function SessionCapacitySettingsReady({
+  state,
+  withinGroup,
+}: SessionCapacitySettingsContentProps & {
+  state: NonNullable<SessionCapacitySettingsContentProps["state"]>;
+}) {
+  const { t } = useTranslation();
+  const { effective, settings } = state.snapshot!;
   const controlsDisabled = !state.isAdmin || state.isLocked;
   const effectiveEnabled = state.isLocked ? effective.enabled : state.enabledDraft;
   const effectiveMaximum = state.isLocked ? effective.max_sessions : settings.max_sessions;
@@ -225,19 +253,18 @@ export function SessionCapacitySettings() {
     invalidReason: state.invalidReason,
   });
 
-  return (
-    <SettingsCard
-      isDirty={state.isDirty}
-      className="min-w-0 w-full"
-      data-testid="session-capacity-settings"
-    >
-      <CardHeader>
-        <CardTitle className="text-base">{t("system:sessionCapacityLimitTitle")}</CardTitle>
-        <p className="text-sm text-muted-foreground">
-          {t("system:sessionCapacityLimitDescription")}
-        </p>
-      </CardHeader>
-      <CardContent className="min-w-0 space-y-5">
+  const content = (
+    <>
+      {withinGroup ? (
+        <div className="space-y-1 pb-3">
+          <h4 className="text-sm font-semibold">{t("system:sessionCapacityLimitTitle")}</h4>
+        </div>
+      ) : (
+        <CardHeader>
+          <CardTitle className="text-base">{t("system:sessionCapacityLimitTitle")}</CardTitle>
+        </CardHeader>
+      )}
+      <CardContent className={withinGroup ? "min-w-0 space-y-5 px-0" : "min-w-0 space-y-5"}>
         <SessionCapacitySwitch
           checked={effectiveEnabled}
           disabled={controlsDisabled}
@@ -257,10 +284,6 @@ export function SessionCapacitySettings() {
           source={effective.source}
           isDirty={state.isDirty}
         />
-        <div className="flex gap-2 rounded-md border border-border/70 bg-muted/20 p-3 text-sm text-muted-foreground">
-          <IconInfoCircle className="size-4 shrink-0" />
-          <p>{t("system:sessionCapacityBehaviorHelp")}</p>
-        </div>
         {state.isLocked && <SessionCapacityManagedNotice />}
         {!state.isAdmin && (
           <p className="text-sm text-muted-foreground">{t("system:sessionCapacityAdminOnly")}</p>
@@ -272,6 +295,40 @@ export function SessionCapacitySettings() {
           </Alert>
         )}
       </CardContent>
+    </>
+  );
+
+  if (withinGroup) {
+    return (
+      <div className="min-w-0 py-3" data-testid="session-capacity-settings">
+        {content}
+      </div>
+    );
+  }
+
+  return (
+    <SettingsCard
+      isDirty={state.isDirty}
+      className="min-w-0 w-full"
+      data-testid="session-capacity-settings"
+    >
+      {content}
     </SettingsCard>
   );
+}
+
+export function SessionCapacitySettingsContent({
+  state,
+  withinGroup = false,
+}: SessionCapacitySettingsContentProps) {
+  if (state.loading && !state.snapshot) {
+    return <SessionCapacityLoadingState withinGroup={withinGroup} />;
+  }
+  if (state.loadFailed && !state.snapshot) {
+    return (
+      <SessionCapacityLoadError onRetry={() => void state.reload()} withinGroup={withinGroup} />
+    );
+  }
+  if (!state.snapshot) return null;
+  return <SessionCapacitySettingsReady state={state} withinGroup={withinGroup} />;
 }

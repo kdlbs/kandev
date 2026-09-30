@@ -8,6 +8,9 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/prompts/models"
 	promptstore "github.com/kandev/kandev/internal/prompts/store"
 )
@@ -21,7 +24,9 @@ var (
 )
 
 type Service struct {
-	repo promptstore.Repository
+	repo     promptstore.Repository
+	eventBus bus.EventBus
+	logger   *logger.Logger
 }
 
 type PromptReferenceExpansion struct {
@@ -77,6 +82,10 @@ func (s *Service) GetPromptByName(ctx context.Context, name string) (*models.Pro
 }
 
 func (s *Service) CreatePrompt(ctx context.Context, name, content string) (*models.Prompt, error) {
+	return s.createPrompt(ctx, name, content, false)
+}
+
+func (s *Service) createPrompt(ctx context.Context, name, content string, allowAgentEdits bool) (*models.Prompt, error) {
 	name = strings.TrimSpace(name)
 	content = strings.TrimSpace(content)
 	if !validPromptFields(name, content) {
@@ -86,8 +95,9 @@ func (s *Service) CreatePrompt(ctx context.Context, name, content string) (*mode
 		return nil, err
 	}
 	prompt := &models.Prompt{
-		Name:    name,
-		Content: content,
+		Name:            name,
+		Content:         content,
+		AllowAgentEdits: allowAgentEdits,
 	}
 	if err := s.repo.CreatePrompt(ctx, prompt); err != nil {
 		if errors.Is(err, promptstore.ErrPromptListLimit) {
@@ -95,15 +105,16 @@ func (s *Service) CreatePrompt(ctx context.Context, name, content string) (*mode
 		}
 		return nil, translateNameConflict(err)
 	}
+	s.publishChanged(ctx)
 	return prompt, nil
 }
 
-// translateNameConflict closes the TOCTOU window between assertNameAvailable
-// and the write: the SQLite UNIQUE index on custom_prompts.name is the only
-// authoritative guard, and a concurrent write that loses the race surfaces a
-// "UNIQUE constraint failed" driver error which would otherwise fall through
-// to a generic 500.
+// translateNameConflict maps authoritative unique-name constraints on both databases.
 func translateNameConflict(err error) error {
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) && pgErr.Code == "23505" && pgErr.ConstraintName == "custom_prompts_name_key" {
+		return ErrPromptAlreadyExists
+	}
 	if err != nil && strings.Contains(err.Error(), "UNIQUE constraint failed") {
 		return ErrPromptAlreadyExists
 	}
@@ -128,18 +139,39 @@ func (s *Service) assertNameAvailable(ctx context.Context, name, excludeID strin
 }
 
 func (s *Service) UpdatePrompt(ctx context.Context, promptID string, name *string, content *string) (*models.Prompt, error) {
+	return s.UpdatePromptWithPermission(ctx, promptID, name, content, nil)
+}
+
+func (s *Service) UpdatePromptWithPermission(ctx context.Context, promptID string, name, content *string, allowAgentEdits *bool) (*models.Prompt, error) {
 	prompt, err := s.repo.GetPromptByID(ctx, promptID)
-	if err != nil {
+	if errors.Is(err, sql.ErrNoRows) || (err == nil && prompt == nil) {
 		return nil, ErrPromptNotFound
 	}
+	if err != nil {
+		return nil, err
+	}
+	if err := s.applyPromptFields(ctx, prompt, name, content); err != nil {
+		return nil, err
+	}
+	if allowAgentEdits != nil {
+		prompt.AllowAgentEdits = *allowAgentEdits && !prompt.Builtin
+	}
+	if err := s.repo.UpdatePrompt(ctx, prompt); err != nil {
+		return nil, translateNameConflict(err)
+	}
+	s.publishChanged(ctx)
+	return prompt, nil
+}
+
+func (s *Service) applyPromptFields(ctx context.Context, prompt *models.Prompt, name, content *string) error {
 	if name != nil {
 		trimmed := strings.TrimSpace(*name)
 		if trimmed == "" || len(trimmed) > maxPromptNameBytes {
-			return nil, ErrInvalidPrompt
+			return ErrInvalidPrompt
 		}
 		if trimmed != prompt.Name {
 			if err := s.assertNameAvailable(ctx, trimmed, prompt.ID); err != nil {
-				return nil, err
+				return err
 			}
 		}
 		prompt.Name = trimmed
@@ -147,21 +179,22 @@ func (s *Service) UpdatePrompt(ctx context.Context, promptID string, name *strin
 	if content != nil {
 		trimmed := strings.TrimSpace(*content)
 		if trimmed == "" || len(trimmed) > maxPromptContentBytes {
-			return nil, ErrInvalidPrompt
+			return ErrInvalidPrompt
 		}
 		prompt.Content = trimmed
 	}
-	if err := s.repo.UpdatePrompt(ctx, prompt); err != nil {
-		return nil, translateNameConflict(err)
-	}
-	return prompt, nil
+	return nil
 }
 
 func (s *Service) DeletePrompt(ctx context.Context, promptID string) error {
 	if promptID == "" {
 		return ErrInvalidPrompt
 	}
-	return s.repo.DeletePrompt(ctx, promptID)
+	if err := s.repo.DeletePrompt(ctx, promptID); err != nil {
+		return err
+	}
+	s.publishChanged(ctx)
+	return nil
 }
 
 // ResolvePromptContent returns the stored prompt content by name, falling back

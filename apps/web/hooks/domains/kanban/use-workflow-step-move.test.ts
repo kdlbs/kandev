@@ -6,9 +6,14 @@ import { usePresentationToken, useWorkflowStepMove } from "./use-workflow-step-m
 const mockAppState = vi.hoisted(() => ({
   value: {
     tasks: { activeSessionId: null as string | null },
+    taskRemoval: { navigationRevision: 4 },
     chatInput: { planModeBySessionId: {} as Record<string, boolean> },
     setPlanMode: vi.fn(),
     setActiveDocument: vi.fn(),
+    beginWorkflowSessionFocus: vi.fn(() => 1),
+    bindWorkflowSessionFocus: vi.fn(),
+    reconcileWorkflowSessionFocus: vi.fn(),
+    cancelWorkflowSessionFocus: vi.fn(),
   },
 }));
 const mockLayoutStore = vi.hoisted(() => ({ closeDocument: vi.fn() }));
@@ -37,11 +42,13 @@ vi.mock("@/lib/api", () => ({
 
 const TASK_ID = "task-1";
 const WORKFLOW_ID = "workflow-1";
+const ENTRY_IDENTITY = "entry:00000000000000000042";
 
 afterEach(() => {
   vi.clearAllMocks();
   mockAppState.value.tasks.activeSessionId = null;
   mockAppState.value.chatInput.planModeBySessionId = {};
+  mockAppState.value.taskRemoval.navigationRevision = 4;
 });
 
 describe("usePresentationToken", () => {
@@ -70,6 +77,7 @@ describe("usePresentationToken", () => {
   });
 });
 
+// eslint-disable-next-line max-lines-per-function -- move races share one hook fixture
 describe("useWorkflowStepMove", () => {
   it("issues the move request with the task's workflow id, target step, and position 0", async () => {
     vi.mocked(moveTask).mockResolvedValue({} as Awaited<ReturnType<typeof moveTask>>);
@@ -86,6 +94,102 @@ describe("useWorkflowStepMove", () => {
       workflow_step_id: "step-b",
       position: 0,
     });
+  });
+
+  it("binds the committed response identity and reconciles its task route", async () => {
+    const task = {
+      metadata: {
+        workflow_session_route: {
+          operation_id: "operation-1",
+          destination_step_id: "step-b",
+          entry_identity: ENTRY_IDENTITY,
+          destination_session_id: "session-b",
+          phase: "committed",
+        },
+      },
+    };
+    vi.mocked(moveTask).mockResolvedValue({
+      workflow_entry_identity: ENTRY_IDENTITY,
+      task,
+    } as unknown as Awaited<ReturnType<typeof moveTask>>);
+    const { result } = renderHook(() =>
+      useWorkflowStepMove({
+        taskId: TASK_ID,
+        workflowId: WORKFLOW_ID,
+        presentationToken: 0,
+      }),
+    );
+
+    await act(async () => {
+      await result.current.handleMove("step-b");
+    });
+
+    expect(mockAppState.value.beginWorkflowSessionFocus).toHaveBeenCalledWith({
+      taskId: TASK_ID,
+      workflowId: WORKFLOW_ID,
+      destinationStepId: "step-b",
+      presentationToken: 0,
+      navigationRevision: 4,
+    });
+    expect(mockAppState.value.bindWorkflowSessionFocus).toHaveBeenCalledWith({
+      requestId: 1,
+      presentationToken: 0,
+      entryIdentity: ENTRY_IDENTITY,
+    });
+    expect(mockAppState.value.reconcileWorkflowSessionFocus).toHaveBeenCalledWith(TASK_ID, {
+      metadata: task.metadata,
+      updatedAt: undefined,
+      workflowStepId: undefined,
+      entryIdentity: ENTRY_IDENTITY,
+    });
+  });
+
+  it("cancels the local focus intent when the move response has no committed identity", async () => {
+    vi.mocked(moveTask).mockResolvedValue({} as Awaited<ReturnType<typeof moveTask>>);
+    const { result, unmount } = renderHook(() =>
+      useWorkflowStepMove({
+        taskId: TASK_ID,
+        workflowId: WORKFLOW_ID,
+        presentationToken: 0,
+      }),
+    );
+
+    await act(async () => {
+      await result.current.handleMove("step-b");
+    });
+
+    expect(mockAppState.value.cancelWorkflowSessionFocus).toHaveBeenCalledWith({
+      requestId: 1,
+      presentationToken: 0,
+    });
+    vi.clearAllMocks();
+    unmount();
+    expect(mockAppState.value.cancelWorkflowSessionFocus).not.toHaveBeenCalled();
+  });
+
+  it("cancels only the active request when the move hook unmounts", async () => {
+    let resolveMove!: () => void;
+    vi.mocked(moveTask).mockReturnValueOnce(
+      new Promise<Awaited<ReturnType<typeof moveTask>>>((resolve) => {
+        resolveMove = () => resolve({} as Awaited<ReturnType<typeof moveTask>>);
+      }),
+    );
+    const { result, unmount } = renderHook(() =>
+      useWorkflowStepMove({
+        taskId: TASK_ID,
+        workflowId: WORKFLOW_ID,
+        presentationToken: 0,
+      }),
+    );
+
+    act(() => {
+      void result.current.handleMove("step-b");
+    });
+    unmount();
+
+    expect(mockAppState.value.cancelWorkflowSessionFocus).toHaveBeenCalledWith({ requestId: 1 });
+    resolveMove();
+    await act(async () => {});
   });
 
   it("notifies onMoveStart and disables plan mode before the request resolves", async () => {

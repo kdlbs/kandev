@@ -278,8 +278,19 @@ export async function openDesktopFile(
   // visible so a late panel switch cannot turn a successful visibility check
   // into a 180-second click timeout. Virtualized trees can also omit a valid
   // file row from the DOM, so use the exact file search in that case.
-  await session.clickTab("Files", { force: true });
-  await expect(session.files).toBeVisible({ timeout: 30_000 });
+  await expect
+    .poll(
+      async () => {
+        try {
+          await session.clickTab("Files", { force: true });
+          return await session.files.isVisible();
+        } catch {
+          return false;
+        }
+      },
+      { timeout: 30_000, message: "waiting for the Files panel to stay in the foreground" },
+    )
+    .toBe(true);
   const existingSearch = session.fileSearchInput();
   if (await existingSearch.isVisible()) {
     await existingSearch.press("Escape");
@@ -385,6 +396,7 @@ export function installFakeKotlinLsp(
   options: {
     crashOnOpen?: boolean;
     holdInitialize?: boolean;
+    keepProgress?: boolean;
     progress?: {
       title: string;
       beginPercentage?: number;
@@ -402,10 +414,14 @@ export function installFakeKotlinLsp(
   fs.rmSync(initializeModePath(backend), { force: true });
   fs.rmSync(initializeReleasePath(backend), { force: true });
   if (options.crashOnOpen) fs.writeFileSync(crashModePath(backend), "1\n");
-  if (options.holdInitialize || options.progress) {
+  if (
+    options.holdInitialize ||
+    (options.progress && !options.keepProgress) ||
+    options.keepProgress
+  ) {
     fs.writeFileSync(
       initializeModePath(backend),
-      JSON.stringify({ progress: options.progress ?? null }),
+      JSON.stringify({ progress: options.progress ?? null, keepProgress: options.keepProgress }),
     );
   }
 }

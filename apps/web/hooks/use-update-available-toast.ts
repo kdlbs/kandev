@@ -23,7 +23,7 @@ export function useUpdateAvailableToast() {
     const title = notification.title || t("task:kandevUpdateAvailable");
     const body =
       notification.body || t("task:updateAvailableToast", { version: notification.version });
-    toast({ title, description: body });
+    toast({ title, description: body, placement: "top" });
 
     if (nativeNotifications.isAvailable()) {
       void nativeNotifications

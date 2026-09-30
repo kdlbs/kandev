@@ -3,6 +3,7 @@ import { test, expect, restoreSeedRepositoryOrigin, type SeedData } from "../../
 import { GitHelper, makeGitEnv } from "../../helpers/git-helper";
 import { waitForFiniteAnimations } from "../../helpers/animations";
 import { SessionPage } from "../../pages/session-page";
+import { expectBoundedTimeline, scrollChangesToEnd } from "./large-changes-helpers";
 import path from "node:path";
 
 function seedStaleCheckout(git: GitHelper, remoteUrl: string): string {
@@ -320,7 +321,10 @@ test.describe("Mobile rewritten contribution history", () => {
     await session.waitForChatIdle({ timeout: 45_000 });
     git.exec(`git checkout -B ${providerBranch} ${localHead}`);
     git.exec(`git branch --set-upstream-to=origin/${providerBranch} ${providerBranch}`);
-    await testPage.getByRole("button", { name: "Changes" }).tap();
+    await testPage
+      .getByRole("navigation")
+      .getByRole("button", { name: /Changes$/ })
+      .tap();
 
     const changes = testPage.getByTestId("mobile-changes-panel");
     await expect(changes.getByTestId("remote-contribution-drift-status")).toHaveCount(0);
@@ -357,17 +361,26 @@ test.describe("Mobile rewritten contribution history", () => {
     await expect(providerToggle).toHaveAttribute("aria-expanded", "true");
     await expect(providerToggle).toBeFocused();
     expect(git.getCurrentSha()).toBe(localHead);
-    await expect(providerSection.locator('[data-commit-provenance="current_pr"]')).toHaveCount(15);
+    await expectBoundedTimeline(testPage);
     await expect(
       providerSection.locator('[data-commit-provenance="current_pr"]').first(),
     ).toHaveAttribute("title", "Current PR commit");
     await expect(
       localSection.locator('[data-commit-provenance="local_checkout"]').first(),
     ).toHaveAttribute("title", "Local checkout commit");
-    await expect(providerSection.locator('[data-testid^="commit-row-"]')).toHaveCount(15);
     await expect(providerSection.locator('[data-testid^="commit-row-"]').first()).toContainText(
       "Mobile rewritten provider commit 15",
     );
+    const oldestProviderCommit = providerHistory.commits[0];
+    const oldestProviderCommitRowTestId = `commit-row-${oldestProviderCommit.sha.slice(0, 7)}`;
+    await scrollChangesToEnd(testPage, oldestProviderCommitRowTestId);
+    const oldestProviderCommitRow = providerSection.getByTestId(oldestProviderCommitRowTestId);
+    await expect(oldestProviderCommitRow).toBeVisible();
+    await expect(oldestProviderCommitRow.getByTestId("commit-provenance")).toHaveAttribute(
+      "data-commit-provenance",
+      "current_pr",
+    );
+    await expectBoundedTimeline(testPage);
     await expect(providerSection.locator(".tabler-icon-arrow-up")).toHaveCount(0);
     await expect(localSection.locator(".tabler-icon-arrow-up")).toHaveCount(0);
 
@@ -567,7 +580,10 @@ test.describe("Mobile rewritten contribution history", () => {
     await testPage.reload();
     await session.waitForLoad();
     await session.waitForChatIdle({ timeout: 45_000 });
-    await testPage.getByRole("button", { name: "Changes" }).tap();
+    await testPage
+      .getByRole("navigation")
+      .getByRole("button", { name: /Changes$/ })
+      .tap();
 
     const changes = testPage.getByTestId("mobile-changes-panel");
     const providerSection = changes.getByTestId("current-pr-commits-section");

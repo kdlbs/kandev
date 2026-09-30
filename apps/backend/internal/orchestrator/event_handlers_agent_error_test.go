@@ -30,10 +30,8 @@ func newAgentErrorTestService(
 	t *testing.T, repo *sqliterepo.Repository, stepGetter *mockStepGetter, configure func(*Service),
 ) (*Service, *observer.ObservedLogs) {
 	t.Helper()
-	// handleRecoverableFailureLocked's last-but-one step (before this card's
-	// dispatch) fires a background cleanupAgentExecution that dereferences
-	// svc.executor — createTestServiceWithScheduler is the fixture that wires
-	// one, unlike the bare createTestService used elsewhere in this package.
+	// Recovery stops the failed execution before dispatching workflow actions.
+	// Use the fixture that wires svc.executor for that cleanup boundary.
 	agentMgr := &mockAgentManager{repoForExecutionLookup: repo}
 	svc := createTestServiceWithScheduler(repo, stepGetter, newMockTaskRepo(), agentMgr)
 	core, logs := observer.New(zapcore.DebugLevel)
@@ -46,6 +44,7 @@ func newAgentErrorTestService(
 		configure(svc)
 	}
 	svc.initWorkflowEngine()
+	t.Cleanup(svc.stopDynamicSuccessorWorkers)
 	return svc, logs
 }
 
@@ -459,6 +458,8 @@ func (r *agentErrorTaskLoadErrorRepo) GetTask(_ context.Context, _ string) (*mod
 
 // --- AC-A5/A7/A8/F2/F3/F4/F5/F6/B5: the guard sequence. ---
 
+// TestDispatchKanbanAgentErrorTrigger_Guards verifies dispatch suppression for
+// user cancellation and dispatch eligibility for recoverable agent failures.
 func TestDispatchKanbanAgentErrorTrigger_Guards(t *testing.T) {
 	ctx := context.Background()
 
@@ -501,6 +502,7 @@ func TestDispatchKanbanAgentErrorTrigger_Guards(t *testing.T) {
 		if !svc.CancelTransientRetry(ctx, "t1", "s1") {
 			t.Fatal("CancelTransientRetry = false, want true (a loop was active)")
 		}
+		waitForFailureRecovery(t, svc)
 		if decisions.clearCalls != 0 {
 			t.Errorf("clearCalls = %d, want 0 (a user cancel must not dispatch on_agent_error)", decisions.clearCalls)
 		}
@@ -518,6 +520,7 @@ func TestDispatchKanbanAgentErrorTrigger_Guards(t *testing.T) {
 		svc, _ := newAgentErrorTestService(t, repo, stepGetter, func(s *Service) { s.engineDecisions = decisions })
 
 		svc.handleRecoverableFailure(ctx, watcher.AgentEventData{TaskID: "t1", SessionID: "s1", AgentExecutionID: "exec-1"})
+		waitForFailureRecovery(t, svc)
 
 		if decisions.clearCalls != 1 {
 			t.Errorf("clearCalls = %d, want 1 (a non-user-initiated recoverable failure must dispatch)", decisions.clearCalls)

@@ -118,13 +118,15 @@ test.describe("Mobile storage maintenance", () => {
     const mobile = new MobileKanbanPage(testPage);
     await mobile.goto();
     await mobile.mobileMenuButton.click();
-    await testPage.getByRole("link", { name: "Settings" }).click();
+    await testPage.getByRole("link", { name: "Settings", exact: true }).click();
     const index = testPage.getByTestId("settings-index");
     await index.locator('a[href="/settings/system/storage"]').click();
 
     await expect(testPage.getByTestId("storage-settings-page")).toBeVisible();
     await expect(testPage.getByTestId("storage-disk-capacity-card")).toBeVisible();
-    await expect(testPage.getByRole("progressbar")).toBeVisible();
+    await expect(
+      testPage.getByTestId("storage-disk-capacity-card").getByRole("progressbar"),
+    ).toBeVisible();
     await testPage
       .getByRole("button", { name: "More information about Scheduled maintenance" })
       .click();

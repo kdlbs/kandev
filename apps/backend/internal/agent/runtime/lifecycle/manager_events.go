@@ -854,6 +854,7 @@ func (m *Manager) handlePromptHandoffEvent(
 func (m *Manager) handleAgentEvent(execution *AgentExecution, event agentctl.AgentEvent) {
 	startupGeneration := execution.startupAttemptSnapshot()
 	execution.withStartupAttempt(startupGeneration, func(attemptID string) {
+		event.SessionSettingsSourceGeneration = startupGeneration
 		m.handleAgentEventWithAttempt(execution, event, attemptID)
 	})
 }
@@ -863,6 +864,9 @@ func (m *Manager) handleAgentEventWithAttempt(
 	event agentctl.AgentEvent,
 	attemptID string,
 ) {
+	if event.SessionSettingsSourceGeneration == 0 {
+		event.SessionSettingsSourceGeneration = execution.startupAttemptSnapshot()
+	}
 	m.handleAgentEventAtContextResetBoundary(execution, event, true, attemptID)
 }
 
@@ -873,18 +877,60 @@ func (m *Manager) handleAgentEventWithAttempt(
 func (m *Manager) handleAgentEventAfterContextReset(execution *AgentExecution, event agentctl.AgentEvent) {
 	startupGeneration := execution.startupAttemptSnapshot()
 	execution.withStartupAttempt(startupGeneration, func(attemptID string) {
+		if event.SessionSettingsSourceGeneration == 0 {
+			event.SessionSettingsSourceGeneration = startupGeneration
+		}
 		m.handleAgentEventAtContextResetBoundary(execution, event, false, attemptID)
 	})
 }
 
-//nolint:cyclop,funlen // ACP event types share lifecycle bookkeeping before publication.
 func (m *Manager) handleAgentEventAtContextResetBoundary(
 	execution *AgentExecution,
 	event agentctl.AgentEvent,
 	enforceResetBoundary bool,
 	attemptID string,
 ) {
+	if event.SessionSettingsSourceGeneration == 0 {
+		event.SessionSettingsSourceGeneration = execution.startupAttemptSnapshot()
+	}
+	m.handleAgentEventAtContextResetBoundaryInternal(execution, event, enforceResetBoundary, attemptID, false)
+}
+
+func (m *Manager) handleAgentEventAtContextResetBoundaryWithIdleSuspensionReplay(
+	execution *AgentExecution,
+	event agentctl.AgentEvent,
+	enforceResetBoundary bool,
+	attemptID string,
+) {
+	if event.SessionSettingsSourceGeneration == 0 {
+		event.SessionSettingsSourceGeneration = execution.startupAttemptSnapshot()
+	}
+	m.handleAgentEventAtContextResetBoundaryInternal(execution, event, enforceResetBoundary, attemptID, true)
+}
+
+//nolint:cyclop,funlen // ACP event types share lifecycle bookkeeping before publication.
+func (m *Manager) handleAgentEventAtContextResetBoundaryInternal(
+	execution *AgentExecution,
+	event agentctl.AgentEvent,
+	enforceResetBoundary bool,
+	attemptID string,
+	idleSuspensionReplay bool,
+) {
 	event.AttemptID = attemptID
+	if !idleSuspensionReplay && execution.bufferIdleSuspensionEvent(idleSuspensionEvent{
+		event: event, enforceResetBoundary: enforceResetBoundary, attemptID: attemptID,
+	}) {
+		m.logger.Debug("buffering agent event during idle suspension",
+			zap.String("execution_id", execution.ID),
+			zap.String("event_type", event.Type))
+		return
+	}
+	if !idleSuspensionReplay && execution.idleSuspensionAgentStopped.Load() {
+		m.logger.Debug("ignoring agent event after idle process stop",
+			zap.String("execution_id", execution.ID),
+			zap.String("event_type", event.Type))
+		return
+	}
 	// A terminal event that was already applied from a retained turn outcome
 	// can be redelivered when the live stream attaches. Drop that exact event
 	// instead of applying the completion a second time.
@@ -985,6 +1031,14 @@ func (m *Manager) handleAgentEventWithoutPublication(execution *AgentExecution, 
 
 func (m *Manager) handleAgentEventState(execution *AgentExecution, event agentctl.AgentEvent) agentctl.AgentEvent {
 	switch event.Type {
+	case streams.EventTypeUsageObservation:
+		if event.TurnID == "" {
+			if event.PromptGeneration != 0 {
+				event.TurnID = execution.promptTurnIDForGeneration(event.PromptGeneration)
+			} else {
+				event.TurnID = execution.promptTurnIDSnapshot()
+			}
+		}
 	case "tool_call":
 		// ACP tool_call events do not carry the lifecycle prompt generation
 		// either (same gap as message_chunk/reasoning). Neither this dispatch
@@ -1063,6 +1117,7 @@ func (m *Manager) handleAgentEventWithStartupGeneration(
 ) {
 	accepted := execution.withStartupAttempt(startupGeneration, func(attemptID string) {
 		event.AttemptID = attemptID
+		event.SessionSettingsSourceGeneration = startupGeneration
 		if !execution.isSessionInitialized() && event.PromptGeneration == 0 && event.Type == toolStatusComplete {
 			m.logger.Debug("ignoring startup completion before ACP initialization",
 				zap.String("execution_id", execution.ID),

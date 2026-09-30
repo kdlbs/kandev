@@ -54,3 +54,20 @@ func TestRowMustBePreserved(t *testing.T) {
 		})
 	}
 }
+
+func TestIsOrphanCancelReasonRequiresExactSystemMarker(t *testing.T) {
+	if !IsOrphanCancelReason(SessionOrphanedCancelReason) {
+		t.Fatal("the reconciliation marker must be recognized")
+	}
+	for _, reason := range []string{
+		"",
+		"orphaned session ",
+		"ORPHANED SESSION",
+		SessionArchiveCancelReason,
+		"user stopped",
+	} {
+		if IsOrphanCancelReason(reason) {
+			t.Fatalf("reason %q must not be treated as an orphan cancellation", reason)
+		}
+	}
+}

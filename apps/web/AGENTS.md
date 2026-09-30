@@ -4,7 +4,7 @@ Scoped guidance for `apps/web/`. Repo-wide rules (commit format, code-quality li
 
 ## Plugin authoring
 
-For plugin UI work, begin with the [canonical plugin authoring guide](../../docs/public/plugins-authoring.md). Follow: choose recipe → edit `manifest.yaml` → implement → validate → package → smoke test. The independently consumable author contract is `@kandev/plugin-sdk` in `../packages/plugin-sdk`; `../../docs/plans/plugins/PLUGIN-API.md` and `lib/plugins/types.ts` document and implement host compatibility. Concrete shared Host UI exports are in `lib/plugins/host-api.ts`, and registration/cleanup behavior is in `lib/plugins/registry.ts` and `lib/plugins/host.ts`. New and official plugins use typed `host.context` reads and never copy/import private `AppState` or Zustand slice shapes. Extend the SDK, host implementation, contract docs, and exact-consumer compatibility test together.
+For plugin UI work, begin with the [canonical plugin authoring guide](../../docs/public/plugins-authoring.md). Follow: choose recipe → edit `manifest.yaml` → implement → validate → package → smoke test. The independently consumable author contract is `@kandev/plugin-sdk` in `../packages/plugin-sdk`; `../../docs/plans/plugins/PLUGIN-API.md` and `lib/plugins/types.ts` document and implement host compatibility. Concrete shared Host UI exports are in `lib/plugins/host-api.ts`, and registration/cleanup behavior is in `lib/plugins/registry.ts` and `lib/plugins/host.ts`. New and official plugins use typed `host.context` reads and never copy/import private `AppState` or Zustand slice shapes. Extend the SDK, host implementation, contract docs, and exact-consumer compatibility test together. Standard mounted action slots use `host.ui.Action`/`ActionGroup`; preserve raw slots and `host.ui.Button`, avoid broad descendant CSS, and use touch-sized phone/coarse-pointer surfaces except the 24px tablet status bar. Phone status actions use the Status drawer.
 
 ## UI Components
 
@@ -31,7 +31,8 @@ import { Dialog } from "@kandev/ui/dialog";
 - Use `useTouchDrawer` when a hover/popover disclosure needs a coarse-pointer `Drawer` alternative. Width-based phone composition and pointer-based disclosure behavior are related but not interchangeable. Apply the 44px minimum to coarse-pointer hit areas, touch rows, and mobile controls only; keep fine-pointer desktop controls at the surrounding design-system density, using 28px for ordinary buttons, inputs, and selectors and 24px only for deliberate compact inline controls, and do not reuse a touch-sized `h-11` class as the shared visual button size. See the [sizing guide](../../.agents/skills/mobile-parity/references/control-sizing.md) for exceptions.
 - Below 640px, shared Radix DropdownMenu/ContextMenu use inset, safe-area-aware bottom sheets in `app/globals.css`. Open `mobile-menu-root` content owns one decorative positioner backdrop matching Drawer dimming and blur; fade it with the sheet's exit motion. Never mark submenus; keep the backdrop outside scrolling content and pointer-transparent so Radix owns dismissal and non-modal interaction. Reuse these primitives and cover long/nested menus instead of adding parallel mobile menus.
 - Mobile capability parity does not require desktop layout parity. Load `/mobile-parity` for the Kandev surface decision guide, mobile design contract, and verification requirements; read [confirmation guidance](components/confirmation/AGENTS.md) when adopting phone confirmation surfaces.
-- Phone listing chrome uses `KanbanHeaderMobile` and `MobileListingContext` across Kanban, List, and Threads. Threads supplies its saved-view control and inline pagination in the title slot. Phone search, tools, and plugin actions live in `MobileListingMenuActions`; keep activity/connection cues on the persistent menu button and restore the actual opener unless focus is moving into a launched surface. Tablet/desktop composition stays separate.
+- Phone hamburger buttons use `AppNavSheet` for app navigation across listings, task workbenches, and page shells. The task title opens the task picker; `ResponsiveTaskPicker` owns its dialogs above responsive layout branches, and `TaskSheetSelectionProvider` shares cancellation with the embedded task sidebar. `MobileTaskNavigationProvider` retains the inline sidebar controller and action dialogs above responsive page headers, rendering the body into the shared menu outlet. Tasks collapses in place and shares the menu scroller. `KanbanHeaderMobile` opens listing-only `MobileMenuSheet` options from the Kanban/Threads/List title dropdown; Threads saved views render inline inside that surface. `MobileListingMenuActions` supplies search in listing options. Phone app navigation groups main-toolbar, sidebar workspace, and task plugin controls in `MobilePluginNavSection`, in one wrapping group. When task controls exist, each plugin uses its task toolbar instead of a second workspace toolbar; workspace-only plugins and sidebar actions remain available. Fallback system metrics follow navigation before Utilities. Keep activity/connection cues on `AppNavTrigger` and restore the actual opener unless focus moves into a launched surface. Tablet/desktop composition stays separate. Phone navigation uses Home for all listing modes; Tasks/Threads remain routes and palette destinations. The inline Tasks heading retains its independent plus. Phone Automations reuses workspace automation reads only while expanded, and Integrations retains a workspace settings entry even without configured links. Phone app navigation groups the built-in Quick Chat/Quick terminal actions below Home. `MobileQuickActions` shares launch and focus behavior; plugin actions and metrics retain separate slots. `MobileIntegrationsSection` opts into a local, initially collapsed disclosure only for phone app navigation; wider consumers retain expanded rendering.
+- Saved phone sidebar layouts retain Home/quick actions before the task outlet and put optional tools/groups afterward in saved relative order. Built-in Automations, Canvases, and Integrations use labelled phone disclosures; icon strips belong to custom shortcut groups. The built-in integration disclosure excludes plugin links rendered as independently customizable nodes. Never persist this phone composition over the desktop layout.
 
 ## Data Flow Pattern (Critical)
 
@@ -39,7 +40,7 @@ import { Dialog } from "@kandev/ui/dialog";
 Go Boot Payload -> Hydrate Store -> Components Read Store -> Hooks Subscribe
 ```
 
-**Never fetch data directly in components.**
+**Never fetch data directly in components.** State in `lib/state/` is below UI/routes: components and routes may consume it, but state must not import `components/` or `app/`, including type-only, re-export, or dynamic imports. Put shared values in dependency-neutral modules.
 
 ### Browser capability boundaries
 
@@ -78,11 +79,11 @@ lib/api/domains/                    # API clients
 
 `chatMotion` owns per-device chat animation preview and persistence; `useChatMotion` applies OS reduced motion. Keep it separate from `richOutputMotion` and transcript auto-scroll. Quick Chat stores server conversations in `quickChat.sessions` and browser-local terminals in `quickChat.terminalTabs`; `activeKind` and terminal IDs track selection. `quick-terminal-actions.ts` owns lifecycle/fallback; terminal descriptors never enter conversation APIs or get lost in reconciliation.
 
-**Hydration:** Go injects `window.__KANDEV_BOOT_PAYLOAD__` into the SPA shell before React mounts. `lib/state/hydration/merge-strategies.ts` has `deepMerge()`, `mergeSessionMap()`, `mergeLoadingState()` to avoid overwriting live client state. Pass `activeSessionId` to protect active sessions.
+**Hydration:** Go injects `window.__KANDEV_BOOT_PAYLOAD__` into the SPA shell before React mounts. `lib/state/hydration/merge-strategies.ts` has `deepMerge()`, `mergeSessionMap()`, `mergeLoadingState()` to avoid overwriting live client state. Pass `activeSessionId` to protect active sessions. Client task navigation uses `fetchTaskNavigationData` for essential task/session hydration. Render current-workspace task projections during refresh; leave optional enrichment to domain hooks instead of repeating the full boot bundle. Read-cursor capture and automatic session creation wait for authoritative route hydration. Do not replay cached hydration snapshots over live state.
 
 For rebasing or finishing PRs written against the old Next.js runtime, follow [`docs/nextjs-spa-migration.md`](../../docs/nextjs-spa-migration.md).
 
-**Hooks Pattern:** Hooks in `hooks/domains/` encapsulate WS subscription + store selection. WS client deduplicates subscriptions automatically.
+**Hooks Pattern:** Hooks in `hooks/domains/` encapsulate WS subscriptions and store selection; the WS client deduplicates subscriptions. The bounded `useSystemInfo` TanStack Query pilot owns only the About view's `/api/v1/system/info` snapshot and request state, scoped by canonical full API base URL, page boot ID, and auth identity. The boot payload remains unchanged; other System resources stay in Zustand, while process-generation/restart/update probes remain independent no-store reads. See the [ownership decision](../../docs/decisions/2026-09-26-system-info-query-cache-ownership.md) and [system design](../../docs/specs/platform/system-design/system-info-query-cache.md). Shell/commit/diff reads share `lib/state/session-read-coordinator.ts` through `use-session-read.ts`; pass the owning store to invalidation and preserve scope, environment-mapping, and late-response guards. Inactive snapshots are bounded at 32 per resource. Files retains four trees/20,000 metadata nodes and restores up to four independent folders concurrently. See the [navigation design](../../docs/specs/ui/system-design/task-navigation-responsiveness.md), including phone session-to-environment binding.
 
 ## WebSockets
 
@@ -111,8 +112,8 @@ surface.
   `next-themes` directly. The routing/image/dynamic adapters now provide
   browser-native behavior for the Vite SPA while legacy Next entrypoints are
   phased out.
-- Components: <200 lines, extract to domain components, composition over props.
-- Hooks: domain-organized in `hooks/domains/`, encapsulate subscription + selection.
+- Task links: `lib/links.ts::linkToTask` is the only `/t/:taskId` builder; pass raw IDs, use `TaskLink` or `AppLink`, and use `linkToTask` for router pushes. Keep compatibility `/tasks/:id`, Office/API paths, and route-recognition prefixes separate.
+- Components stay under 200 lines; extract domain components. Hooks belong in `hooks/domains/` and encapsulate subscription plus selection. `ChangesPanelBody` owns the sole scroller; route working-tree, PR, commit, inline-file, and status row descriptors through `ChangesTimelineViewport`, keeping full collections for counts/actions and keying state by task/session/environment.
 - **Code-host dashboards:** GitHub, GitLab, and plugin code-host pages must use
   the provider-neutral primitives in `components/integrations/` for
   change-request lists, rows, toolbars, scope controls, task preset menus, and
@@ -136,16 +137,13 @@ surface.
   name the target only (for example, `Bitbucket Pull Request`) and preserve their
   registered provider icon.
 - **Interactivity:** all buttons and links with actions must have `cursor-pointer` class.
-- **Self-documenting settings:** every setting must explain in visible, plain-language copy what
-  changes, when the setting applies, and when the user should choose each non-obvious option. State
-  important exclusions, precedence, cost, or destructive consequences next to the control when they
-  can affect the decision. Do not rely on tooltips, external documentation, or implementation terms
-  alone to teach the setting.
-- **Settings save coordination:** settings surfaces with local unsaved state must register a
-  contributor with `useSettingsSaveContributor` (or use `SettingsPageTemplate`) so the shared
-  floating **Save changes** control, navigation guard, and discard flow own persistence. Do not add
-  page-local Save/Cancel controls. Contributor `save` callbacks must reject on failure so the
-  coordinator can report an error; `discard` must restore the contributor's authoritative baseline.
+- **Self-documenting settings:** describe each setting's effect, when it applies, and how to choose non-obvious options; keep exclusions, precedence, costs, destructive consequences, errors, permissions, managed values, and input constraints visible.
+  Use `SettingsInfo` for optional detail (desktop hover/focus, touch drawer); do not rely on external docs or implementation terms alone.
+- **Settings composition:** use `SettingsGroup` for bordered groups and `SettingsRow` for simple preferences; keep one domain owner/save contributor and attach discovery to actual controls. Keep sections expanded and use existing header tabs for larger pages. Preserve specialized editor/table/diagnostic/credential layouts.
+- **Settings save coordination:** register drafts with `useSettingsSaveContributor` or
+  `SettingsPageTemplate`; they own shared save, navigation, and discard. Avoid page-local controls.
+  Reject failures and restore the authoritative baseline. For normalized or fallback saves, snapshot
+  the raw draft before awaiting; apply canonical values only if the draft still matches; test dirty clearing and preservation of in-flight edits.
 - **Settings tabs:** use `components/settings/settings-tabs.tsx` in `SettingsPageHeader`; preserve drafts with validated URL `tab` state, map discovery fragments to the owning tab, and use 44px controls on phones and coarse pointers.
 - **Dialog Enter-to-confirm:** the base `@kandev/ui` `DialogContent` / `AlertDialogContent`
   activate the dialog's semantic action on plain Enter (`packages/ui/src/lib/dialog-default-action.ts`),
@@ -234,7 +232,7 @@ Silence a legitimate one with `// i18n-exempt: <reason>` (required) as a `//`
 LINE comment — the detector's pattern is line-anchored, so a marker inside a
 `/** */` block is silently ignored.
 
-**Real-locale catalogs gate.** `pt-pt`, `zh-cn`, `zh-hk`, `zh-tw` are complete;
+**Real-locale catalogs gate.** `pt-pt`, `zh-cn`, `zh-hk`, `zh-tw`, `ja` are complete;
 `check-i18n-keys.mjs` fails on a missing/extra key, a dropped `{{placeholder}}`
 or `<n>` tag, an empty value, or a value identical to English. Untranslatable
 values are handled in two tiers: those `looksLikeCopy` rejects as non-copy need
@@ -283,7 +281,9 @@ and `lib/plugins/types.ts` are its detailed host implementation — all three mu
   `PluginErrorBoundary`; `mobileEnabled: true` also renders it via the phone bottom nav
   (`session-mobile-bottom-nav.tsx`) with `presentation: "mobile"`.
 - **Task contributions:** `registerTaskMenuAction({ group: "edit", ... })` adds card-only actions to
-  the `Edit` submenu. Group `"primary"` adds flat actions to card and desktop/mobile task-row menus.
+  the `Edit` submenu. Group `"primary"` adds top-level actions to card and desktop/mobile task-row
+  menus; declaring `items(context)` renders an action of either group as a submenu of its children
+  instead, with `run` kept as the flat fallback.
   Card indicator/tag slots stay card-specific; `task-row-metadata` is generic for sidebar and `/tasks` rows.
 - **Sidebar workspace actions:** `registerComponent("sidebar-workspace-actions", ...)` renders after Quick Terminal/Quick Chat in the desktop sidebar's New Task row and in the shared phone navigation sheet, forwarding `SidebarWorkspaceActionsSlotProps` with `presentation: "desktop" | "mobile"`; mobile plugin controls own a 44px touch target and accessible name.
 - **`host.storage`:** authenticated per-user key/value storage (`lib/plugins/host-api.ts`) backed by `/api/plugins/{id}/user-state/...` (`docs/decisions/2026-08-01-per-user-plugin-storage.md`); `subscribe` (`lib/plugins/user-state-sync.ts`) wraps `registerWsHandler` with own-plugin filtering and own-tab echo suppression via a per-tab `writerId`.
@@ -291,7 +291,7 @@ and `lib/plugins/types.ts` are its detailed host implementation — all three mu
 
 ## Sidebar task views
 
-`sidebarViewsByWorkspace` stores personal view state by workspace ID. Use `selectSidebarViews`, preserve workspace identity through async saves and rollback, and keep `sidebarViews` only for legacy wire/hydration compatibility. The backend owns migration/defaults; writes use scoped `sidebar_view_state`, never legacy global fields.
+`taskOverview.byId` owns lightweight task records. Board/workflow `taskIds` and sidebar page memberships reference them; compatible `tasks` arrays expose the exact canonical objects. `withTaskOverviewNormalization` merges legacy board, optimistic, and Office writes before publication. Owners cover boards, active detail, displayed pages, and reusable pages; final release evicts the record. Read journals protect live changes/deletions within 1,000 IDs / 1 MiB. Task timestamps and summary revisions are independent. See [shared task state](../../docs/specs/ui/system-design/sidebar-shared-task-state.md) for coverage and reconciliation. Complete `sqlite_nocase_v1` scopes page locally, including sets above 100; other views fetch bounded pages. Covered views have no query or updating announcement. Do not mount sidebar-only all-workflow fetches. `sidebarViewsByWorkspace` stores personal views: use `selectSidebarViews`, retain workspace identity through saves/rollback, and reserve `sidebarViews` for legacy hydration. The backend owns migration/defaults; writes use scoped `sidebar_view_state`. `SidebarTaskPageCache` shares reads per store and retains at most five first pages, 2 MiB including entities, for five minutes from fetch. Later pages remain display-only. Context generations fence reuse. Soft invalidation clears reusable pages but can publish reconciled provisional rows while one trailing refresh recovers membership; provisional pages are never reusable. Summary changes invalidate affected pages. Access denial clears rows and outstanding reads for every consumer. Keep query status in `SidebarTaskQueryStatus`, without duplicate archive errors or layout-shifting banners.
 
 ## Testing notes
 

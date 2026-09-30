@@ -1,5 +1,6 @@
 // Filename starts with "mobile-" so this runs on the mobile-chrome project.
 import { test, expect } from "../../fixtures/test-base";
+import { watchWs } from "../../helpers/causal-waits";
 import { assertNoDocumentHorizontalOverflow } from "../../helpers/layout-assertions";
 import {
   waitForActiveSessionCancellationPending,
@@ -23,6 +24,7 @@ test.describe.serial("Mobile cancel turn availability", () => {
     prCapture,
   }) => {
     test.setTimeout(120_000);
+    const gateway = watchWs(testPage);
     const session = await seedIdleSession(
       testPage,
       apiClient,
@@ -55,10 +57,35 @@ test.describe.serial("Mobile cancel turn availability", () => {
       caption: "Mobile background work keeps the cancel control reachable in the composer",
     });
 
+    const sessionId = await testPage.evaluate(() => {
+      const store = (
+        window as Window & {
+          __KANDEV_E2E_STORE__?: {
+            getState: () => { tasks: { activeSessionId: string | null } };
+          };
+        }
+      ).__KANDEV_E2E_STORE__;
+      return store?.getState().tasks.activeSessionId;
+    });
+    if (!sessionId) throw new Error("The active task session is not available");
+    const cancellationPending = gateway.waitForEvent("session.cancellation_changed", {
+      where: (payload) => payload.session_id === sessionId && payload.cancellation_pending === true,
+    });
+    const cancellationSettled = gateway.waitForEvent("session.cancellation_changed", {
+      where: (payload) =>
+        payload.session_id === sessionId && payload.cancellation_pending === false,
+    });
+
     await cancel.tap();
-    await waitForActiveSessionCancellationPending(testPage, true);
-    await expect(cancel).toBeDisabled();
+    await cancellationPending;
+    await expect
+      .poll(async () => {
+        if (!(await cancel.isVisible().catch(() => false))) return true;
+        return cancel.isDisabled();
+      })
+      .toBe(true);
     await expect(session.idleInput()).toBeVisible({ timeout: 20_000 });
+    await cancellationSettled;
     await waitForActiveSessionCancellationPending(testPage, false);
     await waitForActiveSessionForegroundActivity(testPage, null);
     await expect(cancel).not.toBeVisible({ timeout: 15_000 });

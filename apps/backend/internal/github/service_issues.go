@@ -210,20 +210,20 @@ func (s *Service) DeleteIssueWatch(ctx context.Context, id string) error {
 		}
 	}
 	if s.taskDeleter != nil {
-		issueTasks, err := s.store.ListIssueWatchTasksByWatch(ctx, id)
+		taskIDs, err := s.store.ListIssueWatchTaskIDsByWatch(ctx, id)
 		if err != nil {
 			s.logger.Warn("failed to list issue tasks for pre-delete sweep",
 				zap.String("watch_id", id), zap.Error(err))
 		} else {
-			for _, it := range issueTasks {
-				if it.TaskID == "" {
+			for _, taskID := range taskIDs {
+				if taskID == "" {
 					continue
 				}
-				if err := s.taskDeleter.DeleteTask(ctx, it.TaskID); err != nil &&
+				if err := s.taskDeleter.DeleteTask(ctx, taskID); err != nil &&
 					!isTaskNotFound(err) {
 					s.logger.Warn("failed to delete issue task during watch cleanup",
 						zap.String("watch_id", id),
-						zap.String("task_id", it.TaskID),
+						zap.String("task_id", taskID),
 						zap.Error(err))
 				}
 			}

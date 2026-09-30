@@ -207,7 +207,7 @@ func TestTaskEventBroadcaster_OrdersTranscriptMutationsAcrossTransportSubjects(t
 // lifecycle state events intentionally sharing one ordered wildcard).
 //
 // The old code had a second subscription system (subscribeEventBusHandlers in
-// cmd/kandev/helpers.go) that subscribed to the same four events, causing
+// cmd/kandev/helpers.go) that subscribed to the same routed events, causing
 // duplicate broadcasts. This test counts the broadcaster's internal
 // subscriptions directly to guard against re-introducing duplicates.
 func TestTaskEventBroadcaster_NoDuplicateSubscriptions(t *testing.T) {
@@ -226,7 +226,7 @@ func TestTaskEventBroadcaster_NoDuplicateSubscriptions(t *testing.T) {
 	//
 	// Update this number when adding or removing event subscriptions in
 	// RegisterTaskNotifications — it is intentionally exact.
-	const wantSubscriptions = 75
+	const wantSubscriptions = 78
 	if got := len(b.subscriptions); got != wantSubscriptions {
 		t.Errorf("RegisterTaskNotifications created %d subscriptions, want %d — "+
 			"did an event get subscribed twice?", got, wantSubscriptions)
@@ -245,6 +245,7 @@ func TestTaskEventBroadcaster_NoDuplicateSubscriptions(t *testing.T) {
 		events.GitHubTaskPRDeleted,
 		events.GitLabTaskMRUpdated,
 		events.GitLabTaskMRDeleted,
+		events.TaskPreviewFeedbackChanged,
 	} {
 		subject := subject
 		t.Run(subject, func(t *testing.T) {
@@ -738,5 +739,25 @@ func TestTaskEventBroadcaster_ScopesSessionPendingActionToOwningWorkspace(t *tes
 	}
 	if clientReceived(foreign) {
 		t.Fatal("session pending-action event crossed the workspace boundary")
+	}
+}
+
+func TestTaskEventBroadcaster_PromptChangesInvalidateWithoutContent(t *testing.T) {
+	log := testLogger()
+	eventBus := bus.NewMemoryEventBus(log)
+	t.Cleanup(eventBus.Close)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	hub := NewHub(nil, log)
+	RegisterTaskNotifications(ctx, eventBus, hub, log)
+	require.NoError(t, eventBus.Publish(ctx, events.PromptsChanged, bus.NewEvent(events.PromptsChanged, "test", map[string]any{})))
+	select {
+	case message := <-hub.broadcast:
+		require.Equal(t, ws.ActionPromptsChanged, message.Action)
+		var payload map[string]any
+		require.NoError(t, json.Unmarshal(message.Payload, &payload))
+		require.Empty(t, payload)
+	default:
+		t.Fatal("prompt change was not broadcast")
 	}
 }

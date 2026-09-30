@@ -5,12 +5,14 @@ import (
 	"testing"
 
 	"github.com/kandev/kandev/internal/persistence/requiredstores"
+	"github.com/kandev/kandev/internal/startup"
 )
 
 func TestValidateAdaptersRejectsMissingCapability(t *testing.T) {
 	catalog := []requiredstores.Descriptor{{
 		ID: "store", OwnerPackage: "test/store", RequiredTables: []string{"values_table"},
 		Capabilities: []requiredstores.Capability{requiredstores.CapabilityBoolean},
+		Sweep:        startup.StepStoresRepositories,
 	}}
 	adapter := Adapter{
 		ID: "store",
@@ -26,7 +28,7 @@ func TestValidateAdaptersRejectsMissingCapability(t *testing.T) {
 }
 
 func TestValidateAdaptersRejectsMissingEngine(t *testing.T) {
-	catalog := []requiredstores.Descriptor{{ID: "store", OwnerPackage: "test/store", RequiredTables: []string{"values_table"}}}
+	catalog := []requiredstores.Descriptor{{ID: "store", OwnerPackage: "test/store", RequiredTables: []string{"values_table"}, Sweep: startup.StepStoresRepositories}}
 	adapter := Adapter{
 		ID:        "store",
 		Engines:   map[EngineName]EngineAdapter{EngineSQLite: {Fresh: noop, Replay: noop}},
@@ -38,7 +40,7 @@ func TestValidateAdaptersRejectsMissingEngine(t *testing.T) {
 }
 
 func TestRunUsesStableEngineStoreScenarioNames(t *testing.T) {
-	catalog := []requiredstores.Descriptor{{ID: "store", OwnerPackage: "test/store", RequiredTables: []string{"values_table"}}}
+	catalog := []requiredstores.Descriptor{{ID: "store", OwnerPackage: "test/store", RequiredTables: []string{"values_table"}, Sweep: startup.StepStoresRepositories}}
 	seen := make(chan string, 3)
 	callback := func(name string) Scenario {
 		return func(s ScenarioContext) error {
@@ -75,6 +77,7 @@ func TestCapabilityScenarioUsesDatabase(t *testing.T) {
 	catalog := []requiredstores.Descriptor{{
 		ID: "store", OwnerPackage: "test/store", RequiredTables: []string{"values_table"},
 		Capabilities: []requiredstores.Capability{requiredstores.CapabilityTransaction},
+		Sweep:        startup.StepStoresRepositories,
 	}}
 	adapter := Adapter{
 		ID: "store",

@@ -561,6 +561,19 @@ describe("hidden session panels", () => {
     expect(api.getPanel(`session:${sessionId}`)).toBeNull();
   });
 
+  it("selects a visible sibling when reload implicitly selects a hidden primary", () => {
+    const { api } = makeReorderingAutoSessionApi();
+    const setActiveSessionAuto = vi.fn();
+    const baseStore = makeAutoSessionAppStore(AUTO_TASK_ID, ["primary", "visible"]);
+    const appStore = { getState: () => ({ ...baseStore.getState(), setActiveSessionAuto }) };
+    withDockviewState({ api, currentLayoutEnvId: null, preMaximizeLayout: null }, () => {
+      hideSessionPanel(api, "primary", AUTO_TASK_ID);
+      runAutoSessionTabEffect("primary", appStore as never, makeAutoSessionRefs());
+    });
+    expect(setActiveSessionAuto).toHaveBeenCalledWith(AUTO_TASK_ID, "visible");
+    expect(api.getPanel("session:primary")).toBeNull();
+  });
+
   it("does not add an explicitly hidden sibling session", () => {
     const activeSessionId = "session-active";
     const hiddenSiblingId = "session-hidden-sibling";

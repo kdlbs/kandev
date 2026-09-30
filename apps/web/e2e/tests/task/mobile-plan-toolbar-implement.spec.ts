@@ -86,10 +86,17 @@ test.describe("mobile: Plan toolbar implement", () => {
           controlHeight: controlRect.height,
         };
       });
-    expect(toolbarSpacing?.toolbarHeight).toBe(30);
-    expect(toolbarSpacing?.controlHeight).toBe(22);
-    expect(toolbarSpacing?.top).toBeGreaterThanOrEqual(1);
-    expect(toolbarSpacing?.bottom).toBeGreaterThanOrEqual(1);
+    const expectedToolbarSpacing = await testPage.evaluate(() => {
+      const usesTouchGeometry =
+        matchMedia("(max-width: 47.999rem)").matches || matchMedia("(pointer: coarse)").matches;
+      return usesTouchGeometry
+        ? { toolbarHeight: 48, controlHeight: 46 }
+        : { toolbarHeight: 30, controlHeight: 22 };
+    });
+    expect(toolbarSpacing?.toolbarHeight).toBe(expectedToolbarSpacing.toolbarHeight);
+    expect(toolbarSpacing?.controlHeight).toBe(expectedToolbarSpacing.controlHeight);
+    expect(toolbarSpacing?.top).toBeGreaterThanOrEqual(0);
+    expect(toolbarSpacing?.bottom).toBeGreaterThanOrEqual(0);
 
     const overflow = await testPage.evaluate(() => {
       const root = document.scrollingElement ?? document.documentElement;

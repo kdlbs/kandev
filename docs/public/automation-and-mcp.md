@@ -20,6 +20,33 @@ Use workflow events for predictable transitions on existing work. Use a workspac
 
 Across Kandev's task, configuration, external, and Office MCP modes, each tool call is validated against that mode's live `tools/list` schema before its handler runs. Missing required fields, wrong types, declared constraint violations, and unknown top-level fields return a tool error without performing the requested action. A missing-field error names each absent schema property, but never echoes submitted argument values. Nested configuration maps still accept arbitrary keys when their schema defines them as open.
 
+
+## Create an automation in configuration chat
+
+Ask configuration chat to create a workspace automation, for example:
+“Create a daily progress report at 09:00 UTC.” The chat can use
+`create_automation_kandev` after discovering the workspace and any workflow,
+repository, agent, or executor profiles it needs.
+
+The tool requires `workspace_id` and `name`. It accepts the existing automation
+creation fields, including `prompt`, repository/base-branch selections, target
+mode, continuation policy, concurrency limit, and initial triggers. A scheduled
+trigger uses `config.cron_expression` and optional `config.timezone`.
+
+New automations are enabled. Each trigger has its own `enabled` value, which
+is false when omitted. Creation does not manually start a run, but an enabled
+trigger can fire as soon as its conditions are met. The default target is a
+hidden automation run with no repository, a new task for each firing, and one
+concurrent run. The `normal_task` target requires a workflow. A
+`managed_conversation` target delivers the prompt to an existing retained plugin
+conversation selected in the workspace; it does not create an automation task.
+
+The result includes the saved automation ID and triggers, plus the webhook
+secret revealed on creation. Later reads redact that secret. You can inspect
+or edit saved automations with the existing settings tools or automation editor.
+Creation is not idempotent, so inspect saved automations before retrying an
+uncertain result. This creation tool is available to configuration chat only.
+
 ## Task creation boundaries
 
 Task creation depends on the caller surface and the destination workspace:
@@ -70,6 +97,7 @@ Open **Settings > Workspaces > _Workspace_ > Automations** (`/settings/workspace
 3. Choose the run destination:
    - **Run in automation history only** keeps each generated task out of Kanban and the sidebar. Workflow selection is optional.
    - **Create a normal task** creates ordinary workflow work that appears in Kanban and the sidebar. A workflow is required; an empty starting step uses that workflow's configured starting step.
+   - **Send to a managed conversation** delivers each firing to a retained plugin conversation. Select the plugin installation and conversation instance in this workspace. This destination does not create a task, and task-only repository and workflow settings are hidden.
 4. Add one or more repository and base-branch pairs, or leave the list empty. The selector is the same searchable paired-chip control used by New Task. A discovered repository is registered in the workspace when the automation is saved. An empty list uses a task-scoped scratch workspace and does not create a Git worktree. Kandev never selects the workspace's first repository for you.
 5. Enter a prompt and optional task-title template.
 6. Choose **Context between runs**:
@@ -96,6 +124,14 @@ The run destination and ordered repository/base-branch pairs are explicit saved 
 Selecting a run opens the complete shared transcript and focuses its exact turn. Replies sent from that transcript create a new turn in the same conversation and remain visible; run selection does not filter away newer replies.
 
 A run cannot wait for a permission response. Kandev rejects the request and marks the run failed. Use only a profile whose intended, constrained actions can complete without a prompt.
+
+For a managed-conversation destination, each firing is admitted as durable ordered
+input to the selected conversation. Automation delivery status records whether
+the input was accepted, separately from the agent's result. Pausing or deleting
+the schedule does not delete the shared conversation. Portable automation export
+stores the plugin ID and instance key, not a private conversation ID; import
+requires an explicit binding to an available conversation in the destination
+workspace.
 
 ## Trigger behavior
 
@@ -628,15 +664,12 @@ A task session currently registers these tool groups:
 | Relationships and workspace sources | List related tasks, add a mixed repository/folder source batch to an idle task, use the legacy one-branch tool, and change a repository's diff base.                                                                                                               |
 | Workflow signal                     | Signal step completion when an auto-advance step explicitly requires that signal.                                                                                                                                                                                  |
 
-When **Settings → General → Task Actions → Agent-generated task titles** is enabled (the default; an
-explicitly saved **off** value remains off), a task-mode session for a newly created task or subtask can
-expose `set_task_title_kandev`. The first eligible session to launch atomically claims the handoff and is
-prompted to call it before any other work, even though the task already has a provisional title. Use a
-short title phrase targeting about six words in sentence case rather than a sentence or progress update.
-The tool is omitted for ordinary tasks, tasks created while the setting was disabled, config sessions,
-Office sessions, and every later session on the task, even if the owner fails before renaming it. A human
-rename wins if it happens first; a late owner call returns `title_not_pending`, while a non-owner call
-returns `title_not_owner`, without changing the title.
+When **Settings → Preferences → Task Behavior → Tasks → Agent-generated task titles** is enabled, a task-mode session for a new task or subtask can receive `set_task_title_kandev`. The setting is on by default. An explicitly saved **off** value stays off.
+
+- The first eligible session to launch claims the handoff and receives the instruction before other work. The task already has a provisional title.
+- Use a short, sentence-case title phrase of about six words.
+- The tool is not available to ordinary tasks, tasks created while the setting is off, config or Office sessions, or later sessions on the task.
+- If a person renames the task first, the owner call returns `title_not_pending`. A non-owner call returns `title_not_owner`. Neither call changes the title.
 
 The same setting applies to ordinary Quick Chat. Quick Chat keeps its agent-and-chat-number label until
 the owner receives the first user request, then the owner can set a more useful title. The owner keeps
@@ -684,9 +717,20 @@ Use `stop_task_kandev` only when the direct child should halt without a replacem
 
 After an accepted stop, Kandev attempts to move an unarchived, non-Office task from `IN_PROGRESS` or `SCHEDULING` to `REVIEW`; other task states are preserved. Worktrees, task environments, commits, task records, descendants, and queued messages remain available, and the task can be started again later.
 
-`add_workspace_sources_kandev` adds one or more sources to an idle task and defaults `task_id` to the current task. A task may also target its same-workspace direct child; Kandev verifies the calling task and session on the backend, so agents cannot provide or override that provenance. Its `sources` input accepts the same atomic mixed batch as the Files panel: `repository` sources use exactly one saved repository ID, local Git path, or remote repository locator plus branch fields; `folder` sources use a local path and optional display name. Repository sources work on Worktree, Local/Local PC, Local Docker, SSH, and Sprites; folders work only on Worktree and Local/Local PC. The target must be repository-backed and have no active turn or tool call. Exact normalized retries are idempotent; contradictory duplicates, unsupported, or failed sources roll back the batch.
+`add_workspace_sources_kandev` accepts the same mixed source batches as the Files panel. It adds sources to an idle task and defaults `task_id` to the current task.
 
-`add_branch_to_task_kandev` is the Worktree-only compatibility path for adding one repository/branch during an active agent turn. It creates the worktree as a sibling under the task directory, promotes the persisted Files root to that parent, and rescans it without restarting the agent, terminals, or workspace processes. The response returns `worktree_path` (the exact new repository location), `task_workspace_path` (the Files root), and `agent_cwd_changed: false`; deferred pre-launch materialization omits both paths. The original repository stays a separate Git worktree, so the sibling is not reported as an embedded repository or untracked files by its Git status. Use `add_workspace_sources_kandev` for mixed batch attachments to an idle task. `update_repository_base_branch_kandev` changes the base used for Kandev's diff, not a pull request's target branch.
+- It can target a same-workspace direct child. Kandev checks the caller's task and session on the backend; the agent cannot set them.
+- A `repository` source uses one saved repository ID, local Git path, or remote locator with branch fields. A `folder` source uses a local path and optional display name.
+- Repository sources work with Worktree, Local/Local PC, Local Docker, SSH, and Sprites. Folder sources work only with Worktree and Local/Local PC.
+- The task must be repository-backed and have no active turn or tool call.
+- Exact normalized retries are idempotent. Contradictory duplicates, unsupported sources, or failed sources roll back the batch.
+
+`add_branch_to_task_kandev` is a Worktree-only compatibility path for adding one repository and branch during an active turn:
+
+- It creates a sibling worktree, makes its parent the Files root, and rescans without restarting the agent or workspace processes.
+- The response includes `worktree_path`, `task_workspace_path`, and `agent_cwd_changed: false`. Deferred pre-launch materialization omits both paths.
+- The original repository stays a separate worktree, so Git does not report the sibling as embedded or untracked files.
+- Use `add_workspace_sources_kandev` for mixed source batches on an idle task. `update_repository_base_branch_kandev` changes Kandev's diff base, not a pull request's target.
 
 The HTTP equivalent is `POST /api/v1/tasks/:id/workspace-sources`, with `{ "sources": [...] }`. An exact normalized retry succeeds as a no-op. It returns `400` for invalid input, `404` for a missing task/source outside the workspace, `409` for contradictory duplicates or an active task, and `422` when materialization or executor capability fails. Successful adoption publishes `task.updated` and `session.workspace_sources.updated`; clients should refresh their Files and repository state from those updates.
 
@@ -879,7 +923,7 @@ External MCP exposes tools in these groups:
 - workspace/workflow configuration: list workspaces, workflows, repositories, and workflow steps; create, update, delete, import, or export workflows; create, update, delete, or reorder steps;
 - agents and profiles: list/update agents; create/delete profiles; list/update profiles; get/update profile MCP configuration;
 - executors: list executors and profiles; create, update, or delete executor profiles;
-- saved prompts: list prompt summaries without content or read one prompt by its exact, case-sensitive name; saved prompt tools are read-only;
+- saved prompts: list prompt summaries without content or read one prompt by its exact, case-sensitive name; create new prompts or update custom prompts that allow agent edits;
 - agent-accessible settings: search setting definitions, describe a field, list authorized resource targets, read saved values, and update declared values through one compact contract;
 - tasks: list, create, move, delete, archive, or update task state; list a task's sessions; read task conversation; discover or answer pending clarification questions; and discover or resolve live agent permission requests.
 
@@ -928,7 +972,7 @@ contains summaries only, so it does not include prompt content:
 ```json
 {
   "shared_prompts": [
-    { "name": "code-review", "builtin": true, "content_bytes": 1234 }
+    { "name": "code-review", "builtin": true, "allow_agent_edits": false, "content_bytes": 1234 }
   ],
   "total": 1
 }
@@ -941,9 +985,36 @@ Use `get_shared_prompt_kandev` with one saved prompt name to read its full conte
 ```
 
 Names are case-sensitive. Kandev trims surrounding whitespace before lookup. The result contains
-`name`, `content`, `builtin`, `content_bytes`, `created_at`, and `updated_at`; it does not expose the
+`name`, `content`, `builtin`, `allow_agent_edits`, `content_bytes`, `created_at`, and `updated_at`; it does not expose the
 internal prompt ID. An empty or unknown name returns an error without prompt content. These tools
-only read saved prompts. They do not create, update, delete, or expand `@name` references.
+only read saved prompts and do not expand `@name` references.
+
+### Create or update a saved prompt
+
+Configuration and external MCP clients expose `create_shared_prompt_kandev` and
+`update_shared_prompt_kandev`. Both require `org.config.manage` and accept:
+
+```json
+{ "name": "review-policy", "content": "Check correctness and test coverage." }
+```
+
+Creation fails if the exact name already exists. Update replaces the full content
+of an existing, case-sensitive name and cannot rename it. Names allow up to 512
+UTF-8 bytes, content up to 1 MiB; surrounding whitespace is trimmed. Success
+returns the same saved-prompt fields as `get_shared_prompt_kandev`.
+
+**Built-in prompts cannot be changed by agents.** Existing custom prompts and
+prompts created in Settings default to human-only editing. An operator can edit a
+custom prompt in **Settings > Prompts**, enable **Allow agent edits**, and save.
+MCP-created prompts allow later agent edits by default; an operator can turn that
+off. MCP cannot change this permission, and generic `update_settings_kandev`
+prompt writes enforce the same protection.
+
+Apply shared prompt changes before changing workflow steps that inject them, then
+read back both the prompts and steps. Successful writes refresh open prompt
+settings pages and affect future `@name` expansions. They preserve unsaved editor
+drafts and do not rewrite instructions already captured by a running turn.
+There is no shared-prompt deletion tool.
 
 ### Answer a pending clarification question
 

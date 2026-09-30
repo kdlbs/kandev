@@ -43,7 +43,7 @@ test.describe("Mobile sidebar automatic task colors", () => {
     await testPage.goto(`/t/${navTask.task_id}`);
     const session = new SessionPage(testPage);
     await session.waitForLoad();
-    await testPage.getByTestId("mobile-session-menu").click();
+    await testPage.getByTestId("mobile-task-picker-trigger").click();
     const sheet = testPage.getByRole("dialog", { name: "Tasks" });
     await expect(sheet.getByTestId("sidebar-filter-bar")).toBeVisible();
 
@@ -108,7 +108,7 @@ test.describe("Mobile sidebar automatic task colors", () => {
 
     await testPage.reload();
     await session.waitForLoad();
-    await testPage.getByTestId("mobile-session-menu").click();
+    await testPage.getByTestId("mobile-task-picker-trigger").click();
     const reloadedSheet = testPage.getByRole("dialog", { name: "Tasks" });
     await expect(reloadedSheet.getByTestId("sidebar-filter-bar")).toBeVisible();
     await expect(

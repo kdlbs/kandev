@@ -64,7 +64,7 @@ func (m *Manager) ExecuteProfilePrompt(ctx context.Context, profileID, prompt st
 	if err != nil {
 		return nil, err
 	}
-	cfg := ia.InferenceConfig()
+	cfg := inferenceConfigForHostUtility(ia)
 	command, err := m.resolveInferenceCommand(ctx, profile.AgentID, ia, agents.Command{})
 	if err != nil {
 		return nil, err
@@ -78,9 +78,10 @@ func (m *Manager) ExecuteProfilePrompt(ctx context.Context, profileID, prompt st
 		Mode:                   profile.Mode,
 		AutoApprovePermissions: &autoApprove,
 		InferenceConfig: &agentctlutil.InferenceConfigDTO{
-			Command: command.Args(), ModelFlag: cfg.ModelFlag.Args(), WorkDir: inst.workDir,
+			Protocol: cfg.Protocol,
+			Command:  command.Args(), ModelFlag: cfg.ModelFlag.Args(), WorkDir: inst.workDir,
 			Env: env, StripEnv: agents.StripEnvFor(ia), CLIFlags: cliFlags, CommandPrefix: prefix,
-			ProviderGatewayAuth: gatewayAuth,
+			ProviderGatewayAuth: gatewayAuth, OperatorDefined: cfg.OperatorDefined,
 		},
 	}
 	release, err := inst.acquireOperation(ctx, false)
@@ -145,6 +146,9 @@ func (m *Manager) ResolveModelConfig(
 	agentType string,
 	req ModelConfigResolutionRequest,
 ) (ModelConfigResolution, error) {
+	if req.ProfileContext != nil {
+		return m.resolveProfileModelConfig(ctx, agentType, req)
+	}
 	if m == nil || m.modelCache == nil {
 		return ModelConfigResolution{}, errors.New("host utility manager not configured")
 	}
@@ -195,7 +199,7 @@ func (m *Manager) resolveModelConfigFlight(
 	if err != nil {
 		return nil, err
 	}
-	cfg := ia.InferenceConfig()
+	cfg := inferenceConfigForHostUtility(ia)
 	if cfg == nil || !cfg.Supported {
 		return nil, errors.New("inference config not available")
 	}
@@ -311,6 +315,7 @@ func (m *Manager) PublishCapabilities(agentType string, caps AgentCapabilities) 
 		return
 	}
 	m.invalidateModelConfigCache(agentType)
+	m.invalidateProfileCapabilities(agentType)
 	m.cache.set(caps)
 }
 
@@ -341,7 +346,7 @@ func (m *Manager) ExecutePromptWithMCP(
 	if err != nil {
 		return nil, err
 	}
-	cfg := ia.InferenceConfig()
+	cfg := inferenceConfigForHostUtility(ia)
 	command, err := m.resolveInferenceCommand(ctx, agentType, ia, agents.Command{})
 	if err != nil {
 		return nil, err
@@ -355,11 +360,13 @@ func (m *Manager) ExecutePromptWithMCP(
 		Model:   resolved,
 		Mode:    mode,
 		InferenceConfig: &agentctlutil.InferenceConfigDTO{
-			Command:   command.Args(),
-			ModelFlag: cfg.ModelFlag.Args(),
-			WorkDir:   inst.workDir,
-			Env:       agents.RuntimeEnvFor(ia),
-			StripEnv:  agents.StripEnvFor(ia),
+			Protocol:        cfg.Protocol,
+			Command:         command.Args(),
+			ModelFlag:       cfg.ModelFlag.Args(),
+			WorkDir:         inst.workDir,
+			Env:             agents.RuntimeEnvFor(ia),
+			StripEnv:        agents.StripEnvFor(ia),
+			OperatorDefined: cfg.OperatorDefined,
 		},
 		MCPServers: mcpServers,
 	}

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
+	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
@@ -19,6 +20,27 @@ type mockSubscription struct {
 	valid        bool
 	mu           sync.Mutex
 	unsubscribed bool
+}
+
+func TestAgentLifecycleSettingsPolicyReachesWatcher(t *testing.T) {
+	w := &Watcher{}
+	payload := lifecycle.AgentEventPayload{
+		TaskID:                "task-1",
+		SessionID:             "session-1",
+		AgentExecutionID:      "execution-1",
+		AttemptID:             "resume-3",
+		SessionSettingsPolicy: streams.SessionSettingsPolicyProviderRestored,
+	}
+	var got AgentEventData
+	if err := w.parseEventData(payload, &got); err != nil {
+		t.Fatalf("parse lifecycle event: %v", err)
+	}
+	if got.SessionSettingsPolicy != streams.SessionSettingsPolicyProviderRestored {
+		t.Fatalf("settings policy = %q, want provider_restored", got.SessionSettingsPolicy)
+	}
+	if got.AttemptID != payload.AttemptID || got.AgentExecutionID != payload.AgentExecutionID {
+		t.Fatalf("attempt/execution identity changed in watcher: %#v", got)
+	}
 }
 
 func (s *mockSubscription) Unsubscribe() error {

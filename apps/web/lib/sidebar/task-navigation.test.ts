@@ -1,4 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+
+const mockReleasePortalScrollRestoration = vi.hoisted(() => vi.fn());
+vi.mock("@/lib/layout/panel-portal-host", () => ({
+  releasePortalScrollRestoration: mockReleasePortalScrollRestoration,
+}));
+
 import {
   TASK_ROW_DOM_ATTR,
   TASK_ROW_REVEAL_CLASS,
@@ -36,8 +42,32 @@ function mountViewport(visible = true) {
 function mountRow(viewport: HTMLElement, taskId: string, rect: Rect) {
   const row = document.createElement("div");
   row.setAttribute(TASK_ROW_DOM_ATTR, taskId);
-  row.scrollIntoView = vi.fn();
-  setRect(row, rect);
+  row.setAttribute("aria-current", "true");
+  let currentRect = rect;
+  vi.spyOn(row, "getBoundingClientRect").mockImplementation(
+    () =>
+      ({
+        x: currentRect.x,
+        y: currentRect.y,
+        width: currentRect.width,
+        height: currentRect.height,
+        top: currentRect.y,
+        right: currentRect.x + currentRect.width,
+        bottom: currentRect.y + currentRect.height,
+        left: currentRect.x,
+        toJSON: () => ({}),
+      }) as DOMRect,
+  );
+  row.scrollIntoView = vi.fn(() => {
+    const viewportRect = viewport.getBoundingClientRect();
+    currentRect = {
+      ...currentRect,
+      y:
+        currentRect.y < viewportRect.top
+          ? viewportRect.top
+          : viewportRect.bottom - currentRect.height,
+    };
+  });
   viewport.appendChild(row);
   return row;
 }
@@ -51,6 +81,7 @@ function setReducedMotion(reducedMotion: boolean) {
 
 afterEach(() => {
   document.body.innerHTML = "";
+  mockReleasePortalScrollRestoration.mockReset();
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
   vi.useRealTimers();
@@ -74,10 +105,23 @@ describe("revealSidebarTask", () => {
       block: "nearest",
       inline: "nearest",
     });
+    expect(mockReleasePortalScrollRestoration).toHaveBeenCalledWith(viewport);
     expect(row.classList.contains(TASK_ROW_REVEAL_CLASS)).toBe(true);
   });
 
-  it("uses immediate nearest scrolling and a non-animated cue for reduced motion", async () => {
+  it("scrolls a partially visible row fully into view", async () => {
+    const viewport = mountViewport();
+    const row = mountRow(viewport, TEST_TASK_ID, { x: 0, y: -40, width: 320, height: 52 });
+
+    await expect(revealSidebarTask(TEST_TASK_ID, (callback) => callback())).resolves.toBe(true);
+    expect(row.scrollIntoView).toHaveBeenCalledWith({
+      behavior: "smooth",
+      block: "nearest",
+      inline: "nearest",
+    });
+  });
+
+  it("uses immediate scrolling and a non-animated cue for reduced motion", async () => {
     setReducedMotion(true);
     const viewport = mountViewport();
     const row = mountRow(viewport, TEST_TASK_ID, { x: 0, y: -24, width: 320, height: 24 });
@@ -88,6 +132,16 @@ describe("revealSidebarTask", () => {
       block: "nearest",
       inline: "nearest",
     });
+    expect(row.classList.contains(TASK_ROW_REVEAL_CLASS)).toBe(true);
+  });
+
+  it("cues a row aligned within one CSS pixel of the viewport edge", async () => {
+    const viewport = mountViewport();
+    const row = mountRow(viewport, TEST_TASK_ID, { x: 0, y: -0.25, width: 320, height: 24 });
+    row.scrollIntoView = vi.fn();
+
+    await expect(revealSidebarTask(TEST_TASK_ID, (callback) => callback())).resolves.toBe(true);
+    expect(row.scrollIntoView).not.toHaveBeenCalled();
     expect(row.classList.contains(TASK_ROW_REVEAL_CLASS)).toBe(true);
   });
 
@@ -119,6 +173,34 @@ describe("revealSidebarTask", () => {
   });
 });
 
+describe("revealSidebarTask layout movement", () => {
+  it("scrolls again when layout moves a previously visible row out of view", async () => {
+    const viewport = mountViewport();
+    const row = mountRow(viewport, "shifted", { x: 0, y: 120, width: 320, height: 24 });
+    const callbacks: Array<() => void> = [];
+    const navigation = revealSidebarTask("shifted", (callback) => callbacks.push(callback));
+    callbacks.shift()!();
+    callbacks.shift()!();
+    expect(row.scrollIntoView).toHaveBeenCalledTimes(1);
+    setRect(viewport, { x: 0, y: 200, width: 320, height: 100 });
+    while (callbacks.length > 0) callbacks.shift()!();
+    await expect(navigation).resolves.toBe(true);
+    expect(row.scrollIntoView).toHaveBeenCalledTimes(2);
+    expect(row.classList.contains(TASK_ROW_REVEAL_CLASS)).toBe(true);
+  });
+
+  it("does not restart scrolling on every frame while the first scroll is pending", async () => {
+    const viewport = mountViewport();
+    const row = mountRow(viewport, "pending-scroll", { x: 0, y: 120, width: 320, height: 24 });
+    row.scrollIntoView = vi.fn();
+    await expect(revealSidebarTask("pending-scroll", (callback) => callback())).resolves.toBe(
+      false,
+    );
+    expect(row.scrollIntoView).toHaveBeenCalledTimes(1);
+    expect(row.classList.contains(TASK_ROW_REVEAL_CLASS)).toBe(false);
+  });
+});
+
 describe("revealSidebarTask edge cases", () => {
   it("finds a row that renders after a later animation frame", async () => {
     const viewport = mountViewport();
@@ -128,9 +210,31 @@ describe("revealSidebarTask edge cases", () => {
     expect(callbacks).toHaveLength(1);
     const row = mountRow(viewport, "late", { x: 0, y: 120, width: 320, height: 24 });
     callbacks.shift()!();
+    while (callbacks.length > 0) callbacks.shift()!();
 
     await expect(navigation).resolves.toBe(true);
     expect(row.scrollIntoView).toHaveBeenCalledTimes(1);
+  });
+
+  it("waits for the row to stay inside the viewport before resolving", async () => {
+    const viewport = mountViewport();
+    const row = mountRow(viewport, "settled", { x: 0, y: 120, width: 320, height: 24 });
+    const callbacks: Array<() => void> = [];
+    const navigation = revealSidebarTask("settled", (callback) => callbacks.push(callback));
+
+    callbacks.shift()!();
+    expect(row.scrollIntoView).toHaveBeenCalledTimes(1);
+    expect(row.classList.contains(TASK_ROW_REVEAL_CLASS)).toBe(false);
+    expect(callbacks).toHaveLength(1);
+
+    for (let frame = 0; frame < 2; frame++) {
+      callbacks.shift()!();
+      expect(row.classList.contains(TASK_ROW_REVEAL_CLASS)).toBe(false);
+    }
+    callbacks.shift()!();
+
+    await expect(navigation).resolves.toBe(true);
+    expect(row.classList.contains(TASK_ROW_REVEAL_CLASS)).toBe(true);
   });
 
   it("does not scroll a superseded task when its row renders late", async () => {

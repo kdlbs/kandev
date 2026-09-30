@@ -144,6 +144,8 @@ func TestReconcileSessionsOnStartupAppliesFullReconciliationWhenNotRetracked(t *
 	turns := &countingTurnService{}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), taskRepo, &mockAgentManager{})
 	svc.turnService = turns
+	publisher := &recordingTaskUpdatedPublisher{}
+	svc.SetTaskEventPublisher(publisher)
 	svc.SetRetrackedSessionChecker(func(sessionID string) bool { return false })
 
 	svc.reconcileSessionsOnStartup(ctx)
@@ -170,6 +172,9 @@ func TestReconcileSessionsOnStartupAppliesFullReconciliationWhenNotRetracked(t *
 
 	if got := turns.calls(); got != 1 {
 		t.Fatalf("AbandonOpenTurns called %d times, want 1", got)
+	}
+	if len(publisher.updatedTaskIDs) != 1 || publisher.updatedTaskIDs[0] != "task1" {
+		t.Fatalf("task.updated publishes = %v, want [task1] after startup marker commit", publisher.updatedTaskIDs)
 	}
 }
 

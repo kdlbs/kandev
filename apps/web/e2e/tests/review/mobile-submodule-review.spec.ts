@@ -30,7 +30,10 @@ test.describe("Nested submodule Review on mobile", () => {
       const worktreePath = await fixture.waitForWorktree(apiClient);
       await fixture.applyNestedChanges(worktreePath);
 
-      await testPage.getByRole("button", { name: "Changes" }).tap();
+      await testPage
+        .getByRole("navigation")
+        .getByRole("button", { name: /Changes$/ })
+        .tap();
       const changesPanel = testPage.getByTestId("mobile-changes-panel");
       await expect(changesPanel).toBeVisible({ timeout: 15_000 });
       await expect(changesPanel.getByText("README.md").first()).toBeVisible({

@@ -44,6 +44,7 @@ export const SETTINGS_DISCOVERY_ROUTE_EXCLUSIONS: Record<string, string> = {
   "/settings/general/editors": TO_TERMINAL_EDITORS,
   "/settings/general/keyboard-shortcuts": TO_KEYBOARD_SHORTCUTS,
   "/settings/general/layouts": "Redirects to the canonical Layouts page.",
+  "/settings/sidebar": "Redirects to the Sidebar tab on the canonical Layouts page.",
   "/settings/general/message-queue": TO_TASK_BEHAVIOR,
   "/settings/general/notifications": "Redirects to the canonical Notifications page.",
   "/settings/general/resource-metrics": TO_APPEARANCE,

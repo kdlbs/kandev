@@ -2,6 +2,7 @@ import type { Locator } from "@playwright/test";
 import { expect, test } from "../../fixtures/test-base";
 import { SessionPage } from "../../pages/session-page";
 import { waitForFiniteAnimations } from "../../helpers/animations";
+import type { ApiClient } from "../../helpers/api-client";
 
 type Box = { x: number; y: number; width: number; height: number };
 
@@ -31,15 +32,23 @@ function expectStablePosition(before: Box, after: Box) {
   expect(after.y).toBeCloseTo(before.y, 0);
 }
 
-function adjacentStep(
-  steps: Array<{ id: string; name: string; position: number }>,
-  currentStepId: string,
-): { id: string; name: string; position: number } {
-  const sorted = [...steps].sort((left, right) => left.position - right.position);
-  const currentIndex = sorted.findIndex((step) => step.id === currentStepId);
-  const target = sorted[currentIndex + 1] ?? sorted[currentIndex - 1];
-  if (!target) throw new Error("workflow step progress test requires an adjacent target");
-  return target;
+async function createProgressWorkflow(
+  apiClient: ApiClient,
+  workspaceId: string,
+  name: string,
+  options: { extraSteps?: number } = {},
+) {
+  const workflow = await apiClient.createWorkflow(workspaceId, name);
+  const startStep = await apiClient.createWorkflowStep(workflow.id, "Work", 0, {
+    is_start_step: true,
+  });
+  const targetStep = await apiClient.createWorkflowStep(workflow.id, "Review", 1);
+  const extraSteps = options.extraSteps ?? 0;
+  for (let index = 0; index < extraSteps; index += 1) {
+    await apiClient.createWorkflowStep(workflow.id, `Verification stage ${index + 1}`, index + 2);
+  }
+  await apiClient.createWorkflowStep(workflow.id, "Done", extraSteps + 2);
+  return { workflowId: workflow.id, startStepId: startStep.id, targetStep };
 }
 
 test.describe("Workflow step progress", () => {
@@ -48,11 +57,17 @@ test.describe("Workflow step progress", () => {
     apiClient,
     seedData,
   }) => {
+    const workflow = await createProgressWorkflow(
+      apiClient,
+      seedData.workspaceId,
+      "Pending workflow step progress",
+      { extraSteps: 6 },
+    );
     const task = await apiClient.seedTask(seedData.workspaceId, "Workflow step progress", {
-      workflow_id: seedData.workflowId,
-      workflow_step_id: seedData.startStepId,
+      workflow_id: workflow.workflowId,
+      workflow_step_id: workflow.startStepId,
     });
-    const targetStep = adjacentStep(seedData.steps, seedData.startStepId);
+    const targetStep = workflow.targetStep;
 
     await testPage.setViewportSize({ width: 900, height: 800 });
     await testPage.goto(`/t/${task.task_id}`);
@@ -121,7 +136,13 @@ test.describe("Workflow step progress", () => {
           timeout: 15_000,
         })
         .toBe(targetStep.id);
-      await expect(disclosure).toBeHidden();
+      const currentStep = trigger.getByTestId("workflow-step-Review");
+      await expect(currentStep).toHaveAttribute("aria-current", "step");
+      await expect(currentStep.locator("[data-marker-state]")).toHaveAttribute(
+        "data-marker-state",
+        "current",
+      );
+      await expect(move).toHaveCount(0);
     } finally {
       releaseMove();
       await testPage.unroute(moveRoute);
@@ -133,18 +154,23 @@ test.describe("Workflow step progress", () => {
     apiClient,
     seedData,
   }) => {
+    const workflow = await createProgressWorkflow(
+      apiClient,
+      seedData.workspaceId,
+      "Full workflow step progress",
+    );
     const task = await apiClient.seedTask(seedData.workspaceId, "Full workflow step progress", {
-      workflow_id: seedData.workflowId,
-      workflow_step_id: seedData.startStepId,
+      workflow_id: workflow.workflowId,
+      workflow_step_id: workflow.startStepId,
     });
-    const targetStep = adjacentStep(seedData.steps, seedData.startStepId);
+    const targetStep = workflow.targetStep;
 
     await testPage.setViewportSize({ width: 1600, height: 900 });
     await testPage.goto(`/t/${task.task_id}`);
     await new SessionPage(testPage).waitForLoad();
 
     const stepper = testPage.locator('[data-testid="workflow-stepper"]:visible').first();
-    const targetTrigger = stepper.getByTestId(`workflow-step-${targetStep.name}`);
+    const targetTrigger = stepper.getByTestId("workflow-step-Review");
     await expect(targetTrigger).toBeVisible();
     await expect(stepper.getByTestId("workflow-stepper-minimal")).toHaveCount(0);
 

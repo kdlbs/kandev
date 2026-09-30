@@ -112,6 +112,10 @@ vi.mock("@/hooks/domains/failed-inbox/use-failed-inbox-controller", () => ({
   useFailedInboxController: (...args: unknown[]) => mocks.useFailedInboxController(...args),
 }));
 
+vi.mock("@/hooks/use-late-clarification-message", () => ({
+  useLateClarificationMessage: () => ({ send: vi.fn() }),
+}));
+
 import { NeedsYouInboxPageClient } from "./needs-you-inbox-page-client";
 
 function bundle(id: string): ClarificationInboxBundle {

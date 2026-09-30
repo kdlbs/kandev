@@ -6,7 +6,6 @@ import {
   RICH_OUTPUT_FILE_CONTENT,
   seedRichOutputTask,
 } from "./rich-output-helpers";
-import { waitForFiniteAnimations } from "../../helpers/animations";
 
 test("renders and persists native rich output with an explicit file preview", async ({
   testPage,
@@ -26,6 +25,7 @@ test("renders and persists native rich output with an explicit file preview", as
   await expect(richOutput.getByTestId("rich-output-metrics")).toContainText("38");
   const lineChart = richOutput.getByTestId("rich-output-chart-line");
   const barChart = richOutput.getByTestId("rich-output-chart-bar");
+  const barPlot = barChart.getByTestId("rich-output-chart-plot");
   await expect(lineChart).toBeVisible();
   await expect(barChart).toBeVisible();
   await lineChart.scrollIntoViewIfNeeded();
@@ -33,9 +33,12 @@ test("renders and persists native rich output with an explicit file preview", as
   await expect(lineChart.locator(".recharts-line-curve")).toHaveAttribute("stroke-dasharray", /\d/);
   await expect(lineChart.locator(".recharts-yAxis text").first()).toBeVisible();
   await expect(lineChart.locator(".recharts-xAxis")).toContainText("Aug 12");
-  await barChart.scrollIntoViewIfNeeded();
-  await waitForFiniteAnimations(barChart);
-  await expect(barChart.locator("svg")).toBeVisible({ timeout: 30_000 });
+  // Scroll the observed plot once. Repeating scroll actions while the lazy
+  // chart mounts can keep the virtualized transcript in motion indefinitely.
+  await barPlot.evaluate((element) =>
+    element.scrollIntoView({ block: "center", inline: "nearest", behavior: "instant" }),
+  );
+  await expect(barPlot.locator("svg")).toBeVisible({ timeout: 30_000 });
   await expect(barChart.locator(".recharts-xAxis text").first()).toBeVisible({ timeout: 30_000 });
   await expect(barChart.locator(".recharts-yAxis text").first()).toBeVisible();
   await expect(barChart.locator(".recharts-xAxis")).toContainText("/api");
@@ -108,6 +111,43 @@ test("renders complete chart geometry when device animation is disabled", async 
 }) => {
   await testPage.addInitScript(() => {
     window.localStorage.setItem("kandev.settings.richOutputAnimations", "false");
+    // This case checks static Recharts geometry. The lazy plot mount has its
+    // own coverage above; make visibility callbacks immediate here so the
+    // animation assertion cannot race with an inner transcript scroll.
+    class ImmediateIntersectionObserver {
+      private readonly callback: IntersectionObserverCallback;
+
+      constructor(callback: IntersectionObserverCallback) {
+        this.callback = callback;
+      }
+
+      observe(target: Element) {
+        this.callback(
+          [
+            {
+              isIntersecting: true,
+              intersectionRatio: 1,
+              target,
+              boundingClientRect: target.getBoundingClientRect(),
+              intersectionRect: target.getBoundingClientRect(),
+              rootBounds: null,
+              time: performance.now(),
+            } as IntersectionObserverEntry,
+          ],
+          this as unknown as IntersectionObserver,
+        );
+      }
+
+      unobserve() {}
+      disconnect() {}
+      takeRecords(): IntersectionObserverEntry[] {
+        return [];
+      }
+    }
+    Object.defineProperty(window, "IntersectionObserver", {
+      configurable: true,
+      value: ImmediateIntersectionObserver,
+    });
   });
   const session = await seedRichOutputTask({
     page: testPage,
@@ -118,12 +158,20 @@ test("renders complete chart geometry when device animation is disabled", async 
   const richOutput = session.activeChat().getByTestId("rich-output");
   const lineChart = richOutput.getByTestId("rich-output-chart-line");
   const barChart = richOutput.getByTestId("rich-output-chart-bar");
+  const barPlot = barChart.getByTestId("rich-output-chart-plot");
 
+  await expect(richOutput).toBeVisible({ timeout: 30_000 });
+  await expect(barChart).toBeVisible({ timeout: 30_000 });
   await lineChart.scrollIntoViewIfNeeded();
   const line = lineChart.locator(".recharts-line-curve");
   await expect(line).toBeVisible({ timeout: 30_000 });
   await expect(line).not.toHaveAttribute("stroke-dasharray", /\d/);
 
-  await barChart.scrollIntoViewIfNeeded();
-  await expect(barChart.locator(".recharts-bar-rectangle")).toHaveCount(6);
+  await barPlot.evaluate((element) =>
+    element.scrollIntoView({ block: "center", inline: "nearest", behavior: "instant" }),
+  );
+  await expect(barPlot.locator("svg")).toBeVisible({ timeout: 30_000 });
+  await expect(barPlot.locator(".recharts-bar-rectangle")).toHaveCount(6, {
+    timeout: 30_000,
+  });
 });

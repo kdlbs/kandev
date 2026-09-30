@@ -16,6 +16,17 @@ type MessageAddResponseDropController = {
   droppedCount: () => number;
 };
 
+type PreviewFeedbackCreateFailureController = {
+  failNextCreate: () => void;
+  failedCount: () => number;
+};
+
+type ExpiredPluginSnapshotController = {
+  expireNextPluginSnapshot: () => void;
+  modifiedCount: () => number;
+  pluginSubscribeCount: () => number;
+};
+
 type ConversationChangeDropController = {
   dropChange: (content: string) => void;
   droppedCount: () => number;
@@ -281,6 +292,64 @@ export async function routeMainWebSocketWithMessageAddResponseDrop(
 }
 
 /**
+ * Rejects one preview-feedback create request before it reaches the backend.
+ * The next request is forwarded normally, so a screenshot draft can exercise
+ * create failure and retry without leaving a server-side row behind.
+ */
+export async function routeMainWebSocketWithPreviewFeedbackCreateFailure(
+  page: Page,
+): Promise<PreviewFeedbackCreateFailureController> {
+  const state = { armed: false, failed: 0 };
+
+  await page.routeWebSocket(/\/ws$/, (ws) => {
+    const server = ws.connectToServer();
+    ws.onMessage((message) => {
+      if (typeof message !== "string") {
+        server.send(message);
+        return;
+      }
+
+      const forwarded: string[] = [];
+      for (const part of message.split("\n")) {
+        const frame = parseQueueAdmissionFrame(part);
+        if (
+          state.armed &&
+          frame?.type === "request" &&
+          frame.action === "task.preview_feedback.create" &&
+          typeof frame.id === "string"
+        ) {
+          state.armed = false;
+          state.failed += 1;
+          ws.send(
+            JSON.stringify({
+              type: "error",
+              id: frame.id,
+              action: frame.action,
+              payload: {
+                code: "INTERNAL_ERROR",
+                message: "Injected preview feedback create failure",
+              },
+            }),
+          );
+          continue;
+        }
+        forwarded.push(part);
+      }
+      const next = forwarded.join("\n");
+      if (next.trim()) server.send(next);
+    });
+    server.onMessage((message) => ws.send(message));
+  });
+
+  return {
+    failNextCreate: () => {
+      state.armed = true;
+    },
+    failedCount: () => state.failed,
+  };
+}
+
+/**
  * Injects one pre-server request loss or one post-admission response loss for
  * `message.queue.add`. Every other gateway frame continues through the proxy.
  */
@@ -410,6 +479,88 @@ export async function routeMainWebSocketWithQueueAdmissionDrops(
     queueAddRequestCount: () => state.queueAddRequests.value,
     droppedRequestCount: () => state.droppedRequests.value,
     droppedResponseCount: () => state.droppedResponses.value,
+  };
+}
+
+/**
+ * Rewrites one plugin subscription expiry in the browser transport. The
+ * signed token remains server-valid, so the panel must exercise its normal
+ * fresh rebind path instead of relying on a relaxed backend validation rule.
+ */
+export async function routeMainWebSocketWithExpiredPluginSnapshot(
+  page: Page,
+): Promise<ExpiredPluginSnapshotController> {
+  const requestIDs = new Set<string>();
+  let armed = false;
+  let modified = 0;
+  let pluginSubscribeRequests = 0;
+
+  await page.routeWebSocket(/\/ws$/, (ws) => {
+    const server = ws.connectToServer();
+    ws.onMessage((message) => {
+      for (const frame of parseJSONFrames(message)) {
+        const payload = asRecord(frame.payload);
+        if (
+          frame.type === "request" &&
+          frame.action === "session.subscribe" &&
+          typeof frame.id === "string" &&
+          payload?.consumer_kind === "plugin"
+        ) {
+          pluginSubscribeRequests += 1;
+          if (armed) requestIDs.add(frame.id);
+        }
+      }
+      server.send(message);
+    });
+    server.onMessage((message) => {
+      if (typeof message !== "string") {
+        ws.send(message);
+        return;
+      }
+      const rewritten: string[] = [];
+      let didRewrite = false;
+      for (const part of message.split("\n")) {
+        const trimmed = part.trim();
+        if (!trimmed) {
+          rewritten.push(part);
+          continue;
+        }
+        let frame: Record<string, unknown> | null = null;
+        try {
+          frame = asRecord(JSON.parse(trimmed));
+        } catch {
+          // Preserve non-JSON frames.
+        }
+        if (
+          armed &&
+          frame?.type === "response" &&
+          frame.action === "session.subscribe" &&
+          typeof frame.id === "string" &&
+          requestIDs.delete(frame.id)
+        ) {
+          const payload = asRecord(frame.payload);
+          if (payload?.success === true) {
+            frame.payload = { ...payload, expires_at: "2000-01-01T00:00:00Z" };
+            rewritten.push(JSON.stringify(frame));
+            armed = false;
+            modified += 1;
+            didRewrite = true;
+            continue;
+          }
+        }
+        rewritten.push(part);
+      }
+      ws.send(didRewrite ? rewritten.join("\n") : message);
+    });
+  });
+
+  return {
+    expireNextPluginSnapshot: () => {
+      requestIDs.clear();
+      armed = true;
+    },
+    modifiedCount: () => modified,
+    pluginSubscribeCount: () => pluginSubscribeRequests,
   };
 }
 

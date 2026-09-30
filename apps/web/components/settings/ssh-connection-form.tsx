@@ -1,8 +1,8 @@
-import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { Input } from "@kandev/ui/input";
-import { Label } from "@kandev/ui/label";
+import { SSHFieldShell } from "@/components/settings/ssh-field-shell";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
+import { SSHIdentityFileField } from "@/components/settings/ssh-identity-file-field";
 import type { SSHIdentitySource } from "@/lib/types/http-ssh";
 import type { SSHExecutorConfig } from "./ssh-connection-card";
 
@@ -83,12 +83,7 @@ export function SSHConnectionForm({ form, baseline, onChange }: SSHConnectionFor
         onChange={(value) => onChange("identity_source", value)}
       />
       {form.identity_source === "file" && (
-        <TextField
-          id="ssh-identity-file"
-          testId="ssh-input-identity-file"
-          label={t("executors:sshIdentityFilePath")}
-          hint={t("executors:sshIdentityFileHint")}
-          placeholder="~/.ssh/id_ed25519"
+        <SSHIdentityFileField
           value={form.identity_file ?? ""}
           isDirty={fieldIsDirty(form, baseline, "identity_file", "")}
           onChange={(value) => onChange("identity_file", value)}
@@ -132,7 +127,7 @@ function TextField({
   onChange,
 }: TextFieldProps) {
   return (
-    <FieldShell id={id} label={label} hint={hint}>
+    <SSHFieldShell id={id} label={label} hint={hint}>
       <Input
         id={id}
         data-testid={testId}
@@ -142,7 +137,7 @@ function TextField({
         placeholder={placeholder}
         onChange={(event) => onChange(event.target.value)}
       />
-    </FieldShell>
+    </SSHFieldShell>
   );
 }
 
@@ -157,7 +152,7 @@ function IdentitySourceField({
 }) {
   const { t } = useTranslation();
   return (
-    <FieldShell id="ssh-identity-source" label={t("executors:sshIdentitySource")}>
+    <SSHFieldShell id="ssh-identity-source" label={t("executors:sshIdentitySource")}>
       <Select value={value} onValueChange={(next) => onChange(next as SSHIdentitySource)}>
         <SelectTrigger
           id="ssh-identity-source"
@@ -183,26 +178,6 @@ function IdentitySourceField({
           </SelectItem>
         </SelectContent>
       </Select>
-    </FieldShell>
-  );
-}
-
-function FieldShell({
-  id,
-  label,
-  hint,
-  children,
-}: {
-  id: string;
-  label: string;
-  hint?: string;
-  children: ReactNode;
-}) {
-  return (
-    <div className="space-y-1.5">
-      <Label htmlFor={id}>{label}</Label>
-      {children}
-      {hint && <p className="text-xs text-muted-foreground">{hint}</p>}
-    </div>
+    </SSHFieldShell>
   );
 }

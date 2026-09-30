@@ -41,7 +41,10 @@ test.describe("Review Markdown preview on mobile", () => {
     const git = new GitHelper(repoDir, makeGitEnv(backend.tmpDir));
     git.stageFile(MARKDOWN_FILE);
 
-    await testPage.getByRole("button", { name: "Changes" }).tap();
+    await testPage
+      .getByRole("navigation")
+      .getByRole("button", { name: /Changes$/ })
+      .tap();
     const changesPanel = testPage.getByTestId("mobile-changes-panel");
     await expect(changesPanel).toBeVisible();
     await expect(

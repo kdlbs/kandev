@@ -43,6 +43,7 @@ func TestConvertPatPR(t *testing.T) {
 		}{Ref: "feature-y", SHA: "deadbeef1234"},
 		Base: struct {
 			Ref string `json:"ref"`
+			SHA string `json:"sha"`
 		}{Ref: "main"},
 	}
 
@@ -189,6 +190,7 @@ func TestConvertPatPR_Merged(t *testing.T) {
 		}{Ref: "fix"},
 		Base: struct {
 			Ref string `json:"ref"`
+			SHA string `json:"sha"`
 		}{Ref: "main"},
 	}
 
@@ -379,6 +381,7 @@ func TestConvertPatPR_Mergeable(t *testing.T) {
 		}{Ref: "b"},
 		Base: struct {
 			Ref string `json:"ref"`
+			SHA string `json:"sha"`
 		}{Ref: "main"},
 	}
 
@@ -402,6 +405,7 @@ func TestConvertPatPR_MergeableState(t *testing.T) {
 		}{Ref: "b"},
 		Base: struct {
 			Ref string `json:"ref"`
+			SHA string `json:"sha"`
 		}{Ref: "main"},
 	}
 

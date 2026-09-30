@@ -4,6 +4,12 @@ import { useRegularMode } from "../../helpers/regular-mode";
 import { KanbanPage } from "../../pages/kanban-page";
 import { SessionPage } from "../../pages/session-page";
 import { createEmptyRemoteRepository } from "../../helpers/empty-remote-repository";
+import { waitForHttp } from "../../helpers/causal-waits";
+import {
+  cleanupPRLinkForkLaunchFixture,
+  createPRLinkForkLaunchFixture,
+  expectForkPRLaunchState,
+} from "./pr-link-fork-launch-helpers";
 
 // Exercises the regular task-create dialog (New Task in the sidebar); run with office off.
 useRegularMode();
@@ -172,6 +178,76 @@ test.describe("Task creation from GitHub URL", () => {
     });
 
     await expect(session.idleInput()).toBeVisible({ timeout: 15_000 });
+  });
+
+  test("starts a target-attached fork PR from its URL", async ({
+    testPage,
+    apiClient,
+    seedData,
+    backend,
+  }) => {
+    test.setTimeout(120_000);
+    const fixture = await createPRLinkForkLaunchFixture(
+      apiClient,
+      seedData.workspaceId,
+      backend.tmpDir,
+    );
+    let taskId: string | undefined;
+
+    try {
+      const { executors } = await apiClient.listExecutors();
+      const worktreeExec = executors.find((executor) => executor.type === "worktree");
+      if (!worktreeExec?.profiles?.[0]) {
+        test.skip(true, "No worktree executor profile available");
+        return;
+      }
+
+      const taskTitle = `Fork PR launch ${fixture.repositoryName}`;
+      const kanban = new KanbanPage(testPage);
+      await kanban.goto();
+      await kanban.createTaskButton.first().click();
+      const dialog = testPage.getByTestId("create-task-dialog");
+      await expect(dialog).toBeVisible();
+      await openRemoteAndPasteURL(testPage, fixture.prURL);
+      await expect(testPage.getByTestId("remote-branch-chip-trigger").first()).toContainText(
+        fixture.headBranch,
+      );
+      await testPage.getByTestId("task-title-input").fill(taskTitle);
+      await testPage.getByTestId("task-description-input").fill("/e2e:simple-message");
+
+      const startButton = testPage.getByTestId("submit-start-agent");
+      await expect(startButton).toBeEnabled();
+      await testPage.getByTestId("executor-profile-selector").click();
+      await testPage.getByRole("option", { name: /Worktree/i }).click();
+      const createdTaskResponse = waitForHttp(testPage, "POST", /\/api\/v1\/tasks$/);
+      await startButton.click();
+      const response = await createdTaskResponse;
+      const responseBody = await response.text();
+      expect(response.status(), responseBody).toBe(200);
+      const created = JSON.parse(responseBody) as { id: string };
+      taskId = created.id;
+      const requestBody = response.request().postDataJSON() as {
+        repositories?: Array<Record<string, unknown>>;
+      };
+      expect(requestBody.repositories?.[0]).not.toHaveProperty("remote_contribution");
+      expect(requestBody.repositories?.[0]).not.toHaveProperty("comparison_target");
+
+      await expect(dialog).not.toBeVisible();
+      await expect(testPage).toHaveURL(new RegExp(`/t/${taskId}$`));
+      const session = new SessionPage(testPage);
+      await session.waitForLoad();
+      await session.waitForChatIdle({ requireEditable: true });
+      await expect(session.chat.getByText("simple mock response", { exact: false })).toBeVisible();
+      await expect(session.idleInput()).toBeVisible();
+
+      await session.clickTab("Terminal", { force: true });
+      await expect(session.terminal).toBeVisible({ timeout: 15_000 });
+      await session.expectTerminalConnected();
+      await expectForkPRLaunchState(testPage, session, apiClient, fixture, taskId);
+      await expect(session.prTopbarButton()).toContainText("#3879", { timeout: 15_000 });
+    } finally {
+      await cleanupPRLinkForkLaunchFixture(apiClient, fixture, taskId);
+    }
   });
 
   // Three tests previously asserted the top-level `github-url-error` testid
@@ -651,9 +727,9 @@ test.describe("Task creation from GitHub URL", () => {
     await expect(launchError).toBeVisible({ timeout: 30_000 });
     await expect(launchError).toContainText(/launch needs attention/i);
 
-    const detailsBtn = launchError.getByRole("button", { name: "Show details" });
-    await expect(detailsBtn).toBeVisible();
-    await detailsBtn.click();
+    const detailsToggle = launchError.locator("summary").filter({ hasText: "Show details" });
+    await expect(detailsToggle).toBeVisible();
+    await detailsToggle.click();
     await expect(launchError.getByTestId("task-launch-error-details")).toContainText(
       /pull request head 200|no remote ref|workspace checkout failed/i,
     );
@@ -728,6 +804,22 @@ test.describe("Task creation from GitHub URL", () => {
     }
 
     const kanban = new KanbanPage(testPage);
+    const currentTaskId = () => {
+      const taskId = new URL(testPage.url()).pathname.match(/^\/t\/([^/]+)$/)?.[1];
+      if (!taskId) throw new Error(`Expected task route, got ${testPage.url()}`);
+      return taskId;
+    };
+    const waitForWorktree = async (taskId: string) => {
+      await expect
+        .poll(async () => (await apiClient.getTaskEnvironment(taskId))?.status ?? null, {
+          timeout: 30_000,
+          message: `Task ${taskId} has a ready worktree environment`,
+        })
+        .toBe("ready");
+      const environment = await apiClient.getTaskEnvironment(taskId);
+      if (!environment) throw new Error(`Task ${taskId} has no environment`);
+      return environment;
+    };
     await kanban.goto();
 
     // Helper: select worktree executor in the create dialog
@@ -773,10 +865,12 @@ test.describe("Task creation from GitHub URL", () => {
     });
     await expect(sessionA.idleInput()).toBeVisible({ timeout: 15_000 });
 
-    // Task A should have the direct PR branch
-    await expect(sessionA.terminal).toBeVisible({ timeout: 15_000 });
-    await sessionA.typeInTerminal("git branch --show-current");
-    await sessionA.expectTerminalHasText("feature/shared-pr");
+    const taskAId = currentTaskId();
+    const environmentA = await waitForWorktree(taskAId);
+    const repoA = environmentA.repos?.find((repo) => repo.repository_id);
+    expect(repoA?.worktree_branch).toMatch(/^feature\/shared-pr-/);
+    const worktreePathA = repoA?.worktree_path ?? environmentA.worktree_path;
+    expect(worktreePathA).toBeTruthy();
 
     // --- Task B: second task from the same PR URL ---
     await testPage.goto("/");
@@ -802,9 +896,6 @@ test.describe("Task creation from GitHub URL", () => {
     await startBtn.click();
     await expect(dialog).not.toBeVisible({ timeout: 10_000 });
 
-    // Task B follows a full navigation away from Task A. Dockview can keep
-    // Task A's terminal mounted while Task B hydrates, so this also guards
-    // SessionPage against reading a stale, hidden terminal buffer.
     await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
     const sessionB = new SessionPage(testPage);
     await sessionB.waitForLoad();
@@ -812,11 +903,14 @@ test.describe("Task creation from GitHub URL", () => {
       timeout: 30_000,
     });
 
-    // Task B should have a suffixed branch (not the original PR branch)
-    await expect(sessionB.terminal).toBeVisible({ timeout: 15_000 });
-    await sessionB.typeInTerminal("git branch --show-current");
-    // Branch should start with the PR branch name but have a random suffix
-    await sessionB.expectTerminalHasText("feature/shared-pr-");
+    const taskBId = currentTaskId();
+    const environmentB = await waitForWorktree(taskBId);
+    const repoB = environmentB.repos?.find((repo) => repo.repository_id);
+    expect(repoB?.worktree_branch).toMatch(/^feature\/shared-pr-/);
+    expect(repoB?.worktree_branch).not.toBe(repoA?.worktree_branch);
+    const worktreePathB = repoB?.worktree_path ?? environmentB.worktree_path;
+    expect(worktreePathB).toBeTruthy();
+    expect(worktreePathB).not.toBe(worktreePathA);
   });
 
   test("can toggle between GitHub URL and repository selector", async ({ testPage }) => {

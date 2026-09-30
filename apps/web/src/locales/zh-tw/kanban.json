@@ -89,7 +89,6 @@
   "selectRepository": "選擇儲存庫",
   "selectTask": "選擇任務 {{title}}",
   "selectWorkflow": "選擇工作流程",
-  "sendToWorkflow": "傳送到工作流程",
   "selectedFilterCount_one": "{{label}}：已選擇 {{count}} 項",
   "selectedFilterCount_other": "{{label}}：已選擇 {{count}} 項",
   "sentryIssue": "Sentry 議題",
@@ -129,5 +128,10 @@
   "boardSort": "看板排序",
   "boardSortCreatedDesc": "最新優先",
   "boardSortPriorityDesc": "優先順序",
-  "priorityFilter": "優先順序篩選"
+  "priorityFilter": "優先順序篩選",
+  "bulkSelected_other": "已選擇 {{count}} 個",
+  "bulkActions": "操作",
+  "selectTasks": "選擇任務",
+  "cancelTaskSelection": "取消選擇",
+  "bulkSelected_one": "已選擇 {{count}} 個"
 }

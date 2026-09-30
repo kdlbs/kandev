@@ -58,6 +58,7 @@ export function buildDialogFormBodyProps(
   const { fs, computed, handlers } = setup;
   const repoLocked = !!props.lockedFields?.repository;
   const effectiveWorkflowId = computed.effectiveWorkflowId ?? null;
+  const workflowAgentOverrideState = setup.workflowAgentOverrideValidation;
   return {
     isSessionMode: setup.isSessionMode,
     isCreateMode: setup.isCreateMode,
@@ -126,6 +127,19 @@ export function buildDialogFormBodyProps(
     bottomSlot: props.bottomSlot,
     descriptionPlaceholder: props.descriptionPlaceholder,
     workflowLocked: props.lockedFields?.workflow,
+    workflowAgentOverrideRows: workflowAgentOverrideState.rows,
+    workflowAgentOverrideOptions: workflowAgentOverrideState.options,
+    workflowAgentOverridesLoading: workflowAgentOverrideState.loading,
+    workflowAgentOverridesInvalid: workflowAgentOverrideState.invalid,
+    workflowAgentOverridesError: workflowAgentOverrideState.error,
+    onWorkflowAgentOverrideChange: (sourceProfileId, replacementProfileId) => {
+      const next = { ...fs.workflowAgentOverrides };
+      if (replacementProfileId) next[sourceProfileId] = replacementProfileId;
+      else delete next[sourceProfileId];
+      fs.setWorkflowAgentOverrides(next);
+    },
+    onResetWorkflowAgentOverrides: () => fs.setWorkflowAgentOverrides({}),
+    onRetryWorkflowAgentOverrides: () => setup.refreshWorkspaceSnapshots(true),
     runnerEditable: computeRunnerEditable(setup.isEditMode, props.editingTask),
     runnerIneligibleReason: computeRunnerIneligibleReason(props.editingTask),
   };
@@ -146,6 +160,7 @@ export function buildDialogFooterProps(
   pendingAttachmentUploadReason?: string | null,
 ) {
   const { fs, computed, submitHandlers } = setup;
+  const workflowAgentOverridesBlockedReason = setup.workflowAgentOverrideValidation.blockedReason;
   return {
     isSessionMode: setup.isSessionMode,
     isCreateMode: setup.isCreateMode,
@@ -173,7 +188,8 @@ export function buildDialogFooterProps(
     submitBlockedReason:
       props.submitBlockedReason ??
       pendingAttachmentUploadReason ??
-      setup.savedBaseSubmitBlockedReason,
+      setup.savedBaseSubmitBlockedReason ??
+      workflowAgentOverridesBlockedReason,
     editDependenciesReady: setup.isEditMode ? setup.editDependencies.ready : undefined,
   };
 }

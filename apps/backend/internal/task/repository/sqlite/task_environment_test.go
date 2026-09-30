@@ -42,13 +42,20 @@ func TestTaskEnvironmentRepoUpdateDeleteAndBulkCleanup(t *testing.T) {
 		t.Fatal(err)
 	}
 	for index, repositoryID := range []string{"environment-repo-one", "environment-repo-two"} {
-		if err := repo.CreateTaskEnvironmentRepo(ctx, &models.TaskEnvironmentRepo{ID: "env-link-" + repositoryID, TaskEnvironmentID: environment.ID, RepositoryID: repositoryID, Position: index, WorktreeBranch: "main"}); err != nil {
+		if err := repo.CreateTaskEnvironmentRepo(ctx, &models.TaskEnvironmentRepo{
+			ID: "env-link-" + repositoryID, TaskEnvironmentID: environment.ID, RepositoryID: repositoryID,
+			Position: index, WorktreeBranch: "main", WorktreeSourceClonePath: "/managed/source",
+			WorktreeSourceCommonDir: "/managed/source/.git",
+		}); err != nil {
 			t.Fatalf("CreateTaskEnvironmentRepo: %v", err)
 		}
 	}
 	links, err := repo.ListTaskEnvironmentRepos(ctx, environment.ID)
 	if err != nil || len(links) != 2 {
 		t.Fatalf("ListTaskEnvironmentRepos = %+v, %v", links, err)
+	}
+	if links[0].WorktreeSourceClonePath != "/managed/source" || links[0].WorktreeSourceCommonDir != "/managed/source/.git" {
+		t.Fatalf("source clone metadata was not persisted: %+v", links[0])
 	}
 	mergedAt := time.Date(2026, time.July, 8, 9, 10, 11, 0, time.UTC)
 	links[0].BranchSlug = "feature"

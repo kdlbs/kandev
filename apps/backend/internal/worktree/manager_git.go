@@ -45,12 +45,12 @@ func (m *Manager) isGitRepo(path string) bool {
 //     "missing branch" from a "could not tell" and avoid surfacing a
 //     misleading ErrInvalidBaseBranch.
 func (m *Manager) branchExists(ctx context.Context, repoPath, branch string) (bool, error) {
-	runErr, execCtxErr := subproc.RunGitAfterAcquire(
+	output, runErr, execCtxErr := subproc.RunGitCombinedAfterAcquire(
 		ctx,
 		subproc.GitLifecycle,
 		m.inspectTimeout,
 		func(execCtx context.Context) *exec.Cmd {
-			return m.newNonInteractiveGitCmd(execCtx, repoPath, "rev-parse", "--verify", branch)
+			return m.newNonInteractiveGitCmd(execCtx, repoPath, "rev-parse", "--verify", "--quiet", branch)
 		},
 	)
 	if runErr != nil {
@@ -61,7 +61,15 @@ func (m *Manager) branchExists(ctx context.Context, repoPath, branch string) (bo
 				zap.Error(ctxErr))
 			return false, fmt.Errorf("branch check timed out for %q after %s: %w", branch, m.inspectTimeout, ctxErr)
 		}
-		return false, nil
+		var exitErr *exec.ExitError
+		if errors.As(runErr, &exitErr) && exitErr.ExitCode() == 1 {
+			return false, nil
+		}
+		outStr := strings.TrimSpace(string(output))
+		if outStr != "" {
+			return false, fmt.Errorf("branch check failed for %q: %s: %w", branch, outStr, runErr)
+		}
+		return false, runErr
 	}
 	return true, nil
 }
@@ -113,12 +121,25 @@ func normalizeOriginBranchName(branch string) string {
 // acquiring the lifecycle throttle. The timeout starts after admission so
 // queue wait does not consume the command's inspection budget.
 func (m *Manager) runBoundedGitInspect(ctx context.Context, repoPath string, args ...string) (string, error) {
+	return m.runBoundedGitInspectWithEnvironment(ctx, repoPath, nil, args...)
+}
+
+func (m *Manager) runBoundedGitInspectWithEnvironment(
+	ctx context.Context,
+	repoPath string,
+	prepareEnvironment func([]string) []string,
+	args ...string,
+) (string, error) {
 	output, runErr, execCtxErr := subproc.RunGitCombinedAfterAcquire(
 		ctx,
 		subproc.GitLifecycle,
 		m.inspectTimeout,
 		func(execCtx context.Context) *exec.Cmd {
-			return m.newNonInteractiveGitCmd(execCtx, repoPath, args...)
+			cmd := m.newNonInteractiveGitCmd(execCtx, repoPath, args...)
+			if prepareEnvironment != nil {
+				cmd.Env = prepareEnvironment(cmd.Env)
+			}
+			return cmd
 		},
 	)
 	if ctxErr := firstContextError(execCtxErr, runErr); ctxErr != nil {
@@ -413,7 +434,11 @@ func (m *Manager) currentBranch(ctx context.Context, repoPath string) string {
 func (m *Manager) newNonInteractiveGitCmd(ctx context.Context, repoPath string, args ...string) *exec.Cmd {
 	cmd := newGitCommand(ctx, args...)
 	cmd.Dir = repoPath
-	cmd.Env = subproc.PrepareGitEnvironment(os.Environ())
+	env := cmd.Env
+	if env == nil {
+		env = os.Environ()
+	}
+	cmd.Env = subproc.PrepareGitEnvironment(env)
 	// After the context cancels and the process is killed, child processes
 	// (e.g. credential helpers) may still hold stdout/stderr pipes open.
 	// WaitDelay bounds how long CombinedOutput waits for those pipes to close.
@@ -527,6 +552,7 @@ func (m *Manager) handleBaseFetchFailure(
 	onProgress SyncProgressCallback,
 ) (string, string, error) {
 	reason := classifyGitFallbackReason(err, string(output), execCtxErr)
+	m.logRefreshDiagnostic("fetch", repoPath, baseBranch, reason, output, err, execCtxErr)
 	if required {
 		fallback := strings.TrimSpace(fallbackBaseBranch)
 		if reason == gitFallbackReasonMissingRemoteRef && fallback != "" && fallback != baseBranch {
@@ -697,6 +723,7 @@ func (m *Manager) pullCurrentBranchOrFallback(
 	output, err, execCtxErr := m.runGitCombinedAfterAcquire(ctx, m.pullTimeout, repoPath, "pull", "--ff-only", "origin", baseBranch)
 	if err != nil {
 		reason := classifyGitFallbackReason(err, string(output), execCtxErr)
+		m.logRefreshDiagnostic("pull", repoPath, baseBranch, reason, output, err, execCtxErr)
 		resolved, selectErr := m.selectContainingRef(ctx, repoPath, baseBranch, remoteRef)
 		if selectErr != nil {
 			if !localBaseExists {
@@ -766,9 +793,8 @@ func (m *Manager) selectContainingRef(
 }
 
 // syncFailureCause intentionally suppresses cmdErr because Git output can
-// contain credentials. Callers expose only a bounded failure class and keep
-// raw command output in internal logs where the existing redaction policy
-// applies.
+// contain credentials. Callers expose only a bounded failure class and never
+// include the command output in errors or progress.
 func syncFailureCause(reason string, _ error, contextErr error) error {
 	if contextErr != nil {
 		return contextErr

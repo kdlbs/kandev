@@ -15,9 +15,16 @@ describe("prepareResultToSessionState", () => {
         status: "completed",
         error_message: "boom",
         duration_ms: 1234,
+        preparation_id: "attempt-1",
+        preparation_started_at: "2026-09-28T18:00:00.123456789Z",
         steps: [
           {
             name: "clone",
+            kind: "remote_helper_download",
+            remote_platform: "linux/amd64",
+            mcp_server_id: "server-a",
+            mcp_provider: "cursor",
+            failure_code: "timeout",
             command: "git clone",
             status: "ok",
             output: "done",
@@ -36,9 +43,16 @@ describe("prepareResultToSessionState", () => {
       status: "completed",
       errorMessage: "boom",
       durationMs: 1234,
+      preparationId: "attempt-1",
+      preparationStartedAt: "2026-09-28T18:00:00.123456789Z",
       steps: [
         {
           name: "clone",
+          kind: "remote_helper_download",
+          remotePlatform: "linux/amd64",
+          mcpServerId: "server-a",
+          mcpProvider: "cursor",
+          failureCode: "timeout",
           command: "git clone",
           status: "ok",
           output: "done",

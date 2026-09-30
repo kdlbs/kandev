@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   getEnvHiddenSessionRecords,
   getEnvHiddenSessions,
+  resolveVisibleSessionId,
   setEnvHiddenSessionOwner,
   setEnvHiddenSessions,
 } from "./env-hidden-sessions";
@@ -45,5 +46,20 @@ describe("env hidden sessions", () => {
       { sessionId: "session-b", taskId: "task-b" },
       { sessionId: "session-c", taskId: "" },
     ]);
+  });
+});
+
+describe("visible session selection", () => {
+  it("keeps visible selections and never creates a selection from null", () => {
+    expect(resolveVisibleSessionId("visible", ["other"], [])).toBe("visible");
+    expect(resolveVisibleSessionId(null, ["visible"], [])).toBeNull();
+  });
+  it("uses the first visible successor without changing hidden records", () => {
+    const hidden = new Set(["primary", "other"]);
+    expect(resolveVisibleSessionId("primary", ["primary", "other", "visible"], hidden)).toBe(
+      "visible",
+    );
+    expect(hidden).toEqual(new Set(["primary", "other"]));
+    expect(resolveVisibleSessionId("primary", ["primary", "other"], hidden)).toBeNull();
   });
 });

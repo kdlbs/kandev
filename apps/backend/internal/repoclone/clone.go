@@ -20,6 +20,7 @@ import (
 
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/common/subproc"
+	"github.com/kandev/kandev/internal/task/models"
 )
 
 const (
@@ -76,6 +77,7 @@ type GitCredentialProvider interface {
 // separate so resolvers can enforce same-origin routing before returning a
 // transient secret.
 type GitCredentialRequest struct {
+	CheckoutOptions      *models.RepositoryCheckoutOptions `json:"checkout_options,omitempty"`
 	WorkspaceID          string
 	TaskID               string
 	SessionID            string
@@ -273,6 +275,48 @@ func (c *Cloner) WorkspaceProviderRepositoryPath(
 	return filepath.Join(parts...), nil
 }
 
+// ManagedCloneRelocationPaths returns the exact managed source candidates and
+// destination eligible for legacy-to-workspace relocation. Unsupported
+// repository sources return ok=false so callers can leave them untouched.
+func (c *Cloner) ManagedCloneRelocationPaths(repository *models.Repository) (
+	root, providerSource, ownerNameSource, destination string, ok bool, err error,
+) {
+	if repository == nil || strings.ToLower(strings.TrimSpace(repository.SourceType)) != "provider" {
+		return "", "", "", "", false, nil
+	}
+	provider := strings.ToLower(strings.TrimSpace(repository.Provider))
+	if provider != githubProvider && provider != gitlabProvider {
+		return "", "", "", "", false, nil
+	}
+	if strings.TrimSpace(repository.WorkspaceID) == "" || strings.TrimSpace(repository.ProviderHost) == "" ||
+		strings.TrimSpace(repository.ProviderOwner) == "" || strings.TrimSpace(repository.ProviderName) == "" {
+		return "", "", "", "", false, nil
+	}
+	root, err = c.ExpandedBasePath()
+	if err != nil {
+		return "", "", "", "", false, err
+	}
+	providerSource, err = c.ProviderRepoPath(provider, repository.ProviderHost, repository.ProviderOwner, repository.ProviderName)
+	if err != nil {
+		return "", "", "", "", false, err
+	}
+	ownerNameSource, err = c.RepoPath(repository.ProviderOwner, repository.ProviderName)
+	if err != nil {
+		return "", "", "", "", false, err
+	}
+	destination, err = c.WorkspaceProviderRepositoryPath(
+		repository.WorkspaceID, provider, repository.ProviderHost, repository.ProviderScope,
+		repository.ProviderRepoID, repository.ProviderOwner, repository.ProviderName,
+	)
+	if err != nil {
+		return "", "", "", "", false, err
+	}
+	if filepath.Clean(providerSource) == filepath.Clean(destination) {
+		return "", "", "", "", false, nil
+	}
+	return root, providerSource, ownerNameSource, destination, true, nil
+}
+
 func stableIdentitySegment(value string) string {
 	sum := sha256.Sum256([]byte(value))
 	return hex.EncodeToString(sum[:])
@@ -436,6 +480,10 @@ func (c *Cloner) EnsureWorkspaceClonedForProvider(
 func (c *Cloner) EnsureWorkspaceClonedWithCredentialRequest(
 	ctx context.Context, request GitCredentialRequest, credentialOrigin, token string,
 ) (string, error) {
+	if hasCheckoutOptions(request) {
+		path, _, err := c.ensureWorkspaceCheckoutCache(ctx, request, credentialOrigin, token)
+		return path, err
+	}
 	targetPath, err := c.WorkspaceProviderRepositoryPath(
 		request.WorkspaceID, request.Provider, request.ProviderHost, request.ProviderScope,
 		request.ProviderRepositoryID, request.Owner, request.Name,
@@ -464,6 +512,13 @@ func (c *Cloner) RefreshWorkspaceRepositoryWithCredentialRequest(
 		request.WorkspaceID, request.Provider, request.ProviderHost, request.ProviderScope,
 		request.ProviderRepositoryID, request.Owner, request.Name,
 	)
+	if err == nil && hasCheckoutOptions(request) {
+		options, validationErr := models.NormalizeRepositoryCheckoutOptions(request.CheckoutOptions)
+		if validationErr != nil {
+			return validationErr
+		}
+		targetPath, err = c.checkoutCachePath(request, options)
+	}
 	if err != nil {
 		return err
 	}

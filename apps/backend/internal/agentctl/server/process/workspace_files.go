@@ -22,6 +22,7 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/common/readselector"
 	"github.com/kandev/kandev/internal/common/subproc"
+	"github.com/kandev/kandev/internal/common/workspacepath"
 	storageworkspaces "github.com/kandev/kandev/internal/system/storage/workspaces"
 	"go.uber.org/zap"
 )
@@ -126,6 +127,9 @@ func (wt *WorkspaceTracker) getFileListClass(ctx context.Context, class subproc.
 
 // GetFileTree returns the file tree for a given path and depth
 func (wt *WorkspaceTracker) GetFileTree(reqPath string, depth int) (*types.FileTreeNode, error) {
+	if err := workspacepath.ValidateTreePath(reqPath); err != nil {
+		return nil, err
+	}
 	// Resolve the full path with path traversal protection
 	safePath := filepath.Join(wt.workDir, filepath.Clean(reqPath))
 	cleanWorkDir := filepath.Clean(wt.workDir)

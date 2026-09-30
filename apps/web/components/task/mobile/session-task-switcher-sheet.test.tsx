@@ -342,7 +342,7 @@ describe("SessionTaskSwitcherSheet lifecycle", () => {
     expect(setActiveSession).toHaveBeenCalledTimes(1);
     expect(setActiveSession).toHaveBeenCalledWith(tabletTaskId, "owner-tablet");
     expect(navigate).toHaveBeenCalledTimes(1);
-    expect(navigate).toHaveBeenCalledWith(tabletTaskId);
+    expect(navigate).toHaveBeenCalledWith(tabletTaskId, "owner-tablet");
     expect(onOpenChange).toHaveBeenCalledTimes(1);
     expect(onOpenChange).toHaveBeenCalledWith(false);
   });

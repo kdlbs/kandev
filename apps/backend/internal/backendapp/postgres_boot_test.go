@@ -76,6 +76,7 @@ func TestPostgresBootInitializesRepositories(t *testing.T) {
 		}
 	})
 	services, agentSettingsController, err := provideServices(
+		context.Background(),
 		cfg,
 		log,
 		repos,

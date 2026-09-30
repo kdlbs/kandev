@@ -15,8 +15,6 @@ async function createEntryTask(apiClient: ApiClient, seedData: SeedData, title: 
 }
 
 test.describe("mobile session entry recovery", () => {
-  test.describe.configure({ retries: 1 });
-
   test("keeps cached access while history recovers with phone-sized controls", async ({
     testPage,
     apiClient,
@@ -30,29 +28,38 @@ test.describe("mobile session entry recovery", () => {
       `Mobile history recovery ${Date.now()}`,
     );
 
-    proxy.delayNextResponses(
-      "message.list",
-      2,
-      11_000,
-      "force both bounded history attempts to expose the mobile unavailable state",
-    );
+    if (!task.session_id) throw new Error("created recovery task has no session");
+    proxy.rejectResponsesUntilReleased("message.list", "Simulated temporary history failure", {
+      sessionId: task.session_id,
+    });
 
-    const session = await openTaskSession(testPage, task.id);
-    const chat = session.activeChat();
-    const historyNotice = chat.getByTestId("session-history-unavailable");
-    await expect(historyNotice).toBeVisible({ timeout: 45_000 });
+    try {
+      const session = await openTaskSession(testPage, task.id);
+      const chat = session.activeChat();
+      const historyNotice = chat.getByTestId("session-history-unavailable");
+      await expect
+        .poll(() => proxy.rejectedResponseCount("message.list"), {
+          timeout: 45_000,
+          message: "Waiting for a session-scoped message.list failure",
+        })
+        .toBeGreaterThan(0);
+      await expect(historyNotice).toBeVisible({ timeout: 45_000 });
 
-    const retry = historyNotice.getByTestId("session-history-retry");
-    const retryBox = await retry.boundingBox();
-    expect(retryBox?.height).toBeGreaterThanOrEqual(44);
-    const detailsSummary = historyNotice.getByTestId("session-history-details-summary");
-    const detailsBox = await detailsSummary.boundingBox();
-    expect(detailsBox?.height).toBeGreaterThanOrEqual(44);
-    await assertNoDocumentHorizontalOverflow(testPage, "mobile session history recovery");
+      const retry = historyNotice.getByTestId("session-history-retry");
+      const retryBox = await retry.boundingBox();
+      expect(retryBox?.height).toBeGreaterThanOrEqual(44);
+      const detailsSummary = historyNotice.getByTestId("session-history-details-summary");
+      const detailsBox = await detailsSummary.boundingBox();
+      expect(detailsBox?.height).toBeGreaterThanOrEqual(44);
+      await assertNoDocumentHorizontalOverflow(testPage, "mobile session history recovery");
 
-    await retry.click();
-    await expect(historyNotice).toHaveCount(0);
-    await expect(chat).toContainText("simple mock response", { timeout: 30_000 });
-    expect(proxy.delayedResponseCount("message.list")).toBe(2);
+      proxy.releaseRejectedResponses("message.list");
+      await retry.tap();
+      await expect(historyNotice).toHaveCount(0);
+      await expect(chat).toContainText("simple mock response", { timeout: 30_000 });
+      expect(proxy.rejectedResponseCount("message.list")).toBeGreaterThan(0);
+    } finally {
+      proxy.releaseRejectedResponses("message.list");
+    }
   });
 });

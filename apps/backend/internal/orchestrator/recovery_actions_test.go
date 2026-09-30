@@ -26,6 +26,18 @@ func actionByTestID(actions []map[string]interface{}, testID string) map[string]
 	return nil
 }
 
+func TestBuildRecoveryActions_LocalizedTooltips(t *testing.T) {
+	for _, corrupted := range []bool{false, true} {
+		actions := buildRecoveryActions("t1", "s1", true, false, corrupted)
+		resumeKey := "sessionRecoveryResumeDescription"
+		if corrupted {
+			resumeKey = "sessionRecoveryCorruptedDescription"
+		}
+		require.Equal(t, resumeKey, actionByTestID(actions, recoveryResumeButtonTestID)["tooltip_key"])
+		require.Equal(t, "sessionRecoveryFreshDescription", actionByTestID(actions, recoveryFreshButtonTestID)["tooltip_key"])
+	}
+}
+
 func TestBuildRecoveryActions_NormalOrdering(t *testing.T) {
 	// Regression: ordinary failures keep Resume first, then Start fresh.
 	actions := buildRecoveryActions("t1", "s1", true /*hasResumeToken*/, false /*auth*/, false /*resumeCorrupted*/)
@@ -120,6 +132,42 @@ func TestCreateRecoveryStatusMessage_ManagedRuntimeNpmUsesOneRetryAction(t *test
 	payload := actions[0]["params"].(map[string]interface{})["payload"].(map[string]interface{})
 	if payload["action"] != "runtime_retry" {
 		t.Fatalf("action payload = %#v", payload)
+	}
+}
+
+func TestCreateRecoveryStatusMessage_ManagedRuntimePolicyUsesOneRetryAction(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t-policy", "s-policy", "step1")
+	svc := createTestServiceWithScheduler(repo, newMockStepGetter(), newMockTaskRepo(), &mockAgentManager{repoForExecutionLookup: repo})
+	mc := &mockMessageCreator{}
+	svc.messageCreator = mc
+
+	require.NoError(t, svc.createRecoveryStatusMessage(ctx, watcher.AgentEventData{
+		TaskID:         "t-policy",
+		SessionID:      "s-policy",
+		ErrorMessage:   "managed npm runtime failed to prepare",
+		FailureCode:    "managed_runtime_npm_policy",
+		FailureDetails: "npm error code ETARGET\nnpm error notarget No matching version found with a date before <release-date>",
+	}, ""))
+
+	if len(mc.sessionMessages) != 1 {
+		t.Fatalf("expected one recovery message, got %d", len(mc.sessionMessages))
+	}
+	meta := mc.sessionMessages[0].metadata
+	if meta["failure_kind"] != "managed_runtime_npm_policy" {
+		t.Fatalf("failure_kind = %#v, want policy code", meta["failure_kind"])
+	}
+	if meta["error_output"] != "npm error code ETARGET\nnpm error notarget No matching version found with a date before <release-date>" {
+		t.Fatalf("error_output = %#v, want sanitized policy details", meta["error_output"])
+	}
+	actions, ok := meta["actions"].([]map[string]interface{})
+	if !ok || len(actions) != 1 || actions[0]["test_id"] != "managed-runtime-npm-retry-button" {
+		t.Fatalf("actions = %#v, want one runtime retry", meta["actions"])
+	}
+	payload := actions[0]["params"].(map[string]interface{})["payload"].(map[string]interface{})
+	if payload["action"] != "runtime_retry" {
+		t.Fatalf("action payload = %#v, want runtime_retry", payload)
 	}
 }
 

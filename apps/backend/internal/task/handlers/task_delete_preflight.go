@@ -10,8 +10,9 @@ import (
 )
 
 type httpTaskDeletePreflightRequest struct {
-	TaskIDs []string `json:"task_ids"`
-	Cascade bool     `json:"cascade"`
+	TaskIDs                []string `json:"task_ids"`
+	Cascade                bool     `json:"cascade"`
+	DiscardWorktreeChanges bool     `json:"discard_worktree_changes"`
 }
 
 // httpTaskDeletePreflight returns a no-store, read-only cleanup consent
@@ -26,11 +27,13 @@ func (h *TaskHandlers) httpTaskDeletePreflight(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid task delete preflight request"})
 		return
 	}
-	result, err := h.service.TaskDeletePreflight(c.Request.Context(), body.TaskIDs, body.Cascade)
+	result, err := h.service.TaskDeletePreflight(c.Request.Context(), body.TaskIDs, body.Cascade, body.DiscardWorktreeChanges)
 	if err != nil {
 		switch {
 		case errors.Is(err, service.ErrTaskDeletePreflightInvalid):
 			c.JSON(http.StatusBadRequest, taskErrorBody(err))
+		case errors.Is(err, service.ErrTaskDeleteConfirmationIdentity):
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "task deletion preview requires an authenticated user"})
 		case errors.Is(err, service.ErrTaskDeletePreflightUnavailable):
 			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "task delete preflight unavailable"})
 		default:

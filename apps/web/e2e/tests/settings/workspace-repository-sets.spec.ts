@@ -55,7 +55,9 @@ test.describe("Workspace repository sets settings", () => {
     expect(membersHintBox!.width).toBeGreaterThan(addRepositoryBox!.width);
     await testPage.getByTestId(EDITOR_NAME).fill(setName);
     await addRepository.click();
-    const repositoryOption = testPage.getByRole("option", { name: /E2E Repo/ });
+    const repositoryOption = testPage.locator(
+      `[role="option"][data-value="${seedData.repositoryId}"]`,
+    );
     await expect(repositoryOption).toBeVisible();
     await expect
       .poll(() =>
@@ -70,7 +72,7 @@ test.describe("Workspace repository sets settings", () => {
     await prCapture.screenshot("desktop-repository-set-add-picker", {
       caption: "The repository picker remains fully clickable outside the scrolling form.",
     });
-    await testPage.getByRole("option", { name: /E2E Repo/ }).click();
+    await repositoryOption.click();
     await testPage.getByTestId("repository-set-add-repository").click();
     await testPage.getByRole("option", { name: SECOND_REPO_NAME }).click();
     const basePicker = testPage.getByTestId(`repository-set-base-${second.id}`);
@@ -87,8 +89,9 @@ test.describe("Workspace repository sets settings", () => {
     await expect(dropdown.getByPlaceholder("Search branches...")).toBeVisible();
     await expect(dropdown.getByText("Branches")).toBeVisible();
     await expect(dropdown.getByRole("option", { name: /^main local/ })).toBeVisible();
-    await expect(dropdown.getByRole("option", { name: /^origin\/main origin/ })).toBeVisible();
-    await expect(dropdown.getByText("origin", { exact: true })).toBeVisible();
+    const remoteMainOption = dropdown.getByRole("option", { name: /^origin\/main origin/ });
+    await expect(remoteMainOption).toBeVisible();
+    await expect(remoteMainOption.getByText("origin", { exact: true })).toBeVisible();
 
     const branchList = dropdown.getByRole("listbox");
     await branchList.hover();

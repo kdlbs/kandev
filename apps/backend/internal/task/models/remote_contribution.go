@@ -108,6 +108,71 @@ func (c RemoteContribution) Validate() error {
 	return nil
 }
 
+// ValidatePRBaseContributionIdentity verifies that a qualified PR base and a
+// persisted contribution describe the same provider change. The attachment is
+// the PR base repository, while the contribution source is the PR head.
+func ValidatePRBaseContributionIdentity(base *PRBase, contribution *RemoteContribution) error {
+	if base == nil || contribution == nil {
+		return nil
+	}
+	if err := base.Validate(); err != nil {
+		return fmt.Errorf("qualified PR base is invalid: %w", err)
+	}
+	if err := contribution.Validate(); err != nil {
+		return fmt.Errorf("remote contribution is invalid: %w", err)
+	}
+	target := base.Target
+	if !samePRBaseContribution(target, *contribution) {
+		return errors.New("qualified PR base does not match remote contribution")
+	}
+	if !matchesContributionHeadRepository(target, *contribution) {
+		return errors.New("qualified PR head repository does not match remote contribution source")
+	}
+	if err := validateContributionAttachmentRepository(target, *contribution); err != nil {
+		return err
+	}
+	return nil
+}
+
+func samePRBaseContribution(target ComparisonTarget, contribution RemoteContribution) bool {
+	return target.Provider == ComparisonTargetProviderGitHub && target.Kind == ComparisonTargetKindPullRequest &&
+		contribution.Provider == RemoteContributionProviderGitHub && contribution.Kind == RemoteContributionKindPullRequest &&
+		target.Number == contribution.Number && target.HeadBranch == contribution.HeadBranch &&
+		target.TargetBranch == contribution.BaseBranch
+}
+
+func matchesContributionHeadRepository(target ComparisonTarget, contribution RemoteContribution) bool {
+	source := ComparisonTargetRepository{
+		Host: contribution.SourceRepository.Host, Path: contribution.SourceRepository.Path,
+		ProviderID: contribution.SourceRepository.ProviderID, RemoteURL: contribution.SourceRepository.RemoteURL,
+	}
+	return sameComparisonTargetRepositoryIdentity(target.HeadRepository, source)
+}
+
+func validateContributionAttachmentRepository(target ComparisonTarget, contribution RemoteContribution) error {
+	canonicalURL, err := url.Parse(contribution.CanonicalURL)
+	if err != nil {
+		return errors.New("remote contribution canonical URL is invalid")
+	}
+	parts := strings.Split(strings.Trim(canonicalURL.Path, "/"), "/")
+	if len(parts) < 4 || !strings.EqualFold(parts[2], "pull") {
+		return errors.New("remote contribution canonical URL does not identify a pull request")
+	}
+	baseRepository := ComparisonTargetRepository{Host: canonicalURL.Host, Path: strings.Join(parts[:2], "/")}
+	if !sameComparisonTargetRepositoryIdentity(target.TargetRepository, baseRepository) {
+		return errors.New("qualified PR base repository does not match remote contribution attachment")
+	}
+	return nil
+}
+
+func sameComparisonTargetRepositoryIdentity(left, right ComparisonTargetRepository) bool {
+	if !strings.EqualFold(strings.TrimSpace(left.Host), strings.TrimSpace(right.Host)) ||
+		!strings.EqualFold(strings.Trim(strings.TrimSpace(left.Path), "/"), strings.Trim(strings.TrimSpace(right.Path), "/")) {
+		return false
+	}
+	return left.ProviderID == "" || right.ProviderID == "" || left.ProviderID == right.ProviderID
+}
+
 func validateRemoteContributionKind(provider, kind string) error {
 	switch provider {
 	case RemoteContributionProviderGitHub:

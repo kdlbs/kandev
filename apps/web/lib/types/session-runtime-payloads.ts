@@ -48,6 +48,7 @@ export type SessionModelsPayload = {
   config_options: ConfigOptionPayload[];
   config_options_settled?: boolean;
   config_baseline?: Record<string, string>;
+  session_settings_policy?: "strict" | "provider_restored";
   timestamp: string;
 };
 
@@ -134,6 +135,13 @@ export type SessionPromptUsagePayload = {
     total_tokens: number;
   };
   timestamp: string;
+};
+
+export type SessionUsageUpdatedPayload = {
+  task_id: string;
+  session_id: string;
+  turn_id?: string;
+  usage_event_id: string;
 };
 
 export type SessionTodosPayload = {

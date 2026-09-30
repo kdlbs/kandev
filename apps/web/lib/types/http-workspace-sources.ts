@@ -1,3 +1,4 @@
+import type { RepositoryCheckoutOptions } from "./repository-checkout-options";
 import type { RepositoryId, SessionId, TaskId } from "./ids";
 
 export type RepositoryBranchPolicy = {
@@ -13,6 +14,7 @@ export type RepositoryBranchPolicy = {
 };
 
 export type TaskRepository = {
+  checkout_options?: RepositoryCheckoutOptions;
   id: string;
   task_id: TaskId;
   repository_id: RepositoryId;

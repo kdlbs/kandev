@@ -62,6 +62,26 @@ func TestFromTaskSerializesWorkspaceFolders(t *testing.T) {
 	}
 }
 
+func TestFromTaskProjectsWorkflowAgentOverridesOnlyForStoredWorkflow(t *testing.T) {
+	overrides, err := models.NewWorkflowAgentOverrides("wf-1", []models.WorkflowAgentOverrideBinding{
+		{StepID: "implement", SourceProfileID: "profile-a", ReplacementProfileID: "profile-b"},
+	})
+	if err != nil {
+		t.Fatalf("create overrides: %v", err)
+	}
+	task := &models.Task{WorkflowID: "wf-1", WorkflowAgentOverrides: overrides}
+	dto := FromTask(task)
+	if dto.WorkflowAgentOverrides == nil {
+		t.Fatal("expected workflow agent overrides in DTO")
+	}
+
+	task.WorkflowID = "wf-2"
+	dto = FromTask(task)
+	if dto.WorkflowAgentOverrides != nil {
+		t.Fatal("foreign workflow override leaked into DTO")
+	}
+}
+
 func TestFromTaskSerializesAutopilot(t *testing.T) {
 	got := FromTask(&models.Task{ID: "task-autopilot", Autopilot: true})
 	if !got.Autopilot {

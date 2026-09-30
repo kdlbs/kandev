@@ -1,19 +1,18 @@
 import { test, expect } from "../../fixtures/office-fixture";
+import type { ApiClient } from "../../helpers/api-client";
+import type { OfficeApiClient } from "../../helpers/office-api-client";
 
 /**
- * Reactive scheduler — event → run wire.
+ * Reactive scheduler — task mutation → run wire.
  *
- * The office scheduler subscribes to a small set of domain events
- * and enqueues a `office_runs` row each time:
+ * Office dashboard mutations enqueue a run row through reactivity:
  *
- *   - `task.updated.assignee` (TaskUpdated subscriber)  → reason=task_assigned
- *   - `task.comment.created` (TaskComment subscriber)   → reason=task_comment
+ *   - assignee mutation (dashboard reactivity) → reason=task_assigned
+ *   - comment creation (dashboard reactivity)   → reason=task_comment
  *
- * These specs drive the real subscriber path — no harness seedRun —
- * so an endpoint rename or a missing subscriber wiring trips a
- * failure end-to-end. We poll the per-agent runs list rather than
- * waiting on WS push so the assertion is robust to event-bus
- * timing.
+ * These specs drive the real HTTP mutation paths without harness run seeding.
+ * We poll the durable per-agent runs list rather than waiting for scheduler
+ * execution or WS delivery.
  */
 
 type RunRow = { id: string; reason: string; task_id?: string; comment_id?: string };
@@ -23,6 +22,40 @@ type RunPage = {
   next_cursor?: string;
   next_id?: string;
 };
+
+type SchedulerOffice = {
+  workspaceId: string;
+  workspaceName: string;
+  agentId: string;
+  workflowId: string;
+};
+
+async function withIsolatedSchedulerOffice(
+  officeApi: OfficeApiClient,
+  apiClient: Pick<ApiClient, "listWorkspaces">,
+  agentProfileId: string,
+  run: (office: SchedulerOffice) => Promise<void>,
+): Promise<void> {
+  const workspaceName = `Scheduler E2E ${Date.now()}`;
+  const { workspaceId, agentId } = await officeApi.completeOnboarding({
+    workspaceName,
+    taskPrefix: "SCHED",
+    agentName: "CEO",
+    agentProfileId,
+    executorPreference: "local_pc",
+  });
+  try {
+    const { workspaces } = await apiClient.listWorkspaces();
+    const workflowId = workspaces.find(
+      (workspace) => workspace.id === workspaceId,
+    )?.office_workflow_id;
+    if (!workflowId) throw new Error("expected onboarding to create an Office workflow");
+
+    await run({ workspaceId, workspaceName, agentId, workflowId });
+  } finally {
+    await officeApi.deleteWorkspace(workspaceId, workspaceName);
+  }
+}
 
 async function listAgentRuns(
   apiClient: { rawRequest: (m: string, u: string) => Promise<Response> },
@@ -43,7 +76,9 @@ async function listAgentRuns(
       "GET",
       `/api/v1/office/agents/${agentId}/runs?${query.toString()}`,
     );
-    if (!res.ok) return [];
+    if (!res.ok) {
+      throw new Error(`listAgentRuns failed (${res.status}): ${await res.text()}`);
+    }
 
     const body = (await res.json()) as RunPage;
     runs.push(...(body.runs ?? []));
@@ -64,70 +99,77 @@ test.describe("Office reactive scheduler", () => {
   test("assigning a task to an agent enqueues a task_assigned run", async ({
     apiClient,
     officeApi,
-    officeSeed,
+    seedData,
   }) => {
-    test.setTimeout(90_000);
+    test.setTimeout(150_000);
 
-    // Create a task without an assignee, then attach the CEO.
-    const task = await apiClient.createTask(
-      officeSeed.workspaceId,
-      "Scheduler — task_assigned wire",
-      { workflow_id: officeSeed.workflowId },
+    await withIsolatedSchedulerOffice(
+      officeApi,
+      apiClient,
+      seedData.agentProfileId,
+      async ({ workspaceId, agentId, workflowId }) => {
+        const task = await officeApi.createTask(workspaceId, "Scheduler task_assigned wire", {
+          workflow_id: workflowId,
+        });
+        const taskId = task.id as string;
+        if (!taskId) throw new Error("expected Office task creation to return an id");
+        await officeApi.assignTask(taskId, agentId);
+
+        await expect
+          .poll(
+            async () => {
+              const runs = await listAgentRuns(apiClient, agentId);
+              return runs.filter((r) => r.reason === "task_assigned" && r.task_id === taskId);
+            },
+            { timeout: 120_000, message: "no task_assigned run surfaced for the new assignee" },
+          )
+          .not.toEqual([]);
+      },
     );
-    await officeApi.assignTask(task.id, officeSeed.agentId);
-
-    // Poll the agent's runs list — the subscriber path is async via
-    // the event bus. We expect at least one task_assigned row whose
-    // payload references the task we just created.
-    await expect
-      .poll(
-        async () => {
-          const runs = await listAgentRuns(apiClient, officeSeed.agentId);
-          return runs.filter((r) => r.reason === "task_assigned" && r.task_id === task.id);
-        },
-        { timeout: 60_000, message: "no task_assigned run surfaced for the new assignee" },
-      )
-      .not.toEqual([]);
   });
 
   test("posting a user comment on a CEO-assigned task enqueues a task_comment run", async ({
     apiClient,
     officeApi,
-    officeSeed,
+    seedData,
   }) => {
-    test.setTimeout(90_000);
+    test.setTimeout(150_000);
 
-    const task = await apiClient.createTask(
-      officeSeed.workspaceId,
-      "Scheduler — task_comment wire",
-      { workflow_id: officeSeed.workflowId },
+    await withIsolatedSchedulerOffice(
+      officeApi,
+      apiClient,
+      seedData.agentProfileId,
+      async ({ workspaceId, agentId, workflowId }) => {
+        const task = await officeApi.createTask(workspaceId, "Scheduler task_comment wire", {
+          workflow_id: workflowId,
+        });
+        const taskId = task.id as string;
+        if (!taskId) throw new Error("expected Office task creation to return an id");
+        await officeApi.assignTask(taskId, agentId);
+
+        await expect
+          .poll(
+            async () => {
+              const runs = await listAgentRuns(apiClient, agentId);
+              return runs.filter((r) => r.reason === "task_assigned" && r.task_id === taskId)
+                .length;
+            },
+            { timeout: 120_000 },
+          )
+          .toBeGreaterThan(0);
+
+        await officeApi.createTaskComment(taskId, "Heads up: please pick this up.");
+
+        await expect
+          .poll(
+            async () => {
+              const runs = await listAgentRuns(apiClient, agentId);
+              return runs.filter((r) => r.reason === "task_comment" && r.task_id === taskId);
+            },
+            { timeout: 120_000, message: "no task_comment run surfaced for the comment" },
+          )
+          .not.toEqual([]);
+      },
     );
-    await officeApi.assignTask(task.id, officeSeed.agentId);
-
-    // Wait for the task_assigned run to land first so we can
-    // disambiguate it from the comment-driven one we're about to
-    // trigger.
-    await expect
-      .poll(
-        async () => {
-          const runs = await listAgentRuns(apiClient, officeSeed.agentId);
-          return runs.filter((r) => r.reason === "task_assigned" && r.task_id === task.id).length;
-        },
-        { timeout: 60_000 },
-      )
-      .toBeGreaterThan(0);
-
-    // Post a real user comment via the office endpoint.
-    await officeApi.createTaskComment(task.id, "Heads up: please pick this up.");
-
-    await expect
-      .poll(
-        async () => {
-          const runs = await listAgentRuns(apiClient, officeSeed.agentId);
-          return runs.filter((r) => r.reason === "task_comment" && r.task_id === task.id);
-        },
-        { timeout: 60_000, message: "no task_comment run surfaced for the comment" },
-      )
-      .not.toEqual([]);
   });
 });

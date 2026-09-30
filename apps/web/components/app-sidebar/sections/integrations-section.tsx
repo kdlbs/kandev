@@ -17,6 +17,7 @@ import { AppSidebarSection } from "../app-sidebar-section";
 
 type IntegrationsSectionProps = {
   collapsed: boolean;
+  includePluginItems?: boolean;
 };
 
 const MAX_HEADER_SHORTCUTS = 4;
@@ -67,7 +68,10 @@ function IntegrationRow({ href, label, icon: Icon, active, testId }: Integration
   );
 }
 
-export function IntegrationsSection({ collapsed }: IntegrationsSectionProps) {
+export function IntegrationsSection({
+  collapsed,
+  includePluginItems = true,
+}: IntegrationsSectionProps) {
   const { t } = useTranslation();
   const pathname = usePathname();
   // First-party integration links and plugin-registered nav items that target
@@ -76,9 +80,14 @@ export function IntegrationsSection({ collapsed }: IntegrationsSectionProps) {
   const destinations = useAppDestinations("sidebar", "integrations");
   // Header shortcuts stay first-party: they are a fixed-width strip, and a
   // plugin should not push a configured integration out of it.
-  const firstPartyLinks = destinations.filter((destination) => destination.source !== "plugin");
+  const visibleDestinations = includePluginItems
+    ? destinations
+    : destinations.filter((destination) => destination.source !== "plugin");
+  const firstPartyLinks = visibleDestinations.filter(
+    (destination) => destination.source !== "plugin",
+  );
 
-  if (destinations.length === 0) return null;
+  if (visibleDestinations.length === 0) return null;
 
   return (
     <AppSidebarSection
@@ -93,7 +102,7 @@ export function IntegrationsSection({ collapsed }: IntegrationsSectionProps) {
       }
       headerActionVisibility="always"
     >
-      {destinations.map((destination) => (
+      {visibleDestinations.map((destination) => (
         <IntegrationRow
           key={destination.id}
           href={destination.href}

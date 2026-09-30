@@ -1,11 +1,12 @@
 import { test, expect } from "../../fixtures/test-base";
 import type { ListAvailableAgentsResponse } from "../../../lib/types/http";
+import { serializeInlineScriptJSON } from "../../helpers/inline-script-json";
 
 // The default mock-agent is discovered as already available (it has an
 // InstallScript, but the catalog filters on !available && install_script), so
 // the catalog would show its "everything installed" state with no install
-// cards. Intercept /api/v1/agents/available and return one unavailable agent
-// with an install script so an install card renders.
+// cards. Seed one unavailable agent in the Go-injected boot payload before the
+// SPA mounts, and keep any later catalog refresh on that same fixture.
 const AVAILABLE_AGENTS = {
   agents: [
     {
@@ -43,19 +44,50 @@ test.describe("Agents browse page", () => {
   test("renders the heading and install cards statically, without a collapsible toggle", async ({
     testPage,
   }) => {
-    await testPage.route("**/api/v1/agents/available**", (route) =>
-      route.fulfill({
-        status: 200,
+    const bootPayloadAssignment = "window.__KANDEV_BOOT_PAYLOAD__=";
+    let bootStateSeeded = false;
+    await testPage.route("**/settings/agents/browse**", async (route) => {
+      const response = await route.fetch();
+      const html = await response.text();
+      const payloadStart = html.indexOf(bootPayloadAssignment);
+      if (payloadStart < 0) throw new Error("Settings shell has no boot payload");
+      const jsonStart = payloadStart + bootPayloadAssignment.length;
+      const scriptEnd = html.indexOf(";</script>", jsonStart);
+      if (scriptEnd < 0) throw new Error("Settings shell boot payload is incomplete");
+      const payload = JSON.parse(html.slice(jsonStart, scriptEnd)) as {
+        initialState?: Record<string, unknown>;
+      };
+      const seededPayload = {
+        ...payload,
+        initialState: {
+          ...payload.initialState,
+          availableAgents: {
+            items: AVAILABLE_AGENTS.agents,
+            tools: [],
+            loading: false,
+            loaded: true,
+          },
+        },
+      };
+      await route.fulfill({
+        response,
+        body: `${html.slice(0, jsonStart)}${serializeInlineScriptJSON(seededPayload)}${html.slice(scriptEnd)}`,
+      });
+      bootStateSeeded = true;
+    });
+    await testPage.route("**/api/v1/agents/available", async (route) => {
+      await route.fulfill({
         contentType: "application/json",
         body: JSON.stringify(AVAILABLE_AGENTS),
-      }),
-    );
-
+      });
+    });
     await testPage.goto("/settings/agents/browse");
+    expect(bootStateSeeded).toBe(true);
 
     const heading = testPage.getByRole("heading", { name: "Browse available agents" });
     await expect(heading).toBeVisible({ timeout: 15_000 });
-    await expect(testPage.getByTestId("install-card-codex")).toBeVisible();
+
+    await expect(testPage.getByTestId("install-card-codex")).toBeVisible({ timeout: 15_000 });
 
     // PR #2544 wrapped the section in a collapsible whose heading row was a
     // toggle button. Reverted, the heading must be a plain heading: no button
@@ -68,7 +100,7 @@ test.describe("Agents browse page", () => {
     // A role-less clickable wrapper (e.g. <div onClick>) would not surface as
     // a button; clicking the heading must not hide the install cards.
     await heading.click();
-    await expect(testPage.getByTestId("install-card-codex")).toBeVisible();
+    await expect(testPage.getByTestId("install-card-codex")).toBeVisible({ timeout: 15_000 });
 
     // A separately-triggered collapsible (e.g. a toggle button elsewhere in
     // the content) would not be caught by the heading assertions. The page

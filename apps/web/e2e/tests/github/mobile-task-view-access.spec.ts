@@ -39,13 +39,8 @@ test("GitHub app navigation opens shared task views and preserves browser Back",
     await github.goto();
     const opener = testPage.getByTestId("app-nav-trigger");
     await opener.tap();
-    await testPage
-      .getByTestId("app-nav-sheet")
-      .getByRole("button", { name: "Task views", exact: true })
-      .tap();
-    const drawer = testPage.getByRole("dialog", { name: "Tasks", exact: true });
+    const drawer = testPage.getByTestId("app-nav-sheet");
     await expect(drawer).toBeVisible();
-    await expect(testPage.getByTestId("app-nav-sheet")).toBeHidden();
     await expect(testPage.locator('[role="dialog"]:visible')).toHaveCount(1);
     await expect(
       drawer.getByTestId("sidebar-view-chip").filter({ hasText: view.name }),
@@ -55,10 +50,6 @@ test("GitHub app navigation opens shared task views and preserves browser Back",
     await expect(drawer).toBeHidden();
     await expect(opener).toBeFocused();
     await opener.tap();
-    await testPage
-      .getByTestId("app-nav-sheet")
-      .getByRole("button", { name: "Task views", exact: true })
-      .tap();
     await drawer.locator(`[data-task-row-id="${task.task_id}"]`).tap();
     await expect(testPage).toHaveURL(new RegExp(`/t/${task.task_id}`));
     await testPage.goBack();
@@ -66,12 +57,8 @@ test("GitHub app navigation opens shared task views and preserves browser Back",
     await expect(github.mobileMenuButton).toBeVisible();
     // The task remains selected in shared state, but GitHub has no task-only providers.
     await opener.tap();
-    await testPage
-      .getByTestId("app-nav-sheet")
-      .getByRole("button", { name: "Task views", exact: true })
-      .tap();
     await expect(drawer.getByTestId("sidebar-filter-bar")).toBeVisible();
-    await drawer.getByRole("button", { name: "New", exact: true }).tap();
+    await drawer.getByRole("button", { name: "New task", exact: true }).tap();
     await expect(drawer).toBeHidden();
     await expect(testPage.getByRole("dialog")).toBeVisible();
     await expect(testPage.getByRole("dialog")).not.toHaveAccessibleName("Tasks");
@@ -97,11 +84,10 @@ test("Kanban navigation can open empty task views and return focus", async ({ te
   const kanban = new MobileKanbanPage(testPage);
   await kanban.goto();
   await kanban.mobileMenuButton.tap();
-  await kanban.menuCard.getByRole("button", { name: "Task views", exact: true }).tap();
-  const drawer = testPage.getByRole("dialog", { name: "Tasks", exact: true });
+  const drawer = testPage.getByTestId("app-nav-sheet");
   await expect(drawer.getByTestId("sidebar-filter-bar")).toBeVisible();
   await expect(drawer.locator('[data-slot="task-switcher-empty-state"]')).toBeVisible();
-  await expect(kanban.menuCard).toBeHidden();
+  await expect(kanban.menuCard).toBeVisible();
   await testPage.keyboard.press("Escape");
   await expect(drawer).toBeHidden();
   await expect(kanban.mobileMenuButton).toBeFocused();

@@ -14,7 +14,7 @@ async function createEntryTask(apiClient: ApiClient, seedData: SeedData, title: 
 }
 
 test.describe("session entry recovery", () => {
-  test.describe.configure({ retries: 1 });
+  test.describe.configure({ retries: 0 });
 
   test("completes entry when status and subscription acknowledgements take seven seconds", async ({
     testPage,
@@ -54,12 +54,7 @@ test.describe("session entry recovery", () => {
     const proxy = await routeSessionEntryRecovery(testPage);
     const task = await createEntryTask(apiClient, seedData, `Retry entry ${Date.now()}`);
 
-    proxy.delayNextResponses(
-      "session.subscribe",
-      1,
-      11_000,
-      "force the first subscription acknowledgement past the ten-second deadline",
-    );
+    proxy.dropNextResponses("session.subscribe", 1);
 
     const session = await openTaskSession(testPage, task.id);
     await expect
@@ -70,7 +65,7 @@ test.describe("session entry recovery", () => {
       .toBeGreaterThan(1);
     await expect(session.activeChat()).toContainText("simple mock response", { timeout: 60_000 });
     await expect(testPage.getByTestId("ensure-session-error-banner")).toHaveCount(0);
-    expect(proxy.delayedResponseCount("session.subscribe")).toBe(1);
+    expect(proxy.droppedResponseCount("session.subscribe")).toBe(1);
   });
 
   test("shows one recoverable history notice and restores it with Retry", async ({
@@ -81,16 +76,19 @@ test.describe("session entry recovery", () => {
     test.setTimeout(150_000);
     const proxy = await routeSessionEntryRecovery(testPage);
     const task = await createEntryTask(apiClient, seedData, `History recovery ${Date.now()}`);
+    const sessionId = task.session_id;
+    if (!sessionId) throw new Error("expected a session for the history-recovery task");
 
-    proxy.delayNextResponses(
-      "message.list",
-      2,
-      11_000,
-      "force both bounded history attempts to expose the unavailable state",
-    );
+    proxy.dropNextResponses("message.list", 2, { sessionId });
 
     const session = await openTaskSession(testPage, task.id);
     const historyNotice = session.activeChat().getByTestId("session-history-unavailable");
+    await expect
+      .poll(() => proxy.droppedResponseCount("message.list"), {
+        timeout: 45_000,
+        message: "Waiting for both message.list responses to be dropped for this session",
+      })
+      .toBe(2);
     await expect(historyNotice).toBeVisible({ timeout: 45_000 });
     await expect(
       session.activeChat().getByText("No messages yet. Start the conversation!", { exact: true }),
@@ -106,7 +104,7 @@ test.describe("session entry recovery", () => {
     await historyNotice.getByTestId("session-history-retry").click();
     await expect(historyNotice).toHaveCount(0);
     await expect(session.activeChat()).toContainText("simple mock response", { timeout: 30_000 });
-    expect(proxy.delayedResponseCount("message.list")).toBe(2);
+    expect(proxy.droppedResponseCount("message.list")).toBe(2);
   });
 
   test("labels exhausted status checks accurately and retries only the status read", async ({
@@ -118,12 +116,7 @@ test.describe("session entry recovery", () => {
     const proxy = await routeSessionEntryRecovery(testPage);
     const task = await createEntryTask(apiClient, seedData, `Status recovery ${Date.now()}`);
 
-    proxy.delayNextResponses(
-      "task.session.status",
-      2,
-      11_000,
-      "force both bounded status attempts to expose the compact status notice",
-    );
+    proxy.dropNextResponses("task.session.status", 2);
 
     await openTaskSession(testPage, task.id);
     const statusNotice = testPage.getByTestId("session-status-unavailable");
@@ -140,6 +133,6 @@ test.describe("session entry recovery", () => {
     await expect(statusNotice).toHaveCount(0);
     expect(proxy.requestCount("task.session.status")).toBeGreaterThanOrEqual(3);
     expect(proxy.requestCount("session.launch")).toBe(launchRequestCountBeforeRetry);
-    expect(proxy.delayedResponseCount("task.session.status")).toBe(2);
+    expect(proxy.droppedResponseCount("task.session.status")).toBe(2);
   });
 });

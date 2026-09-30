@@ -193,15 +193,12 @@ func (m *Manager) prepareRestartedKubernetesAgentctl(
 	if env == nil {
 		env = runtimeEnvFromMetadata(execution.MetadataSnapshot())
 	}
-	approvalPolicy := "untrusted"
-	if refresh.AutoApprovePermissions {
-		approvalPolicy = "never"
-	}
+	normalizeManagedGitHelperEnvironment(execution.RuntimeName, env)
 	if execution.AgentCommand == "" {
 		return "", fmt.Errorf("execution %q has no recorded agent command for Kubernetes restart", execution.ID)
 	}
 	if err := client.ConfigureAgent(
-		ctx, execution.AgentCommand, execution.AgentArgs, env, approvalPolicy,
+		ctx, execution.AgentCommand, execution.AgentArgs, env,
 		execution.ContinueCommand, execution.ContinueArgs,
 	); err != nil {
 		return "", fmt.Errorf("configure agent after Kubernetes restart: %w", err)

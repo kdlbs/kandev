@@ -7,6 +7,7 @@ import {
   restoreSessionCapacitySettings,
   SESSION_CAPACITY_SETTINGS_PATH,
 } from "../../helpers/session-capacity-settings";
+import { openTaskBehaviorRuntime } from "../../helpers/settings-composition";
 
 let baseline: SessionCapacitySettingsValue | undefined;
 
@@ -28,14 +29,12 @@ test("reaches Task Behavior and keeps the form touch-safe", async ({ testPage })
   const mobile = new MobileKanbanPage(testPage);
   await mobile.goto();
   await mobile.mobileMenuButton.click();
-  await testPage
-    .getByTestId("mobile-home-menu-card")
-    .getByRole("link", { name: "Settings" })
-    .click();
+  await testPage.getByTestId("app-nav-sheet").getByRole("link", { name: "Settings" }).click();
   await testPage
     .getByTestId("settings-index")
     .getByRole("link", { name: /^Task Behavior/ })
     .click();
+  await openTaskBehaviorRuntime(testPage);
 
   const card = testPage.getByTestId("session-capacity-settings");
   await expect(card).toBeVisible();
@@ -74,6 +73,7 @@ test("reaches Task Behavior and keeps the form touch-safe", async ({ testPage })
   await expect(saveBar).not.toBeVisible();
 
   await testPage.reload();
+  await openTaskBehaviorRuntime(testPage);
   await expect(card.getByTestId("session-capacity-enabled")).toHaveAttribute(
     "aria-checked",
     "true",
@@ -88,6 +88,7 @@ test("reaches Task Behavior and keeps the form touch-safe", async ({ testPage })
     .tap();
   await expect(testPage.getByTestId("settings-floating-save")).not.toBeVisible();
   await testPage.reload();
+  await openTaskBehaviorRuntime(testPage);
   await expect(card.getByTestId("session-capacity-enabled")).toHaveAttribute(
     "aria-checked",
     "false",
@@ -134,6 +135,7 @@ test("saves the agent-tab close preference with a touch-safe selector", async ({
       .getByRole("link", { name: /^Task Behavior/ })
       .click();
 
+    await testPage.getByRole("tab", { name: "Conversation", exact: true }).tap();
     const card = testPage.getByTestId("agent-tab-close-behavior-card");
     await expect(card).toBeVisible();
     const selector = card.getByRole("combobox");
@@ -159,6 +161,7 @@ test("saves the agent-tab close preference with a touch-safe selector", async ({
     await expect(testPage.getByTestId("settings-floating-save")).not.toBeVisible();
 
     await testPage.reload();
+    await testPage.getByRole("tab", { name: "Conversation", exact: true }).tap();
     await expect(card.getByRole("combobox")).toHaveText(behaviorLabel(draftBehavior));
     expect(await testPage.evaluate(() => document.documentElement.scrollWidth)).toBe(
       await testPage.evaluate(() => document.documentElement.clientWidth),

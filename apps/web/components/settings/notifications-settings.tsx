@@ -2,7 +2,6 @@
 
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Separator } from "@kandev/ui/separator";
 import { NotificationSoundSection } from "@/components/settings/notification-sound-section";
 import { NotificationEventsTable } from "@/components/settings/notification-events-table";
 import { SettingsPageTemplate } from "@/components/settings/settings-page-template";
@@ -19,7 +18,7 @@ import {
   type NotificationsState,
 } from "@/components/settings/notifications-settings-actions";
 import { ExternalProvidersSection } from "@/components/settings/notifications-settings-external-providers";
-import { SettingsTarget } from "@/components/settings/settings-target";
+import { SettingsGroup } from "@/components/settings/settings-group";
 import { GENERAL_SETTINGS_TARGETS } from "@/lib/settings-discovery/catalog/preferences";
 
 function useTableData(state: NotificationsState) {
@@ -118,59 +117,57 @@ export function NotificationsSettings() {
       invalidReason={saveState.invalidReason}
       onSave={() => saveRequest.run()}
       onDiscard={actions.discard}
+      contentFrame="none"
     >
-      <DesktopNotificationsSection
-        notificationPermission={notificationPermission}
-        onRequestPermission={actions.handleRequestPermission}
-        onRefreshPermission={actions.handleRefreshPermission}
-        onTestNotification={actions.handleTestNotification}
-      />
-      <Separator className="my-4" />
-      <NotificationSoundSection onDirtyChange={setSoundIsDirty} />
-      <Separator className="my-4" />
-      <ExternalProvidersSection
-        appriseAvailable={appriseAvailable}
-        appriseProviders={appriseProviders}
-        baselineProviders={baselineProviders}
-        appriseFormMode={appriseFormMode}
-        activeAppriseId={activeAppriseId}
-        appriseName={appriseName}
-        appriseUrls={appriseUrls}
-        showAppriseForm={showAppriseForm}
-        notificationProvidersLoaded={notificationProvidersLoaded}
-        notificationProvidersLoading={notificationProvidersLoading}
-        appriseRescanPending={appriseRescanPending}
-        appriseRescanError={appriseRescanError}
-        appriseRescanResult={appriseRescanResult}
-        setAppriseName={setAppriseName}
-        setAppriseUrls={setAppriseUrls}
-        onAppriseNameEdit={actions.handleAppriseNameEdit}
-        onAppriseEdit={actions.handleAppriseEdit}
-        onOpenForm={actions.openAppriseForm}
-        onCloseForm={actions.closeAppriseForm}
-        onCancelForm={actions.cancelAppriseForm}
-        onDeleteProvider={actions.handleDeleteProvider}
-        onTestProvider={actions.handleTestProvider}
-        onRescanApprise={rescanApprise}
-      />
-      <Separator className="my-4" />
-      <SettingsTarget targetId={GENERAL_SETTINGS_TARGETS.notificationEvents} className="space-y-4">
-        <div>
-          <div className="text-sm font-medium">{t("settings:notificationEvents")}</div>
-          <p className="text-xs text-muted-foreground">
-            {t("settings:notificationEventsDescription")}
-          </p>
-        </div>
-        {tableProviders.length > 0 && (
-          <NotificationEventsTable
-            tableProviders={tableProviders}
-            baselineProviders={baselineProviders}
-            tableEvents={tableEvents}
-            onToggleEvent={actions.handleToggleEvent}
-            onTestProvider={actions.handleTestProvider}
-          />
-        )}
-      </SettingsTarget>
+      <div className="space-y-6">
+        <DesktopNotificationsSection
+          notificationPermission={notificationPermission}
+          onRequestPermission={actions.handleRequestPermission}
+          onRefreshPermission={actions.handleRefreshPermission}
+          onTestNotification={actions.handleTestNotification}
+        />
+        <NotificationSoundSection onDirtyChange={setSoundIsDirty} />
+        <ExternalProvidersSection
+          appriseAvailable={appriseAvailable}
+          appriseProviders={appriseProviders}
+          baselineProviders={baselineProviders}
+          appriseFormMode={appriseFormMode}
+          activeAppriseId={activeAppriseId}
+          appriseName={appriseName}
+          appriseUrls={appriseUrls}
+          showAppriseForm={showAppriseForm}
+          notificationProvidersLoaded={notificationProvidersLoaded}
+          notificationProvidersLoading={notificationProvidersLoading}
+          appriseRescanPending={appriseRescanPending}
+          appriseRescanError={appriseRescanError}
+          appriseRescanResult={appriseRescanResult}
+          setAppriseName={setAppriseName}
+          setAppriseUrls={setAppriseUrls}
+          onAppriseNameEdit={actions.handleAppriseNameEdit}
+          onAppriseEdit={actions.handleAppriseEdit}
+          onOpenForm={actions.openAppriseForm}
+          onCloseForm={actions.closeAppriseForm}
+          onCancelForm={actions.cancelAppriseForm}
+          onDeleteProvider={actions.handleDeleteProvider}
+          onTestProvider={actions.handleTestProvider}
+          onRescanApprise={rescanApprise}
+        />
+        <SettingsGroup
+          title={t("settings:notificationEvents")}
+          description={t("settings:notificationEventsDescription")}
+          discoveryTargetId={GENERAL_SETTINGS_TARGETS.notificationEvents}
+        >
+          {tableProviders.length > 0 && (
+            <NotificationEventsTable
+              tableProviders={tableProviders}
+              baselineProviders={baselineProviders}
+              tableEvents={tableEvents}
+              onToggleEvent={actions.handleToggleEvent}
+              onTestProvider={actions.handleTestProvider}
+            />
+          )}
+        </SettingsGroup>
+      </div>
     </SettingsPageTemplate>
   );
 }

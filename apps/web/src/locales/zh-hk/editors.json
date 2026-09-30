@@ -90,5 +90,9 @@
   "underlineCmdU": "下劃線（Cmd+U）",
   "failedToOpenEditor": "開啟編輯器失敗",
   "downloadFile": "下載檔案",
-  "symlink": "符號連結"
+  "symlink": "符號連結",
+  "failedToOpenFolder": "無法開啟資料夾",
+  "openFolderOnHost": "在執行 Kandev 的計算機上開啟資料夾",
+  "chooseFolder": "選擇資料夾",
+  "openingFolder": "正在開啟資料夾…"
 }

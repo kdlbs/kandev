@@ -161,7 +161,7 @@ function MobileFileViewerHeader({
 
   return (
     <PanelHeaderBarSplit
-      className="h-11 px-2"
+      className="px-2"
       left={
         <div className="flex min-w-0 items-center gap-2">
           <span className="truncate font-mono text-xs">{file.path}</span>
@@ -199,7 +199,12 @@ function MobileFileViewerHeader({
               )}
             </Button>
           )}
-          <Button variant="ghost" size="sm" className="cursor-pointer px-2" onClick={onClose}>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="min-h-11 min-w-11 cursor-pointer px-2"
+            onClick={onClose}
+          >
             {t("task:close")}
           </Button>
         </div>

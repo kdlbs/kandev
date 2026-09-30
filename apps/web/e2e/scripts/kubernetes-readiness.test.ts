@@ -14,6 +14,12 @@ describe("in-cluster backend readiness", () => {
     );
   });
 
+  it("puts the bundled native agentctl on the in-cluster backend PATH", () => {
+    expect(inClusterBackendPod("fixture:image")).toMatch(
+      /\{name: PATH, value: "?\/opt\/kandev\/runtime\/bin:/,
+    );
+  });
+
   it("does not return while the listener is live but application startup is incomplete", async () => {
     vi.useFakeTimers();
     let applicationReady = false;

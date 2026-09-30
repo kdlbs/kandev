@@ -62,7 +62,7 @@ func TestProvide_MockAgentModes(t *testing.T) {
 			wantOnlyMock:    false,
 		},
 		{
-			name:            "only: only mock-agent registered and enabled",
+			name:            "only: mock-agent enabled, optional native descriptor disabled",
 			envValue:        "only",
 			wantMockEnabled: true,
 			wantOnlyMock:    true,
@@ -102,9 +102,12 @@ func TestProvide_MockAgentModes(t *testing.T) {
 			// Check agent count
 			all := reg.List()
 			if tt.wantOnlyMock {
-				if len(all) != 2 {
-					t.Errorf("only mode: expected mock agent plus virtual families, got %d", len(all))
+				if len(all) != 3 {
+					t.Errorf("only mode: expected mock agent, virtual family, and disabled native descriptor, got %d", len(all))
 				}
+			}
+			if native, exists := reg.Get("codex-app-server"); !exists || native.Enabled() {
+				t.Error("native Codex descriptor should remain registered but disabled by default")
 			}
 			if !reg.Exists(agents.DynamicAgentID) {
 				t.Error("dynamic virtual family should always be registered")
@@ -120,6 +123,24 @@ func TestProvide_MockAgentModes(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestProvide_MockOnlyKeepsNativeCodexDisabled(t *testing.T) {
+	t.Setenv("KANDEV_MOCK_AGENT", "only")
+
+	reg, cleanup, err := Provide(newTestLogger(), true)
+	if err != nil {
+		t.Fatalf("Provide() error: %v", err)
+	}
+	defer cleanup() //nolint:errcheck
+
+	native, exists := reg.Get("codex-app-server")
+	if !exists {
+		t.Fatal("native Codex descriptor should remain registered")
+	}
+	if native.Enabled() {
+		t.Fatal("native Codex must stay disabled while mock-only mode isolates inference")
 	}
 }
 
@@ -142,7 +163,10 @@ func TestResolveProviderCommandUsesActiveManagedRuntimeVersion(t *testing.T) {
 	if !ok {
 		t.Fatal("resolveProviderCommand returned !ok")
 	}
-	if got := args[3]; got != "opencode-ai@1.18.5" {
+	if len(args) < 6 || args[3] != "--prefix" || args[4] != managedruntime.NPMProjectPrefix {
+		t.Fatalf("command args = %#v, want managed npm project prefix", args)
+	}
+	if got := args[5]; got != "opencode-ai@1.18.5" {
 		t.Fatalf("package arg = %q, want exact active version", got)
 	}
 	if agent.opts.Runtime != agentruntime.RuntimeStandalone {
@@ -200,6 +224,30 @@ func TestProvide_MockProviders_RegistersExtraAliases(t *testing.T) {
 	// opencode-acp not in the env var, must not be registered.
 	if reg.Exists("opencode-acp") {
 		t.Error("opencode-acp should NOT be registered when not in KANDEV_MOCK_PROVIDERS")
+	}
+}
+
+func TestProvide_E2EMockAuggieIsExplicitlyOptIn(t *testing.T) {
+	t.Setenv("KANDEV_MOCK_AGENT", "only")
+	t.Setenv("KANDEV_E2E_MOCK", "true")
+	t.Setenv("KANDEV_E2E_MOCK_AUGGIE", "true")
+
+	log := newTestLogger()
+	reg, cleanup, err := Provide(log)
+	if err != nil {
+		t.Fatalf("Provide() error: %v", err)
+	}
+	defer cleanup() //nolint:errcheck
+
+	provider, ok := reg.Get("auggie")
+	if !ok {
+		t.Fatal("expected explicit E2E Auggie mock alias")
+	}
+	if _, isMock := provider.(*agents.MockAgent); !isMock {
+		t.Fatalf("auggie provider = %T, want *agents.MockAgent", provider)
+	}
+	if !provider.Enabled() {
+		t.Fatal("explicit E2E Auggie mock alias must be enabled")
 	}
 }
 

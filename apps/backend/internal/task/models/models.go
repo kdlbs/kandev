@@ -4,10 +4,12 @@ import (
 	"encoding/json"
 	"errors"
 	"maps"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/kandev/kandev/internal/agentruntime"
+	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
 	"github.com/kandev/kandev/internal/sysprompt"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
@@ -57,6 +59,13 @@ const (
 	createdAtField                = "created_at"
 )
 
+const (
+	ExecutorIdleSuspensionNone         = ""
+	ExecutorIdleSuspensionInProgress   = "suspending"
+	ExecutorIdleSuspensionAgentStopped = "agent_stopped"
+	ExecutorIdleSuspensionSuspended    = "suspended"
+)
+
 // ListMessagesOptions defines pagination options for listing messages
 type ListMessagesOptions struct {
 	Limit      int
@@ -98,9 +107,27 @@ type PluginMessageFilter struct {
 
 // Task metadata keys used for deferred agent start (e.g., task.moved → handleTaskMovedNoSession).
 const (
-	MetaKeyAgentProfileID    = "agent_profile_id"
-	MetaKeyExecutorID        = "executor_id"
-	MetaKeyExecutorProfileID = "executor_profile_id"
+	MetaKeyAgentProfileID = "agent_profile_id"
+	// MetaKeyAutoStartError records why an asynchronous auto-start failed after
+	// its creating call already returned success. Without it the only evidence
+	// is a backend log line and the task sits in CREATED with no session,
+	// looking exactly like a task nobody asked to start.
+	MetaKeyAutoStartError              = "auto_start_error"
+	MetaKeyExecutorID                  = "executor_id"
+	MetaKeyExecutorProfileID           = "executor_profile_id"
+	MetaKeyManagedByPlugin             = "kandev.managed_by_plugin"
+	MetaKeyManagedRetained             = "kandev.managed_retained"
+	MetaKeyManagedInstallationID       = "kandev.installation_id"
+	MetaKeyManagedWorkspaceID          = "kandev.workspace_id"
+	MetaKeyManagedInstanceKey          = "kandev.instance_key"
+	MetaKeyManagedConversationRevision = "kandev.conversation_revision"
+	MetaKeyManagedConversationPaused   = "kandev.desired_paused"
+	MetaKeyManagedConversationDetached = "kandev.detached"
+	MetaKeyManagedApprovalRevision     = "kandev.approval_revision"
+	MetaKeyManagedManifestDigest       = "kandev.manifest_digest"
+	MetaKeyManagedAgentToolNames       = "kandev.agent_tool_names"
+	MetaKeyManagedPolicyInvalidated    = "kandev.managed_policy_invalidated"
+	MetaKeyManagedRetentionMode        = "kandev.retention_mode"
 	// Automation target metadata is written to continuation tasks so a
 	// change from hidden to visible ownership or from repository-backed to
 	// repository-free execution cannot silently reuse the old task.
@@ -132,6 +159,10 @@ const (
 	// instructions and profile choice ride on this transient marker and are
 	// cleared once the target entry is dispatched.
 	MetaKeyWorkflowMovePending = "workflow_move_pending"
+	// MetaKeyTaskManagementDeferredFence binds a WIP-queued workflow move to
+	// the management generation that admitted it. Promotion rechecks this
+	// marker so an old manager cannot trigger destination entry after transfer.
+	MetaKeyTaskManagementDeferredFence = "task_management_deferred_fence"
 	// MetaKeyManualMoveLifecyclePending identifies an admitted manual move whose
 	// task.moved lifecycle must finish before feeder reconciliation. Its value
 	// records the source step so stale deliveries cannot run the wrong exit.
@@ -178,11 +209,14 @@ const (
 	// because the winner will (or already did) handle it.
 	// Absent on ordinary (non-watcher) auto-start tasks, which launch normally.
 	MetaKeyAutoStartClaimed = "auto_start_claimed"
-	// MetaKeyInterruptedAt is set by startup reconciliation when a task's
-	// session was mid-turn (STARTING/RUNNING) when the backend died. Its
-	// presence makes the task DTO report `interrupted: true` so task-list
-	// surfaces show the red interruption icon; the orchestrator removes the
-	// key when a session of the task next enters STARTING/RUNNING.
+	// MetaKeyForkPRRequiresManualStart blocks unattended launches of fork PR
+	// review tasks. Their worktree setup scripts can read executor-profile secrets;
+	// a user can still explicitly start the task after reviewing it.
+	MetaKeyForkPRRequiresManualStart = "fork_pr_requires_manual_start"
+	// MetaKeyInterruptedAt is set by reconciliation when a task's session lost
+	// an active turn. Its presence makes the task DTO report `interrupted: true`
+	// so task-list surfaces show the warning indicator. The orchestrator removes
+	// the key only after the provider confirms recovery.
 	MetaKeyInterruptedAt = "interrupted_at"
 	// MetaKeyAutoStartFailed is set when a workflow step's auto_start_agent
 	// on_enter action fails to launch a run (kanban StartTask error, or an
@@ -233,6 +267,23 @@ const (
 	// whose Routine workflow start step has no other transition to carry it
 	// into an auto_start_agent evaluation.
 	MetaKeyAutoStartOnCreate = "auto_start_on_create"
+
+	// The MetaKeyOfficeCarrier* keys are the task-boundary causation carrier
+	// set (AC-OFFICE-RUN-CAUSATION-001.18), persisted on a task when an
+	// Office trigger creates it (AC-OFFICE-RUN-CAUSATION-001.5): an agent
+	// creating a task through a runtime action, or a routine fire creating
+	// a task. A run later queued because of that task inherits these
+	// values as though the task creation were the causing run, without
+	// needing to read the creating run row again — which may no longer
+	// exist by the time the task is acted on.
+	MetaKeyOfficeCarrierCausationID    = "office_carrier_causation_id"
+	MetaKeyOfficeCarrierCausationDepth = "office_carrier_causation_depth"
+	MetaKeyOfficeCarrierCreatingRunID  = "office_carrier_creating_run_id"
+	MetaKeyOfficeCarrierHumanRooted    = "office_carrier_human_rooted"
+	MetaKeyOfficeCarrierRoutineID      = "office_carrier_routine_id"
+	MetaKeyOfficeCarrierActorKind      = "office_carrier_actor_kind"
+	MetaKeyOfficeCarrierActorID        = "office_carrier_actor_id"
+
 	// MetaKeyAutoStartOnCreateInFlight is a durable hand-off marker for an
 	// auto-start-on-create launch. The original intent is consumed before the
 	// detached launch starts, but this marker remains until a session or run
@@ -245,7 +296,113 @@ const (
 	// Recording it replaces any existing token (single-slot by construction);
 	// claiming it removes it. See REQ-TASKS-SIGNAL-PAYLOAD-DELIVERY-001.
 	MetaKeyStepHandoffCarry = "step_handoff_carry"
+	// MetaKeyHandoffSource records inbound handoff provenance on a delivery
+	// task created via the cross-workspace handoff runtime route: the source
+	// workspace, task, and agent that created it. Written once at creation;
+	// never mutated.
+	MetaKeyHandoffSource = "handoff_source"
+	// MetaKeyHandoffs records outbound handoff provenance on the source task:
+	// an append-only array of handoff entries, each identifying a delivery
+	// task created from it. Mutated via an optimistic compare-and-set.
+	MetaKeyHandoffs = "handoffs"
 )
+
+// ManagedToolPolicyFromTask returns the persisted restricted policy only for
+// a retained managed conversation. Incomplete or inactive metadata fails
+// closed instead of falling back to a normal task tool profile.
+//
+//nolint:cyclop // The task policy parser validates every persisted field before execution.
+func ManagedToolPolicyFromTask(task *Task) (*mcpprofile.ManagedToolPolicy, bool, error) {
+	if task == nil || task.Metadata == nil {
+		return nil, false, nil
+	}
+	retained, _ := task.Metadata[MetaKeyManagedRetained].(bool)
+	if !retained {
+		if StringFromAny(task.Metadata[MetaKeyManagedRetentionMode]) != "" {
+			return nil, true, errors.New("managed conversation retained marker is invalid")
+		}
+		return nil, false, nil
+	}
+	paused, pausedOK := task.Metadata[MetaKeyManagedConversationPaused].(bool)
+	detached, detachedOK := task.Metadata[MetaKeyManagedConversationDetached].(bool)
+	policyInvalidated, invalidationExists := task.Metadata[MetaKeyManagedPolicyInvalidated]
+	workspaceID := StringFromAny(task.Metadata[MetaKeyManagedWorkspaceID])
+	if !pausedOK || !detachedOK || paused || detached || (invalidationExists && policyInvalidated != false) || workspaceID == "" || workspaceID != task.WorkspaceID {
+		return nil, true, errors.New("managed conversation is inactive or has invalid workspace metadata")
+	}
+	conversationRevision, err := strconv.ParseUint(StringFromAny(task.Metadata[MetaKeyManagedConversationRevision]), 10, 64)
+	if err != nil {
+		return nil, true, errors.New("managed conversation revision is invalid")
+	}
+	approvalRevision, err := strconv.ParseUint(StringFromAny(task.Metadata[MetaKeyManagedApprovalRevision]), 10, 64)
+	if err != nil {
+		return nil, true, errors.New("managed conversation approval revision is invalid")
+	}
+	toolNamesValue, exists := task.Metadata[MetaKeyManagedAgentToolNames]
+	if !exists {
+		return nil, true, errors.New("managed conversation tool selection is missing")
+	}
+	encodedNames, err := json.Marshal(toolNamesValue)
+	if err != nil {
+		return nil, true, errors.New("managed conversation tool selection is invalid")
+	}
+	var toolNames []string
+	if err := json.Unmarshal(encodedNames, &toolNames); err != nil {
+		return nil, true, errors.New("managed conversation tool selection is invalid")
+	}
+	policy := &mcpprofile.ManagedToolPolicy{
+		PluginID:             StringFromAny(task.Metadata[MetaKeyManagedByPlugin]),
+		InstallationID:       StringFromAny(task.Metadata[MetaKeyManagedInstallationID]),
+		WorkspaceID:          workspaceID,
+		InstanceKey:          StringFromAny(task.Metadata[MetaKeyManagedInstanceKey]),
+		ConversationRevision: conversationRevision,
+		ApprovalRevision:     approvalRevision,
+		ManifestDigest:       StringFromAny(task.Metadata[MetaKeyManagedManifestDigest]),
+		AgentToolNames:       toolNames,
+	}
+	if err := policy.Validate(); err != nil {
+		return nil, true, err
+	}
+	return policy, true, nil
+}
+
+// officeCarrierMetadataKeys is every MetaKeyOfficeCarrier* key above, kept
+// next to that block so a new carrier key can't be added to one without
+// the other.
+var officeCarrierMetadataKeys = []string{
+	MetaKeyOfficeCarrierCausationID,
+	MetaKeyOfficeCarrierCausationDepth,
+	MetaKeyOfficeCarrierCreatingRunID,
+	MetaKeyOfficeCarrierHumanRooted,
+	MetaKeyOfficeCarrierRoutineID,
+	MetaKeyOfficeCarrierActorKind,
+	MetaKeyOfficeCarrierActorID,
+}
+
+// StripOfficeCarrierMetadata deletes every task-boundary causation carrier
+// key from metadata in place (safe to call with a nil map). The carrier
+// (AC-OFFICE-RUN-CAUSATION-001.18) may only be derived server-side from a
+// run's own record (AC-OFFICE-RUN-CAUSATION-001.17), so no metadata
+// originating from a request body may carry it.
+func StripOfficeCarrierMetadata(metadata map[string]interface{}) {
+	for _, key := range officeCarrierMetadataKeys {
+		delete(metadata, key)
+	}
+}
+
+// RestoreOfficeCarrierMetadata copies every task-boundary causation carrier
+// key present in existing onto updated (a key absent from existing is left
+// alone). Callers that apply a generic metadata replacement strip
+// request-supplied carrier keys with StripOfficeCarrierMetadata first, then
+// call this so the server-owned carrier the task already had survives the
+// replacement instead of being silently deleted.
+func RestoreOfficeCarrierMetadata(updated, existing map[string]interface{}) {
+	for _, key := range officeCarrierMetadataKeys {
+		if v, ok := existing[key]; ok {
+			updated[key] = v
+		}
+	}
+}
 
 // WorkflowInitialSessionSnapshot identifies the immutable task-initial
 // conversation and the logical profile selected when it was created.
@@ -400,7 +557,83 @@ const (
 	// latest successful agent boot. Recovery cards compare this timestamp with
 	// their own creation time, so the result survives transcript write failures.
 	SessionMetaKeyRecoveryResolvedAt = "recovery_resolved_at"
+	// SessionMetaKeyInterruptedRecoveryPending is a durable token written by
+	// session reconciliation when execution loss returns a conversation to
+	// WAITING_FOR_INPUT. It distinguishes an interrupted waiting session from
+	// an ordinary idle conversation even when the executor row was removed.
+	SessionMetaKeyInterruptedRecoveryPending = "interrupted_recovery_pending"
+	// SessionMetaKeyRecoverySettlementPending carries the immutable recovery
+	// snapshot needed to retry post-commit effects after a partial failure.
+	SessionMetaKeyRecoverySettlementPending = "recovery_settlement_pending"
+	// SessionMetaKeyInitialCreatePromptPassthrough stores the durable
+	// execution and turn evidence for a creation prompt admitted before a
+	// passthrough agent.running event. It prevents recovery from evaluating
+	// the same on_turn_start transition a second time after restart.
+	SessionMetaKeyInitialCreatePromptPassthrough = "initial_create_prompt_passthrough"
 )
+
+// InterruptedRecoverySettlement is the durable recovery snapshot used when a
+// session transition committed but one of its cross-repository effects did
+// not. The executor identity and turn ID are compare-and-set inputs; they
+// must never be refreshed from a successor execution during retry.
+type InterruptedRecoverySettlement struct {
+	Token         string           `json:"token"`
+	ExpectedState TaskSessionState `json:"expected_state"`
+	// RecoveredUpdatedAt is the session generation written by the recovery
+	// transition. Retries must compare against this immutable timestamp rather
+	// than treating a later session read as the recovery generation.
+	RecoveredUpdatedAt               time.Time `json:"recovered_updated_at"`
+	ExpectedTurnID                   string    `json:"expected_turn_id,omitempty"`
+	ExpectedExecutorID               string    `json:"expected_executor_id,omitempty"`
+	ExpectedExecutorAgentExecutionID string    `json:"expected_executor_agent_execution_id,omitempty"`
+	ExpectedExecutorUpdatedAt        time.Time `json:"expected_executor_updated_at,omitempty"`
+}
+
+// HasInterruptedRecoveryPending reports whether metadata carries a valid
+// interrupted-session token. Older in-process callers used a boolean marker,
+// so explicit true remains accepted during the transition to tokens.
+func HasInterruptedRecoveryPending(metadata map[string]interface{}) bool {
+	if metadata == nil {
+		return false
+	}
+	value, ok := metadata[SessionMetaKeyInterruptedRecoveryPending]
+	if !ok || value == nil {
+		return false
+	}
+	switch typed := value.(type) {
+	case bool:
+		return typed
+	case string:
+		return strings.TrimSpace(typed) != ""
+	default:
+		return true
+	}
+}
+
+// LoadInterruptedRecoverySettlement decodes the immutable post-commit
+// snapshot. Invalid or incomplete values fail closed so a retry cannot repair
+// a successor executor or abandon an unrelated turn.
+func LoadInterruptedRecoverySettlement(metadata map[string]interface{}) (InterruptedRecoverySettlement, bool) {
+	if metadata == nil {
+		return InterruptedRecoverySettlement{}, false
+	}
+	value, ok := metadata[SessionMetaKeyRecoverySettlementPending]
+	if !ok || value == nil {
+		return InterruptedRecoverySettlement{}, false
+	}
+	payload, err := json.Marshal(value)
+	if err != nil {
+		return InterruptedRecoverySettlement{}, false
+	}
+	var settlement InterruptedRecoverySettlement
+	if err := json.Unmarshal(payload, &settlement); err != nil {
+		return InterruptedRecoverySettlement{}, false
+	}
+	if strings.TrimSpace(settlement.Token) == "" || settlement.ExpectedState == "" || settlement.RecoveredUpdatedAt.IsZero() {
+		return InterruptedRecoverySettlement{}, false
+	}
+	return settlement, true
+}
 
 // IsCompletionFollowUpSession reports whether a session was explicitly
 // reopened only to continue its completed conversation. The marker remains
@@ -511,6 +744,14 @@ const (
 	// Startup recovery sets it after accepting an ambiguous reservation and
 	// clears it only after the task service replays the public turn events.
 	TurnMetaKeyPromptDispatchStartEventPending = "prompt_dispatch_start_event_pending"
+	// TurnMetaKeyCodexNativeTurnID binds a Kandev turn to the native provider
+	// turn required for safe conversation forks. It is backend-only metadata.
+	TurnMetaKeyCodexNativeTurnID = "codex_native_turn_id"
+
+	// SessionMetaKeyCodexForkRequestPrefix names per-request, at-most-once fork
+	// records on the source session. Ambiguous provider responses remain
+	// uncertain and are never retried automatically.
+	SessionMetaKeyCodexForkRequestPrefix = "codex_fork_request_"
 )
 
 var promptDispatchMetadataKeys = [...]string{
@@ -775,6 +1016,12 @@ func LoadTurnRuntimeConfigSnapshot(metadata map[string]interface{}) (TurnRuntime
 // Cleared on successful transition, on user reply before transition, or any
 // other step change.
 const SessionMetaKeyPendingStepCompletion = "pending_step_completion_signal"
+
+// SessionMetaKeyAgentStartAttemptID identifies the process-start attempt that
+// owns asynchronous bootstrap results. Session activity may advance the row
+// revision while that attempt is still starting, so UpdatedAt is not an
+// attempt identity.
+const SessionMetaKeyAgentStartAttemptID = "agent_start_attempt_id"
 
 // SessionMetaKeyLastAgentError stores the last recoverable agent runtime
 // failure for UI surfaces that need to keep the error visible after auto-resume.
@@ -1084,15 +1331,18 @@ const (
 
 // Task represents a task in the database
 type Task struct {
-	ID             string       `json:"id"`
-	WorkspaceID    string       `json:"workspace_id"`
-	WorkflowID     string       `json:"workflow_id"`
-	WorkflowStepID string       `json:"workflow_step_id"`
-	Title          string       `json:"title"`
-	Description    string       `json:"description"`
-	State          v1.TaskState `json:"state"`
-	Priority       string       `json:"priority"`
-	Position       int          `json:"position"` // Order within workflow step
+	ID             string `json:"id"`
+	WorkspaceID    string `json:"workspace_id"`
+	WorkflowID     string `json:"workflow_id"`
+	WorkflowStepID string `json:"workflow_step_id"`
+	// WorkflowAgentOverrides is scoped to WorkflowID and expands the grouped
+	// create choice into fixed step bindings. It is nil for ordinary tasks.
+	WorkflowAgentOverrides *WorkflowAgentOverrides `json:"workflow_agent_overrides,omitempty"`
+	Title                  string                  `json:"title"`
+	Description            string                  `json:"description"`
+	State                  v1.TaskState            `json:"state"`
+	Priority               string                  `json:"priority"`
+	Position               int                     `json:"position"` // Order within workflow step
 	// WIPAdmitted indicates whether this task consumes an active slot in its
 	// current workflow step. Queued tasks remain visible but do not consume the
 	// destination step's WIP capacity.
@@ -1168,6 +1418,80 @@ type Task struct {
 	// tasks always come back false. UI callers gate office-only surfaces on
 	// this (e.g. the "Open in office view" topbar link).
 	IsFromOffice bool `json:"is_from_office,omitempty"`
+}
+
+const (
+	TaskManagementClaimAcquire     = "acquire"
+	TaskManagementClaimTransfer    = "transfer"
+	TaskManagementClaimRelease     = "release"
+	TaskManagementClaimAcquired    = "acquired"
+	TaskManagementClaimReleased    = "released"
+	TaskManagementClaimTransferred = "transferred"
+)
+
+// TaskManagementClaim is the durable owner projection for an optional
+// plugin-owned task manager. An empty InstallationID represents a released
+// claim; Generation continues to increase across releases and reacquisitions.
+type TaskManagementClaim struct {
+	TaskID          string     `json:"task_id"`
+	WorkspaceID     string     `json:"workspace_id"`
+	OwnerKind       string     `json:"owner_kind"`
+	OwnerActorID    string     `json:"owner_actor_id,omitempty"`
+	InstallationID  string     `json:"installation_id,omitempty"`
+	InstanceKey     string     `json:"instance_key,omitempty"`
+	Generation      int64      `json:"generation"`
+	ResourceVersion string     `json:"resource_version"`
+	AcquiredAt      *time.Time `json:"acquired_at,omitempty"`
+	UpdatedAt       time.Time  `json:"updated_at"`
+	UpdatedByActor  string     `json:"updated_by_actor,omitempty"`
+}
+
+// TaskManagementClaimChange is an optimistic, task-scoped ownership command.
+// Both observed versions are required so a command cannot act on an older task
+// or replace a claim that changed after the UI or plugin read it.
+type TaskManagementClaimChange struct {
+	Action                       string
+	TaskID                       string
+	WorkspaceID                  string
+	ExpectedTaskResourceVersion  string
+	ExpectedClaimResourceVersion string
+	InstallationID               string
+	InstanceKey                  string
+	OwnerKind                    string
+	OwnerActorID                 string
+	ActorID                      string
+	ActorInstallationID          string
+	ActorInstanceKey             string
+	Reason                       string
+}
+
+// TaskManagementClaimFence is the captured manager identity attached to an
+// exact plugin mutation. It is checked inside the task write transaction.
+type TaskManagementClaimFence struct {
+	InstallationID string
+	InstanceKey    string
+	Generation     int64
+}
+
+// TaskManagementClaimHistory is an immutable record of one owner transition.
+type TaskManagementClaimHistory struct {
+	ID                     string    `db:"id" json:"id"`
+	TaskID                 string    `db:"task_id" json:"task_id"`
+	WorkspaceID            string    `db:"workspace_id" json:"workspace_id"`
+	Action                 string    `db:"action" json:"action"`
+	PreviousOwnerKind      string    `db:"previous_owner_kind" json:"previous_owner_kind,omitempty"`
+	PreviousOwnerActorID   string    `db:"previous_owner_actor_id" json:"previous_owner_actor_id,omitempty"`
+	PreviousInstallationID string    `db:"previous_installation_id" json:"previous_installation_id,omitempty"`
+	PreviousInstanceKey    string    `db:"previous_instance_key" json:"previous_instance_key,omitempty"`
+	InstallationID         string    `db:"installation_id" json:"installation_id,omitempty"`
+	InstanceKey            string    `db:"instance_key" json:"instance_key,omitempty"`
+	OwnerKind              string    `db:"owner_kind" json:"owner_kind,omitempty"`
+	OwnerActorID           string    `db:"owner_actor_id" json:"owner_actor_id,omitempty"`
+	Generation             int64     `db:"generation" json:"generation"`
+	ActorID                string    `db:"actor_id" json:"actor_id"`
+	Reason                 string    `db:"reason" json:"reason"`
+	ResourceVersion        string    `db:"resource_version" json:"resource_version"`
+	CreatedAt              time.Time `db:"created_at" json:"created_at"`
 }
 
 // IsOfficeOwnedAndAssigned reports whether runtime behavior belongs to an
@@ -1380,6 +1704,8 @@ type Workspace struct {
 	DefaultEnvironmentID        *string   `json:"default_environment_id,omitempty"`
 	DefaultAgentProfileID       *string   `json:"default_agent_profile_id,omitempty"`
 	DefaultConfigAgentProfileID *string   `json:"default_config_agent_profile_id,omitempty"`
+	ACPIdleSuspensionEnabled    bool      `json:"acp_idle_suspension_enabled"`
+	ACPIdleTimeoutMinutes       int       `json:"acp_idle_timeout_minutes"`
 	CreatedAt                   time.Time `json:"created_at"`
 	UpdatedAt                   time.Time `json:"updated_at"`
 
@@ -1523,6 +1849,15 @@ const (
 	PermissionStatusExpired PermissionStatus = "expired"
 )
 
+// PermissionDecision records the option and policy source that resolved a
+// permission request. Human decisions continue to use PermissionResolutionAudit;
+// this metadata shape is also available to other decision sources.
+type PermissionDecision struct {
+	OptionID   string `json:"option_id"`
+	OptionKind string `json:"option_kind"`
+	Source     string `json:"source"`
+}
+
 type PermissionResolutionActorKind string
 
 const (
@@ -1538,6 +1873,7 @@ const (
 	PermissionSourceWeb         PermissionResolutionSource = "web"
 	PermissionSourceExternalMCP PermissionResolutionSource = "external_mcp"
 	PermissionSourceAutomation  PermissionResolutionSource = "automation"
+	PermissionSourceAutoApprove PermissionResolutionSource = "auto_approve"
 	// PermissionSourceAutomationMCP identifies a resolution made by the
 	// fixed in-session coordinator surface. It is distinct from legacy
 	// backend automation and from the authenticated external MCP bridge.
@@ -1654,6 +1990,20 @@ type Message struct {
 	// non-user messages and for legacy 12-column reads, and serialized only
 	// when > 0 (json omitempty).
 	PromptIndex int `json:"prompt_index,omitempty"`
+	// PayloadDigest is the SHA-256 digest of a large tool payload (currently
+	// shell command stdout/stderr) that CreateMessage/UpdateMessage
+	// externalized into task_message_payloads instead of inlining in
+	// Metadata. Empty when the message's metadata was small enough to stay
+	// inline. Internal repository/service bookkeeping only - never
+	// serialized to API/WS clients (json "-"): the client-visible signal is
+	// already the has_output/stdout_bytes summary ProjectMessageMetadata
+	// leaves in Metadata, and GetMessage is the only reader that resolves
+	// this digest, via RehydrateMessagePayload, for explicit authorized
+	// detail loading (see httpGetShellOutput).
+	PayloadDigest string `json:"-"`
+	// PayloadSize is the uncompressed byte size of the externalized payload
+	// referenced by PayloadDigest. Zero when PayloadDigest is empty.
+	PayloadSize int64 `json:"-"`
 }
 
 // ToAPI converts internal Message to API type.
@@ -1883,6 +2233,37 @@ type TaskSession struct {
 	TokensIn       int64 `json:"tokens_in"`
 	TokensCachedIn int64 `json:"tokens_cached_in"`
 	TokensOut      int64 `json:"tokens_out"`
+}
+
+// ActiveSessionCancellationCandidate is the compare-and-set snapshot used by
+// the active-session stall healer. An empty ExpectedTurnID means that no turn
+// may be active when the cancellation is written.
+type ActiveSessionCancellationCandidate struct {
+	SessionID           string
+	ExpectedUpdatedAt   time.Time
+	ExpectedLastEventAt time.Time
+	ExpectedTurnID      string
+}
+
+// ActiveSessionRecoveryCandidate is the compare-and-set snapshot used by
+// session reconciliation when execution loss should return a conversation to
+// WAITING_FOR_INPUT. The observed state, activity clock, and turn identity
+// must still match at the write boundary; a newer launch, message, or turn
+// therefore owns the session and prevents stale recovery.
+type ActiveSessionRecoveryCandidate struct {
+	TaskID            string
+	SessionID         string
+	ExpectedState     TaskSessionState
+	ExpectedUpdatedAt time.Time
+	// RecoveredUpdatedAt is populated from the durable settlement on retry.
+	// The initial candidate leaves it zero because the repository assigns the
+	// committed generation when it performs the state transition.
+	RecoveredUpdatedAt               time.Time
+	ExpectedLastEventAt              time.Time
+	ExpectedTurnID                   string
+	ExpectedExecutorID               string
+	ExpectedExecutorAgentExecutionID string
+	ExpectedExecutorUpdatedAt        time.Time
 }
 
 // ToAPI converts internal TaskSession to API type
@@ -2194,6 +2575,7 @@ const (
 	ExecutorTypeSSH          ExecutorType = "ssh"
 	ExecutorTypeKubernetes   ExecutorType = "k8s"
 	ExecutorTypeMockRemote   ExecutorType = "mock_remote"
+	ExecutorTypePluginRemote ExecutorType = "plugin_remote"
 )
 
 // IsRemoteExecutorType reports whether the given executor type represents
@@ -2201,7 +2583,7 @@ const (
 // These environments run shells inside the container/VM, not on the host.
 func IsRemoteExecutorType(t ExecutorType) bool {
 	switch t {
-	case ExecutorTypeSprites, ExecutorTypeRemoteDocker, ExecutorTypeLocalDocker, ExecutorTypeSSH, ExecutorTypeKubernetes, ExecutorTypeMockRemote:
+	case ExecutorTypeSprites, ExecutorTypeRemoteDocker, ExecutorTypeLocalDocker, ExecutorTypeSSH, ExecutorTypeKubernetes, ExecutorTypeMockRemote, ExecutorTypePluginRemote:
 		return true
 	default:
 		return false
@@ -2215,7 +2597,7 @@ func IsRemoteExecutorType(t ExecutorType) bool {
 // when adding a new ExecutorType.
 func (t ExecutorType) Runtime() agentruntime.Runtime {
 	switch t {
-	case ExecutorTypeLocal, ExecutorTypeWorktree, ExecutorTypeMockRemote:
+	case ExecutorTypeLocal, ExecutorType("local_pc"), ExecutorTypeWorktree, ExecutorTypeMockRemote:
 		return agentruntime.RuntimeStandalone
 	case ExecutorTypeLocalDocker:
 		return agentruntime.RuntimeDocker
@@ -2227,8 +2609,10 @@ func (t ExecutorType) Runtime() agentruntime.Runtime {
 		return agentruntime.RuntimeSSH
 	case ExecutorTypeKubernetes:
 		return agentruntime.RuntimeKubernetes
+	case ExecutorTypePluginRemote:
+		return agentruntime.RuntimePluginRemote
 	default:
-		return agentruntime.RuntimeStandalone
+		return agentruntime.RuntimeUnknown
 	}
 }
 
@@ -2274,24 +2658,32 @@ type Executor struct {
 	CreatedAt time.Time         `json:"created_at"`
 	UpdatedAt time.Time         `json:"updated_at"`
 	DeletedAt *time.Time        `json:"deleted_at,omitempty"`
+	// Provider is a transient projection populated from the live plugin catalog.
+	Provider *ExecutorProvider `json:"provider,omitempty" db:"-"`
 }
 
 // ExecutorRunning tracks an active executor instance for a session.
 type ExecutorRunning struct {
-	ID                 string               `json:"id"`
-	SessionID          string               `json:"session_id"`
-	TaskID             string               `json:"task_id"`
-	ExecutionProfileID string               `json:"execution_profile_id"`
-	ExecutorID         string               `json:"executor_id"`
-	Runtime            agentruntime.Runtime `json:"runtime,omitempty"`
-	Status             string               `json:"status"`
-	Resumable          bool                 `json:"resumable"`
-	ResumeToken        string               `json:"resume_token,omitempty"`
-	LastMessageUUID    string               `json:"last_message_uuid,omitempty"`
-	AgentExecutionID   string               `json:"agent_execution_id,omitempty"`
-	ContainerID        string               `json:"container_id,omitempty"`
-	AgentctlURL        string               `json:"agentctl_url,omitempty"`
-	AgentctlPort       int                  `json:"agentctl_port,omitempty"`
+	ID                            string               `json:"id"`
+	SessionID                     string               `json:"session_id"`
+	TaskID                        string               `json:"task_id"`
+	ExecutionProfileID            string               `json:"execution_profile_id"`
+	ExecutorID                    string               `json:"executor_id"`
+	Runtime                       agentruntime.Runtime `json:"runtime,omitempty"`
+	Status                        string               `json:"status"`
+	IdleSuspensionState           string               `json:"-" db:"idle_suspension_state"`
+	IdleSuspensionPolicyUpdatedAt time.Time            `json:"-" db:"idle_suspension_policy_updated_at"`
+	Resumable                     bool                 `json:"resumable"`
+	ResumeToken                   string               `json:"resume_token,omitempty"`
+	LastMessageUUID               string               `json:"last_message_uuid,omitempty"`
+	AgentExecutionID              string               `json:"agent_execution_id,omitempty"`
+	// TransientAuthToken carries a decrypted agentctl token only between the
+	// lifecycle recovery inventory read and the matching remote runtime. It is
+	// excluded from JSON and database persistence.
+	TransientAuthToken string `json:"-" db:"-"`
+	ContainerID        string `json:"container_id,omitempty"`
+	AgentctlURL        string `json:"agentctl_url,omitempty"`
+	AgentctlPort       int    `json:"agentctl_port,omitempty"`
 	// PID is SSH-only: the agentctl PID on the *remote* host, used by the SSH
 	// executor's remote-pid stop path. It is 0 for local/standalone rows.
 	PID int `json:"pid,omitempty"`
@@ -2309,6 +2701,9 @@ type ExecutorRunning struct {
 	LastSeenAt     *time.Time             `json:"last_seen_at,omitempty"`
 	CreatedAt      time.Time              `json:"created_at"`
 	UpdatedAt      time.Time              `json:"updated_at"`
+	// ExpectedPluginExecutorRevision is the inventory-envelope revision observed
+	// before a provider operation. It is transient and required for updates.
+	ExpectedPluginExecutorRevision uint64 `json:"-" db:"-"`
 }
 
 // ProfileEnvVar represents an environment variable for an executor profile.
@@ -2446,6 +2841,8 @@ type TaskEnvironmentRepo struct {
 	WorktreeBranchOwner       string     `json:"-"`
 	WorktreeIntegrationRef    string     `json:"-"`
 	WorktreeRecoveryHeadSHA   string     `json:"-"`
+	WorktreeSourceClonePath   string     `json:"-"`
+	WorktreeSourceCommonDir   string     `json:"-"`
 	WorktreeBranchCompactedAt *time.Time `json:"-"`
 	Position                  int        `json:"position"`
 	ErrorMessage              string     `json:"error_message,omitempty"`
@@ -2459,12 +2856,14 @@ type TaskEnvironmentRepo struct {
 // TaskEnvironmentRecoveryClaimRequest identifies the environment authority
 // required while an automatic host-worktree recovery is in progress.
 type TaskEnvironmentRecoveryClaimRequest struct {
-	TaskEnvironmentID   string
-	OwnerTaskID         string
-	OwnershipGeneration int64
-	SessionID           string
-	OperationID         string
-	ExecutorType        string
+	TaskEnvironmentID          string
+	OwnerTaskID                string
+	OwnershipGeneration        int64
+	SessionID                  string
+	OperationID                string
+	ExecutorType               string
+	AllowCurrentSessionRuntime bool
+	CleanupJobID               string
 }
 
 // TaskEnvironmentRecoveryClaim is the durable authority held from recovery
@@ -2586,6 +2985,57 @@ type TaskPlanCommentSnapshot struct {
 
 // TaskPlanCommentRef identifies the exact pending-comment version a delivery includes.
 type TaskPlanCommentRef struct {
+	ID      string `json:"id"`
+	Version int64  `json:"version"`
+}
+
+type TaskPreviewFeedbackKind string
+
+const (
+	TaskPreviewFeedbackText       TaskPreviewFeedbackKind = "text"
+	TaskPreviewFeedbackElement    TaskPreviewFeedbackKind = "element"
+	TaskPreviewFeedbackScreenshot TaskPreviewFeedbackKind = "screenshot"
+)
+
+type TaskPreviewFeedbackSourceKind string
+
+const (
+	TaskPreviewFeedbackBrowser  TaskPreviewFeedbackSourceKind = "browser"
+	TaskPreviewFeedbackHTMLFile TaskPreviewFeedbackSourceKind = "html_file"
+)
+
+// TaskPreviewFeedback is one immutable rendered-page capture with an editable comment.
+type TaskPreviewFeedback struct {
+	ID                     string                        `json:"id"`
+	TaskID                 string                        `json:"task_id"`
+	Kind                   TaskPreviewFeedbackKind       `json:"kind"`
+	Comment                string                        `json:"comment"`
+	SourceKind             TaskPreviewFeedbackSourceKind `json:"source_kind"`
+	SourceSessionID        string                        `json:"source_session_id,omitempty"`
+	SourceLabel            string                        `json:"source_label"`
+	SourcePath             string                        `json:"source_path,omitempty"`
+	PageRoute              string                        `json:"page_route"`
+	PageTitle              string                        `json:"page_title"`
+	SelectedText           string                        `json:"selected_text,omitempty"`
+	TextAnchor             json.RawMessage               `json:"text_anchor,omitempty"`
+	ElementSnapshot        json.RawMessage               `json:"element_snapshot,omitempty"`
+	CaptureRect            json.RawMessage               `json:"capture_rect,omitempty"`
+	ScreenshotAttachmentID string                        `json:"screenshot_attachment_id,omitempty"`
+	ScreenshotAttachment   *TaskMessageAttachment        `json:"screenshot_attachment,omitempty"`
+	Version                int64                         `json:"version"`
+	CreatedAt              time.Time                     `json:"created_at"`
+	UpdatedAt              time.Time                     `json:"updated_at"`
+}
+
+// TaskPreviewFeedbackSnapshot is the authoritative pending collection for a task.
+type TaskPreviewFeedbackSnapshot struct {
+	TaskID   string                 `json:"task_id" db:"task_id"`
+	Revision int64                  `json:"revision" db:"revision"`
+	Items    []*TaskPreviewFeedback `json:"items"`
+}
+
+// TaskPreviewFeedbackRef identifies the exact pending item version included in delivery.
+type TaskPreviewFeedbackRef struct {
 	ID      string `json:"id"`
 	Version int64  `json:"version"`
 }
@@ -2881,14 +3331,15 @@ func (t *Task) ToAPI() *v1.Task {
 	var repositories []v1.TaskRepository
 	for _, repo := range t.Repositories {
 		repositories = append(repositories, v1.TaskRepository{
-			ID:           repo.ID,
-			TaskID:       repo.TaskID,
-			RepositoryID: repo.RepositoryID,
-			BaseBranch:   repo.BaseBranch,
-			Position:     repo.Position,
-			Metadata:     repo.Metadata,
-			CreatedAt:    repo.CreatedAt,
-			UpdatedAt:    repo.UpdatedAt,
+			CheckoutOptions: PublicRepositoryCheckoutOptions(repo.Metadata),
+			ID:              repo.ID,
+			TaskID:          repo.TaskID,
+			RepositoryID:    repo.RepositoryID,
+			BaseBranch:      repo.BaseBranch,
+			Position:        repo.Position,
+			Metadata:        repo.Metadata,
+			CreatedAt:       repo.CreatedAt,
+			UpdatedAt:       repo.UpdatedAt,
 		})
 	}
 

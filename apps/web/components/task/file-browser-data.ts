@@ -6,9 +6,10 @@ import { useWorkspaceRestoration } from "@/hooks/domains/session/use-workspace-r
 import { useRepository } from "@/hooks/domains/workspace/use-repository";
 import { useSessionGitStatus } from "@/hooks/domains/session/use-session-git-status";
 import { useAppStore } from "@/components/state-provider";
-import { useOpenSessionFolder } from "@/hooks/use-open-session-folder";
+import { useTaskFolderAction } from "@/hooks/use-task-folder-action";
 import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard";
 import { useFileBrowserSearch, useFileBrowserTree } from "./file-browser-hooks";
+import { useFileTreeCacheBinding } from "./file-browser-tree-state";
 import { getFileBrowserSessionWorkspacePath, resolveFileBrowserPaths } from "./file-browser-path";
 
 export function getFileBrowserResetKey({
@@ -45,11 +46,12 @@ export function useFileBrowserData(sessionId: string, environmentId: string | nu
   const workspaceRestoration = useWorkspaceRestoration(session?.task_id, sessionId, environmentId);
   const repository = useRepository(session?.repository_id ?? null);
   const gitStatus = useSessionGitStatus(sessionId);
-  const { open: openFolder } = useOpenSessionFolder(sessionId);
+  const folderAction = useTaskFolderAction(sessionId);
   const { copied, copy: copyPath } = useCopyToClipboard(1000);
   const search = useFileBrowserSearch(sessionId);
   const resetKey = useFileBrowserResetKey(sessionId, environmentId);
-  const treeState = useFileBrowserTree(sessionId, resetKey);
+  const cacheBinding = useFileTreeCacheBinding(environmentId ?? sessionId, resetKey);
+  const treeState = useFileBrowserTree(sessionId, resetKey, cacheBinding);
   const isTreeLoaded = !treeState.isLoadingTree && treeState.tree !== null;
   const fileStatuses = useMemo(
     () =>
@@ -63,9 +65,10 @@ export function useFileBrowserData(sessionId: string, environmentId: string | nu
     treeLoaded: isTreeLoaded,
   });
   return {
+    sessionId,
     isSessionFailed,
     sessionError,
-    openFolder,
+    folderAction,
     copied,
     copyPath,
     search,

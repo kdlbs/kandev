@@ -37,7 +37,7 @@ test.describe.serial("Mobile Quick Chat cancellation", () => {
   }) => {
     test.setTimeout(120_000);
     await testPage.goto("/");
-    await testPage.getByTestId("mobile-topbar-menu").tap();
+    await testPage.getByTestId("app-nav-trigger").tap();
     await testPage.getByTestId("mobile-quick-chat-button").tap();
 
     const quickChat = testPage.getByRole("dialog", { name: "Quick Chat" });
@@ -66,7 +66,7 @@ test.describe.serial("Mobile Quick Chat cancellation", () => {
   }) => {
     test.setTimeout(120_000);
     await testPage.goto("/");
-    await testPage.getByTestId("mobile-topbar-menu").tap();
+    await testPage.getByTestId("app-nav-trigger").tap();
     await testPage.getByTestId("mobile-quick-chat-button").tap();
 
     const quickChat = testPage.getByRole("dialog", { name: "Quick Chat" });

@@ -2,13 +2,13 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { CardContent, CardDescription, CardHeader, CardTitle } from "@kandev/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { updateUserSettings } from "@/lib/api";
 import { isUserSettingsResponseCurrent } from "@/lib/settings/user-settings-revision";
 import { mapUserSettingsResponse } from "@/lib/ssr/user-settings";
-import { SettingsCard } from "./settings-card";
+import { SettingsInfo } from "./settings-info";
+import { SettingsRow } from "./settings-group";
 import { GENERAL_SETTINGS_TARGETS } from "@/lib/settings-discovery/catalog/preferences";
 import { useSettingsSaveContributor } from "./settings-save-provider";
 
@@ -66,18 +66,21 @@ export function AgentTabCloseBehaviorSettings() {
   });
 
   return (
-    <SettingsCard
+    <SettingsRow
+      label={t("settings:agentTabCloseButton")}
+      description={t("settings:agentTabCloseButtonDescription")}
+      descriptionId="agent-tab-close-description"
+      controlId="agent-tab-close-behavior"
       isDirty={isDirty}
       discoveryTargetId={GENERAL_SETTINGS_TARGETS.agentTabCloseBehavior}
       data-testid="agent-tab-close-behavior-card"
-    >
-      <CardHeader>
-        <CardTitle className="text-base">{t("settings:agentTabCloseButton")}</CardTitle>
-        <CardDescription>{t("settings:agentTabCloseButtonDescription")}</CardDescription>
-      </CardHeader>
-      <CardContent>
+      control={
         <Select value={draft} onValueChange={(value) => setDraft(value as AgentTabCloseBehavior)}>
-          <SelectTrigger id="agent-tab-close-behavior" data-settings-dirty={isDirty}>
+          <SelectTrigger
+            id="agent-tab-close-behavior"
+            data-settings-dirty={isDirty}
+            aria-describedby="agent-tab-close-description"
+          >
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -85,12 +88,16 @@ export function AgentTabCloseBehaviorSettings() {
             <SelectItem value="hide_panel">{t("settings:hidePanel")}</SelectItem>
           </SelectContent>
         </Select>
-        <p className="mt-2 text-xs text-muted-foreground">
-          {draft === "delete_session"
-            ? t("settings:deleteSessionCloseDescription")
-            : t("settings:hidePanelCloseDescription")}
-        </p>
-      </CardContent>
-    </SettingsCard>
+      }
+      info={
+        <SettingsInfo label={t("settings:agentTabCloseButton")}>
+          <p>
+            {draft === "delete_session"
+              ? t("settings:deleteSessionCloseDescription")
+              : t("settings:hidePanelCloseDescription")}
+          </p>
+        </SettingsInfo>
+      }
+    />
   );
 }

@@ -201,10 +201,10 @@ func TestTaskWorkspaceFoldersMigrationReplaysAfterLegacyTableIsMissing(t *testin
 	if _, err := repo.DB().Exec(`DROP TABLE task_workspace_folders`); err != nil {
 		t.Fatalf("simulate legacy schema: %v", err)
 	}
-	if err := repo.runMigrations(); err != nil {
+	if err := repo.runMigrations(context.Background()); err != nil {
 		t.Fatalf("migrate legacy schema: %v", err)
 	}
-	if err := repo.runMigrations(); err != nil {
+	if err := repo.runMigrations(context.Background()); err != nil {
 		t.Fatalf("replay workspace-folder migration: %v", err)
 	}
 	var tableName string

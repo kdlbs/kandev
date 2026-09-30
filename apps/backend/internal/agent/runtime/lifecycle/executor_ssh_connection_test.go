@@ -2,6 +2,8 @@ package lifecycle
 
 import (
 	"context"
+	"errors"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
@@ -16,6 +18,39 @@ import (
 	"github.com/kandev/kandev/internal/task/models"
 	"golang.org/x/crypto/ssh"
 )
+
+type unsupportedDeadlineConn struct{ net.Conn }
+
+func (unsupportedDeadlineConn) SetDeadline(time.Time) error {
+	return errors.New("deadlines are not supported")
+}
+
+func TestHandshakeWithDeadlineClosesConnectionsWhenDeadlinesAreUnsupported(t *testing.T) {
+	clientConn, serverConn := net.Pipe()
+	defer func() { _ = serverConn.Close() }()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Millisecond)
+	defer cancel()
+	done := make(chan error, 1)
+	go func() {
+		_, _, _, err := handshakeWithDeadline(ctx, unsupportedDeadlineConn{Conn: clientConn}, "test", &ssh.ClientConfig{
+			User:            "test",
+			HostKeyCallback: ssh.InsecureIgnoreHostKey(),
+		})
+		done <- err
+	}()
+
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.DeadlineExceeded) {
+			t.Fatalf("handshake error = %v, want context deadline exceeded", err)
+		}
+	case <-time.After(500 * time.Millisecond):
+		_ = clientConn.Close()
+		<-done
+		t.Fatal("handshake did not stop when its context deadline expired")
+	}
+}
 
 func TestSSHControlRequestUsesBearerToken(t *testing.T) {
 	req, err := http.NewRequest(http.MethodPost, "http://127.0.0.1/api/v1/instances", nil)

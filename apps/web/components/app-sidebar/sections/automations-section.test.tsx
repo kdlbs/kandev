@@ -284,12 +284,14 @@ describe("AutomationsSection responsive visibility", () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     try {
       renderOpenSection();
-      await screen.findByTestId(`sidebar-automation-${AUTOMATION_ID}`);
+      await waitFor(() => expect(screen.getByText("Automations")).toBeTruthy());
 
       await act(async () => {
         await vi.advanceTimersByTimeAsync(LIVE_REFRESH_INTERVAL_MS * 2);
       });
 
+      expect(screen.queryByTestId(`sidebar-automation-${AUTOMATION_ID}`)).toBeNull();
+      expect(mocks.listAutomations).not.toHaveBeenCalled();
       expect(mocks.listAutomationSummaries).not.toHaveBeenCalled();
     } finally {
       vi.useRealTimers();

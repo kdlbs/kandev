@@ -441,9 +441,10 @@ func (b bootStateBuilder) addEditorsState(ctx context.Context, state map[string]
 		return
 	}
 	state["editors"] = map[string]any{
-		"items":   response.Editors,
-		"loaded":  true,
-		"loading": false,
+		"folderOpeningAvailable": response.FolderOpeningAvailable,
+		"items":                  response.Editors,
+		"loaded":                 true,
+		"loading":                false,
 	}
 }
 
@@ -711,6 +712,7 @@ func mapUserSettingsState(response userdto.UserSettingsResponse, workspaceID str
 		"savedLayouts":                      settings.SavedLayouts,
 		"sidebarViews":                      mapSidebarViews(settings.SidebarViews),
 		"sidebarViewsByWorkspace":           settings.SidebarViewsByWorkspace,
+		"sidebarLayoutsByWorkspace":         settings.SidebarLayoutsByWorkspace,
 		"sidebarActiveViewId":               nullString(settings.SidebarActiveViewID),
 		"sidebarDraft":                      mapSidebarDraft(settings.SidebarDraft),
 		"threadViews":                       mapThreadViews(settings.ThreadViews),
@@ -832,6 +834,18 @@ func mapKanbanTaskState(task taskdto.TaskDTO) map[string]any {
 	}
 	return map[string]any{
 		"id":                          task.ID,
+		"workspaceId":                 task.WorkspaceID,
+		"workflowId":                  task.WorkflowID,
+		"origin":                      task.Origin,
+		"metadata":                    task.Metadata,
+		"isArchived":                  task.ArchivedAt != nil,
+		"isFromOffice":                task.IsFromOffice,
+		"primaryExecutorId":           task.PrimaryExecutorID,
+		"primaryExecutorProfileId":    task.PrimaryExecutorProfileID,
+		"primaryExecutorType":         task.PrimaryExecutorType,
+		"primaryExecutorName":         task.PrimaryExecutorName,
+		"isRemoteExecutor":            task.IsRemoteExecutor,
+		"foregroundActivity":          task.ForegroundActivity,
 		"workflowStepId":              task.WorkflowStepID,
 		"title":                       task.Title,
 		"description":                 task.Description,

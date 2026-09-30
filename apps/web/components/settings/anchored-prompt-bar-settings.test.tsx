@@ -57,7 +57,7 @@ describe("AnchoredPromptBarSettings", () => {
     expect(
       screen.getByRole("switch", { name: AUTO_SCROLL_CONTROL_LABEL }).getAttribute(DATA_STATE),
     ).toBe("unchecked");
-    screen.getByText(/desktop only/i);
+    screen.getByText(/Keep your last prompt visible while scrolling on desktop/i);
     screen.getByText(/show scroll to last prompt/i);
   });
 

@@ -7,8 +7,7 @@ import { waitForHttp } from "../../helpers/causal-waits";
 
 async function saveFocusPreference(page: Page, enabled: boolean, mobile: boolean) {
   await page.goto("/settings/preferences/task-behavior");
-  const card = page.getByTestId("creation-auto-focus-card");
-  const toggle = card.getByRole("switch", { name: "Auto-focus new tasks" });
+  const toggle = page.getByTestId("creation-auto-focus-row").getByRole("switch");
   await expect(toggle).toBeChecked({ checked: !enabled });
   await toggle.scrollIntoViewIfNeeded();
   if (mobile) {
@@ -74,7 +73,7 @@ async function openCreationDialog(page: Page, open: () => Promise<void>) {
 
 async function openFromTask(page: Page, mobile: boolean) {
   if (mobile) {
-    await page.getByTestId("mobile-session-menu").click();
+    await page.getByTestId("mobile-task-picker-trigger").click();
     await page
       .getByRole("dialog", { name: "Tasks", exact: true })
       .getByRole("button", { name: "New", exact: true })
@@ -130,7 +129,7 @@ export async function verifyCreationAutoFocus(
     await openCreationDialog(page, () => openFromTask(page, mobile));
     await submitTask(page, "Background task with agent", true, mobile);
     await expect(page).toHaveURL(activeURL);
-    if (mobile) await expect(page.getByTestId("mobile-session-menu")).toBeFocused();
+    if (mobile) await expect(page.getByTestId("mobile-task-picker-trigger")).toBeFocused();
     const secondID = await taskID(api, workspaceID, "Background task with agent");
     await expect
       .poll(

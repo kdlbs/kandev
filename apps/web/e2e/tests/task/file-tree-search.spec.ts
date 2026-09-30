@@ -102,7 +102,7 @@ test.describe("File tree search", () => {
       "FT Search Clear",
     );
 
-    await expect(session.fileTreeNode("clear-alpha.ts")).toBeVisible({ timeout: 15_000 });
+    await session.fileTree.waitForFileTreeNode("clear-alpha.ts", 15_000);
     await testPage.getByRole("button", { name: "Search files" }).click();
     const input = testPage.getByPlaceholder("Search files...");
     await input.fill("clear-alpha");
@@ -113,31 +113,17 @@ test.describe("File tree search", () => {
 
     // Clear input - tree comes back, both files visible again.
     await input.fill("");
-    await expect(session.fileTreeNode("clear-alpha.ts")).toBeVisible({ timeout: 5_000 });
-    await expect(session.fileTreeNode("clear-bravo.ts")).toBeVisible({ timeout: 5_000 });
+    await session.fileTree.waitForFileTreeNode("clear-alpha.ts", 5_000);
+    await session.fileTree.waitForFileTreeNode("clear-bravo.ts", 5_000);
   });
 
   test("Escape closes the search header and returns to the tree", async ({
     testPage,
     apiClient,
     seedData,
-    backend,
   }) => {
-    const repoDir = path.join(backend.tmpDir, "repos", "e2e-repo");
-    const git = new GitHelper(repoDir, makeGitEnv(backend.tmpDir));
-    git.createFile("escape-target.ts", "e");
-    git.stageAll();
-    git.commit("seed escape");
+    await setupTask(testPage, apiClient, seedData, "ft-search-escape", "FT Search Escape");
 
-    const session = await setupTask(
-      testPage,
-      apiClient,
-      seedData,
-      "ft-search-escape",
-      "FT Search Escape",
-    );
-
-    await expect(session.fileTreeNode("escape-target.ts")).toBeVisible({ timeout: 15_000 });
     await testPage.getByRole("button", { name: "Search files" }).click();
     const input = testPage.getByPlaceholder("Search files...");
     await expect(input).toBeVisible({ timeout: 5_000 });

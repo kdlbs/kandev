@@ -167,6 +167,42 @@ func TestSetPluginToolsReplacesRuntimeRegistry(t *testing.T) {
 	}
 }
 
+func TestManagedConversationProfileExposesOnlySelectedPluginTools(t *testing.T) {
+	log := newTestLogger(t)
+	policy := mcpprofile.ManagedToolPolicy{
+		PluginID: "coordinator.v1", InstallationID: "installation-1", WorkspaceID: "workspace-1",
+		InstanceKey: "lead", ConversationRevision: 3, ApprovalRevision: 2,
+		ManifestDigest: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+		AgentToolNames: []string{"read_task"},
+	}
+	profile := mcpprofile.New(mcpprofile.SurfaceManagedConversation, nil, nil).WithManagedToolPolicy(policy)
+	s := NewWithProfile(&testBackend{}, "session-1", "task-1", 10005, log, "", false, profile)
+	tools := []plugintools.Definition{
+		{
+			PluginID: "coordinator.v1", LocalName: "read_task", ExposedName: plugintools.ExposedName("coordinator.v1", "read_task"),
+			Description: "Read a task", InputSchema: []byte(`{"type":"object"}`), Surfaces: []string{plugintools.SurfaceManaged},
+		},
+		{
+			PluginID: "coordinator.v1", LocalName: "update_task", ExposedName: plugintools.ExposedName("coordinator.v1", "update_task"),
+			Description: "Update a task", InputSchema: []byte(`{"type":"object"}`), Surfaces: []string{plugintools.SurfaceManaged},
+		},
+	}
+	require.NoError(t, s.SetPluginTools(plugintools.Snapshot{Generation: "managed", Revision: 1, Tools: tools}))
+	registered := s.mcpServer.ListTools()
+	assert.Contains(t, registered, tools[0].ExposedName)
+	assert.NotContains(t, registered, tools[1].ExposedName)
+	assert.NotContains(t, registered, "list_tasks_kandev")
+	assert.Equal(t, ModeManagedConversation, s.mode)
+
+	s.SetProfile(mcpprofile.New(mcpprofile.SurfaceKanbanTask, nil, nil))
+	assert.Contains(t, s.mcpServer.ListTools(), tools[0].ExposedName)
+	assert.NotContains(t, s.mcpServer.ListTools(), "list_tasks_kandev", "profile replacement cannot widen a managed turn")
+
+	s.SetMode(ModeTask)
+	assert.Contains(t, s.mcpServer.ListTools(), tools[0].ExposedName)
+	assert.NotContains(t, s.mcpServer.ListTools(), "list_tasks_kandev", "legacy mode changes cannot widen the managed surface")
+}
+
 func TestSetPluginToolsRebuildsArgumentValidators(t *testing.T) {
 	log := newTestLogger(t)
 	backend := NewChannelBackendClient(log)
@@ -1037,7 +1073,7 @@ func TestServerModeConfig_ToolCount(t *testing.T) {
 	tools := getRegisteredToolNames(s)
 	// Existing configuration tools plus the five compact settings tools.
 	assert.NotContains(t, tools, "step_complete_kandev", "step_complete_kandev requires a live task session; must NOT register in config mode")
-	assert.Equal(t, 41, len(tools))
+	assert.Equal(t, 44, len(tools))
 }
 
 func TestServerModeConfig_ToolDescriptions(t *testing.T) {
@@ -1218,7 +1254,7 @@ func TestServerModeExternal_ToolCount(t *testing.T) {
 	tools := getRegisteredToolNames(s)
 	// External configuration tools include the five compact settings tools.
 	// add_branch_to_task_kandev is task-mode only — external coding agents have no live session to attach a worktree to.
-	assert.Equal(t, 47, len(tools))
+	assert.Equal(t, 49, len(tools))
 	assert.NotContains(t, tools, "add_branch_to_task_kandev")
 }
 

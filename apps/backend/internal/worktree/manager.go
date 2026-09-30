@@ -221,6 +221,14 @@ func (m *Manager) IsEnabled() bool {
 	return m.config.Enabled
 }
 
+// TasksBasePath returns the configured task-worktree root with home expansion.
+func (m *Manager) TasksBasePath() (string, error) {
+	if m == nil {
+		return "", nil
+	}
+	return m.config.ExpandedTasksBasePath()
+}
+
 // AdmitTaskRecovery prevents a task from creating a session while one of its
 // persisted checkouts is present but no longer has trustworthy linked-worktree
 // metadata. Missing paths remain eligible for ordinary materialization.
@@ -275,20 +283,23 @@ func (m *Manager) admitPersistedWorktreeRecovery(ctx context.Context, taskID str
 	if err := m.validateExistingWorktreePathOwner(wt.Path, wt); err != nil {
 		return &WorktreeRecoveryError{TaskID: taskID, Checkout: wt.Path, State: string(linkedWorktreeAmbiguous), Reason: err.Error()}
 	}
-	inspection := inspectLinkedWorktree(wt.Path)
-	if inspection.class == linkedWorktreeHealthy {
+	inspection := m.inspectCheckout(ctx, wt.Path, handle)
+	if inspection.operationalErr != nil {
+		return fmt.Errorf("inspect persisted checkout: %w", inspection.operationalErr)
+	}
+	if inspection.class == checkoutLinkedHealthy || inspection.class == checkoutMainHealthy {
 		return handle.VerifyPath(filepath.Clean(wt.Path))
 	}
-	if inspection.class != linkedWorktreeMissingAdmin {
+	if inspection.class != checkoutLinkedMissingAdmin {
 		return &WorktreeRecoveryError{
-			TaskID: taskID, Checkout: wt.Path, PointerTarget: inspection.adminPath,
-			ExpectedBacklink: inspection.expectedBacklink, ActualBacklink: inspection.actualBacklink,
-			State: string(inspection.class), Reason: inspection.reason,
+			TaskID: taskID, Checkout: wt.Path, PointerTarget: inspection.linked.adminPath,
+			ExpectedBacklink: inspection.linked.expectedBacklink, ActualBacklink: inspection.linked.actualBacklink,
+			State: string(linkedWorktreeAmbiguous), Reason: inspection.reason,
 		}
 	}
-	if err := validateMissingLinkedWorktreeAdmin(wt.RepositoryPath, inspection.adminPath); err != nil {
+	if err := validateMissingLinkedWorktreeAdmin(wt.RepositoryPath, inspection.linked.adminPath); err != nil {
 		return &WorktreeRecoveryError{
-			TaskID: taskID, Checkout: wt.Path, PointerTarget: inspection.adminPath,
+			TaskID: taskID, Checkout: wt.Path, PointerTarget: inspection.linked.adminPath,
 			State: string(linkedWorktreeAmbiguous), Reason: err.Error(),
 		}
 	}

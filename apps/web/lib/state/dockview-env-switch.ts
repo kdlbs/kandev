@@ -9,7 +9,7 @@
  */
 import type { DockviewApi, SerializedDockview } from "dockview-react";
 import { getEnvLayout, getManualRightWidth } from "@/lib/local-storage";
-import { getEnvHiddenSessions } from "@/lib/env-hidden-sessions";
+import { getEnvHiddenSessions, resolveVisibleSessionId } from "@/lib/env-hidden-sessions";
 import { applyLayoutFixups } from "./dockview-layout-builders";
 import { isLayoutShapeHealthy } from "./dockview-layout-health";
 import {
@@ -156,6 +156,11 @@ export function replaceStaleSessionPanels(
   currentSessionIds: string[] = [],
   envId: string | null = null,
 ): void {
+  keepSessionId = resolveVisibleSessionId(
+    keepSessionId,
+    currentSessionIds,
+    envId ? getEnvHiddenSessions(envId) : [],
+  );
   const keepId = keepSessionId ? `session:${keepSessionId}` : null;
   // keepId=null (sessionless task) → strips all session panels. In practice
   // sessionless tasks should have no session panels; useAutoSessionTab re-adds
@@ -563,17 +568,20 @@ function applyInitialRouteLayout(params: EnvSwitchParams): LayoutGroupIds | null
  * The caller is responsible for saving the old env's layout and releasing
  * env-scoped portals before calling this function.
  */
-export function performEnvSwitch(params: EnvSwitchParams): LayoutGroupIds {
-  const {
-    api,
-    oldEnvId,
-    newEnvId,
-    activeSessionId,
-    currentSessionIds = [],
-    safeWidth,
-    safeHeight,
-    buildDefault,
-  } = params;
+export function performEnvSwitch({
+  currentSessionIds = [],
+  ...input
+}: EnvSwitchParams): LayoutGroupIds {
+  const params = {
+    ...input,
+    currentSessionIds,
+    activeSessionId: resolveVisibleSessionId(
+      input.activeSessionId,
+      currentSessionIds,
+      getEnvHiddenSessions(input.newEnvId),
+    ),
+  };
+  const { api, oldEnvId, newEnvId, activeSessionId, safeWidth, safeHeight, buildDefault } = params;
   if (isDebug()) {
     debug("performEnvSwitch: entry", {
       oldEnvId,

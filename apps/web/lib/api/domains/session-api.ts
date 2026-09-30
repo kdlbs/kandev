@@ -1,4 +1,4 @@
-import { fetchJson, type ApiRequestOptions } from "../client";
+import { ApiError, fetchConditionalJson, fetchJson, type ApiRequestOptions } from "../client";
 import type {
   TaskSessionsResponse,
   TaskSessionResponse,
@@ -36,6 +36,70 @@ export type SearchMessagesResponse = {
   total: number;
 };
 
+export type AgentMcpAuthenticateResponse = {
+  terminal_id: string;
+  task_environment_id: string;
+  label: string;
+  reused: boolean;
+};
+
+export type AgentMcpRetryResponse = {
+  provider_id: "cursor";
+  server_id: string;
+  status:
+    | "ready"
+    | "authentication_required"
+    | "approval_failed"
+    | "connection_failed"
+    | "unavailable";
+  reason_code?: string;
+  tool_count?: number;
+};
+
+export function isAgentMcpRecoveryBusyError(error: unknown): boolean {
+  return (
+    error instanceof ApiError &&
+    error.status === 409 &&
+    error.errorCode === "mcp_recovery_session_busy"
+  );
+}
+
+export function authenticateAgentMcp(
+  taskSessionId: string,
+  serverId: string,
+  options?: ApiRequestOptions,
+): Promise<AgentMcpAuthenticateResponse> {
+  return fetchJson<AgentMcpAuthenticateResponse>(
+    `/api/v1/task-sessions/${encodeURIComponent(taskSessionId)}/mcp/authenticate`,
+    {
+      ...options,
+      init: {
+        ...(options?.init ?? {}),
+        method: "POST",
+        body: JSON.stringify({ server_id: serverId }),
+      },
+    },
+  );
+}
+
+export function retryAgentMcpConnection(
+  taskSessionId: string,
+  serverId: string,
+  options?: ApiRequestOptions,
+): Promise<AgentMcpRetryResponse> {
+  return fetchJson<AgentMcpRetryResponse>(
+    `/api/v1/task-sessions/${encodeURIComponent(taskSessionId)}/mcp/retry`,
+    {
+      ...options,
+      init: {
+        ...(options?.init ?? {}),
+        method: "POST",
+        body: JSON.stringify({ server_id: serverId }),
+      },
+    },
+  );
+}
+
 /** Search messages in a single session via WebSocket. */
 export async function searchSessionMessages(
   sessionId: string,
@@ -69,6 +133,13 @@ export async function listTaskSessions(taskId: string, options?: ApiRequestOptio
 
 export async function fetchTaskSession(taskSessionId: string, options?: ApiRequestOptions) {
   return fetchJson<TaskSessionResponse>(`/api/v1/task-sessions/${taskSessionId}`, options);
+}
+
+export function fetchTaskSessionConditional(taskSessionId: string, etag?: string) {
+  return fetchConditionalJson<TaskSessionResponse>(`/api/v1/task-sessions/${taskSessionId}`, {
+    cache: "no-store",
+    ...(etag ? { init: { headers: { "If-None-Match": etag } } } : {}),
+  });
 }
 
 export async function dismissLastAgentError(
@@ -167,10 +238,18 @@ export async function openSessionInEditor(
   });
 }
 
-export async function openSessionFolder(sessionId: string, options?: ApiRequestOptions) {
+export async function openSessionFolder(
+  sessionId: string,
+  options?: ApiRequestOptions,
+  payload?: { worktree_id?: string },
+) {
   return fetchJson<{ success: boolean }>(`/api/v1/task-sessions/${sessionId}/open-folder`, {
     ...options,
-    init: { method: "POST", ...(options?.init ?? {}) },
+    init: {
+      method: "POST",
+      ...(payload ? { body: JSON.stringify(payload) } : {}),
+      ...(options?.init ?? {}),
+    },
   });
 }
 

@@ -1,5 +1,7 @@
 "use client";
 
+/* eslint-disable max-lines -- board preview owns the responsive board and desktop preview surface. */
+
 import {
   useCallback,
   useEffect,
@@ -20,6 +22,7 @@ import { useAppStore } from "@/components/state-provider";
 import { Task } from "./kanban-card";
 import type { KanbanState } from "@/lib/state/slices";
 import { PREVIEW_PANEL } from "@/lib/settings/constants";
+import { getRenderedPreviewPanelWidth } from "@/lib/settings/preview-panel-width";
 import { linkToTask } from "@/lib/links";
 import { findTaskInSnapshots } from "@/lib/kanban/find-task";
 import { taskRemovalCoversTask } from "@/lib/state/task-removal";
@@ -132,10 +135,24 @@ function useMirrorPreviewedTaskId(
   }, [setKanbanPreviewedTaskId]);
 }
 
+// The rendered width floors the stored, pointer-independent chosen width to
+// the pointer-appropriate minimum. It flips live with pointer mode and is
+// never written back to storage (only the chosen width itself is). The ref
+// lets the resize handler's mousemove closure read the current minimum
+// without depending on its mousedown-time value.
+function usePreviewPanelWidth(previewWidthPx: number, isFinePointer: boolean) {
+  const minWidthPx = isFinePointer ? PREVIEW_PANEL.MIN_WIDTH_PX : PREVIEW_PANEL.COARSE_MIN_WIDTH_PX;
+  const renderedPreviewWidthPx = getRenderedPreviewPanelWidth(previewWidthPx, isFinePointer);
+  const minWidthPxRef = useRef(minWidthPx);
+  minWidthPxRef.current = minWidthPx;
+  return { renderedPreviewWidthPx, minWidthPxRef };
+}
+
 function useResizeHandler(
   isResizingRef: React.RefObject<boolean>,
   previewWidthPx: number,
   updatePreviewWidth: (width: number) => void,
+  minWidthPxRef: React.RefObject<number>,
 ) {
   return useCallback(
     (e: React.MouseEvent) => {
@@ -148,7 +165,7 @@ function useResizeHandler(
       const handleMouseMove = (moveEvent: MouseEvent) => {
         if (!isResizingRef.current) return;
         const deltaX = startX - moveEvent.clientX;
-        updatePreviewWidth(startWidth + deltaX);
+        updatePreviewWidth(Math.max(startWidth + deltaX, minWidthPxRef.current));
       };
 
       const handleMouseUp = () => {
@@ -160,7 +177,7 @@ function useResizeHandler(
       window.addEventListener("mousemove", handleMouseMove);
       window.addEventListener("mouseup", handleMouseUp);
     },
-    [isResizingRef, previewWidthPx, updatePreviewWidth],
+    [isResizingRef, previewWidthPx, updatePreviewWidth, minWidthPxRef],
   );
 }
 
@@ -311,31 +328,120 @@ function useSyncSelectedTaskActivity(params: {
   selectedTaskId: string | null | undefined;
   activeSessionId: string | null;
   setActiveSession: (taskId: string, sessionId: string) => void;
+  setActiveSessionAuto: (taskId: string, sessionId: string) => void;
+  workflowFocusRequestActive: boolean;
   setActiveTask: (taskId: string) => void;
 }) {
-  const { isOpen, selectedTaskId, activeSessionId, setActiveSession, setActiveTask } = params;
+  const {
+    isOpen,
+    selectedTaskId,
+    activeSessionId,
+    setActiveSession,
+    setActiveSessionAuto,
+    workflowFocusRequestActive,
+    setActiveTask,
+  } = params;
 
   useEffect(() => {
     if (!isOpen || !selectedTaskId) return;
     if (activeSessionId) {
-      setActiveSession(selectedTaskId, activeSessionId);
+      if (workflowFocusRequestActive) {
+        setActiveSessionAuto(selectedTaskId, activeSessionId);
+      } else {
+        setActiveSession(selectedTaskId, activeSessionId);
+      }
     } else {
       setActiveTask(selectedTaskId);
     }
-  }, [activeSessionId, isOpen, selectedTaskId, setActiveSession, setActiveTask]);
+  }, [
+    activeSessionId,
+    isOpen,
+    selectedTaskId,
+    setActiveSession,
+    setActiveSessionAuto,
+    workflowFocusRequestActive,
+    setActiveTask,
+  ]);
+}
+
+function usePreviewSessionFocus({
+  previewIsOpen,
+  previewTaskId,
+  selectedTask,
+  selectedTaskSessionId,
+  userSelectedSessionId,
+  setUserSelectedSessionId,
+}: {
+  previewIsOpen: boolean;
+  previewTaskId: string | null | undefined;
+  selectedTask: Task | null;
+  selectedTaskSessionId: string | null;
+  userSelectedSessionId: string | null;
+  setUserSelectedSessionId: (sessionId: string | null) => void;
+}) {
+  const setActiveTask = useAppStore((state) => state.setActiveTask);
+  const setActiveSession = useAppStore((state) => state.setActiveSession);
+  const setActiveSessionAuto = useAppStore((state) => state.setActiveSessionAuto);
+  const workflowFocusRequest = useAppStore((state) => state.workflowSessionFocus.request);
+  const acknowledgeWorkflowSessionFocus = useAppStore(
+    (state) => state.acknowledgeWorkflowSessionFocus,
+  );
+  let activeSessionId: string | null = null;
+  if (previewTaskId) {
+    if (workflowFocusRequest?.taskId === previewTaskId) {
+      activeSessionId = workflowFocusRequest.sessionId;
+    } else {
+      activeSessionId =
+        userSelectedSessionId ?? selectedTask?.primarySessionId ?? selectedTaskSessionId;
+    }
+  }
+
+  const handleSessionChange = useCallback(
+    (sessionId: string | null) => {
+      setUserSelectedSessionId(sessionId);
+      if (previewTaskId && sessionId) setActiveSession(previewTaskId, sessionId);
+    },
+    [previewTaskId, setActiveSession, setUserSelectedSessionId],
+  );
+
+  useEffect(() => {
+    if (!previewIsOpen || !previewTaskId || workflowFocusRequest?.taskId !== previewTaskId) {
+      return;
+    }
+    setUserSelectedSessionId(null);
+    setActiveSessionAuto(previewTaskId, workflowFocusRequest.sessionId);
+    acknowledgeWorkflowSessionFocus(workflowFocusRequest.requestId);
+  }, [
+    acknowledgeWorkflowSessionFocus,
+    previewIsOpen,
+    previewTaskId,
+    setActiveSessionAuto,
+    setUserSelectedSessionId,
+    workflowFocusRequest,
+  ]);
+
+  useSyncSelectedTaskActivity({
+    isOpen: previewIsOpen,
+    selectedTaskId: previewTaskId,
+    activeSessionId,
+    setActiveSession,
+    setActiveSessionAuto,
+    workflowFocusRequestActive: workflowFocusRequest?.taskId === previewTaskId,
+    setActiveTask,
+  });
+
+  return { activeSessionId, handleSessionChange };
 }
 
 export function KanbanWithPreview({ initialTaskId, initialSessionId }: KanbanWithPreviewProps) {
   const router = useRouter();
-  const { isMobile } = useResponsiveBreakpoint();
+  const { isMobile, isFinePointer } = useResponsiveBreakpoint();
 
   // Get tasks from the kanban store
   const kanbanTasks = useAppStore((state) => state.kanban.tasks);
   const kanbanWorkflowId = useAppStore((state) => state.kanban.workflowId);
   const kanbanIsLoading = useAppStore((state) => state.kanban.isLoading ?? false);
   const kanbanMultiSnapshots = useAppStore((state) => state.kanbanMulti.snapshots);
-  const setActiveTask = useAppStore((state) => state.setActiveTask);
-  const setActiveSession = useAppStore((state) => state.setActiveSession);
   const setKanbanPreviewedTaskId = useAppStore((state) => state.setKanbanPreviewedTaskId);
   const hasLoadedTaskSources = hasLoadedKanbanTaskSources({
     activeWorkflowId: kanbanWorkflowId,
@@ -354,8 +460,16 @@ export function KanbanWithPreview({ initialTaskId, initialSessionId }: KanbanWit
 
   useMirrorPreviewedTaskId(previewIsOpen, previewTaskId, setKanbanPreviewedTaskId);
 
+  const { renderedPreviewWidthPx, minWidthPxRef: previewPanelMinWidthPxRef } = usePreviewPanelWidth(
+    previewWidthPx,
+    isFinePointer,
+  );
+
   // Use custom hooks for layout and session management
-  const { containerRef, shouldFloat, kanbanWidth } = useKanbanLayout(previewIsOpen, previewWidthPx);
+  const { containerRef, shouldFloat, kanbanWidth } = useKanbanLayout(
+    previewIsOpen,
+    renderedPreviewWidthPx,
+  );
   const { sessionId: selectedTaskSessionId } = useTaskSession(previewTaskId ?? null);
 
   // User-selected tab overrides the default primary session pick.
@@ -403,16 +517,13 @@ export function KanbanWithPreview({ initialTaskId, initialSessionId }: KanbanWit
     [router],
   );
 
-  const activeSessionId = previewTaskId
-    ? (userSelectedSessionId ?? selectedTask?.primarySessionId ?? selectedTaskSessionId)
-    : null;
-
-  useSyncSelectedTaskActivity({
-    isOpen: previewIsOpen,
-    selectedTaskId: previewTaskId,
-    activeSessionId,
-    setActiveSession,
-    setActiveTask,
+  const { activeSessionId, handleSessionChange } = usePreviewSessionFocus({
+    previewIsOpen,
+    previewTaskId,
+    selectedTask,
+    selectedTaskSessionId,
+    userSelectedSessionId,
+    setUserSelectedSessionId,
   });
 
   useUrlSync(previewTaskId ?? null, previewIsOpen ? (activeSessionId ?? null) : null);
@@ -421,7 +532,12 @@ export function KanbanWithPreview({ initialTaskId, initialSessionId }: KanbanWit
 
   useEscapeKey(previewIsOpen && !actionsMenuOpen, close, previewStepMove.isDisclosureOpen);
 
-  const handleResizeMouseDown = useResizeHandler(isResizingRef, previewWidthPx, updatePreviewWidth);
+  const handleResizeMouseDown = useResizeHandler(
+    isResizingRef,
+    renderedPreviewWidthPx,
+    updatePreviewWidth,
+    previewPanelMinWidthPxRef,
+  );
 
   // On mobile, skip the preview panel entirely — card clicks navigate directly
   if (isMobile) {
@@ -437,7 +553,7 @@ export function KanbanWithPreview({ initialTaskId, initialSessionId }: KanbanWit
       containerRef={containerRef}
       shouldFloat={shouldFloat}
       kanbanWidth={kanbanWidth}
-      previewWidthPx={previewWidthPx}
+      previewWidthPx={renderedPreviewWidthPx}
       isOpen={previewIsOpen}
       selectedTask={previewIsOpen ? selectedTask : null}
       activeSessionId={previewIsOpen ? activeSessionId : null}
@@ -446,7 +562,7 @@ export function KanbanWithPreview({ initialTaskId, initialSessionId }: KanbanWit
       onPreviewTask={handlePreviewTaskWithData}
       onNavigateToTask={handleNavigateToTask}
       onClose={close}
-      onSessionChange={setUserSelectedSessionId}
+      onSessionChange={handleSessionChange}
       onResizeMouseDown={handleResizeMouseDown}
       onActionsMenuOpenChange={setActionsMenuOpen}
     />

@@ -7,6 +7,8 @@ export class MobileKanbanPage {
   readonly mobileSearchToggle: Locator;
   readonly mobileMenuButton: Locator;
   readonly menuCard: Locator;
+  readonly viewOptionsButton: Locator;
+  readonly optionsCard: Locator;
   readonly swimlaneContainer: Locator;
   readonly boardNavigator: Locator;
 
@@ -15,8 +17,10 @@ export class MobileKanbanPage {
     this.mobileFab = page.getByTestId("mobile-fab");
     this.mobileSearchBar = page.getByTestId("mobile-search-bar");
     this.mobileSearchToggle = page.getByTestId("mobile-search-toggle");
-    this.mobileMenuButton = page.getByRole("button", { name: "Open menu" });
-    this.menuCard = page.getByTestId("mobile-home-menu-card");
+    this.mobileMenuButton = page.getByTestId("app-nav-trigger");
+    this.menuCard = page.getByTestId("app-nav-sheet");
+    this.viewOptionsButton = page.getByTestId("mobile-topbar-page-context");
+    this.optionsCard = page.getByTestId("mobile-home-menu-card");
     this.swimlaneContainer = page.getByTestId("swimlane-container");
     this.boardNavigator = page.getByTestId("mobile-board-navigator");
   }
@@ -55,7 +59,7 @@ export class MobileKanbanPage {
   }
 
   async openSearch() {
-    await this.mobileMenuButton.click();
+    await this.viewOptionsButton.click();
     await this.mobileSearchToggle.click();
     await this.mobileSearchBar.waitFor({ state: "visible" });
   }

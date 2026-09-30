@@ -11,6 +11,7 @@ import {
   e2eSleepPlugin,
   SLEEP_EXEMPT_FILES,
 } from "./eslint-rules/no-unsanctioned-sleep.mjs";
+import { taskLinksPlugin } from "./eslint-rules/no-task-link-bypass.mjs";
 
 const eslintConfig = defineConfig([
   {
@@ -85,6 +86,24 @@ const eslintConfig = defineConfig([
     ],
     plugins: { i18next },
     rules: { "i18next/no-literal-string": ["error", noLiteralStringOptions] },
+  },
+  // First-party task workbench URLs and anchors have one URL authority and one
+  // click transport. Tests and the authority module itself are excluded so the
+  // rule checks callers rather than its own implementation and fixtures.
+  {
+    files: ["**/*.ts", "**/*.tsx"],
+    ignores: [
+      "**/*.test.ts",
+      "**/*.test.tsx",
+      "**/*.test-helpers.ts",
+      "**/*.test-helpers.tsx",
+      "**/*.test-utils.ts",
+      "**/*.test-utils.tsx",
+      "e2e/**",
+      "lib/links.ts",
+    ],
+    plugins: { "task-links": taskLinksPlugin },
+    rules: { "task-links/no-task-link-bypass": "error" },
   },
   // E2E tests (Playwright): disable React hooks rules since Playwright's `use()` and
   // `test.extend()` patterns are falsely flagged, and relax test-specific limits.

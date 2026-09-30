@@ -164,6 +164,9 @@ function getStatusMessage(
   metadata: ErrorMetadata | undefined,
   statusLine: string | undefined,
 ): string {
+  if (metadata?.variant === "resume_settings_provider_restored") {
+    return t("task:providerRestoredResumeSuccess");
+  }
   if (metadata?.kind === "model_selection_warning") return t("task:modelSelectionWarning");
   return metadata?.message || comment.content || statusLine || t("task:statusUpdate");
 }

@@ -36,6 +36,7 @@ import type { ConnectionIssueSeverity } from "@/lib/types/connection";
 type AppSidebarFooterProps = {
   collapsed: boolean;
   onToggleSettingsMode: () => void;
+  layoutManaged?: boolean;
 };
 
 type FooterIconButtonProps = {
@@ -351,7 +352,11 @@ function useSettingsGearToggle(
   };
 }
 
-export function AppSidebarFooter({ collapsed, onToggleSettingsMode }: AppSidebarFooterProps) {
+export function AppSidebarFooter({
+  collapsed,
+  onToggleSettingsMode,
+  layoutManaged = false,
+}: AppSidebarFooterProps) {
   const { t } = useTranslation();
   const router = useRouter();
   const workspaces = useAppStore((s) => s.workspaces);
@@ -360,7 +365,9 @@ export function AppSidebarFooter({ collapsed, onToggleSettingsMode }: AppSidebar
   const settingsMode = useAppStore((s) => s.appSidebar.settingsMode);
   const toggleSettings = useSettingsGearToggle(settingsMode, activeWorkspace, onToggleSettingsMode);
   const appStatusBarEnabled = useAppStore((s) => s.userSettings.appStatusBarEnabled);
-  const insightDestinations = useStaticDestinations("sidebar", "insights");
+  const insightDestinations = useStaticDestinations("sidebar", "insights").filter(
+    (destination) => !layoutManaged || destination.source !== "plugin",
+  );
   const releaseNotes = useReleaseNotes();
   const improveOpen = useAppStore((s) => s.appSidebar.improveDialogOpen);
   const setImproveOpen = useAppStore((s) => s.setImproveDialogOpen);

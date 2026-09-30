@@ -36,17 +36,19 @@ func (r *Repository) initSchemaContext(ctx context.Context) error {
 		r.initStepEntriesSchema,
 		r.initTaskUsageEventsSchema,
 		r.initAttachmentsSchema,
+		r.initPreviewFeedbackSchema,
 		r.initTaskResourceCleanupSchema,
 		r.initControlServerRecordSchema,
 		r.initGitSchema,
 		r.initReviewSchema,
 		r.initTaskReviewSchema,
 		r.initClarificationInboxSidecarSchema,
+		r.initBackgroundWorkSchema,
 		r.migrateExecutorProfiles,
 		r.migrateTaskSessions,
 		r.ensureDefaultWorkspace,
 		r.ensureDefaultExecutorsAndEnvironments,
-		r.runMigrations,
+		func() error { return r.runMigrations(ctx) },
 		r.hideBuiltinWorkflows,
 		r.healBuiltinWorkflowStepFlags,
 		r.healBuiltinWorkflowStepParticipantSeats,
@@ -329,6 +331,7 @@ func (r *Repository) ensureRunnerProjectionTables() error {
 			agent_profile_id TEXT NOT NULL DEFAULT '',
 		profile_session_start_policy TEXT NOT NULL DEFAULT 'reuse',
 		profile_session_end_policy TEXT NOT NULL DEFAULT 'park',
+		disable_unclassified_fallback INTEGER NOT NULL DEFAULT 0,
 		stage_type TEXT NOT NULL DEFAULT 'custom',
 		session_target TEXT,
 		auto_advance_requires_signal INTEGER NOT NULL DEFAULT 0,
@@ -403,6 +406,8 @@ const infraSchemaDDL = `
 		default_environment_id TEXT DEFAULT '',
 		default_agent_profile_id TEXT DEFAULT '',
 		default_config_agent_profile_id TEXT DEFAULT '',
+		acp_idle_suspension_enabled BOOLEAN NOT NULL DEFAULT FALSE,
+		acp_idle_timeout_minutes INTEGER NOT NULL DEFAULT 120 CHECK (acp_idle_timeout_minutes > 0),
 		created_at TIMESTAMP NOT NULL,
 		updated_at TIMESTAMP NOT NULL
 	);
@@ -446,6 +451,8 @@ const infraSchemaDDL = `
 		executor_id TEXT NOT NULL,
 		runtime TEXT DEFAULT '',
 		status TEXT NOT NULL DEFAULT 'starting',
+		idle_suspension_state TEXT NOT NULL DEFAULT '',
+		idle_suspension_policy_updated_at TIMESTAMP,
 		resumable INTEGER NOT NULL DEFAULT 0,
 		resume_token TEXT DEFAULT '',
 		agent_execution_id TEXT DEFAULT '',
@@ -517,6 +524,7 @@ func (r *Repository) initTaskSchema() error {
 		workspace_id TEXT NOT NULL DEFAULT '',
 		workflow_id TEXT NOT NULL DEFAULT '',
 		workflow_step_id TEXT NOT NULL DEFAULT '',
+		workflow_agent_overrides TEXT,
 		title TEXT NOT NULL,
 		description TEXT DEFAULT '',
 		state TEXT DEFAULT 'TODO',
@@ -942,6 +950,64 @@ func (r *Repository) initAttachmentsSchema() error {
 	return nil
 }
 
+func (r *Repository) initPreviewFeedbackSchema() error {
+	_, err := r.db.ExecContext(r.migrationContext(), `
+	CREATE TABLE IF NOT EXISTS task_preview_feedback_collections (
+		task_id TEXT PRIMARY KEY,
+		revision INTEGER NOT NULL DEFAULT 0,
+		created_at TIMESTAMP NOT NULL,
+		updated_at TIMESTAMP NOT NULL,
+		FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
+	);
+	CREATE TABLE IF NOT EXISTS task_preview_feedback (
+		id TEXT PRIMARY KEY,
+		task_id TEXT NOT NULL,
+		kind TEXT NOT NULL CHECK (kind IN ('text', 'element', 'screenshot')),
+		comment TEXT NOT NULL,
+		source_kind TEXT NOT NULL CHECK (source_kind IN ('browser', 'html_file')),
+		source_session_id TEXT,
+		source_label TEXT NOT NULL,
+		source_path TEXT,
+		page_route TEXT NOT NULL,
+		page_title TEXT NOT NULL,
+		selected_text TEXT,
+		text_anchor_json TEXT,
+		element_snapshot_json TEXT,
+		capture_rect_json TEXT,
+		screenshot_attachment_id TEXT UNIQUE,
+		version INTEGER NOT NULL DEFAULT 1,
+		created_at TIMESTAMP NOT NULL,
+		updated_at TIMESTAMP NOT NULL,
+		FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE,
+		FOREIGN KEY (screenshot_attachment_id) REFERENCES task_message_attachments(id),
+		CHECK (
+			(kind = 'text' AND selected_text IS NOT NULL AND text_anchor_json IS NOT NULL
+				AND element_snapshot_json IS NULL AND screenshot_attachment_id IS NULL)
+			OR (kind = 'element' AND selected_text IS NULL AND text_anchor_json IS NULL
+				AND element_snapshot_json IS NOT NULL AND screenshot_attachment_id IS NULL)
+			OR (kind = 'screenshot' AND selected_text IS NULL AND text_anchor_json IS NULL
+				AND element_snapshot_json IS NULL AND capture_rect_json IS NOT NULL
+				AND screenshot_attachment_id IS NOT NULL)
+		)
+	);
+	CREATE INDEX IF NOT EXISTS idx_task_preview_feedback_order
+		ON task_preview_feedback(task_id, created_at, id);
+	CREATE TABLE IF NOT EXISTS task_preview_feedback_admissions (
+		id TEXT PRIMARY KEY,
+		task_id TEXT NOT NULL,
+		request_fingerprint TEXT NOT NULL,
+		created_at TIMESTAMP NOT NULL,
+		FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
+	);
+	CREATE INDEX IF NOT EXISTS idx_task_preview_feedback_admissions_task
+		ON task_preview_feedback_admissions(task_id);
+	`)
+	if err != nil {
+		return fmt.Errorf("init preview feedback schema: %w", err)
+	}
+	return nil
+}
+
 func (r *Repository) initSessionSchema() error {
 	if err := r.initSessionWorktreeSchema(); err != nil {
 		return err
@@ -1030,8 +1096,14 @@ func (r *Repository) initStepTransitionsSchema() error {
 	);
 	CREATE INDEX IF NOT EXISTS idx_task_step_transitions_task
 		ON task_step_transitions(task_id, occurred_at, id);
+	CREATE INDEX IF NOT EXISTS idx_task_step_transitions_task_id
+		ON task_step_transitions(task_id, id);
 	CREATE INDEX IF NOT EXISTS idx_task_step_transitions_occurred
 		ON task_step_transitions(occurred_at);
+	CREATE INDEX IF NOT EXISTS idx_task_step_transitions_from_workflow
+		ON task_step_transitions(from_workflow_id, task_id);
+	CREATE INDEX IF NOT EXISTS idx_task_step_transitions_to_workflow
+		ON task_step_transitions(to_workflow_id, task_id);
 	`)
 	if err != nil {
 		return fmt.Errorf("init step transitions schema: %w", err)
@@ -1179,6 +1251,8 @@ const sessionWorktreeSchemaDDL = `
 		worktree_branch_owner TEXT NOT NULL DEFAULT 'unknown',
 		worktree_integration_ref TEXT NOT NULL DEFAULT '',
 		worktree_recovery_head_sha TEXT NOT NULL DEFAULT '',
+		worktree_source_clone_path TEXT NOT NULL DEFAULT '',
+		worktree_source_common_dir TEXT NOT NULL DEFAULT '',
 		worktree_branch_compacted_at TIMESTAMP,
 		position INTEGER DEFAULT 0,
 		error_message TEXT DEFAULT '',

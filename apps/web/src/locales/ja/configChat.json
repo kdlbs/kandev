@@ -1,0 +1,21 @@
+{
+  "agentProfileHeading": "設定エージェントプロファイル",
+  "agentProfileHelp": "設定ツールにアクセスできるエージェントを選ぶ。これがワークスペースのデフォルトになる。",
+  "closePanel": "設定チャットを閉じる",
+  "dialogDescription": "エージェントにワークフロー、エージェントプロファイル、MCP設定の管理を頼む。",
+  "noAgentProfiles": "使えるエージェントプロファイルなし。先にAgent settingsで作成。",
+  "openInQuickChat": "Quick Chatで開く",
+  "profileUnavailable": "選択したエージェントプロファイル、まだ使えない。少し待って再試行。",
+  "promptHeading": "何を設定したい?",
+  "promptPlaceholder": "設定について何でも聞いて...",
+  "startChat": "チャット開始",
+  "startChatAria": "設定チャットを開始",
+  "startingChat": "チャット開始中...",
+  "suggestionAddReviewStep": "ワークフローに「Code Review」ステップ追加",
+  "suggestionCreateProfile": "自動承認有効で新しいエージェントプロファイル作成",
+  "suggestionShowWorkflow": "現在のワークフロー設定を表示",
+  "suggestionUpdateMcp": "デフォルトのエージェントプロファイルのMCPサーバー更新",
+  "tagline": "自然言語でKandevを設定",
+  "tryAsking": "聞いてみる",
+  "unknownError": "不明なエラー"
+}

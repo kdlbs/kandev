@@ -43,6 +43,7 @@ function snapshotWorkflowStep(step: WorkflowSnapshot["steps"][number]) {
     session_target: step.session_target ?? null,
     profile_session_start_policy: step.profile_session_start_policy,
     profile_session_end_policy: step.profile_session_end_policy,
+    disable_unclassified_fallback: step.disable_unclassified_fallback ?? false,
     complete_task_on_enter: step.complete_task_on_enter,
     cancel_triggers_turn_complete: step.cancel_triggers_turn_complete,
     wip_limit: step.wip_limit,
@@ -99,6 +100,7 @@ export function snapshotToState(snapshot: WorkflowSnapshot): Partial<AppState> {
         workspaceId: snapshotTaskWorkspaceId(task, snapshot.workflow.workspace_id),
         workflowId: snapshot.workflow.id,
         workflowStepId,
+        workflowAgentOverrides: task.workflow_agent_overrides,
         title: task.title,
         description: task.description ?? undefined,
         autopilot: task.autopilot ?? false,
@@ -164,6 +166,13 @@ export function snapshotToState(snapshot: WorkflowSnapshot): Partial<AppState> {
       isLoading: false,
       steps: snapshot.steps.map(snapshotWorkflowStep),
       tasks,
+      taskCoverage: snapshot.task_coverage
+        ? {
+            ...snapshot.task_coverage,
+            complete:
+              snapshot.task_coverage.complete && tasks.length === snapshot.task_coverage.total,
+          }
+        : undefined,
     },
   };
 }

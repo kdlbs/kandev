@@ -1,6 +1,9 @@
 // Package events provides event types and utilities for the Kandev event system.
 package events
 
+// PromptsChanged invalidates instance-wide saved prompt caches without carrying content.
+const PromptsChanged = "prompts.changed"
+
 // Event types for tasks
 const (
 	TaskCreated       = "task.created"
@@ -23,6 +26,13 @@ const (
 	// predecessor failed or was cancelled. Payload:
 	// {task_id, failed_task_id, failed_state}.
 	TaskDependencyFailed = "task.dependency_failed"
+	// TaskStalled fires when the session reconciliation sweep observes a task
+	// holding an active session with no live execution behind it and no
+	// session events or messages for longer than the stall threshold.
+	// Detection only: the event never accompanies a state transition, a
+	// synthesized decision, or a queued run. Payload:
+	// {task_id, workspace_id, session_ids, stalled_for, last_event_at}.
+	TaskStalled = "task.stalled"
 )
 
 // Event types for plugin-backed canvas lifecycle changes. Payloads contain
@@ -30,9 +40,11 @@ const (
 // source files, application state, or runtime capabilities.
 const (
 	CanvasCreated                   = "canvas.created"
+	CanvasUpdated                   = "canvas.updated"
 	CanvasReleaseActivated          = "canvas.release.activated"
 	CanvasReleasePermissionRequired = "canvas.release.permission_required"
 	CanvasPromoted                  = "canvas.promoted"
+	CanvasWorkspaceDataEnabled      = "canvas.workspace_data_enabled"
 	CanvasArchived                  = "canvas.archived"
 	CanvasRestored                  = "canvas.restored"
 	CanvasRemoved                   = "canvas.removed"
@@ -116,12 +128,13 @@ const TaskStatusSummaryUpdated = "task.status_summary.updated"
 
 // Event types for task plans
 const (
-	TaskPlanCreated         = "task_plan.created"
-	TaskPlanUpdated         = "task_plan.updated"
-	TaskPlanDeleted         = "task_plan.deleted"
-	TaskPlanRevisionCreated = "task_plan.revision.created"
-	TaskPlanReverted        = "task_plan.reverted"
-	TaskPlanCommentsChanged = "task_plan.comments.changed"
+	TaskPlanCreated            = "task_plan.created"
+	TaskPlanUpdated            = "task_plan.updated"
+	TaskPlanDeleted            = "task_plan.deleted"
+	TaskPlanRevisionCreated    = "task_plan.revision.created"
+	TaskPlanReverted           = "task_plan.reverted"
+	TaskPlanCommentsChanged    = "task_plan.comments.changed"
+	TaskPreviewFeedbackChanged = "task.preview_feedback.changed"
 )
 
 // Event types for task walkthroughs (agent-authored guided code tours)
@@ -185,6 +198,10 @@ const (
 	ExecutorCreated = "executor.created"
 	ExecutorUpdated = "executor.updated"
 	ExecutorDeleted = "executor.deleted"
+	// ExecutorReachabilityChanged is published only when a probe or a
+	// connection-configuration reset actually changes the stored state or
+	// reason — a steady host never publishes.
+	ExecutorReachabilityChanged = "executor.reachability.changed"
 )
 
 // Event types for executor profiles
@@ -303,6 +320,16 @@ const (
 	AvailableCommandsUpdated = "available_commands.updated" // Available slash commands updated
 )
 
+// Event types for session launch warnings
+const (
+	// SessionLaunchWarning is published once, immediately before an SSH
+	// launch's CreateInstance call, when the target executor's stored
+	// reachability record is unreachable and the record is still within the
+	// probing window. It carries Kandev's own attribution of the target
+	// host, independent of whatever an agent process itself reports.
+	SessionLaunchWarning = "session.launch.warning"
+)
+
 // Event types for session mode
 const (
 	SessionModeChanged = "session_mode.changed" // Agent session mode changed
@@ -316,6 +343,8 @@ const (
 	SessionModelSelectionWarningUpdated = "session_model_selection_warning.updated" // Executor-authoritative model decision warning
 	SessionInfoUpdated                  = "session_info.updated"                    // ACP session info received
 	SessionMCPStatusUpdated             = "session_mcp_status.updated"              // MCP attachment evidence changed
+	BackgroundWorkUpdated               = "background_work.updated"                 // Background workload updated
+	BackgroundWorkOutput                = "background_work.output"                  // Background workload output streamed
 )
 
 // Event types for session todos (ACP plan entries)
@@ -325,6 +354,7 @@ const (
 
 const (
 	SessionPromptUsageUpdated = "session_prompt_usage.updated" // Prompt token usage updated
+	SessionUsageUpdated       = "session.usage_updated"        // A committed usage row changed session projections
 )
 
 // Event types for automations
@@ -505,6 +535,16 @@ func BuildAgentCapabilitiesSubject(sessionID string) string {
 	return AgentCapabilitiesUpdated + "." + sessionID
 }
 
+// BuildSessionLaunchWarningSubject creates a session launch warning subject for a specific session
+func BuildSessionLaunchWarningSubject(sessionID string) string {
+	return SessionLaunchWarning + "." + sessionID
+}
+
+// BuildSessionLaunchWarningWildcardSubject creates a wildcard subscription for all session launch warning events
+func BuildSessionLaunchWarningWildcardSubject() string {
+	return SessionLaunchWarning + ".*"
+}
+
 // BuildAgentCapabilitiesWildcardSubject creates a wildcard subscription for all agent capabilities events
 func BuildAgentCapabilitiesWildcardSubject() string {
 	return AgentCapabilitiesUpdated + ".*"
@@ -518,6 +558,26 @@ func BuildSessionModelsSubject(sessionID string) string {
 // BuildSessionModelsWildcardSubject creates a wildcard subscription for all session models events
 func BuildSessionModelsWildcardSubject() string {
 	return SessionModelsUpdated + ".*"
+}
+
+// BuildBackgroundWorkUpdatedSubject creates a subject for background work update events for a session
+func BuildBackgroundWorkUpdatedSubject(sessionID string) string {
+	return BackgroundWorkUpdated + "." + sessionID
+}
+
+// BuildBackgroundWorkUpdatedWildcardSubject creates a wildcard subscription for background work update events
+func BuildBackgroundWorkUpdatedWildcardSubject() string {
+	return BackgroundWorkUpdated + ".*"
+}
+
+// BuildBackgroundWorkOutputSubject creates a subject for background work output events for a session
+func BuildBackgroundWorkOutputSubject(sessionID string) string {
+	return BackgroundWorkOutput + "." + sessionID
+}
+
+// BuildBackgroundWorkOutputWildcardSubject creates a wildcard subscription for background work output events
+func BuildBackgroundWorkOutputWildcardSubject() string {
+	return BackgroundWorkOutput + ".*"
 }
 
 // BuildSessionModelFallbackSubject creates a session-specific fallback-model
@@ -582,6 +642,14 @@ func BuildSessionPromptUsageSubject(sessionID string) string {
 // BuildSessionPromptUsageWildcardSubject creates a wildcard subscription for all prompt usage events
 func BuildSessionPromptUsageWildcardSubject() string {
 	return SessionPromptUsageUpdated + ".*"
+}
+
+func BuildSessionUsageUpdatedSubject(sessionID string) string {
+	return SessionUsageUpdated + "." + sessionID
+}
+
+func BuildSessionUsageUpdatedWildcardSubject() string {
+	return SessionUsageUpdated + ".*"
 }
 
 // BuildOfficeRunEventSubject creates a per-run subject for run event

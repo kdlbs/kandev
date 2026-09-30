@@ -13,8 +13,7 @@ The integration system owns the tool contract for configuration and external
 MCP clients. The prompts package remains the source of saved prompt data and
 reference expansion.
 
-This design adds read access to the existing saved prompt collection. It does
-not add storage, mutation tools, or automatic reference expansion.
+This design owns read access to the saved prompt collection. [Shared prompt writes](shared-prompt-writes.md) extends it with controlled creation/update and the `allow_agent_edits` read field. Reads do not expand references.
 
 ## Requirement mapping
 
@@ -105,8 +104,7 @@ change does not add workspace-level or user-level prompt ownership.
 No database migration is necessary. Existing HTTP prompt routes, Settings UI,
 and `@name` expansion keep their current contracts.
 
-The public MCP reference adds the two tools. The external tool count changes
-from 40 to 42.
+The public MCP reference adds the two tools. The registered catalog tests own current tool counts.
 
 ## Verification strategy
 

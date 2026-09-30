@@ -115,3 +115,90 @@ func TestTaskCreatorAdapter_ReturnsErrorWhenParentNotFound(t *testing.T) {
 		t.Fatalf("expected not-found error, got: %v", err)
 	}
 }
+
+// fakeCarrierResolver returns a fixed carrier map for every task id, and
+// records the id and causing agent it was asked to resolve.
+type fakeCarrierResolver struct {
+	metadata    map[string]interface{}
+	lastID      string
+	lastAgentID string
+}
+
+func (f *fakeCarrierResolver) TaskBoundaryCarrierMetadata(
+	_ context.Context, taskID, causingAgentProfileID string,
+) map[string]interface{} {
+	f.lastID = taskID
+	f.lastAgentID = causingAgentProfileID
+	return f.metadata
+}
+
+// TestTaskCreatorAdapter_ThreadsCarrierFromParentTask is the Review
+// round 1 finding 3 regression test: create_child_task previously never
+// resolved a carrier at all, so a chain could silently reset its own
+// depth ceiling by routing through this action instead of the MCP
+// create-subtask runtime action (AC-OFFICE-RUN-CAUSATION-001.24). With a
+// CarrierResolver wired, the parent task's own carrier must be resolved
+// and forwarded onto the child's spec.
+func TestTaskCreatorAdapter_ThreadsCarrierFromParentTask(t *testing.T) {
+	parent := &taskmodels.Task{ID: "parent-1", WorkspaceID: "ws-1"}
+	creator := &fakeChildCreator{}
+	carrier := &fakeCarrierResolver{metadata: map[string]interface{}{
+		"office_carrier_causation_id": "root-run-1",
+	}}
+	a := NewTaskCreatorAdapter(&fakeParentRepo{task: parent}, creator)
+	a.SetCarrierResolver(carrier)
+
+	if _, err := a.CreateChildTask(context.Background(), "parent-1", engine.ChildTaskSpec{Title: "X"}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if carrier.lastID != "parent-1" {
+		t.Errorf("carrier resolved for task %q, want %q", carrier.lastID, "parent-1")
+	}
+	if len(creator.calls) != 1 {
+		t.Fatalf("expected 1 CreateChildTask call, got %d", len(creator.calls))
+	}
+	got := creator.calls[0].Spec.OfficeCarrierMetadata
+	if got["office_carrier_causation_id"] != "root-run-1" {
+		t.Errorf("OfficeCarrierMetadata = %+v, want the resolver's carrier forwarded", got)
+	}
+}
+
+// TestTaskCreatorAdapter_ThreadsCausingAgentToCarrierResolver proves the
+// adapter forwards the spec's CausingAgentProfileID to the carrier
+// resolver, so the resolver can scope its claimed-run lookup to the agent
+// actually executing this turn instead of an unscoped, task-only lookup
+// that is ambiguous when more than one agent holds a claimed run on the
+// same task.
+func TestTaskCreatorAdapter_ThreadsCausingAgentToCarrierResolver(t *testing.T) {
+	parent := &taskmodels.Task{ID: "parent-1", WorkspaceID: "ws-1"}
+	creator := &fakeChildCreator{}
+	carrier := &fakeCarrierResolver{metadata: map[string]interface{}{}}
+	a := NewTaskCreatorAdapter(&fakeParentRepo{task: parent}, creator)
+	a.SetCarrierResolver(carrier)
+
+	if _, err := a.CreateChildTask(context.Background(), "parent-1", engine.ChildTaskSpec{
+		Title:                 "X",
+		CausingAgentProfileID: "turn-agent-1",
+	}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if carrier.lastAgentID != "turn-agent-1" {
+		t.Errorf("carrier resolved with causing agent %q, want %q", carrier.lastAgentID, "turn-agent-1")
+	}
+}
+
+// TestTaskCreatorAdapter_NoCarrierResolverOmitsCarrier pins the
+// pre-existing (safe) behaviour when no resolver is wired: no carrier is
+// forwarded, rather than the adapter panicking on a nil Carrier.
+func TestTaskCreatorAdapter_NoCarrierResolverOmitsCarrier(t *testing.T) {
+	parent := &taskmodels.Task{ID: "parent-1"}
+	creator := &fakeChildCreator{}
+	a := NewTaskCreatorAdapter(&fakeParentRepo{task: parent}, creator)
+
+	if _, err := a.CreateChildTask(context.Background(), "parent-1", engine.ChildTaskSpec{Title: "X"}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got := creator.calls[0].Spec.OfficeCarrierMetadata; got != nil {
+		t.Errorf("OfficeCarrierMetadata = %+v, want nil (no resolver wired)", got)
+	}
+}

@@ -1,5 +1,6 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { performEnvSwitch, type EnvSwitchParams } from "./dockview-env-switch";
+import { makeMockApi, makeHealthyLayoutWith } from "./dockview-env-switch.test-utils";
 
 const { CANONICAL_CENTER_GROUP_ID, RIGHT_TOP_GROUP_ID, RIGHT_BOTTOM_GROUP_ID } = vi.hoisted(() => ({
   CANONICAL_CENTER_GROUP_ID: "group-center",
@@ -12,7 +13,8 @@ vi.mock("@/lib/local-storage", () => ({
   getManualRightWidth: vi.fn(() => null),
 }));
 
-vi.mock("@/lib/env-hidden-sessions", () => ({
+vi.mock("@/lib/env-hidden-sessions", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/env-hidden-sessions")>()),
   getEnvHiddenSessions: vi.fn(() => []),
 }));
 
@@ -54,37 +56,6 @@ const NEW_SESSION_PANEL_ID = `session:${NEW_SESSION_ID}`;
 const SIBLING_SESSION_PANEL_ID = `session:${SIBLING_SESSION_ID}`;
 const CENTER_GROUP_ID = "center-group";
 
-function makeMockApi() {
-  return {
-    panels: [],
-    groups: [],
-    layout: vi.fn(),
-    fromJSON: vi.fn(),
-    getPanel: vi.fn(() => null),
-    addPanel: vi.fn(),
-  } as unknown as EnvSwitchParams["api"];
-}
-
-function makeHealthyLayoutWith(extraPanels: Record<string, { contentComponent: string }>) {
-  return {
-    grid: {
-      root: {
-        type: "leaf" as const,
-        size: 800,
-        data: { id: "g1", views: ["chat"], activeView: "chat" },
-      },
-      height: 600,
-      width: 800,
-      orientation: "HORIZONTAL" as const,
-    },
-    panels: {
-      chat: { contentComponent: "chat" },
-      ...extraPanels,
-    },
-    activeGroup: "g1",
-  } as unknown as ReturnType<typeof getEnvLayout>;
-}
-
 function makeParams(overrides?: Partial<EnvSwitchParams>): EnvSwitchParams {
   return {
     api: makeMockApi(),
@@ -98,6 +69,8 @@ function makeParams(overrides?: Partial<EnvSwitchParams>): EnvSwitchParams {
     ...overrides,
   };
 }
+
+afterEach(() => vi.mocked(getEnvHiddenSessions).mockReturnValue([]));
 
 describe("performEnvSwitch", () => {
   beforeEach(() => {
@@ -379,7 +352,7 @@ describe("performEnvSwitch fast-path hidden sibling restoration", () => {
 
   it("does not restore a hidden sibling on the fast path", () => {
     vi.mocked(layoutStructuresMatch).mockReturnValueOnce(true);
-    vi.mocked(getEnvHiddenSessions).mockReturnValueOnce([SIBLING_SESSION_ID]);
+    vi.mocked(getEnvHiddenSessions).mockReturnValue([SIBLING_SESSION_ID]);
     type Panel = {
       id: string;
       api: { component: string; close: () => void };
@@ -708,6 +681,23 @@ describe("performEnvSwitch missing Agent restoration", () => {
         id: NEW_SESSION_PANEL_ID,
         position: expect.objectContaining({ referenceGroup: fallbackGroup.id }),
       }),
+    );
+  });
+});
+
+// @covers AC-UI-AGENT-TAB-CLOSE-BEHAVIOR-001.6
+describe("hidden primary restoration after board reload", () => {
+  it.each(["fast", "saved"])("selects a visible successor on the %s restore path", (path) => {
+    vi.mocked(getEnvHiddenSessions).mockReturnValue([NEW_SESSION_ID]);
+    if (path === "fast") vi.mocked(layoutStructuresMatch).mockReturnValueOnce(true);
+    else vi.mocked(getEnvLayout).mockReturnValue(makeHealthyLayoutWith({}));
+    const params = makeParams({ currentSessionIds: [NEW_SESSION_ID, SIBLING_SESSION_ID] });
+    performEnvSwitch(params);
+    expect(params.api.addPanel).not.toHaveBeenCalledWith(
+      expect.objectContaining({ id: NEW_SESSION_PANEL_ID }),
+    );
+    expect(params.api.addPanel).toHaveBeenCalledWith(
+      expect.objectContaining({ id: SIBLING_SESSION_PANEL_ID }),
     );
   });
 });

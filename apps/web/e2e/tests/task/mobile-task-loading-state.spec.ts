@@ -1,49 +1,38 @@
-import type { Page, Route } from "@playwright/test";
+import type { Route } from "@playwright/test";
 import { test, expect } from "../../fixtures/test-base";
 import { MobileKanbanPage } from "../../pages/mobile-kanban-page";
 import { SessionPage } from "../../pages/session-page";
-import { openBlockedTaskLoadingState } from "./task-loading-state-helpers";
-
-async function expectLoadingStateFitsViewport(testPage: Page) {
-  const loadingState = testPage.getByTestId("task-loading-state");
-  const box = await loadingState.boundingBox();
-  const viewport = testPage.viewportSize();
-
-  expect(box).not.toBeNull();
-  expect(viewport).not.toBeNull();
-  if (!box || !viewport) return;
-
-  await expect(loadingState).toBeInViewport();
-  expect(box.x).toBeGreaterThanOrEqual(0);
-  expect(box.y).toBeGreaterThanOrEqual(0);
-  expect(box.width).toBeLessThanOrEqual(viewport.width + 1);
-  expect(box.height).toBeLessThanOrEqual(viewport.height + 1);
-}
+import { openTaskWithStaleGlobalSelection } from "./task-loading-state-helpers";
 
 test.describe("Mobile task loading state", () => {
-  test("shows an inner loading state instead of a blank task detail pane", async ({
+  test("keeps the routed task visible when the global task selection changes", async ({
     testPage,
     apiClient,
     seedData,
   }) => {
-    const unblockTaskDetailRequest = await openBlockedTaskLoadingState({
+    const title = "Mobile Task Loading State Anchor";
+    const { task, blockedTaskDetailRequest } = await openTaskWithStaleGlobalSelection({
       testPage,
       apiClient,
       seedData,
-      title: "Mobile Task Loading State Anchor",
+      title,
       unresolvedTaskId: "unresolved-task-detail-mobile",
     });
 
     try {
-      await expect(testPage.getByTestId("task-loading-state")).toBeVisible({ timeout: 10_000 });
-      await expect(testPage.getByText("Loading task...")).toBeVisible();
-      await expectLoadingStateFitsViewport(testPage);
+      await expect(testPage).toHaveURL(new RegExp(`/t/${task.id}$`));
+      await expect(
+        testPage.getByRole("button", { name: `Open task switcher: ${title}` }),
+      ).toBeInViewport();
+      await expect(testPage.getByTestId("task-loading-state")).toHaveCount(0);
+      await expect(testPage.getByTestId("task-load-error-state")).toHaveCount(0);
+      expect(blockedTaskDetailRequest.requestStarted).toBe(true);
     } finally {
-      await unblockTaskDetailRequest();
+      await blockedTaskDetailRequest.unblock();
     }
   });
 
-  test("shows route loading, then recovers the destination task when optional hydration fails", async ({
+  test("shows the destination task while its optional session refresh is pending or fails", async ({
     testPage,
     apiClient,
     seedData,
@@ -98,14 +87,15 @@ test.describe("Mobile task loading state", () => {
       await expect(testPage).toHaveURL(new RegExp(`/t/${destination.id}$`));
       await requestObserved;
       const routeLoading = testPage.getByRole("status").filter({ hasText: "Loading task…" });
-      await expect(routeLoading).toBeVisible();
+      await expect(routeLoading).toHaveCount(0);
+      await expect(testPage.getByTestId("mobile-task-layout")).toBeVisible();
 
       releaseRequest();
       await handlerSettled;
       await expect(routeLoading).toBeHidden();
       const session = new SessionPage(testPage);
       const mobileTopBar = testPage
-        .getByTestId("mobile-session-menu")
+        .getByTestId("mobile-task-picker-trigger")
         .locator("xpath=ancestor::header");
       await expect(mobileTopBar.getByText(title, { exact: true })).toBeVisible();
       await expect(session.activeChat().getByText(responseText).last()).toBeVisible({

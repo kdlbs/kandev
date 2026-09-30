@@ -26,6 +26,7 @@ health identity, binding semantics, and background recovery ordering.
 
 - [x] [01: Startup lifecycle](task-01-lifecycle.md)
 - [x] [02: Startup measurements and documentation](task-02-evidence.md)
+- [x] [03: Plugin session-event mirror startup batching](task-03-plugin-mirror-batching.md)
 
 ## Verification
 
@@ -82,3 +83,11 @@ backup-registry redesign are unchanged. Constructors for non-task stores still
 have bounded admission barriers rather than a new shared context API; an
 already admitted statement can finish according to its driver's cancellation
 behavior before the next store is rejected.
+
+[Task 03](task-03-plugin-mirror-batching.md) closed a related gap found on a
+2026-09-17 upgrade: the plugins provider's one-time conversation-journal mirror
+sync did not conform to AC-001.4/AC-001.6 (silent, ~4 minutes, non-cancellable
+on a 669k-event journal). Batched mirrored-event commits by a fixed event count
+across sessions (~40x per-event cost reduction) and threaded a cancellable
+startup context through the boot sync path. See that work order for full
+verification receipts.
