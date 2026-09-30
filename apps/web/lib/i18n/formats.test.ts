@@ -38,7 +38,7 @@ describe("formatRelative (en, timeAgo-compatible)", () => {
   });
 });
 
-describe("formatRelative (ja)", () => {
+describe("formatRelative (catalog buckets)", () => {
   const now = new Date(FORMAT_NOW).getTime();
   const ago = (ms: number) => new Date(now - ms).toISOString();
 
@@ -46,12 +46,15 @@ describe("formatRelative (ja)", () => {
     await activateLocale("en");
   });
 
-  it("uses Japanese catalog buckets", async () => {
-    await activateLocale("ja");
-    expect(formatRelative(ago(30_000), now)).toBe("たった今");
-    expect(formatRelative(ago(5 * 60_000), now)).toBe("5分前");
-    expect(formatRelative(ago(3 * 3_600_000), now)).toBe("3時間前");
-    expect(formatRelative(ago(2 * 86_400_000), now)).toBe("2日前");
+  it.each([
+    ["ja", "たった今", "5分前", "3時間前", "2日前"],
+    ["ko", "방금", "5분 전", "3시간 전", "2일 전"],
+  ] as const)("uses the %s catalog buckets", async (locale, justNow, minutes, hours, days) => {
+    await activateLocale(locale);
+    expect(formatRelative(ago(30_000), now)).toBe(justNow);
+    expect(formatRelative(ago(5 * 60_000), now)).toBe(minutes);
+    expect(formatRelative(ago(3 * 3_600_000), now)).toBe(hours);
+    expect(formatRelative(ago(2 * 86_400_000), now)).toBe(days);
   });
 });
 
@@ -93,7 +96,7 @@ describe("formatSidebarElapsedTime", () => {
     ["zh-hk", "3週"],
     ["zh-tw", "3週"],
     ["ja", "3週間"],
-    ["ko", "3w"],
+    ["ko", "3주"],
     ["pseudo", "3ŵ"],
   ] as const)("uses the %s compact unit catalog", async (locale, expected) => {
     await activateLocale(locale);
