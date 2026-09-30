@@ -25,7 +25,7 @@ var ErrCoordinatorProposalCapReached = errors.New("coordinator: open proposal ca
 // reported as a coordinator's open_proposals count (decision 9).
 var openProposalStatuses = []ProposalStatus{ProposalStatusPending, ProposalStatusApproving, ProposalStatusFailed}
 
-const proposalColumns = `id, coordinator_id, workspace_id, status, spec_json, final_spec_json, claimed_at, claim_token, task_id, error, reject_reason, decided_by, created_at, updated_at, kind, target_task_id, standing_order_ids, starts_agent, outcome_json, reply_text, reply_delivered_at, reply_delivery_claimed_at, in_reply_to, ` + changeStatusColumn
+const proposalColumns = `id, coordinator_id, workspace_id, status, spec_json, final_spec_json, claimed_at, claim_token, task_id, error, reject_reason, decided_by, created_at, updated_at, kind, target_task_id, standing_order_ids, starts_agent, outcome_json, reply_text, reply_delivered_at, reply_delivery_claimed_at, in_reply_to, decided_automatically, claimed_automatically, automatic_at, ` + changeStatusColumn
 
 // changeStatusColumn is the status of the pending change an approved
 // improvement produced, NULL for every other proposal.
@@ -61,7 +61,11 @@ type proposalRow struct {
 	ReplyDeliveredAt       sql.NullTime   `db:"reply_delivered_at"`
 	ReplyDeliveryClaimedAt sql.NullTime   `db:"reply_delivery_claimed_at"`
 	InReplyTo              sql.NullString `db:"in_reply_to"`
-	ChangeStatus           sql.NullString `db:"change_status"`
+
+	DecidedAutomatically bool           `db:"decided_automatically"`
+	ClaimedAutomatically bool           `db:"claimed_automatically"`
+	AutomaticAt          sql.NullTime   `db:"automatic_at"`
+	ChangeStatus         sql.NullString `db:"change_status"`
 }
 
 func (r *proposalRow) toProposal() (*Proposal, error) {
@@ -145,6 +149,12 @@ func (r *proposalRow) copyNullables(p *Proposal) {
 	}
 	if r.ChangeStatus.Valid {
 		p.ChangeStatus = &r.ChangeStatus.String
+	}
+	p.DecidedAutomatically = r.DecidedAutomatically
+	p.ClaimedAutomatically = r.ClaimedAutomatically
+	if r.AutomaticAt.Valid {
+		at := r.AutomaticAt.Time
+		p.AutomaticAt = &at
 	}
 }
 
@@ -439,23 +449,43 @@ func (s *Store) listApprovingClaimedBefore(ctx context.Context, cutoff time.Time
 // (ListApprovingClaimedBefore, ReclaimStale), which only orders correctly
 // when every stored value carries the same offset.
 func (s *Store) ClaimProposal(ctx context.Context, id, token string, finalSpec ProposalSpec, decidedBy string, now time.Time) (bool, error) {
-	finalJSON, err := json.Marshal(finalSpec)
-	if err != nil {
-		return false, fmt.Errorf("marshal final spec: %w", err)
-	}
-	return s.ClaimProposalRaw(ctx, id, token, string(finalJSON), decidedBy, now)
+	return s.ClaimProposalTx(ctx, s.db, id, token, finalSpec, decidedBy, now, nil)
 }
 
 // ClaimProposalRaw is ClaimProposal for a frozen spec already encoded as JSON,
 // the form every non-create_task kind stores.
 func (s *Store) ClaimProposalRaw(ctx context.Context, id, token, finalJSON, decidedBy string, now time.Time) (bool, error) {
+	return s.ClaimProposalRawTx(ctx, s.db, id, token, finalJSON, decidedBy, now, nil)
+}
+
+// ClaimProposalTx is ClaimProposal on a transaction-bound handle. A non-nil
+// automaticAt marks the claim as the automatic path's: it also stamps
+// decided_automatically, claimed_automatically and automatic_at. A manager's
+// claim (nil) writes claimed_automatically = 0 and never touches
+// decided_automatically or automatic_at.
+func (s *Store) ClaimProposalTx(ctx context.Context, exec coordinatorExec, id, token string, finalSpec ProposalSpec, decidedBy string, now time.Time, automaticAt *time.Time) (bool, error) {
+	finalJSON, err := json.Marshal(finalSpec)
+	if err != nil {
+		return false, fmt.Errorf("marshal final spec: %w", err)
+	}
+	return s.ClaimProposalRawTx(ctx, exec, id, token, string(finalJSON), decidedBy, now, automaticAt)
+}
+
+// ClaimProposalRawTx is ClaimProposalTx for a frozen spec already encoded as JSON.
+func (s *Store) ClaimProposalRawTx(ctx context.Context, exec coordinatorExec, id, token, finalJSON, decidedBy string, now time.Time, automaticAt *time.Time) (bool, error) {
 	now = now.UTC()
-	res, err := s.db.ExecContext(ctx, s.db.Rebind(`
+	query := `
 		UPDATE coordinator_proposals
-		SET status = ?, claimed_at = ?, claim_token = ?, final_spec_json = ?, decided_by = ?, error = NULL, updated_at = ?
-		WHERE id = ? AND status IN (?, ?)`),
-		string(ProposalStatusApproving), now, token, finalJSON, decidedBy, now,
-		id, string(ProposalStatusPending), string(ProposalStatusFailed))
+		SET status = ?, claimed_at = ?, claim_token = ?, final_spec_json = ?, decided_by = ?, error = NULL, updated_at = ?, claimed_automatically = ?`
+	args := []any{string(ProposalStatusApproving), now, token, finalJSON, decidedBy, now, autonomyColumn(automaticAt != nil)}
+	if automaticAt != nil {
+		query += `, decided_automatically = 1, automatic_at = ?`
+		args = append(args, automaticAt.UTC())
+	}
+	query += `
+		WHERE id = ? AND status IN (?, ?)`
+	args = append(args, id, string(ProposalStatusPending), string(ProposalStatusFailed))
+	res, err := exec.ExecContext(ctx, s.db.Rebind(query), args...)
 	if err != nil {
 		return false, fmt.Errorf("claim proposal: %w", err)
 	}

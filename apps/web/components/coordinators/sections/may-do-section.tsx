@@ -6,6 +6,7 @@ import { RadioGroup, RadioGroupItem } from "@kandev/ui/radio-group";
 import { Skeleton } from "@kandev/ui/skeleton";
 import AppLink from "@/components/routing/app-link";
 import type { ControlAction, ControlSetting } from "@/lib/api/domains/coordinator-api";
+import type { ClassEligibility } from "@/lib/api/domains/coordinator-automatic-api";
 import { linkToCoordinatorActivityClass } from "@/lib/coordinator/links";
 import { CONTROL_ACTIONS } from "@/lib/coordinators/control-draft";
 import {
@@ -13,6 +14,12 @@ import {
   type ActionCounts,
 } from "@/hooks/domains/coordinator/use-action-summary";
 import type { useControlDraft } from "@/hooks/domains/coordinator/use-control-draft";
+import {
+  useClassEligibility,
+  type ClassEligibilityStatus,
+} from "@/hooks/domains/coordinator/use-class-eligibility";
+import { useReviewOpened } from "@/hooks/domains/coordinator/use-review-opened";
+import { AutomaticEligibility, RaisedRecord } from "./automatic-eligibility";
 
 type Control = ReturnType<typeof useControlDraft>;
 
@@ -30,7 +37,33 @@ type MayDoSectionProps = {
   coordinatorId: string;
   canManage: boolean;
   control: Control;
+  phase3?: boolean;
 };
+
+/** The phase 3 raise surface: eligibility of create_task and the review flow. */
+export type MayDoAutomatic = {
+  eligibility: ClassEligibility | null;
+  status: ClassEligibilityStatus;
+  reviewOpened: boolean;
+  reviewFailed: boolean;
+  onReviewOpened: () => void;
+  onMarkReviewed: () => void;
+  onRetry: () => void;
+};
+
+function automaticRadioState(
+  action: ControlAction,
+  value: ControlSetting,
+  canManage: boolean,
+  automatic: MayDoAutomatic | undefined,
+): { disabled: boolean; noteKey: string } {
+  if (!automatic) return { disabled: true, noteKey: "coordinator:mayDoAutomaticNote" };
+  if (action !== "create_task") {
+    return { disabled: true, noteKey: "coordinator:mayDoAutomaticCannot" };
+  }
+  const allowed = canManage && (value === "automatic" || automatic.eligibility?.eligible === true);
+  return { disabled: !allowed, noteKey: "coordinator:mayDoAutomaticNotEligible" };
+}
 
 function Counts({
   action,
@@ -72,12 +105,51 @@ type RowProps = {
   onChange: (value: ControlSetting) => void;
   activity?: MayDoActivity;
   errorMessage?: string;
+  automatic?: MayDoAutomatic;
 };
 
-function ActionRow({ action, value, disabled, onChange, activity, errorMessage }: RowProps) {
+function AutomaticOption({
+  action,
+  radio,
+}: {
+  action: ControlAction;
+  radio: { disabled: boolean; noteKey: string };
+}) {
+  const { t } = useTranslation();
+  return (
+    <label
+      className={`flex items-center gap-2 text-sm ${radio.disabled ? "text-muted-foreground" : "cursor-pointer"}`}
+    >
+      <RadioGroupItem
+        value="automatic"
+        id={`may-do-${action}-automatic`}
+        disabled={radio.disabled}
+      />
+      {t("coordinator:mayDoAutomatic")}
+      {radio.disabled && (
+        <span className="text-xs" data-testid={`may-do-automatic-note-${action}`}>
+          {t(radio.noteKey)}
+        </span>
+      )}
+    </label>
+  );
+}
+
+function ActionRow({
+  action,
+  value,
+  disabled,
+  onChange,
+  activity,
+  errorMessage,
+  automatic,
+}: RowProps) {
   const { t } = useTranslation();
   const stopLocked = action === "stop";
   const name = `may-do-${action}`;
+  const radio = automaticRadioState(action, value, !disabled, automatic);
+  const radioValue = value === "automatic" && !automatic ? "denied" : value;
+  const onReviewClick = action === "create_task" ? automatic?.onReviewOpened : undefined;
   return (
     <div className="space-y-2 py-3" data-testid={`may-do-row-${action}`}>
       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -90,6 +162,7 @@ function ActionRow({ action, value, disabled, onChange, activity, errorMessage }
               action,
             )}
             className="cursor-pointer text-xs underline"
+            onClick={onReviewClick}
             data-testid={`may-do-review-${action}`}
           >
             {t("coordinator:mayDoReviewLast30")}
@@ -97,7 +170,7 @@ function ActionRow({ action, value, disabled, onChange, activity, errorMessage }
         )}
       </div>
       <RadioGroup
-        value={value === "automatic" ? "denied" : value}
+        value={radioValue}
         onValueChange={(next) => onChange(next as ControlSetting)}
         disabled={disabled}
         className="flex flex-wrap gap-4"
@@ -111,11 +184,7 @@ function ActionRow({ action, value, disabled, onChange, activity, errorMessage }
           <RadioGroupItem value="requires_approval" id={`${name}-approval`} disabled={stopLocked} />
           {t("coordinator:mayDoRequiresApproval")}
         </label>
-        <label className="flex items-center gap-2 text-sm text-muted-foreground">
-          <RadioGroupItem value="automatic" id={`${name}-automatic`} disabled />
-          {t("coordinator:mayDoAutomatic")}
-          <span className="text-xs">{t("coordinator:mayDoAutomaticNote")}</span>
-        </label>
+        <AutomaticOption action={action} radio={radio} />
       </RadioGroup>
       {stopLocked && (
         <p className="text-xs text-muted-foreground">{t("coordinator:mayDoStopUnavailable")}</p>
@@ -131,6 +200,20 @@ function ActionRow({ action, value, disabled, onChange, activity, errorMessage }
         </p>
       )}
       {activity && <Counts action={action} counts={activity.counts} status={activity.status} />}
+      {action === "create_task" && automatic && (
+        <>
+          {automatic.eligibility && <RaisedRecord eligibility={automatic.eligibility} />}
+          <AutomaticEligibility
+            eligibility={automatic.eligibility}
+            status={automatic.status}
+            canManage={!disabled}
+            reviewOpened={automatic.reviewOpened}
+            reviewFailed={automatic.reviewFailed}
+            onMarkReviewed={automatic.onMarkReviewed}
+            onRetry={automatic.onRetry}
+          />
+        </>
+      )}
     </div>
   );
 }
@@ -143,6 +226,7 @@ export type MayDoRowsProps = {
   rowErrors?: Partial<Record<ControlAction, string>>;
   errorMessage?: string | null;
   freshConversationNote?: boolean;
+  automatic?: MayDoAutomatic;
 };
 
 export function MayDoRows({
@@ -153,6 +237,7 @@ export function MayDoRows({
   rowErrors,
   errorMessage,
   freshConversationNote = false,
+  automatic,
 }: MayDoRowsProps) {
   const { t } = useTranslation();
   return (
@@ -172,6 +257,7 @@ export function MayDoRows({
             onChange={(next) => onChange(action, next)}
             activity={activity}
             errorMessage={rowErrors?.[action]}
+            automatic={automatic}
           />
         ))}
       </div>
@@ -192,10 +278,24 @@ export function MayDoSection({
   coordinatorId,
   canManage,
   control,
+  phase3 = false,
 }: MayDoSectionProps) {
   const { t } = useTranslation();
   const summary = useActionSummary(workspaceId, coordinatorId, 30);
+  const eligibility = useClassEligibility(workspaceId, coordinatorId, "create_task", phase3);
+  const [reviewOpened, markReviewOpened] = useReviewOpened(coordinatorId, "create_task");
   const { draft, status, retry } = control;
+  const automatic: MayDoAutomatic | undefined = phase3
+    ? {
+        eligibility: eligibility.eligibility,
+        status: eligibility.status,
+        reviewOpened,
+        reviewFailed: eligibility.reviewFailed,
+        onReviewOpened: markReviewOpened,
+        onMarkReviewed: eligibility.markReviewed,
+        onRetry: eligibility.reload,
+      }
+    : undefined;
 
   if (status === "loading" || !draft) {
     if (status === "error") {
@@ -227,6 +327,7 @@ export function MayDoSection({
         onChange={control.setAction}
         activity={{ workspaceId, coordinatorId, counts: summary.counts, status: summary.status }}
         freshConversationNote
+        automatic={automatic}
       />
     </div>
   );

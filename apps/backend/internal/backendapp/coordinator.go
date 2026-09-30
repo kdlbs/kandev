@@ -14,6 +14,7 @@ import (
 	"github.com/kandev/kandev/internal/db"
 	"github.com/kandev/kandev/internal/events/bus"
 	gateways "github.com/kandev/kandev/internal/gateway/websocket"
+	officetestharness "github.com/kandev/kandev/internal/office/testharness"
 	"github.com/kandev/kandev/internal/orchestrator"
 	"github.com/kandev/kandev/internal/persistence/requiredstores"
 	taskservice "github.com/kandev/kandev/internal/task/service"
@@ -119,6 +120,9 @@ func registerCoordinatorRoutes(p routeParams) {
 	t0 := time.Now().UTC()
 	svc := p.services.Coordinator
 	registerCoordinatorHTTPRoutes(p.router, svc, p.log)
+	if officetestharness.Enabled() {
+		coordinator.RegisterTestSeedRoutes(p.router, svc)
+	}
 	if p.gateway != nil {
 		gateways.RegisterCoordinatorNotifications(p.ctx, p.eventBus, p.gateway.Hub, p.log)
 	}
@@ -128,31 +132,42 @@ func registerCoordinatorRoutes(p routeParams) {
 		registerCoordinatorDecisions(p.router, p.eventBus, svc, p.taskSvc, p.services.Workflow, p.log),
 	}
 	if svc.Phase3Enabled() {
-		if p.taskRepo != nil && p.taskSvc != nil {
-			svc.SetRelayDeps(p.taskRepo, p.taskSvc)
-		}
-		if p.taskSvc != nil {
-			coordinatorWakeSources = &coordinatorWakeReader{tasks: p.taskSvc}
-		}
-		wireCoordinatorDelivery(svc, p.taskSvc, p.orchestratorSvc)
-		if p.addCleanup != nil {
-			p.addCleanup(func() error {
-				svc.StopWakeRecorder()
-				svc.StopWakeBackstop()
-				svc.StopDelivery()
-				return nil
-			})
-		}
-		wireCoordinatorSpend(p.services.UsageWriter, svc, p.taskSvc, p.orchestratorSvc)
-		wireCoordinatorContainment(svc, containmentDepsFrom(p), p.orchestratorSvc, p.log)
-		if p.taskSvc != nil && p.orchestratorSvc != nil {
-			svc.SetReplyDeps(p.taskSvc, p.orchestratorSvc)
-		}
-		for _, register := range phase3Registrations() {
-			hooks = append(hooks, register(p.router, p.eventBus, svc, p.log))
-		}
+		hooks = append(hooks, wireCoordinatorPhase3(p, svc)...)
 	}
 	runCoordinatorBackgroundPass(p.ctx, t0, hooks)
+}
+
+// wireCoordinatorPhase3 wires the phase 3 dependencies and returns their
+// background registration hooks.
+func wireCoordinatorPhase3(p routeParams, svc *coordinator.Service) []func(context.Context, time.Time) {
+	var hooks []func(context.Context, time.Time)
+	if p.taskRepo != nil && p.taskSvc != nil {
+		svc.SetRelayDeps(p.taskRepo, p.taskSvc)
+	}
+	if p.taskSvc != nil {
+		coordinatorWakeSources = &coordinatorWakeReader{tasks: p.taskSvc}
+	}
+	wireCoordinatorDelivery(svc, p.taskSvc, p.orchestratorSvc)
+	if p.addCleanup != nil {
+		p.addCleanup(func() error {
+			svc.StopWakeRecorder()
+			svc.StopWakeBackstop()
+			svc.StopDelivery()
+			return nil
+		})
+	}
+	if p.authSvc != nil {
+		svc.SetAutomaticIdentities(p.authSvc)
+	}
+	wireCoordinatorSpend(p.services.UsageWriter, svc, p.taskSvc, p.orchestratorSvc)
+	wireCoordinatorContainment(svc, containmentDepsFrom(p), p.orchestratorSvc, p.log)
+	if p.taskSvc != nil && p.orchestratorSvc != nil {
+		svc.SetReplyDeps(p.taskSvc, p.orchestratorSvc)
+	}
+	for _, register := range phase3Registrations() {
+		hooks = append(hooks, register(p.router, p.eventBus, svc, p.log))
+	}
+	return hooks
 }
 
 // runCoordinatorBackgroundPass is a test seam over startCoordinatorBackgroundPass:
@@ -289,7 +304,7 @@ var (
 	registerCoordinatorDelivery     coordinatorRegistration = registerCoordinatorDeliveryWorker
 	registerCoordinatorRelay        coordinatorRegistration = registerCoordinatorRelayRoutes
 	registerCoordinatorReply        coordinatorRegistration = noopCoordinatorHook
-	registerCoordinatorAutomatic    coordinatorRegistration = noopCoordinatorHook
+	registerCoordinatorAutomatic    coordinatorRegistration = registerCoordinatorAutomaticLowering
 	registerCoordinatorImprovements coordinatorRegistration = noopCoordinatorHook
 )
 
@@ -304,6 +319,13 @@ func phase3Registrations() []coordinatorRegistration {
 		registerCoordinatorAutomatic,
 		registerCoordinatorImprovements,
 	}
+}
+
+// registerCoordinatorAutomaticLowering adds the undo-lowering retry to the
+// wake backstop; it runs before the backstop starts.
+func registerCoordinatorAutomaticLowering(_ *gin.Engine, _ bus.EventBus, svc *coordinator.Service, _ *logger.Logger) func(context.Context, time.Time) {
+	svc.SetBackstopHooks(coordinator.Hooks{Lowering: svc.LoweringDuty()})
+	return func(context.Context, time.Time) {}
 }
 
 // registerCoordinatorRelayRoutes mounts the answer-in-place read route. The

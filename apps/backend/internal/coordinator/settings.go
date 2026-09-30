@@ -76,14 +76,14 @@ type watchesRequest struct {
 
 // parseSettingsBody validates everything in the body that needs no stored
 // state. Policy is validated before Watches.
-func parseSettingsBody(body []byte) (settingsRequest, error) {
+func parseSettingsBody(body []byte, phase3 bool) (settingsRequest, error) {
 	var top map[string]json.RawMessage
 	if err := json.Unmarshal(body, &top); err != nil || top == nil {
 		return settingsRequest{}, bodyErr("", "body must be a JSON object")
 	}
 	var req settingsRequest
 	if raw, ok := presentMember(top, "policy"); ok {
-		p, err := parsePolicyMember(raw)
+		p, err := parsePolicyMember(raw, phase3)
 		if err != nil {
 			return settingsRequest{}, err
 		}
@@ -108,7 +108,7 @@ func presentMember(obj map[string]json.RawMessage, key string) (json.RawMessage,
 	return raw, true
 }
 
-func parsePolicyMember(raw json.RawMessage) (*Policy, error) {
+func parsePolicyMember(raw json.RawMessage, phase3 bool) (*Policy, error) {
 	var member map[string]json.RawMessage
 	if err := json.Unmarshal(raw, &member); err != nil || member == nil {
 		return nil, bodyErr("policy", "policy must be an object")
@@ -144,7 +144,7 @@ func parsePolicyMember(raw json.RawMessage) (*Policy, error) {
 		}
 		p.Actions[a] = Setting(s)
 	}
-	if err := Validate(p); err != nil {
+	if err := Validate(p, phase3); err != nil {
 		return nil, policyValidateErr(err, p)
 	}
 	return &p, nil
@@ -310,7 +310,7 @@ func (s *Service) SaveSettings(ctx context.Context, workspaceID, coordinatorID s
 	if _, err := s.store.GetCoordinator(ctx, workspaceID, coordinatorID); err != nil {
 		return nil, err
 	}
-	req, err := parseSettingsBody(body)
+	req, err := parseSettingsBody(body, s.phase3)
 	if err != nil {
 		return nil, err
 	}
@@ -385,7 +385,7 @@ func (s *Service) applySettings(ctx context.Context, tx coordinatorExec, workspa
 	if !policyChanged && !watchesChanged {
 		return result, false, nil
 	}
-	if err := s.writeSettings(ctx, tx, workspaceID, coordinatorID, row.PolicyJSON, policyChanged, final, watchesChanged, scope); err != nil {
+	if err := s.commitSettings(ctx, tx, workspaceID, coordinatorID, row.PolicyJSON, stored, final, policyChanged, watchesChanged, scope); err != nil {
 		return nil, false, err
 	}
 	result.PolicyRevision = row.Revision + 1
@@ -393,6 +393,23 @@ func (s *Service) applySettings(ctx context.Context, tx coordinatorExec, workspa
 		zap.String("coordinator_id", coordinatorID), zap.Int("old_revision", row.Revision),
 		zap.Int("new_revision", row.Revision+1), zap.Bool("policy_changed", policyChanged), zap.Bool("watches_changed", watchesChanged))
 	return result, true, nil
+}
+
+// commitSettings gates a raise, writes the changed settings and records the
+// class changes, all inside the caller's coordinator lock.
+func (s *Service) commitSettings(ctx context.Context, tx coordinatorExec, workspaceID, coordinatorID string, storedJSON *string, stored, final Policy, policyChanged, watchesChanged bool, scope watchState) error {
+	if policyChanged {
+		if err := s.checkRaise(ctx, coordinatorID, stored, final); err != nil {
+			return err
+		}
+	}
+	if err := s.writeSettings(ctx, tx, workspaceID, coordinatorID, storedJSON, policyChanged, final, watchesChanged, scope); err != nil {
+		return err
+	}
+	if policyChanged {
+		return s.recordClassChanges(ctx, tx, coordinatorID, stored, final)
+	}
+	return nil
 }
 
 func nonNilIDs(ids []string) []string {

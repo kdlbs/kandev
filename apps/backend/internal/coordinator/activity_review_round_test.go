@@ -118,7 +118,7 @@ func TestProposeTask_ProposedActivityDetailIsTitle(t *testing.T) {
 	}
 }
 
-// Only the proposal decision paths write activity rows; a manager's direct
+// Only the proposal decision paths write activity rows (plus test_seed.go, mounted only under the E2E harness); a manager's direct
 // Resume or Send it back never does.
 func TestActivityWriters_OnlyProposalPaths(t *testing.T) {
 	for _, name := range []string{"stalls.go", "recovery.go", "reject.go"} {
@@ -136,7 +136,7 @@ func TestActivityWriters_OnlyProposalPaths(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	allowed := map[string]bool{"decision_phase2.go": true, "proposals.go": true, "propose_kinds.go": true, "activity.go": true, "undo.go": true, "activity_store.go": true}
+	allowed := map[string]bool{"decision_phase2.go": true, "proposals.go": true, "propose_kinds.go": true, "activity.go": true, "undo.go": true, "activity_store.go": true, "test_seed.go": true}
 	for _, e := range entries {
 		n := e.Name()
 		if !strings.HasSuffix(n, ".go") || strings.HasSuffix(n, "_test.go") || allowed[n] {

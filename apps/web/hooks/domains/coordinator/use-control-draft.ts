@@ -26,11 +26,11 @@ import {
 
 export type ControlLoadStatus = "loading" | "ready" | "error";
 
-/** A 400 from the settings PUT: the field it names and the closed error code. */
+/** A 400 or a 409 not_eligible from the settings PUT: the field it names and the closed error code. */
 export type ControlFieldError = { field: string | null; code: string | null; detail: string };
 
 function fieldErrorOf(error: unknown): ControlFieldError | null {
-  if (!(error instanceof ApiError) || error.status !== 400) return null;
+  if (!(error instanceof ApiError) || (error.status !== 400 && error.status !== 409)) return null;
   const body = error.body as { error?: unknown; field?: unknown; code?: unknown } | null;
   return {
     field: typeof body?.field === "string" ? body.field : null,
