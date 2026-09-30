@@ -131,6 +131,8 @@ type Service struct {
 	// phase3 is true when phase 3 is effective (features.coordinator, phase 2
 	// and phase 3 all on). It gates the autonomy settings.
 	phase3 bool
+	// automatic holds the automatic path's injectable seams.
+	automatic automaticState
 	// wakeMu guards kick, the stall hook, the wake sources and the recorder
 	// state; nothing waits while holding it.
 	wakeMu sync.Mutex

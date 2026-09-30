@@ -37,7 +37,7 @@ export type ActivityOutcome =
   | "returned";
 
 // Mirrors internal/coordinator/activity.go's ActivityAuthorization values.
-export type ActivityAuthorization = "requires_approval" | "denied";
+export type ActivityAuthorization = "requires_approval" | "denied" | "automatic";
 
 // Mirrors internal/coordinator/activity_service.go's ActivityItem: the row plus
 // the read-time fields. The server sends ids only; names are resolved by the

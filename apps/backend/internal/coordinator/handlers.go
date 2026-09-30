@@ -55,6 +55,7 @@ func RegisterRoutes(router *gin.Engine, svc *Service, log *logger.Logger) {
 		workspace.GET("/coordinators/:cid/pending-changes", h.httpListPendingChanges)
 		workspace.POST("/coordinators/:cid/pending-changes/:chid/apply", h.httpApplyPendingChange)
 		workspace.POST("/coordinators/:cid/pending-changes/:chid/discard", h.httpDiscardPendingChange)
+		registerAutomaticRoutes(workspace, h)
 	}
 	workspace.GET("/coordinator-stalls", h.httpListStalls)
 	if svc.phase2 {
@@ -341,6 +342,10 @@ func (h *Handlers) respondError(c *gin.Context, err error) {
 	var undoErr *UndoRefusal
 	var settingsErr *SettingsError
 	var deniedErr *PolicyDeniedError
+	if status, body, ok := automaticErrorResponse(err); ok {
+		c.JSON(status, body)
+		return
+	}
 	switch {
 	case errors.As(err, &undoErr):
 		c.JSON(http.StatusConflict, gin.H{"code": undoErr.Code, "reason": undoErr.Reason})

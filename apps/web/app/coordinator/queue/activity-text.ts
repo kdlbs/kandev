@@ -65,6 +65,7 @@ export function actionText(item: ActivityItem, t: TFunction): string {
 
 export function authorizationLine(item: ActivityItem, t: TFunction): string | null {
   if (item.authorization === "requires_approval") return t("coordinator:activityAuthRequires");
+  if (item.authorization === "automatic") return t("coordinator:activityAuthAutomatic");
   if (item.authorization !== "denied") return null;
   return item.refusal_count > 1
     ? t("coordinator:activityAuthDeniedRepeated", { count: item.refusal_count })
@@ -82,6 +83,11 @@ export function outcomeLine(item: ActivityItem, person: PersonName, t: TFunction
   const name = personName(person, t);
   switch (item.outcome) {
     case "approved":
+      if (item.authorization === "automatic") {
+        return name
+          ? t("coordinator:activityApprovedAutomatically", { name })
+          : t("coordinator:activityApprovedAutomaticallyNoName");
+      }
       if (item.edited) {
         return name
           ? t("coordinator:activityApprovedByEdited", { name })

@@ -1,7 +1,7 @@
 ---
 id: "09-automatic"
 title: "The first automatic class: create_task"
-status: pending
+status: built
 wave: 3
 depends_on:
   - "01-flag-schema-settings"
