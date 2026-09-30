@@ -17,12 +17,14 @@ acceptance_criteria:
   - AC-COORDINATOR-IMPROVEMENTS-001.1
   - AC-COORDINATOR-IMPROVEMENTS-001.2
   - AC-COORDINATOR-IMPROVEMENTS-001.3
+  - AC-COORDINATOR-IMPROVEMENTS-001.4
   - AC-COORDINATOR-IMPROVEMENTS-002.1
   - AC-COORDINATOR-IMPROVEMENTS-002.2
   - AC-COORDINATOR-IMPROVEMENTS-002.3
   - AC-COORDINATOR-IMPROVEMENTS-003.1
   - AC-COORDINATOR-IMPROVEMENTS-003.2
   - AC-COORDINATOR-IMPROVEMENTS-003.3
+  - AC-COORDINATOR-IMPROVEMENTS-003.4
   - AC-COORDINATOR-INTEGRATION-003.3
   - AC-COORDINATOR-INTEGRATION-006.4
   - AC-COORDINATOR-INTEGRATION-006.5
@@ -64,7 +66,7 @@ pending change, and the settings list where a manager applies or discards it.
 - `internal/coordinator/no_turn_start_test.go`: append the improvement
   approve and apply rows to `noTurnStartPaths`
   ([copilot](../../specs/coordinator/system-design/copilot.md#attended-only)).
-- Web: `app/coordinator/components/improvement-card.tsx` branching from
+- Web: `app/coordinator/proposal-card/improvement-card.tsx` branching from
   `ProposalCard`, "Runs behind it" through task 06's run read, the diff through
   the existing diff viewer, the approve gate and the reply control from task
   08; the settings "Changes waiting for you" list
@@ -118,11 +120,18 @@ See [plan UI-07](plan.md#ascii-ui-previews).
   approves an improvement.
 - Approval stores one pending change and leaves the coordinator unchanged;
   Apply writes the context as a PATCH does (conversation replaced), is 409
-  `context_changed` when the base differs, including when a manager's context
-  PATCH commits between Apply's read and its conditional write (the edit is
-  kept; SQLite, and PostgreSQL under `KANDEV_TEST_POSTGRES_DSN` with
-  `-race`), and Apply and Discard settle once
-  under concurrency and are refused to readers and a coordinator principal.
+  `context_changed` when the base differs, and a manager's context PATCH racing
+  an Apply loses neither write: Apply holds the PATCH's per-coordinator lock
+  from its first read, so the PATCH commits wholly before it (Apply is 409 and
+  the edit is kept) or wholly after (SQLite, and PostgreSQL under
+  `KANDEV_TEST_POSTGRES_DSN` with `-race`); the `AND context = ?` guard is
+  tested at the store level with a mismatched base. Apply and Discard settle
+  once under concurrency and are refused to readers and a coordinator
+  principal; a change is 404 across coordinators and workspaces and while its
+  proposal is not `approved` (a stale-swept `failed` proposal, or one rejected
+  after that, leaves an inert change); with phase 3 off, improvements are
+  hidden and the routes are unregistered (`AC-COORDINATOR-IMPROVEMENTS-001.4`,
+  `003.4`).
 - The `noTurnStartPaths` rows for improvement approve and for Apply, run
   through `TestCoordinatorConversationNoTurnStart`, assert that neither sends
   a prompt or starts an agent; Apply's conversation replacement starts no

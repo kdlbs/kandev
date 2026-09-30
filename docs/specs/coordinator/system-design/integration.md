@@ -251,10 +251,14 @@ agentctl builds its exact-name approval allowlist from the same list
   earlier keeps its list until it is reopened. While phase 3 is effective, a
   call to the tool from such a conversation is refused `not_in_profile` and
   logged as a refusal (`AC-COORDINATOR-INTEGRATION-003.3`). While phase 3 is
-  not effective, the tool is outside the guard's allowed coordinator actions,
-  so a call from any conversation, including one whose list still holds the
-  tool, is the phase 1 unknown-action error of the guard's check 0, stores
-  nothing and writes no row
+  not effective, the guard's check 0 gains a third refusal, "a phase-3-only
+  action while phase 3 is not effective" (`Service.Phase3Enabled()` at request
+  time): the phase 1 unknown-action error, no row, whatever the principal or
+  bound list, else checks 1 to 3 would write a
+  `not_in_profile` row. The allowlist and
+  `coordinatorPrincipalOnlyActions` gain the action. It is no policy propose
+  action (`ProposeActionFor` omits it), so check 3 does not run, and
+  `actionClass` maps it to `ActionImprovement`
   ([permissions](permissions.md#guard), `AC-COORDINATOR-IMPROVEMENTS-001.1`).
   Changing the list mid-conversation is not done, because the binding is the
   conversation's identity.
@@ -317,7 +321,10 @@ failed is a `requires_approval` row. This is the record the
 an act was allowed to proceed.
 
 **Class.** `ActionImprovement Action = "improvement"` is an activity-only
-class. `validActivityClass` accepts it; `AllActions`, `Validate` and the six
+class; every activity row about an improvement uses it (`proposed`, `approved`,
+`failed`, `rejected`, `returned`, guard refusals). The approve, fail and reject
+writers take the class from `kindAction(kind)`, so a rejected improvement is
+not `unknown` and an approved one is not `create_task`. `validActivityClass` accepts it; `AllActions`, `Validate` and the six
 D17 settings do not know it, so it is never a policy setting and never
 raisable. The activity filter's class list and the class label gain it.
 
@@ -402,7 +409,8 @@ claim left `approving` past the window settles `failed` with
 insert (`AC-COORDINATOR-INTEGRATION-006.5`). `knownProposalKind`,
 `KindExecutors` and `kindAction` gain the kind; `recheckPolicy` returns nil
 for it (no D17 setting governs it, and it must not inherit `create_task`'s,
-which `kindAction`'s default would otherwise apply). Null `target_task_id`
+which `kindAction`'s default would otherwise apply). `kindFilter` hides it while phase 3 is off
+([improvements](improvements.md#store)). Null `target_task_id`
 rows do not collide in the open-target index, so the 25-open limit is the only
 bound on open improvements. The automatic path never sees this kind.
 
