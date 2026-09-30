@@ -1,4 +1,5 @@
-import { lazy, Suspense } from "react";
+import { lazy, Suspense, useEffect } from "react";
+import { useAppStore } from "@/components/state-provider";
 import { AuthRouteRedirect, RouteLoading } from "./spa-route-chrome";
 
 const NeedsYouPageClient = lazy(() =>
@@ -19,12 +20,21 @@ export type CoordinatorRouteProps = {
   coordinatorId: string | null;
 };
 
+function useActivateRouteWorkspace(workspaceId: string, enabled: boolean) {
+  const known = useAppStore((state) => state.workspaces.items.some((w) => w.id === workspaceId));
+  const setActiveWorkspace = useAppStore((state) => state.setActiveWorkspace);
+  useEffect(() => {
+    if (enabled && known) setActiveWorkspace(workspaceId);
+  }, [enabled, known, workspaceId, setActiveWorkspace]);
+}
+
 export function CoordinatorRoute({
   enabled,
   view,
   workspaceId,
   coordinatorId,
 }: CoordinatorRouteProps) {
+  useActivateRouteWorkspace(workspaceId, enabled);
   if (!enabled) return <AuthRouteRedirect />;
   const PageClient = view === "queue" ? QueuePageClient : NeedsYouPageClient;
   return (

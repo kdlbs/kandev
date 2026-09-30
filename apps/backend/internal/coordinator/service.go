@@ -390,9 +390,13 @@ func (s *Service) GetProposal(ctx context.Context, workspaceID, coordinatorID, i
 }
 
 // ListProposals returns a coordinator's proposals per status (Build decision
-// 3). Never nil.
+// 3). Never nil. A coordinator that does not exist in the workspace is
+// ErrNotFound.
 func (s *Service) ListProposals(ctx context.Context, workspaceID, coordinatorID string, status ListProposalsStatus) ([]*Proposal, error) {
 	if err := s.authz.AuthorizeWorkspaceScope(ctx, workspaceID, authz.ScopeWorkspaceRead); err != nil {
+		return nil, err
+	}
+	if _, err := s.store.GetCoordinator(ctx, workspaceID, coordinatorID); err != nil {
 		return nil, err
 	}
 	return s.store.ListProposals(ctx, workspaceID, coordinatorID, status, s.phase2)
