@@ -2,8 +2,11 @@ package websocket
 
 import (
 	"context"
+	"errors"
 	"testing"
 
+	"github.com/kandev/kandev/internal/auth/authn"
+	"github.com/kandev/kandev/internal/coordinator"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
 )
@@ -98,5 +101,62 @@ func TestCoordinatorEventBroadcaster_IgnoresMissingWorkspaceID(t *testing.T) {
 	})
 	if err := eventBus.Publish(context.Background(), events.CoordinatorUpdated, evt); err != nil {
 		t.Fatalf("Publish() error: %v", err)
+	}
+}
+
+func newCoordinatorBroadcastHub(t *testing.T, enforced bool) (*Hub, bus.EventBus, context.Context) {
+	t.Helper()
+	hub := newAccessTestHub(t)
+	hub.setAuthPolicy(AuthPolicy{
+		Enforced: func() bool { return enforced },
+		WorkspaceOwner: func(_ context.Context, workspaceID string) (string, error) {
+			if workspaceID == "ws-a" {
+				return "user-a", nil
+			}
+			return "", errors.New("unknown workspace")
+		},
+	})
+	eventBus := bus.NewMemoryEventBus(testLogger())
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	_ = RegisterCoordinatorNotifications(ctx, eventBus, hub, testLogger())
+	return hub, eventBus, ctx
+}
+
+func publishRealCoordinatorUpdated(t *testing.T, eventBus bus.EventBus) {
+	t.Helper()
+	evt := bus.NewEvent(events.CoordinatorUpdated, "test", coordinator.NewCoordinatorUpdatedPayload("ws-a", "co-1", 2))
+	if err := eventBus.Publish(context.Background(), events.CoordinatorUpdated, evt); err != nil {
+		t.Fatalf("Publish() error: %v", err)
+	}
+}
+
+// TestCoordinatorEventBroadcaster_RealPayloadRoutesByWorkspaceUnderAuth
+// publishes the struct every production publisher uses.
+func TestCoordinatorEventBroadcaster_RealPayloadRoutesByWorkspaceUnderAuth(t *testing.T) {
+	hub, eventBus, _ := newCoordinatorBroadcastHub(t, true)
+	owner := registerAccessClient(t, hub, "a", authn.Identity{UserID: "user-a", Role: authn.RoleMember})
+	other := registerAccessClient(t, hub, "b", authn.Identity{UserID: "user-b", Role: authn.RoleMember})
+
+	publishRealCoordinatorUpdated(t, eventBus)
+
+	waitForMessage(t, owner)
+	if got := receivedActions(other); len(got) != 0 {
+		t.Fatalf("foreign user received %v, want none", got)
+	}
+}
+
+func TestCoordinatorEventBroadcaster_RealPayloadDeliveredWithAuthOff(t *testing.T) {
+	hub, eventBus, _ := newCoordinatorBroadcastHub(t, false)
+	owner := registerAccessClient(t, hub, "a", authn.Identity{UserID: "user-a", Role: authn.RoleMember})
+	synthetic := registerAccessClient(t, hub, "s", authn.Identity{UserID: "default-user", Role: authn.RoleAdmin, Synthetic: true})
+	other := registerAccessClient(t, hub, "b", authn.Identity{UserID: "user-b", Role: authn.RoleMember})
+
+	publishRealCoordinatorUpdated(t, eventBus)
+
+	waitForMessage(t, owner)
+	waitForMessage(t, synthetic)
+	if got := receivedActions(other); len(got) != 0 {
+		t.Fatalf("foreign user received %v, want none: payload must be workspace-scoped", got)
 	}
 }

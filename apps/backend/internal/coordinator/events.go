@@ -22,3 +22,6 @@ func NewCoordinatorUpdatedPayload(workspaceID, coordinatorID string, openProposa
 		OpenProposals: openProposals,
 	}
 }
+
+// GetWorkspaceID lets the gateway scope the broadcast to the owning workspace.
+func (p CoordinatorUpdatedPayload) GetWorkspaceID() string { return p.WorkspaceID }
