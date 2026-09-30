@@ -32,7 +32,7 @@ func (f *fakeSender) PromptUnattendedWake(_ context.Context, in orchestrator.Una
 		in.OnReserved(reserve)
 	}
 	if err != nil {
-		return "", err
+		return id, err
 	}
 	if accept != "" && in.OnAccepted != nil {
 		in.OnAccepted(accept)

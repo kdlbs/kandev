@@ -169,8 +169,8 @@ func (a *coordinatorWakeMessages) CompleteOrphanTurn(ctx context.Context, sessio
 // previous process left open.
 func registerCoordinatorDeliveryWorker(_ *gin.Engine, eventBus bus.EventBus, svc *coordinator.Service, log *logger.Logger) func(context.Context, time.Time) {
 	svc.StartDelivery(eventBus)
-	return func(ctx context.Context, _ time.Time) {
-		if err := svc.RecoverUnattendedStartup(ctx); err != nil {
+	return func(ctx context.Context, t0 time.Time) {
+		if err := svc.RecoverUnattendedStartup(ctx, t0); err != nil {
 			log.Warn("coordinator unattended turn startup recovery failed", zap.Error(err))
 		}
 	}

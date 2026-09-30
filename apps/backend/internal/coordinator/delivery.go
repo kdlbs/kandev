@@ -81,6 +81,9 @@ func (s *Service) sendTurn(ctx context.Context, coord *Coordinator, adm Admissio
 		return nil
 	}
 	if err != nil {
+		if messageID != "" {
+			s.writeBinding(ctx, turnID, "message", s.store.setTurnMessage, messageID)
+		}
 		s.logger.Warn("coordinator delivery: send outcome unknown, left to the backstop",
 			zap.String("coordinator_id", coord.ID), zap.String("turn_id", turnID), zap.Error(err))
 		return nil

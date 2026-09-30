@@ -218,7 +218,7 @@ func TestStartupPass_SettlesAnUnboundPreT0RowInterrupted(t *testing.T) {
 	f := newDeliverFixture(t)
 	f.withFinder(&fakeFinder{})
 	f.openTurnRow(t, openTurn{id: "unbound", started: time.Now().UTC().Add(-time.Hour)})
-	if err := f.svc.RecoverUnattendedStartup(context.Background()); err != nil {
+	if err := f.svc.RecoverUnattendedStartup(context.Background(), time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	f.assertSettled(t, "unbound", outcomeInterrupted)
@@ -228,7 +228,7 @@ func TestStartupPass_LeavesABoundRowOpen(t *testing.T) {
 	f := newDeliverFixture(t)
 	f.withFinder(&fakeFinder{})
 	f.openTurnRow(t, openTurn{id: "bound", sessionTurn: "st", started: time.Now().UTC().Add(-time.Hour)})
-	if err := f.svc.RecoverUnattendedStartup(context.Background()); err != nil {
+	if err := f.svc.RecoverUnattendedStartup(context.Background(), time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	f.assertOpen(t, "bound")
@@ -238,7 +238,7 @@ func TestStartupPass_LeavesARowStartedAfterT0Open(t *testing.T) {
 	f := newDeliverFixture(t)
 	f.withFinder(&fakeFinder{})
 	f.openTurnRow(t, openTurn{id: "later", started: time.Now().UTC().Add(time.Hour)})
-	if err := f.svc.RecoverUnattendedStartup(context.Background()); err != nil {
+	if err := f.svc.RecoverUnattendedStartup(context.Background(), time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	f.assertOpen(t, "later")
@@ -250,7 +250,7 @@ func TestStartupPass_ARunningSessionWithAReservedTurnIsLeftForTheBackstop(t *tes
 	f.withFinder(finder)
 	f.reader.states[ceilingSession] = string(taskmodels.TaskSessionStateRunning)
 	f.openTurnRow(t, openTurn{id: "ut", reserved: "rt", started: time.Now().UTC().Add(-time.Hour)})
-	if err := f.svc.RecoverUnattendedStartup(context.Background()); err != nil {
+	if err := f.svc.RecoverUnattendedStartup(context.Background(), time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	f.assertOpen(t, "ut")
@@ -264,7 +264,7 @@ func TestStartupPass_ANotBusySessionCompletesTheOrphanTurnThenSettles(t *testing
 	finder := &fakeFinder{}
 	f.withFinder(finder)
 	f.openTurnRow(t, openTurn{id: "ut", reserved: "rt", started: time.Now().UTC().Add(-time.Hour)})
-	if err := f.svc.RecoverUnattendedStartup(context.Background()); err != nil {
+	if err := f.svc.RecoverUnattendedStartup(context.Background(), time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	f.assertSettled(t, "ut", outcomeInterrupted)
@@ -279,7 +279,7 @@ func TestStartupPass_ANullReservedTurnIsSettledEvenWithARunningSession(t *testin
 	f.withFinder(finder)
 	f.reader.states[ceilingSession] = string(taskmodels.TaskSessionStateRunning)
 	f.openTurnRow(t, openTurn{id: "ut", started: time.Now().UTC().Add(-time.Hour)})
-	if err := f.svc.RecoverUnattendedStartup(context.Background()); err != nil {
+	if err := f.svc.RecoverUnattendedStartup(context.Background(), time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	f.assertSettled(t, "ut", outcomeInterrupted)
@@ -295,7 +295,7 @@ func TestStartupPass_APrunedRowIsNotResurrectedAndPruneRuns(t *testing.T) {
 	mustExec(t, f.store, `INSERT INTO coordinator_unattended_turns
 		(id, coordinator_id, conversation_task_id, session_id, wake_count, start_ceiling_subcents, started_at, outcome, finished_at)
 		VALUES ('ancient', ?, ?, ?, 1, 500, ?, 'completed', ?)`, f.c.ID, ceilingConvTask, ceilingSession, old, old)
-	if err := f.svc.RecoverUnattendedStartup(context.Background()); err != nil {
+	if err := f.svc.RecoverUnattendedStartup(context.Background(), time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	var n int

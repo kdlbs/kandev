@@ -21,7 +21,8 @@ const (
 
 // turnDuties is the backstop's per-coordinator turn duty: send recovery and
 // missed-settle re-derivation for the open turn, the cost recompute for
-// recently settled turns, then the ceiling check. Each duty runs whatever an
+// recently settled turns, the ceiling check, then the retry of recorded
+// unattended permission denials. Each duty runs whatever an
 // earlier one returned; the errors are joined.
 func (s *Service) turnDuties(ctx context.Context, coordinatorID string) error {
 	var errs []error
@@ -39,6 +40,7 @@ func (s *Service) turnDuties(ctx context.Context, coordinatorID string) error {
 		}
 	}
 	errs = append(errs, s.CheckCeiling(ctx, coordinatorID))
+	errs = append(errs, s.ReresolveRecordedDenials(ctx, coordinatorID))
 	return errors.Join(errs...)
 }
 
@@ -126,14 +128,14 @@ func (s *Service) settleMissed(ctx context.Context, turn *unattendedTurn) bool {
 	return active == nil || active.ID != turn.SessionTurnID
 }
 
-// RecoverUnattendedStartup settles the open turns that started before this
-// call, then prunes retained wake state. A bound row is left to turn end and
+// RecoverUnattendedStartup settles the open turns that started before t0, the
+// process start, then prunes retained wake state. A bound row is left to turn end and
 // the backstop. An unbound row whose reserved turn is set and whose session is
 // persisted RUNNING or STARTING is left to the backstop; any other unbound row
 // settles interrupted. Every settle is conditional, so a concurrent delivery,
 // turn end or backstop tick makes it a no-op.
-func (s *Service) RecoverUnattendedStartup(ctx context.Context) error {
-	t0 := s.store.now().UTC()
+func (s *Service) RecoverUnattendedStartup(ctx context.Context, t0 time.Time) error {
+	t0 = t0.UTC()
 	open, err := s.store.openUnattendedTurns(ctx, "")
 	if err != nil {
 		return err

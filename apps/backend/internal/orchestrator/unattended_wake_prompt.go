@@ -27,7 +27,7 @@ type UnattendedWakePrompt struct {
 // PromptUnattendedWake sends one wake message straight to the session, never
 // through the message queue. The message is stored on the reserved turn
 // inside the dispatch boundary; an error returned before that store wraps
-// ErrWakePromptNotDispatched. It returns the stored message's id.
+// ErrWakePromptNotDispatched. It returns the stored message's id, also alongside an error raised after the store.
 func (s *Service) PromptUnattendedWake(ctx context.Context, in UnattendedWakePrompt) (string, error) {
 	if s.messageCreator == nil {
 		return "", fmt.Errorf("%w: message creator is not configured", ErrWakePromptNotDispatched)
@@ -62,7 +62,7 @@ func (s *Service) PromptUnattendedWake(ctx context.Context, in UnattendedWakePro
 		if !stored {
 			return "", fmt.Errorf("%w: %w", ErrWakePromptNotDispatched, err)
 		}
-		return "", err
+		return messageID, err
 	}
 	return messageID, nil
 }

@@ -17,7 +17,7 @@ func noTurnStartWakeBackstop(t *testing.T) {
 	f.wake(t, "t1", "one", time.Now().UTC().Add(-time.Hour))
 	f.openTurnRow(t, openTurn{id: "ut", started: time.Now().UTC().Add(-time.Hour)})
 	f.duties(t)
-	if err := f.svc.RecoverUnattendedStartup(context.Background()); err != nil {
+	if err := f.svc.RecoverUnattendedStartup(context.Background(), time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	if got := f.sender.count(); got != 0 {
