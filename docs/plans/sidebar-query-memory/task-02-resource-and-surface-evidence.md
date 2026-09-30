@@ -188,3 +188,15 @@ samples peaked at 64,299,672 native bytes; five maximum-input cases peaked at
 cases produced 1,825 samples, with maxima 256,519,800 native bytes, 98,784
 retained bytes, and 450,637,824 bytes RSS delta. These meet the 64/256/8/512 MiB
 budgets. Full delivery-head CI and exact browser counts remain pending.
+
+Delivery-head resource evidence before the final fixture correction is also green:
+`a0bf2671f`, run `36707127038`, attempt 1, memory job `109861941457`.
+The 144 preparation samples peaked at 64,299,672 bytes; pooled peak was
+256,176,304 bytes, retained 98,784 bytes, and RSS delta 504,885,248 bytes.
+Timing job `109861941561` reported 18 first/middle/final measurements on AMD
+EPYC 7763 with GOMAXPROCS=4. SQLite warm ranges were 1.177–1.199s (None),
+1.850–1.859s (State), and 1.410–1.438s (Repository); PostgreSQL ranges were
+2.908–2.992s, 4.065–4.118s, and 3.053–3.196s. The one-second target remains
+waived. Final browser counts and merged delivery evidence remain external
+completion gates; a cold-archive phone fixture required its request wait to follow
+the drawer-opening action. No product logic or timeout is changed by that correction.

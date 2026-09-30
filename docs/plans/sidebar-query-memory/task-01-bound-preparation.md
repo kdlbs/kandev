@@ -1,7 +1,7 @@
 ---
 id: "01-bound-preparation"
 title: "Bound SQLite preparation and scratch lifetime"
-status: in_progress
+status: done
 wave: 2
 depends_on: []
 plan: "plan.md"
@@ -153,4 +153,14 @@ below 64 MiB (peak 64,299,672 bytes). The five maximum-input cases peaked at
 15,684,584 bytes; collapse preparation fell to 5,850,472 bytes. The 73 pooled
 cases (100 reads each, concurrency four) peaked at 256,519,800 native bytes,
 98,784 retained bytes, and 450,637,824 bytes RSS delta, meeting every budget.
-Full delivery-head CI and cross-engine regression confirmation remain pending.
+Full backend and cross-engine confirmation is recorded below.
+
+Before the final browser-fixture correction, full backend CI run `36707127038`
+passed at `a0bf2671f` (attempt 1), including both test shards, both PostgreSQL
+versions, Windows, ambient integration, and static checks. Memory job
+`109861941457` independently confirmed all 144 preparation samples (72 each
+at 0/101), five maximum-input cases, and 1,825 pooled samples across 73 cases.
+Preparation peak was 64,299,672 bytes; maximum-input peak was 15,684,584 bytes;
+pooled peak was 256,176,304 bytes, retained 98,784 bytes, and RSS delta
+504,885,248 bytes. Every native budget passed. The remaining correction changes
+only browser test ordering and delivery records; SQL implementation is unchanged.

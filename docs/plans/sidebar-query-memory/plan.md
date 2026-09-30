@@ -241,6 +241,15 @@ same tree as CI merge `d8c602f58`. Its frontend typecheck found a missing page
 response type import introduced by the ownership-helper extraction; the import
 is corrected. Final CI/browser counts and confirmed merge remain pending.
 
+Before the final browser-fixture correction, full backend and frontend workflows
+passed at `a0bf2671f`. Tasks 01 and 03 are complete with their quantitative CI
+results recorded in the work orders. Browser CI found one cold-archive phone
+fixture awaiting a page request before opening its drawer; the wait now follows
+that action while preserving all failure/retry assertions. Tasks 02 and 04 and
+the package remain in progress until final-head browser counts and confirmed merge
+are recorded in the external delivery receipt. No production change or timeout
+increase accompanies this fixture correction.
+
 ## Risks
 
 - Temporary relations introduce cleanup and pool-reuse hazards; failure-path tests are mandatory.

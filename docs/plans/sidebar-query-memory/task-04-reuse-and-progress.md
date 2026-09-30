@@ -180,3 +180,13 @@ list page. The controller regression covers an archived active record and active
 changes; desktop/phone ownership assertions remain unchanged. The current-main
 Changes timeline fixture now supplies a ResizeObserver entry when asserting a new
 measurement, matching the deferred initial geometry contract. CI verification is pending.
+
+Before the final fixture correction, frontend CI confirmed 2,428 test files passed
+(20,887 tests passed, four skipped), and full backend CI was green. Browser CI
+then exposed a stale causal order in the cold-archive phone recovery test: it awaited
+the sidebar request before opening the drawer. The hidden desktop/command consumers
+now correctly own no server page, so the request begins when the phone drawer mounts.
+The fixture now arms its response wait before tapping the opener and awaits it after
+the drawer is visible. The 503 alert, empty-state exclusion, 44px Retry target, and
+successful archived-row recovery assertions remain intact. Final exact-head E2E
+counts and merge confirmation remain pending in the external delivery record.

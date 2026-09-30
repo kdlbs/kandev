@@ -1,7 +1,7 @@
 ---
 id: "03-shared-overviews"
 title: "Normalize shared task overviews and coverage"
-status: in_progress
+status: done
 wave: 2
 depends_on: ["01-bound-preparation"]
 plan: "plan.md"
@@ -142,4 +142,11 @@ The implementation routes all board writes through `withTaskOverviewNormalizatio
 
 Coverage propagates through backend snapshot DTOs, homepage/task boot mapping, HTTP types, store hydration, and both workflow fetch paths. Workflow scope inventory includes hidden and unassigned active membership while excluding archived, ephemeral, automation-run, and config-mode records. Reconnect gaps invalidate both snapshot coverage and scope inventory; reads begun during the gap cannot survive reconnection. Workflow metadata refreshes with transport recovery.
 
-Regression suites cover canonical identity, explicit clears, independent nanosecond task/summary freshness, optimistic rollback and atomic placement, live membership changes, scope isolation, access denial, bounded journals, and owner eviction. Additional mobile helper, workflow metadata, and SQLite/PostgreSQL scope cases are included. Tests execute only in CI at the user's request; final CI results remain required before completion.
+Regression suites cover canonical identity, explicit clears, independent nanosecond task/summary freshness, optimistic rollback and atomic placement, live membership changes, scope isolation, access denial, bounded journals, and owner eviction. Additional mobile helper, workflow metadata, and SQLite/PostgreSQL scope cases are included. Tests execute only in CI at the user's request; the confirmed results are recorded below.
+
+Before the final browser-fixture correction, frontend CI run `36707126982`
+passed at `a0bf2671f` (attempt 1): all 2,428 test files passed, with 20,887 tests
+passed and four skipped out of 20,891 discovered, followed by a successful build.
+The backend snapshot/scope regressions also passed in run `36707127038`, including
+both PostgreSQL variants. The final fixture correction does not change normalization
+or any overview producer. No product tests, typechecks, or benchmarks ran locally.
