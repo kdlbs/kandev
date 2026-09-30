@@ -137,6 +137,10 @@ export type MockReview = {
 };
 
 export type MockCheckRun = {
+  id?: number;
+  app_id?: number;
+  app_slug?: string;
+  check_suite_id?: number;
   name: string;
   source?: string;
   status: string;
@@ -2010,6 +2014,18 @@ export class ApiClient {
     merge_queue_last_removal_reason?: string;
     merge_queue_last_removal_before_sha?: string;
     checks?: Array<{
+      id?: number;
+      app_id?: number;
+      app_slug?: string;
+      check_suite_id?: number;
+      workflow_id?: number;
+      workflow_name?: string;
+      workflow_run_id?: number;
+      workflow_event?: string;
+      head_repo_id?: number;
+      head_repo_owner?: string;
+      head_repo_name?: string;
+      head_branch?: string;
       name: string;
       source?: string;
       status?: string;
@@ -2350,6 +2366,7 @@ export class ApiClient {
     }>;
     workflow_runs?: Array<{
       id: number;
+      check_suite_id?: number;
       run_attempt?: number;
       workflow_id?: number;
       name: string;
