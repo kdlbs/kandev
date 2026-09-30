@@ -13,7 +13,32 @@ Playwright-based end-to-end tests. Each Playwright worker spawns its own real Go
 | `playwright.config.ts` | Project definitions, timeouts, sharding config.                                                                                              |
 | `global-setup.ts`      | Pre-flight checks for required backend artifacts, the Vite web build, and backend artifact freshness.                                        |
 
-## Prerequisites
+## Quick start for a fresh checkout
+
+Install the toolchain described in the [contributor setup guide](../../../docs/public/contributing.md#set-up-the-repository).
+Run these commands from the repository root:
+
+```sh
+pnpm --dir apps install --frozen-lockfile
+pnpm --dir apps/web exec playwright install chromium
+pnpm --dir apps/web e2e:run --host --shards 1 --project chromium tests/task/task-create-workflow-step-previews.spec.ts
+pnpm --dir apps/web e2e:run --host --shards 1 --project mobile-chrome tests/task/mobile-task-create-workflow-step-previews.spec.ts
+```
+
+Run the two test commands sequentially. The managed runner builds the backend,
+Vite assets, and fixture plugin, then starts and cleans up isolated test instances.
+`--host` uses the local toolchain; these two projects do not need Docker or
+provider API keys. The mobile project uses Chromium with Pixel-5 emulation,
+so the same browser installation serves both commands.
+
+Select the project before the spec path. The default `chromium` project excludes
+`mobile-*.spec.ts`, auth, routing, and container suites. If a file reports
+`No tests found`, check its owning project before changing the file or filters.
+Pass runner options such as `--project` before any `--` separator; options after
+the separator are forwarded to Playwright and do not select the managed runner's
+project. See [Playwright projects](#playwright-projects) for the other suites.
+
+## Prerequisites for raw runs
 
 E2E runs the **prebuilt** backend, not a live rebuild — `fixtures/backend.ts` spawns
 `apps/backend/bin/kandev`, and `pnpm run build:e2e` only rebuilds the Vite bundle.
@@ -22,7 +47,7 @@ build in this order:
 
 ```sh
 make -C apps/backend build
-cd apps/web && pnpm run build:e2e
+pnpm --dir apps/web run build:e2e
 make -C apps/backend e2e-plugin-ui
 make -C apps/backend e2e-plugin-package
 ```
