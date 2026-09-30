@@ -106,6 +106,7 @@ function RecoveryCardHeader({
   failure: string;
 }) {
   const { t } = useTranslation();
+  const { summary, suppressSummary } = recoveryHeaderCopy(copy, actions, failure);
   return (
     <div className="flex min-w-0 gap-3 border-b border-amber-500/20 bg-amber-500/5 p-3 dark:bg-amber-500/10 md:p-4">
       <IconAlertTriangle
@@ -113,15 +114,23 @@ function RecoveryCardHeader({
         aria-hidden="true"
       />
       <div className="min-w-0 flex-1">
-        <h3 className="text-sm font-medium">{copy.title}</h3>
-        <p
-          data-failed={Boolean(actions.recoveryError)}
-          data-testid={actions.recoveryError ? "session-recovery-error" : undefined}
-          role={actions.recoveryError || actions.recoveryNotice ? "status" : undefined}
-          className="mt-1 wrap-anywhere text-sm text-muted-foreground data-[failed=true]:text-destructive"
+        <h3
+          className="text-sm font-medium"
+          aria-live={suppressSummary ? "polite" : undefined}
+          aria-atomic={suppressSummary ? "true" : undefined}
         >
-          {actions.recoveryError ? failure : (actions.recoveryNotice ?? copy.summary)}
-        </p>
+          {copy.title}
+        </h3>
+        {!suppressSummary && (
+          <p
+            data-failed={Boolean(actions.recoveryError)}
+            data-testid={actions.recoveryError ? "session-recovery-error" : undefined}
+            role={actions.recoveryError || actions.recoveryNotice ? "status" : undefined}
+            className="mt-1 wrap-anywhere text-sm text-muted-foreground data-[failed=true]:text-destructive"
+          >
+            {summary}
+          </p>
+        )}
         {model.kind === "provider_quota_limited" && model.metadata?.model_id && (
           <p className="mt-1 text-xs text-muted-foreground">
             {t("chat:providerQuotaModel", { model: model.metadata.model_id })}
@@ -135,6 +144,20 @@ function RecoveryCardHeader({
       </div>
     </div>
   );
+}
+
+function recoveryHeaderCopy(
+  copy: ReturnType<typeof useRecoveryPresentation>["copy"],
+  actions: SessionRecoveryActions,
+  failure: string,
+) {
+  const hasDistinctGuidance = Boolean(
+    actions.recoveryError || actions.branchDetails || actions.guardDetails,
+  );
+  return {
+    summary: hasDistinctGuidance ? failure : (actions.recoveryNotice ?? copy.summary),
+    suppressSummary: !copy.showSummary && !hasDistinctGuidance,
+  };
 }
 
 function AdditionalActions({ model, taskId }: { model: ActiveSessionRecovery; taskId?: string }) {

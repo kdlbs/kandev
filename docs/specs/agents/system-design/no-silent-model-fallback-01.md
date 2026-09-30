@@ -10,6 +10,8 @@ owners:
 ---
 # No Silent Model Fallback: Policy and Persistence
 
+The [Auggie task recovery amendment](explicit-resume-settings.md) overrides compatible selection only for its scoped task start/resume paths. Profile persistence and other consumers retain this design.
+
 ## Scope and mapping
 
 This design amends the strict-by-default implementation in PR #3473. The agents

@@ -568,6 +568,13 @@ func (s *Service) handleAgentBootReady(ctx context.Context, data watcher.AgentEv
 		return
 	}
 	s.clearDynamicStartupStreakForBootReady(ctx, data, session)
+	if err := s.persistProviderRestoredResumeNotice(ctx, session, data); err != nil {
+		s.logger.Warn("failed to create provider-restored resume notice",
+			zap.String("task_id", data.TaskID),
+			zap.String("session_id", data.SessionID),
+			zap.String("attempt_id", data.AttemptID),
+			zap.Error(err))
+	}
 	markerSnapshot, markerSnapshotKnown := s.interruptedMarkerSnapshotForResumeAttempt(data.SessionID, data.AttemptID)
 	// Every boot-ready callback is a recovery callback for marker purposes. A
 	// missing/finished attempt, empty attempt ID, or failed task snapshot leaves
@@ -625,6 +632,64 @@ func (s *Service) handleAgentBootReady(ctx context.Context, data watcher.AgentEv
 	lock.Unlock()
 	guardLocked = false
 	s.drainQueuedMessageForPromptableSession(ctx, data.SessionID)
+}
+
+func (s *Service) persistProviderRestoredResumeNotice(
+	ctx context.Context,
+	session *models.TaskSession,
+	data watcher.AgentEventData,
+) error {
+	if session == nil || session.ID != data.SessionID || session.TaskID != data.TaskID || data.AttemptID == "" ||
+		data.SessionSettingsPolicy != streams.SessionSettingsPolicyProviderRestored ||
+		!s.resumeAttemptOwnsNotice(data.SessionID, data.AgentExecutionID, data.AttemptID) {
+		return nil
+	}
+	if s.messageCreator == nil {
+		return fmt.Errorf("provider-restored resume message creator is unavailable")
+	}
+
+	metadata := map[string]interface{}{
+		"variant":                   "resume_settings_provider_restored",
+		"settings_policy":           string(streams.SessionSettingsPolicyProviderRestored),
+		"attempt_id":                data.AttemptID,
+		"skipped_settings":          []string{"mode", "model"},
+		"skipped_selection_sources": []string{"agent_profile", "runtime_config", "workflow_overrides", "provider_config_options"},
+		"effective_model_known":     false,
+		"effective_mode_known":      false,
+	}
+	if snapshot, ok := lifecycle.LoadSessionModelsSnapshot(session.Metadata[models.SessionMetaKeyACPModelState]); ok && snapshot.SettingsAttemptID == data.AttemptID {
+		if modelID := boundedProviderSelectorID(snapshot.CurrentModelID); modelID != "" {
+			metadata["effective_model_known"] = true
+			metadata["effective_model_id"] = modelID
+		}
+		if modeID := boundedProviderSelectorID(snapshot.CurrentModeID); modeID != "" {
+			metadata["effective_mode_known"] = true
+			metadata["effective_mode_id"] = modeID
+		}
+	}
+
+	messageID := uuid.NewSHA1(
+		uuid.NameSpaceOID,
+		[]byte("resume-settings-provider-restored:"+data.SessionID+":"+data.AttemptID),
+	).String()
+	return s.messageCreator.CreateSessionMessageIdempotent(
+		ctx,
+		messageID,
+		data.TaskID,
+		"Session resumed with the provider's current settings. Saved mode and model selections were kept for future launches.",
+		data.SessionID,
+		string(v1.MessageTypeStatus),
+		s.getActiveTurnID(data.SessionID),
+		metadata,
+		false,
+	)
+}
+
+func boundedProviderSelectorID(value string) string {
+	if value == "" || len(value) > 256 || strings.TrimSpace(value) != value || strings.ContainsAny(value, "\r\n\t") {
+		return ""
+	}
+	return value
 }
 
 func (s *Service) drainQueuedBeforeWorkflowTransition(

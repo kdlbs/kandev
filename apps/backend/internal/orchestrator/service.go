@@ -15,6 +15,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"hash/fnv"
 	"io"
 	"strings"
 	"sync"
@@ -693,6 +694,8 @@ type Service struct {
 	repo          sessionExecutorStore
 	promptTargets taskPullRequestTargetStore
 	agentManager  executor.AgentManagerClient
+	// ACP mode and model reports mutate one selector snapshot per session.
+	sessionSettingsSnapshotLocks [64]sync.Mutex
 
 	// Components
 	queue     *queue.TaskQueue
@@ -3087,6 +3090,12 @@ func (s *Service) acquireSessionLifecycleLock(sessionID string) func() {
 	lock := value.(*sync.Mutex)
 	lock.Lock()
 	return lock.Unlock
+}
+
+func (s *Service) sessionSettingsSnapshotLock(sessionID string) *sync.Mutex {
+	hash := fnv.New32a()
+	_, _ = hash.Write([]byte(sessionID))
+	return &s.sessionSettingsSnapshotLocks[hash.Sum32()%uint32(len(s.sessionSettingsSnapshotLocks))]
 }
 
 func (s *Service) tryAcquireSessionLifecycleLock(sessionID string) (func(), bool) {

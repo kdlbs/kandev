@@ -392,6 +392,7 @@ type WorkflowSectionProps = {
     [key: string]: unknown;
   }>;
   snapshots: Record<string, WorkflowSnapshotData>;
+  previewWorkspaceId?: string | null;
   effectiveWorkflowId: string | null;
   onWorkflowChange: (value: string) => void;
   agentProfiles: AgentProfileOption[];
@@ -410,6 +411,7 @@ function renderWorkflowSection({
   isTaskStarted,
   workflows: allWorkflows,
   snapshots,
+  previewWorkspaceId,
   effectiveWorkflowId,
   onWorkflowChange,
   agentProfiles,
@@ -428,6 +430,7 @@ function renderWorkflowSection({
       <WorkflowSelectorRow
         workflows={workflows}
         snapshots={snapshots}
+        previewWorkspaceId={previewWorkspaceId}
         selectedWorkflowId={effectiveWorkflowId ?? null}
         onWorkflowChange={onWorkflowChange}
         agentProfiles={agentProfiles}

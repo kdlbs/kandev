@@ -358,6 +358,16 @@ func (m *Manager) Start(ctx context.Context) error {
 				startup.Advance(ctx, startup.StepSessionsRecovery, 1)
 				continue
 			}
+			if err := m.restoreRecoveredSessionSettingsSource(recoveryCtx, execution); err != nil {
+				m.logger.Error("refusing to re-track recovered execution: settings source could not be reserved",
+					zap.String("instance_id", execution.ID),
+					zap.String("session_id", execution.SessionID),
+					zap.Error(err))
+				setCandidateOutcome(ri.SessionID, "settings_source")
+				m.dispatchUnreconstructableStop(&stopWG, ri)
+				startup.Advance(ctx, startup.StepSessionsRecovery, 1)
+				continue
+			}
 			// Create trace span for the recovered session
 			_, recoverySpan := tracing.TraceSessionRecovered(
 				context.Background(), execution.TaskID, execution.SessionID, execution.ID,

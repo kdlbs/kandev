@@ -302,6 +302,8 @@ type Handlers struct {
 	messageQueue           MessageQueuer
 	promptResolver         PromptReferenceResolver
 	promptReader           PromptReader
+	promptWriter           PromptWriter
+	promptAuthEnabled      func() bool
 	userSettingsProvider   UserSettingsProvider
 	agentProfileVerifier   AgentProfileVerifier
 	settingsRegistry       *settingscatalog.Registry
@@ -624,6 +626,10 @@ func (h *Handlers) registerConfigModeHandlers(d *guardedMCPDispatcher) {
 	}
 	if h.promptReader != nil {
 		h.registerPromptHandlers(d)
+	}
+	if h.promptWriter != nil {
+		d.RegisterFunc(ws.ActionMCPCreateSharedPrompt, h.handleCreateSharedPrompt)
+		d.RegisterFunc(ws.ActionMCPUpdateSharedPrompt, h.handleUpdateSharedPrompt)
 	}
 	if h.workflowSvc != nil {
 		h.registerWorkflowHandlers(d)

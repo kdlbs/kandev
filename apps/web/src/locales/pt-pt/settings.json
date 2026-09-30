@@ -881,5 +881,7 @@
   "queueMaximumShort": "Limita as mensagens pendentes por sessão. Usa 0 para não limitar.",
   "queueMergeShort": "Combina mensagens relacionadas na fila antes de o agente as ler.",
   "queueAutoMergeShort": "Combina automaticamente mensagens consecutivas compatíveis.",
-  "sleepShort": "Impede que o computador onde o Kandev está a correr entre em suspensão durante as tarefas."
+  "sleepShort": "Impede que o computador onde o Kandev está a correr entre em suspensão durante as tarefas.",
+  "promptAllowAgentEdits": "Permitir edições por agentes",
+  "promptAgentEditsDescription": "Os agentes podem alterar este prompt em todos os locais onde é utilizado."
 }

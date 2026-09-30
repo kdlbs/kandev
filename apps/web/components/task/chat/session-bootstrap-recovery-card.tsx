@@ -33,6 +33,7 @@ type BootstrapRecoveryViewProps = {
   recovery: ReturnType<typeof useSessionRecoveryActions>;
   model: ReturnType<typeof buildRecoveryCardModel>;
   profileExists: boolean;
+  providerRestoredResumeEligible: boolean;
   effectiveBusyAction: ReturnType<typeof useSessionRecoveryActions>["busyAction"];
   needsManagedCloneRelocation: boolean;
   showDialog: boolean;
@@ -86,9 +87,14 @@ function BootstrapRecoveryControls({
     recoveryNotice,
     translate: t,
   });
-  if (guardDetails && recoveryError)
+  if (guardDetails && recoveryError) {
     model.summary = sanitizeSessionErrorDetails(recoveryError.message, 240) || model.summary;
-  if (branchDetails) model.summary = t("task:branchIsNoLongerAvailable");
+    model.showSummary = true;
+  }
+  if (branchDetails) {
+    model.summary = t("task:branchIsNoLongerAvailable");
+    model.showSummary = true;
+  }
   const copy = {
     launchNeedsAttention: t("task:launchNeedsAttention"),
     launchErrorNoChanges: t("task:launchErrorNoChanges"),
@@ -114,6 +120,7 @@ function BootstrapRecoveryControls({
       recovery={recovery}
       model={model}
       profileExists={profileExists}
+      providerRestoredResumeEligible={recovery.providerRestoredResumeEligible}
       effectiveBusyAction={effectiveBusyAction}
       needsManagedCloneRelocation={needsManagedCloneRelocation}
       showDialog={showDialog}
@@ -133,6 +140,7 @@ function BootstrapRecoveryView({
   recovery,
   model,
   profileExists,
+  providerRestoredResumeEligible,
   effectiveBusyAction,
   needsManagedCloneRelocation,
   showDialog,
@@ -169,6 +177,7 @@ function BootstrapRecoveryView({
         model={model}
         error={error}
         profileExists={profileExists}
+        providerRestoredResumeEligible={providerRestoredResumeEligible}
         busyAction={effectiveBusyAction}
         hasBranchRecovery={branchDetails !== null}
         blocked={Boolean(guardDetails && !guardDetails.retryable)}

@@ -26,11 +26,12 @@ type upgradeManifest struct {
 }
 
 type upgradeFixture struct {
-	Engine    testconformance.EngineName `json:"engine"`
-	File      string                     `json:"file"`
-	SHA256    string                     `json:"sha256"`
-	Sentinels map[string]string          `json:"sentinels"`
-	OwnerRows []ownerRowSentinel         `json:"owner_rows"`
+	Engine               testconformance.EngineName `json:"engine"`
+	File                 string                     `json:"file"`
+	SHA256               string                     `json:"sha256"`
+	Sentinels            map[string]string          `json:"sentinels"`
+	OwnerRows            []ownerRowSentinel         `json:"owner_rows"`
+	PostUpgradeOwnerRows []ownerRowSentinel         `json:"post_upgrade_owner_rows"`
 }
 
 type ownerRowSentinel struct {
@@ -170,6 +171,7 @@ func TestPreviousStableUpgrade(t *testing.T) {
 			if err := runCurrentInitialization(database); err != nil {
 				t.Fatalf("current initialization: %v", err)
 			}
+			fixture.OwnerRows = append(fixture.OwnerRows, fixture.PostUpgradeOwnerRows...)
 			if err := checkSentinels(database, fixture); err != nil {
 				t.Fatalf("sentinels after initialization: %v", err)
 			}

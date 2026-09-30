@@ -138,3 +138,11 @@ Existing tests and rendered geometry checks provide evidence for this presentati
 ## Implementation plan
 
 - [Plan and work orders](../../../plans/commit-file-navigation/plan.md)
+
+## Bounded inline rendering extension
+
+The [bounded Changes design](bounded-changes-rendering.md) moves inline
+expansion and detail metadata above virtual row lifetime. It replaces hidden
+inline descendants with virtual rows and bounds inactive metadata reuse.
+Existing source restrictions, explicit Open commit behavior, and mounted-row
+cached reopen remain applicable. Standalone commit detail composition is unchanged.

@@ -84,6 +84,23 @@ func (e *Executor) coordinatorMatchesAbsentTask(ctx context.Context, taskID stri
 	return ok, nil
 }
 
+func (e *Executor) resolveTaskLaunchScope(ctx context.Context, taskID string) (lifecycle.TaskLaunchScope, error) {
+	if taskID == "" {
+		return lifecycle.TaskLaunchScopeUnknown, nil
+	}
+	task, err := e.repo.GetTask(ctx, taskID)
+	if err != nil {
+		return lifecycle.TaskLaunchScopeUnknown, fmt.Errorf("load task launch scope: %w", err)
+	}
+	if task == nil {
+		return lifecycle.TaskLaunchScopeUnknown, nil
+	}
+	if task.IsFromOffice {
+		return lifecycle.TaskLaunchScopeOffice, nil
+	}
+	return lifecycle.TaskLaunchScopeTask, nil
+}
+
 // resolveTaskSessionMCPMode derives restricted MCP access from canonical task
 // ownership and session purpose
 // (docs/specs/coordinator/system-design/copilot.md#principal-and-mode). The
@@ -1870,6 +1887,10 @@ func (e *Executor) LaunchPreparedSession(ctx context.Context, task *v1.Task, ses
 		return nil, fmt.Errorf("%w: existing task environment is not attachable", models.ErrWorkspaceReuseUnsafe)
 	}
 	req, execCfg, err := e.buildLaunchAgentRequest(ctx, task, session, agentProfileID, executorID, prompt, primaryRepo, allRepos, workspaceReuseRequired, existingEnv)
+	if err != nil {
+		return nil, err
+	}
+	req.TaskScope, err = e.resolveTaskLaunchScope(ctx, task.ID)
 	if err != nil {
 		return nil, err
 	}

@@ -117,7 +117,7 @@ The same settings page configures the **Configuration Chat Agent** for each work
 
 Open Configuration Chat from the floating chat button on Settings pages, turn on **Configuration chat** while creating a Quick Chat, or run **Configuration Chat** from the `Cmd/Ctrl+K` command menu. A workspace currently has one configuration conversation. The Settings panel shows that conversation without tabs; **Open in Quick Chat** moves the same setup or session into the larger tabbed dialog without copying it.
 
-Configuration Chat uses a repository-less ephemeral task. Its configuration-mode MCP can inspect and change workflows, agent profiles, and MCP configuration, and can list and read saved prompts by exact name. The selected profile's model, credentials, permissions, and external MCP settings apply. Review requested configuration mutations before approving them.
+Configuration Chat uses a repository-less ephemeral task. Its configuration-mode MCP can inspect and change workflows, agent profiles, and MCP configuration, and can read, create, and update saved prompts by exact name, subject to their agent-edit permission. The selected profile's model, credentials, permissions, and external MCP settings apply. Review requested configuration mutations before approving them.
 
 Closing the floating Settings panel preserves the conversation. To delete it, open it in Quick Chat, close its tab, and confirm deletion. Configuration tasks are excluded from the seven-day Quick Chat sweeper and remain available until explicitly deleted or their workspace is deleted.
 
@@ -132,6 +132,14 @@ Open **Settings > Prompts** (`/settings/prompts`) to add, edit, or delete reusab
 
 Shared prompt reads and reference use are available to org members. Creating,
 editing, or deleting prompts requires `org.config.manage` permission.
+
+To let the configuration assistant update an existing custom prompt, edit it,
+enable **Allow agent edits**, and choose **Save changes**. The control works on
+desktop and phone. Existing and Settings-created prompts default to human-only;
+MCP-created prompts allow later agent edits until you disable the permission.
+Built-in prompts always reject agent writes, while remaining editable by an
+operator. Changes affect every future reference to that prompt. See the
+[MCP write contract](automation-and-mcp.md#create-or-update-a-saved-prompt).
 
 Type `@` in the task chat composer and select a prompt. The visible message keeps the `@name`; Kandev expands the prompt content into hidden system context for the agent. References are recognized only at the start of the text or after whitespace and must match the stored name. Prompt content can reference other saved prompts. Expansion stops at a depth of eight, skips cycles, and includes each prompt only once.
 

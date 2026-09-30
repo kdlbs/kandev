@@ -854,6 +854,7 @@ func (m *Manager) handlePromptHandoffEvent(
 func (m *Manager) handleAgentEvent(execution *AgentExecution, event agentctl.AgentEvent) {
 	startupGeneration := execution.startupAttemptSnapshot()
 	execution.withStartupAttempt(startupGeneration, func(attemptID string) {
+		event.SessionSettingsSourceGeneration = startupGeneration
 		m.handleAgentEventWithAttempt(execution, event, attemptID)
 	})
 }
@@ -863,6 +864,9 @@ func (m *Manager) handleAgentEventWithAttempt(
 	event agentctl.AgentEvent,
 	attemptID string,
 ) {
+	if event.SessionSettingsSourceGeneration == 0 {
+		event.SessionSettingsSourceGeneration = execution.startupAttemptSnapshot()
+	}
 	m.handleAgentEventAtContextResetBoundary(execution, event, true, attemptID)
 }
 
@@ -873,6 +877,9 @@ func (m *Manager) handleAgentEventWithAttempt(
 func (m *Manager) handleAgentEventAfterContextReset(execution *AgentExecution, event agentctl.AgentEvent) {
 	startupGeneration := execution.startupAttemptSnapshot()
 	execution.withStartupAttempt(startupGeneration, func(attemptID string) {
+		if event.SessionSettingsSourceGeneration == 0 {
+			event.SessionSettingsSourceGeneration = startupGeneration
+		}
 		m.handleAgentEventAtContextResetBoundary(execution, event, false, attemptID)
 	})
 }
@@ -883,6 +890,9 @@ func (m *Manager) handleAgentEventAtContextResetBoundary(
 	enforceResetBoundary bool,
 	attemptID string,
 ) {
+	if event.SessionSettingsSourceGeneration == 0 {
+		event.SessionSettingsSourceGeneration = execution.startupAttemptSnapshot()
+	}
 	m.handleAgentEventAtContextResetBoundaryInternal(execution, event, enforceResetBoundary, attemptID, false)
 }
 
@@ -892,6 +902,9 @@ func (m *Manager) handleAgentEventAtContextResetBoundaryWithIdleSuspensionReplay
 	enforceResetBoundary bool,
 	attemptID string,
 ) {
+	if event.SessionSettingsSourceGeneration == 0 {
+		event.SessionSettingsSourceGeneration = execution.startupAttemptSnapshot()
+	}
 	m.handleAgentEventAtContextResetBoundaryInternal(execution, event, enforceResetBoundary, attemptID, true)
 }
 
@@ -1104,6 +1117,7 @@ func (m *Manager) handleAgentEventWithStartupGeneration(
 ) {
 	accepted := execution.withStartupAttempt(startupGeneration, func(attemptID string) {
 		event.AttemptID = attemptID
+		event.SessionSettingsSourceGeneration = startupGeneration
 		if !execution.isSessionInitialized() && event.PromptGeneration == 0 && event.Type == toolStatusComplete {
 			m.logger.Debug("ignoring startup completion before ACP initialization",
 				zap.String("execution_id", execution.ID),

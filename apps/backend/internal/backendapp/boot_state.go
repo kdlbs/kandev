@@ -6,6 +6,7 @@ import (
 
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	agentsettingsdto "github.com/kandev/kandev/internal/agent/settings/dto"
+	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/auth"
 	"github.com/kandev/kandev/internal/auth/authn"
 	taskdto "github.com/kandev/kandev/internal/task/dto"
@@ -1116,6 +1117,7 @@ func (b bootStateBuilder) addTaskDetailSessionsState(
 	worktrees := make(map[string]any)
 	worktreesBySession := make(map[string]any)
 	sessionModelsByID := make(map[string]any)
+	sessionModeByID := make(map[string]any)
 	sessionMCPStatusByID := make(map[string]any)
 	pendingActionsBySession, err := b.bootPendingActionsForInputCapableSessions(
 		ctx,
@@ -1161,6 +1163,9 @@ func (b bootStateBuilder) addTaskDetailSessionsState(
 			sessionModelsByID[session.ID] = taskSessionModelsBootState(
 				snapshot, sessionACPConfigBaseline(session),
 			)
+			if snapshot.SettingsPolicy == streams.SessionSettingsPolicyProviderRestored {
+				sessionModeByID[session.ID] = taskSessionModeBootState(snapshot)
+			}
 		}
 		if history, ok := lifecycle.LoadMCPAttachmentHistory(
 			session.Metadata[taskmodels.SessionMetaKeyMCPAttachmentState],
@@ -1180,6 +1185,9 @@ func (b bootStateBuilder) addTaskDetailSessionsState(
 	state["sessionWorktreesBySessionId"] = map[string]any{"itemsBySessionId": worktreesBySession}
 	if len(sessionModelsByID) > 0 {
 		state["sessionModels"] = map[string]any{"bySessionId": sessionModelsByID}
+	}
+	if len(sessionModeByID) > 0 {
+		state["sessionMode"] = map[string]any{"bySessionId": sessionModeByID}
 	}
 	if len(sessionMCPStatusByID) > 0 {
 		state["sessionMcpStatus"] = map[string]any{"bySessionId": sessionMCPStatusByID}
@@ -1244,10 +1252,21 @@ func taskSessionModelsBootState(
 	if snapshot.ConfigOptionsSettled {
 		state["configOptionsSettled"] = true
 	}
+	if snapshot.SettingsPolicy == streams.SessionSettingsPolicyProviderRestored {
+		state["settingsPolicy"] = string(snapshot.SettingsPolicy)
+	}
 	if len(baseline) > 0 {
 		state["configBaseline"] = baseline
 	}
 	return state
+}
+
+func taskSessionModeBootState(snapshot lifecycle.SessionModelsSnapshot) map[string]any {
+	return map[string]any{
+		"currentModeId":  snapshot.CurrentModeID,
+		"availableModes": []any{},
+		"settingsPolicy": string(snapshot.SettingsPolicy),
+	}
 }
 
 func activeTurnBySessionState(sessionID string) map[string]any {

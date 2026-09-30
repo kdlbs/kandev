@@ -10,6 +10,8 @@ requirements:
 
 # Agent resume and runtime recovery system design
 
+[Explicit Auggie recovery settings](explicit-resume-settings.md) adds an optional attempt policy to Resume recovery; the identity and state-ownership guarantees below still apply.
+
 ## Purpose and boundaries
 
 This design preserves a provider conversation when session launch fails. It

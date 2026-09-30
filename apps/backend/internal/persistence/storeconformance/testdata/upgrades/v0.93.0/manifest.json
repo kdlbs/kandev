@@ -9,6 +9,9 @@
       "sentinels": {
         "fixture.sentinel": "v0.93.0-sqlite-sentinel"
       },
+      "post_upgrade_owner_rows": [
+        {"owner": "prompts", "table": "custom_prompts", "key_column": "id", "key_value": "fixture-v0930-prompt", "values": {"allow_agent_edits": "0"}}
+      ],
       "owner_rows": [
         {"owner": "schema-meta", "table": "kandev_meta", "key_column": "key", "key_value": "fixture.sentinel", "values": {"value": "v0.93.0-sqlite-sentinel"}},
         {"owner": "task", "table": "workspaces", "key_column": "id", "key_value": "fixture-v0930-task-workspace", "values": {"description": "preserved task workspace", "name": "Fixture Task Workspace"}},
@@ -41,6 +44,9 @@
       "sentinels": {
         "fixture.sentinel": "v0.93.0-postgres-sentinel"
       },
+      "post_upgrade_owner_rows": [
+        {"owner": "prompts", "table": "custom_prompts", "key_column": "id", "key_value": "fixture-v0930-prompt", "values": {"allow_agent_edits": "0"}}
+      ],
       "owner_rows": [
         {"owner": "schema-meta", "table": "kandev_meta", "key_column": "key", "key_value": "fixture.sentinel", "values": {"value": "v0.93.0-postgres-sentinel"}},
         {"owner": "task", "table": "workspaces", "key_column": "id", "key_value": "fixture-v0930-task-workspace", "values": {"description": "preserved task workspace", "name": "Fixture Task Workspace"}},
