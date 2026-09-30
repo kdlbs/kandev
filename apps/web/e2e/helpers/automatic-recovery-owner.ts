@@ -9,6 +9,7 @@ export function automaticRecoveryOwnerScenario() {
     testPage,
     apiClient,
     seedData,
+    prCapture,
   }, testInfo) => {
     const task = await apiClient.createTaskWithAgent(
       seedData.workspaceId,
@@ -65,6 +66,9 @@ export function automaticRecoveryOwnerScenario() {
       path: testInfo.outputPath("automatic-recovery-owner.png"),
       fullPage: true,
     });
+    await prCapture.screenshot("automatic-recovery-owner", {
+      caption: "One recovery card retains both automatic failure causes.",
+    });
     const resume = card.getByTestId("recovery-resume-button");
     if (testInfo.project.name === "mobile-chrome") await resume.tap();
     else await resume.click();
@@ -94,7 +98,7 @@ async function revealRecoveryFromFiles(page: Page, mobile: boolean) {
   await expect(page.getByTestId("session-recovery-card")).toBeFocused();
 }
 
-async function failAutomaticRecovery(page: Page, taskId: string, sessionId: string) {
+export async function failAutomaticRecovery(page: Page, taskId: string, sessionId: string) {
   const attempts = { resume: 0, restore: 0, status: 0, manual: 0, finishManual: () => {} };
   await page.routeWebSocket(/\/ws$/, (socket) => {
     const server = socket.connectToServer();

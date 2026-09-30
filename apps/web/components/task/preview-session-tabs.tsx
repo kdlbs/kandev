@@ -399,7 +399,7 @@ export function PreviewSessionTabs({
     >
       <div className="flex h-full flex-col min-h-0" data-testid="preview-session-tabs">
         <SessionRecoveryFeedback
-          ownedByChat={automaticRecoveryOwnedByChat}
+          ownedByChat={viewMode !== "plan" && automaticRecoveryOwnedByChat}
           workspaceId={workspaceId ?? null}
           error={resumption.error}
           notice={resumption.notice}

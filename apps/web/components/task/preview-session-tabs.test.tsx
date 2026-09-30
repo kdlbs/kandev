@@ -347,6 +347,39 @@ afterEach(() => {
 });
 
 describe("PreviewSessionBody delivery", () => {
+  it("keeps automatic recovery reachable while Plan replaces the chat", () => {
+    mocks.sessions = [makeSession("session-a", { state: "FAILED" })];
+    mocks.useTaskSessions.mockReturnValue({ sessions: mocks.sessions, isLoaded: true });
+    mocks.getTaskPlan.mockResolvedValue(null);
+    mocks.taskSessionItems = { "session-a": mocks.sessions[0] };
+    const resumeSession = vi.fn();
+    mocks.useSessionResumption.mockReturnValue({
+      resumptionState: "error",
+      requestIdentity: {
+        taskId: TASK_ID,
+        sessionId: "session-a",
+        generation: 1,
+        attemptId: 1,
+      },
+      error: "Session recovery failed",
+      notice: null,
+      recoveryFailure: {
+        outcome: "recovery_failed",
+        resumeError: "Resume failed",
+        restoreError: "Restore failed",
+      },
+      resumeSession,
+    });
+    render(<PreviewSessionTabs taskId={TASK_ID} sessionId="session-a" />);
+    expect(screen.queryByTestId("session-recovery-error")).toBeNull();
+    fireEvent.mouseDown(screen.getByTestId(PLAN_TAB_TESTID), { button: 0 });
+    expect(screen.getByTestId("session-recovery-error")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    expect(resumeSession).toHaveBeenCalledOnce();
+    fireEvent.mouseDown(screen.getByTestId(SESSION_A_TAB_TESTID), { button: 0 });
+    expect(screen.queryByTestId("session-recovery-error")).toBeNull();
+  });
+
   it("uses TaskChatPanel's queue-aware shared delivery path", () => {
     render(<PreviewSessionBody session={session} taskId={TASK_ID} />);
 

@@ -177,3 +177,12 @@ runtime behavior. The synthetic merge's typecheck failed before this correction
 and passed afterward with a 4 GiB Node heap; its six focused suites passed all
 81 tests. The three affected recovery-card suites also passed on the PR branch.
 Remote CI and review validation remain pending.
+
+Review remediation keeps preview recovery feedback outside Chat while Plan is
+selected and publishes committed request identity through React state, including
+idle session/task/archive changes that have no other render trigger. Both issues
+were reproduced with failing regression tests before the fixes. The affected
+preview and resumption suites pass 76 tests; typecheck and the focused preview
+Plan Playwright regression pass. Preview is desktop/tablet-only: phone task cards
+navigate directly to the full task page. The existing phone automatic-recovery
+scenario covers its native recovery path. No new copy or recovery policy is added.

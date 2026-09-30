@@ -141,6 +141,23 @@ describe("resumeWithSilentFallback", () => {
     vi.spyOn(console, "error").mockImplementation(() => {});
   });
 
+  it("publishes committed request identity when idle inputs change without a status request", () => {
+    mockConnectionStatus = "disconnected";
+    const { result, rerender } = renderHook(
+      ({ taskId, sessionId, archived }) => useSessionResumption(taskId, sessionId, archived),
+      { initialProps: { taskId: TASK_ID, sessionId: SESSION_ID, archived: false } },
+    );
+    const initialGeneration = result.current.requestIdentity!.generation;
+    rerender({ taskId: "t2", sessionId: "s2", archived: false });
+    expect(result.current.requestIdentity).toMatchObject({ taskId: "t2", sessionId: "s2" });
+    expect(result.current.requestIdentity!.generation).toBeGreaterThan(initialGeneration);
+    const switchedGeneration = result.current.requestIdentity!.generation;
+    rerender({ taskId: "t2", sessionId: "s2", archived: true });
+    expect(result.current.requestIdentity!.generation).toBeGreaterThan(switchedGeneration);
+    expect(result.current.resumptionState).toBe("idle");
+    expect(mockRequest).not.toHaveBeenCalled();
+  });
+
   it("uses resume on first try when it succeeds, never calling restore_workspace", async () => {
     mockRequest.mockResolvedValueOnce({
       success: true,
