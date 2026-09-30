@@ -1634,6 +1634,8 @@ func (m *Manager) promoteWorkspaceExecution(ctx context.Context, execution *Agen
 			execution.isResumedSession = true
 		}
 		execution.IsPassthrough = req.IsPassthrough
+		execution.TaskScope = req.TaskScope
+		execution.setSessionSettingsStartupPolicy(req.SessionSettingsPolicy)
 		if !req.IsPassthrough {
 			executorType := req.ExecutorType
 			if executorType == "" {
@@ -1958,6 +1960,8 @@ func (m *Manager) buildExecutionFromInstance(
 ) (*AgentExecution, error) {
 	execution := execInstance.ToAgentExecution(execReq)
 	execution.SessionID = req.SessionID
+	execution.TaskScope = req.TaskScope
+	execution.setSessionSettingsStartupPolicy(req.SessionSettingsPolicy)
 	execution.ResumeAttemptID = ResumeAttemptIDFromContext(ctx)
 	execution.RuntimeName = rt.Name()
 	execution.WorkspaceID = req.WorkspaceID

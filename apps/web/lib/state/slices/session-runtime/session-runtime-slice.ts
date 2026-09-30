@@ -8,6 +8,7 @@ import {
   completeWorkspaceRestoration,
   failWorkspaceRestoration,
 } from "./workspace-restoration";
+import { buildSessionViewActions } from "./session-runtime-view-actions";
 
 const maxProcessOutputBytes = 2 * 1024 * 1024;
 // Shell + terminal streams are unbounded over a session's lifetime; cap them at
@@ -139,7 +140,7 @@ export const defaultSessionRuntimeState: SessionRuntimeSliceState = {
   },
 };
 
-type ImmerSet = Parameters<typeof createSessionRuntimeSlice>[0];
+export type ImmerSet = Parameters<typeof createSessionRuntimeSlice>[0];
 
 function buildTerminalShellProcessActions(set: ImmerSet) {
   return {
@@ -608,56 +609,23 @@ export const createSessionRuntimeSlice: StateCreator<
     set((draft) => {
       delete draft.availableCommands.bySessionId[sessionId];
     }),
-  setSessionMode: (sessionId, modeId, availableModes, requestedModeId) =>
+  setSessionMode: (sessionId, modeId, availableModes, requestedModeId, settingsPolicy) =>
     set((draft) => {
       const existing = draft.sessionMode.bySessionId[sessionId];
+      const nextSettingsPolicy =
+        settingsPolicy === "strict" ? undefined : (settingsPolicy ?? existing?.settingsPolicy);
       draft.sessionMode.bySessionId[sessionId] = {
         currentModeId: modeId,
         availableModes: availableModes ?? existing?.availableModes ?? [],
         requestedModeId,
+        ...(nextSettingsPolicy ? { settingsPolicy: nextSettingsPolicy } : {}),
       };
     }),
   clearSessionMode: (sessionId) =>
     set((draft) => {
       delete draft.sessionMode.bySessionId[sessionId];
     }),
-  setAgentCapabilities: (sessionId, caps) =>
-    set((draft) => {
-      draft.agentCapabilities.bySessionId[sessionId] = caps;
-    }),
-  setSessionModels: (sessionId, data) =>
-    set((draft) => {
-      draft.sessionModels.bySessionId[sessionId] = data;
-    }),
-  setEmbeddedVscodeSupport: (sessionId, supported) =>
-    set((draft) => {
-      draft.embeddedVscodeSupport.bySessionId[sessionId] = supported;
-    }),
-  setSessionMCPStatus: (sessionId, history) =>
-    set((draft) => {
-      draft.sessionMcpStatus.bySessionId[sessionId] = history;
-    }),
-  setPromptUsage: (sessionId, usage) =>
-    set((draft) => {
-      draft.promptUsage.bySessionId[sessionId] = usage;
-    }),
-  bumpSessionUsageInvalidation: (sessionId) =>
-    set((draft) => {
-      draft.usageInvalidation.bySessionId[sessionId] =
-        (draft.usageInvalidation.bySessionId[sessionId] ?? 0) + 1;
-    }),
-  setSessionTodos: (sessionId, entries) =>
-    set((draft) => {
-      draft.sessionTodos.bySessionId[sessionId] = entries;
-    }),
-  setLaunchWarning: (sessionId, entry) =>
-    set((draft) => {
-      draft.launchWarning.bySessionId[sessionId] = entry;
-    }),
-  clearLaunchWarning: (sessionId) =>
-    set((draft) => {
-      delete draft.launchWarning.bySessionId[sessionId];
-    }),
+  ...buildSessionViewActions(set),
   ...buildBackgroundWorkActions(set),
   ...buildUserShellActions(set),
 });

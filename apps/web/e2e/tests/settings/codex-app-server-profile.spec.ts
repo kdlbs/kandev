@@ -21,7 +21,7 @@ test.describe("Codex app-server profile on desktop", () => {
     await stubNativeCodexModels(testPage);
     const modelsResponse = testPage.waitForResponse((response) => {
       const url = new URL(response.url());
-      return url.pathname === "/api/v1/agent-models/codex-app-server";
+      return url.pathname === "/api/v1/agent-models/codex-app-server/probe";
     });
     const { agent, profile } = await openNativeCodexProfile(testPage, apiClient);
     await modelsResponse;
@@ -34,7 +34,10 @@ test.describe("Codex app-server profile on desktop", () => {
     await expect(
       testPage.getByRole("button", { name: "Profile start model settings" }),
     ).toContainText("GPT-5 Codex");
-    await expect(testPage.getByTestId("profile-capability-status")).toHaveCount(0);
+    await expect(testPage.getByTestId("profile-capability-status")).toHaveAttribute(
+      "data-status",
+      "ready",
+    );
     expect(agent.name).toBe("codex-app-server");
     expect(profile.agentId).toBe(agent.id);
     await prCapture.screenshot("codex-app-server-profile-desktop", {

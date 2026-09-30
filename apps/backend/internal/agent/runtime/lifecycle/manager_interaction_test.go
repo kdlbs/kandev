@@ -494,20 +494,22 @@ func TestManager_RestartAgentProcess_Success(t *testing.T) {
 	t.Cleanup(client.Close)
 
 	exec := &AgentExecution{
-		ID:             "exec-1",
-		TaskID:         "task-1",
-		SessionID:      "session-1",
-		AgentProfileID: "profile-1",
-		ACPSessionID:   "old-session",
-		AgentCommand:   "auggie --model test",
-		Status:         v1.AgentStatusRunning,
-		WorkspacePath:  "/workspace",
+		ID:              "exec-1",
+		TaskID:          "task-1",
+		SessionID:       "session-1",
+		AgentProfileID:  "profile-1",
+		ResumeAttemptID: "resume-restart",
+		ACPSessionID:    "old-session",
+		AgentCommand:    "auggie --model test",
+		Status:          v1.AgentStatusRunning,
+		WorkspacePath:   "/workspace",
 		metadata: map[string]interface{}{
 			"task_description": "review the changes",
 		},
 		agentctl:     client,
 		promptDoneCh: make(chan PromptCompletionSignal, 1),
 	}
+	initialStartupGeneration := exec.beginStartupAttemptWithID("resume-restart")
 	exec.messageBuffer.WriteString("old-response")
 	exec.thinkingBuffer.WriteString("old-thinking")
 	exec.currentMessageID = "msg-1"
@@ -531,6 +533,12 @@ func TestManager_RestartAgentProcess_Success(t *testing.T) {
 
 	if exec.ACPSessionID != "new-session-123" {
 		t.Fatalf("expected new ACP session ID, got %q", exec.ACPSessionID)
+	}
+	if exec.currentStartupAttemptID() != "resume-restart" {
+		t.Fatalf("restart changed recovery attempt ID to %q", exec.currentStartupAttemptID())
+	}
+	if got := exec.startupAttemptSnapshot(); got <= initialStartupGeneration {
+		t.Fatalf("restart startup source generation = %d, want > %d", got, initialStartupGeneration)
 	}
 	if exec.Status != v1.AgentStatusReady {
 		t.Fatalf("expected status %q, got %q", v1.AgentStatusReady, exec.Status)

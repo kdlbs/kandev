@@ -1292,6 +1292,24 @@ func TestTaskSessionModelsBootStateOmitsUnavailableBaseline(t *testing.T) {
 	}
 }
 
+func TestTaskSessionModelsBootStateCarriesProviderRestoredProvenance(t *testing.T) {
+	state := taskSessionModelsBootState(lifecycle.SessionModelsSnapshot{
+		CurrentModelID: "effective-model",
+		CurrentModeID:  "effective-mode",
+		SettingsPolicy: streams.SessionSettingsPolicyProviderRestored,
+	}, nil)
+	if state["settingsPolicy"] != string(streams.SessionSettingsPolicyProviderRestored) {
+		t.Fatalf("settings policy = %#v, want provider_restored", state["settingsPolicy"])
+	}
+	modeState := taskSessionModeBootState(lifecycle.SessionModelsSnapshot{
+		CurrentModeID:  "effective-mode",
+		SettingsPolicy: streams.SessionSettingsPolicyProviderRestored,
+	})
+	if modeState["currentModeId"] != "effective-mode" || modeState["settingsPolicy"] != string(streams.SessionSettingsPolicyProviderRestored) {
+		t.Fatalf("mode boot state = %#v, want restored effective mode and provenance", modeState)
+	}
+}
+
 func TestBootRouteDataTasksIncludesFirstPageRows(t *testing.T) {
 	taskSvc, workflowSvc := newBootStateTestServices(t)
 	ctx := context.Background()

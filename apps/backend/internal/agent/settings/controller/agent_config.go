@@ -388,25 +388,34 @@ func (c *Controller) ResolveAgentModelConfig(
 		Status:        string(hostutility.StatusNotConfigured),
 		ConfigOptions: []dto.ConfigOptionDTO{},
 	}
+	var profileContext *hostutility.ProfileProbeContext
+	if req.ProfileID != "" || req.LaunchSettings != nil {
+		resolved, err := c.resolveProfileProbeContext(ctx, agentName, req.AuthorizationScope, req.ProfileID, req.LaunchSettings)
+		if err != nil {
+			return nil, err
+		}
+		profileContext = &resolved
+	}
 	if c.hostUtility == nil {
 		return resp, nil
 	}
-
 	resolution, err := c.hostUtility.ResolveModelConfig(ctx, agentName, hostutility.ModelConfigResolutionRequest{
-		Model:         req.Model,
-		Mode:          req.Mode,
-		ConfigOptions: req.ConfigOptions,
-		Refresh:       req.Refresh,
+		Model:          req.Model,
+		Mode:           req.Mode,
+		ConfigOptions:  req.ConfigOptions,
+		Refresh:        req.Refresh,
+		ProfileContext: profileContext,
 	})
 	if err != nil {
 		return nil, err
 	}
 	resp.Status = string(resolution.Status)
+	resp.ContextRevision = resolution.ContextRevision
 	resp.ConfigOptions = configOptionDTOs(resolution.ConfigOptions)
 	if resolution.Error != "" {
 		message := "model option resolution failed"
 		if resolution.Status == hostutility.StatusAuthRequired {
-			message = "agent authentication is required"
+			message = agentAuthenticationRequiredMessage
 		}
 		resp.Error = &message
 	}

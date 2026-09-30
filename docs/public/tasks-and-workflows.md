@@ -168,7 +168,7 @@ Use **New Task** in the sidebar. In an open task, the **Task** split button also
 />
 
 1. **Set a title.** If the title field appears, enter up to 60 characters. With **Agent-generated task titles** enabled, Kandev uses the prompt's first six words as a provisional title. See [advanced task creation](#let-the-agent-name-new-tasks).
-2. **Choose a workspace and workflow.** Kandev can infer them from the current view. A regular task must belong to a workflow. Use the arrow between the workflow and step names to see where each start action places the task.
+2. **Choose a workspace and workflow.** Kandev can infer them from the current view. A regular task must belong to a workflow. Use the arrow between the workflow and step names to see where each start action places the task. Open the workflow selector to compare the ordered steps in each available workflow. If a preview fails, select **Retry** on that row. Your workflow selection and task draft stay unchanged.
 3. **Choose a source:**
 
    | Source     | Use it for                                        | Notes                                                                                                                                                                                                                                        |

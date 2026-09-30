@@ -143,10 +143,28 @@ func (c *Client) ResetSession(ctx context.Context, cwd string, mcpServers []type
 // mcpServers are forwarded to the agentctl handler so agents that receive MCP configs
 // via the protocol (e.g. Auggie) can reconnect to MCP servers on the new instance.
 func (c *Client) LoadSession(ctx context.Context, sessionID string, mcpServers []types.McpServer) error {
+	return c.LoadSessionWithPolicy(ctx, sessionID, mcpServers, streams.SessionSettingsPolicyStrict)
+}
+
+// LoadSessionWithPolicy restores an existing ACP session while carrying the
+// host-selected policy onto its initial settings reports.
+func (c *Client) LoadSessionWithPolicy(
+	ctx context.Context,
+	sessionID string,
+	mcpServers []types.McpServer,
+	policy streams.SessionSettingsPolicy,
+) error {
+	if policy != streams.SessionSettingsPolicyStrict && policy != streams.SessionSettingsPolicyProviderRestored {
+		return fmt.Errorf("unsupported session settings policy %q", policy)
+	}
 	payload := struct {
-		SessionID  string            `json:"session_id"`
-		McpServers []types.McpServer `json:"mcp_servers,omitempty"`
+		SessionID             string                        `json:"session_id"`
+		McpServers            []types.McpServer             `json:"mcp_servers,omitempty"`
+		SessionSettingsPolicy streams.SessionSettingsPolicy `json:"session_settings_policy,omitempty"`
 	}{SessionID: sessionID, McpServers: mcpServers}
+	if policy != streams.SessionSettingsPolicyStrict {
+		payload.SessionSettingsPolicy = policy
+	}
 
 	c.setLastSessionModelState(nil)
 	resp, err := c.sendStreamRequest(ctx, "agent.session.load", payload)
@@ -289,10 +307,27 @@ func (c *Client) SetModel(ctx context.Context, modelID string) error {
 
 // SetConfigOption sets a session config option via the agent WebSocket stream.
 func (c *Client) SetConfigOption(ctx context.Context, configID, value string) error {
+	return c.SetConfigOptionWithPolicy(ctx, configID, value, streams.SessionSettingsPolicyStrict)
+}
+
+// SetConfigOptionWithPolicy applies a startup config option and carries its
+// host-selected provenance to the adapter's convergence event.
+func (c *Client) SetConfigOptionWithPolicy(
+	ctx context.Context,
+	configID, value string,
+	policy streams.SessionSettingsPolicy,
+) error {
+	if policy != streams.SessionSettingsPolicyStrict && policy != streams.SessionSettingsPolicyProviderRestored {
+		return fmt.Errorf("unsupported session settings policy %q", policy)
+	}
 	payload := struct {
-		ConfigID string `json:"config_id"`
-		Value    string `json:"value"`
+		ConfigID              string                        `json:"config_id"`
+		Value                 string                        `json:"value"`
+		SessionSettingsPolicy streams.SessionSettingsPolicy `json:"session_settings_policy,omitempty"`
 	}{ConfigID: configID, Value: value}
+	if policy != streams.SessionSettingsPolicyStrict {
+		payload.SessionSettingsPolicy = policy
+	}
 
 	resp, err := c.sendStreamRequest(ctx, "agent.session.set_config_option", payload)
 	if err != nil {

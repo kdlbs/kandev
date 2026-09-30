@@ -1017,7 +1017,19 @@ func buildPrepareResultMetadata(result *lifecycle.EnvPrepareResult) map[string]i
 // ResumeOptions controls explicit recovery behavior for a session resume.
 // Branch replacement is intentionally opt-in; ordinary resume preserves the
 // original worktree branch and reports when it is unrecoverable.
+type ResumeSettingsPolicy string
+
+const (
+	// ResumeSettingsPolicyStrict is the zero-value policy used by every ordinary
+	// and legacy resume caller.
+	ResumeSettingsPolicyStrict ResumeSettingsPolicy = ""
+	// ResumeSettingsPolicyProviderRestored keeps the provider's existing model
+	// and mode for one explicitly admitted recovery attempt.
+	ResumeSettingsPolicyProviderRestored ResumeSettingsPolicy = "provider_restored"
+)
+
 type ResumeOptions struct {
+	SettingsPolicy                   ResumeSettingsPolicy
 	AllowBranchReplacement           bool
 	RepairWorkspaceInventory         bool
 	WorkspaceInventoryIdempotencyKey string
@@ -1153,6 +1165,10 @@ func (e *Executor) resumeSession(
 			return nil
 		}
 	}
+	taskScope, err := e.resolveTaskLaunchScope(ctx, task.ID)
+	if err != nil {
+		return nil, err
+	}
 	req, _, execCfg, existingEnv, _, err := e.buildResumeRequestAtCredentialBoundaryWithOptions(
 		ctx, task, session, startAgent, beforeCredentialLease, options,
 	)
@@ -1162,6 +1178,7 @@ func (e *Executor) resumeSession(
 		}
 		return nil, err
 	}
+	req.TaskScope = taskScope
 	credentialSnapshotPersisted := false
 	if startAgent {
 		// Credential setup records the non-secret routing snapshot after the
@@ -1668,6 +1685,7 @@ func newResumeLaunchRequest(
 	}
 	req := &LaunchAgentRequest{
 		TaskID:                 task.ID,
+		SessionSettingsPolicy:  options.SettingsPolicy,
 		WorkspaceID:            task.WorkspaceID,
 		SessionID:              session.ID,
 		TaskTitle:              task.Title,
@@ -2018,7 +2036,9 @@ func (e *Executor) applyRunningRecordToResumeRequest(
 		// after runtime cleanup removed the operational row.
 		noAutoPromptState := session.State == models.TaskSessionStateWaitingForInput ||
 			isRecoverableCancelledResumeSession(session) ||
-			session.State == models.TaskSessionStateCompleted
+			session.State == models.TaskSessionStateCompleted ||
+			(session.State == models.TaskSessionStateFailed &&
+				req.SessionSettingsPolicy == ResumeSettingsPolicyProviderRestored)
 		if startAgent && noAutoPromptState {
 			if token := persistedSessionResumeToken(session); token != "" {
 				req.ACPSessionID = token

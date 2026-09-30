@@ -1,11 +1,42 @@
 package backendapp
 
 import (
+	"context"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	orchestratorexecutor "github.com/kandev/kandev/internal/orchestrator/executor"
 )
+
+type fixedLifecycleProfileResolver struct {
+	profile *lifecycle.AgentProfileInfo
+}
+
+func (r fixedLifecycleProfileResolver) ResolveProfile(context.Context, string) (*lifecycle.AgentProfileInfo, error) {
+	return r.profile, nil
+}
+
+func TestLifecycleAdapter_ResolveAgentProfileForwardsNativeSessionResume(t *testing.T) {
+	const profileID = "profile-uuid-6f5192e6-634b-4d35-96cf-34f57d6b55cf"
+	mgr := lifecycle.NewManager(
+		nil, nil, nil, nil,
+		fixedLifecycleProfileResolver{profile: &lifecycle.AgentProfileInfo{
+			ProfileID: profileID,
+			AgentID:   "agent-uuid-cb5a9b96-75bb-4c75-8812-56663e699e6f",
+			AgentName: "auggie", NativeSessionResume: true,
+		}},
+		nil, lifecycle.ExecutorFallbackDeny, t.TempDir(), newTestLogger(),
+	)
+	adapter := newLifecycleAdapter(mgr, nil, newTestLogger())
+
+	resolved, err := adapter.ResolveAgentProfile(context.Background(), profileID)
+	require.NoError(t, err)
+	require.Equal(t, "auggie", resolved.AgentName)
+	require.True(t, resolved.NativeSessionResume,
+		"the production lifecycle adapter must preserve the capability used by recovery admission")
+}
 
 // acpSessionIDProvider mirrors the unexported interface
 // orchestrator.Service.currentACPSessionID asserts s.agentManager against.

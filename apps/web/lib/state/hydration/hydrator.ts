@@ -638,6 +638,7 @@ function hydrateSessionRuntime(
     );
   }
   mergeBySession("contextWindow");
+  mergeBySession("sessionMode");
   if (state.environmentIdBySessionId) {
     Object.assign(draft.environmentIdBySessionId, state.environmentIdBySessionId);
   }

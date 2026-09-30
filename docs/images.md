@@ -4,7 +4,7 @@ Kandev publishes two container image flavors to GitHub Container Registry. Both 
 
 | Tag                                     | Size (compressed) | Contents                                                                 | Pick when…                                                                                                       |
 |-----------------------------------------|-------------------|--------------------------------------------------------------------------|-------------------------------------------------------------------------------------------------------------------|
-| `ghcr.io/kdlbs/kandev:X.Y.Z`            | ~600 MB           | kandev + Node 24 + npm + git + gh + python3 + pipx                       | You only need npm-installable agent CLIs (claude-code, codex, …) and want the smallest possible footprint.       |
+| `ghcr.io/kdlbs/kandev:X.Y.Z`            | ~600 MB           | kandev + Node 24 + npm + git + gh + procps + python3 + pipx              | You only need npm-installable agent CLIs (claude-code, codex, …) and want the smallest possible footprint.       |
 | `ghcr.io/kdlbs/kandev:X.Y.Z-universal`  | ~1.4 GB           | vanilla **+** language toolchains, build tools, Playwright Chromium deps | Your agents work on Go / Rust / Python projects, run native test suites, or drive headless browsers.             |
 
 `:latest` aliases the vanilla image; `:universal` aliases the latest universal. **Tag pinning is strongly recommended in production** - `:latest` moves and we don't promise it stays the same forever.

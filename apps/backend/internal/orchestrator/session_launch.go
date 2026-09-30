@@ -82,10 +82,11 @@ func isSessionOpenRecoveryContext(ctx context.Context) bool {
 
 // LaunchSessionRequest is the unified request for session.launch.
 type LaunchSessionRequest struct {
-	TaskID         string        `json:"task_id"`
-	Intent         SessionIntent `json:"intent,omitempty"`
-	SessionID      string        `json:"session_id,omitempty"`
-	AgentProfileID string        `json:"agent_profile_id,omitempty"`
+	TaskID                string                        `json:"task_id"`
+	Intent                SessionIntent                 `json:"intent,omitempty"`
+	SessionID             string                        `json:"session_id,omitempty"`
+	SessionSettingsPolicy executor.ResumeSettingsPolicy `json:"-"`
+	AgentProfileID        string                        `json:"agent_profile_id,omitempty"`
 	// ProfileExplicit marks a non-empty profile selected through an explicit
 	// selector-backed choice. It bypasses workflow-step profile resolution for
 	// IntentStart only; IntentStartCreated keeps its existing profile resolution
@@ -582,6 +583,7 @@ func (s *Service) launchResume(ctx context.Context, req *LaunchSessionRequest) (
 		AllowCompletedSessionResume:      req.AllowCompletedSessionResume,
 		Origin:                           string(launchOriginForActivation(req)),
 		RequireIdleSuspensionProvenance:  req.RequireIdleSuspensionProvenance,
+		SettingsPolicy:                   req.SessionSettingsPolicy,
 	})
 	if err != nil {
 		var blocked *sessionOpenRecoveryBlockedError
@@ -847,13 +849,26 @@ func (s *Service) launchRestoreWorkspace(ctx context.Context, req *LaunchSession
 // RecoverSessionOptions carries action-specific recovery authority.
 type RecoverSessionOptions struct {
 	IdempotencyKey string
+	SettingsPolicy executor.ResumeSettingsPolicy
 	ErrorStamp     string
 }
 
 // RecoverSession handles explicit retry, branch replacement, fresh start, and
 // stamp-fenced managed clone relocation after an agent CLI failure.
 func (s *Service) RecoverSession(ctx context.Context, taskID, sessionID, action string, errorStamps ...string) (*LaunchSessionResponse, error) {
-	options := RecoverSessionOptions{}
+	return s.RecoverSessionWithSettingsPolicy(
+		ctx, taskID, sessionID, action, executor.ResumeSettingsPolicyStrict, errorStamps...,
+	)
+}
+
+// RecoverSessionWithSettingsPolicy admits a settings policy for one recovery attempt.
+func (s *Service) RecoverSessionWithSettingsPolicy(
+	ctx context.Context,
+	taskID, sessionID, action string,
+	settingsPolicy executor.ResumeSettingsPolicy,
+	errorStamps ...string,
+) (*LaunchSessionResponse, error) {
+	options := RecoverSessionOptions{SettingsPolicy: settingsPolicy}
 	if len(errorStamps) > 0 {
 		options.ErrorStamp = errorStamps[0]
 	}
@@ -865,24 +880,12 @@ func (s *Service) RecoverSessionWithOptions(
 	taskID, sessionID, action string,
 	options RecoverSessionOptions,
 ) (*LaunchSessionResponse, error) {
-	// Guard before the switch: "fresh_start" clears the resume token, so an
-	// unauthorized call would mutate the session even if the launch failed.
-	// Recovering a session resumes an agent turn: session.prompt.
-	if err := s.authorizeSessionPrompt(ctx, sessionID); err != nil {
+	if err := validateSessionRecoverySettingsPolicyAction(action, options.SettingsPolicy); err != nil {
 		return nil, err
 	}
-	if err := s.authorizeTask(ctx, taskID); err != nil {
-		return nil, err
-	}
-	if err := s.ensureTaskNotArchived(ctx, taskID); err != nil {
-		return nil, err
-	}
-	session, err := s.repo.GetTaskSession(ctx, sessionID)
+	session, err := s.loadSessionForRecovery(ctx, taskID, sessionID, options.SettingsPolicy)
 	if err != nil {
-		return nil, fmt.Errorf("load session for recovery: %w", err)
-	}
-	if session == nil || session.TaskID != taskID {
-		return nil, fmt.Errorf("session not found")
+		return nil, err
 	}
 	action, err = normalizeSessionRecoveryAction(ctx, sessionID, action, s.wasResumeAttempt)
 	if err != nil {
@@ -917,6 +920,7 @@ func (s *Service) RecoverSessionWithOptions(
 		AllowCompletedSessionResume:      action == recoveryActionResume,
 		RepairWorkspaceInventory:         action == recoveryActionRepairWorkspaceInventory,
 		WorkspaceInventoryIdempotencyKey: strings.TrimSpace(options.IdempotencyKey),
+		SessionSettingsPolicy:            options.SettingsPolicy,
 	})
 	if err != nil {
 		return nil, normalizeRecoverSessionError(err)
@@ -943,6 +947,153 @@ func (s *Service) preflightSessionRecovery(
 		return nil, s.managedCloneRelocationPreflightError(ctx, session, action, branchError)
 	}
 	return admission, nil
+}
+
+func (s *Service) loadSessionForRecovery(
+	ctx context.Context,
+	taskID, sessionID string,
+	settingsPolicy executor.ResumeSettingsPolicy,
+) (*models.TaskSession, error) {
+	// Guard before the switch: "fresh_start" clears the resume token, so an
+	// unauthorized call would mutate the session even if the launch failed.
+	// Recovering a session resumes an agent turn: session.prompt.
+	if err := s.authorizeSessionPrompt(ctx, sessionID); err != nil {
+		return nil, err
+	}
+	if err := s.authorizeTask(ctx, taskID); err != nil {
+		return nil, err
+	}
+	if err := s.ensureTaskNotArchived(ctx, taskID); err != nil {
+		return nil, err
+	}
+	session, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		return nil, fmt.Errorf("load session for recovery: %w", err)
+	}
+	if session == nil || session.TaskID != taskID {
+		return nil, fmt.Errorf("session not found")
+	}
+	if settingsPolicy == executor.ResumeSettingsPolicyProviderRestored {
+		if err := s.validateProviderRestoredRecoveryEligibility(ctx, taskID, session); err != nil {
+			return nil, err
+		}
+	}
+	return session, nil
+}
+
+func validateSessionRecoverySettingsPolicyAction(action string, policy executor.ResumeSettingsPolicy) error {
+	switch policy {
+	case executor.ResumeSettingsPolicyStrict:
+		return nil
+	case executor.ResumeSettingsPolicyProviderRestored:
+		if action != recoveryActionResume {
+			return fmt.Errorf("provider-restored settings policy requires the explicit resume action")
+		}
+		return nil
+	default:
+		return fmt.Errorf("unsupported session recovery settings policy: %q", policy)
+	}
+}
+
+func (s *Service) validateProviderRestoredRecoveryEligibility(
+	ctx context.Context,
+	taskID string,
+	session *models.TaskSession,
+) error {
+	if err := validateProviderRestoredSession(session, taskID); err != nil {
+		return err
+	}
+	task, err := s.repo.GetTask(ctx, taskID)
+	if err != nil {
+		return fmt.Errorf("load task for provider-restored recovery: %w", err)
+	}
+	if task == nil || task.IsFromOffice {
+		return fmt.Errorf("provider-restored recovery is only available for task sessions")
+	}
+	profileID, err := s.resolveProviderRestoredAuggieProfile(ctx, session)
+	if err != nil {
+		return err
+	}
+	return s.validateProviderRestoredSessionIdentity(ctx, session, profileID)
+}
+
+func validateProviderRestoredSession(session *models.TaskSession, taskID string) error {
+	if session == nil || session.TaskID != taskID {
+		return fmt.Errorf("session not found")
+	}
+	if session.State != models.TaskSessionStateFailed {
+		return fmt.Errorf("provider-restored recovery requires a failed session")
+	}
+	if session.IsPassthrough {
+		return fmt.Errorf("provider-restored recovery is not available for passthrough sessions")
+	}
+	return nil
+}
+
+func (s *Service) resolveProviderRestoredAuggieProfile(
+	ctx context.Context,
+	session *models.TaskSession,
+) (string, error) {
+	profileID := session.ExecutionProfileID
+	if profileID == "" {
+		profileID = session.AgentProfileID
+	}
+	if profileID == "" || s.agentManager == nil {
+		return "", fmt.Errorf("provider-restored recovery requires a resolved Auggie profile")
+	}
+	profile, err := s.agentManager.ResolveAgentProfile(ctx, profileID)
+	if err != nil {
+		return "", fmt.Errorf("resolve profile for provider-restored recovery: %w", err)
+	}
+	if profile == nil || !strings.EqualFold(strings.TrimSpace(profile.AgentName), "auggie") ||
+		profile.CLIPassthrough || !profile.NativeSessionResume {
+		return "", fmt.Errorf("provider-restored recovery is only available for native Auggie ACP sessions")
+	}
+	return profileID, nil
+}
+
+func (s *Service) validateProviderRestoredSessionIdentity(
+	ctx context.Context,
+	session *models.TaskSession,
+	profileID string,
+) error {
+	if sessionHasProviderSessionToken(session) {
+		return nil
+	}
+	running, err := s.repo.GetExecutorRunningBySessionID(ctx, session.ID)
+	if err != nil && !errors.Is(err, models.ErrExecutorRunningNotFound) {
+		return fmt.Errorf("load provider session identity: %w", err)
+	}
+	if running != nil && running.ResumeToken != "" &&
+		(running.ExecutionProfileID == "" || running.ExecutionProfileID == profileID) {
+		return nil
+	}
+	return fmt.Errorf("provider-restored recovery requires an existing provider session identity")
+}
+
+func sessionHasProviderSessionToken(session *models.TaskSession) bool {
+	if session == nil {
+		return false
+	}
+	if strings.TrimSpace(session.DownstreamACPSessionID) != "" {
+		return true
+	}
+	if session.Metadata == nil {
+		return false
+	}
+	acp, ok := session.Metadata["acp"]
+	if !ok {
+		return false
+	}
+	switch value := acp.(type) {
+	case map[string]interface{}:
+		token, _ := value["session_id"].(string)
+		return strings.TrimSpace(token) != ""
+	case map[string]string:
+		return strings.TrimSpace(value["session_id"]) != ""
+	default:
+		return false
+	}
 }
 
 func normalizeSessionRecoveryAction(

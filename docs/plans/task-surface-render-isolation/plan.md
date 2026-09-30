@@ -184,3 +184,10 @@ Preserve this package's row, file-tree, and scoped-read regression guarantees.
 Task 04 and Tasks 06–08 now have implementation and desktop/phone regression
 coverage. Task 05 remains open pending editor-owner attribution. These tasks do
 not reopen completed work here.
+
+## September 30 Changes rendering follow-up
+
+The [bounded Changes package](../bounded-changes-rendering/plan.md) owns
+virtualization of the Changes timeline, including inline historical files.
+This follow-up preserves the results and completed work orders recorded here.
+Its new regressions supplement the existing interaction and source-routing checks.

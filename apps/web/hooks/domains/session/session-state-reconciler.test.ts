@@ -97,6 +97,48 @@ it("keeps a live model event that arrives before background reconciliation", asy
   }
 });
 
+it("reconciles provider-restored selectors without reviving saved settings", async () => {
+  const session = {
+    ...sessionWithSavedModel(),
+    metadata: {
+      runtime_config: { model: "saved-runtime-model", mode: "saved-runtime-mode" },
+      runtime_config_overrides: {
+        model: "saved-override-model",
+        mode: "saved-override-mode",
+      },
+      acp_model_state: {
+        settings_policy: "provider_restored",
+        current_model_id: "",
+        current_mode_id: "",
+        models: [],
+        config_options: [],
+      },
+    },
+  } as unknown as TaskSession;
+  const store = createAppStore();
+  store.getState().setTaskSession({ ...session, metadata: {} });
+  vi.spyOn(api, "fetchTaskSessionConditional").mockResolvedValue({
+    status: "ok",
+    data: { session },
+    etag: SESSION_ETAG_V1,
+  });
+  const release = acquireSessionStateReconciliation(store, session.id);
+  try {
+    await vi.waitFor(() => {
+      expect(store.getState().sessionModels.bySessionId[session.id]).toMatchObject({
+        currentModelId: "",
+        settingsPolicy: "provider_restored",
+      });
+      expect(store.getState().sessionMode.bySessionId[session.id]).toMatchObject({
+        currentModeId: "",
+        settingsPolicy: "provider_restored",
+      });
+    });
+  } finally {
+    release();
+  }
+});
+
 it("restarts with an unconditional read when consumers reacquire during a released read", async () => {
   vi.useFakeTimers();
   const session = { ...sessionWithSavedModel(), state: "RUNNING" as const };

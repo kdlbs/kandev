@@ -73,6 +73,7 @@ export function SessionRecoveryActionButtons({
     branchDetails,
     guardDetails,
     recoveryNotice,
+    providerRestoredResumeEligible,
     handleRecover,
     handleRestore,
     handleNewBranch,
@@ -91,6 +92,10 @@ export function SessionRecoveryActionButtons({
           {
             kind,
             label: recoveryActionLabel(kind, t),
+            disclosure:
+              kind === "resume" && providerRestoredResumeEligible
+                ? t("task:providerRestoredResumeDisclosure")
+                : undefined,
             testId: action.test_id,
             tooltip: recoveryActionTooltip(action, t),
             onClick: () => void onRecoveryAction(kind),

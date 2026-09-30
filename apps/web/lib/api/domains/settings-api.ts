@@ -42,6 +42,7 @@ export {
   startHostShell,
   stopAgentLogin,
 } from "./host-shell-api";
+export { probeAgentProfile } from "./profile-capability-api";
 export type { AgentLoginSession, HostShellStartOptions } from "./host-shell-api";
 
 // User settings
@@ -478,7 +479,7 @@ export async function createPrompt(
 
 export async function updatePrompt(
   promptId: string,
-  payload: { name?: string; content?: string },
+  payload: { name?: string; content?: string; allow_agent_edits?: boolean },
   options?: ApiRequestOptions,
 ) {
   return fetchJson<CustomPrompt>(`/api/v1/prompts/${promptId}`, {

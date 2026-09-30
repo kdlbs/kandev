@@ -43,6 +43,7 @@ export type ProfileFormData = {
   cli_passthrough: boolean;
   cli_flags: CLIFlag[];
   command_prefix?: string;
+  env_vars?: { key: string; value?: string; secret_id?: string }[];
   provider_kind?: string;
 } & Record<PermissionKey, boolean>;
 
@@ -179,11 +180,13 @@ export function ModePicker({
   modes,
   currentModeId,
   onChange,
+  disabled,
 }: {
   profile: ProfileFormData;
   modes: ModeEntry[];
   currentModeId: string | undefined;
   onChange: (patch: Partial<ProfileFormData>) => void;
+  disabled?: boolean;
 }) {
   return (
     <ModeCombobox
@@ -191,6 +194,7 @@ export function ModePicker({
       onChange={(value) => onChange({ mode: value })}
       modes={modes}
       currentModeId={currentModeId}
+      disabled={disabled}
     />
   );
 }
@@ -316,6 +320,7 @@ export function ModelFallbackSection({
   models,
   configOptions,
   baselineProfile,
+  disabled = false,
   labelCls,
   gapCls,
   onChange,
@@ -324,6 +329,7 @@ export function ModelFallbackSection({
   models: ModelEntry[];
   configOptions: SelectConfigOption[];
   baselineProfile?: ProfileFormData;
+  disabled?: boolean;
   labelCls?: string;
   gapCls: string;
   onChange: (patch: Partial<ProfileFormData>) => void;
@@ -394,7 +400,7 @@ export function ModelFallbackSection({
           baselineProfile={baselineProfile}
           labelCls={labelCls}
           gapCls={gapCls}
-          disabled={autoFallback || requireExactModel}
+          disabled={disabled || autoFallback || requireExactModel}
           onChange={onChange}
         />
       }

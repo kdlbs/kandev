@@ -101,6 +101,7 @@ export type RecoveryCardModel = {
   displayNotice: string | null;
   hasRecoveryFailure: boolean;
   isReadOnly: boolean;
+  showSummary: boolean;
   hasDetails: boolean;
   titleKey: string;
   summary: string;
@@ -154,6 +155,7 @@ export function buildRecoveryCardModel({
     displayNotice,
     hasRecoveryFailure,
     isReadOnly,
+    showSummary: !isReadOnly,
     hasDetails: causes.length > 0 || Boolean(error.details),
     titleKey: recoveryTitleKey(isReadOnly, hasRecoveryFailure),
     summary: recoverySummary(displayNotice, causes, translate),

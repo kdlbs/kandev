@@ -783,6 +783,7 @@ export type EditorsResponse = {
 };
 
 export type CustomPrompt = {
+  allow_agent_edits?: boolean;
   id: string;
   name: string;
   content: string;

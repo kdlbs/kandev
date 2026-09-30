@@ -252,6 +252,10 @@ type hostUtilityProvider interface {
 	) (hostutility.ModelConfigResolution, error)
 }
 
+type profileHostUtilityProvider interface {
+	ProbeProfileCapabilities(context.Context, string, hostutility.ProfileCapabilityRequest) (hostutility.ProfileCapabilityResult, error)
+}
+
 func NewController(repo store.Repository, discoveryRegistry *discovery.Registry, agentRegistry *registry.Registry, sessionChecker SessionChecker, log *logger.Logger,
 ) *Controller {
 	return &Controller{

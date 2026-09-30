@@ -274,6 +274,7 @@ function CommitRowToggle({
     <button
       type="button"
       data-testid="commit-toggle"
+      data-changes-row-focus
       aria-expanded={expanded}
       aria-controls={inlineFilesId}
       className={cn(
@@ -318,12 +319,12 @@ function useCommitFileNavigationHandler(
     fileNavigation?: CommitFileNavigationRequest,
   ) => void,
 ) {
-  return (path: string) => {
-    onOpenCommitDetail?.(commit.detailTarget, {
-      path,
-      token: (nextCommitFileNavigationToken += 1),
-    });
-  };
+  return (path: string) =>
+    onOpenCommitDetail?.(commit.detailTarget, createCommitFileNavigationRequest(path));
+}
+
+export function createCommitFileNavigationRequest(path: string): CommitFileNavigationRequest {
+  return { path, token: (nextCommitFileNavigationToken += 1) };
 }
 
 /** Individual commit row with hover actions */
@@ -334,6 +335,7 @@ export function CommitRow({
   onAmendCommit,
   onRevertCommit,
   onResetToCommit,
+  controlledExpansion,
 }: {
   commit: CommitItem;
   isLatest: boolean;
@@ -350,22 +352,29 @@ export function CommitRow({
   onAmendCommit?: (currentMessage: string, repo?: string) => void;
   onRevertCommit?: (sha: string, repo?: string) => void;
   onResetToCommit?: (sha: string, repo?: string) => void;
+  controlledExpansion?: { expanded: boolean; onToggle: () => void };
 }) {
   const isLocalCommit = commit.detailTarget.source === "local";
   const { isMobile, isFinePointer } = useResponsiveBreakpoint();
   const touchSized = isMobile || isFinePointer === false;
-  const [expanded, setExpanded] = useState(false);
+  const [localExpanded, setLocalExpanded] = useState(false);
   const [hasExpanded, setHasExpanded] = useState(false);
+  const expanded = controlledExpansion?.expanded ?? localExpanded;
   const showActions =
     isLocalCommit && (onResetToCommit || (isLatest && (onAmendCommit || onRevertCommit)));
   const inlineFilesId = `commit-inline-files-${commit.detailTarget.source}-${commit.commit_sha}-${
     commit.repository_name ?? "root"
   }`.replace(/[^a-zA-Z0-9_-]/g, "-");
   const handleToggle = () => {
+    if (controlledExpansion) {
+      controlledExpansion.onToggle();
+      return;
+    }
     if (!expanded) setHasExpanded(true);
-    setExpanded((previous) => !previous);
+    setLocalExpanded((previous) => !previous);
   };
   const handleOpenFile = useCommitFileNavigationHandler(commit, onOpenCommitDetail);
+  const RowElement = controlledExpansion ? "div" : "li";
   return (
     <CommitContextMenu
       commit={commit}
@@ -374,7 +383,7 @@ export function CommitRow({
       onRevertCommit={onRevertCommit}
       onResetToCommit={onResetToCommit}
     >
-      <li
+      <RowElement
         data-testid={`commit-row-${commit.commit_sha.slice(0, 7)}`}
         className="group relative -mx-1 rounded-md px-1 py-1 text-xs hover:bg-muted/60"
       >
@@ -401,12 +410,12 @@ export function CommitRow({
             />
           )}
         </div>
-        {hasExpanded && (
+        {!controlledExpansion && hasExpanded && (
           <div id={inlineFilesId} hidden={!expanded} data-testid="commit-inline-files">
             <CommitRowFiles target={commit.detailTarget} onOpenFile={handleOpenFile} />
           </div>
         )}
-      </li>
+      </RowElement>
     </CommitContextMenu>
   );
 }

@@ -487,6 +487,15 @@ func TestLoadSession_Success(t *testing.T) {
 		if msg.Action != "agent.session.load" {
 			t.Errorf("expected action 'agent.session.load', got %q", msg.Action)
 		}
+		var payload struct {
+			SessionSettingsPolicy streams.SessionSettingsPolicy `json:"session_settings_policy"`
+		}
+		if err := msg.ParsePayload(&payload); err != nil {
+			t.Errorf("parse load request: %v", err)
+		}
+		if payload.SessionSettingsPolicy != streams.SessionSettingsPolicyProviderRestored {
+			t.Errorf("session settings policy = %q, want provider_restored", payload.SessionSettingsPolicy)
+		}
 		resp, _ := ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
 			"success":    true,
 			"session_id": "sess-456",
@@ -499,7 +508,7 @@ func TestLoadSession_Success(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	err := c.LoadSession(ctx, "sess-456", nil)
+	err := c.LoadSessionWithPolicy(ctx, "sess-456", nil, streams.SessionSettingsPolicyProviderRestored)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -522,6 +531,44 @@ func TestLoadSession_Error(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "Method not found") {
 		t.Fatalf("expected 'Method not found' error, got: %v", err)
+	}
+}
+
+func TestSetConfigOptionWithPolicyCarriesHostPolicy(t *testing.T) {
+	var policies []streams.SessionSettingsPolicy
+	c, ts := newTestClientWithStream(t, func(msg ws.Message) *ws.Message {
+		if msg.Action != "agent.session.set_config_option" {
+			t.Errorf("action = %q, want agent.session.set_config_option", msg.Action)
+		}
+		var payload struct {
+			SessionSettingsPolicy streams.SessionSettingsPolicy `json:"session_settings_policy"`
+		}
+		if err := msg.ParsePayload(&payload); err != nil {
+			t.Errorf("parse set_config_option request: %v", err)
+		}
+		policies = append(policies, payload.SessionSettingsPolicy)
+		resp, _ := ws.NewResponse(msg.ID, msg.Action, map[string]any{"success": true})
+		return resp
+	})
+	defer ts.Close()
+	defer c.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := c.SetConfigOptionWithPolicy(ctx, "reasoning_effort", "high", streams.SessionSettingsPolicyProviderRestored); err != nil {
+		t.Fatalf("SetConfigOptionWithPolicy: %v", err)
+	}
+	if err := c.SetConfigOption(ctx, "reasoning_effort", "medium"); err != nil {
+		t.Fatalf("SetConfigOption: %v", err)
+	}
+	want := []streams.SessionSettingsPolicy{streams.SessionSettingsPolicyProviderRestored, ""}
+	if len(policies) != len(want) {
+		t.Fatalf("settings policies = %v, want %v", policies, want)
+	}
+	for index := range want {
+		if policies[index] != want[index] {
+			t.Errorf("request %d settings policy = %q, want %q", index, policies[index], want[index])
+		}
 	}
 }
 

@@ -34,6 +34,7 @@ import { registerReviewHandlers } from "@/lib/ws/handlers/review";
 import { registerTerminalsHandlers } from "@/lib/ws/handlers/terminals";
 import { registerTurnsHandlers } from "@/lib/ws/handlers/turns";
 import { registerSecretsHandlers } from "@/lib/ws/handlers/secrets";
+import { registerPromptsHandlers } from "@/lib/ws/handlers/prompts";
 import { registerUsersHandlers } from "@/lib/ws/handlers/users";
 import { registerSessionHostnamesHandlers } from "@/lib/ws/handlers/session-hostnames";
 import { registerWorkspacesHandlers } from "@/lib/ws/handlers/workspaces";
@@ -78,6 +79,7 @@ export function registerWsHandlers(store: StoreApi<AppState>) {
     ...registerPromptUsageHandlers(store),
     ...registerBackgroundWorkHandlers(store),
     ...registerUsersHandlers(store),
+    ...registerPromptsHandlers(store),
     ...registerSessionHostnamesHandlers(store),
     ...registerTerminalsHandlers(store),
     ...registerDiffsHandlers(store),

@@ -92,3 +92,16 @@ models package suites passed in local runs; the final focused inventory-repair
 regression passed with a typed conflict and no filesystem preflight or launch.
 Specification lint, documentation catalog, public documentation, and harness
 validation passed. Current-head GitHub CI and review validation remain pending.
+
+### Provider-restored settings integration
+
+Merged the newer provider-restored settings policy through the shared recovery
+options without weakening its explicit-resume-only validation. Inventory repair
+retains strict settings; handler and service coverage reject attempts to combine
+inventory repair with provider-restored settings. Existing provider-restored
+eligibility checks and inventory preservation preflight ordering remain intact.
+
+Validation: affected executor, orchestrator, and handler suites passed locally,
+including the strict-policy regression. Documentation catalog and specification
+lint and backend lint passed (zero issues). Normal commit hooks and fresh GitHub
+CI remain pending.

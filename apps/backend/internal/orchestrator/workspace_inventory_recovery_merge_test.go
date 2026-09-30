@@ -100,3 +100,11 @@ func TestInventoryRepairDoesNotRunMutatingRecoveryPreflight(t *testing.T) {
 	require.True(t, reflect.DeepEqual(beforeMetadata, storedSession.Metadata),
 		"recovery refusal must preserve session recovery metadata")
 }
+
+func TestInventoryRepairRejectsProviderRestoredSettingsBeforeRepositoryAccess(t *testing.T) {
+	_, err := (&Service{}).RecoverSessionWithOptions(
+		context.Background(), "task-policy", "session-policy", recoveryActionRepairWorkspaceInventory,
+		RecoverSessionOptions{IdempotencyKey: "inventory-repair", SettingsPolicy: executor.ResumeSettingsPolicyProviderRestored},
+	)
+	require.ErrorContains(t, err, "requires the explicit resume action")
+}

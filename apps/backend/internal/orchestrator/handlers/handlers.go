@@ -297,11 +297,12 @@ func (h *Handlers) wsSetPlanMode(ctx context.Context, msg *ws.Message) (*ws.Mess
 }
 
 type wsRecoverSessionRequest struct {
-	TaskID         string `json:"task_id"`
-	SessionID      string `json:"session_id"`
-	Action         string `json:"action"`
-	IdempotencyKey string `json:"idempotency_key,omitempty"`
-	ErrorStamp     string `json:"error_stamp,omitempty"`
+	TaskID         string                        `json:"task_id"`
+	SessionID      string                        `json:"session_id"`
+	Action         string                        `json:"action"`
+	IdempotencyKey string                        `json:"idempotency_key,omitempty"`
+	ErrorStamp     string                        `json:"error_stamp,omitempty"`
+	SettingsPolicy executor.ResumeSettingsPolicy `json:"settings_policy,omitempty"`
 }
 
 func managedCloneRelocationConflictResponse(msg *ws.Message, err error) (*ws.Message, error) {
@@ -362,6 +363,13 @@ func (h *Handlers) wsRecoverSession(ctx context.Context, msg *ws.Message) (*ws.M
 	if req.SessionID == "" {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "session_id is required", nil)
 	}
+	if req.SettingsPolicy != executor.ResumeSettingsPolicyStrict &&
+		req.SettingsPolicy != executor.ResumeSettingsPolicyProviderRestored {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "unsupported session recovery settings policy", nil)
+	}
+	if req.SettingsPolicy == executor.ResumeSettingsPolicyProviderRestored && req.Action != "resume" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "provider-restored settings policy requires the explicit resume action", nil)
+	}
 	// Cancel an in-progress transient provider retry loop and surface
 	// the manual recovery banner. Distinct from resume/fresh_start: it does not
 	// relaunch the agent, it stops the backoff timer.
@@ -382,6 +390,7 @@ func (h *Handlers) wsRecoverSession(ctx context.Context, msg *ws.Message) (*ws.M
 
 	resp, err := h.service.RecoverSessionWithOptions(ctx, req.TaskID, req.SessionID, req.Action, orchestrator.RecoverSessionOptions{
 		IdempotencyKey: strings.TrimSpace(req.IdempotencyKey),
+		SettingsPolicy: req.SettingsPolicy,
 		ErrorStamp:     req.ErrorStamp,
 	})
 	if err != nil {
