@@ -1,7 +1,7 @@
 ---
 id: "05-delivery-unattended-turn"
 title: "Admission, delivery and the unattended turn"
-status: pending
+status: built
 wave: 3
 depends_on:
   - "02-containment"
@@ -303,3 +303,26 @@ make -C apps/backend lint
 - A stored message is not proof of a send: the orchestrator rolls back the
   reserved turn on a pre-acceptance failure and leaves the message. Only the
   `onAccepted` binding is proof; recovery must never re-send an unbound row.
+
+## Build result
+
+Status: built on `feature/coordinator-p3-05-de-yls`, rebased onto `coordinator/p3-integration` at 3ae690464c (clean, no conflicts, no compile fixes needed for the `MoveTaskWithOptions` change).
+
+Files changed (all under `apps/backend/internal/`): `coordinator/` (`admission*.go`, `delivery*.go`, `delivery_worker.go`, `turn_end.go`, `turn_recovery.go`, `unattended_stamp.go`, `store_turns.go`, `store_unattended.go`, `activity.go`, `proposals.go`, `propose_kinds.go`, `service.go` and their tests, including the env-gated `store_turns_postgres_test.go`), `orchestrator/` (reserved-turn seam, `PromptUnattendedWake`, `unattended_orphan_turn.go`), `backendapp/` (`coordinator.go`, `coordinator_delivery.go` and tests), and the `reserved_turn_id` column.
+
+Documented assumptions:
+
+- `CompleteUnattendedOrphanTurn` lives in `internal/orchestrator/unattended_orphan_turn.go`, not `service.go` as the design text says.
+- `currentUnattendedTurn` is resolved before the write transaction with signature `(ctx, coordinatorID) *string`, not `(ctx, tx, coordinatorID)` as the design says.
+- `openUnattendedTurns` was re-added when the backstop and startup pass needed it.
+- Handoff rule (round 6): a pre-t0 unbound row whose session is RUNNING/STARTING with a non-empty reserved id is left for the backstop (`send_failed`); every other unbound pre-t0 row settles `interrupted`. A null or empty `reserved_turn_id` completes nothing.
+
+Receipts (after the rebase unless noted):
+
+- `go test -race ./internal/coordinator/...`: ok.
+- `golangci-lint run ./... --new-from-rev=3ae690464c`: 0 issues.
+- `go run ./cmd/sqlguard ./internal`: clean. `go test -race ./internal/persistence/storeconformance`: ok.
+- `make typecheck` (after generating the gitignored release-notes/changelog JSON): clean. `make lint-format`: clean. `pnpm run i18n:ratchet`: clean.
+- `make -C apps/backend test` (before the rebase): failures only in packages this work order does not touch or in environment-dependent tests. `internal/orchestrator` passes. `backendapp` (3 tests) and `task/service` (16 tests) fail identically at merge-base c4752a0dd1 in a scratch worktree, so they are pre-existing. The other failing packages (agent/*, agentctl/server/*, common/config, launcher, system/storage/*, worktree) are untouched by this change.
+- Postgres tests skip locally (no `KANDEV_TEST_POSTGRES_DSN`); their bodies were run against SQLite and pass.
+- `make fmt` reformats `internal/plugins/service.go` on the base; that file was restored and is not part of this work.
