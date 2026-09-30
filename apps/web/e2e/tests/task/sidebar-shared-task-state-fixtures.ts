@@ -112,10 +112,14 @@ export async function exerciseSharedPaging(
     const home = new MobileKanbanPage(page);
     await home.openSearch();
     await home.searchInput().fill(anchor.title);
+    await home.taskCard(anchor.id).tap();
   } else {
-    await page.getByRole("textbox", { name: "Search by title..." }).fill(anchor.title);
+    await page
+      .getByTestId("kanban-header-search")
+      .getByPlaceholder("Search tasks...", { exact: true })
+      .fill(anchor.title);
+    await page.getByTestId(`task-card-${anchor.id}`).click();
   }
-  await page.getByTestId(`task-card-${anchor.id}`).getByRole("link").click();
   const { session, rows } = await surface(page, mobile);
   const controls = rows.getByTestId("sidebar-page-controls");
   await expect(rows.locator("[data-task-row-id]")).toHaveCount(100);
