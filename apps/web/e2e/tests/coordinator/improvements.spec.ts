@@ -113,7 +113,8 @@ async function approveThroughCard(testPage: Ctx["testPage"], proposalId: string)
   await card.getByTestId("improvement-show-change").click();
   const diff = card.getByTestId("context-diff");
   await expect(diff).toContainText("Line two changed");
-  await expect(diff).toContainText("+");
+  await expect(diff.locator('[data-kind="remove"]')).toHaveText(["-Line two"]);
+  await expect(diff.locator('[data-kind="add"]')).toHaveText(["+Line two changed", "+Line three"]);
   await expect(approve).toBeEnabled();
 
   const approved = waitForHttp(testPage, "POST", /\/proposals\/[^/]+\/approve$/);

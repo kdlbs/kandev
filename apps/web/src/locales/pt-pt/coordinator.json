@@ -185,6 +185,7 @@
   "activityClassMove": "Mover tarefa",
   "activityClassResume": "Retomar tarefa",
   "activityClassStop": "Parar tarefa",
+  "activityClassImprovement": "Proposta de melhoria",
   "activityClassUnknown": "Ação desconhecida",
   "activityAuthRequires": "Requer aprovação",
   "activityAuthDenied": "Recusada",

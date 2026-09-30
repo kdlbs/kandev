@@ -185,6 +185,7 @@
   "activityClassMove": "移动任务",
   "activityClassResume": "恢复任务",
   "activityClassStop": "停止任务",
+  "activityClassImprovement": "改进提案",
   "activityClassUnknown": "未知操作",
   "activityAuthRequires": "需要批准",
   "activityAuthDenied": "已拒绝",

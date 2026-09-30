@@ -67,9 +67,10 @@ describe("getUndoConflict", () => {
 });
 
 describe("isActivityClass", () => {
-  it("accepts the six classes and unknown, rejects anything else", () => {
+  it("accepts the seven classes and unknown, rejects anything else", () => {
     expect(isActivityClass("move")).toBe(true);
     expect(isActivityClass("unknown")).toBe(true);
+    expect(isActivityClass("improvement")).toBe(true);
     expect(isActivityClass("bogus")).toBe(false);
     expect(isActivityClass(null)).toBe(false);
   });

@@ -185,6 +185,7 @@
   "activityClassMove": "Move task",
   "activityClassResume": "Resume task",
   "activityClassStop": "Stop task",
+  "activityClassImprovement": "Improvement proposal",
   "activityClassUnknown": "Unknown action",
   "activityAuthRequires": "Requires approval",
   "activityAuthDenied": "Denied",

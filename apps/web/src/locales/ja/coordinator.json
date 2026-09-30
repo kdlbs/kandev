@@ -185,6 +185,7 @@
   "activityClassMove": "タスクを移動",
   "activityClassResume": "タスクを再開",
   "activityClassStop": "タスクを停止",
+  "activityClassImprovement": "改善の提案",
   "activityClassUnknown": "不明なアクション",
   "activityAuthRequires": "承認が必要",
   "activityAuthDenied": "拒否",
