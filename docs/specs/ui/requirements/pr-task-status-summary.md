@@ -2,7 +2,7 @@
 status: active
 system: ui
 created: 2026-08-06
-updated: 2026-09-05
+updated: 2026-09-30
 owners:
   - kandev
 ---
@@ -42,6 +42,9 @@ the bounded task-status projection and not the full pull-request record.
 - **AC-UI-PR-TASK-STATUS-SUMMARY-001.18:** On a coarse pointer, the task row shall remain the primary touch target. After task navigation, the existing PR-status drawer shall show the same author login.
 - **AC-UI-PR-TASK-STATUS-SUMMARY-001.19:** TaskPR API and WebSocket payloads shall carry the owning workspace ID. The backend shall route typed PR events by that ID, and the frontend shall ignore missing or mismatched updates before changing the active workspace cache.
 - **AC-UI-PR-TASK-STATUS-SUMMARY-001.20:** When an open GitHub pull request is a draft and has no active merge-queue entry, the task pull-request icon shall use the muted color even when its review or CI fields report a failure. Terminal and active-queue precedence shall remain unchanged.
+- **AC-UI-PR-TASK-STATUS-SUMMARY-001.21:** When a GitHub task summary exceeds the available viewport height, its disclosure shall stay inside the viewport. One internal vertical scroll region shall make every PR entry and the final automation detail reachable.
+- **AC-UI-PR-TASK-STATUS-SUMMARY-001.22:** The desktop disclosure shall remain open while the pointer moves from its trigger into its content and scrolls. Keyboard users shall reach and scroll the same content. Escape shall dismiss the disclosure.
+- **AC-UI-PR-TASK-STATUS-SUMMARY-001.23:** The existing phone PR drawer shall make the same long summary reachable through internal scrolling. Its fixed header and final entry shall remain inside the viewport without document horizontal overflow.
 
 ## Migrated source detail
 
@@ -147,3 +150,5 @@ do not align, and secondary merge-queue text begins under the icon instead of th
 [Sidebar task row presentation refinement](../../../plans/sidebar-task-row-presentation/plan.md)
 
 [PR task status hover hydration](../../../plans/pr-task-status-hover-hydration/plan.md)
+
+[PR task summary scrolling](../../../plans/pr-task-summary-scrolling/plan.md)

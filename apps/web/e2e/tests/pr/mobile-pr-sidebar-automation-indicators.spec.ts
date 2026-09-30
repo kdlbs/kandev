@@ -1,6 +1,7 @@
 import { test, expect, type SeedData } from "../../fixtures/test-base";
 import { SessionPage } from "../../pages/session-page";
 import type { ApiClient } from "../../helpers/api-client";
+import { waitForFiniteAnimations } from "../../helpers/animations";
 
 const OWNER = "testorg";
 const REPO = "testrepo";
@@ -29,6 +30,7 @@ async function seedSidebarAutomation(
   await apiClient.mockGitHubAssociateTaskPR({
     task_id: targetTask.task_id,
     workspace_id: seedData.workspaceId,
+    repository_id: seedData.repositoryId,
     repository_id: seedData.repositoryId,
     owner: OWNER,
     repo: REPO,
@@ -154,5 +156,84 @@ test.describe("Mobile sidebar PR automation indicators", () => {
     await expect(icon.getByTestId("pr-task-automation-auto-fix")).toHaveCount(0);
     await expect(icon.getByTestId("pr-task-automation-auto-merge")).toHaveCount(0);
     await expect(icon.getByTestId("pr-merge-conflict-warning")).toHaveCount(0);
+  });
+
+  // @covers AC-UI-PR-TASK-STATUS-SUMMARY-001.23
+  test("reaches the final PR and automation details inside the mobile drawer", async ({
+    testPage,
+    apiClient,
+    seedData,
+    prCapture,
+  }) => {
+    test.setTimeout(120_000);
+    const { navigationTaskId, targetTaskId } = await seedSidebarAutomation(apiClient, seedData);
+    for (let number = PR_NUMBER + 1; number <= PR_NUMBER + 4; number += 1) {
+      await apiClient.mockGitHubAssociateTaskPR({
+        task_id: targetTaskId,
+        workspace_id: seedData.workspaceId,
+        repository_id: seedData.repositoryId,
+        owner: OWNER,
+        repo: REPO,
+        pr_number: number,
+        pr_url: `https://github.com/${OWNER}/${REPO}/pull/${number}`,
+        pr_title: `Mobile sidebar overflow fixture ${number}: a long pull request title that wraps across multiple lines in the status drawer`,
+        head_branch: `feat/mobile-sidebar-overflow-${number}`,
+        base_branch: "main",
+        author_login: "test-user",
+        state: "open",
+        review_state: "approved",
+        checks_state: "success",
+        mergeable_state: "dirty",
+        has_merge_conflicts: true,
+      });
+    }
+
+    await expect.poll(async () => (await apiClient.listTaskPRs(targetTaskId)).length).toBe(5);
+    await testPage.goto(`/t/${navigationTaskId}`);
+    await new SessionPage(testPage).waitForLoad();
+    await testPage.getByTestId("mobile-task-picker-trigger").tap();
+
+    const sheet = testPage.getByRole("dialog", { name: "Tasks" });
+    const targetRow = sheet.locator(`[data-task-row-id="${targetTaskId}"]`);
+    const icon = targetRow.getByTestId(`pr-task-icon-${targetTaskId}`);
+    await icon.tap();
+
+    const drawer = testPage.getByTestId(`pr-task-automation-drawer-${targetTaskId}`);
+    await expect(drawer).toBeVisible();
+    await waitForFiniteAnimations(drawer);
+    const scrollBody = drawer.locator("[data-vaul-no-drag]");
+    const entries = scrollBody.getByTestId("pr-task-status-entry");
+    await expect(entries).toHaveCount(5, { timeout: 15_000 });
+    const lastEntry = entries.last();
+    const automation = scrollBody.getByTestId("pr-task-automation-details");
+    const viewport = testPage.viewportSize();
+    const drawerBox = await drawer.boundingBox();
+    const headerBox = await drawer.locator('[data-slot="drawer-header"]').boundingBox();
+    expect(viewport).not.toBeNull();
+    expect(drawerBox).not.toBeNull();
+    expect(headerBox).not.toBeNull();
+    expect(drawerBox!.y).toBeGreaterThanOrEqual(0);
+    expect(drawerBox!.y + drawerBox!.height).toBeLessThanOrEqual(viewport!.height);
+    expect(await scrollBody.evaluate((element) => element.scrollHeight)).toBeGreaterThan(
+      await scrollBody.evaluate((element) => element.clientHeight),
+    );
+
+    await lastEntry.scrollIntoViewIfNeeded();
+    await expect.poll(() => scrollBody.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
+    await expect(lastEntry).toBeInViewport({ ratio: 0.5 });
+    await automation.scrollIntoViewIfNeeded();
+    await expect(automation).toBeInViewport({ ratio: 0.5 });
+    const scrolledHeaderBox = await drawer.locator('[data-slot="drawer-header"]').boundingBox();
+    expect(scrolledHeaderBox).not.toBeNull();
+    expect(Math.abs(scrolledHeaderBox!.y - headerBox!.y)).toBeLessThanOrEqual(1);
+    expect(
+      await testPage.evaluate(
+        () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
+      ),
+    ).toBe(true);
+    await prCapture.screenshot("sidebar-pr-summary-overflow-mobile", {
+      caption:
+        "Mobile PR drawer keeps its header fixed while long PR and automation details scroll",
+    });
   });
 });
