@@ -14,10 +14,12 @@ import (
 	"golang.org/x/sys/windows"
 )
 
-// setProcGroup configures the command to run in its own process group.
+// setProcGroup configures the command to run in its own process group with a
+// windowless console, so it never opens a console window even when agentctl
+// has no console.
 func setProcGroup(cmd *exec.Cmd) {
 	cmd.SysProcAttr = &syscall.SysProcAttr{
-		CreationFlags: syscall.CREATE_NEW_PROCESS_GROUP,
+		CreationFlags: syscall.CREATE_NEW_PROCESS_GROUP | windows.CREATE_NO_WINDOW,
 	}
 }
 

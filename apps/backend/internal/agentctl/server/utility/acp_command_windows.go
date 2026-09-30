@@ -14,10 +14,11 @@ import (
 )
 
 // setACPCommandProcAttr starts ACP utility commands suspended so the cleanup
-// lifecycle can attach a kill-on-close Job Object before the command runs.
+// lifecycle can attach a kill-on-close Job Object before the command runs, and
+// without a console window of their own.
 func setACPCommandProcAttr(cmd *exec.Cmd) {
 	cmd.SysProcAttr = &syscall.SysProcAttr{
-		CreationFlags: syscall.CREATE_NEW_PROCESS_GROUP | windows.CREATE_SUSPENDED,
+		CreationFlags: syscall.CREATE_NEW_PROCESS_GROUP | windows.CREATE_SUSPENDED | windows.CREATE_NO_WINDOW,
 	}
 }
 

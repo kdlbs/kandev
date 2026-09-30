@@ -383,6 +383,8 @@ test:
 test-windows:
 	@echo "Running Windows-sensitive packages..."
 	$(CGO_LOCALE) $(CGO_PREFIX) $(GO) test -tags fts5 -v ./internal/agentctl/server/process/... ./internal/agent/runtime/agentctl/launcher/... ./internal/backendapp/ownershiplock/... ./internal/system/storage/workspaces/...
+	@echo "Running Windows helper console-flag tests..."
+	$(CGO_LOCALE) $(CGO_PREFIX) $(GO) test -tags fts5 -v ./internal/common/subproc ./internal/agent/mcpconfig ./internal/agentctl/server/utility ./internal/agent/acpdbg ./internal/agent/codexdbg -run "^(TestWindowsPrepareGitLifecycleCommandRequestsNoConsoleWindow|TestPrepareNativeMCPProcessRequestsNoConsoleWindow|TestWindowsACPCommandProcAttrRequestsNoConsoleWindow|TestConfigureProcessTreeRequestsNoConsoleWindow)$$"
 	@echo "Running Windows managed runtime cache tests..."
 	# Scoped to the Windows-tagged test only: untagged tests in this package use os.Symlink
 	# which requires Developer Mode on Windows. Add new //go:build windows tests here.

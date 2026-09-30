@@ -24,3 +24,15 @@ func TestConfigureProcessTreeStartsSuspended(t *testing.T) {
 		t.Fatalf("CreationFlags = %#x, want CREATE_NEW_PROCESS_GROUP", cmd.SysProcAttr.CreationFlags)
 	}
 }
+
+func TestConfigureProcessTreeRequestsNoConsoleWindow(t *testing.T) {
+	cmd := exec.Command("cmd.exe")
+	configureProcessTree(cmd)
+
+	if cmd.SysProcAttr == nil {
+		t.Fatal("configureProcessTree did not set process attributes")
+	}
+	if cmd.SysProcAttr.CreationFlags&windows.CREATE_NO_WINDOW == 0 {
+		t.Fatalf("CreationFlags = %#x, want CREATE_NO_WINDOW", cmd.SysProcAttr.CreationFlags)
+	}
+}

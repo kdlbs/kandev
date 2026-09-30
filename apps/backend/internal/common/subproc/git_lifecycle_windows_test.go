@@ -7,9 +7,37 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"syscall"
 	"testing"
 	"time"
+
+	"golang.org/x/sys/windows"
 )
+
+func TestWindowsPrepareGitLifecycleCommandRequestsNoConsoleWindow(t *testing.T) {
+	cmd := exec.Command("git", "status")
+	cmd.SysProcAttr = &syscall.SysProcAttr{CreationFlags: windows.BELOW_NORMAL_PRIORITY_CLASS}
+	if err := prepareGitLifecycleCommand(cmd); err != nil {
+		t.Fatalf("prepareGitLifecycleCommand: %v", err)
+	}
+	flags := cmd.SysProcAttr.CreationFlags
+	for _, want := range []uint32{
+		windows.BELOW_NORMAL_PRIORITY_CLASS,
+		syscall.CREATE_NEW_PROCESS_GROUP,
+		windows.CREATE_SUSPENDED,
+		windows.CREATE_NO_WINDOW,
+	} {
+		if flags&want == 0 {
+			t.Fatalf("CreationFlags = %#x, want %#x set", flags, want)
+		}
+	}
+
+	console := exec.Command("git", "status")
+	console.SysProcAttr = &syscall.SysProcAttr{CreationFlags: windows.CREATE_NEW_CONSOLE}
+	if err := prepareGitLifecycleCommand(console); err == nil {
+		t.Fatal("prepareGitLifecycleCommand accepted CREATE_NEW_CONSOLE")
+	}
+}
 
 func TestWindowsManagedGitJobCleanup(t *testing.T) {
 	dir := t.TempDir()

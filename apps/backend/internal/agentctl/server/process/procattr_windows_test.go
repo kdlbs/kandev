@@ -46,6 +46,23 @@ func TestWindowsSetManagedProcGroupStartsSuspended(t *testing.T) {
 	require.NotZero(t, cmd.SysProcAttr.CreationFlags&windows.CREATE_SUSPENDED)
 }
 
+func TestWindowsProcGroupsRequestNoConsoleWindow(t *testing.T) {
+	for name, configure := range map[string]func(*exec.Cmd){
+		"setProcGroup":        setProcGroup,
+		"setManagedProcGroup": setManagedProcGroup,
+		"setAgentProcGroup":   setAgentProcGroup,
+	} {
+		t.Run(name, func(t *testing.T) {
+			cmd := exec.Command(os.Args[0])
+			configure(cmd)
+
+			require.NotNil(t, cmd.SysProcAttr)
+			flags := cmd.SysProcAttr.CreationFlags
+			require.NotZero(t, flags&windows.CREATE_NO_WINDOW, "CreationFlags = %#x, want CREATE_NO_WINDOW", flags)
+		})
+	}
+}
+
 func TestWindowsProcessLifecycleJobKillsDescendants(t *testing.T) {
 	pidFile := filepath.Join(t.TempDir(), "child.pid")
 	cmd := fixtureCmd(fmt.Sprintf("delay-then-child %s 200 30", pidFile))
