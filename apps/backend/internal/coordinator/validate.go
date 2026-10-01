@@ -107,34 +107,61 @@ func ValidateContext(raw string) (string, error) {
 // (missing, cross-workspace, or CLI-passthrough), or a plain error when the
 // profile read itself fails.
 func (v *Validator) ValidateAgentProfile(ctx context.Context, workspaceID, agentProfileID string) error {
-	status, err := v.agentProfileStatus(ctx, workspaceID, agentProfileID)
-	if err != nil {
-		return err
-	}
-	switch status {
-	case ProfileStatusMissing:
-		return &FieldError{Field: "agent_profile_id", Message: "agent profile not found"}
-	case ProfileStatusPassthrough:
-		return &FieldError{
-			Field:   "agent_profile_id",
-			Message: "the coordinator needs Kandev's MCP tools, and this agent profile uses CLI passthrough",
-		}
-	}
-	return nil
+	return v.ValidateAgentProfileFor(ctx, workspaceID, agentProfileID, PatchFieldAgentProfileID)
 }
 
 // ValidateExecutorProfile returns a *FieldError naming "executor_profile_id"
 // when executorProfileID does not resolve to an existing executor profile, or
 // a plain error when the profile read itself fails.
 func (v *Validator) ValidateExecutorProfile(ctx context.Context, executorProfileID string) error {
-	status, err := v.executorProfileStatus(ctx, executorProfileID)
+	return v.ValidateExecutorProfileFor(ctx, executorProfileID, PatchFieldExecutorProfileID)
+}
+
+// ValidateAgentProfileFor is ValidateAgentProfile for the coordinator's own
+// agent (field agent_profile_id) or the agent for created tasks (field
+// task_agent_profile_id); the field selects the error text.
+func (v *Validator) ValidateAgentProfileFor(ctx context.Context, workspaceID, id, field string) error {
+	status, err := v.agentProfileStatus(ctx, workspaceID, id)
+	if err != nil {
+		return err
+	}
+	task := field == PatchFieldTaskAgentProfileID
+	switch status {
+	case ProfileStatusMissing:
+		msg := "agent profile not found"
+		if task {
+			msg = "task agent profile not found"
+		}
+		return &FieldError{Field: field, Message: msg}
+	case ProfileStatusPassthrough:
+		msg := "the coordinator needs Kandev's MCP tools, and this agent profile uses CLI passthrough"
+		if task {
+			msg = "this agent profile uses CLI passthrough, which created tasks cannot use here"
+		}
+		return &FieldError{Field: field, Message: msg}
+	}
+	return nil
+}
+
+// ValidateExecutorProfileFor is ValidateExecutorProfile for the named field.
+func (v *Validator) ValidateExecutorProfileFor(ctx context.Context, id, field string) error {
+	status, err := v.executorProfileStatus(ctx, id)
 	if err != nil {
 		return err
 	}
 	if status == ProfileStatusMissing {
-		return &FieldError{Field: "executor_profile_id", Message: "executor profile not found"}
+		msg := "executor profile not found"
+		if field == PatchFieldTaskExecutorProfileID {
+			msg = "task executor profile not found"
+		}
+		return &FieldError{Field: field, Message: msg}
 	}
 	return nil
+}
+
+// TaskPairStatus computes the statuses of the agent for created tasks.
+func (v *Validator) TaskPairStatus(ctx context.Context, workspaceID, taskAgentID, taskExecutorID string) (agentStatus, executorStatus ProfileStatus, err error) {
+	return v.ProfileStatus(ctx, workspaceID, taskAgentID, taskExecutorID)
 }
 
 // ProfileStatus computes the agent and executor profile statuses the

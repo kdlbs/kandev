@@ -396,7 +396,26 @@ func (s *Service) completeClaimedApproval(ctx context.Context, workspaceID, coor
 		return s.failApproval(ctx, workspaceID, coordinatorID, proposalID, token, "the target step is no longer eligible")
 	}
 
-	result, err := s.createApprovedTask(ctx, workspaceID, proposalID, spec, startsAgent)
+	outcome, err := s.newTaskAgentReads().taskAgent(ctx, workspaceID, coordinatorID, spec, startsAgent)
+	if err != nil {
+		s.logger.Warn("created-task agent read failed before proposal create",
+			zap.String("proposal_id", proposalID), zap.Error(err))
+		return nil, err
+	}
+	switch {
+	case outcome.StepGone:
+		return s.failApproval(ctx, workspaceID, coordinatorID, proposalID, token, "the target step is no longer eligible")
+	case outcome.WorkspaceGone, outcome.CoordinatorGone:
+		return nil, ErrNotFound
+	case outcome.Refusal != "":
+		s.logger.Warn("coordinator.created_task_agent refused",
+			zap.String("proposal_id", proposalID), zap.String("reason", outcome.Refusal))
+		return s.failApproval(ctx, workspaceID, coordinatorID, proposalID, token, outcome.Refusal)
+	}
+	s.logger.Info("coordinator.created_task_agent",
+		zap.String("proposal_id", proposalID), zap.String("source", outcome.Source))
+
+	result, err := s.createApprovedTask(ctx, workspaceID, proposalID, spec, startsAgent, outcome.Meta)
 	if err != nil {
 		return s.failApproval(ctx, workspaceID, coordinatorID, proposalID, token, err.Error())
 	}
@@ -421,7 +440,7 @@ func (s *Service) stepStillEligible(ctx context.Context, spec ProposalSpec, star
 // proposal: the frozen spec's fields, the reserved external id, the regular
 // board origin, and no session/auto-start intent
 // (proposals.md#no-agent-starts).
-func (s *Service) createApprovedTask(ctx context.Context, workspaceID, proposalID string, spec ProposalSpec, startsAgent bool) (taskservice.CreateTaskResult, error) {
+func (s *Service) createApprovedTask(ctx context.Context, workspaceID, proposalID string, spec ProposalSpec, startsAgent bool, addMeta map[string]any) (taskservice.CreateTaskResult, error) {
 	req := &taskservice.CreateTaskRequest{
 		WorkspaceID:             workspaceID,
 		WorkflowID:              spec.WorkflowID,
@@ -434,6 +453,14 @@ func (s *Service) createApprovedTask(ctx context.Context, workspaceID, proposalI
 	}
 	if startsAgent {
 		req.Metadata = map[string]interface{}{taskmodels.MetaKeyAutoStartOnCreate: true}
+	}
+	if len(addMeta) > 0 {
+		if req.Metadata == nil {
+			req.Metadata = map[string]interface{}{}
+		}
+		for k, v := range addMeta {
+			req.Metadata[k] = v
+		}
 	}
 	if spec.RepositoryID != "" {
 		req.Repositories = []taskservice.TaskRepositoryInput{{RepositoryID: spec.RepositoryID}}

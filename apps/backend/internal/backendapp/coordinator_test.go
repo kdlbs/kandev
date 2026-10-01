@@ -505,7 +505,7 @@ func TestRegisterCoordinatorDecisions_WiresDepsAndRecoversStaleProposal(t *testi
 		t.Fatalf("create workflow: %v", err)
 	}
 	if err := harness.workflowSvc.CreateStep(ctx, &wfmodels.WorkflowStep{
-		ID: stepID, WorkflowID: workflowID, Name: "Start", Position: 0, IsStartStep: true,
+		ID: stepID, WorkflowID: workflowID, Name: "Start", Position: 0, IsStartStep: true, AgentProfileID: "decisions-wiring-agent",
 	}); err != nil {
 		t.Fatalf("create step: %v", err)
 	}

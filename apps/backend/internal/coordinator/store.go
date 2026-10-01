@@ -123,6 +123,9 @@ func (s *Store) initSchema() error {
 	if err := s.migratePhase2(migrate); err != nil {
 		return err
 	}
+	if err := s.migrateTaskPair(migrate); err != nil {
+		return err
+	}
 	if err := migrate.Err(); err != nil {
 		return fmt.Errorf("required coordinator migration: %w", err)
 	}
@@ -146,6 +149,9 @@ type coordinatorRow struct {
 	WatchScope          string         `db:"watch_scope"`
 	AutonomyEnabled     bool           `db:"autonomy_enabled"`
 	CostCeilingSubcents sql.NullInt64  `db:"cost_ceiling_subcents"`
+
+	TaskAgentProfileID    string `db:"task_agent_profile_id"`
+	TaskExecutorProfileID string `db:"task_executor_profile_id"`
 }
 
 func (r *coordinatorRow) toCoordinator() *Coordinator {
@@ -162,6 +168,9 @@ func (r *coordinatorRow) toCoordinator() *Coordinator {
 		PolicyRevision:    r.PolicyRevision,
 		WatchScope:        r.WatchScope,
 		AutonomyEnabled:   r.AutonomyEnabled,
+
+		TaskAgentProfileID:    r.TaskAgentProfileID,
+		TaskExecutorProfileID: r.TaskExecutorProfileID,
 	}
 	if r.CostCeilingSubcents.Valid {
 		v := r.CostCeilingSubcents.Int64
@@ -178,11 +187,11 @@ func (r *coordinatorRow) toCoordinator() *Coordinator {
 	return c
 }
 
-const coordinatorColumns = `id, workspace_id, name, agent_profile_id, executor_profile_id, context, conversation_task_id, config_revision, created_at, updated_at, policy_json, policy_revision, watch_scope, autonomy_enabled, cost_ceiling_subcents`
+const coordinatorColumns = `id, workspace_id, name, agent_profile_id, executor_profile_id, context, conversation_task_id, config_revision, created_at, updated_at, policy_json, policy_revision, watch_scope, autonomy_enabled, cost_ceiling_subcents, task_agent_profile_id, task_executor_profile_id`
 
 // insertCoordinatorColumns lists the columns CreateCoordinator writes; the policy columns
 // keep their defaults.
-const insertCoordinatorColumns = `id, workspace_id, name, agent_profile_id, executor_profile_id, context, conversation_task_id, config_revision, created_at, updated_at`
+const insertCoordinatorColumns = `id, workspace_id, name, agent_profile_id, executor_profile_id, context, conversation_task_id, config_revision, created_at, updated_at, task_agent_profile_id, task_executor_profile_id`
 
 // CreateCoordinator inserts a new coordinator, assigning an id and timestamps
 // when unset. config_revision always starts at 0.
@@ -196,9 +205,10 @@ func (s *Store) CreateCoordinator(ctx context.Context, c *Coordinator) error {
 	c.ConfigRevision = 0
 	_, err := s.db.ExecContext(ctx, s.db.Rebind(`
 		INSERT INTO coordinators (`+insertCoordinatorColumns+`)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
 		c.ID, c.WorkspaceID, c.Name, c.AgentProfileID, c.ExecutorProfileID, c.Context,
-		nullableString(c.ConversationTaskID), c.ConfigRevision, c.CreatedAt, c.UpdatedAt)
+		nullableString(c.ConversationTaskID), c.ConfigRevision, c.CreatedAt, c.UpdatedAt,
+		c.TaskAgentProfileID, c.TaskExecutorProfileID)
 	if err != nil {
 		return fmt.Errorf("insert coordinator: %w", err)
 	}
@@ -366,6 +376,11 @@ type CoordinatorPatch struct {
 	ExecutorProfileID *string
 	Context           *string
 
+	// TaskAgentProfileID and TaskExecutorProfileID are the Agent for created
+	// tasks pair; changing them never touches the conversation.
+	TaskAgentProfileID    *string
+	TaskExecutorProfileID *string
+
 	// AutonomyEnabled is the phase 3 autonomy switch; nil leaves it unchanged.
 	AutonomyEnabled *bool
 	// CeilingSet marks CostCeilingSubcents as sent: a nil value with CeilingSet
@@ -383,6 +398,9 @@ type PatchResult struct {
 	// AutonomyChanged is true when autonomy_enabled or cost_ceiling_subcents
 	// differs from the row the PATCH read.
 	AutonomyChanged bool
+	// TaskPairChanged is true when either task pair value differs from the
+	// row the PATCH read.
+	TaskPairChanged bool
 }
 
 // PatchValidator is invoked once inside the PATCH transaction with the
@@ -390,7 +408,7 @@ type PatchResult struct {
 // 7). It may perform its own reads, through other stores' reader pools, but
 // never through the coordinator store's writer pool the lock holds. A
 // returned error aborts the PATCH without writing.
-type PatchValidator func(ctx context.Context, merged *Coordinator) error
+type PatchValidator func(ctx context.Context, merged, stored *Coordinator) error
 
 // PatchCoordinator applies patch to the coordinator with the given id, scoped
 // to workspaceID, under the per-coordinator write lock (decision 7): SQLite
@@ -520,7 +538,7 @@ func (s *Store) patchCoordinatorBody(ctx context.Context, exec coordinatorExec, 
 
 	merged := mergeCoordinatorPatch(row, patch)
 	if validate != nil {
-		if err := validate(ctx, merged); err != nil {
+		if err := validate(ctx, merged, row.toCoordinator()); err != nil {
 			return nil, err
 		}
 	}
@@ -549,6 +567,8 @@ func (s *Store) patchCoordinatorBody(ctx context.Context, exec coordinatorExec, 
 		Coordinator:               merged,
 		ClearedConversationTaskID: clearedConversationTaskID,
 		AutonomyChanged:           autonomySettingsChanged(row, merged),
+		TaskPairChanged: merged.TaskAgentProfileID != row.TaskAgentProfileID ||
+			merged.TaskExecutorProfileID != row.TaskExecutorProfileID,
 	}, nil
 }
 
@@ -586,11 +606,12 @@ func configChangeEffects(row *coordinatorRow, merged *Coordinator) (cleared, con
 // built against changes no row and returns the guard's mismatch error.
 func (s *Store) writePatchedCoordinator(ctx context.Context, exec coordinatorExec, rebind func(string) string, row *coordinatorRow, merged *Coordinator, conversationTaskID *string, configRevision int64, now time.Time, guard *patchGuard) error {
 	query := `
-		UPDATE coordinators SET name = ?, agent_profile_id = ?, executor_profile_id = ?, context = ?, conversation_task_id = ?, config_revision = ?, autonomy_enabled = ?, cost_ceiling_subcents = ?, updated_at = ?
+		UPDATE coordinators SET name = ?, agent_profile_id = ?, executor_profile_id = ?, context = ?, conversation_task_id = ?, config_revision = ?, autonomy_enabled = ?, cost_ceiling_subcents = ?, task_agent_profile_id = ?, task_executor_profile_id = ?, updated_at = ?
 		WHERE id = ? AND workspace_id = ?`
 	args := []any{merged.Name, merged.AgentProfileID, merged.ExecutorProfileID, merged.Context,
 		nullableString(conversationTaskID), configRevision,
-		autonomyColumn(merged.AutonomyEnabled), nullableInt64(merged.CostCeilingSubcents), now, row.ID, row.WorkspaceID}
+		autonomyColumn(merged.AutonomyEnabled), nullableInt64(merged.CostCeilingSubcents),
+		merged.TaskAgentProfileID, merged.TaskExecutorProfileID, now, row.ID, row.WorkspaceID}
 	pinned := guard != nil && guard.pinContext != nil
 	if pinned {
 		query += ` AND context = ?`
@@ -652,7 +673,8 @@ func lockedCoordinatorRow(ctx context.Context, exec coordinatorExec, rebind func
 		&row.ID, &row.WorkspaceID, &row.Name, &row.AgentProfileID, &row.ExecutorProfileID,
 		&row.Context, &row.ConversationTaskID, &row.ConfigRevision, &row.CreatedAt, &row.UpdatedAt,
 		&row.PolicyJSON, &row.PolicyRevision, &row.WatchScope,
-		&row.AutonomyEnabled, &row.CostCeilingSubcents)
+		&row.AutonomyEnabled, &row.CostCeilingSubcents,
+		&row.TaskAgentProfileID, &row.TaskExecutorProfileID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrNotFound
@@ -677,6 +699,12 @@ func mergeCoordinatorPatch(row *coordinatorRow, patch CoordinatorPatch) *Coordin
 	}
 	if patch.Context != nil {
 		merged.Context = *patch.Context
+	}
+	if patch.TaskAgentProfileID != nil {
+		merged.TaskAgentProfileID = *patch.TaskAgentProfileID
+	}
+	if patch.TaskExecutorProfileID != nil {
+		merged.TaskExecutorProfileID = *patch.TaskExecutorProfileID
 	}
 	if patch.AutonomyEnabled != nil {
 		merged.AutonomyEnabled = *patch.AutonomyEnabled

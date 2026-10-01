@@ -28,12 +28,14 @@ const (
 // owners' validators.
 type setupRequest struct {
 	name, agentProfileID, executorProfileID, context string
+	taskAgentProfileID, taskExecutorProfileID        string
 	watches, policy, goal                            json.RawMessage
 }
 
 // setupPlan is a fully validated setup, ready to insert.
 type setupPlan struct {
 	name, agentProfileID, executorProfileID, context string
+	taskAgentProfileID, taskExecutorProfileID        string
 	watches                                          *watchesRequest
 	policy                                           Policy
 	goal                                             *goalInput
@@ -76,7 +78,8 @@ func decodeSetupRequest(body []byte) (setupRequest, error) {
 	for _, m := range []struct {
 		key string
 		dst *string
-	}{{PatchFieldName, &req.name}, {PatchFieldAgentProfileID, &req.agentProfileID}, {PatchFieldExecutorProfileID, &req.executorProfileID}, {PatchFieldContext, &req.context}} {
+	}{{PatchFieldName, &req.name}, {PatchFieldAgentProfileID, &req.agentProfileID}, {PatchFieldExecutorProfileID, &req.executorProfileID}, {PatchFieldContext, &req.context},
+		{PatchFieldTaskAgentProfileID, &req.taskAgentProfileID}, {PatchFieldTaskExecutorProfileID, &req.taskExecutorProfileID}} {
 		v, err := stringMember(top, m.key)
 		if err != nil {
 			return setupRequest{}, err
@@ -123,6 +126,9 @@ func (s *Service) validateSetup(ctx context.Context, workspaceID string, req set
 		return nil, stepError(setupStepIdentity, err)
 	}
 	if err = s.validator.ValidateExecutorProfile(ctx, req.executorProfileID); err != nil {
+		return nil, stepError(setupStepIdentity, err)
+	}
+	if plan.taskAgentProfileID, plan.taskExecutorProfileID, err = s.validateTaskPair(ctx, workspaceID, req.taskAgentProfileID, req.taskExecutorProfileID); err != nil {
 		return nil, stepError(setupStepIdentity, err)
 	}
 	if plan.watches, err = s.validateSetupWatches(ctx, workspaceID, req.watches); err != nil {
@@ -237,6 +243,7 @@ func (s *Service) insertSetup(ctx context.Context, workspaceID string, plan *set
 	c := &Coordinator{
 		ID: uuid.NewString(), WorkspaceID: workspaceID, Name: plan.name,
 		AgentProfileID: plan.agentProfileID, ExecutorProfileID: plan.executorProfileID, Context: plan.context,
+		TaskAgentProfileID: plan.taskAgentProfileID, TaskExecutorProfileID: plan.taskExecutorProfileID,
 		CreatedAt: now, UpdatedAt: now, PolicyJSON: &policy, PolicyRevision: 1, WatchScope: plan.watches.scope,
 	}
 	tx, err := s.store.db.BeginTxx(ctx, nil)
@@ -256,9 +263,9 @@ func (s *Service) insertSetup(ctx context.Context, workspaceID string, plan *set
 func (s *Service) insertSetupRows(ctx context.Context, tx coordinatorExec, c *Coordinator, plan *setupPlan, now time.Time) error {
 	if _, err := tx.ExecContext(ctx, s.store.db.Rebind(`
 		INSERT INTO coordinators (`+insertCoordinatorColumns+`, policy_json, policy_revision, watch_scope)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
 		c.ID, c.WorkspaceID, c.Name, c.AgentProfileID, c.ExecutorProfileID, c.Context,
-		nullableString(c.ConversationTaskID), c.ConfigRevision, now, now, *c.PolicyJSON, c.PolicyRevision, c.WatchScope); err != nil {
+		nullableString(c.ConversationTaskID), c.ConfigRevision, now, now, c.TaskAgentProfileID, c.TaskExecutorProfileID, *c.PolicyJSON, c.PolicyRevision, c.WatchScope); err != nil {
 		return fmt.Errorf("insert coordinator: %w", err)
 	}
 	if plan.watches.scope == watchScopeSelected {

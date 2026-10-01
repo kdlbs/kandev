@@ -150,7 +150,12 @@ func (h *Handlers) httpGetCoordinator(c *gin.Context) {
 		h.respondError(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, dto.WithProfileStatuses(agentStatus, executorStatus))
+	taskAgent, taskExecutor, err := h.service.TaskPairStatuses(ctx, found)
+	if err != nil {
+		h.respondError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, dto.WithProfileStatuses(agentStatus, executorStatus).WithTaskPairStatuses(taskAgent, taskExecutor))
 }
 
 // httpPatchCoordinator backs PATCH /api/v1/workspaces/:id/coordinators/:cid.
