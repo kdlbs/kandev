@@ -3,6 +3,7 @@ package coordinator
 import (
 	"context"
 	"fmt"
+	"github.com/kandev/kandev/internal/coordinator/replay"
 	"time"
 
 	"go.uber.org/zap"
@@ -93,6 +94,7 @@ func (s *Service) runActivityRetention(ctx context.Context) {
 		}
 	}
 	s.pruneOutcomeRows(ctx)
+	s.pruneReplayRows(ctx)
 }
 
 // pruneOutcomeRows deletes outcome, feedback and seen rows past their
@@ -104,6 +106,24 @@ func (s *Service) pruneOutcomeRows(ctx context.Context) {
 		if err != nil {
 			if ctx.Err() == nil {
 				s.logger.Warn("outcomes retention batch failed", zap.Error(err))
+			}
+			return
+		}
+		if n == 0 {
+			return
+		}
+	}
+}
+
+// pruneReplayRows deletes replay result rows past their retention in batches;
+// an error is logged and the next run retries.
+func (s *Service) pruneReplayRows(ctx context.Context) {
+	cutoff := s.store.now().UTC().Add(-replay.Retention)
+	for ctx.Err() == nil {
+		n, err := s.store.PruneReplayResults(ctx, cutoff, outcomesRetentionBatch)
+		if err != nil {
+			if ctx.Err() == nil {
+				s.logger.Warn("replay retention batch failed", zap.Error(err))
 			}
 			return
 		}

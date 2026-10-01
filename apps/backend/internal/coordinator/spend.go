@@ -122,8 +122,14 @@ func (s *Service) Spend(ctx context.Context, c *Coordinator, now time.Time) (Spe
 		s.logger.Warn("coordinator spend: window read failed", zap.String("coordinator_id", c.ID), zap.Error(err))
 		return SpendReading{}, fmt.Errorf("coordinator spend window: %w", err)
 	}
+	extraWindow, err := s.store.ExtraSpend(ctx, c.ID, now.Add(-spendWindow), now)
+	if err != nil {
+		spendReadFailed.Add(spendReadWindow, 1)
+		s.logger.Warn("coordinator spend: replay spend read failed", zap.String("coordinator_id", c.ID), zap.Error(err))
+		return SpendReading{}, fmt.Errorf("coordinator spend replay: %w", err)
+	}
 	reading := SpendReading{
-		WindowSubcents: window.CostSubcents,
+		WindowSubcents: saturatingAdd(window.CostSubcents, extraWindow),
 		Measurable:     !window.HasUnpriced,
 		Degraded:       window.HasUnpriced,
 	}
@@ -133,7 +139,13 @@ func (s *Service) Spend(ctx context.Context, c *Coordinator, now time.Time) (Spe
 		s.logger.Warn("coordinator spend: 7-day read failed", zap.String("coordinator_id", c.ID), zap.Error(err))
 		return reading, nil
 	}
-	reading.Mean7dSubcents = mean.CostSubcents / spendMeanDays
+	extraMean, err := s.store.ExtraSpend(ctx, c.ID, now.Add(-spendMeanWindow), now)
+	if err != nil {
+		spendReadFailed.Add(spendReadMean, 1)
+		s.logger.Warn("coordinator spend: replay 7-day read failed", zap.String("coordinator_id", c.ID), zap.Error(err))
+		return reading, nil
+	}
+	reading.Mean7dSubcents = saturatingAdd(mean.CostSubcents, extraMean) / spendMeanDays
 	reading.Mean7dKnown = true
 	return reading, nil
 }
