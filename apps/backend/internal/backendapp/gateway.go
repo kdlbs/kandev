@@ -149,6 +149,9 @@ func provideGateway(
 	scriptSvc := &scriptServiceAdapter{taskSvc: taskSvc}
 	if lifecycleMgr != nil {
 		gateway.SetLifecycleManager(lifecycleMgr, userSvc, scriptSvc)
+		if terminalSvc != nil {
+			gateway.SetTerminalService(terminalSvc)
+		}
 		gateway.SetLSPHandler(lifecycleMgr, userSvc, lspMaxConnections...)
 		if lspContinuityEnabled {
 			gateway.LSPHandler.EnableContinuity(acquireSessionFence, eventBus)
@@ -360,6 +363,13 @@ func provideGateway(
 					ObservedAt: observation.ObservedAt,
 					Known:      observationErr == nil && observation.Known,
 				}), nil
+			},
+			LoadCompletionGate: func(ctx context.Context, taskID string) (*statussummary.CompletionGateSummary, error) {
+				gate, err := taskRepo.GetTaskCompletionGate(ctx, taskID)
+				if err != nil {
+					return nil, err
+				}
+				return statussummary.CompletionGateSummaryFromSnapshot(gate), nil
 			},
 			ResolveWorkspace: func(ctx context.Context, taskID string) (string, error) {
 				task, err := taskRepo.GetTask(ctx, taskID)

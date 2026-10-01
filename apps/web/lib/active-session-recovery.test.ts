@@ -127,6 +127,23 @@ describe("active session recovery ownership", () => {
       ),
     ).toBeNull();
   });
+  it("keeps a canceled session actionable only for the typed managed clone repair", () => {
+    const managedError = {
+      message: "Workspace needs repair",
+      occurred_at: FAILED_AT,
+      stamp: "managed-clone-stamp",
+      scope: "session",
+      code: "managed_clone_relocation_required",
+      recovery_actions: ["relocate_and_resume"],
+    };
+    const model = selectActiveSessionRecovery(
+      { ...session, state: "CANCELLED", metadata: { last_agent_error: managedError } },
+      [],
+    );
+    expect(model?.kind).toBe("managed_clone_relocation_required");
+    expect(model?.stamp).toBe("managed-clone-stamp");
+    expect(selectActiveSessionRecovery({ ...session, state: "CANCELLED" }, [])).toBeNull();
+  });
   it.each(["RUNNING", "STARTING", "COMPLETED", "CANCELLED"])(
     "does not block %s from retained errors",
     (state) => {

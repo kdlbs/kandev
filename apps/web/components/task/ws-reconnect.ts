@@ -24,6 +24,7 @@ export function teardownWebSocket(
 }
 
 const STABLE_CONNECTION_MS = 500;
+const INITIAL_COMMAND_COMPLETED_CLOSE_REASON = "initial_command_completed";
 
 export function reconnectDelayMs(attempt: number): number {
   const cappedAttempt = Math.min(attempt, 5);
@@ -130,6 +131,14 @@ export function startReconnectLoop({
           if (stableOpenTimeout) {
             clearTimeout(stableOpenTimeout);
             stableOpenTimeout = null;
+          }
+          if (event.code === 1000 && event.reason === INITIAL_COMMAND_COMPLETED_CLOSE_REASON) {
+            log("Terminal initial command completed; stopping reconnect loop", {
+              code: event.code,
+              reason: event.reason,
+            });
+            isMounted = false;
+            return;
           }
           const nextDelay = reconnectDelayMs(retryAttempt);
           retryAttempt += 1;

@@ -4,6 +4,7 @@ import path from "node:path";
 import { test, expect } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
 import { SessionPage } from "../../pages/session-page";
+import type { FileTreePage } from "../../pages/file-tree-page";
 import { GitHelper, makeGitEnv, createStandardProfile } from "../../helpers/git-helper";
 
 // DnD in file-browser.tsx uses native HTML5 drag events (dragstart, dragover,
@@ -92,16 +93,16 @@ async function setupTask({
   return session;
 }
 
-async function dispatchHtmlDnd(testPage: Page, sourcePath: string, targetPath: string) {
+async function dispatchHtmlDnd(
+  testPage: Page,
+  fileTree: FileTreePage,
+  sourcePath: string,
+  targetPath: string,
+) {
   // Virtualized trees can unmount the source while the target is revealed.
   // Keep the browser DataTransfer on the page between the two scrolls so the
   // source and target do not need to be mounted at the same time.
-  const source = testPage.locator(
-    `[data-testid="file-tree-node"][data-path=${JSON.stringify(sourcePath)}]:visible`,
-  );
-  const target = testPage.locator(
-    `[data-testid="file-tree-node"][data-path=${JSON.stringify(targetPath)}]:visible`,
-  );
+  const source = await fileTree.waitForFileTreeNode(sourcePath);
   await expect(source).toBeVisible({ timeout: 30_000 });
   await source.scrollIntoViewIfNeeded();
   await testPage.evaluate((nodePath) => {
@@ -126,6 +127,7 @@ async function dispatchHtmlDnd(testPage: Page, sourcePath: string, targetPath: s
     });
   }, sourcePath);
 
+  const target = await fileTree.waitForFileTreeNode(targetPath);
   await expect(target).toBeVisible({ timeout: 30_000 });
   await target.scrollIntoViewIfNeeded();
   await testPage.evaluate(
@@ -184,10 +186,7 @@ test.describe("File tree drag and drop", () => {
       requiredPath: "movable.ts",
     });
 
-    await session.fileTree.waitForFileTreeNode("movable.ts");
-    await session.fileTree.waitForFileTreeNode("target-dir");
-
-    await dispatchHtmlDnd(testPage, "movable.ts", "target-dir");
+    await dispatchHtmlDnd(testPage, session.fileTree, "movable.ts", "target-dir");
 
     // The file is removed from the root immediately (optimistic update).
     await expect(session.fileTreeNode("movable.ts")).toHaveCount(0, { timeout: 10_000 });
@@ -231,7 +230,7 @@ test.describe("File tree drag and drop", () => {
     // preventDefault is never called, which means the browser would never
     // fire drop in real usage. Dispatching events directly bypasses that
     // guard, but the drop handler also calls isDropInvalid and bails.
-    await dispatchHtmlDnd(testPage, "selfdir", "selfdir");
+    await dispatchHtmlDnd(testPage, session.fileTree, "selfdir", "selfdir");
 
     // Tree is unchanged: folder is still at root with its original child.
     await expect(session.fileTreeNode("selfdir")).toBeVisible({ timeout: 5_000 });

@@ -3,13 +3,20 @@ import { payloadRetentionMarker } from "@/lib/utils/tool-payload-retention";
 import type { StateCreator } from "zustand";
 import { original } from "immer";
 import type { Message, TaskSession } from "@/lib/types/http";
-import type { QueueMeta, QueueOperationToken, SessionSlice, SessionSliceState } from "./types";
+import type {
+  QueueMeta,
+  QueueOperationToken,
+  SessionSlice,
+  SessionSliceState,
+  TaskSessionHydrationEpoch,
+} from "./types";
 import { buildTurnActions, isSettledSessionState, parseTurnTimestamp } from "./turn-actions";
 import {
   buildTaskSessionProjectionActions,
   mergeOrphanPendingActionProjection,
 } from "./task-session-projection-actions";
 import { reconcileMessages } from "./message-signature";
+import { resolveRunningNotices } from "./running-notice-activity";
 import {
   buildPromptMessageActions,
   fanOutTranscriptPrompts,
@@ -72,8 +79,29 @@ function applyMessageMeta(
  * Merge message fields: only overwrite existing fields with non-undefined incoming values.
  * This handles duplicate events from multiple sources.
  */
+/** Keep an already acknowledged Git push dismissal across a delayed update without the marker. */
+function retainDismissedMetadata(
+  target: Record<string, unknown>,
+  source: Record<string, unknown>,
+): boolean {
+  if (source.metadata === undefined) return false;
+  const targetMetadata = target.metadata as Record<string, unknown> | undefined;
+  const dismissedAt = targetMetadata?.git_operation_error_dismissed_at;
+  if (typeof dismissedAt !== "string" || dismissedAt === "") return false;
+  const sourceMetadata =
+    source.metadata !== null && typeof source.metadata === "object"
+      ? (source.metadata as Record<string, unknown>)
+      : {};
+  target.metadata = {
+    ...sourceMetadata,
+    git_operation_error_dismissed_at: dismissedAt,
+  };
+  return true;
+}
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function mergeMessageFields(target: Record<string, unknown>, source: Record<string, any>) {
+  const noticeResolved = (target.metadata as Message["metadata"])?.running_notice_resolved === true;
   for (const key of Object.keys(source)) {
     if (
       key === "metadata" &&
@@ -81,24 +109,16 @@ function mergeMessageFields(target: Record<string, unknown>, source: Record<stri
       !payloadRetentionMarker(source.metadata)
     )
       continue;
-    if (key === "metadata" && source.metadata !== undefined) {
-      const targetMetadata = target.metadata as Record<string, unknown> | undefined;
-      const dismissedAt = targetMetadata?.git_operation_error_dismissed_at;
-      if (typeof dismissedAt === "string" && dismissedAt !== "") {
-        const sourceMetadata =
-          source.metadata !== null && typeof source.metadata === "object"
-            ? (source.metadata as Record<string, unknown>)
-            : {};
-        target.metadata = {
-          ...sourceMetadata,
-          git_operation_error_dismissed_at: dismissedAt,
-        };
-        continue;
-      }
-    }
+    if (key === "metadata" && retainDismissedMetadata(target, source)) continue;
     if (source[key] !== undefined) {
       target[key] = source[key];
     }
+  }
+  if (noticeResolved && target.metadata) {
+    target.metadata = {
+      ...(target.metadata as Message["metadata"]),
+      running_notice_resolved: true,
+    };
   }
 }
 
@@ -126,8 +146,10 @@ function removeMessageByID(messages: Message[], messageId: string) {
 function mergeTaskSessionSnapshot(
   existing: TaskSession | undefined,
   incoming: TaskSession,
-  currentActivityEpoch: number,
-  requestActivityEpoch: number | undefined,
+  epochs: {
+    current: { activity: number; readCursor: number };
+    request?: { activity: number; readCursor: number };
+  },
 ): TaskSession {
   const snapshot = {
     ...incoming,
@@ -139,17 +161,42 @@ function mergeTaskSessionSnapshot(
 
   const merged = mergeTaskSession(existing, snapshot);
   const activityChangedDuringRequest =
-    requestActivityEpoch === undefined
-      ? currentActivityEpoch > 0
-      : currentActivityEpoch > requestActivityEpoch;
-  if (!activityChangedDuringRequest) return merged;
+    epochs.request === undefined
+      ? epochs.current.activity > 0
+      : epochs.current.activity > epochs.request.activity;
+  const readCursorChangedDuringRequest =
+    epochs.request === undefined
+      ? epochs.current.readCursor > 0
+      : epochs.current.readCursor > epochs.request.readCursor;
+  if (!activityChangedDuringRequest && !readCursorChangedDuringRequest) return merged;
 
   return {
     ...merged,
-    foreground_activity: existing.foreground_activity,
-    active_subagent_count: existing.active_subagent_count,
-    supports_steering: existing.supports_steering,
+    ...(activityChangedDuringRequest
+      ? {
+          foreground_activity: existing.foreground_activity,
+          active_subagent_count: existing.active_subagent_count,
+          supports_steering: existing.supports_steering,
+        }
+      : {}),
+    ...(readCursorChangedDuringRequest
+      ? { last_read_message_id: existing.last_read_message_id }
+      : {}),
   };
+}
+
+function mergeTaskSessionActionSnapshot(
+  existing: TaskSession | undefined,
+  incoming: TaskSession,
+  currentEpoch: TaskSessionHydrationEpoch,
+  requestEpoch?: TaskSessionHydrationEpoch,
+): TaskSession {
+  if (!existing) return incoming;
+  if (!requestEpoch) return mergeTaskSession(existing, incoming);
+  return mergeTaskSessionSnapshot(existing, incoming, {
+    current: currentEpoch,
+    request: requestEpoch,
+  });
 }
 
 function reconcileMcpAttachmentHistory(
@@ -224,7 +271,7 @@ export const defaultSessionState: SessionSliceState = {
     reconcileEpochBySession: {},
     settledBoundaryBySession: {},
   },
-  taskSessions: { items: {}, activityEpochBySession: {} },
+  taskSessions: { items: {}, activityEpochBySession: {}, readCursorEpochBySession: {} },
   taskSessionsByTask: {
     itemsByTaskId: {},
     loadingByTaskId: {},
@@ -290,6 +337,7 @@ function buildUpdateMessage(set: ImmerSet) {
     set((draft) => {
       const messages = draft.messages.bySession[message.session_id];
       if (messages) {
+        resolveRunningNotices(messages, message);
         const index = messages.findIndex((entry) => entry.id === message.id);
         if (index !== -1) {
           const merged = { ...messages[index] };
@@ -323,6 +371,7 @@ function buildMessageActions(set: ImmerSet) {
       set((draft) => {
         const sessionId = message.session_id;
         if (!draft.messages.bySession[sessionId]) draft.messages.bySession[sessionId] = [];
+        resolveRunningNotices(draft.messages.bySession[sessionId], message);
         const existingIndex = draft.messages.bySession[sessionId].findIndex(
           (entry) => entry.id === message.id,
         );
@@ -348,6 +397,7 @@ function buildMessageActions(set: ImmerSet) {
             sessionMessages = draft.messages.bySession[message.session_id] = [];
           }
           if (sessionMessages) {
+            resolveRunningNotices(sessionMessages, message);
             const hasMessage = sessionMessages.some((entry) => entry.id === message.id);
             if (hasMessage) mergeMessageAtIndex(sessionMessages, message);
             else if (isTransientRetryNotice(message)) sessionMessages.push(message);
@@ -652,6 +702,9 @@ function buildRemoveTaskSessionAction(set: ImmerSet) {
       if (draft.taskSessions.activityEpochBySession) {
         delete draft.taskSessions.activityEpochBySession[sessionId];
       }
+      if (draft.taskSessions.readCursorEpochBySession) {
+        delete draft.taskSessions.readCursorEpochBySession[sessionId];
+      }
       const sessionsByTask = draft.taskSessionsByTask.itemsByTaskId[taskId];
       if (sessionsByTask) {
         draft.taskSessionsByTask.itemsByTaskId[taskId] = sessionsByTask.filter(
@@ -703,18 +756,24 @@ function buildTaskSessionReconciliationActions(set: ImmerSet) {
     setTaskSessionsForTask: (
       taskId: string,
       sessions: Parameters<SessionSlice["setTaskSessionsForTask"]>[1],
-      activityEpochsAtRequestStart: Parameters<SessionSlice["setTaskSessionsForTask"]>[2],
+      hydrationEpochsAtRequestStart: Parameters<SessionSlice["setTaskSessionsForTask"]>[2],
     ) =>
       set((draft) => {
         const merged = sessions.map((session) => {
           const existing = draft.taskSessions.items[session.id];
+          const requestEpoch = hydrationEpochsAtRequestStart[session.id];
           resetQueueStateForReincarnation(draft, existing, session);
-          const snapshot = mergeTaskSessionSnapshot(
-            existing,
-            session,
-            draft.taskSessions.activityEpochBySession?.[session.id] ?? 0,
-            activityEpochsAtRequestStart[session.id],
-          );
+          const snapshot = mergeTaskSessionSnapshot(existing, session, {
+            current: {
+              activity: draft.taskSessions.activityEpochBySession?.[session.id] ?? 0,
+              readCursor: draft.taskSessions.readCursorEpochBySession?.[session.id] ?? 0,
+            },
+            request: requestEpoch,
+          });
+          if (snapshot.last_read_message_id !== existing?.last_read_message_id) {
+            const epochs = (draft.taskSessions.readCursorEpochBySession ??= {});
+            epochs[session.id] = (epochs[session.id] ?? 0) + 1;
+          }
           return mergeOrphanPendingActionProjection(
             draft.pendingActionProjectionsBySessionId,
             snapshot,
@@ -756,6 +815,10 @@ function buildTaskSessionReconciliationActions(set: ImmerSet) {
           draft.pendingActionProjectionsBySessionId,
           existing ? mergeTaskSession(existing, session) : session,
         );
+        if (merged.last_read_message_id !== existing?.last_read_message_id) {
+          const epochs = (draft.taskSessions.readCursorEpochBySession ??= {});
+          epochs[session.id] = (epochs[session.id] ?? 0) + 1;
+        }
         draft.taskSessions.items[session.id] = merged;
         const list = draft.taskSessionsByTask.itemsByTaskId[taskId];
         if (list) {
@@ -774,14 +837,30 @@ function buildTaskSessionReconciliationActions(set: ImmerSet) {
 /** Create the basic task-session set, read-cursor, removal, and loading actions. */
 function buildTaskSessionActions(set: ImmerSet) {
   return {
-    setTaskSession: (session: Parameters<SessionSlice["setTaskSession"]>[0]) =>
+    setTaskSession: (
+      session: Parameters<SessionSlice["setTaskSession"]>[0],
+      hydrationEpochAtRequestStart?: TaskSessionHydrationEpoch,
+    ) =>
       set((draft) => {
         const existingSession = draft.taskSessions.items[session.id];
         resetQueueStateForReincarnation(draft, existingSession, session);
+        const mergedSnapshot = mergeTaskSessionActionSnapshot(
+          existingSession,
+          session,
+          {
+            activity: draft.taskSessions.activityEpochBySession?.[session.id] ?? 0,
+            readCursor: draft.taskSessions.readCursorEpochBySession?.[session.id] ?? 0,
+          },
+          hydrationEpochAtRequestStart,
+        );
         const mergedSession = mergeOrphanPendingActionProjection(
           draft.pendingActionProjectionsBySessionId,
-          existingSession ? mergeTaskSession(existingSession, session) : session,
+          mergedSnapshot,
         );
+        if (mergedSession.last_read_message_id !== existingSession?.last_read_message_id) {
+          const epochs = (draft.taskSessions.readCursorEpochBySession ??= {});
+          epochs[session.id] = (epochs[session.id] ?? 0) + 1;
+        }
         draft.taskSessions.items[session.id] = mergedSession;
         const sessionsByTask = draft.taskSessionsByTask.itemsByTaskId[session.task_id];
         if (sessionsByTask) {
@@ -796,6 +875,10 @@ function buildTaskSessionActions(set: ImmerSet) {
       set((draft) => {
         const session = draft.taskSessions.items[sessionId];
         if (!session) return;
+        if (session.last_read_message_id !== lastReadMessageId) {
+          const epochs = (draft.taskSessions.readCursorEpochBySession ??= {});
+          epochs[sessionId] = (epochs[sessionId] ?? 0) + 1;
+        }
         session.last_read_message_id = lastReadMessageId;
         const sessionsByTask = draft.taskSessionsByTask.itemsByTaskId[session.task_id];
         if (sessionsByTask) {
@@ -1004,6 +1087,10 @@ export const createSessionSlice: StateCreator<
   setActiveModel: (sessionId, modelId) =>
     set((draft) => {
       draft.activeModel.bySessionId[sessionId] = modelId;
+    }),
+  clearActiveModel: (sessionId) =>
+    set((draft) => {
+      delete draft.activeModel.bySessionId[sessionId];
     }),
   ...buildTaskPlanActions(set, get),
   ...buildWalkthroughActions(set, get),

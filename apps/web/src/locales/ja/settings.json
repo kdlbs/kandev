@@ -1,4 +1,10 @@
 {
+  "agentTabCloseButton": "エージェントタブの閉じるボタン",
+  "agentTabCloseButtonDescription": "デスクトップのエージェントタブで、×ボタンを押したときの動作を選択します。",
+  "deleteSession": "セッションを削除",
+  "hidePanel": "パネルを非表示",
+  "deleteSessionCloseDescription": "確認後、会話を完全に削除します。",
+  "hidePanelCloseDescription": "パネルのみを閉じます。後で「+ > エージェント」から開き直せます。",
   "aSecretNameAndValueAreRequired": "シークレット名と値が必要。",
   "aSecretNameIsRequired": "シークレット名が必要。",
   "aboutAffectedKandevMcpTools": "影響を受ける Kandev MCP ツールについて",
@@ -426,7 +432,7 @@
   "makeTheSelectedSplit40Pixels3": "選択した split を 40 ピクセル低くする。",
   "makeTheSelectedSplit40Pixels4": "選択した split を 40 ピクセル高くする。",
   "makesAgentctlValuesAvailableToPlugins": "agentctl の値を plugins と他の利用先に公開する。組み込み status bar は host 専用のまま。",
-  "manageApiKeysAndCredentialsSecrets": "API keys と credentials を管理。Secrets は保存時に暗号化され、executor profile の env vars 経由で agent 環境に注入される。",
+  "manageApiKeysAndCredentialsSecrets": "シークレットは保存時に暗号化されます。保存してもセッション環境には追加されません。使用するには、エージェントプロファイル、エグゼキュータープロファイル、またはリポジトリ環境にバインドしてください。",
   "globalScope": "グローバル",
   "modelWithValue": "モデル: {{model}}",
   "settingsMenu": "設定メニュー",
@@ -440,7 +446,7 @@
   "settingsMenuShapePerDevice": "この device にだけ適用。他の device と browser は別の選択のまま。",
   "temperatureWithValue": "Temperature: {{temperature}}",
   "workspaceScope": "ワークスペース",
-  "workspaceSecretsDescription": "この workspace の repositories で使える secrets を管理。共有 agent と executor profiles は Global secrets だけ使える。",
+  "workspaceSecretsDescription": "シークレットを保存すると値は保存されますが、セッション環境には追加されません。使用するには、このワークスペースのリポジトリにバインドしてください。共有プロファイルではワークスペースのシークレットを使用できません。",
   "workspacesAndAccess": "Workspaces と Access",
   "revealSecretNamed": "secret {{name}} を表示",
   "hideSecretNamed": "secret {{name}} を非表示",
@@ -881,5 +887,7 @@
   "queueMaximumShort": "セッションごとの保留メッセージ数を制限します。0 は無制限です。",
   "queueMergeShort": "エージェントが読む前に、関連する保留メッセージをまとめます。",
   "queueAutoMergeShort": "互換性のある連続メッセージを自動的にまとめます。",
-  "sleepShort": "タスクの実行中、Kandev が動作するコンピューターのスリープを防ぎます。"
+  "sleepShort": "タスクの実行中、Kandev が動作するコンピューターのスリープを防ぎます。",
+  "promptAllowAgentEdits": "エージェントによる編集を許可",
+  "promptAgentEditsDescription": "エージェントがこのプロンプトを変更すると、使用されているすべての箇所に反映されます。"
 }

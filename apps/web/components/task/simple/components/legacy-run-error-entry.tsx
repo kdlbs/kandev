@@ -24,6 +24,7 @@ type LegacyRunErrorProps = {
   onNewBranch: () => void;
   recoveryError: Error | null;
   recoveryNotice: string | null;
+  providerRestoredResumeEligible: boolean;
   branchDetails: BranchRecoveryDetails | null;
   busyAction: SessionRecoveryAction | "restore" | null;
   blocked: boolean;
@@ -40,6 +41,7 @@ export function LegacyRunErrorEntry({
   onNewBranch,
   recoveryError,
   recoveryNotice,
+  providerRestoredResumeEligible,
   branchDetails,
   busyAction,
   blocked,
@@ -51,6 +53,9 @@ export function LegacyRunErrorEntry({
     {
       kind: "resume",
       label: t("task:resumeSession"),
+      disclosure: providerRestoredResumeEligible
+        ? t("task:providerRestoredResumeDisclosure")
+        : undefined,
       testId: "run-error-resume-button",
       onClick: () => void onRecover("resume"),
     },

@@ -24,13 +24,19 @@ test("remote repository gear applies task-only settings and cancels draft edits"
   await testPage.getByTestId("source-mode-remote").click();
   await expect(testPage.getByTestId("repository-options-trigger")).toHaveCount(0);
   await testPage.getByTestId("remote-repo-chip-trigger").first().click();
-  await testPage.getByTestId("remote-repo-input").fill("https://github.com/checkout-options/repo");
-  await testPage.getByTestId("remote-repo-input").press("Enter");
+  await testPage
+    .getByTestId("remote-repo-input")
+    .last()
+    .fill("https://github.com/checkout-options/repo");
+  await testPage.getByTestId("remote-repo-input").last().press("Enter");
   await apiClient.mockGitHubAddBranches("checkout-options", "other", [{ name: "main" }]);
   await testPage.getByTestId("remote-add-row").click();
   await testPage.getByTestId("remote-repo-chip-trigger").last().click();
-  await testPage.getByTestId("remote-repo-input").fill("https://github.com/checkout-options/other");
-  await testPage.getByTestId("remote-repo-input").press("Enter");
+  await testPage
+    .getByTestId("remote-repo-input")
+    .last()
+    .fill("https://github.com/checkout-options/other");
+  await testPage.getByTestId("remote-repo-input").last().press("Enter");
   await testPage.getByTestId("repository-options-trigger").first().click();
   await expect(testPage.getByText("For this task only", { exact: true })).toBeVisible();
   await testPage.getByTestId("repository-options-download").click();

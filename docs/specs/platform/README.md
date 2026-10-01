@@ -24,7 +24,8 @@ Domain systems retain ownership of source records and workspace context identity
 ## Ownership
 
 This system owns startup and shutdown contracts, process and port-independent
-runtime safety, configuration precedence, diagnostics, notifications,
+runtime safety, foreground delivery semantics (including explicit same-turn
+steering), configuration precedence, diagnostics, notifications,
 localization, feature toggles, health, and shared session recovery services.
 
 Settings discovery and interface parity belong to Platform. Each settings domain
@@ -118,6 +119,7 @@ retains ownership of its values, validation, authority, and persistence.
 - [Diagnostic logging System Design Part 2](system-design/diagnostic-logging-02.md)
 - [Runtime failure attribution](system-design/runtime-failure-attribution.md)
 - [Expected runtime log severity](system-design/expected-runtime-log-severity.md)
+- [Frontend feature state](system-design/features-slice-state.md)
 - [Duration-aware E2E sharding and CI reliability](system-design/e2e-duration-aware-sharding.md)
 - [External CI runner capacity](system-design/external-e2e-runner-capacity.md)
 - [Health Endpoint — Surface the Running Version](system-design/health-endpoint-version.md)

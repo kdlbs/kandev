@@ -38,8 +38,14 @@ export function selectActiveSessionRecovery(
   messages: readonly RecoveryMessage[],
   currentError?: TaskStatusSummaryActiveError | null,
 ): ActiveSessionRecovery | null {
-  if (!session || !["FAILED", "WAITING_FOR_INPUT", "STARTING"].includes(session.state)) return null;
+  if (!session) return null;
   const error = currentSessionError(session, currentError);
+  const managedCloneRelocation = error?.code === "managed_clone_relocation_required";
+  if (
+    !["FAILED", "WAITING_FOR_INPUT", "STARTING"].includes(session.state) &&
+    !(session.state === "CANCELLED" && managedCloneRelocation)
+  )
+    return null;
   if (error?.scope === "task") return null;
   const stamp = error ? lastAgentErrorStamp(error) : undefined;
   const candidates = messages.filter((message) =>

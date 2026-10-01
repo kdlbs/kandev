@@ -484,6 +484,9 @@ test.describe("@chat last prompt scroll affordance", () => {
     test.setTimeout(90_000);
     await testPage.setViewportSize({ width: 1440, height: 1200 });
     await apiClient.saveUserSettings({ show_anchored_prompt_bar: true });
+    await expect
+      .poll(async () => (await apiClient.getUserSettings()).settings.show_anchored_prompt_bar)
+      .toBe(true);
     const longPrompt = Array.from(
       { length: 20 },
       (_, i) => `${LAST_PROMPT_MARKER} Line ${i + 1} of a deliberately long prompt.`,

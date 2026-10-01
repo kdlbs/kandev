@@ -179,6 +179,8 @@ cat "${FAKE_DOCKER_MANIFEST}"
         self.assertIn("options: --ipc=host", desktop_job)
         self.assertIn("git config --global --add safe.directory", desktop_job)
         self.assertIn("path: ~/.local/share/pnpm/store", desktop_job)
+        self.assertIn("actions/setup-go@", desktop_job)
+        self.assertIn("go-version-file: apps/backend/go.mod", desktop_job)
         self.assertIn("pnpm install --frozen-lockfile", desktop_job)
         self.assertIn("pnpm --filter @kandev/desktop e2e", desktop_job)
 

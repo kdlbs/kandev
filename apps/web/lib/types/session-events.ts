@@ -10,6 +10,7 @@ import type {
   SessionModelSelectionWarningPayload,
   SessionMCPStatusPayload,
   SessionPromptUsagePayload,
+  SessionUsageUpdatedPayload,
   SessionTodosPayload,
 } from "./session-runtime-payloads";
 
@@ -166,6 +167,12 @@ export type SessionModeChangedPayload = {
   session_id: string;
   agent_id: string;
   current_mode_id: string;
+  session_settings_policy?: "strict" | "provider_restored";
+  /**
+   * Set only when the session is not in the mode Kandev asked for. Empty means
+   * the reported mode is exactly the requested one.
+   */
+  requested_mode_id?: string;
   available_modes?: {
     id: string;
     name: string;
@@ -326,6 +333,7 @@ export type SessionBackendMessageMap = {
   "session.info_updated": BackendMessage<"session.info_updated", SessionInfoPayload>;
   "session.todos_updated": BackendMessage<"session.todos_updated", SessionTodosPayload>;
   "session.prompt_usage": BackendMessage<"session.prompt_usage", SessionPromptUsagePayload>;
+  "session.usage_updated": BackendMessage<"session.usage_updated", SessionUsageUpdatedPayload>;
   "session.poll_mode_changed": BackendMessage<
     "session.poll_mode_changed",
     { session_id: string; poll_mode: string }
@@ -337,6 +345,14 @@ export type SessionBackendMessageMap = {
   "session.shell.output": BackendMessage<"session.shell.output", ShellOutputPayload>;
   "session.process.output": BackendMessage<"session.process.output", ProcessOutputPayload>;
   "session.process.status": BackendMessage<"session.process.status", ProcessStatusPayload>;
+  "session.background_work.updated": BackendMessage<
+    "session.background_work.updated",
+    import("@/lib/types/background-work").WorkloadRunObservation
+  >;
+  "session.background_work.output": BackendMessage<
+    "session.background_work.output",
+    import("@/lib/types/background-work").WorkloadOutputChunk
+  >;
   "message.queue.status_changed": BackendMessage<
     "message.queue.status_changed",
     QueueStatusChangedPayload

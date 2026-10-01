@@ -166,19 +166,34 @@ func TestInjectedKandevPermissionPolicyCoversServerTools(t *testing.T) {
 func TestInjectedKandevPolicyRunsAfterBlanketApproval(t *testing.T) {
 	m := injectedKandevPermissionManager(t, injectedKandevMCPServers(43210))
 	m.cfg.AutoApprovePermissions = true
+	m.updatesCh = make(chan adapter.AgentEvent, 1)
+	m.pendingPermissions = make(map[string]*PendingPermission)
 	toolName := "mcp__kandev__update_task_plan_kandev"
-	response, err := m.handlePermissionRequest(context.Background(), &adapter.PermissionRequest{
-		ToolName: &toolName,
-		Options: []adapter.PermissionOption{
-			{OptionID: "allow-always", Kind: streams.PermissionOptionKindAllowAlways},
-			{OptionID: "allow-once", Kind: streams.PermissionOptionKindAllowOnce},
-		},
-	})
-	if err != nil {
-		t.Fatalf("handlePermissionRequest returned error: %v", err)
+	type result struct {
+		response *adapter.PermissionResponse
+		err      error
 	}
-	if response == nil || response.OptionID != "allow-always" {
-		t.Fatalf("blanket response = %+v, want first offered allow-always", response)
+	resultCh := make(chan result, 1)
+	go func() {
+		response, err := m.handlePermissionRequest(context.Background(), &adapter.PermissionRequest{
+			ToolName: &toolName,
+			Options: []adapter.PermissionOption{
+				{OptionID: "allow-always", Kind: streams.PermissionOptionKindAllowAlways},
+				{OptionID: "allow-once", Kind: streams.PermissionOptionKindAllowOnce},
+			},
+		})
+		resultCh <- result{response, err}
+	}()
+	event := <-m.updatesCh
+	if event.AutoApprovedOptionID != "allow-always" || event.AutoApprovedOptionKind != string(streams.PermissionOptionKindAllowAlways) || event.AutoApprovalSource != streams.PermissionDecisionSourceAutoApprove || !event.AutoApprovalPending {
+		t.Fatalf("auto-approved decision = (%q, %q, %q), want allow-always with kind and source metadata", event.AutoApprovedOptionID, event.AutoApprovedOptionKind, event.AutoApprovalSource)
+	}
+	if _, err := m.ResolvePermission(event.RequestID, event.PendingID, "allow-always"); err != nil {
+		t.Fatal(err)
+	}
+	got := <-resultCh
+	if got.err != nil || got.response == nil || got.response.OptionID != "allow-always" {
+		t.Fatalf("blanket response = %+v, %v", got.response, got.err)
 	}
 }
 

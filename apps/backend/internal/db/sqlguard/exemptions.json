@@ -1,5 +1,6 @@
 {
   "exemptions": [
+    {"file": "internal/task/inventoryrepair/journal.go", "symbol": "verifyBackup", "rule": "sqlite-catalog", "reason": "Explicit SQLite-only offline repair verifies its backup before any inventory mutation"},
     {"file": "internal/system/toolretention/scan.go", "symbol": "consumeRow", "rule": "sqlite-date-function", "reason": "Tool payload retention rejects non-SQLite engines before scanning; julianday validates legacy SQLite timestamp strings"},
     {"file": "internal/task/repository/sqlite/tool_payload_retention_scan.go", "symbol": "payloadTaskEligibilityTemplate", "rule": "sqlite-date-function", "reason": "PayloadTaskEligible requires the sqlite3 driver before validating legacy timestamps with SQLite date functions"},
     {"file": "internal/agent/settings/store/sqlite.go", "symbol": "migrateDropModelCheckConstraint", "rule": "sqlite-catalog", "reason": "SQLite-only migration for a legacy CHECK constraint"},
@@ -110,6 +111,7 @@
     {"file": "internal/task/repository/sqlite/session.go", "symbol": "DismissLastAgentError", "rule": "sqlite-date-function", "reason": "The task SQLite repository owns this SQLite date expression"},
     {"file": "internal/task/repository/sqlite/worktree_ownership_targets.go", "symbol": "tableColumns", "rule": "sqlite-catalog", "reason": "SQLite-only worktree ownership migration"},
     {"file": "internal/task/repository/sqlite/worktree_ownership_targets.go", "symbol": "tableColumns", "rule": "raw-placeholder", "reason": "SQLite-only worktree ownership migration"},
+    {"file": "internal/testutil/sqlite_template.go", "symbol": "build", "rule": "sqlite-catalog", "reason": "SQLite test template checkpoints its WAL before cloning the database file"},
     {"file": "internal/workflow/repository/phase2_sqlite.go", "symbol": "backfillParticipantsCreatedAtFromRowid", "rule": "sqlite-date-function", "reason": "Guarded by dialect.IsPostgres and returns before this statement on every non-SQLite driver"},
     {"file": "internal/workflow/repository/sqlite.go", "symbol": "DeleteStep", "rule": "sqlite-catalog", "reason": "The workflow SQLite repository owns this catalog probe"},
     {"file": "internal/workflowsync/store.go", "symbol": "addCircuitColumns", "rule": "datetime-type", "reason": "The migration is rendered by schemaSQLForDriver before execution"},

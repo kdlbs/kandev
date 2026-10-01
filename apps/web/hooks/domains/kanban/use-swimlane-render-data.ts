@@ -118,7 +118,8 @@ function useTaskProjectionCache({
       const hiddenStepIds = hiddenWorkflowStepIds[workflowId];
       const cached = projectionCacheRef.current.get(workflowId);
       if (
-        cached?.snapshot === snapshot &&
+        cached &&
+        cached.snapshot === snapshot &&
         cached.hiddenStepIds === hiddenStepIds &&
         cached.repoFilter === repoFilter &&
         cached.searchQuery === searchQuery &&

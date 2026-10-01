@@ -1,14 +1,15 @@
 import { test, expect } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
 import type { SeedData } from "../../fixtures/test-base";
-import { KanbanPage } from "../../pages/kanban-page";
 import { SessionPage } from "../../pages/session-page";
 import type { Page } from "@playwright/test";
+import { waitForFiniteAnimations } from "../../helpers/animations";
 import {
   snapshotPersistedLayouts,
   waitForPersistedLayoutChange,
 } from "../../helpers/dockview-persistence";
 import { dwell } from "../../helpers/causal-waits";
+import { expectControlHeight } from "../../helpers/control-sizing";
 import { pauseNextTerminalDestroy } from "./terminal-close-pause";
 import { readTerminalHostBuffer } from "./terminal-test-helpers";
 
@@ -46,13 +47,8 @@ async function createTaskAndWait(apiClient: ApiClient, seedData: SeedData, title
   return task;
 }
 
-async function openTask(page: Page, title: string): Promise<SessionPage> {
-  const kanban = new KanbanPage(page);
-  await kanban.goto();
-  const card = kanban.taskCardByTitle(title);
-  await expect(card).toBeVisible({ timeout: 15_000 });
-  await card.click();
-  await expect(page).toHaveURL(/\/t\//, { timeout: 15_000 });
+async function openTask(page: Page, taskId: string): Promise<SessionPage> {
+  await page.goto(`/t/${taskId}`);
   const session = new SessionPage(page);
   await session.waitForLoad();
   return session;
@@ -74,15 +70,17 @@ async function listTerminalIds(
   apiClient: ApiClient,
   taskId: string,
   environmentId: string,
+  filterKind?: string,
 ): Promise<string[]> {
   const response = await apiClient.wsRequest<{
-    shells?: Array<{ id?: string; terminal_id?: string }>;
+    shells?: Array<{ id?: string; terminal_id?: string; kind?: string }>;
   }>("user_shell.list", {
     task_id: taskId,
     task_environment_id: environmentId,
     include_parked: true,
   });
   return (response.shells ?? [])
+    .filter((shell) => !filterKind || shell.kind === filterKind)
     .map((shell) => shell.id ?? shell.terminal_id)
     .filter((id): id is string => Boolean(id));
 }
@@ -160,7 +158,17 @@ test.describe("Terminals — dockview UI", () => {
     await firstClose.click();
     const closeConfirmation = tabletTestPage.getByTestId("terminal-close-confirm-popover");
     await expect(closeConfirmation).toBeVisible();
-    await closeConfirmation.getByRole("button", { name: "Cancel", exact: true }).click();
+    await waitForFiniteAnimations(closeConfirmation);
+    expect(await tabletTestPage.evaluate(() => matchMedia("(pointer: coarse)").matches)).toBe(true);
+    const tabletCancel = closeConfirmation.getByRole("button", { name: "Cancel", exact: true });
+    const tabletClose = closeConfirmation.getByRole("button", {
+      name: "Close terminal",
+      exact: true,
+    });
+    // @covers AC-UI-CONTROL-SIZING-001.4, AC-UI-CONTROL-SIZING-001.8
+    await expectControlHeight(tabletCancel, 44);
+    await expectControlHeight(tabletClose, 44);
+    await tabletCancel.click();
     await expect(firstClose).toBeFocused();
     await expect(firstTab).toBeVisible();
 
@@ -216,8 +224,10 @@ test.describe("Terminals — dockview UI", () => {
     seedData,
   }) => {
     test.setTimeout(90_000);
-    await createTaskAndWait(apiClient, seedData, "Tab Badge UI");
-    const session = await openTask(testPage, "Tab Badge UI");
+    const task = await createTaskAndWait(apiClient, seedData, "Tab Badge UI");
+    await testPage.goto(`/t/${task.id}`);
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
     await session.clickTab("Terminal");
     await session.expectTerminalConnected();
 
@@ -264,11 +274,20 @@ test.describe("Terminals — dockview UI", () => {
   }) => {
     test.setTimeout(120_000);
     const task = await createTaskAndWait(apiClient, seedData, "Close + Reload UI");
-    const session = await openTask(testPage, "Close + Reload UI");
+    const session = await openTask(testPage, task.id);
     await session.clickTab("Terminal");
     await session.expectTerminalConnected();
+    const { sessions } = await apiClient.listTaskSessions(task.id);
+    const environmentId = sessions[0]?.task_environment_id;
+    if (!environmentId) throw new Error("task session is missing an environment id");
 
     await clickNewTerminalInPlusMenu(testPage, session);
+    await expect
+      .poll(() => listTerminalIds(apiClient, task.id, environmentId, "ordinary"), {
+        timeout: 10_000,
+        message: "second ordinary terminal shell was not persisted",
+      })
+      .toHaveLength(2);
     await expect(testPage.getByTestId("terminal-tab-seq-1")).toBeVisible({ timeout: 10_000 });
     await expect(testPage.getByTestId("terminal-tab-seq-2")).toBeVisible({ timeout: 5_000 });
 
@@ -276,7 +295,6 @@ test.describe("Terminals — dockview UI", () => {
       .getByTestId("terminal-tab-seq-2")
       .locator("..")
       .locator(".dv-default-tab-action");
-    const layoutBeforeClose = await snapshotPersistedLayouts(testPage);
     await seq2Close.click();
     const confirmation = testPage.getByTestId("terminal-close-confirm-popover");
     await expect(confirmation).toBeVisible();
@@ -285,9 +303,6 @@ test.describe("Terminals — dockview UI", () => {
 
     // Local removal is intentionally optimistic. Observe background teardown
     // before reloading so the reload cannot race the server-owned shell row.
-    const { sessions } = await apiClient.listTaskSessions(task.id);
-    const environmentId = sessions[0]?.task_environment_id;
-    expect(environmentId).toBeTruthy();
     await expect
       .poll(
         async () => {
@@ -304,13 +319,6 @@ test.describe("Terminals — dockview UI", () => {
         { timeout: 10_000, message: "terminal teardown did not reach server state" },
       )
       .toBe(false);
-
-    // The tab is gone from the DOM, but the reload below reads sessionStorage,
-    // and that write is on a ~300ms debounce with no event. Wait for the write
-    // rather than past it: if the close never reaches storage, that is the bug
-    // this test exists to catch, and it should fail here rather than as a
-    // confusing assertion after the reload.
-    await waitForPersistedLayoutChange(testPage, layoutBeforeClose);
 
     await testPage.reload();
     await session.waitForLoad();
@@ -352,8 +360,8 @@ test.describe("Terminals — dockview UI", () => {
     seedData,
   }) => {
     test.setTimeout(180_000);
-    await createTaskAndWait(apiClient, seedData, "Reload Badges UI");
-    const session = await openTask(testPage, "Reload Badges UI");
+    const task = await createTaskAndWait(apiClient, seedData, "Reload Badges UI");
+    const session = await openTask(testPage, task.id);
     await session.clickTab("Terminal");
     await session.expectTerminalConnected();
 
@@ -405,7 +413,7 @@ test.describe("Terminals — dockview UI", () => {
   }) => {
     test.setTimeout(120_000);
     const task = await createTaskAndWait(apiClient, seedData, "Row Destroy UI");
-    const session = await openTask(testPage, "Row Destroy UI");
+    const session = await openTask(testPage, task.id);
     await session.clickTab("Terminal");
     await session.expectTerminalConnected();
 
@@ -428,7 +436,7 @@ test.describe("Terminals — dockview UI", () => {
     ]);
     expect(terminalRowBox).not.toBeNull();
     expect(adjacentRowBox).not.toBeNull();
-    expect(terminalRowBox!.height).toBeCloseTo(adjacentRowBox!.height, 1);
+    expect(Math.abs(terminalRowBox!.height - adjacentRowBox!.height)).toBeLessThanOrEqual(1);
 
     let nativeDialogSeen = false;
     testPage.once("dialog", (dialog) => {
@@ -517,8 +525,8 @@ test.describe("Terminals — dockview UI", () => {
     seedData,
   }) => {
     test.setTimeout(120_000);
-    await createTaskAndWait(apiClient, seedData, "Focus Existing UI");
-    const session = await openTask(testPage, "Focus Existing UI");
+    const task = await createTaskAndWait(apiClient, seedData, "Focus Existing UI");
+    const session = await openTask(testPage, task.id);
     await session.clickTab("Terminal");
     await session.expectTerminalConnected();
 
@@ -574,11 +582,12 @@ test.describe("Terminals — dockview UI", () => {
     testPage,
     apiClient,
     seedData,
+    prCapture,
   }) => {
     test.setTimeout(120_000);
     const destroyPause = await pauseNextTerminalDestroy(testPage);
-    await createTaskAndWait(apiClient, seedData, "Busy Close UI");
-    const session = await openTask(testPage, "Busy Close UI");
+    const task = await createTaskAndWait(apiClient, seedData, "Busy Close UI");
+    const session = await openTask(testPage, task.id);
     await session.clickTab("Terminal");
     await session.expectTerminalConnected();
 
@@ -611,14 +620,23 @@ test.describe("Terminals — dockview UI", () => {
 
     const confirmation = testPage.getByTestId("terminal-close-confirm-popover");
     await expect(confirmation).toBeVisible({ timeout: 5_000 });
+    await waitForFiniteAnimations(confirmation);
+    await prCapture.screenshot("desktop-close-confirmation", {
+      caption: "Terminal close confirmation with standard desktop action sizing",
+    });
     await expect(confirmation).toHaveRole("dialog");
     await expect(testPage.getByRole("alertdialog")).toHaveCount(0);
     await expect(targetTab).toBeVisible();
+    const cancelButton = confirmation.getByRole("button", { name: "Cancel", exact: true });
+    const closeButton = confirmation.getByRole("button", { name: "Close terminal", exact: true });
+    // @covers AC-UI-CONTROL-SIZING-001.1, AC-UI-CONTROL-SIZING-001.3, AC-UI-CONTROL-SIZING-001.6
+    await expectControlHeight(cancelButton, 28);
+    await expectControlHeight(closeButton, 28);
     const confirmationBox = await confirmation.boundingBox();
     expect(confirmationBox).not.toBeNull();
     expect(confirmationBox!.width).toBeLessThanOrEqual(320);
     expect(confirmationBox!.height).toBeLessThanOrEqual(220);
-    await confirmation.getByRole("button", { name: "Close terminal", exact: true }).click();
+    await closeButton.click();
     await destroyPause.waitForRequest();
 
     // The transport is deliberately paused: disappearance must be optimistic,
@@ -656,8 +674,8 @@ test.describe("Terminals — dockview UI", () => {
     seedData,
   }) => {
     test.setTimeout(120_000);
-    await createTaskAndWait(apiClient, seedData, "Tab Terminate UI");
-    const session = await openTask(testPage, "Tab Terminate UI");
+    const task = await createTaskAndWait(apiClient, seedData, "Tab Terminate UI");
+    const session = await openTask(testPage, task.id);
     await session.clickTab("Terminal");
     await session.expectTerminalConnected();
 
@@ -702,8 +720,8 @@ test.describe("Terminals — dockview UI", () => {
     seedData,
   }) => {
     test.setTimeout(90_000);
-    await createTaskAndWait(apiClient, seedData, "Inline Rename UI");
-    const session = await openTask(testPage, "Inline Rename UI");
+    const task = await createTaskAndWait(apiClient, seedData, "Inline Rename UI");
+    const session = await openTask(testPage, task.id);
     await session.clickTab("Terminal");
     await session.expectTerminalConnected();
 

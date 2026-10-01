@@ -45,11 +45,12 @@ async function seedBadgeTest(
 
 type TaskPR = NonNullable<Awaited<ReturnType<ApiClient["getTaskPR"]>>>;
 
-function visibleTaskPRSummary(page: Page) {
+function visibleTaskPRSummary(page: Page, number: number) {
   return page
     .locator(
       '[data-slot="tooltip-content"]:not([data-state="closed"]) > [data-testid="pr-task-status-summary"]',
     )
+    .filter({ hasText: `PR #${number}` })
     .first();
 }
 
@@ -912,10 +913,14 @@ test.describe("PR status badge", () => {
     const icon = taskRow.getByTestId(`pr-task-icon-${task.id}`);
     await expect(icon).toHaveAttribute("data-pr-ready-to-merge", "true");
     const taskActions = taskRow.getByRole("button", { name: "Task actions" });
-    await taskRow.hover();
+    // Keep the pointer on the row's fixed left edge while the trailing slot
+    // grows, so the expanding actions do not move the hover target.
+    await taskRow.hover({ position: { x: 1, y: 1 } });
     await expect(taskActions).toBeVisible();
     const menuSlot = taskRow.getByTestId("sidebar-task-change-request-menu-slot");
+    await expect(trailingActions).toHaveCSS("gap", "4px");
     await expect(menuSlot).toHaveCSS("width", "24px");
+    await expect(taskActions).toHaveCSS("width", "24px");
     const expandedStatusBox = await trailingStatus.boundingBox();
     const taskActionsBox = await taskActions.boundingBox();
     expect(expandedStatusBox).not.toBeNull();
@@ -925,7 +930,7 @@ test.describe("PR status badge", () => {
     );
     await icon.hover();
 
-    const summary = visibleTaskPRSummary(testPage);
+    const summary = visibleTaskPRSummary(testPage, 2966);
     await expect(summary).toBeVisible();
     await expect(summary.getByTestId("pr-task-status-number")).toHaveText("PR #2966");
     const title = summary.getByTestId("pr-task-status-title");
@@ -965,7 +970,7 @@ test.describe("PR status badge", () => {
     // after the row reaches the PR badge.
     await testPage.keyboard.press("Tab");
     await expect(icon).toBeFocused();
-    const focusedSummary = visibleTaskPRSummary(testPage);
+    const focusedSummary = visibleTaskPRSummary(testPage, 2966);
     await expect(focusedSummary).toBeVisible();
     await expect(focusedSummary.getByTestId("pr-task-status-title")).toHaveText(prTitle);
 
@@ -1000,7 +1005,7 @@ test.describe("PR status badge", () => {
     await testPage.keyboard.press("Tab");
     await expect(icon).toBeFocused();
 
-    const multiSummary = visibleTaskPRSummary(testPage);
+    const multiSummary = visibleTaskPRSummary(testPage, 2966);
     // The second association updates the icon while the disclosure is closed.
     // Wait for the keyboard-reopened tooltip before querying its refreshed rows.
     await expect(multiSummary).toBeVisible({ timeout: 15_000 });

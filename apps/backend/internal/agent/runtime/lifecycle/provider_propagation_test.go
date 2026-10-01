@@ -26,7 +26,7 @@ func TestAgentctlProviderMappingsPreserveProviderCapabilities(t *testing.T) {
 			standalone := buildStandaloneCreateInstanceRequest(req, nil, "", false, false, false, false, nil)
 			container := buildContainerCreateInstanceRequest(ContainerConfig{McpProviders: providers}, "", false, false, false, false, nil)
 			docker := buildReconnectCreateInstanceRequest(req, "previous-execution")
-			sprites := spriteCreateInstanceRequest(req)
+			sprites := agentctlInstanceRequest(req, spritesWorkspacePath)
 			ssh := buildSSHCreateInstanceRequest(req, "/workspace", "/remote/agentctl")
 
 			mapped := map[string][]string{
@@ -52,7 +52,7 @@ func TestAgentctlMCPToolNamePresentationCapabilityPropagatesThroughExecutors(t *
 		namespacesMCPTools: true,
 	}
 	req := &ExecutorCreateRequest{AgentConfig: agent}
-	sprites := spriteCreateInstanceRequest(req)
+	sprites := agentctlInstanceRequest(req, spritesWorkspacePath)
 	ssh := buildSSHCreateInstanceRequest(req, "/workspace", "/remote/agentctl")
 
 	requests := map[string]*agentctl.CreateInstanceRequest{

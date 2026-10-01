@@ -30,6 +30,9 @@ type ControlClient struct {
 	httpClient *http.Client
 	logger     *logger.Logger
 	authToken  string
+	// applyToken, when set, updates the credential on a leased endpoint transport,
+	// which must not be replaced.
+	applyToken func(string)
 }
 
 // McpServerConfig holds configuration for an MCP server.
@@ -48,7 +51,8 @@ type CreateInstanceRequest struct {
 	ID                     string              `json:"id,omitempty"`
 	WorkspacePath          string              `json:"workspace_path"`
 	AgentCommand           string              `json:"agent_command,omitempty"`
-	Protocol               string              `json:"protocol,omitempty"`       // Protocol adapter to use (currently "acp")
+	Protocol               string              `json:"protocol,omitempty"` // Protocol adapter to use (currently "acp")
+	CodexAppServerEnabled  bool                `json:"codex_app_server_enabled,omitempty"`
 	AgentType              string              `json:"agent_type,omitempty"`     // Agent type ID for debug file naming (e.g., "codex", "auggie")
 	WorkspaceFlag          string              `json:"workspace_flag,omitempty"` // CLI flag for workspace path (e.g., "--workspace-root")
 	Env                    map[string]string   `json:"env,omitempty"`
@@ -109,13 +113,15 @@ type CreateInstanceResponse struct {
 
 // InstanceInfo contains information about an agent instance.
 type InstanceInfo struct {
-	ID            string            `json:"id"`
-	Port          int               `json:"port"`
-	Status        string            `json:"status"`
-	WorkspacePath string            `json:"workspace_path"`
-	AgentCommand  string            `json:"agent_command"`
-	Env           map[string]string `json:"env,omitempty"`
-	CreatedAt     time.Time         `json:"created_at"`
+	ID              string            `json:"id"`
+	Port            int               `json:"port"`
+	LeaseGeneration uint64            `json:"lease_generation"`
+	ListenerActive  bool              `json:"listener_active"`
+	Status          string            `json:"status"`
+	WorkspacePath   string            `json:"workspace_path"`
+	AgentCommand    string            `json:"agent_command"`
+	Env             map[string]string `json:"env,omitempty"`
+	CreatedAt       time.Time         `json:"created_at"`
 	// SessionID is the task session ID this instance was created for, if any.
 	SessionID string `json:"session_id,omitempty"`
 	// TaskID is the task ID this instance was created for, if any.
@@ -158,6 +164,11 @@ func NewControlClient(host string, port int, log *logger.Logger, opts ...Control
 	return c
 }
 
+// Close releases the client's idle connections.
+func (c *ControlClient) Close() {
+	c.httpClient.CloseIdleConnections()
+}
+
 // AuthToken returns the current auth token. Used to propagate the token
 // from the ControlClient to per-instance Clients after a handshake.
 func (c *ControlClient) AuthToken() string {
@@ -172,6 +183,10 @@ func (c *ControlClient) SetAuthToken(token string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.authToken = token
+	if c.applyToken != nil {
+		c.applyToken(token)
+		return
+	}
 	c.httpClient.Transport = &authTransport{token: token}
 }
 

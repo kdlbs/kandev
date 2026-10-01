@@ -156,6 +156,19 @@ func (s *Service) ResolveSessionIdentity(ctx context.Context, taskID, sessionID 
 	return s.repo.ResolveSessionIdentity(ctx, taskID, sessionID)
 }
 
+// ManagedInputStorage returns the repository's managed-input receipt store
+// when supported. It returns nil for repositories that do not implement it.
+func (s *Service) ManagedInputStorage() ManagedInputStorage {
+	if s == nil || s.repo == nil {
+		return nil
+	}
+	storage, ok := s.repo.(ManagedInputStorage)
+	if !ok {
+		return nil
+	}
+	return storage
+}
+
 // SupportsAtomicDeferredMoveTransition reports whether task and queue rows share
 // one SQL transaction. The in-memory queue cannot participate in task storage.
 func (s *Service) SupportsAtomicDeferredMoveTransition() bool {
@@ -1120,6 +1133,41 @@ func (s *Service) QueueMessageWithMetadataForSessionWithClientQueueID(
 	metadata map[string]interface{},
 	claim *QueueAttachmentClaim,
 ) (*QueuedMessage, bool, error) {
+	return s.queueMessageWithMetadataForSessionWithClientQueueID(
+		ctx, identity, nil, clientQueueID, content, model, userID, planMode, attachments, metadata, claim,
+	)
+}
+
+// QueueMessageWithMetadataForSessionWithClientQueueIDAtWorkflowEntry admits
+// one identified message only while the observed task and session versions
+// still own the current workflow entry.
+func (s *Service) QueueMessageWithMetadataForSessionWithClientQueueIDAtWorkflowEntry(
+	ctx context.Context,
+	identity QueueSessionIdentity,
+	entry WorkflowEntryIdentity,
+	clientQueueID, content, model, userID string,
+	planMode bool,
+	attachments []MessageAttachment,
+	metadata map[string]interface{},
+) (*QueuedMessage, bool, error) {
+	if err := s.validateSessionIdentity(ctx, identity); err != nil {
+		return nil, false, err
+	}
+	return s.queueMessageWithMetadataForSessionWithClientQueueID(
+		ctx, identity, &entry, clientQueueID, content, model, userID, planMode, attachments, metadata, nil,
+	)
+}
+
+func (s *Service) queueMessageWithMetadataForSessionWithClientQueueID(
+	ctx context.Context,
+	identity QueueSessionIdentity,
+	workflowEntry *WorkflowEntryIdentity,
+	clientQueueID, content, model, userID string,
+	planMode bool,
+	attachments []MessageAttachment,
+	metadata map[string]interface{},
+	claim *QueueAttachmentClaim,
+) (*QueuedMessage, bool, error) {
 	if clientQueueID == "" || len(clientQueueID) > MaxQueueAdmissionIDLength {
 		return nil, false, errors.New("client queue id is invalid")
 	}
@@ -1140,7 +1188,7 @@ func (s *Service) QueueMessageWithMetadataForSessionWithClientQueueID(
 			policy := s.resolveAdmissionAutoMergePolicy(admittedCtx, &identity, identity.SessionID)
 			var err error
 			admitted, replay, err = writer.AdmitQueueMessage(
-				admittedCtx, identity, clientQueueID, candidate, claim, s.MaxPerSession(), policy,
+				admittedCtx, identity, clientQueueID, candidate, claim, s.MaxPerSession(), policy, workflowEntry,
 			)
 			if errors.Is(err, ErrAutoMergePolicyChanged) {
 				continue
@@ -2078,7 +2126,7 @@ func lifecycleGenerationFromMetadata(metadata map[string]interface{}) (int64, bo
 }
 
 // ReserveQueued atomically takes an ordinary head entry or reserves a durable
-// lifecycle head entry. The admission lock keeps drains from observing an
+// delivery head entry. The admission lock keeps drains from observing an
 // insert before its automatic-merge finalization completes. A reserved
 // lifecycle row survives until acknowledged. Auto-run OFF leaves the head in
 // place and reports no reserved entry.
@@ -3265,6 +3313,20 @@ func (s *Service) GetStatus(ctx context.Context, sessionID string) *QueueStatus 
 		return nil
 	})
 	return status
+}
+
+// HasPendingForSession reports whether a session still owns queued actionable
+// work. Callers that need an atomic admission boundary must hold the session
+// admission lock while checking it.
+func (s *Service) HasPendingForSession(ctx context.Context, sessionID string) (bool, error) {
+	if s == nil || s.repo == nil || sessionID == "" {
+		return false, nil
+	}
+	entries, err := s.repo.ListBySession(ctx, sessionID)
+	if err != nil {
+		return false, err
+	}
+	return len(entries) > 0, nil
 }
 
 // Snapshot returns an ordered status bound to one immutable session identity.

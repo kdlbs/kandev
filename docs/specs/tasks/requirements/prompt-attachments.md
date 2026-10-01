@@ -1,11 +1,12 @@
 ---
-status: draft
+status: active
 system: tasks
 created: 2026-08-04
-updated: 2026-09-10
+updated: 2026-09-27
 owners:
   - Kandev team
 ---
+
 # Prompt attachments Requirements
 
 ## Overview
@@ -57,6 +58,13 @@ This document is the migrated task-system source for the capability. The source 
   existing attachment controls. Preview failures shall not hide prompt text
   or other attachments, and the phone transcript shall remain within the viewport.
 
+- **AC-TASKS-PROMPT-ATTACHMENTS-001.12:** Every editable task-session composer shall upload readable pasted images in its task workspace, including Office, Quick Chat, runs, and passthrough surfaces. The outcome shall not depend on a loaded Kanban board.
+- **AC-TASKS-PROMPT-ATTACHMENTS-001.13:** If the workspace is unresolved, the composer shall retain selected files and show a localized explanation. It shall block message and plan-implementation actions until every attachment has a ready upload descriptor. Plain text submission shall remain available without attachments.
+- **AC-TASKS-PROMPT-ATTACHMENTS-001.14:** When task or session identity changes, attachments from the previous identity shall not enter the replacement draft. Late results shall not enter it, and completed unclaimed uploads shall be deleted on a best-effort basis. Another selected workspace shall never supply the upload scope.
+- **AC-TASKS-PROMPT-ATTACHMENTS-001.15:** Desktop and phone users shall have reachable file selection, preview, retry, and removal controls. Unreadable image clipboard content shall show feedback without changing ordinary text paste. Read-only transcript views shall remain read-only.
+- **AC-TASKS-PROMPT-ATTACHMENTS-001.16:** A restored draft attachment without an upload descriptor shall not be sent as inline data. If its bytes can be recovered, the composer shall upload it before use. If they cannot be recovered, the attachment shall remain blocked until the user removes it.
+- **AC-TASKS-PROMPT-ATTACHMENTS-001.17:** While any composer attachment lacks a ready upload descriptor, the plan implementation controls shall be disabled and their handlers shall not dispatch an implementation message or advance the workflow. They shall become available when all attachments are ready or removed.
+
 ## Migrated source detail
 
 Decision: [ADR-2026-08-04-file-backed-prompt-attachments](../../../decisions/2026-08-04-file-backed-prompt-attachments.md)
@@ -106,25 +114,25 @@ move files into a workspace manually or strip useful evidence.
 
 `task_message_attachments`
 
-| Field | Type | Constraint |
-|---|---|---|
-| `id` | string | Primary key; opaque client reference |
-| `owner_id` | string | Authenticated user that uploaded the file |
-| `workspace_id` | string | Required staging/authorization scope |
-| `task_id` | string | Nullable until claimed; task FK after claim |
-| `session_id` | string | Nullable until claimed; session FK after claim |
-| `message_id` | string | Nullable until claimed; message FK after claim |
-| `queue_entry_id` | string | Nullable; queued-message owner while queued |
-| `name` | string | Original display name, never used as a storage path |
-| `mime_type` | string | Client-reported media type |
-| `kind` | enum string | `image`, `audio`, or `resource` |
-| `delivery_mode` | enum string | `prompt` or `path` |
-| `size_bytes` | integer | Raw bytes, `1..104857600` |
-| `storage_key` | string | Backend-generated relative storage key |
-| `state` | enum string | `staged`, `claimed`, `expired`, or `deleted` |
-| `expires_at` | timestamp | Required for staged uploads; cleared on claim |
-| `created_at` | timestamp | Upload creation time |
-| `updated_at` | timestamp | Last lifecycle change |
+| Field            | Type        | Constraint                                          |
+| ---------------- | ----------- | --------------------------------------------------- |
+| `id`             | string      | Primary key; opaque client reference                |
+| `owner_id`       | string      | Authenticated user that uploaded the file           |
+| `workspace_id`   | string      | Required staging/authorization scope                |
+| `task_id`        | string      | Nullable until claimed; task FK after claim         |
+| `session_id`     | string      | Nullable until claimed; session FK after claim      |
+| `message_id`     | string      | Nullable until claimed; message FK after claim      |
+| `queue_entry_id` | string      | Nullable; queued-message owner while queued         |
+| `name`           | string      | Original display name, never used as a storage path |
+| `mime_type`      | string      | Client-reported media type                          |
+| `kind`           | enum string | `image`, `audio`, or `resource`                     |
+| `delivery_mode`  | enum string | `prompt` or `path`                                  |
+| `size_bytes`     | integer     | Raw bytes, `1..104857600`                           |
+| `storage_key`    | string      | Backend-generated relative storage key              |
+| `state`          | enum string | `staged`, `claimed`, `expired`, or `deleted`        |
+| `expires_at`     | timestamp   | Required for staged uploads; cleared on claim       |
+| `created_at`     | timestamp   | Upload creation time                                |
+| `updated_at`     | timestamp   | Last lifecycle change                               |
 
 Files live under the resolved Kandev home attachment root with private
 directory/file permissions. Database ownership is authoritative; filenames and
@@ -135,7 +143,7 @@ request paths never determine ownership.
 - `POST /api/v1/attachments` accepts `multipart/form-data` with `file`,
   `workspace_id`, `kind`, and `delivery_mode`, plus optional `task_id` and
   `session_id`. It returns `201` with `{id, name, mime_type, kind,
-  delivery_mode, size_bytes, state, expires_at}`.
+delivery_mode, size_bytes, state, expires_at}`.
 - `GET /api/v1/attachments/:id/content` streams the bytes only to a caller
   authorized for the staged upload or claimed task.
 - `DELETE /api/v1/attachments/:id` deletes an owned staged upload. A claimed

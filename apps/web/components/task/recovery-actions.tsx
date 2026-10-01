@@ -26,6 +26,7 @@ export type RecoveryChoice = {
   testId?: string;
   disabled?: boolean;
   tooltip?: string;
+  disclosure?: string;
 };
 
 export function RecoveryActions({
@@ -50,6 +51,9 @@ export function RecoveryActions({
       ),
     ),
   ].filter(Boolean);
+  const disclosures = [
+    ...new Set(actions.flatMap((action) => (action.disclosure ? [action.disclosure] : []))),
+  ];
   const primaryKind = selectPrimaryRecoveryAction(
     actions.filter((action) => !action.disabled).map((action) => action.kind),
     blocked,
@@ -61,6 +65,15 @@ export function RecoveryActions({
   const ordered = primary ? [primary, ...actions.filter((action) => action !== primary)] : actions;
   return (
     <div>
+      {disclosures.map((disclosure) => (
+        <p
+          key={disclosure}
+          data-testid="provider-restored-resume-disclosure"
+          className="mt-2 max-w-prose break-words text-xs text-muted-foreground"
+        >
+          {disclosure}
+        </p>
+      ))}
       <div
         className="mt-3 flex min-w-0 flex-col gap-2 md:flex-row md:flex-wrap md:items-center"
         aria-busy={busy || undefined}
@@ -119,6 +132,7 @@ function RecoveryActionIcon({ kind }: { kind: RecoveryActionKind }) {
     restore: IconFolder,
     runtime_retry: IconRefresh,
     resume_new_branch: IconGitBranch,
+    relocate_and_resume: IconFolder,
     resume: IconPlayerPlay,
   };
   const Icon = icons[kind];

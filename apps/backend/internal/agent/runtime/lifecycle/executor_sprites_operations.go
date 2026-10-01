@@ -56,8 +56,8 @@ func (r *SpritesExecutor) createSprite(ctx context.Context, client *sprites.Clie
 	return sprite, nil
 }
 
-func (r *SpritesExecutor) uploadAgentctl(ctx context.Context, sprite *sprites.Sprite) error {
-	binaryPath, err := r.agentctlResolver.ResolveLinuxBinary()
+func (r *SpritesExecutor) uploadAgentctl(ctx, helperCtx context.Context, sprite *sprites.Sprite, onProgress PrepareProgressCallback) error {
+	binaryPath, err := r.agentctlResolver.ResolveLinuxBinaryContext(helperCtx, onProgress)
 	if err != nil {
 		return fmt.Errorf("agentctl binary not found: %w", err)
 	}
@@ -442,7 +442,7 @@ func (r *SpritesExecutor) createAgentInstance(
 	sprite *sprites.Sprite,
 	req *ExecutorCreateRequest,
 ) (int, error) {
-	instanceReq := spriteCreateInstanceRequest(req)
+	instanceReq := agentctlInstanceRequest(req, spritesWorkspacePath)
 	reqJSON, err := json.Marshal(instanceReq)
 	if err != nil {
 		return 0, fmt.Errorf("failed to marshal instance request: %w", err)
@@ -472,14 +472,15 @@ func (r *SpritesExecutor) createAgentInstance(
 	return resp.Port, nil
 }
 
-func spriteCreateInstanceRequest(req *ExecutorCreateRequest) agentctl.CreateInstanceRequest {
+func agentctlInstanceRequest(req *ExecutorCreateRequest, workspacePath string) agentctl.CreateInstanceRequest {
 	return agentctl.CreateInstanceRequest{
-		ID:            req.InstanceID,
-		WorkspacePath: spritesWorkspacePath,
-		SessionID:     req.SessionID,
-		TaskID:        req.TaskID,
-		Protocol:      req.Protocol,
-		AgentType:     agentTypeFromReq(req),
+		ID:                    req.InstanceID,
+		WorkspacePath:         workspacePath,
+		SessionID:             req.SessionID,
+		TaskID:                req.TaskID,
+		Protocol:              req.Protocol,
+		CodexAppServerEnabled: req.CodexAppServerEnabled,
+		AgentType:             agentTypeFromReq(req),
 		AutoApprovePermissions: autoApprovePermissionsOverride(
 			req.AutoApprovePermissions,
 			req.AutoApprovePermissionsOverride,

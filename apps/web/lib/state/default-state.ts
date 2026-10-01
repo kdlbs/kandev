@@ -109,9 +109,11 @@ export const defaultState = {
   sessionModels: defaultSessionRuntimeState.sessionModels,
   sessionMcpStatus: defaultSessionRuntimeState.sessionMcpStatus,
   promptUsage: defaultSessionRuntimeState.promptUsage,
+  usageInvalidation: defaultSessionRuntimeState.usageInvalidation,
   sessionPollMode: defaultSessionRuntimeState.sessionPollMode,
   embeddedVscodeSupport: defaultSessionRuntimeState.embeddedVscodeSupport,
   workspaceRestoration: defaultSessionRuntimeState.workspaceRestoration,
+  backgroundWork: defaultSessionRuntimeState.backgroundWork,
   githubStatus: defaultGitHubState.githubStatus,
   githubAppRegistrations: defaultGitHubState.githubAppRegistrations,
   taskPRs: defaultGitHubState.taskPRs,
@@ -445,6 +447,8 @@ export function mergeInitialState(initialState?: HydrationState): DefaultState {
     workflows: { ...defaultState.workflows, ...initialState.workflows },
     workspaceContextRead: {
       ...defaultState.workspaceContextRead,
+      workspaceId: initialState.workspaces?.activeId ?? null,
+      generation: mergeWorkspaceContextGeneration(initialState),
       ...initialState.workspaceContextRead,
       pending: {
         ...defaultState.workspaceContextRead.pending,
@@ -524,10 +528,15 @@ export function mergeInitialState(initialState?: HydrationState): DefaultState {
     sessionModels: { ...defaultState.sessionModels, ...initialState.sessionModels },
     sessionMcpStatus: { ...defaultState.sessionMcpStatus, ...initialState.sessionMcpStatus },
     promptUsage: { ...defaultState.promptUsage, ...initialState.promptUsage },
+    usageInvalidation: { ...defaultState.usageInvalidation, ...initialState.usageInvalidation },
     sessionPollMode: { ...defaultState.sessionPollMode, ...initialState.sessionPollMode },
     embeddedVscodeSupport: {
       ...defaultState.embeddedVscodeSupport,
       ...initialState.embeddedVscodeSupport,
+    },
+    backgroundWork: {
+      ...defaultState.backgroundWork,
+      ...initialState.backgroundWork,
     },
     ...mergeGitHubState(initialState),
     taskIssues: { ...defaultState.taskIssues, ...initialState.taskIssues },

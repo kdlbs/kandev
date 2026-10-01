@@ -30,22 +30,18 @@ export async function waitForComposerQueueMode(
 export async function typeWhileBusy(page: Page, editor: Locator, text: string): Promise<void> {
   const modifier = process.platform === "darwin" ? "Meta" : "Control";
   await editor.scrollIntoViewIfNeeded();
+  // The busy state can arrive before the queue/steering input mode enables the
+  // editor. A click sent during that transition is discarded and cannot focus
+  // the composer, so wait for the editable state before attempting interaction.
+  await expect(editor).toHaveAttribute("contenteditable", "true", { timeout: 15_000 });
   for (let attempt = 0; attempt < 3; attempt++) {
-    const box = await editor.boundingBox();
-    if (!box) throw new Error("Editor bounding box not found");
-    await page.mouse.click(box.x + 20, box.y + box.height / 2);
-    // Typing requires the editor to own focus, and `mouse.click` only queues
-    // that: ProseMirror commits focus on a later tick. This waits for the
-    // commit rather than for a number.
-    //
-    // It replaces an `unverified` 200ms sleep. The hypothesis for that sleep
-    // was that keystrokes sent before the focus commit go to the previously
-    // focused element -- but that is NOT confirmed: with the sleep removed and
-    // nothing in its place, 9/9 calls still landed their text on the first
-    // attempt locally. So this is a precondition guard, not a fix for an
-    // observed failure. It is kept because it is free when focus is already
-    // committed and correct if a loaded shard ever does reorder the two, which
-    // a 9-call sample on an idle machine cannot rule out.
+    // TipTap briefly flips this attribute off after submit; its generic editor
+    // div makes `toBeEditable` fail instead of waiting for the transition.
+    await expect(editor).toHaveAttribute("contenteditable", "true", { timeout: 5_000 });
+    // The composer can replace or re-enable the editor during queue-mode
+    // transitions. A locator click re-resolves the live editor before focusing
+    // it; a coordinate click can land on the previous, non-editable element.
+    await editor.click();
     await expect(editor).toBeFocused({ timeout: 5_000 });
     await page.keyboard.type(text);
     // Auto-retrying, so it returns as soon as ProseMirror renders the text

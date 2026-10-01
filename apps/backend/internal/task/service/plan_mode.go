@@ -1,17 +1,17 @@
 package service
 
-import "fmt"
+import "github.com/kandev/kandev/internal/task/contract"
 
 // PlanWriteMode selects how a plan write's content composes against the
 // stored plan (REQ-TASKS-PLAN-APPEND-001).
-type PlanWriteMode string
+type PlanWriteMode = contract.PlanWriteMode
 
 const (
 	// PlanWriteModeReplace is the default: content is the whole document.
-	PlanWriteModeReplace PlanWriteMode = "replace"
+	PlanWriteModeReplace = contract.PlanWriteModeReplace
 	// PlanWriteModeAppend composes the stored content plus a separator plus
 	// content, which is only a fragment in this mode.
-	PlanWriteModeAppend PlanWriteMode = "append"
+	PlanWriteModeAppend = contract.PlanWriteModeAppend
 )
 
 // ParsePlanWriteMode validates a caller-supplied mode string. An empty
@@ -20,14 +20,5 @@ const (
 // "Append" or "APPEND" — is rejected. It must not be interpreted as replace,
 // which would let a typo overwrite a plan with a fragment.
 func ParsePlanWriteMode(raw string) (PlanWriteMode, error) {
-	switch raw {
-	case "":
-		return PlanWriteModeReplace, nil
-	case string(PlanWriteModeReplace):
-		return PlanWriteModeReplace, nil
-	case string(PlanWriteModeAppend):
-		return PlanWriteModeAppend, nil
-	default:
-		return "", fmt.Errorf("mode must be %q or %q", PlanWriteModeReplace, PlanWriteModeAppend)
-	}
+	return contract.ParsePlanWriteMode(raw)
 }

@@ -139,10 +139,9 @@ function PRChecksSection({
   const aggregateCounts = useMemo(() => deriveAggregateCounts(pr), [pr]);
 
   const { precise, byBucket } = useMemo(() => {
-    // Treat empty `feedback.checks` the same as "feedback not loaded yet" so
-    // we keep showing the aggregate counts. Some mock paths return empty
-    // arrays without errors, and we don't want the popover to flash 0/0/0.
-    if (!feedback?.checks || feedback.checks.length === 0) {
+    // A loaded empty list is authoritative. The selected workflow may be active
+    // before its dependent jobs exist, so aggregate counts would invent checks.
+    if (!feedback?.checks) {
       return { precise: null as CountsView | null, byBucket: null };
     }
     const counts = bucketCheckCounts(feedback.checks);
@@ -164,7 +163,7 @@ function PRChecksSection({
   const rows: ChangeRequestCheckRow[] = byBucket
     ? CHECK_GROUP_ORDER.flatMap((kind) =>
         byBucket[kind].map((group) => ({
-          id: `${kind}:${group.workflow}`,
+          id: `${kind}:${group.id}`,
           label: group.workflow,
           state: normalizedCheckState(kind),
           detail:
@@ -183,7 +182,11 @@ function PRChecksSection({
       counts={{ passed: counts.passed, pending: counts.inProgress, failed: counts.failed }}
       rows={rows}
       loading={isFetching && !byBucket}
-      emptyLabel={t("github:noChecksHaveStarted")}
+      emptyLabel={
+        feedback?.checks?.some((check) => check.conclusion === "cancelled")
+          ? t("github:checksNotSuccessful")
+          : t("github:noChecksHaveStarted")
+      }
       passRateLabel={t("github:passRate")}
       groupLabels={{
         success: t("github:checkBucketPassed"),

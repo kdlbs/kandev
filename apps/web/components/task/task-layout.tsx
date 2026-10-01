@@ -12,10 +12,10 @@ import type { Repository, RepositoryScript } from "@/lib/types/http";
 import type { Terminal } from "@/hooks/domains/session/use-terminals";
 import type { Layout } from "react-resizable-panels";
 import { useTaskCanvasLifecycleActivation } from "./dockview-canvas-activation";
-import { statusSummaryTaskError } from "@/lib/task-status-summary";
-import { useTaskLaunchErrorContext } from "./task-launch-error-context";
 import type { TaskCanvasesLoadStatus } from "@/hooks/domains/task/use-task-canvases";
 import type { TaskTopbarRepository } from "./task-page-content-helpers";
+import { statusSummaryTaskError } from "@/lib/task-status-summary";
+import { useTaskLaunchErrorContext } from "./task-launch-error-context";
 
 // Re-export for backwards compatibility
 export type { SelectedDiff } from "@/hooks/use-session-layout-state";
@@ -53,6 +53,7 @@ type TaskLayoutProps = {
   onTaskUnarchived?: (taskId: string) => void;
   taskCanvases?: Canvas[];
   taskCanvasesStatus?: TaskCanvasesLoadStatus;
+  hasPageLevelFeedback?: boolean;
 };
 
 export const TaskLayout = memo(function TaskLayout(props: TaskLayoutProps) {
@@ -98,6 +99,7 @@ const ResponsiveTaskLayout = memo(function ResponsiveTaskLayout({
   onTaskUnarchived,
   taskCanvases,
   taskCanvasesStatus,
+  hasPageLevelFeedback,
 }: TaskLayoutProps) {
   const { isMobile, usesDesktopWorkbench, isFullDesktop } = useResponsiveBreakpoint();
   const launchErrorContext = useTaskLaunchErrorContext();
@@ -139,6 +141,7 @@ const ResponsiveTaskLayout = memo(function ResponsiveTaskLayout({
         taskCanvases={taskCanvases ?? []}
         onOpenCanvas={onOpenCanvas}
         hasSharedTaskError={hasSharedTaskError}
+        hasPageLevelFeedback={hasPageLevelFeedback}
       />
     );
   }

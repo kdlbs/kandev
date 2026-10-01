@@ -10,6 +10,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { execSync } from "node:child_process";
 import { waitForDiffText, waitForDiffTextAbsent } from "./diff-update-helpers";
+import { scrollChangesToEnd } from "./large-changes-helpers";
 
 // ---------------------------------------------------------------------------
 // Git helper for E2E tests - runs git commands in the test repository
@@ -498,6 +499,7 @@ test.describe("Git Changes Panel", () => {
     await session.clickTab("Changes");
     await session.expandChangesSection("unstaged-files-section");
     const row = testPage.getByTestId(`file-row-${filePath}`);
+    await scrollChangesToEnd(testPage, `file-row-${filePath}`);
     const stage = row.getByTitle("Stage file");
     await expect(stage).toBeVisible();
     expect((await stage.boundingBox())!.height).toBeLessThanOrEqual(24);
@@ -516,12 +518,14 @@ test.describe("Git Changes Panel", () => {
       .getByRole("navigation")
       .getByRole("button", { name: /Changes$/ })
       .click();
+    await scrollChangesToEnd(testPage, `file-row-${filePath}`);
     await expect(row.getByRole("button", { name: "Show more actions" })).toBeVisible();
     await expect(row.getByText(filePath, { exact: true })).toHaveCSS("white-space", "normal");
     await expect(stage).toHaveCount(0);
 
     await testPage.setViewportSize({ width: 768, height: 851 });
     await session.clickTab("Changes");
+    await scrollChangesToEnd(testPage, `file-row-${filePath}`);
     await expect(stage).toBeVisible();
     expect((await stage.boundingBox())!.height).toBeLessThanOrEqual(24);
     await expect(row.getByRole("button", { name: "Show more actions" })).toHaveCount(0);
@@ -1081,12 +1085,16 @@ test.describe("Git Changes Panel", () => {
     const commitRow = testPage.getByTestId(`commit-row-${sha.slice(0, 7)}`);
     await expect(commitRow).toBeVisible({ timeout: 10_000 });
 
-    // Click the commit to open its diff
-    await commitRow.click();
+    // Use the explicit action to open the historical commit detail.
+    await commitRow.getByTestId(`commit-open-${sha.slice(0, 7)}`).click();
 
     // The diff view should open showing the commit message and file changes
     // Look for the commit message (which uniquely identifies this diff view)
-    await expect(session.changes.getByText("Add diff test file")).toBeVisible({ timeout: 10_000 });
+    await expect(
+      testPage.getByTestId("commit-detail-content").getByText("Add diff test file"),
+    ).toBeVisible({
+      timeout: 10_000,
+    });
 
     // Additionally verify the diff shows the actual file content (lines added).
     // Pierre Diffs renders in a shadow DOM — check all diffs-container elements
@@ -1239,9 +1247,9 @@ test.describe("Git Changes Panel", () => {
     await expect(row.getByText("+0", { exact: true })).toHaveCount(0);
     await expect(row.getByText("-0", { exact: true })).toHaveCount(0);
     await row.hover();
-    await expect(row.getByRole("button")).toHaveCount(0);
+    await expect(row.getByTestId(`commit-open-${remoteSha.slice(0, 7)}`)).toBeVisible();
 
-    await row.click();
+    await row.getByTestId(`commit-open-${remoteSha.slice(0, 7)}`).click();
     await expect(testPage.getByText(remoteMessage).last()).toBeVisible({ timeout: 15_000 });
     await expect(testPage.getByText("Remote Author")).toBeVisible({ timeout: 10_000 });
     await testPage.waitForFunction(
@@ -2482,20 +2490,34 @@ test.describe("Git Changes Panel", () => {
     await expect(
       providerSection.getByTestId("current-pr-commits-section-collapse-toggle"),
     ).toHaveAttribute("aria-expanded", "false");
-    await expect(localSection.locator('[data-testid^="commit-row-"]')).toHaveCount(6);
+    await expect(
+      localSection.getByTestId("local-checkout-commits-section-collapse-toggle"),
+    ).toContainText("(6)");
     await providerSection.getByTestId("current-pr-commits-section-collapse-toggle").click();
-    await expect(providerSection.locator('[data-commit-provenance="current_pr"]')).toHaveCount(15);
-    await expect(localSection.locator('[data-commit-provenance="local_checkout"]')).toHaveCount(6);
+    await expect(
+      providerSection.getByTestId("current-pr-commits-section-collapse-toggle"),
+    ).toContainText("(15)");
     await expect(
       providerSection.locator('[data-commit-provenance="current_pr"]').first(),
     ).toHaveAttribute("title", "Current PR commit");
     await expect(
       localSection.locator('[data-commit-provenance="local_checkout"]').first(),
     ).toHaveAttribute("title", "Local checkout commit");
-    await expect(providerSection.locator('[data-testid^="commit-row-"]')).toHaveCount(15);
-    await expect(providerSection.locator('[data-testid^="commit-row-"]').first()).toContainText(
-      "Rewritten provider commit 15",
+    const firstProviderCommit = providerSection
+      .locator('[data-testid^="commit-row-"]')
+      .filter({ hasText: "Rewritten provider commit 15" });
+    const lastProviderCommit = providerSection.locator(
+      '[data-testid^="commit-row-"]:has([title="Rewritten provider commit 1"])',
     );
+    const firstProviderToggle = firstProviderCommit.getByTestId("commit-toggle");
+    const lastProviderToggle = lastProviderCommit.getByTestId("commit-toggle");
+    await testPage.keyboard.press("ArrowDown");
+    await expect(firstProviderToggle).toBeFocused();
+    for (let index = 1; index < 15; index += 1) {
+      await testPage.keyboard.press("ArrowDown");
+    }
+    await expect(lastProviderCommit).toBeVisible();
+    await expect(lastProviderToggle).toBeFocused();
 
     // A rewritten provider history must not label the preserved checkout as
     // six unpushed commits, and reading the panel must not mutate the checkout.
@@ -2732,7 +2754,7 @@ test.describe("Git Changes Panel", () => {
     await testPage.keyboard.press("Enter");
     await expect(providerToggle).toHaveAttribute("aria-expanded", "false");
     await localToggle.focus();
-    for (let index = 0; index < 8; index += 1) {
+    for (let index = 0; index < 20; index += 1) {
       if (await providerToggle.evaluate((element) => document.activeElement === element)) break;
       await testPage.keyboard.press("Tab");
     }

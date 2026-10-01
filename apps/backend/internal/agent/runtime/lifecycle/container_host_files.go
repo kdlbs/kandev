@@ -1,6 +1,7 @@
 package lifecycle
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/kandev/kandev/internal/agent/agents"
@@ -80,7 +81,12 @@ func (cm *ContainerManager) hostFiles() ContainerHostFiles {
 		return cm.containerHostFiles
 	}
 	return localContainerHostFiles{
-		resolveAgentctlBinary:  cm.resolveAgentctlBinary,
+		resolveAgentctlBinary: func() (string, error) {
+			if cm.resolveAgentctlBinary == nil {
+				return "", nil
+			}
+			return cm.resolveAgentctlBinary(context.Background(), nil)
+		},
 		resolveMockAgentBinary: cm.resolveMockAgentBinary,
 		commandBuilder:         cm.commandBuilder,
 		kandevHomeDir:          cm.kandevHomeDir,

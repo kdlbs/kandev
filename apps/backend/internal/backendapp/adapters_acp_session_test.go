@@ -1,11 +1,42 @@
 package backendapp
 
 import (
+	"context"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	orchestratorexecutor "github.com/kandev/kandev/internal/orchestrator/executor"
 )
+
+type fixedLifecycleProfileResolver struct {
+	profile *lifecycle.AgentProfileInfo
+}
+
+func (r fixedLifecycleProfileResolver) ResolveProfile(context.Context, string) (*lifecycle.AgentProfileInfo, error) {
+	return r.profile, nil
+}
+
+func TestLifecycleAdapter_ResolveAgentProfileForwardsNativeSessionResume(t *testing.T) {
+	const profileID = "profile-uuid-6f5192e6-634b-4d35-96cf-34f57d6b55cf"
+	mgr := lifecycle.NewManager(
+		nil, nil, nil, nil,
+		fixedLifecycleProfileResolver{profile: &lifecycle.AgentProfileInfo{
+			ProfileID: profileID,
+			AgentID:   "agent-uuid-cb5a9b96-75bb-4c75-8812-56663e699e6f",
+			AgentName: "auggie", NativeSessionResume: true,
+		}},
+		nil, lifecycle.ExecutorFallbackDeny, t.TempDir(), newTestLogger(),
+	)
+	adapter := newLifecycleAdapter(mgr, nil, newTestLogger())
+
+	resolved, err := adapter.ResolveAgentProfile(context.Background(), profileID)
+	require.NoError(t, err)
+	require.Equal(t, "auggie", resolved.AgentName)
+	require.True(t, resolved.NativeSessionResume,
+		"the production lifecycle adapter must preserve the capability used by recovery admission")
+}
 
 // acpSessionIDProvider mirrors the unexported interface
 // orchestrator.Service.currentACPSessionID asserts s.agentManager against.
@@ -14,6 +45,14 @@ import (
 // orchestrator actually needs, not a copy orchestrator happens to export.
 type acpSessionIDProvider interface {
 	GetACPSessionIDForSession(sessionID string) (string, bool)
+}
+
+type initialPromptAdmissionRegistrar interface {
+	RegisterInitialPromptAdmissionCallbacks(string, func() error, func(), func()) error
+}
+
+type initialPromptDispatchRegistrar interface {
+	RegisterInitialPromptDispatchCallbacks(string, func(), func()) error
 }
 
 // TestLifecycleAdapter_SatisfiesACPSessionIDSeam is the regression test for a
@@ -80,5 +119,39 @@ func TestLifecycleAdapter_GetACPSessionIDForSession_ForwardsLiveIdentity(t *test
 
 	if _, ok := adapter.GetACPSessionIDForSession("no-such-session"); ok {
 		t.Fatal("expected (_, false) for a session with no registered execution")
+	}
+}
+
+func TestLifecycleAdapter_RegistersInitialPromptAdmissionOnRestart(t *testing.T) {
+	mgr := lifecycle.NewManager(nil, nil, nil, nil, nil, nil, lifecycle.ExecutorFallbackDeny, t.TempDir(), newTestLogger())
+	if err := mgr.ExecutionStoreForTesting().Add(&lifecycle.AgentExecution{
+		ID: "exec-model-switch-restart", TaskID: "task-model-switch", SessionID: "session-model-switch",
+		WorkspacePath: t.TempDir(),
+	}); err != nil {
+		t.Fatalf("seed replacement execution: %v", err)
+	}
+	var client orchestratorexecutor.AgentManagerClient = newLifecycleAdapter(mgr, nil, newTestLogger())
+	registrar, ok := client.(initialPromptAdmissionRegistrar)
+	if !ok {
+		t.Fatal("production lifecycleAdapter cannot register the replacement startup prompt's final admission callback")
+	}
+	if err := registrar.RegisterInitialPromptAdmissionCallbacks(
+		"exec-model-switch-restart", func() error { return nil }, func() {}, func() {},
+	); err != nil {
+		t.Fatalf("register replacement startup admission: %v", err)
+	}
+	if err := registrar.RegisterInitialPromptAdmissionCallbacks(
+		"missing-model-switch-restart", func() error { return nil }, nil, nil,
+	); err == nil {
+		t.Fatal("adapter did not forward lifecycle execution lookup errors")
+	}
+	dispatchRegistrar, ok := client.(initialPromptDispatchRegistrar)
+	if !ok {
+		t.Fatal("production lifecycleAdapter cannot register the replacement startup prompt's dispatch callbacks")
+	}
+	if err := dispatchRegistrar.RegisterInitialPromptDispatchCallbacks(
+		"exec-model-switch-restart", func() {}, func() {},
+	); err != nil {
+		t.Fatalf("register replacement startup dispatch callbacks: %v", err)
 	}
 }

@@ -92,8 +92,9 @@ type proxyTokenConsumedKey struct{}
 
 // portProxyEntry caches a reverse proxy and its target for a session:port pair.
 type portProxyEntry struct {
-	proxy  *httputil.ReverseProxy
-	target string
+	proxy      *httputil.ReverseProxy
+	target     string
+	generation string
 }
 
 // PortProxyHandler reverse-proxies HTTP and WebSocket traffic to arbitrary
@@ -223,13 +224,6 @@ func (h *PortProxyHandler) HandlePortProxy(c *gin.Context) {
 func (h *PortProxyHandler) resolveProxy(c *gin.Context, sessionID string, port int) (*httputil.ReverseProxy, error) {
 	cacheKey := sessionID + ":" + strconv.Itoa(port)
 
-	h.mu.Lock()
-	defer h.mu.Unlock()
-
-	if entry, ok := h.proxies[cacheKey]; ok {
-		return entry.proxy, nil
-	}
-
 	execution, ok := h.lifecycleMgr.GetExecutionBySessionID(sessionID)
 	if !ok {
 		c.JSON(http.StatusNotFound, gin.H{"error": "session not found or no active execution"})
@@ -242,6 +236,11 @@ func (h *PortProxyHandler) resolveProxy(c *gin.Context, sessionID string, port i
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "agentctl client not available"})
 		return nil, fmt.Errorf("agentctl client not available")
 	}
+	generation, err := agentctlClient.ConnectionGeneration(c.Request.Context())
+	if err != nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "agentctl connection is unavailable"})
+		return nil, fmt.Errorf("resolve agentctl connection generation: %w", err)
+	}
 
 	baseURL := agentctlClient.BaseURL()
 	target, err := url.Parse(baseURL)
@@ -249,14 +248,18 @@ func (h *PortProxyHandler) resolveProxy(c *gin.Context, sessionID string, port i
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "failed to resolve agentctl target"})
 		return nil, err
 	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if entry, ok := h.proxies[cacheKey]; ok && entry.target == baseURL && entry.generation == generation {
+		return entry.proxy, nil
+	}
 
-	authToken := agentctlClient.AuthToken()
 	// Public path that fronts this proxy on the gateway. Used by `ModifyResponse`
 	// to rewrite root-absolute URLs in proxied HTML/CSS so iframe asset requests
 	// stay on the same proxy chain instead of escaping to the host origin.
 	proxyPrefix := "/port-proxy/" + sessionID + "/" + strconv.Itoa(port)
-	proxy := h.createProxy(cacheKey, target, authToken, proxyPrefix)
-	h.proxies[cacheKey] = &portProxyEntry{proxy: proxy, target: baseURL}
+	proxy := h.createProxy(cacheKey, target, agentctlClient.ProxyTransport(), proxyPrefix)
+	h.proxies[cacheKey] = &portProxyEntry{proxy: proxy, target: baseURL, generation: generation}
 
 	h.logger.Info("created port proxy",
 		zap.String("session_id", sessionID),
@@ -266,12 +269,11 @@ func (h *PortProxyHandler) resolveProxy(c *gin.Context, sessionID string, port i
 	return proxy, nil
 }
 
-func (h *PortProxyHandler) createProxy(cacheKey string, target *url.URL, authToken, proxyPrefix string) *httputil.ReverseProxy {
+func (h *PortProxyHandler) createProxy(cacheKey string, target *url.URL, transport http.RoundTripper, proxyPrefix string) *httputil.ReverseProxy {
 	proxy := &httputil.ReverseProxy{}
+	proxy.Transport = transport
 	proxy.Rewrite = func(r *httputil.ProxyRequest) {
 		r.SetURL(target)
-		r.Out.URL.Path = r.In.URL.Path
-		r.Out.URL.RawPath = ""
 		// Never forward the browser's Accept-Encoding: Go's Transport adds
 		// its own and transparently decompresses, so ModifyResponse (and the
 		// HTML/CSS rewriter) always sees identity bytes. Forwarding gzip/br
@@ -305,10 +307,6 @@ func (h *PortProxyHandler) createProxy(cacheKey string, target *url.URL, authTok
 			} else {
 				r.Out.Header.Del("Referer")
 			}
-		}
-		// Inject agentctl auth token
-		if authToken != "" {
-			r.Out.Header.Set("Authorization", "Bearer "+authToken)
 		}
 		if r.Out.Header.Get("Upgrade") != "" {
 			r.Out.Header.Set("Connection", "Upgrade")

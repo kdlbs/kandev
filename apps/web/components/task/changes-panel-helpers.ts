@@ -10,7 +10,7 @@ import type { FileInfo } from "@/lib/state/store";
 import type { PRDiffFile } from "@/lib/types/github";
 import { normalizeFileChangeStatus, type FileChangeStatus } from "@/lib/utils/file-change-status";
 import type { PRChangedFile } from "./changes-panel-timeline";
-import type { ChangeLayer, CommitDetailTarget } from "./changes-diff-target";
+import type { ChangeLayer, CommitDetailTarget } from "@/lib/state/diff-target-types";
 import type { CommitPresentation } from "./commit-row";
 
 export type ChangedFile = {

@@ -1083,7 +1083,11 @@ func (s *Service) ListMessages(ctx context.Context, sessionID string) ([]*models
 	if err := s.AuthorizeSessionAccess(ctx, sessionID); err != nil {
 		return nil, err
 	}
-	return s.messages.ListMessages(ctx, sessionID)
+	messages, err := s.messages.ListMessages(ctx, sessionID)
+	if err == nil {
+		err = s.projectRunningNotices(ctx, messages)
+	}
+	return messages, err
 }
 
 // ListMessagesPaginated returns messages for a session with pagination options.
@@ -1099,7 +1103,7 @@ func (s *Service) ListMessagesPaginated(ctx context.Context, req ListMessagesReq
 	if limit > MaxMessagesPageSize {
 		limit = MaxMessagesPageSize
 	}
-	return s.messages.ListMessagesPaginated(ctx, req.TaskSessionID, models.ListMessagesOptions{
+	messages, hasMore, err := s.messages.ListMessagesPaginated(ctx, req.TaskSessionID, models.ListMessagesOptions{
 		Limit:       limit,
 		Before:      req.Before,
 		After:       req.After,
@@ -1109,6 +1113,10 @@ func (s *Service) ListMessagesPaginated(ctx context.Context, req ListMessagesReq
 		TaskID:      req.TaskID,
 		Around:      req.Around,
 	})
+	if err == nil {
+		err = s.projectRunningNotices(ctx, messages)
+	}
+	return messages, hasMore, err
 }
 
 // ListMessagesForPlugin returns messages matching the plugin Host data API

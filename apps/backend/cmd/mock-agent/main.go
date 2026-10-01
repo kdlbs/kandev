@@ -31,6 +31,8 @@ const (
 	reasoningEffortLow  = "low"
 	reasoningEffortMed  = "medium"
 	reasoningEffortHigh = "high"
+	mockDefaultMode     = "default"
+	mockPlanMode        = "plan-mock"
 )
 
 // logOutput is the writer for log messages (stderr). Tests can override this.
@@ -47,21 +49,27 @@ var mcpServers map[string]mcpServerDef
 
 // mockAgent implements the acp.Agent interface for the mock agent.
 type mockAgent struct {
-	conn              sessionUpdater
-	model             string
-	sessions          map[acp.SessionId]bool
-	promptCancels     map[acp.SessionId]context.CancelFunc
-	promptCancelHolds map[acp.SessionId]chan struct{}
-	sessionMCPServers map[acp.SessionId]map[string]mcpServerDef
-	sessionConfig     map[acp.SessionId][]acp.SessionConfigOption
-	commandsEmitted   map[acp.SessionId]bool
-	nextSessionID     uint64
-	mu                sync.Mutex
+	conn                           sessionUpdater
+	model                          string
+	sessions                       map[acp.SessionId]bool
+	promptCancels                  map[acp.SessionId]context.CancelFunc
+	promptCancelHolds              map[acp.SessionId]chan struct{}
+	sessionMCPServers              map[acp.SessionId]map[string]mcpServerDef
+	sessionConfig                  map[acp.SessionId][]acp.SessionConfigOption
+	sessionModes                   map[acp.SessionId]acp.SessionModeId
+	commandsEmitted                map[acp.SessionId]bool
+	dynamicFallbackCounterSessions map[acp.SessionId]acp.SessionId
+	nextSessionID                  uint64
+	mu                             sync.Mutex
 }
 
 var _ acp.Agent = (*mockAgent)(nil)
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "--profile-probe-wrapper" {
+		os.Exit(runProfileProbeWrapper(os.Args[2:], os.Getenv(profileProbeEvidenceEnv)))
+	}
+	recordProfileProbeChildEvidence(os.Args, os.Getenv(profileProbeEvidenceEnv))
 	model := parseModelFlag()
 
 	// TUI mode: simple terminal UI for passthrough/PTY testing
@@ -85,13 +93,15 @@ func main() {
 	defer closeMCPClients()
 
 	ag := &mockAgent{
-		model:             model,
-		sessions:          make(map[acp.SessionId]bool),
-		promptCancels:     make(map[acp.SessionId]context.CancelFunc),
-		promptCancelHolds: make(map[acp.SessionId]chan struct{}),
-		sessionMCPServers: make(map[acp.SessionId]map[string]mcpServerDef),
-		sessionConfig:     make(map[acp.SessionId][]acp.SessionConfigOption),
-		commandsEmitted:   make(map[acp.SessionId]bool),
+		model:                          model,
+		sessions:                       make(map[acp.SessionId]bool),
+		promptCancels:                  make(map[acp.SessionId]context.CancelFunc),
+		promptCancelHolds:              make(map[acp.SessionId]chan struct{}),
+		sessionMCPServers:              make(map[acp.SessionId]map[string]mcpServerDef),
+		sessionConfig:                  make(map[acp.SessionId][]acp.SessionConfigOption),
+		sessionModes:                   make(map[acp.SessionId]acp.SessionModeId),
+		commandsEmitted:                make(map[acp.SessionId]bool),
+		dynamicFallbackCounterSessions: make(map[acp.SessionId]acp.SessionId),
 	}
 	asc := acp.NewAgentSideConnection(ag, os.Stdout, os.Stdin)
 	ag.conn = asc
@@ -147,7 +157,12 @@ func (a *mockAgent) NewSession(ctx context.Context, req acp.NewSessionRequest) (
 	a.mu.Lock()
 	a.nextSessionID++
 	sid := acp.SessionId(fmt.Sprintf("mock-session-%d-%d", os.Getpid(), a.nextSessionID))
+	traceACP("session_new", string(sid), nil)
 	a.sessions[sid] = true
+	if a.sessionModes == nil {
+		a.sessionModes = make(map[acp.SessionId]acp.SessionModeId)
+	}
+	a.sessionModes[sid] = mockDefaultMode
 	if a.sessionConfig == nil {
 		a.sessionConfig = make(map[acp.SessionId][]acp.SessionConfigOption)
 	}
@@ -168,7 +183,7 @@ func (a *mockAgent) NewSession(ctx context.Context, req acp.NewSessionRequest) (
 
 	return acp.NewSessionResponse{
 		SessionId:     sid,
-		Modes:         mockSessionModes(),
+		Modes:         mockSessionModes(mockDefaultMode),
 		ConfigOptions: cloneSessionConfigOptions(configOptions),
 	}, nil
 }
@@ -183,14 +198,14 @@ func (a *mockAgent) Logout(_ context.Context, _ acp.LogoutRequest) (acp.LogoutRe
 // ACP session responses. The "default" mode is current; "plan-mock" is an
 // alternative used by tests that need to verify a non-default profile mode
 // propagates from the agent profile through to a new task session.
-func mockSessionModes() *acp.SessionModeState {
+func mockSessionModes(current acp.SessionModeId) *acp.SessionModeState {
 	defaultDesc := "Default mock mode"
 	planDesc := "Plan-style mock mode for testing"
 	return &acp.SessionModeState{
-		CurrentModeId: "default",
+		CurrentModeId: current,
 		AvailableModes: []acp.SessionMode{
-			{Id: "default", Name: "Default", Description: &defaultDesc},
-			{Id: "plan-mock", Name: "Plan Mock", Description: &planDesc},
+			{Id: mockDefaultMode, Name: "Default", Description: &defaultDesc},
+			{Id: mockPlanMode, Name: "Plan Mock", Description: &planDesc},
 		},
 	}
 }
@@ -231,6 +246,7 @@ func mockSessionConfigOptionsForModel(model string) []acp.SessionConfigOption {
 		{Value: modelSlow, Name: "Mock Slow", Description: ptr("Slow mock model for testing")},
 	}
 	modelOptions = append(modelOptions, mockModelVariationOptions()...)
+	modelOptions = append(modelOptions, mockProfileModelOptions()...)
 	return []acp.SessionConfigOption{
 		{Select: &acp.SessionConfigOptionSelect{
 			Category:     &modelCat,
@@ -242,12 +258,12 @@ func mockSessionConfigOptionsForModel(model string) []acp.SessionConfigOption {
 		}},
 		{Select: &acp.SessionConfigOptionSelect{
 			Category:     &modeCat,
-			CurrentValue: "default",
+			CurrentValue: mockDefaultMode,
 			Id:           "mode",
 			Name:         "Mode",
 			Options: acp.SessionConfigSelectOptions{Ungrouped: &acp.SessionConfigSelectOptionsUngrouped{
-				{Value: "default", Name: "Default", Description: ptr("Default mock mode")},
-				{Value: "plan-mock", Name: "Plan Mock", Description: ptr("Plan-style mock mode for testing")},
+				{Value: mockDefaultMode, Name: "Default", Description: ptr("Default mock mode")},
+				{Value: mockPlanMode, Name: "Plan Mock", Description: ptr("Plan-style mock mode for testing")},
 			}},
 			Type: "select",
 		}},
@@ -261,6 +277,46 @@ func mockSessionConfigOptionsForModel(model string) []acp.SessionConfigOption {
 			Type:         "select",
 		}},
 	}
+}
+
+func mockProfileModelOptions() []acp.SessionConfigSelectOption {
+	options := make([]acp.SessionConfigSelectOption, 0, 2)
+	if component := profileModelComponent(os.Getenv("MOCK_AGENT_PROFILE_CATALOG")); component != "" {
+		options = append(options, acp.SessionConfigSelectOption{
+			Value: acp.SessionConfigValueId("profile-env-" + component),
+			Name:  "Profile env " + component,
+		})
+	}
+	if component := profileModelComponent(profileCatalogFlag(os.Args)); component != "" {
+		options = append(options, acp.SessionConfigSelectOption{
+			Value: acp.SessionConfigValueId("profile-cli-" + component),
+			Name:  "Profile CLI " + component,
+		})
+	}
+	return options
+}
+
+func profileCatalogFlag(args []string) string {
+	for index := 1; index < len(args); index++ {
+		if value, found := strings.CutPrefix(args[index], "--profile-catalog="); found {
+			return value
+		}
+		if args[index] == "--profile-catalog" && index+1 < len(args) {
+			return args[index+1]
+		}
+	}
+	return ""
+}
+
+func profileModelComponent(value string) string {
+	value = strings.ToLower(strings.TrimSpace(value))
+	var result strings.Builder
+	for _, char := range value {
+		if char >= 'a' && char <= 'z' || char >= '0' && char <= '9' || char == '-' {
+			result.WriteRune(char)
+		}
+	}
+	return strings.Trim(result.String(), "-")
 }
 
 func mockModelVariationOptions() []acp.SessionConfigSelectOption {
@@ -300,6 +356,7 @@ func ptr(s string) *string {
 // When --fail-on-resume is set, exit before completing the load — LoadSession
 // is only reached on resume, so no resumed-guard is needed here (unlike TUI).
 func (a *mockAgent) LoadSession(ctx context.Context, req acp.LoadSessionRequest) (acp.LoadSessionResponse, error) {
+	traceACP("session_load", string(req.SessionId), nil)
 	if parseFailOnResumeFlag() {
 		_, _ = fmt.Fprintf(logOutput, "mock-agent[%d]: refusing resume for session %s (--fail-on-resume), exiting 1\n", os.Getpid(), req.SessionId)
 		os.Exit(1)
@@ -336,6 +393,10 @@ func (a *mockAgent) LoadSession(ctx context.Context, req acp.LoadSessionRequest)
 		configOptions = a.sessionConfig[req.SessionId]
 	}
 	responseConfigOptions := cloneSessionConfigOptions(configOptions)
+	currentMode := a.sessionModes[req.SessionId]
+	if currentMode == "" {
+		currentMode = mockDefaultMode
+	}
 	// Reset emit state so the resume re-advertises commands (matches real
 	// agents which re-emit on session/load).
 	delete(a.commandsEmitted, req.SessionId)
@@ -348,7 +409,7 @@ func (a *mockAgent) LoadSession(ctx context.Context, req acp.LoadSessionRequest)
 
 	return acp.LoadSessionResponse{
 		ConfigOptions: responseConfigOptions,
-		Modes:         mockSessionModes(),
+		Modes:         mockSessionModes(currentMode),
 	}, nil
 }
 
@@ -356,8 +417,10 @@ func (a *mockAgent) LoadSession(ctx context.Context, req acp.LoadSessionRequest)
 func (a *mockAgent) Prompt(ctx context.Context, req acp.PromptRequest) (acp.PromptResponse, error) {
 	promptCtx, cancelPrompt := context.WithCancel(ctx)
 	prompt := extractPromptText(req.Prompt)
+	traceACP("prompt", string(req.SessionId), map[string]string{"prompt": prompt})
+	acceptanceMarker, cancelHoldPrompt := cancelHoldAcceptanceMarker(prompt)
 	var cancelHold chan struct{}
-	if isCancelHoldPrompt(prompt) {
+	if cancelHoldPrompt {
 		cancelHold = make(chan struct{})
 	}
 	a.mu.Lock()
@@ -382,9 +445,18 @@ func (a *mockAgent) Prompt(ctx context.Context, req acp.PromptRequest) (acp.Prom
 
 	a.emitAvailableCommandsOnce(promptCtx, req.SessionId)
 	if cancelHold != nil {
+		if acceptanceMarker != "" {
+			// The newline flushes the acceptance marker through lifecycle message buffering before the hold.
+			(&emitter{ctx: promptCtx, conn: a.conn, sid: req.SessionId}).text(acceptanceMarker + "\n")
+		}
 		<-cancelHold
 		time.Sleep(mockCancelHoldDuration())
 		return acp.PromptResponse{StopReason: acp.StopReasonCancelled}, nil
+	}
+	// Dynamic unclassified fallback scenarios must return a terminal ACP
+	// RequestError directly from Prompt, just like real provider failures.
+	if resp, err, handled := a.handleDynamicUnclassifiedFallback(promptCtx, req.SessionId, prompt); handled {
+		return resp, err
 	}
 	// The /overloaded scenario must surface a real prompt-time ACP *error*
 	// (a JSON-RPC error response), which handlePrompt's emitter cannot do —
@@ -445,12 +517,54 @@ func (a *mockAgent) Authenticate(_ context.Context, _ acp.AuthenticateRequest) (
 	return acp.AuthenticateResponse{}, nil
 }
 
-// SetSessionMode handles mode changes (no-op for mock).
-func (a *mockAgent) SetSessionMode(_ context.Context, _ acp.SetSessionModeRequest) (acp.SetSessionModeResponse, error) {
+// SetSessionMode reports the accepted mode through the ACP update that real
+// agents use. The host must observe this report before it claims convergence.
+func (a *mockAgent) SetSessionMode(_ context.Context, req acp.SetSessionModeRequest) (acp.SetSessionModeResponse, error) {
+	traceACP("set_mode", string(req.SessionId), map[string]string{"mode_id": string(req.ModeId)})
+	if req.ModeId != mockDefaultMode && req.ModeId != mockPlanMode {
+		return acp.SetSessionModeResponse{}, fmt.Errorf("unknown mock mode %q", req.ModeId)
+	}
+	a.mu.Lock()
+	if !a.sessions[req.SessionId] {
+		a.mu.Unlock()
+		return acp.SetSessionModeResponse{}, fmt.Errorf("unknown mock session %q", req.SessionId)
+	}
+	if a.sessionModes == nil {
+		a.sessionModes = make(map[acp.SessionId]acp.SessionModeId)
+	}
+	a.sessionModes[req.SessionId] = req.ModeId
+	a.mu.Unlock()
+	go a.emitCurrentModeAfterDelay(req.SessionId, req.ModeId)
 	return acp.SetSessionModeResponse{}, nil
 }
 
+// emitCurrentModeAfterDelay defers the report so the JSON-RPC response for
+// session/set_mode is written first. Real agents use that order: the reply
+// acknowledges the request, the notification carries the mode that ended up in
+// force.
+func (a *mockAgent) emitCurrentModeAfterDelay(sid acp.SessionId, mode acp.SessionModeId) {
+	time.Sleep(20 * time.Millisecond)
+	a.mu.Lock()
+	conn := a.conn
+	a.mu.Unlock()
+	if conn == nil {
+		return
+	}
+	_ = conn.SessionUpdate(context.Background(), acp.SessionNotification{
+		SessionId: sid,
+		Update: acp.SessionUpdate{
+			CurrentModeUpdate: &acp.SessionCurrentModeUpdate{CurrentModeId: mode},
+		},
+	})
+}
+
 func (a *mockAgent) SetSessionConfigOption(_ context.Context, req acp.SetSessionConfigOptionRequest) (acp.SetSessionConfigOptionResponse, error) {
+	fields := map[string]string{}
+	if req.ValueId != nil {
+		fields["config_id"] = string(req.ValueId.ConfigId)
+		fields["value"] = string(req.ValueId.Value)
+		traceACP("set_config_option", string(req.ValueId.SessionId), fields)
+	}
 	if req.ValueId == nil {
 		return acp.SetSessionConfigOptionResponse{}, fmt.Errorf("mock agent supports select config options only")
 	}
@@ -528,10 +642,21 @@ func (a *mockAgent) CloseSession(_ context.Context, req acp.CloseSessionRequest)
 	a.mu.Lock()
 	delete(a.sessions, req.SessionId)
 	delete(a.sessionConfig, req.SessionId)
+	delete(a.sessionModes, req.SessionId)
 	delete(a.commandsEmitted, req.SessionId)
+	dynamicFallbackCounterID := a.dynamicFallbackCounterSessions[req.SessionId]
+	delete(a.dynamicFallbackCounterSessions, req.SessionId)
 	a.mu.Unlock()
+	if dynamicFallbackCounterID == "" {
+		if raw, err := os.ReadFile(dynamicUnclassifiedFallbackBindingPath(req.SessionId)); err == nil {
+			dynamicFallbackCounterID = acp.SessionId(strings.TrimSpace(string(raw)))
+		}
+	}
 	_ = os.Remove(overloadedCounterPath(req.SessionId))
 	_ = os.Remove(transportLostCounterPath(req.SessionId))
+	if dynamicFallbackCounterID == "" {
+		_ = os.Remove(dynamicUnclassifiedFallbackCounterPath(req.SessionId))
+	}
 	return acp.CloseSessionResponse{}, nil
 }
 
@@ -760,10 +885,17 @@ func parseMCPConfigFromArgs(args []string) string {
 	return ""
 }
 
-// isCancelHoldPrompt identifies the E2E-only fixture that holds an acknowledged
-// cancellation long enough to exercise remount and hydration projections.
-func isCancelHoldPrompt(prompt string) bool {
-	return strings.EqualFold(strings.TrimSpace(stripKandevSystem(prompt)), "/e2e:cancel-hold")
+// cancelHoldAcceptanceMarker identifies the E2E-only fixture and its optional
+// prompt-correlated provider acceptance marker.
+func cancelHoldAcceptanceMarker(prompt string) (string, bool) {
+	command, marker, hasMarker := strings.Cut(strings.TrimSpace(stripKandevSystem(prompt)), " ")
+	if !strings.EqualFold(command, "/e2e:cancel-hold") {
+		return "", false
+	}
+	if !hasMarker {
+		return "", true
+	}
+	return strings.TrimSpace(marker), true
 }
 
 func mockCancelHoldDuration() time.Duration {

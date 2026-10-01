@@ -12,16 +12,16 @@ Validate a desktop runtime directory with this layout:
     bin/
       kandev[.exe]
       agentctl[.exe]
-      agentctl-linux-amd64
-      agentctl-linux-arm64
-      agentctl-darwin-arm64
-      agentctl-darwin-amd64
+    remote-helpers.json
+
+or the legacy complete layout with four helpers under bin/ and no manifest.
 
 If runtime-dir is omitted, apps/desktop/src-tauri/resources/kandev is checked.
 EOF
 }
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+REMOTE_HELPER_ASSET_VALIDATOR="$ROOT_DIR/scripts/release/remote-helper-assets.mjs"
 RUNTIME_DIR="${ROOT_DIR}/apps/desktop/src-tauri/resources/kandev"
 RUNTIME_DIR_SET=false
 PLATFORM=""
@@ -117,11 +117,21 @@ fi
 
 require_one "Kandev launcher binary" "$BIN_DIR/kandev" "$BIN_DIR/kandev.exe"
 require_one "agentctl binary" "$BIN_DIR/agentctl" "$BIN_DIR/agentctl.exe"
-for helper_spec in "${REMOTE_AGENTCTL_HELPERS[@]}"; do
-  helper="${helper_spec%%:*}"
-  label="${helper_spec#*:}"
-  require_executable "$label" "$BIN_DIR/$helper"
-done
+if [ -f "$RUNTIME_DIR/remote-helpers.json" ]; then
+  if ! command -v node >/dev/null 2>&1; then
+    echo "Node.js is required to validate the remote helper manifest" >&2
+    exit 1
+  fi
+  node "$REMOTE_HELPER_ASSET_VALIDATOR" verify-bundle \
+    --bundle-dir "$RUNTIME_DIR" \
+    --variant standard
+else
+  for helper_spec in "${REMOTE_AGENTCTL_HELPERS[@]}"; do
+    helper="${helper_spec%%:*}"
+    label="${helper_spec#*:}"
+    require_executable "$label" "$BIN_DIR/$helper"
+  done
+fi
 
 if [ -n "$PLATFORM" ]; then
   printf 'Desktop runtime verified for %s at %s\n' "$PLATFORM" "$RUNTIME_DIR"

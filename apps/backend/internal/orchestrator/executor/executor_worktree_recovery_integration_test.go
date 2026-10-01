@@ -2,9 +2,13 @@ package executor
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
+	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/repoclone"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/worktree"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
@@ -118,6 +122,206 @@ func TestWorktreeRecoveryResumeIntegration(t *testing.T) {
 		t.Fatalf("selected recovery admission calls = %d, want 1", admissionCalls)
 	}
 	assertSelectedWorktreeRecoveryRequest(t, admissionRequest, taskID, sessionID)
+}
+
+func TestMainCheckoutLaunchIntegration(t *testing.T) {
+	cases := []struct {
+		name       string
+		state      models.TaskSessionState
+		additional bool
+		resume     bool
+	}{
+		{name: "prepared launch", state: models.TaskSessionStateCreated},
+		{name: "additional session launch", state: models.TaskSessionStateCreated, additional: true},
+		{name: "resume", state: models.TaskSessionStateCancelled, resume: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			const taskID = "task-main-checkout-launch"
+			const primarySessionID = "session-main-checkout-primary"
+			const additionalSessionID = "session-main-checkout-additional"
+			repo := newMockRepository()
+			seedSelectedWorktreeRecoveryEnvironment(repo, taskID, primarySessionID, tc.state)
+			mainPath, before := createExecutorMainCheckout(t)
+			worktreeRecord := repo.taskEnvironmentRepos["environment-recovery"][0]
+			repository := repo.repositories["repo-recovery"]
+			environment := repo.taskEnvironments["environment-recovery"]
+			repository.LocalPath = mainPath
+			worktreeRecord.WorktreePath = mainPath
+			worktreeRecord.WorktreeBranch = before.branch
+			environment.WorkspacePath = mainPath
+			wt := &worktree.Worktree{
+				ID: "worktree-recovery", TaskID: taskID, SessionID: primarySessionID,
+				TaskEnvironmentID: "environment-recovery", RepositoryID: "repo-recovery",
+				TaskDirName: "recovery_abc", BranchSlug: "main", RepositoryPath: mainPath,
+				Path: mainPath, Branch: before.branch, Status: worktree.StatusActive,
+			}
+			store := &mainCheckoutRecoveryStore{worktree: wt}
+			log, err := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "json"})
+			if err != nil {
+				t.Fatalf("create logger: %v", err)
+			}
+			t.Cleanup(func() { _ = log.Close() })
+			manager, err := worktree.NewManager(worktree.Config{
+				Enabled: true, TasksBasePath: filepath.Join(t.TempDir(), "managed-tasks"),
+				BranchPrefix: "feature/",
+			}, store, log)
+			if err != nil {
+				t.Fatalf("create worktree manager: %v", err)
+			}
+			sessionID := primarySessionID
+			if tc.additional {
+				repo.sessions[primarySessionID].State = models.TaskSessionStateRunning
+				additional := *repo.sessions[primarySessionID]
+				additional.ID = additionalSessionID
+				additional.State = models.TaskSessionStateCreated
+				repo.sessions[additionalSessionID] = &additional
+				sessionID = additionalSessionID
+			}
+			if tc.resume {
+				repo.tasks[taskID] = &models.Task{ID: taskID, WorkspaceID: "workspace-recovery", Title: "Recovery resume"}
+			}
+
+			var admissionRequest worktree.RecoveryAdmissionRequest
+			admissionCalls := 0
+			exec := newTestExecutor(t, &mockAgentManager{}, repo)
+			exec.SetSelectedWorktreeRecoveryAdmission(func(ctx context.Context, req worktree.RecoveryAdmissionRequest) (*worktree.RecoveryAdmission, error) {
+				admissionCalls++
+				admissionRequest = req
+				return manager.AdmitRecovery(ctx, req)
+			})
+			if tc.resume {
+				_, err = exec.ResumeSession(context.Background(), repo.sessions[sessionID], false)
+			} else {
+				_, err = exec.LaunchPreparedSession(context.Background(), &v1.Task{
+					ID: taskID, WorkspaceID: "workspace-recovery", Title: "Main checkout launch",
+				}, sessionID, LaunchOptions{
+					AgentProfileID: "profile-recovery", ExecutorID: models.ExecutorIDWorktree, StartAgent: false,
+				})
+			}
+			if err != nil {
+				t.Fatalf("main-checkout launch path: %v", err)
+			}
+			if admissionCalls != 1 {
+				t.Fatalf("selected recovery admission calls = %d, want 1", admissionCalls)
+			}
+			assertSelectedWorktreeRecoveryRequest(t, admissionRequest, taskID, sessionID)
+			if got := admissionRequest.Slots[0].RepositoryPath; got != mainPath {
+				t.Fatalf("selected repository path = %q, want canonical main checkout %q", got, mainPath)
+			}
+			assertExecutorMainCheckoutState(t, mainPath, before)
+			if _, err := os.Lstat(mainPath + ".kandev-recovery.json"); !os.IsNotExist(err) {
+				t.Fatalf("main checkout received recovery record: %v", err)
+			}
+			if store.worktree != wt || store.worktree.Path != mainPath {
+				t.Fatal("selected admission replaced the canonical worktree record")
+			}
+			if tc.additional {
+				if primary := repo.sessions[primarySessionID]; primary == nil || primary.ID != primarySessionID || primary.State != models.TaskSessionStateRunning {
+					t.Fatalf("additional-session launch changed the live primary session: %+v", primary)
+				}
+			}
+		})
+	}
+}
+
+type mainCheckoutRecoveryStore struct {
+	worktree.Store
+	worktree *worktree.Worktree
+}
+
+func (s *mainCheckoutRecoveryStore) GetWorktreeByID(_ context.Context, id string) (*worktree.Worktree, error) {
+	if s.worktree == nil || s.worktree.ID != id {
+		return nil, nil
+	}
+	return s.worktree, nil
+}
+
+type executorMainCheckoutSnapshot struct {
+	branch string
+	head   string
+	index  []byte
+	files  map[string][]byte
+}
+
+func createExecutorMainCheckout(t *testing.T) (string, executorMainCheckoutSnapshot) {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "repository")
+	if err := os.MkdirAll(path, 0o755); err != nil {
+		t.Fatalf("create main checkout: %v", err)
+	}
+	gitCommandInTest(t, path, "init", "-b", "main")
+	gitCommandInTest(t, path, "config", "user.email", "test@example.com")
+	gitCommandInTest(t, path, "config", "user.name", "Test User")
+	writeExecutorMainCheckoutFile(t, path, ".gitignore", "ignored.txt\n")
+	writeExecutorMainCheckoutFile(t, path, "tracked.txt", "committed\n")
+	gitCommandInTest(t, path, "add", ".gitignore", "tracked.txt")
+	gitCommandInTest(t, path, "commit", "-m", "initial commit")
+	gitCommandInTest(t, path, "checkout", "-b", "feature/main-checkout")
+	writeExecutorMainCheckoutFile(t, path, "tracked.txt", "unstaged edit\n")
+	writeExecutorMainCheckoutFile(t, path, "staged.txt", "staged edit\n")
+	gitCommandInTest(t, path, "add", "staged.txt")
+	writeExecutorMainCheckoutFile(t, path, "untracked.txt", "untracked data\n")
+	writeExecutorMainCheckoutFile(t, path, "ignored.txt", "ignored data\n")
+	return path, captureExecutorMainCheckoutState(t, path)
+}
+
+func writeExecutorMainCheckoutFile(t *testing.T, root, name, contents string) {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(root, name), []byte(contents), 0o600); err != nil {
+		t.Fatalf("write main checkout file %q: %v", name, err)
+	}
+}
+
+func captureExecutorMainCheckoutState(t *testing.T, path string) executorMainCheckoutSnapshot {
+	t.Helper()
+	snapshot := executorMainCheckoutSnapshot{
+		branch: gitOutputInTest(t, path, "symbolic-ref", "--short", "HEAD"),
+		head:   gitOutputInTest(t, path, "rev-parse", "--verify", "HEAD"),
+		files:  make(map[string][]byte),
+	}
+	var err error
+	snapshot.index, err = os.ReadFile(filepath.Join(path, ".git", "index"))
+	if err != nil {
+		t.Fatalf("read main checkout index: %v", err)
+	}
+	for _, name := range []string{"tracked.txt", "staged.txt", "untracked.txt", "ignored.txt"} {
+		snapshot.files[name], err = os.ReadFile(filepath.Join(path, name))
+		if err != nil {
+			t.Fatalf("read main checkout file %q: %v", name, err)
+		}
+	}
+	return snapshot
+}
+
+func assertExecutorMainCheckoutState(t *testing.T, path string, want executorMainCheckoutSnapshot) {
+	t.Helper()
+	got := captureExecutorMainCheckoutState(t, path)
+	if got.branch != want.branch || got.head != want.head || string(got.index) != string(want.index) {
+		t.Fatalf("main checkout identity/index changed: got branch=%q head=%q index=%x, want branch=%q head=%q index=%x",
+			got.branch, got.head, got.index, want.branch, want.head, want.index)
+	}
+	for name, contents := range want.files {
+		if string(got.files[name]) != string(contents) {
+			t.Fatalf("main checkout file %q changed: got %q, want %q", name, got.files[name], contents)
+		}
+	}
+}
+
+func TestManagedCloneRelocationProofIncludesLegacyOwnerNamePath(t *testing.T) {
+	root := t.TempDir()
+	cloner := repoclone.NewCloner(repoclone.Config{BasePath: root}, repoclone.ProtocolHTTPS, "", nil)
+	repository := &models.Repository{
+		ID: "repo-legacy", WorkspaceID: "workspace-legacy", SourceType: "provider", Provider: "github",
+		ProviderHost: "https://github.com", ProviderOwner: "acme", ProviderName: "widget",
+	}
+	proof := managedCloneRelocationProof(cloner, repository, "", "")
+	if proof == nil {
+		t.Fatal("managedCloneRelocationProof() returned nil for a managed provider repository")
+	}
+	if want := filepath.Join(root, "acme", "widget"); proof.LegacyOwnerNameSourcePath != want {
+		t.Fatalf("legacy owner/name source = %q, want %q", proof.LegacyOwnerNameSourcePath, want)
+	}
 }
 
 func assertSelectedWorktreeRecoveryRequest(

@@ -14,6 +14,7 @@ import {
   getManualRightWidth,
 } from "@/lib/local-storage";
 import { getLayoutProfileIdentity, type LayoutProfileIdentity } from "@/lib/layout/layout-profiles";
+import { getEnvHiddenSessions, resolveVisibleSessionId } from "@/lib/env-hidden-sessions";
 import { setPinnedTarget, clearPinnedTarget } from "./layout-manager";
 import { applyLayoutFixups, focusOrAddPanel } from "./dockview-layout-builders";
 import {
@@ -36,7 +37,7 @@ import {
   materializeReusableChatPanel,
 } from "./layout-manager";
 import type { BuiltInPreset, LayoutState, LayoutGroupIds } from "./layout-manager";
-import type { CommitDetailTarget } from "@/components/task/changes-diff-target";
+import type { ChangeLayer, CommitDetailTarget } from "@/lib/state/diff-target-types";
 import type { ReviewItemSummary } from "@/lib/plugins/types";
 import { performEnvSwitch, replaceStaleSessionPanels } from "./dockview-env-switch";
 import {
@@ -76,6 +77,12 @@ const debugSave = createDebugLogger("dockview:save");
 const debugWidths = createDebugLogger("dockview:widths");
 
 const DEFAULT_LAYOUT_PROFILE: LayoutProfileIdentity = { kind: "built-in", id: "default" };
+
+export type PendingChatScrollRestore = {
+  scrollTop: number;
+  sessionId: string | null;
+  token: number;
+};
 
 function profileForCustomLayout(layout: Pick<SavedLayoutConfig, "id">): LayoutProfileIdentity {
   return getLayoutProfileIdentity(layout);
@@ -185,6 +192,7 @@ export type SavedLayoutConfig = {
 export type ApplyCustomLayoutOptions = {
   activeSessionId?: string | null;
   sessionIds?: string[];
+  envId?: string | null;
 };
 export type TranscriptScrollTarget = {
   sessionId: string;
@@ -215,12 +223,16 @@ type DockviewStore = {
       source?: string;
       repositoryName?: string;
       prKey?: string;
-      changeLayer?: import("@/components/task/changes-diff-target").ChangeLayer;
+      changeLayer?: ChangeLayer;
     },
   ) => void;
   addCommitDetailPanel: (
     target: CommitDetailTarget | string,
-    opts?: OpenPanelOpts & { groupId?: string; repo?: string },
+    opts?: OpenPanelOpts & {
+      groupId?: string;
+      repo?: string;
+      fileNavigation?: import("@/lib/state/diff-target-types").CommitFileNavigationRequest;
+    },
   ) => void;
   addFileEditorPanel: (path: string, name: string, opts?: OpenPanelOpts) => void;
   promotePreviewToPinned: (type: PreviewType) => void;
@@ -242,6 +254,14 @@ type DockviewStore = {
   closePluginPanels: (pluginId: string) => void;
   addTodosPanel: (opts?: { groupId?: string; quiet?: boolean; inCenter?: boolean }) => void;
   addPromptHistoryPanel: (opts?: { groupId?: string; quiet?: boolean; inCenter?: boolean }) => void;
+  addBackgroundWorkPanel: (opts?: {
+    groupId?: string;
+    quiet?: boolean;
+    inCenter?: boolean;
+    sessionId?: string;
+    workId?: string;
+    title?: string;
+  }) => void;
   /** Open a PR detail panel. prKey (owner/repo/pr_number) gives multi-repo tasks one tab per PR. */
   addPRPanel: (prKey?: string, opts?: ReviewPanelOptions) => void;
   /** Open a GitLab merge request detail panel keyed by host/project/iid. */
@@ -320,8 +340,10 @@ type DockviewStore = {
   activeFilePath: string | null;
   activeFileRepo: string | null;
   activePanelComponent: string | null;
-  pendingChatScrollTop: number | null;
-  setPendingChatScrollTop: (value: number | null) => void;
+  pendingChatScrollTop: PendingChatScrollRestore | null;
+  completedChatScrollRestore: { sessionId: string | null; token: number } | null;
+  setPendingChatScrollTop: (value: PendingChatScrollRestore) => void;
+  completePendingChatScrollTop: (token: number, applied: boolean) => void;
   pendingChatInitialPlacement: { sessionId: string; token: number } | null;
   completePendingChatInitialPlacement: (token: number) => void;
   /** Saved layout from before a manual maximize. Null when not maximized. */
@@ -846,6 +868,22 @@ type RestoreCustomLayoutParams = {
   set: StoreSet;
 };
 
+function visibleCustomLayoutSessions(opts: ApplyCustomLayoutOptions | undefined): {
+  activeSessionId: string | null;
+  sessionIds: string[];
+} {
+  const hiddenSessionIds = new Set(opts?.envId ? getEnvHiddenSessions(opts.envId) : []);
+  const activeSessionId = opts?.activeSessionId ?? null;
+  return {
+    activeSessionId: resolveVisibleSessionId(
+      activeSessionId,
+      opts?.sessionIds ?? [],
+      hiddenSessionIds,
+    ),
+    sessionIds: (opts?.sessionIds ?? []).filter((sessionId) => !hiddenSessionIds.has(sessionId)),
+  };
+}
+
 /**
  * Restore a saved custom layout onto the dockview API. New-format layouts
  * (with columns) are normalized (reusable session panels, chat materialization)
@@ -865,10 +903,11 @@ function restoreCustomLayout({
   if (state?.columns) {
     // Normalize first so both old saved layouts with session-specific panels
     // and newer reusable layouts with chat placeholders apply through one path.
+    const visibleSessions = visibleCustomLayoutSessions(opts);
     const activeState = materializeReusableChatPanel(
       normalizeReusableSessionPanels(state),
-      opts?.activeSessionId ?? null,
-      opts?.sessionIds ?? [],
+      visibleSessions.activeSessionId,
+      visibleSessions.sessionIds,
     );
     const savedWidths = resolveCustomLayoutPinnedWidths(activeState.columns, safeWidth);
     const ids = applyLayoutAndSet(api, activeState, savedWidths, set, {
@@ -881,7 +920,12 @@ function restoreCustomLayout({
 
   try {
     restoreSerializedDockview(api, layout.layout as unknown as SerializedDockview);
-    replaceStaleSessionPanels(api, opts?.activeSessionId ?? null, opts?.sessionIds ?? []);
+    replaceStaleSessionPanels(
+      api,
+      opts?.activeSessionId ?? null,
+      opts?.sessionIds ?? [],
+      opts?.envId ?? null,
+    );
     set(applyLayoutFixups(api));
     return { appliedState: state, oldFormatRestoreFailed: false };
   } catch (e) {
@@ -914,7 +958,7 @@ function restoreMaximizeFromStorage(
   if (!saved) return false;
   try {
     restoreSerializedDockview(api, saved.maximizedDockviewJson as SerializedDockview);
-    replaceStaleSessionPanels(api, activeSessionId, currentSessionIds);
+    replaceStaleSessionPanels(api, activeSessionId, currentSessionIds, envId);
     // After fromJSON, `api.width/height` reflect the JSON's recorded grid
     // dims, which may not match the live container. Always lay out against
     // the measured DOM size so a stale value can't pin the dockview at the
@@ -1561,7 +1605,18 @@ export const useDockviewStore = create<DockviewStore>((set, get) => ({
   buildDefaultLayout: (api, intentName) => performBuildDefault(api, set, get, intentName),
   resetLayout: () => resetToEffectiveDefault(set, get),
   pendingChatScrollTop: null,
-  setPendingChatScrollTop: (value) => set({ pendingChatScrollTop: value }),
+  completedChatScrollRestore: null,
+  setPendingChatScrollTop: (value) =>
+    set({ pendingChatScrollTop: value, completedChatScrollRestore: null }),
+  completePendingChatScrollTop: (token, applied) =>
+    set((state) => {
+      const pending = state.pendingChatScrollTop;
+      if (!pending || pending.token !== token) return {};
+      return {
+        pendingChatScrollTop: null,
+        completedChatScrollRestore: applied ? { sessionId: pending.sessionId, token } : null,
+      };
+    }),
   pendingChatInitialPlacement: null,
   completePendingChatInitialPlacement: (token) =>
     set((state) =>

@@ -25,6 +25,19 @@ type BlockerRepository interface {
 	ListDependentsForTasks(ctx context.Context, blockerTaskIDs []string) (map[string][]string, error)
 }
 
+type exactTaskBlockerRepository interface {
+	AddTaskBlockerExact(
+		ctx context.Context,
+		taskID, blockerTaskID, workspaceID, taskVersion, relatedVersion string,
+		fence models.TaskManagementClaimFence,
+	) (alreadyApplied bool, err error)
+	RemoveTaskBlockerExact(
+		ctx context.Context,
+		taskID, blockerTaskID, workspaceID, taskVersion, relatedVersion string,
+		fence models.TaskManagementClaimFence,
+	) (alreadyApplied bool, err error)
+}
+
 // taskDependencyCleaner removes every edge touching a task. Optional on
 // BlockerRepository so existing test doubles keep compiling.
 type taskDependencyCleaner interface {

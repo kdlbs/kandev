@@ -106,6 +106,7 @@ func newPassthroughMCPTestManager(t *testing.T, agentName string) (*Manager, *Ag
 		SessionID:      "session-1",
 		AgentProfileID: "profile-1",
 		WorkspacePath:  t.TempDir(),
+		ExecutorType:   "local",
 		metadata: map[string]interface{}{
 			"standalone_port": 45678,
 		},

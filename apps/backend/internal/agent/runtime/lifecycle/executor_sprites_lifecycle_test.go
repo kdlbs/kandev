@@ -108,6 +108,7 @@ func TestSpritesStopInstancePreservesSandboxOnSessionStop(t *testing.T) {
 		"stopped via API",
 		"agent crashed",
 		"user requested",
+		StopReasonIdleSuspension,
 	}
 
 	for _, reason := range preserveReasons {

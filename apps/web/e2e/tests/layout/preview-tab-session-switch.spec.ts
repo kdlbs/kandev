@@ -169,10 +169,9 @@ test.describe("Preview tab survives session switch", () => {
       )
       .toBe(true);
 
-    // Navigate to Task A via kanban
-    const kanban = new KanbanPage(testPage);
-    await kanban.goto();
-    await kanban.taskCardByTitle("Preview Switch Task A").click();
+    // Open Task A by its stable route. The board card is not part of this
+    // regression and can be hidden by the user's saved board filters.
+    await testPage.goto(`/t/${taskA.id}`);
     await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
     const session = new SessionPage(testPage);
     await session.waitForLoad();

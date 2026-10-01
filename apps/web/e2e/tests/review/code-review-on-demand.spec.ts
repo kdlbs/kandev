@@ -1,5 +1,5 @@
 import path from "node:path";
-import { test, expect } from "../../fixtures/test-base";
+import { test, expect, resetSeedRepositoryCheckout } from "../../fixtures/test-base";
 import { GitHelper, makeGitEnv } from "../../helpers/git-helper";
 import { SessionPage } from "../../pages/session-page";
 
@@ -32,6 +32,7 @@ test.describe("Native code review — on demand", () => {
     backend,
   }) => {
     await configureReviewer(apiClient, seedData.agentProfileId);
+    resetSeedRepositoryCheckout(seedData, backend.tmpDir);
 
     const task = await apiClient.createTaskWithAgent(
       seedData.workspaceId,
@@ -68,7 +69,7 @@ test.describe("Native code review — on demand", () => {
     await expect(changesTab).toBeVisible();
     await changesTab.click();
     await expect(
-      testPage.getByTestId("unstaged-file-tree").getByTestId(`file-row-${REVIEWED_FILE}`),
+      testPage.getByTestId("unstaged-files-section").getByTestId(`file-row-${REVIEWED_FILE}`),
     ).toBeVisible({
       timeout: 30_000,
     });
@@ -165,6 +166,7 @@ test.describe("Native code review — on demand", () => {
     seedData,
     backend,
   }) => {
+    resetSeedRepositoryCheckout(seedData, backend.tmpDir);
     // No default utility agent/model and a disabled builtin: the run must fail
     // closed with an actionable message rather than a generic error.
     await apiClient.saveUserSettings({
@@ -198,7 +200,7 @@ test.describe("Native code review — on demand", () => {
 
     await testPage.getByTestId("dockview-tab-changes").click();
     await expect(
-      testPage.getByTestId("unstaged-file-tree").getByTestId(`file-row-${REVIEWED_FILE}`),
+      testPage.getByTestId("unstaged-files-section").getByTestId(`file-row-${REVIEWED_FILE}`),
     ).toBeVisible({
       timeout: 30_000,
     });

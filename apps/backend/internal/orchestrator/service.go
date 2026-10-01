@@ -15,6 +15,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"hash/fnv"
 	"io"
 	"strings"
 	"sync"
@@ -49,9 +50,10 @@ func isNoActiveTurnError(err error) bool {
 
 // Common errors
 var (
-	ErrServiceAlreadyRunning = errors.New("service is already running")
-	ErrServiceNotRunning     = errors.New("service is not running")
-	ErrRouteActionActiveTurn = errors.New("route actions require a settled turn")
+	ErrServiceAlreadyRunning            = errors.New("service is already running")
+	ErrServiceNotRunning                = errors.New("service is not running")
+	ErrRouteActionActiveTurn            = errors.New("route actions require a settled turn")
+	ErrIdleSuspensionProvenanceRequired = errors.New("session is not suspended by the workspace idle policy")
 )
 
 const maxStartupTransferReconcileAttempts = 30
@@ -61,6 +63,10 @@ type ServiceConfig struct {
 	Scheduler  scheduler.SchedulerConfig
 	QueueSize  int
 	QueueGroup string
+	// CodexAppServerEnabled controls native-only lifecycle actions such as
+	// conversation forks. It is restart-required, matching agentctl transport
+	// composition and the feature's runtime flag.
+	CodexAppServerEnabled bool
 	// SessionCapacity is the effective instance-wide limit for automatic
 	// session launches. Zero disables the ceiling.
 	SessionCapacity               int
@@ -121,7 +127,11 @@ type MessageCreator interface {
 	UpsertAgentPlanMessage(ctx context.Context, taskID, sourceToolCallID, agentSessionID, content, turnID string) error
 	CreateSessionMessage(ctx context.Context, taskID, content, agentSessionID, messageType, turnID string, metadata map[string]interface{}, requestsInput bool) error
 	CreateSessionMessageIdempotent(ctx context.Context, messageID, taskID, content, agentSessionID, messageType, turnID string, metadata map[string]interface{}, requestsInput bool) error
-	CreatePermissionRequestMessage(ctx context.Context, taskID, sessionID, requestID, pendingID, toolCallID, title, turnID string, options []map[string]interface{}, actionType string, actionDetails map[string]interface{}) (string, error)
+	// CreateLifecycleSessionMessage persists a session message inside a new,
+	// already-completed lifecycle-only turn. The turn is never active, so a
+	// later prompt cannot adopt it.
+	CreateLifecycleSessionMessage(ctx context.Context, taskID, content, agentSessionID, messageType string, metadata map[string]interface{}) error
+	CreatePermissionRequestMessage(ctx context.Context, taskID, sessionID, requestID, pendingID, toolCallID, title, turnID string, options []map[string]interface{}, actionType string, actionDetails map[string]interface{}, decision *models.PermissionDecision) (string, error)
 	UpdatePermissionMessage(ctx context.Context, taskID, sessionID, requestID, pendingID string, status models.PermissionStatus) error
 	ClaimPermissionResolution(ctx context.Context, request models.PermissionResolutionClaimRequest) (*models.PermissionResolutionClaimResult, error)
 	FinalizePermissionResolution(ctx context.Context, request models.PermissionResolutionFinalizeRequest) (*models.PermissionResolutionFinalizeResult, error)
@@ -234,6 +244,12 @@ type TaskEventPublisher interface {
 	// changed — including a generating↔background flip that leaves the coarse
 	// state unchanged.
 	PublishTaskActivityIfChanged(ctx context.Context, taskID string)
+}
+
+// BackgroundWorkObserver records background workload observations and output stream chunks.
+type BackgroundWorkObserver interface {
+	RecordBackgroundWorkloadObservation(ctx context.Context, obs streams.WorkloadRunObservation, taskID, sessionID string) error
+	AppendBackgroundWorkloadOutput(ctx context.Context, chunk streams.WorkloadOutputChunk, sessionID string) error
 }
 
 // FeederPullReconciler wakes task-service feeder pulls after a manual move's
@@ -678,6 +694,8 @@ type Service struct {
 	repo          sessionExecutorStore
 	promptTargets taskPullRequestTargetStore
 	agentManager  executor.AgentManagerClient
+	// ACP mode and model reports mutate one selector snapshot per session.
+	sessionSettingsSnapshotLocks [64]sync.Mutex
 
 	// Components
 	queue     *queue.TaskQueue
@@ -687,6 +705,7 @@ type Service struct {
 
 	// Message queue service for queueing messages while agent is running
 	messageQueue                   *messagequeue.Service
+	managedInputStorage            messagequeue.ManagedInputStorage
 	passthroughDispatchMu          sync.Mutex
 	passthroughDispatches          map[string]map[*passthroughDispatchToken]struct{}
 	initialCreatePromptMu          sync.Mutex
@@ -698,6 +717,10 @@ type Service struct {
 	// reclaiming the same marker while its detached launch is still running.
 	autoStartOnCreateMu       sync.Mutex
 	autoStartOnCreateInFlight map[string]struct{}
+
+	// prepareResultMu orders progress markers and completion snapshots for the
+	// same session before they update durable preparation metadata.
+	prepareResultMu sync.Mutex
 
 	// ceilingEntryAdmissionLocks serialize the durable workflow-entry binding,
 	// ceiling queue, and task-state reconciliation for one task. The lock is
@@ -749,8 +772,9 @@ type Service struct {
 
 	// Task event publisher for emitting task.updated events.
 	// Task service owns the rich payload; orchestrator delegates.
-	taskEvents  TaskEventPublisher
-	feederPulls FeederPullReconciler
+	taskEvents             TaskEventPublisher
+	feederPulls            FeederPullReconciler
+	backgroundWorkObserver BackgroundWorkObserver
 
 	// launchAttachmentClaimer binds staged descriptors before any launch intent
 	// can dispatch them to the runtime. Inline attachments need no claim.
@@ -1133,6 +1157,11 @@ type Service struct {
 	// / stopIdleSessionReaper no-op. See idle_session_reaper.go.
 	idleReaper *idleSessionReaper
 
+	idleParkingMu         sync.Mutex
+	idleParkingCandidates map[idleParkingCandidateKey]time.Time
+	idleParkingFocusAt    map[string]time.Time
+	idleParkingInFlight   map[idleParkingCandidateKey]struct{}
+
 	// lspLeases pins an execution while a browser-independent language-server
 	// lease owns its task-host stream. The gateway is wired through this narrow
 	// interface to avoid importing its WebSocket package here.
@@ -1246,7 +1275,8 @@ type Service struct {
 	// runtime state. Without it, a completion/cancel path can check for active
 	// sibling sessions just before another handler marks one RUNNING, then
 	// clobber the task back to REVIEW while work is active.
-	taskRuntimeStateMu sync.Mutex
+	taskRuntimeStateMu   sync.Mutex
+	taskSchedulingClaims map[string]*taskSchedulingClaim
 
 	// taskSessionErrorLocks serialize session deletion with retained-error
 	// selection and publication for each task. Entries are reference-counted
@@ -2094,6 +2124,12 @@ func (s *Service) SetTurnService(turnService TurnService) {
 	s.turnService = turnService
 }
 
+// SetManagedInputStorage wires the durable receipt store that shares the
+// message queue's FIFO repository.
+func (s *Service) SetManagedInputStorage(storage messagequeue.ManagedInputStorage) {
+	s.managedInputStorage = storage
+}
+
 // SetTaskEventPublisher wires the publisher used for task.updated events.
 //
 // The task service is the canonical publisher: it loads session counts,
@@ -2112,6 +2148,12 @@ func (s *Service) SetTaskEventPublisher(publisher TaskEventPublisher) {
 // after an admitted manual move lifecycle has completed.
 func (s *Service) SetFeederPullReconciler(reconciler FeederPullReconciler) {
 	s.feederPulls = reconciler
+}
+
+// SetBackgroundWorkObserver wires the task-service observer used to record
+// background workload and stream output observations.
+func (s *Service) SetBackgroundWorkObserver(observer BackgroundWorkObserver) {
+	s.backgroundWorkObserver = observer
 }
 
 // SetSessionAccessChecker installs the per-user workspace scoping check used by
@@ -3037,6 +3079,24 @@ func (s *Service) acquireSessionLifecycleLock(sessionID string) func() {
 	lock := value.(*sync.Mutex)
 	lock.Lock()
 	return lock.Unlock
+}
+
+func (s *Service) sessionSettingsSnapshotLock(sessionID string) *sync.Mutex {
+	hash := fnv.New32a()
+	_, _ = hash.Write([]byte(sessionID))
+	return &s.sessionSettingsSnapshotLocks[hash.Sum32()%uint32(len(s.sessionSettingsSnapshotLocks))]
+}
+
+func (s *Service) tryAcquireSessionLifecycleLock(sessionID string) (func(), bool) {
+	if sessionID == "" {
+		return nil, false
+	}
+	value, _ := s.sessionLifecycleLocks.LoadOrStore(sessionID, &sync.Mutex{})
+	lock := value.(*sync.Mutex)
+	if !lock.TryLock() {
+		return nil, false
+	}
+	return lock.Unlock, true
 }
 
 // acquireTurnCompletionLock serializes on_turn_complete processing for a

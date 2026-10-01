@@ -277,6 +277,61 @@ The structured chat composer's `#` search calls `GET /api/v1/workspaces/:workspa
 
 A successful response returns the normalized query and an ordered `groups` array. Each group includes `source`, `provider`, `kind`, `display_name`, `kind_label`, `status`, and `results`. One source can report `not_configured`, `unauthorized`, `rate_limited`, `timeout`, `upstream_error`, or `unsupported_scope` while the request remains HTTP 200 and other groups remain usable. Each result is a versioned `EntityReference` with the fields described below; raw provider errors and credentials are not returned.
 
+### Workflow snapshot coverage
+
+Workflow and workspace snapshot responses can include `task_coverage` alongside
+`tasks`: `workspace_id`, `workflow_id`, `membership: "active"`, `total`, `complete`,
+and `ordering_profile`. The total describes the collection before `task_limit`
+truncation. Boot snapshots use `taskCoverage` for the same metadata and mark
+omitted rows incomplete. Missing metadata never establishes completeness.
+
+The workflow list with `include_hidden=true` can also include
+`task_workflow_coverage`, containing `workspace_id`, `workflow_ids`, and `complete`.
+It identifies every scope containing eligible active tasks, including hidden
+workflows and the empty identifier for unassigned tasks. Empty scopes need no task
+fetch. The boot workflow state carries this as `taskWorkflowCoverage`.
+
+The web client evaluates complete resident views with the verified
+`sqlite_nocase_v1` ordering profile. `server_only` and unknown profiles retain
+server evaluation. Complete active coverage cannot satisfy archived views.
+WebSocket updates maintain shared task records; a reconnect gap invalidates
+coverage until an authoritative snapshot recovers it.
+
+### Query sidebar tasks over HTTP
+
+When a view is not covered by current workspace data, the web sidebar reads one bounded page through `POST /api/v1/workspaces/:workspaceId/sidebar/query`. The route uses the normal workspace authorization boundary and the authenticated user's saved pin and ordering preferences.
+
+```json
+{
+  "filters": [{ "dimension": "archived", "op": "is", "value": false }],
+  "sort": { "key": "lastActivityAt", "direction": "desc" },
+  "group": "none",
+  "collapsed_group_keys": [],
+  "collapsed_task_ids": [],
+  "page": 1,
+  "page_size": 100,
+  "locale": "en"
+}
+```
+
+`page` is one-based. `page_size` defaults to 100 and cannot exceed 100. The server filters and orders the complete view before selecting the page. It clamps a page that is beyond the current result and returns `query_key`, `page`, `page_size`, `total_tasks`, `total_visible_tasks`, `has_previous`, `has_next`, and ordered `entries`. Entries can be group headings, task rows, or continuation context for a task whose parent is on another page. Group headings and continuation entries are not included in `total_visible_tasks`.
+
+The route is read-only. It rejects unknown request fields and limits the request body to 256 KiB. Clients must not send pin, manual ordering, or subtask-order preferences in the query; the server reads those from the authenticated user's settings. The existing workspace task-list route remains available for its other callers.
+
+A query accepts up to 20 filter clauses. Each `in` or `not_in` membership filter
+accepts up to 1,000 values, including an empty list. Each decoded string is
+limited to 256 UTF-8 bytes; JSON escaping does not consume that decoded limit.
+Repository values are repository names, while workflow values are workflow IDs.
+
+Invalid queries return HTTP 400 with the existing `error` string and an additive
+`error_code: "sidebar_query_invalid"`. The `details` object includes a stable
+`reason` and, where relevant, a zero-based `filter_index` and numeric `limit`.
+Reasons include `list_count`, `scalar_length`, `clause_count`, `invalid_clause`,
+`malformed_query`, `page_bounds`, `sorting`, `grouping`, `collapsed_count`, and
+`locale`. Clients should render their own localized recovery message and treat
+unknown reasons as invalid input. Authorization failures remain separate from
+query validation.
+
 ### Send a user turn
 
 `message.add` requires `task_id`, `session_id`, and either non-whitespace `content` or at least one attachment. Optional fields are `author_id`, `model`, `plan_mode`, `has_review_comments`, `attachments`, `context_files`, and `entity_references`.

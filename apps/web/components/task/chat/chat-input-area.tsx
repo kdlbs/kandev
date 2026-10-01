@@ -31,7 +31,7 @@ import type { AgentMessageComment } from "@/lib/state/slices/comments";
 import type { ChatPanelState } from "./use-chat-panel-state";
 import { useComposerProps } from "./use-composer-props";
 import { cn } from "@/lib/utils";
-import { resolveComposerWorkspaceId } from "./composer-workspace";
+import { useComposerWorkspace } from "@/hooks/domains/task/use-composer-workspace";
 import { t } from "@/lib/i18n";
 import { ChatStatusBar, ComposerCIStatus, resolveStatusRowTaskId } from "./chat-status-bar";
 import { DynamicRouteRecovery } from "./dynamic-route-recovery";
@@ -403,6 +403,9 @@ type ChatInputAreaProps = {
    * user prompt. Omitted callers (e.g. quick chat) render no button. */
   showScrollToLastPrompt?: boolean;
   onScrollToLastPrompt?: () => void;
+  /** Explicitly reveals the newest transcript content without changing follow preference. */
+  showJumpToLatest?: boolean;
+  onJumpToLatest?: () => void;
   /** Direction the last prompt actually sits in, driving the scroll
    * button's icon. Ignored while `showScrollToLastPrompt` is falsy. */
   lastPromptScrollDirection?: "up" | "down";
@@ -430,21 +433,6 @@ function useExecutorUnavailable(taskId: string | null, sessionId: string | null)
     unavailable: availability.unavailable,
     reason: availability.status?.label,
   };
-}
-
-/** Resolves the workspace ID the composer should attribute a new message to. */
-function useComposerWorkspaceId(sessionId: string | null, taskId: string | null) {
-  return useAppStore((state) =>
-    resolveComposerWorkspaceId({
-      sessionId,
-      taskId,
-      quickChatSessions: state.quickChat.sessions,
-      activeWorkflowId: state.kanban.workflowId,
-      activeTasks: state.kanban.tasks,
-      snapshots: Object.values(state.kanbanMulti.snapshots),
-      workflows: state.workflows.items,
-    }),
-  );
 }
 
 /** Derives the composer's plan actions, executor-availability state, and placeholder text. */
@@ -535,6 +523,29 @@ function PreviewFeedbackFallbackSurface({
   );
 }
 
+function ComposerStatusNotices({
+  panelState,
+  showAgentStartHint,
+  executorUnavailable,
+}: {
+  panelState: ChatPanelState;
+  showAgentStartHint: boolean;
+  executorUnavailable: boolean;
+}) {
+  return (
+    <>
+      <DynamicRouteRecovery session={panelState.session} />
+      <ComposerAgentStartHint
+        show={showAgentStartHint}
+        needsRecovery={panelState.needsRecovery}
+        executorUnavailable={executorUnavailable}
+        hasPendingClarification={Boolean(panelState.pendingClarification)}
+      />
+      <PlanCommentMigrationNotice {...panelState.planCommentMigration} />
+    </>
+  );
+}
+
 /**
  * The chat composer: input box, submit/cancel handling, plan-mode toggle,
  * clarification banner, and the {@link ChatStatusBar} above it.
@@ -548,6 +559,8 @@ export function ChatInputArea(props: ChatInputAreaProps) {
     surfaceClassName,
     showScrollToLastPrompt,
     onScrollToLastPrompt,
+    showJumpToLatest,
+    onJumpToLatest,
     lastPromptScrollDirection,
     showScrollToStart,
     onScrollToStart,
@@ -558,7 +571,7 @@ export function ChatInputArea(props: ChatInputAreaProps) {
   const disclosure = useComposerDisclosureContext();
   useComposerActivity({ required: Boolean(panelState.session?.pending_action) });
   const statusRowTaskId = resolveStatusRowTaskId(taskId, statusTaskId);
-  const composerWorkspaceId = useComposerWorkspaceId(resolvedSessionId, taskId);
+  const composerWorkspace = useComposerWorkspace(resolvedSessionId, taskId);
   const sessionState = panelState.session?.state ?? null;
   const { planActions, executor, placeholder } = useChatInputDerived(
     panelState,
@@ -572,7 +585,9 @@ export function ChatInputArea(props: ChatInputAreaProps) {
   const { implementPlanHandler, proceedStepName, proceed, isMoving } = planActions;
   const composerProps = useComposerProps({
     ...props,
-    composerWorkspaceId,
+    composerWorkspaceId: composerWorkspace.workspaceId,
+    workspaceResolutionFailed: composerWorkspace.status === "failed",
+    onRetryWorkspaceResolution: composerWorkspace.retry,
     isMoving,
     implementPlanHandler,
     executor,
@@ -592,14 +607,11 @@ export function ChatInputArea(props: ChatInputAreaProps) {
         <ComposerCIStatus taskId={statusRowTaskId} sessionId={resolvedSessionId} standalone />
       )}
       <ComposerDisclosureRegion className={disclosure?.enabled ? "px-2 pb-2 pt-1" : undefined}>
-        <DynamicRouteRecovery session={panelState.session} />
-        <ComposerAgentStartHint
-          show={showAgentStartHint}
-          needsRecovery={panelState.needsRecovery}
+        <ComposerStatusNotices
+          panelState={panelState}
+          showAgentStartHint={showAgentStartHint}
           executorUnavailable={executor.unavailable}
-          hasPendingClarification={Boolean(panelState.pendingClarification)}
         />
-        <PlanCommentMigrationNotice {...panelState.planCommentMigration} />
         <QueueAffordance
           sessionId={resolvedSessionId}
           renderStatusBar={(queueChip) => (
@@ -617,6 +629,8 @@ export function ChatInputArea(props: ChatInputAreaProps) {
               queueChip={queueChip}
               showScrollToLastPrompt={showScrollToLastPrompt}
               onScrollToLastPrompt={onScrollToLastPrompt}
+              showJumpToLatest={showJumpToLatest}
+              onJumpToLatest={onJumpToLatest}
               lastPromptScrollDirection={lastPromptScrollDirection}
               showScrollToStart={showScrollToStart}
               onScrollToStart={onScrollToStart}

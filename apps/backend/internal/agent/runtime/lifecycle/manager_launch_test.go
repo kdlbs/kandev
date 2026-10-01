@@ -933,7 +933,7 @@ func TestConfigureAndStartAgent_DoesNotSendTaskDescriptionEnv(t *testing.T) {
 		agentctl: client,
 	}
 
-	bootCommand, err := mgr.configureAndStartAgent(context.Background(), execution, "never")
+	bootCommand, err := mgr.configureAndStartAgent(context.Background(), execution)
 	if err != nil {
 		t.Fatalf("configureAndStartAgent() error = %v", err)
 	}
@@ -966,7 +966,7 @@ func TestConfigureAndStartAgentUsesRuntimeSnapshotWhenProfileSecretIsUnavailable
 	}
 	execution.setRuntimeEnvironment(map[string]string{"PROFILE_ONLY": "captured-value"})
 
-	if _, err := mgr.configureAndStartAgent(context.Background(), execution, "never"); err != nil {
+	if _, err := mgr.configureAndStartAgent(context.Background(), execution); err != nil {
 		t.Fatalf("configureAndStartAgent() error = %v", err)
 	}
 	if configuredEnv["PROFILE_ONLY"] != "captured-value" {
@@ -1004,7 +1004,7 @@ func TestConfigureAndStartAgentSendsComposedRuntimeEnvironmentAsOverlay(t *testi
 		"GIT_CONFIG_VALUE_2": "!f() { : kandev-host-gh-bridge; '/old/gh' auth git-credential \"$@\"; }; f",
 	})
 
-	if _, err := mgr.configureAndStartAgent(context.Background(), execution, "never"); err != nil {
+	if _, err := mgr.configureAndStartAgent(context.Background(), execution); err != nil {
 		t.Fatalf("configureAndStartAgent() error = %v", err)
 	}
 	if replaced {
@@ -1034,7 +1034,7 @@ func TestConfigureAndStartAgent_SendsStructuredArgv(t *testing.T) {
 		agentctl:       client,
 	}
 
-	if _, err := mgr.configureAndStartAgent(context.Background(), execution, "never"); err != nil {
+	if _, err := mgr.configureAndStartAgent(context.Background(), execution); err != nil {
 		t.Fatalf("configure and start agent: %v", err)
 	}
 	want := []string{"runner", "two words", "", `C:\tools\agent.exe`}
@@ -1065,7 +1065,7 @@ func TestConfigureAndStartAgent_SpillsLargeWakePayloadEnv(t *testing.T) {
 		agentctl: client,
 	}
 
-	if _, err := mgr.configureAndStartAgent(context.Background(), execution, "never"); err != nil {
+	if _, err := mgr.configureAndStartAgent(context.Background(), execution); err != nil {
 		t.Fatalf("configureAndStartAgent() error = %v", err)
 	}
 	if _, exists := configuredEnv["KANDEV_WAKE_PAYLOAD_JSON"]; exists {
@@ -1679,16 +1679,21 @@ func TestLaunch_PromotesWorkspaceOnlyExecution(t *testing.T) {
 	require.NoError(t, mgr.executionStore.Add(existing))
 
 	req := &LaunchRequest{
-		TaskID:              "task-1",
-		SessionID:           "session-1",
-		AgentProfileID:      "profile-1",
-		ACPSessionID:        "acp-session-abc",
-		PreviousExecutionID: "exec-prev",
+		TaskID:                "task-1",
+		SessionID:             "session-1",
+		AgentProfileID:        "profile-1",
+		ACPSessionID:          "acp-session-abc",
+		PreviousExecutionID:   "exec-prev",
+		TaskScope:             TaskLaunchScopeTask,
+		SessionSettingsPolicy: SessionSettingsPolicyProviderRestored,
 	}
 
 	got, err := mgr.Launch(context.Background(), req)
 	require.NoError(t, err)
 	require.Same(t, existing, got, "Launch must reuse the workspace-only execution, not create a new one")
+	require.Equal(t, TaskLaunchScopeTask, got.TaskScope)
+	require.Equal(t, SessionSettingsPolicyProviderRestored, got.sessionSettingsStartupPolicy())
+	require.Equal(t, SessionSettingsPolicyProviderRestored, got.sessionSettingsProjectionPolicy())
 	require.NotEmpty(t, got.AgentCommand, "AgentCommand must be populated by promotion")
 	require.GreaterOrEqual(t, len(got.AgentArgs), 2, "promotion must populate structured argv")
 	require.Equal(t, []string{"/opt/wrapper dir/wrapper", "--"}, got.AgentArgs[:2],

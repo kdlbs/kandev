@@ -41,13 +41,41 @@ async function runDiscoveryAction(
 
 export function useDiscoveryRootActions(discovery: DiscoveryRefresh, toast: Toast, t: TFunction) {
   const confirmingHomeRef = useRef(false);
+  const mutationInFlightRef = useRef(false);
   const [isConfirmingHomeDiscovery, setIsConfirmingHomeDiscovery] = useState(false);
+  const [isMutating, setIsMutating] = useState(false);
+
+  const startMutation = () => {
+    if (mutationInFlightRef.current) return false;
+    mutationInFlightRef.current = true;
+    setIsMutating(true);
+    return true;
+  };
+
+  const finishMutation = () => {
+    mutationInFlightRef.current = false;
+    setIsMutating(false);
+  };
+
+  const executeMutatingAction = async (runner: () => Promise<void>) => {
+    if (!startMutation()) return;
+    try {
+      await runner();
+    } finally {
+      finishMutation();
+    }
+  };
+
   const refreshDiscovery = () =>
-    runDiscoveryAction(() => Promise.resolve(), discovery.refresh, toast, t);
+    executeMutatingAction(() =>
+      runDiscoveryAction(() => Promise.resolve(), discovery.refresh, toast, t),
+    );
   const handleChooseDiscoveryRoot = (path: string) =>
-    runDiscoveryAction(() => addDesktopDiscoveryRootAction(path), discovery.load, toast, t);
+    executeMutatingAction(() =>
+      runDiscoveryAction(() => addDesktopDiscoveryRootAction(path), discovery.load, toast, t),
+    );
   const handleConfirmHomeDiscovery = async () => {
-    if (confirmingHomeRef.current) return;
+    if (confirmingHomeRef.current || !startMutation()) return;
     confirmingHomeRef.current = true;
     setIsConfirmingHomeDiscovery(true);
     try {
@@ -58,19 +86,25 @@ export function useDiscoveryRootActions(discovery: DiscoveryRefresh, toast: Toas
     } finally {
       confirmingHomeRef.current = false;
       setIsConfirmingHomeDiscovery(false);
+      finishMutation();
     }
   };
   const handleReconnectDiscoveryRoot = (oldPath: string, newPath: string) =>
-    runDiscoveryAction(
-      () => reconnectDesktopDiscoveryRootAction(oldPath, newPath),
-      discovery.load,
-      toast,
-      t,
+    executeMutatingAction(() =>
+      runDiscoveryAction(
+        () => reconnectDesktopDiscoveryRootAction(oldPath, newPath),
+        discovery.load,
+        toast,
+        t,
+      ),
     );
   const handleRemoveDiscoveryRoot = (path: string) =>
-    runDiscoveryAction(() => removeDesktopDiscoveryRootAction(path), discovery.refresh, toast, t);
+    executeMutatingAction(() =>
+      runDiscoveryAction(() => removeDesktopDiscoveryRootAction(path), discovery.refresh, toast, t),
+    );
 
   return {
+    isMutating,
     refreshDiscovery,
     handleChooseDiscoveryRoot,
     handleConfirmHomeDiscovery,

@@ -191,8 +191,7 @@ function LoadErrorNotice({
   if (!error) return null;
   return (
     <div
-      role="status"
-      aria-live="polite"
+      role="alert"
       className="flex items-center gap-2 px-3 py-2 text-xs text-destructive"
       data-testid="sidebar-task-load-error"
     >
@@ -256,6 +255,20 @@ export const TaskSwitcher = memo(function TaskSwitcher(props: TaskSwitcherProps)
   return (
     <div>
       {loadErrorNotice}
+      {(props.selectedTaskIds?.size ?? 0) > 0 && props.onClearSelection && (
+        <div className="flex min-h-11 items-center justify-between gap-2 px-3 py-1 text-xs text-muted-foreground">
+          <span role="status">
+            {t("selectedTaskCount", { count: props.selectedTaskIds!.size })}
+          </span>
+          <button
+            type="button"
+            className="min-h-11 shrink-0 cursor-pointer underline underline-offset-2 [@media(pointer:fine)]:min-h-7"
+            onClick={props.onClearSelection}
+          >
+            {t("clearSelection")}
+          </button>
+        </div>
+      )}
       {grouped.groups.map((group) => (
         <GroupSection
           key={group.key}

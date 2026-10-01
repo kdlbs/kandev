@@ -17,6 +17,7 @@ export type {
 } from "./agent-profile";
 
 import type { AgentProfile } from "./agent-profile";
+import type { CLIFlag } from "./agent-profile";
 import type { BackendMessage } from "./backend-message";
 
 /**
@@ -165,7 +166,20 @@ export type CapabilityStatus =
   | "auth_required"
   | "not_installed"
   | "failed"
-  | "not_configured";
+  | "not_configured"
+  | "unsupported";
+
+export type ProfileLaunchSettingsRequest = {
+  env_vars: { key: string; value?: string; secret_id?: string }[];
+  cli_flags: CLIFlag[];
+  command_prefix: string;
+};
+
+export type ProfileCapabilityRequest = {
+  profile_id?: string;
+  launch_settings?: ProfileLaunchSettingsRequest;
+  refresh?: boolean;
+};
 
 export type ModelConfig = {
   default_model: string;
@@ -189,6 +203,7 @@ export type DynamicModelsResponse = {
   current_mode_id?: string;
   commands?: CommandEntry[];
   error: string | null;
+  context_revision?: string;
 };
 
 export type ResolveAgentModelConfigRequest = {
@@ -196,6 +211,8 @@ export type ResolveAgentModelConfigRequest = {
   mode?: string;
   config_options?: Record<string, string>;
   refresh?: boolean;
+  profile_id?: string;
+  launch_settings?: ProfileLaunchSettingsRequest;
 };
 
 export type AgentModelConfigResponse = {
@@ -204,6 +221,7 @@ export type AgentModelConfigResponse = {
   status: CapabilityStatus;
   config_options: ConfigOptionEntry[];
   error: string | null;
+  context_revision?: string;
 };
 
 export type PermissionSetting = {
@@ -301,6 +319,8 @@ export type ClarificationQuestion = {
   title: string;
   prompt: string;
   options: ClarificationOption[];
+  /** Omitted for existing agents, which retain the custom-answer field. */
+  allow_custom_text?: boolean;
 };
 
 // Each per-question chat message carries its own metadata. For multi-question

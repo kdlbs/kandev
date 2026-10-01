@@ -45,12 +45,12 @@ func (m *Manager) isGitRepo(path string) bool {
 //     "missing branch" from a "could not tell" and avoid surfacing a
 //     misleading ErrInvalidBaseBranch.
 func (m *Manager) branchExists(ctx context.Context, repoPath, branch string) (bool, error) {
-	runErr, execCtxErr := subproc.RunGitAfterAcquire(
+	output, runErr, execCtxErr := subproc.RunGitCombinedAfterAcquire(
 		ctx,
 		subproc.GitLifecycle,
 		m.inspectTimeout,
 		func(execCtx context.Context) *exec.Cmd {
-			return m.newNonInteractiveGitCmd(execCtx, repoPath, "rev-parse", "--verify", branch)
+			return m.newNonInteractiveGitCmd(execCtx, repoPath, "rev-parse", "--verify", "--quiet", branch)
 		},
 	)
 	if runErr != nil {
@@ -61,7 +61,15 @@ func (m *Manager) branchExists(ctx context.Context, repoPath, branch string) (bo
 				zap.Error(ctxErr))
 			return false, fmt.Errorf("branch check timed out for %q after %s: %w", branch, m.inspectTimeout, ctxErr)
 		}
-		return false, nil
+		var exitErr *exec.ExitError
+		if errors.As(runErr, &exitErr) && exitErr.ExitCode() == 1 {
+			return false, nil
+		}
+		outStr := strings.TrimSpace(string(output))
+		if outStr != "" {
+			return false, fmt.Errorf("branch check failed for %q: %s: %w", branch, outStr, runErr)
+		}
+		return false, runErr
 	}
 	return true, nil
 }
@@ -113,12 +121,25 @@ func normalizeOriginBranchName(branch string) string {
 // acquiring the lifecycle throttle. The timeout starts after admission so
 // queue wait does not consume the command's inspection budget.
 func (m *Manager) runBoundedGitInspect(ctx context.Context, repoPath string, args ...string) (string, error) {
+	return m.runBoundedGitInspectWithEnvironment(ctx, repoPath, nil, args...)
+}
+
+func (m *Manager) runBoundedGitInspectWithEnvironment(
+	ctx context.Context,
+	repoPath string,
+	prepareEnvironment func([]string) []string,
+	args ...string,
+) (string, error) {
 	output, runErr, execCtxErr := subproc.RunGitCombinedAfterAcquire(
 		ctx,
 		subproc.GitLifecycle,
 		m.inspectTimeout,
 		func(execCtx context.Context) *exec.Cmd {
-			return m.newNonInteractiveGitCmd(execCtx, repoPath, args...)
+			cmd := m.newNonInteractiveGitCmd(execCtx, repoPath, args...)
+			if prepareEnvironment != nil {
+				cmd.Env = prepareEnvironment(cmd.Env)
+			}
+			return cmd
 		},
 	)
 	if ctxErr := firstContextError(execCtxErr, runErr); ctxErr != nil {

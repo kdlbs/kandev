@@ -7,7 +7,11 @@ import { Trans, useTranslation } from "react-i18next";
 import { IconAlertTriangle } from "@tabler/icons-react";
 import { sanitizeSessionErrorDetails } from "@/lib/session-error-details";
 import { cn } from "@/lib/utils";
-import { useActionMessageSession, useAgentBootOutcomeAfterMessage } from "./action-message-state";
+import {
+  useActionMessageSession,
+  useAgentBootOutcomeAfterMessage,
+  useRunningNoticeResolved,
+} from "./action-message-state";
 import type { Message, TaskSessionState } from "@/lib/types/http";
 import type { MessageAction } from "@/components/task/chat/types";
 import { ActionMessageDetails, type ActionMeta } from "./action-message-details";
@@ -27,6 +31,11 @@ import { GitPushErrorDismissAction } from "./git-push-error-dismiss-button";
 export const ActionMessage = memo(function ActionMessage({ comment }: { comment: Message }) {
   const owner = useSessionComposerRecovery(comment.session_id);
   const metadata = comment.metadata as ActionMeta | undefined;
+  const runningNoticeResolved = useRunningNoticeResolved(
+    comment,
+    metadata?.action_visibility === "running" && comment.type === "status",
+  );
+  if (runningNoticeResolved) return null;
   if (metadata?.recovery_actions && owner?.model) return <RecoveryHistory comment={comment} />;
   return <ActionMessageControls comment={comment} />;
 });

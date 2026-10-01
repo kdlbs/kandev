@@ -32,6 +32,10 @@ describe("feature flag repository contract", () => {
     expect(defaultFeatureFlags.canvases).toBe(false);
   });
 
+  it("omits the graduated remote executor plugins flag", () => {
+    expect(defaultFeatureFlags).not.toHaveProperty("remoteExecutorPlugins");
+  });
+
   it("keeps frontend defaults equal to backend FeaturesConfig JSON keys", async () => {
     const backendConfig = await readFile(backendConfigPath, "utf8");
 

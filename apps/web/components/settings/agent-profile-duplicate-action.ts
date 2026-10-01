@@ -33,6 +33,20 @@ export function profileSaveInvalidReason(
   return undefined;
 }
 
+export function resolveProfileEditorInvalidReason(
+  reasons: {
+    nativeCodexUnavailable: boolean;
+    hasExternalConflict: boolean;
+    profileInvalidReason?: string;
+    providerInvalidReason?: string;
+  },
+  translate: (key: string) => string,
+): string | undefined {
+  if (reasons.nativeCodexUnavailable) return translate("agents:nativeCodexUnavailable");
+  if (reasons.hasExternalConflict) return translate("agents:profileExternalChangeInvalidReason");
+  return reasons.profileInvalidReason ?? reasons.providerInvalidReason;
+}
+
 type UseProfileDuplicateActionOptions = {
   agent: Agent;
   draft: AgentProfile;

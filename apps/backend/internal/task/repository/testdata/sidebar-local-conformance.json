@@ -1,0 +1,3568 @@
+{
+  "workflows": [
+    {
+      "id": "wf-a",
+      "name": "Flow A",
+      "step_id": "step-a"
+    },
+    {
+      "id": "wf-b",
+      "name": "Flow B",
+      "step_id": "step-b"
+    }
+  ],
+  "repositories": [
+    {
+      "id": "repo-a",
+      "name": "Alpha",
+      "provider_owner": "org",
+      "provider_name": "alpha"
+    },
+    {
+      "id": "repo-b",
+      "name": "Beta"
+    }
+  ],
+  "scenarios": [
+    {
+      "name": "dimensions",
+      "tasks": [
+        {
+          "workspace_id": "conformance",
+          "workflow_id": "wf-a",
+          "workflow_step_id": "step-a",
+          "state": "TODO",
+          "position": 5,
+          "created_at": "2026-09-29T12:00:03Z",
+          "updated_at": "2026-09-29T12:00:01Z",
+          "metadata": {},
+          "origin": "",
+          "id": "a",
+          "title": "Alpha",
+          "repository_ids": [
+            "repo-a"
+          ],
+          "executor_type": "local",
+          "summary": {
+            "last_activity_at": "2026-09-29T13:00:00.000000002+01:00"
+          },
+          "queued_for_step_id": "step-a",
+          "priority": "low"
+        },
+        {
+          "workspace_id": "conformance",
+          "workflow_id": "wf-b",
+          "workflow_step_id": "step-b",
+          "state": "COMPLETED",
+          "position": 0,
+          "created_at": "2026-09-29T12:00:01Z",
+          "updated_at": "2026-09-29T12:00:03Z",
+          "metadata": {
+            "review_watch_id": "review"
+          },
+          "origin": "",
+          "id": "b",
+          "title": "beta",
+          "repository_ids": [
+            "repo-b"
+          ],
+          "executor_type": "ssh",
+          "summary": {
+            "last_activity_at": "2026-09-29T12:00:00.999999999Z",
+            "pull_request": {
+              "count": 1
+            },
+            "git": {
+              "additions": 3
+            },
+            "primary_session": {
+              "state": "COMPLETED"
+            }
+          }
+        },
+        {
+          "workspace_id": "conformance",
+          "workflow_id": "wf-a",
+          "workflow_step_id": "step-a",
+          "state": "IN_PROGRESS",
+          "position": 2,
+          "created_at": "2026-09-29T12:00:04Z",
+          "updated_at": "2026-09-29T12:00:02Z",
+          "metadata": {
+            "issue_watch_id": "issue"
+          },
+          "origin": "",
+          "id": "c",
+          "title": "Ä",
+          "repository_ids": [
+            "repo-a",
+            "repo-b"
+          ],
+          "executor_type": "local",
+          "summary": {
+            "last_activity_at": "2026-09-29T12:00:00.000000001Z",
+            "primary_session": {
+              "state": "RUNNING"
+            }
+          },
+          "queued_for_step_id": "step-a",
+          "priority": "high"
+        },
+        {
+          "workspace_id": "conformance",
+          "workflow_id": "wf-b",
+          "workflow_step_id": "step-b",
+          "state": "TODO",
+          "position": 0,
+          "created_at": "2026-09-29T12:00:02Z",
+          "updated_at": "2026-09-29T12:00:04Z",
+          "metadata": {},
+          "origin": "",
+          "id": "d",
+          "title": "ä",
+          "summary": {
+            "last_activity_at": "malformed"
+          }
+        }
+      ],
+      "cases": [
+        {
+          "name": "title-asc-none",
+          "query": {
+            "filters": [],
+            "sort": {
+              "key": "title",
+              "direction": "asc"
+            },
+            "group": "none",
+            "collapsed_group_keys": [],
+            "collapsed_task_ids": [],
+            "page": 1,
+            "page_size": 100,
+            "locale": "en"
+          },
+          "expected_task_ids": [
+            "a",
+            "b",
+            "c",
+            "d"
+          ],
+          "expected_group_keys": [
+            "__all__"
+          ]
+        },
+        {
+          "name": "title-asc-workflow",
+          "query": {
+            "filters": [],
+            "sort": {
+              "key": "title",
+              "direction": "asc"
+            },
+            "group": "workflow",
+            "collapsed_group_keys": [],
+            "collapsed_task_ids": [],
+            "page": 1,
+            "page_size": 100,
+            "locale": "en"
+          },
+          "expected_task_ids": [
+            "a",
+            "c",
+            "b",
+            "d"
+          ],
+          "expected_group_keys": [
+            "wf-a",
+            "wf-b"
+          ]
+        },
+        {
+          "name": "title-asc-workflowStep",
+          "query": {
+            "filters": [],
+            "sort": {
+              "key": "title",
+              "direction": "asc"
+            },
+            "group": "workflowStep",
+            "collapsed_group_keys": [],
+            "collapsed_task_ids": [],
+            "page": 1,
+            "page_size": 100,
+            "locale": "en"
+          },
+          "expected_task_ids": [
+            "a",
+            "c",
+            "b",
+            "d"
+          ],
+          "expected_group_keys": [
+            "step-a",
+            "step-b"
+          ]
+        },
+        {
+          "name": "title-asc-executorType",
+          "query": {
+            "filters": [],
+            "sort": {
+              "key": "title",
+              "direction": "asc"
+            },
+            "group": "executorType",
+            "collapsed_group_keys": [],
+            "collapsed_task_ids": [],
+            "page": 1,
+            "page_size": 100,
+            "locale": "en"
+          },
+          "expected_task_ids": [
+            "a",
+            "c",
+            "b",
+            "d"
+          ],
+          "expected_group_keys": [
+            "local",
+            "ssh",
+            "__unassigned__"
+          ]
+        },
+        {
+          "name": "title-asc-state",
+          "query": {
+            "filters": [],
+            "sort": {
+              "key": "title",
+              "direction": "asc"
+            },
+            "group": "state",
+            "collapsed_group_keys": [],
+            "collapsed_task_ids": [],
+            "page": 1,
+            "page_size": 100,
+            "locale": "en"
+          },
+          "expected_task_ids": [
+            "a",
+            "d",
+            "c",
+            "b"
+          ],
+          "expected_group_keys": [
+            "TODO",
+            "IN_PROGRESS",
+            "COMPLETED"
+          ]
+        },
+        {
+          "name": "title-asc-repository",
+          "query": {
+            "filters": [],
+            "sort": {
+              "key": "title",
+              "direction": "asc"
+            },
+            "group": "repository",
+            "collapsed_group_keys": [],
+            "collapsed_task_ids": [],
+            "page": 1,
+            "page_size": 100,
+            "locale": "en"
+          },
+          "expected_task_ids": [
+            "c",
+            "b",
+            "a",
+            "d"
+          ],
+          "expected_group_keys": [
+            "__repo_combination__:[\"org/alpha\",\"Beta\"]",
+            "Beta",
+            "org/alpha",
+            "__unassigned__"
+          ]
+        },
+        {
+          "name": "title-desc-none",
+          "query": {
+            "filters": [],
+            "sort": {
+              "key": "title",
+              "direction": "desc"
+            },
+            "group": "none",
+            "collapsed_group_keys": [],
+            "collapsed_task_ids": [],
+            "page": 1,
+            "page_size": 100,
+            "locale": "en"
+          },
+          "expected_task_ids": [
+            "d",
+            "c",
+            "b",
+            "a"
+          ],
+          "expected_group_keys": [
+            "__all__"
+          ]
+        },
+        {
+          "name": "title-desc-workflow",
+          "query": {
+            "filters": [],
+            "sort": {
+              "key": "title",
+              "direction": "desc"
+            },
+            "group": "workflow",
+            "collapsed_group_keys": [],
+            "collapsed_task_ids": [],
+            "page": 1,
+            "page_size": 100,
+            "locale": "en"
+          },
+          "expected_task_ids": [
+            "d",
+            "b",
+            "c",
+            "a"
+          ],
+          "expected_group_keys": [
+            "wf-b",
+            "wf-a"
+          ]
+        },
+        {
+          "name": "title-desc-workflowStep",
+          "query": {
+            "filters": [],
+            "sort": {
+              "key": "title",
+              "direction": "desc"
+            },
+            "group": "workflowStep",
+            "collapsed_group_keys": [],
+            "collapsed_task_ids": [],
+            "page": 1,
+            "page_size": 100,
+            "locale": "en"
+          },
+          "expected_task_ids": [
+            "d",
+            "b",
+            "c",
+            "a"
+          ],
+          "expected_group_keys": [
+            "step-b",
+            "step-a"
+          ]
+        },
+        {
+          "name": "title-desc-executorType",
+          "query": {
+            "filters": [],
+            "sort": {
+              "key": "title",
+              "direction": "desc"
+            },
+            "group": "executorType",
+            "collapsed_group_keys": [],
+            "collapsed_task_ids": [],
+            "page": 1,
+            "page_size": 100,
+            "locale": "en"
+          },
+          "expected_task_ids": [
+            "d",
+            "c",
+            "a",
+            "b"
+          ],
+          "expected_group_keys": [
+            "__unassigned__",
+            "local",
+            "ssh"
+          ]
+        },
+        {
+          "name": "title-desc-state",
+          "query": {
+            "filters": [],
+            "sort": {
+              "key": "title",
+              "direction": "desc"
+            },
+            "group": "state",
+            "collapsed_group_keys": [],
+            "collapsed_task_ids": [],
+            "page": 1,
+            "page_size": 100,
+            "locale": "en"
+          },
+          "expected_task_ids": [
+            "d",
+            "a",
+            "c",
+            "b"
+          ],
+          "expected_group_keys": [
+            "TODO",
+            "IN_PROGRESS",
+            "COMPLETED"
+          ]
+        },
+        {
+          "name": "title-desc-repository",
+          "query": {
+            "filters": [],
+            "sort": {
+              "key": "title",
+              "direction": "desc"
+            },
+            "group": "repository",
+            "collapsed_group_keys": [],
+            "collapsed_task_ids": [],
+            "page": 1,
+            "page_size": 100,
+            "locale": "en"
+          },
+          "expected_task_ids": [
+            "c",
+            "b",
+            "a",
+            "d"
+          ],
+          "expected_group_keys": [
+            "__repo_combination__:[\"org/alpha\",\"Beta\"]",
+            "Beta",
+            "org/alpha",
+            "__unassigned__"
+          ]
+        },
+        {
+          "name": "updatedAt-asc-none",
+          "query": {
+            "filters": [],
+            "sort": {
+              "key": "updatedAt",
+              "direction": "asc"
+            },
+            "group": "none",
+            "collapsed_group_keys": [],
+            "collapsed_task_ids": [],
+            "page": 1,
+            "page_size": 100,
+            "locale": "en"
+          },
+          "expected_task_ids": [
+            "a",
+            "c",
+            "b",
+            "d"
+          ],
+          "expected_group_keys": [
+            "__all__"
+          ]
+        },
+        {
+          "name": "updatedAt-asc-workflow",
+          "query": {
+            "filters": [],
+            "sort": {
+              "key": "updatedAt",
+              "direction": "asc"
+            },
+            "group": "workflow",
+            "collapsed_group_keys": [],
+            "collapsed_task_ids": [],
+            "page": 1,
+            "page_size": 100,
+            "locale": "en"
+          },
+          "expected_task_ids": [
+            "a",
+            "c",
+            "b",
+            "d"
+          ],
+          "expected_group_keys": [
+            "wf-a",
+            "wf-b"
+          ]
+        },
+        {
+          "name": "updatedAt-asc-workflowStep",
+          "query": {
+            "filters": [],
+            "sort": {
+              "key": "updatedAt",
+              "direction": "asc"
+            },
+            "group": "workflowStep",
+            "collapsed_group_keys": [],
+            "collapsed_task_ids": [],
+            "page": 1,
+            "page_size": 100,
+            "locale": "en"
+          },
+          "expected_task_ids": [
+            "a",
+            "c",
+            "b",
+            "d"
+          ],
+          "expected_group_keys": [
+            "step-a",
+            "step-b"
+          ]
+        },
+        {
+          "name": "updatedAt-asc-executorType",
+          "query": {
+            "filters": [],
+            "sort": {
+              "key": "updatedAt",
+              "direction": "asc"
+            },
+            "group": "executorType",
+            "collapsed_group_keys": [],
+            "collapsed_task_ids": [],
+            "page": 1,
+            "page_size": 100,
+            "locale": "en"
+          },
+          "expected_task_ids": [
+            "a",
+            "c",
+            "b",
+            "d"
+          ],
+          "expected_group_keys": [
+            "local",
+            "ssh",
+            "__unassigned__"
+          ]
+        },
+        {
+          "name": "updatedAt-asc-state",
+          "query": {
+            "filters": [],
+            "sort": {
+              "key": "updatedAt",
+              "direction": "asc"
+            },
+            "group": "state",
+            "collapsed_group_keys": [],
+            "collapsed_task_ids": [],
+            "page": 1,
+            "page_size": 100,
+            "locale": "en"
+          },
+          "expected_task_ids": [
+            "a",
+            "d",
+            "c",
+            "b"
+          ],
+          "expected_group_keys": [
+            "TODO",
+            "IN_PROGRESS",
+            "COMPLETED"
+          ]
+        },
+        {
+          "name": "updatedAt-asc-repository",
+          "query": {
+            "filters": [],
+            "sort": {
+              "key": "updatedAt",
+              "direction": "asc"
+            },
+            "group": "repository",
+            "collapsed_group_keys": [],
+            "collapsed_task_ids": [],
+            "page": 1,
+            "page_size": 100,
+            "locale": "en"
+          },
+          "expected_task_ids": [
+            "c",
+            "b",
+            "a",
+            "d"
+          ],
+          "expected_group_keys": [
+            "__repo_combination__:[\"org/alpha\",\"Beta\"]",
+            "Beta",
+            "org/alpha",
+            "__unassigned__"
+          ]
+        },
+        {
+          "name": "updatedAt-desc-none",
+          "query": {
+            "filters": [],
+            "sort": {
+              "key": "updatedAt",
+              "direction": "desc"
+            },
+            "group": "none",
+            "collapsed_group_keys": [],
+            "collapsed_task_ids": [],
+            "page": 1,
+            "page_size": 100,
+            "locale": "en"
+          },
+          "expected_task_ids": [
+            "d",
+            "b",
+            "c",
+            "a"
+          ],
+          "expected_group_keys": [
+            "__all__"
+          ]
+        },
+        {
+          "name": "updatedAt-desc-workflow",
+          "query": {
+            "filters": [],
+            "sort": {
+              "key": "updatedAt",
+              "direction": "desc"
+            },
+            "group": "workflow",
+            "collapsed_group_keys": [],
+            "collapsed_task_ids": [],
+            "page": 1,
+            "page_size": 100,
+            "locale": "en"
+          },
+          "expected_task_ids": [
+            "d",
+            "b",
+            "c",
+            "a"
+          ],
+          "expected_group_keys": [
+            "wf-b",
+            "wf-a"
+          ]
+        },
+        {
+          "name": "updatedAt-desc-workflowStep",
+          "query": {
+            "filters": [],
+            "sort": {
+              "key": "updatedAt",
+              "direction": "desc"
+            },
+            "group": "workflowStep",
+            "collapsed_group_keys": [],
+            "collapsed_task_ids": [],
+            "page": 1,
+            "page_size": 100,
+            "locale": "en"
+          },
+          "expected_task_ids": [
+            "d",
+            "b",
+            "c",
+            "a"
+          ],
+          "expected_group_keys": [
+            "step-b",
+            "step-a"
+          ]
+        },
+        {
+          "name": "updatedAt-desc-executorType",
+          "query": {
+            "filters": [],
+            "sort": {
+              "key": "updatedAt",
+              "direction": "desc"
+            },
+            "group": "executorType",
+            "collapsed_group_keys": [],
+            "collapsed_task_ids": [],
+            "page": 1,
+            "page_size": 100,
+            "locale": "en"
+          },
+          "expected_task_ids": [
+            "d",
+            "b",
+            "c",
+            "a"
+          ],
+          "expected_group_keys": [
+            "__unassigned__",
+            "ssh",
+            "local"
+          ]
+        },
+        {
+          "name": "updatedAt-desc-state",
+          "query": {
+            "filters": [],
+            "sort": {
+              "key": "updatedAt",
+              "direction": "desc"
+            },
+            "group": "state",
+            "collapsed_group_keys": [],
+            "collapsed_task_ids": [],
+            "page": 1,
+            "page_size": 100,
+            "locale": "en"
+          },
+          "expected_task_ids": [
+            "d",
+            "a",
+            "c",
+            "b"
+          ],
+          "expected_group_keys": [
+            "TODO",
+            "IN_PROGRESS",
+            "COMPLETED"
+          ]
+        },
+        {
+          "name": "updatedAt-desc-repository",
+          "query": {
+            "filters": [],
+            "sort": {
+              "key": "updatedAt",
+              "direction": "desc"
+            },
+            "group": "repository",
+            "collapsed_group_keys": [],
+            "collapsed_task_ids": [],
+            "page": 1,
+            "page_size": 100,
+            "locale": "en"
+          },
+          "expected_task_ids": [
+            "c",
+            "b",
+            "a",
+            "d"
+          ],
+          "expected_group_keys": [
+            "__repo_combination__:[\"org/alpha\",\"Beta\"]",
+            "Beta",
+            "org/alpha",
+            "__unassigned__"
+          ]
+        },
+        {
+          "name": "createdAt-asc-none",
+          "query": {
+            "filters": [],
+            "sort": {
+              "key": "createdAt",
+              "direction": "asc"
+            },
+            "group": "none",
+            "collapsed_group_keys": [],
+            "collapsed_task_ids": [],
+            "page": 1,
+            "page_size": 100,
+            "locale": "en"
+          },
+          "expected_task_ids": [
+            "b",
+            "d",
+            "a",
+            "c"
+          ],
+          "expected_group_keys": [
+            "__all__"
+          ]
+        },
+        {
+          "name": "createdAt-asc-workflow",
+          "query": {
+            "filters": [],
+            "sort": {
+              "key": "createdAt",
+              "direction": "asc"
+            },
+            "group": "workflow",
+            "collapsed_group_keys": [],
+            "collapsed_task_ids": [],
+            "page": 1,
+            "page_size": 100,
+            "locale": "en"
+          },
+          "expected_task_ids": [
+            "b",
+            "d",
+            "a",
+            "c"
+          ],
+          "expected_group_keys": [
+            "wf-b",
+            "wf-a"
+          ]
+        },
+        {
+          "name": "createdAt-asc-workflowStep",
+          "query": {
+            "filters": [],
+            "sort": {
+              "key": "createdAt",
+              "direction": "asc"
+            },
+            "group": "workflowStep",
+            "collapsed_group_keys": [],
+            "collapsed_task_ids": [],
+            "page": 1,
+            "page_size": 100,
+            "locale": "en"
+          },
+          "expected_task_ids": [
+            "b",
+            "d",
+            "a",
+            "c"
+          ],
+          "expected_group_keys": [
+            "step-b",
+            "step-a"
+          ]
+        },
+        {
+          "name": "createdAt-asc-executorType",
+          "query": {
+            "filters": [],
+            "sort": {
+              "key": "createdAt",
+              "direction": "asc"
+            },
+            "group": "executorType",
+            "collapsed_group_keys": [],
+            "collapsed_task_ids": [],
+            "page": 1,
+            "page_size": 100,
+            "locale": "en"
+          },
+          "expected_task_ids": [
+            "b",
+            "d",
+            "a",
+            "c"
+          ],
+          "expected_group_keys": [
+            "ssh",
+            "__unassigned__",
+            "local"
+          ]
+        },
+        {
+          "name": "createdAt-asc-state",
+          "query": {
+            "filters": [],
+            "sort": {
+              "key": "createdAt",
+              "direction": "asc"
+            },
+            "group": "state",
+            "collapsed_group_keys": [],
+            "collapsed_task_ids": [],
+            "page": 1,
+            "page_size": 100,
+            "locale": "en"
+          },
+          "expected_task_ids": [
+            "d",
+            "a",
+            "c",
+            "b"
+          ],
+          "expected_group_keys": [
+            "TODO",
+            "IN_PROGRESS",
+            "COMPLETED"
+          ]
+        },
+        {
+          "name": "createdAt-asc-repository",
+          "query": {
+            "filters": [],
+            "sort": {
+              "key": "createdAt",
+              "direction": "asc"
+            },
+            "group": "repository",
+            "collapsed_group_keys": [],
+            "collapsed_task_ids": [],
+            "page": 1,
+            "page_size": 100,
+            "locale": "en"
+          },
+          "expected_task_ids": [
+            "c",
+            "b",
+            "a",
+            "d"
+          ],
+          "expected_group_keys": [
+            "__repo_combination__:[\"org/alpha\",\"Beta\"]",
+            "Beta",
+            "org/alpha",
+            "__unassigned__"
+          ]
+        },
+        {
+          "name": "createdAt-desc-none",
+          "query": {
+            "filters": [],
+            "sort": {
+              "key": "createdAt",
+              "direction": "desc"
+            },
+            "group": "none",
+            "collapsed_group_keys": [],
+            "collapsed_task_ids": [],
+            "page": 1,
+            "page_size": 100,
+            "locale": "en"
+          },
+          "expected_task_ids": [
+            "c",
+            "a",
+            "d",
+            "b"
+          ],
+          "expected_group_keys": [
+            "__all__"
+          ]
+        },
+        {
+          "name": "createdAt-desc-workflow",
+          "query": {
+            "filters": [],
+            "sort": {
+              "key": "createdAt",
+              "direction": "desc"
+            },
+            "group": "workflow",
+            "collapsed_group_keys": [],
+            "collapsed_task_ids": [],
+            "page": 1,
+            "page_size": 100,
+            "locale": "en"
+          },
+          "expected_task_ids": [
+            "c",
+            "a",
+            "d",
+            "b"
+          ],
+          "expected_group_keys": [
+            "wf-a",
+            "wf-b"
+          ]
+        },
+        {
+          "name": "createdAt-desc-workflowStep",
+          "query": {
+            "filters": [],
+            "sort": {
+              "key": "createdAt",
+              "direction": "desc"
+            },
+            "group": "workflowStep",
+            "collapsed_group_keys": [],
+            "collapsed_task_ids": [],
+            "page": 1,
+            "page_size": 100,
+            "locale": "en"
+          },
+          "expected_task_ids": [
+            "c",
+            "a",
+            "d",
+            "b"
+          ],
+          "expected_group_keys": [
+            "step-a",
+            "step-b"
+          ]
+        },
+        {
+          "name": "createdAt-desc-executorType",
+          "query": {
+            "filters": [],
+            "sort": {
+              "key": "createdAt",
+              "direction": "desc"
+            },
+            "group": "executorType",
+            "collapsed_group_keys": [],
+            "collapsed_task_ids": [],
+            "page": 1,
+            "page_size": 100,
+            "locale": "en"
+          },
+          "expected_task_ids": [
+            "c",
+            "a",
+            "d",
+            "b"
+          ],
+          "expected_group_keys": [
+            "local",
+            "__unassigned__",
+            "ssh"
+          ]
+        },
+        {
+          "name": "createdAt-desc-state",
+          "query": {
+            "filters": [],
+            "sort": {
+              "key": "createdAt",
+              "direction": "desc"
+            },
+            "group": "state",
+            "collapsed_group_keys": [],
+            "collapsed_task_ids": [],
+            "page": 1,
+            "page_size": 100,
+            "locale": "en"
+          },
+          "expected_task_ids": [
+            "a",
+            "d",
+            "c",
+            "b"
+          ],
+          "expected_group_keys": [
+            "TODO",
+            "IN_PROGRESS",
+            "COMPLETED"
+          ]
+        },
+        {
+          "name": "createdAt-desc-repository",
+          "query": {
+            "filters": [],
+            "sort": {
+              "key": "createdAt",
+              "direction": "desc"
+            },
+            "group": "repository",
+            "collapsed_group_keys": [],
+            "collapsed_task_ids": [],
+            "page": 1,
+            "page_size": 100,
+            "locale": "en"
+          },
+          "expected_task_ids": [
+            "c",
+            "b",
+            "a",
+            "d"
+          ],
+          "expected_group_keys": [
+            "__repo_combination__:[\"org/alpha\",\"Beta\"]",
+            "Beta",
+            "org/alpha",
+            "__unassigned__"
+          ]
+        },
+        {
+          "name": "lastActivityAt-asc-none",
+          "query": {
+            "filters": [],
+            "sort": {
+              "key": "lastActivityAt",
+              "direction": "asc"
+            },
+            "group": "none",
+            "collapsed_group_keys": [],
+            "collapsed_task_ids": [],
+            "page": 1,
+            "page_size": 100,
+            "locale": "en"
+          },
+          "expected_task_ids": [
+            "c",
+            "a",
+            "b",
+            "d"
+          ],
+          "expected_group_keys": [
+            "__all__"
+          ]
+        },
+        {
+          "name": "lastActivityAt-asc-workflow",
+          "query": {
+            "filters": [],
+            "sort": {
+              "key": "lastActivityAt",
+              "direction": "asc"
+            },
+            "group": "workflow",
+            "collapsed_group_keys": [],
+            "collapsed_task_ids": [],
+            "page": 1,
+            "page_size": 100,
+            "locale": "en"
+          },
+          "expected_task_ids": [
+            "c",
+            "a",
+            "b",
+            "d"
+          ],
+          "expected_group_keys": [
+            "wf-a",
+            "wf-b"
+          ]
+        },
+        {
+          "name": "lastActivityAt-asc-workflowStep",
+          "query": {
+            "filters": [],
+            "sort": {
+              "key": "lastActivityAt",
+              "direction": "asc"
+            },
+            "group": "workflowStep",
+            "collapsed_group_keys": [],
+            "collapsed_task_ids": [],
+            "page": 1,
+            "page_size": 100,
+            "locale": "en"
+          },
+          "expected_task_ids": [
+            "c",
+            "a",
+            "b",
+            "d"
+          ],
+          "expected_group_keys": [
+            "step-a",
+            "step-b"
+          ]
+        },
+        {
+          "name": "lastActivityAt-asc-executorType",
+          "query": {
+            "filters": [],
+            "sort": {
+              "key": "lastActivityAt",
+              "direction": "asc"
+            },
+            "group": "executorType",
+            "collapsed_group_keys": [],
+            "collapsed_task_ids": [],
+            "page": 1,
+            "page_size": 100,
+            "locale": "en"
+          },
+          "expected_task_ids": [
+            "c",
+            "a",
+            "b",
+            "d"
+          ],
+          "expected_group_keys": [
+            "local",
+            "ssh",
+            "__unassigned__"
+          ]
+        },
+        {
+          "name": "lastActivityAt-asc-state",
+          "query": {
+            "filters": [],
+            "sort": {
+              "key": "lastActivityAt",
+              "direction": "asc"
+            },
+            "group": "state",
+            "collapsed_group_keys": [],
+            "collapsed_task_ids": [],
+            "page": 1,
+            "page_size": 100,
+            "locale": "en"
+          },
+          "expected_task_ids": [
+            "a",
+            "d",
+            "c",
+            "b"
+          ],
+          "expected_group_keys": [
+            "TODO",
+            "IN_PROGRESS",
+            "COMPLETED"
+          ]
+        },
+        {
+          "name": "lastActivityAt-asc-repository",
+          "query": {
+            "filters": [],
+            "sort": {
+              "key": "lastActivityAt",
+              "direction": "asc"
+            },
+            "group": "repository",
+            "collapsed_group_keys": [],
+            "collapsed_task_ids": [],
+            "page": 1,
+            "page_size": 100,
+            "locale": "en"
+          },
+          "expected_task_ids": [
+            "c",
+            "b",
+            "a",
+            "d"
+          ],
+          "expected_group_keys": [
+            "__repo_combination__:[\"org/alpha\",\"Beta\"]",
+            "Beta",
+            "org/alpha",
+            "__unassigned__"
+          ]
+        },
+        {
+          "name": "lastActivityAt-desc-none",
+          "query": {
+            "filters": [],
+            "sort": {
+              "key": "lastActivityAt",
+              "direction": "desc"
+            },
+            "group": "none",
+            "collapsed_group_keys": [],
+            "collapsed_task_ids": [],
+            "page": 1,
+            "page_size": 100,
+            "locale": "en"
+          },
+          "expected_task_ids": [
+            "d",
+            "b",
+            "a",
+            "c"
+          ],
+          "expected_group_keys": [
+            "__all__"
+          ]
+        },
+        {
+          "name": "lastActivityAt-desc-workflow",
+          "query": {
+            "filters": [],
+            "sort": {
+              "key": "lastActivityAt",
+              "direction": "desc"
+            },
+            "group": "workflow",
+            "collapsed_group_keys": [],
+            "collapsed_task_ids": [],
+            "page": 1,
+            "page_size": 100,
+            "locale": "en"
+          },
+          "expected_task_ids": [
+            "d",
+            "b",
+            "a",
+            "c"
+          ],
+          "expected_group_keys": [
+            "wf-b",
+            "wf-a"
+          ]
+        },
+        {
+          "name": "lastActivityAt-desc-workflowStep",
+          "query": {
+            "filters": [],
+            "sort": {
+              "key": "lastActivityAt",
+              "direction": "desc"
+            },
+            "group": "workflowStep",
+            "collapsed_group_keys": [],
+            "collapsed_task_ids": [],
+            "page": 1,
+            "page_size": 100,
+            "locale": "en"
+          },
+          "expected_task_ids": [
+            "d",
+            "b",
+            "a",
+            "c"
+          ],
+          "expected_group_keys": [
+            "step-b",
+            "step-a"
+          ]
+        },
+        {
+          "name": "lastActivityAt-desc-executorType",
+          "query": {
+            "filters": [],
+            "sort": {
+              "key": "lastActivityAt",
+              "direction": "desc"
+            },
+            "group": "executorType",
+            "collapsed_group_keys": [],
+            "collapsed_task_ids": [],
+            "page": 1,
+            "page_size": 100,
+            "locale": "en"
+          },
+          "expected_task_ids": [
+            "d",
+            "b",
+            "a",
+            "c"
+          ],
+          "expected_group_keys": [
+            "__unassigned__",
+            "ssh",
+            "local"
+          ]
+        },
+        {
+          "name": "lastActivityAt-desc-state",
+          "query": {
+            "filters": [],
+            "sort": {
+              "key": "lastActivityAt",
+              "direction": "desc"
+            },
+            "group": "state",
+            "collapsed_group_keys": [],
+            "collapsed_task_ids": [],
+            "page": 1,
+            "page_size": 100,
+            "locale": "en"
+          },
+          "expected_task_ids": [
+            "d",
+            "a",
+            "c",
+            "b"
+          ],
+          "expected_group_keys": [
+            "TODO",
+            "IN_PROGRESS",
+            "COMPLETED"
+          ]
+        },
+        {
+          "name": "lastActivityAt-desc-repository",
+          "query": {
+            "filters": [],
+            "sort": {
+              "key": "lastActivityAt",
+              "direction": "desc"
+            },
+            "group": "repository",
+            "collapsed_group_keys": [],
+            "collapsed_task_ids": [],
+            "page": 1,
+            "page_size": 100,
+            "locale": "en"
+          },
+          "expected_task_ids": [
+            "c",
+            "b",
+            "a",
+            "d"
+          ],
+          "expected_group_keys": [
+            "__repo_combination__:[\"org/alpha\",\"Beta\"]",
+            "Beta",
+            "org/alpha",
+            "__unassigned__"
+          ]
+        },
+        {
+          "name": "state-asc-none",
+          "query": {
+            "filters": [],
+            "sort": {
+              "key": "state",
+              "direction": "asc"
+            },
+            "group": "none",
+            "collapsed_group_keys": [],
+            "collapsed_task_ids": [],
+            "page": 1,
+            "page_size": 100,
+            "locale": "en"
+          },
+          "expected_task_ids": [
+            "b",
+            "c",
+            "d",
+            "a"
+          ],
+          "expected_group_keys": [
+            "__all__"
+          ]
+        },
+        {
+          "name": "state-asc-workflow",
+          "query": {
+            "filters": [],
+            "sort": {
+              "key": "state",
+              "direction": "asc"
+            },
+            "group": "workflow",
+            "collapsed_group_keys": [],
+            "collapsed_task_ids": [],
+            "page": 1,
+            "page_size": 100,
+            "locale": "en"
+          },
+          "expected_task_ids": [
+            "b",
+            "d",
+            "c",
+            "a"
+          ],
+          "expected_group_keys": [
+            "wf-b",
+            "wf-a"
+          ]
+        },
+        {
+          "name": "state-asc-workflowStep",
+          "query": {
+            "filters": [],
+            "sort": {
+              "key": "state",
+              "direction": "asc"
+            },
+            "group": "workflowStep",
+            "collapsed_group_keys": [],
+            "collapsed_task_ids": [],
+            "page": 1,
+            "page_size": 100,
+            "locale": "en"
+          },
+          "expected_task_ids": [
+            "b",
+            "d",
+            "c",
+            "a"
+          ],
+          "expected_group_keys": [
+            "step-b",
+            "step-a"
+          ]
+        },
+        {
+          "name": "state-asc-executorType",
+          "query": {
+            "filters": [],
+            "sort": {
+              "key": "state",
+              "direction": "asc"
+            },
+            "group": "executorType",
+            "collapsed_group_keys": [],
+            "collapsed_task_ids": [],
+            "page": 1,
+            "page_size": 100,
+            "locale": "en"
+          },
+          "expected_task_ids": [
+            "b",
+            "c",
+            "a",
+            "d"
+          ],
+          "expected_group_keys": [
+            "ssh",
+            "local",
+            "__unassigned__"
+          ]
+        },
+        {
+          "name": "state-asc-state",
+          "query": {
+            "filters": [],
+            "sort": {
+              "key": "state",
+              "direction": "asc"
+            },
+            "group": "state",
+            "collapsed_group_keys": [],
+            "collapsed_task_ids": [],
+            "page": 1,
+            "page_size": 100,
+            "locale": "en"
+          },
+          "expected_task_ids": [
+            "d",
+            "a",
+            "c",
+            "b"
+          ],
+          "expected_group_keys": [
+            "TODO",
+            "IN_PROGRESS",
+            "COMPLETED"
+          ]
+        },
+        {
+          "name": "state-asc-repository",
+          "query": {
+            "filters": [],
+            "sort": {
+              "key": "state",
+              "direction": "asc"
+            },
+            "group": "repository",
+            "collapsed_group_keys": [],
+            "collapsed_task_ids": [],
+            "page": 1,
+            "page_size": 100,
+            "locale": "en"
+          },
+          "expected_task_ids": [
+            "c",
+            "b",
+            "a",
+            "d"
+          ],
+          "expected_group_keys": [
+            "__repo_combination__:[\"org/alpha\",\"Beta\"]",
+            "Beta",
+            "org/alpha",
+            "__unassigned__"
+          ]
+        },
+        {
+          "name": "state-desc-none",
+          "query": {
+            "filters": [],
+            "sort": {
+              "key": "state",
+              "direction": "desc"
+            },
+            "group": "none",
+            "collapsed_group_keys": [],
+            "collapsed_task_ids": [],
+            "page": 1,
+            "page_size": 100,
+            "locale": "en"
+          },
+          "expected_task_ids": [
+            "d",
+            "a",
+            "c",
+            "b"
+          ],
+          "expected_group_keys": [
+            "__all__"
+          ]
+        },
+        {
+          "name": "state-desc-workflow",
+          "query": {
+            "filters": [],
+            "sort": {
+              "key": "state",
+              "direction": "desc"
+            },
+            "group": "workflow",
+            "collapsed_group_keys": [],
+            "collapsed_task_ids": [],
+            "page": 1,
+            "page_size": 100,
+            "locale": "en"
+          },
+          "expected_task_ids": [
+            "d",
+            "b",
+            "a",
+            "c"
+          ],
+          "expected_group_keys": [
+            "wf-b",
+            "wf-a"
+          ]
+        },
+        {
+          "name": "state-desc-workflowStep",
+          "query": {
+            "filters": [],
+            "sort": {
+              "key": "state",
+              "direction": "desc"
+            },
+            "group": "workflowStep",
+            "collapsed_group_keys": [],
+            "collapsed_task_ids": [],
+            "page": 1,
+            "page_size": 100,
+            "locale": "en"
+          },
+          "expected_task_ids": [
+            "d",
+            "b",
+            "a",
+            "c"
+          ],
+          "expected_group_keys": [
+            "step-b",
+            "step-a"
+          ]
+        },
+        {
+          "name": "state-desc-executorType",
+          "query": {
+            "filters": [],
+            "sort": {
+              "key": "state",
+              "direction": "desc"
+            },
+            "group": "executorType",
+            "collapsed_group_keys": [],
+            "collapsed_task_ids": [],
+            "page": 1,
+            "page_size": 100,
+            "locale": "en"
+          },
+          "expected_task_ids": [
+            "d",
+            "a",
+            "c",
+            "b"
+          ],
+          "expected_group_keys": [
+            "__unassigned__",
+            "local",
+            "ssh"
+          ]
+        },
+        {
+          "name": "state-desc-state",
+          "query": {
+            "filters": [],
+            "sort": {
+              "key": "state",
+              "direction": "desc"
+            },
+            "group": "state",
+            "collapsed_group_keys": [],
+            "collapsed_task_ids": [],
+            "page": 1,
+            "page_size": 100,
+            "locale": "en"
+          },
+          "expected_task_ids": [
+            "d",
+            "a",
+            "c",
+            "b"
+          ],
+          "expected_group_keys": [
+            "TODO",
+            "IN_PROGRESS",
+            "COMPLETED"
+          ]
+        },
+        {
+          "name": "state-desc-repository",
+          "query": {
+            "filters": [],
+            "sort": {
+              "key": "state",
+              "direction": "desc"
+            },
+            "group": "repository",
+            "collapsed_group_keys": [],
+            "collapsed_task_ids": [],
+            "page": 1,
+            "page_size": 100,
+            "locale": "en"
+          },
+          "expected_task_ids": [
+            "c",
+            "b",
+            "a",
+            "d"
+          ],
+          "expected_group_keys": [
+            "__repo_combination__:[\"org/alpha\",\"Beta\"]",
+            "Beta",
+            "org/alpha",
+            "__unassigned__"
+          ]
+        },
+        {
+          "name": "custom-asc-none",
+          "query": {
+            "filters": [],
+            "sort": {
+              "key": "custom",
+              "direction": "asc"
+            },
+            "group": "none",
+            "collapsed_group_keys": [],
+            "collapsed_task_ids": [],
+            "page": 1,
+            "page_size": 100,
+            "locale": "en"
+          },
+          "expected_task_ids": [
+            "d",
+            "b",
+            "c",
+            "a"
+          ],
+          "expected_group_keys": [
+            "__all__"
+          ],
+          "preferences": {
+            "ordered_task_ids": [
+              "d",
+              "b"
+            ]
+          }
+        },
+        {
+          "name": "custom-asc-workflow",
+          "query": {
+            "filters": [],
+            "sort": {
+              "key": "custom",
+              "direction": "asc"
+            },
+            "group": "workflow",
+            "collapsed_group_keys": [],
+            "collapsed_task_ids": [],
+            "page": 1,
+            "page_size": 100,
+            "locale": "en"
+          },
+          "expected_task_ids": [
+            "d",
+            "b",
+            "c",
+            "a"
+          ],
+          "expected_group_keys": [
+            "wf-b",
+            "wf-a"
+          ],
+          "preferences": {
+            "ordered_task_ids": [
+              "d",
+              "b"
+            ]
+          }
+        },
+        {
+          "name": "custom-asc-workflowStep",
+          "query": {
+            "filters": [],
+            "sort": {
+              "key": "custom",
+              "direction": "asc"
+            },
+            "group": "workflowStep",
+            "collapsed_group_keys": [],
+            "collapsed_task_ids": [],
+            "page": 1,
+            "page_size": 100,
+            "locale": "en"
+          },
+          "expected_task_ids": [
+            "d",
+            "b",
+            "c",
+            "a"
+          ],
+          "expected_group_keys": [
+            "step-b",
+            "step-a"
+          ],
+          "preferences": {
+            "ordered_task_ids": [
+              "d",
+              "b"
+            ]
+          }
+        },
+        {
+          "name": "custom-asc-executorType",
+          "query": {
+            "filters": [],
+            "sort": {
+              "key": "custom",
+              "direction": "asc"
+            },
+            "group": "executorType",
+            "collapsed_group_keys": [],
+            "collapsed_task_ids": [],
+            "page": 1,
+            "page_size": 100,
+            "locale": "en"
+          },
+          "expected_task_ids": [
+            "d",
+            "b",
+            "c",
+            "a"
+          ],
+          "expected_group_keys": [
+            "__unassigned__",
+            "ssh",
+            "local"
+          ],
+          "preferences": {
+            "ordered_task_ids": [
+              "d",
+              "b"
+            ]
+          }
+        },
+        {
+          "name": "custom-asc-state",
+          "query": {
+            "filters": [],
+            "sort": {
+              "key": "custom",
+              "direction": "asc"
+            },
+            "group": "state",
+            "collapsed_group_keys": [],
+            "collapsed_task_ids": [],
+            "page": 1,
+            "page_size": 100,
+            "locale": "en"
+          },
+          "expected_task_ids": [
+            "d",
+            "a",
+            "c",
+            "b"
+          ],
+          "expected_group_keys": [
+            "TODO",
+            "IN_PROGRESS",
+            "COMPLETED"
+          ],
+          "preferences": {
+            "ordered_task_ids": [
+              "d",
+              "b"
+            ]
+          }
+        },
+        {
+          "name": "custom-asc-repository",
+          "query": {
+            "filters": [],
+            "sort": {
+              "key": "custom",
+              "direction": "asc"
+            },
+            "group": "repository",
+            "collapsed_group_keys": [],
+            "collapsed_task_ids": [],
+            "page": 1,
+            "page_size": 100,
+            "locale": "en"
+          },
+          "expected_task_ids": [
+            "c",
+            "b",
+            "a",
+            "d"
+          ],
+          "expected_group_keys": [
+            "__repo_combination__:[\"org/alpha\",\"Beta\"]",
+            "Beta",
+            "org/alpha",
+            "__unassigned__"
+          ],
+          "preferences": {
+            "ordered_task_ids": [
+              "d",
+              "b"
+            ]
+          }
+        },
+        {
+          "name": "custom-desc-none",
+          "query": {
+            "filters": [],
+            "sort": {
+              "key": "custom",
+              "direction": "desc"
+            },
+            "group": "none",
+            "collapsed_group_keys": [],
+            "collapsed_task_ids": [],
+            "page": 1,
+            "page_size": 100,
+            "locale": "en"
+          },
+          "expected_task_ids": [
+            "d",
+            "b",
+            "c",
+            "a"
+          ],
+          "expected_group_keys": [
+            "__all__"
+          ],
+          "preferences": {
+            "ordered_task_ids": [
+              "d",
+              "b"
+            ]
+          }
+        },
+        {
+          "name": "custom-desc-workflow",
+          "query": {
+            "filters": [],
+            "sort": {
+              "key": "custom",
+              "direction": "desc"
+            },
+            "group": "workflow",
+            "collapsed_group_keys": [],
+            "collapsed_task_ids": [],
+            "page": 1,
+            "page_size": 100,
+            "locale": "en"
+          },
+          "expected_task_ids": [
+            "d",
+            "b",
+            "c",
+            "a"
+          ],
+          "expected_group_keys": [
+            "wf-b",
+            "wf-a"
+          ],
+          "preferences": {
+            "ordered_task_ids": [
+              "d",
+              "b"
+            ]
+          }
+        },
+        {
+          "name": "custom-desc-workflowStep",
+          "query": {
+            "filters": [],
+            "sort": {
+              "key": "custom",
+              "direction": "desc"
+            },
+            "group": "workflowStep",
+            "collapsed_group_keys": [],
+            "collapsed_task_ids": [],
+            "page": 1,
+            "page_size": 100,
+            "locale": "en"
+          },
+          "expected_task_ids": [
+            "d",
+            "b",
+            "c",
+            "a"
+          ],
+          "expected_group_keys": [
+            "step-b",
+            "step-a"
+          ],
+          "preferences": {
+            "ordered_task_ids": [
+              "d",
+              "b"
+            ]
+          }
+        },
+        {
+          "name": "custom-desc-executorType",
+          "query": {
+            "filters": [],
+            "sort": {
+              "key": "custom",
+              "direction": "desc"
+            },
+            "group": "executorType",
+            "collapsed_group_keys": [],
+            "collapsed_task_ids": [],
+            "page": 1,
+            "page_size": 100,
+            "locale": "en"
+          },
+          "expected_task_ids": [
+            "d",
+            "b",
+            "c",
+            "a"
+          ],
+          "expected_group_keys": [
+            "__unassigned__",
+            "ssh",
+            "local"
+          ],
+          "preferences": {
+            "ordered_task_ids": [
+              "d",
+              "b"
+            ]
+          }
+        },
+        {
+          "name": "custom-desc-state",
+          "query": {
+            "filters": [],
+            "sort": {
+              "key": "custom",
+              "direction": "desc"
+            },
+            "group": "state",
+            "collapsed_group_keys": [],
+            "collapsed_task_ids": [],
+            "page": 1,
+            "page_size": 100,
+            "locale": "en"
+          },
+          "expected_task_ids": [
+            "d",
+            "a",
+            "c",
+            "b"
+          ],
+          "expected_group_keys": [
+            "TODO",
+            "IN_PROGRESS",
+            "COMPLETED"
+          ],
+          "preferences": {
+            "ordered_task_ids": [
+              "d",
+              "b"
+            ]
+          }
+        },
+        {
+          "name": "custom-desc-repository",
+          "query": {
+            "filters": [],
+            "sort": {
+              "key": "custom",
+              "direction": "desc"
+            },
+            "group": "repository",
+            "collapsed_group_keys": [],
+            "collapsed_task_ids": [],
+            "page": 1,
+            "page_size": 100,
+            "locale": "en"
+          },
+          "expected_task_ids": [
+            "c",
+            "b",
+            "a",
+            "d"
+          ],
+          "expected_group_keys": [
+            "__repo_combination__:[\"org/alpha\",\"Beta\"]",
+            "Beta",
+            "org/alpha",
+            "__unassigned__"
+          ],
+          "preferences": {
+            "ordered_task_ids": [
+              "d",
+              "b"
+            ]
+          }
+        },
+        {
+          "name": "state-is",
+          "query": {
+            "filters": [
+              {
+                "dimension": "state",
+                "op": "is",
+                "value": "review"
+              }
+            ],
+            "sort": {
+              "key": "title",
+              "direction": "asc"
+            },
+            "group": "none",
+            "collapsed_group_keys": [],
+            "collapsed_task_ids": [],
+            "page": 1,
+            "page_size": 100,
+            "locale": "en"
+          },
+          "expected_task_ids": [
+            "b"
+          ]
+        },
+        {
+          "name": "state-is_not",
+          "query": {
+            "filters": [
+              {
+                "dimension": "state",
+                "op": "is_not",
+                "value": "review"
+              }
+            ],
+            "sort": {
+              "key": "title",
+              "direction": "asc"
+            },
+            "group": "none",
+            "collapsed_group_keys": [],
+            "collapsed_task_ids": [],
+            "page": 1,
+            "page_size": 100,
+            "locale": "en"
+          },
+          "expected_task_ids": [
+            "a",
+            "c",
+            "d"
+          ]
+        },
+        {
+          "name": "workflow-is",
+          "query": {
+            "filters": [
+              {
+                "dimension": "workflow",
+                "op": "is",
+                "value": "wf-a"
+              }
+            ],
+            "sort": {
+              "key": "title",
+              "direction": "asc"
+            },
+            "group": "none",
+            "collapsed_group_keys": [],
+            "collapsed_task_ids": [],
+            "page": 1,
+            "page_size": 100,
+            "locale": "en"
+          },
+          "expected_task_ids": [
+            "a",
+            "c"
+          ]
+        },
+        {
+          "name": "workflow-is_not",
+          "query": {
+            "filters": [
+              {
+                "dimension": "workflow",
+                "op": "is_not",
+                "value": "wf-a"
+              }
+            ],
+            "sort": {
+              "key": "title",
+              "direction": "asc"
+            },
+            "group": "none",
+            "collapsed_group_keys": [],
+            "collapsed_task_ids": [],
+            "page": 1,
+            "page_size": 100,
+            "locale": "en"
+          },
+          "expected_task_ids": [
+            "b",
+            "d"
+          ]
+        },
+        {
+          "name": "workflowStep-is",
+          "query": {
+            "filters": [
+              {
+                "dimension": "workflowStep",
+                "op": "is",
+                "value": "step-b"
+              }
+            ],
+            "sort": {
+              "key": "title",
+              "direction": "asc"
+            },
+            "group": "none",
+            "collapsed_group_keys": [],
+            "collapsed_task_ids": [],
+            "page": 1,
+            "page_size": 100,
+            "locale": "en"
+          },
+          "expected_task_ids": [
+            "b",
+            "d"
+          ]
+        },
+        {
+          "name": "workflowStep-is_not",
+          "query": {
+            "filters": [
+              {
+                "dimension": "workflowStep",
+                "op": "is_not",
+                "value": "step-b"
+              }
+            ],
+            "sort": {
+              "key": "title",
+              "direction": "asc"
+            },
+            "group": "none",
+            "collapsed_group_keys": [],
+            "collapsed_task_ids": [],
+            "page": 1,
+            "page_size": 100,
+            "locale": "en"
+          },
+          "expected_task_ids": [
+            "a",
+            "c"
+          ]
+        },
+        {
+          "name": "executorType-is",
+          "query": {
+            "filters": [
+              {
+                "dimension": "executorType",
+                "op": "is",
+                "value": "ssh"
+              }
+            ],
+            "sort": {
+              "key": "title",
+              "direction": "asc"
+            },
+            "group": "none",
+            "collapsed_group_keys": [],
+            "collapsed_task_ids": [],
+            "page": 1,
+            "page_size": 100,
+            "locale": "en"
+          },
+          "expected_task_ids": [
+            "b"
+          ]
+        },
+        {
+          "name": "executorType-is_not",
+          "query": {
+            "filters": [
+              {
+                "dimension": "executorType",
+                "op": "is_not",
+                "value": "ssh"
+              }
+            ],
+            "sort": {
+              "key": "title",
+              "direction": "asc"
+            },
+            "group": "none",
+            "collapsed_group_keys": [],
+            "collapsed_task_ids": [],
+            "page": 1,
+            "page_size": 100,
+            "locale": "en"
+          },
+          "expected_task_ids": [
+            "a",
+            "c",
+            "d"
+          ]
+        },
+        {
+          "name": "repository-is",
+          "query": {
+            "filters": [
+              {
+                "dimension": "repository",
+                "op": "is",
+                "value": "org/alpha"
+              }
+            ],
+            "sort": {
+              "key": "title",
+              "direction": "asc"
+            },
+            "group": "none",
+            "collapsed_group_keys": [],
+            "collapsed_task_ids": [],
+            "page": 1,
+            "page_size": 100,
+            "locale": "en"
+          },
+          "expected_task_ids": [
+            "a",
+            "c"
+          ]
+        },
+        {
+          "name": "repository-is_not",
+          "query": {
+            "filters": [
+              {
+                "dimension": "repository",
+                "op": "is_not",
+                "value": "org/alpha"
+              }
+            ],
+            "sort": {
+              "key": "title",
+              "direction": "asc"
+            },
+            "group": "none",
+            "collapsed_group_keys": [],
+            "collapsed_task_ids": [],
+            "page": 1,
+            "page_size": 100,
+            "locale": "en"
+          },
+          "expected_task_ids": [
+            "b",
+            "d"
+          ]
+        },
+        {
+          "name": "hasDiff-is",
+          "query": {
+            "filters": [
+              {
+                "dimension": "hasDiff",
+                "op": "is",
+                "value": true
+              }
+            ],
+            "sort": {
+              "key": "title",
+              "direction": "asc"
+            },
+            "group": "none",
+            "collapsed_group_keys": [],
+            "collapsed_task_ids": [],
+            "page": 1,
+            "page_size": 100,
+            "locale": "en"
+          },
+          "expected_task_ids": [
+            "b"
+          ]
+        },
+        {
+          "name": "hasDiff-is_not",
+          "query": {
+            "filters": [
+              {
+                "dimension": "hasDiff",
+                "op": "is_not",
+                "value": true
+              }
+            ],
+            "sort": {
+              "key": "title",
+              "direction": "asc"
+            },
+            "group": "none",
+            "collapsed_group_keys": [],
+            "collapsed_task_ids": [],
+            "page": 1,
+            "page_size": 100,
+            "locale": "en"
+          },
+          "expected_task_ids": [
+            "a",
+            "c",
+            "d"
+          ]
+        },
+        {
+          "name": "hasPR-is",
+          "query": {
+            "filters": [
+              {
+                "dimension": "hasPR",
+                "op": "is",
+                "value": true
+              }
+            ],
+            "sort": {
+              "key": "title",
+              "direction": "asc"
+            },
+            "group": "none",
+            "collapsed_group_keys": [],
+            "collapsed_task_ids": [],
+            "page": 1,
+            "page_size": 100,
+            "locale": "en"
+          },
+          "expected_task_ids": [
+            "b"
+          ]
+        },
+        {
+          "name": "hasPR-is_not",
+          "query": {
+            "filters": [
+              {
+                "dimension": "hasPR",
+                "op": "is_not",
+                "value": true
+              }
+            ],
+            "sort": {
+              "key": "title",
+              "direction": "asc"
+            },
+            "group": "none",
+            "collapsed_group_keys": [],
+            "collapsed_task_ids": [],
+            "page": 1,
+            "page_size": 100,
+            "locale": "en"
+          },
+          "expected_task_ids": [
+            "a",
+            "c",
+            "d"
+          ]
+        },
+        {
+          "name": "isPRReview-is",
+          "query": {
+            "filters": [
+              {
+                "dimension": "isPRReview",
+                "op": "is",
+                "value": true
+              }
+            ],
+            "sort": {
+              "key": "title",
+              "direction": "asc"
+            },
+            "group": "none",
+            "collapsed_group_keys": [],
+            "collapsed_task_ids": [],
+            "page": 1,
+            "page_size": 100,
+            "locale": "en"
+          },
+          "expected_task_ids": [
+            "b"
+          ]
+        },
+        {
+          "name": "isPRReview-is_not",
+          "query": {
+            "filters": [
+              {
+                "dimension": "isPRReview",
+                "op": "is_not",
+                "value": true
+              }
+            ],
+            "sort": {
+              "key": "title",
+              "direction": "asc"
+            },
+            "group": "none",
+            "collapsed_group_keys": [],
+            "collapsed_task_ids": [],
+            "page": 1,
+            "page_size": 100,
+            "locale": "en"
+          },
+          "expected_task_ids": [
+            "a",
+            "c",
+            "d"
+          ]
+        },
+        {
+          "name": "isIssueWatch-is",
+          "query": {
+            "filters": [
+              {
+                "dimension": "isIssueWatch",
+                "op": "is",
+                "value": true
+              }
+            ],
+            "sort": {
+              "key": "title",
+              "direction": "asc"
+            },
+            "group": "none",
+            "collapsed_group_keys": [],
+            "collapsed_task_ids": [],
+            "page": 1,
+            "page_size": 100,
+            "locale": "en"
+          },
+          "expected_task_ids": [
+            "c"
+          ]
+        },
+        {
+          "name": "isIssueWatch-is_not",
+          "query": {
+            "filters": [
+              {
+                "dimension": "isIssueWatch",
+                "op": "is_not",
+                "value": true
+              }
+            ],
+            "sort": {
+              "key": "title",
+              "direction": "asc"
+            },
+            "group": "none",
+            "collapsed_group_keys": [],
+            "collapsed_task_ids": [],
+            "page": 1,
+            "page_size": 100,
+            "locale": "en"
+          },
+          "expected_task_ids": [
+            "a",
+            "b",
+            "d"
+          ]
+        },
+        {
+          "name": "archived-is",
+          "query": {
+            "filters": [
+              {
+                "dimension": "archived",
+                "op": "is",
+                "value": false
+              }
+            ],
+            "sort": {
+              "key": "title",
+              "direction": "asc"
+            },
+            "group": "none",
+            "collapsed_group_keys": [],
+            "collapsed_task_ids": [],
+            "page": 1,
+            "page_size": 100,
+            "locale": "en"
+          },
+          "expected_task_ids": [
+            "a",
+            "b",
+            "c",
+            "d"
+          ]
+        },
+        {
+          "name": "archived-is_not",
+          "query": {
+            "filters": [
+              {
+                "dimension": "archived",
+                "op": "is_not",
+                "value": false
+              }
+            ],
+            "sort": {
+              "key": "title",
+              "direction": "asc"
+            },
+            "group": "none",
+            "collapsed_group_keys": [],
+            "collapsed_task_ids": [],
+            "page": 1,
+            "page_size": 100,
+            "locale": "en"
+          },
+          "expected_task_ids": []
+        },
+        {
+          "name": "title-in['Alpha', 'beta']",
+          "query": {
+            "filters": [
+              {
+                "dimension": "titleMatch",
+                "op": "in",
+                "value": [
+                  "Alpha",
+                  "beta"
+                ]
+              }
+            ],
+            "sort": {
+              "key": "title",
+              "direction": "asc"
+            },
+            "group": "none",
+            "collapsed_group_keys": [],
+            "collapsed_task_ids": [],
+            "page": 1,
+            "page_size": 100,
+            "locale": "en"
+          },
+          "expected_task_ids": [
+            "a",
+            "b"
+          ]
+        },
+        {
+          "name": "title-not_in['Alpha', 'beta']",
+          "query": {
+            "filters": [
+              {
+                "dimension": "titleMatch",
+                "op": "not_in",
+                "value": [
+                  "Alpha",
+                  "beta"
+                ]
+              }
+            ],
+            "sort": {
+              "key": "title",
+              "direction": "asc"
+            },
+            "group": "none",
+            "collapsed_group_keys": [],
+            "collapsed_task_ids": [],
+            "page": 1,
+            "page_size": 100,
+            "locale": "en"
+          },
+          "expected_task_ids": [
+            "c",
+            "d"
+          ]
+        },
+        {
+          "name": "title-matchesALP",
+          "query": {
+            "filters": [
+              {
+                "dimension": "titleMatch",
+                "op": "matches",
+                "value": "ALP"
+              }
+            ],
+            "sort": {
+              "key": "title",
+              "direction": "asc"
+            },
+            "group": "none",
+            "collapsed_group_keys": [],
+            "collapsed_task_ids": [],
+            "page": 1,
+            "page_size": 100,
+            "locale": "en"
+          },
+          "expected_task_ids": [
+            "a"
+          ]
+        },
+        {
+          "name": "title-not_matchesALP",
+          "query": {
+            "filters": [
+              {
+                "dimension": "titleMatch",
+                "op": "not_matches",
+                "value": "ALP"
+              }
+            ],
+            "sort": {
+              "key": "title",
+              "direction": "asc"
+            },
+            "group": "none",
+            "collapsed_group_keys": [],
+            "collapsed_task_ids": [],
+            "page": 1,
+            "page_size": 100,
+            "locale": "en"
+          },
+          "expected_task_ids": [
+            "b",
+            "c",
+            "d"
+          ]
+        },
+        {
+          "name": "title-matchesä",
+          "query": {
+            "filters": [
+              {
+                "dimension": "titleMatch",
+                "op": "matches",
+                "value": "ä"
+              }
+            ],
+            "sort": {
+              "key": "title",
+              "direction": "asc"
+            },
+            "group": "none",
+            "collapsed_group_keys": [],
+            "collapsed_task_ids": [],
+            "page": 1,
+            "page_size": 100,
+            "locale": "en"
+          },
+          "expected_task_ids": [
+            "d"
+          ]
+        },
+        {
+          "name": "filtered-wip-global-queue",
+          "query": {
+            "filters": [
+              {
+                "dimension": "titleMatch",
+                "op": "is",
+                "value": "Alpha"
+              }
+            ],
+            "sort": {
+              "key": "title",
+              "direction": "asc"
+            },
+            "group": "none",
+            "collapsed_group_keys": [],
+            "collapsed_task_ids": [],
+            "page": 1,
+            "page_size": 100,
+            "locale": "en"
+          },
+          "expected_task_ids": [
+            "a"
+          ],
+          "expected_queues": {
+            "a": [
+              2,
+              2
+            ]
+          }
+        },
+        {
+          "name": "pins-before-title",
+          "query": {
+            "filters": [],
+            "sort": {
+              "key": "title",
+              "direction": "asc"
+            },
+            "group": "none",
+            "collapsed_group_keys": [],
+            "collapsed_task_ids": [],
+            "page": 1,
+            "page_size": 100,
+            "locale": "en"
+          },
+          "expected_task_ids": [
+            "d",
+            "a",
+            "b",
+            "c"
+          ],
+          "preferences": {
+            "pinned_task_ids": [
+              "d",
+              "d"
+            ]
+          }
+        },
+        {
+          "name": "collapsed-state",
+          "query": {
+            "filters": [],
+            "sort": {
+              "key": "title",
+              "direction": "asc"
+            },
+            "group": "state",
+            "collapsed_group_keys": [
+              "COMPLETED"
+            ],
+            "collapsed_task_ids": [],
+            "page": 1,
+            "page_size": 100,
+            "locale": "en"
+          },
+          "expected_task_ids": [
+            "a",
+            "d",
+            "c"
+          ],
+          "expected_group_keys": [
+            "TODO",
+            "IN_PROGRESS",
+            "COMPLETED"
+          ],
+          "expected_total_visible": 3
+        }
+      ]
+    },
+    {
+      "name": "ties",
+      "tasks": [
+        {
+          "workspace_id": "conformance",
+          "workflow_id": "wf-a",
+          "workflow_step_id": "step-a",
+          "state": "TODO",
+          "position": 0,
+          "created_at": "2026-09-29T12:00:00Z",
+          "updated_at": "2026-09-29T12:00:00Z",
+          "metadata": {},
+          "origin": "",
+          "id": "z",
+          "title": "Alpha"
+        },
+        {
+          "workspace_id": "conformance",
+          "workflow_id": "wf-a",
+          "workflow_step_id": "step-a",
+          "state": "TODO",
+          "position": 0,
+          "created_at": "2026-09-29T12:00:00Z",
+          "updated_at": "2026-09-29T12:00:00Z",
+          "metadata": {},
+          "origin": "",
+          "id": "a",
+          "title": "alpha"
+        },
+        {
+          "workspace_id": "conformance",
+          "workflow_id": "wf-a",
+          "workflow_step_id": "step-a",
+          "state": "TODO",
+          "position": 0,
+          "created_at": "2026-09-29T12:00:00Z",
+          "updated_at": "2026-09-29T12:00:00Z",
+          "metadata": {},
+          "origin": "",
+          "id": "u",
+          "title": "Ä"
+        },
+        {
+          "workspace_id": "conformance",
+          "workflow_id": "wf-a",
+          "workflow_step_id": "step-a",
+          "state": "TODO",
+          "position": 0,
+          "created_at": "2026-09-29T12:00:00Z",
+          "updated_at": "2026-09-29T12:00:00Z",
+          "metadata": {},
+          "origin": "",
+          "id": "l",
+          "title": "ä"
+        },
+        {
+          "workspace_id": "conformance",
+          "workflow_id": "wf-a",
+          "workflow_step_id": "step-a",
+          "state": "TODO",
+          "position": 0,
+          "created_at": "2026-09-29T12:00:00Z",
+          "updated_at": "2026-09-29T12:00:00Z",
+          "metadata": {},
+          "origin": "",
+          "id": "bmp",
+          "title": "�"
+        },
+        {
+          "workspace_id": "conformance",
+          "workflow_id": "wf-a",
+          "workflow_step_id": "step-a",
+          "state": "TODO",
+          "position": 0,
+          "created_at": "2026-09-29T12:00:00Z",
+          "updated_at": "2026-09-29T12:00:00Z",
+          "metadata": {},
+          "origin": "",
+          "id": "astral",
+          "title": "😀"
+        }
+      ],
+      "cases": [
+        {
+          "name": "utf8-nocase-ties",
+          "query": {
+            "filters": [],
+            "sort": {
+              "key": "title",
+              "direction": "asc"
+            },
+            "group": "none",
+            "collapsed_group_keys": [],
+            "collapsed_task_ids": [],
+            "page": 1,
+            "page_size": 100,
+            "locale": "en"
+          },
+          "expected_task_ids": [
+            "a",
+            "z",
+            "u",
+            "l",
+            "bmp",
+            "astral"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "tree",
+      "tasks": [
+        {
+          "workspace_id": "conformance",
+          "workflow_id": "wf-a",
+          "workflow_step_id": "step-a",
+          "state": "TODO",
+          "position": 0,
+          "created_at": "2026-09-29T12:00:00Z",
+          "updated_at": "2026-09-29T12:00:00Z",
+          "metadata": {},
+          "origin": "",
+          "id": "a",
+          "title": "A",
+          "parent_id": "b"
+        },
+        {
+          "workspace_id": "conformance",
+          "workflow_id": "wf-a",
+          "workflow_step_id": "step-a",
+          "state": "TODO",
+          "position": 0,
+          "created_at": "2026-09-29T12:00:00Z",
+          "updated_at": "2026-09-29T12:00:00Z",
+          "metadata": {},
+          "origin": "",
+          "id": "b",
+          "title": "B",
+          "parent_id": "a"
+        },
+        {
+          "workspace_id": "conformance",
+          "workflow_id": "wf-a",
+          "workflow_step_id": "step-a",
+          "state": "TODO",
+          "position": 0,
+          "created_at": "2026-09-29T12:00:00Z",
+          "updated_at": "2026-09-29T12:00:00Z",
+          "metadata": {},
+          "origin": "",
+          "id": "p",
+          "title": "P"
+        },
+        {
+          "workspace_id": "conformance",
+          "workflow_id": "wf-a",
+          "workflow_step_id": "step-a",
+          "state": "IN_PROGRESS",
+          "position": 0,
+          "created_at": "2026-09-29T12:00:00Z",
+          "updated_at": "2026-09-29T12:00:00Z",
+          "metadata": {},
+          "origin": "",
+          "id": "c",
+          "title": "C",
+          "parent_id": "p"
+        },
+        {
+          "workspace_id": "conformance",
+          "workflow_id": "wf-a",
+          "workflow_step_id": "step-a",
+          "state": "TODO",
+          "position": 0,
+          "created_at": "2026-09-29T12:00:00Z",
+          "updated_at": "2026-09-29T12:00:00Z",
+          "metadata": {},
+          "origin": "",
+          "id": "q",
+          "title": "Q"
+        }
+      ],
+      "cases": [
+        {
+          "name": "cycle-roots",
+          "query": {
+            "filters": [],
+            "sort": {
+              "key": "title",
+              "direction": "asc"
+            },
+            "group": "none",
+            "collapsed_group_keys": [],
+            "collapsed_task_ids": [],
+            "page": 1,
+            "page_size": 100,
+            "locale": "en"
+          },
+          "expected_task_ids": [
+            "a",
+            "b",
+            "p",
+            "c",
+            "q"
+          ],
+          "expected_subtask_counts": {
+            "a": 1,
+            "b": 0,
+            "p": 1,
+            "c": 0,
+            "q": 0
+          }
+        },
+        {
+          "name": "filtered-parent",
+          "query": {
+            "filters": [
+              {
+                "dimension": "titleMatch",
+                "op": "in",
+                "value": [
+                  "C",
+                  "Q"
+                ]
+              }
+            ],
+            "sort": {
+              "key": "title",
+              "direction": "asc"
+            },
+            "group": "none",
+            "collapsed_group_keys": [],
+            "collapsed_task_ids": [],
+            "page": 1,
+            "page_size": 100,
+            "locale": "en"
+          },
+          "expected_task_ids": [
+            "c",
+            "q"
+          ],
+          "expected_depths": {
+            "c": 0
+          },
+          "expected_subtask_counts": {
+            "c": 0,
+            "q": 0
+          }
+        },
+        {
+          "name": "collapse",
+          "query": {
+            "filters": [],
+            "sort": {
+              "key": "title",
+              "direction": "asc"
+            },
+            "group": "none",
+            "collapsed_group_keys": [],
+            "collapsed_task_ids": [
+              "p"
+            ],
+            "page": 1,
+            "page_size": 100,
+            "locale": "en"
+          },
+          "expected_task_ids": [
+            "a",
+            "b",
+            "p",
+            "q"
+          ],
+          "expected_subtask_counts": {
+            "a": 1,
+            "b": 0,
+            "p": 1,
+            "q": 0
+          }
+        },
+        {
+          "name": "continuation",
+          "query": {
+            "filters": [],
+            "sort": {
+              "key": "title",
+              "direction": "asc"
+            },
+            "group": "none",
+            "collapsed_group_keys": [],
+            "collapsed_task_ids": [],
+            "page": 4,
+            "page_size": 1,
+            "locale": "en"
+          },
+          "expected_task_ids": [
+            "c"
+          ],
+          "expected_continuation": "p",
+          "expected_depths": {
+            "c": 1
+          },
+          "expected_subtask_counts": {
+            "c": 0
+          }
+        },
+        {
+          "name": "effective-state",
+          "query": {
+            "filters": [],
+            "sort": {
+              "key": "state",
+              "direction": "asc"
+            },
+            "group": "none",
+            "collapsed_group_keys": [],
+            "collapsed_task_ids": [],
+            "page": 1,
+            "page_size": 100,
+            "locale": "en"
+          },
+          "expected_task_ids": [
+            "p",
+            "c",
+            "a",
+            "b",
+            "q"
+          ],
+          "expected_subtask_counts": {
+            "p": 1,
+            "c": 0,
+            "a": 1,
+            "b": 0,
+            "q": 0
+          }
+        }
+      ]
+    },
+    {
+      "name": "queue-timestamp-precision",
+      "tasks": [
+        {
+          "workspace_id": "conformance",
+          "workflow_id": "wf-a",
+          "workflow_step_id": "step-a",
+          "state": "TODO",
+          "position": 0,
+          "created_at": "2026-09-29T00:00:00Z",
+          "updated_at": "2026-09-29T12:00:01Z",
+          "metadata": {},
+          "origin": "",
+          "id": "a",
+          "title": "a",
+          "repository_ids": [
+            "repo-a"
+          ],
+          "executor_type": "local",
+          "summary": {
+            "last_activity_at": "2026-09-29T13:00:00.000000002+01:00"
+          },
+          "queued_for_step_id": "step-a",
+          "priority": "medium",
+          "queued_at": "2026-09-29T00:00:00.000000001Z"
+        },
+        {
+          "workspace_id": "conformance",
+          "workflow_id": "wf-a",
+          "workflow_step_id": "step-a",
+          "state": "TODO",
+          "position": 0,
+          "created_at": "2026-09-29T00:00:00Z",
+          "updated_at": "2026-09-29T12:00:01Z",
+          "metadata": {},
+          "origin": "",
+          "id": "b",
+          "title": "b",
+          "repository_ids": [
+            "repo-a"
+          ],
+          "executor_type": "local",
+          "summary": {
+            "last_activity_at": "2026-09-29T13:00:00.000000002+01:00"
+          },
+          "queued_for_step_id": "step-a",
+          "priority": "medium",
+          "queued_at": "2026-09-29T00:00:00Z"
+        },
+        {
+          "workspace_id": "conformance",
+          "workflow_id": "wf-a",
+          "workflow_step_id": "step-a",
+          "state": "TODO",
+          "position": 0,
+          "created_at": "2026-09-29T00:00:00.000000001Z",
+          "updated_at": "2026-09-29T12:00:01Z",
+          "metadata": {},
+          "origin": "",
+          "id": "c",
+          "title": "c",
+          "repository_ids": [
+            "repo-a"
+          ],
+          "executor_type": "local",
+          "summary": {
+            "last_activity_at": "2026-09-29T13:00:00.000000002+01:00"
+          },
+          "queued_for_step_id": "step-a",
+          "priority": "medium",
+          "queued_at": "2026-09-29T00:00:00Z"
+        }
+      ],
+      "cases": [
+        {
+          "name": "whole-second-before-nanosecond",
+          "query": {
+            "filters": [],
+            "sort": {
+              "key": "title",
+              "direction": "asc"
+            },
+            "group": "none",
+            "collapsed_group_keys": [],
+            "collapsed_task_ids": [],
+            "page": 1,
+            "page_size": 100,
+            "locale": "en"
+          },
+          "expected_task_ids": [
+            "a",
+            "b",
+            "c"
+          ],
+          "expected_queues": {
+            "a": [
+              3,
+              3
+            ],
+            "b": [
+              1,
+              3
+            ],
+            "c": [
+              2,
+              3
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "scope-and-projection-intersection",
+      "tasks": [
+        {
+          "workspace_id": "conformance",
+          "workflow_id": "wf-a",
+          "workflow_step_id": "step-a",
+          "state": "TODO",
+          "position": 5,
+          "created_at": "2026-09-29T12:00:03Z",
+          "updated_at": "2026-09-29T12:00:01Z",
+          "metadata": {},
+          "origin": "",
+          "id": "a",
+          "title": "Alpha",
+          "repository_ids": [
+            "repo-a"
+          ],
+          "executor_type": "local",
+          "summary": {
+            "last_activity_at": "2026-09-29T13:00:00.000000002+01:00"
+          },
+          "queued_for_step_id": "step-a",
+          "priority": "low"
+        },
+        {
+          "workspace_id": "conformance",
+          "workflow_id": "wf-b",
+          "workflow_step_id": "step-b",
+          "state": "COMPLETED",
+          "position": 0,
+          "created_at": "2026-09-29T12:00:01Z",
+          "updated_at": "2026-09-29T12:00:03Z",
+          "metadata": {
+            "review_watch_id": "review"
+          },
+          "origin": "",
+          "id": "b",
+          "title": "beta",
+          "repository_ids": [
+            "repo-b"
+          ],
+          "executor_type": "ssh",
+          "summary": {
+            "last_activity_at": "2026-09-29T12:00:00.999999999Z",
+            "pull_request": {
+              "count": 1
+            },
+            "git": {
+              "additions": 3
+            },
+            "primary_session": {
+              "state": "COMPLETED"
+            }
+          },
+          "archived_at": "2026-09-29T14:00:00Z"
+        },
+        {
+          "workspace_id": "conformance",
+          "workflow_id": "wf-a",
+          "workflow_step_id": "step-a",
+          "state": "IN_PROGRESS",
+          "position": 2,
+          "created_at": "2026-09-29T12:00:04Z",
+          "updated_at": "2026-09-29T12:00:02Z",
+          "metadata": {
+            "issue_watch_id": "issue"
+          },
+          "origin": "",
+          "id": "c",
+          "title": "Ä",
+          "repository_ids": [
+            "repo-a",
+            "repo-b"
+          ],
+          "executor_type": "local",
+          "summary": {
+            "last_activity_at": "2026-09-29T12:00:00.000000001Z",
+            "primary_session": {
+              "state": "RUNNING"
+            }
+          },
+          "queued_for_step_id": "step-a",
+          "priority": "high"
+        },
+        {
+          "workspace_id": "conformance",
+          "workflow_id": "wf-b",
+          "workflow_step_id": "step-b",
+          "state": "TODO",
+          "position": 0,
+          "created_at": "2026-09-29T12:00:02Z",
+          "updated_at": "2026-09-29T12:00:04Z",
+          "metadata": {},
+          "origin": "",
+          "id": "d",
+          "title": "ä",
+          "summary": {
+            "last_activity_at": "malformed"
+          }
+        }
+      ],
+      "cases": [
+        {
+          "name": "default-active-excludes-matching-archive",
+          "query": {
+            "filters": [
+              {
+                "dimension": "titleMatch",
+                "op": "matches",
+                "value": "beta"
+              },
+              {
+                "dimension": "state",
+                "op": "is",
+                "value": "review"
+              }
+            ],
+            "sort": {
+              "key": "title",
+              "direction": "asc"
+            },
+            "group": "none",
+            "collapsed_group_keys": [],
+            "collapsed_task_ids": [],
+            "page": 1,
+            "page_size": 100,
+            "locale": "en"
+          },
+          "expected_task_ids": []
+        },
+        {
+          "name": "explicit-archive-keeps-derived-state",
+          "query": {
+            "filters": [
+              {
+                "dimension": "state",
+                "op": "is",
+                "value": "review"
+              },
+              {
+                "dimension": "titleMatch",
+                "op": "matches",
+                "value": "beta"
+              },
+              {
+                "dimension": "archived",
+                "op": "is",
+                "value": true
+              }
+            ],
+            "sort": {
+              "key": "title",
+              "direction": "asc"
+            },
+            "group": "none",
+            "collapsed_group_keys": [],
+            "collapsed_task_ids": [],
+            "page": 1,
+            "page_size": 100,
+            "locale": "en"
+          },
+          "expected_task_ids": [
+            "b"
+          ]
+        },
+        {
+          "name": "workflow-step-and-state",
+          "query": {
+            "filters": [
+              {
+                "dimension": "workflow",
+                "op": "is",
+                "value": "wf-a"
+              },
+              {
+                "dimension": "state",
+                "op": "is",
+                "value": "in_progress"
+              },
+              {
+                "dimension": "workflowStep",
+                "op": "is",
+                "value": "step-a"
+              }
+            ],
+            "sort": {
+              "key": "title",
+              "direction": "asc"
+            },
+            "group": "none",
+            "collapsed_group_keys": [],
+            "collapsed_task_ids": [],
+            "page": 1,
+            "page_size": 100,
+            "locale": "en"
+          },
+          "expected_task_ids": [
+            "c"
+          ]
+        },
+        {
+          "name": "title-and-state-disjoint",
+          "query": {
+            "filters": [
+              {
+                "dimension": "titleMatch",
+                "op": "in",
+                "value": [
+                  "Alpha",
+                  "beta"
+                ]
+              },
+              {
+                "dimension": "state",
+                "op": "is",
+                "value": "in_progress"
+              }
+            ],
+            "sort": {
+              "key": "title",
+              "direction": "asc"
+            },
+            "group": "none",
+            "collapsed_group_keys": [],
+            "collapsed_task_ids": [],
+            "page": 1,
+            "page_size": 100,
+            "locale": "en"
+          },
+          "expected_task_ids": []
+        },
+        {
+          "name": "both-archive-values",
+          "query": {
+            "filters": [
+              {
+                "dimension": "hasPR",
+                "op": "is",
+                "value": true
+              },
+              {
+                "dimension": "archived",
+                "op": "in",
+                "value": [
+                  true,
+                  false
+                ]
+              }
+            ],
+            "sort": {
+              "key": "title",
+              "direction": "asc"
+            },
+            "group": "none",
+            "collapsed_group_keys": [],
+            "collapsed_task_ids": [],
+            "page": 1,
+            "page_size": 100,
+            "locale": "en"
+          },
+          "expected_task_ids": [
+            "b"
+          ]
+        }
+      ]
+    }
+  ]
+}

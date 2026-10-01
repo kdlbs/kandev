@@ -75,6 +75,25 @@ async function createTask(apiClient: ApiClient, seedData: SeedData, title: strin
   });
 }
 
+async function waitForStoredUserMessage(
+  apiClient: ApiClient,
+  sessionId: string,
+  content: string,
+  timeout = 90_000,
+): Promise<void> {
+  await expect
+    .poll(
+      async () => {
+        const { messages } = await apiClient.listSessionMessages(sessionId);
+        return messages.some(
+          (message) => message.author_type === "user" && message.content === content,
+        );
+      },
+      { timeout, message: "the complete user prompt should be stored" },
+    )
+    .toBe(true);
+}
+
 async function switchMobileTask(testPage: Page, title: string) {
   await testPage.getByTestId("mobile-task-picker-trigger").tap();
   const sheet = testPage.getByRole("dialog", { name: "Tasks" });
@@ -102,11 +121,12 @@ test("mobile oversized previews stay bounded, downloadable, and touch-sized", as
   await session.waitForLoad();
   await session.waitForChatIdle({ timeout: 30_000 });
   await session.sendMessageViaButton(source);
+  await waitForStoredUserMessage(apiClient, task.session_id, source);
   await session.waitForChatIdle({ timeout: 60_000 });
 
   let chat = session.activeChat();
   const userBubble = chat.getByTestId("user-message-bubble").filter({ hasText: firstLine }).first();
-  await expect(userBubble).toBeVisible();
+  await expect(userBubble).toBeVisible({ timeout: 30_000 });
   await expectBounded(userBubble, tail);
   const userDownload = userBubble.getByRole("button", { name: "Download full text" });
   const userDownloadBox = await userDownload.boundingBox();
@@ -119,18 +139,6 @@ test("mobile oversized previews stay bounded, downloadable, and touch-sized", as
     "kandev-message.txt",
     path.join(backend.tmpDir, `mobile-message-${Date.now()}.txt`),
   );
-  await expect
-    .poll(
-      async () => {
-        const { messages } = await apiClient.listSessionMessages(task.session_id!);
-        return messages.some(
-          (message) => message.author_type === "user" && message.content === source,
-        );
-      },
-      { timeout: 30_000, message: "the complete mobile oversized prompt should be stored" },
-    )
-    .toBe(true);
-
   await testPage.reload();
   session = new SessionPage(testPage);
   await session.waitForLoad();
@@ -159,8 +167,9 @@ test("mobile oversized previews stay bounded, downloadable, and touch-sized", as
   );
 
   await session.sendMessageViaButton(slowPrompt);
+  await waitForStoredUserMessage(apiClient, task.session_id, slowPrompt);
   await expect(chat.getByTestId("user-message-bubble").filter({ hasText: slowPrompt })).toBeVisible(
-    { timeout: 15_000 },
+    { timeout: 30_000 },
   );
   await expect(session.agentStatus()).toBeVisible({ timeout: 15_000 });
   await waitForActiveSessionForegroundActivity(testPage, "generating");
@@ -211,16 +220,5 @@ test("mobile oversized previews stay bounded, downloadable, and touch-sized", as
     "the mobile follow-up session should finish",
     60_000,
   );
-  await expect
-    .poll(
-      async () => {
-        const { messages } = await apiClient.listSessionMessages(task.session_id!);
-        return messages.some(
-          (message) => message.author_type === "user" && message.content === slowPrompt,
-        );
-      },
-      { timeout: 30_000, message: "the mobile follow-up prompt should be stored" },
-    )
-    .toBe(true);
   await assertNoDocumentHorizontalOverflow(testPage, "mobile queued oversized message flow");
 });

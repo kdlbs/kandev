@@ -104,11 +104,22 @@ func (m *Manager) PromptAgent(ctx context.Context, executionID string, prompt st
 // that prompt asynchronously, so callers that own startup cancellation must
 // wait for either provider acceptance or a pre-acceptance delivery failure.
 func (m *Manager) RegisterInitialPromptDispatchCallbacks(executionID string, onDispatched, onFailure func()) error {
+	return m.RegisterInitialPromptAdmissionCallbacks(executionID, nil, onDispatched, onFailure)
+}
+
+// RegisterInitialPromptAdmissionCallbacks installs a final admission check and
+// one-shot acceptance/failure callbacks for the initial prompt sent during
+// StartAgentProcess.
+func (m *Manager) RegisterInitialPromptAdmissionCallbacks(
+	executionID string,
+	beforeAdmission func() error,
+	onDispatched, onFailure func(),
+) error {
 	execution, exists := m.executionStore.Get(executionID)
 	if !exists {
 		return fmt.Errorf("execution %q not found: %w", executionID, ErrExecutionNotFound)
 	}
-	execution.setInitialPromptDispatchCallbacks(onDispatched, onFailure)
+	execution.setInitialPromptDispatchCallbacks(beforeAdmission, onDispatched, onFailure)
 	return nil
 }
 
@@ -134,6 +145,48 @@ func (m *Manager) PromptAgentWithDispatchCallback(ctx context.Context, execution
 	}
 	defer operationRelease()
 	result, err := m.sessionManager.SendPromptWithDispatchCallback(ctx, execution, prompt, true, attachments, dispatchOnly, onDispatched)
+	if err != nil || !dispatchOnly {
+		m.releaseActivity(key)
+		if err != nil {
+			m.setRuntimeInterest(execution.SessionID, false)
+		}
+	}
+	return result, err
+}
+
+// PromptAgentWithAdmissionCallback lets the orchestrator revalidate its
+// dispatch reservation after lifecycle stream preparation and before a new
+// prompt generation is allocated.
+func (m *Manager) PromptAgentWithAdmissionCallback(
+	ctx context.Context,
+	executionID string,
+	prompt string,
+	attachments []v1.MessageAttachment,
+	dispatchOnly bool,
+	beforeAdmission func() error,
+	onDispatched func(),
+) (*PromptResult, error) {
+	execution, exists := m.executionStore.Get(executionID)
+	if !exists {
+		return nil, fmt.Errorf("execution %q not found: %w", executionID, ErrExecutionNotFound)
+	}
+	lease, err := m.acquireActivity(ctx, activity.KindExecutionRunning)
+	if err != nil {
+		return nil, err
+	}
+	key := executionActivityKey(executionID)
+	m.trackActivity(key, lease)
+	m.setRuntimeInterest(execution.SessionID, true)
+	operationRelease, err := execution.acquireContextResetOperation(ctx)
+	if err != nil {
+		m.releaseActivity(key)
+		m.setRuntimeInterest(execution.SessionID, false)
+		return nil, err
+	}
+	defer operationRelease()
+	result, err := m.sessionManager.SendPromptWithAdmissionCallback(
+		ctx, execution, prompt, true, attachments, dispatchOnly, beforeAdmission, onDispatched,
+	)
 	if err != nil || !dispatchOnly {
 		m.releaseActivity(key)
 		if err != nil {
@@ -236,6 +289,7 @@ func (m *Manager) cancelAgentExecution(ctx context.Context, execution *AgentExec
 		zap.String("task_id", execution.TaskID),
 		zap.String("session_id", execution.SessionID))
 
+	snapshot := m.captureCancelPromptSnapshot(execution)
 	cancelErr := client.Cancel(ctx)
 	streamDisconnected := errors.Is(cancelErr, agentctlclient.ErrAgentStreamNotConnected)
 	if cancelErr != nil &&
@@ -252,19 +306,29 @@ func (m *Manager) cancelAgentExecution(ctx context.Context, execution *AgentExec
 	// which triggers handleCompleteEvent() to properly flush buffers and mark state.
 	// Clearing here would race with in-flight notifications and lose content.
 
-	execution.promptFinishedMu.Lock()
-	ch := execution.promptFinished
-	execution.promptFinishedMu.Unlock()
-
-	if ch == nil {
-		if execution.dispatchedPromptPending.Load() {
-			return m.escalateStuckCancel(ctx, execution, nil)
-		}
+	if snapshot.ownershipConflict {
+		return ErrPromptActivityNotOwned
+	}
+	if snapshot.finished == nil && !snapshot.dispatchOnly {
 		if streamDisconnected {
 			m.logger.Info("agent stream already disconnected; cancel is complete",
 				zap.String("execution_id", executionID))
 		}
 		return nil
+	}
+	if snapshot.dispatchOnly {
+		immediate := streamDisconnected || errors.Is(cancelErr, agentctlclient.ErrTurnCancelNotAcknowledged)
+		if streamDisconnected {
+			m.logger.Warn("agent stream disconnected before cancel; escalating locally",
+				zap.String("execution_id", executionID),
+				zap.Error(cancelErr))
+		}
+		if errors.Is(cancelErr, agentctlclient.ErrTurnCancelNotAcknowledged) {
+			m.logger.Warn("agent cancel not acknowledged; escalating immediately",
+				zap.String("execution_id", executionID),
+				zap.Error(cancelErr))
+		}
+		return m.cancelDispatchOnlyPrompt(ctx, execution, snapshot, immediate)
 	}
 
 	// Teardown may close the stream immediately before an explicit cancel (for
@@ -275,7 +339,7 @@ func (m *Manager) cancelAgentExecution(ctx context.Context, execution *AgentExec
 		m.logger.Warn("agent stream disconnected before cancel; escalating locally",
 			zap.String("execution_id", executionID),
 			zap.Error(cancelErr))
-		return m.escalateStuckCancel(ctx, execution, ch)
+		return m.escalateStuckCancel(ctx, execution, snapshot.finished)
 	}
 
 	// The agent did not end the in-flight session/prompt RPC after cancel (e.g. it
@@ -285,27 +349,13 @@ func (m *Manager) cancelAgentExecution(ctx context.Context, execution *AgentExec
 		m.logger.Warn("agent cancel not acknowledged; escalating immediately",
 			zap.String("execution_id", executionID),
 			zap.Error(cancelErr))
-		return m.escalateStuckCancel(ctx, execution, ch)
+		return m.escalateStuckCancel(ctx, execution, snapshot.finished)
 	}
 
 	m.logger.Info("agent cancel sent, waiting for turn completion",
 		zap.String("execution_id", executionID))
 
-	// Wait for the in-flight SendPrompt to finish processing the cancel completion.
-	// Without this, a follow-up PromptAgent races on promptDoneCh with two readers.
-	select {
-	case <-ch:
-		if execution.dispatchedPromptPending.Load() {
-			return m.escalateStuckCancel(ctx, execution, ch)
-		}
-		m.logger.Debug("in-flight prompt finished after cancel",
-			zap.String("execution_id", executionID))
-		return nil
-	case <-time.After(cancelWaitTimeout):
-		return m.escalateStuckCancel(ctx, execution, ch)
-	case <-ctx.Done():
-		return ctx.Err()
-	}
+	return m.waitForPromptFinishedAfterCancel(ctx, execution, snapshot)
 }
 
 // escalateStuckCancel unblocks a SendPrompt that is stuck waiting for a completion
@@ -402,7 +452,12 @@ func (m *Manager) SetSessionMode(ctx context.Context, executionID, _ string, mod
 	if !execution.isSessionInitialized() || execution.ACPSessionID == "" {
 		return fmt.Errorf("execution %q ACP session is not ready", executionID)
 	}
-	return client.SetMode(ctx, execution.ACPSessionID, modeID)
+	result, err := client.SetMode(ctx, execution.ACPSessionID, modeID)
+	if err != nil {
+		return err
+	}
+	m.reportModeOutcome(execution, result)
+	return nil
 }
 
 // SetSessionModeBySessionID changes the session mode for a running agent by session ID.
@@ -412,6 +467,25 @@ func (m *Manager) SetSessionModeBySessionID(ctx context.Context, sessionID, mode
 		return fmt.Errorf("no agent running for session %q", sessionID)
 	}
 	return m.SetSessionMode(ctx, execution.ID, execution.ACPSessionID, modeID)
+}
+
+// ForkSessionBySessionID forks a completed provider turn in the live native
+// session. The native thread is bound to the execution, so the caller cannot
+// select a different provider identity.
+func (m *Manager) ForkSessionBySessionID(ctx context.Context, sessionID, providerTurnID string) (string, error) {
+	execution, exists := m.executionStore.GetBySessionID(sessionID)
+	if !exists {
+		return "", fmt.Errorf("no agent running for session %q", sessionID)
+	}
+	if !execution.isSessionInitialized() || execution.ACPSessionID == "" {
+		return "", fmt.Errorf("execution %q session is not ready", execution.ID)
+	}
+	client, release := execution.AcquireAgentCtlClient()
+	defer release()
+	if client == nil {
+		return "", fmt.Errorf("execution %q has no agentctl client", execution.ID)
+	}
+	return client.ForkSession(ctx, execution.ACPSessionID, providerTurnID)
 }
 
 // SetSessionModel changes the session model for a running agent. ACP agents
@@ -516,18 +590,26 @@ func (m *Manager) AuthenticateBySessionID(ctx context.Context, sessionID, method
 // set_session_mode action persisted a newer mode in the same on_enter batch
 // before its agent mode event updated modeState. A nil/empty resolved mode is a
 // no-op. Addresses issue #1183.
-func (m *Manager) reapplySessionModeAfterReset(ctx context.Context, execution *AgentExecution, newSessionID string, prev *CachedModeState) {
+func (m *Manager) reapplySessionModeAfterReset(ctx context.Context, execution *AgentExecution, newSessionID string, prev *CachedModeState) error {
 	fallback := ""
 	if prev != nil {
 		fallback = prev.CurrentModeID
 	}
-	mode := m.effectiveSessionMode(ctx, execution, fallback)
+	mode, source := m.effectiveSessionModeWithSource(ctx, execution, fallback)
+	if mode != "" {
+		m.logger.Info("restoring session mode after context reset",
+			zap.String("execution_id", execution.ID),
+			zap.String("mode", mode),
+			zap.String("mode_source", string(source)))
+	}
 	if err := m.applySessionModeAfterReset(ctx, execution, newSessionID, mode); err != nil {
 		m.logger.Warn("failed to re-apply session mode after context reset",
 			zap.String("execution_id", execution.ID),
 			zap.String("mode", mode),
 			zap.Error(err))
+		return err
 	}
+	return nil
 }
 
 func (m *Manager) applySessionModeAfterReset(
@@ -537,26 +619,35 @@ func (m *Manager) applySessionModeAfterReset(
 ) error {
 	client, releaseClient := execution.AcquireAgentCtlClient()
 	defer releaseClient()
-	if client == nil || mode == "" {
+	if mode == "" {
 		return nil
 	}
-	if err := client.SetMode(ctx, newSessionID, mode); err != nil {
+	if client == nil {
+		return fmt.Errorf("cannot restore permission mode %q: agentctl client is unavailable", mode)
+	}
+	result, err := client.SetMode(ctx, newSessionID, mode)
+	if err != nil {
 		return fmt.Errorf("failed to restore session mode %q: %w", mode, err)
+	}
+	m.reportModeOutcome(execution, result)
+	if !result.Confirmed || result.Effective == "" {
+		return fmt.Errorf("requested permission mode %q was not confirmed after context reset", mode)
 	}
 	availableModes := []streams.SessionModeInfo(nil)
 	if current := execution.GetModeState(); current != nil {
 		availableModes = current.AvailableModes
 	}
-	// Restore the cache too: the fresh session would otherwise report the agent's
-	// default mode, leaving modeState stale relative to what we just re-applied.
 	execution.SetModeState(&CachedModeState{
-		CurrentModeID:  mode,
+		CurrentModeID:  result.Effective,
 		AvailableModes: availableModes,
 	})
+	if result.Effective != mode {
+		return fmt.Errorf("requested permission mode %q was not applied after context reset; agent reported %q", mode, result.Effective)
+	}
 	m.logger.Info("re-applied session mode after context reset",
 		zap.String("execution_id", execution.ID),
 		zap.String("session_id", execution.SessionID),
-		zap.String("mode", mode))
+		zap.String("mode", result.Effective))
 	return nil
 }
 
@@ -1179,6 +1270,9 @@ func (m *Manager) StopAgentWithReason(ctx context.Context, executionID string, r
 	// backend process owns, so it dies with the backend regardless, and
 	// detaching would leave an executors_running row claiming a live agent
 	// with no agent.stopped published. See isPassthroughExecution.
+	if reason == StopReasonBackendShutdown && execution.RuntimeName == executor.NamePluginRemote {
+		return m.detachAgentExecution(executionID, execution)
+	}
 	if m.agentSurvivalEnabled && reason == StopReasonBackendShutdown &&
 		execution.RuntimeName == executor.NameStandalone && !isPassthroughExecution(execution) {
 		return m.detachAgentExecution(executionID, execution)
@@ -1225,8 +1319,13 @@ func (m *Manager) StopAgentWithReason(ctx context.Context, executionID string, r
 		now := time.Now()
 		exec.FinishedAt = &now
 	})
+	preservePassthroughConversation := reason == StopReasonBackendShutdown && execution.IsPassthrough
 
-	if execution.Owner.Kind == ExecutionOwnerRun {
+	// Persist terminal runtime state before publishing the stop event so
+	// environment recovery cannot mistake a stopped resumable session for a
+	// live consumer. A passthrough TUI also needs its stopped execution ID to
+	// resume the same conversation after a graceful backend restart.
+	if execution.Owner.Kind == ExecutionOwnerRun || preservePassthroughConversation {
 		if err := m.persistExecutorRunningResult(ctx, execution); err != nil {
 			return err
 		}
@@ -1235,6 +1334,9 @@ func (m *Manager) StopAgentWithReason(ctx context.Context, executionID string, r
 	execution.EndSessionSpan()
 
 	m.RemoveExecution(executionID)
+	if execution.Owner.Kind != ExecutionOwnerRun && !preservePassthroughConversation {
+		m.deleteExecutorRunning(ctx, executionInventorySessionID(execution), execution.ID)
+	}
 	m.clearRemoteStatus(execution.SessionID)
 
 	m.logger.Info("agent stopped and removed from tracking",
@@ -1394,6 +1496,7 @@ func (m *Manager) restartAgentProcess(
 			return err
 		}
 	}
+	execution.beginStartupAttemptPreservingIdentity()
 
 	// 1. Close WebSocket streams (updates + workspace). Use per-stream Close
 	// methods rather than client.Close — the latter is a terminal drain
@@ -1427,8 +1530,7 @@ func (m *Manager) restartAgentProcess(
 	}
 
 	// 5. Reconfigure and start new agent subprocess
-	approvalPolicy, _ := m.resolveApprovalPolicyAndDisplayName(ctx, execution)
-	if _, err := m.configureAndStartAgent(ctx, execution, approvalPolicy); err != nil {
+	if _, err := m.configureAndStartAgent(ctx, execution); err != nil {
 		m.updateExecutionError(executionID, "failed to restart agent: "+err.Error())
 		return fmt.Errorf("failed to restart agent: %w", err)
 	}
@@ -2093,13 +2195,40 @@ func (m *Manager) markBootReadyForStartup(
 		ctx, executionID, events.AgentBootReady, false, startupGeneration,
 		func(execution *AgentExecution) {
 			m.finalWorkspaceRefresh(execution, "startup_grace")
+			execution.markLifecycleActivity()
 		},
 		func(execution *AgentExecution) {
 			m.setRuntimeInterest(execution.SessionID, false)
 			m.releaseActivity(executionActivityKey(execution.ID))
+			if err := m.clearIdleSuspensionAfterReady(ctx, execution); err != nil {
+				m.logger.Warn("failed to clear idle suspension provenance after agent readiness",
+					zap.String("execution_id", execution.ID), zap.String("session_id", execution.SessionID), zap.Error(err))
+			}
 		},
 	)
 	return err
+}
+
+func (m *Manager) clearIdleSuspensionAfterReady(ctx context.Context, execution *AgentExecution) error {
+	store, ok := m.runningWriter.(idleSuspensionInventory)
+	if !ok || execution == nil {
+		return nil
+	}
+	running, err := store.GetExecutorRunningBySessionID(ctx, execution.SessionID)
+	if err != nil {
+		return err
+	}
+	if running.AgentExecutionID != execution.ID || running.IdleSuspensionState == models.ExecutorIdleSuspensionNone {
+		return nil
+	}
+	if err := store.CompareAndSetExecutorRunningIdleSuspension(
+		ctx, execution.SessionID, execution.ID, time.Time{},
+		running.IdleSuspensionState, models.ExecutorIdleSuspensionNone,
+	); err != nil {
+		return err
+	}
+	execution.idleSuspensionAgentStopped.Store(false)
+	return nil
 }
 
 // markReadyEvent is the shared body of MarkReady / MarkBootReady — both flip
@@ -2124,9 +2253,14 @@ func (m *Manager) markBootReadyFromFailed(ctx context.Context, executionID strin
 			return fmt.Errorf("execution %q has no startup generation for resume attempt %q", executionID, attemptID)
 		}
 	}
-	return m.markReadyEventWithStartupGeneration(
-		ctx, executionID, events.AgentBootReady, false, startupGeneration, nil, nil,
+	err := m.markReadyEventWithStartupGeneration(
+		ctx, executionID, events.AgentBootReady, false, startupGeneration,
+		func(current *AgentExecution) { current.markLifecycleActivity() }, nil,
 	)
+	if err != nil {
+		return err
+	}
+	return m.clearIdleSuspensionAfterReady(ctx, execution)
 }
 
 // markReadyEventWithContext flips executionID to Ready and publishes

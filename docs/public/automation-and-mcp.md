@@ -37,7 +37,9 @@ New automations are enabled. Each trigger has its own `enabled` value, which
 is false when omitted. Creation does not manually start a run, but an enabled
 trigger can fire as soon as its conditions are met. The default target is a
 hidden automation run with no repository, a new task for each firing, and one
-concurrent run. The `normal_task` target requires a workflow.
+concurrent run. The `normal_task` target requires a workflow. A
+`managed_conversation` target delivers the prompt to an existing retained plugin
+conversation selected in the workspace; it does not create an automation task.
 
 The result includes the saved automation ID and triggers, plus the webhook
 secret revealed on creation. Later reads redact that secret. You can inspect
@@ -95,6 +97,7 @@ Open **Settings > Workspaces > _Workspace_ > Automations** (`/settings/workspace
 3. Choose the run destination:
    - **Run in automation history only** keeps each generated task out of Kanban and the sidebar. Workflow selection is optional.
    - **Create a normal task** creates ordinary workflow work that appears in Kanban and the sidebar. A workflow is required; an empty starting step uses that workflow's configured starting step.
+   - **Send to a managed conversation** delivers each firing to a retained plugin conversation. Select the plugin installation and conversation instance in this workspace. This destination does not create a task, and task-only repository and workflow settings are hidden.
 4. Add one or more repository and base-branch pairs, or leave the list empty. The selector is the same searchable paired-chip control used by New Task. A discovered repository is registered in the workspace when the automation is saved. An empty list uses a task-scoped scratch workspace and does not create a Git worktree. Kandev never selects the workspace's first repository for you.
 5. Enter a prompt and optional task-title template.
 6. Choose **Context between runs**:
@@ -121,6 +124,14 @@ The run destination and ordered repository/base-branch pairs are explicit saved 
 Selecting a run opens the complete shared transcript and focuses its exact turn. Replies sent from that transcript create a new turn in the same conversation and remain visible; run selection does not filter away newer replies.
 
 A run cannot wait for a permission response. Kandev rejects the request and marks the run failed. Use only a profile whose intended, constrained actions can complete without a prompt.
+
+For a managed-conversation destination, each firing is admitted as durable ordered
+input to the selected conversation. Automation delivery status records whether
+the input was accepted, separately from the agent's result. Pausing or deleting
+the schedule does not delete the shared conversation. Portable automation export
+stores the plugin ID and instance key, not a private conversation ID; import
+requires an explicit binding to an available conversation in the destination
+workspace.
 
 ## Trigger behavior
 
@@ -323,6 +334,10 @@ Names ending in `_kandev` are the canonical MCP protocol tool names. Some agent 
 Task tools use normal client discovery. When `step_complete_kandev` is required but is not already visible, the agent should search the active tool catalog for its canonical name. Kandev does not request eager loading through client-specific metadata.
 
 `create_task_kandev` advertises `prompt` for instructions delivered to a newly started agent. Older callers may still send `description` when `prompt` is absent, but sending both is an error; the compatibility name is intentionally omitted from the advertised schema.
+
+In task mode, a session-bound Kanban child can pass `parent_id: "self"` to create a sibling under its direct parent when the one-level Kanban depth limit is reached. The result reports the requested and effective parent and explains that the common parent owns coordination while the calling session remains the creation source. An explicit child ID retains the depth error. External MCP callers cannot use the `self` shorthand, and Office task creation keeps its existing runtime and skill boundary.
+
+The additive `parent_resolution` result contains `requested_parent_id`, `resolved_parent_id`, `reason: "kanban_depth_limit"`, and an explanatory `message`. A deduplicated result describes existing work without creation or reparenting; its top-level `parent_id` remains the returned task's actual parent. The `deduplicated` and `creation_complete` indicators retain their existing meaning. See [Coordination](coordination.md#create-a-subtask-from-an-agent) for inheritance and parent controls.
 
 ### Protect task plan writes
 
@@ -912,7 +927,7 @@ External MCP exposes tools in these groups:
 - workspace/workflow configuration: list workspaces, workflows, repositories, and workflow steps; create, update, delete, import, or export workflows; create, update, delete, or reorder steps;
 - agents and profiles: list/update agents; create/delete profiles; list/update profiles; get/update profile MCP configuration;
 - executors: list executors and profiles; create, update, or delete executor profiles;
-- saved prompts: list prompt summaries without content or read one prompt by its exact, case-sensitive name; saved prompt tools are read-only;
+- saved prompts: list prompt summaries without content or read one prompt by its exact, case-sensitive name; create new prompts or update custom prompts that allow agent edits;
 - agent-accessible settings: search setting definitions, describe a field, list authorized resource targets, read saved values, and update declared values through one compact contract;
 - tasks: list, create, move, delete, archive, or update task state; list a task's sessions; read task conversation; discover or answer pending clarification questions; and discover or resolve live agent permission requests.
 
@@ -961,7 +976,7 @@ contains summaries only, so it does not include prompt content:
 ```json
 {
   "shared_prompts": [
-    { "name": "code-review", "builtin": true, "content_bytes": 1234 }
+    { "name": "code-review", "builtin": true, "allow_agent_edits": false, "content_bytes": 1234 }
   ],
   "total": 1
 }
@@ -974,9 +989,36 @@ Use `get_shared_prompt_kandev` with one saved prompt name to read its full conte
 ```
 
 Names are case-sensitive. Kandev trims surrounding whitespace before lookup. The result contains
-`name`, `content`, `builtin`, `content_bytes`, `created_at`, and `updated_at`; it does not expose the
+`name`, `content`, `builtin`, `allow_agent_edits`, `content_bytes`, `created_at`, and `updated_at`; it does not expose the
 internal prompt ID. An empty or unknown name returns an error without prompt content. These tools
-only read saved prompts. They do not create, update, delete, or expand `@name` references.
+only read saved prompts and do not expand `@name` references.
+
+### Create or update a saved prompt
+
+Configuration and external MCP clients expose `create_shared_prompt_kandev` and
+`update_shared_prompt_kandev`. Both require `org.config.manage` and accept:
+
+```json
+{ "name": "review-policy", "content": "Check correctness and test coverage." }
+```
+
+Creation fails if the exact name already exists. Update replaces the full content
+of an existing, case-sensitive name and cannot rename it. Names allow up to 512
+UTF-8 bytes, content up to 1 MiB; surrounding whitespace is trimmed. Success
+returns the same saved-prompt fields as `get_shared_prompt_kandev`.
+
+**Built-in prompts cannot be changed by agents.** Existing custom prompts and
+prompts created in Settings default to human-only editing. An operator can edit a
+custom prompt in **Settings > Prompts**, enable **Allow agent edits**, and save.
+MCP-created prompts allow later agent edits by default; an operator can turn that
+off. MCP cannot change this permission, and generic `update_settings_kandev`
+prompt writes enforce the same protection.
+
+Apply shared prompt changes before changing workflow steps that inject them, then
+read back both the prompts and steps. Successful writes refresh open prompt
+settings pages and affect future `@name` expansions. They preserve unsaved editor
+drafts and do not rewrite instructions already captured by a running turn.
+There is no shared-prompt deletion tool.
 
 ### Answer a pending clarification question
 

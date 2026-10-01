@@ -39,11 +39,15 @@ func (r *memoryRepository) AdmitQueueMessage(
 	claim *QueueAttachmentClaim,
 	maxPerSession int,
 	policy *AutoMergePolicy,
+	workflowEntry *WorkflowEntryIdentity,
 ) (*QueuedMessage, bool, error) {
+	if workflowEntry != nil {
+		return nil, false, ErrQueueAdmissionUnavailable
+	}
 	if err := validateQueueAdmissionInput(identity, clientQueueID, candidate); err != nil {
 		return nil, false, err
 	}
-	fingerprint, err := queueAdmissionFingerprint(identity, candidate)
+	fingerprint, err := queueAdmissionFingerprint(identity, candidate, nil)
 	if err != nil {
 		return nil, false, err
 	}

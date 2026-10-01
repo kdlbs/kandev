@@ -13,9 +13,9 @@ async function openMobileChangesPanel(testPage: Page) {
   await expect(testPage.getByTestId("mobile-changes-panel")).toBeVisible({ timeout: 15_000 });
 }
 
-async function expandSection(testPage: Page, sectionTestId: string) {
+async function expandSection(testPage: Page, sectionTestId: string, timeout = 10_000) {
   const toggle = testPage.getByTestId(`${sectionTestId}-collapse-toggle`);
-  await expect(toggle).toBeVisible({ timeout: 10_000 });
+  await expect(toggle).toBeVisible({ timeout });
   // Mirror session-page expandChangesSection: late defaultCollapsed resyncs
   // can re-collapse after the first tap, so retry until expanded sticks.
   await expect
@@ -292,9 +292,30 @@ test.describe("Mobile changes panel", () => {
       const name = "deeply-nested-file.test.ts";
       const filePath = `${folder}/${name}`;
       git.createFile(filePath, "DEEP_FILE_MARKER\n");
+      await testPage.reload();
+      await session.waitForLoad();
+      await session.waitForChatIdle();
       await openMobileChangesPanel(testPage);
-      await expandSection(testPage, "unstaged-files-section");
+      await expandSection(testPage, "unstaged-files-section", 20_000);
+      const scrollOwner = testPage.getByTestId("changes-panel-scroll-owner");
+      await expect
+        .poll(() => scrollOwner.evaluate((element) => element.scrollHeight > element.clientHeight))
+        .toBe(true);
       const row = testPage.getByTestId(`file-row-${filePath.replaceAll("/", "-")}`);
+      await expect
+        .poll(
+          async () => {
+            if ((await row.count()) > 0) return true;
+            await scrollOwner.evaluate((element) => {
+              const step = Math.max(44, Math.floor(element.clientHeight * 0.8));
+              element.scrollTop = Math.min(element.scrollTop + step, element.scrollHeight);
+            });
+            return (await row.count()) > 0;
+          },
+          { timeout: 15_000 },
+        )
+        .toBe(true);
+      await expect(row).toBeVisible();
       await row.scrollIntoViewIfNeeded();
       const rowBox = (await row.boundingBox())!;
       const filenameBox = (await row.getByText(name, { exact: true }).boundingBox())!;
@@ -396,7 +417,11 @@ test.describe("Mobile changes panel", () => {
     await closeButton.tap();
 
     await expandSection(testPage, "commits-section");
-    await testPage.locator("[data-testid^='commit-row-']").first().tap();
+    await testPage
+      .locator("[data-testid^='commit-row-']")
+      .first()
+      .getByRole("button", { name: "Open commit" })
+      .tap();
     await expect(testPage.getByText("Commit Changes")).toBeVisible({ timeout: 10_000 });
     await closeButton.tap();
   });
@@ -689,7 +714,7 @@ test.describe("Mobile changes panel", () => {
     await expect(testPage.getByTestId("header-remote-contribution-warning")).toHaveCount(0);
     await expect(row.getByText("+0", { exact: true })).toHaveCount(0);
     await expect(row.getByText("-0", { exact: true })).toHaveCount(0);
-    await row.tap();
+    await row.getByTestId(`commit-open-${remoteSha.slice(0, 7)}`).tap();
 
     await expect(testPage.getByText("Commit Changes")).toBeVisible({ timeout: 10_000 });
     await expect(testPage.getByLabel("Commit Changes").getByText(remoteMessage)).toBeVisible({

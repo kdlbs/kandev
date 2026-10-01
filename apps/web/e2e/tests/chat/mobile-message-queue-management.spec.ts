@@ -279,12 +279,14 @@ test("mobile full queue stays usable while removing and clearing messages", asyn
   apiClient,
   seedData,
 }) => {
-  const { session } = await seedFullQueueTask(
+  const queueEvents = watchWs(testPage);
+  const { session, taskId, sessionId } = await seedFullQueueTask(
     testPage,
     apiClient,
     seedData,
     "Mobile queue management",
   );
+  const queueIdentity = await apiClient.getQueueSessionIdentity(taskId, sessionId);
 
   await expectFullQueueScrolls(session);
 
@@ -313,8 +315,13 @@ test("mobile full queue stays usable while removing and clearing messages", asyn
   );
   await expect(chat.getByTestId("chat-input-editor-shell")).toBeVisible();
 
+  const clearResponse = queueEvents.waitForResponse("message.queue.cancel");
   await clear.tap();
-  await expect(panel).not.toBeVisible({ timeout: 10_000 });
+  expect((await clearResponse).payload.removed).toBe(9);
+  await expect
+    .poll(() => apiClient.getQueueStatus(queueIdentity).then((status) => status.count))
+    .toBe(0);
+  await expect(panel).not.toBeVisible();
   await expect(chat.getByTestId("queue-chip")).not.toBeVisible();
   await expect(chat.getByTestId("chat-input-editor-shell")).toBeVisible();
 });
@@ -355,6 +362,9 @@ test("mobile Send Now resumes Auto-run in targeted order without overflow", asyn
   await expect(autoRun).toHaveAttribute("data-state", "unchecked");
   await expect(autoMerge).toHaveAttribute("data-state", "unchecked");
   await expect(autoMerge).toBeEnabled();
+  await expect
+    .poll(() => apiClient.getQueueStatus(queueIdentity).then((status) => status.auto_run))
+    .toBe(false);
   await autoMerge.tap();
   await expect
     .poll(async () => (await apiClient.getQueueStatus(queueIdentity)).auto_merge_enabled)
@@ -363,6 +373,9 @@ test("mobile Send Now resumes Auto-run in targeted order without overflow", asyn
   await expect(autoMerge).toBeEnabled();
   await autoMerge.tap();
   await expect(autoMerge).toHaveAttribute("data-state", "unchecked");
+  await expect
+    .poll(() => apiClient.getQueueStatus(queueIdentity).then((status) => status.auto_merge_enabled))
+    .toBe(false);
 
   await assertNoDocumentHorizontalOverflow(testPage);
 
@@ -370,7 +383,9 @@ test("mobile Send Now resumes Auto-run in targeted order without overflow", asyn
   await rowSendNow.tap();
   await sendNowResponse;
   await expect
-    .poll(() => apiClient.getQueueStatus(queueIdentity).then((status) => status.count))
+    .poll(() => apiClient.getQueueStatus(queueIdentity).then((status) => status.count), {
+      timeout: 15_000,
+    })
     .toBe(2);
   await expect(panel.getByTestId("queue-entry-text")).toHaveCount(2, { timeout: 10_000 });
   await expect(panel.getByTestId("queue-entry-text").nth(0)).toContainText(markerA);

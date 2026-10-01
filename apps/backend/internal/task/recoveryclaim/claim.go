@@ -29,6 +29,32 @@ var (
 )
 
 type claimContextKey struct{}
+type taskCleanupJobContextKey struct{}
+
+// TaskCleanupJob identifies a task-level archive, delete, or environment-reset
+// job whose durable barrier authorizes resource cleanup for the same task.
+type TaskCleanupJob struct {
+	ID     string
+	TaskID string
+}
+
+// WithTaskCleanupJob carries an already admitted task cleanup job through the
+// runtime stop path. The repository revalidates the job before accepting it.
+func WithTaskCleanupJob(ctx context.Context, job TaskCleanupJob) context.Context {
+	if job.ID == "" || job.TaskID == "" {
+		return ctx
+	}
+	return context.WithValue(ctx, taskCleanupJobContextKey{}, job)
+}
+
+// TaskCleanupJobFromContext returns the task cleanup job carried by ctx.
+func TaskCleanupJobFromContext(ctx context.Context) (TaskCleanupJob, bool) {
+	if ctx == nil {
+		return TaskCleanupJob{}, false
+	}
+	job, ok := ctx.Value(taskCleanupJobContextKey{}).(TaskCleanupJob)
+	return job, ok && job.ID != "" && job.TaskID != ""
+}
 
 // WithClaim attaches a recovery claim to an internal operation context. The
 // marker lets nested lifecycle calls reuse the same authority without trying
@@ -82,7 +108,7 @@ func Acquire(ctx context.Context, db *sqlx.DB, req models.TaskEnvironmentRecover
 	if err := lockTask(ctx, db, tx, req.OwnerTaskID); err != nil {
 		return nil, err
 	}
-	if err := ensureCleanupAbsent(ctx, db, tx, req.OwnerTaskID); err != nil {
+	if err := ensureCleanupBarrier(ctx, db, tx, req.OwnerTaskID, req.CleanupJobID); err != nil {
 		return nil, err
 	}
 
@@ -109,7 +135,7 @@ func Acquire(ctx context.Context, db *sqlx.DB, req models.TaskEnvironmentRecover
 		return nil, fmt.Errorf("%w: environment %s is claimed by operation %s", ErrBusy, req.TaskEnvironmentID, claim.OperationID)
 	}
 
-	if busy, err := environmentHasConsumers(ctx, db, tx, req.TaskEnvironmentID, req.SessionID); err != nil {
+	if busy, err := environmentHasConsumers(ctx, db, tx, req.TaskEnvironmentID, req.SessionID, req.AllowCurrentSessionRuntime); err != nil {
 		return nil, err
 	} else if busy {
 		return nil, fmt.Errorf("%w: environment %s has a live session or runtime", ErrBusy, req.TaskEnvironmentID)
@@ -179,6 +205,32 @@ func Release(ctx context.Context, db *sqlx.DB, claim *models.TaskEnvironmentReco
 		return ErrClaimMismatch
 	}
 	return tx.Commit()
+}
+
+// Get returns the durable recovery claim for an environment, if one exists.
+// Callers use it to reconcile an operation that published its filesystem
+// replacement before the owning process stopped.
+func Get(ctx context.Context, db *sqlx.DB, environmentID string) (*models.TaskEnvironmentRecoveryClaim, error) {
+	if db == nil || environmentID == "" {
+		return nil, errors.New("task environment recovery claim: database and environment are required")
+	}
+	claim := &models.TaskEnvironmentRecoveryClaim{}
+	err := db.QueryRowxContext(ctx, db.Rebind(`
+		SELECT task_environment_id, owner_task_id, ownership_generation, session_id,
+			operation_id, executor_type, created_at, updated_at
+		FROM task_environment_recovery_claims WHERE task_environment_id = ?
+	`), environmentID).Scan(
+		&claim.TaskEnvironmentID, &claim.OwnerTaskID, &claim.OwnershipGeneration,
+		&claim.SessionID, &claim.OperationID, &claim.ExecutorType,
+		&claim.CreatedAt, &claim.UpdatedAt,
+	)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return claim, nil
 }
 
 // EnsureAvailableTx rejects mutations that would overlap recovery. A caller
@@ -325,23 +377,49 @@ func lockTask(ctx context.Context, db *sqlx.DB, tx *sqlx.Tx, taskID string) erro
 	return nil
 }
 
-func ensureCleanupAbsent(ctx context.Context, db *sqlx.DB, tx *sqlx.Tx, taskID string) error {
-	var active bool
-	if err := tx.QueryRowContext(ctx, db.Rebind(`
+func ensureCleanupBarrier(ctx context.Context, db *sqlx.DB, tx *sqlx.Tx, taskID, allowedJobID string) error {
+	query := `
 		SELECT EXISTS (
 			SELECT 1 FROM task_resource_cleanup_jobs
 			WHERE task_id = ? AND state IN (?, ?, ?, ?)
-		)
-	`), taskID,
+	`
+	args := []interface{}{
+		taskID,
 		models.TaskResourceCleanupStatePrepared,
 		models.TaskResourceCleanupStatePending,
 		models.TaskResourceCleanupStateRunning,
 		models.TaskResourceCleanupStateRetryWait,
-	).Scan(&active); err != nil {
+	}
+	if allowedJobID != "" {
+		query += ` AND id <> ?`
+		args = append(args, allowedJobID)
+	}
+	query += `)`
+	var active bool
+	if err := tx.QueryRowContext(ctx, db.Rebind(query), args...).Scan(&active); err != nil {
 		return fmt.Errorf("check recovery owner cleanup barrier: %w", err)
 	}
 	if active {
 		return fmt.Errorf("%w: %s", repoerrors.ErrTaskCleanupInProgress, taskID)
+	}
+	if allowedJobID != "" {
+		var admitted bool
+		if err := tx.QueryRowContext(ctx, db.Rebind(`
+			SELECT EXISTS (
+				SELECT 1 FROM task_resource_cleanup_jobs
+				WHERE id = ? AND task_id = ? AND state IN (?, ?, ?, ?)
+			)
+		`), allowedJobID, taskID,
+			models.TaskResourceCleanupStatePrepared,
+			models.TaskResourceCleanupStatePending,
+			models.TaskResourceCleanupStateRunning,
+			models.TaskResourceCleanupStateRetryWait,
+		).Scan(&admitted); err != nil {
+			return fmt.Errorf("validate task cleanup claim: %w", err)
+		}
+		if !admitted {
+			return fmt.Errorf("%w: cleanup operation %s is no longer active", repoerrors.ErrTaskCleanupInProgress, allowedJobID)
+		}
 	}
 	return nil
 }
@@ -362,7 +440,7 @@ func loadEnvironmentIdentity(ctx context.Context, db *sqlx.DB, tx *sqlx.Tx, envi
 	return ownerTaskID, generation, executorType, nil
 }
 
-func environmentHasConsumers(ctx context.Context, db *sqlx.DB, tx *sqlx.Tx, environmentID, requestingSessionID string) (bool, error) {
+func environmentHasConsumers(ctx context.Context, db *sqlx.DB, tx *sqlx.Tx, environmentID, requestingSessionID string, allowCurrentSessionRuntime bool) (bool, error) {
 	var sessionExists, runtimeExists bool
 	if err := tx.QueryRowContext(ctx, db.Rebind(`
 		SELECT EXISTS (
@@ -373,13 +451,27 @@ func environmentHasConsumers(ctx context.Context, db *sqlx.DB, tx *sqlx.Tx, envi
 	`), environmentID, requestingSessionID).Scan(&sessionExists); err != nil {
 		return false, err
 	}
-	if err := tx.QueryRowContext(ctx, db.Rebind(`
+	runtimeQuery := `
 		SELECT EXISTS (
 			SELECT 1 FROM executors_running er
 			JOIN task_sessions ts ON ts.id = er.session_id
 			WHERE ts.task_environment_id = ?
-		)
-	`), environmentID).Scan(&runtimeExists); err != nil {
+			  AND (er.status IS NULL OR er.status NOT IN (?, ?, ?))
+	`
+	if allowCurrentSessionRuntime {
+		runtimeQuery += ` AND er.session_id <> ?`
+	}
+	runtimeQuery += `)`
+	args := []interface{}{
+		environmentID,
+		models.ExecutorRunningStatusFailed,
+		models.ExecutorRunningStatusStopped,
+		models.ExecutorRunningStatusComplete,
+	}
+	if allowCurrentSessionRuntime {
+		args = append(args, requestingSessionID)
+	}
+	if err := tx.QueryRowContext(ctx, db.Rebind(runtimeQuery), args...).Scan(&runtimeExists); err != nil {
 		return false, err
 	}
 	return sessionExists || runtimeExists, nil

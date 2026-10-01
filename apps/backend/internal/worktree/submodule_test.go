@@ -3,6 +3,7 @@ package worktree
 import (
 	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -14,6 +15,19 @@ func allowFileProtocol(t *testing.T) {
 	t.Setenv("GIT_CONFIG_COUNT", "1")
 	t.Setenv("GIT_CONFIG_KEY_0", "protocol.file.allow")
 	t.Setenv("GIT_CONFIG_VALUE_0", "always")
+}
+
+func runGitWithFileProtocol(t *testing.T, repoPath string, args ...string) string {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = repoPath
+	cmd.Env = append(mainCheckoutInspectionEnvironment(os.Environ()),
+		"GIT_CONFIG_COUNT=1", "GIT_CONFIG_KEY_0=protocol.file.allow", "GIT_CONFIG_VALUE_0=always")
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %s failed: %v\n%s", strings.Join(args, " "), err, string(output))
+	}
+	return string(output)
 }
 
 func initRepoWithSubmodule(t *testing.T) (repoPath, submodulePath string) {
@@ -45,7 +59,7 @@ func initRepoWithSubmodule(t *testing.T) (repoPath, submodulePath string) {
 	runGit(t, repoPath, "commit", "-m", "initial main commit")
 
 	// Add the submodule.
-	runGit(t, repoPath, "submodule", "add", submodulePath, "libs/external")
+	runGitWithFileProtocol(t, repoPath, "submodule", "add", submodulePath, "libs/external")
 	runGit(t, repoPath, "commit", "-m", "add submodule")
 
 	return repoPath, submodulePath
@@ -121,8 +135,8 @@ func TestGetSubmodulePaths_MultipleSubmodules(t *testing.T) {
 	runGit(t, repoPath, "add", ".")
 	runGit(t, repoPath, "commit", "-m", "initial")
 
-	runGit(t, repoPath, "submodule", "add", sub1, "vendor/alpha")
-	runGit(t, repoPath, "submodule", "add", sub2, "vendor/beta")
+	runGitWithFileProtocol(t, repoPath, "submodule", "add", sub1, "vendor/alpha")
+	runGitWithFileProtocol(t, repoPath, "submodule", "add", sub2, "vendor/beta")
 	runGit(t, repoPath, "commit", "-m", "add submodules")
 
 	paths, err := getSubmodulePaths(context.Background(), repoPath)

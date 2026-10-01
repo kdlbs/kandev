@@ -30,7 +30,12 @@ type workflowJobKey struct {
 	Attempt int
 }
 
-type workflowAttentionCollector func(context.Context, Client, string, string, *PR) (*WorkflowAttention, error)
+type workflowObservation struct {
+	Runs      []WorkflowRun
+	Attention *WorkflowAttention
+}
+
+type workflowAttentionCollector func(context.Context, Client, string, string, *PR) (*workflowObservation, error)
 
 type workflowAttentionCollectorContextKey struct{}
 
@@ -47,6 +52,7 @@ func workflowAttentionCollectorFromContext(ctx context.Context) workflowAttentio
 // clients because both consume the same Actions REST response shape.
 type ghWorkflowRun struct {
 	ID             int64                     `json:"id"`
+	CheckSuiteID   int64                     `json:"check_suite_id"`
 	RunAttempt     int                       `json:"run_attempt"`
 	WorkflowID     int64                     `json:"workflow_id"`
 	Name           string                    `json:"name"`
@@ -92,17 +98,18 @@ type ghWorkflowJob struct {
 
 func convertRawWorkflowRun(raw ghWorkflowRun) WorkflowRun {
 	run := WorkflowRun{
-		ID:         raw.ID,
-		RunAttempt: raw.RunAttempt,
-		WorkflowID: raw.WorkflowID,
-		Name:       raw.Name,
-		Event:      raw.Event,
-		Status:     raw.Status,
-		HeadSHA:    raw.HeadSHA,
-		HeadBranch: raw.HeadBranch,
-		HTMLURL:    raw.HTMLURL,
-		CreatedAt:  raw.CreatedAt,
-		UpdatedAt:  raw.UpdatedAt,
+		ID:           raw.ID,
+		CheckSuiteID: raw.CheckSuiteID,
+		RunAttempt:   raw.RunAttempt,
+		WorkflowID:   raw.WorkflowID,
+		Name:         raw.Name,
+		Event:        raw.Event,
+		Status:       raw.Status,
+		HeadSHA:      raw.HeadSHA,
+		HeadBranch:   raw.HeadBranch,
+		HTMLURL:      raw.HTMLURL,
+		CreatedAt:    raw.CreatedAt,
+		UpdatedAt:    raw.UpdatedAt,
 	}
 	if raw.Conclusion != nil {
 		run.Conclusion = *raw.Conclusion
@@ -190,24 +197,43 @@ func workflowAttentionUnknown(headSHA string) *WorkflowAttention {
 func collectWorkflowAttention(
 	ctx context.Context, client Client, owner, repo string, pr *PR,
 ) (*WorkflowAttention, error) {
+	observation, err := collectWorkflowObservation(ctx, client, owner, repo, pr)
+	if observation == nil {
+		return workflowAttentionUnknown(""), err
+	}
+	return observation.Attention, err
+}
+
+func collectWorkflowObservation(
+	ctx context.Context, client Client, owner, repo string, pr *PR,
+) (*workflowObservation, error) {
 	if collector := workflowAttentionCollectorFromContext(ctx); collector != nil {
 		return collector(ctx, client, owner, repo, pr)
 	}
 	if pr == nil {
-		return workflowAttentionUnknown(""), nil
+		return &workflowObservation{Attention: workflowAttentionUnknown("")}, nil
 	}
 	if isTerminalPR(pr) {
-		return workflowAttentionNone(pr.HeadSHA), nil
+		observation := &workflowObservation{Attention: workflowAttentionNone(pr.HeadSHA)}
+		if pr.HeadSHA == "" {
+			return observation, nil
+		}
+		runs, err := client.ListWorkflowRuns(ctx, owner, repo, pr.HeadSHA)
+		observation.Runs = runs
+		return observation, err
 	}
 	if pr.HeadSHA == "" {
-		return workflowAttentionUnknown(""), nil
+		return &workflowObservation{Attention: workflowAttentionUnknown("")}, nil
 	}
 
 	runs, err := client.ListWorkflowRuns(ctx, owner, repo, pr.HeadSHA)
 	if err != nil {
-		return workflowAttentionUnknown(pr.HeadSHA), err
+		return &workflowObservation{Attention: workflowAttentionUnknown(pr.HeadSHA)}, err
 	}
-	return classifyWorkflowAttention(ctx, client, owner, repo, pr, runs), nil
+	return &workflowObservation{
+		Runs:      runs,
+		Attention: classifyWorkflowAttention(ctx, client, owner, repo, pr, runs),
+	}, nil
 }
 
 func classifyWorkflowAttention(

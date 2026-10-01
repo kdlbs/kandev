@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { test, expect } from "../../fixtures/test-base";
+import { waitForFiniteAnimations } from "../../helpers/animations";
 import { SessionPage } from "../../pages/session-page";
 import { waitForLatestSessionDone } from "../../helpers/session";
 
@@ -62,6 +63,7 @@ test("identifies a symlink in Changes and the mobile file viewer", async ({
     await expect(row).toBeVisible({ timeout: 20_000 });
     await expect(row.getByTestId("symlink-indicator")).toBeVisible();
     const actions = row.getByRole("button", { name: "Show more actions", exact: true });
+    const viewer = testPage.getByTestId("mobile-file-viewer-panel");
     const actionsBounds = (await actions.boundingBox())!;
     expect(actionsBounds.height).toBeGreaterThanOrEqual(44);
     expect(actionsBounds.width).toBeGreaterThanOrEqual(44);
@@ -70,14 +72,20 @@ test("identifies a symlink in Changes and the mobile file viewer", async ({
     expect(markerBounds.x).toBeGreaterThanOrEqual(rowBounds.x);
     expect(markerBounds.x + markerBounds.width).toBeLessThanOrEqual(actionsBounds.x);
     await actions.tap();
-    const edit = testPage.getByRole("menuitem", { name: "Edit", exact: true });
+    const menu = testPage.getByRole("menu");
+    await expect(menu).toBeVisible();
+    await expect(viewer).not.toBeVisible();
+    const edit = menu.getByRole("menuitem", { name: "Edit", exact: true });
     await expect(edit).toBeVisible();
-    // The menu item has a fixed 44px touch target. Check its layout contract
-    // while the transient menu is open, then tap immediately.
+    // The menu item has a fixed 44px touch target. Wait for its entrance
+    // animation before checking its layout and tapping it while the menu stays open.
+    await waitForFiniteAnimations(menu);
     await expect(edit).toHaveCSS("min-height", "44px");
+    await expect(menu).toBeVisible();
+    await expect(edit).toBeVisible();
     await edit.tap({ timeout: 5_000 });
-    const viewer = testPage.getByTestId("mobile-file-viewer-panel");
     await expect(viewer).toBeVisible();
+    await expect(menu).toBeHidden();
     await expect(viewer.getByTestId("symlink-indicator")).toHaveText("Symlink");
     expect(
       await testPage.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),

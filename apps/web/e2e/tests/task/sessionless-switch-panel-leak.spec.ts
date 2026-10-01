@@ -40,7 +40,7 @@ async function setupTaskWithFilePanel(args: {
   git.createFile(filename, "// leak fixture\n");
   git.stageAll();
   git.commit("seed leak fixture");
-  git.exec("git push origin main");
+  git.pushMainWithRetry();
 
   const profile = await createStandardProfile(args.apiClient, "panel-leak-source");
   const task = await args.apiClient.createTaskWithAgent(

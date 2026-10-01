@@ -3,7 +3,7 @@ id: "03-recovery-and-integration"
 title: "Guard recovery and prove integration"
 status: done
 wave: 3
-depends_on: 
+depends_on:
   - "02-qualified-materialization"
 plan: "plan.md"
 requirements:
