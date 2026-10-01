@@ -58,7 +58,7 @@ diagnostic binary under `/tmp` or on developer Git configuration.
 Run these commands from the repository root after the correction:
 
 ```bash
-(cd apps/backend && go test -tags fts5 ./internal/agent/runtime/lifecycle -run 'Test(BuildWorktreeCreateRequest|CheckoutCredentialEnvironment|SetupScriptEnvironment)' -count=1)
+(cd apps/backend && go test -tags fts5 ./internal/agent/runtime/lifecycle -run 'Test(BuildWorktreeCreateRequest|CheckoutCredentialEnvironment)' -count=1)
 (cd apps/backend && go test -tags fts5 ./cmd/agentctl -run '^TestGitHubCredentialHelper' -count=1)
 (cd apps/backend && go test -tags fts5 ./internal/worktree -run '^TestCreateWorktree_RemoteContribution' -count=1)
 python3 scripts/list-docs.py validate
@@ -75,12 +75,12 @@ includes it. Record every command and actual result before marking the task done
 - `apps/backend/internal/agent/runtime/lifecycle/repository_checkout_options.go`
 - `apps/backend/internal/agent/runtime/lifecycle/env_preparer_worktree_env_test.go`
 - `apps/backend/internal/agent/runtime/lifecycle/checkout_credential_path_test.go` (new)
-- `apps/backend/internal/worktree/manager_remote_contribution_credential_test.go` (new, if the fetch fixture is retained)
+- `apps/backend/internal/testutil/agentctl.go` (shared test helper)
 - This work order and its plan status/results.
 
 ## Dependencies
 
-None. Execute this work order after the user's explicit implementation request.
+None. The user explicitly requested implementation after the design package was completed.
 
 ## Risks
 
@@ -114,3 +114,31 @@ passes three authenticated contribution preparations at the exact provider
 head SHA. All targeted tests, documentation checks, and `make -C apps/backend
 build` passed; both regression tests were confirmed failing before the filter
 change.
+
+## PR review hardening results
+
+Added `TestCheckoutCredentialEnvironmentThroughWorktreeCreate` to pass the
+production-filtered request into `worktree.Manager.Create` and verify three
+authenticated fetches, broker scope, and the resulting head SHA. Removed the
+redundant worktree-only fetch fixture. Moved the shared agentctl fixture
+builder into `internal/testutil`, removed the nonexistent
+`SetupScriptEnvironment` alternative from the lifecycle test pattern, and
+cleared/restored inherited Git location and indexed-config variables in the
+integration test. The shared builder disables Go VCS stamping because the
+credential-helper binary does not need repository metadata and CI can lack a
+usable Git status context during nested builds.
+
+These commands passed after the review changes:
+
+```bash
+(cd apps/backend && env GIT_DIR= GIT_WORK_TREE= GIT_INDEX_FILE= GIT_OBJECT_DIRECTORY= GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=credential.helper GIT_CONFIG_VALUE_0=/bin/false go test -tags fts5 ./internal/agent/runtime/lifecycle -run '^TestCheckoutCredentialEnvironment(RealGitPath|ThroughWorktreeCreate)$' -count=1)
+(cd apps/backend && go test -tags fts5 ./internal/agent/runtime/lifecycle -run 'Test(BuildWorktreeCreateRequest|CheckoutCredentialEnvironment)' -count=1)
+(cd apps/backend && go test -tags fts5 ./cmd/agentctl -run '^TestGitHubCredentialHelper' -count=1)
+(cd apps/backend && go test -tags fts5 ./internal/worktree -run '^TestCreateWorktree_RemoteContribution' -count=1)
+(cd apps/backend && go test -tags fts5 ./internal/orchestrator/executor -run '^TestConfigureGitHubCredentialBroker$' -count=1)
+(cd apps/backend && go test ./internal/testutil)
+python3 scripts/list-docs.py validate
+python3 scripts/lint-spec-files.py --all
+git diff --check
+make -C apps/backend build
+```

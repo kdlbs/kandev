@@ -172,7 +172,7 @@ was contacted. Preserving the global true value made both tests pass.
 The completed work-order commands passed on 2026-10-01:
 
 ```bash
-(cd apps/backend && go test -tags fts5 ./internal/agent/runtime/lifecycle -run 'Test(BuildWorktreeCreateRequest|CheckoutCredentialEnvironment|SetupScriptEnvironment)' -count=1)
+(cd apps/backend && go test -tags fts5 ./internal/agent/runtime/lifecycle -run 'Test(BuildWorktreeCreateRequest|CheckoutCredentialEnvironment)' -count=1)
 (cd apps/backend && go test -tags fts5 ./cmd/agentctl -run '^TestGitHubCredentialHelper' -count=1)
 (cd apps/backend && go test -tags fts5 ./internal/worktree -run '^TestCreateWorktree_RemoteContribution' -count=1)
 (cd apps/backend && go test -tags fts5 ./internal/orchestrator/executor -run '^TestConfigureGitHubCredentialBroker$' -count=1)
@@ -190,9 +190,24 @@ external Git transport or credentials were used.
 The temporary reproduction sources, helper binary, and reporter-evidence
 draft under `/tmp` were removed after this permanent coverage was added.
 
-Issue #4023 is assigned to `carlosflorencio`. The package is unstaged and
-uncommitted. The production change and permanent regressions are recorded in
-the completed work order above.
+## PR review hardening (2026-10-01)
+
+Added a lifecycle integration regression that passes the filtered environment
+from `buildWorktreeCreateRequest` into `worktree.Manager.Create`, then performs
+an authenticated contribution fetch through a local HTTPS proxy and synthetic
+broker. Shared the agentctl test-binary builder in `internal/testutil`, removed
+a nonexistent test name from the verification pattern, and made Git tests clear
+and restore inherited repository-location and indexed-config variables.
+
+The focused lifecycle and worktree tests passed with deliberately poisoned
+inherited Git environment variables. The work-order lifecycle, agentctl,
+worktree, executor, and testutil commands passed, as did spec validation,
+specification lint, `git diff --check`, and `make -C apps/backend build`.
+No credential scope or authorization behavior changed.
+
+Issue #4023 is assigned to `carlosflorencio`. The implementation and work
+package were committed as `197ae979` on
+`feature/investigate-and-plan-a35`, and PR #4137 was opened.
 
 ## Risks
 
