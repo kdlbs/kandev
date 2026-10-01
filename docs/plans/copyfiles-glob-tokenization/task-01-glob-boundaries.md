@@ -113,11 +113,11 @@ only for genuine platform-specific patterns or native links.
 - Live public docs validator: passed (47 pages), using Node v24.18.0 from root.
 - Backend workflow contract: passed (10 tests); action pinning: passed (9 tests).
 - Repository `validateCoverage` preflight: covered, no errors.
-- `git diff --check`: passed.
+- Normal commit hooks: passed, including package Go lint and commitlint; no bypass.
+- `git diff --check`: passed after removing an extra trailing documentation blank line.
 - Native Windows grammar execution is delegated to the focused existing CI job;
   local verification ran on Linux. No live instance/data used.
 
 The first public-doc test invocation from `apps/` failed on a root-relative
 plugin-doc path. Running the same tests from repository root passed; no validator
 or unrelated document was changed.
-
