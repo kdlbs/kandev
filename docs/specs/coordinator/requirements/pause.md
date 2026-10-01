@@ -54,7 +54,7 @@ start it again without losing its queue.
   shall deliver its pending wakes through the ordinary admission
   ([wake](wake.md#req-coordinator-wake-004-autonomy-setting-and-admission)),
   the five-minute cooldown included. Pause and Resume shall discard none: no
-  wake is superseded while the coordinator is paused, and after Resume each
+  wake is superseded because of Pause while the coordinator is paused (turning autonomy off still supersedes, as today), and after Resume each
   wake meets the ordinary episode re-check of delivery, so a wake whose episode
   no longer holds is superseded then, for the reason it always was.
 
