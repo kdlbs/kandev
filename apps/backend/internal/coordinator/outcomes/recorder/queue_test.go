@@ -120,3 +120,27 @@ func TestObservers_PanicInOneDoesNotStopTheOthers(t *testing.T) {
 		t.Fatal("panic not counted or later observer skipped")
 	}
 }
+
+func TestSweep_SkipsProposalsOlderThanRetentionWindow(t *testing.T) {
+	f := newFixture(t)
+	f.proposal("old", "rejected", "create_task", "", f.at(-401*24*time.Hour))
+	f.proposal("recent", "rejected", "create_task", "", f.at(-399*24*time.Hour))
+	n := SQLProposals{DB: f.db}.Sweep(context.Background(), f.queue())
+	if n != 1 || f.outcome("old") != nil || f.outcome("recent") == nil {
+		t.Fatalf("graded %d, old=%v recent=%v", n, f.outcome("old"), f.outcome("recent"))
+	}
+}
+
+func TestSweep_FillsEmptyTurnIDOnFinalRow(t *testing.T) {
+	f := newFixture(t)
+	f.proposal("p1", "rejected", "create_task", "", f.at(-time.Hour))
+	f.grade("p1", time.Time{})
+	if f.outcome("p1").TurnID != nil {
+		t.Fatal("row stamped before the proposal had a turn")
+	}
+	f.exec(`UPDATE coordinator_proposals SET turn_id = 'turn-1' WHERE id = 'p1'`)
+	SQLProposals{DB: f.db}.Sweep(context.Background(), f.queue())
+	if got := f.outcome("p1").TurnID; got == nil || *got != "turn-1" {
+		t.Fatalf("turn id = %v", got)
+	}
+}

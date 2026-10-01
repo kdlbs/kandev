@@ -203,7 +203,7 @@ func (c *Capture) judgeRow(ctx context.Context, st *scanState, coordID string, r
 		return
 	}
 	dest, inFlow := st.steps[row.ToStepID]
-	if !ok || !inFlow || dest.workflowID != st.workflowID || dest.position >= st.steps[refStep].position {
+	if !ok || !inFlow || dest.workflowID != st.workflowID || st.steps[refStep].workflowID != st.workflowID || dest.position >= st.steps[refStep].position {
 		c.markSeen(ctx, coordID, row, seenJudged, nil)
 		return
 	}
@@ -275,7 +275,7 @@ func (c *Capture) startStep(ctx context.Context, st *scanState, workflowID strin
 		workflowID = st.workflowID
 	}
 	var id string
-	err := c.db.GetContext(ctx, &id, c.db.Rebind(`SELECT id FROM workflow_steps WHERE workflow_id = ? AND is_start_step = ? ORDER BY position LIMIT 1`), workflowID, true)
+	err := c.db.GetContext(ctx, &id, c.db.Rebind(`SELECT id FROM workflow_steps WHERE workflow_id = ? AND is_start_step = 1 ORDER BY position LIMIT 1`), workflowID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", false, nil
 	}

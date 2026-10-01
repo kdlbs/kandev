@@ -213,3 +213,33 @@ func TestScan_TwoCoordinatorsOneObservationEach(t *testing.T) {
 		t.Fatalf("rows = %d", f.feedbackCount("moved_back"))
 	}
 }
+
+func TestCapture_PrincipalAndSystemAreIgnoredAndFieldsStored(t *testing.T) {
+	f := newFixture(t)
+	f.proposal("p1", "rejected", "create_task", "", f.at(-time.Hour))
+	chk := &fakeChecker{verdicts: map[string]Verdict{"mgr": VerdictManager, "prin": VerdictPrincipal, "sys": VerdictSystem}}
+	c := f.capture(chk)
+	ev := coordinator.DecisionEvent{ProposalID: "p1", CoordinatorID: f.coord.ID, WorkspaceID: "ws-1", ProposalKind: "create_task",
+		Decision: outcomes.DecisionRejected, ReasonCode: "free text not in the closed set", At: f.at(-time.Hour)}
+	bp, bs := IgnoredCount(IgnoredPrincipal), IgnoredCount(IgnoredSystem)
+	ev.ActorUserID = "prin"
+	c.OnDecision(context.Background(), ev)
+	ev.ActorUserID = "sys"
+	c.OnDecision(context.Background(), ev)
+	if IgnoredCount(IgnoredPrincipal) != bp+1 || IgnoredCount(IgnoredSystem) != bs+1 || f.feedbackCount("rejected") != 0 {
+		t.Fatal("principal or system override stored or not counted")
+	}
+	ev.ActorUserID = "mgr"
+	c.OnDecision(context.Background(), ev)
+	var row struct {
+		UserID     string    `db:"user_id"`
+		ReasonCode string    `db:"reason_code"`
+		CreatedAt  time.Time `db:"created_at"`
+	}
+	if err := f.db.Get(&row, `SELECT user_id, reason_code, created_at FROM coordinator_feedback WHERE kind = 'rejected'`); err != nil {
+		t.Fatal(err)
+	}
+	if row.UserID != "mgr" || row.ReasonCode != outcomes.ReasonNone || !row.CreatedAt.Equal(f.at(-time.Hour)) {
+		t.Fatalf("stored row = %+v", row)
+	}
+}

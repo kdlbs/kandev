@@ -76,7 +76,7 @@ func (c *Capture) OnDecision(ctx context.Context, ev coordinator.DecisionEvent) 
 	}
 	reason := outcomes.ReasonNone
 	if kind == FeedbackRejected {
-		reason = ev.ReasonCode
+		reason = outcomes.Code(ev.ReasonCode, "")
 	}
 	var turn sql.NullString
 	if err := c.db.GetContext(ctx, &turn, c.db.Rebind(`SELECT turn_id FROM coordinator_proposals WHERE id = ?`), ev.ProposalID); err != nil && !errors.Is(err, sql.ErrNoRows) {

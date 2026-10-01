@@ -17,7 +17,7 @@ const externalTablesSQL = `
 	CREATE TABLE workflow_steps (id TEXT PRIMARY KEY, workflow_id TEXT, position INTEGER NOT NULL DEFAULT 0, complete_task_on_enter INTEGER NOT NULL DEFAULT 0);
 	CREATE TABLE task_sessions (id TEXT PRIMARY KEY, task_id TEXT, state TEXT, started_at DATETIME);
 	CREATE TABLE task_usage_events (id INTEGER PRIMARY KEY AUTOINCREMENT, task_id TEXT, session_id TEXT, turn_id TEXT, cost_subcents INTEGER NOT NULL DEFAULT 0, cost_source TEXT NOT NULL DEFAULT 'priced');
-	CREATE TABLE github_task_prs (id TEXT PRIMARY KEY, task_id TEXT, state TEXT, merged_at DATETIME);
+	CREATE TABLE github_task_prs (id TEXT PRIMARY KEY, task_id TEXT, state TEXT, merged_at DATETIME, detached_at DATETIME);
 	CREATE TABLE session_step_history (id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT NOT NULL, from_step_id TEXT, to_step_id TEXT NOT NULL, trigger TEXT NOT NULL, actor_id TEXT, metadata TEXT, created_at DATETIME NOT NULL);
 `
 

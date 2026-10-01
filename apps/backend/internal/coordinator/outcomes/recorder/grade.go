@@ -267,7 +267,7 @@ func readTaskFacts(ctx context.Context, tx *sqlx.Tx, taskID string) (facts outco
 	}
 	facts.StepCompletes = completes.Valid && completes.Bool
 	var mergedTimes []sql.NullTime
-	if err = tx.SelectContext(ctx, &mergedTimes, tx.Rebind(`SELECT merged_at FROM github_task_prs WHERE task_id = ? AND state = 'merged' ORDER BY merged_at`), taskID); err != nil {
+	if err = tx.SelectContext(ctx, &mergedTimes, tx.Rebind(`SELECT merged_at FROM github_task_prs WHERE task_id = ? AND state = 'merged' AND detached_at IS NULL ORDER BY merged_at`), taskID); err != nil {
 		return facts, "", mergedAt, false, err
 	}
 	if len(mergedTimes) > 0 {

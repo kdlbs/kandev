@@ -7,6 +7,10 @@ import (
 	"github.com/jmoiron/sqlx"
 )
 
+// sweepWindow bounds how old a decided proposal may be and still be graded;
+// it matches the outcome-row retention age.
+const sweepWindow = 400 * 24 * time.Hour
+
 // SQLProposals reads graded and gradable proposals from the database.
 type SQLProposals struct{ DB *sqlx.DB }
 
@@ -17,7 +21,7 @@ func (p SQLProposals) OpenProposalsOfTask(ctx context.Context, taskID string) ([
 	err := p.DB.SelectContext(ctx, &ids, p.DB.Rebind(`
 		SELECT p.id FROM coordinator_proposals p
 		LEFT JOIN coordinator_outcomes o ON o.proposal_id = p.id
-		WHERE p.task_id = ? AND p.status IN ('approved', 'rejected', 'returned') AND (o.proposal_id IS NULL OR o.final = ?)
+		WHERE p.task_id = ? AND p.status IN ('approved', 'rejected', 'returned') AND (o.proposal_id IS NULL OR o.final = ? OR (o.turn_id IS NULL AND p.turn_id IS NOT NULL))
 		LIMIT ?`), taskID, false, sweepBatchSize)
 	return ids, err
 }
@@ -34,10 +38,10 @@ func (p SQLProposals) Sweep(ctx context.Context, q *Queue) int {
 		err := p.DB.SelectContext(ctx, &ids, p.DB.Rebind(`
 			SELECT p.id FROM coordinator_proposals p
 			LEFT JOIN coordinator_outcomes o ON o.proposal_id = p.id
-			WHERE p.status IN ('approved', 'rejected', 'returned') AND (o.proposal_id IS NULL OR o.final = ?)
-			  AND (o.graded_at IS NULL OR o.graded_at < ?)
+			WHERE p.status IN ('approved', 'rejected', 'returned') AND (o.proposal_id IS NULL OR o.final = ? OR (o.turn_id IS NULL AND p.turn_id IS NOT NULL))
+			  AND p.updated_at >= ? AND (o.graded_at IS NULL OR o.graded_at < ?)
 			ORDER BY (o.graded_at IS NOT NULL), o.graded_at, p.id
-			LIMIT ?`), false, started, sweepBatchSize+len(tried))
+			LIMIT ?`), false, started.Add(-sweepWindow), started, sweepBatchSize+len(tried))
 		if err != nil {
 			bump(gradeFailedTotal, GradeProposalRead)
 			return total

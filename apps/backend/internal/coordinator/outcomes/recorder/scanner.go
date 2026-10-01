@@ -94,18 +94,33 @@ func (s *Scanner) Stop() {
 }
 
 // EnqueueScan asks for a scan of taskID; a full queue drops it and counts it.
-func (s *Scanner) EnqueueScan(taskID string) {
+// It reports false only when the scan was dropped.
+func (s *Scanner) EnqueueScan(taskID string) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.stopped || s.queued[taskID] {
-		return
+		return true
 	}
 	select {
 	case s.order <- taskID:
 		s.queued[taskID] = true
+		return true
 	default:
 		bump(scanDroppedTotal, ScanDroppedQueueFull)
+		return false
 	}
+}
+
+// rearm schedules another attempt for a chain whose scan was dropped, at the
+// delay of its next retry, so the chain is evaluated again instead of leaking.
+func (s *Scanner) rearm(c *chain) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.stopped || c.ended || c.timerPending {
+		return
+	}
+	c.timerPending = true
+	c.timer = time.AfterFunc(s.delays[min(c.attempt, len(s.delays)-1)], func() { s.fire(c) })
 }
 
 func (s *Scanner) run(ctx context.Context) {
@@ -158,10 +173,13 @@ func (s *Scanner) OnTaskMoved(ctx context.Context, taskID string, at time.Time) 
 		bump(scanDroppedTotal, ScanDroppedChainCap)
 		return
 	}
-	s.chains[taskID] = append(s.chains[taskID], &chain{task: taskID, at: at})
+	c := &chain{task: taskID, at: at}
+	s.chains[taskID] = append(s.chains[taskID], c)
 	s.active++
 	s.mu.Unlock()
-	s.EnqueueScan(taskID)
+	if !s.EnqueueScan(taskID) {
+		s.rearm(c)
+	}
 }
 
 func (s *Scanner) pruneEnded() {
@@ -201,7 +219,7 @@ func (s *Scanner) evaluate(taskID string, rows []time.Time) {
 			s.endChain(c)
 			continue
 		}
-		if c.timerPending {
+		if c.timerPending || s.stopped {
 			continue
 		}
 		if c.attempt >= len(s.delays) {
@@ -238,8 +256,8 @@ func (s *Scanner) fire(c *chain) {
 	c.timerPending = false
 	ended := c.ended
 	s.mu.Unlock()
-	if !ended {
-		s.EnqueueScan(c.task)
+	if !ended && !s.EnqueueScan(c.task) {
+		s.rearm(c)
 	}
 }
 

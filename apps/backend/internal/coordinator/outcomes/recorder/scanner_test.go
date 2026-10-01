@@ -107,3 +107,25 @@ func TestScanner_StopIsIdempotentAndCancelsTimers(t *testing.T) {
 	s.Stop()
 	s.Stop()
 }
+
+func TestScanner_DroppedScanRearmsChainAndNoTimerAfterStop(t *testing.T) {
+	f := moveBackFixture(t)
+	s := f.scanner(&fakeChecker{}, time.Hour)
+	for i := 0; i < scanQueueCap; i++ {
+		s.order <- "x" + time.Duration(i).String()
+	}
+	s.OnTaskMoved(context.Background(), "t1", f.at(0))
+	s.mu.Lock()
+	armed := len(s.chains["t1"]) == 1 && s.chains["t1"][0].timerPending
+	s.mu.Unlock()
+	if !armed {
+		t.Fatal("chain whose first scan was dropped has no retry timer")
+	}
+	s.Stop()
+	late := &chain{task: "t2", at: f.at(0)}
+	s.chains["t2"] = []*chain{late}
+	s.evaluate("t2", nil)
+	if late.timer != nil || late.timerPending {
+		t.Fatal("timer armed after Stop")
+	}
+}

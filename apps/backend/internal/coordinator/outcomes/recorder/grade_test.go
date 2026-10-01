@@ -204,3 +204,15 @@ func TestGrade_ReadErrorKeepsRowAndCounts(t *testing.T) {
 		t.Fatal("read failure not counted or row lost")
 	}
 }
+
+func TestGrade_DetachedMergedPRDoesNotMerge(t *testing.T) {
+	f := newFixture(t)
+	f.step("s1", 1, false)
+	f.task("t1", "s1", false)
+	f.proposal("p1", "approved", "create_task", "t1", f.at(-time.Hour))
+	f.exec(`INSERT INTO github_task_prs (id, task_id, state, merged_at, detached_at) VALUES ('a', 't1', 'merged', ?, ?)`, f.now, f.now)
+	f.grade("p1", time.Time{})
+	if r := f.outcome("p1"); r.MergedAt != nil || (r.TaskResult != nil && *r.TaskResult == "merged") || r.Final {
+		t.Fatalf("detached PR counted: %+v", r)
+	}
+}

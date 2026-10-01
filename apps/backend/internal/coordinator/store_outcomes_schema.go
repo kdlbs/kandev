@@ -49,7 +49,7 @@ const outcomesTablesSQL = `
 	);
 
 	CREATE TABLE IF NOT EXISTS coordinator_moveback_seen (
-		history_row_id INTEGER NOT NULL,
+		history_row_id BIGINT NOT NULL,
 		coordinator_id TEXT NOT NULL,
 		seen_at {{timestamp}} NOT NULL,
 		state TEXT NOT NULL DEFAULT 'judged',
@@ -63,6 +63,8 @@ const outcomesIndexesSQL = `
 	CREATE INDEX IF NOT EXISTS idx_coordinator_outcomes_task ON coordinator_outcomes(task_id);
 	CREATE UNIQUE INDEX IF NOT EXISTS idx_coordinator_feedback_unique ON coordinator_feedback(proposal_id, kind, transition_key);
 	CREATE INDEX IF NOT EXISTS idx_coordinator_feedback_created ON coordinator_feedback(coordinator_id, created_at);
+	CREATE INDEX IF NOT EXISTS idx_coordinator_proposals_task ON coordinator_proposals(task_id);
+	CREATE INDEX IF NOT EXISTS idx_coordinator_activity_target_task ON coordinator_activity(target_task_id);
 	CREATE INDEX IF NOT EXISTS idx_coordinator_moveback_seen_at ON coordinator_moveback_seen(seen_at);
 `
 
