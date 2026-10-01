@@ -108,6 +108,7 @@ test.describe("Nested submodule Review", () => {
         '[data-testid="review-file-row"][data-file-path="README.md"]',
       );
       await expect(readmeRows).toHaveCount(3);
+      // Select the parent diff explicitly; the dialog can open on a nested row.
       const parentReadmeRow = review.locator(
         '[data-testid="review-file-row"][data-file-path="README.md"][data-repository-name=""]',
       );
