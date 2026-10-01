@@ -1091,7 +1091,7 @@ func (m *Manager) prepareExecutionCreateRequest(
 		return nil, err
 	}
 	if len(comparisonTargets) == 0 {
-		comparisonTargets, err = comparisonTargetsFromWorkspaceRepositories(info.WorkspaceRepositories)
+		comparisonTargets, err = comparisonTargetsFromWorkspaceRepositories(info.WorkspaceRepositories, info.ExecutorType)
 		if err != nil {
 			return nil, err
 		}

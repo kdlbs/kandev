@@ -61,7 +61,7 @@ func (s *Service) TaskDeletePreflight(
 	dirty, err := inspector.InspectDirtyWorktrees(ctx, worktrees)
 	if err != nil {
 		return TaskDeletePreflightResult{}, fmt.Errorf(
-			"%w: inspect worktrees before delete: %v", ErrTaskDeletePreflightUnavailable, err,
+			"%w: inspect worktrees before delete: %w", ErrTaskDeletePreflightUnavailable, err,
 		)
 	}
 	discardWorktreeChanges := len(discardConsent) > 0 && discardConsent[0]

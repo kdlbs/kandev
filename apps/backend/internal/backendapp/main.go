@@ -702,6 +702,7 @@ func startAgentInfrastructure(
 	lifecycleMgr.SetSessionSettingsSnapshotWriter(repos.Task)
 	if services.Plugins != nil {
 		lifecycleMgr.SetPluginExecutorProfileLoader(services.Task)
+		lifecycleMgr.SetPluginRuntimeAPIURL(pluginRuntimeAPIURL(cfg))
 		services.Plugins.SetExecutorProviderInventoryReader(repos.Task)
 		pluginExecutor := lifecycle.NewPluginRemoteExecutor(services.Plugins, log)
 		pluginExecutor.SetRecoveryDependencies(services.Task, repos.Task)
