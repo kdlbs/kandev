@@ -29,7 +29,7 @@ test.describe("Guided setup on a phone viewport", () => {
     if (await testPage.getByTestId("setup-next").isDisabled()) {
       await testPage.getByTestId("coordinator-agent-profile-picker").click();
       await testPage.getByRole("option").first().click();
-      await testPage.getByRole("combobox").last().click();
+      await testPage.getByTestId("executor-profile-selector").first().click();
       await testPage.getByRole("option").first().click();
     }
     await expect(testPage.getByTestId("setup-next")).toBeEnabled();

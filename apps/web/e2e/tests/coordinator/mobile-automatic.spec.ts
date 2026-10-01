@@ -19,6 +19,8 @@ test.describe("Coordinator automatic create_task on a phone viewport", () => {
       name: "Mobile Automatic Coordinator",
       agent_profile_id: seedData.agentProfileId,
       executor_profile_id: seedData.worktreeExecutorProfileId,
+      task_agent_profile_id: seedData.agentProfileId,
+      task_executor_profile_id: seedData.worktreeExecutorProfileId,
     });
     const seeded = await apiClient.rawRequest(
       "POST",

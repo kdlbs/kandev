@@ -1,4 +1,5 @@
 import { ApiError, fetchJson, type ApiRequestOptions } from "@/lib/api/client";
+import type { RunsWith } from "./coordinator-runs-with";
 import type {
   ImprovementSpec,
   PendingChangeStatus,
@@ -43,6 +44,10 @@ export type Coordinator = {
   open_proposals?: number;
   agent_profile_status?: ProfileStatus;
   executor_profile_status?: ProfileStatus;
+  task_agent_profile_id: string;
+  task_executor_profile_id: string;
+  task_agent_profile_status?: ProfileStatus;
+  task_executor_profile_status?: ProfileStatus;
   // Present only while features.coordinatorPhase2 is on.
   policy?: { actions: Record<string, string> };
   policy_revision?: number;
@@ -87,6 +92,8 @@ export type CreateCoordinatorRequest = {
   name: string;
   agent_profile_id: string;
   executor_profile_id: string;
+  task_agent_profile_id: string;
+  task_executor_profile_id: string;
   context?: string;
 };
 
@@ -99,6 +106,8 @@ export type PatchCoordinatorRequest = {
   name?: string;
   agent_profile_id?: string;
   executor_profile_id?: string;
+  task_agent_profile_id?: string;
+  task_executor_profile_id?: string;
   context?: string;
   // Phase 3: the ceiling is a two-place dollar string, or null to clear it.
   autonomy_enabled?: boolean;
@@ -123,6 +132,7 @@ type ProposalBase = {
   decided_by: string | null;
   created_at: string;
   updated_at: string;
+  runs_with?: RunsWith | null;
   target_task_id?: string | null;
   standing_order_ids?: string[];
   starts_agent?: boolean;
@@ -736,11 +746,7 @@ export function putCoordinatorSettings(
 
 // Mirrors internal/coordinator/setup.go's body: one request creates the
 // coordinator with its policy, Watches and optional goal, or none of them.
-export type SetupCoordinatorRequest = {
-  name: string;
-  agent_profile_id: string;
-  executor_profile_id: string;
-  context: string;
+export type SetupCoordinatorRequest = Required<CreateCoordinatorRequest> & {
   watches: { scope: "all" | "selected"; workflow_ids?: string[] };
   policy: { actions: Record<ControlAction, ControlSetting> };
   goal?: {

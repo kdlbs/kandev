@@ -599,5 +599,16 @@
   "changeDiscard": "破棄",
   "changeContextChanged": "提案後にコンテキストが変更されました。破棄するか、コーディネーターに再提案を依頼してください。",
   "changeAlreadySettled": "この変更はすでに処理済みです。",
-  "changeActionFailed": "うまくいきませんでした。何も変更されていません。もう一度お試しください。"
+  "changeActionFailed": "うまくいきませんでした。何も変更されていません。もう一度お試しください。",
+  "taskPairLabel": "作成されたタスクのエージェント",
+  "taskPairHelp": "承認したタスクは、ボード、ワークフロー、ワークスペースで指定がない場合、このエージェントで開始されます。",
+  "taskAgentPassthroughWarning": "このエージェントプロファイルは CLI パススルーを使用しており、作成されたタスクではここで使用できません。別のプロファイルを選択してください。",
+  "taskAgentMissingWarning": "このエージェントプロファイルは削除されました。別のプロファイルを選択してください。",
+  "taskExecutorMissingWarning": "このエグゼキュータープロファイルは削除されました。別のプロファイルを選択してください。",
+  "taskPassthroughDisabledReason": "CLI パススルーのプロファイルでは作成されたタスクを実行できません。",
+  "setupErrorTaskAgentProfile": "作成されたタスク用のエージェントプロファイルを選択してください。",
+  "setupErrorTaskExecutor": "作成されたタスク用のエグゼキュータープロファイルを選択してください。",
+  "setupTaskPairValue": "{{agent}}、{{executor}}",
+  "proposalRunsWith": "実行エージェント：{{name}}",
+  "proposalNoAgentAvailable": "利用できるエージェントがありません。コーディネーター設定の「作成されたタスクのエージェント」を確認してください。"
 }

@@ -17,6 +17,8 @@ function seed(apiClient: ApiClient, seedData: SeedData) {
     name: "Sections Coordinator",
     agent_profile_id: seedData.agentProfileId,
     executor_profile_id: seedData.worktreeExecutorProfileId,
+    task_agent_profile_id: seedData.agentProfileId,
+    task_executor_profile_id: seedData.worktreeExecutorProfileId,
   });
 }
 

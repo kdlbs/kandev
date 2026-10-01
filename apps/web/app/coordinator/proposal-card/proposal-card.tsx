@@ -16,6 +16,7 @@ import {
   type ProposalSpec,
   type StoredProposal,
 } from "@/lib/api/domains/coordinator-api";
+import { RunsWithLine } from "./runs-with-line";
 import type { AttentionTask } from "@/lib/coordinator/attention";
 import type { StandingOrder } from "@/lib/api/domains/coordinator-api";
 import {
@@ -415,6 +416,7 @@ function CardBody(props: CardBodyProps) {
           <p className="text-sm font-medium">{createSpec.title}</p>
           {variant === "full" && <CardDescription>{createSpec.description}</CardDescription>}
           <CardDescription>{props.specLabel}</CardDescription>
+          <RunsWithLine runsWith={proposal.runs_with} />
         </>
       )}
       {kindProposal && (

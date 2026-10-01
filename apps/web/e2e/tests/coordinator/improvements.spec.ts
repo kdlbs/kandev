@@ -50,6 +50,8 @@ async function proposeImprovement({ testPage, apiClient, backend, seedData }: Ct
     name: "Improvements Coordinator",
     agent_profile_id: seedData.agentProfileId,
     executor_profile_id: seedData.worktreeExecutorProfileId,
+    task_agent_profile_id: seedData.agentProfileId,
+    task_executor_profile_id: seedData.worktreeExecutorProfileId,
     context: BEFORE,
   });
   const runId = insertRun(path.join(backend.tmpDir, "kandev.db"), coordinator.id);

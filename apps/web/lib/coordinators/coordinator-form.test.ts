@@ -51,6 +51,9 @@ function mkExecutor(overrides: Partial<Executor> = {}): Executor {
   };
 }
 
+const TASK_AGENT = "task-agent-1";
+const TASK_PROFILE = "task-profile-1";
+
 describe("coordinatorFormFromRecord", () => {
   it("maps a Coordinator DTO to editable form fields", () => {
     const coordinator: Coordinator = {
@@ -59,6 +62,8 @@ describe("coordinatorFormFromRecord", () => {
       name: "Planner",
       agent_profile_id: "agent-1",
       executor_profile_id: "profile-1",
+      task_agent_profile_id: TASK_AGENT,
+      task_executor_profile_id: TASK_PROFILE,
       context: SOME_CONTEXT,
       conversation_task_id: null,
       created_at: FIXTURE_TIMESTAMP,
@@ -68,6 +73,8 @@ describe("coordinatorFormFromRecord", () => {
       name: "Planner",
       agentProfileId: "agent-1",
       executorProfileId: "profile-1",
+      taskAgentProfileId: TASK_AGENT,
+      taskExecutorProfileId: TASK_PROFILE,
       context: SOME_CONTEXT,
     });
   });
@@ -79,12 +86,16 @@ describe("buildCreateCoordinatorPayload", () => {
       name: "  Planner  ",
       agentProfileId: "agent-1",
       executorProfileId: "profile-1",
+      taskAgentProfileId: TASK_AGENT,
+      taskExecutorProfileId: TASK_PROFILE,
       context: SOME_CONTEXT,
     });
     expect(payload).toEqual({
       name: "Planner",
       agent_profile_id: "agent-1",
       executor_profile_id: "profile-1",
+      task_agent_profile_id: TASK_AGENT,
+      task_executor_profile_id: TASK_PROFILE,
       context: SOME_CONTEXT,
     });
   });
@@ -95,6 +106,8 @@ describe("buildPatchCoordinatorPayload", () => {
     name: "Planner",
     agentProfileId: "agent-1",
     executorProfileId: "profile-1",
+    taskAgentProfileId: TASK_AGENT,
+    taskExecutorProfileId: TASK_PROFILE,
     context: SOME_CONTEXT,
   };
 

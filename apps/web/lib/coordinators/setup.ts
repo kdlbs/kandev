@@ -21,6 +21,10 @@ export type SetupState = {
   name: string;
   agentProfileId: string;
   executorProfileId: string;
+  taskAgentProfileId: string;
+  taskExecutorProfileId: string;
+  /** A field the manager changed keeps its value until the setup is left. */
+  taskPairTouched: { agent: boolean; executor: boolean };
   watches: WatchesDraft;
   goal: GoalFormState;
   context: string;
@@ -40,6 +44,9 @@ export function initialSetupState(defaults: {
     name: "",
     agentProfileId: defaults.agentProfileId,
     executorProfileId: defaults.executorProfileId,
+    taskAgentProfileId: "",
+    taskExecutorProfileId: "",
+    taskPairTouched: { agent: false, executor: false },
     watches: { scope: "all", workflowIds: [] },
     goal: EMPTY_GOAL_FORM,
     context: "",
@@ -61,6 +68,8 @@ const KEY = {
   name: "coordinator:setupErrorName",
   agent: "coordinator:setupErrorAgentProfile",
   executor: "coordinator:setupErrorExecutor",
+  taskAgent: "coordinator:setupErrorTaskAgentProfile",
+  taskExecutor: "coordinator:setupErrorTaskExecutor",
   watches: "coordinator:watchesKeepOneBoard",
   watchesMax: "coordinator:watchesAtMost",
   goalName: "coordinator:setupErrorGoalName",
@@ -76,6 +85,8 @@ export function identityErrors(state: SetupState): SetupErrors {
   if (name === "" || length(name) > COORDINATOR_NAME_MAX_LENGTH) errors.name = KEY.name;
   if (state.agentProfileId === "") errors.agent_profile_id = KEY.agent;
   if (state.executorProfileId === "") errors.executor_profile_id = KEY.executor;
+  if (state.taskAgentProfileId === "") errors.task_agent_profile_id = KEY.taskAgent;
+  if (state.taskExecutorProfileId === "") errors.task_executor_profile_id = KEY.taskExecutor;
   return errors;
 }
 
@@ -157,6 +168,8 @@ export function buildSetupRequest(state: SetupState): SetupCoordinatorRequest {
     name: state.name.trim(),
     agent_profile_id: state.agentProfileId,
     executor_profile_id: state.executorProfileId,
+    task_agent_profile_id: state.taskAgentProfileId,
+    task_executor_profile_id: state.taskExecutorProfileId,
     context: state.context.trim(),
     watches:
       state.watches.scope === "all"

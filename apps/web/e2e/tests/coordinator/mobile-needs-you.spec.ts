@@ -33,6 +33,8 @@ test.describe("Coordinator screens on a phone viewport", () => {
       name: "Mobile Coordinator",
       agent_profile_id: seedData.agentProfileId,
       executor_profile_id: seedData.worktreeExecutorProfileId,
+      task_agent_profile_id: seedData.agentProfileId,
+      task_executor_profile_id: seedData.worktreeExecutorProfileId,
     });
 
     const taskA = await apiClient.createTaskWithAgent(
@@ -184,6 +186,8 @@ test.describe("Coordinator screens on a phone viewport", () => {
         name: "Default Layout Coordinator",
         agent_profile_id: seedData.agentProfileId,
         executor_profile_id: seedData.worktreeExecutorProfileId,
+        task_agent_profile_id: seedData.agentProfileId,
+        task_executor_profile_id: seedData.worktreeExecutorProfileId,
       });
 
       await testPage.goto("/");

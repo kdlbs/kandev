@@ -53,6 +53,10 @@ function useReviewRows({
   const executor = flattenExecutorProfiles(executors).find(
     (p) => p.id === state.executorProfileId,
   )?.name;
+  const taskAgent = agentProfiles.find((p) => p.id === state.taskAgentProfileId)?.label;
+  const taskExecutor = flattenExecutorProfiles(executors).find(
+    (p) => p.id === state.taskExecutorProfileId,
+  )?.name;
   const selected = new Set(state.watches.workflowIds);
   const watches =
     state.watches.scope === "all"
@@ -89,6 +93,16 @@ function useReviewRows({
       id: "executor",
       setting: t("coordinator:executorLabel"),
       value: executor ?? state.executorProfileId,
+      owner: identity,
+      step: "identity",
+    },
+    {
+      id: "taskPair",
+      setting: t("coordinator:taskPairLabel"),
+      value: t("coordinator:setupTaskPairValue", {
+        agent: taskAgent ?? state.taskAgentProfileId,
+        executor: taskExecutor ?? state.taskExecutorProfileId,
+      }),
       owner: identity,
       step: "identity",
     },

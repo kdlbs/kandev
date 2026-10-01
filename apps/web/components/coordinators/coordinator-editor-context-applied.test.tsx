@@ -13,6 +13,8 @@ vi.mock("@/hooks/domains/settings/use-coordinator", () => ({
       name: "Planner",
       agent_profile_id: "agent-1",
       executor_profile_id: "profile-1",
+      task_agent_profile_id: "agent-1",
+      task_executor_profile_id: "profile-1",
       context: "Some context",
     },
     status: "ready",

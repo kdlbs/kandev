@@ -32,6 +32,8 @@ const EMPTY_FORM: CoordinatorFormState = {
   name: "",
   agentProfileId: "",
   executorProfileId: "",
+  taskAgentProfileId: "",
+  taskExecutorProfileId: "",
   context: "",
 };
 
@@ -135,7 +137,9 @@ function useCoordinatorEditorForm(workspaceId: string, coordinatorId: string) {
   const canSave =
     isValidCoordinatorName(form.name) &&
     Boolean(form.agentProfileId) &&
-    Boolean(form.executorProfileId);
+    Boolean(form.executorProfileId) &&
+    Boolean(form.taskAgentProfileId) &&
+    Boolean(form.taskExecutorProfileId);
 
   const handleSave = async () => {
     setFieldError(null);
@@ -246,6 +250,8 @@ export function CoordinatorEditorPage({ workspaceId, coordinatorId }: Coordinato
         executors={executors}
         agentProfileStatus={coordinator?.agent_profile_status}
         executorProfileStatus={coordinator?.executor_profile_status}
+        taskAgentProfileStatus={coordinator?.task_agent_profile_status}
+        taskExecutorProfileStatus={coordinator?.task_executor_profile_status}
         fieldError={fieldError}
       />
       <div className="space-y-1 text-sm text-muted-foreground">

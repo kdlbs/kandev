@@ -25,6 +25,7 @@ vi.mock("@/lib/toast/sonner", () => ({
 }));
 
 type StoreState = {
+  settingsData: { agentsLoaded: boolean };
   agentProfiles: { items: AgentProfileOption[] };
   executors: { items: Executor[] };
   workspaces: {
@@ -78,6 +79,8 @@ function coordinator(overrides: Partial<Coordinator> = {}): Coordinator {
     name: "Planner",
     agent_profile_id: "agent-1",
     executor_profile_id: "profile-1",
+    task_agent_profile_id: "ap-1",
+    task_executor_profile_id: "ep-1",
     context: "",
     conversation_task_id: null,
     created_at: "2026-09-27T00:00:00Z",
@@ -95,6 +98,7 @@ function setup(
   } = {},
 ) {
   storeState = {
+    settingsData: { agentsLoaded: true },
     agentProfiles: {
       items: [
         {
@@ -144,7 +148,7 @@ describe("CoordinatorAddPage", () => {
   it("preselects the workspace's default agent profile and executor (B4)", () => {
     setup({ defaultAgentProfileId: "agent-1", defaultExecutorId: "exec-1" });
     expect(screen.getByTestId("coordinator-agent-profile-picker").textContent).toContain("Claude");
-    expect(screen.getByTestId("executor-profile-selector").textContent).toContain("worktree");
+    expect(screen.getAllByTestId("executor-profile-selector")[0].textContent).toContain("worktree");
   });
 
   it("does not preselect a CLI-passthrough default agent profile (B4)", () => {
@@ -178,6 +182,8 @@ describe("CoordinatorAddPage", () => {
         name: "Planner",
         agent_profile_id: "agent-1",
         executor_profile_id: "profile-1",
+        task_agent_profile_id: "agent-1",
+        task_executor_profile_id: "profile-1",
         context: "",
       }),
     );
@@ -245,9 +251,9 @@ describe("CoordinatorAddPage", () => {
     expect(
       (screen.getByTestId("coordinator-agent-profile-picker") as HTMLButtonElement).disabled,
     ).toBe(true);
-    expect((screen.getByTestId("executor-profile-selector") as HTMLButtonElement).disabled).toBe(
-      true,
-    );
+    expect(
+      (screen.getAllByTestId("executor-profile-selector")[0] as HTMLButtonElement).disabled,
+    ).toBe(true);
 
     expect((screen.getByTestId(ADD_BUTTON_TESTID) as HTMLButtonElement).disabled).toBe(true);
   });

@@ -38,7 +38,7 @@ function updatedAtNs(proposal: StoredProposal): bigint {
 }
 
 /**
- * Merges one incoming proposal row into the cache by the five rules in order
+ * Merges one incoming proposal row into the cache by the six rules in order
  * (docs/specs/coordinator/system-design/proposal-cards.md#client-store
  * "Merging one proposal"): no cached entry stores the incoming row; a
  * settled cached row is never replaced by an unsettled incoming one; a
@@ -62,6 +62,12 @@ export function mergeProposal(
   // records the delivery is the newer state.
   if (incoming.status === "returned" && cached.status === "returned") {
     if (incoming.reply_delivered_at && !cached.reply_delivered_at) return incoming;
+  }
+  // A settings save writes no proposal row, so a refetch after it carries the
+  // same `updated_at` and a fresh `runs_with`; a null one never replaces a
+  // cached value.
+  if (incoming.runs_with && !isSettledProposal(cached) && !isSettledProposal(incoming)) {
+    return { ...cached, runs_with: incoming.runs_with };
   }
   return cached;
 }

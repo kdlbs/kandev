@@ -10,6 +10,8 @@ export type CoordinatorFormState = {
   name: string;
   agentProfileId: string;
   executorProfileId: string;
+  taskAgentProfileId: string;
+  taskExecutorProfileId: string;
   context: string;
 };
 
@@ -18,6 +20,8 @@ export function coordinatorFormFromRecord(coordinator: Coordinator): Coordinator
     name: coordinator.name,
     agentProfileId: coordinator.agent_profile_id,
     executorProfileId: coordinator.executor_profile_id,
+    taskAgentProfileId: coordinator.task_agent_profile_id,
+    taskExecutorProfileId: coordinator.task_executor_profile_id,
     context: coordinator.context,
   };
 }
@@ -29,6 +33,8 @@ export function buildCreateCoordinatorPayload(
     name: form.name.trim(),
     agent_profile_id: form.agentProfileId,
     executor_profile_id: form.executorProfileId,
+    task_agent_profile_id: form.taskAgentProfileId,
+    task_executor_profile_id: form.taskExecutorProfileId,
     context: form.context,
   };
 }
@@ -45,6 +51,12 @@ export function buildPatchCoordinatorPayload(
   if (form.agentProfileId !== saved.agentProfileId) patch.agent_profile_id = form.agentProfileId;
   if (form.executorProfileId !== saved.executorProfileId) {
     patch.executor_profile_id = form.executorProfileId;
+  }
+  if (form.taskAgentProfileId !== saved.taskAgentProfileId) {
+    patch.task_agent_profile_id = form.taskAgentProfileId;
+  }
+  if (form.taskExecutorProfileId !== saved.taskExecutorProfileId) {
+    patch.task_executor_profile_id = form.taskExecutorProfileId;
   }
   if (form.context !== saved.context) patch.context = form.context;
   return patch;

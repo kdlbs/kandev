@@ -599,5 +599,16 @@
   "changeDiscard": "Discard",
   "changeContextChanged": "The context changed since this was proposed. Discard it, or ask the coordinator to propose again.",
   "changeAlreadySettled": "This change was already settled.",
-  "changeActionFailed": "That did not work. Nothing changed. Try again."
+  "changeActionFailed": "That did not work. Nothing changed. Try again.",
+  "taskPairLabel": "Agent for created tasks",
+  "taskPairHelp": "Tasks you approve start with this agent unless their board, workflow or workspace already sets one.",
+  "taskAgentPassthroughWarning": "This agent profile uses CLI passthrough, which created tasks cannot use here. Choose another.",
+  "taskAgentMissingWarning": "This agent profile was removed. Choose another.",
+  "taskExecutorMissingWarning": "This executor profile was removed. Choose another.",
+  "taskPassthroughDisabledReason": "CLI passthrough profiles cannot run created tasks.",
+  "setupErrorTaskAgentProfile": "Choose an agent profile for created tasks.",
+  "setupErrorTaskExecutor": "Choose an executor profile for created tasks.",
+  "setupTaskPairValue": "{{agent}}, {{executor}}",
+  "proposalRunsWith": "Runs with: {{name}}",
+  "proposalNoAgentAvailable": "No agent available. Check Agent for created tasks in the coordinator settings."
 }

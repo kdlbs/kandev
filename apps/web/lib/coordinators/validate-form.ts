@@ -13,12 +13,16 @@ export type CoordinatorFormFields = {
   name: string;
   agentProfileId: string;
   executorProfileId: string;
+  taskAgentProfileId: string;
+  taskExecutorProfileId: string;
 };
 
 export function canAddCoordinator(form: CoordinatorFormFields): boolean {
   return (
     isValidCoordinatorName(form.name) &&
     form.agentProfileId.length > 0 &&
-    form.executorProfileId.length > 0
+    form.executorProfileId.length > 0 &&
+    form.taskAgentProfileId.length > 0 &&
+    form.taskExecutorProfileId.length > 0
   );
 }

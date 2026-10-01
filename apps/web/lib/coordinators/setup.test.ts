@@ -19,6 +19,8 @@ function valid(): SetupState {
   return {
     ...initialSetupState({ agentProfileId: "a1", executorProfileId: "e1" }),
     name: " Planner ",
+    taskAgentProfileId: "ta1",
+    taskExecutorProfileId: "te1",
   };
 }
 
@@ -48,6 +50,8 @@ describe("step validity", () => {
     expect(isStepValid("identity", { ...state, name: "😀".repeat(61) })).toBe(false);
     expect(isStepValid("identity", { ...state, agentProfileId: "" })).toBe(false);
     expect(isStepValid("identity", { ...state, executorProfileId: "" })).toBe(false);
+    expect(isStepValid("identity", { ...state, taskAgentProfileId: "" })).toBe(false);
+    expect(isStepValid("identity", { ...state, taskExecutorProfileId: "" })).toBe(false);
   });
 
   it("needs at least one board for a selected set", () => {
@@ -118,6 +122,8 @@ describe("buildSetupRequest", () => {
       name: "Planner",
       agent_profile_id: "a1",
       executor_profile_id: "e1",
+      task_agent_profile_id: "ta1",
+      task_executor_profile_id: "te1",
       context: "hi",
       watches: { scope: "all" },
       policy: { actions: valid().actions },

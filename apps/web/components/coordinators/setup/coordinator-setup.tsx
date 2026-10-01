@@ -5,6 +5,7 @@ import { useTranslation } from "react-i18next";
 import { Button } from "@kandev/ui/button";
 import { useAppStore } from "@/components/state-provider";
 import { useRouter } from "@/lib/routing/client-router";
+import { useTaskPairPrefill } from "@/hooks/domains/coordinator/use-task-pair-prefill";
 import { useSettingsData } from "@/hooks/domains/settings/use-settings-data";
 import { useWorkspaceBoards } from "@/hooks/domains/coordinator/use-workspace-boards";
 import { setupCoordinator } from "@/lib/api/domains/coordinator-api";
@@ -25,6 +26,7 @@ import {
   type SetupStepId,
 } from "@/lib/coordinators/setup";
 import type { WorkspaceState } from "@/lib/state/slices";
+import type { AgentProfileOption } from "@/lib/state/slices/settings/types";
 import { SetupStepList } from "./setup-nav";
 import { SetupReview } from "./setup-review";
 import { ContextStep, GoalStep, IdentityStep, MayDoStep, WatchesStep } from "./setup-step-bodies";
@@ -147,6 +149,31 @@ function SetupFooter(props: FooterProps) {
   );
 }
 
+function useSetupTaskPairPrefill(
+  form: ReturnType<typeof useSetupForm>,
+  workspace: Workspace | null,
+  agentProfiles: readonly AgentProfileOption[],
+) {
+  const { state } = form;
+  const agentsLoaded = useAppStore((s) => s.settingsData.agentsLoaded);
+  useTaskPairPrefill({
+    workspaceDefaultAgentProfileId: workspace
+      ? (workspace.default_agent_profile_id ?? null)
+      : undefined,
+    agentProfiles: agentsLoaded ? agentProfiles : undefined,
+    ownAgent: state.agentProfileId,
+    ownExecutor: state.executorProfileId,
+    touched: state.taskPairTouched,
+    current: { agent: state.taskAgentProfileId, executor: state.taskExecutorProfileId },
+    onChange: (pair) =>
+      form.setState((prev) => ({
+        ...prev,
+        taskAgentProfileId: pair.agent,
+        taskExecutorProfileId: pair.executor,
+      })),
+  });
+}
+
 export function CoordinatorSetup({ workspaceId }: Props) {
   const { t } = useTranslation();
   useSettingsData(true);
@@ -166,6 +193,7 @@ export function CoordinatorSetup({ workspaceId }: Props) {
     }),
   );
   const { state } = form;
+  useSetupTaskPairPrefill(form, workspace, agentProfiles);
 
   const [step, setStep] = useState<SetupStepId>("identity");
   const [toReview, setToReview] = useState(false);

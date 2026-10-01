@@ -26,7 +26,7 @@ async function chooseIdentity(page: Page) {
   await page.getByLabel("Name").fill(NAME);
   await page.getByTestId("coordinator-agent-profile-picker").click();
   await page.getByRole("option").first().click();
-  await page.getByRole("combobox").last().click();
+  await page.getByTestId("executor-profile-selector").first().click();
   await page.getByRole("option").first().click();
 }
 

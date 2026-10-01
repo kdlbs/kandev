@@ -12,7 +12,10 @@ import {
 } from "@/components/task-create-dialog-selectors";
 import { useExecutorProfileOptions } from "@/components/task-create-dialog-options";
 import { COORDINATOR_NAME_MAX_LENGTH } from "@/lib/coordinators/validate-form";
-import { coordinatorProfileStatusMessageKey } from "@/lib/coordinators/profile-status-message";
+import {
+  coordinatorProfileStatusMessageKey,
+  type CoordinatorProfileField,
+} from "@/lib/coordinators/profile-status-message";
 import { withUnavailableExecutorOption } from "@/lib/coordinators/executor-option";
 import { flattenExecutorProfiles } from "@/lib/coordinators/profile-lookup";
 import type { CoordinatorFormState } from "@/lib/coordinators/coordinator-form";
@@ -30,6 +33,8 @@ export type CoordinatorFormFieldsProps = {
   executors: readonly Executor[];
   agentProfileStatus?: ProfileStatus;
   executorProfileStatus?: ProfileStatus;
+  taskAgentProfileStatus?: ProfileStatus;
+  taskExecutorProfileStatus?: ProfileStatus;
   fieldError: CoordinatorFieldError | null;
   /** Setup mode: show only these fields, in the phase-1 order. */
   only?: readonly CoordinatorFieldKey[];
@@ -38,7 +43,7 @@ export type CoordinatorFormFieldsProps = {
   onLeave?: (field: CoordinatorErrorField) => void;
 };
 
-export type CoordinatorFieldKey = "name" | "agent" | "executor" | "context";
+export type CoordinatorFieldKey = "name" | "agent" | "executor" | "taskPair" | "context";
 
 function FieldError({ testId, message }: { testId: string; message: string | undefined }) {
   if (!message) return null;
@@ -55,7 +60,7 @@ function ProfileStatusMessage({
   status,
 }: {
   testId: string;
-  field: "agent" | "executor";
+  field: CoordinatorProfileField;
   status: ProfileStatus | undefined;
 }) {
   const { t } = useTranslation();
@@ -87,6 +92,113 @@ function useCoordinatorExecutorOptions(
   );
 }
 
+type AgentFieldProps = {
+  form: CoordinatorFormState;
+  onChange: CoordinatorFormFieldsProps["onChange"];
+  disabled: boolean;
+  agentProfiles: CoordinatorFormFieldsProps["agentProfiles"];
+  status: ProfileStatus | undefined;
+  message: string | undefined;
+};
+
+function AgentField({ form, onChange, disabled, agentProfiles, status, message }: AgentFieldProps) {
+  const { t } = useTranslation();
+  return (
+    <div className="space-y-1.5">
+      <Label>{t("coordinator:agentProfileLabel")}</Label>
+      <AgentProfilePicker
+        profiles={[...agentProfiles]}
+        value={form.agentProfileId}
+        onValueChange={(value) => onChange("agentProfileId", value)}
+        testId="coordinator-agent-profile-picker"
+        placeholder={t("coordinator:agentProfilePlaceholder")}
+        disabledOptionReason={(profile) =>
+          profile.cli_passthrough ? t("coordinator:passthroughDisabledReason") : undefined
+        }
+        disabled={disabled}
+      />
+      <ProfileStatusMessage
+        testId="coordinator-agent-profile-status"
+        field="agent"
+        status={status}
+      />
+      <FieldError testId="coordinator-agent-profile-error" message={message} />
+    </div>
+  );
+}
+
+type TaskPairFieldsetProps = {
+  form: CoordinatorFormState;
+  onChange: CoordinatorFormFieldsProps["onChange"];
+  disabled: boolean;
+  agentProfiles: CoordinatorFormFieldsProps["agentProfiles"];
+  executorOptions: ReturnType<typeof useCoordinatorExecutorOptions>;
+  agentStatus: ProfileStatus | undefined;
+  executorStatus: ProfileStatus | undefined;
+  messageOf: (field: CoordinatorErrorField) => string | undefined;
+};
+
+function TaskPairFieldset({
+  form,
+  onChange,
+  disabled,
+  agentProfiles,
+  executorOptions,
+  agentStatus,
+  executorStatus,
+  messageOf,
+}: TaskPairFieldsetProps) {
+  const { t } = useTranslation();
+  return (
+    <fieldset className="space-y-3" data-testid="coordinator-task-pair">
+      <legend className="text-sm font-medium">{t("coordinator:taskPairLabel")}</legend>
+      <p className="text-sm text-muted-foreground">{t("coordinator:taskPairHelp")}</p>
+      <div className="space-y-1.5">
+        <Label>{t("coordinator:agentProfileLabel")}</Label>
+        <AgentProfilePicker
+          profiles={[...agentProfiles]}
+          value={form.taskAgentProfileId}
+          onValueChange={(value) => onChange("taskAgentProfileId", value)}
+          testId="coordinator-task-agent-profile-picker"
+          placeholder={t("coordinator:agentProfilePlaceholder")}
+          disabledOptionReason={(profile) =>
+            profile.cli_passthrough ? t("coordinator:taskPassthroughDisabledReason") : undefined
+          }
+          disabled={disabled}
+        />
+        <ProfileStatusMessage
+          testId="coordinator-task-agent-profile-status"
+          field="taskAgent"
+          status={agentStatus}
+        />
+        <FieldError
+          testId="coordinator-task-agent-profile-error"
+          message={messageOf("task_agent_profile_id")}
+        />
+      </div>
+      <div className="space-y-1.5">
+        <Label>{t("coordinator:executorLabel")}</Label>
+        <ExecutorProfileSelector
+          options={executorOptions}
+          value={form.taskExecutorProfileId}
+          onValueChange={(value) => onChange("taskExecutorProfileId", value)}
+          disabled={disabled}
+          placeholder={t("coordinator:executorPlaceholder")}
+        />
+        <ProfileStatusMessage
+          testId="coordinator-task-executor-status"
+          field="taskExecutor"
+          status={executorStatus}
+        />
+        <FieldError
+          testId="coordinator-task-executor-error"
+          message={messageOf("task_executor_profile_id")}
+        />
+      </div>
+    </fieldset>
+  );
+}
+
 export function CoordinatorFormFields({
   form,
   onChange,
@@ -95,6 +207,8 @@ export function CoordinatorFormFields({
   executors,
   agentProfileStatus,
   executorProfileStatus,
+  taskAgentProfileStatus,
+  taskExecutorProfileStatus,
   fieldError,
   only,
   messages,
@@ -102,6 +216,7 @@ export function CoordinatorFormFields({
 }: CoordinatorFormFieldsProps) {
   const { t } = useTranslation();
   const executorOptions = useCoordinatorExecutorOptions(executors, form.executorProfileId);
+  const taskExecutorOptions = useCoordinatorExecutorOptions(executors, form.taskExecutorProfileId);
   const shows = (key: CoordinatorFieldKey) => !only || only.includes(key);
   const messageOf = (field: CoordinatorErrorField) => {
     if (messages) return messages[field];
@@ -125,29 +240,14 @@ export function CoordinatorFormFields({
         </div>
       )}
       {shows("agent") && (
-        <div className="space-y-1.5">
-          <Label>{t("coordinator:agentProfileLabel")}</Label>
-          <AgentProfilePicker
-            profiles={[...agentProfiles]}
-            value={form.agentProfileId}
-            onValueChange={(value) => onChange("agentProfileId", value)}
-            testId="coordinator-agent-profile-picker"
-            placeholder={t("coordinator:agentProfilePlaceholder")}
-            disabledOptionReason={(profile) =>
-              profile.cli_passthrough ? t("coordinator:passthroughDisabledReason") : undefined
-            }
-            disabled={disabled}
-          />
-          <ProfileStatusMessage
-            testId="coordinator-agent-profile-status"
-            field="agent"
-            status={agentProfileStatus}
-          />
-          <FieldError
-            testId="coordinator-agent-profile-error"
-            message={messageOf("agent_profile_id")}
-          />
-        </div>
+        <AgentField
+          form={form}
+          onChange={onChange}
+          disabled={disabled}
+          agentProfiles={agentProfiles}
+          status={agentProfileStatus}
+          message={messageOf("agent_profile_id")}
+        />
       )}
       {shows("executor") && (
         <div className="space-y-1.5">
@@ -169,6 +269,18 @@ export function CoordinatorFormFields({
             message={messageOf("executor_profile_id")}
           />
         </div>
+      )}
+      {shows("taskPair") && (
+        <TaskPairFieldset
+          form={form}
+          onChange={onChange}
+          disabled={disabled}
+          agentProfiles={agentProfiles}
+          executorOptions={taskExecutorOptions}
+          agentStatus={taskAgentProfileStatus}
+          executorStatus={taskExecutorProfileStatus}
+          messageOf={messageOf}
+        />
       )}
       {shows("context") && (
         <div className="space-y-1.5">
