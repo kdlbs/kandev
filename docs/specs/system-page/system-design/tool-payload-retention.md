@@ -61,8 +61,10 @@ through a separate read-only connection. Database maintenance owns explicit `VAC
 The verification connection opens the snapshot as a SQLite `file:` URI with
 `mode=ro`, so it never creates a file. The native path follows `file:` with only
 `%`, `?`, and `#` percent-escaped, because SQLite decodes `%XX`, starts the
-query at `?`, and ignores the rest after `#`. SQLite reads every other character
-literally, including a Windows drive letter and backslashes.
+query at `?`, and ignores the rest after `#`. SQLite reads all remaining characters
+literally, including a Windows drive letter and backslashes. The shared path
+escape helper lives in `internal/db`; each caller keeps its own connection mode
+and options.
 
 ## Policy and persistence
 

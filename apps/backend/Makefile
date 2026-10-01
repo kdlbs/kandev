@@ -393,7 +393,7 @@ test-windows:
 	$(CGO_LOCALE) $(CGO_PREFIX) $(GO) test -tags fts5 -v ./internal/gateway/websocket -run TestResolveAndBindReportsOccupiedPort
 	@echo "Running Windows SQLite database path tests..."
 	$(CGO_LOCALE) $(CGO_PREFIX) $(GO) test -tags fts5 -v ./internal/system/backups -run TestVerifySnapshotOpensNativeAbsolutePath
-	$(CGO_LOCALE) $(CGO_PREFIX) $(GO) test -tags fts5 -v ./internal/task/inventoryrepair -run TestOpenDatabase
+	$(CGO_LOCALE) $(CGO_PREFIX) $(GO) test -tags fts5 -v ./internal/task/inventoryrepair -run "^TestOpenDatabase(Reads|Writes)NativeAbsolutePath$$"
 
 ## Verify run/dev/start-debug expand to the right per-shell command line across
 ## native Windows (cmd), Git Bash/MSYS, and Unix — the Make-target dispatch the

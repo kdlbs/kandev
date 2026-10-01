@@ -876,8 +876,8 @@ jobs:
       - name: Test Windows SQLite database paths
         shell: bash
         run: |
-          go test -race -v ./internal/system/backups -run '^TestVerifySnapshotOpensNativeAbsolutePath$'
-          go test -race -v ./internal/task/inventoryrepair -run '^TestOpenDatabase(Reads|Writes)NativeAbsolutePath$'
+          go test -race -tags fts5 -v ./internal/system/backups -run '^TestVerifySnapshotOpensNativeAbsolutePath$'
+          go test -race -tags fts5 -v ./internal/task/inventoryrepair -run '^TestOpenDatabase(Reads|Writes)NativeAbsolutePath$'
 
       - name: Test Cursor project slug path normalization
         run: go test -race -v ./internal/agent/mcpconfig -run '^TestDeriveCursorProjectSlug$'

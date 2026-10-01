@@ -51,9 +51,10 @@ No installation-specific IDs are hardcoded in production logic.
 Repair connections open the database as a SQLite `file:` URI followed by the
 mode and connection options. The canonical path follows `file:` with only `%`,
 `?`, and `#` percent-escaped, because SQLite decodes `%XX`, starts the query at
-`?`, and ignores the rest after `#`. SQLite reads every other character
-literally, including a Windows drive letter and backslashes. Neither `mode=ro`
-nor `mode=rw` creates a file.
+`?`, and ignores the rest after `#`. SQLite reads all remaining characters
+literally, including a Windows drive letter and backslashes. The shared path
+escape helper lives in `internal/db`. Each caller keeps its own mode and options.
+Neither `mode=ro` nor `mode=rw` creates a file.
 
 Before application, acquire the same home and database locks produced by
 `backendapp/ownershiplock.Targets` and held through `ownershiplock.Acquire`.

@@ -59,7 +59,7 @@ on Windows, and preparation with a selected backup could never arm cleanup.
 
 ```bash
 cd apps/backend && go test -p 2 -tags fts5 ./internal/system/backups ./internal/system/toolretention -count=1
-cd apps/backend && go test -race -v ./internal/system/backups -run '^TestVerifySnapshotOpensNativeAbsolutePath$'
+cd apps/backend && go test -race -tags fts5 -v ./internal/system/backups -run '^TestVerifySnapshotOpensNativeAbsolutePath$'
 cd apps/backend && golangci-lint run ./internal/system/... --new-from-rev=fba6f2b3281bc379904bf17509184f09b81e97d9 --timeout=10m
 python3 scripts/list-docs.py validate
 python3 scripts/lint-spec-files.py --all

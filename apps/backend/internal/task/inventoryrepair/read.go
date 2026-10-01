@@ -8,8 +8,9 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
-	"strings"
 	"time"
+
+	"github.com/kandev/kandev/internal/db"
 )
 
 type row map[string]any
@@ -30,12 +31,6 @@ type inspection struct {
 	guards []observation
 }
 
-// sqliteURIPath escapes the characters that SQLite decodes or treats as
-// delimiters in the path of a "file:" URI. SQLite reads every other character
-// of a clean absolute path literally, including a Windows drive colon and
-// backslashes.
-var sqliteURIPath = strings.NewReplacer("%", "%25", "?", "%3f", "#", "%23")
-
 // openDatabase opens the database file itself; neither mode creates a file.
 func openDatabase(p Plan, write bool) (*sql.DB, error) {
 	mode := "ro"
@@ -47,7 +42,7 @@ func openDatabase(p Plan, write bool) (*sql.DB, error) {
 		q.Set("_txlock", "immediate")
 		q.Set("_synchronous", "FULL")
 	}
-	db, err := sql.Open("sqlite3", "file:"+sqliteURIPath.Replace(p.Database)+"?"+q.Encode())
+	db, err := sql.Open("sqlite3", "file:"+db.EscapeSQLiteURIPath(p.Database)+"?"+q.Encode())
 	if err != nil {
 		return nil, err
 	}
