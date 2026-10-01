@@ -27,7 +27,20 @@ func ledgerRowCount(t *testing.T, p routeParams) int {
 	return n
 }
 
+type recordingReaderSetter struct {
+	reader handlers.CoordinatorTurnReader
+}
+
+func (r *recordingReaderSetter) SetCoordinatorTurnReader(reader handlers.CoordinatorTurnReader) {
+	r.reader = reader
+}
+
 func runLedgerWiring(t *testing.T, phase31 bool) (routeParams, bus.EventBus, string) {
+	p, eventBus, convTask, _ := runLedgerWiringWithSetter(t, phase31)
+	return p, eventBus, convTask
+}
+
+func runLedgerWiringWithSetter(t *testing.T, phase31 bool) (routeParams, bus.EventBus, string, *recordingReaderSetter) {
 	t.Helper()
 	harness := newBootStateTestHarness(t)
 	pool := newCoordinatorTestPool(t)
@@ -63,13 +76,14 @@ func runLedgerWiring(t *testing.T, phase31 bool) (routeParams, bus.EventBus, str
 		ctx: ctx, dbPool: pool, eventBus: eventBus, taskSvc: harness.taskSvc, log: newTestLogger(),
 		addCleanup: func(fn func() error) { cleanups = append(cleanups, fn) },
 	}
-	wireCoordinatorLedger(p, svc, &handlers.Handlers{})
+	setter := &recordingReaderSetter{}
+	wireCoordinatorLedger(p, svc, setter)
 	t.Cleanup(func() {
 		for _, fn := range cleanups {
 			_ = fn()
 		}
 	})
-	return p, eventBus, convTask
+	return p, eventBus, convTask, setter
 }
 
 func publishTurnStarted(t *testing.T, eventBus bus.EventBus, taskID string) {
@@ -126,8 +140,46 @@ func TestWireCoordinatorLedger_DoesNothingWithPhase2Off(t *testing.T) {
 	wireCoordinatorLedger(routeParams{
 		ctx: context.Background(), dbPool: pool, eventBus: bus.NewMemoryEventBus(newTestLogger()), taskSvc: harness.taskSvc,
 		log: newTestLogger(), addCleanup: func(func() error) { registered = true },
-	}, svc, &handlers.Handlers{})
+	}, svc, &recordingReaderSetter{})
 	if registered {
 		t.Fatal("ledger started with coordinator phase 2 off")
+	}
+}
+
+func TestWireCoordinatorLedger_InstallsTheTurnReaderOnlyWithPhase31(t *testing.T) {
+	for _, phase31 := range []bool{false, true} {
+		_, _, _, setter := runLedgerWiringWithSetter(t, phase31)
+		if installed := setter.reader != nil; installed != phase31 {
+			t.Fatalf("phase31=%v: reader installed = %v", phase31, installed)
+		}
+	}
+}
+
+func TestWireCoordinatorLedger_SettlesTheRowOnTurnCompletion(t *testing.T) {
+	p, eventBus, convTask := runLedgerWiring(t, false)
+	publishTurnStarted(t, eventBus, convTask)
+	waitForLedgerRows(t, p, 1)
+	started := time.Now().UTC().Add(-time.Second)
+	if err := eventBus.Publish(context.Background(), events.TurnCompleted, &bus.Event{Data: map[string]any{
+		"id": "st-1", "session_id": "sess-1", "task_id": convTask, "started_at": started, "completed_at": time.Now().UTC(),
+	}}); err != nil {
+		t.Fatalf("publish: %v", err)
+	}
+	tick := time.NewTicker(5 * time.Millisecond)
+	defer tick.Stop()
+	timeout := time.After(5 * time.Second)
+	for {
+		var finished int
+		if err := p.dbPool.Reader().Get(&finished, `SELECT COUNT(*) FROM coordinator_turns WHERE finished_at IS NOT NULL AND outcome IS NOT NULL`); err != nil {
+			t.Fatal(err)
+		}
+		if finished == 1 {
+			return
+		}
+		select {
+		case <-tick.C:
+		case <-timeout:
+			t.Fatal("completion event did not settle the ledger row")
+		}
 	}
 }

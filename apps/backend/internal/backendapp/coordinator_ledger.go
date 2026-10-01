@@ -12,10 +12,15 @@ import (
 	"github.com/kandev/kandev/internal/mcp/handlers"
 )
 
+// turnReaderSetter is the MCP handlers' seam for the phase 3.1 turn reader.
+type turnReaderSetter interface {
+	SetCoordinatorTurnReader(handlers.CoordinatorTurnReader)
+}
+
 // wireCoordinatorLedger starts the turn ledger when coordinator phase 2 is on:
 // recording is independent of features.coordinatorPhase31, which gates only the
 // read tool. A missing dependency leaves recording off rather than half-built.
-func wireCoordinatorLedger(p routeParams, svc *coordinator.Service, mcp *handlers.Handlers) {
+func wireCoordinatorLedger(p routeParams, svc *coordinator.Service, mcp turnReaderSetter) {
 	if !svc.Phase2Enabled() || p.dbPool == nil || p.eventBus == nil || p.taskSvc == nil {
 		return
 	}
