@@ -51,10 +51,8 @@ export interface NavItem {
   /**
    * Where the item renders: "main" (default) as a top-level sidebar entry,
    * "integrations" inside the sidebar's Integrations section alongside the
-   * first-party integration links, "sidebar-footer" as an icon button in the
-   * sidebar footer's icon row and as a labelled row in the phone menu's
-   * Utilities group (subject to the footer's inline budget — an over-budget
-   * item is reached through the footer's overflow menu instead), "settings"
+   * first-party integration links, "sidebar-footer" as a labelled item in the
+   * desktop footer's utilities menu and the phone menu's Utilities group, "settings"
    * accepted but rendered on no surface.
    */
   section?: PluginSDK.PluginNavSection;

@@ -93,7 +93,7 @@ export function SidebarLayoutNavigation({ collapsed, inOffice }: SidebarLayoutNa
   const items: React.ReactNode[] = [];
 
   for (const node of visibleNodes) {
-    if (!fixedRendered && node.destinationId !== "home") {
+    if (!fixedRendered && node.destinationId !== "home" && node.destinationId !== "new_task") {
       items.push(<AppSidebarFixedNav key="sidebar-fixed-navigation" collapsed={collapsed} />);
       fixedRendered = true;
     }

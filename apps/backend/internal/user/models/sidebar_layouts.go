@@ -58,8 +58,8 @@ func DefaultSidebarLayout() SidebarLayout {
 		Version:  SidebarLayoutVersion,
 		Revision: 0,
 		Nodes: []SidebarLayoutNode{
-			{ID: "home", Kind: SidebarLayoutNodeBuiltin, Visible: true, DestinationID: "home"},
 			{ID: "new-task", Kind: SidebarLayoutNodeBuiltin, Visible: true, DestinationID: "new_task"},
+			{ID: "home", Kind: SidebarLayoutNodeBuiltin, Visible: true, DestinationID: "home"},
 			{ID: "automations", Kind: SidebarLayoutNodeBuiltin, Visible: true, DestinationID: "automations"},
 			{ID: "canvases", Kind: SidebarLayoutNodeBuiltin, Visible: true, DestinationID: "canvases"},
 			{ID: "integrations", Kind: SidebarLayoutNodeBuiltin, Visible: true, DestinationID: "integrations"},

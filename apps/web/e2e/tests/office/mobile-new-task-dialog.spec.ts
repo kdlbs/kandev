@@ -16,7 +16,7 @@ test("mobile Office task creation only shows supported assignee controls", async
   expect(project.id).toBeTruthy();
 
   await testPage.goto("/office/tasks");
-  await testPage.locator('button:has(svg.tabler-icon-plus):has-text("New Task")').tap();
+  await testPage.getByRole("main").getByRole("button", { name: "New Task", exact: true }).tap();
 
   const dialog = testPage.getByTestId("office-new-issue-dialog");
   await expect(dialog).toBeVisible({ timeout: 10_000 });

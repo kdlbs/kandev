@@ -178,9 +178,8 @@ test.describe("Task sidebar diff stats", () => {
       .poll(() => activeActionContainer.evaluate((element) => getComputedStyle(element).opacity))
       .toBe("0");
 
-    // Hover near the row's fixed left edge. Centering the pointer on the row
-    // lets the trailing actions overlap the hover point and cancel the state.
-    await activeAlphaRow.hover({ position: { x: 1, y: 1 } });
+    // The title stays clear of the trailing actions while their slot expands.
+    await activeAlphaRow.getByText("Diff Alpha", { exact: true }).hover();
     await expect(activeActionContainer).toHaveCSS("opacity", "1");
     await expect(activeDiffStats).toHaveCSS("opacity", "0");
 

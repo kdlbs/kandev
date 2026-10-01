@@ -62,11 +62,15 @@ test.describe("quick terminal tabs", () => {
       const quickChatButton = testPage.getByTestId("sidebar-quick-chat-shortcut");
       await expect(terminalButton).toBeVisible();
       await expect(quickChatButton).toBeVisible();
-      expect(
-        await terminalButton.evaluate((element) =>
-          element.nextElementSibling?.getAttribute("data-testid"),
-        ),
-      ).toBe("sidebar-quick-chat-shortcut");
+      const utilities = testPage.getByTestId("sidebar-quick-actions");
+      await expect(utilities.getByRole("button").first()).toHaveAttribute(
+        "data-testid",
+        "sidebar-quick-chat-shortcut",
+      );
+      await expect(utilities.getByRole("button").last()).toHaveAttribute(
+        "data-testid",
+        "sidebar-quick-terminal-shortcut",
+      );
 
       await terminalButton.click();
       const dialog = testPage.getByRole("dialog", { name: QUICK_CHAT_TITLE });
