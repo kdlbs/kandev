@@ -39,7 +39,7 @@ The measures of the second half of this document are read only with the flag.
 - **Feedback observation:** the stored record of one override.
 - **Manager:** a person with `workspace.manage` in the coordinator's workspace.
 - **Pattern key:** the triple of override kind, proposal kind and reason
-  code.
+  code; a `moved_back` observation holds the reason code `none`.
 
 ## Requirements
 
@@ -64,14 +64,16 @@ The measures of the second half of this document are read only with the flag.
   decided in the last 400 days whose row is not final. A row is final when its decision is `rejected`, `returned` or `undone`, when its proposal created no task, and when its task result is `merged` or `dropped`. Grading the
   same proposal any number of times, or from two grading paths at once, shall
   leave one row with the values derivable from the stored facts.
-- **AC-COORDINATOR-OUTCOMES-001.3:** A final row shall not change again; `done` and `failed` are re-graded and a
-  task that leaves `done` shall raise the reopening count by one, once per
-  observed transition, however many graders observe it.
+- **AC-COORDINATOR-OUTCOMES-001.3:** A final row shall not change again, except that an undo of its action shall turn it to `undone` and that an empty turn id is filled once a turn id is stamped; `done` and `failed` are re-graded and a
+  task whose result goes from `done` to `open` or `failed` shall raise the
+  reopening count by one, once per observed transition, however many graders
+  observe it; a move from `done` to `merged` or `dropped` shall not.
 - **AC-COORDINATOR-OUTCOMES-001.4:** Cost shall be the sum of priced usage
   rows of the created task's sessions, and shall be unknown, never zero, when
   the task has no usage rows or one is unpriced. Time to merge shall be the
   time from the proposal's approval to the first observed merge, and empty
-  until the task is merged.
+  until the task is merged; the merge time is the merged timestamp the pull
+  request itself carries (the earliest, when several are linked), set once.
 - **AC-COORDINATOR-OUTCOMES-001.5:** When a task, a proposal or the usage of a
   task is read with an error, the grader shall keep the row's earlier values,
   count `coordinator_outcome_grade_failed_total{reason}` and retry on the next
@@ -126,7 +128,9 @@ The measures of the second half of this document are read only with the flag.
   system shall return, for a coordinator and a window of 1 to 90 days
   (default 30), these measures, each with the counts it was computed from:
   the approval-without-edit rate (proposals approved and never edited, of
-  those decided in the window); override recurrence (observations of the
+  those a manager decided in the window: automatic approvals and returned
+  proposals are not counted, and an undone proposal counts as approved, or
+  edited when it had edits); override recurrence (observations of the
   window whose pattern key also appears among observations in the 30 days
   before that observation, of all observations of the window); dollars per
   merged task (the priced cost of the coordinator's turns started in the

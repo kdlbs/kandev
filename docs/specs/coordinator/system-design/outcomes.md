@@ -40,12 +40,26 @@ automatic-approval class), `decided_at`, `edited_fields` (JSON array of names),
 `reason_code`, `task_id` (nullable), `task_result` (nullable), `cost_subcents`
 (nullable), `reopen_count`, `approved_at`, `merged_at` (nullable),
 `last_step_id`, `final` (bool), `graded_at`. Index on `(coordinator_id,
-decided_at, proposal_id)` and on `(final, graded_at)`.
+decided_at, proposal_id)` and on `(final, graded_at)`. `approved_at` is the
+`created_at` of the proposal's approved created or moved activity row
+(`coordinator_activity` with `action_class` `create_task` or `move`, `outcome`
+`approved`, joined by `proposal_id`), and NULL when the proposal has none.
 
 `coordinator_feedback`: `id`, `coordinator_id`, `kind` (`rejected`, `edited`,
-`undone`, `moved_back`), `proposal_id`, `turn_id`, `user_id`, `reason_code`,
+`undone`, `moved_back`), `proposal_id`, `turn_id`, `user_id`, `reason_code`
+(`none` for `moved_back`), `proposal_kind` (the proposal's `kind`), `to_step_id`
+(destination step of a `moved_back`, empty otherwise, informational),
 `transition_key` (empty except `moved_back`), `created_at`. Unique index on
-`(proposal_id, kind, transition_key)`. No text column exists, so `002.1`
+`(proposal_id, kind, transition_key)`, and an index on `(coordinator_id,
+created_at)`. A third table, `coordinator_moveback_seen` (`history_row_id`
+primary key, `coordinator_id`, `seen_at`), remembers which step history rows were
+judged once (see [override capture](#override-capture)).
+
+**Lifecycle.** Rows of all three tables are deleted with their coordinator and
+with its workspace, inside the same transactions as the other phase 3 rows
+(`deleteCoordinatorPhase3Rows`, `store_workspace_delete.go`). Retention is 400
+days: the daily sweep deletes outcome rows by `decided_at`, feedback rows by
+`created_at` and seen rows by `seen_at` older than 400 days, in batches of 200. No text column exists, so `002.1`
 ("no free text") holds structurally.
 
 ## Outcome rows
@@ -60,14 +74,28 @@ racing produce one row with one value. The only non-derivable field is
 `decided_at` is the time of the first recorded decision and is written only by
 the insert: the insert takes the queue entry's `decidedAt` (the hook time) when it is non-zero, and a row created by the sweep or the task-transition path
 (below) stores the proposal's `updated_at`, since `coordinator_proposals` has no
-decision time column. A re-grade and an undo never change it (an undo changes
-`decision` to `undone` only). `decision` is `edited` when `edited_fields` is
+decision time column. The queue is a keyed set: enqueueing an id already
+queued keeps the queued entry but takes the new `decidedAt` when the queued one
+is zero, so a hook time is never lost to an earlier sweep entry. A re-grade and an undo never change it (an undo changes
+`decision` to `undone` only). The upsert is guarded: `DO UPDATE ... WHERE
+coordinator_outcomes.final = false OR excluded.decision = 'undone' OR
+(coordinator_outcomes.turn_id IS NULL AND excluded.turn_id IS NOT NULL)`; on a
+final row only `decision` (to `undone`, which stays final) and an empty `turn_id`
+(`COALESCE`) can change, so an undo of a `move` row, of a `merged` or `dropped`
+row, or one that races the archive of its created task (`reverseCreate` commits
+before `markUndone`, so a grade may already have stored `dropped`) still lands
+as `undone`. `turn_id` is read from `coordinator_proposals.turn_id` on every
+grade. `decision` is `edited` when `edited_fields` is
 non-empty and `approved` otherwise, for a proposal whose status is `approved`;
 `rejected`, `returned` and `undone` come from the status and the activity row
 as [grading paths](#grading-paths) derives them, which is the one rule.
 
-`edited_fields` is the sorted list of field names whose approved value differs
-from the proposed; values are never read into the row (`001.1`). The reject
+`edited_fields` is the sorted list of top-level JSON keys whose value in
+`final_spec_json` differs from `spec_json`; a NULL `final_spec_json` means no
+edits. One function (`outcomes.EditedFields`) computes it and the hook payload
+uses the same function, so an `edited` observation and an `approved` row cannot
+disagree; values are never read into the row (`001.1`). An edit approved and
+then executed to `failed` fires no hook and stores nothing, as `failed` is open. The reject
 reason code comes from [reason codes](#reason-codes). A proposal with no
 decision has no row (`001.5`).
 
@@ -101,17 +129,21 @@ keyed set so a proposal is queued once at a time, a worker pool of 1):
 1. **Decision:** the `DecisionObserver` hook above.
 2. **Task transition:** the grader observes `task.moved` (`events.TaskMoved`, a
    step change) and `task.state_changed` for tasks present in
-   `coordinator_outcomes.task_id` or in `coordinator_activity.task_id` with the
-   created or moved action; it resolves the proposals of the task and enqueues
+   `coordinator_outcomes.task_id` or in `coordinator_activity.target_task_id` with
+   `action_class` `create_task` or `move` and `outcome` `approved`; it resolves the proposals of the task and enqueues
    each.
 3. **Sweep:** every 24 hours (and at start) it enqueues, from
    `coordinator_proposals` left-joined to `coordinator_outcomes`, decided
    proposals (status `approved`, `rejected` or `returned`, never `pending`, `approving` or `failed`) whose `updated_at` is within 400 days and
    that have no outcome row or whose row has `final = false`, in batches of 200
-   ordered by `(graded_at NULLS FIRST, proposal_id)`. A proposal decided before
+   ordered by `(graded_at NULLS FIRST, proposal_id)`; the set also includes final rows whose `turn_id` is NULL while the proposal's is not. A proposal decided before
    recording began therefore gets a row on the first sweep within that window.
 
-The queue never blocks the publisher; a full queue (1000) drops the enqueue and
+The grader worker, the sweep ticker and the delayed moved-back retry timers are
+started and stopped by the coordinator service's lifecycle (no goroutine
+outlives `Stop`, checked with goleak); a pending retry timer is not a queue
+entry until it fires, so it does not count against the 1000, and a restart
+loses it, which the daily moved-back scan recovers. The queue never blocks the publisher; a full queue (1000) drops the enqueue and
 counts `coordinator_outcome_grade_failed_total{reason="queue_full"}`; the sweep
 recovers it. A read error keeps the earlier row, counts the reason
 (`task_read`, `proposal_read`, `usage_read`), and the next pass retries
@@ -135,12 +167,16 @@ proposal kind creates no task, or when the task result is `merged` or `dropped`
 (`001.3`); such a row is graded once at decision and the sweep skips it, so the
 sweep set is only approved task-creating proposals whose task is not yet merged
 or dropped and whose decision is within 400 days. A `merged`
-row's `merged_at` is set once from the first observed merged pull request
-time and never moves.
+row's `merged_at` is set once from the earliest merged timestamp the linked pull
+requests carry (not the time a grader saw it) and never moves; a task that
+was already deleted when first graded stores `task_result` NULL and a final
+row, so it is not re-swept.
 
-**Reopen count.** `Grade` runs in one transaction per proposal (a write
-transaction, so two graders serialize on the row). It reads the stored result,
-computes the new one, and when the stored result is `done` and the new one is not
+**Reopen count.** `Grade` runs in one transaction per proposal. The row is
+locked before the stored result is read: SQLite's write transaction serializes
+graders, and PostgreSQL takes `pg_advisory_xact_lock(hashtext(proposal_id))`
+first (covering the first insert as well). It reads the stored result,
+computes the new one, and when the stored result is `done` and the new one is `open` or `failed`
 it adds one to `reopen_count` in that same transaction before writing the new
 result; the second grader then reads the already-updated result and adds nothing
 (`001.3`). No other statement writes `task_result` or `reopen_count`.
@@ -172,14 +208,20 @@ computed on read.
   session only. A test moves a card with only a completed session and asserts no
   observation and no error.
   History rows are written asynchronously and may follow the event, so a scan
-  that finds no new row is retried by the in-process queue after 2 minutes, 10
+  that finds no unseen row (a history row of the task later than the action and
+  absent from `coordinator_moveback_seen`) is retried by the in-process queue after 2 minutes, 10
   minutes and 1 hour, and a separate daily **moved-back scan** (own pass, not
   the outcome sweep set, so `final` rows are included) scans tasks with a
   coordinator created or moved activity row in the last 30 days, in batches of
   200 ordered by `task_id`. Every path reads the same rows and inserts under the
   same key, so any of them may run first.
 
-Each candidate goes through the manager check the automatic class already uses
+A candidate is judged once: its row id is inserted into `coordinator_moveback_seen`
+(`ON CONFLICT DO NOTHING`) in the same transaction as the feedback insert or the
+ignored count, and a candidate already seen is skipped, so rescans neither
+recount `coordinator_override_ignored_total` nor store an observation for a
+user promoted to manager later. A candidate whose manager check errored
+(`authz_error`) is not marked seen and is retried by the next scan. Each candidate goes through the manager check the automatic class already uses
 for its raiser (`automatic_approve.go`, `workspace.manage` in the coordinator's
 workspace). A false result
 or an error stores nothing and counts `coordinator_override_ignored_total{reason}`
@@ -190,7 +232,9 @@ the unique index (`002.2`), so redelivery, a grader run or a second observer
 never duplicates one.
 
 `moved_back` compares the destination step's position with the position of the
-step the coordinator's approved action left the card in, both read from the
+step the coordinator's approved action left the card in (for a `move` the
+proposal's `to_step_id`; for `create_task` the `step_id` of `final_spec_json`,
+`spec_json` when that is NULL, and the workflow's start step when it is empty), both read from the
 workflow's step order when the candidate is processed, and requires the row time
 to be later than the action's time (`002.4`). `transition_key` is the history
 row id, so two different moves back both count while one row seen twice does
@@ -225,13 +269,13 @@ each `{value, numerator, denominator, null_reason}`:
 
 | Measure | Computation |
 | --- | --- |
-| Approval without edit | `decision = 'approved'` over manager-decided proposals (`automatic = false`) decided in the window |
-| Override recurrence | feedback rows of the window whose pattern key also appears in the previous 30 days before that row, over all rows of the window; the pattern key is `(kind, reason_code, proposal kind)`, and for `moved_back` the destination step id replaces `reason_code` |
+| Approval without edit | rows with `decision` in (`approved`, `undone`) and empty `edited_fields`, over rows with `automatic = false` and `decision` in (`approved`, `edited`, `rejected`, `undone`) decided in the window (`returned` is not counted) |
+| Override recurrence | feedback rows of the window whose pattern key also appears in the previous 30 days before that row, over all rows of the window; the pattern key is `(kind, reason_code, proposal_kind)` read from the feedback row (`reason_code` is `none` for `moved_back`) |
 | Dollars per merged task | priced cost of coordinator turns started in the window (joined from usage), over tasks with `merged_at` in the window |
 | Median wait | median of `decided_at - proposal.created_at` over manager-decided proposals (`automatic = false`) whose `decision` is `approved`, `edited`, `rejected` or `undone` (an undone proposal was first approved); `returned` proposals are not counted, as no decision was taken |
 | Agreement | items rated and replayed, per shadow dream 006.4 |
 
-A zero denominator gives `null` with `no_data`; an unknown cost among the inputs
+The window is the rolling `days` x 24 hours ending at the request time (UTC); dollars are `cost_subcents / 10000`. A zero denominator gives `null` with `no_data`; an unknown cost among the inputs
 `cost_unknown`; fewer than 5 rated items `too_few` (`003.2`). Dollars per merged task includes the cost of dream turns, since they are
 coordinator turns, counted by turn start time, and of replay runs (their
 `cost_subcents` by result row `created_at`); shadow items count for agreement

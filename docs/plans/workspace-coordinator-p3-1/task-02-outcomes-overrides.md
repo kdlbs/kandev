@@ -46,7 +46,7 @@ and capture record whether or not the flag is on.
   (decision event, step transition, 24-hour sweep), `overrides.Capture`,
   `reasons.Code`, the measures reader, with tests beside each.
 - Store: `coordinator_outcomes` and `coordinator_feedback` with the unique
-  index that makes an observation unique per proposal, kind and transition.
+  index that makes an observation unique per proposal, kind and transition, and `coordinator_moveback_seen` (a history row is judged once); all three are deleted with their coordinator and workspace and pruned after 400 days.
 - `GET /coordinators/:id/measures?days=` behind the flag; the agreement
   measure reads an `AgreementSource` interface whose default returns
   `no_data`, which work order 04 implements over ratings and replay verdicts.
