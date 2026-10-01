@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"go.uber.org/zap"
 )
 
 // repairLinks sets turn_id on the proposals and guarded-call log rows a call
@@ -70,7 +72,7 @@ func (l *Ledger) actionPending(ctx context.Context, row *turnRow, in VerdictInpu
 	}
 	pending, err := l.deps.ActionPending(ctx, row.SessionID)
 	if err != nil {
-		l.log.Warn("coordinator ledger: pending interaction read failed")
+		l.log.Warn("coordinator ledger: pending interaction read failed", zap.Error(err))
 		return false
 	}
 	return pending

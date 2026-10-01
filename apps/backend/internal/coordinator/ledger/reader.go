@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/jmoiron/sqlx"
+	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/coordinator"
 )
@@ -175,36 +176,65 @@ func (l *Ledger) List(ctx context.Context, coordinatorID string, args ListArgs) 
 	}
 	ws, err := l.deps.WatchSet(ctx, coordinatorID)
 	if err != nil {
-		l.log.Warn("coordinator ledger: watch set read failed")
+		l.log.Warn("coordinator ledger: watch set read failed", zap.Error(err))
+		return nil, ErrUnavailable
+	}
+	scope, err := l.taskScopeFor(ctx, coordinatorID, ws)
+	if err != nil {
+		l.log.Warn("coordinator ledger: workspace read failed", zap.Error(err))
 		return nil, ErrUnavailable
 	}
 	if q.task != "" {
-		visible, err := l.taskVisible(ctx, ws, q.task)
+		visible, err := l.taskVisible(ctx, scope, q.task)
 		if err != nil {
+			l.log.Warn("coordinator ledger: task read failed", zap.Error(err))
 			return nil, ErrUnavailable
 		}
 		if !visible {
 			return nil, coordinator.ErrNotFound
 		}
 	}
-	page, err := l.readPage(ctx, coordinatorID, q, ws)
+	page, err := l.readPage(ctx, coordinatorID, q, scope)
 	if err != nil {
-		l.log.Warn("coordinator ledger: read failed")
+		l.log.Warn("coordinator ledger: read failed", zap.Error(err))
 		return nil, ErrUnavailable
 	}
 	return page, nil
 }
 
-func (l *Ledger) taskVisible(ctx context.Context, ws coordinator.WatchSet, taskID string) (bool, error) {
-	var workflowID string
-	err := l.deps.RO.GetContext(ctx, &workflowID, l.deps.RO.Rebind(`SELECT COALESCE(workflow_id, '') FROM tasks WHERE id = ?`), taskID)
+// taskScope is what a coordinator may see of a task: the task must sit in the
+// coordinator's own workspace and in a watched workflow.
+type taskScope struct {
+	watch       coordinator.WatchSet
+	workspaceID string
+}
+
+func (t taskScope) allows(workspaceID, workflowID string) bool {
+	return workspaceID == t.workspaceID && t.watch.Contains(workflowID)
+}
+
+func (l *Ledger) taskScopeFor(ctx context.Context, coordinatorID string, ws coordinator.WatchSet) (taskScope, error) {
+	var workspaceID string
+	err := l.deps.RO.GetContext(ctx, &workspaceID, l.deps.RO.Rebind(`SELECT workspace_id FROM coordinators WHERE id = ?`), coordinatorID)
+	if err != nil {
+		return taskScope{}, fmt.Errorf("read coordinator workspace: %w", err)
+	}
+	return taskScope{watch: ws, workspaceID: workspaceID}, nil
+}
+
+func (l *Ledger) taskVisible(ctx context.Context, scope taskScope, taskID string) (bool, error) {
+	var row struct {
+		WorkspaceID string `db:"workspace_id"`
+		WorkflowID  string `db:"workflow_id"`
+	}
+	err := l.deps.RO.GetContext(ctx, &row, l.deps.RO.Rebind(`SELECT COALESCE(workspace_id, '') AS workspace_id, COALESCE(workflow_id, '') AS workflow_id FROM tasks WHERE id = ?`), taskID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return false, nil
 	}
 	if err != nil {
 		return false, fmt.Errorf("read task workflow: %w", err)
 	}
-	return ws.Contains(workflowID), nil
+	return scope.allows(row.WorkspaceID, row.WorkflowID), nil
 }
 
 type listedTurn struct {
@@ -227,7 +257,7 @@ type listedTurn struct {
 	CallsTruncated bool           `db:"calls_truncated"`
 }
 
-func (l *Ledger) readPage(ctx context.Context, coordinatorID string, q listQuery, ws coordinator.WatchSet) (*Page, error) {
+func (l *Ledger) readPage(ctx context.Context, coordinatorID string, q listQuery, scope taskScope) (*Page, error) {
 	db := l.deps.RO
 	where := `coordinator_id = ? AND started_at >= ?`
 	args := []any{coordinatorID, q.since}
@@ -261,7 +291,7 @@ func (l *Ledger) readPage(ctx context.Context, coordinatorID string, q listQuery
 		next := encodeCursor(last.StartedAt, last.ID)
 		page.NextBefore = &next
 	}
-	views, err := l.enrich(ctx, db, rows, ws)
+	views, err := l.enrich(ctx, db, rows, scope)
 	if err != nil {
 		return nil, err
 	}
@@ -269,7 +299,7 @@ func (l *Ledger) readPage(ctx context.Context, coordinatorID string, q listQuery
 	return page, nil
 }
 
-func (l *Ledger) enrich(ctx context.Context, db *sqlx.DB, rows []listedTurn, ws coordinator.WatchSet) ([]TurnView, error) {
+func (l *Ledger) enrich(ctx context.Context, db *sqlx.DB, rows []listedTurn, scope taskScope) ([]TurnView, error) {
 	if len(rows) == 0 {
 		return []TurnView{}, nil
 	}
@@ -281,7 +311,7 @@ func (l *Ledger) enrich(ctx context.Context, db *sqlx.DB, rows []listedTurn, ws 
 	if err != nil {
 		return nil, err
 	}
-	calls, err := l.callsByTurn(ctx, db, ids, ws)
+	calls, err := l.callsByTurn(ctx, db, ids, scope)
 	if err != nil {
 		return nil, err
 	}
@@ -339,7 +369,7 @@ func proposalIDsByTurn(ctx context.Context, db *sqlx.DB, turnIDs []string) (map[
 
 // callsByTurn reads the digests and drops the target of any entry outside the
 // watch set.
-func (l *Ledger) callsByTurn(ctx context.Context, db *sqlx.DB, turnIDs []string, ws coordinator.WatchSet) (map[string][]CallView, error) {
+func (l *Ledger) callsByTurn(ctx context.Context, db *sqlx.DB, turnIDs []string, scope taskScope) (map[string][]CallView, error) {
 	query, args, err := sqlx.In(`SELECT turn_id, action, target_task_id, allowed FROM coordinator_turn_calls WHERE turn_id IN (?) ORDER BY id`, turnIDs)
 	if err != nil {
 		return nil, fmt.Errorf("call digests: %w", err)
@@ -359,7 +389,7 @@ func (l *Ledger) callsByTurn(ctx context.Context, db *sqlx.DB, turnIDs []string,
 			targets = append(targets, r.Target.String)
 		}
 	}
-	visible, err := visibleTasks(ctx, db, targets, ws)
+	visible, err := visibleTasks(ctx, db, targets, scope)
 	if err != nil {
 		return nil, err
 	}
@@ -375,24 +405,25 @@ func (l *Ledger) callsByTurn(ctx context.Context, db *sqlx.DB, turnIDs []string,
 	return out, nil
 }
 
-func visibleTasks(ctx context.Context, db *sqlx.DB, taskIDs []string, ws coordinator.WatchSet) (map[string]bool, error) {
+func visibleTasks(ctx context.Context, db *sqlx.DB, taskIDs []string, scope taskScope) (map[string]bool, error) {
 	visible := map[string]bool{}
 	if len(taskIDs) == 0 {
 		return visible, nil
 	}
-	query, args, err := sqlx.In(`SELECT id, COALESCE(workflow_id, '') AS workflow_id FROM tasks WHERE id IN (?)`, taskIDs)
+	query, args, err := sqlx.In(`SELECT id, COALESCE(workspace_id, '') AS workspace_id, COALESCE(workflow_id, '') AS workflow_id FROM tasks WHERE id IN (?)`, taskIDs)
 	if err != nil {
 		return nil, fmt.Errorf("digest targets: %w", err)
 	}
 	var rows []struct {
-		ID         string `db:"id"`
-		WorkflowID string `db:"workflow_id"`
+		ID          string `db:"id"`
+		WorkspaceID string `db:"workspace_id"`
+		WorkflowID  string `db:"workflow_id"`
 	}
 	if err := db.SelectContext(ctx, &rows, db.Rebind(query), args...); err != nil {
 		return nil, fmt.Errorf("digest targets: %w", err)
 	}
 	for _, r := range rows {
-		visible[r.ID] = ws.Contains(r.WorkflowID)
+		visible[r.ID] = scope.allows(r.WorkspaceID, r.WorkflowID)
 	}
 	return visible, nil
 }

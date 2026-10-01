@@ -182,3 +182,26 @@ func TestReader_ProposalsAndUsage(t *testing.T) {
 		t.Fatalf("no usage rows: %+v %v", c.Tokens, c.CostSubcents)
 	}
 }
+
+func TestReader_AllWatchScopeStaysInsideTheCoordinatorsWorkspace(t *testing.T) {
+	f := newFixture(t)
+	f.exec(`INSERT INTO tasks (id, workspace_id, workflow_id) VALUES ('mine', 'ws-1', 'wf-1'), ('foreign', 'ws-2', 'wf-9')`)
+	f.watch = coordinator.WatchSet{All: true}
+	f.ledgerTurn("a", "sa", time.Now().UTC().Add(-time.Hour), true, VerdictActed)
+	f.callRow("a", "get_task_conversation_kandev", "mine", true)
+	f.callRow("a", "get_task_conversation_kandev", "foreign", false)
+
+	_, foreignErr := f.l.List(t.Context(), f.coord.ID, ListArgs{Task: "foreign"})
+	_, missingErr := f.l.List(t.Context(), f.coord.ID, ListArgs{Task: "no-such-task"})
+	if !errors.Is(foreignErr, coordinator.ErrNotFound) || !errors.Is(missingErr, coordinator.ErrNotFound) {
+		t.Fatalf("foreign = %v, missing = %v, want both not found", foreignErr, missingErr)
+	}
+	p, err := f.l.List(t.Context(), f.coord.ID, ListArgs{Task: "mine"})
+	if err != nil || len(p.Turns) != 1 {
+		t.Fatalf("own task: %+v %v", p, err)
+	}
+	calls := p.Turns[0].Calls
+	if len(calls) != 2 || calls[0].Target == nil || *calls[0].Target != "mine" || calls[1].Target != nil {
+		t.Fatalf("digest = %+v", calls)
+	}
+}
