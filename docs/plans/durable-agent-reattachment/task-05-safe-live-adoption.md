@@ -121,3 +121,11 @@ Completed 2026-09-28.
 
 - `make -C apps/backend lint`, Web recovery tests/lint/typecheck/i18n checks, desktop/mobile durable-recovery E2Es, and docs/spec validation passed. PostgreSQL was unavailable and native Windows/macOS process tests remain release gates.
 - No executor redial policy, remote reachability scheduler, or detached MCP wait/offline policy was added. No changes were committed.
+
+### CI remediation, 2026-10-01
+
+- Lazy execution creation now forwards the retained journal root and stable session owner, falling back to the task environment owner when no session is bound. Backend restart/resume browser validation passes.
+- The concrete backend lifecycle adapter forwards initial delivery submission binding. Its optional-interface regression and Monitor browser validation pass.
+- The focused race command recorded in task 03 passes. Current-head CI remains pending publication.
+
+- CI reproduced forced deletion of established Docker environments after recoverable agent failure. Lifecycle now preserves that environment for authorized resume; bootstrap rollback, deletion, and explicit force remain destructive. Passed `go test -race -tags fts5 ./internal/agent/runtime/lifecycle -run 'TestDockerRecoverableFailureRetains|TestKubernetesRecoverableFailure|Test.*Docker.*Stop|Test.*StopAgentWithReason' -count=1`. All three real-container browser regressions passed with `KANDEV_E2E_CONTAINERS=1 pnpm e2e:raw --project=containers e2e/tests/docker/docker-launch.spec.ts --grep 'externally stopped|external stop' --retries=0 --reporter=line`. Final backend lint passed; public executor guidance was updated.

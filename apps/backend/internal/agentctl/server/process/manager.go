@@ -763,13 +763,25 @@ func (m *Manager) CancelDeliverySubmission(ctx context.Context, id string) error
 	if err != nil {
 		return err
 	}
-	switch submission.State {
-	case journal.SubmissionCancelled, journal.SubmissionCompleted, journal.SubmissionFailed:
-		return nil
-	default:
-		_, err = deliveryJournal.TransitionSubmission(ctx, id, journal.SubmissionCancelled, time.Now().UTC())
+	payload, err := json.Marshal(adapter.AgentEvent{
+		Type:                 adapter.EventTypeComplete,
+		SessionID:            submission.SessionID,
+		DeliverySubmissionID: id,
+		Data:                 map[string]any{"stop_reason": "cancelled"},
+	})
+	if err != nil {
 		return err
 	}
+	err = deliveryJournal.CancelSubmission(ctx, id, journal.Event{
+		SessionID: submission.SessionID, IncarnationID: submission.IncarnationID,
+		HarnessGeneration: submission.HarnessGeneration, StreamID: submission.StreamID,
+		SubmissionID: id, Type: adapter.EventTypeComplete, Terminal: true, Payload: payload,
+		CreatedAt: time.Now().UTC(),
+	})
+	if err == nil {
+		m.signalDeliveryWakeup()
+	}
+	return err
 }
 
 // getBaseBranches returns a snapshot of cfg.BaseBranches under the

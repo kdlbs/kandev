@@ -347,10 +347,8 @@ func (sm *StreamManager) projectDurableAgentDeliveryEventWithEffect(
 	if !deliveryEvent.Terminal || deliveryEvent.SubmissionID == "" {
 		return nil
 	}
-	outcome := models.DeliverySubmissionState(deliveryEvent.EventType)
-	switch outcome {
-	case models.DeliverySubmissionCompleted, models.DeliverySubmissionFailed, models.DeliverySubmissionCancelled:
-	default:
+	outcome := projectedDeliveryTerminalOutcome(deliveryEvent)
+	if outcome == "" {
 		return nil
 	}
 	settler, ok := repository.(agentDeliveryTerminalSettler)
@@ -359,6 +357,24 @@ func (sm *StreamManager) projectDurableAgentDeliveryEventWithEffect(
 	}
 	_, err := settler.SettleAgentDeliveryTerminal(ctx, deliveryEvent.StreamID, deliveryEvent.Sequence, outcome, time.Now().UTC())
 	return err
+}
+
+func projectedDeliveryTerminalOutcome(event *models.AgentDeliveryEvent) models.DeliverySubmissionState {
+	switch event.EventType {
+	case streams.EventTypeComplete:
+		var payload streams.AgentEvent
+		_ = json.Unmarshal(event.Payload, &payload)
+		if payload.Data["stop_reason"] == string(models.DeliverySubmissionCancelled) {
+			return models.DeliverySubmissionCancelled
+		}
+		return models.DeliverySubmissionCompleted
+	case streams.EventTypeError:
+		return models.DeliverySubmissionFailed
+	case string(models.DeliverySubmissionCancelled), "canceled":
+		return models.DeliverySubmissionCancelled
+	default:
+		return ""
+	}
 }
 
 func (sm *StreamManager) projectAndAcknowledgeDurableAgentEvent(
@@ -408,13 +424,7 @@ func deliveryEffectForEvent(event agentctl.AgentEvent) *models.AgentDeliveryEffe
 	}
 	effectKey := fmt.Sprintf("agent_delivery.event:%s:%d", event.DeliveryStreamID, event.DeliverySequence)
 	effectType := "agent_delivery.event"
-	// A managed-runtime retry can emit an error and then complete the same
-	// logical turn. Keep failures sequence-scoped so the later completion can
-	// still claim the workflow effect key.
-	if event.Type == streams.EventTypeComplete && event.TurnID != "" {
-		effectKey = "workflow.on_turn_complete:" + event.TurnID
-		effectType = "workflow.on_turn_complete"
-	}
+	// Event projection never claims the orchestrator's workflow transition key.
 	now := time.Now().UTC()
 	return &models.AgentDeliveryEffect{
 		EffectKey:   effectKey,
@@ -431,19 +441,9 @@ func deliveryEffectForDeliveryEvent(event *models.AgentDeliveryEvent) *models.Ag
 	if event == nil || event.StreamID == "" || event.Sequence == 0 {
 		return nil
 	}
-	var payloadEvent agentctl.AgentEvent
-	if len(event.Payload) > 0 {
-		_ = json.Unmarshal(event.Payload, &payloadEvent)
-	}
 	effectKey := fmt.Sprintf("agent_delivery.event:%s:%d", event.StreamID, event.Sequence)
 	effectType := "agent_delivery.event"
-	// A managed-runtime retry can emit an error and then complete the same
-	// logical turn. Keep failures sequence-scoped so the later completion can
-	// still claim the workflow effect key.
-	if event.EventType == streams.EventTypeComplete && payloadEvent.TurnID != "" {
-		effectKey = "workflow.on_turn_complete:" + payloadEvent.TurnID
-		effectType = "workflow.on_turn_complete"
-	}
+	// Event projection never claims the orchestrator's workflow transition key.
 	now := time.Now().UTC()
 	return &models.AgentDeliveryEffect{
 		EffectKey:   effectKey,

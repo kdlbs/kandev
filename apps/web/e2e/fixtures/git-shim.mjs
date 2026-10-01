@@ -87,11 +87,9 @@ function gateMatchesCommand(gate, subcommand, commandArgs) {
   return typeof gate.startedFile === "string" && typeof gate.releaseFile === "string";
 }
 
-/** Delays fetch/pull or gates clone/fetch/pull/worktree-add when configured. */
+/** Applies numeric fetch/pull delays or an explicit command gate. */
 function maybeDelay(subcommand, commandArgs) {
   const isFetchOrPull = subcommand === "fetch" || subcommand === "pull";
-  const isWorktreeAdd = subcommand === "worktree" && commandArgs[0] === "add";
-  if (!isFetchOrPull && subcommand !== "clone" && !isWorktreeAdd) return;
   const raw = readFileSafe(process.env.KANDEV_E2E_GIT_DELAY_FILE);
   if (isFetchOrPull && /^[0-9]+$/.test(raw)) {
     const delayMs = Number(raw);

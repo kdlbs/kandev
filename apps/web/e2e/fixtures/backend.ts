@@ -8,6 +8,7 @@ import { prepareCompactRuntimeFixture, type CompactRuntimeFixture } from "./comp
 import { E2E_DOCKER_SCOPE } from "./docker-probe";
 import { dwell } from "../helpers/causal-waits";
 import { killProcessGroup } from "./process-group";
+import { writeGitShimLauncher } from "./git-shim-launcher";
 
 const BACKEND_DIR = path.resolve(__dirname, "../../../../apps/backend");
 const WEB_DIR = path.resolve(__dirname, "../..");
@@ -378,7 +379,12 @@ export const backendFixture = base.extend<object, { backend: BackendContext }>({
         const shimGitLabPushRecordFile = path.join(tmpDir, "gitlab-push-record");
         const originalPath = process.env.PATH ?? "";
         fs.mkdirSync(shimDir, { recursive: true });
-        writeGitShimLauncher(shimDir, shimScript);
+        writeGitShimLauncher(shimDir, shimScript, {
+          KANDEV_E2E_ORIGINAL_PATH: originalPath,
+          KANDEV_E2E_GIT_DELAY_FILE: shimDelayFile,
+          KANDEV_E2E_GITLAB_PUSH_FILE: shimGitLabPushFile,
+          KANDEV_E2E_GITLAB_PUSH_RECORD_FILE: shimGitLabPushRecordFile,
+        });
 
         // Opt-in: Docker E2E project or KANDEV_E2E_DOCKER=1 enables real
         // container execution. Default is off so the regular suite stays fast
@@ -549,30 +555,6 @@ export const backendFixture = base.extend<object, { backend: BackendContext }>({
     { scope: "worker", timeout: 60_000 },
   ],
 });
-
-/**
- * Write a small launcher named `git` (POSIX) or `git.cmd` (Windows) into
- * `shimDir` that hands control to the Node `git-shim.mjs`. Kept minimal and
- * platform-specific because the interesting logic lives in the .mjs; this only
- * bridges a PATH `git` lookup to `node git-shim.mjs "$@"`. `process.execPath`
- * is the Node binary already running the E2E suite, so no separate Node install
- * is assumed on PATH.
- */
-function writeGitShimLauncher(shimDir: string, shimScript: string): void {
-  const node = process.execPath;
-  if (process.platform === "win32") {
-    // %* forwards all args verbatim; extensionless files aren't executable via
-    // PATHEXT on Windows, so a .cmd wrapper is required for exec.Command("git").
-    const launcher = `@echo off\r\n"${node}" "${shimScript}" %*\r\n`;
-    fs.writeFileSync(path.join(shimDir, "git.cmd"), launcher);
-    return;
-  }
-  // POSIX: an extensionless `git` shebang launcher. `#!/bin/sh` is only the
-  // launcher interpreter (guaranteed present on macOS/Linux) — the shim body is
-  // Node, so the developer's login shell (bash/zsh/fish) is irrelevant.
-  const launcher = `#!/bin/sh\nexec "${node}" "${shimScript}" "$@"\n`;
-  fs.writeFileSync(path.join(shimDir, "git"), launcher, { mode: 0o755 });
-}
 
 /** Strip GH_TOKEN / GITHUB_TOKEN so the mock client is used. */
 // Sanitize the inherited environment before handing it to the e2e backend.

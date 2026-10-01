@@ -23,6 +23,9 @@ func deliveryTerminalSettlementEffect(event *models.AgentDeliveryEvent) (*models
 	}
 	var payload streams.AgentEvent
 	_ = json.Unmarshal(event.Payload, &payload)
+	if event.EventType == streams.EventTypeComplete && payload.Data["stop_reason"] == string(models.DeliverySubmissionCancelled) {
+		outcome = models.DeliverySubmissionCancelled
+	}
 	now := time.Now().UTC()
 	return &models.AgentDeliveryEffect{
 		EffectKey:         fmt.Sprintf("agent_delivery.terminal:%s:%d", event.StreamID, event.Sequence),
@@ -46,7 +49,7 @@ func deliveryTerminalOutcome(eventType string) models.DeliverySubmissionState {
 		return models.DeliverySubmissionCompleted
 	case streams.EventTypeError:
 		return models.DeliverySubmissionFailed
-	case "cancelled", "canceled":
+	case string(models.DeliverySubmissionCancelled), "canceled":
 		return models.DeliverySubmissionCancelled
 	default:
 		return ""

@@ -450,7 +450,45 @@ func TestDeliveryEffectAllowsSuccessfulRetryAfterTerminalFailure(t *testing.T) {
 	if got, want := failureEffect.EffectKey, "agent_delivery.event:"+streamID+":1"; got != want {
 		t.Fatalf("failure effect key = %q, want %q", got, want)
 	}
-	if got, want := successEffect.EffectKey, "workflow.on_turn_complete:turn-managed-runtime-retry"; got != want {
+	if got, want := successEffect.EffectKey, "agent_delivery.event:"+streamID+":2"; got != want {
 		t.Fatalf("success effect key = %q, want %q", got, want)
+	}
+	storedEvent := &models.AgentDeliveryEvent{
+		StreamID: streamID, Sequence: 2, EventType: streams.EventTypeComplete,
+		Payload: []byte(`{"type":"complete","turn_id":"turn-managed-runtime-retry"}`),
+	}
+	if storedEffect := deliveryEffectForDeliveryEvent(storedEvent); storedEffect.EffectKey != successEffect.EffectKey {
+		t.Fatalf("persisted completion effect = %q, want %q", storedEffect.EffectKey, successEffect.EffectKey)
+	}
+}
+
+type terminalSettlingDeliveryRepository struct {
+	recordingAgentDeliveryRepository
+	outcome models.DeliverySubmissionState
+}
+
+func (r *terminalSettlingDeliveryRepository) SettleAgentDeliveryTerminal(_ context.Context, _ string, _ int64, outcome models.DeliverySubmissionState, _ time.Time) (bool, error) {
+	r.outcome = outcome
+	return true, nil
+}
+
+func TestProjectionSettlesTerminalBeforeLifecycleCanSuppressCallback(t *testing.T) {
+	for _, outcome := range []models.DeliverySubmissionState{models.DeliverySubmissionCompleted, models.DeliverySubmissionCancelled, models.DeliverySubmissionFailed} {
+		t.Run(string(outcome), func(t *testing.T) {
+			repo := &terminalSettlingDeliveryRepository{}
+			event := &models.AgentDeliveryEvent{StreamID: "stream", Sequence: 1, SubmissionID: "submission", EventType: streams.EventTypeComplete, Terminal: true}
+			if outcome == models.DeliverySubmissionFailed {
+				event.EventType = streams.EventTypeError
+			}
+			if outcome == models.DeliverySubmissionCancelled {
+				event.Payload = []byte(`{"data":{"stop_reason":"cancelled"}}`)
+			}
+			if err := (&StreamManager{}).projectDurableAgentDeliveryEventWithEffect(context.Background(), event, repo, nil); err != nil {
+				t.Fatal(err)
+			}
+			if repo.outcome != outcome {
+				t.Fatalf("terminal outcome = %q, want %q", repo.outcome, outcome)
+			}
+		})
 	}
 }

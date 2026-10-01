@@ -201,7 +201,7 @@ function interceptServerResponse(
   socket: WebSocketRoute,
   state: ResponseHandlingState,
 ): boolean {
-  const rejection = consumeRejectRule(context, state.rejectRules, state.rejectedCounts);
+  const rejection = consumeRejectRule(context, state.rejectedCounts);
   if (rejection && frame) {
     socket.send(
       JSON.stringify({

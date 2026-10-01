@@ -3,7 +3,7 @@ package lifecycle
 import "github.com/kandev/kandev/internal/agent/executor"
 
 // StopReasonRecoverableAgentFailure stops a failed agent while retaining the
-// Kubernetes runtime and credentials needed to resume its session.
+// task runtime and credentials needed to resume its session.
 const StopReasonRecoverableAgentFailure = "recoverable agent failure"
 
 // shouldPreserveKubernetesRuntime retains established Kubernetes resources for
@@ -14,4 +14,11 @@ func shouldPreserveKubernetesRuntime(execution *AgentExecution, reason string) b
 	}
 	return reason == StopReasonRecoverableAgentFailure ||
 		(execution.isResumedSession && reason == StopReasonAgentBootstrapFailed)
+}
+
+func shouldPreserveRecoverableRuntime(execution *AgentExecution, reason string) bool {
+	if shouldPreserveKubernetesRuntime(execution, reason) {
+		return true
+	}
+	return execution != nil && execution.RuntimeName == executor.NameDocker && reason == StopReasonRecoverableAgentFailure
 }

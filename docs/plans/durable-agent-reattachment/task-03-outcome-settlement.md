@@ -110,3 +110,12 @@ Completed 2026-09-28.
 - Race coverage passed for SQLite, orchestrator, Office, and automation in the five-package run. The complete lifecycle package passed separately with `go test -race ./internal/agent/runtime/lifecycle -count=1` using a private `/tmp` mount. The runtime-loss regression now waits for the identity-bound recovery notice and reads mutable execution state under its store lock.
 - `go run ./cmd/sqlguard ./internal`, `go test -race ./internal/persistence/storeconformance -count=1`, backend lint, document catalog validation, full spec lint, and whitespace checks passed. Store conformance used SQLite; PostgreSQL coverage was skipped because `KANDEV_TEST_POSTGRES_DSN` is not configured.
 - Native Windows/macOS containment tests remain release gates. No test or implementation changes were committed.
+
+### CI remediation, 2026-10-01
+
+- Event projection now owns `agent_delivery.event:<stream>:<sequence>`; the orchestrator exclusively owns workflow transition deduplication. The dynamic workflow completion browser regression passes.
+- Explicit cancellation commits its terminal record and cancelled submission in one journal transaction. Repeated cancellation preserves one terminal. A capacity failure rolls back both, including after reopening the journal.
+- Terminal projection maps wire `complete`/`error` and `data.stop_reason=cancelled` to submission outcomes before lifecycle callback suppression. SQL settlement uses the same cancellation meaning.
+- Passed `go test -race -tags fts5 ./internal/agent/runtime/lifecycle ./internal/agentctl/journal ./internal/agentctl/server/process ./internal/task/repository/sqlite ./internal/backendapp -run 'TestProjectionSettlesTerminal|TestCancel|Test.*Delivery|TestPrepareExecutionCreateRequest' -count=1`.
+- Passed all five desktop/mobile cancellation browser regressions with `pnpm e2e:raw --project=chromium --project=mobile-chrome e2e/tests/session/pause-resume-recovery.spec.ts e2e/tests/session/mobile-pause-resume-recovery.spec.ts --retries=0 --reporter=line`. Per-spec retry overrides were removed.
+- Passed the complete five affected backend packages with `go test -race -tags fts5 ./internal/agent/runtime/lifecycle ./internal/agentctl/journal ./internal/agentctl/server/process ./internal/task/repository/sqlite ./internal/backendapp -count=1`. Backend lint, web typecheck, affected web lint/helper tests, catalog/spec lint, and whitespace passed before the subsequent Docker stop-policy fix. Current-head CI remains pending publication.

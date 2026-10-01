@@ -363,45 +363,52 @@ func (j *Journal) TransitionSubmission(ctx context.Context, id string, next Subm
 	defer j.mu.RUnlock()
 	var submission Submission
 	err := j.db.Update(func(tx *bolt.Tx) error {
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-		bucket := tx.Bucket(bucketSubmissions)
-		raw := bucket.Get([]byte(id))
-		if raw == nil {
-			return ErrSubmissionNotFound
-		}
-		if err := json.Unmarshal(raw, &submission); err != nil {
-			return ErrJournalCorrupt
-		}
-		if !validSubmissionTransition(submission.State, next) {
-			return ErrSubmissionState
-		}
-		submission.State = next
-		if updatedAt.IsZero() {
-			updatedAt = time.Now().UTC()
-		}
-		submission.UpdatedAt = updatedAt
-		encoded, err := json.Marshal(submission)
-		if err != nil {
-			return err
-		}
-		journalBytes, err := decodeInt64(tx.Bucket(bucketMeta).Get(keyJournalBytes))
-		if err != nil {
-			return err
-		}
-		oldBytes := int64(len(raw))
-		newBytes := int64(len(encoded))
-		if newBytes > oldBytes && journalBytes+newBytes-oldBytes > j.config.MaxJournalBytes {
-			return ErrJournalFull
-		}
-		if err := bucket.Put([]byte(id), encoded); err != nil {
-			return err
-		}
-		return tx.Bucket(bucketMeta).Put(keyJournalBytes, encodeInt64(journalBytes+newBytes-oldBytes))
+		var err error
+		submission, err = j.transitionSubmissionTx(ctx, tx, id, next, updatedAt)
+		return err
 	})
 	if err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
 		RecordJournalError(classifyJournalError(err))
 	}
 	return submission, err
+}
+
+func (j *Journal) transitionSubmissionTx(ctx context.Context, tx *bolt.Tx, id string, next SubmissionState, updatedAt time.Time) (Submission, error) {
+	var submission Submission
+	if err := ctx.Err(); err != nil {
+		return submission, err
+	}
+	bucket := tx.Bucket(bucketSubmissions)
+	raw := bucket.Get([]byte(id))
+	if raw == nil {
+		return submission, ErrSubmissionNotFound
+	}
+	if err := json.Unmarshal(raw, &submission); err != nil {
+		return submission, ErrJournalCorrupt
+	}
+	if !validSubmissionTransition(submission.State, next) {
+		return submission, ErrSubmissionState
+	}
+	submission.State = next
+	if updatedAt.IsZero() {
+		updatedAt = time.Now().UTC()
+	}
+	submission.UpdatedAt = updatedAt
+	encoded, err := json.Marshal(submission)
+	if err != nil {
+		return submission, err
+	}
+	journalBytes, err := decodeInt64(tx.Bucket(bucketMeta).Get(keyJournalBytes))
+	if err != nil {
+		return submission, err
+	}
+	oldBytes := int64(len(raw))
+	newBytes := int64(len(encoded))
+	if newBytes > oldBytes && journalBytes+newBytes-oldBytes > j.config.MaxJournalBytes {
+		return submission, ErrJournalFull
+	}
+	if err := bucket.Put([]byte(id), encoded); err != nil {
+		return submission, err
+	}
+	return submission, tx.Bucket(bucketMeta).Put(keyJournalBytes, encodeInt64(journalBytes+newBytes-oldBytes))
 }

@@ -10,6 +10,23 @@ import (
 	"github.com/kandev/kandev/internal/task/models"
 )
 
+func TestCancelledCompleteEventSettlesMatchingBlockAsCancelled(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+	seedDeliverySettlement(t, repo, ctx, "cancel", "submission-cancel")
+	event := terminalDeliveryEvent("cancel", "submission-cancel", "stream-cancel", 1, "complete")
+	event.Payload = []byte(`{"type":"complete","data":{"stop_reason":"cancelled"},"turn_id":"turn-cancel"}`)
+	projectDeliveryEvent(t, repo, ctx, event)
+	settled, err := repo.SettleAgentDeliveryTerminal(ctx, event.StreamID, event.Sequence, models.DeliverySubmissionCancelled, time.Now().UTC())
+	if err != nil || !settled {
+		t.Fatalf("cancel settlement = %v, %v; want settled", settled, err)
+	}
+	submission, err := repo.GetAgentDeliverySubmission(ctx, event.SubmissionID)
+	if err != nil || submission.State != models.DeliverySubmissionCancelled {
+		t.Fatalf("cancel submission = %+v, %v", submission, err)
+	}
+}
+
 func TestSQLiteDeliveryTerminalSettlesMatchingBlock(t *testing.T) {
 	repo := newRepoForSessionTests(t)
 	ctx := context.Background()

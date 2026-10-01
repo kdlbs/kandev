@@ -621,6 +621,10 @@ func (a *lifecycleAdapter) SetPromptTurnID(ctx context.Context, agentExecutionID
 	return a.mgr.SetPromptTurnID(ctx, agentExecutionID, turnID)
 }
 
+func (a *lifecycleAdapter) SetInitialDeliverySubmissionID(ctx context.Context, agentExecutionID, submissionID string) error {
+	return a.mgr.SetInitialDeliverySubmissionID(ctx, agentExecutionID, submissionID)
+}
+
 // RequiresCloneURL implements executor.ExecutorTypeCapabilities by delegating to
 // the lifecycle manager. Without this, executor types like local_docker and
 // sprites can't tell the orchestrator they need a clone URL.

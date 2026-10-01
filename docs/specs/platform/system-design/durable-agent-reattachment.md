@@ -70,6 +70,8 @@ If an executor's transport has been destroyed, return transport_unavailable whil
 A later executor redial hook can supply the authenticated replacement connection and invoke the same operation.
 The ten-second initial window does not define a maximum lifetime for recoverable uncertainty.
 
+Established Docker environments remain retained after recoverable agent failure. Cleanup stops process ownership without force-removing the container, so a later authorized resume can reuse its workspace. Fresh bootstrap rollback, task/session deletion, and explicit force-stop remain destructive. This policy does not authorize a prompt resend.
+
 ## Submission-specific block settlement
 
 SessionRecoveryBlock currently identifies session/incarnation/generation but not the original submission.
