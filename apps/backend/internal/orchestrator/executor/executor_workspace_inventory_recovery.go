@@ -33,28 +33,11 @@ func (e *Executor) admitLaunchWorkspaceInventory(
 	env *models.TaskEnvironment,
 	repositories []*repoInfo,
 ) error {
-	if err := e.validateReuseEnvironmentInventory(ctx, req, env); err != nil {
-		// Fresh and additional-session launches have no caller-facing repair
-		// option, so attempt the guarded repair automatically while preserving
-		// the original fail-closed error when the checkout cannot be proven.
-		if !req.WorkspaceReuseRequired || !req.UseWorktree {
-			return err
-		}
-		receipt, repairErr := e.repairReuseEnvironmentInventory(
-			ctx, task, session, req, env, repositories,
-			workspaceInventoryLaunchIdempotencyKey(session.ID),
+	inventoryErr := e.validateReuseEnvironmentInventory(ctx, req, env)
+	if inventoryErr != nil {
+		return e.admitLaunchWorkspaceInventoryAfterRepair(
+			ctx, task, session, req, env, repositories, inventoryErr,
 		)
-		if repairErr != nil {
-			if e.logger != nil {
-				e.logger.Info("automatic workspace inventory repair did not resolve launch mismatch, falling back to fail-closed admission error",
-					zap.String("task_id", task.ID),
-					zap.String("session_id", session.ID),
-					zap.Error(repairErr))
-			}
-			return err
-		}
-		req.WorkspaceInventoryRecoveryReceipt = receipt
-		return e.validateReuseEnvironmentInventory(ctx, req, env)
 	}
 	if !req.WorkspaceReuseRequired || !req.UseWorktree {
 		return nil
@@ -73,6 +56,60 @@ func (e *Executor) admitLaunchWorkspaceInventory(
 	}
 	req.WorkspaceInventoryRecoveryReceipt = receipt
 	return nil
+}
+
+// admitLaunchWorkspaceInventoryAfterRepair keeps fresh and additional-session
+// repair fail-closed while requiring durable attestation for every requested
+// slot once revalidation confirms canonical inventory.
+func (e *Executor) admitLaunchWorkspaceInventoryAfterRepair(
+	ctx context.Context,
+	task *v1.Task,
+	session *models.TaskSession,
+	req *LaunchAgentRequest,
+	env *models.TaskEnvironment,
+	repositories []*repoInfo,
+	inventoryErr error,
+) error {
+	if !req.WorkspaceReuseRequired || !req.UseWorktree {
+		return inventoryErr
+	}
+	receipt, repairErr := e.repairReuseEnvironmentInventory(
+		ctx, task, session, req, env, repositories,
+		workspaceInventoryLaunchIdempotencyKey(session.ID),
+	)
+	if repairErr != nil {
+		if e.logger != nil {
+			e.logger.Info("automatic workspace inventory repair did not resolve launch mismatch, falling back to fail-closed admission error",
+				zap.String("task_id", task.ID),
+				zap.String("session_id", session.ID),
+				zap.Error(repairErr))
+		}
+		return inventoryErr
+	}
+	req.WorkspaceInventoryRecoveryReceipt = receipt
+	if err := e.validateReuseEnvironmentInventory(ctx, req, env); err != nil {
+		return err
+	}
+	return e.requireAttestedLaunchWorkspaceInventoryRows(ctx, task, session, req, env, repositories)
+}
+
+func (e *Executor) requireAttestedLaunchWorkspaceInventoryRows(
+	ctx context.Context,
+	task *v1.Task,
+	session *models.TaskSession,
+	req *LaunchAgentRequest,
+	env *models.TaskEnvironment,
+	repositories []*repoInfo,
+) error {
+	if _, err := e.attestedWorkspaceInventoryRowsReceipt(ctx, task, session, req, env, repositories); err == nil {
+		return nil
+	} else if e.logger != nil {
+		e.logger.Info("automatic workspace inventory repair receipt is not launchable",
+			zap.String("task_id", task.ID),
+			zap.String("session_id", session.ID),
+			zap.Error(err))
+	}
+	return fmt.Errorf("%w: workspace inventory repair receipt is not durably attested", models.ErrWorkspaceReuseUnsafe)
 }
 
 func (e *Executor) repairClaimedWorkspaceInventory(
