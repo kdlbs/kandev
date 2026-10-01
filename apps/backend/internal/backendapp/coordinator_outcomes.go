@@ -67,7 +67,7 @@ func wireCoordinatorOutcomes(p routeParams, svc *coordinator.Service) {
 	scanner.Start(p.ctx)
 	svc.SetDecisionObserver(recorder.NewObservers(log, queue, capture))
 	if svc.Phase31Enabled() {
-		svc.SetOutcomeMeasures(recorder.NewMeasures(reader, nil))
+		svc.SetOutcomeMeasures(recorder.NewMeasures(reader, dreamAgreement{store: svc.Store()}))
 	}
 	if p.addCleanup != nil {
 		p.addCleanup(func() error {

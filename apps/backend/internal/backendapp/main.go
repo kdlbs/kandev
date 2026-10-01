@@ -1606,6 +1606,7 @@ func constructOfficeServices(
 		return nil, false
 	}
 	services.UsageWriter = usageWriter
+	services.Pricing = pricingLookup
 
 	if !cfg.Features.Office {
 		log.Info("Office feature disabled; Office services skipped while global run scheduling remains enabled")
