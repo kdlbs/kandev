@@ -6,7 +6,7 @@ system: coordinator
 owners:
   - kandev
 created: 2026-09-26
-last_updated: 2026-09-28
+last_updated: 2026-10-01
 ---
 
 # Task proposals Requirements
@@ -103,10 +103,18 @@ Mockup:
   eligible step, it shall also never be a feeder of an auto-starting step, so
   no automatic queue or WIP-limit promotion following the create can start an
   agent either.
-- **AC-COORDINATOR-PROPOSALS-002.13:** The created task shall not inherit the
-  coordinator's agent profile. When it is later started, it shall resolve its
-  agent the way any task of its target workflow does: the step's agent
-  profile, then the workflow's default, then the workspace default.
+- **AC-COORDINATOR-PROPOSALS-002.13:** When an approval, a manager's or an
+  automatic one, is about to create its task, the system shall first resolve
+  the agent profile the task would get without any addition, by the chain a
+  task of its target workflow follows when it starts: the step's agent
+  profile, then the workflow's default, then the workspace default. When
+  that chain yields a profile, the system shall add no agent profile and no
+  executor profile to the task. When it yields none, the system shall add the
+  coordinator's Agent for created tasks
+  ([created task agent](created-task-agent.md#req-coordinator-created-task-agent-001-agent-for-created-tasks))
+  to the task as its agent profile and executor profile, so that the task can
+  start. The task shall never take the coordinator's own agent profile or
+  executor profile for this.
 - **AC-COORDINATOR-PROPOSALS-002.14:** When a claim goes stale while the
   process keeps running, the system shall recover it (`AC-COORDINATOR-PROPOSALS-002.7`)
   within one minute of it going stale, with no manager action and no restart.
@@ -114,6 +122,26 @@ Mockup:
   reachable from a coordinator session's Kandev surface: a coordinator
   principal that calls either shall be refused and change nothing, and a
   principal that cannot be resolved shall be refused.
+- **AC-COORDINATOR-PROPOSALS-002.16:** When a profile is to be added under
+  `AC-COORDINATOR-PROPOSALS-002.13` and the coordinator's Agent for created
+  tasks, as stored at that moment, has an agent profile that is missing or
+  CLI passthrough, or an executor profile that is missing, the system shall
+  create no task and settle the proposal `failed` with an error that names
+  "Agent for created tasks" and the field that is not usable, so that a
+  manager can fix the setting and approve again. The check shall run before
+  every create call, including a stale re-claim's and an automatic approval's.
+  When one of the reads the check needs fails for a reason other than not
+  found, the system shall create no task and leave the row `approving` under
+  its claim, and an approve request shall return 500.
+- **AC-COORDINATOR-PROPOSALS-002.17:** Adding a profile under
+  `AC-COORDINATOR-PROPOSALS-002.13` shall not change whether an agent starts:
+  an approval shall start an agent only when the phase-2 start-agent policy
+  already allows it, and an automatic approval shall start none
+  (`AC-COORDINATOR-AUTOMATIC-003.1`).
+- **AC-COORDINATOR-PROPOSALS-002.18:** When a recovery finds the task an
+  earlier attempt created, the system shall complete the approval with that
+  task and shall not change it, whatever the coordinator's Agent for created
+  tasks is by then.
 - **AC-COORDINATOR-PROPOSALS-002.3:** When a manager approves with edits, the
   system shall merge the edited title, description, workflow, step and
   repository into the spec and validate it as in
@@ -267,6 +295,18 @@ Mockup:
   stale shall show "Approval did not finish." and **Retry**, which runs the
   same recovery as an approve without edits; a claim that is not stale keeps
   "Approval in progress. Edits are locked." with no actions.
+- **AC-COORDINATOR-PROPOSALS-005.11:** A `pending` or `failed` proposal card,
+  on Needs you and in the copilot transcript, shall show below the workflow
+  and step "Runs with: <agent profile name>", naming the agent profile the
+  created task would run with under `AC-COORDINATOR-PROPOSALS-002.13` (the
+  step's, the workflow's, the workspace default or the coordinator's Agent
+  for created tasks), and the raw profile id when its name is unknown. When
+  no usable profile exists (`AC-COORDINATOR-PROPOSALS-002.16`) it shall show
+  "No agent available. Check Agent for created tasks in the coordinator
+  settings." and keep **Approve** enabled. Other states shall show no such
+  line. The line shall show for readers too, and its copy shall be localized
+  in all six languages with no em dash.
+
 ## Out of scope
 
 - Undo of an approval (needs the phase 2 "What it did" log).
@@ -276,7 +316,18 @@ Mockup:
 - Any `automatic` write class (decision D13, gate G2 and phase 3).
 - Expiry of pending proposals: they stay until decided or their coordinator is
   deleted.
-- The agent profile and executor of the task an approval creates. **Decided
+- The agent profile and executor of the task an approval creates. **Superseded
+  2026-10-01 (live finding F-07, owner decision) by
+  `AC-COORDINATOR-PROPOSALS-002.13`, `002.16` to `002.18`, `005.11` and
+  `REQ-COORDINATOR-CREATED-TASK-AGENT-001`.** The text below is kept as history. It
+  decided (D1) that an approved task carries no profile and resolves like any
+  task of its workflow; in a workspace with no step, workflow or workspace
+  default that left every approved task unable to start. The decision as
+  originally written, together with the text of `AC-COORDINATOR-PROPOSALS-002.13`
+  it replaced ("The created task shall not inherit the coordinator's agent
+  profile. When it is later started, it shall resolve its agent the way any
+  task of its target workflow does: the step's agent profile, then the
+  workflow's default, then the workspace default."):
   (D1), no backend change:** an approved task carries no profile of its own
   and resolves like any task on its target workflow. The approve path
   (`createApprovedTask`, `apps/backend/internal/coordinator/approve.go:367`)

@@ -148,6 +148,64 @@ adds a second predicate beside the permissions design's workflow watch. The
 permissions requirements gain REQ-COORDINATOR-PERMISSIONS-005 and a definition of
 a watched task.
 
+## Amendment 2026-10-01: Agent for created tasks (reverses D1)
+
+Work order 07 of phase 3.1 amends the phase 1 decision recorded as "Decided
+(D1), no backend change" in the proposals requirements (not D1 of
+[ADR-2026-09-26-workspace-coordinator](2026-09-26-workspace-coordinator.md),
+which is where the product lives). That decision said an approved task carries
+no agent profile of its own and resolves its agent at start like any task of its
+board.
+
+**Reason (live finding F-07).** In a workspace with no step profile, no
+workflow default and no workspace default, an approved task could never start:
+opening it showed "Failed to ensure session: task has no agent_profile_id
+configured". Seven of nine workspaces on the main instance had no workspace
+default, and the soak hit it. The old behaviour failed open into a dead card.
+
+**Decision (owner, 2026-10-01).**
+
+- Each coordinator gets an "Agent for created tasks" setting: an agent profile
+  and an executor profile, required on create and edit, validated like the
+  coordinator's own pair, shown in settings and in guided setup, pre-filled
+  from the workspace default agent profile else the coordinator's own pair, and
+  backfilled for existing coordinators from their own pair.
+- At approve, on the human path and the automatic path alike, the system
+  resolves what the task would get without the setting (step, workflow,
+  workspace default, through one function shared with the orchestrator). When
+  that yields a profile, nothing is added. Otherwise the setting is stamped into
+  the created task's metadata. When the stamp is needed and the setting is
+  unusable, the approval creates no task and settles the proposal `failed` with
+  a reason.
+- The proposal card shows "Runs with: <profile name>".
+- Unchanged: an approval starts an agent only when the phase-2 start-agent
+  policy allows it and an automatic approval starts none. The owner keeps that a
+  separate decision.
+
+**Flag.** This is not behind `features.coordinatorPhase31`. It fixes a fail-open
+dead card, so it ships under `features.coordinator` alone, with the phase 1
+behaviour it replaces, in every profile where the coordinator is on. No runtime
+flag is added.
+
+**Tests that change with the amended criterion.** Two phase 3 tests assert that
+the created task's request metadata is empty and now assert the stamp:
+`TestAutomaticApproval_ApprovesAndRecordsRaiser` (the request carries the stamp
+when the chain is empty and no `auto_start_on_create`) and
+`TestAutomaticApproval_ManagerApprovalAfterFailureKeepsAutomaticAtAndAuthorization`
+(no request carries `auto_start_on_create`; the stamp is allowed). The approve
+tests that build a `Service` over fakes gain a coordinator row with a task pair
+and a chain input, and the end-to-end coordinator fixtures create coordinators
+with the two new fields. Each is named in
+[work order 07](../plans/workspace-coordinator-p3-1/task-07-agent-for-created-tasks.md).
+
+**Consequences.** One more pair of columns on `coordinators` (additive,
+backfilled), two members on the create, setup and PATCH bodies, two statuses on
+the coordinator read, `runs_with` on pending and failed proposals, one new leaf
+package that holds the agent profile chain, a changed claim-to-create step,
+and one field group and one Review row in settings and setup. Work order 06
+(Watches by project) also edits those two screens; this order adds exactly one
+field group and one row so the merge is mechanical.
+
 ## G3.1 conditions
 
 1. Phase 3 is merged with its exit met.
