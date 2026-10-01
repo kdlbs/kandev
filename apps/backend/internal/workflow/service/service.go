@@ -3,6 +3,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -616,36 +617,14 @@ func (s *Service) ReorderSteps(ctx context.Context, workflowID string, stepIDs [
 	if err := s.AuthorizeWorkflow(ctx, workflowID); err != nil {
 		return err
 	}
-	// Resolve and check every step before writing any of them. The step IDs
-	// are caller-supplied and are not required by anything upstream to belong
-	// to workflowID, so a reorder could set positions on another workflow's
-	// steps — including a read-only one, whose guard only ever saw the
-	// workflow named in the URL. A rejection found halfway through the write
-	// loop would also leave a half-applied reorder behind.
-	steps := make([]*models.WorkflowStep, 0, len(stepIDs))
-	for _, stepID := range stepIDs {
-		step, err := s.repo.GetStep(ctx, stepID)
-		if err != nil {
-			s.logger.Error("failed to get step for reorder", zap.String("step_id", stepID), zap.Error(err))
-			return err
-		}
-		if step == nil || step.WorkflowID != workflowID {
-			// Same answer as a step that does not exist: the caller named an
-			// ID this workflow does not own, and whether it exists elsewhere
-			// is not theirs to learn.
-			s.logger.Warn("refused to reorder a step from another workflow",
-				zap.String("step_id", stepID), zap.String("workflow_id", workflowID))
+	if err := s.repo.ReorderSteps(ctx, workflowID, stepIDs); err != nil {
+		if errors.Is(err, models.ErrWorkflowStepNotFound) {
 			return ErrNotVisible
 		}
-		steps = append(steps, step)
+		s.logger.Error("failed to reorder workflow steps", zap.String("workflow_id", workflowID), zap.Error(err))
+		return err
 	}
-	for i, step := range steps {
-		step.Position = i
-		if err := s.repo.UpdateStep(ctx, step); err != nil {
-			s.logger.Error("failed to update step position", zap.String("step_id", step.ID), zap.Error(err))
-			return err
-		}
-	}
+
 	s.logger.Info("reordered workflow steps", zap.String("workflow_id", workflowID), zap.Int("count", len(stepIDs)))
 	return nil
 }
