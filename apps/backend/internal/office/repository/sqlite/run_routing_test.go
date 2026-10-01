@@ -11,6 +11,7 @@ import (
 	settingsstore "github.com/kandev/kandev/internal/agent/settings/store"
 	"github.com/kandev/kandev/internal/office/models"
 	"github.com/kandev/kandev/internal/office/repository/sqlite"
+	runsmodels "github.com/kandev/kandev/internal/runs/models"
 )
 
 // newTestRepoWithDB returns both the repo and the underlying *sqlx.DB
@@ -53,7 +54,7 @@ func seedAgentProfile(t *testing.T, db *sqlx.DB, id, workspaceID string) {
 func TestSetRunResolvedRoute_PersistsExecutionProfileAndSnapshots(t *testing.T) {
 	repo, _ := newTestRepoWithDB(t)
 	ctx := context.Background()
-	run := &models.Run{
+	run := &runsmodels.Run{
 		AgentProfileID: "office-cto",
 		Reason:         "task_assigned",
 		Payload:        `{}`,
@@ -93,14 +94,14 @@ func TestClearAllParkedRoutingForWorkspace_ClearsOnlyTargetWorkspace(t *testing.
 	seedAgentProfile(t, db, "agent-a", "ws-a")
 	seedAgentProfile(t, db, "agent-b", "ws-b")
 
-	runA := &models.Run{
+	runA := &runsmodels.Run{
 		AgentProfileID: "agent-a",
 		Reason:         "task_assigned",
 		Payload:        `{"task_id":"t1"}`,
 		Status:         "queued",
 		CoalescedCount: 1,
 	}
-	runB := &models.Run{
+	runB := &runsmodels.Run{
 		AgentProfileID: "agent-b",
 		Reason:         "task_assigned",
 		Payload:        `{"task_id":"t2"}`,
@@ -167,7 +168,7 @@ func TestClearAllParkedRoutingForWorkspace_NoParkedRuns(t *testing.T) {
 	ctx := context.Background()
 
 	seedAgentProfile(t, db, "agent-a", "ws-a")
-	run := &models.Run{
+	run := &runsmodels.Run{
 		AgentProfileID: "agent-a",
 		Reason:         "task_assigned",
 		Payload:        "{}",
@@ -192,7 +193,7 @@ func TestParkRunForSessionRecoveryPreservesPendingWork(t *testing.T) {
 	ctx := context.Background()
 
 	seedAgentProfile(t, db, "agent-recovery", "ws-recovery")
-	run := &models.Run{
+	run := &runsmodels.Run{
 		AgentProfileID: "agent-recovery",
 		Reason:         "task_assigned",
 		Payload:        `{"task_id":"task-recovery"}`,
@@ -217,7 +218,7 @@ func TestParkRunForSessionRecoveryPreservesPendingWork(t *testing.T) {
 		t.Fatalf("status = %q, want queued", got.Status)
 	}
 	if got.RoutingBlockedStatus == nil ||
-		*got.RoutingBlockedStatus != models.RoutingBlockedSessionRecoveryRequired {
+		*got.RoutingBlockedStatus != runsmodels.RoutingBlockedSessionRecoveryRequired {
 		t.Fatalf("routing block = %v, want session recovery", got.RoutingBlockedStatus)
 	}
 	if got.SessionRecoveryBlockID == nil || *got.SessionRecoveryBlockID != "block-recovery" {
@@ -245,7 +246,7 @@ func TestParkRunForSessionRecoveryPreservesPendingWork(t *testing.T) {
 		t.Fatalf("reload after generic clear: %v", err)
 	}
 	if stillBlocked.RoutingBlockedStatus == nil ||
-		*stillBlocked.RoutingBlockedStatus != models.RoutingBlockedSessionRecoveryRequired {
+		*stillBlocked.RoutingBlockedStatus != runsmodels.RoutingBlockedSessionRecoveryRequired {
 		t.Fatalf("generic clear released recovery run: %v", stillBlocked.RoutingBlockedStatus)
 	}
 	if err := repo.ClearSessionRecoveryPark(ctx, run.ID, "block-recovery"); err != nil {
@@ -270,7 +271,7 @@ func TestListRunsWaitingOnProvider_MatchesParkedRunForProvider(t *testing.T) {
 	ctx := context.Background()
 
 	seedAgentProfile(t, db, "agent-a", "ws-a")
-	run := &models.Run{
+	run := &runsmodels.Run{
 		AgentProfileID: "agent-a",
 		Reason:         "task_assigned",
 		Payload:        `{"task_id":"t1"}`,
@@ -308,7 +309,7 @@ func TestListRunsWaitingOnProvider_WildcardProviderIDMatchesNone(t *testing.T) {
 	ctx := context.Background()
 
 	seedAgentProfile(t, db, "agent-a", "ws-a")
-	run := &models.Run{
+	run := &runsmodels.Run{
 		AgentProfileID: "agent-a",
 		Reason:         "task_assigned",
 		Payload:        `{"task_id":"t1"}`,
@@ -353,7 +354,7 @@ func TestClaimNextEligibleRun_SkipsRoutingBlocked(t *testing.T) {
 	ctx := context.Background()
 
 	seedAgentProfile(t, db, "agent-a", "ws-a")
-	run := &models.Run{
+	run := &runsmodels.Run{
 		AgentProfileID: "agent-a",
 		Reason:         "task_assigned",
 		Payload:        `{"task_id":"t1"}`,
@@ -396,7 +397,7 @@ func TestClearRoutingBlock_ClearsScheduledRetryAt(t *testing.T) {
 	ctx := context.Background()
 
 	seedAgentProfile(t, db, "agent-a", "ws-a")
-	run := &models.Run{
+	run := &runsmodels.Run{
 		AgentProfileID: "agent-a",
 		Reason:         "task_assigned",
 		Payload:        `{"task_id":"t1"}`,
@@ -446,7 +447,7 @@ func TestParkRunForProviderCapacity_RestampsPriorityClassToRecoveryUnlessAlready
 
 	seedAgentProfile(t, db, "agent-a", "ws-a")
 
-	periodic := &models.Run{
+	periodic := &runsmodels.Run{
 		AgentProfileID: "agent-a",
 		Reason:         "task_assigned",
 		Payload:        `{}`,
@@ -454,7 +455,7 @@ func TestParkRunForProviderCapacity_RestampsPriorityClassToRecoveryUnlessAlready
 		CoalescedCount: 1,
 		PriorityClass:  models.PriorityClassPeriodic,
 	}
-	human := &models.Run{
+	human := &runsmodels.Run{
 		AgentProfileID: "agent-a",
 		Reason:         "task_assigned",
 		Payload:        `{}`,
@@ -504,7 +505,7 @@ func TestRequeueRunForNextCandidate_RestampsPriorityClassToRecoveryUnlessAlready
 
 	seedAgentProfile(t, db, "agent-a", "ws-a")
 
-	periodic := &models.Run{
+	periodic := &runsmodels.Run{
 		AgentProfileID: "agent-a",
 		Reason:         "task_assigned",
 		Payload:        `{}`,
@@ -512,7 +513,7 @@ func TestRequeueRunForNextCandidate_RestampsPriorityClassToRecoveryUnlessAlready
 		CoalescedCount: 1,
 		PriorityClass:  models.PriorityClassPeriodic,
 	}
-	human := &models.Run{
+	human := &runsmodels.Run{
 		AgentProfileID: "agent-a",
 		Reason:         "task_assigned",
 		Payload:        `{}`,
@@ -562,7 +563,7 @@ func TestClearAllParkedRoutingForWorkspace_RestampsPriorityClassToRecoveryUnless
 
 	seedAgentProfile(t, db, "agent-a", "ws-a")
 
-	periodic := &models.Run{
+	periodic := &runsmodels.Run{
 		AgentProfileID: "agent-a",
 		Reason:         "task_assigned",
 		Payload:        `{}`,
@@ -570,7 +571,7 @@ func TestClearAllParkedRoutingForWorkspace_RestampsPriorityClassToRecoveryUnless
 		CoalescedCount: 1,
 		PriorityClass:  models.PriorityClassPeriodic,
 	}
-	human := &models.Run{
+	human := &runsmodels.Run{
 		AgentProfileID: "agent-a",
 		Reason:         "task_assigned",
 		Payload:        `{}`,

@@ -17,6 +17,7 @@ import (
 	officeruntime "github.com/kandev/kandev/internal/office/runtime"
 	"github.com/kandev/kandev/internal/office/shared"
 	"github.com/kandev/kandev/internal/office/wakeup"
+	runsmodels "github.com/kandev/kandev/internal/runs/models"
 	taskmodels "github.com/kandev/kandev/internal/task/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
@@ -152,7 +153,7 @@ func (si *SchedulerIntegration) tick(ctx context.Context) {
 }
 
 type sessionRecoveryRunStore interface {
-	ListSessionRecoveryRuns(context.Context) ([]models.Run, error)
+	ListSessionRecoveryRuns(context.Context) ([]runsmodels.Run, error)
 	ClearSessionRecoveryPark(context.Context, string, string) error
 }
 
@@ -889,7 +890,7 @@ func sessionRecoveryDetails(err error) (string, bool) {
 // failures. It preserves the run and skips HandleRunFailure, whose retry
 // schedule would otherwise dispatch the same native session again.
 func (si *SchedulerIntegration) parkSessionRecoveryRun(
-	ctx context.Context, run *models.Run, launchErr error,
+	ctx context.Context, run *runsmodels.Run, launchErr error,
 ) bool {
 	reason, required := sessionRecoveryDetails(launchErr)
 	if !required || run == nil || run.SessionID == "" {

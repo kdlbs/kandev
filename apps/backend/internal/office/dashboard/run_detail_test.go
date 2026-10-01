@@ -11,8 +11,8 @@ import (
 
 	settingsstore "github.com/kandev/kandev/internal/agent/settings/store"
 	"github.com/kandev/kandev/internal/office/dashboard"
-	officemodels "github.com/kandev/kandev/internal/office/models"
 	"github.com/kandev/kandev/internal/office/repository/sqlite"
+	runsmodels "github.com/kandev/kandev/internal/runs/models"
 )
 
 // runDetailDeps wires a fresh in-memory repo for run-detail tests.
@@ -47,7 +47,7 @@ func seedRunDetailRun(
 ) string {
 	t.Helper()
 	ctx := context.Background()
-	run := &officemodels.Run{
+	run := &runsmodels.Run{
 		AgentProfileID: agentID,
 		Reason:         "task_assigned",
 		Payload:        `{"task_id":"` + taskID + `"}`,
@@ -132,7 +132,7 @@ func TestListAgentRunsPaged_FirstPageNoCursor(t *testing.T) {
 
 func TestListAgentRunsPaged_IncludesPersistedRoutineID(t *testing.T) {
 	deps := newRunDetailDeps(t)
-	run := &officemodels.Run{
+	run := &runsmodels.Run{
 		AgentProfileID: "agent-1",
 		Reason:         "routine_dispatch_event",
 		Payload:        `{"agent_profile_id":"agent-1"}`,
@@ -157,7 +157,7 @@ func TestListAgentRunsPaged_IncludesPersistedRoutineID(t *testing.T) {
 
 func TestListAgentRunsPaged_FallsBackToRoutineIDInPayload(t *testing.T) {
 	deps := newRunDetailDeps(t)
-	run := &officemodels.Run{
+	run := &runsmodels.Run{
 		AgentProfileID: "agent-1",
 		Reason:         "routine_dispatch_event",
 		Payload:        `{"routine_id":"routine-legacy"}`,
@@ -213,7 +213,7 @@ func TestListAgentRunsPaged_EmptyAgent(t *testing.T) {
 func TestListAgentRunsPaged_UsesSourceTaskForCommentLinks(t *testing.T) {
 	deps := newRunDetailDeps(t)
 	ctx := context.Background()
-	run := &officemodels.Run{
+	run := &runsmodels.Run{
 		AgentProfileID: "agent-1",
 		Reason:         "task_comment",
 		Payload:        `{"task_id":"target-task","source_task_id":"source-task","comment_id":"cm-source"}`,
@@ -242,7 +242,7 @@ func TestListAgentRunsPaged_UsesSourceTaskForCommentLinks(t *testing.T) {
 func TestListAgentRunsPaged_UsesSourceTaskWithoutCommentID(t *testing.T) {
 	deps := newRunDetailDeps(t)
 	ctx := context.Background()
-	run := &officemodels.Run{
+	run := &runsmodels.Run{
 		AgentProfileID: "agent-1",
 		Reason:         "approval_resolved",
 		Payload:        `{"task_id":"target-task","source_task_id":"source-task"}`,

@@ -7,6 +7,7 @@ import (
 
 	"github.com/kandev/kandev/internal/office/models"
 	"github.com/kandev/kandev/internal/office/repository/sqlite"
+	runsmodels "github.com/kandev/kandev/internal/runs/models"
 )
 
 // fakeRunDetailRepo satisfies just the RunDetailRepo methods exercised
@@ -16,19 +17,19 @@ type fakeRunDetailRepo struct {
 	err      error
 }
 
-func (f *fakeRunDetailRepo) GetRunWithCosts(_ context.Context, _ string) (*models.Run, *sqlite.RunCostRollup, error) {
+func (f *fakeRunDetailRepo) GetRunWithCosts(_ context.Context, _ string) (*runsmodels.Run, *sqlite.RunCostRollup, error) {
 	return nil, nil, nil
 }
 func (f *fakeRunDetailRepo) ListTasksTouchedByRun(_ context.Context, _ string) ([]string, error) {
 	return nil, nil
 }
-func (f *fakeRunDetailRepo) ListRunEvents(_ context.Context, _ string, _, _ int) ([]*models.RunEvent, error) {
+func (f *fakeRunDetailRepo) ListRunEvents(_ context.Context, _ string, _, _ int) ([]*runsmodels.RunEvent, error) {
 	return nil, nil
 }
 func (f *fakeRunDetailRepo) ListRunSkillSnapshots(_ context.Context, _ string) ([]models.RunSkillSnapshot, error) {
 	return nil, nil
 }
-func (f *fakeRunDetailRepo) ListRunsForAgentPaged(_ context.Context, _ string, _ time.Time, _ string, _ int) ([]*models.Run, error) {
+func (f *fakeRunDetailRepo) ListRunsForAgentPaged(_ context.Context, _ string, _ time.Time, _ string, _ int) ([]*runsmodels.Run, error) {
 	return nil, nil
 }
 func (f *fakeRunDetailRepo) GetAgentInstance(_ context.Context, _ string) (*models.AgentInstance, error) {
@@ -40,7 +41,7 @@ func (f *fakeRunDetailRepo) ListRouteAttempts(_ context.Context, _ string) ([]mo
 
 func TestBuildRunRouting_NilWhenNoAttemptsAndNoSnapshot(t *testing.T) {
 	repo := &fakeRunDetailRepo{}
-	out, err := buildRunRouting(context.Background(), repo, &models.Run{ID: "r"})
+	out, err := buildRunRouting(context.Background(), repo, &runsmodels.Run{ID: "r"})
 	if err != nil {
 		t.Fatalf("err = %v", err)
 	}
@@ -51,7 +52,7 @@ func TestBuildRunRouting_NilWhenNoAttemptsAndNoSnapshot(t *testing.T) {
 
 func TestBuildRunRouting_IncludesExecutionProfileOnlySnapshot(t *testing.T) {
 	profileID := "claude-opus"
-	out, err := buildRunRouting(context.Background(), &fakeRunDetailRepo{}, &models.Run{
+	out, err := buildRunRouting(context.Background(), &fakeRunDetailRepo{}, &runsmodels.Run{
 		ID: "r", ResolvedExecutionProfileID: &profileID,
 	})
 	if err != nil {
@@ -67,9 +68,9 @@ func TestBuildRunRouting_PopulatesAttemptsAndSnapshot(t *testing.T) {
 	tier := "frontier"
 	prov := "claude-acp"
 	model := "opus"
-	blocked := models.RoutingBlockedStatus("waiting_for_provider_capacity")
+	blocked := runsmodels.RoutingBlockedStatus("waiting_for_provider_capacity")
 	retry := time.Now().UTC().Add(time.Minute)
-	run := &models.Run{
+	run := &runsmodels.Run{
 		ID:                   "r1",
 		LogicalProviderOrder: &order,
 		RequestedTier:        &tier,
@@ -112,8 +113,8 @@ func TestBuildRunRouting_PopulatesAttemptsAndSnapshot(t *testing.T) {
 func TestBuildRunRouting_IncludesSessionRecoveryReference(t *testing.T) {
 	blockID := "block-1"
 	reason := "native_state_missing"
-	blocked := models.RoutingBlockedSessionRecoveryRequired
-	out, err := buildRunRouting(context.Background(), &fakeRunDetailRepo{}, &models.Run{
+	blocked := runsmodels.RoutingBlockedSessionRecoveryRequired
+	out, err := buildRunRouting(context.Background(), &fakeRunDetailRepo{}, &runsmodels.Run{
 		ID:                     "recovery-run",
 		RoutingBlockedStatus:   &blocked,
 		SessionRecoveryBlockID: &blockID,

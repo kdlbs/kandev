@@ -6,6 +6,7 @@ import (
 	"bufio"
 	"context"
 	"errors"
+	"os"
 	"os/exec"
 	"strconv"
 	"strings"
@@ -87,8 +88,12 @@ func TestTerminateOwnedSessionKillsDescendantsOnly(t *testing.T) {
 	if err := TerminateOwnedSession(context.Background(), identity, 100*time.Millisecond); err != nil {
 		t.Fatalf("TerminateOwnedSession: %v", err)
 	}
-	if err := syscall.Kill(descendantPID, 0); err == nil {
-		t.Fatalf("owned descendant %d is still alive", descendantPID)
+	stat, err := readProcStat(descendantPID)
+	if err == nil && stat.state != 'Z' && stat.state != 'X' {
+		t.Fatalf("owned descendant %d is still running (state %c)", descendantPID, stat.state)
+	}
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("inspect owned descendant %d: %v", descendantPID, err)
 	}
 	if err := syscall.Kill(unrelated.Process.Pid, 0); err != nil {
 		t.Fatalf("unrelated process %d was affected: %v", unrelated.Process.Pid, err)
