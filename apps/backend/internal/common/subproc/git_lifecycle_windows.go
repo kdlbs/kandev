@@ -26,6 +26,9 @@ func prepareGitLifecycleCommand(cmd *exec.Cmd) error {
 	if attr.CreationFlags&windows.CREATE_NEW_CONSOLE != 0 {
 		return errors.New("Git command requests a new controlling console")
 	}
+	if attr.CreationFlags&(windows.CREATE_NO_WINDOW|windows.DETACHED_PROCESS) != 0 {
+		return errors.New("Git command requests console detachment")
+	}
 	// HideWindow keeps the child attached to a console while hiding a newly
 	// created console window. Console descendants can then inherit that console.
 	attr.HideWindow = true

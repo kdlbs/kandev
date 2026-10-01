@@ -47,6 +47,25 @@ func TestWindowsPrepareGitLifecycleCommandHidesConsoleWindow(t *testing.T) {
 	}
 }
 
+func TestWindowsPrepareGitLifecycleCommandRejectsConsoleDetachmentFlags(t *testing.T) {
+	tests := []struct {
+		name          string
+		creationFlags uint32
+	}{
+		{name: "CREATE_NO_WINDOW", creationFlags: windows.CREATE_NO_WINDOW},
+		{name: "DETACHED_PROCESS", creationFlags: windows.DETACHED_PROCESS},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			cmd := exec.Command("git", "status")
+			cmd.SysProcAttr = &syscall.SysProcAttr{CreationFlags: test.creationFlags}
+			if err := prepareGitLifecycleCommand(cmd); err == nil {
+				t.Fatalf("prepareGitLifecycleCommand accepted %s", test.name)
+			}
+		})
+	}
+}
+
 const windowsConsoleProbeEnv = "KANDEV_WINDOWS_CONSOLE_PROBE"
 
 func TestWindowsDetachedParentKeepsConsoleHiddenForDescendants(t *testing.T) {
