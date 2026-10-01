@@ -47,6 +47,13 @@ func TestActivityRetention_StartRunsPassAndTickerThenStops(t *testing.T) {
 		case <-time.After(10 * time.Millisecond):
 		}
 	}
+	for svc.retentionRunning.Load() {
+		select {
+		case <-deadline:
+			t.Fatal("startup pass did not finish")
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
 	seedActivity(t, store, c.ID, "o2", ActionMove, ActivityProposed, old)
 	tick <- time.Now()
 	for retentionRowCount(t, store, c.ID) != 0 {
