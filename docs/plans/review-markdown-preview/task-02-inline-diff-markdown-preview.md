@@ -42,6 +42,11 @@ Completed 2026-07-29:
   Playwright, and `mobile-chrome` Playwright all passed.
 - Full verification passed: `make fmt`, then `make typecheck test lint`.
 
+October 2026 CI fixup: AC-UI-REVIEW-MARKDOWN-PREVIEW-001.9 keeps preview
+selection in the dialog while a transient diff refresh unmounts its file row.
+The existing mobile Review E2E caught the lost preview in E2E shard 14. Focused
+Review component tests and the mobile Playwright scenario verify the fix.
+
 ## Files likely touched
 
 - `apps/web/components/review/review-markdown-diff-preview.tsx`

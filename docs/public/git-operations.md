@@ -152,6 +152,12 @@ If the selected PR or branch cannot be fetched, preparation fails instead of sta
 Resuming an existing workspace preserves its branch, local commits, and uncommitted changes.
 A newly recreated workspace fetches the selected PR again.
 Existing workspaces that previously started on the wrong branch are not reset automatically.
+
+In the Review dialog, choose **Preview markdown** for a changed Markdown file to
+render its changed content in place. **Show diff** returns to the textual diff.
+The selected view stays in place if the file list briefly refreshes while Review
+remains open.
+
 ### Files remain, but Git metadata is missing
 
 A linked worktree stores its files separately from its Git administrative

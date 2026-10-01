@@ -38,6 +38,8 @@ type ReviewDiffListProps = {
   onDiscard: (path: string) => void;
   onOpenFile?: (filePath: string, repo?: string) => void;
   onPreviewMarkdown?: (filePath: string, repo?: string) => void;
+  previewedFiles?: Set<string>;
+  onToggleMarkdownPreview?: (fileKey: string) => void;
   fileRefs: Map<string, React.RefObject<HTMLDivElement | null>>;
 };
 
@@ -54,6 +56,8 @@ export const ReviewDiffList = memo(function ReviewDiffList({
   onDiscard,
   onOpenFile,
   onPreviewMarkdown,
+  previewedFiles,
+  onToggleMarkdownPreview,
   fileRefs,
 }: ReviewDiffListProps) {
   const scrollContainerRef = useRef<HTMLDivElement | null>(null);
@@ -130,6 +134,8 @@ export const ReviewDiffList = memo(function ReviewDiffList({
                 onDiscard={onDiscard}
                 onOpenFile={onOpenFile}
                 onPreviewMarkdown={onPreviewMarkdown}
+                previewedFiles={previewedFiles}
+                onToggleMarkdownPreview={onToggleMarkdownPreview}
                 sectionRef={fileRefs.get(key)}
                 scrollContainer={scrollContainerRef}
                 suppressAutoMark={suppressAutoMarkRef}
@@ -168,6 +174,8 @@ type FileDiffSectionProps = {
   onDiscard: (key: string) => void;
   onOpenFile?: (filePath: string, repo?: string) => void;
   onPreviewMarkdown?: (filePath: string, repo?: string) => void;
+  previewedFiles?: Set<string>;
+  onToggleMarkdownPreview?: (fileKey: string) => void;
   sectionRef?: React.RefObject<HTMLDivElement | null>;
   scrollContainer: React.RefObject<HTMLDivElement | null>;
   suppressAutoMark: React.RefObject<boolean>;
@@ -386,13 +394,21 @@ export function resolveDiffExpansion(
 
 function useMarkdownPreview(
   file: ReviewFile,
+  fileKey: string,
   onPreviewMarkdown?: FileDiffSectionProps["onPreviewMarkdown"],
+  previewedFiles?: Set<string>,
+  onToggleMarkdownPreviewForFile?: (fileKey: string) => void,
 ) {
-  const [markdownPreview, setMarkdownPreview] = useState(false);
+  const [localPreview, setLocalPreview] = useState(false);
   const markdownPreviewContent = useMemo(() => extractReviewMarkdownPreview(file), [file]);
-  const handleToggleMarkdownPreview = useCallback(() => setMarkdownPreview((v) => !v), []);
+  const markdownPreview =
+    markdownPreviewContent.fragments.length > 0 && (previewedFiles?.has(fileKey) ?? localPreview);
+  const handleToggleMarkdownPreview = useCallback(() => {
+    if (onToggleMarkdownPreviewForFile) onToggleMarkdownPreviewForFile(fileKey);
+    else setLocalPreview((v) => !v);
+  }, [fileKey, onToggleMarkdownPreviewForFile]);
   useEffect(() => {
-    if (markdownPreviewContent.fragments.length === 0) setMarkdownPreview(false);
+    if (markdownPreviewContent.fragments.length === 0) setLocalPreview(false);
   }, [markdownPreviewContent.fragments.length]);
   const onToggleMarkdownPreview = getMarkdownPreviewToggle({
     file,
@@ -502,21 +518,21 @@ function FileDiffSection({
   onDiscard,
   onOpenFile,
   onPreviewMarkdown,
+  previewedFiles,
+  onToggleMarkdownPreview: onToggleMarkdownPreviewForFile,
   sectionRef,
   scrollContainer,
   suppressAutoMark,
   externalLinkContext,
 }: FileDiffSectionProps) {
   const controls = useFileDiffDisplayControls(wordWrap);
-  const { openCommentFile, fileCommentsProps } = useFileCommentEditor(
+  const comments = useFileCommentEditor(file, sessionId, controls.setCollapsed, suppressAutoMark);
+  const preview = useMarkdownPreview(
     file,
-    sessionId,
-    controls.setCollapsed,
-    suppressAutoMark,
-  );
-  const { markdownPreview, markdownPreviewContent, onToggleMarkdownPreview } = useMarkdownPreview(
-    file,
+    fileKey,
     onPreviewMarkdown,
+    previewedFiles,
+    onToggleMarkdownPreviewForFile,
   );
   const { isVisible, sentinelRef } = useLazyVisible(scrollContainer);
   useScrollIntoViewOnSelect(isSelected, sectionRef, controls.setCollapsed, suppressAutoMark);
@@ -555,20 +571,20 @@ function FileDiffSection({
         hasStickyRepoHeader={hasStickyRepoHeader}
         onCheckboxChange={handleCheckboxChange}
         onDiscard={handleDiscard}
-        onCommentFile={openCommentFile}
+        onCommentFile={comments.openCommentFile}
         onOpenFile={onOpenFile}
-        markdownPreview={!onPreviewMarkdown && markdownPreview}
-        onToggleMarkdownPreview={onToggleMarkdownPreview}
+        markdownPreview={!onPreviewMarkdown && preview.markdownPreview}
+        onToggleMarkdownPreview={preview.onToggleMarkdownPreview}
         onToggleCollapse={controls.handleToggleCollapse}
         onToggleExpandUnchanged={controls.handleToggleExpandUnchanged}
         onToggleWordWrap={controls.handleToggleWordWrap}
         {...externalLinkContext}
       />
       <div ref={sentinelRef} />
-      {!controls.collapsed && <ReviewFileComments {...fileCommentsProps} />}
+      {!controls.collapsed && <ReviewFileComments {...comments.fileCommentsProps} />}
       {!controls.collapsed &&
-        (markdownPreview ? (
-          <ReviewMarkdownDiffPreviewContent preview={markdownPreviewContent} />
+        (preview.markdownPreview ? (
+          <ReviewMarkdownDiffPreviewContent preview={preview.markdownPreviewContent} />
         ) : (
           <ReviewFileDiffContent
             shouldRender={isVisible || !!forceLoad}
