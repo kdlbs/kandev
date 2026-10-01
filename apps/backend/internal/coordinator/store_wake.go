@@ -69,7 +69,11 @@ func (s *Store) withWakeLockPostgres(ctx context.Context, coordinatorID string, 
 // set selected by scope, denials first because they hang off their turn.
 // scope is a coordinator_id predicate ("= ?" or "IN (SELECT ...)") with args.
 func deleteCoordinatorPhase3Rows(ctx context.Context, tx *sqlx.Tx, scope string, args ...any) error {
+	dreams := `SELECT id FROM coordinator_dreams WHERE coordinator_id ` + scope
 	stmts := []string{
+		`DELETE FROM coordinator_dream_ratings WHERE item_id IN (SELECT id FROM coordinator_dream_items WHERE dream_id IN (` + dreams + `))`,
+		`DELETE FROM coordinator_dream_items WHERE dream_id IN (` + dreams + `)`,
+		`DELETE FROM coordinator_dreams WHERE coordinator_id ` + scope,
 		`DELETE FROM coordinator_turn_calls WHERE turn_id IN (SELECT id FROM coordinator_turns WHERE coordinator_id ` + scope + `)`,
 		`DELETE FROM coordinator_unattended_denials WHERE turn_id IN (SELECT id FROM coordinator_unattended_turns WHERE coordinator_id ` + scope + `)`,
 	}
