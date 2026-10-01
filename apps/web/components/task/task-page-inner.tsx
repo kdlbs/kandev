@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { type ReactNode, useCallback, useEffect, useState } from "react";
 import { TaskTopBar } from "@/components/task/task-top-bar";
 import { TaskLayout } from "@/components/task/task-layout";
 import { DebugOverlay } from "@/components/debug-overlay";
@@ -10,12 +10,6 @@ import { isDebugUI } from "@/lib/config";
 import { TooltipProvider } from "@kandev/ui/tooltip";
 import { useAppStore } from "@/components/state-provider";
 import type { UseEnsureTaskSessionResult } from "@/hooks/domains/session/use-ensure-task-session";
-import {
-  EnsureSessionErrorBanner,
-  getSessionRecoveryRetry,
-  SessionRecoveryFeedback,
-} from "@/components/task/ensure-session-error";
-import { TaskMoveErrorBanner } from "@/components/task/task-move-error-banner";
 import type { Layout } from "react-resizable-panels";
 import { TaskArchivedProvider } from "./task-archived-context";
 import { TaskCommands } from "@/components/task-commands";
@@ -25,7 +19,6 @@ import { useEmbeddedVscodeSupport } from "@/components/task/task-page-editor-cap
 import { VcsDialogsProvider } from "@/components/vcs/vcs-dialogs";
 import { PortForwardingVisibilityProvider } from "@/components/task/port-forwarding-visibility-provider";
 import { TaskLaunchErrorProvider } from "@/components/task/task-launch-error-context";
-import { SessionBootstrapRecoveryCard } from "@/components/task/chat/session-bootstrap-recovery-card";
 import { TaskSharedError } from "@/components/task/task-shared-error";
 import {
   buildDebugEntries,
@@ -47,6 +40,8 @@ import type {
 import { useTranslation } from "react-i18next";
 import type { Canvas } from "@/lib/api/domains/canvas-api";
 import type { TaskCanvasesLoadStatus } from "@/hooks/domains/task/use-task-canvases";
+import { AgentProjectTaskProvider } from "./agent-project-task-context";
+import { TaskPageEntryFeedback, TaskPageRecoveryFeedback } from "./task-page-feedback";
 import { useTaskStatusSummary } from "@/hooks/domains/task/use-task-status-summary";
 
 import { useAutomaticRecoveryChatOwner } from "@/hooks/domains/session/use-automatic-recovery-chat-owner";
@@ -150,6 +145,10 @@ function buildTaskTopBarProps(params: {
     ),
     workflowId: taskProps.workflowId,
     taskState: params.task?.state ?? null,
+    isAgentProjectTask: Boolean(params.task?.agent_project_id),
+    isAgentProjectWorker: Boolean(
+      params.task?.agent_project_id && params.task.agent_project_tier !== "coordinator",
+    ),
     workspaceId: taskProps.workspaceId,
     projectId: taskProps.projectId,
     issueUrl: taskProps.issueUrl,
@@ -249,75 +248,6 @@ function TaskDebugOverlay({ entries }: { entries: ReturnType<typeof maybeBuildDe
   return <DebugOverlay title={t("task:taskDebug")} entries={entries} />;
 }
 
-function TaskPageRecoveryFeedback({
-  ownedByChat,
-  taskId,
-  sessionId,
-  resumption,
-  bootstrapRecoveryError,
-  workspaceId,
-  isPassthrough,
-}: {
-  taskId: string;
-  sessionId: string | null;
-  resumption: TaskPageInnerProps["resumption"];
-  ownedByChat: boolean;
-  bootstrapRecoveryError: ReturnType<typeof resolveTaskPageBootstrapRecoveryError>;
-  workspaceId: string | null;
-  isPassthrough: boolean;
-}) {
-  if (bootstrapRecoveryError && sessionId && isPassthrough) {
-    return (
-      <SessionBootstrapRecoveryCard
-        taskId={taskId}
-        sessionId={sessionId}
-        workspaceId={workspaceId}
-        error={bootstrapRecoveryError}
-        automaticRecovery={resumption}
-      />
-    );
-  }
-  if (bootstrapRecoveryError) {
-    return null;
-  }
-  return (
-    <SessionRecoveryFeedback
-      ownedByChat={ownedByChat}
-      error={resumption.error}
-      notice={resumption.notice}
-      recoveryFailure={resumption.recoveryFailure}
-      onRetry={getSessionRecoveryRetry(resumption)}
-      retryDisabled={
-        resumption.resumptionState === "checking" || resumption.resumptionState === "resuming"
-      }
-      workspaceId={workspaceId}
-    />
-  );
-}
-
-function TaskPageEntryFeedback({
-  taskMoveError,
-  ensureSession,
-  workspaceId,
-}: {
-  taskMoveError: unknown;
-  ensureSession: UseEnsureTaskSessionResult;
-  workspaceId: string | null;
-}) {
-  return (
-    <>
-      {taskMoveError !== null && <TaskMoveErrorBanner error={taskMoveError} />}
-      {ensureSession.status === "error" && (
-        <EnsureSessionErrorBanner
-          error={ensureSession.error}
-          onRetry={ensureSession.retry}
-          workspaceId={workspaceId}
-        />
-      )}
-    </>
-  );
-}
-
 function TaskPageLayoutFeedback({
   layoutProps,
   isMobile,
@@ -334,6 +264,25 @@ function TaskPageLayoutFeedback({
         <TaskLayout {...layoutProps} hasPageLevelFeedback={hasPageLevelMobileFeedback} />
       </div>
     </>
+  );
+}
+
+function AgentProjectTaskScope({ task, children }: { task: Task; children: ReactNode }) {
+  return (
+    <AgentProjectTaskProvider
+      value={
+        task.agent_project_id && task.agent_project_tier
+          ? {
+              taskId: task.id,
+              projectId: task.agent_project_id,
+              workspaceId: task.workspace_id,
+              tier: task.agent_project_tier,
+            }
+          : null
+      }
+    >
+      {children}
+    </AgentProjectTaskProvider>
   );
 }
 
@@ -614,11 +563,13 @@ export function TaskPageInner(props: TaskPageInnerProps) {
                   workspaceId={task?.workspace_id ?? null}
                   isPassthrough={sessionPanel.isSessionPassthrough}
                 />
-                <TaskPageLayoutFeedback
-                  layoutProps={layoutProps}
-                  isMobile={isMobile}
-                  hasPageLevelMobileFeedback={hasPageLevelMobileFeedback}
-                />
+                <AgentProjectTaskScope task={task}>
+                  <TaskPageLayoutFeedback
+                    layoutProps={layoutProps}
+                    isMobile={isMobile}
+                    hasPageLevelMobileFeedback={hasPageLevelMobileFeedback}
+                  />
+                </AgentProjectTaskScope>
               </TaskLaunchErrorProvider>
             </TaskArchivedProvider>
           </div>

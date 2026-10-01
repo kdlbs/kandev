@@ -198,6 +198,41 @@
       ]
     },
     {
+      "id": "agent-projects",
+      "audiences": [
+        "user"
+      ],
+      "stability": "beta",
+      "docs": [
+        "tasks-and-workflows",
+        "automation-and-mcp"
+      ],
+      "sources": [
+        "apps/backend/internal/projects/service.go",
+        "apps/backend/internal/projects/workers.go",
+        "apps/backend/internal/mcp/server/project_tools.go",
+        "apps/backend/internal/mcp/handlers/project_handlers.go",
+        "apps/web/components/app-sidebar/sections/projects-section.tsx",
+        "apps/web/components/task/agent-project-file-roots.tsx"
+      ],
+      "tests": [
+        "apps/backend/internal/projects/service_test.go",
+        "apps/backend/internal/mcp/handlers/project_authorization_test.go",
+        "apps/backend/internal/mcp/server/server_project_mode_test.go",
+        "apps/web/components/app-sidebar/sections/projects-section.test.tsx",
+        "apps/web/e2e/tests/projects/agent-projects.spec.ts",
+        "apps/web/e2e/tests/projects/mobile-agent-projects.spec.ts"
+      ],
+      "mcpTools": [
+        "create_agent_project_worker_kandev",
+        "get_agent_project_kandev",
+        "get_agent_project_task_kandev",
+        "list_agent_project_workers_kandev",
+        "message_agent_project_worker_kandev",
+        "stop_agent_project_worker_kandev"
+      ]
+    },
+    {
       "id": "sessions-and-coordination",
       "audiences": [
         "user"

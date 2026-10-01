@@ -5,6 +5,9 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/google/uuid"
+	storageworkspaces "github.com/kandev/kandev/internal/system/storage/workspaces"
 )
 
 // TestCleanupWorktrees_RemovesEmptyTaskDir is a regression guard for issue
@@ -221,5 +224,94 @@ func TestCleanupWorktrees_RemovesEmptyTaskDir_TrailingSlashTasksBase(t *testing.
 	}
 	if _, err := os.Stat(taskDir); !os.IsNotExist(err) {
 		t.Errorf("task dir %s should be removed despite trailing slash in TasksBasePath; stat err=%v", taskDir, err)
+	}
+}
+
+func TestCleanupWorktrees_RemovesOnlyAgentProjectContextLink(t *testing.T) {
+	cfg := newTestConfig(t)
+	mgr, err := NewManager(cfg, newMockStore(), newTestLogger())
+	if err != nil {
+		t.Fatalf("NewManager: %v", err)
+	}
+	repoPath := initGitRepoWithRemote(t)
+	wt, err := mgr.Create(context.Background(), CreateRequest{
+		TaskID: "project-task", SessionID: "project-session", TaskTitle: "Project task",
+		RepositoryID: "repo-project", RepositoryPath: repoPath, BaseBranch: "main",
+		TaskDirName: "project-task_abc", RepoName: "repo-project",
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	taskDir := filepath.Dir(wt.Path)
+	projectID := uuid.NewString()
+	contextRoot := filepath.Join(filepath.Dir(cfg.TasksBasePath), "agent-projects", projectID, "context")
+	if err := os.MkdirAll(contextRoot, 0o700); err != nil {
+		t.Fatalf("create canonical context: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(contextRoot, "notes.md"), []byte("keep"), 0o600); err != nil {
+		t.Fatalf("write canonical context: %v", err)
+	}
+	if _, err := EnsureOwnedDirectoryLink(taskDir, "context", contextRoot, OwnedDirectoryLinkOwner{
+		TaskID: wt.TaskID, TaskDirName: filepath.Base(taskDir),
+	}); err != nil {
+		t.Fatalf("create task context link: %v", err)
+	}
+	if _, found, err := storageworkspaces.ReadOwnershipMarker(taskDir); err != nil || !found {
+		t.Fatalf("task root ownership marker found=%v err=%v", found, err)
+	}
+
+	if err := mgr.CleanupWorktrees(context.Background(), []*Worktree{wt}); err != nil {
+		t.Fatalf("CleanupWorktrees: %v", err)
+	}
+	if _, err := os.Lstat(taskDir); !os.IsNotExist(err) {
+		t.Fatalf("owned task root should be removed after its context link, stat err=%v", err)
+	}
+	if got, err := os.ReadFile(filepath.Join(contextRoot, "notes.md")); err != nil || string(got) != "keep" {
+		t.Fatalf("canonical project context was changed: %q, %v", got, err)
+	}
+}
+
+func TestCleanupWorktrees_PreservesUnexpectedContextLink(t *testing.T) {
+	cfg := newTestConfig(t)
+	mgr, err := NewManager(cfg, newMockStore(), newTestLogger())
+	if err != nil {
+		t.Fatalf("NewManager: %v", err)
+	}
+	repoPath := initGitRepoWithRemote(t)
+	wt, err := mgr.Create(context.Background(), CreateRequest{
+		TaskID: "project-task-wrong-link", SessionID: "project-session-wrong-link", TaskTitle: "Project task",
+		RepositoryID: "repo-project-wrong-link", RepositoryPath: repoPath, BaseBranch: "main",
+		TaskDirName: "project-task-wrong-link_abc", RepoName: "repo-project-wrong-link",
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	taskDir := filepath.Dir(wt.Path)
+	projectID := uuid.NewString()
+	contextRoot := filepath.Join(filepath.Dir(cfg.TasksBasePath), "agent-projects", projectID, "context")
+	if err := os.MkdirAll(contextRoot, 0o700); err != nil {
+		t.Fatalf("create canonical context: %v", err)
+	}
+	if _, err := EnsureOwnedDirectoryLink(taskDir, "context", contextRoot, OwnedDirectoryLinkOwner{
+		TaskID: wt.TaskID, TaskDirName: filepath.Base(taskDir),
+	}); err != nil {
+		t.Fatalf("create task context link: %v", err)
+	}
+	if err := RemoveOwnedDirectoryLink(taskDir, "context"); err != nil {
+		t.Fatalf("remove original task context link: %v", err)
+	}
+	unexpectedTarget := t.TempDir()
+	if err := os.Symlink(unexpectedTarget, filepath.Join(taskDir, "context")); err != nil {
+		t.Fatalf("replace task context link: %v", err)
+	}
+
+	if err := mgr.CleanupWorktrees(context.Background(), []*Worktree{wt}); err != nil {
+		t.Fatalf("CleanupWorktrees: %v", err)
+	}
+	if info, err := os.Lstat(filepath.Join(taskDir, "context")); err != nil || info.Mode()&os.ModeSymlink == 0 {
+		t.Fatalf("unexpected context link should be preserved, info=%v err=%v", info, err)
+	}
+	if _, err := os.Stat(taskDir); err != nil {
+		t.Fatalf("task root with an unexpected link should be preserved: %v", err)
 	}
 }

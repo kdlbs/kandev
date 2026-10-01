@@ -58,6 +58,10 @@ vi.mock("@/components/state-provider", () => ({
   useAppStore: (selector: (s: typeof state) => unknown) => selector(state),
 }));
 
+vi.mock("@/components/app-sidebar/sections/projects-section", () => ({
+  ProjectsSection: () => null,
+}));
+
 vi.mock("@/hooks/use-select-workspace", () => ({ useSelectWorkspace: () => vi.fn() }));
 vi.mock("@/hooks/use-quick-chat-launcher", () => ({ useQuickChatLauncher: () => vi.fn() }));
 vi.mock("@/hooks/use-quick-terminal-launcher", () => ({ useQuickTerminalLauncher: () => vi.fn() }));
@@ -67,6 +71,7 @@ vi.mock("@/components/quick-chat/use-quick-chat-activity", () => ({
 
 vi.mock("@/hooks/use-in-office", () => ({
   useInOffice: () => inOffice,
+  useOfficeModeState: () => (inOffice ? "office" : "kanban"),
 }));
 
 type NavRegistration = {

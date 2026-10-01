@@ -464,6 +464,8 @@ func (s *Service) publishTaskEventNow(ctx context.Context, eventType string, tas
 		"workspace_id":       task.WorkspaceID,
 		"workflow_id":        task.WorkflowID,
 		"workflow_step_id":   task.WorkflowStepID,
+		"agent_project_id":   task.AgentProjectID,
+		"agent_project_tier": task.AgentProjectTier,
 		"title":              task.Title,
 		"description":        task.Description,
 		"state":              string(task.State),

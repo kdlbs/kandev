@@ -14,6 +14,10 @@ export { createAzureDevOpsSlice, defaultAzureDevOpsState } from "./azure-devops/
 export { createJiraSlice, defaultJiraState } from "./jira/jira-slice";
 export { createLinearSlice, defaultLinearState } from "./linear/linear-slice";
 export { createOfficeSlice, defaultOfficeState } from "./office/office-slice";
+export {
+  createAgentProjectsSlice,
+  defaultAgentProjectsState,
+} from "./agent-projects/agent-projects-slice";
 export { createFeaturesSlice, defaultFeaturesState } from "./features/features-slice";
 export { createAuthSlice, defaultAuthState } from "./auth/auth-slice";
 export { createAutomationsSlice, defaultAutomationsState } from "./automations/automations-slice";
@@ -72,6 +76,12 @@ export type {
   LinearIssueWatchesState,
 } from "./linear/types";
 export type { OfficeSlice, OfficeSliceState, OfficeSliceActions } from "./office/types";
+export type {
+  AgentProjectsSlice,
+  AgentProjectsSliceState,
+  AgentProjectsSliceActions,
+  AgentProjectCollection,
+} from "./agent-projects/types";
 export type {
   FeaturesSlice,
   FeaturesSliceState,

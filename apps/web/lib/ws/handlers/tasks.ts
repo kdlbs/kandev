@@ -34,6 +34,7 @@ import {
   updateTaskStatusSummaryInBothKanbans,
 } from "@/lib/ws/handlers/task-status-summary";
 import { taskRemovalOwnsDepartureForTask } from "@/lib/state/task-removal";
+import { publishAgentProjectTaskEvent } from "@/lib/ws/handlers/agent-project-events";
 import { applyTaskOverviewEvent, applyTaskOverviewPatch } from "./task-overview";
 import { taskOverviewPatch } from "@/lib/state/slices/task-overview-patch";
 const lifecycleDebug = createDebugLogger("task-lifecycle:ws");
@@ -420,10 +421,15 @@ function handleTaskUpsert(
 export function registerTasksHandlers(store: StoreApi<AppState>): WsHandlers {
   return {
     "task.created": (message) => {
+      publishAgentProjectTaskEvent(message.payload);
       handleTaskUpsert("task.created", store, message);
     },
-    "task.updated": (message) => handleTaskUpdated(store, message),
+    "task.updated": (message) => {
+      publishAgentProjectTaskEvent(message.payload);
+      handleTaskUpdated(store, message);
+    },
     "task.deleted": (message) => {
+      publishAgentProjectTaskEvent(message.payload);
       const deletedId = message.payload.task_id;
       const currentState = store.getState();
       currentState.cancelWorkflowSessionFocus?.({ taskId: deletedId });
@@ -511,6 +517,7 @@ export function registerTasksHandlers(store: StoreApi<AppState>): WsHandlers {
       }
     },
     "task.state_changed": (message) => {
+      publishAgentProjectTaskEvent(message.payload);
       handleTaskUpsert("task.state_changed", store, message);
     },
     "task.status_summary.updated": (message) => {

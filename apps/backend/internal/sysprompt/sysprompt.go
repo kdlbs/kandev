@@ -70,6 +70,48 @@ const officeContextMarker = "KANDEV OFFICE MCP TOOLS"
 
 const pullRequestTargetContextMarker = "BRANCH POLICY PULL REQUEST TARGETS"
 
+const agentProjectContextMarker = "KANDEV AGENT PROJECT CONTEXT"
+
+// AgentProjectInstructions returns the server-owned workspace guidance for an
+// Agent Project task. Paths are quoted data because repository names and host
+// paths are not instruction text.
+func AgentProjectInstructions(tier, contextPath, primaryRepositoryPath string, repositoryPaths []string) string {
+	role := "Worker"
+	roleGuidance := "Work only on the assigned task. Use get_agent_project_task_kandev to inspect your task and ask_parent_question_kandev when blocked or when you have a result to report."
+	if tier == "coordinator" {
+		role = "Coordinator"
+		roleGuidance = "Delegate implementation work only with create_agent_project_worker_kandev, using the economy or frontier tier. Review worker results with list_agent_project_workers_kandev, message_agent_project_worker_kandev, and stop_agent_project_worker_kandev. Do not create generic Kandev tasks or native subagents. Keep the shared notes.md current with project status and decisions. Write updates to a temporary file and atomically rename it into place."
+	}
+	lines := []string{
+		agentProjectContextMarker + ":",
+		"You are the " + role + " for an Agent Project.",
+		"Shared project context is available at " + strconv.Quote(StripTags(contextPath)) + " and from this task workspace at ../context.",
+		"The project context is shared durable state. Use notes.md for concise status, decisions, and handoffs; keep implementation files in repository worktrees.",
+		"Your starting directory is the primary repository worktree " + strconv.Quote(StripTags(primaryRepositoryPath)) + ".",
+		roleGuidance,
+		"Repository worktrees:",
+	}
+	for _, repositoryPath := range repositoryPaths {
+		lines = append(lines, "- "+strconv.Quote(StripTags(repositoryPath)))
+	}
+	return strings.Join(lines, "\n")
+}
+
+// InjectAgentProjectInstructions replaces any previous project guidance block
+// with the current server-generated workspace snapshot.
+func InjectAgentProjectInstructions(prompt, instructions string) string {
+	prompt = systemTagRegex.ReplaceAllStringFunc(prompt, func(block string) string {
+		if strings.Contains(block, agentProjectContextMarker) {
+			return ""
+		}
+		return block
+	})
+	if instructions == "" {
+		return strings.TrimSpace(prompt)
+	}
+	return Wrap(instructions) + "\n\n" + strings.TrimSpace(prompt)
+}
+
 // PullRequestTarget is immutable task context that tells an agent where a
 // branch-policy-backed pull request must merge.
 type PullRequestTarget struct {

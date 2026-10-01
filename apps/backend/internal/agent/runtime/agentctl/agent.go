@@ -129,11 +129,12 @@ type NewSessionResponse struct {
 
 // createSessionRequest sends a session creation request and parses the response.
 // Used by both NewSession and ResetSession which share the same payload/response format.
-func (c *Client) createSessionRequest(ctx context.Context, action, cwd string, mcpServers []types.McpServer) (string, error) {
+func (c *Client) createSessionRequest(ctx context.Context, action, cwd string, mcpServers []types.McpServer, additionalDirectories []string) (string, error) {
 	payload := struct {
-		Cwd        string            `json:"cwd"`
-		McpServers []types.McpServer `json:"mcp_servers,omitempty"`
-	}{Cwd: cwd, McpServers: mcpServers}
+		Cwd                   string            `json:"cwd"`
+		McpServers            []types.McpServer `json:"mcp_servers,omitempty"`
+		AdditionalDirectories []string          `json:"additional_directories,omitempty"`
+	}{Cwd: cwd, McpServers: mcpServers, AdditionalDirectories: additionalDirectories}
 
 	c.setLastSessionModelState(nil)
 	resp, err := c.sendStreamRequest(ctx, action, payload)
@@ -162,20 +163,32 @@ func (c *Client) createSessionRequest(ctx context.Context, action, cwd string, m
 
 // NewSession creates a new ACP session via the agent WebSocket stream.
 func (c *Client) NewSession(ctx context.Context, cwd string, mcpServers []types.McpServer) (string, error) {
-	return c.createSessionRequest(ctx, "agent.session.new", cwd, mcpServers)
+	return c.NewSessionWithAdditionalDirectories(ctx, cwd, mcpServers, nil)
+}
+
+func (c *Client) NewSessionWithAdditionalDirectories(ctx context.Context, cwd string, mcpServers []types.McpServer, directories []string) (string, error) {
+	return c.createSessionRequest(ctx, "agent.session.new", cwd, mcpServers, directories)
 }
 
 // ResetSession creates a new session on the same connection, resetting context without
 // restarting the subprocess. Returns the new session ID or an error if not supported.
 func (c *Client) ResetSession(ctx context.Context, cwd string, mcpServers []types.McpServer) (string, error) {
-	return c.createSessionRequest(ctx, "agent.session.reset", cwd, mcpServers)
+	return c.ResetSessionWithAdditionalDirectories(ctx, cwd, mcpServers, nil)
+}
+
+func (c *Client) ResetSessionWithAdditionalDirectories(ctx context.Context, cwd string, mcpServers []types.McpServer, directories []string) (string, error) {
+	return c.createSessionRequest(ctx, "agent.session.reset", cwd, mcpServers, directories)
 }
 
 // LoadSession resumes an existing ACP session via the agent WebSocket stream.
 // mcpServers are forwarded to the agentctl handler so agents that receive MCP configs
 // via the protocol (e.g. Auggie) can reconnect to MCP servers on the new instance.
 func (c *Client) LoadSession(ctx context.Context, sessionID string, mcpServers []types.McpServer) error {
-	return c.LoadSessionWithPolicy(ctx, sessionID, mcpServers, streams.SessionSettingsPolicyStrict)
+	return c.LoadSessionWithPolicyAndAdditionalDirectories(ctx, sessionID, mcpServers, streams.SessionSettingsPolicyStrict, nil)
+}
+
+func (c *Client) LoadSessionWithAdditionalDirectories(ctx context.Context, sessionID string, mcpServers []types.McpServer, directories []string) error {
+	return c.LoadSessionWithPolicyAndAdditionalDirectories(ctx, sessionID, mcpServers, streams.SessionSettingsPolicyStrict, directories)
 }
 
 // LoadSessionWithPolicy restores an existing ACP session while carrying the
@@ -186,14 +199,27 @@ func (c *Client) LoadSessionWithPolicy(
 	mcpServers []types.McpServer,
 	policy streams.SessionSettingsPolicy,
 ) error {
+	return c.LoadSessionWithPolicyAndAdditionalDirectories(ctx, sessionID, mcpServers, policy, nil)
+}
+
+// LoadSessionWithPolicyAndAdditionalDirectories applies the host-selected
+// settings policy and writable roots to a restored ACP session.
+func (c *Client) LoadSessionWithPolicyAndAdditionalDirectories(
+	ctx context.Context,
+	sessionID string,
+	mcpServers []types.McpServer,
+	policy streams.SessionSettingsPolicy,
+	directories []string,
+) error {
 	if policy != streams.SessionSettingsPolicyStrict && policy != streams.SessionSettingsPolicyProviderRestored {
 		return fmt.Errorf("unsupported session settings policy %q", policy)
 	}
 	payload := struct {
 		SessionID             string                        `json:"session_id"`
 		McpServers            []types.McpServer             `json:"mcp_servers,omitempty"`
+		AdditionalDirectories []string                      `json:"additional_directories,omitempty"`
 		SessionSettingsPolicy streams.SessionSettingsPolicy `json:"session_settings_policy,omitempty"`
-	}{SessionID: sessionID, McpServers: mcpServers}
+	}{SessionID: sessionID, McpServers: mcpServers, AdditionalDirectories: directories}
 	if policy != streams.SessionSettingsPolicyStrict {
 		payload.SessionSettingsPolicy = policy
 	}

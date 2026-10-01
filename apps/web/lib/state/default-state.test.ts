@@ -78,3 +78,26 @@ describe("settings agent hydration", () => {
     ]);
   });
 });
+
+describe("agent project hydration", () => {
+  it("merges active and archived project maps without replacing collection defaults", () => {
+    const state = mergeInitialState({
+      agentProjects: {
+        active: {
+          byWorkspaceId: { "workspace-1": [{ id: "project-1" }] },
+          loadedByWorkspaceId: { "workspace-1": true },
+        },
+        archived: {
+          errorByWorkspaceId: { "workspace-2": "Could not load archived projects" },
+        },
+      },
+    } as unknown as HydrationState);
+
+    expect(state.agentProjects.active.byWorkspaceId["workspace-1"]).toEqual([{ id: "project-1" }]);
+    expect(state.agentProjects.active.loadedByWorkspaceId["workspace-1"]).toBe(true);
+    expect(state.agentProjects.active.loadingByWorkspaceId).toEqual({});
+    expect(state.agentProjects.archived.errorByWorkspaceId["workspace-2"]).toBe(
+      "Could not load archived projects",
+    );
+  });
+});

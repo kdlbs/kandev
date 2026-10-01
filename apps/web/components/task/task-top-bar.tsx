@@ -49,6 +49,8 @@ type TaskTopBarProps = {
   workflowSteps?: WorkflowStepperStep[];
   currentStepId?: string | null;
   workflowId?: string | null;
+  isAgentProjectTask?: boolean;
+  isAgentProjectWorker?: boolean;
   taskState?: string | null;
   workspaceId?: string | null;
   projectId?: string | null;
@@ -68,6 +70,43 @@ type TaskTopBarProps = {
   subjectPrimaryExecutorType?: string | null;
 };
 
+function renderWorkflowStepper({
+  isAgentProjectTask,
+  workflowSteps,
+  currentStepId,
+  taskId,
+  workflowId,
+  taskState,
+  isArchived,
+  onMoveStart,
+  onMoveError,
+}: Pick<
+  TaskTopBarProps,
+  | "isAgentProjectTask"
+  | "workflowSteps"
+  | "currentStepId"
+  | "taskId"
+  | "workflowId"
+  | "taskState"
+  | "isArchived"
+  | "onMoveStart"
+  | "onMoveError"
+>): ReactNode {
+  if (isAgentProjectTask || !workflowSteps?.length) return undefined;
+  return (
+    <WorkflowStepper
+      steps={workflowSteps}
+      currentStepId={currentStepId ?? null}
+      taskId={taskId ?? null}
+      workflowId={workflowId ?? null}
+      taskState={taskState}
+      isArchived={isArchived}
+      onMoveStart={onMoveStart}
+      onMoveError={onMoveError}
+    />
+  );
+}
+
 const TaskTopBar = memo(function TaskTopBar({
   taskId,
   activeSessionId,
@@ -79,6 +118,8 @@ const TaskTopBar = memo(function TaskTopBar({
   workflowSteps,
   currentStepId,
   workflowId,
+  isAgentProjectTask = false,
+  isAgentProjectWorker = false,
   taskState,
   workspaceId,
   projectId,
@@ -133,20 +174,17 @@ const TaskTopBar = memo(function TaskTopBar({
           <ExecutorSettingsButton taskId={taskId} sessionId={activeSessionId ?? null} />
         ) : undefined
       }
-      center={
-        workflowSteps && workflowSteps.length > 0 ? (
-          <WorkflowStepper
-            steps={workflowSteps}
-            currentStepId={currentStepId ?? null}
-            taskId={taskId ?? null}
-            workflowId={workflowId ?? null}
-            taskState={taskState}
-            isArchived={isArchived}
-            onMoveStart={onMoveStart}
-            onMoveError={onMoveError}
-          />
-        ) : undefined
-      }
+      center={renderWorkflowStepper({
+        isAgentProjectTask,
+        workflowSteps,
+        currentStepId,
+        taskId,
+        workflowId,
+        taskState,
+        isArchived,
+        onMoveStart,
+        onMoveError,
+      })}
       // The stepper handles its own truncation (`w-full min-w-0 overflow-hidden`),
       // so the center zone may shrink instead of pushing chrome out of the bar.
       centerClassName="min-w-0 shrink"
@@ -167,6 +205,8 @@ const TaskTopBar = memo(function TaskTopBar({
           actionsMenuBoardRow={actionsMenuBoardRow}
           subjectWorkflowStepId={subjectWorkflowStepId}
           subjectPrimaryExecutorType={subjectPrimaryExecutorType}
+          isAgentProjectTask={isAgentProjectTask}
+          isAgentProjectWorker={isAgentProjectWorker}
         />
       }
     />
@@ -407,6 +447,18 @@ function TopbarToolsGroup({
 /** Right section: status/attention + tools rendered inline.
  *  The former overflow popover was removed in the UI overhaul — every cluster
  *  is always visible so users don't have to discover the dots menu. */
+function TopBarOfficeTaskLink({ href }: { href?: string | null }) {
+  const { t } = useTranslation();
+  if (!href) return null;
+  return (
+    <TopbarCluster label={t("task:openInOfficeView")} className="[&_a]:h-7 [&_a]:text-xs">
+      <Button asChild size="sm" variant="outline" className="cursor-pointer px-2">
+        <Link href={href}>{t("task:openInOfficeView")}</Link>
+      </Button>
+    </TopbarCluster>
+  );
+}
+
 function TopBarRight({
   taskId,
   activeSessionId,
@@ -423,6 +475,8 @@ function TopBarRight({
   actionsMenuBoardRow,
   subjectWorkflowStepId,
   subjectPrimaryExecutorType,
+  isAgentProjectTask,
+  isAgentProjectWorker,
 }: {
   taskId?: string | null;
   activeSessionId?: string | null;
@@ -439,6 +493,8 @@ function TopBarRight({
   actionsMenuBoardRow?: TaskActionsMenuBoardRow | null;
   subjectWorkflowStepId?: string | null;
   subjectPrimaryExecutorType?: string | null;
+  isAgentProjectTask?: boolean;
+  isAgentProjectWorker?: boolean;
 }) {
   const { t } = useTranslation();
   return (
@@ -465,13 +521,7 @@ function TopBarRight({
           <TaskUnarchiveButton taskId={taskId} onUnarchived={onTaskUnarchived} />
         </TopbarCluster>
       )}
-      {officeTaskHref && (
-        <TopbarCluster label={t("task:openInOfficeView")} className="[&_a]:h-7 [&_a]:text-xs">
-          <Button asChild size="sm" variant="outline" className="cursor-pointer px-2">
-            <Link href={officeTaskHref}>{t("task:openInOfficeView")}</Link>
-          </Button>
-        </TopbarCluster>
-      )}
+      <TopBarOfficeTaskLink href={officeTaskHref} />
       <TopbarCluster label={t("task:assignedTo")} className="[&_button]:h-7 [&_button]:text-xs">
         <TaskAssigneeControl taskId={taskId} workspaceId={workspaceId} isArchived={isArchived} />
       </TopbarCluster>
@@ -491,15 +541,18 @@ function TopBarRight({
         isArchived={isArchived}
         embeddedVscodeSupported={embeddedVscodeSupported}
       />
-      <TaskTopBarActionsMenu
-        taskId={taskId ?? null}
-        taskTitle={taskTitle ?? ""}
-        boardRow={actionsMenuBoardRow ?? null}
-        workspaceId={workspaceId ?? null}
-        isArchived={isArchived}
-        subjectWorkflowStepId={subjectWorkflowStepId}
-        subjectPrimaryExecutorType={subjectPrimaryExecutorType}
-      />
+      {(!isAgentProjectTask || isAgentProjectWorker) && (
+        <TaskTopBarActionsMenu
+          taskId={taskId ?? null}
+          taskTitle={taskTitle ?? ""}
+          boardRow={actionsMenuBoardRow ?? null}
+          workspaceId={workspaceId ?? null}
+          isArchived={isArchived}
+          subjectWorkflowStepId={subjectWorkflowStepId}
+          subjectPrimaryExecutorType={subjectPrimaryExecutorType}
+          isAgentProjectWorker={isAgentProjectWorker}
+        />
+      )}
     </div>
   );
 }

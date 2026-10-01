@@ -46,9 +46,11 @@ test.describe("mobile session entry recovery", () => {
       await expect(historyNotice).toBeVisible({ timeout: 45_000 });
 
       const retry = historyNotice.getByTestId("session-history-retry");
+      await expect(retry).toBeVisible();
       const retryBox = await retry.boundingBox();
       expect(retryBox?.height).toBeGreaterThanOrEqual(44);
       const detailsSummary = historyNotice.getByTestId("session-history-details-summary");
+      await expect(detailsSummary).toBeVisible();
       const detailsBox = await detailsSummary.boundingBox();
       expect(detailsBox?.height).toBeGreaterThanOrEqual(44);
       await assertNoDocumentHorizontalOverflow(testPage, "mobile session history recovery");

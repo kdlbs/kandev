@@ -98,6 +98,10 @@ func (a *MockAgent) SetSupportsMCP(v bool) { a.supportsMCP = v }
 // SupportsMCPEnabled reports the current MCP support setting.
 func (a *MockAgent) SupportsMCPEnabled() bool { return a.supportsMCP }
 
+// SupportsProjectWorkspaceDirectories reports that the ACP mock accepts the
+// standard server-owned additionalDirectories session field in tests/dev.
+func (a *MockAgent) SupportsProjectWorkspaceDirectories() bool { return true }
+
 func (a *MockAgent) ID() string {
 	if a.id != "" {
 		return a.id
