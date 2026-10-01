@@ -154,6 +154,15 @@ features:
     dev:  "false"
     e2e:  "true"
 
+  # Coordinator record and measure (phase 3.1): the turn ledger tool and the
+  # surfaces that read the ledger. Recording itself runs without it. Only
+  # effective together with KANDEV_FEATURES_COORDINATOR,
+  # KANDEV_FEATURES_COORDINATOR_PHASE2 and KANDEV_FEATURES_COORDINATOR_PHASE3.
+  KANDEV_FEATURES_COORDINATOR_PHASE31:
+    prod: "false"
+    dev:  "false"
+    e2e:  "false"
+
 # ── Mock providers ────────────────────────────────────────────────
 # Swap real third-party services for in-memory fakes. Production
 # leaves all of these unset (real APIs). Dev opts into the mock agent

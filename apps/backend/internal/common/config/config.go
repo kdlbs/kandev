@@ -572,6 +572,11 @@ type FeaturesConfig struct {
 	// with Coordinator and CoordinatorPhase2.
 	CoordinatorPhase3 bool `mapstructure:"coordinator_phase3" json:"coordinatorPhase3"`
 
+	// CoordinatorPhase31 gates the surfaces that read the coordinator turn
+	// ledger. Recording runs without it. It only takes effect together with
+	// Coordinator, CoordinatorPhase2 and CoordinatorPhase3.
+	CoordinatorPhase31 bool `mapstructure:"coordinator_phase31" json:"coordinatorPhase31"`
+
 	// CodexAppServer enables the separate native Codex app-server agent. It is
 	// off in every shipped profile and requires a restart because its protocol
 	// adapter and profile catalogue are composed at startup.

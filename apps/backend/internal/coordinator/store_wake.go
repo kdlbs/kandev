@@ -70,11 +70,12 @@ func (s *Store) withWakeLockPostgres(ctx context.Context, coordinatorID string, 
 // scope is a coordinator_id predicate ("= ?" or "IN (SELECT ...)") with args.
 func deleteCoordinatorPhase3Rows(ctx context.Context, tx *sqlx.Tx, scope string, args ...any) error {
 	stmts := []string{
+		`DELETE FROM coordinator_turn_calls WHERE turn_id IN (SELECT id FROM coordinator_turns WHERE coordinator_id ` + scope + `)`,
 		`DELETE FROM coordinator_unattended_denials WHERE turn_id IN (SELECT id FROM coordinator_unattended_turns WHERE coordinator_id ` + scope + `)`,
 	}
 	for _, table := range []string{
 		"coordinator_unattended_turns", "coordinator_wakes", "coordinator_class_changes",
-		"coordinator_class_reviews", "coordinator_pending_changes",
+		"coordinator_class_reviews", "coordinator_pending_changes", "coordinator_turns",
 	} {
 		stmts = append(stmts, `DELETE FROM `+table+` WHERE coordinator_id `+scope)
 	}

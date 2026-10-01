@@ -510,3 +510,27 @@ func TestEnvironmentDefaults_CoordinatorPhase3PerProfile(t *testing.T) {
 		})
 	}
 }
+
+func TestEnvironmentDefaults_CoordinatorPhase31OffInEveryProfile(t *testing.T) {
+	selectors := map[string]map[string]string{
+		"prod": nil,
+		"dev":  {"KANDEV_DEBUG_DEV_MODE": "true"},
+		"e2e":  {"KANDEV_E2E_MOCK": "true"},
+	}
+	for name, selector := range selectors {
+		t.Run(name, func(t *testing.T) {
+			clearProfileSelectors(t)
+			clearProfilesYAMLVars(t)
+			for k, v := range selector {
+				t.Setenv(k, v)
+			}
+			defaults, err := EnvironmentDefaults()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := defaults["KANDEV_FEATURES_COORDINATOR_PHASE31"]; got != "false" {
+				t.Fatalf("KANDEV_FEATURES_COORDINATOR_PHASE31 = %q in %s, want false", got, name)
+			}
+		})
+	}
+}

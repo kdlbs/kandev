@@ -321,6 +321,23 @@ var registrations = []runtimeFlagRegistration{
 	},
 	{
 		definition: RuntimeFlagDefinition{
+			Key:         "features.coordinatorPhase31",
+			EnvVar:      "KANDEV_FEATURES_COORDINATOR_PHASE31",
+			Kind:        KindFeature,
+			Label:       "Coordinator record and measure",
+			Description: "Lets a coordinator read its own turn history. Turns are recorded whether or not this is on. Requires Workspace coordinators, Coordinator control and Coordinator autonomy.",
+			Stability:   StabilityExperimental,
+			RiskLevel:   RiskLow,
+			RiskDescription: "Adds a read-only tool to coordinator conversations and routes that read the turn ledger. " +
+				"Still evolving and should be reviewed before relying on it.",
+			RestartRequired: true,
+			Mutable:         true,
+		},
+		read:  func(cfg *config.Config) bool { return cfg.Features.CoordinatorPhase31 },
+		apply: func(cfg *config.Config, value bool) { cfg.Features.CoordinatorPhase31 = value },
+	},
+	{
+		definition: RuntimeFlagDefinition{
 			Key:         "debug.devMode",
 			EnvVar:      "KANDEV_DEBUG_DEV_MODE",
 			Kind:        KindDebug,
