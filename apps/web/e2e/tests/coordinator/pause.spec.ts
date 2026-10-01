@@ -27,6 +27,8 @@ async function autonomousCoordinator(
     name,
     agent_profile_id: seed.agentProfileId,
     executor_profile_id: seed.worktreeExecutorProfileId,
+    task_agent_profile_id: seed.agentProfileId,
+    task_executor_profile_id: seed.worktreeExecutorProfileId,
   });
   if (autonomy) {
     const patched = await apiClient.rawRequest(

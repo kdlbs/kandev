@@ -61,6 +61,8 @@ test.describe("Coordinator watch projects", () => {
         name: "Project Watcher",
         agent_profile_id: seedData.agentProfileId,
         executor_profile_id: seedData.worktreeExecutorProfileId,
+        task_agent_profile_id: seedData.agentProfileId,
+        task_executor_profile_id: seedData.worktreeExecutorProfileId,
       });
       const inScope = await blockedTask(
         apiClient,
@@ -108,6 +110,8 @@ test.describe("Coordinator watch projects", () => {
         name: "Project Validator",
         agent_profile_id: seedData.agentProfileId,
         executor_profile_id: seedData.worktreeExecutorProfileId,
+        task_agent_profile_id: seedData.agentProfileId,
+        task_executor_profile_id: seedData.worktreeExecutorProfileId,
       });
       const base = `/api/v1/workspaces/${seedData.workspaceId}/coordinators/${coordinator.id}`;
 

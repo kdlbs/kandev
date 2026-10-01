@@ -20,6 +20,8 @@ test.describe("Coordinator pause on a phone viewport", () => {
         name: "Mobile Pause",
         agent_profile_id: seedData.agentProfileId,
         executor_profile_id: seedData.worktreeExecutorProfileId,
+        task_agent_profile_id: seedData.agentProfileId,
+        task_executor_profile_id: seedData.worktreeExecutorProfileId,
       });
       const patched = await apiClient.rawRequest(
         "PATCH",
