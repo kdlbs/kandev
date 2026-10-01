@@ -3,10 +3,12 @@
 
 import json
 from pathlib import Path
+import runpy
 import subprocess
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
 
 SKILL_DIR = Path(__file__).resolve().parents[1]
@@ -141,6 +143,37 @@ class PRWalkthroughContextTest(unittest.TestCase):
             sorted(str(path.relative_to(first)) for path in (first / "head" / "files").rglob("*")),
             sorted(str(path.relative_to(second)) for path in (second / "head" / "files").rglob("*")),
         )
+
+    def test_large_change_uses_bounded_git_processes(self) -> None:
+        for index in range(200):
+            (self.repo / f"batch-{index:03d}.txt").write_text(f"head file {index}\n")
+        self.git("add", ".")
+        self.git("commit", "-m", "large change")
+        head = self.git("rev-parse", "HEAD").stdout.strip()
+        prepare = runpy.run_path(str(SCRIPT))["prepare"]
+        original = prepare.__globals__["subprocess"].Popen
+        with patch.object(prepare.__globals__["subprocess"], "Popen", wraps=original) as launches:
+            output = Path(self.temp.name) / "batch-context"
+            prepare(str(self.repo), self.base, head, output)
+        self.assertLessEqual(launches.call_count, 20)
+        for index in range(200):
+            self.assertEqual(
+                (output / "head" / "files" / f"batch-{index:03d}.txt").read_text(),
+                f"head file {index}\n",
+            )
+
+    def test_batch_framing_preserves_literal_paths_empty_files_and_unterminated_text(self) -> None:
+        samples = {"a-empty.txt": b"", "b-[*]-ü\n.txt": b"no final newline", "c-after.txt": b"following record\n"}
+        for name, content in samples.items():
+            (self.repo / name).write_bytes(content)
+        self.git("add", ".")
+        self.git("commit", "-m", "batch framing")
+        head = self.git("rev-parse", "HEAD").stdout.strip()
+        output = Path(self.temp.name) / "framing-context"
+        result = self.run_context(output, head=head)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        for name, content in samples.items():
+            self.assertEqual((output / "head" / "files" / name).read_bytes(), content)
 
     def test_rejects_invalid_shas_and_missing_merge_base(self) -> None:
         output = Path(self.temp.name) / "context"
