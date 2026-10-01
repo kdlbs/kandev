@@ -6,7 +6,7 @@ import fs from "node:fs";
 import path from "node:path";
 import type { ApiClient } from "../../helpers/api-client";
 import { waitForHttp, watchWs } from "../../helpers/causal-waits";
-import { GitHelper, makeGitEnv } from "../../helpers/git-helper";
+import { makeGitEnv } from "../../helpers/git-helper";
 import { waitForSessionDone } from "../../helpers/session";
 import { SessionPage } from "../../pages/session-page";
 import { mockFolderAvailability } from "../../helpers/open-task-folder";

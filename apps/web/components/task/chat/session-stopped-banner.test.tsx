@@ -270,6 +270,7 @@ describe("SessionStoppedBanner provider-restored Resume", () => {
       busyAction: null,
       recoveryError: null,
       branchDetails: null,
+      continuationDetails: null,
       guardDetails: null,
       managedCloneRecoveryStamp: null,
       lastFailedAction: null,
@@ -280,6 +281,7 @@ describe("SessionStoppedBanner provider-restored Resume", () => {
       handleRestore: vi.fn().mockResolvedValue(undefined),
       handleNewBranch: vi.fn().mockResolvedValue(true),
       handleManagedCloneRelocation: vi.fn().mockResolvedValue(true),
+      handleContinueFromHistory: vi.fn().mockResolvedValue(true),
     };
     render(<BannerHarness mode="recoverable" recoveryActions={recoveryActions} />);
 

@@ -159,7 +159,7 @@ func (sm *SessionManager) InitializeSession(
 	restoreIdentities ...RestoreIdentity,
 ) (*InitializeResult, error) {
 	return sm.InitializeSessionWithSettingsPolicy(
-		ctx, client, agentConfig, existingSessionID, workspacePath, mcpServers,
+		ctx, execution, client, agentConfig, existingSessionID, workspacePath, mcpServers,
 		SessionSettingsPolicyStrict, restoreIdentities...,
 	)
 }
@@ -168,6 +168,7 @@ func (sm *SessionManager) InitializeSession(
 // explicit per-attempt settings policy.
 func (sm *SessionManager) InitializeSessionWithSettingsPolicy(
 	ctx context.Context,
+	execution *AgentExecution,
 	client *agentctl.Client,
 	agentConfig agents.Agent,
 	existingSessionID string,

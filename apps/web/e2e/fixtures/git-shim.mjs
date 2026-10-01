@@ -71,6 +71,22 @@ function runRealGit(args, extraEnv) {
   return 1; // terminated by signal
 }
 
+function gateMatchesCommand(gate, subcommand, commandArgs) {
+  const targetCommand = typeof gate.subcommand === "string" ? gate.subcommand : null;
+  if (
+    targetCommand ? targetCommand !== subcommand : subcommand !== "fetch" && subcommand !== "pull"
+  ) {
+    return false;
+  }
+  if (
+    Array.isArray(gate.requiredArgs) &&
+    !gate.requiredArgs.every((required) => commandArgs.includes(required))
+  ) {
+    return false;
+  }
+  return typeof gate.startedFile === "string" && typeof gate.releaseFile === "string";
+}
+
 /** Delays fetch/pull or gates clone/fetch/pull/worktree-add when configured. */
 function maybeDelay(subcommand, commandArgs) {
   const isFetchOrPull = subcommand === "fetch" || subcommand === "pull";
@@ -84,19 +100,7 @@ function maybeDelay(subcommand, commandArgs) {
   }
   try {
     const gate = JSON.parse(raw);
-    const targetCommand = typeof gate.subcommand === "string" ? gate.subcommand : null;
-    if (
-      targetCommand ? targetCommand !== subcommand : subcommand !== "fetch" && subcommand !== "pull"
-    ) {
-      return;
-    }
-    if (
-      Array.isArray(gate.requiredArgs) &&
-      !gate.requiredArgs.every((required) => commandArgs.includes(required))
-    ) {
-      return;
-    }
-    if (typeof gate.startedFile !== "string" || typeof gate.releaseFile !== "string") return;
+    if (!gateMatchesCommand(gate, subcommand, commandArgs)) return;
     fs.writeFileSync(gate.startedFile, "started");
     while (!fs.existsSync(gate.releaseFile)) sleepMs(50);
   } catch {

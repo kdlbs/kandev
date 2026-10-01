@@ -181,11 +181,6 @@ func (c *ControlClient) Close() {
 	c.httpClient.CloseIdleConnections()
 }
 
-// Close releases the client's idle connections.
-func (c *ControlClient) Close() {
-	c.httpClient.CloseIdleConnections()
-}
-
 func (c *ControlClient) installTransportLocked() {
 	var transport http.RoundTripper
 	if c.authToken != "" {

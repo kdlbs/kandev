@@ -92,7 +92,12 @@ describe("session recovery service", () => {
   it("accepts the explicit continuation action as a distinct protocol action", async () => {
     mocks.request.mockResolvedValue({ success: true });
     await expect(
-      requestSessionRecover("task-1", "session-1", "continue_from_history", "failed"),
+      requestSessionRecover({
+        taskId: "task-1",
+        sessionId: "session-1",
+        action: "continue_from_history",
+        failureMessage: "failed",
+      }),
     ).resolves.toBeUndefined();
     expect(mocks.request).toHaveBeenCalledWith(
       "session.recover",

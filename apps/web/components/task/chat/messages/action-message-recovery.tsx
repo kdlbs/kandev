@@ -76,6 +76,32 @@ function addHistoryContinuationChoice(
   });
 }
 
+function choicesFromMessageActions(
+  actions: MessageAction[],
+  t: ReturnType<typeof useTranslation>["t"],
+  providerRestoredResumeEligible: boolean,
+  onRecoveryAction: (action: SessionRecoveryAction) => void | Promise<void>,
+): RecoveryChoice[] {
+  return actions.flatMap((action) => {
+    const kind = sessionRecoveryAction(action);
+    return kind
+      ? [
+          {
+            kind,
+            label: recoveryActionLabel(kind, t),
+            disclosure:
+              kind === "resume" && providerRestoredResumeEligible
+                ? t("task:providerRestoredResumeDisclosure")
+                : undefined,
+            testId: action.test_id,
+            tooltip: recoveryActionTooltip(action, t),
+            onClick: () => void onRecoveryAction(kind),
+          },
+        ]
+      : [];
+  });
+}
+
 function buildRecoveryChoices({
   actions,
   t,
@@ -112,24 +138,7 @@ function buildRecoveryChoices({
           onClick: onRelocationConfirm,
         },
       ]
-    : actions.flatMap((action) => {
-        const kind = sessionRecoveryAction(action);
-        return kind
-          ? [
-              {
-                kind,
-                label: recoveryActionLabel(kind, t),
-                disclosure:
-                  kind === "resume" && providerRestoredResumeEligible
-                    ? t("task:providerRestoredResumeDisclosure")
-                    : undefined,
-                testId: action.test_id,
-                tooltip: recoveryActionTooltip(action, t),
-                onClick: () => onRecoveryAction(kind),
-              },
-            ]
-          : [];
-      });
+    : choicesFromMessageActions(actions, t, providerRestoredResumeEligible, onRecoveryAction);
   if (recoveryError && !managedCloneRecoveryStamp)
     choices.push({
       kind: "restore",

@@ -264,7 +264,7 @@ func TestInitializeSession_ProviderRestoredPolicyPreservesIdentityOnLoadFailure(
 	}
 
 	_, err := sessionManager.InitializeSessionWithSettingsPolicy(
-		context.Background(), client, agentConfig, "saved-session", "/workspace", nil,
+		context.Background(), nil, client, agentConfig, "saved-session", "/workspace", nil,
 		SessionSettingsPolicyProviderRestored,
 	)
 	if err == nil {

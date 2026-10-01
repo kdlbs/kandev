@@ -95,23 +95,6 @@ async function listAgentRuns(
   }
 }
 
-async function createSchedulerAgent(
-  officeApi: OfficeApiClient,
-  workspaceId: string,
-  agentProfileId: string,
-): Promise<string> {
-  const agent = await officeApi.createAgent(workspaceId, {
-    name: `Scheduler E2E ${Date.now()}`,
-    role: "worker",
-    agent_profile_id: agentProfileId,
-    executor_preference: JSON.stringify({ type: "local_pc" }),
-  });
-  const agentId = String(agent.id ?? "");
-  if (!agentId) throw new Error("Office scheduler test agent was not created");
-  await officeApi.updateAgentStatus(agentId, "idle");
-  return agentId;
-}
-
 test.describe("Office reactive scheduler", () => {
   test("assigning a task to an agent enqueues a task_assigned run", async ({
     apiClient,
