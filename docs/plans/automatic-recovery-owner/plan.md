@@ -77,6 +77,31 @@ Recovery presentation ownership and Uniform active recovery presentation, plus
 4. Preserve independent shared task errors, historical errors and workspace
    navigation to the composer. No second mutable error store or recovery hook.
 
+## Preview Plan correction
+
+The first PR review remediation restored the legacy banner above the agent tabs
+when Plan replaced Chat. That preserved access but violated the shared-card
+placement contract. Plan must retain the shared `SessionRecoveryCard` below its
+content, at the composer location. Mount the same selection/pending provider and
+manual recovery actions only while Plan owns that region. Put remaining
+session-specific fallback feedback below content too; independent task errors
+retain their existing shared strip.
+
+```text
+Task header
+Agent / Plan tabs
+Plan content (scrolls)
+[Session recovery failed]
+[Resume session] [Start fresh session]
+[Technical details]
+```
+
+The browser regression must assert the shared card, absence of the upper legacy
+banner, placement below tabs and at the panel bottom, both automatic causes,
+manual pending guards and a return to Chat with one owner. Phone task cards open
+the full task page instead of preview; its existing recovery scenario remains
+the phone coverage. Capture the corrected preview before updating the PR image.
+
 ## ASCII UI preview
 
 ### UI-01: Task Chat after automatic recovery fails

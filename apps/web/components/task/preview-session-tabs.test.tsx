@@ -44,6 +44,11 @@ const mocks = vi.hoisted(() => ({
   getTaskPlan: vi.fn(),
 }));
 
+vi.mock("./preview-plan-recovery", () => ({
+  PreviewRecoveryRegion: ({ viewMode }: { viewMode: string }) =>
+    viewMode === "plan" ? <div data-testid="preview-plan-recovery" /> : null,
+}));
+
 vi.mock("./task-chat-panel", () => ({
   TaskChatPanel: (props: Record<string, unknown>) => {
     mocks.taskChatPanelProps = props;
@@ -373,9 +378,8 @@ describe("PreviewSessionBody delivery", () => {
     render(<PreviewSessionTabs taskId={TASK_ID} sessionId="session-a" />);
     expect(screen.queryByTestId("session-recovery-error")).toBeNull();
     fireEvent.mouseDown(screen.getByTestId(PLAN_TAB_TESTID), { button: 0 });
-    expect(screen.getByTestId("session-recovery-error")).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
-    expect(resumeSession).toHaveBeenCalledOnce();
+    expect(screen.queryByTestId("session-recovery-error")).toBeNull();
+    expect(screen.getByTestId("preview-plan-recovery")).toBeTruthy();
     fireEvent.mouseDown(screen.getByTestId(SESSION_A_TAB_TESTID), { button: 0 });
     expect(screen.queryByTestId("session-recovery-error")).toBeNull();
   });

@@ -65,6 +65,7 @@ When startup or resume fails:
 
 - Kandev adds one recovery entry to the selected session's chat.
 - The current unresolved failure replaces the blocked message composer with one recovery card. Automatic resume and workspace-restore failures appear in that card, with separate causes in Technical details, rather than a second session banner. Older entries keep their message and technical details without stale controls.
+- In Kanban preview, selecting Plan keeps the recovery card below the Plan content, in the composer area.
 - Repeated delivery of the same failure does not add another entry.
 - History loading and new messages keep the normal chat scroll behavior.
 

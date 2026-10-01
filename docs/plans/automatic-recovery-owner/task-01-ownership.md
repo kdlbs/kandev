@@ -186,3 +186,15 @@ preview and resumption suites pass 76 tests; typecheck and the focused preview
 Plan Playwright regression pass. Preview is desktop/tablet-only: phone task cards
 navigate directly to the full task page. The existing phone automatic-recovery
 scenario covers its native recovery path. No new copy or recovery policy is added.
+
+## User review correction
+
+The earlier Plan fallback was reachable but still used the legacy banner above
+the agent tabs. That remediation is superseded: use the shared recovery card at
+the lower composer position, with Plan content above it. See the updated preview
+in `plan.md`. The corrected browser regression failed on the prior implementation
+because Plan had zero shared recovery cards. It now checks placement, separate
+causes, manual action guards and return-to-Chat ownership. Targeted validation passed: 57 tests in the two affected Vitest suites, frontend
+typecheck, focused ESLint, specification lint and the Plan Playwright regression.
+The regression failed before the correction and passed after it. Remote CI and
+review checks remain pending for this correction; previous PR checks are historical.

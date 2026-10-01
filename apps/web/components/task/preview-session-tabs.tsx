@@ -25,6 +25,7 @@ import { PreviewSessionTabMenu } from "./preview-session-tab-menu";
 import { SessionTabDialogs } from "./session-tab-menu";
 import { TabRenameInput } from "./tab-rename-input";
 import { PreviewPlanPanel, usePreviewPlanSummary } from "./preview-plan-panel";
+import { PreviewRecoveryRegion } from "./preview-plan-recovery";
 import { TaskChatPanel } from "./task-chat-panel";
 import { TaskLaunchErrorProvider } from "./task-launch-error-context";
 import { PreviewTaskErrorShell } from "./preview-task-error-shell";
@@ -398,17 +399,6 @@ export function PreviewSessionTabs({
       resumption={resumption}
     >
       <div className="flex h-full flex-col min-h-0" data-testid="preview-session-tabs">
-        <SessionRecoveryFeedback
-          ownedByChat={viewMode !== "plan" && automaticRecoveryOwnedByChat}
-          workspaceId={workspaceId ?? null}
-          error={resumption.error}
-          notice={resumption.notice}
-          recoveryFailure={resumption.recoveryFailure}
-          onRetry={getSessionRecoveryRetry(resumption)}
-          retryDisabled={
-            resumption.resumptionState === "checking" || resumption.resumptionState === "resuming"
-          }
-        />
         <div className="border-b px-2 py-1">
           <SessionTabs
             tabs={tabs}
@@ -428,6 +418,16 @@ export function PreviewSessionTabs({
             resumption={resumption}
           />
         </div>
+        <PreviewRecoveryRegion
+          key={activeSessionId}
+          viewMode={viewMode}
+          session={activeSession}
+          archived={isArchived}
+          ownedByChat={automaticRecoveryOwnedByChat}
+          taskId={taskId}
+          workspaceId={workspaceId}
+          resumption={resumption}
+        />
         <PreviewSessionTabDialogHost
           dialogs={dialogs}
           sortedSessions={sortedSessions}

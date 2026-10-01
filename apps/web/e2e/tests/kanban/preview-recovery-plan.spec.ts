@@ -41,14 +41,30 @@ test("Plan keeps automatic recovery reachable in the preview", async ({
   await expect.poll(() => ({ ...attempts })).toMatchObject({ resume: 1, restore: 1 });
   await expect(preview.getByTestId("session-recovery-card")).toBeVisible();
   await preview.getByTestId("preview-plan-tab").click();
-  const fallback = preview.getByTestId("session-recovery-error");
-  await expect(fallback).toBeVisible();
-  await expect(preview.getByTestId("session-recovery-card")).toHaveCount(0);
-  await expect(fallback.getByRole("button", { name: "Retry" })).toBeEnabled();
+  const recovery = preview.getByTestId("session-recovery-card");
+  await expect(recovery).toHaveCount(1);
+  await expect(recovery).toBeVisible();
+  await expect(preview.getByTestId("session-recovery-error")).toHaveCount(0);
+  const tabsBox = await preview.getByTestId("preview-plan-tab").boundingBox();
+  const recoveryBox = await recovery.boundingBox();
+  const panelBox = await preview.boundingBox();
+  expect(recoveryBox!.y).toBeGreaterThan(tabsBox!.y + tabsBox!.height);
+  expect(recoveryBox!.y + recoveryBox!.height).toBeGreaterThan(panelBox!.y + panelBox!.height - 30);
+  await recovery.getByText("Technical details", { exact: true }).click();
+  await expect(recovery.locator("pre")).toContainText("Automatic resume transport failed");
+  await expect(recovery.locator("pre")).toContainText("Automatic workspace restore failed");
   await prCapture.screenshot("plan-recovery-feedback", {
-    caption: "Preview Plan keeps recovery details and retry available.",
+    caption: "Preview Plan uses the shared recovery card in the lower composer area.",
   });
+  const resume = recovery.getByTestId("recovery-resume-button");
+  await resume.click();
+  await expect.poll(() => attempts.manual).toBe(1);
+  await expect(resume).toBeDisabled();
+  await expect(recovery.getByTestId("recovery-fresh-button")).toBeDisabled();
+  attempts.finishManual();
+  await expect(resume).toBeEnabled();
+  await expect(recovery.getByTestId("session-recovery-error")).toBeVisible();
   await preview.getByTestId(`preview-session-tab-${sessionId}`).click();
   await expect(preview.getByTestId("session-recovery-card")).toBeVisible();
-  await expect(fallback).toHaveCount(0);
+  await expect(preview.getByTestId("session-recovery-error")).toHaveCount(0);
 });
