@@ -10,8 +10,8 @@ function file(path = README_PATH): FileInfo {
   return { path, status: "modified", staged: false };
 }
 
-function status(files: Record<string, FileInfo>): GitStatusEntry {
-  return { files } as GitStatusEntry;
+function status(files: Record<string, FileInfo>, repositoryName?: string): GitStatusEntry {
+  return { files, repository_name: repositoryName } as GitStatusEntry;
 }
 
 describe("buildReviewGitStatusFiles", () => {
@@ -20,7 +20,7 @@ describe("buildReviewGitStatusFiles", () => {
     const perRepoFiles = { [README_PATH]: file() };
 
     const result = buildReviewGitStatusFiles(
-      status(legacyFiles),
+      status(legacyFiles, "frontend"),
       [{ repository_name: "frontend", status: status(perRepoFiles) }],
       1,
     );
@@ -47,12 +47,12 @@ describe("buildReviewGitStatusFiles", () => {
     const backend = { [README_PATH]: file() };
 
     const partiallyHydrated = buildReviewGitStatusFiles(
-      status(frontend),
+      status(frontend, "frontend"),
       [{ repository_name: "frontend", status: status(frontend) }],
       2,
     );
     const fullyHydrated = buildReviewGitStatusFiles(
-      status(backend),
+      status(backend, "backend"),
       [
         { repository_name: "frontend", status: status(frontend) },
         { repository_name: "backend", status: status(backend) },
@@ -84,7 +84,7 @@ describe("buildReviewGitStatusFiles", () => {
       { repository_name: "backend", status: status(backend) },
     ];
 
-    const result = buildReviewGitStatusFiles(status(frontend), statuses, 0);
+    const result = buildReviewGitStatusFiles(status(frontend, "frontend"), statuses, 0);
 
     expect(result.isMultiRepo).toBe(true);
     expect(Object.keys(result.files ?? {}).sort()).toEqual([
@@ -130,6 +130,24 @@ describe("buildReviewGitStatusFiles", () => {
     ]);
     expect(result.files?.["\u0000README.md"]?.repository_name).toBe("");
     expect(result.files?.["vendor/lib\u0000src/lib.ts"]?.repository_name).toBe("vendor/lib");
+  });
+});
+
+describe("multi-repository review hydration", () => {
+  it("merges the root legacy status when named submodule statuses have hydrated first", () => {
+    const rootDiff = "-parent base\n+parent working-tree change";
+    const root = status({ [README_PATH]: { ...file(), diff: rootDiff } });
+    const outer = status({ [README_PATH]: file() }, "vendor/outer");
+
+    const result = buildReviewGitStatusFiles(
+      root,
+      [{ repository_name: "vendor/outer", status: outer }],
+      1,
+    );
+
+    expect(result.isMultiRepo).toBe(true);
+    expect(result.files?.["\u0000README.md"]?.diff).toBe(rootDiff);
+    expect(result.files?.["vendor/outer\u0000README.md"]?.repository_name).toBe("vendor/outer");
   });
 });
 

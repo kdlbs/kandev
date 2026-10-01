@@ -29,14 +29,20 @@ owns the additive evidence and presentation rules.
 
 The user explicitly authorized implementation after reviewing this package.
 All four work orders are complete with their scoped build, test, lint, i18n,
-E2E, public-documentation, and specification checks recorded below. No commits,
-pushes, or persistent platform tasks or sessions were created.
+E2E, public-documentation, and specification checks recorded below. The user
+authorized PR #4093 and its CI fixup; no persistent platform tasks or sessions
+were created.
 
 ## Checkout and evidence
 
 - Checkout: `/root/.kandev/tasks/implement-clearer-se_hhvg8vdz/kandev`.
 - Dedicated branch: `feature/plan-clearer-session-73b`.
-- Base: `ff917a370ac9127fee6f8d7cee80b6b7b9b6175b`.
+- Initial package base: `ff917a370ac9127fee6f8d7cee80b6b7b9b6175b`.
+- Conflict reconciliation merged main at `53e96ad19d453ebbf7df0bb61f1bc7265fa33319`
+  in commit `e4a8c64e6964fd9ea7277544ff19881a06f0c0ed`.
+- PR fixup reconciliation merged the current main tip
+  `08e4ffdb99caf40b0df5baa67b29cf4313188f15` in commit
+  `8b63bd3e60871fd7a8ff7dd3ded8e21c291facf0` with no file conflicts.
 - PR #4065 merged commit `fa729f2d7653f4480c107c6a6d50a5452eb3dd0e`
   is an ancestor, verified with `git merge-base --is-ancestor`.
 - The package was moved into this existing task checkout at the user's request. Original developer files are not changed.
@@ -385,6 +391,32 @@ evidence with one compact active-row marker; and model-application failures
 identify the actual safe value sent to `SetModel`. Regressions cover absent
 transcript history, successor failures, manual dismissal, safe-copy/DOM
 redaction, fallback and variation rejection, and unknown-model fallback.
+
+## PR #4093 CI fixup
+
+After the first conflict-resolution merge, CI run `36898975028` had two final
+E2E failures. The markdown preview test reused a worker repository containing
+untracked canvas files, so its fixture now uses a dedicated committed repository.
+The nested submodule review test exposed that the dialog discarded a root status
+held in the legacy slot while named child statuses had hydrated; the adapter now
+retains that root snapshot when its repository identity is empty and no explicit
+root entry is present. The test selects the root file before reading its lazy
+diff. The existing mobile nested-submodule review flow also asserts the same
+root diff; this change is data normalization only and does not alter mobile
+composition, touch behavior, or scrolling. Public review guidance already
+describes parent and submodule files as distinct scoped entries, so no public
+documentation update is needed.
+
+Local verification after those fixes passed: `pnpm exec vitest run
+components/task/use-review-dialog.test.ts` (10 tests), `pnpm run typecheck`,
+`pnpm run i18n:check`, changed-file ESLint, Prettier, and the managed E2E command
+`pnpm e2e:run tests/chat/markdown-preview.spec.ts
+tests/review/submodule-review.spec.ts -- --retries=0` (10 tests), plus
+`pnpm e2e:run --project mobile-chrome
+tests/review/mobile-submodule-review.spec.ts -- --retries=0` (1 test). The failed
+full E2E run also recorded six unrelated first-attempt timeouts that passed on
+retry; all their diagnostic contexts were inspected. The final pushed head and
+its exact-head CI result are tracked by PR #4093.
 
 ## Risks
 
