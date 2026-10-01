@@ -86,6 +86,11 @@ type CoordinatorPhase2 struct {
 	Policy         CoordinatorPolicyDTO `json:"policy"`
 	PolicyRevision int                  `json:"policy_revision"`
 	Watches        CoordinatorWatchDTO  `json:"watches"`
+	// Projects and ProjectsConfig are the settings read's project members;
+	// absent unless the stored scope is selected (Projects) or phase 3.1 is
+	// effective (ProjectsConfig).
+	Projects       *ProjectsDTO       `json:"projects,omitempty"`
+	ProjectsConfig *ProjectsConfigDTO `json:"projects_config,omitempty"`
 }
 
 // SummaryDTO is the list route's per-coordinator card summary, present only
@@ -127,6 +132,9 @@ type CoordinatorPolicyDTO struct {
 type CoordinatorWatchDTO struct {
 	Scope       string   `json:"scope"`
 	WorkflowIDs []string `json:"workflow_ids"`
+	// Projects is *WatchProjectsDTO or *WatchProjectsAllDTO; absent when
+	// the stored project scope is every project and phase 3.1 is off.
+	Projects any `json:"projects,omitempty"`
 }
 
 // WithPolicyView attaches the phase-2 fields and returns the receiver.

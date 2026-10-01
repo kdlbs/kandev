@@ -3,9 +3,23 @@ package coordinator
 import (
 	"context"
 	"errors"
+	"expvar"
 
 	"go.uber.org/zap"
 )
+
+const abortReasonProjectsRead = "projects_read_failed"
+
+var deliveryAbortedTotal = expvar.NewMap("coordinator_delivery_aborted_total")
+
+func deliveryAbortedCounter(reason string) int64 { return expvarMapValue(deliveryAbortedTotal, reason) }
+
+// wakeRepos is the repositories of the pending wakes' tasks, read once; err is
+// set when that read failed.
+type wakeRepos struct {
+	byTask map[string][]string
+	err    error
+}
 
 // holdingWakes runs delivery step 2: it re-checks each pending wake's episode
 // against stored state, supersedes the ones that no longer hold, and returns
@@ -21,10 +35,23 @@ func (s *Service) holdingWakes(ctx context.Context, coord *Coordinator) ([]pendi
 	if err != nil {
 		return nil, err
 	}
+	g, err := s.newWatchGate(ctx, set, coord.WorkspaceID)
+	if err != nil {
+		deliveryAbortedTotal.Add(abortReasonProjectsRead, 1)
+		s.logger.Warn("coordinator delivery: project scope read failed; delivery aborted",
+			zap.String("coordinator_id", coord.ID), zap.Error(err))
+		return nil, err
+	}
 	own, err := s.store.ListOwnTasks(ctx, coord.ID)
 	if err != nil {
 		return nil, err
 	}
+	taskIDs := make([]string, 0, len(pending))
+	for _, w := range pending {
+		taskIDs = append(taskIDs, w.TaskID)
+	}
+	byTask, repoErr := s.taskRepositoryIDs(ctx, g, taskIDs)
+	repos := wakeRepos{byTask: byTask, err: repoErr}
 	workflows := make(map[string]string, len(own))
 	for _, o := range own {
 		workflows[o.TaskID] = o.WorkflowID
@@ -35,13 +62,24 @@ func (s *Service) holdingWakes(ctx context.Context, coord *Coordinator) ([]pendi
 	if src == nil {
 		return nil, errors.New("coordinator delivery: wake sources are not wired")
 	}
+	keep, superseded := s.partitionWakes(ctx, src, coord, g, repos, workflows, pending)
+	if superseded {
+		s.publishCoordinatorUpdatedWith(ctx, coord.WorkspaceID, coord.ID, true)
+	}
+	return keep, nil
+}
+
+// partitionWakes returns the first deliveryWakeLimit wakes that still hold and
+// supersedes the ones that no longer do; superseded reports whether any row
+// changed.
+func (s *Service) partitionWakes(ctx context.Context, src WakeSources, coord *Coordinator, g *watchGate, repos wakeRepos, workflows map[string]string, pending []pendingWake) ([]pendingWake, bool) {
 	var keep []pendingWake
 	superseded := false
 	for _, w := range pending {
 		if len(keep) >= deliveryWakeLimit {
 			break
 		}
-		holds, err := s.wakeHolds(ctx, src, coord, set, workflows, w)
+		holds, err := s.wakeHolds(ctx, src, coord, g, repos, workflows, w)
 		if err != nil {
 			s.logger.Warn("coordinator delivery: episode read failed",
 				zap.String("coordinator_id", coord.ID), zap.String("wake_id", w.ID), zap.Error(err))
@@ -62,17 +100,20 @@ func (s *Service) holdingWakes(ctx context.Context, coord *Coordinator) ([]pendi
 			superseded = true
 		}
 	}
-	if superseded {
-		s.publishCoordinatorUpdatedWith(ctx, coord.WorkspaceID, coord.ID, true)
-	}
-	return keep, nil
+	return keep, superseded
 }
 
 // wakeHolds reports whether the wake's task is still owned, still in the watch
 // set, and still shows the wake's exact episode.
-func (s *Service) wakeHolds(ctx context.Context, src WakeSources, coord *Coordinator, set WatchSet, workflows map[string]string, w pendingWake) (bool, error) {
+func (s *Service) wakeHolds(ctx context.Context, src WakeSources, coord *Coordinator, g *watchGate, repos wakeRepos, workflows map[string]string, w pendingWake) (bool, error) {
 	workflowID, owned := workflows[w.TaskID]
-	if !owned || !set.Contains(workflowID) {
+	if !owned || !g.set.Contains(workflowID) {
+		return false, nil
+	}
+	if g.needsRepositories() && repos.err != nil {
+		return false, repos.err
+	}
+	if !g.task(workflowID, repos.byTask[w.TaskID]) {
 		return false, nil
 	}
 	episodes, err := s.readEpisodes(ctx, src, coord.WorkspaceID, w.TaskID, []WakeKind{w.Kind})

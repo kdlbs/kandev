@@ -131,6 +131,11 @@ type Service struct {
 	// phase3 is true when phase 3 is effective (features.coordinator, phase 2
 	// and phase 3 all on). It gates the autonomy settings.
 	phase3 bool
+
+	// phase31 is true when phase 3.1 is effective (phase 3 effective and
+	// features.coordinatorPhase31): the project-scope write surface and its
+	// reads. The stored project scope is enforced whatever its value.
+	phase31 bool
 	// automatic holds the automatic path's injectable seams.
 	automatic automaticState
 	// wakeMu guards kick, the stall hook, the wake sources and the recorder
@@ -141,7 +146,10 @@ type Service struct {
 	// stallWakeHook records stall wakes; nil is a no-op.
 	stallWakeHook StallWakeHook
 	wakeSources   WakeSources
-	recorderSubs  []bus.Subscription
+	// projects reads sets, repositories and task repositories for the project
+	// scope; guarded by wakeMu.
+	projects     ProjectReader
+	recorderSubs []bus.Subscription
 	// recorderStopped latches once StopWakeRecorder ran: later hook and event
 	// entries are refused. wakeInFlight counts handlers and hooks in flight.
 	recorderStopped bool
@@ -190,6 +198,14 @@ func WithPhase2(on bool) ServiceOption {
 func WithPhase3(on bool) ServiceOption {
 	return func(s *Service) { s.phase3 = on }
 }
+
+// WithPhase31 sets whether the phase 3.1 surface is effective.
+func WithPhase31(on bool) ServiceOption {
+	return func(s *Service) { s.phase31 = on }
+}
+
+// Phase31Enabled reports whether the phase 3.1 surface is effective.
+func (s *Service) Phase31Enabled() bool { return s.phase31 }
 
 // Phase3Enabled reports whether the phase 3 autonomy surface is effective.
 func (s *Service) Phase3Enabled() bool { return s.phase3 }

@@ -84,7 +84,13 @@ func (h *Handlers) coordinatorDTO(ctx context.Context, c *Coordinator) (*Coordin
 	if err != nil {
 		return nil, err
 	}
-	return dto.WithPolicyView(view), nil
+	dto.WithPolicyView(view)
+	projects, err := h.service.WatchProjectsView(ctx, c)
+	if err != nil {
+		return nil, err
+	}
+	dto.Watches.Projects = projects
+	return dto, nil
 }
 
 // httpListCoordinators backs GET /api/v1/workspaces/:id/coordinators.

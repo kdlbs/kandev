@@ -65,8 +65,9 @@ func (e *PolicyDeniedError) Error() string { return "policy_denied" }
 
 // settingsRequest is a validated PUT body. Nil members are unchanged.
 type settingsRequest struct {
-	policy  *Policy
-	watches *watchesRequest
+	policy   *Policy
+	watches  *watchesRequest
+	projects *projectsRequest
 }
 
 type watchesRequest struct {
@@ -76,7 +77,7 @@ type watchesRequest struct {
 
 // parseSettingsBody validates everything in the body that needs no stored
 // state. Policy is validated before Watches.
-func parseSettingsBody(body []byte, phase3 bool) (settingsRequest, error) {
+func parseSettingsBody(body []byte, phase3, phase31 bool) (settingsRequest, error) {
 	var top map[string]json.RawMessage
 	if err := json.Unmarshal(body, &top); err != nil || top == nil {
 		return settingsRequest{}, bodyErr("", "body must be a JSON object")
@@ -95,6 +96,13 @@ func parseSettingsBody(body []byte, phase3 bool) (settingsRequest, error) {
 			return settingsRequest{}, err
 		}
 		req.watches = w
+	}
+	if raw, ok := presentMember(top, fieldProjects); ok && phase31 {
+		p, err := parseProjectsMember(raw)
+		if err != nil {
+			return settingsRequest{}, err
+		}
+		req.projects = p
 	}
 	return req, nil
 }
@@ -262,7 +270,9 @@ func (s *Store) EffectiveWatchSet(ctx context.Context, exec coordinatorExec, coo
 			ids = append(ids, id)
 		}
 	}
-	return WatchSet{WorkflowIDs: ids}, nil
+	set.All = false
+	set.WorkflowIDs = ids
+	return set, nil
 }
 
 // EffectiveWatchSet returns the coordinator's effective Watches, read through
@@ -287,7 +297,13 @@ func (s *Service) GetSettings(ctx context.Context, workspaceID, coordinatorID st
 	if err != nil {
 		return nil, err
 	}
-	return phase2FromView(view), nil
+	out := phase2FromView(view)
+	state, err := s.store.loadProjectState(ctx, s.store.ro, coordinatorID)
+	if err != nil {
+		return nil, err
+	}
+	out.Projects, out.ProjectsConfig = s.projectsView(ctx, workspaceID, state)
+	return out, nil
 }
 
 func phase2FromView(v PolicyView) *CoordinatorPhase2 {
@@ -310,7 +326,7 @@ func (s *Service) SaveSettings(ctx context.Context, workspaceID, coordinatorID s
 	if _, err := s.store.GetCoordinator(ctx, workspaceID, coordinatorID); err != nil {
 		return nil, err
 	}
-	req, err := parseSettingsBody(body, s.phase3)
+	req, err := parseSettingsBody(body, s.phase3, s.phase31)
 	if err != nil {
 		return nil, err
 	}
@@ -342,17 +358,9 @@ func (s *Service) SaveSettings(ctx context.Context, workspaceID, coordinatorID s
 // resolves the body against the effective Watches, and writes only when
 // something differs.
 func (s *Service) applySettings(ctx context.Context, tx coordinatorExec, workspaceID, coordinatorID string, req settingsRequest) (*CoordinatorPhase2, bool, error) {
-	var row struct {
-		PolicyJSON *string `db:"policy_json"`
-		Revision   int     `db:"policy_revision"`
-		Workspace  string  `db:"workspace_id"`
-	}
-	if err := tx.QueryRowContext(ctx, s.store.db.Rebind(`SELECT policy_json, policy_revision, workspace_id FROM coordinators WHERE id = ?`), coordinatorID).
-		Scan(&row.PolicyJSON, &row.Revision, &row.Workspace); err != nil {
-		return nil, false, fmt.Errorf("read coordinator settings: %w", err)
-	}
-	if row.Workspace != workspaceID {
-		return nil, false, ErrNotFound
+	row, err := s.readSettingsRow(ctx, tx, workspaceID, coordinatorID)
+	if err != nil {
+		return nil, false, err
 	}
 	stored, policyErr := ParsePolicy(row.PolicyJSON)
 	rawSet, err := s.store.LoadWatchSet(ctx, tx, coordinatorID)
@@ -367,6 +375,10 @@ func (s *Service) applySettings(ctx context.Context, tx coordinatorExec, workspa
 	if err != nil {
 		return nil, false, err
 	}
+	storedProjects, newProjects, err := s.resolveProjectsFor(ctx, tx, workspaceID, coordinatorID, req.projects)
+	if err != nil {
+		return nil, false, err
+	}
 	policyChanged := req.policy != nil && (policyErr != nil || !policiesEqual(*req.policy, stored))
 	watchesChanged := newWatches != nil
 	final := stored
@@ -377,33 +389,68 @@ func (s *Service) applySettings(ctx context.Context, tx coordinatorExec, workspa
 	if watchesChanged {
 		scope = *newWatches
 	}
+	if newProjects != nil {
+		storedProjects = *newProjects
+	}
 	result := &CoordinatorPhase2{
 		Policy:         CoordinatorPolicyDTO{Actions: final.Actions},
 		PolicyRevision: row.Revision,
 		Watches:        CoordinatorWatchDTO{Scope: scope.scope, WorkflowIDs: nonNilIDs(scope.ids)},
 	}
-	if !policyChanged && !watchesChanged {
+	result.Projects, result.ProjectsConfig = s.projectsView(ctx, workspaceID, storedProjects)
+	if !policyChanged && !watchesChanged && newProjects == nil {
 		return result, false, nil
 	}
-	if err := s.commitSettings(ctx, tx, workspaceID, coordinatorID, row.PolicyJSON, stored, final, policyChanged, watchesChanged, scope); err != nil {
+	if err := s.commitSettings(ctx, tx, workspaceID, coordinatorID, row.PolicyJSON, stored, final, policyChanged, watchesChanged, scope, newProjects); err != nil {
 		return nil, false, err
 	}
 	result.PolicyRevision = row.Revision + 1
 	s.logger.Info("coordinator settings saved",
 		zap.String("coordinator_id", coordinatorID), zap.Int("old_revision", row.Revision),
-		zap.Int("new_revision", row.Revision+1), zap.Bool("policy_changed", policyChanged), zap.Bool("watches_changed", watchesChanged))
+		zap.Int("new_revision", row.Revision+1), zap.Bool("policy_changed", policyChanged), zap.Bool("watches_changed", watchesChanged), zap.Bool("projects_changed", newProjects != nil))
 	return result, true, nil
+}
+
+type settingsRow struct {
+	PolicyJSON *string
+	Revision   int
+}
+
+// readSettingsRow reads the stored policy and revision; a coordinator of
+// another workspace is not found.
+func (s *Service) readSettingsRow(ctx context.Context, tx coordinatorExec, workspaceID, coordinatorID string) (settingsRow, error) {
+	var row settingsRow
+	var owner string
+	if err := tx.QueryRowContext(ctx, s.store.db.Rebind(`SELECT policy_json, policy_revision, workspace_id FROM coordinators WHERE id = ?`), coordinatorID).
+		Scan(&row.PolicyJSON, &row.Revision, &owner); err != nil {
+		return settingsRow{}, fmt.Errorf("read coordinator settings: %w", err)
+	}
+	if owner != workspaceID {
+		return settingsRow{}, ErrNotFound
+	}
+	return row, nil
+}
+
+// resolveProjectsFor loads the stored project state and resolves the request
+// against it; the second result is nil when nothing changes.
+func (s *Service) resolveProjectsFor(ctx context.Context, tx coordinatorExec, workspaceID, coordinatorID string, req *projectsRequest) (projectState, *projectState, error) {
+	stored, err := s.store.loadProjectState(ctx, tx, coordinatorID)
+	if err != nil {
+		return projectState{}, nil, err
+	}
+	next, err := s.resolveProjects(ctx, workspaceID, stored, req)
+	return stored, next, err
 }
 
 // commitSettings gates a raise, writes the changed settings and records the
 // class changes, all inside the caller's coordinator lock.
-func (s *Service) commitSettings(ctx context.Context, tx coordinatorExec, workspaceID, coordinatorID string, storedJSON *string, stored, final Policy, policyChanged, watchesChanged bool, scope watchState) error {
+func (s *Service) commitSettings(ctx context.Context, tx coordinatorExec, workspaceID, coordinatorID string, storedJSON *string, stored, final Policy, policyChanged, watchesChanged bool, scope watchState, projects *projectState) error {
 	if policyChanged {
 		if err := s.checkRaise(ctx, coordinatorID, stored, final); err != nil {
 			return err
 		}
 	}
-	if err := s.writeSettings(ctx, tx, workspaceID, coordinatorID, storedJSON, policyChanged, final, watchesChanged, scope); err != nil {
+	if err := s.writeSettings(ctx, tx, workspaceID, coordinatorID, storedJSON, policyChanged, final, watchesChanged, scope, projects); err != nil {
 		return err
 	}
 	if policyChanged {
@@ -488,7 +535,7 @@ func (s *Service) resolveWatches(ctx context.Context, tx coordinatorExec, worksp
 	return &next, nil
 }
 
-func (s *Service) writeSettings(ctx context.Context, tx coordinatorExec, workspaceID, coordinatorID string, oldPolicy *string, policyChanged bool, final Policy, watchesChanged bool, scope watchState) error {
+func (s *Service) writeSettings(ctx context.Context, tx coordinatorExec, workspaceID, coordinatorID string, oldPolicy *string, policyChanged bool, final Policy, watchesChanged bool, scope watchState, projects *projectState) error {
 	policyJSON := oldPolicy
 	if policyChanged {
 		encoded, err := json.Marshal(final)
@@ -506,6 +553,11 @@ func (s *Service) writeSettings(ctx context.Context, tx coordinatorExec, workspa
 	}
 	if _, err := tx.ExecContext(ctx, s.store.db.Rebind(query+` WHERE id = ?`), append(args, coordinatorID)...); err != nil {
 		return fmt.Errorf("write settings: %w", err)
+	}
+	if projects != nil {
+		if err := s.store.writeProjectState(ctx, tx, workspaceID, coordinatorID, *projects); err != nil {
+			return err
+		}
 	}
 	if !watchesChanged {
 		return nil

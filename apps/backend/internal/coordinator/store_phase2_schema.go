@@ -14,6 +14,8 @@ var phase2ColumnMigrations = []struct{ name, stmt string }{
 	{"coordinators.policy_json", `ALTER TABLE coordinators ADD COLUMN policy_json TEXT`},
 	{"coordinators.policy_revision", `ALTER TABLE coordinators ADD COLUMN policy_revision INTEGER NOT NULL DEFAULT 0`},
 	{"coordinators.watch_scope", `ALTER TABLE coordinators ADD COLUMN watch_scope TEXT NOT NULL DEFAULT 'all'`},
+	{"coordinators.project_scope", `ALTER TABLE coordinators ADD COLUMN project_scope TEXT NOT NULL DEFAULT 'all'`},
+	{"coordinators.include_no_repository", `ALTER TABLE coordinators ADD COLUMN include_no_repository INTEGER NOT NULL DEFAULT 0`},
 	{"coordinator_proposals.kind", `ALTER TABLE coordinator_proposals ADD COLUMN kind TEXT NOT NULL DEFAULT 'create_task'`},
 	{"coordinator_proposals.target_task_id", `ALTER TABLE coordinator_proposals ADD COLUMN target_task_id TEXT`},
 	{"coordinator_proposals.standing_order_ids", `ALTER TABLE coordinator_proposals ADD COLUMN standing_order_ids TEXT NOT NULL DEFAULT '[]'`},
@@ -47,6 +49,15 @@ const phase2TablesSQL = `
 		workspace_id TEXT NOT NULL,
 		created_at {{timestamp}} NOT NULL,
 		PRIMARY KEY (coordinator_id, workflow_id)
+	);
+
+	CREATE TABLE IF NOT EXISTS coordinator_watch_projects (
+		coordinator_id TEXT NOT NULL,
+		entry_kind TEXT NOT NULL,
+		entry_id TEXT NOT NULL,
+		workspace_id TEXT NOT NULL,
+		created_at {{timestamp}} NOT NULL,
+		PRIMARY KEY (coordinator_id, entry_kind, entry_id)
 	);
 
 	CREATE TABLE IF NOT EXISTS coordinator_activity (
@@ -175,6 +186,7 @@ const phase2TablesSQL = `
 const phase2IndexesSQL = `
 	CREATE INDEX IF NOT EXISTS idx_coordinator_watches_workflow ON coordinator_watches(workflow_id);
 	CREATE INDEX IF NOT EXISTS idx_coordinator_watches_workspace ON coordinator_watches(workspace_id);
+	CREATE INDEX IF NOT EXISTS idx_coordinator_watch_projects_entry ON coordinator_watch_projects(entry_kind, entry_id);
 	CREATE INDEX IF NOT EXISTS idx_coordinator_activity_list ON coordinator_activity(coordinator_id, created_at DESC, id DESC);
 	CREATE INDEX IF NOT EXISTS idx_coordinator_activity_class ON coordinator_activity(coordinator_id, action_class, created_at);
 	CREATE INDEX IF NOT EXISTS idx_coordinator_activity_created ON coordinator_activity(created_at);

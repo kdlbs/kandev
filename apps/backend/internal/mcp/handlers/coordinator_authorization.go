@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"slices"
 	"strings"
 
@@ -12,6 +13,7 @@ import (
 	"github.com/kandev/kandev/internal/coordinator"
 	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
 	mcpscope "github.com/kandev/kandev/internal/mcp/scope"
+	taskmodels "github.com/kandev/kandev/internal/task/models"
 	ws "github.com/kandev/kandev/pkg/websocket"
 )
 
@@ -236,9 +238,20 @@ func (h *Handlers) coordinatorWatchesFields(
 		if err != nil || task == nil {
 			return false
 		}
-		workflowID = task.WorkflowID
+		return h.coordinatorWatchesTask(ctx, principal, task.ID, task.WorkflowID)
 	}
 	return h.coordinatorWatchesWorkflow(ctx, principal, workflowID)
+}
+
+// coordinatorWatchesTask reports whether the task is in the coordinator's
+// Watches, workflow and projects together; an unreadable scope refuses.
+func (h *Handlers) coordinatorWatchesTask(ctx context.Context, principal mcpscope.Principal, taskID, workflowID string) bool {
+	watched, err := h.coordinatorSvc.TaskWatched(ctx, principal.CoordinatorID, taskID, workflowID)
+	if err != nil {
+		h.logger.Error("coordinator watch scope read failed; refusing", zap.String("coordinator_id", principal.CoordinatorID), zap.Error(err))
+		return false
+	}
+	return watched
 }
 
 // coordinatorWatchesWorkflow reports whether the workflow is in the
@@ -325,4 +338,30 @@ func isCoordinatorProposeAction(action string) bool {
 	}
 	_, isPropose := coordinator.ProposeActionFor(tool)
 	return isPropose
+}
+
+// filterCoordinatorTasks drops the tasks outside a coordinator principal's
+// projects. Other callers, and a coordinator without phase 2, see the list
+// unchanged. A resolver failure is an error naming projects.
+func (h *Handlers) filterCoordinatorTasks(ctx context.Context, tasks []*taskmodels.Task) ([]*taskmodels.Task, error) {
+	principal, ok := mcpscope.PrincipalFromContext(ctx)
+	if !ok || !principal.IsCoordinator() || h.coordinatorSvc == nil || !h.coordinatorSvc.Phase2() {
+		return tasks, nil
+	}
+	refs := make([]coordinator.TaskRef, 0, len(tasks))
+	for _, t := range tasks {
+		refs = append(refs, coordinator.TaskRef{ID: t.ID, WorkflowID: t.WorkflowID})
+	}
+	watched, err := h.coordinatorSvc.WatchedTaskIDs(ctx, principal.CoordinatorID, refs)
+	if err != nil {
+		h.logger.Error("coordinator projects read failed", zap.String("coordinator_id", principal.CoordinatorID), zap.Error(err))
+		return nil, errors.New("could not read the coordinator's projects")
+	}
+	kept := make([]*taskmodels.Task, 0, len(tasks))
+	for _, t := range tasks {
+		if watched[t.ID] {
+			kept = append(kept, t)
+		}
+	}
+	return kept, nil
 }

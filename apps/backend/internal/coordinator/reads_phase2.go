@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"go.uber.org/zap"
+
+	"github.com/kandev/kandev/internal/coordinator/watch"
 )
 
 const (
@@ -23,6 +25,8 @@ const (
 type WatchSet struct {
 	All         bool
 	WorkflowIDs []string
+	// Projects is the stored project scope; its zero value is every project.
+	Projects watch.Scope
 }
 
 // Contains reports whether the workflow is watched. The empty id is never
@@ -49,11 +53,22 @@ func normalizeWatchScope(scope string) string {
 	return watchScopeSelected
 }
 
-// LoadWatchSet reads the coordinator's watch scope and selected workflows
-// through exec. An unknown stored scope reads as selected.
+// Project entry kinds of coordinator_watch_projects.
+const (
+	projectKindSet        = "repository_set"
+	projectKindRepository = "repository"
+)
+
+// LoadWatchSet reads the coordinator's watch scope, selected workflows and
+// project scope through exec. An unknown stored scope reads as selected; an
+// unknown stored project scope reads as selected too, so it never widens.
 func (s *Store) LoadWatchSet(ctx context.Context, exec coordinatorExec, coordinatorID string) (WatchSet, error) {
-	var scope string
-	err := exec.QueryRowContext(ctx, s.db.Rebind(`SELECT watch_scope FROM coordinators WHERE id = ?`), coordinatorID).Scan(&scope)
+	var (
+		scope, projectScope string
+		includeNoRepo       bool
+	)
+	err := exec.QueryRowContext(ctx, s.db.Rebind(`SELECT watch_scope, project_scope, include_no_repository FROM coordinators WHERE id = ?`), coordinatorID).
+		Scan(&scope, &projectScope, &includeNoRepo)
 	if errors.Is(err, sql.ErrNoRows) {
 		return WatchSet{}, ErrNotFound
 	}
@@ -61,6 +76,11 @@ func (s *Store) LoadWatchSet(ctx context.Context, exec coordinatorExec, coordina
 		return WatchSet{}, fmt.Errorf("read watch scope: %w", err)
 	}
 	set := WatchSet{All: normalizeWatchScope(scope) == watchScopeAll, WorkflowIDs: []string{}}
+	if normalizeWatchScope(projectScope) == watchScopeSelected {
+		if set.Projects, err = s.loadProjectScope(ctx, exec, coordinatorID, includeNoRepo); err != nil {
+			return WatchSet{}, err
+		}
+	}
 	if set.All {
 		return set, nil
 	}
@@ -81,6 +101,48 @@ func (s *Store) LoadWatchSet(ctx context.Context, exec coordinatorExec, coordina
 	}
 	sort.Strings(set.WorkflowIDs)
 	return set, nil
+}
+
+// ProjectEntry is one stored project entry.
+type ProjectEntry struct {
+	Kind string `json:"kind"`
+	ID   string `json:"id"`
+}
+
+// storedProjectEntries returns the coordinator's entries ordered by kind
+// (repository_set before repository) then id.
+func (s *Store) storedProjectEntries(ctx context.Context, exec coordinatorExec, coordinatorID string) ([]ProjectEntry, error) {
+	rows, err := exec.QueryContext(ctx, s.db.Rebind(`SELECT entry_kind, entry_id FROM coordinator_watch_projects WHERE coordinator_id = ?
+		ORDER BY CASE entry_kind WHEN 'repository_set' THEN 0 ELSE 1 END, entry_id`), coordinatorID)
+	if err != nil {
+		return nil, fmt.Errorf("read watch projects: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	out := []ProjectEntry{}
+	for rows.Next() {
+		var e ProjectEntry
+		if err := rows.Scan(&e.Kind, &e.ID); err != nil {
+			return nil, fmt.Errorf("scan watch project: %w", err)
+		}
+		out = append(out, e)
+	}
+	return out, rows.Err()
+}
+
+func (s *Store) loadProjectScope(ctx context.Context, exec coordinatorExec, coordinatorID string, includeNoRepo bool) (watch.Scope, error) {
+	entries, err := s.storedProjectEntries(ctx, exec, coordinatorID)
+	if err != nil {
+		return watch.Scope{}, err
+	}
+	scope := watch.Scope{Selected: true, IncludeNoRepo: includeNoRepo}
+	for _, e := range entries {
+		if e.Kind == projectKindSet {
+			scope.SetIDs = append(scope.SetIDs, e.ID)
+		} else {
+			scope.RepoIDs = append(scope.RepoIDs, e.ID)
+		}
+	}
+	return scope, nil
 }
 
 // StandingOrder is one stored standing order.

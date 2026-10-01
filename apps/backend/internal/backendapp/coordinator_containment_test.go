@@ -38,7 +38,7 @@ func TestRegisterCoordinatorRoutes_Phase3WiresContainment(t *testing.T) {
 	runCoordinatorBackgroundPass = func(context.Context, time.Time, []func(context.Context, time.Time)) {}
 	t.Cleanup(func() { runCoordinatorBackgroundPass = origPass })
 	for _, p3 := range []bool{false, true} {
-		svc, err := initCoordinatorWiring(context.Background(), newCoordinatorTestPool(t), newCoordinatorTestTracker(t), nil, nil, nil, true, true, p3, newTestLogger())
+		svc, err := initCoordinatorWiring(context.Background(), newCoordinatorTestPool(t), newCoordinatorTestTracker(t), nil, nil, nil, true, true, p3, false, newTestLogger())
 		if err != nil {
 			t.Fatal(err)
 		}

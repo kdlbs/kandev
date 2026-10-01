@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"sync/atomic"
 	"time"
 
 	"github.com/google/uuid"
@@ -28,6 +29,10 @@ type Store struct {
 	// now is the injectable clock. Overridden only by tests (decision 7's
 	// deterministic-order test needs a strictly increasing fake clock).
 	now func() time.Time
+
+	// projects reads the project scope's membership for counts made inside the
+	// store; nil until the Service wires it.
+	projects atomic.Pointer[ProjectReader]
 
 	// phase3 reports whether phase 3 is effective; improvement proposals are
 	// fenced out of every fenced read while it is not. Set by the Service that
@@ -301,7 +306,7 @@ func (s *Store) ListCoordinators(ctx context.Context, workspaceID string) ([]*Co
 
 // coordinatorOwnedTables lists the per-coordinator tables in deletion order.
 var coordinatorOwnedTables = []string{
-	"coordinator_watches", "coordinator_activity", "coordinator_standing_orders",
+	"coordinator_watches", "coordinator_watch_projects", "coordinator_activity", "coordinator_standing_orders",
 	"coordinator_goals", "coordinator_proposals",
 }
 

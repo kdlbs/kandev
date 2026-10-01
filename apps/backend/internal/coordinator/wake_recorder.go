@@ -262,7 +262,12 @@ func (s *Service) recordForOwners(ctx context.Context, src WakeSources, owners [
 			s.dropWakeRead(ctx, owner.CoordinatorID, taskID, err)
 			continue
 		}
-		if !set.Contains(owner.WorkflowID) {
+		watched, err := s.taskWatched(ctx, set, owner.WorkspaceID, taskID, owner.WorkflowID)
+		if err != nil {
+			s.dropWakeRead(ctx, owner.CoordinatorID, taskID, err)
+			continue
+		}
+		if !watched {
 			continue
 		}
 		if !read {

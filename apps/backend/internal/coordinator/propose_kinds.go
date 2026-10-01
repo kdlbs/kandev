@@ -213,7 +213,11 @@ func (s *Service) proposeTarget(ctx context.Context, c *Coordinator, taskID stri
 	if err != nil {
 		return nil, fmt.Errorf("read watch set: %w", err)
 	}
-	if !set.Contains(t.WorkflowID) {
+	watched, err := s.taskWatched(ctx, set, c.WorkspaceID, taskID, t.WorkflowID)
+	if err != nil {
+		return nil, fmt.Errorf("read projects: %w", err)
+	}
+	if !watched {
 		return nil, notFoundTarget()
 	}
 	switch {
