@@ -17,7 +17,7 @@ import (
 
 const externalTablesPostgresSQL = `
 	CREATE TABLE tasks (id TEXT PRIMARY KEY, workspace_id TEXT, workflow_id TEXT, workflow_step_id TEXT, state TEXT, archived_at TIMESTAMPTZ, updated_at TIMESTAMPTZ);
-	CREATE TABLE workflow_steps (id TEXT PRIMARY KEY, complete_task_on_enter BOOLEAN NOT NULL DEFAULT FALSE);
+	CREATE TABLE workflow_steps (id TEXT PRIMARY KEY, complete_task_on_enter INTEGER NOT NULL DEFAULT 0);
 	CREATE TABLE task_sessions (id TEXT PRIMARY KEY, state TEXT);
 	CREATE TABLE task_session_turns (id TEXT PRIMARY KEY, started_at TIMESTAMPTZ);
 	CREATE TABLE task_usage_events (id SERIAL PRIMARY KEY, session_id TEXT, turn_id TEXT, agent_type TEXT, model TEXT, tokens_in INTEGER NOT NULL DEFAULT 0, tokens_out INTEGER, tokens_total INTEGER NOT NULL DEFAULT 0, cost_subcents INTEGER NOT NULL DEFAULT 0, cost_source TEXT NOT NULL DEFAULT 'priced', created_at TIMESTAMPTZ);
@@ -52,7 +52,7 @@ func newPostgresFixture(t *testing.T) *fixture {
 
 func TestPostgres_StartRedeliveryKeepsOneRowAndOneSnapshot(t *testing.T) {
 	f := newPostgresFixture(t)
-	f.exec(`INSERT INTO workflow_steps (id, complete_task_on_enter) VALUES ('s-open', ?), ('s-done', ?)`, false, true)
+	f.exec(`INSERT INTO workflow_steps (id, complete_task_on_enter) VALUES ('s-open', 0), ('s-done', 1)`)
 	f.task("t-open", "wf", "s-open", "TODO", f.at(0), false)
 	f.task("t-done", "wf", "s-done", "COMPLETED", f.at(0), false)
 	started := f.at(-time.Minute)
@@ -69,7 +69,7 @@ func TestPostgres_StartRedeliveryKeepsOneRowAndOneSnapshot(t *testing.T) {
 
 func TestPostgres_SnapshotSelectsOnlyOpenWatchedTasks(t *testing.T) {
 	f := newPostgresFixture(t)
-	f.exec(`INSERT INTO workflow_steps (id, complete_task_on_enter) VALUES ('s-open', ?), ('s-done', ?)`, false, true)
+	f.exec(`INSERT INTO workflow_steps (id, complete_task_on_enter) VALUES ('s-open', 0), ('s-done', 1)`)
 	f.task("t-b", "wf", "s-open", "TODO", f.at(time.Minute), false)
 	f.task("t-a", "wf", "s-open", "TODO", f.at(time.Minute), false)
 	f.task("t-archived", "wf", "s-open", "TODO", f.at(time.Hour), true)
@@ -137,5 +137,25 @@ func TestPostgres_RetentionDeletesOldTurnsCallsAndSnapshots(t *testing.T) {
 	var kept []string
 	if err := f.db.Select(&kept, `SELECT hash FROM coordinator_turn_snapshots`); err != nil || strings.Join(kept, ",") != "shared" {
 		t.Fatalf("snapshots kept = %v (%v)", kept, err)
+	}
+}
+
+func TestPostgres_SnapshotRetentionRacingARepublishingStartKeepsTheSnapshot(t *testing.T) {
+	f := newPostgresFixture(t)
+	f.watch = coordinator.WatchSet{All: true}
+	snap, _ := f.snapshot(f.at(0))
+	aged := time.Now().UTC().Add(-500 * 24 * time.Hour)
+	for i := 0; i < 5; i++ {
+		id := "st-" + strings.Repeat("x", i+1)
+		f.exec(`DELETE FROM coordinator_turn_snapshots`)
+		f.exec(`INSERT INTO coordinator_turn_snapshots (hash, body, created_at) VALUES (?, ?, ?)`, snap.Hash, string(snap.Body), aged)
+		var wg sync.WaitGroup
+		wg.Add(2)
+		go func() { defer wg.Done(); f.l.RunDaily(t.Context()) }()
+		go func() { defer wg.Done(); f.start(id, f.at(0)) }()
+		wg.Wait()
+		if n := f.count(`SELECT COUNT(*) FROM coordinator_turns t JOIN coordinator_turn_snapshots s ON s.hash = t.snapshot_hash WHERE t.session_turn_id = '` + id + `'`); n != 1 {
+			t.Fatalf("iteration %d: started row does not resolve to a stored snapshot", i)
+		}
 	}
 }

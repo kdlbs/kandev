@@ -9,6 +9,7 @@ import (
 const turnEventQueueSize = 256
 
 type turnJob struct {
+	stage  string
 	handle func(context.Context, *bus.Event)
 	event  *bus.Event
 }
@@ -19,7 +20,7 @@ func (l *Ledger) enqueueEvent(j turnJob) {
 	select {
 	case l.events <- j:
 	default:
-		countFailure(StageStart)
+		countFailure(j.stage)
 		l.log.Warn("coordinator ledger: turn event queue full, event dropped")
 	}
 }

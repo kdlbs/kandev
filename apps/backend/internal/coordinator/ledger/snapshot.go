@@ -13,6 +13,7 @@ import (
 	"github.com/jmoiron/sqlx"
 
 	"github.com/kandev/kandev/internal/coordinator"
+	"github.com/kandev/kandev/internal/db/dialect"
 )
 
 const (
@@ -92,7 +93,7 @@ func snapshotTasks(ctx context.Context, db *sqlx.DB, workspaceID string, ws coor
 	}
 	where := `t.workspace_id = ? AND t.archived_at IS NULL AND NOT EXISTS (
 		SELECT 1 FROM workflow_steps s WHERE s.id = t.workflow_step_id AND s.complete_task_on_enter = ?)`
-	args := []any{workspaceID, true}
+	args := []any{workspaceID, dialect.BoolToInt(true)}
 	if !ws.All {
 		ids := slices.Clone(ws.WorkflowIDs)
 		slices.Sort(ids)

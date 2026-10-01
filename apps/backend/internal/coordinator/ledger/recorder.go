@@ -27,13 +27,14 @@ func (l *Ledger) Subscribe(eventBus bus.EventBus) (func(), error) {
 	for _, s := range []struct {
 		subject string
 		handle  func(context.Context, *bus.Event)
+		stage   string
 	}{
-		{events.TurnStarted, l.OnTurnStarted},
-		{events.TurnCompleted, l.OnTurnCompleted},
+		{events.TurnStarted, l.OnTurnStarted, StageStart},
+		{events.TurnCompleted, l.OnTurnCompleted, StageComplete},
 	} {
-		handle := s.handle
+		handle, stage := s.handle, s.stage
 		sub, err := eventBus.Subscribe(s.subject, func(_ context.Context, e *bus.Event) error {
-			l.enqueueEvent(turnJob{handle: handle, event: e})
+			l.enqueueEvent(turnJob{handle: handle, event: e, stage: stage})
 			return nil
 		})
 		if err != nil {

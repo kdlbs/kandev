@@ -91,9 +91,21 @@ func TestEnqueueEvent_FullQueueDropsAndCounts(t *testing.T) {
 		f.l.enqueueEvent(turnJob{handle: func(context.Context, *bus.Event) {}})
 	}
 	before := FailureCount(StageStart)
-	f.l.enqueueEvent(turnJob{handle: func(context.Context, *bus.Event) {}})
+	f.l.enqueueEvent(turnJob{stage: StageStart, handle: func(context.Context, *bus.Event) {}})
 	if FailureCount(StageStart) != before+1 {
 		t.Fatal("dropped event not counted")
+	}
+}
+
+func TestEnqueueEvent_DroppedCompletionIsCountedAsCompleteStage(t *testing.T) {
+	f := newFixture(t)
+	for range turnEventQueueSize {
+		f.l.enqueueEvent(turnJob{handle: func(context.Context, *bus.Event) {}})
+	}
+	beforeComplete, beforeStart := FailureCount(StageComplete), FailureCount(StageStart)
+	f.l.enqueueEvent(turnJob{stage: StageComplete, handle: func(context.Context, *bus.Event) {}})
+	if FailureCount(StageComplete) != beforeComplete+1 || FailureCount(StageStart) != beforeStart {
+		t.Fatal("dropped completion not counted under the complete stage")
 	}
 }
 
