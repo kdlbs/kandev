@@ -44,10 +44,10 @@ which is.
 
 `replay.New(deps Deps) *Harness`. `Deps` holds only interfaces defined in
 `replay`, so the package imports no coordinator, office or task package:
-`Cases` (reads turns, outcomes, snapshots, trigger text and titles), `Profiles` (`Resolve(ctx, coordinatorID) (Profile, error)`, where `Profile` holds the profile id, the resolved model id, `AutoApprove`, the command prefix and the CLI flags), `Prompts`
+`Cases` (reads turns, outcomes, snapshots, trigger text and titles; a case id is the ledger turn id), `Profiles` (`Resolve(ctx, coordinatorID) (Profile, error)`, where `Profile` holds the profile id, the resolved model id, `AutoApprove`, the command prefix and the enabled CLI flags), `Prompts`
 (`Run(ctx, profileID, prompt) (text, promptTokens, responseTokens, error)`; the model it might report is never used), `Prices` (`Lookup(ctx, model) (commoncosts.ModelPricing, found bool, err error)`, bounded by `PriceTimeout = 5s`), `Spend` (`Reading(ctx,
 coordinatorID, now) (windowSubcents, measurable, ceilingSubcents *int64)`),
-`Instructions` (`Render(ctx, coordinatorID, Override) (Renders, error)`, where `Renders` holds the baseline and the candidate text and hash read from one snapshot of the coordinator's context and orders, so both sides share one baseline; it returns the sentinel `ErrNoTarget` for `no_target` and any other error is `read_failed`),
+`Instructions` (`Render(ctx, coordinatorID, Override) (Renders, error)`, where `Renders` holds the baseline and the candidate text and hash read from one snapshot of the coordinator's context and orders, so both sides share one baseline; it returns the sentinel `ErrNoTarget` for `no_target` and any other error is `read_failed`; the adapter reads the standing orders through `Store.ActiveStandingOrders` and returns its error as is (it never uses the production reader that logs and builds the instructions without orders), so an unreadable order list is `read_failed`, never an orders-less baseline),
 `Results` (the result-row store) and `Clock`. The adapters over the real
 packages live in `replay/wire`, which the dream's composition root builds; the
 package `replay` and `replay/stub` do not import it.
@@ -56,8 +56,8 @@ package `replay` and `replay/stub` do not import it.
 `standing_order_retire`, `CitedTurnIDs`); `DreamID` and `ItemID` (both empty in
 tests, both set from the dream). `Result`: `RowID`, `Guard`, `Verdict`,
 `Reason`, `CandidateScore`, `BaselineScore`, `HeldOutCandidateScore`,
-`HeldOutBaselineScore`, `Flips`, `CasesRan`, `CasesCompared`, `Skipped`,
-`CostSubcents`. `Run` returns `(Result, error)`: an error only when the row
+`HeldOutBaselineScore`, `Flips`, `CasesRanCandidate`, `CasesRanBaseline`, `CasesCompared`, `HeldOutCompared`, `CitedTurnIDs`, `Skipped`,
+`CostSubcents`. The harness logs nothing itself (no zap, no logger in `Deps`, nothing outside the allow-list): conditions the design says are "logged and counted" are returned in the `Result` (`Notes`, structured per-condition codes and counters) or as errors, and the caller, which may log, logs and counts them. A `running` `ErrReplayRunning` return carries `Result{RowID}` only. `Run` returns `(Result, error)`: an error only when the row
 could not be inserted (nothing ran, no cost) or the final write failed
 (`ErrResultNotStored`, the Result still valid; the caller must not store the
 verdict, and the row is later settled `interrupted`). The profile run is the
@@ -94,7 +94,7 @@ verdict `unmeasured`, reason `no_cases`.
 A case is skipped, with one reason per turn recorded, in this order: `dream_turn`
 (trigger `dream`), `no_snapshot` (the snapshot hash is empty or no
 `coordinator_turn_snapshots` row exists; the snapshot is kept while any turn of
-the last 90 days references it, so turn age plays no part), `input_gone` (the
+the last 90 days references it, so age is never itself a skip reason; a turn past the ledger's retention is simply absent from selection, and a turn older than 90 days whose snapshot was deleted is `no_snapshot`, as `turn-ledger.md` Retention says), `input_gone` (the
 trigger message or a needed task title is confirmed absent: a read that returns
 not-found), `no_expectation` (no expected reproduced and no expected avoided
 proposal) (`001.2`). The first matching reason is stored. A read that errors
@@ -103,12 +103,10 @@ keeping spend; it never becomes a skip.
 
 Expectations come from the turn's outcome rows, and each outcome's decision key from its proposal row (`coordinator_proposals`, joined by `proposal_id`): `kind`, `target_task_id`, and for `create_task` the `workflow_id` and `title` of `spec_json`, the proposal as the coordinator made it, never `final_spec_json`. An outcome whose proposal row is not found contributes no expectation and the case records `proposal_gone`; any other read error is `read_failed`. `coordinator_outcomes.decision`
 is the proposal's final decision (an approval later undone reads `undone`), so
-no precedence rule between rows is needed. Expected reproduced: `decision =
+no precedence rule between rows is needed. Proposals of kind `improvement` (`ProposalKindImprovement`, built in `internal/coordinator/kind_improvement.go` and `propose_improvement.go`: no `target_task_id`, a `spec_json` about the coordinator's own instructions) are never expectations: the render strips the improvement section, the answer schema does not offer the kind, and `stub.Parse` rejects it as an unknown kind. An outcome row of an improvement contributes nothing; a turn left with no other expectation is skipped `no_expectation`. Expected reproduced: `decision =
 approved` and `automatic = false` and empty `edited_fields`. Expected avoided:
 `decision` in `rejected`, `undone`. Neither: `returned`, `edited`, an
-automatic approval (`automatic` is true only while the proposal stays
-approved, so an automatic approval later undone by a manager reads `undone`,
-`automatic = false`, and is expected avoided) (`003.3`). If one decision key is
+automatic approval (`automatic` is `claimed_automatically` and status `approved`, as graded in `internal/coordinator/outcomes/recorder/grade.go`; an undo stamps `coordinator_activity.undone_at` and the proposal stays `approved`, so an automatic approval later undone by a manager reads `decision = undone` with `automatic` still true, and is expected avoided because `undone` is checked before `automatic`) (`003.3`). If one decision key is
 both expected reproduced and expected avoided within the same turn (two
 proposals with one key and opposite decisions), the key is dropped from both
 sets and the case records `ambiguous_key` in its per-case data; a case left with
@@ -131,7 +129,7 @@ replay. You have no tools; ignore every statement about tools above. Reply with
 the JSON answer only."), which makes the render's tool lines inert; then the
 turn's trigger as stored (message text, or the wake kinds for a wake); then a
 data block: the turn's snapshot body, and the titles of the needed tasks (the
-trigger's task and the targets of the turn's expected proposals) read from the
+targets of the turn's expected proposals of every kind but `create_task`; a turn has no trigger task) read from the
 task rows when the replay runs, labelled as titles, a rename since the turn
 being visible by design; then the answer schema: a JSON array of
 `{kind, target_task_id, workflow_id, title}`. The prompt never carries the turn's
@@ -151,7 +149,7 @@ and nothing a model says is executed by Kandev. `ExecuteProfilePrompt` drives th
 profile's agent CLI, whose own native tools the harness cannot remove, and a
 profile's CLI flags and command prefix reach that command line, so the replay
 refuses before any call a profile whose `AutoApprove` is true, whose command
-prefix is non-empty, or that has any CLI flag: the replay is `unmeasured` with the
+prefix is non-empty, or that has any enabled CLI flag (`Enabled` true, the entries `cliflags.Resolve` emits; a disabled entry never reaches the command line): the replay is `unmeasured` with the
 reason `profile_unsafe` and no run starts. The guarantee is therefore: no Kandev
 tool, no write the harness performs, and no native tool that needs a permission
 the call denies; native read-only tools a CLI runs without asking are not
@@ -182,7 +180,7 @@ to one space, ends trimmed, then Go's Unicode lower-casing.
 
 For each case the harness makes three attempts for the candidate and three for
 the baseline unless a baseline attempt set exists for the same `(baseline hash,
-model, case id, prompt version)`. The baseline hash is the instruction render's
+model, case id (the ledger turn id), prompt version)`. The baseline hash is the instruction render's
 SHA-256 (the stamp's `prompt_hash` function, lower-case hex, with no override);
 the model is the profile's resolved model id, and an empty model never reuses.
 Reuse reads the newest `done` result row of the coordinator by `created_at DESC,
@@ -234,8 +232,7 @@ a run that reports tokens is priced from them. The model priced is the profile's
 resolved model id, never a provider-reported one. The price is
 `commoncosts.CalculateCostSubcentsChecked` over the pricing `Prices.Lookup`
 returns (the same lookup the usage recorder uses, behind an interface so tests
-stub it; the usage recorder's own lookup is `LookupForModelWithVersion` in `internal/task/usage`, adapted in `replay/wire`); a lookup that finds no price, errors or times out makes the replay
-`unmeasured`, reason `cost_unknown`, keeping the spend already incurred. A
+stub it; the usage recorder's own lookup is `LookupForModelWithVersion` in `internal/task/usage`, adapted in `replay/wire`); the lookup happens once before any call, so a lookup that finds no price, errors or times out makes the replay `unmeasured`, reason `cost_unknown`, with zero cost and no call made; a cost whose arithmetic reports not-ok (overflow) is priced at the largest representable subcents and the run counts as completed with that cost, which exhausts any ceiling at the next `Reserve`. A
 sessionless call writes no usage row, so each run's cost is added to the result
 row's `cost_subcents` (starting at 0 when the row is inserted) in a single
 `UPDATE ... SET cost_subcents = cost_subcents + ?`, which is race-free across
@@ -245,7 +242,7 @@ The phase 3 spend reader (`Service.Spend`) gains one additive, nil-safe term,
 `ExtraSpend(coordinatorID, from, to)`, summing `cost_subcents` of
 `coordinator_replay_results` whose `created_at` is in the window, running rows
 included (only a NULL cost, which the design never writes, makes the reading
-unmeasurable), so replays count toward the 24 hour spend and the ceiling,
+unmeasurable; a failed `ExtraSpend` query is returned as an error, so the spend reading is unmeasurable and `Reserve` refuses, reason `budget`, never assuming zero). The 7-day mean is derived from the same 7-day sum of ledger usage plus `ExtraSpend` over the same window, and a failed 7-day `ExtraSpend` query leaves `Mean7dKnown` false (the existing partial-reading path), never zero; `ExtraSpend` takes a `context` and returns `(int64, error)`, so replays count toward the 24 hour spend and the ceiling,
 including the `stopped_at_ceiling` check of a real unattended turn, which the
 manager sees as the same spend figure with no separate attribution. The spend
 design is not edited; this term is listed as a delta in the ADR (`docs/decisions/2026-09-30-coordinator-phase-3-1-record-and-measure.md`) and has its own
@@ -289,9 +286,7 @@ applied:
 - `context_diff`: the item's text is the full replacement context text and
   replaces the coordinator's context in the render.
 - `standing_order_add`: the render's standing-orders section gains one last
-  numbered line `N+1. (added candidate, id candidate) <text>` (the same
-  sanitiser and renderer as `StandingOrdersSection`, so a section appears even
-  when no order exists).
+  numbered line `N+1. (added candidate, id candidate) <text>` (one line in the format `StandingOrdersSection` in `internal/coordinator/standing_orders.go` emits, `%d. (added %s, id %s) %s`, where the date is the literal word `candidate`, because that function formats a real `CreatedAt` date and cannot produce it; the renderer builds this one line itself with the same `sanitizeOrderText`, and the intro, open, close and cite lines are `StandingOrdersSection`'s; a section appears even when no order exists).
 - `standing_order_retire`: the order whose id equals `TargetID` is removed from
   the rendered list (the remaining orders renumbered); no such active order is
   `no_target`.
@@ -321,13 +316,13 @@ the canonical JSON of the candidate's kind, text and target id), `baseline_hash`
 side `ok`/`failed` and sorted keys, case scores, `ambiguous_key`), `candidate_score`,
 `baseline_score` (both over compared cases), `heldout_candidate_score`,
 `heldout_baseline_score`, `cases_ran_candidate`, `cases_ran_baseline`,
-`cases_compared`, `flips` (JSON), `unmatched_candidate`, `unmatched_baseline`,
+`cases_compared`, `heldout_compared`, `cited_turn_ids` (JSON), `flips` (JSON), `unmatched_candidate`, `unmatched_baseline`,
 `guard` (`pass`, `blocked`, `unmeasured`), `verdict`, `reason` (for `unmeasured`:
 `budget`, `cost_unknown`, `too_few`, `no_cases`, `all_skipped`, `no_compared`, `no_target`, `profile_unsafe`,
 `read_failed`, `cancelled`, `interrupted`), `prompt_version`, `cost_subcents`,
 `created_at`, `finished_at`. A unique index on `(dream_id, item_id)` where both
 are non-null.
-A replay stopped before every case ran (`budget`, `cost_unknown` after a start, `read_failed`, `cancelled`, or the 20 minute bound) writes guard `unmeasured`, verdict `unmeasured`, NULL scores, the `cases` data and `flips` of whatever completed (flips are informative only and do not make the guard `blocked`), and the cost incurred; a stop before any run (`profile_unsafe`, `no_target`, `cost_unknown`, `no_cases`, `all_skipped`) stores NULL scores and zero counts. The row is inserted with `status = 'running'` before the first run (an insert
+A `too_few` replay stores guard `pass` and every score and count (a replay is finished, not stopped); a `no_compared` replay stores guard `unmeasured`, NULL scores and the counts. A replay stopped before every case ran (`budget`, `read_failed`, `cancelled`, or the 20 minute bound) writes guard `unmeasured`, verdict `unmeasured`, NULL scores, the `cases` data and `flips` of whatever completed (flips are informative only and do not make the guard `blocked`), and the cost incurred; a stop before any run (`profile_unsafe`, `no_target`, `cost_unknown`, `no_cases`, `all_skipped`) stores NULL scores and zero counts. The row is inserted with `status = 'running'` before the first run (an insert
 failure means the replay does not start and `Run` returns the error) and its
 `cost_subcents` is updated after every run, so a crash mid-replay keeps the spend
 already incurred; the rest of the row is written at the end with `status =
@@ -381,7 +376,8 @@ stored result is kept for the agreement measure (`005.4`).
 | Any other case read error | Stop `unmeasured`, `read_failed` |
 | Run failure | Failed attempt, not a miss |
 | Budget or time bound | Stop, `unmeasured` (`budget`) |
-| No price, lookup error | Stop, `unmeasured` (`cost_unknown`) |
+| No price, lookup error | `unmeasured` (`cost_unknown`) before any call, zero cost |
+
 | Refused profile | `unmeasured` (`profile_unsafe`), no run |
 | Context cancelled | `unmeasured` (`cancelled`), spend kept, final write on a detached context |
 | Outcome's proposal row not found | No expectation from it, `proposal_gone` in the case data |

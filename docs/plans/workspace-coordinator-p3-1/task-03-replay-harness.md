@@ -64,7 +64,7 @@ in CI.
   it is additive and nil-safe and not gated by `features.coordinatorPhase31`.
 - The constants (`MaxOutputTokens`, `ReplayTimeout`, `RunTimeout`,
   `Concurrency`, `MinHeldOut`, `MinGainThousandths`, `CaseWindow`), the refusal
-  of a profile that is auto-approve, has a command prefix or has CLI flags
+  of a profile that is auto-approve, has a command prefix or has an enabled CLI flag
   (`profile_unsafe`), and run pricing from estimated tokens when the executor
   reports none (no agentctl change; the executors stay as they are).
 - The `Harness`/`Deps`/`Request`/`Result` contract, the `replay/wire` adapters
@@ -94,7 +94,7 @@ in CI.
 - The planted suite fails when the guard is disabled and passes with each
   candidate at its recorded guard result and verdict, and asserts the
   guard-only candidate's held-out gain is at least `MinGainThousandths`.
-- Partial stops store `unmeasured` with NULL scores; reason codes `no_cases`,
+- Partial stops (budget, time, cancelled, read_failed) store `unmeasured` with NULL scores, while `too_few` keeps its scores and the held-out compared count and cited turn ids are stored; the harness logs nothing itself; `improvement` proposals are never expectations; reason codes `no_cases`,
   `all_skipped` and `no_compared`; 004.3 applies only with 20 held-out compared
   cases; the guard counts a failed attempt as neither hit nor miss.
 

@@ -77,10 +77,9 @@ coordinator or a dream can change.
 - **AC-COORDINATOR-REPLAY-001.2:** A turn shall be skipped, with the reason
   recorded per turn, when it was a dream (`dream_turn`), when its snapshot
   hash is empty or no snapshot row exists for it (`no_snapshot`; a snapshot
-  survives while any turn of the last 90 days references it, so a turn's age
-  alone never skips it), when its trigger message or a task title the replay
+  survives while any turn of the last 90 days references it, so a turn's age alone never skips it; a turn past the ledger's retention is absent from selection, and a turn older than 90 days whose snapshot was deleted is skipped `no_snapshot`), when its trigger message or a task title the replay
   needs is confirmed absent (`input_gone`), or when it has no expected
-  reproduced and no expected avoided proposal (`no_expectation`; an outcome whose proposal row no longer exists contributes
+  reproduced and no expected avoided proposal (`no_expectation`; an outcome whose proposal row no longer exists, and an outcome of an `improvement` proposal, contributes
   no expectation), the first
   match in that order. A read that fails shall not skip a turn: the replay
   stops `unmeasured` with the reason `read_failed`. A skipped case shall not
@@ -94,7 +93,8 @@ coordinator or a dream can change.
   and never the turn's own proposals, outcomes or decisions. No Kandev tool or
   MCP server shall be offered to the model, and the replay shall refuse, as
   `unmeasured` with the reason `profile_unsafe`, a profile that is auto-approve,
-  has a command prefix or has any CLI flag. The candidate's proposals shall be
+  has a command prefix or has any enabled CLI flag (a disabled flag never reaches
+  the command line). The candidate's proposals shall be
   read from a structured answer and recorded as data, and nothing the model
   says shall be executed by Kandev.
 - **AC-COORDINATOR-REPLAY-001.4:** A replay shall never write to a task,
@@ -145,12 +145,12 @@ coordinator or a dream can change.
   scores, flips and verdicts.
 - **AC-COORDINATOR-REPLAY-002.6:** Each replay shall store one result row
   holding the candidate's hash, the baseline's, the model, the cases run and
-  skipped with reasons and each attempt's decision keys, both scores over the
-  compared cases and both over the held-out compared cases, the unmatched
+  skipped with reasons and each attempt's decision keys, both scores over the compared cases and both over the held-out compared cases, the number of held-out compared cases, the cited turn ids, the cases ran on each side and compared, the unmatched
   counts, the flips (the turn and proposal of each), the guard result and the
   verdict of `003` and `004`, the reason when `unmeasured`, its cost and its
-  time. A replay stopped before every case ran (any `unmeasured` reason other than
-  `no_cases` and `all_skipped`) shall store guard `unmeasured`, verdict
+  time. A replay stopped before every case ran (reason `budget`, `cancelled`,
+  `read_failed` or its time bound; not `too_few`, `no_compared`, `no_cases` or
+  `all_skipped`, which finished) shall store guard `unmeasured`, verdict
   `unmeasured`, no scores, the flips found so far, the per-case data of the
   attempts that completed and the cost incurred. A replay started again for
   the same dream item shall make no model call
@@ -197,7 +197,7 @@ it.
 - **AC-COORDINATOR-REPLAY-004.3:** A blocked guard whatever the case count, or
   a guard that passed with at least 20 held-out compared cases and a gain under
   0.05 or a negative one, shall be reported
-  `not_an_improvement`, with the two scores.
+  `not_an_improvement`, with the candidate's score and the baseline's (over the held-out compared cases).
 - **AC-COORDINATOR-REPLAY-004.4:** The judge's threshold, the minimum case
   count and the case window shall be constants of the harness, changeable
   only by a code change, and shall not be settable by a coordinator, a
