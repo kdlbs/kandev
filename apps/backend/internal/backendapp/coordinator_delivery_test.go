@@ -226,7 +226,7 @@ func TestWakeMessages_CompleteOrphanTurnDelegatesToTheOrchestrator(t *testing.T)
 
 func TestRegisterCoordinatorDeliveryWorker_RecoversOpenTurnsAtStartup(t *testing.T) {
 	pool := newCoordinatorTestPool(t)
-	svc, err := initCoordinatorWiring(context.Background(), pool, newCoordinatorTestTracker(t), nil, nil, nil, true, true, true, newTestLogger())
+	svc, err := initCoordinatorWiring(context.Background(), pool, newCoordinatorTestTracker(t), nil, nil, nil, true, true, true, false, newTestLogger())
 	if err != nil {
 		t.Fatalf("initCoordinatorWiring: %v", err)
 	}

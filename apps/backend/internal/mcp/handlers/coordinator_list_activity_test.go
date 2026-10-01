@@ -15,7 +15,7 @@ import (
 	ws "github.com/kandev/kandev/pkg/websocket"
 )
 
-func newListActivityTestHandlers(t *testing.T, phase2 bool) (*Handlers, *coordinator.Store, *sqlx.DB, *coordinator.Coordinator) {
+func newListActivityTestHandlers(t *testing.T, phase2 bool, extra ...coordinator.ServiceOption) (*Handlers, *coordinator.Store, *sqlx.DB, *coordinator.Coordinator) {
 	t.Helper()
 	taskSvc, _ := newTestTaskService(t)
 	ctx := context.Background()
@@ -27,7 +27,7 @@ func newListActivityTestHandlers(t *testing.T, phase2 bool) (*Handlers, *coordin
 	t.Cleanup(func() { _ = conn.Close() })
 	store, err := coordinator.NewStore(conn, conn)
 	require.NoError(t, err)
-	svc := coordinator.NewService(store, coordinator.NewValidator(nil, nil), taskSvc, testLogger(t), coordinator.WithPhase2(phase2))
+	svc := coordinator.NewService(store, coordinator.NewValidator(nil, nil), taskSvc, testLogger(t), append([]coordinator.ServiceOption{coordinator.WithPhase2(phase2)}, extra...)...)
 	c := &coordinator.Coordinator{WorkspaceID: workspaces[0].ID, Name: "Ops", AgentProfileID: "a", ExecutorProfileID: "e"}
 	require.NoError(t, store.CreateCoordinator(ctx, c))
 	h := &Handlers{taskSvc: taskSvc, logger: testLogger(t).WithFields()}

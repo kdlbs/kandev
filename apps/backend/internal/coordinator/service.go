@@ -131,6 +131,8 @@ type Service struct {
 	// phase3 is true when phase 3 is effective (features.coordinator, phase 2
 	// and phase 3 all on). It gates the autonomy settings.
 	phase3 bool
+	// phase31 is true when the phase 3.1 read surface is effective.
+	phase31 bool
 	// automatic holds the automatic path's injectable seams.
 	automatic automaticState
 	// wakeMu guards kick, the stall hook, the wake sources and the recorder
@@ -190,6 +192,15 @@ func WithPhase2(on bool) ServiceOption {
 func WithPhase3(on bool) ServiceOption {
 	return func(s *Service) { s.phase3 = on }
 }
+
+// WithPhase31 turns the phase 3.1 read surface (the turn ledger tool) on or
+// off. Off is the default; callers pass the effective condition.
+func WithPhase31(on bool) ServiceOption {
+	return func(s *Service) { s.phase31 = on }
+}
+
+// Phase31Enabled reports whether the phase 3.1 read surface is effective.
+func (s *Service) Phase31Enabled() bool { return s.phase31 }
 
 // Phase3Enabled reports whether the phase 3 autonomy surface is effective.
 func (s *Service) Phase3Enabled() bool { return s.phase3 }
@@ -545,6 +556,15 @@ func (s *Service) CoordinatorProfilesReady(ctx context.Context, coordinatorID st
 		return false, fmt.Errorf("compute profile status: %w", err)
 	}
 	return agentStatus == ProfileStatusOK && executorStatus == ProfileStatusOK, nil
+}
+
+// WorkspaceIDOf returns the workspace a coordinator belongs to.
+func (s *Service) WorkspaceIDOf(ctx context.Context, coordinatorID string) (string, error) {
+	found, err := s.store.GetCoordinatorByID(ctx, coordinatorID)
+	if err != nil {
+		return "", err
+	}
+	return found.WorkspaceID, nil
 }
 
 // CoordinatorStandingInstructionsData returns coordinatorID's name and

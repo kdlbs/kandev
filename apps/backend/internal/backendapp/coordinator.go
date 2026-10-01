@@ -36,6 +36,7 @@ func initCoordinatorWiring(
 	enabled bool,
 	phase2 bool,
 	phase3 bool,
+	phase31 bool,
 	log *logger.Logger,
 ) (*coordinator.Service, error) {
 	store, storeErr := coordinator.NewStore(dbPool.Writer(), dbPool.Reader())
@@ -48,7 +49,8 @@ func initCoordinatorWiring(
 
 	validator := coordinator.NewValidator(agentProfiles, taskSvc)
 	svc := coordinator.NewService(store, validator, taskSvc, log, coordinator.WithPhase2(phase2),
-		coordinator.WithPhase3(phase3Effective(enabled, phase2, phase3)))
+		coordinator.WithPhase3(phase3Effective(enabled, phase2, phase3)),
+		coordinator.WithPhase31(phase31Effective(enabled, phase2, phase3, phase31)))
 	svc.SetProposalDeps(taskSvc, taskSvc, taskSvc, workflowSvc)
 	svc.SetUndoDeps(&coordinatorUndoSeam{tasks: taskSvc, steps: workflowSvc})
 	return svc, nil
@@ -59,6 +61,13 @@ func initCoordinatorWiring(
 // phase 3 are all on.
 func phase3Effective(coordinatorOn, phase2, phase3 bool) bool {
 	return coordinatorOn && phase2 && phase3
+}
+
+// phase31Effective is the single source for the phase 3.1 read gate: the turn
+// ledger tool exists only when coordinator, phases 2 and 3, and phase 3.1 are
+// all on. Recording does not depend on it.
+func phase31Effective(coordinatorOn, phase2, phase3, phase31 bool) bool {
+	return phase3Effective(coordinatorOn, phase2, phase3) && phase31
 }
 
 // coordinatorStandingInstructionsReader closes over svc to build the

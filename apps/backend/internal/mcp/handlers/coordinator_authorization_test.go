@@ -83,8 +83,8 @@ func TestAuthorizeCoordinatorRequest_TableOverEveryRegisteredAction(t *testing.T
 			guarded, replacement, err := h.authorizeCoordinatorRequest(principalCtx, msg)
 			require.NoError(t, err)
 			_, allowed := coordinatorSurfaceActions[action]
-			if action == coordinator.ActionProposeImprovement {
-				// Phase 3 is off in this fixture: the action answers the phase 1 unknown-action error.
+			if action == coordinator.ActionProposeImprovement || action == coordinator.ActionListTurns {
+				// Phases 3 and 3.1 are off in this fixture: the actions answer the phase 1 unknown-action error.
 				assertWSError(t, guarded, ws.ErrorCodeUnknownAction)
 				return
 			}

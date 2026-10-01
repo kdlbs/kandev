@@ -362,6 +362,8 @@ type Handlers struct {
 	// registered and a coordinator principal's propose call 404s via the
 	// guard's nil-service check.
 	coordinatorSvc *coordinator.Service
+	// coordinatorTurns reads the turn ledger; nil while phase 3.1 is off.
+	coordinatorTurns CoordinatorTurnReader
 }
 
 func (h *Handlers) releaseWorkspacePolicyAfterCreateRollback(ctx context.Context, taskID string) {
@@ -562,6 +564,7 @@ func (h *Handlers) registerTaskReadHandlers(d *guardedMCPDispatcher) {
 		d.RegisterFunc(coordinator.ActionProposeImprovement, h.handleProposeImprovement)
 		d.RegisterFunc(coordinator.ActionGetItem, h.handleGetCoordinatorItem)
 		d.RegisterFunc(coordinator.ActionListActivity, h.handleListCoordinatorActivity)
+		d.RegisterFunc(coordinator.ActionListTurns, h.handleListCoordinatorTurns)
 	}
 }
 

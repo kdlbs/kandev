@@ -28,6 +28,10 @@ const ActionGetItem = "coordinator.get_item"
 // tool dispatches (docs/specs/coordinator/system-design/activity-log.md#read-tool).
 const ActionListActivity = "coordinator.list_activity"
 
+// ActionListTurns is the MCP action the list_coordinator_turns_kandev tool
+// dispatches (docs/specs/coordinator/system-design/turn-ledger.md).
+const ActionListTurns = "coordinator.list_turns"
+
 // ActionApproveProposal and ActionRejectProposal are reserved MCP action
 // names (docs/specs/coordinator/system-design/proposals.md#security): approve
 // and reject are reachable only through the two REST routes, and no handler
