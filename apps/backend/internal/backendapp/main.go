@@ -2672,6 +2672,7 @@ func buildOfficeFeatureServices(
 		skillSvc, routineSvc, approvalSvc,
 		cfgLoader, cfgWriter,
 	)
+	dashboardSvc.SetWorkspaceLister(services.Task)
 	documentSvc := taskservice.NewDocumentService(taskRepo, log)
 	onboardingSvc := officeonboarding.NewOnboardingService(
 		repo, cfgLoader, cfgWriter, log,

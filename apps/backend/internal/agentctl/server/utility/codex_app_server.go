@@ -68,6 +68,7 @@ func (e *CodexAppServerInferenceExecutor) Probe(ctx context.Context, req *ProbeR
 	}
 	defer cleanup()
 	if err := initializeCodexAppServer(ctx, client); err != nil {
+		cleanup()
 		stderrTail := stderr.tail()
 		failureMessage := utilityUpstreamError(err, stderrTail)
 		failureCode := managedRuntimeProbeFailureCode(req.InferenceConfig.Command, stderrTail)
@@ -91,6 +92,7 @@ func (e *CodexAppServerInferenceExecutor) Probe(ctx context.Context, req *ProbeR
 	}
 	var listed protocol.ModelListResponse
 	if err := client.Call(ctx, protocol.MethodModelList, protocol.ModelListParams{}, &listed); err != nil {
+		cleanup()
 		stderrTail := stderr.tail()
 		failureMessage := utilityUpstreamError(err, stderrTail)
 		failureCode := managedRuntimeProbeFailureCode(req.InferenceConfig.Command, stderrTail)
@@ -208,9 +210,12 @@ func (e *CodexAppServerInferenceExecutor) start(
 		e.logger.Warn("failed to install Codex app-server process lifecycle", zap.Error(lifecycleErr))
 	}
 	client := protocol.NewClient(stdin, stdout, protocol.Options{})
+	var cleanupOnce sync.Once
 	cleanup := func() {
-		_ = client.Close()
-		cleanupACPCommand(ctx, cmd, lifecycle, e.logger)
+		cleanupOnce.Do(func() {
+			_ = client.Close()
+			cleanupACPCommand(ctx, cmd, lifecycle, e.logger)
+		})
 	}
 	return client, cleanup, stderr, nil
 }

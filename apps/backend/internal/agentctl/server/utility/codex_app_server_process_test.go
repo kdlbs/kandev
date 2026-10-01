@@ -193,7 +193,14 @@ func TestCodexAppServerProbeClassifiesTrustedManagedRuntimeETarget(t *testing.T)
 		t.Fatalf("Probe: %v", err)
 	}
 	if response.FailureCode != ProbeFailureManagedRuntimeNPMResolution {
-		t.Fatalf("failure code = %q, want %q", response.FailureCode, ProbeFailureManagedRuntimeNPMResolution)
+		t.Fatalf("failure code = %q, want %q (error: %q)", response.FailureCode, ProbeFailureManagedRuntimeNPMResolution, response.Error)
+	}
+	prefix, err := os.ReadFile(prefixFile)
+	if err != nil {
+		t.Fatalf("read managed npm prefix captured by fake npx: %v", err)
+	}
+	if !isPreparedNPMPrefix(string(prefix), workDir) {
+		t.Fatalf("managed npm prefix = %q, want prepared private prefix", prefix)
 	}
 }
 

@@ -421,6 +421,32 @@ export type DashboardData = {
 };
 
 /**
+ * One workspace in the read-only multi-workspace overview
+ * (GET /api/v1/office/workspaces/aggregate). Mirrors the snake_case wire shape.
+ */
+export type WorkspaceAggregateEntry = {
+  workspace_id: string;
+  name: string;
+  task_count: number;
+  open_tasks: number;
+  in_progress_tasks: number;
+  blocked_tasks: number;
+  done_tasks: number;
+  pending_approvals: number;
+  agent_count: number;
+  running_agents: number;
+};
+
+/**
+ * Normalized store shape for the multi-workspace overview: the workspace list
+ * plus a merged recent-activity feed (activity entries normalized to camelCase).
+ */
+export type WorkspaceAggregate = {
+  workspaces: WorkspaceAggregateEntry[];
+  recentActivity: ActivityEntry[];
+};
+
+/**
  * Slim per-agent card payload duplicated from `office-api` so the store
  * type doesn't depend on the api module. Mirrors the snake_case JSON shape
  * the backend serialises.
@@ -634,6 +660,7 @@ export type OfficeSliceState = {
     inboxCountByWorkspaceId: Record<string, number>;
     runs: Run[];
     dashboardByWorkspaceId: Record<string, DashboardData | null>;
+    workspaceAggregate: WorkspaceAggregate | null;
     tasks: TasksState;
     meta: OfficeMeta | null;
     isLoading: boolean;
@@ -674,6 +701,7 @@ export type OfficeSliceActions = {
   setInboxCount: (workspaceId: string, count: number) => void;
   setRuns: (runs: Run[]) => void;
   setDashboard: (workspaceId: string, data: DashboardData | null) => void;
+  setWorkspaceAggregate: (data: WorkspaceAggregate | null) => void;
   setTasks: (tasks: OfficeTask[]) => void;
   appendTasks: (tasks: OfficeTask[]) => void;
   patchTaskInStore: (taskId: string, patch: Partial<OfficeTask>) => void;

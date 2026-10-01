@@ -539,6 +539,7 @@
   "noTasksInThisProjectYet": "此项目尚无任务。",
   "noTasksTouchedYet": "尚未处理任何任务。",
   "noTasksWereModifiedDuringThis": "此运行期间未修改任何任务。",
+  "noWorkspaces": "尚无工作区。",
   "notConfigured": "未配置",
   "notifyOnly": "仅通知",
   "noUtilizationDataAvailable": "无可用利用率数据。",

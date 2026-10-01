@@ -24,6 +24,7 @@ import {
 // resolved at render below. The route paths are URLs, not copy.
 const PAGE_TITLE_KEYS: Record<string, string> = {
   "/office": "office:dashboard",
+  "/office/overview": "office:overview",
   "/office/inbox": "office:inbox",
   "/office/tasks": "office:tasks",
   "/office/routines": "office:routines",
