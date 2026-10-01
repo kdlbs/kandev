@@ -537,9 +537,9 @@ func TestDeliveryAPIRejectsForeignStoredSubmission(t *testing.T) {
 }
 
 func TestDeliveryAPICancelsCurrentSubmission(t *testing.T) {
-	server, _, deliveryJournal := newDurableDeliveryTestServer(t)
+	server, procMgr, deliveryJournal := newDurableDeliveryTestServer(t)
 	ctx := context.Background()
-	if _, err := deliveryJournal.PutSubmission(ctx, journal.Submission{
+	if _, err := procMgr.AdmitDeliverySubmission(ctx, journal.Submission{
 		ID: "submission-cancel-api", SessionID: "session-1", IncarnationID: "session-1",
 		HarnessGeneration: 1, Hash: "hash-cancel-api", Payload: []byte("prompt"),
 	}); err != nil {
@@ -566,5 +566,9 @@ func TestDeliveryAPICancelsCurrentSubmission(t *testing.T) {
 	}
 	if submission.State != journal.SubmissionCancelled {
 		t.Fatalf("cancelled state = %q, want %q", submission.State, journal.SubmissionCancelled)
+	}
+	events, _, err := deliveryJournal.Replay(ctx, procMgr.DeliveryStreamID(), 0, 10)
+	if err != nil || len(events) != 1 || !events[0].Terminal || events[0].SubmissionID != submission.ID {
+		t.Fatalf("cancel terminal = %+v, %v; want exact retained outcome", events, err)
 	}
 }
