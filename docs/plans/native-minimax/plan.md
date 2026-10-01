@@ -1,0 +1,159 @@
+---
+created: 2026-09-30
+status: done
+requirements:
+  - REQ-AGENTS-MINIMAX-001
+  - REQ-AGENTS-MINIMAX-002
+  - REQ-AGENTS-MINIMAX-003
+system_design:
+  - ../../specs/agents/system-design/minimax-code.md
+legacy_specs: []
+---
+
+# Implementation Plan: Native MiniMax
+
+## Overview
+
+Deliver #3996 sequentially in the authorized unattended primary session. The
+user explicitly authorized continuing through design, implementation, commit,
+PR, review remediation and normal-policy merge without routine checkpoints.
+
+## Scope
+
+Native agent and subscription setup, dynamic native model catalog, profile
+selection, terminal passthrough, isolated runtime metadata and public docs.
+Exclude wrappers, new transports, Office routing and credential relocation.
+
+## Technical approach
+
+Add MiniMaxACP to agents and registry using mcode directly. Verify installation
+with --version, pin the official npm install recipe, retain native ACP IDs and
+translate only terminal model syntax. Reuse LoginAgent with localized region
+selection, ACP sessionmodel, permission handlers and executor session mounts.
+
+| Provider | Transport | Model shape | Behavior | Evidence | Unsupported fallback |
+| --- | --- | --- | --- | --- | --- |
+| MiniMax Code | native ACP | typed category=model, encoded provider/model/variant | native session selection | published 0.5.10 handshake, protocol fixture | visible error, no account fallback |
+| MiniMax Code terminal | native CLI | provider/model#variant | decoded explicit profile model | argv tests | invalid input retained, native rejection |
+
+## ASCII UI preview
+
+UI-01: Settings > Agents > MiniMax (login required), shared desktop/phone content:
+
+```text
+MiniMax   [MCP] [Login required]
+[Login] [New Profile]
+  Sign in to minimax-acp
+  [Choose Mainland China or Global]
+  [selected full wrapped command; native terminal]
+  [Done]
+```
+
+UI-02: Profile start model picker (authenticated native catalog):
+
+```text
+Profile: MiniMax M3
+Start model: [MiniMax-M3 - thinking v]
+[Save]
+```
+
+These are content previews. MiniMax login reuses the shipped quick terminal:
+a bounded desktop dialog and full-screen phone surface, dynamic viewport
+height, safe-area padding, a flexing terminal and a visible Done action. The
+command preview wraps within its width. Existing profile model popovers
+retain their touch selection and tap-outside dismissal behavior. AC-001.2,
+AC-001.3 and AC-002.2 are checked by desktop/mobile rendered flows.
+
+## Tests
+
+Agent/registry tests map AC-001.1/2 and AC-002.1/2/3 and AC-003.1/2 to native
+metadata, availability, argv and credential isolation. Protocol shape tests
+exercise typed config models in shared adapter/utility code. Isolated native
+probes establish initialize and unauthenticated behavior; mock endpoint probes
+provide runtime evidence without claiming subscription access.
+
+## E2E tests
+
+`settings/minimax-agent.spec.ts` (chromium) and
+`settings/mobile-minimax-agent.spec.ts` (mobile-chrome) cover localized login
+help and selecting/saving encoded profile models using fixture capabilities.
+
+## Work orders
+
+- [x] [Task 01: Native MiniMax runtime](task-01-native-runtime.md)
+- [x] [Task 02: Setup, protocol and documentation](task-02-setup-validation.md)
+
+## Verification results
+
+Implementation validation passed: affected Go packages and changed-package
+lint; login unit tests, frontend typecheck/lint/i18n; desktop and phone login,
+model selection/save/reload E2E; public docs and specification/harness checks.
+Native 0.5.10 probes verified initialize, auth_required, model selection, text,
+MCP tool execution, active cancel and subsequent load against an explicit local
+BYOK endpoint. No subscription credentials were available; native policy did
+not emit permission requests during the probe, so handler evidence comes from
+shared ACP regression tests. Both implementation work orders are complete.
+CI/review disposition and final merge evidence are tracked by
+[PR #4110](https://github.com/kdlbs/kandev/pull/4110) and Kandev task
+`04d255ef-97fa-4d3c-9618-8abf0db8745c`.
+
+## Risks
+
+Published CLI requires a supported Node version and optional SQLite install
+scripts. Subscription model discovery cannot be verified live without an account.
+OAuth file copying is not portable because native credential keys include the
+absolute auth-home identity. CLI and ACP model syntax differ.
+
+## Review remediation validation
+
+The setup work order now covers localized install/passthrough metadata, single
+capability-probe ownership after profile login, complete phone command display,
+and an actual native task using the saved model. Installation and task tests
+use isolated executable fixtures; published CLI probes and live OAuth limits
+remain recorded separately. Current-head remote review/check and merge evidence
+is tracked in the persistent Kandev plan and PR #4110.
+
+## UI-03: Login region choice
+
+```text
+Desktop: short dialog             Phone: inset bottom drawer
+MiniMax account region            MiniMax account region
+Choose subscription region.       Choose subscription region.
+[Mainland China] [Global]          [Mainland China, 48px]
+                                  [Global, 48px; safe area]
+After choice: existing quick terminal with the selected full command.
+```
+
+The setup work order owns named command selection, rejecting unknown variants,
+localized region selection and both viewport flows. The existing login endpoint
+and permissions are reused. No subprocess starts before choice, and reopening
+returns to choice. Required local checks include login endpoint/DTO/API tests,
+frontend API serialization tests, both setup/native-task E2E flows and backend
+module lint. Previous f8 remote results remain historical until the next head
+finishes CI and automated review.
+
+## Region conflict correction
+
+AC-AGENTS-MINIMAX-001.2 requires the selected region to reach native login.
+The existing one-session-per-agent manager returns the original session on a
+second start regardless of argv. A Global request can therefore attach to a
+CN login. Preserve that manager's ownership and reject mismatched variant argv
+with HTTP 409; identical/default reconnects retain their prior behavior.
+
+UI-04 (same terminal on desktop and full-height phone):
+
+```text
+Sign in: minimax-acp
+[requested full command]
+Another sign-in command is running. Close it before trying again.
+[Done]
+```
+
+Work order 02 owns the handler guard, structured error-to-copy mapping and
+regressions. RED uses the real login manager through HTTP, including same-region
+positive controls and cross-region/default mixed cases. Frontend coverage
+exercises the start callback with a structured conflict and unrelated error.
+Both E2E flows verify same-command reuse, rejection and an unchanged live
+original session. Run the affected Go packages/race tests, full backend module
+lint, frontend regressions/type/i18n/lint, desktop/phone E2E, docs/spec checks.
+No session is killed or replaced; there is no account or command fallback.

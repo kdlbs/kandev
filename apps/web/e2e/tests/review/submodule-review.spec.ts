@@ -115,7 +115,7 @@ test.describe("Nested submodule Review", () => {
       await parentReadmeRow.click();
       await expect
         .poll(() => session.reviewDiffText(), { timeout: 45_000 })
-        .toEqual(expect.stringContaining("parent working-tree change"));
+        .toContain("parent working-tree change");
       for (const [repositoryName, expected] of [
         ["vendor/outer", "outer committed change"],
         ["vendor/outer/vendor/inner", "inner committed change"],

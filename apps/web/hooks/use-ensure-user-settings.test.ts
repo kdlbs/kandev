@@ -58,7 +58,7 @@ function makeUnloadedSettings(): UserSettingsState {
     startupPage: "task_overview",
     repositoryIds: [],
     tasksListSort: "updated_desc",
-    tasksListGroup: "state",
+    tasksListGroup: "workflow_step",
     tasksListShowDetails: false,
     preferredShell: null,
     shellOptions: [],

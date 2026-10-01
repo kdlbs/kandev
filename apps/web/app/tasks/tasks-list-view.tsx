@@ -8,20 +8,25 @@ import { IconArchive, IconArchiveOff, IconLoader, IconTrash } from "@tabler/icon
 import { TaskArchiveConfirmation } from "@/components/task/task-archive-confirmation";
 import { cleanupSharesParentWorkspace } from "@/components/task/task-cleanup-summary";
 import { TaskDeleteConfirmDialog } from "@/components/task/task-delete-confirm-dialog";
-import { primaryTaskRepository, type Repository, type Task, type Workflow } from "@/lib/types/http";
-import { formatTaskStateLabel } from "@/lib/ui/state-labels";
+import { type Repository, type Task } from "@/lib/types/http";
 import { isTaskInFlight } from "@/lib/ui/state-icons";
 import { formatRelativeTime } from "@/lib/utils";
 import { TasksPagination } from "./tasks-pagination";
 import { TaskListRowPrimaryContent } from "./rich-task-list-row";
 import { PullToRefresh } from "@/components/mobile/pull-to-refresh";
 import { TasksListControls } from "./tasks-list-controls";
-import { TASK_STATE_ORDER } from "@/lib/tasks/tasks-list-options";
 import { useTranslation } from "react-i18next";
-import { t } from "@/lib/i18n";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import type { TaskListFacetValue } from "@/lib/plugins/types";
 import { workspaceModeFromMetadata } from "@/lib/kanban/map-task";
+
+import {
+  buildTaskSections,
+  type TaskTreeNode,
+  type TaskListSection,
+  type TaskListStepPreviews,
+  type TaskListWorkflow,
+} from "@/lib/tasks/task-list-sections";
 
 export type TasksListViewProps = {
   total: number;
@@ -33,8 +38,9 @@ export type TasksListViewProps = {
   onTasksListGroupChange: (group: string) => void;
   facetOptions?: ReadonlyArray<{ value: string; label: string }>;
   facetValues?: Record<string, readonly TaskListFacetValue[]>;
+  workflowStepPreviews?: TaskListStepPreviews;
   tasks: Task[];
-  workflows: Workflow[];
+  workflows: TaskListWorkflow[];
   repositories: Repository[];
   showTaskDetails: boolean;
   pageCount: number;
@@ -76,6 +82,7 @@ export function TasksListView({
   onRefresh,
   facetOptions,
   facetValues,
+  workflowStepPreviews,
 }: TasksListViewProps) {
   // Not a <main>: AppShell owns that landmark, one per page.
   const content = (
@@ -103,6 +110,7 @@ export function TasksListView({
           onDelete={handleDelete}
           onRowClick={handleRowClick}
           facetValues={facetValues}
+          workflowStepPreviews={workflowStepPreviews}
         />
         <TasksPagination
           total={total}
@@ -114,25 +122,6 @@ export function TasksListView({
     </div>
   );
   return onRefresh ? <PullToRefresh onRefresh={onRefresh}>{content}</PullToRefresh> : content;
-}
-
-type TaskTreeNode = {
-  task: Task;
-  children: TaskTreeNode[];
-  level: number;
-};
-
-type TaskListSection = {
-  key: string;
-  title: string | null;
-  color?: string;
-  nodes: TaskTreeNode[];
-};
-
-const UNGROUPED_FACET_SECTION_KEY = "facet:host:ungrouped";
-
-function facetValueSectionKey(value: string): string {
-  return `facet:value:${value}`;
 }
 
 function TaskRows({
@@ -148,9 +137,10 @@ function TaskRows({
   onDelete,
   onRowClick,
   facetValues = {},
+  workflowStepPreviews = {},
 }: {
   tasks: Task[];
-  workflows: Workflow[];
+  workflows: TaskListWorkflow[];
   repositories: Repository[];
   showTaskDetails: boolean;
   tasksListGroup: string;
@@ -164,17 +154,32 @@ function TaskRows({
   ) => Promise<void>;
   onRowClick: (task: Task) => void;
   facetValues?: Record<string, readonly TaskListFacetValue[]>;
+  workflowStepPreviews?: TaskListStepPreviews;
 }) {
   const { t, i18n } = useTranslation();
   const workflowMap = useMemo(() => new Map(workflows.map((w) => [w.id, w.name])), [workflows]);
   const repoMap = useMemo(() => new Map(repositories.map((r) => [r.id, r.name])), [repositories]);
-  // `groupForTask` resolves its headings from the catalog (the no-workflow /
-  // no-repository fallbacks, and now the task-state vocabulary). Without the
-  // language in the deps a section header keeps the previous locale until the
-  // task list itself changes.
+  // Section headings resolve from the active locale even when the tasks do not change.
   const sections = useMemo(
-    () => buildTaskSections(tasks, { groupBy: tasksListGroup, workflowMap, repoMap, facetValues }),
-    [facetValues, repoMap, tasks, tasksListGroup, workflowMap, i18n.language],
+    () =>
+      buildTaskSections(tasks, {
+        groupBy: tasksListGroup,
+        workflowMap,
+        repoMap,
+        facetValues,
+        workflows,
+        workflowStepPreviews,
+      }),
+    [
+      facetValues,
+      repoMap,
+      tasks,
+      tasksListGroup,
+      workflowMap,
+      workflows,
+      workflowStepPreviews,
+      i18n.language,
+    ],
   );
 
   if (isLoading) {
@@ -210,134 +215,6 @@ function TaskRows({
       ))}
     </div>
   );
-}
-
-function buildTaskSections(
-  tasks: Task[],
-  {
-    groupBy,
-    workflowMap,
-    repoMap,
-    facetValues,
-  }: {
-    groupBy: string;
-    workflowMap: Map<string, string>;
-    repoMap: Map<string, string>;
-    facetValues: Record<string, readonly TaskListFacetValue[]>;
-  },
-): TaskListSection[] {
-  const roots = buildTaskTree(tasks);
-  if (groupBy.startsWith("facet:")) {
-    const grouped = new Map<string, { title: string; color?: string; tasks: Task[] }>();
-    for (const task of tasks) {
-      const values = facetValues[`${groupBy}:${task.id}`] ?? [];
-      const entries = values.length ? values : [{ value: "untagged", label: t("tasks:ungrouped") }];
-      for (const value of entries) {
-        const key = values.length ? facetValueSectionKey(value.value) : UNGROUPED_FACET_SECTION_KEY;
-        const section = grouped.get(key) ?? { title: value.label, color: value.color, tasks: [] };
-        section.tasks.push(task);
-        grouped.set(key, section);
-      }
-    }
-    return Array.from(grouped.entries())
-      .map(([key, section]) => ({
-        key,
-        title: section.title,
-        color: section.color,
-        nodes: buildTaskTree(section.tasks),
-      }))
-      .sort((a, b) =>
-        (a.title ?? "").localeCompare(b.title ?? "", undefined, { sensitivity: "base" }),
-      );
-  }
-  if (groupBy === "none") {
-    return [{ key: "all", title: null, nodes: roots }];
-  }
-
-  const sections = new Map<string, TaskListSection>();
-  for (const node of roots) {
-    const { key, title } = groupForTask(node.task, groupBy, workflowMap, repoMap);
-    const section = sections.get(key) ?? { key, title, nodes: [] };
-    section.nodes.push(node);
-    sections.set(key, section);
-  }
-
-  return Array.from(sections.values()).sort((a, b) => compareSection(a, b, groupBy));
-}
-
-function buildTaskTree(tasks: Task[]): TaskTreeNode[] {
-  const childrenByParent = new Map<string, Task[]>();
-  const taskIds = new Set(tasks.map((task) => task.id));
-  const roots: Task[] = [];
-
-  for (const task of tasks) {
-    if (task.parent_id && taskIds.has(task.parent_id)) {
-      const siblings = childrenByParent.get(task.parent_id) ?? [];
-      siblings.push(task);
-      childrenByParent.set(task.parent_id, siblings);
-    } else {
-      roots.push(task);
-    }
-  }
-
-  const visited = new Set<string>();
-
-  const buildNode = (task: Task, level: number): TaskTreeNode | null => {
-    if (visited.has(task.id)) return null;
-    visited.add(task.id);
-    return {
-      task,
-      level,
-      children: (childrenByParent.get(task.id) ?? [])
-        .map((child) => buildNode(child, level + 1))
-        .filter((node): node is TaskTreeNode => node !== null),
-    };
-  };
-
-  const nodes = roots
-    .map((task) => buildNode(task, 0))
-    .filter((node): node is TaskTreeNode => node !== null);
-  for (const task of tasks) {
-    const node = buildNode(task, 0);
-    if (node) nodes.push(node);
-  }
-
-  return nodes;
-}
-
-function groupForTask(
-  task: Task,
-  groupBy: string,
-  workflowMap: Map<string, string>,
-  repoMap: Map<string, string>,
-) {
-  if (groupBy === "workflow") {
-    const title = workflowMap.get(task.workflow_id);
-    if (!title) return { key: "workflow:none", title: t("tasks:noWorkflow") };
-    return { key: `workflow:${task.workflow_id || "none"}`, title };
-  }
-  if (groupBy === "repository") {
-    const primaryRepo = primaryTaskRepository(task.repositories);
-    if (!primaryRepo) return { key: "repository:none", title: t("tasks:noRepository") };
-    const repoId = primaryRepo?.repository_id ?? "none";
-    const title = repoMap.get(repoId);
-    if (!title) return { key: "repository:none", title: t("tasks:noRepository") };
-    return { key: `repository:${repoId}`, title };
-  }
-  const title = formatTaskStateLabel(task.state);
-  return { key: `state:${task.state}`, title };
-}
-
-function compareSection(a: TaskListSection, b: TaskListSection, groupBy: string): number {
-  if (groupBy === "state") {
-    const aIndex = TASK_STATE_ORDER.indexOf(a.key.replace("state:", "") as Task["state"]);
-    const bIndex = TASK_STATE_ORDER.indexOf(b.key.replace("state:", "") as Task["state"]);
-    return (
-      (aIndex === -1 ? Number.MAX_SAFE_INTEGER : aIndex) -
-      (bIndex === -1 ? Number.MAX_SAFE_INTEGER : bIndex)
-    );
-  }
-  return (a.title ?? "").localeCompare(b.title ?? "", undefined, { sensitivity: "base" });
 }
 
 function flattenTaskTree(nodes: TaskTreeNode[]): TaskTreeNode[] {

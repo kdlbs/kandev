@@ -34,6 +34,7 @@ vi.mock("@/lib/state/dockview-store", () => ({
 vi.mock("@/components/state-provider", () => ({
   useAppStore: (selector: (state: Record<string, unknown>) => unknown) =>
     selector({
+      connection: { status: "disconnected" },
       tasks: { activeSessionId: null, activeTaskId: null },
       taskSessions: { items: {} },
       agentProfiles: { items: [] },

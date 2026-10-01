@@ -120,12 +120,32 @@ func assertRecoveredGitResponses(t *testing.T, server *Server, anchors, want map
 		t.Fatalf("status=%+v", status)
 	}
 	for _, repo := range status.Repos {
+		if !repo.Status.Success || repo.Status.StatusState != "ready" || !repo.Status.FilesComplete {
+			t.Errorf("initial status for %s=%+v, want complete live membership", repo.RepositoryName, repo.Status)
+		}
+	}
+
+	var detailed MultiRepoGitStatusResult
+	readRecoveredGitJSON(t, server, "/api/v1/git/status/multi?fresh=true&details=wait", &detailed)
+	if !detailed.Success || len(detailed.Repos) != len(anchors) {
+		t.Fatalf("detailed status=%+v", detailed)
+	}
+	detailedByRepo := make(map[string]GitStatusResult, len(detailed.Repos))
+	for _, repo := range detailed.Repos {
+		detailedByRepo[repo.RepositoryName] = repo.Status
+	}
+	for _, repo := range status.Repos {
 		expectedAhead := 0
 		if _, ok := want[repo.RepositoryName]; ok {
 			expectedAhead = 1
 		}
-		if !repo.Status.Success || repo.Status.BaseCommit != anchors[repo.RepositoryName] || repo.Status.Ahead != expectedAhead {
-			t.Errorf("status for %s=%+v, want base %s and ahead %d", repo.RepositoryName, repo.Status, anchors[repo.RepositoryName], expectedAhead)
+		detailedStatus, ok := detailedByRepo[repo.RepositoryName]
+		if !ok {
+			t.Errorf("detailed status is missing repository %q", repo.RepositoryName)
+			continue
+		}
+		if !detailedStatus.Success || detailedStatus.DetailState != "ready" || detailedStatus.BaseCommit != anchors[repo.RepositoryName] || detailedStatus.Ahead != expectedAhead {
+			t.Errorf("status for %s=%+v, want ready details using base %s and ahead %d", repo.RepositoryName, detailedStatus, anchors[repo.RepositoryName], expectedAhead)
 		}
 	}
 }

@@ -431,6 +431,13 @@ func (p *EventPublisher) PublishGitStatus(execution *AgentExecution, update *age
 		AgentID:           execution.ID,
 		Timestamp:         update.Timestamp.Format(time.RFC3339Nano),
 		Status: &GitStatusData{
+			StatusState:         update.StatusState,
+			FilesComplete:       update.FilesComplete,
+			DetailState:         update.DetailState,
+			ErrorCode:           update.ErrorCode,
+			TrackerID:           update.TrackerID,
+			TrackerEpoch:        update.TrackerEpoch,
+			SnapshotRevision:    update.SnapshotRevision,
 			Branch:              update.Branch,
 			RemoteBranch:        update.RemoteBranch,
 			HeadCommit:          update.HeadCommit,

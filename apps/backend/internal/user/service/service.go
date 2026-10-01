@@ -821,7 +821,7 @@ func applyTasksListPreferences(settings *models.UserSettings, sortValue, groupVa
 		if !models.IsValidTasksListGroup(v) {
 			return fmt.Errorf("tasks_list_group must be one of %s", strings.Join(models.TasksListGroupValues(), ", "))
 		}
-		settings.TasksListGroup = v
+		settings.TasksListGroup = models.NormalizeTasksListGroup(v)
 	}
 	return nil
 }

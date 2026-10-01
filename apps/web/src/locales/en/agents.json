@@ -356,5 +356,14 @@
   "providerPassthroughUnsupported": "Disable CLI passthrough to use an OpenAI-compatible provider.",
   "nativeCodexUnavailableTitle": "Native Codex app server is unavailable",
   "nativeCodexUnavailable": "This saved profile is preserved, but it cannot be edited, duplicated, enabled, or started while the Codex app-server feature is off. You can delete the profile or enable the feature in Settings.",
-  "nativeCodexUnavailableShort": "Feature off"
+  "nativeCodexUnavailableShort": "Feature off",
+  "minimaxLoginDescription": "Sign in to your MiniMax account. MiniMax stores credentials in {{dataDir}}.",
+  "minimaxDescription": "MiniMax Code using its native ACP server and subscription login.",
+  "minimaxPassthroughLabel": "CLI Passthrough",
+  "minimaxPassthroughDescription": "Show terminal directly instead of chat interface",
+  "minimaxChooseRegionTitle": "MiniMax account region",
+  "minimaxChooseRegionDescription": "Choose the region for your MiniMax subscription account.",
+  "minimaxRegionCN": "Mainland China",
+  "minimaxRegionGlobal": "Global",
+  "minimaxLoginConflict": "Another sign-in command is already running. Close that terminal before trying again."
 }

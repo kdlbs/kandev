@@ -642,6 +642,18 @@ func TestApplyBasicSettingsTranscriptNavigation(t *testing.T) {
 
 // TestApplyBasicSettings_TasksListPreferences verifies tasks list sort and group are applied and invalid values rejected.
 func TestApplyBasicSettings_TasksListPreferences(t *testing.T) {
+	t.Run("canonicalizes legacy and current workflow step groups", func(t *testing.T) {
+		for _, value := range []string{"state", "workflow_step", " state "} {
+			settings := &models.UserSettings{TasksListSort: "created_asc"}
+			if err := applyBasicSettings(settings, &UpdateUserSettingsRequest{TasksListGroup: ptr(value)}); err != nil {
+				t.Fatalf("apply group %q: %v", value, err)
+			}
+			if settings.TasksListGroup != "workflow_step" || settings.TasksListSort != "created_asc" {
+				t.Fatalf("settings = (%q, %q), want (workflow_step, created_asc)", settings.TasksListGroup, settings.TasksListSort)
+			}
+		}
+	})
+
 	t.Run("sets valid sort and group", func(t *testing.T) {
 		settings := &models.UserSettings{}
 		req := &UpdateUserSettingsRequest{

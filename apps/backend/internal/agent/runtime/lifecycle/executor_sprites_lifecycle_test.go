@@ -139,6 +139,7 @@ func TestShouldRunExecutorCleanupIncludesCascadeTerminalReasons(t *testing.T) {
 		StopReasonCascadeDelete,
 		StopReasonTaskTreeArchived,
 		StopReasonTaskTreeDeleted,
+		StopReasonLaunchRollback,
 	} {
 		t.Run(reason, func(t *testing.T) {
 			if !shouldRunExecutorCleanup(reason) {

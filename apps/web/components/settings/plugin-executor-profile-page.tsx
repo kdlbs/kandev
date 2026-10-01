@@ -12,6 +12,9 @@ import { PluginExecutorProfileFields } from "@/components/settings/plugin-execut
 import { localizedExecutorProviderMessage } from "@/lib/executor-provider-display";
 import type { Executor, ExecutorProfile } from "@/lib/types/http";
 import { EXECUTOR_ICON_MAP } from "@/lib/executor-icons";
+import { useSecrets } from "@/hooks/domains/settings/use-secrets";
+import { RemoteCredentialsCard } from "@/components/settings/profile-edit/remote-credentials-card";
+import type { usePluginExecutorCredentials } from "@/components/settings/plugin-executor-credentials";
 import { settingsActionClassName } from "@/components/settings/settings-control";
 import {
   usePluginExecutorProfileData,
@@ -158,6 +161,40 @@ function ProfileSchemaFields({
   );
 }
 
+function PluginExecutorCredentialsCard({
+  credentials,
+}: {
+  credentials: ReturnType<typeof usePluginExecutorCredentials>;
+}) {
+  const { items: secrets } = useSecrets();
+  const { form, baseline } = credentials;
+  return (
+    <RemoteCredentialsCard
+      isRemote
+      selectedIds={form.remoteCredentials}
+      baselineSelectedIds={baseline.remoteCredentials}
+      onChange={credentials.setRemoteCredentials}
+      configBundleIds={form.configBundleIds}
+      baselineConfigBundleIds={baseline.configBundleIds}
+      onConfigBundleChange={credentials.setConfigBundleIds}
+      agentEnvVars={form.agentEnvVars}
+      baselineAgentEnvVars={baseline.agentEnvVars}
+      onAgentEnvVarChange={credentials.onAgentEnvVarChange}
+      secrets={secrets}
+      gitIdentityMode={form.gitIdentityMode}
+      baselineGitIdentityMode={baseline.gitIdentityMode}
+      onGitIdentityModeChange={credentials.setGitIdentityMode}
+      gitUserName={form.gitUserName}
+      gitUserEmail={form.gitUserEmail}
+      baselineGitUserName={baseline.gitUserName}
+      baselineGitUserEmail={baseline.gitUserEmail}
+      onGitUserNameChange={credentials.setGitUserName}
+      onGitUserEmailChange={credentials.setGitUserEmail}
+      localGitIdentity={form.localGitIdentity}
+    />
+  );
+}
+
 function ProfileEditorForm({
   data,
   save,
@@ -259,6 +296,14 @@ export function PluginExecutorProfilePage({
         }
       />
       <ProfileEditorForm data={data} save={save} deletion={deletion} />
+      <fieldset
+        disabled={
+          data.loading || Boolean(data.loadError) || Boolean(save.unavailableReason) || save.saving
+        }
+        className="min-w-0 disabled:opacity-60"
+      >
+        <PluginExecutorCredentialsCard credentials={data.credentials} />
+      </fieldset>
       <DeleteProfileDialog
         open={deletion.deleteOpen}
         onOpenChange={deletion.setDeleteOpen}

@@ -1396,6 +1396,24 @@ fn executable_name(name: &str) -> OsString {
     }
 }
 
+fn temporary_test_window_command(executable: &Path) -> Command {
+    let mut command = Command::new(executable);
+    command
+        .arg(TEMPORARY_TEST_ARGUMENT)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    command
+}
+
+fn launch_temporary_test_window(executable: &Path) -> Result<u32, String> {
+    crate::child_process::spawn_managed(
+        temporary_test_window_command(executable),
+        "temporary test window",
+    )
+    .map_err(|err| format!("Could not open a temporary Kandev test window: {err}"))
+}
+
 #[cfg(feature = "desktop-runtime")]
 #[tauri::command]
 pub fn start_temporary_test_instance(
@@ -1405,14 +1423,7 @@ pub fn start_temporary_test_instance(
     state.require_conflict_startup(&webview)?;
     let executable = env::current_exe()
         .map_err(|err| format!("Could not locate the Kandev desktop application: {err}"))?;
-    Command::new(&executable)
-        .arg(TEMPORARY_TEST_ARGUMENT)
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()
-        .map(|_| ())
-        .map_err(|err| format!("Could not open a temporary Kandev test window: {err}"))
+    launch_temporary_test_window(&executable).map(|_| ())
 }
 
 #[cfg(feature = "desktop-runtime")]
@@ -1912,6 +1923,78 @@ mod tests {
             OsString::from("kandev"),
             OsString::from(TEMPORARY_TEST_ARGUMENT)
         ]));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn temporary_launch_reaps_exited_gui_children() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let root = temp_root("temporary-child-reaping");
+        let marker_dir = root.join("pids");
+        fs::create_dir(&marker_dir).expect("create child marker directory");
+        let executable = root.join("gui-standin");
+        let marker_path = shell_quote(&marker_dir);
+        let script = format!(
+            "#!/bin/sh\n[ \"$#\" -eq 1 ] && [ \"$1\" = \"{TEMPORARY_TEST_ARGUMENT}\" ] || exit 71\nprintf '%s' \"$1\" > {marker_path}/\"$$\"\n"
+        );
+        fs::write(&executable, script).expect("write GUI stand-in");
+        let mut permissions = fs::metadata(&executable)
+            .expect("read GUI stand-in permissions")
+            .permissions();
+        permissions.set_mode(0o700);
+        fs::set_permissions(&executable, permissions).expect("make GUI stand-in executable");
+
+        let conflict = StartupConflict {
+            version: 1,
+            target_kind: ConflictTargetKind::Home,
+            target_path: root.display().to_string(),
+            storage_kind: ConflictStorageKind::SqliteInHome,
+            database_path: Some(root.join("data/kandev.db").display().to_string()),
+            owner: None,
+        };
+        let state = BackendState::default();
+        *state
+            .startup_conflict
+            .lock()
+            .expect("startup conflict mutex poisoned") = Some(conflict.clone());
+        let error = launch_temporary_test_window(&root.join("missing-gui"))
+            .expect_err("missing GUI executable must be reported");
+        assert!(error.contains("Could not open a temporary Kandev test window"));
+        assert_eq!(state.startup_conflict(), Some(conflict));
+        assert!(state.can_start_temporary_test("tauri://localhost/"));
+
+        let pids = (0..17)
+            .map(|_| {
+                let pid = launch_temporary_test_window(&executable)
+                    .expect("spawn temporary GUI stand-in");
+                wait_for_file(&marker_dir.join(pid.to_string()));
+                assert_eq!(
+                    fs::read_to_string(marker_dir.join(pid.to_string()))
+                        .expect("read temporary argument marker"),
+                    TEMPORARY_TEST_ARGUMENT
+                );
+                pid
+            })
+            .collect::<Vec<_>>();
+        assert!(state.can_start_temporary_test("tauri://localhost/"));
+        let probes = pids
+            .into_iter()
+            .map(|pid| thread::spawn(move || (pid, pid_is_reaped_within_one_second(pid))))
+            .collect::<Vec<_>>();
+        let still_waitable = probes
+            .into_iter()
+            .filter_map(|probe| {
+                let (pid, reaped) = probe.join().expect("join exact-PID probe");
+                (!reaped).then_some(pid)
+            })
+            .collect::<Vec<_>>();
+
+        fs::remove_dir_all(root).expect("remove temporary child-reaping fixture");
+        assert!(
+            still_waitable.is_empty(),
+            "temporary GUI child statuses remained waitable: {still_waitable:?}"
+        );
     }
 
     #[test]
@@ -2545,6 +2628,58 @@ mod tests {
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).expect("create temp root");
         dir
+    }
+
+    #[cfg(unix)]
+    fn shell_quote(path: &Path) -> String {
+        format!("'{}'", path.to_string_lossy().replace('\'', "'\\''"))
+    }
+
+    #[cfg(unix)]
+    fn wait_for_file(path: &Path) {
+        let deadline = Instant::now() + Duration::from_secs(1);
+        while !path.exists() && Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(5));
+        }
+        assert!(path.is_file(), "timed out waiting for test child marker");
+    }
+
+    #[cfg(unix)]
+    fn pid_is_reaped_within_one_second(pid: u32) -> bool {
+        let deadline = Instant::now() + Duration::from_secs(1);
+        loop {
+            let mut info = unsafe { std::mem::zeroed::<libc::siginfo_t>() };
+            let result = unsafe {
+                libc::waitid(
+                    libc::P_PID,
+                    pid as libc::id_t,
+                    &mut info,
+                    libc::WEXITED | libc::WNOHANG | libc::WNOWAIT,
+                )
+            };
+            if result == -1 {
+                let error = std::io::Error::last_os_error();
+                assert_eq!(error.raw_os_error(), Some(libc::ECHILD));
+                return true;
+            }
+            if Instant::now() >= deadline {
+                let mut status = 0;
+                let collected =
+                    unsafe { libc::waitpid(pid as libc::pid_t, &mut status, libc::WNOHANG) };
+                if collected == pid as libc::pid_t {
+                    return false;
+                }
+                if collected == -1
+                    && std::io::Error::last_os_error().raw_os_error() == Some(libc::ECHILD)
+                {
+                    return true;
+                }
+                unsafe { libc::kill(pid as i32, libc::SIGKILL) };
+                let _ = unsafe { libc::waitpid(pid as libc::pid_t, &mut status, 0) };
+                return false;
+            }
+            thread::sleep(Duration::from_millis(5));
+        }
     }
 
     #[cfg(unix)]

@@ -34,6 +34,7 @@ type ChangesPanelProps = {
   ) => void;
   onOpenDiffAll?: () => void;
   onOpenReview?: () => void;
+  onRetryGitStatus?: () => void;
 };
 
 const ChangesPanel = memo(function ChangesPanel(props: ChangesPanelProps) {

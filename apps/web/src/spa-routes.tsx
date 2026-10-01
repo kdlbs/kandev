@@ -446,7 +446,6 @@ function resolveTasksDataRouteInitialData(
 ) {
   return {
     initialWorkspaceId: tasksPage?.activeWorkspaceId ?? bootstrapped.activeWorkspaceId ?? undefined,
-    initialWorkflows: tasksPage?.workflows ?? bootstrapped.workflows,
     initialRepositories: tasksPage?.repositories ?? bootstrapped.repositories,
     initialTasks: sortTasksForList(tasksPage?.tasks ?? [], initialSort),
     initialTotal: tasksPage?.total ?? 0,

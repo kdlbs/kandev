@@ -12,7 +12,10 @@ import (
 
 const GitPushPreflightHistoryUpdateRequired = "history_update_required"
 
-const gitPushPreflightTimeout = 2 * time.Minute
+const (
+	gitPushPreflightTimeout = 2 * time.Minute
+	gitStatusDetailsReady   = "ready"
+)
 
 // GitOperationResult represents the result of a git operation.
 // This matches the server-side process.GitOperationResult.
@@ -645,6 +648,13 @@ func (c *Client) GetCumulativeDiff(ctx context.Context, baseCommit, targetBranch
 // GitStatusResult represents the result of a git status query.
 type GitStatusResult struct {
 	Success             bool                   `json:"success"`
+	StatusState         string                 `json:"status_state,omitempty"`
+	FilesComplete       bool                   `json:"files_complete"`
+	DetailState         string                 `json:"detail_state,omitempty"`
+	ErrorCode           string                 `json:"error_code,omitempty"`
+	TrackerID           string                 `json:"tracker_id,omitempty"`
+	TrackerEpoch        uint64                 `json:"tracker_epoch,omitempty"`
+	SnapshotRevision    uint64                 `json:"snapshot_revision,omitempty"`
 	RepositoryName      string                 `json:"repository_name,omitempty"`
 	IsSubmodule         bool                   `json:"is_submodule,omitempty"`
 	Branch              string                 `json:"branch"`
@@ -709,9 +719,8 @@ func (c *Client) GetGitStatus(ctx context.Context) (*GitStatusResult, error) {
 	return &result, nil
 }
 
-// GetGitStatusFresh gets a fresh git status, bypassing the workspace tracker's cache.
-// Use this when the caller knows the working tree changed since the last poll
-// (e.g. at agent turn completion).
+// GetGitStatusFresh starts or joins a fresh basic status observation and
+// publishes the accepted result to the workspace tracker's cache.
 func (c *Client) GetGitStatusFresh(ctx context.Context) (*GitStatusResult, error) {
 	var result GitStatusResult
 	status, err := c.fetchJSONResult(ctx, "/api/v1/git/status?fresh=true", &result)
@@ -720,6 +729,23 @@ func (c *Client) GetGitStatusFresh(ctx context.Context) (*GitStatusResult, error
 	}
 	if status >= 400 {
 		return &result, fmt.Errorf("git status fresh failed with status %d: %s", status, result.Error)
+	}
+	return &result, nil
+}
+
+// GetGitStatusWithDetails returns a fresh snapshot after file diffs and
+// secondary Git statistics settle under the caller's deadline.
+func (c *Client) GetGitStatusWithDetails(ctx context.Context) (*GitStatusResult, error) {
+	var result GitStatusResult
+	status, err := c.fetchJSONResult(ctx, "/api/v1/git/status?fresh=true&details=wait", &result)
+	if err != nil {
+		return nil, err
+	}
+	if status >= 400 {
+		return &result, fmt.Errorf("git status details failed with status %d: %s", status, result.Error)
+	}
+	if !result.Success || (result.DetailState != "" && result.DetailState != gitStatusDetailsReady) {
+		return &result, fmt.Errorf("git status details unavailable: %s", result.ErrorCode)
 	}
 	return &result, nil
 }
@@ -741,24 +767,29 @@ type MultiRepoGitStatusResult struct {
 }
 
 // GetGitStatusMultiFresh returns one status entry per repo (multi-repo) or a
-// single untagged entry (single-repo) with the workspace tracker's cache
-// bypassed — each repo re-runs `git status --porcelain` against the worktree.
-// Used by the session-subscribe handler in the main backend so a new observer
-// always sees a validated snapshot rather than a possibly-stale cached one.
-//
-// The fresh path is read-only with respect to the cache: it returns the live
-// query but does not write the result back into the tracker's currentStatus.
-// That's intentional — the poll loop owns the cache, and writing here would
-// race with concurrent polls. Already-subscribed observers continue to see
-// the cached stream until the poll loop catches up.
+// single untagged entry (single-repo), starting or joining a fresh basic
+// observation that is published to the tracker's cache and stream.
 func (c *Client) GetGitStatusMultiFresh(ctx context.Context) (*MultiRepoGitStatusResult, error) {
+	return c.getGitStatusMulti(ctx, "/api/v1/git/status/multi?fresh=true", "git status multi")
+}
+
+// GetGitStatusMultiRefresh runs one supported foreground refresh mode.
+func (c *Client) GetGitStatusMultiRefresh(ctx context.Context, mode string) (*MultiRepoGitStatusResult, error) {
+	path := "/api/v1/git/status/multi?mode=" + url.QueryEscape(mode)
+	if mode != "fresh" && mode != "recover" && mode != "replay" {
+		return nil, fmt.Errorf("unsupported git status refresh mode %q", mode)
+	}
+	return c.getGitStatusMulti(ctx, path, "git status multi "+mode)
+}
+
+func (c *Client) getGitStatusMulti(ctx context.Context, path, operation string) (*MultiRepoGitStatusResult, error) {
 	var result MultiRepoGitStatusResult
-	status, err := c.fetchJSONResult(ctx, "/api/v1/git/status/multi?fresh=true", &result)
+	status, err := c.fetchJSONResult(ctx, path, &result)
 	if err != nil {
 		return nil, err
 	}
 	if status >= 400 {
-		return &result, fmt.Errorf("git status multi failed with status %d: %s", status, result.Error)
+		return &result, fmt.Errorf("%s failed with status %d: %s", operation, status, result.Error)
 	}
 	return &result, nil
 }

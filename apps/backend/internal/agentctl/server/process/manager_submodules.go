@@ -412,7 +412,7 @@ func listGitlinkPaths(ctx context.Context, workDir, ref string) ([]string, error
 }
 
 func gitlinkCommitAt(ctx context.Context, workDir, ref, relativePath string) (string, error) {
-	if !sha1HexPattern.MatchString(ref) || !safeGitRelativePath(relativePath) {
+	if !gitObjectIDPattern.MatchString(ref) || !safeGitRelativePath(relativePath) {
 		return "", fmt.Errorf("invalid gitlink lookup")
 	}
 	output, err := runGitLifecycleOutput(ctx, workDir, "ls-tree", "-z", ref, "--", relativePath)
@@ -425,7 +425,7 @@ func gitlinkCommitAt(ctx context.Context, workDir, ref, relativePath string) (st
 			continue
 		}
 		fields := strings.Fields(header)
-		if len(fields) == 3 && sha1HexPattern.MatchString(fields[2]) {
+		if len(fields) == 3 && gitObjectIDPattern.MatchString(fields[2]) {
 			return fields[2], nil
 		}
 	}

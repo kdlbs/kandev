@@ -517,6 +517,19 @@ func (a githubExecutorCredentialPolicyAdapter) ResolveTaskGitCredentialPolicy(
 	}, nil
 }
 
+// pluginRuntimeAPIURL is the Kandev API URL plugin executor environments call
+// back to. It exists only when an externally reachable base URL is configured.
+func pluginRuntimeAPIURL(cfg *config.Config) string {
+	if cfg == nil {
+		return ""
+	}
+	publicBaseURL := strings.TrimRight(strings.TrimSpace(cfg.GitHubCredentialBroker.PublicBaseURL), "/")
+	if publicBaseURL == "" {
+		return ""
+	}
+	return publicBaseURL + "/api/v1"
+}
+
 func githubCredentialBrokerEndpoint(cfg *config.Config) string {
 	if cfg != nil {
 		if publicBaseURL := strings.TrimRight(strings.TrimSpace(cfg.GitHubCredentialBroker.PublicBaseURL), "/"); publicBaseURL != "" {
