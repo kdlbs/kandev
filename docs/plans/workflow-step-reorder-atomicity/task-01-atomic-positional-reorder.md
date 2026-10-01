@@ -197,3 +197,49 @@ not count as a review. The next normal synchronize review must provide real
 current-head findings/verdict before merge. Old-head E2E shard 5 also reports a
 nested-submodule review assertion failure outside reorder scope; the exact
 leaf was sent to the parent coordinator to avoid duplicate remediation.
+
+### Sequential delivery verification
+
+After rebasing on the updated main, bounded verification passed with
+`GOMAXPROCS=2` and Go `-p 2`: race tests for workflow models, service,
+repository, controller, HTTP handlers, and MCP handlers; real disposable
+PostgreSQL reorder tests (2.950s); and SQL guard. Full backend lint ran with
+concurrency 2 and reported zero issues. The owned PostgreSQL container was
+removed after verification. No ambient DSN or live data was used.
+
+The exact nested-submodule leaf passed in a fresh managed runner without
+retries. A runtime-image sequence including its two immediate predecessor
+specifications also passed with 2 CPU, 4 GiB, and one worker (four tests).
+The archived CI shard 5 manifest replay under those limits reproduced the
+missing parent README diff at case 112 and the mobile file-status missing row
+at case 211. It also exposed a mobile submodule repository-label failure.
+The user stopped this replay at case 216; the runner was joined with exit 143
+and its container removed. This partial run is failure evidence, not a suite
+result. No further shard or sequence replay is planned.
+
+An exact two-test trace run reproduced the desktop parent-diff failure in a
+fresh worker; the mobile file-status test passed (13s). A focused desktop
+WebSocket capture established the cause: the root's ready revision 4 contained
+the complete README patch, but a child snapshot with a later timestamp had
+already replaced the environment's compatibility mirror. The handler compared
+the root event against that unrelated repository and rejected its enrichment.
+The canonical root snapshot remained pending and masked the cumulative patch.
+Temporary diagnostic instrumentation was restored after the run, and its trace,
+frames, and log were retained outside the repository.
+
+CI remediation now reads the accepted snapshot from the canonical per-repository
+map, including the empty root scope. A legacy fallback applies only to root
+snapshots. A permanent regression reproduced the rejected root enrichment;
+all 22 handler tests pass after the lookup correction, including stale-root
+rejection. Desktop Changes/Review and the existing phone Changes panel/Review
+dialog share this state boundary; their composition, touch targets and actions
+are unchanged. The updated web build passed. Both exact failed E2E tests passed
+in the runtime image with 2 CPU, 4 GiB, one worker, and retries disabled:
+desktop submodule Review (44.7s) and mobile file status (12.6s). The mobile
+failure's independent cause has not been proven; its prior failed-shard signal
+still requires fresh hosted CI evidence. Assertions and timeouts have not been
+weakened. The interrupted local shard's mobile submodule label failure also
+remains a recorded signal for hosted verification.
+
+Final fixup publication, thread dispositions, fresh exact-head CI and active
+trusted semantic review, and normal merge remain pending.
