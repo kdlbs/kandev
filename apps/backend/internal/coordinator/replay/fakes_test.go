@@ -141,7 +141,11 @@ func (w *world) Run(ctx context.Context, _ string, prompt string) (Reply, error)
 	if f == nil {
 		return Reply{Text: "[]"}, nil
 	}
-	return f(prompt)
+	reply, err := f(prompt)
+	if err == nil && ctx.Err() != nil {
+		return Reply{}, ctx.Err() // a real runner stops at its deadline
+	}
+	return reply, err
 }
 
 func (w *world) Insert(_ context.Context, n NewRow) (Stored, bool, error) {

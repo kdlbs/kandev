@@ -3,6 +3,7 @@ package replay
 import (
 	"context"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -168,7 +169,7 @@ func TestWakeTurnHasNoTriggerTextAndPromptCarriesWakeKinds(t *testing.T) {
 	}
 	p := buildPrompt("RENDER", pc.input)
 	for _, want := range []string{"RENDER", replayParagraph, "Trigger (wake): task_done, stalled", "body", "task-a: T"} {
-		if !contains(p, want) {
+		if !strings.Contains(p, want) {
 			t.Fatalf("prompt lacks %q:\n%s", want, p)
 		}
 	}
@@ -182,7 +183,7 @@ func TestPromptNeverCarriesDecisions(t *testing.T) {
 	pc := prep(t, w, turn)
 	p := buildPrompt("RENDER", pc.input)
 	for _, banned := range []string{"p-secret-id", "rejected", "approved"} {
-		if contains(p, banned) {
+		if strings.Contains(p, banned) {
 			t.Fatalf("prompt leaks %q", banned)
 		}
 	}

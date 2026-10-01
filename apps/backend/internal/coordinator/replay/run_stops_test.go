@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"math"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -52,6 +53,44 @@ func TestBudgetCeilingStopsAPrefixAndKeepsSpend(t *testing.T) {
 	}
 	if w.calls == 0 || w.calls >= 30 {
 		t.Fatalf("expected a prefix of the calls, got %d", w.calls)
+	}
+}
+
+func TestBudgetStopStoresTheFlipsAndAttemptsFoundSoFar(t *testing.T) {
+	w := newWorld()
+	fewCases(w, 5)
+	w.answer = scripted(func(side, id string) []string {
+		if side == "cand" && id == "ta" {
+			return nil // drops the approval the baseline reproduces
+		}
+		return []string{"move|good" + id[1:]}
+	})
+	w.pricing.OutputPerMillion = 1000
+	ceiling := int64(1500)
+	w.spend.CeilingSubcents = &ceiling
+	res := mustRun(t, w, req())
+	if res.Reason != ReasonBudget || res.CandidateScore != nil {
+		t.Fatalf("got %+v", res)
+	}
+	if len(res.Flips) != 1 || res.Flips[0] != (Flip{TurnID: "ta", ProposalID: "ta-p1"}) {
+		t.Fatalf("flips %v", res.Flips)
+	}
+	var rec *CaseRecord
+	for i := range res.Cases {
+		if res.Cases[i].TurnID == "ta" {
+			rec = &res.Cases[i]
+		}
+	}
+	if rec == nil || len(rec.Candidate) != 3 || len(rec.Baseline) != 3 {
+		t.Fatalf("completed attempts not kept: %+v", rec)
+	}
+	for _, a := range rec.Candidate {
+		if !a.OK || len(a.Keys) != 0 {
+			t.Fatalf("candidate attempt %+v", a)
+		}
+	}
+	if stored := w.rows[res.RowID].Result.Cases; len(stored) != len(res.Cases) {
+		t.Fatalf("stored %d case records, result has %d", len(stored), len(res.Cases))
 	}
 }
 
@@ -168,7 +207,7 @@ func TestCostUpdateFailureKeepsCostInTheReadingAndCarries(t *testing.T) {
 	fewCases(w, 2)
 	w.addCostErr = errBoom
 	res := mustRun(t, w, req())
-	if !contains(joinNotes(res.Notes), "cost_update_failed") {
+	if !strings.Contains(joinNotes(res.Notes), "cost_update_failed") {
 		t.Fatalf("notes %v", res.Notes)
 	}
 	if res.CostSubcents != 12*110 {
@@ -295,8 +334,16 @@ func TestCancelWinsOnlyWhenFirst(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	res, _ := w.harness().Run(ctx, req())
-	if res.Reason != ReasonCancelled && res.Reason != ReasonBudget {
-		t.Fatalf("reason %q", res.Reason)
+	if res.Reason != ReasonCancelled {
+		t.Fatalf("a replay cancelled before its first call is cancelled, got %q", res.Reason)
+	}
+
+	live := newWorld()
+	fewCases(live, 5)
+	live.spend.CeilingSubcents = &ceiling
+	res, _ = live.harness().Run(context.Background(), req())
+	if res.Reason != ReasonBudget {
+		t.Fatalf("a replay refused by the ceiling is budget, got %q", res.Reason)
 	}
 }
 
@@ -321,8 +368,8 @@ func TestRunTimeoutFailsTheAttemptNotTheReplay(t *testing.T) {
 		w := newWorld()
 		fewCases(w, 1)
 		var n atomic.Int64
-		w.answer = func(string) (Reply, error) {
-			if n.Add(1) == 1 {
+		w.answer = func(prompt string) (Reply, error) {
+			if strings.Contains(prompt, "CAND") && n.Add(1) == 1 {
 				time.Sleep(RunTimeout + time.Second)
 				return Reply{Text: "[]"}, nil // too late: the context is done
 			}
@@ -331,6 +378,18 @@ func TestRunTimeoutFailsTheAttemptNotTheReplay(t *testing.T) {
 		res, err := w.harness().Run(context.Background(), req())
 		if err != nil || res.Reason == ReasonBudget {
 			t.Fatalf("got %+v %v", res, err)
+		}
+		if len(res.Cases) != 1 || len(res.Cases[0].Candidate) != 3 {
+			t.Fatalf("cases %+v", res.Cases)
+		}
+		failed := 0
+		for _, a := range res.Cases[0].Candidate {
+			if !a.OK {
+				failed++
+			}
+		}
+		if failed != 1 {
+			t.Fatalf("exactly the timed-out attempt must be failed: %+v", res.Cases[0].Candidate)
 		}
 	})
 }

@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
+	"sync"
 	"testing"
 )
 
@@ -257,15 +259,11 @@ func TestRunAllSkippedAndNoCompared(t *testing.T) {
 func TestRunFailedAttemptIsNotAMiss(t *testing.T) {
 	w := newWorld()
 	twentyFive(w)
-	w.answer = func(prompt string) (Reply, error) {
-		f := scripted(func(side, id string) []string { return []string{"move|good" + caseNum(id)} })
-		return f(prompt)
-	}
+	inner := scripted(func(side, id string) []string { return []string{"move|good" + caseNum(id)} })
 	// every call to the candidate fails for t01 after the first attempt
 	count := map[string]int{}
-	inner := w.answer
 	w.answer = func(prompt string) (Reply, error) {
-		if contains(prompt, "CAND") && contains(prompt, "CASE:t01") {
+		if strings.Contains(prompt, "CAND") && strings.Contains(prompt, "CASE:t01") {
 			w.mu.Lock()
 			count["t01"]++
 			n := count["t01"]
@@ -285,13 +283,40 @@ func TestRunFailedAttemptIsNotAMiss(t *testing.T) {
 	}
 }
 
-func contains(s, sub string) bool { return len(sub) > 0 && indexOf(s, sub) >= 0 }
-
-func indexOf(s, sub string) int {
-	for i := 0; i+len(sub) <= len(s); i++ {
-		if s[i:i+len(sub)] == sub {
-			return i
+func TestRunCountsStrayKeysOncePerSuccessfulAttemptOfComparedCases(t *testing.T) {
+	w := newWorld()
+	twentyFive(w)
+	inner := scripted(func(side, id string) []string {
+		keys := []string{"move|good" + caseNum(id)}
+		if id == "t03" && side == "base" || id == "t04" && side == "base" || id == "t01" && side == "cand" {
+			keys = append(keys, "move|stray")
 		}
+		return keys
+	})
+	var mu sync.Mutex
+	t02 := 0
+	w.answer = func(prompt string) (Reply, error) {
+		switch {
+		case strings.Contains(prompt, "CAND") && strings.Contains(prompt, "CASE:t04"):
+			return Reply{}, errBoom // t04 never runs on the candidate, so it is not compared
+		case strings.Contains(prompt, "CAND") && strings.Contains(prompt, "CASE:t02"):
+			mu.Lock()
+			t02++
+			n := t02
+			mu.Unlock()
+			r, err := inner(prompt)
+			if n <= 2 { // the stray key shows in two of three attempts
+				r.Text = r.Text[:len(r.Text)-1] + `,{"kind":"move","target_task_id":"stray"}]`
+			}
+			return r, err
+		}
+		return inner(prompt)
 	}
-	return -1
+	res := mustRun(t, w, req())
+	if res.CasesCompared != 24 {
+		t.Fatalf("compared %d", res.CasesCompared)
+	}
+	if res.UnmatchedCandidate != 5 || res.UnmatchedBaseline != 3 {
+		t.Fatalf("unmatched %d/%d, want 5/3", res.UnmatchedCandidate, res.UnmatchedBaseline)
+	}
 }
