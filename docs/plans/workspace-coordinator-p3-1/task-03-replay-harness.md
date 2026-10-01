@@ -88,12 +88,15 @@ in CI.
   thousandths, and a blocked guard with 19 held-out cases is
   `not_an_improvement`.
 - Idempotent second `Run` for one dream item, `profile_unsafe`, `cost_unknown`,
-  `cancelled` and `read_failed` stops, the zero-token estimate pricing, and the
-  dependency-closure test.
+  `cancelled` and `read_failed` stops, the zero-token estimate pricing, and the dependency-closure allow-list test (standard library, `internal/common/costs`, `replay`, `replay/stub` only).
 - The budget stops a replay `unmeasured` (`budget`) when spend is unmeasurable
   or would reach the ceiling.
 - The planted suite fails when the guard is disabled and passes with each
-  candidate at its recorded guard result and verdict.
+  candidate at its recorded guard result and verdict, and asserts the
+  guard-only candidate's held-out gain is at least `MinGainThousandths`.
+- Partial stops store `unmeasured` with NULL scores; reason codes `no_cases`,
+  `all_skipped` and `no_compared`; 004.3 applies only with 20 held-out compared
+  cases; the guard counts a failed attempt as neither hit nor miss.
 
 ## Validation
 

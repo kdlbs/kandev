@@ -44,7 +44,8 @@ coordinator or a dream can change.
 - **Case score:** expected reproduced plus expected avoided that a run met,
   over all expected reproduced and avoided of the case, in integer thousandths
   rounded half up.
-- **Flip:** an expected reproduced proposal that a candidate misses.
+- **Flip:** an expected reproduced proposal that the baseline reproduces and
+  the candidate does not, by the majority rule of `AC-COORDINATOR-REPLAY-003.1`.
 - **Held-out case:** a case whose turn is not among the turns the candidate
   cites as its evidence.
 - **Unmeasured:** the result of a candidate the harness cannot judge, shown
@@ -70,22 +71,26 @@ coordinator or a dream can change.
   days before the replay, not already selected; each group is ordered by the
   ledger turn's `started_at` descending with ties by the ledger turn `id`
   descending, and the cases run in that order, the first group before the
-  second. With no such turn the replay has no cases (`no_cases`).
+  second. With no such turn the replay has no cases (`no_cases`); when turns were
+  selected but every one was skipped the reason is `all_skipped`, and when
+  cases ran but none ran on both sides it is `no_compared`.
 - **AC-COORDINATOR-REPLAY-001.2:** A turn shall be skipped, with the reason
   recorded per turn, when it was a dream (`dream_turn`), when its snapshot
   hash is empty or no snapshot row exists for it (`no_snapshot`; a snapshot
   survives while any turn of the last 90 days references it, so a turn's age
   alone never skips it), when its trigger message or a task title the replay
   needs is confirmed absent (`input_gone`), or when it has no expected
-  reproduced and no expected avoided proposal (`no_expectation`), the first
+  reproduced and no expected avoided proposal (`no_expectation`; an outcome whose proposal row no longer exists contributes
+  no expectation), the first
   match in that order. A read that fails shall not skip a turn: the replay
   stops `unmeasured` with the reason `read_failed`. A skipped case shall not
   count in any score.
 - **AC-COORDINATOR-REPLAY-001.3:** A case shall run as one prompt that holds
   only the instruction render for the configuration under test, the turn's
   trigger as stored, the turn's frozen snapshot and the titles of the tasks the
-  replay needs (the turn's trigger task and the targets of its expected
-  proposals; a title is a label read when the replay runs, never board state),
+  replay needs (the target tasks of its expected proposals of every kind but
+  `create_task`, which contributes no title; a title is a label read when the
+  replay runs, never board state),
   and never the turn's own proposals, outcomes or decisions. No Kandev tool or
   MCP server shall be offered to the model, and the replay shall refuse, as
   `unmeasured` with the reason `profile_unsafe`, a profile that is auto-approve,
@@ -96,8 +101,9 @@ coordinator or a dream can change.
   proposal, activity row, setting or conversation of the coordinator, never
   start a task session of the coordinator's workspace, and never be
   triggered by a coordinator principal; its only writes are its own result row.
-  The replay package's dependency closure shall contain no package that writes
-  those records, and a test shall fail when it does.
+  The replay package's dependency closure shall contain no package other than
+  the standard library, `internal/common/costs`, `replay` and `replay/stub`,
+  and a test shall fail when it does.
 
 ### REQ-COORDINATOR-REPLAY-002: Runs and scores
 
@@ -130,7 +136,8 @@ coordinator or a dream can change.
   run's bound reaches the coordinator's cost ceiling (no ceiling set admits
   every run), and a replay stopped for that reason, or by its time bound, shall
   be `unmeasured` with the reason `budget`; a run whose model has no price
-  shall make the replay `unmeasured` with the reason `cost_unknown`. A replay's
+  shall make the replay `unmeasured` with the reason `cost_unknown`, found before the first
+  run so that no cost is incurred. A replay's
   cost shall count in that 24 hour spend while the replay is running and after
   it.
 - **AC-COORDINATOR-REPLAY-002.5:** Two replays of the same candidate and the
@@ -142,7 +149,11 @@ coordinator or a dream can change.
   compared cases and both over the held-out compared cases, the unmatched
   counts, the flips (the turn and proposal of each), the guard result and the
   verdict of `003` and `004`, the reason when `unmeasured`, its cost and its
-  time. A replay started again for the same dream item shall make no model call
+  time. A replay stopped before every case ran (any `unmeasured` reason other than
+  `no_cases` and `all_skipped`) shall store guard `unmeasured`, verdict
+  `unmeasured`, no scores, the flips found so far, the per-case data of the
+  attempts that completed and the cost incurred. A replay started again for
+  the same dream item shall make no model call
   and return the stored result of a finished row, or report that the replay is
   still running. A replay whose row cannot be written
   shall report that to its caller, which shall not store the verdict.
@@ -162,8 +173,9 @@ happy with is blocked, whatever else it improves.
   successful attempts, a miss in at least two), and shall name the turns and
   proposals it flipped.
 - **AC-COORDINATOR-REPLAY-003.2:** A flip shall block whatever the candidate's
-  score, its improvement or the number of cases. A replay with no compared
-  case shall not pass the guard: its guard result shall be `unmeasured`.
+  score, its improvement or the number of cases. A replay with no compared case shall not pass the guard: its guard result shall be `unmeasured`
+  and its verdict `unmeasured` with the reason `no_cases`, `all_skipped` or
+  `no_compared`.
 - **AC-COORDINATOR-REPLAY-003.3:** A proposal the manager approved with edits
   shall not be an expected reproduced proposal and shall not block.
 
@@ -178,12 +190,13 @@ it.
   improvement only when the guard passed, at least 20 held-out compared cases
   exist, and its score exceeds the baseline's on those cases by at least 0.05
   (50 thousandths).
-- **AC-COORDINATOR-REPLAY-004.2:** With the guard not blocked and fewer than 20
+- **AC-COORDINATOR-REPLAY-004.2:** With the guard passed and fewer than 20
   held-out compared cases, the judge shall report the candidate `unmeasured`
   (reason `too_few`) with the count and shall never report it as an
   improvement, a regression or a tie.
 - **AC-COORDINATOR-REPLAY-004.3:** A blocked guard whatever the case count, or
-  a guard that passed with a gain under 0.05 or a negative one, shall be reported
+  a guard that passed with at least 20 held-out compared cases and a gain under
+  0.05 or a negative one, shall be reported
   `not_an_improvement`, with the two scores.
 - **AC-COORDINATOR-REPLAY-004.4:** The judge's threshold, the minimum case
   count and the case window shall be constants of the harness, changeable
@@ -196,10 +209,11 @@ it.
 
 #### Acceptance criteria
 
-- **AC-COORDINATOR-REPLAY-005.1:** The repository shall hold a fixed case set with at least 20 held-out cases and a fixed set of planted candidates with known-bad effects (two flip at least one expected reproduced proposal, one drops every proposal, one repeats a rejected proposal, which the harness scores as a miss of an expected avoided proposal) and one known-good candidate, and a test that runs the harness over them with a deterministic stub model and no network, and fails unless each planted candidate gets its recorded guard result and verdict (the two that flip and the one that drops every proposal are `blocked` and `not_an_improvement`; the one that repeats a rejected proposal passes the guard and is `not_an_improvement`) and the known-good candidate is reported `improvement`. One bad candidate shall be built so that its score would exceed the baseline's by the gain threshold were the guard off.
+- **AC-COORDINATOR-REPLAY-005.1:** The repository shall hold a fixed case set with at least 20 held-out cases and a fixed set of planted candidates with known-bad effects (two flip at least one expected reproduced proposal, one drops every proposal, one repeats a rejected proposal, which the harness scores as a miss of an expected avoided proposal) and one known-good candidate, and a test that runs the harness over them with a deterministic stub model and no network, and fails unless each planted candidate gets its recorded guard result and verdict (the two that flip and the one that drops every proposal are `blocked` and `not_an_improvement`; the one that repeats a rejected proposal passes the guard and is `not_an_improvement`) and the known-good candidate is reported `improvement`. One bad candidate shall be built so that its score would exceed the baseline's by the gain threshold were the guard off, and the test shall assert that gain from the candidate's stored held-out scores.
 - **AC-COORDINATOR-REPLAY-005.2:** That test shall run in the backend's
   ordinary test run in continuous integration, and a change that makes any
-  planted candidate pass shall fail it.
+  planted candidate's guard result or verdict differ from its recorded one shall
+  fail it.
 - **AC-COORDINATOR-REPLAY-005.3:** The evaluator, the cases, the scoring and
   the planted set shall be code and fixtures of the repository. The scorer
   shall read nothing at run time except the selected cases and the runs'
@@ -207,7 +221,8 @@ it.
   coordinator tool shall reach the replay package or its fixtures; tests shall
   assert the constants' values and that dependency boundary.
 - **AC-COORDINATOR-REPLAY-005.4:** Every shadow dream item that passes the
-  gate shall be replayed (`AC-COORDINATOR-SHADOW-DREAM-004.1`), and its stored
+  gate and is within the dream's replay limit shall be replayed
+  (`AC-COORDINATOR-SHADOW-DREAM-004.1`: up to 5 items per dream), and its stored
   scores shall stay available for comparison with the owner's ratings of the
   same items.
 - **AC-COORDINATOR-REPLAY-005.5:** In phase 3.1 the harness shall gate no

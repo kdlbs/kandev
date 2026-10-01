@@ -44,11 +44,10 @@ which is.
 
 `replay.New(deps Deps) *Harness`. `Deps` holds only interfaces defined in
 `replay`, so the package imports no coordinator, office or task package:
-`Cases` (reads turns, outcomes, snapshots, trigger text and titles), `Prompts`
-(`Run(ctx, profileID, prompt) (text, model, promptTokens, responseTokens,
-error)`), `Prices` (`Lookup(model) (pricing, ok)`), `Spend` (`Reading(ctx,
+`Cases` (reads turns, outcomes, snapshots, trigger text and titles), `Profiles` (`Resolve(ctx, coordinatorID) (Profile, error)`, where `Profile` holds the profile id, the resolved model id, `AutoApprove`, the command prefix and the CLI flags), `Prompts`
+(`Run(ctx, profileID, prompt) (text, promptTokens, responseTokens, error)`; the model it might report is never used), `Prices` (`Lookup(ctx, model) (commoncosts.ModelPricing, found bool, err error)`, bounded by `PriceTimeout = 5s`), `Spend` (`Reading(ctx,
 coordinatorID, now) (windowSubcents, measurable, ceilingSubcents *int64)`),
-`Instructions` (`Render(ctx, coordinatorID, Override) (text, hash, error)`),
+`Instructions` (`Render(ctx, coordinatorID, Override) (Renders, error)`, where `Renders` holds the baseline and the candidate text and hash read from one snapshot of the coordinator's context and orders, so both sides share one baseline; it returns the sentinel `ErrNoTarget` for `no_target` and any other error is `read_failed`),
 `Results` (the result-row store) and `Clock`. The adapters over the real
 packages live in `replay/wire`, which the dream's composition root builds; the
 package `replay` and `replay/stub` do not import it.
@@ -64,14 +63,19 @@ could not be inserted (nothing ran, no cost) or the final write failed
 verdict, and the row is later settled `interrupted`). The profile run is the
 coordinator's own agent profile, resolved by `Prompts`; the model priced is the
 model id that profile resolves to. A candidate `Kind` outside the six dream
-item kinds is a caller bug and returns an error.
+item kinds, an empty `CoordinatorID`, exactly one of `DreamID` and `ItemID` set, or a nil dependency is a caller bug and returns an error before any row is written.
+
+Order inside `Run`: validate the request; insert the `running` row; resolve the
+profile (an error is `read_failed`); refuse an unsafe profile (`profile_unsafe`);
+refuse an empty resolved model or one with no price, looked up once (`cost_unknown`,
+no call made, zero cost); render (`ErrNoTarget` is `no_target`); select cases;
+run. The model priced is `Profile.Model`.
 
 Idempotency: the row has a unique key on `(dream_id, item_id)` when both are
-set. A second `Run` for the same pair finds the row; a `done` row returns its
-stored result and makes no model call, a `running` row returns the in-progress
+set. A second `Run` for the same pair finds the row (a caller whose insert loses the unique index reads the winner's row the same way); a `done` row returns its
+stored result and makes no model call, even if the request's candidate differs, and a `running` row returns the in-progress
 error `ErrReplayRunning` without starting a run (the dream lease already
-serialises production callers). Context cancellation stops the replay at once,
-keeps the spend, and stores `unmeasured` with the reason `cancelled`.
+serialises production callers). With both ids empty nothing is idempotent. Context cancellation cancels the calls in flight, `Run` waits for them to return, keeps the spend, and stores `unmeasured` with the reason `cancelled`; the final write and the cost updates use a context detached from the cancellation, bounded by 10 seconds. When cancellation coincides with another stop reason, the reason that was set first stays.
 
 ## Case selection
 
@@ -97,7 +101,7 @@ proposal) (`001.2`). The first matching reason is stored. A read that errors
 other than not-found aborts the replay `unmeasured`, reason `read_failed`,
 keeping spend; it never becomes a skip.
 
-Expectations come from the turn's outcome rows. `coordinator_outcomes.decision`
+Expectations come from the turn's outcome rows, and each outcome's decision key from its proposal row (`coordinator_proposals`, joined by `proposal_id`): `kind`, `target_task_id`, and for `create_task` the `workflow_id` and `title` of `spec_json`, the proposal as the coordinator made it, never `final_spec_json`. An outcome whose proposal row is not found contributes no expectation and the case records `proposal_gone`; any other read error is `read_failed`. `coordinator_outcomes.decision`
 is the proposal's final decision (an approval later undone reads `undone`), so
 no precedence rule between rows is needed. Expected reproduced: `decision =
 approved` and `automatic = false` and empty `edited_fields`. Expected avoided:
@@ -109,8 +113,8 @@ both expected reproduced and expected avoided within the same turn (two
 proposals with one key and opposite decisions), the key is dropped from both
 sets and the case records `ambiguous_key` in its per-case data; a case left with
 no expectation is skipped `no_expectation`. Two proposals of one turn with the
-same key and the same kind of expectation count once. A skipped case counts in no
-score.
+same key and the same kind of expectation count once, represented by the smallest `proposal_id` (string order), which is the id a flip reports. A skipped case counts in no
+score. The trigger text is read through `Cases`: for a `message` turn, the earliest user-authored message of the task session turn named by the ledger turn's `session_turn_id` (ordered by `created_at`, then `id`); for a `wake` turn there is no text and the wake kinds stand in. A turn carries no trigger task, so the titles needed are those of the `target_task_id` of expected proposals of every kind but `create_task`. Present-but-empty trigger text or title is used as empty; only not-found is `input_gone`. An override whose `coordinator_feedback.turn_id` is null never joins group two.
 
 ## Sandbox
 
@@ -155,11 +159,14 @@ removable and are not claimed removed.
 
 Isolation of writers is a dependency boundary: `replay` and `replay/stub` are
 tested with `go list -deps`, and the test fails when the closure of either
-contains `internal/coordinator` (the package holding the proposal, activity and
-settings writers), any other package under `internal/coordinator` except `replay`
-and `replay/stub`, `internal/office`, `internal/task/service`, `internal/task/store`,
-or a package on the forbidden list kept in the test file (conversation and
-settings writers). `replay/wire` is the only package that imports those and
+contains any package other than the standard library, `internal/common/costs`
+(pricing arithmetic, imports only `math` and `strings`), `replay` and `replay/stub`. An allow-list
+rather than a forbidden list, so no writer package (`internal/coordinator`,
+`internal/office`, `internal/task/service`, `internal/task/repository`, the
+settings and message stores) can enter by name or by transitive import. `replay`
+therefore redeclares the few constants it needs from `internal/coordinator/outcomes` and
+`internal/coordinator/ledger` (decision values, the `dream` trigger), with a test in
+`replay/wire` asserting they equal the originals. `replay/wire` is the only package that imports those and
 nothing in `replay` or `replay/stub` imports it. The only caller allowed to start
 a run is the dream episode's server-side code and tests; the tool surface has no
 entry (`001.4`).
@@ -180,9 +187,8 @@ SHA-256 (the stamp's `prompt_hash` function, lower-case hex, with no override);
 the model is the profile's resolved model id, and an empty model never reuses.
 Reuse reads the newest `done` result row of the coordinator by `created_at DESC,
 id DESC` that holds that case's attempts under that key, ignoring rows with
-reason `interrupted` or `cancelled`, and takes only attempts that succeeded; a
-case whose reusable attempts number fewer than three runs the missing attempts
-fresh. Each attempt stores `ok` or `failed` and its sorted decision keys in the
+reason `interrupted` or `cancelled`, and takes only attempts that succeeded; a case whose reusable attempts number fewer than three runs the missing attempts
+fresh. Reused attempts keep their stored attempt index (1 to 3) and a fresh attempt takes the lowest index not held by a reusable one, so a failed attempt's index is the one rerun. Each attempt stores `ok` or `failed` and its sorted decision keys in the
 row's per-case data (`002.1`).
 
 Case score for an attempt = (expected reproduced whose key is in the attempt +
@@ -193,7 +199,7 @@ for attempt index k in 1..3, the mean over compared cases whose attempt k
 succeeded; the score is the median of the means of the indices that have at least
 one such case (the middle value of three, the lower of two, the only one of one;
 no index gives no score, the replay then has no compared case). Held-out scores
-use only held-out compared cases, the same way. An attempt's proposals matching
+use only held-out compared cases, the same way. Dispatch order is case-major in the selection order of `001.1`: for each case, the candidate's attempts 1 to 3, then the baseline's missing attempts, with at most `Concurrency` calls in flight; results are collected by case and attempt index. So a stop leaves a prefix of whole cases. An attempt's proposals matching
 no expected key are not scored; the result stores for each side the sum over all
 its successful attempts of the compared cases of such distinct keys per attempt
 (`002.2`).
@@ -215,7 +221,7 @@ refuses when the reading is unmeasurable, or when a ceiling is set and `window
 spend + the bounds of calls in flight + bound >= ceiling` (no ceiling admits);
 on admit it adds `bound` to the in-flight sum, and it removes it when the call
 ends and its real cost has been written to the row. A refusal stops the replay
-`unmeasured`, reason `budget`, after the calls in flight finish (`002.4`).
+`unmeasured`, reason `budget`, after the calls in flight finish (`002.4`). The price of `Profile.Model` is looked up once before any call, so `cost_unknown` is raised with zero cost.
 `bound` is the price of `MaxOutputTokens = 4000` output tokens plus the prompt's
 input tokens estimated as bytes / 3 (constant in `replay/constants.go`; the call
 has no per-call maximum, so an actual run may exceed `bound` and the next
@@ -228,13 +234,12 @@ a run that reports tokens is priced from them. The model priced is the profile's
 resolved model id, never a provider-reported one. The price is
 `commoncosts.CalculateCostSubcentsChecked` over the pricing `Prices.Lookup`
 returns (the same lookup the usage recorder uses, behind an interface so tests
-stub it); a lookup that finds no price, errors or times out makes the replay
+stub it; the usage recorder's own lookup is `LookupForModelWithVersion` in `internal/task/usage`, adapted in `replay/wire`); a lookup that finds no price, errors or times out makes the replay
 `unmeasured`, reason `cost_unknown`, keeping the spend already incurred. A
 sessionless call writes no usage row, so each run's cost is added to the result
 row's `cost_subcents` (starting at 0 when the row is inserted) in a single
 `UPDATE ... SET cost_subcents = cost_subcents + ?`, which is race-free across
-concurrent runs. A failed cost update is logged and counted and the in-memory
-total is carried to the final write, which writes the larger of the two.
+concurrent runs. A failed cost update is logged and counted, the call's real cost stays in the in-flight sum as unwritten cost (so `Reserve` keeps seeing it instead of releasing the bound), and the in-memory total is carried to the final write, which writes the larger of the two.
 
 The phase 3 spend reader (`Service.Spend`) gains one additive, nil-safe term,
 `ExtraSpend(coordinatorID, from, to)`, summing `cost_subcents` of
@@ -243,7 +248,7 @@ included (only a NULL cost, which the design never writes, makes the reading
 unmeasurable), so replays count toward the 24 hour spend and the ceiling,
 including the `stopped_at_ceiling` check of a real unattended turn, which the
 manager sees as the same spend figure with no separate attribution. The spend
-design is not edited; this term is listed as a delta in the ADR and has its own
+design is not edited; this term is listed as a delta in the ADR (`docs/decisions/2026-09-30-coordinator-phase-3-1-record-and-measure.md`) and has its own
 test (a running row is counted once; a zero-cost running row does not block
 admission). A replay also has a wall-clock bound of 20 minutes (a constant
 `ReplayTimeout`, the dream's episode bound; a full 100-case replay is 600
@@ -261,7 +266,7 @@ of the case (three attempts: two; two attempts: both). The guard evaluates each
 proposal the baseline reproduces and blocks when the candidate does not
 reproduce it (`003.1`); a case that did not run on either side is not evaluated
 (a baseline-ran, candidate-excluded case simply leaves the compared set). Flips
-carry the turn id and the proposal id. A flip blocks whatever the score or
+carry the turn id and the proposal id. A call that failed shrinks the number of successful attempts and is never counted as a miss, so with attempts [hit, miss, failed] the key is in one of two successful attempts, which is not more than half, and the case flips; with [hit, miss, hit] it does not. A case reproduced by the baseline in all three attempts and by the candidate in one of three flips; in two of three it does not. Of two successful attempts both must hit. When several proposals of one turn share a flipped key, the flip carries the smallest `proposal_id`. A flip blocks whatever the score or
 improvement or case count (`003.2`). A replay with no compared case returns the
 guard result `unmeasured`, never `pass`.
 
@@ -299,12 +304,11 @@ with no model call and no cost. An empty resulting context text is applied as
 empty. The baseline render uses the orders and context current when the replay
 starts.
 
-Verdict order: no compared case: guard `unmeasured`, verdict `unmeasured`
-(`no_cases`); guard `blocked` gives `not_an_improvement`; fewer than `MinHeldOut`
+Verdict order: no compared case: guard `unmeasured`, verdict `unmeasured`, reason `no_cases` (no turn selected), `all_skipped` (every selected turn skipped) or `no_compared` (cases ran but none on both sides); guard `blocked` gives `not_an_improvement`; the guard passed and fewer than `MinHeldOut`
 held-out compared cases gives `unmeasured` (`too_few`) with the count (never an
 improvement, regression or tie) (`004.2`); held-out candidate score minus held-out
 baseline score in thousandths `>= MinGainThousandths` gives `improvement`
-(`004.1`); everything else is `not_an_improvement` with both scores (`004.3`). The
+(`004.1`); everything else (guard passed, at least `MinHeldOut` held-out compared cases, gain under the threshold or negative) is `not_an_improvement` with both scores (`004.3`). The
 shadow dream shows a guard `blocked` as `blocked` on its report; the row's
 `verdict` stays `not_an_improvement`.
 
@@ -319,11 +323,11 @@ side `ok`/`failed` and sorted keys, case scores, `ambiguous_key`), `candidate_sc
 `heldout_baseline_score`, `cases_ran_candidate`, `cases_ran_baseline`,
 `cases_compared`, `flips` (JSON), `unmatched_candidate`, `unmatched_baseline`,
 `guard` (`pass`, `blocked`, `unmeasured`), `verdict`, `reason` (for `unmeasured`:
-`budget`, `cost_unknown`, `too_few`, `no_cases`, `no_target`, `profile_unsafe`,
+`budget`, `cost_unknown`, `too_few`, `no_cases`, `all_skipped`, `no_compared`, `no_target`, `profile_unsafe`,
 `read_failed`, `cancelled`, `interrupted`), `prompt_version`, `cost_subcents`,
 `created_at`, `finished_at`. A unique index on `(dream_id, item_id)` where both
 are non-null.
-The row is inserted with `status = 'running'` before the first run (an insert
+A replay stopped before every case ran (`budget`, `cost_unknown` after a start, `read_failed`, `cancelled`, or the 20 minute bound) writes guard `unmeasured`, verdict `unmeasured`, NULL scores, the `cases` data and `flips` of whatever completed (flips are informative only and do not make the guard `blocked`), and the cost incurred; a stop before any run (`profile_unsafe`, `no_target`, `cost_unknown`, `no_cases`, `all_skipped`) stores NULL scores and zero counts. The row is inserted with `status = 'running'` before the first run (an insert
 failure means the replay does not start and `Run` returns the error) and its
 `cost_subcents` is updated after every run, so a crash mid-replay keeps the spend
 already incurred; the rest of the row is written at the end with `status =
@@ -349,8 +353,7 @@ flip) and one known-good that reproduces every expected proposal and avoids ever
 expected avoided one where the baseline does not. At least one bad candidate is
 built to reproduce every approved proposal except one flipped, and to avoid every
 rejected one the baseline repeats, so that its held-out score exceeds the
-baseline's by at least the gain threshold and only the guard stops it. The
-deterministic stub model (a `Prompts` and `Prices` and `Spend` stub, no network)
+baseline's by at least the gain threshold and only the guard stops it. Fixture constraints: the baseline reproduces at least one approval in a compared case (so the drop-all candidate flips); the baseline repeats enough rejected proposals that the good candidate and the guard-only candidate each beat the baseline by well over `MinGainThousandths` on the held-out cases even after the flipped approval (with 25 cases one flip costs at most 40 thousandths). `TestPlantedCandidates` asserts, from the stored held-out scores of the guard-only candidate, that its gain is at least `MinGainThousandths`, so fixture drift cannot silently turn the guard-off mutation into `not_an_improvement`. The deterministic stub model (a `Profiles`, `Prompts`, `Prices` and `Spend` stub, no network)
 reads a marker in the candidate's context and answers from a fixture table.
 `TestPlantedCandidates` runs `Run` over them and asserts each candidate's exact
 guard result and verdict: the two flippers `blocked` and `not_an_improvement`, the
@@ -380,7 +383,10 @@ stored result is kept for the agreement measure (`005.4`).
 | Budget or time bound | Stop, `unmeasured` (`budget`) |
 | No price, lookup error | Stop, `unmeasured` (`cost_unknown`) |
 | Refused profile | `unmeasured` (`profile_unsafe`), no run |
-| Context cancelled | `unmeasured` (`cancelled`), spend kept |
+| Context cancelled | `unmeasured` (`cancelled`), spend kept, final write on a detached context |
+| Outcome's proposal row not found | No expectation from it, `proposal_gone` in the case data |
+| Profile resolve or render error | `unmeasured` (`read_failed`) |
+| Unknown or empty model, price lookup error | `unmeasured` (`cost_unknown`) before any call |
 | Row insert fails | Replay does not start, error returned |
 | Final write matches nothing or fails | `Result` returned with `ErrResultNotStored`, logged and counted; caller does not store the verdict |
 
@@ -392,5 +398,5 @@ of 3 and with two-attempt cases, judge boundaries (0.049, 0.05, 19 and 20
 held-out compared cases, and a blocked guard with 19), determinism across two
 runs, the budget stop with calls in flight, the zero-token estimate pricing, the
 no-price stop, the idempotent second `Run`, the stale settle, the
-import-boundary test, store conformance on SQLite and PostgreSQL, and the planted
+import-boundary allow-list test, store conformance on SQLite and PostgreSQL, and the planted
 suite.
