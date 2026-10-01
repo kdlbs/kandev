@@ -117,8 +117,7 @@ Mockup:
   add the coordinator's Agent for created tasks
   ([created task agent](created-task-agent.md#req-coordinator-created-task-agent-001-agent-for-created-tasks))
   as the task's agent profile and executor profile, so that the task can
-  start. The task shall never take the coordinator's own agent profile or
-  executor profile.
+  start. The pair added is the Agent for created tasks, never the own pair's fields.
 - **AC-COORDINATOR-PROPOSALS-002.14:** When a claim goes stale while the
   process keeps running, the system shall recover it (`AC-COORDINATOR-PROPOSALS-002.7`)
   within one minute of it going stale, with no manager action and no restart.
@@ -311,7 +310,7 @@ Mockup:
   "No agent available. Check Agent for created tasks in the coordinator
   settings." and keep **Approve** enabled. Other states shall show no such
   line. The line shall show for readers too, and its copy shall be localized
-  in all six languages with no em dash.
+  in all six languages with no em dash. Exceptions: `AC-COORDINATOR-CREATED-TASK-AGENT-001.11`.
 
 ## Out of scope
 
@@ -326,12 +325,11 @@ Mockup:
   2026-10-01 (live finding F-07, owner decision) by
   `AC-COORDINATOR-PROPOSALS-002.13`, `002.16` to `002.18`, `005.11` and
   `REQ-COORDINATOR-CREATED-TASK-AGENT-001`.** The text below is kept as history: the decision as
-  originally written, together with the text of `AC-COORDINATOR-PROPOSALS-002.13`
+  written, with the text of `AC-COORDINATOR-PROPOSALS-002.13`
   it replaced ("The created task shall not inherit the coordinator's agent
   profile. When it is later started, it shall resolve its agent the way any
   task of its target workflow does: the step's agent profile, then the
-  workflow's default, then the workspace default."):
-  (D1), no backend change:** an approved task carries no profile of its own
+  workflow's default, then the workspace default."): an approved task carries no profile of its own
   and resolves like any task on its target workflow. The approve path
   (`createApprovedTask`, `apps/backend/internal/coordinator/approve.go:367`)
   sets neither `AgentProfileID` nor `AssigneeAgentProfileID` on the created

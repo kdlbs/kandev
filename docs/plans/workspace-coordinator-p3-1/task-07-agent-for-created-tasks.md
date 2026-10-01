@@ -61,7 +61,8 @@ it changes no runtime flag, registry entry or `profiles.yaml`.
   wiring in `internal/backendapp/coordinator.go`.
 - Proposal DTO `runs_with` on pending and failed rows, built by the same
   function as the approval.
-- Web: the `Proposal` type and `runs_with`, the card line (Needs you and
+- Web: merge rule 6 in `mergeProposal` (`use-proposals.ts`), so an equal
+  `updated_at` row still refreshes a non-null `runs_with`; the `Proposal` type and `runs_with`, the card line (Needs you and
   transcript), the Agent for created tasks field group in the add form,
   Identity and guided setup's Who runs it, the pure `prefillTaskPair`, the
   Review row, status messages, copy in six locales (`pnpm run i18n:zh-hant`
@@ -160,6 +161,12 @@ Review row  Agent for created tasks | Claude, Local | Identity | [Change]
   readers, on Needs you and in the transcript, and its omission when null;
   `prefillTaskPair` matrix (workspace default usable, passthrough, missing,
   touched and untouched fields following the own pair).
+  Also: `mergeProposal` rule 6 (equal `updated_at`, non-null incoming
+  `runs_with` replaces, null never does, settled rows untouched); the agent
+  field stays empty while `workspaceDefaultAgentProfileId` is `undefined`;
+  approve with a step-resolved profile makes no workspace-default read; PATCH
+  validation order (empty or null before check failures, own pair before task
+  pair, agent before executor).
 - Playwright: add a coordinator in a workspace with no defaults, approve a
   proposal, open the created task and see a session start without "no
   agent_profile_id"; the card line before approval; `mobile-chrome` at 390 px.

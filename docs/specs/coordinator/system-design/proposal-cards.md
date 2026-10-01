@@ -70,7 +70,11 @@ time by id, with these rules in order:
    row.
 4. The incoming `updated_at` is earlier: keep the cached row.
 5. Equal `updated_at`: take the incoming row only when it is settled and the
-   cached one is not; otherwise keep the cached row.
+   cached one is not; otherwise keep the cached row, except for rule 6.
+6. Equal `updated_at`, both rows unsettled, and the incoming `runs_with`
+   non-null: keep the cached row with `runs_with` taken from the incoming
+   row. An incoming `null` or absent `runs_with` never replaces a cached
+   value.
 
 Every proposal write stamps `updated_at`, so rule 3 orders two unsettled
 responses (a late `pending` list response cannot overwrite a fresher
@@ -116,7 +120,7 @@ independent of whether that id is in the current pending list, which is what
 lets it show "Approved: <card>" or "Rejected: <reason>"
 (`AC-COORDINATOR-PROPOSALS-005.8`) after a reload with no other proposal
 ever having been listed. It merges its own reads and its decision responses
-with the same five rules. Until its first read succeeds it renders a
+with the same six rules. Until its first read succeeds it renders a
 one-line "Loading proposal" placeholder; a failed read keeps the last row
 it had (or the placeholder) and retries on the next `coordinator.updated`;
 a 404 renders "This proposal no longer exists." with no actions.

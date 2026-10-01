@@ -21,7 +21,8 @@ Each coordinator therefore carries an "Agent for created tasks" setting that
 the approval path adds to the task only when nothing else names an agent. This
 document owns that setting. The approval behaviour it feeds is
 [`AC-COORDINATOR-PROPOSALS-002.13`](proposals.md#req-coordinator-proposals-002-approving)
-and `002.16` to `002.18`, and the card line is `005.11`.
+and `002.16` to `002.18`, and the card line is `005.11` with the
+exceptions of `001.11`.
 
 Decided by the owner on 2026-10-01, reversing decision D1 of phase 1. It is
 part of `features.coordinator` and is not behind a later phase flag.
@@ -73,7 +74,10 @@ guided setup.
   that differs from the stored one: an absent field and a field sent back
   unchanged shall not be validated, so a stored pair that has since gone
   missing never blocks an edit of another field. When both fields of one
-  request are invalid, the error shall name `task_agent_profile_id`.
+  request are invalid in the same way (both empty or null, or both failing
+  the checks), the error shall name `task_agent_profile_id`; a field that is
+  empty or null is reported before a field that fails the checks, whichever
+  field each is.
 - **AC-COORDINATOR-CREATED-TASK-AGENT-001.4:** When the system starts with
   coordinators stored before this setting existed, it shall set each such
   coordinator's Agent for created tasks to its own agent profile and executor
@@ -136,6 +140,15 @@ guided setup.
   the executor was removed." (executor `missing`), choosing the agent's when
   both apply. When the coordinator or its workspace no longer exists, no row
   remains to carry a text and the request shall return 404.
+- **AC-COORDINATOR-CREATED-TASK-AGENT-001.11:** The "Runs with" line of
+  `AC-COORDINATOR-PROPOSALS-005.11` shall show on a `pending` or `failed`
+  proposal card of the create-task kind, and shall be omitted when a read the
+  card's own row needs fails (the step, the workflow's default, the workspace
+  default, or the coordinator when the chain is empty or the pair is to be
+  added) or when the step or the workspace no longer exists; a failed read
+  shall not fail the proposal list or read, and a row that needs no failed
+  read shall still show its line. When only the agent profile's name cannot be
+  read or is unknown, the line shall show the profile id.
 
 ## Out of scope
 

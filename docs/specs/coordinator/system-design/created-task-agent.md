@@ -37,7 +37,7 @@ and executor profile. It is not behind `features.coordinatorPhase2`, `3` or
 | `REQ-COORDINATOR-CREATED-TASK-AGENT-001` (`001.1` to `001.4`, `001.9`, `001.10`) | [Store](#store), [Routes](#routes), [Validation](#validation) |
 | `REQ-COORDINATOR-CREATED-TASK-AGENT-001` (`001.5` to `001.8`) | [Settings UI](#settings-ui) |
 | `REQ-COORDINATOR-PROPOSALS-002` (`002.13`, `002.16` to `002.18`) | [The chain](#the-chain), [At approve](#at-approve) |
-| `REQ-COORDINATOR-PROPOSALS-005` (`005.11`) | [Runs with](#runs-with) |
+| `REQ-COORDINATOR-PROPOSALS-005` (`005.11`), `REQ-COORDINATOR-CREATED-TASK-AGENT-001` (`001.11`) | [Runs with](#runs-with) |
 
 ## Store
 
@@ -76,12 +76,16 @@ a phase 3 database holding coordinators, on both dialects.
   unchanged; `null`, or empty after trimming, is 400 naming the field; a value
   equal to the stored one is accepted, is not validated and changes nothing.
   A value that differs from the stored one is validated, and only then. The
-  validation order on a PATCH is: every request-level 400 first (an empty or
-  `null` task-pair field, agent then executor), then the merged-row validator
-  (`patchValidator`) for the coordinator's own pair, then the task pair's
-  check, all before the write and in the same place, so when the own pair and
-  the task pair are both invalid the error names the own pair's field, and the
-  task agent before the task executor. `patchValidator` keeps checking the
+  validation order on a PATCH is total: (1) every request-level 400, in the
+  order the route reports them today for the name, the context and the own
+  pair, then an empty or `null` `task_agent_profile_id`, then an empty or
+  `null` `task_executor_profile_id`; (2) the merged-row validator
+  (`patchValidator`) for the coordinator's own pair; (3) the task pair's
+  check, agent then executor, all before the write and in the same place, so an empty or `null` task-pair field is reported before any check
+  failure (a changed nonexistent agent with a `null` executor names
+  `task_executor_profile_id`), when the own pair and the task pair both fail
+  checks the error names the own pair's field, and the task agent comes before
+  the task executor. `patchValidator` keeps checking the
   coordinator's own pair on every write and does not check the task pair, so
   a stored task pair that has gone missing never blocks an edit of the
   context, the autonomy or the own pair; the task pair's check runs only for a
@@ -93,7 +97,9 @@ a phase 3 database holding coordinators, on both dialects.
   publishes `coordinator.updated` after the commit through the helper
   the approve path uses (`publishCoordinatorUpdated`, `autonomy_changed`
   false), because today only an autonomy change publishes one. A PATCH
-  publishes at most one event: when it also changes the autonomy, the
+  publishes at most one `coordinator.updated` event (other events, such as the
+  task events of archiving a cleared conversation, are unchanged): when it
+  also changes the autonomy, the
   existing autonomy event (`autonomy_changed` true) is the only one and the
   pair adds none; a PATCH that changes no stored task-pair value adds
   nothing for the pair. Open proposal cards
@@ -159,7 +165,12 @@ restate the order.
 The coordinator loads the inputs for a task that does not exist yet: the frozen
 spec's step (always present, since an empty step in a proposal means the
 workflow's start step) and that workflow's default, and the workspace default;
-the metadata, assignee and replacement inputs are empty. Reads go through
+the metadata, assignee and replacement inputs are empty. The workspace
+default is read lazily, by both approve and a card: the caller first calls
+`Resolve` with the workspace default empty, and only when that returns
+`none` does it read the workspace default and call `Resolve` again, so
+`Resolve` stays the only owner of the order and a failed or missing workspace
+default read never touches a row the step or the workflow resolves. Reads go through
 narrow interfaces the coordinator package declares (a step by id, the
 workflow's `AgentProfileID`, the workspace's `DefaultAgentProfileID`, an agent
 profile by id), implemented by the owning services; none authorizes, because
@@ -327,8 +338,14 @@ The card (`proposal-cards.md#cards`) shows "Runs with: <name>" for any source
 but `none`, and the warning line for `none`, below the workflow and step line,
 for managers and readers, on Needs you and in the transcript. `runs_with`
 refreshes when the row is refetched after `coordinator.updated`, which a
-change to the setting publishes ([Routes](#routes)); it does not preview a
-pending Edit, and the approval's own result is what counts.
+change to the setting publishes ([Routes](#routes)). A setting save writes no
+proposal row, so the refetched row's `updated_at` is equal to the cached one;
+the client merge therefore takes a non-null incoming `runs_with` for an equal
+`updated_at` when both rows are unsettled
+([merge rule 6](proposal-cards.md#client-store)), and a `null` one (a failed
+read, or a response body that carries none) never replaces a cached value. The
+line does not preview a pending Edit, and the approval's own result is what
+counts. The card omits the line and shows the id as `001.11` says.
 
 ## Settings UI
 
@@ -343,8 +360,10 @@ pending Edit, and the approval's own result is what counts.
   `agentProfiles` and not passthrough, else `ownAgent`, else empty; executor is
   `ownExecutor`, else empty; while `agentProfiles` has not loaded the agent is
   empty, and the function runs again when it arrives; the same holds while
-  `workspaceDefaultAgentProfileId` has not loaded (it is treated as unset
-  and the field re-computes when it arrives, unless touched). It returns
+  `workspaceDefaultAgentProfileId` has not loaded: it is `undefined` while
+  loading and `null` once loaded with no default, and an `undefined` value
+  keeps the agent empty (never `ownAgent`) until it becomes `null` or an id,
+  when the field re-computes unless touched. It returns
   `{agent, executor}`: for a touched field `current` (the form's value for
   that field, `{agent, executor}`), for an untouched field the computed
   value. `touched` is
