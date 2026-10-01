@@ -62,14 +62,14 @@ function NoAuthActions({
 }) {
   const { t } = useTranslation();
   return (
-    <div className="flex shrink-0 items-center gap-2">
+    <div className="col-span-2 flex w-full items-center gap-2 sm:w-auto sm:shrink-0">
       {showTerminal && (
         <Button
           type="button"
           variant="outline"
           size="sm"
           onClick={onOpenTerminal}
-          className="cursor-pointer"
+          className="min-h-11 flex-1 cursor-pointer sm:min-h-9 sm:flex-none"
           data-testid="profile-no-auth-open-terminal"
         >
           <IconTerminal2 className="mr-2 h-4 w-4" />
@@ -82,7 +82,7 @@ function NoAuthActions({
         size="sm"
         onClick={onRefresh}
         disabled={isLoading}
-        className="cursor-pointer"
+        className="min-h-11 flex-1 cursor-pointer sm:min-h-9 sm:flex-none"
         data-testid="profile-no-auth-refresh"
       >
         <IconRefresh className={`mr-2 h-4 w-4 ${isLoading ? "animate-spin" : ""}`} />
@@ -134,7 +134,7 @@ export function NoAuthPanel({
     <div
       data-testid="profile-no-auth-panel"
       data-status={status}
-      className="flex items-start gap-3 rounded-md border border-amber-500/40 bg-amber-500/5 p-3"
+      className="grid grid-cols-[auto,minmax(0,1fr)] gap-3 rounded-md border border-amber-500/40 bg-amber-500/5 p-3 sm:flex sm:items-start"
     >
       <Icon className="h-5 w-5 shrink-0 text-amber-600 dark:text-amber-400" />
       <div className="flex-1 min-w-0 space-y-1">
@@ -173,6 +173,7 @@ export function NoAuthPanel({
           agentName={agentName}
           description={loginCommand?.description}
           command={loginCommand?.cmd}
+          variants={loginCommand?.variants}
           onLoginSuccess={() => {
             void onRefresh();
           }}

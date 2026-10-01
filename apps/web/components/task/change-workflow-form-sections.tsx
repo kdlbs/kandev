@@ -7,6 +7,7 @@ import { cn } from "@/lib/utils";
 import { useTranslation } from "react-i18next";
 import { useChangeWorkflow } from "@/hooks/domains/kanban/use-change-workflow";
 import type { WorkflowStepDTO } from "@/lib/types/http";
+import { parseWorkflowStepColor } from "@/lib/task-color-presentation";
 
 export type ChangeWorkflowState = ReturnType<typeof useChangeWorkflow>;
 type TouchProps = { isTouchSurface: boolean };
@@ -89,16 +90,26 @@ export function ChangeWorkflowCurrentTask({ state }: { state: ChangeWorkflowStat
 function stepOptions(steps: readonly WorkflowStepDTO[]): ComboboxOption[] {
   return [...steps]
     .sort((left, right) => left.position - right.position || left.id.localeCompare(right.id))
-    .map((step) => ({
-      value: step.id,
-      label: step.name,
-      renderLabel: () => (
-        <span className="flex min-w-0 items-center gap-2">
-          <span className="size-2 shrink-0 rounded-full" style={{ backgroundColor: step.color }} />
-          <span className="truncate">{step.name}</span>
-        </span>
-      ),
-    }));
+    .map((step) => {
+      const color = parseWorkflowStepColor(step.color);
+      return {
+        value: step.id,
+        label: step.name,
+        renderLabel: () => (
+          <span className="flex min-w-0 items-center gap-2">
+            <span
+              aria-hidden="true"
+              className={cn(
+                "size-2 shrink-0 rounded-full",
+                "className" in color && color.className,
+              )}
+              style={"style" in color ? color.style : undefined}
+            />
+            <span className="truncate">{step.name}</span>
+          </span>
+        ),
+      };
+    });
 }
 
 function WorkflowPickerSection({

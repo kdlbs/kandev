@@ -44,8 +44,11 @@ type AgentProfileDTO struct {
 	ProviderBaseURL string `json:"provider_base_url,omitempty"`
 	// ProviderAPIKeySecretID references the Kandev global secret holding the
 	// bearer key. The value is never returned.
-	ProviderAPIKeySecretID string `json:"provider_api_key_secret_id,omitempty"`
-	CursorMCPAuthEnabled   bool   `json:"cursor_mcp_auth_enabled"`
+	ProviderAPIKeySecretID  string   `json:"provider_api_key_secret_id,omitempty"`
+	CursorMCPAuthEnabled    bool     `json:"cursor_mcp_auth_enabled"`
+	CursorPluginsMCPEnabled bool     `json:"cursor_plugins_mcp_enabled"`
+	MCPSelectionMode        string   `json:"mcp_selection_mode"`
+	MCPSelectedServers      []string `json:"mcp_selected_servers"`
 	// ProviderSupported is computed at read time: true when the profile's
 	// agent advertises OpenAI-compatible provider support. Not persisted.
 	ProviderSupported bool `json:"provider_supported"`
@@ -179,6 +182,24 @@ type AgentDTO struct {
 	UpdatedAt        time.Time `json:"updated_at"`
 }
 
+// AgentMCPDiscoveryDTO exposes a credential-free host preview of one agent's
+// native MCP sources. Host paths and server connection definitions stay local.
+type AgentMCPDiscoveryDTO struct {
+	AgentID    string                       `json:"agent_id"`
+	ProviderID string                       `json:"provider_id"`
+	Status     string                       `json:"status"`
+	Reason     string                       `json:"reason,omitempty"`
+	Servers    []AgentMCPDiscoveryServerDTO `json:"servers"`
+}
+
+type AgentMCPDiscoveryServerDTO struct {
+	ID                   string `json:"id"`
+	Name                 string `json:"name"`
+	PluginName           string `json:"plugin_name,omitempty"`
+	SourceKind           string `json:"source_kind"`
+	CredentialsAvailable bool   `json:"credentials_available"`
+}
+
 type ListAgentsResponse struct {
 	Agents []AgentDTO `json:"agents"`
 	Total  int        `json:"total"`
@@ -198,8 +219,9 @@ type AgentDiscoveryDTO struct {
 // The frontend uses it to render a "Login" button that opens a PTY terminal
 // running the named command.
 type LoginCommandDTO struct {
-	Cmd         []string `json:"cmd"`
-	Description string   `json:"description,omitempty"`
+	Variants    map[string][]string `json:"variants,omitempty"`
+	Cmd         []string            `json:"cmd"`
+	Description string              `json:"description,omitempty"`
 }
 
 type ListDiscoveryResponse struct {
@@ -495,32 +517,54 @@ type CommandPreviewResponse struct {
 // DynamicModelsResponse is the response for the /agent-models/:agentName endpoint.
 // Data now comes from the host utility capability cache populated by ACP probes.
 type DynamicModelsResponse struct {
-	AgentName      string            `json:"agent_name"`
-	Status         string            `json:"status"` // "probing" | "ok" | "auth_required" | "not_installed" | "failed"
-	Models         []ModelEntryDTO   `json:"models"`
-	CurrentModelID string            `json:"current_model_id,omitempty"`
-	Modes          []ModeEntryDTO    `json:"modes,omitempty"`
-	CurrentModeID  string            `json:"current_mode_id,omitempty"`
-	Commands       []CommandEntryDTO `json:"commands,omitempty"`
-	Error          *string           `json:"error"`
+	AgentName       string            `json:"agent_name"`
+	Status          string            `json:"status"` // "probing" | "ok" | "auth_required" | "not_installed" | "failed"
+	Models          []ModelEntryDTO   `json:"models"`
+	CurrentModelID  string            `json:"current_model_id,omitempty"`
+	Modes           []ModeEntryDTO    `json:"modes,omitempty"`
+	CurrentModeID   string            `json:"current_mode_id,omitempty"`
+	Commands        []CommandEntryDTO `json:"commands,omitempty"`
+	Error           *string           `json:"error"`
+	ContextRevision string            `json:"context_revision,omitempty"`
+}
+
+// ProfileLaunchSettingsRequest is a complete, request-only profile snapshot.
+// Pointer fields distinguish an explicit empty value from an omitted field.
+type ProfileLaunchSettingsRequest struct {
+	EnvVars       *[]ProfileEnvVarDTO `json:"env_vars"`
+	CLIFlags      *[]CLIFlagDTO       `json:"cli_flags"`
+	CommandPrefix *string             `json:"command_prefix"`
+}
+
+// ProfileCapabilityRequest asks the host utility to inspect a saved profile
+// or a complete unsaved launch-settings snapshot.
+type ProfileCapabilityRequest struct {
+	ProfileID          string                        `json:"profile_id,omitempty"`
+	LaunchSettings     *ProfileLaunchSettingsRequest `json:"launch_settings,omitempty"`
+	Refresh            bool                          `json:"refresh,omitempty"`
+	AuthorizationScope string                        `json:"-"`
 }
 
 // ResolveAgentModelConfigRequest selects the provider context to resolve.
 type ResolveAgentModelConfigRequest struct {
-	Model         string            `json:"model"`
-	Mode          string            `json:"mode,omitempty"`
-	ConfigOptions map[string]string `json:"config_options,omitempty"`
-	Refresh       bool              `json:"refresh,omitempty"`
+	Model              string                        `json:"model"`
+	Mode               string                        `json:"mode,omitempty"`
+	ConfigOptions      map[string]string             `json:"config_options,omitempty"`
+	Refresh            bool                          `json:"refresh,omitempty"`
+	ProfileID          string                        `json:"profile_id,omitempty"`
+	LaunchSettings     *ProfileLaunchSettingsRequest `json:"launch_settings,omitempty"`
+	AuthorizationScope string                        `json:"-"`
 }
 
 // AgentModelConfigResponse is the complete provider option snapshot for one
 // selected model.
 type AgentModelConfigResponse struct {
-	AgentName     string            `json:"agent_name"`
-	Model         string            `json:"model"`
-	Status        string            `json:"status"`
-	ConfigOptions []ConfigOptionDTO `json:"config_options"`
-	Error         *string           `json:"error"`
+	AgentName       string            `json:"agent_name"`
+	Model           string            `json:"model"`
+	Status          string            `json:"status"`
+	ConfigOptions   []ConfigOptionDTO `json:"config_options"`
+	Error           *string           `json:"error"`
+	ContextRevision string            `json:"context_revision,omitempty"`
 }
 
 // ModeEntryDTO is a single ACP session mode advertised by an agent.

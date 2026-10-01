@@ -5,6 +5,7 @@ import type { GitChangeLayer } from "@/lib/state/slices/session-runtime/types";
 
 export type ReviewChangeFacet = {
   diff: string;
+  diff_state?: "pending" | "ready" | "unavailable";
   status: FileChangeStatus;
   additions: number;
   deletions: number;
@@ -15,6 +16,7 @@ export type ReviewChangeFacet = {
 export type ReviewFile = {
   path: string;
   diff: string;
+  diff_state?: "pending" | "ready" | "unavailable";
   status: FileChangeStatus;
   additions: number;
   deletions: number;

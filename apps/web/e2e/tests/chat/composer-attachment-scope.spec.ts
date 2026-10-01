@@ -66,10 +66,12 @@ test.describe("task chat attachment workspace scope", () => {
     await expect(reloadedChat).toBeVisible({ timeout: 30_000 });
     const sentMessage = reloadedChat.getByTestId("user-message-bubble").filter({ hasText: marker });
     await expect(sentMessage).toHaveCount(1);
-    await expect(
-      sentMessage.getByRole("button", { name: "Open Attachment 1", exact: true }),
-    ).toHaveCount(1);
-    const image = sentMessage.locator(
+    const attachmentButton = sentMessage.getByRole("button", {
+      name: "Open Attachment 1",
+      exact: true,
+    });
+    await expect(attachmentButton).toHaveCount(1);
+    const image = attachmentButton.locator(
       `img[src*="/api/v1/attachments/${String(attachment?.attachment_id)}/content"]`,
     );
     await expect(image).toHaveCount(1);

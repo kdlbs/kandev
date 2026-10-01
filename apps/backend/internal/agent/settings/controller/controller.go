@@ -76,6 +76,7 @@ type Controller struct {
 	automationDeps              AutomationDependencyChecker
 	utilityDeps                 UtilityDependencyChecker
 	mcpService                  *mcpconfig.Service
+	cursorMCPDiscoverySource    *cursorMCPDiscoverySource
 	hostUtility                 hostUtilityProvider
 	jobStore                    *JobStore
 	updateJobStore              *AgentUpdateJobStore
@@ -252,6 +253,10 @@ type hostUtilityProvider interface {
 	) (hostutility.ModelConfigResolution, error)
 }
 
+type profileHostUtilityProvider interface {
+	ProbeProfileCapabilities(context.Context, string, hostutility.ProfileCapabilityRequest) (hostutility.ProfileCapabilityResult, error)
+}
+
 func NewController(repo store.Repository, discoveryRegistry *discovery.Registry, agentRegistry *registry.Registry, sessionChecker SessionChecker, log *logger.Logger,
 ) *Controller {
 	return &Controller{
@@ -260,6 +265,7 @@ func NewController(repo store.Repository, discoveryRegistry *discovery.Registry,
 		agentRegistry:             agentRegistry,
 		sessionChecker:            sessionChecker,
 		mcpService:                mcpconfig.NewService(repo),
+		cursorMCPDiscoverySource:  newCursorMCPDiscoverySource(),
 		logger:                    log.WithFields(zap.String("component", "agent-settings-controller")),
 		runtimeUpdateStatusCache:  make(map[string]runtimeUpdateStatusCacheEntry),
 		runtimeUpdateStatusNow:    time.Now,

@@ -526,9 +526,10 @@ export const createKanbanSlice: StateCreator<
       if (draft.workflows.activeId === workflowId) return;
       draft.workflows.activeId = workflowId;
     }),
-  setWorkflows: (workflows) =>
+  setWorkflows: (workflows, coverage) =>
     set((draft) => {
       draft.workflows.items = workflows;
+      draft.workflows.taskWorkflowCoverage = coverage;
     }),
   reorderWorkflowItems: (workflowIds) =>
     set((draft) => {

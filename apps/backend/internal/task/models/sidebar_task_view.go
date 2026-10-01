@@ -125,7 +125,7 @@ func (q SidebarTaskViewQuery) Validate() error {
 			return err
 		}
 	}
-	if !oneOf(q.Locale, "en", "pt-pt", "zh-cn", "zh-hk", "zh-tw", "ja", "pseudo") {
+	if !oneOf(q.Locale, "en", "pt-pt", "zh-cn", "zh-hk", "zh-tw", "ja", "ko", "pseudo") {
 		return sidebarValidationError("locale", "unsupported locale", 0)
 	}
 	return nil

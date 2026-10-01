@@ -91,7 +91,8 @@ The response contains `query_key`, `page`, `page_size`, `total_entries`, `total_
 `total_tasks` counts all matching tasks. Add `total_visible_tasks` for task rows after collapse visibility.
 `total_entries` is display metadata only and never drives pagination.
 Paginator visibility is `total_visible_tasks > 100`; headings and continuation labels do not count.
-Use this same endpoint for small and large lists, with no eager-fetch threshold probe.
+Use this endpoint for uncovered views, with no eager-fetch threshold probe.
+Complete eligible shared data can serve a view locally under the [shared-state design](sidebar-shared-task-state.md).
 Small views return their full task-row set in the first response and hide pagination controls.
 
 Task entries contain identity, parent ID, depth, filtered descendant count, and the bounded
@@ -157,7 +158,8 @@ Use the same ordering policy for small and large views, so crossing the threshol
 Other non-sidebar consumers of the client engine remain unchanged.
 Conformance fixtures record this text-order compatibility difference explicitly for each
 dialect; all filter, tree, pin, and numeric ordering expectations remain shared.
-The query response is authoritative for every sidebar view order; the browser must not re-sort it.
+Server page responses remain authoritative for their membership and order. The browser must not re-sort a partial server page.
+A complete covered dataset can use the verified local evaluator described in [shared task state](sidebar-shared-task-state.md).
 
 Cycle guards must bound recursive traversal by the candidate graph size.
 Break malformed cycles deterministically at the smallest task ID and promote that node.
@@ -169,89 +171,116 @@ all task records. Use indexed workspace/archive membership and parent relationsh
 Inspect query plans for both supported dialects. Add indexes through existing migrations
 only when the measured plan needs them; no new persisted presentation aggregate is planned.
 
+## Bounded SQLite query preparation
+
+This section defines the proposed memory repair for AC-UI-SIDEBAR-ARCHIVED-FILTER-002.19.
+The [decision](../../../decisions/2026-09-29-sidebar-query-scratch-relation.md) records the temporary-storage boundary.
+The [repair package](../../../plans/sidebar-query-memory/plan.md) contains measurements and delivery checks.
+
+`sidebarActivitySortKey` expands strict timestamp normalization into a large SQL expression.
+References through the recursive sidebar CTE graph amplify its preparation cost.
+A `MATERIALIZED` hint on `candidate_raw` alone does not prevent this cost.
+A bounded response and a small Go heap therefore do not establish bounded native memory.
+
+For SQLite, separate candidate evaluation from recursive page evaluation with a transaction-local scratch relation.
+Use one explicitly pinned reader connection for the entire operation.
+Keep the main database opened through `OpenSQLiteReader` with `mode=ro`.
+Do not borrow the writer connection or weaken its read-only main-database contract.
+
+1. Begin the existing consistent read transaction on that connection.
+2. Execute `CREATE TEMP TABLE kandev_sidebar_filtered AS` followed by candidate and filter evaluation.
+   Populate only the columns already selected by `sidebarBaseCandidateFields`, plus group keys and labels.
+   Evaluate the existing activity expression here without changing its precision or fallback rules.
+3. Add temporary indexes on task ID and parent ID for the recursive joins. Stage nonempty pin/manual-order preferences in `temp.kandev_sidebar_preferences`, keyed by kind, parent ID, and task ID; parameterize the input as JSON and retain the first position for duplicate IDs. Indexed lookups keep statement size independent of saved-list length.
+4. Build the downstream query from a narrow `filtered` CTE over `temp.kandev_sidebar_filtered`.
+   Apply collapse, cycle handling, tree aggregation, ranking, counts, and page selection as before.
+5. Use the same relation for empty-page counts and collapsed-group headers.
+   Hydrate only the selected task IDs, within the same transaction.
+6. Drop both owned scratch tables before a successful commit, then return the connection.
+
+Split `sidebarTaskBaseSQL` into candidate/filter construction and visibility construction.
+Keep stage arguments separate: workspace and filter arguments populate the relation.
+Collapse, preference, and paging arguments belong to downstream statements.
+Never split argument lists by counting question marks or parsing generated SQL.
+Use the original single-statement path for PostgreSQL.
+Its request shape, authorization, ordering, and transaction guarantees remain unchanged.
+
+The scratch relation contains lightweight rows for all matching candidates inside SQLite.
+It does not copy complete tasks into Go or expose all candidates to the browser.
+No descriptions, transcripts, sessions, or plans enter this relation.
+Its size depends on matching task count and selected scalar columns, not browsing history.
+Retain the engine's existing temporary-storage policy; do not force `temp_store=MEMORY`.
+Do not add a persistent table, schema migration, custom SQLite function, or saved-view migration.
+
+### Scratch ownership and failure handling
+
+Use a constant, qualified scratch-table name owned only by this repository operation.
+One pinned connection executes at most one sidebar query at a time.
+Separate reader connections have separate temporary schemas.
+Do not use `CREATE ... IF NOT EXISTS` or reuse rows from an earlier request.
+
+Close all result sets before cleanup and transaction completion.
+On cancellation or any intermediate error, roll back before returning the connection.
+SQLite rolls back scratch-table creation with the transaction.
+Verify cleanup on the same connection with a short, independent cleanup context.
+Drop any remaining owned scratch table after rollback; preserve the original request error.
+If rollback or cleanup cannot establish a clean connection, discard it with `driver.ErrBadConn`
+through `sql.Conn.Raw` instead of returning it to the pool.
+Never expose cleanup SQL, submitted filters, or task values in the API error.
+A failed stage returns the existing query error; there is no expensive legacy-query fallback.
+
+The tests must cover failure after creation, indexing, page read, header read, hydration, and commit.
+Inject failures through test seams, without new production configuration.
+Also cover cancellation and exhausted cleanup deadlines.
+The next borrower must see no scratch rows from another workspace or user.
+A concurrent writer must remain usable under the existing WAL snapshot rules.
+
+### Memory and compatibility budgets
+
+Use Linux subprocess tests with the production SQLite library and real reader-pool wiring.
+Measure native allocation high-water marks separately from Go allocations.
+Reset SQLite's global high-water counter only inside a dedicated subprocess.
+A small test-support cgo package can expose `sqlite3_memory_used` and `sqlite3_memory_highwater`.
+It must have no production callers and must not call `malloc_trim`.
+
+For empty and 101-task fixtures, each full sequential read has a native peak increase of at most 64 MiB.
+Cover every supported sort/group combination, both directions, page boundaries, and collapsed headers.
+Also cover maximum legal filters and preferences without weakening existing input limits.
+Four concurrent reads have an aggregate native peak increase of at most 256 MiB.
+After 100 fixed-fixture reads through the four-connection pool, RSS stays within 512 MiB of the initialized baseline.
+Retained SQLite allocation must return within 8 MiB of the warmed baseline after each batch.
+These fixture budgets detect preparation amplification; they do not impose a constant-memory claim on arbitrary workspace sizes.
+RSS and allocator samples include explicit units and the process/build identity.
+
+Record cold and warm timings on the same host; target less than 500 ms for the empty state/activity query.
+Do not use a wall-clock unit-test threshold on a shared CI host.
+Retain the existing 100,000-task first/deep-page benchmark and its reported-host timing criterion.
+Extend its query matrix to Last activity with State and Repository grouping.
+Record native peak memory and RSS alongside duration, response size, and Go allocations.
+The correction must not silently trade the preparation problem for unbounded execution cost.
+
+Reuse chronological-order fixtures for nanoseconds, timezone offsets, equal instants, malformed timestamps,
+missing summaries, filtered descendants, cycles, pins, manual order, and WIP metadata.
+PostgreSQL must pass the existing conformance tests using a disposable database.
+Desktop and phone E2E retain the existing sidebar/picker composition and verify complete-tree order and paging.
+No new controls, copy, or rendered geometry are proposed.
+
 ## Cache and live updates
 
-Replace the archive accumulator and active sidebar aggregation with one shared sidebar page cache per mounted query owner.
-The effective workspace/view hook owns the query key, current page, request generation,
-loading state, error state, and current response. Desktop and phone consumers share it.
-Retain one displayed page plus at most five distinct first-page snapshots for the
-active workspace, with one in-flight replacement per active query. The displayed
-first page shares its cached object rather than duplicating rows. Later pages
-replace the displayed page and are never inserted into the reusable cache.
-An individual active-task detail record remains separate.
+The [shared task state design](sidebar-shared-task-state.md) now owns canonical task overviews,
+coverage metadata, local view eligibility, bounded page memberships, and reconciliation during reads.
+It revises the previous unconditional query-on-mount and revision-mismatch rejection rules.
+Keep the five-page, 2 MiB, five-minute reusable-page limits, including attributable entity bytes.
+Account/workspace changes and access denial remain hard invalidation boundaries.
 
-Use one store-scoped cache/controller shared by desktop, phone, and app-navigation
-consumers, not an unscoped module-level result map. It owns request deduplication,
-reference-counted request consumers and a least-recently-used map. Existing hook
-subscriptions trigger reads; the controller checks store generations, revisions,
-and summary references before every lookup and request settlement. Cap retained snapshots at
-five entries and 2 MiB of serialized response bytes; reject an oversized snapshot
-from reuse while still permitting its current-page display. Expire snapshots
-five minutes after successful fetch, not after last access. No persistence,
-prefetch of unvisited views, or eager page traversal is introduced.
-
-Key reuse by workspace context generation and the complete effective query:
-filters, sort, group, locale, collapse state, page size, pin order, manual root
-order, and child order. Do not key only by saved-view ID. Saved and draft queries
-with identical semantics can share a first page. A context change, logout,
-store disposal, or access-denied response cancels requests and clears results
-before rendering; returning to that workspace starts cold.
-
-On a view change, synchronously select an eligible cached first page, then
-revalidate once without hiding it. A miss has no page until its request succeeds.
-Do not temporarily label the old view's rows as the newly selected view. On
-refresh failure, retain the eligible page and show a nonblocking error. Authorization
-failures clear it instead. Access-denial notifications reset every mounted
-consumer, including idle siblings, and fence their outstanding completions.
-Query-revision changes also reject stale display commits; a queued fresh read
-preserves the requested page without displaying the invalidated response. Enforce generation and request identity before both
-display commits and cache writes. Abort errors caused by supersession are silent.
-
-The existing sidebar query revision is the conservative invalidation boundary.
-When membership/order inputs change, invalidate reusable first pages for that
-workspace before they can be restored; keep only the currently displayed page
-under existing live-row reconciliation until refresh settles. Do not extend a
-snapshot's eligibility across a revision mismatch. Display-only updates must
-patch retained task fields or invalidate affected snapshots, never resurrect old
-status on return. This favors correctness during event churn; it does not claim
-cache hits while tasks are continuously changing. A completed response spanning
-an invalidation may serve the active read under existing reconciliation, but
-must not enter reusable storage until the queued refresh settles at one revision.
-
-Changing filters, sort, group, locale, or collapse preferences resets to page 1.
-Changing workspace clears the page immediately. Preserve saved preferences themselves.
-Previous/Next replaces the page after success and scrolls its owner to the top.
-While a page request runs, disable both paging controls and keep the last accepted page.
-Keep a requested page separate from the displayed page so errors never mislabel old rows.
-
-Deduplicate requests by store-owned query/page identity, including StrictMode mounts.
-Abort superseded requests and reject late responses by workspace and request generation.
-A view-key mismatch never commits. A server-normalized query key becomes the accepted key.
-
-Archive, unarchive, delete, activity, state, and relevant repository/settings events
-invalidate affected membership or ordering. Immediately remove deleted rows and rows known to leave the current filter.
-Archive removes a row from an active view; unarchive removes it from an archived view.
-Update visible scalar fields from accepted live revisions. Do not append off-page tasks.
-Coalesce invalidations into one current-page request, with at most one trailing refresh.
-Use a 250 ms coalescing interval and a two-second maximum wait during an event burst.
-Cancel timers when the owner is disabled or changes workspace.
-
-An invalidation that arrives during a read schedules one follow-up; it does not cause
-an immediate unbounded retry loop. Foreground refresh reads only the current page.
-After settlement, clamp a vanished last page once using server page metadata.
-Page traversal is live browsing, not a historical snapshot. Mutations can move boundaries
-between reads, but one accepted page contains no duplicate task IDs.
-
-Update existing archive-cache WS handlers so none can accumulate the complete workspace.
-Do not populate active Kanban snapshots with archived rows.
-Stop requesting full workspace workflow snapshots solely to populate the sidebar.
-Boards can retain their independent snapshot subscriptions while mounted.
-Audit boot hydration and workspace-context loading too; moving only the final render behind
-pagination does not bound an earlier sidebar-owned load.
+A complete resident dataset can serve local pages without a duplicate request.
+An uncovered view uses the optimized server query and merges returned records into the same overview store.
+Ordinary changes can make a response require refresh without making it unsafe to show reconciled rows.
+The client separates those cases from hard identity, authorization, and deletion barriers.
 
 ## Active-task actions and independent detail
 
-All views consume the same paged projection, including lists of at most 100 tasks.
+All views consume the same paged projection, derived from complete shared data or a bounded server response.
 Keep task/session detail and active Kanban snapshots separate from this list cache.
 Paging never calls setActiveTask, setActiveSession, or route navigation.
 Only a successful user-initiated page change scrolls the list to the top.
@@ -321,9 +350,9 @@ Initial query failure replaces the list's loading state; refresh failure appears
 once alongside retained rows. Place status immediately below the view controls,
 with pagination below the rows. An invalid filter names its one-based position,
 translated dimension where available, and correction; the existing Filters control
-remains available. Retry is for reads that can succeed unchanged. A compact
-`Updating tasks...` status uses a polite announcement without removing rows or
-introducing a blocking overlay. Hide status after success; distinguish empty success.
+remains available. Retry is for reads that can succeed unchanged. A screen-reader-only
+`Updating tasks...` status uses a polite announcement without moving or removing rows.
+Covered local views issue no request and have no refreshing announcement. Hide status after success; distinguish empty success.
 Keep stable button names and Retry separate from page actions.
 A standalone current-task marker outside the page must not affect page totals or sort order.
 
@@ -337,8 +366,10 @@ Group headings never trigger pagination at 100 tasks. Filters and collapse chang
 cross the threshold; hidden descendants still affect tree rank.
 Prove paging never changes the active task/session or scrolls the conversation pane.
 A 100,000-task benchmark records SQL plans, query duration, response bytes, and allocations.
-Require first and deep-page queries to finish within one second after warm-up on the same
-reported four-vCPU fixture host. Record hardware and database backend with results.
+Record first and deep-page warm timings on the same reported four-vCPU fixture host,
+including hardware and database backend. The 100,000-task timing measurement is
+informational; it does not gate delivery. Native memory budgets and bounded output
+remain deterministic acceptance criteria.
 Do not claim constant database query time; window output and browser work are bounded.
 
 Use existing request tracing for route duration and structured query counts.
@@ -352,3 +383,7 @@ The [view loading repair](../../../plans/sidebar-view-loading-repair/plan.md)
 owns filter validation, bounded return switching, and unified query status.
 The original implemented package remains historical; its eager-loader and navigation
 instructions are superseded by this package, not recorded as successful new validation.
+
+The [memory repair](../../../plans/sidebar-query-memory/plan.md) adds native-allocation evidence and SQLite scratch-relation ownership.
+
+[Shared task reuse](sidebar-shared-task-state.md) extends this repair to homepage reuse and initial-load progress under live invalidation.

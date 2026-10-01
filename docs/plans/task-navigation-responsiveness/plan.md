@@ -1,10 +1,12 @@
 ---
 created: 2026-09-28
-status: done
+status: in_progress
 requirements:
   - REQ-UI-TASK-NAVIGATION-RESPONSIVENESS-001
+  - REQ-UI-SIDEBAR-ARCHIVED-FILTER-002
 system_design:
   - ../../specs/ui/system-design/task-navigation-responsiveness.md
+  - ../../specs/ui/system-design/sidebar-archived-filter.md
 legacy_specs: []
 ---
 
@@ -14,9 +16,14 @@ legacy_specs: []
 
 Repair overview hydration, repeated session reads, and blocking file-tree
 restoration. Then measure the repaired task switch and investigate the remaining
-memory/debug questions in an isolated runtime. Execute four work orders
+memory/debug questions in an isolated runtime. Execute the work orders
 sequentially in the primary session. Implementation was explicitly requested
-after the design checkpoint and is complete.
+after the design checkpoint. Tasks 01-06 are complete; Task 07 restores small sidebar views from Zustand in
+the same PR, as explicitly requested. No additional local test runs or seeded
+preview are required; CI owns further validation. the user's follow-up
+[Task 06](task-06-firefox-task-paint.md) removes measured Firefox rendering work
+and records the remaining latency and desktop/phone verification. Its background
+refresh follow-up also removes the task-list shift caused by routine query status.
 
 ## Evidence and confirmed causes
 
@@ -207,8 +214,10 @@ browser still exhibits a problem after deterministic regressions pass.
 - [x] [Task 02: Share session read ownership](task-02-shared-session-reads.md)
 - [x] [Task 03: Restore file trees progressively](task-03-progressive-file-trees.md)
 - [x] [Task 04: Verify navigation and investigate retained memory](task-04-navigation-evidence.md)
+- [x] [Task 05: Immediate task route presentation](task-05-immediate-task-route.md)
+- [x] [Task 06: Remove unnecessary work before task-switch paint](task-06-firefox-task-paint.md)
 
-The sequence is 01 -> 02 -> 03 -> 04. It does not authorize parallel agents.
+The sequence is 01 -> 02 -> 03 -> 04 -> 05 -> 06. It does not authorize parallel agents.
 Install fresh-worktree dependencies once before implementation checks:
 `(cd apps && pnpm install --frozen-lockfile)`. Each work order supplies complete
 targeted commands; desktop/mobile suites run sequentially with managed limits.
@@ -315,3 +324,7 @@ Preserve this package's row, file-tree, and scoped-read regression guarantees.
 Task 04 and Tasks 06–08 now have implementation and desktop/phone regression
 coverage. Task 05 remains open pending editor-owner attribution. These tasks do
 not reopen completed work here.
+
+## Added work order
+
+- [Task 07: Restore shared-store sidebar rows](task-07-shared-sidebar-state.md), after Task 06.

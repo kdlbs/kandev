@@ -126,24 +126,28 @@ type ACPSessionCreatedPayload struct {
 
 // PrepareProgressEventPayload is the payload for environment preparation progress events.
 type PrepareProgressEventPayload struct {
-	TaskID         string     `json:"task_id"`
-	SessionID      string     `json:"session_id"`
-	ExecutionID    string     `json:"execution_id"`
-	StepName       string     `json:"step_name"`
-	StepKind       string     `json:"step_kind,omitempty"`
-	RemotePlatform string     `json:"remote_platform,omitempty"`
-	FailureCode    string     `json:"failure_code,omitempty"`
-	StepCommand    string     `json:"step_command,omitempty"`
-	StepIndex      int        `json:"step_index"`
-	TotalSteps     int        `json:"total_steps"`
-	Status         string     `json:"status"`
-	Output         string     `json:"output,omitempty"`
-	Error          string     `json:"error,omitempty"`
-	Warning        string     `json:"warning,omitempty"`
-	WarningDetail  string     `json:"warning_detail,omitempty"`
-	StartedAt      *time.Time `json:"started_at,omitempty"`
-	EndedAt        *time.Time `json:"ended_at,omitempty"`
-	Timestamp      string     `json:"timestamp"`
+	TaskID               string     `json:"task_id"`
+	SessionID            string     `json:"session_id"`
+	ExecutionID          string     `json:"execution_id"`
+	PreparationID        string     `json:"preparation_id,omitempty"`
+	PreparationStartedAt string     `json:"preparation_started_at,omitempty"`
+	StepName             string     `json:"step_name"`
+	StepKind             string     `json:"step_kind,omitempty"`
+	MCPProvider          string     `json:"mcp_provider,omitempty"`
+	MCPServerID          string     `json:"mcp_server_id,omitempty"`
+	RemotePlatform       string     `json:"remote_platform,omitempty"`
+	FailureCode          string     `json:"failure_code,omitempty"`
+	StepCommand          string     `json:"step_command,omitempty"`
+	StepIndex            int        `json:"step_index"`
+	TotalSteps           int        `json:"total_steps"`
+	Status               string     `json:"status"`
+	Output               string     `json:"output,omitempty"`
+	Error                string     `json:"error,omitempty"`
+	Warning              string     `json:"warning,omitempty"`
+	WarningDetail        string     `json:"warning_detail,omitempty"`
+	StartedAt            *time.Time `json:"started_at,omitempty"`
+	EndedAt              *time.Time `json:"ended_at,omitempty"`
+	Timestamp            string     `json:"timestamp"`
 }
 
 // GetSessionID returns the session ID for this event (used by event routing).
@@ -153,15 +157,17 @@ func (p PrepareProgressEventPayload) GetSessionID() string {
 
 // PrepareCompletedEventPayload is the payload when environment preparation finishes.
 type PrepareCompletedEventPayload struct {
-	TaskID        string        `json:"task_id"`
-	SessionID     string        `json:"session_id"`
-	ExecutionID   string        `json:"execution_id"`
-	Success       bool          `json:"success"`
-	ErrorMessage  string        `json:"error_message,omitempty"`
-	DurationMs    int64         `json:"duration_ms"`
-	WorkspacePath string        `json:"workspace_path,omitempty"`
-	Steps         []PrepareStep `json:"steps,omitempty"`
-	Timestamp     string        `json:"timestamp"`
+	TaskID               string        `json:"task_id"`
+	SessionID            string        `json:"session_id"`
+	ExecutionID          string        `json:"execution_id"`
+	PreparationID        string        `json:"preparation_id,omitempty"`
+	PreparationStartedAt string        `json:"preparation_started_at,omitempty"`
+	Success              bool          `json:"success"`
+	ErrorMessage         string        `json:"error_message,omitempty"`
+	DurationMs           int64         `json:"duration_ms"`
+	WorkspacePath        string        `json:"workspace_path,omitempty"`
+	Steps                []PrepareStep `json:"steps,omitempty"`
+	Timestamp            string        `json:"timestamp"`
 }
 
 // GetSessionID returns the session ID for this event (used by event routing).
@@ -371,6 +377,13 @@ func (p GitEventPayload) GetSessionID() string {
 }
 
 type GitStatusData struct {
+	StatusState         string   `json:"status_state,omitempty"`
+	FilesComplete       bool     `json:"files_complete"`
+	DetailState         string   `json:"detail_state,omitempty"`
+	ErrorCode           string   `json:"error_code,omitempty"`
+	TrackerID           string   `json:"tracker_id,omitempty"`
+	TrackerEpoch        uint64   `json:"tracker_epoch,omitempty"`
+	SnapshotRevision    uint64   `json:"snapshot_revision,omitempty"`
 	Branch              string   `json:"branch"`
 	RemoteBranch        string   `json:"remote_branch,omitempty"`
 	HeadCommit          string   `json:"head_commit,omitempty"`

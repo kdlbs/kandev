@@ -27,9 +27,10 @@ import (
 type workflowRepo struct {
 	mockRepository
 
-	workspaces  map[string]*models.Workspace
-	workflows   map[string]*models.Workflow
-	byWorkspace map[string][]*models.Workflow
+	workspaces    map[string]*models.Workspace
+	workflows     map[string]*models.Workflow
+	byWorkspace   map[string][]*models.Workflow
+	snapshotTasks []*models.Task
 
 	listErr    error
 	createErr  error
@@ -121,7 +122,7 @@ func (r *workflowRepo) ReorderWorkflows(_ context.Context, workspaceID string, i
 }
 
 func (r *workflowRepo) ListTasks(context.Context, string) ([]*models.Task, error) {
-	return nil, nil
+	return r.snapshotTasks, nil
 }
 
 // stubStepLister satisfies WorkflowStepLister without a workflow repository.

@@ -1,13 +1,17 @@
+import { matchesSidebarClause } from "@/lib/sidebar/sidebar-local-filter";
+import { sidebarCandidate } from "@/lib/sidebar/sidebar-local-projection";
+import type { SidebarTaskPageResponse, SidebarTaskQuery } from "@/lib/types/http";
+import type { TaskOverview } from "@/lib/state/slices/task-overview-types";
 import { useMemo, useRef } from "react";
 import { useAppStore } from "@/components/state-provider";
 import { useSidebarTaskPage } from "@/hooks/domains/kanban/use-sidebar-task-page";
+import { useSidebarStoreTasks } from "@/hooks/domains/kanban/use-sidebar-store-tasks";
 import { toKanbanTask } from "@/lib/kanban/map-task";
 import type { AggregatedSidebarTasks } from "@/components/task/task-session-sidebar-aggregate";
 import type { TaskMoveWorkflow } from "@/components/task/task-move-context-menu";
 import type { WorkspaceContextReadError } from "@/lib/state/slices/kanban/types";
 import type { AppState } from "@/lib/state/store";
-import type { Task } from "@/lib/types/http";
-import type { WipQueueStatus } from "@/lib/kanban/wip-queue";
+import { getDestinationQueue, type WipQueueStatus } from "@/lib/kanban/wip-queue";
 import type { TaskStatusSummary } from "@/lib/types/task-status-summary";
 import { pickFreshestStatusSummary } from "@/lib/task-status-summary";
 import { useShallow } from "zustand/react/shallow";
@@ -20,14 +24,17 @@ export type WorkspaceSidebarTasksResult = AggregatedSidebarTasks & {
   archivedError: string | null;
   retryArchivedTasks: () => void;
   page: ReturnType<typeof useSidebarTaskPage>;
-  pageEntries: NonNullable<ReturnType<typeof useSidebarTaskPage>["response"]>["entries"];
+  pageEntries:
+    | NonNullable<ReturnType<typeof useSidebarTaskPage>["response"]>["entries"]
+    | undefined;
   workspaceContextError: WorkspaceContextReadError | null;
   workspaceContextPending: boolean;
   workspaceContextAccessDenied: boolean;
-  retryWorkspaceContext: () => void;
+  retryWorkspaceContext: (() => void) | undefined;
 };
 
 const NOOP_REFRESH = () => {};
+const EMPTY_PAGE_ENTRIES: NonNullable<WorkspaceSidebarTasksResult["pageEntries"]> = [];
 
 type SidebarTask = AggregatedSidebarTasks["allTasks"][number];
 function shallowTaskEqual(previous: SidebarTask, next: SidebarTask): boolean {
@@ -52,21 +59,25 @@ function reuseUnchangedTasks(previous: SidebarTask[], next: SidebarTask[]): Side
 }
 
 function buildWipQueueByTaskId(
-  entries: NonNullable<ReturnType<typeof useSidebarTaskPage>["response"]>["entries"],
+  entries: WorkspaceSidebarTasksResult["pageEntries"],
   allSteps: AggregatedSidebarTasks["allSteps"],
   stepsByWorkflowId: AggregatedSidebarTasks["stepsByWorkflowId"],
+  allTasks: SidebarTask[],
 ): Map<string, WipQueueStatus> {
+  if (!entries) return buildStoreWipQueue(allTasks, allSteps);
   const result = new Map<string, WipQueueStatus>();
+  const taskById = new Map(allTasks.map((task) => [task.id, task]));
   for (const entry of entries) {
     if (
       entry.kind !== "task" ||
-      !entry.task ||
+      !entry.task_id ||
       !entry.wip_queue_position ||
       !entry.wip_queue_total
     ) {
       continue;
     }
-    const task = toKanbanTask(entry.task);
+    const task = taskById.get(entry.task_id);
+    if (!task) continue;
     const stepId = task.queuedForStepId;
     if (!stepId) continue;
     const stepTitle =
@@ -79,6 +90,21 @@ function buildWipQueueByTaskId(
       total: entry.wip_queue_total,
       destinationTitle: stepTitle,
     });
+  }
+  return result;
+}
+
+function buildStoreWipQueue(allTasks: SidebarTask[], allSteps: AggregatedSidebarTasks["allSteps"]) {
+  const result = new Map<string, WipQueueStatus>();
+  for (const stepId of new Set(allTasks.map((task) => task.queuedForStepId))) {
+    if (!stepId) continue;
+    for (const entry of getDestinationQueue(allTasks, stepId)) {
+      result.set(entry.task.id, {
+        position: entry.position,
+        total: entry.total,
+        destinationTitle: allSteps.find((step) => step.id === stepId)?.title ?? stepId,
+      });
+    }
   }
   return result;
 }
@@ -127,24 +153,37 @@ function getWorkspaceContextStatus(
     error: errors.find((error) => error === "access_denied") ?? errors[0] ?? null,
     accessDenied: errors.includes("access_denied"),
     pending: matches && workspaceContextIsPending(workspaceContextRead),
+    canRetry: !matches || workspaceContextRead.snapshotError !== "access_denied",
   };
 }
 
-function workspacePageTasks(
+function projectSidebarTasks(
   entries: NonNullable<ReturnType<typeof useSidebarTaskPage>["response"]>["entries"],
-  statusSummaryByTaskId: Record<string, TaskStatusSummary>,
+  byId: AppState["taskOverview"]["byId"],
+  summaries: Record<string, TaskStatusSummary>,
+  filters: SidebarTaskQuery["filters"],
+  activeTaskOnly: boolean,
 ) {
-  const tasks: SidebarTask[] = [];
-  for (const entry of entries) {
-    if (entry.kind !== "task" || !entry.task) continue;
-    const task = toKanbanTask(entry.task as Task);
-    tasks.push({
-      ...task,
-      statusSummary: pickFreshestStatusSummary(task.statusSummary, statusSummaryByTaskId[task.id]),
-      _workflowId: entry.task.workflow_id ?? "",
-    });
-  }
-  return tasks;
+  return entries.flatMap((entry): SidebarTask[] => {
+    if (entry.kind !== "task") return [];
+    const task = byId[entry.task_id ?? ""] ?? (entry.task ? toKanbanTask(entry.task) : undefined);
+    if (!task || (!activeTaskOnly && !eligibleArchiveMembership(task, filters))) return [];
+    return [
+      {
+        ...task,
+        _workflowId: task.workflowId,
+        statusSummary: pickFreshestStatusSummary(task.statusSummary, summaries[task.id]),
+      },
+    ];
+  });
+}
+
+function eligibleArchiveMembership(task: TaskOverview, filters: SidebarTaskQuery["filters"]) {
+  if (!sidebarCandidate(task)) return false;
+  const clauses = filters.filter((clause) => clause.dimension === "archived");
+  return clauses.length
+    ? clauses.every((clause) => matchesSidebarClause(String(task.isArchived === true), clause))
+    : !task.isArchived;
 }
 
 function useWorkspaceWorkflowMetadata(workspaceId: string | null) {
@@ -196,26 +235,28 @@ function useWorkspaceWorkflowMetadata(workspaceId: string | null) {
   return { filteredWorkflows, stepsByWorkflowId, allSteps };
 }
 
-/**
- * Sidebar rows come from the server's bounded, globally ordered query. Workflow
- * metadata can reuse snapshots already loaded by a board, but this hook never
- * fetches complete task snapshots for the sidebar.
- */
-export function useWorkspaceSidebarTasks(workspaceId: string | null): WorkspaceSidebarTasksResult {
-  const page = useSidebarTaskPage(workspaceId);
-  const taskRemoval = useAppStore((state) => state.taskRemoval);
-  const { filteredWorkflows, stepsByWorkflowId, allSteps } =
-    useWorkspaceWorkflowMetadata(workspaceId);
-  const workspaceContextGeneration = useAppStore((state) => state.workspaceContextGeneration ?? 0);
-  const workspaceContextRead = useAppStore((state) => state.workspaceContextRead);
-  const retryWorkspaceContext = useAppStore(
-    (state) => state.requestWorkspaceContextRefresh ?? NOOP_REFRESH,
-  );
+function sidebarSourceEntries(
+  response: SidebarTaskPageResponse | null,
+  activeTaskId: string | null,
+  activeTaskOnly: boolean,
+): SidebarTaskPageResponse["entries"] {
+  if (!activeTaskOnly) return response?.entries ?? EMPTY_PAGE_ENTRIES;
+  return activeTaskId ? [{ kind: "task", task_id: activeTaskId }] : EMPTY_PAGE_ENTRIES;
+}
 
-  const pageEntries = page.response?.entries ?? [];
+function useSidebarPageTasks(
+  workspaceId: string | null,
+  page: ReturnType<typeof useSidebarTaskPage>,
+  activeTaskOnly: boolean,
+) {
+  const activeTaskId = useAppStore((state) => state.tasks.activeTaskId);
+  const pageEntries = useMemo(
+    () => sidebarSourceEntries(page.response, activeTaskId, activeTaskOnly),
+    [activeTaskOnly, activeTaskId, page.response],
+  );
+  const byId = useAppStore((state) => state.taskOverview.byId);
   const pageTaskIds = useMemo(
-    () =>
-      pageEntries.flatMap((entry) => (entry.kind === "task" && entry.task ? [entry.task.id] : [])),
+    () => pageEntries.flatMap((entry) => (entry.task_id ? [entry.task_id] : [])),
     [pageEntries],
   );
   const statusSummaryByTaskId = useAppStore(
@@ -229,8 +270,15 @@ export function useWorkspaceSidebarTasks(workspaceId: string | null): WorkspaceS
     }),
   );
   const nextPageTasks = useMemo(
-    () => workspacePageTasks(pageEntries, statusSummaryByTaskId),
-    [pageEntries, statusSummaryByTaskId],
+    () =>
+      projectSidebarTasks(
+        pageEntries,
+        byId,
+        statusSummaryByTaskId,
+        page.view.filters,
+        activeTaskOnly,
+      ),
+    [pageEntries, statusSummaryByTaskId, byId, page.view.filters, activeTaskOnly],
   );
   const previousTasksRef = useRef<SidebarTask[]>([]);
   const allTasks = useMemo(() => {
@@ -238,6 +286,36 @@ export function useWorkspaceSidebarTasks(workspaceId: string | null): WorkspaceS
     previousTasksRef.current = tasks;
     return tasks;
   }, [nextPageTasks]);
+
+  return { pageEntries, allTasks };
+}
+
+/**
+ * Complete inventories reuse the board's task state; other views use a
+ * bounded server page. This hook never fetches workflow snapshots for the sidebar.
+ * Command hosts and hidden navigation read the active record without retaining a page.
+ */
+export function useWorkspaceSidebarTasks(
+  workspaceId: string | null,
+  activeTaskOnly = false,
+): WorkspaceSidebarTasksResult {
+  const pageWorkspaceId = activeTaskOnly ? null : workspaceId;
+  const storeTasks = useSidebarStoreTasks(pageWorkspaceId);
+  const page = useSidebarTaskPage(
+    pageWorkspaceId,
+    !activeTaskOnly && storeTasks === null,
+    storeTasks,
+  );
+  const taskRemoval = useAppStore((state) => state.taskRemoval);
+  const { filteredWorkflows, stepsByWorkflowId, allSteps } =
+    useWorkspaceWorkflowMetadata(workspaceId);
+  const workspaceContextGeneration = useAppStore((state) => state.workspaceContextGeneration ?? 0);
+  const workspaceContextRead = useAppStore((state) => state.workspaceContextRead);
+  const retryWorkspaceContext = useAppStore(
+    (state) => state.requestWorkspaceContextRefresh ?? NOOP_REFRESH,
+  );
+
+  const { pageEntries, allTasks } = useSidebarPageTasks(workspaceId, page, activeTaskOnly);
 
   const pendingArchiveTaskIds = useMemo(() => {
     const pending = new Set<string>();
@@ -258,8 +336,8 @@ export function useWorkspaceSidebarTasks(workspaceId: string | null): WorkspaceS
   }, [allTasks, taskRemoval, workspaceId]);
 
   const wipQueueByTaskId = useMemo(
-    () => buildWipQueueByTaskId(pageEntries, allSteps, stepsByWorkflowId),
-    [pageEntries, allSteps, stepsByWorkflowId],
+    () => buildWipQueueByTaskId(pageEntries, allSteps, stepsByWorkflowId, allTasks),
+    [pageEntries, allSteps, stepsByWorkflowId, allTasks],
   );
   const workspaceWorkflows = useMemo<TaskMoveWorkflow[]>(
     () =>
@@ -298,6 +376,6 @@ export function useWorkspaceSidebarTasks(workspaceId: string | null): WorkspaceS
     workspaceContextError: workspaceContextStatus.error,
     workspaceContextPending: workspaceContextStatus.pending,
     workspaceContextAccessDenied: workspaceContextStatus.accessDenied,
-    retryWorkspaceContext,
+    retryWorkspaceContext: workspaceContextStatus.canRetry ? retryWorkspaceContext : undefined,
   };
 }

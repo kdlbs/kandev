@@ -17,10 +17,23 @@ import type {
   DynamicPolicyOutcome,
   DynamicAgentProfile,
   DynamicUnclassifiedPolicy,
+  MCPSelectionMode,
 } from "@/lib/types/agent-profile";
 import { agentProfileId, workspaceId as toWorkspaceId } from "@/lib/types/ids";
 
 type RawProfile = Partial<AgentProfilePayload> & Partial<AgentProfile> & Record<string, unknown>;
+
+type RawMcpSelection = {
+  mcpSelectionMode?: unknown;
+  mcp_selection_mode?: unknown;
+  mcpSelectedServers?: unknown;
+  mcp_selected_servers?: unknown;
+};
+
+type NormalizedMcpSelection = {
+  mcpSelectionMode: MCPSelectionMode;
+  mcpSelectedServers: string[];
+};
 
 function pickString(raw: RawProfile, camel: string, snake: string, fallback = ""): string {
   const value = raw[camel] ?? raw[snake];
@@ -45,6 +58,21 @@ function pickFlags(raw: RawProfile): CLIFlag[] {
 function pickEnvVars(raw: RawProfile): ProfileEnvVar[] {
   const value = raw.envVars ?? raw.env_vars;
   return Array.isArray(value) ? (value as ProfileEnvVar[]) : [];
+}
+
+function normalizeMcpSelection(raw: RawProfile): NormalizedMcpSelection {
+  const selection = raw as RawProfile & RawMcpSelection;
+  const mode = selection.mcpSelectionMode ?? selection.mcp_selection_mode;
+  const rawServers = selection.mcpSelectedServers ?? selection.mcp_selected_servers;
+  const servers = Array.isArray(rawServers)
+    ? rawServers.filter(
+        (server): server is string => typeof server === "string" && server.trim() !== "",
+      )
+    : [];
+  return {
+    mcpSelectionMode: mode === "selected" ? "selected" : "inherit",
+    mcpSelectedServers: [...new Set(servers)],
+  };
 }
 
 function pickConfigOptions(raw: RawProfile): Record<string, string> | undefined {
@@ -229,6 +257,7 @@ export function normalizeAgentProfile(raw: unknown): AgentProfile {
   const profile = (raw ?? {}) as RawProfile;
   const kind = pickString(profile, "kind", "kind");
   const dynamic = pickDynamic(profile);
+  const mcpSelection = normalizeMcpSelection(profile);
   return {
     id: agentProfileId(pickString(profile, "id", "id")),
     ...(kind === "dynamic" || kind === "concrete" ? { kind: kind as AgentProfileKind } : {}),
@@ -262,6 +291,13 @@ export function normalizeAgentProfile(raw: unknown): AgentProfile {
       "cursor_mcp_auth_enabled",
       true,
     ),
+    cursorPluginsMcpEnabled: pickBool(
+      profile,
+      "cursorPluginsMcpEnabled",
+      "cursor_plugins_mcp_enabled",
+      true,
+    ),
+    ...mcpSelection,
     // Absent on legacy payloads → enabled by default.
     enabled: pickBool(profile, "enabled", "enabled", true),
     workspaceId: (() => {
@@ -324,6 +360,8 @@ export function toAgentProfilePayload(
   setPayloadField(payload, "env_vars", profile.envVars);
   setPayloadField(payload, "cli_passthrough", profile.cliPassthrough);
   setPayloadField(payload, "cursor_mcp_auth_enabled", profile.cursorMcpAuthEnabled);
+  setPayloadField(payload, "mcp_selection_mode", profile.mcpSelectionMode);
+  setPayloadField(payload, "mcp_selected_servers", profile.mcpSelectedServers);
   setPayloadField(payload, "enabled", profile.enabled);
   setPayloadField(payload, "user_modified", profile.userModified);
   setPayloadField(payload, "created_at", profile.createdAt);

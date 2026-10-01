@@ -18,6 +18,7 @@ import (
 
 	"github.com/gorilla/websocket"
 	"github.com/kandev/kandev/internal/common/logger"
+	"go.uber.org/zap"
 )
 
 const (
@@ -51,26 +52,70 @@ func NewEndpointClient(ctx context.Context, resolver ConnectionLeaseResolver, lo
 }
 
 func newEndpointClient(ctx context.Context, resolver ConnectionLeaseResolver, log *logger.Logger, dependencies endpointTransportDependencies, now func() time.Time, opts ...ClientOption) (*Client, error) {
-	manager := newConnectionLeaseManager(resolver, now, nil)
-	lease, err := manager.resolve(ctx)
+	manager, initial, err := resolveInitialEndpoint(ctx, resolver, now)
 	if err != nil {
-		return nil, fmt.Errorf("resolve remote executor connection lease: %w", err)
+		return nil, err
 	}
-	initial, err := url.Parse(lease.BaseURL)
-	if err != nil {
-		return nil, errors.New("remote executor connection lease has an invalid endpoint")
-	}
-	initial.RawQuery = ""
-	initial.ForceQuery = false
 	client := newClient(strings.TrimSuffix(initial.String(), "/"), log, opts...)
-	transport := newEndpointRoundTripper(manager, initial, client.authToken, client.executionID, dependencies)
-	manager.onGeneration = transport.CloseIdleConnections
+	transport := newLeasedRoundTripper(manager, initial, client.authToken, client.executionID, dependencies)
 	client.endpointTransport = transport
 	client.httpClient.Transport = transport
 	client.longRunningHTTPClient.Transport = transport
 	client.httpClient.CheckRedirect = endpointRedirectPolicy
 	client.longRunningHTTPClient.CheckRedirect = endpointRedirectPolicy
 	return client, nil
+}
+
+// NewEndpointControlClient creates a control client that reaches agentctl's
+// control server through provider-issued connection leases.
+func NewEndpointControlClient(ctx context.Context, resolver ConnectionLeaseResolver, log *logger.Logger, opts ...ControlClientOption) (*ControlClient, error) {
+	return newEndpointControlClient(ctx, resolver, log, endpointTransportDependencies{}, nil, opts...)
+}
+
+func newEndpointControlClient(
+	ctx context.Context,
+	resolver ConnectionLeaseResolver,
+	log *logger.Logger,
+	dependencies endpointTransportDependencies,
+	now func() time.Time,
+	opts ...ControlClientOption,
+) (*ControlClient, error) {
+	manager, initial, err := resolveInitialEndpoint(ctx, resolver, now)
+	if err != nil {
+		return nil, err
+	}
+	client := &ControlClient{
+		baseURL: strings.TrimSuffix(initial.String(), "/"),
+		logger:  log.WithFields(zap.String("component", "agentctl-control")),
+	}
+	for _, opt := range opts {
+		opt(client)
+	}
+	transport := newLeasedRoundTripper(manager, initial, client.authToken, "", dependencies)
+	client.applyToken = transport.setAuthToken
+	client.httpClient = &http.Client{Timeout: 30 * time.Second, Transport: transport, CheckRedirect: endpointRedirectPolicy}
+	return client, nil
+}
+
+func resolveInitialEndpoint(ctx context.Context, resolver ConnectionLeaseResolver, now func() time.Time) (*connectionLeaseManager, *url.URL, error) {
+	manager := newConnectionLeaseManager(resolver, now, nil)
+	lease, err := manager.resolve(ctx)
+	if err != nil {
+		return nil, nil, fmt.Errorf("resolve remote executor connection lease: %w", err)
+	}
+	initial, err := url.Parse(lease.BaseURL)
+	if err != nil {
+		return nil, nil, errors.New("remote executor connection lease has an invalid endpoint")
+	}
+	initial.RawQuery = ""
+	initial.ForceQuery = false
+	return manager, initial, nil
+}
+
+func newLeasedRoundTripper(manager *connectionLeaseManager, initial *url.URL, authToken, executionID string, dependencies endpointTransportDependencies) *endpointRoundTripper {
+	transport := newEndpointRoundTripper(manager, initial, authToken, executionID, dependencies)
+	manager.onGeneration = transport.CloseIdleConnections
+	return transport
 }
 
 type connectionLeaseManager struct {
@@ -689,6 +734,8 @@ func (t *endpointRoundTripper) dialWebSocket(ctx context.Context, endpoint *url.
 		dialer.NetDialTLSContext = nil
 		if t.transport.TLSClientConfig != nil {
 			dialer.TLSClientConfig = t.transport.TLSClientConfig.Clone()
+			// The HTTP transport adds h2 to its ALPN list; a WebSocket upgrade is HTTP/1.1 only.
+			dialer.TLSClientConfig.NextProtos = []string{"http/1.1"}
 		}
 		dialer.Proxy = nil
 		dialer.Subprotocols = appendUnique(dialer.Subprotocols, lease.WebSocketSubprotocols...)

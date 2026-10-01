@@ -49,6 +49,8 @@ import type { Canvas } from "@/lib/api/domains/canvas-api";
 import type { TaskCanvasesLoadStatus } from "@/hooks/domains/task/use-task-canvases";
 import { useTaskStatusSummary } from "@/hooks/domains/task/use-task-status-summary";
 
+import { useAutomaticRecoveryChatOwner } from "@/hooks/domains/session/use-automatic-recovery-chat-owner";
+
 const PAGE_LEVEL_MOBILE_FEEDBACK_STYLE = {
   paddingTop: "calc(3.5rem + 1px + env(safe-area-inset-top, 0px))",
 } as const;
@@ -248,6 +250,7 @@ function TaskDebugOverlay({ entries }: { entries: ReturnType<typeof maybeBuildDe
 }
 
 function TaskPageRecoveryFeedback({
+  ownedByChat,
   taskId,
   sessionId,
   resumption,
@@ -258,6 +261,7 @@ function TaskPageRecoveryFeedback({
   taskId: string;
   sessionId: string | null;
   resumption: TaskPageInnerProps["resumption"];
+  ownedByChat: boolean;
   bootstrapRecoveryError: ReturnType<typeof resolveTaskPageBootstrapRecoveryError>;
   workspaceId: string | null;
   isPassthrough: boolean;
@@ -278,6 +282,7 @@ function TaskPageRecoveryFeedback({
   }
   return (
     <SessionRecoveryFeedback
+      ownedByChat={ownedByChat}
       error={resumption.error}
       notice={resumption.notice}
       recoveryFailure={resumption.recoveryFailure}
@@ -378,6 +383,56 @@ function TaskPageDesktopTopBar({
   return <TaskTopBar {...topBarProps} onMoveStart={onMoveStart} onMoveError={onMoveError} />;
 }
 
+function useTaskPageRecoveryFeedback(
+  {
+    task,
+    effectiveSessionId,
+    resumption,
+    sessionPanel,
+    isMobile,
+    ensureSession,
+  }: Pick<
+    TaskPageInnerProps,
+    "task" | "effectiveSessionId" | "resumption" | "sessionPanel" | "isMobile" | "ensureSession"
+  >,
+  taskMoveError: unknown,
+) {
+  const activeSessionMetadata = useAppStore((state) =>
+    effectiveSessionId ? (state.taskSessions.items[effectiveSessionId]?.metadata ?? null) : null,
+  );
+  const statusSummary = useTaskStatusSummary(task?.id, task?.status_summary);
+  const automaticRecoveryOwnedByChat = useAutomaticRecoveryChatOwner({
+    taskId: task?.id,
+    sessionId: effectiveSessionId,
+    recovery: resumption,
+    summary: statusSummary,
+    disabled: Boolean(task?.archived_at) || sessionPanel.isSessionPassthrough,
+  });
+  const bootstrapRecoveryError = resolveTaskPageBootstrapRecoveryError(
+    statusSummary,
+    effectiveSessionId,
+    activeSessionMetadata,
+  );
+  const hasPageLevelMobileFeedback = shouldReservePageLevelMobileFeedbackOffset({
+    isMobile,
+    hasTaskMoveError: taskMoveError !== null,
+    hasEnsureSessionError: ensureSession.status === "error",
+    hasBootstrapRecoveryError: bootstrapRecoveryError !== null,
+    effectiveSessionId,
+    isSessionPassthrough: sessionPanel.isSessionPassthrough,
+    hasComposerRecoveryOwner: automaticRecoveryOwnedByChat,
+    hasResumptionError: Boolean(resumption.error),
+    hasResumptionNotice: Boolean(resumption.notice),
+    hasStatusUnavailable: resumption.recoveryFailure?.outcome === "status_unavailable",
+  });
+  return {
+    activeSessionMetadata,
+    bootstrapRecoveryError,
+    automaticRecoveryOwnedByChat,
+    hasPageLevelMobileFeedback,
+  };
+}
+
 /**
  * Derives everything the task page renders from its inputs: the resolved task
  * props plus the three prop bundles handed to the debug overlay, top bar, and
@@ -416,25 +471,15 @@ function useTaskPageDerivedProps(
   const actionsMenuBoardRow = useTaskActionsMenuBoardRow(task);
   const remote = resolveRemoteExecutor(resumption.sessionStatus as RemoteExecutorStatus | null);
   const embeddedVscode = useEmbeddedVscodeSupport(effectiveSessionId, resumption.sessionStatus);
-  const activeSessionMetadata = useAppStore((state) =>
-    effectiveSessionId ? (state.taskSessions.items[effectiveSessionId]?.metadata ?? null) : null,
-  );
-  const bootstrapRecoveryError = resolveTaskPageBootstrapRecoveryError(
-    useTaskStatusSummary(task?.id, task?.status_summary),
-    effectiveSessionId,
+  const {
     activeSessionMetadata,
+    bootstrapRecoveryError,
+    automaticRecoveryOwnedByChat,
+    hasPageLevelMobileFeedback,
+  } = useTaskPageRecoveryFeedback(
+    { task, effectiveSessionId, resumption, sessionPanel, isMobile, ensureSession },
+    taskMoveError,
   );
-  const hasPageLevelMobileFeedback = shouldReservePageLevelMobileFeedbackOffset({
-    isMobile,
-    hasTaskMoveError: taskMoveError !== null,
-    hasEnsureSessionError: ensureSession.status === "error",
-    hasBootstrapRecoveryError: bootstrapRecoveryError !== null,
-    effectiveSessionId,
-    isSessionPassthrough: sessionPanel.isSessionPassthrough,
-    hasResumptionError: Boolean(resumption.error),
-    hasResumptionNotice: Boolean(resumption.notice),
-    hasStatusUnavailable: resumption.recoveryFailure?.outcome === "status_unavailable",
-  });
   const debugEntries = maybeBuildDebugEntries({
     isVisible: isDebugUI() && showDebugOverlay,
     connectionStatus,
@@ -481,6 +526,7 @@ function useTaskPageDerivedProps(
     topBarProps,
     layoutProps,
     bootstrapRecoveryError,
+    automaticRecoveryOwnedByChat,
     hasPageLevelMobileFeedback,
   };
 }
@@ -500,6 +546,7 @@ export function TaskPageInner(props: TaskPageInnerProps) {
     topBarProps,
     layoutProps,
     bootstrapRecoveryError,
+    automaticRecoveryOwnedByChat,
     hasPageLevelMobileFeedback,
   } = useTaskPageDerivedProps(props, taskMoveError);
   if (!task) return null;
@@ -553,9 +600,13 @@ export function TaskPageInner(props: TaskPageInnerProps) {
                   statusSummary: task.status_summary,
                   repositories: task.repositories,
                   automaticRecovery: props.resumption,
+                  automaticRecoveryOwnerSessionId: automaticRecoveryOwnedByChat
+                    ? effectiveSessionId
+                    : null,
                 }}
               >
                 <TaskPageRecoveryFeedback
+                  ownedByChat={automaticRecoveryOwnedByChat}
                   taskId={task.id}
                   sessionId={effectiveSessionId}
                   resumption={props.resumption}

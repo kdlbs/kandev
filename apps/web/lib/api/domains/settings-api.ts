@@ -42,6 +42,7 @@ export {
   startHostShell,
   stopAgentLogin,
 } from "./host-shell-api";
+export { probeAgentProfile } from "./profile-capability-api";
 export type { AgentLoginSession, HostShellStartOptions } from "./host-shell-api";
 
 // User settings

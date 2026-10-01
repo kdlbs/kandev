@@ -49,14 +49,15 @@ function isTargetWorkspaceRestore(
   );
 }
 
-/** Fail one automatic restore request, then forward all later requests normally. */
-export async function failNextWorkspaceRestore(
+/** Keep automatic restore requests failed until the test allows a user retry. */
+export async function failWorkspaceRestoresUntilReleased(
   page: Page,
   taskId: string,
   sessionId: string,
   failureMessage = "workspace restore failed for e2e",
-): Promise<{ wasConsumed: () => boolean }> {
-  let pending = true;
+): Promise<{ wasConsumed: () => boolean; allowNextRestores: () => void }> {
+  let failRestores = true;
+  let wasConsumed = false;
 
   await page.routeWebSocket(/\/ws$/, (socket) => {
     const server = socket.connectToServer();
@@ -69,8 +70,8 @@ export async function failNextWorkspaceRestore(
       const forwarded: string[] = [];
       for (const part of message.split("\n")) {
         const frame = parseGatewayFrame(part.trim());
-        if (pending && isTargetWorkspaceRestore(frame, taskId, sessionId)) {
-          pending = false;
+        if (failRestores && isTargetWorkspaceRestore(frame, taskId, sessionId)) {
+          wasConsumed = true;
           socket.send(restoreFailureFrame(frame.id, failureMessage));
           continue;
         }
@@ -81,7 +82,12 @@ export async function failNextWorkspaceRestore(
     server.onMessage((message: SocketMessage) => socket.send(message));
   });
 
-  return { wasConsumed: () => !pending };
+  return {
+    wasConsumed: () => wasConsumed,
+    allowNextRestores: () => {
+      failRestores = false;
+    },
+  };
 }
 
 export async function seedCompletedConversation(

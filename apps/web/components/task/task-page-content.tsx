@@ -189,11 +189,13 @@ export function useTaskDetails(activeTaskId: string | null, initialTask: Task | 
   const routeDataReady = useTaskRouteSessionHydrated();
   const [taskDetails, setTaskDetails] = useState<Task | null>(null);
   const [taskLoadError, setTaskLoadError] = useState<unknown | null>(null);
-  const activeTaskIdRef = useRef(activeTaskId);
   const connectionStatus = useAppStore((state) => state.connection.status);
   const previousConnectionStatus = useRef(connectionStatus);
   const reconnectRefreshPending = useRef(false);
-  const effectiveTaskId = activeTaskId ?? initialTask?.id ?? null;
+  const effectiveTaskId = initialTask?.id ?? activeTaskId ?? null;
+  const effectiveTaskIdRef = useRef(effectiveTaskId);
+  const taskDetailsRequestIdRef = useRef(0);
+  effectiveTaskIdRef.current = effectiveTaskId;
   const kanbanTask = useAppStore((state) =>
     resolveLatestTaskProjection(effectiveTaskId, state.kanban.tasks, state.kanbanMulti.snapshots),
   );
@@ -206,41 +208,48 @@ export function useTaskDetails(activeTaskId: string | null, initialTask: Task | 
     taskDetailsId: taskDetails?.id ?? null,
     initialTaskId: initialTask?.id ?? null,
   });
-  useEffect(() => {
-    activeTaskIdRef.current = activeTaskId;
-  }, [activeTaskId]);
-
   const loadTaskDetails = useCallback(
-    async (refresh = true) => {
-      if (!activeTaskId) return;
-      const requestedTaskId = activeTaskId;
+    async (refresh = true, taskId = effectiveTaskId) => {
+      if (!taskId || effectiveTaskIdRef.current !== taskId) return;
+      const requestedTaskId = taskId;
+      const requestId = ++taskDetailsRequestIdRef.current;
       try {
         const response = await readTaskNavigationIdentity(store, requestedTaskId, { refresh });
-        if (activeTaskIdRef.current !== requestedTaskId) return;
+        if (
+          requestId !== taskDetailsRequestIdRef.current ||
+          effectiveTaskIdRef.current !== requestedTaskId
+        ) {
+          return;
+        }
         setTaskDetails(response.task);
         setTaskLoadError(null);
       } catch (error) {
-        if (activeTaskIdRef.current !== requestedTaskId) return;
+        if (
+          requestId !== taskDetailsRequestIdRef.current ||
+          effectiveTaskIdRef.current !== requestedTaskId
+        ) {
+          return;
+        }
         console.error("[TaskPageContent] Failed to load task details:", error);
         setTaskLoadError(error);
       }
     },
-    [activeTaskId, store],
+    [effectiveTaskId, store],
   );
 
   useEffect(() => {
     if (
       !routeDataReady ||
-      !activeTaskId ||
-      taskDetails?.id === activeTaskId ||
-      initialTask?.id === activeTaskId
+      !effectiveTaskId ||
+      taskDetails?.id === effectiveTaskId ||
+      initialTask?.id === effectiveTaskId
     ) {
       setTaskLoadError(null);
       return;
     }
     setTaskLoadError(null);
-    void loadTaskDetails(false);
-  }, [routeDataReady, activeTaskId, taskDetails?.id, initialTask?.id, loadTaskDetails]);
+    void loadTaskDetails(false, effectiveTaskId);
+  }, [routeDataReady, effectiveTaskId, taskDetails?.id, initialTask?.id, loadTaskDetails]);
 
   useEffect(() => {
     const reconnected =
@@ -253,14 +262,18 @@ export function useTaskDetails(activeTaskId: string | null, initialTask: Task | 
     }
   }, [connectionStatus, routeDataReady, loadTaskDetails]);
 
-  useForegroundRefresh(loadTaskDetails, routeDataReady && Boolean(activeTaskId), activeTaskId);
+  useForegroundRefresh(
+    loadTaskDetails,
+    routeDataReady && Boolean(effectiveTaskId),
+    effectiveTaskId,
+  );
 
   const onTaskUnarchived = useCallback(
     (taskId: string) => {
-      if (activeTaskId !== taskId) return;
-      void loadTaskDetails(true);
+      if (effectiveTaskId !== taskId) return;
+      void loadTaskDetails(true, taskId);
     },
-    [activeTaskId, loadTaskDetails],
+    [effectiveTaskId, loadTaskDetails],
   );
 
   return {

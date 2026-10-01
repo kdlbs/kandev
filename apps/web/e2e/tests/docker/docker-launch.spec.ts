@@ -1,4 +1,5 @@
 import { test, expect } from "../../fixtures/docker-test-base";
+import { randomUUID } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import {
@@ -9,8 +10,11 @@ import {
 import { SessionPage } from "../../pages/session-page";
 import {
   dockerCurrentBranch,
+  dockerExec as dockerRun,
   dockerFileContent,
+  dockerFindContainerByTaskID,
   dockerInspectExists,
+  dockerPathExists,
   dockerRemove,
   dockerState,
   dockerStop,
@@ -115,17 +119,65 @@ test.describe("Docker executor — launch + reuse + recovery", () => {
     const { executors } = await apiClient.listExecutors();
     const dockerExec = executors.find((e) => e.type === "local_docker");
     expect(dockerExec?.id).toBeTruthy();
+    const gatePath = `/tmp/kandev-e2e-prepare-gate-${randomUUID()}`;
+    const startedPath = `/tmp/kandev-e2e-prepare-started-${randomUUID()}`;
+    const prepareScript = `touch '${startedPath}'; while [ ! -e '${gatePath}' ]; do sleep 0.1; done`;
     const profile = await apiClient.createExecutorProfile(dockerExec!.id, {
       name: "E2E Docker Slow",
       config: { image_tag: E2E_IMAGE_TAG },
-      prepare_script: "sleep 20",
+      prepare_script: prepareScript,
       cleanup_script: "",
       env_vars: seedData.gitConfigEnvVars,
     });
     const persistedProfile = await apiClient.getExecutorProfile(dockerExec!.id, profile.id);
-    expect(persistedProfile.prepare_script).toBe("sleep 20");
+    expect(persistedProfile.prepare_script).toBe(prepareScript);
 
+    let taskId: string | undefined;
     try {
+      type WsMessage = {
+        id?: string;
+        type?: string;
+        action?: string;
+        payload?: {
+          task_id?: string;
+          session_id?: string;
+          step_name?: string;
+          status?: string;
+        };
+      };
+      const prepareProgressEvents: WsMessage[] = [];
+      let userSubscriptionId: string | undefined;
+      let userSubscriptionReady = false;
+      let socketObserved = false;
+      testPage.on("websocket", (socket) => {
+        if (!new URL(socket.url()).pathname.endsWith("/ws")) return;
+        socketObserved = true;
+        const parseFrame = (payload: string | Buffer): WsMessage[] =>
+          String(payload)
+            .split("\n")
+            .filter(Boolean)
+            .map((line) => JSON.parse(line) as WsMessage);
+
+        socket.on("framesent", ({ payload }) => {
+          for (const message of parseFrame(payload)) {
+            if (message.action === "user.subscribe") userSubscriptionId = message.id;
+          }
+        });
+        socket.on("framereceived", ({ payload }) => {
+          for (const message of parseFrame(payload)) {
+            if (message.action === "executor.prepare.progress") {
+              prepareProgressEvents.push(message);
+            }
+            if (message.type === "response" && message.id === userSubscriptionId) {
+              userSubscriptionReady = true;
+            }
+          }
+        });
+      });
+      await testPage.goto("/");
+      await expect.poll(() => socketObserved, { timeout: 15_000 }).toBe(true);
+      await expect.poll(() => userSubscriptionReady, { timeout: 15_000 }).toBe(true);
+
       const task = await apiClient.createTaskWithAgent(
         seedData.workspaceId,
         "Docker Slow Progress",
@@ -136,12 +188,47 @@ test.describe("Docker executor — launch + reuse + recovery", () => {
           workflow_step_id: seedData.startStepId,
           repository_ids: [seedData.repositoryId],
           executor_profile_id: profile.id,
-          start_agent: false,
         },
       );
+      taskId = task.id;
 
-      await testPage.goto(`/t/${task.id}`);
       const session = new SessionPage(testPage);
+
+      let containerID = "";
+      await expect
+        .poll(
+          () => {
+            containerID = dockerFindContainerByTaskID(task.id) ?? "";
+            return containerID;
+          },
+          { timeout: 90_000, message: "Waiting for the task's bootstrapping Docker container" },
+        )
+        .not.toBe("");
+      await expect
+        .poll(
+          () =>
+            prepareProgressEvents.some(
+              (message) =>
+                message.payload?.task_id === task.id &&
+                message.payload.step_name === "Waiting for Docker container" &&
+                message.payload.status === "running",
+            ),
+          {
+            timeout: 30_000,
+            message: "Waiting for the live Docker container preparation progress event",
+          },
+        )
+        .toBe(true);
+      await expect
+        .poll(() => dockerPathExists(containerID, startedPath), {
+          timeout: 30_000,
+          message: "Waiting for the Docker prepare script to reach its release gate",
+        })
+        .toBe(true);
+
+      const taskItem = session.sidebarTaskItem("Docker Slow Progress");
+      await expect(taskItem).toBeVisible({ timeout: 15_000 });
+      await taskItem.click();
       await session.waitForLoad();
 
       const panel = testPage.getByTestId("prepare-progress-panel");
@@ -153,8 +240,13 @@ test.describe("Docker executor — launch + reuse + recovery", () => {
         timeout: 15_000,
       });
 
+      const release = dockerRun(containerID, "sh", "-c", `touch '${gatePath}'`);
+      expect(release.status, release.stderr).toBe(0);
+
       await expect(panel).toHaveAttribute("data-status", "completed", { timeout: 30_000 });
     } finally {
+      const containerID = taskId ? dockerFindContainerByTaskID(taskId) : null;
+      if (containerID) dockerRun(containerID, "sh", "-c", `touch '${gatePath}'`);
       await apiClient.deleteExecutorProfile(profile.id).catch(() => {});
     }
   });
@@ -220,7 +312,6 @@ test.describe("Docker executor — launch + reuse + recovery", () => {
     seedData,
   }) => {
     test.setTimeout(180_000);
-
     const task = await apiClient.createTaskWithAgent(
       seedData.workspaceId,
       "Docker External Stop Reuse",

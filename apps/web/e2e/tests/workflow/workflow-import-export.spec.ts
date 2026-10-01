@@ -312,8 +312,7 @@ workflows:
     await expect(importDialog).not.toBeVisible();
 
     // Verify the workflow is back with its structure
-    await page.goto(seedData.workspaceId);
-    const reimportedCard = await page.findWorkflowCard("Roundtrip WF");
+    const reimportedCard = await page.findWorkflowCard("Roundtrip WF", { waitForName: true });
     await expect(reimportedCard).toBeVisible();
     await expect(reimportedCard.getByText("Plan")).toBeVisible();
     await expect(reimportedCard.getByText("Implementation")).toBeVisible();

@@ -20,7 +20,9 @@ import {
   shouldPreserveActivePanel,
 } from "./dockview-session-tab-activation";
 import { anchorIncomingSessionPanel, ensureSessionPanel } from "./dockview-session-handoff";
+import { hiddenSessionIdsFor, pruneHiddenSessionIds } from "./dockview-hidden-session-panels";
 import { t } from "@/lib/i18n";
+import { resolveVisibleSessionId } from "@/lib/env-hidden-sessions";
 
 const debug = createDebugLogger("dockview:session-tabs");
 
@@ -370,8 +372,10 @@ function ensureSiblingPanels(
   createdSet: Set<string>,
 ): string[] {
   const created: string[] = [];
+  const hiddenSessionIds = hiddenSessionIdsFor(api);
   for (const sid of currentSessionIds) {
     if (sid === effectiveSessionId) continue;
+    if (hiddenSessionIds.has(sid)) continue;
     if (isDebug() && !api.getPanel(`session:${sid}`)) created.push(sid);
     ensureSessionPanel(api, sid, siblingAnchor, true, createdSet);
   }
@@ -538,9 +542,21 @@ export function runAutoSessionTabEffect(
     currentSessionIds,
     effectiveSessionId ?? "",
   );
+  pruneHiddenSessionIds(api, appStore.getState);
 
   if (!effectiveSessionId) {
     if (isDebug()) debug("useAutoSessionTab: no effectiveSessionId, returning");
+    updateAutoSessionTabRefs(refs, tid, effectiveSessionId);
+    return;
+  }
+
+  if (hiddenSessionIdsFor(api).has(effectiveSessionId)) {
+    const visibleSessionId = resolveVisibleSessionId(
+      effectiveSessionId,
+      currentSessionIds,
+      hiddenSessionIdsFor(api),
+    );
+    if (tid && visibleSessionId) appStore.getState().setActiveSessionAuto(tid, visibleSessionId);
     updateAutoSessionTabRefs(refs, tid, effectiveSessionId);
     return;
   }

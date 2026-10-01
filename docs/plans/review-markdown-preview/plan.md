@@ -1,7 +1,10 @@
 ---
-spec: docs/specs/ui/requirements/review-markdown-preview.md
 created: 2026-07-29
 status: done
+requirements:
+  - REQ-UI-REVIEW-MARKDOWN-PREVIEW-001
+system_design:
+  - ../../specs/ui/system-design/review-markdown-preview.md
 ---
 
 # Implementation Plan: Review Markdown Preview
@@ -27,8 +30,9 @@ desktop, tablet, and mobile.
 
 ### In-place Review rendering
 
-- Keep preview state local to each `FileDiffSection` in
-  `apps/web/components/review/review-diff-list.tsx`.
+- Keep preview state in the Review dialog and key it by file identity, so a
+  transient file-list refresh can remount rows without clearing the selected
+  preview. Reset it when the dialog closes or its review source changes.
 - Replace `renderDiffContent(...)` with a Review-specific Markdown preview component while that row
   is in preview mode. Reuse the existing sanitized Markdown rendering primitives rather than
   introducing another renderer.

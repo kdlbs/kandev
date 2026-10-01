@@ -60,8 +60,12 @@ func newGitAPIFixture(t *testing.T) *gitAPIFixture {
 
 	log, _ := logger.NewLogger(logger.LoggingConfig{Level: "error"})
 	cfg := &config.InstanceConfig{WorkDir: repo}
+	manager := process.NewManager(cfg, log)
+	if tracker := manager.GetWorkspaceTracker(); tracker != nil {
+		t.Cleanup(tracker.Stop)
+	}
 	return &gitAPIFixture{
-		server: NewServer(cfg, process.NewManager(cfg, log), nil, nil, log),
+		server: NewServer(cfg, manager, nil, nil, log),
 		repo:   repo,
 		bare:   bare,
 	}
@@ -875,6 +879,9 @@ func TestHandleGitStatus_ReportsWorktreeState(t *testing.T) {
 	if !result.Success {
 		t.Fatalf("git status failed: %+v", result)
 	}
+	if result.TrackerID == "" || result.TrackerEpoch == 0 || result.SnapshotRevision == 0 {
+		t.Errorf("status ordering = %q / %d / %d, want tracker identity, non-zero epoch and revision", result.TrackerID, result.TrackerEpoch, result.SnapshotRevision)
+	}
 	if result.Branch != "feature/work" {
 		t.Errorf("branch = %q, want %q", result.Branch, "feature/work")
 	}
@@ -931,6 +938,46 @@ func TestHandleGitStatusMulti_SingleRepoUsesEmptyRepositoryName(t *testing.T) {
 	}
 	if result.Repos[0].Status.Branch != "feature/work" {
 		t.Errorf("branch = %q, want %q", result.Repos[0].Status.Branch, "feature/work")
+	}
+	if result.Repos[0].Status.StatusState != "ready" || !result.Repos[0].Status.FilesComplete || result.Repos[0].Status.DetailState != "pending" {
+		t.Errorf("quality = %q / %v / %q, want ready / true / pending on a cache miss",
+			result.Repos[0].Status.StatusState, result.Repos[0].Status.FilesComplete, result.Repos[0].Status.DetailState)
+	}
+}
+
+func TestHandleGitStatusMulti_DetailsWaitReturnsEnrichedStatus(t *testing.T) {
+	fixture := newGitAPIFixture(t)
+
+	rec := getGitAPI(t, fixture.server, "/api/v1/git/status/multi?fresh=true&details=wait")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d (body %s)", rec.Code, rec.Body.String())
+	}
+	var result MultiRepoGitStatusResult
+	if err := json.Unmarshal(rec.Body.Bytes(), &result); err != nil {
+		t.Fatalf("decode multi status: %v", err)
+	}
+	if !result.Success || len(result.Repos) != 1 {
+		t.Fatalf("multi status = %+v, want exactly one repo entry", result)
+	}
+	status := result.Repos[0].Status
+	if status.StatusState != "ready" || !status.FilesComplete || status.DetailState != "ready" {
+		t.Fatalf("quality = %q / %v / %q, want ready / true / ready",
+			status.StatusState, status.FilesComplete, status.DetailState)
+	}
+}
+
+func TestHandleGitStatusMultiReplayDoesNotStartObservationOnCacheMiss(t *testing.T) {
+	fixture := newGitAPIFixture(t)
+	replay := getGitAPI(t, fixture.server, "/api/v1/git/status/multi?mode=replay")
+	if replay.Code != http.StatusOK {
+		t.Fatalf("replay status = %d (%s)", replay.Code, replay.Body.String())
+	}
+	var result MultiRepoGitStatusResult
+	if err := json.Unmarshal(replay.Body.Bytes(), &result); err != nil {
+		t.Fatalf("decode replay result: %v", err)
+	}
+	if len(result.Repos) != 1 || result.Repos[0].Status.Success || result.Repos[0].Status.StatusState != "unavailable" || result.Repos[0].Status.FilesComplete {
+		t.Fatalf("replay result = %+v, want unavailable without starting a fresh observation", result)
 	}
 }
 

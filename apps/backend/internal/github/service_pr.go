@@ -359,8 +359,8 @@ func (s *Service) getPRFeedback(
 	defer cancelFetch()
 	fetchCtx = withWorkflowAttentionCollector(fetchCtx, func(
 		collectorCtx context.Context, collectorClient Client, collectorOwner, collectorRepo string, pr *PR,
-	) (*WorkflowAttention, error) {
-		return s.collectWorkflowAttention(
+	) (*workflowObservation, error) {
+		return s.collectWorkflowObservation(
 			collectorCtx, collectorClient, cacheScope, collectorOwner, collectorRepo, pr,
 		)
 	})
@@ -417,8 +417,8 @@ func (s *Service) getPRStatus(
 	defer cancelFetch()
 	fetchCtx = withWorkflowAttentionCollector(fetchCtx, func(
 		collectorCtx context.Context, collectorClient Client, collectorOwner, collectorRepo string, pr *PR,
-	) (*WorkflowAttention, error) {
-		return s.collectWorkflowAttention(
+	) (*workflowObservation, error) {
+		return s.collectWorkflowObservation(
 			collectorCtx, collectorClient, cacheScope, collectorOwner, collectorRepo, pr,
 		)
 	})

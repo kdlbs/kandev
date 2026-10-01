@@ -1,7 +1,10 @@
 import { test, expect } from "../../fixtures/test-base";
+import { waitForFiniteAnimations } from "../../helpers/pr-capture";
 import { assertNoDocumentHorizontalOverflow } from "../../helpers/layout-assertions";
 import { waitForLatestSessionDone } from "../../helpers/session";
 import { ChangeWorkflowPage } from "../../pages/change-workflow-page";
+import { KanbanPage } from "../../pages/kanban-page";
+import { seedRemainingStepColors } from "./change-workflow-color-helpers";
 import { ThreadActionsPage } from "./threads-task-actions-helpers";
 import {
   seedWorkflowAgentOverrideFixture,
@@ -9,6 +12,80 @@ import {
   waitForWorkflowMoveLifecycle,
   waitForWorkflowStep,
 } from "./task-workflow-agent-overrides-helpers";
+
+// @covers AC-TASKS-CHANGE-WORKFLOW-001.9
+test("shows step colors when selecting a destination on phone", async ({
+  testPage,
+  apiClient,
+  seedData,
+  prCapture,
+}, testInfo) => {
+  const destination = await apiClient.createWorkflow(seedData.workspaceId, "Phone colored steps");
+  const analysis = await apiClient.createWorkflowStep(destination.id, "Analysis", 0);
+  const implement = await apiClient.createWorkflowStep(destination.id, "Implement", 1);
+  for (const [id, color] of [
+    [analysis.id, "bg-blue-500"],
+    [implement.id, "bg-green-500"],
+  ]) {
+    expect((await apiClient.rawRequest("PUT", `/api/v1/workflow/steps/${id}`, { color })).ok).toBe(
+      true,
+    );
+  }
+  const remainingColors = await seedRemainingStepColors(apiClient, destination.id);
+  const other = await apiClient.createWorkflow(seedData.workspaceId, "Phone other destination");
+  const incoming = await apiClient.createWorkflowStep(other.id, "Incoming", 0);
+  const task = await apiClient.createTask(seedData.workspaceId, "Phone step color task", {
+    workflow_id: seedData.workflowId,
+    workflow_step_id: seedData.startStepId,
+  });
+  const kanban = new KanbanPage(testPage);
+  await kanban.goto(seedData.workflowId);
+  await kanban.taskCard(task.id).getByLabel("More options").tap();
+  await testPage.getByTestId("task-context-change-workflow").tap();
+  const form = new ChangeWorkflowPage(testPage, true);
+  await expect(form.phoneDrawer).toBeVisible();
+  await form.chooseWorkflow(destination.id);
+  await form.expectStepOptionColor(analysis.id, "var(--color-blue-500)");
+  await form.expectStepOptionColor(implement.id, "var(--color-green-500)");
+  await assertNoDocumentHorizontalOverflow(testPage, "phone step options");
+  await testPage.screenshot({
+    path: testInfo.outputPath("phone-step-colors.png"),
+    animations: "disabled",
+  });
+  if (prCapture.capturing) {
+    await waitForFiniteAnimations(testPage.locator("body"));
+    await prCapture.screenshot("phone-step-colors", {
+      caption: "Destination step colors in the phone Change workflow picker",
+    });
+  }
+  // Reviewer-requested coverage of the existing palette and fallback CSS.
+  for (const step of remainingColors) {
+    await form.expectStepOptionColor(step.id, step.cssColor);
+    await form.chooseStep(step.id);
+    await form.expectSelectedStepColor(step.cssColor);
+  }
+  await form.chooseStep(analysis.id);
+  await form.expectSelectedStepColor("var(--color-blue-500)");
+  await form.expectStepOptionColor(implement.id, "var(--color-green-500)");
+  await testPage.getByPlaceholder("Search steps...").fill("Implement");
+  await expect(testPage.getByRole("option", { name: "Analysis", exact: true })).toBeHidden();
+  await form.chooseStep(implement.id);
+  await form.expectSelectedStepColor("var(--color-green-500)");
+  const stepTrigger = form.form.getByTestId("change-workflow-step");
+  const control = await stepTrigger.boundingBox();
+  expect(control?.height).toBeGreaterThanOrEqual(44);
+  const drawer = await form.phoneDrawer.boundingBox();
+  expect(control!.x).toBeGreaterThanOrEqual(drawer!.x);
+  expect(control!.x + control!.width).toBeLessThanOrEqual(drawer!.x + drawer!.width);
+  await form.chooseWorkflow(other.id);
+  await expect(stepTrigger).toContainText("Select a step");
+  await expect(stepTrigger.locator(".rounded-full")).toHaveCount(0);
+  await form.chooseStep(incoming.id);
+  await form.submit();
+  await expect(form.phoneDrawer).toBeHidden();
+  await waitForWorkflowStep(apiClient, task.id, incoming.id);
+  expect((await apiClient.getTask(task.id)).workflow_id).toBe(other.id);
+});
 
 test("changes workflow from phone task actions with task-local agent routing", async ({
   testPage,
