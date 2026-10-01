@@ -404,21 +404,27 @@ works for the dial and the listen address; a bare one does not parse as a dial U
 was not a working setting before this listener change either. Docker, remote Docker,
 Sprites, SSH and Kubernetes start their own agentctl and never use this launcher.
 
-Agents do not dial `agent.standaloneHost`. agentctl hands each agent the Kandev MCP
-endpoints of its instance server as `http://localhost:<instance port>/mcp` and `/sse`. With
-the default IPv4 loopback listener, a client that tries only the first address `localhost`
-resolves to is refused when that address is `::1`, as it can be on Windows. Clients that
-try every resolved address in turn, such as Go's dialer, Node.js 20 and later with its
-default `autoSelectFamily`, curl and Python's `socket.create_connection`, reach
-`127.0.0.1`. SSH and Kubernetes launches already bind `127.0.0.1` and hand agents the same
-`localhost` URLs.
+Agents do not dial the control-server endpoint. agentctl injects the Kandev MCP endpoints
+of each instance server into the agent configuration. Those endpoints use the address
+reachable from the agent's execution environment. A restricted listener uses its
+configured host. An all-interface listener uses a family-matched loopback address. This
+keeps standalone agents connected when `agent.standaloneHost` is a non-loopback address,
+and avoids advertising an unspecified address such as `0.0.0.0`.
 
-When the configured control port is busy, the launcher asks the OS for a fallback port with
-a bind on the standalone host when it is a specific IP literal, which is where the child
-will listen, and on `127.0.0.1` for `localhost`, any other host name, and an unspecified
-address. The probe only learns a port number, so it never opens an all-interfaces
-listener, and a host name is not resolved for it. For a host name that does not resolve to
-loopback, or an unspecified address, the probe therefore checks loopback only; a port taken
-on another address makes the child's bind fail, and the launch reports the exit. With the
-default host this is the loopback bind the port-availability probe of
-[port collision safety](../requirements/port-collision-safety.md) uses.
+The same endpoint builder is used for ACP configuration, later session configuration,
+passthrough CLI configuration, and Cursor project configuration. Docker agents keep using
+loopback inside their container. SSH and Kubernetes agents keep using their forwarded
+loopback address. Other remote executor addresses do not use the standalone host. The
+injected endpoint remains trusted only when the internal provenance marker is set and its
+name, transport, host, path, and current instance port match exactly. Caller-provided MCP
+entries cannot gain that trust.
+
+When the configured control port is busy, the launcher checks the addresses where the
+child listener will bind. It resolves a host name to its candidate addresses. For a
+wildcard host, it uses the local interface addresses. It runs bounded connect probes before
+bind probes so an existing wildcard listener is detected even on systems where a specific
+bind can also succeed. It opens only specific-address probe listeners, including for a
+wildcard child listener. Fallback selection validates and briefly reserves the candidate
+port on every probe address. If any address is occupied during selection, it retries with
+a bounded number of candidates. This keeps hostname and wildcard binds from selecting a
+port occupied on another local interface.

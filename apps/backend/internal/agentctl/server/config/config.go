@@ -242,6 +242,10 @@ type InstanceConfig struct {
 	// Port is the HTTP server port for this instance
 	Port int
 
+	// MCPHost is the address injected MCP clients use to reach this instance.
+	// It is derived from the listener bind host and is never sent over the API.
+	MCPHost string `json:"-"`
+
 	// Protocol for agent communication
 	Protocol agent.Protocol
 
@@ -555,6 +559,11 @@ func (c *Config) ListenHost() string {
 	return ""
 }
 
+// MCPReachableHost returns an agent-facing host for the current listener.
+func (c *Config) MCPReachableHost() string {
+	return MCPReachableHost(c.ListenHost())
+}
+
 // ConsumeNonce atomically validates and burns the bootstrap nonce.
 // Returns the auth token if the nonce matches, empty string otherwise.
 // The nonce is invalidated after a single successful call (one-shot).
@@ -620,6 +629,7 @@ func generateSelfToken() string {
 func (c *Config) NewInstanceConfig(port int, overrides *InstanceOverrides) *InstanceConfig {
 	cfg := &InstanceConfig{
 		Port:                      port,
+		MCPHost:                   c.MCPReachableHost(),
 		Protocol:                  c.Defaults.Protocol,
 		AgentCommand:              c.Defaults.AgentCommand,
 		WorkDir:                   c.Defaults.WorkDir,
@@ -645,7 +655,7 @@ func (c *Config) NewInstanceConfig(port int, overrides *InstanceOverrides) *Inst
 	// The MCP server uses the agent stream WebSocket connection (bidirectional)
 	// to forward tool calls to the backend.
 	if port > 0 {
-		cfg.McpServers = injectKandevMcpServer(cfg.McpServers, port)
+		cfg.McpServers = injectKandevMcpServerAtHost(cfg.McpServers, port, cfg.MCPHost)
 		cfg.InjectedKandevMCP = true
 	}
 
@@ -1167,16 +1177,19 @@ const kandevMcpServerName = "kandev"
 // the "first surviving entry wins" dedup keeps the HTTP entry (modern streamable MCP);
 // SSE remains as a fallback for SSE-only agents.
 func injectKandevMcpServer(servers []McpServerConfig, port int) []McpServerConfig {
-	portStr := strconv.Itoa(port)
+	return injectKandevMcpServerAtHost(servers, port, "localhost")
+}
+
+func injectKandevMcpServerAtHost(servers []McpServerConfig, port int, host string) []McpServerConfig {
 	kandevMcpSse := McpServerConfig{
 		Name: kandevMcpServerName,
 		Type: "sse",
-		URL:  "http://localhost:" + portStr + "/sse",
+		URL:  MCPServerURL(host, port, "/sse"),
 	}
 	kandevMcpHttp := McpServerConfig{
 		Name: kandevMcpServerName,
 		Type: "http",
-		URL:  "http://localhost:" + portStr + "/mcp",
+		URL:  MCPServerURL(host, port, "/mcp"),
 	}
 
 	// Filter out any existing kandev server and prepend the local ones

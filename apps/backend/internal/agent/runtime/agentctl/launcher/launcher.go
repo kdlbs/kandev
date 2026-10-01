@@ -443,58 +443,98 @@ func (l *Launcher) closeParentPipeLocked() {
 	}
 }
 
-// checkPortAvailable reports whether the given port is free, using the same
-// probe contract the process launcher uses (internal/common/netprobe): a
-// dual-stack loopback connect must find nothing listening AND a fresh
-// loopback bind must succeed.
+// checkPortAvailable reports whether the given port is free on the effective
+// listener host, using bounded connect and specific-address bind probes.
 //
 // A bind alone is not enough. A surviving agentctl can hold the wildcard
 // address, and on macOS/BSD a bind against an active wildcard listener can
 // still succeed, which would report the occupied control port as free and
 // send this launch to a second server on a port the record does not name.
-func checkPortAvailable(port int) error {
-	if !netprobe.PortAvailable(port) {
+func checkPortAvailable(host string, port int) error {
+	if !netprobe.PortAvailableAtHost(host, port) {
 		return fmt.Errorf("port %d is already in use", port)
 	}
 	return nil
 }
 
-// loopbackFreePortProbeAddr is the probe address for every host that is not a
-// specific IP literal.
-const loopbackFreePortProbeAddr = "127.0.0.1:0"
+const maxFreePortProbeAttempts = 8
 
-// freePortProbeAddr returns the address findFreePort binds to learn a free
-// port for an agentctl child that will listen on host. A specific IP literal
-// (IPv4, or IPv6 bare or in brackets) is probed on that address, which is
-// where the child binds. localhost, an empty host, any other host name, and an
-// unspecified address are probed on IPv4 loopback: a host name is not resolved
-// here (Go binds a "tcp" listener for localhost on its first IPv4 address),
-// and the probe only learns a port number, so it never opens an
-// all-interfaces listener.
-func freePortProbeAddr(host string) string {
-	literal := strings.TrimSuffix(strings.TrimPrefix(host, "["), "]")
-	if ip, err := netip.ParseAddr(literal); err == nil && !ip.IsUnspecified() {
-		return net.JoinHostPort(ip.String(), "0")
+// freePortProbeAddrs returns concrete addresses for bounded temporary binds.
+// Wildcard listeners are expanded to specific interface addresses.
+func freePortProbeAddrs(host string) ([]string, error) {
+	addresses, err := netprobe.ProbeAddresses(host)
+	if err != nil {
+		return nil, err
 	}
-	return loopbackFreePortProbeAddr
+	probes := make([]string, 0, len(addresses))
+	for _, address := range addresses {
+		probes = append(probes, net.JoinHostPort(address.String(), "0"))
+	}
+	return probes, nil
 }
 
 // findFreePort asks the OS for a port that is free where an agentctl child
-// listening on host will bind.
+// listening on host will bind. Each probe binds only a concrete interface
+// address; it never opens a temporary wildcard listener.
 func findFreePort(host string) (int, error) {
-	ln, err := net.Listen("tcp", freePortProbeAddr(host))
+	addresses, err := netprobe.ProbeAddresses(host)
 	if err != nil {
-		return 0, err
+		return 0, fmt.Errorf("resolve probe addresses for %q: %w", host, err)
 	}
-	port := ln.Addr().(*net.TCPAddr).Port
-	_ = ln.Close()
-	return port, nil
+	if len(addresses) == 0 {
+		return 0, fmt.Errorf("no probe addresses for %q", host)
+	}
+
+	var lastErr error
+	for attempt := 0; attempt < maxFreePortProbeAttempts; attempt++ {
+		first := addresses[0]
+		probe, err := net.Listen(networkForProbeAddress(first), net.JoinHostPort(first.String(), "0"))
+		if err != nil {
+			return 0, err
+		}
+		port := probe.Addr().(*net.TCPAddr).Port
+		_ = probe.Close()
+
+		if !netprobe.PortAvailableAtAddresses(addresses, port) {
+			lastErr = fmt.Errorf("port %d became unavailable during fallback selection", port)
+			continue
+		}
+
+		reservations := make([]net.Listener, 0, len(addresses))
+		available := true
+		for _, address := range addresses {
+			listener, err := net.Listen(networkForProbeAddress(address), net.JoinHostPort(address.String(), fmt.Sprint(port)))
+			if err != nil {
+				lastErr = err
+				available = false
+				break
+			}
+			reservations = append(reservations, listener)
+		}
+		for _, listener := range reservations {
+			_ = listener.Close()
+		}
+		if available {
+			return port, nil
+		}
+	}
+	if lastErr == nil {
+		lastErr = fmt.Errorf("could not reserve a fallback port after %d attempts", maxFreePortProbeAttempts)
+	}
+	return 0, lastErr
+}
+
+func networkForProbeAddress(address netip.Addr) string {
+	if address.Is4() {
+		return "tcp4"
+	}
+	return "tcp6"
 }
 
 // ensurePortAvailable checks if the configured port is free. If not, it
 // immediately falls back to an OS-assigned free port.
 func (l *Launcher) ensurePortAvailable() error {
-	if err := checkPortAvailable(l.port); err == nil {
+	if err := checkPortAvailable(l.host, l.port); err == nil {
 		return nil
 	}
 

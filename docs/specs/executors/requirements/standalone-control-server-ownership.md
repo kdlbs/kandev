@@ -175,13 +175,22 @@ each other's agents.
 - **AC-EXECUTORS-CONTROL-OWNERSHIP-001.12:** When the system starts a control server on
   the local host, it shall make that server and every instance server it supervises listen
   only on the host the backend dials it at, `agent.standaloneHost` (IPv4 loopback by
-  default). A listener it opens only to pick a fallback control port shall bind that host
-  when it is a specific IP address and IPv4 loopback otherwise, and never every interface.
-  Bootstrap authentication shall not by itself widen the listener to every interface:
-  identity and capability retrieval under AC-EXECUTORS-CONTROL-OWNERSHIP-004.6 needs no
-  credential, and the backend and the agent processes it supervises reach it over
-  loopback. A non-loopback standalone host that an operator configures applies to both
-  the dial and the listener.
+  default). A listener it opens only to pick a fallback control port shall probe the
+  effective listener addresses. It shall probe every resolved address for a host name and
+  concrete local interface addresses for a wildcard host. It shall use bounded connect and
+  bind probes, and shall never open a temporary wildcard listener. It shall retry a bounded
+  number of times if a candidate becomes occupied during selection. Bootstrap
+  authentication shall not by itself widen the listener to every interface: identity and
+  capability retrieval under AC-EXECUTORS-CONTROL-OWNERSHIP-004.6 needs no credential. A
+  non-loopback standalone host that an operator configures applies to both the dial and
+  the listener.
+
+  When agentctl injects its local Kandev MCP endpoints into a local agent, it shall use a
+  host that reaches the instance listener. It shall use the specific bind host when the
+  listener is restricted to that host. It shall use a matching loopback address when the
+  listener accepts all interfaces. Permission auto-approval shall keep the trusted
+  injection marker and compare the exact endpoint derived from that listener host and the
+  current instance port.
 
 ### REQ-EXECUTORS-CONTROL-OWNERSHIP-004: An upgrade never adopts an incompatible control server
 

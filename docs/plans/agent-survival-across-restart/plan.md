@@ -41,7 +41,8 @@ a turn that ends while unattached is not lost, liveness that never reports a
 failed enumeration as healthy, and a runtime feature flag whose disabled path
 reproduces the previous behavior exactly. Task 02 also keeps the locally launched
 control server and its instance servers listening only on `agent.standaloneHost`
-instead of every interface.
+instead of every interface. It keeps injected agent MCP endpoints aligned with that listener
+and checks ports across the effective listener addresses.
 
 Out of scope: Docker, SSH, Sprites and remote-docker survival, provider-native
 resume semantics, host reboot survival, and transcript replay beyond the terminal
