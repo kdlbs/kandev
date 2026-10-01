@@ -2,6 +2,8 @@ package backendapp
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"testing"
 	"time"
 
@@ -29,6 +31,7 @@ func ledgerRowCount(t *testing.T, p routeParams) int {
 
 type recordingReaderSetter struct {
 	reader handlers.CoordinatorTurnReader
+	svc    *coordinator.Service
 }
 
 func (r *recordingReaderSetter) SetCoordinatorTurnReader(reader handlers.CoordinatorTurnReader) {
@@ -76,7 +79,7 @@ func runLedgerWiringWithSetter(t *testing.T, phase31 bool) (routeParams, bus.Eve
 		ctx: ctx, dbPool: pool, eventBus: eventBus, taskSvc: harness.taskSvc, log: newTestLogger(),
 		addCleanup: func(fn func() error) { cleanups = append(cleanups, fn) },
 	}
-	setter := &recordingReaderSetter{}
+	setter := &recordingReaderSetter{svc: svc}
 	wireCoordinatorLedger(p, svc, setter)
 	t.Cleanup(func() {
 		for _, fn := range cleanups {
@@ -181,5 +184,39 @@ func TestWireCoordinatorLedger_SettlesTheRowOnTurnCompletion(t *testing.T) {
 		case <-timeout:
 			t.Fatal("completion event did not settle the ledger row")
 		}
+	}
+}
+
+func TestWireCoordinatorLedger_StampsTheHashOfTheStandingInstructions(t *testing.T) {
+	p, eventBus, convTask, setter := runLedgerWiringWithSetter(t, false)
+	var c struct {
+		ID          string `db:"id"`
+		WorkspaceID string `db:"workspace_id"`
+	}
+	if err := p.dbPool.Reader().Get(&c, `SELECT id, workspace_id FROM coordinators LIMIT 1`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.dbPool.Writer().Exec(`UPDATE coordinators SET context = ? WHERE id = ?`, "watch the release queue", c.ID); err != nil {
+		t.Fatal(err)
+	}
+	ws, err := p.taskSvc.GetWorkspace(context.Background(), c.WorkspaceID)
+	if err != nil || ws == nil {
+		t.Fatalf("GetWorkspace: %v", err)
+	}
+	content, err := coordinatorStandingInstructionsReader(setter.svc, newTestLogger())(context.Background(), c.ID, ws.Name, c.WorkspaceID)
+	if err != nil || content == "" {
+		t.Fatalf("instructions: %q %v", content, err)
+	}
+	sum := sha256.Sum256([]byte(content))
+	want := hex.EncodeToString(sum[:])
+
+	publishTurnStarted(t, eventBus, convTask)
+	waitForLedgerRows(t, p, 1)
+	var got string
+	if err := p.dbPool.Reader().Get(&got, `SELECT prompt_hash FROM coordinator_turns`); err != nil {
+		t.Fatal(err)
+	}
+	if got != want {
+		t.Fatalf("prompt_hash = %q, want %q", got, want)
 	}
 }

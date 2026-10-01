@@ -267,3 +267,27 @@ func TestSnapshot_NoOrphanWhenTheRowInsertFails(t *testing.T) {
 		t.Fatalf("snapshots after a failed row insert = %d, err %v", n, err)
 	}
 }
+
+func TestSnapshot_TaskKindsIncludeProposalsBeyondTheProposalCap(t *testing.T) {
+	f := newFixture(t)
+	f.exec(`INSERT INTO workflow_steps (id, complete_task_on_enter) VALUES ('s-open', 0)`)
+	f.task("t1", "wf", "s-open", "TODO", f.at(0), false)
+	started := f.at(time.Hour)
+	for i := 0; i < snapshotProposalCap; i++ {
+		f.proposal(fmt.Sprintf("old%03d", i), f.coord.ID, started.Add(-time.Duration(i+10)*time.Minute))
+	}
+	f.proposal("late", f.coord.ID, started.Add(-time.Minute))
+	f.exec(`UPDATE coordinator_proposals SET kind = 'resume', status = 'pending', target_task_id = 't1' WHERE id = 'late'`)
+	_, body := f.snapshot(started)
+	if len(body.Proposals) != snapshotProposalCap || body.ProposalsTotal != snapshotProposalCap+1 {
+		t.Fatalf("proposals %d/%d", len(body.Proposals), body.ProposalsTotal)
+	}
+	for _, p := range body.Proposals {
+		if p.ID == "late" {
+			t.Fatal("late proposal inside the cap; test does not exercise it")
+		}
+	}
+	if fmt.Sprint(body.Tasks[0].Kinds) != "[resume]" {
+		t.Fatalf("kinds = %v, want [resume]", body.Tasks[0].Kinds)
+	}
+}

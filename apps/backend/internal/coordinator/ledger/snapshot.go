@@ -64,11 +64,9 @@ func BuildSnapshot(ctx context.Context, db *sqlx.DB, coordinatorID, workspaceID 
 	if err != nil {
 		return nil, err
 	}
-	kinds := map[string][]string{}
-	for _, p := range proposals {
-		if p.Status == "pending" && p.TargetTaskID != nil && !slices.Contains(kinds[*p.TargetTaskID], p.Kind) {
-			kinds[*p.TargetTaskID] = append(kinds[*p.TargetTaskID], p.Kind)
-		}
+	kinds, err := pendingKindsByTask(ctx, db, coordinatorID, startedAt, tasks)
+	if err != nil {
+		return nil, err
 	}
 	body := snapshotBody{Tasks: tasks, TasksTotal: total, Proposals: proposals, ProposalsTotal: ptotal,
 		Truncated: total > len(tasks) || ptotal > len(proposals)}
@@ -159,4 +157,33 @@ func snapshotProposals(ctx context.Context, db *sqlx.DB, coordinatorID string, s
 		out = append(out, p)
 	}
 	return out, total, nil
+}
+
+// pendingKindsByTask reads the kinds of the coordinator's pending proposals that
+// target each captured task, independent of the capped proposal list.
+func pendingKindsByTask(ctx context.Context, db *sqlx.DB, coordinatorID string, startedAt time.Time, tasks []snapshotTask) (map[string][]string, error) {
+	kinds := map[string][]string{}
+	if len(tasks) == 0 {
+		return kinds, nil
+	}
+	ids := make([]string, len(tasks))
+	for i, t := range tasks {
+		ids[i] = t.TaskID
+	}
+	query, args, err := sqlx.In(`SELECT DISTINCT target_task_id, kind FROM coordinator_proposals
+		WHERE coordinator_id = ? AND status = 'pending' AND created_at < ? AND target_task_id IN (?)`, coordinatorID, startedAt, ids)
+	if err != nil {
+		return nil, fmt.Errorf("snapshot kinds: %w", err)
+	}
+	var rows []struct {
+		Target string `db:"target_task_id"`
+		Kind   string `db:"kind"`
+	}
+	if err := db.SelectContext(ctx, &rows, db.Rebind(query), args...); err != nil {
+		return nil, fmt.Errorf("snapshot kinds: %w", err)
+	}
+	for _, r := range rows {
+		kinds[r.Target] = append(kinds[r.Target], r.Kind)
+	}
+	return kinds, nil
 }

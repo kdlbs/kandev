@@ -6,6 +6,8 @@ import (
 	"time"
 
 	"github.com/jmoiron/sqlx"
+
+	"github.com/kandev/kandev/internal/db/dialect"
 )
 
 const (
@@ -201,6 +203,9 @@ func (l *Ledger) deleteSnapshotBatch(ctx context.Context, cutoff time.Time) (int
 		return 0, fmt.Errorf("begin snapshot batch: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err := l.lockSnapshots(ctx, tx); err != nil {
+		return 0, err
+	}
 	const unreferenced = `NOT EXISTS (SELECT 1 FROM coordinator_turns t WHERE t.snapshot_hash = coordinator_turn_snapshots.hash AND t.started_at >= ?)`
 	var hashes []string
 	if err := tx.SelectContext(ctx, &hashes, tx.Rebind(
@@ -221,4 +226,17 @@ func (l *Ledger) deleteSnapshotBatch(ctx context.Context, cutoff time.Time) (int
 		return 0, fmt.Errorf("commit snapshot batch: %w", err)
 	}
 	return len(hashes), nil
+}
+
+// lockSnapshots serialises snapshot publication against snapshot retention on
+// PostgreSQL, where a not-yet-committed turn row is invisible to the retention
+// re-check. SQLite's single writer already serialises them.
+func (l *Ledger) lockSnapshots(ctx context.Context, tx *sqlx.Tx) error {
+	if !dialect.IsPostgres(l.deps.DB.DriverName()) {
+		return nil
+	}
+	if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtextextended('coordinator_turn_snapshots', 0))`); err != nil {
+		return fmt.Errorf("lock snapshots: %w", err)
+	}
+	return nil
 }

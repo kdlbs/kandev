@@ -39,7 +39,7 @@ func (h *Handlers) handleListCoordinatorTurns(ctx context.Context, msg *ws.Messa
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
 	}
 	principal, ok := mcpscope.PrincipalFromContext(ctx)
-	if !ok || principal.CoordinatorID == "" {
+	if !ok || !principal.IsCoordinator() {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "coordinator not found", nil)
 	}
 	if h.coordinatorTurns == nil {

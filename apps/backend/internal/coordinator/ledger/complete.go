@@ -43,7 +43,7 @@ func (l *Ledger) complete(ctx context.Context, coordinatorID string, te turnEven
 		return err
 	}
 	if row.FinishedAt.Valid {
-		l.dropActive(te.sessionID, row.ID, te.sessionTurnID)
+		l.dropActive(te.sessionID, "", te.sessionTurnID)
 		return nil
 	}
 	row, unattendedID, err := l.reevaluateTrigger(ctx, row, te)
@@ -76,7 +76,7 @@ func (l *Ledger) complete(ctx context.Context, coordinatorID string, te turnEven
 	if err != nil {
 		return fmt.Errorf("complete ledger turn: %w", err)
 	}
-	l.dropActive(te.sessionID, row.ID, te.sessionTurnID)
+	l.dropActive(te.sessionID, "", te.sessionTurnID)
 	if n, _ := res.RowsAffected(); n == 0 {
 		return nil
 	}

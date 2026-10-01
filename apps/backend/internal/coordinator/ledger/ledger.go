@@ -79,6 +79,7 @@ type Ledger struct {
 
 	calls   callQueue
 	truncMu sync.Mutex
+	events  chan turnJob
 
 	lifeMu  sync.Mutex
 	stopped bool
@@ -101,6 +102,7 @@ func New(deps Deps) *Ledger {
 		retryEvery: time.Second,
 		active:     make(map[string]activeEntry),
 		stopCh:     make(chan struct{}),
+		events:     make(chan turnJob, turnEventQueueSize),
 	}
 	if l.log == nil {
 		l.log = zap.NewNop()
@@ -117,9 +119,10 @@ func New(deps Deps) *Ledger {
 // and logged.
 func (l *Ledger) Start(ctx context.Context) {
 	l.safe(StageStart, func() error { return l.rebuildActive(ctx) })
-	l.wg.Add(2)
+	l.wg.Add(3)
 	go l.runCallWriter()
 	go l.runJobs()
+	go l.runTurnEvents()
 }
 
 // Stop ends the writer and waits for in-flight retries; it is idempotent.

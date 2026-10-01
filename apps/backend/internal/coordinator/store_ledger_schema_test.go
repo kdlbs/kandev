@@ -137,3 +137,24 @@ func TestDeleteWorkspaceStateRemovesLedgerRowsAndKeepsSharedSnapshots(t *testing
 		t.Fatalf("snapshots = %d, want 1", n)
 	}
 }
+
+func TestDeleteCoordinatorRemovesItsLedgerRowsAndKeepsSharedSnapshots(t *testing.T) {
+	s := newTestStore(t)
+	c := &Coordinator{WorkspaceID: "ws-1", Name: "n", AgentProfileID: "a", ExecutorProfileID: "e"}
+	if err := s.CreateCoordinator(context.Background(), c); err != nil {
+		t.Fatalf("CreateCoordinator: %v", err)
+	}
+	seedLedgerRows(t, s, c)
+	if count(t, s, "coordinator_turns") == 0 || count(t, s, "coordinator_turn_calls") == 0 {
+		t.Fatal("seed produced no ledger rows")
+	}
+	if err := s.DeleteCoordinator(context.Background(), "ws-1", c.ID); err != nil {
+		t.Fatalf("DeleteCoordinator: %v", err)
+	}
+	if n := count(t, s, "coordinator_turns") + count(t, s, "coordinator_turn_calls"); n != 0 {
+		t.Fatalf("ledger rows left after coordinator delete: %d", n)
+	}
+	if n := count(t, s, "coordinator_turn_snapshots"); n != 1 {
+		t.Fatalf("snapshots = %d, want 1", n)
+	}
+}

@@ -32,8 +32,8 @@ func (l *Ledger) Subscribe(eventBus bus.EventBus) (func(), error) {
 		{events.TurnCompleted, l.OnTurnCompleted},
 	} {
 		handle := s.handle
-		sub, err := eventBus.Subscribe(s.subject, func(ctx context.Context, e *bus.Event) error {
-			handle(ctx, e)
+		sub, err := eventBus.Subscribe(s.subject, func(_ context.Context, e *bus.Event) error {
+			l.enqueueEvent(turnJob{handle: handle, event: e})
 			return nil
 		})
 		if err != nil {
@@ -352,6 +352,9 @@ func (l *Ledger) insertRow(ctx context.Context, r *newRow, snap *Snapshot) (bool
 	}
 	defer func() { _ = tx.Rollback() }()
 	if snap != nil {
+		if err := l.lockSnapshots(ctx, tx); err != nil {
+			return false, err
+		}
 		if _, err := tx.ExecContext(ctx, tx.Rebind(`INSERT INTO coordinator_turn_snapshots (hash, body, created_at) VALUES (?, ?, ?) ON CONFLICT (hash) DO NOTHING`),
 			snap.Hash, string(snap.Body), l.now()); err != nil {
 			return false, fmt.Errorf("insert snapshot: %w", err)
