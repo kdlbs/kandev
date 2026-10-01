@@ -80,23 +80,24 @@ func (b *budget) reserve(ctx context.Context, bound int64) error {
 	return nil
 }
 
-// unwrittenNow is the cost of finished calls whose write failed.
-func (b *budget) unwrittenNow() int64 {
+// claimUnwritten takes the cost of finished calls whose write failed, so
+// exactly one write carries it.
+func (b *budget) claimUnwritten() int64 {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	return b.unwritten
+	c := b.unwritten
+	b.unwritten = 0
+	return c
 }
 
-// settle ends a call: its bound leaves the in-flight sum. A successful write
-// also clears the carried cost it included; a failed one keeps the carried
-// cost and adds this call's, so the reading keeps seeing it.
-func (b *budget) settle(bound, cost, carried int64, written bool) {
+// settle ends a call: its bound leaves the in-flight sum. A failed write
+// returns the claimed carry and this call's cost to the unwritten sum, so the
+// reading keeps seeing them.
+func (b *budget) settle(bound, cost, claimed int64, written bool) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	b.inflight -= bound
-	if written {
-		b.unwritten -= carried
-		return
+	if !written {
+		b.unwritten = saturatingAdd(b.unwritten, saturatingAdd(cost, claimed))
 	}
-	b.unwritten = saturatingAdd(b.unwritten, cost)
 }

@@ -154,7 +154,7 @@ func (r *run) charge(bound, cost int64) {
 	r.mu.Lock()
 	r.spent = saturatingAdd(r.spent, cost)
 	r.mu.Unlock()
-	carried := r.bud.unwrittenNow()
+	carried := r.bud.claimUnwritten()
 	total := saturatingAdd(cost, carried)
 	written := true
 	if total > 0 {

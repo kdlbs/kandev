@@ -196,9 +196,45 @@ func TestBudgetCountsUnwrittenCost(t *testing.T) {
 	if err := b.reserve(context.Background(), 699); err != nil {
 		t.Fatalf("300+699 < 1000 admits: %v", err)
 	}
+	if got := b.claimUnwritten(); got != 300 {
+		t.Fatalf("claimed %d", got)
+	}
 	b.settle(699, 10, 300, true) // a write of 310 succeeded, carrying the 300
-	if b.unwrittenNow() != 0 {
-		t.Fatalf("unwritten %d", b.unwrittenNow())
+	if got := b.claimUnwritten(); got != 0 {
+		t.Fatalf("unwritten %d", got)
+	}
+}
+
+func TestConcurrentChargesWriteACarriedCostOnce(t *testing.T) {
+	w := newWorld()
+	b := &budget{spend: w, clock: w}
+	r := &run{h: &Harness{d: Deps{Results: w}}, bud: b}
+	w.addCostErr = errBoom
+	if err := b.reserve(context.Background(), 5); err != nil {
+		t.Fatal(err)
+	}
+	r.charge(5, 7) // write fails: 7 stays unwritten
+	w.addCostErr = nil
+	for i := 0; i < 2; i++ {
+		if err := b.reserve(context.Background(), 5); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var wg sync.WaitGroup
+	for i := 0; i < 2; i++ {
+		wg.Add(1)
+		go func() { defer wg.Done(); r.charge(5, 10) }()
+	}
+	wg.Wait()
+	var sum int64
+	for _, c := range w.costAdds {
+		sum += c
+	}
+	if sum != 27 {
+		t.Fatalf("row charged %d, want 7+10+10 once each", sum)
+	}
+	if got := b.claimUnwritten(); got != 0 || b.inflight != 0 {
+		t.Fatalf("unwritten %d inflight %d", got, b.inflight)
 	}
 }
 

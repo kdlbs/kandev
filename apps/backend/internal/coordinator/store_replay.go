@@ -121,8 +121,8 @@ func (r *ReplayResults) Insert(ctx context.Context, n replay.NewRow) (replay.Sto
 		return replay.Stored{ID: id, Status: replay.StatusRunning}, true, nil
 	}
 	var row replayRow
-	if err := s.db.GetContext(ctx, &row, s.db.Rebind(`SELECT `+replayColumns+` FROM coordinator_replay_results WHERE dream_id = ? AND item_id = ?`),
-		n.DreamID, n.ItemID); err != nil {
+	if err := s.db.GetContext(ctx, &row, s.db.Rebind(`SELECT `+replayColumns+` FROM coordinator_replay_results WHERE coordinator_id = ? AND dream_id = ? AND item_id = ?`),
+		n.CoordinatorID, n.DreamID, n.ItemID); err != nil {
 		return replay.Stored{}, false, fmt.Errorf("read held replay row: %w", err)
 	}
 	stored, err := row.stored()

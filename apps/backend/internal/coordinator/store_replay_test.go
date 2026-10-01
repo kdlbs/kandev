@@ -24,6 +24,11 @@ func runReplayStoreConformance(t *testing.T, store *Store) {
 	if err != nil || inserted || dup.ID != first.ID || dup.Status != replay.StatusRunning {
 		t.Fatalf("duplicate insert = %+v %v %v", dup, inserted, err)
 	}
+	// A foreign coordinator passing the held pair learns nothing about the row.
+	foreign, inserted, err := rr.Insert(ctx, replay.NewRow{CoordinatorID: "c2", DreamID: "d1", ItemID: "i1", PromptVersion: "v", CreatedAt: replayT0})
+	if err == nil || inserted || foreign.ID != "" || foreign.Status != "" {
+		t.Fatalf("foreign insert = %+v %v %v, want an error and no row", foreign, inserted, err)
+	}
 	// Rows without a dream item never conflict.
 	for range 2 {
 		if _, ok, err := rr.Insert(ctx, replay.NewRow{CoordinatorID: "c1", PromptVersion: "v", CreatedAt: replayT0}); err != nil || !ok {
