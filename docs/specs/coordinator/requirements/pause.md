@@ -6,7 +6,7 @@ system: coordinator
 owners:
   - kandev
 created: 2026-09-30
-last_updated: 2026-09-30
+last_updated: 2026-10-01
 ---
 
 # Pausing a coordinator Requirements
@@ -73,7 +73,7 @@ start it again without losing its queue.
   does, settle it with the outcome `stopped_by_pause`, and return its wakes to
   `pending`. When it is paused while a dream is running, the system shall cancel
   the episode and set its review-result row `failed` with the reason
-  `paused`.
+  `paused`, whether the episode is cancelled before or after the row changes.
 - **AC-COORDINATOR-PAUSE-002.3:** While a coordinator is paused, a proposal
   that the automatic class would approve shall stay `pending` for a manager,
   with the note "Paused; a manager will decide", and shall count against the ten-per-day limit of the automatic class in no way. Resume shall not approve it automatically; automatic approval is tried only when a proposal is created.
@@ -113,9 +113,13 @@ start it again without losing its queue.
   the note that a paused coordinator keeps its queue and that turning autonomy
   off does not.
 - **AC-COORDINATOR-PAUSE-003.3:** Pause and Resume shall take effect without
-  a save bar and shall update every open view through `coordinator.updated`.
-  While the request is in flight the control shall be disabled; when it
-  fails the control shall show the failure and the previous state.
+  a save bar and shall update every open view: a committed change publishes
+  `coordinator.updated` with `autonomy_changed`, and each view re-reads the
+  autonomy read, which carries the paused state. While the request is in flight
+  the control shall be disabled; when it fails the control shall show the
+  failure and the latest state read, or the state at the click when no read has
+  landed since. A read issued after the click shall outrank the response of the
+  request.
 - **AC-COORDINATOR-PAUSE-003.4:** On a phone the control shall be a full-width
   button with a touch target of at least 44 pixels at the end of the autonomy
   strip's second line.

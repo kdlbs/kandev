@@ -6,7 +6,7 @@ system: coordinator
 owners:
   - kandev
 created: 2026-09-30
-last_updated: 2026-09-30
+last_updated: 2026-10-01
 requirements:
   - REQ-COORDINATOR-PAUSE-001
   - REQ-COORDINATOR-PAUSE-002
@@ -56,8 +56,9 @@ Set and clear are single conditional statements:
 Two managers racing commit in order; the last committed statement decides
 (`001.2`). Each statement is conditional, so a Resume that commits before a Pause
 on an unpaused coordinator changes nothing and the Pause then applies: the
-final state is what the commit order gives, never an error. A successful change publishes `coordinator.updated`; a no-op
-publishes nothing.
+final state is what the commit order gives, never an error. A successful change publishes `coordinator.updated` with `autonomy_changed: true`,
+once, after the commit (a further owner in the list of
+[wake screens](wake-screens.md#autonomy-read)); a no-op publishes nothing.
 
 ## Routes
 
@@ -152,7 +153,7 @@ queue exactly as if the pass had run at that time (`001.3`).
 
 ## Resume
 
-Resume clears the state and publishes `coordinator.updated`. Nothing else runs
+Resume clears the state and publishes `coordinator.updated` with `autonomy_changed: true`. Nothing else runs
 on Resume: the next ordinary delivery pass admits pending wakes through the
 usual eight checks, the five-minute cooldown included, and Pause and Resume
 discard none (`001.3`); turning autonomy off while paused still supersedes wakes, as it always did, and is not a Pause effect. That pass runs the ordinary episode re-check
@@ -219,7 +220,7 @@ the row's binding columns, the only state that tells the stages apart:
 
 | Row | Meaning | Stop does |
 | --- | --- | --- |
-| `session_turn_id` set | running | Sets `pause_requested_at` (conditional, `WHERE pause_requested_at IS NULL AND outcome IS NULL`) and `pause_cancel_at` (conditional as above; zero rows changed means the row settled or the ceiling marked it, and `Stop` then does not call `CancelTurn` for it, the ceiling's own path owning that cancel), cancels the session turn through the `CancelTurn` path the spend ceiling uses ([spend](spend.md#stopping)), then, after a successful cancel, re-reads the row by id and passes that fresh row to `settleBoundTurn` (so the struct it works on carries the written `pause_cancel_at`), which settles `stopped_by_pause` with the wakes back to `pending`. `ErrTurnNotActive` from `CancelTurn` is not an error: the turn is ending, either on its own or because a sibling `Stop` already cancelled it, so the Stopper settles nothing and never clears `pause_cancel_at`; the turn-end handler settles the row and, seeing `pause_cancel_at`, gives it `stopped_by_pause` with its wakes `pending`. A turn that was ending on its own when the cancel intent was written is therefore also labelled `stopped_by_pause`; that is accepted, because the wakes are redelivered after Resume and a wake is an invitation, not a record. Nothing ever unsets `pause_cancel_at`, so overlapping `Stop` calls cannot lose a cancel another call made Any other cancel error is logged, leaves `pause_cancel_at` set and the next pass retries (`002.2`) |
+| `session_turn_id` set | running | Sets `pause_requested_at` (conditional, `WHERE pause_requested_at IS NULL AND outcome IS NULL`) and `pause_cancel_at` (conditional as above; zero rows changed means the row settled or the ceiling marked it, and `Stop` then does not call `CancelTurn` for it, the ceiling's own path owning that cancel), cancels the session turn through the `CancelTurn` path the spend ceiling uses ([spend](spend.md#stopping)), then, after a successful cancel, re-reads the row by id and passes that fresh row to `settleBoundTurn` (so the struct it works on carries the written `pause_cancel_at`), which settles `stopped_by_pause` with the wakes back to `pending`. `ErrTurnNotActive` from `CancelTurn` is not an error: the turn is ending, either on its own or because a sibling `Stop` already cancelled it, so the Stopper settles nothing and never clears `pause_cancel_at`; the turn-end handler settles the row and, seeing `pause_cancel_at`, gives it `stopped_by_pause` with its wakes `pending`. A turn that was ending on its own when the cancel intent was written is therefore also labelled `stopped_by_pause`; that is accepted, because the wakes are redelivered after Resume and a wake is an invitation, not a record. Nothing ever unsets `pause_cancel_at`, so overlapping `Stop` calls cannot lose a cancel another call made. Any other cancel error is logged, leaves `pause_cancel_at` set and the next pass retries (`002.2`) |
 | both bindings NULL | started, maybe not yet sent | Sets `pause_requested_at` and does nothing else until the row's `started_at` is at least 2 minutes before the store clock (`started_at <= now - 2 minutes`, inclusive; the age is of the row, not of the pause, so a pause that finds an old unbound row settles it at once); then `Store.settlePausedUnsentTurn(id, coordinatorID)` (new, `store_turns.go`), which sets `stopped_by_pause`, returns the row's wakes to `pending` in the same transaction and matches only `outcome IS NULL AND session_turn_id IS NULL AND reserved_turn_id IS NULL` and a coordinator row that still has `paused_at IS NOT NULL` (one statement, so it loses to a binding, a reservation or a Resume that arrived between the read and the settle; after a Resume the ordinary `recoverUnboundTurn` handles the row). A settle error is logged and the next pass retries. The existing `settleUnsentTurn` is not changed: `settleNotSent` keeps closing reserved rows as `send_failed` and `interrupted`, so a pause never leaves a row that blocks delivery |
 | `reserved_turn_id` set, `session_turn_id` NULL | send in flight | Sets `pause_requested_at` only; the next pass sees the row bound (running, cancelled as above) or settled |
 
@@ -266,13 +267,22 @@ A manager's own attended turn is never stopped (`002.4`).
 
 ## Pause and the episode
 
-If a dream is `running` for the coordinator, the same `Stopper` cancels its
-episode session first (after a `Gate.Active` re-read that does nothing when the coordinator is no longer paused, as for a turn row, so a delayed `Stop` never cancels a dream started after Resume) and then sets the dream row `failed` with the reason
-`paused`, in a conditional update `WHERE status = 'running'` so it cannot
-overwrite a row the episode already finished (`002.2`). A failed cancel leaves
-the row `running` and the next pass retries; a cancel that succeeded followed by
-a failed update is retried the same way, the second cancel finding the episode
-over and being ignored. Work order 05 ships the `Stopper`'s registration point
+If a dream is `running` for the coordinator, the same `Stopper` first re-reads
+`Gate.Active` and does nothing when the coordinator is no longer paused (as for a
+turn row, so a delayed `Stop` never cancels a dream started after Resume), then
+sets the dream row `failed` with the reason `paused` in a conditional update
+`WHERE status = 'running'`, and only then cancels the episode session. Marking
+first makes the row's reason `paused` however the episode ends: the dream's
+orchestrating goroutine writes its terminal status with the same
+`WHERE status = 'running'` guard, finds zero rows changed and stops writing
+([shadow dream](shadow-dream.md#trigger-and-lease)), so it cannot record
+`bad_output` or a run error over `paused` (`002.2`). A row that already finished
+is left as it is. A failed update leaves the row `running` and nothing is
+cancelled; the next pass retries. A cancel that fails after the update is
+not retried by the `Stopper`, which no longer finds a `running` row: the dream's
+goroutine finds zero rows changed at its next refresh, at most one minute later,
+and cancels the episode itself ([shadow dream](shadow-dream.md#trigger-and-lease)).
+Work order 05 ships the `Stopper`'s registration point
 for the dream canceller and tests it with a fake; the dream does not exist until
 work order 04, whose tests verify the cancel and the `failed`/`paused` row end to
 end. The window is unchanged, so the next dream
@@ -321,14 +331,22 @@ text, Held with a reason, and Paused, which wins over the other three: line 1
 reads "Autonomy: Paused by <name> . <time>" (without " by <name>" when the name
 is null), "Last woke <age>" and the pending count stay.
 
-The control acts without a save bar. It is disabled while the request is in
-flight; on success the view takes the response's coordinator as the state, unless a
-`coordinator.updated` for that coordinator was received after the click was sent,
-in which case the response is discarded and the event's state stands; on
-failure it shows the error inline and keeps the state it held when the click
-happened. Events always replace the state, and the ordering key is the local
-order of receipt (the DTO carries no revision), so a stale response or a change by
-another manager never wins over a later event; every open view updates from `coordinator.updated` (`003.3`). On a phone it is a
+The control acts without a save bar. The paused state reaches every view through
+the autonomy read ([wake screens](wake-screens.md#autonomy-read)), which gains
+`paused` (bool), `paused_at` (RFC 3339 UTC or `null`) and `paused_by`
+(`{id, name}` or `null`, the name rule of [Routes](#routes)) whatever the phase
+3.1 flag, so the flag-off badge has a source. `coordinator.updated` carries no
+state: a client treats it as "re-read", and the strip's existing rule re-reads
+on `autonomy_changed`, which Pause and Resume set. The control is disabled while
+the request is in flight. When the request answers 200 the view applies the
+response's coordinator as the state and also re-reads the autonomy read. The
+ordering rule is on reads: every read carries the client's sequence number and
+the response of the PUT counts as a read issued at the click; a read issued
+after the click outranks the PUT response, and of two reads the later-issued
+wins, so a stale PUT response or another manager's change never overwrites a
+later read. On failure the control shows the error inline and the state of the
+latest read that landed since the click, or the state held when the click
+happened when none has (`003.3`). On a phone it is a
 full-width button with a touch target of at least 44 px at the end of the strip's
 second line (`003.4`). Copy is in six locales; no em dash.
 
@@ -337,11 +355,12 @@ second line (`003.4`). Copy is in six locales; no em dash.
 | Failure | Behaviour |
 | --- | --- |
 | State read fails | Paused for all act-on-its-own points, logged; with the flag off, only for a coordinator in the known-paused set; automatic approval answers with the unavailable note (flag-on, or flag-off for a known-paused coordinator); flag-off for any other coordinator proceeds as phase 3 |
-| Stop fails | State stays paused; failure logged; the next backstop pass retries the stop, and the turn can also end by the ceiling or on its own; the next delivery pass still refuses to start another |
+| Stop fails | State stays paused; failure logged; the next backstop pass retries the stop, and the turn can also end by the ceiling or on its own; the next delivery pass still refuses to start another. If a Resume commits before the retry, the backstop no longer calls `Stop` for that coordinator and the turn runs to its end; because `pause_cancel_at` stays set, the turn-end handler labels it `stopped_by_pause` (ledger verdict `blocked`) and returns its wakes to `pending`. This is accepted: a wake is an invitation, not a record, and the redelivered wakes meet the ordinary episode re-check, the five-minute cooldown and the spend ceiling, so the cost is bounded to one further turn per pass of admission |
 | Concurrent pause and resume | Commit order decides |
 | `CancelTurn` returns `ErrCancelInFlight` | `pause_cancel_at` stays set, logged at info, next pass retries |
 | Backstop's paused-coordinator query fails | Logged, pass skipped, next pass retries; wake recording untouched |
 | Resume commits during a stop | `Stop` re-reads the state before each write and stops; a cancel already issued settles `stopped_by_pause` with wakes `pending` |
+| A failed cancel, then Resume | See Stop fails: the turn finishes on its own, settles `stopped_by_pause` and its wakes return to `pending` (accepted) |
 
 A Stop that fails leaves a turn running after the state says paused. It does not
 start any new one, and the failure is visible in the log; the backstop pass calls
@@ -354,4 +373,4 @@ Pause and resume matrix (idempotence, reader 403, coordinator principal 403,
 autonomy off), the three call points with a paused and a failing read, a
 running turn stopped with its wakes back to `pending`, the dream cancelled with
 `paused`, an attended message under Pause, Resume through the cooldown, and
-the strip in each of its four states on desktop and phone, and the strip absent with autonomy off. Also: the route's 404/403/400 order and `{}` body, a delayed `Stop` after Resume cancelling nothing, `ErrCancelInFlight` retried, one failing row not skipping the next, a paused read in `OnAccepted` for a bound row (`pause_cancel_at` written, settle `stopped_by_pause`), `settlePausedUnsentTurn` losing to a Resume, the 2-minute boundary at exactly 2 minutes and at 1 minute 59 seconds, the automatic-approval note only on automatic-class proposals and the unavailable note on a read error, wakes superseded by the episode re-check only after Resume, and the flag-off badge with no control. Also: two overlapping `Stop` calls where the second gets `ErrTurnNotActive` (the turn still settles `stopped_by_pause` with wakes `pending`, `pause_cancel_at` never cleared), the flag-off read error at automatic approval for a known-paused and for another coordinator, a response overtaken by a later `coordinator.updated` being discarded, a late-send cancel failing once and not retried, and a delayed `Stop` after Resume cancelling no dream.
+the strip in each of its four states on desktop and phone, and the strip absent with autonomy off. Also: the route's 404/403/400 order and `{}` body, a delayed `Stop` after Resume cancelling nothing, `ErrCancelInFlight` retried, one failing row not skipping the next, a paused read in `OnAccepted` for a bound row (`pause_cancel_at` written, settle `stopped_by_pause`), `settlePausedUnsentTurn` losing to a Resume, the 2-minute boundary at exactly 2 minutes and at 1 minute 59 seconds, the automatic-approval note only on automatic-class proposals and the unavailable note on a read error, wakes superseded by the episode re-check only after Resume, and the flag-off badge with no control. Also: two overlapping `Stop` calls where the second gets `ErrTurnNotActive` (the turn still settles `stopped_by_pause` with wakes `pending`, `pause_cancel_at` never cleared), the flag-off read error at automatic approval for a known-paused and for another coordinator, a PUT response overtaken by a read issued after the click being discarded, a failed request showing the latest read, Pause and Resume publishing `autonomy_changed` so a second manager's strip updates, the autonomy read carrying `paused` with the flag off, a dream row ending `failed`/`paused` when the episode ends between mark and cancel, and a failed cancel followed by Resume ending `stopped_by_pause` with wakes `pending`, a late-send cancel failing once and not retried, and a delayed `Stop` after Resume cancelling no dream.

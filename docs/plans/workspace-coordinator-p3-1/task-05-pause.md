@@ -48,6 +48,9 @@ turn, and the Pause and Resume controls.
   in the dream tick.
 - The unattended-turn outcome `stopped_by_pause`, and the backstop's retry of
   `Stopper.Stop` for a paused coordinator.
+- The autonomy read gains `paused`, `paused_at`, `paused_by` (whatever the
+  flag), and Pause and Resume publish `coordinator.updated` with
+  `autonomy_changed: true`.
 - Web: the fourth state of the autonomy strip and the Autonomy section
   control, phone layout, copy in six locales.
 - Existing code changed: `coordinator_unattended_turns` gains nullable
