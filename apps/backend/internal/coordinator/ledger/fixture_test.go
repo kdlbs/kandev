@@ -56,11 +56,16 @@ func newFixture(t *testing.T) *fixture {
 	}
 	t.Cleanup(func() { _ = rc.Close() })
 	writer, reader := sqlx.NewDb(wc, "sqlite3"), sqlx.NewDb(rc, "sqlite3")
+	return newFixtureOn(t, writer, reader, externalTablesSQL)
+}
+
+func newFixtureOn(t *testing.T, writer, reader *sqlx.DB, externalSQL string) *fixture {
+	t.Helper()
 	store, err := coordinator.NewStore(writer, reader)
 	if err != nil {
 		t.Fatalf("new store: %v", err)
 	}
-	if _, err := writer.Exec(externalTablesSQL); err != nil {
+	if _, err := writer.Exec(externalSQL); err != nil {
 		t.Fatalf("external tables: %v", err)
 	}
 	c := &coordinator.Coordinator{WorkspaceID: "ws-1", Name: "Coord", AgentProfileID: "agent-1", ExecutorProfileID: "exec-1"}
