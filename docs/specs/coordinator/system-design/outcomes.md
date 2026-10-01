@@ -266,7 +266,7 @@ behind workspace-member authorisation on the HTTP layer.
 `days` of 1 to 90, default 30; empty, repeated, non-integer or out of range is
 400 naming `days`; a coordinator of another workspace is not found; a
 coordinator principal is 403 (`003.3`). The response holds the five measures,
-each `{value, numerator, denominator, null_reason}`:
+each `{value, numerator, denominator, null_reason, capped}`:
 
 | Measure | Computation |
 | --- | --- |
