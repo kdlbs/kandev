@@ -40,6 +40,9 @@ type callQueue struct {
 	mu      sync.Mutex
 	seq     uint64
 	written uint64
+	// settledAhead holds settled sequences above written whose predecessors are
+	// still queued; written only ever covers a contiguous settled prefix.
+	settledAhead map[uint64]struct{}
 	// advanced is closed and replaced each time written moves.
 	advanced chan struct{}
 	// truncated holds ledger rows whose digest lost a call to a full queue.
@@ -51,6 +54,7 @@ type callQueue struct {
 func (q *callQueue) init() {
 	q.ch = make(chan callEntry, callQueueSize)
 	q.advanced = make(chan struct{})
+	q.settledAhead = make(map[uint64]struct{})
 	q.truncated = make(map[string]struct{})
 	q.parked = make(map[string]int)
 }
@@ -76,8 +80,7 @@ func (l *Ledger) Call(sessionID, action, targetTaskID string, allowed bool) {
 		return
 	default:
 	}
-	q.written = e.seq
-	q.signalLocked()
+	q.settleLocked(e.seq)
 	if entry, ok := l.activeEntryFor(sessionID); ok {
 		q.truncated[entry.rowID] = struct{}{}
 	}
@@ -92,11 +95,28 @@ func (q *callQueue) signalLocked() {
 
 func (q *callQueue) settle(seq uint64) {
 	q.mu.Lock()
-	if seq > q.written {
-		q.written = seq
+	q.settleLocked(seq)
+	q.mu.Unlock()
+}
+
+func (q *callQueue) settleLocked(seq uint64) {
+	if seq <= q.written {
+		return
+	}
+	q.settledAhead[seq] = struct{}{}
+	advanced := false
+	for {
+		next := q.written + 1
+		if _, ok := q.settledAhead[next]; !ok {
+			break
+		}
+		delete(q.settledAhead, next)
+		q.written = next
+		advanced = true
+	}
+	if advanced {
 		q.signalLocked()
 	}
-	q.mu.Unlock()
 }
 
 func (q *callQueue) takeTruncated() []string {

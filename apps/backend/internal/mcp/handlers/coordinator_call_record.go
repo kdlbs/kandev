@@ -8,7 +8,10 @@ import (
 	ws "github.com/kandev/kandev/pkg/websocket"
 )
 
-const maxRecordedActionLen = 128
+const (
+	maxRecordedActionLen = 128
+	maxRecordedTargetLen = 64
+)
 
 // withCoordinatorCaller carries a coordinator session through the guarded call
 // so the writes it makes can name the ledger turn.
@@ -31,12 +34,18 @@ func (h *Handlers) recordCoordinatorCall(ctx context.Context, msg *ws.Message, a
 		return
 	}
 	action := msg.Action
+	if tool, ok := coordinator.ToolForAction(action); ok {
+		action = tool
+	}
 	if len(action) > maxRecordedActionLen {
 		action = action[:maxRecordedActionLen]
 	}
 	target := ""
 	if fields, err := automationPayloadFields(msg.Payload); err == nil {
 		target = jsonStringField(fields, "task_id")
+	}
+	if len(target) > maxRecordedTargetLen {
+		target = ""
 	}
 	h.coordinatorSvc.RecordCall(principal.CallerSessionID, action, target, allowed)
 }

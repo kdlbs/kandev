@@ -189,3 +189,29 @@ func TestCalls_NoCallsIsNotBlocked(t *testing.T) {
 		t.Fatalf("verdict = %s", v)
 	}
 }
+
+func TestCalls_DroppedCallDoesNotSettleEntriesStillQueued(t *testing.T) {
+	f := newFixture(t) // writer not started: every accepted call stays queued
+	f.start("st-1", f.at(0))
+	for i := 0; i < callQueueSize+1; i++ {
+		f.l.Call(testSession, "a", "", true)
+	}
+	q := &f.l.calls
+	q.mu.Lock()
+	written := q.written
+	q.mu.Unlock()
+	if written != 0 {
+		t.Fatalf("written = %d with %d calls still queued, want 0", written, callQueueSize)
+	}
+	f.startWriter()
+	f.l.drainCalls(t.Context())
+	q.mu.Lock()
+	written = q.written
+	q.mu.Unlock()
+	if written != callQueueSize+1 {
+		t.Fatalf("written after drain = %d, want %d", written, callQueueSize+1)
+	}
+	if n := len(f.callRows()); n != 100 {
+		t.Fatalf("call rows = %d, want the 100 cap", n)
+	}
+}

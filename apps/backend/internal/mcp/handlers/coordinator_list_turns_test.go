@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"sync"
 	"testing"
 
@@ -150,6 +151,13 @@ func (l *recordingLedger) Call(session, action, target string, allowed bool) {
 	l.calls = append(l.calls, callRecord{session, action, target, allowed})
 }
 
+func toolOf(t *testing.T, action string) string {
+	t.Helper()
+	name, ok := coordinator.ToolForAction(action)
+	require.True(t, ok, action)
+	return name
+}
+
 func TestGuardedDispatch_RecordsAllowAndRefuseDecisionsForCoordinators(t *testing.T) {
 	h, c := listTurnsHandlers(t, false, nil)
 	led := &recordingLedger{}
@@ -157,6 +165,8 @@ func TestGuardedDispatch_RecordsAllowAndRefuseDecisionsForCoordinators(t *testin
 	d := ws.NewDispatcher()
 	h.RegisterHandlers(d)
 	ctx := getItemPrincipalContext(c.WorkspaceID, c.ID)
+	listActivityTool := toolOf(t, coordinator.ActionListActivity)
+	improvementTool := toolOf(t, coordinator.ActionProposeImprovement)
 
 	_, err := d.Dispatch(ctx, makeWSMessage(t, coordinator.ActionListActivity, map[string]interface{}{}))
 	require.NoError(t, err)
@@ -166,9 +176,9 @@ func TestGuardedDispatch_RecordsAllowAndRefuseDecisionsForCoordinators(t *testin
 	require.NoError(t, err)
 
 	require.Equal(t, []callRecord{
-		{"coordinator-session", coordinator.ActionListActivity, "", true},
-		{"coordinator-session", coordinator.ActionListActivity, "task-9", false},
-		{"coordinator-session", coordinator.ActionProposeImprovement, "", false},
+		{"coordinator-session", listActivityTool, "", true},
+		{"coordinator-session", listActivityTool, "task-9", false},
+		{"coordinator-session", improvementTool, "", false},
 	}, led.calls)
 }
 
@@ -181,4 +191,17 @@ func TestGuardedDispatch_NonCoordinatorCallersAreNotRecorded(t *testing.T) {
 	_, err := d.Dispatch(context.Background(), makeWSMessage(t, coordinator.ActionListActivity, map[string]interface{}{}))
 	require.NoError(t, err)
 	require.Empty(t, led.calls)
+}
+
+func TestGuardedDispatch_RecordedTargetIsBounded(t *testing.T) {
+	h, c := listTurnsHandlers(t, false, nil)
+	led := &recordingLedger{}
+	h.coordinatorSvc.SetTurnLedger(led)
+	d := ws.NewDispatcher()
+	h.RegisterHandlers(d)
+	long := strings.Repeat("x", maxRecordedTargetLen+1)
+	_, err := d.Dispatch(getItemPrincipalContext(c.WorkspaceID, c.ID), makeWSMessage(t, coordinator.ActionListActivity, map[string]interface{}{"task_id": long}))
+	require.NoError(t, err)
+	require.Len(t, led.calls, 1)
+	require.Equal(t, "", led.calls[0].target)
 }
