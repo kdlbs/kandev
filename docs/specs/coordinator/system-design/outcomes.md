@@ -51,9 +51,10 @@ decided_at, proposal_id)` and on `(final, graded_at)`. `approved_at` is the
 (destination step of a `moved_back`, empty otherwise, informational),
 `transition_key` (empty except `moved_back`), `created_at` (the decision time for decisions; for `moved_back` the history row's `created_at`, so a late scan or retry does not move the observation in the recurrence window or retention). Unique index on
 `(proposal_id, kind, transition_key)`, and an index on `(coordinator_id,
-created_at)`. A third table, `coordinator_moveback_seen` (`history_row_id`
-primary key, `coordinator_id`, `seen_at`), remembers which step history rows were
-judged once (see [override capture](#override-capture)).
+created_at)`. A third table, `coordinator_moveback_seen` (primary key `(history_row_id,
+coordinator_id)`, `seen_at`), remembers which step history rows each coordinator
+judged once (see [override capture](#override-capture)); deleting a coordinator
+deletes only its own seen rows.
 
 **Lifecycle.** Rows of all three tables are deleted with their coordinator and
 with its workspace, inside the same transactions as the other phase 3 rows
@@ -121,7 +122,7 @@ uses only `proposalID` and the hook time: the grader queue entry is
 `{proposalID, decidedAt}` with `decidedAt` zero on every entry that does not come
 from the hook, and **`Grade` derives every other value from stored rows**, so a
 sweep-run grade and a hook-run grade write the same row. The derivation:
-`automatic` is `coordinator_proposals.claimed_automatically`, which every claim rewrites (an automatic claim that failed and was re-claimed by a manager reads false, as the hook payload does; `decided_automatically` is sticky and is not used); `decision` is
+`automatic` is `coordinator_proposals.claimed_automatically AND status = 'approved'`: every claim rewrites the column, so an automatic claim that failed and was re-claimed by a manager reads false, and the reject and return paths never rewrite it, so a `rejected` or `returned` proposal is always `automatic = false` whatever an earlier failed automatic claim left there, as the hook payload does (`decided_automatically` is sticky and is not used); `decision` is
 `rejected` or `returned` from the status, `undone` when the proposal's created or
 moved activity row has `undone_at` set, `edited` when `edited_fields` is
 non-empty and `approved` otherwise; `edited_fields` is the sorted names that
@@ -205,11 +206,11 @@ computed on read.
   matched to a history row. The scan reads the step-transition history rows
   (`SessionStepHistory`: `trigger`, nullable `actor_id`, `created_at`, row id) of
   every session of the task with `created_at` later than the earliest approved created or moved activity row of the task (undone or not) and within the last 30 days, in order `(created_at, id)`, and treats each row as one candidate whose
-  `transition_key` is the row id. The mover is `actor_id`: a person only when it
-  is a user id of the workspace. Engine, agent, undo, plugin and queue-promotion
-  moves store a nil `actor_id`, so a nil or non-user value is counted
+  `transition_key` is the row id. The mover is `actor_id`. Engine, agent, undo, plugin and queue-promotion
+  moves store a nil (NULL or empty) `actor_id`, so a nil value is counted
   `coordinator_override_ignored_total{reason="actor_unknown"}` and stores
-  nothing. The table is keyed by session and a row is written only when the task had a
+  nothing; any non-nil value, including a plugin or principal id, is passed to
+  the manager check, which classifies it (`principal`, `system`, `not_manager`). The table is keyed by session and a row is written only when the task had a
   primary or active session at the moment of the move (the workflow service writes
   nothing for a sessionless move), so a card moved while none of its sessions was
   active has no row and `moved_back` is a signal for moves made with an active
@@ -217,21 +218,21 @@ computed on read.
   observation and no error.
   History rows are written asynchronously and may follow the event, so a scan
   that judged no candidate (it found no history row of the task with `created_at` at or after the event time and absent from `coordinator_moveback_seen`; the test runs after judging, so a scan that judged one schedules no retry) is retried by the in-process queue after 2 minutes, 10
-  minutes and 1 hour, and a separate daily **moved-back scan** (own pass, not
+  minutes and 1 hour (one chain per task: a move event for a task whose chain is pending adds no timers, a scan that judges at least one candidate cancels the rest of its chain, at most 1000 chains are pending and an overflow is counted `coordinator_override_scan_dropped_total`), and a separate daily **moved-back scan** (own pass, not
   the outcome sweep set, so `final` rows are included) scans tasks with a
   coordinator created or moved activity row in the last 30 days, in batches of
   200 ordered by `task_id`. Scans run on a separate in-process queue, keyed by task id, one worker, capacity 1000, whose overflow is dropped and counted `coordinator_override_scan_dropped_total` (the daily scan recovers it); a candidate older than 30 days is never judged, so a seen row pruned at 400 days is never judged again. Every path reads the same rows and inserts under the
   same key, so any of them may run first.
 
-A candidate is judged once, in this order: (1) the position check of `moved_back` below (a step no longer in the workflow, an equal or later position, or a row not later than the reference action, or no reference action (every approved created or moved action of the task undone) ends here: nothing stored, nothing counted, the candidate marked seen); (2) the actor: a nil or non-user `actor_id` is counted `actor_unknown` and marked seen; (3) the manager check. So the ignored counter counts backward moves only (every engine, agent, undo or plugin loop-back included, one count per history row since each is judged once), never forward moves or moves within a step. Marking seen inserts the row id into `coordinator_moveback_seen`
-(`ON CONFLICT DO NOTHING`) first, in the same transaction as the feedback insert; the feedback insert and the ignored counter increment happen only when that seen insert affected one row (the counter increments after the commit), so two concurrent scans of one row produce one effect, and a candidate already seen is skipped, so rescans neither
+A candidate is judged once, in this order: (1) the position check of `moved_back` below (a step no longer in the workflow, an equal or later position, or a row not later than the reference action, or no reference action (every approved created or moved action of the task made before the row was undone before it) ends here: nothing stored, nothing counted, the candidate marked seen); (2) the actor: a nil `actor_id` is counted `actor_unknown` and marked seen (a non-nil value is never stopped here, so the auth-off default user reaches step (3)); (3) the manager check. So the ignored counter counts backward moves only (every engine, agent, undo or plugin loop-back included, one count per history row since each is judged once), never forward moves or moves within a step. Marking seen inserts the row id into `coordinator_moveback_seen`
+(`ON CONFLICT DO NOTHING`) first, in the same transaction as the feedback insert; the feedback insert and the ignored counter increment happen only when that seen insert affected one row (the counter increments after the commit), so two concurrent scans of one row produce one effect, and a candidate already seen by that coordinator is skipped, so rescans neither
 recount `coordinator_override_ignored_total` nor store an observation for a
 user promoted to manager later. Every judged candidate is marked seen except one whose manager check errored
-(`authz_error`): it stays unseen, is counted, and is retried by the next scan that reaches its task. Each candidate that reaches step (3) goes through the manager check the automatic class already uses
+(`authz_error`) and one whose judging read failed (the workflow step order, the reference activity row, or the history rows themselves; counted `read_error`): it stays unseen, stores nothing, is counted, and is retried by the next scan that reaches its task. A history-row read error aborts that scan and marks nothing seen. A step absent from a successfully read step order is the "no longer in the workflow" case of step (1), and so is a destination step of another workflow. Each candidate that reaches step (3) goes through the manager check the automatic class already uses
 for its raiser (`automatic_approve.go`, `workspace.manage` in the coordinator's
-workspace). When authentication is disabled the synthetic default user (`userstore.DefaultUserID`, the id a manual move stores in `actor_id`) is treated as a manager, as the automatic class treats an empty raiser; a test moves a card back with auth disabled and asserts one `moved_back` row. A false result
+workspace). Whether authentication is disabled is read when the candidate is judged, not when the move happened; while it is disabled the synthetic default user (`userstore.DefaultUserID`, the id a manual move stores in `actor_id`) is treated as a manager, as the automatic class treats an empty raiser, and while it is enabled that id goes to the resolver like any other (an unjudged row of the auth-off period is then `not_manager`); a test moves a card back with auth disabled and asserts one `moved_back` row. A false result
 or an error stores nothing and counts `coordinator_override_ignored_total{reason}`
-with reason `not_manager`, `principal`, `system`, `actor_unknown` or `authz_error`
+with reason `not_manager`, `principal`, `system`, `actor_unknown`, `authz_error` or `read_error`
 (`002.3`); for decisions the kind comes from the observer's actor, for moves from the history row above. A manager
 override inserts one feedback row with `INSERT ... ON CONFLICT DO NOTHING` on
 the unique index (`002.2`), so redelivery, a grader run or a second observer
@@ -244,8 +245,10 @@ proposal's `to_step_id`; for `create_task` the `step_id` of `final_spec_json`,
 workflow's step order when the candidate is processed, and requires the row time
 to be later than the action's time (`002.4`). `transition_key` is the history
 row id, so two different moves back both count while one row seen twice does
-not. The reference action, read when the candidate is judged, is the approved created or moved activity row of the task, of the coordinator, with `undone_at` NULL at that moment, and with the greatest `created_at` earlier than the row's `created_at`, ties by `proposal_id` descending; the observation names its proposal. A candidate is judged once, so one history row yields at most one observation whichever path judged it (`002.2`). A step no longer in the workflow, or an equal or
+not. The reference action, read when the candidate is judged, is the approved created or moved activity row of the task, of the coordinator, not undone as of the row (`undone_at` NULL or later than the row's `created_at`, so the result is the same whichever path judges and whenever), and with the greatest `created_at` earlier than the row's `created_at`, ties by `proposal_id` descending; the observation names its proposal. A candidate is judged once, so one history row yields at most one observation whichever path judged it (`002.2`). A step no longer in the workflow, or an equal or
 later position, stores nothing.
+
+**Several coordinators.** A card on which more than one coordinator has an approved created or moved action is judged once per coordinator: for each such coordinator the candidate runs the judging order above with that coordinator's own reference action and its own seen row (`(history_row_id, coordinator_id)`), so one history row can yield one observation per coordinator and never two for one. **Row time.** A history row's `created_at` is when the asynchronous writer stored it, not when the move happened; a coordinator action approved between a move and its delayed row is taken as the reference action, a known limitation accepted because the window is the writer's lag and no move-time column exists.
 
 ## Reason codes
 
