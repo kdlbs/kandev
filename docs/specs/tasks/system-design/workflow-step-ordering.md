@@ -31,8 +31,11 @@ its independent workflow authorization and delegates persistence to a new
 Requests still carry `workflow_id` and `step_ids`. No route, response shape,
 event contract, or frontend layout changes. Foreign or missing step membership
 must retain a sanitized not-visible/not-found classification at the service
-boundary; do not disclose the owning workflow. Invalid order errors follow
-existing request failure handling without introducing new public status codes.
+boundary; do not disclose the owning workflow. A typed invalid-order error maps
+to the existing HTTP 400 and MCP validation response. Duplicate or incomplete
+orders are client errors, while database failures remain internal errors. MCP
+requires the `step_ids` field but permits an explicit empty array for an existing
+empty workflow; missing/null input remains a validation error.
 
 ## Positional transaction
 
@@ -40,7 +43,8 @@ The repository accepts workflow identity and ordered IDs, never caller-owned
 step snapshots. In one writer transaction, validate uniqueness, the complete
 membership of the named workflow, and each requested ID's membership. Close
 membership query rows before subsequent writes so single-connection pools do
-not deadlock. Empty ordering is accepted only for empty membership.
+not deadlock. Check workflow existence in both dialects; empty ordering is
+accepted only for an existing workflow with empty membership.
 
 Update only `position` and `updated_at`, scoping every write by both step ID and
 workflow ID and requiring exactly one affected row. Use one UTC timestamp for

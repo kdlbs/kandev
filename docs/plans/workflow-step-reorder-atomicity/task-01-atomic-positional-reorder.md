@@ -59,7 +59,7 @@ Run these from the repository root; PostgreSQL tests use only a disposable DSN.
 
 ```bash
 (cd apps/backend && go test ./internal/workflow/service -run '^TestReorderSteps(PreservesConcurrentEdit|RollsBackSecondWriteFailure)$' -count=1)
-(cd apps/backend && go test -race ./internal/workflow/service ./internal/workflow/repository ./internal/workflow/controller)
+(cd apps/backend && go test -race ./internal/workflow/service ./internal/workflow/repository ./internal/workflow/controller ./internal/workflow/handlers ./internal/mcp/handlers)
 (cd apps/backend && go test -race ./internal/workflow/repository -run '^TestPostgresReorderSteps' -count=1 -v)
 (cd apps/backend && go run ./cmd/sqlguard ./internal)
 (cd apps/backend && go test -race ./internal/persistence/storeconformance -count=1)
@@ -85,7 +85,8 @@ join every command handle.
 - `apps/backend/internal/workflow/repository/reorder.go`
 - `apps/backend/internal/workflow/repository/reorder_test.go`
 - `apps/backend/internal/workflow/repository/reorder_postgres_test.go`
-- Affected controller guard/interface tests only when necessary.
+- Affected controller, HTTP, and MCP boundary tests.
+- `apps/backend/internal/workflow/models/errors.go` and HTTP/MCP validation translation.
 - `docs/public/workflow-tips.md`
 - This package and `docs/specs/tasks/{requirements,system-design}/workflow-step-ordering.md`.
 
@@ -149,3 +150,50 @@ nanosecond inputs, because the database stores microsecond precision. The new
 controller test confirms existing behavior, including a successful legal reorder.
 
 PR, exact-head CI/trusted semantic reviews, and normal merge are pending.
+
+
+### PR review remediation
+
+PR [#4141](https://github.com/kdlbs/kandev/pull/4141) initially exposed valid
+boundary gaps: invalid complete orders returned internal errors, explicit empty
+MCP orders were rejected even for empty workflows, and SQLite did not check
+workflow existence before accepting an empty order. Permanent tests reproduced
+HTTP 500 instead of 400, missing-workflow success, and incorrect MCP responses
+before the remediation edits. Typed invalid-order classification uses existing
+HTTP 400/MCP validation replies; missing/foreign resources remain not-found.
+The PostgreSQL edit barrier now observes `pg_blocking_pids`, and invalid-order
+tests check both classification and reason. Targeted remediation verification,
+CI, trusted semantic reviews, and merge remain pending.
+
+The first Action Pinning run failed only in the unchanged walkthrough-runner
+shared-deadline test. Its exact local test passed 20 repeats. The failed job was
+rerun once; attempt 2 of run 36908151283 succeeded on the exact original head
+without source edits, confirming this failure was transient. No walkthrough
+source/test edits were made in this scope.
+
+
+The repository API confirms `OPENCODE_REVIEW_ENABLED=false`; the trusted-base
+OpenCode workflow gates on that setting and configured App identity. Disabled,
+skipped review jobs do not count as semantic review evidence. The active Claude
+review and all registered checks remain delivery gates. Initial Claude run
+36908151025 completed successfully, but its App-authored comment only says it
+will analyze the PR; no substantive review has been claimed from that result.
+
+Post-review local checks: the expanded five-package race command passed
+(repository 11.416s, HTTP handlers 10.983s, MCP handlers cached from a passing
+116.592s initial run); the exact original two regressions passed (0.046s).
+The updated real PostgreSQL command passed (8.373s), including the additional
+missing-workflow case and live lock-table edit barrier. SQL guard, catalog,
+specification lint, public documentation checks, and PR coverage preflight
+passed. Full backend lint found one test-only if/else-chain style issue; it was
+converted to a switch and the targeted repository cases passed (1.530s).
+The repeated SQLite/disposable-PostgreSQL persistence conformance command passed
+(168.428s). Final lint on the rebased source and exact-head remote delivery
+checks are pending. Main advanced to `daab1c45647e7ac9e002f15e02f6e910a3e778a4`.
+
+The first Claude job's raw log reports `is_error=true`, one turn, 445ms duration,
+and zero cost despite a successful job conclusion; its boilerplate comment does
+not count as a review. The next normal synchronize review must provide real
+current-head findings/verdict before merge. Old-head E2E shard 5 also reports a
+nested-submodule review assertion failure outside reorder scope; the exact
+leaf was sent to the parent coordinator to avoid duplicate remediation.

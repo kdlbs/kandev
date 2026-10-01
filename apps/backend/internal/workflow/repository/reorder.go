@@ -17,16 +17,17 @@ func (r *Repository) ReorderSteps(ctx context.Context, workflowID string, stepID
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
+	query := `SELECT id FROM workflows WHERE id = ?`
 	if dialect.IsPostgres(r.db.DriverName()) {
 		// The parent lock serializes reorders and prevents new membership until commit.
-		var id string
-		err := tx.QueryRowContext(ctx, tx.Rebind(`SELECT id FROM workflows WHERE id = ? FOR UPDATE`), workflowID).Scan(&id)
+		query += ` FOR UPDATE`
+	}
+	var id string
+	if err := tx.QueryRowContext(ctx, tx.Rebind(query), workflowID).Scan(&id); err != nil {
 		if err == sql.ErrNoRows {
 			return models.ErrWorkflowStepNotFound
 		}
-		if err != nil {
-			return err
-		}
+		return err
 	}
 	var existing []string
 	if err := tx.SelectContext(ctx, &existing, tx.Rebind(`SELECT id FROM workflow_steps WHERE workflow_id = ?`), workflowID); err != nil {
@@ -65,12 +66,12 @@ func validateStepOrderMembership(existing, requested []string) error {
 			return models.ErrWorkflowStepNotFound
 		}
 		if seen {
-			return fmt.Errorf("workflow step order contains duplicate IDs")
+			return fmt.Errorf("%w: contains duplicate IDs", models.ErrInvalidWorkflowStepOrder)
 		}
 		members[id] = true
 	}
 	if len(existing) != len(requested) {
-		return fmt.Errorf("workflow step order must include every step")
+		return fmt.Errorf("%w: must include every step", models.ErrInvalidWorkflowStepOrder)
 	}
 	return nil
 }

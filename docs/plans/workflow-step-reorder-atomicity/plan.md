@@ -19,7 +19,7 @@ SQLite, PostgreSQL behavior, and existing guards before delivery.
 
 ## Confirmed root cause and evidence
 
-Refreshed main and the branch both resolve to
+At investigation start, refreshed main and the branch both resolved to
 `08e4ffdb99caf40b0df5baa67b29cf4313188f15`. `Service.ReorderSteps` reads each
 step through `GetStep`, changes its position, and calls `UpdateStep`, which
 overwrites content from that snapshot and commits each row separately.
@@ -51,7 +51,9 @@ regressions are the implementation work order's first action.
 Add `Repository.ReorderSteps` in the workflow repository, using a transaction
 for membership validation and position/timestamp-only writes. Replace the
 ordinary service loop with authorized delegation and preserve typed visibility
-errors. Keep controller guards and `ReorderStepsIfUnchanged` intact. Prefer a
+errors. Use a typed invalid-order error with the existing HTTP 400/MCP
+validation mapping; allow explicitly empty MCP arrays for existing empty
+workflows. Keep controller guards and `ReorderStepsIfUnchanged` intact. Prefer a
 small repository file over extending the large `sqlite.go` unnecessarily.
 
 | Database | Persistence path | Evidence | Conditional coverage |
@@ -68,6 +70,8 @@ small repository file over extending the large `sqlite.go` unnecessarily.
   covers ORDERING criteria 1/4, including both legitimate and foreign rows.
 - `repository/reorder_postgres_test.go`: real dialect success, rollback, and
   multi-connection concurrency variants of those tests.
+- HTTP and MCP boundary tests assert validation/not-found classification,
+  missing/null/empty payload handling, and unchanged persisted snapshots.
 - Existing `service/access_test.go`, controller session-target tests, and
   version-fencing repository tests cover ORDERING criterion 5 and compatibility.
 

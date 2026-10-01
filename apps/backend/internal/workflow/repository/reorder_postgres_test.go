@@ -47,17 +47,13 @@ func TestPostgresReorderStepsPreservesConcurrentEdit(t *testing.T) {
 	t.Cleanup(func() { _ = blocker.Rollback() })
 	_, err = blocker.ExecContext(ctx, `SELECT id FROM workflow_steps WHERE id = 'b' FOR UPDATE`)
 	require.NoError(t, err)
-	waiter, err := repo.db.Connx(ctx)
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = waiter.Close() })
-	var pid int
-	require.NoError(t, waiter.QueryRowContext(ctx, `SELECT pg_backend_pid()`).Scan(&pid))
-	require.NoError(t, waiter.Close())
+	var blockerPID int
+	require.NoError(t, blocker.QueryRowContext(ctx, `SELECT pg_backend_pid()`).Scan(&blockerPID))
 	finished := make(chan error, 1)
 	go func() { finished <- repo.ReorderSteps(ctx, "wf-test", []string{"b", "a", "c"}) }()
 	for {
 		var waiting bool
-		require.NoError(t, blocker.QueryRowContext(ctx, `SELECT COALESCE(wait_event_type = 'Lock', false) FROM pg_stat_activity WHERE pid = $1`, pid).Scan(&waiting))
+		require.NoError(t, blocker.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM pg_locks WHERE NOT granted AND $1 = ANY(pg_blocking_pids(pid)))`, blockerPID).Scan(&waiting))
 		if waiting {
 			break
 		}

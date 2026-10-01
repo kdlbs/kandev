@@ -49,8 +49,15 @@ func runReorderMembershipTests(t *testing.T, factory func(*testing.T) *Repositor
 			err = repo.ReorderSteps(ctx, "wf-test", ids)
 			if name != "complete" {
 				require.Error(t, err)
-				if name == "missing" || name == "foreign" {
+				switch name {
+				case "missing", "foreign":
 					require.ErrorIs(t, err, models.ErrWorkflowStepNotFound)
+				case "duplicate":
+					require.ErrorIs(t, err, models.ErrInvalidWorkflowStepOrder)
+					require.ErrorContains(t, err, "contains duplicate IDs")
+				default:
+					require.ErrorIs(t, err, models.ErrInvalidWorkflowStepOrder)
+					require.ErrorContains(t, err, "must include every step")
 				}
 				for _, original := range before {
 					stored, err := repo.GetStep(ctx, original.ID)
@@ -73,6 +80,10 @@ func runReorderMembershipTests(t *testing.T, factory func(*testing.T) *Repositor
 
 		})
 	}
+	t.Run("missing workflow", func(t *testing.T) {
+		repo := factory(t)
+		require.ErrorIs(t, repo.ReorderSteps(context.Background(), "missing", nil), models.ErrWorkflowStepNotFound)
+	})
 	t.Run("empty workflow", func(t *testing.T) {
 		repo := factory(t)
 		_, err := repo.db.Exec(`DELETE FROM workflow_steps WHERE workflow_id = 'wf-test'`)
@@ -91,4 +102,10 @@ func assertReorderPositions(t *testing.T, repo *Repository, ids []string) {
 		require.Equal(t, i, step.Position)
 		require.True(t, steps[0].UpdatedAt.Equal(step.UpdatedAt))
 	}
+}
+
+// @covers AC-TASKS-WORKFLOW-STEP-ORDERING-001.4
+func TestReorderStepsRejectsMissingWorkflow(t *testing.T) {
+	repo := setupTestRepo(t)
+	require.ErrorIs(t, repo.ReorderSteps(context.Background(), "missing", nil), models.ErrWorkflowStepNotFound)
 }
