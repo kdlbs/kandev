@@ -64,10 +64,10 @@ The measures of the second half of this document are read only with the flag.
   decided in the last 400 days whose row is not final. A row is final when its decision is `rejected`, `returned` or `undone`, when its proposal created no task, and when its task result is `merged` or `dropped`. Grading the
   same proposal any number of times, or from two grading paths at once, shall
   leave one row with the values derivable from the stored facts.
-- **AC-COORDINATOR-OUTCOMES-001.3:** A final row shall not change again, except that an undo of its action shall turn it to `undone` and that an empty turn id is filled once a turn id is stamped; `done` and `failed` are re-graded and a
+- **AC-COORDINATOR-OUTCOMES-001.3:** A final row shall not change again, except that an undo of its action shall turn only its decision to `undone` and that an empty turn id is filled once a turn id is stamped; every other column, the reopening count included, stays as it was. `done` and `failed` rows that are not final are re-graded and a
   task whose result goes from `done` to `open` or `failed` shall raise the
   reopening count by one, once per observed transition, however many graders
-  observe it; a move from `done` to `merged` or `dropped` shall not.
+  observe it; a move from `done` to `merged` or `dropped` shall not, and a final row never raises it.
 - **AC-COORDINATOR-OUTCOMES-001.4:** Cost shall be the sum of priced usage
   rows of the created task's sessions, and shall be unknown, never zero, when
   the task has no usage rows or one is unpriced. Time to merge shall be the
@@ -90,12 +90,13 @@ The measures of the second half of this document are read only with the flag.
 #### Acceptance criteria
 
 - **AC-COORDINATOR-OUTCOMES-002.1:** When a manager rejects a proposal,
-  approves it with edits, or undoes an approved action, and when a manager
+  approves it with edits (the approval taking effect: an approval whose execution fails leaves the proposal open and is no override), or undoes an approved action, and when a manager
   moves a card that the coordinator created or moved to an earlier step of its
   workflow, the system shall store one feedback observation holding the
   coordinator, the override kind (`rejected`, `edited`, `undone` or
   `moved_back`), the proposal, the turn that made it, the acting user, the
-  reason code and the time. It shall store no free text.
+  reason code and the time (the time of the decision, or for `moved_back` the
+  time of the step history row, never the time the observation was inserted). It shall store no free text.
 - **AC-COORDINATOR-OUTCOMES-002.2:** The same override shall never produce two
   observations: an observation is unique per proposal, kind and, for
   `moved_back`, the moving step transition, however many times its source is
