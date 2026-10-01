@@ -22,7 +22,7 @@ class ContextError(Exception):
     """Raised when the trusted context cannot be prepared."""
 
 
-def git(repo: str, *args: str, text: bool = False) -> subprocess.CompletedProcess:
+def git(repo: str, *args: str, text: bool = False, stdin_bytes: bytes | None = None) -> subprocess.CompletedProcess:
     env = {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "LC_ALL": "C"}
     return subprocess.run(
         ["git", *args],
@@ -30,6 +30,7 @@ def git(repo: str, *args: str, text: bool = False) -> subprocess.CompletedProces
         env=env,
         capture_output=True,
         text=text,
+        input=stdin_bytes,
         check=False,
     )
 
@@ -123,6 +124,40 @@ def head_tree_entries(repo: str, head_sha: str, paths: list[bytes]) -> dict[byte
             if path in wanted:
                 entries[path] = tuple(field.decode("ascii") for field in fields)
     return entries
+
+
+def prefetch_missing_blobs(repo: str, head_sha: str, entries: dict[bytes, tuple[str, str, str]]) -> None:
+    wanted = {oid for mode, kind, oid in entries.values() if mode in REGULAR_MODES and kind == "blob"}
+    if not all(SHA_RE.fullmatch(oid) for oid in wanted):
+        raise ContextError("git returned an invalid file object ID")
+    objects = git(repo, "rev-list", "--objects", "--missing=print", "--no-object-names", head_sha + "^{tree}", text=True)
+    if objects.returncode != 0:
+        raise ContextError("could not inspect missing PR head file objects")
+    missing = sorted(wanted.intersection(line[1:] for line in objects.stdout.splitlines() if line.startswith("?")))
+    if not missing:
+        return
+    config = git(repo, "config", "--type=bool", "--get-regexp", r"^remote\..*\.promisor$", text=True)
+    if config.returncode not in {0, 1}:
+        raise ContextError("could not inspect configured promisor remotes")
+    remotes = []
+    for line in config.stdout.splitlines():
+        key, value = line.rsplit(None, 1)
+        if value == "true":
+            remotes.append(key[len("remote."):-len(".promisor")])
+    if not remotes:
+        legacy = git(repo, "config", "--get", "extensions.partialClone", text=True)
+        if legacy.returncode == 0 and legacy.stdout.strip():
+            remotes.append(legacy.stdout.strip())
+    for remote in remotes:
+        result = git(
+            repo, "-c", "fetch.negotiationAlgorithm=noop", "fetch", remote,
+            "--no-tags", "--no-write-fetch-head", "--recurse-submodules=no",
+            "--filter=blob:none", "--stdin",
+            stdin_bytes=("\n".join(missing) + "\n").encode("ascii"),
+        )
+        if result.returncode == 0:
+            return
+    raise ContextError("could not prefetch required PR head file objects")
 
 
 class BlobReader:
@@ -236,6 +271,7 @@ def prepare(repo: str, base_sha: str, head_sha: str, output_dir: Path) -> Path:
     tree_entries = head_tree_entries(repo, head_sha, [
         path for status, path in files if status != "D" and is_safe_path(display_path(path))
     ])
+    prefetch_missing_blobs(repo, head_sha, tree_entries)
 
     head_root = output_dir / "head" / "files"
     if head_root.exists() or head_root.is_symlink():
