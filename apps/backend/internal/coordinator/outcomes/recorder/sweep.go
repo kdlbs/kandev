@@ -29,7 +29,7 @@ func (p SQLProposals) Sweep(ctx context.Context, q *Queue) int {
 	started := time.Now().UTC()
 	tried := map[string]bool{}
 	total := 0
-	for ctx.Err() == nil {
+	for ctx.Err() == nil && !q.isStopped() {
 		var ids []string
 		err := p.DB.SelectContext(ctx, &ids, p.DB.Rebind(`
 			SELECT p.id FROM coordinator_proposals p
@@ -78,4 +78,10 @@ func (q *Queue) RunSweeps(ctx context.Context, p SQLProposals) {
 			}
 		}
 	}()
+}
+
+func (q *Queue) isStopped() bool {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	return q.stopped
 }

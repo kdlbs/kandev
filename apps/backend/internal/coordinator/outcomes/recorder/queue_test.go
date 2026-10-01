@@ -104,3 +104,19 @@ func TestSweep_GradesMissingAndOpenRowsOnce(t *testing.T) {
 		t.Fatal("open row not regraded")
 	}
 }
+
+type panicObserver struct{}
+
+func (panicObserver) OnDecision(context.Context, coordinator.DecisionEvent) { panic("boom") }
+
+func TestObservers_PanicInOneDoesNotStopTheOthers(t *testing.T) {
+	f := newFixture(t)
+	f.proposal("p1", "rejected", "create_task", "", f.at(-time.Hour))
+	q := f.queue()
+	o := &Observers{log: zap.NewNop(), list: []namedObserver{{ObserverOverride, panicObserver{}}, {ObserverGrader, q}}}
+	before := ObserverPanicCount(ObserverOverride)
+	o.OnDecision(context.Background(), coordinator.DecisionEvent{ProposalID: "p1"})
+	if ObserverPanicCount(ObserverOverride) != before+1 || len(q.order) != 1 {
+		t.Fatal("panic not counted or later observer skipped")
+	}
+}

@@ -205,6 +205,8 @@ type Service struct {
 	// is a no-op.
 	observerMu       sync.RWMutex
 	decisionObserver DecisionObserver
+	// outcomeMeasures answers the measures route; nil until wired.
+	outcomeMeasures OutcomeMeasuresReader
 	// dreamStop is the dream canceller registered by the dream scheduler; nil
 	// is a no-op.
 	dreamStop pause.DreamStop
