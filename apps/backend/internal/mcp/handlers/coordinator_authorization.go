@@ -212,6 +212,12 @@ func coordinatorBindingMatches(binding *mcpprofile.CoordinatorToolPolicy, princi
 func (h *Handlers) refuseCoordinator(
 	ctx context.Context, principal mcpscope.Principal, msg *ws.Message, class coordinator.Action, reason string,
 ) (bool, *ws.Message, error) {
+	// A dream episode's refusals are written nowhere: the episode has no row a
+	// turn could read, and a failed read records nothing either.
+	if dream, err := h.coordinatorSvc.IsDreamEpisodeTask(ctx, principal.CallerTaskID); err != nil || dream {
+		response, _, respErr := coordinatorUnknownAction(msg)
+		return true, response, respErr
+	}
 	if err := h.coordinatorSvc.RecordRefusal(ctx, principal.CoordinatorID, principal.WorkspaceID, class, reason); err != nil {
 		h.logger.Error("coordinator refusal not recorded",
 			zap.String("coordinator_id", principal.CoordinatorID), zap.String("reason", reason), zap.Error(err))

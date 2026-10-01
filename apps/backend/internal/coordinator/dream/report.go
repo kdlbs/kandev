@@ -48,8 +48,8 @@ func (s *Scheduler) report(ctx context.Context, c *coordinator.Coordinator, p pl
 			}
 		case row.Gate == GatePass:
 			row.Verdict = replay.VerdictUnmeasured
-		case row.Gate == GateCredential || row.Gate == GateSize:
-			row.Text, row.TargetID = withheld(row.Text, row.Gate), ""
+		default:
+			row.Text, row.TargetID = withheld(row, in.HasCredential)
 		}
 		items = append(items, row)
 	}
@@ -82,11 +82,14 @@ func contextLimit(_ *coordinator.Coordinator) int {
 	return coordinator.ContextMaxRunes
 }
 
-// withheld is what is stored of an item the gate refused for its content: the
-// text is never kept whole, and not at all when it held a credential.
-func withheld(text, gate string) string {
-	if gate == GateCredential {
-		return ""
+// withheld is what is stored of a refused item: nothing when text or target
+// holds a credential, a bounded text otherwise, and a bounded target.
+func withheld(row coordinator.DreamItem, hasCredential func(string) bool) (text, target string) {
+	if hasCredential != nil && (hasCredential(row.Text) || hasCredential(row.TargetID)) {
+		return "", ""
 	}
-	return truncateRunes(text, MaxItemTextRunes)
+	if row.Gate == GateSize {
+		return truncateRunes(row.Text, MaxItemTextRunes), ""
+	}
+	return row.Text, truncateRunes(row.TargetID, MaxItemTextRunes)
 }

@@ -158,6 +158,16 @@ describe("LearningSection", () => {
     expect(await screen.findByText("Off")).toBeTruthy();
   });
 
+  it("keeps the switch and says so when the save fails", async () => {
+    api.putShadowDream.mockRejectedValue(new Error("boom"));
+    render31();
+    const toggle = await screen.findByTestId("learning-shadow-toggle");
+    fireEvent.click(toggle);
+    expect(await screen.findByTestId("learning-toggle-error")).toBeTruthy();
+    await waitFor(() => expect(toggle.getAttribute("aria-checked")).toBe("true"));
+    expect(toggle).toHaveProperty("disabled", false);
+  });
+
   it("leaves a reader without the switch and the rating", async () => {
     render31(false);
     expect(await screen.findByTestId("learning-shadow-toggle")).toHaveProperty("disabled", true);
@@ -210,6 +220,16 @@ describe("DreamReportDetail", () => {
     expect(screen.getByTestId("learning-rate-i1-useful").getAttribute("aria-checked")).toBe(
       "false",
     );
+  });
+
+  it("shows Try again and no partial item when the report cannot load", async () => {
+    api.getDream.mockRejectedValueOnce(new Error("boom"));
+    render31();
+    fireEvent.click(await screen.findByTestId("learning-report-open-d1"));
+    const error = await screen.findByTestId("learning-detail-error");
+    expect(screen.queryByTestId("learning-item-i1")).toBeNull();
+    fireEvent.click(within(error).getByRole("button"));
+    expect(await screen.findByTestId("learning-item-i1")).toBeTruthy();
   });
 
   it("goes back to the list", async () => {

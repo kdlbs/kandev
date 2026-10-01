@@ -87,10 +87,12 @@ func wireCoordinatorDream(p routeParams, svc *coordinator.Service) {
 		return nil
 	}})
 	svc.SetDreamStop(sch.StopCoordinator)
+	svc.SetDreamEpisodeArchiver(coordinator.DreamEpisode{Tasks: p.taskSvc}.Archive)
 	svc.SetLearningHealth(sch)
 	if p.addCleanup != nil {
 		p.addCleanup(func() error {
 			svc.SetDreamStop(nil)
+			svc.SetDreamEpisodeArchiver(nil)
 			sch.Stop()
 			return nil
 		})

@@ -19,7 +19,7 @@ func (s *Scheduler) start(parent context.Context, c *coordinator.Coordinator, p 
 		s.mu.Unlock()
 		return
 	}
-	ctx, cancel := context.WithTimeout(context.WithoutCancel(parent), s.d.Bound)
+	ctx, cancel := context.WithCancel(context.WithoutCancel(parent))
 	s.cancels[p.dream.ID] = cancel
 	s.wg.Add(1)
 	s.mu.Unlock()
@@ -150,8 +150,14 @@ func (s *Scheduler) episode(ctx context.Context, c *coordinator.Coordinator, p p
 	} else if !linked {
 		return ReasonLeaseLost, d, nil
 	}
-	raw, err := s.d.Episode.Prompt(ctx, taskID, sessionID, p.evidence.Message)
+	promptCtx, stop := context.WithTimeout(ctx, s.d.Bound)
+	raw, err := s.d.Episode.Prompt(promptCtx, taskID, sessionID, Frame+p.evidence.Message)
+	timedOut := errors.Is(context.Cause(promptCtx), context.DeadlineExceeded)
+	stop()
 	if err != nil {
+		if timedOut {
+			return ReasonTimeout, d, nil
+		}
 		return ReasonRunError, d, nil
 	}
 	ans, err := ParseAnswer(raw)

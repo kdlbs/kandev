@@ -505,6 +505,14 @@ func (s *Store) DreamCoordinatorIDs(ctx context.Context) ([]string, error) {
 		ORDER BY 1`)
 }
 
+// OpenDreamEpisodeTasks lists the episode task ids of the coordinator's dreams
+// that are not yet archived.
+func (s *Store) OpenDreamEpisodeTasks(ctx context.Context, coordinatorID string) ([]string, error) {
+	return s.queryIDs(ctx, "open dream episode tasks", `
+		SELECT episode_task_id FROM coordinator_dreams
+		WHERE coordinator_id = ? AND episode_task_id IS NOT NULL AND episode_archived_at IS NULL`, coordinatorID)
+}
+
 // PruneDreams deletes up to limit dreams started before cutoff with their
 // items and ratings.
 func (s *Store) PruneDreams(ctx context.Context, cutoff time.Time, limit int) (int64, error) {

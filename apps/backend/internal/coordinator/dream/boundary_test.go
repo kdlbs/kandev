@@ -6,8 +6,11 @@ import (
 	"go/token"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/kandev/kandev/internal/coordinator"
 )
 
 // allowedImports is every non-standard import the package may have. None of
@@ -19,12 +22,18 @@ var allowedImports = map[string]bool{
 	"github.com/kandev/kandev/internal/coordinator/replay": true,
 }
 
-// storeWriters are the coordinator store and service methods that change what
-// a turn reads; a dream must never call one.
-var storeWriters = []string{
-	"UpdateCoordinator", "UpdateContext", "SetContext", "CreateStandingOrder", "RetireStandingOrder",
-	"UpdateStandingOrder", "AddNote", "RetireNote", "UpdateNote", "SetAutonomy", "SetPaused",
-	"InsertProposal", "InsertPendingChange", "SetShadowDreamEnabled", "CreateCoordinator", "DeleteCoordinator",
+// allowedStoreMethods is every coordinator.Store method the package may call.
+// Any other Store method, including every writer of context, standing orders,
+// notes or settings, fails the boundary test.
+var allowedStoreMethods = map[string]bool{
+	"ActiveStandingOrders": true, "AcceptedDreamWithHash": true, "CountDreamDecisions": true,
+	"CountDreamTurns": true, "DreamWindowDecisions": true, "DreamWindowTurns": true,
+	"DreamsWithOpenEpisode": true, "ExpireStaleDreams": true, "FailDream": true, "FinishDream": true,
+	"FirstLedgerTurnAt": true, "GetCoordinatorByID": true, "InsertRunningDream": true,
+	"InsertSkippedDream": true, "LastAcceptedDream": true, "LastDream": true,
+	"MarkDreamEpisodeArchived": true, "NthCompletedTurnFinish": true, "RefreshDream": true,
+	"RunningDream": true, "SetDreamEpisodeSession": true, "SetDreamEpisodeTask": true,
+	"SettleStaleReplays": true, "ShadowDreamEnabled": true,
 }
 
 func productionFiles(t *testing.T) []string {
@@ -61,10 +70,11 @@ func TestDreamPackageImportsNoWriterOfWhatATurnReads(t *testing.T) {
 	}
 }
 
-func TestDreamPackageCallsNoStoreWriterOfWhatATurnReads(t *testing.T) {
-	banned := map[string]bool{}
-	for _, m := range storeWriters {
-		banned[m] = true
+func TestDreamPackageCallsOnlyAllowedStoreMethods(t *testing.T) {
+	storeType := reflect.TypeOf(&coordinator.Store{})
+	storeMethods := map[string]bool{}
+	for i := 0; i < storeType.NumMethod(); i++ {
+		storeMethods[storeType.Method(i).Name] = true
 	}
 	fset := token.NewFileSet()
 	for _, name := range productionFiles(t) {
@@ -77,8 +87,8 @@ func TestDreamPackageCallsNoStoreWriterOfWhatATurnReads(t *testing.T) {
 			t.Fatal(err)
 		}
 		ast.Inspect(f, func(n ast.Node) bool {
-			if sel, ok := n.(*ast.SelectorExpr); ok && banned[sel.Sel.Name] {
-				t.Errorf("%s calls %s", name, sel.Sel.Name)
+			if sel, ok := n.(*ast.SelectorExpr); ok && storeMethods[sel.Sel.Name] && !allowedStoreMethods[sel.Sel.Name] {
+				t.Errorf("%s calls Store.%s, which is not on the dream allowlist", name, sel.Sel.Name)
 			}
 			return true
 		})

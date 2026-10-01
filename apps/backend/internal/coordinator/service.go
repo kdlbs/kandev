@@ -213,6 +213,9 @@ type Service struct {
 	// dreamStop is the dream canceller registered by the dream scheduler; nil
 	// is a no-op.
 	dreamStop pause.DreamStop
+	// archiveEpisode archives a dream episode task; nil until the dream is
+	// wired.
+	archiveEpisode func(ctx context.Context, taskID string) error
 }
 
 // ServiceOption configures optional Service behavior.
@@ -617,9 +620,14 @@ func (s *Service) DeleteCoordinator(ctx context.Context, workspaceID, id string)
 	if err := s.authz.AuthorizeWorkspaceScope(ctx, workspaceID, authz.ScopeWorkspaceManage); err != nil {
 		return err
 	}
+	open, err := s.store.OpenDreamEpisodeTasks(ctx, id)
+	if err != nil {
+		return err
+	}
 	if err := s.store.DeleteCoordinator(ctx, workspaceID, id); err != nil {
 		return err
 	}
+	s.archiveEpisodes(ctx, open)
 	if s.onCoordinatorDeleted != nil {
 		s.onCoordinatorDeleted(ctx, workspaceID, id)
 	}
