@@ -77,7 +77,11 @@ guided setup.
   request are invalid in the same way (both empty or null, or both failing
   the checks), the error shall name `task_agent_profile_id`; a field that is
   empty or null is reported before a field that fails the checks, whichever
-  field each is.
+  field each is. This holds on both create routes and on an edit; on the
+  create routes the name, the context and the coordinator's own pair are
+  reported before the task pair, and on an edit the own pair and the autonomy
+  interlock are reported after every empty or null field and before the task
+  pair's checks.
 - **AC-COORDINATOR-CREATED-TASK-AGENT-001.4:** When the system starts with
   coordinators stored before this setting existed, it shall set each such
   coordinator's Agent for created tasks to its own agent profile and executor
@@ -142,13 +146,18 @@ guided setup.
   remains to carry a text and the request shall return 404.
 - **AC-COORDINATOR-CREATED-TASK-AGENT-001.11:** The "Runs with" line of
   `AC-COORDINATOR-PROPOSALS-005.11` shall show on a `pending` or `failed`
-  proposal card of the create-task kind, and shall be omitted when a read the
-  card's own row needs fails (the step, the workflow's default, the workspace
-  default, or the coordinator when the chain is empty or the pair is to be
-  added) or when the step or the workspace no longer exists; a failed read
+  proposal card of the create-task kind, and the server shall omit it (`runs_with`
+  null) when a read the card's own row needs fails (the step, the workflow's
+  default, the workspace default, or the coordinator and the task pair's agent
+  and executor profile status reads when the chain is empty or the pair is to
+  be added) or when the step or the workspace no longer exists; a card that
+  already shows a line for an unchanged unsettled row keeps it when only a
+  refetch read fails, and shows the incoming value whenever the row's
+  `updated_at` has moved; a failed read
   shall not fail the proposal list or read, and a row that needs no failed
-  read shall still show its line. When only the agent profile's name cannot be
-  read or is unknown, the line shall show the profile id.
+  read shall still show its line. When the agent profile's name cannot be
+  read (an error or not found) or is unknown, the line shall show the profile
+  id, and that failure shall not omit the line.
 
 ## Out of scope
 

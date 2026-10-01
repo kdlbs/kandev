@@ -71,7 +71,12 @@ a phase 3 database holding coordinators, on both dialects.
   the coordinator's own two profiles: for the setup route, step `identity`,
   field order `name`, `agent_profile_id`, `executor_profile_id`,
   `task_agent_profile_id`, `task_executor_profile_id`, first failure wins
-  ([coordinators](coordinators.md#guided-setup)).
+  ([coordinators](coordinators.md#guided-setup)), with one exception for the
+  task pair that `001.3` states: after the own pair's checks pass, both
+  task-pair fields are tested for absent, `null` or empty first (agent, then
+  executor), and only then are the task agent and the task executor checked
+  against the stores, so a nonexistent task agent with an empty task executor
+  names `task_executor_profile_id` on both create routes, as on a PATCH.
 - `PATCH .../coordinators/:cid` accepts the same two fields. Absent is
   unchanged; `null`, or empty after trimming, is 400 naming the field; a value
   equal to the stored one is accepted, is not validated and changes nothing.
@@ -80,7 +85,9 @@ a phase 3 database holding coordinators, on both dialects.
   order the route reports them today for the name, the context and the own
   pair, then an empty or `null` `task_agent_profile_id`, then an empty or
   `null` `task_executor_profile_id`; (2) the merged-row validator
-  (`patchValidator`) for the coordinator's own pair; (3) the task pair's
+  (`patchValidator`): the own agent profile, the own executor profile, then
+  `checkAutonomyInterlock`, so an interlock failure is reported before any
+  task-pair check; (3) the task pair's
   check, agent then executor, all before the write and in the same place, so an empty or `null` task-pair field is reported before any check
   failure (a changed nonexistent agent with a `null` executor names
   `task_executor_profile_id`), when the own pair and the task pair both fail
@@ -320,7 +327,8 @@ approval cannot disagree except by time), over `final_spec` when the row has
 one, else `spec`, and with the row's `starts_agent`. The agent profile shown
 is the one the table adds, or the one `Resolve` returned when nothing is
 added; a workspace addition shows `workspace`. The name is read from the agent
-profile and is the id when the profile cannot be found.
+profile and is the id when the profile cannot be found or the name read
+fails; a name read never makes `runs_with` `null`.
 
 Reads for one request are shared: the coordinator, the workspace default and
 each agent profile name are read once per request, and a step or a workflow
@@ -329,8 +337,10 @@ over one workflow makes one step read per distinct step. A failed read never
 fails the list or the read: it makes `runs_with` `null` on the rows that
 needed it only: a row needs the step and workflow reads for its own step, the
 workspace default read only when its step and workflow name no profile, and
-the coordinator read only when the chain is empty or the pair is to be
-added, so a row resolved by its step is unaffected by a failed coordinator
+the coordinator read and the task pair's two status reads (agent profile, then
+executor, stopping at the first non-ok as at approve) only when the chain is
+empty or the pair is to be added; the agent profile name read is not among them
+(it falls back to the id), so a row resolved by its step is unaffected by a failed coordinator
 read. A warn is logged, and those cards show no line. A read error on a card is
 therefore different from an approve's, which returns 500.
 
@@ -343,7 +353,14 @@ proposal row, so the refetched row's `updated_at` is equal to the cached one;
 the client merge therefore takes a non-null incoming `runs_with` for an equal
 `updated_at` when both rows are unsettled
 ([merge rule 6](proposal-cards.md#client-store)), and a `null` one (a failed
-read, or a response body that carries none) never replaces a cached value. The
+read, or a response body that carries none) never replaces a cached value
+under that rule. Under rule 3 (a later `updated_at`) the incoming row is taken
+whole, `null` `runs_with` included: a row whose `updated_at` moved was written
+(an edit, a decision), its cached line may describe an earlier spec, and
+`runs_with` is `null` on every status but `pending` and `failed` anyway. A
+failed read on a refetch of an unchanged unsettled row therefore leaves the
+line the card already shows, and the server's omission takes effect on the
+next load of the page or the next refetch whose read succeeds. The
 line does not preview a pending Edit, and the approval's own result is what
 counts. The card omits the line and shows the id as `001.11` says.
 
