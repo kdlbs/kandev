@@ -233,6 +233,7 @@
   "activityConflictStepDeleted": "The step it came from no longer exists.",
   "activityConflictStepDone": "The step it came from is now a finishing step.",
   "activityConflictStepFull": "The step it came from is full.",
+  "activityConflictFeederStartsAgent": "Undo could start an agent through a feeder step. No change was made.",
   "activityNotUndoable": "This can no longer be undone",
   "activityUndoFailed": "Undo failed. Try again.",
   "activityGone": "This action is no longer listed.",

@@ -233,6 +233,7 @@
   "activityConflictStepDeleted": "它原来所在的步骤已不存在。",
   "activityConflictStepDone": "它原来所在的步骤现在是结束步骤。",
   "activityConflictStepFull": "它原来所在的步骤已满。",
+  "activityConflictFeederStartsAgent": "撤销可能会通过馈送步骤启动代理。未做任何更改。",
   "activityNotUndoable": "此操作已无法撤销",
   "activityUndoFailed": "撤销失败。请重试。",
   "activityGone": "此操作已不在列表中。",

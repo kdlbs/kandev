@@ -61,6 +61,7 @@ func moveFixture(t *testing.T) (*Service, *Store, *Coordinator, *fakeUndoTasks) 
 	svc, store, c, _, fake := newActivityService(t, true)
 	fake.tasks["t1"] = &UndoTask{Identifier: "KAN-1", WorkflowID: "wf", WorkflowStepID: "s2"}
 	fake.steps["s1"] = &UndoStep{Name: "Todo", WorkflowID: "wf"}
+	fake.nodes = []StepNode{{ID: "s1"}}
 	seedMoveRow(t, store, c, "m1", "t1", moveOutcomeS1toS2)
 	return svc, store, c, fake
 }
@@ -193,6 +194,7 @@ func TestUndoActivity_MoveBack(t *testing.T) {
 	for _, autoStart := range []bool{false, true} {
 		svc, store, c, fake := moveFixture(t)
 		fake.steps["s1"].AutoStart = autoStart
+		fake.nodes = []StepNode{{ID: "s1", AutoStartOnEnter: autoStart}}
 		if _, err := svc.UndoActivity(context.Background(), "ws-1", c.ID, "m1"); err != nil {
 			t.Fatal(err)
 		}
@@ -206,6 +208,31 @@ func TestUndoActivity_MoveBack(t *testing.T) {
 		if len(undoneRows(t, store, c.ID)) != 1 {
 			t.Fatal("no undone row")
 		}
+	}
+}
+
+func TestUndoActivity_RefusesFeederStepThatCanStartAnAgent(t *testing.T) {
+	svc, store, c, fake := moveFixture(t)
+	fake.nodes = []StepNode{
+		{ID: "s1"},
+		{ID: "s2", PullFromStepID: "s1"},
+		{ID: "s3", PullFromStepID: "s2", AutoStartOnEnter: true},
+	}
+
+	_, err := svc.UndoActivity(context.Background(), "ws-1", c.ID, "m1")
+	assertUndoRefusal(t, err, UndoConflict, UndoReasonFeederStartsAgent)
+	if len(fake.moves) != 0 {
+		t.Fatalf("MoveTaskWithOptions called before feeder safety refusal: %+v", fake.moves)
+	}
+	if len(undoneRows(t, store, c.ID)) != 0 {
+		t.Fatal("undo marker written after feeder safety refusal")
+	}
+	row, err := store.GetActivityRow(context.Background(), store.db, c.ID, "m1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if row.UndoneAt != nil {
+		t.Fatal("original activity row marked undone after refusal")
 	}
 }
 
@@ -267,10 +294,11 @@ func TestUndoActivity_MoveQueuedBehindLimitStillMarks(t *testing.T) {
 func TestUndoActivity_MoveReadErrorsAre500NotRefusals(t *testing.T) {
 	boom := errors.New("boom")
 	cases := map[string]func(f *fakeUndoTasks){
-		"task read":    func(f *fakeUndoTasks) { f.taskErr = boom },
-		"step read":    func(f *fakeUndoTasks) { f.stepErr = boom },
-		"session read": func(f *fakeUndoTasks) { f.sessErr = boom },
-		"move failure": func(f *fakeUndoTasks) { f.moveErr = boom },
+		"task read":           func(f *fakeUndoTasks) { f.taskErr = boom },
+		"step read":           func(f *fakeUndoTasks) { f.stepErr = boom },
+		"workflow steps read": func(f *fakeUndoTasks) { f.nodesErr = boom },
+		"session read":        func(f *fakeUndoTasks) { f.sessErr = boom },
+		"move failure":        func(f *fakeUndoTasks) { f.moveErr = boom },
 	}
 	for name, mutate := range cases {
 		t.Run(name, func(t *testing.T) {

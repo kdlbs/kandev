@@ -20,6 +20,7 @@ export const MESSAGE_TEXT_KEY: Record<UndoMessageKey, string> = {
   activityConflictStepDeleted: "coordinator:activityConflictStepDeleted",
   activityConflictStepDone: "coordinator:activityConflictStepDone",
   activityConflictStepFull: "coordinator:activityConflictStepFull",
+  activityConflictFeederStartsAgent: "coordinator:activityConflictFeederStartsAgent",
   activityNotUndoable: "coordinator:activityNotUndoable",
   activityUndoFailed: "coordinator:activityUndoFailed",
   activityGone: "coordinator:activityGone",

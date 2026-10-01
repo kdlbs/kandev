@@ -233,6 +233,7 @@
   "activityConflictStepDeleted": "它原來所在的步驟已不存在。",
   "activityConflictStepDone": "它原來所在的步驟現在是結束步驟。",
   "activityConflictStepFull": "它原來所在的步驟已滿。",
+  "activityConflictFeederStartsAgent": "復原可能會透過供給步驟啟動代理程式。沒有作出任何變更。",
   "activityNotUndoable": "此操作已無法撤銷",
   "activityUndoFailed": "撤銷失敗。請重試。",
   "activityGone": "此操作已不在列表中。",

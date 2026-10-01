@@ -294,6 +294,7 @@ describe("undo", () => {
     ["step_deleted", "activityConflictStepDeleted"],
     ["step_done", "activityConflictStepDone"],
     ["step_full", "activityConflictStepFull"],
+    ["feeder_starts_agent", "activityConflictFeederStartsAgent"],
     ["something_new", "activityConflictMoved"],
     [undefined, "activityConflictMoved"],
   ])("undo_conflict reason %s shows %s with no re-read", async (reason, key) => {

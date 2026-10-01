@@ -199,28 +199,27 @@ Mockup:
   left, unarchived, shall count as moved back. When the task is in any other
   step or was archived, the system shall refuse with 409 `undo_conflict` and
   the row shall say "It has moved since".
-- **AC-COORDINATOR-ACTIVITY-LOG-003.7:** The checks of an undo of a move run in
-  this order and the first that applies decides: the task is archived or
-  missing (`archived`); the task is already in the step it left (counts as
-  moved back, no refusal); the task is in the step it was moved to, and then
-  the step it left no longer exists (`step_deleted`), that step is now a
-  completing step (`step_done`), the task has an agent session that is
-  starting or running (`agent_running`), or that step is at its task limit
-  and refuses the task (`step_full`); the task is in any other step
-  (`moved`). Each refusal is 409 `undo_conflict` carrying that reason,
-  changes nothing and leaves the row undoable. Only an optioned move refuses on a move still pending on the task (the task
-  service's move conflict, reason `moved`); undo of a move to a step that
-  does not auto-start is a plain move, which clears a pending move marker,
-  and that is accepted. The row shall say "It has moved since" for
-  `moved`, `archived` and any reason the client does not know or that is absent, "An agent is working on it. Stop it, then undo."
-  for `agent_running`, "The step it came from no longer exists." for
-  `step_deleted`, "The step it came from is now a finishing step." for
-  `step_done` and "The step it came from is full." for `step_full`. When the
-  step it left queues the task because it is at its limit, the task counts as
-  moved back.
-- **AC-COORDINATOR-ACTIVITY-LOG-003.8:** Moving a task back shall not start an
-  agent: the move enters the step without running its prompt, so the task
-  lands idle in the step it left.
+- **AC-COORDINATOR-ACTIVITY-LOG-003.7:** Undo checks in this order: archived
+  or missing task (`archived`); already at source (success); at destination,
+  then missing source (`step_deleted`), finishing source (`step_done`), active
+  session (`agent_running`), source feeds another auto-start step
+  (`feeder_starts_agent`), or full source (`step_full`); any other step
+  (`moved`). A refusal returns 409 `undo_conflict`, changes nothing and
+  leaves the row undoable. A pending move blocks only an optioned move; a
+  plain move to a non-auto-start source clears its marker and succeeds. A
+  task queued by the full source still counts as moved back. Before moving,
+  the system reads the full workflow graph; a read error returns 500, and a
+  missing source returns `step_deleted`, both without a move. The row says
+  "It has moved since" for `moved`, `archived` and unknown reasons; "An agent
+  is working on it. Stop it, then undo." for `agent_running`; "The step it
+  came from no longer exists." for `step_deleted`; "The step it came from is
+  now a finishing step." for `step_done`; "The step it came from is full."
+  for `step_full`; and "Undo could start an agent through a feeder step. No
+  change was made." for `feeder_starts_agent`.
+- **AC-COORDINATOR-ACTIVITY-LOG-003.8:** Undo shall not start an agent. It
+  skips the destination prompt and returns 409 `feeder_starts_agent` without
+  moving the task when that step can promote queued work into an auto-start
+  step.
 - **AC-COORDINATOR-ACTIVITY-LOG-003.9:** A row shall count as undoable only
   when everything undo needs is readable: an `approved` create row with a
   target task id, or an `approved` move row whose proposal outcome holds both

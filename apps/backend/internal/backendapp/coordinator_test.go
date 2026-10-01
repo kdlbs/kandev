@@ -122,7 +122,10 @@ func TestCoordinatorStandingInstructionsReader_BuildsContentFromTheCoordinator(t
 	if err != nil {
 		t.Fatalf("reader unexpected error: %v", err)
 	}
-	for _, want := range []string{"Ops", "Acme Workspace", "ws-1", "watch the release queue", "propose_task_kandev"} {
+	for _, want := range []string{
+		"Ops", "Acme Workspace", "ws-1", "watch the release queue",
+		"proposal tools available in this conversation", "A human must decide each proposal",
+	} {
 		if !strings.Contains(content, want) {
 			t.Errorf("reader content missing %q, got:\n%s", want, content)
 		}

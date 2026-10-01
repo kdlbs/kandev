@@ -204,9 +204,12 @@ retries it. Running the pass twice changes nothing the second time.
 
 The first prompt of each session carries a system block built by
 `internal/coordinator/prompt.go`: the coordinator's job (explain what needs the
-manager and why; propose tasks), the workspace name and id, the context text
+manager and why; propose changes), the workspace name and id, the context text
 between explicit delimiters marked as operator-provided, and the rule that its
-only write is `propose_task_kandev`, decided by a person. It also explains
+write actions are only those proposal tools bound to the conversation. These
+tools can propose new tasks or actions on existing tasks, when each tool is
+available. A person decides every proposal; none is applied automatically.
+It also explains
 the reference a manager's message may start with: the prefix
 `About <id> [<kind>:<ref>]: ` names the item the question is about; for `proposal` and `stall`,
 `get_coordinator_item_kandev` with that `kind` and `ref` as `id` reads its
