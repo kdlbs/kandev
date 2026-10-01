@@ -247,7 +247,8 @@ Reuse `github:workflowAwaitingApproval` for visible text and the approval portio
 Its existing English value is "Awaiting maintainer approval". This preserves established terminology and six-language localization.
 Do not add an approval-only tooltip over the icon's existing disclosure.
 Hydrated disclosures reuse `PRTaskStatusSummary` with per-PR approval and conflict rows.
-If the compact source is newer than cached full rows, the disclosure uses projected approval/conflict rows and the selected PR identities instead of those older workflow-attention rows.
+When a newer compact source requires approval, the disclosure uses the existing projected approval/conflict rows with their selected PR identities.
+A newer explicit negative uses the [negative approval disclosure](#negative-approval-disclosure) path.
 Compact same-head stale approval includes the existing localized last-known explanation and repository/PR attribution.
 Hydration failure must not leave a visible padlock with only a generic loading or unavailable message.
 
@@ -256,6 +257,39 @@ The task picker keeps its existing navigation and scroll ownership.
 Tapping the PR control opens its existing drawer and stops row navigation; dismissal restores focus to the opener.
 Retain its touch hit area, safe-area behavior, internal scroller, and desktop density.
 Verify phone rendering and a narrow fine-pointer viewport; no new overlay composition is needed.
+
+### Negative approval disclosure
+
+An explicit false flag means no linked open PR has eligible approval evidence.
+It does not mean that linked PR records or their independent status details are absent.
+The existing timestamp predicate determines whether compact approval evidence supersedes every cached full observation.
+
+`pr-task-workflow-projection.ts` owns negative disclosure derivation.
+`getTaskPRIconViewModel` applies that result to both the desktop tooltip and phone drawer.
+The negative path retains one entry per cached linked PR, including its number, title, and nonempty author.
+It removes older approval rows across all open siblings and omits stale approval notes.
+Independent review, check, queue, and merge rows remain detail-snapshot evidence.
+A negative approval flag alone does not clear generic action-required or unavailable workflow evidence.
+
+Conflict rows use the accepted compact conflict projection.
+Selected conflict identity requires repository plus PR number when multiple repositories share a number.
+Known full identities retain their metadata. A missing selected full identity uses the existing attributed compact entry.
+Superseded conflict rows do not return through a fallback.
+
+For one cached PR with the matching representative number, a newer compact merged or closed state supplies the terminal row.
+Compact lifecycle values require case normalization because the frontend mapper capitalizes them.
+One representative lifecycle cannot define every sibling state in a mixed collection.
+The negative path derives disclosure count and heading identity from its resulting entries.
+It never treats an empty positive-attention array as a complete PR disclosure.
+
+Missing legacy flags and invalid, equal, or older compact timestamps retain the current full-record behavior.
+The existing positive compact projection remains unchanged.
+Disclosure reconciliation cannot change stored observations, merge eligibility, or automation state.
+It adds no provider reads, subscriptions, persistence, or public wire fields.
+
+The [shared summary contract](../../ui/requirements/pr-task-status-summary.md) defines visible identity, terminal rows, authors, and complete PR entries.
+The existing `PRTaskIconDrawer` remains the phone surface, with its current header, single scroll owner, safe areas, and focus return.
+The [repair plan](../../../plans/pr-task-disclosure-negative-projection/plan.md) owns regression and rendered desktop/phone evidence.
 
 ### Delivery and verification
 

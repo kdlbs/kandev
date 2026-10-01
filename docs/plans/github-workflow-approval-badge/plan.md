@@ -203,3 +203,8 @@ Captures: desktop light and dark task icons, desktop workflow explanation, phone
 - The small glyph needs rendered proof at normal density; conflict priority must preserve the hidden approval text.
 - Approval is a workflow gate, not PR review approval. The badge does not assert that the current user has approval permission.
 - Provider observations retain their existing refresh latency; this package adds no faster poller.
+
+## Follow-up repair
+
+[Preserve PR details after approval clears](../pr-task-disclosure-negative-projection/plan.md) repairs the newer negative projection path.
+This completed package retains its original work-order statuses and verification results.

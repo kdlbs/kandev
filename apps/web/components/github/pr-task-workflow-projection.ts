@@ -4,9 +4,21 @@ import { parseStrictRfc3339Timestamp } from "@/lib/utils/strict-timestamp";
 import type { TaskPRInfo } from "./pr-task-automation";
 import { derivePRTaskStatusSummary } from "./pr-task-status-summary";
 
-type PRTaskStatusSummaryData = ReturnType<typeof derivePRTaskStatusSummary>;
+export type PRTaskStatusSummaryData = ReturnType<typeof derivePRTaskStatusSummary>;
 export type ProjectedPRTaskStatusSummary = Omit<PRTaskStatusSummaryData, "number"> & {
   number: number;
+};
+
+export type NegativeWorkflowApprovalDisclosure = {
+  summaries: ProjectedPRTaskStatusSummary[];
+  count: number;
+  identity?: { number: number; repository?: string };
+};
+
+type DisclosureEntry = {
+  pr?: TaskPR;
+  repository?: string;
+  summary: ProjectedPRTaskStatusSummary;
 };
 
 function compactPRLifecycleLabel(
@@ -126,6 +138,134 @@ export function getCompactWorkflowStatusSummaries(
     });
   }
   return [...summaries.values()];
+}
+
+function taskPRRepository(pr: TaskPR): string | undefined {
+  const owner = pr.owner.trim();
+  const repository = pr.repo.trim();
+  return owner && repository ? `${owner}/${repository}` : undefined;
+}
+
+function normalizeRepositoryName(repository: string | undefined): string | undefined {
+  const normalized = repository?.trim().toLowerCase();
+  return normalized || undefined;
+}
+
+function compactTerminalStateRow(state: string): PRTaskStatusSummaryData["rows"][number] | null {
+  switch (state.trim().toLowerCase()) {
+    case "merged":
+      return { kind: "state", status: "merged", tone: "merged" };
+    case "closed":
+      return { kind: "state", status: "closed", tone: "danger" };
+    default:
+      return null;
+  }
+}
+
+function isSupersededByCompactConflict(row: PRTaskStatusSummaryData["rows"][number]): boolean {
+  return (
+    row.kind === "merge" &&
+    (row.status === "ready" || row.status === "mergeable" || row.status === "conflicts")
+  );
+}
+
+function cachedPRSummary(
+  pr: TaskPR,
+  summary?: PRTaskStatusSummaryData,
+): ProjectedPRTaskStatusSummary {
+  if (summary) return { ...summary, number: pr.pr_number };
+  const author = pr.author_login.trim();
+  return {
+    number: pr.pr_number,
+    title: pr.pr_title,
+    ...(author ? { author } : {}),
+    rows: [],
+  };
+}
+
+/** Keep full PR identity while applying the newer negative approval and conflict projection. */
+export function getNegativeWorkflowApprovalDisclosure(
+  prs: TaskPR[],
+  fullSummaries: PRTaskStatusSummaryData[],
+  prInfo: TaskPRInfo,
+  compactSummaries = getCompactWorkflowStatusSummaries(prInfo),
+): NegativeWorkflowApprovalDisclosure {
+  const entries: DisclosureEntry[] = prs.map((pr, index) => {
+    const summary = cachedPRSummary(pr, fullSummaries[index]);
+    return {
+      pr,
+      repository: taskPRRepository(pr),
+      summary: {
+        ...summary,
+        rows: summary.rows.filter(
+          (row) => !(row.id === "workflow-attention" && row.status === "awaiting_approval"),
+        ),
+      },
+    };
+  });
+
+  const terminalState = compactTerminalStateRow(prInfo.state);
+  const singlePR = prs.length === 1 && prs[0].pr_number === prInfo.number ? entries[0] : undefined;
+
+  for (const compactSummary of compactSummaries) {
+    const conflictRows = compactSummary.rows.filter((row) => row.id === "merge-conflict");
+    if (conflictRows.length === 0) continue;
+
+    const repository = getProjectedPRRepository(prInfo, compactSummary.number);
+    const numberedEntries = entries.filter(
+      (entry) => entry.pr?.pr_number === compactSummary.number,
+    );
+    let matchingEntry: DisclosureEntry | undefined;
+    if (repository) {
+      matchingEntry = numberedEntries.find(
+        (entry) =>
+          normalizeRepositoryName(entry.repository) === normalizeRepositoryName(repository),
+      );
+    } else if (numberedEntries.length === 1) {
+      matchingEntry = numberedEntries[0];
+    }
+
+    if (matchingEntry) {
+      matchingEntry.summary = {
+        ...matchingEntry.summary,
+        rows: [
+          ...matchingEntry.summary.rows.filter((row) => !isSupersededByCompactConflict(row)),
+          ...conflictRows,
+        ],
+      };
+      continue;
+    }
+
+    entries.push({
+      repository,
+      summary: { ...compactSummary, rows: conflictRows },
+    });
+  }
+
+  if (terminalState && singlePR) {
+    singlePR.summary = {
+      ...singlePR.summary,
+      rows: [
+        terminalState,
+        ...singlePR.summary.rows.filter((row) => row.kind !== "state" && row.kind !== "merge"),
+      ],
+    };
+  }
+
+  const summaries = entries.map(({ summary }) => summary);
+  const onlyEntry = entries.length === 1 ? entries[0] : undefined;
+  return {
+    summaries,
+    count: summaries.length,
+    ...(onlyEntry
+      ? {
+          identity: {
+            number: onlyEntry.summary.number,
+            ...(onlyEntry.repository ? { repository: onlyEntry.repository } : {}),
+          },
+        }
+      : {}),
+  };
 }
 
 export function getCompactStaleWorkflowPRs(prInfo: TaskPRInfo) {
