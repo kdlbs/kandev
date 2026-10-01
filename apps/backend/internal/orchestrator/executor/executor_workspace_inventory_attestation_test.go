@@ -555,11 +555,7 @@ func TestLaunchPreparedSessionCrossSessionRetryCompletesUnattestedCommitBeforeLa
 		AgentProfileID: "profile-123", ExecutorID: models.ExecutorIDWorktree,
 		State: models.TaskSessionStateCreated, StartedAt: time.Now(), UpdatedAt: time.Now(),
 	}
-	repo.sessions[sessionBID] = &models.TaskSession{
-		ID: sessionBID, TaskID: taskID, TaskEnvironmentID: "env-cross-session",
-		AgentProfileID: "profile-123", ExecutorID: models.ExecutorIDWorktree,
-		State: models.TaskSessionStateCreated, StartedAt: time.Now(), UpdatedAt: time.Now(),
-	}
+
 	repo.recordWorkspaceInventoryPostRepairAttestationFunc = func(
 		context.Context, string, string, *models.WorkspaceInventoryPreservation, bool, time.Time,
 	) error {
@@ -583,6 +579,13 @@ func TestLaunchPreparedSessionCrossSessionRetryCompletesUnattestedCommitBeforeLa
 	}
 	if got := repo.taskEnvironmentRepos["env-cross-session"][0].BranchSlug; got != "main" {
 		t.Fatalf("test setup did not commit the repair row before attestation failure: branch_slug=%q", got)
+	}
+
+	repo.sessions[sessionAID].State = models.TaskSessionStateFailed
+	repo.sessions[sessionBID] = &models.TaskSession{
+		ID: sessionBID, TaskID: taskID, TaskEnvironmentID: "env-cross-session",
+		AgentProfileID: "profile-123", ExecutorID: models.ExecutorIDWorktree,
+		State: models.TaskSessionStateCreated, StartedAt: time.Now(), UpdatedAt: time.Now(),
 	}
 
 	// Session B is a completely different session first observing the
@@ -692,6 +695,9 @@ func TestResumeCrossSessionRetryCompletesUnattestedLaunchCommitBeforeLaunch(t *t
 		t.Fatalf("test setup did not commit the repair row before attestation failure: branch_slug=%q", got)
 	}
 
+	// The crashed launch is terminal before another session can attest it.
+	repo.sessions[sessionAID].State = models.TaskSessionStateFailed
+
 	// Session C is a completely different session resuming the same task.
 	// validateReuseEnvironmentInventory already passes for it (the row is
 	// canonical), so resume reaches the already-valid branch
@@ -788,6 +794,9 @@ func TestNormalResumeCrossSessionUnattestedLaunchCommitBlocksBeforeLaunch(t *tes
 	if got := repo.taskEnvironmentRepos["env-normal-resume-cross-session"][0].BranchSlug; got != "main" {
 		t.Fatalf("test setup did not commit the repair row before attestation failure: branch_slug=%q", got)
 	}
+
+	// The crashed launch is terminal before another session can attest it.
+	repo.sessions[sessionAID].State = models.TaskSessionStateFailed
 
 	_, err := exec.ResumeSession(context.Background(), repo.sessions[sessionCID], true)
 	if !errors.Is(err, models.ErrWorkspaceInventoryRecoveryConflict) {

@@ -56,12 +56,20 @@ recovery validates all of these facts:
 - `git worktree list --porcelain`, the checkout's common Git directory, HEAD,
   symbolic branch, and repository path are reciprocal;
 - the expected branch slot and observed branch/ref identity agree;
-- no competing session or runtime claims a live writer: this checks every
-  `executors_running` row for the task directly, independent of the owning
-  session's own lifecycle status, because a session can already be
-  failed/cancelled while its executor row has not yet reached a terminal
-  status (failed, stopped, or completed) — a crash before cleanup ran, or
-  cleanup still in flight.
+- no competing session or runtime claims a live writer. A durable environment
+  recovery claim covers the owning task and every inherited/shared-group
+  borrower, including a terminal session whose executor remains live. Session
+  attachment/start, runtime writes, cleanup, and ownership changes use the same
+  database admission guard. The executor retains the claim through proof,
+  metadata repair, and post-repair attestation, then releases it even on failure
+  or cancellation. Repair and attestation transactions validate claim authority.
+  An interrupted process leaves the durable claim in place and fails closed.
+
+Inspection disables Git fsmonitor and optional index writes for every Git
+command. Status does not recurse into submodules, and configured external
+clean/process filters are rejected before status can execute them. Repositories
+requiring those filters need manual recovery; changing conversion semantics
+would invalidate the status proof.
 
 The inspector captures HEAD, ref containment, porcelain status counts and
 hash, a bounded content hash over tracked, untracked, and ignored files using
@@ -103,7 +111,8 @@ commits, so the loser's insert collides with the winner's already-committed
 row and surfaces as an occupied-slot conflict instead of a deduplicated
 success.
 
-A same-idempotency-key retry is resolved before candidate selection runs:
+An explicit repair request validates its key even when inventory is already
+valid. A same-idempotency-key retry is resolved before candidate selection runs:
 the executor looks up an existing receipt for `(task_id, idempotency_key)`
 first. When one exists, the executor reconstructs the stable request identity
 from the current server-owned task, session, environment, repository slot, and
@@ -154,7 +163,8 @@ Any session reaching the already-valid branch instead completes (or is
 blocked by, if already negative) the same durable attestation a same-session
 retry already requires, before it is ever handed back as an admitted launch.
 Before accepting that row-scoped receipt, admission also binds it back to the
-current task, workspace, environment, task-repository, repository, branch slot,
+environment owner's task, workspace, environment, owner task-repository,
+repository, branch slot,
 worktree ID, canonical path hash, and observed branch/ref identity. A recorded
 positive result is launchable only when its durable post-repair evidence exists
 and exactly matches the receipt's pre-repair checkout evidence; incomplete or
@@ -180,7 +190,7 @@ propagates the original admission error unchanged (no regression versus the
 pre-repair behavior). Repair success re-validates once, then proceeds through
 the single existing launch attempt; the session-scoped `sessionLock` already
 serializes concurrent launches for that session, and the repair function's own
-active-session check rejects a competing sibling writer on the task. No
+durable environment claim rejects competing writers across all borrowing tasks. No
 primary-session flag is set or changed by this path: `SetSessionPrimary` runs
 earlier, at session creation, independent of whether the launch that follows
 repairs or launches cleanly.

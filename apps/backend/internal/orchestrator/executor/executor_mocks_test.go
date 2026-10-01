@@ -340,6 +340,7 @@ type mockRepository struct {
 	// executor-level idempotency short-circuit and attestation wiring
 	// end-to-end against the mock alone.
 	workspaceInventoryReceipts map[string]*models.WorkspaceInventoryRecoveryReceipt
+	inventoryClaims            map[string]*models.TaskEnvironmentRecoveryClaim
 	// Optional hook invoked at the top of UpdateTaskStateIfCurrentIn, before
 	// it reads task state/archived_at. Lets tests simulate the exact TOCTOU
 	// window this CAS closes: an earlier (non-transactional) archived-state

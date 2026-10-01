@@ -62,3 +62,10 @@ tests pass; current-head GitHub CI and review validation remain pending.
 - [System design](../../specs/agents/system-design/workspace-inventory-repair.md)
 - [Decision](../../decisions/2026-09-01-preserve-checkouts-during-inventory-repair.md)
 - [x] [Task 01: Workspace inventory repair](task-01-workspace-inventory-repair.md)
+
+## Architecture and security remediation
+
+Task 01 includes callback-safe Git inspection, owner-bound inherited receipts,
+session-bound explicit retries, and durable environment claims shared with
+writer admission. Regression and delivery evidence is recorded in its Results
+section and the existing Kandev task for PR #3310.

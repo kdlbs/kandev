@@ -75,7 +75,7 @@ func (e *Executor) admitLaunchWorkspaceInventory(
 	return nil
 }
 
-func (e *Executor) repairReuseEnvironmentInventory(
+func (e *Executor) repairClaimedWorkspaceInventory(
 	ctx context.Context,
 	task *v1.Task,
 	session *models.TaskSession,
@@ -84,13 +84,6 @@ func (e *Executor) repairReuseEnvironmentInventory(
 	repositories []*repoInfo,
 	idempotencyKey string,
 ) (*models.WorkspaceInventoryRecoveryReceipt, error) {
-	// persistTaskEnvironment takes this task-scoped lock before it can create
-	// or attach a worktree writer. Retain it across proof, transaction, and
-	// post-repair attestation so a sibling launch cannot materialize the same
-	// checkout between either preservation observation and the durable receipt.
-	writerLock := e.taskEnvLock(task.ID)
-	writerLock.Lock()
-	defer writerLock.Unlock()
 
 	repairer, err := e.workspaceInventoryRepairer(task, session, req, env, idempotencyKey)
 	if err != nil {
@@ -263,7 +256,7 @@ func (e *Executor) attestedWorkspaceInventoryRowsReceipt(
 			continue
 		}
 		candidate := rows[0]
-		existing, err := repairer.GetWorkspaceInventoryRepairReceiptForRow(ctx, task.ID, candidate.ID)
+		existing, err := repairer.GetWorkspaceInventoryRepairReceiptForRow(ctx, env.TaskID, candidate.ID)
 		if err != nil {
 			return nil, fmt.Errorf("load workspace inventory repair receipt for row: %w", err)
 		}
@@ -277,10 +270,14 @@ func (e *Executor) attestedWorkspaceInventoryRowsReceipt(
 		if !ok {
 			return nil, fmt.Errorf("%w: no server-owned repository identity for attested row", models.ErrWorkspaceInventoryRecoveryConflict)
 		}
-		if !workspaceInventoryRowReceiptMatches(existing, task, env, spec, info, candidate) {
+		owner, ownerInfo, err := e.workspaceInventoryReceiptOwner(ctx, existing, task, env, info)
+		if err != nil {
+			return nil, err
+		}
+		if !workspaceInventoryRowReceiptMatches(existing, owner, env, spec, ownerInfo, candidate) {
 			return nil, fmt.Errorf("%w: repaired row receipt identity no longer matches", models.ErrWorkspaceInventoryRecoveryConflict)
 		}
-		attested, err := e.attestedExistingWorkspaceInventoryReceipt(ctx, repairer, existing, spec, session, info, candidate)
+		attested, err := e.attestInventoryRow(ctx, repairer, existing, spec, session, env, info, candidate)
 		if err != nil {
 			return nil, err
 		}
@@ -381,7 +378,7 @@ func (e *Executor) attestedExistingWorkspaceInventoryReceipt(
 	before := preservationEvidenceFromModel(existing.Preservation)
 	after, inspectErr := inspectWorkspaceInventoryCandidate(ctx, info, candidate)
 	matched := inspectErr == nil && samePreservationEvidence(before, after)
-	running, err := e.workspaceInventoryRuntimeEvidence(ctx, existing.TaskID, session.ID)
+	running, err := e.workspaceInventoryRuntimeEvidence(ctx, session.TaskID, session.ID)
 	if err != nil {
 		return nil, err
 	}

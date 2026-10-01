@@ -13,6 +13,7 @@ import (
 
 	"github.com/kandev/kandev/internal/db/dialect"
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/recoveryclaim"
 )
 
 const (
@@ -34,6 +35,10 @@ func (r *Repository) RepairWorkspaceInventory(
 		return nil, err
 	}
 	defer func() { _ = tx.Rollback() }()
+
+	if err := recoveryclaim.EnsureAvailableTx(ctx, r.db, tx, repair.TaskEnvironmentID); err != nil {
+		return nil, err
+	}
 
 	// Lock the task row before checking for an existing receipt. On
 	// PostgreSQL, checking first and locking later lets two concurrent
@@ -392,8 +397,13 @@ func (r *Repository) RecordWorkspaceInventoryPostRepairAttestation(
 	if taskID == "" || idempotencyKey == "" {
 		return models.ErrWorkspaceInventoryRecoveryInvalid
 	}
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
 	var payload, requestHash string
-	err := r.db.QueryRowContext(ctx, r.db.Rebind(`
+	err = tx.QueryRowContext(ctx, r.db.Rebind(`
 		SELECT receipt_json, request_hash FROM workspace_inventory_recovery_receipts
 		WHERE task_id = ? AND idempotency_key = ?
 	`), taskID, idempotencyKey).Scan(&payload, &requestHash)
@@ -404,6 +414,9 @@ func (r *Repository) RecordWorkspaceInventoryPostRepairAttestation(
 	if err := json.Unmarshal([]byte(payload), receipt); err != nil {
 		return fmt.Errorf("decode receipt for post-repair attestation: %w", err)
 	}
+	if err := recoveryclaim.EnsureAvailableTx(ctx, r.db, tx, receipt.TaskEnvironmentID); err != nil {
+		return err
+	}
 	receipt.RequestHash = requestHash
 	receipt.PostRepairEvidence = evidence
 	receipt.PostRepairMatched = matched
@@ -413,7 +426,7 @@ func (r *Repository) RecordWorkspaceInventoryPostRepairAttestation(
 	if err != nil {
 		return fmt.Errorf("encode receipt for post-repair attestation: %w", err)
 	}
-	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
+	result, err := tx.ExecContext(ctx, r.db.Rebind(`
 		UPDATE workspace_inventory_recovery_receipts
 		SET receipt_json = ?, post_repair_matched = ?, post_repair_verified_at = ?
 		WHERE task_id = ? AND idempotency_key = ?
@@ -429,5 +442,5 @@ func (r *Repository) RecordWorkspaceInventoryPostRepairAttestation(
 	if rows != 1 {
 		return fmt.Errorf("persist post-repair attestation: %w", models.ErrWorkspaceInventoryRecoveryConflict)
 	}
-	return nil
+	return tx.Commit()
 }

@@ -1751,29 +1751,8 @@ func (e *Executor) prepareResumeRepositorySettings(
 	}
 	applyResumeRepositoryFlags(req, allRepos)
 	pinDirtyCloneRelocationToSelectedWorktrees(ctx, req, session, existingEnv)
-	if err := e.validateReuseEnvironmentInventory(ctx, req, existingEnv); err != nil {
-		if !options.RepairWorkspaceInventory {
-			return "", existingEnv, nil, err
-		}
-		receipt, repairErr := e.repairReuseEnvironmentInventory(
-			ctx, task, session, req, existingEnv, allRepos,
-			options.WorkspaceInventoryIdempotencyKey,
-		)
-		if repairErr != nil {
-			return "", existingEnv, nil, repairErr
-		}
-		req.WorkspaceInventoryRecoveryReceipt = receipt
-		if validateErr := e.validateReuseEnvironmentInventory(ctx, req, existingEnv); validateErr != nil {
-			return "", existingEnv, nil, validateErr
-		}
-	} else if req.WorkspaceReuseRequired && req.UseWorktree {
-		receipt, repairErr := e.attestedWorkspaceInventoryRowsReceipt(
-			ctx, task, session, req, existingEnv, allRepos,
-		)
-		if repairErr != nil {
-			return "", existingEnv, nil, repairErr
-		}
-		req.WorkspaceInventoryRecoveryReceipt = receipt
+	if err := e.admitResumeWorkspaceInventory(ctx, task, session, req, existingEnv, allRepos, options); err != nil {
+		return "", existingEnv, nil, err
 	}
 
 	e.reuseExistingEnvironment(ctx, req, existingEnv)

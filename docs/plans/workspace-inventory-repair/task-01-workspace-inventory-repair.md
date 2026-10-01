@@ -113,3 +113,26 @@ documentation catalog, and specification validation passed. Remote delivery and
 fresh GitHub CI remain pending. GitHub authentication has been restored; the
 latest upstream integration passed all six affected package suites, backend
 lint, documentation catalog, and specification validation before delivery.
+
+### Architecture and security remediation
+
+Preservation inspection disables Git fsmonitor and rejects external clean/process
+filters before status can execute them. Receipt admission uses the environment
+owner for inherited/shared-group checkouts, and explicit retries validate stored
+key identity even when inventory is already valid. Durable environment recovery
+claims cover proof, repair, and incomplete attestation; repair and attestation
+transactions honor those claims. Local mutexes only serialize same-task retries.
+
+Permanent regressions reproduced all four findings before fixes. Additional
+SQLite tests cover live inherited sessions, orphan runtimes, concurrent child
+admission, claim release after cancellation, and guarded metadata/attestation
+writes. Existing crash fixtures now mark the failed writer terminal before
+another session completes its attestation.
+
+Validation: full executor and worktree race suites passed; targeted inventory,
+callback, inherited-attestation, and cross-session regressions passed after the
+final production edit. PostgreSQL inventory-repair regressions passed with
+`go test -race ./internal/task/repository/sqlite -run 'TestPostgres.*WorkspaceInventory' -count=1`
+against a disposable PostgreSQL 17 database. SQL guard, documentation catalog,
+specification lint, and public-doc validators passed. Final broad checks and
+exact-head GitHub CI/review verification are recorded in the Kandev task.

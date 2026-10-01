@@ -57,11 +57,10 @@ func InspectPreservedCheckout(ctx context.Context, req PreservationRequest) (*Pr
 	if err != nil {
 		return nil, err
 	}
-	// --no-optional-locks tells Git to skip any action that would require
-	// taking a lock — in particular, status's normal opportunistic index
-	// refresh (updating cached stat info) — so this inspection can never
-	// write to .git/index even incidentally.
-	status, err := gitBytes(ctx, worktreePath, "--no-optional-locks", "status", "--porcelain=v1", "-z", "--untracked-files=all")
+	if err := rejectPreservationFilters(ctx, worktreePath); err != nil {
+		return nil, err
+	}
+	status, err := gitBytes(ctx, worktreePath, "status", "--porcelain=v1", "-z", "--untracked-files=all", "--ignore-submodules=all")
 	if err != nil {
 		return nil, err
 	}
@@ -160,12 +159,34 @@ func gitText(ctx context.Context, directory string, args ...string) (string, err
 }
 
 func gitBytes(ctx context.Context, directory string, args ...string) ([]byte, error) {
-	cmd := newGitCommand(ctx, append([]string{"-C", directory}, args...)...)
+	// Inspection must not refresh the index or invoke repository callbacks.
+	cmd := newGitCommand(ctx, append([]string{
+		"--no-optional-locks", "-c", "core.fsmonitor=false", "-c", "core.untrackedCache=false",
+		"-C", directory,
+	}, args...)...)
 	output, err := runGitCmdOutput(ctx, cmd)
 	if err != nil {
 		return nil, fmt.Errorf("%w: git inspection failed", ErrPreservedCheckoutUnproven)
 	}
 	return output, nil
+}
+
+// Clean/process filters can execute while status compares tracked content.
+// Reject them rather than changing conversion semantics and attesting a
+// different status from the repository's own configuration.
+func rejectPreservationFilters(ctx context.Context, directory string) error {
+	config, err := gitBytes(ctx, directory, "config", "--null", "--list")
+	if err != nil {
+		return err
+	}
+	for _, entry := range bytes.Split(config, []byte{0}) {
+		key, value, _ := strings.Cut(string(entry), "\n")
+		if strings.HasPrefix(key, "filter.") && value != "" &&
+			(strings.HasSuffix(key, ".clean") || strings.HasSuffix(key, ".process")) {
+			return fmt.Errorf("%w: external content filters", ErrPreservedCheckoutUnproven)
+		}
+	}
+	return nil
 }
 
 func worktreeRegistrationMatches(ctx context.Context, repositoryPath, worktreePath, refName, headOID string) bool {
