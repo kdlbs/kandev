@@ -264,6 +264,56 @@ A reset must not write the requested mode into its cache after an unconfirmed
 response. An unmet explicit start mode stops prompt dispatch and records the
 reason. A session without an explicit requested mode retains provider defaults.
 
+### Already satisfied legacy modes
+
+Criteria 007.9-007.11 extend confirmation without relaxing evidence for a mode
+mutation. Agents owns this contract because provider observations and mode
+enforcement are agent-facing runtime responsibilities, even when task startup
+is the visible failure.
+
+The active adapter can already know that the selected mode is in force. For a
+legacy-only mode catalog, `Adapter.setSessionMode` shall check this after taking
+the existing mode and config gates and validating the requested choice, before
+`beginModeChange` or sending a provider RPC. Under `a.mu`, require all of:
+
+- The connection exists, the adapter is open, and the active session is nonempty.
+- No advertised select config option with category `mode` was selected. The
+  authoritative config-option mutation path remains unchanged.
+- `modeSessionID` equals the active `sessionID`, `currentModeID` is nonempty and
+  equals the requested advertised legacy choice, and `modeOutcomeUncertain`
+  is false. A request value alone is never a current-mode observation.
+- The caller context has not been cancelled after acquiring the gates.
+
+Return a confirmed `streams.ModeResult` using that observed value and route it
+through the existing mode-event completion path. Preserve session-settings
+generation ordering and the normal source attribution. Do not call
+`noteCurrentMode` with the requested value, clear uncertainty, or manufacture a
+new provider observation. The existing mode and config gates remain the
+linearization boundary relative to other mutations and new/load/reset.
+
+If any condition fails, retain the existing RPC selection, observation-generation
+check, 750 ms settle window, and uncertainty handling. In particular, an empty
+successful legacy RPC response still cannot confirm a genuine mode change. A
+late report or a cached matching value after an uncertain request must not
+activate the short path. A replacement session must establish its own report.
+
+`NewSession`, `LoadSession`, and `ResetSession` already replace session-scoped
+mode observations. Reuse those paths. `SessionManager.applyExplicitSessionMode`
+and context-reset enforcement still require an applied result before dispatch;
+they do not special-case Auggie or omit configured settings. The explicit
+provider-restored recovery policy remains a separate, attempt-scoped exception.
+
+The no-op result proves satisfaction, not a fresh mutation. Existing startup
+confirmation logs remain valid; new diagnostics must not say an RPC was sent.
+No schema, public API, settings-file write, profile option, or new runtime flag
+is required. This preserves the existing ADR's evidence and isolation boundary;
+the design records the local decision rather than introducing another ADR.
+
+Deterministic adapter tests must assert zero provider mode RPCs and the emitted
+confirmed result. A lifecycle-to-adapter wire fixture must prove prompt admission
+for fresh and loaded matching sessions and non-admission for a different silent
+mode. Config-option clamps and timeout ambiguity remain regression controls.
+
 ### Attribution
 
 `Manager.effectiveSessionMode` returns the winning source alongside the mode:
@@ -396,3 +446,5 @@ or on network access. Backend integration coverage asserts the same contract at
 
 - [Session-control replacement plan](../../../plans/agent-permission-session-controls/plan.md)
   supersedes automatic mode overlays and completes config-option confirmation.
+- [Auggie confirmed-mode startup repair](../../../plans/auggie-confirmed-mode-startup/plan.md)
+  adds already satisfied legacy-mode handling without changing silent mutations.
