@@ -5,7 +5,12 @@ status: done
 wave: 2
 depends_on: ["01-review-markdown-preview"]
 plan: "plan.md"
-spec: "../../specs/ui/requirements/review-markdown-preview.md"
+requirements:
+  - REQ-UI-REVIEW-MARKDOWN-PREVIEW-001
+acceptance_criteria:
+  - AC-UI-REVIEW-MARKDOWN-PREVIEW-001.9
+system_design:
+  - ../../specs/ui/system-design/review-markdown-preview.md
 ---
 
 # Task 02: Render changed Markdown inside Review

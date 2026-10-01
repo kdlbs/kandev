@@ -2,6 +2,10 @@
 spec: docs/specs/ui/requirements/review-markdown-preview.md
 created: 2026-07-29
 status: done
+requirements:
+  - REQ-UI-REVIEW-MARKDOWN-PREVIEW-001
+system_design:
+  - ../../specs/ui/system-design/review-markdown-preview.md
 ---
 
 # Implementation Plan: Review Markdown Preview
