@@ -27,7 +27,7 @@ on Windows, and preparation with a selected backup could never arm cleanup.
 ## In scope
 
 - Open the snapshot in `verifySnapshot` as `file:<path>?mode=ro`, with only
-  `%`, `?`, and `#` in the path percent-escaped. Every other character,
+  `%`, `?`, and `#` in the path percent-escaped. All remaining characters,
   including a drive letter and backslashes, stays literal. The connection
   options are unchanged.
 - Add a table test that verifies a real SQLite file at a native absolute path

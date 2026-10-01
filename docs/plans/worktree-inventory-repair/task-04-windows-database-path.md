@@ -28,7 +28,7 @@ available on platforms other than Linux.
 ## In scope
 
 - Build the DSN as `file:<path>?<encoded options>`, with only `%`, `?`, and
-  `#` in the path percent-escaped. Every other character, including a drive
+  `#` in the path percent-escaped. All remaining characters, including a drive
   letter and backslashes, stays literal. Keep every mode and connection option.
 - Add table tests that open a real SQLite file at a native absolute path whose
   directory name contains a space, `#`, `%41`, or, on platforms other than
