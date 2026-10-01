@@ -111,5 +111,14 @@ engine. It blocks later transition actions, then does not commit a transition.
 can fall through when its guard is not satisfied, so a later valid move still
 counts. Regression coverage includes self-only, self-before-valid, and
 invalid-guard self-target cases in the model and engine parity tests, plus
-self-only and self-before-valid cases in the handler. Validation and commit
-details are recorded after the correction is complete.
+self-only and self-before-valid cases in the handler.
+
+Verification passed:
+
+- `go test -tags fts5 ./internal/workflow/models ./internal/workflow/engine ./internal/mcp/handlers`
+- `python3 scripts/list-docs.py validate`
+- `python3 scripts/lint-spec-files.py --all`
+- The commit hooks passed, including Go lint for the changed packages.
+
+The correction was committed as `a79821d5fd` and pushed to the contributor's
+PR branch over SSH.
