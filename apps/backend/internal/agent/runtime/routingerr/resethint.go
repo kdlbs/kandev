@@ -1,10 +1,13 @@
 package routingerr
 
 import (
+	"path"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
+	_ "time/tzdata"
 )
 
 // resetHintPattern captures a provider retry time only when the notice also
@@ -12,6 +15,10 @@ import (
 // backend and provider locations, so it must not become a circuit deadline.
 var resetHintPattern = regexp.MustCompile(
 	`(?i)try again at\s+([A-Za-z]{3,9})[\s,]+(\d{1,2})(st|nd|rd|th)?(?:[\s,]+(\d{4}))?[\s,]+(\d{1,2}):(\d{2})(?::(\d{2}))?\s*(AM|PM)?\s+(UTC|GMT|Z|[+-]\d{2}:?\d{2})(?:\s|[.,;!?]|$)`,
+)
+
+var resetClockHintPattern = regexp.MustCompile(
+	`(?i)\bresets\s+(\d{1,2})(?::(\d{2}))?\s*(AM|PM)\s+\(([^()\r\n]+)\)`,
 )
 
 var monthNames = [...]string{
@@ -44,10 +51,97 @@ func parseResetHint(text string) *time.Time {
 
 func parseResetHintAt(text string, now time.Time) *time.Time {
 	parts, ok := parseResetHintParts(text)
+	if ok {
+		return resolveResetHintYear(parts, now)
+	}
+	return parseResetClockHintAt(text, now)
+}
+
+func parseResetClockHintAt(text string, now time.Time) *time.Time {
+	match := resetClockHintPattern.FindStringSubmatch(text)
+	if match == nil {
+		return nil
+	}
+	hour, ok := parseClockHour(match[1], match[3])
 	if !ok {
 		return nil
 	}
-	return resolveResetHintYear(parts, now)
+	minute := 0
+	if match[2] != "" {
+		minute, ok = parseIntInRange(match[2], 0, 59)
+		if !ok {
+			return nil
+		}
+	}
+	location, ok := parseIANAResetLocation(match[4])
+	if !ok {
+		return nil
+	}
+
+	localNow := now.In(location)
+	firstDate := time.Date(localNow.Year(), localNow.Month(), localNow.Day(), 0, 0, 0, 0, time.UTC)
+	for dayOffset := 0; dayOffset <= 1; dayOffset++ {
+		date := firstDate.AddDate(0, 0, dayOffset)
+		candidates := resetClockWallTimeInstants(date, hour, minute, location)
+		if len(candidates) == 0 {
+			// A gap later today is the selected reset and must remain unusable.
+			// Once its wall clock has elapsed, the next calendar day can be valid.
+			if dayOffset == 0 && localNow.Hour()*60+localNow.Minute() > hour*60+minute {
+				continue
+			}
+			return nil
+		}
+		if len(candidates) == 1 {
+			if candidates[0].After(now) {
+				return &candidates[0]
+			}
+			continue
+		}
+		for _, candidate := range candidates {
+			if candidate.After(now) {
+				return nil
+			}
+		}
+	}
+	return nil
+}
+
+func resetClockWallTimeInstants(date time.Time, hour, minute int, location *time.Location) []time.Time {
+	wall := time.Date(date.Year(), date.Month(), date.Day(), hour, minute, 0, 0, time.UTC)
+	unique := make(map[int64]struct{})
+	var candidates []time.Time
+	for delta := -48 * time.Hour; delta <= 48*time.Hour; delta += 15 * time.Minute {
+		_, offset := wall.Add(delta).In(location).Zone()
+		candidate := wall.Add(-time.Duration(offset) * time.Second)
+		localized := candidate.In(location)
+		if localized.Year() != date.Year() || localized.Month() != date.Month() || localized.Day() != date.Day() ||
+			localized.Hour() != hour || localized.Minute() != minute || localized.Second() != 0 {
+			continue
+		}
+		key := candidate.UnixNano()
+		if _, exists := unique[key]; exists {
+			continue
+		}
+		unique[key] = struct{}{}
+		candidates = append(candidates, candidate)
+	}
+	sort.Slice(candidates, func(i, j int) bool { return candidates[i].Before(candidates[j]) })
+	return candidates
+}
+
+func parseIANAResetLocation(raw string) (*time.Location, bool) {
+	if strings.EqualFold(raw, "UTC") {
+		return time.UTC, true
+	}
+	if raw == "" || strings.EqualFold(raw, "Local") || !strings.Contains(raw, "/") ||
+		strings.Contains(raw, `\`) || path.IsAbs(raw) || path.Clean(raw) != raw {
+		return nil, false
+	}
+	location, err := time.LoadLocation(raw)
+	if err != nil {
+		return nil, false
+	}
+	return location, true
 }
 
 func parseResetHintParts(text string) (resetHintParts, bool) {
