@@ -440,6 +440,17 @@ type AgentManagerClient interface {
 	WaitForAgentctlReady(ctx context.Context, sessionID string) error
 }
 
+type gitStatusDetailsReader interface {
+	GetGitStatusWithDetails(context.Context, string) (*client.GitStatusResult, error)
+}
+
+func getGitStatusWithDetails(ctx context.Context, manager AgentManagerClient, sessionID string) (*client.GitStatusResult, error) {
+	if reader, ok := manager.(gitStatusDetailsReader); ok {
+		return reader.GetGitStatusWithDetails(ctx, sessionID)
+	}
+	return manager.GetGitStatusFresh(ctx, sessionID)
+}
+
 // PromptTurnIDSetter is an optional lifecycle capability. Keeping it out of
 // AgentManagerClient lets test and legacy adapters continue to work while the
 // production lifecycle carries durable turn identity with completion events.

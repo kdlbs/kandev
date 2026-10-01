@@ -1801,9 +1801,9 @@
   "splitView": "Śƥĺĩţ vĩēŵ",
   "sprite": "Śƥŕĩţē",
   "stageAll": "Śţàĝē àĺĺ",
-  "stagedFiles": "Śţàĝēđ",
+  "stagedFiles": "Śţàĝēď",
   "stageAllChangesBeforeCommitting": "Śţàĝē àĺĺ ćĥàńĝēś ƀēƒōŕē ćōḿḿĩţţĩńĝ",
-  "unstagedFiles": "Ûńśţàĝēđ",
+  "unstagedFiles": "Ũńśţàĝēď",
   "stageApproval": "Àƥƥŕōvàĺ",
   "stageCount": "Śţàĝē {{selectionCount}}",
   "stageFile": "Śţàĝē ƒĩĺē",
@@ -2563,5 +2563,13 @@
   "managedCloneRelocationConfirm": "Ḿōvē àńď ŕēśũḿē",
   "sessionRecoveryResumeDescription": "Ŕēśũḿĩńĝ ķēēƥś ŷōũŕ ƥŕēvĩōũś ḿēśśàĝēś àńď ćōńţēxţ.",
   "sessionRecoveryFreshDescription": "Śţàŕţĩńĝ ƒŕēśĥ ũśēś ţĥē śàḿē ŵōŕķśƥàćē ŵĩţĥōũţ ƥŕēvĩōũś ćōńvēŕśàţĩōń ćōńţēxţ.",
-  "sessionRecoveryCorruptedDescription": "Ŕēśũḿĩńĝ ŵĩĺĺ ĺĩķēĺŷ ƒàĩĺ àĝàĩń ƀēćàũśē ţĥĩś śēśśĩōń’ś śàvēď śţàţē ĩś ćōŕŕũƥţēď. Śţàŕţ à ƒŕēśĥ śēśśĩōń ĩńśţēàď."
+  "sessionRecoveryCorruptedDescription": "Ŕēśũḿĩńĝ ŵĩĺĺ ĺĩķēĺŷ ƒàĩĺ àĝàĩń ƀēćàũśē ţĥĩś śēśśĩōń’ś śàvēď śţàţē ĩś ćōŕŕũƥţēď. Śţàŕţ à ƒŕēśĥ śēśśĩōń ĩńśţēàď.",
+  "gitStatusChecking": "Ćĥēćķĩńĝ ćĥàńĝēď ƒĩĺēś...",
+  "gitStatusUnavailable": "Ĝĩţ śţàţũś ũńàvàĩĺàƀĺē",
+  "gitStatusRefreshFailedWithData": "Ŕēƒŕēśĥ ƒàĩĺēď. Śĥōŵĩńĝ ĺàśţ ōƀśēŕvēď ćĥàńĝēś.",
+  "gitStatusDetailsPending": "Ćĥàńĝēď ƒĩĺēś àŕē ŕēàďŷ. Ďĩƒƒś àŕē ĺōàďĩńĝ.",
+  "gitStatusRepositoryUnavailable": "{{repository}} ćōũĺď ńōţ ƀē ŕēƒŕēśĥēď.",
+  "gitDiffLoading": "Ďĩƒƒ ĩś ĺōàďĩńĝ",
+  "gitDiffUnavailable": "Ďĩƒƒ ĩś ũńàvàĩĺàƀĺē",
+  "gitStatusRetry": "Ŕēţŕŷ"
 }

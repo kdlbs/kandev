@@ -66,6 +66,9 @@ func (m *Manager) inspectManagedCloneRelocation(
 	if !managedCloneRelocationProofComplete(wt, proof) {
 		return managedCloneRelocationInspection{}, nil
 	}
+	if reused, err := m.inspectRegisteredLegacyClone(ctx, taskID, wt, proof); reused || err != nil {
+		return managedCloneRelocationInspection{}, err
+	}
 	root, destination, err := canonicalManagedCloneDestination(taskID, wt, proof)
 	if err != nil {
 		return managedCloneRelocationInspection{}, err
@@ -121,6 +124,9 @@ func (m *Manager) validateManagedMainCheckoutIdentity(
 ) error {
 	if !managedCloneRelocationProofComplete(wt, proof) {
 		return nil
+	}
+	if reused, err := m.inspectRegisteredLegacyClone(ctx, taskID, wt, proof); reused || err != nil {
+		return err
 	}
 	_, destination, err := canonicalManagedCloneDestination(taskID, wt, proof)
 	if err != nil {

@@ -104,3 +104,19 @@ func (r *controllerRepository) DeleteDelivery(context.Context, string, string, s
 	return nil
 }
 func (r *controllerRepository) Close() error { return nil }
+
+func (r *controllerRepository) CreateProviderWithSubscriptions(ctx context.Context, provider *models.Provider, events []string) error {
+	if err := r.CreateProvider(ctx, provider); err != nil {
+		return err
+	}
+	return r.ReplaceSubscriptions(ctx, provider.ID, provider.UserID, events)
+}
+func (r *controllerRepository) UpdateProviderWithSubscriptions(ctx context.Context, provider *models.Provider, events *[]string) error {
+	if err := r.UpdateProvider(ctx, provider); err != nil {
+		return err
+	}
+	if events != nil {
+		return r.ReplaceSubscriptions(ctx, provider.ID, provider.UserID, *events)
+	}
+	return nil
+}

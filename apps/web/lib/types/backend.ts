@@ -198,6 +198,9 @@ export type AgentInstallOutputPayload = {
 };
 
 export type AgentUpdateJobPayload = {
+  automatic?: boolean;
+  runtime_id?: string;
+  previous_version?: string;
   job_id: string;
   agent_name: string;
   status: "queued" | "resolving" | "updating" | "refreshing" | "succeeded" | "failed";
@@ -233,6 +236,11 @@ export type DiffUpdatePayload = {
 };
 
 export type UpdateAvailablePayload = {
+  agent_name?: string;
+  runtime_id?: string;
+  display_name?: string;
+  previous_version?: string;
+  runtime_update_status?: "available" | "succeeded" | "failed" | "interrupted";
   version: string;
   url?: string;
   title: string;
@@ -347,6 +355,7 @@ export type FileChangeFacet = {
   old_path?: string;
   diff?: string;
   diff_skip_reason?: "too_large" | "binary" | "truncated" | "budget_exceeded";
+  diff_state?: "pending" | "ready" | "unavailable";
 };
 
 export type FileInfo = {
@@ -359,6 +368,7 @@ export type FileInfo = {
   old_path?: string;
   diff?: string;
   diff_skip_reason?: "too_large" | "binary" | "truncated" | "budget_exceeded";
+  diff_state?: "pending" | "ready" | "unavailable";
   staged_change?: FileChangeFacet;
   unstaged_change?: FileChangeFacet;
 };

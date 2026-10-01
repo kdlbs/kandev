@@ -2,7 +2,8 @@
 
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { IconAlertTriangle } from "@tabler/icons-react";
+import { IconAlertTriangle, IconLoader2 } from "@tabler/icons-react";
+import { Button } from "@kandev/ui/button";
 import { PanelBody } from "./panel-primitives";
 import { DiscardDialog, AmendDialog, ResetDialog } from "./changes-panel-dialogs";
 import { ReviewProgressBar } from "./changes-panel-timeline";
@@ -82,8 +83,64 @@ function EmptyChangesPanel() {
   );
 }
 
-function ChangesPanelTimeline(props: ChangesPanelTimelineContentProps) {
-  if (!props.hasAnything) return <EmptyChangesPanel />;
+function GitStatusNotice(props: ChangesPanelBodyProps) {
+  const { t } = useTranslation();
+  if (!props.gitStatus.loading && !props.gitStatus.unavailable && !props.gitStatus.detailsPending) {
+    return null;
+  }
+  const hasFailure = props.gitStatus.unavailable;
+  return (
+    <div
+      className="mx-3 mt-2 rounded-md border border-border/60 bg-muted/30 px-2.5 py-2 text-xs"
+      data-testid="git-status-notice"
+      role={hasFailure ? "alert" : "status"}
+      aria-live={hasFailure ? "assertive" : "polite"}
+    >
+      <div className="flex min-w-0 items-start justify-between gap-2">
+        <div className="flex min-w-0 items-start gap-2">
+          {hasFailure ? (
+            <IconAlertTriangle className="mt-0.5 size-3.5 shrink-0 text-amber-500" />
+          ) : (
+            <IconLoader2 className="mt-0.5 size-3.5 shrink-0 animate-spin text-muted-foreground" />
+          )}
+          <div className="min-w-0 space-y-1">
+            {props.gitStatus.loading && <p>{t("task:gitStatusChecking")}</p>}
+            {hasFailure && (
+              <p className="font-medium text-foreground">
+                {props.gitStatus.hasPriorData
+                  ? t("task:gitStatusRefreshFailedWithData")
+                  : t("task:gitStatusUnavailable")}
+              </p>
+            )}
+            {props.gitStatus.failedRepositories.map((repository) => (
+              <p key={repository} className="break-words text-muted-foreground">
+                {t("task:gitStatusRepositoryUnavailable", { repository })}
+              </p>
+            ))}
+            {props.gitStatus.detailsPending && (
+              <p className="text-muted-foreground">{t("task:gitStatusDetailsPending")}</p>
+            )}
+          </div>
+        </div>
+        {hasFailure && props.onRetryGitStatus && (
+          <Button
+            type="button"
+            variant="outline"
+            className="h-11 min-h-11 shrink-0 px-3 md:h-7 md:min-h-7"
+            onClick={props.onRetryGitStatus}
+          >
+            {t("task:gitStatusRetry")}
+          </Button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function ChangesPanelTimeline(
+  props: ChangesPanelTimelineContentProps & Pick<ChangesPanelBodyProps, "gitStatus">,
+) {
+  if (!props.hasAnything) return props.gitStatus.membershipReady ? <EmptyChangesPanel /> : null;
   return <ChangesPanelTimelineContent {...props} />;
 }
 
@@ -97,6 +154,10 @@ export function ChangesPanelBody(props: ChangesPanelBodyProps) {
     props.prFiles.length,
     props.hasUnstaged,
     props.hasStaged,
+    props.gitStatus.membershipReady,
+    props.gitStatus.loading,
+    props.gitStatus.unavailable,
+    props.gitStatus.detailsPending,
   ].join(":");
   return (
     <PanelBody scroll={false} className="flex flex-col overflow-hidden">
@@ -109,6 +170,7 @@ export function ChangesPanelBody(props: ChangesPanelBodyProps) {
         className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden"
         data-testid="changes-panel-scroll-owner"
       >
+        <GitStatusNotice {...props} />
         {workspaceBlocked && !props.hasAnything ? (
           <WorkspaceUnavailable
             restoration={props.workspaceRestoration}

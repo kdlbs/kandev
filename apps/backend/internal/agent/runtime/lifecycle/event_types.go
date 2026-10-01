@@ -377,6 +377,13 @@ func (p GitEventPayload) GetSessionID() string {
 }
 
 type GitStatusData struct {
+	StatusState         string   `json:"status_state,omitempty"`
+	FilesComplete       bool     `json:"files_complete"`
+	DetailState         string   `json:"detail_state,omitempty"`
+	ErrorCode           string   `json:"error_code,omitempty"`
+	TrackerID           string   `json:"tracker_id,omitempty"`
+	TrackerEpoch        uint64   `json:"tracker_epoch,omitempty"`
+	SnapshotRevision    uint64   `json:"snapshot_revision,omitempty"`
 	Branch              string   `json:"branch"`
 	RemoteBranch        string   `json:"remote_branch,omitempty"`
 	HeadCommit          string   `json:"head_commit,omitempty"`

@@ -20,7 +20,7 @@ design does not add full PR records to `TaskStatusSummary`.
 
 | Requirement | Design sections |
 | --- | --- |
-| `REQ-UI-PR-TASK-STATUS-SUMMARY-001` | [Disclosure data flow](#disclosure-data-flow), [Author presentation](#author-presentation), [Mobile behavior](#mobile-behavior), [Failure and recovery](#failure-and-recovery) |
+| `REQ-UI-PR-TASK-STATUS-SUMMARY-001` | [Disclosure data flow](#disclosure-data-flow), [Disclosure scrolling](#disclosure-scrolling), [Author presentation](#author-presentation), [Mobile behavior](#mobile-behavior), [Failure and recovery](#failure-and-recovery) |
 
 ## Current data split
 
@@ -114,6 +114,33 @@ does not depend on color or an icon.
 The GitHub CI popover header receives the same optional author. This header is
 shared by the desktop status popover and the coarse-pointer PR-status drawer.
 
+## Disclosure scrolling
+
+`PRTaskIconTooltip` owns the desktop summary shell. Its maximum height uses
+`--radix-tooltip-content-available-height`, with a dynamic viewport limit and
+space for the border and collision margin. A single inner body owns vertical
+scrolling. It contains both the PR summaries and automation details.
+The outer shell retains the tooltip arrow without clipping it.
+
+The shell accepts pointer events locally. The shared Tooltip primitive remains
+unchanged. An opt-in hoverable mode in `useTaskIconTooltipState` tracks trigger
+and content presence. It reuses `useHoverPopover` for the short close delay
+across the six-pixel gap. Other task indicators retain their current defaults.
+Hydration remains trigger-owned and does not repeat when the pointer enters content.
+
+The scroll body is a named `region` using existing localized PR status copy.
+The Tooltip description is plain text derived from the rendered content, so it
+retains the PR identities and status details without placing a duplicate,
+focusable scroll body in Radix's visually hidden description node. The body
+accepts keyboard focus and shows a visible focus indicator. Focus can move from
+the trigger into the body without closing the disclosure. Escape dismisses it
+until a new disclosure interaction. Leaving both regions closes it after the
+gap delay. Unmount clears timers.
+
+The existing `PRTaskIconDrawer` keeps its fixed header and single scrolling body.
+Its `80dvh` limit and shared Drawer safe-area handling contain long summaries.
+No new provider request, persistent state, or mobile surface is necessary.
+
 ## Failure and recovery
 
 The tooltip does not show a toast for a passive disclosure error. It shows a
@@ -141,8 +168,10 @@ part of the visible summary and the accessible content.
 
 ## Mobile behavior
 
-The compact task-row indicator remains passive on coarse pointers. The task row
-keeps its existing primary navigation action and touch geometry.
+The task row keeps its primary navigation action and touch geometry. The
+existing task-icon drawer also provides explicit coarse-pointer disclosure,
+as specified by the [sidebar automation design](../../integrations/system-design/github-pr-merge-queue.md).
+It uses the same summary content as the desktop tooltip.
 
 After navigation, the existing `PRStatusChipDrawer` is the author-detail entry
 point. The drawer keeps its current safe-area handling and internal scroll
@@ -163,6 +192,16 @@ an inactive task indicator that initially has only compact summary data.
 
 Mobile Playwright coverage taps the inactive task row, opens the existing
 PR-status drawer, and checks the author identity and page containment.
+
+Scrolling coverage seeds five linked PRs with wrapped titles and automation
+details. Desktop coverage measures viewport containment, crosses the trigger
+gap, and uses real wheel input to reach the final entry. Keyboard coverage
+moves focus into the named scroll region, checks its visible focus indicator,
+and uses scroll keys before Escape. Component coverage checks that the Tooltip
+description retains rendered PR details and that the scroll region has a
+localized accessible name.
+Phone coverage taps the existing task-icon drawer and reaches the last entry.
+Short-content coverage confirms that no unnecessary scroll region appears.
 
 ## Related designs
 

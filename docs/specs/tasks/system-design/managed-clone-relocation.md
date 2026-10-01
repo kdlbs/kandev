@@ -65,6 +65,41 @@ Do not reset or alter the original worktree. Revalidate branch and HEAD before
 publishing the replacement. The ordinary admission check then validates the
 new worktree against the current source clone before the agent can start.
 
+## Unchanged legacy source admission
+
+For AC-TASKS-MANAGED-CLONE-RELOCATION-001.5 and .001.6, distinguish a layout
+candidate from the repository's registered source. The computed workspace path
+alone does not establish that a source-clone change occurred.
+
+Before requiring `ExpectedDestinationPath` to exist, the shared worktree
+inspection checks whether `Worktree.RepositoryPath` resolves to either exact
+legacy candidate in `ManagedCloneRelocationProof` (`ExpectedSourcePath` or
+`LegacyOwnerNameSourcePath`). Resolve existing paths, require containment under
+the managed root, verify the provider origin, and require the checkout's actual
+Git common directory to be that clone's `.git`. Keep ordinary linked-worktree
+registration, branch, and ownership validation in place. Main-checkout admission
+uses the same source selection and directory identity rule, retaining ordinary
+main-checkout HEAD validation, including valid detached commits. Only linked
+worktrees require the persisted branch registration proof. Cancellation and
+operational inspection errors propagate without falling back to reuse.
+
+This verified match is unchanged-source reuse. Do not require, create, or inspect
+the computed workspace destination, acquire a relocation claim, rewrite database
+paths, or run transfer-only filter/submodule/cleanliness checks. Preserve the
+normal credentials policy. Canonicalize filesystem paths without treating every
+case-insensitive string match as the same directory on case-sensitive systems.
+
+If that exact legacy match is absent, keep the existing destination validation
+and relocation path, including refusal when the registered workspace destination
+is missing. Never substitute a legacy clone for a missing current destination.
+Every selected slot must pass: an unchanged legacy slot cannot hide a foreign,
+missing, or relocation-required sibling. GitHub and GitLab share this proof;
+other provider types retain their existing handling.
+
+This restores the existing source-change boundary in the relocation ADR; it
+introduces no repository migration or new credential ownership rule. The repair
+of a live installation is not an implementation template for automatic recovery.
+
 ## Authority and publication
 
 Reuse `task_environment_recovery_claims`, the owner-generation fence, the

@@ -85,7 +85,8 @@ func (m *Manager) InspectDirtyWorktrees(
 				// changes left to protect, so let task cleanup proceed.
 				continue
 			}
-			return nil, fmt.Errorf("inspect worktree changes for %s: %w", wt.ID, statusErr)
+			return nil, fmt.Errorf("inspect worktree changes for %s: %w", wt.ID,
+				classifyWorktreeCleanupInspectionError(CleanupInspectionStageStatus, statusErr, wt))
 		}
 		files := parseDirtyWorktreeFiles(status)
 		if len(files) == 0 {

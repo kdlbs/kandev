@@ -95,15 +95,19 @@ func getPRFeedback(ctx context.Context, c Client, owner, repo string, number int
 	if checks == nil {
 		checks = []CheckRun{}
 	}
-	workflowAttention, _ := collectWorkflowAttention(ctx, c, owner, repo, pr)
+	workflowObservation, _ := collectWorkflowObservation(ctx, c, owner, repo, pr)
+	selection := selectCurrentPRChecks(pr, checks, workflowObservation.Runs)
+	checks = selection.Checks
+	checksState := selectedPRChecksState(checks, selection.ActiveWorkflowRuns)
 	hasIssues := hasFailingChecks(checks) || hasChangesRequested(reviews)
 	return &PRFeedback{
 		PR:                pr,
 		Reviews:           reviews,
 		Comments:          comments,
 		Checks:            checks,
+		ChecksState:       &checksState,
 		HasIssues:         hasIssues,
-		WorkflowAttention: workflowAttention,
+		WorkflowAttention: workflowObservation.Attention,
 	}, nil
 }
 
@@ -128,8 +132,11 @@ func getPRStatus(ctx context.Context, c Client, owner, repo string, number int) 
 	if checks == nil {
 		checks = []CheckRun{}
 	}
-	workflowAttention, _ := collectWorkflowAttention(ctx, c, owner, repo, pr)
-	return newPRStatusWithWorkflow(pr, reviews, checks, workflowAttention), nil
+	workflowObservation, _ := collectWorkflowObservation(ctx, c, owner, repo, pr)
+	selection := selectCurrentPRChecks(pr, checks, workflowObservation.Runs)
+	checks = selection.Checks
+	state := selectedPRChecksState(checks, selection.ActiveWorkflowRuns)
+	return newPRStatusWithCheckState(pr, reviews, checks, workflowObservation.Attention, &state), nil
 }
 
 // newPRStatus derives the PRStatus rollup from the three upstream reads every
@@ -147,13 +154,23 @@ func newPRStatus(pr *PR, reviews []PRReview, checks []CheckRun) *PRStatus {
 }
 
 func newPRStatusWithWorkflow(pr *PR, reviews []PRReview, checks []CheckRun, workflowAttention *WorkflowAttention) *PRStatus {
+	return newPRStatusWithCheckState(pr, reviews, checks, workflowAttention, nil)
+}
+
+func newPRStatusWithCheckState(
+	pr *PR, reviews []PRReview, checks []CheckRun, workflowAttention *WorkflowAttention, checksState *string,
+) *PRStatus {
 	reviewState, pendingReviewCount := deriveReviewSyncState(pr, reviews)
 	total, passing := countCheckResults(checks)
+	derivedChecksState := computeOverallCheckStatus(checks)
+	if checksState != nil {
+		derivedChecksState = *checksState
+	}
 	return &PRStatus{
 		PR:                                    pr,
 		WorkflowAttention:                     workflowAttention,
 		ReviewState:                           reviewState,
-		ChecksState:                           computeOverallCheckStatus(checks),
+		ChecksState:                           derivedChecksState,
 		MergeableState:                        pr.MergeableState,
 		MergeQueueState:                       pr.MergeQueueState,
 		MergeQueuePosition:                    pr.MergeQueuePosition,
@@ -187,6 +204,14 @@ func newPRStatusWithWorkflow(pr *PR, reviews []PRReview, checks []CheckRun, work
 		mergeQueuePopulated:         pr.mergeQueuePopulated,
 		mergeQueueRecoveryPopulated: pr.mergeQueueRecoveryPopulated,
 	}
+}
+
+func selectedPRChecksState(checks []CheckRun, hasActiveWorkflow bool) string {
+	state := computeOverallCheckStatus(checks)
+	if hasActiveWorkflow && state == "" {
+		return checkStatusPending
+	}
+	return state
 }
 
 // reviewSample is a normalized review row consumed by latestReviewStateByAuthor.
@@ -278,10 +303,9 @@ func countCheckResults(checks []CheckRun) (int, int) {
 			continue
 		}
 		switch c.Conclusion {
-		case checkConclusionSkipped, checkConclusionNeutral:
+		case checkConclusionCancelled, checkConclusionSkipped, checkConclusionNeutral:
 			continue
-		case checkConclusionFail, checkConclusionTimedOut,
-			checkConclusionCancelled, checkConclusionActionRequired:
+		case checkConclusionFail, checkConclusionTimedOut, checkConclusionActionRequired:
 			total++
 		default:
 			total++
@@ -304,14 +328,20 @@ func convertRawCheckRuns(raw []ghCheckRun) []CheckRun {
 			output = *cr.Output.Summary
 		}
 		checks[i] = CheckRun{
-			Name:        cr.Name,
-			Source:      checkSourceCheckRun,
-			Status:      cr.Status,
-			Conclusion:  conclusion,
-			HTMLURL:     cr.HTMLURL,
-			Output:      output,
-			StartedAt:   parseTimePtr(cr.StartedAt),
-			CompletedAt: parseTimePtr(cr.CompletedAt),
+			ID:           cr.ID,
+			Name:         cr.Name,
+			Source:       checkSourceCheckRun,
+			Status:       cr.Status,
+			Conclusion:   conclusion,
+			HTMLURL:      cr.HTMLURL,
+			Output:       output,
+			StartedAt:    parseTimePtr(cr.StartedAt),
+			CompletedAt:  parseTimePtr(cr.CompletedAt),
+			CheckSuiteID: cr.CheckSuite.ID,
+		}
+		if cr.App != nil {
+			checks[i].AppID = cr.App.ID
+			checks[i].AppSlug = cr.App.Slug
 		}
 	}
 	return checks
@@ -413,7 +443,7 @@ func convertRawStatusContexts(raw []ghStatusContext) []CheckRun {
 		case commitStatusFailure, commitStatusError:
 			conclusion = checkConclusionFail
 		case commitStatusPending:
-			status = "in_progress"
+			status = checkStatusInProgress
 			conclusion = ""
 		}
 		checks[i] = CheckRun{
@@ -432,15 +462,14 @@ func convertRawStatusContexts(raw []ghStatusContext) []CheckRun {
 	return checks
 }
 
-// mergeChecks deduplicates check runs and commit statuses by normalized name.
-// Check-run source wins over status-context; among same-source duplicates the
-// most recent entry (by StartedAt) is kept.
+// mergeChecks keeps identified check runs independent while allowing their
+// normalized names to shadow duplicate status contexts.
 func mergeChecks(checkRuns, statusChecks []CheckRun) []CheckRun {
 	merged := make([]CheckRun, 0, len(checkRuns)+len(statusChecks))
 	byKey := make(map[string]int)
 
 	for _, check := range statusChecks {
-		key := checkMergeKey(check)
+		key := "name:" + checkMergeKey(check)
 		if idx, ok := byKey[key]; ok {
 			if isNewerCheck(check, merged[idx]) {
 				merged[idx] = check
@@ -451,9 +480,23 @@ func mergeChecks(checkRuns, statusChecks []CheckRun) []CheckRun {
 		merged = append(merged, check)
 	}
 	for _, check := range checkRuns {
-		key := checkMergeKey(check)
+		key := checkRunMergeKey(check)
+		statusKey := "name:" + checkMergeKey(check)
+		if idx, ok := byKey[statusKey]; ok && merged[idx].Source == checkSourceStatusContext {
+			merged[idx] = check
+			delete(byKey, statusKey)
+			byKey[key] = idx
+			continue
+		}
 		if idx, ok := byKey[key]; ok {
-			if merged[idx].Source == checkSourceStatusContext || isNewerCheck(check, merged[idx]) {
+			if merged[idx].Source == checkSourceStatusContext {
+				if checkRunHasProviderIdentity(check) {
+					byKey[key] = len(merged)
+					merged = append(merged, check)
+					continue
+				}
+				merged[idx] = check
+			} else if isNewerCheck(check, merged[idx]) || sameCheckRunIDIsNewer(check, merged[idx]) {
 				merged[idx] = check
 			}
 			continue
@@ -462,6 +505,33 @@ func mergeChecks(checkRuns, statusChecks []CheckRun) []CheckRun {
 		merged = append(merged, check)
 	}
 	return merged
+}
+
+func checkRunMergeKey(check CheckRun) string {
+	if check.ID != 0 {
+		return fmt.Sprintf("check-id:%d", check.ID)
+	}
+	if checkRunHasProviderIdentity(check) {
+		app := ""
+		if check.AppID != 0 {
+			app = fmt.Sprintf("app-id:%d", check.AppID)
+		} else if check.AppSlug != "" {
+			app = "app-slug:" + strings.ToLower(strings.TrimSpace(check.AppSlug))
+		}
+		if check.CheckSuiteID != 0 {
+			return fmt.Sprintf("suite:%d|%s|name:%s", check.CheckSuiteID, app, checkMergeKey(check))
+		}
+		return fmt.Sprintf("%s|name:%s", app, checkMergeKey(check))
+	}
+	return "name:" + checkMergeKey(check)
+}
+
+func checkRunHasProviderIdentity(check CheckRun) bool {
+	return check.ID != 0 || check.AppID != 0 || check.AppSlug != "" || check.CheckSuiteID != 0
+}
+
+func sameCheckRunIDIsNewer(candidate, current CheckRun) bool {
+	return candidate.ID != 0 && current.ID != 0 && candidate.ID > current.ID
 }
 
 func checkMergeKey(check CheckRun) string {
@@ -649,10 +719,14 @@ func latestReviewByAuthor(reviews []PRReview) map[string]PRReview {
 	return latest
 }
 
-// hasFailingChecks returns true if any completed check run has failed.
+// hasFailingChecks returns true if any completed check has a failure conclusion.
 func hasFailingChecks(checks []CheckRun) bool {
 	for _, c := range checks {
-		if c.Status == checkStatusCompleted && c.Conclusion == checkConclusionFail {
+		if c.Status != checkStatusCompleted {
+			continue
+		}
+		switch c.Conclusion {
+		case checkConclusionFail, checkConclusionTimedOut, checkConclusionActionRequired:
 			return true
 		}
 	}

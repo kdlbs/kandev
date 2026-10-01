@@ -2,6 +2,10 @@
 
 import {
   forwardRef,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type KeyboardEventHandler,
   type FocusEventHandler,
   type MouseEventHandler,
   type PointerEventHandler,
@@ -23,12 +27,20 @@ import type { TaskPR } from "@/lib/types/github";
 import type { TaskPRTooltipHydrationStatus } from "@/hooks/domains/github/use-task-pr-tooltip-hydration";
 import { useChangeRequestTaskTooltipState } from "@/components/integrations/use-change-request-task-tooltip-state";
 import type { TaskPRAutomationSummary, TaskPRInfo } from "./pr-task-automation";
+import {
+  PRTaskStatusSummary,
+  type PRTaskStatusSummaryData,
+  type StaleWorkflowAttentionPR,
+} from "./pr-task-status-summary";
 import { PRStatusGlyph } from "./pr-status-glyph";
 export { AutomationIndicatorDots } from "./pr-status-glyph";
 
 export type PRTaskIconDisclosureProps = {
   taskId: string;
   prInfo?: TaskPRInfo;
+  disclosurePRNumber?: number;
+  disclosurePRRepository?: string;
+  disclosurePRCount?: number;
   prs: TaskPR[];
   hasFullData: boolean;
   singlePR: TaskPR | null;
@@ -42,16 +54,115 @@ export type PRTaskIconDisclosureProps = {
   content: ReactNode;
 };
 
+export function createPRTaskIconDisclosureProps({
+  taskId,
+  prInfo,
+  disclosurePRNumber,
+  disclosurePRRepository,
+  disclosurePRCount,
+  prs,
+  hasFullData,
+  singlePR,
+  readyToMerge,
+  allReadyToMerge,
+  displayState,
+  displayCount,
+  iconColor,
+  ariaLabel,
+  automation,
+  hasMergeConflicts,
+  hasWorkflowApprovalRequired,
+  summaries,
+  staleWorkflowPRs,
+  hydrationStatus,
+}: Omit<PRTaskIconDisclosureProps, "icon" | "content"> & {
+  automation: TaskPRAutomationSummary;
+  hasMergeConflicts: boolean;
+  hasWorkflowApprovalRequired: boolean;
+  summaries: PRTaskStatusSummaryData[];
+  staleWorkflowPRs: StaleWorkflowAttentionPR[];
+  hydrationStatus: TaskPRTooltipHydrationStatus;
+}): PRTaskIconDisclosureProps {
+  return {
+    taskId,
+    prInfo,
+    disclosurePRNumber,
+    disclosurePRRepository,
+    disclosurePRCount,
+    prs,
+    hasFullData,
+    singlePR,
+    readyToMerge,
+    allReadyToMerge,
+    displayState,
+    displayCount,
+    iconColor,
+    ariaLabel,
+    icon: (
+      <PRTaskIconGlyph
+        automation={automation}
+        hasMergeConflicts={hasMergeConflicts}
+        hasWorkflowApprovalRequired={hasWorkflowApprovalRequired}
+      />
+    ),
+    content: getTaskPRIconDisclosureContent({
+      hasFullData,
+      summaries,
+      staleWorkflowPRs,
+      automation,
+      hydrationStatus,
+      hasWorkflowApprovalRequired,
+    }),
+  };
+}
+
+function getTaskPRIconDisclosureContent({
+  hasFullData,
+  summaries,
+  staleWorkflowPRs,
+  automation,
+  hydrationStatus,
+  hasWorkflowApprovalRequired,
+}: {
+  hasFullData: boolean;
+  summaries: PRTaskStatusSummaryData[];
+  staleWorkflowPRs: StaleWorkflowAttentionPR[];
+  automation: TaskPRAutomationSummary;
+  hydrationStatus: TaskPRTooltipHydrationStatus;
+  hasWorkflowApprovalRequired: boolean;
+}) {
+  if (hasFullData) {
+    return (
+      <>
+        <PRTaskStatusSummary summaries={summaries} staleWorkflowPRs={staleWorkflowPRs} />
+        <TaskPRAutomationDetails summary={automation} />
+      </>
+    );
+  }
+  return (
+    <>
+      <CompactPRTooltipContent
+        status={hydrationStatus}
+        workflowApprovalRequired={hasWorkflowApprovalRequired}
+      />
+      <TaskPRAutomationDetails summary={automation} status={hydrationStatus} />
+    </>
+  );
+}
+
 export function PRTaskIconGlyph({
   automation,
   hasMergeConflicts,
+  hasWorkflowApprovalRequired,
 }: {
   automation: TaskPRAutomationSummary;
   hasMergeConflicts: boolean;
+  hasWorkflowApprovalRequired: boolean;
 }) {
   return (
     <PRStatusGlyph
       hasMergeConflicts={hasMergeConflicts}
+      hasWorkflowApprovalRequired={hasWorkflowApprovalRequired}
       autoFixEnabled={automation.autoFixEnabled}
       autoMergeEnabled={automation.autoMergeEnabled}
     />
@@ -68,7 +179,15 @@ export function PRTaskIconDrawer({
   onOpenChange: (open: boolean) => void;
   t: ReturnType<typeof useTranslation>["t"];
 }) {
-  const { prs, prInfo, singlePR, content } = props;
+  const {
+    prs,
+    prInfo,
+    singlePR,
+    content,
+    disclosurePRNumber,
+    disclosurePRRepository,
+    disclosurePRCount,
+  } = props;
   return (
     <Drawer open={open} onOpenChange={onOpenChange}>
       <DrawerTrigger asChild>
@@ -85,9 +204,15 @@ export function PRTaskIconDrawer({
       >
         <DrawerHeader className="shrink-0 border-b py-2">
           <DrawerTitle className="text-sm">
-            {prs.length > 1
-              ? t("github:pullRequestCount", { count: prs.length })
-              : t("github:pullRequestStatus", { number: singlePR?.pr_number ?? prInfo?.number })}
+            {getDrawerTitle({
+              t,
+              prs,
+              prInfo,
+              singlePR,
+              disclosurePRNumber,
+              disclosurePRRepository,
+              disclosurePRCount,
+            })}
           </DrawerTitle>
           <DrawerDescription className="sr-only">
             {t("github:pullRequestCiStatusReviewsAnd")}
@@ -107,23 +232,63 @@ export function PRTaskIconTooltip({
 }: PRTaskIconDisclosureProps & {
   tooltip: ReturnType<typeof useChangeRequestTaskTooltipState>;
 }) {
+  const { t } = useTranslation();
+  const triggerRef = useRef<HTMLElement>(null);
+  const scrollBodyRef = useRef<HTMLDivElement>(null);
+  const [tooltipDescription, setTooltipDescription] = useState(props.ariaLabel);
+  useLayoutEffect(() => {
+    const scrollBody = scrollBodyRef.current;
+    if (!scrollBody) return;
+    const description = (scrollBody.innerText || scrollBody.textContent || "")
+      .replace(/\s+/g, " ")
+      .trim();
+    if (description) setTooltipDescription(description);
+  }, [props.ariaLabel, props.content, tooltip.open]);
+  const onEscapeKeyDown = (event: Event) => {
+    if (tooltip.onEscapeKeyDown(event)) triggerRef.current?.focus();
+  };
+  const onTriggerKeyDown: KeyboardEventHandler<HTMLSpanElement> = (event) => {
+    if (event.key !== "Tab" || event.shiftKey || !tooltip.open) return;
+    event.preventDefault();
+    scrollBodyRef.current?.focus();
+  };
+
   return (
     <Tooltip open={tooltip.open}>
       <TooltipTrigger asChild>
         <PRTaskIconTrigger
           {...props}
+          ref={triggerRef}
           onPointerEnter={tooltip.onPointerEnter}
           onPointerLeave={tooltip.onPointerLeave}
           onFocus={tooltip.onFocus}
           onBlur={tooltip.onBlur}
+          onKeyDown={onTriggerKeyDown}
         />
       </TooltipTrigger>
       <TooltipContent
         sideOffset={6}
-        onEscapeKeyDown={tooltip.onEscapeKeyDown}
-        className="w-80 max-w-[calc(100vw-1rem)] p-3"
+        onEscapeKeyDown={onEscapeKeyDown}
+        onPointerEnter={tooltip.onContentPointerEnter}
+        onPointerLeave={tooltip.onContentPointerLeave}
+        onFocus={tooltip.onContentFocus}
+        onBlur={tooltip.onContentBlur}
+        aria-label={tooltipDescription}
+        className="pointer-events-auto flex w-80 max-w-[calc(100vw-1rem)] flex-col p-3"
+        style={{
+          maxHeight: "min(var(--radix-tooltip-content-available-height), calc(100dvh - 1rem))",
+        }}
       >
-        {props.content}
+        <div
+          ref={scrollBodyRef}
+          data-testid="pr-task-summary-scroll-body"
+          tabIndex={0}
+          role="region"
+          aria-label={t("github:pullRequestCiStatusReviewsAnd")}
+          className="min-h-0 flex-1 overflow-y-auto overscroll-contain rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        >
+          {props.content}
+        </div>
       </TooltipContent>
     </Tooltip>
   );
@@ -137,6 +302,7 @@ type PRTaskIconTriggerProps = PRTaskIconDisclosureProps & {
   onPointerLeave?: PointerEventHandler<HTMLSpanElement>;
   onFocus?: FocusEventHandler<HTMLSpanElement>;
   onBlur?: FocusEventHandler<HTMLSpanElement>;
+  onKeyDown?: KeyboardEventHandler<HTMLSpanElement>;
 };
 
 export const PRTaskIconTrigger = forwardRef<HTMLElement, PRTaskIconTriggerProps>(
@@ -147,6 +313,9 @@ export const PRTaskIconTrigger = forwardRef<HTMLElement, PRTaskIconTriggerProps>
       onClick,
       taskId,
       prInfo: _prInfo,
+      disclosurePRNumber: _disclosurePRNumber,
+      disclosurePRRepository: _disclosurePRRepository,
+      disclosurePRCount: _disclosurePRCount,
       prs,
       hasFullData,
       singlePR: _singlePR,
@@ -162,6 +331,7 @@ export const PRTaskIconTrigger = forwardRef<HTMLElement, PRTaskIconTriggerProps>
       onPointerLeave,
       onFocus,
       onBlur,
+      onKeyDown,
       ...triggerAttributes
     },
     ref: Ref<HTMLElement>,
@@ -175,11 +345,12 @@ export const PRTaskIconTrigger = forwardRef<HTMLElement, PRTaskIconTriggerProps>
         : undefined,
       "aria-label": ariaLabel,
     };
+    const hasMultiplePRs = displayCount > 1;
     const contents = (
       <span className="inline-flex items-center gap-0.5">
         {icon}
-        {prs.length > 1 ? (
-          <span className="text-[9px] font-semibold leading-none tabular-nums">{prs.length}</span>
+        {hasMultiplePRs ? (
+          <span className="text-[9px] font-semibold leading-none tabular-nums">{displayCount}</span>
         ) : null}
       </span>
     );
@@ -210,17 +381,48 @@ export const PRTaskIconTrigger = forwardRef<HTMLElement, PRTaskIconTriggerProps>
         {...commonAttributes}
         role="img"
         tabIndex={0}
-        className={cn("inline-flex shrink-0 items-center", prs.length > 1 && "gap-0.5", iconColor)}
+        className={cn("inline-flex shrink-0 items-center", hasMultiplePRs && "gap-0.5", iconColor)}
         onPointerEnter={onPointerEnter}
         onPointerLeave={onPointerLeave}
         onFocus={onFocus}
         onBlur={onBlur}
+        onKeyDown={onKeyDown}
       >
         {contents}
       </span>
     );
   },
 );
+
+function getDrawerTitle({
+  t,
+  prs,
+  prInfo,
+  singlePR,
+  disclosurePRNumber,
+  disclosurePRRepository,
+  disclosurePRCount,
+}: {
+  t: ReturnType<typeof useTranslation>["t"];
+  prs: TaskPR[];
+  prInfo?: TaskPRInfo;
+  singlePR: TaskPR | null;
+  disclosurePRNumber?: number;
+  disclosurePRRepository?: string;
+  disclosurePRCount?: number;
+}) {
+  const count = disclosurePRCount ?? prs.length;
+  if (count > 1) return t("github:pullRequestCount", { count });
+  if (disclosurePRRepository && disclosurePRNumber) {
+    return t("github:prTaskStatusRepositoryNumber", {
+      repository: disclosurePRRepository,
+      number: disclosurePRNumber,
+    });
+  }
+  return t("github:pullRequestStatus", {
+    number: disclosurePRNumber ?? singlePR?.pr_number ?? prInfo?.number,
+  });
+}
 
 export function TaskPRAutomationDetails({
   summary,
@@ -273,20 +475,42 @@ export function TaskPRAutomationDetails({
   );
 }
 
-export function CompactPRTooltipContent({ status }: { status: TaskPRTooltipHydrationStatus }) {
+function CompactWorkflowApprovalLabel({ required }: { required: boolean }) {
+  const { t } = useTranslation();
+  if (!required) return null;
+  return (
+    <div className="text-sm font-medium text-foreground">
+      {t("github:workflowAwaitingApproval")}
+    </div>
+  );
+}
+
+export function CompactPRTooltipContent({
+  status,
+  workflowApprovalRequired = false,
+}: {
+  status: TaskPRTooltipHydrationStatus;
+  workflowApprovalRequired?: boolean;
+}) {
   const { t } = useTranslation();
   if (status === "loading" || status === "idle") {
     return (
-      <span data-testid="pr-task-tooltip-loading" className="text-sm text-muted-foreground">
-        {t("github:taskPrDetailsLoading")}
-      </span>
+      <>
+        <CompactWorkflowApprovalLabel required={workflowApprovalRequired} />
+        <span data-testid="pr-task-tooltip-loading" className="text-sm text-muted-foreground">
+          {t("github:taskPrDetailsLoading")}
+        </span>
+      </>
     );
   }
   if (status === "unavailable") {
     return (
-      <span data-testid="pr-task-tooltip-unavailable" className="text-sm text-muted-foreground">
-        {t("github:taskPrDetailsUnavailable")}
-      </span>
+      <>
+        <CompactWorkflowApprovalLabel required={workflowApprovalRequired} />
+        <span data-testid="pr-task-tooltip-unavailable" className="text-sm text-muted-foreground">
+          {t("github:taskPrDetailsUnavailable")}
+        </span>
+      </>
     );
   }
   return null;

@@ -3,6 +3,7 @@ status: current
 system: executors
 requirements:
   - REQ-EXECUTORS-IDLE-PARKING-001
+  - REQ-EXECUTORS-IDLE-PARKING-002
 ---
 
 # Workspace ACP idle suspension design
@@ -13,6 +14,7 @@ requirements:
 The backend decides eligibility from Kandev activity. The runtime stops the exact process and preserves its recovery data.
 No OpenCode-specific quiescence endpoint, provider admission fence, or process-descendant probe is required.
 The existing agentctl disconnected-instance reaper and its stream guard remain unchanged.
+`REQ-EXECUTORS-IDLE-PARKING-002` maps to [Always-on idle reclaim](#always-on-idle-reclaim).
 
 ## Workspace policy and persistence
 
@@ -95,6 +97,21 @@ Do not silently start a fresh provider conversation.
 
 Do not assume every executor's ordinary StopInstance preserves task-owned resources. Test and adapt its suspension reason explicitly.
 Provider process-internal work beyond ACP visibility is a limitation of the opt-in retention policy, not a new eligibility prerequisite.
+
+## Always-on idle reclaim
+
+The orchestrator's idle reclaim is separate from the workspace policy. The periodic reaper and the synchronous settle points share one primitive.
+`classifyIdleReclaim` releases a runtime only for a settled session with no live agent and no active turn.
+For `WAITING_FOR_INPUT` and `IDLE` it also requires a stored resume token or row status `running`.
+
+`models.RowMustBePreserved` keeps the `executors_running` row of a resumable session.
+Lifecycle stale-execution cleanup repairs a current row that holds a resume token or has status `running`, and deletes any other current row.
+Without the row, a prompt to a waiting session returns `ErrSessionRuntimeUnavailable` and the message handler keeps the message queued.
+No code path was found that launches the runtime for it afterwards.
+Such a session therefore keeps its runtime until a prompt starts the agent, the task is torn down, or restart reconciliation handles the row.
+The usual case is a prepared workspace whose agent has not started, such as a session created for a step with another agent profile.
+The skip is logged at debug level with disposition `skipped_no_resume_token`.
+`COMPLETED` sessions keep the existing reclaim behavior with or without a token, because a tokenless completed row may be pruned.
 
 ## Settings and mobile behavior
 

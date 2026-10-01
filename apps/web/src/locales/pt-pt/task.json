@@ -2563,5 +2563,13 @@
   "managedCloneRelocationConfirm": "Mover e retomar",
   "sessionRecoveryResumeDescription": "Retomar mantém as mensagens e o contexto anteriores.",
   "sessionRecoveryFreshDescription": "Começar de novo utiliza o mesmo espaço de trabalho sem o contexto da conversa anterior.",
-  "sessionRecoveryCorruptedDescription": "É provável que retomar volte a falhar porque o estado guardado desta sessão está corrompido. Inicie uma nova sessão."
+  "sessionRecoveryCorruptedDescription": "É provável que retomar volte a falhar porque o estado guardado desta sessão está corrompido. Inicie uma nova sessão.",
+  "gitStatusChecking": "A verificar os ficheiros alterados...",
+  "gitStatusUnavailable": "O estado do Git não está disponível",
+  "gitStatusRefreshFailedWithData": "A atualização falhou. A mostrar as últimas alterações observadas.",
+  "gitStatusDetailsPending": "Os ficheiros alterados estão prontos. As diferenças estão a carregar.",
+  "gitStatusRepositoryUnavailable": "Não foi possível atualizar {{repository}}.",
+  "gitDiffLoading": "A diferença está a carregar",
+  "gitDiffUnavailable": "A diferença não está disponível",
+  "gitStatusRetry": "Tentar novamente"
 }

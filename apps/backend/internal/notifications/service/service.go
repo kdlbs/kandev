@@ -134,10 +134,7 @@ func (s *Service) CreateProvider(ctx context.Context, userID, name string, provi
 		Config:  config,
 		Enabled: enabled,
 	}
-	if err := s.repo.CreateProvider(ctx, provider); err != nil {
-		return nil, err
-	}
-	if err := s.repo.ReplaceSubscriptions(ctx, provider.ID, userID, events); err != nil {
+	if err := s.repo.CreateProviderWithSubscriptions(ctx, provider, events); err != nil {
 		return nil, err
 	}
 	return provider, nil
@@ -165,16 +162,13 @@ func (s *Service) UpdateProvider(ctx context.Context, userID, providerID string,
 	if err := s.validateProvider(provider.Type, provider.Config); err != nil {
 		return nil, err
 	}
-	if err := s.repo.UpdateProvider(ctx, provider); err != nil {
-		return nil, err
-	}
 	if updates.Events != nil {
 		if err := s.validateEvents(*updates.Events); err != nil {
 			return nil, err
 		}
-		if err := s.repo.ReplaceSubscriptions(ctx, provider.ID, provider.UserID, *updates.Events); err != nil {
-			return nil, err
-		}
+	}
+	if err := s.repo.UpdateProviderWithSubscriptions(ctx, provider, updates.Events); err != nil {
+		return nil, err
 	}
 	return provider, nil
 }
@@ -449,6 +443,9 @@ func (s *Service) dispatchProvider(ctx context.Context, userID string, provider 
 
 func (s *Service) buildSemanticMessage(ctx context.Context, taskID, eventType string, payload map[string]string) (string, string) {
 	if eventType == EventSystemUpdateAvailable {
+		if payload["agent_name"] != "" {
+			return runtimeUpdateMessage(payload)
+		}
 		return semanticMessageCopy(eventType, payload["version"])
 	}
 	title, body := semanticMessageCopy(eventType, "")
@@ -508,10 +505,7 @@ func (s *Service) ensureDefaultProviders(ctx context.Context, userID string) err
 			Config:  map[string]interface{}{},
 			Enabled: true,
 		}
-		if err := s.repo.CreateProvider(ctx, provider); err != nil {
-			return err
-		}
-		if err := s.repo.ReplaceSubscriptions(ctx, provider.ID, userID, []string{
+		if err := s.repo.CreateProviderWithSubscriptions(ctx, provider, []string{
 			EventTaskSessionClarificationAsked,
 			EventOfficeInboxItem,
 			EventSystemUpdateAvailable,
@@ -543,10 +537,7 @@ func (s *Service) ensureSystemProvider(ctx context.Context, userID string) error
 		},
 		Enabled: true,
 	}
-	if err := s.repo.CreateProvider(ctx, provider); err != nil {
-		return err
-	}
-	return s.repo.ReplaceSubscriptions(ctx, provider.ID, userID, []string{
+	return s.repo.CreateProviderWithSubscriptions(ctx, provider, []string{
 		EventTaskSessionClarificationAsked,
 		EventOfficeInboxItem,
 		EventSystemUpdateAvailable,

@@ -81,6 +81,8 @@ function purgeEnvScopedRuntime(state: SessionRuntimeSliceState, envKey: string) 
   delete state.shell.statuses[envKey];
   delete state.gitStatus.byEnvironmentId[envKey];
   delete state.gitStatus.byEnvironmentRepo[envKey];
+  delete state.gitStatus.refreshByEnvironmentId?.[envKey];
+  delete state.gitStatus.refreshByEnvironmentRepo?.[envKey];
   delete state.sessionCommits.byEnvironmentId[envKey];
   delete state.sessionCommits.loading[envKey];
   delete state.sessionCommits.refetchTrigger[envKey];
@@ -112,7 +114,12 @@ export const defaultSessionRuntimeState: SessionRuntimeSliceState = {
     activeProcessBySessionId: {},
     devProcessBySessionId: {},
   },
-  gitStatus: { byEnvironmentId: {}, byEnvironmentRepo: {} },
+  gitStatus: {
+    byEnvironmentId: {},
+    byEnvironmentRepo: {},
+    refreshByEnvironmentId: {},
+    refreshByEnvironmentRepo: {},
+  },
   environmentIdBySessionId: {},
   sessionCommits: { byEnvironmentId: {}, loading: {}, refetchTrigger: {} },
   gitCheckoutGeneration: { byEnvironmentId: {} },
@@ -567,11 +574,32 @@ export const createSessionRuntimeSlice: StateCreator<
     });
     return changed;
   },
+  setGitStatusRefresh: (taskEnvironmentId, repositoryName, refresh) =>
+    set((draft) => {
+      if (!taskEnvironmentId) return;
+      if (repositoryName === undefined) {
+        const byEnvironmentId = (draft.gitStatus.refreshByEnvironmentId ??= {});
+        if (refresh) byEnvironmentId[taskEnvironmentId] = refresh;
+        else delete byEnvironmentId[taskEnvironmentId];
+        return;
+      }
+      const byEnvironmentRepo = (draft.gitStatus.refreshByEnvironmentRepo ??= {});
+      const repoMap = (byEnvironmentRepo[taskEnvironmentId] ??= {});
+      if (refresh) repoMap[repositoryName] = refresh;
+      else {
+        delete repoMap[repositoryName];
+        if (Object.keys(repoMap).length === 0) {
+          delete draft.gitStatus.refreshByEnvironmentRepo?.[taskEnvironmentId];
+        }
+      }
+    }),
   clearGitStatus: (sessionId) =>
     set((draft) => {
       const envKey = draft.environmentIdBySessionId[sessionId] ?? sessionId;
       delete draft.gitStatus.byEnvironmentId[envKey];
       delete draft.gitStatus.byEnvironmentRepo[envKey];
+      delete draft.gitStatus.refreshByEnvironmentId?.[envKey];
+      delete draft.gitStatus.refreshByEnvironmentRepo?.[envKey];
     }),
   bumpWorkspaceFilesRefresh: (sessionId) =>
     set((draft) => {

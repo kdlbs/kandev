@@ -81,6 +81,10 @@ test.describe("managed task commands", () => {
     await expect.poll(() => readTaskStatus(apiClient, taskId), { timeout: 15_000 }).toBe(200);
     await expect.poll(() => readTaskStatus(apiClient, child.id), { timeout: 15_000 }).toBe(200);
     await expect(staleDialog).toHaveCount(0, { timeout: 5_000 });
+    await expect(testPage.locator('[data-slot="alert-dialog-overlay"]')).toHaveCount(0);
+    await expect
+      .poll(() => testPage.evaluate(() => getComputedStyle(document.body).pointerEvents))
+      .not.toBe("none");
 
     await kanban.openTaskActionsMenu(taskId);
     await testPage.getByRole("menuitem", { name: "Delete", exact: true }).click();

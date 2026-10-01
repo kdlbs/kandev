@@ -915,7 +915,6 @@ func ciAutomationBuildDeltaForPR(pr *github.TaskPR, feedback *github.PRFeedback,
 func ciAutomationCheckConclusionNeedsFix(conclusion string) bool {
 	return conclusion == ciAutomationCheckFailure ||
 		conclusion == "timed_out" ||
-		conclusion == "cancelled" ||
 		conclusion == "action_required"
 }
 

@@ -191,6 +191,34 @@ func TestUpdateUserSettingsMapsLastSeenDisplay(t *testing.T) {
 	}
 }
 
+// TestUpdateUserSettingsPreservesOmittedAgentTabCloseBehavior verifies the
+// JSON PATCH boundary leaves the saved close behavior unchanged when omitted.
+func TestUpdateUserSettingsPreservesOmittedAgentTabCloseBehavior(t *testing.T) {
+	log, err := logger.NewFromZap(zap.NewNop())
+	if err != nil {
+		t.Fatalf("logger.NewFromZap: %v", err)
+	}
+	repo := &settingsRepository{settings: &models.UserSettings{
+		AgentTabCloseBehavior: models.AgentTabCloseBehaviorHidePanel,
+	}}
+	controller := NewController(service.NewService(repo, nil, log))
+
+	var patch dto.UpdateUserSettingsRequest
+	if err := json.Unmarshal([]byte(`{}`), &patch); err != nil {
+		t.Fatalf("decode omitted settings patch: %v", err)
+	}
+	response, err := controller.UpdateUserSettings(context.Background(), patch)
+	if err != nil {
+		t.Fatalf("apply omitted settings patch: %v", err)
+	}
+	if response.Settings.AgentTabCloseBehavior != models.AgentTabCloseBehaviorHidePanel {
+		t.Fatalf("response behavior = %q, want hide_panel", response.Settings.AgentTabCloseBehavior)
+	}
+	if repo.settings.AgentTabCloseBehavior != models.AgentTabCloseBehaviorHidePanel {
+		t.Fatalf("saved behavior = %q, want hide_panel", repo.settings.AgentTabCloseBehavior)
+	}
+}
+
 // TestAzureDevOpsBrowsePreferencesRoundTripThroughSettingsAPI verifies Azure DevOps browse preferences survive update, read-back, omission, and null clearing.
 func TestAzureDevOpsBrowsePreferencesRoundTripThroughSettingsAPI(t *testing.T) {
 	conn, err := sqlx.Open("sqlite3", ":memory:")

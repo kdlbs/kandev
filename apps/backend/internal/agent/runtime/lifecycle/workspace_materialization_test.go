@@ -69,7 +69,7 @@ func TestRemoteWorkspaceProjectionFromLaunch_SkipsPrimaryWorkspaceRepository(t *
 	projection, err := remoteWorkspaceProjectionFromLaunch(&LaunchRequest{Repositories: []RepoLaunchSpec{
 		{RepositoryURL: "https://github.com/acme/one.git", RepoName: "one", BaseBranch: "main"},
 		{RepositoryURL: "https://github.com/acme/two.git", RepoName: "two", CheckoutBranch: "feature/next"},
-	}})
+	}}, false)
 	if err != nil {
 		t.Fatalf("remoteWorkspaceProjectionFromLaunch: %v", err)
 	}
@@ -78,11 +78,36 @@ func TestRemoteWorkspaceProjectionFromLaunch_SkipsPrimaryWorkspaceRepository(t *
 	}
 }
 
+func TestRemoteWorkspaceProjectionFromLaunch_IncludesPrimaryWithoutPrepareScript(t *testing.T) {
+	projection, err := remoteWorkspaceProjectionFromLaunch(&LaunchRequest{Repositories: []RepoLaunchSpec{
+		{RepositoryURL: "https://github.com/acme/one.git", RepoName: "one", BaseBranch: "main"},
+	}}, true)
+	if err != nil {
+		t.Fatalf("remoteWorkspaceProjectionFromLaunch: %v", err)
+	}
+	if len(projection) != 1 || projection[0].Destination != "one-main" || projection[0].RepositoryURL != "https://github.com/acme/one.git" {
+		t.Fatalf("projection=%+v; want the primary repository", projection)
+	}
+}
+
+func TestRemoteWorkspaceProjectionFromLaunch_SingleRepositoryUsesTheLaunchCloneURL(t *testing.T) {
+	projection, err := remoteWorkspaceProjectionFromLaunch(&LaunchRequest{
+		RepositoryID: "repository-1", RepoName: "one", BaseBranch: "main",
+		Metadata: map[string]interface{}{"repository_clone_url": "https://github.com/acme/one.git"},
+	}, true)
+	if err != nil {
+		t.Fatalf("remoteWorkspaceProjectionFromLaunch: %v", err)
+	}
+	if len(projection) != 1 || projection[0].RepositoryURL != "https://github.com/acme/one.git" {
+		t.Fatalf("projection=%+v; want the launch clone URL", projection)
+	}
+}
+
 func TestRemoteWorkspaceProjectionFromLaunch_KeepsAdditionalBranchOfPrimaryRepository(t *testing.T) {
 	projection, err := remoteWorkspaceProjectionFromLaunch(&LaunchRequest{Repositories: []RepoLaunchSpec{
 		{RepositoryURL: "https://github.com/acme/repository.git", RepoName: "repository", BaseBranch: "main"},
 		{RepositoryURL: "https://github.com/acme/repository.git", RepoName: "repository", BaseBranch: "main", CheckoutBranch: "release/2026"},
-	}})
+	}}, false)
 	if err != nil {
 		t.Fatalf("remoteWorkspaceProjectionFromLaunch: %v", err)
 	}
@@ -96,7 +121,7 @@ func TestQualifiedPRBase_RemoteWorkspaceProjectionForwardsIdentity(t *testing.T)
 	projection, err := remoteWorkspaceProjectionFromLaunch(&LaunchRequest{Repositories: []RepoLaunchSpec{
 		{RepositoryURL: "https://github.com/fork/widget.git", RepoName: "primary", BaseBranch: "main"},
 		{RepositoryURL: "https://github.com/fork/widget.git", RepoName: "fork", BaseBranch: "release/next", CheckoutBranch: "feature/work", PRNumber: 42, QualifiedPRBase: &qualifiedBase},
-	}})
+	}}, false)
 	if err != nil {
 		t.Fatalf("remoteWorkspaceProjectionFromLaunch: %v", err)
 	}

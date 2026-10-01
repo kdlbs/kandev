@@ -4,6 +4,7 @@ import { useCallback, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { useToast } from "@/components/toast-provider";
 import { useAppStore } from "@/components/state-provider";
+import { formatCompactDuration } from "@/lib/i18n/formats";
 import { useCommentsStore } from "@/lib/state/slices/comments";
 import type { PRFeedbackComment } from "@/lib/state/slices/comments";
 import { useGitHubStatus } from "@/hooks/domains/github/use-github-status";
@@ -139,10 +140,9 @@ function PRChecksSection({
   const aggregateCounts = useMemo(() => deriveAggregateCounts(pr), [pr]);
 
   const { precise, byBucket } = useMemo(() => {
-    // Treat empty `feedback.checks` the same as "feedback not loaded yet" so
-    // we keep showing the aggregate counts. Some mock paths return empty
-    // arrays without errors, and we don't want the popover to flash 0/0/0.
-    if (!feedback?.checks || feedback.checks.length === 0) {
+    // A loaded empty list is authoritative. The selected workflow may be active
+    // before its dependent jobs exist, so aggregate counts would invent checks.
+    if (!feedback?.checks) {
       return { precise: null as CountsView | null, byBucket: null };
     }
     const counts = bucketCheckCounts(feedback.checks);
@@ -164,7 +164,7 @@ function PRChecksSection({
   const rows: ChangeRequestCheckRow[] = byBucket
     ? CHECK_GROUP_ORDER.flatMap((kind) =>
         byBucket[kind].map((group) => ({
-          id: `${kind}:${group.workflow}`,
+          id: `${kind}:${group.id}`,
           label: group.workflow,
           state: normalizedCheckState(kind),
           detail:
@@ -183,7 +183,11 @@ function PRChecksSection({
       counts={{ passed: counts.passed, pending: counts.inProgress, failed: counts.failed }}
       rows={rows}
       loading={isFetching && !byBucket}
-      emptyLabel={t("github:noChecksHaveStarted")}
+      emptyLabel={
+        feedback?.checks?.some((check) => check.conclusion === "cancelled")
+          ? t("github:checksNotSuccessful")
+          : t("github:noChecksHaveStarted")
+      }
       passRateLabel={t("github:passRate")}
       groupLabels={{
         success: t("github:checkBucketPassed"),
@@ -240,10 +244,10 @@ function PRPopoverFooter({
 }
 
 function formatElapsedShort(seconds: number): string {
-  if (seconds < 60) return `${seconds}s`;
+  if (seconds < 60) return formatCompactDuration(seconds, "second");
   const minutes = Math.floor(seconds / 60);
-  if (minutes < 60) return `${minutes}m`;
-  return `${Math.floor(minutes / 60)}h`;
+  if (minutes < 60) return formatCompactDuration(minutes, "minute");
+  return formatCompactDuration(Math.floor(minutes / 60), "hour");
 }
 
 function ReconnectGitHubBlock() {

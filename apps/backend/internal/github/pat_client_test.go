@@ -270,7 +270,7 @@ func TestPATClient_ListCheckRunsPaginatesCheckRuns(t *testing.T) {
 		}
 		if r.URL.Query().Get("page") == "2" {
 			w.WriteHeader(http.StatusOK)
-			_, _ = w.Write([]byte(`{"check_runs":[{"name":"late failure","status":"completed","conclusion":"failure","html_url":"https://checks/fail"}]}`))
+			_, _ = w.Write([]byte(`{"check_runs":[{"id":52,"name":"late failure","status":"completed","conclusion":"failure","html_url":"https://checks/fail","app":{"id":18,"slug":"github-actions"},"check_suite":{"id":109}}]}`))
 			return
 		}
 		w.Header().Set("Link", `<https://api.github.com/repos/acme/widget/commits/sha/check-runs?per_page=100&page=2>; rel="next"`)
@@ -290,11 +290,20 @@ func TestPATClient_ListCheckRunsPaginatesCheckRuns(t *testing.T) {
 	if got := computeOverallCheckStatus(checks); got != "failure" {
 		t.Fatalf("overall check status = %q, want failure; checks=%#v", got, checks)
 	}
+	var late *CheckRun
+	for i := range checks {
+		if checks[i].Name == "late failure" {
+			late = &checks[i]
+		}
+	}
+	if late == nil || late.ID != 52 || late.AppID != 18 || late.AppSlug != "github-actions" || late.CheckSuiteID != 109 {
+		t.Fatalf("page-two provider identity = %+v, checks=%#v", late, checks)
+	}
 }
 
 func TestPATClient_ListWorkflowRunsPaginatesAndListsAttemptJobs(t *testing.T) {
 	c, requests := newLinkPaginatedPATServer(t, "/repos/acme/widget/actions/runs", []string{
-		`{"workflow_runs":[{"id":7,"run_attempt":1,"workflow_id":9,"name":"Run tests","event":"pull_request","status":"completed","conclusion":"action_required","head_sha":"sha","head_branch":"feature","head_repository":{"full_name":"contributor/widget-fork","name":"widget-fork","owner":{"login":"contributor"}},"html_url":"https://github.com/acme/widget/actions/runs/7","created_at":"2026-09-01T10:00:00Z","updated_at":"2026-09-01T10:00:00Z","pull_requests":[]}]}`,
+		`{"workflow_runs":[{"id":7,"check_suite_id":88,"run_attempt":1,"workflow_id":9,"name":"Run tests","event":"pull_request","status":"completed","conclusion":"action_required","head_sha":"sha","head_branch":"feature","head_repository":{"full_name":"contributor/widget-fork","name":"widget-fork","owner":{"login":"contributor"}},"html_url":"https://github.com/acme/widget/actions/runs/7","created_at":"2026-09-01T10:00:00Z","updated_at":"2026-09-01T10:00:00Z","pull_requests":[]}]}`,
 		`{"workflow_runs":[{"id":8,"run_attempt":1,"workflow_id":10,"name":"Lint","event":"pull_request","status":"completed","conclusion":"success","head_sha":"sha","head_branch":"feature","html_url":"https://github.com/acme/widget/actions/runs/8","created_at":"2026-09-01T10:00:00Z","updated_at":"2026-09-01T11:00:00Z","pull_requests":[]}]}`,
 	})
 
@@ -302,7 +311,7 @@ func TestPATClient_ListWorkflowRunsPaginatesAndListsAttemptJobs(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListWorkflowRuns: %v", err)
 	}
-	if len(runs) != 2 || runs[0].HeadRepoOwner != "contributor" || runs[0].HeadRepoName != "widget-fork" {
+	if len(runs) != 2 || runs[0].HeadRepoOwner != "contributor" || runs[0].HeadRepoName != "widget-fork" || runs[0].CheckSuiteID != 88 {
 		t.Fatalf("runs = %#v", runs)
 	}
 	if len(*requests) != 2 {

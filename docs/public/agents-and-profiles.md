@@ -24,7 +24,7 @@ Open **Settings > Agents** (`/settings/agents`). Kandev scans the host on which 
 
 ![Settings > Agents showing detected agent CLIs, profiles, configured status, unavailable status, update indicators, and New profile controls.](../screenshots/settings-agents.png)
 
-The production registry currently shows Auggie, Claude, Codex, Copilot, Gemini, OpenCode, Amp, Qwen, iFlow (beta), Droid, Kilocode, Pi, Cursor, Kimi, Kiro, Qoder, Trae, `omp`, Devin, Grok, Hermes, Goose, Muse, and Antigravity. An entry is usable only when its executable is supported on the current platform and available to the Kandev process. Development and E2E profiles can add mock agents that are not product integrations.
+The production registry currently shows Auggie, Claude, Codex, Copilot, Gemini, OpenCode, Amp, Qwen, iFlow (beta), Droid, Kilocode, Pi, Cursor, Kimi, Kiro, Qoder, Trae, `omp`, Devin, Grok, Hermes, Goose, Muse, Antigravity, and MiniMax. An entry is usable only when its executable is supported on the current platform and available to the Kandev process. Development and E2E profiles can add mock agents that are not product integrations.
 
 Hermes launches with `hermes acp`. Install the required `hermes` executable from its **Settings > Agents** card, which runs the official Hermes installer. Hermes currently supports task and workspace sessions. Office-assigned skill injection is not yet supported.
 
@@ -45,6 +45,72 @@ Native sessions show response and turn token usage in the chat footer. A provide
 After a completed turn, use **Fork conversation** to create another session through that turn. The new session keeps the task and executor, and files remain shared in the workspace. It does not create a branch or worktree. Native Codex subagents and background commands stay within the session; they do not become separate Kandev tasks.
 
 Codex questions sent through Kandev's `ask_user_question_kandev` MCP tool or through the native app-server `item/tool/requestUserInput` method use the normal clarification UI. Native options and permitted free-text answers map back to Codex's answer format. Secret questions fail closed because Kandev's clarification flow stores answers in the conversation. If Codex resolves a pending request, Kandev closes the corresponding clarification.
+
+### MiniMax Code
+
+MiniMax uses the official [MiniMax Code](https://github.com/MiniMax-AI/minimax-code)
+CLI directly through `mcode acp`. Install it from **Settings > Agents > Browse**,
+or install the tested release with npm:
+
+```bash
+npm install -g @minimax-ai/code@0.5.10 --registry=https://registry.npmjs.org/ --ignore-scripts=false --include=optional --allow-scripts=@minimax-ai/code,better-sqlite3
+mcode --version
+```
+
+Use a supported Node.js version (22.19+ in the 22 series, 24.2+ in the 24 series,
+or 25/26). The optional SQLite dependency and its installation scripts must be
+allowed. Kandev reports MiniMax installed only when `mcode` is on its PATH and
+responds to `--version`; npm alone does not count as an installation.
+
+Sign in as the operating-system user running Kandev. For a mainland China
+account use `mcode login --no-browser`; for a Global account use:
+
+```bash
+env -u MINIMAX_DATA_DIR -u MAVIS_DATA_DIR \
+  -u __MAVIS_RUNTIME_DATA_DIR -u __MAVIS_RUNTIME_PROFILE \
+  mcode login --region global --no-browser
+```
+
+Choose **Mainland China** or **Global** when Kandev opens the login setup.
+The selected login terminal prints a browser authorization link. Close an existing
+sign-in terminal before choosing a different region in another tab. After login,
+click **Done** to refresh
+capabilities, create a MiniMax profile, and choose a model from the native
+catalog. Subscription access stays with MiniMax Code; no OpenCode wrapper or
+static API key is required.
+
+Native catalog entries currently include MiniMax-M3, M3.1-Flash-Preview,
+MiniMax-M2.7-highspeed and MiniMax-M2.7. Available models and thinking variants
+come from your CLI/account and may change. The native defaults for the two M3
+models are 512k context, with an optional 1M window; M2.7 models use 200k.
+These are upstream catalog values, not guaranteed account entitlements.
+MiniMax's ACP interface currently accepts text prompts and does not advertise
+image, audio or video inputs, even when the underlying model supports media.
+
+Kandev retains the native ACP provider/model/variant identifiers in profiles.
+CLI passthrough translates them into `--model provider/model#variant` and uses
+`--session <id>` or `--continue` for resume. Structured sessions use ACP model
+selection, permission requests, MCP configuration, cancellation and session load.
+Kandev does not add a MiniMax permission bypass flag.
+
+MiniMax owns its config, subscription credentials and sessions under
+`~/.minimax`. Kandev's native integration targets that default directory and
+removes `MINIMAX_DATA_DIR`, `MAVIS_DATA_DIR`, `__MAVIS_RUNTIME_DATA_DIR` and
+`__MAVIS_RUNTIME_PROFILE` from agent launches and POSIX login. If you already use a named
+MiniMax profile or a custom data directory, sign in to the default directory
+for this integration. MiniMax's installation directory `~/.minimax-code` is
+separate from its data directory.
+
+The login terminal requires a POSIX host shell. On native Windows, sign in with
+`mcode login --no-browser` outside Kandev after clearing the four data/profile
+override variables above from that shell. Otherwise login can target a
+directory that Kandev's ACP runtime does not use.
+
+Containers persist an isolated `.minimax` directory at `/root/.minimax`.
+Remote/container executors need their own installation and native login inside
+that environment. Kandev does not copy host OAuth tokens: native credential
+records include the absolute auth-directory identity and cannot be treated as
+portable credentials. No provider or account fallback is injected on failure.
 
 ### Muse command surfaces
 
@@ -101,7 +167,7 @@ The status shown on this page is authoritative for the current host. A CLI that 
 ### Update a managed agent runtime
 
 The update icon is available on managed Claude, Codex, OpenCode, Copilot,
-Gemini, Pi, and Muse agent cards. It updates the runtime on the Kandev host.
+Gemini, Pi, and Muse agent cards when Kandev owns their managed runtime. It prepares the runtime on the Kandev host.
 
 Each managed runtime has a reviewed Kandev default. If you have not selected a
 version, Kandev uses that exact default for probes, sessions, standalone
@@ -135,14 +201,14 @@ the control has no dot but remains usable.
 2. Review the current version, active version, available stable versions, and command.
 3. Keep the latest version selected for a normal update, or select an older stable version to roll back.
 4. Select **Update runtime**, **Roll back runtime**, or **Repair runtime**.
-5. Wait for the exact version to prepare and pass its ACP capability probe.
+5. Wait for the exact version to prepare and pass its runtime capability probe.
 
-OpenCode has one additional host-runtime rule. When the `opencode` executable
-is on the Kandev host `PATH`, the update installs the selected `opencode-ai`
-package version globally and the follow-up capability probe runs that same
-executable. Containers, SSH executors, and hosts without that executable keep
-using the managed `npx` runtime. This keeps the update result aligned with the
-runtime that Kandev will use for host utility calls.
+When the `opencode` executable is on the Kandev host `PATH`, Kandev treats it
+as externally managed. The runtime update section links to OpenCode's supported
+upgrade guidance instead of changing a global installation. Hosts without that
+executable use the managed `npx` runtime. Containers and SSH executors retain
+their existing executor-safe command and selected version; updating an external
+host CLI does not update those environments.
 
 Kandev enables the action only after the backend validates the selected version
 against the trusted package catalogue. It does not accept package names, npm
@@ -160,6 +226,8 @@ configuration options, commands, and runtime version without a page reload.
   in their own environment. Running sessions and containers are unchanged.
 - If preparation, ACP validation, authentication, or persistence fails, Kandev keeps the previous active version and capability catalogue. Select another stable version or retry the same target.
 - Kandev may prepare the exact version again if npm removes its cache entry. Kandev does not own an offline package inventory, and global npm cache cleanup is not required.
+
+When a native OpenCode installation is present on the host, its vendor update guidance stays separate from **Manage fallback versions**. That control selects the managed package used by remote and container launches; it does not update the native host or a remote native installation. Update, rollback and return to the Kandev default remain available for the managed fallback. A rejected or busy manual request leaves automatic-update consent unchanged; an accepted manual selection turns it off.
 
 #### Recover a stale npm runtime lookup
 
@@ -203,6 +271,52 @@ Do not use `npm cache clean --force` as the normal recovery step. It removes
 unrelated npm data and does not target the stale execution tree. If the
 specialized retry cannot resolve the runtime, check that the Kandev service
 uses the expected npm installation and configured registry. Run `npm config get registry` as the Kandev service user to inspect the registry used by that process. Then use the runtime update controls to select and prepare another trusted stable version.
+
+### Runtime notifications and automatic updates
+
+Kandev checks enabled, available agent runtimes in the background, including
+native CLIs with a verified release source. Outside Settings, an **agent runtime
+updates** indicator remains visible while a known newer version is available.
+Notifications name the affected runtime and link directly to its row in
+**Settings > Agents > Agent runtime updates**. The existing update-available
+notification preferences apply; repeated notices for the same runtime and version
+are suppressed across reloads.
+
+The **Agent runtime updates** section is at the bottom of **Settings > Agents**,
+after your installed agents, and starts collapsed. Expand it to manage runtime
+policies. Notification and indicator links open the section automatically and
+reveal their destination. Collapsing the section preserves unsaved policy changes.
+
+The runtime section shows the selected or observed version, latest known version,
+and who manages the installation. **Unknown** means Kandev could not verify the
+version or release source. It does not mean the runtime is up to date. Unavailable
+and disabled registrations remain listed separately, without background checks.
+Offline and source failures do not create error notifications.
+
+Automatic updates are off by default. An administrator can enable **Automatic
+updates** for each eligible managed runtime, then select the shared **Save changes**
+action. This consent applies to the Kandev installation and survives reloads.
+Kandev checks on startup and every 15 minutes; successful release lookups are
+cached for six hours and failed lookups for 15 minutes.
+
+An automatic update prepares a stable exact version and validates it before
+activating it for future launches. Running sessions keep their existing process
+and version. The retained result records the old and target versions. If
+preparation, validation, or activation fails, that attempt preserves the previous
+selection. Kandev reports the failure and does not repeatedly retry that target. An interrupted
+update has an unconfirmed result; review the current selection before retrying.
+
+Use **Manage versions** to retry manually, choose an older stable version, or
+return to the Kandev default. A manual version choice turns off automatic updates,
+so Kandev does not undo your choice. Disabling automatic updates also prevents a
+candidate still being prepared from activating. To retry automatically after a
+failure, turn the option off and save, then turn it on and save again.
+
+Externally managed npm packages and native CLIs show **Manual update guidance**
+when vendor documentation is available. Their supported vendor or package-manager
+updates remain owned by the operator. Kandev does not infer update authority from
+`PATH` or run an unverified global updater. Custom commands, virtual agents, and
+other runtimes without a supported updater explicitly show the unsupported state.
 
 <details>
 <summary>Add a custom terminal agent</summary>

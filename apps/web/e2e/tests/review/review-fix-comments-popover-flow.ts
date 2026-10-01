@@ -1,7 +1,8 @@
 import { expect, type Locator, type Page } from "@playwright/test";
 import { SessionPage } from "../../pages/session-page";
 import type { ApiClient } from "../../helpers/api-client";
-import type { SeedData } from "../../fixtures/test-base";
+import { resetSeedRepositoryCheckout, type SeedData } from "../../fixtures/test-base";
+import type { BackendContext } from "../../fixtures/backend";
 
 // The single file the `/e2e:review-cumulative-setup` scenario produces. A
 // pending comment must reference a file present in the diff for the "Fix
@@ -67,7 +68,12 @@ export async function seedComments(testPage: Page, sessionId: string): Promise<S
   return comments;
 }
 
-export async function seedReviewTask(testPage: Page, apiClient: ApiClient, seedData: SeedData) {
+export async function seedReviewTask(
+  backend: BackendContext,
+  apiClient: ApiClient,
+  seedData: SeedData,
+) {
+  resetSeedRepositoryCheckout(seedData, backend.tmpDir);
   return apiClient.createTaskWithAgent(
     seedData.workspaceId,
     "Review Fix Comments Popover E2E",

@@ -830,6 +830,11 @@ jobs:
           go-version-file: apps/backend/go.mod
           cache-dependency-path: apps/backend/go.sum
 
+      - name: Test Windows copy-file glob tokenization
+        run: >-
+          go test -race -v ./internal/worktree/copyfiles
+          -run '^(TestParseSpecs_GlobTokenization|TestParseSpecs_NativeEscapes|TestCopyPlan_GlobTokenization|TestCopyPlan_UnclosedClassKeepsFollowingEntries|TestValidateSpec_GlobAdjacentSuffix)$'
+
       # Compile-checks every `*_windows.go` file (pty/conpty wrapper, job-object
       # launcher, shell, signals, sysprocattr, vscode cleanup, …). The rest of
       # the suite is build-tag-gated out automatically.
@@ -849,7 +854,7 @@ jobs:
         # The process package is large and the race detector is slow on
         # windows-latest. Go's default package timeout is 10 minutes, which can
         # terminate a healthy suite before the workflow's 30-minute job cap.
-        run: go test -race -v -timeout 25m ./internal/agentctl/server/process/... ./internal/agent/runtime/agentctl/launcher/... ./internal/common/ptyexec/... ./internal/backendapp/ownershiplock/... ./internal/system/storage/workspaces/...
+        run: go test -race -v -json -timeout 25m ./internal/agentctl/server/process/... ./internal/agent/runtime/agentctl/launcher/... ./internal/common/ptyexec/... ./internal/backendapp/ownershiplock/... ./internal/system/storage/workspaces/...
 
       - name: Test Windows managed runtime cache repair
         run: go test -race -v ./internal/agent/managedruntime -run TestRemoveNpxExecutionTreeTreatsMissingWindowsChildAsAbsent
@@ -870,6 +875,14 @@ jobs:
           go test -race -v
           -run '^(TestExplicitLocalRepositoryWindowsPathSemantics|TestListDirectory.*|TestDriveRootsFromMask|TestSplitAbsForRoot)$'
           ./internal/task/service
+
+      # Keep SQLite path coverage targeted: other tests in these packages
+      # assert POSIX file modes or depend on Git path output.
+      - name: Test Windows SQLite database paths
+        shell: bash
+        run: |
+          go test -race -tags fts5 -v ./internal/system/backups -run '^TestVerifySnapshotOpensNativeAbsolutePath$'
+          go test -race -tags fts5 -v ./internal/task/inventoryrepair -run '^TestOpenDatabase(Reads|Writes)NativeAbsolutePath$'
 
       - name: Test Cursor project slug path normalization
         run: go test -race -v ./internal/agent/mcpconfig -run '^TestDeriveCursorProjectSlug$'
