@@ -98,7 +98,8 @@ guided setup.
   is closed or the setup is left; going Back or Change within the same setup
   keeps it. While the agent profile list has not loaded, the agent field shall
   stay empty, and it shall pre-fill when the list arrives unless it was
-  edited. An existing coordinator's page shall show its stored values and
+  edited. The same holds while the workspace default has not loaded. An
+  existing coordinator's page shall show its stored values and
   pre-fill nothing.
 - **AC-COORDINATOR-CREATED-TASK-AGENT-001.7:** The guided setup's Review shall show
   an "Agent for created tasks" row, owned by Identity, whose value is the agent
@@ -120,9 +121,21 @@ guided setup.
   (`AC-COORDINATOR-COORDINATORS-002.7`, `002.10`), the system shall keep the
   coordinator's conversation and its configuration revision unchanged. When
   that save changes a stored value, the system shall publish
-  `coordinator.updated` once after the save commits, so open proposal cards
+  `coordinator.updated` after the save commits, as the only event of that
+  request (a request that also changes the autonomy publishes the autonomy
+  event alone), so open proposal cards
   refetch their "Runs with" line (`AC-COORDINATOR-PROPOSALS-005.11`); a save
   that changes no stored value shall publish nothing.
+
+- **AC-COORDINATOR-CREATED-TASK-AGENT-001.10:** When
+  `AC-COORDINATOR-PROPOSALS-002.16` refuses an approval, the proposal's error
+  shall be exactly one of: "Agent for created tasks is not usable: the agent
+  profile was removed." (agent `missing`), "Agent for created tasks is not
+  usable: the agent profile uses CLI passthrough, which created tasks cannot
+  use here." (agent `passthrough`), or "Agent for created tasks is not usable:
+  the executor was removed." (executor `missing`), choosing the agent's when
+  both apply. When the coordinator or its workspace no longer exists, no row
+  remains to carry a text and the request shall return 404.
 
 ## Out of scope
 
