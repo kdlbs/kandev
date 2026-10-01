@@ -206,7 +206,7 @@
   "saveAzureDevopsView": "Azure DevOps 뷰 저장",
   "savedCredential": "저장된 자격 증명",
   "saveFailed": "저장 실패: {{error}}",
-  "saveViewDescription": "이 워크스페이스의 현재 {{kind}}을 저장합니다.",
+  "saveViewDescription": "이 워크스페이스의 현재 {{kind}}를 저장합니다.",
   "saving": "저장 중...",
   "savingEllipsis": "저장 중...",
   "selectAProjectToViewIts": "보드를 보려면 프로젝트를 선택하세요.",

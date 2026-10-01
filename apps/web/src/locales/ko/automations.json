@@ -53,7 +53,7 @@
   "cronHelp": "표준 5필드 cron 또는 단축키 ({{shortcuts}})",
   "delete": "삭제",
   "deleteAutomationTitle": "자동화를 삭제하시겠습니까?",
-  "deleteAutomationDescription": "{{name}}을 영구적으로 삭제합니다. 이 작업은 되돌릴 수 없습니다.",
+  "deleteAutomationDescription": "{{name}}을(를) 영구적으로 삭제합니다. 이 작업은 되돌릴 수 없습니다.",
   "deleteAll": "모두 삭제",
   "deleteAllRuns": "모든 실행 삭제",
   "deleteAllRunsDescription": "이 자동화의 모든 실행 기록(현재 로드되지 않은 것 포함)과 관련 작업을 영구적으로 제거합니다. 되돌릴 수 없습니다.",

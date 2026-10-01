@@ -53,8 +53,8 @@
   "taskDeleteCompleted_other": "{{count}}개 작업을 삭제했습니다.",
   "taskUnarchived": "작업 아카이브 해제됨",
   "unarchive": "아카이브 해제",
-  "unarchivedBranchesMissing_one": "브랜치 {{branches}}이 더 이상 로컬이나 원격에 없습니다. 다음 세션은 기본 브랜치에서 새로 시작합니다.",
-  "unarchivedBranchesMissing_other": "브랜치 {{branches}}이 더 이상 로컬이나 원격에 없습니다. 다음 세션은 기본 브랜치에서 새로 시작합니다.",
+  "unarchivedBranchesMissing_one": "{{branches}} 브랜치는 더 이상 로컬이나 원격에 없습니다. 다음 세션은 기본 브랜치에서 새로 시작합니다.",
+  "unarchivedBranchesMissing_other": "{{branches}} 브랜치는 더 이상 로컬이나 원격에 없습니다. 다음 세션은 기본 브랜치에서 새로 시작합니다.",
   "unarchivedTaskRestored": "작업이 복원되었습니다.",
   "unarchiveTask": "작업 아카이브 해제"
 }

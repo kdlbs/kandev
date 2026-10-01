@@ -46,7 +46,7 @@
   "customTemplateDescription": "처음부터 자신만의 에이전트 워크플로를 만듭니다.",
   "cycle": "순환",
   "delete": "삭제",
-  "deleteAndArchiveTasks": "작업 삭제 및 아카이브",
+  "deleteAndArchiveTasks": "워크플로 삭제 및 작업 아카이브",
   "deleteStep": "단계 삭제",
   "deleteStepAffectsTasks_one": "{{stepName}}을 삭제하면 {{count}}개 작업에도 영향을 줍니다.",
   "deleteStepAffectsTasks_other": "{{stepName}}을 삭제하면 {{count}}개 작업에도 영향을 줍니다.",

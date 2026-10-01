@@ -272,9 +272,9 @@
   "placement.moved": "워크스페이스를 이동했습니다.",
   "placement.failed": "워크스페이스를 이동하지 못했습니다.",
   "placement.ownerOnly": "워크스페이스 소유자만 이동할 수 있습니다",
-  "idlePolicyDescription": "이 작업공간에서 쉬고 있는 ACP 에이전트를 일시 중지해 자원 사용을 줄입니다. 기본적으로 꺼져 있습니다.",
+  "idlePolicyDescription": "이 워크스페이스에서 쉬고 있는 ACP 에이전트를 일시 중지해 리소스 사용을 줄입니다. 기본적으로 꺼져 있습니다.",
   "idlePolicyResumeDescription": "작업을 열거나 메시지를 보내면 선택한 세션이 다시 시작됩니다.",
-  "idlePolicyTitle": "자원 절약",
+  "idlePolicyTitle": "리소스 절약",
   "idleSuspensionEnabled": "쉬는 ACP 에이전트 일시 중지",
   "idleTimeoutMinutes": "유휴 시간 제한(분)",
   "idleTimeoutMustBePositive": "0보다 큰 정수를 입력하세요."

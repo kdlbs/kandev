@@ -86,7 +86,7 @@
   "statusRunning": "실행 중",
   "statusWaiting": "대기 중",
   "statusReadyForReview": "리뷰 준비 완료",
-  "pendingClarification": "확인",
+  "pendingClarification": "설명 요청",
   "pendingPermission": "권한",
   "pendingNone": "없음",
   "taskTypeStandard": "표준",

@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import {
+  formatCompactDuration,
   formatDate,
   formatNumber,
   formatRelative,
@@ -105,6 +106,23 @@ describe("formatSidebarElapsedTime", () => {
 
   afterAll(async () => {
     await activateLocale("en");
+  });
+});
+
+describe("formatCompactDuration", () => {
+  afterAll(async () => {
+    await activateLocale("en");
+  });
+
+  it.each([
+    ["en", "42s", "5m", "3h", "2d"],
+    ["ko", "42초", "5분", "3시간", "2일"],
+  ] as const)("formats compact units in %s", async (locale, seconds, minutes, hours, days) => {
+    await activateLocale(locale);
+    expect(formatCompactDuration(42, "second")).toBe(seconds);
+    expect(formatCompactDuration(5, "minute")).toBe(minutes);
+    expect(formatCompactDuration(3, "hour")).toBe(hours);
+    expect(formatCompactDuration(2, "day")).toBe(days);
   });
 });
 
