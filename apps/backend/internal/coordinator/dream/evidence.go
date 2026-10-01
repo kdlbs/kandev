@@ -44,6 +44,10 @@ You may call list_coordinator_turns_kandev to read turn digests.
 
 `
 
+// evidenceBudget is what the evidence block may hold once the frame that
+// precedes it is counted against the opening message's character cap.
+var evidenceBudget = MaxEvidenceChars - utf8.RuneCountInString(Frame)
+
 // Turn is one completed non-dream turn as the opening message projects it.
 type Turn struct {
 	ID      string
@@ -102,7 +106,7 @@ func BuildEvidence(turns []Turn, decisions []Decision) Evidence {
 		}
 		line := decisionLine(d)
 		n := utf8.RuneCountInString(line)
-		if used+n > MaxEvidenceChars-len("</data>\n") {
+		if used+n > evidenceBudget-len("</data>\n") {
 			break
 		}
 		b.WriteString(line)

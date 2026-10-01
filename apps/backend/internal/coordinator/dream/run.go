@@ -55,9 +55,6 @@ func (s *Scheduler) run(ctx context.Context, c *coordinator.Coordinator, p plan)
 // fail stores a failure on a context that outlives the dream's own. A fallback
 // write that fails leaves the row to lease expiry.
 func (s *Scheduler) fail(id, reason string, ctx context.Context) {
-	if cause := context.Cause(ctx); reason == ReasonRunError && errors.Is(cause, context.DeadlineExceeded) {
-		reason = ReasonTimeout
-	}
 	if _, err := s.d.Store.FailDream(context.WithoutCancel(ctx), id, reason, s.d.Clock()); err != nil {
 		s.d.Log.Warn("dream fail write", zap.String("dream_id", id), zap.Error(err))
 	}

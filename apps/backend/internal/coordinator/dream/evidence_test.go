@@ -38,6 +38,9 @@ func TestEvidenceCharCap(t *testing.T) {
 	if n := utf8.RuneCountInString(e.Message); n > MaxEvidenceChars {
 		t.Fatalf("message has %d runes", n)
 	}
+	if n := utf8.RuneCountInString(Frame + e.Message); n > MaxEvidenceChars {
+		t.Fatalf("frame plus message has %d runes, cap %d", n, MaxEvidenceChars)
+	}
 	if len(e.TurnIDs) == 0 || len(e.TurnIDs) >= 100 {
 		t.Fatalf("turns kept = %d, want some but not all", len(e.TurnIDs))
 	}

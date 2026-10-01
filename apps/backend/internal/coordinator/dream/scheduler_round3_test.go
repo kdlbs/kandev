@@ -177,3 +177,18 @@ func TestTurnLine_KeepsActionNamesInsideTheEnvelope(t *testing.T) {
 		t.Fatalf("line escapes the envelope: %q", line)
 	}
 }
+
+func TestHealth_NextAfterFollowsTheLastDreamStart(t *testing.T) {
+	f := newFixture(t)
+	f.seedEvidence(6)
+	f.sch.Tick(context.Background(), f.coord.ID)
+	row := f.waitFinished()
+	in, err := f.sch.healthInput(context.Background(), f.coord)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := row.StartedAt.Add(Spacing)
+	if in.NextAfter == nil || !in.NextAfter.Equal(want) {
+		t.Fatalf("NextAfter = %v, want %v (start of the last dream plus spacing)", in.NextAfter, want)
+	}
+}

@@ -214,7 +214,12 @@ func (h *Handlers) refuseCoordinator(
 ) (bool, *ws.Message, error) {
 	// A dream episode's refusals are written nowhere: the episode has no row a
 	// turn could read, and a failed read records nothing either.
-	if dream, err := h.coordinatorSvc.IsDreamEpisodeTask(ctx, principal.CallerTaskID); err != nil || dream {
+	dream, dreamErr := h.coordinatorSvc.IsDreamEpisodeTask(ctx, principal.CallerTaskID)
+	if dreamErr != nil {
+		h.logger.Warn("coordinator refusal not recorded: dream episode check failed",
+			zap.String("coordinator_id", principal.CoordinatorID), zap.Error(dreamErr))
+	}
+	if dreamErr != nil || dream {
 		response, _, respErr := coordinatorUnknownAction(msg)
 		return true, response, respErr
 	}

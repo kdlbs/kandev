@@ -43,14 +43,16 @@ func (s *Scheduler) healthInput(ctx context.Context, c *coordinator.Coordinator)
 	if last != nil && last.Status == coordinator.DreamFailed {
 		in.LastFailed, in.LastFailedReason = true, last.Reason
 	}
+	if last != nil {
+		next := last.StartedAt.Add(Spacing)
+		in.NextAfter = &next
+	}
 	accepted, err := st.LastAcceptedDream(ctx, c.ID)
 	if err != nil {
 		return in, fmt.Errorf("health: last accepted dream: %w", err)
 	}
 	if accepted != nil && accepted.FinishedAt != nil {
 		in.LastAcceptedAt = accepted.FinishedAt
-		next := accepted.FinishedAt.Add(Spacing)
-		in.NextAfter = &next
 	}
 	if in.DebtSince, err = s.debtSince(ctx, c.ID, accepted, now); err != nil {
 		return in, fmt.Errorf("health: evidence: %w", err)
