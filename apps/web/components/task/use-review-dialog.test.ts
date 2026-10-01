@@ -133,6 +133,45 @@ describe("buildReviewGitStatusFiles", () => {
   });
 });
 
+describe("nested repository review status", () => {
+  it("keeps the live root status while submodule statuses hydrate", () => {
+    const rootDiff = "@@ -1 +1,2 @@\n parent base\n+parent working-tree change\n";
+    const outerScope = "vendor/lib";
+    const innerScope = "vendor/lib/vendor/inner";
+    const innerPath = "src/lib.ts";
+    const rootKey = `\u0000${README_PATH}`;
+    const outerKey = `${outerScope}\u0000${README_PATH}`;
+    const innerKey = `${innerScope}\u0000${innerPath}`;
+    const rootFiles = { [README_PATH]: { ...file(), diff: rootDiff } };
+    const outerFiles = { [README_PATH]: file() };
+    const innerFiles = { [innerPath]: file(innerPath) };
+
+    const result = buildReviewGitStatusFiles(
+      status(rootFiles),
+      [
+        { repository_name: outerScope, status: status(outerFiles) },
+        { repository_name: innerScope, status: status(innerFiles) },
+      ],
+      1,
+    );
+
+    expect(result.isMultiRepo).toBe(true);
+    expect(result.files?.[rootKey]).toMatchObject({
+      path: README_PATH,
+      repository_name: "",
+      diff: rootDiff,
+    });
+    expect(result.files?.[outerKey]).toMatchObject({
+      path: README_PATH,
+      repository_name: outerScope,
+    });
+    expect(result.files?.[innerKey]).toMatchObject({
+      path: innerPath,
+      repository_name: innerScope,
+    });
+  });
+});
+
 describe("legacy composite file replay", () => {
   it("repairs pathless composite files before the Review dialog reads them", () => {
     const result = buildReviewGitStatusFiles(
