@@ -189,6 +189,17 @@ func runDreamReportConformance(t *testing.T, store *Store) {
 		t.Fatalf("second page = %+v", page)
 	}
 
+	// A dream's episode task resolves to its coordinator, like a conversation task.
+	if id, ok, err := store.CoordinatorForConversationTask(ctx, "task-1"); err != nil || !ok || id != "c2" {
+		t.Fatalf("episode task lookup = %q %v %v", id, ok, err)
+	}
+	if isDream, err := store.IsDreamEpisodeTask(ctx, "task-1"); err != nil || !isDream {
+		t.Fatalf("IsDreamEpisodeTask = %v %v", isDream, err)
+	}
+	if isDream, _ := store.IsDreamEpisodeTask(ctx, "other-task"); isDream {
+		t.Fatal("an unrelated task is not a dream task")
+	}
+
 	// Evidence reads: the oldest turn start scans as a time on both dialects.
 	if first, err := store.FirstLedgerTurnAt(ctx, "c5"); err != nil || first != nil {
 		t.Fatalf("first turn of an empty ledger = %v %v", first, err)

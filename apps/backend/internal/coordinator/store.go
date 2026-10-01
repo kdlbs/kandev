@@ -286,7 +286,8 @@ func (s *Store) GetCoordinatorByID(ctx context.Context, id string) (*Coordinator
 func (s *Store) CoordinatorForConversationTask(ctx context.Context, taskID string) (string, bool, error) {
 	var id string
 	err := s.ro.GetContext(ctx, &id, s.ro.Rebind(`
-		SELECT id FROM coordinators WHERE conversation_task_id = ?`), taskID)
+		SELECT id FROM coordinators WHERE conversation_task_id = ?
+		UNION SELECT coordinator_id FROM coordinator_dreams WHERE episode_task_id = ?`), taskID, taskID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", false, nil
 	}

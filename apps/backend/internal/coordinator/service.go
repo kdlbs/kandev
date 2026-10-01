@@ -755,3 +755,12 @@ func (s *Service) SetContainment(c *ContainmentChecker) { s.containment = c }
 
 // Containment returns the injected containment checker, or nil before wiring.
 func (s *Service) Containment() *ContainmentChecker { return s.containment }
+
+// Store returns the coordinator store, for the composition root's wiring of
+// the packages that read it directly.
+func (s *Service) Store() *Store { return s.store }
+
+// IsDreamEpisodeTask reports whether taskID is a dream's episode task.
+func (s *Service) IsDreamEpisodeTask(ctx context.Context, taskID string) (bool, error) {
+	return s.store.IsDreamEpisodeTask(ctx, taskID)
+}

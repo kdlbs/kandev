@@ -542,3 +542,12 @@ func rowsChanged(res sql.Result, err error, what string) (bool, error) {
 
 // NewDreamID returns a fresh dream or item id.
 func NewDreamID() string { return uuid.NewString() }
+
+// IsDreamEpisodeTask reports whether taskID is the episode task of a dream.
+func (s *Store) IsDreamEpisodeTask(ctx context.Context, taskID string) (bool, error) {
+	var n int
+	if err := s.ro.GetContext(ctx, &n, s.ro.Rebind(`SELECT COUNT(*) FROM coordinator_dreams WHERE episode_task_id = ?`), taskID); err != nil {
+		return false, fmt.Errorf("check dream episode task: %w", err)
+	}
+	return n > 0, nil
+}
