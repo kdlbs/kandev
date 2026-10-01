@@ -3,7 +3,6 @@ import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { type Page } from "@playwright/test";
 import { expect, resetSeedRepositoryCheckout, test } from "../../fixtures/test-base";
-import { watchWs } from "../../helpers/causal-waits";
 import type { SeedData } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
 import {
