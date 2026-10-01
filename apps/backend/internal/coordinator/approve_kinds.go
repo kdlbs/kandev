@@ -137,7 +137,11 @@ func (s *Service) completeKind(ctx context.Context, exec KindExecutor, proposal 
 	}
 	s.publishCoordinatorUpdated(ctx, proposal.WorkspaceID, proposal.CoordinatorID)
 	s.logger.Info("proposal approved", zap.String("proposal_id", proposal.ID), zap.String("kind", proposal.Kind), zap.String("task_id", target))
-	return s.store.GetProposal(ctx, proposal.WorkspaceID, proposal.CoordinatorID, proposal.ID, s.phase2)
+	approved, err := s.store.GetProposal(ctx, proposal.WorkspaceID, proposal.CoordinatorID, proposal.ID, s.phase2)
+	if err == nil {
+		s.notifyApproved(ctx, approved)
+	}
+	return approved, err
 }
 
 func (s *Service) failKind(ctx context.Context, exec KindExecutor, proposal *Proposal, token, text string) (*Proposal, error) {

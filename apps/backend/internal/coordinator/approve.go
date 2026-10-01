@@ -519,7 +519,11 @@ func (s *Service) completeApproval(ctx context.Context, workspaceID, coordinator
 	s.logger.Info("proposal approved",
 		zap.String("proposal_id", proposalID), zap.String("coordinator_id", coordinatorID),
 		zap.String("workspace_id", workspaceID), zap.String("task_id", taskID))
-	return s.store.GetProposal(ctx, workspaceID, coordinatorID, proposalID, s.phase2)
+	approved, err := s.store.GetProposal(ctx, workspaceID, coordinatorID, proposalID, s.phase2)
+	if err == nil {
+		s.notifyApproved(ctx, approved)
+	}
+	return approved, err
 }
 
 // failApproval runs step 5's failure fence (the same fence completeApproval

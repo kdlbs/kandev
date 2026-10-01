@@ -138,6 +138,7 @@ func (s *Service) UndoActivity(ctx context.Context, workspaceID, coordinatorID, 
 		return nil, err
 	}
 	s.afterUndo(ctx, row)
+	s.notifyUndone(ctx, row)
 	s.publishCoordinatorUpdated(ctx, workspaceID, coordinatorID)
 	fresh, err := s.store.GetActivityRow(ctx, s.store.db, coordinatorID, rowID)
 	if err != nil {

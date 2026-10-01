@@ -13,6 +13,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/authz"
+	"github.com/kandev/kandev/internal/coordinator/outcomes"
 	"github.com/kandev/kandev/internal/orchestrator"
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	taskmodels "github.com/kandev/kandev/internal/task/models"
@@ -163,6 +164,7 @@ func (s *Service) ReplyToProposal(ctx context.Context, workspaceID, coordinatorI
 	returned := *proposal
 	returned.Status, returned.ReplyText, returned.UpdatedAt = ProposalStatusReturned, &text, now
 	returned.DecidedBy = &decidedBy
+	s.notifyDecided(ctx, &returned, outcomes.DecisionReturned, outcomes.ReasonNone, now)
 
 	claimed, delivered := s.deliverReply(ctx, &returned)
 	if claimed {

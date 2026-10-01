@@ -201,6 +201,10 @@ type Service struct {
 	pauseMu     sync.Mutex
 	pauserNames PauserNames
 	pauseRun    pauseRunner
+	// decisionObserver is told about every decision after it committed; nil
+	// is a no-op.
+	observerMu       sync.RWMutex
+	decisionObserver DecisionObserver
 	// dreamStop is the dream canceller registered by the dream scheduler; nil
 	// is a no-op.
 	dreamStop pause.DreamStop
