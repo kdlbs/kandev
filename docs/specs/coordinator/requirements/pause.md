@@ -41,7 +41,10 @@ start it again without losing its queue.
   manager shall be able to pause and resume one coordinator. Pausing an already
   paused coordinator, or resuming one that is not paused, shall change nothing
   and shall succeed. A reader and a coordinator principal on any transport
-  shall be refused with 403 and change nothing.
+  shall be refused with 403 and change nothing. A request for a coordinator
+  that does not exist or is not visible to the caller shall be refused with 404,
+  and a request whose body has no boolean `paused` shall be refused with 400;
+  each changes nothing.
 - **AC-COORDINATOR-PAUSE-001.2:** The paused state shall be stored with the time
   and the manager who set it, survive a restart, be allowed while autonomy is
   off, and be deleted with the coordinator. When two managers pause and
@@ -50,7 +53,10 @@ start it again without losing its queue.
 - **AC-COORDINATOR-PAUSE-001.3:** When a coordinator is resumed, the system
   shall deliver its pending wakes through the ordinary admission
   ([wake](wake.md#req-coordinator-wake-004-autonomy-setting-and-admission)),
-  the five-minute cooldown included, and shall discard none.
+  the five-minute cooldown included. Pause and Resume shall discard none: no
+  wake is superseded while the coordinator is paused, and after Resume each
+  wake meets the ordinary episode re-check of delivery, so a wake whose episode
+  no longer holds is superseded then, for the reason it always was.
 
 ### REQ-COORDINATOR-PAUSE-002: What Pause stops
 
@@ -76,8 +82,13 @@ start it again without losing its queue.
   coordinator's proposals from it shall be created as usual.
 - **AC-COORDINATOR-PAUSE-002.5:** When the paused state cannot be read, the
   system shall treat the coordinator as paused for every act-on-its-own
-  decision, and log it.
-- **AC-COORDINATOR-PAUSE-002.7:** When the phase 3.1 flag stops being effective while a coordinator is paused, the system shall keep it paused for every act-on-its-own decision and keep the stored state; only the route and the controls shall go.
+  decision, and log it. While the phase 3.1 flag is not effective this applies
+  only to a coordinator the process knows to be paused; for any other
+  coordinator an unreadable state is treated as not paused, so a flag-off boot
+  behaves as phase 3 does.
+- **AC-COORDINATOR-PAUSE-002.7:** When the phase 3.1 flag stops being effective while a coordinator is paused, the system shall keep it paused for every act-on-its-own decision and keep the stored state; only the route and the controls shall go. The autonomy strip and the Autonomy
+  settings section shall then show a read-only "Paused" badge with the note
+  "Resume needs the phase 3.1 features to be on", and no control.
 - **AC-COORDINATOR-PAUSE-002.6:** Pause shall not change autonomy, the ceiling,
   the policy, Watches, the conversation or any pending wake, proposal or
   stored spend.
@@ -93,7 +104,10 @@ start it again without losing its queue.
   and the time in place of Active or Held, keep the pending count, and offer a
   manager **Resume**; when the coordinator is not paused and autonomy is on it
   shall offer a manager **Pause**. A reader shall see the state and no
-  control.
+  control. The strip is shown only while autonomy is on, as today, in one of
+  four states: Active, Active with a transient text, Held with a reason, or
+  Paused, which takes precedence over the other three; with autonomy off the
+  state and the control appear in the Autonomy settings section only.
 - **AC-COORDINATOR-PAUSE-003.2:** The coordinator's Autonomy settings section
   shall show the state and the same control, also while autonomy is off, with
   the note that a paused coordinator keeps its queue and that turning autonomy

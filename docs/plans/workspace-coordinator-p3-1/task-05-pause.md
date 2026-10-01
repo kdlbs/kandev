@@ -78,6 +78,18 @@ turn, and the Pause and Resume controls.
   flag-off read-error carve-out, and the read-only "Paused" badge shown with the
   flag off, per the [pause design](../../specs/coordinator/system-design/pause.md).
 
+- Also in scope, from the pause design: the route's check order (404, 404, 403,
+  400) and its response before `Stopper.Stop` finishes; the service-owned
+  goroutine that runs `Stop` after a committed pause and the `OnAccepted` cancel;
+  the re-read of the paused state before each cancel write; `ErrCancelInFlight`
+  retry and per-row failure isolation; the atomic Resume guard in
+  `settlePausedUnsentTurn`; the paused note placement in `TryAutomaticApproval`;
+  the known-paused set refresh in the backstop pass; the strip absent with
+  autonomy off.
+- The dream half of `AC-COORDINATOR-PAUSE-002.2` is verified end to end by work
+  order 04, which creates the dream; this work order ships the `Stopper`'s
+  registration point for the dream canceller and tests it with a fake.
+
 ## Out of scope
 
 - Pausing routines, scheduled pause, workspace-wide pause.
