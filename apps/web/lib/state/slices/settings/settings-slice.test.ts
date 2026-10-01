@@ -102,6 +102,31 @@ describe("settings update jobs", () => {
     ).toMatchObject({ job_id: "newer" });
   });
 
+  // @covers AC-AGENTS-RUNTIME-NOTIFY-002.6
+  it("preserves immutable automatic origin through partial updates and same-job readiness snapshots", () => {
+    const store = makeStore();
+    const actions = store.getState() as SettingsSlice & {
+      upsertAgentUpdateJob: (job: ReturnType<typeof updateJob>) => void;
+      setAgentUpdateJobs: (jobs: ReturnType<typeof updateJob>[]) => void;
+    };
+    actions.upsertAgentUpdateJob(updateJob({ automatic: true, previous_version: "0.9.0" }));
+    actions.upsertAgentUpdateJob(updateJob({ status: "refreshing" }));
+    expect(store.getState().updateJobs.byAgent[AGENT_NAME]).toMatchObject({
+      automatic: true,
+      previous_version: "0.9.0",
+    });
+    actions.setAgentUpdateJobs([updateJob({ status: "succeeded" })]);
+    expect(store.getState().updateJobs.byAgent[AGENT_NAME]).toMatchObject({
+      automatic: true,
+      previous_version: "0.9.0",
+    });
+    actions.setAgentUpdateJobs([
+      updateJob({ job_id: "manual-retry", started_at: NEWER_TIMESTAMP }),
+    ]);
+    expect(store.getState().updateJobs.byAgent[AGENT_NAME].automatic).toBeUndefined();
+    expect(store.getState().updateJobs.byAgent[AGENT_NAME].previous_version).toBeUndefined();
+  });
+
   it("does not let an older HTTP snapshot clobber newer websocket output", () => {
     const store = makeStore();
     const actions = store.getState() as SettingsSlice & {

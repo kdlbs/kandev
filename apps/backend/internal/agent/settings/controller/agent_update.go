@@ -68,10 +68,11 @@ func (c *Controller) previewAgentUpdate(
 		return nil, ErrRuntimeUpdateUnsupported
 	}
 	spec := managed.ManagedNPMRuntime()
-	if strings.TrimSpace(spec.Package) == "" {
+	if strings.TrimSpace(spec.Package) == "" || spec.NativeBinaryOnPath() {
 		return nil, ErrRuntimeUpdateUnsupported
 	}
 
+	spec.NativeBinary = ""
 	current := ""
 	if caps, found := c.runtimeUpdater.CurrentCapabilities(name); found {
 		current = caps.AgentVersion
@@ -535,6 +536,9 @@ func (c *Controller) EnqueueAgentUpdate(
 	name string,
 	targetVersion string,
 ) (*dto.AgentUpdateJobDTO, error) {
+	if err := c.disableAutomaticUpdates(ctx, name); err != nil {
+		return nil, err
+	}
 	return c.enqueueAgentUpdate(ctx, name, strings.TrimSpace(targetVersion), false)
 }
 
@@ -545,6 +549,9 @@ func (c *Controller) EnqueueAgentUpdateUseDefault(
 	ctx context.Context,
 	name string,
 ) (*dto.AgentUpdateJobDTO, error) {
+	if err := c.disableAutomaticUpdates(ctx, name); err != nil {
+		return nil, err
+	}
 	return c.enqueueAgentUpdate(ctx, name, "", true)
 }
 
@@ -569,9 +576,10 @@ func (c *Controller) enqueueAgentUpdate(
 		return nil, ErrRuntimeUpdateUnsupported
 	}
 	spec := managed.ManagedNPMRuntime()
-	if strings.TrimSpace(spec.Package) == "" {
+	if strings.TrimSpace(spec.Package) == "" || spec.NativeBinaryOnPath() {
 		return nil, ErrRuntimeUpdateUnsupported
 	}
+	spec.NativeBinary = ""
 	if useDefault {
 		targetVersion = spec.DefaultVersionOrPinned()
 	}
@@ -620,6 +628,10 @@ func (c *Controller) validateAgentUpdateTarget(
 	if err != nil {
 		return fmt.Errorf("%w: %v", ErrRuntimeUpdatePreviewFailed, err)
 	}
+	return validateRuntimeCatalogueTarget(metadata, targetVersion)
+}
+
+func validateRuntimeCatalogueTarget(metadata RuntimeVersionMetadata, targetVersion string) error {
 	catalogue, err := managedruntime.BuildCatalogue(metadata.Versions, metadata.Latest)
 	if err != nil {
 		return fmt.Errorf("%w: %v", ErrRuntimeUpdatePreviewFailed, err)

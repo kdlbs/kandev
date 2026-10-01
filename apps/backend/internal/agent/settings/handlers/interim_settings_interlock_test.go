@@ -69,3 +69,22 @@ func TestRegisterRoutesProtectsEveryStateChangingAgentSettingsRoute(t *testing.T
 		})
 	}
 }
+
+// @covers AC-AGENTS-RUNTIME-NOTIFY-002.1
+func TestAutomaticRuntimePolicyRequiresSettingsAuthorityAndInterlock(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	log, err := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "json"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	router := gin.New()
+	useSyntheticSettingsIdentity(router)
+	NewHandlers(nil, nil, log, "test-interlock").registerHTTP(router)
+	req := httptest.NewRequest(http.MethodPatch, "/api/v1/agent-update/gemini/automatic", strings.NewReader(`{"enabled":true}`))
+	req.Header.Set("Content-Type", "application/json")
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, req)
+	if response.Code != http.StatusForbidden {
+		t.Fatalf("unguarded automatic policy route: %d", response.Code)
+	}
+}

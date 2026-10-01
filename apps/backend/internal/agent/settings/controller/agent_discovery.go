@@ -163,7 +163,7 @@ func (c *Controller) buildRuntimeUpdateDTO(ctx context.Context, ag agents.Agent,
 		return nil
 	}
 	spec := managed.ManagedNPMRuntime()
-	if spec.Package == "" {
+	if spec.Package == "" || spec.NativeBinaryOnPath() {
 		return nil
 	}
 	defaultVersion := spec.DefaultVersionOrPinned()

@@ -1,6 +1,7 @@
 package dto
 
 import (
+	"github.com/kandev/kandev/internal/agent/managedruntime"
 	"time"
 
 	"github.com/kandev/kandev/internal/agent/mcpconfig"
@@ -358,6 +359,20 @@ const (
 // runtime. ActiveVersion is the optional persisted operator selection; the
 // default is never persisted and remains the fallback effective version.
 type AgentUpdateStatusDTO struct {
+	AutoUpdate          bool                          `json:"auto_update"`
+	LastOutcome         *managedruntime.UpdateOutcome `json:"last_outcome,omitempty"`
+	DisplayName         string                        `json:"display_name"`
+	RuntimeID           string                        `json:"runtime_id"`
+	Owner               string                        `json:"owner"`
+	Mechanism           string                        `json:"mechanism"`
+	Management          string                        `json:"management"`
+	Source              string                        `json:"source,omitempty"`
+	GuidanceURL         string                        `json:"guidance_url,omitempty"`
+	CurrentVersion      string                        `json:"current_version,omitempty"`
+	Available           bool                          `json:"available"`
+	Enabled             bool                          `json:"enabled"`
+	AutoUpdateSupported bool                          `json:"auto_update_supported"`
+
 	AgentName        string                `json:"agent_name"`
 	Package          string                `json:"package"`
 	DefaultVersion   string                `json:"default_version"`
@@ -427,6 +442,8 @@ const (
 
 // AgentUpdateJobDTO is the retained HTTP and WebSocket update snapshot.
 type AgentUpdateJobDTO struct {
+	Automatic        bool                 `json:"automatic"`
+	PreviousVersion  string               `json:"previous_version,omitempty"`
 	JobID            string               `json:"job_id"`
 	AgentName        string               `json:"agent_name"`
 	Status           AgentUpdateJobStatus `json:"status"`

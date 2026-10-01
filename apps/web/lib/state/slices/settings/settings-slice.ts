@@ -23,6 +23,7 @@ export const defaultSettingsState: SettingsSliceState = {
   agentProfiles: { items: [], version: 0 },
   installJobs: { byAgent: {} },
   updateJobs: { byAgent: {} },
+  agentRuntimeUpdates: { byAgent: {}, checkedAt: 0, loading: false },
   editors: { items: [], loaded: false, loading: false },
   prompts: { items: [], loaded: false, loading: false },
   secrets: { items: [], loaded: false, loading: false },
@@ -142,7 +143,13 @@ function createAgentUpdateJobActions(
         for (const job of jobs) {
           const current = byAgent[job.agent_name];
           if (!current || installJobStartedAtMs(job) > installJobStartedAtMs(current)) {
-            byAgent[job.agent_name] = job;
+            const previous = draft.updateJobs.byAgent[job.agent_name];
+            const snapshot = { ...job };
+            if (previous?.job_id === job.job_id) {
+              snapshot.automatic ??= previous.automatic;
+              snapshot.previous_version ??= previous.previous_version;
+            }
+            byAgent[job.agent_name] = snapshot;
           }
         }
         draft.updateJobs.byAgent = byAgent;
@@ -468,6 +475,17 @@ export const createSettingsSlice: StateCreator<
   SettingsSlice
 > = (set) => ({
   ...defaultSettingsState,
+  setAgentRuntimeUpdateStatuses: (statuses, checkedAt) =>
+    set((draft) => {
+      draft.agentRuntimeUpdates.byAgent = Object.fromEntries(
+        statuses.map((status) => [status.agent_name, status]),
+      );
+      draft.agentRuntimeUpdates.checkedAt = checkedAt;
+    }),
+  setAgentRuntimeUpdateLoading: (loading) =>
+    set((draft) => {
+      draft.agentRuntimeUpdates.loading = loading;
+    }),
   ...createCoreActions(set),
   ...createAgentProfileRecentUseActions(set),
   ...createSleepInhibitionActions(set),

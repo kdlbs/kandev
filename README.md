@@ -116,7 +116,9 @@ Connect Kandev to GitHub, GitLab, Jira, Linear, Sentry, and Azure DevOps to pull
 Managed npm runtimes have reviewed defaults. To fetch a selected upstream
 release, use **Update agent** in **Settings > Agents**. Kandev refreshes its
 advertised models and modes for future sessions without restarting active
-sessions. See [Agents and Profiles](docs/public/agents-and-profiles.md#update-a-managed-agent-runtime).
+sessions. Background notices cover every registered runtime, with optional automatic
+updates for supported managed installations and manual guidance for external CLIs.
+See [Agents and Profiles](docs/public/agents-and-profiles.md#update-a-managed-agent-runtime).
 
 ### Bring your own TUI agents
 

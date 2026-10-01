@@ -19,7 +19,13 @@ import (
 	"go.uber.org/zap"
 )
 
+type runtimeActivationGuard func(context.Context, func() error) error
+
 type AgentUpdateJob struct {
+	Automatic        bool
+	PreviousVersion  string
+	activationGuard  runtimeActivationGuard
+	context          context.Context
 	ID               string
 	AgentName        string
 	Package          string
@@ -39,6 +45,7 @@ type AgentUpdateJob struct {
 }
 
 type AgentUpdateJobStore struct {
+	automaticWorkers    sync.WaitGroup
 	mu                  sync.Mutex
 	jobs                map[string]*AgentUpdateJob
 	activeByAgt         map[string]*AgentUpdateJob
@@ -48,6 +55,7 @@ type AgentUpdateJobStore struct {
 	updater             RuntimeUpdater
 	maintenance         *maintenanceCoordinator
 	onRefresh           func()
+	onFinished          func(dto.AgentUpdateJobDTO)
 	selectionStore      managedruntime.SelectionStore
 	onStatusInvalidated func(string)
 }
@@ -85,20 +93,25 @@ func (s *AgentUpdateJobStore) Enqueue(
 	spec agents.ManagedNPMRuntimeSpec,
 	targetVersions ...string,
 ) (*AgentUpdateJob, error) {
-	return s.enqueue(agentName, spec, false, targetVersions...)
+	return s.enqueue(agentName, spec, false, nil, targetVersions...)
 }
 
 func (s *AgentUpdateJobStore) EnqueueDefault(
 	agentName string,
 	spec agents.ManagedNPMRuntimeSpec,
 ) (*AgentUpdateJob, error) {
-	return s.enqueue(agentName, spec, true)
+	return s.enqueue(agentName, spec, true, nil)
+}
+
+func (s *AgentUpdateJobStore) enqueueAutomatic(ctx context.Context, name string, spec agents.ManagedNPMRuntimeSpec, target, previous, id string, guard runtimeActivationGuard) (*AgentUpdateJob, error) {
+	return s.enqueue(name, spec, false, &AgentUpdateJob{ID: id, Automatic: true, PreviousVersion: previous, context: ctx, activationGuard: guard}, target)
 }
 
 func (s *AgentUpdateJobStore) enqueue(
 	agentName string,
 	spec agents.ManagedNPMRuntimeSpec,
 	useDefault bool,
+	automatic *AgentUpdateJob,
 	targetVersions ...string,
 ) (*AgentUpdateJob, error) {
 	s.mu.Lock()
@@ -114,6 +127,10 @@ func (s *AgentUpdateJobStore) enqueue(
 		Output:     newRingBuffer(jobOutputRingSize),
 		StartedAt:  time.Now().UTC(),
 		UseDefault: useDefault,
+	}
+	if automatic != nil {
+		job.ID, job.Automatic, job.PreviousVersion = automatic.ID, true, automatic.PreviousVersion
+		job.context, job.activationGuard = automatic.context, automatic.activationGuard
 	}
 	requestedTarget := ""
 	if len(targetVersions) > 0 {
@@ -135,7 +152,15 @@ func (s *AgentUpdateJobStore) enqueue(
 	s.mu.Unlock()
 
 	s.broadcast(ws.ActionAgentUpdateStarted, job.snapshot())
-	go s.run(job, spec, requestedTarget, ref)
+	if job.Automatic {
+		s.automaticWorkers.Add(1)
+	}
+	go func() {
+		if job.Automatic {
+			defer s.automaticWorkers.Done()
+		}
+		s.run(job, spec, requestedTarget, ref)
+	}()
 	return job, nil
 }
 
@@ -186,11 +211,25 @@ func (s *AgentUpdateJobStore) run(
 	requestedTarget string,
 	ref MaintenanceJobRef,
 ) {
-	s.semaphore <- struct{}{}
-	defer func() { <-s.semaphore }()
-
-	ctx, cancel := context.WithTimeout(context.Background(), jobHardTimeout)
+	parent := job.context
+	if parent == nil {
+		parent = context.Background()
+	}
+	ctx, cancel := context.WithTimeout(parent, jobHardTimeout)
 	defer cancel()
+	select {
+	case s.semaphore <- struct{}{}:
+	case <-ctx.Done():
+		s.finishFailed(job, ctx, ctx.Err(), ref)
+		return
+	}
+	defer func() { <-s.semaphore }()
+	if job.activationGuard != nil {
+		if err := job.activationGuard(ctx, func() error { return nil }); err != nil {
+			s.finishFailed(job, ctx, err, ref)
+			return
+		}
+	}
 	s.setStatus(job, dto.AgentUpdateJobStatusResolving)
 
 	var (
@@ -403,18 +442,29 @@ func (s *AgentUpdateJobStore) runExactCandidate(
 		s.finishFailed(job, ctx, errors.New(capabilityRefreshError(caps)), ref)
 		return
 	}
+	activate := func() error {
+		if job.UseDefault {
+			if err := s.selectionStore.Delete(ctx, job.AgentName, spec.Package); err != nil {
+				return fmt.Errorf("clear active runtime version: %w", err)
+			}
+		} else if err := s.selectionStore.Save(ctx, job.AgentName, spec.Package, target); err != nil {
+			return fmt.Errorf("persist active runtime version: %w", err)
+		}
+		candidate.PublishCapabilities(job.AgentName, caps)
+		return nil
+	}
+	if job.activationGuard != nil {
+		err = job.activationGuard(ctx, activate)
+	} else {
+		err = activate()
+	}
+	if err != nil {
+		s.finishFailed(job, ctx, err, ref)
+		return
+	}
 	s.mu.Lock()
 	job.CurrentVersion = caps.AgentVersion
 	s.mu.Unlock()
-	if job.UseDefault {
-		if err := s.selectionStore.Delete(ctx, job.AgentName, spec.Package); err != nil {
-			s.finishFailed(job, ctx, fmt.Errorf("clear active runtime version: %w", err), ref)
-			return
-		}
-	} else if err := s.selectionStore.Save(ctx, job.AgentName, spec.Package, target); err != nil {
-		s.finishFailed(job, ctx, fmt.Errorf("persist active runtime version: %w", err), ref)
-		return
-	}
 	s.mu.Lock()
 	if job.UseDefault {
 		job.ActiveVersion = ""
@@ -424,7 +474,6 @@ func (s *AgentUpdateJobStore) runExactCandidate(
 		job.EffectiveVersion = target
 	}
 	s.mu.Unlock()
-	candidate.PublishCapabilities(job.AgentName, caps)
 	s.finishActivated(job, target, ref)
 }
 
@@ -587,7 +636,9 @@ func (s *AgentUpdateJobStore) finishRefresh(
 func (s *AgentUpdateJobStore) finishLocked(job *AgentUpdateJob) {
 	now := time.Now().UTC()
 	job.FinishedAt = &now
-	delete(s.activeByAgt, job.AgentName)
+	if !job.Automatic {
+		delete(s.activeByAgt, job.AgentName)
+	}
 }
 
 func capabilityRefreshError(caps hostutility.AgentCapabilities) string {
@@ -613,6 +664,17 @@ func (s *AgentUpdateJobStore) scheduleEviction(jobID string) {
 }
 
 func (s *AgentUpdateJobStore) broadcast(action string, payload dto.AgentUpdateJobDTO) {
+	if action == ws.ActionAgentUpdateFinished && s.onFinished != nil {
+		s.onFinished(payload)
+	}
+	if action == ws.ActionAgentUpdateFinished && payload.Automatic {
+		// Keep the attempt active until its durable outcome has been retained.
+		s.mu.Lock()
+		if active := s.activeByAgt[payload.AgentName]; active != nil && active.ID == payload.JobID {
+			delete(s.activeByAgt, payload.AgentName)
+		}
+		s.mu.Unlock()
+	}
 	if s.hub == nil {
 		return
 	}
@@ -624,6 +686,8 @@ func (s *AgentUpdateJobStore) broadcast(action string, payload dto.AgentUpdateJo
 func (j *AgentUpdateJob) snapshot() dto.AgentUpdateJobDTO {
 	snapshot := dto.AgentUpdateJobDTO{
 		JobID:            j.ID,
+		Automatic:        j.Automatic,
+		PreviousVersion:  j.PreviousVersion,
 		AgentName:        j.AgentName,
 		Status:           j.Status,
 		Operation:        string(j.Operation),

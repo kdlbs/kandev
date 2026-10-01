@@ -19,6 +19,8 @@ export type AgentUpdateVersion = {
 
 export type AgentUpdateJob = {
   job_id: string;
+  automatic?: boolean;
+  previous_version?: string;
   agent_name: string;
   status: AgentUpdateJobStatus;
   operation?: AgentUpdateOperation;
@@ -99,7 +101,28 @@ export async function updateAgentUseDefault(
   });
 }
 
+export type AgentRuntimeOutcome = {
+  id: string;
+  status: "running" | "succeeded" | "failed" | "interrupted";
+  previous_version: string;
+  target_version: string;
+  finished_at: string;
+};
+
 export type AgentUpdateStatus = {
+  display_name: string;
+  runtime_id: string;
+  owner: "kandev" | "external" | "none";
+  mechanism: string;
+  management: "managed" | "manual" | "unsupported";
+  source: string;
+  guidance_url: string;
+  current_version: string;
+  available: boolean;
+  enabled: boolean;
+  auto_update_supported: boolean;
+  auto_update: boolean;
+  last_outcome?: AgentRuntimeOutcome;
   agent_name: string;
   package: string;
   default_version: string;
@@ -127,4 +150,10 @@ export async function getAgentUpdateJob(
   options?: ApiRequestOptions,
 ): Promise<AgentUpdateJob> {
   return fetchJson<AgentUpdateJob>(`/api/v1/agent-update/jobs/${jobId}`, options);
+}
+
+export async function setAgentAutomaticUpdates(agentName: string, enabled: boolean): Promise<void> {
+  await fetchJson(`/api/v1/agent-update/${encodeURIComponent(agentName)}/automatic`, {
+    init: { method: "PATCH", body: JSON.stringify({ enabled }) },
+  });
 }

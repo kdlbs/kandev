@@ -1,12 +1,27 @@
 import { renderHook, waitFor } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { create, useStore } from "zustand";
+import { immer } from "zustand/middleware/immer";
+import { createSettingsSlice } from "@/lib/state/slices/settings/settings-slice";
+import type { SettingsSlice } from "@/lib/state/slices/settings/types";
 import type { AgentUpdateJob } from "@/lib/api";
 
 const listAgentUpdateStatusesMock = vi.fn();
+function newStore() {
+  return create<SettingsSlice>()(immer((set, get, api) => createSettingsSlice(set, get, api)));
+}
+let mockStore = newStore();
+vi.mock("@/components/state-provider", () => ({
+  useAppStoreApi: () => mockStore,
+  useAppStore: (selector: (s: SettingsSlice) => unknown) => useStore(mockStore, selector),
+}));
+beforeEach(() => {
+  mockStore = newStore();
+});
 
-vi.mock("@/lib/api", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@/lib/api")>()),
+vi.mock("@/lib/api/domains/agent-update-api", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/api/domains/agent-update-api")>()),
   listAgentUpdateStatuses: (...args: unknown[]) => listAgentUpdateStatusesMock(...args),
 }));
 
@@ -25,7 +40,7 @@ function job(overrides: Partial<AgentUpdateJob> = {}): AgentUpdateJob {
 afterEach(() => vi.clearAllMocks());
 
 describe("useAgentRuntimeUpdateStatuses", () => {
-  it("loads structural statuses into a page-local agent map", async () => {
+  it("loads structural statuses into a shared agent map", async () => {
     listAgentUpdateStatusesMock.mockResolvedValueOnce({
       statuses: [
         {
@@ -96,4 +111,21 @@ describe("useAgentRuntimeUpdateStatuses", () => {
     rerender({ jobs: { "claude-acp": job({ job_id: "job-2" }) } });
     await waitFor(() => expect(listAgentUpdateStatusesMock).toHaveBeenCalledTimes(3));
   });
+});
+
+it("shares two mounted consumers and settles when the initiator unmounts", async () => {
+  let resolve!: (value: unknown) => void;
+  listAgentUpdateStatusesMock.mockReturnValueOnce(
+    new Promise((done) => {
+      resolve = done;
+    }),
+  );
+  const first = renderHook(() => useAgentRuntimeUpdateStatuses({}));
+  const second = renderHook(() => useAgentRuntimeUpdateStatuses({}));
+  expect(listAgentUpdateStatusesMock).toHaveBeenCalledTimes(1);
+  first.unmount();
+  resolve({ statuses: [{ agent_name: "gemini", check_state: "unknown" }] });
+  await waitFor(() =>
+    expect(second.result.current.statusByAgent.gemini?.check_state).toBe("unknown"),
+  );
 });

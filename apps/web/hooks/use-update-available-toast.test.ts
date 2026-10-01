@@ -20,6 +20,19 @@ function updateNotification(): UpdateAvailableNotification {
   };
 }
 
+function runtimeNotification(): UpdateAvailableNotification {
+  return {
+    ...updateNotification(),
+    agent_name: "gemini",
+    runtime_id: "npm:@google/gemini-cli",
+    display_name: "Gemini",
+    previous_version: "1.0.0",
+    version: "2.0.0",
+    occurrence_id: "runtime-gemini-2",
+    runtime_update_status: "available",
+  };
+}
+
 vi.mock("@/components/state-provider", () => ({
   useAppStore: (selector: (state: Record<string, unknown>) => unknown) =>
     selector({
@@ -104,5 +117,39 @@ describe("useUpdateAvailableToast", () => {
     rerender();
     expect(mockToast).not.toHaveBeenCalled();
     expect(mockClearNotification).toHaveBeenCalledWith(null);
+  });
+
+  // @covers AC-AGENTS-RUNTIME-NOTIFY-001.3
+  it("names each runtime, links to its controls, and does not collapse equal versions across agents", async () => {
+    ({ useUpdateAvailableToast } = await import("./use-update-available-toast"));
+    mockNotification = runtimeNotification();
+    const { rerender } = renderHook(() => useUpdateAvailableToast());
+    expect(mockToast).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        title: expect.stringContaining("Gemini"),
+        action: { href: "/settings/agents#runtime-update-gemini", label: expect.any(String) },
+      }),
+    );
+    mockNotification = {
+      ...mockNotification,
+      agent_name: "codex-app-server",
+      display_name: "Codex",
+      occurrence_id: "runtime-codex-2",
+    };
+    rerender();
+    expect(mockToast).toHaveBeenCalledTimes(2);
+  });
+
+  // @covers AC-AGENTS-RUNTIME-NOTIFY-002.6
+  it("does not claim an interrupted activation failed or succeeded", () => {
+    mockNotification = {
+      ...runtimeNotification(),
+      occurrence_id: "interrupted-attempt",
+      runtime_update_status: "interrupted",
+    };
+    renderHook(() => useUpdateAvailableToast());
+    expect(mockToast).toHaveBeenCalledWith(
+      expect.objectContaining({ description: expect.stringContaining("could not be confirmed") }),
+    );
   });
 });

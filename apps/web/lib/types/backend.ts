@@ -198,6 +198,8 @@ export type AgentInstallOutputPayload = {
 };
 
 export type AgentUpdateJobPayload = {
+  automatic?: boolean;
+  previous_version?: string;
   job_id: string;
   agent_name: string;
   status: "queued" | "resolving" | "updating" | "refreshing" | "succeeded" | "failed";
@@ -233,6 +235,11 @@ export type DiffUpdatePayload = {
 };
 
 export type UpdateAvailablePayload = {
+  agent_name?: string;
+  runtime_id?: string;
+  display_name?: string;
+  previous_version?: string;
+  runtime_update_status?: "available" | "succeeded" | "failed" | "interrupted";
   version: string;
   url?: string;
   title: string;

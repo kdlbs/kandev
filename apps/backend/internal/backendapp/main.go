@@ -1460,6 +1460,16 @@ func startGatewayAndServe(
 			}
 		})
 	}
+	agentSettingsController.SetRuntimeUpdateNotifier(notificationSvc)
+	stopRuntimeUpdates := agentSettingsController.StartRuntimeUpdateBackground(ctx)
+	stopRuntimeUpdatesCleanup := func() error { stopRuntimeUpdates(); return nil }
+	addCleanup(stopRuntimeUpdatesCleanup)
+	restoreCleanups = append(restoreCleanups, stopRuntimeUpdatesCleanup)
+	gateway.Hub.AddUserSubscriptionListener(func(string) {
+		if err := agentSettingsController.ReplayRuntimeUpdateNotices(ctx); err != nil && ctx.Err() == nil {
+			log.Debug("runtime update replay unavailable")
+		}
+	})
 	systemSvc.StartBackground(ctx)
 	addCleanup(func() error { systemSvc.StopBackground(); return nil })
 	gateways.RegisterSystemNotifications(processRuntimeContext(ctx), eventBus, gateway.Hub, log)

@@ -449,6 +449,9 @@ func (s *Service) dispatchProvider(ctx context.Context, userID string, provider 
 
 func (s *Service) buildSemanticMessage(ctx context.Context, taskID, eventType string, payload map[string]string) (string, string) {
 	if eventType == EventSystemUpdateAvailable {
+		if payload["agent_name"] != "" {
+			return runtimeUpdateMessage(payload)
+		}
 		return semanticMessageCopy(eventType, payload["version"])
 	}
 	title, body := semanticMessageCopy(eventType, "")
