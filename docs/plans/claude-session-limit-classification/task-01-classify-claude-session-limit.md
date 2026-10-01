@@ -28,7 +28,8 @@ Prove that terminal projection and existing recovery consumers receive the resul
 
 ## In scope
 
-- Add the provider-scoped session signature and clock-only reset branch described by the system design.
+- Add the provider-scoped session signature and Claude-session-only clock parser described by the system design.
+- Carry the provider diagnostic's existing occurrence timestamp into reset parsing for delayed classification.
 - Add failing classifier and parser tests before production changes.
 - Add ACP, Kanban, and dynamic-engine contract tests named in the plan.
 - Preserve structured metadata precedence, existing dated formats, and diagnostic redaction.
@@ -37,14 +38,15 @@ Prove that terminal projection and existing recovery consumers receive the resul
 
 - Fixed-profile automatic resume, workflow deferral, rendered recovery changes, and saved-policy changes.
 - Unobserved Claude period signatures or changes to other provider rules.
-- Production changes outside `routingerr` unless new evidence requires revising this package first.
+- Production changes outside `routingerr` and the existing `ProviderError.OccurredAt` handoff through `classifyKanbanFailure`.
 
 ## Acceptance
 
 1. The exact issue notice classifies as high-confidence hard quota and carries the correctly zoned hint through existing terminal projection.
 2. Clock tests cover same day, next day, equality, midnight, noon, omitted minutes, backend-zone independence, and daylight-saving boundaries.
-   Invalid clocks, missing zones, unknown names, `Local`, ambiguous clocks, and nonexistent clocks produce no hint.
-3. Structured precedence and other providers retain their behavior.
+   Invalid clocks, missing zones, unknown names, `GMT`, `Local`, dot-prefixed zone path components, ambiguous clocks, and selected nonexistent clocks produce no hint.
+3. Weekly clock-only quota notices do not acquire a daily hint, and delayed classification remains anchored to the provider diagnostic occurrence time.
+4. Structured precedence and other providers retain their behavior.
    Fixed Kanban quota recovery remains manual, while dynamic hard policy excludes shared-binding siblings and honors the reset deadline.
 
 ## TDD sequence
@@ -62,7 +64,7 @@ Negative cases include a different provider, bare `session limit`, approaching l
 Parser cases use fixed `now` values and compare absolute instants.
 Use Helsinki before and after 11:10am, exact equality, UTC, and a complete nested IANA name at the raw parser boundary.
 Keep the existing Codex dated, leap-date, offset, and year-rollover cases.
-Reject invalid hours, minutes, missing meridiem, missing parentheses, unknown zones, abbreviations, and host-local zones.
+Reject invalid hours, minutes, missing meridiem, missing parentheses, unknown zones, `GMT`, abbreviations, host-local zones, and zone paths containing dot-prefixed components.
 Use Helsinki's spring gap as a no-hint case while that nonexistent clock is still upcoming.
 If the current day's gap clock has elapsed, assert rollover to the next valid day's clock.
 Keep the autumn repeated 03:30 clock as a no-hint case while that ambiguous clock is upcoming.
@@ -80,10 +82,11 @@ Keep existing output, tool-effect, and generation-fence tests passing.
 Run this complete block from the repository root:
 
 ```bash
-(cd apps/backend && go test ./internal/agent/runtime/routingerr -run 'TestClassifyClaudeSessionLimit$|TestParseClaudeResetClock$' -count=1)
-(cd apps/backend && go test ./internal/agent/runtime/routingerr ./internal/agent/runtime/dynamic -count=1)
+(cd apps/backend && go test -tags fts5 ./internal/agent/runtime/routingerr -run 'TestClassifyClaudeSessionLimit$|TestParseClaudeResetClock$|TestParseClaudeResetClockDST$|TestClassify_OpenCodeWeeklyResetClockDoesNotBecomeDailyHint$' -count=1)
+(cd apps/backend && go test -tags fts5 ./internal/agent/runtime/routingerr ./internal/agent/runtime/dynamic -count=1)
 (cd apps/backend && go test -tags fts5 ./internal/agentctl/server/adapter/transport/acp -run '^TestProviderErrorFromErrorClaudeSessionLimit$' -count=1)
 (cd apps/backend && go test -tags fts5 ./internal/orchestrator -run '^TestClassifyKanbanFailureClaudeSessionLimit$|^TestClaudeQuotaFixedProfileRemainsManual$' -count=1)
+make -C apps/backend build
 python3 scripts/list-docs.py validate
 python3 scripts/lint-spec-files.test.py
 python3 scripts/lint-spec-files.py --all
@@ -151,8 +154,24 @@ Re-read these boundaries if the base changes before implementation.
 
 ## Results
 
-Done. The observed Claude session-limit signature now classifies as a high-confidence hard quota failure, and clock-only reset hints resolve in the supplied UTC or IANA zone. The parser rejects invalid, unsupported, nonexistent, and ambiguous clocks without changing the quota classification. ACP projection, fixed-profile Kanban policy, dynamic shared-binding routing, and reset-time probe behavior are covered by regressions.
+Done. The observed Claude session-limit signature now classifies as a high-confidence hard quota failure, and clock-only reset hints resolve in UTC or a valid slash-separated IANA location. The parser rejects invalid, unsupported, nonexistent, and ambiguous clocks without changing the quota classification. ACP projection, fixed-profile Kanban policy, dynamic shared-binding routing, and reset-time probe behavior are covered by regressions.
 
 The initial classifier/parser tests failed on the original unknown classification and nil reset hint, then passed after implementation. The targeted `routingerr` and `dynamic` packages, ACP projection regression, Kanban classification and manual-policy regressions, backend build, documentation validation, specification lint, PR-documentation coverage preflight, and whitespace check all passed. The backend build emitted only the expected unsigned macOS agentctl artifact warnings because no signing tool was installed.
 
-Review correction: the original DST loop stopped when today's selected clock fell in a spring gap, even if that wall-clock time had already elapsed. Added a fixed-clock regression for 2026-03-29 12:00 UTC and now advance to the next calendar day only in that elapsed-gap case. The upcoming spring-gap and autumn-ambiguity no-hint cases remain intact. `go test ./internal/agent/runtime/routingerr -run 'TestParseClaudeResetClock' -count=1` and `go test ./internal/agent/runtime/routingerr ./internal/agent/runtime/dynamic -count=1` passed after the correction.
+Review correction: the original DST loop stopped when today's selected clock fell in a spring gap, even if that wall-clock time had already elapsed. Added a fixed-clock regression for 2026-03-29 12:00 UTC and now advance to the next calendar day only in that elapsed-gap case. The upcoming spring-gap and autumn-ambiguity no-hint cases remain intact.
+
+PR review remediation (2026-10-01):
+
+- Added a weekly OpenCode clock-only reset regression; it failed before the correction because classification assigned the next daily clock, then passed after clock-only parsing was gated to `claude.stderr.session_limit.v1`.
+- Added a delayed Kanban classification assertion for a provider diagnostic observed at 2024-01-01 08:03 UTC. It failed before timestamp propagation by resolving against current time, then passed with the expected absolute reset at 2024-01-01 09:10 UTC.
+- Kept the elapsed spring-gap Helsinki regression, upcoming spring-gap case, and autumn repeated-clock case together in `TestParseClaudeResetClockDST`.
+- Expanded unsupported-zone cases to reject bare `GMT`, `../Etc/UTC`, `../../Etc/UTC`, and dot-prefixed path components before timezone loading.
+- `go test -tags fts5 ./internal/agent/runtime/routingerr ./internal/agent/runtime/dynamic -count=1`: passed.
+- `go test -tags fts5 ./internal/agentctl/server/adapter/transport/acp -run '^TestProviderErrorFromErrorClaudeSessionLimit$' -count=1`: passed.
+- `go test -tags fts5 ./internal/orchestrator -run '^TestClassifyKanbanFailureClaudeSessionLimit$|^TestClaudeQuotaFixedProfileRemainsManual$' -count=1`: passed.
+- `make -C apps/backend build`: passed; macOS agentctl artifacts were not codesigned because `codesign` and `rcodesign` were unavailable.
+- `python3 scripts/list-docs.py validate`: passed, 339 decisions and 1283 specifications.
+- `python3 scripts/lint-spec-files.test.py`: passed, 36 tests.
+- `python3 scripts/lint-spec-files.py --all`: passed.
+- PR-documentation `validateCoverage` preflight: `covered`, no errors.
+- `git diff --check`: passed.

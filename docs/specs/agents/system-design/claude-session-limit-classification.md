@@ -23,7 +23,7 @@ This design adds no recovery owner, event field, or orchestration branch.
 
 - `internal/agent/runtime/routingerr` owns provider rules, `Classify`, reset parsing, and error invariants.
 - `internal/agentctl/server/adapter/transport/acp` projects terminal ACP errors through `ProviderErrorFromError`.
-- `internal/orchestrator.classifyKanbanFailure` passes the agent identity, projected message, and structured reset hint to the classifier.
+- `internal/orchestrator.classifyKanbanFailure` passes the agent identity, projected message, structured reset hint, and provider diagnostic observation time to the classifier.
 - `internal/agent/runtime/dynamic.Engine` applies saved policies and shared credential circuits.
 
 ## Classification
@@ -41,32 +41,39 @@ Structured HTTP status continues to run before provider rules.
 
 ## Reset clock
 
-Extend `parseResetHintAt(text, now)` with a separate clock-only parsing branch.
-Keep the existing dated `try again at` branch and its year-resolution behavior.
+Keep `parseResetHintAt(text, now)` for the existing dated `try again at` format and its year-resolution behavior.
+Add a separate clock-only parser and invoke it only when the classified rule is `claude.stderr.session_limit.v1`.
 Do not broaden the existing offset parser to load arbitrary zone strings.
 
 The new branch accepts `resets 11:10am (Europe/Helsinki)` and `resets 11am (Europe/Helsinki)`.
 It requires an AM/PM suffix, validates hours 1 through 12 and minutes 0 through 59, and requires balanced zone parentheses.
 Preserve timezone-name case when calling `time.LoadLocation`.
-Accept UTC and IANA names, including names with multiple slash-separated components.
-Reject `Local`, abbreviations such as `EET`, unknown names, absolute paths, and malformed names.
+Accept UTC and valid slash-separated IANA location names, including names with multiple components.
+Reject `GMT`, `Local`, abbreviations such as `EET`, unknown names, absolute paths, dot-prefixed path components, and malformed names.
 Use the standard `time/tzdata` fallback so packaged binaries do not depend on host timezone files.
 
-Convert `now` into the explicit location before selecting the calendar date.
+Resolve the clock against `Input.OccurredAt`, which carries the diagnostic's existing provider observation time; use classification time only when that field is zero.
+Do not roll an elapsed reset forward again when classification is delayed.
+Convert the observation time into the explicit location before selecting the calendar date.
 Use calendar dates rather than adding twenty-four hours for rollover.
 Select today's requested wall time when it is future, otherwise select the next calendar day's wall time.
 At exact equality, select the next day.
 Validate the selected wall time and reject daylight-saving gaps or repeated wall times instead of choosing an arbitrary offset.
-Compare the resulting instant with `now` before returning it.
+If today's gap or repeated wall time has fully elapsed, advance to the next calendar date before validating that day's occurrence.
+Compare the resulting instant with the observation time before returning it.
 
 For example, at `2026-10-01T08:03:00Z`, Helsinki's `11:10am` resolves to `2026-10-01T08:10:00Z`.
 At `2026-10-01T08:11:00Z`, it resolves to `2026-10-02T08:10:00Z`.
 The parser receives a clock argument for deterministic tests.
 No new public clock API is needed.
 
-`Classify` already parses text only for quota or rate errors with no structured `ResetHint`.
+`Classify` parses text only for quota or rate errors with no structured `ResetHint`.
+It retains generic dated parsing for compatibility, while clock-only parsing is restricted to the exact Claude session-limit rule.
 It passes input text to the parser, while rules consume sanitized text.
 Retain this separation and do not persist raw text.
+
+The provider diagnostic already carries `OccurredAt`; `classifyKanbanFailure` passes it through the internal `routingerr.Input.OccurredAt` field.
+No new stream/event field or automatic replay authority is introduced.
 
 ## Consumer integration
 

@@ -42,9 +42,8 @@ type resetHintParts struct {
 	location *time.Location
 }
 
-// parseResetHint extracts an explicitly zoned provider retry time from free
-// text. It returns nil when the notice has no supported timezone or the
-// timestamp is malformed.
+// parseResetHint extracts an explicitly zoned, dated provider retry time from
+// free text. Clock-only reset notices use their provider-specific parser.
 func parseResetHint(text string) *time.Time {
 	return parseResetHintAt(text, time.Now())
 }
@@ -54,7 +53,7 @@ func parseResetHintAt(text string, now time.Time) *time.Time {
 	if ok {
 		return resolveResetHintYear(parts, now)
 	}
-	return parseResetClockHintAt(text, now)
+	return nil
 }
 
 func parseResetClockHintAt(text string, now time.Time) *time.Time {
@@ -136,6 +135,11 @@ func parseIANAResetLocation(raw string) (*time.Location, bool) {
 	if raw == "" || strings.EqualFold(raw, "Local") || !strings.Contains(raw, "/") ||
 		strings.Contains(raw, `\`) || path.IsAbs(raw) || path.Clean(raw) != raw {
 		return nil, false
+	}
+	for _, component := range strings.Split(raw, "/") {
+		if component == "" || strings.HasPrefix(component, ".") {
+			return nil, false
+		}
 	}
 	location, err := time.LoadLocation(raw)
 	if err != nil {

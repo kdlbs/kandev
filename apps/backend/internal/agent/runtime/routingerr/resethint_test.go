@@ -163,7 +163,7 @@ func TestParseClaudeResetClock(t *testing.T) {
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			got := parseResetHintAt(tc.text, tc.now)
+			got := parseResetClockHintAt(tc.text, tc.now)
 			if got == nil || !got.Equal(tc.want) {
 				t.Fatalf("parseResetHintAt(%q) = %v, want %v", tc.text, got, tc.want)
 			}
@@ -190,7 +190,7 @@ func TestParseClaudeResetClockRollover(t *testing.T) {
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			got := parseResetHintAt("resets 11:10am (Europe/Helsinki)", tc.now)
+			got := parseResetClockHintAt("resets 11:10am (Europe/Helsinki)", tc.now)
 			if got == nil || !got.Equal(tc.want) {
 				t.Fatalf("parseResetHintAt() = %v, want %v", got, tc.want)
 			}
@@ -213,9 +213,12 @@ func TestParseClaudeResetClockRejectsInvalid(t *testing.T) {
 		"resets 11:10am (Local)",
 		"resets 11:10am (EET)",
 		"resets 11:10am (../Etc/UTC)",
+		"resets 11:10am (../../Etc/UTC)",
+		"resets 11:10am (.hidden/Europe)",
 		"resets 11:10am (/Europe/Helsinki)",
+		"resets 11:10am (GMT)",
 	} {
-		if got := parseResetHintAt(text, now); got != nil {
+		if got := parseResetClockHintAt(text, now); got != nil {
 			t.Errorf("parseResetHintAt(%q) = %v, want no hint", text, got)
 		}
 	}
@@ -259,7 +262,7 @@ func TestParseClaudeResetClockDST(t *testing.T) {
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			got := parseResetHintAt(tc.text, tc.now)
+			got := parseResetClockHintAt(tc.text, tc.now)
 			if tc.want == nil {
 				if got != nil {
 					t.Fatalf("parseResetHintAt() = %v, want no hint", got)

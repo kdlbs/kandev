@@ -13,6 +13,7 @@ const claudeSessionLimitNotice = "Internal error: You've hit your session limit 
 
 // @covers AC-AGENTS-CLAUDE-SESSION-LIMIT-001.1, AC-AGENTS-CLAUDE-SESSION-LIMIT-001.2
 func TestClassifyKanbanFailureClaudeSessionLimit(t *testing.T) {
+	occurredAt := time.Date(2024, time.January, 1, 8, 3, 0, 0, time.UTC)
 	classified := classifyKanbanFailure(watcher.AgentEventData{
 		AgentID:      "claude-acp",
 		ErrorMessage: claudeSessionLimitNotice,
@@ -20,7 +21,7 @@ func TestClassifyKanbanFailureClaudeSessionLimit(t *testing.T) {
 			Source:     streams.ProviderErrorSourceACPPrompt,
 			ProviderID: "claude-acp",
 			Message:    claudeSessionLimitNotice,
-			OccurredAt: time.Date(2026, time.October, 1, 8, 3, 0, 0, time.UTC),
+			OccurredAt: occurredAt,
 		},
 	})
 	if classified.Code != routingerr.CodeQuotaLimited || classified.Confidence != routingerr.ConfHigh || classified.Class != routingerr.ClassHard {
@@ -28,6 +29,10 @@ func TestClassifyKanbanFailureClaudeSessionLimit(t *testing.T) {
 	}
 	if classified.ResetHint == nil || !classified.FallbackAllowed {
 		t.Fatalf("classification = %+v, want a reset hint and fallback eligibility", classified)
+	}
+	wantReset := time.Date(2024, time.January, 1, 9, 10, 0, 0, time.UTC)
+	if !classified.ResetHint.Equal(wantReset) {
+		t.Fatalf("reset hint = %s, want occurrence-anchored %s", classified.ResetHint, wantReset)
 	}
 }
 

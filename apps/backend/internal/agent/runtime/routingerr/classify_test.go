@@ -338,6 +338,21 @@ func TestClassify_OpenCodePeriodUsageLimitsAreHighConfidenceQuota(t *testing.T) 
 	}
 }
 
+func TestClassify_OpenCodeWeeklyResetClockDoesNotBecomeDailyHint(t *testing.T) {
+	resetInjection()
+	e := Classify(Input{
+		Phase:      PhaseStreaming,
+		ProviderID: "opencode-acp",
+		Stderr:     "AI_APICallError: Weekly usage limit reached · resets 11am (America/New_York)",
+	})
+	if e.Code != CodeQuotaLimited || e.Confidence != ConfHigh {
+		t.Fatalf("classification = %+v, want high-confidence quota_limited", e)
+	}
+	if e.ResetHint != nil {
+		t.Fatalf("ResetHint = %v, want no daily hint for a weekly reset notice", e.ResetHint)
+	}
+}
+
 func TestClassify_OpenCodeCreditLimitReachedIsHighConfidenceQuota(t *testing.T) {
 	resetInjection()
 	cases := []struct {

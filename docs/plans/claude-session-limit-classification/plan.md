@@ -36,7 +36,7 @@ At fixed time `2026-10-01T08:03:00Z`, the clock parser also returned nil instead
 The reproduction command was:
 
 ```bash
-(cd apps/backend && go test ./internal/agent/runtime/routingerr -run TestIssue4131TemporaryEvidence -v -count=1)
+(cd apps/backend && go test -tags fts5 ./internal/agent/runtime/routingerr -run TestIssue4131TemporaryEvidence -v -count=1)
 ```
 
 This is evidence of current behavior, not a completed implementation check.
@@ -62,11 +62,14 @@ The temporary test is absent from the final diff.
 
 The [system design](../../specs/agents/system-design/claude-session-limit-classification.md) owns parsing and consumer contracts.
 Add `claude.stderr.session_limit.v1` in `apps/backend/internal/agent/runtime/routingerr/rules.go`.
-Add a clock-only branch in `resethint.go`, with `time/tzdata` available as the standard fallback.
+Add a clock-only parser in `resethint.go`, gated by that exact Claude session-limit classifier rule; retain generic dated parsing for other quota and rate-limit notices.
+Anchor parsing to `ProviderError.OccurredAt` through `routingerr.Input.OccurredAt`, falling back to classification time only when absent.
+Restrict accepted clock zones to UTC and valid slash-separated IANA locations, with dot-prefixed path components rejected before loading.
+Keep `time/tzdata` available as the standard fallback.
 Reuse `parseClockHour`, numeric validation, and calendar validation where their contracts fit.
 Keep structured reset precedence in `routingerr.Classify` unchanged.
 
-No production changes are expected outside `routingerr`.
+The delayed classification fix also threads the existing `ProviderError.OccurredAt` through `classifyKanbanFailure`; no new event field is needed.
 Integration tests must pass the observed terminal error through `ProviderErrorFromError` and `classifyKanbanFailure`.
 Dynamic tests must pass the classified quota error through `Engine.ApplyFailure`.
 Use the current test seams, including `WithClock` and the credential circuit store.
@@ -88,11 +91,12 @@ The remaining regressions cover the bounded variants, unsupported inputs, compat
 | Acceptance criteria | File and proposed regression |
 | --- | --- |
 | `.1`, `.7` | `routingerr/classify_test.go`: `TestClassifyClaudeSessionLimit`, `TestClassifyClaudeSessionLimitRejectsUnrelatedText` |
-| `.2`, `.3`, `.4` | `routingerr/resethint_test.go`: `TestParseClaudeResetClock`, `TestParseClaudeResetClockRollover`, `TestParseClaudeResetClockRejectsInvalid`, `TestParseClaudeResetClockDST` |
+| `.2`, `.3`, `.4` | `routingerr/resethint_test.go`: `TestParseClaudeResetClock`, `TestParseClaudeResetClockRollover`, `TestParseClaudeResetClockRejectsInvalid`, `TestParseClaudeResetClockDST` (including elapsed spring-gap rollover and rejected `GMT`) |
 | `.4`, `.5` | `routingerr/classify_test.go`: `TestClassifyClaudeResetHintPrecedence`, `TestClassifyClaudeInvalidResetClockKeepsQuotaClassification`, `TestClassifyClaudeStructuredHTTPStatusPrecedence`; existing Codex tests |
 | `.1`, `.2`, `.6` | `transport/acp/opencode_stderr_test.go`: `TestProviderErrorFromErrorClaudeSessionLimit` |
-| `.1`, `.2`, `.6` | `orchestrator/event_handlers_transient_claude_test.go`: `TestClassifyKanbanFailureClaudeSessionLimit`, `TestClaudeQuotaFixedProfileRemainsManual` |
+| `.1`, `.2`, `.3`, `.6` | `orchestrator/event_handlers_transient_claude_test.go`: `TestClassifyKanbanFailureClaudeSessionLimit` verifies delayed classification stays anchored to `ProviderError.OccurredAt`; `TestClaudeQuotaFixedProfileRemainsManual` |
 | `.6` | `dynamic/engine_test.go`: `TestEngineRoutesClaudeSessionLimitThroughHardPolicy` |
+| `.7` | `routingerr/classify_test.go`: weekly OpenCode notice with a clock-only reset keeps quota classification without acquiring a daily reset hint |
 
 Criterion numbers refer to `AC-AGENTS-CLAUDE-SESSION-LIMIT-001`.
 `TestClassifyClaudeSessionLimit` must fail before the fix because the result is the unknown post-start rule.
@@ -115,8 +119,8 @@ No live subscription exhaustion or chargeable agent run is required.
 Implementation checks on 2026-10-01:
 
 - Initial red run: classifier returned `phase.poststart.unknown`; reset parser returned no hint, as expected.
-- `go test ./internal/agent/runtime/routingerr -run 'TestClassifyClaudeSessionLimit$|TestParseClaudeResetClock$' -count=1`: passed.
-- `go test ./internal/agent/runtime/routingerr ./internal/agent/runtime/dynamic -count=1`: passed.
+- The initial classifier/parser regressions failed on the original behavior, then passed after implementation.
+- The initial `routingerr` and `dynamic` targeted packages passed.
 - `go test -tags fts5 ./internal/agentctl/server/adapter/transport/acp -run '^TestProviderErrorFromErrorClaudeSessionLimit$' -count=1`: passed.
 - `go test -tags fts5 ./internal/orchestrator -run '^TestClassifyKanbanFailureClaudeSessionLimit$|^TestClaudeQuotaFixedProfileRemainsManual$' -count=1`: passed.
 - `make -C apps/backend build`: passed. The macOS agentctl artifacts were built without codesign because neither `codesign` nor `rcodesign` was available.
@@ -126,8 +130,18 @@ Implementation checks on 2026-10-01:
 - PR-documentation `validateCoverage` preflight: `covered`, no errors.
 - `git diff --check`: passed.
 - Review correction: the elapsed spring-gap regression now resolves `resets 3:30am (Europe/Helsinki)` at `2026-03-29T12:00:00Z` to `2026-03-30T00:30:00Z`; the upcoming spring-gap and autumn repeated-clock cases still return no hint.
-- Post-correction `go test ./internal/agent/runtime/routingerr -run 'TestParseClaudeResetClock' -count=1`: passed.
-- Post-correction `go test ./internal/agent/runtime/routingerr ./internal/agent/runtime/dynamic -count=1`: passed.
+- Post-correction `routingerr` and `dynamic` targeted packages passed.
+
+PR review remediation on 2026-10-01:
+
+- Clock-only parsing is restricted to `claude.stderr.session_limit.v1`; dated reset parsing remains shared. A weekly OpenCode quota notice with a clock-only reset keeps a nil text-derived hint.
+- Reset parsing uses `ProviderError.OccurredAt` through `routingerr.Input.OccurredAt`, so delayed classification does not move a same-day reset to tomorrow.
+- The accepted zone contract is UTC plus slash-separated IANA locations. `GMT`, dot-prefixed path components, and traversal-shaped locations are rejected.
+- AC `.4` now distinguishes an upcoming invalid wall time from an elapsed current-day wall time that rolls to tomorrow.
+- Review-specific red/green commands: `go test -tags fts5 ./internal/agent/runtime/routingerr -run '^TestClassify_OpenCodeWeeklyResetClockDoesNotBecomeDailyHint$' -count=1` and `go test -tags fts5 ./internal/orchestrator -run '^TestClassifyKanbanFailureClaudeSessionLimit$' -count=1`. Both failed before their respective corrections and passed after them.
+- Final affected-package checks passed: `go test -tags fts5 ./internal/agent/runtime/routingerr ./internal/agent/runtime/dynamic -count=1`, the ACP projection regression, and the Kanban classifier/manual-policy regressions.
+- `make -C apps/backend build` passed; macOS agentctl artifacts were not codesigned because `codesign` and `rcodesign` were unavailable.
+- Current documentation checks passed: `python3 scripts/list-docs.py validate` (339 decisions, 1283 specifications), `python3 scripts/lint-spec-files.test.py` (36 tests), `python3 scripts/lint-spec-files.py --all`, PR-documentation `validateCoverage` (`covered`, no errors), and `git diff --check`.
 
 Design checks on 2026-10-01:
 
