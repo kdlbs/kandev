@@ -45,7 +45,15 @@ export type AutonomySpend = {
   ceiling_subcents: number | null;
 };
 
-export type AutonomyRead = {
+// The paused state the autonomy read and the coordinator read carry, whatever
+// the phase 3.1 flag. paused_by is null when the manager is not readable.
+export type PauseState = {
+  paused?: boolean;
+  paused_at?: string | null;
+  paused_by?: { id: string; name: string } | null;
+};
+
+export type AutonomyRead = PauseState & {
   server_time: string;
   autonomy_enabled: boolean;
   admission?: AutonomyAdmission;
@@ -56,6 +64,23 @@ export type AutonomyRead = {
   containment: { conditions: AutonomyCondition[] };
   spend: AutonomySpend;
 };
+
+export function putCoordinatorPause(
+  workspaceId: string,
+  coordinatorId: string,
+  paused: boolean,
+  options?: ApiRequestOptions,
+): Promise<PauseState> {
+  return fetchJson<PauseState>(coordinatorPath(workspaceId, coordinatorId, "/pause"), {
+    ...options,
+    init: {
+      ...options?.init,
+      method: "PUT",
+      headers: { "Content-Type": "application/json", ...options?.init?.headers },
+      body: JSON.stringify({ paused }),
+    },
+  });
+}
 
 export function getAutonomy(
   workspaceId: string,

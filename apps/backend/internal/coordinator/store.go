@@ -146,6 +146,8 @@ type coordinatorRow struct {
 	WatchScope          string         `db:"watch_scope"`
 	AutonomyEnabled     bool           `db:"autonomy_enabled"`
 	CostCeilingSubcents sql.NullInt64  `db:"cost_ceiling_subcents"`
+	PausedAt            sql.NullTime   `db:"paused_at"`
+	PausedBy            sql.NullString `db:"paused_by"`
 }
 
 func (r *coordinatorRow) toCoordinator() *Coordinator {
@@ -167,6 +169,11 @@ func (r *coordinatorRow) toCoordinator() *Coordinator {
 		v := r.CostCeilingSubcents.Int64
 		c.CostCeilingSubcents = &v
 	}
+	if r.PausedAt.Valid {
+		at := r.PausedAt.Time.UTC()
+		c.PausedAt = &at
+		c.PausedBy = r.PausedBy.String
+	}
 	if r.PolicyJSON.Valid {
 		raw := r.PolicyJSON.String
 		c.PolicyJSON = &raw
@@ -178,7 +185,7 @@ func (r *coordinatorRow) toCoordinator() *Coordinator {
 	return c
 }
 
-const coordinatorColumns = `id, workspace_id, name, agent_profile_id, executor_profile_id, context, conversation_task_id, config_revision, created_at, updated_at, policy_json, policy_revision, watch_scope, autonomy_enabled, cost_ceiling_subcents`
+const coordinatorColumns = `id, workspace_id, name, agent_profile_id, executor_profile_id, context, conversation_task_id, config_revision, created_at, updated_at, policy_json, policy_revision, watch_scope, autonomy_enabled, cost_ceiling_subcents, paused_at, paused_by`
 
 // insertCoordinatorColumns lists the columns CreateCoordinator writes; the policy columns
 // keep their defaults.
@@ -652,7 +659,7 @@ func lockedCoordinatorRow(ctx context.Context, exec coordinatorExec, rebind func
 		&row.ID, &row.WorkspaceID, &row.Name, &row.AgentProfileID, &row.ExecutorProfileID,
 		&row.Context, &row.ConversationTaskID, &row.ConfigRevision, &row.CreatedAt, &row.UpdatedAt,
 		&row.PolicyJSON, &row.PolicyRevision, &row.WatchScope,
-		&row.AutonomyEnabled, &row.CostCeilingSubcents)
+		&row.AutonomyEnabled, &row.CostCeilingSubcents, &row.PausedAt, &row.PausedBy)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrNotFound

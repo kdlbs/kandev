@@ -29,6 +29,9 @@ func (s *Service) Deliver(ctx context.Context, coordinatorID string) error {
 		return err
 	}
 	defer release()
+	if paused, _ := s.gate.Active(ctx, coordinatorID); paused {
+		return nil
+	}
 	adm := s.Admit(ctx, coordinatorID, AdmitCounting)
 	if !adm.OK {
 		admissionHeldTotal.Add(adm.Reason, 1)
@@ -71,7 +74,7 @@ func (s *Service) sendTurn(ctx context.Context, coord *Coordinator, adm Admissio
 			s.writeBinding(ctx, turnID, "reserved", s.store.bindReservedTurn, reservedTurnID)
 		},
 		OnAccepted: func(sessionTurnID string) {
-			s.writeBinding(ctx, turnID, "accepted", s.store.bindAcceptedTurn, sessionTurnID)
+			s.onAccepted(ctx, coord.ID, adm.SessionID, turnID, sessionTurnID)
 		},
 	})
 	if errors.Is(err, orchestrator.ErrWakePromptNotDispatched) {

@@ -66,6 +66,12 @@ type Coordinator struct {
 	AutonomyEnabled     bool
 	CostCeilingSubcents *int64
 
+	// PausedAt and PausedBy are the Pause state: set when a manager paused the
+	// coordinator, nil and empty otherwise. PausedBy may be empty when the
+	// pausing user is unknown.
+	PausedAt *time.Time
+	PausedBy string
+
 	// PolicyJSON is the stored permission map, nil for a phase-1 coordinator.
 	PolicyJSON     *string
 	PolicyRevision int

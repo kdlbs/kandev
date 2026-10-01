@@ -154,6 +154,14 @@ features:
     dev:  "false"
     e2e:  "true"
 
+  # Coordinator phase 3.1 (record and measure): pause and the other 3.1
+  # surfaces. Off in every shipped profile; only effective together with
+  # KANDEV_FEATURES_COORDINATOR, _PHASE2 and _PHASE3.
+  KANDEV_FEATURES_COORDINATOR_PHASE31:
+    prod: "false"
+    dev:  "false"
+    e2e:  "false"
+
 # ── Mock providers ────────────────────────────────────────────────
 # Swap real third-party services for in-memory fakes. Production
 # leaves all of these unset (real APIs). Dev opts into the mock agent

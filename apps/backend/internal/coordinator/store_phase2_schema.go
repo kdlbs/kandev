@@ -21,6 +21,8 @@ var phase2ColumnMigrations = []struct{ name, stmt string }{
 	{"coordinator_proposals.outcome_json", `ALTER TABLE coordinator_proposals ADD COLUMN outcome_json TEXT`},
 	{"coordinators.autonomy_enabled", `ALTER TABLE coordinators ADD COLUMN autonomy_enabled INTEGER NOT NULL DEFAULT 0`},
 	{"coordinators.cost_ceiling_subcents", `ALTER TABLE coordinators ADD COLUMN cost_ceiling_subcents BIGINT`},
+	{"coordinators.paused_at", `ALTER TABLE coordinators ADD COLUMN paused_at {{timestamp}}`},
+	{"coordinators.paused_by", `ALTER TABLE coordinators ADD COLUMN paused_by TEXT`},
 	{"coordinator_proposals.reply_text", `ALTER TABLE coordinator_proposals ADD COLUMN reply_text TEXT`},
 	{"coordinator_proposals.reply_delivered_at", `ALTER TABLE coordinator_proposals ADD COLUMN reply_delivered_at {{timestamp}}`},
 	{"coordinator_proposals.reply_delivery_claimed_at", `ALTER TABLE coordinator_proposals ADD COLUMN reply_delivery_claimed_at {{timestamp}}`},
@@ -36,6 +38,8 @@ var phase2ColumnMigrations = []struct{ name, stmt string }{
 var phase2LateColumnMigrations = []struct{ name, stmt string }{
 	{"coordinator_activity.unattended_turn_id", `ALTER TABLE coordinator_activity ADD COLUMN unattended_turn_id TEXT`},
 	{"coordinator_unattended_turns.reserved_turn_id", `ALTER TABLE coordinator_unattended_turns ADD COLUMN reserved_turn_id TEXT`},
+	{"coordinator_unattended_turns.pause_requested_at", `ALTER TABLE coordinator_unattended_turns ADD COLUMN pause_requested_at {{timestamp}}`},
+	{"coordinator_unattended_turns.pause_cancel_at", `ALTER TABLE coordinator_unattended_turns ADD COLUMN pause_cancel_at {{timestamp}}`},
 }
 
 // phase2TablesSQL creates the phase-2 tables. Indexes over columns added by

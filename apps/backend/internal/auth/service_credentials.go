@@ -255,3 +255,23 @@ func (s *Service) ResolveUserIdentity(ctx context.Context, userID string) (authn
 	}
 	return identityOf(user, "", ""), true, nil
 }
+
+// UserDisplayName returns the name shown for a user, falling back to the email
+// when no display name is set. ok is false with a nil error when the account
+// does not exist.
+func (s *Service) UserDisplayName(ctx context.Context, userID string) (string, bool, error) {
+	if s == nil || userID == "" {
+		return "", false, nil
+	}
+	user, err := s.users.GetUser(ctx, userID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", false, nil
+	}
+	if err != nil {
+		return "", false, err
+	}
+	if user.DisplayName != "" {
+		return user.DisplayName, true, nil
+	}
+	return user.Email, true, nil
+}

@@ -9,6 +9,7 @@ import {
 
 export type StripState =
   | { kind: "off" }
+  | { kind: "paused"; at: string | null; by: string | null }
   | { kind: "active" }
   | { kind: "busy" }
   | { kind: "cooldown"; untilMs: number }
@@ -18,6 +19,9 @@ export type StripState =
 /** The strip's state from the admission block; anything unrecognized is `unknown`, never healthy. */
 export function stripState(value: AutonomyRead): StripState {
   if (!value.autonomy_enabled) return { kind: "off" };
+  if (value.paused === true) {
+    return { kind: "paused", at: value.paused_at ?? null, by: value.paused_by?.name ?? null };
+  }
   const admission = value.admission;
   if (!admission) return { kind: "unknown" };
   if (admission.ok) return { kind: "active" };

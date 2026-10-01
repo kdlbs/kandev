@@ -847,6 +847,27 @@
       ]
     },
     {
+      "id": "coordinator-pause",
+      "audiences": [
+        "user"
+      ],
+      "stability": "experimental",
+      "docs": [
+        "coordinator"
+      ],
+      "sources": [
+        "apps/backend/internal/coordinator/pause/pause.go",
+        "apps/backend/internal/coordinator/service_pause.go",
+        "apps/web/components/coordinators/autonomy/pause-control.tsx"
+      ],
+      "tests": [
+        "apps/backend/internal/coordinator/pause_gate_test.go",
+        "apps/backend/internal/coordinator/pause_stop_test.go",
+        "apps/web/components/coordinators/autonomy/pause-control.test.tsx",
+        "apps/web/e2e/tests/coordinator/pause.spec.ts"
+      ]
+    },
+    {
       "id": "plugin-system",
       "audiences": [
         "operator",

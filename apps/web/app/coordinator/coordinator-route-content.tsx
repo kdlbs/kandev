@@ -81,7 +81,12 @@ function CoordinatorScreenList({
   return (
     <div className="h-full min-h-0 overflow-y-auto">
       {attention.phase3Effective && (
-        <AutonomyStrip autonomy={attention.autonomy} canManage={canManage} />
+        <AutonomyStrip
+          autonomy={attention.autonomy}
+          canManage={canManage}
+          workspaceId={workspaceId}
+          coordinatorId={coordinator.id}
+        />
       )}
       {/* Full width under the topbar, not inside the content column: the
           derived-facts caption sits beside the counts, which only fits when

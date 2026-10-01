@@ -1,7 +1,11 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { getAutonomy, type AutonomyRead } from "@/lib/api/domains/coordinator-autonomy-api";
+import {
+  getAutonomy,
+  type AutonomyRead,
+  type PauseState,
+} from "@/lib/api/domains/coordinator-autonomy-api";
 import { isUsableAutonomy, nextDeadlineMs, serverNowMs } from "@/lib/coordinator/autonomy";
 import { useWebSocketClient } from "@/lib/ws/connection";
 
@@ -14,6 +18,13 @@ export type AutonomyInput = {
   error: boolean;
   loading: boolean;
   retry: () => void;
+  /**
+   * A write issued from this view counts as a read issued now: it outranks
+   * every read issued before it, and `applyWrite` is ignored once a later read
+   * has been issued. Absent where a view cannot write.
+   */
+  beginWrite?: () => number;
+  applyWrite?: (token: number, patch: PauseState) => void;
 };
 
 type State = { value: AutonomyRead | null; loadedAt: number | null; error: boolean };
@@ -106,5 +117,21 @@ export function useAutonomy(
   }, [enabled, retryTick, reload]);
 
   const retry = useCallback(() => reload(), [reload]);
-  return { value: state.value, loadedAt: state.loadedAt, error: state.error, loading, retry };
+  const beginWrite = useCallback(() => ++sequenceRef.current, []);
+  const applyWrite = useCallback((token: number, patch: PauseState) => {
+    if (token !== sequenceRef.current) return;
+    setState((prev) =>
+      prev.value ? { ...prev, value: { ...prev.value, ...patch }, error: false } : prev,
+    );
+    setLoading(false);
+  }, []);
+  return {
+    value: state.value,
+    loadedAt: state.loadedAt,
+    error: state.error,
+    loading,
+    retry,
+    beginWrite,
+    applyWrite,
+  };
 }
