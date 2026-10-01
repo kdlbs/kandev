@@ -143,6 +143,9 @@ type Service struct {
 	// surface exist. The pause gate and the stored project scope are enforced
 	// whatever its value.
 	phase31 bool
+
+	// learningHealth computes the Learning section's health line; guarded by observerMu.
+	learningHealth LearningHealthReader
 	// automatic holds the automatic path's injectable seams.
 	automatic automaticState
 	// wakeMu guards kick, the stall hook, the wake sources and the recorder
@@ -210,6 +213,9 @@ type Service struct {
 	// dreamStop is the dream canceller registered by the dream scheduler; nil
 	// is a no-op.
 	dreamStop pause.DreamStop
+	// archiveEpisode archives a dream episode task; nil until the dream is
+	// wired.
+	archiveEpisode func(ctx context.Context, taskID string) error
 }
 
 // ServiceOption configures optional Service behavior.
@@ -614,9 +620,14 @@ func (s *Service) DeleteCoordinator(ctx context.Context, workspaceID, id string)
 	if err := s.authz.AuthorizeWorkspaceScope(ctx, workspaceID, authz.ScopeWorkspaceManage); err != nil {
 		return err
 	}
+	open, err := s.store.OpenDreamEpisodeTasks(ctx, id)
+	if err != nil {
+		return err
+	}
 	if err := s.store.DeleteCoordinator(ctx, workspaceID, id); err != nil {
 		return err
 	}
+	s.archiveEpisodes(ctx, open)
 	if s.onCoordinatorDeleted != nil {
 		s.onCoordinatorDeleted(ctx, workspaceID, id)
 	}
@@ -752,3 +763,12 @@ func (s *Service) SetContainment(c *ContainmentChecker) { s.containment = c }
 
 // Containment returns the injected containment checker, or nil before wiring.
 func (s *Service) Containment() *ContainmentChecker { return s.containment }
+
+// Store returns the coordinator store, for the composition root's wiring of
+// the packages that read it directly.
+func (s *Service) Store() *Store { return s.store }
+
+// IsDreamEpisodeTask reports whether taskID is a dream's episode task.
+func (s *Service) IsDreamEpisodeTask(ctx context.Context, taskID string) (bool, error) {
+	return s.store.IsDreamEpisodeTask(ctx, taskID)
+}

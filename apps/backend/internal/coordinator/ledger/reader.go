@@ -259,7 +259,7 @@ type listedTurn struct {
 
 func (l *Ledger) readPage(ctx context.Context, coordinatorID string, q listQuery, scope taskScope) (*Page, error) {
 	db := l.deps.RO
-	where := `coordinator_id = ? AND started_at >= ?`
+	where := `coordinator_id = ? AND started_at >= ? AND "trigger" <> 'dream'`
 	args := []any{coordinatorID, q.since}
 	if q.verdict != "" {
 		where += ` AND verdict = ?`

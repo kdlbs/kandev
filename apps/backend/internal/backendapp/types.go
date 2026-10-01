@@ -2,6 +2,7 @@ package backendapp
 
 import (
 	"errors"
+	replaywire "github.com/kandev/kandev/internal/coordinator/replay/wire"
 	taskusage "github.com/kandev/kandev/internal/task/usage"
 
 	"github.com/kandev/kandev/internal/agent/managedruntime"
@@ -162,6 +163,9 @@ type Services struct {
 	// UsageWriter is the task usage ledger writer; the coordinator registers
 	// its post-commit spend observer on it. Nil until the writer starts.
 	UsageWriter *taskusage.Writer
+	// Pricing is the model price lookup the replay harness prices a dream's
+	// replays with. Nil until the lookup is constructed.
+	Pricing replaywire.PriceSource
 }
 
 type schedulerStopper interface {

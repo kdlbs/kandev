@@ -30,6 +30,7 @@ func wireCoordinatorLedger(p routeParams, svc *coordinator.Service, mcp turnRead
 		DB: p.dbPool.Writer(), RO: p.dbPool.Reader(), Log: p.log.Zap(),
 		BuildVersion:       resolveVersion(p),
 		CoordinatorForTask: svc.CoordinatorForConversationTask,
+		IsDreamTask:        svc.IsDreamEpisodeTask,
 		WatchSet:           svc.EffectiveWatchSet,
 		ActionPending:      reader.ActionPending,
 		PromptHash: func(ctx context.Context, coordinatorID string) string {

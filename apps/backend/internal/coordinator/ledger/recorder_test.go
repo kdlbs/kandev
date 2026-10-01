@@ -1,6 +1,7 @@
 package ledger
 
 import (
+	"context"
 	"sync"
 	"testing"
 	"time"
@@ -139,5 +140,15 @@ func TestRecorder_StartStampsSelectedWatchScope(t *testing.T) {
 	row := f.oneTurn()
 	if row.WatchScope != "workflows" || row.WatchIDs != `["wf-1","wf-2"]` {
 		t.Fatalf("watch = %q %q", row.WatchScope, row.WatchIDs)
+	}
+}
+
+func TestRecorder_DreamEpisodeTurnIsStampedWithTheDreamTrigger(t *testing.T) {
+	f := newFixture(t)
+	f.l.deps.IsDreamTask = func(_ context.Context, taskID string) (bool, error) { return taskID == testConvTask, nil }
+	f.start("st-dream", f.at(0))
+
+	if row := f.oneTurn(); row.Trigger != TriggerDream {
+		t.Fatalf("trigger = %q, want %q", row.Trigger, TriggerDream)
 	}
 }

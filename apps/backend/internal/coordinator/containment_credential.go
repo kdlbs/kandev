@@ -153,3 +153,11 @@ func (c *ContainmentChecker) scanRepositoryBindings(ctx context.Context, co *Coo
 		scan.unverified = true
 	}
 }
+
+// ContainsCredential reports whether text carries one of the Kandev
+// credential patterns the containment check refuses.
+func ContainsCredential(text string) bool {
+	return strings.Contains(text, kandevPATPrefix) ||
+		strings.Contains(text, DetailKandevAPIKey) ||
+		strings.Contains(text, DetailKandevRunToken)
+}

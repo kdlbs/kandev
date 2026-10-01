@@ -2511,6 +2511,7 @@ func registerMCPAndDebugRoutes(
 		mcpHandlers.SetCoordinatorService(p.services.Coordinator)
 		wireCoordinatorLedger(p, p.services.Coordinator, mcpHandlers)
 		wireCoordinatorOutcomes(p, p.services.Coordinator)
+		wireCoordinatorDream(p, p.services.Coordinator)
 		p.services.Coordinator.SetKindDeps(coordinator.KindDeps{
 			Tasks:     &coordinatorKindReader{tasks: p.taskSvc, liveExec: p.lifecycleMgr.HasLiveAgentExecution},
 			Resumer:   &coordinatorResumer{resume: p.orchestratorSvc.ResumeTaskSession},

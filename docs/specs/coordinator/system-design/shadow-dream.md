@@ -46,8 +46,9 @@ replay unchanged and adds only an apply path.
 `coordinator_dreams`: `id`, `coordinator_id`, `status` (`running`, `ok`,
 `clean`, `partial`, `failed`, `skipped`), `reason`, `window_start`,
 `window_end`, `input_hash`, `turn_ids` (JSON), `considered` (JSON, labelled
-agent-reported on read), `model`, `cost_subcents` (nullable), `started_at`,
-`refreshed_at`, `finished_at`. Index on `(coordinator_id, started_at, id)`.
+agent-reported on read), `model`, `cost_subcents` (nullable), `episode_task_id` and `episode_session_id`
+(nullable, written when the episode opens), `started_at`, `refreshed_at`,
+`finished_at`. Index on `(coordinator_id, started_at, id)`.
 
 `coordinator_dream_items`: `id`, `dream_id`, `position`, `kind`, `text`,
 `cited_turn_ids` (JSON), `gate` (`pass` or the refusal reason), `replay_id`
@@ -161,6 +162,23 @@ reason `paused` ([pause](pause.md#pause-and-the-episode)). The ledger records th
 turn with trigger `dream` and the model stamp; the session is archived on end
 and nothing is delivered to the conversation or Needs you (`002.7`). The only
 starter is `Scheduler.Tick`; no tool, route, wake or delivery calls it (`002.6`).
+
+## Episode cleanup
+
+The dream row's `episode_task_id` and `episode_session_id` are the only key the
+cleanup uses. The dream tick runs it on every pass, before the admission
+conditions, for each dream row that is not `running` and whose episode task is
+not yet archived, and for each `running` row whose lease expired: it re-reads
+the Pause gate, cancels the session if it is live and archives the task and
+session through the `OpenTask` archive call. The cleanup is idempotent (an
+already archived task is a no-op) and needs no goroutine of the dead process,
+so it covers Pause, Resume before a pass, and a restart. `Stopper.Stop` calls
+the dream-stop hook registered with `SetDreamStop`; the hook sets the
+coordinator's `running` row `failed` with the reason `paused` and cancels the
+episode and any replay it owns, and the tick cleanup finishes whatever a failed
+hook left. The tick also calls `Store.SettleStaleReplays(ctx, now)`; the dream
+lease is the per-coordinator exclusion the replay harness requires of its
+caller.
 
 ## Opening message
 

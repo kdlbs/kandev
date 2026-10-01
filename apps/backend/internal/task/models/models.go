@@ -138,6 +138,10 @@ const (
 	// task, set at creation and read by the startup cleanup pass that
 	// archives/deletes conversation tasks whose coordinator no longer exists.
 	MetaKeyCoordinatorID = "coordinator_id"
+	// MetaKeyCoordinatorPurpose marks a coordinator-origin task that is not a
+	// conversation. CoordinatorPurposeDream is the shadow dream episode task.
+	MetaKeyCoordinatorPurpose = "coordinator_purpose"
+	CoordinatorPurposeDream   = "dream"
 	// MetaKeyWorkflowInitialSession is a write-once task-local snapshot of
 	// the first session identity used by workflow session targeting.
 	MetaKeyWorkflowInitialSession = "workflow_initial_session"

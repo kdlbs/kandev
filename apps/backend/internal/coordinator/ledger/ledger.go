@@ -64,6 +64,9 @@ type Deps struct {
 	WatchSet func(ctx context.Context, coordinatorID string) (coordinator.WatchSet, error)
 	// ActionPending reports whether the session has a pending interaction.
 	ActionPending func(ctx context.Context, sessionID string) (bool, error)
+	// IsDreamTask reports whether taskID is a shadow dream episode task; its
+	// turns are recorded with the dream trigger. Nil means none is.
+	IsDreamTask func(ctx context.Context, taskID string) (bool, error)
 }
 
 // Ledger is the recorder, call queue, active-turn map and reader.

@@ -3,6 +3,7 @@ package coordinator
 import (
 	"context"
 	"errors"
+	taskmodels "github.com/kandev/kandev/internal/task/models"
 	"testing"
 
 	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
@@ -53,5 +54,13 @@ func TestOpenConversationBindFailureDeletesTask(t *testing.T) {
 	got, _ := d.svc.store.GetCoordinatorByID(context.Background(), d.coordinator.ID)
 	if got.ConversationTaskID != nil {
 		t.Fatal("an unbound task must never become current")
+	}
+}
+
+func TestIsDreamTask(t *testing.T) {
+	dream := &taskmodels.Task{Metadata: map[string]interface{}{taskmodels.MetaKeyCoordinatorPurpose: taskmodels.CoordinatorPurposeDream}}
+	conv := &taskmodels.Task{Metadata: map[string]interface{}{taskmodels.MetaKeyCoordinatorID: "c"}}
+	if !isDreamTask(dream) || isDreamTask(conv) || isDreamTask(nil) || isDreamTask(&taskmodels.Task{}) {
+		t.Fatal("only a task stamped with the dream purpose is a dream task")
 	}
 }

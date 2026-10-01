@@ -42,6 +42,18 @@ Pause stops a coordinator from acting on its own without touching its settings. 
 
 Pausing works while autonomy is off, from the **Autonomy** section. If the phase 3.1 features are turned off on a paused coordinator, it stays paused and shows a read-only **Paused** badge until they are back on.
 
+## Learn from its own turns
+
+With the phase 3.1 features on, a coordinator's settings have a **Learning** section. It shows what the coordinator would change about itself. Shadow changes nothing: no suggestion is applied, copied or approved.
+
+- **Shadow dream** is a per-coordinator switch, off by default. While it is on and the coordinator has run unattended turns, a short review runs about once a day. The review reads only the coordinator's own turn history and writes a report.
+- **Health** reads Fresh, Waiting, Stale or Never run. A waiting dream names what is missing (for example, turn autonomy on) and how to fix it.
+- **Measures** cover the last 7, 30 or 90 days: proposals approved without edits, how often an override came back, dollars per merged task, median wait for you, and how your ratings compare with replay. A measure with too little data says so instead of showing a number. An unknown cost shows as "unknown".
+- **Reports** list the newest 20 with a status (clean, partial, failed or skipped), the turn and item counts and the cost. Select **Open** for the items, each with its gate result, replay result, the turns it cites, and a **Considered, not proposed** list that the agent reported and Kandev did not verify.
+- Managers rate each item **Useful**, **Not useful** or **Harmful**. The newest rating wins. Readers see the section read-only.
+
+Reports are kept for 400 days. The review never runs a tool other than reading the coordinator's turn history.
+
 ## Clear a hold
 
 A hold with events waiting also appears as an item on **Needs you**, with an **Open settings** link for managers. The common reasons and what clears them:

@@ -26,6 +26,31 @@ func (s *Service) SetDreamStop(stop pause.DreamStop) {
 	s.dreamStop = stop
 }
 
+// SetDreamEpisodeArchiver registers the archiver of dream episode tasks; a nil
+// value clears it.
+func (s *Service) SetDreamEpisodeArchiver(archive func(ctx context.Context, taskID string) error) {
+	s.pauseMu.Lock()
+	defer s.pauseMu.Unlock()
+	s.archiveEpisode = archive
+}
+
+// archiveEpisodes archives the episode tasks of dream rows that are about to
+// be, or just were, deleted with their coordinator, so no live task outlives
+// the row that names it.
+func (s *Service) archiveEpisodes(ctx context.Context, taskIDs []string) {
+	s.pauseMu.Lock()
+	archive := s.archiveEpisode
+	s.pauseMu.Unlock()
+	if archive == nil {
+		return
+	}
+	for _, id := range taskIDs {
+		if err := archive(context.WithoutCancel(ctx), id); err != nil {
+			s.logger.Warn("dream episode task not archived on coordinator delete", zap.String("task_id", id), zap.Error(err))
+		}
+	}
+}
+
 // stillPaused re-reads the gate. A read error answers paused, as everywhere.
 func (s *Service) stillPaused(ctx context.Context, coordinatorID string) bool {
 	paused, _ := s.gate.Active(ctx, coordinatorID)

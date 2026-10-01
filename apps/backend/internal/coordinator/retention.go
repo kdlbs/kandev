@@ -95,6 +95,7 @@ func (s *Service) runActivityRetention(ctx context.Context) {
 	}
 	s.pruneOutcomeRows(ctx)
 	s.pruneReplayRows(ctx)
+	s.pruneDreamRows(ctx)
 }
 
 // pruneOutcomeRows deletes outcome, feedback and seen rows past their
@@ -124,6 +125,24 @@ func (s *Service) pruneReplayRows(ctx context.Context) {
 		if err != nil {
 			if ctx.Err() == nil {
 				s.logger.Warn("replay retention batch failed", zap.Error(err))
+			}
+			return
+		}
+		if n == 0 {
+			return
+		}
+	}
+}
+
+// pruneDreamRows deletes dreams started before the retention age, with their
+// items and ratings, in batches; an error is logged and the next run retries.
+func (s *Service) pruneDreamRows(ctx context.Context) {
+	cutoff := s.store.now().UTC().Add(-activityRetentionAge)
+	for ctx.Err() == nil {
+		n, err := s.store.PruneDreams(ctx, cutoff, outcomesRetentionBatch)
+		if err != nil {
+			if ctx.Err() == nil {
+				s.logger.Warn("dream retention batch failed", zap.Error(err))
 			}
 			return
 		}

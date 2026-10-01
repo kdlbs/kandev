@@ -230,6 +230,15 @@ func (l *Ledger) buildRow(ctx context.Context, coordinatorID string, te turnEven
 	if l.deps.PromptHash != nil {
 		row.promptHash = l.deps.PromptHash(ctx, coordinatorID)
 	}
+	if l.deps.IsDreamTask != nil {
+		dream, err := l.deps.IsDreamTask(ctx, te.taskID)
+		if err != nil {
+			return nil, nil, fmt.Errorf("dream task check: %w", err)
+		}
+		if dream {
+			row.trigger = TriggerDream
+		}
+	}
 	var snap *Snapshot
 	if l.deps.WatchSet != nil {
 		ws, err := l.deps.WatchSet(ctx, coordinatorID)

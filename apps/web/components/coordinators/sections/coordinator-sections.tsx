@@ -5,6 +5,8 @@ import { useTranslation } from "react-i18next";
 import { useCoordinatorSection } from "@/hooks/domains/coordinator/use-coordinator-section";
 import { useControlDraft } from "@/hooks/domains/coordinator/use-control-draft";
 import { useCoordinatorPhase3Effective } from "@/hooks/domains/settings/use-coordinator-phase3-effective";
+import { useCoordinatorPhase31Effective } from "@/hooks/domains/settings/use-coordinator-phase31-effective";
+import { LearningSection } from "@/components/coordinators/learning/learning-section";
 import type { ControlDraft } from "@/lib/coordinators/control-draft";
 import type { WatchSet } from "@/lib/coordinator/watch-filter";
 import { WatchesNoneNotice } from "@/app/coordinator/components/watches-none-notice";
@@ -78,6 +80,22 @@ function watchSetFromStored(stored: ControlDraft): WatchSet {
   };
 }
 
+function sectionSlugs(phase3: boolean, phase31: boolean): string[] {
+  return [...BASE_SLUGS, ...(phase3 ? ["autonomy"] : []), ...(phase31 ? ["learning"] : [])];
+}
+
+function learningEntry(
+  t: ReturnType<typeof useTranslation>["t"],
+  props: { workspaceId: string; coordinatorId: string; canManage: boolean },
+): CoordinatorSectionEntry {
+  return {
+    slug: "learning",
+    label: t("coordinator:sectionLearning"),
+    help: t("coordinator:sectionLearningHelp"),
+    render: () => <LearningSection {...props} />,
+  };
+}
+
 /** The phase-2 coordinator page body: Identity holds the phase-1 fields unchanged. */
 export function CoordinatorSections({
   workspaceId,
@@ -89,9 +107,8 @@ export function CoordinatorSections({
   const { t } = useTranslation();
   const control = useControlDraft({ workspaceId, coordinatorId, canManage });
   const phase3 = useCoordinatorPhase3Effective();
-  const { selectSection } = useCoordinatorSection(
-    phase3 ? [...BASE_SLUGS, "autonomy"] : BASE_SLUGS,
-  );
+  const phase31 = useCoordinatorPhase31Effective();
+  const { selectSection } = useCoordinatorSection(sectionSlugs(phase3, phase31));
   const stored = control.stored;
   const entries: CoordinatorSectionEntry[] = [
     {
@@ -164,6 +181,9 @@ export function CoordinatorSections({
         />
       ),
     });
+  }
+  if (phase31) {
+    entries.push(learningEntry(t, { workspaceId, coordinatorId, canManage }));
   }
   return (
     <>
