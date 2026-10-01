@@ -199,7 +199,14 @@ service or the step store and a failure of either cannot affect it.
       then: from step not found, 409 `undo_conflict` reason `step_deleted`;
       from step completing on enter, `step_done`; any session of the task
       starting or running (seam `HasActiveSession`, the same two states the
-      task service blocks moves on), `agent_running`. Otherwise call
+      task service blocks moves on), `agent_running`. Read all steps in the
+      task's workflow through `ListSteps`; a read error is 500 with nothing
+      written, and a from step missing from the graph is `step_deleted`. If
+      the from step feeds, directly or through a feeder chain, into a different
+      auto-start step, return 409 `feeder_starts_agent` before calling the
+      task service. The move path also promotes queued feeder work and publishes
+      `task.moved` for it, so `SkipStepPrompt` on the task being undone cannot
+      suppress that separate start. Otherwise call
       `MoveTaskWithOptions(task, workflow, from_step_id, 0, opts)` with
       `opts.ExpectedWorkflowID` = the workflow just read, and
       `opts.EntryOptions.SkipStepPrompt` = true only when the from step
@@ -264,7 +271,8 @@ resume is `not_undoable`; the UI shows "No undo" (`003.1`).
 workflow id, workflow step id), `MoveTaskWithOptions(ctx, id, workflowID,
 stepID, position, opts)` (returning whether the task was admitted),
 `GetStep(ctx, stepID)` (name, workflow id, auto-start, completes-on-enter, or
-`ErrStepNotFound`) and `HasActiveSession(ctx, taskID)`. The backend wiring
+`ErrStepNotFound`), `ListSteps(ctx, workflowID)` (the complete feeder graph)
+and `HasActiveSession(ctx, taskID)`. The backend wiring
 adapts the task service for the first four and the workflow service's
 `GetStep` (mapping `ErrWorkflowStepNotFound` to `ErrStepNotFound`) and the
 task's session list for the last two; tests use a fake.

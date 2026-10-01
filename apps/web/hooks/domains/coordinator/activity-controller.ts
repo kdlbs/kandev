@@ -16,6 +16,7 @@ export type UndoMessageKey =
   | "activityConflictStepDeleted"
   | "activityConflictStepDone"
   | "activityConflictStepFull"
+  | "activityConflictFeederStartsAgent"
   | "activityNotUndoable"
   | "activityUndoFailed"
   | "activityGone";
@@ -52,6 +53,7 @@ const CONFLICT_KEY_BY_REASON: Record<string, UndoMessageKey> = {
   step_deleted: "activityConflictStepDeleted",
   step_done: "activityConflictStepDone",
   step_full: "activityConflictStepFull",
+  feeder_starts_agent: "activityConflictFeederStartsAgent",
 };
 
 export function conflictMessageKey(reason: string | undefined): UndoMessageKey {

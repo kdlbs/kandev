@@ -18,12 +18,13 @@ const (
 	UndoNotUndoable   = "not_undoable"
 	UndoConflict      = "undo_conflict"
 
-	UndoReasonMoved       = "moved"
-	UndoReasonArchived    = "archived"
-	UndoReasonAgentActive = "agent_running"
-	UndoReasonStepGone    = "step_deleted"
-	UndoReasonStepDone    = "step_done"
-	UndoReasonStepFull    = "step_full"
+	UndoReasonMoved             = "moved"
+	UndoReasonArchived          = "archived"
+	UndoReasonAgentActive       = "agent_running"
+	UndoReasonStepGone          = "step_deleted"
+	UndoReasonStepDone          = "step_done"
+	UndoReasonStepFull          = "step_full"
+	UndoReasonFeederStartsAgent = "feeder_starts_agent"
 )
 
 // UndoRefusal is a 409 refusal of an undo. It carries no row; the client
@@ -202,6 +203,23 @@ func (s *Service) moveBack(ctx context.Context, taskID, workflowID, fromStepID s
 	}
 	if active {
 		return conflict(UndoReasonAgentActive)
+	}
+	steps, err := s.undoTasks.ListSteps(ctx, workflowID)
+	if err != nil {
+		return fmt.Errorf("read workflow steps for undo: %w", err)
+	}
+	stepListed := false
+	for _, candidate := range steps {
+		if candidate.ID == fromStepID {
+			stepListed = true
+			break
+		}
+	}
+	if !stepListed {
+		return conflict(UndoReasonStepGone)
+	}
+	if feedsAutoStartStep(steps, fromStepID) {
+		return conflict(UndoReasonFeederStartsAgent)
 	}
 	_, err = s.undoTasks.MoveTaskWithOptions(ctx, taskID, workflowID, fromStepID, 0,
 		UndoMoveOptions{ExpectedWorkflowID: workflowID, SkipStepPrompt: step.AutoStart})

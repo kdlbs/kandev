@@ -185,6 +185,31 @@ describe("buildActivityItems", () => {
   });
 });
 
+describe("copilot proposal visibility", () => {
+  it.each(["propose_task", "propose_resume", "propose_message", "propose_move"])(
+    "keeps a returned %s proposal card visible in the copilot",
+    (kind) => {
+      const proposal = tool("t", kind, "complete", undefined, {
+        normalized: {
+          generic: {
+            name: `mcp__kandev__${kind}_kandev`,
+            output: JSON.stringify({ proposal_id: `proposal-${kind}` }),
+          },
+        },
+      });
+      const running = {
+        turnId: "t",
+        running: true,
+        waiting: false,
+        awaiting: new Set<string>(),
+      };
+      const items = asItems([proposal]);
+      expect(buildActivityItems(items, running)).toEqual([{ type: "message", message: proposal }]);
+      expect(buildActivityItems(items, idle)).toEqual([{ type: "message", message: proposal }]);
+    },
+  );
+});
+
 describe("deriveStatusLine", () => {
   const running = { turnId: "t", running: true, waiting: false, awaiting: new Set<string>() };
   it("is absent when nothing runs", () => {

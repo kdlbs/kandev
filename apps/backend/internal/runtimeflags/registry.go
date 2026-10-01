@@ -277,8 +277,8 @@ var registrations = []runtimeFlagRegistration{
 			Description: "Enables per-workspace coordinators: a copilot conversation that proposes ordinary, unstarted tasks for a human to approve.",
 			Stability:   StabilityExperimental,
 			RiskLevel:   RiskLow,
-			RiskDescription: "Coordinators can only propose tasks; approval always requires an explicit human decision and no proposal can " +
-				"ever auto-start an agent. Still evolving and should be reviewed before relying on it.",
+			RiskDescription: "Phase 1 only proposes unstarted tasks. With coordinator control enabled, approved resume or move proposals can start an agent on an existing task. " +
+				"A person must approve each proposal. Still evolving and should be reviewed before relying on it.",
 			RestartRequired: true,
 			Mutable:         true,
 		},

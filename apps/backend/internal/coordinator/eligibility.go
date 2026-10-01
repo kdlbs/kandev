@@ -82,3 +82,23 @@ func StartsAgentOnEnter(steps []StepNode, stepID string) bool {
 	}
 	return false
 }
+
+// feedsAutoStartStep reports whether entering stepID can promote queued work
+// into a different step that auto-starts an agent. Undo can suppress the
+// returned task's direct auto-start, but the shared move path also reconciles
+// feeder work and does not carry that one-shot option to promoted tasks.
+func feedsAutoStartStep(steps []StepNode, stepID string) bool {
+	byID := make(map[string]StepNode, len(steps))
+	for _, step := range steps {
+		byID[step.ID] = step
+	}
+	for _, step := range steps {
+		if step.ID == stepID || !step.AutoStartOnEnter {
+			continue
+		}
+		if feedsInto(byID, step.PullFromStepID, stepID) {
+			return true
+		}
+	}
+	return false
+}

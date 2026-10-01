@@ -219,6 +219,7 @@ describe("CoordinatorCopilot - ready conversation", () => {
       },
       automaticRecovery: false,
       hideSessionSelectors: true,
+      activityDisplay: true,
       taskArchiveState: false,
     });
   });

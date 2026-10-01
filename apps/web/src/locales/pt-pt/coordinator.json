@@ -229,6 +229,7 @@
   "activityConflictStepDeleted": "A etapa de onde veio já não existe.",
   "activityConflictStepDone": "A etapa de onde veio é agora uma etapa final.",
   "activityConflictStepFull": "A etapa de onde veio está cheia.",
+  "activityConflictFeederStartsAgent": "Anular poderia iniciar um agente através de uma etapa de alimentação. Não foi feita qualquer alteração.",
   "activityNotUndoable": "Já não é possível anular isto",
   "activityUndoFailed": "Não foi possível anular. Tente novamente.",
   "activityGone": "Esta ação já não está listada.",
