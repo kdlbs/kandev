@@ -49,10 +49,10 @@ Run the first regression before implementation and confirm the expected missing
 managed destination error. Then implement and run all commands from repo root:
 
 ```bash
-(cd apps/backend && go test ./internal/worktree -run 'TestManagerAdmitRecoveryReusesRegisteredLegacyClone' -count=1)
-(cd apps/backend && go test ./internal/worktree ./internal/repoclone ./internal/orchestrator/executor ./internal/agent/runtime/lifecycle ./internal/task/service)
-(cd apps/backend && go test ./internal/worktree ./internal/orchestrator/executor ./internal/agent/runtime/lifecycle -run 'LegacyClone|LegacyReuse|ManagedClone|ManagedMain|MainCheckout|WorktreeRecovery(Launch|Resume)Integration|RegisteredLegacy' -count=1)
-(cd apps/backend && go test ./internal/worktree -run 'Relocat|PreservesLegacyCheckoutContent|ParseManagedGitOrigin' -count=1)
+(cd apps/backend && go test -tags fts5 ./internal/worktree -run 'TestManagerAdmitRecoveryReusesRegisteredLegacyClone' -count=1)
+(cd apps/backend && go test -tags fts5 ./internal/worktree ./internal/repoclone ./internal/orchestrator/executor ./internal/agent/runtime/lifecycle ./internal/task/service)
+(cd apps/backend && go test -tags fts5 ./internal/worktree ./internal/orchestrator/executor ./internal/agent/runtime/lifecycle -run 'LegacyClone|LegacyReuse|LegacyMain|ManagedClone|ManagedMain|MainCheckout|WorktreeRecovery(Launch|Resume)Integration|RegisteredLegacy' -count=1)
+(cd apps/backend && go test -tags fts5 ./internal/worktree -run 'Relocat|PreservesLegacyCheckoutContent|ParseManagedGitOrigin' -count=1)
 python3 scripts/list-docs.py validate
 python3 scripts/lint-spec-files.test.py
 python3 scripts/lint-spec-files.py --all
@@ -125,3 +125,18 @@ Completed on 2026-10-01.
 The initial case-alias fixture was corrected to keep request and persisted
 repository paths consistent; the final case and symlink alias regressions pass.
 No live installation or database was modified during implementation.
+
+## PR review remediation
+
+- The detached-main regression failed in both legacy layouts before the fix.
+  Main checkouts now retain ordinary HEAD validation; linked worktrees still
+  require branch registration proof.
+- Metadata preservation checks snapshot the stored value before admission.
+  Filter coverage now stages an attributed file and compares filter config,
+  attributes, file content, and index after admission.
+- Verification commands use `-tags fts5`; source-identity wording distinguishes
+  stale task registration from supported workspace source relocation.
+- Passed with isolated HOME/Git configuration and canonical temporary paths:
+  `go test -tags fts5 ./internal/worktree ./internal/orchestrator/executor ./internal/agent/runtime/lifecycle -run 'LegacyClone|LegacyReuse|LegacyMain|ManagedClone|ManagedMain|MainCheckout|WorktreeRecovery(Launch|Resume)Integration|RegisteredLegacy|PreservesLegacyCheckoutContent|Relocat|ParseManagedGitOrigin' -count=1`.
+- `golangci-lint run ./... --new-from-rev=0fa4f43672fd84b13a4c1824833cad74495d3cec --timeout=5m`
+  passed with zero issues. Catalog validation and specification lint passed.

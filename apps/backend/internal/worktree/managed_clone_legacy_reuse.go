@@ -30,8 +30,10 @@ func (m *Manager) inspectRegisteredLegacyClone(
 	if err := verifyManagedCloneOrigin(ctx, m, source, proof.Identity); err != nil {
 		return false, legacyCloneInspectionError(ctx, taskID, "managed clone provider identity could not be verified", err)
 	}
-	if _, _, err := inspectManagedCloneBranch(ctx, m, taskID, source, wt); err != nil {
-		return false, legacyCloneInspectionError(ctx, taskID, "registered legacy clone branch could not be verified", err)
+	if !sameDirectoryIdentity(wt.Path, source) {
+		if _, _, err := inspectManagedCloneBranch(ctx, m, taskID, source, wt); err != nil {
+			return false, legacyCloneInspectionError(ctx, taskID, "registered legacy clone branch could not be verified", err)
+		}
 	}
 	return true, nil
 }

@@ -71,11 +71,12 @@ func TestManagerAdmitRecoveryReusesRegisteredLegacyClone(t *testing.T) {
 				t.Run(name, func(t *testing.T) {
 					f := newLegacyReuseFixture(t, provider, ownerLayout, mainCheckout)
 					before := runGit(t, f.wt.Path, "rev-parse", "HEAD")
+					storedBefore := *f.wt
 					admission, err := f.manager.AdmitRecovery(context.Background(), f.request)
 					require.NoError(t, err)
 					require.Nil(t, admission)
 					require.Equal(t, before, runGit(t, f.wt.Path, "rev-parse", "HEAD"))
-					require.Equal(t, f.wt, f.store.worktrees[f.wt.ID])
+					require.Equal(t, storedBefore, *f.store.worktrees[storedBefore.ID])
 					require.NoDirExists(t, f.proof.ExpectedDestinationPath)
 					require.Nil(t, f.store.claim)
 				})
@@ -95,17 +96,23 @@ func addLegacyReuseContent(t *testing.T, f legacyReuseFixture) map[string][]byte
 	require.NoError(t, os.WriteFile(filepath.Join(f.wt.Path, "staged.txt"), []byte("unstaged\n"), 0o600))
 	require.NoError(t, os.WriteFile(filepath.Join(f.wt.Path, "ignored.txt"), []byte("build output\n"), 0o600))
 	runGit(t, f.wt.Path, "config", "filter.test.smudge", "cat")
+	runGit(t, f.wt.Path, "config", "filter.test.clean", "cat")
+	require.NoError(t, os.WriteFile(filepath.Join(f.wt.Path, ".gitattributes"), []byte("filtered.txt filter=test\n"), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(f.wt.Path, "filtered.txt"), []byte("filtered content\n"), 0o600))
+	runGit(t, f.wt.Path, "add", ".gitattributes", "filtered.txt")
+	require.Equal(t, "filtered.txt: filter: test", strings.TrimSpace(runGit(t, f.wt.Path, "check-attr", "filter", "--", "filtered.txt")))
 	return captureLegacyReuseContent(t, f.wt.Path)
 }
 
 func captureLegacyReuseContent(t *testing.T, checkout string) map[string][]byte {
 	t.Helper()
 	snapshot := map[string][]byte{
+		"filter":    []byte(runGit(t, checkout, "config", "--local", "--get-regexp", "^filter\\.test\\.")),
 		"HEAD":      []byte(runGit(t, checkout, "rev-parse", "HEAD")),
 		"branch":    []byte(runGit(t, checkout, "symbolic-ref", "HEAD")),
 		"submodule": []byte(runGit(t, filepath.Join(checkout, "sub"), "rev-parse", "HEAD")),
 	}
-	for _, name := range []string{"staged.txt", "ignored.txt", ".gitignore", "sub/.git"} {
+	for _, name := range []string{"staged.txt", "ignored.txt", ".gitignore", "sub/.git", ".gitattributes", "filtered.txt"} {
 		data, err := os.ReadFile(filepath.Join(checkout, name))
 		require.NoError(t, err)
 		snapshot[name] = data
@@ -130,11 +137,12 @@ func TestManagerAdmitRecoveryPreservesLegacyCheckoutContent(t *testing.T) {
 					require.NoError(t, os.MkdirAll(filepath.Dir(f.proof.ExpectedDestinationPath), 0o755))
 					runGit(t, f.wt.RepositoryPath, "clone", "--no-hardlinks", f.wt.RepositoryPath, f.proof.ExpectedDestinationPath)
 				}
+				storedBefore := *f.wt
 				admission, err := f.manager.AdmitRecovery(context.Background(), f.request)
 				require.NoError(t, err)
 				require.Nil(t, admission)
 				require.Equal(t, before, captureLegacyReuseContent(t, f.wt.Path))
-				require.Equal(t, f.wt, f.store.worktrees[f.wt.ID])
+				require.Equal(t, storedBefore, *f.store.worktrees[storedBefore.ID])
 				require.Nil(t, f.store.claim)
 				if !destinationExists {
 					require.NoDirExists(t, f.proof.ExpectedDestinationPath)
@@ -196,10 +204,11 @@ func TestManagerAdmitRecoveryRejectsInvalidLegacyReuse(t *testing.T) {
 			tc.mutate(t, &f)
 			f.wt.RepositoryPath = f.request.Slots[0].RepositoryPath
 			before := runGit(t, f.wt.Path, "rev-parse", "HEAD")
+			storedBefore := *f.wt
 			_, err := f.manager.AdmitRecovery(context.Background(), f.request)
 			require.Error(t, err)
 			require.Equal(t, before, runGit(t, f.wt.Path, "rev-parse", "HEAD"))
-			require.Equal(t, f.wt, f.store.worktrees[f.wt.ID])
+			require.Equal(t, storedBefore, *f.store.worktrees[storedBefore.ID])
 			require.Nil(t, f.store.claim)
 			require.NoDirExists(t, f.proof.ExpectedDestinationPath)
 		})
@@ -236,4 +245,25 @@ func TestManagerAdmitRecoveryReusesLegacyCloneThroughRegisteredSymlink(t *testin
 	admission, err := f.manager.AdmitRecovery(context.Background(), f.request)
 	require.NoError(t, err)
 	require.Nil(t, admission)
+}
+
+func TestManagerAdmitRecoveryPreservesDetachedLegacyMainCheckout(t *testing.T) {
+	for _, ownerLayout := range []bool{false, true} {
+		t.Run(fmt.Sprintf("owner-layout=%t", ownerLayout), func(t *testing.T) {
+			f := newLegacyReuseFixture(t, "github", ownerLayout, true)
+			runGit(t, f.wt.Path, "checkout", "--detach")
+			runGit(t, f.wt.Path, "commit", "--allow-empty", "-m", "detached work")
+			head := runGit(t, f.wt.Path, "rev-parse", "HEAD")
+			require.NotEqual(t, runGit(t, f.wt.Path, "rev-parse", f.wt.Branch), head)
+			storedBefore := *f.wt
+			admission, err := f.manager.AdmitRecovery(context.Background(), f.request)
+			require.NoError(t, err)
+			require.Nil(t, admission)
+			require.Equal(t, head, runGit(t, f.wt.Path, "rev-parse", "HEAD"))
+			require.Equal(t, "HEAD", strings.TrimSpace(runGit(t, f.wt.Path, "rev-parse", "--abbrev-ref", "HEAD")))
+			require.Equal(t, storedBefore, *f.store.worktrees[storedBefore.ID])
+			require.NoDirExists(t, f.proof.ExpectedDestinationPath)
+			require.Nil(t, f.store.claim)
+		})
+	}
 }

@@ -60,9 +60,11 @@ The workspace system still owns source-clone placement and credentials.
 - **AC-TASKS-MANAGED-CLONE-RELOCATION-001.6:** Legacy reuse shall require the
   registered source and actual checkout to identify the same recognized managed
   clone of the selected repository. A missing or invalid registered source,
-  foreign workspace, wrong origin, or changed registration shall remain an
-  error. An unchanged slot shall not bypass validation of any other selected
-  repository slot.
+  foreign workspace, wrong origin, or a mismatch between the task slot's recorded
+  source identity and the actual checkout shall remain an error. A workspace
+  repository moving to a new source clone remains eligible for the guarded
+  relocation in .001.1. An unchanged slot shall not bypass validation of any
+  other selected repository slot.
 
 ### REQ-TASKS-MANAGED-CLONE-RELOCATION-002: Recover work that cannot move silently
 

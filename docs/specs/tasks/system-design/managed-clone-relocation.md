@@ -78,7 +78,9 @@ legacy candidate in `ManagedCloneRelocationProof` (`ExpectedSourcePath` or
 the managed root, verify the provider origin, and require the checkout's actual
 Git common directory to be that clone's `.git`. Keep ordinary linked-worktree
 registration, branch, and ownership validation in place. Main-checkout admission
-uses the same source selection and directory identity rule. Cancellation and
+uses the same source selection and directory identity rule, retaining ordinary
+main-checkout HEAD validation, including valid detached commits. Only linked
+worktrees require the persisted branch registration proof. Cancellation and
 operational inspection errors propagate without falling back to reuse.
 
 This verified match is unchanged-source reuse. Do not require, create, or inspect
