@@ -188,6 +188,11 @@ directory does not require linked-worktree recovery. When Git metadata is valid,
 Kandev keeps using the same checkout and does not create recovery artifacts. A
 successful relaunch clears the matching task-level launch error.
 
+A healthy checkout can keep using an older managed clone while that clone remains
+the repository's registered source. Resuming does not require a newer workspace
+clone to exist or move your files. If the registered source changes, Kandev
+validates the old and new clone identities before offering or performing relocation.
+
 For missing linked-worktree metadata, Kandev checks every selected repository
 slot before it changes any slot. It keeps the original checkout and creates a
 sibling recovery worktree with a branch named
