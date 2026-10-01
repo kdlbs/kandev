@@ -229,7 +229,7 @@ func (s *Service) checkProposalWatched(ctx context.Context, coordinatorID, works
 	if !set.Contains(spec.WorkflowID) {
 		return &FieldError{Field: "workflow_id", Message: "workflow is outside this coordinator's watches"}
 	}
-	if g.projects.Selected() && !g.projects.InProjects(repoIDsOf(spec.RepositoryID)) {
+	if !g.task(spec.WorkflowID, repoIDsOf(spec.RepositoryID)) {
 		return &FieldError{Field: ApproveFieldRepositoryID, Message: "repository is outside this coordinator's projects"}
 	}
 	return s.checkSourceTaskWatched(ctx, g, spec)

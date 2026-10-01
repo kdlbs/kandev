@@ -127,7 +127,7 @@ func checkProjectEntryShape(req *projectsRequest) error {
 func (s *Store) loadProjectState(ctx context.Context, exec coordinatorExec, coordinatorID string) (projectState, error) {
 	var (
 		scope         string
-		includeNoRepo bool
+		includeNoRepo int
 	)
 	if err := exec.QueryRowContext(ctx, s.db.Rebind(`SELECT project_scope, include_no_repository FROM coordinators WHERE id = ?`), coordinatorID).
 		Scan(&scope, &includeNoRepo); err != nil {
@@ -137,7 +137,7 @@ func (s *Store) loadProjectState(ctx context.Context, exec coordinatorExec, coor
 	if err != nil {
 		return projectState{}, err
 	}
-	return projectState{scope: normalizeWatchScope(scope), entries: entries, includeNoRepo: includeNoRepo}, nil
+	return projectState{scope: normalizeWatchScope(scope), entries: entries, includeNoRepo: includeNoRepo != 0}, nil
 }
 
 // existingProjectEntries returns the listed entries that name a live set or
@@ -252,7 +252,7 @@ func resolveProjects(existing map[ProjectEntry]struct{}, stored projectState, re
 func (s *Store) writeProjectState(ctx context.Context, tx coordinatorExec, workspaceID, coordinatorID string, next projectState) error {
 	query, args := `UPDATE coordinators SET project_scope = ? WHERE id = ?`, []any{next.scope, coordinatorID}
 	if next.scope == watchScopeSelected {
-		query, args = `UPDATE coordinators SET project_scope = ?, include_no_repository = ? WHERE id = ?`, []any{next.scope, next.includeNoRepo, coordinatorID}
+		query, args = `UPDATE coordinators SET project_scope = ?, include_no_repository = ? WHERE id = ?`, []any{next.scope, autonomyColumn(next.includeNoRepo), coordinatorID}
 	}
 	if _, err := tx.ExecContext(ctx, s.db.Rebind(query), args...); err != nil {
 		return fmt.Errorf("write project scope: %w", err)

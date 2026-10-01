@@ -41,6 +41,20 @@ describe("ProjectsFields", () => {
     expect(onRetry).toHaveBeenCalledTimes(1);
   });
 
+  it.each([
+    ["the projects failed to load", { status: "error" as const, sets: [], loose: [] }],
+    ["the workspace has no projects", { status: "ready" as const, sets: [], loose: [] }],
+  ])("keeps every project watched when %s", (_label, over) => {
+    const { onChange } = renderFields({
+      ...over,
+      projects: { scope: "all", entries: [], includeNoRepository: false },
+    });
+    const all = screen.getByTestId("watches-projects-all") as HTMLButtonElement;
+    expect(all.disabled).toBe(true);
+    fireEvent.click(all);
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
   it("shows the server error and the keep-one hint for an empty selected draft", () => {
     renderFields({
       projects: { scope: "selected", entries: [], includeNoRepository: false },

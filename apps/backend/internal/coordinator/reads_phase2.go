@@ -65,7 +65,7 @@ const (
 func (s *Store) LoadWatchSet(ctx context.Context, exec coordinatorExec, coordinatorID string) (WatchSet, error) {
 	var (
 		scope, projectScope string
-		includeNoRepo       bool
+		includeNoRepo       int
 	)
 	err := exec.QueryRowContext(ctx, s.db.Rebind(`SELECT watch_scope, project_scope, include_no_repository FROM coordinators WHERE id = ?`), coordinatorID).
 		Scan(&scope, &projectScope, &includeNoRepo)
@@ -77,7 +77,7 @@ func (s *Store) LoadWatchSet(ctx context.Context, exec coordinatorExec, coordina
 	}
 	set := WatchSet{All: normalizeWatchScope(scope) == watchScopeAll, WorkflowIDs: []string{}}
 	if normalizeWatchScope(projectScope) == watchScopeSelected {
-		if set.Projects, err = s.loadProjectScope(ctx, exec, coordinatorID, includeNoRepo); err != nil {
+		if set.Projects, err = s.loadProjectScope(ctx, exec, coordinatorID, includeNoRepo != 0); err != nil {
 			return WatchSet{}, err
 		}
 	}

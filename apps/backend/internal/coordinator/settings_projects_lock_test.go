@@ -150,7 +150,6 @@ func TestSaveSettings_ProjectsChangeArchivesConversationAndPublishesOnce(t *test
 	}
 
 	mustSave(t, svc, c.WorkspaceID, c.ID, projectsBody("selected", false, repoEntry("repo-a")))
-	time.Sleep(50 * time.Millisecond)
 	if n := len(capture.snapshot()); n != 1 || len(conv.archivedIDs) != 1 {
 		t.Fatalf("an unchanged save published %d events and archived %d", n, len(conv.archivedIDs))
 	}
@@ -177,7 +176,6 @@ func TestProjectDeleted_PublishesOncePerChangeAndDoesNotArchive(t *testing.T) {
 		}
 	}
 	waitForEvents(t, capture, 1)
-	time.Sleep(50 * time.Millisecond)
 	if n := len(capture.snapshot()); n != 1 {
 		t.Fatalf("events = %d, want exactly 1 (the repeat removed nothing)", n)
 	}
