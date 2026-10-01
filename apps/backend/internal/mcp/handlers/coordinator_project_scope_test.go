@@ -99,6 +99,46 @@ func TestListTasks_FilteredToProjectScope(t *testing.T) {
 	require.ElementsMatch(t, []string{"task-in", "task-out", "task-none"}, listedTaskIDs(t, f))
 }
 
+func TestListTasks_StoredProjectScopeIsEnforcedWithPhase31Off(t *testing.T) {
+	f := newPhase2GuardFixture(t)
+	seedProjectWorld(t, f, false)
+	off := coordinator.NewService(f.store, coordinator.NewValidator(nil, nil), allowAllAuthorizer{}, testLogger(t), coordinator.WithPhase2(true))
+	off.SetProjectReader(f.h.taskSvc)
+	f.h.SetCoordinatorService(off)
+	f.svc = off
+
+	require.ElementsMatch(t, []string{"task-in"}, listedTaskIDs(t, f))
+	principal := coordinatorTestPrincipal(f.c.WorkspaceID)
+	principal.CoordinatorID = f.c.ID
+	require.True(t, f.h.coordinatorWatchesFields(context.Background(), principal, ws.ActionMCPGetTaskConversation, taskField("task-in")))
+	require.False(t, f.h.coordinatorWatchesFields(context.Background(), principal, ws.ActionMCPGetTaskConversation, taskField("task-out")))
+}
+
+func TestGetCoordinatorItem_StallOfAnOutOfProjectTaskIsNotFound(t *testing.T) {
+	f := newPhase2GuardFixture(t)
+	seedProjectWorld(t, f, false)
+	ctx := context.Background()
+	now := time.Now().UTC()
+	for _, id := range []string{"task-in", "task-out"} {
+		_, err := f.store.UpsertStall(ctx, &coordinator.Stall{
+			TaskID: id, WorkspaceID: f.c.WorkspaceID, StalledForMs: 60_000, LastEventAt: now, DetectedAt: now,
+		})
+		require.NoError(t, err)
+	}
+	read := func(id string) *ws.Message {
+		msg := makeWSMessage(t, coordinator.ActionGetItem, getItemPayload("stall", id))
+		resp, err := f.h.handleGetCoordinatorItem(getItemPrincipalContext(f.c.WorkspaceID, f.c.ID), msg)
+		require.NoError(t, err)
+		return resp
+	}
+	require.Equal(t, ws.MessageTypeResponse, read("task-in").Type)
+	out := read("task-out")
+	assertWSError(t, out, ws.ErrorCodeNotFound)
+	var errPayload ws.ErrorPayload
+	require.NoError(t, json.Unmarshal(out.Payload, &errPayload))
+	require.Equal(t, "target not found", errPayload.Message)
+}
+
 func TestCoordinatorWatchesFields_ProjectScope(t *testing.T) {
 	f := newPhase2GuardFixture(t)
 	seedProjectWorld(t, f, false)

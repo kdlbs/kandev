@@ -89,13 +89,18 @@ export function useCoordinatorWatchSet(
     });
   }, [wsClient, active, workspaceId, coordinatorId, read]);
 
-  // A set changing membership changes which repositories a selected Projects
-  // scope resolves to; the server resolves, so re-read. A deletion is covered by
-  // the coordinator.updated the server publishes after it tidies the entries.
+  // A set changing membership, or a repository being deleted, changes which
+  // repositories a selected Projects scope resolves to; the server resolves, so
+  // re-read.
   useEffect(() => {
     if (!wsClient || !active) return;
     const off = (
-      ["repository_set.created", "repository_set.updated", "repository_set.deleted"] as const
+      [
+        "repository_set.created",
+        "repository_set.updated",
+        "repository_set.deleted",
+        "repository.deleted",
+      ] as const
     ).map((event) => wsClient.on(event, () => read()));
     return () => off.forEach((unsubscribe) => unsubscribe());
   }, [wsClient, active, read]);

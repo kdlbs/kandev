@@ -183,11 +183,8 @@ func (s *Service) existingProjectEntries(ctx context.Context, workspaceID string
 
 // keepProjectEntries drops the entries naming something that no longer
 // exists but is stored; any other entry that does not exist is foreign.
-func (s *Service) keepProjectEntries(ctx context.Context, workspaceID string, body, stored []ProjectEntry) ([]ProjectEntry, error) {
-	existing, err := s.existingProjectEntries(ctx, workspaceID, body)
-	if err != nil {
-		return nil, err
-	}
+// existing is read before the coordinator lock is taken.
+func keepProjectEntries(existing map[ProjectEntry]struct{}, body, stored []ProjectEntry) ([]ProjectEntry, error) {
 	storedSet := make(map[ProjectEntry]struct{}, len(stored))
 	for _, e := range stored {
 		storedSet[e] = struct{}{}
@@ -205,6 +202,15 @@ func (s *Service) keepProjectEntries(ctx context.Context, workspaceID string, bo
 	return kept, nil
 }
 
+// liveProjectEntries reads, outside any lock, which of the body's entries name
+// a live set or repository. It reads nothing when the member lists none.
+func (s *Service) liveProjectEntries(ctx context.Context, workspaceID string, req *projectsRequest) (map[ProjectEntry]struct{}, error) {
+	if req == nil || req.scope != watchScopeSelected {
+		return nil, nil
+	}
+	return s.existingProjectEntries(ctx, workspaceID, req.entries)
+}
+
 func errProjectsEmpty() error {
 	return projectsErr(codeProjectsEmpty, "keep at least one project in scope or include tasks with no repository")
 }
@@ -212,7 +218,8 @@ func errProjectsEmpty() error {
 // resolveProjects turns the body's projects member into the state to write,
 // or nil when it leaves the stored value as it is. The body is compared with
 // the stored value first; under every project only the scope is compared.
-func (s *Service) resolveProjects(ctx context.Context, workspaceID string, stored projectState, req *projectsRequest) (*projectState, error) {
+// existing is the live subset of the body's entries, read before the lock.
+func resolveProjects(existing map[ProjectEntry]struct{}, stored projectState, req *projectsRequest) (*projectState, error) {
 	if req == nil {
 		return nil, nil
 	}
@@ -230,7 +237,7 @@ func (s *Service) resolveProjects(ctx context.Context, workspaceID string, store
 	if len(req.entries) == 0 && !req.includeNoRepo {
 		return nil, errProjectsEmpty()
 	}
-	kept, err := s.keepProjectEntries(ctx, workspaceID, req.entries, stored.entries)
+	kept, err := keepProjectEntries(existing, req.entries, stored.entries)
 	if err != nil {
 		return nil, err
 	}

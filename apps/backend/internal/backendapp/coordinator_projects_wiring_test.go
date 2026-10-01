@@ -10,6 +10,16 @@ import (
 )
 
 func TestRegisterCoordinatorSubscribers_PhaseTwoTidiesDeletedProjects(t *testing.T) {
+	for _, tc := range []struct{ event, kind string }{
+		{events.RepositoryDeleted, "repository"},
+		{events.RepositorySetDeleted, "repository_set"},
+	} {
+		t.Run(tc.event, func(t *testing.T) { tidyDeletedProject(t, tc.event, tc.kind) })
+	}
+}
+
+func tidyDeletedProject(t *testing.T, event, kind string) {
+	t.Helper()
 	for _, phase2 := range []bool{false, true} {
 		pool := newCoordinatorTestPool(t)
 		log := newTestLogger()
@@ -26,14 +36,14 @@ func TestRegisterCoordinatorSubscribers_PhaseTwoTidiesDeletedProjects(t *testing
 			t.Fatalf("CreateCoordinator: %v", err)
 		}
 		if _, err := pool.Writer().Exec(
-			`INSERT INTO coordinator_watch_projects (coordinator_id, entry_kind, entry_id, workspace_id, created_at) VALUES (?, 'repository', 'repo-1', 'ws-1', CURRENT_TIMESTAMP)`, c.ID); err != nil {
+			`INSERT INTO coordinator_watch_projects (coordinator_id, entry_kind, entry_id, workspace_id, created_at) VALUES (?, ?, 'repo-1', 'ws-1', CURRENT_TIMESTAMP)`, c.ID, kind); err != nil {
 			t.Fatalf("seed entry: %v", err)
 		}
 
 		memBus := bus.NewMemoryEventBus(log)
 		registerCoordinatorSubscribers(nil, memBus, svc, log)
-		evt := bus.NewEvent(events.RepositoryDeleted, "task-service", map[string]interface{}{"id": "repo-1"})
-		if err := memBus.Publish(context.Background(), events.RepositoryDeleted, evt); err != nil {
+		evt := bus.NewEvent(event, "task-service", map[string]interface{}{"id": "repo-1"})
+		if err := memBus.Publish(context.Background(), event, evt); err != nil {
 			t.Fatalf("Publish: %v", err)
 		}
 

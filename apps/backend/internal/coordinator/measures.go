@@ -166,16 +166,9 @@ func sumProposalCounts(counts []ActivityCount) proposalCounts {
 }
 
 // computeBaseline reads the baseline of a goal being set at setAt, through
-// the locked handle.
-func (s *Store) computeBaseline(ctx context.Context, exec coordinatorExec, c *Coordinator, setAt time.Time) (goalBaseline, error) {
-	watch, err := s.LoadWatchSet(ctx, exec, c.ID)
-	if err != nil {
-		return goalBaseline{}, err
-	}
-	open, err := s.CountOpenWatchedTasks(ctx, exec, c.WorkspaceID, watch)
-	if err != nil {
-		return goalBaseline{}, err
-	}
+// the locked handle. open is the open watched task count, read by the caller
+// before the lock because the project scope's listings may write.
+func (s *Store) computeBaseline(ctx context.Context, exec coordinatorExec, c *Coordinator, setAt time.Time, open int64) (goalBaseline, error) {
 	base := goalBaseline{OpenTasks: open}
 	windowStart := setAt.AddDate(0, 0, -measureWindowDays)
 	if c.CreatedAt.After(windowStart) {

@@ -39,6 +39,7 @@ type setupPlan struct {
 	projects                                         *projectsRequest
 	policy                                           Policy
 	goal                                             *goalInput
+	goalOpenTasks                                    int64
 }
 
 func stepError(step string, err error) error {
@@ -94,11 +95,6 @@ func decodeSetupRequest(body []byte, phase31 bool) (setupRequest, error) {
 	if req.watches != nil {
 		if _, err := parseWatchesMember(req.watches); isInvalidBody(err) {
 			return setupRequest{}, err
-		}
-	}
-	if req.projects != nil {
-		if _, err := parseProjectsMember(req.projects); err != nil {
-			return setupRequest{}, stepError(setupStepProjects, err)
 		}
 	}
 	if req.policy != nil {
@@ -256,6 +252,11 @@ func (s *Service) CreateSetup(ctx context.Context, workspaceID string, body []by
 	if err != nil {
 		return nil, err
 	}
+	if plan.goal != nil {
+		if plan.goalOpenTasks, err = s.setupOpenTasks(ctx, workspaceID, plan); err != nil {
+			return nil, fmt.Errorf("guided setup: %w", err)
+		}
+	}
 	created, err := s.insertSetup(ctx, workspaceID, plan)
 	if err != nil {
 		return nil, fmt.Errorf("guided setup: %w", err)
@@ -264,6 +265,17 @@ func (s *Service) CreateSetup(ctx context.Context, workspaceID string, body []by
 		zap.String("workspace_id", workspaceID), zap.String("coordinator_id", created.ID))
 	s.publishCoordinatorUpdated(ctx, workspaceID, created.ID)
 	return created, nil
+}
+
+// setupOpenTasks counts the open tasks the new coordinator's Watches cover,
+// read before the setup transaction opens because the project scope's
+// listings may write.
+func (s *Service) setupOpenTasks(ctx context.Context, workspaceID string, plan *setupPlan) (int64, error) {
+	set := WatchSet{All: plan.watches.scope == watchScopeAll, WorkflowIDs: plan.watches.ids}
+	if plan.projects != nil {
+		set.Projects = storedScope(projectState{scope: watchScopeSelected, entries: plan.projects.entries, includeNoRepo: plan.projects.includeNoRepo})
+	}
+	return s.store.CountOpenWatchedTasks(ctx, s.store.ro, workspaceID, set)
 }
 
 // insertSetup writes the coordinator row, its Watches and its goal in one
@@ -320,6 +332,6 @@ func (s *Service) insertSetupRows(ctx context.Context, tx coordinatorExec, c *Co
 	if plan.goal == nil {
 		return nil
 	}
-	_, err := s.createGoal(ctx, tx, c, *plan.goal)
+	_, err := s.createGoal(ctx, tx, c, *plan.goal, plan.goalOpenTasks)
 	return err
 }

@@ -330,14 +330,19 @@ func (s *Service) SaveSettings(ctx context.Context, workspaceID, coordinatorID s
 	if err != nil {
 		return nil, err
 	}
+	live, err := s.liveProjectEntries(ctx, workspaceID, req.projects)
+	if err != nil {
+		return nil, err
+	}
 	var (
 		result   *CoordinatorPhase2
+		projects projectState
 		archived string
 		changed  bool
 	)
 	err = s.store.withCoordinatorLock(ctx, coordinatorID, func(tx coordinatorExec) error {
 		var err error
-		result, changed, err = s.applySettings(ctx, tx, workspaceID, coordinatorID, req)
+		result, projects, changed, err = s.applySettings(ctx, tx, workspaceID, coordinatorID, req, live)
 		if err != nil || !changed {
 			return err
 		}
@@ -351,33 +356,35 @@ func (s *Service) SaveSettings(ctx context.Context, workspaceID, coordinatorID s
 		s.archiveConversation(ctx, coordinatorID, archived)
 		s.publishCoordinatorUpdated(ctx, workspaceID, coordinatorID)
 	}
+	result.Projects, result.ProjectsConfig = s.projectsView(ctx, workspaceID, projects)
 	return result, nil
 }
 
 // applySettings runs inside the coordinator lock: it reads the stored state,
 // resolves the body against the effective Watches, and writes only when
-// something differs.
-func (s *Service) applySettings(ctx context.Context, tx coordinatorExec, workspaceID, coordinatorID string, req settingsRequest) (*CoordinatorPhase2, bool, error) {
+// something differs. It returns the project state as stored afterwards; the
+// caller builds the project view once the lock is released.
+func (s *Service) applySettings(ctx context.Context, tx coordinatorExec, workspaceID, coordinatorID string, req settingsRequest, live map[ProjectEntry]struct{}) (*CoordinatorPhase2, projectState, bool, error) {
 	row, err := s.readSettingsRow(ctx, tx, workspaceID, coordinatorID)
 	if err != nil {
-		return nil, false, err
+		return nil, projectState{}, false, err
 	}
 	stored, policyErr := ParsePolicy(row.PolicyJSON)
 	rawSet, err := s.store.LoadWatchSet(ctx, tx, coordinatorID)
 	if err != nil {
-		return nil, false, err
+		return nil, projectState{}, false, err
 	}
 	current, err := s.effectiveWatchState(ctx, tx, workspaceID, rawSet)
 	if err != nil {
-		return nil, false, err
+		return nil, projectState{}, false, err
 	}
 	newWatches, err := s.resolveWatches(ctx, tx, workspaceID, rawSet, current, req.watches)
 	if err != nil {
-		return nil, false, err
+		return nil, projectState{}, false, err
 	}
-	storedProjects, newProjects, err := s.resolveProjectsFor(ctx, tx, workspaceID, coordinatorID, req.projects)
+	storedProjects, newProjects, err := s.resolveProjectsFor(ctx, tx, coordinatorID, req.projects, live)
 	if err != nil {
-		return nil, false, err
+		return nil, projectState{}, false, err
 	}
 	policyChanged := req.policy != nil && (policyErr != nil || !policiesEqual(*req.policy, stored))
 	watchesChanged := newWatches != nil
@@ -397,18 +404,17 @@ func (s *Service) applySettings(ctx context.Context, tx coordinatorExec, workspa
 		PolicyRevision: row.Revision,
 		Watches:        CoordinatorWatchDTO{Scope: scope.scope, WorkflowIDs: nonNilIDs(scope.ids)},
 	}
-	result.Projects, result.ProjectsConfig = s.projectsView(ctx, workspaceID, storedProjects)
 	if !policyChanged && !watchesChanged && newProjects == nil {
-		return result, false, nil
+		return result, storedProjects, false, nil
 	}
 	if err := s.commitSettings(ctx, tx, workspaceID, coordinatorID, row.PolicyJSON, stored, final, policyChanged, watchesChanged, scope, newProjects); err != nil {
-		return nil, false, err
+		return nil, projectState{}, false, err
 	}
 	result.PolicyRevision = row.Revision + 1
 	s.logger.Info("coordinator settings saved",
 		zap.String("coordinator_id", coordinatorID), zap.Int("old_revision", row.Revision),
 		zap.Int("new_revision", row.Revision+1), zap.Bool("policy_changed", policyChanged), zap.Bool("watches_changed", watchesChanged), zap.Bool("projects_changed", newProjects != nil))
-	return result, true, nil
+	return result, storedProjects, true, nil
 }
 
 type settingsRow struct {
@@ -433,12 +439,12 @@ func (s *Service) readSettingsRow(ctx context.Context, tx coordinatorExec, works
 
 // resolveProjectsFor loads the stored project state and resolves the request
 // against it; the second result is nil when nothing changes.
-func (s *Service) resolveProjectsFor(ctx context.Context, tx coordinatorExec, workspaceID, coordinatorID string, req *projectsRequest) (projectState, *projectState, error) {
+func (s *Service) resolveProjectsFor(ctx context.Context, tx coordinatorExec, coordinatorID string, req *projectsRequest, live map[ProjectEntry]struct{}) (projectState, *projectState, error) {
 	stored, err := s.store.loadProjectState(ctx, tx, coordinatorID)
 	if err != nil {
 		return projectState{}, nil, err
 	}
-	next, err := s.resolveProjects(ctx, workspaceID, stored, req)
+	next, err := resolveProjects(live, stored, req)
 	return stored, next, err
 }
 

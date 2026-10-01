@@ -56,11 +56,16 @@ func TestProposeTask_OutsideWatchSetIsRefused(t *testing.T) {
 	_, _, err := svc.ProposeTask(ctx, f.coordinator.ID, req)
 	wantProposalFieldError(t, err, "workflow_id")
 
-	for _, source := range []string{otherTask.ID, "task-none"} {
+	messages := map[string]bool{}
+	for _, source := range []string{otherTask.ID, "task-none", "task-missing"} {
 		req = f.baseRequest()
 		req.SourceTaskID = source
 		_, _, err = svc.ProposeTask(ctx, f.coordinator.ID, req)
 		wantProposalFieldError(t, err, fieldSourceTaskID)
+		messages[err.Error()] = true
+	}
+	if len(messages) != 1 {
+		t.Fatalf("a missing and an out-of-scope source task must answer alike, got %v", messages)
 	}
 
 	if rows := listActivity(t, f.svc.store, f.coordinator.ID); len(rows) != 0 {

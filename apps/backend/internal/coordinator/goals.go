@@ -314,10 +314,17 @@ func (s *Service) PutGoal(ctx context.Context, workspaceID, coordinatorID string
 	if err != nil {
 		return nil, err
 	}
+	open, counted, err := s.goalBaselineOpenTasks(ctx, c, obj, goalID)
+	if err != nil {
+		return nil, err
+	}
 	return s.runGoalWrite(ctx, c, false, func(tx coordinatorExec) (goalChange, error) {
 		active, err := s.store.activeGoalOn(ctx, tx, c.ID)
 		if err != nil {
 			return goalChange{}, err
+		}
+		if active == nil && !counted {
+			return goalChange{}, ErrGoalConflict
 		}
 		if goalID != "" && (active == nil || active.ID != goalID) {
 			return goalChange{}, ErrGoalConflict
@@ -327,15 +334,41 @@ func (s *Service) PutGoal(ctx context.Context, workspaceID, coordinatorID string
 			return goalChange{}, err
 		}
 		if active == nil {
-			return s.createGoal(ctx, tx, c, in)
+			return s.createGoal(ctx, tx, c, in, open)
 		}
 		return s.updateGoal(ctx, tx, active, in)
 	})
 }
 
-func (s *Service) createGoal(ctx context.Context, tx coordinatorExec, c *Coordinator, in goalInput) (goalChange, error) {
+// goalBaselineOpenTasks reads the open watched task count a new goal freezes
+// as its baseline. The count is read outside the coordinator lock because a
+// project scope's listings may write. It is read only when no goal is active
+// and the body validates, so a goal_id precondition, an update or an invalid body costs no read.
+func (s *Service) goalBaselineOpenTasks(ctx context.Context, c *Coordinator, obj map[string]json.RawMessage, goalID string) (int64, bool, error) {
+	if goalID != "" {
+		return 0, false, nil
+	}
+	active, err := s.store.activeGoalOn(ctx, s.store.ro, c.ID)
+	if err != nil || active != nil {
+		return 0, false, err
+	}
+	if _, err := validateGoalInput(obj, nil); err != nil {
+		return 0, false, err
+	}
+	watch, err := s.store.LoadWatchSet(ctx, s.store.ro, c.ID)
+	if err != nil {
+		return 0, false, err
+	}
+	open, err := s.store.CountOpenWatchedTasks(ctx, s.store.ro, c.WorkspaceID, watch)
+	if err != nil {
+		return 0, false, err
+	}
+	return open, true, nil
+}
+
+func (s *Service) createGoal(ctx context.Context, tx coordinatorExec, c *Coordinator, in goalInput, open int64) (goalChange, error) {
 	now := s.store.now().UTC()
-	baseline, err := s.store.computeBaseline(ctx, tx, c, now)
+	baseline, err := s.store.computeBaseline(ctx, tx, c, now, open)
 	if err != nil {
 		return goalChange{}, err
 	}

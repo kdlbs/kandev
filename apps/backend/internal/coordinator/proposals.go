@@ -242,6 +242,11 @@ func repoIDsOf(id string) []string {
 	return []string{id}
 }
 
+// sourceTaskUnavailableMessage is the one refusal for a source task that is
+// missing, in another workspace, or outside the watches, so the response does
+// not reveal which.
+const sourceTaskUnavailableMessage = "source task not found in this workspace"
+
 func (s *Service) checkSourceTaskWatched(ctx context.Context, g *watchGate, spec ProposalSpec) error {
 	if spec.SourceTaskID == "" {
 		return nil
@@ -250,7 +255,7 @@ func (s *Service) checkSourceTaskWatched(ctx context.Context, g *watchGate, spec
 	if err != nil {
 		return fmt.Errorf("get source task: %w", err)
 	}
-	outside := &FieldError{Field: fieldSourceTaskID, Message: "source task is outside this coordinator's watches"}
+	outside := &FieldError{Field: fieldSourceTaskID, Message: sourceTaskUnavailableMessage}
 	if task == nil {
 		return outside
 	}
@@ -274,7 +279,7 @@ func (s *Service) validateProposalSourceTask(ctx context.Context, workspaceID, s
 	_, err = resolveWorkspaceScopedRef(
 		"source task", task, err, repoerrors.ErrTaskNotFound,
 		func(t *taskmodels.Task) string { return t.WorkspaceID }, workspaceID,
-		&FieldError{Field: fieldSourceTaskID, Message: "source task not found in this workspace"},
+		&FieldError{Field: fieldSourceTaskID, Message: sourceTaskUnavailableMessage},
 	)
 	return err
 }

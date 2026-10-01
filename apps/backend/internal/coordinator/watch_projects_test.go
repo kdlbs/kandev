@@ -21,6 +21,7 @@ type fakeProjects struct {
 	failRepos error
 	failTasks error
 	reads     int
+	onList    func()
 }
 
 func newFakeProjects() *fakeProjects { return &fakeProjects{taskRepos: map[string][]string{}} }
@@ -44,6 +45,9 @@ func (f *fakeProjects) readCount() int {
 }
 
 func (f *fakeProjects) ListRepositorySets(context.Context, string) ([]*taskmodels.RepositorySet, error) {
+	if f.onList != nil {
+		f.onList()
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.reads++
@@ -51,6 +55,9 @@ func (f *fakeProjects) ListRepositorySets(context.Context, string) ([]*taskmodel
 }
 
 func (f *fakeProjects) ListRepositories(context.Context, string) ([]*taskmodels.Repository, error) {
+	if f.onList != nil {
+		f.onList()
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.reads++
@@ -155,7 +162,7 @@ func TestRecorder_ResolverFailureDropsTheWakeAndCounts(t *testing.T) {
 	wantWakes(t, e, storedWake{"t-a", "completed", "completed", "pending"})
 }
 
-func TestRecorder_TaskRepositoryReadFailureCountsTheTaskOutside(t *testing.T) {
+func TestRecorder_TaskRepositoryReadFailureTreatsTheTaskAsOutside(t *testing.T) {
 	e := newWakeEnv(t)
 	p := newFakeProjects()
 	p.addRepo("repo-a", "a")
