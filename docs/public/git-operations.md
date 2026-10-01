@@ -152,6 +152,12 @@ If the selected PR or branch cannot be fetched, preparation fails instead of sta
 Resuming an existing workspace preserves its branch, local commits, and uncommitted changes.
 A newly recreated workspace fetches the selected PR again.
 Existing workspaces that previously started on the wrong branch are not reset automatically.
+
+In the Review dialog, choose **Preview markdown** for a changed Markdown file to
+render its changed content in place. **Show diff** returns to the textual diff.
+The selected view stays in place if the file list briefly refreshes while Review
+remains open.
+
 ### Files remain, but Git metadata is missing
 
 A linked worktree stores its files separately from its Git administrative
@@ -187,6 +193,11 @@ A main repository can also be the selected host **Worktree** checkout. Its `.git
 directory does not require linked-worktree recovery. When Git metadata is valid,
 Kandev keeps using the same checkout and does not create recovery artifacts. A
 successful relaunch clears the matching task-level launch error.
+
+A healthy checkout can keep using an older managed clone while that clone remains
+the repository's registered source. Resuming does not require a newer workspace
+clone to exist or move your files. If the registered source changes, Kandev
+validates the old and new clone identities before offering or performing relocation.
 
 For missing linked-worktree metadata, Kandev checks every selected repository
 slot before it changes any slot. It keeps the original checkout and creates a

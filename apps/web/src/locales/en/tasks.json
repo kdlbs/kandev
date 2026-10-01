@@ -22,7 +22,6 @@
   "group": "Group",
   "groupByNone": "None",
   "groupByRepository": "Repository",
-  "groupByState": "State",
   "groupByWorkflow": "Workflow",
   "ungrouped": "Ungrouped",
   "loading": "Loading...",
@@ -56,5 +55,10 @@
   "unarchivedBranchesMissing_one": "Branch {{branches}} no longer exists locally or on the remote. The next session starts fresh from the base branch.",
   "unarchivedBranchesMissing_other": "Branches {{branches}} no longer exist locally or on the remote. The next session starts fresh from the base branch.",
   "unarchivedTaskRestored": "The task has been restored.",
-  "unarchiveTask": "Unarchive task"
+  "unarchiveTask": "Unarchive task",
+  "groupByWorkflowStep": "Workflow step",
+  "noWorkflowStep": "No workflow step",
+  "loadingWorkflowStep": "Loading workflow step...",
+  "unknownWorkflowStep": "Unknown workflow step",
+  "workflowStepSection": "{{workflow}} / {{step}}"
 }

@@ -27,6 +27,10 @@ vi.mock("@/hooks/domains/session/use-request-changes-walkthrough", () => ({
   useRequestChangesWalkthrough: () => vi.fn(),
 }));
 
+vi.mock("@/hooks/domains/session/use-session-git-refresh", () => ({
+  useSessionGitRefresh: () => vi.fn(),
+}));
+
 vi.mock("../changes-panel", () => ({
   ChangesPanelBody: (props: { comparisonRequestToken?: number }) => {
     mocks.comparisonTokens.push(props.comparisonRequestToken);

@@ -1,9 +1,14 @@
 "use client";
 
-import { useCallback } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { startAgentLogin } from "@/lib/api";
+import { ApiError } from "@/lib/api/client";
+import { t as translate } from "@/lib/i18n";
+import { fetchDynamicModels } from "@/lib/api/domains/settings-api";
 import { PtyTerminalDialog, type StartPtySession } from "@/components/settings/pty-terminal-dialog";
+
+import { MiniMaxLoginRegion } from "./minimax-login-region";
 
 type Props = {
   open: boolean;
@@ -14,14 +19,17 @@ type Props = {
   /** Argv of the login command. Surfaced in the dialog so the user can see
    *  (and re-run) the actual command after Ctrl+C drops them into a shell. */
   command?: string[];
+  variants?: Record<string, string[]>;
   /** Called when the user clicks Done. Used to trigger a capability rescan. */
   onLoginSuccess?: () => void;
+  /** Refresh the catalog when the caller only rescans cached agent cards. */
+  refreshModelsOnDone?: boolean;
 };
 
 /**
  * Opens a PTY-backed terminal running an agent's login command on the kandev
- * host. Thin wrapper over <PtyTerminalDialog> - the only thing login-specific
- * is the start endpoint.
+ * host. MiniMax refreshes the native catalog before settings reread cached
+ * agent cards.
  */
 export function AgentLoginDialog({
   open,
@@ -29,24 +37,58 @@ export function AgentLoginDialog({
   agentName,
   description,
   command,
+  variants,
   onLoginSuccess,
+  refreshModelsOnDone = false,
 }: Props) {
   const { t } = useTranslation();
+  const [selectedVariant, setSelectedVariant] = useState<string>();
+  useEffect(() => {
+    if (!open) setSelectedVariant(undefined);
+  }, [open]);
   const startSession: StartPtySession = useCallback(
-    (size, options) => startAgentLogin(agentName, size, options),
-    [agentName],
+    (size, options) =>
+      startAgentLogin(agentName, size, { ...options, commandVariant: selectedVariant }).catch(
+        (error) => {
+          if (error instanceof ApiError && error.errorCode === "login_command_conflict") {
+            throw new Error(translate("agents:minimaxLoginConflict"));
+          }
+          throw error;
+        },
+      ),
+    [agentName, selectedVariant],
   );
+  const handleLoginSuccess = useCallback(() => {
+    if (!refreshModelsOnDone) {
+      onLoginSuccess?.();
+      return;
+    }
+    const finish = () => onLoginSuccess?.();
+    void fetchDynamicModels(agentName, { refresh: true }).then(finish, finish);
+  }, [agentName, onLoginSuccess, refreshModelsOnDone]);
 
+  if (agentName === "minimax-acp" && variants?.cn && variants.global && !selectedVariant) {
+    return (
+      <MiniMaxLoginRegion open={open} onOpenChange={onOpenChange} onSelect={setSelectedVariant} />
+    );
+  }
   return (
     <PtyTerminalDialog
       open={open}
       onOpenChange={onOpenChange}
       title={t("agents:signInToAgent", { name: agentName })}
-      description={description}
-      command={command}
+      description={
+        agentName === "minimax-acp"
+          ? t("agents:minimaxLoginDescription", {
+              dataDir: "~/.minimax",
+            })
+          : description
+      }
+      command={selectedVariant ? variants?.[selectedVariant] : command}
+      presentation={agentName === "minimax-acp" ? "quick" : "standard"}
       testIdPrefix="agent-login"
       startSession={startSession}
-      onDone={onLoginSuccess}
+      onDone={handleLoginSuccess}
     />
   );
 }

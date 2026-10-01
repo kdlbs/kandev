@@ -22,7 +22,13 @@ vi.mock("@/hooks/domains/session/use-cumulative-diff", () => ({
 const SESSION = "sess-1";
 const STATUS_TIME_1 = "2026-05-28T00:00:01Z";
 const STATUS_TIME_2 = "2026-05-28T00:00:02Z";
+const ORDERED_STATUS_TIME_1 = "2026-09-30T10:00:01Z";
+const ORDERED_STATUS_TIME_2 = "2026-09-30T10:00:02Z";
+const ORDERED_STATUS_TIME_3 = "2026-09-30T10:00:03Z";
+const ENVIRONMENT_A = "environment-a";
+const ENVIRONMENT_B = "environment-b";
 const MISSING_HANDLER_MESSAGE = "session.git.event handler is missing";
+const ACCEPTED_DIFF = "accepted diff";
 const invalidateCumulativeDiffCacheMock = vi.mocked(invalidateCumulativeDiffCache);
 
 function makeStore() {
@@ -204,7 +210,9 @@ describe("git-status WS handler — commit events", () => {
     expect(state.gitCheckoutGeneration.byEnvironmentId[SESSION]?.["repo-b"]).toBe(1);
     expect(state.sessionCommits.byEnvironmentId[SESSION]).toHaveLength(1);
   });
+});
 
+describe("git-status WS handler — status ordering", () => {
   it("stores the status-level submodule marker", () => {
     const store = freshStore();
     const handler = gitStatusHandler(store);
@@ -216,6 +224,128 @@ describe("git-status WS handler — commit events", () => {
     expect(store.getState().gitStatus.byEnvironmentId[SESSION].is_submodule).toBe(true);
   });
 
+  it("keeps a newer unavailable detail quality when an older ready response arrives", () => {
+    const store = freshStore();
+    const handler = gitStatusHandler(store);
+    const unavailable = statusUpdateEvent(ORDERED_STATUS_TIME_2);
+    unavailable.status.status_state = "unavailable";
+    unavailable.status.files_complete = false;
+    unavailable.status.error_code = "details_unavailable";
+    unavailable.status.tracker_id = "tracker-a";
+    unavailable.status.tracker_epoch = 1;
+    unavailable.status.snapshot_revision = 7;
+    handler(gitEvent(unavailable));
+
+    const olderReady = statusUpdateEvent(ORDERED_STATUS_TIME_1);
+    olderReady.status.tracker_id = "tracker-a";
+    olderReady.status.tracker_epoch = 1;
+    olderReady.status.snapshot_revision = 6;
+    handler(gitEvent(olderReady));
+
+    expect(store.getState().gitStatus.byEnvironmentId[SESSION]).toBeUndefined();
+    expect(store.getState().gitStatus.refreshByEnvironmentRepo?.[SESSION]?.[""]).toMatchObject({
+      state: "unavailable",
+      error_code: "details_unavailable",
+      tracker_id: "tracker-a",
+      snapshot_revision: 7,
+    });
+  });
+
+  it("accepts a newer capture from a replacement tracker with a lower local revision", () => {
+    const store = freshStore();
+    const handler = gitStatusHandler(store);
+    const first = statusUpdateEvent(ORDERED_STATUS_TIME_2);
+    first.status.tracker_id = "agentctl-a/tracker-1";
+    first.status.tracker_epoch = 44;
+    first.status.snapshot_revision = 90;
+    handler(gitEvent(first));
+
+    const replacement = statusUpdateEvent(ORDERED_STATUS_TIME_3);
+    replacement.status.tracker_id = "agentctl-b/tracker-1";
+    replacement.status.tracker_epoch = 1;
+    replacement.status.snapshot_revision = 1;
+    replacement.status.modified = ["replacement.ts"];
+    replacement.status.files = {
+      "replacement.ts": {
+        path: "replacement.ts",
+        status: "modified",
+        staged: false,
+        additions: 1,
+      },
+    };
+    handler(gitEvent(replacement));
+
+    expect(store.getState().gitStatus.byEnvironmentId[SESSION]?.files).toHaveProperty(
+      "replacement.ts",
+    );
+    expect(store.getState().gitStatus.byEnvironmentId[SESSION]?.tracker_id).toBe(
+      "agentctl-b/tracker-1",
+    );
+  });
+});
+
+describe("git-status WS handler — environment isolation", () => {
+  it("keeps ordering and refresh quality isolated between environments", () => {
+    const store = freshStore();
+    const handler = gitStatusHandler(store);
+    const unavailable = statusUpdateEvent(ORDERED_STATUS_TIME_2);
+    unavailable.task_environment_id = ENVIRONMENT_A;
+    unavailable.status.status_state = "unavailable";
+    unavailable.status.files_complete = false;
+    unavailable.status.error_code = "details_unavailable";
+    unavailable.status.tracker_id = "tracker-a";
+    unavailable.status.snapshot_revision = 7;
+    handler(gitEvent(unavailable));
+
+    const otherEnvironment = statusUpdateEvent(ORDERED_STATUS_TIME_3);
+    otherEnvironment.task_environment_id = ENVIRONMENT_B;
+    otherEnvironment.status.tracker_id = "tracker-b";
+    otherEnvironment.status.snapshot_revision = 1;
+    handler(gitEvent(otherEnvironment));
+
+    const stale = statusUpdateEvent(ORDERED_STATUS_TIME_1);
+    stale.task_environment_id = ENVIRONMENT_A;
+    stale.status.tracker_id = "tracker-a";
+    stale.status.snapshot_revision = 6;
+    handler(gitEvent(stale));
+
+    expect(store.getState().gitStatus.byEnvironmentId[ENVIRONMENT_B]?.tracker_id).toBe("tracker-b");
+    expect(
+      store.getState().gitStatus.refreshByEnvironmentRepo?.[ENVIRONMENT_A]?.[""],
+    ).toMatchObject({
+      state: "unavailable",
+      error_code: "details_unavailable",
+      snapshot_revision: 7,
+    });
+    expect(store.getState().gitStatus.byEnvironmentId[ENVIRONMENT_A]).toBeUndefined();
+  });
+
+  it.each(["unavailable", "loading"] as const)(
+    "does not apply an older %s frame over a newer ready snapshot",
+    (statusState) => {
+      const store = freshStore();
+      const handler = gitStatusHandler(store);
+      const ready = statusUpdateEvent(ORDERED_STATUS_TIME_2);
+      ready.status.tracker_id = "tracker-a";
+      ready.status.tracker_epoch = 1;
+      ready.status.snapshot_revision = 8;
+      handler(gitEvent(ready));
+
+      const older = statusUpdateEvent(ORDERED_STATUS_TIME_1);
+      older.status.status_state = statusState;
+      older.status.files_complete = false;
+      older.status.tracker_id = "tracker-a";
+      older.status.tracker_epoch = 1;
+      older.status.snapshot_revision = 7;
+      handler(gitEvent(older));
+
+      expect(store.getState().gitStatus.byEnvironmentId[SESSION]?.files).toHaveProperty("a.ts");
+      expect(store.getState().gitStatus.refreshByEnvironmentId?.[SESSION]).toBeUndefined();
+    },
+  );
+});
+
+describe("git-status WS handler — commit and upstream evidence", () => {
   it("retains the commit and upstream evidence from a status event", () => {
     const store = freshStore();
     const handler = gitStatusHandler(store);
@@ -369,7 +499,7 @@ describe("git-status WS handler — delivered environment identity", () => {
     expect(store.getState().gitStatus.byEnvironmentRepo).toEqual({});
   });
 
-  it("normalizes a sparse status update with no file map", () => {
+  it("does not accept a sparse status update with no complete file map", () => {
     const store = freshStore();
     const handler = gitStatusHandler(store);
     const event = statusUpdateEvent(STATUS_TIME_1) as GitStatusUpdateEvent & {
@@ -380,6 +510,73 @@ describe("git-status WS handler — delivered environment identity", () => {
 
     handler(gitEvent(event));
 
-    expect(store.getState().gitStatus.byEnvironmentRepo["payload-env"][""].files).toEqual({});
+    expect(store.getState().gitStatus.byEnvironmentRepo["payload-env"]).toBeUndefined();
+    expect(
+      store.getState().gitStatus.refreshByEnvironmentRepo?.["payload-env"]?.[""],
+    ).toMatchObject({ state: "pending" });
+  });
+
+  it("preserves snapshot quality through the status event adapter", () => {
+    const store = freshStore();
+    const handler = gitStatusHandler(store);
+    const event = statusUpdateEvent(STATUS_TIME_1) as GitStatusUpdateEvent & {
+      task_environment_id: string;
+    };
+    event.task_environment_id = "payload-env";
+    event.status.status_state = "ready";
+    event.status.files_complete = true;
+    event.status.detail_state = "pending";
+    event.status.error_code = "";
+    event.status.files!["a.ts"].diff_state = "pending";
+
+    handler(gitEvent(event));
+
+    const status = store.getState().gitStatus.byEnvironmentRepo["payload-env"][""];
+    expect(status).toMatchObject({
+      status_state: "ready",
+      files_complete: true,
+      detail_state: "pending",
+    });
+    expect(status.files["a.ts"].diff_state).toBe("pending");
+  });
+
+  it("preserves accepted files while marking incomplete membership as pending", () => {
+    const store = freshStore();
+    const handler = gitStatusHandler(store);
+    handler(gitEvent(statusUpdateEvent(STATUS_TIME_1, ACCEPTED_DIFF, SESSION, "env-1")));
+
+    const incomplete = statusUpdateEvent(STATUS_TIME_2, "", SESSION, "env-1");
+    incomplete.status.status_state = "loading";
+    incomplete.status.files_complete = false;
+    incomplete.status.files = {};
+    handler(gitEvent(incomplete));
+
+    expect(store.getState().gitStatus.byEnvironmentRepo["env-1"][""].files["a.ts"].diff).toBe(
+      ACCEPTED_DIFF,
+    );
+    expect(store.getState().gitStatus.refreshByEnvironmentRepo?.["env-1"]?.[""]).toMatchObject({
+      state: "pending",
+    });
+  });
+
+  it("records unavailable status without replacing the last accepted snapshot", () => {
+    const store = freshStore();
+    const handler = gitStatusHandler(store);
+    handler(gitEvent(statusUpdateEvent(STATUS_TIME_1, ACCEPTED_DIFF, SESSION, "env-1")));
+
+    const unavailable = statusUpdateEvent(STATUS_TIME_2, "", SESSION, "env-1");
+    unavailable.status.status_state = "unavailable";
+    unavailable.status.files_complete = false;
+    unavailable.status.error_code = "status_timeout";
+    unavailable.status.files = {};
+    handler(gitEvent(unavailable));
+
+    expect(store.getState().gitStatus.byEnvironmentRepo["env-1"][""].files["a.ts"].diff).toBe(
+      ACCEPTED_DIFF,
+    );
+    expect(store.getState().gitStatus.refreshByEnvironmentRepo?.["env-1"]?.[""]).toMatchObject({
+      state: "unavailable",
+      error_code: "status_timeout",
+    });
   });
 });

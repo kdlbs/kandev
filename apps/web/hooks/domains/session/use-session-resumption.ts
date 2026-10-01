@@ -468,6 +468,7 @@ async function checkAndResume({
 }
 
 interface UseSessionResumptionReturn {
+  requestIdentity: import("@/lib/session-recovery-presentation").SessionRecoveryOwner["requestIdentity"];
   resumptionState: ResumptionState;
   sessionStatus: SessionStatus | null;
   error: string | null;
@@ -488,6 +489,7 @@ interface UseSessionResumptionReturn {
  * and automatically resumes if needed.
  */
 type SessionResetAndCheckResult = {
+  committedRequest: SessionRequestIdentity;
   sessionStatus: SessionStatus | null;
   captureRequest: () => SessionRequestIdentity;
   buildGuardedSettersFor: (capturedRequest: SessionRequestIdentity) => ResumeStateSetter;
@@ -534,7 +536,11 @@ function useSessionResetAndCheck({
   const startupRecoveryInFlightRef = useRef(new Map<string, Promise<void>>());
   const focusRequestInFlightRef = useRef(false);
   const lastFocusRequestAtRef = useRef(0);
-  const activeRequestRef = useRef<SessionRequestIdentity>({ key: requestKey, generation: 0 });
+  const [committedRequest, setCommittedRequest] = useState<SessionRequestIdentity>({
+    key: requestKey,
+    generation: 0,
+  });
+  const activeRequestRef = useRef<SessionRequestIdentity>(committedRequest);
 
   // Publish the new identity during commit so callbacks from the previous
   // request are rejected before passive effects or queued promise handlers run.
@@ -544,6 +550,7 @@ function useSessionResetAndCheck({
       key: requestKey,
       generation: requestGenerationRef.current,
     };
+    setCommittedRequest(activeRequestRef.current);
   }, [requestKey]);
 
   // Reset all local state when session or task changes to prevent stale data
@@ -738,6 +745,7 @@ function useSessionResetAndCheck({
 
   return {
     sessionStatus,
+    committedRequest,
     captureRequest: () => activeRequestRef.current,
     buildGuardedSettersFor: (capturedRequest) =>
       buildGuardedSetters(activeRequestRef, capturedRequest, setters),
@@ -937,7 +945,7 @@ export function useSessionResumption(
 
   useSessionRecoveryFeedback(sessionId, session?.state, error, notice, setters);
 
-  const { sessionStatus, captureRequest, buildGuardedSettersFor, retryStatus } =
+  const { sessionStatus, committedRequest, captureRequest, buildGuardedSettersFor, retryStatus } =
     useSessionResetAndCheck({
       taskId,
       sessionId,
@@ -957,7 +965,18 @@ export function useSessionResumption(
     buildGuardedSettersFor,
   });
 
+  const request = committedRequest;
+  const ownsFeedback = request.key === getSessionRequestKey(taskId, sessionId, taskArchiveState);
   return {
+    requestIdentity:
+      ownsFeedback && taskId && sessionId
+        ? {
+            taskId,
+            sessionId,
+            generation: request.generation,
+            attemptId: recoveryAttemptIdRef.current,
+          }
+        : null,
     resumptionState,
     sessionStatus,
     error,

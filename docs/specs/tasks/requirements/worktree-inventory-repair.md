@@ -49,6 +49,11 @@ This is explicit maintenance of selected records. It does not extend automatic
   and durable progress record. Interruption shall allow the same operation to
   continue or roll back after identity checks; it shall not permit the backend
   to serve a partially repaired inventory.
+- **AC-TASKS-WORKTREE-INVENTORY-REPAIR-001.6:** Read-only and read-write repair
+  database connections shall open the database file at its canonical absolute
+  path. This includes a Windows drive-letter path and a path containing a space,
+  `#`, `%`, or, where file names allow it, `?`. Read-only connections shall
+  reject writes. Neither mode shall create or open another file.
 
 ### REQ-TASKS-WORKTREE-INVENTORY-REPAIR-002: Audit-preserving cleanup recovery
 

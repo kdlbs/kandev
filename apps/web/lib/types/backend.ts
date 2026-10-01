@@ -347,6 +347,7 @@ export type FileChangeFacet = {
   old_path?: string;
   diff?: string;
   diff_skip_reason?: "too_large" | "binary" | "truncated" | "budget_exceeded";
+  diff_state?: "pending" | "ready" | "unavailable";
 };
 
 export type FileInfo = {
@@ -359,6 +360,7 @@ export type FileInfo = {
   old_path?: string;
   diff?: string;
   diff_skip_reason?: "too_large" | "binary" | "truncated" | "budget_exceeded";
+  diff_state?: "pending" | "ready" | "unavailable";
   staged_change?: FileChangeFacet;
   unstaged_change?: FileChangeFacet;
 };

@@ -820,7 +820,7 @@ func TestDockerManagedBrokerReconnectRecreatesInstanceWithFreshLease(t *testing.
 	dockerExec := NewDockerExecutor(config.DockerConfig{}, "", newTestDockerLogger())
 	dockerExec.brokerPreflight = func(
 		context.Context,
-		brokerAgentctlProcessClient,
+		agentctlProcessClient,
 		string,
 		map[string]string,
 	) error {
@@ -860,7 +860,7 @@ func TestDockerManagedBrokerReconnectStopsBeforeReplacementWhenUnreachable(t *te
 	dockerExec := NewDockerExecutor(config.DockerConfig{}, "", newTestDockerLogger())
 	dockerExec.brokerPreflight = func(
 		context.Context,
-		brokerAgentctlProcessClient,
+		agentctlProcessClient,
 		string,
 		map[string]string,
 	) error {

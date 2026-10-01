@@ -40,6 +40,13 @@ func TestPublishGitStatus_PropagatesRepositoryName(t *testing.T) {
 	}
 	pub.PublishGitStatus(exec, &agentctl.GitStatusUpdate{
 		Timestamp:        time.Now(),
+		StatusState:      "ready",
+		FilesComplete:    true,
+		DetailState:      "pending",
+		ErrorCode:        "source_timeout",
+		TrackerID:        "agentctl/tracker-1",
+		TrackerEpoch:     17,
+		SnapshotRevision: 3,
 		RepositoryName:   "frontend",
 		IsSubmodule:      true,
 		Branch:           "feature/x",
@@ -64,6 +71,12 @@ func TestPublishGitStatus_PropagatesRepositoryName(t *testing.T) {
 		}
 		if payload.Status.RepositoryName != "frontend" {
 			t.Errorf("repository_name was dropped: got %q", payload.Status.RepositoryName)
+		}
+		if payload.Status.StatusState != "ready" || !payload.Status.FilesComplete || payload.Status.DetailState != "pending" {
+			t.Errorf("status quality was dropped: %q / %v / %q", payload.Status.StatusState, payload.Status.FilesComplete, payload.Status.DetailState)
+		}
+		if payload.Status.ErrorCode != "source_timeout" || payload.Status.TrackerID != "agentctl/tracker-1" || payload.Status.TrackerEpoch != 17 || payload.Status.SnapshotRevision != 3 {
+			t.Errorf("status failure/order fields were dropped: %q / %q / %d / %d", payload.Status.ErrorCode, payload.Status.TrackerID, payload.Status.TrackerEpoch, payload.Status.SnapshotRevision)
 		}
 		if !payload.Status.IsSubmodule {
 			t.Error("is_submodule was dropped")
