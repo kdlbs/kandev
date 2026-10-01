@@ -39,11 +39,11 @@ access is unavailable in this task environment.
 install recipe, logos and LoginAgent. `registry.LoadDefaults` registers it and the fixed utility probe command allowlist accepts `mcode`, with a
 unique display order. Install pins the verified official package and includes
 optional SQLite dependencies and required install scripts. The login PTY uses
-`mcode login --no-browser`; localized instructions explain native CN/default
-and Global commands and the existing Ctrl+C-to-shell recovery path. The shared
-AgentLoginDialog renders those instructions on desktop and phone, uses the
-existing quick terminal surface and refreshes native models before rescanning
-the agent cards after Done. Long command previews truncate within the dialog.
+`mcode login --no-browser --region cn|global` after an explicit account-region
+choice. The shared AgentLoginDialog presents a short desktop dialog or inset
+phone drawer, then the existing quick terminal surface. It refreshes native
+models before rescanning agent cards after Done. Long command previews wrap
+within the dialog.
 
 ## Protocol and models
 
@@ -122,3 +122,21 @@ executes the production install job against an isolated npm executable, and
 starts a native task with the saved profile model. Its prompt record proves
 model propagation through the runtime. This is separate from published-CLI
 protocol probes and does not claim a live subscription login or model turn.
+
+## Explicit login region choices
+
+`LoginCommand` owns optional named command variants. Discovery publishes their
+argv; the login start request supplies only `command_variant`. The endpoint
+selects that identifier from the registered agent's map and rejects unknown
+identifiers before starting a PTY. Omitted identifiers keep the existing
+default command. Clients cannot submit command text or arbitrary flags.
+MiniMax defines `cn` and `global`, both retaining the default-data environment
+sanitation and adding the official native region flag. The existing POSIX
+login wrapper, authorization and executor ownership remain unchanged.
+
+MiniMax setup presents two region buttons before the terminal starts. Desktop
+uses a short dialog; phone uses an inset bottom drawer with 48px controls and
+safe-area spacing, following the existing canvas rename drawer. After choice,
+the existing quick terminal supplies dynamic viewport sizing and its single
+terminal scroll owner. Closing and reopening setup returns to the region
+choice. No login subprocess starts merely by opening the chooser.

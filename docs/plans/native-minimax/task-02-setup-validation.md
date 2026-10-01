@@ -54,7 +54,7 @@ Profile start model: [MiniMax-M3 - thinking] [Save]
 
 ```bash
 (cd apps/web && pnpm run i18n:check && pnpm run typecheck)
-(cd apps/web && pnpm exec vitest run components/settings/agent-login-dialog.test.tsx components/settings/profile-form-fields.test.tsx components/settings/installed-agent-card.test.tsx hooks/domains/settings/use-dynamic-models.test.ts)
+(cd apps/web && pnpm exec vitest run lib/api/domains/host-shell-api.test.ts components/settings/agent-login-dialog.test.tsx components/settings/profile-form-fields.test.tsx components/settings/installed-agent-card.test.tsx hooks/domains/settings/use-dynamic-models.test.ts)
 (cd apps/web && pnpm e2e:run --project chromium tests/settings/minimax-agent.spec.ts)
 (cd apps/web && pnpm e2e:run --no-build --project mobile-chrome tests/settings/mobile-minimax-agent.spec.ts)
 node scripts/validate-public-docs.mjs
@@ -102,6 +102,24 @@ Passed: desktop and phone native login/model profile E2E flows; login refresh or
 
 Published 0.5.10 probes used disposable HOME/data/workspace directories. Unauthenticated session/new returned auth_required. An explicit local BYOK fixture verified model selection/rejection, text streaming, MCP initialize/tools/list/tools/call, active cancellation and session load after cancellation. No live subscription/OAuth consent test was possible. Native permission-mode selection succeeded, but no request_permission was emitted for these tool calls; shared ACP handler tests provide permission regression evidence.
 
-Desktop/phone screenshots were captured from the deterministic ACP peer, not from a live model account. Phone testing first exposed overflowing long command content; the quick terminal and bounded preview fixed it. Closing MiniMax login from an agent card now refreshes native models before rescanning; the profile auth panel retains ownership of its existing capability refresh and performs one probe.
+Desktop/phone screenshots were captured from the deterministic ACP peer, not from a live model account. Phone testing first exposed overflowing long command content; the quick terminal and wrapped preview fixed it. Closing MiniMax login from an agent card now refreshes native models before rescanning; the profile auth panel retains ownership of its existing capability refresh and performs one probe.
 
 Review remediation extends the real installation job through an isolated npm fixture and exercises filesystem discovery with E2E availability bypass disabled. The desktop/phone flows check Portuguese install and passthrough copy, then launch an actual native ACP task and assert the saved model reaches the fixture's prompt. Full login commands wrap on phones. Technical command/path values use interpolation so pseudo localization preserves their bytes. The MiniMax docs explicitly state the existing POSIX login-terminal boundary and native Windows manual-login environment requirements.
+
+## Phone region correction
+
+UI-03 in the plan adds an explicit region choice before login. The server owns
+the allowed command variants and rejects unknown selections before starting a
+process. Default callers retain their existing command. Cover the request/DTO
+contract, no-process-before-choice, reopen reset, Mainland China on desktop and
+Global on phone, physical phone targets and native task/model propagation.
+Run affected Go packages and full backend module lint before delivery; recapture
+region/login/profile/install surfaces after the final commit.
+
+Region correction validation: three affected Go packages passed. The API/login/
+profile/model regression files passed 59 tests. Full backend module lint,
+changed frontend ESLint, typecheck and all locale checks passed. Desktop and
+phone E2E passed with real install/login endpoints, server-owned region argv,
+no login before selection and actual native model/task propagation. Public
+validation covered 47 pages and 62 passing tests; specs/catalog/harness passed.
+Screenshot recapture and remote checks remain delivery gates.

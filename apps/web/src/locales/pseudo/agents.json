@@ -357,8 +357,12 @@
   "nativeCodexUnavailableTitle": "Ńàţĩvē Ćōďēx àƥƥ śēŕvēŕ ĩś ũńàvàĩĺàƀĺē",
   "nativeCodexUnavailable": "Ţĥĩś śàvēď ƥŕōƒĩĺē ĩś ƥŕēśēŕvēď, ƀũţ ĩţ ćàńńōţ ƀē ēďĩţēď, ďũƥĺĩćàţēď, ēńàƀĺēď, ōŕ śţàŕţēď ŵĥĩĺē ţĥē Ćōďēx àƥƥ-śēŕvēŕ ƒēàţũŕē ĩś ōƒƒ. Ŷōũ ćàń ďēĺēţē ţĥē ƥŕōƒĩĺē ōŕ ēńàƀĺē ţĥē ƒēàţũŕē ĩń Śēţţĩńĝś.",
   "nativeCodexUnavailableShort": "Ƒēàţũŕē ōƒƒ",
-  "minimaxLoginDescription": "Śĩĝń ĩń ţō ŷōũŕ ḾĩńĩḾàx àććōũńţ. Ţĥĩś ţēŕḿĩńàĺ śţàŕţś ḿàĩńĺàńď Ćĥĩńà ĺōĝĩń. Ƒōŕ à Ĝĺōƀàĺ àććōũńţ, ƥŕēśś {{interrupt}} ţō ōƥēń ţĥē śĥēĺĺ, ţĥēń ŕēŕũń ţĥē ďĩśƥĺàŷēď ćōḿḿàńď ŵĩţĥ {{regionFlag}}. ḾĩńĩḾàx ũśēś {{dataDir}} ƒōŕ ćŕēďēńţĩàĺś.",
+  "minimaxLoginDescription": "Śĩĝń ĩń ţō ŷōũŕ ḾĩńĩḾàx àććōũńţ. ḾĩńĩḾàx śţōŕēś ćŕēďēńţĩàĺś ĩń {{dataDir}}.",
   "minimaxDescription": "ḾĩńĩḾàx Ćōďē ũśĩńĝ ĩţś ńàţĩvē ÀĆƤ śēŕvēŕ àńď śũƀśćŕĩƥţĩōń ĺōĝĩń.",
   "minimaxPassthroughLabel": "ĆĹĨ Ƥàśśţĥŕōũĝĥ",
-  "minimaxPassthroughDescription": "Śĥōŵ ţēŕḿĩńàĺ ďĩŕēćţĺŷ ĩńśţēàď ōƒ ćĥàţ ĩńţēŕƒàćē"
+  "minimaxPassthroughDescription": "Śĥōŵ ţēŕḿĩńàĺ ďĩŕēćţĺŷ ĩńśţēàď ōƒ ćĥàţ ĩńţēŕƒàćē",
+  "minimaxChooseRegionTitle": "ḾĩńĩḾàx àććōũńţ ŕēĝĩōń",
+  "minimaxChooseRegionDescription": "Ćĥōōśē ţĥē ŕēĝĩōń ƒōŕ ŷōũŕ ḾĩńĩḾàx śũƀśćŕĩƥţĩōń àććōũńţ.",
+  "minimaxRegionCN": "Ḿàĩńĺàńď Ćĥĩńà",
+  "minimaxRegionGlobal": "Ĝĺōƀàĺ"
 }

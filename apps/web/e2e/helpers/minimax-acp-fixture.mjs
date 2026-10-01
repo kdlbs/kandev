@@ -36,6 +36,7 @@ if (process.argv.includes("--version")) {
   process.exit(0);
 }
 if (process.argv.includes("login")) {
+  fs.writeFileSync(path.join(root, "login-args.json"), JSON.stringify(process.argv.slice(2)));
   fs.writeFileSync(authenticated, "fixture login");
   console.log("MiniMax fixture login complete");
   process.exit(0);

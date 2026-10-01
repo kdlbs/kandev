@@ -71,9 +71,9 @@ env -u MINIMAX_DATA_DIR -u MAVIS_DATA_DIR \
   mcode login --region global --no-browser
 ```
 
-The login terminal prints a browser authorization link. Its default command
-uses mainland China login. For a Global account, press Ctrl+C to enter the
-shell and run the Global command above. After login, click **Done** to refresh
+Choose **Mainland China** or **Global** when Kandev opens the login setup.
+The selected login terminal prints a browser authorization link. After login,
+click **Done** to refresh
 capabilities, create a MiniMax profile, and choose a model from the native
 catalog. Subscription access stays with MiniMax Code; no OpenCode wrapper or
 static API key is required.

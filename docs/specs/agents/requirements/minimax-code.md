@@ -25,7 +25,8 @@ models, authentication and recovery, including their settings projection.
   shall not report it installed.
 - **AC-AGENTS-MINIMAX-001.2:** Install shall use the official
   `@minimax-ai/code` package. Setup shall expose native login and explain
-  mainland China and Global account commands on desktop and phone.
+  mainland China and Global account choices on desktop and phone before
+  starting login, without requiring keyboard control chords.
 - **AC-AGENTS-MINIMAX-001.3:** Missing authentication shall remain visible as
   login required. Successful login and refresh shall populate native models
   without switching account or provider on failure.

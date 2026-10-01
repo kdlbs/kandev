@@ -5,7 +5,6 @@ import (
 	"context"
 	_ "embed"
 	"net/url"
-	"runtime"
 	"strings"
 	"time"
 
@@ -141,15 +140,16 @@ func minimaxDataOverrides() []string {
 func (a *MiniMaxACP) RemoteAuth() *RemoteAuth { return nil }
 
 func (a *MiniMaxACP) LoginCommand() *LoginCommand {
-	cmd := []string{minimaxBin, "login", "--no-browser"}
-	if runtime.GOOS != "windows" {
-		cmd = []string{"env"}
-		for _, key := range minimaxDataOverrides() {
-			cmd = append(cmd, "-u", key)
-		}
-		cmd = append(cmd, minimaxBin, "login", "--no-browser")
+	cmd := []string{"env"}
+	for _, key := range minimaxDataOverrides() {
+		cmd = append(cmd, "-u", key)
 	}
-	return &LoginCommand{Cmd: cmd}
+	cmd = append(cmd, minimaxBin, "login", "--no-browser")
+	variants := make(map[string][]string, 2)
+	for _, region := range []string{"cn", "global"} {
+		variants[region] = append(append([]string{}, cmd...), "--region", region)
+	}
+	return &LoginCommand{Cmd: cmd, Variants: variants}
 }
 
 func (a *MiniMaxACP) InstallScript() string {

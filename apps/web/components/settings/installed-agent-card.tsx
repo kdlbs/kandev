@@ -397,6 +397,7 @@ function AuthDialogs({
         agentName={agent.name}
         description={agent.login_command?.description}
         command={agent.login_command?.cmd}
+        variants={agent.login_command?.variants}
         onLoginSuccess={onAuthComplete}
         refreshModelsOnDone={agent.name === "minimax-acp"}
       />

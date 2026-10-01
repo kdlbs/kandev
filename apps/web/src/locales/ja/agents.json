@@ -357,8 +357,12 @@
   "nativeCodexUnavailableTitle": "Codex app server を利用できません",
   "nativeCodexUnavailable": "この保存済みプロファイルは保持されていますが、Codex app server 機能がオフの間は編集、複製、有効化、開始できません。プロファイルを削除するか、設定で機能を有効にしてください。",
   "nativeCodexUnavailableShort": "機能オフ",
-  "minimaxLoginDescription": "MiniMax アカウントにログインします。このターミナルでは中国本土向けのログインを開始します。Global アカウントの場合は、{{interrupt}} でシェルを開き、表示されたコマンドに {{regionFlag}} を追加して再実行してください。MiniMax は認証情報を {{dataDir}} に保存します。",
+  "minimaxLoginDescription": "MiniMax アカウントにログインします。MiniMax は認証情報を {{dataDir}} に保存します。",
   "minimaxDescription": "ネイティブ ACP サーバーとサブスクリプションログインを使用する MiniMax Code。",
   "minimaxPassthroughLabel": "CLI パススルー",
-  "minimaxPassthroughDescription": "チャット画面の代わりにターミナルを直接表示"
+  "minimaxPassthroughDescription": "チャット画面の代わりにターミナルを直接表示",
+  "minimaxChooseRegionTitle": "MiniMax アカウントのリージョン",
+  "minimaxChooseRegionDescription": "MiniMax サブスクリプションアカウントのリージョンを選択してください。",
+  "minimaxRegionCN": "中国本土",
+  "minimaxRegionGlobal": "グローバル"
 }

@@ -80,14 +80,50 @@ export async function exerciseMiniMaxSetup({
     const auth = page.getByTestId("auth-icon-minimax-acp");
     await expect(auth).toBeVisible({ timeout: 15_000 });
     await activate(auth);
+    const region = info.project.name === "mobile-chrome" ? "Global" : "Mainland China";
+    const choice = page.getByRole("button", { name: region, exact: true });
+    await expect(choice).toBeVisible();
+    if (info.project.name === "chromium") {
+      const desktopSize = page.viewportSize()!;
+      await page.setViewportSize({ width: 390, height: 844 });
+      await expect(page.getByTestId("minimax-login-region-drawer")).toBeVisible();
+      await expect
+        .poll(async () => (await choice.boundingBox())!.height)
+        .toBeGreaterThanOrEqual(44);
+      await page.setViewportSize(desktopSize);
+      await expect(page.getByTestId("minimax-login-region-drawer")).not.toBeVisible();
+      await expect(choice).toBeVisible();
+    }
+    if (info.project.name === "mobile-chrome") {
+      expect((await choice.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+      await expect(page.getByTestId("minimax-login-region-drawer")).toBeVisible();
+    }
+    expect(fs.existsSync(path.join(root, "authenticated"))).toBe(false);
+    await page.keyboard.press("Escape");
+    await expect(choice).not.toBeVisible();
+    await activate(auth);
+    await expect(choice).toBeVisible();
+    expect(fs.existsSync(path.join(root, "authenticated"))).toBe(false);
+    await capture.screenshot("region", {
+      caption: "Choose the MiniMax subscription account region",
+    });
+    await activate(choice);
     const command = page.getByTestId("agent-login-command").locator("code");
     await expect(command).toHaveCSS("white-space", "pre-wrap");
     expect(await command.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(
       true,
     );
-    const help = page.getByText(/For a Global account, press Ctrl\+C/);
+    const help = page.getByText(/MiniMax stores credentials in/);
     await expect(help).toBeVisible();
     await expect.poll(() => fs.existsSync(path.join(root, "authenticated"))).toBe(true);
+    const nativeRegion = info.project.name === "mobile-chrome" ? "global" : "cn";
+    expect(JSON.parse(fs.readFileSync(path.join(root, "login-args.json"), "utf8"))).toEqual([
+      "login",
+      "--no-browser",
+      "--region",
+      nativeRegion,
+    ]);
+    await expect(command).toContainText(`--region ${nativeRegion}`);
     const dialog = page.getByRole("dialog");
     await dialog.evaluate(async (element) => {
       await Promise.all(
@@ -111,7 +147,7 @@ export async function exerciseMiniMaxSetup({
     expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(viewport.width + 1);
     expect(bounds!.y + bounds!.height).toBeLessThanOrEqual(viewport.height + 1);
     await capture.screenshot("login", {
-      caption: "MiniMax subscription login and region guidance",
+      caption: "MiniMax subscription login for the selected account region",
     });
     const done = page.getByRole("button", { name: "Done", exact: true });
     await expect(done).toBeVisible();

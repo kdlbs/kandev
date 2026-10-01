@@ -233,9 +233,10 @@ func detectShellForOS(goos string, getenv func(string) string, exists func(strin
 }
 
 type startRequest struct {
-	Cols     uint16          `json:"cols"`
-	Rows     uint16          `json:"rows"`
-	ClientID json.RawMessage `json:"client_id"`
+	CommandVariant string          `json:"command_variant,omitempty"`
+	Cols           uint16          `json:"cols"`
+	Rows           uint16          `json:"rows"`
+	ClientID       json.RawMessage `json:"client_id"`
 }
 
 func (h *Handlers) httpStart(c *gin.Context) {
@@ -262,6 +263,14 @@ func (h *Handlers) httpStart(c *gin.Context) {
 
 	var req startRequest
 	_ = c.ShouldBindJSON(&req) // body is optional
+	cmd := lc.Cmd
+	if req.CommandVariant != "" {
+		cmd = lc.Variants[req.CommandVariant]
+		if len(cmd) == 0 {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid_login_variant"})
+			return
+		}
+	}
 
 	// Wrap the agent's login command so that when the login process exits
 	// (Ctrl+C, /quit, success exit, anything) the PTY drops the user into
@@ -279,7 +288,7 @@ func (h *Handlers) httpStart(c *gin.Context) {
 	// - so the agent dies as expected and sh survives to exec the shell.
 	wrapped := append(
 		[]string{"sh", "-c", `trap 'true' INT; "$@"; exec "${SHELL:-/bin/sh}"`, "kandev-login-wrapper"},
-		lc.Cmd...,
+		cmd...,
 	)
 	sess, err := h.mgr.Start(name, wrapped, req.Cols, req.Rows)
 	if err != nil && err != ErrSessionAlreadyRunning {

@@ -29,7 +29,7 @@ Exclude wrappers, new transports, Office routing and credential relocation.
 Add MiniMaxACP to agents and registry using mcode directly. Verify installation
 with --version, pin the official npm install recipe, retain native ACP IDs and
 translate only terminal model syntax. Reuse LoginAgent with localized region
-help, ACP sessionmodel, permission handlers and executor session mounts.
+selection, ACP sessionmodel, permission handlers and executor session mounts.
 
 | Provider | Transport | Model shape | Behavior | Evidence | Unsupported fallback |
 | --- | --- | --- | --- | --- | --- |
@@ -44,9 +44,8 @@ UI-01: Settings > Agents > MiniMax (login required), shared desktop/phone conten
 MiniMax   [MCP] [Login required]
 [Login] [New Profile]
   Sign in to minimax-acp
-  MiniMax account login. China: mcode login.
-  Global: mcode login --region global.
-  [full wrapped command; native terminal; Ctrl+C opens shell]
+  [Choose Mainland China or Global]
+  [selected full wrapped command; native terminal]
   [Done]
 ```
 
@@ -61,7 +60,7 @@ Start model: [MiniMax-M3 - thinking v]
 These are content previews. MiniMax login reuses the shipped quick terminal:
 a bounded desktop dialog and full-screen phone surface, dynamic viewport
 height, safe-area padding, a flexing terminal and a visible Done action. The
-command preview truncates within its width. Existing profile model popovers
+command preview wraps within its width. Existing profile model popovers
 retain their touch selection and tap-outside dismissal behavior. AC-001.2,
 AC-001.3 and AC-002.2 are checked by desktop/mobile rendered flows.
 
@@ -113,3 +112,22 @@ and an actual native task using the saved model. Installation and task tests
 use isolated executable fixtures; published CLI probes and live OAuth limits
 remain recorded separately. Current-head remote review/check and merge evidence
 is tracked in the persistent Kandev plan and PR #4110.
+
+## UI-03: Login region choice
+
+```text
+Desktop: short dialog             Phone: inset bottom drawer
+MiniMax account region            MiniMax account region
+Choose subscription region.       Choose subscription region.
+[Mainland China] [Global]          [Mainland China, 48px]
+                                  [Global, 48px; safe area]
+After choice: existing quick terminal with the selected full command.
+```
+
+The setup work order owns named command selection, rejecting unknown variants,
+localized region selection and both viewport flows. The existing login endpoint
+and permissions are reused. No subprocess starts before choice, and reopening
+returns to choice. Required local checks include login endpoint/DTO/API tests,
+frontend API serialization tests, both setup/native-task E2E flows and backend
+module lint. Previous f8 remote results remain historical until the next head
+finishes CI and automated review.

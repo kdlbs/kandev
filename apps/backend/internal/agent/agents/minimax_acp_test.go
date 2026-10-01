@@ -56,9 +56,12 @@ func TestMiniMaxLoginUsesDefaultDataDirectory(t *testing.T) {
 	for _, key := range minimaxDataOverrides() {
 		t.Setenv(key, "outside-executor")
 	}
-	argv := NewMiniMaxACP().LoginCommand().Cmd
-	if out, err := exec.Command(argv[0], argv[1:]...).CombinedOutput(); err != nil {
-		t.Fatalf("login failed: %v %s", err, out)
+	login := NewMiniMaxACP().LoginCommand()
+	commands := append([][]string{login.Cmd}, login.Variants["cn"], login.Variants["global"])
+	for _, argv := range commands {
+		if out, err := exec.Command(argv[0], argv[1:]...).CombinedOutput(); err != nil {
+			t.Fatalf("login failed: %v %s", err, out)
+		}
 	}
 }
 
