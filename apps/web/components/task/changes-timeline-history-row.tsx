@@ -134,16 +134,16 @@ function HistorySectionRow({
   const toggleTestId = row.historyKind === "pr" ? "pr-changes-section" : row.testId;
   return (
     <div className="relative flex gap-2.5">
-      <div className="flex flex-col items-center">
+      <div className="flex flex-col items-center justify-center">
         <div
-          className={`relative z-10 mt-[5px] size-1.5 shrink-0 rounded-full ${row.historyKind === "pr" ? "bg-purple-500" : "bg-blue-500"}`}
+          className={`relative z-10 size-1.5 shrink-0 rounded-full ${row.historyKind === "pr" ? "bg-purple-500" : "bg-blue-500"}`}
         />
       </div>
-      <div className="min-w-0 flex-1 pb-3">
-        <div className="mb-1 flex items-center justify-between gap-2 -mt-0.5">
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center justify-between gap-2">
           <button
             type="button"
-            className="flex min-h-6 items-center gap-1 text-[11px] font-medium uppercase tracking-wider text-foreground/70 cursor-pointer hover:text-foreground/90 [@media(pointer:coarse)]:min-h-11"
+            className="flex min-h-7 min-w-0 items-center gap-1 text-[11px] font-medium uppercase tracking-wider text-foreground/70 cursor-pointer hover:text-foreground/90 max-md:min-h-11 [@media(pointer:coarse)]:min-h-11"
             onClick={() => onToggleSection(row.sectionKey)}
             aria-expanded={!row.collapsed}
             data-testid={`${toggleTestId}-collapse-toggle`}
