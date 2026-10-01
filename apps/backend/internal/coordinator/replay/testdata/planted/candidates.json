@@ -1,0 +1,28 @@
+[
+  {
+    "name": "flip-one-a",
+    "guard": "blocked",
+    "verdict": "not_an_improvement",
+    "guardOnly": true
+  },
+  {
+    "name": "flip-two",
+    "guard": "blocked",
+    "verdict": "not_an_improvement"
+  },
+  {
+    "name": "drop-all",
+    "guard": "blocked",
+    "verdict": "not_an_improvement"
+  },
+  {
+    "name": "repeat-rejected",
+    "guard": "pass",
+    "verdict": "not_an_improvement"
+  },
+  {
+    "name": "good",
+    "guard": "pass",
+    "verdict": "improvement"
+  }
+]
