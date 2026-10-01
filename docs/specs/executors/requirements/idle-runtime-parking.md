@@ -2,7 +2,7 @@
 status: active
 system: executors
 created: 2026-09-28
-updated: 2026-09-28
+updated: 2026-10-01
 owners:
   - kandev
 ---
@@ -14,6 +14,7 @@ owners:
 Users can reduce resource use by suspending idle ACP agent processes in a workspace.
 The workspace policy applies to all ACP agents. It is disabled by default and has a default timeout of two hours.
 The executor system owns process suspension and recovery. Workspace settings expose the policy without creating a separate runtime contract.
+The always-on idle reclaim of settled runtimes runs regardless of this policy. It keeps a waiting session whose runtime record cleanup would remove for lack of a resume identity.
 
 ## Terminology
 
@@ -40,6 +41,16 @@ The executor system owns process suspension and recovery. Workspace settings exp
 - **AC-EXECUTORS-IDLE-PARKING-001.8:** Failed suspension or resume shall preserve durable ownership and conversation identity for retry. Kandev shall never replace an unrecoverable conversation silently. Missing resume identity or unsupported restore shall produce a visible diagnostic and preserve the process when suspension has not started.
 - **AC-EXECUTORS-IDLE-PARKING-001.9:** Desktop and phone workspace settings shall expose the same switch, timeout, validation, and saved state. Phone users shall use the normal touch composer and task navigation for recovery.
 - **AC-EXECUTORS-IDLE-PARKING-001.10:** Disabling the policy shall prevent new suspensions without starting every suspended process. Existing suspended sessions shall still resume on focus or messages. Diagnostics shall identify suspended instances and bounded skip/failure reasons without tokens or credentials.
+
+### REQ-EXECUTORS-IDLE-PARKING-002: Resume-safe idle reclaim
+
+**Intent:** Keep the always-on idle reclaim from removing the runtime record of a waiting session that has no resume identity.
+
+#### Acceptance criteria
+
+- **AC-EXECUTORS-IDLE-PARKING-002.1:** When the always-on idle reclaim finds a `WAITING_FOR_INPUT` or `IDLE` session with no live agent and no active turn, and its runtime record has no resume identity and a status other than `running`, it shall keep the session's runtime and runtime record. This includes a prepared session whose agent has not started.
+- **AC-EXECUTORS-IDLE-PARKING-002.2:** After such a reclaim pass, a prompt to a `WAITING_FOR_INPUT` session with a prepared runtime record shall attempt to start its agent in the same session. It shall not report the session runtime as unavailable.
+- **AC-EXECUTORS-IDLE-PARKING-002.3:** A session whose runtime record holds a resume identity or has status `running`, and a `COMPLETED` session without a resume identity, shall keep the existing reclaim behavior. The runtime is released, a record with a resume identity or status `running` is repaired in place, and a completed record without either may be removed.
 
 ## Compatibility
 

@@ -77,7 +77,10 @@ describe("buildSidebarItem", () => {
       emptyContext(),
     );
 
-    expect(item.prInfo).toEqual({ number: 42, state: "Open", aggregateState: "pending" });
+    expect(item.prInfo).toMatchObject({
+      aggregateState: "pending",
+      statusSummaryUpdatedAt: UPDATED_AT,
+    });
   });
 
   it("uses summary presence as the authority for cleared session and pending fields", () => {
@@ -221,8 +224,10 @@ describe("buildSidebarItem automation indicators", () => {
     expect(item.prInfo).toEqual({
       number: 42,
       state: "Open",
+      aggregateState: undefined,
       autoFixEnabled: true,
       autoMergeEnabled: true,
+      statusSummaryUpdatedAt: UPDATED_AT,
     });
   });
 });

@@ -1,4 +1,5 @@
 pub mod backend;
+mod child_process;
 pub mod downloads;
 pub mod external_links;
 pub mod folder_picker;

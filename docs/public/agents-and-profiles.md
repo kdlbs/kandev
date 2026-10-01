@@ -24,7 +24,7 @@ Open **Settings > Agents** (`/settings/agents`). Kandev scans the host on which 
 
 ![Settings > Agents showing detected agent CLIs, profiles, configured status, unavailable status, update indicators, and New profile controls.](../screenshots/settings-agents.png)
 
-The production registry currently shows Auggie, Claude, Codex, Copilot, Gemini, OpenCode, Amp, Qwen, iFlow (beta), Droid, Kilocode, Pi, Cursor, Kimi, Kiro, Qoder, Trae, `omp`, Devin, Grok, Hermes, Goose, Muse, and Antigravity. An entry is usable only when its executable is supported on the current platform and available to the Kandev process. Development and E2E profiles can add mock agents that are not product integrations.
+The production registry currently shows Auggie, Claude, Codex, Copilot, Gemini, OpenCode, Amp, Qwen, iFlow (beta), Droid, Kilocode, Pi, Cursor, Kimi, Kiro, Qoder, Trae, `omp`, Devin, Grok, Hermes, Goose, Muse, Antigravity, and MiniMax. An entry is usable only when its executable is supported on the current platform and available to the Kandev process. Development and E2E profiles can add mock agents that are not product integrations.
 
 Hermes launches with `hermes acp`. Install the required `hermes` executable from its **Settings > Agents** card, which runs the official Hermes installer. Hermes currently supports task and workspace sessions. Office-assigned skill injection is not yet supported.
 
@@ -45,6 +45,72 @@ Native sessions show response and turn token usage in the chat footer. A provide
 After a completed turn, use **Fork conversation** to create another session through that turn. The new session keeps the task and executor, and files remain shared in the workspace. It does not create a branch or worktree. Native Codex subagents and background commands stay within the session; they do not become separate Kandev tasks.
 
 Codex questions sent through Kandev's `ask_user_question_kandev` MCP tool or through the native app-server `item/tool/requestUserInput` method use the normal clarification UI. Native options and permitted free-text answers map back to Codex's answer format. Secret questions fail closed because Kandev's clarification flow stores answers in the conversation. If Codex resolves a pending request, Kandev closes the corresponding clarification.
+
+### MiniMax Code
+
+MiniMax uses the official [MiniMax Code](https://github.com/MiniMax-AI/minimax-code)
+CLI directly through `mcode acp`. Install it from **Settings > Agents > Browse**,
+or install the tested release with npm:
+
+```bash
+npm install -g @minimax-ai/code@0.5.10 --registry=https://registry.npmjs.org/ --ignore-scripts=false --include=optional --allow-scripts=@minimax-ai/code,better-sqlite3
+mcode --version
+```
+
+Use a supported Node.js version (22.19+ in the 22 series, 24.2+ in the 24 series,
+or 25/26). The optional SQLite dependency and its installation scripts must be
+allowed. Kandev reports MiniMax installed only when `mcode` is on its PATH and
+responds to `--version`; npm alone does not count as an installation.
+
+Sign in as the operating-system user running Kandev. For a mainland China
+account use `mcode login --no-browser`; for a Global account use:
+
+```bash
+env -u MINIMAX_DATA_DIR -u MAVIS_DATA_DIR \
+  -u __MAVIS_RUNTIME_DATA_DIR -u __MAVIS_RUNTIME_PROFILE \
+  mcode login --region global --no-browser
+```
+
+Choose **Mainland China** or **Global** when Kandev opens the login setup.
+The selected login terminal prints a browser authorization link. Close an existing
+sign-in terminal before choosing a different region in another tab. After login,
+click **Done** to refresh
+capabilities, create a MiniMax profile, and choose a model from the native
+catalog. Subscription access stays with MiniMax Code; no OpenCode wrapper or
+static API key is required.
+
+Native catalog entries currently include MiniMax-M3, M3.1-Flash-Preview,
+MiniMax-M2.7-highspeed and MiniMax-M2.7. Available models and thinking variants
+come from your CLI/account and may change. The native defaults for the two M3
+models are 512k context, with an optional 1M window; M2.7 models use 200k.
+These are upstream catalog values, not guaranteed account entitlements.
+MiniMax's ACP interface currently accepts text prompts and does not advertise
+image, audio or video inputs, even when the underlying model supports media.
+
+Kandev retains the native ACP provider/model/variant identifiers in profiles.
+CLI passthrough translates them into `--model provider/model#variant` and uses
+`--session <id>` or `--continue` for resume. Structured sessions use ACP model
+selection, permission requests, MCP configuration, cancellation and session load.
+Kandev does not add a MiniMax permission bypass flag.
+
+MiniMax owns its config, subscription credentials and sessions under
+`~/.minimax`. Kandev's native integration targets that default directory and
+removes `MINIMAX_DATA_DIR`, `MAVIS_DATA_DIR`, `__MAVIS_RUNTIME_DATA_DIR` and
+`__MAVIS_RUNTIME_PROFILE` from agent launches and POSIX login. If you already use a named
+MiniMax profile or a custom data directory, sign in to the default directory
+for this integration. MiniMax's installation directory `~/.minimax-code` is
+separate from its data directory.
+
+The login terminal requires a POSIX host shell. On native Windows, sign in with
+`mcode login --no-browser` outside Kandev after clearing the four data/profile
+override variables above from that shell. Otherwise login can target a
+directory that Kandev's ACP runtime does not use.
+
+Containers persist an isolated `.minimax` directory at `/root/.minimax`.
+Remote/container executors need their own installation and native login inside
+that environment. Kandev does not copy host OAuth tokens: native credential
+records include the absolute auth-directory identity and cannot be treated as
+portable credentials. No provider or account fallback is injected on failure.
 
 ### Muse command surfaces
 

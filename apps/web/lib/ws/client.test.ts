@@ -275,6 +275,76 @@ describe("session subscription readiness", () => {
   });
 });
 
+describe("session Git refresh response", () => {
+  it("cancels a foreground refresh waiter without accepting its late response", async () => {
+    const { client, socket } = connectClient();
+    const sessionId = "sess-git-refresh-cancel";
+    const unfocus = client.focusSession(sessionId);
+    const controller = new AbortController();
+    const refresh = client.refreshSessionData(sessionId, "recover", controller.signal);
+    if (!refresh) throw new Error("refresh request was not sent");
+    const request = socket.sent.find((message) => message.action === "session.git.refresh");
+    expect(request).toBeDefined();
+
+    controller.abort();
+    await expect(refresh).rejects.toBeInstanceOf(Error);
+    socket.receive({ id: request?.id, type: "response", payload: { success: true } });
+    unfocus();
+  });
+
+  it("returns the correlated scoped snapshot response and forwards the recovery mode", async () => {
+    const { client, socket } = connectClient();
+    const sessionId = "sess-git-refresh";
+    const unfocus = client.focusSession(sessionId);
+    const refresh = client.refreshSessionData(sessionId, "recover");
+    if (!refresh) throw new Error("refresh request was not sent");
+
+    const request = socket.sent.find((message) => message.action === "session.git.refresh");
+    expect(request?.payload).toEqual({ session_id: sessionId, mode: "recover" });
+    const response = {
+      success: true,
+      session_id: sessionId,
+      task_environment_id: "env-git-refresh",
+      mode: "recover",
+      status_state: "ready",
+      snapshots: [
+        {
+          type: "notification",
+          action: "session.git.event",
+          payload: {
+            type: "status_update",
+            session_id: sessionId,
+            task_environment_id: "env-git-refresh",
+            timestamp: "2026-09-30T12:00:00Z",
+            status: {
+              status_state: "ready",
+              files_complete: true,
+              detail_state: "ready",
+              branch: "main",
+              remote_branch: null,
+              modified: ["README.md"],
+              added: [],
+              deleted: [],
+              untracked: [],
+              renamed: [],
+              ahead: 0,
+              behind: 0,
+              remote_ahead: 0,
+              remote_behind: 0,
+              files: {},
+            },
+          },
+        },
+      ],
+    } as const;
+    socket.receive({ id: request?.id, type: "response", payload: response });
+
+    await expect(refresh).resolves.toEqual(response);
+    unfocus();
+    client.disconnect();
+  });
+});
+
 describe("ordered core session compatibility", () => {
   it("registers a distinct core wire and dispatches each sequence before acknowledging it", async () => {
     const { client, socket } = connectClient();

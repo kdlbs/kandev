@@ -118,7 +118,7 @@ func decodePayload(t *testing.T, raw json.RawMessage) map[string]interface{} {
 	return payload
 }
 
-func TestBuildGitStatusNotificationIncludesAncestryEvidence(t *testing.T) {
+func TestBuildGitStatusNotificationHidesUnknownAncestryEvidenceWhileDetailsArePending(t *testing.T) {
 	msg := buildGitStatusNotification("session-1", "env-1", "web", client.GitStatusResult{
 		Branch:           "feature/rewrite",
 		RemoteBranch:     "origin/feature/rewrite",
@@ -129,6 +129,10 @@ func TestBuildGitStatusNotificationIncludesAncestryEvidence(t *testing.T) {
 		RemoteAhead:      2,
 		RemoteBehind:     3,
 		RemoteHeadCommit: "remote-head",
+		StatusState:      "ready",
+		FilesComplete:    true,
+		DetailState:      "pending",
+		ErrorCode:        "source_timeout",
 	})
 	if msg == nil {
 		t.Fatal("buildGitStatusNotification returned nil")
@@ -142,14 +146,20 @@ func TestBuildGitStatusNotificationIncludesAncestryEvidence(t *testing.T) {
 		t.Fatalf("status payload = %#v, want an object", payload["status"])
 	}
 	for key, want := range map[string]interface{}{
-		"head_commit":        "local-head",
-		"base_commit":        "base-head",
-		"remote_ahead":       float64(2),
-		"remote_behind":      float64(3),
-		"remote_head_commit": "remote-head",
+		"status_state":   "ready",
+		"files_complete": true,
+		"detail_state":   "pending",
+		"error_code":     "source_timeout",
+		"head_commit":    "local-head",
+		"base_commit":    "base-head",
 	} {
 		if got := status[key]; got != want {
 			t.Errorf("status[%q] = %#v, want %#v", key, got, want)
+		}
+	}
+	for _, key := range []string{"ahead", "behind", "remote_ahead", "remote_behind", "remote_head_commit", "branch_additions", "branch_deletions"} {
+		if _, exists := status[key]; exists {
+			t.Errorf("pending detail status leaked unconfirmed field %q: %#v", key, status[key])
 		}
 	}
 }

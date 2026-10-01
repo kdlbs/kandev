@@ -16,17 +16,22 @@ export type HostShellStartOptions = ApiRequestOptions & {
   clientId?: string;
 };
 
+export type AgentLoginStartOptions = ApiRequestOptions & {
+  commandVariant?: string;
+};
+
 export async function startAgentLogin(
   agentName: string,
   size: { cols: number; rows: number },
-  options?: ApiRequestOptions,
+  options?: AgentLoginStartOptions,
 ): Promise<AgentLoginSession> {
+  const { commandVariant, ...requestOptions } = options ?? {};
   return fetchJson<AgentLoginSession>(`/api/v1/agent-login/agents/${agentName}/start`, {
-    ...options,
+    ...requestOptions,
     init: {
       method: "POST",
-      body: JSON.stringify(size),
-      ...(options?.init ?? {}),
+      body: JSON.stringify({ ...size, command_variant: commandVariant }),
+      ...(requestOptions.init ?? {}),
     },
   });
 }

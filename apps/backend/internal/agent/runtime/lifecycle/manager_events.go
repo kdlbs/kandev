@@ -1142,6 +1142,16 @@ func agentEventDataString(data map[string]any, key string) string {
 
 // handleGitStatusUpdate processes git status updates from the workspace tracker
 func (m *Manager) handleGitStatusUpdate(execution *AgentExecution, update *agentctl.GitStatusUpdate) {
+	if execution == nil || update == nil || execution.SessionID == "" {
+		return
+	}
+	current, exists := m.executionStore.GetBySessionID(execution.SessionID)
+	if !exists || current != execution {
+		m.logger.Debug("dropping git status from retired execution",
+			zap.String("session_id", execution.SessionID),
+			zap.String("execution_id", execution.ID))
+		return
+	}
 	// Publish git status update to event bus for WebSocket streaming and persistence
 	m.eventPublisher.PublishGitStatus(execution, update)
 }

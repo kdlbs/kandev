@@ -2,7 +2,7 @@
 status: draft
 system: desktop
 created: 2026-09-25
-updated: 2026-09-25
+updated: 2026-09-30
 owners:
   - kandev
 ---
@@ -84,6 +84,8 @@ desktop test instances run concurrently without sharing mutable runtime state.
   the existing shared-data and single-instance focus behavior, including an
   explicit `KANDEV_HOME_DIR`. Temporary data isolation shall not silently
   change the selected runtime profile.
+
+- **AC-DESKTOP-ISOLATED-STARTUP-002.6:** After a temporary GUI child exits, its conflict launcher shall reap it within one second under normal scheduling. Repeated temporary launches shall not accumulate zombie children. Closing the conflict launcher shall leave running temporary windows independent.
 
 ### REQ-DESKTOP-ISOLATED-STARTUP-003: Support deliberate developer isolation
 

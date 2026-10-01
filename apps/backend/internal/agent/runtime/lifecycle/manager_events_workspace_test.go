@@ -160,6 +160,20 @@ func TestHandleGitStatusUpdateUsesGitSubject(t *testing.T) {
 	require.Equal(t, 2, payload.Status.Ahead)
 }
 
+func TestHandleGitStatusUpdateDropsRetiredExecution(t *testing.T) {
+	h := newWorkspaceEventsHarness(t)
+	retired := h.exec
+	h.mgr.executionStore.Remove(retired.ID)
+	replacement := &AgentExecution{ID: "exec-2", TaskID: "task-1", SessionID: "session-1"}
+	require.NoError(t, h.mgr.executionStore.Add(replacement))
+
+	h.mgr.handleGitStatusUpdate(retired, &agentctl.GitStatusUpdate{Timestamp: time.Now(), Branch: "retired"})
+	require.Equal(t, 0, h.count(), "a delayed callback from the replaced execution must not publish")
+
+	h.mgr.handleGitStatusUpdate(replacement, &agentctl.GitStatusUpdate{Timestamp: time.Now(), Branch: "current"})
+	require.Equal(t, 1, h.count(), "the current execution must continue publishing status")
+}
+
 func TestHandleFileChangeNotificationPublishesPathAndOperation(t *testing.T) {
 	h := newWorkspaceEventsHarness(t)
 	at := time.Date(2026, 8, 12, 13, 0, 0, 0, time.UTC)

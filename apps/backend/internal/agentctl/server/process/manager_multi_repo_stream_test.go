@@ -32,18 +32,22 @@ func TestManager_SubscribeWorkspaceStream_MultiRepoEmitsPerRepoStatuses(t *testi
 	if len(mgr.repoTrackers) != 2 {
 		t.Fatalf("expected 2 per-repo trackers, got %d", len(mgr.repoTrackers))
 	}
-
-	// Start the trackers so the subscriber's replayed status is non-empty.
-	mgr.workspaceTracker.Start(context.Background())
-	for _, tr := range mgr.repoTrackers {
-		tr.Start(context.Background())
-	}
 	t.Cleanup(func() {
 		mgr.workspaceTracker.Stop()
 		for _, tr := range mgr.repoTrackers {
 			tr.Stop()
 		}
 	})
+
+	// Populate each per-repository cache synchronously so the subscription
+	// exercises replay rather than racing the trackers' first polling cycle.
+	statusCtx, cancelStatus := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancelStatus()
+	for _, tr := range mgr.repoTrackers {
+		if _, err := tr.GetGitStatus(statusCtx, true); err != nil {
+			t.Fatalf("capture initial status for %s: %v", tr.RepositoryName(), err)
+		}
+	}
 
 	sub := mgr.SubscribeWorkspaceStream()
 	defer mgr.UnsubscribeWorkspaceStream(sub)

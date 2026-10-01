@@ -27,6 +27,7 @@ Reviewers currently have to leave the expanded Review dialog or open a Markdown 
 - **AC-UI-REVIEW-MARKDOWN-PREVIEW-001.6:** For a modified file, each hunk renders as a separate Markdown fragment containing its new-side context and additions. Omitted lines between hunks are not joined or implied to be adjacent.
 - **AC-UI-REVIEW-MARKDOWN-PREVIEW-001.7:** Deleted lines, diff metadata, hunk headers, and `No newline at end of file` markers are never included in rendered Markdown.
 - **AC-UI-REVIEW-MARKDOWN-PREVIEW-001.8:** A partial or truncated diff labels its preview as partial. Files with no renderable new-side Markdown do not expose the preview action.
+- **AC-UI-REVIEW-MARKDOWN-PREVIEW-001.9:** While the Review dialog remains open, a temporary diff refresh that removes and restores a file row shall preserve that row's selected preview mode. Closing the dialog or changing the review source resets the mode.
 
 ## Migrated source detail
 
@@ -58,6 +59,8 @@ prose-heavy changes harder to validate.
 - Non-Markdown files do not expose the action.
 - Preview mode is transient. Review status, comments, filtering, file ordering, and file selection
   remain unchanged.
+- A temporary diff refresh keeps the selected preview mode when its file row returns. Closing Review
+  or changing its source resets preview mode.
 
 ## Scenarios
 

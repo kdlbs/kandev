@@ -1300,6 +1300,7 @@ var allowedProbeCommands = map[string]string{
 	"grok":               "grok",
 	"hermes":             "hermes",
 	"kimi":               "kimi",
+	"mcode":              "mcode",
 	"kiro-cli-chat":      "kiro-cli-chat",
 	"mock-agent":         "mock-agent",
 	"npx":                "npx",

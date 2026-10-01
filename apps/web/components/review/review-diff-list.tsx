@@ -1,7 +1,6 @@
 "use client";
 
 import { memo, useEffect, useMemo, useRef, useState, useCallback } from "react";
-import { FileDiffViewer, DiffErrorBoundary } from "@/components/diff";
 import type { RevertBlockInfo } from "@/components/diff";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import { requestFileContent, updateFileContent } from "@/lib/ws/workspace-files";
@@ -12,21 +11,16 @@ import { useRunComment } from "@/hooks/domains/comments/use-run-comment";
 import { useBaseBranchByRepo } from "@/hooks/domains/session/use-base-branch-by-repo";
 import { ReviewFileComments } from "./review-file-comments";
 import type { DiffComment } from "@/lib/diff/types";
-import {
-  diffSkipReasonLabel,
-  hasTextualDiff,
-  reviewDiffUnavailableLabel,
-  reviewFileKey,
-} from "./types";
+import { reviewFileKey } from "./types";
 import type { ReviewFile } from "./types";
 import { ReviewDiffGroup } from "./review-diff-group";
 import { ReviewDiffHeader, type ReviewExternalLinkContext } from "./review-diff-header";
 import { extractReviewMarkdownPreview } from "./review-markdown-diff-preview";
 import { ReviewMarkdownDiffPreviewContent } from "./review-markdown-diff-preview-content";
+import { ReviewFileDiffContent } from "./review-file-diff-content";
 import { groupByRepositoryName } from "@/lib/group-by-repo";
 import { useActiveTaskPR } from "@/hooks/domains/github/use-task-pr";
 import { useTranslation } from "react-i18next";
-import { t } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
 const SCROLL_KEYS = new Set(["ArrowDown", "ArrowUp", "PageDown", "PageUp", "Home", "End", " "]);
@@ -44,6 +38,8 @@ type ReviewDiffListProps = {
   onDiscard: (path: string) => void;
   onOpenFile?: (filePath: string, repo?: string) => void;
   onPreviewMarkdown?: (filePath: string, repo?: string) => void;
+  previewedFiles?: Set<string>;
+  onToggleMarkdownPreview?: (fileKey: string) => void;
   fileRefs: Map<string, React.RefObject<HTMLDivElement | null>>;
 };
 
@@ -60,6 +56,8 @@ export const ReviewDiffList = memo(function ReviewDiffList({
   onDiscard,
   onOpenFile,
   onPreviewMarkdown,
+  previewedFiles,
+  onToggleMarkdownPreview,
   fileRefs,
 }: ReviewDiffListProps) {
   const scrollContainerRef = useRef<HTMLDivElement | null>(null);
@@ -136,6 +134,8 @@ export const ReviewDiffList = memo(function ReviewDiffList({
                 onDiscard={onDiscard}
                 onOpenFile={onOpenFile}
                 onPreviewMarkdown={onPreviewMarkdown}
+                previewedFiles={previewedFiles}
+                onToggleMarkdownPreview={onToggleMarkdownPreview}
                 sectionRef={fileRefs.get(key)}
                 scrollContainer={scrollContainerRef}
                 suppressAutoMark={suppressAutoMarkRef}
@@ -174,6 +174,8 @@ type FileDiffSectionProps = {
   onDiscard: (key: string) => void;
   onOpenFile?: (filePath: string, repo?: string) => void;
   onPreviewMarkdown?: (filePath: string, repo?: string) => void;
+  previewedFiles?: Set<string>;
+  onToggleMarkdownPreview?: (fileKey: string) => void;
   sectionRef?: React.RefObject<HTMLDivElement | null>;
   scrollContainer: React.RefObject<HTMLDivElement | null>;
   suppressAutoMark: React.RefObject<boolean>;
@@ -390,83 +392,23 @@ export function resolveDiffExpansion(
   return { enableExpansion: true, baseRef: "HEAD" };
 }
 
-function renderDiffContent(opts: {
-  shouldRender: boolean;
-  file: ReviewFile;
-  sessionId: string;
-  wordWrap: boolean;
-  enableWalkthroughAnnotations: boolean;
-  expandUnchanged: boolean;
-  enableExpansion: boolean;
-  baseRef: string;
-  onRevertBlock: (filePath: string, info: RevertBlockInfo) => void;
-  onCommentRun: (comment: DiffComment) => void;
-  onToggleExpandUnchanged: () => void;
-}) {
-  const {
-    shouldRender,
-    file,
-    sessionId,
-    wordWrap,
-    enableWalkthroughAnnotations,
-    expandUnchanged,
-    enableExpansion,
-    baseRef,
-    onRevertBlock,
-    onCommentRun,
-    onToggleExpandUnchanged,
-  } = opts;
-  const hasText = hasTextualDiff(file);
-  if (shouldRender && hasText) {
-    return (
-      <>
-        <DiffErrorBoundary filePath={file.path}>
-          <FileDiffViewer
-            filePath={file.path}
-            diff={file.diff}
-            status={file.status}
-            enableComments
-            enableAcceptReject
-            enableWalkthroughAnnotations={enableWalkthroughAnnotations}
-            onRevertBlock={onRevertBlock}
-            onCommentRun={onCommentRun}
-            sessionId={sessionId}
-            wordWrap={wordWrap}
-            enableExpansion={enableExpansion}
-            baseRef={baseRef}
-            hideHeader
-            expandUnchanged={expandUnchanged}
-            onToggleExpandUnchanged={onToggleExpandUnchanged}
-            repo={file.repository_name ?? ""}
-          />
-        </DiffErrorBoundary>
-        {file.diff_skip_reason === "truncated" && (
-          <div className="py-1 text-center text-xs text-muted-foreground border-t">
-            {t("review:diffTruncated")}
-          </div>
-        )}
-      </>
-    );
-  }
-  const message = hasText
-    ? diffSkipReasonLabel(file.diff_skip_reason)
-    : reviewDiffUnavailableLabel(file);
-  return (
-    <div className="flex items-center justify-center py-12 text-muted-foreground text-sm">
-      {message}
-    </div>
-  );
-}
-
 function useMarkdownPreview(
   file: ReviewFile,
+  fileKey: string,
   onPreviewMarkdown?: FileDiffSectionProps["onPreviewMarkdown"],
+  previewedFiles?: Set<string>,
+  onToggleMarkdownPreviewForFile?: (fileKey: string) => void,
 ) {
-  const [markdownPreview, setMarkdownPreview] = useState(false);
+  const [localPreview, setLocalPreview] = useState(false);
   const markdownPreviewContent = useMemo(() => extractReviewMarkdownPreview(file), [file]);
-  const handleToggleMarkdownPreview = useCallback(() => setMarkdownPreview((v) => !v), []);
+  const markdownPreview =
+    markdownPreviewContent.fragments.length > 0 && (previewedFiles?.has(fileKey) ?? localPreview);
+  const handleToggleMarkdownPreview = useCallback(() => {
+    if (onToggleMarkdownPreviewForFile) onToggleMarkdownPreviewForFile(fileKey);
+    else setLocalPreview((v) => !v);
+  }, [fileKey, onToggleMarkdownPreviewForFile]);
   useEffect(() => {
-    if (markdownPreviewContent.fragments.length === 0) setMarkdownPreview(false);
+    if (markdownPreviewContent.fragments.length === 0) setLocalPreview(false);
   }, [markdownPreviewContent.fragments.length]);
   const onToggleMarkdownPreview = getMarkdownPreviewToggle({
     file,
@@ -576,31 +518,27 @@ function FileDiffSection({
   onDiscard,
   onOpenFile,
   onPreviewMarkdown,
+  previewedFiles,
+  onToggleMarkdownPreview: onToggleMarkdownPreviewForFile,
   sectionRef,
   scrollContainer,
   suppressAutoMark,
   externalLinkContext,
 }: FileDiffSectionProps) {
   const controls = useFileDiffDisplayControls(wordWrap);
-  const { openCommentFile, fileCommentsProps } = useFileCommentEditor(
+  const comments = useFileCommentEditor(file, sessionId, controls.setCollapsed, suppressAutoMark);
+  const preview = useMarkdownPreview(
     file,
-    sessionId,
-    controls.setCollapsed,
-    suppressAutoMark,
-  );
-  const { markdownPreview, markdownPreviewContent, onToggleMarkdownPreview } = useMarkdownPreview(
-    file,
+    fileKey,
     onPreviewMarkdown,
+    previewedFiles,
+    onToggleMarkdownPreviewForFile,
   );
   const { isVisible, sentinelRef } = useLazyVisible(scrollContainer);
-  // Force load when visible via intersection observer, or forceLoad is true
-  const shouldRenderContent = isVisible || !!forceLoad;
   useScrollIntoViewOnSelect(isSelected, sectionRef, controls.setCollapsed, suppressAutoMark);
-  // Auto-mark sends the composite key (matches the dialog's reviewed-set
-  // shape) so cross-repo same-named files don't all get marked when one
-  // scrolls past.
   const scrollSentinelRef = useAutoMarkOnScroll({
-    autoMarkOnScroll,
+    autoMarkOnScroll:
+      autoMarkOnScroll && file.diff_state !== "pending" && file.diff_state !== "unavailable",
     isReviewed,
     isStale,
     fileKey,
@@ -633,34 +571,34 @@ function FileDiffSection({
         hasStickyRepoHeader={hasStickyRepoHeader}
         onCheckboxChange={handleCheckboxChange}
         onDiscard={handleDiscard}
-        onCommentFile={openCommentFile}
+        onCommentFile={comments.openCommentFile}
         onOpenFile={onOpenFile}
-        markdownPreview={!onPreviewMarkdown && markdownPreview}
-        onToggleMarkdownPreview={onToggleMarkdownPreview}
+        markdownPreview={!onPreviewMarkdown && preview.markdownPreview}
+        onToggleMarkdownPreview={preview.onToggleMarkdownPreview}
         onToggleCollapse={controls.handleToggleCollapse}
         onToggleExpandUnchanged={controls.handleToggleExpandUnchanged}
         onToggleWordWrap={controls.handleToggleWordWrap}
         {...externalLinkContext}
       />
       <div ref={sentinelRef} />
-      {!controls.collapsed && <ReviewFileComments {...fileCommentsProps} />}
+      {!controls.collapsed && <ReviewFileComments {...comments.fileCommentsProps} />}
       {!controls.collapsed &&
-        (markdownPreview ? (
-          <ReviewMarkdownDiffPreviewContent preview={markdownPreviewContent} />
+        (preview.markdownPreview ? (
+          <ReviewMarkdownDiffPreviewContent preview={preview.markdownPreviewContent} />
         ) : (
-          renderDiffContent({
-            shouldRender: shouldRenderContent,
-            file,
-            sessionId,
-            wordWrap: controls.effectiveWordWrap,
-            enableWalkthroughAnnotations,
-            expandUnchanged: controls.expandUnchanged,
-            enableExpansion,
-            baseRef,
-            onRevertBlock: handleRevertBlock,
-            onCommentRun: handleCommentRun,
-            onToggleExpandUnchanged: controls.handleToggleExpandUnchanged,
-          })
+          <ReviewFileDiffContent
+            shouldRender={isVisible || !!forceLoad}
+            file={file}
+            sessionId={sessionId}
+            wordWrap={controls.effectiveWordWrap}
+            enableWalkthroughAnnotations={enableWalkthroughAnnotations}
+            expandUnchanged={controls.expandUnchanged}
+            enableExpansion={enableExpansion}
+            baseRef={baseRef}
+            onRevertBlock={handleRevertBlock}
+            onCommentRun={handleCommentRun}
+            onToggleExpandUnchanged={controls.handleToggleExpandUnchanged}
+          />
         ))}
     </div>
   );
