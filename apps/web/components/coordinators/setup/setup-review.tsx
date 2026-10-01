@@ -14,6 +14,7 @@ import {
 } from "@/lib/coordinators/setup";
 import type { AgentProfileOption } from "@/lib/state/slices/settings/types";
 import type { Executor } from "@/lib/types/http";
+import type { ProjectChoice } from "@/lib/coordinators/control-draft";
 import type { WorkspaceBoard } from "@/hooks/domains/coordinator/use-workspace-boards";
 
 const ACTION_LABEL = {
@@ -38,14 +39,35 @@ type Props = {
   agentProfiles: readonly AgentProfileOption[];
   executors: readonly Executor[];
   boards: readonly WorkspaceBoard[];
+  /** The selectable projects; undefined while the Projects step is not offered. */
+  projectChoices?: readonly ProjectChoice[];
   onChange: (step: SetupStepId) => void;
 };
+
+function projectsReviewValue(
+  state: SetupState,
+  choices: readonly ProjectChoice[] | undefined,
+  t: (key: string) => string,
+): string | null {
+  if (!choices) return null;
+  const { scope, entries, includeNoRepository } = state.projects;
+  if (scope === "all") return t("coordinator:setupEveryProject");
+  const chosen = new Set(entries.map((entry) => `${entry.kind}:${entry.id}`));
+  const names = choices
+    .filter((choice) => chosen.has(`${choice.kind}:${choice.id}`))
+    .map((choice) => choice.name)
+    .join(", ");
+  if (!includeNoRepository) return names;
+  if (names === "") return t("coordinator:watchesIncludeNoRepository");
+  return `${names} ${t("coordinator:copilotProjectsNoRepository")}`;
+}
 
 function useReviewRows({
   state,
   agentProfiles,
   executors,
   boards,
+  projectChoices,
 }: Omit<Props, "onChange">): Row[] {
   const { t, i18n } = useTranslation();
   const notSet = t("coordinator:setupNotSet");
@@ -61,6 +83,7 @@ function useReviewRows({
           .filter((b) => selected.has(b.id))
           .map((b) => b.name)
           .join(", ");
+  const projects = projectsReviewValue(state, projectChoices, t);
   const goal = state.goal;
   const due =
     goal.dueOn === ""
@@ -99,6 +122,17 @@ function useReviewRows({
       owner: t("coordinator:sectionWatches"),
       step: "watches",
     },
+    ...(projects === null
+      ? []
+      : [
+          {
+            id: "projects",
+            setting: t("coordinator:watchesProjects"),
+            value: projects,
+            owner: t("coordinator:sectionWatches"),
+            step: "projects" as const,
+          },
+        ]),
     {
       id: "goal",
       setting: t("coordinator:sectionGoal"),

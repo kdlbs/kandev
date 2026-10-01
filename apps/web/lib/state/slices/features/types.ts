@@ -20,6 +20,7 @@ export const defaultFeatureFlags = {
   coordinator: false,
   coordinatorPhase2: false,
   coordinatorPhase3: false,
+  coordinatorPhase31: false,
   codexAppServer: false,
   agentBackgroundWork: false,
 } as const;

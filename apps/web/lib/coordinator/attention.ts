@@ -26,6 +26,8 @@ export type AttentionTask = {
   state?: string;
   workflowStepId?: string;
   workflowId?: string | null;
+  /** Repository ids of the task; `[]` is none, `null` is unknown (fails closed under a Projects scope). */
+  repositoryIds?: string[] | null;
   isArchived?: boolean;
   updatedAt?: string;
   statusSummary?: AttentionTaskStatusSummary | null;

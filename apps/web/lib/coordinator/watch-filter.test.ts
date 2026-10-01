@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { AttentionStall, AttentionTask } from "@/lib/coordinator/attention";
-import { filterWatched, isTaskWatched } from "./watch-filter";
+import { filterWatched, isTaskWatched, type WatchSet } from "./watch-filter";
 
 const task = (id: string, workflowId?: string | null): AttentionTask => ({
   id,
@@ -54,5 +54,54 @@ describe("filterWatched", () => {
   it("keeps nothing for an empty selected set", () => {
     const out = filterWatched({ tasks, stalls }, { scope: "selected", workflowIds: [] });
     expect(out).toEqual({ tasks: [], stalls: [] });
+  });
+});
+
+describe("isTaskWatched with a Projects scope", () => {
+  const withRepos = (id: string, repositoryIds: string[] | null | undefined): AttentionTask => ({
+    id,
+    title: id,
+    workflowId: "wf-a",
+    repositoryIds,
+  });
+  const projects = (
+    repositoryIds: string[] | null,
+    includeNoRepository = false,
+  ): WatchSet["projects"] => ({ scope: "selected", repositoryIds, includeNoRepository });
+  const watch = (p: WatchSet["projects"]): WatchSet => ({
+    scope: "all",
+    workflowIds: [],
+    projects: p,
+  });
+
+  it("watches a task with any repository in scope", () => {
+    const set = watch(projects(["r1"]));
+    expect(isTaskWatched(withRepos("t", ["r1"]), set)).toBe(true);
+    expect(isTaskWatched(withRepos("t", ["r2", "r1"]), set)).toBe(true);
+    expect(isTaskWatched(withRepos("t", ["r2"]), set)).toBe(false);
+  });
+
+  it("watches a task with no repository only when the toggle is on", () => {
+    expect(isTaskWatched(withRepos("t", []), watch(projects(["r1"], true)))).toBe(true);
+    expect(isTaskWatched(withRepos("t", []), watch(projects(["r1"], false)))).toBe(false);
+  });
+
+  it("fails closed on unknown repositories or an unknown scope", () => {
+    expect(isTaskWatched(withRepos("t", null), watch(projects(["r1"], true)))).toBe(false);
+    expect(isTaskWatched(withRepos("t", undefined), watch(projects(["r1"], true)))).toBe(false);
+    expect(isTaskWatched(withRepos("t", ["r1"]), watch(projects(null, true)))).toBe(false);
+  });
+
+  it("combines with the boards scope", () => {
+    const set: WatchSet = {
+      scope: "selected",
+      workflowIds: ["wf-b"],
+      projects: projects(["r1"]),
+    };
+    expect(isTaskWatched(withRepos("t", ["r1"]), set)).toBe(false);
+  });
+
+  it("ignores repositories when no Projects scope is set", () => {
+    expect(isTaskWatched(withRepos("t", undefined), { scope: "all", workflowIds: [] })).toBe(true);
   });
 });

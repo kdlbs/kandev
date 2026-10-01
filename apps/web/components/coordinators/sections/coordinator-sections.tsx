@@ -5,6 +5,8 @@ import { useTranslation } from "react-i18next";
 import { useCoordinatorSection } from "@/hooks/domains/coordinator/use-coordinator-section";
 import { useControlDraft } from "@/hooks/domains/coordinator/use-control-draft";
 import { useCoordinatorPhase3Effective } from "@/hooks/domains/settings/use-coordinator-phase3-effective";
+import type { ControlDraft } from "@/lib/coordinators/control-draft";
+import type { WatchSet } from "@/lib/coordinator/watch-filter";
 import { WatchesNoneNotice } from "@/app/coordinator/components/watches-none-notice";
 import { AutonomySection } from "./autonomy-section";
 import { ChangesWaiting } from "./changes-waiting";
@@ -60,6 +62,22 @@ function MayDoBody(props: ComponentProps<typeof MayDoSection>) {
   );
 }
 
+function watchSetFromStored(stored: ControlDraft): WatchSet {
+  const { scope, workflowIds } = stored.watches;
+  const projects = stored.projects;
+  if (projects?.scope !== "selected") return { scope, workflowIds };
+  const ids = projects.entries.length === 0 ? [] : null;
+  return {
+    scope,
+    workflowIds,
+    projects: {
+      scope: "selected",
+      repositoryIds: ids,
+      includeNoRepository: projects.includeNoRepository,
+    },
+  };
+}
+
 /** The phase-2 coordinator page body: Identity holds the phase-1 fields unchanged. */
 export function CoordinatorSections({
   workspaceId,
@@ -74,7 +92,7 @@ export function CoordinatorSections({
   const { selectSection } = useCoordinatorSection(
     phase3 ? [...BASE_SLUGS, "autonomy"] : BASE_SLUGS,
   );
-  const stored = control.stored?.watches;
+  const stored = control.stored;
   const entries: CoordinatorSectionEntry[] = [
     {
       slug: "identity",
@@ -152,7 +170,7 @@ export function CoordinatorSections({
       <WatchesNoneNotice
         workspaceId={workspaceId}
         coordinatorId={coordinatorId}
-        watchSet={stored && { scope: stored.scope, workflowIds: stored.workflowIds }}
+        watchSet={stored ? watchSetFromStored(stored) : undefined}
         onChooseBoards={canManage ? () => selectSection("watches") : undefined}
       />
       <SectionsRow entries={entries} />

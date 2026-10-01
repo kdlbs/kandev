@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { ApiError } from "@/lib/api/client";
 import {
   actionOfPath,
+  activeSetupSteps,
   buildSetupRequest,
   contextReviewValue,
   goalErrors,
@@ -182,5 +183,57 @@ describe("server answers", () => {
     expect(actionOfPath("policy.actions.stop")).toBe("stop");
     expect(actionOfPath("policy.actions.bogus")).toBeNull();
     expect(actionOfPath("policy")).toBeNull();
+  });
+});
+
+describe("projects step", () => {
+  const selected = (patch: Partial<SetupState["projects"]>): SetupState => ({
+    ...valid(),
+    projects: { scope: "selected", entries: [], includeNoRepository: false, ...patch },
+  });
+
+  it("is offered only while the flag is effective", () => {
+    expect(activeSetupSteps(false)).not.toContain("projects");
+    const steps = activeSetupSteps(true);
+    expect(steps.indexOf("projects")).toBe(steps.indexOf("watches") + 1);
+  });
+
+  it("sends no projects member under scope all and the entries once selected", () => {
+    expect(buildSetupRequest(valid())).not.toHaveProperty("projects");
+    const entries = [{ kind: "repository_set" as const, id: "s1" }];
+    expect(buildSetupRequest(selected({ entries })).projects).toEqual({
+      scope: "selected",
+      entries,
+      include_no_repository: false,
+    });
+  });
+
+  it("needs an entry or the no-repository toggle, and at most 50 entries", () => {
+    expect(isStepValid("projects", valid())).toBe(true);
+    expect(isStepValid("projects", selected({}))).toBe(false);
+    expect(isStepValid("projects", selected({ includeNoRepository: true }))).toBe(true);
+    const many = Array.from({ length: 51 }, (_, i) => ({
+      kind: "repository" as const,
+      id: `r${i}`,
+    }));
+    expect(isStepValid("projects", selected({ entries: many }))).toBe(false);
+  });
+
+  it("Skip returns to scope all", () => {
+    const skipped = skipStep("projects", selected({ includeNoRepository: true }));
+    expect(skipped.projects).toEqual({ scope: "all", entries: [], includeNoRepository: false });
+  });
+
+  it("reads a server refusal naming the projects step", () => {
+    const error = new ApiError("bad", 400, {
+      step: "projects",
+      field: "projects",
+      code: "projects_empty",
+    });
+    expect(setupServerError(error)).toEqual({
+      step: "projects",
+      field: "projects",
+      code: "projects_empty",
+    });
   });
 });

@@ -20,6 +20,17 @@ export function watchesNoBoard(watchSet: WatchSet | undefined): boolean {
   );
 }
 
+export function watchesNoProject(watchSet: WatchSet | undefined): boolean {
+  const projects = watchSet?.projects;
+  return (
+    watchSet !== undefined &&
+    projects !== undefined &&
+    projects.repositoryIds !== null &&
+    projects.repositoryIds.length === 0 &&
+    !projects.includeNoRepository
+  );
+}
+
 /** Shown while the coordinator's effective watch set is empty. */
 export function WatchesNoneNotice({
   workspaceId,
@@ -29,10 +40,14 @@ export function WatchesNoneNotice({
   onChooseBoards,
 }: WatchesNoneNoticeProps) {
   const { t } = useTranslation();
-  if (!watchesNoBoard(watchSet)) return null;
+  const noBoard = watchesNoBoard(watchSet);
+  if (!noBoard && !watchesNoProject(watchSet)) return null;
+  const [sentence, choose] = noBoard
+    ? [t("coordinator:watchesNone"), t("coordinator:watchesChooseBoards")]
+    : [t("coordinator:watchesNoneProjects"), t("coordinator:watchesChooseProjects")];
   return (
     <p className="text-sm text-muted-foreground" data-testid="watches-none-notice">
-      {t("coordinator:watchesNone")}{" "}
+      {sentence}{" "}
       {onChooseBoards && (
         <button
           type="button"
@@ -40,7 +55,7 @@ export function WatchesNoneNotice({
           onClick={onChooseBoards}
           data-testid="watches-none-choose"
         >
-          {t("coordinator:watchesChooseBoards")}
+          {choose}
         </button>
       )}
       {chooseBoards && !onChooseBoards && (
@@ -49,7 +64,7 @@ export function WatchesNoneNotice({
           className="cursor-pointer underline"
           data-testid="watches-none-choose"
         >
-          {t("coordinator:watchesChooseBoards")}
+          {choose}
         </Link>
       )}
     </p>

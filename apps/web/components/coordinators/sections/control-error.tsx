@@ -17,6 +17,11 @@ export const CODE_KEYS: Record<string, string> = {
   action_missing: "coordinator:controlErrorActionMissing",
   watches_duplicate: "coordinator:controlErrorDuplicateBoard",
   unknown_action: "coordinator:controlErrorUnknownAction",
+  invalid_projects: "coordinator:controlErrorInvalidProjects",
+  projects_empty: "coordinator:watchesKeepOneProject",
+  projects_too_many: "coordinator:watchesProjectsAtMost",
+  projects_duplicate: "coordinator:controlErrorDuplicateProject",
+  projects_foreign_entry: "coordinator:controlErrorForeignProject",
 };
 
 /** One inline message for a rejected save, above the save bar. */
@@ -24,6 +29,7 @@ export function ControlError({ error }: { error: ControlFieldError | null }) {
   const { t } = useTranslation();
   if (!error) return null;
   const key = (error.code && CODE_KEYS[error.code]) || "coordinator:controlErrorInvalidBody";
+  const message = t(key, { field: error.field ?? "", detail: error.detail });
   return (
     <p
       role="alert"
@@ -31,7 +37,7 @@ export function ControlError({ error }: { error: ControlFieldError | null }) {
       data-testid="control-error"
       data-field={error.field ?? ""}
     >
-      {t(key, { field: error.field ?? "", detail: error.detail })}
+      {error.field === "projects" ? `${t("coordinator:watchesProjects")}: ${message}` : message}
     </p>
   );
 }

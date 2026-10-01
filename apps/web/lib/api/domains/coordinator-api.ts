@@ -46,7 +46,7 @@ export type Coordinator = {
   // Present only while features.coordinatorPhase2 is on.
   policy?: { actions: Record<string, string> };
   policy_revision?: number;
-  watches?: { scope: "all" | "selected"; workflow_ids: string[] };
+  watches?: Projects.CoordinatorWatches;
   // Present only while features.coordinatorPhase3 is effective. The ceiling is
   // a dollar string with two decimals, or null when unset.
   autonomy_enabled?: boolean;
@@ -54,6 +54,10 @@ export type Coordinator = {
   // Present only on the list route while features.coordinatorPhase2 is on.
   summary?: CoordinatorSummary;
 };
+
+import type * as Projects from "./coordinator-projects-types";
+
+export type * from "./coordinator-projects-types";
 
 // Mirrors internal/coordinator/dto.go's SummaryDTO.
 export type CoordinatorSummary = {
@@ -71,11 +75,16 @@ export type CoordinatorSettings = {
   policy: { actions: Record<ControlAction, ControlSetting> };
   policy_revision: number;
   watches: { scope: "all" | "selected"; workflow_ids: string[] };
+  // Resolved scope for the client filter; present while the stored scope is selected.
+  projects?: Projects.SettingsProjects;
+  // Present only while features.coordinatorPhase31 is effective.
+  projects_config?: Projects.ProjectsConfig;
 };
 
 export type PutSettingsRequest = {
   policy?: { actions: Record<ControlAction, ControlSetting> };
   watches?: { scope: "all" | "selected"; workflow_ids?: string[] };
+  projects?: Projects.ProjectsRequest;
 };
 
 export type CoordinatorListResponse = {
@@ -742,6 +751,7 @@ export type SetupCoordinatorRequest = {
   executor_profile_id: string;
   context: string;
   watches: { scope: "all" | "selected"; workflow_ids?: string[] };
+  projects?: Projects.ProjectsRequest;
   policy: { actions: Record<ControlAction, ControlSetting> };
   goal?: {
     name: string;

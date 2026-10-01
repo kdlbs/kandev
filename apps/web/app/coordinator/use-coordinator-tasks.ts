@@ -36,10 +36,22 @@ function matchesWorkspace(
   return read?.workspaceId === workspaceId;
 }
 
+/** Every repository of a task, from its repository list or its primary repository id; `[]` is none. */
+export function taskRepositoryIds(task: {
+  repositories?: ReadonlyArray<{ repository_id: string }>;
+  repositoryId?: string;
+}): string[] {
+  if (task.repositories && task.repositories.length > 0) {
+    return task.repositories.map((repository) => repository.repository_id);
+  }
+  return task.repositoryId ? [task.repositoryId] : [];
+}
+
 function toAttentionTask(task: Task, workflowId: string): AttentionTask {
   return {
     id: task.id,
     workflowId,
+    repositoryIds: taskRepositoryIds(task),
     title: task.title,
     identifier: task.identifier,
     state: task.state,
@@ -96,6 +108,7 @@ function useCoordinatorTasksFromActiveCache(workspaceId: string | null): UseCoor
         flattened.push({
           id: task.id,
           workflowId,
+          repositoryIds: taskRepositoryIds(task),
           title: task.title,
           identifier: task.identifier,
           state: task.state,

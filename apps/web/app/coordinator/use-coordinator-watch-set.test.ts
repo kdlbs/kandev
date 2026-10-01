@@ -7,7 +7,7 @@ vi.mock("@/lib/api/domains/coordinator-api", () => ({
 }));
 vi.mock("@/lib/ws/connection", () => ({ useWebSocketClient: () => null }));
 
-import { useCoordinatorWatchSet } from "./use-coordinator-watch-set";
+import { useCoordinatorWatchSet, watchSetFromSettings } from "./use-coordinator-watch-set";
 
 const settings = (ids: string[]) => ({
   policy: { actions: {} },
@@ -54,5 +54,31 @@ describe("useCoordinatorWatchSet", () => {
     getMock.mockReturnValueOnce(new Promise(() => {}));
     rerender({ id: "c2" });
     expect(result.current.input.value).toBeUndefined();
+  });
+});
+
+describe("watchSetFromSettings", () => {
+  const base = { policy: { actions: {} }, policy_revision: 1 } as never;
+  it("carries no projects when the stored scope is all", () => {
+    const set = watchSetFromSettings({
+      ...(base as object),
+      watches: { scope: "all", workflow_ids: [] },
+    } as never);
+    expect(set.projects).toBeUndefined();
+  });
+
+  it("maps a selected scope to camelCase and keeps an unknown list as null", () => {
+    const make = (ids: string[] | null) =>
+      watchSetFromSettings({
+        ...(base as object),
+        watches: { scope: "all", workflow_ids: [] },
+        projects: { scope: "selected", repository_ids: ids, include_no_repository: true },
+      } as never);
+    expect(make(["r1"]).projects).toEqual({
+      scope: "selected",
+      repositoryIds: ["r1"],
+      includeNoRepository: true,
+    });
+    expect(make(null).projects?.repositoryIds).toBeNull();
   });
 });

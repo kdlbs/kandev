@@ -1,3 +1,4 @@
+import type { PageContext } from "./use-page-context";
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { TooltipProvider } from "@kandev/ui/tooltip";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -43,13 +44,18 @@ function coordinator(id: string): Coordinator {
   return { id, name: `Name ${id}` } as Coordinator;
 }
 
-const CONTEXT = {
-  ref: { kind: "task", id: "t-1" },
+const NOT_WATCHED = "workspace-copilot-not-watched";
+
+const CONTEXT: PageContext = {
+  ref: { kind: "task" as const, id: "t-1" },
   label: "KAN-7",
   workflowId: "wf-1",
-} as never;
+  repositoryIds: null,
+};
 
-function mount(over: { coordinators?: Coordinator[]; routeKey?: string } = {}) {
+function mount(
+  over: { coordinators?: Coordinator[]; routeKey?: string; context?: PageContext } = {},
+) {
   const store = createWorkspaceCopilotStore();
   const utils = render(
     <TooltipProvider>
@@ -58,7 +64,7 @@ function mount(over: { coordinators?: Coordinator[]; routeKey?: string } = {}) {
         workspaceId="ws-1"
         coordinator={coordinator("c1")}
         coordinators={over.coordinators ?? [coordinator("c1")]}
-        context={CONTEXT}
+        context={over.context ?? CONTEXT}
         routeKey={over.routeKey ?? "task:t-1"}
         onClose={vi.fn()}
         onSwitch={vi.fn()}
@@ -111,13 +117,13 @@ describe("WorkspaceCopilotPanel", () => {
       watches: { scope: "selected", workflow_ids: ["other"] },
     });
     mount();
-    expect(screen.getByTestId("workspace-copilot-not-watched")).toBeTruthy();
+    expect(screen.getByTestId(NOT_WATCHED)).toBeTruthy();
   });
 
   it("offers no hint before the watches have loaded", () => {
     mocks.useCoordinatorWatches.mockReturnValue({ loaded: false, watches: undefined });
     mount();
-    expect(screen.queryByTestId("workspace-copilot-not-watched")).toBeNull();
+    expect(screen.queryByTestId(NOT_WATCHED)).toBeNull();
   });
 
   it("reports the coordinator gone when the controller does", () => {
@@ -145,5 +151,53 @@ describe("WorkspaceCopilotPanel", () => {
       );
     });
     expect(onGone).toHaveBeenCalledWith("c1");
+  });
+});
+
+describe("WorkspaceCopilotPanel projects", () => {
+  it("lists the watched projects on a second line", () => {
+    mocks.useCoordinatorWatches.mockReturnValue({
+      loaded: true,
+      watches: {
+        scope: "selected",
+        workflow_ids: [],
+        projects: {
+          scope: "selected",
+          repository_ids: ["r1"],
+          include_no_repository: true,
+          names: ["a", "b", "c", "d", "e", "f", "g"],
+        },
+      },
+    });
+    mount();
+    expect(screen.getByTestId("workspace-copilot-projects")).toBeTruthy();
+  });
+
+  it("shows no projects line when the coordinator reports no projects", () => {
+    mocks.useCoordinatorWatches.mockReturnValue({
+      loaded: true,
+      watches: { scope: "all", workflow_ids: [] },
+    });
+    mount();
+    expect(screen.queryByTestId("workspace-copilot-projects")).toBeNull();
+  });
+
+  it("hints when the task's repositories are outside the selected projects", () => {
+    mocks.useCoordinatorWatches.mockReturnValue({
+      loaded: true,
+      watches: {
+        scope: "all",
+        workflow_ids: [],
+        projects: { scope: "selected", repository_ids: ["r1"], include_no_repository: false },
+      },
+    });
+    mount({ context: { ...CONTEXT, repositoryIds: ["r2"] } });
+    expect(screen.getByTestId(NOT_WATCHED)).toBeTruthy();
+    cleanup();
+    mount({ context: { ...CONTEXT, repositoryIds: ["r1", "r2"] } });
+    expect(screen.queryByTestId(NOT_WATCHED)).toBeNull();
+    cleanup();
+    mount({ context: { ...CONTEXT, repositoryIds: null } });
+    expect(screen.queryByTestId(NOT_WATCHED)).toBeNull();
   });
 });

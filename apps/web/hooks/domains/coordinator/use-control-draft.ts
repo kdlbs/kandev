@@ -16,11 +16,14 @@ import {
   buildPutRequest,
   draftFromSettings,
   isPolicyDirty,
+  isProjectsDirty,
+  isProjectsInvalid,
   isWatchesDirty,
   isWatchesInvalid,
   mergeStored,
   settleAfterSave,
   type ControlDraft,
+  type ProjectsDraft,
   type WatchesDraft,
 } from "@/lib/coordinators/control-draft";
 
@@ -122,6 +125,16 @@ function useControlRead(workspaceId: string, coordinatorId: string) {
   };
 }
 
+function invalidReason(
+  t: (key: string) => string,
+  watchesInvalid: boolean,
+  projectsInvalid: boolean,
+): string | undefined {
+  if (watchesInvalid) return t("coordinator:watchesKeepOneBoard");
+  if (projectsInvalid) return t("coordinator:watchesKeepOneProject");
+  return undefined;
+}
+
 type Params = { workspaceId: string; coordinatorId: string; canManage: boolean };
 
 /**
@@ -166,12 +179,17 @@ export function useControlDraft({ workspaceId, coordinatorId, canManage }: Param
     [update],
   );
 
+  const setProjects = useCallback(
+    (projects: ProjectsDraft) => update((d) => ({ ...d, projects })),
+    [update],
+  );
+
   const save = async () => {
     const sent = draftRef.current;
     const base = storedRef.current;
     if (!sent || !base) return;
     const request = buildPutRequest(sent, base);
-    if (!request.policy && !request.watches) return;
+    if (!request.policy && !request.watches && !request.projects) return;
     setFieldError(null);
     sequenceRef.current += 1;
     try {
@@ -194,14 +212,17 @@ export function useControlDraft({ workspaceId, coordinatorId, canManage }: Param
 
   const policyDirty = !!draft && !!stored && isPolicyDirty(draft, stored);
   const watchesDirty = !!draft && !!stored && isWatchesDirty(draft, stored);
-  const invalid = !!draft && !!stored && isWatchesInvalid(draft, stored);
+  const projectsDirty = !!draft && !!stored && isProjectsDirty(draft, stored);
+  const watchesInvalid = !!draft && !!stored && isWatchesInvalid(draft, stored);
+  const projectsInvalid = !!draft && !!stored && isProjectsInvalid(draft, stored);
+  const invalid = watchesInvalid || projectsInvalid;
 
   useSettingsSaveContributor({
     id: "coordinator-control",
     revision: JSON.stringify(draft),
-    isDirty: canManage && (policyDirty || watchesDirty),
+    isDirty: canManage && (policyDirty || watchesDirty || projectsDirty),
     canSave: !invalid,
-    invalidReason: invalid ? t("coordinator:watchesKeepOneBoard") : undefined,
+    invalidReason: invalidReason(t, watchesInvalid, projectsInvalid),
     save,
     discard: () => {
       setDraft(storedRef.current);
@@ -218,8 +239,10 @@ export function useControlDraft({ workspaceId, coordinatorId, canManage }: Param
     fieldError,
     setAction,
     setWatches,
+    setProjects,
     policyDirty,
     watchesDirty,
+    projectsDirty,
     invalid,
   };
 }

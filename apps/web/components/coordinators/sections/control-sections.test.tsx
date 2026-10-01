@@ -25,6 +25,7 @@ const draft = (over: Partial<ControlDraft> = {}): ControlDraft => ({
     stop: "denied",
   },
   watches: { scope: "all", workflowIds: [] },
+  projects: null,
   ...over,
 });
 

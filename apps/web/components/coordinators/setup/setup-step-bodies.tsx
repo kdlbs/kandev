@@ -2,11 +2,12 @@
 
 import { useTranslation } from "react-i18next";
 import type { ControlAction } from "@/lib/api/domains/coordinator-api";
-import type { WatchesDraft } from "@/lib/coordinators/control-draft";
+import type { ProjectsDraft, WatchesDraft } from "@/lib/coordinators/control-draft";
 import type { GoalFormState } from "@/lib/coordinators/goal-form";
 import {
   actionOfPath,
   actionPath,
+  PROJECTS_PATHS,
   WATCHES_PATHS,
   type SetupErrors,
   type SetupState,
@@ -17,7 +18,9 @@ import type { useWorkspaceBoards } from "@/hooks/domains/coordinator/use-workspa
 import { CoordinatorFormFields } from "../coordinator-form-fields";
 import { GoalFormFields } from "../sections/goal-form-fields";
 import { MayDoRows } from "../sections/may-do-section";
+import { ProjectsFields } from "../sections/projects-fields";
 import { WatchesFields } from "../sections/watches-section";
+import type { useWorkspaceProjects } from "@/hooks/domains/coordinator/use-workspace-projects";
 
 type Edit = (patch: Partial<SetupState>, paths: readonly string[]) => void;
 
@@ -105,6 +108,28 @@ export function WatchesStep({ state, messages, edit, boards }: WatchesProps) {
         onBoardsRetry={boards.retry}
         canManage
         onChange={(next: WatchesDraft) => edit({ watches: next }, WATCHES_PATHS)}
+        errorMessage={line ? t(line) : null}
+      />
+    </div>
+  );
+}
+
+type ProjectsProps = BodyProps & { projects: ReturnType<typeof useWorkspaceProjects> };
+
+export function ProjectsStep({ state, messages, edit, projects }: ProjectsProps) {
+  const { t } = useTranslation();
+  const line = firstMessage(messages, (p) => p.startsWith("projects"));
+  return (
+    <div className="space-y-4">
+      <StepLine messages={messages} />
+      <ProjectsFields
+        projects={state.projects}
+        sets={projects.sets}
+        loose={projects.loose}
+        status={projects.status}
+        onRetry={projects.retry}
+        canManage
+        onChange={(next: ProjectsDraft) => edit({ projects: next }, PROJECTS_PATHS)}
         errorMessage={line ? t(line) : null}
       />
     </div>
