@@ -65,9 +65,15 @@ guided setup.
 - **AC-COORDINATOR-CREATED-TASK-AGENT-001.3:** When a manager sets Agent for created
   tasks, the system shall apply the checks of
   `AC-COORDINATOR-COORDINATORS-002.4` and `002.5` to the new pair: the agent
-  profile must exist in the workspace and not be CLI passthrough, and the
-  executor profile must exist; the 400 error shall name `task_agent_profile_id`
-  or `task_executor_profile_id`.
+  profile must exist in the coordinator's workspace (a profile of another
+  workspace does not exist for this purpose) and not be CLI passthrough, and
+  the executor profile must exist (executor profiles are not workspace-scoped);
+  the 400 error shall name `task_agent_profile_id` or `task_executor_profile_id`.
+  An edit shall validate a field only when the request carries it with a value
+  that differs from the stored one: an absent field and a field sent back
+  unchanged shall not be validated, so a stored pair that has since gone
+  missing never blocks an edit of another field. When both fields of one
+  request are invalid, the error shall name `task_agent_profile_id`.
 - **AC-COORDINATOR-CREATED-TASK-AGENT-001.4:** When the system starts with
   coordinators stored before this setting existed, it shall set each such
   coordinator's Agent for created tasks to its own agent profile and executor
@@ -87,9 +93,13 @@ guided setup.
   with the coordinator's own executor profile once chosen (the workspace
   holds a default executor, not an executor profile). A pre-filled field shall
   follow later changes to the coordinator's own pair until the manager edits
-  that field; a field the manager edited shall keep the manager's value. An
-  existing coordinator's page shall show its stored values and pre-fill
-  nothing.
+  that field; a field the manager edited shall keep the manager's value. A
+  field counts as edited from the manager's first change to it until the form
+  is closed or the setup is left; going Back or Change within the same setup
+  keeps it. While the agent profile list has not loaded, the agent field shall
+  stay empty, and it shall pre-fill when the list arrives unless it was
+  edited. An existing coordinator's page shall show its stored values and
+  pre-fill nothing.
 - **AC-COORDINATOR-CREATED-TASK-AGENT-001.7:** The guided setup's Review shall show
   an "Agent for created tasks" row, owned by Identity, whose value is the agent
   profile name and the executor name joined by ", ", and **Change** on it shall
@@ -108,7 +118,11 @@ guided setup.
 - **AC-COORDINATOR-CREATED-TASK-AGENT-001.9:** When a manager saves a change to
   Agent for created tasks and to no other conversation-affecting field
   (`AC-COORDINATOR-COORDINATORS-002.7`, `002.10`), the system shall keep the
-  coordinator's conversation and its configuration revision unchanged.
+  coordinator's conversation and its configuration revision unchanged. When
+  that save changes a stored value, the system shall publish
+  `coordinator.updated` once after the save commits, so open proposal cards
+  refetch their "Runs with" line (`AC-COORDINATOR-PROPOSALS-005.11`); a save
+  that changes no stored value shall publish nothing.
 
 ## Out of scope
 

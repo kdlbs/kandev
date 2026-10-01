@@ -55,7 +55,8 @@ it changes no runtime flag, registry entry or `profiles.yaml`.
   `task_*_profile_status` on the read. A task-pair-only PATCH keeps the
   conversation and `config_revision`.
 - Approve: the new call between `stepStillEligible` and `createApprovedTask`
-  in `completeClaimedApproval` (no addition, addition, refusal, error), the
+  in `completeClaimedApproval` (no addition, workspace addition, pair
+  addition, refusal, error), the
   narrow step, workflow-default and workspace-default readers and their
   wiring in `internal/backendapp/coordinator.go`.
 - Proposal DTO `runs_with` on pending and failed rows, built by the same
@@ -119,24 +120,38 @@ Review row  Agent for created tasks | Claude, Local | Identity | [Change]
 ## Acceptance
 
 - Chain: step, workflow default and workspace default each yield and win in
-  that order; an empty chain stamps the pair; a chain that yields stamps nothing
-  (neither agent nor executor); a read error stamps nothing and leaves the row
-  `approving` (500).
+  that order; a step with a session target skips its profile and the workflow
+  default; an empty chain stamps the pair; a chain that yields stamps nothing
+  (neither agent nor executor); an unusable workspace default (missing in the
+  workspace, passthrough) counts as empty; a proposal that starts an agent
+  with only a usable workspace default stamps that profile alone (no executor)
+  and an automatic or non-starting approval stamps nothing; a read error stamps
+  nothing and leaves the row `approving` (500, and for an automatic approval
+  the `unavailable` note and a counted row); a workflow that no longer exists
+  is an empty input.
 - Refusal: agent `missing`, agent `passthrough`, executor `missing` and a
   deleted coordinator each create no task and settle `failed` naming the setting,
   on the human path, the stale re-claim and the automatic path; approving
   again after fixing the setting creates the task; when the chain yields, an
-  unusable pair is not read and does not block.
+  unusable pair is not read and does not block; both fields unusable names
+  the agent profile.
 - A found task of an earlier attempt is completed untouched; a racing second
-  attempt returns the first task; an edit of the setting between claim and
-  create is honoured, after create is not.
+  attempt returns the first task; an edit of the setting committed before the
+  attempt's read is honoured, one committed after the read or after the create
+  is not.
 - Start policy: with a stamp, an approval starts an agent only if the policy
   allows it and an automatic approval starts none.
 - Create, setup and PATCH matrices: absent, null, empty, whitespace, unknown
   profile, passthrough agent, unknown executor, cross-workspace profile, each
   400 naming the field; setup `step: identity`; PATCH absent unchanged;
-  a task-pair-only PATCH keeps `conversation_task_id` and `config_revision`;
+  a task-pair-only PATCH keeps `conversation_task_id` and `config_revision`
+  and publishes `coordinator.updated` once only when a stored value changes;
+  an unchanged or absent task-pair field is not validated, so a coordinator
+  whose stored task agent profile was deleted still accepts a context edit;
   a coordinator PATCH of its own pair still archives the conversation.
+- `agentprofile.Resolve` cases added beside the orchestrator's: workflow
+  default beats task metadata; a session-target step skips the workflow
+  default.
 - Migration: a phase 3 database with coordinators upgrades on SQLite and
   PostgreSQL; empty pairs are filled from the own pair, set values survive, a
   second start changes nothing.

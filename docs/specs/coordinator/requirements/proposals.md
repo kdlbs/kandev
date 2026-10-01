@@ -105,16 +105,20 @@ Mockup:
   agent either.
 - **AC-COORDINATOR-PROPOSALS-002.13:** When an approval, a manager's or an
   automatic one, is about to create its task, the system shall first resolve
-  the agent profile the task would get without any addition, by the chain a
-  task of its target workflow follows when it starts: the step's agent
-  profile, then the workflow's default, then the workspace default. When
-  that chain yields a profile, the system shall add no agent profile and no
-  executor profile to the task. When it yields none, the system shall add the
-  coordinator's Agent for created tasks
+  the agent profile the task would get without any addition: the step's
+  agent profile, then the workflow's default (neither when the step has a
+  session target), taken as set whether or not it still exists. When that
+  yields a profile, the system shall add nothing. Otherwise it shall consider
+  the workspace default, which counts only when it exists in the workspace and
+  is not CLI passthrough: a usable one shall be added as the task's agent
+  profile (no executor profile) when the proposal starts an agent, because
+  that launch does not consult the workspace default, and nothing shall be
+  added when it does not. With no usable workspace default, the system shall
+  add the coordinator's Agent for created tasks
   ([created task agent](created-task-agent.md#req-coordinator-created-task-agent-001-agent-for-created-tasks))
-  to the task as its agent profile and executor profile, so that the task can
+  as the task's agent profile and executor profile, so that the task can
   start. The task shall never take the coordinator's own agent profile or
-  executor profile for this.
+  executor profile.
 - **AC-COORDINATOR-PROPOSALS-002.14:** When a claim goes stale while the
   process keeps running, the system shall recover it (`AC-COORDINATOR-PROPOSALS-002.7`)
   within one minute of it going stale, with no manager action and no restart.
@@ -122,15 +126,17 @@ Mockup:
   reachable from a coordinator session's Kandev surface: a coordinator
   principal that calls either shall be refused and change nothing, and a
   principal that cannot be resolved shall be refused.
-- **AC-COORDINATOR-PROPOSALS-002.16:** When a profile is to be added under
-  `AC-COORDINATOR-PROPOSALS-002.13` and the coordinator's Agent for created
-  tasks, as stored at that moment, has an agent profile that is missing or
-  CLI passthrough, or an executor profile that is missing, the system shall
-  create no task and settle the proposal `failed` with an error that names
-  "Agent for created tasks" and the field that is not usable, so that a
-  manager can fix the setting and approve again. The check shall run before
-  every create call, including a stale re-claim's and an automatic approval's.
-  When one of the reads the check needs fails for a reason other than not
+- **AC-COORDINATOR-PROPOSALS-002.16:** When the coordinator's Agent for created
+  tasks is to be added under `AC-COORDINATOR-PROPOSALS-002.13` and the pair,
+  as read once per attempt immediately before the create call, has an agent
+  profile that is missing or CLI passthrough, or an executor profile that is
+  missing, or the coordinator no longer exists, the system shall create no
+  task and settle the proposal `failed` with an error that names "Agent for
+  created tasks" and the field that is not usable (the agent profile when
+  both are), so that a manager can fix the setting and approve again. A save
+  committed after that read affects the next attempt only. The check shall run
+  before every create call, including a stale re-claim's and an automatic
+  approval's. When a read the check needs fails for a reason other than not
   found, the system shall create no task and leave the row `approving` under
   its claim, and an approve request shall return 500.
 - **AC-COORDINATOR-PROPOSALS-002.17:** Adding a profile under
@@ -319,10 +325,7 @@ Mockup:
 - The agent profile and executor of the task an approval creates. **Superseded
   2026-10-01 (live finding F-07, owner decision) by
   `AC-COORDINATOR-PROPOSALS-002.13`, `002.16` to `002.18`, `005.11` and
-  `REQ-COORDINATOR-CREATED-TASK-AGENT-001`.** The text below is kept as history. It
-  decided (D1) that an approved task carries no profile and resolves like any
-  task of its workflow; in a workspace with no step, workflow or workspace
-  default that left every approved task unable to start. The decision as
+  `REQ-COORDINATOR-CREATED-TASK-AGENT-001`.** The text below is kept as history: the decision as
   originally written, together with the text of `AC-COORDINATOR-PROPOSALS-002.13`
   it replaced ("The created task shall not inherit the coordinator's agent
   profile. When it is later started, it shall resolve its agent the way any

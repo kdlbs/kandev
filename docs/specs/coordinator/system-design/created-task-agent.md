@@ -52,7 +52,10 @@ logger beside the phase-2 columns, on SQLite and PostgreSQL:
 `coordinatorColumns`, `insertCoordinatorColumns`, the row struct and the DTO
 carry both. After the `ALTER`s, every start runs two idempotent statements,
 `UPDATE coordinators SET task_agent_profile_id = agent_profile_id WHERE
-task_agent_profile_id = ''` and the executor counterpart (`001.4`). A value
+task_agent_profile_id = ''` and the executor counterpart (`001.4`), in one
+transaction, in the same startup step as the `ALTER`s and before the service
+accepts a request, so no request sees a half-filled pair. Neither statement
+writes `updated_at`, and an error aborts startup like any migration error. A value
 that is already set is never touched, and a second start matches no row. The
 backfill is the only writer of an empty value's replacement, so a row created
 through a route (which refuses an empty value) is never rewritten. The
@@ -71,12 +74,23 @@ a phase 3 database holding coordinators, on both dialects.
   ([coordinators](coordinators.md#guided-setup)).
 - `PATCH .../coordinators/:cid` accepts the same two fields. Absent is
   unchanged; `null`, or empty after trimming, is 400 naming the field; a value
-  equal to the stored one is accepted and changes nothing. A change to these
+  equal to the stored one is accepted, is not validated and changes nothing.
+  A value that differs from the stored one is validated, and only then. The
+  existing merged-row validator (`patchValidator`) keeps checking the
+  coordinator's own pair on every write and does not check the task pair, so
+  a stored task pair that has gone missing never blocks an edit of the
+  context, the autonomy or the own pair; the task pair's check runs only for a
+  field the request changes, the agent first. A change to these
   fields alone does not clear `conversation_task_id`, does not increment
   `config_revision` and does not archive the conversation (`001.9`): the
   existing change test compares only `context`, `agent_profile_id` and
-  `executor_profile_id`. The PATCH publishes `coordinator.updated` as every
-  PATCH does, so open proposal cards refetch ([Runs with](#runs-with)).
+  `executor_profile_id`. A PATCH that changes a stored task-pair value
+  publishes `coordinator.updated` once after the commit through the helper
+  the approve path uses (`publishCoordinatorUpdated`, `autonomy_changed`
+  false), because today only an autonomy change publishes one; a PATCH that
+  changes no stored value publishes nothing for the pair. Open proposal cards
+  then refetch ([Runs with](#runs-with)). A publish failure is logged and
+  never changes the PATCH result.
 - `GET .../coordinators/:cid` adds `task_agent_profile_status` (`ok`,
   `missing`, `passthrough`) and `task_executor_profile_status` (`ok`,
   `missing`), computed by the same `profileStatus` helper as the first pair. A
@@ -98,8 +112,16 @@ exists) with `FieldError.Field` `task_agent_profile_id` or
 `task_executor_profile_id`. The passthrough message reads "this agent profile
 uses CLI passthrough, which created tasks cannot use here" and the not-found
 messages read "task agent profile not found" and "task executor profile not
-found". `profileStatus` is called a second time for the task pair; it already
-returns a plain error for a failed read.
+found". The status of the task pair comes from the validator's per-field
+helpers (`agentProfileStatus` and `executorProfileStatus`, which
+`Validator.ProfileStatus` combines for the first pair), called with the task
+pair's ids; they already return a plain error for a failed read. Wherever this
+design says `profileStatus`, it means those helpers. The agent check is
+workspace-scoped and the executor check is existence only, because an executor
+profile carries no workspace (`ValidateExecutorProfile` takes none today).
+Neither check is transactional with the write: a profile deleted between the
+validation and the commit leaves a stored pair that reads `missing`
+(`001.8`), exactly as for the first pair.
 
 ## The chain
 
@@ -111,69 +133,132 @@ workflow step (nil allowed), the per-task step replacement, the workflow's
 default profile, the task's `metadata.agent_profile_id`, the Office assignee
 profile and the workspace default profile; `Source` is one of `step`,
 `workflow`, `task_metadata`, `assignee`, `workspace`. The order is the
-orchestrator's today: the step's replacement or pinned profile (skipped when the
-step has a session target), the workflow's default, the task metadata, the
-assignee, the workspace default. The orchestrator's `resolveTaskAgentProfile`
-keeps loading its inputs and calls `Resolve`; its existing table tests in
-`session_ensure_test.go` pass unchanged, which is the proof that the extraction
-kept the order. Nothing is copied: the coordinator package does not restate
-the order.
+orchestrator's today: the step's replacement or pinned profile, then the
+workflow's default, then the task metadata, the assignee and the workspace
+default. The step's profile and the workflow's default are both skipped when
+the step has a session target, and the workflow's default is read only when
+there is a step (`resolveStepAgentProfile`,
+`orchestrator/event_handlers_workflow.go`). The orchestrator's
+`resolveTaskAgentProfile` keeps loading its inputs and calls `Resolve`; its
+existing table tests in `session_ensure_test.go` pass, and the extraction adds
+two cases the tests do not cover today: a task whose step has no profile but
+whose workflow has a default and whose metadata names another profile (the
+workflow default wins), and a step with a session target and a workflow
+default (neither applies). The comment above `resolveTaskAgentProfile`, which lists the task metadata before the workflow default, is corrected in the same change. Nothing is copied: the coordinator package does not
+restate the order.
 
-The coordinator loads the inputs for a task that does not exist yet: the
-frozen spec's step and workflow default, and the workspace default; the
-metadata, assignee and replacement inputs are empty. Reads go through narrow
-interfaces the coordinator package declares (a step by id, the workflow's
-`AgentProfileID`, the workspace's `DefaultAgentProfileID`), implemented by the
-owning services; none authorizes, because the approve path has authorized the
-workspace. A read that fails for a reason other than not found is an error and
-never an empty input: an empty input would stamp over a real default.
+The coordinator loads the inputs for a task that does not exist yet: the frozen
+spec's step (always present, since an empty step in a proposal means the
+workflow's start step) and that workflow's default, and the workspace default;
+the metadata, assignee and replacement inputs are empty. Reads go through
+narrow interfaces the coordinator package declares (a step by id, the
+workflow's `AgentProfileID`, the workspace's `DefaultAgentProfileID`, an agent
+profile by id), implemented by the owning services; none authorizes, because
+the approve path has authorized the workspace. Per loader:
 
-The stamp is conditional because task metadata outranks the workspace default
-in the chain: adding the coordinator's pair unconditionally would override a
-workspace default the manager set.
+- the step: it was just read by the eligibility check, so it is present; a
+  read error is an error.
+- the workflow's default: a workflow that does not exist gives an empty
+  input; a read error is an error. This is deliberately stricter than the
+  orchestrator's launch, which logs and falls through, because an empty input
+  here would stamp the coordinator's pair over a default that exists.
+- the workspace default: an unset default gives an empty input; a default
+  whose profile does not exist in the workspace or is CLI passthrough also
+  gives an empty input, since a task cannot use it; a read error is an error.
+  A workspace that is not found is an error, because the approve path has
+  already authorized it.
+
+A step or workflow profile is taken as set whether or not it still exists: it
+is the board owner's choice and a dangling one surfaces as the existing
+session start failure, which this feature does not change.
+
+Two start paths take different chains. A task opened later resolves step,
+workflow, metadata, assignee, then the workspace default
+(`resolveTaskAgentProfile`). The launch an approval takes when the proposal
+starts an agent (`auto_start_on_create`, then the workflow-step auto-start in
+`event_handlers_workflow.go` and `resolveEffectiveAgentProfile`) takes the
+step's and the workflow's profile, then `metadata.agent_profile_id`, and never
+reads the workspace default. The addition therefore depends on `startsAgent`:
+
+| `Resolve` source | Proposal does not start an agent | Proposal starts an agent |
+| --- | --- | --- |
+| `step` or `workflow` | nothing added | nothing added |
+| `workspace` (usable) | nothing added | the workspace default is added as `agent_profile_id`; no executor |
+| none | the coordinator's pair is added | the coordinator's pair is added |
+
+The coordinator's pair is added only when nothing else names an agent, and the
+workspace default is added only to keep it in force on the launch that would
+otherwise ignore it. Task metadata outranks the workspace default in the
+chain, which is why adding the coordinator's pair unconditionally would
+override a workspace default the manager set.
 
 ## At approve
 
 `completeClaimedApproval` runs one new call between `stepStillEligible` and
 `createApprovedTask`, for every create attempt: the original claimer's, a
-stale re-claim's, a failed row's retry and an automatic approval's, because
-all of them reach it (`approve.go`). It returns one of:
+stale re-claim's, a failed row's retry and an automatic approval's (which
+never starts an agent), because all of them reach it (`approve.go`). It
+returns one of:
 
-- *no addition*: `Resolve` yielded a profile. Nothing is added; the coordinator
-  is not read.
-- *addition*: `Resolve` yielded none. The coordinator row is read (by id and
-  workspace), its task pair is checked with `profileStatus`, and the task's
-  create request metadata gains `agent_profile_id` and `executor_profile_id`
-  (`taskmodels.MetaKeyAgentProfileID`, `MetaKeyExecutorProfileID`), merged
-  into the map that already carries `auto_start_on_create` when the proposal
-  starts an agent. No other request field changes.
+- *no addition*: the table above says nothing is added. The coordinator is
+  not read.
+- *workspace addition*: the table adds the workspace default. The task's
+  create request metadata gains `agent_profile_id` only.
+- *pair addition*: the table adds the coordinator's pair. The coordinator row
+  is read (by id and workspace), its task pair is checked with
+  `profileStatus`, and the request metadata gains `agent_profile_id` and
+  `executor_profile_id` (`taskmodels.MetaKeyAgentProfileID`,
+  `MetaKeyExecutorProfileID`).
+
+  Either addition merges into the map that already carries
+  `auto_start_on_create` when the proposal starts an agent. No other request
+  field changes.
 - *refusal*: the pair is not usable (agent `missing` or `passthrough`, or
-  executor `missing`), or the coordinator row is gone. `failApproval` settles
-  the row `failed` with an error such as "Agent for created tasks is not
-  usable: the agent profile was removed" (the field and status named), and no
-  create call runs. The card then shows the existing `failed` state
-  (`AC-COORDINATOR-PROPOSALS-005.3`), and a manager fixes the setting and
-  approves again. An automatic approval leaves the same `failed` row
-  (`AC-COORDINATOR-AUTOMATIC-003.3`), which counts toward its 10 per 24 hours
-  (`003.2`). When the coordinator row is gone its proposals are gone too, so
-  the settle matches no row and the request returns 404 as any approval of a
-  deleted proposal does.
+  executor `missing`; the agent is named first when both are), or the
+  coordinator row is gone. `failApproval` settles the row `failed` with an
+  error such as "Agent for created tasks is not usable: the agent profile was
+  removed" (the field and status named), and no create call runs. The card
+  then shows the existing `failed` state (`AC-COORDINATOR-PROPOSALS-005.3`),
+  and a manager fixes the setting and approves again. An automatic approval
+  leaves the same `failed` row (`AC-COORDINATOR-AUTOMATIC-003.3`), which
+  counts toward its 10 per 24 hours (`003.2`). When the coordinator row is
+  gone its proposals are gone too, so the settle matches no row and the
+  request returns 404 as any approval of a deleted proposal does.
 - *error*: a read failed. The row stays `approving` under its claim, a warn
   log names the proposal id and the failed read, and an approve request
   returns 500; the stale re-claim recovers it, exactly as a failed step-graph
-  read does.
+  read does. An automatic approval takes the same path as its
+  `finishClaim` error today: the tool returns `{proposal_id, status: <the
+  re-read status>, note: "automatic approval unavailable; a manager will
+  decide"}` (`afterFailedFinish`), and the row counts toward the 10 per 24
+  hours, as every row claimed automatically does (`CountAutomaticDecidedTx`
+  counts whatever the status).
 
-The pair is read once per attempt, at that moment. An edit of the setting
-between the claim and the create is therefore honoured by that create; an edit
-after the create changes nothing, because the stamp is copied into the task.
+The pair and the workspace default are read once per attempt, immediately
+before the create call, and that attempt uses what it read: a save committed
+after the read applies to the next attempt, and one committed before it is
+honoured. An edit after the create changes nothing, because the stamp is
+copied into the task. A profile deleted between the read and the create is
+not rechecked; the created task then fails to start with the existing
+session start error.
 
 A recovery that finds the task of an earlier attempt completes with it and
 never updates its metadata (`002.18`). The lookup that finds it
 (`GetTaskByExternalID`) runs before this call, so no read or refusal happens
-for it. A second attempt that races a first reaches the create, which stays
-idempotent on the reserved external id and returns the first task
+for it. A second attempt whose create races a first one's reaches the create,
+which stays idempotent on the reserved external id and returns the first task
 (`CreateTaskOutcomeFoundSettled` or `FoundUnsettled`); what this attempt would
-have stamped is dropped.
+have added is dropped. The refusal and the error branches run before the
+create and use step 5's fence like the ineligible-step failure beside them, so
+they share its accepted limitation
+([Approve](proposals.md#approve), step 5): when a stale re-claim fails the row
+on a refusal while the first claimer's create is still running and then
+commits, a task exists although the card says "Nothing was created", a later
+approve of the `failed` row finds it through step 1's lookup, and a reject
+leaves it on its board. The refusal is a second way into that state beside the
+ineligible step. It needs this request's create call to run for more than two
+minutes, a second caller to re-claim the row during that call, and the pair to
+be unusable at that caller's read.
 
 Each create logs at info "coordinator.created_task_agent" with the proposal id
 and `source` (`step`, `workflow`, `workspace` or `coordinator`), and each
@@ -192,18 +277,28 @@ The proposal DTO gains `runs_with`, present on `pending` and `failed` rows and
 is empty and the coordinator's pair is not usable, or the coordinator is
 missing, it is `none` with empty id and name. The list and read routes compute
 it with the same call as [At approve](#at-approve) (a function that returns
-the chain's outcome and the pair's usability, used by both, so the card and the
+the table's outcome and the pair's usability, used by both, so the card and the
 approval cannot disagree except by time), over `final_spec` when the row has
-one, else `spec`. The name is read from the agent profile and is the id when
-the profile cannot be found. Per request the workspace default and the
-coordinator are read once. A read failure never fails the list or the read: the
-member is `null`, a warn is logged, and the card shows no line.
+one, else `spec`, and with the row's `starts_agent`. The agent profile shown
+is the one the table adds, or the one `Resolve` returned when nothing is
+added; a workspace addition shows `workspace`. The name is read from the agent
+profile and is the id when the profile cannot be found.
+
+Reads for one request are shared: the coordinator, the workspace default and
+each agent profile name are read once per request, and a step or a workflow
+default is read once per distinct id across the rows, so a list of N proposals
+over one workflow makes one step read per distinct step. A failed read never
+fails the list or the read: it makes `runs_with` `null` on the rows that
+needed it (all rows when the coordinator or the workspace default failed), a
+warn is logged, and those cards show no line. A read error on a card is
+therefore different from an approve's, which returns 500.
 
 The card (`proposal-cards.md#cards`) shows "Runs with: <name>" for any source
 but `none`, and the warning line for `none`, below the workflow and step line,
 for managers and readers, on Needs you and in the transcript. `runs_with`
-refreshes when the row is refetched after `coordinator.updated`; it does not
-preview a pending Edit, and the approval's own result is what counts.
+refreshes when the row is refetched after `coordinator.updated`, which a
+change to the setting publishes ([Routes](#routes)); it does not preview a
+pending Edit, and the approval's own result is what counts.
 
 ## Settings UI
 
@@ -216,10 +311,15 @@ preview a pending Edit, and the approval's own result is what counts.
   agentProfiles, ownAgent, ownExecutor, touched})` in
   `apps/web/lib/coordinator/`: agent is the workspace default when it is in
   `agentProfiles` and not passthrough, else `ownAgent`, else empty; executor is
-  `ownExecutor`, else empty. `touched` marks each field the manager edited; a
-  touched field keeps its value and an untouched field is recomputed whenever
-  `ownAgent` or `ownExecutor` changes. An existing coordinator's page never
-  calls it.
+  `ownExecutor`, else empty; while `agentProfiles` has not loaded the agent is
+  empty, and the function runs again when it arrives. `touched` is
+  `{agent: boolean, executor: boolean}` held in the form's or the setup's own
+  state: a field becomes touched on the manager's first change to it through
+  its picker, and stays touched until the form is closed or the setup is left
+  (a Back or a Change inside the setup keeps it, because that state outlives
+  the step). A touched field keeps its value and an untouched field is
+  recomputed whenever `ownAgent`, `ownExecutor` or `agentProfiles` changes. An
+  existing coordinator's page never calls it.
 - The add form and Finish stay disabled while either value is empty
   (`001.2`). A 400 naming `task_agent_profile_id` or `task_executor_profile_id`
   shows beside its field, and in the setup returns to Who runs it
@@ -236,9 +336,10 @@ preview a pending Edit, and the approval's own result is what counts.
 
 ## Security
 
-Both ids are checked against the coordinator's workspace on every write and
-again at approve, so a profile of another workspace is `missing` and never
-stamped. Writes need `workspace.manage`; a reader sees the setting and the
+The agent profile id is checked against the coordinator's workspace on every
+write that changes it and again at approve, so an agent profile of another
+workspace is `missing` and never stamped. The executor profile id is checked
+for existence only, as the coordinator's own executor profile is. Writes need `workspace.manage`; a reader sees the setting and the
 resolved agent's name, as readers already see the workspace's agent profiles.
 The stamp is written by the system into the task's metadata under keys that
 are not coordinator-reserved; the coordinator's tools never carry the

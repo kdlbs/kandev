@@ -177,6 +177,14 @@ default, and the soak hit it. The old behaviour failed open into a dead card.
   the created task's metadata. When the stamp is needed and the setting is
   unusable, the approval creates no task and settles the proposal `failed` with
   a reason.
+- Two refinements the spec review forced, both keeping the owner's rule that
+  the step, workflow or workspace choice still wins. A workspace default counts
+  only when its profile exists in the workspace and is not CLI passthrough. The
+  launch an approval takes when the proposal starts an agent never reads the
+  workspace default, so for such a proposal a usable workspace default is
+  itself added as the task's agent profile (no executor) instead of being left
+  to a launch that would ignore it; automatic approvals never start an agent and
+  are unaffected.
 - The proposal card shows "Runs with: <profile name>".
 - Unchanged: an approval starts an agent only when the phase-2 start-agent
   policy allows it and an automatic approval starts none. The owner keeps that a
