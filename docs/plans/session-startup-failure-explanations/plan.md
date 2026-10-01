@@ -43,6 +43,11 @@ were created.
 - PR fixup reconciliation merged the current main tip
   `08e4ffdb99caf40b0df5baa67b29cf4313188f15` in commit
   `8b63bd3e60871fd7a8ff7dd3ded8e21c291facf0` with no file conflicts.
+- After that CI cycle, main advanced through `daab1c45647e7ac9e002f15e02f6e910a3e778a4`
+  to `bbb57f3d3cc7a00f14d55067a22f126966add712`. The latest reconciliation
+  had one overlap in the nested-submodule E2E assertion. Main already selected
+  the root README before reading its lazy diff, so that equivalent assertion was
+  retained while preserving the production fix and unit coverage.
 - PR #4065 merged commit `fa729f2d7653f4480c107c6a6d50a5452eb3dd0e`
   is an ancestor, verified with `git merge-base --is-ancestor`.
 - The package was moved into this existing task checkout at the user's request. Original developer files are not changed.

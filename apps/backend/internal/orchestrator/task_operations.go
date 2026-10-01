@@ -1340,6 +1340,10 @@ type startTaskOptions struct {
 	// process to start now: an Office scheduler launch only chose a provider.
 	// Zero value means "derive from autoStart".
 	Origin launchOrigin
+	// AutomationRun names the admitted automation run this start serves. A
+	// start queued by the session ceiling persists it so the replay binds the
+	// session and turn it creates to that run.
+	AutomationRun *automationRunLaunch
 	// ceilingEntryBinding is set only by a replay that owns a persisted
 	// workflow-entry record. The start path rechecks it immediately before
 	// runtime admission so a stale route cannot dispatch the old payload.
