@@ -48,6 +48,9 @@ type proposalFacts struct {
 type storedOutcome struct {
 	TurnID      sql.NullString `db:"turn_id"`
 	TaskResult  sql.NullString `db:"task_result"`
+	Cost        sql.NullInt64  `db:"cost_subcents"`
+	MergedAt    sql.NullTime   `db:"merged_at"`
+	LastStepID  string         `db:"last_step_id"`
 	ReopenCount int            `db:"reopen_count"`
 	Final       bool           `db:"final"`
 }
@@ -147,7 +150,7 @@ func readProposal(ctx context.Context, tx *sqlx.Tx, id string) (*proposalFacts, 
 
 func readStored(ctx context.Context, tx *sqlx.Tx, id string) (*storedOutcome, error) {
 	var s storedOutcome
-	err := tx.GetContext(ctx, &s, tx.Rebind(`SELECT turn_id, task_result, reopen_count, final FROM coordinator_outcomes WHERE proposal_id = ?`), id)
+	err := tx.GetContext(ctx, &s, tx.Rebind(`SELECT turn_id, task_result, cost_subcents, merged_at, last_step_id, reopen_count, final FROM coordinator_outcomes WHERE proposal_id = ?`), id)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -230,7 +233,7 @@ func (g *Grader) gradeTask(ctx context.Context, tx *sqlx.Tx, taskID string, stor
 	if !found {
 		v.final = true
 		if stored != nil {
-			v.taskResult = stored.TaskResult
+			v.taskResult, v.cost, v.mergedAt, v.lastStepID = stored.TaskResult, stored.Cost, stored.MergedAt, stored.LastStepID
 		}
 		return nil
 	}

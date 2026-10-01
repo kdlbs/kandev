@@ -200,7 +200,7 @@ func TestScan_TwoCoordinatorsOneObservationEach(t *testing.T) {
 	other.ID, other.Name = "", "Other"
 	if err := f.store.CreateCoordinator(context.Background(), &other); err != nil {
 		// the workspace allows one coordinator; fall back to a direct row
-		t.Skip("second coordinator not creatable: ", err)
+		t.Fatalf("second coordinator not creatable: %v", err)
 	}
 	f.exec(`INSERT INTO coordinator_proposals (id, coordinator_id, workspace_id, status, spec_json, task_id, kind, created_at, updated_at)
 		VALUES ('p2', ?, 'ws-1', 'approved', '{"step_id":"s1"}', 't1', 'create_task', ?, ?)`, other.ID, f.at(-time.Hour), f.at(-time.Hour))
@@ -241,5 +241,42 @@ func TestCapture_PrincipalAndSystemAreIgnoredAndFieldsStored(t *testing.T) {
 	}
 	if row.UserID != "mgr" || row.ReasonCode != outcomes.ReasonNone || !row.CreatedAt.Equal(f.at(-time.Hour)) {
 		t.Fatalf("stored row = %+v", row)
+	}
+}
+
+func TestScan_ReferenceIsNewestApprovedNotUndoneAtTheMove(t *testing.T) {
+	cases := []struct {
+		name  string
+		setup func(f *fixture)
+		want  string
+	}{
+		{"newest approved before the move", func(f *fixture) {}, "p2"},
+		{"newest undone before the move falls back", func(f *fixture) {
+			f.exec(`UPDATE coordinator_activity SET undone_at = ? WHERE id = 'a2'`, f.at(-3*time.Minute))
+		}, "p1"},
+		{"newest undone after the move still counts", func(f *fixture) {
+			f.exec(`UPDATE coordinator_activity SET undone_at = ? WHERE id = 'a2'`, f.at(-30*time.Second))
+		}, "p2"},
+		{"approval after the move is not chosen", func(f *fixture) {
+			f.proposal("p3", "approved", "create_task", "t1", f.at(-30*time.Second))
+			f.approvedRow("a3", "p3", "create_task", "t1", f.at(-30*time.Second))
+		}, "p2"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			f := moveBackFixture(t)
+			f.proposal("p2", "approved", "create_task", "t1", f.at(-30*time.Minute))
+			f.approvedRow("a2", "p2", "create_task", "t1", f.at(-30*time.Minute))
+			c.setup(f)
+			f.history("s0", "mgr", f.at(-time.Minute))
+			cp := f.capture(&fakeChecker{verdicts: map[string]Verdict{"mgr": VerdictManager}})
+			if _, err := cp.ScanTask(context.Background(), "t1"); err != nil {
+				t.Fatal(err)
+			}
+			var got string
+			if err := f.db.Get(&got, `SELECT proposal_id FROM coordinator_feedback WHERE kind = 'moved_back'`); err != nil || got != c.want {
+				t.Fatalf("reference = %q (err %v), want %q", got, err, c.want)
+			}
+		})
 	}
 }

@@ -70,6 +70,13 @@ func TestHTTPMeasuresFlagOffUnwiredAndForeignCoordinatorAre404(t *testing.T) {
 	if rec := runHandler(h.httpGetMeasures, http.MethodGet, "/x", "", workspaceParams("no-such")); rec.Code != http.StatusNotFound {
 		t.Fatalf("unknown coordinator = %d", rec.Code)
 	}
+	foreign := &Coordinator{WorkspaceID: "other-ws", Name: "Foreign", AgentProfileID: "a", ExecutorProfileID: "e"}
+	if err := env.svc.store.CreateCoordinator(context.Background(), foreign); err != nil {
+		t.Fatal(err)
+	}
+	if rec := runHandler(h.httpGetMeasures, http.MethodGet, "/x", "", workspaceParams(foreign.ID)); rec.Code != http.StatusNotFound {
+		t.Fatalf("coordinator of another workspace = %d", rec.Code)
+	}
 	env.svc.SetOutcomeMeasures(nil)
 	if rec := runHandler(h.httpGetMeasures, http.MethodGet, "/x", "", workspaceParams(env.c.ID)); rec.Code != http.StatusNotFound {
 		t.Fatalf("unwired = %d", rec.Code)

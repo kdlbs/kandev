@@ -48,6 +48,9 @@ func (p SQLProposals) Sweep(ctx context.Context, q *Queue) int {
 		}
 		progressed := false
 		for _, id := range ids {
+			if ctx.Err() != nil || q.isStopped() {
+				return total
+			}
 			if tried[id] {
 				continue
 			}
