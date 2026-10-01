@@ -44,7 +44,11 @@ func initialPromptDeliverySubmissionID(execution *AgentExecution) string {
 	if submissionID := models.StringFromAny(execution.MetadataSnapshot()[initialDeliverySubmissionIDMetadataKey]); submissionID != "" {
 		return submissionID
 	}
-	return initialPromptSubmissionID(execution.SessionID, execution.DeliveryHarnessGeneration)
+	id := initialPromptSubmissionID(execution.SessionID, execution.DeliveryHarnessGeneration)
+	if execution.ID != "" {
+		id += ":" + execution.ID
+	}
+	return id
 }
 
 // deliverySubmissionIdentityForPrompt keeps the caller's immutable identity
@@ -355,8 +359,10 @@ func isInitialPromptSubmission(execution *AgentExecution, submission journal.Sub
 	if execution == nil {
 		return false
 	}
-	return submission.ID == initialPromptSubmissionID(execution.SessionID, execution.DeliveryHarnessGeneration) &&
-		submission.HarnessGeneration == execution.DeliveryHarnessGeneration
+	legacyID := initialPromptSubmissionID(execution.SessionID, execution.DeliveryHarnessGeneration)
+	initialID := submission.ID == legacyID ||
+		(strings.HasPrefix(submission.ID, legacyID+":") && len(submission.ID) > len(legacyID)+1)
+	return initialID && submission.HarnessGeneration == execution.DeliveryHarnessGeneration
 }
 
 func peerSubmissionsForRecovery(

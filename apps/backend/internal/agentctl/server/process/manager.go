@@ -724,10 +724,13 @@ func (m *Manager) deliverySubmissionIDForEvent(update adapter.AgentEvent) string
 	if update.DeliverySubmissionID != "" {
 		return update.DeliverySubmissionID
 	}
+	if mapped != "" {
+		return mapped
+	}
 	if active != "" {
 		return active
 	}
-	return mapped
+	return ""
 }
 
 // DeliverySubmissionIdentity returns the durable owner identity used by

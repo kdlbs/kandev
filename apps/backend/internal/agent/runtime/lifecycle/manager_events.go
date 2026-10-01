@@ -292,7 +292,7 @@ func (m *Manager) claimPromptCompletion(
 	isError bool,
 ) (promptCompletionClaim, bool) {
 	claim := promptCompletionClaim{}
-	if event.PromptGeneration == 0 {
+	if event.PromptGeneration == 0 && event.DeliverySubmissionID == "" {
 		if execution.dispatchedPromptPending.Load() {
 			m.logger.Debug("ignoring unnumbered completion while a dispatched prompt is pending",
 				zap.String("execution_id", execution.ID))
@@ -307,6 +307,12 @@ func (m *Manager) claimPromptCompletion(
 	err := m.executionStore.WithLock(execution.ID, func(current *AgentExecution) {
 		if current != execution {
 			return
+		}
+		if event.PromptGeneration == 0 && event.DeliverySubmissionID != "" {
+			if current.deliverySubmissionIDSnapshot() != event.DeliverySubmissionID {
+				return
+			}
+			event.PromptGeneration = current.promptGeneration
 		}
 		if current.recoveredPromptGenerationPending.CompareAndSwap(true, false) {
 			current.promptGeneration = event.PromptGeneration
@@ -441,9 +447,6 @@ func (m *Manager) handleCompleteEvent(execution *AgentExecution, event *agentctl
 // lease is held by the event dispatcher. Direct test and legacy callers use
 // handleCompleteEvent, which acquires that lease before entering here.
 func (m *Manager) handleCompleteEventLeased(execution *AgentExecution, event *agentctl.AgentEvent) bool {
-	if event.DeliverySubmissionID != "" {
-		execution.clearDeliverySubmissionID(event.DeliverySubmissionID)
-	}
 	if event.TurnID == "" {
 		// Snapshot before publishing AgentReady. A queued successor may bind a
 		// new turn while the complete stream frame is still crossing the bus.
@@ -461,6 +464,9 @@ func (m *Manager) handleCompleteEventLeased(execution *AgentExecution, event *ag
 	claim, claimed := m.claimPromptCompletion(execution, event, isError)
 	if !claimed {
 		return false
+	}
+	if event.DeliverySubmissionID != "" {
+		execution.clearDeliverySubmissionID(event.DeliverySubmissionID)
 	}
 	var failureEvidence *PromptAttemptEvidence
 	if isError {

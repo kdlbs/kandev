@@ -1018,5 +1018,9 @@
   "failedToLoadRouteAttempts": "경로 시도를 불러오지 못했습니다",
   "failedToLoadRoutingConfig": "라우팅 구성을 불러오지 못했습니다",
   "failedToLoadRoutingPreview": "라우팅 미리 보기를 불러오지 못했습니다",
-  "failedToLoadTaskQuorum": "작업 정족수를 불러오지 못했습니다"
+  "failedToLoadTaskQuorum": "작업 정족수를 불러오지 못했습니다",
+  "openSessionRecovery": "세션 복구 열기",
+  "sessionRecoveryDescription": "세션이 복구될 때까지 이 실행은 대기합니다. Kandev는 프롬프트를 자동으로 다시 전송하지 않습니다.",
+  "sessionRecoveryReason": "이유: {{reason}}",
+  "sessionRecoveryRequired": "세션 복구 필요"
 }

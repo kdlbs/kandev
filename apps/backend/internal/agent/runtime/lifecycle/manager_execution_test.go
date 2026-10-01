@@ -65,6 +65,7 @@ func TestPrepareExecutionCreateRequestRetainsSessionJournalOwnership(t *testing.
 			mgr.dataDir = t.TempDir()
 			prepared, err := mgr.prepareExecutionCreateRequest(context.Background(), "task-1", &WorkspaceInfo{
 				SessionID: sessionID, TaskEnvironmentID: "environment-1", AgentID: "auggie",
+				DeliveryIncarnationID: "incarnation-1", DeliveryHarnessGeneration: 3, DeliveryStreamID: "incarnation-1:g3",
 				ExecutorType: string(models.ExecutorTypeLocal), WorkspacePath: t.TempDir(),
 			}, "execution-1")
 			if err != nil {
@@ -76,6 +77,9 @@ func TestPrepareExecutionCreateRequestRetainsSessionJournalOwnership(t *testing.
 			}
 			if prepared.request.DurableJournalHostRoot != mgr.dataDir || prepared.request.DurableJournalOwnerID != owner {
 				t.Fatalf("restored journal root/owner = %q/%q, want %q/%q", prepared.request.DurableJournalHostRoot, prepared.request.DurableJournalOwnerID, mgr.dataDir, owner)
+			}
+			if prepared.request.DeliveryIncarnationID != "incarnation-1" || prepared.request.DeliveryHarnessGeneration != 3 || prepared.request.DeliveryStreamID != "incarnation-1:g3" {
+				t.Fatalf("workspace restore lost durable delivery identity: %+v", prepared.request)
 			}
 		})
 	}

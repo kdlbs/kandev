@@ -1729,9 +1729,12 @@ type McpConfigProvider interface {
 
 // WorkspaceInfo contains information about a task's workspace for on-demand execution creation
 type WorkspaceInfo struct {
-	TaskID            string
-	SessionID         string // Task session ID (from task_sessions table)
-	TaskEnvironmentID string // Env this session belongs to (shared across sessions in same task)
+	DeliveryIncarnationID     string
+	DeliveryHarnessGeneration uint64
+	DeliveryStreamID          string
+	TaskID                    string
+	SessionID                 string // Task session ID (from task_sessions table)
+	TaskEnvironmentID         string // Env this session belongs to (shared across sessions in same task)
 	// RecoveryErrorObservation captures session and owner identity before
 	// selected-workspace inspection so a refusal can be conditionally recorded.
 	RecoveryErrorObservation *models.WorkspaceRecoveryErrorObservation

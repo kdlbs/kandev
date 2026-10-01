@@ -422,6 +422,23 @@ func TestInitialPromptDeliverySubmissionIDUsesAdmittedMessageIdentity(t *testing
 	}
 }
 
+func TestInitialPromptDeliverySubmissionIDSeparatesAuthorizedLaunchAttempts(t *testing.T) {
+	first := &AgentExecution{ID: "attempt-1", SessionID: "session-1", DeliveryMode: DurableDeliveryV1, DeliveryHarnessGeneration: 3}
+	second := &AgentExecution{ID: "attempt-2", SessionID: "session-1", DeliveryMode: DurableDeliveryV1, DeliveryHarnessGeneration: 3}
+	firstID := initialPromptDeliverySubmissionID(first)
+	if firstID == initialPromptDeliverySubmissionID(second) {
+		t.Fatal("separate authorized launches reused a submission identity")
+	}
+	if firstID != initialPromptDeliverySubmissionID(first) {
+		t.Fatal("one launch changed its immutable submission identity")
+	}
+	for _, id := range []string{firstID, initialPromptSubmissionID(first.SessionID, 3)} {
+		if !isInitialPromptSubmission(second, journal.SubmissionSummary{ID: id, HarnessGeneration: 3}) {
+			t.Fatalf("retained initial submission %q cannot be adopted", id)
+		}
+	}
+}
+
 func TestDeliverySubmissionIdentityPrefersExplicitRequest(t *testing.T) {
 	tests := []struct {
 		name         string

@@ -121,3 +121,11 @@ Completed 2026-09-28.
 - Passed the complete five affected backend packages with `go test -race -tags fts5 ./internal/agent/runtime/lifecycle ./internal/agentctl/journal ./internal/agentctl/server/process ./internal/task/repository/sqlite ./internal/backendapp -count=1`. Backend lint, web typecheck, affected web lint/helper tests, catalog/spec lint, and whitespace passed before the subsequent Docker stop-policy fix. Current-head CI remains pending publication.
 
 - Follow-up CI found `TestDeliveryAPICancelsCurrentSubmission` seeded an unbound stream directly in the journal. The fixture now uses production `AdmitDeliverySubmission` and asserts a replayable terminal for the exact submission. The unchanged production identity fence remains enforced. Reproduced the failure, then passed `go test -race -tags fts5 ./internal/agentctl/server/api -count=1` (64 seconds).
+
+### CI remediation, 2026-10-02
+
+- Unnumbered cancellation terminals complete only the exact active submission. Generation-bound event ownership takes precedence over a concurrent successor dispatch. Late predecessor terminals preserve the successor status and completion signal.
+- Workspace-only recovery now projects the persisted incarnation, current harness generation, and stream into executor creation. Generation storage failures reject recovery; SQL identity fences remain unchanged.
+- The missing-owner regression failed before the fix. Passed `GOCACHE=/tmp/kandev-go-build-preserved-20261001 go test -race -tags fts5 ./internal/agent/runtime/lifecycle ./internal/agentctl/server/process ./internal/task/service -count=1`, covering current-generation restore and failed generation reads.
+- Passed desktop cancellation with `pnpm e2e:raw --project=chromium e2e/tests/session/session-recovery.spec.ts --grep 'pausing an accepted lazy resume' --retries=0 --reporter=line` and phone cancellation with `pnpm e2e:raw --project=mobile-chrome e2e/tests/session/mobile-session-resume-recovery.spec.ts --grep 'pausing an accepted lazy resume' --retries=0 --reporter=line`. Both preserve runtime identity across two pauses and a follow-up prompt.
+- Backend lint and complete locale validation passed after rebasing onto current main. Published-head CI and review verification remain pending.

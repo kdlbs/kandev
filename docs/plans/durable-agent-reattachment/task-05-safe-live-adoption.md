@@ -129,3 +129,9 @@ Completed 2026-09-28.
 - The focused race command recorded in task 03 passes. Current-head CI remains pending publication.
 
 - CI reproduced forced deletion of established Docker environments after recoverable agent failure. Lifecycle now preserves that environment for authorized resume; bootstrap rollback, deletion, and explicit force remain destructive. Passed `go test -race -tags fts5 ./internal/agent/runtime/lifecycle -run 'TestDockerRecoverableFailureRetains|TestKubernetesRecoverableFailure|Test.*Docker.*Stop|Test.*StopAgentWithReason' -count=1`. All three real-container browser regressions passed with `KANDEV_E2E_CONTAINERS=1 pnpm e2e:raw --project=containers e2e/tests/docker/docker-launch.spec.ts --grep 'externally stopped|external stop' --retries=0 --reporter=line`. Final backend lint passed; public executor guidance was updated.
+
+### CI remediation, 2026-10-02
+
+- A newly authorized launch without an explicit message submission uses an execution-bound initial submission identity. Native restore preserves the harness generation while distinct authorized launches cannot collide in the retained journal. Legacy initial submission identities remain recognizable during adoption.
+- The launch-identity regression failed before the fix. The complete lifecycle, process, and task-service packages passed with the race detector, using the command recorded in task 03.
+- Added Korean translations for the existing recovery surfaces after main introduced that locale. Complete locale validation passes; composition and interaction remain unchanged. Published-head CI verification remains pending.
