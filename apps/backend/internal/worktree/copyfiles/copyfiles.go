@@ -88,7 +88,8 @@ func parsePatternSpec(entry string) (PatternSpec, error) {
 // Parse splits a comma-separated user spec into trimmed, deduplicated,
 // non-empty patterns with the exact `:symlink` suffix stripped. Order is preserved
 // (first occurrence wins on dedupe). Commas inside `{...}` are treated as part
-// of the pattern (brace alternation), so `config/{local,dev}.yml` is parsed as
+// of the pattern (brace alternation), as are class commas and POSIX-escaped
+// commas, so `config/{local,dev}.yml` is parsed as
 // a single pattern. This is the copy-only view used by the remote-executor
 // path, where symlinks back to the host repo can't apply.
 func Parse(spec string) []string {
@@ -150,15 +151,28 @@ func ValidateSpec(spec string) error {
 	return nil
 }
 
-// splitTopLevelCommas splits s on commas that sit outside any `{...}` group,
-// so brace alternation patterns like `config/{local,dev}.yml` survive intact.
+// splitTopLevelCommas preserves character classes, brace alternation, and
+// escaped bytes. Backslashes are separators on Windows and escapes elsewhere.
 // Nested braces are tracked; an unbalanced `}` is treated as a literal.
 func splitTopLevelCommas(s string) []string {
 	out := make([]string, 0, 4)
 	depth := 0
+	inClass := false
 	start := 0
 	for i := 0; i < len(s); i++ {
+		if s[i] == '\\' && filepath.Separator != '\\' {
+			i++
+			continue
+		}
+		if inClass {
+			if s[i] == ']' {
+				inClass = false
+			}
+			continue
+		}
 		switch s[i] {
+		case '[':
+			inClass = true
 		case '{':
 			depth++
 		case '}':

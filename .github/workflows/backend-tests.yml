@@ -851,6 +851,11 @@ jobs:
         # terminate a healthy suite before the workflow's 30-minute job cap.
         run: go test -race -v -timeout 25m ./internal/agentctl/server/process/... ./internal/agent/runtime/agentctl/launcher/... ./internal/common/ptyexec/... ./internal/backendapp/ownershiplock/... ./internal/system/storage/workspaces/...
 
+      - name: Test Windows copy-file glob tokenization
+        run: >-
+          go test -race -v ./internal/worktree/copyfiles
+          -run '^(TestParseSpecs_GlobTokenization|TestParseSpecs_NativeEscapes|TestCopyPlan_GlobTokenization|TestValidateSpec_GlobAdjacentSuffix)$'
+
       - name: Test Windows managed runtime cache repair
         run: go test -race -v ./internal/agent/managedruntime -run TestRemoveNpxExecutionTreeTreatsMissingWindowsChildAsAbsent
 
