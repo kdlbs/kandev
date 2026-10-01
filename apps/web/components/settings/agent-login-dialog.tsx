@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { startAgentLogin } from "@/lib/api";
+import { ApiError } from "@/lib/api/client";
+import { t as translate } from "@/lib/i18n";
 import { fetchDynamicModels } from "@/lib/api/domains/settings-api";
 import { PtyTerminalDialog, type StartPtySession } from "@/components/settings/pty-terminal-dialog";
 
@@ -46,7 +48,14 @@ export function AgentLoginDialog({
   }, [open]);
   const startSession: StartPtySession = useCallback(
     (size, options) =>
-      startAgentLogin(agentName, size, { ...options, commandVariant: selectedVariant }),
+      startAgentLogin(agentName, size, { ...options, commandVariant: selectedVariant }).catch(
+        (error) => {
+          if (error instanceof ApiError && error.errorCode === "login_command_conflict") {
+            throw new Error(translate("agents:minimaxLoginConflict"));
+          }
+          throw error;
+        },
+      ),
     [agentName, selectedVariant],
   );
   const handleLoginSuccess = useCallback(() => {

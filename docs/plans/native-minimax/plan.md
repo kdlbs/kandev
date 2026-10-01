@@ -131,3 +131,29 @@ returns to choice. Required local checks include login endpoint/DTO/API tests,
 frontend API serialization tests, both setup/native-task E2E flows and backend
 module lint. Previous f8 remote results remain historical until the next head
 finishes CI and automated review.
+
+## Region conflict correction
+
+AC-AGENTS-MINIMAX-001.2 requires the selected region to reach native login.
+The existing one-session-per-agent manager returns the original session on a
+second start regardless of argv. A Global request can therefore attach to a
+CN login. Preserve that manager's ownership and reject mismatched variant argv
+with HTTP 409; identical/default reconnects retain their prior behavior.
+
+UI-04 (same terminal on desktop and full-height phone):
+
+```text
+Sign in: minimax-acp
+[requested full command]
+Another sign-in command is running. Close it before trying again.
+[Done]
+```
+
+Work order 02 owns the handler guard, structured error-to-copy mapping and
+regressions. RED uses the real login manager through HTTP, including same-region
+positive controls and cross-region/default mixed cases. Frontend coverage
+exercises the start callback with a structured conflict and unrelated error.
+Both E2E flows verify same-command reuse, rejection and an unchanged live
+original session. Run the affected Go packages/race tests, full backend module
+lint, frontend regressions/type/i18n/lint, desktop/phone E2E, docs/spec checks.
+No session is killed or replaced; there is no account or command fallback.

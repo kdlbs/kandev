@@ -123,3 +123,22 @@ phone E2E passed with real install/login endpoints, server-owned region argv,
 no login before selection and actual native model/task propagation. Public
 validation covered 47 pages and 62 passing tests; specs/catalog/harness passed.
 Screenshot recapture and remote checks remain delivery gates.
+
+## Region conflict correction (done)
+
+The existing manager returns an active session when the second start's command
+has changed. Implement UI-04 and the plan's correction for
+AC-AGENTS-MINIMAX-001.2. Files: loginpty handlers and MiniMax HTTP tests;
+AgentLoginDialog and callback tests; all locale agent catalogs; the existing
+setup E2E helper. Preserve the original process and same-command reconnects.
+Validate real HTTP 409, localized callback errors and the original session's
+identity/argv/liveness. Recapture affected screenshots after the normal commit.
+Remote CI and review evidence must then use the new head.
+
+Conflict correction passed: real HTTP same-command positive controls and
+cross-region/default rejection cases; full loginpty race suite; all 61
+frontend regression tests; desktop and phone two-tab error/reconnect flows
+with the original terminal still live; typecheck, locale checks, changed-file
+ESLint and full backend module lint. Public docs validated 47 pages with 62
+passing tests; catalog/spec/harness checks passed. Capture publication and
+remote gate evidence must use the final correction head.

@@ -5,7 +5,7 @@ import type { SeedData } from "../../fixtures/test-base";
 import { waitForAgentMessage, waitForSessionDone } from "../../helpers/session";
 import type { BackendContext } from "../../fixtures/backend";
 import type { ApiClient } from "../../helpers/api-client";
-import type { PrAssetCapture } from "../../helpers/pr-asset-capture";
+import { PrAssetCapture } from "../../helpers/pr-asset-capture";
 
 export async function exerciseMiniMaxSetup({
   page,
@@ -104,10 +104,50 @@ export async function exerciseMiniMaxSetup({
     await activate(auth);
     await expect(choice).toBeVisible();
     expect(fs.existsSync(path.join(root, "authenticated"))).toBe(false);
+    if (capture.capturing) {
+      await page.getByRole("dialog").evaluate(async (element) => {
+        await Promise.all(
+          element
+            .getAnimations({ subtree: true })
+            .filter(
+              (animation) =>
+                animation.playState === "running" &&
+                Number.isFinite(animation.effect?.getComputedTiming().endTime),
+            )
+            .map((animation) => animation.finished.catch(() => undefined)),
+        );
+      });
+    }
     await capture.screenshot("region", {
       caption: "Choose the MiniMax subscription account region",
     });
+    const started = page.waitForResponse(
+      (response) =>
+        response.url().endsWith("/agent-login/agents/minimax-acp/start") &&
+        response.request().method() === "POST",
+    );
     await activate(choice);
+    const login = await (await started).json();
+    const nativeRegion = info.project.name === "mobile-chrome" ? "global" : "cn";
+    const same = await api.rawRequest("POST", "/api/v1/agent-login/agents/minimax-acp/start", {
+      command_variant: nativeRegion,
+    });
+    expect(same.status).toBe(200);
+    expect((await same.json()).session_id).toBe(login.session_id);
+    const conflict = await api.rawRequest("POST", "/api/v1/agent-login/agents/minimax-acp/start", {
+      command_variant: nativeRegion === "cn" ? "global" : "cn",
+    });
+    expect(conflict.status).toBe(409);
+    expect((await conflict.json()).error_code).toBe("login_command_conflict");
+    const live = await api.rawRequest(
+      "GET",
+      `/api/v1/agent-login/sessions/${login.session_id}/status`,
+    );
+    expect(await live.json()).toMatchObject({
+      session_id: login.session_id,
+      running: true,
+      cmd: login.cmd,
+    });
     const command = page.getByTestId("agent-login-command").locator("code");
     await expect(command).toHaveCSS("white-space", "pre-wrap");
     expect(await command.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(
@@ -116,7 +156,6 @@ export async function exerciseMiniMaxSetup({
     const help = page.getByText(/MiniMax stores credentials in/);
     await expect(help).toBeVisible();
     await expect.poll(() => fs.existsSync(path.join(root, "authenticated"))).toBe(true);
-    const nativeRegion = info.project.name === "mobile-chrome" ? "global" : "cn";
     expect(JSON.parse(fs.readFileSync(path.join(root, "login-args.json"), "utf8"))).toEqual([
       "login",
       "--no-browser",
@@ -149,6 +188,7 @@ export async function exerciseMiniMaxSetup({
     await capture.screenshot("login", {
       caption: "MiniMax subscription login for the selected account region",
     });
+    await exerciseConflictingLogin({ page, api, info, region: nativeRegion, original: login });
     const done = page.getByRole("button", { name: "Done", exact: true });
     await expect(done).toBeVisible();
     await activate(done);
@@ -258,5 +298,68 @@ export async function exerciseMiniMaxSetup({
     if (createdAgent) await api.deleteCustomAgentByName("minimax-acp");
     await release();
     fs.rmSync(root, { recursive: true, force: true });
+  }
+}
+
+async function exerciseConflictingLogin({
+  page,
+  api,
+  info,
+  region,
+  original,
+}: {
+  page: Page;
+  api: ApiClient;
+  info: TestInfo;
+  region: string;
+  original: { session_id: string; cmd: string[] };
+}) {
+  const other = await page.context().newPage();
+  const activate = (control: Locator) =>
+    info.project.name === "mobile-chrome" ? control.tap() : control.click();
+  try {
+    await other.goto("/settings/agents");
+    await activate(other.getByTestId("auth-icon-minimax-acp"));
+    await activate(
+      other.getByRole("button", {
+        name: region === "cn" ? "Global" : "Mainland China",
+        exact: true,
+      }),
+    );
+    await expect(
+      other.getByText(
+        "Another sign-in command is already running. Close that terminal before trying again.",
+      ),
+    ).toBeVisible();
+    const dialog = other.getByRole("dialog");
+    await dialog.evaluate(async (element) => {
+      await Promise.all(
+        element
+          .getAnimations({ subtree: true })
+          .filter(
+            (animation) =>
+              animation.playState === "running" &&
+              Number.isFinite(animation.effect?.getComputedTiming().endTime),
+          )
+          .map((animation) => animation.finished.catch(() => undefined)),
+      );
+    });
+    const capture = new PrAssetCapture(other, info.file, { captureKey: "conflict" });
+    await capture.screenshot("login", {
+      caption: "Competing region sign-in preserves the original terminal",
+    });
+    await activate(other.getByRole("button", { name: "Close", exact: true }));
+    await expect(dialog).not.toBeVisible();
+    const live = await api.rawRequest(
+      "GET",
+      `/api/v1/agent-login/sessions/${original.session_id}/status`,
+    );
+    expect(await live.json()).toMatchObject({
+      session_id: original.session_id,
+      running: true,
+      cmd: original.cmd,
+    });
+  } finally {
+    await other.close();
   }
 }

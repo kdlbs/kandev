@@ -364,5 +364,6 @@
   "minimaxChooseRegionTitle": "MiniMax アカウントのリージョン",
   "minimaxChooseRegionDescription": "MiniMax サブスクリプションアカウントのリージョンを選択してください。",
   "minimaxRegionCN": "中国本土",
-  "minimaxRegionGlobal": "グローバル"
+  "minimaxRegionGlobal": "グローバル",
+  "minimaxLoginConflict": "別のログインコマンドが実行中です。そのターミナルを閉じてから再試行してください。"
 }

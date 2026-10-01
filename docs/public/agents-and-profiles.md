@@ -72,7 +72,8 @@ env -u MINIMAX_DATA_DIR -u MAVIS_DATA_DIR \
 ```
 
 Choose **Mainland China** or **Global** when Kandev opens the login setup.
-The selected login terminal prints a browser authorization link. After login,
+The selected login terminal prints a browser authorization link. Close an existing
+sign-in terminal before choosing a different region in another tab. After login,
 click **Done** to refresh
 capabilities, create a MiniMax profile, and choose a model from the native
 catalog. Subscription access stays with MiniMax Code; no OpenCode wrapper or

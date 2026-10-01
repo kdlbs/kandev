@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"runtime"
+	"slices"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -299,7 +300,12 @@ func (h *Handlers) httpStart(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-	c.JSON(http.StatusOK, sess.Status())
+	status := sess.Status()
+	if err == ErrSessionAlreadyRunning && len(lc.Variants) > 0 && !slices.Equal(status.Cmd, wrapped) {
+		c.JSON(http.StatusConflict, gin.H{"error": "login_command_conflict", "error_code": "login_command_conflict"})
+		return
+	}
+	c.JSON(http.StatusOK, status)
 }
 
 func (h *Handlers) httpStop(c *gin.Context) {

@@ -364,5 +364,6 @@
   "minimaxChooseRegionTitle": "MiniMax 帳戶區域",
   "minimaxChooseRegionDescription": "選擇您的 MiniMax 訂閱帳戶所屬區域。",
   "minimaxRegionCN": "中國大陸",
-  "minimaxRegionGlobal": "全球"
+  "minimaxRegionGlobal": "全球",
+  "minimaxLoginConflict": "另一個登入命令正在執行。請先關閉該終端，然後重試。"
 }

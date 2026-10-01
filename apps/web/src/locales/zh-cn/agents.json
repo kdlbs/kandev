@@ -364,5 +364,6 @@
   "minimaxChooseRegionTitle": "MiniMax 账户区域",
   "minimaxChooseRegionDescription": "选择您的 MiniMax 订阅账户所属区域。",
   "minimaxRegionCN": "中国大陆",
-  "minimaxRegionGlobal": "全球"
+  "minimaxRegionGlobal": "全球",
+  "minimaxLoginConflict": "另一个登录命令正在运行。请先关闭该终端，然后重试。"
 }

@@ -140,3 +140,10 @@ safe-area spacing, following the existing canvas rename drawer. After choice,
 the existing quick terminal supplies dynamic viewport sizing and its single
 terminal scroll owner. Closing and reopening setup returns to the region
 choice. No login subprocess starts merely by opening the chooser.
+
+The shared login manager still owns one live session per agent. Reconnecting
+with identical argv reuses it. For agents publishing login variants, a request
+whose argv differs from that live session returns HTTP 409 with the structured
+`login_command_conflict` code. It neither replaces nor attaches to the other
+region's sign-in. The caller shows a localized explanation and leaves the
+original terminal live; the user closes it before choosing another region.

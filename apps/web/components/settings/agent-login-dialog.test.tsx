@@ -1,16 +1,28 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { ApiError } from "@/lib/api/client";
 import { AgentLoginDialog } from "./agent-login-dialog";
 
-const { refresh } = vi.hoisted(() => ({ refresh: vi.fn() }));
+const { refresh, start, terminal } = vi.hoisted(() => ({
+  refresh: vi.fn(),
+  start: vi.fn(),
+  terminal: vi.fn(),
+}));
 vi.mock("@/lib/api/domains/settings-api", () => ({ fetchDynamicModels: refresh }));
-vi.mock("@/lib/api", () => ({ startAgentLogin: vi.fn() }));
+vi.mock("@/lib/api", () => ({ startAgentLogin: start }));
 vi.mock("@/components/settings/pty-terminal-dialog", () => ({
-  PtyTerminalDialog: ({ onDone }: { onDone: () => void }) => <button onClick={onDone}>Done</button>,
+  PtyTerminalDialog: (props: { onDone: () => void }) => {
+    terminal(props);
+    return <button onClick={props.onDone}>Done</button>;
+  },
 }));
 
 afterEach(cleanup);
-beforeEach(() => refresh.mockReset());
+beforeEach(() => {
+  refresh.mockReset();
+  start.mockReset();
+  terminal.mockReset();
+});
 
 describe("MiniMax login completion", () => {
   it("refreshes native models before rescanning the settings cards", async () => {
@@ -79,5 +91,28 @@ describe("MiniMax login completion", () => {
     fireEvent.click(screen.getByText("Done"));
     expect(rescan).toHaveBeenCalledTimes(1);
     expect(refresh).not.toHaveBeenCalled();
+  });
+});
+
+describe("native login command ownership", () => {
+  it("localizes a command conflict without retrying or replacing the original session", async () => {
+    start.mockRejectedValue(
+      new ApiError("login_command_conflict", 409, { error_code: "login_command_conflict" }),
+    );
+    render(<AgentLoginDialog open onOpenChange={vi.fn()} agentName="minimax-acp" />);
+    const { startSession } = terminal.mock.calls.at(-1)![0];
+    await expect(startSession({ cols: 80, rows: 24 })).rejects.toThrow(
+      "Another sign-in command is already running. Close that terminal before trying again.",
+    );
+    expect(start).toHaveBeenCalledTimes(1);
+  });
+
+  it("preserves unrelated start failures without retrying", async () => {
+    const unavailable = new ApiError("agent not found", 404, { error: "agent not found" });
+    start.mockRejectedValue(unavailable);
+    render(<AgentLoginDialog open onOpenChange={vi.fn()} agentName="minimax-acp" />);
+    const { startSession } = terminal.mock.calls.at(-1)![0];
+    await expect(startSession({ cols: 80, rows: 24 })).rejects.toBe(unavailable);
+    expect(start).toHaveBeenCalledTimes(1);
   });
 });

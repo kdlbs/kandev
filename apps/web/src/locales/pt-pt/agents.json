@@ -364,5 +364,6 @@
   "minimaxChooseRegionTitle": "Região da conta MiniMax",
   "minimaxChooseRegionDescription": "Escolha a região da sua conta de subscrição MiniMax.",
   "minimaxRegionCN": "China continental",
-  "minimaxRegionGlobal": "Internacional"
+  "minimaxRegionGlobal": "Internacional",
+  "minimaxLoginConflict": "Já está em execução outro comando de início de sessão. Feche esse terminal antes de tentar novamente."
 }

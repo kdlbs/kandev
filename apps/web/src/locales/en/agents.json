@@ -364,5 +364,6 @@
   "minimaxChooseRegionTitle": "MiniMax account region",
   "minimaxChooseRegionDescription": "Choose the region for your MiniMax subscription account.",
   "minimaxRegionCN": "Mainland China",
-  "minimaxRegionGlobal": "Global"
+  "minimaxRegionGlobal": "Global",
+  "minimaxLoginConflict": "Another sign-in command is already running. Close that terminal before trying again."
 }
