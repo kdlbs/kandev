@@ -63,7 +63,7 @@ func TestStandingInstructions(t *testing.T) {
 		instructions := StandingInstructions("Acme", "ws-1", "Ops", "")
 		for _, tc := range cases {
 			t.Run(tc.name, func(t *testing.T) {
-				tools := " " + strings.Join(ToolNames(tc.p, tc.phase), " ") + " "
+				tools := " " + strings.Join(ToolNames(tc.p, tc.phase, false), " ") + " "
 				for _, want := range tc.want {
 					if !strings.Contains(tools, " "+want+" ") {
 						t.Errorf("ToolNames() = %q, missing %q", tools, want)
