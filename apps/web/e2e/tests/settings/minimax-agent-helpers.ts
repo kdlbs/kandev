@@ -348,6 +348,7 @@ async function exerciseConflictingLogin({
     await capture.screenshot("login", {
       caption: "Competing region sign-in preserves the original terminal",
     });
+    capture.flush();
     await activate(other.getByRole("button", { name: "Close", exact: true }));
     await expect(dialog).not.toBeVisible();
     const live = await api.rawRequest(
