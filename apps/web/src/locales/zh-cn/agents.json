@@ -357,5 +357,8 @@
   "nativeCodexUnavailableTitle": "原生 Codex app server 不可用",
   "nativeCodexUnavailable": "此已保存的配置会保留，但 Codex app-server 功能关闭时无法编辑、复制、启用或启动。你可以删除此配置，或在设置中启用该功能。",
   "nativeCodexUnavailableShort": "功能已关闭",
-  "minimaxLoginDescription": "登录您的 MiniMax 账户。此终端默认启动中国大陆登录流程。使用 Global 账户时，按 Ctrl+C 打开命令行，然后在显示的命令中添加 --region global 并重新运行。MiniMax 将凭据保存在 ~/.minimax。"
+  "minimaxLoginDescription": "登录您的 MiniMax 账户。此终端默认启动中国大陆登录流程。使用 Global 账户时，按 {{interrupt}} 打开命令行，然后在显示的命令中添加 {{regionFlag}} 并重新运行。MiniMax 将凭据保存在 {{dataDir}}。",
+  "minimaxDescription": "MiniMax Code 使用原生 ACP 服务器和订阅账号登录。",
+  "minimaxPassthroughLabel": "CLI 直通模式",
+  "minimaxPassthroughDescription": "直接显示终端，而不是聊天界面"
 }

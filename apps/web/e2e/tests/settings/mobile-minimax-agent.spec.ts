@@ -6,7 +6,15 @@ test("native MiniMax setup and model profile work on phone", async ({
   backend,
   apiClient,
   prCapture,
+  seedData,
 }, info) => {
   test.setTimeout(90_000);
-  await exerciseMiniMaxSetup(testPage, backend, apiClient, info, prCapture);
+  await exerciseMiniMaxSetup({
+    page: testPage,
+    backend,
+    api: apiClient,
+    info,
+    capture: prCapture,
+    seed: seedData,
+  });
 });

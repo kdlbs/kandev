@@ -398,6 +398,7 @@ function AuthDialogs({
         description={agent.login_command?.description}
         command={agent.login_command?.cmd}
         onLoginSuccess={onAuthComplete}
+        refreshModelsOnDone={agent.name === "minimax-acp"}
       />
     );
   }

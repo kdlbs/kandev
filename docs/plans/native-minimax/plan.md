@@ -46,7 +46,7 @@ MiniMax   [MCP] [Login required]
   Sign in to minimax-acp
   MiniMax account login. China: mcode login.
   Global: mcode login --region global.
-  [native terminal; Ctrl+C opens shell]
+  [full wrapped command; native terminal; Ctrl+C opens shell]
   [Done]
 ```
 
@@ -104,3 +104,12 @@ Published CLI requires a supported Node version and optional SQLite install
 scripts. Subscription model discovery cannot be verified live without an account.
 OAuth file copying is not portable because native credential keys include the
 absolute auth-home identity. CLI and ACP model syntax differ.
+
+## Review remediation validation
+
+The setup work order now covers localized install/passthrough metadata, single
+capability-probe ownership after profile login, complete phone command display,
+and an actual native task using the saved model. Installation and task tests
+use isolated executable fixtures; published CLI probes and live OAuth limits
+remain recorded separately. Current-head remote review/check and merge evidence
+is tracked in the persistent Kandev plan and PR #4110.

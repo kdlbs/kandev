@@ -17,6 +17,8 @@ type Props = {
   command?: string[];
   /** Called when the user clicks Done. Used to trigger a capability rescan. */
   onLoginSuccess?: () => void;
+  /** Refresh the catalog when the caller only rescans cached agent cards. */
+  refreshModelsOnDone?: boolean;
 };
 
 /**
@@ -31,6 +33,7 @@ export function AgentLoginDialog({
   description,
   command,
   onLoginSuccess,
+  refreshModelsOnDone = false,
 }: Props) {
   const { t } = useTranslation();
   const startSession: StartPtySession = useCallback(
@@ -38,20 +41,28 @@ export function AgentLoginDialog({
     [agentName],
   );
   const handleLoginSuccess = useCallback(() => {
-    if (agentName !== "minimax-acp") {
+    if (!refreshModelsOnDone) {
       onLoginSuccess?.();
       return;
     }
     const finish = () => onLoginSuccess?.();
     void fetchDynamicModels(agentName, { refresh: true }).then(finish, finish);
-  }, [agentName, onLoginSuccess]);
+  }, [agentName, onLoginSuccess, refreshModelsOnDone]);
 
   return (
     <PtyTerminalDialog
       open={open}
       onOpenChange={onOpenChange}
       title={t("agents:signInToAgent", { name: agentName })}
-      description={agentName === "minimax-acp" ? t("agents:minimaxLoginDescription") : description}
+      description={
+        agentName === "minimax-acp"
+          ? t("agents:minimaxLoginDescription", {
+              regionFlag: "--region global",
+              dataDir: "~/.minimax",
+              interrupt: "Ctrl+C",
+            })
+          : description
+      }
       command={command}
       presentation={agentName === "minimax-acp" ? "quick" : "standard"}
       testIdPrefix="agent-login"

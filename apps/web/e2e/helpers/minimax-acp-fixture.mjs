@@ -6,6 +6,31 @@ import readline from "node:readline";
 // It exercises Kandev's native registration; it never calls a model provider.
 const root = path.dirname(path.dirname(process.argv[1]));
 const authenticated = path.join(root, "authenticated");
+if (path.basename(process.argv[1]) === "npm") {
+  if (process.argv.includes("--version")) {
+    console.log("11.6.0");
+    process.exit(0);
+  }
+  const args = process.argv.slice(2);
+  const expected = [
+    "install",
+    "-g",
+    "@minimax-ai/code@0.5.10",
+    "--registry=https://registry.npmjs.org/",
+    "--ignore-scripts=false",
+    "--include=optional",
+    "--allow-scripts=@minimax-ai/code,better-sqlite3",
+  ];
+  if (JSON.stringify(args) !== JSON.stringify(expected)) {
+    console.error("Unexpected install arguments", args);
+    process.exit(1);
+  }
+  fs.writeFileSync(path.join(root, "installed-args.json"), JSON.stringify(args));
+  fs.copyFileSync(path.join(root, "pending-mcode"), path.join(root, "bin", "mcode"));
+  fs.chmodSync(path.join(root, "bin", "mcode"), 0o755);
+  console.log("MiniMax fixture installation complete");
+  process.exit(0);
+}
 if (process.argv.includes("--version")) {
   console.log("0.5.10");
   process.exit(0);
@@ -70,6 +95,10 @@ lines.on("line", (line) => {
     model = params.value;
     result = { configOptions: configOptions() };
   } else if (method === "session/prompt") {
+    fs.appendFileSync(
+      path.join(root, "turns.jsonl"),
+      JSON.stringify({ args: process.argv.slice(2), model }) + "\n",
+    );
     send({
       method: "session/update",
       params: {

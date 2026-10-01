@@ -94,11 +94,16 @@ Kandev does not add a MiniMax permission bypass flag.
 
 MiniMax owns its config, subscription credentials and sessions under
 `~/.minimax`. Kandev's native integration targets that default directory and
-removes `MINIMAX_DATA_DIR`, `MAVIS_DATA_DIR` and the legacy internal data/profile
-overrides from agent launches and POSIX login. If you already use a named
+removes `MINIMAX_DATA_DIR`, `MAVIS_DATA_DIR`, `__MAVIS_RUNTIME_DATA_DIR` and
+`__MAVIS_RUNTIME_PROFILE` from agent launches and POSIX login. If you already use a named
 MiniMax profile or a custom data directory, sign in to the default directory
 for this integration. MiniMax's installation directory `~/.minimax-code` is
 separate from its data directory.
+
+The login terminal requires a POSIX host shell. On native Windows, sign in with
+`mcode login --no-browser` outside Kandev after clearing the four data/profile
+override variables above from that shell. Otherwise login can target a
+directory that Kandev's ACP runtime does not use.
 
 Containers persist an isolated `.minimax` directory at `/root/.minimax`.
 Remote/container executors need their own installation and native login inside

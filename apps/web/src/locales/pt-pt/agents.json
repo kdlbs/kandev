@@ -357,5 +357,8 @@
   "nativeCodexUnavailableTitle": "O servidor de aplicações Codex nativo está indisponível",
   "nativeCodexUnavailable": "Este perfil guardado é preservado, mas não pode ser editado, duplicado, ativado ou iniciado enquanto a funcionalidade do servidor de aplicações Codex estiver desativada. Pode eliminar o perfil ou ativar a funcionalidade nas Definições.",
   "nativeCodexUnavailableShort": "Funcionalidade desativada",
-  "minimaxLoginDescription": "Inicie sessão na sua conta MiniMax. Este terminal inicia a autenticação para a China continental. Para uma conta Global, prima Ctrl+C para abrir a shell e volte a executar o comando apresentado com --region global. O MiniMax guarda as credenciais em ~/.minimax."
+  "minimaxLoginDescription": "Inicie sessão na sua conta MiniMax. Este terminal inicia a autenticação para a China continental. Para uma conta Global, prima {{interrupt}} para abrir a shell e volte a executar o comando apresentado com {{regionFlag}}. O MiniMax guarda as credenciais em {{dataDir}}.",
+  "minimaxDescription": "MiniMax Code com o seu servidor ACP nativo e autenticação por subscrição.",
+  "minimaxPassthroughLabel": "Modo terminal da CLI",
+  "minimaxPassthroughDescription": "Mostrar o terminal diretamente em vez da interface de conversa"
 }

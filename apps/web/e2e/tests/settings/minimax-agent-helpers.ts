@@ -1,17 +1,27 @@
 import fs from "node:fs";
 import path from "node:path";
 import { expect, type Locator, type Page, type TestInfo } from "@playwright/test";
+import type { SeedData } from "../../fixtures/test-base";
+import { waitForAgentMessage, waitForSessionDone } from "../../helpers/session";
 import type { BackendContext } from "../../fixtures/backend";
 import type { ApiClient } from "../../helpers/api-client";
 import type { PrAssetCapture } from "../../helpers/pr-asset-capture";
 
-export async function exerciseMiniMaxSetup(
-  page: Page,
-  backend: BackendContext,
-  api: ApiClient,
-  info: TestInfo,
-  capture: PrAssetCapture,
-) {
+export async function exerciseMiniMaxSetup({
+  page,
+  backend,
+  api,
+  info,
+  capture,
+  seed,
+}: {
+  page: Page;
+  backend: BackendContext;
+  api: ApiClient;
+  info: TestInfo;
+  capture: PrAssetCapture;
+  seed: SeedData;
+}) {
   const activate = (control: Locator) =>
     info.project.name === "mobile-chrome"
       ? control.tap({ timeout: 10_000 })
@@ -24,12 +34,35 @@ export async function exerciseMiniMaxSetup(
     path.resolve(__dirname, "../../helpers/minimax-acp-fixture.mjs"),
     "utf8",
   );
-  fs.writeFileSync(path.join(bin, "mcode"), `#!${process.execPath}\n${source}`, { mode: 0o755 });
+  fs.writeFileSync(path.join(root, "pending-mcode"), `#!${process.execPath}\n${source}`);
+  fs.writeFileSync(path.join(bin, "npm"), `#!${process.execPath}\n${source}`, { mode: 0o755 });
   const release = await backend.useEnv({
-    KANDEV_MOCK_AGENT: "true",
+    KANDEV_E2E_MOCK: "false",
+    KANDEV_MOCK_AGENT: "false",
+    KANDEV_MOCK_PROVIDERS: "true",
     PATH: `${bin}${path.delimiter}${process.env.PATH}`,
   });
+  let createdAgent = false;
   try {
+    await page
+      .context()
+      .addCookies([{ name: "kandev_locale", value: "pt-pt", url: backend.baseUrl }]);
+    await page.goto("/settings/agents/browse");
+    const installCard = page.getByTestId("install-card-minimax-acp");
+    await expect(installCard).toBeVisible({ timeout: 15_000 });
+    await expect(installCard).toContainText(
+      "MiniMax Code com o seu servidor ACP nativo e autenticação por subscrição.",
+    );
+    await page.context().addCookies([{ name: "kandev_locale", value: "en", url: backend.baseUrl }]);
+    await page.reload();
+    await expect(installCard.locator("code")).toContainText("@minimax-ai/code@0.5.10");
+    expect(
+      await installCard.evaluate((element) => element.scrollWidth <= element.clientWidth),
+    ).toBe(true);
+    await installCard.scrollIntoViewIfNeeded();
+    await capture.screenshot("install", { caption: "MiniMax native CLI installation" });
+    await activate(page.getByTestId("install-button-minimax-acp"));
+    await expect.poll(() => fs.existsSync(path.join(root, "installed-args.json"))).toBe(true);
     await expect
       .poll(
         async () => {
@@ -47,6 +80,11 @@ export async function exerciseMiniMaxSetup(
     const auth = page.getByTestId("auth-icon-minimax-acp");
     await expect(auth).toBeVisible({ timeout: 15_000 });
     await activate(auth);
+    const command = page.getByTestId("agent-login-command").locator("code");
+    await expect(command).toHaveCSS("white-space", "pre-wrap");
+    expect(await command.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(
+      true,
+    );
     const help = page.getByText(/For a Global account, press Ctrl\+C/);
     await expect(help).toBeVisible();
     await expect.poll(() => fs.existsSync(path.join(root, "authenticated"))).toBe(true);
@@ -91,7 +129,16 @@ export async function exerciseMiniMaxSetup(
         { timeout: 30_000 },
       )
       .toBe("ok");
-    const { agents } = await api.listAgents();
+    let { agents } = await api.listAgents();
+    if (!agents.some((item) => item.name === "minimax-acp")) {
+      const created = await api.rawRequest("POST", "/api/v1/agents", {
+        name: "minimax-acp",
+        profiles: [],
+      });
+      expect(created.ok, await created.text()).toBe(true);
+      createdAgent = true;
+      ({ agents } = await api.listAgents());
+    }
     const agent = agents.find((item) => item.name === "minimax-acp");
     expect(agent).toBeTruthy();
     const profile = await api.createAgentProfile(agent!.id, "MiniMax fixture profile", {
@@ -121,13 +168,58 @@ export async function exerciseMiniMaxSetup(
           () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
         ),
       ).toBe(true);
+      await page
+        .context()
+        .addCookies([{ name: "kandev_locale", value: "pt-pt", url: backend.baseUrl }]);
+      await page.reload();
+      const passthrough = page.getByTestId("cli-passthrough-toggle");
+      await expect(passthrough).toContainText("Modo terminal da CLI");
+      await expect(passthrough).toContainText(
+        "Mostrar o terminal diretamente em vez da interface de conversa",
+      );
+      await page
+        .context()
+        .addCookies([{ name: "kandev_locale", value: "en", url: backend.baseUrl }]);
+      await page.reload();
+      await expect(selector).toContainText("MiniMax-M2.7-highspeed");
       await capture.screenshot("profile", {
         caption: "MiniMax native model saved in an agent profile",
       });
+      const task = await api.createTaskWithAgent(
+        seed.workspaceId,
+        "Native MiniMax fixture task",
+        profile.id,
+        {
+          description: "Reply with the fixture response.",
+          workflow_id: seed.workflowId,
+          workflow_step_id: seed.startStepId,
+          repository_ids: [seed.repositoryId],
+        },
+      );
+      expect(task.session_id).toBeTruthy();
+      await waitForAgentMessage(api, task.session_id!, "MiniMax fixture response", 30_000);
+      await waitForSessionDone(
+        api,
+        task.id,
+        task.session_id!,
+        "MiniMax fixture turn settles",
+        30_000,
+      );
+      const turns = fs
+        .readFileSync(path.join(root, "turns.jsonl"), "utf8")
+        .trim()
+        .split("\n")
+        .map((line) => JSON.parse(line));
+      expect(turns).toContainEqual({
+        args: ["acp"],
+        model: "m:minimax:MiniMax-M2.7-highspeed:v:thinking",
+      });
+      await api.deleteTask(task.id);
     } finally {
       await api.deleteAgentProfile(profile.id, true);
     }
   } finally {
+    if (createdAgent) await api.deleteCustomAgentByName("minimax-acp");
     await release();
     fs.rmSync(root, { recursive: true, force: true });
   }

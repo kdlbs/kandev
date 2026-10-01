@@ -106,3 +106,19 @@ commands, credential ownership and live-test limits.
 ## Implementation plans
 
 - [Native MiniMax delivery](../../../plans/native-minimax/plan.md)
+
+## Setup validation refinements
+
+The agent-card login caller requests a native model refresh before rescanning
+cached cards. The profile auth panel already owns capability refresh and does
+not request an additional dialog probe. The login dialog renders the complete
+sanitation command as wrapped text on phones. Localized MiniMax catalog and
+passthrough descriptions resolve at render time; command flags, Ctrl+C and
+credential paths use interpolation to preserve technical bytes in pseudo
+localization. The login PTY retains its existing POSIX host-shell boundary.
+
+The deterministic setup fixture disables the E2E installed-agent bypass,
+executes the production install job against an isolated npm executable, and
+starts a native task with the saved profile model. Its prompt record proves
+model propagation through the runtime. This is separate from published-CLI
+protocol probes and does not claim a live subscription login or model turn.

@@ -27,6 +27,7 @@ describe("MiniMax login completion", () => {
         onOpenChange={vi.fn()}
         agentName="minimax-acp"
         onLoginSuccess={rescan}
+        refreshModelsOnDone
       />,
     );
     fireEvent.click(screen.getByText("Done"));
@@ -45,12 +46,29 @@ describe("MiniMax login completion", () => {
         onOpenChange={vi.fn()}
         agentName="minimax-acp"
         onLoginSuccess={rescan}
+        refreshModelsOnDone
       />,
     );
     fireEvent.click(screen.getByText("Done"));
     await waitFor(() => expect(rescan).toHaveBeenCalledTimes(1));
     expect(refresh).toHaveBeenCalledTimes(1);
     expect(refresh).toHaveBeenCalledWith("minimax-acp", { refresh: true });
+  });
+
+  it("lets the profile callback own its single capability refresh", async () => {
+    refresh.mockResolvedValue({ status: "ok" });
+    const profileRefresh = vi.fn(() => refresh("minimax-acp", { refresh: true }));
+    render(
+      <AgentLoginDialog
+        open
+        onOpenChange={vi.fn()}
+        agentName="minimax-acp"
+        onLoginSuccess={profileRefresh}
+      />,
+    );
+    fireEvent.click(screen.getByText("Done"));
+    await waitFor(() => expect(profileRefresh).toHaveBeenCalledTimes(1));
+    expect(refresh).toHaveBeenCalledTimes(1);
   });
 
   it("retains other agents' login completion behavior", () => {
