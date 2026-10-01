@@ -12,6 +12,11 @@ owners:
 
 ## Authority
 
+Task-resource cleanup registered by `system.Service.StartBackground` performs
+due work asynchronously. Its start/stop contract follows
+[Task Cleanup Source Manifest](archive-source-manifest.md#background-recovery).
+This does not change the mandatory archive-cascade recovery gate.
+
 This document is the exhaustive production starter, subscription, listener,
 process, sweep, route-publication, readiness, and cleanup catalog for the archive
 recovery gate. [Archive Cascade Boundary Contracts](archive-cascade-boundary-contracts.md#mandatory-recovery-runtime)
