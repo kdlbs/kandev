@@ -149,6 +149,8 @@ Watches
   Save is disabled: Keep at least one project in scope or include tasks with no repository.
 ```
 
+Phone: one column; set and repository cards with a full-width Put/Take button, 44 px touch targets.
+
 ## Traceability
 
 | Criteria | Work order |

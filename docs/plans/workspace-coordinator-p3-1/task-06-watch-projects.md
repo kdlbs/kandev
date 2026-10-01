@@ -36,11 +36,13 @@ copilot hint. Work order 01 and 04 call the same filter, so 06 may land before
 - `internal/coordinator/watch/`: `Predicate.InProjects` (compiled in,
   enforcing stored scope whatever the flag), `Resolver`, `watch.Task`; every
   existing workflow-watch call site moves to `watch.Task` (read tools, propose
-  tools, wake recorder, backstop, automatic counts, stall reads).
+  tools, wake recorder, backstop, delivery recheck, open watched count, automatic counts,
+  stall reads); `list_tasks_kandev` omits out-of-scope tasks.
 - Store: `project_scope` and `include_no_repository` on `coordinators`,
   `coordinator_watch_projects`; the subscription to repository and repository
   set deletion events; the `projects` member of the settings request with
   validation.
+- Setup: the optional `projects` member of `POST /coordinators/setup` (flag-gated, step `projects`).
 - Web: `watch-filter.ts` with the resolved `projects` input,
   `AttentionTask.repositoryIds`, the Projects part of the Watches section, the
   guided-setup step, the copilot scope hint, copy in six locales.

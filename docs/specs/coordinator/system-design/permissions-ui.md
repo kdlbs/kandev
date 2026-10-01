@@ -190,7 +190,9 @@ new ones", on when the draft scope is `all`.
   to the Configure page's Watches section,
   `/settings/workspaces/:id/coordinators/:cid?section=watches` (managers
   only; readers see the notice without the link). The notice follows the
-  stored value, not the draft.
+  stored value, not the draft. When the boards are watched but the stored Projects selection is
+  known and empty, the same component shows "This coordinator watches no project." with **Choose
+  projects** (same link rules; [watch projects](watch-projects.md#screens)).
 - **Reader.** A reader sees the switch and each board's state, all disabled,
   with no Put/Take buttons.
 
@@ -212,11 +214,17 @@ classification already ignores it. `AttentionTask` gains
 The watch set input is the effective set from `GET .../settings` (`scope` and
 effective `workflow_ids`), read through the hook
 `useCoordinatorWatchSet(workspaceId, coordinatorId)`. It reads on screen
-mount, on **Try again** and on each `coordinator.updated` event for this
-coordinator (a Watches save by any manager publishes it, so open screens
-follow the change without a reload), keeps its last successful value with its
+mount, on **Try again**, on each `coordinator.updated` event for this
+coordinator (a Watches or Projects save by any manager publishes it, so open screens
+follow the change without a reload) and, whenever the hook is active at all (the
+phase-2 flag on, whatever the phase 3.1 flag or the stored scope), on the workspace's `repository_set.created`, `repository_set.updated`,
+`repository_set.deleted` and `repository.deleted` events, since a set membership change
+publishes no `coordinator.updated`, keeps its last successful value with its
 load time, and is not read at all while the phase-2 flag is off (no filter,
-phase-1 behaviour). Reads are numbered and only the latest response is
+phase-1 behaviour); with the phase-2 flag on and the phase 3.1 flag off the read still
+carries the stored Projects enforcement member (`projects`, present only while the
+stored scope is `selected`) and the client applies it in every path above
+(`AC-COORDINATOR-PERMISSIONS-005.9`). Reads are numbered and only the latest response is
 applied, so a late older response never replaces a newer value or a newer
 failure; the kept value belongs to one coordinator and is discarded when the
 viewed coordinator changes, so the screens are back in the not-yet-loaded
@@ -243,7 +251,9 @@ filtered.
 screens show no task or stall items and no counts derived from them (the same
 loading state as a tasks input that has never loaded), and the proposals
 show. If the first read fails, the screens do the same and the banner gains
-the line "Could not load which boards this coordinator watches." with
+the line "Could not load which boards this coordinator watches." (and, when the read succeeded
+but its `projects` member could not resolve the sets, the sibling line "Could not load which
+projects this coordinator watches.") with
 **Try again**; after an earlier success a failed re-read keeps the last set
 and the line reads "... Showing what was loaded at <time>." The line comes
 after the three input lines of
