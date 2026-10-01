@@ -91,10 +91,13 @@ Threaded the cleanup attempt context through source parsing, no-follow path
 traversal, recursive directory capture, submodule capture, and bounded digest
 reads. The reader stops after the first observed cancellation, returns no partial
 digest, and closes owned handles while preserving cancellation and close errors.
+Added a regression proving a close failure joined with a missing path cannot be
+accepted as an ordinary deletion.
 The cleanup boundary test proves a canceled claimed job retains retry diagnostics,
 persists no partial manifest, and does not remove its worktree.
 
 Passed:
 
 - `(cd apps/backend && go test -race -count=1 -run '^TestArchiveManifest' ./internal/worktree)`
+- `(cd apps/backend && go test -count=1 -run '^TestArchiveManifestDeletedPathDoesNotIgnoreCloseFailure$' ./internal/worktree)`
 - `(cd apps/backend && go test -count=1 -run 'TestCleanupManifestCancellationBlocksRemoval|TestCleanupCaptureFailureBlocksWorktreeRemoval|TestCleanupRetryReusesPersistedSourceManifest|TestCleanupPersistsSourceManifestAfterStopBeforeWorktreeRemoval|TestRetryTaskResourceCleanupJobPersistsAfterRunContextCancellation|TestRetryTaskResourceCleanupPersistsAfterDeadlineExpiry' ./internal/task/service)`

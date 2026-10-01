@@ -12,8 +12,10 @@ owners:
 
 ## Authority
 
-Task-resource cleanup registered by `system.Service.StartBackground` performs
-due work asynchronously. Its start/stop contract follows
+`system.Service.StartBackground` starts `StorageRuntime`, which registers the
+task-resource cleanup worker. Its owned goroutine performs due work
+asynchronously; `StartBackground` does not wait for cleanup recovery or
+filesystem work. The worker's start/stop contract follows
 [Task Cleanup Source Manifest](archive-source-manifest.md#background-recovery).
 This does not change the mandatory archive-cascade recovery gate.
 

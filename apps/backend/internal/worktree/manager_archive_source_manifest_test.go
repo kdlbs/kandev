@@ -596,6 +596,24 @@ func TestArchiveManifestHandlesDeletedRenameDestination(t *testing.T) {
 	}
 }
 
+// @covers AC-TASKS-ARCHIVE-SOURCE-MANIFEST-001.4
+func TestArchiveManifestDeletedPathDoesNotIgnoreCloseFailure(t *testing.T) {
+	closeErr := errors.New("parent directory close failed")
+	err := errors.Join(os.ErrNotExist, archiveSourceManifestCloseError(closeErr))
+	if !errors.Is(err, os.ErrNotExist) || !errors.Is(err, closeErr) {
+		t.Fatalf("combined capture error %v does not preserve both causes", err)
+	}
+	if archiveSourceManifestIsDeletedPath("D ", err) {
+		t.Fatal("deleted path classification suppressed a directory close failure")
+	}
+	if !archiveSourceManifestIsDeletedPath("D ", os.ErrNotExist) {
+		t.Fatal("missing deleted path was not accepted")
+	}
+	if archiveSourceManifestIsDeletedPath(" M", os.ErrNotExist) {
+		t.Fatal("missing modified path was treated as a deletion")
+	}
+}
+
 // @covers AC-TASKS-ARCHIVE-SOURCE-MANIFEST-001.3
 func TestArchiveManifestCapturesUnmergedIndex(t *testing.T) {
 	repo := initGitRepoForWorktreeTest(t)

@@ -28,6 +28,8 @@ type ArchiveSourceManifest struct {
 	Entries           []ArchiveSourceManifestEntry `json:"entries,omitempty"`
 }
 
+var errArchiveSourceManifestHandleClose = errors.New("archive source manifest handle close failed")
+
 // ArchiveSourceManifestEntry identifies one changed path without retaining its
 // source bytes. A missing digest without an omission marker represents deletion.
 type ArchiveSourceManifestEntry struct {
@@ -280,10 +282,10 @@ func archiveSourceManifestEntry(ctx context.Context, root string, fields []strin
 	entry := ArchiveSourceManifestEntry{Path: path, Status: status}
 	digest, omitted, err := archiveSourceManifestDigestForEntry(ctx, root, path, status)
 	if err != nil {
-		if errors.Is(err, os.ErrNotExist) && (status[0] == 'D' || status[1] == 'D') {
+		if archiveSourceManifestIsDeletedPath(status, err) {
 			return entry, consumed, nil
 		}
-		if errors.Is(err, os.ErrNotExist) {
+		if archiveSourceManifestIsMissingPathError(err) {
 			return ArchiveSourceManifestEntry{}, 0, fmt.Errorf("source path disappeared before content identity was captured")
 		}
 		return ArchiveSourceManifestEntry{}, 0, err
@@ -315,6 +317,21 @@ func archiveSourceManifestStatusPath(fields []string, index int) (string, string
 	return path, field[:2], consumed, nil
 }
 
+func archiveSourceManifestIsDeletedPath(status string, err error) bool {
+	return len(status) == 2 && (status[0] == 'D' || status[1] == 'D') && archiveSourceManifestIsMissingPathError(err)
+}
+
+func archiveSourceManifestIsMissingPathError(err error) bool {
+	return errors.Is(err, os.ErrNotExist) && !errors.Is(err, errArchiveSourceManifestHandleClose)
+}
+
+func archiveSourceManifestCloseError(err error) error {
+	if err == nil {
+		return nil
+	}
+	return fmt.Errorf("%w: %w", errArchiveSourceManifestHandleClose, err)
+}
+
 func archiveSourceManifestPath(root, path string) error {
 	if path == "" || filepath.IsAbs(path) {
 		return fmt.Errorf("invalid source path")
@@ -332,7 +349,7 @@ func archiveSourceManifestDigestForEntry(ctx context.Context, root, path, status
 		return "", false, err
 	}
 	digest, omitted, captureErr := archiveSourceManifestDigestEntryAt(ctx, parent, name, status)
-	closeErr := parent.Close()
+	closeErr := archiveSourceManifestCloseError(parent.Close())
 	return digest, omitted, errors.Join(captureErr, closeErr)
 }
 
@@ -374,7 +391,7 @@ func archiveSourceManifestDigestEntryAt(
 			return "", false, err
 		}
 		digest, digestErr := archiveSourceManifestDirectoryDigestHandle(ctx, directory)
-		closeErr := directory.Close()
+		closeErr := archiveSourceManifestCloseError(directory.Close())
 		return digest, false, errors.Join(digestErr, closeErr)
 	}
 	f, err := parent.OpenFile(name)
@@ -517,7 +534,7 @@ func archiveSourceManifestCollectSubdirectory(
 		return err
 	}
 	collectErr := archiveSourceManifestCollectDirectory(ctx, child, path, records)
-	closeErr := child.Close()
+	closeErr := archiveSourceManifestCloseError(child.Close())
 	return errors.Join(collectErr, closeErr)
 }
 
@@ -565,19 +582,19 @@ func archiveSourceManifestOpenParent(
 	components := strings.Split(filepath.ToSlash(filepath.Clean(path)), "/")
 	for _, component := range components[:len(components)-1] {
 		if err := ctx.Err(); err != nil {
-			return nil, "", errors.Join(err, directory.Close())
+			return nil, "", errors.Join(err, archiveSourceManifestCloseError(directory.Close()))
 		}
 		child, err := directory.OpenSubdirectory(component)
 		if err != nil {
-			return nil, "", errors.Join(err, directory.Close())
+			return nil, "", errors.Join(err, archiveSourceManifestCloseError(directory.Close()))
 		}
-		if err := directory.Close(); err != nil {
-			return nil, "", errors.Join(err, child.Close())
+		if closeErr := archiveSourceManifestCloseError(directory.Close()); closeErr != nil {
+			return nil, "", errors.Join(closeErr, archiveSourceManifestCloseError(child.Close()))
 		}
 		directory = child
 	}
 	if err := ctx.Err(); err != nil {
-		return nil, "", errors.Join(err, directory.Close())
+		return nil, "", errors.Join(err, archiveSourceManifestCloseError(directory.Close()))
 	}
 	return directory, components[len(components)-1], nil
 }
@@ -596,17 +613,17 @@ func archiveSourceManifestFileDigest(ctx context.Context, root, path string) (st
 	}
 	mode, err := parent.LstatEntry(filepath.Base(path))
 	if err != nil {
-		return "", errors.Join(err, parent.Close())
+		return "", errors.Join(err, archiveSourceManifestCloseError(parent.Close()))
 	}
 	if !mode.IsRegular() {
-		return "", errors.Join(fmt.Errorf("source path is not a regular file"), parent.Close())
+		return "", errors.Join(fmt.Errorf("source path is not a regular file"), archiveSourceManifestCloseError(parent.Close()))
 	}
 	f, err := parent.OpenFile(filepath.Base(path))
 	if err != nil {
-		return "", errors.Join(err, parent.Close())
+		return "", errors.Join(err, archiveSourceManifestCloseError(parent.Close()))
 	}
 	digest, digestErr := archiveSourceManifestReadDigest(ctx, f)
-	return digest, errors.Join(digestErr, parent.Close())
+	return digest, errors.Join(digestErr, archiveSourceManifestCloseError(parent.Close()))
 }
 
 func openArchiveSourceDirectory(root, target string) (storageworkspaces.DirectoryHandle, error) {
@@ -638,7 +655,7 @@ func archiveSourceManifestReadDigest(ctx context.Context, f io.ReadCloser) (stri
 			break
 		}
 	}
-	closeErr := f.Close()
+	closeErr := archiveSourceManifestCloseError(f.Close())
 	readErr = errors.Join(readErr, ctx.Err())
 	if readErr != nil {
 		return "", errors.Join(readErr, closeErr)

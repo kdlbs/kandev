@@ -113,6 +113,8 @@ Capture checks cancellation before filesystem work and between entries.
 A bounded read loop checks cancellation before each read and after each read
 before accepting content. It checks again before returning a complete digest.
 All open files and directory handles close on cancellation or failure.
+Close failures remain capture errors and cannot be masked by an expected
+missing-path error for a deleted entry.
 
 Cancellation errors wrap `context.Canceled` or `context.DeadlineExceeded` so
 `errors.Is` works through cleanup error wrappers. The worker does not persist
@@ -145,9 +147,11 @@ new worker until the prior worker drains. Repeated starts and stops are
 idempotent. Capture cancellation lets stop drain source inspection promptly.
 
 The archive-cascade recovery gate and outbox readiness obligations remain in
-[Runtime Startup Registry](runtime-startup-registry.md). This change moves
-task-resource filesystem cleanup off `system.Service.StartBackground`; it does
-not bypass the mandatory archive-cascade gate.
+[Runtime Startup Registry](runtime-startup-registry.md). `system.Service.StartBackground`
+still starts `StorageRuntime`, which registers the task-resource cleanup worker.
+The worker's owned goroutine performs due cleanup and recovery, so
+`StartBackground` does not wait for filesystem work. This does not bypass the
+mandatory archive-cascade gate.
 
 Cascade cleanup keeps the recovery contract in
 `AC-TASKS-RUNTIME-CLEANUP-001.32`. A deadline is insufficient evidence of a
