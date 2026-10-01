@@ -57,9 +57,9 @@ found that launches the runtime for it afterwards.
 ## Verification
 
 ```bash
-cd apps/backend && go test -tags fts5 ./internal/orchestrator -run 'TestClassifyIdleReclaimDisposition|TestReclaimIdleSession|TestPromptAfterIdleReclaimLaunchesPreparedSession|TestIdleReaper_' -count=1
-cd apps/backend && go test -tags fts5 ./internal/agent/runtime/lifecycle -run 'TestDeleteExecutorRunning' -count=1
-cd apps/backend && golangci-lint run ./internal/orchestrator/... ./internal/agent/runtime/lifecycle/... --new-from-rev=e96910ff9a44d9c5e2970f8b92f50039b001d31e --timeout=10m
+(cd apps/backend && go test -tags fts5 ./internal/orchestrator -run 'TestClassifyIdleReclaimDisposition|TestReclaimIdleSession|TestPromptAfterIdleReclaimLaunchesPreparedSession|TestIdleReaper_' -count=1)
+(cd apps/backend && go test -tags fts5 ./internal/agent/runtime/lifecycle -run 'TestDeleteExecutorRunning' -count=1)
+(cd apps/backend && golangci-lint run ./internal/orchestrator/... ./internal/agent/runtime/lifecycle/... --new-from-rev=e96910ff9a44d9c5e2970f8b92f50039b001d31e --timeout=10m)
 python3 scripts/list-docs.py validate
 python3 scripts/lint-spec-files.py --all
 git diff --check
@@ -85,3 +85,13 @@ git diff --check
   `session runtime unavailable: ... session is not resumable: no executor record`.
   After the change they pass.
 - The existing idle reaper tests pass unchanged; their rows are `running`.
+
+## Maintainer fixup results (2026-10-01)
+
+- Each backend verification command now runs in a subshell, so later commands
+  start from the repository root.
+- The idle-reclaim skip log includes the row status and whether a resume token
+  exists. It does not log the token value.
+- The focused orchestrator and lifecycle tests pass, and the changed-package
+  backend lint reports no issues.
+- Specification validation and whitespace checks pass.

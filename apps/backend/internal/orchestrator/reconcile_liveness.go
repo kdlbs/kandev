@@ -373,6 +373,8 @@ func (s *Service) reclaimIdleSession(ctx context.Context, sessionID string) erro
 			zap.String("session_id", sessionID),
 			zap.String("disposition", string(decision)),
 			zap.String("session_state", string(session.State)),
+			zap.Bool("has_resume_token", running.ResumeToken != ""),
+			zap.String("row_status", running.Status),
 			zap.Bool("agent_running", agentRunning),
 			zap.Bool("has_active_turn", hasActiveTurn))
 		return nil
