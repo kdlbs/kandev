@@ -102,8 +102,7 @@ unattended-turn row now matches, one conditional statement (`WHERE trigger =
 runs, so a start that beat the reservation ends as a `wake`. Nothing else ever
 changes a stored trigger (`001.2`).
 
-If the start event was lost, the completion handler inserts the row with the
-same `ON CONFLICT` rule and derives the stamp at that time. The trigger match
+Completion always runs insert-if-missing first (the same `ON CONFLICT (session_id, session_turn_id) DO NOTHING` insert, whether or not the start event was lost), then the conditional update below, so a completion handled before its start, or a start handled after completion, cannot leave a row unfinished: the start insert never touches an existing row, and the update matches only `finished_at IS NULL`. If the start event was lost, the insert derives the stamp at that time. The trigger match
 is the same but reads the unattended-turn row in any status except `send_failed` (the acceptance criterion states this exclusion; a `send_failed` or pause-settled unbound row never started a turn, so letting it match would label a manager's message a `wake`)
 and except a row settled while unbound (`session_turn_id IS NULL` and `outcome`
 set: a failed or pause-stopped delivery never started a turn, so such a row
@@ -168,18 +167,24 @@ The verdict is computed from stored rows by a pure function
 
 1. `blocked`: outcome is `failed`, `cancelled`, `interrupted`, `stopped_at_ceiling`
    or `stopped_by_pause`; or the turn has at least one call
-   row, every one refused, `calls_truncated` is false, and no proposal with this
+   row, every one refused, `calls_truncated` is false, no entry for its session on the
+   retry list, and no proposal with this
    turn id. A truncated digest never yields `blocked` by refusals, because a
    dropped call may have been allowed.
 2. `acted`: an automatic approval executed inside the turn. It is read from
-   `coordinator_activity` rows with this turn id and the automatic actor.
+   `coordinator_activity` rows with outcome `approved`, authorization `automatic`
+   and `unattended_turn_id` equal to the id of the unattended-turn row bound to
+   this ledger row (`ledger_turn_id`). A failed automatic approval
+   (`failProposalStore` writes `automatic` with outcome `failed`) is excluded.
 3. `proposed`: at least one proposal has this turn id.
-4. `needs_you`: trigger `wake`, no proposal, and a wake of kind question or
-   permission delivered in this turn (the `wake_kinds` copy names the kinds; the
-   wake rows are those of the bound unattended row) is still `delivered` at
-   completion, that is not `superseded` by a later wake of the same episode key.
-   Wakes have only `pending`, `delivered` and `superseded`, so "unanswered" is
-   exactly "delivered and not superseded".
+4. `needs_you`: trigger `wake`, no proposal, `wake_kinds` names a question or
+   permission wake, and the coordinator's conversation session still has a
+   pending interaction at grade time. The signal is the pending-interaction read
+   admission already uses (`ConversationReader.ActionPending`, backed by
+   `ListPendingInteractions` for the session id). Wake status is never the
+   signal: `supersedeWake` only moves `pending` wakes, so a delivered wake never
+   becomes `superseded` and cannot show an answer. A failed read grades the turn
+   as not `needs_you` and is logged.
 5. `nothing_needed`.
 
 A turn with zero call rows and no proposal is `nothing_needed`, not `blocked`:
@@ -205,7 +210,7 @@ Deviation is visible because a manager save archives the conversation
 The model is empty at start and set at completion, and again by the ledger's
 own 10-minute pass over rows finished in the last 24 hours whose model is still
 empty (usage is often written after completion, as the turn cost recompute
-already handles), from the provider-reported model of the turn's first usage row
+already handles), from the provider-reported model of the turn's first usage row with a non-empty model
 (`ORDER BY created_at, id`), lower-cased and trimmed. It is never derived from the agent profile (`002.2`). The harness is
 `<agent type>@<build version>` built from the same usage row's agent type
 and the build version (a constructor argument the composition root sets from
@@ -221,13 +226,17 @@ field is empty (`002.5`).
 
 Which rows a guarded call wrote is decided by columns, never by actor: a
 coordinator_activity row is a guarded-call row when `outcome = 'proposed'` or
-`"authorization" IN ('denied', 'automatic')`, and never when `undo_of_id IS NOT
+`"authorization" = 'denied'`, and never when `undo_of_id IS NOT
 NULL`. Manager approve, reject, fail and return rows carry `authorization =
 'requires_approval'` with outcome `approved`, `failed`, `rejected` or
 `returned`, and their actor column is NULL when auth is disabled, so the actor
-column discriminates nothing. Automatic approvals carry the raiser as actor and
-`authorization = 'automatic'`; the `acted` verdict reads exactly that
-authorization with this turn id. Proposals are all created by guarded calls, so
+column discriminates nothing. Automatic approvals (successful and failed) carry `authorization = 'automatic'` and the
+unattended-turn id, are written on the decision path outside the session
+(`decision_phase2.go`), and never get a `turn_id`; the `acted` verdict links them
+through `unattended_turn_id` and counts outcome `approved` only. Refusal rows coalesce within 60 seconds on class, reason and `unattended_turn_id`
+(`recordRefusalTx`, `activity.go`); that match gains `turn_id` equality (`turn_id IS NULL` when
+the call has no active ledger turn), so two attended turns never share one row and a
+coalesced row keeps the turn id of the call that created it. Proposals are all created by guarded calls, so
 every proposal with a NULL `turn_id` in the window is repairable.
 
 The guarded-call layer already resolves the calling session. `ledger.ActiveTurnID(sessionID)`
@@ -242,7 +251,12 @@ When the insert changes no row (the row exists), the handler reads the existing
 row by `(session_id, session_turn_id)`: an unfinished row replaces the entry
 (`rowID` of the existing row), and a finished row removes the entry if it still
 holds the generated id, so a redelivered start never leaves an entry whose id
-has no row. The rebuild at startup puts the newest unfinished row of each session
+has no row. Every map change is a compare-and-swap on `(rowID, sessionTurnID)`: completion
+removes the entry only when it still holds the completing turn's `sessionTurnID`, a start never
+replaces an entry whose `sessionTurnID` belongs to a later turn, and an insert that fails with
+an error other than a conflict removes the entry it set if it still holds the generated id. A
+guarded call that read that id in the meantime may persist it; such a dangling turn id reads as
+unknown (`003.3`). The rebuild at startup puts the newest unfinished row of each session
 by `(started_at DESC, id DESC)` in the map; older unfinished rows of the same
 session stay and are settled by completion or the retention settle. The handler
 itself is asynchronous, so a guarded call that beats it sees no entry and its
@@ -273,14 +287,17 @@ the coordinator's turn for that session with `started_at <=` enqueue time and
 so a late write is never charged to the next turn. An entry that resolves to no
 turn is parked, not retried inline: the writer moves it to a retry list with
 its next attempt time (1 second later) and goes on to the next queue entry, so
-a start race never stalls the queue. After three failed attempts it is dropped,
+a start race never stalls the queue. After three retries (four attempts in all, one second apart, as the completion re-enqueue of the outcome read does) it is dropped,
 counting stage `call_unattributed`. A parked entry counts as settled for the
 completion drain (the written-sequence advances when an entry is written,
 dropped or parked); if it resolves after the turn's verdict was stored, its row
 is still written but is absent from that verdict, as for any late call. The
 writer is a single goroutine, so the count-then-insert of the 100-call cap
 cannot race and the call row ids are the recording order; a full
-queue drops the entry and counts stage `call_queue_full`. The writer inserts one
+queue drops the entry, counts stage `call_queue_full` and, when the session has an active
+ledger turn in the map, sets that turn's `calls_truncated`. A call dropped after its retries
+resolved no turn and cannot be marked; the verdict reads a turn as having an incomplete digest
+when `calls_truncated` is set or an entry for its session is still on the retry list. The writer inserts one
 row unless the turn already has 100, in which case it sets `calls_truncated` once
 and drops the call. The action name is the tool's registered name; arguments and
 results are never passed in (`001.4`). Guard code holds no dependency on the
@@ -303,7 +320,7 @@ It selects the workspace's tasks that are not archived and not in a step that
 completes tasks, filtered through the coordinator's watch set
 ([watch projects](watch-projects.md#the-filter)), ordered `(updated_at DESC,
 task_id)`, capped at 200, and the coordinator's open proposals capped at 50
-(oldest first, ties by id). Per task it keeps task id, step id, state, the
+(oldest first, ties by id). Proposals created at or after the turn's `started_at` are left out of the open-proposal list and of the per-task kinds, so a turn's own proposals never appear in its snapshot; task rows reflect their state when the handler reads them. Per task it keeps task id, step id, state, the
 task's last update time (null sorts last) and the kinds of the coordinator's
 `pending` proposals that target it (each once, sorted ascending), only. Per
 open proposal (status `pending`, `approving` or `failed`, the proposal store's
@@ -311,7 +328,10 @@ open proposal (status `pending`, `approving` or `failed`, the proposal store's
 none), only (`006.1`). A cap carries its own total: `tasks_total`,
 `proposals_total`. The body is canonical JSON (keys sorted, arrays in projection
 order), its SHA-256 is the hash, and `INSERT ... ON CONFLICT (hash) DO NOTHING`
-stores it once. A snapshot capped by the item limit carries `"truncated":
+stores it once, in the same transaction as the ledger row insert that first names it. Retention's
+delete re-check runs inside its own batch transaction; the one window left, a delete committing between
+the snapshot's conflict check and the ledger commit, leaves a row whose snapshot is gone and reads
+as `no_snapshot`, never as an error. A snapshot capped by the item limit carries `"truncated":
 true` and the total. It holds no title or text (`006.2`); a failed build leaves
 `snapshot_hash` empty (`006.3`).
 
@@ -329,7 +349,7 @@ proposal ids are the turn's proposals ordered by `(created_at, id)`, the first 2
 errors use the phase-1 validation error type naming the argument. `task`
 outside the effective watch set returns the phase-1 not-found error before the
 query (`004.4`); a digest entry outside it is returned with `target` omitted
-after the query. A read error returns the phase-1 unavailable error; the page is
+after the query. A failed watch-set read returns the same unavailable error and no page. A read error returns the phase-1 unavailable error; the page is
 built entirely in memory first so no partial page is sent (`004.5`).
 
 ## Gating

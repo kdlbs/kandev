@@ -65,15 +65,15 @@ outcome side is [outcomes](outcomes.md), the harness that consumes the data is
   time the recorder handled it), and a dream episode's turn shall be a session
   turn like any other, so its session turn id is never empty. Starting the
   same session turn twice, or a redelivered start event, shall leave exactly
-  one row.
+  one row, and a start that is handled after the same turn's completion shall
+  leave the finished row unchanged.
 - **AC-COORDINATOR-TURN-LEDGER-001.2:** The trigger shall be `wake` when the session turn is the one an unattended-turn row of phase 3 is bound to or has reserved (the row carries the kinds of the wakes it delivered, at most 20, read from the wake rows whose turn id is that unattended-turn row's id, in order of kind then wake id), `dream` when it is a shadow dream episode, and `message` otherwise; a manager's message during an open delivery shall not make its turn a `wake`. A turn that has no row when it completes (a start event that was lost) shall get one at completion with the stamp read then, and its trigger derived by the same rule from the unattended-turn row in any status except `send_failed` and a row settled while it had no bound session turn (such a delivery never started a turn, so it cannot make a manager's message a `wake`). A delivery that never started a turn shall have no ledger row.
 - **AC-COORDINATOR-TURN-LEDGER-001.3:** When a turn completes, the system
   shall set the ledger row's finish time, the turn outcome (`completed`, `failed`, `cancelled`, `interrupted`, `stopped_at_ceiling`, `stopped_by_pause` or `unknown`, read from the unattended-turn row when there is one and from the session's state at completion otherwise) and one verdict, chosen by this precedence: `blocked` when the turn failed, was
   cancelled, was interrupted, was stopped by the ceiling or by Pause, or when the turn has at least one call row, every call row is refused, the digest is not truncated and none created a
-  proposal (a truncated digest cannot show that every call was refused, so it never makes a turn `blocked` by refusals); `acted` when an automatic approval of phase 3 executed in the turn;
+  proposal (a digest that is truncated, or that lost a call to a full queue or has a call still waiting on the retry list, cannot show that every call was refused, so it never makes a turn `blocked` by refusals); `acted` when an automatic approval of phase 3 executed in the turn (an activity row with outcome `approved` and authorization `automatic` whose unattended-turn id is the turn's bound unattended-turn row; a failed automatic approval never counts);
   `proposed` when the turn created at least one proposal; `needs_you` when an
-  unattended turn created no proposal and a question or permission wake it
-  delivered is still unanswered; `nothing_needed` otherwise. An attended turn
+  unattended turn created no proposal, delivered a question or permission wake, and the coordinator's conversation session still has a pending clarification or permission when the turn is graded (the same pending-interaction read admission uses; wake supersession is never the signal, and a failed read means not `needs_you`); `nothing_needed` otherwise. An attended turn
   is never `needs_you`.
 - **AC-COORDINATOR-TURN-LEDGER-001.4:** The system shall record each guarded
   Kandev call of a turn as a call row holding the action name, the target task
@@ -85,8 +85,8 @@ outcome side is [outcomes](outcomes.md), the harness that consumes the data is
   allocated by the single writer, so ids are the order and no two calls tie).
   A call whose turn cannot be determined yet shall be retried without
   blocking later calls and shall be dropped after three retries one second
-  apart.
-- **AC-COORDINATOR-TURN-LEDGER-001.5:** When two writers complete the same turn
+  apart (four attempts in all).
+- **AC-COORDINATOR-TURN-LEDGER-001.5:** A completion shall first insert the row when it is missing and then finish it by one conditional update that matches only an unfinished row. When two writers complete the same turn
   at once, or a completion arrives for a row already completed, the system
   shall keep the first completion's values and change nothing. The only later
   changes to a completed row are two corrections made by the ledger's own
@@ -115,7 +115,7 @@ outcome side is [outcomes](outcomes.md), the harness that consumes the data is
   what the provider reported for that turn's usage, normalised by trimming
   and lower-casing, and shall never fill it from the agent profile's
   configured model. Before any usage is reported the model is empty; when the turn completes, and again by the ledger's own pass that runs every 10 minutes over rows finished in the last 24 hours, the row shall be updated, only while the model is still empty, with the reported model. A turn with several models shall carry the
-  first reported.
+  first non-empty one reported, in the order of the usage rows.
 - **AC-COORDINATOR-TURN-LEDGER-002.3:** The harness version shall be the
   Kandev build version and the agent type the provider-reported usage
   carries, joined as `<agent type>@<build version>`; it is empty when no
@@ -139,10 +139,10 @@ outcome side is [outcomes](outcomes.md), the harness that consumes the data is
   set the proposal's and the row's turn id to the ledger row of the turn that
   is active on the calling session, and leave it empty when no such turn can
   be determined or its read fails. A row a guarded call wrote is one whose
-  outcome is `proposed` or whose authorization is `denied` or `automatic`; a
+  outcome is `proposed` or whose authorization is `denied`, and a coalesced refusal row shall be shared only by calls of the same turn (a call with no turn matches only rows with no turn id); a
   row a manager wrote (outcome `approved`, `failed`, `rejected` or `returned`
   with authorization `requires_approval`, or any row that references an undone
-  row) is never one, whatever its actor column holds.
+  row) is never one, whatever its actor column holds; an automatic approval row, successful or failed, is written on the decision path outside the session, carries no turn id, and is linked to its turn only through its unattended-turn id.
 - **AC-COORDINATOR-TURN-LEDGER-003.2:** An unattended-turn row of phase 3 shall
   carry the id of its ledger row, set when the ledger row is inserted. A
   ledger row shall be linked to at most one unattended-turn row.
@@ -189,7 +189,7 @@ context.
   [Projects](permissions.md#req-coordinator-permissions-005-projects), read
   once per call at the time of the call): a `task`
   filter outside it shall return the phase-1 not-found error, and a digest
-  entry outside it shall be returned with its target omitted.
+  entry outside it shall be returned with its target omitted. When the watch-set read fails, the tool shall return the phase-1 unavailable error and no page.
 - **AC-COORDINATOR-TURN-LEDGER-004.5:** When the ledger read fails, the tool
   shall return the phase-1 unavailable error and shall not return a partial
   page.
@@ -221,7 +221,9 @@ anything a person or the agent can see.
   delete a coordinator's ledger rows and their call rows in the same
   transaction that deletes the coordinator or its workspace; snapshots are
   shared by content hash and are left to age out. A turn whose snapshot has
-  been deleted shall read as having no snapshot, never as an error. It shall
+  been deleted shall read as having no snapshot, never as an error, and a
+  snapshot shall be stored in the same transaction that inserts the first ledger
+  row naming it. It shall
   run while recording runs, whatever the phase 3.1 flag.
 - **AC-COORDINATOR-TURN-LEDGER-005.4:** The ledger tables shall be added by
   migrations that are additive and replayable on SQLite and PostgreSQL; a
@@ -238,7 +240,7 @@ anything a person or the agent can see.
   the coordinator's board state as its open tasks within the watch set (not archived and not in a step that completes tasks; at most 200, newest updated first, ties by task id), its open proposals (at most 50, oldest first, ties by id; open means status `pending`, `approving` or `failed`, the set the proposal store already counts as open) and, for each task, only its task id, workflow step id, state, last update time and the kinds of the coordinator's proposals of status `pending` that target it (each kind once, sorted ascending), and for each proposal only its id, kind, status and target task id (null when it has none), and shall store it once per content hash; an identical board shall
   share one stored snapshot. When more items exist than a cap, the snapshot
   shall say so and carry the total of the capped list (tasks and proposals
-  separately). A task whose last update time is null sorts last and is
+  separately). Proposals created at or after the turn's start time are excluded from the snapshot, so a proposal the turn itself made never appears in the board it started from. A task whose last update time is null sorts last and is
   recorded with a null time. A turn recorded late (its start event was lost)
   shall have an empty snapshot hash, since the board at the turn's start can
   no longer be read.
