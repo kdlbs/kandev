@@ -11,6 +11,7 @@ acceptance_criteria:
   - AC-PLATFORM-WINDOWS-BACKGROUND-CONSOLE-001.1
   - AC-PLATFORM-WINDOWS-BACKGROUND-CONSOLE-001.2
   - AC-PLATFORM-WINDOWS-BACKGROUND-CONSOLE-001.3
+  - AC-PLATFORM-WINDOWS-BACKGROUND-CONSOLE-001.4
 system_design:
   - ../../specs/platform/system-design/windows-background-process-console.md
 ---
@@ -19,9 +20,9 @@ system_design:
 
 ## Summary
 
-Add `CREATE_NO_WINDOW` to the Windows creation flags of every Job-Object-managed
-helper, so that no helper opens a console window when the backend has no
-console.
+Set `HideWindow` on every in-scope Windows process attribute. This hides a new
+console window while keeping the console handle available to the helper and
+its default console descendants.
 
 ## In scope
 
@@ -33,11 +34,11 @@ console.
 - The agentctl launch in `internal/agent/runtime/agentctl/launcher`.
 - The agent process trees of `internal/agent/acpdbg` and
   `internal/agent/codexdbg`.
-- Windows build-tagged tests for each flag set and for the
-  `CREATE_NEW_CONSOLE` rejection.
+- Windows build-tagged tests for each process attribute, the
+  `CREATE_NEW_CONSOLE` rejection, and hidden console inheritance from a
+  detached parent.
 - A targeted step in the native Windows CI job, mirrored in
-  `make test-windows`, for the five flag tests that its package step does not
-  run.
+  `make test-windows`, for the helper tests that its package step does not run.
 
 ## Out of scope
 
@@ -49,23 +50,23 @@ console.
 ## Acceptance
 
 - `AC-PLATFORM-WINDOWS-BACKGROUND-CONSOLE-001.1` through
-  `AC-PLATFORM-WINDOWS-BACKGROUND-CONSOLE-001.3` describe the behavior covered
+  `AC-PLATFORM-WINDOWS-BACKGROUND-CONSOLE-001.4` describe the behavior covered
   by this work order.
 
 ## Verification
 
 ```bash
-cd apps/backend && go test -tags fts5 ./internal/common/subproc -run '^TestWindowsPrepareGitLifecycleCommandRequestsNoConsoleWindow$' -count=1
-cd apps/backend && go test -tags fts5 ./internal/agent/mcpconfig -run '^TestPrepareNativeMCPProcessRequestsNoConsoleWindow$' -count=1
-cd apps/backend && go test -tags fts5 ./internal/agentctl/server/utility -run '^TestWindowsACPCommandProcAttrRequestsNoConsoleWindow$' -count=1
-cd apps/backend && go test -tags fts5 ./internal/agentctl/server/process -run '^TestWindowsProcGroupsRequestNoConsoleWindow$' -count=1
-cd apps/backend && go test -tags fts5 ./internal/agent/runtime/agentctl/launcher -run '^TestBuildSysProcAttrRequestsNoConsoleWindow$' -count=1
-cd apps/backend && go test -tags fts5 ./internal/agent/acpdbg ./internal/agent/codexdbg -run '^TestConfigureProcessTreeRequestsNoConsoleWindow$' -count=1
+cd apps/backend && go test -tags fts5 ./internal/common/subproc -run '^(TestWindowsPrepareGitLifecycleCommandHidesConsoleWindow|TestWindowsDetachedParentKeepsConsoleHiddenForDescendants)$' -count=1
+cd apps/backend && go test -tags fts5 ./internal/agent/mcpconfig -run '^TestPrepareNativeMCPProcessHidesConsoleWindow$' -count=1
+cd apps/backend && go test -tags fts5 ./internal/agentctl/server/utility -run '^TestWindowsACPCommandProcAttrHidesConsoleWindow$' -count=1
+cd apps/backend && go test -tags fts5 ./internal/agentctl/server/process -run '^TestWindowsProcGroupsHideConsoleWindow$' -count=1
+cd apps/backend && go test -tags fts5 ./internal/agent/runtime/agentctl/launcher -run '^TestBuildSysProcAttrHidesConsoleWindow$' -count=1
+cd apps/backend && go test -tags fts5 ./internal/agent/acpdbg ./internal/agent/codexdbg -run '^TestConfigureProcessTreeHidesConsoleWindow$' -count=1
 cd apps/backend && go test -tags fts5 ./internal/common/subproc -run '^(TestWindowsManagedGitJobCleanup|TestWindowsManagedGitAskpassIsExecutedAndDenied)$' -count=1
 cd apps/backend && go test -tags fts5 ./internal/agentctl/server/utility -run '^TestWindowsACPCommandLifecycleJobKillsDescendants$' -count=1
 cd apps/backend && go test -tags fts5 ./internal/agentctl/server/process -run '^(TestWindowsProcessLifecycleJobKillsDescendants|TestWindowsProcessRunnerReapsDescendantAfterLeaderExit)$' -count=1
-# The native Windows CI step for the five flag tests outside its package step:
-cd apps/backend && go test -race -v -run '^(TestWindowsPrepareGitLifecycleCommandRequestsNoConsoleWindow|TestPrepareNativeMCPProcessRequestsNoConsoleWindow|TestWindowsACPCommandProcAttrRequestsNoConsoleWindow|TestConfigureProcessTreeRequestsNoConsoleWindow)$' ./internal/common/subproc ./internal/agent/mcpconfig ./internal/agentctl/server/utility ./internal/agent/acpdbg ./internal/agent/codexdbg
+# The native Windows CI step for the console tests outside its package step:
+cd apps/backend && go test -tags fts5 -race -v -run '^(TestWindowsPrepareGitLifecycleCommandHidesConsoleWindow|TestWindowsDetachedParentKeepsConsoleHiddenForDescendants|TestPrepareNativeMCPProcessHidesConsoleWindow|TestWindowsACPCommandProcAttrHidesConsoleWindow|TestConfigureProcessTreeHidesConsoleWindow)$' ./internal/common/subproc ./internal/agent/mcpconfig ./internal/agentctl/server/utility ./internal/agent/acpdbg ./internal/agent/codexdbg
 python3 scripts/list-docs.py validate
 python3 scripts/lint-spec-files.py --all
 git diff --check
@@ -73,14 +74,11 @@ git diff --check
 
 ## Results
 
-- The seven new flag tests failed before the change because
-  `CREATE_NO_WINDOW` (`0x8000000`) was not set, and pass after it.
-- The existing Git, agentctl process, and ACP utility lifecycle tests pass
-  with the new flag.
-- The new CI step command passes on Windows 11, and the matching
-  `make test-windows` line passes under `cmd.exe`.
-- A temporary harness ran managed Git from a process without a console. The
-  child had a visible console window before the change and a windowless
-  console after it.
-- `golangci-lint run` for the seven changed packages with the base SHA reported
-  0 issues.
+- The follow-up replaces `CREATE_NO_WINDOW` with `HideWindow`; this keeps a
+  console handle for the helper and its default console descendants.
+- The detached-parent regression test checks that the managed child and its
+  default console descendant share one console window handle and a hidden window.
+- The targeted Windows CI command now uses `-tags fts5`, matching
+  `make test-windows`, and includes the detached-parent regression test.
+- Verification results for this follow-up are recorded after the focused
+  checks complete.

@@ -19,7 +19,9 @@ for.
 
 Platform owns this contract because the helpers belong to several systems
 (managed Git, agentctl process management, agent launch, and ACP utilities)
-and share one Windows console behavior.
+and share one Windows console behavior. Managed console helpers keep their
+console attachment while Windows hides newly created console windows, so
+console descendants inherit the hidden console.
 
 ## Terminology
 
@@ -53,6 +55,9 @@ console windows over my work.
 - **AC-PLATFORM-WINDOWS-BACKGROUND-CONSOLE-001.3:** When a managed helper
   process runs without a console window, the system shall still pass its input,
   capture its output, and stop it together with its owner.
+- **AC-PLATFORM-WINDOWS-BACKGROUND-CONSOLE-001.4:** When a managed console
+  helper runs without a visible console window, it shall keep a console handle
+  so that default console descendants inherit the hidden console.
 
 ## Out of scope
 

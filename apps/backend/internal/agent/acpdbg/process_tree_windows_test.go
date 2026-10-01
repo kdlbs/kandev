@@ -25,14 +25,17 @@ func TestConfigureProcessTreeStartsSuspended(t *testing.T) {
 	}
 }
 
-func TestConfigureProcessTreeRequestsNoConsoleWindow(t *testing.T) {
+func TestConfigureProcessTreeHidesConsoleWindow(t *testing.T) {
 	cmd := exec.Command("cmd.exe")
 	configureProcessTree(cmd)
 
 	if cmd.SysProcAttr == nil {
 		t.Fatal("configureProcessTree did not set process attributes")
 	}
-	if cmd.SysProcAttr.CreationFlags&windows.CREATE_NO_WINDOW == 0 {
-		t.Fatalf("CreationFlags = %#x, want CREATE_NO_WINDOW", cmd.SysProcAttr.CreationFlags)
+	if !cmd.SysProcAttr.HideWindow {
+		t.Fatal("HideWindow = false, want true")
+	}
+	if cmd.SysProcAttr.CreationFlags&windows.CREATE_NO_WINDOW != 0 {
+		t.Fatalf("CreationFlags = %#x, must not include CREATE_NO_WINDOW", cmd.SysProcAttr.CreationFlags)
 	}
 }

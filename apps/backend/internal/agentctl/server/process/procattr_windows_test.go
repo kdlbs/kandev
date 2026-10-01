@@ -46,7 +46,7 @@ func TestWindowsSetManagedProcGroupStartsSuspended(t *testing.T) {
 	require.NotZero(t, cmd.SysProcAttr.CreationFlags&windows.CREATE_SUSPENDED)
 }
 
-func TestWindowsProcGroupsRequestNoConsoleWindow(t *testing.T) {
+func TestWindowsProcGroupsHideConsoleWindow(t *testing.T) {
 	for name, configure := range map[string]func(*exec.Cmd){
 		"setProcGroup":        setProcGroup,
 		"setManagedProcGroup": setManagedProcGroup,
@@ -58,7 +58,8 @@ func TestWindowsProcGroupsRequestNoConsoleWindow(t *testing.T) {
 
 			require.NotNil(t, cmd.SysProcAttr)
 			flags := cmd.SysProcAttr.CreationFlags
-			require.NotZero(t, flags&windows.CREATE_NO_WINDOW, "CreationFlags = %#x, want CREATE_NO_WINDOW", flags)
+			require.True(t, cmd.SysProcAttr.HideWindow, "HideWindow = false, want true")
+			require.Zero(t, flags&windows.CREATE_NO_WINDOW, "CreationFlags = %#x, must not include CREATE_NO_WINDOW", flags)
 		})
 	}
 }

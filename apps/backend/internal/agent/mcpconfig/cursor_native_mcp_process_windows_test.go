@@ -11,7 +11,7 @@ import (
 	"golang.org/x/sys/windows"
 )
 
-func TestPrepareNativeMCPProcessRequestsNoConsoleWindow(t *testing.T) {
+func TestPrepareNativeMCPProcessHidesConsoleWindow(t *testing.T) {
 	cmd := exec.Command(os.Args[0], "mcp", "list")
 	cmd.SysProcAttr = &syscall.SysProcAttr{CreationFlags: windows.BELOW_NORMAL_PRIORITY_CLASS}
 	if err := prepareNativeMCPProcess(cmd); err != nil {
@@ -22,11 +22,16 @@ func TestPrepareNativeMCPProcessRequestsNoConsoleWindow(t *testing.T) {
 		windows.BELOW_NORMAL_PRIORITY_CLASS,
 		syscall.CREATE_NEW_PROCESS_GROUP,
 		windows.CREATE_SUSPENDED,
-		windows.CREATE_NO_WINDOW,
 	} {
 		if flags&want == 0 {
 			t.Fatalf("CreationFlags = %#x, want %#x set", flags, want)
 		}
+	}
+	if !cmd.SysProcAttr.HideWindow {
+		t.Fatal("HideWindow = false, want true")
+	}
+	if flags&windows.CREATE_NO_WINDOW != 0 {
+		t.Fatalf("CreationFlags = %#x, must not include CREATE_NO_WINDOW", flags)
 	}
 
 	console := exec.Command(os.Args[0], "mcp", "list")

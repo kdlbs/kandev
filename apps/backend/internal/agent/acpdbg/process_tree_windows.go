@@ -20,11 +20,12 @@ type processTree struct {
 }
 
 // configureProcessTree keeps the child suspended until its Job Object is ready.
-// CREATE_NO_WINDOW gives a console child its own windowless console, so it never
-// opens a console window even when this process has no console.
+// HideWindow keeps the child attached to a console while hiding a newly created
+// console window, so console descendants can inherit it.
 func configureProcessTree(cmd *exec.Cmd) {
 	cmd.SysProcAttr = &syscall.SysProcAttr{
-		CreationFlags: syscall.CREATE_NEW_PROCESS_GROUP | windows.CREATE_SUSPENDED | windows.CREATE_NO_WINDOW,
+		HideWindow:    true,
+		CreationFlags: syscall.CREATE_NEW_PROCESS_GROUP | windows.CREATE_SUSPENDED,
 	}
 }
 

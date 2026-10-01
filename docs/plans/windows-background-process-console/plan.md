@@ -11,11 +11,12 @@ system_design:
 
 ## Overview
 
-When the Kandev backend runs without a console, every managed helper that it
-starts on Windows opens a visible console window. Short-lived Git commands
-flash a window, and long-lived processes such as agentctl keep one open. Add
-`CREATE_NO_WINDOW` to the existing creation flags of the Job-Object-managed
-helpers so that they never open a console window.
+When the Kandev backend runs without a console, every managed console helper
+that it starts on Windows can open a visible console window. Short-lived Git
+commands flash a window, and long-lived processes such as agentctl keep one
+open. Set `HideWindow` on the existing Windows process attributes. This hides
+new console windows while keeping the console handle available to helpers and
+their console descendants.
 
 ## Evidence and root cause
 
@@ -23,21 +24,27 @@ On `fba6f2b32`, no backend code sets `CREATE_NO_WINDOW` or `HideWindow`. The
 managed helper sites set only `CREATE_NEW_PROCESS_GROUP`, plus
 `CREATE_SUSPENDED` where a Job Object is attached before the process resumes.
 Those flags do not affect console allocation, so a console child of a process
-without a console receives a new visible console.
+without a console receives a new visible console. Microsoft documents that
+`CREATE_NO_WINDOW` starts a console app without a console handle. This means
+default console descendants can allocate their own visible console, and some
+console APIs are unavailable to the managed helper.
 
 A temporary harness on one Windows 11 machine started a test binary with
 `DETACHED_PROCESS` and ran a managed Git command through `RunGitOutputClass`,
-with a probe program in place of Git. Without the new flag, the probe had its
-own console with a visible window. With the flag, it had its own console and
-no window.
+with a probe program in place of Git. It showed that the direct managed child
+had no visible console window after the original change. The regression test
+now also checks that the child retains a console handle and that a default
+console descendant inherits the hidden console.
 
 ## Technical approach
 
-Add the flag in each package's existing Windows-only process-attribute
-function. Keep the `CREATE_NEW_CONSOLE` rejection in managed Git and Cursor
-native MCP preparation, because Windows ignores `CREATE_NO_WINDOW` together
-with that flag. Leave the pseudo-terminal paths, the CLI launcher, and commands
-without process attributes unchanged.
+Set `syscall.SysProcAttr.HideWindow` in each package's existing Windows-only
+process-attribute function. Keep the `CREATE_NEW_CONSOLE` rejection in managed
+Git and Cursor native MCP preparation to preserve those callers' existing
+console-ownership contract. Keep `CREATE_NEW_PROCESS_GROUP` and
+`CREATE_SUSPENDED` where the current lifecycle needs them. Leave the
+pseudo-terminal paths, the CLI launcher, and commands without process
+attributes unchanged.
 
 ## Delivery order
 
@@ -45,19 +52,20 @@ without process attributes unchanged.
 
 ## Risks
 
-- **Console control events.** The helpers no longer share the parent's
-  console, so console control events from that console, such as Ctrl+Break or
-  a console close, no longer reach them. No code calls
-  `GenerateConsoleCtrlEvent`, and `CREATE_NEW_PROCESS_GROUP` already disabled
-  Ctrl+C for them. On Windows, Go's `os.Process.Signal` supports only
-  `os.Kill` and returns `EWINDOWS` otherwise, so the graceful stop paths already
-  fall back to kill. Owners still stop the helpers through their Job Objects
-  and existing termination paths. If binding agentctl to its Job Object fails,
-  which the launcher logs as a warning, agentctl also no longer receives a
-  terminal's console close and relies on the backend's shutdown path.
-- **Console hosts.** Each helper now gets its own hidden `conhost.exe`, also on
-  terminal and desktop launches where it previously shared the parent's
-  console. Descendants of a helper share that helper's console.
+- **Console control events.** A helper started by a detached backend gets its
+  own hidden console. A helper started by a backend with a terminal continues
+  to share that terminal's console. `CREATE_NEW_PROCESS_GROUP` still disables
+  Ctrl+C for the helper group. No code calls `GenerateConsoleCtrlEvent`. On
+  Windows, Go's `os.Process.Signal` supports only `os.Kill` and returns
+  `EWINDOWS` otherwise, so the agentctl launcher's graceful stop falls back to
+  kill. Owners still stop helpers through their Job Objects and existing
+  termination paths.
+- **Graceful close.** A hidden console remains attached to the helper, so the
+  existing `taskkill` request without `/F` retains a console target. A helper
+  can still ignore a close request. Owners must keep their existing wait and
+  forced-termination paths.
+- **GUI programs.** Windows applies `HideWindow` to the first window of GUI
+  programs too. The listed process paths must remain console-helper paths.
 
 ## Verification strategy
 

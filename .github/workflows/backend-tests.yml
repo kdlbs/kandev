@@ -852,11 +852,11 @@ jobs:
         run: go test -race -v -timeout 25m ./internal/agentctl/server/process/... ./internal/agent/runtime/agentctl/launcher/... ./internal/common/ptyexec/... ./internal/backendapp/ownershiplock/... ./internal/system/storage/workspaces/...
 
       # Keep this targeted: these packages have broader tests, while these
-      # native tests pin the windowless-console flag on managed helpers.
-      - name: Test Windows helper console flags
+      # native tests verify hidden consoles retain handles for descendants.
+      - name: Test Windows helper console behavior
         run: >-
-          go test -race -v
-          -run '^(TestWindowsPrepareGitLifecycleCommandRequestsNoConsoleWindow|TestPrepareNativeMCPProcessRequestsNoConsoleWindow|TestWindowsACPCommandProcAttrRequestsNoConsoleWindow|TestConfigureProcessTreeRequestsNoConsoleWindow)$'
+          go test -tags fts5 -race -v
+          -run '^(TestWindowsPrepareGitLifecycleCommandHidesConsoleWindow|TestWindowsDetachedParentKeepsConsoleHiddenForDescendants|TestPrepareNativeMCPProcessHidesConsoleWindow|TestWindowsACPCommandProcAttrHidesConsoleWindow|TestConfigureProcessTreeHidesConsoleWindow)$'
           ./internal/common/subproc ./internal/agent/mcpconfig ./internal/agentctl/server/utility ./internal/agent/acpdbg ./internal/agent/codexdbg
 
       - name: Test Windows managed runtime cache repair
