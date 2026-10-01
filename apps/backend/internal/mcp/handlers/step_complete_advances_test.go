@@ -131,6 +131,20 @@ func TestHandleStepComplete_SignalGatedStepWithoutMoveActionDoesNotAdvance(t *te
 			onTurnComplete: []wfmodels.OnTurnCompleteAction{{Type: wfmodels.OnTurnCompleteMoveToStep}},
 		},
 		{
+			name: "move_to_step targeting current step",
+			onTurnComplete: []wfmodels.OnTurnCompleteAction{{
+				Type:   wfmodels.OnTurnCompleteMoveToStep,
+				Config: map[string]interface{}{"step_id": "step-no-move"},
+			}},
+		},
+		{
+			name: "self-targeting move blocks later move",
+			onTurnComplete: []wfmodels.OnTurnCompleteAction{
+				{Type: wfmodels.OnTurnCompleteMoveToStep, Config: map[string]interface{}{"step_id": "step-no-move"}},
+				{Type: wfmodels.OnTurnCompleteMoveToStep, Config: map[string]interface{}{"step_id": "step-later"}},
+			},
+		},
+		{
 			name: "move_to_next that requires approval",
 			onTurnComplete: []wfmodels.OnTurnCompleteAction{{
 				Type:   wfmodels.OnTurnCompleteMoveToNext,

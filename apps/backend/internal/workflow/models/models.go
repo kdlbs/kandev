@@ -324,11 +324,14 @@ func (s *WorkflowStep) HasOnTurnCompleteAction(actionType OnTurnCompleteActionTy
 
 // AdvancesOnTurnComplete reports whether the step's on_turn_complete actions
 // include a move the workflow engine runs: move_to_next, move_to_previous, or
-// move_to_step with a non-empty step_id, not marked requires_approval. The
-// engine skips a move_to_step without a step_id and does not run a
-// requires_approval move on turn completion; disable_plan_mode never moves the
-// task. A move behind a wait_for_quorum guard counts, because the guard can be
-// satisfied later.
+// move_to_step with a non-empty step_id that differs from this step, not
+// marked requires_approval. An unconditional self-target is selected by the
+// engine and blocks later actions, but does not transition. A guarded
+// self-target can fall through when its guard is not satisfied. The engine
+// skips a move_to_step without a step_id and does not run a requires_approval
+// move on turn completion; disable_plan_mode never moves the task. A move
+// behind a wait_for_quorum guard counts, because the guard can be satisfied
+// later.
 func (s *WorkflowStep) AdvancesOnTurnComplete() bool {
 	for _, action := range s.Events.OnTurnComplete {
 		if requiresApproval, _ := action.Config["requires_approval"].(bool); requiresApproval {
@@ -338,12 +341,36 @@ func (s *WorkflowStep) AdvancesOnTurnComplete() bool {
 		case OnTurnCompleteMoveToNext, OnTurnCompleteMoveToPrevious:
 			return true
 		case OnTurnCompleteMoveToStep:
-			if stepID, _ := action.Config["step_id"].(string); stepID != "" {
+			stepID, _ := action.Config["step_id"].(string)
+			if stepID == "" {
+				continue
+			}
+			if stepID != s.ID {
 				return true
+			}
+			if !hasOnTurnCompleteQuorumGuard(action.Config) {
+				return false
 			}
 		}
 	}
 	return false
+}
+
+func hasOnTurnCompleteQuorumGuard(config map[string]any) bool {
+	guard, ok := config["wait_for_quorum"].(map[string]any)
+	if !ok {
+		condition, ok := config["if"].(map[string]any)
+		if !ok {
+			return false
+		}
+		guard, ok = condition["wait_for_quorum"].(map[string]any)
+		if !ok {
+			return false
+		}
+	}
+	role, _ := guard["role"].(string)
+	threshold, _ := guard["threshold"].(string)
+	return role != "" && threshold != ""
 }
 
 // RemapStepID returns the mapped workflow-step ID when id references a template

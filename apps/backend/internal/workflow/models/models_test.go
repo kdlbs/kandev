@@ -34,6 +34,25 @@ func TestWorkflowStepAdvancesOnTurnComplete(t *testing.T) {
 		{name: "move_to_next", actions: []OnTurnCompleteAction{{Type: OnTurnCompleteMoveToNext}}, want: true},
 		{name: "move_to_previous", actions: []OnTurnCompleteAction{{Type: OnTurnCompleteMoveToPrevious}}, want: true},
 		{name: "move_to_step with step_id", actions: []OnTurnCompleteAction{moveToStep(map[string]any{"step_id": "review"})}, want: true},
+		{name: "move_to_step targeting current step", actions: []OnTurnCompleteAction{moveToStep(map[string]any{"step_id": "current"})}, want: false},
+		{name: "self-targeting move blocks later move", actions: []OnTurnCompleteAction{
+			moveToStep(map[string]any{"step_id": "current"}),
+			{Type: OnTurnCompleteMoveToNext},
+		}, want: false},
+		{name: "self-target with invalid guard blocks later move", actions: []OnTurnCompleteAction{
+			moveToStep(map[string]any{
+				"step_id": "current",
+				"if":      map[string]any{"wait_for_quorum": map[string]any{"role": "", "threshold": "all_approve"}},
+			}),
+			{Type: OnTurnCompleteMoveToNext},
+		}, want: false},
+		{name: "guarded self-target can fall through to later move", actions: []OnTurnCompleteAction{
+			moveToStep(map[string]any{
+				"step_id": "current",
+				"if":      map[string]any{"wait_for_quorum": map[string]any{"role": "approver", "threshold": "all_approve"}},
+			}),
+			{Type: OnTurnCompleteMoveToNext},
+		}, want: true},
 		{name: "move_to_step without config", actions: []OnTurnCompleteAction{moveToStep(nil)}, want: false},
 		{name: "move_to_step with empty step_id", actions: []OnTurnCompleteAction{moveToStep(map[string]any{"step_id": ""})}, want: false},
 		{name: "move_to_step with non-string step_id", actions: []OnTurnCompleteAction{moveToStep(map[string]any{"step_id": 3})}, want: false},
@@ -73,7 +92,7 @@ func TestWorkflowStepAdvancesOnTurnComplete(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			step := &WorkflowStep{Events: StepEvents{OnTurnComplete: tc.actions}}
+			step := &WorkflowStep{ID: "current", Events: StepEvents{OnTurnComplete: tc.actions}}
 			if got := step.AdvancesOnTurnComplete(); got != tc.want {
 				t.Fatalf("AdvancesOnTurnComplete() = %t, want %t", got, tc.want)
 			}

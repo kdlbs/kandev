@@ -29,15 +29,18 @@ that shape, keep `accepted:true`, and keep recording the signal.
 
 - Add `WorkflowStep.AdvancesOnTurnComplete` in `internal/workflow/models`,
   matching the engine: `move_to_next`, `move_to_previous`, and `move_to_step`
-  with a non-empty `step_id` count; `requires_approval` moves and
-  `disable_plan_mode` do not.
+  with a non-empty target different from the current step count;
+  `requires_approval` moves and `disable_plan_mode` do not. Preserve action
+  ordering: an unguarded self-target blocks later moves, while a guarded
+  self-target can fall through when its guard is not satisfied.
 - Use it in `resolveStepCompletionAdvances` and return a distinct `note` for a
   signal-gated step without a move.
 - Handler regressions for no actions, `disable_plan_mode` only, `move_to_step`
-  without `step_id`, and a `requires_approval` move, asserting that the signal
-  is still recorded and published.
-- A model test for the helper and an engine test comparing it with the
-  compiled `on_turn_complete` actions.
+  without `step_id`, a self-target alone and before a later move, and a
+  `requires_approval` move, asserting that the signal is still recorded and
+  published.
+- Model coverage for self-target ordering and an engine parity test that runs
+  the compiled actions through actual transition evaluation.
 
 ## Out of scope
 
@@ -56,13 +59,16 @@ that shape, keep `accepted:true`, and keep recording the signal.
    automatically; the pending signal and bus event are unchanged.
 3. Existing gated-with-move, non-gated, and lookup-failure responses keep
    their fields and `note` text.
+4. An unguarded self-target, including one before a later valid move, returns
+   `advances:false`; a guarded self-target can fall through to a later move
+   when the guard is not satisfied.
 
 ## Verification
 
 ```bash
 (cd apps/backend && go test -tags fts5 ./internal/mcp/handlers -run "StepComplete" -count=1)
 (cd apps/backend && go test -tags fts5 ./internal/workflow/models -count=1)
-(cd apps/backend && go test -tags fts5 ./internal/workflow/engine -run "TestCompileStep_" -count=1)
+(cd apps/backend && go test -tags fts5 ./internal/workflow/engine -run "TestCompileStep_OnTurnCompleteMovesMatchAdvancesOnTurnComplete" -count=1)
 python3 scripts/list-docs.py validate
 python3 scripts/lint-spec-files.py --all
 git diff --check
@@ -75,6 +81,8 @@ git diff --check
 - `apps/backend/internal/workflow/engine/types_test.go`
 - `apps/backend/internal/mcp/handlers/handlers.go`
 - `apps/backend/internal/mcp/handlers/step_complete_advances_test.go`
+- `docs/specs/tasks/requirements/workflow-explicit-completion-signal.md`
+- `docs/specs/tasks/system-design/workflow-explicit-completion-signal.md`
 
 ## Parallelism
 
@@ -90,7 +98,18 @@ git diff --check
 
 ## Results
 
-Completed. The four new handler cases failed before the change with
-`expected: false, actual: true` for `advances` and an empty `note`, and pass
-after it. The existing step-completion handler tests, the new model test, and
-the engine comparison test pass.
+Completed in the contributor PR. The handler cases failed before that change
+with `expected: false, actual: true` for `advances` and an empty `note`, and
+passed after it. The existing step-completion handler tests, model test, and
+engine comparison test passed.
+
+### Follow-up correction
+
+An unguarded `move_to_step` targeting the current step is selected by the
+engine. It blocks later transition actions, then does not commit a transition.
+`AdvancesOnTurnComplete` now reports this case as false. A guarded self-target
+can fall through when its guard is not satisfied, so a later valid move still
+counts. Regression coverage includes self-only, self-before-valid, and
+invalid-guard self-target cases in the model and engine parity tests, plus
+self-only and self-before-valid cases in the handler. Validation and commit
+details are recorded after the correction is complete.

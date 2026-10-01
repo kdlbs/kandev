@@ -45,13 +45,16 @@ before returning:
 `internal/workflow/models.WorkflowStep.AdvancesOnTurnComplete` mirrors
 `internal/workflow/engine.compileOnTurnComplete` and `evaluateActions`:
 `move_to_next` and `move_to_previous` count, `move_to_step` counts only with a
-non-empty `step_id`, and a move marked `requires_approval` does not count
-because neither engine nor legacy turn completion runs it. `disable_plan_mode`
-changes session settings and never moves the task. A move behind a
-`wait_for_quorum` guard counts, because quorum re-evaluation can still apply
-it. The field describes configuration, not a promise: a clarification barrier,
-an unsatisfied guard, or a last-step `move_to_next` can still leave the task
-in place.
+non-empty `step_id` that differs from the current step, and a move marked
+`requires_approval` does not count because neither engine nor legacy turn
+completion runs it. An unguarded self-target is selected first and blocks later
+actions, but the engine does not transition to the current step. A guarded
+self-target can fall through to later actions when its guard is not satisfied.
+`disable_plan_mode` changes session settings and never moves the task. A move
+behind a `wait_for_quorum` guard counts, because quorum re-evaluation can still
+apply it. The field describes configuration, not a promise: a clarification
+barrier, an unsatisfied guard, or a last-step `move_to_next` can still leave the
+task in place.
 
 A signal-gated step without such a move still accepts and records the signal.
 The turn-end gate finds the signal, the engine selects no transition, and the
