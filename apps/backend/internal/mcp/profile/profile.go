@@ -25,9 +25,10 @@ const (
 	SurfaceConfiguration       Surface = "configuration"
 	SurfaceExternal            Surface = "external"
 	SurfaceAutomation          Surface = "automation"
+	SurfaceCoordinator         Surface = "coordinator"
+	SurfaceProjectCoordinator  Surface = "project-coordinator"
+	SurfaceProjectWorker       Surface = "project-worker"
 	SurfaceManagedConversation Surface = "managed-conversation"
-	// SurfaceCoordinator is the copilot's conversation MCP surface.
-	SurfaceCoordinator Surface = "coordinator"
 )
 
 type Capability string
@@ -248,18 +249,31 @@ func Legacy(mode string, disableAskQuestion bool, providers []string) Context {
 		surface = SurfaceAutomation
 	case mcpmode.Coordinator:
 		surface = SurfaceCoordinator
+	case mcpmode.ProjectCoordinator:
+		surface = SurfaceProjectCoordinator
+	case mcpmode.ProjectWorker:
+		surface = SurfaceProjectWorker
 	case mcpmode.TaskTitlePending:
 		capabilities = append(capabilities, CapabilityTaskTitle)
 	}
-	if !disableAskQuestion && surface != SurfaceExternal && surface != SurfaceAutomation && surface != SurfaceCoordinator {
-		capabilities = append(capabilities, CapabilityUserQuestion)
+	switch surface {
+	case SurfaceProjectCoordinator:
+		if !disableAskQuestion {
+			capabilities = append(capabilities, CapabilityUserQuestion)
+		}
+	case SurfaceProjectWorker:
+		capabilities = append(capabilities, CapabilityParentQuestion)
+	default:
+		if !disableAskQuestion && surface != SurfaceExternal && surface != SurfaceAutomation && surface != SurfaceCoordinator {
+			capabilities = append(capabilities, CapabilityUserQuestion)
+		}
 	}
 	return New(surface, capabilities, providers)
 }
 
 func normalizeSurface(surface Surface) Surface {
 	switch surface {
-	case SurfaceKanbanTask, SurfaceOfficeTask, SurfaceConfiguration, SurfaceExternal, SurfaceAutomation, SurfaceManagedConversation, SurfaceCoordinator:
+	case SurfaceKanbanTask, SurfaceOfficeTask, SurfaceConfiguration, SurfaceExternal, SurfaceAutomation, SurfaceCoordinator, SurfaceProjectCoordinator, SurfaceProjectWorker, SurfaceManagedConversation:
 		return surface
 	default:
 		return SurfaceKanbanTask

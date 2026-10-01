@@ -153,10 +153,15 @@ func (sm *SessionManager) InitializeSession(
 	existingSessionID string,
 	workspacePath string,
 	mcpServers []agentctltypes.McpServer,
+	additionalDirectories ...[]string,
 ) (*InitializeResult, error) {
-	return sm.InitializeSessionWithSettingsPolicy(
+	var directories []string
+	if len(additionalDirectories) > 0 {
+		directories = additionalDirectories[0]
+	}
+	return sm.InitializeSessionWithSettingsPolicyAndDirectories(
 		ctx, client, agentConfig, existingSessionID, workspacePath, mcpServers,
-		SessionSettingsPolicyStrict,
+		SessionSettingsPolicyStrict, directories,
 	)
 }
 
@@ -170,6 +175,24 @@ func (sm *SessionManager) InitializeSessionWithSettingsPolicy(
 	workspacePath string,
 	mcpServers []agentctltypes.McpServer,
 	settingsPolicy SessionSettingsPolicy,
+) (*InitializeResult, error) {
+	return sm.InitializeSessionWithSettingsPolicyAndDirectories(
+		ctx, client, agentConfig, existingSessionID, workspacePath, mcpServers,
+		settingsPolicy, nil,
+	)
+}
+
+// InitializeSessionWithSettingsPolicyAndDirectories applies both the host
+// settings policy and server-granted writable roots to an ACP session.
+func (sm *SessionManager) InitializeSessionWithSettingsPolicyAndDirectories(
+	ctx context.Context,
+	client *agentctl.Client,
+	agentConfig agents.Agent,
+	existingSessionID string,
+	workspacePath string,
+	mcpServers []agentctltypes.McpServer,
+	settingsPolicy SessionSettingsPolicy,
+	additionalDirectories []string,
 ) (*InitializeResult, error) {
 	if settingsPolicy != SessionSettingsPolicyStrict && settingsPolicy != SessionSettingsPolicyProviderRestored {
 		return nil, fmt.Errorf("unsupported session settings policy: %d", settingsPolicy)
@@ -215,7 +238,7 @@ func (sm *SessionManager) InitializeSessionWithSettingsPolicy(
 		zap.String("agent_version", result.AgentVersion))
 
 	// Step 2: Create or resume ACP session based on configuration
-	sessionID, err := sm.createOrLoadSession(ctx, client, agentConfig, existingSessionID, workspacePath, mcpServers, settingsPolicy)
+	sessionID, err := sm.createOrLoadSession(ctx, client, agentConfig, existingSessionID, workspacePath, mcpServers, settingsPolicy, additionalDirectories)
 	if err != nil {
 		return nil, err
 	}
@@ -233,6 +256,7 @@ func (sm *SessionManager) createOrLoadSession(
 	workspacePath string,
 	mcpServers []agentctltypes.McpServer,
 	settingsPolicy SessionSettingsPolicy,
+	additionalDirectories []string,
 ) (string, error) {
 	rt := agentConfig.Runtime()
 	sm.logger.Debug("createOrLoadSession decision",
@@ -241,7 +265,7 @@ func (sm *SessionManager) createOrLoadSession(
 		zap.String("existing_session_id", existingSessionID),
 		zap.Bool("will_attempt_load", rt.SessionConfig.NativeSessionResume && existingSessionID != ""))
 	if rt.SessionConfig.NativeSessionResume && existingSessionID != "" {
-		sessionID, err := sm.loadSession(ctx, client, agentConfig, existingSessionID, mcpServers, settingsPolicy)
+		sessionID, err := sm.loadSession(ctx, client, agentConfig, existingSessionID, mcpServers, settingsPolicy, additionalDirectories)
 		if err == nil {
 			return sessionID, nil
 		}
@@ -299,9 +323,9 @@ func (sm *SessionManager) createOrLoadSession(
 			zap.Bool("capability_mismatch", hasCanonicalSessionLoadMessage(err, "agent does not support session loading (LoadSession capability is false)")),
 			zap.Bool("session_unknown", isSessionUnknownErr(err)),
 			zap.Bool("provider_session_missing", isMissingProviderSessionErr(err, existingSessionID)))
-		return sm.createNewSession(ctx, client, agentConfig, workspacePath, mcpServers)
+		return sm.createNewSession(ctx, client, agentConfig, workspacePath, mcpServers, additionalDirectories)
 	}
-	return sm.createNewSession(ctx, client, agentConfig, workspacePath, mcpServers)
+	return sm.createNewSession(ctx, client, agentConfig, workspacePath, mcpServers, additionalDirectories)
 }
 
 // shouldInjectResumeContext determines if we should inject resume context for this session.
@@ -350,6 +374,7 @@ func (sm *SessionManager) loadSession(
 	sessionID string,
 	mcpServers []agentctltypes.McpServer,
 	settingsPolicy SessionSettingsPolicy,
+	additionalDirectories []string,
 ) (string, error) {
 	sm.logger.Info("restoring existing ACP session",
 		zap.String("agent_type", agentConfig.ID()),
@@ -359,7 +384,7 @@ func (sm *SessionManager) loadSession(
 	if settingsPolicy == SessionSettingsPolicyProviderRestored {
 		loadSettingsPolicy = streams.SessionSettingsPolicyProviderRestored
 	}
-	if err := client.LoadSessionWithPolicy(ctx, sessionID, mcpServers, loadSettingsPolicy); err != nil {
+	if err := client.LoadSessionWithPolicyAndAdditionalDirectories(ctx, sessionID, mcpServers, loadSettingsPolicy, additionalDirectories); err != nil {
 		// context.Canceled is caller teardown (WS disconnect, session already
 		// gone) rather than an agent or transport fault, so it does not warrant
 		// an ERROR + stacktrace. DeadlineExceeded is a real startup/handshake
@@ -394,12 +419,13 @@ func (sm *SessionManager) createNewSession(
 	agentConfig agents.Agent,
 	workspacePath string,
 	mcpServers []agentctltypes.McpServer,
+	additionalDirectories []string,
 ) (string, error) {
 	sm.logger.Info("sending ACP session/new request",
 		zap.String("agent_type", agentConfig.ID()),
 		zap.String("workspace_path", workspacePath))
 
-	sessionID, err := client.NewSession(ctx, workspacePath, mcpServers)
+	sessionID, err := client.NewSessionWithAdditionalDirectories(ctx, workspacePath, mcpServers, additionalDirectories)
 	if err != nil {
 		sm.logger.Error("ACP session/new failed",
 			zap.String("agent_type", agentConfig.ID()),
@@ -665,9 +691,9 @@ func (sm *SessionManager) initializeACPConnection(
 	if execution.RequiredNativeConversationID != "" {
 		ctx = context.WithValue(ctx, requiredNativeConversationKey{}, execution.RequiredNativeConversationID)
 	}
-	result, err := sm.InitializeSessionWithSettingsPolicy(
+	result, err := sm.InitializeSessionWithSettingsPolicyAndDirectories(
 		ctx, client, agentConfig, execution.ACPSessionID, execution.WorkspacePath, mcpServers,
-		execution.sessionSettingsStartupPolicy(),
+		execution.sessionSettingsStartupPolicy(), execution.ProjectWritableRoots,
 	)
 	releaseClient()
 	if err != nil {

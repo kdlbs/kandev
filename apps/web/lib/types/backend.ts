@@ -99,6 +99,8 @@ export type TaskEventPayload = {
   workflow_id: string;
   old_workflow_id?: string | null;
   workflow_step_id: string;
+  agent_project_id?: string;
+  agent_project_tier?: "coordinator" | "economy" | "frontier";
   title: string;
   description?: string;
   state?: TaskState;

@@ -156,6 +156,16 @@ func (e *Executor) resolveTaskSessionMCPMode(ctx context.Context, taskID string,
 	if task.Origin == models.TaskOriginAutomationRun {
 		return McpModeAutomation, nil
 	}
+	if task.AgentProjectID != "" {
+		switch task.AgentProjectTier {
+		case "coordinator":
+			return McpModeProjectCoordinator, nil
+		case "economy", "frontier":
+			return McpModeProjectWorker, nil
+		default:
+			return "", fmt.Errorf("project task MCP tier is invalid")
+		}
+	}
 	if task.IsFromOffice {
 		return McpModeOffice, nil
 	}
@@ -222,6 +232,20 @@ func (e *Executor) resolveTaskSessionMCPProfile(ctx context.Context, taskID stri
 	}
 	if task.Origin == models.TaskOriginAutomationRun {
 		return e.withCanvasCapability(mcpprofile.NewAutomation()), nil
+	}
+	if task.AgentProjectID != "" {
+		switch task.AgentProjectTier {
+		case "coordinator":
+			return mcpprofile.New(mcpprofile.SurfaceProjectCoordinator, []mcpprofile.Capability{mcpprofile.CapabilityUserQuestion}, nil), nil
+		case "economy", "frontier":
+			capabilities := []mcpprofile.Capability{mcpprofile.CapabilityParentQuestion}
+			if session == nil || session.IsPassthrough {
+				capabilities = nil
+			}
+			return mcpprofile.New(mcpprofile.SurfaceProjectWorker, capabilities, nil), nil
+		default:
+			return mcpprofile.Context{}, fmt.Errorf("project task MCP tier is invalid")
+		}
 	}
 	surface := mcpprofile.SurfaceKanbanTask
 	if task.IsFromOffice {
@@ -2552,6 +2576,16 @@ func (e *Executor) buildLaunchAgentRequest(ctx context.Context, task *v1.Task, s
 				req.WorkspaceFolders = append(req.WorkspaceFolders, WorkspaceFolderSpec{Name: f.DisplayName, LocalPath: f.LocalPath})
 			}
 		}
+	}
+	if task.AgentProjectID != "" {
+		contextPath, pathErr := e.resolveAgentProjectContextPath(ctx, task.AgentProjectID)
+		if pathErr != nil {
+			return nil, execConfig, pathErr
+		}
+		if contextPath == "" {
+			return nil, execConfig, fmt.Errorf("agent project context path is unavailable")
+		}
+		req.ProjectWorkspace = &ProjectWorkspaceAccess{ContextPath: contextPath, Tier: task.AgentProjectTier}
 	}
 
 	// Activate config-mode MCP tools when config_mode is set in session metadata.

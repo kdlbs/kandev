@@ -3,6 +3,7 @@ package executor
 import (
 	"context"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -180,6 +181,9 @@ func managedCloneRelocationProof(cloner any, repository *models.Repository, reco
 	if err != nil || !managed {
 		return nil
 	}
+	if !sameExistingPath(repository.LocalPath, destination) {
+		return nil
+	}
 	return &worktree.ManagedCloneRelocationProof{
 		ManagedRoot: root, ExpectedSourcePath: source, LegacyOwnerNameSourcePath: ownerNameSource,
 		ExpectedDestinationPath: destination,
@@ -189,6 +193,18 @@ func managedCloneRelocationProof(cloner any, repository *models.Repository, reco
 			Owner: repository.ProviderOwner, Name: repository.ProviderName,
 		},
 	}
+}
+
+func sameExistingPath(first, second string) bool {
+	if strings.TrimSpace(first) == "" || strings.TrimSpace(second) == "" {
+		return false
+	}
+	canonicalFirst, err := filepath.EvalSymlinks(first)
+	if err != nil {
+		return false
+	}
+	canonicalSecond, err := filepath.EvalSymlinks(second)
+	return err == nil && filepath.Clean(canonicalFirst) == filepath.Clean(canonicalSecond)
 }
 
 func (e *Executor) repositoryLocalPath(ctx context.Context, repositoryID string) (string, error) {

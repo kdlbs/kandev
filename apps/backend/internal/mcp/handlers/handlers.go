@@ -357,6 +357,7 @@ type Handlers struct {
 	// Optional list_pending_agent_permissions_kandev / resolve_agent_permission_kandev
 	// dependency (external MCP surface only, set via SetAgentPermissionService).
 	agentPermissionSvc AgentPermissionService
+	agentProjectSvc    AgentProjectMCPService
 
 	// Optional coordinator.propose_task dependency (coordinator MCP surface
 	// only, set via SetCoordinatorService). Without it the action is not
@@ -499,18 +500,21 @@ func (h *Handlers) SetPluginService(svc *plugins.Service) {
 	h.pluginSvc = svc
 }
 
+// SetAgentProjectService wires the session-bound coordinator MCP boundary.
+func (h *Handlers) SetAgentProjectService(svc AgentProjectMCPService) {
+	h.agentProjectSvc = svc
+}
+
+// SetCoordinatorService wires the optional coordinator-only MCP service.
+func (h *Handlers) SetCoordinatorService(svc *coordinator.Service) {
+	h.coordinatorSvc = svc
+}
+
 // SetCanvasAuthoringService wires the feature-gated, task-scoped canvas
 // authoring boundary. Leave it unset when canvas support is disabled so raw WS
 // canvas actions are not registered either.
 func (h *Handlers) SetCanvasAuthoringService(svc CanvasAuthoringService) {
 	h.canvasAuthoringSvc = svc
-}
-
-// SetCoordinatorService wires coordinator.propose_task and
-// coordinator.get_item. Leave it unset when features.coordinator is
-// disabled so neither action is registered either.
-func (h *Handlers) SetCoordinatorService(svc *coordinator.Service) {
-	h.coordinatorSvc = svc
 }
 
 // RegisterHandlers registers all MCP handlers with the dispatcher.
@@ -529,6 +533,7 @@ func (h *Handlers) registerTaskModeHandlers(d *guardedMCPDispatcher) {
 	h.registerTaskMutationHandlers(d)
 	h.registerTaskPlanHandlers(d)
 	h.registerTaskQuestionHandlers(d)
+	h.registerAgentProjectHandlers(d)
 	h.registerReviewHandlers(d)
 	h.registerCanvasHandlers(d)
 }

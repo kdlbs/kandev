@@ -147,6 +147,78 @@ func TestResetSession_UsesResetActionAndReturnsNewSessionID(t *testing.T) {
 	}
 }
 
+func TestProjectWorkspaceDirectoriesAreForwardedForNewAndLoadedSessions(t *testing.T) {
+	directories := []string{"/projects/123/context", "/repos/api"}
+	tests := []struct {
+		name   string
+		action string
+		call   func(*Client) error
+	}{
+		{
+			name:   "new",
+			action: "agent.session.new",
+			call: func(client *Client) error {
+				_, err := client.NewSessionWithAdditionalDirectories(context.Background(), "/repo", nil, directories)
+				return err
+			},
+		},
+		{
+			name:   "load",
+			action: "agent.session.load",
+			call: func(client *Client) error {
+				return client.LoadSessionWithAdditionalDirectories(context.Background(), "session-1", nil, directories)
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			client, captured := captureStreamRequest(t, okResponse(map[string]any{"success": true, "session_id": "session-1"}))
+			if err := tt.call(client); err != nil {
+				t.Fatalf("session request: %v", err)
+			}
+			sent := captured()
+			if sent.Action != tt.action {
+				t.Fatalf("action = %q, want %q", sent.Action, tt.action)
+			}
+			var payload struct {
+				AdditionalDirectories []string `json:"additional_directories"`
+			}
+			if err := json.Unmarshal(sent.Payload, &payload); err != nil {
+				t.Fatalf("decode request payload: %v", err)
+			}
+			if !reflect.DeepEqual(payload.AdditionalDirectories, directories) {
+				t.Fatalf("additional_directories = %v, want %v", payload.AdditionalDirectories, directories)
+			}
+		})
+	}
+}
+
+func TestLoadSessionWithPolicyAndAdditionalDirectoriesForwardsBoth(t *testing.T) {
+	directories := []string{"/projects/123/context", "/repos/api"}
+	client, captured := captureStreamRequest(t, okResponse(map[string]any{"success": true, "session_id": "session-1"}))
+	if err := client.LoadSessionWithPolicyAndAdditionalDirectories(
+		context.Background(), "session-1", nil,
+		streams.SessionSettingsPolicyProviderRestored, directories,
+	); err != nil {
+		t.Fatalf("LoadSessionWithPolicyAndAdditionalDirectories: %v", err)
+	}
+
+	sent := captured()
+	var payload struct {
+		AdditionalDirectories []string                      `json:"additional_directories"`
+		SessionSettingsPolicy streams.SessionSettingsPolicy `json:"session_settings_policy"`
+	}
+	if err := json.Unmarshal(sent.Payload, &payload); err != nil {
+		t.Fatalf("decode request payload: %v", err)
+	}
+	if !reflect.DeepEqual(payload.AdditionalDirectories, directories) {
+		t.Fatalf("additional_directories = %v, want %v", payload.AdditionalDirectories, directories)
+	}
+	if payload.SessionSettingsPolicy != streams.SessionSettingsPolicyProviderRestored {
+		t.Fatalf("session_settings_policy = %q, want provider_restored", payload.SessionSettingsPolicy)
+	}
+}
+
 func TestResetSession_FailureModes(t *testing.T) {
 	t.Run("stream error frame", func(t *testing.T) {
 		c, _ := captureStreamRequest(t, func(msg ws.Message) *ws.Message {

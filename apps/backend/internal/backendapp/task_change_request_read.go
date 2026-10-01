@@ -11,6 +11,7 @@ import (
 	"github.com/kandev/kandev/internal/github"
 	"github.com/kandev/kandev/internal/gitlab"
 	mcphandlers "github.com/kandev/kandev/internal/mcp/handlers"
+	agentprojects "github.com/kandev/kandev/internal/projects"
 	"github.com/kandev/kandev/internal/task/models"
 	taskservice "github.com/kandev/kandev/internal/task/service"
 )
@@ -96,6 +97,28 @@ func (r *taskChangeRequestReader) GetTaskChangeRequests(
 	}
 	for _, provider := range providers {
 		appendTaskChangeRequestProviderRead(ctx, task, provider, &result)
+	}
+	return result, nil
+}
+
+func (r *taskChangeRequestReader) ListWorkerChangeRequests(
+	ctx context.Context, taskID string,
+) ([]agentprojects.WorkerChangeRequest, error) {
+	response, err := r.GetTaskChangeRequests(ctx, taskID)
+	if err != nil {
+		return nil, err
+	}
+	changes := response.ChangeRequests
+	if len(changes) > agentprojects.MaxWorkerChangeRequests {
+		changes = changes[:agentprojects.MaxWorkerChangeRequests]
+	}
+	result := make([]agentprojects.WorkerChangeRequest, 0, len(changes))
+	for _, change := range changes {
+		result = append(result, agentprojects.WorkerChangeRequest{
+			Provider: change.Provider, Number: change.Number, URL: change.URL,
+			Title: change.Title, State: change.State,
+			Draft: change.Draft != nil && *change.Draft,
+		})
 	}
 	return result, nil
 }

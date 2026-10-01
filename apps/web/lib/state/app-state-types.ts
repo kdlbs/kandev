@@ -80,6 +80,7 @@ import type {
 } from "./slices";
 import type { TaskOverviewSlice } from "./slices/task-overview-types";
 import type { AppStateExtraActions } from "./app-state-extra-actions";
+import type { AgentProjectsSlice } from "./slices/agent-projects/types";
 import type { GitStatusRefreshState } from "./slices/session-runtime/types";
 import type {
   AvailableCommand,
@@ -710,7 +711,8 @@ export type AppState = KanbanSlice & {
   restoreChatAnimations: UIA["restoreChatAnimations"];
   acknowledgeAgentErrors: UIA["acknowledgeAgentErrors"];
   dismissAgentError: UIA["dismissAgentError"];
-} & TaskOverviewSlice &
+} & AgentProjectsSlice &
+  TaskOverviewSlice &
   AppStateExtraActions &
   Pick<
     UIA,

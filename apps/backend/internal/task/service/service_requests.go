@@ -73,15 +73,19 @@ type TaskRepositoryInput struct {
 
 // CreateTaskRequest contains the data for creating a new task
 type CreateTaskRequest struct {
-	WorkspaceID    string                `json:"workspace_id"`
-	WorkflowID     string                `json:"workflow_id"`
-	WorkflowStepID string                `json:"workflow_step_id"`
-	Title          string                `json:"title"`
-	Description    string                `json:"description"`
-	AutoTitle      bool                  `json:"auto_title,omitempty"`
-	Priority       string                `json:"priority"`
-	State          *v1.TaskState         `json:"state,omitempty"`
-	Repositories   []TaskRepositoryInput `json:"repositories,omitempty"`
+	WorkspaceID           string `json:"workspace_id"`
+	AgentProjectID        string `json:"-"`
+	AgentProjectTier      string `json:"-"`
+	AgentProjectProfileID string `json:"-"`
+	agentProjectTask      bool
+	WorkflowID            string                `json:"workflow_id"`
+	WorkflowStepID        string                `json:"workflow_step_id"`
+	Title                 string                `json:"title"`
+	Description           string                `json:"description"`
+	AutoTitle             bool                  `json:"auto_title,omitempty"`
+	Priority              string                `json:"priority"`
+	State                 *v1.TaskState         `json:"state,omitempty"`
+	Repositories          []TaskRepositoryInput `json:"repositories,omitempty"`
 	// projectRepositoryDefaults marks the source list read from a root task's
 	// Office project. Only these automatic selections deduplicate aliases after
 	// each source has passed normal repository resolution.

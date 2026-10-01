@@ -70,6 +70,32 @@ func TestOptionsFromConfigIgnoresRetiredAppStatusBarEnv(t *testing.T) {
 	}
 }
 
+func TestAgentProjectsFlagContract(t *testing.T) {
+	const key = "features.agentProjects"
+	const envVar = "KANDEV_FEATURES_AGENT_PROJECTS"
+	definition, ok := DefinitionByKey(key)
+	if !ok {
+		t.Fatalf("runtime flag definition %q is missing", key)
+	}
+	if definition.EnvVar != envVar {
+		t.Fatalf("EnvVar = %q, want %q", definition.EnvVar, envVar)
+	}
+	if !definition.RestartRequired {
+		t.Fatal("RestartRequired = false, want true")
+	}
+	if ValuesFromConfig(&config.Config{})[key] {
+		t.Fatal("Agent Projects must default off")
+	}
+
+	defaults, err := profiles.FeatureFlagDefaults()
+	if err != nil {
+		t.Fatalf("FeatureFlagDefaults: %v", err)
+	}
+	if got := defaults["agent_projects"]; got != "false" {
+		t.Fatalf("profile default = %q, want false", got)
+	}
+}
+
 func TestOptionsFromConfigParsesClaudeBackgroundPromptHandoffEnv(t *testing.T) {
 	preserveEnv(t, "KANDEV_FEATURES_CLAUDE_BACKGROUND_PROMPT_HANDOFF")
 	t.Setenv("KANDEV_FEATURES_CLAUDE_BACKGROUND_PROMPT_HANDOFF", "TRUE")

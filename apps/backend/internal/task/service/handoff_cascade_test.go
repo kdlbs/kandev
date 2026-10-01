@@ -191,6 +191,49 @@ type recordingCleanupCoordinator struct {
 	cleaned               []string
 }
 
+type projectRestoreCleanupRace struct {
+	started chan struct{}
+	release chan struct{}
+	mu      sync.Mutex
+	calls   int
+}
+
+func (c *projectRestoreCleanupRace) CleanupTaskResources(context.Context, string, bool) {}
+
+func (c *projectRestoreCleanupRace) PrepareTaskResourceCleanup(
+	context.Context,
+	string,
+	models.TaskResourceCleanupTrigger,
+	string,
+	bool,
+) error {
+	return nil
+}
+
+func (c *projectRestoreCleanupRace) StartPreparedTaskResourceCleanup(context.Context, string) error {
+	return nil
+}
+
+func (c *projectRestoreCleanupRace) CancelPreparedTaskResourceCleanup(
+	ctx context.Context,
+	operationID string,
+) error {
+	c.mu.Lock()
+	c.calls++
+	call := c.calls
+	c.mu.Unlock()
+	if call != 1 {
+		return nil
+	}
+	close(c.started)
+	select {
+	case <-c.release:
+		return ErrCleanupCancellationRace
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
 type deleteAdmissionCall struct {
 	taskIDs []string
 	discard bool
@@ -647,6 +690,67 @@ func TestArchiveTaskTreeDoesNotAdoptIndependentChildCascade(t *testing.T) {
 	}
 	if len(out.ArchivedTaskIDs) != 1 || out.ArchivedTaskIDs[0] != "root" {
 		t.Fatalf("parent archive IDs = %v, want [root]", out.ArchivedTaskIDs)
+	}
+}
+
+func TestUnarchiveAgentProjectTreeRetriesWhileArchiveCleanupRuns(t *testing.T) {
+	ctx := context.Background()
+	tasks := newFakeTaskRepo()
+	tasks.addTask("project-root", "", "ws-1")
+	tasks.mu.Lock()
+	tasks.tasks["project-root"].AgentProjectID = "project-1"
+	tasks.mu.Unlock()
+	repo := newCascadeRepo(tasks)
+	const cascadeID = "cascade-project-restore"
+	if changed, err := repo.ArchiveTaskIfActive(ctx, "project-root", cascadeID); err != nil || !changed {
+		t.Fatalf("archive project coordinator: changed=%v err=%v", changed, err)
+	}
+	cleanup := &projectRestoreCleanupRace{
+		started: make(chan struct{}),
+		release: make(chan struct{}),
+	}
+	handoff := NewHandoffService(repo, nil, nil, nil, nil, nil)
+	handoff.SetTaskResourceCleaner(cleanup)
+	handoff.SetAgentProjectActionAuthorizer(func(_ context.Context, projectID, taskID string) error {
+		if projectID != "project-1" || taskID != "project-root" {
+			t.Fatalf("project restore authorization = %q/%q", projectID, taskID)
+		}
+		return nil
+	})
+
+	result := make(chan error, 1)
+	go func() {
+		_, err := handoff.UnarchiveAgentProjectTree(ctx, "project-1", "project-root")
+		result <- err
+	}()
+	select {
+	case <-cleanup.started:
+	case <-time.After(time.Second):
+		t.Fatal("project restore did not attempt to cancel archive cleanup")
+	}
+	stillArchived, err := tasks.GetTask(ctx, "project-root")
+	if err != nil {
+		t.Fatalf("load project task while cleanup is running: %v", err)
+	}
+	if stillArchived.ArchivedAt == nil {
+		t.Fatal("project task became active before archive cleanup finished")
+	}
+	close(cleanup.release)
+
+	select {
+	case err := <-result:
+		if err != nil {
+			t.Fatalf("UnarchiveAgentProjectTree after cleanup finished: %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("project restore did not resume after archive cleanup finished")
+	}
+	active, err := tasks.GetTask(ctx, "project-root")
+	if err != nil {
+		t.Fatalf("load restored project task: %v", err)
+	}
+	if active.ArchivedAt != nil {
+		t.Fatal("project task remains archived after restore")
 	}
 }
 

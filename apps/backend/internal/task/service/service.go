@@ -539,6 +539,8 @@ type Service struct {
 	taskDeletePreviewMu             sync.Mutex
 	taskDeletePreviews              map[string]taskDeletePreview
 	managementClaimLocks            parentMutex
+	agentProjectContextPathResolver         func(string) (string, error)
+	agentProjectPrimaryRepositoryIDResolver func(context.Context, string, string) (string, error)
 	providerProber                  ProviderDefaultBranchProber
 	gitArchiveCapture               GitArchiveCapture
 	workflowStepCreator             WorkflowStepCreator
@@ -588,6 +590,9 @@ type Service struct {
 	runtimeOverridesMu             sync.Mutex
 
 	workspaceSourceProviderRefresher WorkspaceSourceProviderRefresher
+	agentProjectsEnabled             bool
+	agentProjectTaskAuthorizer       func(context.Context, *CreateTaskRequest) error
+	agentProjectActionAuthorizer     func(context.Context, string, string) error
 
 	workspaceDefaultsInitializer WorkspaceDefaultsInitializer
 	// foregroundActivity resolves the live fine-grained busy substate of a RUNNING
@@ -664,6 +669,34 @@ type Service struct {
 // required before a newly created child can be returned or launched.
 type WorkspacePolicyAttacher interface {
 	AttachWorkspacePolicy(ctx context.Context, taskID, parentID string, policy WorkspacePolicy) error
+}
+
+// SetAgentProjectsEnabled gates project task creation from the typed runtime
+// flag configured during backend startup.
+func (s *Service) SetAgentProjectsEnabled(enabled bool) {
+	s.agentProjectsEnabled = enabled
+}
+
+// SetAgentProjectTaskAuthorizer installs the project-domain check used by the
+// workflow-free task creation path.
+func (s *Service) SetAgentProjectTaskAuthorizer(authorizer func(context.Context, *CreateTaskRequest) error) {
+	s.agentProjectTaskAuthorizer = authorizer
+}
+
+// SetAgentProjectActionAuthorizer installs the membership check used by
+// project-level archive and delete operations.
+func (s *Service) SetAgentProjectActionAuthorizer(authorizer func(context.Context, string, string) error) {
+	s.agentProjectActionAuthorizer = authorizer
+}
+
+func (s *Service) SetAgentProjectContextPathResolver(resolver func(string) (string, error)) {
+	s.agentProjectContextPathResolver = resolver
+}
+
+func (s *Service) SetAgentProjectPrimaryRepositoryIDResolver(
+	resolver func(context.Context, string, string) (string, error),
+) {
+	s.agentProjectPrimaryRepositoryIDResolver = resolver
 }
 
 // AutoArchiveCoordinator owns the full lifecycle transition for automatic
