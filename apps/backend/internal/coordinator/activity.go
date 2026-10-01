@@ -143,12 +143,18 @@ func (s *Store) InsertActivity(ctx context.Context, exec coordinatorExec, row Ac
 	}
 	row.WorkspaceID = workspaceID
 	row.Detail = truncateRunes(row.Detail, activityDetailMaxRunes)
-	_, err := exec.ExecContext(ctx, s.db.Rebind(`INSERT INTO coordinator_activity (`+activityColumns+`, unattended_turn_id)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
+	var turnID *string
+	if row.Outcome == ActivityProposed || row.Authorization == AuthDenied {
+		if row.UndoOfID == nil {
+			turnID = s.ledgerTurnID(ctx)
+		}
+	}
+	_, err := exec.ExecContext(ctx, s.db.Rebind(`INSERT INTO coordinator_activity (`+activityColumns+`, unattended_turn_id, turn_id)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
 		row.ID, row.CoordinatorID, row.WorkspaceID, string(row.ActionClass), string(row.Outcome),
 		string(row.Authorization), row.TargetTaskID, row.ProposalID, row.ActorUserID, row.ReasonCode,
 		row.Detail, row.Edited, row.RefusalCount, row.UndoneAt, row.UndoneBy, row.UndoOfID,
-		row.CreatedAt, row.UpdatedAt, row.UnattendedTurnID)
+		row.CreatedAt, row.UpdatedAt, row.UnattendedTurnID, turnID)
 	if err != nil {
 		return fmt.Errorf("insert coordinator activity: %w", err)
 	}
@@ -223,6 +229,13 @@ func (s *Store) recordRefusalTx(ctx context.Context, tx coordinatorExec, coordin
 	turnMatch, turnArgs := `unattended_turn_id IS NULL`, []any(nil)
 	if turnID != nil {
 		turnMatch, turnArgs = `unattended_turn_id = ?`, []any{*turnID}
+	}
+	ledgerTurn := s.ledgerTurnID(ctx)
+	if ledgerTurn == nil {
+		turnMatch += ` AND turn_id IS NULL`
+	} else {
+		turnMatch += ` AND turn_id = ?`
+		turnArgs = append(turnArgs, *ledgerTurn)
 	}
 	args := append([]any{coordinatorID, string(class), reasonCode, string(ActivityRefused), now.Add(-refusalCoalesceWindow)}, turnArgs...)
 	err := tx.QueryRowContext(ctx, s.db.Rebind(`SELECT id FROM coordinator_activity

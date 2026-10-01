@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -44,6 +45,9 @@ type Store struct {
 	// afterUnattendedLookup is a test-only hook run between RecordUnattendedDenial's
 	// turn lookup and its write transaction. nil in production.
 	afterUnattendedLookup func()
+
+	ledgerMu sync.RWMutex
+	ledger   TurnLedger
 
 	// beforeCoordinatorRowDelete is a test-only hook invoked by
 	// DeleteCoordinator and DeleteWorkspaceState after the coordinator row

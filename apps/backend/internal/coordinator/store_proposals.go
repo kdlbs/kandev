@@ -33,7 +33,7 @@ const changeStatusColumn = `(SELECT pc.status FROM coordinator_pending_changes p
 
 // proposalInsertColumns are the columns a new proposal row sets; the reply
 // columns other than in_reply_to stay NULL until a reply.
-const proposalInsertColumns = `id, coordinator_id, workspace_id, status, spec_json, final_spec_json, claimed_at, claim_token, task_id, error, reject_reason, decided_by, created_at, updated_at, kind, target_task_id, standing_order_ids, starts_agent, outcome_json, in_reply_to`
+const proposalInsertColumns = `id, coordinator_id, workspace_id, status, spec_json, final_spec_json, claimed_at, claim_token, task_id, error, reject_reason, decided_by, created_at, updated_at, kind, target_task_id, standing_order_ids, starts_agent, outcome_json, in_reply_to, turn_id`
 
 // proposalRow is the DB scan target for coordinator_proposals.
 type proposalRow struct {
@@ -237,11 +237,11 @@ func (s *Store) insertProposalBody(ctx context.Context, exec coordinatorExec, p 
 
 	_, err = exec.ExecContext(ctx, s.db.Rebind(`
 		INSERT INTO coordinator_proposals (`+proposalInsertColumns+`)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
 		p.ID, p.CoordinatorID, p.WorkspaceID, string(p.Status), string(specJSON),
 		nil, nil, nil, nil, nil, nil, nil, p.CreatedAt, p.UpdatedAt,
 		p.Kind, nullableString(p.TargetTaskID), string(idsJSON), p.StartsAgent, nullableString(p.OutcomeJSON),
-		nullableString(p.InReplyTo))
+		nullableString(p.InReplyTo), s.ledgerTurnID(ctx))
 	if err != nil {
 		return fmt.Errorf("insert proposal: %w", err)
 	}
