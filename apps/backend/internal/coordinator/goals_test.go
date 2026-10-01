@@ -377,7 +377,7 @@ func TestPutGoal_UniqueViolationSurfacesAsPlainError(t *testing.T) {
 	f := newGoalFixture(t)
 	f.createTasksTable()
 	f.mustPut(`{"name":"g","criteria":[]}`)
-	_, err := f.svc.createGoal(context.Background(), f.store.db, f.c, goalInput{Name: "dup"})
+	_, err := f.svc.createGoal(context.Background(), f.store.db, f.c, goalInput{Name: "dup"}, 0)
 	if err == nil || errors.Is(err, ErrGoalConflict) || errors.Is(err, ErrNotFound) {
 		t.Fatalf("err = %v, want a plain insert error", err)
 	}

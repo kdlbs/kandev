@@ -33,7 +33,7 @@ func (s *Store) DeleteWorkspaceState(ctx context.Context, workspaceID string) er
 	if _, err := tx.ExecContext(ctx, tx.Rebind(`DELETE FROM coordinator_wakes WHERE workspace_id = ?`), workspaceID); err != nil {
 		return fmt.Errorf("delete workspace wakes: %w", err)
 	}
-	for _, table := range []string{"coordinator_watches", "coordinator_activity", "coordinator_standing_orders", "coordinator_goals"} {
+	for _, table := range []string{"coordinator_watches", "coordinator_watch_projects", "coordinator_activity", "coordinator_standing_orders", "coordinator_goals"} {
 		if _, err := tx.ExecContext(ctx, tx.Rebind(`DELETE FROM `+table+` WHERE workspace_id = ?`), workspaceID); err != nil {
 			return fmt.Errorf("delete workspace %s: %w", table, err)
 		}

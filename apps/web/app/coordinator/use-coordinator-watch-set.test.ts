@@ -5,9 +5,10 @@ const getMock = vi.fn();
 vi.mock("@/lib/api/domains/coordinator-api", () => ({
   getCoordinatorSettings: (...args: unknown[]) => getMock(...args),
 }));
-vi.mock("@/lib/ws/connection", () => ({ useWebSocketClient: () => null }));
+const ws = vi.hoisted(() => ({ client: null as unknown }));
+vi.mock("@/lib/ws/connection", () => ({ useWebSocketClient: () => ws.client }));
 
-import { useCoordinatorWatchSet } from "./use-coordinator-watch-set";
+import { useCoordinatorWatchSet, watchSetFromSettings } from "./use-coordinator-watch-set";
 
 const settings = (ids: string[]) => ({
   policy: { actions: {} },
@@ -15,7 +16,10 @@ const settings = (ids: string[]) => ({
   watches: { scope: "selected", workflow_ids: ids },
 });
 
-beforeEach(() => vi.clearAllMocks());
+beforeEach(() => {
+  vi.clearAllMocks();
+  ws.client = null;
+});
 
 describe("useCoordinatorWatchSet", () => {
   it("stays inert while disabled", () => {
@@ -54,5 +58,60 @@ describe("useCoordinatorWatchSet", () => {
     getMock.mockReturnValueOnce(new Promise(() => {}));
     rerender({ id: "c2" });
     expect(result.current.input.value).toBeUndefined();
+  });
+});
+
+describe("useCoordinatorWatchSet events", () => {
+  it("re-reads when a repository or a repository set changes", async () => {
+    const handlers = new Map<string, () => void>();
+    ws.client = {
+      on: (event: string, handler: () => void) => {
+        handlers.set(event, handler);
+        return () => handlers.delete(event);
+      },
+    };
+    getMock.mockResolvedValue(settings(["a"]));
+    const { result } = renderHook(() => useCoordinatorWatchSet("w", "c", true));
+    await waitFor(() => expect(result.current.input.value).toBeDefined());
+    expect([...handlers.keys()].sort()).toEqual(
+      [
+        "coordinator.updated",
+        "repository.deleted",
+        "repository_set.created",
+        "repository_set.deleted",
+        "repository_set.updated",
+      ].sort(),
+    );
+    for (const event of [...handlers.keys()].filter((e) => e !== "coordinator.updated")) {
+      const before = getMock.mock.calls.length;
+      await act(async () => handlers.get(event)!());
+      await waitFor(() => expect(getMock.mock.calls.length).toBe(before + 1));
+    }
+  });
+});
+
+describe("watchSetFromSettings", () => {
+  const base = { policy: { actions: {} }, policy_revision: 1 } as never;
+  it("carries no projects when the stored scope is all", () => {
+    const set = watchSetFromSettings({
+      ...(base as object),
+      watches: { scope: "all", workflow_ids: [] },
+    } as never);
+    expect(set.projects).toBeUndefined();
+  });
+
+  it("maps a selected scope to camelCase and keeps an unknown list as null", () => {
+    const make = (ids: string[] | null) =>
+      watchSetFromSettings({
+        ...(base as object),
+        watches: { scope: "all", workflow_ids: [] },
+        projects: { scope: "selected", repository_ids: ids, include_no_repository: true },
+      } as never);
+    expect(make(["r1"]).projects).toEqual({
+      scope: "selected",
+      repositoryIds: ["r1"],
+      includeNoRepository: true,
+    });
+    expect(make(null).projects?.repositoryIds).toBeNull();
   });
 });

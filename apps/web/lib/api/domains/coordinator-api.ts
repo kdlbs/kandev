@@ -51,7 +51,7 @@ export type Coordinator = {
   // Present only while features.coordinatorPhase2 is on.
   policy?: { actions: Record<string, string> };
   policy_revision?: number;
-  watches?: { scope: "all" | "selected"; workflow_ids: string[] };
+  watches?: Projects.CoordinatorWatches;
   // Present only while features.coordinatorPhase3 is effective. The ceiling is
   // a dollar string with two decimals, or null when unset.
   autonomy_enabled?: boolean;
@@ -59,6 +59,10 @@ export type Coordinator = {
   // Present only on the list route while features.coordinatorPhase2 is on.
   summary?: CoordinatorSummary;
 };
+
+import type * as Projects from "./coordinator-projects-types";
+
+export type * from "./coordinator-projects-types";
 
 // Mirrors internal/coordinator/dto.go's SummaryDTO.
 export type CoordinatorSummary = {
@@ -76,11 +80,16 @@ export type CoordinatorSettings = {
   policy: { actions: Record<ControlAction, ControlSetting> };
   policy_revision: number;
   watches: { scope: "all" | "selected"; workflow_ids: string[] };
+  // Resolved scope for the client filter; present while the stored scope is selected.
+  projects?: Projects.SettingsProjects;
+  // Present only while features.coordinatorPhase31 is effective.
+  projects_config?: Projects.ProjectsConfig;
 };
 
 export type PutSettingsRequest = {
   policy?: { actions: Record<ControlAction, ControlSetting> };
   watches?: { scope: "all" | "selected"; workflow_ids?: string[] };
+  projects?: Projects.ProjectsRequest;
 };
 
 export type CoordinatorListResponse = {
@@ -366,7 +375,7 @@ export type PutGoalRequest = {
   criteria: { id?: string; text: string }[];
 };
 
-function workspacePath(workspaceId: string, suffix: string): string {
+export function workspacePath(workspaceId: string, suffix: string): string {
   return `/api/v1/workspaces/${encodeURIComponent(workspaceId)}${suffix}`;
 }
 
@@ -744,27 +753,4 @@ export function putCoordinatorSettings(
   );
 }
 
-// Mirrors internal/coordinator/setup.go's body: one request creates the
-// coordinator with its policy, Watches and optional goal, or none of them.
-export type SetupCoordinatorRequest = Required<CreateCoordinatorRequest> & {
-  watches: { scope: "all" | "selected"; workflow_ids?: string[] };
-  policy: { actions: Record<ControlAction, ControlSetting> };
-  goal?: {
-    name: string;
-    due_on: string | null;
-    criteria: Array<{ text: string }>;
-  };
-};
-
-export function setupCoordinator(
-  workspaceId: string,
-  req: SetupCoordinatorRequest,
-  options?: ApiRequestOptions,
-): Promise<Coordinator> {
-  return mutate<Coordinator>(
-    workspacePath(workspaceId, "/coordinators/setup"),
-    "POST",
-    req,
-    options,
-  );
-}
+export { setupCoordinator, type SetupCoordinatorRequest } from "./coordinator-setup-api";

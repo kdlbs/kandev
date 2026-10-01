@@ -823,6 +823,10 @@ func (h *Handlers) handleListTasks(ctx context.Context, msg *ws.Message) (*ws.Me
 			if err != nil {
 				return nil, err
 			}
+			tasks, err = h.filterCoordinatorTasks(ctx, tasks)
+			if err != nil {
+				return nil, err
+			}
 			dtos := make([]dto.TaskDTO, 0, len(tasks))
 			for _, t := range tasks {
 				dtos = append(dtos, dto.FromTask(t))

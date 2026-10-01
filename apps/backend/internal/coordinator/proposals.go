@@ -103,7 +103,7 @@ func (s *Service) ProposeTask(ctx context.Context, coordinatorID string, req Pro
 		return nil, 0, err
 	}
 	if s.phase2 {
-		if err := s.checkProposalWatched(ctx, coordinatorID, spec); err != nil {
+		if err := s.checkProposalWatched(ctx, coordinatorID, found.WorkspaceID, spec); err != nil {
 			return nil, 0, err
 		}
 	}
@@ -214,17 +214,40 @@ func (s *Service) buildProposalSpec(ctx context.Context, workspaceID string, req
 	}, startsAgent, nil
 }
 
-// checkProposalWatched refuses a proposal whose workflow, or whose source
-// task's workflow, is outside the coordinator's effective watch set. A source
-// task without a workflow is never watched.
-func (s *Service) checkProposalWatched(ctx context.Context, coordinatorID string, spec ProposalSpec) error {
+// checkProposalWatched refuses a proposal whose workflow, whose source task,
+// or whose repository is outside the coordinator's Watches. A source task
+// without a workflow is never watched.
+func (s *Service) checkProposalWatched(ctx context.Context, coordinatorID, workspaceID string, spec ProposalSpec) error {
 	set, err := s.EffectiveWatchSet(ctx, coordinatorID)
 	if err != nil {
 		return fmt.Errorf("read watch set: %w", err)
 	}
+	g, err := s.newWatchGate(ctx, set, workspaceID)
+	if err != nil {
+		return fmt.Errorf("read projects: %w", err)
+	}
 	if !set.Contains(spec.WorkflowID) {
 		return &FieldError{Field: "workflow_id", Message: "workflow is outside this coordinator's watches"}
 	}
+	if !g.task(spec.WorkflowID, repoIDsOf(spec.RepositoryID)) {
+		return &FieldError{Field: ApproveFieldRepositoryID, Message: "repository is outside this coordinator's projects"}
+	}
+	return s.checkSourceTaskWatched(ctx, g, spec)
+}
+
+func repoIDsOf(id string) []string {
+	if id == "" {
+		return nil
+	}
+	return []string{id}
+}
+
+// sourceTaskUnavailableMessage is the one refusal for a source task that is
+// missing, in another workspace, or outside the watches, so the response does
+// not reveal which.
+const sourceTaskUnavailableMessage = "source task not found in this workspace"
+
+func (s *Service) checkSourceTaskWatched(ctx context.Context, g *watchGate, spec ProposalSpec) error {
 	if spec.SourceTaskID == "" {
 		return nil
 	}
@@ -232,8 +255,18 @@ func (s *Service) checkProposalWatched(ctx context.Context, coordinatorID string
 	if err != nil {
 		return fmt.Errorf("get source task: %w", err)
 	}
-	if task == nil || !set.Contains(task.WorkflowID) {
-		return &FieldError{Field: fieldSourceTaskID, Message: "source task is outside this coordinator's watches"}
+	outside := &FieldError{Field: fieldSourceTaskID, Message: sourceTaskUnavailableMessage}
+	if task == nil {
+		return outside
+	}
+	repos, err := s.taskRepositoryIDs(ctx, g, []string{task.ID})
+	if err != nil {
+		s.logger.Warn("coordinator: source task repository read failed; treating task as outside the projects",
+			zap.String("task_id", task.ID), zap.Error(err))
+		return outside
+	}
+	if !g.task(task.WorkflowID, repos[task.ID]) {
+		return outside
 	}
 	return nil
 }
@@ -246,7 +279,7 @@ func (s *Service) validateProposalSourceTask(ctx context.Context, workspaceID, s
 	_, err = resolveWorkspaceScopedRef(
 		"source task", task, err, repoerrors.ErrTaskNotFound,
 		func(t *taskmodels.Task) string { return t.WorkspaceID }, workspaceID,
-		&FieldError{Field: fieldSourceTaskID, Message: "source task not found in this workspace"},
+		&FieldError{Field: fieldSourceTaskID, Message: sourceTaskUnavailableMessage},
 	)
 	return err
 }

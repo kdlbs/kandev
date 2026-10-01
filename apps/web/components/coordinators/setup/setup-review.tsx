@@ -1,6 +1,7 @@
 "use client";
 
 import { useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
 import { Button } from "@kandev/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@kandev/ui/table";
 import { CONTROL_ACTIONS } from "@/lib/coordinators/control-draft";
@@ -14,6 +15,7 @@ import {
 } from "@/lib/coordinators/setup";
 import type { AgentProfileOption } from "@/lib/state/slices/settings/types";
 import type { Executor } from "@/lib/types/http";
+import type { ProjectChoice } from "@/lib/coordinators/control-draft";
 import type { WorkspaceBoard } from "@/hooks/domains/coordinator/use-workspace-boards";
 
 const ACTION_LABEL = {
@@ -38,43 +40,42 @@ type Props = {
   agentProfiles: readonly AgentProfileOption[];
   executors: readonly Executor[];
   boards: readonly WorkspaceBoard[];
+  /** The selectable projects; undefined while the Projects step is not offered. */
+  projectChoices?: readonly ProjectChoice[];
   onChange: (step: SetupStepId) => void;
 };
 
-function useReviewRows({
-  state,
-  agentProfiles,
-  executors,
-  boards,
-}: Omit<Props, "onChange">): Row[] {
-  const { t, i18n } = useTranslation();
-  const notSet = t("coordinator:setupNotSet");
+function projectsReviewValue(
+  state: SetupState,
+  choices: readonly ProjectChoice[] | undefined,
+  t: (key: string) => string,
+): string | null {
+  if (!choices) return null;
+  const { scope, entries, includeNoRepository } = state.projects;
+  if (scope === "all") return t("coordinator:setupEveryProject");
+  const chosen = new Set(entries.map((entry) => `${entry.kind}:${entry.id}`));
+  const names = choices
+    .filter((choice) => chosen.has(`${choice.kind}:${choice.id}`))
+    .map((choice) => choice.name)
+    .join(", ");
+  if (!includeNoRepository) return names;
+  if (names === "") return t("coordinator:watchesIncludeNoRepository");
+  return `${names} ${t("coordinator:copilotProjectsNoRepository")}`;
+}
+
+function identityRows(
+  state: SetupState,
+  agentProfiles: Props["agentProfiles"],
+  executors: Props["executors"],
+  identity: string,
+  t: TFunction,
+): Row[] {
   const agent = agentProfiles.find((p) => p.id === state.agentProfileId)?.label;
-  const executor = flattenExecutorProfiles(executors).find(
-    (p) => p.id === state.executorProfileId,
-  )?.name;
+  const profiles = flattenExecutorProfiles(executors);
+  const executor = profiles.find((p) => p.id === state.executorProfileId)?.name;
   const taskAgent = agentProfiles.find((p) => p.id === state.taskAgentProfileId)?.label;
-  const taskExecutor = flattenExecutorProfiles(executors).find(
-    (p) => p.id === state.taskExecutorProfileId,
-  )?.name;
-  const selected = new Set(state.watches.workflowIds);
-  const watches =
-    state.watches.scope === "all"
-      ? t("coordinator:setupEveryBoard")
-      : boards
-          .filter((b) => selected.has(b.id))
-          .map((b) => b.name)
-          .join(", ");
-  const goal = state.goal;
-  const due =
-    goal.dueOn === ""
-      ? t("coordinator:setupGoalNoDue")
-      : t("coordinator:setupGoalDue", { date: formatCalendarDate(goal.dueOn, i18n.language) });
-  const goalValue = isGoalEmpty(goal)
-    ? notSet
-    : t("coordinator:setupGoalValue", { name: goal.name.trim(), due, count: goal.criteria.length });
-  const identity = t("coordinator:sectionIdentity");
-  const rows: Row[] = [
+  const taskExecutor = profiles.find((p) => p.id === state.taskExecutorProfileId)?.name;
+  return [
     {
       id: "name",
       setting: t("coordinator:nameLabel"),
@@ -106,6 +107,38 @@ function useReviewRows({
       owner: identity,
       step: "identity",
     },
+  ];
+}
+
+function useReviewRows({
+  state,
+  agentProfiles,
+  executors,
+  boards,
+  projectChoices,
+}: Omit<Props, "onChange">): Row[] {
+  const { t, i18n } = useTranslation();
+  const notSet = t("coordinator:setupNotSet");
+  const selected = new Set(state.watches.workflowIds);
+  const watches =
+    state.watches.scope === "all"
+      ? t("coordinator:setupEveryBoard")
+      : boards
+          .filter((b) => selected.has(b.id))
+          .map((b) => b.name)
+          .join(", ");
+  const projects = projectsReviewValue(state, projectChoices, t);
+  const goal = state.goal;
+  const due =
+    goal.dueOn === ""
+      ? t("coordinator:setupGoalNoDue")
+      : t("coordinator:setupGoalDue", { date: formatCalendarDate(goal.dueOn, i18n.language) });
+  const goalValue = isGoalEmpty(goal)
+    ? notSet
+    : t("coordinator:setupGoalValue", { name: goal.name.trim(), due, count: goal.criteria.length });
+  const identity = t("coordinator:sectionIdentity");
+  const rows: Row[] = [
+    ...identityRows(state, agentProfiles, executors, identity, t),
     {
       id: "watches",
       setting: t("coordinator:sectionWatches"),
@@ -113,6 +146,17 @@ function useReviewRows({
       owner: t("coordinator:sectionWatches"),
       step: "watches",
     },
+    ...(projects === null
+      ? []
+      : [
+          {
+            id: "projects",
+            setting: t("coordinator:watchesProjects"),
+            value: projects,
+            owner: t("coordinator:sectionWatches"),
+            step: "projects" as const,
+          },
+        ]),
     {
       id: "goal",
       setting: t("coordinator:sectionGoal"),

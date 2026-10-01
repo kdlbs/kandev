@@ -23,7 +23,7 @@ import { useCoordinatorWatchSet } from "./use-coordinator-watch-set";
 import { useFeature } from "@/hooks/domains/features/use-feature";
 import { filterWatched, type WatchSet } from "@/lib/coordinator/watch-filter";
 
-export type CoordinatorInputKind = "tasks" | "stalls" | "proposals" | "watches";
+export type CoordinatorInputKind = "tasks" | "stalls" | "proposals" | "watches" | "projects";
 
 export type CoordinatorInputStatus = {
   kind: CoordinatorInputKind;
@@ -156,11 +156,16 @@ export function useCoordinatorAttention(
           },
         ]
       : []),
+    ...(phase2 && watchValue?.projects?.repositoryIds === null
+      ? [{ kind: "projects" as const, error: true, loadedAt: watchSet.input.loadedAt }]
+      : []),
   ];
 
   const retryFailed = () => {
     if (tasksInput.error) tasksInput.retry();
-    if (phase2 && watchSet.input.error) watchSet.retry();
+    if (phase2 && (watchSet.input.error || watchValue?.projects?.repositoryIds === null)) {
+      watchSet.retry();
+    }
     retryStallsAndProposals();
   };
 

@@ -29,6 +29,7 @@ const draft = (createTask: string): ControlDraft =>
       stop: "denied",
     },
     watches: { scope: "all", workflowIds: [] },
+    projects: null,
   }) as ControlDraft;
 
 const control = (d: ControlDraft) =>

@@ -136,6 +136,12 @@ type Service struct {
 	// phase3 is true when phase 3 is effective (features.coordinator, phase 2
 	// and phase 3 all on). It gates the autonomy settings.
 	phase3 bool
+
+	// phase31 is true when phase 3.1 is effective (phase 3 effective and
+	// features.coordinatorPhase31): the pause route and controls and the
+	// project-scope write surface and its reads exist. The pause gate and the
+	// stored project scope are enforced whatever its value.
+	phase31 bool
 	// automatic holds the automatic path's injectable seams.
 	automatic automaticState
 	// wakeMu guards kick, the stall hook, the wake sources and the recorder
@@ -146,7 +152,10 @@ type Service struct {
 	// stallWakeHook records stall wakes; nil is a no-op.
 	stallWakeHook StallWakeHook
 	wakeSources   WakeSources
-	recorderSubs  []bus.Subscription
+	// projects reads sets, repositories and task repositories for the project
+	// scope; guarded by wakeMu.
+	projects     ProjectReader
+	recorderSubs []bus.Subscription
 	// recorderStopped latches once StopWakeRecorder ran: later hook and event
 	// entries are refused. wakeInFlight counts handlers and hooks in flight.
 	recorderStopped bool
@@ -174,6 +183,10 @@ type Service struct {
 	// re-check and the claim.
 	afterApproveRecheck func()
 
+	// afterGoalBaselineRead is a test-only hook run between PutGoal's
+	// pre-lock reads and the locked write.
+	afterGoalBaselineRead func()
+
 	// permissionResolver resolves a denied unattended permission request; nil
 	// until SetUnattendedPermissionResolver, and then the handler does nothing.
 	permissionResolver UnattendedPermissionResolver
@@ -181,9 +194,6 @@ type Service struct {
 	// until phase 3 wiring sets it.
 	containment *ContainmentChecker
 
-	// phase31 is true when phase 3.1 is effective: the pause route and controls
-	// exist. The pause gate does not read it.
-	phase31 bool
 	// gate is the pause precondition; knownPaused backs its flag-off carve-out.
 	gate        pause.Gate
 	knownPaused *pause.KnownSet

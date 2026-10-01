@@ -1,8 +1,11 @@
 import { describe, expect, it } from "vitest";
-import type { ControlDraft } from "./control-draft";
+import type { ControlDraft, ProjectsDraft } from "./control-draft";
 import {
   buildPutRequest,
+  isProjectsInvalid,
   isWatchesInvalid,
+  sameProjects,
+  switchOffProjects,
   mergeStored,
   sameWatches,
   settleAfterSave,
@@ -19,6 +22,7 @@ const base = (): ControlDraft => ({
     stop: "denied",
   },
   watches: { scope: "all", workflowIds: [] },
+  projects: null,
 });
 
 const withAction = (
@@ -142,5 +146,86 @@ describe("switchOffWatches", () => {
     const result = switchOffWatches(ids);
     expect(result.ok && result.watches.workflowIds).toEqual(ids.slice(0, 50));
     expect(result.ok && result.capped).toBe(true);
+  });
+});
+
+describe("Projects draft", () => {
+  const selected = (ids: string[], includeNoRepository = false): ProjectsDraft => ({
+    scope: "selected",
+    entries: ids.map((id) => ({ kind: "repository" as const, id })),
+    includeNoRepository,
+  });
+  const withProjects = (projects: ProjectsDraft | null): ControlDraft => ({ ...base(), projects });
+
+  it("compares selected entries as a set and the toggle, and ignores both under all", () => {
+    expect(sameProjects(selected(["a", "b"]), selected(["b", "a"]))).toBe(true);
+    expect(sameProjects(selected(["a"]), selected(["a"], true))).toBe(false);
+    expect(
+      sameProjects(
+        { ...selected(["a"]), scope: "all" },
+        { ...selected(["b"], true), scope: "all" },
+      ),
+    ).toBe(true);
+    expect(sameProjects({ ...selected(["a"]), scope: "all" }, selected(["a"]))).toBe(false);
+    expect(sameProjects(null, null)).toBe(true);
+  });
+
+  it("sends the projects member only when it changed", () => {
+    const stored = withProjects(selected(["a"]));
+    expect(buildPutRequest(stored, stored)).toEqual({});
+    expect(buildPutRequest(withProjects(selected(["a", "b"], true)), stored)).toEqual({
+      projects: {
+        scope: "selected",
+        entries: [
+          { kind: "repository", id: "a" },
+          { kind: "repository", id: "b" },
+        ],
+        include_no_repository: true,
+      },
+    });
+    expect(buildPutRequest(withProjects({ ...selected(["a"]), scope: "all" }), stored)).toEqual({
+      projects: { scope: "all" },
+    });
+  });
+
+  it("never sends projects while the scope is not offered", () => {
+    expect(buildPutRequest(withProjects(null), withProjects(null))).toEqual({});
+  });
+
+  it("marks an edited selection with no entry and no toggle invalid", () => {
+    const stored = withProjects(selected(["a"]));
+    expect(isProjectsInvalid(withProjects(selected([])), stored)).toBe(true);
+    expect(isProjectsInvalid(withProjects(selected([], true)), stored)).toBe(false);
+    expect(isProjectsInvalid(stored, stored)).toBe(false);
+  });
+
+  it("keeps an edited projects member through a re-read and a save", () => {
+    const old = withProjects(selected(["a"]));
+    const next = withProjects(selected(["z"]));
+    const dirty = withProjects(selected(["a", "b"]));
+    expect(mergeStored(old, old, next).projects).toEqual(next.projects);
+    expect(mergeStored(dirty, old, next).projects).toEqual(dirty.projects);
+    expect(settleAfterSave(dirty, old, next).projects).toEqual(dirty.projects);
+    expect(settleAfterSave(old, old, next).projects).toEqual(next.projects);
+  });
+
+  it("restores stored entries when switching off, else starts from every project capped at 50", () => {
+    const all: ProjectsDraft = {
+      scope: "all",
+      entries: [{ kind: "repository", id: "a" }],
+      includeNoRepository: false,
+    };
+    expect(switchOffProjects(all, [])?.entries).toEqual([{ kind: "repository", id: "a" }]);
+    const none: ProjectsDraft = { scope: "all", entries: [], includeNoRepository: false };
+    expect(switchOffProjects(none, [])).toBeNull();
+    const choices = Array.from({ length: 60 }, (_, i) => ({
+      kind: "repository" as const,
+      id: `r${i}`,
+      name: `r${i}`,
+    }));
+    const started = switchOffProjects(none, choices);
+    expect(started?.scope).toBe("selected");
+    expect(started?.entries).toHaveLength(50);
+    expect(started?.includeNoRepository).toBe(false);
   });
 });

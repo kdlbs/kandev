@@ -1,5 +1,6 @@
 "use client";
 
+import { repositoriesInProjects } from "@/lib/coordinator/watch-filter";
 import { useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { useStore } from "zustand";
@@ -31,8 +32,21 @@ function notWatchedBy(
   context: PageContext | null,
   watches: ReturnType<typeof useCoordinatorWatches>,
 ): boolean {
-  if (!context || !watches.loaded || watches.watches?.scope !== "selected") return false;
-  return context.workflowId !== null && !watches.watches.workflow_ids.includes(context.workflowId);
+  const loaded = watches.watches;
+  if (!context || !watches.loaded || !loaded) return false;
+  const boardOutside =
+    loaded.scope === "selected" &&
+    context.workflowId !== null &&
+    !loaded.workflow_ids.includes(context.workflowId);
+  if (boardOutside) return true;
+  const projects = loaded.projects;
+  if (projects?.scope !== "selected" || projects.repository_ids === null) return false;
+  if (context.repositoryIds === null) return false;
+  return !repositoriesInProjects(context.repositoryIds, {
+    scope: "selected",
+    repositoryIds: projects.repository_ids,
+    includeNoRepository: projects.include_no_repository,
+  });
 }
 
 /** The host's open panel: the phase-1 controller and content on the host store,
@@ -72,6 +86,7 @@ export function WorkspaceCopilotPanel({
     <WorkspacePageChipRow
       chip={chip}
       notWatched={notWatchedBy(context, watches)}
+      projects={watches.watches?.projects}
       onRemove={() => store.getState().dismissChip(routeKey)}
     />
   ) : null;

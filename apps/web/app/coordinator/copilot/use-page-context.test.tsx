@@ -32,6 +32,7 @@ describe("usePageContext task pages", () => {
       ref: { kind: "task", id: "t-1" },
       label: "KAN-7",
       workflowId: "wf-1",
+      repositoryIds: [],
     });
   });
 
@@ -58,6 +59,7 @@ describe("usePageContext board and inbox", () => {
       ref: { kind: "workflow", id: "wf-1" },
       label: "Sprint - one board",
       workflowId: "wf-1",
+      repositoryIds: null,
     });
   });
 
@@ -81,5 +83,15 @@ describe("pageRouteKey", () => {
     expect(pageRouteKey({ kind: "kanban" }, "wf-1")).toBe("kanban:wf-1");
     expect(pageRouteKey({ kind: "kanban" }, null)).toBe("kanban:");
     expect(pageRouteKey({ kind: "needsYouInbox" }, "wf-1")).toBe("needsYouInbox:");
+  });
+});
+
+describe("usePageContext task repositories", () => {
+  it("carries the task's repository ids, from the list or the main repository", () => {
+    const withList = { ...TASK, repositories: [{ repository_id: "r1" }, { repository_id: "r2" }] };
+    expect(context(TASK_ROUTE, { tasks: [withList] })?.repositoryIds).toEqual(["r1", "r2"]);
+    expect(
+      context(TASK_ROUTE, { tasks: [{ ...TASK, repositoryId: "r9" }] })?.repositoryIds,
+    ).toEqual(["r9"]);
   });
 });

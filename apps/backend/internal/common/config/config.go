@@ -572,9 +572,10 @@ type FeaturesConfig struct {
 	// with Coordinator and CoordinatorPhase2.
 	CoordinatorPhase3 bool `mapstructure:"coordinator_phase3" json:"coordinatorPhase3"`
 
-	// CoordinatorPhase31 gates the phase 3.1 surfaces (pause, learning). It
-	// only takes effect together with Coordinator, CoordinatorPhase2 and
-	// CoordinatorPhase3.
+	// CoordinatorPhase31 gates the phase 3.1 surfaces: pausing a coordinator,
+	// the Projects scope editor, and everything that reads or acts on the
+	// recorded turn ledger. It only takes effect together with Coordinator,
+	// CoordinatorPhase2 and CoordinatorPhase3.
 	CoordinatorPhase31 bool `mapstructure:"coordinator_phase31" json:"coordinatorPhase31"`
 
 	// CodexAppServer enables the separate native Codex app-server agent. It is

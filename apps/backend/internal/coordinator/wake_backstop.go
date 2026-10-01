@@ -274,10 +274,18 @@ func (b *WakeBackstop) readWakeEpisodes(ctx context.Context, c *Coordinator) ([]
 	if err != nil {
 		return fail(err)
 	}
+	g, err := s.newWatchGate(ctx, set, c.WorkspaceID)
+	if err != nil {
+		return fail(err)
+	}
+	repos, err := s.taskRepositoryIDs(ctx, g, idsOfOwnTasks(own))
+	if err != nil {
+		return fail(err)
+	}
 	watched := make([]OwnTask, 0, len(own))
 	ids := make([]string, 0, len(own))
 	for _, t := range own {
-		if set.Contains(t.WorkflowID) {
+		if g.task(t.WorkflowID, repos[t.TaskID]) {
 			watched = append(watched, t)
 			ids = append(ids, t.TaskID)
 		}
@@ -299,4 +307,12 @@ func (b *WakeBackstop) readWakeEpisodes(ctx context.Context, c *Coordinator) ([]
 		}
 	}
 	return kept, true
+}
+
+func idsOfOwnTasks(own []OwnTask) []string {
+	ids := make([]string, 0, len(own))
+	for _, t := range own {
+		ids = append(ids, t.TaskID)
+	}
+	return ids
 }

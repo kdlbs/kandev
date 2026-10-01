@@ -36,6 +36,7 @@ func initCoordinatorWiring(
 	enabled bool,
 	phase2 bool,
 	phase3 bool,
+	phase31 bool,
 	log *logger.Logger,
 	extra ...coordinator.ServiceOption,
 ) (*coordinator.Service, error) {
@@ -49,11 +50,21 @@ func initCoordinatorWiring(
 
 	validator := coordinator.NewValidator(agentProfiles, taskSvc)
 	opts := append([]coordinator.ServiceOption{coordinator.WithPhase2(phase2),
-		coordinator.WithPhase3(phase3Effective(enabled, phase2, phase3))}, extra...)
+		coordinator.WithPhase3(phase3Effective(enabled, phase2, phase3)),
+		coordinator.WithPhase31(phase31Effective(enabled, phase2, phase3, phase31))}, extra...)
 	svc := coordinator.NewService(store, validator, taskSvc, log, opts...)
 	svc.SetProposalDeps(taskSvc, taskSvc, taskSvc, workflowSvc)
+	if taskSvc != nil {
+		svc.SetProjectReader(taskSvc)
+	}
 	svc.SetUndoDeps(&coordinatorUndoSeam{tasks: taskSvc, steps: workflowSvc})
 	return svc, nil
+}
+
+// phase31Effective is the single source for the phase 3.1 gate: it needs
+// coordinator, phase 2, phase 3 and the phase 3.1 flag.
+func phase31Effective(coordinatorOn, phase2, phase3, phase31 bool) bool {
+	return phase3Effective(coordinatorOn, phase2, phase3) && phase31
 }
 
 // phase3Effective is the single source for the phase 3 gate: the autonomy
@@ -61,12 +72,6 @@ func initCoordinatorWiring(
 // phase 3 are all on.
 func phase3Effective(coordinatorOn, phase2, phase3 bool) bool {
 	return coordinatorOn && phase2 && phase3
-}
-
-// phase31Effective is the single source for the phase 3.1 gate: it needs the
-// phase 3 surface as well.
-func phase31Effective(coordinatorOn, phase2, phase3, phase31 bool) bool {
-	return phase3Effective(coordinatorOn, phase2, phase3) && phase31
 }
 
 // coordinatorStandingInstructionsReader closes over svc to build the
@@ -247,6 +252,11 @@ func registerCoordinatorSubscribers(_ *gin.Engine, eventBus bus.EventBus, svc *c
 		} else {
 			subs = append(subs, sub)
 		}
+		projectSubs, err := coordinator.SubscribeProjectDeleted(eventBus, svc, log)
+		if err != nil {
+			log.Error("failed to subscribe coordinator to repository deletion", zap.Error(err))
+		}
+		subs = append(subs, projectSubs...)
 	}
 
 	return func(ctx context.Context, _ time.Time) {

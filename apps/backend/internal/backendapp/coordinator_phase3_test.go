@@ -32,7 +32,7 @@ func TestInitCoordinatorWiring_Phase3FollowsAllThreeFlags(t *testing.T) {
 	for _, on := range []bool{false, true} {
 		for _, p2 := range []bool{false, true} {
 			for _, p3 := range []bool{false, true} {
-				svc, err := initCoordinatorWiring(context.Background(), newCoordinatorTestPool(t), newCoordinatorTestTracker(t), nil, nil, nil, on, p2, p3, newTestLogger())
+				svc, err := initCoordinatorWiring(context.Background(), newCoordinatorTestPool(t), newCoordinatorTestTracker(t), nil, nil, nil, on, p2, p3, false, newTestLogger())
 				if err != nil {
 					t.Fatalf("initCoordinatorWiring: %v", err)
 				}
@@ -52,7 +52,7 @@ func TestRegisterCoordinatorRoutes_Phase3RegistrationsOnlyWhenEffective(t *testi
 	names := []string{"containment", "spend", "wake", "delivery", "relay", "reply", "automatic", "improvements"}
 	for _, p2 := range []bool{false, true} {
 		for _, p3 := range []bool{false, true} {
-			svc, err := initCoordinatorWiring(context.Background(), newCoordinatorTestPool(t), newCoordinatorTestTracker(t), nil, nil, nil, true, p2, p3, newTestLogger())
+			svc, err := initCoordinatorWiring(context.Background(), newCoordinatorTestPool(t), newCoordinatorTestTracker(t), nil, nil, nil, true, p2, p3, false, newTestLogger())
 			if err != nil {
 				t.Fatalf("initCoordinatorWiring: %v", err)
 			}
@@ -97,7 +97,7 @@ func TestRegisterCoordinatorRoutes_Phase3RegistrationsOnlyWhenEffective(t *testi
 
 func TestRegisterCoordinatorWakeState_PrunesAndSurvivesFailure(t *testing.T) {
 	pool := newCoordinatorTestPool(t)
-	svc, err := initCoordinatorWiring(context.Background(), pool, newCoordinatorTestTracker(t), nil, nil, nil, true, true, true, newTestLogger())
+	svc, err := initCoordinatorWiring(context.Background(), pool, newCoordinatorTestTracker(t), nil, nil, nil, true, true, true, false, newTestLogger())
 	if err != nil {
 		t.Fatalf("initCoordinatorWiring: %v", err)
 	}
@@ -141,7 +141,7 @@ func TestRegisterCoordinatorWakeState_PrunesAndSurvivesFailure(t *testing.T) {
 func TestRegisterCoordinatorRelayRoutes_MountsReadRouteOnlyWhenPhase3Effective(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	for _, p3 := range []bool{false, true} {
-		svc, err := initCoordinatorWiring(context.Background(), newCoordinatorTestPool(t), newCoordinatorTestTracker(t), nil, nil, nil, true, true, p3, newTestLogger())
+		svc, err := initCoordinatorWiring(context.Background(), newCoordinatorTestPool(t), newCoordinatorTestTracker(t), nil, nil, nil, true, true, p3, false, newTestLogger())
 		if err != nil {
 			t.Fatalf("initCoordinatorWiring: %v", err)
 		}
@@ -163,7 +163,7 @@ func TestRegisterCoordinatorRelayRoutes_MountsReadRouteOnlyWhenPhase3Effective(t
 
 func TestRegisterCoordinatorWakeState_FailedPruneStillStartsBackstopAndRecorder(t *testing.T) {
 	pool := newCoordinatorTestPool(t)
-	svc, err := initCoordinatorWiring(context.Background(), pool, newCoordinatorTestTracker(t), nil, nil, nil, true, true, true, newTestLogger())
+	svc, err := initCoordinatorWiring(context.Background(), pool, newCoordinatorTestTracker(t), nil, nil, nil, true, true, true, false, newTestLogger())
 	if err != nil {
 		t.Fatalf("initCoordinatorWiring: %v", err)
 	}
@@ -190,7 +190,7 @@ func TestRegisterCoordinatorWakeState_FailedPruneStillStartsBackstopAndRecorder(
 }
 
 func TestWireCoordinatorSpend_MissingDependenciesFailClosed(t *testing.T) {
-	svc, err := initCoordinatorWiring(context.Background(), newCoordinatorTestPool(t), newCoordinatorTestTracker(t), nil, nil, nil, true, true, true, newTestLogger())
+	svc, err := initCoordinatorWiring(context.Background(), newCoordinatorTestPool(t), newCoordinatorTestTracker(t), nil, nil, nil, true, true, true, false, newTestLogger())
 	if err != nil {
 		t.Fatalf("initCoordinatorWiring: %v", err)
 	}

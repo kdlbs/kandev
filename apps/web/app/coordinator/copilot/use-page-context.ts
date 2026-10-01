@@ -1,4 +1,5 @@
 import { useAppStore } from "@/components/state-provider";
+import { taskRepositoryIds } from "@/app/coordinator/use-coordinator-tasks";
 import { normalizeCopilotItemId, type CopilotItemRef } from "@/lib/coordinator/copilot-id";
 
 /** The route kinds that count as a workspace page. */
@@ -13,6 +14,8 @@ export type PageContext = {
   label: string;
   /** The workflow the page belongs to, when known. */
   workflowId: string | null;
+  /** The task's repository ids; null when the page has no task or they are unknown. */
+  repositoryIds: string[] | null;
 };
 
 /** The page's identity for the chip: a query or hash change keeps it. */
@@ -36,6 +39,7 @@ function useTaskContext(taskId: string | null, workspaceId: string): PageContext
     ref: { kind: "task", id: taskId },
     label: normalizeCopilotItemId(task.identifier),
     workflowId: task.workflowId ?? null,
+    repositoryIds: taskRepositoryIds(task),
   };
 }
 
@@ -49,6 +53,7 @@ function useWorkflowContext(enabled: boolean, workspaceId: string): PageContext 
     ref: { kind: "workflow", id: workflow.id },
     label: normalizeCopilotItemId(workflow.name),
     workflowId: workflow.id,
+    repositoryIds: null,
   };
 }
 

@@ -29,8 +29,9 @@ never read or change it. No write action is `automatic` in phase 2 (D13).
   `denied`.
 - **Watches:** `all` (every workflow of the workspace, including workflows
   created later) or `selected` (a list of the workspace's workflows).
-- **Watched task:** a task whose workflow is watched and, while the phase 3.1
-  flag is effective, that is also in the coordinator's projects. A **watched
+- **Watched task:** a task whose workflow is watched and that is also in the
+  coordinator's projects (a stored `selected` Projects scope is enforced whatever
+  the phase 3.1 flag, `AC-COORDINATOR-PERMISSIONS-005.9`). A **watched
   workflow** is one in scope under Watches.
 - **Project:** a repository set of the workspace (a named group of its
   repositories, `RepositorySet`), or one repository of the workspace that a
@@ -253,15 +254,21 @@ that belongs to another team.
   the system shall return with every coordinator its Projects scope, and a
   coordinator that existed before, or is created without one, shall have scope
   `all` and the toggle off (the toggle has no effect while the scope is `all`, which watches
-  every task; it matters only once the manager switches to `selected`, so switching
-  never silently starts watching repository-less tasks). Projects narrows Watches: a task is watched only
+  every task including repository-less ones; once the manager switches to `selected` the toggle
+  decides whether repository-less tasks stay watched, and it starts off, so switching narrows
+  the watch and the editor says so beside the toggle). Projects narrows Watches: a task is watched only
   when its workflow is watched and it is in the projects.
 - **AC-COORDINATOR-PERMISSIONS-005.2:** The system shall refuse a Projects save
   with 400 naming `projects`, storing nothing, when it is `selected` with no
   entry and the toggle off, with more than 50 entries, with a duplicate entry,
-  or with a set or repository that is not in the coordinator's workspace. A
-  save that leaves Projects as stored, including a list emptied by a deleted
-  set or repository, shall not be refused for it.
+  or with a set or repository that is not in the coordinator's workspace and is
+  not already in the stored list. A save that leaves Projects as stored,
+  including a list emptied by a deleted set or repository, shall not be refused
+  for it, and a stored entry whose target no longer exists, sent back by a
+  save that changes something else, shall be dropped without failing the save.
+  Entry order shall not make a save differ from the stored value, and when several checks fail the
+  code shall follow the fixed order of the system design (`invalid_projects`, `projects_empty`,
+  `projects_too_many`, `projects_duplicate`, `projects_foreign_entry`).
 - **AC-COORDINATOR-PERMISSIONS-005.3:** The membership of a task shall be
   resolved when it is read, from the task's repositories and the listed sets'
   membership at that moment, and never cached on the coordinator: a task that
@@ -273,14 +280,16 @@ that belongs to another team.
   its counts, the wake recorder, the backstop and the automatic class's
   counts, the stall reads, the turn ledger's board snapshot and call digest
   ([turn ledger](turn-ledger.md#req-coordinator-turn-ledger-004-the-query-tool)),
-  and the shadow dream's window and evidence. A task outside the projects
+  and the shadow dream's window and evidence. The 10-per-24h cap of
+  `AC-COORDINATOR-AUTOMATIC-003.2` is not a watched-task count: it counts every
+  automatic approval of the coordinator whatever the scope is now. A task outside the projects
   shall be answered as not found to a read tool and shall raise no wake.
 - **AC-COORDINATOR-PERMISSIONS-005.5:** While the scope is `selected`, `create_task` shall refuse, naming `repository_id`, a repository that is neither listed nor in a listed set, or no repository while the toggle is off; under `all` it shall refuse nothing for projects; every other propose tool shall refuse a target task
   outside the projects, naming the field. A proposal made while its target was
   in scope shall stay approvable after the scope changes, as it does for Watches
   (`AC-COORDINATOR-PERMISSIONS-002.6`).
 - **AC-COORDINATOR-PERMISSIONS-005.6:** When a listed set or repository is
-  deleted from the workspace, the system shall remove its entry from every coordinator's list; an entry that outlives its set or repository, for example through a missed event, shall match no task and shall not make a save fail. When a `selected` list becomes empty with the toggle
+  deleted from the workspace, the system shall remove its entry from every coordinator's list; an entry that outlives its set or repository, for example through a missed event, shall match no task (a repository entry only while its repository is in the workspace) and shall not make a save fail. The removal shall publish `coordinator.updated` and shall neither archive the conversation nor raise `policy_revision`. When a `selected` list becomes empty with the toggle
   off, the coordinator shall watch no task and Configure and Needs you shall
   say so, with a link for managers; the system shall never switch it to
   `all`. A set that loses its last repository stays listed and matches no

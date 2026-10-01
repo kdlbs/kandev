@@ -48,8 +48,9 @@ are UTC.
 `trigger` (`message`, `wake`, `dream`), `wake_kinds` (JSON array, at most 20),
 `agent_profile_id`, `model`, `harness`, `config_revision`, `policy_revision`,
 `prompt_hash`, `snapshot_hash`, `watch_scope`, `watch_ids` (JSON, the effective
-workflow ids or `all`), `project_scope` (JSON, see
-[watch projects](watch-projects.md)), `started_at`, `finished_at` (null while
+workflow ids or `all`), `project_scope` (JSON `{"scope":"all"}` or
+`{"scope":"selected","entries":[{"kind":"repository_set|repository","id":"..."}],"include_no_repository":bool}`
+with entries ordered as in [watch projects](watch-projects.md#read-shape), as stored at the turn start), `started_at`, `finished_at` (null while
 running), `outcome`, `verdict`, `calls_truncated` (bool). Unique index on
 `(session_id, session_turn_id)`. Index on `(coordinator_id, started_at, id)`.
 
