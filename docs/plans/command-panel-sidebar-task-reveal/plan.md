@@ -1,5 +1,8 @@
 ---
-spec: docs/specs/ui/requirements/command-panel-sidebar-task-reveal.md
+requirements:
+  - REQ-UI-COMMAND-PANEL-SIDEBAR-TASK-REVEAL-001
+system_design:
+  - ../../specs/ui/system-design/command-panel-sidebar-task-reveal.md
 created: 2026-08-05
 status: implemented
 ---
@@ -119,3 +122,8 @@ Execution is sequential in the primary conversation. No subagents are authorized
   CSS. Visibility scoping is required to avoid treating hidden markup as the destination.
 - `content-visibility: auto` is used for long task lists. The E2E assertion must inspect the row's
   actual bounding box after reveal rather than assuming DOM presence proves visibility.
+
+## Resilience follow-up
+
+[Task 02: Preserve command reveal during portal restoration](task-02-reveal-restoration.md)
+covers the consolidated sidebar correction and its regression evidence.

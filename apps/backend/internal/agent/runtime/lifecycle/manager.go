@@ -14,6 +14,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/docker"
 	"github.com/kandev/kandev/internal/agent/executor"
 	"github.com/kandev/kandev/internal/agent/managedruntime"
+	"github.com/kandev/kandev/internal/agent/mcpconfig"
 	"github.com/kandev/kandev/internal/agent/registry"
 	"github.com/kandev/kandev/internal/agent/runtime/activity"
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
@@ -40,14 +41,16 @@ const (
 
 // Manager manages agent instance lifecycles
 type Manager struct {
-	registry        *registry.Registry
-	eventBus        bus.EventBus
-	credsMgr        CredentialsManager
-	profileResolver ProfileResolver
-	ownerAdmission  OwnerAdmission
-	worktreeMgr     *worktree.Manager
-	mcpProvider     McpConfigProvider
-	logger          *logger.Logger
+	registry              *registry.Registry
+	eventBus              bus.EventBus
+	credsMgr              CredentialsManager
+	profileResolver       ProfileResolver
+	ownerAdmission        OwnerAdmission
+	worktreeMgr           *worktree.Manager
+	mcpProvider           McpConfigProvider
+	cursorInventoryLoader func(context.Context) (mcpconfig.CursorNativeInventory, error)
+	cursorNativeMCPRunner mcpconfig.NativeMCPCommandRunner
+	logger                *logger.Logger
 	// dataDir is the kandev root directory. Misnamed for historical reasons:
 	// cmd/kandev/agents.go passes cfg.ResolvedHomeDir() (the kandev root —
 	// typically ~/.kandev) here, not ResolvedDataDir(). Used for:
@@ -306,6 +309,13 @@ type Manager struct {
 	activityLeaseOwners map[string]uint64
 	activityPending     map[string]map[uint64]*executionActivityClaim
 	activityGeneration  uint64
+}
+
+// SetCursorNativeMCPCommandRunner installs the bounded runner used for native
+// Cursor MCP approval and readiness checks. Production uses the exec runner;
+// tests inject a fake so they never mutate a developer's Cursor account.
+func (m *Manager) SetCursorNativeMCPCommandRunner(runner mcpconfig.NativeMCPCommandRunner) {
+	m.cursorNativeMCPRunner = runner
 }
 
 // SetOwnerAdmission wires the durable owner gate used by run-owned launches.

@@ -149,6 +149,9 @@ func provideGateway(
 	scriptSvc := &scriptServiceAdapter{taskSvc: taskSvc}
 	if lifecycleMgr != nil {
 		gateway.SetLifecycleManager(lifecycleMgr, userSvc, scriptSvc)
+		if terminalSvc != nil {
+			gateway.SetTerminalService(terminalSvc)
+		}
 		gateway.SetLSPHandler(lifecycleMgr, userSvc, lspMaxConnections...)
 		if lspContinuityEnabled {
 			gateway.LSPHandler.EnableContinuity(acquireSessionFence, eventBus)

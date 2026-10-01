@@ -71,3 +71,13 @@ Server-side view evaluation and size-based paging remain unchanged.
 The user explicitly required size-based pagination for all sidebar views.
 Archive status determines membership, never whether pagination is available.
 The archived conversation navigation repair remains a separate outcome in this package.
+
+## Shared-state revision (2026-09-30)
+
+The approved [shared sidebar task-state decision](2026-09-29-shared-sidebar-task-state.md)
+revises unconditional server queries and blanket rejection after ordinary invalidation.
+Complete eligible resident data can supply local pages at any collection size;
+uncovered views retain bounded server evaluation. Explicit coverage and verified
+ordering supersede the earlier small-inventory shortcut. The
+[implementation package](../plans/sidebar-query-memory/plan.md) owns this migration,
+native-memory limits, hard context barriers, and bounded record ownership.

@@ -1,4 +1,10 @@
 {
+  "agentTabCloseButton": "エージェントタブの閉じるボタン",
+  "agentTabCloseButtonDescription": "デスクトップのエージェントタブで、×ボタンを押したときの動作を選択します。",
+  "deleteSession": "セッションを削除",
+  "hidePanel": "パネルを非表示",
+  "deleteSessionCloseDescription": "確認後、会話を完全に削除します。",
+  "hidePanelCloseDescription": "パネルのみを閉じます。後で「+ > エージェント」から開き直せます。",
   "aSecretNameAndValueAreRequired": "シークレット名と値が必要。",
   "aSecretNameIsRequired": "シークレット名が必要。",
   "aboutAffectedKandevMcpTools": "影響を受ける Kandev MCP ツールについて",

@@ -15783,11 +15783,12 @@ func (x *InspectExecutorEnvironmentResponse) GetError() *ExecutorProviderError {
 }
 
 type ResolveExecutorConnectionRequest struct {
-	state         protoimpl.MessageState          `protogen:"open.v1"`
-	Context       *ExecutorProviderRequestContext `protobuf:"bytes,1,opt,name=context,proto3" json:"context,omitempty"`
-	Resource      *ExecutorResourceDescriptor     `protobuf:"bytes,2,opt,name=resource,proto3" json:"resource,omitempty"`
-	Purpose       string                          `protobuf:"bytes,3,opt,name=purpose,proto3" json:"purpose,omitempty"`
-	RuntimePort   uint32                          `protobuf:"varint,4,opt,name=runtime_port,json=runtimePort,proto3" json:"runtime_port,omitempty"`
+	state    protoimpl.MessageState          `protogen:"open.v1"`
+	Context  *ExecutorProviderRequestContext `protobuf:"bytes,1,opt,name=context,proto3" json:"context,omitempty"`
+	Resource *ExecutorResourceDescriptor     `protobuf:"bytes,2,opt,name=resource,proto3" json:"resource,omitempty"`
+	Purpose  string                          `protobuf:"bytes,3,opt,name=purpose,proto3" json:"purpose,omitempty"`
+	// agentctl control port, or an instance port agentctl assigned to a session.
+	RuntimePort   uint32 `protobuf:"varint,4,opt,name=runtime_port,json=runtimePort,proto3" json:"runtime_port,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }

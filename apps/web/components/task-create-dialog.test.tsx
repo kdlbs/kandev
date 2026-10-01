@@ -15,6 +15,7 @@ import type { DialogFormState, TaskFormInputsHandle } from "./task-create-dialog
 const enhancePromptMock = vi.fn();
 const toastMock = vi.fn();
 const setHasDescriptionMock = vi.fn();
+const formInitializationSpy = vi.fn();
 const ORIGINAL_PROMPT = "Original prompt";
 const IMPROVED_PROMPT = "Improved prompt";
 const USER_EDIT = "User edit";
@@ -220,7 +221,10 @@ vi.mock("@/components/task-create-dialog-selectors", () => ({
 }));
 
 vi.mock("@/components/task-create-dialog-state", () => ({
-  useDialogFormState: () => mockFs,
+  useDialogFormState: () => {
+    formInitializationSpy();
+    return mockFs;
+  },
   useTaskCreateDialogEffects: () => undefined,
   useDialogHandlers: () => ({
     handleTaskNameChange: () => undefined,
@@ -396,10 +400,32 @@ beforeEach(() => {
   enhancePromptMock.mockReset();
   toastMock.mockReset();
   setHasDescriptionMock.mockReset();
+  formInitializationSpy.mockReset();
   dialogEscapeHandler = undefined;
   dialogCloseAutoFocusHandler = undefined;
   autoFocusNewTasks = true;
   mockFs = buildMockFs();
+});
+
+it("defers form initialization until first opening and retains the close lifecycle", () => {
+  const props = {
+    mode: "create" as const,
+    onOpenChange: () => undefined,
+    workspaceId: "workspace-1",
+    workflowId: null,
+    defaultStepId: null,
+    steps: [],
+  };
+  const view = render(<TaskCreateDialog {...props} open={false} />);
+  expect(formInitializationSpy).not.toHaveBeenCalled();
+
+  view.rerender(<TaskCreateDialog {...props} open />);
+  expect(formInitializationSpy).toHaveBeenCalled();
+  expect(dialogCloseAutoFocusHandler).toBeTypeOf("function");
+  formInitializationSpy.mockClear();
+  view.rerender(<TaskCreateDialog {...props} open={false} />);
+  expect(formInitializationSpy).toHaveBeenCalled();
+  expect(dialogCloseAutoFocusHandler).toBeTypeOf("function");
 });
 
 describe("TaskCreateDialog focus return (AC-TASKS-TASK-ACTIONS-MENU-001.12)", () => {

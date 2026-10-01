@@ -2,7 +2,6 @@ import { type Page } from "@playwright/test";
 import { test, expect } from "../../fixtures/test-base";
 import type { SeedData } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
-import { KanbanPage } from "../../pages/kanban-page";
 import { SessionPage } from "../../pages/session-page";
 
 /**
@@ -81,8 +80,11 @@ test.describe("Session layout", () => {
     await expect(session.terminal).toBeVisible({ timeout: 15_000 });
     await session.expectMaximized();
     await session.expectTerminalConnected(60_000);
-    // Terminal reconnects to the same shell — our output should still be there
     await session.expectTerminalHasText(TERMINAL_MARKER, 60_000);
+    // The restored terminal must also accept new input.
+    const restoredMarker = "KANDEV_E2E_MARKER_AFTER_REFRESH";
+    await session.typeInTerminal('printf "KANDEV_E2E_MARKER_AFTER_%s\\n" REFRESH');
+    await session.expectTerminalHasText(restoredMarker, 60_000);
   });
 
   test("task switching preserves maximize per session", async ({
@@ -138,9 +140,12 @@ test.describe("Session layout", () => {
     await expect(session.terminal).toBeVisible({ timeout: 15_000 });
     await session.expectTerminalConnected(60_000);
 
-    // Task A should still be maximized with our output
+    // Task A retains its maximize state, scrollback, and terminal input.
     await session.expectMaximized();
     await session.expectTerminalHasText(TERMINAL_MARKER, 60_000);
+    const restoredMarker = "KANDEV_E2E_MARKER_AFTER_TASK_SWITCH";
+    await session.typeInTerminal('printf "KANDEV_E2E_MARKER_AFTER_%s\\n" TASK_SWITCH');
+    await session.expectTerminalHasText(restoredMarker, 60_000);
   });
 
   test("closing maximized panel exits maximize and restores layout", async ({
@@ -274,23 +279,7 @@ test.describe("Session tab cleanup", () => {
       )
       .toBe(true);
 
-    const kanban = new KanbanPage(testPage);
-    await kanban.goto();
-    const card = kanban.taskCardByTitle("Single Session Tab Task");
-    // The session state is already terminal, but the board snapshot can still
-    // be from the preceding task-list read. Re-drive that read until the
-    // durable task appears instead of relying on a single stale render.
-    await expect
-      .poll(
-        async () => {
-          if (await card.isVisible().catch(() => false)) return true;
-          await kanban.goto();
-          return card.isVisible().catch(() => false);
-        },
-        { timeout: 30_000, message: "finished task should appear in the kanban snapshot" },
-      )
-      .toBe(true);
-    await card.click();
+    await testPage.goto(`/t/${task.id}`);
     await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
 
     const session = new SessionPage(testPage);

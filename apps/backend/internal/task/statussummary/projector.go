@@ -202,21 +202,27 @@ type pendingRequestIdentity struct {
 }
 
 type pullRequestObservation struct {
-	state                 string
-	number                int
-	url                   string
-	reviewState           string
-	checksState           string
-	mergeableState        string
-	hasMergeConflicts     *bool
-	mergeQueueState       string
-	unresolvedReviewCount int
-	pendingReviewCount    int
-	requiredReviews       int
-	checksTotal           int
-	checksPassing         int
-	autoFixEnabled        bool
-	autoMergeEnabled      bool
+	state                    string
+	owner                    string
+	repo                     string
+	number                   int
+	url                      string
+	reviewState              string
+	checksState              string
+	mergeableState           string
+	hasMergeConflicts        *bool
+	mergeQueueState          string
+	unresolvedReviewCount    int
+	pendingReviewCount       int
+	requiredReviews          int
+	checksTotal              int
+	checksPassing            int
+	autoFixEnabled           bool
+	autoMergeEnabled         bool
+	headSHA                  string
+	workflowAttentionState   string
+	workflowAttentionHeadSHA string
+	workflowAttentionStale   bool
 }
 
 func NewProjector(cfg ProjectorConfig) *Projector {

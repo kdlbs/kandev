@@ -5741,7 +5741,7 @@ func (s *Service) resolveArchiveBaseCommitAndBranch(ctx context.Context, session
 	}
 
 	// Fallback: try to get base commit from git status for legacy sessions
-	status, err := s.agentManager.GetGitStatus(ctx, sessionID)
+	status, err := s.getGitStatusWithDetails(ctx, sessionID, true)
 	if err != nil {
 		s.logger.Debug("failed to get git status for base commit fallback",
 			zap.String("session_id", sessionID),
@@ -5898,13 +5898,7 @@ func (s *Service) saveGitStatusSnapshot(ctx context.Context, sessionID string, f
 		// retry loop because another attempt cannot resolve this identity.
 		return false, true
 	}
-	var status *client.GitStatusResult
-	var err error
-	if fresh {
-		status, err = s.agentManager.GetGitStatusFresh(ctx, sessionID)
-	} else {
-		status, err = s.agentManager.GetGitStatus(ctx, sessionID)
-	}
+	status, err := s.getGitStatusWithDetails(ctx, sessionID, fresh)
 	if err != nil {
 		s.logger.Debug("failed to capture git status snapshot",
 			zap.String("session_id", sessionID),
@@ -5915,6 +5909,9 @@ func (s *Service) saveGitStatusSnapshot(ctx context.Context, sessionID string, f
 		return false, true // No execution — caller should not retry
 	}
 	if !status.Success {
+		return false, false
+	}
+	if !gitStatusDetailsReady(status) {
 		return false, false
 	}
 
@@ -5939,6 +5936,9 @@ func (s *Service) saveGitStatusSnapshot(ctx context.Context, sessionID string, f
 		"comparison_target":     status.ComparisonTarget,
 		"comparison_status":     status.ComparisonStatus,
 		"comparison_error_code": status.ComparisonErrorCode,
+		"status_state":          "ready",
+		"files_complete":        true,
+		"detail_state":          "ready",
 	}
 
 	if err := s.repo.CreateGitSnapshot(ctx, &models.GitSnapshot{
@@ -5995,12 +5995,15 @@ func (s *Service) captureArchiveDiff(ctx context.Context, sessionID, baseCommit 
 		BaseCommit:        diffResult.BaseCommit,
 		Files:             diffResult.Files,
 	}
-	status, statusErr := s.agentManager.GetGitStatusFresh(ctx, sessionID)
+	status, statusErr := s.getGitStatusWithDetails(ctx, sessionID, true)
 	if statusErr != nil {
 		s.logger.Warn("failed to capture git status metadata for archive",
 			zap.String("session_id", sessionID),
 			zap.Error(statusErr))
-	} else if status != nil && status.Success {
+	} else if status == nil || !status.Success || !gitStatusDetailsReady(status) {
+		s.logger.Warn("git status metadata is unavailable for archive",
+			zap.String("session_id", sessionID))
+	} else {
 		snapshot.Branch = status.Branch
 		snapshot.RemoteBranch = status.RemoteBranch
 		snapshot.Ahead = status.Ahead
@@ -6042,7 +6045,34 @@ func archiveGitStatusMetadata(status *client.GitStatusResult, files map[string]i
 		"remote_head_commit": status.RemoteHeadCommit,
 		"branch_additions":   status.BranchAdditions,
 		"branch_deletions":   status.BranchDeletions,
+		"status_state":       "ready",
+		"files_complete":     true,
+		"detail_state":       "ready",
 	}
+}
+
+type detailedGitStatusReader interface {
+	GetGitStatusWithDetails(context.Context, string) (*client.GitStatusResult, error)
+}
+
+func (s *Service) getGitStatusWithDetails(ctx context.Context, sessionID string, fresh bool) (*client.GitStatusResult, error) {
+	if reader, ok := s.agentManager.(detailedGitStatusReader); ok {
+		return reader.GetGitStatusWithDetails(ctx, sessionID)
+	}
+	if fresh {
+		return s.agentManager.GetGitStatusFresh(ctx, sessionID)
+	}
+	return s.agentManager.GetGitStatus(ctx, sessionID)
+}
+
+func gitStatusDetailsReady(status *client.GitStatusResult) bool {
+	if status == nil {
+		return false
+	}
+	if status.StatusState == "" && status.DetailState == "" && !status.FilesComplete {
+		return true
+	}
+	return status.StatusState == "ready" && status.FilesComplete && (status.DetailState == "ready" || status.DetailState == "")
 }
 
 // parseCommitTime parses a commit timestamp from git log output.

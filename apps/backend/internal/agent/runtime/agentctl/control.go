@@ -30,6 +30,9 @@ type ControlClient struct {
 	httpClient *http.Client
 	logger     *logger.Logger
 	authToken  string
+	// applyToken, when set, updates the credential on a leased endpoint transport,
+	// which must not be replaced.
+	applyToken func(string)
 }
 
 // McpServerConfig holds configuration for an MCP server.
@@ -161,6 +164,11 @@ func NewControlClient(host string, port int, log *logger.Logger, opts ...Control
 	return c
 }
 
+// Close releases the client's idle connections.
+func (c *ControlClient) Close() {
+	c.httpClient.CloseIdleConnections()
+}
+
 // AuthToken returns the current auth token. Used to propagate the token
 // from the ControlClient to per-instance Clients after a handshake.
 func (c *ControlClient) AuthToken() string {
@@ -175,6 +183,10 @@ func (c *ControlClient) SetAuthToken(token string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.authToken = token
+	if c.applyToken != nil {
+		c.applyToken(token)
+		return
+	}
 	c.httpClient.Transport = &authTransport{token: token}
 }
 

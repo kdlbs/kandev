@@ -953,6 +953,8 @@ func (s *Service) publishWorkspaceEvent(ctx context.Context, eventType string, w
 		"default_environment_id":          workspace.DefaultEnvironmentID,
 		"default_agent_profile_id":        workspace.DefaultAgentProfileID,
 		"default_config_agent_profile_id": workspace.DefaultConfigAgentProfileID,
+		"acp_idle_suspension_enabled":     workspace.ACPIdleSuspensionEnabled,
+		"acp_idle_timeout_minutes":        workspace.ACPIdleTimeoutMinutes,
 		// Placement is reach: moving a workspace between units is what grants
 		// and withdraws access now, so an access-changed event that omitted it
 		// would tell clients something changed without telling them what.

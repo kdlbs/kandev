@@ -66,14 +66,13 @@ Carry an optional error stamp in recovery error details so the client can match
 the request failure to its durable record. Do not deduplicate by message text
 or by session alone. Without correlation, retain a distinct historical error.
 
-One shared recovery view model selects the active record and fallback request
-state. Task detail, preview, and Quick Chat consume it. In a mounted chat, the
-composer recovery region owns active presentation when messaging is blocked;
-chronological rows retain history without mutation controls. See the September 20
-amendment. The outer `SessionRecoveryFeedback`
-renders only when there is no matching chat owner; initial session creation
-keeps its current ensure-error surface. Do not mount duplicate action hooks
-that can issue equivalent requests from separate renderers.
+Task detail, preview and Quick Chat share one model for active and fallback
+recovery. Blocked-session feedback belongs in the composer region; historical
+rows retain details without mutation controls. Preview Plan replaces the
+transcript but keeps the shared recovery card below its scrolling content, never
+above agent tabs. Only the displayed surface mounts manual recovery actions;
+pending state is shared across tabs. Outer `SessionRecoveryFeedback` is only for
+cases without a matching card owner. Initial creation keeps its ensure-error UI.
 
 Reuse `TaskLaunchErrorEntry`, `SessionStoppedBanner`, and their existing
 handlers behind this ownership decision. Do not route session Resume through

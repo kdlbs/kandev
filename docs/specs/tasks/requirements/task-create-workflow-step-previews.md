@@ -50,6 +50,11 @@ workflow's [launch destination](task-create-launch-preview.md).
   Phone and coarse-pointer actions shall have hit areas of at least 44 CSS pixels.
   Preview changes shall use one translated status region and shall not change a
   workflow option's accessible name.
+- **AC-TASKS-CREATE-WORKFLOW-STEPS-001.7:** When the available workflows exceed
+  the visible picker height, every option shall remain reachable and selectable.
+  The picker shall remain inside the viewport. Desktop wheel input and phone
+  touch scrolling shall move the option list in both directions. Scrolling
+  shall preserve the task draft and shall not change the selected workflow.
 
 ## Out of scope
 
@@ -61,3 +66,4 @@ workflow's [launch destination](task-create-launch-preview.md).
 ## Implementation plans
 
 - [Workflow step preview repair](../../../plans/task-create-workflow-step-previews/plan.md)
+- [Workflow picker scrolling regression](../../../plans/task-create-workflow-scroll/plan.md)

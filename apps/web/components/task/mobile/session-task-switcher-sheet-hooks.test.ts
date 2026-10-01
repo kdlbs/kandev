@@ -177,8 +177,10 @@ describe("toSheetItem automation indicators", () => {
     expect(item.prInfo).toEqual({
       number: 42,
       state: "Open",
+      aggregateState: undefined,
       autoFixEnabled: true,
       autoMergeEnabled: true,
+      statusSummaryUpdatedAt: UPDATED_AT,
     });
   });
 });

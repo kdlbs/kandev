@@ -45,18 +45,17 @@ async function createTaskAndWaitForDone(
   return task;
 }
 
-/** Navigate via the kanban board to a task and wait for the session view. */
-async function navigateToTaskViaKanban(page: Page, taskId: string): Promise<SessionPage> {
+/** Open a task from the task listing and wait for the session view. */
+async function navigateToTaskFromListing(page: Page, title: string): Promise<SessionPage> {
   const kanban = new KanbanPage(page);
   await kanban.goto();
-  // The API task id is stable while the card title can be translated or still
-  // be settling in the board projection after the task reaches a terminal
-  // state.
-  const card = kanban.taskCard(taskId);
-  await expect(card).toBeVisible({ timeout: 15_000 });
-  await card.click();
-  await expect(page).toHaveURL(/\/t\//, { timeout: 15_000 });
   const session = new SessionPage(page);
+  // New tasks appear in the sidebar before the Kanban board's filtered
+  // columns necessarily include their cards.
+  const sidebarTask = session.sidebarTaskItem(title);
+  await expect(sidebarTask).toBeVisible({ timeout: 15_000 });
+  await sidebarTask.click();
+  await expect(page).toHaveURL(/\/t\//, { timeout: 15_000 });
   await session.waitForLoad();
   return session;
 }
@@ -91,7 +90,7 @@ test.describe("Terminal hangs on Connecting", () => {
   });
 
   /**
-   * Reproduces: switching from one task to another via the kanban board
+   * Reproduces: switching from one task to another from the task listing
    * leaves the second task's terminal stuck on "Connecting terminal...".
    *
    * Two tasks are created and both run to completion before any navigation
@@ -99,29 +98,22 @@ test.describe("Terminal hangs on Connecting", () => {
    * After landing on task B (the second navigation), the terminal panel must
    * connect within a reasonable budget instead of hanging.
    */
-  test("shell terminal connects after switching tasks via kanban", async ({
+  test("shell terminal connects after switching tasks from the listing", async ({
     testPage,
     apiClient,
     seedData,
   }) => {
     test.setTimeout(90_000);
-    const alpha = await createTaskAndWaitForDone(apiClient, seedData, "Switch Task Alpha");
-    const beta = await createTaskAndWaitForDone(apiClient, seedData, "Switch Task Beta");
+    await createTaskAndWaitForDone(apiClient, seedData, "Switch Task Alpha");
+    await createTaskAndWaitForDone(apiClient, seedData, "Switch Task Beta");
 
-    const session = await navigateToTaskViaKanban(testPage, alpha.id);
+    const session = await navigateToTaskFromListing(testPage, "Switch Task Alpha");
     await session.clickTab("Terminal");
     await session.expectTerminalConnected();
 
-    // Now switch to task Beta via the kanban board — full client-side nav.
-    const kanban = new KanbanPage(testPage);
-    await kanban.goto();
-    const betaCard = kanban.taskCard(beta.id);
-    await expect(betaCard).toBeVisible({ timeout: 15_000 });
-    await betaCard.click();
-    await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
-
-    const sessionB = new SessionPage(testPage);
-    await sessionB.waitForLoad();
+    // Return to the listing and open Beta. Its sidebar row can be ready before
+    // the filtered Kanban board publishes its card.
+    const sessionB = await navigateToTaskFromListing(testPage, "Switch Task Beta");
     await sessionB.clickTab("Terminal");
     await sessionB.expectTerminalConnected();
   });
@@ -135,9 +127,9 @@ test.describe("Terminal hangs on Connecting", () => {
    */
   test("shell terminal reconnects after hard reload", async ({ testPage, apiClient, seedData }) => {
     test.setTimeout(60_000);
-    const task = await createTaskAndWaitForDone(apiClient, seedData, "Reload Terminal Task");
+    await createTaskAndWaitForDone(apiClient, seedData, "Reload Terminal Task");
 
-    const session = await navigateToTaskViaKanban(testPage, task.id);
+    const session = await navigateToTaskFromListing(testPage, "Reload Terminal Task");
     await session.clickTab("Terminal");
     await session.expectTerminalConnected();
 
@@ -163,10 +155,10 @@ test.describe("Terminal hangs on Connecting", () => {
     seedData,
   }) => {
     test.setTimeout(120_000);
-    const alpha = await createTaskAndWaitForDone(apiClient, seedData, "Sidebar Switch Alpha");
+    await createTaskAndWaitForDone(apiClient, seedData, "Sidebar Switch Alpha");
     await createTaskAndWaitForDone(apiClient, seedData, "Sidebar Switch Beta");
 
-    const session = await navigateToTaskViaKanban(testPage, alpha.id);
+    const session = await navigateToTaskFromListing(testPage, "Sidebar Switch Alpha");
     await session.clickTab("Terminal");
     await session.expectTerminalConnected();
 
@@ -204,7 +196,7 @@ test.describe("Terminal hangs on Connecting", () => {
   }) => {
     test.setTimeout(150_000);
 
-    const taskA = await createTaskAndWaitForDone(apiClient, seedData, "Default Exec A");
+    await createTaskAndWaitForDone(apiClient, seedData, "Default Exec A");
     await createTaskAndWaitForDone(
       apiClient,
       seedData,
@@ -213,7 +205,7 @@ test.describe("Terminal hangs on Connecting", () => {
     );
     await createTaskAndWaitForDone(apiClient, seedData, "Default Exec C");
 
-    const session = await navigateToTaskViaKanban(testPage, taskA.id);
+    const session = await navigateToTaskFromListing(testPage, "Default Exec A");
     await session.clickTab("Terminal");
     await session.expectTerminalConnected();
 

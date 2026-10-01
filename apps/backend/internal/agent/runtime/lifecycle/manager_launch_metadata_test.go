@@ -322,6 +322,46 @@ func TestBuildLaunchMetadataProjectsWorktreeAndRepoFields(t *testing.T) {
 		"the single-repo base branch is recorded under the empty key for single-repo trackers")
 }
 
+func TestBuildLaunchMetadataProjectsTrustedPrimaryRepositoryContext(t *testing.T) {
+	const repositoryConfiguredKey = "repository_configured"
+	metadata := buildLaunchMetadata(&LaunchRequest{
+		Metadata: map[string]interface{}{
+			repositoryConfiguredKey:   true,
+			MetadataKeyRepositoryPath: "/task-supplied/path",
+		},
+		Repositories: []RepoLaunchSpec{
+			{RepositoryID: "primary", RepositoryPath: "/repos/primary"},
+			{RepositoryID: "secondary", RepositoryPath: "/repos/secondary"},
+		},
+	}, "", "", "")
+
+	require.Equal(t, true, metadata[repositoryConfiguredKey])
+	require.Equal(t, "/repos/primary", metadata[MetadataKeyRepositoryPath])
+
+	freeTask := buildLaunchMetadata(&LaunchRequest{
+		Metadata: map[string]interface{}{
+			repositoryConfiguredKey:   true,
+			MetadataKeyRepositoryPath: "/task-supplied/path",
+		},
+		ExecutorConfig:   map[string]string{MetadataKeyRepositoryPath: "/executor-supplied/path"},
+		WorkspaceFolders: []WorkspaceFolderSpec{{Name: "notes", LocalPath: "/folders/notes"}},
+	}, "", "", "")
+	require.Equal(t, false, freeTask[repositoryConfiguredKey])
+	require.NotContains(t, freeTask, MetadataKeyRepositoryPath)
+}
+
+func TestPromotionWithoutRepositorySpecsPreservesTrustedRepositoryContext(t *testing.T) {
+	primary := t.TempDir()
+	execution := &AgentExecution{metadata: map[string]interface{}{
+		MetadataKeyRepositoryConfigured: true,
+		MetadataKeyRepositoryPath:       primary,
+	}}
+	applyLaunchRepositoryContextToExecution(execution, &LaunchRequest{})
+	path, available := cursorMCPSourceRepository(execution)
+	require.True(t, available)
+	require.Equal(t, primary, path)
+}
+
 func TestBuildLaunchMetadataOmitsEmptyOptionalKeys(t *testing.T) {
 	metadata := buildLaunchMetadata(&LaunchRequest{}, "", "", "")
 

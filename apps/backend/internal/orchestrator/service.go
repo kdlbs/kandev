@@ -718,6 +718,10 @@ type Service struct {
 	autoStartOnCreateMu       sync.Mutex
 	autoStartOnCreateInFlight map[string]struct{}
 
+	// prepareResultMu orders progress markers and completion snapshots for the
+	// same session before they update durable preparation metadata.
+	prepareResultMu sync.Mutex
+
 	// ceilingEntryAdmissionLocks serialize the durable workflow-entry binding,
 	// ceiling queue, and task-state reconciliation for one task. The lock is
 	// deliberately task-scoped so unrelated queued launches can progress in

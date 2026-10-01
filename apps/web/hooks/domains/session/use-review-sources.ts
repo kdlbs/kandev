@@ -31,6 +31,7 @@ export type SourceCounts = Record<ReviewSource, number>;
 
 type UncommittedFile = {
   diff?: string;
+  diff_state?: ReviewFile["diff_state"];
   diff_skip_reason?: ReviewFile["diff_skip_reason"];
   status?: string;
   old_path?: string;
@@ -44,6 +45,7 @@ type UncommittedFile = {
 
 type UncommittedChangeFacet = {
   diff?: string;
+  diff_state?: ReviewFile["diff_state"];
   diff_skip_reason?: ReviewFile["diff_skip_reason"];
   status?: string;
   old_path?: string;
@@ -82,6 +84,7 @@ function addUncommittedFiles(
     fileMap.set(key, {
       path,
       diff,
+      diff_state: file.diff_state,
       status: normalizeFileChangeStatus(file.status),
       additions: file.additions ?? 0,
       deletions: file.deletions ?? 0,
@@ -103,6 +106,7 @@ function normalizeUncommittedFacet(
   if (!facet) return undefined;
   return {
     diff: facet.diff ? normalizeDiffContent(facet.diff) : "",
+    diff_state: facet.diff_state,
     status: normalizeFileChangeStatus(facet.status),
     additions: facet.additions ?? 0,
     deletions: facet.deletions ?? 0,
@@ -388,6 +392,8 @@ export type UseReviewSourcesResult = {
   truncatedFilesCount: number;
   /** Raw single-repo gitStatus (kept for `useAutoCloseWhenEmpty` consumers). */
   gitStatus: ReturnType<typeof useSessionGitStatus>;
+  /** Raw per-repository snapshots for membership and layer-aware close decisions. */
+  statusByRepo: ReturnType<typeof useSessionGitStatusByRepo>;
   /**
    * Raw PR diff files as ReviewFile[], NOT deduplicated with uncommitted/committed.
    * Use when displaying the PR-specific diff for a file (e.g. clicking a PR file row),
@@ -521,6 +527,7 @@ export function useReviewSources(
     selectedPRKey: pr ? prTaskKey(pr) : selectedKey,
     selectPR,
     gitStatus,
+    statusByRepo,
     rawPRFiles,
     truncatedFilesCount: readTruncatedFilesCount(cumulativeDiff),
   };

@@ -52,10 +52,12 @@ type mockAgentServer struct {
 	server               *httptest.Server
 	mu                   sync.Mutex
 	actionLog            []string // ordered log of actions received
+	httpActionLog        []string
 	rejectStreamAttempts int
 	agentStatus          string
 	upgrader             websocket.Upgrader
 	handler              func(msg ws.Message) *ws.Message
+	afterResponse        func(msg ws.Message)
 	wsConnected          chan struct{} // closed when WS stream connects
 	materialized         []materializedUpload
 	failMaterialize      bool
@@ -80,6 +82,30 @@ func newMockAgentServer(t *testing.T) *mockAgentServer {
 	}
 
 	mux := http.NewServeMux()
+	mux.HandleFunc("/health", func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+	mux.HandleFunc("/api/v1/stop", func(w http.ResponseWriter, _ *http.Request) {
+		m.mu.Lock()
+		m.httpActionLog = append(m.httpActionLog, "stop")
+		m.mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprint(w, `{"success":true}`)
+	})
+	mux.HandleFunc("/api/v1/agent/configure", func(w http.ResponseWriter, _ *http.Request) {
+		m.mu.Lock()
+		m.httpActionLog = append(m.httpActionLog, "configure")
+		m.mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprint(w, `{"success":true}`)
+	})
+	mux.HandleFunc("/api/v1/start", func(w http.ResponseWriter, _ *http.Request) {
+		m.mu.Lock()
+		m.httpActionLog = append(m.httpActionLog, "start")
+		m.mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprint(w, `{"success":true,"command":"cursor-agent acp"}`)
+	})
 	mux.HandleFunc("/api/v1/status", func(w http.ResponseWriter, _ *http.Request) {
 		m.mu.Lock()
 		status := m.agentStatus
@@ -141,6 +167,9 @@ func newMockAgentServer(t *testing.T) *mockAgentServer {
 			data, _ := json.Marshal(resp)
 			if err := conn.WriteMessage(websocket.TextMessage, data); err != nil {
 				return
+			}
+			if m.afterResponse != nil {
+				m.afterResponse(msg)
 			}
 		}
 	})
@@ -293,6 +322,12 @@ func (m *mockAgentServer) getActionLog() []string {
 	result := make([]string, len(m.actionLog))
 	copy(result, m.actionLog)
 	return result
+}
+
+func (m *mockAgentServer) getHTTPActionLog() []string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return append([]string(nil), m.httpActionLog...)
 }
 
 func (m *mockAgentServer) Close() {
@@ -2395,13 +2430,19 @@ func TestSendPrompt_DispatchOnlyBlocksNextPromptUntilItsCompletion(t *testing.T)
 	case <-time.After(100 * time.Millisecond):
 	}
 
-	execution.promptDoneCh <- PromptCompletionSignal{StopReason: "first-complete"}
+	execution.promptDoneCh <- PromptCompletionSignal{
+		StopReason:       "first-complete",
+		PromptGeneration: execution.promptGenerationSnapshot(),
+	}
 	select {
 	case <-secondPromptSeen:
 	case <-time.After(2 * time.Second):
 		t.Fatal("second prompt did not reach agentctl after the dispatch-only turn completed")
 	}
-	execution.promptDoneCh <- PromptCompletionSignal{StopReason: "second-complete"}
+	execution.promptDoneCh <- PromptCompletionSignal{
+		StopReason:       "second-complete",
+		PromptGeneration: execution.promptGenerationSnapshot(),
+	}
 	select {
 	case err := <-result:
 		if err != nil {
@@ -2500,7 +2541,10 @@ func TestSendPrompt_AdvancesGenerationForEveryDispatch(t *testing.T) {
 	if !store.OwnsPromptGeneration(execution.SessionID, execution.ID, 1) {
 		t.Fatal("initial prompt must own generation 1 even when execution starts running")
 	}
-	execution.promptDoneCh <- PromptCompletionSignal{StopReason: "initial-complete"}
+	execution.promptDoneCh <- PromptCompletionSignal{
+		StopReason:       "initial-complete",
+		PromptGeneration: 1,
+	}
 
 	if _, err := sm.SendPrompt(ctx, execution, "replacement", true, nil, true); err != nil {
 		t.Fatalf("dispatch replacement prompt: %v", err)

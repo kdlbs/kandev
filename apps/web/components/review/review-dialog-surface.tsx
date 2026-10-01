@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useRef } from "react";
+import { useCallback, useRef, useState } from "react";
 import { Dialog, DialogContent, DialogTitle } from "@kandev/ui/dialog";
 import { useReviewSidebarResize } from "@/hooks/use-review-sidebar-resize";
 import type { TaskPR } from "@/lib/types/github";
@@ -46,6 +46,16 @@ function ReviewDialogDiffContent({
   | "state"
 >) {
   const { t } = useTranslation();
+  // Diff refreshes can unmount file rows; keep their preview choice for this dialog.
+  const [previewedFiles, setPreviewedFiles] = useState<Set<string>>(() => new Set());
+  const toggleMarkdownPreview = useCallback((fileKey: string) => {
+    setPreviewedFiles((current) => {
+      const next = new Set(current);
+      if (next.has(fileKey)) next.delete(fileKey);
+      else next.add(fileKey);
+      return next;
+    });
+  }, []);
   const blockReviewForPR = shouldBlockReviewForPR(state.allFiles);
   return (
     <ReviewPRDiffBoundary
@@ -67,6 +77,8 @@ function ReviewDialogDiffContent({
           onToggleReviewed={state.handleToggleReviewed}
           onDiscard={state.handleDiscard}
           onOpenFile={onOpenFile}
+          previewedFiles={previewedFiles}
+          onToggleMarkdownPreview={toggleMarkdownPreview}
           fileRefs={state.fileRefs}
         />
       ) : (

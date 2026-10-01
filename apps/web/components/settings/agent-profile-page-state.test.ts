@@ -179,7 +179,11 @@ describe("useProfileSave Cursor MCP auth preference", () => {
   });
 
   it("omits an unchanged preference from the stale profile draft", async () => {
-    const savedProfile = { ...agent("a1", "p1").profiles[0], cursorMcpAuthEnabled: false };
+    const savedProfile = {
+      ...agent("a1", "p1").profiles[0],
+      cursorMcpAuthEnabled: false,
+      cursorPluginsMcpEnabled: false,
+    };
     const draft = { ...savedProfile, name: "renamed profile" };
     vi.mocked(updateAgentProfileAction).mockResolvedValue(draft);
     const agents = [{ ...agent("a1", "p1"), profiles: [savedProfile] }];
@@ -202,7 +206,10 @@ describe("useProfileSave Cursor MCP auth preference", () => {
 
     expect(updateAgentProfileAction).toHaveBeenLastCalledWith(
       "p1",
-      expect.objectContaining({ cursor_mcp_auth_enabled: undefined }),
+      expect.objectContaining({
+        cursor_mcp_auth_enabled: undefined,
+        cursor_plugins_mcp_enabled: undefined,
+      }),
       false,
     );
   });

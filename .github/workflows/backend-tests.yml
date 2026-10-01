@@ -14,6 +14,11 @@ on:
   merge_group:
     types: [checks_requested]
   workflow_dispatch:
+    inputs:
+      sidebar_resources_only:
+        description: Run only the sidebar memory and timing evidence jobs
+        type: boolean
+        default: false
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -74,6 +79,7 @@ jobs:
     timeout-minutes: 10
     outputs:
       run: ${{ steps.detect.outputs.run }}
+      sidebar_resources: ${{ steps.detect.outputs.sidebar_resources }}
 
     steps:
       - name: Checkout code
@@ -107,8 +113,15 @@ jobs:
           BASE_REF: ${{ github.base_ref }}
           MERGE_GROUP_BASE_SHA: ${{ github.event.merge_group.base_sha }}
           PUSH_BEFORE: ${{ github.event.before }}
+          SIDEBAR_RESOURCES_ONLY: ${{ inputs.sidebar_resources_only }}
         run: |
           set -euo pipefail
+
+          if [[ "${EVENT_NAME}" == "workflow_dispatch" && "${SIDEBAR_RESOURCES_ONLY}" == "true" ]]; then
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            echo "sidebar_resources=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
 
           case "${EVENT_NAME}" in
             # The checkout is the merge ref, whose first parent is the base
@@ -129,6 +142,7 @@ jobs:
              || ! git cat-file -e "${BASE}^{commit}" 2>/dev/null; then
             echo "No usable base commit for '${EVENT_NAME}'; running everything."
             echo "run=true" >> "$GITHUB_OUTPUT"
+            echo "sidebar_resources=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
@@ -137,6 +151,11 @@ jobs:
           # change to one would skip every job and still report success.
           git diff --name-only -z "${BASE}" HEAD \
             | python3 .github/scripts/changed-paths.py
+          if git diff --name-only "${BASE}" HEAD | grep -E '^(apps/backend/internal/task/repository/sqlite/sidebar_task_query.*[.]go|apps/backend/internal/testutil/sqlitememory/|[.]github/workflows/backend-tests[.]yml$)' >/dev/null; then
+            echo "sidebar_resources=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "sidebar_resources=false" >> "$GITHUB_OUTPUT"
+          fi
 
   static_checks:
     name: Backend Static Checks
@@ -501,6 +520,7 @@ jobs:
       - test_ambient_env
       - postgres-boot
       - postgres-18
+      - sidebar-resources
       - test-windows
     if: ${{ always() }}
     steps:
@@ -512,6 +532,7 @@ jobs:
           TEST_SHARDS_RESULT: ${{ needs.test_shards.result }}
           TEST_AMBIENT_ENV_RESULT: ${{ needs.test_ambient_env.result }}
           POSTGRES_BOOT_RESULT: ${{ needs['postgres-boot'].result }}
+          SIDEBAR_RESOURCES_RESULT: ${{ needs['sidebar-resources'].result }}
           POSTGRES_18_RESULT: ${{ needs['postgres-18'].result }}
           TEST_WINDOWS_RESULT: ${{ needs['test-windows'].result }}
         run: |
@@ -523,6 +544,7 @@ jobs:
           echo "Test shards: ${TEST_SHARDS_RESULT}"
           echo "Ambient env tests: ${TEST_AMBIENT_ENV_RESULT}"
           echo "Postgres boot: ${POSTGRES_BOOT_RESULT}"
+          echo "Sidebar resources: ${SIDEBAR_RESOURCES_RESULT}"
           echo "Postgres 18: ${POSTGRES_18_RESULT}"
           echo "Windows tests: ${TEST_WINDOWS_RESULT}"
 
@@ -554,6 +576,7 @@ jobs:
             "test_ambient_env:${TEST_AMBIENT_ENV_RESULT}" \
             "postgres-boot:${POSTGRES_BOOT_RESULT}" \
             "postgres-18:${POSTGRES_18_RESULT}" \
+            "sidebar-resources:${SIDEBAR_RESOURCES_RESULT}" \
             "test-windows:${TEST_WINDOWS_RESULT}"; do
             name="${entry%%:*}"
             result="${entry#*:}"
@@ -649,6 +672,72 @@ jobs:
             ./internal/worktree
           )
           go test -v -race -timeout 15m "${POSTGRES_PACKAGES[@]}"
+
+  sidebar-resources:
+    name: Sidebar resource bounds (${{ matrix.mode }})
+    needs: changes
+    if: needs.changes.outputs.sidebar_resources == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        mode: [memory, timing]
+    container: ghcr.io/kdlbs/kandev-ci:build-latest
+    services:
+      postgres:
+        # Mirrored from the digest-pinned Docker Hub image by
+        # ci-base-image.yml. Service images are pulled before steps begin, so
+        # moving this pull to GHCR removes an otherwise unwrappable Docker Hub
+        # timeout from job startup.
+        image: ghcr.io/kdlbs/kandev-ci:postgres-16@sha256:fe03a7605299a34ddf5e4f285dff78c3d7190a576b3c6b46f2fcff69f4bffd54
+        credentials:
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+        env:
+          POSTGRES_USER: kandev
+          POSTGRES_PASSWORD: kandev
+          POSTGRES_DB: kandev_admin
+        options: >-
+          --health-cmd "pg_isready -U kandev -d kandev_admin"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    defaults:
+      run:
+        shell: bash
+        working-directory: apps/backend
+    env:
+      KANDEV_TEST_POSTGRES_DSN: host=postgres port=5432 user=kandev password=kandev dbname=kandev_admin sslmode=disable
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          persist-credentials: false
+      - name: Measure isolated native memory and pooled retention
+        if: matrix.mode == 'memory'
+        env:
+          KANDEV_SIDEBAR_MEMORY_MATRIX: "1"
+        run: |
+          set -euo pipefail
+          go test -tags sqlite_fts5 -p 1 ./internal/task/repository/sqlite \
+            -run '^TestSidebarQuery(PreparationMemory|PoolMemoryPlateau|MaximumInputMemory)$' \
+            -timeout 45m -count=1 -v 2>&1 | tee sidebar-memory.log
+      - name: Measure populated SQLite and PostgreSQL pages
+        if: matrix.mode == 'timing'
+        run: |
+          set -euo pipefail
+          go test -tags sqlite_fts5 -p 1 ./internal/task/repository/sqlite \
+            -run '^Test(QuerySidebarTaskPage|SidebarQueryScratch|SidebarTaskViewConformance|SidebarLocalViewSQLiteConformance|SidebarTree|SidebarUniformAndMixedTreeStates|SidebarRepositoryProjection|SidebarPostgresJITSetting)' \
+            -bench '^BenchmarkSidebarTaskPage100K$' \
+            -benchtime=1x -timeout 15m -count=1 -v 2>&1 | tee sidebar-benchmark.log
+      - name: Upload sidebar resource evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: sidebar-resource-evidence-${{ matrix.mode }}
+          path: apps/backend/sidebar-*.log
+          retention-days: 30
 
   postgres-18:
     name: Backend Postgres 18

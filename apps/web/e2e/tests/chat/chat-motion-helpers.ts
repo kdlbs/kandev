@@ -218,12 +218,6 @@ export function chatMotionScenarios(mobile: boolean) {
     );
     expect(Math.abs(movement.samples.at(-1)! - movement.target)).toBeLessThan(3);
     // Real input must release follow intent before the next delivery.
-    const scrollEnded = scroller.evaluate(
-      (el) =>
-        new Promise<void>((resolve) => {
-          el.addEventListener("scrollend", () => resolve(), { once: true });
-        }),
-    );
     if (mobile) {
       const box = (await scroller.boundingBox())!;
       const client = await testPage.context().newCDPSession(testPage);
@@ -239,10 +233,24 @@ export function chatMotionScenarios(mobile: boolean) {
       await scroller.hover();
       await testPage.mouse.wheel(0, -350);
     }
-    await scrollEnded;
     await expect
       .poll(() => scroller.evaluate((el) => el.scrollHeight - el.clientHeight - el.scrollTop))
       .toBeGreaterThan(100);
+    // Wheel input need not emit scrollend in every browser. Observe a settled
+    // position after proving that real input moved away from the bottom.
+    let previousTop = -1;
+    let stableReads = 0;
+    await expect
+      .poll(
+        async () => {
+          const top = await scroller.evaluate((el) => el.scrollTop);
+          stableReads = top === previousTop ? stableReads + 1 : 0;
+          previousTop = top;
+          return stableReads;
+        },
+        { intervals: [100], message: "reader scroll should settle" },
+      )
+      .toBeGreaterThanOrEqual(3);
     const heldTop = await scroller.evaluate((el) => el.scrollTop);
     await apiClient.seedAgentMessages(task.session_id, 1, "READER-OWNED");
     await expect(session.activeChat().getByText("READER-OWNED 1", { exact: true })).toBeAttached();

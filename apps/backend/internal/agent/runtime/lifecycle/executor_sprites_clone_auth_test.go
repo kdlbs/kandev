@@ -125,7 +125,7 @@ func TestSpriteCreateInstanceRequestCarriesRefreshedEnvironment(t *testing.T) {
 		},
 	}
 
-	got := spriteCreateInstanceRequest(req)
+	got := agentctlInstanceRequest(req, spritesWorkspacePath)
 	if got.Env[envKeyGitHubCredentialLease] != "new-lease-after-restart" {
 		t.Fatalf("lease = %q, want refreshed lease", got.Env[envKeyGitHubCredentialLease])
 	}
@@ -152,7 +152,7 @@ func TestSpriteCreateInstanceRequestStripsForkPRCredentials(t *testing.T) {
 		},
 	}
 
-	got := spriteCreateInstanceRequest(req)
+	got := agentctlInstanceRequest(req, spritesWorkspacePath)
 	if _, ok := got.Env["GITHUB_TOKEN"]; ok {
 		t.Fatalf("fork PR agent env leaked GITHUB_TOKEN: %v", got.Env)
 	}

@@ -409,12 +409,12 @@ func (e *Executor) StopExecution(ctx context.Context, executionID string, reason
 		zap.String("reason", reason),
 		zap.Bool("force", force))
 	if err := e.agentManager.StopAgentWithReason(ctx, executionID, reason, force); err != nil {
+		if errors.Is(err, lifecycle.ErrExecutionNotFound) || errors.Is(err, runtimeapi.ErrNotFound) {
+			return fmt.Errorf("%w: %w: %w", ErrExecutionNotFound, runtimeapi.ErrNotFound, err)
+		}
 		e.logger.Warn("failed to stop agent by execution id",
 			zap.String("agent_execution_id", executionID),
 			zap.Error(err))
-		if errors.Is(err, lifecycle.ErrExecutionNotFound) {
-			return fmt.Errorf("%w: %w: %w", ErrExecutionNotFound, runtimeapi.ErrNotFound, err)
-		}
 		return fmt.Errorf("%w: stop execution %q: %w", ErrExecutionNotFound, executionID, err)
 	}
 	return nil

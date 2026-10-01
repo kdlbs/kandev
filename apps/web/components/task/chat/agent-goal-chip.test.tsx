@@ -75,9 +75,9 @@ describe("AgentGoalChip", () => {
 
     const details = await screen.findByTestId("agent-goal-drawer-content");
     expect(details.textContent).toContain(GOAL_OBJECTIVE);
-    expect(screen.getByRole("button", { name: "Close goal details" }).className).toContain(
-      "[@media(pointer:coarse)]:min-h-11",
-    );
+    const close = screen.getByRole("button", { name: "Close goal details" });
+    expect(close.className).toContain("[@media(pointer:coarse)]:min-h-11");
+    expect(close.closest("[data-vaul-no-drag]")).not.toBeNull();
   });
 
   it("does not close the touch drawer when the trigger loses hover state", () => {

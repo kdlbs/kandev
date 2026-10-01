@@ -11,42 +11,67 @@ import (
 )
 
 type sidebarBaseNeeds struct {
-	state, activity, repository, executor      bool
+	state, activity, executor                  bool
+	repositoryGroup, repositoryFilter          bool
 	diff, pullRequest, reviewWatch, issueWatch bool
 	workflowNames, summary                     bool
 }
 
 func sidebarBaseNeedsFor(query models.SidebarTaskViewQuery) sidebarBaseNeeds {
 	needs := sidebarBaseNeeds{
-		state:         query.Group == sidebarStateKey || query.Sort.Key == sidebarStateKey || sidebarQueryHasFilter(query, sidebarStateKey),
-		activity:      query.Sort.Key == sidebarActivitySortField,
-		repository:    query.Group == sidebarRepositoryKey || sidebarQueryHasFilter(query, sidebarRepositoryKey),
-		executor:      query.Group == "executorType" || sidebarQueryHasFilter(query, "executorType"),
-		diff:          sidebarQueryHasFilter(query, "hasDiff"),
-		pullRequest:   sidebarQueryHasFilter(query, "hasPR"),
-		reviewWatch:   sidebarQueryHasFilter(query, "isPRReview"),
-		issueWatch:    sidebarQueryHasFilter(query, "isIssueWatch"),
-		workflowNames: query.Group == sidebarWorkflowKey || query.Group == "workflowStep",
+		state:            query.Group == sidebarStateKey || query.Sort.Key == sidebarStateKey || sidebarQueryHasFilter(query, sidebarStateKey),
+		activity:         query.Sort.Key == sidebarActivitySortField,
+		repositoryGroup:  query.Group == sidebarRepositoryKey,
+		repositoryFilter: sidebarQueryHasFilter(query, sidebarRepositoryKey),
+		executor:         query.Group == "executorType" || sidebarQueryHasFilter(query, "executorType"),
+		diff:             sidebarQueryHasFilter(query, "hasDiff"),
+		pullRequest:      sidebarQueryHasFilter(query, "hasPR"),
+		reviewWatch:      sidebarQueryHasFilter(query, "isPRReview"),
+		issueWatch:       sidebarQueryHasFilter(query, "isIssueWatch"),
+		workflowNames:    query.Group == sidebarWorkflowKey || query.Group == sidebarWorkflowStepKey,
 	}
 	needs.summary = needs.state || needs.activity || needs.diff || needs.pullRequest
 	return needs
 }
 
-func sidebarBaseCTE(driver, groupExpr, groupLabelExpr string, query models.SidebarTaskViewQuery) string {
+func sidebarBaseCTE(driver, groupExpr, groupLabelExpr, scopeSQL string, query models.SidebarTaskViewQuery) string {
 	needs := sidebarBaseNeedsFor(query)
+	if needs.repositoryGroup {
+		// Repository group identity is only needed after filtering identifies display roots.
+		needs.repositoryGroup = false
+		groupExpr, groupLabelExpr = sidebarGroupExpressions(sidebarGroupNone)
+	}
 	summaryJoin, workflowJoins := sidebarBaseJoins(needs)
 	candidateFields := sidebarBaseCandidateFields(driver, needs)
-	return `WITH RECURSIVE candidate_raw AS (
-		SELECT ` + strings.Join(candidateFields, ",\n\t\t\t") + `
-		FROM tasks t
-		` + workflowJoins + summaryJoin + `
-		WHERE t.workspace_id = ? AND COALESCE(t.is_ephemeral, 0) = 0
+	projectionFields := []string{"candidate_raw.*", groupExpr + " AS group_key", groupLabelExpr + " AS group_label"}
+	if needs.activity {
+		projectionFields = append(projectionFields, sidebarActivitySortKey(driver, "activity_source")+" AS activity_at")
+	}
+	projectionName, identityProjection := "candidate", ""
+	projectionMaterialization := "NOT MATERIALIZED"
+	if dialect.IsPostgres(driver) {
+		projectionName = "candidate_projection"
+		projectionMaterialization = "MATERIALIZED"
+		// Keep base-table identity statistics without repeating derived projections.
+		identityProjection = `, candidate AS NOT MATERIALIZED (
+			SELECT identity.id, identity.parent_id, candidate_projection.* FROM candidate_projection
+			JOIN tasks identity ON identity.id = candidate_projection.projection_id
+		)`
+	}
+	return `WITH RECURSIVE scoped_tasks AS NOT MATERIALIZED (
+		SELECT t.* FROM tasks t
+		WHERE t.workspace_id = ? AND (t.is_ephemeral = 0 OR t.is_ephemeral IS NULL)
 			AND COALESCE(t.origin, '') <> 'automation_run'
 			AND ` + excludeConfigModePredicate(driver, "t.metadata") + `
-	), candidate AS (
-		SELECT candidate_raw.*, ` + groupExpr + ` AS group_key, ` + groupLabelExpr + ` AS group_label
+			AND ` + scopeSQL + `
+	), candidate_raw AS MATERIALIZED (
+		SELECT ` + strings.Join(candidateFields, ",\n\t\t\t") + `
+		FROM scoped_tasks t
+		` + workflowJoins + summaryJoin + `
+	), ` + projectionName + ` AS ` + projectionMaterialization + ` (
+		SELECT ` + strings.Join(projectionFields, ", ") + `
 		FROM candidate_raw
-	)`
+	)` + identityProjection
 }
 
 func sidebarBaseJoins(needs sidebarBaseNeeds) (string, string) {
@@ -62,10 +87,14 @@ func sidebarBaseJoins(needs sidebarBaseNeeds) (string, string) {
 
 func sidebarBaseCandidateFields(driver string, needs sidebarBaseNeeds) []string {
 	fields := []string{"t.id", "t.workspace_id", "t.workflow_id", "t.workflow_step_id", "t.title", "t.parent_id", "t.archived_at", "t.created_at", "t.updated_at"}
+	if dialect.IsPostgres(driver) {
+		fields[0] = "t.id AS projection_id"
+		fields = append(fields[:5], fields[6:]...)
+	}
 	fields = append(fields, sidebarStateFields(driver, needs)...)
 	fields = append(fields, sidebarActivityFields(driver, needs)...)
 	fields = append(fields, sidebarWorkflowFields(needs)...)
-	fields = append(fields, sidebarRepositoryFields(driver, needs)...)
+	fields = append(fields, sidebarRepositoryFields(needs)...)
 	fields = append(fields, sidebarExecutorFields(needs)...)
 	fields = append(fields, sidebarDiffFields(driver, needs)...)
 	fields = append(fields, sidebarPullRequestFields(driver, needs)...)
@@ -96,7 +125,7 @@ func sidebarActivityFields(driver string, needs sidebarBaseNeeds) []string {
 		return nil
 	}
 	value := `COALESCE(NULLIF(` + dialect.JSONExtract(driver, "summary.summary", "last_activity_at") + `, ''), CAST(t.updated_at AS TEXT), CAST(t.created_at AS TEXT))`
-	return []string{sidebarActivitySortKey(driver, value) + " AS activity_at"}
+	return []string{value + " AS activity_source"}
 }
 
 func sidebarWorkflowFields(needs sidebarBaseNeeds) []string {
@@ -107,45 +136,6 @@ func sidebarWorkflowFields(needs sidebarBaseNeeds) []string {
 		`COALESCE(NULLIF(w.name, ''), 'undefined') AS workflow_name`,
 		`COALESCE(NULLIF(ws.name, ''), 'undefined') AS workflow_step_name`,
 	}
-}
-
-func sidebarRepositoryFields(driver string, needs sidebarBaseNeeds) []string {
-	if !needs.repository {
-		return nil
-	}
-	repoName := `COALESCE((SELECT CASE
-		WHEN COALESCE(r.provider_owner, '') <> '' AND COALESCE(r.provider_name, '') <> ''
-		THEN r.provider_owner || '/' || r.provider_name
-		ELSE r.name END
-		FROM task_repositories tr JOIN repositories r ON r.id = tr.repository_id
-		WHERE tr.task_id = t.id ORDER BY tr.position ASC, tr.id ASC LIMIT 1), 'undefined')`
-	repositoryCount := `(SELECT COUNT(DISTINCT tr.repository_id) FROM task_repositories tr WHERE tr.task_id = t.id)`
-	resolvedRepositoryCount := `(SELECT COUNT(DISTINCT tr.repository_id) FROM task_repositories tr JOIN repositories r ON r.id = tr.repository_id WHERE tr.task_id = t.id)`
-	repositorySlug := `CASE
-		WHEN COALESCE(r.provider_owner, '') <> '' AND COALESCE(r.provider_name, '') <> ''
-		THEN r.provider_owner || '/' || r.provider_name
-		ELSE r.name END`
-	repositorySlugs := `(SELECT json_group_array(repo_slug) FROM (
-		SELECT ` + repositorySlug + ` AS repo_slug, MIN(tr.position) AS position, MIN(tr.id) AS id
-		FROM task_repositories tr JOIN repositories r ON r.id = tr.repository_id
-		WHERE tr.task_id = t.id GROUP BY tr.repository_id, repo_slug ORDER BY position, id))`
-	repositoryLabels := `(SELECT group_concat(repo_slug, ', ') FROM (
-		SELECT ` + repositorySlug + ` AS repo_slug, MIN(tr.position) AS position, MIN(tr.id) AS id
-		FROM task_repositories tr JOIN repositories r ON r.id = tr.repository_id
-		WHERE tr.task_id = t.id GROUP BY tr.repository_id, repo_slug ORDER BY position, id))`
-	if dialect.IsPostgres(driver) {
-		repositorySlugs = `(SELECT COALESCE(array_to_json(array_agg(repo_slug ORDER BY position, id))::text, '[]') FROM (
-			SELECT ` + repositorySlug + ` AS repo_slug, MIN(tr.position) AS position, MIN(tr.id) AS id
-			FROM task_repositories tr JOIN repositories r ON r.id = tr.repository_id
-			WHERE tr.task_id = t.id GROUP BY tr.repository_id, repo_slug) ordered_repositories)`
-		repositoryLabels = `(SELECT string_agg(repo_slug, ', ' ORDER BY position, id) FROM (
-			SELECT ` + repositorySlug + ` AS repo_slug, MIN(tr.position) AS position, MIN(tr.id) AS id
-			FROM task_repositories tr JOIN repositories r ON r.id = tr.repository_id
-			WHERE tr.task_id = t.id GROUP BY tr.repository_id, repo_slug) ordered_repositories)`
-	}
-	return []string{repoName + " AS repository_name", repositoryCount + " AS repository_count",
-		resolvedRepositoryCount + " AS resolved_repository_count", "COALESCE(" + repositorySlugs + ", '[]') AS repository_slugs",
-		"COALESCE(" + repositoryLabels + ", 'undefined') AS repository_labels"}
 }
 
 func sidebarExecutorFields(needs sidebarBaseNeeds) []string {
@@ -192,7 +182,7 @@ func sidebarWatchField(driver, metadataKey, alias string) string {
 func sidebarActivitySortKey(driver, value string) string {
 	if dialect.IsPostgres(driver) {
 		validRFC3339 := `^[0-9]{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])([T]([01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9]([.][0-9]{1,9}){0,1}(Z|([+-]([01][0-9]|2[0-3]):[0-5][0-9]))| ([01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9]([.][0-9]{1,9}){0,1}(Z|([+-]([01][0-9]|2[0-3])(:[0-5][0-9]){0,1})))$`
-		utcSecond := `TO_CHAR(DATE_TRUNC('second', CAST((` + value + `) AS TIMESTAMPTZ)) AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS')`
+		utcSecond := `TO_CHAR(CAST(REGEXP_REPLACE((` + value + `), '[.][0-9]+', '') AS TIMESTAMPTZ) AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS')`
 		fraction := `RPAD(COALESCE(SUBSTRING((` + value + `) FROM '[.]([0-9]{1,9})'), ''), 9, '0')`
 		year := `CAST(SUBSTRING((` + value + `), 1, 4) AS INTEGER)`
 		month := `CAST(SUBSTRING((` + value + `), 6, 2) AS INTEGER)`
@@ -201,7 +191,10 @@ func sidebarActivitySortKey(driver, value string) string {
 			WHEN 4 THEN 30 WHEN 6 THEN 30 WHEN 9 THEN 30 WHEN 11 THEN 30 ELSE 31 END`
 		return `CASE WHEN (` + value + `) ~ '` + validRFC3339 + `' AND SUBSTRING((` + value + `), 1, 4) <> '0000' THEN
 			CASE WHEN ` + day + ` <= ` + maxDay + `
-				THEN ` + utcSecond + ` || '.' || ` + fraction + ` ELSE (` + value + `) END
+				THEN CASE WHEN LENGTH((` + value + `)) = 20 AND SUBSTRING((` + value + `), 20, 1) = 'Z'
+					AND SUBSTRING((` + value + `), 11, 1) = 'T'
+					THEN SUBSTRING((` + value + `), 1, 19) || '.000000000'
+					ELSE ` + utcSecond + ` || '.' || ` + fraction + ` END ELSE (` + value + `) END
 			ELSE (` + value + `) END`
 	}
 	tail := `SUBSTR((` + value + `), INSTR((` + value + `), '.') + 1)`
@@ -213,7 +206,9 @@ func sidebarActivitySortKey(driver, value string) string {
 	normalizedFraction := `SUBSTR((` + fraction + `) || '000000000', 1, 9)`
 	zoneStart := `CASE WHEN INSTR((` + value + `), '.') > 0 THEN INSTR((` + value + `), '.') + LENGTH(` + fraction + `) + 1 ELSE 20 END`
 	zone := `SUBSTR((` + value + `), ` + zoneStart + `)`
-	utcSecond := `STRFTIME('%Y-%m-%dT%H:%M:%S', (` + value + `))`
+	// Normalize the whole second separately so SQLite's millisecond rounding cannot carry a nanosecond fraction.
+	normalizedZone := `CASE WHEN LENGTH(` + zone + `) = 3 THEN ` + zone + ` || ':00' ELSE ` + zone + ` END`
+	utcSecond := `STRFTIME('%Y-%m-%dT%H:%M:%S', SUBSTR((` + value + `), 1, 19) || (` + normalizedZone + `))`
 	validCalendarDate := `DATE(SUBSTR((` + value + `), 1, 10), '+0 days') = SUBSTR((` + value + `), 1, 10)`
 	validClock := `SUBSTR((` + value + `), 1, 4) GLOB '[0-9][0-9][0-9][0-9]'
 		AND SUBSTR((` + value + `), 6, 2) BETWEEN '01' AND '12'
@@ -231,7 +226,10 @@ func sidebarActivitySortKey(driver, value string) string {
 			AND SUBSTR(` + zone + `, 5, 2) BETWEEN '00' AND '59')
 		OR (SUBSTR((` + value + `), 11, 1) = ' ' AND LENGTH(` + zone + `) = 3 AND SUBSTR(` + zone + `, 1, 1) IN ('+', '-')
 			AND SUBSTR(` + zone + `, 2, 2) BETWEEN '00' AND '23'))`
-	return `CASE WHEN ` + utcSecond + ` IS NOT NULL AND ` + validCalendarDate + ` AND ` + validClock + `
+	return `CASE WHEN LENGTH((` + value + `)) = 20 AND SUBSTR((` + value + `), 20, 1) = 'Z'
+		AND STRFTIME('%Y-%m-%dT%H:%M:%SZ', (` + value + `), '+0 seconds') = (` + value + `)
+		THEN SUBSTR((` + value + `), 1, 19) || '.000000000'
+		WHEN ` + utcSecond + ` IS NOT NULL AND ` + validCalendarDate + ` AND ` + validClock + `
 		AND ` + validFraction + ` AND ` + validZone + `
 		THEN ` + utcSecond + ` || '.' || ` + normalizedFraction + ` ELSE (` + value + `) END`
 }
@@ -249,7 +247,7 @@ func sidebarGroupExpressions(group string) (string, string) {
 	switch group {
 	case sidebarWorkflowKey:
 		return `COALESCE(NULLIF(workflow_id, ''), '__unassigned__')`, `workflow_name`
-	case "workflowStep":
+	case sidebarWorkflowStepKey:
 		return `COALESCE(NULLIF(workflow_step_id, ''), '__unassigned__')`, `workflow_step_name`
 	case "executorType":
 		return `COALESCE(NULLIF(executor_type, 'undefined'), '__unassigned__')`, `executor_type`
@@ -270,16 +268,13 @@ func sidebarGroupExpressions(group string) (string, string) {
 	}
 }
 
-func sidebarVisibleCTE(query models.SidebarTaskViewQuery) (string, []any) {
+func sidebarVisibleCTE(driver string, query models.SidebarTaskViewQuery) (string, []any) {
 	var ctes []string
 	var args []any
 	if len(query.CollapsedTaskIDs) > 0 {
-		roots := make([]string, len(query.CollapsedTaskIDs))
-		for i, id := range query.CollapsedTaskIDs {
-			roots[i] = "(?)"
-			args = append(args, id)
-		}
-		ctes = append(ctes, "collapsed_requested(id) AS (VALUES "+strings.Join(roots, ", ")+")")
+		requestedSQL, requestedArgs := sidebarStringListSQL(driver, query.CollapsedTaskIDs)
+		args = append(args, requestedArgs...)
+		ctes = append(ctes, "collapsed_requested(id) AS ("+requestedSQL+")")
 		ctes = append(ctes, `collapsed_roots(id) AS (
 			SELECT filtered.id FROM filtered JOIN collapsed_requested requested ON requested.id = filtered.id
 		)`)
@@ -289,7 +284,7 @@ func sidebarVisibleCTE(query models.SidebarTaskViewQuery) (string, []any) {
 			SELECT child.id FROM filtered child JOIN hidden_tasks hidden ON child.parent_id = hidden.id
 		)`)
 	}
-	visible := `visible AS MATERIALIZED (SELECT * FROM filtered WHERE 1=1`
+	visible := `visible AS MATERIALIZED (SELECT id FROM filtered WHERE 1=1`
 	if len(query.CollapsedTaskIDs) > 0 {
 		visible += ` AND id NOT IN (SELECT id FROM hidden_tasks)`
 	}
@@ -298,7 +293,19 @@ func sidebarVisibleCTE(query models.SidebarTaskViewQuery) (string, []any) {
 	return ", " + strings.Join(ctes, ", "), args
 }
 
-func sidebarFilterSQL(driver string, filters []models.SidebarTaskViewClause) (string, []any, error) {
+func sidebarPartitionFilters(filters []models.SidebarTaskViewClause) (scope, projection []models.SidebarTaskViewClause) {
+	for _, filter := range filters {
+		switch filter.Dimension {
+		case sidebarArchivedKey, sidebarWorkflowKey, sidebarWorkflowStepKey, "titleMatch":
+			scope = append(scope, filter)
+		default:
+			projection = append(projection, filter)
+		}
+	}
+	return scope, projection
+}
+
+func sidebarFilterSQL(driver string, filters []models.SidebarTaskViewClause, defaultActive bool) (string, []any, error) {
 	parts := []string{"1=1"}
 	args := make([]any, 0, len(filters)*2)
 	hasArchivedFilter := false
@@ -317,7 +324,7 @@ func sidebarFilterSQL(driver string, filters []models.SidebarTaskViewClause) (st
 		parts = append(parts, condition)
 		args = append(args, values...)
 	}
-	if !hasArchivedFilter {
+	if defaultActive && !hasArchivedFilter {
 		parts = append(parts, "archived_at IS NULL")
 	}
 	return strings.Join(parts, " AND "), args, nil
@@ -325,17 +332,17 @@ func sidebarFilterSQL(driver string, filters []models.SidebarTaskViewClause) (st
 
 func sidebarFilterColumn(driver, dimension string) (string, bool) {
 	columns := map[string]string{
-		sidebarArchivedKey:   `CASE WHEN archived_at IS NULL THEN 'false' ELSE 'true' END`,
-		sidebarStateKey:      `state_bucket`,
-		sidebarWorkflowKey:   `COALESCE(NULLIF(workflow_id, ''), 'undefined')`,
-		"workflowStep":       `COALESCE(NULLIF(workflow_step_id, ''), 'undefined')`,
-		"executorType":       `executor_type`,
-		sidebarRepositoryKey: `repository_name`,
-		"hasDiff":            `has_diff`,
-		"hasPR":              `has_pr`,
-		"isPRReview":         `is_pr_review`,
-		"isIssueWatch":       `is_issue_watch`,
-		"titleMatch":         `COALESCE(title, '')`,
+		sidebarArchivedKey:     `CASE WHEN archived_at IS NULL THEN 'false' ELSE 'true' END`,
+		sidebarStateKey:        `state_bucket`,
+		sidebarWorkflowKey:     `COALESCE(NULLIF(workflow_id, ''), 'undefined')`,
+		sidebarWorkflowStepKey: `COALESCE(NULLIF(workflow_step_id, ''), 'undefined')`,
+		"executorType":         `executor_type`,
+		sidebarRepositoryKey:   `repository_name`,
+		"hasDiff":              `has_diff`,
+		"hasPR":                `has_pr`,
+		"isPRReview":           `is_pr_review`,
+		"isIssueWatch":         `is_issue_watch`,
+		"titleMatch":           `COALESCE(title, '')`,
 	}
 	value, ok := columns[dimension]
 	return value, ok
@@ -409,7 +416,7 @@ func sidebarClauseValues(clause models.SidebarTaskViewClause) ([]any, error) {
 
 func sidebarTotalGroupCountSQL(group string) string {
 	if group == sidebarGroupNone {
-		return `(SELECT CASE WHEN COUNT(*) > 0 THEN 1 ELSE 0 END FROM filtered)`
+		return `CASE WHEN EXISTS (SELECT 1 FROM filtered) THEN 1 ELSE 0 END`
 	}
 	return `(SELECT COUNT(*) FROM ordered_groups)`
 }
@@ -419,18 +426,18 @@ func sidebarPageSelectSQL(groupNone bool) string {
 	groupCountJoin := `LEFT JOIN group_task_counts group_count ON group_count.group_key = tree.root_group_key
 		AND group_count.group_label = tree.root_group_label`
 	if groupNone {
-		groupCountExpr = `(SELECT COUNT(*) FROM visible)`
+		groupCountExpr = `page_summary.total_visible_tasks`
 		groupCountJoin = ""
 	}
 	return ` SELECT tree.id, tree.root_group_key, tree.root_group_label,
 		COALESCE(NULLIF(w.name, ''), 'undefined'), COALESCE(NULLIF(ws.name, ''), 'undefined'), COALESCE(ws.color, ''),
 		COALESCE(tree.parent_id, ''), COALESCE(parent.title, ''),
-		` + groupCountExpr + `, tree.depth, tree.group_position,
+		` + groupCountExpr + `, tree.depth, tree.order_path > group_start.first_order_path,
 		COALESCE(queue_status.queue_position, 0), COALESCE(queue_status.queue_total, 0),
 		COALESCE(subtask_counts.subtask_count, 0),
 		page_summary.total_tasks, page_summary.total_visible_tasks, page_summary.total_groups, page_options.page
-	FROM page_window page
-	JOIN page_ordered_tree tree ON tree.id = page.id
+	FROM page_window tree
+	JOIN page_group_starts group_start ON group_start.group_order = tree.group_order
 	CROSS JOIN page_summary
 	CROSS JOIN page_options
 	LEFT JOIN tasks parent ON parent.id = tree.parent_id
@@ -442,12 +449,12 @@ func sidebarPageSelectSQL(groupNone bool) string {
 	ORDER BY tree.group_order ASC, tree.order_path ASC`
 }
 
-func sidebarGroupHeaderSelectSQL(groupKeys []string) string {
+func sidebarGroupHeaderSelectSQL(groupKeysSQL string) string {
 	return ` SELECT groups.group_key, groups.group_label, COALESCE(counts.task_count, 0)
 	FROM ordered_groups groups
 	LEFT JOIN group_task_counts counts ON counts.group_key = groups.group_key
 		AND counts.group_label = groups.group_label
-	WHERE groups.group_key IN (` + placeholders(len(groupKeys)) + `)
+	WHERE groups.group_key IN (` + groupKeysSQL + `)
 	ORDER BY groups.group_order ASC`
 }
 

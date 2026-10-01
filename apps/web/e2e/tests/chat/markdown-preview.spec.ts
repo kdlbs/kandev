@@ -93,8 +93,7 @@ async function openFileInCode(
 ): Promise<void> {
   await session.clickTab("Files");
   await expect(session.files).toBeVisible({ timeout: 5_000 });
-  const fileRow = session.files.getByText(fileName);
-  await expect(fileRow).toBeVisible({ timeout: 10_000 });
+  const fileRow = await session.fileTree.waitForFileTreeNode(fileName, 30_000);
   await fileRow.click();
 
   const editorTab = testPage.locator(`.dv-default-tab:has-text('${fileName}')`);
@@ -103,7 +102,7 @@ async function openFileInCode(
 }
 
 test.describe("Markdown preview", () => {
-  test.describe.configure({ retries: 1, timeout: 120_000 });
+  test.describe.configure({ retries: 0, timeout: 120_000 });
 
   test("toggle markdown preview in file editor", async ({
     testPage,

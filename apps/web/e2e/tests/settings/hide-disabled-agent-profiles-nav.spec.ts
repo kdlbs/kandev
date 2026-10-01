@@ -1,4 +1,5 @@
 import { test, expect } from "../../fixtures/test-base";
+import { getMockAgent } from "../../helpers/agent-fixtures";
 
 // Covers docs/specs/agents/requirements/hide-disabled-profiles-nav.md's nav-visibility
 // scenarios: with "Hide disabled agent profiles from left panel navigation"
@@ -9,12 +10,14 @@ test.describe("hide disabled agent profiles from left panel navigation", () => {
   test("off by default keeps a disabled profile visible; on hides it; re-enabling reveals it", async ({
     testPage,
     apiClient,
+    seedData,
   }) => {
     test.setTimeout(120_000);
 
     const { agents } = await apiClient.listAgents();
-    const agent = agents[0];
-    const profile = agent.profiles[0];
+    const agent = getMockAgent(agents);
+    const profile = agent.profiles.find((candidate) => candidate.id === seedData.agentProfileId);
+    if (!profile) throw new Error("Seeded mock profile unavailable");
     // The Settings tree's profile leaf is labelled with the profile name and
     // appends the "Disabled" badge while the profile is disabled — an
     // unanchored regex matches both states.

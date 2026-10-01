@@ -139,6 +139,15 @@ function panelProps(): ChangesPanelBodyProps {
     comparisonTargets: [],
     comparisonUnavailable: false,
     comparisonErrorCode: null,
+    gitStatus: {
+      hasPriorData: false,
+      membershipReady: false,
+      loading: false,
+      unavailable: false,
+      detailsPending: false,
+      failedRepositories: [],
+      showEmpty: false,
+    },
     isLoading: false,
     loadingOperation: null,
     dialogs: {} as ChangesPanelBodyProps["dialogs"],
@@ -289,6 +298,57 @@ describe("ChangesPanelBody history context ownership", () => {
     expect(taskBSection.getAttribute(ARIA_EXPANDED)).toBe(COLLAPSED);
     setContext(...TASK_B_NEW_ENVIRONMENT_CONTEXT);
     expect(screen.getByTestId(COMMIT_SECTION_TOGGLE).getAttribute(ARIA_EXPANDED)).toBe(EXPANDED);
+  });
+});
+
+describe("ChangesPanelBody Git status presentation", () => {
+  it("shows a retryable unavailable state without claiming the workspace is clean", () => {
+    const retry = vi.fn();
+    render(
+      <TooltipProvider>
+        <StateProvider>
+          <ChangesPanelBody
+            {...panelProps()}
+            gitStatus={{ ...panelProps().gitStatus, unavailable: true }}
+            onRetryGitStatus={retry}
+          />
+          <StoreCapture />
+        </StateProvider>
+      </TooltipProvider>,
+    );
+
+    expect(screen.getByRole("alert").textContent).toContain("Git status unavailable");
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    expect(retry).toHaveBeenCalledTimes(1);
+    expect(screen.queryByText("Your changed files will appear here")).toBeNull();
+  });
+
+  it("shows the clean message only after complete membership is ready", () => {
+    const renderPanel = (gitStatusMembershipReady: boolean) =>
+      render(
+        <TooltipProvider>
+          <StateProvider>
+            <ChangesPanelBody
+              {...panelProps()}
+              hasAnything={false}
+              hasCommits={false}
+              gitStatus={{
+                ...panelProps().gitStatus,
+                membershipReady: gitStatusMembershipReady,
+                showEmpty: gitStatusMembershipReady,
+              }}
+            />
+            <StoreCapture />
+          </StateProvider>
+        </TooltipProvider>,
+      );
+
+    const view = renderPanel(false);
+    expect(screen.queryByText("Your changed files will appear here")).toBeNull();
+    view.unmount();
+
+    renderPanel(true);
+    expect(screen.getByText("Your changed files will appear here")).toBeTruthy();
   });
 });
 

@@ -5,8 +5,8 @@ import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import type { ApiClient } from "../../helpers/api-client";
-import { waitForHttp } from "../../helpers/causal-waits";
-import { GitHelper, makeGitEnv } from "../../helpers/git-helper";
+import { waitForHttp, watchWs } from "../../helpers/causal-waits";
+import { makeGitEnv } from "../../helpers/git-helper";
 import { SessionPage } from "../../pages/session-page";
 import { mockFolderAvailability } from "../../helpers/open-task-folder";
 
@@ -139,6 +139,7 @@ test.describe("Attach local workspace sources", () => {
       })
       .toBeTruthy();
 
+    const wsWatcher = watchWs(testPage);
     await testPage.goto(`/t/${task.id}`);
     const session = new SessionPage(testPage);
     await session.waitForLoad();
@@ -273,14 +274,28 @@ test.describe("Attach local workspace sources", () => {
       worktree.worktree_path ? [worktree.worktree_path] : [],
     );
     expect(repoPaths).toHaveLength(2);
+    const filePaths = repoPaths.map((_, index) => `changes/repository-${index}.txt`);
+    await session.clickTab("Files");
+    const pendingDir = path.join(backend.tmpDir, "pending-changes");
+    fs.mkdirSync(pendingDir, { recursive: true });
+    const pendingFiles = filePaths.map((_, index) => {
+      const pendingFile = path.join(pendingDir, `repository-${index}.txt`);
+      fs.writeFileSync(pendingFile, `repository ${index}\n`);
+      return pendingFile;
+    });
     for (const [index, repoPath] of repoPaths.entries()) {
-      new GitHelper(repoPath, makeGitEnv(backend.tmpDir)).createFile(
-        `changes/repository-${index}.txt`,
-        `repository ${index}\n`,
-      );
+      const destination = path.join(repoPath, filePaths[index]!);
+      fs.mkdirSync(path.dirname(destination), { recursive: true });
+      fs.renameSync(pendingFiles[index]!, destination);
     }
 
+    const refreshResponse = wsWatcher.waitForResponse("session.git.refresh");
     await session.clickTab("Changes");
+    const refresh = await refreshResponse;
+    expect(refresh.payload.mode).toBe("fresh");
+    expect(refresh.payload.task_environment_id).toBeTruthy();
+    expect(Array.isArray(refresh.payload.snapshots)).toBe(true);
+    expect(refresh.payload.snapshots).toHaveLength(2);
     const changes = session.changes;
     await expect(changes.getByTestId("changes-repo-group")).toHaveCount(2, { timeout: 30_000 });
     await expect(

@@ -260,6 +260,15 @@ function useTaskCreateFocusReturn(props: TaskCreateDialogProps, isCreateMode: bo
 }
 
 export function TaskCreateDialog(props: TaskCreateDialogProps) {
+  const [hasOpened, setHasOpened] = useState(props.open);
+  if (props.open && !hasOpened) setHasOpened(true);
+  // Keep an opened form mounted for its close transition, focus return and
+  // draft lifecycle; unopened forms need no subscriptions or setup.
+  if (!props.open && !hasOpened) return null;
+  return <TaskCreateDialogContent {...props} />;
+}
+
+function TaskCreateDialogContent(props: TaskCreateDialogProps) {
   const { t } = useTranslation("chat");
   const syncedTaskCreateLastUsed = useAppStore((state) => state.userSettings.taskCreateLastUsed);
   const preserveQueuedLastUsedOnCloseRef = useRef<{

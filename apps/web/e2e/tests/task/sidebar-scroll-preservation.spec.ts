@@ -178,15 +178,21 @@ test.describe("sidebar scrolling", () => {
     }));
     expect(overflow.scrollWidth).toBeGreaterThan(overflow.clientWidth);
 
-    await titleViewport.hover();
+    // The page may retain a pointer location from layout changes after the
+    // navigation. Move clear of the row first so the title receives a real
+    // mouse-enter event, then target visible text inside the clipped viewport.
+    await testPage.mouse.move(0, 0);
+    await titleViewport.hover({ position: { x: 4, y: 8 } });
+    await expect
+      .poll(() => titleViewport.evaluate((element) => element.matches(":hover")))
+      .toBe(true);
     await expect
       .poll(() => titleText.evaluate((element) => element.style.transform))
       .toMatch(/^translateX\(-/);
-    const rowBoxBeforeHover = await taskRow.boundingBox();
-    if (!rowBoxBeforeHover) throw new Error("Long-title sidebar row has no layout box");
-    await taskRow.hover({
-      position: { x: rowBoxBeforeHover.width - 2, y: rowBoxBeforeHover.height / 2 },
-    });
+    // Hover a stable part of the row so the action transition settles without
+    // the pointer crossing the scrollbar gutter or the moving title.
+    await taskRow.hover({ position: { x: 6, y: 6 } });
+    expect(await taskRow.evaluate((element) => element.matches(":hover"))).toBe(true);
     await expect(actions.locator("..")).toHaveCSS("opacity", "1");
     await expect(actions).toBeInViewport();
 
@@ -278,7 +284,7 @@ test.describe("sidebar scrolling", () => {
   test("reveals a command-selected task", async ({ testPage, apiClient, seedData }) => {
     test.setTimeout(60_000);
 
-    const taskCount = 25;
+    const taskCount = 40;
     const created: { id: string; title: string }[] = [];
     for (let index = 0; index < taskCount; index++) {
       const title = `Command Reveal Task ${String(index).padStart(2, "0")}`;
@@ -290,7 +296,7 @@ test.describe("sidebar scrolling", () => {
       created.push({ id: task.id, title });
     }
 
-    const initialTask = created.at(-1)!;
+    const initialTask = created.at(-2)!;
     await testPage.goto(`/t/${initialTask.id}`);
     const session = new SessionPage(testPage);
     await session.waitForLoad();
@@ -310,27 +316,22 @@ test.describe("sidebar scrolling", () => {
     }));
     expect(dimensions.scrollHeight).toBeGreaterThan(dimensions.clientHeight);
 
-    const offscreenTitle = await scrollContainer.evaluate(
-      (element, taskTitles) => {
-        const containerRect = element.getBoundingClientRect();
-        const rows = element.querySelectorAll<HTMLElement>("[data-testid='sidebar-task-item']");
-        for (const row of rows) {
-          const rowRect = row.getBoundingClientRect();
-          const isOutside =
-            rowRect.bottom <= containerRect.top + 1 || rowRect.top >= containerRect.bottom - 1;
-          if (isOutside) {
-            const title = taskTitles.find((candidate) => row.textContent?.includes(candidate));
-            if (title) return title;
-          }
-        }
-        return null;
-      },
-      created.map(({ title }) => title),
-    );
-    if (!offscreenTitle) throw new Error("Expected a rendered task row outside the viewport");
-    const targetTask = created.find(({ title }) => title === offscreenTitle)!;
+    const targetTask = created[0]!;
     const targetRow = session.sidebarTaskItem(targetTask.title);
     await expect(targetRow).toBeVisible();
+    await expect
+      .poll(async () => {
+        const [containerBox, rowBox] = await Promise.all([
+          scrollContainer.boundingBox(),
+          targetRow.boundingBox(),
+        ]);
+        if (!containerBox || !rowBox) return false;
+        return (
+          rowBox.y + rowBox.height <= containerBox.y + 1 ||
+          rowBox.y >= containerBox.y + containerBox.height - 1
+        );
+      })
+      .toBe(true);
     const before = await Promise.all([scrollContainer.boundingBox(), targetRow.boundingBox()]);
     if (!before[0] || !before[1]) throw new Error("Command-selected target has no layout box");
     expect(
@@ -506,22 +507,23 @@ test.describe("sidebar scrolling", () => {
     await expect(scrollContainer).toHaveAttribute("data-can-scroll-down", "false");
 
     const aboveTitle = await scrollContainer.evaluate(
-      (element, taskTitles) => {
+      (element, { taskTitles, activeTitle }) => {
         const containerRect = element.getBoundingClientRect();
         const rows = element.querySelectorAll<HTMLElement>("[data-testid='sidebar-task-item']");
         for (const row of rows) {
           const rowRect = row.getBoundingClientRect();
           if (rowRect.bottom <= containerRect.top + 1) {
             const title = taskTitles.find((candidate) => row.textContent?.includes(candidate));
-            if (title) return title;
+            if (title && title !== activeTitle) return title;
           }
         }
         return null;
       },
-      created.map(({ title }) => title),
+      { taskTitles: created.map(({ title }) => title), activeTitle: initialTask.title },
     );
     if (!aboveTitle) throw new Error("Expected a rendered task row above the viewport");
     const targetTask = created.find(({ title }) => title === aboveTitle)!;
+    expect(targetTask.id).not.toBe(initialTask.id);
     const targetRow = session.sidebarTaskItem(targetTask.title);
     const before = await Promise.all([scrollContainer.boundingBox(), targetRow.boundingBox()]);
     if (!before[0] || !before[1]) throw new Error("Command-selected target has no layout box");
@@ -545,18 +547,15 @@ test.describe("sidebar scrolling", () => {
     await expect(targetRow).toHaveClass(/task-sidebar-row-reveal/, { timeout: 1_000 });
     await expect
       .poll(
-        async () => {
-          const [containerBox, rowBox] = await Promise.all([
-            scrollContainer.boundingBox(),
-            targetRow.boundingBox(),
-          ]);
-          if (!containerBox || !rowBox) return false;
-          return (
-            rowBox.y >= containerBox.y - 1 &&
-            rowBox.y + rowBox.height <= containerBox.y + containerBox.height + 1
-          );
-        },
-        { timeout: 10_000 },
+        () =>
+          scrollContainer.evaluate((viewport, taskId) => {
+            const row = viewport.querySelector<HTMLElement>(`[data-task-row-id='${taskId}']`);
+            if (!row || viewport.getClientRects().length === 0) return false;
+            const viewportRect = viewport.getBoundingClientRect();
+            const rowRect = row.getBoundingClientRect();
+            return rowRect.top >= viewportRect.top - 1 && rowRect.bottom <= viewportRect.bottom + 1;
+          }, targetTask.id),
+        { timeout: 10_000, message: "command selection should reveal its task row" },
       )
       .toBe(true);
 

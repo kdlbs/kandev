@@ -27,18 +27,20 @@ export type MobileActionConfirmationProps = Omit<
   onConfirm: () => void | Promise<void>;
   completionPolicy?: ConfirmationCompletionPolicy;
   focusReturnRef?: RefObject<HTMLElement | null>;
+  useMobileSurfaceForCoarsePointer?: boolean;
   fallback?: ReactNode;
 };
 
 /** Keep this adapter mounted across responsive branches so a boundary change cancels the request. */
 export function MobileActionConfirmation(props: MobileActionConfirmationProps) {
-  const { isMobile, changed } = useConfirmationBoundary(
+  const { changed, useMobileSurface } = useConfirmationBoundary(
     props.open,
     props.targetKey,
     props.onOpenChange,
+    props.useMobileSurfaceForCoarsePointer ?? false,
   );
   if (changed || !props.open) return null;
-  if (!isMobile) return props.fallback ?? null;
+  if (!useMobileSurface) return props.fallback ?? null;
   return <OpenMobileConfirmation {...props} />;
 }
 
@@ -46,19 +48,22 @@ export function useConfirmationBoundary(
   open: boolean,
   targetKey: string,
   onOpenChange: (open: boolean) => void,
+  useMobileSurfaceForCoarsePointer = false,
 ) {
   const viewport = useResponsiveBreakpoint();
-  const { isMobile } = viewport;
-  const previous = useRef({ isMobile, targetKey, open });
+  const { isMobile, isFinePointer } = viewport;
+  const useMobileSurface = isMobile || (useMobileSurfaceForCoarsePointer && !isFinePointer);
+  const previous = useRef({ useMobileSurface, targetKey, open });
   const changed =
     previous.current.open &&
     open &&
-    (previous.current.isMobile !== isMobile || previous.current.targetKey !== targetKey);
+    (previous.current.useMobileSurface !== useMobileSurface ||
+      previous.current.targetKey !== targetKey);
   useLayoutEffect(() => {
-    previous.current = { isMobile, targetKey, open };
+    previous.current = { useMobileSurface, targetKey, open };
     if (changed && open) onOpenChange(false);
-  });
-  return { ...viewport, changed };
+  }, [changed, onOpenChange, open, targetKey, useMobileSurface]);
+  return { ...viewport, changed, useMobileSurface };
 }
 
 function OpenMobileConfirmation({
@@ -71,6 +76,7 @@ function OpenMobileConfirmation({
   fallback: _fallback,
   open: _open,
   targetKey: _targetKey,
+  useMobileSurfaceForCoarsePointer: _useMobileSurfaceForCoarsePointer,
   ...content
 }: MobileActionConfirmationProps) {
   const host = useMobileConfirmationHost();

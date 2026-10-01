@@ -72,3 +72,32 @@ func TestWaitForPendingDispatchedPrompt_ConsumesCompletionSignal(t *testing.T) {
 		t.Fatal("completion signal did not clear the pending prompt gate")
 	}
 }
+
+func TestWaitForPendingDispatchedPrompt_IgnoresStaleGenerationSignal(t *testing.T) {
+	execution := pendingPromptExecution()
+	execution.promptDoneCh = make(chan PromptCompletionSignal, 2)
+	execution.promptLifecycleMu.Lock()
+	execution.promptGeneration = 7
+	execution.dispatchedPromptGeneration = 7
+	execution.promptLifecycleMu.Unlock()
+	execution.promptDoneCh <- PromptCompletionSignal{
+		StopReason:       "stale",
+		PromptGeneration: 6,
+	}
+	execution.promptDoneCh <- PromptCompletionSignal{
+		StopReason:       "current",
+		PromptGeneration: 7,
+	}
+
+	if err := waitForPendingDispatchedPrompt(context.Background(), execution); err != nil {
+		t.Fatalf("waitForPendingDispatchedPrompt: %v", err)
+	}
+	if execution.dispatchedPromptPending.Load() {
+		t.Fatal("matching completion signal did not clear the pending prompt gate")
+	}
+	select {
+	case signal := <-execution.promptDoneCh:
+		t.Fatalf("wait left a stale or duplicate completion signal queued: %+v", signal)
+	default:
+	}
+}

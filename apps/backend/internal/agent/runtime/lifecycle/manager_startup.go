@@ -578,6 +578,14 @@ func (m *Manager) waitForAgentctlReady(execution *AgentExecution) {
 		m.eventPublisher.PublishAgentctlEvent(ctx, events.AgentctlError, execution, err.Error())
 		return
 	}
+	// Comparison configuration must arrive before readiness exposes workspace
+	// access or the cached poll mode starts fresh Git scans.
+	client, releaseClient = execution.AcquireAgentCtlClient()
+	if client != nil {
+		m.pushTaskBaseBranches(ctx, execution.TaskID, execution.ID, client)
+		m.pushTaskComparisonTargets(ctx, execution.TaskID, execution.ID, client)
+		releaseClient()
+	}
 	execution.MarkAgentctlReady()
 
 	elapsed := time.Since(opStart)
@@ -595,17 +603,6 @@ func (m *Manager) waitForAgentctlReady(execution *AgentExecution) {
 	// default slow poll mode even though the frontend already sent focus,
 	// and git state updates take up to 30s to reach the UI.
 	m.flushCachedPollMode(execution.SessionID)
-	// Seed the workspace's per-repo base-branch map. LaunchRequest metadata
-	// only carries it on the full launch path, so workspaces created by an
-	// agent starting on an already-prepared workspace, or by lazy recovery
-	// after a restart, would otherwise have none — and their branch diff stat
-	// would silently fall back to an integration branch.
-	client, releaseClient = execution.AcquireAgentCtlClient()
-	if client != nil {
-		m.pushTaskBaseBranches(ctx, execution.TaskID, execution.ID, client)
-		m.pushTaskComparisonTargets(ctx, execution.TaskID, execution.ID, client)
-		releaseClient()
-	}
 	// Use the timeout context for event publishing instead of a fresh Background context
 	m.eventPublisher.PublishAgentctlEvent(ctx, events.AgentctlReady, execution, "")
 }

@@ -168,6 +168,9 @@ func TestHostRuntimeUpdaterResolvesStableVersionCatalogue(t *testing.T) {
 
 func TestHostRuntimeUpdaterInvalidatesOnlyManagedNPMExecutionTree(t *testing.T) {
 	cacheRoot := t.TempDir()
+	if resolved, err := filepath.EvalSymlinks(cacheRoot); err == nil {
+		cacheRoot = resolved
+	}
 	spec := agents.ManagedNPMRuntimeSpec{Package: "opencode-ai"}
 	target := filepath.Join(cacheRoot, "_npx", spec.ExecutionCacheKey())
 	other := filepath.Join(cacheRoot, "_npx", "keep-me")

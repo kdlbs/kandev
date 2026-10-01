@@ -10,6 +10,8 @@ const { CANONICAL_CENTER_GROUP_ID, RIGHT_TOP_GROUP_ID, RIGHT_BOTTOM_GROUP_ID } =
 vi.mock("@/lib/local-storage", () => ({
   getEnvLayout: vi.fn(() => null),
   getManualRightWidth: vi.fn(() => null),
+  getSessionStorage: vi.fn((_key: string, fallback: string[]) => fallback),
+  setSessionStorage: vi.fn(),
 }));
 
 vi.mock("./dockview-layout-builders", () => ({

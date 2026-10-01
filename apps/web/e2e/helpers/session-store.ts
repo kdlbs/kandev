@@ -92,18 +92,19 @@ export async function waitForSessionAgentctlReady(
 export async function waitForActiveSessionForegroundActivity(
   page: Page,
   activity: "generating" | "background" | null,
+  targetSessionId?: string,
 ): Promise<void> {
   await page.waitForFunction(
-    (expected) => {
+    ({ expected, sessionId: targetSessionId }) => {
       const store = (window as E2EStoreWindow).__KANDEV_E2E_STORE__;
       if (!store) return false;
       const state = store.getState();
-      const sessionId = state.tasks.activeSessionId;
+      const sessionId = targetSessionId ?? state.tasks.activeSessionId;
       if (!sessionId) return false;
       const current = state.taskSessions.items[sessionId]?.foreground_activity;
       return expected === null ? current == null : current === expected;
     },
-    activity,
+    { expected: activity, sessionId: targetSessionId },
     { timeout: 20_000 },
   );
 }
@@ -134,25 +135,29 @@ export async function waitForActiveSessionSupportsSteering(
 export async function seedActiveSessionForegroundActivity(
   page: Page,
   activity: "generating" | "background" | null,
+  targetSessionId?: string,
 ): Promise<void> {
-  await page.evaluate((nextActivity) => {
-    const store = (window as E2EStoreWindow).__KANDEV_E2E_STORE__;
-    if (!store) {
-      throw new Error("E2E store bridge missing — is __KANDEV_E2E_EXPOSE_STORE__ set?");
-    }
-    store.setState((state) => {
-      const sessionId = store.getState().tasks.activeSessionId;
-      if (!sessionId) throw new Error("No active session is available in the E2E store");
-      const session = state.taskSessions.items[sessionId];
-      if (!session) throw new Error(`Session ${sessionId} not found in store`);
-      // Intentionally skip the activity epoch: this stale projection predates
-      // the current backend process and its reconnect events.
-      state.taskSessions.items[sessionId] = {
-        ...session,
-        foreground_activity: nextActivity,
-      };
-    });
-  }, activity);
+  await page.evaluate(
+    ({ nextActivity, targetSessionId }) => {
+      const store = (window as E2EStoreWindow).__KANDEV_E2E_STORE__;
+      if (!store) {
+        throw new Error("E2E store bridge missing — is __KANDEV_E2E_EXPOSE_STORE__ set?");
+      }
+      store.setState((state) => {
+        const sessionId = targetSessionId ?? store.getState().tasks.activeSessionId;
+        if (!sessionId) throw new Error("No active session is available in the E2E store");
+        const session = state.taskSessions.items[sessionId];
+        if (!session) throw new Error(`Session ${sessionId} not found in store`);
+        // Intentionally skip the activity epoch: this stale projection predates
+        // the current backend process and its reconnect events.
+        state.taskSessions.items[sessionId] = {
+          ...session,
+          foreground_activity: nextActivity,
+        };
+      });
+    },
+    { nextActivity: activity, targetSessionId },
+  );
 }
 
 /** Wait for the backend-owned cancellation projection on the active session. */
