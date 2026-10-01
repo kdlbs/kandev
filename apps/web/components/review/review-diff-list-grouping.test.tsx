@@ -194,7 +194,7 @@ describe("ReviewDiffList — multi-repo grouping", () => {
   });
 });
 
-describe("ReviewDiffList — file status rendering", () => {
+describe("ReviewDiffList — Markdown preview rendering", () => {
   it("replaces a Markdown diff in place and preserves reviewed state when restored", () => {
     const markdownFile = {
       ...file("guide.md"),
@@ -227,7 +227,47 @@ describe("ReviewDiffList — file status rendering", () => {
     expect(screen.getByTestId("diff-stub").textContent).toBe("guide.md");
     expect(screen.getByRole("checkbox").getAttribute("data-state")).toBe("checked");
   });
+});
 
+describe("ReviewDiffList — Markdown preview state", () => {
+  it("preserves Markdown preview when the file row is temporarily removed", () => {
+    const markdownFile = {
+      ...file("guide.md"),
+      status: "added",
+      diff: "@@ -0,0 +1 @@\n+# Guide",
+    } as ReviewFile;
+    const refs = new Map([[markdownFile.path, createRef<HTMLDivElement>()]]);
+    const { rerender } = render(
+      withTooltips(
+        <ReviewDiffList
+          {...baseProps}
+          files={[markdownFile]}
+          selectedFile={markdownFile.path}
+          fileRefs={refs}
+        />,
+      ),
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Preview markdown" }));
+    expect(screen.getByTestId("review-markdown-diff-preview")).toBeTruthy();
+
+    rerender(withTooltips(<ReviewDiffList {...baseProps} files={[]} fileRefs={new Map()} />));
+    rerender(
+      withTooltips(
+        <ReviewDiffList
+          {...baseProps}
+          files={[markdownFile]}
+          selectedFile={markdownFile.path}
+          fileRefs={refs}
+        />,
+      ),
+    );
+
+    expect(screen.getByTestId("review-markdown-diff-preview")).toBeTruthy();
+  });
+});
+
+describe("ReviewDiffList — file status rendering", () => {
   it("shows moved status in the mobile header and honest copy for a patchless rename", () => {
     mocks.isMobile = true;
     const movedFile = {

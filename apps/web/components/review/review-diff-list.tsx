@@ -23,6 +23,7 @@ import { ReviewDiffGroup } from "./review-diff-group";
 import { ReviewDiffHeader, type ReviewExternalLinkContext } from "./review-diff-header";
 import { extractReviewMarkdownPreview } from "./review-markdown-diff-preview";
 import { ReviewMarkdownDiffPreviewContent } from "./review-markdown-diff-preview-content";
+import { useReviewMarkdownPreviewState } from "./use-review-markdown-preview-state";
 import { groupByRepositoryName } from "@/lib/group-by-repo";
 import { useActiveTaskPR } from "@/hooks/domains/github/use-task-pr";
 import { useTranslation } from "react-i18next";
@@ -63,6 +64,7 @@ export const ReviewDiffList = memo(function ReviewDiffList({
   fileRefs,
 }: ReviewDiffListProps) {
   const scrollContainerRef = useRef<HTMLDivElement | null>(null);
+  const { markdownPreviewFiles, toggleMarkdownPreview } = useReviewMarkdownPreviewState();
   // Opening the dialog and restoring a selected file can move the scroll
   // container before the selected-file effect runs. Start suppressed so those
   // initial layout movements can never count as user review activity; genuine
@@ -128,6 +130,8 @@ export const ReviewDiffList = memo(function ReviewDiffList({
                 enableWalkthroughAnnotations={enableWalkthroughAnnotations}
                 hasStickyRepoHeader={showRepoHeaders}
                 isSelected={selectedFile === key}
+                markdownPreview={markdownPreviewFiles.has(key)}
+                onToggleMarkdownPreview={() => toggleMarkdownPreview(key)}
                 forceLoad={
                   selectedIndex >= 0 &&
                   files.findIndex((candidate) => reviewFileKey(candidate) === key) <= selectedIndex
@@ -169,6 +173,8 @@ type FileDiffSectionProps = {
   enableWalkthroughAnnotations: boolean;
   hasStickyRepoHeader: boolean;
   isSelected?: boolean;
+  markdownPreview: boolean;
+  onToggleMarkdownPreview: () => void;
   forceLoad?: boolean;
   onToggleReviewed: (key: string, reviewed: boolean) => void;
   onDiscard: (key: string) => void;
@@ -460,21 +466,20 @@ function renderDiffContent(opts: {
 
 function useMarkdownPreview(
   file: ReviewFile,
+  markdownPreview: boolean,
+  onTogglePreviewMarkdown: () => void,
   onPreviewMarkdown?: FileDiffSectionProps["onPreviewMarkdown"],
 ) {
-  const [markdownPreview, setMarkdownPreview] = useState(false);
   const markdownPreviewContent = useMemo(() => extractReviewMarkdownPreview(file), [file]);
-  const handleToggleMarkdownPreview = useCallback(() => setMarkdownPreview((v) => !v), []);
-  useEffect(() => {
-    if (markdownPreviewContent.fragments.length === 0) setMarkdownPreview(false);
-  }, [markdownPreviewContent.fragments.length]);
+  const showMarkdownPreview =
+    !onPreviewMarkdown && markdownPreview && markdownPreviewContent.fragments.length > 0;
   const onToggleMarkdownPreview = getMarkdownPreviewToggle({
     file,
     fragments: markdownPreviewContent.fragments,
     onPreviewMarkdown,
-    onTogglePreview: handleToggleMarkdownPreview,
+    onTogglePreview: onTogglePreviewMarkdown,
   });
-  return { markdownPreview, markdownPreviewContent, onToggleMarkdownPreview };
+  return { showMarkdownPreview, markdownPreviewContent, onToggleMarkdownPreview };
 }
 
 function useFileDiffDisplayControls(wordWrap: boolean) {
@@ -571,6 +576,8 @@ function FileDiffSection({
   enableWalkthroughAnnotations,
   hasStickyRepoHeader,
   isSelected,
+  markdownPreview,
+  onToggleMarkdownPreview: toggleMarkdownPreview,
   forceLoad,
   onToggleReviewed,
   onDiscard,
@@ -588,10 +595,8 @@ function FileDiffSection({
     controls.setCollapsed,
     suppressAutoMark,
   );
-  const { markdownPreview, markdownPreviewContent, onToggleMarkdownPreview } = useMarkdownPreview(
-    file,
-    onPreviewMarkdown,
-  );
+  const { showMarkdownPreview, markdownPreviewContent, onToggleMarkdownPreview } =
+    useMarkdownPreview(file, markdownPreview, toggleMarkdownPreview, onPreviewMarkdown);
   const { isVisible, sentinelRef } = useLazyVisible(scrollContainer);
   // Force load when visible via intersection observer, or forceLoad is true
   const shouldRenderContent = isVisible || !!forceLoad;
@@ -635,7 +640,7 @@ function FileDiffSection({
         onDiscard={handleDiscard}
         onCommentFile={openCommentFile}
         onOpenFile={onOpenFile}
-        markdownPreview={!onPreviewMarkdown && markdownPreview}
+        markdownPreview={showMarkdownPreview}
         onToggleMarkdownPreview={onToggleMarkdownPreview}
         onToggleCollapse={controls.handleToggleCollapse}
         onToggleExpandUnchanged={controls.handleToggleExpandUnchanged}
@@ -645,7 +650,7 @@ function FileDiffSection({
       <div ref={sentinelRef} />
       {!controls.collapsed && <ReviewFileComments {...fileCommentsProps} />}
       {!controls.collapsed &&
-        (markdownPreview ? (
+        (showMarkdownPreview ? (
           <ReviewMarkdownDiffPreviewContent preview={markdownPreviewContent} />
         ) : (
           renderDiffContent({
