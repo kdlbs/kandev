@@ -24,17 +24,14 @@ const expectLocaleActivation = async (
   requested: string,
   canonical: string,
   displayLanguage: string,
-  hasRealCatalog = true,
 ) => {
   const result = await activateLocale(requested);
   expect(result).toBe(canonical);
   expect(i18n.language).toBe(canonical);
   expect(document.documentElement.lang).toBe(canonical);
   expect(readLocaleCookie()).toBe(canonical);
-  if (hasRealCatalog) {
-    expect(i18n.hasResourceBundle(canonical, "settings")).toBe(true);
-    expect(i18n.getResource(canonical, "settings", "displayLanguage")).toBe(displayLanguage);
-  }
+  expect(i18n.hasResourceBundle(canonical, "settings")).toBe(true);
+  expect(i18n.getResource(canonical, "settings", "displayLanguage")).toBe(displayLanguage);
   expect(i18n.t(DISPLAY_LANGUAGE_KEY)).toBe(displayLanguage);
 };
 
@@ -182,16 +179,16 @@ describe("activateLocale", () => {
   });
 
   it.each([
-    ["Simplified Chinese", ZH_CN_LOCALE, ZH_CN_LOCALE, "显示语言", true],
-    ["European Portuguese", "pt-PT", PT_PT_LOCALE, "Idioma de apresentação", true],
-    ["Traditional Chinese (Taiwan)", ZH_TW_LOCALE, ZH_TW_LOCALE, "顯示語言", true],
-    ["Traditional Chinese (Hong Kong)", "zh-HK", ZH_HK_LOCALE, "顯示語言", true],
-    ["Japanese", "ja", JA_LOCALE, "表示言語", true],
-    ["Korean", KO_LOCALE, KO_LOCALE, "Display language", false],
+    ["Simplified Chinese", ZH_CN_LOCALE, ZH_CN_LOCALE, "显示语言"],
+    ["European Portuguese", "pt-PT", PT_PT_LOCALE, "Idioma de apresentação"],
+    ["Traditional Chinese (Taiwan)", ZH_TW_LOCALE, ZH_TW_LOCALE, "顯示語言"],
+    ["Traditional Chinese (Hong Kong)", "zh-HK", ZH_HK_LOCALE, "顯示語言"],
+    ["Japanese", "ja", JA_LOCALE, "表示言語"],
+    ["Korean", "ko-KR", KO_LOCALE, "표시 언어"],
   ])(
-    "activates %s and uses its available catalog",
-    async (_name, requested, canonical, displayLanguage, hasRealCatalog) => {
-      await expectLocaleActivation(requested, canonical, displayLanguage, hasRealCatalog);
+    "activates %s and resolves its real catalog",
+    async (_name, requested, canonical, displayLanguage) => {
+      await expectLocaleActivation(requested, canonical, displayLanguage);
     },
   );
 
