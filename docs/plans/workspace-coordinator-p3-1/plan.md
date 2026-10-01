@@ -66,7 +66,7 @@ Critical path: 01, 02, 03, 04. Work orders 05 and 06 run in parallel with them. 
 | [task-02](task-02-outcomes-overrides.md) | 3.1-2 | M | 01 | Outcome rows, override observations, five measures |
 | [task-03](task-03-replay-harness.md) | 3.1-3 | L | 01, 02 | Replay library, guard, judge, planted suite in CI |
 | [task-04](task-04-shadow-dream.md) | 3.1-4 | L | 01, 02, 03, 05 | Shadow dream, report, ratings, health, Learning section |
-| [task-05](task-05-pause.md) | 3.1-5 | S | phase 3 merged | Pause state, route, precondition, controls |
+| [task-05](task-05-pause.md) | 3.1-5 | M | phase 3 merged | Pause state, route, precondition, controls |
 | [task-06](task-06-watch-projects.md) | 3.1-6 | M | phase 3 merged | Projects scope, filter, enforcement, settings and setup UI |
 
 Sizes: S under 1 day, M 1 to 3 days, L 3 to 7 days. Every acceptance criterion of the new and amended requirement documents is owned by exactly one work order ([Traceability](#traceability)).

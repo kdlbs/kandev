@@ -32,6 +32,7 @@ const (
 	decisionLogField     = "decision_log"
 	classField           = "class"
 	unavailableNote      = "automatic approval unavailable; a manager will decide"
+	pausedNote           = "Paused; a manager will decide"
 	limitReachedNote     = "automatic limit reached; a manager will decide"
 	raiserLoweredReason  = "raising manager no longer a manager"
 	undoLoweredReason    = "undo of an automatic create"

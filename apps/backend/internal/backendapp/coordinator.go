@@ -37,6 +37,7 @@ func initCoordinatorWiring(
 	phase2 bool,
 	phase3 bool,
 	log *logger.Logger,
+	extra ...coordinator.ServiceOption,
 ) (*coordinator.Service, error) {
 	store, storeErr := coordinator.NewStore(dbPool.Writer(), dbPool.Reader())
 	if recordErr := recordRequiredStore(ctx, storeTracker, "coordinator", storeErr); recordErr != nil {
@@ -47,8 +48,9 @@ func initCoordinatorWiring(
 	}
 
 	validator := coordinator.NewValidator(agentProfiles, taskSvc)
-	svc := coordinator.NewService(store, validator, taskSvc, log, coordinator.WithPhase2(phase2),
-		coordinator.WithPhase3(phase3Effective(enabled, phase2, phase3)))
+	opts := append([]coordinator.ServiceOption{coordinator.WithPhase2(phase2),
+		coordinator.WithPhase3(phase3Effective(enabled, phase2, phase3))}, extra...)
+	svc := coordinator.NewService(store, validator, taskSvc, log, opts...)
 	svc.SetProposalDeps(taskSvc, taskSvc, taskSvc, workflowSvc)
 	svc.SetUndoDeps(&coordinatorUndoSeam{tasks: taskSvc, steps: workflowSvc})
 	return svc, nil
@@ -59,6 +61,12 @@ func initCoordinatorWiring(
 // phase 3 are all on.
 func phase3Effective(coordinatorOn, phase2, phase3 bool) bool {
 	return coordinatorOn && phase2 && phase3
+}
+
+// phase31Effective is the single source for the phase 3.1 gate: it needs the
+// phase 3 surface as well.
+func phase31Effective(coordinatorOn, phase2, phase3, phase31 bool) bool {
+	return phase3Effective(coordinatorOn, phase2, phase3) && phase31
 }
 
 // coordinatorStandingInstructionsReader closes over svc to build the
@@ -148,8 +156,10 @@ func wireCoordinatorPhase3(p routeParams, svc *coordinator.Service) []func(conte
 		coordinatorWakeSources = &coordinatorWakeReader{tasks: p.taskSvc}
 	}
 	wireCoordinatorDelivery(svc, p.taskSvc, p.orchestratorSvc)
+	svc.LoadKnownPaused(p.ctx)
 	if p.addCleanup != nil {
 		p.addCleanup(func() error {
+			svc.StopPause()
 			svc.StopWakeRecorder()
 			svc.StopWakeBackstop()
 			svc.StopDelivery()
@@ -158,6 +168,7 @@ func wireCoordinatorPhase3(p routeParams, svc *coordinator.Service) []func(conte
 	}
 	if p.authSvc != nil {
 		svc.SetAutomaticIdentities(p.authSvc)
+		svc.SetPauserNames(p.authSvc)
 	}
 	wireCoordinatorSpend(p.services.UsageWriter, svc, p.taskSvc, p.orchestratorSvc)
 	wireCoordinatorContainment(svc, containmentDepsFrom(p), p.orchestratorSvc, p.log)

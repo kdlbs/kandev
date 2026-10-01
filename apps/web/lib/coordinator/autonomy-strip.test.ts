@@ -117,3 +117,56 @@ describe("spendView", () => {
     expect(spendView({ ...base, window_subcents: null })).toMatchObject({ kind: "unmeasurable" });
   });
 });
+
+describe("stripState paused", () => {
+  const base: AutonomyRead = {
+    server_time: "2026-09-30T10:00:00Z",
+    autonomy_enabled: true,
+    admission: { ok: false, reason: "cooldown", detail: "", until: "2026-09-30T10:05:00Z" },
+    pending_wakes: 3,
+    oldest_pending_at: null,
+    last_woke_at: null,
+    last_turn: null,
+    containment: { conditions: [] },
+    spend: {
+      measurable: true,
+      degraded: false,
+      window_subcents: 0,
+      mean_daily_subcents_7d: 0,
+      mean_known: true,
+      ceiling_subcents: null,
+    },
+  };
+
+  it("takes precedence over Active, a transient text and Held", () => {
+    const paused = {
+      paused: true,
+      paused_at: "2026-09-30T09:12:00Z",
+      paused_by: { id: "u", name: "Ada" },
+    };
+    expect(stripState({ ...base, ...paused })).toEqual({
+      kind: "paused",
+      at: "2026-09-30T09:12:00Z",
+      by: "Ada",
+    });
+    expect(stripState({ ...base, ...paused, admission: { ok: true, detail: "" } }).kind).toBe(
+      "paused",
+    );
+    expect(
+      stripState({
+        ...base,
+        ...paused,
+        admission: { ok: false, reason: "ceiling_reached", detail: "" },
+      }).kind,
+    ).toBe("paused");
+  });
+
+  it("is not shown with autonomy off and tolerates an unreadable manager", () => {
+    expect(stripState({ ...base, autonomy_enabled: false, paused: true }).kind).toBe("off");
+    expect(stripState({ ...base, paused: true, paused_at: null, paused_by: null })).toEqual({
+      kind: "paused",
+      at: null,
+      by: null,
+    });
+  });
+});

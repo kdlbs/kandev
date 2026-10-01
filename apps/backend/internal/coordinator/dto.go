@@ -60,6 +60,7 @@ type CoordinatorDTO struct {
 
 	*CoordinatorPhase2
 	*CoordinatorPhase3
+	*PauseView
 }
 
 // CoordinatorPhase3 carries the phase 3 read fields; nil (and so absent from

@@ -74,3 +74,27 @@ func (h *Handlers) setupResponse(ctx context.Context, created *Coordinator) *Coo
 	}
 	return dto
 }
+
+// httpPutPause backs PUT /api/v1/workspaces/:id/coordinators/:cid/pause. The
+// response is the coordinator DTO carrying the paused state.
+func (h *Handlers) httpPutPause(c *gin.Context) {
+	ctx := c.Request.Context()
+	body, err := io.ReadAll(http.MaxBytesReader(c.Writer, c.Request.Body, maxSettingsBodyBytes))
+	if err != nil {
+		h.respondError(c, &FieldError{Field: "paused", Message: "request body is unreadable or too large"})
+		return
+	}
+	coord, err := h.service.SetPaused(ctx, c.Param("id"), c.Param("cid"), body)
+	if err != nil {
+		h.respondError(c, err)
+		return
+	}
+	dto, err := h.coordinatorDTO(ctx, coord)
+	if err != nil {
+		h.logger.Warn("pause committed but the coordinator read failed", zap.String("coordinator_id", coord.ID), zap.Error(err))
+		dto = NewCoordinatorDTO(coord).WithAutonomy(coord)
+		view := h.service.pauseView(ctx, coord)
+		dto.PauseView = &view
+	}
+	c.JSON(http.StatusOK, dto)
+}

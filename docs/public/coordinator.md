@@ -24,10 +24,23 @@ The strip sits above the counts on **Needs you** and **Queue**. It shows the sta
 
 - **Active**: the coordinator will wake for the next event. A short note explains a pause, such as waiting for the conversation or the gap between turns.
 - **Held**: something is stopping it. The reason is named in brackets, for example "Held (Cost ceiling reached)".
+- **Paused**: a manager paused the coordinator. The strip names who paused it and when, and takes precedence over Active and Held.
 - **Off**: autonomy is turned off.
 - **State unavailable**: Kandev could not read the state. Select **Try again**. Unavailable never means healthy.
 
 If a turn was asked to stop at the ceiling and is still running after five minutes, the strip warns that the stop is not confirmed and offers **Stop**.
+
+## Pause a coordinator
+
+Pause stops a coordinator from acting on its own without touching its settings. Managers see **Pause** on the strip and in the **Autonomy** section, and **Resume** while it is paused. The change takes effect at once and needs no save.
+
+- A turn the coordinator is running on its own is stopped, and its events return to the queue.
+- No new unattended turn starts and no proposal is approved automatically. Such a proposal waits for a manager with the note "Paused; a manager will decide".
+- Pending events are kept. After **Resume** they are delivered through the usual rules, including the five-minute gap between turns.
+- Your own messages to the coordinator still start a turn.
+- Turning autonomy off is different: it discards the queue. Pause keeps it.
+
+Pausing works while autonomy is off, from the **Autonomy** section. If the phase 3.1 features are turned off on a paused coordinator, it stays paused and shows a read-only **Paused** badge until they are back on.
 
 ## Clear a hold
 

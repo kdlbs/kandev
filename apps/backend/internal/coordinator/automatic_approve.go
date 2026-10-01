@@ -103,6 +103,12 @@ func (s *Service) TryAutomaticApproval(ctx context.Context, proposal *Proposal) 
 	if err != nil || setting.Value != SettingAutomatic {
 		return nil, nil
 	}
+	if paused, gateErr := s.gate.Active(ctx, proposal.CoordinatorID); paused {
+		if gateErr != nil {
+			return s.pendingResult(proposal, unavailableNote), nil
+		}
+		return s.pendingResult(proposal, pausedNote), nil
+	}
 	raiser := setting.ChangedBy
 	raiserCtx, verdict, err := s.raiserContext(ctx, proposal.WorkspaceID, raiser)
 	if err != nil {

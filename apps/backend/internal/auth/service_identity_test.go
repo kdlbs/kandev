@@ -118,3 +118,21 @@ func TestResolveUserIdentitySeparatesMissingFromUndecidable(t *testing.T) {
 		t.Fatalf("empty id: ok=%v err=%v, want ErrIdentityUnavailable", ok, err)
 	}
 }
+
+func TestUserDisplayName(t *testing.T) {
+	f := newServiceFixture(t, false)
+	setupEnabled(t, f)
+	member, err := f.svc.AdminCreateUser(context.Background(), "ada@x.dev", "memberpass123", "Ada", usermodels.RoleMember)
+	if err != nil {
+		t.Fatalf("create member: %v", err)
+	}
+	if name, ok, err := f.svc.UserDisplayName(context.Background(), member.ID); err != nil || !ok || name != "Ada" {
+		t.Fatalf("member: name=%q ok=%v err=%v", name, ok, err)
+	}
+	if _, ok, err := f.svc.UserDisplayName(context.Background(), "no-such-user"); ok || err != nil {
+		t.Fatalf("missing user: ok=%v err=%v, want false and nil", ok, err)
+	}
+	if _, ok, err := f.svc.UserDisplayName(context.Background(), ""); ok || err != nil {
+		t.Fatalf("empty id: ok=%v err=%v", ok, err)
+	}
+}

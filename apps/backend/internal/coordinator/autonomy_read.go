@@ -112,6 +112,7 @@ type AutonomyReadDTO struct {
 	LastTurn        *TurnReadDTO           `json:"last_turn"`
 	Containment     AutonomyContainmentDTO `json:"containment"`
 	Spend           AutonomySpendDTO       `json:"spend"`
+	PauseView
 }
 
 func timeStr(t time.Time) string { return t.UTC().Format(autonomyReadTimeFmt) }
@@ -152,7 +153,7 @@ func (s *Service) AutonomyRead(ctx context.Context, workspaceID, coordinatorID s
 		return nil, readFailed("coordinator", err)
 	}
 	now := s.store.now().UTC()
-	out := &AutonomyReadDTO{ServerTime: timeStr(now), AutonomyEnabled: coord.AutonomyEnabled}
+	out := &AutonomyReadDTO{ServerTime: timeStr(now), AutonomyEnabled: coord.AutonomyEnabled, PauseView: s.pauseView(ctx, coord)}
 	if coord.AutonomyEnabled {
 		if err := s.fillAdmission(ctx, coord, out); err != nil {
 			return nil, err

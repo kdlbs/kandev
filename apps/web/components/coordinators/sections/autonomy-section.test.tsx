@@ -35,6 +35,10 @@ vi.mock("@/lib/api/domains/coordinator-autonomy-api", () => ({
   getAutonomy: (...a: unknown[]) => getAutonomy(...a),
 }));
 
+vi.mock("@/hooks/domains/settings/use-coordinator-phase31-effective", () => ({
+  useCoordinatorPhase31Effective: () => false,
+}));
+
 import { AutonomySection } from "./autonomy-section";
 
 const NOW = "2026-09-30T10:00:00Z";

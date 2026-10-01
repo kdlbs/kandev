@@ -9,6 +9,7 @@ import (
 
 	"github.com/kandev/kandev/internal/authz"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/coordinator/pause"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
 	taskmodels "github.com/kandev/kandev/internal/task/models"
@@ -175,6 +176,19 @@ type Service struct {
 	// containment evaluates the unattended-turn containment conditions; nil
 	// until phase 3 wiring sets it.
 	containment *ContainmentChecker
+
+	// phase31 is true when phase 3.1 is effective: the pause route and controls
+	// exist. The pause gate does not read it.
+	phase31 bool
+	// gate is the pause precondition; knownPaused backs its flag-off carve-out.
+	gate        pause.Gate
+	knownPaused *pause.KnownSet
+	pauseMu     sync.Mutex
+	pauserNames PauserNames
+	pauseRun    pauseRunner
+	// dreamStop is the dream canceller registered by the dream scheduler; nil
+	// is a no-op.
+	dreamStop pause.DreamStop
 }
 
 // ServiceOption configures optional Service behavior.
@@ -236,6 +250,8 @@ func NewService(store *Store, validator *Validator, authorizer WorkspaceAuthoriz
 	s.registerKinds()
 	s.executeTimeout = executeDeadline
 	s.backstop = newWakeBackstop(s)
+	s.knownPaused = pause.NewKnownSet()
+	s.gate = pause.NewGate(store.IsPaused, func() bool { return s.phase31 }, s.knownPaused, s.logger.Zap())
 	for _, opt := range opts {
 		opt(s)
 	}

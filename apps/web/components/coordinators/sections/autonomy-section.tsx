@@ -13,6 +13,8 @@ import {
 import type { AutonomyRead } from "@/lib/api/domains/coordinator-autonomy-api";
 import { formatSubcentsUsd } from "@/lib/coordinator/autonomy";
 import { AutonomySpend } from "@/components/coordinators/autonomy/autonomy-spend";
+import { PauseControl, PausedFlagOffNote } from "@/components/coordinators/autonomy/pause-control";
+import { formatDateTime } from "@/lib/i18n/formats";
 import { AutonomyContainment } from "./autonomy-containment";
 
 const HINT_KEY: Record<Exclude<CeilingHint, null>, string> = {
@@ -46,6 +48,46 @@ function SpendLines({ value }: { value: AutonomyRead }) {
       <p className="text-muted-foreground" data-testid="autonomy-spend-last">
         {last}
       </p>
+    </div>
+  );
+}
+
+function pausedSinceText(value: AutonomyRead, t: ReturnType<typeof useTranslation>["t"]): string {
+  const time = value.paused_at ? formatDateTime(value.paused_at) : null;
+  const name = value.paused_by?.name;
+  if (time && name) return t("coordinator:autonomyPausedSinceBy", { time, name });
+  if (time) return t("coordinator:autonomyPausedSince", { time });
+  return t("coordinator:autonomyStatePaused");
+}
+
+type PauseBlockProps = {
+  workspaceId: string;
+  coordinatorId: string;
+  canManage: boolean;
+  autonomy: ReturnType<typeof useAutonomy>;
+};
+
+function PauseBlock({ workspaceId, coordinatorId, canManage, autonomy }: PauseBlockProps) {
+  const { t } = useTranslation();
+  const value = autonomy.value;
+  if (!value) return null;
+  const paused = value.paused === true;
+  return (
+    <div className="space-y-2" data-testid="autonomy-pause-block">
+      <div className="flex flex-wrap items-center justify-between gap-3 text-sm">
+        <span className="font-medium" data-testid="autonomy-pause-state" data-paused={paused}>
+          {paused ? pausedSinceText(value, t) : t("coordinator:autonomyNotPaused")}
+        </span>
+        <PauseControl
+          workspaceId={workspaceId}
+          coordinatorId={coordinatorId}
+          autonomy={autonomy}
+          canManage={canManage}
+          testIdPrefix="autonomy-section"
+        />
+      </div>
+      <PausedFlagOffNote paused={paused} />
+      <p className="text-xs text-muted-foreground">{t("coordinator:autonomyPauseKeepsQueue")}</p>
     </div>
   );
 }
@@ -90,6 +132,12 @@ export function AutonomySection({ workspaceId, coordinatorId, canManage }: Props
         </label>
         <p className="text-xs text-muted-foreground">{t("coordinator:autonomyToggleHelp")}</p>
       </div>
+      <PauseBlock
+        workspaceId={workspaceId}
+        coordinatorId={coordinatorId}
+        canManage={canManage}
+        autonomy={autonomy}
+      />
       <div className="space-y-2">
         <label htmlFor="autonomy-ceiling" className="text-sm font-medium">
           {t("coordinator:autonomyCeilingLabel")}

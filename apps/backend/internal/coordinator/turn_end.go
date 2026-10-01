@@ -31,11 +31,14 @@ func (s *Service) onTurnCompleted(ctx context.Context, event *bus.Event) {
 	}
 }
 
-// boundTurnOutcome derives a bound turn's outcome from the ceiling stop marker
-// and the session's state; ok is false when the state cannot be read.
+// boundTurnOutcome derives a bound turn's outcome from the ceiling stop marker,
+// the pause cancel intent and the session's state; ok is false when the state cannot be read.
 func (s *Service) boundTurnOutcome(ctx context.Context, turn *unattendedTurn) (string, bool) {
 	if turn.StopRequestedAt != nil {
 		return outcomeStopped, true
+	}
+	if turn.PauseCancelAt != nil {
+		return outcomeStoppedByPause, true
 	}
 	if s.convReader == nil {
 		return "", false

@@ -2,6 +2,7 @@ import { useCallback, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@kandev/ui/button";
 import { AutonomySpend } from "@/components/coordinators/autonomy/autonomy-spend";
+import { PauseControl, PausedFlagOffNote } from "@/components/coordinators/autonomy/pause-control";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import type { AutonomyInput } from "@/hooks/domains/coordinator/use-autonomy";
 import { isStopFailing } from "@/lib/coordinator/autonomy";
@@ -20,10 +21,20 @@ import { useNowTick } from "../use-now-tick";
 
 type TFn = ReturnType<typeof useTranslation>["t"];
 
+function pausedText(state: Extract<StripState, { kind: "paused" }>, t: TFn): string {
+  const time = state.at ? formatTime(Date.parse(state.at)) : null;
+  if (state.by && time) return t("coordinator:autonomyStatePausedByAt", { name: state.by, time });
+  if (state.by) return t("coordinator:autonomyStatePausedBy", { name: state.by });
+  if (time) return t("coordinator:autonomyStatePausedAt", { time });
+  return t("coordinator:autonomyStatePaused");
+}
+
 function stateText(state: StripState, t: TFn): { text: string; tone: string } {
   switch (state.kind) {
     case "off":
       return { text: t("coordinator:autonomyStateOff"), tone: "off" };
+    case "paused":
+      return { text: pausedText(state, t), tone: "paused" };
     case "active":
       return { text: t("coordinator:autonomyStateActive"), tone: "active" };
     case "busy":
@@ -133,6 +144,8 @@ function StripUnavailable({ retry }: { retry: () => void }) {
 export type AutonomyStripProps = {
   autonomy: AutonomyInput;
   canManage: boolean;
+  workspaceId?: string;
+  coordinatorId?: string;
 };
 
 /**
@@ -141,8 +154,14 @@ export type AutonomyStripProps = {
  * confirmed. Not rendered before the first read settles; an error replaces
  * it with one retry line, whatever stale value is held.
  */
-export function AutonomyStrip({ autonomy, canManage }: AutonomyStripProps) {
+export function AutonomyStrip({
+  autonomy,
+  canManage,
+  workspaceId,
+  coordinatorId,
+}: AutonomyStripProps) {
   const { t } = useTranslation();
+  const { isMobile } = useResponsiveBreakpoint();
   const now = useNowTick();
   const { value, loadedAt, error } = autonomy;
   if (error) return <StripUnavailable retry={autonomy.retry} />;
@@ -153,6 +172,15 @@ export function AutonomyStrip({ autonomy, canManage }: AutonomyStripProps) {
   const showDetails = state.kind !== "off";
   const ageMs = lastWokeAgeMs(value, loadedAt, now);
   const stopTurn = isStopFailing(value) ? value.last_turn : null;
+  const control =
+    workspaceId && coordinatorId ? (
+      <PauseControl
+        workspaceId={workspaceId}
+        coordinatorId={coordinatorId}
+        autonomy={autonomy}
+        canManage={canManage}
+      />
+    ) : null;
   return (
     <div
       className="bg-background space-y-1 border-b px-4 py-2 text-sm"
@@ -191,7 +219,10 @@ export function AutonomyStrip({ autonomy, canManage }: AutonomyStripProps) {
             <AutonomySpend spend={value.spend} />
           </>
         )}
+        <PausedFlagOffNote paused={state.kind === "paused"} />
+        {!isMobile && control}
       </div>
+      {isMobile && control && <div data-testid="autonomy-strip-control-row">{control}</div>}
       {stopTurn && <StopWarning sessionId={stopTurn.session_id} canManage={canManage} />}
     </div>
   );

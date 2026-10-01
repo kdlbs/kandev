@@ -20,6 +20,8 @@ const (
 	outcomeSendFailed  = "send_failed"
 	outcomeInterrupted = "interrupted"
 
+	outcomeStoppedByPause = "stopped_by_pause"
+
 	wakeStatusDelivered  = "delivered"
 	wakeStatusSuperseded = "superseded"
 )
@@ -136,22 +138,23 @@ func (s *Store) startTurnTx(ctx context.Context, tx coordinatorExec, in turnStar
 	return &startedTurn{ID: turnID, WorkspaceID: workspaceID, Wakes: wakes}, nil
 }
 
-// readTurnStartGuard re-reads the coordinator under the wake lock: autonomy
-// must be on, the ceiling set and the conversation unchanged.
+// readTurnStartGuard re-reads the coordinator under the wake lock: it must not
+// be paused, autonomy must be on, the ceiling set and the conversation unchanged.
 func (s *Store) readTurnStartGuard(ctx context.Context, tx coordinatorExec, in turnStart) (workspaceID string, ceiling int64, err error) {
 	var autonomy int
 	var convTask sql.NullString
 	var ceil sql.NullInt64
+	var pausedAt sql.NullTime
 	err = tx.QueryRowContext(ctx, s.db.Rebind(`
-		SELECT workspace_id, autonomy_enabled, conversation_task_id, cost_ceiling_subcents FROM coordinators WHERE id = ?`),
-		in.CoordinatorID).Scan(&workspaceID, &autonomy, &convTask, &ceil)
+		SELECT workspace_id, autonomy_enabled, conversation_task_id, cost_ceiling_subcents, paused_at FROM coordinators WHERE id = ?`),
+		in.CoordinatorID).Scan(&workspaceID, &autonomy, &convTask, &ceil, &pausedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", 0, errTurnNotStarted
 	}
 	if err != nil {
 		return "", 0, fmt.Errorf("re-read coordinator for turn start: %w", err)
 	}
-	if autonomy != 1 || !ceil.Valid || !convTask.Valid || convTask.String != in.ConvTaskID {
+	if pausedAt.Valid || autonomy != 1 || !ceil.Valid || !convTask.Valid || convTask.String != in.ConvTaskID {
 		return "", 0, errTurnNotStarted
 	}
 	return workspaceID, ceil.Int64, nil
@@ -245,18 +248,24 @@ type unattendedTurn struct {
 	Outcome         string
 	StartedAt       time.Time
 	FinishedAt      *time.Time
+	// PauseRequestedAt marks that a pause found the row open; PauseCancelAt is
+	// the cancel intent written before CancelTurn. Neither is ever unset.
+	PauseRequestedAt *time.Time
+	PauseCancelAt    *time.Time
 }
 
 const unattendedTurnColumns = `id, coordinator_id, conversation_task_id, session_id, message_id, session_turn_id,
-	reserved_turn_id, stop_requested_at, outcome, started_at, finished_at`
+	reserved_turn_id, stop_requested_at, outcome, started_at, finished_at, pause_requested_at, pause_cancel_at`
 
 func scanUnattendedTurn(sc interface{ Scan(...any) error }) (*unattendedTurn, error) {
 	var t unattendedTurn
 	var msg, st, rt, outcome sql.NullString
-	var stop, fin sql.NullTime
-	if err := sc.Scan(&t.ID, &t.CoordinatorID, &t.ConvTaskID, &t.SessionID, &msg, &st, &rt, &stop, &outcome, &t.StartedAt, &fin); err != nil {
+	var stop, fin, pauseReq, pauseCancel sql.NullTime
+	if err := sc.Scan(&t.ID, &t.CoordinatorID, &t.ConvTaskID, &t.SessionID, &msg, &st, &rt, &stop, &outcome, &t.StartedAt, &fin,
+		&pauseReq, &pauseCancel); err != nil {
 		return nil, err
 	}
+	t.PauseRequestedAt, t.PauseCancelAt = utcPtr(pauseReq), utcPtr(pauseCancel)
 	t.MessageID, t.SessionTurnID, t.ReservedTurnID, t.Outcome = msg.String, st.String, rt.String, outcome.String
 	if stop.Valid {
 		v := stop.Time.UTC()
@@ -268,6 +277,14 @@ func scanUnattendedTurn(sc interface{ Scan(...any) error }) (*unattendedTurn, er
 	}
 	t.StartedAt = t.StartedAt.UTC()
 	return &t, nil
+}
+
+func utcPtr(n sql.NullTime) *time.Time {
+	if !n.Valid {
+		return nil
+	}
+	v := n.Time.UTC()
+	return &v
 }
 
 // getUnattendedTurn reads one turn row, nil when it is gone.
@@ -299,10 +316,8 @@ func (s *Store) settleUnsentTurn(ctx context.Context, id, outcome string) (bool,
 	if err != nil || !changed {
 		return false, err
 	}
-	if _, err := tx.ExecContext(ctx, tx.Rebind(`
-		UPDATE coordinator_wakes SET status = ?, turn_id = NULL, updated_at = ? WHERE turn_id = ?`),
-		wakeStatusPending, now, id); err != nil {
-		return false, fmt.Errorf("return wakes to pending: %w", err)
+	if err := returnWakesToPending(ctx, tx, tx.Rebind, id, now); err != nil {
+		return false, err
 	}
 	if err := tx.Commit(); err != nil {
 		return false, fmt.Errorf("commit unsent settle: %w", err)
@@ -325,11 +340,88 @@ func (s *Store) openTurnBySessionTurn(ctx context.Context, sessionTurnID string)
 }
 
 // settleOpenTurn settles an open row and reports whether this call changed it.
+// A stopped_by_pause settle also returns the row's wakes to pending in the same
+// transaction.
 func (s *Store) settleOpenTurn(ctx context.Context, id, outcome string, at time.Time) (bool, error) {
-	res, err := s.db.ExecContext(ctx, s.db.Rebind(`
+	tx, err := s.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return false, fmt.Errorf("begin settle unattended turn: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	res, err := tx.ExecContext(ctx, tx.Rebind(`
 		UPDATE coordinator_unattended_turns SET outcome = ?, finished_at = ?
 		WHERE id = ? AND outcome IS NULL`), outcome, at.UTC(), id)
-	return rowChanged(res, err, "settle unattended turn")
+	changed, err := rowChanged(res, err, "settle unattended turn")
+	if err != nil || !changed {
+		return false, err
+	}
+	if outcome == outcomeStoppedByPause {
+		if err := returnWakesToPending(ctx, tx, tx.Rebind, id, at.UTC()); err != nil {
+			return false, err
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return false, fmt.Errorf("commit settle unattended turn: %w", err)
+	}
+	return true, nil
+}
+
+// returnWakesToPending releases a turn's wakes back to the queue with their
+// kinds and created times unchanged.
+func returnWakesToPending(ctx context.Context, tx coordinatorExec, rebind func(string) string, turnID string, at time.Time) error {
+	if _, err := tx.ExecContext(ctx, rebind(`
+		UPDATE coordinator_wakes SET status = ?, turn_id = NULL, updated_at = ? WHERE turn_id = ?`),
+		wakeStatusPending, at, turnID); err != nil {
+		return fmt.Errorf("return wakes to pending: %w", err)
+	}
+	return nil
+}
+
+// markPauseRequested records that a pause found the row open; it settles nothing.
+func (s *Store) markPauseRequested(ctx context.Context, id string) (bool, error) {
+	res, err := s.db.ExecContext(ctx, s.db.Rebind(`
+		UPDATE coordinator_unattended_turns SET pause_requested_at = ?
+		WHERE id = ? AND outcome IS NULL AND pause_requested_at IS NULL`), s.now().UTC(), id)
+	return rowChanged(res, err, "mark pause requested")
+}
+
+// markPauseCancel writes the cancel intent before CancelTurn. It matches an
+// open row the ceiling has not marked and keeps the first timestamp, so a retry
+// never moves it and nothing ever unsets it.
+func (s *Store) markPauseCancel(ctx context.Context, id string) (bool, error) {
+	res, err := s.db.ExecContext(ctx, s.db.Rebind(`
+		UPDATE coordinator_unattended_turns SET pause_cancel_at = COALESCE(pause_cancel_at, ?)
+		WHERE id = ? AND outcome IS NULL AND stop_requested_at IS NULL`), s.now().UTC(), id)
+	return rowChanged(res, err, "mark pause cancel")
+}
+
+// settlePausedUnsentTurn settles an unbound, unreserved open row stopped_by_pause
+// and returns its wakes to pending, only while the coordinator is still paused.
+// One statement decides, so a binding, a reservation or a Resume that arrived
+// first makes it a no-op.
+func (s *Store) settlePausedUnsentTurn(ctx context.Context, id, coordinatorID string) (bool, error) {
+	tx, err := s.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return false, fmt.Errorf("begin paused unsent settle: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	now := s.now().UTC()
+	res, err := tx.ExecContext(ctx, tx.Rebind(`
+		UPDATE coordinator_unattended_turns SET outcome = ?, finished_at = ?
+		WHERE id = ? AND coordinator_id = ? AND outcome IS NULL AND session_turn_id IS NULL AND reserved_turn_id IS NULL
+		AND EXISTS (SELECT 1 FROM coordinators WHERE id = ? AND paused_at IS NOT NULL)`),
+		outcomeStoppedByPause, now, id, coordinatorID, coordinatorID)
+	changed, err := rowChanged(res, err, "settle paused unsent turn")
+	if err != nil || !changed {
+		return false, err
+	}
+	if err := returnWakesToPending(ctx, tx, tx.Rebind, id, now); err != nil {
+		return false, err
+	}
+	if err := tx.Commit(); err != nil {
+		return false, fmt.Errorf("commit paused unsent settle: %w", err)
+	}
+	return true, nil
 }
 
 // recentSettledTurns returns the bound rows settled at or after since.

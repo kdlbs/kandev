@@ -1,7 +1,7 @@
 ---
 id: "05-pause"
 title: "Pause"
-status: draft
+status: implemented
 wave: 2
 depends_on:
   - "phase 3 merged"
@@ -48,6 +48,9 @@ turn, and the Pause and Resume controls.
   in the dream tick.
 - The unattended-turn outcome `stopped_by_pause`, and the backstop's retry of
   `Stopper.Stop` for a paused coordinator.
+- The autonomy read gains `paused`, `paused_at`, `paused_by` (whatever the
+  flag), and Pause and Resume publish `coordinator.updated` with
+  `autonomy_changed: true`.
 - Web: the fourth state of the autonomy strip and the Autonomy section
   control, phone layout, copy in six locales.
 - Existing code changed: `coordinator_unattended_turns` gains nullable
@@ -77,6 +80,18 @@ turn, and the Pause and Resume controls.
   minutes, cancel on accepted binding), the in-memory known-paused set for the
   flag-off read-error carve-out, and the read-only "Paused" badge shown with the
   flag off, per the [pause design](../../specs/coordinator/system-design/pause.md).
+
+- Also in scope, from the pause design: the route's check order (404, 404, 403,
+  400) and its response before `Stopper.Stop` finishes; the service-owned
+  goroutine that runs `Stop` after a committed pause and the `OnAccepted` cancel;
+  the re-read of the paused state before each cancel write; `ErrCancelInFlight`
+  retry and per-row failure isolation; the atomic Resume guard in
+  `settlePausedUnsentTurn`; the paused note placement in `TryAutomaticApproval`;
+  the known-paused set refresh in the backstop pass; the strip absent with
+  autonomy off.
+- The dream half of `AC-COORDINATOR-PAUSE-002.2` is verified end to end by work
+  order 04, which creates the dream; this work order ships the `Stopper`'s
+  registration point for the dream canceller and tests it with a fake.
 
 ## Out of scope
 
@@ -113,3 +128,47 @@ Phone: [ Pause ] full-width button at the end of the strip's second line.
 - `make -C apps/backend test` for the touched packages, with `synctest` for any timer and no `time.Sleep`; store conformance on SQLite and PostgreSQL for each new table or column.
 - `cd apps && pnpm --filter @kandev/web` typecheck, lint and Vitest for the touched modules, `cd apps/web && pnpm run i18n:check`, and the Playwright spec of this work order (plan verification strategy) on desktop and `mobile-chrome`, with the `auth` project for reader cases.
 - `python3 scripts/list-docs.py validate` if a specification changes.
+
+## Implementation record
+
+### Changes
+
+- Backend: new `coordinator/pause/` (Gate, Stopper, DreamStop ports), `store_pause.go`,
+  `service_pause.go`, `pause_stop.go`; changes to the store, schema (`paused_at`,
+  `paused_by`, `pause_requested_at`, `pause_cancel_at`), turns, turn end, delivery,
+  wake backstop, automatic approval, DTO, autonomy read and routes
+  (`PUT .../coordinators/:cid/pause`). `auth.Service.UserDisplayName` resolves the
+  pausing manager's name.
+- Web: `PauseControl`, `usePauseControl`, the fourth strip state, the Autonomy
+  section block, the flag-off badge, the autonomy write-ordering token, copy in six
+  locales plus pseudo.
+- Tests: Go (Gate, Stopper, delivery, automatic approval, store, route, Postgres
+  conformance, env-gated), Vitest, and Playwright (`pause.spec.ts` on chromium,
+  `mobile-pause.spec.ts` on `mobile-chrome`).
+- Docs: `docs/public/coordinator.md` Pause section and a `coordinator-pause` entry
+  in `docs/public/coverage.json`.
+
+### Assumptions and coordination
+
+- Flag registration: `features.coordinatorPhase31` /
+  `KANDEV_FEATURES_COORDINATOR_PHASE31` was absent on the base, so this work order
+  registers it (off in every profile, effective only with coordinator, phase 2 and
+  phase 3). The e2e specs enable it through `backend.useEnv`. Work order 01 or any
+  earlier registration must be reconciled on merge into one registry entry.
+- Dream seam (coordination with work order 04): this work order builds only the
+  no-op dream-stop hook (`Service.SetDreamStop`, called by `Stopper.Stop`). Work order
+  04 owns dream-episode cleanup, the dream tables and links, the restart-cleanup
+  query, and the dream tick's `Gate.Active` call. It registers its canceller through
+  `SetDreamStop` and verifies the dream half of AC-COORDINATOR-PAUSE-002.2 end to end.
+- Spec review findings 28 and 29: deferred to work order 04.
+- e2e reader case (403 for a reader): covered by the Go route tests and the Vitest
+  reader test; the e2e fixtures have no reader principal for a coordinator workspace.
+
+### Commands run
+
+- `make fmt`; `make typecheck test lint`; `make lint-format`;
+  `cd apps/web && pnpm run i18n:check && pnpm run i18n:ratchet`
+- `go run ./cmd/sqlguard ./internal`; `python3 scripts/list-docs.py validate`;
+  `node scripts/validate-public-docs.mjs`
+- `cd apps/web && pnpm e2e:run --host -- e2e/tests/coordinator/pause.spec.ts` (3 passed);
+  `pnpm e2e:run --host --no-build -- --project=mobile-chrome e2e/tests/coordinator/mobile-pause.spec.ts` (1 passed)

@@ -8,6 +8,10 @@ vi.mock("@/lib/coordinator/stop-turn", () => ({
   stopSessionTurn: (...args: unknown[]) => stopSessionTurn(...args),
 }));
 
+vi.mock("@/hooks/domains/settings/use-coordinator-phase31-effective", () => ({
+  useCoordinatorPhase31Effective: () => false,
+}));
+
 import { AutonomyStrip } from "./autonomy-strip";
 
 const NOW = Date.parse("2026-09-30T10:00:00Z");

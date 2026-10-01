@@ -200,3 +200,18 @@ func TestWireCoordinatorSpend_MissingDependenciesFailClosed(t *testing.T) {
 		t.Fatalf("spend with no ledger read as measurable: %+v", reading)
 	}
 }
+
+func TestPhase31Effective(t *testing.T) {
+	for _, on := range []bool{false, true} {
+		for _, p2 := range []bool{false, true} {
+			for _, p3 := range []bool{false, true} {
+				for _, p31 := range []bool{false, true} {
+					want := on && p2 && p3 && p31
+					if got := phase31Effective(on, p2, p3, p31); got != want {
+						t.Fatalf("phase31Effective(%v,%v,%v,%v) = %v, want %v", on, p2, p3, p31, got, want)
+					}
+				}
+			}
+		}
+	}
+}

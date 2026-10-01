@@ -56,6 +56,9 @@ func RegisterRoutes(router *gin.Engine, svc *Service, log *logger.Logger) {
 		workspace.POST("/coordinators/:cid/pending-changes/:chid/apply", h.httpApplyPendingChange)
 		workspace.POST("/coordinators/:cid/pending-changes/:chid/discard", h.httpDiscardPendingChange)
 		registerAutomaticRoutes(workspace, h)
+		if svc.phase31 {
+			workspace.PUT("/coordinators/:cid/pause", h.httpPutPause)
+		}
 	}
 	workspace.GET("/coordinator-stalls", h.httpListStalls)
 	if svc.phase2 {
@@ -76,6 +79,8 @@ func (h *Handlers) coordinatorDTO(ctx context.Context, c *Coordinator) (*Coordin
 	dto := NewCoordinatorDTO(c)
 	if h.service.phase3 {
 		dto.WithAutonomy(c)
+		view := h.service.pauseView(ctx, c)
+		dto.PauseView = &view
 	}
 	if !h.service.phase2 {
 		return dto, nil

@@ -181,6 +181,7 @@ func (b *WakeBackstop) visitSet(ctx context.Context, now time.Time) []string {
 
 // runPass visits every coordinator of the visit set once.
 func (b *WakeBackstop) runPass(ctx context.Context) {
+	b.svc.stopPausedCoordinators(ctx, b.skip)
 	for _, id := range b.visitSet(ctx, time.Now().UTC()) {
 		if ctx.Err() != nil {
 			return
