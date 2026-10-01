@@ -6,27 +6,40 @@ export async function expectFileBrowserIconCentered(
   iconIndex: 0 | 1,
   state: string,
 ) {
-  const icons = button.locator("svg");
-  await expect(icons).toHaveCount(2);
-  const icon = icons.nth(iconIndex);
-  await expect(icon).toBeVisible();
-  await expect
-    .poll(() => icon.evaluate((element) => Number(getComputedStyle(element).opacity)), {
-      message: `Waiting for the ${state} Files copy-path icon to become visible`,
-    })
-    .toBeGreaterThan(0.99);
-
-  const [buttonBox, iconBox] = await Promise.all([button.boundingBox(), icon.boundingBox()]);
-  expect(buttonBox, `${state} Files copy-path target`).not.toBeNull();
-  expect(iconBox, `${state} Files copy-path icon`).not.toBeNull();
-  expect(
-    Math.abs(buttonBox!.x + buttonBox!.width / 2 - (iconBox!.x + iconBox!.width / 2)),
-    `${state} Files copy-path icon horizontal center offset`,
-  ).toBeLessThanOrEqual(1);
-  expect(
-    Math.abs(buttonBox!.y + buttonBox!.height / 2 - (iconBox!.y + iconBox!.height / 2)),
-    `${state} Files copy-path icon vertical center offset`,
-  ).toBeLessThanOrEqual(1);
+  await expect(async () => {
+    // Copy feedback replaces the SVG. Read visibility and geometry together.
+    const geometry = await button.evaluate((element, index) => {
+      const icons = element.querySelectorAll("svg");
+      const icon = icons[index];
+      if (!icon) return null;
+      const target = element.getBoundingClientRect();
+      const rect = icon.getBoundingClientRect();
+      const style = getComputedStyle(icon);
+      return {
+        iconCount: icons.length,
+        targetVisible: target.width > 0 && target.height > 0,
+        iconVisible: rect.width > 0 && rect.height > 0 && style.visibility === "visible",
+        opacity: Number(style.opacity),
+        copied: icon.classList.contains("tabler-icon-check"),
+        offsetX: Math.abs(target.x + target.width / 2 - (rect.x + rect.width / 2)),
+        offsetY: Math.abs(target.y + target.height / 2 - (rect.y + rect.height / 2)),
+      };
+    }, iconIndex);
+    expect(geometry, `${state} Files copy-path geometry`).not.toBeNull();
+    expect(geometry!.iconCount).toBe(2);
+    expect(geometry!.targetVisible, `${state} Files copy-path target`).toBe(true);
+    expect(geometry!.iconVisible, `${state} Files copy-path icon`).toBe(true);
+    expect(geometry!.opacity).toBeGreaterThan(0.99);
+    if (state.startsWith("copied")) expect(geometry!.copied).toBe(true);
+    expect(
+      geometry!.offsetX,
+      `${state} Files copy-path icon horizontal center offset`,
+    ).toBeLessThanOrEqual(1);
+    expect(
+      geometry!.offsetY,
+      `${state} Files copy-path icon vertical center offset`,
+    ).toBeLessThanOrEqual(1);
+  }).toPass({ timeout: 5_000 });
 }
 
 export async function readTaskWorkspacePath(page: Page, apiClient: ApiClient): Promise<string> {

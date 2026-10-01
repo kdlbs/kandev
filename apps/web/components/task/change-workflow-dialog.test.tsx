@@ -130,6 +130,42 @@ beforeEach(() => {
   useChangeWorkflowMock.mockReturnValue(makeHookState());
 });
 
+// @covers AC-TASKS-CHANGE-WORKFLOW-001.9
+describe.each(["desktop", "phone"])("destination step colors on %s", (surface) => {
+  it.each([
+    ["bg-blue-500", "bg-blue-500", ""],
+    ["bg-green-500", "bg-green-500", ""],
+    ["#abcdef", "", "#abcdef"],
+    ["", "bg-slate-500", ""],
+    ["unsupported-color", "bg-slate-500", ""],
+  ])("renders %s in options and the selected step", (color, expectedClass, expectedStyle) => {
+    responsiveMock.isMobile = surface === "phone";
+    const state = makeHookState();
+    state.snapshot!.steps[0].color = color;
+    useChangeWorkflowMock.mockReturnValue(state);
+    render(
+      <ChangeWorkflowDialog
+        open
+        onOpenChange={vi.fn()}
+        taskId="task-1"
+        workspaceId="workspace-1"
+      />,
+    );
+
+    const trigger = screen.getByTestId("change-workflow-step");
+    fireEvent.click(trigger);
+    const option = screen.getByRole("option", { name: "Build" });
+    for (const container of [trigger, option]) {
+      const dot = container.querySelector<HTMLElement>(".rounded-full");
+      expect(dot).not.toBeNull();
+      if (expectedClass) expect(dot!.classList.contains(expectedClass)).toBe(true);
+      expect(dot!.style.backgroundColor).toBe(expectedStyle);
+      expect(dot!.getAttribute("aria-hidden")).toBe("true");
+      expect(container.textContent).toContain("Build");
+    }
+  });
+});
+
 describe("ChangeWorkflowDialog", () => {
   it("shows the destination form, task-scoped agent mapping, and conversation relationships", () => {
     render(

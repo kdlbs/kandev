@@ -49,6 +49,30 @@ export class ChangeWorkflowPage {
     else await option.click();
   }
 
+  async expectStepOptionColor(stepId: string, cssColor: string) {
+    await this.openSelector(this.form.getByTestId("change-workflow-step"));
+    await this.expectColorDot(this.option(stepId), cssColor);
+  }
+
+  async expectSelectedStepColor(cssColor: string) {
+    await this.expectColorDot(this.form.getByTestId("change-workflow-step"), cssColor);
+  }
+
+  private async expectColorDot(container: Locator, cssColor: string) {
+    const expectedColor = await this.page.evaluate((color) => {
+      const reference = document.createElement("span");
+      reference.style.backgroundColor = color;
+      document.body.append(reference);
+      const resolved = getComputedStyle(reference).backgroundColor;
+      reference.remove();
+      return resolved;
+    }, cssColor);
+    expect(expectedColor).not.toBe("rgba(0, 0, 0, 0)");
+    const dot = container.locator(".rounded-full");
+    await expect(dot).toBeVisible();
+    await expect(dot).toHaveCSS("background-color", expectedColor);
+  }
+
   private async openSelector(trigger: Locator) {
     await expect(trigger).toBeVisible();
     if ((await trigger.getAttribute("aria-expanded")) !== "true") {

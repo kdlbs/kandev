@@ -15,6 +15,7 @@ import { measureFileTreeElement } from "./file-tree-measurement";
 import {
   captureChangesTimelineAnchor,
   observeChangesTimelinePresentationChanges,
+  refreshChangesTimelineMeasurements,
   resolveChangesTimelineAnchor,
   scrollTopForChangesTimelineAnchor,
   type ChangesTimelineAnchor,
@@ -234,8 +235,8 @@ function useTimelineViewportLifecycle<Row extends ChangesTimelineRowIdentity>({
         current.virtualizer.getVirtualItems(),
         current.scrollElement?.scrollTop ?? 0,
       );
+      refreshChangesTimelineMeasurements(viewportRef.current, current.virtualizer);
       current.state.pendingPresentationAnchorRef.current = anchor;
-      current.virtualizer.measure();
     });
   }, [scrollElement, virtualizer]);
 

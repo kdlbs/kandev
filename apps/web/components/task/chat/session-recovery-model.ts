@@ -7,11 +7,13 @@ import { formatDateTime } from "@/lib/i18n/formats";
 import type { TaskLaunchErrorContextValue } from "../task-launch-error-context";
 import {
   buildRecoveryCardModel,
+  automaticRecoveryCauses,
   causeLabel,
   operationLabel,
 } from "./session-bootstrap-recovery-model";
 import {
   isSessionRecoveryBusy,
+  matchingAutomaticRecovery,
   type SessionRecoveryOwner,
 } from "@/lib/session-recovery-presentation";
 import { sessionRecoveryAction } from "./messages/action-message-recovery";
@@ -191,7 +193,11 @@ export function useRecoveryPresentation(
       ? state.availableAgents.items.find((agent) => agent.name === profile.agent_name)?.display_name
       : undefined;
   }, undefined);
-  const automatic = matchingAutomaticRecovery(context, model.sessionId);
+  const automatic = matchingAutomaticRecovery(
+    context?.automaticRecovery,
+    context?.taskId,
+    model.sessionId,
+  );
   const managedCloneRelocation =
     model.kind === "managed_clone_relocation_required" ||
     Boolean(actions.managedCloneRecoveryStamp);
@@ -204,10 +210,28 @@ export function useRecoveryPresentation(
     isSessionRecoveryBusy(automatic?.resumptionState ?? "idle") ||
     actions.busyAction !== null;
   const busyAction = automatic?.resumptionState === "resuming" ? "resume" : actions.busyAction;
-  const details = recoveryPresentationDetails(model, bootstrap, actions, t);
+  const causes = bootstrap?.causes ?? automaticRecoveryCauses(automatic, t);
+  const details = recoveryPresentationDetails(model, bootstrap, causes, actions, t);
   const detailFields = bootstrap?.detailFields ?? [];
   const failure = recoveryFailureCopy(actions, t);
-  return { copy, busy, busyAction, details, detailFields, failure };
+  return {
+    copy: withAutomaticNotice(copy, automatic, actions),
+    busy,
+    busyAction,
+    details,
+    detailFields,
+    failure,
+  };
+}
+
+function withAutomaticNotice(
+  copy: ReturnType<typeof recoveryPresentationCopy>,
+  automatic: SessionRecoveryOwner | null,
+  actions: SessionRecoveryActions,
+) {
+  return automatic?.notice && !actions.recoveryError
+    ? { ...copy, summary: automatic.notice }
+    : copy;
 }
 
 function buildBootstrapRecoveryModel(
@@ -275,11 +299,11 @@ function recoveryPresentationCopy(
 function recoveryPresentationDetails(
   model: ActiveSessionRecovery,
   bootstrap: ReturnType<typeof buildRecoveryCardModel> | null,
+  causes: NonNullable<ReturnType<typeof buildRecoveryCardModel>>["causes"],
   actions: SessionRecoveryActions,
   t: ReturnType<typeof useTranslation>["t"],
 ) {
   if (bootstrap?.hasTypedSelectionCause) return "";
-  const causes = bootstrap?.causes ?? [];
   const manualFailure = actions.manualRecoveryFailure;
   const ownsManualFailure =
     !manualFailure ||
@@ -318,12 +342,6 @@ function isBootstrapRecovery(model: ActiveSessionRecovery) {
     model.kind !== "provider_quota_limited" &&
     model.kind !== "managed_clone_relocation_required"
   );
-}
-
-function matchingAutomaticRecovery(context: TaskLaunchErrorContextValue | null, sessionId: string) {
-  return context?.statusSummary?.active_error?.session_id === sessionId
-    ? context.automaticRecovery
-    : null;
 }
 
 function isManagedRuntimeFailure(kind: string) {

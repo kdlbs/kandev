@@ -13,6 +13,12 @@ import { parseTurnTimestamp } from "@/lib/state/slices/session/turn-actions";
 
 /** Automatic recovery state shared with the session-owned bootstrap card. */
 export type SessionRecoveryOwner = {
+  requestIdentity?: {
+    taskId: string;
+    sessionId: string;
+    generation: number;
+    attemptId: number;
+  } | null;
   resumptionState: ResumptionState;
   error: string | null;
   notice: string | null;
@@ -161,4 +167,16 @@ export function sessionRecoveryOwnerId(
   return failure?.outcome === "recovery_failed" && failure.workspaceAttemptId
     ? `session-recovery-owner-${failure.workspaceAttemptId}`
     : undefined;
+}
+
+/** Routes request-local diagnostics; it does not merge durable error identities. */
+export function matchingAutomaticRecovery(
+  recovery: SessionRecoveryOwner | null | undefined,
+  taskId: string | null | undefined,
+  sessionId: string | null | undefined,
+): SessionRecoveryOwner | null {
+  const identity = recovery?.requestIdentity;
+  if (!identity || identity.taskId !== taskId || identity.sessionId !== sessionId) return null;
+  if (recovery.recoveryFailure?.outcome === "status_unavailable") return null;
+  return recovery;
 }

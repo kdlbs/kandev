@@ -356,5 +356,14 @@
   "watcherKindLinear": "Linear",
   "nativeCodexUnavailableTitle": "原生 Codex app server 不可用",
   "nativeCodexUnavailable": "此已儲存的設定會保留，但 Codex app-server 功能關閉時無法編輯、複製、啓用或啓動。你可以刪除此設定，或在設定中啓用該功能。",
-  "nativeCodexUnavailableShort": "功能已關閉"
+  "nativeCodexUnavailableShort": "功能已關閉",
+  "minimaxLoginDescription": "登入您的 MiniMax 帳戶。MiniMax 將認證資料存儲在 {{dataDir}}。",
+  "minimaxDescription": "MiniMax Code 使用原生 ACP 伺服器和訂閲帳戶登入。",
+  "minimaxPassthroughLabel": "CLI 直通模式",
+  "minimaxPassthroughDescription": "直接顯示終端，而不是聊天介面",
+  "minimaxChooseRegionTitle": "MiniMax 帳戶區域",
+  "minimaxChooseRegionDescription": "選擇您的 MiniMax 訂閲帳戶所屬區域。",
+  "minimaxRegionCN": "中國大陸",
+  "minimaxRegionGlobal": "全球",
+  "minimaxLoginConflict": "另一個登入命令正在執行。請先關閉該終端，然後重試。"
 }

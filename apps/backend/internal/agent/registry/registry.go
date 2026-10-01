@@ -81,6 +81,7 @@ func (r *Registry) LoadDefaults(codexAppServerEnabled ...bool) {
 		agents.NewPiACP(),
 		agents.NewCursorACP(),
 		agents.NewKimiACP(),
+		agents.NewMiniMaxACP(),
 		agents.NewKiroACP(),
 		agents.NewQoderACP(),
 		agents.NewTraeACP(),

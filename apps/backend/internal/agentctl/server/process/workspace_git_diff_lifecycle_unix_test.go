@@ -44,21 +44,23 @@ printf quick
 	result := make(chan struct {
 		output    string
 		truncated bool
+		err       error
 	}, 1)
 	go func() {
-		output, truncated := capDiffOutput(ctx, dir, "diff")
+		output, truncated, err := capDiffOutput(ctx, dir, "diff")
 		result <- struct {
 			output    string
 			truncated bool
-		}{output, truncated}
+			err       error
+		}{output, truncated, err}
 	}()
 	waitForProcessGitFile(t, filepath.Join(dir, "started"), time.Second)
 	cancel()
 
 	select {
 	case value := <-result:
-		if value.output == "" || value.truncated {
-			t.Fatalf("capDiffOutput result = (%q, %t), want partial output without truncation", value.output, value.truncated)
+		if value.output == "" || value.truncated || !errors.Is(value.err, context.Canceled) {
+			t.Fatalf("capDiffOutput result = (%q, %t, %v), want partial output, no truncation, cancellation error", value.output, value.truncated, value.err)
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("capDiffOutput did not return after cancellation closed its reader")

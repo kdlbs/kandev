@@ -156,7 +156,7 @@ replace state verification, installation association, or HMAC verification.
 
 **agentctl client** (`internal/agent/runtime/agentctl/`) is the HTTP/WS client used by the lifecycle manager to talk to a running agentctl instance. It is a runtime-tier package and should not be imported outside `internal/agent/runtime/`.
 
-**Agent discovery vs. ACP probing:** discovery answers only whether an agent executable is available; authentication, protocol compatibility, and supported models or modes belong to the ACP probe path, not installation gates.
+**Agent discovery vs. ACP probing:** discovery answers only whether an agent executable is available; authentication, protocol compatibility, and supported models or modes belong to the ACP probe path, not installation gates. MiniMax uses native `mcode acp`, dynamic encoded model IDs and executor-owned `~/.minimax`; do not relocate its auth files because their identity includes the absolute auth-home path.
 
 **agentctl** is an HTTP server that:
 - Runs inside Docker containers or as standalone process

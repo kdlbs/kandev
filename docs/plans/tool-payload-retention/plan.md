@@ -165,6 +165,7 @@ and browser-test files. Shared runtime integration remains in the primary sessio
 | 2 | [Guarded cleanup and replay](task-02-guarded-cleanup.md) | Backup gate, bounded mutation, durable marker |
 | 3 | [Settings and conversation UI](task-03-settings-and-transcript.md) | Usable desktop/phone workflow and removed-output state |
 | 4 | [Scheduling and integration](task-04-scheduling-and-integration.md) | Daily operation, restart evidence, docs, full feature verification |
+| 5 | [Windows backup verification](task-05-windows-backup-verification.md) | Backup verification opens native Windows paths |
 
 ## Tests
 
@@ -181,6 +182,7 @@ verification evidence and assertions about committed database state.
 | 003.1–003.4 | `internal/system/toolretention/scheduler_test.go`: fake clock, startup readiness, daily schedule, busy backoff, restart/cancel |
 | 001.4–001.7, 002.1/002.2, 003.4/003.5 | `components/settings/system/tool-payload-retention-card.test.tsx`: draft, choice, error, job states, independent Office settings |
 | 002.4 | Transcript renderer tests and `hooks/domains/system/use-tool-payload-retention.test.ts`: removed marker, output cache invalidation |
+| 002.2/002.8 | `internal/system/backups/verify_snapshot_test.go`, `internal/system/backups/retention_test.go`: native absolute snapshot path with a space, `#`, `%`, or (POSIX only) `?`; read-only reader; no other file created; receipt verification |
 
 ## E2E Tests
 
@@ -282,7 +284,7 @@ Final confirmation after the cancellation fix:
   The preceding eight-scenario desktop/phone/auth run remains green.
 - Full backend lint passed again with zero issues. SQLguard, document index,
   specification lint, published-page validation, and whitespace checks passed.
-- All four work orders are complete. Changes remain uncommitted for review.
+- Work orders 1–4 are complete. Changes remain uncommitted for review.
 
 ## Review remediation
 

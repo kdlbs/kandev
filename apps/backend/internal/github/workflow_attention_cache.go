@@ -121,25 +121,42 @@ func (s *Service) cachedWorkflowJobs(
 func (s *Service) collectWorkflowAttention(
 	ctx context.Context, client Client, cacheScope, owner, repo string, pr *PR,
 ) (*WorkflowAttention, error) {
+	observation, err := s.collectWorkflowObservation(ctx, client, cacheScope, owner, repo, pr)
+	if observation == nil {
+		return workflowAttentionUnknown(""), err
+	}
+	return observation.Attention, err
+}
+
+func (s *Service) collectWorkflowObservation(
+	ctx context.Context, client Client, cacheScope, owner, repo string, pr *PR,
+) (*workflowObservation, error) {
 	if pr == nil {
-		return workflowAttentionUnknown(""), nil
+		return &workflowObservation{Attention: workflowAttentionUnknown("")}, nil
 	}
 	if isTerminalPR(pr) {
-		return workflowAttentionNone(pr.HeadSHA), nil
+		observation := &workflowObservation{Attention: workflowAttentionNone(pr.HeadSHA)}
+		if pr.HeadSHA == "" {
+			return observation, nil
+		}
+		runs, err := s.cachedWorkflowRuns(ctx, client, cacheScope, owner, repo, pr.HeadSHA)
+		observation.Runs = runs
+		return observation, err
 	}
 	if pr.HeadSHA == "" {
-		return workflowAttentionUnknown(""), nil
+		return &workflowObservation{Attention: workflowAttentionUnknown("")}, nil
 	}
 
 	runs, err := s.cachedWorkflowRuns(ctx, client, cacheScope, owner, repo, pr.HeadSHA)
 	if err != nil {
-		return workflowAttentionUnknown(pr.HeadSHA), err
+		return &workflowObservation{Attention: workflowAttentionUnknown(pr.HeadSHA)}, err
 	}
-	return classifyWorkflowAttentionWithJobs(ctx, owner, repo, pr, runs,
+	attention := classifyWorkflowAttentionWithJobs(ctx, owner, repo, pr, runs,
 		func(jobCtx context.Context, runID int64, attempt int) ([]WorkflowJob, error) {
 			return s.cachedWorkflowJobs(jobCtx, client, cacheScope, owner, repo, runID, attempt, true)
 		},
-	), nil
+	)
+	return &workflowObservation{Runs: runs, Attention: attention}, nil
 }
 
 func (s *Service) invalidateWorkflowAttentionForPR(

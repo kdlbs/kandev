@@ -13,10 +13,11 @@ test("phone file menu creates editable whole-file feedback", async ({
   testPage,
   apiClient,
   seedData,
+  backend,
   prCapture,
 }) => {
   const ws = watchWs(testPage);
-  const task = await seedReviewTask(testPage, apiClient, seedData);
+  const task = await seedReviewTask(backend, apiClient, seedData);
   await loadSession(testPage, task.id);
   const dialog = await openDialogWithChanges(testPage);
   await exerciseFileComment(testPage, dialog, true);

@@ -54,7 +54,7 @@ export function operationLabel(operation: string | undefined, translate: TFuncti
   return translate("task:sessionRecoveryResumeAttempt");
 }
 
-function automaticRecoveryCauses(
+export function automaticRecoveryCauses(
   recovery: SessionRecoveryOwner | null | undefined,
   translate: TFunction,
 ): AgentErrorCause[] {

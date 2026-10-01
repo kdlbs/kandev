@@ -119,3 +119,23 @@ describe("shouldReservePageLevelMobileFeedbackOffset", () => {
     ).toBe(false);
   });
 });
+
+it("does not reserve a second phone header region for composer-owned automatic feedback", () => {
+  expect(
+    shouldReservePageLevelMobileFeedbackOffset(
+      pageFeedbackParams({
+        hasResumptionError: true,
+        hasComposerRecoveryOwner: true,
+      }),
+    ),
+  ).toBe(false);
+  expect(
+    shouldReservePageLevelMobileFeedbackOffset(
+      pageFeedbackParams({
+        hasResumptionError: true,
+        hasComposerRecoveryOwner: true,
+        hasTaskMoveError: true,
+      }),
+    ),
+  ).toBe(true);
+});

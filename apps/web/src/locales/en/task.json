@@ -2616,5 +2616,13 @@
   "managedCloneRelocationConfirm": "Move and resume",
   "sessionRecoveryResumeDescription": "Resuming keeps your previous messages and context.",
   "sessionRecoveryFreshDescription": "Starting fresh uses the same workspace without previous conversation context.",
-  "sessionRecoveryCorruptedDescription": "Resuming will likely fail again because this session’s saved state is corrupted. Start a fresh session instead."
+  "sessionRecoveryCorruptedDescription": "Resuming will likely fail again because this session’s saved state is corrupted. Start a fresh session instead.",
+  "gitStatusChecking": "Checking changed files...",
+  "gitStatusUnavailable": "Git status unavailable",
+  "gitStatusRefreshFailedWithData": "Refresh failed. Showing last observed changes.",
+  "gitStatusDetailsPending": "Changed files are ready. Diffs are loading.",
+  "gitStatusRepositoryUnavailable": "{{repository}} could not be refreshed.",
+  "gitDiffLoading": "Diff is loading",
+  "gitDiffUnavailable": "Diff is unavailable",
+  "gitStatusRetry": "Retry"
 }

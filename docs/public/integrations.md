@@ -354,6 +354,8 @@ For a task with linked GitHub pull requests, open the PR status control above th
 
 If a current pull-request head has a GitHub Actions workflow that requires maintainer approval, the PR status control shows **Awaiting maintainer approval**, even when GitHub reports no checks. Detailed desktop and mobile views show the workflow name, the reason, and a link to GitHub. Approval-only workflow attention is not a failed check, does not start **Auto-fix CI & address comments**, and does not make the pull request ready for **Auto-merge or requeue when ready**. If GitHub does not provide enough evidence, Kandev keeps the workflow state unavailable or marks the last same-head observation as stale instead of claiming approval.
 
+Task lists, Kanban cards, and the task picker also show an amber lock when the current PR head awaits maintainer approval. Hover the icon on desktop or tap it on a phone to see the PR details. If the PR also has merge conflicts, the icon shows the red conflict warning; the details still show both conditions.
+
 Kandev refreshes GitHub Actions observations for empty, running, changing, or
 attention-required results within 30 seconds. Nonempty completed results with
 no attention requirement remain cached for up to five minutes. The cache is

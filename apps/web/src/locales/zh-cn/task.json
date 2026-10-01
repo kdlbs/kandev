@@ -2616,5 +2616,13 @@
   "managedCloneRelocationConfirm": "移动并继续",
   "sessionRecoveryResumeDescription": "恢复会保留之前的消息和上下文。",
   "sessionRecoveryFreshDescription": "重新开始会使用同一工作区，但不保留之前的对话上下文。",
-  "sessionRecoveryCorruptedDescription": "此会话的已保存状态已损坏，恢复可能会再次失败。请开始新会话。"
+  "sessionRecoveryCorruptedDescription": "此会话的已保存状态已损坏，恢复可能会再次失败。请开始新会话。",
+  "gitStatusChecking": "正在检查更改的文件...",
+  "gitStatusUnavailable": "Git 状态不可用",
+  "gitStatusRefreshFailedWithData": "刷新失败。正在显示上次观察到的更改。",
+  "gitStatusDetailsPending": "更改文件已就绪。正在加载差异。",
+  "gitStatusRepositoryUnavailable": "无法刷新 {{repository}}。",
+  "gitDiffLoading": "差异正在加载",
+  "gitDiffUnavailable": "差异不可用",
+  "gitStatusRetry": "重试"
 }

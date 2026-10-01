@@ -174,7 +174,6 @@ export default async function TasksPage({
       <TasksPageClient
         workspaces={workspaces}
         initialWorkspaceId={workspaceId}
-        initialWorkflows={workflows}
         initialRepositories={repositories}
         initialTasks={tasks}
         initialTotal={total}

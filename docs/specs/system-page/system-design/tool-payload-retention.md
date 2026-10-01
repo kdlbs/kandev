@@ -58,6 +58,14 @@ Existing `internal/system/backups` owns snapshot files through
 not run an integrity check. Preparation adds verification of the new snapshot
 through a separate read-only connection. Database maintenance owns explicit `VACUUM`.
 
+The verification connection opens the snapshot as a SQLite `file:` URI with
+`mode=ro`, so it never creates a file. The native path follows `file:` with only
+`%`, `?`, and `#` percent-escaped, because SQLite decodes `%XX`, starts the
+query at `?`, and ignores the rest after `#`. SQLite reads all remaining characters
+literally, including a Windows drive letter and backslashes. The shared path
+escape helper lives in `internal/db`; each caller keeps its own connection mode
+and options.
+
 ## Policy and persistence
 
 Use a dedicated settings key `tool_payload_retention`, version 1:

@@ -20,6 +20,28 @@ type settingsScanner struct {
 	revision int64
 }
 
+// @covers AC-UI-LIST-STEP-GROUPING-001.5
+func TestTasksListGroupLegacySettingsRoundTrip(t *testing.T) {
+	settings, err := scanUserSettings(settingsScanner{raw: `{"tasks_list_group":"state","tasks_list_sort":"title_asc"}`, revision: 7}, DefaultUserID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if settings.TasksListGroup != "workflow_step" || settings.Revision != 7 || settings.TasksListSort != "title_asc" {
+		t.Fatalf("legacy settings = (%q, %d, %q)", settings.TasksListGroup, settings.Revision, settings.TasksListSort)
+	}
+	raw, err := marshalUserSettingsPayload(settings)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload["tasks_list_group"] != "workflow_step" {
+		t.Fatalf("persisted group = %v", payload["tasks_list_group"])
+	}
+}
+
 // upsertUserSettingsForTest writes settings via UpsertUserSettingsPreservingTaskCreateLastUsed at the current stored revision.
 func upsertUserSettingsForTest(t *testing.T, repo *sqliteRepository, ctx context.Context, settings *models.UserSettings) {
 	t.Helper()

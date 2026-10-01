@@ -132,6 +132,8 @@ type NativeBinaryAgent interface {
 type LoginCommand struct {
 	// Cmd is the command + args to spawn, e.g. []string{"claude", "auth", "login"}.
 	Cmd []string
+	// Variants are server-owned command choices selected by opaque identifiers.
+	Variants map[string][]string
 	// Description renders above the terminal as a one-line hint, e.g.
 	// "Authenticate with your Anthropic account."
 	Description string

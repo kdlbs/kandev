@@ -258,8 +258,8 @@ func (s *Service) stopIdleSessionReaper() {
 // executors_running row, applies the minimum-idle filter (UpdatedAt
 // age), and delegates each candidate to reclaimIdleSession. The
 // primitive enforces the fail-closed guard (state, live agent,
-// active turn); this scan only adds the age filter that the
-// settle-point callers do not need.
+// active turn, resume token); this scan only adds the age filter that
+// the settle-point callers do not need.
 //
 // Each row's reclaim is best-effort: a failure is logged at warn and
 // skipped. The next tick will retry. The scan never aborts the loop
@@ -304,8 +304,8 @@ func (s *Service) reclaimIdleSessionsOnce(ctx context.Context) {
 			continue
 		}
 		// Delegate to the fail-closed primitive. It reads the session,
-		// checks the triple guard (state × live runtime × active turn),
-		// and either reclaims the row or skips it. Errors here are
+		// checks its guard (state × live runtime × active turn × resume
+		// token), and either reclaims the row or skips it. Errors here are
 		// recoverable on the next tick — log and move on.
 		if err := s.reclaimIdleSession(ctx, sessionID); err != nil {
 			s.logger.Warn("idle reaper: reclaim failed; row preserved for next tick",

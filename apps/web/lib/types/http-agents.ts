@@ -260,6 +260,7 @@ export type ToolStatus = {
 
 export type LoginCommand = {
   cmd: string[];
+  variants?: Record<string, string[]>;
   description?: string;
 };
 
