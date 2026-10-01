@@ -104,3 +104,65 @@ describe("projectWorkflowTasks — priority filter scoping", () => {
     ]);
   });
 });
+
+// @covers AC-UI-BOARD-REPOSITORY-MATCHING-001.5, AC-UI-BOARD-REPOSITORY-MATCHING-001.6
+describe("projectWorkflowTasks repository membership", () => {
+  const linked: Task = {
+    id: "multi",
+    title: "Rendering fix",
+    workflowStepId: "ready",
+    repositoryId: "backend",
+    repositories: [
+      { id: "backend-link", repository_id: "backend", position: 0 },
+      { id: "web-link", repository_id: "web", position: 1 },
+    ],
+  };
+  const workflows = {
+    first: {
+      steps: [{ id: "ready" }],
+      tasks: [
+        linked,
+        { ...linked, id: "empty", repositoryId: "web", repositories: [] },
+        {
+          ...linked,
+          id: "other",
+          repositories: [{ id: "other-link", repository_id: "other", position: 0 }],
+        },
+        { ...linked, id: "plugin-rejected" },
+      ],
+    },
+    second: {
+      steps: [{ id: "ready" }],
+      tasks: [{ ...linked, id: "legacy", repositoryId: "web", repositories: undefined }],
+    },
+  };
+
+  it("retains a secondary-linked task in occupancy even when search removes its card", () => {
+    const first = projectWorkflowTasks(workflows, "first", new Set(["web"]), {
+      searchQuery: "absent",
+      matchesPluginTaskFilters: (id) => id !== "plugin-rejected",
+    });
+    expect(first.visibleTasks).toEqual([]);
+    expect(first.occupancyTasks).toEqual([linked]);
+    expect(first.occupancyTasks.map((entry) => entry.workflowStepId)).toEqual(["ready"]);
+    const second = projectWorkflowTasks(workflows, "second", new Set(["web"]), { searchQuery: "" });
+    expect(second.visibleTasks.map((entry) => entry.id)).toEqual(["legacy"]);
+    expect(second.occupancyTasks.map((entry) => entry.id)).toEqual(["legacy"]);
+  });
+
+  it("composes membership with search, hidden steps and plugins for visible cards", () => {
+    const options = {
+      searchQuery: "rendering",
+      matchesPluginTaskFilters: (id: string) => id !== "plugin-rejected",
+    };
+    expect(
+      projectWorkflowTasks(workflows, "first", new Set(["backend", "web"]), options).visibleTasks,
+    ).toEqual([linked]);
+    const hidden = projectWorkflowTasks(workflows, "first", new Set(["web"]), {
+      ...options,
+      hiddenStepIds: new Set(["ready"]),
+    });
+    expect(hidden.visibleTasks).toEqual([]);
+    expect(hidden.occupancyTasks).toEqual([linked]);
+  });
+});

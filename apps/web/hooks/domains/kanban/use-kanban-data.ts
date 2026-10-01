@@ -4,7 +4,7 @@ import { useMemo, useSyncExternalStore } from "react";
 import { useAppStore } from "@/components/state-provider";
 import { useWorkflowSnapshot } from "@/hooks/use-workflow-snapshot";
 import { useUserDisplaySettings } from "@/hooks/use-user-display-settings";
-import { filterTasksByRepositories } from "@/lib/kanban/filters";
+import { filterTasksByRepositories, getTaskRepositoryIds } from "@/lib/kanban/filters";
 import type { WorkflowStep } from "@/components/kanban-column";
 
 type KanbanDataOptions = {
@@ -106,13 +106,13 @@ export function useKanbanData({
       if (task.description?.toLowerCase().includes(query)) return true;
 
       // Match repository name/path
-      if (task.repositoryId) {
-        const repo = repositories.find((r) => r.id === task.repositoryId);
-        if (repo?.name?.toLowerCase().includes(query)) return true;
-        if (repo?.local_path?.toLowerCase().includes(query)) return true;
-      }
-
-      return false;
+      return getTaskRepositoryIds(task).some((repositoryId) => {
+        const repo = repositories.find((r) => r.id === repositoryId);
+        return (
+          repo?.name?.toLowerCase().includes(query) ||
+          repo?.local_path?.toLowerCase().includes(query)
+        );
+      });
     });
   }, [visibleTasks, searchQuery, workspaceState.activeId, repositoriesByWorkspace]);
 

@@ -3,11 +3,19 @@ import type { KanbanState } from "@/lib/state/store";
 
 export type KanbanTask = KanbanState["tasks"][number];
 
-// Minimal task type for filtering - only needs id and repositoryId
+// Minimal task membership shared by repository filtering and search.
 export type FilterableTask = {
   id: string;
   repositoryId?: string;
+  repositories?: ReadonlyArray<{ repository_id: string }>;
 };
+
+export function getTaskRepositoryIds(task: FilterableTask): string[] {
+  return (
+    task.repositories?.map((repository) => repository.repository_id) ??
+    (task.repositoryId ? [task.repositoryId] : [])
+  );
+}
 
 export function mapSelectedRepositoryIds(
   repositories: Repository[],
@@ -32,5 +40,7 @@ export function filterTasksByRepositories<T extends FilterableTask>(
   if (selectedRepositoryIds.size === 0) {
     return tasks;
   }
-  return tasks.filter((task) => task.repositoryId && selectedRepositoryIds.has(task.repositoryId));
+  return tasks.filter((task) =>
+    getTaskRepositoryIds(task).some((repositoryId) => selectedRepositoryIds.has(repositoryId)),
+  );
 }
