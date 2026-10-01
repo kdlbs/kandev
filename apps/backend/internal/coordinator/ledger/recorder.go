@@ -161,6 +161,12 @@ func (l *Ledger) start(ctx context.Context, coordinatorID string, te turnEvent) 
 		return err
 	}
 	created, err := l.insertRow(ctx, row, snap)
+	if err != nil && snap != nil {
+		countFailure(StageSnapshot)
+		l.log.Warn("coordinator ledger: snapshot store failed", zap.Error(err))
+		row.snapshotHash = ""
+		created, err = l.insertRow(ctx, row, nil)
+	}
 	if err != nil {
 		l.dropActive(te.sessionID, entry.rowID, te.sessionTurnID)
 		return err

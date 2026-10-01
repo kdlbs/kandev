@@ -154,3 +154,20 @@ func TestSnapshot_FailedBuildLeavesEmptyHashAndRowWritten(t *testing.T) {
 		t.Fatal("snapshot failure not counted")
 	}
 }
+
+func TestSnapshot_FailedStoreLeavesEmptyHashAndRowWritten(t *testing.T) {
+	f := newFixture(t)
+	f.exec(`DROP TABLE coordinator_turn_snapshots`)
+	before := FailureCount(StageSnapshot)
+	f.start("st-1", f.at(0))
+	row := f.oneTurn()
+	if row.SnapshotHash != "" {
+		t.Fatalf("hash = %q, want empty", row.SnapshotHash)
+	}
+	if FailureCount(StageSnapshot) != before+1 {
+		t.Fatal("snapshot store failure not counted")
+	}
+	if f.l.ActiveTurnID(testSession) == "" {
+		t.Fatal("active turn entry was dropped")
+	}
+}
