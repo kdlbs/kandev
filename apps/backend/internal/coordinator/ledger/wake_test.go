@@ -1,6 +1,8 @@
 package ledger
 
 import (
+	"encoding/json"
+	"fmt"
 	"testing"
 	"time"
 )
@@ -166,5 +168,61 @@ func TestRecorder_UnsettledBoundRowFallsBackToSessionStateAfterRetries(t *testin
 	waitFor(t, func() bool { return f.oneTurn().FinishedAt != nil })
 	if got := *f.oneTurn().Outcome; got != "cancelled" {
 		t.Fatalf("outcome = %s", got)
+	}
+}
+
+func TestRecorder_RowCreatedAtCompletionTakesTheWakeTrigger(t *testing.T) {
+	f := newFixture(t)
+	s := f.at(0)
+	f.exec(`INSERT INTO task_session_turns (id, started_at) VALUES ('st-1', ?)`, s)
+	f.exec(`INSERT INTO task_sessions (id, state) VALUES (?, 'IDLE')`, testSession)
+	f.unattended("u1", sp("st-1"), sp("st-1"), sp("completed"), s)
+	f.wake("w1", "question", "u1")
+	f.complete("st-1", s, s.Add(time.Second)) // the start event was lost
+
+	row := f.oneTurn()
+	if row.Trigger != TriggerWake || row.WakeKinds != `["question"]` || row.SnapshotHash != "" {
+		t.Fatalf("row = %+v", row)
+	}
+	if link := f.unattendedLink("u1"); link == nil || *link != row.ID {
+		t.Fatalf("link = %v, want %s", link, row.ID)
+	}
+}
+
+func TestRecorder_RowCreatedAtCompletionExcludesUnusableWakeRows(t *testing.T) {
+	cases := map[string]*string{"send_failed": sp("send_failed"), "settled while unbound": sp("stopped_by_pause")}
+	for name, outcome := range cases {
+		t.Run(name, func(t *testing.T) {
+			f := newFixture(t)
+			s := f.at(0)
+			f.exec(`INSERT INTO task_session_turns (id, started_at) VALUES ('st-1', ?)`, s)
+			f.unattended("u1", nil, sp("st-1"), outcome, s)
+			f.wake("w1", "question", "u1")
+			f.complete("st-1", s, s.Add(time.Second))
+			row := f.oneTurn()
+			if row.Trigger != TriggerMessage || row.WakeKinds != "[]" {
+				t.Fatalf("row = %+v", row)
+			}
+			if link := f.unattendedLink("u1"); link != nil {
+				t.Fatalf("excluded row linked to %s", *link)
+			}
+		})
+	}
+}
+
+func TestRecorder_WakeKindsAreCappedAtTwenty(t *testing.T) {
+	f := newFixture(t)
+	s := f.at(0)
+	f.unattended("u1", nil, sp("st-1"), nil, s)
+	for i := 0; i < 21; i++ {
+		f.wake(fmt.Sprintf("w%02d", i), fmt.Sprintf("kind%02d", i), "u1")
+	}
+	f.start("st-1", s)
+	var kinds []string
+	if err := json.Unmarshal([]byte(f.oneTurn().WakeKinds), &kinds); err != nil {
+		t.Fatal(err)
+	}
+	if len(kinds) != 20 {
+		t.Fatalf("wake kinds = %d, want 20", len(kinds))
 	}
 }

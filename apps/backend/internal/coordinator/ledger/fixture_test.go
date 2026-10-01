@@ -128,12 +128,18 @@ type turnSnapshotRow struct {
 	Verdict      *string    `db:"verdict"`
 	FinishedAt   *time.Time `db:"finished_at"`
 	Truncated    bool       `db:"calls_truncated"`
+
+	StartedAt      time.Time `db:"started_at"`
+	WatchScope     string    `db:"watch_scope"`
+	WatchIDs       string    `db:"watch_ids"`
+	ConfigRevision int64     `db:"config_revision"`
+	PolicyRevision int64     `db:"policy_revision"`
 }
 
 func (f *fixture) turns() []turnSnapshotRow {
 	f.t.Helper()
 	var rows []turnSnapshotRow
-	err := f.db.Select(&rows, `SELECT id, "trigger", wake_kinds, model, harness, prompt_hash, snapshot_hash, agent_profile_id, outcome, verdict, finished_at, calls_truncated FROM coordinator_turns ORDER BY started_at, id`)
+	err := f.db.Select(&rows, `SELECT id, "trigger", wake_kinds, model, harness, prompt_hash, snapshot_hash, agent_profile_id, outcome, verdict, finished_at, calls_truncated, started_at, watch_scope, watch_ids, config_revision, policy_revision FROM coordinator_turns ORDER BY started_at, id`)
 	if err != nil {
 		f.t.Fatalf("read turns: %v", err)
 	}

@@ -4,11 +4,14 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/kandev/kandev/internal/coordinator"
 )
 
 func TestRecorder_StartWritesOneStampedRow(t *testing.T) {
 	f := newFixture(t)
 	s := f.at(0)
+	f.exec(`UPDATE coordinators SET config_revision = 7 WHERE id = ?`, f.coord.ID)
 	f.start("st-1", s)
 	f.start("st-1", s) // redelivered start
 
@@ -21,6 +24,15 @@ func TestRecorder_StartWritesOneStampedRow(t *testing.T) {
 	}
 	if row.SnapshotHash == "" {
 		t.Fatal("snapshot hash empty")
+	}
+	if !row.StartedAt.Equal(s) {
+		t.Fatalf("started_at = %v, want the event's %v", row.StartedAt, s)
+	}
+	if row.WatchScope != "all" || row.WatchIDs != "[]" {
+		t.Fatalf("watch = %q %q", row.WatchScope, row.WatchIDs)
+	}
+	if row.ConfigRevision != 7 || row.PolicyRevision != int64(f.coord.PolicyRevision) {
+		t.Fatalf("revisions = %d/%d, want 7/%d", row.ConfigRevision, row.PolicyRevision, f.coord.PolicyRevision)
 	}
 	if got := f.l.ActiveTurnID(testSession); got != row.ID {
 		t.Fatalf("ActiveTurnID = %q, want %q", got, row.ID)
@@ -100,6 +112,9 @@ func TestRecorder_CompletionBeforeStartLeavesFinishedRow(t *testing.T) {
 	if row.FinishedAt == nil || row.SnapshotHash != "" {
 		t.Fatalf("late row: %+v", row)
 	}
+	if !row.StartedAt.Equal(s) {
+		t.Fatalf("late row started_at = %v, want the session turn row's %v", row.StartedAt, s)
+	}
 	if got := f.l.ActiveTurnID(testSession); got != "" {
 		t.Fatalf("finished row left an active entry %q", got)
 	}
@@ -114,5 +129,15 @@ func TestRecorder_AttendedUnreadableStateIsUnknownNeverBlocked(t *testing.T) {
 	row := f.oneTurn()
 	if *row.Outcome != "unknown" || *row.Verdict != VerdictNothingNeeded {
 		t.Fatalf("row = %+v", row)
+	}
+}
+
+func TestRecorder_StartStampsSelectedWatchScope(t *testing.T) {
+	f := newFixture(t)
+	f.watch = coordinator.WatchSet{WorkflowIDs: []string{"wf-2", "wf-1"}}
+	f.start("st-1", f.at(0))
+	row := f.oneTurn()
+	if row.WatchScope != "workflows" || row.WatchIDs != `["wf-1","wf-2"]` {
+		t.Fatalf("watch = %q %q", row.WatchScope, row.WatchIDs)
 	}
 }
