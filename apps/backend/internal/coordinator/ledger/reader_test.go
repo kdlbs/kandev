@@ -205,3 +205,49 @@ func TestReader_AllWatchScopeStaysInsideTheCoordinatorsWorkspace(t *testing.T) {
 		t.Fatalf("digest = %+v", calls)
 	}
 }
+
+func TestReader_TurnWithDeletedSnapshotStillReads(t *testing.T) {
+	f := newFixture(t)
+	f.exec(`INSERT INTO workflow_steps (id, complete_task_on_enter) VALUES ('s-open', 0)`)
+	f.start("st-1", f.at(-time.Hour))
+	hash := f.oneTurn().SnapshotHash
+	f.exec(`DELETE FROM coordinator_turn_snapshots`)
+	p, err := f.l.List(t.Context(), f.coord.ID, ListArgs{})
+	if err != nil || len(p.Turns) != 1 || p.Turns[0].Stamp.SnapshotHash != hash {
+		t.Fatalf("page = %+v, err %v", p, err)
+	}
+}
+
+func TestReader_LedgerReadFailureReturnsUnavailableAndNoPage(t *testing.T) {
+	f := newFixture(t)
+	f.ledgerTurn("a", "sa", time.Now().UTC().Add(-time.Hour), true, VerdictActed)
+	f.exec(`DROP TABLE coordinator_turn_calls`)
+	p, err := f.l.List(t.Context(), f.coord.ID, ListArgs{})
+	if !errors.Is(err, ErrUnavailable) || p != nil {
+		t.Fatalf("page = %+v, err = %v, want ErrUnavailable and no page", p, err)
+	}
+}
+
+func TestReader_ListWritesNothing(t *testing.T) {
+	f := newFixture(t)
+	f.ledgerTurn("a", "sa", time.Now().UTC().Add(-time.Hour), true, VerdictActed)
+	f.callRow("a", "move_task_kandev", "", true)
+	tables := []string{"coordinator_turns", "coordinator_turn_calls", "coordinator_turn_snapshots", "coordinator_proposals", "coordinator_activity"}
+	counts := func() (out []int) {
+		for _, tbl := range tables {
+			var n int
+			if err := f.db.Get(&n, `SELECT COUNT(*) FROM `+tbl); err != nil {
+				t.Fatal(err)
+			}
+			out = append(out, n)
+		}
+		return out
+	}
+	before := counts()
+	if _, err := f.l.List(t.Context(), f.coord.ID, ListArgs{}); err != nil {
+		t.Fatal(err)
+	}
+	if after := counts(); fmt.Sprint(before) != fmt.Sprint(after) {
+		t.Fatalf("row counts changed: %v -> %v", before, after)
+	}
+}
