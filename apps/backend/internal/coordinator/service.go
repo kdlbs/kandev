@@ -177,6 +177,10 @@ type Service struct {
 	// re-check and the claim.
 	afterApproveRecheck func()
 
+	// afterGoalBaselineRead is a test-only hook run between PutGoal's
+	// pre-lock reads and the locked write.
+	afterGoalBaselineRead func()
+
 	// permissionResolver resolves a denied unattended permission request; nil
 	// until SetUnattendedPermissionResolver, and then the handler does nothing.
 	permissionResolver UnattendedPermissionResolver

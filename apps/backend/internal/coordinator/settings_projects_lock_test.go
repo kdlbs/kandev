@@ -75,11 +75,21 @@ func TestSetup_GoalBaselineCountIsReadOutsideTheCoordinatorLock(t *testing.T) {
 		probed++
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
-		var one int
-		if err := store.ro.QueryRowContext(ctx, `SELECT 1`).Scan(&one); err != nil && failed == nil {
-			failed = err
+		conn, err := store.db.Conn(ctx)
+		if err != nil {
+			if failed == nil {
+				failed = err
+			}
+			return
 		}
-		_ = one
+		defer func() { _ = conn.Close() }()
+		if _, err := conn.ExecContext(ctx, "BEGIN IMMEDIATE"); err != nil {
+			if failed == nil {
+				failed = err
+			}
+			return
+		}
+		_, _ = conn.ExecContext(context.WithoutCancel(ctx), "ROLLBACK")
 	}
 	_, err := svc.CreateSetup(context.Background(), testWorkspaceID, []byte(setupBody(map[string]string{
 		"projects": `{"scope":"selected","entries":[{"kind":"repository","id":"repo-a"}]}`,
@@ -180,4 +190,28 @@ func TestProjectDeleted_PublishesOncePerChangeAndDoesNotArchive(t *testing.T) {
 func combinedBody(policyOverrides map[string]string, projects string) string {
 	policy := policyBody(policyOverrides)
 	return policy[:len(policy)-1] + "," + projects[1:]
+}
+
+func TestPutGoal_ActiveGoalGoneBeforeTheLockStillCreates(t *testing.T) {
+	f := newGoalFixture(t)
+	f.createTasksTable()
+	f.mustPut(`{"name":"first","criteria":[]}`)
+	fired := false
+	f.svc.afterGoalBaselineRead = func() {
+		if fired {
+			return
+		}
+		fired = true
+		if _, err := f.store.db.Exec(`DELETE FROM coordinator_goals`); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	g, err := f.put(`{"name":"second","criteria":[]}`)
+	if err != nil {
+		t.Fatalf("PutGoal with the active goal gone before the lock: %v", err)
+	}
+	if g == nil || g.Name != "second" {
+		t.Fatalf("goal = %#v, want the created second goal", g)
+	}
 }

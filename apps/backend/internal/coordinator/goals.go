@@ -314,31 +314,55 @@ func (s *Service) PutGoal(ctx context.Context, workspaceID, coordinatorID string
 	if err != nil {
 		return nil, err
 	}
-	open, counted, err := s.goalBaselineOpenTasks(ctx, c, obj, goalID)
-	if err != nil {
-		return nil, err
+	for attempt := 0; ; attempt++ {
+		open, counted, err := s.goalBaselineOpenTasks(ctx, c, obj, goalID)
+		if err != nil {
+			return nil, err
+		}
+		if s.afterGoalBaselineRead != nil {
+			s.afterGoalBaselineRead()
+		}
+		g, err := s.runGoalWrite(ctx, c, false, func(tx coordinatorExec) (goalChange, error) {
+			return s.putGoalLocked(ctx, tx, c, obj, goalID, open, counted)
+		})
+		if errors.Is(err, errGoalBaselineUncounted) {
+			if attempt >= maxGoalBaselineAttempts {
+				return nil, ErrGoalConflict
+			}
+			continue
+		}
+		return g, err
 	}
-	return s.runGoalWrite(ctx, c, false, func(tx coordinatorExec) (goalChange, error) {
-		active, err := s.store.activeGoalOn(ctx, tx, c.ID)
-		if err != nil {
-			return goalChange{}, err
-		}
-		if active == nil && !counted {
-			return goalChange{}, ErrGoalConflict
-		}
-		if goalID != "" && (active == nil || active.ID != goalID) {
-			return goalChange{}, ErrGoalConflict
-		}
-		in, err := validateGoalInput(obj, active)
-		if err != nil {
-			return goalChange{}, err
-		}
-		if active == nil {
-			return s.createGoal(ctx, tx, c, in, open)
-		}
-		return s.updateGoal(ctx, tx, active, in)
-	})
 }
+
+// putGoalLocked is PutGoal's write under the coordinator lock; open is the
+// baseline count read before the lock, valid only when counted.
+func (s *Service) putGoalLocked(ctx context.Context, tx coordinatorExec, c *Coordinator, obj map[string]json.RawMessage, goalID string, open int64, counted bool) (goalChange, error) {
+	active, err := s.store.activeGoalOn(ctx, tx, c.ID)
+	if err != nil {
+		return goalChange{}, err
+	}
+	if active == nil && goalID == "" && !counted {
+		return goalChange{}, errGoalBaselineUncounted
+	}
+	if goalID != "" && (active == nil || active.ID != goalID) {
+		return goalChange{}, ErrGoalConflict
+	}
+	in, err := validateGoalInput(obj, active)
+	if err != nil {
+		return goalChange{}, err
+	}
+	if active == nil {
+		return s.createGoal(ctx, tx, c, in, open)
+	}
+	return s.updateGoal(ctx, tx, active, in)
+}
+
+// errGoalBaselineUncounted reports that the active goal the pre-lock read saw
+// is gone, so the create has no baseline count yet.
+var errGoalBaselineUncounted = errors.New("coordinator: goal baseline not counted")
+
+const maxGoalBaselineAttempts = 3
 
 // goalBaselineOpenTasks reads the open watched task count a new goal freezes
 // as its baseline. The count is read outside the coordinator lock because a
