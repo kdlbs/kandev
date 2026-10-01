@@ -219,8 +219,9 @@ type AgentDiscoveryDTO struct {
 // The frontend uses it to render a "Login" button that opens a PTY terminal
 // running the named command.
 type LoginCommandDTO struct {
-	Cmd         []string `json:"cmd"`
-	Description string   `json:"description,omitempty"`
+	Variants    map[string][]string `json:"variants,omitempty"`
+	Cmd         []string            `json:"cmd"`
+	Description string              `json:"description,omitempty"`
 }
 
 type ListDiscoveryResponse struct {
