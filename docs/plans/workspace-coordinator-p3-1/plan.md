@@ -27,6 +27,8 @@ requirements:
   - REQ-COORDINATOR-PAUSE-003
   - REQ-COORDINATOR-PERMISSIONS-005
   - REQ-COORDINATOR-CREATED-TASK-AGENT-001
+  - REQ-COORDINATOR-PROPOSALS-002
+  - REQ-COORDINATOR-PROPOSALS-005
 system_design:
   - ../../specs/coordinator/system-design/turn-ledger.md
   - ../../specs/coordinator/system-design/outcomes.md
