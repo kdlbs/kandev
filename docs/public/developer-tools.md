@@ -24,6 +24,10 @@ If Kandev does not detect Apprise, check the `PATH` used by the backend process.
 Apprise in a directory already in that `PATH`, rescan. If you install it elsewhere or change `PATH`
 after Kandev starts, restart Kandev so the running backend receives the new environment, then rescan.
 
+Each provider save applies its name, enabled state, settings, and selected events together.
+If validation or saving fails, the provider's previously saved configuration remains intact.
+A failed creation leaves no partially configured provider. Saves for separate providers are independent.
+
 ## Quick Chat
 
 Quick Chat is an agent conversation outside the board. Use it for repository orientation, experiments, and disposable questions that do not need workflow state, review gates, dependencies, or a delivery record.
