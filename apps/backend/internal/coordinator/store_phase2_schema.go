@@ -32,6 +32,42 @@ var phase2ColumnMigrations = []struct{ name, stmt string }{
 	{"coordinator_proposals.automatic_at", `ALTER TABLE coordinator_proposals ADD COLUMN automatic_at {{timestamp}}`},
 }
 
+// taskPairColumnMigrations add the Agent for created tasks pair; the backfill
+// that follows fills only empty values from the coordinator's own pair.
+var taskPairColumnMigrations = []struct{ name, stmt string }{
+	{"coordinators.task_agent_profile_id", `ALTER TABLE coordinators ADD COLUMN task_agent_profile_id TEXT NOT NULL DEFAULT ''`},
+	{"coordinators.task_executor_profile_id", `ALTER TABLE coordinators ADD COLUMN task_executor_profile_id TEXT NOT NULL DEFAULT ''`},
+}
+
+var taskPairBackfills = []string{
+	`UPDATE coordinators SET task_agent_profile_id = agent_profile_id WHERE task_agent_profile_id = ''`,
+	`UPDATE coordinators SET task_executor_profile_id = executor_profile_id WHERE task_executor_profile_id = ''`,
+}
+
+// migrateTaskPair adds the task pair columns and backfills every empty value
+// in one transaction, so no request sees a half-filled pair.
+func (s *Store) migrateTaskPair(migrate *db.MigrateLogger) error {
+	for _, m := range taskPairColumnMigrations {
+		if err := migrate.Apply(m.name, m.stmt); err != nil {
+			return fmt.Errorf("coordinator column %s: %w", m.name, err)
+		}
+	}
+	if err := migrate.Err(); err != nil {
+		return err
+	}
+	tx, err := s.db.Beginx()
+	if err != nil {
+		return fmt.Errorf("begin task pair backfill: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	for _, stmt := range taskPairBackfills {
+		if _, err := tx.Exec(stmt); err != nil {
+			return fmt.Errorf("task pair backfill: %w", err)
+		}
+	}
+	return tx.Commit()
+}
+
 // phase2LateColumnMigrations add columns to tables phase2TablesSQL creates, so
 // they run after it: coordinator_activity does not exist on a phase 1 database
 // until then.

@@ -6,7 +6,7 @@ system: coordinator
 owners:
   - kandev
 created: 2026-09-26
-last_updated: 2026-09-29
+last_updated: 2026-10-01
 ---
 
 # Coordinators in a workspace Requirements
@@ -159,8 +159,10 @@ Mockup:
 - **AC-COORDINATOR-COORDINATORS-004.3:** When a manager opens **+ Add
   coordinator**, the page shall show Name, Agent profile, Executor and Context,
   shall list CLI-passthrough profiles disabled with their reason, and shall
-  enable **Add coordinator** only while the name is valid and both profiles are
-  chosen; after adding, the new coordinator's page shall open.
+  enable **Add coordinator** only while the name is valid, both profiles are
+  chosen and the Agent for created tasks pair of
+  [`REQ-COORDINATOR-CREATED-TASK-AGENT-001`](created-task-agent.md) is chosen; after adding, the new
+  coordinator's page shall open.
 - **AC-COORDINATOR-COORDINATORS-004.4:** On an existing coordinator's page, a
   change shall be saved through the settings save bar (Discard and Save appear
   only while something changed), the page shall say that the profile's
@@ -264,7 +266,8 @@ chose.
   to 5 shall have **Next** and, from step 2, **Back**; Review shall have
   **Back** and **Finish** and no **Next**.
 - **AC-COORDINATOR-COORDINATORS-008.2:** Who runs it shall ask for the name,
-  agent profile and executor under the phase-1 rules; What it watches shall
+  agent profile and executor under the phase-1 rules, and for Agent for
+  created tasks under `REQ-COORDINATOR-CREATED-TASK-AGENT-001`; What it watches shall
   offer the Watches choice of
   [permissions](permissions.md#req-coordinator-permissions-003-watches) with
   `all` chosen; What it is for shall offer the goal form of
@@ -273,13 +276,14 @@ chose.
   it may do shall show the May do rows with `create_task`, `message`, `move`
   and `resume` set to Requires approval and `start_agent` and `stop` Denied.
 - **AC-COORDINATOR-COORDINATORS-008.3:** Review shall show a "What it wrote"
-  table with the columns Setting, Value and Owned from now on by, twelve rows
-  (Name, Agent profile, Executor, Watches, Goal, Context and one per May do
-  action), each naming the Configure section that owns it and showing "Not
+  table with the columns Setting, Value and Owned from now on by, thirteen rows
+  (Name, Agent profile, Executor, Agent for created tasks, Watches, Goal,
+  Context and one per May do action), each naming the Configure section that owns it and showing "Not
   set" for a skipped Goal or Context; **Change**
   on a row shall return to its step with the values kept.
 - **AC-COORDINATOR-COORDINATORS-008.4:** **Finish** shall be enabled only while
-  the name is valid, both profiles are chosen and Watches is `all` or has at
+  the name is valid, both profiles and the Agent for created tasks pair are
+  chosen and Watches is `all` or has at
   least one workflow; the system shall create the coordinator, its settings,
   its Watches and its goal in one transaction, or none of them, and open the
   new coordinator's Configure page.

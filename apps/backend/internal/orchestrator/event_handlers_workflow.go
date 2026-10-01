@@ -3009,18 +3009,34 @@ func (s *Service) resolveStepAgentProfile(ctx context.Context, step *wfmodels.Wo
 	if step.AgentProfileID != "" {
 		return step.AgentProfileID
 	}
-	if s.workflowStepGetter != nil && step.WorkflowID != "" {
-		meta, err := s.getWorkflowMeta(ctx, step.WorkflowID)
-		if err != nil {
-			s.logger.Warn("failed to resolve workflow agent profile, falling back to task defaults",
-				zap.String("workflow_id", step.WorkflowID),
-				zap.String("step_id", step.ID),
-				zap.Error(err))
-		} else if meta.AgentProfileID != "" {
-			return meta.AgentProfileID
-		}
+	return s.workflowDefaultProfile(ctx, step)
+}
+
+// workflowDefaultProfile returns the default agent profile of the step's
+// workflow, or "" when there is none or it cannot be read.
+func (s *Service) workflowDefaultProfile(ctx context.Context, step *wfmodels.WorkflowStep) string {
+	if s.workflowStepGetter == nil || step.WorkflowID == "" {
+		return ""
 	}
-	return ""
+	meta, err := s.getWorkflowMeta(ctx, step.WorkflowID)
+	if err != nil {
+		s.logger.Warn("failed to resolve workflow agent profile, falling back to task defaults",
+			zap.String("workflow_id", step.WorkflowID),
+			zap.String("step_id", step.ID),
+			zap.Error(err))
+		return ""
+	}
+	return meta.AgentProfileID
+}
+
+// stepProfileInputs returns the task's fixed-step replacement and the step's
+// own agent profile. replaced reports whether the task carries a replacement
+// for the step at all, which an empty replacement still settles.
+func (s *Service) stepProfileInputs(task *models.Task, step *wfmodels.WorkflowStep) (replacement string, replaced bool, own string) {
+	if task != nil && step.SessionTarget == nil && task.WorkflowID == step.WorkflowID {
+		replacement, replaced = task.WorkflowAgentOverrides.ReplacementFor(task.WorkflowID, step.ID)
+	}
+	return replacement, replaced, step.AgentProfileID
 }
 
 // resolveStepAgentProfileForTask applies a task's fixed-step substitution

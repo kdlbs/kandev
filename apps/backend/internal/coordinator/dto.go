@@ -48,6 +48,8 @@ type CoordinatorDTO struct {
 	Name                  string         `json:"name"`
 	AgentProfileID        string         `json:"agent_profile_id"`
 	ExecutorProfileID     string         `json:"executor_profile_id"`
+	TaskAgentProfileID    string         `json:"task_agent_profile_id"`
+	TaskExecutorProfileID string         `json:"task_executor_profile_id"`
 	Context               string         `json:"context"`
 	ConversationTaskID    *string        `json:"conversation_task_id"`
 	ConfigRevision        int64          `json:"config_revision"`
@@ -56,6 +58,8 @@ type CoordinatorDTO struct {
 	OpenProposals         *int           `json:"open_proposals,omitempty"`
 	AgentProfileStatus    *ProfileStatus `json:"agent_profile_status,omitempty"`
 	ExecutorProfileStatus *ProfileStatus `json:"executor_profile_status,omitempty"`
+	TaskAgentStatus       *ProfileStatus `json:"task_agent_profile_status,omitempty"`
+	TaskExecutorStatus    *ProfileStatus `json:"task_executor_profile_status,omitempty"`
 	Summary               *SummaryDTO    `json:"summary,omitempty"`
 
 	*CoordinatorPhase2
@@ -153,6 +157,7 @@ func NewCoordinatorDTO(c *Coordinator) *CoordinatorDTO {
 		Name:               c.Name,
 		AgentProfileID:     c.AgentProfileID,
 		ExecutorProfileID:  c.ExecutorProfileID,
+		TaskAgentProfileID: c.TaskAgentProfileID, TaskExecutorProfileID: c.TaskExecutorProfileID,
 		Context:            c.Context,
 		ConversationTaskID: c.ConversationTaskID,
 		ConfigRevision:     c.ConfigRevision,
@@ -173,6 +178,14 @@ func (d *CoordinatorDTO) WithOpenProposals(count int) *CoordinatorDTO {
 func (d *CoordinatorDTO) WithProfileStatuses(agent, executor ProfileStatus) *CoordinatorDTO {
 	d.AgentProfileStatus = &agent
 	d.ExecutorProfileStatus = &executor
+	return d
+}
+
+// WithTaskPairStatuses sets the GET route's task_agent_profile_status and
+// task_executor_profile_status and returns the receiver.
+func (d *CoordinatorDTO) WithTaskPairStatuses(agent, executor ProfileStatus) *CoordinatorDTO {
+	d.TaskAgentStatus = &agent
+	d.TaskExecutorStatus = &executor
 	return d
 }
 
@@ -200,6 +213,9 @@ type CreateCoordinatorRequest struct {
 	AgentProfileID    string `json:"agent_profile_id"`
 	ExecutorProfileID string `json:"executor_profile_id"`
 	Context           string `json:"context"`
+
+	TaskAgentProfileID    string `json:"task_agent_profile_id"`
+	TaskExecutorProfileID string `json:"task_executor_profile_id"`
 }
 
 // PatchCoordinatorRequest is the raw PATCH .../coordinators/:cid request
@@ -218,6 +234,9 @@ const (
 	PatchFieldAgentProfileID    = "agent_profile_id"
 	PatchFieldExecutorProfileID = "executor_profile_id"
 	PatchFieldContext           = "context"
+
+	PatchFieldTaskAgentProfileID    = "task_agent_profile_id"
+	PatchFieldTaskExecutorProfileID = "task_executor_profile_id"
 )
 
 // StringField reports field's presence and value: (nil, false, nil) when
@@ -267,6 +286,7 @@ type ProposalDTO struct {
 	DecidedBy     *string        `json:"decided_by"`
 	CreatedAt     time.Time      `json:"created_at"`
 	UpdatedAt     time.Time      `json:"updated_at"`
+	RunsWith      *RunsWith      `json:"runs_with"`
 
 	// ProposalPhase2 is nil, and its fields are absent from the body, while
 	// the phase-2 flag is off.
@@ -361,6 +381,7 @@ func newProposalDTO(p *Proposal, phase2 bool) *ProposalDTO {
 		DecidedBy:      p.DecidedBy,
 		CreatedAt:      p.CreatedAt,
 		UpdatedAt:      p.UpdatedAt,
+		RunsWith:       p.RunsWith,
 	}
 }
 

@@ -3,6 +3,8 @@ package coordinator
 import (
 	"context"
 	"fmt"
+	wfmodels "github.com/kandev/kandev/internal/workflow/models"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -30,6 +32,8 @@ type DecisionTaskService interface {
 	CreateTask(ctx context.Context, req *taskservice.CreateTaskRequest) (taskservice.CreateTaskResult, error)
 	SettleExternalID(ctx context.Context, taskID, externalID string) (bool, *taskmodels.Task, error)
 	GetTaskByExternalID(ctx context.Context, workspaceID, externalID string) (*taskmodels.Task, error)
+	GetWorkflowStep(ctx context.Context, stepID string) (*wfmodels.WorkflowStep, error)
+	GetWorkspace(ctx context.Context, id string) (*taskmodels.Workspace, error)
 }
 
 // WorkspaceAuthorizer is the workspace-scope check every coordinator route
@@ -332,13 +336,19 @@ func (s *Service) CreateCoordinator(ctx context.Context, workspaceID string, req
 	if err := s.validator.ValidateExecutorProfile(ctx, req.ExecutorProfileID); err != nil {
 		return nil, err
 	}
+	taskAgent, taskExecutor, err := s.validateTaskPair(ctx, workspaceID, req.TaskAgentProfileID, req.TaskExecutorProfileID)
+	if err != nil {
+		return nil, err
+	}
 
 	created := &Coordinator{
-		WorkspaceID:       workspaceID,
-		Name:              name,
-		AgentProfileID:    req.AgentProfileID,
-		ExecutorProfileID: req.ExecutorProfileID,
-		Context:           coordinatorContext,
+		WorkspaceID:           workspaceID,
+		Name:                  name,
+		AgentProfileID:        req.AgentProfileID,
+		ExecutorProfileID:     req.ExecutorProfileID,
+		TaskAgentProfileID:    taskAgent,
+		TaskExecutorProfileID: taskExecutor,
+		Context:               coordinatorContext,
 	}
 	if err := s.store.CreateCoordinator(ctx, created); err != nil {
 		return nil, fmt.Errorf("create coordinator: %w", err)
@@ -346,6 +356,44 @@ func (s *Service) CreateCoordinator(ctx context.Context, workspaceID string, req
 	s.logger.Info("coordinator created",
 		zap.String("workspace_id", workspaceID), zap.String("coordinator_id", created.ID))
 	return created, nil
+}
+
+// requireTaskPair trims the task pair and reports an empty value, the agent
+// first, as a *FieldError naming the field.
+func requireTaskPair(agent, executor string) (string, string, error) {
+	agent, executor = strings.TrimSpace(agent), strings.TrimSpace(executor)
+	if agent == "" {
+		return "", "", &FieldError{Field: PatchFieldTaskAgentProfileID, Message: "task_agent_profile_id is required"}
+	}
+	if executor == "" {
+		return "", "", &FieldError{Field: PatchFieldTaskExecutorProfileID, Message: "task_executor_profile_id is required"}
+	}
+	return agent, executor, nil
+}
+
+// validateTaskPair checks both task-pair values for emptiness first, then
+// against the stores, agent before executor.
+func (s *Service) validateTaskPair(ctx context.Context, workspaceID, agent, executor string) (string, string, error) {
+	agent, executor, err := requireTaskPair(agent, executor)
+	if err != nil {
+		return "", "", err
+	}
+	if err := s.validator.ValidateAgentProfileFor(ctx, workspaceID, agent, PatchFieldTaskAgentProfileID); err != nil {
+		return "", "", err
+	}
+	if err := s.validator.ValidateExecutorProfileFor(ctx, executor, PatchFieldTaskExecutorProfileID); err != nil {
+		return "", "", err
+	}
+	return agent, executor, nil
+}
+
+// TaskPairStatuses reports the statuses of c's agent for created tasks.
+func (s *Service) TaskPairStatuses(ctx context.Context, c *Coordinator) (ProfileStatus, ProfileStatus, error) {
+	a, e, err := s.validator.TaskPairStatus(ctx, c.WorkspaceID, c.TaskAgentProfileID, c.TaskExecutorProfileID)
+	if err != nil {
+		return "", "", fmt.Errorf("compute task profile status: %w", err)
+	}
+	return a, e, nil
 }
 
 // GetCoordinator returns a coordinator and its two profile statuses
@@ -408,6 +456,8 @@ func (s *Service) PatchCoordinator(ctx context.Context, workspaceID, id string, 
 	updated, clearedConversationTaskID := result.Coordinator, result.ClearedConversationTaskID
 	if result.AutonomyChanged {
 		s.afterAutonomyChange(ctx, workspaceID, id)
+	} else if result.TaskPairChanged {
+		s.publishCoordinatorUpdated(ctx, workspaceID, id)
 	}
 	if clearedConversationTaskID != nil && s.onConversationCleared != nil {
 		s.onConversationCleared(ctx, id, *clearedConversationTaskID)
@@ -421,15 +471,32 @@ func (s *Service) PatchCoordinator(ctx context.Context, workspaceID, id string, 
 // patchValidator is the validation a coordinator write runs on the merged row:
 // both profiles must resolve and the autonomy interlock must hold.
 func (s *Service) patchValidator(workspaceID string, patch CoordinatorPatch) PatchValidator {
-	return func(ctx context.Context, merged *Coordinator) error {
+	return func(ctx context.Context, merged, stored *Coordinator) error {
 		if err := s.validator.ValidateAgentProfile(ctx, workspaceID, merged.AgentProfileID); err != nil {
 			return err
 		}
 		if err := s.validator.ValidateExecutorProfile(ctx, merged.ExecutorProfileID); err != nil {
 			return err
 		}
-		return checkAutonomyInterlock(patch, merged)
+		if err := checkAutonomyInterlock(patch, merged); err != nil {
+			return err
+		}
+		return s.validateChangedTaskPair(ctx, workspaceID, patch, stored)
 	}
+}
+
+// validateChangedTaskPair checks only the task-pair fields the patch changes,
+// agent first.
+func (s *Service) validateChangedTaskPair(ctx context.Context, workspaceID string, patch CoordinatorPatch, stored *Coordinator) error {
+	if v := patch.TaskAgentProfileID; v != nil && *v != stored.TaskAgentProfileID {
+		if err := s.validator.ValidateAgentProfileFor(ctx, workspaceID, *v, PatchFieldTaskAgentProfileID); err != nil {
+			return err
+		}
+	}
+	if v := patch.TaskExecutorProfileID; v != nil && *v != stored.TaskExecutorProfileID {
+		return s.validator.ValidateExecutorProfileFor(ctx, *v, PatchFieldTaskExecutorProfileID)
+	}
+	return nil
 }
 
 // afterAutonomyChange runs after a PATCH that changed autonomy or the ceiling
@@ -489,12 +556,39 @@ func (s *Service) buildCoordinatorPatch(req PatchCoordinatorRequest) (Coordinato
 		patch.ExecutorProfileID = executorProfileID
 	}
 
+	if err := patchTaskPairFields(req, &patch); err != nil {
+		return patch, err
+	}
+
 	if s.phase3 {
 		if err := applyAutonomyFields(req, &patch); err != nil {
 			return patch, err
 		}
 	}
 	return patch, nil
+}
+
+// patchTaskPairFields reads the task pair: absent is unchanged, null or empty
+// after trimming is a *FieldError, the agent before the executor.
+func patchTaskPairFields(req PatchCoordinatorRequest, patch *CoordinatorPatch) error {
+	for _, f := range []struct {
+		name string
+		dst  **string
+	}{{PatchFieldTaskAgentProfileID, &patch.TaskAgentProfileID}, {PatchFieldTaskExecutorProfileID, &patch.TaskExecutorProfileID}} {
+		v, present, err := req.StringField(f.name)
+		if err != nil {
+			return err
+		}
+		if !present {
+			continue
+		}
+		trimmed := strings.TrimSpace(*v)
+		if trimmed == "" {
+			return &FieldError{Field: f.name, Message: f.name + " must not be empty"}
+		}
+		*f.dst = &trimmed
+	}
+	return nil
 }
 
 // DeleteCoordinator deletes a coordinator and its proposals (Build decision
@@ -521,7 +615,12 @@ func (s *Service) GetProposal(ctx context.Context, workspaceID, coordinatorID, i
 	if err := s.authz.AuthorizeWorkspaceScope(ctx, workspaceID, authz.ScopeWorkspaceRead); err != nil {
 		return nil, err
 	}
-	return s.store.GetProposal(ctx, workspaceID, coordinatorID, id, s.phase2)
+	found, err := s.store.GetProposal(ctx, workspaceID, coordinatorID, id, s.phase2)
+	if err != nil {
+		return nil, err
+	}
+	s.attachRunsWith(ctx, found)
+	return found, nil
 }
 
 // ListProposals returns a coordinator's proposals per status (Build decision
@@ -534,7 +633,12 @@ func (s *Service) ListProposals(ctx context.Context, workspaceID, coordinatorID 
 	if _, err := s.store.GetCoordinator(ctx, workspaceID, coordinatorID); err != nil {
 		return nil, err
 	}
-	return s.store.ListProposals(ctx, workspaceID, coordinatorID, status, s.phase2)
+	rows, err := s.store.ListProposals(ctx, workspaceID, coordinatorID, status, s.phase2)
+	if err != nil {
+		return nil, err
+	}
+	s.attachRunsWith(ctx, rows...)
+	return rows, nil
 }
 
 // CoordinatorForConversationTask returns the id of the coordinator whose

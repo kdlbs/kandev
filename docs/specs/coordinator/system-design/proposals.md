@@ -140,11 +140,15 @@ There is no deduplication key.
    When the step is eligible, create the task through the task service with the frozen spec, external
    id `coordinator-proposal:<id>` (with `AllowReservedExternalID`), origin the
    regular board origin, and no `start_agent`, no `prepare_session` and no
-   `auto_start_on_create` metadata marker. The request sets no agent
-   profile: the coordinator's profile belongs to its conversation, and the
-   task resolves its agent at start through the orchestrator's
-   `resolveTaskAgentProfile` (step, workflow, workspace default) like any
-   board task (`AC-COORDINATOR-PROPOSALS-002.13`). Branch on the returned
+   `auto_start_on_create` metadata marker unless the phase-2 start-agent
+   policy allows it. The request never carries the coordinator's own agent
+   profile, which belongs to its conversation. Immediately before the create,
+   [the agent step](created-task-agent.md#at-approve) resolves what the task
+   would get from the step, the workflow and the workspace default, adds the
+   coordinator's Agent for created tasks to the request's metadata only when
+   that chain is empty, and settles the row `failed` without a create when
+   that pair is unusable (`AC-COORDINATOR-PROPOSALS-002.13`, `002.16` to
+   `002.18`; this replaces decision D1). Branch on the returned
    `CreateTaskResult.Outcome`:
    - `CreateTaskOutcomeCreated`: call `Service.SettleExternalID(ctx,
      task.ID, "coordinator-proposal:<id>")`, as the MCP and HTTP create

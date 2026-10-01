@@ -42,6 +42,8 @@ function coordinator(overrides: Partial<Coordinator> = {}): Coordinator {
     name: "Planner",
     agent_profile_id: "agent-1",
     executor_profile_id: "profile-1",
+    task_agent_profile_id: "ap-1",
+    task_executor_profile_id: "ep-1",
     context: "Watches the board",
     conversation_task_id: null,
     created_at: "2026-09-27T00:00:00Z",

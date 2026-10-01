@@ -6,7 +6,7 @@ system: coordinator
 owners:
   - kandev
 created: 2026-09-28
-last_updated: 2026-09-28
+last_updated: 2026-10-01
 requirements:
   - REQ-COORDINATOR-PROPOSALS-004
   - REQ-COORDINATOR-PROPOSALS-005
@@ -19,7 +19,9 @@ requirements:
 How the web client reads proposals and lets a manager decide them, on the
 Needs you screen and in the copilot transcript. The routes, events and the
 approve and reject semantics it calls are in [proposals.md](proposals.md);
-this design adds no route and changes no backend behaviour.
+this design adds no route and changes no backend behaviour. The one
+addition is the `runs_with` member of the proposal, defined in
+[created task agent](created-task-agent.md#runs-with).
 
 ## Requirement mapping
 
@@ -68,7 +70,13 @@ time by id, with these rules in order:
    row.
 4. The incoming `updated_at` is earlier: keep the cached row.
 5. Equal `updated_at`: take the incoming row only when it is settled and the
-   cached one is not; otherwise keep the cached row.
+   cached one is not; otherwise keep the cached row, except for rule 6 and the
+   existing `returned` row exception (`reply_delivered_at`), which is kept.
+6. Equal `updated_at`, both rows unsettled, and the incoming `runs_with`
+   non-null: keep the cached row with `runs_with` taken from the incoming
+   row. An incoming `null` or absent `runs_with` never replaces a cached
+   value under this rule; rule 3 takes its incoming row whole, `runs_with`
+   included.
 
 Every proposal write stamps `updated_at`, so rule 3 orders two unsettled
 responses (a late `pending` list response cannot overwrite a fresher
@@ -114,7 +122,7 @@ independent of whether that id is in the current pending list, which is what
 lets it show "Approved: <card>" or "Rejected: <reason>"
 (`AC-COORDINATOR-PROPOSALS-005.8`) after a reload with no other proposal
 ever having been listed. It merges its own reads and its decision responses
-with the same five rules. Until its first read succeeds it renders a
+with the same six rules. Until its first read succeeds it renders a
 one-line "Loading proposal" placeholder; a failed read keeps the last row
 it had (or the placeholder) and retries on the next `coordinator.updated`;
 a 404 renders "This proposal no longer exists." with no actions.
@@ -150,6 +158,18 @@ when a name is unknown, as `proposal-details.tsx` does today.
 | `failed` | "Could not create the task: `<error>`. Nothing was created."; when `error` is null or empty, "Could not create the task. Nothing was created." | Approve, Edit, Reject |
 | `approved` | "Approved: `<card>`" | none |
 | `rejected` | "Rejected: `<reason>`"; when `reject_reason` is null, "Rejected" | none |
+
+**Runs with.** A `pending` or `failed` card shows, on its own line directly
+below "`<workflow>` · `<step>`", "Runs with: `<runs_with.agent_profile_name>`"
+(`t()` key `coordinator:proposal.runsWith`) when `runs_with.source` is `step`,
+`workflow`, `workspace` or `coordinator`, and "No agent available. Check Agent
+for created tasks in the coordinator settings." (`coordinator:proposal.noAgentAvailable`)
+when it is `none`; with `runs_with` null or absent the line is omitted. An
+empty `agent_profile_name` shows the id. The line shows for readers and
+on both surfaces, never on `approving`, `approved` or `rejected`, and never
+disables an action. The client `Proposal` type gains the optional
+`runs_with`; the Needs-you proposal item reads it from the same store row as
+the rest of the card. Six locales, no em dash.
 
 On Needs you the card also keeps the description, the "Proposed by
 `<coordinator>`" line and the propose-only policy line that

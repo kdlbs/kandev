@@ -17,6 +17,8 @@ test.describe("Coordinator answer in place: question", () => {
       name: "Answering Coordinator",
       agent_profile_id: seedData.agentProfileId,
       executor_profile_id: seedData.worktreeExecutorProfileId,
+      task_agent_profile_id: seedData.agentProfileId,
+      task_executor_profile_id: seedData.worktreeExecutorProfileId,
     });
     const title = "Answer In Place Question";
     const task = await apiClient.createTaskWithAgent(
@@ -75,6 +77,8 @@ test.describe("Coordinator answer in place: permission", () => {
       name: "Permission Answering Coordinator",
       agent_profile_id: seedData.agentProfileId,
       executor_profile_id: seedData.worktreeExecutorProfileId,
+      task_agent_profile_id: seedData.agentProfileId,
+      task_executor_profile_id: seedData.worktreeExecutorProfileId,
     });
     const task = await apiClient.createTaskWithAgent(
       seedData.workspaceId,

@@ -26,6 +26,7 @@ requirements:
   - REQ-COORDINATOR-PAUSE-002
   - REQ-COORDINATOR-PAUSE-003
   - REQ-COORDINATOR-PERMISSIONS-005
+  - REQ-COORDINATOR-CREATED-TASK-AGENT-001
 system_design:
   - ../../specs/coordinator/system-design/turn-ledger.md
   - ../../specs/coordinator/system-design/outcomes.md
@@ -33,6 +34,7 @@ system_design:
   - ../../specs/coordinator/system-design/shadow-dream.md
   - ../../specs/coordinator/system-design/pause.md
   - ../../specs/coordinator/system-design/watch-projects.md
+  - ../../specs/coordinator/system-design/created-task-agent.md
 legacy_specs: []
 ---
 
@@ -44,6 +46,8 @@ Phase 3.1 records and measures; it learns nothing and applies nothing. It adds a
 
 Recording (work orders 01 and 02) ships ahead of the flag. Everything that reads it, changes the tool profile, adds a route or a screen, or starts an episode sits behind `features.coordinatorPhase31` (effective only with `features.coordinator`, `coordinatorPhase2` and `coordinatorPhase3`), off in every shipped profile. The decisions, the wake-source amendment and the flag boundary are in [ADR-2026-09-30-coordinator-phase-3-1-record-and-measure](../../decisions/2026-09-30-coordinator-phase-3-1-record-and-measure.md). Source proposal: Part 1 of the post-phase-3 proposal (revision 2).
 
+Work order 07 (Agent for created tasks, owner decision of 2026-10-01 for live finding F-07) is the one exception to the flag boundary: it fixes a fail-open dead card, so it ships under `features.coordinator` alone and is independent of 01 to 06 (see the [ADR amendment](../../decisions/2026-09-30-coordinator-phase-3-1-record-and-measure.md#amendment-2026-10-01-agent-for-created-tasks-reverses-d1)).
+
 ## Gate
 
 Work orders 01, 02 and 06 need phase 3 merged (condition 1 of G3.1) and may start then. Work orders 03, 04 and 05 need all four conditions of [G3.1](../../decisions/2026-09-30-coordinator-phase-3-1-record-and-measure.md#g31-conditions).
@@ -54,6 +58,7 @@ Work orders 01, 02 and 06 need phase 3 merged (condition 1 of G3.1) and may star
 phase 3 --> 01 ledger --> 02 outcomes --> 03 replay --> 04 shadow dream
 phase 3 --> 05 pause -------------------------------------^ (04 needs 05's gate)
 phase 3 --> 06 projects   (anytime; before 01 if early, so the ledger records the watch set)
+         07 agent for created tasks   (anytime; independent, not behind the 3.1 flag)
 ```
 
 Critical path: 01, 02, 03, 04. Work orders 05 and 06 run in parallel with them. If 06 lands first, 01 records `project_scope` from the start; if 01 lands first, 06 moves the ledger snapshot and digest to `watch.Task`. Work orders touch disjoint files except `internal/backendapp/coordinator.go`, where 01 adds one named registration function per later work order, and the coordinator settings page, where 01 adds no section and 04 adds Learning.
@@ -68,6 +73,7 @@ Critical path: 01, 02, 03, 04. Work orders 05 and 06 run in parallel with them. 
 | [task-04](task-04-shadow-dream.md) | 3.1-4 | L | 01, 02, 03, 05 | Shadow dream, report, ratings, health, Learning section |
 | [task-05](task-05-pause.md) | 3.1-5 | M | phase 3 merged | Pause state, route, precondition, controls |
 | [task-06](task-06-watch-projects.md) | 3.1-6 | M | phase 3 merged | Projects scope, filter, enforcement, settings and setup UI |
+| [task-07](task-07-agent-for-created-tasks.md) | 3.1-7 | M | nothing | Agent for created tasks: setting, stamp at approve, "Runs with" card line (not behind the flag) |
 
 Sizes: S under 1 day, M 1 to 3 days, L 3 to 7 days. Every acceptance criterion of the new and amended requirement documents is owned by exactly one work order ([Traceability](#traceability)).
 
@@ -159,6 +165,7 @@ Watches
 | `AC-COORDINATOR-SHADOW-DREAM-001.1` to `6` (6); `AC-COORDINATOR-SHADOW-DREAM-002.1` to `7` (7); `AC-COORDINATOR-SHADOW-DREAM-003.1` to `5` (5); `AC-COORDINATOR-SHADOW-DREAM-004.1` to `5` (5); `AC-COORDINATOR-SHADOW-DREAM-005.1` to `6` (6); `AC-COORDINATOR-SHADOW-DREAM-006.1` to `4` (4); `AC-COORDINATOR-REPLAY-005.4`; `AC-COORDINATOR-OUTCOMES-003.4` | 04 |
 | `AC-COORDINATOR-PAUSE-001.1` to `3` (3); `AC-COORDINATOR-PAUSE-002.1` to `7` (7); `AC-COORDINATOR-PAUSE-003.1` to `4` (4) | 05 |
 | `AC-COORDINATOR-PERMISSIONS-005.1` to `9` (9) | 06 |
+| `AC-COORDINATOR-CREATED-TASK-AGENT-001.1` to `9` (9); `AC-COORDINATOR-PROPOSALS-002.13`, `002.16` to `002.18` (4); `AC-COORDINATOR-PROPOSALS-005.11` | 07 |
 
 The phase 2 criteria that Projects extends (`AC-COORDINATOR-PERMISSIONS-003.x`, `004.x`) stay owned by their phase 2 work orders; work order 06 updates the tests that pin them.
 

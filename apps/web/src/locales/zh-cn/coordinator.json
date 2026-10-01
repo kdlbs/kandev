@@ -611,5 +611,16 @@
   "changeDiscard": "丢弃",
   "changeContextChanged": "自提议以来上下文已更改。请丢弃它，或让协调器重新提议。",
   "changeAlreadySettled": "此更改已处理完毕。",
-  "changeActionFailed": "操作未成功。未做任何更改。请重试。"
+  "changeActionFailed": "操作未成功。未做任何更改。请重试。",
+  "taskPairLabel": "已创建任务的智能体",
+  "taskPairHelp": "您批准的任务将使用此智能体启动，除非其看板、工作流或工作区已指定了智能体。",
+  "taskAgentPassthroughWarning": "此智能体配置使用 CLI 直通，已创建的任务在此无法使用。请选择其他配置。",
+  "taskAgentMissingWarning": "此智能体配置已被移除。请选择其他配置。",
+  "taskExecutorMissingWarning": "此执行器配置已被移除。请选择其他配置。",
+  "taskPassthroughDisabledReason": "CLI 直通配置无法运行已创建的任务。",
+  "setupErrorTaskAgentProfile": "请为已创建的任务选择智能体配置。",
+  "setupErrorTaskExecutor": "请为已创建的任务选择执行器配置。",
+  "setupTaskPairValue": "{{agent}}，{{executor}}",
+  "proposalRunsWith": "运行方式：{{name}}",
+  "proposalNoAgentAvailable": "没有可用的智能体。请在协调器设置中检查“已创建任务的智能体”。"
 }

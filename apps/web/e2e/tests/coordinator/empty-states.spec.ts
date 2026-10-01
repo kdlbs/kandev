@@ -66,6 +66,8 @@ test.describe("Coordinator missing/empty/failure states", () => {
       name: "Real Coordinator",
       agent_profile_id: seedData.agentProfileId,
       executor_profile_id: seedData.worktreeExecutorProfileId,
+      task_agent_profile_id: seedData.agentProfileId,
+      task_executor_profile_id: seedData.worktreeExecutorProfileId,
     });
 
     await testPage.goto(
@@ -86,6 +88,8 @@ test.describe("Coordinator missing/empty/failure states", () => {
       name: "Empty State Coordinator",
       agent_profile_id: seedData.agentProfileId,
       executor_profile_id: seedData.worktreeExecutorProfileId,
+      task_agent_profile_id: seedData.agentProfileId,
+      task_executor_profile_id: seedData.worktreeExecutorProfileId,
     });
 
     await testPage.goto(linkToCoordinatorNeedsYou(seedData.workspaceId, coordinator.id));
@@ -107,6 +111,8 @@ test.describe("Coordinator missing/empty/failure states", () => {
       name: "Banner Coordinator",
       agent_profile_id: seedData.agentProfileId,
       executor_profile_id: seedData.worktreeExecutorProfileId,
+      task_agent_profile_id: seedData.agentProfileId,
+      task_executor_profile_id: seedData.worktreeExecutorProfileId,
     });
 
     let stallsCallCount = 0;

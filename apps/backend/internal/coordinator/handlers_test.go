@@ -72,7 +72,7 @@ func TestHTTPCreateCoordinator(t *testing.T) {
 	t.Run("201 with the created coordinator", func(t *testing.T) {
 		h := newHandlersForTest(t, agents, executors, nil)
 		rec := runHandler(h.httpCreateCoordinator, http.MethodPost, "/api/v1/workspaces/ws-1/coordinators",
-			`{"name":"Coordinator","agent_profile_id":"ap-1","executor_profile_id":"ep-1"}`, workspaceParams(""))
+			`{"name":"Coordinator","agent_profile_id":"ap-1","executor_profile_id":"ep-1","task_agent_profile_id":"ap-1","task_executor_profile_id":"ep-1"}`, workspaceParams(""))
 		if rec.Code != http.StatusCreated {
 			t.Fatalf("status = %d, want %d, body=%s", rec.Code, http.StatusCreated, rec.Body.String())
 		}
@@ -95,7 +95,7 @@ func TestHTTPCreateCoordinator(t *testing.T) {
 	t.Run("400 naming the field on invalid input", func(t *testing.T) {
 		h := newHandlersForTest(t, agents, executors, nil)
 		rec := runHandler(h.httpCreateCoordinator, http.MethodPost, "/api/v1/workspaces/ws-1/coordinators",
-			`{"name":"","agent_profile_id":"ap-1","executor_profile_id":"ep-1"}`, workspaceParams(""))
+			`{"name":"","agent_profile_id":"ap-1","executor_profile_id":"ep-1","task_agent_profile_id":"ap-1","task_executor_profile_id":"ep-1"}`, workspaceParams(""))
 		if rec.Code != http.StatusBadRequest {
 			t.Fatalf("status = %d, want %d, body=%s", rec.Code, http.StatusBadRequest, rec.Body.String())
 		}
@@ -109,7 +109,7 @@ func TestHTTPCreateCoordinator(t *testing.T) {
 	t.Run("404 when the workspace cannot be read", func(t *testing.T) {
 		h := newHandlersForTest(t, agents, executors, repoerrors.ErrWorkspaceNotFound)
 		rec := runHandler(h.httpCreateCoordinator, http.MethodPost, "/api/v1/workspaces/ws-1/coordinators",
-			`{"name":"Coordinator","agent_profile_id":"ap-1","executor_profile_id":"ep-1"}`, workspaceParams(""))
+			`{"name":"Coordinator","agent_profile_id":"ap-1","executor_profile_id":"ep-1","task_agent_profile_id":"ap-1","task_executor_profile_id":"ep-1"}`, workspaceParams(""))
 		if rec.Code != http.StatusNotFound {
 			t.Fatalf("status = %d, want %d", rec.Code, http.StatusNotFound)
 		}
@@ -118,7 +118,7 @@ func TestHTTPCreateCoordinator(t *testing.T) {
 	t.Run("403 when forbidden", func(t *testing.T) {
 		h := newHandlersForTest(t, agents, executors, svcpkg.ErrForbidden)
 		rec := runHandler(h.httpCreateCoordinator, http.MethodPost, "/api/v1/workspaces/ws-1/coordinators",
-			`{"name":"Coordinator","agent_profile_id":"ap-1","executor_profile_id":"ep-1"}`, workspaceParams(""))
+			`{"name":"Coordinator","agent_profile_id":"ap-1","executor_profile_id":"ep-1","task_agent_profile_id":"ap-1","task_executor_profile_id":"ep-1"}`, workspaceParams(""))
 		if rec.Code != http.StatusForbidden {
 			t.Fatalf("status = %d, want %d", rec.Code, http.StatusForbidden)
 		}
@@ -127,7 +127,7 @@ func TestHTTPCreateCoordinator(t *testing.T) {
 	t.Run("500 on an unexpected error", func(t *testing.T) {
 		h := newHandlersForTest(t, agents, executors, errors.New("boom"))
 		rec := runHandler(h.httpCreateCoordinator, http.MethodPost, "/api/v1/workspaces/ws-1/coordinators",
-			`{"name":"Coordinator","agent_profile_id":"ap-1","executor_profile_id":"ep-1"}`, workspaceParams(""))
+			`{"name":"Coordinator","agent_profile_id":"ap-1","executor_profile_id":"ep-1","task_agent_profile_id":"ap-1","task_executor_profile_id":"ep-1"}`, workspaceParams(""))
 		if rec.Code != http.StatusInternalServerError {
 			t.Fatalf("status = %d, want %d", rec.Code, http.StatusInternalServerError)
 		}
@@ -152,7 +152,7 @@ func TestHTTPListCoordinators(t *testing.T) {
 	t.Run("200 with open_proposals per coordinator", func(t *testing.T) {
 		h := newHandlersForTest(t, agents, executors, nil)
 		created, err := h.service.CreateCoordinator(context.Background(), testWorkspaceID, CreateCoordinatorRequest{
-			Name: "Coordinator", AgentProfileID: "ap-1", ExecutorProfileID: "ep-1",
+			Name: "Coordinator", AgentProfileID: "ap-1", TaskAgentProfileID: "ap-1", TaskExecutorProfileID: "ep-1", ExecutorProfileID: "ep-1",
 		})
 		if err != nil {
 			t.Fatalf("CreateCoordinator() unexpected error: %v", err)
@@ -180,7 +180,7 @@ func TestHTTPGetCoordinator(t *testing.T) {
 	t.Run("200 with profile statuses", func(t *testing.T) {
 		h := newHandlersForTest(t, agents, executors, nil)
 		created, err := h.service.CreateCoordinator(context.Background(), testWorkspaceID, CreateCoordinatorRequest{
-			Name: "Coordinator", AgentProfileID: "ap-1", ExecutorProfileID: "ep-1",
+			Name: "Coordinator", AgentProfileID: "ap-1", TaskAgentProfileID: "ap-1", TaskExecutorProfileID: "ep-1", ExecutorProfileID: "ep-1",
 		})
 		if err != nil {
 			t.Fatalf("CreateCoordinator() unexpected error: %v", err)
@@ -215,7 +215,7 @@ func TestHTTPPatchCoordinator(t *testing.T) {
 	t.Run("200 with the updated coordinator", func(t *testing.T) {
 		h := newHandlersForTest(t, agents, executors, nil)
 		created, err := h.service.CreateCoordinator(context.Background(), testWorkspaceID, CreateCoordinatorRequest{
-			Name: "Coordinator", AgentProfileID: "ap-1", ExecutorProfileID: "ep-1",
+			Name: "Coordinator", AgentProfileID: "ap-1", TaskAgentProfileID: "ap-1", TaskExecutorProfileID: "ep-1", ExecutorProfileID: "ep-1",
 		})
 		if err != nil {
 			t.Fatalf("CreateCoordinator() unexpected error: %v", err)
@@ -235,7 +235,7 @@ func TestHTTPPatchCoordinator(t *testing.T) {
 	t.Run("400 naming the field on a null value", func(t *testing.T) {
 		h := newHandlersForTest(t, agents, executors, nil)
 		created, err := h.service.CreateCoordinator(context.Background(), testWorkspaceID, CreateCoordinatorRequest{
-			Name: "Coordinator", AgentProfileID: "ap-1", ExecutorProfileID: "ep-1",
+			Name: "Coordinator", AgentProfileID: "ap-1", TaskAgentProfileID: "ap-1", TaskExecutorProfileID: "ep-1", ExecutorProfileID: "ep-1",
 		})
 		if err != nil {
 			t.Fatalf("CreateCoordinator() unexpected error: %v", err)
@@ -260,7 +260,7 @@ func TestHTTPDeleteCoordinator(t *testing.T) {
 	t.Run("204 on success", func(t *testing.T) {
 		h := newHandlersForTest(t, agents, executors, nil)
 		created, err := h.service.CreateCoordinator(context.Background(), testWorkspaceID, CreateCoordinatorRequest{
-			Name: "Coordinator", AgentProfileID: "ap-1", ExecutorProfileID: "ep-1",
+			Name: "Coordinator", AgentProfileID: "ap-1", TaskAgentProfileID: "ap-1", TaskExecutorProfileID: "ep-1", ExecutorProfileID: "ep-1",
 		})
 		if err != nil {
 			t.Fatalf("CreateCoordinator() unexpected error: %v", err)
@@ -288,7 +288,7 @@ func TestHTTPListProposals(t *testing.T) {
 		t.Helper()
 		h := newHandlersForTest(t, agents, executors, nil)
 		created, err := h.service.CreateCoordinator(context.Background(), testWorkspaceID, CreateCoordinatorRequest{
-			Name: "Coordinator", AgentProfileID: "ap-1", ExecutorProfileID: "ep-1",
+			Name: "Coordinator", AgentProfileID: "ap-1", TaskAgentProfileID: "ap-1", TaskExecutorProfileID: "ep-1", ExecutorProfileID: "ep-1",
 		})
 		if err != nil {
 			t.Fatalf("CreateCoordinator() unexpected error: %v", err)
@@ -363,7 +363,7 @@ func TestHTTPGetProposal(t *testing.T) {
 	t.Run("200 with the proposal", func(t *testing.T) {
 		h := newHandlersForTest(t, agents, executors, nil)
 		created, err := h.service.CreateCoordinator(context.Background(), testWorkspaceID, CreateCoordinatorRequest{
-			Name: "Coordinator", AgentProfileID: "ap-1", ExecutorProfileID: "ep-1",
+			Name: "Coordinator", AgentProfileID: "ap-1", TaskAgentProfileID: "ap-1", TaskExecutorProfileID: "ep-1", ExecutorProfileID: "ep-1",
 		})
 		if err != nil {
 			t.Fatalf("CreateCoordinator() unexpected error: %v", err)

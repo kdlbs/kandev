@@ -81,6 +81,8 @@ test.describe("Coordinator What it did", () => {
       name: "Activity Coordinator",
       agent_profile_id: seedData.agentProfileId,
       executor_profile_id: seedData.worktreeExecutorProfileId,
+      task_agent_profile_id: seedData.agentProfileId,
+      task_executor_profile_id: seedData.worktreeExecutorProfileId,
     });
 
     await testPage.goto(linkToCoordinatorQueue(seedData.workspaceId, coordinator.id));

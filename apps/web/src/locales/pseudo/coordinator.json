@@ -611,5 +611,16 @@
   "changeDiscard": "Ďĩśćàŕď",
   "changeContextChanged": "Ţĥē ćōńţēxţ ćĥàńĝēď śĩńćē ţĥĩś ŵàś ƥŕōƥōśēď. Ďĩśćàŕď ĩţ, ōŕ àśķ ţĥē ćōōŕďĩńàţōŕ ţō ƥŕōƥōśē àĝàĩń.",
   "changeAlreadySettled": "Ţĥĩś ćĥàńĝē ŵàś àĺŕēàďŷ śēţţĺēď.",
-  "changeActionFailed": "Ţĥàţ ďĩď ńōţ ŵōŕķ. Ńōţĥĩńĝ ćĥàńĝēď. Ţŕŷ àĝàĩń."
+  "changeActionFailed": "Ţĥàţ ďĩď ńōţ ŵōŕķ. Ńōţĥĩńĝ ćĥàńĝēď. Ţŕŷ àĝàĩń.",
+  "taskPairLabel": "Àĝēńţ ƒōŕ ćŕēàţēď ţàśķś",
+  "taskPairHelp": "Ţàśķś ŷōũ àƥƥŕōvē śţàŕţ ŵĩţĥ ţĥĩś àĝēńţ ũńĺēśś ţĥēĩŕ ƀōàŕď, ŵōŕķƒĺōŵ ōŕ ŵōŕķśƥàćē àĺŕēàďŷ śēţś ōńē.",
+  "taskAgentPassthroughWarning": "Ţĥĩś àĝēńţ ƥŕōƒĩĺē ũśēś ĆĹĨ ƥàśśţĥŕōũĝĥ, ŵĥĩćĥ ćŕēàţēď ţàśķś ćàńńōţ ũśē ĥēŕē. Ćĥōōśē àńōţĥēŕ.",
+  "taskAgentMissingWarning": "Ţĥĩś àĝēńţ ƥŕōƒĩĺē ŵàś ŕēḿōvēď. Ćĥōōśē àńōţĥēŕ.",
+  "taskExecutorMissingWarning": "Ţĥĩś ēxēćũţōŕ ƥŕōƒĩĺē ŵàś ŕēḿōvēď. Ćĥōōśē àńōţĥēŕ.",
+  "taskPassthroughDisabledReason": "ĆĹĨ ƥàśśţĥŕōũĝĥ ƥŕōƒĩĺēś ćàńńōţ ŕũń ćŕēàţēď ţàśķś.",
+  "setupErrorTaskAgentProfile": "Ćĥōōśē àń àĝēńţ ƥŕōƒĩĺē ƒōŕ ćŕēàţēď ţàśķś.",
+  "setupErrorTaskExecutor": "Ćĥōōśē àń ēxēćũţōŕ ƥŕōƒĩĺē ƒōŕ ćŕēàţēď ţàśķś.",
+  "setupTaskPairValue": "{{agent}}, {{executor}}",
+  "proposalRunsWith": "Ŕũńś ŵĩţĥ: {{name}}",
+  "proposalNoAgentAvailable": "Ńō àĝēńţ àvàĩĺàƀĺē. Ćĥēćķ Àĝēńţ ƒōŕ ćŕēàţēď ţàśķś ĩń ţĥē ćōōŕďĩńàţōŕ śēţţĩńĝś."
 }

@@ -3,6 +3,8 @@ package coordinator
 import (
 	"context"
 
+	wfmodels "github.com/kandev/kandev/internal/workflow/models"
+
 	taskmodels "github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 	taskservice "github.com/kandev/kandev/internal/task/service"
@@ -27,6 +29,14 @@ type fakeDecisionTaskService struct {
 	createResult taskservice.CreateTaskResult
 	createErr    error
 	createCalls  []*taskservice.CreateTaskRequest
+
+	// stepByID, stepErr, workspaces and workspaceErr drive the created-task
+	// agent chain. A step not in stepByID reads as a step that names its own
+	// agent, so tests that do not care see no addition.
+	stepByID     map[string]*wfmodels.WorkflowStep
+	stepErr      map[string]error
+	workspaces   map[string]*taskmodels.Workspace
+	workspaceErr map[string]error
 
 	settled     bool
 	survivor    *taskmodels.Task
@@ -93,6 +103,26 @@ func (f *fakeDecisionTaskService) GetTaskByExternalID(_ context.Context, _, exte
 		return nil, repoerrors.ErrTaskNotFound
 	}
 	return t, nil
+}
+
+func (f *fakeDecisionTaskService) GetWorkflowStep(_ context.Context, id string) (*wfmodels.WorkflowStep, error) {
+	if err, ok := f.stepErr[id]; ok {
+		return nil, err
+	}
+	if st, ok := f.stepByID[id]; ok {
+		return st, nil
+	}
+	return &wfmodels.WorkflowStep{ID: id, AgentProfileID: "step-agent"}, nil
+}
+
+func (f *fakeDecisionTaskService) GetWorkspace(_ context.Context, id string) (*taskmodels.Workspace, error) {
+	if err, ok := f.workspaceErr[id]; ok {
+		return nil, err
+	}
+	if w, ok := f.workspaces[id]; ok {
+		return w, nil
+	}
+	return &taskmodels.Workspace{ID: id}, nil
 }
 
 var _ DecisionTaskService = (*fakeDecisionTaskService)(nil)

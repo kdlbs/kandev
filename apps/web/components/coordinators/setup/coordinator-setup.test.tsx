@@ -27,6 +27,7 @@ vi.mock("@/lib/api/domains/coordinator-api", async (importOriginal) => ({
 }));
 
 const storeState = {
+  settingsData: { agentsLoaded: true },
   addCoordinator: (...args: unknown[]) => mockAdd(...args),
   agentProfiles: {
     items: [
@@ -163,7 +164,7 @@ describe("CoordinatorSetup navigation", () => {
 });
 
 describe("CoordinatorSetup review", () => {
-  it("lists 12 rows in order with the owner and a Change button per row", () => {
+  it("lists 13 rows in order with the owner and a Change button per row", () => {
     open();
     toReview();
     const rows = screen.getAllByTestId(/^setup-review-row-/);
@@ -172,6 +173,7 @@ describe("CoordinatorSetup review", () => {
         "name",
         "agent",
         "executor",
+        "taskPair",
         "watches",
         "goal",
         "context",
@@ -280,6 +282,8 @@ describe("CoordinatorSetup finish", () => {
       name: PLANNER,
       agent_profile_id: "a1",
       executor_profile_id: "p1",
+      task_agent_profile_id: "a1",
+      task_executor_profile_id: "p1",
       context: "",
       watches: { scope: "all" },
       policy: {

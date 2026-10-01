@@ -6,7 +6,7 @@ system: coordinator
 owners:
   - kandev
 created: 2026-09-26
-last_updated: 2026-09-29
+last_updated: 2026-10-01
 requirements:
   - REQ-COORDINATOR-COORDINATORS-001
   - REQ-COORDINATOR-COORDINATORS-002
@@ -357,11 +357,11 @@ missing `watches` is step `watches`, field `watches.scope`, code
 `policy.actions.create_task`, code `action_missing`; a missing name or
 profile id is step `identity` naming that field.
 
-**Setup-mode rules.** There is no stored coordinator, so the rules that
-compare with a stored state do not apply:
+**Setup-mode rules.** With no stored coordinator, rules that compare with a
+stored state do not apply:
 
-- *Watches.* The stored set is empty, so there is no "equal to stored" rule
-  and no id dropping. `scope: "all"` stores no workflow rows
+- *Watches.* The stored set is empty: no "equal to stored" rule, no id
+  dropping. `scope: "all"` stores no workflow rows
   and ignores `workflow_ids`. `scope: "selected"` needs 1 to 50 unique ids,
   each an existing workflow of this workspace; the first failing check in this
   order is the code: `watches_empty`, `watches_too_many`, `watches_duplicate`,
@@ -372,8 +372,7 @@ compare with a stored state do not apply:
   `done` is ignored and every criterion is stored not done. A present `goal`
   is a full goal: an empty object is 400 `goal.name`, not "no goal".
 
-Two setups at once create two coordinators, and so may a retry after a
-timeout; the page says so (below).
+Two setups at once, or a retry after a timeout, create two coordinators; the page says so.
 
 The web page `settings/workspace/[id]/coordinators/new` renders
 `CoordinatorSetup` while phase 2 is on: a header "Add coordinator", the step
@@ -443,20 +442,21 @@ buttons.
   `create_task`, `message`, `move`, `resume` `requires_approval` and
   `start_agent`, `stop` `denied`; Watches starts as `all`.
 - **Review.** "What it wrote" has the columns Setting, Value and Owned from
-  now on by, and 12 rows in this order (`008.3`):
+  now on by, and 13 rows in this order (`008.3`):
 
   | Setting | Value | Owned from now on by | Change goes to |
   | --- | --- | --- | --- |
   | Name | the trimmed name | Identity | step 1 |
   | Agent profile | its name | Identity | step 1 |
   | Executor | its name | Identity | step 1 |
+  | Agent for created tasks | both names | Identity | step 1 |
   | Watches | "Every board" or the board names in the order of the workspace board list, joined by ", " | Watches | step 2 |
   | Goal | `<milestone>, due <date>, <n> criteria`, or `<milestone>, no due date, <n> criteria`, or "Not set" when skipped | Goal | step 3 |
   | Context | the text up to its first line break, trimmed and cut to 80 code points with a trailing "…" when it was cut or had more lines, or "Not set" | Identity | step 4 |
   | six May do rows, one per action in the order of the May do section | its setting label | May do | step 5 |
 
   The "Change goes to" column only documents where **Change** leads; the page
-  shows three columns and a **Change** button per row (`008.3`). The Goal
+  shows three columns and a **Change** button per row. The Goal
   cell is one `t()` template with `_one`/`_other` count keys and the due
   date as a locale medium date.
 
@@ -465,8 +465,7 @@ buttons.
   the previous step and ends that shortcut. The owner labels are the
   Configure labels of `009.1`.
 - **Finish.** Enabled per `008.4` and only while the goal and context are valid
-  or empty and no request is in flight (disabled from click to response, so
-  a double click sends one request). Results:
+  or empty and no request is in flight (disabled from click to response, so a double click sends one). Results:
   - 201: navigate to the new coordinator's Configure page.
   - 400 with `step`: go to that step, keep every value, show the error beside
     the field named by `field` (`008.6`, control mapping in Step contents).

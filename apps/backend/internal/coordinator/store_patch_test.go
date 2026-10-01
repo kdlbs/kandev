@@ -70,7 +70,7 @@ func TestPatchCoordinator_ValidatorErrorAbortsWithoutWriting(t *testing.T) {
 
 	sentinel := errors.New("profile validation failed")
 	name := "renamed"
-	_, _, err := store.PatchCoordinator(ctx, "ws-1", c.ID, CoordinatorPatch{Name: &name}, func(_ context.Context, _ *Coordinator) error {
+	_, _, err := store.PatchCoordinator(ctx, "ws-1", c.ID, CoordinatorPatch{Name: &name}, func(_ context.Context, _, _ *Coordinator) error {
 		return sentinel
 	})
 	if !errors.Is(err, sentinel) {

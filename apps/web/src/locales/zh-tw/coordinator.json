@@ -611,5 +611,16 @@
   "changeDiscard": "丟棄",
   "changeContextChanged": "自提議以來上下文已更改。請丟棄它，或讓協調器重新提議。",
   "changeAlreadySettled": "此更改已處理完畢。",
-  "changeActionFailed": "操作未成功。未做任何更改。請重試。"
+  "changeActionFailed": "操作未成功。未做任何更改。請重試。",
+  "taskPairLabel": "已建立任務的代理程式",
+  "taskPairHelp": "您批准的任務將使用此代理程式啟動，除非其看板、工作流程或工作區已指定了代理程式。",
+  "taskAgentPassthroughWarning": "此代理程式設定檔使用 CLI 直通，已建立的任務在此無法使用。請選擇其他設定。",
+  "taskAgentMissingWarning": "此代理程式設定檔已被移除。請選擇其他設定。",
+  "taskExecutorMissingWarning": "此執行器設定檔已被移除。請選擇其他設定。",
+  "taskPassthroughDisabledReason": "CLI 直通設定無法執行已建立的任務。",
+  "setupErrorTaskAgentProfile": "請為已建立的任務選擇代理程式設定檔。",
+  "setupErrorTaskExecutor": "請為已建立的任務選擇執行器設定檔。",
+  "setupTaskPairValue": "{{agent}}，{{executor}}",
+  "proposalRunsWith": "執行方式：{{name}}",
+  "proposalNoAgentAvailable": "沒有可用的代理程式。請在協調器設定中檢查「已建立任務的代理程式」。"
 }

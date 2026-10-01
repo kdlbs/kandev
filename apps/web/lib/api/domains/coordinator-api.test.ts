@@ -60,6 +60,8 @@ const coordinator: Coordinator = {
   name: "Backend coordinator",
   agent_profile_id: "agent-1",
   executor_profile_id: "executor-1",
+  task_agent_profile_id: "ap-1",
+  task_executor_profile_id: "ep-1",
   context: "Own the backend surface.",
   conversation_task_id: null,
   created_at: TIMESTAMP,
@@ -112,6 +114,8 @@ describe("createCoordinator", () => {
       name: "Backend coordinator",
       agent_profile_id: "agent-1",
       executor_profile_id: "executor-1",
+      task_agent_profile_id: "ap-1",
+      task_executor_profile_id: "ep-1",
       context: "Own the backend surface.",
     };
     await createCoordinator(WORKSPACE_ID, createRequest, OPTS);

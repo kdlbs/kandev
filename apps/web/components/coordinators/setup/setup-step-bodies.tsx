@@ -62,11 +62,13 @@ export function IdentityStep({
     <div className="space-y-4">
       <StepLine messages={messages} />
       <CoordinatorFormFields
-        only={["name", "agent", "executor"]}
+        only={["name", "agent", "executor", "taskPair"]}
         form={{
           name: state.name,
           agentProfileId: state.agentProfileId,
           executorProfileId: state.executorProfileId,
+          taskAgentProfileId: state.taskAgentProfileId,
+          taskExecutorProfileId: state.taskExecutorProfileId,
           context: "",
         }}
         onChange={(key, value) => {
@@ -74,6 +76,24 @@ export function IdentityStep({
           if (key === "agentProfileId") edit({ agentProfileId: value }, ["agent_profile_id"]);
           if (key === "executorProfileId")
             edit({ executorProfileId: value }, ["executor_profile_id"]);
+          if (key === "taskAgentProfileId") {
+            edit(
+              {
+                taskAgentProfileId: value,
+                taskPairTouched: { ...state.taskPairTouched, agent: true },
+              },
+              ["task_agent_profile_id"],
+            );
+          }
+          if (key === "taskExecutorProfileId") {
+            edit(
+              {
+                taskExecutorProfileId: value,
+                taskPairTouched: { ...state.taskPairTouched, executor: true },
+              },
+              ["task_executor_profile_id"],
+            );
+          }
         }}
         onLeave={leave}
         disabled={false}
@@ -84,6 +104,8 @@ export function IdentityStep({
           name: translated("name"),
           agent_profile_id: translated("agent_profile_id"),
           executor_profile_id: translated("executor_profile_id"),
+          task_agent_profile_id: translated("task_agent_profile_id"),
+          task_executor_profile_id: translated("task_executor_profile_id"),
         }}
       />
     </div>
@@ -172,7 +194,14 @@ export function ContextStep({
       <StepLine messages={messages} />
       <CoordinatorFormFields
         only={["context"]}
-        form={{ name: "", agentProfileId: "", executorProfileId: "", context: state.context }}
+        form={{
+          name: "",
+          agentProfileId: "",
+          executorProfileId: "",
+          taskAgentProfileId: "",
+          taskExecutorProfileId: "",
+          context: state.context,
+        }}
         onChange={(_key, value) => edit({ context: value as string }, ["context"])}
         onLeave={() => leave("context")}
         disabled={false}

@@ -45,6 +45,8 @@ test.describe("Coordinator copilot activity display on a phone viewport", () => 
       name: "Activity Coordinator",
       agent_profile_id: seedData.agentProfileId,
       executor_profile_id: seedData.worktreeExecutorProfileId,
+      task_agent_profile_id: seedData.agentProfileId,
+      task_executor_profile_id: seedData.worktreeExecutorProfileId,
     });
     await testPage.goto(linkToCoordinatorNeedsYou(seedData.workspaceId, coordinator.id));
     const panel = await openCopilot(testPage);

@@ -89,7 +89,7 @@ func TestServiceCreateCoordinator(t *testing.T) {
 	t.Run("creates a trimmed coordinator", func(t *testing.T) {
 		svc := newServiceForTest(t, agents, executors, nil)
 		created, err := svc.CreateCoordinator(context.Background(), workspaceID, CreateCoordinatorRequest{
-			Name: "  Release Coordinator  ", AgentProfileID: "ap-1", ExecutorProfileID: "ep-1", Context: "  standing context  ",
+			Name: "  Release Coordinator  ", AgentProfileID: "ap-1", TaskAgentProfileID: "ap-1", TaskExecutorProfileID: "ep-1", ExecutorProfileID: "ep-1", Context: "  standing context  ",
 		})
 		if err != nil {
 			t.Fatalf("CreateCoordinator() unexpected error: %v", err)
@@ -111,7 +111,7 @@ func TestServiceCreateCoordinator(t *testing.T) {
 	t.Run("invalid name is a FieldError naming name", func(t *testing.T) {
 		svc := newServiceForTest(t, agents, executors, nil)
 		_, err := svc.CreateCoordinator(context.Background(), workspaceID, CreateCoordinatorRequest{
-			Name: "   ", AgentProfileID: "ap-1", ExecutorProfileID: "ep-1",
+			Name: "   ", AgentProfileID: "ap-1", TaskAgentProfileID: "ap-1", TaskExecutorProfileID: "ep-1", ExecutorProfileID: "ep-1",
 		})
 		assertFieldError(t, err, "name")
 	})
@@ -123,7 +123,7 @@ func TestServiceCreateCoordinator(t *testing.T) {
 			over[i] = 'a'
 		}
 		_, err := svc.CreateCoordinator(context.Background(), workspaceID, CreateCoordinatorRequest{
-			Name: "Coordinator", AgentProfileID: "ap-1", ExecutorProfileID: "ep-1", Context: string(over),
+			Name: "Coordinator", AgentProfileID: "ap-1", TaskAgentProfileID: "ap-1", TaskExecutorProfileID: "ep-1", ExecutorProfileID: "ep-1", Context: string(over),
 		})
 		assertFieldError(t, err, "context")
 	})
@@ -131,7 +131,7 @@ func TestServiceCreateCoordinator(t *testing.T) {
 	t.Run("missing agent profile is a FieldError naming agent_profile_id", func(t *testing.T) {
 		svc := newServiceForTest(t, agents, executors, nil)
 		_, err := svc.CreateCoordinator(context.Background(), workspaceID, CreateCoordinatorRequest{
-			Name: "Coordinator", AgentProfileID: "does-not-exist", ExecutorProfileID: "ep-1",
+			Name: "Coordinator", AgentProfileID: "does-not-exist", TaskAgentProfileID: "ap-1", TaskExecutorProfileID: "ep-1", ExecutorProfileID: "ep-1",
 		})
 		assertFieldError(t, err, "agent_profile_id")
 	})
@@ -139,7 +139,7 @@ func TestServiceCreateCoordinator(t *testing.T) {
 	t.Run("missing executor profile is a FieldError naming executor_profile_id", func(t *testing.T) {
 		svc := newServiceForTest(t, agents, executors, nil)
 		_, err := svc.CreateCoordinator(context.Background(), workspaceID, CreateCoordinatorRequest{
-			Name: "Coordinator", AgentProfileID: "ap-1", ExecutorProfileID: "does-not-exist",
+			Name: "Coordinator", AgentProfileID: "ap-1", TaskAgentProfileID: "ap-1", TaskExecutorProfileID: "ep-1", ExecutorProfileID: "does-not-exist",
 		})
 		assertFieldError(t, err, "executor_profile_id")
 	})
@@ -148,7 +148,7 @@ func TestServiceCreateCoordinator(t *testing.T) {
 		wantErr := errors.New("boom")
 		svc := newServiceForTest(t, agents, executors, wantErr)
 		_, err := svc.CreateCoordinator(context.Background(), workspaceID, CreateCoordinatorRequest{
-			Name: "Coordinator", AgentProfileID: "ap-1", ExecutorProfileID: "ep-1",
+			Name: "Coordinator", AgentProfileID: "ap-1", TaskAgentProfileID: "ap-1", TaskExecutorProfileID: "ep-1", ExecutorProfileID: "ep-1",
 		})
 		if !errors.Is(err, wantErr) {
 			t.Fatalf("CreateCoordinator() error = %v, want %v", err, wantErr)
@@ -165,7 +165,7 @@ func TestServiceGetCoordinator(t *testing.T) {
 	t.Run("returns the coordinator and ok/ok statuses", func(t *testing.T) {
 		svc := newServiceForTest(t, agents, executors, nil)
 		created, err := svc.CreateCoordinator(context.Background(), workspaceID, CreateCoordinatorRequest{
-			Name: "Coordinator", AgentProfileID: "ap-1", ExecutorProfileID: "ep-1",
+			Name: "Coordinator", AgentProfileID: "ap-1", TaskAgentProfileID: "ap-1", TaskExecutorProfileID: "ep-1", ExecutorProfileID: "ep-1",
 		})
 		if err != nil {
 			t.Fatalf("CreateCoordinator() unexpected error: %v", err)
@@ -185,7 +185,7 @@ func TestServiceGetCoordinator(t *testing.T) {
 	t.Run("reports a missing agent profile without failing", func(t *testing.T) {
 		svc := newServiceForTest(t, agents, executors, nil)
 		created, err := svc.CreateCoordinator(context.Background(), workspaceID, CreateCoordinatorRequest{
-			Name: "Coordinator", AgentProfileID: "ap-1", ExecutorProfileID: "ep-1",
+			Name: "Coordinator", AgentProfileID: "ap-1", TaskAgentProfileID: "ap-1", TaskExecutorProfileID: "ep-1", ExecutorProfileID: "ep-1",
 		})
 		if err != nil {
 			t.Fatalf("CreateCoordinator() unexpected error: %v", err)
@@ -241,7 +241,7 @@ func TestServiceListCoordinators(t *testing.T) {
 		}
 
 		created, err := svc.CreateCoordinator(ctx, workspaceID, CreateCoordinatorRequest{
-			Name: "Coordinator", AgentProfileID: "ap-1", ExecutorProfileID: "ep-1",
+			Name: "Coordinator", AgentProfileID: "ap-1", TaskAgentProfileID: "ap-1", TaskExecutorProfileID: "ep-1", ExecutorProfileID: "ep-1",
 		})
 		if err != nil {
 			t.Fatalf("CreateCoordinator() unexpected error: %v", err)
@@ -283,13 +283,13 @@ func TestServiceListCoordinators(t *testing.T) {
 		ctx := context.Background()
 
 		busy, err := svc.CreateCoordinator(ctx, workspaceID, CreateCoordinatorRequest{
-			Name: "Busy", AgentProfileID: "ap-1", ExecutorProfileID: "ep-1",
+			Name: "Busy", AgentProfileID: "ap-1", TaskAgentProfileID: "ap-1", TaskExecutorProfileID: "ep-1", ExecutorProfileID: "ep-1",
 		})
 		if err != nil {
 			t.Fatalf("CreateCoordinator() unexpected error: %v", err)
 		}
 		idle, err := svc.CreateCoordinator(ctx, workspaceID, CreateCoordinatorRequest{
-			Name: "Idle", AgentProfileID: "ap-1", ExecutorProfileID: "ep-1",
+			Name: "Idle", AgentProfileID: "ap-1", TaskAgentProfileID: "ap-1", TaskExecutorProfileID: "ep-1", ExecutorProfileID: "ep-1",
 		})
 		if err != nil {
 			t.Fatalf("CreateCoordinator() unexpected error: %v", err)
@@ -337,7 +337,7 @@ func TestServicePatchCoordinator(t *testing.T) {
 	newCoordinator := func(t *testing.T, svc *Service) *Coordinator {
 		t.Helper()
 		created, err := svc.CreateCoordinator(context.Background(), workspaceID, CreateCoordinatorRequest{
-			Name: "Coordinator", AgentProfileID: "ap-1", ExecutorProfileID: "ep-1", Context: "context",
+			Name: "Coordinator", AgentProfileID: "ap-1", TaskAgentProfileID: "ap-1", TaskExecutorProfileID: "ep-1", ExecutorProfileID: "ep-1", Context: "context",
 		})
 		if err != nil {
 			t.Fatalf("CreateCoordinator() unexpected error: %v", err)
@@ -464,7 +464,7 @@ func TestServiceDeleteCoordinator(t *testing.T) {
 	t.Run("deletes the coordinator and calls the hook", func(t *testing.T) {
 		svc := newServiceForTest(t, agents, executors, nil)
 		created, err := svc.CreateCoordinator(context.Background(), workspaceID, CreateCoordinatorRequest{
-			Name: "Coordinator", AgentProfileID: "ap-1", ExecutorProfileID: "ep-1",
+			Name: "Coordinator", AgentProfileID: "ap-1", TaskAgentProfileID: "ap-1", TaskExecutorProfileID: "ep-1", ExecutorProfileID: "ep-1",
 		})
 		if err != nil {
 			t.Fatalf("CreateCoordinator() unexpected error: %v", err)
@@ -518,7 +518,7 @@ func TestServiceProposalReads(t *testing.T) {
 		svc := newServiceForTest(t, agents, executors, nil)
 		ctx := context.Background()
 		created, err := svc.CreateCoordinator(ctx, workspaceID, CreateCoordinatorRequest{
-			Name: "Coordinator", AgentProfileID: "ap-1", ExecutorProfileID: "ep-1",
+			Name: "Coordinator", AgentProfileID: "ap-1", TaskAgentProfileID: "ap-1", TaskExecutorProfileID: "ep-1", ExecutorProfileID: "ep-1",
 		})
 		if err != nil {
 			t.Fatalf("CreateCoordinator() unexpected error: %v", err)
@@ -552,13 +552,13 @@ func TestServiceProposalReads(t *testing.T) {
 		svc := newServiceForTest(t, agents, executors, nil)
 		ctx := context.Background()
 		a, err := svc.CreateCoordinator(ctx, workspaceID, CreateCoordinatorRequest{
-			Name: "A", AgentProfileID: "ap-1", ExecutorProfileID: "ep-1",
+			Name: "A", AgentProfileID: "ap-1", TaskAgentProfileID: "ap-1", TaskExecutorProfileID: "ep-1", ExecutorProfileID: "ep-1",
 		})
 		if err != nil {
 			t.Fatalf("CreateCoordinator() unexpected error: %v", err)
 		}
 		b, err := svc.CreateCoordinator(ctx, workspaceID, CreateCoordinatorRequest{
-			Name: "B", AgentProfileID: "ap-1", ExecutorProfileID: "ep-1",
+			Name: "B", AgentProfileID: "ap-1", TaskAgentProfileID: "ap-1", TaskExecutorProfileID: "ep-1", ExecutorProfileID: "ep-1",
 		})
 		if err != nil {
 			t.Fatalf("CreateCoordinator() unexpected error: %v", err)

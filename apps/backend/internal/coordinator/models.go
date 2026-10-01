@@ -61,6 +61,12 @@ type Coordinator struct {
 	CreatedAt          time.Time
 	UpdatedAt          time.Time
 
+	// TaskAgentProfileID and TaskExecutorProfileID are the Agent for created
+	// tasks pair the approval path adds to a created task when nothing else
+	// names an agent.
+	TaskAgentProfileID    string
+	TaskExecutorProfileID string
+
 	// AutonomyEnabled and CostCeilingSubcents are the phase 3 settings; the
 	// ceiling is in hundredths of a cent, nil when unset.
 	AutonomyEnabled     bool
@@ -131,7 +137,9 @@ type Proposal struct {
 	TargetTaskID     *string
 	StandingOrderIDs []string
 	StartsAgent      bool
-	OutcomeJSON      *string
+	// RunsWith is computed by the proposal read and list routes only.
+	RunsWith    *RunsWith
+	OutcomeJSON *string
 	// RawSpec is the stored spec JSON of a non-create_task kind, whose shape
 	// this package does not parse.
 	RawSpec string

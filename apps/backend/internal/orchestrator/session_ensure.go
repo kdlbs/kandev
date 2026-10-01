@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"context"
 	"fmt"
+	"github.com/kandev/kandev/internal/task/agentprofile"
 	"sync"
 
 	"github.com/kandev/kandev/internal/task/models"
@@ -423,30 +424,41 @@ func (s *Service) tryEnsureExecutionWithBinding(
 	return err
 }
 
-// resolveTaskAgentProfile applies the 5-step resolution chain on the backend:
-// 1) workflow step override, 2) task.metadata.agent_profile_id,
-// 3) workflow default, 4) Office task assignee, 5) workspace default. Returns the resolved profile id
-// (or "" when none resolve) along with the workflow step it loaded (or nil).
-// Returning the step lets callers reuse it (e.g. to gate auto-start) without a
-// second DB lookup.
+// resolveTaskAgentProfile resolves the task's agent profile in the order owned
+// by agentprofile.Resolve: workflow step override, workflow default,
+// task.metadata.agent_profile_id, Office task assignee, workspace default.
+// Returns the resolved profile id (or "" when none resolve) along with the
+// workflow step it loaded (or nil). Returning the step lets callers reuse it
+// (e.g. to gate auto-start) without a second DB lookup.
 func (s *Service) resolveTaskAgentProfile(ctx context.Context, task *models.Task) (string, *wfmodels.WorkflowStep) {
 	step := s.lookupWorkflowStep(ctx, task.WorkflowStepID)
+	in := agentprofile.Input{Assignee: task.AssigneeAgentProfileID}
+	if v, ok := task.Metadata["agent_profile_id"].(string); ok {
+		in.TaskMetadata = v
+	}
 	if step != nil {
-		if id := s.resolveStepAgentProfileForTask(ctx, task, step); id != "" {
-			return id, step
+		in.HasStep = true
+		in.StepSessionTarget = step.SessionTarget != nil
+		if !in.StepSessionTarget {
+			var replaced bool
+			in.StepReplacement, replaced, in.StepProfile = s.stepProfileInputs(task, step)
+			if replaced && in.StepReplacement == "" {
+				in.StepSessionTarget = true
+			}
+			if !in.StepSessionTarget && in.StepReplacement == "" && in.StepProfile == "" {
+				in.WorkflowDefault = s.workflowDefaultProfile(ctx, step)
+			}
 		}
 	}
-	if v, ok := task.Metadata["agent_profile_id"].(string); ok && v != "" {
-		return v, step
-	}
-	if task.AssigneeAgentProfileID != "" {
-		return task.AssigneeAgentProfileID, step
+	if id, src := agentprofile.Resolve(in); src != agentprofile.SourceNone {
+		return id, step
 	}
 	ws, err := s.repo.GetWorkspace(ctx, task.WorkspaceID)
-	if err == nil && ws != nil && ws.DefaultAgentProfileID != nil && *ws.DefaultAgentProfileID != "" {
-		return *ws.DefaultAgentProfileID, step
+	if err == nil && ws != nil && ws.DefaultAgentProfileID != nil {
+		in.WorkspaceDefault = *ws.DefaultAgentProfileID
 	}
-	return "", step
+	id, _ := agentprofile.Resolve(in)
+	return id, step
 }
 
 // lookupWorkflowStep loads a workflow step by id, returning nil when the id

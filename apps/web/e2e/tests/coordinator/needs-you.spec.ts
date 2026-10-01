@@ -22,6 +22,8 @@ test.describe("Coordinator Needs you and Queue", () => {
       name: "Planner",
       agent_profile_id: seedData.agentProfileId,
       executor_profile_id: seedData.worktreeExecutorProfileId,
+      task_agent_profile_id: seedData.agentProfileId,
+      task_executor_profile_id: seedData.worktreeExecutorProfileId,
     });
 
     const title = "Needs You Golden Path";
@@ -85,6 +87,8 @@ test.describe("Coordinator Needs you and Queue", () => {
       name: "Queue Coordinator",
       agent_profile_id: seedData.agentProfileId,
       executor_profile_id: seedData.worktreeExecutorProfileId,
+      task_agent_profile_id: seedData.agentProfileId,
+      task_executor_profile_id: seedData.worktreeExecutorProfileId,
     });
 
     const workingTask = await apiClient.createTaskWithAgent(
@@ -231,6 +235,8 @@ test.describe("Coordinator Needs you and Queue", () => {
         name: "Deep Link Coordinator",
         agent_profile_id: seedData.agentProfileId,
         executor_profile_id: seedData.worktreeExecutorProfileId,
+        task_agent_profile_id: seedData.agentProfileId,
+        task_executor_profile_id: seedData.worktreeExecutorProfileId,
       });
       const task = await apiClient.createTaskWithAgent(
         seedData.workspaceId,

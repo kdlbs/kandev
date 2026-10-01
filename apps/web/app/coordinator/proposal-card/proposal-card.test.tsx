@@ -142,6 +142,44 @@ function statusText(testId: string) {
   return screen.getByTestId(testId).querySelector('p[class*="text-sm"]')?.textContent;
 }
 
+const RUNS_WITH_ID = "proposal-runs-with";
+
+describe("ProposalCard - runs with", () => {
+  const runs = (over: object) => ({
+    agent_profile_id: "ap-1",
+    agent_profile_name: "Claude",
+    source: "step",
+    ...over,
+  });
+
+  it("shows the agent name below the board line", () => {
+    renderCard({ proposal: proposal({ runs_with: runs({}) as never }) });
+    expect(screen.getByTestId(RUNS_WITH_ID).textContent).toBe("Runs with: Claude");
+  });
+
+  it("falls back to the profile id when the name is empty", () => {
+    renderCard({ proposal: proposal({ runs_with: runs({ agent_profile_name: "" }) as never }) });
+    expect(screen.getByTestId(RUNS_WITH_ID).textContent).toBe("Runs with: ap-1");
+  });
+
+  it("names the settings field when no agent is available", () => {
+    renderCard({
+      proposal: proposal({
+        runs_with: runs({ source: "none", agent_profile_id: "", agent_profile_name: "" }) as never,
+      }),
+    });
+    expect(screen.getByTestId(RUNS_WITH_ID).textContent).toContain("Check Agent for created tasks");
+  });
+
+  it("shows the line to a reader and omits it when runs_with is absent", () => {
+    renderCard({ canManage: false, proposal: proposal({ runs_with: runs({}) as never }) });
+    expect(screen.getByTestId(RUNS_WITH_ID)).toBeTruthy();
+    cleanup();
+    renderCard();
+    expect(screen.queryByTestId(RUNS_WITH_ID)).toBeNull();
+  });
+});
+
 describe("ProposalCard - content by state", () => {
   it("shows the pending line", () => {
     renderCard({ proposal: proposal({ status: "pending" }) });

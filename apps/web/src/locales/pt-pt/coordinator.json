@@ -611,5 +611,16 @@
   "changeDiscard": "Descartar",
   "changeContextChanged": "O contexto mudou desde que isto foi proposto. Descarte-o ou peça ao coordenador que proponha novamente.",
   "changeAlreadySettled": "Esta alteração já foi resolvida.",
-  "changeActionFailed": "Não funcionou. Nada foi alterado. Tente novamente."
+  "changeActionFailed": "Não funcionou. Nada foi alterado. Tente novamente.",
+  "taskPairLabel": "Agente para tarefas criadas",
+  "taskPairHelp": "As tarefas que aprovar começam com este agente, a menos que o quadro, o fluxo de trabalho ou o espaço de trabalho já defina um.",
+  "taskAgentPassthroughWarning": "Este perfil de agente usa passagem direta da CLI, que as tarefas criadas não podem usar aqui. Escolha outro.",
+  "taskAgentMissingWarning": "Este perfil de agente foi removido. Escolha outro.",
+  "taskExecutorMissingWarning": "Este perfil de executor foi removido. Escolha outro.",
+  "taskPassthroughDisabledReason": "Os perfis com passagem direta da CLI não podem executar tarefas criadas.",
+  "setupErrorTaskAgentProfile": "Escolha um perfil de agente para as tarefas criadas.",
+  "setupErrorTaskExecutor": "Escolha um perfil de executor para as tarefas criadas.",
+  "setupTaskPairValue": "{{agent}}, {{executor}}",
+  "proposalRunsWith": "Executa com: {{name}}",
+  "proposalNoAgentAvailable": "Nenhum agente disponível. Verifique o Agente para tarefas criadas nas definições do coordenador."
 }
