@@ -854,7 +854,7 @@ jobs:
       - name: Test Windows copy-file glob tokenization
         run: >-
           go test -race -v ./internal/worktree/copyfiles
-          -run '^(TestParseSpecs_GlobTokenization|TestParseSpecs_NativeEscapes|TestCopyPlan_GlobTokenization|TestValidateSpec_GlobAdjacentSuffix)$'
+          -run '^(TestParseSpecs_GlobTokenization|TestParseSpecs_NativeEscapes|TestCopyPlan_GlobTokenization|TestCopyPlan_UnclosedClassKeepsFollowingEntries|TestValidateSpec_GlobAdjacentSuffix)$'
 
       - name: Test Windows managed runtime cache repair
         run: go test -race -v ./internal/agent/managedruntime -run TestRemoveNpxExecutionTreeTreatsMissingWindowsChildAsAbsent

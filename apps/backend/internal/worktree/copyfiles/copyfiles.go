@@ -157,22 +157,23 @@ func ValidateSpec(spec string) error {
 func splitTopLevelCommas(s string) []string {
 	out := make([]string, 0, 4)
 	depth := 0
-	inClass := false
+	canCloseClass := true
 	start := 0
 	for i := 0; i < len(s); i++ {
 		if s[i] == '\\' && filepath.Separator != '\\' {
 			i++
 			continue
 		}
-		if inClass {
-			if s[i] == ']' {
-				inClass = false
-			}
-			continue
-		}
 		switch s[i] {
 		case '[':
-			inClass = true
+			if canCloseClass {
+				end := classClosingBracket(s, i+1)
+				if end < 0 {
+					canCloseClass = false
+				} else {
+					i = end
+				}
+			}
 		case '{':
 			depth++
 		case '}':
@@ -188,6 +189,19 @@ func splitTopLevelCommas(s string) []string {
 	}
 	out = append(out, s[start:])
 	return out
+}
+
+// classClosingBracket ignores POSIX-escaped closing brackets. Once no closer
+// exists, no later opener can form a class, so the splitter scans that tail once.
+func classClosingBracket(s string, start int) int {
+	for i := start; i < len(s); i++ {
+		if s[i] == '\\' && filepath.Separator != '\\' {
+			i++
+		} else if s[i] == ']' {
+			return i
+		}
+	}
+	return -1
 }
 
 // Copy resolves each spec's pattern relative to sourceDir and copies (or, for
@@ -534,6 +548,17 @@ func (s *copyState) expandPattern(pattern string) error {
 		return s.handleMatch(joined, pattern)
 	}
 
+	// Exact escaped paths need full unescaping; doublestar's literal shortcut
+	// unescapes only metacharacters. Existing native paths keep priority above.
+	if literal, ok := unescapeLiteralPattern(pattern); ok {
+		if !filepath.IsAbs(literal) {
+			literal = filepath.Join(s.canonRoot, literal)
+		}
+		if _, err := os.Lstat(literal); err == nil {
+			return s.handleMatch(literal, pattern)
+		}
+	}
+
 	matches, err := doublestar.FilepathGlob(joined)
 	if err != nil {
 		s.warn("invalid pattern %q: %v", pattern, err)
@@ -556,6 +581,26 @@ func (s *copyState) expandPattern(pattern string) error {
 		}
 	}
 	return nil
+}
+
+func unescapeLiteralPattern(pattern string) (string, bool) {
+	if filepath.Separator == '\\' || !strings.Contains(pattern, `\`) {
+		return "", false
+	}
+	var literal strings.Builder
+	for i := 0; i < len(pattern); i++ {
+		switch pattern[i] {
+		case '*', '?', '[', '{':
+			return "", false
+		case '\\':
+			i++
+			if i == len(pattern) {
+				return "", false
+			}
+		}
+		literal.WriteByte(pattern[i])
+	}
+	return literal.String(), true
 }
 
 // handleMatch dispatches a single literal/match path to file or directory copy.

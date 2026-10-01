@@ -75,3 +75,14 @@ working-directory invocation. Native Windows execution awaits CI.
 - POSIX backslash escapes must not become Windows escapes.
 - Class closing brackets and escaped brackets must not leak delimiter state.
 - Main may advance while other approved fixes land; refresh before delivery.
+
+## PR review remediation
+
+PR #4139 exposed an unclosed-class recovery regression and a dependency shortcut
+that misses exact escaped-comma filenames. Permanent regressions failed before
+the correction. The same work order now includes class-closer recovery and a
+contained exact-literal escape fallback after native literal-path priority.
+Final remediation checks passed: package race tests, full changed-revision backend
+lint (zero issues on warmed-cache retry), all named specification/public-doc and
+workflow validators, documentation coverage preflight, and diff whitespace checks.
+The work order records the initial cold-cache timeout and exact final results.

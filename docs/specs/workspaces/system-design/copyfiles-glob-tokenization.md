@@ -22,8 +22,11 @@ and remote planning. Executor transport and task setup remain separate consumers
 ## Tokenizer and consumers
 
 `splitTopLevelCommas` scans the original string without rewriting pattern bytes.
-It tracks brace alternation depth and character-class state. Only commas outside
-both states delimit entries. Class contents cannot alter brace depth. POSIX
+It tracks brace alternation depth and skips classes through an unescaped closing
+bracket. An opener without a closer remains outside class grouping, preserving
+independent following entries and their non-fatal warnings. Once no closer
+exists, later openers cannot form a class; the scan stays linear. Class contents
+cannot alter brace depth. POSIX
 backslashes consume the next byte for syntax tracking, including inside classes;
 Windows backslashes remain separators, consistent with `doublestar.FilepathGlob`
 normalizing native paths. Nested alternations retain their existing behavior.
@@ -37,7 +40,11 @@ No schema migration or new setting is needed.
 
 `Manager.copyConfiguredFiles` supplies `ParseSpecs` output to `Copy` before setup.
 The remote lifecycle path supplies `Parse` output to `Plan`; symlink modes become
-bytes remotely. Both expand through the existing `doublestar.FilepathGlob` path.
+bytes remotely. Both retain native literal-path priority, then resolve fully unescaped POSIX
+exact paths before `doublestar.FilepathGlob`. The dependency's literal shortcut
+unescapes metacharacters only, so exact escaped commas need this contained
+literal fallback. Unescaped glob metacharacters and dangling escapes keep the
+existing glob/error path. Pattern bytes and native Windows paths stay unchanged.
 Tests exercise these public package pipelines using temporary source and target
 directories, checking exact paths, bytes, warnings, and mode precedence.
 

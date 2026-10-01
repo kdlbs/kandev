@@ -60,7 +60,7 @@ Run focused failing tests first with `go test ./internal/worktree/copyfiles
 Native Windows coverage runs in the existing CI `test-windows` job:
 
 ```bash
-(cd apps/backend && go test -race -v ./internal/worktree/copyfiles -run '^(TestParseSpecs_GlobTokenization|TestParseSpecs_NativeEscapes|TestCopyPlan_GlobTokenization|TestValidateSpec_GlobAdjacentSuffix)$')
+(cd apps/backend && go test -race -v ./internal/worktree/copyfiles -run '^(TestParseSpecs_GlobTokenization|TestParseSpecs_NativeEscapes|TestCopyPlan_GlobTokenization|TestCopyPlan_UnclosedClassKeepsFollowingEntries|TestValidateSpec_GlobAdjacentSuffix)$')
 ```
 
 When bare Node is absent, resolve the configured runtime through
@@ -121,3 +121,25 @@ only for genuine platform-specific patterns or native links.
 The first public-doc test invocation from `apps/` failed on a root-relative
 plugin-doc path. Running the same tests from repository root passed; no validator
 or unrelated document was changed.
+
+## PR review remediation
+
+Codex and Greptile identified the same unclosed-class regression; CodeRabbit
+identified exact escaped-comma matching missing the dependency's literal fast
+path. Permanent tests reproduced both failures at `f01002fa8` before remediation.
+Restore independent entries for an unclosed class and add an exact-literal escape
+fallback after native literal priority. Both corrections stay in copyfiles with
+unchanged validation policy and containment. Final remediation results:
+
+- Focused RED tests reproduced both reviewer findings before the correction.
+- Full `go test -race ./internal/worktree/copyfiles`: passed after the final edit.
+- Full backend `golangci-lint run ./... --new-from-rev=08e4ffdb99caf40b0df5baa67b29cf4313188f15 --timeout=5m`: passed, zero issues, with `GOMAXPROCS=2`.
+  The first cold-cache run reported zero issues but timed out; a warmed-cache
+  retry of the same command passed without bypass.
+- Catalog validation, 36 spec-linter tests, full spec lint: passed.
+- Public validator tests (62), live public validator (47 pages): passed.
+- Backend workflow contract (10), action pinning (9): passed.
+- Documentation coverage preflight: covered, no errors.
+- Diff whitespace checks: passed.
+- Native exact-path priority is covered with distinct escaped and literal files.
+  Malformed-class recovery verifies the following entry survives with one warning.

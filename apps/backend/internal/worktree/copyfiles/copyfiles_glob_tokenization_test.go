@@ -18,6 +18,7 @@ func TestParseSpecs_GlobTokenization(t *testing.T) {
 		name, spec string
 		want       []PatternSpec
 	}{
+		{"unclosed class", `config/[a.env, .env.local`, toSpecs(`config/[a.env`, `.env.local`)},
 		{"class comma", `config/[a,b].env, .env.local`, toSpecs(`config/[a,b].env`, `.env.local`)},
 		{"class opening brace", `config/[{].env, .env.local`, toSpecs(`config/[{].env`, `.env.local`)},
 		{"class closing brace", `config/{[}],dev}.env, .env.local`, toSpecs(`config/{[}],dev}.env`, `.env.local`)},
@@ -80,6 +81,7 @@ func TestCopyPlan_GlobTokenization(t *testing.T) {
 		{"class comma", `config/[a,b].env`, []string{"config/a.env", "config/b.env"}, false},
 		{"class brace", `config/[{].env, .env.local`, []string{"config/{.env", ".env.local"}, false},
 		{"escaped brace", `config/\{.env, .env.local`, []string{"config/{.env", ".env.local"}, true},
+		{"escaped exact comma", `config/a\,b.env, .env.local`, []string{"config/a,b.env", ".env.local"}, true},
 		{"escaped comma", `config/a\,b*.env, .env.local`, []string{"config/a,b.env", ".env.local"}, true},
 		{"negated class", `config/[!a,b{].env, .env.local`, []string{"config/c.env", ".env.local"}, false},
 		{"nested alternation", `config/{a,{b,c}}.env, .env.local`, []string{"config/a.env", "config/b.env", "config/c.env", ".env.local"}, false},
@@ -180,5 +182,52 @@ func TestValidateSpec_GlobAdjacentSuffix(t *testing.T) {
 		if err := ValidateSpec(spec); err == nil {
 			t.Errorf("ValidateSpec(%q) accepted missing suffix path", spec)
 		}
+	}
+}
+
+// @covers AC-WORKSPACES-COPYFILES-GLOB-TOKENIZATION-001.3
+func TestCopyPlan_UnclosedClassKeepsFollowingEntries(t *testing.T) {
+	t.Parallel()
+	src, dst := t.TempDir(), t.TempDir()
+	writeFile(t, filepath.Join(src, ".env.local"), "LOCAL=1", 0o600)
+	spec := `config/[a.env, .env.local`
+	copied, warnings, err := Copy(context.Background(), src, dst, ParseSpecs(spec), nil)
+	if err != nil || len(warnings) != 1 {
+		t.Errorf("Copy warnings=%v err=%v", warnings, err)
+	}
+	if !reflect.DeepEqual(copied, []string{".env.local"}) {
+		t.Errorf("Copy=%v, want .env.local", copied)
+	}
+	entries, warnings, err := Plan(context.Background(), src, Parse(spec), nil)
+	if err != nil || len(warnings) != 1 {
+		t.Errorf("Plan warnings=%v err=%v", warnings, err)
+	}
+	if len(entries) != 1 || entries[0].RelPath != ".env.local" || string(entries[0].Content) != "LOCAL=1" {
+		t.Errorf("Plan=%v, want .env.local bytes", entries)
+	}
+}
+
+// @covers AC-WORKSPACES-COPYFILES-GLOB-TOKENIZATION-001.2
+func TestCopyPlan_EscapedExactCommaPreservesLiteralPath(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX literal backslash filename")
+	}
+	src, dst := t.TempDir(), t.TempDir()
+	writeFile(t, filepath.Join(src, `a\,b.env`), "LITERAL=1", 0o600)
+	writeFile(t, filepath.Join(src, "a,b.env"), "ESCAPED=1", 0o600)
+	spec := `a\,b.env`
+	copied, warnings, err := Copy(context.Background(), src, dst, ParseSpecs(spec), nil)
+	if err != nil || len(warnings) != 0 || !reflect.DeepEqual(copied, []string{spec}) {
+		t.Fatalf("Copy=%v warnings=%v err=%v", copied, warnings, err)
+	}
+	if got := readFile(t, filepath.Join(dst, spec)); got != "LITERAL=1" {
+		t.Errorf("Copy content=%q", got)
+	}
+	entries, warnings, err := Plan(context.Background(), src, Parse(spec), nil)
+	if err != nil || len(warnings) != 0 || len(entries) != 1 {
+		t.Fatalf("Plan=%v warnings=%v err=%v", entries, warnings, err)
+	}
+	if entries[0].RelPath != spec || string(entries[0].Content) != "LITERAL=1" {
+		t.Errorf("Plan=%v", entries)
 	}
 }
