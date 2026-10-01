@@ -10,8 +10,8 @@ function file(path = README_PATH): FileInfo {
   return { path, status: "modified", staged: false };
 }
 
-function status(files: Record<string, FileInfo>): GitStatusEntry {
-  return { files } as GitStatusEntry;
+function status(files: Record<string, FileInfo>, repository_name?: string): GitStatusEntry {
+  return { files, ...(repository_name === undefined ? {} : { repository_name }) } as GitStatusEntry;
 }
 
 describe("buildReviewGitStatusFiles", () => {
@@ -134,20 +134,17 @@ describe("buildReviewGitStatusFiles", () => {
 });
 
 describe("nested repository review status", () => {
-  it("keeps the live root status while submodule statuses hydrate", () => {
-    const rootDiff = "@@ -1 +1,2 @@\n parent base\n+parent working-tree change\n";
+  it("does not treat the latest nested status as the root while scopes hydrate", () => {
     const outerScope = "vendor/lib";
     const innerScope = "vendor/lib/vendor/inner";
     const innerPath = "src/lib.ts";
-    const rootKey = `\u0000${README_PATH}`;
     const outerKey = `${outerScope}\u0000${README_PATH}`;
     const innerKey = `${innerScope}\u0000${innerPath}`;
-    const rootFiles = { [README_PATH]: { ...file(), diff: rootDiff } };
     const outerFiles = { [README_PATH]: file() };
     const innerFiles = { [innerPath]: file(innerPath) };
 
     const result = buildReviewGitStatusFiles(
-      status(rootFiles),
+      status(outerFiles, outerScope),
       [
         { repository_name: outerScope, status: status(outerFiles) },
         { repository_name: innerScope, status: status(innerFiles) },
@@ -156,11 +153,7 @@ describe("nested repository review status", () => {
     );
 
     expect(result.isMultiRepo).toBe(true);
-    expect(result.files?.[rootKey]).toMatchObject({
-      path: README_PATH,
-      repository_name: "",
-      diff: rootDiff,
-    });
+    expect(result.files?.[`\u0000${README_PATH}`]).toBeUndefined();
     expect(result.files?.[outerKey]).toMatchObject({
       path: README_PATH,
       repository_name: outerScope,

@@ -404,16 +404,27 @@ func TestGetGitStatus_FreshBypassesStaleCache(t *testing.T) {
 	runGit(t, repoDir, "add", ".")
 	runGit(t, repoDir, "commit", "-m", "add tracked")
 
-	// Dirty the worktree and prime the cache by running an update.
+	// Dirty the worktree and capture the status that will become the stale
+	// cache snapshot. Seed the cache directly because GetGitStatus falls back
+	// to a live read when the cache is empty, which cannot prove it was primed.
 	writeFile(t, repoDir, "tracked.txt", "v2")
-	wt.updateGitStatus(ctx)
-
-	cached, err := wt.GetGitStatus(ctx, false)
+	cached, err := wt.getGitStatus(ctx)
 	if err != nil {
-		t.Fatalf("priming GetGitStatus failed: %v", err)
+		t.Fatalf("capturing stale status failed: %v", err)
 	}
 	if _, ok := cached.Files["tracked.txt"]; !ok {
-		t.Fatalf("expected priming run to cache tracked.txt as modified; got Files=%v", mapKeys(cached.Files))
+		t.Fatalf("expected captured status to contain modified tracked.txt; got Files=%v", mapKeys(cached.Files))
+	}
+	wt.mu.Lock()
+	wt.currentStatus = cached
+	wt.mu.Unlock()
+
+	primed, err := wt.GetGitStatus(ctx, false)
+	if err != nil {
+		t.Fatalf("primed GetGitStatus failed: %v", err)
+	}
+	if _, ok := primed.Files["tracked.txt"]; !ok {
+		t.Fatalf("expected seeded cache to contain tracked.txt; got Files=%v", mapKeys(primed.Files))
 	}
 
 	// Simulate the bug: commit the file but DO NOT refresh the tracker (this

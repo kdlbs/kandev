@@ -50,20 +50,6 @@ function buildMultiRepoReviewFiles(
   return files;
 }
 
-function includeLegacyRootStatusWhileNestedScopesHydrate(
-  reviewGitStatus: GitStatusEntry | undefined,
-  statusByRepo: Array<{ repository_name: string; status: GitStatusEntry }>,
-  taskRepositoryCount: number,
-): Array<{ repository_name: string; status: GitStatusEntry }> {
-  const hasRootStatus = statusByRepo.some((entry) => entry.repository_name === "");
-  // A single task repository keeps its root status on the legacy status
-  // channel. Promote it while nested repository statuses hydrate.
-  if (hasRootStatus || taskRepositoryCount !== 1 || !reviewGitStatus?.files) {
-    return statusByRepo;
-  }
-  return [{ repository_name: "", status: reviewGitStatus }, ...statusByRepo];
-}
-
 export function buildReviewGitStatusFiles(
   reviewGitStatus: GitStatusEntry | undefined,
   statusByRepo: Array<{ repository_name: string; status: GitStatusEntry }>,
@@ -100,12 +86,9 @@ export function buildReviewGitStatusFiles(
     };
   }
 
-  const normalizedStatuses = includeLegacyRootStatusWhileNestedScopesHydrate(
-    reviewGitStatus,
-    statusByRepo,
-    taskRepositoryCount,
-  );
-  const files = buildMultiRepoReviewFiles(normalizedStatuses);
+  // `reviewGitStatus` is the latest status from any repository in a multi-repo
+  // task. Only the per-repository map can identify the real workspace root.
+  const files = buildMultiRepoReviewFiles(statusByRepo);
   return {
     files: Object.keys(files).length > 0 ? files : null,
     isMultiRepo: true,

@@ -9,6 +9,20 @@ import {
   readGitValue,
 } from "./submodule-review-helpers";
 
+type E2EReviewStoreWindow = Window & {
+  __KANDEV_E2E_STORE__?: {
+    getState: () => {
+      environmentIdBySessionId: Record<string, string>;
+      gitStatus: {
+        byEnvironmentRepo: Record<
+          string,
+          Record<string, { files: Record<string, { diff?: string }> }>
+        >;
+      };
+    };
+  };
+};
+
 test.describe("Submodule review fixture", () => {
   test("cleans source repositories when setup fails", async ({ apiClient, seedData, backend }) => {
     const tempRoot = fs.mkdtempSync(path.join(backend.tmpDir, "submodule-review-failure-"));
@@ -79,6 +93,16 @@ test.describe("Nested submodule Review", () => {
         await outerNode.getByRole("button").click();
       }
       await expect(innerNode).toBeVisible();
+
+      const rootReadmeDiff = () =>
+        testPage.evaluate((sessionId) => {
+          const state = (window as E2EReviewStoreWindow).__KANDEV_E2E_STORE__?.getState();
+          const envId = state?.environmentIdBySessionId[sessionId] ?? sessionId;
+          return state?.gitStatus.byEnvironmentRepo[envId]?.[""]?.files["README.md"]?.diff ?? "";
+        }, fixture.sessionId);
+      await expect
+        .poll(rootReadmeDiff, { timeout: 45_000 })
+        .toContain("parent working-tree change");
 
       const readmeRows = review.locator(
         '[data-testid="review-file-row"][data-file-path="README.md"]',
