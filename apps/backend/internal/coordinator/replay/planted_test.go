@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -24,6 +25,10 @@ type plantedCandidate struct {
 	Guard     string `json:"guard"`
 	Verdict   string `json:"verdict"`
 	GuardOnly bool   `json:"guardOnly"`
+
+	Flips            []string `json:"flips"`
+	HeldOutCandidate int64    `json:"heldOutCandidate"`
+	HeldOutBaseline  int64    `json:"heldOutBaseline"`
 }
 
 func loadJSON(t *testing.T, name string, into any) {
@@ -101,6 +106,16 @@ func TestPlantedCandidates(t *testing.T) {
 			}
 			if res.Guard != c.Guard || res.Verdict != c.Verdict {
 				t.Fatalf("%s: guard %s verdict %s (reason %q), recorded %s/%s", c.Name, res.Guard, res.Verdict, res.Reason, c.Guard, c.Verdict)
+			}
+			var flips []string
+			for _, f := range res.Flips {
+				flips = append(flips, f.TurnID)
+			}
+			if !reflect.DeepEqual(flips, c.Flips) && (len(flips) != 0 || len(c.Flips) != 0) {
+				t.Fatalf("%s: flips %v, recorded %v", c.Name, flips, c.Flips)
+			}
+			if *res.HeldOutCandidateScore != c.HeldOutCandidate || *res.HeldOutBaselineScore != c.HeldOutBaseline {
+				t.Fatalf("%s: held-out scores %d/%d, recorded %d/%d", c.Name, *res.HeldOutCandidateScore, *res.HeldOutBaselineScore, c.HeldOutCandidate, c.HeldOutBaseline)
 			}
 			if res.HeldOutCompared < MinHeldOut {
 				t.Fatalf("held-out compared %d: the fixture must hold at least %d", res.HeldOutCompared, MinHeldOut)

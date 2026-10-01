@@ -64,6 +64,35 @@ func TestReplayCases_SelectTurnsGroupsAndOrder(t *testing.T) {
 	}
 }
 
+func TestReplayCases_TiesBreakByTurnIDDescendingInBothGroups(t *testing.T) {
+	s := newTestStore(t)
+	now := time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)
+	for i := range 48 {
+		seedReplayTurn(t, s, fmt.Sprintf("a%02d", i), now.Add(-time.Duration(i+2)*time.Hour), replay.DecisionApproved, false)
+	}
+	for _, id := range []string{"b1", "b2"} {
+		seedReplayTurn(t, s, id, now.Add(-time.Hour), replay.DecisionApproved, false)
+	}
+	for _, id := range []string{"o1", "o2", "o3"} {
+		seedReplayTurn(t, s, id, now.Add(-30*24*time.Hour), replay.DecisionRejected, true)
+	}
+	turns, err := NewReplayCases(s).SelectTurns(context.Background(), "c1", now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(turns) != 53 {
+		t.Fatalf("turns = %d", len(turns))
+	}
+	var got []string
+	for _, i := range []int{0, 1, 2, 49, 50, 51, 52} {
+		got = append(got, turns[i].ID)
+	}
+	want := []string{"b2", "b1", "a00", "a47", "o3", "o2", "o1"}
+	if fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Fatalf("order %v, want %v", got, want)
+	}
+}
+
 func TestReplayCases_ReadsAndNotFound(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()

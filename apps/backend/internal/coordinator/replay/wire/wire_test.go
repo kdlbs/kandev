@@ -99,6 +99,23 @@ func (r runner) ExecuteProfilePrompt(context.Context, string, string) (*hostutil
 	return r.res, r.err
 }
 
+type recordingRunner struct{ profile, prompt string }
+
+func (r *recordingRunner) ExecuteProfilePrompt(_ context.Context, profile, prompt string) (*hostutility.PromptResult, error) {
+	r.profile, r.prompt = profile, prompt
+	return &hostutility.PromptResult{Response: "[]"}, nil
+}
+
+func TestPromptsPassOnlyTheProfileAndPrompt(t *testing.T) {
+	rec := &recordingRunner{}
+	if _, err := (Prompts{Runner: rec}).Run(t.Context(), "prof-1", "the prompt"); err != nil {
+		t.Fatal(err)
+	}
+	if rec.profile != "prof-1" || rec.prompt != "the prompt" {
+		t.Fatalf("runner saw %q %q", rec.profile, rec.prompt)
+	}
+}
+
 func TestPrompts(t *testing.T) {
 	got, err := Prompts{Runner: runner{res: &hostutility.PromptResult{Response: "[]", PromptTokens: 7, ResponseTokens: 2, Model: "ignored"}}}.Run(t.Context(), "p", "x")
 	if err != nil || got != (replay.Reply{Text: "[]", PromptTokens: 7, ResponseTokens: 2}) {
