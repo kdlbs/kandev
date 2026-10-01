@@ -41,7 +41,7 @@
   "gitlabMergeRequest": "GitLab 머지 리퀘스트",
   "goToTask": "작업으로 이동",
   "group": "그룹",
-  "groupTasksIntoSectionsByState": "작업을 상태, 워크플로, 리포지토리별로 또는 그룹 없이 섹션으로 묶습니다.",
+  "groupTasksIntoSectionsByWorkflowStep": "작업을 워크플로 단계, 워크플로, 리포지토리별 섹션으로 묶거나 그룹화하지 않습니다.",
   "healthIssues": "상태 문제",
   "improveKandev": "Kandev 개선",
   "jiraTicket": "Jira 티켓",

@@ -2563,5 +2563,13 @@
   "managedCloneRelocationConfirm": "옮기고 재개",
   "sessionRecoveryResumeDescription": "재개하면 이전 메시지와 문맥이 유지됩니다.",
   "sessionRecoveryFreshDescription": "새로 시작하면 이전 대화 문맥 없이 같은 워크스페이스를 사용합니다.",
-  "sessionRecoveryCorruptedDescription": "저장된 세션 상태가 손상되어 재개하면 다시 실패할 가능성이 큽니다. 새 세션을 시작하세요."
+  "sessionRecoveryCorruptedDescription": "저장된 세션 상태가 손상되어 재개하면 다시 실패할 가능성이 큽니다. 새 세션을 시작하세요.",
+  "gitStatusChecking": "변경된 파일을 확인하는 중...",
+  "gitStatusUnavailable": "Git 상태를 확인할 수 없습니다",
+  "gitStatusRefreshFailedWithData": "새로 고침에 실패했습니다. 마지막으로 확인한 변경 사항을 표시합니다.",
+  "gitStatusDetailsPending": "변경된 파일을 확인했습니다. diff를 불러오는 중입니다.",
+  "gitStatusRepositoryUnavailable": "다음 리포지토리를 새로 고치지 못했습니다: {{repository}}",
+  "gitDiffLoading": "diff를 불러오는 중입니다",
+  "gitDiffUnavailable": "diff를 사용할 수 없습니다",
+  "gitStatusRetry": "다시 시도"
 }

@@ -356,5 +356,14 @@
   "providerPassthroughUnsupported": "OpenAI 호환 공급자를 사용하려면 CLI 패스스루를 비활성화하세요.",
   "nativeCodexUnavailableTitle": "네이티브 Codex 앱 서버를 사용할 수 없음",
   "nativeCodexUnavailable": "저장된 프로필은 유지되지만 Codex 앱 서버 기능이 꺼져 있는 동안에는 편집, 복제, 활성화 또는 시작할 수 없습니다. 프로필을 삭제하거나 설정에서 기능을 켤 수 있습니다.",
-  "nativeCodexUnavailableShort": "기능 꺼짐"
+  "nativeCodexUnavailableShort": "기능 꺼짐",
+  "minimaxLoginDescription": "MiniMax 계정에 로그인합니다. 자격 증명은 {{dataDir}}에 저장됩니다.",
+  "minimaxDescription": "네이티브 ACP 서버와 구독 로그인을 사용하는 MiniMax Code입니다.",
+  "minimaxPassthroughLabel": "CLI 패스스루",
+  "minimaxPassthroughDescription": "채팅 인터페이스 대신 터미널을 바로 표시합니다.",
+  "minimaxChooseRegionTitle": "MiniMax 계정 지역",
+  "minimaxChooseRegionDescription": "MiniMax 구독 계정의 지역을 선택하세요.",
+  "minimaxRegionCN": "중국 본토",
+  "minimaxRegionGlobal": "글로벌",
+  "minimaxLoginConflict": "다른 로그인 명령이 이미 실행 중입니다. 다시 시도하기 전에 해당 터미널을 닫으세요."
 }

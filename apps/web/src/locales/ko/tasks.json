@@ -22,7 +22,7 @@
   "group": "그룹",
   "groupByNone": "없음",
   "groupByRepository": "리포지토리",
-  "groupByState": "상태",
+  "groupByWorkflowStep": "워크플로 단계",
   "groupByWorkflow": "워크플로",
   "ungrouped": "그룹 없음",
   "loading": "불러오는 중...",
@@ -56,5 +56,9 @@
   "unarchivedBranchesMissing_one": "{{branches}} 브랜치는 더 이상 로컬이나 원격에 없습니다. 다음 세션은 기본 브랜치에서 새로 시작합니다.",
   "unarchivedBranchesMissing_other": "{{branches}} 브랜치는 더 이상 로컬이나 원격에 없습니다. 다음 세션은 기본 브랜치에서 새로 시작합니다.",
   "unarchivedTaskRestored": "작업이 복원되었습니다.",
-  "unarchiveTask": "작업 아카이브 해제"
+  "unarchiveTask": "작업 아카이브 해제",
+  "noWorkflowStep": "워크플로 단계 없음",
+  "loadingWorkflowStep": "워크플로 단계를 불러오는 중...",
+  "unknownWorkflowStep": "알 수 없는 워크플로 단계",
+  "workflowStepSection": "{{workflow}} / {{step}}"
 }
