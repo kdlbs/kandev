@@ -8,6 +8,9 @@ import (
 // activityTool is the phase-2 read tool over the coordinator's own activity.
 const activityTool = "list_coordinator_activity_kandev"
 
+// turnsTool is the phase 3.1 read tool over the coordinator's own turn ledger.
+const turnsTool = "list_coordinator_turns_kandev"
+
 var readTools = []string{
 	"list_tasks_kandev", "get_task_conversation_kandev",
 	"list_workflows_kandev", "list_workflow_steps_kandev",
@@ -33,6 +36,12 @@ var proposeOrder = []Action{ActionCreateTask, ActionMessage, ActionMove, ActionR
 // the activity tool, and each propose tool whose action the policy allows;
 // phase3 adds the improvement tool.
 func ToolNames(p Policy, phase2, phase3 bool) []string {
+	return ToolNamesPhase31(p, phase2, phase3, false)
+}
+
+// ToolNamesPhase31 is ToolNames with the phase 3.1 turn ledger tool added when
+// phase31 is true.
+func ToolNamesPhase31(p Policy, phase2, phase3, phase31 bool) []string {
 	names := append([]string{}, readTools...)
 	if !phase2 {
 		return append(names, proposeTool[ActionCreateTask])
@@ -45,6 +54,9 @@ func ToolNames(p Policy, phase2, phase3 bool) []string {
 	}
 	if phase3 {
 		names = append(names, improvementTool)
+	}
+	if phase31 {
+		names = append(names, turnsTool)
 	}
 	return names
 }
@@ -76,6 +88,7 @@ var actionTools = map[string]string{
 	mcpcontract.ActionProposeMove:    "propose_move_kandev",
 
 	mcpcontract.ActionProposeImprovement: improvementTool,
+	mcpcontract.ActionListTurns:          turnsTool,
 }
 
 // ToolForAction returns the MCP tool name that exposes a WebSocket action.

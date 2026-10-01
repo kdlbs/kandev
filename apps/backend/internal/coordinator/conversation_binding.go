@@ -20,7 +20,7 @@ func (s *Service) stampToolPolicy(metadata map[string]interface{}, c *Coordinato
 		WorkspaceID:        c.WorkspaceID,
 		ConversationTaskID: conversationTaskID,
 		PolicyRevision:     c.PolicyRevision,
-		ToolNames:          ToolNames(s.policyFor(c), true, s.phase3),
+		ToolNames:          ToolNamesPhase31(s.policyFor(c), true, s.phase3, s.phase31),
 	})
 	if err != nil {
 		return err

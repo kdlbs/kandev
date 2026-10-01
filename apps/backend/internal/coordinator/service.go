@@ -138,9 +138,10 @@ type Service struct {
 	phase3 bool
 
 	// phase31 is true when phase 3.1 is effective (phase 3 effective and
-	// features.coordinatorPhase31): the pause route and controls and the
-	// project-scope write surface and its reads exist. The pause gate and the
-	// stored project scope are enforced whatever its value.
+	// features.coordinatorPhase31): the pause route and controls, the
+	// project-scope write surface and its reads, and the turn ledger read
+	// surface exist. The pause gate and the stored project scope are enforced
+	// whatever its value.
 	phase31 bool
 	// automatic holds the automatic path's injectable seams.
 	automatic automaticState
@@ -675,6 +676,15 @@ func (s *Service) CoordinatorProfilesReady(ctx context.Context, coordinatorID st
 		return false, fmt.Errorf("compute profile status: %w", err)
 	}
 	return agentStatus == ProfileStatusOK && executorStatus == ProfileStatusOK, nil
+}
+
+// WorkspaceIDOf returns the workspace a coordinator belongs to.
+func (s *Service) WorkspaceIDOf(ctx context.Context, coordinatorID string) (string, error) {
+	found, err := s.store.GetCoordinatorByID(ctx, coordinatorID)
+	if err != nil {
+		return "", err
+	}
+	return found.WorkspaceID, nil
 }
 
 // CoordinatorStandingInstructionsData returns coordinatorID's name and

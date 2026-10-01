@@ -36,6 +36,7 @@ var coordinatorSurfaceActions = map[string]struct{}{
 	coordinator.ActionListActivity:   {},
 
 	coordinator.ActionProposeImprovement: {},
+	coordinator.ActionListTurns:          {},
 }
 
 // coordinatorPrincipalOnlyActions are registered coordinator-surface actions
@@ -53,6 +54,7 @@ var coordinatorPrincipalOnlyActions = map[string]struct{}{
 	coordinator.ActionListActivity:   {},
 
 	coordinator.ActionProposeImprovement: {},
+	coordinator.ActionListTurns:          {},
 }
 
 // authorizeCoordinatorRequest is the one execution-time boundary for the
@@ -82,6 +84,9 @@ func (h *Handlers) authorizeCoordinatorRequest(ctx context.Context, msg *ws.Mess
 		return coordinatorUnknownAction(msg)
 	}
 	if msg.Action == coordinator.ActionProposeImprovement && (h.coordinatorSvc == nil || !h.coordinatorSvc.Phase3Enabled()) {
+		return coordinatorUnknownAction(msg)
+	}
+	if msg.Action == coordinator.ActionListTurns && (h.coordinatorSvc == nil || !h.coordinatorSvc.Phase31Enabled() || h.coordinatorTurns == nil) {
 		return coordinatorUnknownAction(msg)
 	}
 	if _, principalOnly := coordinatorPrincipalOnlyActions[msg.Action]; principalOnly && !isCoordinator {

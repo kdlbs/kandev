@@ -325,11 +325,11 @@ var registrations = []runtimeFlagRegistration{
 			EnvVar:      "KANDEV_FEATURES_COORDINATOR_PHASE31",
 			Kind:        KindFeature,
 			Label:       "Coordinator record and measure",
-			Description: "Adds pausing a coordinator, the recorded-turn views and the Projects scope for Watches. Requires Workspace coordinators, Coordinator control and Coordinator autonomy.",
+			Description: "Adds pausing a coordinator, the Projects scope for Watches and the coordinator's read of its own turn history. Turns are recorded whether or not this is on. Requires Workspace coordinators, Coordinator control and Coordinator autonomy.",
 			Stability:   StabilityExperimental,
 			RiskLevel:   RiskMedium,
-			RiskDescription: "Adds controls that stop an unattended coordinator turn and narrow what a coordinator can see and act on by project. " +
-				"A paused coordinator stays paused and a stored Projects scope stays enforced while the controls are off. " +
+			RiskDescription: "Adds controls that stop an unattended coordinator turn and narrow what a coordinator can see and act on by project, " +
+				"plus a read-only turn-history tool. A paused coordinator stays paused and a stored Projects scope stays enforced while the controls are off. " +
 				"Still evolving and should be reviewed before relying on it.",
 			RestartRequired: true,
 			Mutable:         true,

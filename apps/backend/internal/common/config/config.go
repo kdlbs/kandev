@@ -574,8 +574,8 @@ type FeaturesConfig struct {
 
 	// CoordinatorPhase31 gates the phase 3.1 surfaces: pausing a coordinator,
 	// the Projects scope editor, and everything that reads or acts on the
-	// recorded turn ledger. It only takes effect together with Coordinator,
-	// CoordinatorPhase2 and CoordinatorPhase3.
+	// recorded turn ledger. Recording itself runs without it. It only takes
+	// effect together with Coordinator, CoordinatorPhase2 and CoordinatorPhase3.
 	CoordinatorPhase31 bool `mapstructure:"coordinator_phase31" json:"coordinatorPhase31"`
 
 	// CodexAppServer enables the separate native Codex app-server agent. It is

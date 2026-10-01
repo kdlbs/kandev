@@ -34,6 +34,9 @@ const ActionGetItem = mcpcontract.ActionGetItem
 // ActionListActivity is mcpcontract.ActionListActivity, re-exported.
 const ActionListActivity = mcpcontract.ActionListActivity
 
+// ActionListTurns is mcpcontract.ActionListTurns, re-exported.
+const ActionListTurns = mcpcontract.ActionListTurns
+
 // ActionApproveProposal, ActionRejectProposal and DecisionActions re-export
 // mcpcontract's reserved decision action names
 // (docs/specs/coordinator/system-design/proposals.md#security) for callers

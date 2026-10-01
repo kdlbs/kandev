@@ -156,8 +156,9 @@ features:
 
   # Coordinator phase 3.1 (record and measure): pausing a coordinator, the
   # Projects scope editor, and everything that reads or acts on the recorded
-  # turn ledger. Off in every shipped profile; only effective together with
-  # KANDEV_FEATURES_COORDINATOR, _PHASE2 and _PHASE3.
+  # turn ledger. Recording itself runs without it. Off in every shipped
+  # profile; only effective together with KANDEV_FEATURES_COORDINATOR, _PHASE2
+  # and _PHASE3.
   KANDEV_FEATURES_COORDINATOR_PHASE31:
     prod: "false"
     dev:  "false"
