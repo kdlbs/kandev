@@ -125,4 +125,3 @@ Completed on 2026-10-01.
 The initial case-alias fixture was corrected to keep request and persisted
 repository paths consistent; the final case and symlink alias regressions pass.
 No live installation or database was modified during implementation.
-
