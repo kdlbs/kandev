@@ -111,24 +111,27 @@ import (
 )
 
 const (
-	desktopHealthTokenEnv    = "KANDEV_DESKTOP_HEALTH_TOKEN"
-	desktopHealthTokenHeader = "X-Kandev-Desktop-Health-Token"
-	desktopRuntimeEnv        = "KANDEV_DESKTOP_RUNTIME"
-	agentShutdownTimeout     = 20 * time.Second
-	httpShutdownTimeout      = 10 * time.Second
-	tracingShutdownTimeout   = 5 * time.Second
-	addedFieldKey            = "added"
-	branchFieldKey           = "branch"
-	branchAdditionsFieldKey  = "branch_additions"
-	branchDeletionsFieldKey  = "branch_deletions"
-	deletedFieldKey          = "deleted"
-	versionFieldKey          = "version"
-	serviceFieldKey          = "service"
-	kandevName               = "kandev"
-	startingStatus           = "starting"
-	healthRoutePath          = "/health"
-	readyRoutePath           = "/ready"
-	websocketRoutePath       = "/ws"
+	desktopHealthTokenEnv              = "KANDEV_DESKTOP_HEALTH_TOKEN"
+	desktopHealthTokenHeader           = "X-Kandev-Desktop-Health-Token"
+	desktopRuntimeEnv                  = "KANDEV_DESKTOP_RUNTIME"
+	agentShutdownTimeout               = 20 * time.Second
+	httpShutdownTimeout                = 10 * time.Second
+	tracingShutdownTimeout             = 5 * time.Second
+	addedFieldKey                      = "added"
+	branchFieldKey                     = "branch"
+	branchAdditionsFieldKey            = "branch_additions"
+	branchDeletionsFieldKey            = "branch_deletions"
+	deletedFieldKey                    = "deleted"
+	versionFieldKey                    = "version"
+	serviceFieldKey                    = "service"
+	kandevName                         = "kandev"
+	startingStatus                     = "starting"
+	healthRoutePath                    = "/health"
+	readyRoutePath                     = "/ready"
+	websocketRoutePath                 = "/ws"
+	gitStatusReadyState                = "ready"
+	gitStatusLiveSourceUnavailableCode = "live_source_unavailable"
+	gitStatusRepositoryUnavailableCode = "repository_unavailable"
 )
 
 // buildSessionDataProvider constructs the session data provider function used by the WebSocket hub
@@ -168,6 +171,214 @@ func buildSessionGitDataProvider(taskRepo *sqliterepo.Repository, lifecycleMgr *
 		}
 		return appendLiveGitStatusMessage(ctx, taskRepo, lifecycleMgr, sessionID, session, nil, log), nil
 	}
+}
+
+func buildSessionGitRefreshProvider(taskRepo *sqliterepo.Repository, lifecycleMgr *lifecycle.Manager, log *logger.Logger) gateways.SessionGitRefreshProvider {
+	return func(ctx context.Context, sessionID, mode string) (gateways.SessionGitRefreshResult, error) {
+		return getSessionGitStatusRefresh(ctx, taskRepo, lifecycleMgr, log, sessionID, mode)
+	}
+}
+
+func getSessionGitStatusRefresh(ctx context.Context, taskRepo *sqliterepo.Repository, lifecycleMgr *lifecycle.Manager, log *logger.Logger, sessionID, mode string) (gateways.SessionGitRefreshResult, error) {
+	result := gateways.SessionGitRefreshResult{
+		SessionID: sessionID, Mode: mode, StatusState: "unavailable", Snapshots: []*ws.Message{},
+	}
+	session, err := taskRepo.GetTaskSession(ctx, sessionID)
+	if err != nil || session == nil {
+		result.ErrorCode = "session_unavailable"
+		return result, nil
+	}
+	result.TaskEnvironmentID = session.TaskEnvironmentID
+	sources, ok := resolveGitStatusSources(ctx, taskRepo, session, log)
+	if !ok {
+		result.ErrorCode = "environment_unavailable"
+		return result, nil
+	}
+	result.TaskEnvironmentID = sources.environmentID
+	if lifecycleMgr == nil {
+		result.ErrorCode = gitStatusLiveSourceUnavailableCode
+		return result, nil
+	}
+	return refreshGitStatusFromSources(ctx, taskRepo, lifecycleMgr, log, result, sources, sessionID, mode), nil
+}
+
+func refreshGitStatusFromSources(ctx context.Context, taskRepo *sqliterepo.Repository, lifecycleMgr *lifecycle.Manager, log *logger.Logger, result gateways.SessionGitRefreshResult, sources *gitStatusSources, sessionID, mode string) gateways.SessionGitRefreshResult {
+	budget := 2 * time.Second
+	if mode == "recover" {
+		budget = 60 * time.Second
+	}
+	rpcCtx, cancel := context.WithTimeout(ctx, budget)
+	defer cancel()
+	live := false
+	for _, sourceSessionID := range sources.sessionIDs {
+		if rpcCtx.Err() != nil {
+			break
+		}
+		multi, sourceLive := getGitStatusRefreshFromSource(rpcCtx, taskRepo, lifecycleMgr, log, sources, sessionID, sourceSessionID, mode)
+		live = live || sourceLive
+		if multi == nil {
+			continue
+		}
+		appendGitStatusRefreshSnapshots(&result, sources, sessionID, multi)
+		if result.Success {
+			return result
+		}
+	}
+	if live && rpcCtx.Err() != nil {
+		result.ErrorCode = "status_timeout"
+	} else {
+		result.ErrorCode = gitStatusLiveSourceUnavailableCode
+	}
+	return result
+}
+
+func getGitStatusRefreshFromSource(ctx context.Context, taskRepo *sqliterepo.Repository, lifecycleMgr *lifecycle.Manager, log *logger.Logger, sources *gitStatusSources, requestedSessionID, sourceSessionID, mode string) (*client.MultiRepoGitStatusResult, bool) {
+	execution, exists := lifecycleMgr.GetExecutionBySessionID(sourceSessionID)
+	if !exists || !executionMatchesGitStatusSource(sources, execution, sourceSessionID, log) || !isLiveGitStatusExecution(execution) {
+		return nil, false
+	}
+	agentClient, releaseClient := execution.AcquireAgentCtlClient()
+	if agentClient == nil {
+		releaseClient()
+		return nil, true
+	}
+	generation, err := agentClient.ConnectionGeneration(ctx)
+	if err != nil {
+		releaseClient()
+		return nil, true
+	}
+	streamGeneration := execution.StartupAttemptGeneration()
+	multi, queryErr := agentClient.GetGitStatusMultiRefresh(ctx, mode)
+	stillCurrent := revalidateSessionGitRefreshSource(ctx, taskRepo, lifecycleMgr, requestedSessionID, sources, sourceSessionID, execution, agentClient, generation, streamGeneration, log)
+	releaseClient()
+	if queryErr != nil || !stillCurrent || multi == nil || len(multi.Repos) == 0 {
+		return nil, true
+	}
+	return multi, true
+}
+
+func appendGitStatusRefreshSnapshots(result *gateways.SessionGitRefreshResult, sources *gitStatusSources, sessionID string, multi *client.MultiRepoGitStatusResult) {
+	for _, repo := range multi.Repos {
+		status := repo.Status
+		markFailedGitRepositoryUnavailable(&status)
+		if notification := buildGitStatusNotification(sessionID, sources.environmentID, repo.RepositoryName, status); notification != nil {
+			result.Snapshots = append(result.Snapshots, notification)
+		}
+		if isCompleteGitStatusResult(status) {
+			result.Success = true
+			result.StatusState = gitStatusReadyState
+		}
+	}
+	if !result.Success {
+		result.ErrorCode = "status_unavailable"
+	}
+}
+
+func markFailedGitRepositoryUnavailable(status *client.GitStatusResult) {
+	if status.Success {
+		return
+	}
+	status.StatusState = "unavailable"
+	status.FilesComplete = false
+	status.DetailState = "unavailable"
+	if status.ErrorCode == "" {
+		status.ErrorCode = gitStatusRepositoryUnavailableCode
+	}
+}
+
+func isCompleteGitStatusResult(status client.GitStatusResult) bool {
+	return status.Success && status.FilesComplete && (status.StatusState == gitStatusReadyState || status.StatusState == "")
+}
+
+func revalidateSessionGitRefreshSource(
+	ctx context.Context,
+	taskRepo *sqliterepo.Repository,
+	lifecycleMgr *lifecycle.Manager,
+	requestedSessionID string,
+	sources *gitStatusSources,
+	sourceSessionID string,
+	execution *lifecycle.AgentExecution,
+	agentClient *client.Client,
+	connectionGeneration string,
+	streamGeneration uint64,
+	log *logger.Logger,
+) bool {
+	if !hasGitStatusRefreshInputs(ctx, taskRepo, lifecycleMgr, execution, agentClient) {
+		return false
+	}
+	if !isCurrentGitStatusExecution(ctx, lifecycleMgr, sources, sourceSessionID, execution, streamGeneration, log) {
+		return false
+	}
+	if !matchesGitStatusConnectionGeneration(ctx, agentClient, connectionGeneration) {
+		return false
+	}
+	return requestedSessionUsesGitStatusSource(ctx, taskRepo, requestedSessionID, sources, sourceSessionID, log)
+}
+
+func hasGitStatusRefreshInputs(ctx context.Context, taskRepo *sqliterepo.Repository, lifecycleMgr *lifecycle.Manager, execution *lifecycle.AgentExecution, agentClient *client.Client) bool {
+	return ctx.Err() == nil && taskRepo != nil && lifecycleMgr != nil && execution != nil && agentClient != nil
+}
+
+func isCurrentGitStatusExecution(ctx context.Context, lifecycleMgr *lifecycle.Manager, sources *gitStatusSources, sourceSessionID string, execution *lifecycle.AgentExecution, streamGeneration uint64, log *logger.Logger) bool {
+	currentExecution, ok := lifecycleMgr.GetExecutionBySessionID(sourceSessionID)
+	if !ok || !sameGitStatusExecution(currentExecution, execution, streamGeneration) {
+		return false
+	}
+	return executionMatchesGitStatusSource(sources, currentExecution, sourceSessionID, log) && isLiveGitStatusExecution(currentExecution)
+}
+
+func sameGitStatusExecution(currentExecution, execution *lifecycle.AgentExecution, streamGeneration uint64) bool {
+	if currentExecution == nil || execution == nil {
+		return false
+	}
+	if currentExecution != execution || currentExecution.ID != execution.ID {
+		return false
+	}
+	if currentExecution.TaskEnvironmentID != execution.TaskEnvironmentID || currentExecution.WorkspacePath != execution.WorkspacePath {
+		return false
+	}
+	return currentExecution.StartupAttemptGeneration() == streamGeneration
+}
+
+func matchesGitStatusConnectionGeneration(ctx context.Context, agentClient *client.Client, expected string) bool {
+	currentGeneration, err := agentClient.ConnectionGeneration(ctx)
+	return err == nil && currentGeneration == expected
+}
+
+func requestedSessionUsesGitStatusSource(ctx context.Context, taskRepo *sqliterepo.Repository, requestedSessionID string, sources *gitStatusSources, sourceSessionID string, log *logger.Logger) bool {
+	requested, err := taskRepo.GetTaskSession(ctx, requestedSessionID)
+	if err != nil || requested == nil || requested.TaskEnvironmentID != sources.environmentID {
+		return false
+	}
+	currentSources, ok := resolveGitStatusSources(ctx, taskRepo, requested, log)
+	if !sameGitStatusRefreshScope(currentSources, sources, ok) {
+		return false
+	}
+	return sourceSessionStillEligible(currentSources.sessionIDs, sourceSessionID)
+}
+
+func sameGitStatusRefreshScope(currentSources, expected *gitStatusSources, ok bool) bool {
+	if !ok || currentSources.environmentID != expected.environmentID || currentSources.workspacePath != expected.workspacePath {
+		return false
+	}
+	if len(currentSources.workspacePaths) != len(expected.workspacePaths) {
+		return false
+	}
+	for path := range currentSources.workspacePaths {
+		if _, exists := expected.workspacePaths[path]; !exists {
+			return false
+		}
+	}
+	return true
+}
+
+func sourceSessionStillEligible(sessionIDs []string, sourceSessionID string) bool {
+	for _, candidate := range sessionIDs {
+		if candidate == sourceSessionID {
+			return true
+		}
+	}
+	return false
 }
 
 const sessionIDPayloadKey = "session_id"
@@ -345,7 +556,7 @@ func tryGetLiveGitStatusWithState(ctx context.Context, lifecycleMgr *lifecycle.M
 			continue
 		}
 		live = true
-		if msgs := tryGetLiveGitStatusFromExecution(rpcCtx, execution, requestedSessionID, sourceSessionID, sources.environmentID, log); len(msgs) > 0 {
+		if msgs := tryGetLiveGitStatusFromExecution(rpcCtx, lifecycleMgr, sources, execution, requestedSessionID, sourceSessionID, sources.environmentID, log); len(msgs) > 0 {
 			return msgs, true
 		}
 	}
@@ -378,6 +589,9 @@ func executionMatchesGitStatusSource(sources *gitStatusSources, execution *lifec
 		return false
 	}
 	if execution.WorkspacePath != sources.workspacePath {
+		if _, allowed := sources.workspacePaths[execution.WorkspacePath]; allowed {
+			return true
+		}
 		log.Debug("rejecting live git status source",
 			zap.String("source_session_id", sessionID),
 			zap.String("task_environment_id", sources.environmentID),
@@ -387,7 +601,7 @@ func executionMatchesGitStatusSource(sources *gitStatusSources, execution *lifec
 	return true
 }
 
-func tryGetLiveGitStatusFromExecution(ctx context.Context, execution *lifecycle.AgentExecution, requestedSessionID, sourceSessionID, taskEnvironmentID string, log *logger.Logger) []*ws.Message {
+func tryGetLiveGitStatusFromExecution(ctx context.Context, lifecycleMgr *lifecycle.Manager, sources *gitStatusSources, execution *lifecycle.AgentExecution, requestedSessionID, sourceSessionID, taskEnvironmentID string, log *logger.Logger) []*ws.Message {
 	agentClient, releaseClient := execution.AcquireAgentCtlClient()
 	defer releaseClient()
 	if agentClient == nil {
@@ -395,6 +609,11 @@ func tryGetLiveGitStatusFromExecution(ctx context.Context, execution *lifecycle.
 			zap.String("source_session_id", sourceSessionID))
 		return nil
 	}
+	connectionGeneration, err := agentClient.ConnectionGeneration(ctx)
+	if err != nil {
+		return nil
+	}
+	streamGeneration := execution.StartupAttemptGeneration()
 
 	// Force fresh git query: cache can wedge when the poll loop misses a HEAD change.
 	multi, err := agentClient.GetGitStatusMultiFresh(ctx)
@@ -404,20 +623,13 @@ func tryGetLiveGitStatusFromExecution(ctx context.Context, execution *lifecycle.
 			zap.Error(err))
 		return nil
 	}
-	if multi == nil || !multi.Success || len(multi.Repos) == 0 {
+	if !isCurrentInitialGitStatusRead(ctx, lifecycleMgr, sources, execution, agentClient, connectionGeneration, sourceSessionID, streamGeneration, log) {
 		return nil
 	}
-
-	out := make([]*ws.Message, 0, len(multi.Repos))
-	for _, repo := range multi.Repos {
-		if !repo.Status.Success {
-			continue
-		}
-		notification := buildGitStatusNotification(requestedSessionID, taskEnvironmentID, repo.RepositoryName, repo.Status)
-		if notification != nil {
-			out = append(out, notification)
-		}
+	if !hasGitStatusRepositories(multi) {
+		return nil
 	}
+	out := liveGitStatusNotifications(requestedSessionID, taskEnvironmentID, multi)
 	if len(out) == 0 {
 		return nil
 	}
@@ -428,6 +640,27 @@ func tryGetLiveGitStatusFromExecution(ctx context.Context, execution *lifecycle.
 	return out
 }
 
+func isCurrentInitialGitStatusRead(ctx context.Context, lifecycleMgr *lifecycle.Manager, sources *gitStatusSources, execution *lifecycle.AgentExecution, agentClient *client.Client, connectionGeneration, sourceSessionID string, streamGeneration uint64, log *logger.Logger) bool {
+	return isCurrentGitStatusExecution(ctx, lifecycleMgr, sources, sourceSessionID, execution, streamGeneration, log) &&
+		matchesGitStatusConnectionGeneration(ctx, agentClient, connectionGeneration)
+}
+
+func hasGitStatusRepositories(multi *client.MultiRepoGitStatusResult) bool {
+	return multi != nil && multi.Success && len(multi.Repos) > 0
+}
+
+func liveGitStatusNotifications(requestedSessionID, taskEnvironmentID string, multi *client.MultiRepoGitStatusResult) []*ws.Message {
+	notifications := make([]*ws.Message, 0, len(multi.Repos))
+	for _, repo := range multi.Repos {
+		status := repo.Status
+		markFailedGitRepositoryUnavailable(&status)
+		if notification := buildGitStatusNotification(requestedSessionID, taskEnvironmentID, repo.RepositoryName, status); notification != nil {
+			notifications = append(notifications, notification)
+		}
+	}
+	return notifications
+}
+
 // buildGitStatusNotification packages a single repo's status as a WS event
 // the frontend can route through its existing git-status handler. The
 // repository_name is stamped on the inner status payload so the frontend
@@ -436,28 +669,61 @@ func buildGitStatusNotification(sessionID, taskEnvironmentID, repositoryName str
 	if taskEnvironmentID == "" {
 		return nil
 	}
+	statusState := status.StatusState
+	detailState := status.DetailState
+	filesComplete := status.FilesComplete
+	if statusState == "" {
+		if status.Success {
+			statusState = gitStatusReadyState
+			filesComplete = true
+		} else {
+			statusState = "unavailable"
+		}
+	}
+	if detailState == "" {
+		if status.Success {
+			detailState = gitStatusReadyState
+		} else {
+			detailState = "unavailable"
+		}
+	}
+	errorCode := status.ErrorCode
+	if !status.Success && errorCode == "" {
+		errorCode = "status_unavailable"
+	}
 	statusPayload := map[string]interface{}{
 		branchFieldKey:          status.Branch,
 		"remote_branch":         status.RemoteBranch,
 		"head_commit":           status.HeadCommit,
 		"base_commit":           status.BaseCommit,
-		"ahead":                 status.Ahead,
-		"behind":                status.Behind,
-		"remote_ahead":          status.RemoteAhead,
-		"remote_behind":         status.RemoteBehind,
-		"remote_head_commit":    status.RemoteHeadCommit,
-		"files":                 status.Files,
-		"modified":              status.Modified,
-		addedFieldKey:           status.Added,
-		deletedFieldKey:         status.Deleted,
-		"untracked":             status.Untracked,
-		"renamed":               status.Renamed,
-		branchAdditionsFieldKey: status.BranchAdditions,
-		branchDeletionsFieldKey: status.BranchDeletions,
+		"status_state":          statusState,
+		"files_complete":        filesComplete,
+		"detail_state":          detailState,
+		"error_code":            errorCode,
+		"tracker_id":            status.TrackerID,
+		"tracker_epoch":         status.TrackerEpoch,
+		"snapshot_revision":     status.SnapshotRevision,
 		"comparison_target":     status.ComparisonTarget,
 		"comparison_status":     status.ComparisonStatus,
 		"comparison_error_code": status.ComparisonErrorCode,
 		"is_submodule":          status.IsSubmodule,
+	}
+	if filesComplete {
+		statusPayload["files"] = status.Files
+		statusPayload["modified"] = status.Modified
+		statusPayload[addedFieldKey] = status.Added
+		statusPayload[deletedFieldKey] = status.Deleted
+		statusPayload["untracked"] = status.Untracked
+		statusPayload["renamed"] = status.Renamed
+	}
+	if detailState == gitStatusReadyState {
+		statusPayload["ahead"] = status.Ahead
+		statusPayload["behind"] = status.Behind
+		statusPayload["remote_ahead"] = status.RemoteAhead
+		statusPayload["remote_behind"] = status.RemoteBehind
+		statusPayload["remote_head_commit"] = status.RemoteHeadCommit
+		statusPayload[branchAdditionsFieldKey] = status.BranchAdditions
+		statusPayload[branchDeletionsFieldKey] = status.BranchDeletions
 	}
 	if repositoryName != "" {
 		statusPayload["repository_name"] = repositoryName
@@ -528,27 +794,50 @@ func buildGitSnapshotNotification(sessionID, repositoryName string, snapshot *mo
 		return nil
 	}
 	metadata := snapshot.Metadata
+	compactLive := snapshot.TriggeredBy == sqliterepo.TriggeredByLiveMonitor && snapshot.Files == nil
 	statusPayload := map[string]interface{}{
 		branchFieldKey:          snapshot.Branch,
 		"remote_branch":         snapshot.RemoteBranch,
 		"head_commit":           snapshot.HeadCommit,
 		"base_commit":           snapshot.BaseCommit,
-		"ahead":                 snapshot.Ahead,
-		"behind":                snapshot.Behind,
-		"remote_ahead":          metadata["remote_ahead"],
-		"remote_behind":         metadata["remote_behind"],
-		"remote_head_commit":    metadata["remote_head_commit"],
-		"files":                 snapshot.Files,
-		"modified":              metadata["modified"],
-		addedFieldKey:           metadata[addedFieldKey],
-		deletedFieldKey:         metadata[deletedFieldKey],
-		"untracked":             metadata["untracked"],
-		"renamed":               metadata["renamed"],
-		branchAdditionsFieldKey: metadata[branchAdditionsFieldKey],
-		branchDeletionsFieldKey: metadata[branchDeletionsFieldKey],
+		"status_state":          gitStatusReadyState,
+		"files_complete":        true,
+		"detail_state":          gitStatusReadyState,
 		"comparison_target":     metadata["comparison_target"],
 		"comparison_status":     metadata["comparison_status"],
 		"comparison_error_code": metadata["comparison_error_code"],
+	}
+	if compactLive {
+		statusPayload["files_complete"] = false
+		statusPayload["error_code"] = "summary_only"
+		if metadata["status_state"] == gitStatusReadyState && metadata["detail_state"] == gitStatusReadyState {
+			statusPayload["status_state"] = gitStatusReadyState
+			statusPayload["detail_state"] = gitStatusReadyState
+			statusPayload["ahead"] = snapshot.Ahead
+			statusPayload["behind"] = snapshot.Behind
+			statusPayload["remote_ahead"] = metadata["remote_ahead"]
+			statusPayload["remote_behind"] = metadata["remote_behind"]
+			statusPayload["remote_head_commit"] = metadata["remote_head_commit"]
+			statusPayload[branchAdditionsFieldKey] = metadata[branchAdditionsFieldKey]
+			statusPayload[branchDeletionsFieldKey] = metadata[branchDeletionsFieldKey]
+		} else {
+			statusPayload["status_state"] = "unavailable"
+			statusPayload["detail_state"] = "unavailable"
+		}
+	} else {
+		statusPayload["files"] = snapshot.Files
+		statusPayload["ahead"] = snapshot.Ahead
+		statusPayload["behind"] = snapshot.Behind
+		statusPayload["remote_ahead"] = metadata["remote_ahead"]
+		statusPayload["remote_behind"] = metadata["remote_behind"]
+		statusPayload["remote_head_commit"] = metadata["remote_head_commit"]
+		statusPayload["modified"] = metadata["modified"]
+		statusPayload[addedFieldKey] = metadata[addedFieldKey]
+		statusPayload[deletedFieldKey] = metadata[deletedFieldKey]
+		statusPayload["untracked"] = metadata["untracked"]
+		statusPayload["renamed"] = metadata["renamed"]
+		statusPayload[branchAdditionsFieldKey] = metadata[branchAdditionsFieldKey]
+		statusPayload[branchDeletionsFieldKey] = metadata[branchDeletionsFieldKey]
 	}
 	if repositoryName != "" {
 		statusPayload["repository_name"] = repositoryName

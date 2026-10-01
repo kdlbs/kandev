@@ -396,7 +396,7 @@ func TestSpriteCreateInstanceRequestMapsEveryField(t *testing.T) {
 		Metadata: map[string]interface{}{MetadataKeyBaseBranches: map[string]string{"": "main"}},
 	}
 
-	got := spriteCreateInstanceRequest(req)
+	got := agentctlInstanceRequest(req, spritesWorkspacePath)
 
 	if got.ID != "instance-1" || got.WorkspacePath != spritesWorkspacePath {
 		t.Fatalf("request = %+v", got)

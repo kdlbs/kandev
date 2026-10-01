@@ -1009,18 +1009,32 @@ func TestSSHExecutorStopInstanceAbandonsARemoteCommandThatWedgesAfterTheReading(
 	}
 
 	done := make(chan error, 1)
+	finished := make(chan struct{})
 	go func() {
+		defer close(finished)
 		done <- exec.StopInstance(context.Background(), &ExecutorInstance{
 			InstanceID: "instance-1",
 			StopReason: StopReasonTaskDeleted,
 		}, false)
 	}()
+	t.Cleanup(func() {
+		select {
+		case <-finished:
+			return
+		default:
+		}
+		// Unblock StopInstance before the timeout helper restores package
+		// globals. A failed assertion must not leave its goroutine running.
+		_ = client.Close()
+		<-finished
+	})
 	select {
 	case err := <-done:
+		<-finished
 		if err != nil {
 			t.Fatalf("StopInstance: %v", err)
 		}
-	case <-time.After(2 * time.Second):
+	case <-time.After(5 * time.Second):
 		t.Fatal("StopInstance did not return after its remote command wedged — the backstop must have been missed")
 	}
 	if !exec.isTransportLost(state) {

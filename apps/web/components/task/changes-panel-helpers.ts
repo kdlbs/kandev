@@ -24,6 +24,7 @@ export type ChangedFile = {
   /** Repository this file belongs to in multi-repo workspaces; empty for single-repo. */
   repositoryName?: string;
   changeLayer?: ChangeLayer;
+  diffState?: FileInfo["diff_state"];
 };
 
 /**
@@ -65,6 +66,7 @@ export function mapToChangedFiles(files: FileInfo[]): ChangedFile[] {
     oldPath: file.old_path,
     repositoryName: file.repository_name,
     changeLayer: file.change_layer,
+    diffState: file.diff_state,
     isSymlink: file.is_symlink,
   }));
 }
@@ -75,6 +77,7 @@ type CumulativeDiffFiles = Record<
     path?: string;
     repository_name?: string;
     diff?: string;
+    diff_state?: FileInfo["diff_state"];
     status?: string;
     additions?: number;
     deletions?: number;
@@ -124,8 +127,10 @@ function addReviewSource(
     path: string;
     repositoryName?: string;
     diff?: string;
+    diff_state?: FileInfo["diff_state"];
   },
 ): void {
+  if (source.diff_state === "pending" || source.diff_state === "unavailable") return;
   const isScoped = source.repositoryName !== undefined;
   const collidesWithHigherPriority = isScoped
     ? source.repositoryName !== "" && winningDiffs.has(source.path)
@@ -151,6 +156,7 @@ function buildReviewProgressIndex(
       path: file.path,
       repositoryName,
       diff: file.diff,
+      diff_state: file.diff_state,
     });
   }
   if (cumulativeDiffFiles) {
@@ -159,6 +165,7 @@ function buildReviewProgressIndex(
       addReviewSource(winningDiffs, paths, {
         ...identity,
         diff: file.diff,
+        diff_state: file.diff_state,
       });
     }
   }

@@ -926,7 +926,7 @@ func (h *GitHandlers) computeGitCommits(ctx context.Context, req *GitCommitsRequ
 	// merge-base from git status. Applies to sessions created before the
 	// base-commit capture feature, or when that capture failed.
 	if baseCommit == "" {
-		status, statusErr := agentClient.GetGitStatus(ctx)
+		status, statusErr := agentClient.GetGitStatusWithDetails(ctx)
 		if statusErr == nil && status != nil && status.BaseCommit != "" {
 			baseCommit = status.BaseCommit
 			h.logger.Debug("using git status base commit as fallback",
@@ -1006,7 +1006,7 @@ func (h *GitHandlers) computeCumulativeDiff(ctx context.Context, req *Cumulative
 		targetBranch = h.sessionReader.GetSessionBaseBranch(ctx, req.SessionID)
 	}
 	if baseCommit == "" {
-		status, statusErr := agentClient.GetGitStatus(ctx)
+		status, statusErr := agentClient.GetGitStatusWithDetails(ctx)
 		if statusErr == nil && status != nil && status.BaseCommit != "" {
 			baseCommit = status.BaseCommit
 			h.logger.Debug("using git status base commit as fallback for cumulative diff",

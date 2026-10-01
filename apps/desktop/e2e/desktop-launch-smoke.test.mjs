@@ -12,6 +12,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import {
   HEALTH_REQUESTED_TIMEOUT_MS,
   ROOT_REQUESTED_TIMEOUT_MS,
+  parseProcessStatuses,
   waitForHttp,
   writeJsonAtomically,
   createAtomicRecordWriter,
@@ -56,6 +57,36 @@ const STARTUP_COPY_KEYS = [
   "spawnError",
   "startupFailureTitle",
 ];
+
+test("process-status parsing preserves PID ownership and zombie state", () => {
+  assert.deepEqual(parseProcessStatuses(" 123 45 Sl+\n 124 45 Z\n"), [
+    { pid: 123, parentPid: 45, state: "Sl+" },
+    { pid: 124, parentPid: 45, state: "Z" },
+  ]);
+  assert.deepEqual(parseProcessStatuses("\n"), []);
+  assert.throws(() => parseProcessStatuses("not a process row"), /invalid process status row/);
+});
+
+test("empty status-1 ps failures mean there are no child processes", () => {
+  const noChildren = Object.assign(new Error("ps found no child processes"), {
+    status: 1,
+    stdout: " \n",
+  });
+  let statuses;
+  assert.doesNotThrow(() => {
+    statuses = parseProcessStatuses(noChildren);
+  });
+  assert.deepEqual(statuses, []);
+
+  const partialOutputFailure = Object.assign(new Error("ps failed after partial output"), {
+    status: 1,
+    stdout: "not a process row",
+  });
+  assert.throws(() => parseProcessStatuses(partialOutputFailure), partialOutputFailure);
+
+  const otherFailure = Object.assign(new Error("ps failed"), { status: 2, stdout: "" });
+  assert.throws(() => parseProcessStatuses(otherFailure), otherFailure);
+});
 
 async function withTempDir(run) {
   const dir = await mkdtemp(join(tmpdir(), "wait-for-file-"));

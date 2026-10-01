@@ -11,6 +11,7 @@ import { useAppStore } from "@/components/state-provider";
 import { useFileEditors } from "@/hooks/use-file-editors";
 import { usePanelActive } from "@/hooks/use-panel-active";
 import { useSessionGitStatus } from "@/hooks/domains/session/use-session-git-status";
+import { useSessionGitRefresh } from "@/hooks/domains/session/use-session-git-refresh";
 import { useSessionCommits } from "@/hooks/domains/session/use-session-commits";
 import { useEnvironmentSessionId } from "@/hooks/use-environment-session-id";
 import type { ReviewSource } from "@/hooks/domains/session/use-review-sources";
@@ -49,7 +50,6 @@ import { TodosContent } from "./todos-panel-content";
 import { BackgroundWorkPanel } from "./chat/background-work/background-work-panel";
 
 import { setPanelTitle } from "@/lib/layout/panel-portal-manager";
-import { getWebSocketClient } from "@/lib/ws/connection";
 import { usePortalSlot } from "@/lib/layout/panel-portal-host";
 import { ENV_SCOPED_DOCKVIEW_COMPONENTS } from "@/lib/state/dockview-env-scoped-components";
 import { useTranslation } from "react-i18next";
@@ -262,14 +262,7 @@ function ChatContent({ panelId, params }: { panelId: string; params: Record<stri
  */
 function useResyncGitStatusOnTabActivate(panelId: string, sessionId: string | null) {
   const isVisible = usePanelActive(panelId);
-
-  useEffect(() => {
-    if (!sessionId || !isVisible) return;
-    // Visibility is synchronized by usePanelActive, including the initial
-    // portal-registration race. Ask for a fresh snapshot whenever the panel
-    // becomes visible or its session changes.
-    getWebSocketClient()?.refreshSessionData(sessionId);
-  }, [sessionId, isVisible]);
+  return useSessionGitRefresh(sessionId, isVisible);
 }
 
 /** Render the changes/diff viewer for the panel's params (`kind` "all" or
@@ -331,7 +324,7 @@ function ChangesContent({ panelId }: { panelId: string }) {
   // Dynamic title with file count — use environment-stable sessionId so the
   // tab title doesn't re-fetch on same-environment session tab switches.
   const activeSessionId = useEnvironmentSessionId();
-  useResyncGitStatusOnTabActivate(panelId, activeSessionId);
+  const retryGitStatus = useResyncGitStatusOnTabActivate(panelId, activeSessionId);
   const gitStatus = useSessionGitStatus(activeSessionId);
   const { commits } = useSessionCommits(activeSessionId);
   const fileCount = gitStatus?.files ? Object.keys(gitStatus.files).length : 0;
@@ -369,6 +362,7 @@ function ChangesContent({ panelId }: { panelId: string }) {
 
   return (
     <ChangesPanel
+      onRetryGitStatus={retryGitStatus}
       onOpenDiffFile={handleOpenDiffFile}
       onEditFile={handleEditFile}
       onOpenCommitDetail={handleOpenCommitDetail}

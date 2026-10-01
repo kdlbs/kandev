@@ -143,17 +143,19 @@ function expectSelectedRepositoryState(current: ReturnType<typeof useRemoteContr
   expect(current.repositoryScope).toBe("frontend");
 }
 
-describe("useRemoteContributionRelation repository scoping", () => {
-  beforeEach(() => {
-    mocks.selectedPR = selectedPR;
-    mocks.prs = [selectedPR];
-    mocks.selectedKey = null;
-    mocks.statuses = [];
-    mocks.repositoryName = "frontend";
-    mocks.authoritativeCommits = [{ sha: mocks.providerHead }] as PRCommitInfo[];
-    mocks.loading = false;
-    mocks.error = null;
-  });
+function resetRelationMocks() {
+  mocks.selectedPR = selectedPR;
+  mocks.prs = [selectedPR];
+  mocks.selectedKey = null;
+  mocks.statuses = [];
+  mocks.repositoryName = "frontend";
+  mocks.authoritativeCommits = [{ sha: mocks.providerHead }] as PRCommitInfo[];
+  mocks.loading = false;
+  mocks.error = null;
+}
+
+describe("useRemoteContributionRelation repository selection", () => {
+  beforeEach(resetRelationMocks);
 
   it.each([
     ["frontend then backend", ["frontend", "backend"]],
@@ -189,6 +191,10 @@ describe("useRemoteContributionRelation repository scoping", () => {
     expect(result.current.contributionHistoryTarget?.repositoryScope).toBe("");
     expect(result.current.repositoryScope).toBe("");
   });
+});
+
+describe("useRemoteContributionRelation status quality", () => {
+  beforeEach(resetRelationMocks);
 
   // @covers AC-TASKS-REMOTE-CONTRIBUTION-TASKS-001.7
   it("keeps retained commits visible without authorizing actions during refresh", () => {
@@ -217,6 +223,38 @@ describe("useRemoteContributionRelation repository scoping", () => {
       useDisabled: true,
     });
   });
+
+  it("keeps local Git actions available without a selected PR when status details are ready", () => {
+    mocks.prs = [];
+    mocks.selectedPR = null;
+    mocks.statuses = [
+      status("", "local-head", "", {
+        branch: "feature/local-only",
+        remote_branch: "",
+        ahead: 1,
+        detail_state: "ready",
+      }),
+    ];
+
+    const { result } = renderHook(() => useRemoteContributionRelation("session-1"));
+
+    expect(result.current.relation).toMatchObject({
+      kind: "not_applicable",
+      action: "normal_push",
+      pushAhead: 1,
+      canPush: true,
+      pullBehind: 0,
+      canPull: false,
+    });
+    expect(remoteContributionActionPolicy(result.current.relation)).toMatchObject({
+      pushDisabled: false,
+      pullDisabled: false,
+    });
+  });
+});
+
+describe("useRemoteContributionRelation branch-scoped PR selection", () => {
+  beforeEach(resetRelationMocks);
 
   it("ignores a merged Review PR when a newer PR matches the checked-out branch", () => {
     const historicalPR = taskPR({

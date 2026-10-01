@@ -119,6 +119,8 @@ export async function assertProgressiveNavigation(
   const status = page.getByTestId("file-tree-refresh-status");
   await expect(status).toContainText("temporary navigation folder failure");
   await expect(session.fileTreeNode(`${AVAILABLE}/available.ts`)).toBeVisible();
+  await showNavigationFiles(page, mobile);
+  await expect(status).toBeVisible();
   const retry = status.getByRole("button", { name: "Retry", exact: true });
   if (mobile) {
     const box = await retry.boundingBox();

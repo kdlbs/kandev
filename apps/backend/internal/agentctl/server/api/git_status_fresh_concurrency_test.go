@@ -84,8 +84,8 @@ func TestGitStatusMultiFreshKeepsInvalidRepoFailureLocal(t *testing.T) {
 	if !statuses["healthy"].Success {
 		t.Fatalf("healthy repository failed: %+v", statuses["healthy"])
 	}
-	if statuses["broken"].Success || !strings.Contains(statuses["broken"].Error, "repo subpath not found") {
-		t.Fatalf("broken repository status = %+v, want local not-found failure", statuses["broken"])
+	if statuses["broken"].Success || statuses["broken"].ErrorCode != "repository_unavailable" {
+		t.Fatalf("broken repository status = %+v, want a local repository-unavailable failure", statuses["broken"])
 	}
 }
 
@@ -143,7 +143,7 @@ func assertCanceledMultiStatus(t *testing.T, result gitStatusHTTPResult, repoNam
 		t.Fatalf("canceled multi status = %d, %+v", result.code, result.body)
 	}
 	for repo, status := range statusesByRepo(t, result.body, repoNames) {
-		if status.Success || !strings.Contains(status.Error, context.Canceled.Error()) {
+		if status.Success || status.ErrorCode != "status_canceled" {
 			t.Errorf("canceled status for %s = %+v", repo, status)
 		}
 	}
@@ -274,7 +274,7 @@ func (g *gitStatusCommandGate) assertInvocationCounts(t *testing.T, repos []stri
 }
 
 const gitStatusWrapperScript = `#!/bin/sh
-if [ "$#" -ge 3 ] && [ "$1" = "rev-parse" ] && [ "$2" = "--abbrev-ref" ] && [ "$3" = "HEAD" ]; then
+if [ "$#" -ge 3 ] && [ "$1" = "status" ] && [ "$2" = "--porcelain" ] && [ "$3" = "--untracked-files=no" ]; then
 	repo=${PWD##*/}
 	printf '%s\n' "$repo" >> "$KANDEV_TEST_GIT_LOG"
 	printf '%s\n' "$repo" > "$KANDEV_TEST_GIT_EVENTS"

@@ -730,6 +730,7 @@ func mapUserSettingsState(response userdto.UserSettingsResponse, workspaceID str
 		"terminalFontSize":                  nullInt(settings.TerminalFontSize),
 		"changesPanelLayout":                changesPanelLayout(settings.ChangesPanelLayout),
 		"lastSeenDisplay":                   lastSeenDisplay(settings.LastSeenDisplay),
+		"agentTabCloseBehavior":             usermodels.NormalizeAgentTabCloseBehavior(settings.AgentTabCloseBehavior),
 		"azureDevOpsBrowsePreferences":      settings.AzureDevOpsBrowsePreferences,
 		"systemMetricsDisplay": map[string]any{
 			"showInTopbar": settings.SystemMetricsDisplay.ShowInTopbar,
@@ -771,6 +772,8 @@ func mapWorkspaceItemState(workspace taskdto.WorkspaceDTO) map[string]any {
 		"default_environment_id":          workspace.DefaultEnvironmentID,
 		"default_agent_profile_id":        workspace.DefaultAgentProfileID,
 		"default_config_agent_profile_id": workspace.DefaultConfigAgentProfileID,
+		"acp_idle_suspension_enabled":     workspace.ACPIdleSuspensionEnabled,
+		"acp_idle_timeout_minutes":        workspace.ACPIdleTimeoutMinutes,
 		"office_workflow_id":              nullString(workspace.OfficeWorkflowID),
 		"created_at":                      workspace.CreatedAt,
 		"updated_at":                      workspace.UpdatedAt,

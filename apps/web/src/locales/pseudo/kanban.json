@@ -41,7 +41,6 @@
   "gitlabMergeRequest": "ĜĩţĹàƀ Ḿēŕĝē Ŕēqũēśţ",
   "goToTask": "Ĝō ţō Ţàśķ",
   "group": "Ĝŕōũƥ",
-  "groupTasksIntoSectionsByState": "Ĝŕōũƥ ţàśķś ĩńţō śēćţĩōńś ƀŷ śţàţē, ŵōŕķƒĺōŵ, ŕēƥōśĩţōŕŷ, ōŕ ńōńē.",
   "healthIssues": "Ĥēàĺţĥ ĩśśũēś",
   "improveKandev": "Ĩḿƥŕōvē Ķàńďēv",
   "jiraTicket": "Ĵĩŕà Ţĩćķēţ",
@@ -133,5 +132,6 @@
   "bulkSelected_other": "{{count}} śēĺēćţēď",
   "bulkActions": "Àćţĩōńś",
   "selectTasks": "Śēĺēćţ ţàśķś",
-  "cancelTaskSelection": "Ćàńćēĺ śēĺēćţĩōń"
+  "cancelTaskSelection": "Ćàńćēĺ śēĺēćţĩōń",
+  "groupTasksIntoSectionsByWorkflowStep": "Ĝŕōũƥ ţàśķś ĩńţō śēćţĩōńś ƀŷ ŵōŕķƒĺōŵ śţēƥ, ŵōŕķƒĺōŵ, ŕēƥōśĩţōŕŷ, ōŕ ńōńē."
 }

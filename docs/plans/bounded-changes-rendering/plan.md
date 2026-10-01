@@ -193,6 +193,10 @@ The completed commit-file-navigation package owns the existing inline actions.
 Their historical validation results remain unchanged. Companion links identify
 this follow-up without reopening completed work orders.
 
+[Changes timeline measurement refresh](../changes-timeline-measurement-refresh/plan.md)
+owns the subsequent contiguous-row regression after presentation invalidation.
+The completed work orders and historical results in this package remain intact.
+
 Use the simple-English guidance for documentation. Implementation must assess
 `docs/public/sessions-and-review.md` for any observable keyboard or retry change.
 Update `apps/web/AGENTS.md` with the viewport ownership rule after implementation.

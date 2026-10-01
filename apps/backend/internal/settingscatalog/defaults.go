@@ -645,7 +645,7 @@ func userSettingsDomain() DomainDescriptor {
 		"github_default_query_presets", "GitHub query presets", "object", "gitlab_saved_presets", "GitLab saved presets", "object", "azure_devops_browse_preferences", "Azure DevOps browse preferences", "object",
 		"default_utility_agent_id", "default utility agent", "string", "default_utility_model", "default utility model", "string", "default_utility_agent_profile_id", "default utility profile", "string",
 		"keyboard_shortcuts", "keyboard shortcuts", "object", "terminal_link_behavior", "terminal link behavior", "string", "terminal_font_family", "terminal font family", "string",
-		"terminal_font_size", "terminal font size", "integer", "changes_panel_layout", "changes panel layout", "string", "last_seen_display", "last seen display", "string",
+		"terminal_font_size", "terminal font size", "integer", "changes_panel_layout", "changes panel layout", "string", "last_seen_display", "last seen display", "string", "agent_tab_close_behavior", "agent tab close behavior", "string",
 		"sidebar_hover_enabled", "sidebar hover enabled", "boolean", "sidebar_hover_delay_ms", "sidebar hover delay", "integer",
 		"system_metrics_display", "system metrics display", "object", "app_status_bar_enabled", "status bar", "boolean", "resolve_session_hostnames", "resolve hostnames", "boolean",
 		"app_status_bar_order", "status bar order", "object", "quick_chat_tab_order_by_workspace", "quick chat tab order", "object", "kanban_hidden_step_ids", "hidden kanban steps", "object",

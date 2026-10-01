@@ -1,5 +1,5 @@
 ---
-status: draft
+status: active
 system: tasks
 created: 2026-09-23
 owners:
@@ -67,6 +67,12 @@ conversation. Actual workflow configuration determines each step's recipient.
   Submission shall prevent duplicate requests. Errors shall preserve valid draft
   choices. Success shall update workflow membership and step indicators without
   navigating away from an open task or changing the board's selected workflow.
+- **AC-TASKS-CHANGE-WORKFLOW-001.9:** On desktop and phone, each destination
+  step option and the selected step shall display a color dot beside its name.
+  Colors selected in workflow settings and supported custom hex colors shall
+  render visibly. Missing or unsupported colors shall use a neutral dot. Step
+  names shall remain readable and searchable, independently of color. Changing
+  the destination workflow shall clear the old selection and its color.
 
 ### REQ-TASKS-CHANGE-WORKFLOW-002: Consistent task transition
 
@@ -123,3 +129,4 @@ Those documents continue to own unrelated actions and bulk behavior.
 
 - [System design](../system-design/change-workflow.md)
 - [Implementation package](../../../plans/change-workflow/plan.md)
+- [Step-color follow-up package](../../../plans/change-workflow-step-colors/plan.md)

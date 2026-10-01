@@ -36,6 +36,18 @@ describe("mapToChangedFiles", () => {
       }),
     ]);
   });
+  it("preserves pending detail state for the row placeholder", () => {
+    expect(
+      mapToChangedFiles([
+        {
+          path: "src/pending.ts",
+          status: "modified",
+          staged: false,
+          diff_state: "pending",
+        },
+      ])[0],
+    ).toMatchObject({ diffState: "pending" });
+  });
 });
 
 function diffFile(overrides: Partial<PRDiffFile>): PRDiffFile {
@@ -176,6 +188,16 @@ describe("selectPRFilesForReviewProgress", () => {
 });
 
 describe("computeReviewProgress PR files", () => {
+  it("does not count a pending diff as reviewable progress", () => {
+    const pending = progressLocalFile("src/pending.ts", { diff_state: "pending" });
+    const key = reviewFileKey({ path: pending.path });
+
+    expect(computeReviewProgress([pending], null, new Map([[key, { reviewed: true }]]))).toEqual({
+      reviewedCount: 0,
+      totalFileCount: 0,
+    });
+  });
+
   it("counts same-path PR reviews per repository using each patch hash", () => {
     const path = "README.md";
     const frontendPatch = "@@ -1 +1 @@\n-frontend old\n+frontend new";
