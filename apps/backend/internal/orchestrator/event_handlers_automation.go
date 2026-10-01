@@ -44,6 +44,10 @@ type automationRunBinding interface {
 	MarkRunTerminalByBinding(ctx context.Context, taskID, sessionID, turnID string, status automation.RunStatus, errMsg string) error
 }
 
+type deferredAutomationRunCloser interface {
+	MarkDeferredRunFailedByTaskID(ctx context.Context, taskID, errMsg string) error
+}
+
 type automationDispatchReader interface {
 	GetAutomationForDispatch(ctx context.Context, id string) (*automation.Automation, error)
 }

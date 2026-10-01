@@ -78,7 +78,9 @@ bounded instance capacity, so that one installation does not overload its host.
   not be bound shall also stop that session. A start whose run is no longer
   open shall be dropped without launching. This includes a record that
   AC-AGENTS-SESSION-CEILING-001.5 preserved after its replay failed the run,
-  so the next sweep drops it instead of replaying it.
+  so the next sweep drops it instead of replaying it. If the task is deleted
+  while its start waits, the unbound run shall fail and release its concurrency
+  slot.
 
 ### REQ-AGENTS-SESSION-CEILING-002: Configure automatic session capacity
 

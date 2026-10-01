@@ -1940,6 +1940,11 @@ func (s *Service) MarkRunFailedByTaskID(ctx context.Context, taskID, errMsg stri
 	return s.store.MarkRunFailedByTaskID(ctx, taskID, errMsg)
 }
 
+// MarkDeferredRunFailedByTaskID closes an unbound run after its queued task is deleted.
+func (s *Service) MarkDeferredRunFailedByTaskID(ctx context.Context, taskID, errMsg string) error {
+	return s.store.MarkDeferredRunFailedByTaskID(ctx, taskID, errMsg)
+}
+
 // MarkRunSucceededByTaskID transitions a still-pending run (task_created)
 // into the succeeded state when the launched agent finishes cleanly.
 func (s *Service) MarkRunSucceededByTaskID(ctx context.Context, taskID string) error {

@@ -123,7 +123,7 @@ func (s *Service) failQueuedAutomationRun(ctx context.Context, payload map[strin
 	case errors.Is(err, automation.ErrAutomationRunNotDispatchable):
 		return true
 	case err == dropped:
-		// DispatchRun returns the callback's own error once the run is failed.
+		// Exact equality means DispatchRun persisted the failure; it wraps persistence errors.
 		s.logger.Info("failed the automation run of a dropped queued start",
 			zap.String("run_id", run.RunID), zap.String("reason", reason))
 		return true

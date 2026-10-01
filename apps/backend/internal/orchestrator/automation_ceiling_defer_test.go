@@ -11,7 +11,9 @@ import (
 
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/automation"
+	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
+	"github.com/kandev/kandev/internal/orchestrator/watcher"
 	"github.com/kandev/kandev/internal/task/models"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
@@ -204,6 +206,30 @@ func TestAutomationStartDeferredByCeiling_StoppedRunIsNotLaunched(t *testing.T) 
 	require.Zero(t, f.launches, "a stopped run's queued start must not launch")
 	require.False(t, f.ceilingDeferred(t), "the queued start of a closed run is dropped")
 	require.Equal(t, "stopped by user", f.run(t).ErrorMessage)
+}
+
+func TestAutomationStartDeferredByCeiling_TaskDeletionFailsRunAndReleasesCapacity(t *testing.T) {
+	ctx := context.Background()
+	f := deferAutomationStartAtCeiling(t, "t-defer-task-delete")
+	require.NoError(t, f.repo.DeleteTask(ctx, f.taskID))
+
+	f.svc.handleTaskDeleted(ctx, watcher.TaskEventData{TaskID: f.taskID})
+
+	deleted := f.run(t)
+	require.Equal(t, automation.RunStatusFailed, deleted.Status)
+	require.Equal(t, "task deleted before deferred automation start", deleted.ErrorMessage)
+	require.Zero(t, f.activeRuns(t), "deleting the queued task releases its automation slot")
+
+	autoSvc := automation.NewService(f.autoStore, bus.NewMemoryEventBus(testLogger()), testLogger())
+	result, err := autoSvc.FireTrigger(ctx, f.auto.ID, "", automation.TriggerType("manual"),
+		json.RawMessage(`{}`), automation.DedupNotConfigured())
+	require.NoError(t, err)
+	require.False(t, result.Skipped, "a deleted deferred task must not block the next run")
+	require.NotEmpty(t, result.RunID)
+	require.Equal(t, 1, f.activeRuns(t))
+
+	f.freeCeilingAndSweep(ctx)
+	require.Zero(t, f.launches, "the deleted task's queued start must not launch")
 }
 
 // Deleting the automation removes its runs. A task that outlives them drops

@@ -228,8 +228,8 @@ it; the record is cleared only after the run is no longer waiting, so a failed
 run update leaves the record for the next sweep. A queued automation start does
 not survive a backend restart: startup reconciliation fails the unbound run, and
 the sweep then drops the start. When the task is hard-deleted while its start is
-queued, the record goes with the task and the `triggered` run keeps its slot
-until it is stopped or until the next backend start.
+queued, the task-deleted event fails the unbound run. Its concurrency slot is
+released, and the missing task prevents a later replay.
 
 ## Persistence
 

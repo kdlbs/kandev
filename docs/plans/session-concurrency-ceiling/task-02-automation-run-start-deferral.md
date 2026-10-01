@@ -38,6 +38,7 @@ automatic callers do, and bind the replayed launch to its run.
 - Drop a start whose run was deleted or is no longer `triggered`, whether the
   sweep's check or the replay's dispatch finds it closed.
 - Fail the run of any other dropped queued start before clearing its record.
+- Fail the unbound run when task deletion removes its deferred start record.
 
 ## Out of scope
 
@@ -54,7 +55,9 @@ automatic callers do, and bind the replayed launch to its run.
   and open run. The replay binds the session and turn, and the bound turn's
   completion settles the run and frees its concurrency slot. A replay whose
   session launched but could not be bound fails the run and stops the session.
-  A record that survives its replay is dropped by the next sweep.
+  A record that survives its replay is dropped by the next sweep. Deleting a
+  task with a deferred start fails its unbound run and releases the automation
+  concurrency slot.
 - `AC-AGENTS-SESSION-CEILING-001.1` and `AC-AGENTS-SESSION-CEILING-001.5`: the
   refusal persists a replayable record, and a still-refused replay keeps it.
 
@@ -81,13 +84,17 @@ git diff --check
   a surviving record of a bound run being dropped, with and without a workflow
   step.
 - `TestDispatchRunDeferredLaunchLeavesTheRunOpen` covers the dispatcher.
+- `TestAutomationStartDeferredByCeiling_TaskDeletionFailsRunAndReleasesCapacity`
+  covers hard deletion of a queued task: the unbound run fails, its slot is
+  released, a later trigger is admitted, and the deleted task is not launched.
 - The automation package and the focused orchestrator selection pass.
+- The deletion regression passes with the race detector. The pre-existing
+  route-recovery test that failed in the earlier CI run passes five race-enabled
+  repetitions.
+- Public documentation and specification validation pass.
 - Backend lint against the base revision reports 0 issues.
 
 ## Risks
 
 - A queued start holds its run's concurrency slot for as long as the ceiling
   stays full.
-- Deleting the task while its start is queued removes the record. The
-  `triggered` run then keeps its slot until it is stopped or until the next
-  backend start.
