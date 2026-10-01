@@ -1,7 +1,7 @@
 ---
 id: "04-shadow-dream"
 title: "Shadow dream, report, ratings and Learning section"
-status: draft
+status: implemented
 wave: 3
 depends_on:
   - "01-turn-ledger"
@@ -150,3 +150,27 @@ Phone: full-screen page; rating is a segmented control.
 - `make -C apps/backend test` for the touched packages, with `synctest` for any timer and no `time.Sleep`; store conformance on SQLite and PostgreSQL for each new table or column.
 - `cd apps && pnpm --filter @kandev/web` typecheck, lint and Vitest for the touched modules, `cd apps/web && pnpm run i18n:check`, and the Playwright spec of this work order (plan verification strategy) on desktop and `mobile-chrome`, with the `auth` project for reader cases.
 - `python3 scripts/list-docs.py validate` if a specification changes.
+
+## Implementation record
+
+### Files
+
+- Backend: `internal/coordinator/dream/` (scheduler, lease, evidence, parse, gate, replay hookup, report, ratings, health, boundary test), `internal/coordinator/store_dream*.go`, `dream_episode.go`, `retention.go` (400-day prune), `internal/backendapp/coordinator_dream.go` (wiring, `dreamAgreement`, `dreamConditions`), `internal/mcp/scope` and `internal/mcp/profile` (the dream episode resolves as a coordinator principal with the one-tool policy), pause stop hook via `svc.SetDreamStop`.
+- Web: `components/coordinators/learning/` (section, health, measures, reports, report detail), `lib/coordinator/learning.ts`, `lib/api/domains/coordinator-learning-api.ts`, `hooks/domains/coordinator/use-learning.ts`, the Learning entry in `coordinator-sections.tsx` (phase 3.1 only), copy in all six locales plus pseudo.
+- Tests: Go tests beside each file; Vitest for the section, lib and API client; Playwright `learning.spec.ts` (desktop) and `mobile-learning.spec.ts` (`mobile-chrome`), seeding dream rows with `learning-fixture.ts`.
+- Docs: `docs/public/coordinator.md` ("Learn from its own turns").
+
+### Commands run
+
+`go test -race ./internal/coordinator/... ./internal/persistence/storeconformance`, `go run ./cmd/sqlguard ./internal`, `golangci-lint run --new-from-rev`, `pnpm run typecheck`, `pnpm run i18n:check`, `pnpm run i18n:ratchet`, ESLint and Prettier on the touched paths, Vitest for `components/coordinators`, `lib/coordinator` and the API client, both Playwright specs, `python3 scripts/list-docs.py validate`.
+
+### Decisions
+
+- `target_id` on items; `bad_target` for a named order that is missing, retired or foreign, `no_target` for note kinds that have no target in this phase.
+- The window is by `started_at`, start inclusive and end exclusive.
+- Failure reasons are a closed set; a null cost shows as "unknown".
+- The report list is fixed at 20 with a `before` cursor; rows are retained 400 days.
+- Addition: `coordinator_dreams.episode_archived_at` records when the episode task was archived, so cleanup is idempotent across Pause, Resume and restart.
+- Addition: health reads "fresh" when a debt exists but is at most 36 hours old and nothing has been accepted yet, so a new coordinator is not shown as Stale on day one.
+- The rating PUT returns 204.
+- Reader (`auth` project) read-only behavior is covered by the section's Vitest cases; the Playwright specs cover the manager path.
