@@ -4,6 +4,8 @@ import (
 	"context"
 	"testing"
 	"time"
+
+	"github.com/kandev/kandev/internal/coordinator/replay"
 )
 
 func retentionRowCount(t *testing.T, store *Store, coordinatorID string) int {
@@ -116,5 +118,18 @@ func TestActivityRetention_PrunesOutcomeRowsPastCutoff(t *testing.T) {
 	}
 	if n := count(t, store, "coordinator_feedback") + count(t, store, "coordinator_moveback_seen"); n != 0 {
 		t.Fatalf("old feedback and seen rows left: %d", n)
+	}
+}
+
+func TestActivityRetention_PrunesReplayResultsPastCutoff(t *testing.T) {
+	svc, store, c, _, _ := newActivityService(t, true)
+	now := svc.store.now().UTC()
+	mustExec(t, store, `INSERT INTO coordinator_replay_results (id, coordinator_id, status, created_at) VALUES ('r-old', ?, 'done', ?)`,
+		c.ID, now.Add(-replay.Retention-time.Hour))
+	mustExec(t, store, `INSERT INTO coordinator_replay_results (id, coordinator_id, status, created_at) VALUES ('r-new', ?, 'done', ?)`,
+		c.ID, now.Add(-replay.Retention+time.Hour))
+	svc.runActivityRetention(context.Background())
+	if n := count(t, store, "coordinator_replay_results"); n != 1 {
+		t.Fatalf("replay rows = %d, want the fresh one", n)
 	}
 }
