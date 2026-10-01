@@ -76,6 +76,7 @@ func deleteCoordinatorPhase3Rows(ctx context.Context, tx *sqlx.Tx, scope string,
 	for _, table := range []string{
 		"coordinator_unattended_turns", "coordinator_wakes", "coordinator_class_changes",
 		"coordinator_class_reviews", "coordinator_pending_changes", "coordinator_turns",
+		"coordinator_outcomes", "coordinator_feedback", "coordinator_moveback_seen",
 	} {
 		stmts = append(stmts, `DELETE FROM `+table+` WHERE coordinator_id `+scope)
 	}

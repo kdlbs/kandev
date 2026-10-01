@@ -138,6 +138,9 @@ func (s *Store) initSchema() error {
 	if err := s.migrateLedger(migrate); err != nil {
 		return err
 	}
+	if err := s.migrateOutcomes(migrate); err != nil {
+		return err
+	}
 	if err := migrate.Err(); err != nil {
 		return fmt.Errorf("required coordinator migration: %w", err)
 	}

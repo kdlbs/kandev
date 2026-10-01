@@ -102,3 +102,19 @@ func TestActivityRetention_CancelledContextDeletesNothing(t *testing.T) {
 		t.Fatal("running flag left set")
 	}
 }
+
+func TestActivityRetention_PrunesOutcomeRowsPastCutoff(t *testing.T) {
+	svc, store, c, _, _ := newActivityService(t, true)
+	old := svc.store.now().UTC().Add(-outcomesRetention - time.Hour)
+	fresh := svc.store.now().UTC().Add(-outcomesRetention + time.Hour)
+	seedOutcomeRows(t, store, c.ID, old)
+	mustExec(t, store, `INSERT INTO coordinator_outcomes (proposal_id, coordinator_id, kind, decision, decided_at, graded_at)
+		VALUES ('p-keep', ?, 'create_task', 'approved', ?, ?)`, c.ID, fresh, fresh)
+	svc.runActivityRetention(context.Background())
+	if n := count(t, store, "coordinator_outcomes"); n != 1 {
+		t.Fatalf("outcome rows = %d, want the fresh one", n)
+	}
+	if n := count(t, store, "coordinator_feedback") + count(t, store, "coordinator_moveback_seen"); n != 0 {
+		t.Fatalf("old feedback and seen rows left: %d", n)
+	}
+}

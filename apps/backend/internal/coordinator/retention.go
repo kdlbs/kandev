@@ -67,6 +67,10 @@ func (s *Service) startActivityRetention(ctx context.Context, tick <-chan time.T
 // exited after their context was cancelled.
 func (s *Service) WaitActivityRetentionStopped() { s.retentionWG.Wait() }
 
+// outcomesRetentionBatch is the number of rows of each outcomes table one
+// prune transaction removes.
+const outcomesRetentionBatch = 200
+
 // runActivityRetention deletes rows older than the retention age in batches.
 // A run that starts while another is in progress returns at once; a batch
 // error is logged and ends the run, and the next run retries.
@@ -85,6 +89,25 @@ func (s *Service) runActivityRetention(ctx context.Context) {
 			return
 		}
 		if n < int64(activityRetentionBatch) {
+			break
+		}
+	}
+	s.pruneOutcomeRows(ctx)
+}
+
+// pruneOutcomeRows deletes outcome, feedback and seen rows past their
+// retention in batches; an error is logged and the next run retries.
+func (s *Service) pruneOutcomeRows(ctx context.Context) {
+	cutoff := s.store.now().UTC().Add(-outcomesRetention)
+	for ctx.Err() == nil {
+		n, err := s.store.PruneOutcomeRows(ctx, cutoff, outcomesRetentionBatch)
+		if err != nil {
+			if ctx.Err() == nil {
+				s.logger.Warn("outcomes retention batch failed", zap.Error(err))
+			}
+			return
+		}
+		if n == 0 {
 			return
 		}
 	}
