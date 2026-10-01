@@ -20,7 +20,7 @@ func (s *Scheduler) start(parent context.Context, c *coordinator.Coordinator, p 
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(parent), s.d.Bound)
-	s.cancels[c.ID] = cancel
+	s.cancels[p.dream.ID] = cancel
 	s.wg.Add(1)
 	s.mu.Unlock()
 	go func() {
@@ -28,7 +28,7 @@ func (s *Scheduler) start(parent context.Context, c *coordinator.Coordinator, p 
 		defer func() {
 			cancel()
 			s.mu.Lock()
-			delete(s.cancels, c.ID)
+			delete(s.cancels, p.dream.ID)
 			s.mu.Unlock()
 		}()
 		s.run(ctx, c, p)
@@ -92,12 +92,12 @@ func (s *Scheduler) refresh(ctx context.Context, coordinatorID, dreamID string) 
 		return true
 	}
 	if !ok {
-		s.Cancel(coordinatorID)
+		s.Cancel(dreamID)
 		return false
 	}
 	if reason := s.breach(ctx, coordinatorID); reason != "" {
 		s.fail(dreamID, reason, ctx)
-		s.Cancel(coordinatorID)
+		s.Cancel(dreamID)
 		return false
 	}
 	return true
@@ -116,7 +116,7 @@ func (s *Scheduler) breach(ctx context.Context, coordinatorID string) string {
 	case !s.d.Conditions.ContainmentOK(ctx, c):
 		return ReasonContainment
 	}
-	if _, atCeiling := s.d.Conditions.Spend(ctx, c, s.d.Clock()); atCeiling {
+	if measurable, atCeiling := s.d.Conditions.Spend(ctx, c, s.d.Clock()); !measurable || atCeiling {
 		return ReasonCeiling
 	}
 	return ""
@@ -129,17 +129,26 @@ func (s *Scheduler) episode(ctx context.Context, c *coordinator.Coordinator, p p
 	st := s.d.Store
 	taskID, err := s.d.Episode.CreateTask(ctx, c)
 	if err != nil {
+		s.archiveUnbound(ctx, taskID)
 		return ReasonRunError, d, nil
 	}
-	if _, err := st.SetDreamEpisodeTask(context.WithoutCancel(ctx), d.ID, taskID); err != nil {
+	bound, err := st.SetDreamEpisodeTask(context.WithoutCancel(ctx), d.ID, taskID)
+	if err != nil {
+		s.archiveUnbound(ctx, taskID)
 		return ReasonStoreError, d, nil
+	}
+	if !bound {
+		s.archiveUnbound(ctx, taskID)
+		return ReasonLeaseLost, d, nil
 	}
 	sessionID, err := s.d.Episode.CreateSession(ctx, taskID)
 	if err != nil {
 		return ReasonRunError, d, nil
 	}
-	if _, err := st.SetDreamEpisodeSession(context.WithoutCancel(ctx), d.ID, sessionID); err != nil {
+	if linked, err := st.SetDreamEpisodeSession(context.WithoutCancel(ctx), d.ID, sessionID); err != nil {
 		return ReasonStoreError, d, nil
+	} else if !linked {
+		return ReasonLeaseLost, d, nil
 	}
 	raw, err := s.d.Episode.Prompt(ctx, taskID, sessionID, p.evidence.Message)
 	if err != nil {
@@ -158,14 +167,25 @@ func (s *Scheduler) episode(ctx context.Context, c *coordinator.Coordinator, p p
 	return "", d, items
 }
 
+// archiveUnbound archives a task the dream row does not name, so the tick
+// cleanup could never find it.
+func (s *Scheduler) archiveUnbound(ctx context.Context, taskID string) {
+	if taskID == "" {
+		return
+	}
+	if err := s.d.Episode.Archive(context.WithoutCancel(ctx), taskID); err != nil {
+		s.d.Log.Warn("dream episode: archive unbound task", zap.String("task_id", taskID), zap.Error(err))
+	}
+}
+
 func statusOf(items []coordinator.DreamItem) string {
 	if len(items) == 0 {
-		return coordinator.DreamClean
+		return coordinator.DreamOK
 	}
 	for _, it := range items {
 		if it.Gate != GatePass || it.Verdict == "" || it.Verdict == replay.VerdictUnmeasured {
 			return coordinator.DreamPartial
 		}
 	}
-	return coordinator.DreamOK
+	return coordinator.DreamClean
 }

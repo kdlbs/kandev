@@ -40,11 +40,16 @@ func (s *Scheduler) report(ctx context.Context, c *coordinator.Coordinator, p pl
 			ID: newID(), DreamID: p.dream.ID, Position: i, Kind: it.Kind, Text: it.Text,
 			TargetID: it.TargetID, CitedTurnIDs: it.CitedTurnIDs, Gate: Check(it, in),
 		}
-		if row.Gate == GatePass && replays < MaxReplays {
+		switch {
+		case row.Gate == GatePass && replays < MaxReplays:
 			replays++
 			if reason := s.replayItem(ctx, c.ID, p.dream.ID, &row, it); reason != "" {
 				return nil, reason
 			}
+		case row.Gate == GatePass:
+			row.Verdict = replay.VerdictUnmeasured
+		case row.Gate == GateCredential || row.Gate == GateSize:
+			row.Text, row.TargetID = withheld(row.Text, row.Gate), ""
 		}
 		items = append(items, row)
 	}
@@ -75,4 +80,13 @@ func (s *Scheduler) replayItem(ctx context.Context, coordinatorID, dreamID strin
 
 func contextLimit(_ *coordinator.Coordinator) int {
 	return coordinator.ContextMaxRunes
+}
+
+// withheld is what is stored of an item the gate refused for its content: the
+// text is never kept whole, and not at all when it held a credential.
+func withheld(text, gate string) string {
+	if gate == GateCredential {
+		return ""
+	}
+	return truncateRunes(text, MaxItemTextRunes)
 }

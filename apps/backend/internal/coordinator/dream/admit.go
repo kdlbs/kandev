@@ -36,8 +36,11 @@ func (s *Scheduler) admit(ctx context.Context, c *coordinator.Coordinator, now t
 	if measurable, atCeiling := s.d.Conditions.Spend(ctx, c, now); !measurable || atCeiling {
 		return plan{}, false
 	}
+	if prev, err := st.LastDream(ctx, c.ID); err != nil || (prev != nil && now.Sub(prev.StartedAt) < Spacing) {
+		return plan{}, false
+	}
 	last, err := st.LastAcceptedDream(ctx, c.ID)
-	if err != nil || (last != nil && last.FinishedAt != nil && now.Sub(*last.FinishedAt) < Spacing) {
+	if err != nil {
 		return plan{}, false
 	}
 	start, ok := s.windowStart(ctx, c.ID, last, now)

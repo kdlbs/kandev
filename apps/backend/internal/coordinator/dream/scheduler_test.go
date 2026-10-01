@@ -85,6 +85,7 @@ type fixture struct {
 	store *coordinator.Store
 	coord *coordinator.Coordinator
 	now   time.Time
+	nowMu sync.Mutex
 	ep    *fakeEpisode
 	rp    *fakeReplay
 	cond  *fakeConditions
@@ -123,7 +124,7 @@ func newFixture(t *testing.T) *fixture {
 		t.Fatal(err)
 	}
 	f.sch = New(Deps{Store: store, Episode: f.ep, Replay: f.rp, Conditions: f.cond,
-		Clock: func() time.Time { return f.now }, Bound: 5 * time.Second, Refresh: time.Hour})
+		Clock: f.clock, Bound: 5 * time.Second, Refresh: time.Hour})
 	t.Cleanup(f.sch.Stop)
 	return f
 }
@@ -325,4 +326,16 @@ func waitFor(t *testing.T, cond func() bool) {
 		time.Sleep(5 * time.Millisecond)
 	}
 	t.Fatal("condition not reached")
+}
+
+func (f *fixture) clock() time.Time {
+	f.nowMu.Lock()
+	defer f.nowMu.Unlock()
+	return f.now
+}
+
+func (f *fixture) advance(d time.Duration) {
+	f.nowMu.Lock()
+	defer f.nowMu.Unlock()
+	f.now = f.now.Add(d)
 }

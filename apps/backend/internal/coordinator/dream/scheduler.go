@@ -34,7 +34,7 @@ const (
 	MaxReplays        = 5
 	MinTurns          = 5
 	MinDecisions      = 1
-	LeaseExpiry       = 3 * time.Minute
+	LeaseExpiry       = 5 * time.Minute
 	DefaultBound      = 20 * time.Minute
 	DefaultRefresh    = time.Minute
 	maxWindow         = 30 * 24 * time.Hour
@@ -118,10 +118,10 @@ func (s *Scheduler) Stop() {
 	s.wg.Wait()
 }
 
-// Cancel cancels the in-process goroutine of a coordinator's running dream.
-func (s *Scheduler) Cancel(coordinatorID string) {
+// Cancel cancels the in-process goroutine of one dream.
+func (s *Scheduler) Cancel(dreamID string) {
 	s.mu.Lock()
-	cancel := s.cancels[coordinatorID]
+	cancel := s.cancels[dreamID]
 	s.mu.Unlock()
 	if cancel != nil {
 		cancel()
@@ -140,8 +140,12 @@ func (s *Scheduler) Tick(ctx context.Context, coordinatorID string) {
 		return
 	}
 	now := s.d.Clock()
-	if _, err := st.ExpireStaleDreams(ctx, coordinatorID, now.Add(-LeaseExpiry), now); err != nil {
+	expired, err := st.ExpireStaleDreams(ctx, coordinatorID, now.Add(-LeaseExpiry), now)
+	if err != nil {
 		s.d.Log.Warn("dream tick: expire", zap.Error(err))
+	}
+	for _, d := range expired {
+		s.Cancel(d.ID)
 	}
 	if _, err := st.SettleStaleReplays(ctx, now); err != nil {
 		s.d.Log.Warn("dream tick: settle replays", zap.Error(err))
@@ -186,7 +190,7 @@ func (s *Scheduler) StopCoordinator(ctx context.Context, coordinatorID string) e
 	if _, err := s.d.Store.FailDream(ctx, row.ID, ReasonPaused, s.d.Clock()); err != nil {
 		return err
 	}
-	s.Cancel(coordinatorID)
+	s.Cancel(row.ID)
 	return nil
 }
 

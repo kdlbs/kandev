@@ -8,6 +8,8 @@ import (
 	"encoding/json"
 	"errors"
 	"strings"
+
+	"github.com/kandev/kandev/internal/coordinator"
 )
 
 // Item kinds a report may carry.
@@ -21,6 +23,7 @@ const (
 	MaxItems                = 10
 	MaxConsidered           = 20
 	MaxItemTextRunes        = 500
+	MaxCitedTurns           = 50
 	MinCitedTurns           = 2
 	maxFenceOverhead        = 16
 )
@@ -67,10 +70,11 @@ func ParseAnswer(raw string) (Answer, error) {
 		return Answer{}, ErrBadOutput
 	}
 	for _, it := range a.Items {
-		if !validKinds[it.Kind] {
+		if !validKinds[it.Kind] || len(it.CitedTurnIDs) > MaxCitedTurns {
 			return Answer{}, ErrBadOutput
 		}
 	}
+	a.Considered = keptConsidered(a.Considered)
 	if a.Items == nil {
 		a.Items = []Item{}
 	}
@@ -87,4 +91,17 @@ func stripFence(s string) string {
 	inner := strings.TrimSuffix(strings.TrimPrefix(s, "```"), "```")
 	inner = strings.TrimPrefix(inner, "json")
 	return strings.TrimSpace(inner)
+}
+
+// keptConsidered bounds each considered entry and drops any that holds a
+// credential.
+func keptConsidered(in []string) []string {
+	out := make([]string, 0, len(in))
+	for _, c := range in {
+		if coordinator.ContainsCredential(c) {
+			continue
+		}
+		out = append(out, truncateRunes(c, MaxItemTextRunes))
+	}
+	return out
 }

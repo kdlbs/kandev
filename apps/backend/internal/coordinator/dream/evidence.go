@@ -109,7 +109,13 @@ func decisionLine(d Decision) string {
 		cost = fmt.Sprint(*d.CostSubcents)
 	}
 	return fmt.Sprintf("- proposal %s kind=%s decision=%s edited=%s reason=%s result=%s cost_subcents=%s title=%q\n",
-		d.ProposalID, d.Kind, d.Decision, d.EditedFields, d.ReasonCode, d.TaskResult, cost, truncateRunes(d.Title, MaxTitleRunes))
+		inert(d.ProposalID), inert(d.Kind), inert(d.Decision), inert(d.EditedFields), inert(d.ReasonCode), inert(d.TaskResult), cost,
+		inert(truncateRunes(d.Title, MaxTitleRunes)))
+}
+
+// inert keeps free text from closing or opening the evidence envelope.
+func inert(s string) string {
+	return strings.NewReplacer("<", "&lt;", ">", "&gt;").Replace(s)
 }
 
 func truncateRunes(s string, n int) string {

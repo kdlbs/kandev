@@ -510,7 +510,7 @@ func (s *Store) DreamCoordinatorIDs(ctx context.Context) ([]string, error) {
 func (s *Store) PruneDreams(ctx context.Context, cutoff time.Time, limit int) (int64, error) {
 	var ids []string
 	if err := s.db.SelectContext(ctx, &ids, s.db.Rebind(
-		`SELECT id FROM coordinator_dreams WHERE started_at < ? AND status <> 'running' ORDER BY started_at, id LIMIT ?`), cutoff.UTC(), limit); err != nil {
+		`SELECT id FROM coordinator_dreams WHERE started_at < ? AND status <> 'running' AND (episode_task_id IS NULL OR episode_archived_at IS NOT NULL) ORDER BY started_at, id LIMIT ?`), cutoff.UTC(), limit); err != nil {
 		return 0, fmt.Errorf("select dreams to prune: %w", err)
 	}
 	var total int64
