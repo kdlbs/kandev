@@ -175,6 +175,12 @@ Implementation commands and red/green results are pending, to be recorded in
 each work order after an explicit implementation request. No production code or
 permanent tests were changed during planning.
 
+Publication checks on main revision `994807230d7a03385dc80b001d8a2fd6f8adb4f3`:
+the package applies cleanly; the catalog validates 339 decisions and 1283
+specifications; specification lint, all 36 linter tests, package coverage
+preflight, and the normal pre-commit and commit-message checks pass. No
+implementation or provider inference was run for this documentation-only draft.
+
 ## Risks
 
 - A naive cached-mode shortcut can erase timeout uncertainty or confirm a value
