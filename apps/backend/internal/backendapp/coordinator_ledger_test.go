@@ -45,6 +45,11 @@ func runLedgerWiring(t *testing.T, phase31 bool) (routeParams, bus.EventBus, str
 
 func runLedgerWiringWithSetter(t *testing.T, phase31 bool) (routeParams, bus.EventBus, string, *recordingReaderSetter) {
 	t.Helper()
+	return runLedgerWiringPhases(t, true, phase31)
+}
+
+func runLedgerWiringPhases(t *testing.T, phase2, phase31 bool) (routeParams, bus.EventBus, string, *recordingReaderSetter) {
+	t.Helper()
 	harness := newBootStateTestHarness(t)
 	pool := newCoordinatorTestPool(t)
 	pool.Writer().SetMaxOpenConns(1)
@@ -53,7 +58,7 @@ func runLedgerWiringWithSetter(t *testing.T, phase31 bool) (routeParams, bus.Eve
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
-	svc, err := initCoordinatorWiring(ctx, pool, newCoordinatorTestTracker(t), harness.taskSvc, harness.workflowSvc, nil, true, true, true, phase31, newTestLogger())
+	svc, err := initCoordinatorWiring(ctx, pool, newCoordinatorTestTracker(t), harness.taskSvc, harness.workflowSvc, nil, true, phase2, true, phase31, newTestLogger())
 	if err != nil || svc == nil {
 		t.Fatalf("initCoordinatorWiring: svc=%v err=%v", svc, err)
 	}

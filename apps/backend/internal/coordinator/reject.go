@@ -9,6 +9,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/authz"
+	"github.com/kandev/kandev/internal/coordinator/outcomes"
 )
 
 // proposalRejectReasonMaxRunes is RejectProposalRequest.Reason's length
@@ -62,5 +63,9 @@ func (s *Service) RejectProposal(ctx context.Context, workspaceID, coordinatorID
 	s.publishCoordinatorUpdated(ctx, workspaceID, coordinatorID)
 	s.logger.Info("proposal rejected",
 		zap.String("proposal_id", proposalID), zap.String("coordinator_id", coordinatorID), zap.String("workspace_id", workspaceID))
-	return s.store.GetProposal(ctx, workspaceID, coordinatorID, proposalID, s.phase2)
+	rejected, err := s.store.GetProposal(ctx, workspaceID, coordinatorID, proposalID, s.phase2)
+	if err == nil {
+		s.notifyDecided(ctx, rejected, outcomes.DecisionRejected, outcomes.Code("", trimmed), rejected.UpdatedAt)
+	}
+	return rejected, err
 }

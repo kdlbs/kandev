@@ -39,7 +39,7 @@ The measures of the second half of this document are read only with the flag.
 - **Feedback observation:** the stored record of one override.
 - **Manager:** a person with `workspace.manage` in the coordinator's workspace.
 - **Pattern key:** the triple of override kind, proposal kind and reason
-  code.
+  code; a `moved_back` observation holds the reason code `none`.
 
 ## Requirements
 
@@ -61,17 +61,19 @@ The measures of the second half of this document are read only with the flag.
 - **AC-COORDINATOR-OUTCOMES-001.2:** The system shall grade a proposal after a
   step transition of a task the coordinator created or moved, when the
   proposal is decided, and on a sweep every 24 hours over every proposal
-  decided in the last 400 days whose row is not final. A row is final when its decision is `rejected`, `returned` or `undone`, when its proposal created no task, and when its task result is `merged` or `dropped`. Grading the
+  decided in the last 400 days whose row is not final. A row is final when its decision is `rejected`, `returned` or `undone`, when its proposal created no task, when its task is found deleted, or when its task result is `merged` or `dropped`. Grading the
   same proposal any number of times, or from two grading paths at once, shall
-  leave one row with the values derivable from the stored facts.
-- **AC-COORDINATOR-OUTCOMES-001.3:** A final row shall not change again; `done` and `failed` are re-graded and a
-  task that leaves `done` shall raise the reopening count by one, once per
-  observed transition, however many graders observe it.
+  leave one row with the values derivable from the stored facts while the row is not final (a final row keeps what AC-COORDINATOR-OUTCOMES-001.3 freezes, even where a later fact would derive another value), except the decision time (the first recorded one, never moved) and the reopening count.
+- **AC-COORDINATOR-OUTCOMES-001.3:** A final row shall not change again, except that an undo of its action shall turn only its decision to `undone` and that an empty turn id is filled once a turn id is stamped; every other column, the reopening count included, stays as it was. `done` and `failed` rows that are not final are re-graded and a
+  task whose result goes from `done` to `open` or `failed` shall raise the
+  reopening count by one, once per observed transition, however many graders
+  observe it; a move from `done` to `merged` or `dropped` shall not, and a final row never raises it.
 - **AC-COORDINATOR-OUTCOMES-001.4:** Cost shall be the sum of priced usage
   rows of the created task's sessions, and shall be unknown, never zero, when
   the task has no usage rows or one is unpriced. Time to merge shall be the
   time from the proposal's approval to the first observed merge, and empty
-  until the task is merged.
+  until the task is merged; the merge time is the merged timestamp the pull
+  request itself carries (the earliest, when several are linked), set once.
 - **AC-COORDINATOR-OUTCOMES-001.5:** When a task, a proposal or the usage of a
   task is read with an error, the grader shall keep the row's earlier values,
   count `coordinator_outcome_grade_failed_total{reason}` and retry on the next
@@ -88,12 +90,13 @@ The measures of the second half of this document are read only with the flag.
 #### Acceptance criteria
 
 - **AC-COORDINATOR-OUTCOMES-002.1:** When a manager rejects a proposal,
-  approves it with edits, or undoes an approved action, and when a manager
+  approves it with edits (the approval taking effect: an approval whose execution fails leaves the proposal open and is no override), or undoes an approved action, and when a manager
   moves a card that the coordinator created or moved to an earlier step of its
   workflow, the system shall store one feedback observation holding the
   coordinator, the override kind (`rejected`, `edited`, `undone` or
   `moved_back`), the proposal, the turn that made it, the acting user, the
-  reason code and the time. It shall store no free text.
+  reason code and the time (the time of the decision, or for `moved_back` the
+  time of the step history row, never the time the observation was inserted). It shall store no free text.
 - **AC-COORDINATOR-OUTCOMES-002.2:** The same override shall never produce two
   observations: an observation is unique per proposal, kind and, for
   `moved_back`, the moving step transition, however many times its source is
@@ -102,10 +105,10 @@ The measures of the second half of this document are read only with the flag.
   stored. An override by a person who is not a manager, by a coordinator
   principal or by the system shall store no observation and shall count in
   `coordinator_override_ignored_total{reason}`; an authorisation read that
-  fails shall be treated as not a manager.
+  fails shall store no observation at that time and count in `coordinator_override_ignored_total{reason="authz_error"}`; a decision override is not retried, and a moved-back override whose read failed is judged again by a later scan and stored if that read then shows a manager.
 - **AC-COORDINATOR-OUTCOMES-002.4:** A card counts as moved back only when its
   destination step is earlier in the workflow's step order than the step the
-  coordinator's approved action left it in, and the move happened after that action. When several proposals of the coordinator created or moved the card, the observation shall name the newest approved one. A move is observed only when its step transition history records a user as the mover, so a card that had no active session when it was moved (none ever, or only completed, failed or cancelled ones) is not observed. A move to a later step, a move within the step, and a move of a card
+  coordinator's approved action left it in, and the move happened after that action. When several proposals of the coordinator created or moved the card, the observation shall name the newest approved one that was made before the move and was not undone at the time of the move (an action undone before the move is skipped; one undone after it still counts; the move's time is the stored time of its history row, so an approval or undo in the writer's lag window is judged as before the move). A move is observed only when its step transition history records a user as the mover, so a card that had no active session when it was moved (none ever, or only completed, failed or cancelled ones) is not observed. A move to a later step, a move within the step, and a move of a card
   the coordinator did not create or move shall store nothing.
 - **AC-COORDINATOR-OUTCOMES-002.5:** A rejection reason typed by a manager or
   a coded one shall map to one reason code of a closed set, `duplicate`,
@@ -126,7 +129,9 @@ The measures of the second half of this document are read only with the flag.
   system shall return, for a coordinator and a window of 1 to 90 days
   (default 30), these measures, each with the counts it was computed from:
   the approval-without-edit rate (proposals approved and never edited, of
-  those decided in the window); override recurrence (observations of the
+  those a manager decided in the window: automatic approvals and returned
+  proposals are not counted, and an undone proposal counts as approved, or
+  edited when it had edits); override recurrence (observations of the
   window whose pattern key also appears among observations in the 30 days
   before that observation, of all observations of the window); dollars per
   merged task (the priced cost of the coordinator's turns started in the

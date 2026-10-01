@@ -58,6 +58,7 @@ func RegisterRoutes(router *gin.Engine, svc *Service, log *logger.Logger) {
 		registerAutomaticRoutes(workspace, h)
 		if svc.phase31 {
 			workspace.PUT("/coordinators/:cid/pause", h.httpPutPause)
+			workspace.GET("/coordinators/:cid/measures", h.httpGetMeasures)
 		}
 	}
 	workspace.GET("/coordinator-stalls", h.httpListStalls)
