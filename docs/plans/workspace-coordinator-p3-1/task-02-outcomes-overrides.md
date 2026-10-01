@@ -50,8 +50,11 @@ and capture record whether or not the flag is on.
 - `GET /coordinators/:id/measures?days=` behind the flag; the agreement
   measure reads an `AgreementSource` interface whose default returns
   `no_data`, which work order 04 implements over ratings and replay verdicts.
-- Metrics `coordinator_outcome_grade_failed_total{reason}` and
-  `coordinator_override_ignored_total{reason}`.
+- Metrics `coordinator_outcome_grade_failed_total{reason}`,
+  `coordinator_override_ignored_total{reason}`,
+  `coordinator_override_read_failed_total{site}`,
+  `coordinator_override_scan_dropped_total{site}` and
+  `coordinator_outcomes_observer_panic_total{observer}`.
 - The decision observer is also called from the automatic-approval path
   (`approveAutomatically`, `finishClaim`) and `ReturnProposalTx`; the
   `automatic` column, the sweep over `coordinator_proposals` left-joined to

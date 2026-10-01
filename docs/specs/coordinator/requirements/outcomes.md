@@ -61,9 +61,9 @@ The measures of the second half of this document are read only with the flag.
 - **AC-COORDINATOR-OUTCOMES-001.2:** The system shall grade a proposal after a
   step transition of a task the coordinator created or moved, when the
   proposal is decided, and on a sweep every 24 hours over every proposal
-  decided in the last 400 days whose row is not final. A row is final when its decision is `rejected`, `returned` or `undone`, when its proposal created no task, or when its task result is `merged` or `dropped`. Grading the
+  decided in the last 400 days whose row is not final. A row is final when its decision is `rejected`, `returned` or `undone`, when its proposal created no task, when its task is found deleted, or when its task result is `merged` or `dropped`. Grading the
   same proposal any number of times, or from two grading paths at once, shall
-  leave one row with the values derivable from the stored facts, except the decision time (the first recorded one, never moved) and the reopening count.
+  leave one row with the values derivable from the stored facts while the row is not final (a final row keeps what AC-COORDINATOR-OUTCOMES-001.3 freezes, even where a later fact would derive another value), except the decision time (the first recorded one, never moved) and the reopening count.
 - **AC-COORDINATOR-OUTCOMES-001.3:** A final row shall not change again, except that an undo of its action shall turn only its decision to `undone` and that an empty turn id is filled once a turn id is stamped; every other column, the reopening count included, stays as it was. `done` and `failed` rows that are not final are re-graded and a
   task whose result goes from `done` to `open` or `failed` shall raise the
   reopening count by one, once per observed transition, however many graders
@@ -105,10 +105,10 @@ The measures of the second half of this document are read only with the flag.
   stored. An override by a person who is not a manager, by a coordinator
   principal or by the system shall store no observation and shall count in
   `coordinator_override_ignored_total{reason}`; an authorisation read that
-  fails shall be treated as not a manager.
+  fails shall store no observation at that time and count in `coordinator_override_ignored_total{reason="authz_error"}`; a decision override is not retried, and a moved-back override whose read failed is judged again by a later scan and stored if that read then shows a manager.
 - **AC-COORDINATOR-OUTCOMES-002.4:** A card counts as moved back only when its
   destination step is earlier in the workflow's step order than the step the
-  coordinator's approved action left it in, and the move happened after that action. When several proposals of the coordinator created or moved the card, the observation shall name the newest approved one that was made before the move and was not undone at the time of the move (an action undone before the move is skipped; one undone after it still counts). A move is observed only when its step transition history records a user as the mover, so a card that had no active session when it was moved (none ever, or only completed, failed or cancelled ones) is not observed. A move to a later step, a move within the step, and a move of a card
+  coordinator's approved action left it in, and the move happened after that action. When several proposals of the coordinator created or moved the card, the observation shall name the newest approved one that was made before the move and was not undone at the time of the move (an action undone before the move is skipped; one undone after it still counts; the move's time is the stored time of its history row, so an approval or undo in the writer's lag window is judged as before the move). A move is observed only when its step transition history records a user as the mover, so a card that had no active session when it was moved (none ever, or only completed, failed or cancelled ones) is not observed. A move to a later step, a move within the step, and a move of a card
   the coordinator did not create or move shall store nothing.
 - **AC-COORDINATOR-OUTCOMES-002.5:** A rejection reason typed by a manager or
   a coded one shall map to one reason code of a closed set, `duplicate`,
