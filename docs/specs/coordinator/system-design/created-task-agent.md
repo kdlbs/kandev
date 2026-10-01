@@ -34,7 +34,7 @@ and executor profile. It is not behind `features.coordinatorPhase2`, `3` or
 
 | Requirement | Design section |
 | --- | --- |
-| `REQ-COORDINATOR-CREATED-TASK-AGENT-001` (`001.1` to `001.4`, `001.9`) | [Store](#store), [Routes](#routes), [Validation](#validation) |
+| `REQ-COORDINATOR-CREATED-TASK-AGENT-001` (`001.1` to `001.4`, `001.9`, `001.10`) | [Store](#store), [Routes](#routes), [Validation](#validation) |
 | `REQ-COORDINATOR-CREATED-TASK-AGENT-001` (`001.5` to `001.8`) | [Settings UI](#settings-ui) |
 | `REQ-COORDINATOR-PROPOSALS-002` (`002.13`, `002.16` to `002.18`) | [The chain](#the-chain), [At approve](#at-approve) |
 | `REQ-COORDINATOR-PROPOSALS-005` (`005.11`) | [Runs with](#runs-with) |
