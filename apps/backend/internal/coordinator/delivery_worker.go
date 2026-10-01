@@ -182,7 +182,7 @@ func (s *Service) onSessionStateChanged(ctx context.Context, event *bus.Event) {
 		return
 	}
 	coordinatorID := conversationTaskCoordinatorID(task)
-	if coordinatorID == "" {
+	if coordinatorID == "" || isDreamTask(task) {
 		return
 	}
 	primary, err := s.convReader.PrimarySession(ctx, taskID)

@@ -371,6 +371,11 @@ func (s *Service) CleanupConversationTasks(ctx context.Context, t0 time.Time) {
 // alone.
 func (s *Service) cleanupOneConversationTask(ctx context.Context, task *taskmodels.Task) {
 	coordinatorID := conversationTaskCoordinatorID(task)
+	if isDreamTask(task) && coordinatorID != "" {
+		if _, err := s.store.GetCoordinatorByID(ctx, coordinatorID); !errors.Is(err, ErrNotFound) {
+			return
+		}
+	}
 	if coordinatorID == "" {
 		s.deleteConversationTaskBestEffort(ctx, task.ID)
 		return
@@ -404,6 +409,16 @@ func conversationTaskCoordinatorID(task *taskmodels.Task) string {
 	}
 	id, _ := task.Metadata[taskmodels.MetaKeyCoordinatorID].(string)
 	return id
+}
+
+// isDreamTask reports whether a coordinator-origin task is a shadow dream
+// episode, which is not a conversation and is archived by the dream tick.
+func isDreamTask(task *taskmodels.Task) bool {
+	if task == nil || task.Metadata == nil {
+		return false
+	}
+	purpose, _ := task.Metadata[taskmodels.MetaKeyCoordinatorPurpose].(string)
+	return purpose == taskmodels.CoordinatorPurposeDream
 }
 
 // archiveConversation archives the conversation task a committed

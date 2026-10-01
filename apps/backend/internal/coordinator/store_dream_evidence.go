@@ -66,7 +66,7 @@ func (s *Store) CountDreamDecisions(ctx context.Context, coordinatorID string, s
 // when it has none.
 func (s *Store) FirstLedgerTurnAt(ctx context.Context, coordinatorID string) (*time.Time, error) {
 	var t sql.NullTime
-	err := s.ro.GetContext(ctx, &t, s.ro.Rebind(`SELECT MIN(started_at) FROM coordinator_turns WHERE coordinator_id = ?`), coordinatorID)
+	err := s.ro.GetContext(ctx, &t, s.ro.Rebind(`SELECT started_at FROM coordinator_turns WHERE coordinator_id = ? ORDER BY started_at LIMIT 1`), coordinatorID)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return nil, fmt.Errorf("read first ledger turn: %w", err)
 	}

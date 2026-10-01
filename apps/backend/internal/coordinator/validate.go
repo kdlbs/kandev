@@ -215,3 +215,6 @@ func (v *Validator) executorProfileStatus(ctx context.Context, executorProfileID
 	}
 	return ProfileStatusOK, nil
 }
+
+// ContextMaxRunes is the longest coordinator context, in code points.
+const ContextMaxRunes = contextMaxRunes

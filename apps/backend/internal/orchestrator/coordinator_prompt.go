@@ -28,6 +28,9 @@ func coordinatorMetadataID(task *models.Task) string {
 	if task == nil || task.Metadata == nil {
 		return ""
 	}
+	if purpose, _ := task.Metadata[models.MetaKeyCoordinatorPurpose].(string); purpose == models.CoordinatorPurposeDream {
+		return ""
+	}
 	id, _ := task.Metadata[models.MetaKeyCoordinatorID].(string)
 	return id
 }

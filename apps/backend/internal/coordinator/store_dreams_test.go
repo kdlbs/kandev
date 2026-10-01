@@ -189,6 +189,21 @@ func runDreamReportConformance(t *testing.T, store *Store) {
 		t.Fatalf("second page = %+v", page)
 	}
 
+	// Evidence reads: the oldest turn start scans as a time on both dialects.
+	if first, err := store.FirstLedgerTurnAt(ctx, "c5"); err != nil || first != nil {
+		t.Fatalf("first turn of an empty ledger = %v %v", first, err)
+	}
+	for i, id := range []string{"lt2", "lt1"} {
+		if _, err := store.db.ExecContext(ctx, store.db.Rebind(`INSERT INTO coordinator_turns
+			(id, coordinator_id, session_id, session_turn_id, "trigger", started_at, finished_at) VALUES (?, 'c5', 's', ?, 'wake', ?, ?)`),
+			id, id, at.Add(time.Duration(-i)*time.Hour), at); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if first, err := store.FirstLedgerTurnAt(ctx, "c5"); err != nil || first == nil || !first.Equal(at.Add(-time.Hour)) {
+		t.Fatalf("first turn = %v %v, want %v", first, err, at.Add(-time.Hour))
+	}
+
 	if n, err := store.PruneDreams(ctx, at.Add(24*time.Hour), 100); err != nil || n < 2 {
 		t.Fatalf("prune = %d %v", n, err)
 	}

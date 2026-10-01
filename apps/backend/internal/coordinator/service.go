@@ -143,6 +143,9 @@ type Service struct {
 	// surface exist. The pause gate and the stored project scope are enforced
 	// whatever its value.
 	phase31 bool
+
+	// learningHealth computes the Learning section's health line; guarded by observerMu.
+	learningHealth LearningHealthReader
 	// automatic holds the automatic path's injectable seams.
 	automatic automaticState
 	// wakeMu guards kick, the stall hook, the wake sources and the recorder

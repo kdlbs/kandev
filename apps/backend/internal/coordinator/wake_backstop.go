@@ -23,6 +23,9 @@ type Hooks struct {
 	TurnDuties BackstopDuty
 	Lowering   BackstopDuty
 	Deliver    BackstopDuty
+	// Dream is the shadow dream tick: lease expiry, episode cleanup and
+	// admission. It runs first in every visit, before the autonomy gate.
+	Dream BackstopDuty
 }
 
 // WakeBackstop runs the 60-second pass over the coordinators that need a
@@ -78,6 +81,9 @@ func (b *WakeBackstop) setHooks(h Hooks) {
 	}
 	if h.Deliver != nil {
 		b.hooks.Deliver = h.Deliver
+	}
+	if h.Dream != nil {
+		b.hooks.Dream = h.Dream
 	}
 }
 
@@ -182,11 +188,40 @@ func (b *WakeBackstop) visitSet(ctx context.Context, now time.Time) []string {
 // runPass visits every coordinator of the visit set once.
 func (b *WakeBackstop) runPass(ctx context.Context) {
 	b.svc.stopPausedCoordinators(ctx, b.skip)
+	visited := map[string]struct{}{}
 	for _, id := range b.visitSet(ctx, time.Now().UTC()) {
 		if ctx.Err() != nil {
 			return
 		}
+		visited[id] = struct{}{}
 		b.visit(ctx, id)
+	}
+	b.visitDreamOnly(ctx, visited)
+}
+
+// visitDreamOnly runs the dream tick for the coordinators that only a dream
+// row brings into the pass: a running dream or an episode task not yet
+// archived. They get no other duty.
+func (b *WakeBackstop) visitDreamOnly(ctx context.Context, visited map[string]struct{}) {
+	duty := b.currentHooks().Dream
+	if duty == nil {
+		return
+	}
+	ids, err := b.svc.store.DreamCoordinatorIDs(ctx)
+	if err != nil {
+		if ctx.Err() == nil {
+			b.skip("coordinators with dreams", err)
+		}
+		return
+	}
+	for _, id := range ids {
+		if _, done := visited[id]; done {
+			continue
+		}
+		if ctx.Err() != nil {
+			return
+		}
+		b.runDuty(ctx, "dream", duty, id)
 	}
 }
 
@@ -202,6 +237,7 @@ func (b *WakeBackstop) visit(ctx context.Context, coordinatorID string) {
 		return
 	}
 	hooks := b.currentHooks()
+	b.runDuty(ctx, "dream", hooks.Dream, coordinatorID)
 	b.runDuty(ctx, "turn duties", hooks.TurnDuties, coordinatorID)
 	b.runDuty(ctx, "lowering", hooks.Lowering, coordinatorID)
 	if !c.AutonomyEnabled {
