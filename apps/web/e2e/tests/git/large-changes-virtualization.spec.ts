@@ -18,6 +18,11 @@ import {
   type BrowserObservation,
 } from "./large-changes-helpers";
 import { SessionPage } from "../../pages/session-page";
+import {
+  expectContiguousTimeline,
+  refreshSpacingAndExpectAnchor,
+  seedCommitSpacingHistory,
+} from "./changes-commit-spacing-helpers";
 import path from "node:path";
 
 test.describe("Large Changes virtualization", () => {
@@ -30,6 +35,50 @@ test.describe("Large Changes virtualization", () => {
     );
     git.exec("git reset --hard HEAD");
     git.exec("git clean -fd");
+  });
+
+  // @covers AC-UI-BOUNDED-CHANGES-001.6
+  test("keeps commit spacing contiguous through refresh, resize, and reopening", async ({
+    testPage,
+    apiClient,
+    seedData,
+    prCapture,
+  }) => {
+    await testPage.setViewportSize({ width: 1280, height: 900 });
+    const profile = await createStandardProfile(apiClient, "Commit Spacing Profile");
+    const task = await apiClient.createTaskWithAgent(
+      seedData.workspaceId,
+      "Commit Spacing",
+      profile.id,
+      {
+        description: "/e2e:simple-message",
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+        repository_ids: [seedData.repositoryId],
+      },
+    );
+    await testPage.goto(`/t/${task.id}`);
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
+    await session.waitForChatIdle();
+    await session.clickTab("Changes");
+    await seedCommitSpacingHistory(testPage);
+    await refreshSpacingAndExpectAnchor(testPage);
+    await prCapture.screenshot("changelist-spacing-desktop", {
+      caption: "Commit history retains compact, contiguous rows after measurement refresh",
+    });
+    await testPage.getByTestId("changes-panel-scroll-owner").evaluate((element) => {
+      element.scrollTop = 360;
+    });
+    await refreshSpacingAndExpectAnchor(testPage);
+    for (const width of [1040, 768, 1280]) {
+      await testPage.setViewportSize({ width, height: 900 });
+      await refreshSpacingAndExpectAnchor(testPage);
+    }
+    await session.clickSessionChatTab();
+    await session.clickTab("Changes");
+    await expectContiguousTimeline(testPage);
+    await expectNoPageHorizontalOverflow(testPage);
   });
 
   for (const layout of ["tree", "flat"] as const) {

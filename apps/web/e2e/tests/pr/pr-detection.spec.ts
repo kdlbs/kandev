@@ -1,5 +1,5 @@
 import path from "node:path";
-import { test, expect } from "../../fixtures/test-base";
+import { test, expect, resetSeedRepositoryCheckout } from "../../fixtures/test-base";
 import { watchWs } from "../../helpers/causal-waits";
 import { KanbanPage } from "../../pages/kanban-page";
 import { SessionPage } from "../../pages/session-page";
@@ -344,8 +344,10 @@ test.describe("PR external detection", () => {
     testPage,
     apiClient,
     seedData,
+    backend,
   }) => {
     test.setTimeout(120_000);
+    resetSeedRepositoryCheckout(seedData, backend.tmpDir);
 
     // --- Seed workflow ---
     const workflow = await apiClient.createWorkflow(seedData.workspaceId, "PR Detection Workflow");

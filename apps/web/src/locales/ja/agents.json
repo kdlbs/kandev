@@ -356,5 +356,14 @@
   "providerPassthroughUnsupported": "OpenAI互換 provider を使うには CLI passthrough を無効にする。",
   "nativeCodexUnavailableTitle": "Codex app server を利用できません",
   "nativeCodexUnavailable": "この保存済みプロファイルは保持されていますが、Codex app server 機能がオフの間は編集、複製、有効化、開始できません。プロファイルを削除するか、設定で機能を有効にしてください。",
-  "nativeCodexUnavailableShort": "機能オフ"
+  "nativeCodexUnavailableShort": "機能オフ",
+  "minimaxLoginDescription": "MiniMax アカウントにログインします。MiniMax は認証情報を {{dataDir}} に保存します。",
+  "minimaxDescription": "ネイティブ ACP サーバーとサブスクリプションログインを使用する MiniMax Code。",
+  "minimaxPassthroughLabel": "CLI パススルー",
+  "minimaxPassthroughDescription": "チャット画面の代わりにターミナルを直接表示",
+  "minimaxChooseRegionTitle": "MiniMax アカウントのリージョン",
+  "minimaxChooseRegionDescription": "MiniMax サブスクリプションアカウントのリージョンを選択してください。",
+  "minimaxRegionCN": "中国本土",
+  "minimaxRegionGlobal": "グローバル",
+  "minimaxLoginConflict": "別のログインコマンドが実行中です。そのターミナルを閉じてから再試行してください。"
 }

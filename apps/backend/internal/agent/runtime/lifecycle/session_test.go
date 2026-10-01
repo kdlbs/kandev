@@ -57,6 +57,7 @@ type mockAgentServer struct {
 	agentStatus          string
 	upgrader             websocket.Upgrader
 	handler              func(msg ws.Message) *ws.Message
+	afterResponse        func(msg ws.Message)
 	wsConnected          chan struct{} // closed when WS stream connects
 	materialized         []materializedUpload
 	failMaterialize      bool
@@ -166,6 +167,9 @@ func newMockAgentServer(t *testing.T) *mockAgentServer {
 			data, _ := json.Marshal(resp)
 			if err := conn.WriteMessage(websocket.TextMessage, data); err != nil {
 				return
+			}
+			if m.afterResponse != nil {
+				m.afterResponse(msg)
 			}
 		}
 	})
@@ -2426,13 +2430,19 @@ func TestSendPrompt_DispatchOnlyBlocksNextPromptUntilItsCompletion(t *testing.T)
 	case <-time.After(100 * time.Millisecond):
 	}
 
-	execution.promptDoneCh <- PromptCompletionSignal{StopReason: "first-complete"}
+	execution.promptDoneCh <- PromptCompletionSignal{
+		StopReason:       "first-complete",
+		PromptGeneration: execution.promptGenerationSnapshot(),
+	}
 	select {
 	case <-secondPromptSeen:
 	case <-time.After(2 * time.Second):
 		t.Fatal("second prompt did not reach agentctl after the dispatch-only turn completed")
 	}
-	execution.promptDoneCh <- PromptCompletionSignal{StopReason: "second-complete"}
+	execution.promptDoneCh <- PromptCompletionSignal{
+		StopReason:       "second-complete",
+		PromptGeneration: execution.promptGenerationSnapshot(),
+	}
 	select {
 	case err := <-result:
 		if err != nil {
@@ -2531,7 +2541,10 @@ func TestSendPrompt_AdvancesGenerationForEveryDispatch(t *testing.T) {
 	if !store.OwnsPromptGeneration(execution.SessionID, execution.ID, 1) {
 		t.Fatal("initial prompt must own generation 1 even when execution starts running")
 	}
-	execution.promptDoneCh <- PromptCompletionSignal{StopReason: "initial-complete"}
+	execution.promptDoneCh <- PromptCompletionSignal{
+		StopReason:       "initial-complete",
+		PromptGeneration: 1,
+	}
 
 	if _, err := sm.SendPrompt(ctx, execution, "replacement", true, nil, true); err != nil {
 		t.Fatalf("dispatch replacement prompt: %v", err)

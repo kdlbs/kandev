@@ -730,6 +730,7 @@ func mapUserSettingsState(response userdto.UserSettingsResponse, workspaceID str
 		"terminalFontSize":                  nullInt(settings.TerminalFontSize),
 		"changesPanelLayout":                changesPanelLayout(settings.ChangesPanelLayout),
 		"lastSeenDisplay":                   lastSeenDisplay(settings.LastSeenDisplay),
+		"agentTabCloseBehavior":             usermodels.NormalizeAgentTabCloseBehavior(settings.AgentTabCloseBehavior),
 		"azureDevOpsBrowsePreferences":      settings.AzureDevOpsBrowsePreferences,
 		"systemMetricsDisplay": map[string]any{
 			"showInTopbar": settings.SystemMetricsDisplay.ShowInTopbar,

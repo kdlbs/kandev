@@ -14,6 +14,7 @@ import {
   getManualRightWidth,
 } from "@/lib/local-storage";
 import { getLayoutProfileIdentity, type LayoutProfileIdentity } from "@/lib/layout/layout-profiles";
+import { getEnvHiddenSessions, resolveVisibleSessionId } from "@/lib/env-hidden-sessions";
 import { setPinnedTarget, clearPinnedTarget } from "./layout-manager";
 import { applyLayoutFixups, focusOrAddPanel } from "./dockview-layout-builders";
 import {
@@ -191,6 +192,7 @@ export type SavedLayoutConfig = {
 export type ApplyCustomLayoutOptions = {
   activeSessionId?: string | null;
   sessionIds?: string[];
+  envId?: string | null;
 };
 export type TranscriptScrollTarget = {
   sessionId: string;
@@ -866,6 +868,22 @@ type RestoreCustomLayoutParams = {
   set: StoreSet;
 };
 
+function visibleCustomLayoutSessions(opts: ApplyCustomLayoutOptions | undefined): {
+  activeSessionId: string | null;
+  sessionIds: string[];
+} {
+  const hiddenSessionIds = new Set(opts?.envId ? getEnvHiddenSessions(opts.envId) : []);
+  const activeSessionId = opts?.activeSessionId ?? null;
+  return {
+    activeSessionId: resolveVisibleSessionId(
+      activeSessionId,
+      opts?.sessionIds ?? [],
+      hiddenSessionIds,
+    ),
+    sessionIds: (opts?.sessionIds ?? []).filter((sessionId) => !hiddenSessionIds.has(sessionId)),
+  };
+}
+
 /**
  * Restore a saved custom layout onto the dockview API. New-format layouts
  * (with columns) are normalized (reusable session panels, chat materialization)
@@ -885,10 +903,11 @@ function restoreCustomLayout({
   if (state?.columns) {
     // Normalize first so both old saved layouts with session-specific panels
     // and newer reusable layouts with chat placeholders apply through one path.
+    const visibleSessions = visibleCustomLayoutSessions(opts);
     const activeState = materializeReusableChatPanel(
       normalizeReusableSessionPanels(state),
-      opts?.activeSessionId ?? null,
-      opts?.sessionIds ?? [],
+      visibleSessions.activeSessionId,
+      visibleSessions.sessionIds,
     );
     const savedWidths = resolveCustomLayoutPinnedWidths(activeState.columns, safeWidth);
     const ids = applyLayoutAndSet(api, activeState, savedWidths, set, {
@@ -901,7 +920,12 @@ function restoreCustomLayout({
 
   try {
     restoreSerializedDockview(api, layout.layout as unknown as SerializedDockview);
-    replaceStaleSessionPanels(api, opts?.activeSessionId ?? null, opts?.sessionIds ?? []);
+    replaceStaleSessionPanels(
+      api,
+      opts?.activeSessionId ?? null,
+      opts?.sessionIds ?? [],
+      opts?.envId ?? null,
+    );
     set(applyLayoutFixups(api));
     return { appliedState: state, oldFormatRestoreFailed: false };
   } catch (e) {
@@ -934,7 +958,7 @@ function restoreMaximizeFromStorage(
   if (!saved) return false;
   try {
     restoreSerializedDockview(api, saved.maximizedDockviewJson as SerializedDockview);
-    replaceStaleSessionPanels(api, activeSessionId, currentSessionIds);
+    replaceStaleSessionPanels(api, activeSessionId, currentSessionIds, envId);
     // After fromJSON, `api.width/height` reflect the JSON's recorded grid
     // dims, which may not match the live container. Always lay out against
     // the measured DOM size so a stale value can't pin the dockview at the

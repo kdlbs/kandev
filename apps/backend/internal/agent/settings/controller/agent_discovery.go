@@ -207,6 +207,7 @@ func buildLoginCommandDTO(ag agents.Agent) *dto.LoginCommandDTO {
 	}
 	return &dto.LoginCommandDTO{
 		Cmd:         lc.Cmd,
+		Variants:    lc.Variants,
 		Description: lc.Description,
 	}
 }

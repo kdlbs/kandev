@@ -106,6 +106,25 @@ variable heights. Only positive measurements replace cached sizes, following
 remeasurement. Zero-height observations during hiding retain estimates or the
 last positive measurement.
 
+`ChangesTimelineViewport` refreshes presentation measurements through
+`observeChangesTimelinePresentationChanges`. Invalidating the virtualizer's
+cache does not cause an unchanged mounted element to emit another
+`ResizeObserver` entry. A refresh must therefore repopulate mounted row sizes,
+including rows whose dimensions did not change, before restoring its anchor.
+Conservative estimates remain valid for unmounted rows only.
+
+Capture the anchor and collect the mounted wrappers' sizes before clearing the
+cache. Batch layout reads before publishing sizes. Accept positive current
+heights and retain each mounted row's previous positive keyed size when hidden
+geometry is unavailable. Rebuild the virtualizer's measurements, apply those
+sizes, then publish the pending anchor for restoration. This ordering prevents
+an intermediate estimate-only layout from moving the visible entry.
+
+Keep this explicit measurement pass limited to the mounted window on
+presentation invalidation. Initial mounting and ordinary scrolling retain the
+asynchronous `file-tree-measurement.ts` path. Do not measure the full collection,
+fix all row heights, or enlarge overscan to mask missing measurements.
+
 Capture the first visible key and offset before a same-context model change.
 Restore that anchor when it survives. Otherwise use the nearest surviving index
 and clamp the scroll position. Preserve scroll on ordinary background updates.
@@ -193,3 +212,4 @@ UI ownership. The design records sufficient rationale. Truncation loses access,
 CSS hiding retains components, and nested scrollers weaken navigation.
 
 - [Implementation plan](../../../plans/bounded-changes-rendering/plan.md)
+- [Measurement refresh repair](../../../plans/changes-timeline-measurement-refresh/plan.md)

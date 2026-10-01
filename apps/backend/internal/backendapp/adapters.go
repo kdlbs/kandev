@@ -1163,6 +1163,20 @@ func (a *lifecycleAdapter) GetGitStatusFresh(ctx context.Context, sessionID stri
 	return agentClient.GetGitStatusFresh(ctx)
 }
 
+// GetGitStatusWithDetails retrieves a fresh status after enrichment completes.
+func (a *lifecycleAdapter) GetGitStatusWithDetails(ctx context.Context, sessionID string) (*client.GitStatusResult, error) {
+	execution, ok := a.mgr.GetExecutionBySessionID(sessionID)
+	if !ok {
+		return nil, nil
+	}
+	agentClient, releaseClient := execution.AcquireAgentCtlClient()
+	defer releaseClient()
+	if agentClient == nil {
+		return nil, nil
+	}
+	return agentClient.GetGitStatusWithDetails(ctx)
+}
+
 // WaitForAgentctlReady waits for the agentctl HTTP server to be ready for a session.
 func (a *lifecycleAdapter) WaitForAgentctlReady(ctx context.Context, sessionID string) error {
 	return a.mgr.WaitForAgentctlReadyForSession(ctx, sessionID)

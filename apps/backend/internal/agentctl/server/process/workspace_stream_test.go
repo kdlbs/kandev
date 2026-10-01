@@ -8,30 +8,19 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/types"
 )
 
-// TestAttachWorkspaceStreamSubscriber_RefreshesBeforeReplay verifies that a
-// new subscriber receives a *fresh* git status, not whatever stale value is
-// sitting in the tracker's currentStatus cache. This closes the bug where an
-// agent shell `git commit` (which bypasses GitOperator) leaves the cache
-// showing "file=modified", and any later subscribe replays that stale entry.
-func TestAttachWorkspaceStreamSubscriber_RefreshesBeforeReplay(t *testing.T) {
+// TestAttachWorkspaceStreamSubscriber_ReplaysAcceptedSnapshot verifies that a
+// stream attach replays the tracker-owned snapshot without creating a second
+// status observation or changing its ordering token.
+func TestAttachWorkspaceStreamSubscriber_ReplaysAcceptedSnapshot(t *testing.T) {
 	repoDir, cleanup := setupTestRepo(t)
 	defer cleanup()
 
-	log := newTestLogger(t)
-	wt := NewWorkspaceTracker(repoDir, log)
-
-	// Plant a stale entry directly into the cache: pretend an earlier poll
-	// observed README.md as modified, but the file is actually clean on disk.
-	wt.mu.Lock()
-	wt.currentStatus = types.GitStatusUpdate{
-		Timestamp: time.Now(),
-		Branch:    "main",
-		Modified:  []string{"README.md"},
-		Files: map[string]types.FileInfo{
-			"README.md": {Path: "README.md", Status: fileStatusModified, Staged: false},
-		},
+	wt := NewWorkspaceTracker(repoDir, newTestLogger(t))
+	t.Cleanup(wt.Stop)
+	accepted, err := wt.GetGitStatus(context.Background(), true)
+	if err != nil {
+		t.Fatalf("GetGitStatus() error = %v", err)
 	}
-	wt.mu.Unlock()
 
 	sub := make(types.WorkspaceStreamSubscriber, 4)
 	wt.AttachWorkspaceStreamSubscriber(sub)
@@ -42,14 +31,11 @@ func TestAttachWorkspaceStreamSubscriber_RefreshesBeforeReplay(t *testing.T) {
 		if msg.GitStatus == nil {
 			t.Fatalf("expected GitStatus message on attach, got %+v", msg)
 		}
-		// The working tree is actually clean. With the refresh-before-replay
-		// fix in place, AttachWorkspaceStreamSubscriber re-runs git status and
-		// the replayed snapshot reflects that — Modified must be empty.
-		if len(msg.GitStatus.Modified) != 0 {
-			t.Errorf("expected fresh Modified=[], got %v (stale cache was replayed)", msg.GitStatus.Modified)
+		if msg.GitStatus.SnapshotRevision != accepted.SnapshotRevision || msg.GitStatus.TrackerEpoch != accepted.TrackerEpoch {
+			t.Errorf("replay ordering = (%d, %d), want accepted (%d, %d)", msg.GitStatus.TrackerEpoch, msg.GitStatus.SnapshotRevision, accepted.TrackerEpoch, accepted.SnapshotRevision)
 		}
-		if _, exists := msg.GitStatus.Files["README.md"]; exists {
-			t.Errorf("expected README.md to be absent from Files, found it (stale cache was replayed)")
+		if !msg.GitStatus.FilesComplete || msg.GitStatus.StatusState != gitStatusStateReady {
+			t.Errorf("replayed status quality = (%q, %v), want ready complete membership", msg.GitStatus.StatusState, msg.GitStatus.FilesComplete)
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("timed out waiting for replayed status on subscribe")
@@ -188,6 +174,23 @@ func TestAttachWorkspaceStreamSubscriber_DoesNotBroadcastToOthers(t *testing.T) 
 
 	log := newTestLogger(t)
 	wt := NewWorkspaceTracker(repoDir, log)
+	t.Cleanup(wt.Stop)
+	enrichmentStarted := make(chan struct{})
+	releaseEnrichment := make(chan struct{})
+	var released bool
+	defer func() {
+		if !released {
+			close(releaseEnrichment)
+		}
+	}()
+	wt.gitStatusBeforeEnrich = func() {
+		close(enrichmentStarted)
+		<-releaseEnrichment
+	}
+	if _, err := wt.GetGitStatus(context.Background(), true); err != nil {
+		t.Fatalf("GetGitStatus() error = %v", err)
+	}
+	waitForSignal(t, enrichmentStarted, "enrichment gate")
 
 	existing := make(types.WorkspaceStreamSubscriber, 8)
 	wt.AttachWorkspaceStreamSubscriber(existing)
@@ -221,6 +224,8 @@ func TestAttachWorkspaceStreamSubscriber_DoesNotBroadcastToOthers(t *testing.T) 
 	case <-time.After(150 * time.Millisecond):
 		// Good — no noise.
 	}
+	close(releaseEnrichment)
+	released = true
 }
 
 func drain(t *testing.T, sub types.WorkspaceStreamSubscriber) {

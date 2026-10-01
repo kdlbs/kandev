@@ -71,6 +71,7 @@ function makeUnloadedSettings(): UserSettingsState {
     unreadDivider: true,
     agentGeneratedTaskTitles: false,
     autoFocusNewTasks: true,
+    agentTabCloseBehavior: "delete_session",
     mcpTaskAgentProfileDefault: "current_task",
     showAnchoredPromptBar: false,
     showScrollToLastPrompt: true,

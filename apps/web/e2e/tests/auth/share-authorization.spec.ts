@@ -1,4 +1,5 @@
 import { expect, type APIResponse } from "@playwright/test";
+import path from "node:path";
 import { backendFixture as test } from "../../fixtures/backend";
 import { acceptInvite, createInviteToken, setupAdmin } from "../../helpers/auth";
 
@@ -39,7 +40,10 @@ test.describe.serial("share authorization", () => {
   };
 
   test.beforeAll(async ({ backend }) => {
-    await backend.restart({ KANDEV_FEATURES_AUTH: "true" });
+    await backend.restart({
+      KANDEV_FEATURES_AUTH: "true",
+      KANDEV_DATABASE_PATH: path.join(backend.tmpDir, "kandev-auth-share-authorization.db"),
+    });
   });
 
   test.afterAll(async ({ backend }) => {

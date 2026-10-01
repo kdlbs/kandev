@@ -53,27 +53,18 @@ import type { PRDiffFile, TaskPR } from "@/lib/types/github";
 import { gitOperationLabel } from "@/hooks/use-git-with-feedback";
 import { getGitCredentialDisplay } from "./changes-git-credential-display";
 import type { RemoteContributionRelation } from "@/hooks/domains/session/remote-contribution-relation";
-import {
-  remoteContributionActionPolicy,
-  remoteContributionActionReasonKey,
-} from "@/hooks/domains/session/remote-contribution-relation";
-import {
-  buildRemoteContributionResolutionTarget,
-  type RemoteContributionResolutionTarget,
-} from "./use-remote-contribution-resolution";
+import type { RemoteContributionResolutionTarget } from "./changes-panel-contribution-state";
+import { useChangesPanelContributionState } from "./changes-panel-contribution-state";
 import { useRemoteContributionResolution } from "./use-remote-contribution-resolution";
 import { useTranslation } from "react-i18next";
 import { useWorkspaceRestoration } from "@/hooks/domains/session/use-workspace-restoration";
 import type { WorkspaceRestorationAttempt } from "@/lib/state/slices/session-runtime/workspace-restoration";
+import { useChangesPanelGitStatus, type ChangesPanelGitStatus } from "./changes-panel-git-status";
 
 function useChangesPanelStoreData() {
   const { t } = useTranslation();
   const activeTaskId = useAppStore((state) => state.tasks.activeTaskId);
   const activeSessionId = useEnvironmentSessionId();
-  const taskTitle = useAppStore((state) => {
-    if (!state.tasks.activeTaskId) return undefined;
-    return state.kanban.tasks.find((t: { id: string }) => t.id === state.tasks.activeTaskId)?.title;
-  });
   const baseBranch = useAppStore((state) =>
     activeSessionId ? state.taskSessions.items[activeSessionId]?.base_branch : undefined,
   );
@@ -90,7 +81,6 @@ function useChangesPanelStoreData() {
   return {
     activeTaskId,
     activeSessionId,
-    taskTitle,
     baseBranch,
     gitCredentialDisplay,
   };
@@ -133,6 +123,7 @@ export type ChangesPanelBodyProps = {
   comparisonTargets: string[];
   comparisonUnavailable: boolean;
   comparisonErrorCode: string | null;
+  gitStatus: ChangesPanelGitStatus;
   isLoading: boolean;
   loadingOperation: string | null;
   dialogs: DialogsType;
@@ -143,6 +134,7 @@ export type ChangesPanelBodyProps = {
     fileNavigation?: CommitFileNavigationRequest,
   ) => void;
   onOpenReview?: () => void;
+  onRetryGitStatus?: () => void;
   onRevertCommit?: (sha: string, repo?: string) => void;
   onStageAll: () => void;
   onUnstageAll: () => void;
@@ -365,32 +357,17 @@ function hasCumulativeFiles(files: Record<string, unknown> | null | undefined): 
   return Object.keys(files ?? {}).length > 0;
 }
 
-function useChangesPanelResolutionTarget(
-  relation: RemoteContributionRelation,
-  repositoryScope: string,
-  selectedPR: TaskPR | null | undefined,
-  t: (key: string) => string,
-) {
-  const remoteRepositoryLabel = t("task:remoteRepository");
-  return useMemo(
-    () =>
-      buildRemoteContributionResolutionTarget(
-        relation,
-        repositoryScope,
-        selectedPR,
-        remoteRepositoryLabel,
-      ),
-    [relation, repositoryScope, selectedPR, remoteRepositoryLabel],
-  );
-}
-
 export function useChangesPanelData() {
-  const { t } = useTranslation();
   const { activeTaskId, activeSessionId, baseBranch, gitCredentialDisplay } =
     useChangesPanelStoreData();
   const workspaceRestoration = useWorkspaceRestoration(activeTaskId, activeSessionId);
   const baseBranchByRepo = useBaseBranchByRepo(activeTaskId);
   const git = useSessionGit(activeSessionId);
+  const gitStatusPresentation = useChangesPanelGitStatus(
+    activeSessionId,
+    git.gitStatus,
+    git.statusByRepo,
+  );
   const { toast } = useToast();
   const { reviews } = useSessionFileReviews(activeSessionId);
   const reviewRepositoryNames = useMemo(
@@ -402,20 +379,11 @@ export function useChangesPanelData() {
     activeSessionId,
     prData.refreshProviderEvidence,
   );
-  const resolutionTarget = useChangesPanelResolutionTarget(
+  const contributionState = useChangesPanelContributionState(
     prData.relation,
     prData.repositoryScope,
     prData.selectedPR,
-    t,
   );
-  const remoteActionPolicy = useMemo(
-    () => remoteContributionActionPolicy(prData.relation),
-    [prData.relation],
-  );
-  const pullDisabledReason = useMemo(() => {
-    const key = remoteContributionActionReasonKey(prData.relation, "pull");
-    return key ? t(key) : undefined;
-  }, [prData.relation, t]);
   const vcsDialogs = useVcsDialogs();
   const baseBranchDisplay = useMemo(() => getBaseBranchDisplay(baseBranch), [baseBranch]);
   const unstagedFiles = useMemo(() => mapToChangedFiles(git.unstagedFiles), [git.unstagedFiles]);
@@ -456,6 +424,7 @@ export function useChangesPanelData() {
     activeTaskId,
     activeSessionId,
     git,
+    gitStatusPresentation,
     baseBranchDisplay,
     baseBranchByRepo,
     unstagedFiles,
@@ -473,11 +442,11 @@ export function useChangesPanelData() {
     gitCredentialDisplay,
     walkthroughRequestReady,
     resolution,
-    resolutionTarget,
+    resolutionTarget: contributionState.resolutionTarget,
     workspaceRestoration,
-    pushDisabled: remoteActionPolicy.pushDisabled,
-    pullDisabled: remoteActionPolicy.pullDisabled,
-    pullDisabledReason,
+    pushDisabled: contributionState.remoteActionPolicy.pushDisabled,
+    pullDisabled: contributionState.remoteActionPolicy.pullDisabled,
+    pullDisabledReason: contributionState.pullDisabledReason,
     ...prData,
   };
 }
@@ -490,6 +459,7 @@ type ChangesPanelCallbacks = {
     fileNavigation?: CommitFileNavigationRequest,
   ) => void;
   onOpenReview?: () => void;
+  onRetryGitStatus?: () => void;
 };
 
 type ChangesPanelWorkspaceActions = Pick<
@@ -598,6 +568,8 @@ export function buildChangesPanelBodyProps(
     comparisonTargets: git.comparisonTargets,
     comparisonUnavailable: git.comparisonUnavailable,
     comparisonErrorCode: git.comparisonErrorCode,
+    gitStatus: data.gitStatusPresentation,
+    onRetryGitStatus: callbacks.onRetryGitStatus,
     isLoading: git.isLoading,
     loadingOperation: git.loadingOperation,
     dialogs: data.dialogs,
