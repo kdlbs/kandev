@@ -8,6 +8,7 @@ import {
   expectDivergedHistory,
   expectHeaderGeometry,
   expectExpandedPRContiguous,
+  expectRepositoryToggleTouchTarget,
 } from "./changes-history-regression-helpers";
 
 test.describe("Changes history regression", () => {
@@ -73,12 +74,20 @@ test.describe("Changes history regression", () => {
     testPage,
     apiClient,
     seedData,
+    prCapture,
   }) => {
     await testPage.setViewportSize({ width: 393, height: 851 });
     const session = await openHistoryRegression(testPage, apiClient, seedData, true);
     await seedHistoryRelation(testPage, "diverged");
     await expectDivergedHistory(testPage);
     await expectHeaderGeometry(testPage, 44);
+    await seedHistoryRelation(testPage, "diverged", ["frontend", "backend"]);
+    await testPage.getByTestId("local-checkout-commits-section-collapse-toggle").click();
+    await expectRepositoryToggleTouchTarget(testPage, "frontend");
+    await prCapture.screenshot("history-repository-targets-fine-pointer-phone", {
+      caption: "44px repository controls on a fine-pointer phone",
+    });
+    await testPage.getByTestId("local-checkout-commits-section-collapse-toggle").click();
     await testPage.setViewportSize({ width: 767, height: 851 });
     await expectHeaderGeometry(testPage, 44);
     await testPage.setViewportSize({ width: 768, height: 900 });

@@ -151,6 +151,10 @@ match the corresponding presentation mode; positive measurements remain the
 authority for wrapping and font scaling. Do not set a fixed height on virtual
 wrappers or add spacer descriptors for this repair.
 
+History repository sub-headers also keep at least 44px disclosure targets on
+phone widths, including fine pointers, and on coarse pointers. Their measured
+wrappers retain the existing repository-row padding and desktop density.
+
 Rendered checks must measure the disclosures, header wrappers, and first
 descendants, as well as adjacent virtual transforms. Wrapper adjacency alone
 cannot detect excessive internal header padding. Exercise collapsed/expanded

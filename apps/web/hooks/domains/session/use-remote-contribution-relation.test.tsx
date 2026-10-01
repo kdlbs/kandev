@@ -216,10 +216,13 @@ describe("useRemoteContributionRelation status quality", () => {
       useDisabled: true,
     });
 
-    mocks.statuses[0] = status("frontend", "local-head", mocks.providerHead, {
-      remote_ahead: 1,
-      remote_behind: 0,
-    });
+    mocks.statuses = [
+      status("frontend", "local-head", mocks.providerHead, {
+        remote_ahead: 1,
+        remote_behind: 0,
+      }),
+      ...mocks.statuses.slice(1),
+    ];
     rerender();
     expect(result.current.relation.kind).toBe("local_ahead");
   });

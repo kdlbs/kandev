@@ -96,3 +96,7 @@ and phone stale/confirmed-divergence subsets each passed two tests. The final
 browser runs reused the freshly rebuilt classifier bundle via `--host --no-build`.
 No remote mutation was performed. Public Git guidance now distinguishes unknown
 snapshots from confirmed divergence. Final package static checks follow task 02.
+
+PR review follow-up replaces the selected repository's status through a new
+mock array before rerendering, matching immutable store updates and preserving
+the sibling repository. The focused unit suite remains green.

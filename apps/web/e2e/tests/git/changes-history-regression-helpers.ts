@@ -4,6 +4,7 @@ import type { ApiClient } from "../../helpers/api-client";
 import type { AppState } from "../../../lib/state/store";
 import { SessionPage } from "../../pages/session-page";
 import { seedLargeWorkingTree } from "./large-changes-helpers";
+import { expectTouchControl } from "../../helpers/control-sizing";
 
 const PROVIDER_BASE = "a".repeat(40);
 const PROVIDER_HEAD = "b".repeat(40);
@@ -93,9 +94,13 @@ export async function openHistoryRegression(
   return session;
 }
 
-export async function seedHistoryRelation(page: Page, kind: "stale" | "diverged" | "local_ahead") {
+export async function seedHistoryRelation(
+  page: Page,
+  kind: "stale" | "diverged" | "local_ahead",
+  repositoryNames = [""],
+) {
   await page.evaluate(
-    ({ providerBase, providerHead, localHead, relationKind }) => {
+    ({ providerBase, providerHead, localHead, relationKind, repositories }) => {
       const store = (window as Window & { __KANDEV_E2E_STORE__?: { getState: () => AppState } })
         .__KANDEV_E2E_STORE__;
       if (!store) throw new Error("E2E store bridge missing");
@@ -130,11 +135,13 @@ export async function seedHistoryRelation(page: Page, kind: "stale" | "diverged"
         },
         timestamp: new Date(Date.now() + 7_200_000).toISOString(),
       });
-      state.setSessionCommits(sessionId, [
-        {
-          id: "local-history",
+      state.setSessionCommits(
+        sessionId,
+        repositories.map((repositoryName, index) => ({
+          id: `local-history-${index}`,
           session_id: sessionId,
-          commit_sha: localHead,
+          commit_sha: index === 0 ? localHead : "d".repeat(40),
+          repository_name: repositoryName || undefined,
           parent_sha: providerHead,
           author_name: "Contributor",
           author_email: "contributor@example.invalid",
@@ -145,14 +152,15 @@ export async function seedHistoryRelation(page: Page, kind: "stale" | "diverged"
           insertions: 1,
           deletions: 0,
           pushed: false,
-        },
-      ]);
+        })),
+      );
     },
     {
       providerBase: PROVIDER_BASE,
       providerHead: PROVIDER_HEAD,
       localHead: LOCAL_HEAD,
       relationKind: kind,
+      repositories: repositoryNames,
     },
   );
 }
@@ -213,4 +221,22 @@ export async function expectExpandedPRContiguous(page: Page) {
     )
     .toBe(0);
   await page.getByTestId("pr-changes-section-collapse-toggle").click();
+}
+
+export async function expectRepositoryToggleTouchTarget(page: Page, repositoryName: string) {
+  const toggle = page.getByTestId("commits-repo-header").filter({ hasText: repositoryName });
+  await expect(toggle).toBeVisible();
+  await expectTouchControl(toggle);
+  await expect
+    .poll(() =>
+      toggle.evaluate((element) => {
+        const box = element.getBoundingClientRect();
+        return element.contains(
+          document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2),
+        );
+      }),
+    )
+    .toBe(true);
+  await toggle.click();
+  await expect(toggle).toHaveAttribute("aria-expanded", "false");
 }

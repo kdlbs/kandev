@@ -211,6 +211,16 @@ all six desktop scenarios; the matching phone run passed four scenarios.
 Fresh desktop/phone screenshot manifests were captured. The current catalog validates 339 decisions and
 1,284 specifications; public-doc and specification validation passed.
 
+## PR review follow-up
+
+Repository sub-header disclosures also use the phone-width minimum. A rendered
+multi-repository fixture reproduced the missing minimum at 24px; the regression
+now verifies at least 44px, the center hit target, and collapse clickability.
+The selected-repository hook fixture now replaces its status array immutably
+before rerendering. All 76 focused unit tests, six desktop and four phone
+scenarios, typecheck, and lint checks passed. Exact-head remote evidence is
+tracked after the fixup push.
+
 ## Risks
 
 - Stale upstream evidence can legitimately postpone comparison until ordinary

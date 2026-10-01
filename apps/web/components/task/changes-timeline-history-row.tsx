@@ -188,7 +188,7 @@ function HistoryRepositoryRow({
     <div className="flex items-center justify-between gap-2 px-1 py-0.5">
       <button
         type="button"
-        className="flex min-h-6 min-w-0 items-center gap-1.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground/80 cursor-pointer hover:text-foreground/80 [@media(pointer:coarse)]:min-h-11"
+        className="flex min-h-6 min-w-0 items-center gap-1.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground/80 cursor-pointer hover:text-foreground/80 max-md:min-h-11 [@media(pointer:coarse)]:min-h-11"
         data-testid={row.historyKind === "pr" ? "pr-files-repo-header" : "commits-repo-header"}
         data-changes-row-focus
         aria-expanded={!row.collapsed}

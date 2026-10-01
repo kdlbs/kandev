@@ -129,3 +129,12 @@ commit-spacing regression passed its one scenario. The documentation coverage
 preflight accepted both completed work orders and all three production paths;
 diff whitespace checks passed. Publication and merge are authorized after
 local verification; remote checks and review evidence are tracked with the PR.
+
+PR review follow-up reproduced a 24px history repository disclosure on a 393px
+fine-pointer phone. Applied the phone-width minimum to the shared repository
+header. The regression now seeds two repository groups, checks the 44px target
+and center hit test, clicks the control, and verifies collapse. The rebuilt
+six-scenario desktop run passed, alongside all 76 focused unit tests, typecheck,
+and targeted ESLint. Fresh desktop and narrow fine-pointer screenshots were
+captured. The phone run passed four scenarios with fresh captures. Exact-head
+remote checks follow the fixup push.
