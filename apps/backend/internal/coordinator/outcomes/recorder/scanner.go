@@ -16,6 +16,8 @@ const (
 	chainCap       = 1000
 	scanBatchSize  = 200
 	endedChainKeep = time.Hour
+
+	dailyEnqueueWait = 50 * time.Millisecond
 )
 
 var defaultRetryDelays = []time.Duration{2 * time.Minute, 10 * time.Minute, time.Hour}
@@ -96,6 +98,11 @@ func (s *Scanner) Stop() {
 // EnqueueScan asks for a scan of taskID; a full queue drops it and counts it.
 // It reports false only when the scan was dropped.
 func (s *Scanner) EnqueueScan(taskID string) bool {
+	return s.enqueue(taskID, true)
+}
+
+// enqueue queues taskID; countDrop says whether a full queue is counted.
+func (s *Scanner) enqueue(taskID string, countDrop bool) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.stopped || s.queued[taskID] {
@@ -106,7 +113,9 @@ func (s *Scanner) EnqueueScan(taskID string) bool {
 		s.queued[taskID] = true
 		return true
 	default:
-		bump(scanDroppedTotal, ScanDroppedQueueFull)
+		if countDrop {
+			bump(scanDroppedTotal, ScanDroppedQueueFull)
+		}
 		return false
 	}
 }
@@ -310,11 +319,37 @@ func (s *Scanner) enqueueRecentTasks(ctx context.Context) {
 			return
 		}
 		for _, id := range ids {
-			s.EnqueueScan(id)
+			if !s.enqueueWaiting(ctx, id) {
+				return
+			}
 		}
 		if len(ids) < scanBatchSize {
 			return
 		}
 		cursor = ids[len(ids)-1]
+	}
+}
+
+// enqueueWaiting queues taskID, waiting for room while the queue is full. It
+// reports false when the scanner stops or ctx ends first.
+func (s *Scanner) enqueueWaiting(ctx context.Context, taskID string) bool {
+	for {
+		select {
+		case <-ctx.Done():
+			return false
+		case <-s.stopCh:
+			return false
+		default:
+		}
+		if s.enqueue(taskID, false) {
+			return true
+		}
+		select {
+		case <-ctx.Done():
+			return false
+		case <-s.stopCh:
+			return false
+		case <-time.After(dailyEnqueueWait):
+		}
 	}
 }

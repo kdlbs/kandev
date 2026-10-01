@@ -8,6 +8,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/coordinator"
+	"github.com/kandev/kandev/internal/coordinator/outcomes"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
 )
@@ -112,9 +113,14 @@ func (q *Queue) gradeOne(ctx context.Context, id string, at time.Time) {
 }
 
 // OnDecision implements coordinator.DecisionObserver: it queues the decided
-// proposal and never blocks or fails the decision.
+// proposal and never blocks or fails the decision. An undo carries no decision
+// time for the outcome row: its decided_at stays the approval time.
 func (q *Queue) OnDecision(_ context.Context, ev coordinator.DecisionEvent) {
-	q.Enqueue(ev.ProposalID, ev.At)
+	at := ev.At
+	if ev.Decision == outcomes.DecisionUndone {
+		at = time.Time{}
+	}
+	q.Enqueue(ev.ProposalID, at)
 }
 
 // Subscribe queues the open-outcome proposals of a task whenever it moves or

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/coordinator/outcomes"
+	workflowmodels "github.com/kandev/kandev/internal/workflow/models"
 )
 
 type recordingObserver struct {
@@ -131,7 +132,7 @@ func TestDecisionObserver_ReturnNotifiesReturned(t *testing.T) {
 	}
 }
 
-func TestDecisionObserver_UndoNotifiesUndoneWithZeroTime(t *testing.T) {
+func TestDecisionObserver_UndoNotifiesUndoneWithTheUndoTime(t *testing.T) {
 	svc, store, c, _, _ := newActivityService(t, true)
 	obs := &recordingObserver{}
 	svc.SetDecisionObserver(obs)
@@ -148,7 +149,50 @@ func TestDecisionObserver_UndoNotifiesUndoneWithZeroTime(t *testing.T) {
 		t.Fatal(err)
 	}
 	e := obs.only(t)
-	if e.Decision != outcomes.DecisionUndone || e.ProposalID != p.ID || !e.At.IsZero() || e.ActorUserID != "user-7" {
+	if e.Decision != outcomes.DecisionUndone || e.ProposalID != p.ID || e.At.IsZero() || e.ActorUserID != "user-7" {
 		t.Fatalf("event = %+v", e)
+	}
+}
+
+func TestDecisionObserver_RecoveredApprovalKeepsTheDecidingUser(t *testing.T) {
+	store, c, tasks, svc := approveFixture(t)
+	obs := &recordingObserver{}
+	svc.SetDecisionObserver(obs)
+	p := insertProposal(t, store, c, sampleSpec())
+	if matched, err := store.ClaimProposal(context.Background(), p.ID, "old-tok", sampleSpec(), "user-9", time.Now().Add(-10*time.Minute)); err != nil || !matched {
+		t.Fatalf("ClaimProposal matched=%v err=%v", matched, err)
+	}
+	tasks.createResult = createdResult("task-new")
+	tasks.settled = true
+
+	svc.StartupRecoveryPass(context.Background(), time.Now())
+
+	if e := obs.only(t); e.Decision != outcomes.DecisionApproved || e.ActorUserID != "user-9" {
+		t.Fatalf("event = %+v, want the claiming user", e)
+	}
+}
+
+func TestDecisionObserver_FailedApprovalNotifiesNothing(t *testing.T) {
+	store, c, tasks, svc := approveFixture(t)
+	obs := &recordingObserver{}
+	svc.SetDecisionObserver(obs)
+	p := insertProposal(t, store, c, sampleSpec())
+	claimDirectly(t, store, p, "old-tok", sampleSpec(), time.Now().Add(-10*time.Minute))
+	svc.SetDecisionDeps(tasks, &fakeStepReader{steps: []*workflowmodels.WorkflowStep{
+		{ID: "step-1", IsStartStep: true, Events: workflowmodels.StepEvents{
+			OnEnter: []workflowmodels.OnEnterAction{{Type: workflowmodels.OnEnterAutoStartAgent}},
+		}},
+	}}, nil)
+
+	svc.StartupRecoveryPass(context.Background(), time.Now())
+
+	got, err := store.GetProposal(context.Background(), "ws-1", c.ID, p.ID, false)
+	if err != nil || got.Status != ProposalStatusFailed {
+		t.Fatalf("proposal = %+v err = %v, want failed", got, err)
+	}
+	obs.mu.Lock()
+	defer obs.mu.Unlock()
+	if len(obs.events) != 0 {
+		t.Fatalf("events = %+v, want none", obs.events)
 	}
 }

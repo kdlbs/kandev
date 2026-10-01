@@ -66,13 +66,17 @@ func (s *Service) notifyApproved(ctx context.Context, p *Proposal) {
 		return
 	}
 	edited := editedFieldsOf(p)
+	actor := decidingUserID(ctx)
+	if actor == "" && p.DecidedBy != nil {
+		actor = *p.DecidedBy
+	}
 	decision := outcomes.DecisionApproved
 	if len(edited) > 0 {
 		decision = outcomes.DecisionEdited
 	}
 	s.notifyDecision(ctx, DecisionEvent{
 		ProposalID: p.ID, CoordinatorID: p.CoordinatorID, WorkspaceID: p.WorkspaceID, ProposalKind: proposalKindOf(p),
-		Decision: decision, Automatic: p.ClaimedAutomatically, ActorUserID: decidingUserID(ctx),
+		Decision: decision, Automatic: p.ClaimedAutomatically, ActorUserID: actor,
 		EditedFields: edited, ReasonCode: outcomes.ReasonNone, At: p.UpdatedAt,
 	})
 }
@@ -124,8 +128,8 @@ func rawFinalSpecOf(p *Proposal) []byte {
 	return b
 }
 
-// notifyUndone reports the undo of an approved action. The undo has no
-// decision time of its own, so the event carries a zero time.
+// notifyUndone reports the undo of an approved action; the event time is the
+// time the action was marked undone.
 func (s *Service) notifyUndone(ctx context.Context, row *ActivityRow) {
 	if row.ProposalID == nil {
 		return
@@ -135,5 +139,9 @@ func (s *Service) notifyUndone(ctx context.Context, row *ActivityRow) {
 		s.logger.Warn("undo decision not observed: proposal read failed", zap.String("proposal_id", *row.ProposalID), zap.Error(err))
 		return
 	}
-	s.notifyDecided(ctx, p, outcomes.DecisionUndone, outcomes.ReasonNone, time.Time{})
+	var at time.Time
+	if fresh, err := s.store.GetActivityRow(ctx, s.store.db, row.CoordinatorID, row.ID); err == nil && fresh.UndoneAt != nil {
+		at = fresh.UndoneAt.UTC()
+	}
+	s.notifyDecided(ctx, p, outcomes.DecisionUndone, outcomes.ReasonNone, at)
 }

@@ -129,3 +129,58 @@ func TestScanner_DroppedScanRearmsChainAndNoTimerAfterStop(t *testing.T) {
 		t.Fatal("timer armed after Stop")
 	}
 }
+
+func fillScanQueue(s *Scanner) {
+	for i := 0; i < scanQueueCap; i++ {
+		s.order <- "filler-" + time.Duration(i).String()
+	}
+}
+
+func TestScanner_DailyPassWaitsForRoomInsteadOfDropping(t *testing.T) {
+	f := moveBackFixture(t)
+	s := f.scanner(&fakeChecker{})
+	fillScanQueue(s)
+	dropped := ScanDroppedCount(ScanDroppedQueueFull)
+	done := make(chan bool, 1)
+	go func() { done <- s.enqueueWaiting(context.Background(), "late-task") }()
+	select {
+	case <-done:
+		t.Fatal("enqueueWaiting returned while the queue was full")
+	case <-time.After(3 * dailyEnqueueWait):
+	}
+	<-s.order
+	select {
+	case ok := <-done:
+		if !ok {
+			t.Fatal("enqueueWaiting = false after room appeared")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("enqueueWaiting did not return once there was room")
+	}
+	s.mu.Lock()
+	queued := s.queued["late-task"]
+	s.mu.Unlock()
+	if !queued {
+		t.Fatal("late-task was not queued")
+	}
+	if ScanDroppedCount(ScanDroppedQueueFull) != dropped {
+		t.Fatal("waiting for room counted a drop")
+	}
+}
+
+func TestScanner_DailyPassWaitEndsOnStop(t *testing.T) {
+	f := moveBackFixture(t)
+	s := f.scanner(&fakeChecker{})
+	fillScanQueue(s)
+	done := make(chan bool, 1)
+	go func() { done <- s.enqueueWaiting(context.Background(), "late-task") }()
+	s.Stop()
+	select {
+	case ok := <-done:
+		if ok {
+			t.Fatal("enqueueWaiting = true after Stop")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("enqueueWaiting outlived Stop")
+	}
+}
