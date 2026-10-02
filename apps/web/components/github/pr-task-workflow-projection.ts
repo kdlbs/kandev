@@ -151,6 +151,42 @@ function normalizeRepositoryName(repository: string | undefined): string | undef
   return normalized || undefined;
 }
 
+function findDisclosureEntry(
+  entries: DisclosureEntry[],
+  number: number,
+  repository: string | undefined,
+): DisclosureEntry | undefined {
+  const numberedEntries = entries.filter((entry) => entry.summary.number === number);
+  const normalizedRepository = normalizeRepositoryName(repository);
+  if (normalizedRepository) {
+    return numberedEntries.find(
+      (entry) => normalizeRepositoryName(entry.repository) === normalizedRepository,
+    );
+  }
+  return numberedEntries.length === 1 ? numberedEntries[0] : undefined;
+}
+
+function getConflictProjectionRepository(prInfo: TaskPRInfo, number: number): string | undefined {
+  return (prInfo.mergeConflictPRNumber ?? prInfo.number) === number
+    ? prInfo.mergeConflictRepository
+    : undefined;
+}
+
+function getTerminalProjectionRepository(prInfo: TaskPRInfo): string | undefined {
+  const repositories = [
+    (prInfo.workflowApprovalPRNumber ?? prInfo.number) === prInfo.number
+      ? prInfo.workflowApprovalRepository
+      : undefined,
+    (prInfo.mergeConflictPRNumber ?? prInfo.number) === prInfo.number
+      ? prInfo.mergeConflictRepository
+      : undefined,
+  ]
+    .map(normalizeRepositoryName)
+    .filter((repository): repository is string => repository !== undefined);
+  const distinctRepositories = [...new Set(repositories)];
+  return distinctRepositories.length === 1 ? distinctRepositories[0] : undefined;
+}
+
 function compactTerminalStateRow(state: string): PRTaskStatusSummaryData["rows"][number] | null {
   switch (state.trim().toLowerCase()) {
     case "merged":
@@ -205,25 +241,15 @@ export function getNegativeWorkflowApprovalDisclosure(
   });
 
   const terminalState = compactTerminalStateRow(prInfo.state);
-  const singlePR = prs.length === 1 && prs[0].pr_number === prInfo.number ? entries[0] : undefined;
 
   for (const compactSummary of compactSummaries) {
     const conflictRows = compactSummary.rows.filter((row) => row.id === "merge-conflict");
     if (conflictRows.length === 0) continue;
 
-    const repository = getProjectedPRRepository(prInfo, compactSummary.number);
-    const numberedEntries = entries.filter(
-      (entry) => entry.pr?.pr_number === compactSummary.number,
-    );
-    let matchingEntry: DisclosureEntry | undefined;
-    if (repository) {
-      matchingEntry = numberedEntries.find(
-        (entry) =>
-          normalizeRepositoryName(entry.repository) === normalizeRepositoryName(repository),
-      );
-    } else if (numberedEntries.length === 1) {
-      matchingEntry = numberedEntries[0];
-    }
+    const repository =
+      getConflictProjectionRepository(prInfo, compactSummary.number) ??
+      getProjectedPRRepository(prInfo, compactSummary.number);
+    const matchingEntry = findDisclosureEntry(entries, compactSummary.number, repository);
 
     if (matchingEntry) {
       matchingEntry.summary = {
@@ -242,12 +268,32 @@ export function getNegativeWorkflowApprovalDisclosure(
     });
   }
 
-  if (terminalState && singlePR) {
-    singlePR.summary = {
-      ...singlePR.summary,
+  if (prInfo.hasMergeConflicts === false) {
+    const conflictNumber = prInfo.mergeConflictPRNumber ?? prInfo.number;
+    const conflictEntry = findDisclosureEntry(
+      entries,
+      conflictNumber,
+      getConflictProjectionRepository(prInfo, conflictNumber),
+    );
+    if (conflictEntry) {
+      conflictEntry.summary = {
+        ...conflictEntry.summary,
+        rows: conflictEntry.summary.rows.filter(
+          (row) => !(row.kind === "merge" && row.status === "conflicts"),
+        ),
+      };
+    }
+  }
+
+  const terminalEntry = terminalState
+    ? findDisclosureEntry(entries, prInfo.number, getTerminalProjectionRepository(prInfo))
+    : undefined;
+  if (terminalState && terminalEntry) {
+    terminalEntry.summary = {
+      ...terminalEntry.summary,
       rows: [
         terminalState,
-        ...singlePR.summary.rows.filter((row) => row.kind !== "state" && row.kind !== "merge"),
+        ...terminalEntry.summary.rows.filter((row) => row.kind !== "state" && row.kind !== "merge"),
       ],
     };
   }

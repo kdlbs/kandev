@@ -14,6 +14,8 @@ const TASK_ID = "task-1";
 const WORKSPACE_ID = "workspace-1";
 const APPROVAL_LABEL = "Awaiting maintainer approval";
 const PR_TITLE = "Test PR";
+const FIRST_REPOSITORY_PR_TITLE = "First repository PR";
+const SECOND_REPOSITORY_PR_TITLE = "Second repository PR";
 const STATUS_ENTRY_TEST_ID = "pr-task-status-entry";
 
 vi.mock("@/lib/api/domains/github-api", () => ({
@@ -177,6 +179,35 @@ describe("negative projection terminal PR summaries", () => {
     expect(entry.textContent).toContain("Merged");
     expect(entry.textContent).not.toContain("Open");
   });
+
+  it.each([
+    { compactState: "Merged", stateLabel: "Merged" },
+    { compactState: "Closed", stateLabel: "Closed" },
+  ])("applies the newer $stateLabel state to its matching PR among siblings", async (scenario) => {
+    renderNegativeProjection(
+      [
+        makePR({ pr_title: "Terminal target", mergeable_state: "clean" }),
+        makePR({
+          id: "pr-43",
+          pr_number: 43,
+          pr_title: "Open sibling",
+          mergeable_state: "clean",
+        }),
+      ],
+      makePRInfo({ state: scenario.compactState, count: 2 }),
+    );
+    focusDisclosure();
+
+    const entries = await screen.findAllByTestId(STATUS_ENTRY_TEST_ID);
+    const target = entries.find((entry) => entry.textContent?.includes("Terminal target"));
+    const sibling = entries.find((entry) => entry.textContent?.includes("Open sibling"));
+    expect(target?.textContent).toContain(scenario.stateLabel);
+    expect(target?.textContent).not.toContain("Mergeable");
+    expect(target?.textContent).not.toContain("Ready to merge");
+    expect(sibling?.textContent).toContain("Open");
+    expect(sibling?.textContent).toContain("Mergeable");
+    expect(sibling?.textContent).not.toContain(scenario.stateLabel);
+  });
 });
 
 // @covers AC-UI-PR-TASK-STATUS-SUMMARY-001.6/.8
@@ -239,7 +270,7 @@ describe("negative projection compact conflict attribution", () => {
           repository_id: "repository-first",
           owner: "org",
           repo: "first",
-          pr_title: "First repository PR",
+          pr_title: FIRST_REPOSITORY_PR_TITLE,
           mergeable_state: "clean",
           checks_state: "success",
         }),
@@ -248,7 +279,7 @@ describe("negative projection compact conflict attribution", () => {
           repository_id: "repository-second",
           owner: "org",
           repo: "second",
-          pr_title: "Second repository PR",
+          pr_title: SECOND_REPOSITORY_PR_TITLE,
           mergeable_state: "clean",
           checks_state: "pending",
         }),
@@ -263,8 +294,8 @@ describe("negative projection compact conflict attribution", () => {
 
     const entries = await screen.findAllByTestId(STATUS_ENTRY_TEST_ID);
     expect(entries).toHaveLength(2);
-    const first = entries.find((entry) => entry.textContent?.includes("First repository PR"));
-    const second = entries.find((entry) => entry.textContent?.includes("Second repository PR"));
+    const first = entries.find((entry) => entry.textContent?.includes(FIRST_REPOSITORY_PR_TITLE));
+    const second = entries.find((entry) => entry.textContent?.includes(SECOND_REPOSITORY_PR_TITLE));
     expect(first?.textContent).toContain("Passed");
     expect(first?.textContent).toContain("Mergeable");
     expect(first?.textContent).not.toContain("Conflicts");
@@ -273,5 +304,43 @@ describe("negative projection compact conflict attribution", () => {
     expect(second?.textContent).not.toContain("Mergeable");
     expect(second?.textContent).not.toContain("Ready to merge");
     expect(second?.textContent).toContain("org/second");
+  });
+
+  it("clears stale conflicts only for the repository attributed by the newer summary", async () => {
+    renderNegativeProjection(
+      [
+        makePR({
+          id: "first-42",
+          repo: "first",
+          pr_title: FIRST_REPOSITORY_PR_TITLE,
+          review_state: "approved",
+          checks_state: "success",
+          mergeable_state: "dirty",
+        }),
+        makePR({
+          id: "second-42",
+          repo: "second",
+          pr_title: SECOND_REPOSITORY_PR_TITLE,
+          mergeable_state: "dirty",
+        }),
+      ],
+      makePRInfo({
+        count: 2,
+        hasMergeConflicts: false,
+        mergeConflictPRNumber: 42,
+        mergeConflictRepository: "o/first",
+        workflowApprovalPRNumber: 42,
+        workflowApprovalRepository: "o/second",
+      }),
+    );
+    focusDisclosure();
+
+    const entries = await screen.findAllByTestId(STATUS_ENTRY_TEST_ID);
+    const first = entries.find((entry) => entry.textContent?.includes(FIRST_REPOSITORY_PR_TITLE));
+    const second = entries.find((entry) => entry.textContent?.includes(SECOND_REPOSITORY_PR_TITLE));
+    expect(first?.textContent).toContain("Approved");
+    expect(first?.textContent).toContain("Passed");
+    expect(first?.textContent).not.toContain("Conflicts");
+    expect(second?.textContent).toContain("Conflicts");
   });
 });

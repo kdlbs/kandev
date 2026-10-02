@@ -9,6 +9,8 @@ import {
 
 const SUMMARY_UPDATED_AT = "2026-09-30T12:00:00Z";
 const FULL_SYNCED_AT = "2026-09-30T11:00:00Z";
+const FIRST_REPOSITORY = "org/first";
+const SECOND_REPOSITORY = "org/second";
 
 function makePR(overrides: Partial<TaskPR> = {}): TaskPR {
   return {
@@ -192,7 +194,7 @@ describe("negative workflow conflict and state projection", () => {
     const projection = getNegativeWorkflowApprovalDisclosure(
       [first, second],
       summariesFor([first, second]),
-      makePRInfo({ hasMergeConflicts: true, mergeConflictRepository: "org/second" }),
+      makePRInfo({ hasMergeConflicts: true, mergeConflictRepository: SECOND_REPOSITORY }),
     );
 
     const firstRows = projection.summaries[0].rows;
@@ -200,7 +202,7 @@ describe("negative workflow conflict and state projection", () => {
     expect(firstRows.some((row) => row.status === "conflicts")).toBe(false);
     expect(firstRows.some((row) => row.status === "mergeable")).toBe(true);
     const conflict = secondRows.find((row) => row.status === "conflicts");
-    expect(conflict?.detail?.values).toEqual({ repository: "org/second", number: 42 });
+    expect(conflict?.detail?.values).toEqual({ repository: SECOND_REPOSITORY, number: 42 });
     expect(secondRows.some((row) => row.status === "mergeable" || row.status === "ready")).toBe(
       false,
     );
@@ -248,7 +250,7 @@ describe("negative workflow conflict and state projection", () => {
     expect(projection.summaries[1].author).toBeUndefined();
   });
 
-  it("uses compact merged state for one matching PR without overwriting mixed siblings", () => {
+  it("uses compact merged state for its PR without overwriting sibling details", () => {
     const open = makePR({ state: "open" });
     const mergedProjection = getNegativeWorkflowApprovalDisclosure(
       [open],
@@ -267,8 +269,81 @@ describe("negative workflow conflict and state projection", () => {
       summariesFor([open, mergedSibling]),
       makePRInfo({ state: "Merged", count: 2 }),
     );
-    expect(mixedProjection.summaries[0].rows.some((row) => row.status === "merged")).toBe(false);
+    expect(mixedProjection.summaries[0].rows.some((row) => row.status === "merged")).toBe(true);
+    expect(mixedProjection.summaries[0].rows.filter((row) => row.kind === "merge")).toEqual([]);
     expect(mixedProjection.summaries[1].rows.some((row) => row.status === "merged")).toBe(true);
+    expect(mixedProjection.summaries[1].title).toBe("Test PR");
+  });
+});
+
+describe("negative workflow conflict repository reconciliation", () => {
+  it("attributes a conflict to its repository when approval targets a same-number PR", () => {
+    const approvalPR = makePR({
+      id: "approval-42",
+      repository_id: "repository-first",
+      repo: "first",
+      pr_title: "Approval PR",
+      mergeable_state: "clean",
+    });
+    const conflictPR = makePR({
+      id: "conflict-42",
+      repository_id: "repository-second",
+      repo: "second",
+      pr_title: "Conflict PR",
+      mergeable_state: "clean",
+    });
+    const projection = getNegativeWorkflowApprovalDisclosure(
+      [approvalPR, conflictPR],
+      summariesFor([approvalPR, conflictPR]),
+      makePRInfo({
+        workflowApprovalRequired: true,
+        workflowApprovalPRNumber: 42,
+        workflowApprovalRepository: FIRST_REPOSITORY,
+        hasMergeConflicts: true,
+        mergeConflictPRNumber: 42,
+        mergeConflictRepository: SECOND_REPOSITORY,
+      }),
+    );
+
+    const firstRows = projection.summaries[0].rows;
+    const secondRows = projection.summaries[1].rows;
+    expect(firstRows.some((row) => row.status === "conflicts")).toBe(false);
+    expect(firstRows.some((row) => row.status === "mergeable")).toBe(true);
+    expect(secondRows.some((row) => row.status === "conflicts")).toBe(true);
+    expect(secondRows.some((row) => row.status === "mergeable")).toBe(false);
+  });
+
+  it("clears only the cached conflict attributed by a newer negative projection", () => {
+    const first = makePR({
+      id: "first-42",
+      repository_id: "repository-first",
+      repo: "first",
+      pr_title: "First PR",
+      mergeable_state: "dirty",
+    });
+    const second = makePR({
+      id: "second-42",
+      repository_id: "repository-second",
+      repo: "second",
+      pr_title: "Second PR",
+      mergeable_state: "dirty",
+    });
+    const projection = getNegativeWorkflowApprovalDisclosure(
+      [first, second],
+      summariesFor([first, second]),
+      makePRInfo({
+        hasMergeConflicts: false,
+        mergeConflictPRNumber: 42,
+        mergeConflictRepository: FIRST_REPOSITORY,
+        workflowApprovalPRNumber: 42,
+        workflowApprovalRepository: SECOND_REPOSITORY,
+      }),
+    );
+
+    expect(projection.summaries[0].rows.some((row) => row.status === "conflicts")).toBe(false);
+    expect(projection.summaries[0].rows.some((row) => row.status === "approved")).toBe(true);
+    expect(projection.summaries[0].rows.some((row) => row.status === "passed")).toBe(true);
+    expect(projection.summaries[1].rows.some((row) => row.status === "conflicts")).toBe(true);
   });
 });
 
@@ -294,5 +369,59 @@ describe("negative terminal lifecycle reconciliation", () => {
     expect(rows.filter((row) => row.kind === "merge")).toEqual([]);
     expect(rows.some((row) => row.status === "approved")).toBe(true);
     expect(rows.some((row) => row.status === "passed")).toBe(true);
+  });
+
+  it.each([
+    {
+      label: "merged",
+      compactState: "Merged",
+      readyToMerge: true,
+      mergeQueueState: undefined,
+    },
+    {
+      label: "closed",
+      compactState: "Closed",
+      readyToMerge: false,
+      mergeQueueState: "awaiting_checks",
+    },
+  ])("applies the $label state to its matching PR among siblings", (scenario) => {
+    const target = makePR({
+      id: "target-42",
+      pr_number: 42,
+      pr_title: "Terminal target",
+      state: "open",
+      mergeable_state: "clean",
+      ...(scenario.mergeQueueState ? { merge_queue_state: scenario.mergeQueueState } : {}),
+    });
+    const sibling = makePR({
+      id: "sibling-43",
+      pr_number: 43,
+      pr_title: "Open sibling",
+      state: "open",
+      mergeable_state: "clean",
+    });
+    const projection = getNegativeWorkflowApprovalDisclosure(
+      [target, sibling],
+      [
+        derivePRTaskStatusSummary(target, scenario.readyToMerge ?? false),
+        derivePRTaskStatusSummary(sibling, false),
+      ],
+      makePRInfo({ state: scenario.compactState, count: 2 }),
+    );
+
+    const targetSummary = projection.summaries[0];
+    const siblingSummary = projection.summaries[1];
+    expect(targetSummary.title).toBe("Terminal target");
+    expect(
+      targetSummary.rows.some((row) => row.status === scenario.compactState.toLowerCase()),
+    ).toBe(true);
+    expect(targetSummary.rows.filter((row) => row.kind === "merge")).toEqual([]);
+    expect(targetSummary.rows.some((row) => row.status === "approved")).toBe(true);
+    expect(targetSummary.rows.some((row) => row.status === "passed")).toBe(true);
+    expect(siblingSummary.title).toBe("Open sibling");
+    expect(
+      siblingSummary.rows.some((row) => row.status === "merged" || row.status === "closed"),
+    ).toBe(false);
+    expect(siblingSummary.rows.some((row) => row.status === "mergeable")).toBe(true);
   });
 });

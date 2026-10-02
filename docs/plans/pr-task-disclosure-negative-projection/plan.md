@@ -227,16 +227,17 @@ The coverage preflight simulated the two planned production paths.
 It changed no runtime file and made no GitHub request.
 The plan and work order remain unstaged and uncommitted.
 
-Implementation completed on 2026-10-01. The negative path retains cached PR identities and independent rows while clearing stale approval, applies compact conflicts with repository-aware attribution, and applies compact terminal state only to its matching single PR.
+Implementation completed on 2026-10-01. The negative path retains cached PR identities and independent rows while clearing stale approval, reconciles conflicts by repository and PR number, and applies compact terminal state to the matching PR among siblings without changing those siblings.
 
-- Focused unit/component suite: 6 files and 83 tests passed after review remediation.
+- Focused unit/component suite: 6 files and 90 tests passed after both review follow-ups.
 - `pnpm run typecheck`, targeted ESLint, and `pnpm run i18n:ratchet`: passed.
-- Desktop Chromium and mobile Chrome E2E: 3 tests passed in each project.
+- Targeted Prettier check passed.
+- Desktop Chromium and mobile Chrome sidebar E2E: 3 tests passed in each project after a fresh backend and web build.
 - Documentation and specification validation passed; `git diff --check` passed after result updates.
 
 The earlier failed regression assertions are root-cause evidence. The permanent desktop and phone scenarios now pass against deterministic timestamps that prove they exercise the newer-negative branch.
 
-Review remediation on 2026-10-02 keeps terminal PR disclosures free of open-only merge rows and replaces stale `ready`/`mergeable` rows with a newer attributed conflict. Independent queue evidence and unrelated sibling rows remain intact. The pure-helper and rendered component regressions, typecheck, lint, formatting, and both browser specs passed after the change.
+Review remediation on 2026-10-02 keeps terminal PR disclosures free of open-only merge and queue rows, replaces stale readiness with attributed conflict evidence, clears cached conflicts when the newer projection explicitly clears them, and preserves unrelated sibling rows. The pure-helper and rendered component regressions, typecheck, lint, formatting, and both browser specs passed after the change.
 
 ## Risks
 

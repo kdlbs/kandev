@@ -160,15 +160,15 @@ E2E response fixtures must preserve the real workspace and association scope.
 
 The original regressions passed after implementation. Before the fix, both new browser scenarios reached the newer-negative fixture branch and failed because the PR status number was absent.
 
-Review follow-up on 2026-10-02 found and fixed two stale merge-row combinations. Before the follow-up production edit, the new pure-helper and component assertions failed on terminal merge rows and compact conflicts paired with `Mergeable`.
+Review follow-ups on 2026-10-02 fixed four projection gaps: terminal lifecycle was not applied when sibling PRs existed, cached conflicts survived an explicit negative conflict summary, compact conflicts could inherit the approval repository for a same-number PR, and readiness rows remained alongside new conflict evidence. Before the fixes, the new pure-helper tests failed on conflict attribution, conflict clearing, and both terminal states among siblings; the component tests failed on both terminal states and attributed conflict clearing.
 
-- Focused unit/component suite: 6 files and 83 tests passed, including merged/closed/queued terminal rows, targeted conflict reconciliation, and queue-row retention.
+- Focused unit/component suite: 6 files and 90 tests passed, including merged/closed sibling targeting, explicit conflict clearing, same-number repository attribution, and queue-row handling.
 - `pnpm run typecheck`: passed.
 - Targeted ESLint across the changed production, regression, helper, and E2E files: passed without warnings.
-- Prettier check for the changed projection and regression files: passed.
+- Prettier check across the changed projection, regression, helper, and E2E files: passed.
 - `pnpm run i18n:ratchet`: passed with zero added or modified copy violations; guard allowlist intact.
-- Desktop Chromium sidebar spec: 3 tests passed, including merged details and keyboard reopen without a fetch.
-- Mobile Chrome sidebar spec: 3 tests passed, including drawer content, focus return, and viewport checks.
+- Desktop Chromium sidebar spec: 3 tests passed after a fresh backend and web build, including merged details and keyboard reopen without a fetch.
+- Mobile Chrome sidebar spec: 3 tests passed after a fresh backend and web build, including drawer content, focus return, and viewport checks.
 - `python3 scripts/list-docs.py validate`: 339 decisions and 1,281 specifications validated.
 - `python3 scripts/lint-spec-files.py --all`: all specification files passed.
 - `git diff --check`: passed after recording results.
