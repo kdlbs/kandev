@@ -272,9 +272,6 @@ unrelated npm data and does not target the stale execution tree. If the
 specialized retry cannot resolve the runtime, check that the Kandev service
 uses the expected npm installation and configured registry. Run `npm config get registry` as the Kandev service user to inspect the registry used by that process. Then use the runtime update controls to select and prepare another trusted stable version.
 
-<details>
-<summary>Add a custom terminal agent</summary>
-
 ### Runtime notifications and automatic updates
 
 Kandev checks enabled, available agent runtimes in the background, including
@@ -321,6 +318,8 @@ updates remain owned by the operator. Kandev does not infer update authority fro
 `PATH` or run an unverified global updater. Custom commands, virtual agents, and
 other runtimes without a supported updater explicitly show the unsupported state.
 
+<details>
+<summary>Add a custom terminal agent</summary>
 
 ### Add a custom terminal agent
 
