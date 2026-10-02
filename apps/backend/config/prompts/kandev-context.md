@@ -23,7 +23,7 @@ get_task_plan_kandev: offset/limit read Unicode code-point fragments; omit both 
 
 Available tools:
 {question_tool_section}
-{step_complete_section}{task_title_section}{canvas_guidance_section}- create_task_plan_kandev: save a new plan.
+{step_complete_section}{connection_loss_section}{task_title_section}{canvas_guidance_section}- create_task_plan_kandev: save a new plan.
 {rich_output_section}
 - show_walkthrough_kandev, get_walkthrough_kandev, delete_walkthrough_kandev.
 - create_task_kandev: Create explicitly requested persistent work; related follow-up uses parent_id="self".

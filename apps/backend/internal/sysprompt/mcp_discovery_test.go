@@ -57,12 +57,18 @@ func TestKandevContext_RenderedSizesDeliverRecordedCompaction(t *testing.T) {
 	const (
 		recordedOrdinaryPromptBytesBeforeCompaction = 4804
 		minimumRenderedReductionBytes               = 400
+		// connectionLossSectionBytes is the rendered size of the
+		// unconditional connection-loss guidance block. It sits on top of the
+		// compaction ceiling below rather than eroding it, since every
+		// session must carry that guidance regardless of future compaction.
+		connectionLossSectionBytes = 150
 	)
 	// This baseline is a recorded rendered prompt from before rich-output
 	// examples moved behind tool discovery. Keep the assertion on rendered
 	// bytes, not the reusable raw template, so interpolation cannot hide prompt
 	// growth or make a prompt-reduction claim from source-file size alone.
-	require.LessOrEqual(t, len([]byte(ordinary)), recordedOrdinaryPromptBytesBeforeCompaction-minimumRenderedReductionBytes)
+	require.LessOrEqual(t, len([]byte(ordinary)),
+		recordedOrdinaryPromptBytesBeforeCompaction-minimumRenderedReductionBytes+connectionLossSectionBytes)
 	assert.True(t, utf8.ValidString(ordinary))
 	assert.True(t, utf8.ValidString(canvas))
 	t.Logf("rendered prompt sizes: ordinary=%d bytes, canvas=%d bytes, baseline=%d bytes, reduction=%d bytes",

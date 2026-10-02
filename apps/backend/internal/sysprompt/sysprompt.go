@@ -225,6 +225,7 @@ func KandevContext() string {
 		"coordinator_task_control_section": coordinatorTaskControlSection,
 		"canvas_guidance_section":          "",
 		"rich_output_section":              richOutputSection,
+		"connection_loss_section":          connectionLossSection,
 		"task_title_section":               "",
 		"autopilot_section":                "",
 		"question_tool_section":            userQuestionSection,
@@ -264,6 +265,18 @@ const stepCompleteSection = "- step_complete_kandev: Signal that every requireme
 	"If it is not visible, use the client's tool search/discovery with the canonical name; some clients display mcp__kandev__step_complete_kandev. " +
 	"Required param: summary.\n" +
 	stepCompleteRecoveryInstruction
+
+// connectionLossSection tells the agent up front that a Kandev MCP tool call
+// can keep waiting through a connection loss instead of failing immediately,
+// so the wait reads as normal rather than a hang the agent should paper over
+// with its own retry logic. Included unconditionally, unlike
+// stepCompleteSection, because every session can lose and regain its Kandev
+// connection regardless of workflow-step capability. See
+// docs/specs/platform/system-design/detached-agent-continuity-02.md
+// ("Agent guidance").
+const connectionLossSection = `CONNECTION LOSS:
+A Kandev tool call can wait through a connection loss and complete once it returns. Never wrap it in your own sleep or polling loop.
+`
 
 // coordinatorTaskControlSection documents task-mode-only parent/child controls.
 // Restricted MCP modes omit the section because neither message_task_kandev nor
@@ -360,6 +373,7 @@ func FormatKandevContextWithOptions(taskID, sessionID string, options KandevCont
 		"task_id":                          taskID,
 		"session_id":                       sessionID,
 		"step_complete_section":            section,
+		"connection_loss_section":          connectionLossSection,
 		"task_title_section":               taskTitle,
 		"coordinator_task_control_section": coordinatorControls,
 		"canvas_guidance_section":          canvasGuidance,
