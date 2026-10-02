@@ -212,3 +212,23 @@ Validation completed with the rebased lockfile:
 - `NODE_OPTIONS=--max-old-space-size=4096 pnpm --dir apps/web run typecheck` and `pnpm --dir apps/web run lint` passed. Changed TypeScript files passed Prettier.
 - Managed E2E rebuilt runtime and fixtures, then ran immediate delete, immediate archive, and shared-task-state specs for chromium and mobile-chrome: ten tests passed with `--retries=0`.
 - `python3 scripts/list-docs.py validate`, `python3 scripts/lint-spec-files.py --all`, and `git diff --check` passed.
+
+## CI commit-spacing test remediation
+
+The rebased head passed full frontend CI. E2E shard 12 exposed a separate
+commit-history test readiness race: a programmatic scroll could leave the old
+virtualized window mounted until the scroll event, while the helper accepted
+contiguous rows below a blank viewport top. A concentrated scroll/font-refresh
+experiment reproduced that stale window; dispatching the scroll event retained
+the same visible row and offset through ten alternating transitions.
+
+The test now follows the existing scroll helpers' explicit event dispatch,
+checks the viewport top is covered, and exercises down/up/down transitions.
+This changes test readiness only; the production contract and public docs do
+not change. Investigation included 20 isolated repetitions, ten CPU-throttled
+repetitions, the 34-test preceding CI sequence, and the failed shard artifacts.
+
+Final validation: desktop virtualization (three tests) and phone virtualization
+and history (six tests) passed with retries disabled; targeted lint and
+frontend typecheck passed. Desktop history passed all five tests, for 14 affected
+browser tests total. Formatting, spec lint, and diff checks passed.
