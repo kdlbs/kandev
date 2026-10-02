@@ -10,7 +10,7 @@ import (
 )
 
 // @covers AC-TASKS-MANAGED-CLONE-RELOCATION-001.1, AC-TASKS-MANAGED-CLONE-RELOCATION-002.1
-func TestManualRecoveryPreflightWaitsForInspectionWithoutAuthorizingDirtyRelocation(t *testing.T) {
+func TestManualRecoveryPreflightRequestsInspectionWaitWithoutDirtyAuthorization(t *testing.T) {
 	repo := newMockRepository()
 	seedSelectedWorktreeRecoveryEnvironment(repo, "task-manual-recovery", "session-manual-recovery", models.TaskSessionStateCancelled)
 	session := repo.sessions["session-manual-recovery"]

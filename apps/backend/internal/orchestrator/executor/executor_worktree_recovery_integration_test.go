@@ -251,16 +251,13 @@ func (s *mainCheckoutRecoveryStore) ReadRecoverySelectionSnapshot(
 	if session == nil || environment == nil {
 		return models.WorkspaceRecoverySelectionSnapshot{}, fmt.Errorf("selected recovery records missing")
 	}
-	repositories := make(map[string]*models.Repository, len(environment.Repos))
-	for _, slot := range environment.Repos {
-		if slot == nil || slot.DeletedAt != nil || (slot.Status != "" && slot.Status != "active") {
-			continue
+	return models.CaptureWorkspaceRecoverySelectionSnapshot(session, environment, func(id string) (*models.Repository, error) {
+		repository := s.repository.repositories[id]
+		if repository == nil {
+			return nil, fmt.Errorf("selected recovery repository %q missing", id)
 		}
-		if repository := s.repository.repositories[slot.RepositoryID]; repository != nil {
-			repositories[slot.RepositoryID] = repository
-		}
-	}
-	return models.NewWorkspaceRecoverySelectionSnapshot(session, environment, repositories), nil
+		return repository, nil
+	})
 }
 
 type executorMainCheckoutSnapshot struct {

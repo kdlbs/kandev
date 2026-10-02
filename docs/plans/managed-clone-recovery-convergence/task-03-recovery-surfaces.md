@@ -58,7 +58,7 @@ provider failures, hand-authored live database repairs, and full browser suites.
    reconnect preserve that action. A late response cannot replace a newer error.
 2. Desktop and phone require explicit confirmation with the staging warning.
    Cancellation performs no transfer. Ordinary desktop controls remain 28 pixels.
-   phone controls measure at least 44 pixels and produce no page horizontal overflow.
+   Phone controls measure at least 44 pixels and produce no page horizontal overflow.
 3. Successful confirmation validates both selected slots, retains originals and
    content, and continues the same task/session and existing provider conversation.
    A later-slot failure preserves completed progress and blocks agent startup.
@@ -197,3 +197,12 @@ Specification catalog validation and lint passed (339 decisions, 1,283
 specifications, and 36 linter tests). The PR documentation coverage preflight and
 `git diff --check` passed. The only validation limitation is unavailable
 PostgreSQL configuration for the Task 02 connection-gated cases.
+
+Review follow-up validation: The latest focused frontend set passed 91 tests across
+five files, including the fixture regression that preserves stopped resumable
+executor rows and refuses seeding while a live process is recorded. Typecheck,
+full web lint, `i18n:check`, and `i18n:ratchet` passed. After a fresh host build,
+the mobile multi-repository Restore-first scenario and desktop multi-repository
+recovery scenario each passed (one test each). The existing single-repository
+desktop and phone cases had passed earlier in the implementation run. PostgreSQL
+execution remains unavailable because `KANDEV_TEST_POSTGRES_DSN` is unset.

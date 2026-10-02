@@ -51,12 +51,29 @@ func TestMainCheckoutWorkspaceRestore(t *testing.T) {
 		ValidatedTaskEnvironmentGeneration: 1,
 		WorkspacePath:                      repositoryPath, WorkspaceID: "workspace-main-checkout-restore",
 		TaskDirName: "main-checkout-restore", ExecutorType: string(models.ExecutorTypeWorktree), AgentID: "auggie",
+		RecoveryErrorObservation: &models.WorkspaceRecoveryErrorObservation{
+			TaskID: taskID, SessionID: sessionID, TaskEnvironmentID: environmentID,
+			EnvironmentOwnerTaskID: taskID, OwnershipGeneration: 1,
+			SelectionSnapshot: models.WorkspaceRecoverySelectionSnapshot{
+				TaskID: taskID, SessionID: sessionID, SessionPersisted: true,
+				SessionTaskEnvironmentID: environmentID, TaskEnvironmentID: environmentID,
+				EnvironmentOwnerTaskID: taskID, OwnershipGeneration: 1,
+				ExecutorType: string(models.ExecutorTypeWorktree),
+				Slots: []models.WorkspaceRecoveryInventorySlot{{
+					EnvironmentRepoID: "environment-repository-main-checkout-restore",
+					RepositoryID:      repositoryID, BranchSlug: "main", WorktreeID: worktreeID,
+					WorktreePath: repositoryPath, WorktreeBranch: before.branch, Status: "active",
+					RepositoryPresent: true, RepositoryLocalPath: repositoryPath,
+				}},
+			},
+		},
 		WorkspaceRepositories: []WorkspaceRepositorySpec{{
 			RepositoryID: repositoryID, RepositoryPath: repositoryPath, WorktreePath: repositoryPath,
 			WorktreeBranch: before.branch, BaseBranch: "main", RepoName: "repository",
 			WorktreeID: worktreeID, BranchSlug: "main",
 		}},
 	}
+	store.selection = info.RecoveryErrorObservation.SelectionSnapshot
 	provider := &mockWorkspaceInfoProvider{infos: map[string]*WorkspaceInfo{sessionID: info}}
 	mgr, backend := newEnvironmentExecutionTestManager(t, provider)
 	mgr.SetWorktreeManager(worktreeManager)
@@ -119,7 +136,8 @@ func TestMainCheckoutWorkspaceRestore(t *testing.T) {
 
 type lifecycleMainCheckoutStore struct {
 	worktree.Store
-	worktree *worktree.Worktree
+	worktree  *worktree.Worktree
+	selection models.WorkspaceRecoverySelectionSnapshot
 }
 
 func (s *lifecycleMainCheckoutStore) GetWorktreeByID(_ context.Context, id string) (*worktree.Worktree, error) {
@@ -127,6 +145,13 @@ func (s *lifecycleMainCheckoutStore) GetWorktreeByID(_ context.Context, id strin
 		return nil, nil
 	}
 	return s.worktree, nil
+}
+
+func (s *lifecycleMainCheckoutStore) ReadRecoverySelectionSnapshot(
+	context.Context,
+	models.WorkspaceRecoverySelectionSnapshot,
+) (models.WorkspaceRecoverySelectionSnapshot, error) {
+	return s.selection.Canonical(), nil
 }
 
 type lifecycleMainCheckoutSnapshot struct {

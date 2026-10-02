@@ -3,7 +3,6 @@ package service
 import (
 	"context"
 	"errors"
-	"fmt"
 	"time"
 
 	"go.uber.org/zap"
@@ -20,27 +19,12 @@ func (s *Service) workspaceRecoverySelectionSnapshot(
 	session *models.TaskSession,
 	environment *models.TaskEnvironment,
 ) (models.WorkspaceRecoverySelectionSnapshot, error) {
-	repositories := make(map[string]*models.Repository, len(environment.Repos))
-	for _, row := range environment.Repos {
-		if row == nil || row.DeletedAt != nil || (row.Status != "" && row.Status != "active") {
-			continue
-		}
-		if row.RepositoryID == "" {
-			return models.WorkspaceRecoverySelectionSnapshot{}, errors.New("workspace recovery repository identity is incomplete")
-		}
-		if s.repoEntities == nil {
-			return models.WorkspaceRecoverySelectionSnapshot{}, errors.New("workspace recovery repository inventory is unavailable")
-		}
-		repository, err := s.repoEntities.GetRepository(ctx, row.RepositoryID)
-		if err != nil {
-			return models.WorkspaceRecoverySelectionSnapshot{}, fmt.Errorf("load workspace recovery repository %q: %w", row.RepositoryID, err)
-		}
-		if repository == nil {
-			return models.WorkspaceRecoverySelectionSnapshot{}, fmt.Errorf("workspace recovery repository %q is missing", row.RepositoryID)
-		}
-		repositories[row.RepositoryID] = repository
+	if s.repoEntities == nil {
+		return models.WorkspaceRecoverySelectionSnapshot{}, errors.New("workspace recovery repository inventory is unavailable")
 	}
-	return models.NewWorkspaceRecoverySelectionSnapshot(session, environment, repositories), nil
+	return models.CaptureWorkspaceRecoverySelectionSnapshot(session, environment, func(repositoryID string) (*models.Repository, error) {
+		return s.repoEntities.GetRepository(ctx, repositoryID)
+	})
 }
 
 // ReportManagedCloneRelocationRequired records a verified dirty-worktree
@@ -54,6 +38,7 @@ func (s *Service) ReportManagedCloneRelocationRequired(
 		return "", nil
 	}
 	now := time.Now().UTC()
+	durableCtx := context.WithoutCancel(ctx)
 	errorValue := models.LastAgentError{
 		Message:         "The task workspace contains local changes and needs explicit relocation.",
 		OccurredAt:      now,
@@ -67,7 +52,7 @@ func (s *Service) ReportManagedCloneRelocationRequired(
 			models.LaunchErrorCategoryManagedCloneRelocationRequired, now.Format(time.RFC3339Nano),
 		),
 	}
-	stored, stamp, err := s.sessions.CommitWorkspaceRecoveryErrorIfCurrent(ctx, observation, errorValue)
+	stored, stamp, err := s.sessions.CommitWorkspaceRecoveryErrorIfCurrent(durableCtx, observation, errorValue)
 	if err != nil {
 		if s.logger != nil {
 			s.logger.Warn("failed to persist workspace recovery error",
@@ -81,8 +66,7 @@ func (s *Service) ReportManagedCloneRelocationRequired(
 		return stamp, nil
 	}
 	if s.eventBus != nil {
-		eventCtx := context.WithoutCancel(ctx)
-		if err := s.eventBus.Publish(eventCtx, events.TaskSessionErrorChanged, bus.NewEvent(
+		if err := s.eventBus.Publish(durableCtx, events.TaskSessionErrorChanged, bus.NewEvent(
 			events.TaskSessionErrorChanged,
 			"task-service",
 			map[string]interface{}{

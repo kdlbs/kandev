@@ -34,28 +34,19 @@ func (e *Executor) admitSelectedWorktreeRecovery(
 		return nil, fmt.Errorf("worktree recovery admission: selected environment identity is incomplete")
 	}
 
-	activeRows := make([]*models.TaskEnvironmentRepo, 0, len(env.Repos))
 	selectedRepositories := make(map[string]*models.Repository, len(env.Repos))
-	for _, row := range env.Repos {
-		if row == nil || row.DeletedAt != nil ||
-			(row.Status != "" && row.Status != "active") {
-			continue
+	selectionSnapshot, err := models.CaptureWorkspaceRecoverySelectionSnapshot(session, env, func(repositoryID string) (*models.Repository, error) {
+		repository, err := e.repo.GetRepository(ctx, repositoryID)
+		if repository != nil {
+			selectedRepositories[repositoryID] = repository
 		}
-		if row.RepositoryID == "" {
-			return nil, fmt.Errorf("selected worktree recovery inventory has an incomplete repository identity")
-		}
-		repository, err := e.repo.GetRepository(ctx, row.RepositoryID)
-		if err != nil {
-			return nil, err
-		}
-		if repository == nil {
-			return nil, fmt.Errorf("load repository %q for worktree recovery: repository is missing", row.RepositoryID)
-		}
-		selectedRepositories[row.RepositoryID] = repository
-		activeRows = append(activeRows, row)
+		return repository, err
+	})
+	if err != nil {
+		return nil, err
 	}
-	selectionSnapshot := models.NewWorkspaceRecoverySelectionSnapshot(session, env, selectedRepositories)
 	selectionSnapshot.SessionPersisted = sessionPersisted
+	activeRows := models.SelectedWorkspaceRecoveryRows(env)
 	slots := make([]worktree.RecoverySlot, 0, len(activeRows))
 	for _, row := range activeRows {
 		if row.WorktreeID == "" {

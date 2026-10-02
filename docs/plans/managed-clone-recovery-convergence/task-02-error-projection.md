@@ -71,8 +71,11 @@ retained metadata, and duplicate refusal. Include equivalent real-connection Pos
 behind `KANDEV_TEST_POSTGRES_DSN` if SQL changes.
 
 Add `TestRestoreWorkspaceReturnsManagedCloneRelocationDetails` in a focused
-orchestrator/handler test file. Capture the published event and stored error.
-Keep lifecycle reporter tests separate from generic process-start failure settlement.
+orchestrator/handler test file to verify typed relocation details map to the
+Restore conflict response. The handler test covers transport mapping; the
+service regression above separately covers the real reporter, persisted error,
+and one published event. Keep lifecycle reporter tests separate from generic
+process-start failure settlement.
 
 ## Verification
 
@@ -102,9 +105,10 @@ If unavailable, record that limitation without claiming PostgreSQL passed.
 - `apps/backend/internal/agent/runtime/lifecycle/types.go`
 - `apps/backend/internal/agent/runtime/lifecycle/manager.go`
 - `apps/backend/internal/agent/runtime/lifecycle/manager_execution.go`
-- `apps/backend/internal/agent/runtime/lifecycle/manager_workspace_recovery_projection_test.go` (new)
+- `apps/backend/internal/agent/runtime/lifecycle/manager_workspace_restore_admission_test.go`
+- `apps/backend/internal/orchestrator/missing_checkout_recovery_test.go`
 - `apps/backend/internal/backendapp/agents.go`
-- `apps/backend/internal/backendapp/agents_workspace_recovery_test.go` (new)
+- `apps/backend/internal/backendapp/helpers_test.go`
 - `apps/backend/internal/orchestrator/session_launch.go`
 - `apps/backend/internal/orchestrator/workspace_recovery_projection_test.go` (new)
 - `apps/backend/internal/orchestrator/handlers/handlers.go`

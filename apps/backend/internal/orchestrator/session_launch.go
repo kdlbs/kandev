@@ -1278,28 +1278,17 @@ func (s *Service) workspaceRecoverySelectionSnapshot(
 	repositoryReader, ok := s.repo.(interface {
 		GetRepository(context.Context, string) (*models.Repository, error)
 	})
-	repositories := make(map[string]*models.Repository, len(environment.Repos))
-	for _, row := range environment.Repos {
-		if !selectedWorkspaceRecoveryRepository(row) {
-			continue
+	var readRepository func(string) (*models.Repository, error)
+	if ok {
+		readRepository = func(repositoryID string) (*models.Repository, error) {
+			return repositoryReader.GetRepository(ctx, repositoryID)
 		}
-		if row.RepositoryID == "" {
-			return models.WorkspaceRecoverySelectionSnapshot{}, errors.New("workspace recovery repository identity is incomplete")
-		}
-		if !ok {
-			return models.WorkspaceRecoverySelectionSnapshot{}, errors.New("workspace recovery repository inventory could not be read")
-		}
-		repository, err := repositoryReader.GetRepository(ctx, row.RepositoryID)
-		if err != nil || repository == nil {
-			return models.WorkspaceRecoverySelectionSnapshot{}, errors.New("workspace recovery repository inventory could not be read")
-		}
-		repositories[row.RepositoryID] = repository
 	}
-	return models.NewWorkspaceRecoverySelectionSnapshot(session, environment, repositories), nil
-}
-
-func selectedWorkspaceRecoveryRepository(row *models.TaskEnvironmentRepo) bool {
-	return row != nil && row.DeletedAt == nil && (row.Status == "" || row.Status == dynamicRouteStatusActive)
+	snapshot, err := models.CaptureWorkspaceRecoverySelectionSnapshot(session, environment, readRepository)
+	if err != nil {
+		return models.WorkspaceRecoverySelectionSnapshot{}, errors.New("workspace recovery repository inventory could not be read")
+	}
+	return snapshot, nil
 }
 
 func (s *Service) workspaceRecoveryExecutionID(ctx context.Context, sessionID string) (string, error) {

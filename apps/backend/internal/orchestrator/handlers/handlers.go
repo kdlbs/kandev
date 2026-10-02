@@ -145,6 +145,9 @@ func (h *Handlers) wsLaunchSession(ctx context.Context, msg *ws.Message) (*ws.Me
 		if recoveryResponse, responseErr := managedCloneRelocationConflictResponse(msg, err); recoveryResponse != nil || responseErr != nil {
 			return recoveryResponse, responseErr
 		}
+		if recoveryResponse, responseErr := recoveryInspectionConflictResponse(msg, err); recoveryResponse != nil || responseErr != nil {
+			return recoveryResponse, responseErr
+		}
 		if guardResponse, responseErr := sessionRecoveryGuardConflictResponse(msg, err); guardResponse != nil || responseErr != nil {
 			return guardResponse, responseErr
 		}

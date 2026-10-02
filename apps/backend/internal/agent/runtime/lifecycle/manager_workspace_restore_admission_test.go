@@ -229,11 +229,28 @@ func TestManualRecoveryPreflightDoesNotDeadlockWorkspaceSingleflight(t *testing.
 		TaskID: taskID, SessionID: sessionID, TaskEnvironmentID: environmentID,
 		EnvironmentOwnerTaskID: taskID, OwnershipGeneration: 1,
 		ExecutorType: string(models.ExecutorTypeWorktree),
+		RecoveryErrorObservation: &models.WorkspaceRecoveryErrorObservation{
+			TaskID: taskID, SessionID: sessionID, TaskEnvironmentID: environmentID,
+			EnvironmentOwnerTaskID: taskID, OwnershipGeneration: 1,
+			SelectionSnapshot: models.WorkspaceRecoverySelectionSnapshot{
+				TaskID: taskID, SessionID: sessionID, SessionPersisted: true,
+				SessionTaskEnvironmentID: environmentID, TaskEnvironmentID: environmentID,
+				EnvironmentOwnerTaskID: taskID, OwnershipGeneration: 1,
+				ExecutorType: string(models.ExecutorTypeWorktree),
+				Slots: []models.WorkspaceRecoveryInventorySlot{{
+					EnvironmentRepoID: "environment-repository-recovery-singleflight",
+					RepositoryID:      repositoryID, BranchSlug: "main", WorktreeID: worktreeID,
+					WorktreePath: worktreePath, WorktreeBranch: "feature/recovery", Status: "active",
+					RepositoryPresent: true, RepositoryLocalPath: repositoryPath,
+				}},
+			},
+		},
 		WorkspaceRepositories: []WorkspaceRepositorySpec{{
 			RepositoryID: repositoryID, RepositoryPath: repositoryPath,
 			WorktreeID: worktreeID, WorktreePath: worktreePath, WorktreeBranch: "feature/recovery", BranchSlug: "main",
 		}},
 	}
+	store.selection = info.RecoveryErrorObservation.SelectionSnapshot
 	manager, backend := newEnvironmentExecutionTestManager(t, &mockWorkspaceInfoProvider{})
 	manager.SetWorktreeManager(worktreeManager)
 	var singleflightBodyCalls atomic.Int32
@@ -271,7 +288,8 @@ func TestManualRecoveryPreflightDoesNotDeadlockWorkspaceSingleflight(t *testing.
 	manualRequest := worktree.RecoveryAdmissionRequest{
 		TaskID: taskID, SessionID: sessionID, TaskEnvironmentID: environmentID,
 		OwnerTaskID: taskID, OwnershipGeneration: 1, ExecutorType: string(models.ExecutorTypeWorktree),
-		InspectionWait: worktree.ManualRecoveryInspectionWait,
+		SelectionSnapshot: info.RecoveryErrorObservation.SelectionSnapshot,
+		InspectionWait:    worktree.ManualRecoveryInspectionWait,
 		Slots: []worktree.RecoverySlot{{
 			WorktreeID: worktreeID, RepositoryID: repositoryID, BranchSlug: "main", RepositoryPath: repositoryPath,
 		}},
@@ -321,9 +339,17 @@ func TestManualRecoveryPreflightDoesNotDeadlockWorkspaceSingleflight(t *testing.
 type recoveryAdmissionBarrierStore struct {
 	worktree.Store
 	worktree     *worktree.Worktree
+	selection    models.WorkspaceRecoverySelectionSnapshot
 	claimEntered chan struct{}
 	releaseClaim <-chan struct{}
 	claimCalls   atomic.Int32
+}
+
+func (s *recoveryAdmissionBarrierStore) ReadRecoverySelectionSnapshot(
+	context.Context,
+	models.WorkspaceRecoverySelectionSnapshot,
+) (models.WorkspaceRecoverySelectionSnapshot, error) {
+	return s.selection.Canonical(), nil
 }
 
 func (s *recoveryAdmissionBarrierStore) GetWorktreeByID(_ context.Context, id string) (*worktree.Worktree, error) {

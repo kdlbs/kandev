@@ -157,7 +157,7 @@ func TestSQLiteStore_ReadRecoverySelectionSnapshotIncludesCompleteActiveInventor
 			position, status, created_at, updated_at
 		) VALUES
 			('slot-selection-a', 'env-session-recovery-selection', 'repo-selection-a', 'main', 'wt-selection-a', '/tasks/widget-a', 'feature/a', '/repos/old-a', '/repos/old-a/.git', 0, 'active', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
-			('slot-selection-b', 'env-session-recovery-selection', 'repo-selection-b', 'main', '', '', '', '', '', 1, 'active', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+			('slot-selection-b', 'env-session-recovery-selection', 'repo-selection-b', 'main', '', '', '', '', '', 1, '', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
 			('slot-selection-deleted', 'env-session-recovery-selection', 'repo-selection-b', 'deleted', 'wt-deleted', '/tasks/deleted', 'feature/deleted', '', '', 2, 'deleted', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
 	`); err != nil {
 		t.Fatalf("seed environment inventory: %v", err)
@@ -186,7 +186,8 @@ func TestSQLiteStore_ReadRecoverySelectionSnapshotIncludesCompleteActiveInventor
 		t.Fatalf("materialized slot identity = %+v", snapshot.Slots[0])
 	}
 	if snapshot.Slots[1].EnvironmentRepoID != "slot-selection-b" || snapshot.Slots[1].WorktreeID != "" ||
-		snapshot.Slots[1].RepositoryLocalPath != "/repos/widget-b" || !snapshot.Slots[1].RepositoryPresent {
+		snapshot.Slots[1].RepositoryLocalPath != "/repos/widget-b" || !snapshot.Slots[1].RepositoryPresent ||
+		snapshot.Slots[1].Status != "active" {
 		t.Fatalf("unmaterialized active slot identity = %+v", snapshot.Slots[1])
 	}
 }

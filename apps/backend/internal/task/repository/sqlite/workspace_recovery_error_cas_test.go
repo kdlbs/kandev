@@ -100,10 +100,6 @@ func TestCommitWorkspaceRecoveryErrorPreservesSuccessorState(t *testing.T) {
 				require.NoError(t, repo.SetSessionMetadataKey(ctx, sessionID, models.SessionMetaKeyLastAgentError,
 					models.LastAgentError{Message: "observed", OccurredAt: time.Date(2026, 10, 2, 0, 0, 0, 0, time.UTC), StampValue: tt.initialStamp}))
 			}
-			if tt.mutate != nil {
-				tt.mutate(t, repo, sessionID, taskID)
-			}
-
 			observation := models.WorkspaceRecoveryErrorObservation{
 				TaskID: taskID, SessionID: sessionID, TaskEnvironmentID: environmentID,
 				EnvironmentOwnerTaskID: taskID, OwnershipGeneration: 1,
@@ -111,6 +107,9 @@ func TestCommitWorkspaceRecoveryErrorPreservesSuccessorState(t *testing.T) {
 				ExpectedErrorStamp: tt.initialStamp,
 			}
 			observation.SelectionSnapshot = workspaceRecoverySelectionSnapshotForTest(t, repo, sessionID, environmentID)
+			if tt.mutate != nil {
+				tt.mutate(t, repo, sessionID, taskID)
+			}
 			stored, stamp, err := repo.CommitWorkspaceRecoveryErrorIfCurrent(ctx, observation, models.LastAgentError{
 				Message:    "The task workspace contains local changes and needs explicit relocation.",
 				OccurredAt: time.Date(2026, 10, 2, 1, 0, 0, 0, time.UTC),
@@ -199,6 +198,74 @@ func workspaceRecoverySelectionSnapshotForTest(
 		}
 	}
 	return models.NewWorkspaceRecoverySelectionSnapshot(session, environment, repositories)
+}
+
+func TestCommitWorkspaceRecoveryErrorAcceptsLegacySessionWithSelectedEnvironment(t *testing.T) {
+	for _, test := range []struct {
+		name                 string
+		sessionEnvironmentID string
+		repositoryStatus     string
+	}{
+		{name: "unbound legacy session", repositoryStatus: "active"},
+		{name: "empty legacy repository status", sessionEnvironmentID: "environment-legacy-recovery-cas", repositoryStatus: ""},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			repo := newRepoForSessionTests(t)
+			ctx := context.Background()
+			const (
+				workspaceID   = "workspace-legacy-recovery-cas"
+				taskID        = "task-legacy-recovery-cas"
+				sessionID     = "session-legacy-recovery-cas"
+				environmentID = "environment-legacy-recovery-cas"
+				repositoryID  = "repository-legacy-recovery-cas"
+			)
+			require.NoError(t, repo.CreateWorkspace(ctx, &models.Workspace{ID: workspaceID, Name: "Legacy recovery"}))
+			require.NoError(t, repo.CreateTask(ctx, &models.Task{ID: taskID, WorkspaceID: workspaceID, Title: "Legacy recovery"}))
+			require.NoError(t, repo.CreateRepository(ctx, &models.Repository{
+				ID: repositoryID, WorkspaceID: workspaceID, Name: "widget", LocalPath: "/managed/widget",
+			}))
+			require.NoError(t, repo.CreateTaskEnvironment(ctx, &models.TaskEnvironment{
+				ID: environmentID, TaskID: taskID, OwnershipGeneration: 1,
+				ExecutorType: string(models.ExecutorTypeWorktree), Status: models.TaskEnvironmentStatusReady,
+				WorkspacePath: "/tasks/legacy/widget",
+			}))
+			require.NoError(t, repo.CreateTaskEnvironmentRepo(ctx, &models.TaskEnvironmentRepo{
+				ID: "environment-repository-legacy-recovery-cas", TaskEnvironmentID: environmentID,
+				RepositoryID: repositoryID, BranchSlug: "main", WorktreeID: "worktree-legacy-recovery-cas",
+				WorktreePath: "/tasks/legacy/widget", WorktreeBranch: "feature/legacy", Position: 0,
+				Status: test.repositoryStatus,
+			}))
+			require.NoError(t, repo.CreateTaskSession(ctx, &models.TaskSession{
+				ID: sessionID, TaskID: taskID, TaskEnvironmentID: test.sessionEnvironmentID,
+				State: models.TaskSessionStateCancelled,
+			}))
+
+			observation := models.WorkspaceRecoveryErrorObservation{
+				TaskID: taskID, SessionID: sessionID, TaskEnvironmentID: environmentID,
+				EnvironmentOwnerTaskID: taskID, OwnershipGeneration: 1,
+				SessionState: models.TaskSessionStateCancelled,
+			}
+			observation.SelectionSnapshot = workspaceRecoverySelectionSnapshotForTest(t, repo, sessionID, environmentID)
+			require.Equal(t, test.sessionEnvironmentID, observation.SelectionSnapshot.SessionTaskEnvironmentID)
+			require.True(t, observation.SelectionSnapshot.Complete())
+			projected := models.LastAgentError{
+				Message: "relocation required", OccurredAt: time.Date(2026, 10, 2, 1, 0, 0, 0, time.UTC),
+				Code:            models.LaunchErrorCategoryManagedCloneRelocationRequired,
+				RecoveryActions: []string{models.RecoveryActionRelocateAndResume}, StampValue: "legacy-session-relocation",
+			}
+
+			stored, stamp, err := repo.CommitWorkspaceRecoveryErrorIfCurrent(ctx, observation, projected)
+			require.NoError(t, err)
+			require.True(t, stored)
+			require.Equal(t, projected.Stamp(), stamp)
+			session, err := repo.GetTaskSession(ctx, sessionID)
+			require.NoError(t, err)
+			require.Equal(t, test.sessionEnvironmentID, session.TaskEnvironmentID, "session identity must remain unchanged")
+			lastError, ok := models.LoadLastAgentError(session.Metadata)
+			require.True(t, ok)
+			require.Equal(t, projected.Stamp(), lastError.Stamp())
+		})
+	}
 }
 
 // @covers AC-TASKS-MANAGED-CLONE-RELOCATION-002.4, AC-TASKS-MANAGED-CLONE-RELOCATION-003.1

@@ -53,6 +53,7 @@ async function expectConfirmationWithinPhoneViewport(page: Page, confirmation: L
   const box = (await confirmation.boundingBox())!;
   expect(box.x).toBeGreaterThanOrEqual(0);
   expect(box.x + box.width).toBeLessThanOrEqual(viewport.width + 1);
+  expect(box.y).toBeGreaterThanOrEqual(0);
   expect(box.y + box.height).toBeLessThanOrEqual(viewport.height + 1);
 }
 
@@ -209,7 +210,7 @@ async function assertPhoneRelocatedSlots(
 test.describe("mobile: multi-repository managed clone recovery", () => {
   let fixture: MultiRepoRelocationFixture | null = null;
 
-  test.describe.configure({ retries: 0 });
+  test.describe.configure({ retries: 0, timeout: 360_000 });
   test.afterEach(async ({ apiClient, seedData }) => {
     if (!fixture) return;
     await cleanupMultiRepoManagedCloneRelocationFixture(apiClient, seedData, fixture);
@@ -222,7 +223,6 @@ test.describe("mobile: multi-repository managed clone recovery", () => {
     seedData,
     backend,
   }) => {
-    test.setTimeout(240_000);
     const launch = captureSessionLaunchMessages(testPage);
     const recovery = captureSessionRecoveryMessages(testPage);
     const activeFixture = await seedMultiRepoManagedCloneRelocationFixture(

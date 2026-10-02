@@ -1,6 +1,9 @@
 package models
 
-import "sort"
+import (
+	"fmt"
+	"sort"
+)
 
 // WorkspaceRecoverySelectionSnapshot identifies the selected session,
 // environment, and complete active repository inventory at recovery preflight.
@@ -78,10 +81,7 @@ func NewWorkspaceRecoverySelectionSnapshot(
 		EnvironmentStatus: string(environment.Status), TaskDirName: environment.TaskDirName,
 		WorkspacePath: environment.WorkspacePath,
 	}
-	for _, row := range environment.Repos {
-		if row == nil || row.DeletedAt != nil || (row.Status != "" && row.Status != "active") {
-			continue
-		}
+	for _, row := range SelectedWorkspaceRecoveryRows(environment) {
 		slot := WorkspaceRecoveryInventorySlot{
 			EnvironmentRepoID: row.ID, RepositoryID: row.RepositoryID,
 			BranchSlug: row.BranchSlug, WorktreeID: row.WorktreeID,
@@ -111,6 +111,54 @@ func NewWorkspaceRecoverySelectionSnapshot(
 		snapshot.Slots = append(snapshot.Slots, slot)
 	}
 	return snapshot.Canonical()
+}
+
+// SelectedWorkspaceRecoveryRows returns the complete active repository inventory,
+// including legacy rows whose status predates the explicit active value.
+func SelectedWorkspaceRecoveryRows(environment *TaskEnvironment) []*TaskEnvironmentRepo {
+	if environment == nil {
+		return nil
+	}
+	rows := make([]*TaskEnvironmentRepo, 0, len(environment.Repos))
+	for _, row := range environment.Repos {
+		if row != nil && row.DeletedAt == nil && (row.Status == "" || row.Status == "active") {
+			rows = append(rows, row)
+		}
+	}
+	return rows
+}
+
+// CaptureWorkspaceRecoverySelectionSnapshot loads the registered repositories
+// for the selected environment before building its canonical snapshot.
+func CaptureWorkspaceRecoverySelectionSnapshot(
+	session *TaskSession,
+	environment *TaskEnvironment,
+	readRepository func(string) (*Repository, error),
+) (WorkspaceRecoverySelectionSnapshot, error) {
+	if session == nil || environment == nil {
+		return WorkspaceRecoverySelectionSnapshot{}, nil
+	}
+	repositories := make(map[string]*Repository, len(environment.Repos))
+	for _, row := range SelectedWorkspaceRecoveryRows(environment) {
+		if row.RepositoryID == "" {
+			return WorkspaceRecoverySelectionSnapshot{}, fmt.Errorf("workspace recovery repository identity is incomplete")
+		}
+		if readRepository == nil {
+			return WorkspaceRecoverySelectionSnapshot{}, fmt.Errorf("workspace recovery repository inventory is unavailable")
+		}
+		if _, read := repositories[row.RepositoryID]; read {
+			continue
+		}
+		repository, err := readRepository(row.RepositoryID)
+		if err != nil {
+			return WorkspaceRecoverySelectionSnapshot{}, fmt.Errorf("load workspace recovery repository %q: %w", row.RepositoryID, err)
+		}
+		if repository == nil {
+			return WorkspaceRecoverySelectionSnapshot{}, fmt.Errorf("workspace recovery repository %q is missing", row.RepositoryID)
+		}
+		repositories[row.RepositoryID] = repository
+	}
+	return NewWorkspaceRecoverySelectionSnapshot(session, environment, repositories), nil
 }
 
 // Canonical returns a copy whose slots are ordered independently of query or
@@ -190,4 +238,12 @@ func (s WorkspaceRecoverySelectionSnapshot) Complete() bool {
 		}
 	}
 	return true
+}
+
+// SessionEnvironmentMatchesSelected accepts a persisted legacy session with no
+// environment ID only when the selected environment is owned by that task.
+func (s WorkspaceRecoverySelectionSnapshot) SessionEnvironmentMatchesSelected() bool {
+	return s.SessionTaskEnvironmentID == s.TaskEnvironmentID ||
+		(s.SessionPersisted && s.SessionTaskEnvironmentID == "" && s.TaskID != "" &&
+			s.EnvironmentOwnerTaskID == s.TaskID)
 }

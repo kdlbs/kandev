@@ -35,7 +35,7 @@ func (r *Repository) lockWorkspaceRecoverySlots(
 	lockSlotsQuery := `
 		SELECT id, COALESCE(repository_id, '')
 		FROM task_environment_repos
-		WHERE task_environment_id = ? AND status = 'active' AND deleted_at IS NULL
+		WHERE task_environment_id = ? AND (COALESCE(status, '') = '' OR status = 'active') AND deleted_at IS NULL
 		ORDER BY id`
 	if dialect.IsPostgres(r.db.DriverName()) {
 		lockSlotsQuery += ` FOR UPDATE`
@@ -114,7 +114,7 @@ func (r *Repository) readWorkspaceRecoveryInventory(
 			COALESCE(r.provider_name, ''), COALESCE(r.remote_url, '')
 		FROM task_environment_repos ter
 		LEFT JOIN repositories r ON r.id = ter.repository_id
-		WHERE ter.task_environment_id = ? AND ter.status = 'active' AND ter.deleted_at IS NULL
+		WHERE ter.task_environment_id = ? AND (COALESCE(ter.status, '') = '' OR ter.status = 'active') AND ter.deleted_at IS NULL
 		ORDER BY ter.id`
 	if dialect.IsPostgres(r.db.DriverName()) {
 		query += ` FOR UPDATE OF ter`
@@ -142,6 +142,9 @@ func (r *Repository) readWorkspaceRecoveryInventory(
 		); err != nil {
 			return nil, err
 		}
+		if slot.Status == "" {
+			slot.Status = worktreeRepoStatusActive
+		}
 		slot.RepositoryPresent = repositoryPresent == 1
 		slot.RepositoryDeleted = repositoryDeleted == 1
 		slots = append(slots, slot)
@@ -156,7 +159,7 @@ func workspaceRecoverySnapshotMatchesObservation(
 	return snapshot.Complete() && snapshot.SessionPersisted && snapshot.TaskID == observation.TaskID &&
 		snapshot.SessionID == observation.SessionID &&
 		snapshot.TaskEnvironmentID == observation.TaskEnvironmentID &&
-		snapshot.SessionTaskEnvironmentID == observation.TaskEnvironmentID &&
+		snapshot.SessionEnvironmentMatchesSelected() &&
 		snapshot.EnvironmentOwnerTaskID == observation.EnvironmentOwnerTaskID &&
 		snapshot.OwnershipGeneration == observation.OwnershipGeneration
 }

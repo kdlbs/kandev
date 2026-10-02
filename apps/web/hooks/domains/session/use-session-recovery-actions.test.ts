@@ -63,6 +63,7 @@ vi.mock("@/components/state-provider", () => ({
 const TASK_ID = "task-1";
 const SESSION_ID = "session-1";
 const FAILED_TO_RESUME_MESSAGE_KEY = "task:failedToResumeSession";
+const LEGACY_ERROR_STAMP = "legacy-stamp";
 const PROVIDER_UNAVAILABLE = "provider unavailable";
 const MANAGED_CLONE_RECOVERY_STAMP = "managed-stamp-2";
 const MANAGED_CLONE_RELOCATION_ERROR = "workspace needs relocation";
@@ -425,7 +426,7 @@ describe("useSessionRecoveryActions", () => {
       useSessionRecoveryActions({
         taskId: TASK_ID,
         sessionId: SESSION_ID,
-        errorStamp: "legacy-stamp",
+        errorStamp: LEGACY_ERROR_STAMP,
       }),
     );
 
@@ -451,9 +452,14 @@ describe("useSessionRecoveryActions", () => {
   it("ignores a late restore relocation response after the session changes", async () => {
     const pending = Promise.withResolvers<void>();
     mocks.restoreSessionWorkspace.mockReturnValueOnce(pending.promise);
+    mocks.managedCloneRelocationRecoveryDetails.mockReturnValueOnce({
+      kind: "managed_clone_relocation_required",
+      error_stamp: LEGACY_ERROR_STAMP,
+      recovery_action: "relocate_and_resume",
+    });
     const { result, rerender } = renderHook(
       ({ sessionId }: { sessionId: string }) =>
-        useSessionRecoveryActions({ taskId: TASK_ID, sessionId, errorStamp: "legacy-stamp" }),
+        useSessionRecoveryActions({ taskId: TASK_ID, sessionId, errorStamp: LEGACY_ERROR_STAMP }),
       { initialProps: { sessionId: SESSION_ID } },
     );
 

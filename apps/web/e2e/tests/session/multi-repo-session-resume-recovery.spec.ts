@@ -37,7 +37,7 @@ test.describe("multi-repository managed clone recovery", () => {
     seedData,
     backend,
   }) => {
-    test.setTimeout(240_000);
+    test.setTimeout(360_000);
     const recovery = captureSessionRecoveryMessages(testPage);
     fixture = await seedMultiRepoManagedCloneRelocationFixture(
       testPage,

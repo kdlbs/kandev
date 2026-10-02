@@ -96,7 +96,8 @@ func (r *Repository) workspaceRecoverySessionMatches(
 	`), observation.SessionID).Scan(&taskID, &environmentID, &state); err != nil {
 		return false, err
 	}
-	return taskID == observation.TaskID && environmentID == observation.TaskEnvironmentID && state == observation.SessionState, nil
+	return taskID == observation.TaskID && environmentID == observation.SelectionSnapshot.SessionTaskEnvironmentID &&
+		state == observation.SessionState, nil
 }
 
 func (r *Repository) workspaceRecoverySelectionMatches(
@@ -128,8 +129,9 @@ func (r *Repository) workspaceRecoverySelectionMatches(
 	}
 	currentSelection := models.WorkspaceRecoverySelectionSnapshot{
 		TaskID: observation.TaskID, SessionID: observation.SessionID, SessionPersisted: true,
-		SessionTaskEnvironmentID: observation.TaskEnvironmentID, TaskEnvironmentID: observation.TaskEnvironmentID,
-		EnvironmentOwnerTaskID: ownerTaskID, OwnershipGeneration: generation,
+		SessionTaskEnvironmentID: observation.SelectionSnapshot.SessionTaskEnvironmentID,
+		TaskEnvironmentID:        observation.TaskEnvironmentID,
+		EnvironmentOwnerTaskID:   ownerTaskID, OwnershipGeneration: generation,
 		ExecutorType: executorType, ExecutorID: executorID, ExecutorProfileID: executorProfileID,
 		EnvironmentStatus: environmentStatus, TaskDirName: taskDirName, WorkspacePath: workspacePath,
 	}

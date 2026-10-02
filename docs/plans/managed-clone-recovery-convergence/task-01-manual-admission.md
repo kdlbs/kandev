@@ -57,10 +57,11 @@ Do not broaden the existing `RelocateDirty` context as a way to permit waiting.
 
 ## Regression first
 
-Add `TestManualRecoveryPreflightWaitsForInspectionWithoutAuthorizingDirtyRelocation`
-in `executor_manual_recovery_contention_test.go`. Use barriers to hold inspection
-before the manual call and release it after the waiter starts. Before the fix,
-the request returns `WorktreeRecoveryError` immediately instead of waiting.
+Add `TestManualRecoveryPreflightRequestsInspectionWaitWithoutDirtyAuthorization`
+in `executor_manual_recovery_contention_test.go`. Assert the manual preflight
+requests bounded inspection waiting without enabling dirty relocation. The held
+lock behavior and post-wait revalidation are covered by real-manager barriers in
+`recovery_admission_wait_policy_test.go`.
 Record that behavioral RED before production edits.
 
 Add `TestRecoveryAdmissionWaitPolicyHonorsCancellationAndDeadline` and
@@ -74,7 +75,7 @@ Include a mixed inventory with an unchanged valid slot and a dirty or invalid si
 Run from the repository root:
 
 ```bash
-(cd apps/backend && go test -tags fts5 ./internal/orchestrator/executor -run '^TestManualRecoveryPreflightWaitsForInspectionWithoutAuthorizingDirtyRelocation$' -count=1)
+(cd apps/backend && go test -tags fts5 ./internal/orchestrator/executor -run '^TestManualRecoveryPreflightRequestsInspectionWaitWithoutDirtyAuthorization$' -count=1)
 (cd apps/backend && go test -tags fts5 -race ./internal/worktree ./internal/orchestrator/executor ./internal/agent/runtime/lifecycle ./internal/orchestrator ./internal/orchestrator/handlers -run 'ManualRecoveryPreflight|RecoveryAdmissionWaitPolicy|LockRecoverySlots|DirtyRecoverySlotLock|AdmitRecovery|RegisteredLegacy|ManagedClone|ManagedMain|SessionRecoveryGuard|WorktreeRecovery(Launch|Resume)Integration' -count=1)
 git diff --check
 ```
@@ -143,7 +144,7 @@ and does not start an agent.
 
 Passed:
 
-- `go test -tags fts5 ./internal/orchestrator/executor -run '^TestManualRecoveryPreflightWaitsForInspectionWithoutAuthorizingDirtyRelocation$' -count=1`
+- `go test -tags fts5 ./internal/orchestrator/executor -run '^TestManualRecoveryPreflightRequestsInspectionWaitWithoutDirtyAuthorization$' -count=1`
 - `go test -tags fts5 ./internal/worktree -run 'RecoveryAdmissionWaitPolicy|RecoveryAdmissionRejectsSelectionDriftAfterInspectionWait|ReadRecoverySelectionSnapshotIncludesCompleteActiveInventory' -count=1`
 - `go test -tags fts5 ./internal/orchestrator ./internal/orchestrator/executor ./internal/agent/runtime/lifecycle -run 'ManualRecoveryPreflight|RecoveryAdmission|WorkspaceRecovery|WorkspaceRestore|FreshStartPreflightPreservesProviderState' -count=1`
 - `go test -tags fts5 -race ./internal/worktree ./internal/task/repository/sqlite ./internal/task/service ./internal/agent/runtime/lifecycle ./internal/orchestrator ./internal/orchestrator/executor ./internal/orchestrator/handlers ./internal/backendapp -run 'WorkspaceRecovery|CommitWorkspaceRecoveryError|RecoveryAdmissionWaitPolicy|RecoveryAdmissionRejectsSelectionDriftAfterInspectionWait|ReadRecoverySelectionSnapshot|ManualRecoveryPreflight|FreshStartPreflightPreservesProviderState|RestoreWorkspace|WorkspaceRestore|MainCheckoutLaunchIntegration|MissingCheckoutRecovery' -count=1`

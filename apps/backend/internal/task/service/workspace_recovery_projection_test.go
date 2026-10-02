@@ -15,27 +15,34 @@ import (
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/system/storage/workspaces"
 	"github.com/kandev/kandev/internal/task/models"
+	taskrepo "github.com/kandev/kandev/internal/task/repository"
 	"github.com/kandev/kandev/internal/worktree"
 	"github.com/stretchr/testify/require"
 )
 
 func TestWorkspaceRecoveryProjectsRelocationErrorFromEveryEntryPoint(t *testing.T) {
 	for _, test := range []struct {
-		name     string
-		initial  *models.LastAgentError
-		expected string
+		name                 string
+		sessionEnvironmentID string
+		initial              *models.LastAgentError
+		expected             string
+		incompleteInventory  bool
 	}{
-		{name: "legacy generic error"},
+		{name: "legacy generic error", sessionEnvironmentID: "environment-workspace-recovery-projection"},
 		{
-			name: "modern generic error",
+			name: "modern generic error", sessionEnvironmentID: "environment-workspace-recovery-projection",
 			initial: &models.LastAgentError{
 				Message: "workspace could not be restored", OccurredAt: time.Date(2026, 9, 29, 0, 0, 0, 0, time.UTC), StampValue: "generic-error-stamp",
 			},
 			expected: "generic-error-stamp",
 		},
+		{name: "legacy session without environment binding"},
+		{name: "snapshot capture failure is non-blocking", sessionEnvironmentID: "environment-workspace-recovery-projection", incompleteInventory: true},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			svc, eventBus, repo := createTestService(t)
+			repositoryReader := &changingWorkspaceRecoveryRepositoryReader{RepositoryEntityRepository: repo}
+			svc.repoEntities = repositoryReader
 			ctx := context.Background()
 			fixture := newWorkspaceRecoveryProjectionFixture(t)
 			taskID, sessionID, environmentID := "task-workspace-recovery-projection", "session-workspace-recovery-projection", "environment-workspace-recovery-projection"
@@ -50,20 +57,33 @@ func TestWorkspaceRecoveryProjectsRelocationErrorFromEveryEntryPoint(t *testing.
 				ID: "task-repository-workspace-recovery-projection", TaskID: taskID,
 				RepositoryID: "repository-workspace-recovery-projection", BaseBranch: "main", CheckoutBranch: fixture.branch,
 			}))
+			environmentRepos := []*models.TaskEnvironmentRepo{{
+				ID: "environment-repository-workspace-recovery-projection", TaskEnvironmentID: environmentID,
+				RepositoryID: "repository-workspace-recovery-projection", BranchSlug: "feature-recovery",
+				WorktreeID: fixture.worktreeID, WorktreePath: fixture.worktreePath, WorktreeBranch: fixture.branch,
+				WorktreeSourceClonePath: fixture.sourceClone, WorktreeSourceCommonDir: filepath.Join(fixture.sourceClone, ".git"),
+				Status: "active", Position: 0,
+			}}
+			if test.incompleteInventory {
+				require.NoError(t, repo.CreateRepository(ctx, &models.Repository{
+					ID: "repository-workspace-recovery-projection-extra", WorkspaceID: "workspace-recovery-projection",
+					Name: "extra", LocalPath: "/managed/extra",
+				}))
+				environmentRepos = append(environmentRepos, &models.TaskEnvironmentRepo{
+					ID: "environment-repository-workspace-recovery-projection-extra", TaskEnvironmentID: environmentID,
+					RepositoryID: "repository-workspace-recovery-projection-extra", BranchSlug: "main",
+					WorktreeID: "worktree-extra", WorktreePath: "/tasks/extra", WorktreeBranch: "feature/extra",
+					Status: "active", Position: 1,
+				})
+			}
 			require.NoError(t, repo.CreateTaskEnvironment(ctx, &models.TaskEnvironment{
 				ID: environmentID, TaskID: taskID, OwnershipGeneration: 7,
 				ExecutorType: string(models.ExecutorTypeWorktree), Status: models.TaskEnvironmentStatusReady,
 				WorkspacePath: fixture.worktreePath, TaskDirName: fixture.taskDirName,
-				Repos: []*models.TaskEnvironmentRepo{{
-					ID: "environment-repository-workspace-recovery-projection", TaskEnvironmentID: environmentID,
-					RepositoryID: "repository-workspace-recovery-projection", BranchSlug: "feature-recovery",
-					WorktreeID: fixture.worktreeID, WorktreePath: fixture.worktreePath, WorktreeBranch: fixture.branch,
-					WorktreeSourceClonePath: fixture.sourceClone, WorktreeSourceCommonDir: filepath.Join(fixture.sourceClone, ".git"),
-					Status: "active", Position: 0,
-				}},
+				Repos: environmentRepos,
 			}))
 			require.NoError(t, repo.CreateTaskSession(ctx, &models.TaskSession{
-				ID: sessionID, TaskID: taskID, TaskEnvironmentID: environmentID,
+				ID: sessionID, TaskID: taskID, TaskEnvironmentID: test.sessionEnvironmentID,
 				State: models.TaskSessionStateCancelled, ErrorMessage: "legacy workspace restore failure",
 				ExecutorID: models.ExecutorIDWorktree, RepositoryID: "repository-workspace-recovery-projection",
 				WorkspacePath: fixture.worktreePath,
@@ -78,9 +98,20 @@ func TestWorkspaceRecoveryProjectsRelocationErrorFromEveryEntryPoint(t *testing.
 			svc.SetRepoCloneLocation(workspaceRecoveryProjectionCloneLocation{root: fixture.managedRoot, source: fixture.sourceClone, destination: fixture.destinationClone})
 			info, err := svc.GetWorkspaceInfoForSession(ctx, taskID, sessionID)
 			require.NoError(t, err)
+			require.Equal(t, 1, repositoryReader.reads, "repository identity must be read once for proofs and admission")
+			if test.incompleteInventory {
+				require.Nil(t, info.RecoveryErrorObservation)
+				require.Len(t, info.WorkspaceRepositories, 1, "other workspace projections remain available")
+				return
+			}
 			require.NotNil(t, info.RecoveryErrorObservation)
 			require.True(t, info.RecoveryErrorObservation.SelectionSnapshot.Valid())
 			require.Len(t, info.RecoveryErrorObservation.SelectionSnapshot.Slots, 1)
+			require.Equal(t, info.WorkspaceRepositories[0].RepositoryPath,
+				info.RecoveryErrorObservation.SelectionSnapshot.Slots[0].RepositoryLocalPath)
+			// Later lifecycle reads use the stable fixture repository; the changing reader
+			// exists only to expose a second fetch during this captured workspace response.
+			svc.repoEntities = repo
 			observation := *info.RecoveryErrorObservation
 			require.Equal(t, test.expected, observation.ExpectedErrorStamp)
 
@@ -119,7 +150,9 @@ func TestWorkspaceRecoveryProjectsRelocationErrorFromEveryEntryPoint(t *testing.
 			_, err = worktreeManager.AdmitRecovery(ctx, manualRequest)
 			var relocationRequired *worktree.ManagedCloneRelocationRequiredError
 			require.ErrorAs(t, err, &relocationRequired, "manual preflight must use the real worktree manager")
-			manualStamp, err := svc.ReportManagedCloneRelocationRequired(ctx, observation)
+			reportCtx, cancel := context.WithCancel(ctx)
+			cancel()
+			manualStamp, err := svc.ReportManagedCloneRelocationRequired(reportCtx, observation)
 			require.NoError(t, err)
 			require.Equal(t, firstStamp, manualStamp)
 
@@ -149,6 +182,20 @@ func TestWorkspaceRecoveryProjectsRelocationErrorFromEveryEntryPoint(t *testing.
 			require.Equal(t, 1, errorEvents, "repeated detections must publish one durable error change")
 		})
 	}
+}
+
+type changingWorkspaceRecoveryRepositoryReader struct {
+	taskrepo.RepositoryEntityRepository
+	reads int
+}
+
+func (r *changingWorkspaceRecoveryRepositoryReader) GetRepository(ctx context.Context, id string) (*models.Repository, error) {
+	r.reads++
+	repository, err := r.RepositoryEntityRepository.GetRepository(ctx, id)
+	if err == nil && r.reads > 1 && repository != nil {
+		repository.LocalPath += "/changed-after-proof"
+	}
+	return repository, err
 }
 
 type workspaceRecoveryProjectionFixture struct {

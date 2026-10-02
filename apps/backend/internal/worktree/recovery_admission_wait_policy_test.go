@@ -276,7 +276,7 @@ func (s *recoverySelectionSnapshotWaitStore) readCount() int {
 
 // @covers AC-TASKS-MANAGED-CLONE-RELOCATION-001.3
 func TestRecoveryAdmissionRejectsSelectionDriftAfterInspectionWait(t *testing.T) {
-	for _, drift := range []string{"added sibling slot", "selected environment", "owner generation"} {
+	for _, drift := range []string{"added sibling slot", "selected environment", "owner generation", "missing snapshot"} {
 		t.Run(drift, func(t *testing.T) {
 			store := newMockStore()
 			worktreePath := t.TempDir()
@@ -316,6 +316,9 @@ func TestRecoveryAdmissionRejectsSelectionDriftAfterInspectionWait(t *testing.T)
 					WorktreeID: "worktree-selected", RepositoryID: "repository-selected", BranchSlug: "main",
 					RepositoryPath: "/repos/widget",
 				}},
+			}
+			if drift == "missing snapshot" {
+				request.SelectionSnapshot = models.WorkspaceRecoverySelectionSnapshot{}
 			}
 			manager := &Manager{store: storeWithSnapshot}
 			key := recoverySlotKey(request.Slots[0])
@@ -364,15 +367,23 @@ func TestRecoveryAdmissionRejectsSelectionDriftAfterInspectionWait(t *testing.T)
 				changed.TaskEnvironmentID = "environment-replacement"
 			case "owner generation":
 				changed.OwnershipGeneration++
+			case "missing snapshot":
+				// A durable reader cannot authorize recovery from a selected slot list alone.
 			}
-			storeWithSnapshot.mutateSnapshot(changed)
+			if drift != "missing snapshot" {
+				storeWithSnapshot.mutateSnapshot(changed)
+			}
 			owner.Unlock()
 
 			select {
 			case got := <-resultCh:
 				var recoveryErr *WorktreeRecoveryError
 				require.ErrorAs(t, got.err, &recoveryErr)
-				require.Contains(t, recoveryErr.Reason, "inventory changed")
+				if drift == "missing snapshot" {
+					require.Contains(t, recoveryErr.Reason, "identity is unavailable")
+				} else {
+					require.Contains(t, recoveryErr.Reason, "inventory changed")
+				}
 				require.Nil(t, got.admission)
 				require.Equal(t, 1, storeWithSnapshot.readCount(), "stale preflight must stop before reloading or inspecting worktrees")
 				lockValue, ok := manager.recoveryLocks.Load(key)

@@ -422,7 +422,7 @@ func (s *SQLiteStore) ReadRecoverySelectionSnapshot(
 		FROM task_environments te
 		LEFT JOIN task_sessions s ON s.id = ?
 		LEFT JOIN task_environment_repos ter
-			ON ter.task_environment_id = te.id AND ter.status = ? AND ter.deleted_at IS NULL
+			ON ter.task_environment_id = te.id AND (COALESCE(ter.status, '') = '' OR ter.status = ?) AND ter.deleted_at IS NULL
 		LEFT JOIN repositories r ON r.id = ter.repository_id
 		WHERE te.id = ?
 		ORDER BY COALESCE(ter.id, '')
@@ -463,6 +463,9 @@ func readRecoverySelectionSnapshotRows(rows *sql.Rows) (models.WorkspaceRecovery
 		snapshot.SessionPersisted = sessionPersisted == 1
 		if slotID != "" {
 			slot.EnvironmentRepoID = slotID
+			if slot.Status == "" {
+				slot.Status = StatusActive
+			}
 			slot.RepositoryPresent = repositoryPresent == 1
 			slot.RepositoryDeleted = repositoryDeleted == 1
 			snapshot.Slots = append(snapshot.Slots, slot)

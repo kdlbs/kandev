@@ -6,6 +6,7 @@ import path from "node:path";
 import { expect, type Page } from "@playwright/test";
 import type { SeedData } from "../fixtures/test-base";
 import type { CreateTaskResponse } from "../../lib/types/http";
+import type { Repository } from "../../lib/types/http";
 import type { ApiClient } from "./api-client";
 import { GitHelper, makeGitEnv } from "./git-helper";
 import { SessionPage } from "../pages/session-page";
@@ -14,12 +15,14 @@ import { waitForSessionState } from "./session";
 type SqliteTestDatabase = {
   prepare(sql: string): {
     get(...parameters: unknown[]): unknown;
-    run(...parameters: unknown[]): unknown;
+    run(...parameters: unknown[]): { changes?: number | bigint };
   };
+  exec(sql: string): void;
   close(): void;
 };
 
 const nodeRequire = createRequire(path.join(process.cwd(), "package.json"));
+const ACTIVE_EXECUTOR_STATUSES = new Set(["starting", "prepared", "ready", "running"]);
 
 export type MultiRepoRelocationSlot = {
   repositoryId: string;
@@ -38,6 +41,7 @@ export type MultiRepoRelocationFixture = {
   task: CreateTaskResponse;
   session: SessionPage;
   environment: Awaited<ReturnType<ApiClient["getTaskEnvironment"]>> & {};
+  originalSeedRepository: Repository;
   slots: [MultiRepoRelocationSlot, MultiRepoRelocationSlot];
 };
 
@@ -86,135 +90,190 @@ export async function seedMultiRepoManagedCloneRelocationFixture(
     );
   }
 
-  await apiClient.updateRepository(seedData.repositoryId, {
-    source_type: "local",
-    local_path: sourceClonePaths[0],
-    remote_url: remoteUrls[0],
-    default_branch: "main",
-    pull_before_worktree: false,
-  });
-  const extraRepository = await apiClient.createRepository(
-    seedData.workspaceId,
-    extraSeedPath,
-    "main",
-    {
-      name: repoNames[1],
-    },
-  );
-  repoIds[1] = extraRepository.id;
-  await apiClient.updateRepository(extraRepository.id, {
-    source_type: "local",
-    local_path: sourceClonePaths[1],
-    remote_url: remoteUrls[1],
-    default_branch: "main",
-    pull_before_worktree: false,
-  });
-
-  const task = await apiClient.createTaskWithAgent(
-    seedData.workspaceId,
-    title,
-    seedData.agentProfileId,
-    {
-      description: "/e2e:simple-message",
-      workflow_id: seedData.workflowId,
-      workflow_step_id: seedData.startStepId,
-      repository_ids: repoIds,
-      executor_profile_id: seedData.worktreeExecutorProfileId,
-    },
-  );
-  if (!task.session_id) throw new Error("multi-repository relocation task has no session_id");
-  await page.goto(`/t/${task.id}`);
-  const session = new SessionPage(page);
-  await session.waitForLoad();
-  await session.waitForChatIdle({ timeout: 60_000 });
-  const environment = await apiClient.getTaskEnvironment(task.id);
-  if (!environment || environment.repos?.length !== 2) {
-    throw new Error("multi-repository relocation task did not create two selected worktrees");
-  }
-
-  for (let index = 0; index < repoIds.length; index += 1) {
-    fs.mkdirSync(path.dirname(destinationClonePaths[index]), { recursive: true });
-    execFileSync(
-      "git",
-      ["clone", "--local", sourceClonePaths[index], destinationClonePaths[index]],
-      {
-        env: gitEnv,
-        stdio: "pipe",
-      },
-    );
-    execFileSync(
-      "git",
-      ["-C", destinationClonePaths[index], "remote", "set-url", "origin", remoteUrls[index]],
-      {
-        env: gitEnv,
-        stdio: "pipe",
-      },
-    );
-    await apiClient.updateRepository(repoIds[index], {
-      source_type: "provider",
-      local_path: destinationClonePaths[index],
-      provider: "github",
-      provider_repo_id: `e2e-${repoNames[index]}`,
-      provider_host: "https://github.com",
-      provider_owner: "e2e",
-      provider_name: repoNames[index],
-      remote_url: remoteUrls[index],
+  const originalSeedRepository = await apiClient.getRepository(seedData.repositoryId);
+  let extraRepositoryId = "";
+  try {
+    await apiClient.updateRepository(seedData.repositoryId, {
+      source_type: "local",
+      local_path: sourceClonePaths[0],
+      remote_url: remoteUrls[0],
+      default_branch: "main",
+      pull_before_worktree: false,
     });
-  }
-  await apiClient.mockGitHubSetUser("relocation-e2e");
-  await apiClient.mockGitHubSetWorkspaceConnection(seedData.workspaceId, {
-    source: "legacy_shared",
-    status: "active",
-  });
-
-  const slots = repoIds.map((repositoryId, index) => {
-    const repository = environment.repos?.find(
-      (candidate) => candidate.repository_id === repositoryId,
+    const extraRepository = await apiClient.createRepository(
+      seedData.workspaceId,
+      extraSeedPath,
+      "main",
+      {
+        name: repoNames[1],
+      },
     );
-    if (!repository?.worktree_path || !repository.worktree_id) {
-      throw new Error(`selected repository ${repositoryId} has no persisted worktree`);
-    }
-    const originalPath = repository.worktree_path;
-    const ignored = index === 1;
-    let dirtyFileName = ignored ? `relocation-ignored-${suffix}.txt` : "README.md";
-    let dirtyFileContent: string;
-    if (ignored) {
-      dirtyFileContent = `ignored local content ${suffix}`;
-      fs.writeFileSync(path.join(originalPath, dirtyFileName), dirtyFileContent, { mode: 0o644 });
-      execFileSync("git", ["-C", originalPath, "check-ignore", "--quiet", dirtyFileName], {
-        env: gitEnv,
-        stdio: "pipe",
-      });
-    } else {
-      const trackedFiles = execFileSync("git", ["-C", originalPath, "ls-files", "-z"], {
-        env: gitEnv,
-        stdio: "pipe",
-      })
-        .toString("utf8")
-        .split("\0")
-        .filter((file) => file && fs.existsSync(path.join(originalPath, file)));
-      dirtyFileName = trackedFiles[0] ?? "";
-      if (!dirtyFileName) throw new Error(`worktree ${originalPath} has no tracked file to edit`);
-      const previous = fs.readFileSync(path.join(originalPath, dirtyFileName), "utf8");
-      dirtyFileContent = `${previous}\ntracked local content ${suffix}\n`;
-      fs.writeFileSync(path.join(originalPath, dirtyFileName), dirtyFileContent, { mode: 0o644 });
-    }
-    const git = new GitHelper(originalPath, gitEnv);
-    return {
-      repositoryId,
-      sourceClonePath: sourceClonePaths[index],
-      destinationClonePath: destinationClonePaths[index],
-      originalPath,
-      originalWorktreeId: repository.worktree_id,
-      originalBranch: repository.worktree_branch ?? "",
-      originalHead: git.getCurrentSha(),
-      dirtyFileName,
-      dirtyFileContent,
-      ignored,
-    };
-  }) as [MultiRepoRelocationSlot, MultiRepoRelocationSlot];
+    extraRepositoryId = extraRepository.id;
+    repoIds[1] = extraRepository.id;
+    await apiClient.updateRepository(extraRepository.id, {
+      source_type: "local",
+      local_path: sourceClonePaths[1],
+      remote_url: remoteUrls[1],
+      default_branch: "main",
+      pull_before_worktree: false,
+    });
 
-  return { task, session, environment, slots };
+    const task = await apiClient.createTaskWithAgent(
+      seedData.workspaceId,
+      title,
+      seedData.agentProfileId,
+      {
+        description: "/e2e:simple-message",
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+        repository_ids: repoIds,
+        executor_profile_id: seedData.worktreeExecutorProfileId,
+      },
+    );
+    if (!task.session_id) throw new Error("multi-repository relocation task has no session_id");
+    await page.goto(`/t/${task.id}`);
+    const session = new SessionPage(page);
+    await session.waitForLoad();
+    await session.waitForChatIdle({ timeout: 60_000 });
+    const environment = await apiClient.getTaskEnvironment(task.id);
+    if (!environment || environment.repos?.length !== 2) {
+      throw new Error("multi-repository relocation task did not create two selected worktrees");
+    }
+
+    for (let index = 0; index < repoIds.length; index += 1) {
+      fs.mkdirSync(path.dirname(destinationClonePaths[index]), { recursive: true });
+      execFileSync(
+        "git",
+        ["clone", "--local", sourceClonePaths[index], destinationClonePaths[index]],
+        {
+          env: gitEnv,
+          stdio: "pipe",
+        },
+      );
+      execFileSync(
+        "git",
+        ["-C", destinationClonePaths[index], "remote", "set-url", "origin", remoteUrls[index]],
+        {
+          env: gitEnv,
+          stdio: "pipe",
+        },
+      );
+      await apiClient.updateRepository(repoIds[index], {
+        source_type: "provider",
+        local_path: destinationClonePaths[index],
+        provider: "github",
+        provider_repo_id: `e2e-${repoNames[index]}`,
+        provider_host: "https://github.com",
+        provider_owner: "e2e",
+        provider_name: repoNames[index],
+        remote_url: remoteUrls[index],
+      });
+    }
+    await apiClient.mockGitHubSetUser("relocation-e2e");
+    await apiClient.mockGitHubSetWorkspaceConnection(seedData.workspaceId, {
+      source: "legacy_shared",
+      status: "active",
+    });
+
+    const slots = repoIds.map((repositoryId, index) => {
+      const repository = environment.repos?.find(
+        (candidate) => candidate.repository_id === repositoryId,
+      );
+      if (!repository?.worktree_path || !repository.worktree_id) {
+        throw new Error(`selected repository ${repositoryId} has no persisted worktree`);
+      }
+      const originalPath = repository.worktree_path;
+      const ignored = index === 1;
+      let dirtyFileName = ignored ? `relocation-ignored-${suffix}.txt` : "README.md";
+      let dirtyFileContent: string;
+      if (ignored) {
+        dirtyFileContent = `ignored local content ${suffix}`;
+        fs.writeFileSync(path.join(originalPath, dirtyFileName), dirtyFileContent, { mode: 0o644 });
+        execFileSync("git", ["-C", originalPath, "check-ignore", "--quiet", dirtyFileName], {
+          env: gitEnv,
+          stdio: "pipe",
+        });
+      } else {
+        const trackedFiles = execFileSync("git", ["-C", originalPath, "ls-files", "-z"], {
+          env: gitEnv,
+          stdio: "pipe",
+        })
+          .toString("utf8")
+          .split("\0")
+          .filter((file) => file && fs.existsSync(path.join(originalPath, file)));
+        dirtyFileName = trackedFiles[0] ?? "";
+        if (!dirtyFileName) throw new Error(`worktree ${originalPath} has no tracked file to edit`);
+        const previous = fs.readFileSync(path.join(originalPath, dirtyFileName), "utf8");
+        dirtyFileContent = `${previous}\ntracked local content ${suffix}\n`;
+        fs.writeFileSync(path.join(originalPath, dirtyFileName), dirtyFileContent, { mode: 0o644 });
+      }
+      const git = new GitHelper(originalPath, gitEnv);
+      return {
+        repositoryId,
+        sourceClonePath: sourceClonePaths[index],
+        destinationClonePath: destinationClonePaths[index],
+        originalPath,
+        originalWorktreeId: repository.worktree_id,
+        originalBranch: repository.worktree_branch ?? "",
+        originalHead: git.getCurrentSha(),
+        dirtyFileName,
+        dirtyFileContent,
+        ignored,
+      };
+    }) as [MultiRepoRelocationSlot, MultiRepoRelocationSlot];
+
+    return { task, session, environment, originalSeedRepository, slots };
+  } catch (setupError) {
+    const cleanup = [
+      () => apiClient.e2eReset(seedData.workspaceId, [seedData.workflowId]),
+      () => apiClient.mockGitHubReset(),
+      ...(extraRepositoryId ? [() => apiClient.deleteRepository(extraRepositoryId)] : []),
+      () => restoreSeedRepository(apiClient, seedData.repositoryId, originalSeedRepository),
+    ];
+    try {
+      await attemptEveryCleanup(cleanup);
+    } catch {
+      // Keep the setup failure as the cause; cleanup still attempts every restoration step.
+    }
+    throw setupError;
+  }
+}
+
+async function restoreSeedRepository(
+  apiClient: ApiClient,
+  repositoryId: string,
+  repository: Repository,
+) {
+  await apiClient.updateRepository(repositoryId, {
+    source_type: repository.source_type,
+    local_path: repository.local_path,
+    provider: repository.provider,
+    provider_repo_id: repository.provider_repo_id,
+    provider_host: repository.provider_host ?? "",
+    provider_scope: repository.provider_scope ?? "",
+    provider_owner: repository.provider_owner,
+    provider_name: repository.provider_name,
+    remote_url: repository.remote_url ?? "",
+    default_branch: repository.default_branch,
+    pull_before_worktree: repository.pull_before_worktree,
+    setup_script: repository.setup_script,
+    cleanup_script: repository.cleanup_script,
+    dev_script: repository.dev_script,
+    copy_files: repository.copy_files,
+    secret_bindings: repository.secret_bindings,
+  });
+}
+
+async function attemptEveryCleanup(steps: Array<() => Promise<void>>) {
+  let firstError: unknown;
+  for (const step of steps) {
+    try {
+      await step();
+    } catch (error) {
+      firstError ??= error;
+    }
+  }
+  if (firstError !== undefined) throw firstError;
 }
 
 function createIgnoredFixtureRepository(
@@ -250,11 +309,26 @@ export function seedLegacyGenericSessionError(tmpDir: string, sessionId: string)
     DatabaseSync: new (databasePath: string) => SqliteTestDatabase;
   };
   const db = new DatabaseSync(path.join(tmpDir, "kandev.db"));
+  db.exec("PRAGMA busy_timeout = 5000; BEGIN IMMEDIATE");
+  let committed = false;
   try {
-    const row = db.prepare("SELECT metadata FROM task_sessions WHERE id = ?").get(sessionId) as
-      | { metadata?: string | null }
-      | undefined;
+    const row = db
+      .prepare("SELECT metadata, state FROM task_sessions WHERE id = ?")
+      .get(sessionId) as { metadata?: string | null; state?: string } | undefined;
     if (!row) throw new Error(`legacy recovery session ${sessionId} does not exist`);
+    if (row.state !== "CANCELLED") {
+      throw new Error(
+        `legacy recovery session ${sessionId} is not stopped (${row.state ?? "unknown"})`,
+      );
+    }
+    const execution = db
+      .prepare(
+        "SELECT status, COALESCE(local_pid, 0) AS local_pid FROM executors_running WHERE session_id = ? LIMIT 1",
+      )
+      .get(sessionId) as { status?: string; local_pid?: number } | undefined;
+    if (execution && hasLiveExecutor(execution)) {
+      throw new Error(`legacy recovery session ${sessionId} still has a live execution`);
+    }
     const metadata = row.metadata ? (JSON.parse(row.metadata) as Record<string, unknown>) : {};
     metadata.last_agent_error = {
       message: "The previous agent launch failed.",
@@ -263,18 +337,58 @@ export function seedLegacyGenericSessionError(tmpDir: string, sessionId: string)
       phase: "bootstrap",
       stamp: `legacy-${randomUUID()}`,
     };
-    db.prepare(
-      "UPDATE task_sessions SET state = ?, error_message = ?, metadata = ?, updated_at = ? WHERE id = ?",
-    ).run(
-      "FAILED",
-      "The previous agent launch failed.",
-      JSON.stringify(metadata),
-      new Date().toISOString(),
-      sessionId,
-    );
+    const updated = db
+      .prepare(
+        `UPDATE task_sessions
+       SET state = ?, error_message = ?, metadata = ?, updated_at = ?
+       WHERE id = ? AND state = 'CANCELLED'
+         AND NOT EXISTS (
+           SELECT 1 FROM executors_running er
+           WHERE er.session_id = task_sessions.id
+             AND (er.status IN ('starting', 'prepared', 'ready', 'running')
+               OR COALESCE(er.local_pid, 0) > 0)
+         )`,
+      )
+      .run(
+        "FAILED",
+        "The previous agent launch failed.",
+        JSON.stringify(metadata),
+        new Date().toISOString(),
+        sessionId,
+      );
+    if (updated.changes !== 1 && updated.changes !== 1n) {
+      throw new Error(
+        `legacy recovery session ${sessionId} changed before its error could be seeded`,
+      );
+    }
+    db.exec("COMMIT");
+    committed = true;
+  } finally {
+    if (!committed) db.exec("ROLLBACK");
+    db.close();
+  }
+}
+
+function hasLiveExecution(tmpDir: string, sessionId: string) {
+  const { DatabaseSync } = nodeRequire("node:sqlite") as {
+    DatabaseSync: new (databasePath: string) => SqliteTestDatabase;
+  };
+  const db = new DatabaseSync(path.join(tmpDir, "kandev.db"));
+  try {
+    db.exec("PRAGMA busy_timeout = 5000");
+    const execution = db
+      .prepare(
+        "SELECT status, COALESCE(local_pid, 0) AS local_pid FROM executors_running WHERE session_id = ? LIMIT 1",
+      )
+      .get(sessionId) as { status?: string; local_pid?: number } | undefined;
+    return execution ? hasLiveExecutor(execution) : false;
   } finally {
     db.close();
   }
+}
+
+function hasLiveExecutor(execution: { status?: string; local_pid?: number }) {
+  return ACTIVE_EXECUTOR_STATUSES.has(execution.status ?? "") || (execution.local_pid ?? 0) > 0;
 }
 
 export function readSessionErrorStamp(tmpDir: string, sessionId: string): string | null {
@@ -380,6 +494,12 @@ export async function stopAndSeedLegacySessionFailure(
     message: "Waiting for the multi-repository recovery session to stop",
     timeout: 30_000,
   });
+  await expect
+    .poll(() => hasLiveExecution(tmpDir, sessionId), {
+      timeout: 30_000,
+      message: "Waiting for the stopped multi-repository recovery execution to be removed",
+    })
+    .toBe(false);
   seedLegacyGenericSessionError(tmpDir, sessionId);
 }
 
@@ -388,20 +508,12 @@ export async function cleanupMultiRepoManagedCloneRelocationFixture(
   seedData: SeedData,
   fixture: MultiRepoRelocationFixture,
 ) {
-  await apiClient.e2eReset(seedData.workspaceId, [seedData.workflowId]);
-  await apiClient.mockGitHubReset();
-  await apiClient.deleteRepository(fixture.slots[1].repositoryId);
-  await apiClient.updateRepository(seedData.repositoryId, {
-    source_type: "local",
-    local_path: seedData.repositoryPath,
-    provider: "",
-    provider_repo_id: "",
-    provider_host: "",
-    provider_scope: "",
-    provider_owner: "",
-    provider_name: "",
-    remote_url: seedData.repositoryRemoteURL,
-  });
+  await attemptEveryCleanup([
+    () => apiClient.e2eReset(seedData.workspaceId, [seedData.workflowId]),
+    () => apiClient.mockGitHubReset(),
+    () => apiClient.deleteRepository(fixture.slots[1].repositoryId),
+    () => restoreSeedRepository(apiClient, seedData.repositoryId, fixture.originalSeedRepository),
+  ]);
 }
 
 export function assertSnapshotContent(slot: MultiRepoRelocationSlot) {

@@ -693,21 +693,19 @@ func (m *Manager) revalidateRecoverySelectionSnapshot(ctx context.Context, req *
 	if snapshot.Present() && !snapshot.Valid() {
 		return recoveryAdmissionError(*req, "selected worktree inventory identity is incomplete")
 	}
+	reader, ok := m.store.(RecoverySelectionSnapshotReader)
 	if !snapshot.Valid() {
+		if ok {
+			return recoveryAdmissionError(*req, "selected worktree inventory identity is unavailable")
+		}
 		return nil
 	}
 	if !snapshot.Complete() {
 		return recoveryAdmissionError(*req, "selected worktree inventory is incomplete")
 	}
-	if snapshot.TaskID != req.TaskID || snapshot.SessionID != req.SessionID ||
-		snapshot.SessionTaskEnvironmentID != req.TaskEnvironmentID ||
-		snapshot.TaskEnvironmentID != req.TaskEnvironmentID ||
-		snapshot.EnvironmentOwnerTaskID != req.OwnerTaskID ||
-		snapshot.OwnershipGeneration != req.OwnershipGeneration ||
-		snapshot.ExecutorType != req.ExecutorType {
+	if !recoverySelectionSnapshotMatchesRequest(snapshot, req) {
 		return recoveryAdmissionError(*req, "selected worktree inventory identity is inconsistent")
 	}
-	reader, ok := m.store.(RecoverySelectionSnapshotReader)
 	if !ok {
 		return recoveryAdmissionError(*req, "selected worktree inventory cannot be revalidated")
 	}
@@ -719,6 +717,13 @@ func (m *Manager) revalidateRecoverySelectionSnapshot(ctx context.Context, req *
 		return recoveryAdmissionError(*req, "selected worktree inventory changed while waiting for inspection")
 	}
 	return nil
+}
+
+func recoverySelectionSnapshotMatchesRequest(snapshot models.WorkspaceRecoverySelectionSnapshot, req *RecoveryAdmissionRequest) bool {
+	return snapshot.TaskID == req.TaskID && snapshot.SessionID == req.SessionID &&
+		snapshot.SessionEnvironmentMatchesSelected() && snapshot.TaskEnvironmentID == req.TaskEnvironmentID &&
+		snapshot.EnvironmentOwnerTaskID == req.OwnerTaskID &&
+		snapshot.OwnershipGeneration == req.OwnershipGeneration && snapshot.ExecutorType == req.ExecutorType
 }
 
 func waitForRecoveryInspectionLock(ctx context.Context, lock *sync.Mutex, deadline time.Time) error {

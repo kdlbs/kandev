@@ -1331,32 +1331,22 @@ func (m *Manager) admitWorkspaceRecovery(ctx context.Context, info *WorkspaceInf
 	if info.RecoveryErrorObservation != nil {
 		selectionSnapshot = info.RecoveryErrorObservation.SelectionSnapshot
 	}
+	if !selectionSnapshot.Complete() {
+		return nil, fmt.Errorf("worktree recovery admission: selected repository inventory is unavailable")
+	}
 	slots := make([]worktree.RecoverySlot, 0, len(info.WorkspaceRepositories))
-	if selectionSnapshot.Valid() {
-		for _, selected := range selectionSnapshot.Canonical().Slots {
-			if selected.WorktreeID == "" {
-				continue
-			}
-			if !selected.RepositoryPresent || selected.RepositoryID == "" || selected.RepositoryLocalPath == "" {
-				return nil, fmt.Errorf("selected worktree recovery inventory is incomplete")
-			}
-			slots = append(slots, worktree.RecoverySlot{
-				WorktreeID: selected.WorktreeID, RepositoryID: selected.RepositoryID,
-				BranchSlug: selected.BranchSlug, RepositoryPath: selected.RepositoryLocalPath,
-				CloneRelocation: cloneRelocationByRepository[selected.RepositoryID],
-			})
+	for _, selected := range selectionSnapshot.Canonical().Slots {
+		if selected.WorktreeID == "" {
+			continue
 		}
-	} else {
-		for _, repository := range info.WorkspaceRepositories {
-			if repository.WorktreeID == "" {
-				continue
-			}
-			slots = append(slots, worktree.RecoverySlot{
-				WorktreeID: repository.WorktreeID, RepositoryID: repository.RepositoryID,
-				BranchSlug: repository.BranchSlug, RepositoryPath: repository.RepositoryPath,
-				CloneRelocation: repository.CloneRelocation,
-			})
+		if !selected.RepositoryPresent || selected.RepositoryID == "" || selected.RepositoryLocalPath == "" {
+			return nil, fmt.Errorf("selected worktree recovery inventory is incomplete")
 		}
+		slots = append(slots, worktree.RecoverySlot{
+			WorktreeID: selected.WorktreeID, RepositoryID: selected.RepositoryID,
+			BranchSlug: selected.BranchSlug, RepositoryPath: selected.RepositoryLocalPath,
+			CloneRelocation: cloneRelocationByRepository[selected.RepositoryID],
+		})
 	}
 	if len(slots) == 0 {
 		return nil, nil

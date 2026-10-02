@@ -207,7 +207,7 @@ Restore response ordering. The regression files are listed below.
 
 | Criteria | Regression and test file |
 | --- | --- |
-| 001.1, 001.3, 002.1 | `TestManualRecoveryPreflightWaitsForInspectionWithoutAuthorizingDirtyRelocation`, new `executor_manual_recovery_contention_test.go` |
+| 001.1, 001.3, 002.1 | `TestManualRecoveryPreflightRequestsInspectionWaitWithoutDirtyAuthorization`, `executor_manual_recovery_contention_test.go`; real held-lock behavior in `recovery_admission_wait_policy_test.go` |
 | 001.3, 001.4, 002.4 | Cancellation, deadline, added-sibling/environment/generation drift, and lock-release cases in `recovery_admission_wait_policy_test.go` |
 | 002.1, 003.1 | `TestWorkspaceRecoveryProjectsRelocationErrorFromEveryEntryPoint`, new `workspace_recovery_projection_test.go` under task service |
 | 002.4, 003.1 | `TestCommitWorkspaceRecoveryErrorPreservesSuccessorState` and selected inventory drift/stamp-reuse cases, repository CAS regression files |
@@ -245,8 +245,10 @@ Implementation and package checks passed on October 2, 2026:
 - Backend projection, admission, and compare-and-set regressions passed under
   `go test -race`; SQL guard and SQLite store conformance passed. PostgreSQL cases
   were skipped because `KANDEV_TEST_POSTGRES_DSN` was unavailable.
-- Six focused frontend Vitest files passed (100 tests); web typecheck, full lint,
-  `i18n:check`, and `i18n:ratchet` passed.
+- Six focused frontend Vitest files passed (100 tests) in the implementation run;
+  web typecheck, full lint, `i18n:check`, and `i18n:ratchet` passed. The review
+  follow-up focused set passed 91 tests across five files, and repeated typecheck,
+  full lint, and both i18n checks passed.
 - Guarded desktop and phone multi-repository E2E scenarios passed, as did the
   existing single-repository dirty-relocation scenarios on both platforms. Each
   guarded run rebuilt the backend and Vite assets.
@@ -261,7 +263,8 @@ Implementation and package checks passed on October 2, 2026:
 Review follow-up: All reported inventory-CAS, stale-execution expectation, and
 post-wait snapshot findings were fixed in the existing work orders. The final
 race-enabled backend regressions, SQL guard, specification validation, and
-backend build passed. PostgreSQL cases compiled but were skipped because
+backend build passed. Desktop and mobile multi-repository browser regressions
+passed after fresh host builds. PostgreSQL cases compiled but were skipped because
 `KANDEV_TEST_POSTGRES_DSN` was unavailable.
 
 ### Documentation coverage preflight command

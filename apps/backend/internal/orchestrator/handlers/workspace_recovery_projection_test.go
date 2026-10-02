@@ -15,6 +15,7 @@ import (
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 	taskmodels "github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository"
+	"github.com/kandev/kandev/internal/worktree"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"github.com/stretchr/testify/require"
@@ -68,4 +69,43 @@ func TestRestoreWorkspaceReturnsManagedCloneRelocationDetails(t *testing.T) {
 	require.Equal(t, "managed_clone_relocation_required", payload.Details["kind"])
 	require.Equal(t, "relocation-stamp", payload.Details["error_stamp"])
 	require.Equal(t, "relocate_and_resume", payload.Details["recovery_action"])
+}
+
+func TestSessionLaunchMapsRecoveryInspectionContentionToConflict(t *testing.T) {
+	ctx := context.Background()
+	dbConn, err := db.OpenSQLite(filepath.Join(t.TempDir(), "test.db"))
+	require.NoError(t, err)
+	sqlxDB := sqlx.NewDb(dbConn, "sqlite3")
+	t.Cleanup(func() { _ = sqlxDB.Close() })
+	repo, cleanup, err := repository.Provide(sqlxDB, sqlxDB, nil)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = cleanup() })
+
+	now := time.Now().UTC()
+	require.NoError(t, repo.CreateWorkspace(ctx, &taskmodels.Workspace{ID: "workspace-contention", Name: "Test", CreatedAt: now, UpdatedAt: now}))
+	require.NoError(t, repo.CreateWorkflow(ctx, &taskmodels.Workflow{ID: "workflow-contention", WorkspaceID: "workspace-contention", Name: "Test", CreatedAt: now, UpdatedAt: now}))
+	require.NoError(t, repo.CreateTask(ctx, &taskmodels.Task{
+		ID: "task-contention", WorkspaceID: "workspace-contention", WorkflowID: "workflow-contention",
+		Title: "Session launch contention", State: v1.TaskStateInProgress, CreatedAt: now, UpdatedAt: now,
+	}))
+	require.NoError(t, repo.CreateTaskSession(ctx, &taskmodels.TaskSession{
+		ID: "session-contention", TaskID: "task-contention", State: taskmodels.TaskSessionStateCancelled,
+		AgentProfileID: "profile-contention", StartedAt: now, UpdatedAt: now,
+	}))
+
+	log, err := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "console", OutputPath: "stderr"})
+	require.NoError(t, err)
+	service := orchestrator.NewService(
+		orchestrator.ServiceConfig{}, bus.NewMemoryEventBus(log),
+		restoreProjectionAgentManager{err: &worktree.RecoveryInspectionContentionError{}},
+		nil, repo, nil, nil, nil, log,
+	)
+	response, err := NewHandlers(service, log).wsLaunchSession(ctx, createTestMessage(t, ws.ActionSessionLaunch, map[string]interface{}{
+		"task_id": "task-contention", "session_id": "session-contention", "intent": string(orchestrator.IntentRestoreWorkspace),
+	}))
+	require.NoError(t, err)
+
+	payload := parseError(t, response)
+	require.Equal(t, ws.ErrorCodeConflict, payload.Code)
+	require.Equal(t, "recovery_inspection_busy", payload.Details["kind"])
 }
