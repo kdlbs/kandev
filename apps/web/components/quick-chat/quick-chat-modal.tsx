@@ -168,6 +168,7 @@ function QuickChatConversationContent({
         workspaceId={workspaceId}
         canCreateConfigurationChat={canCreateConfigurationChat}
         pendingAgentId={quickChat.pendingAgentId}
+        error={quickChat.setupError}
         onStart={quickChat.handleSelectAgent}
         onCancel={() => quickChat.handleOpenChange(false)}
         onKindChange={quickChat.handleSetupKindChange}

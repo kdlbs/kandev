@@ -15,6 +15,10 @@ legacy_specs: []
 
 Move runtime policy below installed agents and make it a compact collapsed disclosure. Deliver the presentation, fragment navigation and desktop/phone regression coverage together in one sequential work order. This is a follow-up to the [original notification package](../agent-runtime-notifications/plan.md); notifications and automatic-update semantics retain their existing contracts. The user explicitly authorized implementation through merge on 2026-10-02.
 
+## Follow-up contract
+
+The [floating indicator removal package](../remove-agent-runtime-update-indicator/plan.md) implements AC-AGENTS-RUNTIME-NOTIFY-001.7 in place of retired 001.4. Indicator previews and positive indicator assertions below describe the earlier implementation, not the current result. The follow-up owns the shared desktop/phone helper changes; historical verification results and completed work-order statuses remain delivery evidence for this package.
+
 ## Scope
 
 ### In scope

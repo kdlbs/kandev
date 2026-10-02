@@ -1144,6 +1144,64 @@ describe("idle-suspended session focus recovery", () => {
     };
   });
 
+  it("does not recover on focus while automatic recovery is blocked", async () => {
+    const visibility = vi.spyOn(document, "visibilityState", "get").mockReturnValue("visible");
+    mockRequest.mockResolvedValue({
+      session_id: SESSION_ID,
+      task_id: TASK_ID,
+      state: "WAITING_FOR_INPUT",
+      is_agent_running: false,
+      is_resumable: true,
+      needs_resume: true,
+      is_idle_suspended: true,
+      auto_resume_allowed: true,
+      resume_reason: "idle_suspension",
+    });
+    try {
+      renderHook(() =>
+        useSessionResumption(TASK_ID, SESSION_ID, false, { preventAutoResume: true }),
+      );
+      await act(async () => {
+        window.dispatchEvent(new Event("focus"));
+      });
+      expect(mockRequest).not.toHaveBeenCalled();
+    } finally {
+      visibility.mockRestore();
+    }
+  });
+
+  it("invalidates pending startup recovery when an error arrives", async () => {
+    const status = Promise.withResolvers<unknown>();
+    mockRequest.mockReturnValueOnce(status.promise);
+    const { rerender } = renderHook(
+      ({ blocked }) =>
+        useSessionResumption(TASK_ID, SESSION_ID, false, { preventAutoResume: blocked }),
+      { initialProps: { blocked: false } },
+    );
+    await waitFor(() =>
+      expect(mockRequest).toHaveBeenCalledWith(
+        STATUS_ACTION,
+        expect.anything(),
+        expect.any(Number),
+      ),
+    );
+    rerender({ blocked: true });
+    await act(async () => {
+      status.resolve({
+        session_id: SESSION_ID,
+        task_id: TASK_ID,
+        state: "WAITING_FOR_INPUT",
+        is_agent_running: false,
+        is_resumable: true,
+        needs_resume: true,
+        is_idle_suspended: true,
+        auto_resume_allowed: true,
+        resume_reason: "idle_suspension",
+      });
+    });
+    expect(mockRequest.mock.calls.some(([action]) => action === LAUNCH_ACTION)).toBe(false);
+  });
+
   it("resumes the selected session without a prompt despite the preference", async () => {
     mockRequest
       .mockResolvedValueOnce({

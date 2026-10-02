@@ -391,8 +391,6 @@
   "runtimeFailedBody": "{{agent}} 런타임 {{version}}을(를) 활성화할 수 없습니다(이전 버전: {{previous}}). 이번 시도에서는 선택한 버전이 유지되었습니다. 수동으로 다시 시도하거나 자동 업데이트를 끄세요.",
   "runtimeRunning": "{{previous}}에서 {{version}}로 업데이트 준비 중",
   "runtimeReview": "런타임 확인",
-  "runtimeIndicator_one": "에이전트 런타임 업데이트 {{count}}개",
-  "runtimeIndicator_other": "에이전트 런타임 업데이트 {{count}}개",
   "runtimePolicySaveFailed": "자동 업데이트 설정을 저장할 수 없습니다. 다시 시도하세요.",
   "runtimeOtherRegistrations_one": "기타 등록된 런타임({{count}}개)",
   "runtimeOtherRegistrations_other": "기타 등록된 런타임({{count}}개)",

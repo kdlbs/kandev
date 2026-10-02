@@ -12,7 +12,10 @@ import (
 	acp "github.com/coder/acp-go-sdk"
 )
 
-const mockContinuationOutputScenario = "output"
+const (
+	mockContinuationOutputScenario        = "output"
+	mockContinuationReadAmbiguousScenario = "read-ambiguous"
+)
 
 type mockContinuationEpisode struct {
 	Scenario        string `json:"scenario"`
@@ -30,7 +33,7 @@ func (a *mockAgent) handleMockInterruptionContinuation(ctx context.Context, sid 
 	scenario := strings.TrimPrefix(prompt, "/continuation-")
 	if strings.HasPrefix(prompt, "/continuation-") {
 		switch scenario {
-		case mockContinuationOutputScenario, "read", "write", "pending", "unknown", "read-hold", "read-restore-transient", "read-restore-hard", "read-ambiguous":
+		case mockContinuationOutputScenario, "read", "write", "pending", "unknown", "read-hold", "read-restore-transient", "read-restore-hard", mockContinuationReadAmbiguousScenario:
 			return a.emitMockInterruption(ctx, sid, scenario)
 		}
 	}
@@ -47,7 +50,7 @@ func (a *mockAgent) handleMockInterruptionContinuation(ctx context.Context, sid 
 		return acp.PromptResponse{}, err, true
 	}
 	e := &emitter{ctx: ctx, conn: a.conn, sid: sid}
-	if episode.Scenario == "read-ambiguous" {
+	if episode.Scenario == mockContinuationReadAmbiguousScenario {
 		e.text("Mock continuation acceptance uncertain.\n")
 		return acp.PromptResponse{}, &acp.RequestError{Code: -32603, Message: "continuation acceptance uncertain"}, true
 	}

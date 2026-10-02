@@ -147,4 +147,12 @@ describe("QuickChatSetup default agent", () => {
     expect((screen.getByTestId("quick-chat-start") as HTMLButtonElement).disabled).toBe(true);
     expect(props.onStart).not.toHaveBeenCalled();
   });
+
+  it("renders an inline error message and changes start button to retry", () => {
+    render(<QuickChatSetup {...props} error="Could not connect to workspace repository." />);
+
+    expect(screen.getByTestId("quick-chat-setup-error")).toBeTruthy();
+    expect(screen.getByText("Could not connect to workspace repository.")).toBeTruthy();
+    expect(screen.getByTestId("quick-chat-start").textContent).toBe("Retry");
+  });
 });

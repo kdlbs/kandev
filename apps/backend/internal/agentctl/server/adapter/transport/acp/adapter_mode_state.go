@@ -40,14 +40,14 @@ func (a *Adapter) lockModeChange(ctx context.Context) error {
 	}
 }
 
-// noteCurrentMode records a mode report from the active provider session and
-// wakes any request waiting for a new observation.
+// noteCurrentMode records an uncorrelated report and wakes any request waiting
+// for a new observation. An uncorrelated report never clears mode uncertainty.
 func (a *Adapter) noteCurrentMode(sessionID, mode string) bool {
 	if sessionID == "" || mode == "" {
 		return false
 	}
 	a.mu.Lock()
-	updated := a.noteModeLocked(sessionID, mode, !a.modeChangeActive)
+	updated := a.noteModeLocked(sessionID, mode, false)
 	a.mu.Unlock()
 	return updated
 }
@@ -90,7 +90,6 @@ func (a *Adapter) resetSessionModeLocked() {
 func (a *Adapter) beginModeChange() (generation uint64, uncertain bool) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	a.modeChangeActive = true
 	return a.modeObservationGeneration, a.modeOutcomeUncertain
 }
 
@@ -99,7 +98,6 @@ func (a *Adapter) endModeChange(unconfirmed bool) {
 	if unconfirmed {
 		a.modeOutcomeUncertain = true
 	}
-	a.modeChangeActive = false
 	a.mu.Unlock()
 }
 

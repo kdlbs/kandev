@@ -1,6 +1,7 @@
 import { expect, type Page } from "@playwright/test";
 import type { AgentUpdateStatus } from "../../../lib/api/domains/agent-update-api";
 import { waitForFiniteAnimations } from "../../helpers/animations";
+import { waitForHttp } from "../../helpers/causal-waits";
 import type { PrAssetCapture } from "../../helpers/pr-asset-capture";
 import { installRuntimeUpdateFixture } from "./agent-runtime-update-helpers";
 import { compactRuntimeSettings, retainRuntimePolicyDraft } from "./agent-runtime-settings-helpers";
@@ -120,12 +121,18 @@ export async function runtimeAwareness(page: Page, mobile = false, capture?: PrA
     await route.fulfill({ json: { enabled } });
   });
   await compactRuntimeSettings(page, mobile, capture);
+  const statusRead = waitForHttp(page, "GET", /\/agent-update\/status$/);
   await page.goto("/");
+  await statusRead;
   const indicator = page.getByTestId("agent-runtime-update-indicator");
-  await expect(indicator).toContainText("2 agent runtime updates");
-  if (mobile) expect((await indicator.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+  // @covers AC-AGENTS-RUNTIME-NOTIFY-001.7
+  await expect(indicator).toHaveCount(0);
   expect(runtime.postCount()).toBe(0);
-  await indicator.click();
+  await capture?.screenshot("runtime-updates-no-floating-indicator", {
+    caption:
+      "Available runtime updates leave the application view free of the floating update button.",
+  });
+  await page.goto("/settings/agents#runtime-updates");
   await expect(page).toHaveURL(/settings\/agents#runtime-updates$/);
   await expect(page.locator("#runtime-updates > details")).toHaveAttribute("open");
   await page.goto("/");
@@ -155,6 +162,12 @@ export async function runtimeAwareness(page: Page, mobile = false, capture?: PrA
   });
   await review.click();
   await expect(page).toHaveURL(/settings\/agents#runtime-update-kimi-acp$/);
+  await expect(toast).toHaveCount(0);
+  const statusAfterNotice = waitForHttp(page, "GET", /\/agent-update\/status$/);
+  await page.goto("/");
+  await statusAfterNotice;
+  await expect(indicator).toHaveCount(0);
+  await page.goto("/settings/agents#runtime-update-kimi-acp");
   const managed = page.getByTestId("runtime-policy-claude-acp");
   const automatic = managed.getByRole("switch", { name: "Automatic updates" });
   await expect(automatic).not.toBeChecked();

@@ -102,7 +102,7 @@ func TestMockInterruptionContinuationAcceptedCancelAndClose(t *testing.T) {
 }
 
 func TestMockInterruptionContinuationRestoreOutcomes(t *testing.T) {
-	for _, scenario := range []string{"read-restore-transient", "read-restore-hard", "read-ambiguous"} {
+	for _, scenario := range []string{"read-restore-transient", "read-restore-hard", mockContinuationReadAmbiguousScenario} {
 		t.Run(scenario, func(t *testing.T) {
 			sid := acp.SessionId(t.Name())
 			_ = os.Remove(mockContinuationPath(sid))
@@ -124,7 +124,7 @@ func TestMockInterruptionContinuationRestoreOutcomes(t *testing.T) {
 			}
 			require.NoError(t, err)
 			_, err = restored.Prompt(t.Context(), acp.PromptRequest{SessionId: sid, Prompt: []acp.ContentBlock{acp.TextBlock(mockContinuationPrompt)}})
-			if scenario == "read-ambiguous" {
+			if scenario == mockContinuationReadAmbiguousScenario {
 				require.ErrorContains(t, err, "acceptance uncertain")
 			} else {
 				require.NoError(t, err)

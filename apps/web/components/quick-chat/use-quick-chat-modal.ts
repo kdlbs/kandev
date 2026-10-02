@@ -5,7 +5,11 @@ import { useShallow } from "zustand/react/shallow";
 import { useTranslation } from "react-i18next";
 import { useAppStore } from "@/components/state-provider";
 import { useToast } from "@/components/toast-provider";
-import { startQuickChat, type QuickChatRepositoryInput } from "@/lib/api/domains/workspace-api";
+import {
+  startQuickChat,
+  getQuickChatRetainedSessionFromError,
+  type QuickChatRepositoryInput,
+} from "@/lib/api/domains/workspace-api";
 import { updateQuickTerminalTab } from "@/lib/api/domains/quick-terminal-api";
 import { ApiError } from "@/lib/api/client";
 import { type PtyTerminalState } from "@/components/settings/pty-terminal-view";
@@ -18,11 +22,6 @@ import { useQuickChatCloseActions, resolveQuickChatTaskId } from "./use-quick-ch
 import { useQuickChatTabOrder } from "./use-quick-chat-tab-order";
 
 const noop = () => {};
-
-async function deleteQuickChatTask(taskId: string) {
-  const { deleteTaskAfterUserAction } = await import("@/lib/api/domains/kanban-api");
-  await deleteTaskAfterUserAction(taskId);
-}
 
 function useQuickChatStore(workspaceId: string) {
   const store = useAppStore(
@@ -44,6 +43,7 @@ function useQuickChatStore(workspaceId: string) {
       removeQuickTerminal: s.removeQuickTerminal,
       renameQuickChatSession: s.renameQuickChatSession,
       openQuickChat: s.openQuickChat,
+      upsertQuickChatSessionFromEvent: s.upsertQuickChatSessionFromEvent,
       applyAgentProfileRecentUse: s.applyAgentProfileRecentUse,
       agentProfiles: s.agentProfiles.items ?? [],
       agentGeneratedTaskTitles: s.userSettings.agentGeneratedTaskTitles,
@@ -160,12 +160,19 @@ async function startQuickChatForAgent(
     ).length + 1;
   // i18n-exempt: persisted as the quick-chat task title, same contract as use-config-chat.ts.
   const initialName = `${agent?.label || "Agent"} - Chat ${sessionCount}`;
-  const response = await startQuickChat(workspaceId, {
-    agent_profile_id: agentId,
-    title: initialName,
-    ...(store.agentGeneratedTaskTitles ? { auto_title: true } : {}),
-    repositories: repositories.length > 0 ? repositories : undefined,
-  });
+  let response;
+  try {
+    response = await startQuickChat(workspaceId, {
+      agent_profile_id: agentId,
+      title: initialName,
+      ...(store.agentGeneratedTaskTitles ? { auto_title: true } : {}),
+      repositories: repositories.length > 0 ? repositories : undefined,
+    });
+  } catch (error) {
+    const retained = getQuickChatRetainedSessionFromError(error);
+    if (!retained) throw error;
+    return { ...retained, name: initialName, agentProfileId: agentId };
+  }
   return {
     sessionId: response.session_id,
     name: initialName,
@@ -179,22 +186,22 @@ async function startQuickChatForAgent(
  * Eager init means the backend boots a real agent process before responding.
  * Aborting the fetch on a rapid second click would NOT stop the backend agent
  * (it's already running by the time the abort lands), and we'd never see the
- * task_id on the FE — orphaning the task. Instead we let every request run
- * to completion and reconcile by request id: if a newer pick superseded this
- * one before the response arrived, we delete the now-orphaned ephemeral task.
+ * task_id on the FE. Every request runs to completion; request ownership
+ * determines activation while late responses reconcile retained tabs.
  *
  * Exported for unit testing — see `use-quick-chat-modal.test.ts`. */
 export function useAgentSelection(workspaceId: string, store: QuickChatStore) {
   const { t } = useTranslation();
-  const { toast } = useToast();
   const [pendingAgentId, setPendingAgentId] = useState<string | null>(null);
-  // Monotonic request id; the latest click "wins" — older responses get
-  // cleaned up if the backend already started their agent.
+  const [setupError, setSetupError] = useState<string | null>(null);
+  // Monotonic request id; the latest click "wins" for activation,
+  // while earlier responses upsert without activating.
   const latestRequestId = useRef(0);
 
   const reset = useCallback(() => {
     latestRequestId.current += 1;
     setPendingAgentId(null);
+    setSetupError(null);
   }, []);
 
   const handleSelectAgent = useCallback(
@@ -202,13 +209,22 @@ export function useAgentSelection(workspaceId: string, store: QuickChatStore) {
       const requestId = ++latestRequestId.current;
       const setupSessionId = store.activeSessionId;
       setPendingAgentId(agentId);
+      setSetupError(null);
       try {
         const result = await startQuickChatForAgent(workspaceId, agentId, store, repositories);
         if (latestRequestId.current !== requestId) {
-          // A newer pick superseded us — the backend already booted this
-          // agent, so delete the orphan task. Best-effort: ignore failures.
-          deleteQuickChatTask(result.taskId).catch((err) =>
-            console.error("Failed to clean up superseded quick chat task:", err),
+          // A newer pick superseded us for activation — upsert the session
+          // into the workspace tabs without selecting it or deleting it.
+          store.upsertQuickChatSessionFromEvent({
+            sessionId: result.sessionId,
+            workspaceId,
+            agentProfileId: result.agentProfileId,
+            kind: "chat",
+            taskId: result.taskId,
+            name: result.name,
+          });
+          recordAgentProfileRecentUseBestEffort("quick_chat", result.agentProfileId, (record) =>
+            store.applyAgentProfileRecentUse("quick_chat", record),
           );
           return;
         }
@@ -228,21 +244,18 @@ export function useAgentSelection(workspaceId: string, store: QuickChatStore) {
         store.renameQuickChatSession(result.sessionId, result.name);
       } catch (error) {
         if (latestRequestId.current !== requestId) return;
-        toast({
-          title: t("chat:failedToStartQuickChat"),
-          description: error instanceof Error ? error.message : t("chat:unknownError"),
-          variant: "error",
-        });
+        const errorMessage = error instanceof Error ? error.message : t("chat:unknownError");
+        setSetupError(errorMessage);
       } finally {
         if (latestRequestId.current === requestId) {
           setPendingAgentId(null);
         }
       }
     },
-    [workspaceId, store, toast],
+    [workspaceId, store, t],
   );
 
-  return { pendingAgentId, reset, handleSelectAgent };
+  return { pendingAgentId, setupError, reset, handleSelectAgent };
 }
 
 type QuickChatTabActionsOptions = {
@@ -400,6 +413,7 @@ export function useQuickChatModal(workspaceId: string, onSupersedeConfigStart = 
   const [setupKey, setSetupKey] = useState(0);
   const {
     pendingAgentId,
+    setupError,
     reset,
     handleSelectAgent: doSelectAgent,
   } = useAgentSelection(workspaceId, store);
@@ -449,6 +463,7 @@ export function useQuickChatModal(workspaceId: string, onSupersedeConfigStart = 
       activeSession && isQuickChatSetupSessionId(activeSession.sessionId),
     ),
     pendingAgentId,
+    setupError,
     handleSelectAgent,
   };
 }

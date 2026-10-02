@@ -396,5 +396,8 @@ Each failure is defined at its owning phase above. Accepted membership survives 
 
 ## Implementation plan
 
+Exact-path polling follows the [dirty-path monitor supplement](workspace-dirty-path-monitor.md)
+and its [repair package](../../../plans/workspace-dirty-path-monitor/plan.md).
+
 Original delivery is recorded in [Changes panel Git refresh](../../../plans/changes-panel-git-refresh/plan.md).
 The draft [loading and recovery follow-up](../../../plans/changes-loading-feedback/plan.md) owns the new toolbar and delayed-retry behavior.

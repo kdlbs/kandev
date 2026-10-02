@@ -2499,6 +2499,131 @@ func (m *Manager) markCompletedWithTurnIDAndAttempt(
 	return nil
 }
 
+type promptErrorCompletionPublication struct {
+	execution   *AgentExecution
+	eventType   string
+	payload     AgentEventPayload
+	exitCode    int
+	errorMsg    string
+	wasShutdown bool
+}
+
+// preparePromptErrorCompletion applies a numbered prompt's terminal state
+// without publishing synchronously. The caller holds promptLifecycleMu, so
+// admission cannot pass the completion fence before this state is visible.
+func (m *Manager) preparePromptErrorCompletion(
+	execution *AgentExecution,
+	event *agentctlclient.AgentEvent,
+	failureEvidence *PromptAttemptEvidence,
+) (*promptErrorCompletionPublication, error) {
+	errorMsg := extractErrorMessage(event)
+	wasShutdown := m.IsShuttingDown()
+	eventType := events.AgentFailed
+	terminalStatus := v1.AgentStatusFailed
+	if wasShutdown {
+		eventType = events.AgentStopped
+		terminalStatus = v1.AgentStatusStopped
+	}
+	if failureEvidence == nil {
+		failureEvidence = ensureCompletionFailureEvidence(execution, 1, errorMsg, nil)
+	}
+	if wasShutdown {
+		failureEvidence = nil
+	}
+
+	publication := &promptErrorCompletionPublication{
+		execution:   execution,
+		eventType:   eventType,
+		exitCode:    1,
+		errorMsg:    errorMsg,
+		wasShutdown: wasShutdown,
+	}
+	applied := false
+	err := m.executionStore.WithLock(execution.ID, func(current *AgentExecution) {
+		if current != execution || isTerminalStatus(current.Status) {
+			return
+		}
+		now := time.Now()
+		exitCode := publication.exitCode
+		current.FinishedAt = &now
+		current.ExitCode = &exitCode
+		current.ErrorMessage = publication.errorMsg
+		current.Status = terminalStatus
+
+		payload := cloneTerminalAgentEventPayload(
+			newAgentEventPayloadWithTurnIDAndEvidence(current, event.TurnID, failureEvidence),
+		)
+		if event.AttemptID != "" {
+			payload.AttemptID = event.AttemptID
+		}
+		publication.payload = payload
+		applied = true
+	})
+	if err != nil {
+		return nil, err
+	}
+	if !applied {
+		m.logger.Debug("ignoring stale/duplicate prompt error completion",
+			zap.String("execution_id", execution.ID),
+			zap.String("current_status", string(execution.Status)))
+		return nil, nil
+	}
+	return publication, nil
+}
+
+func cloneTerminalAgentEventPayload(payload AgentEventPayload) AgentEventPayload {
+	if payload.FinishedAt != nil {
+		finishedAt := *payload.FinishedAt
+		payload.FinishedAt = &finishedAt
+	}
+	if payload.ExitCode != nil {
+		exitCode := *payload.ExitCode
+		payload.ExitCode = &exitCode
+	}
+	if payload.ProviderError != nil {
+		providerError := *payload.ProviderError
+		if payload.ProviderError.ResetAt != nil {
+			resetAt := *payload.ProviderError.ResetAt
+			providerError.ResetAt = &resetAt
+		}
+		payload.ProviderError = &providerError
+	}
+	return payload
+}
+
+// finishPromptErrorCompletion performs terminal side effects and publishes the
+// identity/evidence snapshot captured while promptLifecycleMu was held.
+func (m *Manager) finishPromptErrorCompletion(publication *promptErrorCompletionPublication) {
+	execution := publication.execution
+	if publication.wasShutdown {
+		m.logger.Warn("error completion during shutdown, treating as cancellation",
+			zap.String("execution_id", execution.ID),
+			zap.String("task_id", execution.TaskID),
+			zap.Int("exit_code", publication.exitCode),
+			zap.String("error", publication.errorMsg))
+	} else {
+		m.logger.Warn("error completion received, marking execution as failed",
+			zap.String("execution_id", execution.ID),
+			zap.String("task_id", execution.TaskID),
+			zap.String("error", publication.errorMsg),
+			zap.String("status", publication.payload.Status),
+			zap.String("agent_command", execution.AgentCommand),
+			zap.String("acp_session_id", execution.ACPSessionID))
+	}
+
+	execution.EndSessionSpan()
+	m.persistExecutorRunning(context.Background(), execution)
+	m.releaseActivity(executionActivityKey(execution.ID))
+	if !publication.wasShutdown {
+		m.logger.Info("execution completed",
+			zap.String("execution_id", execution.ID),
+			zap.Int("exit_code", publication.exitCode),
+			zap.String("status", publication.payload.Status))
+		m.classifyAndMaybeRemediate(execution, publication.exitCode, publication.errorMsg)
+	}
+	m.eventPublisher.publishAgentEventPayload(context.Background(), publication.eventType, publication.payload)
+}
+
 func ensureCompletionFailureEvidence(
 	execution *AgentExecution,
 	exitCode int,

@@ -151,12 +151,13 @@ func isUninitializedStartupExecution(execution *AgentExecution) bool {
 	return execution.Status == v1.AgentStatusStarting || execution.Status == v1.AgentStatusRunning
 }
 
-// handleCompleteEventMarkState marks the execution state after a complete event:
-// failed+removed on error, ready on success.
 func isUninitializedStartupFailure(execution *AgentExecution, event *agentctl.AgentEvent) bool {
 	return event != nil && event.PromptGeneration == 0 && isUninitializedStartupExecution(execution)
 }
 
+// handleCompleteEventMarkState marks the execution state after a complete event.
+// Its success path runs under the event's startup callback lease and must keep
+// using lease-free helpers through readiness publication.
 func (m *Manager) handleCompleteEventMarkState(
 	execution *AgentExecution,
 	event *agentctl.AgentEvent,
@@ -222,7 +223,9 @@ func (m *Manager) handleCompleteEventMarkState(
 		}
 		m.eventPublisher.PublishAgentEvent(context.Background(), events.AgentRunning, execution)
 	}
-	if err := m.MarkReady(execution.ID); err != nil {
+	if err := m.markReadyEventForExecution(
+		context.Background(), execution, events.AgentReady, false, event.AttemptID,
+	); err != nil {
 		m.logger.Error("failed to mark execution as ready after complete",
 			zap.String("execution_id", execution.ID),
 			zap.Error(err))
@@ -341,7 +344,33 @@ func (m *Manager) finishPromptCompletion(
 	claim promptCompletionClaim,
 	failureEvidence *PromptAttemptEvidence,
 ) {
+	if claim.locked && event.PromptGeneration != 0 && isError {
+		setProviderError(execution, event.ProviderError)
+		publication, err := m.preparePromptErrorCompletion(execution, event, failureEvidence)
+		if err != nil {
+			m.logger.Error("failed to mark execution as failed after error completion",
+				zap.String("execution_id", execution.ID),
+				zap.Error(err))
+		}
+
+		// Publish the terminal state before waking a waiter or releasing the
+		// dispatch barrier. Admission must observe FAILED/STOPPED after this
+		// generation's completion signal.
+		handleCompleteEventSignalLeased(execution, event, isError)
+		execution.dispatchedPromptPending.Store(false)
+		execution.promptLifecycleMu.Unlock()
+		if publication != nil {
+			m.finishPromptErrorCompletion(publication)
+		}
+		return
+	}
+
 	handleCompleteEventSignalLeased(execution, event, isError)
+	if claim.locked && event.PromptGeneration != 0 {
+		// Finalization and signal delivery are complete, so a later prompt can
+		// pass the dispatch barrier after this lifecycle lease ends.
+		execution.dispatchedPromptPending.Store(false)
+	}
 	if event.PromptGeneration == 0 || isError {
 		if isError {
 			setProviderError(execution, event.ProviderError)
