@@ -12,6 +12,8 @@ import (
 	acp "github.com/coder/acp-go-sdk"
 )
 
+const mockContinuationOutputScenario = "output"
+
 type mockContinuationEpisode struct {
 	Scenario        string `json:"scenario"`
 	Original        int    `json:"original"`
@@ -28,7 +30,7 @@ func (a *mockAgent) handleMockInterruptionContinuation(ctx context.Context, sid 
 	scenario := strings.TrimPrefix(prompt, "/continuation-")
 	if strings.HasPrefix(prompt, "/continuation-") {
 		switch scenario {
-		case "output", "read", "write", "pending", "unknown", "read-hold", "read-restore-transient", "read-restore-hard", "read-ambiguous":
+		case mockContinuationOutputScenario, "read", "write", "pending", "unknown", "read-hold", "read-restore-transient", "read-restore-hard", "read-ambiguous":
 			return a.emitMockInterruption(ctx, sid, scenario)
 		}
 	}
@@ -99,7 +101,7 @@ func (a *mockAgent) emitMockInterruption(ctx context.Context, sid acp.SessionId,
 	}
 	e := &emitter{ctx: ctx, conn: a.conn, sid: sid}
 	e.text("Mock interruption: partial history preserved.\n")
-	if scenario != "output" {
+	if scenario != mockContinuationOutputScenario {
 		kind := acp.ToolKindRead
 		if scenario == "write" {
 			kind = acp.ToolKindEdit

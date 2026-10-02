@@ -50,8 +50,7 @@ func (s *Service) retryContinuationPreparation(ctx context.Context, taskID, sess
 	if classified.Confidence != routingerr.ConfHigh || routingerr.Decide(routingerr.ContextKanban, classified, time.Now().UTC()) != routingerr.DecisionShortRetry {
 		return false
 	}
-	executionID, lookupErr := s.agentManager.GetExecutionIDForSession(ctx, sessionID)
-	if executionID != "" || (lookupErr != nil && !agentruntime.IsNotFound(lookupErr) && !errors.Is(lookupErr, agentruntime.ErrNoExecutionForSession)) {
+	if !s.continuationExecutionAbsent(ctx, sessionID) {
 		return false
 	}
 	guard, release := s.acquireCancelInFlightGuard(sessionID)
@@ -84,8 +83,13 @@ func (s *Service) retryContinuationPreparation(ctx context.Context, taskID, sess
 	data := watcher.AgentEventData{TaskID: taskID, SessionID: sessionID, RecoveryMode: recoveryModeContinue}
 	data.ProviderError = &streams.ProviderError{ProviderID: next.providerID, ModelID: next.modelID}
 	s.createTransientRetryStatusMessageLocked(state, context.WithoutCancel(ctx), data, classified, attempt, delay, retryAt)
-	s.armTransientRetryEntryLocked(taskID, sessionID, executionID, next, delay)
+	s.armTransientRetryEntryLocked(taskID, sessionID, "", next, delay)
 	return true
+}
+
+func (s *Service) continuationExecutionAbsent(ctx context.Context, sessionID string) bool {
+	executionID, err := s.agentManager.GetExecutionIDForSession(ctx, sessionID)
+	return executionID == "" && (err == nil || agentruntime.IsNotFound(err) || errors.Is(err, agentruntime.ErrNoExecutionForSession))
 }
 
 func (s *Service) createContinuationRecoveryMessage(ctx context.Context, data watcher.AgentEventData, entry *transientRetryEntry) error {

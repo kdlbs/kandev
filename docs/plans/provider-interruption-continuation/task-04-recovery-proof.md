@@ -142,3 +142,19 @@ shutdown notice persistence, and finishing startup ownership at acceptance.
 Scoped race tests and final desktop integration checks pass after these fixes.
 
 PR review remediation covers fixture prefix dispatch, cancellation, episode cleanup, setup-error preservation, and failed native-restore worktree release. Focused race tests pass. The real checkout-release regression passes in Linux Docker; macOS sandbox checkout restrictions prevented reaching that boundary on the host.
+
+CI static-check remediation extracts the existing execution-absence predicate
+and gives the mock output scenario its own constant, preserving behavior.
+Focused orchestrator/mock race regressions pass. The full backend CI command
+passes on macOS with zero issues:
+
+```bash
+# From apps/backend; use the authoritative fetched base.
+golangci-lint run ./... --new-from-rev=8403b464b42719d4f0357c9376a33a11a88f7416 --timeout=10m
+```
+
+The Linux attempt ended on Docker storage I/O errors; the first host attempt
+exhausted temporary space. Resetting this task's generated Go cache recovered
+about 50GB, and the host rerun passed. Shared Docker data was not altered.
+The UI is unchanged by this cleanup, so the screenshots from the UI fixup
+commit remain representative.
