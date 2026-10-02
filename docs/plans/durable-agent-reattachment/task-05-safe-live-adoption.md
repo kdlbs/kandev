@@ -621,7 +621,7 @@ GOCACHE=/tmp/kandev-go-build-preserved-20261001 pnpm e2e:run --host --project ch
 ```
 
 Final fixture validation passed six mobile cases (55.5s) and twelve desktop cases
-(1.8m), with three repetitions and zero retries. Targeted ESLint and Prettier
+(1.9m), with three repetitions and zero retries. Targeted ESLint and Prettier
 checks passed. The original hosted run reached terminal state with 55 passing
 checks and eight failed checks (six browser shards and their two report gates);
 its snapshot was complete with no API errors.
@@ -632,6 +632,28 @@ GOCACHE=/tmp/kandev-go-build-preserved-20261001 pnpm e2e:run --host --project mo
 GOCACHE=/tmp/kandev-go-build-preserved-20261001 pnpm e2e:run --host --project chromium tests/kanban/swimlane-height.spec.ts tests/settings/hide-disabled-agent-profiles-nav.spec.ts tests/task/task-create-workflow-step-previews.spec.ts tests/workflow/workflow-step-proceed.spec.ts -- --grep 'live content grows|off by default|scrolls ten|preserves session settings' --repeat-each=3 --retries=0
 pnpm exec eslint e2e/tests/settings/mobile-workspace-repository-sets.spec.ts e2e/tests/settings/hide-disabled-agent-profiles-nav.spec.ts e2e/tests/task/task-create-workflow-step-previews.spec.ts e2e/tests/task/task-navigation-helpers.ts e2e/tests/task/task-navigation-responsiveness.spec.ts e2e/tests/workflow/workflow-step-proceed.spec.ts
 pnpm exec prettier --check e2e/tests/settings/mobile-workspace-repository-sets.spec.ts e2e/tests/settings/hide-disabled-agent-profiles-nav.spec.ts e2e/tests/task/task-create-workflow-step-previews.spec.ts e2e/tests/task/task-navigation-helpers.ts e2e/tests/task/task-navigation-responsiveness.spec.ts e2e/tests/workflow/workflow-step-proceed.spec.ts
+cd ../..
+python3 scripts/list-docs.py validate
+python3 scripts/lint-spec-files.py --all
+git diff --check
+```
+
+### Latest Git metadata and ACP mode integration, 2026-10-02
+
+Rebased onto main `8403b464b42719d4f0357c9376a33a11a88f7416`, including Git diff
+status metadata and confirmed Auggie mode startup. All 83 branch commits were
+preserved without new conflicts. Range-diff changed only documentation context
+headers. Catalog validation, full spec lint, and whitespace checks passed.
+Affected backend packages passed with race detection: ACP (28.905s), process
+(208.755s), and lifecycle (133.990s). A fresh managed browser build passed the
+context-reset persistence case with zero retries (32.7s). Publication and final
+exact-head hosted checks remain the next gates.
+
+```bash
+cd apps/backend
+GOCACHE=/tmp/kandev-go-build-preserved-20261001 go test -trimpath -race ./internal/agentctl/server/adapter/transport/acp ./internal/agentctl/server/process ./internal/agent/runtime/lifecycle
+cd ../web
+GOCACHE=/tmp/kandev-go-build-preserved-20261001 pnpm e2e:run --host --project chromium tests/workflow/workflow-step-proceed.spec.ts -- --grep 'preserves session settings across context reset' --retries=0
 cd ../..
 python3 scripts/list-docs.py validate
 python3 scripts/lint-spec-files.py --all
