@@ -189,6 +189,12 @@ Use **New Task** in the sidebar. In an open task, the **Task** split button also
 
    On mobile, **Plan mode** and **Create only** provide the same behavior as the two non-primary actions.
 
+When you choose **Remote**, Kandev can reuse an available matching checkout.
+If a previously registered local checkout folder was deleted, it uses another
+available source or creates a managed clone. The original local registration
+and its existing task associations remain unchanged; selecting that local
+repository explicitly still requires its checkout to be available.
+
 ### Reduce downloads for a large remote repository
 
 In **New Task → Remote**, select a repository and open its gear (**Repository options**).

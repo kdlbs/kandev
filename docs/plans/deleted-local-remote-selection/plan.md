@@ -1,0 +1,135 @@
+---
+created: 2026-10-02
+status: implemented
+requirements:
+  - REQ-WORKSPACES-REMOTE-RESOLUTION-001
+system_design:
+  - ../../specs/workspaces/system-design/remote-repository-resolution.md
+legacy_specs: []
+---
+
+# Implementation plan: Remote selection after local checkout deletion
+
+## Overview
+
+Correct remote repository selection so a deleted local checkout does not strand
+new tasks. One sequential work order implements the selector and proves the
+service-to-preparation flow. Production changes and regression coverage are complete.
+
+The workspace system owns the selection contract because it owns repository
+registrations. Existing task-worktree recovery contracts remain separate.
+
+## Confirmed root cause and reproduction
+
+`FindOrCreateRepository` selects the earliest provider-identity row without
+checking its local availability. After a local checkout is manually deleted,
+`ResolveRepositoryRef` still returns that local row. The executor intentionally
+skips cloning `source_type=local`; preparation therefore receives its stale path.
+
+On 2026-10-02, temporary
+`TestRepro_RemoteSelectionAdoptsDeletedLocalCheckout` created a real Git
+checkout and registered it through `CreateRepository`, removed the directory,
+then resolved `https://github.com/acme/widgets.git`. It failed the expectation
+that remote selection supplies a cloneable source: the same ID returned with
+`created=false` and `source=local`. The throwaway file was removed after diagnosis.
+
+Both existing executor controls passed:
+`TestResolveTaskRepoInfo_ReClonesWhenLocalPathIsNotAGitRepo` and
+`TestResolveTaskRepoInfo_DoesNotReCloneLocalSourceTypeRepo`. This locates the
+correction in selection, without weakening local ownership in the executor.
+
+## Scope
+
+### In scope
+
+- Remote locator resolution for a saved checkout directory that is absent.
+- Eligible matching candidate selection and managed registration fallback.
+- Preservation of skipped local registrations and explicit local behavior.
+- Identity isolation, repeat/concurrent selection, and launch preparation proof.
+
+### Out of scope
+
+- Existing materialized worktree recovery and missing local Git objects.
+- Recreating a user's local path or changing its registration/source type.
+- New UI, APIs, clone protocols, credentials, flags, or database migrations.
+- Repairing invalid checkouts and inaccessible mounts.
+
+## Technical approach
+
+Extract remote-candidate eligibility and fallback lookup into a small private
+helper in `internal/task/service/remote_repository_resolution.go`. Integrate it
+into `FindOrCreateRepository` in `service_resources.go` under `repoResolveMu`.
+Only requests with a remote URL and no explicit local path use this policy.
+Keep existing field backfill, creation, and rollback ownership semantics.
+
+After the earliest local candidate is proven absent, enumerate raw workspace
+rows using exact provider identity semantics, deterministically select an
+eligible row, or use the current provider-row creation path. Repeated calls
+must find a previously created managed row behind the stale local candidate.
+
+| Input/provider shape | Intended behavior | Evidence |
+| --- | --- | --- |
+| GitHub HTTPS or SSH, including `github_url` compatibility | Skip deleted local match; reuse/create managed row | Service table tests and backend integration |
+| Built-in GitLab, including trusted self-managed host | Same eligibility with normalized host isolation | Service table tests |
+| Azure DevOps locator | Same selection; retain existing clone-auth path | Service resolution test; no new PAT transport behavior |
+| Trusted plugin descriptor | Preserve scope/immutable ID and exact clone URL | Scoped candidate tests |
+| Explicit local path or repository ID | Existing ownership behavior | Existing controls and service negative cases |
+| Permission, invalid Git, or changed canonical identity | Return inspection failure without modifying local registration | Focused filesystem cases |
+| Unsupported or untrusted provider locator | Existing resolver rejection | Existing remote resolution tests |
+
+## Tests
+
+In `remote_repository_resolution_test.go`, add
+`TestResolveRepositoryRef_RemoteSelectionSkipsDeletedLocalCheckout` as the
+permanent version of the failing reproduction (AC-001.1, .3).
+Use a real checkout and deletion, not a fabricated missing path alone.
+
+Add cases for live local reuse, deleted local plus live local, deleted local
+plus managed provider, only deleted local matches, repeat/concurrent fallback,
+explicit local/ID preservation, canonical/permission validation, and host/scope/
+workspace isolation (AC-001.2-.5). Assert sentinels and original dependent rows
+so identical data cannot mask selection of the wrong source.
+
+## End-to-end evidence
+
+Add `TestRemoteSelection_DeletedLocalCheckoutPreparesManagedWorkspace` in
+`internal/orchestrator/executor/executor_remote_selection_integration_test.go`
+(AC-001.1, .3, .6). Construct a real task service and SQLite repository, resolve
+the remote locator, persist its task attachment, and pass it through executor
+repository preparation and real worktree creation. A controlled clone adapter
+uses a disposable local bare origin; the final agent boundary uses an existing
+fake. Assert clone/branch/checkout success and original-directory absence.
+Add a clone-failure case that proves no agent startup and no local-path mutation.
+This is backend end-to-end evidence; no rendered controls change, so a browser
+test would add an unrelated boundary.
+
+## Work orders
+
+- [x] [Task 01: Select a cloneable source after local deletion](task-01-select-available-remote-source.md)
+
+## Verification results
+
+- Temporary service reproduction: failed as expected, exposing deleted-local adoption.
+- Two targeted executor controls: passed.
+- Permanent deletion regression: failed before the correction and passed afterward.
+- Final race checks: both `internal/task/service` and `internal/orchestrator/executor` passed.
+- Scoped fallback race regression: passed after adding explicit same-host,
+  wrong-scope, unscoped-legacy, and wrong-immutable-ID candidates.
+- Backend integration: managed cloning, real worktree creation, requested base
+  commit, and agent startup passed; authentication failure and cancellation
+  prevented agent startup and preserved the original local registration.
+- Changed-code lint: zero issues for both affected packages.
+- Specification catalog validation, 36 specification-linter tests, full spec lint,
+  62 public-doc validator tests, validation of 47 public docs pages, PR-documentation
+  coverage (`covered`), and whitespace checks passed.
+
+Public recovery guidance was added to `docs/public/tasks-and-workflows.md`.
+The paired requirement and design are active/current.
+
+## Risks
+
+- Raw workspace enumeration must exactly preserve scoped and host identity rules.
+- Missing paths can represent unmounted storage; preserve the original local row.
+- Filesystem disappearance after selection can still fail ordinary preparation.
+- Fallback must not copy local secrets or machine-specific scripts.
+- Rollback must only delete registrations actually created by that request.

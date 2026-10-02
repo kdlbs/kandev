@@ -1297,10 +1297,7 @@ func (s *Service) FindOrCreateRepository(ctx context.Context, req *FindOrCreateR
 	req.ProviderName = strings.TrimSpace(req.ProviderName)
 	req.RemoteURL = strings.TrimSpace(req.RemoteURL)
 	req.ProviderHost = normalizeProviderHost(req.Provider, req.ProviderHost)
-	existing, err := s.repoEntities.GetRepositoryByProviderIdentity(ctx, models.ProviderRepositoryIdentity{
-		WorkspaceID: req.WorkspaceID, Provider: req.Provider, Scope: req.ProviderScope,
-		RepositoryID: req.ProviderRepoID, Host: req.ProviderHost, Owner: req.ProviderOwner, Name: req.ProviderName,
-	})
+	existing, err := s.findRepositoryForRemoteSelection(ctx, req)
 	if err != nil {
 		return nil, false, fmt.Errorf("lookup repository: %w", err)
 	}
