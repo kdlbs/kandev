@@ -4,10 +4,34 @@ import { test, expect } from "../../fixtures/test-base";
 import { openQuickChatSetup, selectAgentIfNeeded } from "./quick-chat-helpers";
 import { completeQuickChatOpening, expectTouchTarget } from "./quick-chat-opening-composer-helpers";
 
+function findMaterializedAttachment(root: string, name: string): string | null {
+  const pending: string[] = [root];
+  while (pending.length > 0) {
+    const directory = pending.pop();
+    if (!directory) continue;
+    let entries: fs.Dirent[];
+    try {
+      entries = fs.readdirSync(directory, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+    for (const entry of entries) {
+      const fullPath = path.join(directory, entry.name);
+      if (entry.isDirectory()) {
+        if (entry.name !== "node_modules" && entry.name !== ".git") pending.push(fullPath);
+      } else if (entry.isFile() && entry.name === name && fullPath.includes(`${path.sep}.kandev`)) {
+        return fullPath;
+      }
+    }
+  }
+  return null;
+}
+
 test.describe("Quick Chat opening composer", () => {
   test("starts the opening prompt from the centered desktop composer", async ({
     testPage,
     apiClient,
+    backend,
   }, testInfo) => {
     await testPage.setViewportSize({ width: 1440, height: 900 });
     await testPage.goto("/");
@@ -66,14 +90,19 @@ test.describe("Quick Chat opening composer", () => {
     await testPage.setViewportSize({ width: 768, height: 850 });
     await expect.poll(async () => (await narrowAgent.boundingBox())?.height ?? 0).toBeLessThan(44);
 
-    await testPage.setViewportSize({ width: 1440, height: 560 });
+    await testPage.setViewportSize({ width: 1440, height: 400 });
+    await expect
+      .poll(() => scrollRegion.evaluate((element) => element.scrollHeight - element.clientHeight), {
+        timeout: 5_000,
+      })
+      .toBeGreaterThan(0);
     const scrollMetrics = await scrollRegion.evaluate((element) => ({
       scrollHeight: element.scrollHeight,
       clientHeight: element.clientHeight,
       overflowY: getComputedStyle(element).overflowY,
     }));
     expect(scrollMetrics.overflowY).toBe("auto");
-    expect(scrollMetrics.scrollHeight).toBeGreaterThanOrEqual(scrollMetrics.clientHeight);
+    expect(scrollMetrics.scrollHeight).toBeGreaterThan(scrollMetrics.clientHeight);
     await expect(dialog.getByTestId("quick-chat-send")).toBeVisible();
 
     const prompt = "Explain the startup path in this repository";
@@ -89,6 +118,18 @@ test.describe("Quick Chat opening composer", () => {
       },
       expectedAttachmentName: attachmentName,
     });
+
+    await expect
+      .poll(() => findMaterializedAttachment(backend.tmpDir, attachmentName) !== null, {
+        timeout: 30_000,
+        message: "Wait for the opening attachment to be materialized into the session",
+      })
+      .toBe(true);
+    const materialized = findMaterializedAttachment(backend.tmpDir, attachmentName);
+    if (materialized === null) throw new Error("Materialized opening attachment disappeared");
+    expect(fs.readFileSync(materialized, "utf8")).toBe(
+      "Follow the native launcher into the task session.",
+    );
   });
 
   test("keeps a failed creation draft and retries without duplicating the opening message", async ({

@@ -80,6 +80,9 @@ describe("Quick Chat opening payload routing", () => {
       WORKSPACE_ID,
       expect.not.objectContaining({ prompt: openingPayload.message }),
     );
+    const structuredRequest = startQuickChatMock.mock.calls[1]?.[1] as Record<string, unknown>;
+    expect(structuredRequest).not.toHaveProperty("prompt");
+    expect(structuredRequest).not.toHaveProperty("attachments");
     expect(store.setQuickChatInitialPrompt).toHaveBeenCalledWith("session-2", openingPayload);
   });
 });

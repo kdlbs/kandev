@@ -17,8 +17,10 @@ const AGENT_A_ID = "agent-a";
 const AGENT_B_ID = "agent-b";
 const SEND_TEST_ID = "quick-chat-send";
 const DESCRIPTION_TEST_ID = "task-description-input";
+const PROMPT_MESSAGE = "Review this code";
 let defaultAgentId = AGENT_A_ID;
 let defaultConfigAgentId = AGENT_B_ID;
+let chatSubmitKey: "enter" | "cmd_enter" = "enter";
 let agentProfiles: Array<{ id: string; enabled?: boolean }> = [
   { id: AGENT_A_ID },
   { id: AGENT_B_ID },
@@ -29,6 +31,7 @@ vi.mock("@/components/state-provider", () => ({
   useAppStore: (selector: (state: unknown) => unknown) =>
     selector({
       features: { dynamicAgentRouting: true },
+      userSettings: { chatSubmitKey },
       agentProfiles: { items: agentProfiles },
       workspaces: {
         items: [
@@ -58,6 +61,7 @@ vi.mock("@/components/task-create-dialog-selectors", () => ({
     descriptionValueRef,
     onDescriptionValueChange,
     onAttachmentsChange,
+    onKeyDown,
     toolbarActions,
   }: {
     initialDescription: string;
@@ -65,6 +69,7 @@ vi.mock("@/components/task-create-dialog-selectors", () => ({
     descriptionValueRef: React.RefObject<TaskFormInputsHandle | null>;
     onDescriptionValueChange?: (message: string) => void;
     onAttachmentsChange?: (attachments: FileAttachment[]) => void;
+    onKeyDown?: (event: React.KeyboardEvent<HTMLTextAreaElement>) => void;
     toolbarActions?: ReactNode;
   }) => {
     const [attachments] = useState(initialAttachments ?? []);
@@ -85,6 +90,7 @@ vi.mock("@/components/task-create-dialog-selectors", () => ({
           data-testid={DESCRIPTION_TEST_ID}
           defaultValue={initialDescription}
           onChange={(event) => onDescriptionValueChange?.(event.target.value)}
+          onKeyDown={onKeyDown}
         />
         {toolbarActions}
       </div>
@@ -193,6 +199,7 @@ function QuickChatSetupHarness({
 beforeEach(() => {
   defaultAgentId = AGENT_A_ID;
   defaultConfigAgentId = AGENT_B_ID;
+  chatSubmitKey = "enter";
   agentProfiles = [{ id: AGENT_A_ID }, { id: AGENT_B_ID }];
   vi.clearAllMocks();
 });
@@ -226,7 +233,7 @@ describe("QuickChatSetup", () => {
     const send = screen.getByTestId(SEND_TEST_ID) as HTMLButtonElement;
     expect(send.disabled).toBe(true);
     fireEvent.change(screen.getByTestId(DESCRIPTION_TEST_ID), {
-      target: { value: "Review this code" },
+      target: { value: PROMPT_MESSAGE },
     });
     expect(send.disabled).toBe(false);
     fireEvent.click(send);
@@ -234,7 +241,30 @@ describe("QuickChatSetup", () => {
     expect(props.onStartQuickChat).toHaveBeenCalledWith(
       AGENT_A_ID,
       [],
-      expect.objectContaining({ message: "Review this code", clientMessageId: expect.any(String) }),
+      expect.objectContaining({ message: PROMPT_MESSAGE, clientMessageId: expect.any(String) }),
+    );
+  });
+
+  it("uses the configured chat submit key and keeps modified or composing Enter in the draft", async () => {
+    chatSubmitKey = "cmd_enter";
+    render(<QuickChatSetupHarness />);
+    const input = screen.getByTestId(DESCRIPTION_TEST_ID);
+    fireEvent.change(input, { target: { value: PROMPT_MESSAGE } });
+
+    fireEvent.keyDown(input, { key: "Enter" });
+    fireEvent.keyDown(input, { key: "Enter", ctrlKey: true, shiftKey: true });
+    fireEvent.keyDown(input, { key: "Enter", ctrlKey: true, altKey: true });
+    fireEvent.keyDown(input, { key: "Enter", ctrlKey: true, repeat: true });
+    fireEvent.keyDown(input, { key: "Enter", ctrlKey: true, isComposing: true, keyCode: 229 });
+
+    expect(props.onStartQuickChat).not.toHaveBeenCalled();
+
+    fireEvent.keyDown(input, { key: "Enter", ctrlKey: true });
+    await waitFor(() => expect(props.onStartQuickChat).toHaveBeenCalledOnce());
+    expect(props.onStartQuickChat).toHaveBeenCalledWith(
+      AGENT_A_ID,
+      [],
+      expect.objectContaining({ message: PROMPT_MESSAGE }),
     );
   });
 

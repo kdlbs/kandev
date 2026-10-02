@@ -65,6 +65,7 @@ function useInputHandle(
   inputRef: React.RefObject<TipTapInputHandle | null>,
   getAttachments: () => MessageAttachment[],
   clearAcceptedPayload: NonNullable<ChatInputContainerHandle["clearAcceptedPayload"]>,
+  restoreStagedAttachments: NonNullable<ChatInputContainerHandle["restoreStagedAttachments"]>,
 ) {
   const focusInput = useComposerFocus(inputRef);
   useImperativeHandle(
@@ -78,10 +79,11 @@ function useInputHandle(
         inputRef.current?.insertText(text, from, to);
       },
       clearAcceptedPayload,
+      restoreStagedAttachments,
       clear: () => inputRef.current?.clear(),
       getAttachments,
     }),
-    [inputRef, getAttachments, clearAcceptedPayload, focusInput],
+    [inputRef, getAttachments, clearAcceptedPayload, restoreStagedAttachments, focusInput],
   );
 }
 
@@ -256,6 +258,7 @@ export function useChatInputContainer(params: UseChatInputContainerParams) {
     handleChange,
     handleSubmit,
     clearAcceptedPayload: clearAcceptedPayloadFromState,
+    restoreStagedAttachments,
     allItems,
     getAttachments,
     hasPendingAttachmentUploads,
@@ -268,7 +271,7 @@ export function useChatInputContainer(params: UseChatInputContainerParams) {
       clearAcceptedPayloadFromState(payload, resetHeight),
     [clearAcceptedPayloadFromState, resetHeight],
   );
-  useInputHandle(ref, inputRef, getAttachments, clearAcceptedPayload);
+  useInputHandle(ref, inputRef, getAttachments, clearAcceptedPayload, restoreStagedAttachments);
   const addFilesWithHold = useComposerInputPresentation({
     inputRef,
     addFiles,

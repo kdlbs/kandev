@@ -50,7 +50,9 @@ function preferencesStorageKey(workspaceId: string, userId: string): string {
 function restoreSetupAttachments(draftId: string): FileAttachment[] {
   return getChatDraftAttachments(draftId).map((stored) => {
     const restored = restoreAttachmentPreview(stored);
-    const hasRecoverableData = Boolean(restored.attachmentId || restored.data);
+    const expiresAt = restored.expiresAt ? Date.parse(restored.expiresAt) : Number.NaN;
+    const isExpired = Number.isFinite(expiresAt) && expiresAt <= Date.now();
+    const hasRecoverableData = Boolean(restored.data || (restored.attachmentId && !isExpired));
     return {
       ...restored,
       uploadStatus: hasRecoverableData ? "ready" : "failed",

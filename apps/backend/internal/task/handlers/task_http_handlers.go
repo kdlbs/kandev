@@ -2558,16 +2558,40 @@ func (h *TaskHandlers) httpStartConfigChat(c *gin.Context) {
 	sessionID := resp.SessionID
 
 	// If a prompt was provided, launch the agent asynchronously so it starts
-	// processing immediately. The frontend receives WS updates when it starts.
+	// processing immediately. Wait for launch admission before returning so the
+	// frontend does not clear an opening payload that failed to dispatch.
 	if strings.TrimSpace(body.Prompt) != "" {
-		go h.launchConfigChatAgent(
-			context.WithoutCancel(ctx),
-			task.ID,
-			sessionID,
-			agentProfileID,
-			body.Prompt,
-			body.Attachments,
+		launchCtx, cancel := context.WithTimeout(
+			context.WithoutCancel(ctx), constants.AgentLaunchTimeout,
 		)
+		defer cancel()
+		launchResult := make(chan error, 1)
+		go func() {
+			launchResult <- h.launchConfigChatAgent(
+				launchCtx, task.ID, sessionID, agentProfileID, body.Prompt, body.Attachments,
+			)
+		}()
+		if launchErr := <-launchResult; launchErr != nil {
+			rollbackCtx, rollbackCancel := context.WithTimeout(
+				context.WithoutCancel(ctx), constants.TaskDeleteTimeout,
+			)
+			restoreErr := h.service.RestoreLaunchMessageAttachments(
+				rollbackCtx, task.ID, sessionID, body.Attachments,
+			)
+			if restoreErr != nil {
+				h.logger.Error("failed to restore config chat attachments after launch failure",
+					zap.String("task_id", task.ID), zap.Error(restoreErr))
+			} else if deleteErr := h.service.DeleteTaskWithLifecycle(rollbackCtx, task.ID); deleteErr != nil {
+				h.logger.Error("failed to rollback config chat task",
+					zap.String("task_id", task.ID), zap.Error(deleteErr))
+			}
+			rollbackCancel()
+			h.logger.Error("failed to start config chat agent",
+				zap.Error(launchErr), zap.String("task_id", task.ID),
+				zap.String("session_id", sessionID))
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to start session"})
+			return
+		}
 	}
 
 	h.logger.Info("config chat session created",
@@ -2595,12 +2619,8 @@ func (h *TaskHandlers) launchConfigChatAgent(
 	ctx context.Context,
 	taskID, sessionID, agentProfileID, prompt string,
 	attachments []v1.MessageAttachment,
-) {
-	startCtx, cancel := context.WithTimeout(
-		ctx, constants.AgentLaunchTimeout,
-	)
-	defer cancel()
-	launchResp, err := h.orchestrator.LaunchSession(startCtx, &orchestrator.LaunchSessionRequest{
+) error {
+	launchResp, err := h.orchestrator.LaunchSession(ctx, &orchestrator.LaunchSessionRequest{
 		TaskID:         taskID,
 		Intent:         orchestrator.IntentStartCreated,
 		SessionID:      sessionID,
@@ -2609,13 +2629,11 @@ func (h *TaskHandlers) launchConfigChatAgent(
 		Attachments:    attachments,
 	})
 	if err != nil {
-		h.logger.Error("failed to start config chat agent",
-			zap.Error(err), zap.String("task_id", taskID),
-			zap.String("session_id", sessionID))
-		return
+		return err
 	}
 	h.logger.Info("config chat agent started",
 		zap.String("task_id", taskID),
 		zap.String("session_id", launchResp.SessionID),
 		zap.String("execution_id", launchResp.AgentExecutionID))
+	return nil
 }

@@ -52,6 +52,7 @@ export type ChatInputContainerHandle = {
   getSelectionStart: () => number;
   insertText: (text: string, from: number, to: number) => void;
   clearAcceptedPayload?: (payload: Pick<ChatSubmitPayload, "message" | "attachments">) => boolean;
+  restoreStagedAttachments?: (attachments: MessageAttachment[]) => void;
   clear: () => void;
   getAttachments: () => MessageAttachment[];
 };

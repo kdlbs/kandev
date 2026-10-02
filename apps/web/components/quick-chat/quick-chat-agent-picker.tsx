@@ -24,6 +24,8 @@ type QuickChatAgentPickerProps = {
   onValueChange: (value: string) => void;
   disabled: boolean;
   placeholder: string;
+  labelId: string;
+  ariaDescribedBy: string;
 };
 
 export function QuickChatAgentPicker({
@@ -32,6 +34,8 @@ export function QuickChatAgentPicker({
   onValueChange,
   disabled,
   placeholder,
+  labelId,
+  ariaDescribedBy,
 }: QuickChatAgentPickerProps) {
   const { t } = useTranslation();
   const { isMobile } = useResponsiveBreakpoint();
@@ -50,6 +54,7 @@ export function QuickChatAgentPicker({
         triggerClassName="h-9 w-full justify-between border border-input bg-background px-3 shadow-xs hover:bg-accent/50"
         popoverPortal
         testId="agent-profile-selector"
+        ariaDescribedBy={ariaDescribedBy}
       />
     );
   }
@@ -61,7 +66,8 @@ export function QuickChatAgentPicker({
         type="button"
         variant="outline"
         role="combobox"
-        aria-label={t("chat:agentProfile")}
+        aria-labelledby={`${labelId} quick-chat-agent-selected-value`}
+        aria-describedby={ariaDescribedBy}
         aria-haspopup="dialog"
         aria-expanded={open}
         disabled={disabled}
@@ -69,7 +75,12 @@ export function QuickChatAgentPicker({
         className="h-11 min-h-11 w-full justify-between cursor-pointer"
         onClick={() => setOpen(true)}
       >
-        <span className="min-w-0 truncate text-left">{selected?.label ?? placeholder}</span>
+        <span id="quick-chat-agent-selected-value" className="min-w-0 truncate text-left">
+          {selected?.renderTriggerLabel?.() ??
+            selected?.renderLabel?.() ??
+            selected?.label ??
+            placeholder}
+        </span>
         <IconChevronDown className="ml-2 h-4 w-4 shrink-0 opacity-50" aria-hidden />
       </Button>
       <MobilePickerSheet

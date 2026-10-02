@@ -141,8 +141,8 @@ the repository-context requirement with the opening-composer behavior.
 - Mobile Quick Chat and configuration set: 15 tests accounted for; 14 passed
   in the combined run and the migrated configuration-mode picker case passed
   in a focused rerun.
-- Desktop configuration popover: five passed in the combined run and the
-  migrated command-palette setup case passed in a focused rerun.
+- Desktop configuration popover: all six passed in the final focused run,
+  including the command-palette setup case.
 - New desktop and mobile opening-composer E2Es, creation failure/retry, and
   desktop/mobile plugin Quick Chat actions passed. Each opening prompt appeared
   once in persisted session messages.
@@ -151,3 +151,16 @@ the repository-context requirement with the opening-composer behavior.
   `python3 scripts/lint-spec-files.test.py`, and
   `python3 scripts/lint-spec-files.py --all` passed.
 - Documentation-coverage validation and `git diff --check` passed.
+
+Final focused browser checks were run sequentially from `apps/web`:
+
+- `pnpm e2e:run --host --no-build --project chromium e2e/tests/chat/quick-chat-opening-composer.spec.ts`: 2 passed, including staged attachment file-byte verification and desktop 1440x400 overflow.
+- `pnpm e2e:run --host --no-build --project mobile-chrome e2e/tests/chat/mobile-quick-chat-opening-composer.spec.ts`: 1 passed, including 390x560 overflow and Send containment.
+- `pnpm e2e:run --host --no-build --project chromium e2e/tests/chat/agent-profile-recent-use.spec.ts`: 1 passed after closing the setup tab through the supported tab action and reopening from the still-open add menu.
+- `pnpm e2e:run --host --no-build --project mobile-chrome e2e/tests/chat/mobile-agent-goal.spec.ts --grep 'submits once while the message acknowledgement is delayed' --retries=0`: 1 passed; the settled opening-message baseline plus the delayed user send produces exactly one additional `message.add` request.
+- `pnpm e2e:run --host --no-build --project chromium e2e/tests/chat/queue-admission-reliability.spec.ts --grep 'reconciles without duplicating a queued message' --retries=0`: 1 passed. Queue-add diagnostics now reset at fault injection; the targeted lost-response attempt sends once. The initial whole-test count included queue traffic before the fault was armed.
+- `pnpm e2e:run --host --no-build --project mobile-chrome e2e/tests/chat/mobile-queue-admission-reliability.spec.ts --grep 'reconciles through a touch submit' --retries=0`: 1 passed.
+- `pnpm e2e:run --host --no-build --project chromium e2e/tests/plugins/composer-actions.spec.ts --grep 'Quick Chat setup'`: 1 passed.
+- `pnpm e2e:run --host --no-build --project chromium e2e/tests/session/session-resume-prompt-queue.spec.ts`: 3 passed.
+- `pnpm e2e:run --host --no-build --project chromium e2e/tests/settings/config-chat-popover.spec.ts`: 6 passed. `pnpm e2e:run --host --no-build --project mobile-chrome e2e/tests/settings/mobile-config-chat-popover.spec.ts`: 1 passed.
+- The first mobile workflow-preview run reproduced a touch-dismissal defect: a long popover covered the task-description editor, so its tap was intercepted by workflow-option content. The touch popover now exposes a localized 44px close control. `(cd apps/web && pnpm e2e:run --host --project mobile-chrome e2e/tests/task/mobile-task-create-workflow-step-previews.spec.ts --grep 'keeps long workflow previews contained and touch-usable on a phone' --retries=0)` rebuilt the app and passed 1 test. The other long-option scrolling case passed in the initial two-test run.

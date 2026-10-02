@@ -166,3 +166,14 @@ late staged upload instead of restoring it.
 - The setup discard generation regression confirms delayed callbacks cannot
   repopulate a cleared draft.
 - `git diff --check` passed.
+
+The final reduced-viewport browser checks passed with strict scroll evidence:
+
+- `(cd apps/web && pnpm e2e:run --host --no-build --project chromium e2e/tests/chat/quick-chat-opening-composer.spec.ts)` passed 2 tests. The short desktop case uses a 1440x400 viewport and requires the setup scroll region to overflow.
+- `(cd apps/web && pnpm e2e:run --host --no-build --project mobile-chrome e2e/tests/chat/mobile-quick-chat-opening-composer.spec.ts)` passed 1 test. At 390x560, the setup scroll region overflows while Send remains in the viewport; horizontal overflow remains absent.
+
+Final PR review validation also passed:
+
+- `(cd apps/web && pnpm exec vitest run components/quick-chat/use-quick-chat-setup-draft.test.ts lib/local-storage.test.ts components/task-create-dialog-selectors-attachment-lifecycle.test.tsx)`: 3 files, 44 tests passed after extracting stored attachment serialization.
+- `pnpm run typecheck`, `pnpm run i18n:check`, `pnpm run i18n:ratchet`, focused ESLint with zero warnings, and `pnpm run build:vite` passed.
+- `(cd apps/web && pnpm e2e:run --host --project mobile-chrome e2e/tests/task/mobile-task-create-workflow-step-previews.spec.ts --grep 'keeps long workflow previews contained and touch-usable on a phone' --retries=0)` passed 1 test with a fresh Vite bundle after extracting the touch close control.

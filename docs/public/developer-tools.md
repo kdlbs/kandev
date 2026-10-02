@@ -58,7 +58,8 @@ contribute to this activity indicator.
 
 ### Start a chat
 
-1. Enter the opening prompt. Add files when they help explain the request.
+1. Enter a non-empty opening prompt. Add files when they help explain the request. Wait for each
+   file to finish uploading before selecting **Send**. Retry or remove a failed upload first.
 2. Choose an enabled agent profile. Quick Chat uses the workspace default when available.
 3. For an ordinary Quick Chat, add workspace repositories when code context helps.
 4. Choose a branch for each repository. Do not add the same repository twice.
@@ -89,6 +90,7 @@ If **Send** stays disabled, complete these steps:
 - Enter a prompt.
 - Select an enabled profile.
 - Complete every repository and branch row.
+- Wait for each attached file to finish uploading. Retry or remove a failed upload.
 
 If a repository is missing, make sure that it belongs to the current workspace. Then refresh the repository configuration. Use a normal task when the result must remain visible on a board or become a reviewed PR.
 

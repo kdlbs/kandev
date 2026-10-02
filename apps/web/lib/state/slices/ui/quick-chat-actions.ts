@@ -27,6 +27,7 @@ import {
   setChatDraftAttachments,
   setChatDraftText,
 } from "@/lib/local-storage";
+import { toQuickChatDraftAttachments } from "./quick-chat-opening-draft";
 import { getQuickChatSetupSessionId, isQuickChatSetupSessionId } from "./quick-chat-session";
 import type {
   QuickChatInitialPrompt,
@@ -91,23 +92,7 @@ function seedQuickChatOpeningDraft(sessionId: string, prompt: QuickChatInitialPr
     typeof prompt === "string" ? { message: prompt } : prompt;
   if (getChatDraftText(sessionId) || getChatDraftAttachments(sessionId).length > 0) return;
   setChatDraftText(sessionId, payload.message);
-  const attachments =
-    payload.attachments?.flatMap((attachment) => {
-      if (!attachment.attachment_id || !attachment.name) return [];
-      return [
-        {
-          id: attachment.attachment_id,
-          attachmentId: attachment.attachment_id,
-          mimeType: attachment.mime_type,
-          fileName: attachment.name,
-          size: attachment.size_bytes ?? 0,
-          isImage: attachment.type === "image",
-          deliveryMode:
-            attachment.delivery_mode ?? (attachment.type === "image" ? "prompt" : "path"),
-        },
-      ];
-    }) ?? [];
-  setChatDraftAttachments(sessionId, attachments);
+  setChatDraftAttachments(sessionId, toQuickChatDraftAttachments(payload.attachments));
 }
 
 function rememberSelectedSession(

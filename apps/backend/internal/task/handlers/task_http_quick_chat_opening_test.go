@@ -95,13 +95,17 @@ func TestHTTPConfigChatOpeningPayload(t *testing.T) {
 }
 
 type configAttachmentClaimResult struct {
-	request *orchestrator.LaunchSessionRequest
-	err     error
+	request     *orchestrator.LaunchSessionRequest
+	err         error
+	ctxErr      error
+	hasDeadline bool
 }
 
 type configAttachmentClaimOrchestrator struct {
-	service *service.Service
-	results chan configAttachmentClaimResult
+	service                *service.Service
+	results                chan configAttachmentClaimResult
+	cancelRequestOnPrepare context.CancelFunc
+	launchErr              error
 }
 
 func (o *configAttachmentClaimOrchestrator) LaunchSession(
@@ -109,12 +113,21 @@ func (o *configAttachmentClaimOrchestrator) LaunchSession(
 	req *orchestrator.LaunchSessionRequest,
 ) (*orchestrator.LaunchSessionResponse, error) {
 	if req.Intent == orchestrator.IntentPrepare {
+		if o.cancelRequestOnPrepare != nil {
+			o.cancelRequestOnPrepare()
+		}
 		return &orchestrator.LaunchSessionResponse{SessionID: "config-session"}, nil
 	}
 	claimErr := o.service.ClaimMessageAttachments(ctx, req.TaskID, req.SessionID, req.Attachments)
-	o.results <- configAttachmentClaimResult{request: req, err: claimErr}
+	_, hasDeadline := ctx.Deadline()
+	o.results <- configAttachmentClaimResult{
+		request: req, err: claimErr, ctxErr: ctx.Err(), hasDeadline: hasDeadline,
+	}
 	if claimErr != nil {
 		return nil, claimErr
+	}
+	if o.launchErr != nil {
+		return nil, o.launchErr
 	}
 	return &orchestrator.LaunchSessionResponse{SessionID: req.SessionID}, nil
 }
@@ -129,12 +142,14 @@ func (*configAttachmentClaimOrchestrator) EnsureSession(
 
 func TestHTTPConfigChatOpeningAttachmentClaimUsesRequestIdentity(t *testing.T) {
 	for _, tc := range []struct {
-		name          string
-		requestUserID string
-		wantClaimErr  error
+		name               string
+		requestUserID      string
+		wantClaimErr       error
+		wantStatus         int
+		cancelAfterPrepare bool
 	}{
-		{name: "owner", requestUserID: "user-1"},
-		{name: "foreign user", requestUserID: "user-2", wantClaimErr: models.ErrAttachmentClaimConflict},
+		{name: "owner survives request cancellation", requestUserID: "user-1", wantStatus: http.StatusOK, cancelAfterPrepare: true},
+		{name: "foreign user is rejected", requestUserID: "user-2", wantClaimErr: models.ErrAttachmentClaimConflict, wantStatus: http.StatusInternalServerError},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			dbConn, err := db.OpenSQLite(filepath.Join(t.TempDir(), "config-chat-attachment.db"))
@@ -178,11 +193,14 @@ func TestHTTPConfigChatOpeningAttachmentClaimUsesRequestIdentity(t *testing.T) {
 				c.Request.Context(), authn.Identity{UserID: tc.requestUserID, Role: authn.RoleMember},
 			))
 			c.Request = c.Request.WithContext(requestCtx)
+			if tc.cancelAfterPrepare {
+				orch.cancelRequestOnPrepare = cancel
+			}
 
 			h.httpStartConfigChat(c)
 			cancel()
 
-			require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+			require.Equal(t, tc.wantStatus, rec.Code, rec.Body.String())
 			var result configAttachmentClaimResult
 			select {
 			case result = <-orch.results:
@@ -193,6 +211,8 @@ func TestHTTPConfigChatOpeningAttachmentClaimUsesRequestIdentity(t *testing.T) {
 				require.ErrorIs(t, result.err, tc.wantClaimErr)
 			} else {
 				require.NoError(t, result.err)
+				assert.NoError(t, result.ctxErr, "the launch context must be detached from request cancellation")
+				assert.True(t, result.hasDeadline, "the detached launch context must retain a bounded timeout")
 			}
 			require.Len(t, result.request.Attachments, 1)
 			stored, err := repo.GetMessageAttachment(context.Background(), attachment.ID)
@@ -207,6 +227,64 @@ func TestHTTPConfigChatOpeningAttachmentClaimUsesRequestIdentity(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestHTTPConfigChatRestoresClaimedAttachmentWhenLaunchFails(t *testing.T) {
+	dbConn, err := db.OpenSQLite(filepath.Join(t.TempDir(), "config-chat-launch-failure.db"))
+	require.NoError(t, err)
+	dbConnSQLX := sqlx.NewDb(dbConn, "sqlite3")
+	t.Cleanup(func() { _ = dbConnSQLX.Close() })
+	repo, cleanup, err := repository.Provide(dbConnSQLX, dbConnSQLX, nil)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = cleanup() })
+	log := newTestLogger(t)
+	agentProfileID := "profile-1"
+	executorID := models.ExecutorIDLocal
+	require.NoError(t, repo.CreateWorkspace(context.Background(), &models.Workspace{
+		ID: "ws-1", Name: "Workspace", DefaultAgentProfileID: &agentProfileID,
+		DefaultExecutorID: &executorID,
+	}))
+	svc := service.NewService(service.Repos{
+		Workspaces: repo, Tasks: repo, TaskRepos: repo,
+		Workflows: repo, Messages: repo, Turns: repo,
+		Sessions: repo, GitSnapshots: repo, RepoEntities: repo,
+		Executors: repo, Environments: repo, TaskEnvironments: repo,
+		Reviews: repo,
+	}, bus.NewMemoryEventBus(log), log, service.RepositoryDiscoveryConfig{})
+	attachmentSvc, err := service.NewAttachmentService(repo, t.TempDir(), nil, log)
+	require.NoError(t, err)
+	svc.SetAttachmentService(attachmentSvc)
+	attachment, err := attachmentSvc.Stage(
+		context.Background(), "user-1", "ws-1", "trace.txt", "text/plain", "resource", "path", strings.NewReader("trace bytes"),
+	)
+	require.NoError(t, err)
+	orch := &configAttachmentClaimOrchestrator{
+		service:   svc,
+		results:   make(chan configAttachmentClaimResult, 1),
+		launchErr: errors.New("launch failed after claim"),
+	}
+	h := &TaskHandlers{service: svc, orchestrator: orch, logger: log}
+	body := `{"agent_profile_id":"profile-1","prompt":"Review this trace","attachments":[{"type":"resource","attachment_id":"` +
+		attachment.ID + `","mime_type":"text/plain","name":"trace.txt","size_bytes":11,"delivery_mode":"path"}]}`
+	c, rec := quickChatRequestContext(t, "/workspaces/ws-1/config-chat", body)
+	c.Request = c.Request.WithContext(authn.WithIdentity(
+		c.Request.Context(), authn.Identity{UserID: "user-1", Role: authn.RoleMember},
+	))
+
+	h.httpStartConfigChat(c)
+
+	require.Equal(t, http.StatusInternalServerError, rec.Code, rec.Body.String())
+	result := <-orch.results
+	require.NoError(t, result.err, "the real claimer accepts the staged owner's attachment before launch fails")
+	restored, err := repo.GetMessageAttachment(context.Background(), attachment.ID)
+	require.NoError(t, err)
+	assert.Equal(t, models.AttachmentStateStaged, restored.State)
+	assert.Empty(t, restored.TaskID)
+	_, file, err := attachmentSvc.Open(context.Background(), "user-1", attachment.ID)
+	require.NoError(t, err, "the staged upload remains available for retry")
+	require.NoError(t, file.Close())
+	_, err = svc.GetTask(context.Background(), result.request.TaskID)
+	require.Error(t, err, "the failed config chat task is rolled back")
 }
 
 func TestHTTPQuickChatRejectsAttachmentsWithoutPrompt(t *testing.T) {

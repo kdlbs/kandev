@@ -168,27 +168,28 @@ changes. Use live status/error announcements without moving keyboard focus.
 
 ## Tests
 
-Planned test names define the traceability targets; they do not exist yet unless
-noted. Use `@covers` annotations for these AC IDs when adding cases.
+Test paths below define traceability targets. Implementation status and executed
+verification are recorded in the Results sections. Use `@covers` annotations for
+these AC IDs when adding cases.
 
-| AC suffix     | Test evidence                                                                                                                                                               |
-| ------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| AC suffix     | Test evidence                                                                                                                                                                            |
+| ------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | 1, 3, 4, 5, 8 | `components/quick-chat/quick-chat-setup.test.tsx`, `use-quick-chat-setup-draft.test.ts`: immediate editing, defaults/disabled profiles, repo validation, mode round trip, duplicate Send |
-| 6, 7          | Setup and task-create selector tests; desktop and mobile `composer-actions.spec.ts`: attachment recovery and plugin insertion/submission                                  |
-| 8, 9, 10      | `use-quick-chat-initial-prompt.test.ts`: full payload, rejected/throwing admission, remount, new draft race, stable message identity                                       |
-| 5, 8, 9       | `use-quick-chat-modal.test.ts`, `components/config-chat/use-config-chat.test.ts`: routing, superseded starts, workspace change, preserved payload                          |
-| 8, 9, 12      | `task_http_quick_chat_opening_test.go`: Quick Chat/config opening payload and attachment rollback; handler/service/repository tests                                       |
-| 9, 10         | `lib/state/slices/ui/quick-chat-actions.test.ts`, `quick-chat-sync.test.ts`: payload retention and reconciliation                                                          |
-| 10, 12        | Draft and recovery tests: descriptor restore, invalid/expired records, identity/workspace scope                                                                         |
+| 6, 7          | Setup and task-create selector tests; desktop and mobile `composer-actions.spec.ts`: attachment recovery and plugin insertion/submission                                                 |
+| 8, 9, 10      | `use-quick-chat-initial-prompt.test.ts`: full payload, rejected/throwing admission, remount, new draft race, stable message identity                                                     |
+| 5, 8, 9       | `use-quick-chat-modal.test.ts`, `components/config-chat/use-config-chat.test.ts`: routing, superseded starts, workspace change, preserved payload                                        |
+| 8, 9, 12      | `task_http_quick_chat_opening_test.go`: Quick Chat/config opening payload and attachment rollback; handler/service/repository tests                                                      |
+| 9, 10         | `lib/state/slices/ui/quick-chat-actions.test.ts`, `quick-chat-sync.test.ts`: payload retention and reconciliation                                                                        |
+| 10, 12        | Draft and recovery tests: descriptor restore, invalid/expired records, identity/workspace scope                                                                                          |
 
 ## E2E tests
 
-| File and project                                                             | Flow / AC suffix                                                                                                                     |
-| ---------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| File and project                                                             | Flow / AC suffix                                                                                     |
+| ---------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
 | `tests/chat/quick-chat-opening-composer.spec.ts`, chromium (new)             | UI-01/02/04; one initial message, failed creation recovery/retry, configuration routing; AC 1-10, 12 |
-| `tests/chat/mobile-quick-chat-opening-composer.spec.ts`, mobile-chrome (new) | UI-03/04; touch pickers, prompt/file/config flow, controls and overflow; AC 1-12 |
-| Desktop and mobile `tests/plugins/*composer-actions.spec.ts`                 | Installed plugin inserts at selection and submits the current Quick Chat opening payload |
-| Existing desktop/mobile Quick Chat and composer specs                       | Entry, repositories, saved prompts, tabs, queueing, entity references, slash commands, and settings |
+| `tests/chat/mobile-quick-chat-opening-composer.spec.ts`, mobile-chrome (new) | UI-03/04; touch pickers, prompt/file/config flow, controls and overflow; AC 1-12                     |
+| Desktop and mobile `tests/plugins/*composer-actions.spec.ts`                 | Installed plugin inserts at selection and submits the current Quick Chat opening payload             |
+| Existing desktop/mobile Quick Chat and composer specs                        | Entry, repositories, saved prompts, tabs, queueing, entity references, slash commands, and settings  |
 
 Use the installed plugin fixture to prove composer capability insertion and submit.
 Real microphone capture is not required by mock E2E; manually check a configured

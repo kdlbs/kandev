@@ -9,6 +9,7 @@ import type {
   ChatSubmitPayload,
   ChatSubmitResult,
 } from "@/components/task/chat/chat-input-container";
+import { toQuickChatDraftAttachments } from "@/lib/state/slices/ui/quick-chat-opening-draft";
 import type { QuickChatInitialPrompt } from "@/lib/state/slices/ui/types";
 
 type InitialPromptDelivery = {
@@ -26,29 +27,9 @@ function toSubmitPayload(prompt: QuickChatInitialPrompt): ChatSubmitPayload {
   return typeof prompt === "string" ? { message: prompt } : prompt;
 }
 
-function toStoredAttachments(payload: ChatSubmitPayload) {
-  return (
-    payload.attachments?.flatMap((attachment) => {
-      if (!attachment.attachment_id || !attachment.name) return [];
-      return [
-        {
-          id: attachment.attachment_id,
-          attachmentId: attachment.attachment_id,
-          mimeType: attachment.mime_type,
-          fileName: attachment.name,
-          size: attachment.size_bytes ?? 0,
-          isImage: attachment.type === "image",
-          deliveryMode:
-            attachment.delivery_mode ?? (attachment.type === "image" ? "prompt" : "path"),
-        },
-      ];
-    }) ?? []
-  );
-}
-
 function attachmentDraftMatches(
   sessionId: string,
-  expected: ReturnType<typeof toStoredAttachments>,
+  expected: ReturnType<typeof toQuickChatDraftAttachments>,
 ): boolean {
   const current = getChatDraftAttachments(sessionId);
   return (
@@ -68,9 +49,19 @@ function attachmentDraftMatches(
 type MutableValue<T> = { current: T };
 type DeliveryGeneration = { identity: string; generation: number };
 
+function isCurrentDelivery(
+  deliveryGenerationRef: MutableValue<DeliveryGeneration>,
+  identity: string,
+  generation: number,
+): boolean {
+  const current = deliveryGenerationRef.current;
+  return current.identity === identity && current.generation === generation;
+}
+
 function scheduleInitialPromptDelivery(args: {
   sessionId: string;
   taskId: string;
+  deliveryIdentity: string;
   prompt: QuickChatInitialPrompt;
   deliveryGeneration: number;
   deliveryGenerationRef: MutableValue<DeliveryGeneration>;
@@ -85,6 +76,7 @@ function scheduleInitialPromptDelivery(args: {
   const {
     sessionId,
     taskId,
+    deliveryIdentity,
     prompt,
     deliveryGeneration,
     deliveryGenerationRef,
@@ -97,7 +89,7 @@ function scheduleInitialPromptDelivery(args: {
     onRejected,
   } = args;
   const payload = toSubmitPayload(prompt);
-  const draftAttachments = toStoredAttachments(payload);
+  const draftAttachments = toQuickChatDraftAttachments(payload.attachments);
   const attemptIdentity =
     payload.clientMessageId ??
     JSON.stringify({
@@ -122,6 +114,7 @@ function scheduleInitialPromptDelivery(args: {
   const restoreRejectedDraft = () => {
     if (
       deliveryGenerationRef.current.generation === deliveryGeneration &&
+      deliveryGenerationRef.current.identity === deliveryIdentity &&
       attemptedFor.current === attemptKey &&
       savedForRecovery &&
       getChatDraftText(sessionId) === payload.message &&
@@ -134,7 +127,8 @@ function scheduleInitialPromptDelivery(args: {
     .then(() => {
       // Earlier passive effects can start the session queue after this effect
       // was scheduled. Re-read the admission gate before consuming the prompt.
-      if (deliveryGenerationRef.current.generation !== deliveryGeneration) return undefined;
+      if (!isCurrentDelivery(deliveryGenerationRef, deliveryIdentity, deliveryGeneration))
+        return undefined;
       if (blockedRef.current) return undefined;
       attemptedFor.current = attemptKey;
       onAttempted?.();
@@ -142,7 +136,7 @@ function scheduleInitialPromptDelivery(args: {
     })
     .then((accepted) => {
       if (
-        deliveryGenerationRef.current.generation !== deliveryGeneration ||
+        !isCurrentDelivery(deliveryGenerationRef, deliveryIdentity, deliveryGeneration) ||
         attemptedFor.current !== attemptKey
       )
         return;
@@ -191,31 +185,34 @@ export function useQuickChatInitialPrompt({
     };
   }
   const blockedRef = useRef(blocked);
-  const submitRef = useRef(submit);
-  const onAttemptedRef = useRef(onAttempted);
-  const onAcceptedRef = useRef(onAccepted);
-  const onRejectedRef = useRef(onRejected);
   blockedRef.current = blocked;
-  submitRef.current = submit;
-  onAttemptedRef.current = onAttempted;
-  onAcceptedRef.current = onAccepted;
-  onRejectedRef.current = onRejected;
 
   useEffect(() => {
     if (!prompt || !taskId || blocked) return;
     scheduleInitialPromptDelivery({
       sessionId,
       taskId,
+      deliveryIdentity,
       prompt,
       deliveryGeneration: deliveryGenerationRef.current.generation,
       deliveryGenerationRef,
       attemptedFor,
       inFlightFor,
       blockedRef,
-      submit: submitRef.current,
-      onAttempted: onAttemptedRef.current,
-      onAccepted: onAcceptedRef.current,
-      onRejected: onRejectedRef.current,
+      submit,
+      onAttempted,
+      onAccepted,
+      onRejected,
     });
-  }, [blocked, prompt, sessionId, taskId]);
+  }, [
+    blocked,
+    deliveryIdentity,
+    onAccepted,
+    onAttempted,
+    onRejected,
+    prompt,
+    sessionId,
+    submit,
+    taskId,
+  ]);
 }

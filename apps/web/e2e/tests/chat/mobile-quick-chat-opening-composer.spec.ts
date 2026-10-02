@@ -43,9 +43,29 @@ test("opens the phone picker and delivers the opening prompt", async ({
     const editor = dialog.getByTestId("task-description-input");
     const send = dialog.getByTestId("quick-chat-send");
     const attach = dialog.getByRole("button", { name: "Attach files" });
+    const setupScroll = dialog.getByTestId("quick-chat-setup-scroll");
     await expectTouchTarget(attach);
     await expectTouchTarget(send);
     await expect(editor).toBeVisible();
+
+    await testPage.setViewportSize({ width: 390, height: 560 });
+    await expect
+      .poll(() => setupScroll.evaluate((element) => element.scrollHeight - element.clientHeight), {
+        timeout: 5_000,
+      })
+      .toBeGreaterThan(0);
+    const shortViewportMetrics = await setupScroll.evaluate((element) => ({
+      scrollHeight: element.scrollHeight,
+      clientHeight: element.clientHeight,
+    }));
+    expect(shortViewportMetrics.scrollHeight).toBeGreaterThan(shortViewportMetrics.clientHeight);
+    const shortSendBox = await send.boundingBox();
+    expect(shortSendBox).not.toBeNull();
+    expect(shortSendBox!.y + shortSendBox!.height).toBeLessThanOrEqual(560);
+    await expect(send).toBeVisible();
+    await expectNoHorizontalOverflow(testPage);
+
+    await testPage.setViewportSize({ width: 390, height: 844 });
     await testInfo.attach("quick-chat-opening-phone", {
       body: await testPage.screenshot(),
       contentType: "image/png",

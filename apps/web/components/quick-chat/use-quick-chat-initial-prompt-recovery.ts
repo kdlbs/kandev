@@ -9,8 +9,11 @@ export function useQuickChatInitialPromptRecovery(
   const restoreRejectedPrompt = useCallback(
     (rejectedSessionId: string, prompt: QuickChatInitialPrompt) => {
       const input = chatInputRef.current;
-      if (rejectedSessionId === sessionId && input && !input.getValue()) {
+      if (rejectedSessionId !== sessionId || !input) return;
+      if (!input.getValue())
         input.insertText(typeof prompt === "string" ? prompt : prompt.message, 0, 0);
+      if (typeof prompt !== "string" && prompt.attachments?.length) {
+        input.restoreStagedAttachments?.(prompt.attachments);
       }
     },
     [chatInputRef, sessionId],

@@ -136,3 +136,38 @@ describe("useQuickChatSetupDraft", () => {
     expect(view.result.current.draft.message).toBe("Workspace two");
   });
 });
+
+it("restores expired staged uploads as failed while preserving their expiry", () => {
+  const expired = {
+    id: "expired-row",
+    attachmentId: "expired-attachment",
+    expiresAt: "2020-01-01T00:00:00Z",
+    mimeType: "text/plain",
+    fileName: "expired.txt",
+    size: 12,
+    isImage: false,
+    deliveryMode: "path" as const,
+  };
+  const active = {
+    id: "active-row",
+    attachmentId: "active-attachment",
+    expiresAt: "2099-01-01T00:00:00Z",
+    mimeType: "text/plain",
+    fileName: "active.txt",
+    size: 12,
+    isImage: false,
+    deliveryMode: "path" as const,
+  };
+  setChatDraftAttachments(DRAFT_ID, [expired, active]);
+
+  const { result } = renderHook(() => useQuickChatSetupDraft(WORKSPACE_ID, USER_ID));
+
+  expect(result.current.draft.attachments).toEqual([
+    expect.objectContaining({
+      ...expired,
+      uploadStatus: "failed",
+      uploadError: expect.any(String),
+    }),
+    expect.objectContaining({ ...active, uploadStatus: "ready" }),
+  ]);
+});

@@ -83,6 +83,8 @@ function AgentField({
         onValueChange={onChange}
         disabled={disabled}
         placeholder={placeholder}
+        labelId="quick-chat-agent-label"
+        ariaDescribedBy="quick-chat-agent-help"
       />
     </section>
   );
@@ -90,19 +92,21 @@ function AgentField({
 
 function RepositoryContextHelp() {
   const { t } = useTranslation();
-  const usesTouchDrawer = useTouchDrawer() || useResponsiveBreakpoint().isMobile;
+  const usesTouchDrawer = useTouchDrawer();
+  const isMobile = useResponsiveBreakpoint().isMobile;
+  const usesTouchDrawerOnCurrentDevice = usesTouchDrawer || isMobile;
   const [open, setOpen] = useState(false);
   const trigger = (
     <button
       type="button"
       aria-label={t("chat:aboutRepositoryContext")}
-      className={`flex shrink-0 cursor-pointer items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground ${usesTouchDrawer ? "h-11 w-11" : "h-7 w-7"}`}
-      onClick={() => usesTouchDrawer && setOpen(true)}
+      className={`flex shrink-0 cursor-pointer items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground ${usesTouchDrawerOnCurrentDevice ? "h-11 w-11" : "h-7 w-7"}`}
+      onClick={() => usesTouchDrawerOnCurrentDevice && setOpen(true)}
     >
       <IconInfoCircle className="h-4 w-4" />
     </button>
   );
-  if (usesTouchDrawer) {
+  if (usesTouchDrawerOnCurrentDevice) {
     return (
       <>
         {trigger}
@@ -161,10 +165,7 @@ function RepositoryField({
         </div>
         <RepositoryContextHelp />
       </div>
-      <div
-        className="flex min-h-11 flex-wrap items-center gap-2"
-        aria-describedby="quick-chat-repositories-help"
-      >
+      <div className="flex min-h-11 flex-wrap items-center gap-2">
         <WorkspaceRepoChips
           rows={rows}
           repositories={repositories}
@@ -173,6 +174,7 @@ function RepositoryField({
           addHint={addHint}
           addLabel={t("chat:addRepository")}
           allowDuplicateRepositories={false}
+          ariaDescribedBy="quick-chat-repositories-help"
           onAdd={onAdd}
           onRemove={onRemove}
           onRowRepositoryChange={onRepositoryChange}

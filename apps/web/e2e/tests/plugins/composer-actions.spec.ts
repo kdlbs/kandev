@@ -320,13 +320,16 @@ test.describe("Plugins — composer capability", () => {
       session_id: string;
     };
     await expect
-      .poll(async () => {
-        const { messages } = await apiClient.listSessionMessages(started.session_id);
-        return messages.filter(
-          (message) =>
-            message.author_type === "user" && message.content === `head ${DICTATED} tail`,
-        ).length;
-      })
+      .poll(
+        async () => {
+          const { messages } = await apiClient.listSessionMessages(started.session_id);
+          return messages.filter(
+            (message) =>
+              message.author_type === "user" && message.content === `head ${DICTATED} tail`,
+          ).length;
+        },
+        { timeout: 30_000 },
+      )
       .toBe(1);
     await expect(
       dialog

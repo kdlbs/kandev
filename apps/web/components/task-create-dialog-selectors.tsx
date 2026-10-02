@@ -150,7 +150,12 @@ export const RepositorySelector = memo(function RepositorySelector({
 });
 
 type AgentSelectorProps = {
-  options: Array<{ value: string; label: string; renderLabel: () => React.ReactNode }>;
+  options: Array<{
+    value: string;
+    label: string;
+    renderLabel: () => React.ReactNode;
+    renderTriggerLabel?: () => React.ReactNode;
+  }>;
   value: string;
   onValueChange: (value: string) => void;
   disabled: boolean;
@@ -160,6 +165,7 @@ type AgentSelectorProps = {
   touchTarget?: boolean;
   testId?: string;
   triggerId?: string;
+  ariaDescribedBy?: string;
 };
 
 export const AgentSelector = memo(function AgentSelector({
@@ -173,6 +179,7 @@ export const AgentSelector = memo(function AgentSelector({
   touchTarget,
   testId,
   triggerId,
+  ariaDescribedBy,
 }: AgentSelectorProps) {
   const { t } = useTranslation();
   return (
@@ -191,6 +198,7 @@ export const AgentSelector = memo(function AgentSelector({
       touchTarget={touchTarget}
       testId={testId ?? "agent-profile-selector"}
       triggerId={triggerId}
+      ariaDescribedBy={ariaDescribedBy}
     />
   );
 });
@@ -488,6 +496,7 @@ function useFileAttachments(
         }
         const keptByDraft = updateAttachment(attachment.id, {
           attachmentId: uploaded.attachment_id,
+          expiresAt: uploaded.expires_at,
           uploadStatus: "ready",
           size: uploaded.size_bytes,
         });
@@ -689,7 +698,9 @@ function toContextItems(
 
 function AttachButton({ onClick, disabled }: { onClick: () => void; disabled?: boolean }) {
   const { t } = useTranslation();
-  const usesTouchTarget = useTouchDrawer() || useResponsiveBreakpoint().isMobile;
+  const usesTouchDrawer = useTouchDrawer();
+  const isMobile = useResponsiveBreakpoint().isMobile;
+  const usesTouchTarget = usesTouchDrawer || isMobile;
   return (
     <div className="flex items-center px-1 pb-1">
       <Tooltip>

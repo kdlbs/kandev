@@ -89,10 +89,13 @@ test.describe("Send during session resume", () => {
     await submit.click();
     await expect(editor).toHaveText("");
     await expect
-      .poll(async () => {
-        const { sessions } = await apiClient.listTaskSessions(taskId);
-        return sessions.find((session) => session.id === sessionId)?.state;
-      })
+      .poll(
+        async () => {
+          const { sessions } = await apiClient.listTaskSessions(taskId);
+          return sessions.find((session) => session.id === sessionId)?.state;
+        },
+        { timeout: 30_000 },
+      )
       .toBe("RUNNING");
     const marker = "quick chat startup marker";
     await expect(editor).toHaveAttribute("contenteditable", "true", { timeout: 15_000 });

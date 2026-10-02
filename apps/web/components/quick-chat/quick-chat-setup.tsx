@@ -214,6 +214,7 @@ function useQuickChatSetupActions(args: {
 }) {
   const formRef = useRef<TaskFormInputsHandle>(null);
   const submitLock = useRef(false);
+  const chatSubmitKey = useAppStore((state) => state.userSettings.chatSubmitKey);
   const composerSubmitDisabled =
     args.isStarting ||
     !args.profileEnabled ||
@@ -255,18 +256,21 @@ function useQuickChatSetupActions(args: {
 
   const handlePromptKeyDown = useCallback(
     (event: React.KeyboardEvent) => {
+      const hasSubmitModifier = event.metaKey || event.ctrlKey;
       if (
         event.key !== "Enter" ||
         event.shiftKey ||
+        event.altKey ||
         event.repeat ||
         event.nativeEvent.isComposing ||
-        event.keyCode === 229
+        event.keyCode === 229 ||
+        (chatSubmitKey === "enter" ? hasSubmitModifier : !hasSubmitModifier)
       )
         return;
       event.preventDefault();
       void handleSend();
     },
-    [handleSend],
+    [chatSubmitKey, handleSend],
   );
 
   return { formRef, composerSubmitDisabled, canSubmit, handleSend, handlePromptKeyDown };

@@ -11,6 +11,7 @@ import type {
   ChatSubmitPayload,
   ChatSubmitResult,
 } from "@/components/task/chat/chat-input-container";
+import type { QuickChatInitialPrompt } from "@/lib/state/slices/ui/types";
 import { useQuickChatInitialPrompt } from "./use-quick-chat-initial-prompt";
 
 const LAUNCH_PROMPT = "Start here";
@@ -110,6 +111,72 @@ describe("useQuickChatInitialPrompt draft recovery", () => {
     await act(async () => {});
     expect(firstSubmit).toHaveBeenCalledOnce();
     expect(nextSubmit).not.toHaveBeenCalled();
+  });
+});
+
+describe("useQuickChatInitialPrompt session identity", () => {
+  it("does not hand session A's scheduled payload or callback to unblocked session B", async () => {
+    const submitA = vi.fn().mockResolvedValue(true);
+    const submitB = vi.fn().mockResolvedValue(true);
+    const attemptedA = vi.fn();
+    const attemptedB = vi.fn();
+    const acceptedB = vi.fn();
+    const payloadA = { message: "A's opening message" };
+    const payloadB = { message: "B's pending opening message" };
+    let pendingB: typeof payloadB | undefined = payloadB;
+    type HandoffProps = {
+      sessionId: string;
+      taskId: string;
+      prompt?: QuickChatInitialPrompt;
+      submit: (payload: ChatSubmitPayload) => ChatSubmitResult;
+      onAttempted?: () => void;
+      onAccepted?: (sessionId: string, prompt: QuickChatInitialPrompt) => void;
+    };
+    const initialProps: HandoffProps = {
+      sessionId: "session-A",
+      taskId: "task-A",
+      prompt: payloadA,
+      submit: submitA,
+      onAttempted: () => attemptedA(),
+      onAccepted: () => undefined,
+    };
+    const view = renderHook(
+      ({ sessionId, taskId, prompt, submit, onAttempted, onAccepted }: HandoffProps) =>
+        useQuickChatInitialPrompt({
+          sessionId,
+          taskId,
+          prompt,
+          blocked: false,
+          submit,
+          onAttempted,
+          onAccepted,
+        }),
+      { initialProps },
+    );
+
+    // Rerender before the scheduled promise microtask flushes.
+    view.rerender({
+      sessionId: "session-B",
+      taskId: "task-B",
+      prompt: pendingB,
+      submit: submitB,
+      onAttempted: () => {
+        attemptedB();
+        pendingB = undefined;
+      },
+      onAccepted: acceptedB,
+    });
+    await act(async () => {});
+
+    expect(submitA).not.toHaveBeenCalled();
+    expect(submitB).toHaveBeenCalledOnce();
+    expect(submitB).toHaveBeenCalledWith(payloadB);
+    expect(attemptedA).not.toHaveBeenCalled();
+    expect(attemptedB).toHaveBeenCalledOnce();
+    expect(acceptedB).toHaveBeenCalledWith("session-B", payloadB);
+    expect(pendingB).toBeUndefined();
+    expect(getChatDraftText("session-A")).toBe(payloadA.message);
+    expect(getChatDraftText("session-B")).toBe("");
   });
 });
 

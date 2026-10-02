@@ -16,10 +16,11 @@ The task system owns the transition from a setup draft to the first conversation
 turn. UI owns the surrounding dialog and tab navigation. This design reuses
 existing attachment, launch, and MCP boundaries. It needs no database migration.
 
-Source inspection confirms two separate setup components and a string-only
-`initialPrompt` handoff. Ordinary Quick Chat eagerly starts a session; configuration
-chat prepares one and uses a separate prompt-bearing path for passthrough profiles.
-The redesign must cover both paths without duplicate dispatch.
+Before this change, source inspection found two separate setup components and a
+string-only `initialPrompt` handoff. Ordinary Quick Chat eagerly started a
+session; configuration chat prepared one and used a separate prompt-bearing path
+for passthrough profiles. The redesign covers both paths without duplicate
+dispatch.
 
 ## Requirement mapping
 
