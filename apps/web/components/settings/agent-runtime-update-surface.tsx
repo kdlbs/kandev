@@ -27,6 +27,7 @@ export function AgentRuntimeUpdateSurface({
   onOpenChange,
   body,
   footer,
+  managedFallback,
 }: {
   agentName: string;
   displayName: string;
@@ -35,8 +36,12 @@ export function AgentRuntimeUpdateSurface({
   onOpenChange: (nextOpen: boolean) => void;
   body: ReactNode;
   footer: (mobile?: boolean) => ReactNode;
+  managedFallback?: boolean;
 }) {
   const { t } = useTranslation();
+  const description = t(
+    managedFallback ? "agents:runtimeFallbackReview" : "agents:reviewUpdateBeforeApplying",
+  );
   if (isMobile) {
     return (
       <Drawer open={open} onOpenChange={onOpenChange}>
@@ -46,7 +51,7 @@ export function AgentRuntimeUpdateSurface({
         >
           <DrawerHeader className="shrink-0 px-4 py-3 text-left">
             <DrawerTitle>{t(UPDATE_AGENT_KEY, { name: displayName })}</DrawerTitle>
-            <DrawerDescription>{t("agents:reviewUpdateBeforeApplying")}</DrawerDescription>
+            <DrawerDescription>{description}</DrawerDescription>
           </DrawerHeader>
           {body}
           {footer(true)}
@@ -62,7 +67,7 @@ export function AgentRuntimeUpdateSurface({
       >
         <DialogHeader className="px-4 pb-1 pt-3">
           <DialogTitle>{t(UPDATE_AGENT_KEY, { name: displayName })}</DialogTitle>
-          <DialogDescription>{t("agents:reviewUpdateBeforeApplying")}</DialogDescription>
+          <DialogDescription>{description}</DialogDescription>
         </DialogHeader>
         {body}
         {footer()}

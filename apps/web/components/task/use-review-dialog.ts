@@ -54,7 +54,7 @@ function getUnlistedRootStatus(
   reviewGitStatus: GitStatusEntry | undefined,
   statusByRepo: Array<{ repository_name: string; status: GitStatusEntry }>,
 ): GitStatusEntry | undefined {
-  if (!reviewGitStatus?.files || (reviewGitStatus.repository_name ?? "") !== "") return undefined;
+  if (!reviewGitStatus?.files || reviewGitStatus.repository_name !== "") return undefined;
   return statusByRepo.some((entry) => entry.repository_name === "") ? undefined : reviewGitStatus;
 }
 
@@ -65,9 +65,8 @@ export function buildReviewGitStatusFiles(
   cumulativeRepositoryNames: Iterable<string> = [],
 ): ReviewGitStatusFiles {
   const named = statusByRepo.filter((entry) => entry.repository_name !== "");
-  // The legacy slot mirrors whichever repository most recently emitted. Its
-  // repository_name distinguishes the workspace root from a named repository
-  // while per-repository hydration is incomplete.
+  // In multi-repo tasks the legacy slot mirrors the latest repository update.
+  // Trust it as root only when its explicit repository_name is empty.
   const legacyRootStatus = getUnlistedRootStatus(reviewGitStatus, statusByRepo);
   const isMultiRepo = isReviewMultiRepo(
     taskRepositoryCount,

@@ -5,13 +5,17 @@ import type { FileInfo, GitStatusEntry } from "@/lib/state/slices/session-runtim
 type GitStatusByRepo = Array<{ repository_name: string; status: GitStatusEntry }>;
 
 const README_PATH = "README.md";
+const OUTER_REPOSITORY = "vendor/outer";
 
 function file(path = README_PATH): FileInfo {
   return { path, status: "modified", staged: false };
 }
 
-function status(files: Record<string, FileInfo>, repositoryName?: string): GitStatusEntry {
-  return { files, repository_name: repositoryName } as GitStatusEntry;
+function status(files: Record<string, FileInfo>, repository_name?: string): GitStatusEntry {
+  return {
+    files,
+    ...(repository_name === undefined ? {} : { repository_name }),
+  } as GitStatusEntry;
 }
 
 describe("buildReviewGitStatusFiles", () => {
@@ -136,18 +140,64 @@ describe("buildReviewGitStatusFiles", () => {
 describe("multi-repository review hydration", () => {
   it("merges the root legacy status when named submodule statuses have hydrated first", () => {
     const rootDiff = "-parent base\n+parent working-tree change";
-    const root = status({ [README_PATH]: { ...file(), diff: rootDiff } });
-    const outer = status({ [README_PATH]: file() }, "vendor/outer");
+    const root = status({ [README_PATH]: { ...file(), diff: rootDiff } }, "");
+    const outer = status({ [README_PATH]: file() }, OUTER_REPOSITORY);
 
     const result = buildReviewGitStatusFiles(
       root,
-      [{ repository_name: "vendor/outer", status: outer }],
+      [{ repository_name: OUTER_REPOSITORY, status: outer }],
       1,
     );
 
     expect(result.isMultiRepo).toBe(true);
     expect(result.files?.["\u0000README.md"]?.diff).toBe(rootDiff);
-    expect(result.files?.["vendor/outer\u0000README.md"]?.repository_name).toBe("vendor/outer");
+    expect(result.files?.["vendor/outer\u0000README.md"]?.repository_name).toBe(OUTER_REPOSITORY);
+  });
+
+  it("does not infer that a legacy status without repository identity belongs to root", () => {
+    const submoduleFiles = { [README_PATH]: file() };
+
+    const result = buildReviewGitStatusFiles(
+      status({ [README_PATH]: file() }),
+      [{ repository_name: OUTER_REPOSITORY, status: status(submoduleFiles) }],
+      2,
+    );
+
+    expect(result.isMultiRepo).toBe(true);
+    expect(result.files?.[`\u0000${README_PATH}`]).toBeUndefined();
+    expect(result.files?.["vendor/outer\u0000README.md"]?.repository_name).toBe(OUTER_REPOSITORY);
+  });
+});
+
+describe("nested repository review status", () => {
+  it("does not treat the latest nested status as the root while scopes hydrate", () => {
+    const outerScope = "vendor/lib";
+    const innerScope = "vendor/lib/vendor/inner";
+    const innerPath = "src/lib.ts";
+    const outerKey = `${outerScope}\u0000${README_PATH}`;
+    const innerKey = `${innerScope}\u0000${innerPath}`;
+    const outerFiles = { [README_PATH]: file() };
+    const innerFiles = { [innerPath]: file(innerPath) };
+
+    const result = buildReviewGitStatusFiles(
+      status(outerFiles, outerScope),
+      [
+        { repository_name: outerScope, status: status(outerFiles) },
+        { repository_name: innerScope, status: status(innerFiles) },
+      ],
+      1,
+    );
+
+    expect(result.isMultiRepo).toBe(true);
+    expect(result.files?.[`\u0000${README_PATH}`]).toBeUndefined();
+    expect(result.files?.[outerKey]).toMatchObject({
+      path: README_PATH,
+      repository_name: outerScope,
+    });
+    expect(result.files?.[innerKey]).toMatchObject({
+      path: innerPath,
+      repository_name: innerScope,
+    });
   });
 });
 

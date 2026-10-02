@@ -5,6 +5,7 @@ import { filterTasks, projectWorkflowTasks } from "./task-projections";
 const WORKFLOW_ID = "wf-1";
 const CRITICAL_ID = "critical-1";
 const HIGH_ID = "high-1";
+const PLUGIN_REJECTED_ID = "plugin-rejected";
 
 function task(id: string, priority?: Task["priority"]): Task {
   return { id, title: id, workflowStepId: "step-1", priority } as Task;
@@ -103,4 +104,87 @@ describe("projectWorkflowTasks — priority filter scoping", () => {
       "unranked-1",
     ]);
   });
+});
+
+// @covers AC-UI-BOARD-REPOSITORY-MATCHING-001.5, AC-UI-BOARD-REPOSITORY-MATCHING-001.6
+describe("projectWorkflowTasks repository membership", () => {
+  const linked: Task = {
+    id: "multi",
+    title: "Rendering fix",
+    workflowStepId: "ready",
+    repositoryId: "backend",
+    repositories: [
+      { id: "backend-link", repository_id: "backend", position: 0 },
+      { id: "web-link", repository_id: "web", position: 1 },
+    ],
+  };
+  const workflows = {
+    first: {
+      steps: [{ id: "ready" }],
+      tasks: [
+        linked,
+        { ...linked, id: "empty", repositoryId: "web", repositories: [] },
+        {
+          ...linked,
+          id: "other",
+          repositories: [{ id: "other-link", repository_id: "other", position: 0 }],
+        },
+        { ...linked, id: PLUGIN_REJECTED_ID },
+      ],
+    },
+    second: {
+      steps: [{ id: "ready" }],
+      tasks: [{ ...linked, id: "legacy", repositoryId: "web", repositories: undefined }],
+    },
+  };
+
+  it("retains a secondary-linked task in occupancy even when search removes its card", () => {
+    const first = projectWorkflowTasks(workflows, "first", new Set(["web"]), {
+      searchQuery: "absent",
+      matchesPluginTaskFilters: (id) => id !== PLUGIN_REJECTED_ID,
+    });
+    expect(first.visibleTasks).toEqual([]);
+    expect(first.occupancyTasks).toEqual([linked]);
+    expect(first.occupancyTasks.map((entry) => entry.workflowStepId)).toEqual(["ready"]);
+    const second = projectWorkflowTasks(workflows, "second", new Set(["web"]), { searchQuery: "" });
+    expect(second.visibleTasks.map((entry) => entry.id)).toEqual(["legacy"]);
+    expect(second.occupancyTasks.map((entry) => entry.id)).toEqual(["legacy"]);
+  });
+
+  it("composes membership with search, hidden steps and plugins for visible cards", () => {
+    const options = {
+      searchQuery: "rendering",
+      matchesPluginTaskFilters: (id: string) => id !== PLUGIN_REJECTED_ID,
+    };
+    expect(
+      projectWorkflowTasks(workflows, "first", new Set(["backend", "web"]), options).visibleTasks,
+    ).toEqual([linked]);
+    const hidden = projectWorkflowTasks(workflows, "first", new Set(["web"]), {
+      ...options,
+      hiddenStepIds: new Set(["ready"]),
+    });
+    expect(hidden.visibleTasks).toEqual([]);
+    expect(hidden.occupancyTasks).toEqual([linked]);
+  });
+  it.each(["CLIENT-UI", "/projects/client"])(
+    "matches repository search with collection authority: %s",
+    (searchQuery) => {
+      const options = {
+        searchQuery,
+        repositoriesById: new Map([["web", { name: "client-ui", local_path: "/projects/client" }]]),
+        matchesPluginTaskFilters: (id: string) => id !== PLUGIN_REJECTED_ID,
+      };
+      const first = projectWorkflowTasks(workflows, "first", new Set(), options);
+      expect(first.visibleTasks).toEqual([linked]);
+      expect(first.occupancyTasks).toHaveLength(3);
+      expect(
+        projectWorkflowTasks(workflows, "second", new Set(), options).visibleTasks.map(
+          (entry) => entry.id,
+        ),
+      ).toEqual(["legacy"]);
+      expect(
+        projectWorkflowTasks(workflows, "first", new Set(["other"]), options).visibleTasks,
+      ).toEqual([]);
+    },
+  );
 });

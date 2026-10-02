@@ -26,6 +26,7 @@ type RuntimeUpdateStatusResolver func(context.Context, string) (string, error)
 
 type runtimeUpdateStatusCacheEntry struct {
 	latest    string
+	metadata  *RuntimeVersionMetadata
 	checkedAt time.Time
 	expiresAt time.Time
 	ok        bool
@@ -38,6 +39,11 @@ type runtimeUpdateStatusTarget struct {
 	activeVersion    string
 	effectiveVersion string
 	selectionErr     error
+	capability       agents.RuntimeUpdateCapability
+	displayName      string
+	currentVersion   string
+	available        bool
+	enabled          bool
 }
 
 // SetRuntimeUpdateStatusClock injects the clock used for status cache TTLs.
@@ -74,7 +80,7 @@ func (c *Controller) InvalidateRuntimeUpdateStatus(packageName string) {
 }
 
 // ListAgentUpdateStatuses returns one non-mutating status item for each
-// available built-in managed runtime. Registry failures are represented as
+// registered runtime. Source failures are represented as
 // unknown entries rather than failing the whole batch.
 func (c *Controller) ListAgentUpdateStatuses(ctx context.Context) (*dto.ListAgentUpdateStatusResponse, error) {
 	targets, err := c.runtimeUpdateStatusTargets(ctx)
@@ -86,6 +92,9 @@ func (c *Controller) ListAgentUpdateStatuses(ctx context.Context) (*dto.ListAgen
 	entries := make(map[string]runtimeUpdateStatusCacheEntry, len(targets))
 	uniquePackages := make(map[string]struct{}, len(targets))
 	for _, target := range targets {
+		if target.packageName == "" || !target.available || !target.enabled {
+			continue
+		}
 		if _, exists := uniquePackages[target.packageName]; exists {
 			continue
 		}
@@ -111,12 +120,24 @@ func (c *Controller) ListAgentUpdateStatuses(ctx context.Context) (*dto.ListAgen
 	for _, target := range targets {
 		entry := entries[target.packageName]
 		status := dto.AgentUpdateStatusDTO{
-			AgentName:        target.agentName,
-			Package:          target.packageName,
-			DefaultVersion:   target.defaultVersion,
-			ActiveVersion:    target.activeVersion,
-			EffectiveVersion: target.effectiveVersion,
-			CheckState:       dto.AgentUpdateCheckStateUnknown,
+			ManagedFallback:     target.capability.ManagedFallback != nil && c.verifiedManagedActivation(),
+			AgentName:           target.agentName,
+			DisplayName:         target.displayName,
+			RuntimeID:           target.capability.RuntimeID,
+			Owner:               target.capability.Owner,
+			Mechanism:           target.capability.Mechanism,
+			Management:          target.capability.Management,
+			Source:              target.packageName,
+			GuidanceURL:         target.capability.Source.GuidanceURL,
+			CurrentVersion:      target.currentVersion,
+			Available:           target.available,
+			Enabled:             target.enabled,
+			AutoUpdateSupported: c.automaticUpdateSupported(target.capability) && target.available && target.enabled,
+			Package:             target.packageName,
+			DefaultVersion:      target.defaultVersion,
+			ActiveVersion:       target.activeVersion,
+			EffectiveVersion:    comparableRuntimeVersion(target, entry),
+			CheckState:          dto.AgentUpdateCheckStateUnknown,
 		}
 		if !entry.checkedAt.IsZero() {
 			checkedAt := entry.checkedAt
@@ -126,11 +147,37 @@ func (c *Controller) ListAgentUpdateStatuses(ctx context.Context) (*dto.ListAgen
 			status.LatestVersion = entry.latest
 		}
 		if target.selectionErr == nil && entry.ok {
-			status.CheckState = compareRuntimeUpdateStatus(entry.latest, target.effectiveVersion)
+			status.CheckState = compareRuntimeUpdateStatus(entry.latest, status.EffectiveVersion)
+		}
+		if c.runtimeAutoUpdateStore != nil {
+			c.runtimeAutoUpdateMu.Lock()
+			policy, err := c.runtimeAutoUpdateStore.Get(ctx, target.agentName, target.capability.RuntimeID)
+			c.runtimeAutoUpdateMu.Unlock()
+			if err == nil {
+				status.AutoUpdate, status.LastOutcome = policy.Enabled, policy.Outcome
+			}
 		}
 		statuses = append(statuses, status)
 	}
 	return &dto.ListAgentUpdateStatusResponse{Statuses: statuses}, nil
+}
+
+func comparableRuntimeVersion(target runtimeUpdateStatusTarget, entry runtimeUpdateStatusCacheEntry) string {
+	if target.capability.Managed != nil || target.capability.Source.NPM == "" {
+		return target.effectiveVersion
+	}
+	current, err := managedruntime.ParseStableVersion(target.effectiveVersion)
+	if err != nil || entry.metadata == nil {
+		return ""
+	}
+	// An ACP observation may describe the vendor CLI rather than its npm adapter.
+	for _, published := range entry.metadata.Versions {
+		version, err := managedruntime.ParseStableVersion(published)
+		if err == nil && current.Equal(version) {
+			return target.effectiveVersion
+		}
+	}
+	return ""
 }
 
 func (c *Controller) runtimeUpdateStatusTargets(ctx context.Context) ([]runtimeUpdateStatusTarget, error) {
@@ -149,37 +196,26 @@ func (c *Controller) runtimeUpdateStatusTargets(ctx context.Context) ([]runtimeU
 	}
 
 	targets := make([]runtimeUpdateStatusTarget, 0)
-	for _, ag := range c.agentRegistry.ListEnabled() {
-		if c.discovery != nil && !available[ag.ID()] {
-			continue
+	for _, ag := range c.agentRegistry.List() {
+		capability := agents.RuntimeUpdateCapabilities(ag)
+		target := runtimeUpdateStatusTarget{
+			agentName: ag.ID(), displayName: ag.DisplayName(), capability: capability,
+			available: c.discovery == nil || available[ag.ID()], enabled: ag.Enabled(),
 		}
-		managed, ok := ag.(agents.ManagedNPMRuntimeAgent)
-		if !ok {
-			continue
+		target.packageName = capability.Source.NPM
+		if capability.Source.GitHubRepository != "" {
+			target.packageName = "github:" + capability.Source.GitHubRepository
 		}
-		spec := managed.ManagedNPMRuntime()
-		packageName := strings.TrimSpace(spec.Package)
-		if packageName == "" {
-			continue
+		if c.runtimeUpdater != nil {
+			if caps, found := c.runtimeUpdater.CurrentCapabilities(ag.ID()); found {
+				target.currentVersion = caps.AgentVersion
+			}
 		}
-		defaultVersion := strings.TrimSpace(spec.DefaultVersionOrPinned())
-		if _, err := managedruntime.ParseStableVersion(defaultVersion); err != nil {
-			// Custom test/extension agents are not part of the built-in managed
-			// catalogue and must not create an unverifiable status item.
-			continue
+		target.effectiveVersion = target.currentVersion
+		if capability.Managed != nil {
+			target.activeVersion, target.effectiveVersion, target.defaultVersion, target.selectionErr = c.runtimeVersions(ctx, ag.ID(), *capability.Managed)
 		}
-		activeVersion, effectiveVersion, _, selectionErr := c.runtimeVersions(ctx, ag.ID(), spec)
-		if selectionErr != nil {
-			effectiveVersion = defaultVersion
-		}
-		targets = append(targets, runtimeUpdateStatusTarget{
-			agentName:        ag.ID(),
-			packageName:      packageName,
-			defaultVersion:   defaultVersion,
-			activeVersion:    activeVersion,
-			effectiveVersion: effectiveVersion,
-			selectionErr:     selectionErr,
-		})
+		targets = append(targets, target)
 	}
 	return targets, nil
 }
@@ -189,6 +225,9 @@ func (c *Controller) runtimeUpdateStatusEntry(
 	packageName string,
 	now time.Time,
 ) runtimeUpdateStatusCacheEntry {
+	if ctx.Err() != nil {
+		return runtimeUpdateStatusCacheEntry{}
+	}
 	c.runtimeUpdateStatusMu.Lock()
 	if entry, ok := c.runtimeUpdateStatusCache[packageName]; ok && now.Before(entry.expiresAt) {
 		c.runtimeUpdateStatusMu.Unlock()
@@ -201,57 +240,82 @@ func (c *Controller) runtimeUpdateStatusEntry(
 	}
 	c.runtimeUpdateStatusMu.Unlock()
 
-	lookup <- struct{}{}
-	defer func() { <-lookup }()
-
-	// Recheck after waiting for the bounded slot so concurrent requests do not
-	// repeat a lookup that another waiter already completed.
-	c.runtimeUpdateStatusMu.Lock()
-	if entry, ok := c.runtimeUpdateStatusCache[packageName]; ok && now.Before(entry.expiresAt) {
+	result := c.runtimeUpdateStatusFlight.DoChan(packageName, func() (interface{}, error) {
+		lookupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), runtimeUpdateStatusLookupTimeout)
+		defer cancel()
+		select {
+		case lookup <- struct{}{}:
+		case <-lookupCtx.Done():
+			return runtimeUpdateStatusCacheEntry{}, nil
+		}
+		defer func() { <-lookup }()
+		c.runtimeUpdateStatusMu.Lock()
+		cached, found := c.runtimeUpdateStatusCache[packageName]
 		c.runtimeUpdateStatusMu.Unlock()
-		return entry
+		if found && now.Before(cached.expiresAt) {
+			return cached, nil
+		}
+		latest, metadata, err := c.resolveRuntimeUpdateLatest(lookupCtx, packageName)
+		entry := runtimeUpdateStatusCacheEntry{expiresAt: now.Add(runtimeUpdateStatusFailureTTL)}
+		if err == nil {
+			entry.latest, entry.ok, entry.checkedAt, entry.expiresAt = latest, true, now, now.Add(runtimeUpdateStatusSuccessTTL)
+			entry.metadata = metadata
+		}
+		c.runtimeUpdateStatusMu.Lock()
+		if c.runtimeUpdateStatusCache == nil {
+			c.runtimeUpdateStatusCache = make(map[string]runtimeUpdateStatusCacheEntry)
+		}
+		c.runtimeUpdateStatusCache[packageName] = entry
+		c.runtimeUpdateStatusMu.Unlock()
+		return entry, nil
+	})
+	select {
+	case <-ctx.Done():
+		return runtimeUpdateStatusCacheEntry{}
+	case value := <-result:
+		return value.Val.(runtimeUpdateStatusCacheEntry)
 	}
-	c.runtimeUpdateStatusMu.Unlock()
-
-	lookupCtx, cancel := context.WithTimeout(ctx, runtimeUpdateStatusLookupTimeout)
-	defer cancel()
-	latest, err := c.resolveRuntimeUpdateLatest(lookupCtx, packageName)
-	entry := runtimeUpdateStatusCacheEntry{}
-	if err == nil {
-		entry.latest = latest
-		entry.ok = true
-		entry.checkedAt = now
-		entry.expiresAt = now.Add(runtimeUpdateStatusSuccessTTL)
-	} else {
-		entry.expiresAt = now.Add(runtimeUpdateStatusFailureTTL)
-	}
-	c.runtimeUpdateStatusMu.Lock()
-	if c.runtimeUpdateStatusCache == nil {
-		c.runtimeUpdateStatusCache = make(map[string]runtimeUpdateStatusCacheEntry)
-	}
-	c.runtimeUpdateStatusCache[packageName] = entry
-	c.runtimeUpdateStatusMu.Unlock()
-	return entry
 }
 
-func (c *Controller) resolveRuntimeUpdateLatest(ctx context.Context, packageName string) (string, error) {
+func (c *Controller) resolveRuntimeUpdateLatest(ctx context.Context, packageName string) (string, *RuntimeVersionMetadata, error) {
 	c.runtimeUpdateStatusMu.Lock()
 	resolver := c.runtimeUpdateStatusResolver
 	c.runtimeUpdateStatusMu.Unlock()
 	if resolver != nil {
-		return validateRuntimeUpdateLatest(resolver(ctx, packageName))
+		latest, err := validateRuntimeUpdateLatest(resolver(ctx, packageName))
+		return latest, nil, err
+	}
+	if strings.HasPrefix(packageName, "github:") {
+		latest, err := c.resolveGitHubRuntimeRelease(ctx, strings.TrimPrefix(packageName, "github:"))
+		return latest, nil, err
 	}
 	if c.runtimeUpdater == nil {
-		return "", errors.New("runtime updater unavailable")
+		return "", nil, errors.New("runtime updater unavailable")
 	}
 	if metadataResolver, ok := c.runtimeUpdater.(RuntimeVersionResolver); ok {
 		metadata, err := metadataResolver.ResolveVersions(ctx, packageName)
 		if err != nil {
-			return "", err
+			return "", nil, err
 		}
-		return validateRuntimeUpdateLatest(metadata.Latest, nil)
+		latest, err := validateRuntimeUpdateLatest(metadata.Latest, nil)
+		metadata.Versions = append([]string(nil), metadata.Versions...)
+		return latest, &metadata, err
 	}
-	return validateRuntimeUpdateLatest(c.runtimeUpdater.ResolveTarget(ctx, packageName))
+	latest, err := validateRuntimeUpdateLatest(c.runtimeUpdater.ResolveTarget(ctx, packageName))
+	return latest, nil, err
+}
+
+func (c *Controller) validateAutomaticRuntimeTarget(ctx context.Context, spec agents.ManagedNPMRuntimeSpec, target string) error {
+	now := c.runtimeUpdateStatusTime()
+	c.runtimeUpdateStatusMu.Lock()
+	entry := c.runtimeUpdateStatusCache[spec.Package]
+	c.runtimeUpdateStatusMu.Unlock()
+	if entry.ok && now.Before(entry.expiresAt) && entry.latest == target && entry.metadata != nil {
+		return validateRuntimeCatalogueTarget(*entry.metadata, target)
+	}
+	lookupCtx, cancel := context.WithTimeout(ctx, runtimeUpdateStatusLookupTimeout)
+	defer cancel()
+	return c.validateAgentUpdateTarget(lookupCtx, spec, target)
 }
 
 func validateRuntimeUpdateLatest(latest string, err error) (string, error) {

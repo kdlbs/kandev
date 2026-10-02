@@ -387,7 +387,12 @@ service temp path short enough for local Unix-domain socket paths; an excessivel
 exceed the platform socket-address limit.
 
 Persistent Go build caching is separate: Go's default `GOCACHE` is not derived from `TMPDIR`, and
-Kandev injects its managed Go-cache location only when that opt-in Storage setting is enabled.
+Kandev injects its managed Go-cache location only when that opt-in Storage setting is enabled. If
+Kandev cannot prepare that cache for a host-local execution, the agent still starts without the
+managed override. This fallback does not change the saved setting or cache data. Go tools then use
+an independently configured `GOCACHE` or Go's normal default; a tool can still fail if that cache
+is unusable. Adoption, cleanup, restore, and deletion keep strict path checks and reject unsafe
+symlinks.
 Scratch cleanup in the inherited temporary directory belongs to the operating system or the host's
 temporary-file policy. Archive and delete stop and reap the task's host-local processes, but do not
 recursively delete shared temporary files.

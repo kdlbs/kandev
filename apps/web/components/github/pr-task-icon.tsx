@@ -30,6 +30,7 @@ import {
   getCompactPRStatusAccessibleLabels,
   getCompactStaleWorkflowPRs,
   getCompactWorkflowStatusSummaries,
+  getNegativeWorkflowApprovalDisclosure,
   getProjectedPRRepository,
 } from "./pr-task-workflow-projection";
 
@@ -488,6 +489,41 @@ function getStaleWorkflowPRs(prs: TaskPR[]) {
   });
 }
 
+function getTaskPRIconDisclosureProjection(
+  prs: TaskPR[],
+  presentation: TaskPRIconPresentation,
+  prInfo: TaskPRInfo | undefined,
+  compactWorkflowApprovalAuthoritative: boolean,
+) {
+  if (!compactWorkflowApprovalAuthoritative || !prInfo) {
+    return { summaries: presentation.summaries };
+  }
+
+  const compactSummaries = getCompactWorkflowStatusSummaries(prInfo);
+  if (prInfo.workflowApprovalRequired === false) {
+    const negativeDisclosure = getNegativeWorkflowApprovalDisclosure(
+      prs,
+      presentation.summaries,
+      prInfo,
+      compactSummaries,
+    );
+    return {
+      summaries: negativeDisclosure.summaries,
+      count: negativeDisclosure.count,
+      identity: negativeDisclosure.identity,
+    };
+  }
+
+  const identity =
+    compactSummaries.length === 1
+      ? {
+          number: compactSummaries[0].number,
+          repository: getProjectedPRRepository(prInfo, compactSummaries[0].number),
+        }
+      : undefined;
+  return { summaries: compactSummaries, count: compactSummaries.length, identity };
+}
+
 function getTaskPRIconViewModel(
   prs: TaskPR[],
   prInfo: TaskPRInfo | undefined,
@@ -503,18 +539,12 @@ function getTaskPRIconViewModel(
     compactWorkflowApprovalAuthoritative && prInfo
       ? getCompactStaleWorkflowPRs(prInfo)
       : getStaleWorkflowPRs(prs);
-  const compactDisclosureSummaries =
-    compactWorkflowApprovalAuthoritative && prInfo
-      ? getCompactWorkflowStatusSummaries(prInfo)
-      : undefined;
-  const disclosureSummaries = compactDisclosureSummaries ?? presentation.summaries;
-  const projectedDisclosureIdentity =
-    compactDisclosureSummaries?.length === 1
-      ? {
-          number: compactDisclosureSummaries[0].number,
-          repository: getProjectedPRRepository(prInfo, compactDisclosureSummaries[0].number),
-        }
-      : undefined;
+  const disclosure = getTaskPRIconDisclosureProjection(
+    prs,
+    presentation,
+    prInfo,
+    compactWorkflowApprovalAuthoritative,
+  );
   const statusLabels = getTaskPRIconStatusLabels(
     prs,
     prInfo,
@@ -542,10 +572,10 @@ function getTaskPRIconViewModel(
     ...presentation,
     compactWorkflowApprovalAuthoritative,
     staleWorkflowPRs,
-    disclosureSummaries,
-    disclosurePRNumber: projectedDisclosureIdentity?.number,
-    disclosurePRRepository: projectedDisclosureIdentity?.repository,
-    disclosurePRCount: compactDisclosureSummaries?.length,
+    disclosureSummaries: disclosure.summaries,
+    disclosurePRNumber: disclosure.identity?.number,
+    disclosurePRRepository: disclosure.identity?.repository,
+    disclosurePRCount: disclosure.count,
     hasMergeConflicts,
     ariaLabel,
   };

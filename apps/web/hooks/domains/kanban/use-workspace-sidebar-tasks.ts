@@ -17,7 +17,7 @@ import { pickFreshestStatusSummary } from "@/lib/task-status-summary";
 import { useShallow } from "zustand/react/shallow";
 
 export type WorkspaceSidebarTasksResult = AggregatedSidebarTasks & {
-  pendingArchiveTaskIds: ReadonlySet<string>;
+  pendingRemovalTaskIds: ReadonlySet<string>;
   workflows: TaskMoveWorkflow[];
   wipQueueByTaskId: Map<string, WipQueueStatus>;
   isLoading: boolean;
@@ -317,19 +317,18 @@ export function useWorkspaceSidebarTasks(
 
   const { pageEntries, allTasks } = useSidebarPageTasks(workspaceId, page, activeTaskOnly);
 
-  const pendingArchiveTaskIds = useMemo(() => {
+  const pendingRemovalTaskIds = useMemo(() => {
     const pending = new Set<string>();
-    const activeTaskIds = new Set(
-      allTasks.filter((task) => task.isArchived !== true).map((task) => task.id),
-    );
-    for (const [taskId, token] of Object.entries(taskRemoval.pendingTokenByTaskId)) {
+    for (const task of allTasks) {
+      const token = taskRemoval.pendingTokenByTaskId[task.id];
+      if (!token) continue;
       const operation = taskRemoval.operationsByToken[token];
       if (
-        activeTaskIds.has(taskId) &&
-        operation?.action === "archive" &&
-        operation.workspaceId === workspaceId
+        operation?.workspaceId === workspaceId &&
+        (operation?.action === "delete" ||
+          (operation?.action === "archive" && task.isArchived !== true))
       ) {
-        pending.add(taskId);
+        pending.add(task.id);
       }
     }
     return pending;
@@ -363,7 +362,7 @@ export function useWorkspaceSidebarTasks(
   return {
     ...emptyMetadata,
     allTasks,
-    pendingArchiveTaskIds,
+    pendingRemovalTaskIds,
     allSteps,
     stepsByWorkflowId,
     wipQueueByTaskId,

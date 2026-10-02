@@ -212,3 +212,30 @@ it("keeps lookups read-only and treats committed workspace changes as hard barri
   request.release();
   expect(cache.get("b")).toBeNull();
 });
+
+it("invalidates cached pages without restarting reads on deletion and unsubscribes consumers", async () => {
+  const { cache } = setup();
+  await load(cache, "a");
+  let resolve!: (value: SidebarTaskPageResponse) => void;
+  vi.mocked(querySidebarTasks).mockReturnValueOnce(
+    new Promise((done) => {
+      resolve = done;
+    }),
+  );
+  const request = cache.request("ws", query, "b");
+  const signal = vi.mocked(querySidebarTasks).mock.calls.at(-1)?.[2]?.init?.signal;
+  const live = vi.fn(),
+    disposed = vi.fn();
+  cache.subscribeDeletedTasks(live);
+  const unsubscribe = cache.subscribeDeletedTasks(disposed);
+  unsubscribe();
+  cache.removeTasks(new Set(["deleted"]));
+  expect(signal?.aborted).toBe(false);
+  expect(cache.get("a")).toBeNull();
+  expect(live).toHaveBeenCalledWith(new Set(["deleted"]));
+  expect(disposed).not.toHaveBeenCalled();
+  resolve(page("b"));
+  expect((await request.promise).provisional).toBe(true);
+  expect(cache.get("b")).toBeNull();
+  request.release();
+});

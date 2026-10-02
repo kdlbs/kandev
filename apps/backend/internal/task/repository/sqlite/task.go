@@ -3565,6 +3565,9 @@ func (r *Repository) DeleteTaskWithVacatedStep(ctx context.Context, id string) (
 	if err != nil {
 		return "", err
 	}
+	if err := r.purgeTaskPromptSequenceTx(ctx, tx, id, sessions); err != nil {
+		return "", err
+	}
 	result, err := tx.ExecContext(ctx, r.db.Rebind(`DELETE FROM tasks WHERE id = ?`), id)
 	if err != nil {
 		return "", err
@@ -5207,48 +5210,88 @@ func (r *Repository) ListExpiredQuickChatTasks(ctx context.Context, cutoff time.
 // DeleteExpiredQuickChatTask deletes id only when it still matches the expired
 // quick-chat predicate at delete time.
 func (r *Repository) DeleteExpiredQuickChatTask(ctx context.Context, id string, cutoff time.Time) (bool, error) {
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return false, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := r.lockTaskRowInTx(ctx, tx, id); err != nil {
+		if errors.Is(err, ErrTaskNotFound) {
+			return false, nil
+		}
+		return false, err
+	}
+
 	drv := r.db.DriverName()
 	sessionActivity := "COALESCE(MAX(ts.updated_at), t.updated_at)"
 	lastActivity := dialect.GreatestTimestamp(drv, "t.updated_at", sessionActivity)
-	query := fmt.Sprintf(`
-		WITH candidate AS (
-			SELECT t.id, %s AS last_activity
-			FROM tasks t
-			LEFT JOIN task_sessions ts ON ts.task_id = t.id
-			WHERE t.id = ?
-				AND t.is_ephemeral = 1
-				AND COALESCE(t.workflow_id, '') = ''
-				AND COALESCE(t.origin, '') != ?
-				AND %s
-				AND t.archived_at IS NULL
-				AND NOT EXISTS (
-					SELECT 1 FROM task_sessions active
-					WHERE active.task_id = t.id
-						AND active.state IN (?, ?)
-				)
-			GROUP BY t.id, t.updated_at
-			HAVING %s < ?
-		)
-		DELETE FROM tasks
-		WHERE id = ?
-			AND EXISTS (SELECT 1 FROM candidate)
+	candidate := fmt.Sprintf(`
+		SELECT t.id, %s AS last_activity
+		FROM tasks t
+		LEFT JOIN task_sessions ts ON ts.task_id = t.id
+		WHERE t.id = ?
+			AND t.is_ephemeral = 1
+			AND COALESCE(t.workflow_id, '') = ''
+			AND COALESCE(t.origin, '') != ?
+			AND %s
+			AND t.archived_at IS NULL
+			AND NOT EXISTS (
+				SELECT 1 FROM task_sessions active
+				WHERE active.task_id = t.id
+					AND active.state IN (?, ?)
+			)
+		GROUP BY t.id, t.updated_at
+		HAVING %s < ?
 	`,
 		lastActivity,
 		excludeConfigModePredicate(drv, "t.metadata"),
 		lastActivity,
 	)
-	result, err := r.db.ExecContext(ctx, r.db.Rebind(query),
+	candidateArgs := []any{
 		id,
 		models.TaskOriginAutomationRun,
 		models.TaskSessionStateRunning,
 		models.TaskSessionStateIdle,
 		cutoff,
-		id,
-	)
+	}
+	var eligible bool
+	if err := tx.GetContext(ctx, &eligible, r.db.Rebind(
+		"WITH candidate AS ("+candidate+") SELECT EXISTS (SELECT 1 FROM candidate)",
+	), candidateArgs...); err != nil {
+		return false, err
+	}
+	if !eligible {
+		if err := tx.Commit(); err != nil {
+			return false, err
+		}
+		return false, nil
+	}
+
+	sessions, err := r.taskQueueSessionsInTx(ctx, tx, id)
 	if err != nil {
 		return false, err
 	}
-	rows, _ := result.RowsAffected()
+	if err := lockSessionTurnWrites(ctx, tx, r.db.DriverName(), sessions...); err != nil {
+		return false, err
+	}
+	query := "WITH candidate AS (" + candidate + ") DELETE FROM tasks WHERE id = ? AND EXISTS (SELECT 1 FROM candidate)"
+	candidateArgs = append(candidateArgs, id)
+	result, err := tx.ExecContext(ctx, r.db.Rebind(query), candidateArgs...)
+	if err != nil {
+		return false, err
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	if rows > 0 {
+		if err := r.purgePromptSequencesForSessionsTx(ctx, tx, sessions); err != nil {
+			return false, err
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return false, err
+	}
 	return rows > 0, nil
 }
 

@@ -657,6 +657,7 @@ and workflow selections support up to 1,000 values per filter; the limits apply
 to each selected value, not to the combined selection.
 
 - Search matches tasks without changing their state.
+- On Kanban and Pipeline boards, selecting a repository includes tasks linked to it, including tasks whose primary repository is different.
 - The display menu groups its controls into collapsible **Filters**, **Sort**, **Preview panel**, and, in **List**, **List rows** sections. Each section shows its current values while collapsed. Filters cover **Workflow**, **Repository**, and, in Kanban, **Priority**; registered plugin filters appear there when available. In Kanban/Pipeline, each workflow lane has a **Columns** menu outside these groups to hide individual steps. Unticking a step hides its column and tasks on that board, scoped to its own workflow, until you re-tick it. The optional **Auto-hide empty columns** setting collapses unoccupied steps without changing those manual choices; auto-hidden empty steps return as move destinations while a task is being moved, while manually hidden steps remain unavailable for pointer and bulk moves. On phones, tap the listing-title dropdown to open **View options** and expand the same display groups and change columns for the focused workflow.
 - In **List**, the display menu can enable **Show task details** to include available repository, description, pull-request, session, parent, review, and archive context in each row. This option is off by default and follows the user across devices.
 - **List** can group by **Workflow step**, **Workflow**, **Repository**, or **None**. Workflow step uses configured step names and order, such as Backlog, Work, or Review. The icon on each task still shows its runtime status, which can differ from its workflow step. Old State grouping preferences and links open workflow step grouping.
@@ -894,6 +895,7 @@ Unarchiving a task cancels a pending worktree recheck. If the recheck is already
 
 **Delete**
 
+- While deletion is pending, the task stays dimmed with a spinner in the sidebar and phone task picker. It disappears when deletion succeeds. If deletion fails and the task is still available, the row returns to its normal state.
 - Delete is permanent. If **Also delete _N_ subtasks** is off, direct children become root tasks. If it is on, Kandev deletes the descendants.
 - Executor cleanup follows the same asynchronous retry and restart-reconciliation rules as archive.
 - When a task has a `RUNNING` agent, the dialog warns that deletion discards in-progress work. Delete always shows this warning. Archive shows it only when confirmation is on.

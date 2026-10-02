@@ -2,7 +2,7 @@
 status: active
 system: platform
 created: 2026-07-19
-updated: 2026-09-30
+updated: 2026-10-02
 owners:
   - kandev
 ---
@@ -68,6 +68,7 @@ A failed live source still cannot authorize an unmarked persisted fallback.
 - **AC-PLATFORM-WORKSPACE-GIT-STATUS-001.33:** A failed Git detail command cannot certify an empty diff or zero statistics as ready. Healthy files and facets retain ready detail where available, failed detail is identifiable, ordinary same-fingerprint observations do not restart unavailable enrichment, and an explicit refresh can retry it without repository mutation.
 - **AC-PLATFORM-WORKSPACE-GIT-STATUS-001.34:** An unavailable implicit comparison reference can make ancestry totals unavailable without invalidating independently successful per-file diffs.
 - **AC-PLATFORM-WORKSPACE-GIT-STATUS-001.35:** A WebSocket connection admits at most four concurrent session Git refresh operations. Excess requests receive a correlated unavailable result without starting source work.
+- **AC-PLATFORM-WORKSPACE-GIT-STATUS-001.36:** For every eligible tracked changed path in a stable observation, successful diff enrichment shall associate statistics and patch content with the exact repository-relative path in the file-membership snapshot, including Unicode, quoting characters, literal rename-like text, tabs, newlines, and leading or trailing whitespace supported by the task filesystem. Actual renames shall enrich the destination path while preserving observed rename metadata. This applies independently to flattened, staged, and unstaged representations; binary and content-unchanged changes may legitimately have zero line counts.
 
 ## Out of scope
 

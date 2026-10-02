@@ -126,9 +126,10 @@ describe("useLazyLoadMessages loadMore", () => {
     storeMock.meta.isLoadingMore = true;
     storeMock.meta.oldestCursor = "m3";
 
-    // A concurrent caller (e.g. the panel sentinel with join enabled) calls
-    // loadMore while the request is in flight: it must JOIN the shared
-    // promise (same count, no second HTTP request), not return 0.
+    // A concurrent caller (automatic backfill or a last-prompt preload while
+    // the transcript loads) calls loadMore while the request is in flight: it
+    // must JOIN the shared promise (same count, no second HTTP request), not
+    // return 0.
     const second = result.current.loadMore();
 
     await act(async () => {
@@ -176,115 +177,7 @@ describe("useLazyLoadMessages loadMore", () => {
   });
 });
 
-describe("useLazyLoadMessages minUserPromptsPerLoad", () => {
-  it("loads multiple pages until at least the threshold of user prompts arrives", async () => {
-    listTaskSessionMessages
-      .mockResolvedValueOnce(
-        wireTypedResponse(
-          [
-            { id: "m4", author_type: "user" },
-            { id: "m3", author_type: "agent" },
-            { id: "m2", author_type: "user" },
-          ],
-          true,
-        ),
-      )
-      .mockResolvedValueOnce(wireTypedResponse([{ id: "m1", author_type: "user" }], false));
-    const { result } = renderHook(() => useLazyLoadMessages("s1", { minUserPromptsPerLoad: 3 }));
-
-    await act(async () => {
-      await result.current.loadMore();
-    });
-
-    // Page 1 carries only 2 user prompts (below the threshold of 3), so a
-    // second page is fetched; page 2 brings the total to 3 and the loop stops.
-    expect(listTaskSessionMessages).toHaveBeenCalledTimes(2);
-    expect(listTaskSessionMessages).toHaveBeenNthCalledWith(2, "s1", {
-      limit: 20,
-      before: "m2",
-      sort: "desc",
-    });
-    expect(storeMock.bySession.filter((m) => m.author_type === "user")).toHaveLength(3);
-  });
-
-  it("continues the accumulation loop after joining a request once it settles", async () => {
-    const { promise: pagePromise, resolve: resolvePage } = Promise.withResolvers<unknown>();
-    listTaskSessionMessages.mockReturnValueOnce(pagePromise);
-    listTaskSessionMessages.mockResolvedValueOnce(
-      wireTypedResponse([{ id: "m1", author_type: "user" }], false),
-    );
-    const { result } = renderHook(() => useLazyLoadMessages("s1", { minUserPromptsPerLoad: 3 }));
-
-    // A transcript-owned request is in flight for the current cursor; the
-    // panel's loadMore joins it.
-    storeMock.meta.isLoadingMore = true;
-    const loadPromise = result.current.loadMore();
-    // The joined flight is the session's LAST: the coordinator clears the
-    // store's flag before the join promise resolves.
-    await act(async () => {
-      storeMock.meta.isLoadingMore = false;
-      resolvePage(
-        wireTypedResponse(
-          [
-            { id: "m4", author_type: "user" },
-            { id: "m3", author_type: "agent" },
-          ],
-          true,
-        ),
-      );
-    });
-    await act(async () => {
-      await loadPromise;
-    });
-
-    // The loop continued past the joined page (page 2 fetched) instead of
-    // stopping on the stale in-flight flag.
-    expect(listTaskSessionMessages).toHaveBeenCalledTimes(2);
-    expect(listTaskSessionMessages).toHaveBeenNthCalledWith(2, "s1", {
-      limit: 20,
-      before: "m3",
-      sort: "desc",
-    });
-  });
-
-  it("stops after a zero-result page even when the threshold is unmet", async () => {
-    listTaskSessionMessages
-      .mockResolvedValueOnce(wireTypedResponse([{ id: "m1", author_type: "user" }], true))
-      .mockResolvedValueOnce(wireTypedResponse([], true));
-    const { result } = renderHook(() => useLazyLoadMessages("s1", { minUserPromptsPerLoad: 3 }));
-
-    await act(async () => {
-      await result.current.loadMore();
-    });
-
-    expect(listTaskSessionMessages).toHaveBeenCalledTimes(2);
-  });
-
-  it("stops accumulating when a page loads prompt #1", async () => {
-    listTaskSessionMessages
-      .mockResolvedValueOnce(
-        wireTypedResponse(
-          [
-            { id: "m3", author_type: "agent" },
-            { id: "m2", author_type: "user", prompt_index: 2 },
-          ],
-          true,
-        ),
-      )
-      .mockResolvedValueOnce(
-        wireTypedResponse([{ id: "m1", author_type: "user", prompt_index: 1 }], true),
-      )
-      .mockResolvedValueOnce(wireTypedResponse([{ id: "hidden" }], false));
-    const { result } = renderHook(() => useLazyLoadMessages("s1", { minUserPromptsPerLoad: 3 }));
-
-    await act(async () => {
-      await result.current.loadMore();
-    });
-
-    expect(listTaskSessionMessages).toHaveBeenCalledTimes(2);
-    expect(storeMock.bySession.some((message) => message.prompt_index === 1)).toBe(true);
-  });
-
+describe("useLazyLoadMessages default targets", () => {
   it("fetches a single page when no threshold is set (transcript behavior)", async () => {
     listTaskSessionMessages.mockResolvedValueOnce(
       wireTypedResponse([{ id: "m1", author_type: "user" }], false),

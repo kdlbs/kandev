@@ -160,6 +160,7 @@ export const defaultUIState: UISliceState = {
   sessionFailureNotification: null,
   taskDeletedNotification: null,
   updateAvailableNotification: null,
+  updateAvailableNotificationQueue: [],
   bottomTerminal: { isOpen: false, pendingCommand: null },
   sidebarViews: createDefaultSidebarState(),
   sidebarViewsByWorkspace: {},
@@ -363,7 +364,20 @@ function buildNotificationActions(set: ImmerSet) {
       }),
     setUpdateAvailableNotification: (n: UISlice["updateAvailableNotification"]) =>
       set((draft) => {
-        draft.updateAvailableNotification = n;
+        if (!n) {
+          draft.updateAvailableNotification =
+            draft.updateAvailableNotificationQueue.shift() ?? null;
+          return;
+        }
+        if (
+          draft.updateAvailableNotification?.occurrence_id === n.occurrence_id ||
+          draft.updateAvailableNotificationQueue.some(
+            (queued) => queued.occurrence_id === n.occurrence_id,
+          )
+        )
+          return;
+        if (draft.updateAvailableNotification) draft.updateAvailableNotificationQueue.push(n);
+        else draft.updateAvailableNotification = n;
       }),
   };
 }

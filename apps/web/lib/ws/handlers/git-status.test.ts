@@ -213,6 +213,40 @@ describe("git-status WS handler — commit events", () => {
 });
 
 describe("git-status WS handler — status ordering", () => {
+  it("accepts root enrichment after a newer child snapshot without accepting stale root data", () => {
+    const store = freshStore();
+    const handler = gitStatusHandler(store);
+    const root = statusUpdateEvent(ORDERED_STATUS_TIME_1, "");
+    root.status.detail_state = "pending";
+    root.status.tracker_id = "root-tracker";
+    root.status.snapshot_revision = 3;
+    handler(gitEvent(root));
+
+    const child = statusUpdateEvent(ORDERED_STATUS_TIME_3, "child patch");
+    child.status.repository_name = "vendor/child";
+    child.status.tracker_id = "child-tracker";
+    child.status.snapshot_revision = 4;
+    handler(gitEvent(child));
+
+    const ready = statusUpdateEvent(ORDERED_STATUS_TIME_2, ACCEPTED_DIFF);
+    ready.status.detail_state = "ready";
+    ready.status.tracker_id = "root-tracker";
+    ready.status.snapshot_revision = 4;
+    handler(gitEvent(ready));
+
+    expect(store.getState().gitStatus.byEnvironmentRepo[SESSION][""].files["a.ts"].diff).toBe(
+      ACCEPTED_DIFF,
+    );
+    expect(
+      store.getState().gitStatus.byEnvironmentRepo[SESSION]["vendor/child"].files["a.ts"].diff,
+    ).toBe("child patch");
+    handler(gitEvent(root));
+    expect(store.getState().gitStatus.byEnvironmentRepo[SESSION][""].detail_state).toBe("ready");
+    expect(store.getState().gitStatus.byEnvironmentRepo[SESSION][""].files["a.ts"].diff).toBe(
+      ACCEPTED_DIFF,
+    );
+  });
+
   it("stores the status-level submodule marker", () => {
     const store = freshStore();
     const handler = gitStatusHandler(store);

@@ -1221,27 +1221,35 @@ func (p staticManagedGoCacheEnvironment) ExecutionEnvironment(context.Context) (
 	return map[string]string{"GOCACHE": p.path}, nil
 }
 
-func TestPrepareManagedGoCacheEnvironmentOverridesLocalRequest(t *testing.T) {
+func TestPrepareManagedGoCacheEnvironmentPreservesRequestUntilComposition(t *testing.T) {
 	mgr := newTestManager(t)
 	managedPath := filepath.Join(t.TempDir(), "cache", "go-build")
 	mgr.SetManagedGoCacheEnvironmentProvider(staticManagedGoCacheEnvironment{path: managedPath})
+	requestedPath := "/home/user/.cache/go-build"
 	req := &LaunchRequest{
 		ExecutorType: "local_pc",
-		Env:          map[string]string{"GOCACHE": "/home/user/.cache/go-build"},
+		Env:          map[string]string{"GOCACHE": requestedPath},
 	}
 
 	err := mgr.prepareManagedGoCacheEnvironment(context.Background(), req)
 	if err != nil {
 		t.Fatalf("prepareManagedGoCacheEnvironment() error = %v", err)
 	}
-	if got := req.Env["GOCACHE"]; got != managedPath {
-		t.Fatalf("request GOCACHE = %q, want %q", got, managedPath)
+	if got := req.Env["GOCACHE"]; got != requestedPath {
+		t.Fatalf("request GOCACHE = %q, want preserved input %q", got, requestedPath)
 	}
 	if req.managedGoCachePath != managedPath {
 		t.Fatalf("managedGoCachePath = %q, want %q", req.managedGoCachePath, managedPath)
 	}
 	if got, _ := req.Metadata[managedGoCacheMetadataKey].(string); got != managedPath {
 		t.Fatalf("managed cache metadata = %q, want %q", got, managedPath)
+	}
+	resolved, err := mgr.buildEnvForExecution(context.Background(), "exec-1", req, nil, nil)
+	if err != nil {
+		t.Fatalf("buildEnvForExecution() error = %v", err)
+	}
+	if got := resolved["GOCACHE"]; got != managedPath {
+		t.Fatalf("resolved GOCACHE = %q, want managed path %q", got, managedPath)
 	}
 }
 
@@ -1258,11 +1266,13 @@ func TestManagedGoCacheEnvironmentPropagatesToPrepareAndRuntime(t *testing.T) {
 		t.Fatalf("prepareManagedGoCacheEnvironment() error = %v", err)
 	}
 
-	prepareEnv := buildEnvPrepareRequest(req, "/tmp/workspace", executor.NameStandalone).Env
 	runtimeEnv, err := mgr.buildEnvForExecution(context.Background(), "exec-1", req, nil, nil)
 	if err != nil {
 		t.Fatalf("buildEnvForExecution() error = %v", err)
 	}
+	preparedReq := *req
+	preparedReq.Env = runtimeEnv
+	prepareEnv := buildEnvPrepareRequest(&preparedReq, "/tmp/workspace", executor.NameStandalone).Env
 	if prepareEnv["GOCACHE"] != managedPath || runtimeEnv["GOCACHE"] != managedPath {
 		t.Fatalf("GOCACHE diverged: prepare=%q runtime=%q want=%q",
 			prepareEnv["GOCACHE"], runtimeEnv["GOCACHE"], managedPath)

@@ -28,14 +28,6 @@ export type MessagesState = {
   >;
 };
 
-/** Prompts are fetched independently from the transcript with their own page metadata. */
-export type PromptsState = MessagesState & {
-  /** Incremented when a session is removed to reject stale prompt requests. */
-  generationBySession: Record<string, number>;
-  /** Incremented whenever an authoritative prompt refresh begins. */
-  refreshGenerationBySession: Record<string, number>;
-};
-
 export type TurnsState = {
   bySession: Record<string, Turn[]>;
   activeBySession: Record<string, string | null>; // sessionId -> active turnId
@@ -269,7 +261,6 @@ export type QueueState = {
 
 export type SessionSliceState = {
   messages: MessagesState;
-  messagePrompts: PromptsState;
   turns: TurnsState;
   taskSessions: TaskSessionsState;
   taskSessionsByTask: TaskSessionsByTaskState;
@@ -334,18 +325,6 @@ export type SessionSliceActions = {
   ) => void;
   /** Sets the session's message-loading flag. */
   setMessagesLoading: (sessionId: string, loading: boolean) => void;
-  replacePromptMessages: (
-    sessionId: string,
-    messages: Message[],
-    meta?: { hasMore?: boolean; oldestCursor?: string | null },
-  ) => void;
-  prependPromptMessages: (
-    sessionId: string,
-    messages: Message[],
-    meta?: { hasMore?: boolean; oldestCursor?: string | null },
-  ) => void;
-  setPromptMessagesLoading: (sessionId: string, loading: boolean) => void;
-  setPromptMessagesLoadingMore: (sessionId: string, loading: boolean) => void;
   /** Upserts a turn row, rejecting stale updates (see shouldApplyTurnUpdate). */
   addTurn: (turn: Turn) => void;
   /** Merges a complete REST snapshot and reconciles its marker atomically. */
