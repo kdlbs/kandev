@@ -198,4 +198,10 @@ Navigation branch setup now creates and pushes fixture commits from a temporary 
 - `pnpm e2e:run --project mobile-chrome tests/task/mobile-task-navigation-responsiveness.spec.ts` passed 1/1.
 - Web typecheck, targeted ESLint, Prettier, i18n ratchet, E2E sleep ratchet, and `git diff --check` passed.
 
-The fixture isolation change is not yet on the PR head. Fresh PR CI and retry-artifact verification remain outstanding.
+Fixture isolation is pushed as `8bcf6d838ef`. Fresh PR CI on that head completed with 50 passed, 16 skipped, and no failed or pending checks. The first `pr-walkthrough-generate` attempt stopped at the model deadline; rerunning that failed job passed.
+
+- The final E2E retry summary recorded 3,645 executed tests, 47 skipped, zero final failures/timeouts, and four tests that passed after retry (five retry attempts total). The dirty-checkout regression passed on its first attempt.
+- The four retry-only cases were the office taskless-routine test, session refresh-efficiency test, disabled-agent-profile navigation test, and the existing mounted-task-panel request-deduplication test. The latter had two duplicate-request assertion failures before passing; the focused desktop spec passed all four tests locally.
+- `scripts/playwright-blob-audit` found no parse errors. It reported the retry-only failures above; no final unexpected outcome remained.
+- `scripts/pr-state --summary 4151` showed no failed or pending checks and zero unresolved review threads. `git merge-tree --write-tree FETCH_HEAD HEAD` was conflict-free against current `main` `1793d42de0a`.
+- Local desktop navigation E2E passed 4/4; mobile navigation E2E passed 1/1. Typecheck, targeted ESLint, Prettier, i18n ratchet, E2E sleep ratchet, and `git diff --check` passed.
