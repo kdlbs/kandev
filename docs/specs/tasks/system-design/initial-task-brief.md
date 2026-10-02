@@ -93,11 +93,11 @@ unchanged. Before admission, the synthetic description row represents the brief.
 After admission, prompt #1 replaces it and contains the brief plus instruction.
 No synthetic historical prompt, extra ordinal, or permanently pinned banner is needed.
 
-Reuse the existing transcript and Prompt History renderers. The nearest mobile
+Reuse the existing transcript renderer; the prompt-review surface is an external plugin panel, not a core renderer. The nearest mobile
 exemplar is `components/task/task-layout.tsx` and its `SessionMobileLayout`.
 Phone Chat remains a full-height destination with one transcript scroll owner.
 Composer position, safe-area handling, touch targets, and navigation remain unchanged.
-Long first prompts remain reachable through existing prompt expansion/history controls.
+Long first prompts remain reachable through the transcript's own rendering and, above the bounded-preview limit, its full-text download.
 
 ## Failure and compatibility
 

@@ -26,9 +26,9 @@ Authorization, safe DTOs, lifecycle fencing, core compatibility, and visible rec
 
 ## Purpose and boundaries
 
-This design adds the narrow public browser Host contracts required for a future external prompt-history plugin. The host continues to own authorization, transcript persistence, transport reconciliation, task-panel placement, native navigation, custom-prompt disclosure, and browser-local favorite state. The future plugin owns prompt-list derivation and presentation through those contracts.
+This design adds the narrow public browser Host contracts required for an external prompt-history plugin. The host continues to own authorization, transcript persistence, transport reconciliation, task-panel placement, native navigation, custom-prompt disclosure, and browser-local favorite state. The plugin owns prompt-list derivation and presentation through those contracts.
 
-The existing core feature remains the reference implementation. This package does not extract it. The [UI prompt-history requirements](../../ui/requirements/prompt-history-panel.md) remain authoritative for the product outcome; this plugin-system design is authoritative for the prerequisite boundary.
+The external plugin now exists, and the built-in core panel is removed by [Prompt History Extraction](prompt-history-extraction.md). The [UI prompt-history requirements](../../ui/requirements/prompt-history-panel.md) record the removed panel's behavior; this plugin-system design is authoritative for the prerequisite boundary, and the extraction design is authoritative for what core keeps and removes.
 
 ## Requirement mapping
 
@@ -52,9 +52,9 @@ Classification meanings:
 
 |Current contact point|Current responsibility|Classification|Target|
 |----------------------------------------------------------------------------------------------------------------------------------------------------------------------|-------------------------------------------------------------------------------------------------------------------|-----------------------------------------------------------------------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-|`apps/web/components/task/prompt-history-panel-content.tsx` (`PromptHistoryPanelContent`)|Coordinates active session, prompt pages, turns, loading/error/empty state, pagination sentinel, and rows.|lacking API contract|Future plugin composes public conversation hooks; core component stays until extraction.|
+|`apps/web/components/task/prompt-history-panel-content.tsx` (`PromptHistoryPanelContent`)|Coordinates active session, prompt pages, turns, loading/error/empty state, pagination sentinel, and rows.|lacking API contract|The plugin composes public conversation hooks; the core component is removed by [Prompt History Extraction](prompt-history-extraction.md).|
 |`apps/web/components/task/prompt-history-panel-row.tsx` (`PromptHistoryRow`)|Expansion, timestamps, durations, favorites, prompt mentions, accessible row navigation, touch/fine-pointer sizing.|lacking API contract|`host.ui.PromptMentionText`, `host.conversation.useMessageFavorite`, scoped `openMessage`, existing UI/i18n utilities.|
-|`apps/web/lib/prompt-history.ts` (`buildPromptHistoryEntries`)|Filters user prompts, stable ordering, duration bounds, sender-task marker, absolute prompt index.|lacking API contract, but plugin-owned logic|Copy behavior into the future plugin through public DTOs; no host utility is required.|
+|`apps/web/lib/prompt-history.ts` (`buildPromptHistoryEntries`)|Filters user prompts, stable ordering, duration bounds, sender-task marker, absolute prompt index.|lacking API contract, but plugin-owned logic|Copied into the plugin through public DTOs; the core builder is removed by [Prompt History Extraction](prompt-history-extraction.md).|
 |`apps/web/hooks/domains/session/use-session-prompts.ts`|Gap-aware initial user-message read and private prompt projection.|lacking API contract|`host.conversation.useSessionMessages`.|
 |`apps/web/hooks/use-lazy-load-prompts.ts` and `use-lazy-load-sentinel.ts`|Older-page loading, stale request guards, and intersection rearming.|lacking API contract for data; UI sentinel is plugin-owned|Host hook owns request lifecycle and `loadMore`; plugin may own intersection presentation.|
 |`apps/web/lib/state/slices/session/prompt-message-actions.ts`, `session-slice.ts`, and `types.ts`|Private prompt cache, ordering, merge/delete, loading metadata, generation fencing.|lacking API contract|Private implementation behind the Host hook; never exposed to SDK consumers.|
@@ -71,8 +71,8 @@ Classification meanings:
 |`apps/web/components/task/plugin-task-panel.tsx`, `lib/plugins/registry.ts`, and `lib/state/layout-manager/plugin-panels.ts`|Resolve, render, persist, and revoke generic plugin panels.|sufficient API contract for identity/lifecycle; contract change required for new props|Keep one `plugin-panel` component and extend its context plumbing only.|
 |`apps/web/components/task/dockview-add-panel-items.tsx`|Desktop add-panel entry and passthrough filtering for the core panel.|covered but contract change required|Evaluate generic task-panel visibility instead of prompt-history-specific plugin logic.|
 |`apps/web/components/task/mobile/plugin-panel-picker.tsx`, `session-mobile-bottom-nav.tsx`, `session-mobile-layout.tsx`|Grouped mobile Panels entry and full-height plugin panels.|sufficient API contract for placement; contract change required for visibility/navigation|Reuse the picker/full-height surface and inject context/capability.|
-|`apps/web/lib/state/layout-manager/constants.ts`, serializer, `apps/web/lib/layout/layout-profiles.ts`, `lib/state/layout-manager/plugin-panels.ts`, and layout editor|Built-in `prompt-history` identity and saved layout behavior.|covered but contract change required|Extend reusable-panel validation, serializer/restore, late plugin registration, removal/drop behavior, and editor definitions for `plugin:<pluginId>:<panelKey>`. All title reads use the reactive `resolveTaskPanelTitle`; built-in-to-plugin saved-ID migration remains later extraction work.|
-|`apps/web/src/locales/*/task.json` prompt-history keys|Core panel copy in five shipped locales.|sufficient core contract, not public plugin API|Future plugin registers its own catalogs through existing `host.i18n`; core keys stay in this package.|
+|`apps/web/lib/state/layout-manager/constants.ts`, serializer, `apps/web/lib/layout/layout-profiles.ts`, `lib/state/layout-manager/plugin-panels.ts`, and layout editor|Built-in `prompt-history` identity and saved layout behavior.|covered but contract change required|Extend reusable-panel validation, serializer/restore, late plugin registration, removal/drop behavior, and editor definitions for `plugin:<pluginId>:<panelKey>`. All title reads use the reactive `resolveTaskPanelTitle`; the built-in id is dropped on restore rather than migrated to the plugin's id, as [Prompt History Extraction](prompt-history-extraction.md) records.|
+|`apps/web/src/locales/*/task.json` prompt-history keys|Core panel copy in five shipped locales.|sufficient core contract, not public plugin API|The plugin registers its own catalogs through the existing `host.i18n`; the core panel keys are removed with the panel by [Prompt History Extraction](prompt-history-extraction.md).|
 |Existing `host.ui`, `host.i18n`, `host.utils`, and `useResponsiveBreakpoint`|Design-system primitives, translation, relative time, `cn`, and pointer/viewport state.|sufficient API contract|Reuse unchanged except for the prompt-mention component and React lifecycle type above.|
 
 ### Backend integration points
@@ -96,7 +96,7 @@ Classification meanings:
 |`apps/packages/plugin-sdk/src/index.ts`|covered but contract change required|Runtime-free source of consumer types for the same additions.|
 |`apps/web/lib/plugins/types.ts`|covered but contract change required|Internal aliases and concrete refinements remain assignable to the SDK.|
 |`docs/public/plugins-authoring.md` and `docs/public/plugins-manifest.md`|covered but contract change required|Document browser reads, `api_read:messages`, lifecycle, and minimum host version during implementation.|
-|`docs/specs/ui/requirements/prompt-history-panel.md` and system design|sufficient product behavior contract|Remain unchanged; link this prerequisite package.|
+|`docs/specs/ui/requirements/prompt-history-panel.md` and system design|sufficient product behavior contract|Record the panel's behavior; both documents are deprecated and superseded by [Prompt History Extraction](prompt-history-extraction.md).|
 |ADR 0047 and ADR 2026-08-01 task-panel contributions|sufficient related decisions|New browser-facade ADR narrows the missing browser boundary without changing either decision.|
 
 ### Current test coverage
@@ -104,12 +104,12 @@ Classification meanings:
 |Coverage|Current evidence|Classification|Planned proof|
 |-----------------------------------------------------------------------|----------------------------------------------------------------------------|---------------------------------------|----------------------------------------------------------------------------------------------------------------|
 |Prompt ordering, durable indexes, deletion, pagination, SQLite/Postgres|backend prompt-index and message-list repository/handler tests|sufficient existing regression coverage|Keep; add plugin-route mapping/authorization cases only.|
-|Prompt derivation and formatting|`apps/web/lib/prompt-history.test.ts`|sufficient core reference|Future plugin parity fixture asserts public DTOs permit the same output; do not move core tests in this package.|
-|Prompt panel states, aliases, favorites, accessibility, pagination|`prompt-history-panel-content*.test.tsx`, row tests|sufficient core reference|Add Host facade/component tests through public APIs.|
+|Prompt derivation and formatting|`apps/web/lib/turn-duration.test.ts`, fixture parity suites|sufficient core reference|The fixture plugin asserts public DTOs permit the same output; the core prompt-entry tests were removed with the panel.|
+|Prompt panel states, aliases, favorites, accessibility, pagination|`tests/plugins/prompt-history-plugin.spec.ts`, `tests/plugins/mobile-prompt-history-plugin.spec.ts`|sufficient core reference|The fixture plugin covers these through public APIs; the core panel tests were removed with the panel.|
 |WS message add/update/delete and prompt-index mapping|`apps/web/lib/ws/handlers/messages.test.ts`|sufficient transport coverage|Add facade reconciliation and lifecycle tests.|
 |Desktop navigation/around-window|dockview renderer, task-chat scroll-target, and load-message-window tests|sufficient core mechanism|Add scoped capability tests and fixture-plugin E2E.|
 |Plugin panel registration, restore, lifecycle, and mobile picker|registry, plugin-task-panel, layout manager, and mobile plugin-panel tests|sufficient base coverage|Add title, visibility, session-kind, and navigation-capability cases.|
-|End-to-end prompt history and saved layouts|`apps/web/e2e/tests/task/prompt-history-panel.spec.ts`, layout profile specs|sufficient core reference|Add external-style fixture plugin desktop and `mobile-*.spec.ts` parity paths.|
+|End-to-end prompt history and saved layouts|`tests/plugins/prompt-history-plugin.spec.ts`, `tests/plugins/mobile-prompt-history-plugin.spec.ts`, layout profile specs|sufficient core reference|The fixture plugin's desktop and `mobile-*.spec.ts` paths are the parity evidence; the core panel spec was removed with the panel.|
 
 ## Public browser API contract
 
@@ -254,16 +254,16 @@ All API additions are optional/additive under the current plugin API version:
 - any `api_read:messages` manifest requires `min_kandev_version: "0.91.1"`; one validator enforces this in manifest/archive/install, including dev/E2E.
 - existing REST and Go RPC contracts remain unchanged;
 
-Required sequence:
+Sequence:
 
-1. land and verify this host prerequisite package while the core panel remains active;
-2. in a separate repository/package, implement the plugin through the public SDK only and prove parity;
-3. in a later Kandev extraction package, migrate saved built-in panel identities, remove core panel/state/tests/locales, and update ownership documentation;
-4. publish/enable the plugin according to the release decision for that later package.
+1. this host prerequisite package landed and was verified while the core panel remained active;
+2. the plugin was implemented in its own repository through the public SDK;
+3. [Prompt History Extraction](prompt-history-extraction.md) removes the core panel, state, tests, layout identity, and locale copy, and updates ownership documentation. It does not migrate saved layout entries to the plugin's panel id: the stored `prompt-history` entry is dropped on restore and the plugin panel is added by the user;
+4. publishing and enabling the plugin is owned by that plugin's repository and release process.
 
 ## Verification architecture
 
-Each work order uses RED-GREEN-REFACTOR. Backend tests cover auth, capability, authorization, filters/cursors, sanitized DTOs, event ordering, deletion, outbox, and restart. Frontend tests cover readiness, deterministic merge, stale generations, reconnect, lifecycle abort, typed failures, panel title/visibility/context/navigation, and host UI privacy. SDK assignability proves runtime-free types match the Host; desktop/mobile fixture Playwright uses public APIs and keeps the core prompt-history E2E green.
+Each work order uses RED-GREEN-REFACTOR. Backend tests cover auth, capability, authorization, filters/cursors, sanitized DTOs, event ordering, deletion, outbox, and restart. Frontend tests cover readiness, deterministic merge, stale generations, reconnect, lifecycle abort, typed failures, panel title/visibility/context/navigation, and host UI privacy. SDK assignability proves runtime-free types match the Host; desktop/mobile fixture Playwright uses public APIs and, after [Prompt History Extraction](prompt-history-extraction.md), covers the plugin path on both projects now that the core panel E2E suite is removed.
 
 ## Related decisions
 

@@ -625,6 +625,7 @@ type Service struct {
 	// acquisition re-reads and corrects for it instead of locking a step the
 	// task has already left. Nil in production.
 	bulkMoveBeforeLockForTest             func()
+	cleanupWorkerLifecycleMu              sync.Mutex
 	cleanupWorkerMu                       sync.Mutex
 	archiveReclaimBackfillMu              sync.Mutex
 	archiveReclaimBackfillAfterWorktreeID string

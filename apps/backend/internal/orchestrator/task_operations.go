@@ -2832,12 +2832,12 @@ func (s *Service) buildWorkflowEntryPrompt(
 	ctx context.Context,
 	taskDescription string,
 	step *wfmodels.WorkflowStep,
-	taskID, sessionID string,
+	taskID, sessionID, incarnationID string,
 	isPassthrough bool,
 ) (string, string, error) {
 	basePrompt := taskDescription
 	if step.Prompt == "" && strings.TrimSpace(taskDescription) != "" {
-		claimed, err := s.repo.ClaimInitialPromptFallback(ctx, sessionID)
+		claimed, err := s.repo.ClaimInitialPromptFallback(ctx, sessionID, incarnationID)
 		if err != nil {
 			return "", "", fmt.Errorf("failed to claim workflow prompt fallback: %w", err)
 		}
@@ -3703,7 +3703,7 @@ func (s *Service) StartSessionForWorkflowStep(ctx context.Context, taskID, sessi
 	}
 
 	effectivePrompt, promptReferenceContext, err := s.buildWorkflowEntryPrompt(
-		ctx, dbTask.Description, step, taskID, sessionID, session.IsPassthrough,
+		ctx, dbTask.Description, step, taskID, sessionID, session.QueueIncarnationID, session.IsPassthrough,
 	)
 	if err != nil {
 		return fmt.Errorf("failed to build workflow prompt: %w", err)

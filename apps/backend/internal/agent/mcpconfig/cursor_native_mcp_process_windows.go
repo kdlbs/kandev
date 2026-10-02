@@ -20,6 +20,9 @@ func prepareNativeMCPProcess(cmd *exec.Cmd) error {
 	if attr.CreationFlags&windows.CREATE_NEW_CONSOLE != 0 {
 		return errors.New("native MCP command requested a new console")
 	}
+	// HideWindow keeps the child attached to a console while hiding a newly
+	// created console window. Console descendants can then inherit that console.
+	attr.HideWindow = true
 	attr.CreationFlags |= syscall.CREATE_NEW_PROCESS_GROUP | windows.CREATE_SUSPENDED
 	cmd.SysProcAttr = &attr
 	return nil

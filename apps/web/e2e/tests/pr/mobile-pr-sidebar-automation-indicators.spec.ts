@@ -3,6 +3,7 @@ import { SessionPage } from "../../pages/session-page";
 import type { ApiClient } from "../../helpers/api-client";
 import { waitForFiniteAnimations } from "../../helpers/animations";
 import { assertNoDocumentHorizontalOverflow } from "../../helpers/layout-assertions";
+import { installNewerNegativePRProjectionFixture } from "../../helpers/pr-negative-projection-fixture";
 
 const OWNER = "testorg";
 const REPO = "testrepo";
@@ -92,6 +93,107 @@ async function seedSidebarAutomation(
 }
 
 test.describe("Mobile sidebar PR automation indicators", () => {
+  // @covers AC-UI-PR-TASK-STATUS-SUMMARY-001.2/.3/.17/.24
+  // @covers AC-INTEGRATIONS-GITHUB-WORKFLOW-ATTENTION-003.4/.8
+  test("shows merged PR details in the drawer after a newer negative approval projection", async ({
+    testPage,
+    apiClient,
+    seedData,
+    prCapture,
+  }) => {
+    test.setTimeout(120_000);
+    const stepOptions = {
+      workflow_id: seedData.workflowId,
+      workflow_step_id: seedData.startStepId,
+    };
+    const navigationTask = await apiClient.seedTask(
+      seedData.workspaceId,
+      "Mobile negative projection navigation",
+      stepOptions,
+    );
+    const targetTask = await apiClient.seedTask(
+      seedData.workspaceId,
+      "Mobile merged negative projection target",
+      { ...stepOptions, state: "IN_PROGRESS" },
+    );
+    await apiClient.seedTaskSession(navigationTask.task_id, {
+      state: "WAITING_FOR_INPUT",
+      agentProfileId: seedData.agentProfileId,
+    });
+    await apiClient.seedTaskSession(targetTask.task_id, {
+      state: "WAITING_FOR_INPUT",
+      agentProfileId: seedData.agentProfileId,
+    });
+    await apiClient.mockGitHubReset();
+    await apiClient.mockGitHubSetUser("test-user");
+    await apiClient.mockGitHubAssociateTaskPR({
+      workspace_id: seedData.workspaceId,
+      repository_id: seedData.repositoryId,
+      task_id: targetTask.task_id,
+      owner: OWNER,
+      repo: REPO,
+      pr_number: PR_NUMBER,
+      pr_url: `https://github.com/${OWNER}/${REPO}/pull/${PR_NUMBER}`,
+      pr_title: "Mobile merged negative approval fixture",
+      head_branch: "feature/mobile-negative-approval",
+      base_branch: "main",
+      author_login: "negative-author",
+      state: "merged",
+      review_state: "approved",
+      checks_state: "success",
+      mergeable_state: "clean",
+    });
+    const assertProjectionTimestamps = await installNewerNegativePRProjectionFixture(
+      testPage,
+      targetTask.task_id,
+      PR_NUMBER,
+    );
+
+    await testPage.goto(`/t/${navigationTask.task_id}`);
+    await new SessionPage(testPage).waitForLoad();
+    const navigationURL = testPage.url();
+    await testPage.getByTestId("mobile-task-picker-trigger").tap();
+    const sheet = testPage.getByRole("dialog", { name: "Tasks" });
+    await waitForFiniteAnimations(sheet);
+    const targetRow = sheet.locator(`[data-task-row-id="${targetTask.task_id}"]`);
+    const icon = targetRow.getByTestId(`pr-task-icon-${targetTask.task_id}`);
+    await expect(icon).toBeVisible();
+    await icon.tap();
+
+    const drawer = testPage.getByTestId(`pr-task-automation-drawer-${targetTask.task_id}`);
+    await expect(drawer).toBeVisible();
+    await waitForFiniteAnimations(drawer);
+    await assertProjectionTimestamps();
+
+    const summary = drawer.getByTestId("pr-task-status-summary");
+    await expect(summary.getByTestId("pr-task-status-number")).toHaveText(`PR #${PR_NUMBER}`);
+    await expect(summary.getByTestId("pr-task-status-title")).toHaveText(
+      "Mobile merged negative approval fixture",
+    );
+    await expect(summary.getByTestId("pr-task-status-title-author")).toHaveText(
+      "by negative-author",
+    );
+    await expect(summary.getByTestId("pr-task-status-state-value")).toContainText("Merged");
+    await expect(drawer).not.toContainText("Awaiting maintainer approval");
+    const drawerBounds = await drawer.boundingBox();
+    const viewport = testPage.viewportSize();
+    expect(drawerBounds).not.toBeNull();
+    expect(viewport).not.toBeNull();
+    expect(drawerBounds!.x).toBeGreaterThanOrEqual(0);
+    expect(drawerBounds!.y).toBeGreaterThanOrEqual(0);
+    expect(drawerBounds!.x + drawerBounds!.width).toBeLessThanOrEqual(viewport!.width);
+    expect(drawerBounds!.y + drawerBounds!.height).toBeLessThanOrEqual(viewport!.height);
+    await assertNoDocumentHorizontalOverflow(testPage);
+    await prCapture.screenshot("sidebar-negative-projection-merged-mobile", {
+      caption: "Phone PR drawer retains the merged PR after approval clears.",
+    });
+
+    await testPage.keyboard.press("Escape");
+    await expect(drawer).toHaveCount(0);
+    await expect(icon).toBeFocused();
+    await expect(testPage).toHaveURL(navigationURL);
+  });
+
   test("shows touch indicators, details, and terminal-state cleanup", async ({
     testPage,
     apiClient,

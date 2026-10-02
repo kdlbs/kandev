@@ -86,6 +86,8 @@ export function buildReviewGitStatusFiles(
     };
   }
 
+  // `reviewGitStatus` is the latest status from any repository in a multi-repo
+  // task. Only the per-repository map can identify the real workspace root.
   const files = buildMultiRepoReviewFiles(statusByRepo);
   return {
     files: Object.keys(files).length > 0 ? files : null,
