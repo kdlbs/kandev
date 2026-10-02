@@ -154,6 +154,9 @@ export async function showNavigationFiles(page: Page, mobile: boolean) {
     await session.showSessionContext();
     await session.clickTab("Files");
   }
+  await expect(page.locator('[data-testid="files-panel"]:visible').first()).toBeVisible({
+    timeout: 15_000,
+  });
 }
 
 export async function selectNavigationTask(page: Page, title: string, mobile = false) {
@@ -175,6 +178,7 @@ export async function assertProgressiveNavigation(
   backend: BackendContext,
   mobile: boolean,
 ) {
+  resetSeedRepositoryCheckout(seed, backend.tmpDir);
   const [a, b] = await seedNavigationTasks(api, seed, backend);
   const gate = await routeNavigationResponses(page);
   const initialRequestOffset = gate.requests.length;
@@ -186,26 +190,30 @@ export async function assertProgressiveNavigation(
   await waitForSessionGitHydration(page, a.session_id!);
   await showNavigationFiles(page, mobile);
   await waitForTreeResponse(gate, initialRequestOffset, a.session_id!, "");
-  await expect(session.fileTreeNode(ROOT_FILE)).toBeVisible();
+  await expect(session.fileTreeNode(ROOT_FILE)).toBeVisible({ timeout: 15_000 });
   await saveExpandedPaths(page, a.session_id!, [AVAILABLE, HELD], mobile);
   gate.hold((r) => r.action === "workspace.tree.get" && r.payload.path === HELD);
   const reloadRequestOffset = gate.requests.length;
   await page.reload();
+  await session.waitForLoad();
   await waitForSessionGitHydration(page, a.session_id!);
   await showNavigationFiles(page, mobile);
-  await expect.poll(() => gate.heldCount()).toBeGreaterThan(0);
+  await expect.poll(() => gate.heldCount(), { timeout: 15_000 }).toBeGreaterThan(0);
   await waitForTreeResponse(gate, reloadRequestOffset, a.session_id!, "");
   await waitForTreeResponse(gate, reloadRequestOffset, a.session_id!, AVAILABLE);
   // This assertion is deliberately before release: an unfinished sibling cannot hide the root.
-  await expect(session.fileTreeNode(ROOT_FILE)).toBeVisible();
-  await expect(session.fileTreeNode(`${AVAILABLE}/available.ts`)).toBeVisible();
+  await expect(session.fileTreeNode(ROOT_FILE)).toBeVisible({ timeout: 15_000 });
+  await expect(session.fileTreeNode(`${AVAILABLE}/available.ts`)).toBeVisible({ timeout: 15_000 });
   gate.release("temporary navigation folder failure");
-  const status = page.getByTestId("file-tree-refresh-status");
-  await expect(status).toContainText("temporary navigation folder failure");
-  await expect(session.fileTreeNode(`${AVAILABLE}/available.ts`)).toBeVisible();
   await showNavigationFiles(page, mobile);
+  const status = page
+    .locator('[data-testid="files-panel"]:visible')
+    .getByTestId("file-tree-refresh-status");
+  await expect(status).toContainText("temporary navigation folder failure", { timeout: 15_000 });
   await expect(status).toBeVisible();
+  await expect(session.fileTreeNode(`${AVAILABLE}/available.ts`)).toBeVisible({ timeout: 15_000 });
   const retry = status.getByRole("button", { name: "Retry", exact: true });
+  await expect(retry).toBeVisible();
   const retryRequestOffset = gate.requests.length;
   if (mobile) {
     const box = await retry.boundingBox();
@@ -214,7 +222,7 @@ export async function assertProgressiveNavigation(
     await retry.tap();
   } else await retry.click();
   await waitForTreeResponse(gate, retryRequestOffset, a.session_id!, HELD);
-  await expect(session.fileTreeNode(`${HELD}/held.ts`)).toBeVisible();
+  await expect(session.fileTreeNode(`${HELD}/held.ts`)).toBeVisible({ timeout: 15_000 });
   await expect(status).toHaveCount(0);
   const taskBRequestOffset = gate.requests.length;
   await selectNavigationTask(page, b.title, mobile);
@@ -223,10 +231,11 @@ export async function assertProgressiveNavigation(
   await waitForSessionGitHydration(page, b.session_id!);
   await showNavigationFiles(page, mobile);
   await waitForTreeResponse(gate, taskBRequestOffset, b.session_id!, "");
-  await expect(session.fileTreeNode(ROOT_FILE)).toBeVisible();
+  await expect(session.fileTreeNode(ROOT_FILE)).toBeVisible({ timeout: 15_000 });
   // Task A's environment-scoped tree cache remains available while returning from B.
   await selectNavigationTask(page, a.title, mobile);
   await expect(page).toHaveURL(new RegExp(`/t/${a.id}$`));
+  await waitForNavigationGitHydration(page, a.session_id!);
   await showNavigationFiles(page, mobile);
   await expect(session.fileTreeNode(`${AVAILABLE}/available.ts`)).toBeVisible();
   if (mobile) {

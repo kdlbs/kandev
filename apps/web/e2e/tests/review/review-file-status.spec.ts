@@ -1,4 +1,4 @@
-import { test, expect } from "../../fixtures/test-base";
+import { expect, resetSeedRepositoryCheckout, test } from "../../fixtures/test-base";
 import { dwell } from "../../helpers/causal-waits";
 import { GitHelper, makeGitEnv } from "../../helpers/git-helper";
 import { getSingleLineTextInVisualOrder } from "../../helpers/layout-assertions";
@@ -16,6 +16,9 @@ const MOVED_PATH = "review-status-a-very-long-new-name-that-must-truncate.ts";
 
 test.describe("Review file status", () => {
   test.describe.configure({ timeout: 120_000 });
+  test.beforeEach(async ({ seedData, backend }) => {
+    resetSeedRepositoryCheckout(seedData, backend.tmpDir);
+  });
 
   // @covers AC-PLATFORM-E2E-DURATION-AWARE-SHARDING-002.4
   test("shows every status, keeps the marker visible at minimum width, and explains a pure move", async ({
