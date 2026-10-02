@@ -66,11 +66,19 @@ type RecoveryAdmissionRequest struct {
 	OwnerTaskID            string
 	OwnershipGeneration    int64
 	ExecutorType           string
+	SelectionSnapshot      models.WorkspaceRecoverySelectionSnapshot
 	OperationID            string
 	AllowBranchReplacement bool
 	RelocateDirty          bool
-	Slots                  []RecoverySlot
+	// InspectionWait allows only an outer manual preflight to wait for a
+	// read-only inspection lock. It does not authorize dirty relocation.
+	InspectionWait time.Duration
+	Slots          []RecoverySlot
 }
+
+// ManualRecoveryInspectionWait is the maximum time a manual recovery
+// preflight may wait for a selected worktree inspection lock.
+const ManualRecoveryInspectionWait = 15 * time.Second
 
 // RecoveryAdmission retains the environment authority and per-worktree locks
 // until the caller crosses the external workspace-start boundary.
@@ -625,8 +633,25 @@ func (m *Manager) lockRecoverySlots(ctx context.Context, req *RecoveryAdmissionR
 	sort.Slice(sorted, func(i, j int) bool {
 		return recoverySlotKey(req.Slots[sorted[i]]) < recoverySlotKey(req.Slots[sorted[j]])
 	})
+	wait := req.InspectionWait
+	if wait > ManualRecoveryInspectionWait {
+		wait = ManualRecoveryInspectionWait
+	}
+	var waitDeadline time.Time
+	if wait > 0 {
+		waitDeadline = time.Now().Add(wait)
+		if callerDeadline, ok := ctx.Deadline(); ok && callerDeadline.Before(waitDeadline) {
+			waitDeadline = callerDeadline
+		}
+	}
+	selection := snapshotRecoverySlotIdentities(req, indices)
 	locks := make([]*sync.Mutex, 0, len(sorted))
 	seen := make(map[string]struct{}, len(sorted))
+	unlock := func() {
+		for i := len(locks) - 1; i >= 0; i-- {
+			locks[i].Unlock()
+		}
+	}
 	for _, index := range sorted {
 		key := recoverySlotKey(req.Slots[index])
 		if _, ok := seen[key]; ok {
@@ -635,41 +660,182 @@ func (m *Manager) lockRecoverySlots(ctx context.Context, req *RecoveryAdmissionR
 		seen[key] = struct{}{}
 		lockValue, _ := m.recoveryLocks.LoadOrStore(key, &sync.Mutex{})
 		lock := lockValue.(*sync.Mutex)
-		if req.RelocateDirty {
-			// The stamped repair runs outside lifecycle singleflight and can wait
-			// for an in-flight read-only inspection to finish.
-			ticker := time.NewTicker(10 * time.Millisecond)
-			for !lock.TryLock() {
-				select {
-				case <-ctx.Done():
-					ticker.Stop()
-					for i := len(locks) - 1; i >= 0; i-- {
-						locks[i].Unlock()
-					}
-					return nil, recoveryAdmissionError(*req, ctx.Err().Error())
-				case <-ticker.C:
-				}
-			}
-			ticker.Stop()
-			if err := ctx.Err(); err != nil {
-				lock.Unlock()
-				for i := len(locks) - 1; i >= 0; i-- {
-					locks[i].Unlock()
-				}
-				return nil, recoveryAdmissionError(*req, err.Error())
-			}
-		} else if !lock.TryLock() {
-			// Session startup is coalesced by lifecycle singleflight. Waiting here
-			// can make a competing workspace request own that flight while the
-			// recovery caller waits for it, so ordinary admissions never queue.
-			for i := len(locks) - 1; i >= 0; i-- {
-				locks[i].Unlock()
-			}
-			return nil, recoveryAdmissionError(*req, "selected worktree is already being recovered")
+		if err := waitForRecoveryInspectionLock(ctx, lock, waitDeadline); err != nil {
+			unlock()
+			return nil, err
 		}
 		locks = append(locks, lock)
 	}
+	if err := ctx.Err(); err != nil {
+		unlock()
+		return nil, err
+	}
+	if err := m.revalidateRecoverySelectionSnapshot(ctx, req); err != nil {
+		unlock()
+		return nil, err
+	}
+	if m.store != nil {
+		resolved, err := m.resolveRecoverySlots(ctx, req)
+		if err != nil {
+			unlock()
+			return nil, err
+		}
+		if !sameRecoverySlotIndices(indices, resolved) || !recoverySlotIdentitiesMatch(selection, req) {
+			unlock()
+			return nil, recoveryAdmissionError(*req, "selected worktree inventory changed while waiting for inspection")
+		}
+	}
 	return locks, nil
+}
+
+func (m *Manager) revalidateRecoverySelectionSnapshot(ctx context.Context, req *RecoveryAdmissionRequest) error {
+	snapshot := req.SelectionSnapshot
+	if snapshot.Present() && !snapshot.Valid() {
+		return recoveryAdmissionError(*req, "selected worktree inventory identity is incomplete")
+	}
+	if !snapshot.Valid() {
+		return nil
+	}
+	if !snapshot.Complete() {
+		return recoveryAdmissionError(*req, "selected worktree inventory is incomplete")
+	}
+	if snapshot.TaskID != req.TaskID || snapshot.SessionID != req.SessionID ||
+		snapshot.SessionTaskEnvironmentID != req.TaskEnvironmentID ||
+		snapshot.TaskEnvironmentID != req.TaskEnvironmentID ||
+		snapshot.EnvironmentOwnerTaskID != req.OwnerTaskID ||
+		snapshot.OwnershipGeneration != req.OwnershipGeneration ||
+		snapshot.ExecutorType != req.ExecutorType {
+		return recoveryAdmissionError(*req, "selected worktree inventory identity is inconsistent")
+	}
+	reader, ok := m.store.(RecoverySelectionSnapshotReader)
+	if !ok {
+		return recoveryAdmissionError(*req, "selected worktree inventory cannot be revalidated")
+	}
+	current, err := reader.ReadRecoverySelectionSnapshot(ctx, snapshot)
+	if err != nil {
+		return recoveryAdmissionError(*req, "selected worktree inventory cannot be revalidated")
+	}
+	if !snapshot.Equal(current) {
+		return recoveryAdmissionError(*req, "selected worktree inventory changed while waiting for inspection")
+	}
+	return nil
+}
+
+func waitForRecoveryInspectionLock(ctx context.Context, lock *sync.Mutex, deadline time.Time) error {
+	for {
+		if err := ctx.Err(); err != nil {
+			return recoveryInspectionWaitError(err)
+		}
+		if !deadline.IsZero() && !time.Now().Before(deadline) {
+			return &RecoveryInspectionContentionError{}
+		}
+		if lock.TryLock() {
+			if err := ctx.Err(); err != nil {
+				lock.Unlock()
+				return recoveryInspectionWaitError(err)
+			}
+			return nil
+		}
+		if deadline.IsZero() {
+			return &RecoveryInspectionContentionError{}
+		}
+		remaining := time.Until(deadline)
+		if remaining <= 0 {
+			return recoveryInspectionWaitError(ctx.Err())
+		}
+		timer := time.NewTimer(remaining)
+		ticker := time.NewTicker(10 * time.Millisecond)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			ticker.Stop()
+			return recoveryInspectionWaitError(ctx.Err())
+		case <-timer.C:
+			ticker.Stop()
+			return recoveryInspectionWaitError(ctx.Err())
+		case <-ticker.C:
+			timer.Stop()
+			ticker.Stop()
+		}
+	}
+}
+
+func recoveryInspectionWaitError(ctxErr error) error {
+	if errors.Is(ctxErr, context.Canceled) {
+		return ctxErr
+	}
+	return &RecoveryInspectionContentionError{}
+}
+
+type recoverySlotIdentity struct {
+	worktreeID      string
+	sessionID       string
+	taskID          string
+	taskDirName     string
+	environmentID   string
+	repositoryID    string
+	branchSlug      string
+	repositoryPath  string
+	worktreePath    string
+	branch          string
+	sourceClonePath string
+	sourceCommonDir string
+	status          string
+	deleted         bool
+}
+
+func snapshotRecoverySlotIdentities(req *RecoveryAdmissionRequest, indices []int) map[int]recoverySlotIdentity {
+	identities := make(map[int]recoverySlotIdentity, len(indices))
+	for _, index := range indices {
+		wt := req.Slots[index].Worktree
+		if wt == nil {
+			identities[index] = recoverySlotIdentity{}
+			continue
+		}
+		identities[index] = recoverySlotIdentity{
+			worktreeID: wt.ID, sessionID: wt.SessionID, taskID: wt.TaskID, taskDirName: wt.TaskDirName,
+			environmentID: wt.TaskEnvironmentID, repositoryID: wt.RepositoryID, branchSlug: wt.BranchSlug,
+			repositoryPath: wt.RepositoryPath, worktreePath: wt.Path, branch: wt.Branch,
+			sourceClonePath: wt.SourceClonePath, sourceCommonDir: wt.SourceCommonDir,
+			status: wt.Status, deleted: wt.DeletedAt != nil,
+		}
+	}
+	return identities
+}
+
+func recoverySlotIdentitiesMatch(identities map[int]recoverySlotIdentity, req *RecoveryAdmissionRequest) bool {
+	for index, expected := range identities {
+		wt := req.Slots[index].Worktree
+		if wt == nil {
+			if expected != (recoverySlotIdentity{}) {
+				return false
+			}
+			continue
+		}
+		actual := recoverySlotIdentity{
+			worktreeID: wt.ID, sessionID: wt.SessionID, taskID: wt.TaskID, taskDirName: wt.TaskDirName,
+			environmentID: wt.TaskEnvironmentID, repositoryID: wt.RepositoryID, branchSlug: wt.BranchSlug,
+			repositoryPath: wt.RepositoryPath, worktreePath: wt.Path, branch: wt.Branch,
+			sourceClonePath: wt.SourceClonePath, sourceCommonDir: wt.SourceCommonDir,
+			status: wt.Status, deleted: wt.DeletedAt != nil,
+		}
+		if actual != expected {
+			return false
+		}
+	}
+	return true
+}
+
+func sameRecoverySlotIndices(expected, actual []int) bool {
+	if len(expected) != len(actual) {
+		return false
+	}
+	for index := range expected {
+		if expected[index] != actual[index] {
+			return false
+		}
+	}
+	return true
 }
 
 func (m *Manager) inspectRecoverySlots(ctx context.Context, req *RecoveryAdmissionRequest, indices []int) (recoverySlotInspection, error) {

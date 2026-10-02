@@ -990,6 +990,24 @@ func (s *Service) GetWorkspaceInfoForSession(ctx context.Context, taskID, sessio
 			ensureWorkspaceMetadata(info)[lifecycle.MetadataKeyContainerID] = running.ContainerID
 		}
 	}
+	if taskEnv != nil && taskEnv.ExecutorType == string(models.ExecutorTypeWorktree) &&
+		info.TaskEnvironmentID != "" && info.EnvironmentOwnerTaskID != "" && info.OwnershipGeneration > 0 {
+		errorStamp := ""
+		if lastError, ok := models.LoadLastAgentError(session.Metadata); ok {
+			errorStamp = lastError.Stamp()
+		}
+		selectionSnapshot, snapshotErr := s.workspaceRecoverySelectionSnapshot(ctx, session, taskEnv)
+		if snapshotErr != nil {
+			return nil, fmt.Errorf("capture workspace recovery inventory: %w", snapshotErr)
+		}
+		info.RecoveryErrorObservation = &models.WorkspaceRecoveryErrorObservation{
+			TaskID: taskID, SessionID: sessionID, TaskEnvironmentID: info.TaskEnvironmentID,
+			EnvironmentOwnerTaskID: info.EnvironmentOwnerTaskID, OwnershipGeneration: info.OwnershipGeneration,
+			SelectionSnapshot: selectionSnapshot,
+			SessionState:      session.State, AgentExecutionID: info.AgentExecutionID,
+			ExpectedErrorStamp: errorStamp,
+		}
+	}
 	executorID := session.ExecutorID
 	recordedKubernetes := running != nil && running.Runtime == agentruntime.RuntimeKubernetes
 	if recordedKubernetes {

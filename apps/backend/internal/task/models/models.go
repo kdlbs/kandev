@@ -2345,6 +2345,21 @@ type TaskSession struct {
 	TokensOut      int64 `json:"tokens_out"`
 }
 
+// WorkspaceRecoveryErrorObservation is the session and environment identity
+// captured before selected-workspace inspection. Repository writers compare
+// every field in the same transaction that records the recovery error.
+type WorkspaceRecoveryErrorObservation struct {
+	TaskID                 string
+	SessionID              string
+	TaskEnvironmentID      string
+	EnvironmentOwnerTaskID string
+	OwnershipGeneration    int64
+	SelectionSnapshot      WorkspaceRecoverySelectionSnapshot
+	SessionState           TaskSessionState
+	AgentExecutionID       string
+	ExpectedErrorStamp     string
+}
+
 // ActiveSessionCancellationCandidate is the compare-and-set snapshot used by
 // the active-session stall healer. An empty ExpectedTurnID means that no turn
 // may be active when the cancellation is written.

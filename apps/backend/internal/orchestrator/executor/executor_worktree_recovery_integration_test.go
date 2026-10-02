@@ -2,6 +2,7 @@ package executor
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -156,7 +157,7 @@ func TestMainCheckoutLaunchIntegration(t *testing.T) {
 				TaskDirName: "recovery_abc", BranchSlug: "main", RepositoryPath: mainPath,
 				Path: mainPath, Branch: before.branch, Status: worktree.StatusActive,
 			}
-			store := &mainCheckoutRecoveryStore{worktree: wt}
+			store := &mainCheckoutRecoveryStore{worktree: wt, repository: repo}
 			log, err := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "json"})
 			if err != nil {
 				t.Fatalf("create logger: %v", err)
@@ -227,7 +228,8 @@ func TestMainCheckoutLaunchIntegration(t *testing.T) {
 
 type mainCheckoutRecoveryStore struct {
 	worktree.Store
-	worktree *worktree.Worktree
+	worktree   *worktree.Worktree
+	repository *mockRepository
 }
 
 func (s *mainCheckoutRecoveryStore) GetWorktreeByID(_ context.Context, id string) (*worktree.Worktree, error) {
@@ -235,6 +237,30 @@ func (s *mainCheckoutRecoveryStore) GetWorktreeByID(_ context.Context, id string
 		return nil, nil
 	}
 	return s.worktree, nil
+}
+
+func (s *mainCheckoutRecoveryStore) ReadRecoverySelectionSnapshot(
+	_ context.Context,
+	expected models.WorkspaceRecoverySelectionSnapshot,
+) (models.WorkspaceRecoverySelectionSnapshot, error) {
+	if s.repository == nil {
+		return models.WorkspaceRecoverySelectionSnapshot{}, fmt.Errorf("recovery repository unavailable")
+	}
+	session := s.repository.sessions[expected.SessionID]
+	environment := s.repository.taskEnvironments[expected.TaskEnvironmentID]
+	if session == nil || environment == nil {
+		return models.WorkspaceRecoverySelectionSnapshot{}, fmt.Errorf("selected recovery records missing")
+	}
+	repositories := make(map[string]*models.Repository, len(environment.Repos))
+	for _, slot := range environment.Repos {
+		if slot == nil || slot.DeletedAt != nil || (slot.Status != "" && slot.Status != "active") {
+			continue
+		}
+		if repository := s.repository.repositories[slot.RepositoryID]; repository != nil {
+			repositories[slot.RepositoryID] = repository
+		}
+	}
+	return models.NewWorkspaceRecoverySelectionSnapshot(session, environment, repositories), nil
 }
 
 type executorMainCheckoutSnapshot struct {

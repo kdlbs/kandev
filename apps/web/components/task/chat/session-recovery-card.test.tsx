@@ -58,6 +58,22 @@ function Owner() {
     <SessionRecoveryCard model={context.model} actions={actions} onNewSession={vi.fn()} />
   ) : null;
 }
+function ownerView(current: TaskSession) {
+  return (
+    <StateProvider
+      initialState={
+        {
+          taskSessions: { items: { session: current } },
+          agentProfiles: { items: [{ id: "profile" }] },
+        } as unknown as Partial<AppState>
+      }
+    >
+      <SessionRecoveryProvider session={current} messages={[]} taskId="task" enabled>
+        <Owner />
+      </SessionRecoveryProvider>
+    </StateProvider>
+  );
+}
 function renderCase(kind?: string) {
   const row = message(kind);
   return render(
@@ -119,6 +135,69 @@ describe("composer recovery ownership", () => {
     expect(resume).toHaveBeenCalledWith("resume");
     expect(screen.queryByTestId(FRESH_BUTTON)).toBeNull();
     expect(screen.queryByRole("button", { name: "Delete task" })).toBeNull();
+  });
+
+  it("replaces a cancelled legacy error with one relocation action after projection", () => {
+    const cancelled = {
+      ...session,
+      state: "CANCELLED",
+      error_message: "The previous agent launch failed.",
+      metadata: {
+        last_agent_error: {
+          message: "The previous agent launch failed.",
+          stamp: "legacy-generic-stamp",
+          scope: "session",
+        },
+      },
+    } as unknown as TaskSession;
+    const { rerender } = render(ownerView(cancelled));
+    expect(screen.queryByTestId(RECOVERY_CARD)).toBeNull();
+
+    const projected = {
+      ...cancelled,
+      metadata: {
+        last_agent_error: {
+          message: "Workspace needs repair",
+          occurred_at: "2026-10-02T00:00:00Z",
+          stamp: "managed-clone-stamp",
+          scope: "session",
+          code: "managed_clone_relocation_required",
+          recovery_actions: ["relocate_and_resume"],
+        },
+      },
+    } as unknown as TaskSession;
+    rerender(ownerView(projected));
+
+    expect(screen.getAllByTestId("managed-clone-relocate-button")).toHaveLength(1);
+    expect(screen.queryByTestId(RESUME_BUTTON)).toBeNull();
+    expect(screen.queryByTestId(FRESH_BUTTON)).toBeNull();
+    expect(screen.queryByTestId(RESTORE_WORKSPACE_BUTTON)).toBeNull();
+  });
+
+  it("keeps one disabled action group and one live status while recovery waits", () => {
+    const pendingActions = { ...actions, busyAction: "resume" } as SessionRecoveryActions;
+    const { container } = render(
+      <StateProvider
+        initialState={
+          {
+            taskSessions: { items: { session } },
+            agentProfiles: { items: [{ id: "profile" }] },
+          } as unknown as Partial<AppState>
+        }
+      >
+        <SessionRecoveryCard
+          model={{ sessionId: "session", stamp: "failure", kind: "generic" }}
+          actions={pendingActions}
+          onNewSession={vi.fn()}
+        />
+      </StateProvider>,
+    );
+
+    expect(container.querySelectorAll('[aria-busy="true"]')).toHaveLength(1);
+    expect(screen.getAllByRole("status")).toHaveLength(1);
+    expect(screen.getByRole("status").textContent).toBe("Resuming...");
+    expect(screen.getByTestId(RESUME_BUTTON)).toHaveProperty("disabled", true);
+    expect(screen.getByTestId(FRESH_BUTTON)).toHaveProperty("disabled", true);
   });
 });
 

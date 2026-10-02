@@ -371,24 +371,51 @@ export function useSessionRecoveryActions({
       setRecoveryNotice(t("task:resumeFailedWorkspaceReadOnly"));
       setManualRecoveryFailure(null);
     } catch (cause) {
-      if (!isCurrentOperation(operation)) return;
-      setLocalResultRequestKey(operation.requestKey);
+      const association = recoveryFailureAssociation({
+        cause,
+        operation,
+        errorStamp,
+        taskId,
+        sessionId,
+        isCurrentOperation,
+        isCurrentSession,
+        matchesLatestErrorStamp,
+      });
+      if (!association) return;
+      const { managedClone, errorStamp: associatedStamp, requestKey } = association;
+      setLocalResultRequestKey(requestKey);
       const guard = sessionRecoveryGuardDetails(cause);
+      if (managedClone?.kind === "managed_clone_relocation_required") {
+        setManagedCloneRecoveryStamp(managedClone.error_stamp ?? null);
+      } else if (managedClone?.kind === "managed_clone_relocation_stale") {
+        setManagedCloneRecoveryStamp(null);
+      }
       setRestoreError(guardOrFallbackError(cause, guard, t, t("task:failedToRestoreWorkspace")));
       setGuardDetails(guard ?? guardDetails);
       setRecoveryNotice(null);
       setManualRecoveryFailure({
         operation: "restore_workspace",
         sessionId,
-        errorStamp: errorStamp ?? null,
-        requestKey: operation.requestKey,
+        errorStamp: associatedStamp,
+        requestKey,
         operationId: operation.operationId,
       });
     } finally {
       release();
       if (isCurrentOperation(operation)) setBusyAction(null);
     }
-  }, [beginOperation, guardDetails, isCurrentOperation, pendingKey, sessionId, taskId, t]);
+  }, [
+    beginOperation,
+    errorStamp,
+    guardDetails,
+    isCurrentOperation,
+    isCurrentSession,
+    matchesLatestErrorStamp,
+    pendingKey,
+    sessionId,
+    taskId,
+    t,
+  ]);
 
   const handleRetry = useCallback(() => {
     return handleRecover(lastFailedAction ?? "resume");

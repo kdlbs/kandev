@@ -1312,7 +1312,8 @@ func (m *Manager) reconcileWorkspaceWorktrees(ctx context.Context, taskID string
 func (m *Manager) admitWorkspaceRecovery(ctx context.Context, info *WorkspaceInfo) (*worktree.RecoveryAdmission, error) {
 	if m == nil || m.worktreeMgr == nil || info == nil ||
 		info.ExecutorType != string(models.ExecutorTypeWorktree) ||
-		info.TaskEnvironmentID == "" || len(info.WorkspaceRepositories) == 0 {
+		info.TaskEnvironmentID == "" || (len(info.WorkspaceRepositories) == 0 &&
+		(info.RecoveryErrorObservation == nil || len(info.RecoveryErrorObservation.SelectionSnapshot.Slots) == 0)) {
 		return nil, nil
 	}
 	ownerTaskID := info.EnvironmentOwnerTaskID
@@ -1322,18 +1323,40 @@ func (m *Manager) admitWorkspaceRecovery(ctx context.Context, info *WorkspaceInf
 	if ownerTaskID == "" || info.SessionID == "" || info.OwnershipGeneration <= 0 {
 		return nil, fmt.Errorf("worktree recovery admission: workspace environment identity is incomplete")
 	}
-	slots := make([]worktree.RecoverySlot, 0, len(info.WorkspaceRepositories))
+	cloneRelocationByRepository := make(map[string]*worktree.ManagedCloneRelocationProof, len(info.WorkspaceRepositories))
 	for _, repository := range info.WorkspaceRepositories {
-		if repository.WorktreeID == "" {
-			continue
+		cloneRelocationByRepository[repository.RepositoryID] = repository.CloneRelocation
+	}
+	var selectionSnapshot models.WorkspaceRecoverySelectionSnapshot
+	if info.RecoveryErrorObservation != nil {
+		selectionSnapshot = info.RecoveryErrorObservation.SelectionSnapshot
+	}
+	slots := make([]worktree.RecoverySlot, 0, len(info.WorkspaceRepositories))
+	if selectionSnapshot.Valid() {
+		for _, selected := range selectionSnapshot.Canonical().Slots {
+			if selected.WorktreeID == "" {
+				continue
+			}
+			if !selected.RepositoryPresent || selected.RepositoryID == "" || selected.RepositoryLocalPath == "" {
+				return nil, fmt.Errorf("selected worktree recovery inventory is incomplete")
+			}
+			slots = append(slots, worktree.RecoverySlot{
+				WorktreeID: selected.WorktreeID, RepositoryID: selected.RepositoryID,
+				BranchSlug: selected.BranchSlug, RepositoryPath: selected.RepositoryLocalPath,
+				CloneRelocation: cloneRelocationByRepository[selected.RepositoryID],
+			})
 		}
-		slots = append(slots, worktree.RecoverySlot{
-			WorktreeID:      repository.WorktreeID,
-			RepositoryID:    repository.RepositoryID,
-			BranchSlug:      repository.BranchSlug,
-			RepositoryPath:  repository.RepositoryPath,
-			CloneRelocation: repository.CloneRelocation,
-		})
+	} else {
+		for _, repository := range info.WorkspaceRepositories {
+			if repository.WorktreeID == "" {
+				continue
+			}
+			slots = append(slots, worktree.RecoverySlot{
+				WorktreeID: repository.WorktreeID, RepositoryID: repository.RepositoryID,
+				BranchSlug: repository.BranchSlug, RepositoryPath: repository.RepositoryPath,
+				CloneRelocation: repository.CloneRelocation,
+			})
+		}
 	}
 	if len(slots) == 0 {
 		return nil, nil
@@ -1345,10 +1368,29 @@ func (m *Manager) admitWorkspaceRecovery(ctx context.Context, info *WorkspaceInf
 		OwnerTaskID:         ownerTaskID,
 		OwnershipGeneration: info.OwnershipGeneration,
 		ExecutorType:        info.ExecutorType,
+		SelectionSnapshot:   selectionSnapshot,
 		Slots:               slots,
 	}
 	admission, err := m.worktreeMgr.AdmitRecovery(ctx, request)
 	if err != nil {
+		var relocationRequired *worktree.ManagedCloneRelocationRequiredError
+		if errors.As(err, &relocationRequired) && m.workspaceRecoveryErrorReporter != nil {
+			if info.RecoveryErrorObservation == nil {
+				return nil, &WorkspaceRecoveryProjectionError{PersistFailed: true}
+			}
+			stamp, reportErr := m.workspaceRecoveryErrorReporter.ReportManagedCloneRelocationRequired(ctx, *info.RecoveryErrorObservation)
+			if reportErr != nil {
+				m.logger.Warn("failed to project workspace recovery refusal",
+					zap.String("task_id", info.TaskID),
+					zap.String("session_id", info.SessionID),
+					zap.Error(reportErr))
+				return nil, &WorkspaceRecoveryProjectionError{PersistFailed: true}
+			}
+			if stamp == "" {
+				return nil, &WorkspaceRecoveryProjectionError{Stale: true}
+			}
+			return nil, &WorkspaceRecoveryProjectionError{Stamp: stamp}
+		}
 		return nil, err
 	}
 	info.WorktreeRecoveryAdmitted = true

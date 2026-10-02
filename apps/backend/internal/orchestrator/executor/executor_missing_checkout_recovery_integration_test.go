@@ -153,21 +153,22 @@ func TestMissingCheckoutRecoveryPreflightCarriesExplicitBranchReplacement(t *tes
 }
 
 type executorMissingCheckoutRecoveryFixture struct {
-	taskID         string
-	sessionID      string
-	workspaceID    string
-	environmentID  string
-	worktreeID     string
-	taskDirName    string
-	repositoryID   string
-	branchSlug     string
-	branch         string
-	repositoryPath string
-	worktreePath   string
-	branchHead     string
-	sessionState   models.TaskSessionState
-	store          *worktree.SQLiteStore
-	manager        *worktree.Manager
+	taskID            string
+	sessionID         string
+	workspaceID       string
+	environmentID     string
+	worktreeID        string
+	environmentRepoID string
+	taskDirName       string
+	repositoryID      string
+	branchSlug        string
+	branch            string
+	repositoryPath    string
+	worktreePath      string
+	branchHead        string
+	sessionState      models.TaskSessionState
+	store             *worktree.SQLiteStore
+	manager           *worktree.Manager
 }
 
 func newExecutorMissingCheckoutRecoveryFixture(t *testing.T, route string) *executorMissingCheckoutRecoveryFixture {
@@ -176,7 +177,8 @@ func newExecutorMissingCheckoutRecoveryFixture(t *testing.T, route string) *exec
 	fixture := &executorMissingCheckoutRecoveryFixture{
 		taskID: "task-missing-checkout-" + route, sessionID: "session-missing-checkout-" + route,
 		workspaceID: "workspace-missing-checkout", environmentID: "environment-recovery",
-		worktreeID: "worktree-recovery", taskDirName: "task-missing-checkout-root-" + route,
+		worktreeID: "worktree-recovery", environmentRepoID: "environment-repository-recovery-" + route,
+		taskDirName:  "task-missing-checkout-root-" + route,
 		repositoryID: "repo-recovery", branchSlug: "main", branch: "feature/recovery",
 		sessionState: models.TaskSessionStateCreated,
 	}
@@ -239,7 +241,7 @@ func newExecutorMissingCheckoutRecoveryFixture(t *testing.T, route string) *exec
 		ExecutorType: string(models.ExecutorTypeWorktree), ExecutorID: models.ExecutorIDWorktree,
 		Status: models.TaskEnvironmentStatusReady, WorkspacePath: fixture.worktreePath, TaskDirName: fixture.taskDirName,
 		Repos: []*models.TaskEnvironmentRepo{{
-			ID: "environment-repository-recovery-" + route, TaskEnvironmentID: fixture.environmentID,
+			ID: fixture.environmentRepoID, TaskEnvironmentID: fixture.environmentID,
 			RepositoryID: fixture.repositoryID, BranchSlug: fixture.branchSlug, WorktreeID: fixture.worktreeID,
 			WorktreePath: fixture.worktreePath, WorktreeBranch: fixture.branch, Status: "active", Position: 0,
 		}},
@@ -278,8 +280,10 @@ func configureExecutorMissingCheckoutEnvironment(repo *mockRepository, fixture *
 	env.WorkspacePath = fixture.worktreePath
 	env.OwnershipGeneration = 1
 	env.ExecutorType = string(models.ExecutorTypeWorktree)
+	env.ExecutorID = models.ExecutorIDWorktree
 	env.Status = models.TaskEnvironmentStatusReady
 	for _, row := range env.Repos {
+		row.ID = fixture.environmentRepoID
 		row.WorktreeID = fixture.worktreeID
 		row.WorktreePath = fixture.worktreePath
 		row.WorktreeBranch = fixture.branch
@@ -297,7 +301,11 @@ func configureExecutorMissingCheckoutEnvironment(repo *mockRepository, fixture *
 			}
 		}
 	}
-	repo.repositories[fixture.repositoryID].LocalPath = fixture.repositoryPath
+	repository := repo.repositories[fixture.repositoryID]
+	repository.WorkspaceID = fixture.workspaceID
+	repository.Name = "repository"
+	repository.SourceType = "local"
+	repository.LocalPath = fixture.repositoryPath
 	repo.taskRepositories["task-repo-recovery"].TaskID = fixture.taskID
 	repo.taskRepositories["task-repo-recovery"].RepositoryID = fixture.repositoryID
 	repo.taskRepositories["task-repo-recovery"].BaseBranch = "main"

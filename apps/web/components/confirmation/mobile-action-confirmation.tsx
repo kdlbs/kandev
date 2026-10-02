@@ -148,7 +148,7 @@ function OpenMobileConfirmation({
       <DrawerContent
         aria-labelledby={titleId}
         aria-describedby={descriptionId}
-        className="data-[vaul-drawer-direction=bottom]:max-h-[calc(100dvh-1rem)] data-[vaul-drawer-direction=bottom]:mt-0 overflow-hidden"
+        className="data-[vaul-drawer-direction=bottom]:h-[min(90dvh,48rem)] data-[vaul-drawer-direction=bottom]:max-h-[calc(100dvh-1rem)] data-[vaul-drawer-direction=bottom]:mt-0 overflow-hidden"
         onOpenAutoFocus={(event) => event.preventDefault()}
         onCloseAutoFocus={(event) => event.preventDefault()}
         onEscapeKeyDown={(event) => {

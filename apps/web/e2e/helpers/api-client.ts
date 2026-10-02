@@ -1186,6 +1186,15 @@ export class ApiClient {
     await this.request("PATCH", `/api/v1/repositories/${repositoryId}`, updates);
   }
 
+  async deleteRepository(repositoryId: string): Promise<void> {
+    const response = await this.rawRequest("DELETE", `/api/v1/repositories/${repositoryId}`);
+    if (!response.ok) {
+      throw new Error(
+        `API DELETE /api/v1/repositories/${repositoryId} failed (${response.status}): ${await response.text()}`,
+      );
+    }
+  }
+
   async createRepositoryScript(
     repositoryId: string,
     name: string,

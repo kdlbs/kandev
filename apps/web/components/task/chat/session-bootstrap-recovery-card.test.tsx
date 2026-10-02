@@ -374,6 +374,34 @@ describe("SessionBootstrapRecoveryCard", () => {
     fireEvent.click(screen.getByTestId("managed-clone-relocation-confirm"));
     expect(recoveryActionState.handleManagedCloneRelocation).toHaveBeenCalledOnce();
   });
+
+  it("changes a cancelled legacy restore failure to one relocation action", () => {
+    recoveryActionState.manualRecoveryFailure = { operation: "restore_workspace" };
+    recoveryActionState.recoveryError = new Error("workspace needs relocation");
+    const { rerender } = render(
+      <SessionBootstrapRecoveryCard taskId="task-1" sessionId="session-1" error={error} />,
+    );
+    expect(screen.getByTestId("recovery-restore-workspace-button")).toBeTruthy();
+    expect(screen.getByTestId(RESUME_BUTTON_TEST_ID)).toBeTruthy();
+
+    recoveryActionState.managedCloneRecoveryStamp = "managed-stamp-2";
+    rerender(
+      <SessionBootstrapRecoveryCard
+        taskId="task-1"
+        sessionId="session-1"
+        error={{
+          ...error,
+          stamp: "managed-stamp-2",
+          category: "managed_clone_relocation_required",
+        }}
+      />,
+    );
+
+    expect(screen.getAllByTestId("managed-clone-relocate-button")).toHaveLength(1);
+    expect(screen.queryByTestId(RESUME_BUTTON_TEST_ID)).toBeNull();
+    expect(screen.queryByTestId("recovery-fresh-button")).toBeNull();
+    expect(screen.queryByTestId("recovery-restore-workspace-button")).toBeNull();
+  });
 });
 
 it("keeps a refusal prerequisite visible and exposes no recovery bypass", () => {
