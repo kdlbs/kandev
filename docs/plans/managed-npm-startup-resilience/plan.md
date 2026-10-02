@@ -176,6 +176,8 @@ At the initial package handoff on 2026-10-02, issue 4152 remained assigned to ca
 
 Code-review remediation completed on 2026-10-02. The Task 02 results record the three repaired findings and validation. All affected backend package tests, review-specific race tests, the scoped backend linter, the full backend build, specification validation, and whitespace validation passed. The original incident cause remains unknown.
 
+The subsequent PR review pass addressed all 28 actionable threads. Additional regressions cover process-generation capture, startup metadata snapshots, stderr completeness, final boot output, authentication recovery, and mobile success in the original conversation. The UI review also consolidated the shared runtime recovery card shell. Full desktop, mobile, Docker, and SSH startup-recovery E2Es passed after the review changes. Backend lint and commit hooks passed; see the Task 02 and Task 03 results for command details. The initial desktop group run had one backend-fixture restart failure during teardown; the cancellation case passed alone, and the complete four-case desktop group passed on rerun. This does not change the unresolved cause of issue 4152's initial ACP exit.
+
 ## Risks and assumptions
 
 - One retry is the chosen bound, matching the existing replacement-generation model. The user requested automatic recovery but did not prescribe a retry count.

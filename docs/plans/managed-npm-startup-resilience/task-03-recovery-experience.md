@@ -148,3 +148,16 @@ Verification passed:
 - `python3 scripts/list-docs.py validate`, `python3 scripts/lint-spec-files.py --all`, and `git diff --check`.
 
 Issue 4152's original process-exit cause remains unconfirmed. This work adds bounded recovery for the proven eligible startup failure classes; it does not claim to identify that incident's initial exit cause.
+
+### PR review follow-up (2026-10-02)
+
+The review pass corrected public guidance to require complete, generation-matched evidence for ordinary-exit retry; unclassified npm codes and truncated diagnostics fail closed. UI review changes now preserve structured bootstrap causes for managed-runtime cards and share the card shell between npm and general startup failures. The mobile success E2E confirms the agent reply remains in the same conversation.
+
+Final PR-review validation:
+
+- Desktop startup-retry E2E: 4 passed on full rerun. The preceding run had three passes and one backend-fixture readiness failure during teardown; the cancellation case then passed alone before the full rerun.
+- Mobile startup-retry E2E: 2 passed.
+- Docker and SSH startup-recovery E2E: 2 passed on the real executors, with no skips.
+- The managed-runtime component suite passed 61 tests across the session recovery model, startup recovery card, and action message. After the complexity refactor, the focused startup card suite passed 5 tests; TypeScript typecheck and i18n validation passed.
+- Backend `golangci-lint` passed with zero issues. The commit hooks passed documentation, spec, formatting, scoped lint, web lint, i18n, E2E sleep, public-copy, and commit-message checks.
+- `python3 scripts/list-docs.py validate`, `python3 scripts/lint-spec-files.py --all`, and public-document validation passed.

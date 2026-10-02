@@ -141,3 +141,5 @@ Passed validation:
 - `python3 scripts/list-docs.py validate`, `python3 scripts/lint-spec-files.py --all`, and `git diff --check`.
 
 The original incident's process-exit cause remains unconfirmed.
+
+The subsequent PR review also verified generation-pinned npm diagnostics and retry replacement start responses. Regression coverage now checks that cleanup writers cannot deadlock diagnostics, the final retry cause is retained and classified for authentication, process-setup/session-setup failures keep their phase, and unknown or incomplete npm evidence cannot fall through to empty-stderr recovery. Startup metadata snapshots are synchronized across event construction. All 28 actionable PR review threads were addressed across the implementation and documentation.
