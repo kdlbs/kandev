@@ -685,3 +685,32 @@ GOCACHE=/tmp/kandev-go-build-preserved-20261001 pnpm e2e:run --host --project ch
 pnpm exec eslint e2e/tests/task/task-create-workflow-step-previews.spec.ts e2e/tests/task/workflow-step-previews-helpers.ts e2e/tests/layout/preview-tab-session-switch.spec.ts
 pnpm exec prettier --check e2e/tests/task/task-create-workflow-step-previews.spec.ts e2e/tests/task/workflow-step-previews-helpers.ts e2e/tests/layout/preview-tab-session-switch.spec.ts
 ```
+
+### Exact dirty-path monitor integration, 2026-10-02
+
+Rebased all 85 branch commits onto main
+`69fa561795f52ee69ef15513e9f55c3c65ddc3f7` without conflicts. Range-diff preserves
+all branch changes. The affected process package passed with race detection
+(163.197s). A fresh browser build passed the three affected/regression cases
+with zero retries (35.2s). Full web typecheck and lint, documentation catalog,
+full specification lint, and whitespace checks passed.
+
+The preceding published cohort is terminal: 59 passed, 11 skipped, 1 neutral,
+4 failed, 0 pending, complete evidence. All 20 browser blob reports were audited;
+the only failed attempts are the two fixtures described above (one failed and
+one timed out, both passed their retry). New-head hosted checks remain required.
+Native Windows/macOS product containment smoke tests and the live harness
+restore matrix remain outside these checks.
+
+```bash
+cd apps/backend
+GOCACHE=/tmp/kandev-go-build-preserved-20261001 go test -trimpath -race ./internal/agentctl/server/process
+cd ../web
+GOCACHE=/tmp/kandev-go-build-preserved-20261001 pnpm e2e:run --host --project chromium tests/task/task-create-workflow-step-previews.spec.ts tests/layout/preview-tab-session-switch.spec.ts -- --grep 'titles repeat|scrolls ten|promoted file tab' --retries=0
+pnpm run typecheck
+pnpm run lint
+cd ../..
+python3 scripts/list-docs.py validate
+python3 scripts/lint-spec-files.py --all
+git diff --check
+```
