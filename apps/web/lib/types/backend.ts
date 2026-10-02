@@ -199,6 +199,7 @@ export type AgentInstallOutputPayload = {
 
 export type AgentUpdateJobPayload = {
   automatic?: boolean;
+  runtime_id?: string;
   previous_version?: string;
   job_id: string;
   agent_name: string;

@@ -16,7 +16,7 @@ func (h *Handlers) httpSetAutomaticRuntimeUpdates(c *gin.Context) {
 	var request struct {
 		Enabled *bool `json:"enabled"`
 	}
-	if err := c.ShouldBindJSON(&request); err != nil || request.Enabled == nil {
+	if err := decodeStrictSettingsJSON(c, &request); err != nil || request.Enabled == nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "enabled must be a boolean"})
 		return
 	}

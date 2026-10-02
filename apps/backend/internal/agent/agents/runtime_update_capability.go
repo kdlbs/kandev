@@ -15,12 +15,13 @@ type RuntimeReleaseAgent interface{ RuntimeReleaseSource() RuntimeReleaseSource 
 // RuntimeUpdateCapability describes the runtime that structured execution uses.
 // Separately installed authentication and passthrough CLIs retain their owners.
 type RuntimeUpdateCapability struct {
-	RuntimeID  string
-	Owner      string
-	Mechanism  string
-	Management string
-	Source     RuntimeReleaseSource
-	Managed    *ManagedNPMRuntimeSpec
+	RuntimeID       string
+	Owner           string
+	Mechanism       string
+	Management      string
+	Source          RuntimeReleaseSource
+	Managed         *ManagedNPMRuntimeSpec
+	ManagedFallback *ManagedNPMRuntimeSpec
 }
 
 const RuntimeManagementUnsupported = "unsupported"
@@ -66,6 +67,7 @@ func managedRuntimeUpdateCapability(ag Agent, spec ManagedNPMRuntimeSpec) Runtim
 	}
 	cap.RuntimeID, cap.Owner, cap.Mechanism, cap.Management = "native:"+spec.NativeBinary, "external", "native", "manual"
 	cap.Managed = nil
+	cap.ManagedFallback = &spec
 	if source, ok := ag.(RuntimeReleaseAgent); ok {
 		cap.Source = source.RuntimeReleaseSource()
 	}

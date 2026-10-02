@@ -120,6 +120,7 @@ func (c *Controller) ListAgentUpdateStatuses(ctx context.Context) (*dto.ListAgen
 	for _, target := range targets {
 		entry := entries[target.packageName]
 		status := dto.AgentUpdateStatusDTO{
+			ManagedFallback:     target.capability.ManagedFallback != nil && c.verifiedManagedActivation(),
 			AgentName:           target.agentName,
 			DisplayName:         target.displayName,
 			RuntimeID:           target.capability.RuntimeID,
@@ -224,6 +225,9 @@ func (c *Controller) runtimeUpdateStatusEntry(
 	packageName string,
 	now time.Time,
 ) runtimeUpdateStatusCacheEntry {
+	if ctx.Err() != nil {
+		return runtimeUpdateStatusCacheEntry{}
+	}
 	c.runtimeUpdateStatusMu.Lock()
 	if entry, ok := c.runtimeUpdateStatusCache[packageName]; ok && now.Before(entry.expiresAt) {
 		c.runtimeUpdateStatusMu.Unlock()
@@ -236,31 +240,21 @@ func (c *Controller) runtimeUpdateStatusEntry(
 	}
 	c.runtimeUpdateStatusMu.Unlock()
 
-	select {
-	case lookup <- struct{}{}:
-	case <-ctx.Done():
-		return runtimeUpdateStatusCacheEntry{}
-	}
-	defer func() { <-lookup }()
-
-	// Recheck after waiting for the bounded slot so concurrent requests do not
-	// repeat a lookup that another waiter already completed.
-	c.runtimeUpdateStatusMu.Lock()
-	if entry, ok := c.runtimeUpdateStatusCache[packageName]; ok && now.Before(entry.expiresAt) {
-		c.runtimeUpdateStatusMu.Unlock()
-		return entry
-	}
-	c.runtimeUpdateStatusMu.Unlock()
-
 	result := c.runtimeUpdateStatusFlight.DoChan(packageName, func() (interface{}, error) {
+		lookupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), runtimeUpdateStatusLookupTimeout)
+		defer cancel()
+		select {
+		case lookup <- struct{}{}:
+		case <-lookupCtx.Done():
+			return runtimeUpdateStatusCacheEntry{}, nil
+		}
+		defer func() { <-lookup }()
 		c.runtimeUpdateStatusMu.Lock()
 		cached, found := c.runtimeUpdateStatusCache[packageName]
 		c.runtimeUpdateStatusMu.Unlock()
 		if found && now.Before(cached.expiresAt) {
 			return cached, nil
 		}
-		lookupCtx, cancel := context.WithTimeout(ctx, runtimeUpdateStatusLookupTimeout)
-		defer cancel()
 		latest, metadata, err := c.resolveRuntimeUpdateLatest(lookupCtx, packageName)
 		entry := runtimeUpdateStatusCacheEntry{expiresAt: now.Add(runtimeUpdateStatusFailureTTL)}
 		if err == nil {

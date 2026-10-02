@@ -397,5 +397,8 @@
   "runtimeOtherRegistrations_one": "其他已註冊的執行時（{{count}}）",
   "runtimeOtherRegistrations_other": "其他已註冊的執行時（{{count}}）",
   "runtimeInterruptedTitle": "{{agent}} 執行時更新已中斷",
-  "runtimeInterruptedBody": "無法確認 {{agent}} 執行時從 {{previous}} 更新到 {{version}} 的結果。請檢查目前選擇，再重試或恢復 Kandev 預設版本。"
+  "runtimeInterruptedBody": "無法確認 {{agent}} 執行時從 {{previous}} 更新到 {{version}} 的結果。請檢查目前選擇，再重試或恢復 Kandev 預設版本。",
+  "runtimeFallbackManage": "管理後備版本",
+  "runtimeFallbackExplainer": "此操作選擇遠端和容器啟動所用的託管軟體包。主機上的原生安裝保持不變。遠端原生安裝仍由其原有管理方負責更新。",
+  "runtimeFallbackReview": "在更改後續遠端或容器啟動前，請先檢視託管後備軟體包。"
 }

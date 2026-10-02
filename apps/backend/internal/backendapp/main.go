@@ -1403,6 +1403,7 @@ func startGatewayAndServe(
 	services.Task.StartQuickChatExpirationLoop(ctx)
 
 	hostUtilityCtx, hostUtilityCancel := context.WithCancel(ctx)
+	hostUtilityReady := make(chan struct{})
 	var hostUtilityWG sync.WaitGroup
 	hostUtilityWG.Add(1)
 	go func() {
@@ -1410,6 +1411,7 @@ func startGatewayAndServe(
 		if err := hostUtilityMgr.Start(hostUtilityCtx); err != nil {
 			log.Warn("host utility manager bootstrap error", zap.Error(err))
 		}
+		close(hostUtilityReady)
 		// Reconcile profiles against fresh probe results — seeds defaults for
 		// newly probed agents, heals stale profile models/modes, cleans up
 		// orphans referencing removed agents.
@@ -1461,7 +1463,7 @@ func startGatewayAndServe(
 		})
 	}
 	agentSettingsController.SetRuntimeUpdateNotifier(notificationSvc)
-	stopRuntimeUpdates := agentSettingsController.StartRuntimeUpdateBackground(ctx)
+	stopRuntimeUpdates := agentSettingsController.StartRuntimeUpdateBackground(ctx, hostUtilityReady)
 	stopRuntimeUpdatesCleanup := func() error { stopRuntimeUpdates(); return nil }
 	addCleanup(stopRuntimeUpdatesCleanup)
 	restoreCleanups = append(restoreCleanups, stopRuntimeUpdatesCleanup)

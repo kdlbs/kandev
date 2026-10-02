@@ -38,9 +38,9 @@ No model discovery, worker delegation, or global developer CLI/login changes. Na
 ## Verification
 
 ```bash
-(cd apps/backend && go test -race ./internal/agent/settings/controller ./internal/agent/settings/handlers ./internal/agent/managedruntime ./internal/notifications/service ./internal/notifications/providers ./internal/backendapp -count=1)
+(cd apps/backend && go test -race -tags fts5 ./internal/agent/settings/controller ./internal/agent/settings/handlers ./internal/agent/managedruntime ./internal/notifications/service ./internal/notifications/providers ./internal/backendapp -count=1)
 (cd apps/backend && go run ./cmd/sqlguard ./internal)
-(cd apps/backend && go test -race ./internal/persistence/storeconformance -count=1)
+(cd apps/backend && go test -race -tags fts5 ./internal/persistence/storeconformance -count=1)
 ```
 
 ## Files likely touched
@@ -66,3 +66,5 @@ Passed the listed controller/handlers/managedruntime/notifications/backendapp ra
 Additional deterministic coverage verifies shared source catalogue reuse, consent withdrawal during validation, preparation/probe/persistence failures, retained outcomes across controller recreation, interrupted activation without an invented result, and read-only subscriber replay after worker disposal. A temporary runtime installation and a real isolated fixture process prove automatic activation, manual rollback and default reset leave the existing process/version live.
 
 The complete lifecycle race suite and hostutility race suite passed. Its existing launch-deadline test failed twice because a 40ms deadline expired before the download stage started. The test now allows one second for launch setup against a ten-second download timeout, preserving its assertion that the launch deadline bounds transfer. Focused and full lifecycle race verification passed after this fixture correction. Backend lint reports zero issues. Additional red/green tests require a verified release catalogue before automatic consent and immediate retained notifications when catalogue validation fails before job creation.
+
+PR review remediation covers shared-source caller cancellation, consent-preserving manual admission and durable-outcome release before refresh callbacks. Native-host managed fallback controls preserve package selection/recovery without global native mutation or false host capability publication. Red/green regression tests pass for cancellation, rejected manual requests, terminal admission, verified native fallback update/rollback/default, strict policy JSON, save contributor identity, original outcome identity, and bootstrap readiness. Backend controller/handler/registry/backendapp tests pass with -race -tags fts5; five directly changed frontend suites pass 39 tests, plus two card-destination snapshot tests. TypeScript, all seven shipped locales, 18 desktop and seven phone E2E cases pass. External exact-head CI/review/merge gates remain pending.

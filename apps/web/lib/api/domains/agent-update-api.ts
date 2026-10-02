@@ -18,6 +18,7 @@ export type AgentUpdateVersion = {
 };
 
 export type AgentUpdateJob = {
+  runtime_id?: string;
   job_id: string;
   automatic?: boolean;
   previous_version?: string;
@@ -37,6 +38,7 @@ export type AgentUpdateJob = {
 };
 
 export type AgentUpdatePreview = {
+  managed_fallback?: boolean;
   agent_name: string;
   package: string;
   current_version?: string;
@@ -110,14 +112,15 @@ export type AgentRuntimeOutcome = {
 };
 
 export type AgentUpdateStatus = {
+  managed_fallback?: boolean;
   display_name: string;
   runtime_id: string;
   owner: "kandev" | "external" | "none";
   mechanism: string;
   management: "managed" | "manual" | "unsupported";
-  source: string;
-  guidance_url: string;
-  current_version: string;
+  source?: string;
+  guidance_url?: string;
+  current_version?: string;
   available: boolean;
   enabled: boolean;
   auto_update_supported: boolean;

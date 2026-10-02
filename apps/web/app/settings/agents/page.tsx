@@ -427,7 +427,12 @@ export default function AgentsSettingsPage() {
 
       <Separator />
 
-      <AgentRuntimePolicies />
+      <AgentRuntimePolicies
+        hasRuntimeControl={(name) =>
+          installedAgents.some((agent) => agent.name === name) &&
+          Boolean(resolveRuntimeUpdate(name)?.supported)
+        }
+      />
 
       <InstalledAgentsSection
         canManage={canManage}

@@ -37,7 +37,7 @@ function job(overrides: Partial<AgentUpdateJob> = {}): AgentUpdateJob {
   };
 }
 
-afterEach(() => vi.clearAllMocks());
+afterEach(() => vi.resetAllMocks());
 
 describe("useAgentRuntimeUpdateStatuses", () => {
   it("loads structural statuses into a shared agent map", async () => {

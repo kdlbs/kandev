@@ -7,6 +7,7 @@ import (
 	"testing/synctest"
 
 	"github.com/kandev/kandev/internal/agent/agents"
+	"github.com/kandev/kandev/internal/agent/settings/dto"
 )
 
 // @covers AC-AGENTS-RUNTIME-NOTIFY-001.2
@@ -30,6 +31,45 @@ func TestRuntimeStatusConcurrentConsumersShareSourceLookup(t *testing.T) {
 	})
 }
 
+// @covers AC-AGENTS-RUNTIME-NOTIFY-001.2
+func TestRuntimeStatusCallerCancellationPreservesSharedSourceAndCache(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		c := newTestController(map[string]agents.Agent{"gemini": agents.NewGemini()})
+		started, release := make(chan struct{}), make(chan struct{})
+		var calls atomic.Int32
+		c.SetRuntimeUpdateStatusResolver(func(ctx context.Context, _ string) (string, error) {
+			calls.Add(1)
+			close(started)
+			select {
+			case <-ctx.Done():
+				return "", ctx.Err()
+			case <-release:
+				return "9.0.0", nil
+			}
+		})
+		ctx, cancel := context.WithCancel(context.Background())
+		first := make(chan struct{})
+		go func() { _, _ = c.ListAgentUpdateStatuses(ctx); close(first) }()
+		<-started
+		second := make(chan dto.AgentUpdateCheckState, 1)
+		go func() {
+			response, _ := c.ListAgentUpdateStatuses(context.Background())
+			second <- response.Statuses[0].CheckState
+		}()
+		synctest.Wait()
+		cancel()
+		<-first
+		close(release)
+		if state := <-second; state != dto.AgentUpdateCheckStateUpdateAvailable {
+			t.Fatalf("remaining subscriber lost shared source: %s", state)
+		}
+		response, _ := c.ListAgentUpdateStatuses(context.Background())
+		if response.Statuses[0].LatestVersion != "9.0.0" || calls.Load() != 1 {
+			t.Fatalf("caller cancellation poisoned cache: %+v; calls=%d", response, calls.Load())
+		}
+	})
+}
+
 func TestRuntimeStatusCancelledWaiterDoesNotWaitForSourceSlot(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		c := newTestController(map[string]agents.Agent{"gemini": agents.NewGemini()})
@@ -47,9 +87,5 @@ func TestRuntimeStatusCancelledWaiterDoesNotWaitForSourceSlot(t *testing.T) {
 		default:
 			t.Error("cancelled status blocked on source slot")
 		}
-		for range runtimeUpdateStatusMaxConcurrent {
-			<-c.runtimeUpdateStatusLookup
-		}
-		<-done
 	})
 }

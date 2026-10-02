@@ -384,11 +384,11 @@
   "runtimeUnsupportedHelp": "Kandev에는 이 런타임의 검증된 업데이트 소스나 승인된 업데이트 도구가 없습니다. 설치 관리자에게 확인하세요.",
   "runtimeNotAvailable": "사용할 수 없거나 비활성화됨",
   "runtimeAvailableTitle": "{{agent}} 런타임 업데이트 사용 가능",
-  "runtimeAvailableBody": "{{agent}} 런타임 {{runtime}}을 {{previous}}에서 {{version}}로 업데이트할 수 있습니다. 업데이트 설정 또는 수동 안내를 확인하세요.",
+  "runtimeAvailableBody": "{{agent}} 런타임 {{runtime}}을(를) {{previous}}에서 {{version}}로 업데이트할 수 있습니다. 업데이트 설정 또는 수동 안내를 확인하세요.",
   "runtimeSucceededTitle": "{{agent}} 런타임 업데이트 완료",
   "runtimeSucceededBody": "{{agent}} 런타임이 {{previous}}에서 {{version}}로 업데이트되어 새 세션에 적용됩니다. 이전 버전을 선택하거나 Kandev 기본값으로 돌아갈 수 있습니다.",
   "runtimeFailedTitle": "{{agent}} 런타임 업데이트 실패",
-  "runtimeFailedBody": "{{agent}} 런타임 {{version}}을 활성화할 수 없습니다(이전 버전: {{previous}}). 이번 시도에서는 선택한 버전이 유지되었습니다. 수동으로 다시 시도하거나 자동 업데이트를 끄세요.",
+  "runtimeFailedBody": "{{agent}} 런타임 {{version}}을(를) 활성화할 수 없습니다(이전 버전: {{previous}}). 이번 시도에서는 선택한 버전이 유지되었습니다. 수동으로 다시 시도하거나 자동 업데이트를 끄세요.",
   "runtimeRunning": "{{previous}}에서 {{version}}로 업데이트 준비 중",
   "runtimeReview": "런타임 확인",
   "runtimeIndicator_one": "에이전트 런타임 업데이트 {{count}}개",
@@ -397,5 +397,8 @@
   "runtimeOtherRegistrations_one": "기타 등록된 런타임({{count}}개)",
   "runtimeOtherRegistrations_other": "기타 등록된 런타임({{count}}개)",
   "runtimeInterruptedTitle": "{{agent}} 런타임 업데이트 중단",
-  "runtimeInterruptedBody": "{{agent}} 런타임을 {{previous}}에서 {{version}}로 업데이트한 결과를 확인할 수 없습니다. 다시 시도하거나 Kandev 기본값으로 돌아가기 전에 현재 선택을 확인하세요."
+  "runtimeInterruptedBody": "{{agent}} 런타임을 {{previous}}에서 {{version}}로 업데이트한 결과를 확인할 수 없습니다. 다시 시도하거나 Kandev 기본값으로 돌아가기 전에 현재 선택을 확인하세요.",
+  "runtimeFallbackManage": "대체 버전 관리",
+  "runtimeFallbackExplainer": "원격 및 컨테이너 실행에 사용할 관리 패키지를 선택합니다. 호스트의 네이티브 설치는 변경되지 않습니다. 원격 네이티브 설치의 업데이트는 기존 관리 주체가 계속 담당합니다.",
+  "runtimeFallbackReview": "향후 원격 또는 컨테이너 실행을 변경하기 전에 관리되는 대체 패키지를 검토하세요."
 }

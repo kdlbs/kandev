@@ -336,6 +336,7 @@ type AvailableAgentDTO struct {
 // RuntimeUpdateDTO describes a Kandev-managed npm runtime. Package is
 // informational; update requests select only the built-in agent name.
 type RuntimeUpdateDTO struct {
+	ManagedFallback  bool   `json:"managed_fallback,omitempty"`
 	Supported        bool   `json:"supported"`
 	Package          string `json:"package"`
 	CurrentVersion   string `json:"current_version,omitempty"`
@@ -359,6 +360,7 @@ const (
 // runtime. ActiveVersion is the optional persisted operator selection; the
 // default is never persisted and remains the fallback effective version.
 type AgentUpdateStatusDTO struct {
+	ManagedFallback     bool                          `json:"managed_fallback,omitempty"`
 	AutoUpdate          bool                          `json:"auto_update"`
 	LastOutcome         *managedruntime.UpdateOutcome `json:"last_outcome,omitempty"`
 	DisplayName         string                        `json:"display_name"`
@@ -442,6 +444,7 @@ const (
 
 // AgentUpdateJobDTO is the retained HTTP and WebSocket update snapshot.
 type AgentUpdateJobDTO struct {
+	RuntimeID        string               `json:"runtime_id,omitempty"`
 	Automatic        bool                 `json:"automatic"`
 	PreviousVersion  string               `json:"previous_version,omitempty"`
 	JobID            string               `json:"job_id"`
@@ -463,6 +466,7 @@ type AgentUpdateJobDTO struct {
 // AgentUpdatePreviewDTO is a read-only representation of the next managed
 // runtime update. The command is derived from trusted built-in agent metadata.
 type AgentUpdatePreviewDTO struct {
+	ManagedFallback   bool                    `json:"managed_fallback,omitempty"`
 	AgentName         string                  `json:"agent_name"`
 	Package           string                  `json:"package"`
 	CurrentVersion    string                  `json:"current_version,omitempty"`

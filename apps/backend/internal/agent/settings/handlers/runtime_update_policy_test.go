@@ -6,6 +6,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/agents"
 	"github.com/kandev/kandev/internal/agent/hostutility"
 	"github.com/kandev/kandev/internal/agent/managedruntime"
+	"github.com/kandev/kandev/internal/agent/settings/controller"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -39,6 +40,10 @@ func (u verifiedPolicyUpdater) Probe(ctx context.Context, name string, command a
 }
 func (verifiedPolicyUpdater) PublishCapabilities(string, hostutility.AgentCapabilities) {}
 
+func (verifiedPolicyUpdater) ResolveVersions(context.Context, string) (controller.RuntimeVersionMetadata, error) {
+	return controller.RuntimeVersionMetadata{Latest: "9.0.0", Versions: []string{"9.0.0"}}, nil
+}
+
 // @covers AC-AGENTS-RUNTIME-NOTIFY-002.1
 func TestAutomaticPolicyEndpointPersistsConsentAndFailsTruthfully(t *testing.T) {
 	router, ctrl, _ := newAgentUpdateRouter(t, verifiedPolicyUpdater{&handlerRuntimeUpdater{}})
@@ -53,6 +58,9 @@ func TestAutomaticPolicyEndpointPersistsConsentAndFailsTruthfully(t *testing.T) 
 		{`{"enabled":false}`, "gemini", 200},
 		{`{}`, "gemini", 400},
 		{`{"enabled":"yes"}`, "gemini", 400},
+		{`{"enabled":true} {"enabled":false}`, "gemini", 400},
+		{`{"enabled":true} trailing`, "gemini", 400},
+		{`{"enabled":true,"unexpected":true}`, "gemini", 400},
 		{`{"enabled":true}`, "cursor-acp", 400},
 		{`{"enabled":true}`, "missing-agent", 404},
 	} {

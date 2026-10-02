@@ -397,5 +397,8 @@
   "runtimeOtherRegistrations_one": "その他の登録済みランタイム（{{count}}）",
   "runtimeOtherRegistrations_other": "その他の登録済みランタイム（{{count}}）",
   "runtimeInterruptedTitle": "{{agent}} のランタイム更新が中断されました",
-  "runtimeInterruptedBody": "{{agent}} のランタイムを {{previous}} から {{version}} に更新した結果を確認できませんでした。再試行するか Kandev の既定値に戻す前に、現在の選択を確認してください。"
+  "runtimeInterruptedBody": "{{agent}} のランタイムを {{previous}} から {{version}} に更新した結果を確認できませんでした。再試行するか Kandev の既定値に戻す前に、現在の選択を確認してください。",
+  "runtimeFallbackManage": "フォールバックのバージョンを管理",
+  "runtimeFallbackExplainer": "リモート環境とコンテナでの起動に使う管理対象パッケージを選択します。ホストのネイティブインストールは変更されません。リモートのネイティブインストールの更新は引き続き元の管理者が行います。",
+  "runtimeFallbackReview": "今後のリモート環境やコンテナでの起動を変更する前に、管理対象のフォールバックパッケージを確認してください。"
 }

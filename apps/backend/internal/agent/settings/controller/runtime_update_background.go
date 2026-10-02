@@ -15,7 +15,7 @@ type runtimeUpdateBackground struct {
 }
 
 // StartRuntimeUpdateBackground owns the single install-wide update sweep.
-func (c *Controller) StartRuntimeUpdateBackground(parent context.Context) func() {
+func (c *Controller) StartRuntimeUpdateBackground(parent context.Context, readiness ...<-chan struct{}) func() {
 	c.runtimeBackgroundMu.Lock()
 	defer c.runtimeBackgroundMu.Unlock()
 	if c.runtimeBackground != nil {
@@ -27,6 +27,13 @@ func (c *Controller) StartRuntimeUpdateBackground(parent context.Context) func()
 	worker.wg.Add(1)
 	go func() {
 		defer worker.wg.Done()
+		if len(readiness) > 0 && readiness[0] != nil {
+			select {
+			case <-readiness[0]:
+			case <-ctx.Done():
+				return
+			}
+		}
 		ticker := time.NewTicker(runtimeUpdateBackgroundInterval)
 		defer ticker.Stop()
 		for ctx.Err() == nil {

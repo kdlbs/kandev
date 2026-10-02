@@ -134,7 +134,7 @@ func TestAutomaticCandidateCannotSurviveWithdrawalAndReenable(t *testing.T) {
 	if err := c.RunRuntimeUpdatePass(ctx); err != nil {
 		t.Fatal(err)
 	}
-	<-updater.probed
+	waitForRuntimeSignal(t, updater.probed, "candidate probe")
 	if err := c.SetAgentAutomaticUpdates(ctx, "gemini", false); err != nil {
 		t.Fatal(err)
 	}
@@ -206,7 +206,7 @@ func TestAutomaticFailurePreservesSelectionAndDoesNotRetryAfterReload(t *testing
 }
 
 // @covers AC-AGENTS-RUNTIME-NOTIFY-002.2
-func TestNativeOpenCodeManualAPIRejectsExternalMutation(t *testing.T) {
+func TestNativeOpenCodeManualAPIRejectsUnverifiedFallback(t *testing.T) {
 	binary := filepath.Join(t.TempDir(), "opencode")
 	if err := os.WriteFile(binary, []byte("#!/bin/sh\nexit 0\n"), 0700); err != nil {
 		t.Fatal(err)
@@ -214,7 +214,8 @@ func TestNativeOpenCodeManualAPIRejectsExternalMutation(t *testing.T) {
 	t.Setenv("PATH", filepath.Dir(binary))
 	ag := agents.NewOpenCodeACP()
 	c := newTestController(map[string]agents.Agent{ag.ID(): ag})
-	c.SetRuntimeUpdater(&recoveryRuntimeUpdater{metadata: RuntimeVersionMetadata{Latest: "9.0.0", Versions: []string{"9.0.0"}}})
+	base := &recoveryRuntimeUpdater{metadata: RuntimeVersionMetadata{Latest: "9.0.0", Versions: []string{"9.0.0"}}}
+	c.SetRuntimeUpdater(candidateWithoutCatalogue{RuntimeUpdater: base, candidate: base})
 	c.SetManagedRuntimeSelectionStore(newRecoverySelectionStore())
 	c.SetJobBroadcaster(newUpdateTerminalBroadcaster())
 	if _, err := c.PreviewAgentUpdate(context.Background(), ag.ID(), "9.0.0"); !errors.Is(err, ErrRuntimeUpdateUnsupported) {
@@ -317,7 +318,7 @@ func TestAutomaticFinishingJobIsNotReportedAsInterrupted(t *testing.T) {
 	if err := c.RunRuntimeUpdatePass(ctx); err != nil {
 		t.Fatal(err)
 	}
-	<-finishing
+	waitForRuntimeSignal(t, finishing, "outcome retention")
 	if err := c.RunRuntimeUpdatePass(ctx); err != nil {
 		t.Fatal(err)
 	}

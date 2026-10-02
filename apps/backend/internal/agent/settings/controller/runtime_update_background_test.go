@@ -3,6 +3,7 @@ package controller
 import (
 	"context"
 	"github.com/kandev/kandev/internal/agent/agents"
+	"sync/atomic"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -32,6 +33,27 @@ func TestRuntimeBackgroundOwnsOneCadenceAndStops(t *testing.T) {
 		if notices.count() != 2 {
 			t.Fatal("disposed background loop published")
 		}
+	})
+}
+
+// @covers AC-AGENTS-RUNTIME-NOTIFY-001.2
+func TestRuntimeBackgroundWaitsForHostProbeBootstrap(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		c := newTestController(map[string]agents.Agent{"gemini": agents.NewGemini()})
+		var calls atomic.Int32
+		c.SetRuntimeUpdateStatusResolver(func(context.Context, string) (string, error) { calls.Add(1); return "9.0.0", nil })
+		ready := make(chan struct{})
+		stop := c.StartRuntimeUpdateBackground(context.Background(), ready)
+		synctest.Wait()
+		if calls.Load() != 0 {
+			t.Fatal("source lookup started before host probes")
+		}
+		close(ready)
+		synctest.Wait()
+		if calls.Load() != 1 {
+			t.Fatal("bootstrap completion did not start immediate pass")
+		}
+		stop()
 	})
 }
 

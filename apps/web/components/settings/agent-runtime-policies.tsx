@@ -30,27 +30,44 @@ function RuntimeOutcome({ status }: { status: AgentUpdateStatus }) {
   );
 }
 
-function RuntimeAction({ status }: { status: AgentUpdateStatus }) {
+function RuntimeAction({ status, hasControl }: { status: AgentUpdateStatus; hasControl: boolean }) {
   const { t } = useTranslation();
   const canManage = useIsAdmin();
-  if (status.management === "managed" && status.available && status.enabled && canManage) {
-    return (
-      <Button asChild variant="outline" className={settingsActionClassName("shrink-0")}>
-        <a href={`#installed-agent-${status.agent_name}`}>{t("agents:runtimeManage")}</a>
-      </Button>
-    );
-  }
-  if (!status.guidance_url) return null;
+  const managedControl =
+    (status.management === "managed" || status.managed_fallback) &&
+    status.available &&
+    status.enabled &&
+    hasControl &&
+    canManage;
   return (
-    <Button asChild variant="outline" className={settingsActionClassName("shrink-0")}>
-      <a href={status.guidance_url} target="_blank" rel="noopener noreferrer">
-        {t("agents:runtimeManualGuidance")}
-      </a>
-    </Button>
+    <div className="flex flex-wrap gap-2">
+      {managedControl && (
+        <Button asChild variant="outline" className={settingsActionClassName("shrink-0")}>
+          <a href={`#installed-agent-${status.agent_name}`}>
+            {t(status.managed_fallback ? "agents:runtimeFallbackManage" : "agents:runtimeManage")}
+          </a>
+        </Button>
+      )}
+      {!managedControl || status.managed_fallback
+        ? status.guidance_url && (
+            <Button asChild variant="outline" className={settingsActionClassName("shrink-0")}>
+              <a href={status.guidance_url} target="_blank" rel="noopener noreferrer">
+                {t("agents:runtimeManualGuidance")}
+              </a>
+            </Button>
+          )
+        : null}
+    </div>
   );
 }
 
-function RuntimePolicyRow({ status }: { status: AgentUpdateStatus }) {
+function RuntimePolicyRow({
+  status,
+  hasControl,
+}: {
+  status: AgentUpdateStatus;
+  hasControl: boolean;
+}) {
   const { t } = useTranslation();
   const canManage = useIsAdmin();
   const { draft, setDraft, isDirty } = useRuntimeAutoUpdatePolicy(status);
@@ -91,7 +108,7 @@ function RuntimePolicyRow({ status }: { status: AgentUpdateStatus }) {
             </span>
           </div>
         </div>
-        <RuntimeAction status={status} />
+        <RuntimeAction status={status} hasControl={hasControl} />
       </div>
       {managed ? (
         <SettingsRow
@@ -121,14 +138,22 @@ function RuntimePolicyRow({ status }: { status: AgentUpdateStatus }) {
   );
 }
 
-export function AgentRuntimePolicies() {
+export function AgentRuntimePolicies({
+  hasRuntimeControl,
+}: {
+  hasRuntimeControl: (agentName: string) => boolean;
+}) {
   const { t } = useTranslation();
   const { statusByAgent } = useAgentRuntimeUpdateStatuses();
   const statuses = Object.values(statusByAgent);
   const active = statuses.filter((s) => s.available && s.enabled);
   const inactive = statuses.filter((s) => !s.available || !s.enabled);
   const row = (s: AgentUpdateStatus) => (
-    <RuntimePolicyRow key={`${s.agent_name}:${s.runtime_id}`} status={s} />
+    <RuntimePolicyRow
+      key={`${s.agent_name}:${s.runtime_id}`}
+      status={s}
+      hasControl={hasRuntimeControl(s.agent_name)}
+    />
   );
   return (
     <SettingsGroup

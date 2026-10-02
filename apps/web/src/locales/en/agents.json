@@ -397,5 +397,8 @@
   "runtimeOtherRegistrations_one": "Other registered runtime ({{count}})",
   "runtimeOtherRegistrations_other": "Other registered runtimes ({{count}})",
   "runtimeInterruptedTitle": "{{agent}} runtime update interrupted",
-  "runtimeInterruptedBody": "{{agent}} runtime update from {{previous}} to {{version}} could not be confirmed. Review the current selection before retrying or returning to the Kandev default."
+  "runtimeInterruptedBody": "{{agent}} runtime update from {{previous}} to {{version}} could not be confirmed. Review the current selection before retrying or returning to the Kandev default.",
+  "runtimeFallbackManage": "Manage fallback versions",
+  "runtimeFallbackExplainer": "This selects the managed package used by remote and container launches. The native host installation stays unchanged. Remote native installations keep their own update owner.",
+  "runtimeFallbackReview": "Review the managed fallback package before changing future remote or container launches."
 }

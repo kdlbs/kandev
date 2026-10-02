@@ -28,7 +28,7 @@ export function useRuntimeAutoUpdatePolicy(status: AgentUpdateStatus) {
   }, [status.auto_update, status.runtime_id]);
   const isDirty = draft !== saved;
   useSettingsSaveContributor({
-    id: `runtime-automatic-${status.agent_name}`,
+    id: `runtime-automatic-${status.agent_name}-${status.runtime_id}`,
     revision: Number(draft),
     isDirty,
     save: async (revision) => {

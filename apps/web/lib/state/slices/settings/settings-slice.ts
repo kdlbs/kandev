@@ -147,6 +147,7 @@ function createAgentUpdateJobActions(
             const snapshot = { ...job };
             if (previous?.job_id === job.job_id) {
               snapshot.automatic ??= previous.automatic;
+              snapshot.runtime_id ??= previous.runtime_id;
               snapshot.previous_version ??= previous.previous_version;
             }
             byAgent[job.agent_name] = snapshot;

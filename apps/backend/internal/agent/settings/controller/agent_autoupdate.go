@@ -16,15 +16,17 @@ func (c *Controller) SetRuntimeAutoUpdateStore(store *managedruntime.AutoUpdateS
 }
 
 func (c *Controller) automaticUpdateSupported(cap agents.RuntimeUpdateCapability) bool {
-	_, verified := c.runtimeUpdater.(RuntimeCandidateUpdater)
-	_, catalogue := c.runtimeUpdater.(RuntimeVersionResolver)
-	return cap.Managed != nil && verified && catalogue && c.managedRuntimeSelections != nil && c.runtimeAutoUpdateStore != nil && c.updateJobStore != nil
+	return cap.Managed != nil && c.verifiedManagedActivation() && c.runtimeAutoUpdateStore != nil && c.updateJobStore != nil
 }
 
 // SetAgentAutomaticUpdates binds install-wide consent to the trusted runtime.
 func (c *Controller) SetAgentAutomaticUpdates(ctx context.Context, name string, enabled bool) error {
 	c.runtimeAutoUpdateMu.Lock()
 	defer c.runtimeAutoUpdateMu.Unlock()
+	return c.setAgentAutomaticUpdatesLocked(ctx, name, enabled)
+}
+
+func (c *Controller) setAgentAutomaticUpdatesLocked(ctx context.Context, name string, enabled bool) error {
 	ag, found := c.agentRegistry.Get(name)
 	if !found {
 		return ErrAgentNotFound
@@ -110,7 +112,7 @@ func (c *Controller) enqueueAutomaticUpdate(ctx context.Context, status dto.Agen
 	spec := *cap.Managed
 	spec.NativeBinary = ""
 	guard := c.automaticActivationGuard(status.AgentName, cap.RuntimeID, spec, active, effective, id, status.LatestVersion)
-	_, err = c.updateJobStore.enqueueAutomatic(ctx, status.AgentName, spec, status.LatestVersion, effective, id, guard)
+	_, err = c.updateJobStore.enqueueAutomatic(ctx, status.AgentName, spec, status.LatestVersion, effective, id, cap.RuntimeID, guard)
 	if err != nil {
 		var saveErr error
 		earlyOutcome, saveErr = c.retainEarlyAutomaticFailure(ctx, status.AgentName, policy)
@@ -179,7 +181,7 @@ func (c *Controller) retainAutomaticOutcome(job dto.AgentUpdateJobDTO) {
 		c.runtimeAutoUpdateMu.Unlock()
 		return
 	}
-	policy, err := c.runtimeAutoUpdateStore.Get(ctx, job.AgentName, agents.RuntimeUpdateCapabilities(ag).RuntimeID)
+	policy, err := c.runtimeAutoUpdateStore.Get(ctx, job.AgentName, job.RuntimeID)
 	if err != nil || policy.Outcome == nil || policy.Outcome.ID != job.JobID {
 		c.runtimeAutoUpdateMu.Unlock()
 		return
@@ -194,11 +196,11 @@ func (c *Controller) retainAutomaticOutcome(job dto.AgentUpdateJobDTO) {
 	c.publishRuntimeStatus(ctx, dto.AgentUpdateStatusDTO{AgentName: job.AgentName, DisplayName: ag.DisplayName(), RuntimeID: policy.RuntimeID, LastOutcome: policy.Outcome})
 }
 
-func (c *Controller) disableAutomaticUpdates(ctx context.Context, name string) error {
+func (c *Controller) disableAutomaticUpdatesLocked(ctx context.Context, name string) error {
 	if c.runtimeAutoUpdateStore == nil {
 		return nil
 	}
-	return c.SetAgentAutomaticUpdates(ctx, name, false)
+	return c.setAgentAutomaticUpdatesLocked(ctx, name, false)
 }
 
 func (c *Controller) settleInterruptedAutomaticUpdate(ctx context.Context, status *dto.AgentUpdateStatusDTO) {

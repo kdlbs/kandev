@@ -22,9 +22,12 @@ import (
 type runtimeActivationGuard func(context.Context, func() error) error
 
 type AgentUpdateJob struct {
+	RuntimeID        string
 	Automatic        bool
+	ManagedFallback  bool
 	PreviousVersion  string
 	activationGuard  runtimeActivationGuard
+	beforeStart      func() error
 	context          context.Context
 	ID               string
 	AgentName        string
@@ -103,15 +106,19 @@ func (s *AgentUpdateJobStore) EnqueueDefault(
 	return s.enqueue(agentName, spec, true, nil)
 }
 
-func (s *AgentUpdateJobStore) enqueueAutomatic(ctx context.Context, name string, spec agents.ManagedNPMRuntimeSpec, target, previous, id string, guard runtimeActivationGuard) (*AgentUpdateJob, error) {
-	return s.enqueue(name, spec, false, &AgentUpdateJob{ID: id, Automatic: true, PreviousVersion: previous, context: ctx, activationGuard: guard}, target)
+func (s *AgentUpdateJobStore) enqueueAutomatic(ctx context.Context, name string, spec agents.ManagedNPMRuntimeSpec, target, previous, id, runtimeID string, guard runtimeActivationGuard) (*AgentUpdateJob, error) {
+	return s.enqueue(name, spec, false, &AgentUpdateJob{ID: id, RuntimeID: runtimeID, Automatic: true, PreviousVersion: previous, context: ctx, activationGuard: guard}, target)
+}
+
+func (s *AgentUpdateJobStore) enqueueManual(name string, spec agents.ManagedNPMRuntimeSpec, useDefault bool, target string, fallback bool, beforeStart func() error) (*AgentUpdateJob, error) {
+	return s.enqueue(name, spec, useDefault, &AgentUpdateJob{ManagedFallback: fallback, beforeStart: beforeStart}, target)
 }
 
 func (s *AgentUpdateJobStore) enqueue(
 	agentName string,
 	spec agents.ManagedNPMRuntimeSpec,
 	useDefault bool,
-	automatic *AgentUpdateJob,
+	options *AgentUpdateJob,
 	targetVersions ...string,
 ) (*AgentUpdateJob, error) {
 	s.mu.Lock()
@@ -128,9 +135,14 @@ func (s *AgentUpdateJobStore) enqueue(
 		StartedAt:  time.Now().UTC(),
 		UseDefault: useDefault,
 	}
-	if automatic != nil {
-		job.ID, job.Automatic, job.PreviousVersion = automatic.ID, true, automatic.PreviousVersion
-		job.context, job.activationGuard = automatic.context, automatic.activationGuard
+	if options != nil {
+		if options.ID != "" {
+			job.ID = options.ID
+		}
+		job.Automatic, job.PreviousVersion = options.Automatic, options.PreviousVersion
+		job.ManagedFallback = options.ManagedFallback
+		job.RuntimeID = options.RuntimeID
+		job.context, job.activationGuard = options.context, options.activationGuard
 	}
 	requestedTarget := ""
 	if len(targetVersions) > 0 {
@@ -146,6 +158,13 @@ func (s *AgentUpdateJobStore) enqueue(
 		existing := s.jobs[ref.JobID]
 		s.mu.Unlock()
 		return existing, nil
+	}
+	if options != nil && options.beforeStart != nil {
+		if err := options.beforeStart(); err != nil {
+			s.maintenance.release(agentName, ref)
+			s.mu.Unlock()
+			return nil, err
+		}
 	}
 	s.jobs[job.ID] = job
 	s.activeByAgt[agentName] = job
@@ -251,7 +270,7 @@ func (s *AgentUpdateJobStore) run(
 		return
 	}
 	currentVersion := ""
-	if caps, ok := s.updater.CurrentCapabilities(job.AgentName); ok {
+	if caps, ok := s.updater.CurrentCapabilities(job.AgentName); ok && !job.ManagedFallback {
 		currentVersion = caps.AgentVersion
 		s.mu.Lock()
 		job.CurrentVersion = currentVersion
@@ -450,7 +469,9 @@ func (s *AgentUpdateJobStore) runExactCandidate(
 		} else if err := s.selectionStore.Save(ctx, job.AgentName, spec.Package, target); err != nil {
 			return fmt.Errorf("persist active runtime version: %w", err)
 		}
-		candidate.PublishCapabilities(job.AgentName, caps)
+		if !job.ManagedFallback {
+			candidate.PublishCapabilities(job.AgentName, caps)
+		}
 		return nil
 	}
 	if job.activationGuard != nil {
@@ -464,8 +485,6 @@ func (s *AgentUpdateJobStore) runExactCandidate(
 	}
 	s.mu.Lock()
 	job.CurrentVersion = caps.AgentVersion
-	s.mu.Unlock()
-	s.mu.Lock()
 	if job.UseDefault {
 		job.ActiveVersion = ""
 		job.EffectiveVersion = job.DefaultVersion
@@ -542,6 +561,7 @@ func (s *AgentUpdateJobStore) finishFailed(
 	s.finishLocked(job)
 	snapshot := job.snapshot()
 	s.mu.Unlock()
+	s.complete(snapshot)
 	s.broadcast(ws.ActionAgentUpdateFinished, snapshot)
 	s.scheduleEviction(job.ID)
 }
@@ -554,6 +574,7 @@ func (s *AgentUpdateJobStore) finishAlreadyUpToDate(job *AgentUpdateJob, ref Mai
 	s.finishLocked(job)
 	snapshot := job.snapshot()
 	s.mu.Unlock()
+	s.complete(snapshot)
 	s.broadcast(ws.ActionAgentUpdateFinished, snapshot)
 	s.scheduleEviction(job.ID)
 }
@@ -578,6 +599,7 @@ func (s *AgentUpdateJobStore) finishActivated(
 	statusInvalidator := s.onStatusInvalidated
 	packageName := job.Package
 	s.mu.Unlock()
+	s.complete(snapshot)
 	if statusInvalidator != nil && packageName != "" {
 		statusInvalidator(packageName)
 	}
@@ -623,6 +645,7 @@ func (s *AgentUpdateJobStore) finishRefresh(
 	statusInvalidator := s.onStatusInvalidated
 	packageName := job.Package
 	s.mu.Unlock()
+	s.complete(snapshot)
 	if refreshed && statusInvalidator != nil && packageName != "" {
 		statusInvalidator(packageName)
 	}
@@ -663,11 +686,11 @@ func (s *AgentUpdateJobStore) scheduleEviction(jobID string) {
 	})
 }
 
-func (s *AgentUpdateJobStore) broadcast(action string, payload dto.AgentUpdateJobDTO) {
-	if action == ws.ActionAgentUpdateFinished && s.onFinished != nil {
+func (s *AgentUpdateJobStore) complete(payload dto.AgentUpdateJobDTO) {
+	if s.onFinished != nil {
 		s.onFinished(payload)
 	}
-	if action == ws.ActionAgentUpdateFinished && payload.Automatic {
+	if payload.Automatic {
 		// Keep the attempt active until its durable outcome has been retained.
 		s.mu.Lock()
 		if active := s.activeByAgt[payload.AgentName]; active != nil && active.ID == payload.JobID {
@@ -675,6 +698,9 @@ func (s *AgentUpdateJobStore) broadcast(action string, payload dto.AgentUpdateJo
 		}
 		s.mu.Unlock()
 	}
+}
+
+func (s *AgentUpdateJobStore) broadcast(action string, payload dto.AgentUpdateJobDTO) {
 	if s.hub == nil {
 		return
 	}
@@ -685,6 +711,7 @@ func (s *AgentUpdateJobStore) broadcast(action string, payload dto.AgentUpdateJo
 
 func (j *AgentUpdateJob) snapshot() dto.AgentUpdateJobDTO {
 	snapshot := dto.AgentUpdateJobDTO{
+		RuntimeID:        j.RuntimeID,
 		JobID:            j.ID,
 		Automatic:        j.Automatic,
 		PreviousVersion:  j.PreviousVersion,

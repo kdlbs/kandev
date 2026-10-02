@@ -76,9 +76,12 @@ describe("saved automatic runtime consent", () => {
     const { result, rerender } = renderHook(({ value }) => useRuntimeAutoUpdatePolicy(value), {
       initialProps: { value: status },
     });
+    const firstIdentity = contributor.id;
     act(() => result.current.setDraft(true));
     rerender({ value: { ...status, runtime_id: "native:gemini" } });
     expect(result.current.draft).toBe(false);
     expect(result.current.isDirty).toBe(false);
+    expect(contributor.id).not.toBe(firstIdentity);
+    expect(contributor.id).toContain("native:gemini");
   });
 });

@@ -170,6 +170,7 @@ export async function runtimeAwareness(page: Page, mobile = false, capture?: PrA
             status: "failed",
             previous_version: "0.62.0",
             target_version: "0.64.0",
+            finished_at: "2026-07-26T12:05:00.000Z",
           },
         }
       : status,
