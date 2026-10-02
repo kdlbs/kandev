@@ -39,7 +39,7 @@ No cache generations or consumer tracking are required.
 - **AC-SYSTEM-PAGE-GO-CACHE-004.2:** A persisted Go-specific setting shall allow cleanup while tasks run. It shall default to disabled on fresh installations and upgrades.
 - **AC-SYSTEM-PAGE-GO-CACHE-004.3:** With the setting disabled, automatic cleanup shall retain the existing global idle requirement. Manual cleanup shall retain existing activity admission and explicit force behavior.
 - **AC-SYSTEM-PAGE-GO-CACHE-004.4:** With the setting enabled, due automatic Go cleanup shall bypass task activity and quiet-period checks. Existing tasks and newly starting tasks shall not prevent its progress.
-- **AC-SYSTEM-PAGE-GO-CACHE-004.5:** Automatic deletion shall still require scheduled maintenance, enabled Go-cache cleanup, and cache size above the configured threshold. The new setting alone shall not enable scheduling or cache management.
+- **AC-SYSTEM-PAGE-GO-CACHE-004.5:** Automatic deletion shall still require scheduled maintenance, enabled Go-cache cleanup, and cleanup-eligible build-cache bytes above the configured threshold. Preserved fuzz-corpus bytes are excluded. The new setting alone shall not enable scheduling or cache management.
 - **AC-SYSTEM-PAGE-GO-CACHE-004.6:** Explicit Go cleanup shall remain available with scheduling or management disabled. The busy setting shall apply without requiring repeated force confirmation.
 - **AC-SYSTEM-PAGE-GO-CACHE-004.7:** Busy cleanup shall not bypass ownership, adoption, containment, symlink, mount, or administrator restrictions. It shall not authorize busy cleanup of another resource.
 - **AC-SYSTEM-PAGE-GO-CACHE-004.8:** Cleanup shall serialize cache mutations and remain bounded under concurrent writes. Partial failure and cancellation shall preserve unrelated data and permit another cleanup attempt.
@@ -55,8 +55,9 @@ No cache generations or consumer tracking are required.
 - **AC-SYSTEM-PAGE-GO-CACHE-005.1:** Desktop and phone users shall see a Go-specific busy-cleanup switch beside its threshold, with a visible build-failure warning.
 - **AC-SYSTEM-PAGE-GO-CACHE-005.2:** The switch shall persist after reload. Its explanation shall state that it bypasses idle checks only for Go cleanup.
 - **AC-SYSTEM-PAGE-GO-CACHE-005.3:** The interface shall explain direct deletion without restore, the size threshold, and possible cache growth between maintenance runs.
-- **AC-SYSTEM-PAGE-GO-CACHE-005.4:** Cleanup results shall distinguish removed bytes, remaining or unknown bytes, partial failure, and skipped resources. Busy cleanup shall never claim an empty cache or exact disk recovery without evidence.
-- **AC-SYSTEM-PAGE-GO-CACHE-005.5:** New copy shall use the selected language. Phone users shall access the same controls and results without horizontal page scrolling.
+- **AC-SYSTEM-PAGE-GO-CACHE-005.4:** The interface shall report physical cache usage, including the fuzz corpus, separately from cleanup-eligible bytes used by threshold eligibility.
+- **AC-SYSTEM-PAGE-GO-CACHE-005.5:** Cleanup results shall distinguish removed bytes, remaining or unknown bytes, partial failure, and skipped resources. Busy cleanup shall never claim an empty cache or exact disk recovery without evidence.
+- **AC-SYSTEM-PAGE-GO-CACHE-005.6:** New copy shall use the selected language. Phone users shall access the same controls and results without horizontal page scrolling.
 
 ## Retired draft identities
 

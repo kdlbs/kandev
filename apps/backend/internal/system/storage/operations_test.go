@@ -184,6 +184,47 @@ func TestRunNowAllowsExplicitGoCleanupWithSavedBusyPolicy(t *testing.T) {
 	waitForJobState(t, tracker, jobID, jobs.StateSucceeded)
 }
 
+func TestRunNowGoBusyPolicyStillRejectsExistingMaintenance(t *testing.T) {
+	connection := newSQLite(t)
+	pool := db.NewPool(connection, connection)
+	rawSettings, err := systemsettings.NewStore(pool)
+	if err != nil {
+		t.Fatalf("new settings store: %v", err)
+	}
+	settings := NewSettingsStore(rawSettings)
+	policy := DefaultSettings()
+	policy.GoCache.AllowCleanupWhileBusy = true
+	if _, err := settings.SaveSettings(context.Background(), policy); err != nil {
+		t.Fatalf("SaveSettings: %v", err)
+	}
+	coordinator := activity.NewCoordinator(activity.Options{})
+	held, _, err := coordinator.TryAcquireMaintenance(context.Background(), 0)
+	if err != nil {
+		t.Fatalf("TryAcquireMaintenance: %v", err)
+	}
+	defer held.Release()
+	provider := &explicitGoCacheCleanupProvider{called: make(chan struct{})}
+	operations := NewOperations(OperationsConfig{
+		Settings: settings, Store: newStorageStore(t, pool),
+		Jobs: jobs.NewTracker(nil, newOperationsTestLogger(t)), Activity: coordinator,
+		Providers: []CleanupProvider{provider},
+	})
+
+	jobID, err := operations.RunNow(context.Background(), []string{"go_cache"}, false)
+	var busyErr *BusyError
+	if !errors.As(err, &busyErr) || jobID != "" {
+		t.Fatalf("RunNow = (%q, %v), want non-overridable maintenance busy error", jobID, err)
+	}
+	if len(busyErr.Resources) != 1 || busyErr.Resources[0].Kind != activity.KindMaintenanceRunning {
+		t.Fatalf("busy resources = %#v, want maintenance-running", busyErr.Resources)
+	}
+	select {
+	case <-provider.called:
+		t.Fatal("Go-cache cleanup ran alongside another maintenance run")
+	default:
+	}
+}
+
 func TestRunNowDoesNotBypassForDisabledUnselectedGoCache(t *testing.T) {
 	connection := newSQLite(t)
 	pool := db.NewPool(connection, connection)

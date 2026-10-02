@@ -103,7 +103,11 @@ func (o *Operations) RunNow(ctx context.Context, resources []string, force bool)
 	if err != nil {
 		return "", err
 	}
-	if !goCacheBusyPreflightBypass(providers, settings) {
+	if goCacheBusyPreflightBypass(providers, settings) {
+		if err := o.preflightGoCacheBusy(ctx); err != nil {
+			return "", err
+		}
+	} else {
 		if err := o.preflight(ctx, force); err != nil {
 			return "", err
 		}
@@ -118,6 +122,18 @@ func (o *Operations) RunNow(ctx context.Context, resources []string, force bool)
 	}), nil
 }
 
+func (o *Operations) preflightGoCacheBusy(ctx context.Context) error {
+	release, busy, err := o.config.Activity.TryAcquireMaintenanceWhileBusy(ctx)
+	if errors.Is(err, activity.ErrBusy) {
+		return &BusyError{Resources: activity.BusyResourcesForKinds(busy)}
+	}
+	if err != nil {
+		return err
+	}
+	release()
+	return nil
+}
+
 func goCacheBusyPreflightBypass(
 	providers []CleanupProvider,
 	settings StorageMaintenanceSettings,
@@ -126,7 +142,7 @@ func goCacheBusyPreflightBypass(
 		return false
 	}
 	for _, provider := range providers {
-		if provider.Name() == "go_cache" {
+		if provider.Name() == string(ResourceTypeGoCache) {
 			if settings.GoCache.Enabled {
 				return true
 			}

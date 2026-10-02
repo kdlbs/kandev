@@ -31,13 +31,15 @@ Do not alter execution environments, process supervision, or task retry behavior
 
 ## Policy
 
-Add the proposed boolean `go_cache.allow_cleanup_while_busy` to
+Add the boolean `go_cache.allow_cleanup_while_busy` to
 `GoCacheSettings` in `internal/system/storage/types.go` and matching web types.
 Persist it in the existing settings JSON. Missing values resolve to false.
 No new database table or runtime feature flag is needed.
 Existing permissions protect writes. Existing settings save/reload and validation remain authoritative.
 
-Use the existing schedule interval and `go_cache.max_bytes` threshold.
+Use the existing schedule interval and `go_cache.max_bytes` threshold. Keep the displayed physical
+cache size inclusive of the fuzz corpus, but report `cleanup_eligible_size_bytes` separately and
+exclude fuzz-corpus bytes from threshold eligibility.
 Do not add a parallel timer or change default schedule enablement.
 
 | Trigger | Busy option off | Busy option on |
@@ -91,7 +93,8 @@ Retain ownership/adoption and exact-root validation. Use the repository's
 handle-relative directory safety patterns so path replacement cannot redirect deletion.
 Do not follow symlinks, junctions, or nested mounts. Preserve an unexpected entry
 and report a partial result when containment cannot be established.
-Preserve the Kandev marker and fuzz corpus, which is outside build-artifact cleanup.
+Preserve the Kandev marker and root `fuzz` subtree. The physical measurement includes its bytes,
+but cleanup-eligible size and threshold discovery exclude that subtree.
 Never erase a parent directory or an unadopted default cache.
 
 Use a bounded traversal with a 30-second operation deadline, batches of at most

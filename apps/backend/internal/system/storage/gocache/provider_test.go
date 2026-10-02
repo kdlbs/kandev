@@ -430,6 +430,40 @@ func TestCleanupStopsWhenCacheRootIsReplaced(t *testing.T) {
 	}
 }
 
+func TestCleanupRejectsReplacementWithRetainedSession(t *testing.T) {
+	provider, cachePath := newManagedCacheForCleanupTest(t, 1)
+	writeCleanupFixture(t, filepath.Join(cachePath, "candidate"), "selected cache")
+	first, err := provider.cleanupContentsWithLimit(
+		context.Background(), cachePath, false, 1, 1, cacheFilesystemIdentity,
+	)
+	if err == nil || !first.Partial {
+		t.Fatalf("initial bounded cleanup = (%#v, %v), want retained partial session", first, err)
+	}
+
+	moved := cachePath + ".moved"
+	if err := os.Rename(cachePath, moved); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(cachePath, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeMarker(cachePath); err != nil {
+		t.Fatal(err)
+	}
+	replacement := filepath.Join(cachePath, "replacement")
+	if err := os.WriteFile(replacement, []byte("keep replacement"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := provider.Cleanup(context.Background())
+	if err == nil || !result.Partial {
+		t.Fatalf("Cleanup with replaced root = (%#v, %v), want path-change failure", result, err)
+	}
+	if data, err := os.ReadFile(replacement); err != nil || string(data) != "keep replacement" {
+		t.Fatalf("replacement cache changed: data=%q err=%v", data, err)
+	}
+}
+
 func TestScanCacheStopsAtEntryLimit(t *testing.T) {
 	home := t.TempDir()
 	cachePath := filepath.Join(home, "cache")

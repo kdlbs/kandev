@@ -260,22 +260,29 @@ Scheduled cleanup is disabled by default. It normally starts only after the conf
 period. Orphaned task workspaces and eligible temporary artifacts move into Kandev's quarantine
 before permanent deletion. Each entry shows its `delete_after` retention deadline: **Delete** and
 **Clear eligible** cannot remove it before that time. The deadline is the earliest safe deletion
-time, not an exact promise. The first successful scheduled or full manual maintenance run after the
-deadline performs the purge, subject to the idle gate and any preemption.
+time, not an exact promise. The first scheduled or full manual maintenance run that reaches the
+quarantine provider after the deadline performs the purge. That provider still must pass the idle
+gate and avoid preemption. A run that cleans only the Go cache does not purge quarantine entries.
 
 Go-cache cleanup uses a separate policy. When managed-cache use is enabled, new host-local
-executions share the selected Go build-cache path. The configured size is a cleanup trigger, not a
-quota; the cache can grow between maintenance runs. Eligible cleanup deletes build-cache data
-directly and does not create a restorable quarantine entry. It keeps the cache root and ownership
-marker, and preserves Go's `fuzz` corpus. Deleted build-cache data cannot be restored.
+executions share the selected Go build-cache path. The displayed physical size includes Go's `fuzz`
+corpus, while the cleanup-eligible size and trigger exclude it.
+
+- The configured size is a cleanup trigger, not a quota. The cache can grow between maintenance
+  runs.
+- Cleanup permanently deletes eligible build-cache data without a restorable quarantine entry. It
+  keeps the cache root and ownership marker, and preserves Go's `fuzz` corpus.
+- Deleted build-cache data cannot be restored.
 
 The Go-cache policy includes an off-by-default **Allow cleanup while tasks are running** switch.
-When enabled, Go-cache cleanup alone skips task-activity and idle-period checks. Scheduled cleanup
-still requires scheduling and Go-cache cleanup to be enabled and the cache to exceed its trigger
-size. Explicit Go-cache cleanup can also use this setting without a second force prompt. Other
-cleanup providers keep their existing admission rules. A build can fail if cleanup removes a file
-that it needs; Kandev does not retry the build automatically. A later build can repopulate the same
-cache path.
+When enabled, Go-cache cleanup skips task-activity and idle-period checks, but it still waits for
+other maintenance runs to finish. Scheduled cleanup still requires scheduling and Go-cache cleanup
+to be enabled and the cleanup-eligible size to exceed its trigger. Explicit Go-cache cleanup can
+also use this setting without a second force prompt.
+
+Other cleanup providers keep their existing admission rules. A build can fail if cleanup removes a
+file that it needs, and Kandev does not retry the build automatically. A later build can repopulate
+the same cache path.
 
 Each full maintenance run also revisits at most 100 Kandev-managed local branches retained when a
 task was archived before its work was integrated. Kandev considers only durable rows that still

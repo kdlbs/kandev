@@ -20,11 +20,11 @@ This design preserves the technical source detail for `REQ-SYSTEM-PAGE-STORAGE-M
 | --- | --- |
 | `REQ-SYSTEM-PAGE-STORAGE-MAINTENANCE-001` | [Migrated source detail](#migrated-source-detail) |
 
-## Planned Go-cache replacement
+## Current Go-cache policy
 
-The draft [Go cache reclamation design](go-cache-reclamation.md) owns proposed
-busy-cleanup settings and direct deletion. Existing settings and historical
-quarantine records retain the compatibility rules in that design.
+The current [Go cache reclamation design](go-cache-reclamation.md) owns the busy-cleanup setting
+and direct deletion. Existing settings and historical quarantine records retain their prior
+compatibility rules.
 
 ## Migrated source detail
 

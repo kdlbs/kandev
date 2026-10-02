@@ -49,6 +49,17 @@ func TestScheduledGoCleanupRunsWhileTasksAreActiveAndSkipsOtherProviders(t *test
 	if len(result["go_cache"]) == 0 || len(result["skipped_providers"]) == 0 {
 		t.Fatalf("run result = %s, want completed Go data and skipped providers", run.Result)
 	}
+	var skipped map[string]struct {
+		Reason        string                  `json:"reason"`
+		BusyResources []activity.BusyResource `json:"busy_resources"`
+	}
+	if err := json.Unmarshal(result["skipped_providers"], &skipped); err != nil {
+		t.Fatalf("decode skipped providers: %v", err)
+	}
+	if skipped["workspaces"].Reason != "activity_busy" || len(skipped["workspaces"].BusyResources) != 1 ||
+		skipped["workspaces"].BusyResources[0].Label == "" {
+		t.Fatalf("skipped provider result = %#v, want labeled busy resources", skipped["workspaces"])
+	}
 }
 
 func TestBusyGoCleanupDoesNotRunWhenPolicyOrPrerequisitesAreOff(t *testing.T) {
@@ -162,6 +173,48 @@ func TestNewTaskAdmissionDoesNotCancelBusyGoCleanup(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Fatal("Go cleanup did not finish")
+	}
+}
+
+func TestBusyGoCleanupDoesNotOverlapAnotherMaintenanceRun(t *testing.T) {
+	coordinator := activity.NewCoordinator(activity.Options{})
+	goCache := &barrierCleanupProvider{
+		name: "go_cache", started: make(chan struct{}), release: make(chan struct{}),
+	}
+	settings := DefaultSettings()
+	settings.Enabled = true
+	settings.GoCache.Enabled = true
+	settings.GoCache.AllowCleanupWhileBusy = true
+	first := NewRunner(RunnerConfig{
+		Activity: coordinator, Store: &recordingRunStore{}, Providers: []CleanupProvider{goCache},
+	})
+	firstDone := make(chan runnerResult, 1)
+	go func() {
+		run, err := first.Run(context.Background(), RunTriggerScheduled, settings)
+		firstDone <- runnerResult{run: run, err: err}
+	}()
+	select {
+	case <-goCache.started:
+	case <-time.After(time.Second):
+		t.Fatal("first Go-cache cleanup did not start")
+	}
+
+	secondProvider := &testNamedCleanupProvider{name: "go_cache"}
+	second := NewRunner(RunnerConfig{
+		Activity: coordinator, Store: &recordingRunStore{}, Providers: []CleanupProvider{secondProvider},
+	})
+	secondRun, err := second.Run(context.Background(), RunTriggerScheduled, settings)
+	if err != nil || secondRun.State != RunStateSkippedBusy || secondProvider.calls != 0 {
+		t.Fatalf("second cleanup = (%#v, %v), calls=%d, want skipped while maintenance is active", secondRun, err, secondProvider.calls)
+	}
+	close(goCache.release)
+	select {
+	case result := <-firstDone:
+		if result.err != nil || result.run.State != RunStateSucceeded {
+			t.Fatalf("first cleanup = (%#v, %v), want success", result.run, result.err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("first Go-cache cleanup did not finish")
 	}
 }
 

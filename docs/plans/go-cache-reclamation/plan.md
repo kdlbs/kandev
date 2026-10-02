@@ -157,11 +157,11 @@ remains the baseline for non-Go providers. Do not alter their historical results
 Implementation and final checks passed on 2026-10-02:
 
 - `make -C apps/backend build` and `make -C apps/backend test`.
-- `go test -trimpath -race -tags fts5 ./internal/system/storage/... -count=1`.
+- `(cd apps/backend && go test -trimpath -race -tags fts5 ./internal/system/storage/... -count=1)`.
 - Targeted backendapp storage/cache integration tests and Linux race tests for cache safety.
 - Darwin arm64 and Windows amd64 cache-package cross-compilation.
 - `make -C apps/backend check-make-shells`, `bash scripts/go-cache-reuse.test.sh`, and `bash scripts/release/runtime-bundle.test.sh`.
-- Web storage/component suite: 142 tests; desktop storage E2E: 10 passed; mobile storage E2E: 7 passed.
+- Web storage/component suite: 217 tests; desktop storage E2E: 10 passed; mobile storage E2E: 7 passed.
 - Web typecheck, changed-file ESLint, Prettier, `i18n:check`, and `i18n:ratchet`.
 - Public documentation tests and validator, specification catalog validation, full specification lint, and `git diff --check`.
 

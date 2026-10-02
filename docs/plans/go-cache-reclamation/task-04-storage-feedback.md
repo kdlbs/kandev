@@ -98,7 +98,7 @@ sequential
 
 Implemented the persisted busy-cleanup switch and visible warning, localized in
 all seven supported languages. Go cleanup results now expose removed and
-remaining/unknown bytes, partial outcomes, and busy-run information in the Go
+remaining/unknown bytes, partial outcomes, and a busy-policy snapshot in the Go
 resource row and run history. The phone control retains a 44-pixel touch target.
 Operations documentation describes direct deletion, build interruption, and
 the scheduled-cleanup prerequisites. E2E cleanup restores policy settings while
@@ -106,7 +106,7 @@ preserving adopted-path state because adoption has a dedicated endpoint.
 
 Validation passed:
 
-- Focused storage UI and hook suite: 142 tests.
+- Focused storage UI and hook suite: 217 tests.
 - Desktop storage-maintenance E2E: 10 passed.
 - Mobile storage-maintenance E2E: 7 passed.
 - Web typecheck, changed-file ESLint and Prettier, `i18n:check`, and `i18n:ratchet`.

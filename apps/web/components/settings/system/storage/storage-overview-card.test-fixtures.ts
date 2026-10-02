@@ -34,7 +34,13 @@ export const degradedOverview = {
   },
   summary: {
     workspaces: { active_bytes: 0, candidate_bytes: 0 },
-    go_cache: { path: "/data/cache/go-build", size_bytes: 0, owned: true, enabled: false },
+    go_cache: {
+      path: "/data/cache/go-build",
+      size_bytes: 0,
+      cleanup_eligible_size_bytes: 0,
+      owned: true,
+      enabled: false,
+    },
     quarantine: { available: false, warning: "quarantine database unavailable" },
     temporary_artifacts: { available: false, warning: "temporary artifact registry unavailable" },
     docker: {

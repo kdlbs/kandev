@@ -38,6 +38,7 @@ type Config struct {
 	Mutations  *storage.MutationGate
 	Scanner    *filescan.Limiter
 	OnProgress func(filescan.Progress)
+	mountID    func(string) (string, error)
 }
 
 // Provider manages the single Go cache selected by persisted settings.
@@ -49,11 +50,12 @@ type Provider struct {
 
 // Analysis describes the configured cache without changing it.
 type Analysis struct {
-	Path          string `json:"path"`
-	SizeBytes     int64  `json:"size_bytes"`
-	Owned         bool   `json:"owned"`
-	Enabled       bool   `json:"enabled"`
-	UnmanagedPath string `json:"unmanaged_path,omitempty"`
+	Path                     string `json:"path"`
+	SizeBytes                int64  `json:"size_bytes"`
+	CleanupEligibleSizeBytes *int64 `json:"cleanup_eligible_size_bytes,omitempty"`
+	Owned                    bool   `json:"owned"`
+	Enabled                  bool   `json:"enabled"`
+	UnmanagedPath            string `json:"unmanaged_path,omitempty"`
 	// A nil size means that the distinct user cache was not measured. A pointer
 	// preserves an explicitly measured zero in the successful response.
 	UnmanagedSizeBytes *int64 `json:"unmanaged_size_bytes,omitempty"`
@@ -123,12 +125,24 @@ func (p *Provider) Analyze(ctx context.Context) (Analysis, error) {
 	if scanner == nil {
 		scanner = filescan.NewLimiter(4)
 	}
+	managedMountSkip, err := p.mountBoundarySkip(cachePath)
+	if err != nil {
+		return Analysis{}, fmt.Errorf("identify Go-cache mount: %w", err)
+	}
 	measurementRoots := []filescan.Root{
 		{
 			Path: cachePath, MissingOK: true, SymlinkPolicy: filescan.RejectSymlinks,
-			Exclude: func(path string, _ fs.DirEntry) bool { return path == markerPath(cachePath) },
+			Exclude: func(path string, _ fs.DirEntry) bool {
+				return path == markerPath(cachePath) || path == filepath.Join(cachePath, fuzzDirectoryName)
+			},
+			ShouldSkip: managedMountSkip,
+		},
+		{
+			Path: filepath.Join(cachePath, fuzzDirectoryName), MissingOK: true,
+			SymlinkPolicy: filescan.SkipSymlinks, ShouldSkip: managedMountSkip,
 		},
 	}
+	unmanagedIndex := len(measurementRoots)
 	unmanagedPath, hasUnmanagedPath := defaultGoCachePath()
 	if hasUnmanagedPath && unmanagedPath != cachePath {
 		measurementRoots = append(measurementRoots, filescan.Root{
@@ -142,17 +156,22 @@ func (p *Provider) Analyze(ctx context.Context) (Analysis, error) {
 	if err := measurements[0].Err; err != nil {
 		return Analysis{}, fmt.Errorf("measure Go cache: %w", err)
 	}
+	if err := measurements[1].Err; err != nil {
+		return Analysis{}, fmt.Errorf("measure Go cache fuzz corpus: %w", err)
+	}
+	eligibleBytes := measurements[0].Bytes
 	analysis := Analysis{
-		Path: cachePath, SizeBytes: measurements[0].Bytes, Owned: owned, Enabled: settings.GoCache.Enabled,
+		Path: cachePath, SizeBytes: saturatingAdd(eligibleBytes, measurements[1].Bytes),
+		CleanupEligibleSizeBytes: &eligibleBytes, Owned: owned, Enabled: settings.GoCache.Enabled,
 	}
 	if !hasUnmanagedPath || unmanagedPath == cachePath {
 		return analysis, nil
 	}
-	if err := measurements[1].Err; err != nil {
+	if err := measurements[unmanagedIndex].Err; err != nil {
 		return Analysis{}, fmt.Errorf("measure Go cache: %w", err)
 	}
 	analysis.UnmanagedPath = unmanagedPath
-	unmanagedSizeBytes := measurements[1].Bytes
+	unmanagedSizeBytes := measurements[unmanagedIndex].Bytes
 	analysis.UnmanagedSizeBytes = &unmanagedSizeBytes
 	return analysis, nil
 }
@@ -194,6 +213,27 @@ func defaultGoCachePath() (string, bool) {
 		return "", false
 	}
 	return filepath.Join(cacheDir, "go-build"), true
+}
+
+func (p *Provider) mountBoundarySkip(rootPath string) (func(string, fs.DirEntry) (bool, error), error) {
+	identify := p.config.mountID
+	if identify == nil {
+		identify = cacheMountIdentity
+	}
+	rootMount, err := identify(rootPath)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return func(path string, _ fs.DirEntry) (bool, error) {
+		mount, err := identify(path)
+		if err != nil {
+			return false, err
+		}
+		return mount != rootMount, nil
+	}, nil
 }
 
 // Cleanup deletes an above-threshold cache's build data in place.
@@ -263,9 +303,6 @@ func (p *Provider) cleanupWithSettingsLocked(
 	if !settings.GoCache.Enabled && !explicit {
 		return result, nil
 	}
-	if err := p.validateCachePath(cachePath); err != nil {
-		return result, err
-	}
 	trashRoot := filepath.Clean(p.config.TrashDir)
 	if !filepath.IsAbs(trashRoot) {
 		return result, fmt.Errorf("go-cache trash path must be absolute: %q", trashRoot)
@@ -273,10 +310,14 @@ func (p *Provider) cleanupWithSettingsLocked(
 	if pathsOverlap(cachePath, trashRoot) {
 		return result, errors.New("go cache and Kandev trash must not contain each other")
 	}
-	if !adopted && !hasValidMarker(cachePath) {
-		return result, ErrNotOwned
+	rootHandle, err := p.openValidatedCacheRoot(cachePath, adopted, cacheFilesystemIdentity)
+	if err != nil {
+		return result, err
 	}
-	return p.cleanupContents(ctx, cachePath, adopted, settings.GoCache.MaxBytes)
+	return p.cleanupContentsWithPreparedRoot(
+		ctx, cachePath, adopted, settings.GoCache.MaxBytes, cleanupEntryLimit,
+		"filesystem", cacheFilesystemIdentity, rootHandle,
+	)
 }
 
 // ValidateAdoption verifies an explicitly confirmed external cache path.

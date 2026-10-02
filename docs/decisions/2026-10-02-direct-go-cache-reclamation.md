@@ -1,6 +1,6 @@
 # ADR-2026-10-02-direct-go-cache-reclamation: Direct Go-cache deletion with a busy policy
 
-**Status:** accepted policy; implementation pending
+**Status:** accepted; implemented
 **Date:** 2026-10-02
 **Area:** backend
 

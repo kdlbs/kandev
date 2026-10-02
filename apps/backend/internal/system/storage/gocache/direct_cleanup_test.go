@@ -40,6 +40,9 @@ func TestCleanupDeletesContentsWithoutQuarantine(t *testing.T) {
 	if _, err := os.Stat(artifact); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("cache artifact still exists: %v", err)
 	}
+	if info, err := os.Stat(filepath.Join(cachePath, "00")); err != nil || !info.IsDir() {
+		t.Fatalf("Go cache shard directory was not preserved: info=%v err=%v", info, err)
+	}
 	if !hasValidMarker(cachePath) {
 		t.Fatal("cleanup did not preserve the ownership marker")
 	}

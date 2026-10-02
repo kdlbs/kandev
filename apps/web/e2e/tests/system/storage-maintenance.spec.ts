@@ -570,7 +570,7 @@ test.describe("System storage maintenance", () => {
       await expect(testPage.getByTestId("storage-go-cache-result")).toContainText("16 GB removed");
       await expect(testPage.getByTestId("storage-go-cache-result")).toContainText("0 GB remains");
       await expect(testPage.getByTestId("storage-go-cache-result")).toContainText(
-        "This run allowed Go cache cleanup while tasks were active.",
+        "Go cache cleanup during active tasks was enabled for this run.",
       );
     } finally {
       await restoreStorageMaintenanceSettings(apiClient, baseline);

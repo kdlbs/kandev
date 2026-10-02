@@ -59,7 +59,15 @@ function goCacheDisabledReason(
   if (goCache.owned !== true) {
     return t("system:storageGoCacheNotOwned");
   }
-  if ((goCache.size_bytes ?? 0) <= (settings ?? overview.settings).go_cache.max_bytes) {
+  const cleanupEligibleBytes = goCache.cleanup_eligible_size_bytes;
+  if (
+    typeof cleanupEligibleBytes !== "number" ||
+    !Number.isFinite(cleanupEligibleBytes) ||
+    cleanupEligibleBytes < 0
+  ) {
+    return t("system:storageAnalysisSourcePending");
+  }
+  if (cleanupEligibleBytes <= (settings ?? overview.settings).go_cache.max_bytes) {
     return t("system:storageGoCacheBelowLimit");
   }
   return undefined;

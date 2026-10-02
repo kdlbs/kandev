@@ -87,7 +87,7 @@ describe("StorageRunHistory", () => {
     expect(result.textContent).toContain("The remaining cache size is unknown.");
     expect(result.textContent).toContain("Cleanup was partial.");
     expect(result.textContent).toContain(
-      "This run allowed Go cache cleanup while tasks were active.",
+      "Go cache cleanup during active tasks was enabled for this run.",
     );
     expect(result.textContent).toContain("Other cleanup was skipped because tasks are active.");
   });

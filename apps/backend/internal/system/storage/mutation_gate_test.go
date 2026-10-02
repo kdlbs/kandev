@@ -3,6 +3,7 @@ package storage
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
 	"time"
 )
@@ -14,7 +15,8 @@ func TestMutationGateSerializesAndHonorsCancellation(t *testing.T) {
 		t.Fatalf("first Acquire: %v", err)
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
+	base, cancel := context.WithCancel(context.Background())
+	ctx := &signallingDoneContext{Context: base, entered: make(chan struct{})}
 	acquired := make(chan error, 1)
 	go func() {
 		release, acquireErr := gate.Acquire(ctx)
@@ -23,6 +25,11 @@ func TestMutationGateSerializesAndHonorsCancellation(t *testing.T) {
 		}
 		acquired <- acquireErr
 	}()
+	select {
+	case <-ctx.entered:
+	case <-time.After(time.Second):
+		t.Fatal("waiter did not enter the blocking acquire")
+	}
 	cancel()
 	select {
 	case err := <-acquired:
@@ -39,4 +46,15 @@ func TestMutationGateSerializesAndHonorsCancellation(t *testing.T) {
 		t.Fatalf("Acquire after release: %v", err)
 	}
 	release()
+}
+
+type signallingDoneContext struct {
+	context.Context
+	entered chan struct{}
+	once    sync.Once
+}
+
+func (c *signallingDoneContext) Done() <-chan struct{} {
+	c.once.Do(func() { close(c.entered) })
+	return c.Context.Done()
 }

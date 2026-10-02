@@ -46,6 +46,7 @@ type Coordinator struct {
 	active       map[Kind]int
 	lastActivity time.Time
 	maintenance  *maintenanceState
+	busyCleanup  bool
 }
 
 type maintenanceState struct {
@@ -159,6 +160,29 @@ func (c *Coordinator) TryAcquireMaintenanceForce(
 	return c.tryAcquireMaintenance(ctx, 0, true)
 }
 
+// TryAcquireMaintenanceWhileBusy reserves the maintenance slot for a resource
+// cleanup that is allowed to overlap task activity. It does not block new task
+// admission, but it remains mutually exclusive with every other maintenance run.
+func (c *Coordinator) TryAcquireMaintenanceWhileBusy(ctx context.Context) (func(), []Kind, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, nil, err
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.maintenance != nil || c.busyCleanup {
+		return nil, []Kind{KindMaintenanceRunning}, ErrBusy
+	}
+	c.busyCleanup = true
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			c.mu.Lock()
+			c.busyCleanup = false
+			c.mu.Unlock()
+		})
+	}, nil, nil
+}
+
 func (c *Coordinator) tryAcquireMaintenance(
 	ctx context.Context,
 	quietPeriod time.Duration,
@@ -166,7 +190,7 @@ func (c *Coordinator) tryAcquireMaintenance(
 ) (*MaintenanceLease, []Kind, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if c.maintenance != nil {
+	if c.maintenance != nil || c.busyCleanup {
 		return nil, []Kind{KindMaintenanceRunning}, ErrBusy
 	}
 	if busy := c.busyKindsLocked(); !ignoreActive && len(busy) > 0 {

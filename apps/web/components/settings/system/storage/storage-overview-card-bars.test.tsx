@@ -59,7 +59,13 @@ const barsOverview = {
   },
   summary: {
     workspaces: { total_bytes: 8 * 1024 ** 3, active_bytes: 0, candidate_bytes: 0 },
-    go_cache: { path: "/data/cache/go-build", size_bytes: 0, owned: true, enabled: false },
+    go_cache: {
+      path: "/data/cache/go-build",
+      size_bytes: 0,
+      cleanup_eligible_size_bytes: 0,
+      owned: true,
+      enabled: false,
+    },
     quarantine: { available: true, count: 0, size_bytes: 2 * 1024 ** 3 },
     temporary_artifacts: { available: false, warning: "registry unavailable" },
     system_temporary: {
@@ -169,6 +175,7 @@ describe("StorageOverviewCard relative bars", () => {
         go_cache: {
           ...barsOverview.summary.go_cache,
           size_bytes: 16 * 1024 ** 3,
+          cleanup_eligible_size_bytes: 16 * 1024 ** 3,
           owned: true,
         },
       },
@@ -194,6 +201,7 @@ describe("StorageOverviewCard relative bars", () => {
             go_cache: {
               ...actionOverview.summary.go_cache,
               size_bytes: 1,
+              cleanup_eligible_size_bytes: 1,
               warning: "cache measurement warning",
             },
             system_temporary: {

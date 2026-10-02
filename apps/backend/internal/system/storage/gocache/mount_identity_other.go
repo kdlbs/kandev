@@ -2,8 +2,15 @@
 
 package gocache
 
-import "errors"
+import (
+	"errors"
+	"os"
+)
 
 func cacheMountIdentity(string) (string, error) {
-	return "", errors.New("Go-cache mount identity is unsupported on this platform")
+	return "", errors.New("go-cache mount identity is unsupported on this platform")
+}
+
+func cacheMountIdentityFromFile(*os.File) (string, error) {
+	return "", errors.New("go-cache mount identity is unsupported on this platform")
 }

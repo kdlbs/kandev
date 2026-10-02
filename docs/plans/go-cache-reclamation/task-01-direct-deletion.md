@@ -83,8 +83,9 @@ Implemented bounded in-place deletion with ownership-marker and fuzz-corpus
 preservation, mount-aware filesystem-boundary and symlink skipping, root/path
 identity checks, cancellation, resumable threshold discovery, bounded deletion
 progress, partial results, and unknown remaining-byte reporting. Historical
-quarantine controllers remain unchanged and the Go-cache provider no longer
-creates or reads quarantine intents.
+quarantine restore and delete behavior is retained, and those operations now
+share the cache mutation gate. The Go-cache provider no longer creates or reads
+quarantine intents.
 
 Validation passed:
 

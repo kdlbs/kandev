@@ -159,11 +159,28 @@ func (r *Runner) runGoCacheWhileBusy(
 	trigger RunTrigger,
 	settings StorageMaintenanceSettings,
 ) (MaintenanceRun, error) {
+	releaseBusyMaintenance, busy, err := r.activity.TryAcquireMaintenanceWhileBusy(ctx)
+	if errors.Is(err, activity.ErrBusy) {
+		result := marshalRunResult(map[string]any{"busy_resources": activity.BusyResourcesForKinds(busy)})
+		run, transitionErr := r.transitionRun(ctx, run.ID, RunStateSkippedBusy, result, "another maintenance run is active")
+		if transitionErr != nil {
+			return MaintenanceRun{}, transitionErr
+		}
+		if trigger == RunTriggerManual {
+			return run, &BusyError{Resources: activity.BusyResourcesForKinds(busy)}
+		}
+		return run, nil
+	}
+	if err != nil {
+		return r.finishRun(ctx, run.ID, ctx, nil, err)
+	}
 	if _, err := r.transitionRun(ctx, run.ID, RunStateRunning, nil, ""); err != nil {
+		releaseBusyMaintenance()
 		return MaintenanceRun{}, err
 	}
 	goProviders, otherProviders := partitionGoCacheProviders(r.providers)
 	result, goErr := r.runProviders(ctx, settings, goProviders)
+	releaseBusyMaintenance()
 	if len(otherProviders) == 0 {
 		return r.finishRun(ctx, run.ID, ctx, result, goErr)
 	}
@@ -198,9 +215,22 @@ func partitionGoCacheProviders(providers []CleanupProvider) ([]CleanupProvider, 
 
 func skippedProviders(providers []CleanupProvider, busy []activity.Kind) map[string]any {
 	skipped := make(map[string]any, len(providers))
+	reason := "activity_busy"
+	if len(busy) > 0 {
+		quietPeriodOnly := true
+		for _, kind := range busy {
+			if kind != activity.KindQuietPeriod {
+				quietPeriodOnly = false
+				break
+			}
+		}
+		if quietPeriodOnly {
+			reason = "quiet_period"
+		}
+	}
 	for _, provider := range providers {
 		skipped[provider.Name()] = map[string]any{
-			"reason": "activity_busy", "busy_resources": busy,
+			"reason": reason, "busy_resources": activity.BusyResourcesForKinds(busy),
 		}
 	}
 	return skipped

@@ -362,6 +362,7 @@ export interface StorageWorkspaceSummary {
 export interface StorageGoCacheSummary {
   path?: string;
   size_bytes?: number;
+  cleanup_eligible_size_bytes?: number;
   owned?: boolean;
   enabled?: boolean;
   unmanaged_path?: string;

@@ -69,9 +69,9 @@ a deliberate stopped-service cleanup remains the authority for that historical f
 
 ## Consequences
 
-The accepted [direct Go-cache policy](2026-10-02-direct-go-cache-reclamation.md)
-supersedes new Go-cache quarantine and opted-in busy admission when its
-implementation lands. It does not change workspace quarantine or historical retention.
+The accepted and implemented [direct Go-cache policy](2026-10-02-direct-go-cache-reclamation.md)
+supersedes new Go-cache quarantine and opted-in busy admission. It does not change workspace
+quarantine or historical retention.
 
 - Operators can configure and inspect cleanup from Kandev without host cron or systemd overrides.
 - A systemd-managed Kandev process does not gain implicit authority to delete host resources;

@@ -485,6 +485,7 @@ describe("StorageOverviewCard refresh and policy state", () => {
         go_cache: {
           ...degradedOverview.summary.go_cache,
           size_bytes: 15 * 1024 ** 3,
+          cleanup_eligible_size_bytes: 15 * 1024 ** 3,
         },
       },
     } satisfies StorageOverviewResponse;
@@ -504,6 +505,35 @@ describe("StorageOverviewCard refresh and policy state", () => {
     );
   });
 
+  it("does not treat preserved fuzz bytes as cleanup-eligible cache size", () => {
+    const overview = {
+      ...degradedOverview,
+      settings: {
+        ...degradedOverview.settings,
+        go_cache: { ...degradedOverview.settings.go_cache, max_bytes: 10 * 1024 ** 3 },
+      },
+      summary: {
+        ...degradedOverview.summary,
+        go_cache: {
+          ...degradedOverview.summary.go_cache,
+          size_bytes: 20 * 1024 ** 3,
+          cleanup_eligible_size_bytes: 5 * 1024 ** 3,
+        },
+      },
+    } satisfies StorageOverviewResponse;
+
+    render(<StorageOverviewCard overview={overview} onRunGoCache={vi.fn()} />, {
+      wrapper: TooltipProvider,
+    });
+
+    const resource = screen.getByTestId("storage-resource-go-cache-trigger");
+    expect(resource.textContent).toContain("20 GB");
+    fireEvent.click(resource);
+    expect((screen.getByTestId("storage-go-cache-clean") as HTMLButtonElement).disabled).toBe(true);
+  });
+});
+
+describe("StorageOverviewCard analysis progress", () => {
   it("shows refresh progress while a cached snapshot is loading", () => {
     render(<StorageOverviewCard overview={degradedOverview} loading onRunGoCache={vi.fn()} />);
 
