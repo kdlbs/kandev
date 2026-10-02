@@ -10,15 +10,16 @@ import { scheduleFrontendErrorReport } from "@/lib/api/domains/frontend-error-lo
 type ToastVariant = "default" | "success" | "error" | "loading";
 type ToastPlacement = "top";
 
+type ToastAction = { label: string } & ({ href: string } | { onClick: () => void });
+
 type Toast = {
-  action?: { href: string; label: string };
   id: string;
   title?: string;
   description?: string;
   variant?: ToastVariant;
   placement?: ToastPlacement;
-  /** A button under the copy; pressing it runs `onClick` and dismisses the toast. */
-  action?: { label: string; onClick: () => void };
+  /** A link (`href`) or a button (`onClick`, which also dismisses the toast). */
+  action?: ToastAction;
 };
 
 type ToastInput = Omit<Toast, "id"> & { duration?: number };
@@ -162,7 +163,7 @@ function ToastActionButton({
   action,
   onDone,
 }: {
-  action: NonNullable<Toast["action"]>;
+  action: { label: string; onClick: () => void };
   onDone: () => void;
 }) {
   return (
@@ -240,7 +241,7 @@ function ToastStack({
             </div>
             <div className="min-w-0 flex-1 space-y-1">
               {t.title && <div className="text-sm font-semibold leading-tight">{t.title}</div>}
-              {t.action && (
+              {t.action && "href" in t.action && (
                 <Button
                   asChild
                   size="sm"
@@ -253,7 +254,7 @@ function ToastStack({
               {t.description && (
                 <div className="text-xs leading-relaxed text-muted-foreground">{t.description}</div>
               )}
-              {t.action && (
+              {t.action && "onClick" in t.action && (
                 <ToastActionButton action={t.action} onDone={() => dismissToast(t.id)} />
               )}
             </div>

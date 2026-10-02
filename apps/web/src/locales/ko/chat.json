@@ -155,5 +155,6 @@
   "emptyTurnKnownCommand": "`/{{command}}`이 실행되었지만 출력이 없습니다. {{hint}}",
   "emptyTurnNoOutput": "에이전트가 아무 출력 없이 종료되었습니다.",
   "emptyTurnResendHint": "앞의 슬래시 없이 일반 메시지로 요청을 다시 보내 보세요.",
-  "emptyTurnUnknownCommand": "`/{{command}}`은 이 에이전트가 인식하는 명령이 아니어서 출력이 없습니다. {{hint}}"
+  "emptyTurnUnknownCommand": "`/{{command}}`은 이 에이전트가 인식하는 명령이 아니어서 출력이 없습니다. {{hint}}",
+  "coordinatorAboutTag": "{{id}} 관련"
 }

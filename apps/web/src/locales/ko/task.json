@@ -2620,5 +2620,9 @@
   "gitDiffUnavailable": "diff를 사용할 수 없습니다",
   "gitStatusAutomaticRetry": "변경 사항을 새로 고치지 못했습니다. 자동으로 다시 시도합니다.",
   "gitStatusShowingLastAvailable": "마지막으로 사용 가능한 변경 사항을 표시합니다.",
-  "gitStatusRetry": "다시 시도"
+  "gitStatusRetry": "다시 시도",
+  "kandevProposeTask": "Kandev: 작업 제안",
+  "kandevProposeResume": "Kandev: 재개 제안",
+  "kandevProposeMessage": "Kandev: 메시지 제안",
+  "kandevProposeMove": "Kandev: 이동 제안"
 }
