@@ -573,3 +573,14 @@ GOCACHE=/tmp/kandev-go-build-preserved-20261001 pnpm e2e:run --host --project ch
 cd ../..
 python3 .github/scripts/backend-tests-workflow-contract_test.py
 ```
+
+Hosted harness lint found the rebased backend guide at 301 lines. Removed one
+sentence duplicated by its existing backend i18n routing bullet; the stable
+error-code rule, document link, and locale ADR remain intact. The exact whole-tree
+lint failed before this correction and passed afterward. Harness linter tests
+also passed. No product behavior or CI limit was changed.
+
+```bash
+python3 .github/scripts/lint-harness-files.py --all
+python3 scripts/lint-harness-files.test.py
+```
