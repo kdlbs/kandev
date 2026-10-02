@@ -25,8 +25,10 @@ Apprise in a directory already in that `PATH`, rescan. If you install it elsewhe
 after Kandev starts, restart Kandev so the running backend receives the new environment, then rescan.
 
 Each provider save applies its name, enabled state, settings, and selected events together.
-If validation or saving fails, the provider's previously saved configuration remains intact.
-A failed creation leaves no partially configured provider. Saves for separate providers are independent.
+If validation fails or saving is rolled back, the provider's previously saved configuration remains intact.
+An aborted creation leaves no partially configured provider. If the connection fails while saving,
+reload the settings to confirm the saved state before retrying, especially when adding a provider.
+Saves for separate providers are independent.
 
 ## Quick Chat
 

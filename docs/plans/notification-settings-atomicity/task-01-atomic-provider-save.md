@@ -40,8 +40,9 @@ new authentication boundaries, unrelated refactors, and additional workers/tasks
 
 ## Acceptance
 
-1. Rejected update preserves provider fields, timestamps, and all subscription
-   rows; failed create leaves neither provider nor subscriptions. The new
+1. Validation failure or a confirmed persistence abort preserves provider fields,
+   timestamps, and all subscription rows; an aborted create leaves neither provider
+   nor subscriptions. Ambiguous commit errors require saved-state reconciliation. The new
    regressions fail on main for the confirmed cause before implementation.
 2. Successful create/update atomically persist the selected configuration, omitted
    updates preserve subscriptions, and explicit empty updates clear them. Default
@@ -128,3 +129,27 @@ remediate CI and all review threads, confirm exact-head checks and trusted seman
 reviews, and use normal merge/queue under existing authorization. Report the PR and
 merged SHA to parent `14825981-b175-411d-999a-31ddc2aa5fc3`; do not declare completion
 before merge or a concrete external blocker.
+
+
+## PR review remediation
+
+Valid review findings addressed: each store scenario creates its own provider and
+snapshot; the unused complete-update parameter is removed; service event selection
+asserts set membership rather than unspecified timestamp-tie order; rollback tests
+verify the subscription UNIQUE constraint error from the second insert for SQLite
+and PostgreSQL. These are test-only coverage improvements of existing behavior.
+Documentation qualifies confirmed rollback versus an ambiguous PostgreSQL commit
+acknowledgement; whole-configuration atomicity remains the same.
+
+Rebased onto main `daab1c45647e7ac9e002f15e02f6e910a3e778a4` before the resource
+hold, without owned-file conflicts. Post-remediation targeted race tests passed for
+service, store, and controller. Specification catalog/lint and public-doc validators
+passed (62 tests; 47 pages). The CI-style lint attempt was blocked by another
+task's shared lint lock, so it did not provide lint evidence. Normal commit hooks
+and focused tests are required for the release fixup. Compatibility with the later
+main is checked through an isolated synthetic merge, without routine rebasing.
+Release fixup: `GOMAXPROCS=2 GOFLAGS=-p=2 go test -race -run
+'TestNotificationSuccessfulSaveAndEventSelection|TestSQLiteRepositoryAtomicProviderSave|TestPostgresRepositoryAtomicProviderSave'
+./internal/notifications/service ./internal/notifications/store` passed. PostgreSQL
+remains environment-gated and unavailable locally. Fresh exact-head CI/reviews and
+merge remain pending.

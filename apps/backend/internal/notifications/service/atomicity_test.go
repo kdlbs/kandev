@@ -128,8 +128,7 @@ func TestNotificationSuccessfulSaveAndEventSelection(t *testing.T) {
 	afterSubs, err = repo.ListSubscriptionsByProvider(ctx, original.ID)
 	require.NoError(t, err)
 	require.Len(t, afterSubs, 2)
-	require.Equal(t, events[0], afterSubs[0].EventType)
-	require.Equal(t, events[1], afterSubs[1].EventType)
+	require.ElementsMatch(t, events, []string{afterSubs[0].EventType, afterSubs[1].EventType})
 	events = []string{}
 	_, err = svc.UpdateProvider(ctx, "owner", original.ID, ProviderUpdate{Events: &events})
 	require.NoError(t, err)

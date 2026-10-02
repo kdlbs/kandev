@@ -28,6 +28,9 @@ on invalid events and subscription-write errors.
   doubles for the new interface. Keep test additions in separate files where
   existing test-file size limits require it.
 - Record the contract in notification requirements and the paired design.
+  Pre-commit rejection or confirmed abort preserves the prior configuration; a lost
+  PostgreSQL COMMIT acknowledgement has unknown outcome and requires reload or
+  reconciliation. The entire configuration commits together; no retry redesign.
 
 Exclude UI changes, schema migrations, multi-provider batch atomicity, delivery
 behavior, new authorization rules, and unrelated refactors. This is a routine

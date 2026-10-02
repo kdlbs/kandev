@@ -31,7 +31,11 @@ provider first. Validation failure must never reach provider or subscription SQL
 The repository exposes explicit atomic create-with-subscriptions and
 update-with-optional-subscriptions operations. Each operation begins one database
 transaction, writes the provider, applies the supplied subscription replacement,
-and commits. Any statement or commit failure propagates an error and rolls back.
+and commits. Statement failures roll back the transaction and propagate an error.
+A confirmed transaction abort preserves the previous configuration. If the
+connection fails during PostgreSQL commit, the server may have committed before
+its acknowledgement was lost; an error then has an unknown persisted outcome.
+Deferred rollback cannot undo a transaction already committed by the server.
 Subscription delete and inserts share that transaction with the provider write.
 Existing low-level provider and subscription methods may remain for seed/migration
 callers and tests, sharing SQL helpers with the atomic operations.
@@ -56,10 +60,13 @@ derives subscription ownership from the new provider's user ID.
 ## Failure and verification
 
 An error is returned through the existing controller/handler path. A successful
-save exposes the entire selected configuration. A failed create can be retried
-without an orphan provider; failed update preserves fields, timestamps, and
-subscription rows. This guarantee applies to one provider save, not a batch of
-independent provider requests.
+save exposes the entire selected configuration. A create rolled back before commit
+leaves no orphan provider; an aborted update preserves fields, timestamps, and
+subscription rows. After an ambiguous commit
+error, reload the saved configuration before retrying, especially creation.
+Either the entire configuration was committed or none of it was; partial provider
+and subscription state is never a valid outcome. This guarantee applies to one
+provider save, not a batch of independent provider requests.
 
 Permanent service tests use the real repository and a private temporary SQLite
 database. Invalid events and test-only `BEFORE INSERT` triggers exercise rejected
