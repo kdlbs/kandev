@@ -402,3 +402,19 @@ func TestProviderSendsClarificationAction(t *testing.T) {
 		t.Fatalf("test message = %#v, want clarification action", capture.messages)
 	}
 }
+
+func (r *notificationTestRepository) CreateProviderWithSubscriptions(ctx context.Context, provider *models.Provider, events []string) error {
+	if err := r.CreateProvider(ctx, provider); err != nil {
+		return err
+	}
+	return r.ReplaceSubscriptions(ctx, provider.ID, provider.UserID, events)
+}
+func (r *notificationTestRepository) UpdateProviderWithSubscriptions(ctx context.Context, provider *models.Provider, events *[]string) error {
+	if err := r.UpdateProvider(ctx, provider); err != nil {
+		return err
+	}
+	if events != nil {
+		return r.ReplaceSubscriptions(ctx, provider.ID, provider.UserID, *events)
+	}
+	return nil
+}
