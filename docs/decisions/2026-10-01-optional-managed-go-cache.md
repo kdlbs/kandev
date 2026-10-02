@@ -26,7 +26,7 @@ Keep request environment input separate from the managed override until final co
 A launch fallback grants no maintenance ownership and changes no saved setting.
 Adoption, cleanup, quarantine, restore, and deletion retain their existing safety checks.
 The owning contract is [Storage maintenance](../specs/system-page/requirements/storage-maintenance.md), requirement `REQ-SYSTEM-PAGE-STORAGE-MAINTENANCE-006`.
-The [design](../specs/system-page/system-design/storage-maintenance-01.md#managed-cache-launch-integration) records integration boundaries.
+The [current system design](../specs/system-page/system-design/managed-go-cache-launch-fallback.md) records integration boundaries.
 
 ## Consequences
 

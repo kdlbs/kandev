@@ -19,7 +19,7 @@ acceptance_criteria:
   - AC-SYSTEM-PAGE-STORAGE-MAINTENANCE-006.8
   - AC-SYSTEM-PAGE-STORAGE-MAINTENANCE-006.9
 system_design:
-  - ../../specs/system-page/system-design/storage-maintenance-01.md
+  - ../../specs/system-page/system-design/managed-go-cache-launch-fallback.md
 ---
 
 # Task 02: Recovery flows and maintenance safety
@@ -110,7 +110,7 @@ Plan/work-order statuses and requirement/design mappings were checked before com
 - `docs/public/operations.md`
 - `docs/plans/managed-go-cache-launch-fallback/plan.md` and sibling work-order results
 - `docs/specs/system-page/requirements/storage-maintenance.md` (requirement 006 and active status)
-- `docs/specs/system-page/system-design/storage-maintenance-01.md` (extension lifecycle statement only)
+- `docs/specs/system-page/system-design/managed-go-cache-launch-fallback.md` (current lifecycle design)
 - `docs/specs/system-page/system-design/storage-maintenance-02.md` (link to the launch fallback rule)
 - `docs/decisions/2026-10-01-optional-managed-go-cache.md` (implementation status only)
 - `docs/plans/storage-maintenance/plan.md` (completed-package cross-link)
@@ -135,7 +135,7 @@ Existing storage diagnostics can still report cache unavailability after launch 
 ## Inputs
 
 - [Requirements](../../specs/system-page/requirements/storage-maintenance.md), active requirement 006.
-- [Design](../../specs/system-page/system-design/storage-maintenance-01.md#managed-cache-launch-integration).
+- [Design](../../specs/system-page/system-design/managed-go-cache-launch-fallback.md).
 - [Task 01](task-01-lifecycle-fallback.md) implementation and regression evidence.
 - Existing backendapp registry/manager/adapter tests and orchestrator recovery dispatch.
 - Existing provider `recordingStore`, settings, and sentinel-preservation fixtures.
@@ -161,3 +161,17 @@ Validation passed:
 - `git diff --check`
 
 Requirement 006 is Active, its lifecycle design and decision record reflect implementation, and public operations guidance explains fallback and strict maintenance safety.
+
+PR review follow-up (2026-10-02): the initial backend shard exposed open fake agentctl WebSocket streams from `TestManagedGoCacheRecoveryFlows`; subsequent backend listener tests then failed their goroutine-leak checks. Test cleanup now stops all managed agents before stopping the lifecycle manager. The focused race run below failed before that cleanup change and passed after it.
+
+Validation passed after the cleanup change:
+
+- `go test -race ./internal/backendapp -run '^(TestManagedGoCacheRecoveryFlows|TestBindBootstrapListenersServesLivenessBeforeSwap|TestBindBootstrapListenersEchoesDesktopHealthToken|TestHandlerSwitchSwapsWithoutRebind|TestBindBootstrapListenersFailsWhenPortUnavailable|TestCloseBoundListenersReleasesPortOnStartupFailure|TestStartHTTPServersMultipleLoopbackAddresses|TestStartHTTPServersAllFailIsFatal|TestStartHTTPServersPartialFailSelfHeals|TestServerListenersStopClosesListenersAndDrains)$' -count=1`
+- `go test -race ./internal/backendapp -count=1`
+- `go test ./internal/backendapp -run '^Test(ManagedGoCacheRecoveryFlows|ManagedGoCacheQuarantineRejectsSymlinks|QuarantineController.*GoCache)$' -count=1`
+- `make -C apps/backend build`
+- `golangci-lint run ./... --new-from-rev=517249b5e609aef76e9ad06496b8f1a13cd00516 --timeout=5m` (0 issues)
+- `python3 scripts/list-docs.py validate` (340 decisions and 1284 specifications)
+- `python3 scripts/lint-spec-files.test.py` (36 tests passed) and `python3 scripts/lint-spec-files.py --all`
+- `node --test scripts/validate-public-docs.test.mjs` (62 tests passed) and `node scripts/validate-public-docs.mjs` (47 pages validated)
+- Actual changed-package coverage preflight: `ok: true`, `status: covered`; `git diff --check`

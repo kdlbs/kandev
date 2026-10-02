@@ -4,7 +4,7 @@ status: complete
 requirements:
   - REQ-SYSTEM-PAGE-STORAGE-MAINTENANCE-006
 system_design:
-  - ../../specs/system-page/system-design/storage-maintenance-01.md
+  - ../../specs/system-page/system-design/managed-go-cache-launch-fallback.md
 legacy_specs: []
 ---
 
@@ -57,7 +57,7 @@ This package fills that behavioral gap and corrects the lifecycle design.
 Storage owns the durable setting and maintenance authority, even though lifecycle integration changes task availability.
 Adjacent task launch recovery and agent resume contracts retain their existing conversation and admission semantics.
 
-- [System design](../../specs/system-page/system-design/storage-maintenance-01.md#managed-cache-launch-integration)
+- [System design](../../specs/system-page/system-design/managed-go-cache-launch-fallback.md)
 - [Decision](../../decisions/2026-10-01-optional-managed-go-cache.md)
 - [Completed storage package](../storage-maintenance/plan.md)
 - [Original managed-cache work order](../storage-maintenance/task-05-managed-go-cache.md)
@@ -171,7 +171,7 @@ const root = 'docs/plans/managed-go-cache-launch-fallback/';
 const orders = fs.readdirSync(root).filter(p => p.startsWith('task-')).map(p => root + p);
 const paths = [root + 'plan.md', ...orders,
   'docs/specs/system-page/requirements/storage-maintenance.md',
-  'docs/specs/system-page/system-design/storage-maintenance-01.md'];
+  'docs/specs/system-page/system-design/managed-go-cache-launch-fallback.md'];
 const fileContents = Object.fromEntries(paths.map(p => [p, fs.readFileSync(p, 'utf8')]));
 const result = validateCoverage({
   changedFiles: [...orders, 'apps/backend/internal/agent/runtime/lifecycle/manager_startup.go'],
@@ -197,7 +197,7 @@ Planning checks passed on 2026-10-01:
 - Actual documentation-only diff coverage preflight: `ok: true`, `status: exempt`.
 - Catalog discovery includes the amended storage documents and new decision.
 
-These are planning-stage results. At the design-package handoff, implementation tests and public-doc validators had not run, public content was unchanged, and both work orders were pending. Task 02 later added the public guidance and completed the implementation and validation recorded below.
+These are historical planning-stage results. At the 2026-10-01 design-package handoff, implementation tests and public-doc validators had not run, public content was unchanged, and both work orders were pending. Task 02 later added the public guidance and completed the implementation and validation recorded below.
 
 Implementation and completion checks passed:
 
@@ -210,6 +210,24 @@ Implementation and completion checks passed:
 The managed-cache fallback is implemented. Storage maintenance keeps its persisted setting and strict safety checks. No host cache was repaired or changed during implementation.
 
 Implementation is complete. Requirement 006 is Active, its lifecycle design and decision record describe the implemented behavior, and both work orders are done with results recorded. Public operations guidance now documents the fallback and retained maintenance safeguards.
+
+### PR review follow-up verification (2026-10-02)
+
+Review corrections add task/session correlation to bounded fallback warnings, assert provider-call counts for disabled/absent/remote cases, move requirement 006 to its own current lifecycle design, and stop all test agents during recovery-fixture cleanup.
+
+Passed after these corrections:
+
+- `go test ./internal/agent/runtime/lifecycle -run '^Test(ManagedGoCacheFallbackWarningIsBounded|ManagedGoCacheDisabledAbsentAndRemote)$' -count=1`
+- `go test ./internal/agent/runtime/lifecycle ./internal/system/storage/gocache -run 'ManagedGoCache|ExecutionEnvironment|CleanupRejects|ValidateAdoption' -count=1`
+- `go test -race ./internal/agent/runtime/lifecycle -run 'ManagedGoCache' -count=1`
+- `go test -race ./internal/backendapp -count=1`, including the recovery fixture and backend goroutine-leak regressions
+- The exact backend recovery/quarantine test selection and the focused race selection containing the recovery fixture and listener cleanup tests
+- `make -C apps/backend build`
+- `golangci-lint run ./... --new-from-rev=517249b5e609aef76e9ad06496b8f1a13cd00516 --timeout=5m` (0 issues)
+- `python3 scripts/list-docs.py validate` (340 decisions and 1284 specifications), 36 specification-linter tests, full specification lint, 62 public-doc tests, and validation of 47 published pages
+- Actual changed-package documentation coverage: `ok: true`, `status: covered`; `git diff --check`
+
+One additional local run of `go test ./internal/agent/runtime/lifecycle ./internal/system/storage/gocache -count=1` reached the 10-minute package timeout in `TestOpenSSHRuntimeAPITunnel_ResumeRebindsPersistedRemotePort`; the Go-cache provider package passed in that run. The exact SSH test then passed 20 repeated race-enabled runs with `-timeout=90s`. This separate suite-order timeout did not reproduce in the focused run.
 
 ## Compatibility and risks
 
@@ -224,4 +242,4 @@ Implementation is complete. Requirement 006 is Active, its lifecycle design and 
 
 ## Handoff
 
-Implementation and validation are complete. The requirements, design, decision, plan, and work orders are available in the workspace and remain uncommitted. No host cache repair or saved-setting change occurred.
+Implementation and validation are complete. The requirements, current design, decision, plan, and both completed work orders are committed on the feature branch and under review in [PR #4153](https://github.com/kdlbs/kandev/pull/4153). No host cache repair or saved-setting change occurred.

@@ -150,7 +150,7 @@ scan deadline changes, and host-wide disk attribution are outside this extension
 - **AC-SYSTEM-PAGE-STORAGE-MAINTENANCE-006.5:** A new or recovered execution shall not inherit a managed override rejected during its preparation. A later execution shall evaluate the current setting again.
 - **AC-SYSTEM-PAGE-STORAGE-MAINTENANCE-006.6:** Caller cancellation or deadline expiry shall prevent startup. Wrapped provider cancellation or deadline errors shall remain errors rather than cache fallbacks.
 - **AC-SYSTEM-PAGE-STORAGE-MAINTENANCE-006.7:** Disabled management shall add no managed override. Container and remote executions shall receive no host-managed cache override or host cache preparation.
-- **AC-SYSTEM-PAGE-STORAGE-MAINTENANCE-006.8:** Cache fallback shall emit one bounded backend warning per preparation decision. The warning shall explain the skipped managed override without exposing paths, credentials, or raw provider output.
+- **AC-SYSTEM-PAGE-STORAGE-MAINTENANCE-006.8:** Cache fallback shall emit one bounded backend warning per preparation decision, with task and session IDs when available. The warning shall explain the skipped managed override without exposing paths, credentials, or raw provider output.
 - **AC-SYSTEM-PAGE-STORAGE-MAINTENANCE-006.9:** Fallback shall preserve saved cache settings and filesystem ownership. Adoption, cleanup, rotation, quarantine, restore, and permanent deletion shall continue rejecting unsafe symlink paths without changing their targets.
 
 #### Exclusions
@@ -161,7 +161,7 @@ Fallback does not guarantee that an independently configured cache or a tool's d
 ## System design
 
 The implemented optional-cache contract is defined in the
-[managed-cache launch integration](../system-design/storage-maintenance-01.md#managed-cache-launch-integration).
+[managed Go-cache launch fallback design](../system-design/managed-go-cache-launch-fallback.md).
 Its [fix package](../../../plans/managed-go-cache-launch-fallback/plan.md) records completed implementation and verification evidence.
 
 The implemented usage bars and timeout feedback are defined in

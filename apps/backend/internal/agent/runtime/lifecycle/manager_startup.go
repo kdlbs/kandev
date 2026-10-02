@@ -525,6 +525,16 @@ func (m *Manager) prepareManagedGoCacheEnvironment(ctx context.Context, req *Lau
 		req.Metadata = managedMetadata
 	}
 	req.managedGoCachePath = ""
+	warnFallback := func(reason string) {
+		fields := []zap.Field{zap.String("reason", reason)}
+		if req.TaskID != "" {
+			fields = append(fields, zap.String("task_id", req.TaskID))
+		}
+		if req.SessionID != "" {
+			fields = append(fields, zap.String("session_id", req.SessionID))
+		}
+		m.logger.Warn("managed Go cache preparation skipped; continuing without managed override", fields...)
+	}
 	if m.managedGoCache == nil || !isHostLocalExecutor(req.ExecutorType) {
 		return nil
 	}
@@ -539,8 +549,7 @@ func (m *Manager) prepareManagedGoCacheEnvironment(ctx context.Context, req *Lau
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 			return fmt.Errorf("prepare managed Go cache: %w", err)
 		}
-		m.logger.Warn("managed Go cache preparation skipped; continuing without managed override",
-			zap.String("reason", "preparation_failed"))
+		warnFallback("preparation_failed")
 		return nil
 	}
 	path := env["GOCACHE"]
@@ -548,8 +557,7 @@ func (m *Manager) prepareManagedGoCacheEnvironment(ctx context.Context, req *Lau
 		return nil
 	}
 	if !filepath.IsAbs(path) {
-		m.logger.Warn("managed Go cache preparation skipped; continuing without managed override",
-			zap.String("reason", "invalid_output"))
+		warnFallback("invalid_output")
 		return nil
 	}
 	path = filepath.Clean(path)

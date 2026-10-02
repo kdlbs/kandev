@@ -245,7 +245,10 @@ func TestManagedGoCacheFallbackWarningIsBounded(t *testing.T) {
 			mgr := newTestManager(t)
 			mgr.logger = log
 			mgr.SetManagedGoCacheEnvironmentProvider(test.provider)
-			if err := mgr.prepareManagedGoCacheEnvironment(context.Background(), &LaunchRequest{ExecutorType: "local"}); err != nil {
+			request := &LaunchRequest{
+				TaskID: "task-1", SessionID: "session-1", ExecutorType: "local",
+			}
+			if err := mgr.prepareManagedGoCacheEnvironment(context.Background(), request); err != nil {
 				t.Fatalf("prepareManagedGoCacheEnvironment() error = %v, want fallback", err)
 			}
 			entries := logs.All()
@@ -257,8 +260,8 @@ func TestManagedGoCacheFallbackWarningIsBounded(t *testing.T) {
 				t.Fatalf("warning message = %q", entry.Message)
 			}
 			fields := entry.ContextMap()
-			if len(fields) != 1 || fields["reason"] != test.reason {
-				t.Fatalf("warning fields = %#v, want only reason %q", fields, test.reason)
+			if len(fields) != 3 || fields["reason"] != test.reason || fields["task_id"] != request.TaskID || fields["session_id"] != request.SessionID {
+				t.Fatalf("warning fields = %#v, want reason %q and task/session IDs", fields, test.reason)
 			}
 			if strings.Contains(entry.Message, "secret-token") || strings.Contains(fmt.Sprint(fields), "private") {
 				t.Fatalf("warning exposed provider output: %q %#v", entry.Message, fields)
@@ -320,6 +323,10 @@ func TestManagedGoCacheDisabledAbsentAndRemote(t *testing.T) {
 		Settings: managedGoCacheSettingsStub{settings: settings},
 	})
 	var calls atomic.Int32
+	disabledProvider := managedGoCacheProviderFunc(func(ctx context.Context) (map[string]string, error) {
+		calls.Add(1)
+		return provider.ExecutionEnvironment(ctx)
+	})
 	counted := managedGoCacheProviderFunc(func(context.Context) (map[string]string, error) {
 		calls.Add(1)
 		return map[string]string{"GOCACHE": "/managed/cache"}, nil
@@ -330,12 +337,13 @@ func TestManagedGoCacheDisabledAbsentAndRemote(t *testing.T) {
 		provider ManagedGoCacheEnvironmentProvider
 		wantCall int32
 	}{
-		{name: "disabled setting", executor: "local", provider: provider, wantCall: 1},
-		{name: "absent provider", executor: "local"},
-		{name: "remote executor", executor: "local_docker", provider: counted},
+		{name: "disabled setting", executor: "local", provider: disabledProvider, wantCall: 1},
+		{name: "absent provider", executor: "local", wantCall: 0},
+		{name: "remote executor", executor: "local_docker", provider: counted, wantCall: 0},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
+			callsBefore := calls.Load()
 			mgr := newTestManager(t)
 			if test.provider != nil {
 				mgr.SetManagedGoCacheEnvironmentProvider(test.provider)
@@ -358,8 +366,8 @@ func TestManagedGoCacheDisabledAbsentAndRemote(t *testing.T) {
 			if got := request.Env["GOCACHE"]; got != "/independent/cache" {
 				t.Fatalf("request GOCACHE = %q, want independent value", got)
 			}
-			if test.name == "remote executor" && calls.Load() != 0 {
-				t.Fatalf("remote provider calls = %d, want 0", calls.Load())
+			if got := calls.Load() - callsBefore; got != test.wantCall {
+				t.Fatalf("provider calls = %d, want %d", got, test.wantCall)
 			}
 		})
 	}

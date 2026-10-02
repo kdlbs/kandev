@@ -4,7 +4,7 @@ system: system-page
 requirements:
   - REQ-SYSTEM-PAGE-STORAGE-MAINTENANCE-001
 created: 2026-07-14
-updated: 2026-10-01
+updated: 2026-10-02
 owners:
   - cfl
 ---
@@ -343,7 +343,7 @@ distinct `DELETE ALL NOW` confirmation because it removes the configured restore
 - An invalid or unreadable settings object falls back to disabled scheduling, reports a health
   warning, and does not run destructive maintenance.
 - Managed-cache launch preparation uses the optional
-  [lifecycle integration](storage-maintenance-01.md#managed-cache-launch-integration).
+  [lifecycle integration](managed-go-cache-launch-fallback.md).
   This fallback does not change the maintenance failure rules.
 - A managed Go-cache cleanup failure leaves either the original cache or its quarantined rename
   intact; it never recursively deletes outside the configured owned path.

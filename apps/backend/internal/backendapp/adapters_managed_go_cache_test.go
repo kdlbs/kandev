@@ -91,7 +91,10 @@ func TestManagedGoCacheRecoveryFlows(t *testing.T) {
 		HomeDir: cacheHome, TrashDir: trashRoot, Settings: settings, Store: quarantineStore,
 	})
 	manager.SetManagedGoCacheEnvironmentProvider(cacheProvider)
-	t.Cleanup(func() { require.NoError(t, manager.Stop()) })
+	t.Cleanup(func() {
+		require.NoError(t, manager.StopAllAgents(ctx))
+		require.NoError(t, manager.Stop())
+	})
 	adapter := newLifecycleAdapter(manager, agentRegistry, log)
 	repoAdapter := &taskRepositoryAdapter{repo: harness.taskRepo, svc: harness.taskSvc}
 	orchestratorSvc := orchestrator.NewService(
@@ -194,8 +197,11 @@ func TestManagedGoCacheRecoveryFlows(t *testing.T) {
 		fields := entry.ContextMap()
 		require.Equal(t, "preparation_failed", fields["reason"])
 		for key := range fields {
-			require.Contains(t, []string{"component", "reason"}, key, "unexpected fallback warning field %q", key)
+			require.Contains(t, []string{"component", "reason", "task_id", "session_id"}, key,
+				"unexpected fallback warning field %q", key)
 		}
+		require.Equal(t, task.ID, fields["task_id"])
+		require.NotEmpty(t, fields["session_id"])
 		require.NotContains(t, entry.Message, managedPath)
 		require.NotContains(t, entry.Message, externalCache)
 	}

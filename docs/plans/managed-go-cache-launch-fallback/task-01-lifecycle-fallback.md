@@ -16,7 +16,7 @@ acceptance_criteria:
   - AC-SYSTEM-PAGE-STORAGE-MAINTENANCE-006.7
   - AC-SYSTEM-PAGE-STORAGE-MAINTENANCE-006.8
 system_design:
-  - ../../specs/system-page/system-design/storage-maintenance-01.md
+  - ../../specs/system-page/system-design/managed-go-cache-launch-fallback.md
 ---
 
 # Task 01: Lifecycle fallback and execution state
@@ -91,6 +91,14 @@ Validation passed:
 - `go test ./internal/agent/runtime/lifecycle ./internal/system/storage/gocache -count=1`
 - `git diff --check`
 
+PR review follow-up (2026-10-02): fallback warnings now include `task_id` and `session_id` when available, and the bounded-warning regression asserts both fields. The disabled, absent-provider, and remote-executor cases now assert their expected provider-call counts.
+
+Validation passed:
+
+- `go test ./internal/agent/runtime/lifecycle -run '^Test(ManagedGoCacheFallbackWarningIsBounded|ManagedGoCacheDisabledAbsentAndRemote)$' -count=1`
+- `go test ./internal/agent/runtime/lifecycle ./internal/system/storage/gocache -run 'ManagedGoCache|ExecutionEnvironment|CleanupRejects|ValidateAdoption' -count=1`
+- `go test -race ./internal/agent/runtime/lifecycle -run 'ManagedGoCache' -count=1`
+
 ## Files touched
 
 - `apps/backend/internal/agent/runtime/lifecycle/manager_startup.go`
@@ -120,7 +128,7 @@ Do not treat the caller's independent cache value as managed-only state.
 ## Inputs
 
 - [Requirements](../../specs/system-page/requirements/storage-maintenance.md), active requirement 006.
-- [Design](../../specs/system-page/system-design/storage-maintenance-01.md#managed-cache-launch-integration).
+- [Design](../../specs/system-page/system-design/managed-go-cache-launch-fallback.md).
 - Existing static cache fixture and launch/environment-preparer tests in `manager_launch_test.go`.
 - Existing recovery environment fixture in `manager_execution_test.go`.
 - [Decision](../../decisions/2026-10-01-optional-managed-go-cache.md).
