@@ -82,6 +82,10 @@ Existing GitLab presentation exclusions remain in force.
 
 ## Delivery
 
+The [sidebar history and spacing repair](../../../plans/changes-sidebar-history-spacing/plan.md)
+implements an evidence correction under existing criteria 001.4 and 001.7, with
+[relation design](../system-design/remote-contribution-relation.md).
+
 Requirement 002 is implemented. See the
 [contribution resume recovery package](../../../plans/contribution-resume-recovery/plan.md)
 for the admission tests and verification evidence.

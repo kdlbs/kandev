@@ -19,7 +19,7 @@ The probe created a native ACP session, saved its provider session ID, and
 interrupted a read prompt after Cursor emitted a `kind=read`,
 `status=completed` tool update. It then stopped that process and loaded the
 same session ID in a replacement process. `session/load` succeeded and replayed
-the earlier output seed and both user prompts. A follow-up prompt in the
+both user prompts, including the earlier seed prompt. A follow-up prompt in the
 restored conversation could not recover the synthetic read result and made no
 new tool call. The provider said the interrupted read had returned no file
 contents.
@@ -33,10 +33,11 @@ The test logs only the CLI version, negotiated load support, tool kind/status,
 and boolean restore outcomes. It does not log the account credential, raw
 provider frames, workspace path, or prompt contents.
 
-The opt-in test is an observational diagnostic and exits successfully when
-continuation is unavailable. A passing test run records the evidence; it does
-not by itself prove provider support. The positive same-ID continuation
-check below must also assert successful read-only completion.
+`TestCursorNativeAbruptDisconnectRestore` records interrupted-result retention
+without requiring its preservation. `TestCursorNativeSessionResume` accepts
+method-not-found as an observed unsupported capability. Neither diagnostic
+proves positive support. `TestCursorNativeConversationRestore` separately
+requires successful same-ID read-only continuation through `session/load`.
 
 ## Follow-up: abrupt disconnect and native session identity
 
@@ -64,13 +65,13 @@ preservation of interrupted tool results is not.
 
 Sanitized outcomes:
 
-| Probe | Result |
-| --- | --- |
-| Advertised load / resume | `true` / `false` |
-| Direct `session/resume` | `-32601` |
-| Abrupt disconnect, same ID restored | `true` |
-| Interrupted read result retained | `false` |
-| Interrupted assistant output retained | `false` |
+| Probe                                      | Result                     |
+| ------------------------------------------ | -------------------------- |
+| Advertised load / resume                   | `true` / `false`           |
+| Direct `session/resume`                    | `-32601`                   |
+| Abrupt disconnect, same ID restored        | `true`                     |
+| Interrupted read result retained           | `false`                    |
+| Interrupted assistant output retained      | `false`                    |
 | Same-ID continuation allowing safe re-read | `true`, one completed read |
 
 ## Delivery consequence

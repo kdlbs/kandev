@@ -30,6 +30,10 @@ func continuationFailureFixture(t *testing.T) (*Service, *mockMessageCreator, wa
 	session, err := svc.repo.GetTaskSession(context.Background(), "s1")
 	require.NoError(t, err)
 	session.DownstreamACPSessionID = "provider-session"
+	session.TaskEnvironmentID = "existing-workspace"
+	require.NoError(t, svc.repo.CreateTaskEnvironment(context.Background(), &models.TaskEnvironment{
+		ID: "existing-workspace", TaskID: "t1", ExecutorType: "local", Status: models.TaskEnvironmentStatusReady,
+	}))
 	session.AgentProfileID = "profile-1"
 	session.AgentProfileSnapshot = map[string]any{"model": "mock-fast", "auto_approve": false}
 	require.NoError(t, svc.repo.UpdateTaskSession(context.Background(), session))
@@ -133,7 +137,7 @@ func TestInterruptionContinuationBudgetDoesNotRevertToReplay(t *testing.T) {
 	require.False(t, svc.handleTransientFailure(context.Background(), data), "missing continuation evidence cannot authorize original prompt replay")
 }
 
-func TestInterruptionContinuationSettlementDoesNotCompleteTurn(t *testing.T) {
+func TestInterruptionContinuationSettlementClosesTurnAsInterrupted(t *testing.T) {
 	svc, _, data := continuationFailureFixture(t)
 	turns := &repoTurnService{repo: svc.repo.(*sqliterepo.Repository)}
 	svc.turnService = turns

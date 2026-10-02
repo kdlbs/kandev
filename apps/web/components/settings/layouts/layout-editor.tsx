@@ -53,7 +53,6 @@ export const placeholderComponents: Record<string, React.FunctionComponent<IDock
   // unknown tabComponent (AC8), regardless of which plugin registered it.
   "plugin-panel": PlaceholderPanel,
   // Reusable panels rendered through the same placeholder box in the editor.
-  "prompt-history": PlaceholderPanel,
   todos: PlaceholderPanel,
 };
 

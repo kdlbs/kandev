@@ -28,16 +28,21 @@ func (s *Service) recordContinuationAcceptance(sessionID string, entry *transien
 	entry.mu.Unlock()
 }
 
-func (s *Service) continuationCancellationOwnsTurn(sessionID string, entry *transientRetryEntry) bool {
+func (s *Service) continuationCancellationOwnsTurn(ctx context.Context, sessionID string, entry *transientRetryEntry) bool {
 	current, ok := s.transientRetries.Load(sessionID)
 	if !ok || current != entry {
 		return false
 	}
 	entry.mu.Lock()
 	executionID, generation := entry.acceptedExecution, entry.acceptedGeneration
+	restoredID := entry.restoredExecution
 	entry.mu.Unlock()
 	if executionID == "" {
-		return true
+		if restoredID == "" {
+			return true
+		}
+		liveID, err := s.agentManager.GetExecutionIDForSession(ctx, sessionID)
+		return err == nil && liveID == restoredID
 	}
 	evidence, ok := s.promptAttemptForSession(sessionID)
 	if !ok {
@@ -74,8 +79,9 @@ func (s *Service) cancelRestoredContinuation(ctx context.Context, sessionID stri
 	}
 	guard, release := s.acquireCancelInFlightGuard(sessionID)
 	guard.Lock()
+	liveID, err = s.agentManager.GetExecutionIDForSession(ctx, sessionID)
 	current, ok = s.transientRetries.Load(sessionID)
-	owned := ok && current == entry && !s.isCancelInFlight(sessionID)
+	owned := ok && current == entry && err == nil && liveID == executionID && !s.isCancelInFlight(sessionID)
 	if owned {
 		err = s.closeInterruptedTurn(ctx, sessionID)
 	}

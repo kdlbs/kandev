@@ -11,7 +11,6 @@ import (
 // Since both acpclient and adapter now use the shared types package,
 // no conversion is needed - we just forward to the handler.
 func (a *Adapter) handlePermissionRequest(ctx context.Context, req *PermissionRequest) (*PermissionResponse, error) {
-	a.poisonContinuationSafety()
 	req.ToolName = a.dialect.normalizePermissionToolName(req.ToolName, req.ToolMeta, req.Title, req.ActionType)
 
 	a.mu.RLock()
@@ -23,6 +22,9 @@ func (a *Adapter) handlePermissionRequest(ctx context.Context, req *PermissionRe
 	sessionID := req.SessionID
 	if sessionID == "" {
 		sessionID = fallbackSessionID
+	}
+	if sessionID == fallbackSessionID {
+		a.poisonContinuationSafety()
 	}
 
 	// Only emit a synthetic tool_call event if no ToolCall notification preceded this.

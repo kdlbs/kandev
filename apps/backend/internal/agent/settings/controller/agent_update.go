@@ -63,17 +63,13 @@ func (c *Controller) previewAgentUpdate(
 	if !ok {
 		return nil, ErrAgentNotFound
 	}
-	managed, ok := ag.(agents.ManagedNPMRuntimeAgent)
-	if !ok {
-		return nil, ErrRuntimeUpdateUnsupported
-	}
-	spec := managed.ManagedNPMRuntime()
-	if strings.TrimSpace(spec.Package) == "" {
-		return nil, ErrRuntimeUpdateUnsupported
+	spec, fallback, err := c.managedRuntimeUpdateSpec(ag)
+	if err != nil {
+		return nil, err
 	}
 
 	current := ""
-	if caps, found := c.runtimeUpdater.CurrentCapabilities(name); found {
+	if caps, found := c.runtimeUpdater.CurrentCapabilities(name); found && !fallback {
 		current = caps.AgentVersion
 	}
 	active, effective, defaultVersion, err := c.runtimeVersions(ctx, name, spec)
@@ -110,6 +106,7 @@ func (c *Controller) previewAgentUpdate(
 		command = spec.UpdateCommand().Args()
 	}
 	return &dto.AgentUpdatePreviewDTO{
+		ManagedFallback:   fallback,
 		AgentName:         name,
 		Package:           spec.Package,
 		CurrentVersion:    current,
@@ -122,6 +119,26 @@ func (c *Controller) previewAgentUpdate(
 		Command:           command,
 		CommandString:     buildCommandString(command),
 	}, nil
+}
+
+func (c *Controller) managedRuntimeUpdateSpec(ag agents.Agent) (agents.ManagedNPMRuntimeSpec, bool, error) {
+	managed, ok := ag.(agents.ManagedNPMRuntimeAgent)
+	if !ok {
+		return agents.ManagedNPMRuntimeSpec{}, false, ErrRuntimeUpdateUnsupported
+	}
+	spec := managed.ManagedNPMRuntime()
+	fallback := spec.NativeBinaryOnPath()
+	if strings.TrimSpace(spec.Package) == "" || (fallback && !c.verifiedManagedActivation()) {
+		return agents.ManagedNPMRuntimeSpec{}, false, ErrRuntimeUpdateUnsupported
+	}
+	spec.NativeBinary = ""
+	return spec, fallback, nil
+}
+
+func (c *Controller) verifiedManagedActivation() bool {
+	_, candidate := c.runtimeUpdater.(RuntimeCandidateUpdater)
+	_, catalogue := c.runtimeUpdater.(RuntimeVersionResolver)
+	return candidate && catalogue && c.managedRuntimeSelections != nil
 }
 
 func resolvePreviewTarget(
@@ -557,20 +574,21 @@ func (c *Controller) enqueueAgentUpdate(
 	if c.updateJobStore == nil || c.runtimeUpdater == nil {
 		return nil, ErrRuntimeUpdaterUnavailable
 	}
+	c.runtimeAutoUpdateMu.Lock()
+	defer c.runtimeAutoUpdateMu.Unlock()
 	if active, found := c.updateJobStore.GetActive(name); found {
+		if active.Automatic {
+			return nil, &MaintenanceConflictError{AgentName: name, Active: MaintenanceJobRef{JobID: active.JobID, Kind: MaintenanceKindUpdate}}
+		}
 		return active, nil
 	}
 	ag, ok := c.agentRegistry.Get(name)
 	if !ok {
 		return nil, ErrAgentNotFound
 	}
-	managed, ok := ag.(agents.ManagedNPMRuntimeAgent)
-	if !ok {
-		return nil, ErrRuntimeUpdateUnsupported
-	}
-	spec := managed.ManagedNPMRuntime()
-	if strings.TrimSpace(spec.Package) == "" {
-		return nil, ErrRuntimeUpdateUnsupported
+	spec, fallback, err := c.managedRuntimeUpdateSpec(ag)
+	if err != nil {
+		return nil, err
 	}
 	if useDefault {
 		targetVersion = spec.DefaultVersionOrPinned()
@@ -582,18 +600,17 @@ func (c *Controller) enqueueAgentUpdate(
 	if err := c.validateAgentUpdateTarget(ctx, spec, targetVersion); err != nil {
 		return nil, err
 	}
-	if !useDefault {
+	if !useDefault && !fallback {
 		if noOp := c.alreadyActiveHealthyUpdate(ctx, name, spec, targetVersion); noOp != nil {
+			if err := c.disableAutomaticUpdatesLocked(ctx, name); err != nil {
+				return nil, err
+			}
 			return noOp, nil
 		}
 	}
-	var job *AgentUpdateJob
-	var err error
-	if useDefault {
-		job, err = c.updateJobStore.EnqueueDefault(name, spec)
-	} else {
-		job, err = c.updateJobStore.Enqueue(name, spec, targetVersion)
-	}
+	job, err := c.updateJobStore.enqueueManual(name, spec, useDefault, targetVersion, fallback, func() error {
+		return c.disableAutomaticUpdatesLocked(ctx, name)
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -620,6 +637,10 @@ func (c *Controller) validateAgentUpdateTarget(
 	if err != nil {
 		return fmt.Errorf("%w: %v", ErrRuntimeUpdatePreviewFailed, err)
 	}
+	return validateRuntimeCatalogueTarget(metadata, targetVersion)
+}
+
+func validateRuntimeCatalogueTarget(metadata RuntimeVersionMetadata, targetVersion string) error {
 	catalogue, err := managedruntime.BuildCatalogue(metadata.Versions, metadata.Latest)
 	if err != nil {
 		return fmt.Errorf("%w: %v", ErrRuntimeUpdatePreviewFailed, err)

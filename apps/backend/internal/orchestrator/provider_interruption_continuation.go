@@ -6,12 +6,15 @@ import (
 	"encoding/json"
 
 	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
+	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/orchestrator/watcher"
 	"github.com/kandev/kandev/internal/task/models"
 )
 
 const recoveryModeContinue = "continue"
 const recoveryModeReplay = "replay"
+const recoveryDispositionManual = "manual"
+const failureKindProviderInterrupted = "provider_interrupted"
 
 // continuationBinding is an immutable admission snapshot, retained only in process.
 type continuationBinding struct {
@@ -47,6 +50,26 @@ func (s *Service) continuationBindingForFailure(ctx context.Context, data watche
 func (s *Service) continuationFailureHasEvidence(data watcher.AgentEventData) bool {
 	return s.config.ProviderInterruptionContinuation && data.OwnerKind == queueStatusScopeTask && !data.DynamicRouteAttempt &&
 		data.ContinuationSafety.SafeFor(data.PromptGeneration) && data.EvidenceKnown && s.continuationPromptIdentityMatches(data)
+}
+
+func (s *Service) continuationRefusalReason(ctx context.Context, data watcher.AgentEventData) string {
+	if !s.config.ProviderInterruptionContinuation {
+		return "disabled"
+	}
+	safety := data.ContinuationSafety
+	if safety == nil || !safety.Known || !data.EvidenceKnown || !s.continuationPromptIdentityMatches(data) {
+		return "missing_evidence"
+	}
+	if safety.Unsafe || safety.Pending {
+		return "unsafe_work"
+	}
+	if safety.Support != streams.ContinuationNativeSavedHistoryV1 || data.OwnerKind != queueStatusScopeTask || data.DynamicRouteAttempt {
+		return "unsupported_restore"
+	}
+	if s.continuationBindingForFailure(ctx, data) == nil {
+		return "missing_evidence"
+	}
+	return ""
 }
 
 func (s *Service) continuationPromptIdentityMatches(data watcher.AgentEventData) bool {

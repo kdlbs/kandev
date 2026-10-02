@@ -26,9 +26,11 @@ func mockContinuationPath(sid acp.SessionId) string {
 func (a *mockAgent) handleMockInterruptionContinuation(ctx context.Context, sid acp.SessionId, prompt string) (acp.PromptResponse, error, bool) {
 	prompt = stripKandevSystem(strings.TrimSpace(prompt))
 	scenario := strings.TrimPrefix(prompt, "/continuation-")
-	switch scenario {
-	case "output", "read", "write", "pending", "unknown", "read-hold", "read-restore-transient", "read-restore-hard", "read-ambiguous":
-		return a.emitMockInterruption(ctx, sid, scenario)
+	if strings.HasPrefix(prompt, "/continuation-") {
+		switch scenario {
+		case "output", "read", "write", "pending", "unknown", "read-hold", "read-restore-transient", "read-restore-hard", "read-ambiguous":
+			return a.emitMockInterruption(ctx, sid, scenario)
+		}
 	}
 	if !strings.HasPrefix(prompt, "Your previous turn was interrupted by a temporary connection failure. Continue the unfinished request") {
 		return acp.PromptResponse{}, nil, false
@@ -53,6 +55,9 @@ func (a *mockAgent) handleMockInterruptionContinuation(ctx context.Context, sid 
 		return acp.PromptResponse{StopReason: acp.StopReasonCancelled}, nil, true
 	}
 	e.text(fmt.Sprintf("Mock continuation complete: original=%d continuation=%d native=%s\n", episode.Original, episode.Continuation, sid))
+	if ctx.Err() != nil {
+		return acp.PromptResponse{StopReason: acp.StopReasonCancelled}, nil, true
+	}
 	return acp.PromptResponse{StopReason: acp.StopReasonEndTurn}, nil, true
 }
 

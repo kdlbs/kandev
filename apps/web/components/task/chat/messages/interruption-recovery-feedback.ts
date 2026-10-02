@@ -3,6 +3,7 @@ type RecoveryMetadata = {
   recovery_mode?: string;
   recovery_phase?: string;
   recovery_disposition?: string;
+  recovery_reason?: string;
   attempts_started?: number;
 };
 
@@ -19,6 +20,16 @@ export function interruptionRecoveryKey(metadata: RecoveryMetadata) {
   const count = metadata.attempts_started;
   if (metadata.recovery_disposition === "exhausted" && Number.isInteger(count) && count! > 0)
     return "chat:providerRecoveryExhaustedBody";
+  switch (metadata.recovery_reason) {
+    case "disabled":
+      return "chat:providerRecoveryDisabledBody";
+    case "unsafe_work":
+      return "chat:providerRecoveryUnsafeBody";
+    case "unsupported_restore":
+      return "chat:providerRecoveryUnsupportedBody";
+    case "missing_evidence":
+      return "chat:providerRecoveryEvidenceBody";
+  }
   return "chat:providerManualRecoveryBody";
 }
 

@@ -13,10 +13,36 @@ import (
 
 const mockContinuationPrompt = "Your previous turn was interrupted by a temporary connection failure. Continue the unfinished request using this conversation's existing history and available completed tool results."
 
+func TestMockInterruptionContinuationRequiresFixturePrefix(t *testing.T) {
+	a := newTransportLostTestAgent()
+	a.conn = newCapturingUpdater()
+	for _, prompt := range []string{"read", "output", "write", "unknown"} {
+		_, _, handled := a.handleMockInterruptionContinuation(t.Context(), "ordinary", prompt)
+		require.False(t, handled, "ordinary prompts cannot enter an interruption fixture")
+	}
+}
+
+func TestMockInterruptionContinuationCancelledCompletion(t *testing.T) {
+	sid := acp.SessionId(t.Name())
+	_ = os.Remove(mockContinuationPath(sid))
+	_ = os.Remove(mockContinuationPath(sid))
+	a := newTransportLostTestAgent()
+	a.conn = newCapturingUpdater()
+	t.Cleanup(func() { _ = os.Remove(mockContinuationPath(sid)) })
+	_, _, _ = a.handleMockInterruptionContinuation(t.Context(), sid, "/continuation-read")
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	response, err, handled := a.handleMockInterruptionContinuation(ctx, sid, mockContinuationPrompt)
+	require.True(t, handled)
+	require.NoError(t, err)
+	require.Equal(t, acp.StopReasonCancelled, response.StopReason)
+}
+
 func TestMockInterruptionContinuationRestoresSameConversation(t *testing.T) {
 	for _, scenario := range []string{"output", "read", "write", "pending", "unknown"} {
 		t.Run(scenario, func(t *testing.T) {
 			sid := acp.SessionId(t.Name())
+			_ = os.Remove(mockContinuationPath(sid))
 			a := newTransportLostTestAgent()
 			a.conn = newCapturingUpdater()
 			_, err := a.LoadSession(t.Context(), acp.LoadSessionRequest{SessionId: sid})
@@ -41,6 +67,7 @@ func TestMockInterruptionContinuationRestoresSameConversation(t *testing.T) {
 
 func TestMockInterruptionContinuationAcceptedCancelAndClose(t *testing.T) {
 	const sid acp.SessionId = "continuation-cancel-owned-fixture"
+	_ = os.Remove(mockContinuationPath(sid))
 	a := newTransportLostTestAgent()
 	a.conn = newCapturingUpdater()
 	t.Cleanup(func() { _, _ = a.CloseSession(context.Background(), acp.CloseSessionRequest{SessionId: sid}) })
@@ -78,6 +105,7 @@ func TestMockInterruptionContinuationRestoreOutcomes(t *testing.T) {
 	for _, scenario := range []string{"read-restore-transient", "read-restore-hard", "read-ambiguous"} {
 		t.Run(scenario, func(t *testing.T) {
 			sid := acp.SessionId(t.Name())
+			_ = os.Remove(mockContinuationPath(sid))
 			a := newTransportLostTestAgent()
 			a.conn = newCapturingUpdater()
 			t.Cleanup(func() { _, _ = a.CloseSession(context.Background(), acp.CloseSessionRequest{SessionId: sid}) })

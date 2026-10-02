@@ -368,17 +368,7 @@ func (s *Service) handleTransientFailure(ctx context.Context, data watcher.Agent
 	// Reserve the next timer while the notice lifecycle is still serialized. A
 	// concurrent failure can replace this reservation, but cannot arm it until
 	// its own failed turn has been parked.
-	entry := s.reserveTransientRetryWithMetadataLocked(
-		noticeState,
-		data.TaskID,
-		data.SessionID,
-		data.AgentExecutionID,
-		attempt,
-		delay,
-		retryAt,
-		classified,
-	)
-	if entry != nil {
+	entry := s.reserveTransientRetryWithMetadataLocked(noticeState, data.SessionID, attempt, func(entry *transientRetryEntry) {
 		entry.mode = mode
 		entry.continuation = binding
 		entry.providerID = data.AgentID
@@ -388,7 +378,7 @@ func (s *Service) handleTransientFailure(ctx context.Context, data watcher.Agent
 			}
 			entry.modelID = data.ProviderError.ModelID
 		}
-	}
+	})
 	noticeState.mu.Unlock()
 	releaseNoticeState()
 
@@ -484,7 +474,7 @@ func (s *Service) scheduleTransientRetryWithMetadataLocked(
 	retryAt time.Time,
 	classified *routingerr.Error,
 ) {
-	entry := s.reserveTransientRetryWithMetadataLocked(state, taskID, sessionID, execID, attempt, delay, retryAt, classified)
+	entry := s.reserveTransientRetryWithMetadataLocked(state, sessionID, attempt, nil)
 	if entry != nil {
 		s.armTransientRetryEntryLocked(taskID, sessionID, execID, entry, delay)
 	}
@@ -492,11 +482,9 @@ func (s *Service) scheduleTransientRetryWithMetadataLocked(
 
 func (s *Service) reserveTransientRetryWithMetadataLocked(
 	state *transientRetryNoticeState,
-	taskID, sessionID, execID string,
+	sessionID string,
 	attempt int,
-	delay time.Duration,
-	retryAt time.Time,
-	classified *routingerr.Error,
+	initialize func(*transientRetryEntry),
 ) *transientRetryEntry {
 	if state.retired.Load() {
 		return nil
@@ -507,9 +495,13 @@ func (s *Service) reserveTransientRetryWithMetadataLocked(
 		if previous, ok := previous.(*transientRetryEntry); ok {
 			previous.mu.Lock()
 			entry.started = previous.started
+			entry.mode, entry.continuation = previous.mode, previous.continuation
 			entry.providerID, entry.modelID = previous.providerID, previous.modelID
 			previous.mu.Unlock()
 		}
+	}
+	if initialize != nil {
+		initialize(entry)
 	}
 	state.owned.Store(true)
 	s.transientRetries.Store(sessionID, entry)
@@ -851,6 +843,7 @@ func classifyKanbanFailure(data watcher.AgentEventData) *routingerr.Error {
 	providerID := data.AgentID
 	message := data.ErrorMessage
 	var resetHint *time.Time
+	var occurredAt time.Time
 	if providerError := data.ProviderError; providerError != nil {
 		// Provider rules are keyed by agent ID. OpenCode diagnostics carry the
 		// model-provider ID instead ("opencode-go"), which has no rules; keeping
@@ -864,6 +857,7 @@ func classifyKanbanFailure(data watcher.AgentEventData) *routingerr.Error {
 			message = providerError.Message
 		}
 		resetHint = providerError.ResetAt
+		occurredAt = providerError.OccurredAt
 	}
 	phase := routingerr.PhasePromptSend
 	if data.DynamicRouteAttempt {
@@ -883,6 +877,7 @@ func classifyKanbanFailure(data watcher.AgentEventData) *routingerr.Error {
 		Phase:      phase,
 		ProviderID: providerID,
 		ResetHint:  resetHint,
+		OccurredAt: occurredAt,
 		Stderr:     message,
 	})
 	if data.DynamicRouteAttempt && data.EvidenceKnown && !data.OutputObserved && !data.EffectObserved &&
@@ -1103,11 +1098,12 @@ func (s *Service) CancelTransientRetry(ctx context.Context, taskID, sessionID st
 
 	execID, _ := s.agentManager.GetExecutionIDForSession(ctx, sessionID)
 	s.handleRecoverableFailure(ctx, watcher.AgentEventData{
-		TaskID:           taskID,
-		SessionID:        sessionID,
-		AgentExecutionID: execID,
-		ErrorMessage:     "Automatic provider retries cancelled. Resume or start fresh to continue.",
-		UserInitiated:    true,
+		TaskID:              taskID,
+		SessionID:           sessionID,
+		AgentExecutionID:    execID,
+		ErrorMessage:        "Automatic provider retries cancelled. Resume or start fresh to continue.",
+		RecoveryDisposition: "cancelled",
+		UserInitiated:       true,
 	})
 	return true
 }

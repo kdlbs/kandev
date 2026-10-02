@@ -28,11 +28,11 @@ delivery evidence.
 
 ## Requirement mapping
 
-| Requirement | Design sections |
-| --- | --- |
+| Requirement                                  | Design sections                                                      |
+| -------------------------------------------- | -------------------------------------------------------------------- |
 | `REQ-PLATFORM-INTERRUPTION-CONTINUATION-001` | Compatibility and evidence; Recovery admission; Restore and dispatch |
-| `REQ-PLATFORM-INTERRUPTION-CONTINUATION-002` | Episode ownership; Settlement; Rollout and restart |
-| `REQ-PLATFORM-INTERRUPTION-CONTINUATION-003` | Feedback contract; Desktop and phone composition; Observability |
+| `REQ-PLATFORM-INTERRUPTION-CONTINUATION-002` | Episode ownership; Settlement; Rollout and restart                   |
+| `REQ-PLATFORM-INTERRUPTION-CONTINUATION-003` | Feedback contract; Desktop and phone composition; Observability      |
 
 ## Evidence from the investigation
 
@@ -63,15 +63,15 @@ Set support in the provider dialect after negotiated native load/resume support
 and tested constructor policy agree. There is no new universal ACP extension
 advertised to clients and no provider-name branch in orchestration.
 
-| Provider/transport shape | Intended behavior | Evidence and unsupported fallback |
-| --- | --- | --- |
-| Cursor ACP with tested native restore, current generation, saved conversation | Eligible output-only or completed-read continuation | Captured/sanitized fixtures plus isolated native restore check; failed restore is manual |
-| Cursor ACP with only `kind=read` and completed status | Eligible only after the native compatibility check proves this wire shape is a read-only contract | Positive and conflicting-frame tests; unrecognized identity/kind is unknown |
-| Cursor ACP search or a title such as `Read File` without positive typed evidence | Unsupported tool for continuation | No title, payload-normalizer, shell-command, or heuristic inference |
-| Cursor ACP pending reads, writes, execute, MCP, permissions, monitors, subagents | Manual recovery | Negative matrix, including writes from previous recovery attempts |
-| Other production adapters, old remote agentctl omitting the snapshot | Existing recovery only | Compatibility-negative tests, no implicit support inheritance |
-| Mock ACP in isolated dev/E2E | Test-only version of the same typed contract | Constructor provenance and mock-only marker; no production marker acceptance |
-| Dynamic profiles, Office, utility, passthrough | Existing policy owners | Regression tests; no legacy-loop interception |
+| Provider/transport shape                                                         | Intended behavior                                                                                 | Evidence and unsupported fallback                                                        |
+| -------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
+| Cursor ACP with tested native restore, current generation, saved conversation    | Eligible output-only or completed-read continuation                                               | Captured/sanitized fixtures plus isolated native restore check; failed restore is manual |
+| Cursor ACP with only `kind=read` and completed status                            | Eligible only after the native compatibility check proves this wire shape is a read-only contract | Positive and conflicting-frame tests; unrecognized identity/kind is unknown              |
+| Cursor ACP search or a title such as `Read File` without positive typed evidence | Unsupported tool for continuation                                                                 | No title, payload-normalizer, shell-command, or heuristic inference                      |
+| Cursor ACP pending reads, writes, execute, MCP, permissions, monitors, subagents | Manual recovery                                                                                   | Negative matrix, including writes from previous recovery attempts                        |
+| Other production adapters, old remote agentctl omitting the snapshot             | Existing recovery only                                                                            | Compatibility-negative tests, no implicit support inheritance                            |
+| Mock ACP in isolated dev/E2E                                                     | Test-only version of the same typed contract                                                      | Constructor provenance and mock-only marker; no production marker acceptance             |
+| Dynamic profiles, Office, utility, passthrough                                   | Existing policy owners                                                                            | Regression tests; no legacy-loop interception                                            |
 
 The native compatibility check is a delivery prerequisite: a disposable
 workspace/conversation must show that restore returns the same provider session
@@ -234,19 +234,23 @@ failure rechecks the episode's combined effect evidence before rescheduling.
 Introduce typed recovery disposition metadata on the existing status/error
 records, not a second frontend state owner. Proposed fields:
 
-| Field | Values or meaning |
-| --- | --- |
-| `recovery_mode` | `replay`, `continue` |
-| `recovery_phase` | `waiting`, `reconnecting`, `continuing`, `manual` |
-| `recovery_disposition` | `manual`, `cancelled`, `exhausted`, `restart_interrupted`; omitted while automatic recovery is active |
-| `attempt` / `max_attempts` / `retry_at` | Existing scheduled ordinal, bound, absolute UTC deadline |
-| `attempts_started` | Actual launches started, kept distinct from scheduled ordinal |
+| Field                                   | Values or meaning                                                                                                            |
+| --------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| `recovery_mode`                         | `replay`, `continue`                                                                                                         |
+| `recovery_phase`                        | `waiting`, `reconnecting`, `continuing`, `manual`                                                                            |
+| `recovery_disposition`                  | `manual`, `cancelled`, `exhausted`, `restart_interrupted`; omitted while automatic recovery is active                        |
+| `recovery_reason`                       | Manual refusal: `disabled`, `unsafe_work`, `unsupported_restore`, `missing_evidence`; omitted for cancellation or exhaustion |
+| `attempt` / `max_attempts` / `retry_at` | Existing scheduled ordinal, bound, absolute UTC deadline                                                                     |
+| `attempts_started`                      | Actual launches started, kept distinct from scheduled ordinal                                                                |
 
 Carry disposition from the actual policy result into
 `createRecoveryStatusMessage`. Do not choose exhaustion from `routingerr.Decide`.
 Capture the exhaustion outcome before `resetTransientRetry` destroys counters.
 No active episode and absent legacy metadata renders neutral connection-loss
 copy, never guesses exhaustion. Existing status records remain readable.
+Manual refusal derives from the backend admission evidence, including saved
+identity and invocation freshness. Localized feedback distinguishes its closed
+reason codes; unknown or absent codes retain the neutral legacy fallback.
 Retry notice persistence remains through `TransientRetryMessageService` and
 task-service update/delete with existing event publishing and duplicate repair.
 

@@ -176,8 +176,8 @@ Cursor recovery choices. They preserve the provider-neutral safety boundary in
    though its classification is transient.
 2. **Replay mode.** Eligible retries retain the execution profile and native
    identity before sending the cached original prompt at the safe point above.
-   Separate opt-in native continuation preserves this replay fence, sends a
-   continuation instruction, and refuses writes or uncertain work. Otherwise
+   Separate opt-in native continuation follows its distinct contract, admitting
+   output or completed reads while refusing writes or uncertain work. Otherwise
    the existing manual Resume and Start fresh choices remain available.
 3. **Cursor-owned retry.** Kandev does not schedule while the original
    `session/prompt` RPC remains open. Provider progress after a marker clears

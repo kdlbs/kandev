@@ -164,5 +164,9 @@
   "continuationPhase_waiting": "Waiting to reconnect.",
   "continuationPhase_reconnecting": "Reconnecting...",
   "continuationPhase_continuing": "Continuing previous request...",
-  "continuationHistoryPreserved": "Previous conversation is preserved."
+  "continuationHistoryPreserved": "Previous conversation is preserved.",
+  "providerRecoveryDisabledBody": "Automatic continuation is disabled. Resume to try again, or start a fresh session.",
+  "providerRecoveryUnsafeBody": "Automatic continuation stopped because an action is pending or its outcome is uncertain. Review the work before resuming.",
+  "providerRecoveryUnsupportedBody": "This agent cannot automatically restore the interrupted conversation. Resume to try again, or start a fresh session.",
+  "providerRecoveryEvidenceBody": "Automatic continuation stopped because conversation identity or safety evidence is missing. Review the work before resuming."
 }

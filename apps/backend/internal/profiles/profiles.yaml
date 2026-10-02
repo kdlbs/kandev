@@ -91,12 +91,13 @@ features:
     dev:  "false"
     e2e:  "false"
 
-  # Normalized background work and subagent lifecycle management.
+  # Safe continuation of an interrupted native conversation. Explicit opt-in.
   KANDEV_FEATURES_PROVIDER_INTERRUPTION_CONTINUATION:
     prod: "false"
     dev:  "false"
     e2e:  "false"
 
+  # Normalized background work and subagent lifecycle management.
   KANDEV_FEATURES_AGENT_BACKGROUND_WORK:
     prod: "false"
     dev:  "false"

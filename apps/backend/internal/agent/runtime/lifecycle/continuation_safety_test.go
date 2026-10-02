@@ -28,6 +28,11 @@ func TestContinuationSafetySnapshotTerminalEventRoundTrip(t *testing.T) {
 		var wire map[string]any
 		require.NoError(t, json.Unmarshal(raw, &wire))
 		require.Contains(t, wire, "continuation_safety", "terminal snapshot must reach lifecycle bus")
+		value, err := json.Marshal(wire["continuation_safety"])
+		require.NoError(t, err)
+		var decoded streams.ContinuationSafetySnapshot
+		require.NoError(t, json.Unmarshal(value, &decoded))
+		require.Equal(t, *snapshot, decoded)
 		return
 	}
 	t.Fatal("no agent.failed event")

@@ -8,7 +8,6 @@ import {
   type StoreSet,
 } from "./dockview-panel-actions";
 import { buildTerminalPanelActions } from "./dockview-terminal-panel-actions";
-import { PROMPT_HISTORY_PANEL_ID } from "./layout-manager/constants";
 import { panelTitle } from "./layout-manager/panel-title";
 import {
   parsePluginPanelId,
@@ -87,7 +86,7 @@ function buildTranscriptActions(set: StoreSet, get: StoreGet) {
 
 /**
  * Build the single-instance side-panel actions (plan, plugin task panel,
- * todos, prompt-history) via shared placement rules, plus
+ * todos) via shared placement rules, plus
  * `closePluginPanels` which removes every open panel contributed by a plugin.
  */
 function buildSidePanelActions(get: StoreGet) {
@@ -132,20 +131,6 @@ function buildSidePanelActions(get: StoreGet) {
         api,
         centerGroupId,
         { id: "todos", component: "todos", title: panelTitle("todos") },
-        opts,
-      );
-    },
-    addPromptHistoryPanel: (opts?: SidePanelOpts) => {
-      const { api, centerGroupId } = get();
-      if (!api) return;
-      addSidePanel(
-        api,
-        centerGroupId,
-        {
-          id: PROMPT_HISTORY_PANEL_ID,
-          component: PROMPT_HISTORY_PANEL_ID,
-          title: panelTitle(PROMPT_HISTORY_PANEL_ID),
-        },
         opts,
       );
     },

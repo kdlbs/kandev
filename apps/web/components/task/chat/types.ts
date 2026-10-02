@@ -307,6 +307,12 @@ export type StatusMetadata = {
   retry_in_seconds?: number;
   retry_at?: string;
   failure_code?: string;
+  effective_model_known?: boolean;
+  effective_model_id?: string;
+  effective_model_name?: string;
+  effective_mode_known?: boolean;
+  effective_mode_id?: string;
+  resolved_error_stamp?: string;
   // Running-only action notices are hidden once the session settles. They use
   // compact neutral presentation instead of the normal recovery/error card.
   action_visibility?: "running";

@@ -72,8 +72,15 @@ When startup or resume fails:
 
 For eligible failed Auggie ACP task sessions, the recovery card explains that
 **Resume** keeps the same conversation and skips saved mode and model overrides
-for that attempt. A successful recovery leaves a notice in chat, and the model
-and mode selectors show the provider-reported values when known.
+for that attempt. A success notice reports the provider-confirmed model name or
+ID when available. If the provider does not confirm a model, the notice makes no
+model claim. The notice confirms that the previous conversation was preserved,
+that saved selections remain unchanged for future launches, and that the
+restored permission mode may differ. A recovered failure remains in chat history
+with a **Resolved** label. A manually dismissed failure is labeled **Dismissed**
+and does not report a successful recovery. The matching failure remains
+**Resolved** even when a separate success notice is missing from the loaded chat.
+A later failure keeps its own recovery controls.
 
 ### Experimental interruption continuation
 

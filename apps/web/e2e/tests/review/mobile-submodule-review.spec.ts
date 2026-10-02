@@ -50,6 +50,9 @@ test.describe("Nested submodule Review on mobile", () => {
         hasText: /^vendor\/outer\/vendor\/inner$/,
       });
       await expect(innerLabel).toBeVisible({ timeout: 15_000 });
+      await expect
+        .poll(() => session.reviewDiffText(), { timeout: 45_000 })
+        .toContain("parent working-tree change");
       await expectStickyReviewHeaderClearance(review, "touch");
 
       const innerHeader = review

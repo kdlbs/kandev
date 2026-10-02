@@ -22,7 +22,9 @@ of the same model invocation or exactly-once tool effects. A new generic
 Use a distinct same-conversation continuation mode for positively supported
 interactive concrete profiles. It restores provider history and submits one
 new instruction to continue unfinished work. Original-prompt replay retains
-its existing no-output/no-tool fence. Continuation allows output and confirmed,
+its existing no-output/no-tool fence for Cursor without a provider retry
+guarantee; the prior decision's provider-guarantee exception remains intact.
+Continuation allows output and confirmed,
 completed read-only tools, but never state-changing, pending, or ambiguous work.
 Native restoration uses advertised `session/resume` when available, otherwise
 `session/load` with historical notifications suppressed. Kandev keeps persisted

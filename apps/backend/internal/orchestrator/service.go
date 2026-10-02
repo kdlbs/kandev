@@ -420,8 +420,8 @@ type sessionExecutorStore interface {
 	// task description is still eligible as the initial prompt.
 	HasUserPromptHistory(ctx context.Context, sessionID string) (bool, error)
 	// ClaimInitialPromptFallback atomically reserves the first prompt slot for
-	// an empty workflow-step task-description fallback.
-	ClaimInitialPromptFallback(ctx context.Context, sessionID string) (bool, error)
+	// an empty workflow-step task-description fallback in the expected incarnation.
+	ClaimInitialPromptFallback(ctx context.Context, sessionID, incarnationID string) (bool, error)
 	GetActiveTaskSessionByTaskID(ctx context.Context, taskID string) (*models.TaskSession, error)
 	ListActiveTaskSessionsByTaskID(ctx context.Context, taskID string) ([]*models.TaskSession, error)
 	SetSessionPrimary(ctx context.Context, sessionID string) error
@@ -455,6 +455,7 @@ type sessionExecutorStore interface {
 	ListExecutorsRunning(ctx context.Context) ([]*models.ExecutorRunning, error)
 	UpsertExecutorRunning(ctx context.Context, running *models.ExecutorRunning) error
 	GetExecutorRunningBySessionID(ctx context.Context, sessionID string) (*models.ExecutorRunning, error)
+	ListExecutorsRunningByTaskID(ctx context.Context, taskID string) ([]*models.ExecutorRunning, error)
 	DeleteExecutorRunningBySessionID(ctx context.Context, sessionID string) error
 	HasExecutorRunningRow(ctx context.Context, sessionID string) (bool, error)
 	UpdateResumeToken(ctx context.Context, sessionID, expectedExecID, resumeToken, lastMessageUUID string) error
@@ -1830,6 +1831,7 @@ func NewService(
 		return nil
 	})
 	exec.SetOnSessionStateTransition(s.transitionTaskSessionState)
+	exec.SetOnResumeFailureRollback(s.rollbackResumeFailureIfCurrentAttempt)
 	exec.SetOnBootstrapFailureTransition(s.transitionBootstrapFailure)
 	exec.SetOnBootstrapFailureMessageRepair(s.persistBootstrapFailureMessage)
 	exec.SetOnSessionStarting(func(

@@ -48,6 +48,20 @@ func TestInterruptionContinuationSettlementAmbiguousDispatch(t *testing.T) {
 	active, err := svc.turnService.GetActiveTurn(context.Background(), "s1")
 	require.NoError(t, err)
 	require.Nil(t, active, "recovery feedback must not create a new agent turn")
+	latest := svc.messageCreator.(*mockMessageCreator).sessionMessages
+	require.Equal(t, "replacement-1", latest[len(latest)-1].metadata["execution_id"], "manual settlement records the restored execution")
+}
+
+func TestInterruptionContinuationManualSettlementMetadataFailureIsFailed(t *testing.T) {
+	svc, _, data := continuationFailureFixture(t)
+	require.True(t, svc.handleTransientFailure(context.Background(), data))
+	value, _ := svc.transientRetries.Load("s1")
+	entry := value.(*transientRetryEntry)
+	svc.repo = continuationMetadataFailure{sessionExecutorStore: svc.repo}
+	svc.finishContinuationManual(context.Background(), "t1", "s1", "execution-1", entry)
+	session, err := svc.repo.GetTaskSession(context.Background(), "s1")
+	require.NoError(t, err)
+	require.Equal(t, models.TaskSessionStateFailed, session.State, "failed interruption persistence cannot advertise idle recovery")
 }
 
 func TestInterruptionContinuationSettlementCancelFailureIsManual(t *testing.T) {
@@ -94,4 +108,10 @@ func TestInterruptionContinuationSettlementStorageFailureNeverCompletesTurn(t *t
 	session, err := svc.repo.GetTaskSession(context.Background(), "s1")
 	require.NoError(t, err)
 	require.Equal(t, "FAILED", string(session.State))
+}
+
+type continuationMetadataFailure struct{ sessionExecutorStore }
+
+func (continuationMetadataFailure) SetSessionMetadataKey(context.Context, string, string, interface{}) error {
+	return errors.New("metadata storage unavailable")
 }

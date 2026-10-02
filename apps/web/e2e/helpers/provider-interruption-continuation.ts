@@ -17,30 +17,32 @@ export async function createContinuationFixture(
   options: { enabled?: boolean; env?: Record<string, string>; executorProfileId?: string } = {},
 ) {
   const tracePath = path.join(backend.tmpDir, `continuation-${Date.now()}.jsonl`);
-  await backend.restart({
-    ...options.env,
-    KANDEV_FEATURES_PROVIDER_INTERRUPTION_CONTINUATION: String(options.enabled ?? true),
-    KANDEV_DEBUG_PPROF_ENABLED: "true",
-  });
-  const { agents } = await apiClient.listAgents();
-  const agent = agents.find((candidate) => candidate.name === "mock-agent");
-  if (!agent) throw new Error("mock-agent was not registered");
-  const profile = await apiClient.createAgentProfile(agent.id, `Continuation ${Date.now()}`, {
-    model: "mock-fast",
-    auto_fallback: false,
-    env_vars: [{ key: "E2E_MOCK_AGENT_ACP_TRACE_FILE", value: tracePath }],
-  });
+  let profileId = "";
   let taskId = "";
   const dispose = async () => {
     try {
       if (taskId) await apiClient.deleteTask(taskId);
-      await apiClient.deleteAgentProfile(profile.id, true);
+      if (profileId) await apiClient.deleteAgentProfile(profileId, true);
     } finally {
       fs.rmSync(tracePath, { force: true });
       await backend.restart();
     }
   };
   try {
+    await backend.restart({
+      ...options.env,
+      KANDEV_FEATURES_PROVIDER_INTERRUPTION_CONTINUATION: String(options.enabled ?? true),
+      KANDEV_DEBUG_PPROF_ENABLED: "true",
+    });
+    const { agents } = await apiClient.listAgents();
+    const agent = agents.find((candidate) => candidate.name === "mock-agent");
+    if (!agent) throw new Error("mock-agent was not registered");
+    const profile = await apiClient.createAgentProfile(agent.id, `Continuation ${Date.now()}`, {
+      model: "mock-fast",
+      auto_fallback: false,
+      env_vars: [{ key: "E2E_MOCK_AGENT_ACP_TRACE_FILE", value: tracePath }],
+    });
+    profileId = profile.id;
     const task = await apiClient.createTaskWithAgent(
       seedData.workspaceId,
       `Continuation ${scenario}`,
@@ -57,7 +59,11 @@ export async function createContinuationFixture(
     if (!task.session_id) throw new Error("created task has no session ID");
     return { taskId, sessionId: task.session_id, tracePath, dispose };
   } catch (error) {
-    await dispose();
+    try {
+      await dispose();
+    } catch (cleanupError) {
+      console.warn("Continuation fixture cleanup failed", cleanupError);
+    }
     throw error;
   }
 }

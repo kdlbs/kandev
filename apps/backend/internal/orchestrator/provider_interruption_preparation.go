@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
+	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/orchestrator/watcher"
 	"github.com/kandev/kandev/internal/task/models"
 )
@@ -49,8 +50,8 @@ func (s *Service) retryContinuationPreparation(ctx context.Context, taskID, sess
 	if classified.Confidence != routingerr.ConfHigh || routingerr.Decide(routingerr.ContextKanban, classified, time.Now().UTC()) != routingerr.DecisionShortRetry {
 		return false
 	}
-	executionID, _ := s.agentManager.GetExecutionIDForSession(ctx, sessionID)
-	if executionID != "" {
+	executionID, lookupErr := s.agentManager.GetExecutionIDForSession(ctx, sessionID)
+	if executionID != "" || (lookupErr != nil && !agentruntime.IsNotFound(lookupErr) && !errors.Is(lookupErr, agentruntime.ErrNoExecutionForSession)) {
 		return false
 	}
 	guard, release := s.acquireCancelInFlightGuard(sessionID)
@@ -74,14 +75,14 @@ func (s *Service) retryContinuationPreparation(ctx context.Context, taskID, sess
 	attempt := s.nextTransientAttemptLocked(sessionID)
 	delay := transientRetryDelayFor(classified, attempt, time.Now().UTC())
 	retryAt := time.Now().UTC().Add(delay)
-	next := s.reserveTransientRetryWithMetadataLocked(state, taskID, sessionID, executionID, attempt, delay, retryAt, classified)
+	next := s.reserveTransientRetryWithMetadataLocked(state, sessionID, attempt, func(next *transientRetryEntry) {
+		next.predecessorStopped = true
+	})
 	if next == nil {
 		return false
 	}
-	next.mode = recoveryModeContinue
-	next.continuation = entry.continuation
-	next.predecessorStopped = true
 	data := watcher.AgentEventData{TaskID: taskID, SessionID: sessionID, RecoveryMode: recoveryModeContinue}
+	data.ProviderError = &streams.ProviderError{ProviderID: next.providerID, ModelID: next.modelID}
 	s.createTransientRetryStatusMessageLocked(state, context.WithoutCancel(ctx), data, classified, attempt, delay, retryAt)
 	s.armTransientRetryEntryLocked(taskID, sessionID, executionID, next, delay)
 	return true
@@ -92,7 +93,7 @@ func (s *Service) createContinuationRecoveryMessage(ctx context.Context, data wa
 	data.RecoveryAttemptsStarted = entry.started
 	entry.mu.Unlock()
 	if data.RecoveryDisposition == "" {
-		data.RecoveryDisposition = "manual"
+		data.RecoveryDisposition = recoveryDispositionManual
 		if data.RecoveryAttemptsStarted >= transientMaxAttempts {
 			data.RecoveryDisposition = "exhausted"
 		}

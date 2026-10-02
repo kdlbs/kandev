@@ -199,13 +199,13 @@ sqlguard:
 build-preview:
 	@echo "Building preview..."
 	@$(call MKDIR,$(BUILD_DIR))
-	$(GO) build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/preview$(EXE) ./cmd/preview
+	$(GO) build -trimpath $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/preview$(EXE) ./cmd/preview
 
 ## Build the mock-agent binary for testing
 build-mock-agent:
 	@echo "Building mock-agent..."
 	@$(call MKDIR,$(BUILD_DIR))
-	$(GO) build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/mock-agent$(EXE) ./cmd/mock-agent
+	$(GO) build -trimpath $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/mock-agent$(EXE) ./cmd/mock-agent
 
 ## Build the winjob helper — wraps a subprocess in a Windows Job Object so
 ## Ctrl-C at the top of the chain reliably terminates the entire subtree
@@ -216,7 +216,7 @@ build-mock-agent:
 build-winjob:
 	@echo "Building winjob..."
 	@$(call MKDIR,$(BUILD_DIR))
-	$(GO) build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/winjob$(EXE) ./cmd/winjob
+	$(GO) build -trimpath $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/winjob$(EXE) ./cmd/winjob
 
 ## Build and run acpdbg — usage: make acpdbg ARGS="probe auggie"
 acpdbg: build-acpdbg
@@ -226,7 +226,7 @@ acpdbg: build-acpdbg
 build-acpdbg:
 	@echo "Building acpdbg..."
 	@$(call MKDIR,$(BUILD_DIR))
-	$(GO) build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/acpdbg$(EXE) ./cmd/acpdbg
+	$(GO) build -trimpath $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/acpdbg$(EXE) ./cmd/acpdbg
 
 ## Build and run codexdbg — usage: make codexdbg ARGS="probe"
 codexdbg: build-codexdbg
@@ -236,7 +236,7 @@ codexdbg: build-codexdbg
 build-codexdbg:
 	@echo "Building codexdbg..."
 	@$(call MKDIR,$(BUILD_DIR))
-	$(GO) build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/codexdbg$(EXE) ./cmd/codexdbg
+	$(GO) build -trimpath $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/codexdbg$(EXE) ./cmd/codexdbg
 
 ## Build the complete development binary set.
 build: build-runtime build-mock-agent build-acpdbg build-codexdbg build-winjob
@@ -257,12 +257,12 @@ build-runtime: build-agentctl build-agentctl-remote build-kandev
 build-kandev:
 	@echo "Building $(BINARY_NAME)..."
 	@$(call MKDIR,$(BUILD_DIR))
-	$(CGO_LOCALE) $(CGO_PREFIX) $(GO) build $(GOFLAGS) -tags fts5 -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/$(BINARY_NAME)$(EXE) ./cmd/kandev
+	$(CGO_LOCALE) $(CGO_PREFIX) $(GO) build -trimpath $(GOFLAGS) -tags fts5 -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/$(BINARY_NAME)$(EXE) ./cmd/kandev
 
 ## Build all binaries (unified + individual services + agentctl)
 build-all: build build-agentctl
 	@echo "Building individual services..."
-	$(GO) build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/agent-manager$(EXE) ./cmd/agent-manager
+	$(GO) build -trimpath $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/agent-manager$(EXE) ./cmd/agent-manager
 
 ## Build the agentctl sidecar binary (includes embedded MCP server). Carries
 ## $(CGO_LOCALE) because agentctl imports cgo (unlike mock-agent/acpdbg/winjob),
@@ -270,7 +270,7 @@ build-all: build build-agentctl
 build-agentctl:
 	@echo "Building agentctl..."
 	@$(call MKDIR,$(BUILD_DIR))
-	$(CGO_LOCALE) $(GO) build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/agentctl$(EXE) ./cmd/agentctl
+	$(CGO_LOCALE) $(GO) build -trimpath $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/agentctl$(EXE) ./cmd/agentctl
 
 ## Build only the agentctl helpers needed by the development profile.
 build-agentctl-dev: $(DEV_AGENTCTL_TARGETS)
@@ -282,33 +282,33 @@ build-agentctl-remote: build-agentctl-linux build-agentctl-linux-arm64 build-age
 build-agentctl-linux:
 	@echo "Building agentctl for linux/amd64..."
 	@$(call MKDIR,$(BUILD_DIR))
-	$(GO_LINUX_AMD64) $(GO) build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/agentctl-linux-amd64 ./cmd/agentctl
+	$(GO_LINUX_AMD64) $(GO) build -trimpath $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/agentctl-linux-amd64 ./cmd/agentctl
 
 ## Build agentctl for linux/arm64 (used by ARM Linux SSH hosts, e.g. Graviton)
 build-agentctl-linux-arm64:
 	@echo "Building agentctl for linux/arm64..."
 	@$(call MKDIR,$(BUILD_DIR))
-	$(GO_LINUX_ARM64) $(GO) build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/agentctl-linux-arm64 ./cmd/agentctl
+	$(GO_LINUX_ARM64) $(GO) build -trimpath $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/agentctl-linux-arm64 ./cmd/agentctl
 
 ## Build agentctl for darwin/arm64 (used by Apple Silicon SSH hosts)
 build-agentctl-darwin-arm64:
 	@echo "Building agentctl for darwin/arm64..."
 	@$(call MKDIR,$(BUILD_DIR))
-	$(GO_DARWIN_ARM64) $(GO) build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/agentctl-darwin-arm64 ./cmd/agentctl
+	$(GO_DARWIN_ARM64) $(GO) build -trimpath $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/agentctl-darwin-arm64 ./cmd/agentctl
 	$(call adhoc_sign_darwin,$(BUILD_DIR)/agentctl-darwin-arm64)
 
 ## Build agentctl for darwin/amd64 (used by Intel Mac SSH hosts)
 build-agentctl-darwin-amd64:
 	@echo "Building agentctl for darwin/amd64..."
 	@$(call MKDIR,$(BUILD_DIR))
-	$(GO_DARWIN_AMD64) $(GO) build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/agentctl-darwin-amd64 ./cmd/agentctl
+	$(GO_DARWIN_AMD64) $(GO) build -trimpath $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/agentctl-darwin-amd64 ./cmd/agentctl
 	$(call adhoc_sign_darwin,$(BUILD_DIR)/agentctl-darwin-amd64)
 
 ## Build mock-agent for linux/amd64 (used by Docker E2E tests)
 build-mock-agent-linux:
 	@echo "Building mock-agent for linux/amd64..."
 	@$(call MKDIR,$(BUILD_DIR))
-	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 $(GO) build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/mock-agent-linux-amd64 ./cmd/mock-agent
+	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 $(GO) build -trimpath $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/mock-agent-linux-amd64 ./cmd/mock-agent
 
 
 ## Package the plugin-fixture SDK plugin (cmd/plugin-fixture) as a kandev
@@ -336,9 +336,9 @@ e2e-plugin-package: e2e-plugin-ui
 	@$(call MKDIR,$(FIXTURE_STAGE_DIR)/server)
 	cp $(FIXTURE_PACKAGE_DIR)/manifest.yaml $(FIXTURE_STAGE_DIR)/manifest.yaml
 	cp -r $(FIXTURE_PACKAGE_DIR)/ui $(FIXTURE_STAGE_DIR)/ui
-	$(GO) build $(GOFLAGS) -o $(FIXTURE_STAGE_DIR)/server/plugin-$(HOST_GOOS)-$(HOST_GOARCH)$(EXE) ./cmd/plugin-fixture
+	$(GO) build -trimpath $(GOFLAGS) -o $(FIXTURE_STAGE_DIR)/server/plugin-$(HOST_GOOS)-$(HOST_GOARCH)$(EXE) ./cmd/plugin-fixture
 	$(GO) run ./cmd/plugin-pack -dir $(FIXTURE_STAGE_DIR) -out $(FIXTURE_PACKAGE_OUT) -platform-only
-	$(GO) build $(GOFLAGS) -o .build/plugin-package-verify$(EXE) ./cmd/plugin-package-verify
+	$(GO) build -trimpath $(GOFLAGS) -o .build/plugin-package-verify$(EXE) ./cmd/plugin-package-verify
 	cd ../web && node scripts/write-e2e-plugin-identity.mjs \
 		e2e/fixtures/plugins/prompt-history-plugin/bundle.js \
 		../backend/cmd/plugin-fixture/fixture-package/ui/bundle.js \
@@ -372,7 +372,7 @@ start-debug: build
 ## Run tests
 test:
 	@echo "Running tests..."
-	$(CGO_LOCALE) $(CGO_PREFIX) $(GO) test -tags fts5 ./...
+	$(CGO_LOCALE) $(CGO_PREFIX) $(GO) test -trimpath -tags fts5 ./...
 
 ## Run only the Windows-sensitive packages — mirrors the test-windows job in
 ## .github/workflows/backend-tests.yml. The broader suite uses Unix-only
@@ -382,18 +382,20 @@ test:
 ## guards in source.
 test-windows:
 	@echo "Running Windows-sensitive packages..."
-	$(CGO_LOCALE) $(CGO_PREFIX) $(GO) test -tags fts5 -v ./internal/agentctl/server/process/... ./internal/agent/runtime/agentctl/launcher/... ./internal/backendapp/ownershiplock/... ./internal/system/storage/workspaces/...
+	$(CGO_LOCALE) $(CGO_PREFIX) $(GO) test -trimpath -tags fts5 -v ./internal/agentctl/server/process/... ./internal/agent/runtime/agentctl/launcher/... ./internal/backendapp/ownershiplock/... ./internal/system/storage/workspaces/...
+	@echo "Running Windows helper console-behavior tests..."
+	$(CGO_LOCALE) $(CGO_PREFIX) $(GO) test -trimpath -tags fts5 -v ./internal/common/subproc ./internal/agent/mcpconfig ./internal/agentctl/server/utility ./internal/agent/acpdbg ./internal/agent/codexdbg -run "^(TestWindowsPrepareGitLifecycleCommandHidesConsoleWindow|TestWindowsDetachedParentKeepsConsoleHiddenForDescendants|TestPrepareNativeMCPProcessHidesConsoleWindow|TestWindowsACPCommandProcAttrHidesConsoleWindow|TestConfigureProcessTreeHidesConsoleWindow)$$"
 	@echo "Running Windows managed runtime cache tests..."
 	# Scoped to the Windows-tagged test only: untagged tests in this package use os.Symlink
 	# which requires Developer Mode on Windows. Add new //go:build windows tests here.
-	$(CGO_LOCALE) $(CGO_PREFIX) $(GO) test -tags fts5 -v ./internal/agent/managedruntime -run TestRemoveNpxExecutionTreeTreatsMissingWindowsChildAsAbsent
+	$(CGO_LOCALE) $(CGO_PREFIX) $(GO) test -trimpath -tags fts5 -v ./internal/agent/managedruntime -run TestRemoveNpxExecutionTreeTreatsMissingWindowsChildAsAbsent
 	@echo "Running Windows port-collision tests..."
-	$(CGO_LOCALE) $(CGO_PREFIX) $(GO) test -tags fts5 -v ./internal/common/netutil -run TestIsAddrInUse
-	$(CGO_LOCALE) $(CGO_PREFIX) $(GO) test -tags fts5 -v ./internal/agentctl/server/instance -run TestAllocatePortAndListenerRetriesAddressInUse
-	$(CGO_LOCALE) $(CGO_PREFIX) $(GO) test -tags fts5 -v ./internal/gateway/websocket -run TestResolveAndBindReportsOccupiedPort
+	$(CGO_LOCALE) $(CGO_PREFIX) $(GO) test -trimpath -tags fts5 -v ./internal/common/netutil -run TestIsAddrInUse
+	$(CGO_LOCALE) $(CGO_PREFIX) $(GO) test -trimpath -tags fts5 -v ./internal/agentctl/server/instance -run TestAllocatePortAndListenerRetriesAddressInUse
+	$(CGO_LOCALE) $(CGO_PREFIX) $(GO) test -trimpath -tags fts5 -v ./internal/gateway/websocket -run TestResolveAndBindReportsOccupiedPort
 	@echo "Running Windows SQLite database path tests..."
-	$(CGO_LOCALE) $(CGO_PREFIX) $(GO) test -tags fts5 -v ./internal/system/backups -run TestVerifySnapshotOpensNativeAbsolutePath
-	$(CGO_LOCALE) $(CGO_PREFIX) $(GO) test -tags fts5 -v ./internal/task/inventoryrepair -run "^TestOpenDatabase(Reads|Writes)NativeAbsolutePath$$"
+	$(CGO_LOCALE) $(CGO_PREFIX) $(GO) test -trimpath -tags fts5 -v ./internal/system/backups -run TestVerifySnapshotOpensNativeAbsolutePath
+	$(CGO_LOCALE) $(CGO_PREFIX) $(GO) test -trimpath -tags fts5 -v ./internal/task/inventoryrepair -run "^TestOpenDatabase(Reads|Writes)NativeAbsolutePath$$"
 
 ## Verify run/dev/start-debug expand to the right per-shell command line across
 ## native Windows (cmd), Git Bash/MSYS, and Unix — the Make-target dispatch the
@@ -406,14 +408,14 @@ check-make-shells:
 ## Enable debug: KANDEV_DEBUG_AGENT_MESSAGES=true KANDEV_DEBUG_LOG_DIR=/tmp/e2e-debug
 test-e2e:
 	@echo "Running E2E adapter tests..."
-	$(GO) test -tags e2e -v -timeout 10m ./internal/agentctl/server/adapter/e2e/
+	$(GO) test -trimpath -tags e2e -v -timeout 10m ./internal/agentctl/server/adapter/e2e/
 
 ## Run sprites e2e test (requires SPRITES_API_TOKEN env var)
 ## Sprites VMs are always x86_64/amd64 regardless of host architecture.
 test-sprites-e2e: build-agentctl-linux
 	@echo "Running sprites e2e test..."
 	KANDEV_AGENTCTL_LINUX_BINARY=$(CURDIR)/$(BUILD_DIR)/agentctl-linux-amd64 \
-		$(GO) test -v -count=1 -tags sprites_e2e -run TestSpritesE2E -timeout 10m ./internal/agent/runtime/lifecycle/
+		$(GO) test -trimpath -v -count=1 -tags sprites_e2e -run TestSpritesE2E -timeout 10m ./internal/agent/runtime/lifecycle/
 
 ## Stress-run the lifecycle goleak suite — repro target for the CI-only flake
 ## where StreamManager/WorkspaceStream goroutines linger past TestMain on
@@ -425,12 +427,12 @@ test-sprites-e2e: build-agentctl-linux
 LIFECYCLE_GOLEAK_COUNT ?= 20
 test-lifecycle-goleak:
 	@echo "Stress-running lifecycle goleak suite ($(LIFECYCLE_GOLEAK_COUNT)x)..."
-	$(CGO_LOCALE) $(CGO_PREFIX) $(GO) test -tags fts5 -race -count=$(LIFECYCLE_GOLEAK_COUNT) -timeout 600s ./internal/agent/runtime/lifecycle/ ./internal/agent/runtime/agentctl/
+	$(CGO_LOCALE) $(CGO_PREFIX) $(GO) test -trimpath -tags fts5 -race -count=$(LIFECYCLE_GOLEAK_COUNT) -timeout 600s ./internal/agent/runtime/lifecycle/ ./internal/agent/runtime/agentctl/
 
 ## Run tests with coverage
 test-coverage:
 	@echo "Running tests with coverage..."
-	$(CGO_LOCALE) $(CGO_PREFIX) $(GO) test -tags fts5 -v -coverprofile=coverage.out ./...
+	$(CGO_LOCALE) $(CGO_PREFIX) $(GO) test -trimpath -tags fts5 -v -coverprofile=coverage.out ./...
 	$(GO) tool cover -html=coverage.out -o coverage.html
 
 ## Regenerate Go stubs from proto/kandev/plugin/v1/plugin.proto (§3 of
@@ -489,10 +491,10 @@ deps:
 build-cross:
 	@echo "Building for multiple platforms..."
 	@$(call MKDIR,$(BUILD_DIR))
-	CGO_ENABLED=1 GOOS=linux GOARCH=amd64 $(GO) build -tags fts5 -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/$(BINARY_NAME)-linux-amd64 ./cmd/kandev
-	CGO_ENABLED=1 GOOS=darwin GOARCH=amd64 $(GO) build -tags fts5 -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/$(BINARY_NAME)-darwin-amd64 ./cmd/kandev
-	CGO_ENABLED=1 GOOS=darwin GOARCH=arm64 $(GO) build -tags fts5 -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/$(BINARY_NAME)-darwin-arm64 ./cmd/kandev
-	CGO_ENABLED=1 GOOS=windows GOARCH=amd64 $(GO) build -tags fts5 -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/$(BINARY_NAME)-windows-amd64.exe ./cmd/kandev
+	CGO_ENABLED=1 GOOS=linux GOARCH=amd64 $(GO) build -trimpath -tags fts5 -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/$(BINARY_NAME)-linux-amd64 ./cmd/kandev
+	CGO_ENABLED=1 GOOS=darwin GOARCH=amd64 $(GO) build -trimpath -tags fts5 -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/$(BINARY_NAME)-darwin-amd64 ./cmd/kandev
+	CGO_ENABLED=1 GOOS=darwin GOARCH=arm64 $(GO) build -trimpath -tags fts5 -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/$(BINARY_NAME)-darwin-arm64 ./cmd/kandev
+	CGO_ENABLED=1 GOOS=windows GOARCH=amd64 $(GO) build -trimpath -tags fts5 -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/$(BINARY_NAME)-windows-amd64.exe ./cmd/kandev
 
 ## Show help
 help:

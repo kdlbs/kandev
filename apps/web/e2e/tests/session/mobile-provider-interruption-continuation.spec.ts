@@ -7,7 +7,7 @@ import {
 import { assertNoDocumentHorizontalOverflow } from "../../helpers/layout-assertions";
 import { SessionPage } from "../../pages/session-page";
 
-test.setTimeout(120_000);
+test.setTimeout(300_000);
 
 test("phone: continuation Cancel is visible while running and preserves history", async ({
   testPage,

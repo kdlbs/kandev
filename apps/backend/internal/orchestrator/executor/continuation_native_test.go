@@ -9,6 +9,7 @@ import (
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	"github.com/stretchr/testify/require"
 	"reflect"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -20,6 +21,9 @@ func TestContinuationNativeOnlyRestoreReturnsStartupFailure(t *testing.T) {
 	startupFailure := errors.New("dial tcp: network is unreachable")
 	started := make(chan struct{})
 	release := make(chan struct{})
+	var releaseOnce sync.Once
+	releasePrompt := func() { releaseOnce.Do(func() { close(release) }) }
+	t.Cleanup(releasePrompt)
 	mgr := &mockAgentManager{startAgentProcessFunc: func(context.Context, string) error {
 		close(started)
 		<-release
@@ -43,8 +47,13 @@ func TestContinuationNativeOnlyRestoreReturnsStartupFailure(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("restore did not start")
 	}
-	close(release)
-	got := <-completed
+	releasePrompt()
+	var got result
+	select {
+	case got = <-completed:
+	case <-time.After(5 * time.Second):
+		t.Fatal("restore did not settle")
+	}
 	require.ErrorIs(t, got.err, startupFailure, "native restore owner must receive the actual initialization failure")
 	require.NotNil(t, got.execution, "the owner needs the exact failed execution for teardown")
 	require.Equal(t, "exec-123", got.execution.AgentExecutionID)

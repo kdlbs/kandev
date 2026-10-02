@@ -80,6 +80,7 @@ type executorStore interface {
 	GetExecutor(ctx context.Context, id string) (*models.Executor, error)
 	GetExecutorProfile(ctx context.Context, id string) (*models.ExecutorProfile, error)
 	GetExecutorRunningBySessionID(ctx context.Context, sessionID string) (*models.ExecutorRunning, error)
+	ListExecutorsRunningByTaskID(ctx context.Context, taskID string) ([]*models.ExecutorRunning, error)
 	UpsertExecutorRunning(ctx context.Context, running *models.ExecutorRunning) error
 	HasExecutorRunningRow(ctx context.Context, sessionID string) (bool, error)
 	DeleteExecutorRunningBySessionID(ctx context.Context, sessionID string) error
@@ -515,9 +516,12 @@ type LaunchAgentRequest struct {
 	// AllowBranchReplacement is granted only by the explicit new-branch recovery
 	// action. It permits lifecycle to replace a confirmed missing worktree branch.
 	AllowBranchReplacement bool
-	TaskTitle              string // Human-readable task title for semantic worktree naming
-	AgentProfileID         string
-	TurnID                 string // Durable Kandev turn for the initial prompt, when present
+	// WorkspaceInventoryRecoveryReceipt is an output populated only after the
+	// guarded, server-authorized preservation repair succeeds.
+	WorkspaceInventoryRecoveryReceipt *models.WorkspaceInventoryRecoveryReceipt
+	TaskTitle                         string // Human-readable task title for semantic worktree naming
+	AgentProfileID                    string
+	TurnID                            string // Durable Kandev turn for the initial prompt, when present
 	// OfficeAgentProfileID is the stable Office identity. AgentProfileID stays
 	// the concrete execution profile inside the executor for compatibility.
 	OfficeAgentProfileID string
@@ -810,7 +814,8 @@ type TaskExecution struct {
 	WorktreePath   string
 	WorktreeBranch string
 	// PrepareResult carries the env preparation result for deferred persistence
-	PrepareResult *lifecycle.EnvPrepareResult
+	PrepareResult                     *lifecycle.EnvPrepareResult
+	WorkspaceInventoryRecoveryReceipt *models.WorkspaceInventoryRecoveryReceipt
 }
 
 // FromTaskSession converts a models.TaskSession to TaskExecution
@@ -861,6 +866,29 @@ type SessionStateTransitionFunc func(
 	errorMessage string,
 	onChanged func(),
 ) (changed bool, finalState models.TaskSessionState, err error)
+
+// ResumeCredentialSnapshotRestore describes the prior non-secret Git
+// credential-routing value. Present=false removes the key during rollback.
+type ResumeCredentialSnapshotRestore struct {
+	Value   interface{}
+	Present bool
+}
+
+// ResumeFailureRollbackRequest contains the immutable attempt identity and
+// state projection needed to roll back a failed resume atomically.
+type ResumeFailureRollbackRequest struct {
+	TaskID             string
+	SessionID          string
+	AttemptID          string
+	ExpectedState      models.TaskSessionState
+	NextState          models.TaskSessionState
+	ErrorMessage       string
+	CredentialSnapshot *ResumeCredentialSnapshotRestore
+}
+
+// ResumeFailureRollbackFunc commits an attempt-fenced resume rollback and
+// publishes its accepted session transition.
+type ResumeFailureRollbackFunc func(context.Context, ResumeFailureRollbackRequest) (bool, error)
 
 // BootstrapFailureTransitionFunc atomically commits a bootstrap error and
 // its FAILED session transition, then publishes the accepted transition.
@@ -1040,6 +1068,9 @@ type Executor struct {
 	// Strict session-state callback used by operations that need to distinguish
 	// accepted writes from terminal/no-op races.
 	onSessionStateTransition SessionStateTransitionFunc
+
+	// Attempt-fenced resume rollback callback that publishes accepted transitions.
+	onResumeFailureRollback ResumeFailureRollbackFunc
 
 	// Atomic bootstrap-failure callback used by the orchestrator to commit the
 	// typed error, FAILED state, and corresponding publication as one ownership
@@ -1424,6 +1455,12 @@ func (e *Executor) SetOnSessionStateChange(fn SessionStateChangeFunc) {
 // detailed lifecycle operations.
 func (e *Executor) SetOnSessionStateTransition(fn SessionStateTransitionFunc) {
 	e.onSessionStateTransition = fn
+}
+
+// SetOnResumeFailureRollback wires the attempt-fenced state transition and
+// event publication used when an agent resume fails after entering STARTING.
+func (e *Executor) SetOnResumeFailureRollback(fn ResumeFailureRollbackFunc) {
+	e.onResumeFailureRollback = fn
 }
 
 // SetOnBootstrapFailureTransition wires the atomic bootstrap-failure commit

@@ -100,7 +100,7 @@ Task 04 owns rendered desktop/phone proof against these structural annotations.
 ## Verification
 
 ```bash
-(cd apps/backend && go test -race -tags fts5 ./internal/orchestrator -run 'Test(InterruptionRecoveryDisposition|CreateRecoveryStatusMessage|TransientFailureLabelAndManualMessage)' -count=1)
+(cd apps/backend && go test -tags fts5 -race ./internal/orchestrator -run 'Test(InterruptionRecoveryDisposition|CreateRecoveryStatusMessage|TransientFailureLabelAndManualMessage)' -count=1)
 (cd apps/web && pnpm test -- components/task/chat/messages/interruption-recovery-feedback.test.ts components/task/chat/messages/action-message.test.tsx components/task/chat/session-recovery-model.test.ts)
 (cd apps/web && pnpm run i18n:zh-hant)
 (cd apps/web && pnpm run i18n:pseudo)
@@ -156,3 +156,5 @@ passed (39 tests), with typecheck, full web lint, and i18n checks passing.
 Rendered desktop and phone checks pass, including cancellation during RUNNING,
 neutral manual recovery, 44px touch actions, details wrapping, and no horizontal
 overflow. Task 04 records the integration matrix.
+
+PR review remediation adds localized refusal explanations, restores legacy retry live-region semantics, and gates all retry rendering on terminal visibility. The final four-file web run passes 55 tests, including fixture cleanup regressions; typecheck, focused lint, and localization checks pass.

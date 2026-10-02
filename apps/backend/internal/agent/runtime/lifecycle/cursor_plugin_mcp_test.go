@@ -393,7 +393,7 @@ func TestCursorPluginMCPNativeIdentityPreservesProjectPrecedence(t *testing.T) {
 				map[string]json.RawMessage{explicitName: json.RawMessage(`{"url":"https://explicit.example"}`)},
 				map[string]agentctltypes.McpServer{
 					"atlassian": {Name: "plugin-atlassian-atlassian", URL: "https://plugin.example"},
-				})
+				}, "localhost")
 			require.Len(t, servers, 1)
 			require.Contains(t, servers, explicitName)
 			require.Empty(t, ownership)

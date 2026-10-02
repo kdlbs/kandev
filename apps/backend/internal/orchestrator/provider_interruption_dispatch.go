@@ -137,6 +137,9 @@ func (s *Service) stopContinuationPredecessor(ctx context.Context, taskID, sessi
 	claim, claimed := s.executionTeardownClaimFor(sessionID, executionID)
 	err := s.stopTransientRetryExecution(ctx, executionID)
 	if err != nil && !agentruntime.IsNotFound(err) {
+		if claimed {
+			s.executionTeardownClaims.CompareAndDelete(terminalExecutionKey(sessionID, executionID), claim)
+		}
 		return err
 	}
 	if claimed {
@@ -162,17 +165,25 @@ func (s *Service) finishContinuationManual(ctx context.Context, taskID, sessionI
 	if !ok || current != entry {
 		return
 	}
-	s.resetTransientRetry(sessionID)
 	settlementCtx := context.WithoutCancel(ctx)
+	entry.mu.Lock()
+	if entry.restoredExecution != "" {
+		executionID = entry.restoredExecution
+	}
+	entry.mu.Unlock()
 	data := watcher.AgentEventData{TaskID: taskID, SessionID: sessionID, AgentExecutionID: executionID,
 		RecoveryMode: recoveryModeContinue, ErrorMessage: "Automatic continuation could not safely proceed. Resume or start fresh to continue."}
 	if len(disposition) > 0 {
 		data.RecoveryDisposition = disposition[0]
 	}
-	_ = s.settleContinuationInterruption(settlementCtx, data)
+	nextState := models.TaskSessionStateWaitingForInput
+	if err := s.settleContinuationInterruption(settlementCtx, data); err != nil {
+		nextState = models.TaskSessionStateFailed
+		s.logger.Warn("failed to persist interrupted continuation", zap.String("session_id", sessionID), zap.Error(err))
+	}
+	s.resetTransientRetry(sessionID)
 	_ = s.persistLastAgentError(settlementCtx, data)
 	_ = s.createContinuationRecoveryMessage(settlementCtx, data, entry)
-	nextState := models.TaskSessionStateWaitingForInput
 	if !cancelConfirmed {
 		nextState = models.TaskSessionStateFailed
 	}

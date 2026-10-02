@@ -72,8 +72,8 @@ frontend copy, and runtime toggle promotion.
 ## Verification
 
 ```bash
-(cd apps/backend && go test -race -tags fts5 ./internal/orchestrator -run 'Test(InterruptionContinuation|HandleTransientFailure.*Replay|PromptAttemptEvidence|CursorTransportLost)' -count=1)
-(cd apps/backend && go test -race ./internal/agent/runtime/lifecycle ./internal/agentctl/server/adapter/transport/acp -run 'Test(ContinuationNativeOnlyRestore|ContinuationSafetySnapshot|CursorContinuationEvidence)' -count=1)
+(cd apps/backend && go test -tags fts5 -race ./internal/orchestrator -run 'Test(InterruptionContinuation|HandleTransientFailure.*Replay|PromptAttemptEvidence|CursorTransportLost)' -count=1)
+(cd apps/backend && go test -tags fts5 -race ./internal/agent/runtime/lifecycle ./internal/agentctl/server/adapter/transport/acp -run 'Test(ContinuationNativeOnlyRestore|ContinuationSafetySnapshot|CursorContinuationEvidence)' -count=1)
 make -C apps/backend lint
 ```
 
@@ -136,3 +136,5 @@ for reconciliation and respecting accepted-runtime survival policy. Compiling
 regressions failed before each fix; scoped owner/executor race tests and lint
 pass. All seven affected desktop acceptance flows pass, including transient
 restore, cancellation, ambiguity, and restart with and without live adoption.
+
+PR review remediation initializes ownership before publication, refuses uncertain execution lookups, checks cancellation identity twice, releases failed teardown claims, and fails closed on unpersisted interruption settlement. Exact automation-turn binding, legacy cancellation, restored-execution identity, and abandoned replay startup records have passing focused race regressions.

@@ -40,12 +40,47 @@ import { useTranslation } from "react-i18next";
 import { PerRepoPullMenu } from "./changes-panel-per-repo-menu";
 import { ComparisonTargetDisplay } from "./changes-panel-comparison-target";
 import type { BranchRow, PerRepoStatus } from "./changes-panel-branch-rows";
+import {
+  ChangesPanelRefreshIndicator,
+  type ChangesPanelRefreshStatus,
+} from "./changes-panel-refresh-status";
 
 const ACTION_MENU_ITEM_CLASS = "cursor-pointer gap-2";
 const PANEL_ACTION_BUTTON_CLASS =
   "h-6 min-h-6 text-[11px] px-1.5 gap-1 cursor-pointer [@media(pointer:coarse)]:min-h-11";
 const WALKTHROUGH_LABEL_KEY = "task:walkMeThroughTheseChanges";
 const REVIEW_LABEL_KEY = "task:filterStateReview";
+
+function ChangesPanelReviewButton({
+  onOpenReview,
+  primaryOnly,
+}: {
+  onOpenReview?: () => void;
+  primaryOnly: boolean;
+}) {
+  const { t } = useTranslation();
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Button
+          size="sm"
+          variant="ghost"
+          className={PANEL_ACTION_BUTTON_CLASS}
+          aria-label={t(REVIEW_LABEL_KEY)}
+          onClick={onOpenReview}
+        >
+          <IconEye className="h-3 w-3" />
+          {primaryOnly ? (
+            <span className="hidden @[420px]/changes-panel:inline">{t(REVIEW_LABEL_KEY)}</span>
+          ) : (
+            t(REVIEW_LABEL_KEY)
+          )}
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent>{t(REVIEW_LABEL_KEY)}</TooltipContent>
+    </Tooltip>
+  );
+}
 
 export type RenameBranchResult = {
   success: boolean;
@@ -393,77 +428,81 @@ export function ChangesPanelHeaderLeft({
   onRequestWalkthrough,
   requestWalkthroughDisabled,
   primaryOnly = false,
+  refreshStatus = null,
+  hasPriorData = false,
+  failedRepositories = [],
 }: {
   showDiffReview: boolean;
   onOpenDiffAll?: () => void;
   onOpenReview?: () => void;
   onRequestWalkthrough?: () => void;
   requestWalkthroughDisabled?: boolean;
+  refreshStatus?: ChangesPanelRefreshStatus;
+  hasPriorData?: boolean;
+  failedRepositories?: string[];
   /** Keep the primary Review action available beside the overflow menu. */
   primaryOnly?: boolean;
 }) {
   const { t } = useTranslation();
-  if (!showDiffReview) return null;
+  const status = (
+    <ChangesPanelRefreshIndicator
+      status={refreshStatus}
+      hasPriorData={hasPriorData}
+      failedRepositories={failedRepositories}
+    />
+  );
   if (primaryOnly) {
     return (
       <>
-        <Button
-          size="sm"
-          variant="ghost"
-          className={`${PANEL_ACTION_BUTTON_CLASS} hidden @[350px]/changes-panel:inline-flex`}
-          aria-label={t("task:diff")}
-          onClick={onOpenDiffAll}
-        >
-          <IconGitMerge className="h-3 w-3" />
-          <span className="hidden @[420px]/changes-panel:inline">{t("task:diff")}</span>
-        </Button>
-        <Button
-          size="sm"
-          variant="ghost"
-          className={PANEL_ACTION_BUTTON_CLASS}
-          aria-label={t(REVIEW_LABEL_KEY)}
-          onClick={onOpenReview}
-        >
-          <IconEye className="h-3 w-3" />
-          <span className="hidden @[420px]/changes-panel:inline">{t(REVIEW_LABEL_KEY)}</span>
-        </Button>
-        {onRequestWalkthrough ? (
-          <ChangesPanelWalkthroughButton
-            onRequestWalkthrough={onRequestWalkthrough}
-            requestWalkthroughDisabled={requestWalkthroughDisabled}
-          />
-        ) : null}
+        {showDiffReview && (
+          <>
+            <Button
+              size="sm"
+              variant="ghost"
+              className={`${PANEL_ACTION_BUTTON_CLASS} hidden @[350px]/changes-panel:inline-flex`}
+              aria-label={t("task:diff")}
+              onClick={onOpenDiffAll}
+            >
+              <IconGitMerge className="h-3 w-3" />
+              <span className="hidden @[420px]/changes-panel:inline">{t("task:diff")}</span>
+            </Button>
+            <ChangesPanelReviewButton onOpenReview={onOpenReview} primaryOnly />
+            {onRequestWalkthrough ? (
+              <ChangesPanelWalkthroughButton
+                onRequestWalkthrough={onRequestWalkthrough}
+                requestWalkthroughDisabled={requestWalkthroughDisabled}
+              />
+            ) : null}
+          </>
+        )}
+        {status}
       </>
     );
   }
   return (
     <>
-      <Button
-        size="sm"
-        variant="ghost"
-        className={PANEL_ACTION_BUTTON_CLASS}
-        aria-label={t("task:diff")}
-        onClick={onOpenDiffAll}
-      >
-        <IconGitMerge className="h-3 w-3" />
-        {t("task:diff")}
-      </Button>
-      <Button
-        size="sm"
-        variant="ghost"
-        className={PANEL_ACTION_BUTTON_CLASS}
-        aria-label={t(REVIEW_LABEL_KEY)}
-        onClick={onOpenReview}
-      >
-        <IconEye className="h-3 w-3" />
-        {t(REVIEW_LABEL_KEY)}
-      </Button>
-      {onRequestWalkthrough ? (
-        <ChangesPanelWalkthroughButton
-          onRequestWalkthrough={onRequestWalkthrough}
-          requestWalkthroughDisabled={requestWalkthroughDisabled}
-        />
-      ) : null}
+      {showDiffReview && (
+        <>
+          <Button
+            size="sm"
+            variant="ghost"
+            className={PANEL_ACTION_BUTTON_CLASS}
+            aria-label={t("task:diff")}
+            onClick={onOpenDiffAll}
+          >
+            <IconGitMerge className="h-3 w-3" />
+            {t("task:diff")}
+          </Button>
+          <ChangesPanelReviewButton onOpenReview={onOpenReview} primaryOnly={false} />
+          {onRequestWalkthrough ? (
+            <ChangesPanelWalkthroughButton
+              onRequestWalkthrough={onRequestWalkthrough}
+              requestWalkthroughDisabled={requestWalkthroughDisabled}
+            />
+          ) : null}
+        </>
+      )}
+      {status}
     </>
   );
 }

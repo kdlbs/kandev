@@ -72,6 +72,8 @@ export function TransientRetryNotice({
   return (
     <section
       data-testid="transient-retry-card"
+      role={phase ? undefined : "status"}
+      aria-live={phase ? undefined : "polite"}
       className="flex w-full min-w-0 flex-col items-stretch gap-2 sm:flex-row sm:items-center rounded-md border border-amber-500/25 bg-amber-500/[0.06] px-2 py-1.5 sm:gap-3 sm:px-3"
     >
       {phase && (

@@ -48,9 +48,45 @@ func TestCursorContinuationEvidenceTerminalOutput(t *testing.T) {
 		var wire map[string]any
 		require.NoError(t, json.Unmarshal(raw, &wire))
 		require.Contains(t, wire, "continuation_safety", "terminal error must carry bounded safety evidence")
+		var decoded AgentEvent
+		require.NoError(t, json.Unmarshal(raw, &decoded))
+		require.True(t, decoded.ContinuationSafety.SafeFor(7))
 		return
 	}
 	t.Fatal("missing terminal error")
+}
+
+func TestCursorContinuationEvidenceRPCFailureRetiresAsyncCompletion(t *testing.T) {
+	a, fake, _ := setupHandoffFakeAgent(t)
+	a.agentID = mockAgentID
+	a.dialect = newACPDialect(mockAgentID)
+	a.cfg.ProviderInterruptionContinuation = true
+	fake.promptFailure = &acpsdk.RequestError{Code: -32603, Message: "peer disconnected before response", Data: map[string]any{"kandevMock": map[string]any{"continuationInterruption": true}}}
+	require.NoError(t, a.Initialize(t.Context()))
+	a.capabilities.LoadSession = true
+	_, err := a.NewSession(t.Context(), nil)
+	require.NoError(t, err)
+	done := make(chan error, 1)
+	go func() { done <- a.Prompt(t.Context(), "test", nil, 7) }()
+	select {
+	case <-fake.entered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("prompt not accepted")
+	}
+	a.asyncTurnMu.Lock()
+	a.asyncTurnFinalizers["session-handoff"] = &asyncTurnFinalizer{seq: 1, promptEpoch: a.asyncTurnEpochs["session-handoff"]}
+	a.asyncTurnMu.Unlock()
+	fake.releasePrompts()
+	select {
+	case err := <-done:
+		require.NoError(t, err)
+	case <-time.After(2 * time.Second):
+		t.Fatal("prompt did not settle")
+	}
+	a.asyncTurnMu.Lock()
+	_, scheduled := a.asyncTurnFinalizers["session-handoff"]
+	a.asyncTurnMu.Unlock()
+	require.False(t, scheduled, "a terminal interruption cannot retain an idle-success finalizer")
 }
 
 // @covers AC-PLATFORM-INTERRUPTION-CONTINUATION-001.2
@@ -132,4 +168,14 @@ func TestCursorContinuationEvidenceOverflow(t *testing.T) {
 	}
 	require.False(t, a.continuationSafetySnapshot(turn).SafeFor(7))
 	require.LessOrEqual(t, len(turn.continuationTools), 256)
+}
+
+func TestCursorContinuationEvidencePermissionSessionFence(t *testing.T) {
+	a, turn := newCursorPromptTurn(t, 7)
+	a.cfg.ProviderInterruptionContinuation = true
+	a.capabilities.LoadSession = true
+	a.sessionID = "current-session"
+	_, err := a.handlePermissionRequest(t.Context(), &PermissionRequest{SessionID: "predecessor-session", ToolCallID: "old-tool"})
+	require.NoError(t, err)
+	require.True(t, a.continuationSafetySnapshot(turn).SafeFor(7), "a different session cannot poison the current safety ledger")
 }

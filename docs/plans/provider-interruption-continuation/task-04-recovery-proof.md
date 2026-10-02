@@ -77,9 +77,9 @@ generic full-suite verification.
 ## Verification
 
 ```bash
-(cd apps/backend && go test -race ./cmd/mock-agent ./internal/agentctl/server/adapter/transport/acp -run 'Test(MockInterruptionContinuation|CursorContinuationEvidence|ContinuationNativeOnlyRestore)' -count=1)
-(cd apps/web && pnpm e2e:run --project chromium tests/session/provider-interruption-continuation.spec.ts tests/session/transient-retry.spec.ts tests/session/transient-retry-transport-lost.spec.ts)
-(cd apps/web && pnpm e2e:run --project mobile-chrome tests/session/mobile-provider-interruption-continuation.spec.ts tests/session/mobile-transient-retry.spec.ts)
+(cd apps/backend && go test -tags fts5 -race ./cmd/mock-agent ./internal/agentctl/server/adapter/transport/acp ./internal/agent/runtime/lifecycle ./internal/orchestrator/executor ./internal/backendapp -run 'Test(MockInterruptionContinuation|CursorContinuationEvidence|ContinuationNativeOnlyRestore)' -count=1)
+(cd apps/web && pnpm e2e:run --docker --project chromium tests/session/provider-interruption-continuation.spec.ts tests/session/transient-retry.spec.ts tests/session/transient-retry-transport-lost.spec.ts)
+(cd apps/web && pnpm e2e:run --docker --project mobile-chrome tests/session/mobile-provider-interruption-continuation.spec.ts tests/session/mobile-transient-retry.spec.ts)
 ```
 
 Run project commands sequentially. Managed runner rebuilds production assets and
@@ -140,3 +140,5 @@ Integration failures produced compiling regressions before production fixes:
 startup error ownership, stopped-executor grace, accepted context lifetime,
 shutdown notice persistence, and finishing startup ownership at acceptance.
 Scoped race tests and final desktop integration checks pass after these fixes.
+
+PR review remediation covers fixture prefix dispatch, cancellation, episode cleanup, setup-error preservation, and failed native-restore worktree release. Focused race tests pass. The real checkout-release regression passes in Linux Docker; macOS sandbox checkout restrictions prevented reaching that boundary on the host.

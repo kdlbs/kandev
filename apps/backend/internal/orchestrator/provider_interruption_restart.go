@@ -69,6 +69,13 @@ func (s *Service) retireInterruptedNoticeOnStartup(ctx context.Context, session 
 			return
 		}
 	}
+	if len(notices) > 0 && session.State == models.TaskSessionStateWaitingForInput {
+		data := watcher.AgentEventData{TaskID: session.TaskID, SessionID: session.ID,
+			AttemptID: "replay-restart:" + notices[0].ID, RecoveryDisposition: "restart_interrupted",
+			ErrorMessage: "Automatic provider retries were interrupted by a backend restart. Resume or start fresh to continue."}
+		_ = s.persistLastAgentError(ctx, data)
+		_ = s.createRecoveryStatusMessage(ctx, data, "")
+	}
 }
 
 func (s *Service) settleRestartedContinuation(ctx context.Context, session *models.TaskSession, notice *models.Message) {

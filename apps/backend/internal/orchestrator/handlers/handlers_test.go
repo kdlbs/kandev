@@ -39,6 +39,16 @@ func TestWsRecoverSessionCancelRetryReportsServiceResult(t *testing.T) {
 	require.False(t, payload.Cancelled)
 }
 
+func TestWsRecoverWorkspaceInventoryRequiresIdempotencyKeyBeforeServiceAccess(t *testing.T) {
+	handlers := setupOrchestratorHandlers(t)
+	response, err := handlers.wsRecoverSession(context.Background(), createTestMessage(t, ws.ActionSessionRecover, map[string]interface{}{
+		"task_id": "t1", "session_id": "s1", "action": "repair_workspace_inventory",
+	}))
+	require.NoError(t, err)
+	payload := parseError(t, response)
+	require.Equal(t, ws.ErrorCodeValidation, payload.Code)
+}
+
 func TestWsRecoverSessionValidatesSettingsPolicyAndOriginalAction(t *testing.T) {
 	handlers := setupOrchestratorHandlers(t)
 	tests := []struct {
@@ -48,6 +58,7 @@ func TestWsRecoverSessionValidatesSettingsPolicyAndOriginalAction(t *testing.T) 
 	}{
 		{name: "unsupported policy", action: "resume", policy: "future_policy"},
 		{name: "runtime retry alias", action: "runtime_retry", policy: "provider_restored"},
+		{name: "inventory repair", action: "repair_workspace_inventory", policy: "provider_restored"},
 		{name: "branch replacement", action: "resume_new_branch", policy: "provider_restored"},
 		{name: "cancel retry", action: "cancel_retry", policy: "provider_restored"},
 	}
@@ -58,6 +69,7 @@ func TestWsRecoverSessionValidatesSettingsPolicyAndOriginalAction(t *testing.T) 
 				"session_id":      "session-1",
 				"action":          tt.action,
 				"settings_policy": tt.policy,
+				"idempotency_key": "inventory-repair",
 			}))
 			require.NoError(t, err)
 			require.Equal(t, ws.ErrorCodeValidation, parseError(t, response).Code)
@@ -207,4 +219,15 @@ func TestWsRespondToPermissionRequiresTaskAndRequestIdentity(t *testing.T) {
 			require.Equal(t, test.want, payload.Message)
 		})
 	}
+}
+
+func TestWsRecoverRelocationRequiresErrorStampBeforeServiceAccess(t *testing.T) {
+	handlers := setupOrchestratorHandlers(t)
+	response, err := handlers.wsRecoverSession(context.Background(), createTestMessage(t, ws.ActionSessionRecover, map[string]interface{}{
+		"task_id": "t1", "session_id": "s1", "action": "relocate_and_resume",
+	}))
+	require.NoError(t, err)
+	payload := parseError(t, response)
+	require.Equal(t, ws.ErrorCodeValidation, payload.Code)
+	require.Contains(t, payload.Message, "error_stamp")
 }

@@ -164,5 +164,9 @@
   "continuationPhase_waiting": "Ŵàĩţĩńĝ ţō ŕēćōńńēćţ.",
   "continuationPhase_reconnecting": "Ŕēćōńńēćţĩńĝ...",
   "continuationPhase_continuing": "Ćōńţĩńũĩńĝ ƥŕēvĩōũś ŕēqũēśţ...",
-  "continuationHistoryPreserved": "Ƥŕēvĩōũś ćōńvēŕśàţĩōń ĩś ƥŕēśēŕvēď."
+  "continuationHistoryPreserved": "Ƥŕēvĩōũś ćōńvēŕśàţĩōń ĩś ƥŕēśēŕvēď.",
+  "providerRecoveryDisabledBody": "Àũţōḿàţĩć ćōńţĩńũàţĩōń ĩś ďĩśàƀĺēď. Ŕēśũḿē ţō ţŕŷ àĝàĩń, ōŕ śţàŕţ à ƒŕēśĥ śēśśĩōń.",
+  "providerRecoveryUnsafeBody": "Àũţōḿàţĩć ćōńţĩńũàţĩōń śţōƥƥēď ƀēćàũśē àń àćţĩōń ĩś ƥēńďĩńĝ ōŕ ĩţś ōũţćōḿē ĩś ũńćēŕţàĩń. Ŕēvĩēŵ ţĥē ŵōŕķ ƀēƒōŕē ŕēśũḿĩńĝ.",
+  "providerRecoveryUnsupportedBody": "Ţĥĩś àĝēńţ ćàńńōţ àũţōḿàţĩćàĺĺŷ ŕēśţōŕē ţĥē ĩńţēŕŕũƥţēď ćōńvēŕśàţĩōń. Ŕēśũḿē ţō ţŕŷ àĝàĩń, ōŕ śţàŕţ à ƒŕēśĥ śēśśĩōń.",
+  "providerRecoveryEvidenceBody": "Àũţōḿàţĩć ćōńţĩńũàţĩōń śţōƥƥēď ƀēćàũśē ćōńvēŕśàţĩōń ĩďēńţĩţŷ ōŕ śàƒēţŷ ēvĩďēńćē ĩś ḿĩśśĩńĝ. Ŕēvĩēŵ ţĥē ŵōŕķ ƀēƒōŕē ŕēśũḿĩńĝ."
 }

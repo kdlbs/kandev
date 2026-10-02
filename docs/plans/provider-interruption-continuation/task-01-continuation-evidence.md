@@ -68,9 +68,9 @@ with only the minimum existing credential access, never copy/log credentials.
 
 ```bash
 cursor-agent --version
-(cd apps/backend && KANDEV_TEST_CURSOR_NATIVE_CONTINUATION=1 go test -race ./internal/agent/runtime/lifecycle -run '^TestCursorNativeConversationRestore$' -count=1 -v)
-(cd apps/backend && KANDEV_TEST_CURSOR_NATIVE_CONTINUATION=1 go test -race ./internal/agent/runtime/lifecycle -run '^TestCursorNative(AbruptDisconnectRestore|SessionResume)$' -count=1 -v)
-(cd apps/backend && go test -race ./internal/agentctl/server/adapter/transport/acp ./internal/agentctl/types/streams ./internal/agent/runtime/lifecycle ./internal/orchestrator/watcher -run 'Test(CursorContinuationEvidence|ContinuationSafetySnapshot|ContinuationConfig)' -count=1)
+(cd apps/backend && KANDEV_TEST_CURSOR_NATIVE_CONTINUATION=1 go test -tags fts5 -race ./internal/agent/runtime/lifecycle -run '^TestCursorNativeConversationRestore$' -count=1 -v)
+(cd apps/backend && KANDEV_TEST_CURSOR_NATIVE_CONTINUATION=1 go test -tags fts5 -race ./internal/agent/runtime/lifecycle -run '^TestCursorNative(AbruptDisconnectRestore|SessionResume)$' -count=1 -v)
+(cd apps/backend && go test -tags fts5 -race ./internal/agentctl/server/adapter/transport/acp ./internal/agentctl/types/streams ./internal/agent/runtime/lifecycle ./internal/orchestrator/watcher -run 'Test(CursorContinuationEvidence|ContinuationSafetySnapshot|ContinuationConfig)' -count=1)
 (cd apps/backend && go test ./internal/runtimeflags ./internal/common/config ./internal/profiles)
 (cd apps && pnpm --filter @kandev/web test -- lib/state/slices/features/features-contract.test.ts)
 ```
@@ -139,3 +139,5 @@ Task 02 is implemented and its affected desktop integration checks pass.
 - [x] Run the exact Task 01 checks and record results before starting Task 02.
 
 The strengthened native read continuation assertion passed for deliberate cancellation and abrupt process loss. Typed bounded safety evidence, terminal lifecycle and watcher JSON propagation, old-helper omission, managed startup/instance/adapter flag inheritance, and all-off registry/profile/frontend contracts passed focused tests with race detection. Scoped lint reported zero issues. Native `session/resume` returned `-32601`; production restoration already prefers an advertised resume method and suppresses `session/load` history replay. Task 02 is complete; the flag remains off.
+
+PR review remediation fences foreign-session permissions, retires async finalizers on attested terminal RPC errors, and verifies complete snapshot serialization. Focused ACP and lifecycle race tests pass. The live Cursor probes have stronger assertions but were not rerun during fixup.

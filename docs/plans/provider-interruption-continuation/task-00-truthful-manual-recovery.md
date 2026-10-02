@@ -66,12 +66,12 @@ sizes; no new focus behavior, surface or control is introduced.
 ## Verification
 
 ```bash
-(cd apps/backend && go test -race -tags fts5 ./internal/orchestrator -run 'Test(InterruptionRecoveryDisposition|CreateRecoveryStatusMessage|TransientFailureLabelAndManualMessage|HandleTransientFailure_)' -count=1)
+(cd apps/backend && go test -tags fts5 -race ./internal/orchestrator -run 'Test(InterruptionRecoveryDisposition|CreateRecoveryStatusMessage|TransientFailureLabelAndManualMessage|HandleTransientFailure_)' -count=1)
 (cd apps/backend && golangci-lint run ./internal/orchestrator ./internal/agent/runtime/lifecycle --timeout=5m)
 (cd apps/web && pnpm test -- components/task/chat/session-recovery-model.test.ts components/task/chat/messages/action-message.test.tsx)
 (cd apps/web && pnpm run typecheck && pnpm run lint && pnpm run i18n:check)
-(cd apps/web && pnpm e2e:run --host --project chromium tests/session/transient-retry.spec.ts --grep 'Cancel stops' --retries=0)
-(cd apps/web && pnpm e2e:run --host --no-build --project mobile-chrome tests/session/mobile-transient-retry.spec.ts --retries=0)
+(cd apps/web && pnpm e2e:run --docker --project chromium tests/session/transient-retry.spec.ts --grep 'Cancel stops' --retries=0)
+(cd apps/web && pnpm e2e:run --docker --no-build --project mobile-chrome tests/session/mobile-transient-retry.spec.ts --retries=0)
 ```
 
 The second managed browser run reuses the first run's freshly built artifacts.
@@ -105,3 +105,5 @@ neutral copy and retain technical details. Phone cancellation passes in the
 focused mobile run. Docker browser verification replaces the earlier host
 Chromium launch failure; the implementation does not depend on host browser
 permissions.
+
+PR review remediation adds typed refusal reasons for disabled recovery, unsafe work, unsupported restore, and missing evidence. Focused backend recovery tests and the rendered consumer tests pass; terminal sessions no longer retain retry feedback.

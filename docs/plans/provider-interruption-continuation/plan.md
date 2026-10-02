@@ -81,14 +81,14 @@ Register `features.providerInterruptionContinuation` with environment
 and restart-required experimental metadata. Update typed config, runtimeflags,
 frontend defaults, agentctl configuration, and contract tests together.
 
-| Compatibility shape | Recovery | Required evidence/fallback |
-| --- | --- | --- |
-| Cursor ACP native identity; no tool work | Same-conversation continuation after output | Native restore probe plus fixture; missing identity is manual |
-| Cursor ACP tested `read` kind; all tools completed | Same-conversation continuation | Native read contract plus outcome fixture; titles/search heuristics excluded |
-| Write, execute, MCP, pending read, subagent, background, permission | Manual recovery | Negative fixtures and sticky episode safety |
-| Other adapter or old remote fields absent | Existing replay/manual behavior | Remote JSON round-trip/omission tests |
-| Dynamic, Office, utility, passthrough | Existing policy owner | Regression tests |
-| Controlled mock dialect | Test-only support | Provenance-gated fixture; never inherited by production dialects |
+| Compatibility shape                                                 | Recovery                                    | Required evidence/fallback                                                   |
+| ------------------------------------------------------------------- | ------------------------------------------- | ---------------------------------------------------------------------------- |
+| Cursor ACP native identity; no tool work                            | Same-conversation continuation after output | Native restore probe plus fixture; missing identity is manual                |
+| Cursor ACP tested `read` kind; all tools completed                  | Same-conversation continuation              | Native read contract plus outcome fixture; titles/search heuristics excluded |
+| Write, execute, MCP, pending read, subagent, background, permission | Manual recovery                             | Negative fixtures and sticky episode safety                                  |
+| Other adapter or old remote fields absent                           | Existing replay/manual behavior             | Remote JSON round-trip/omission tests                                        |
+| Dynamic, Office, utility, passthrough                               | Existing policy owner                       | Regression tests                                                             |
+| Controlled mock dialect                                             | Test-only support                           | Provenance-gated fixture; never inherited by production dialects             |
 
 ### Recovery owner
 
@@ -187,16 +187,16 @@ attempts started. Details expand inline and wrap. Maps to `.003.2` and `.003.4`.
 
 The implementation tests below provide delivery evidence.
 
-| Criteria (prefix `AC-PLATFORM-INTERRUPTION-CONTINUATION-`) | Evidence |
-| --- | --- |
-| `001.1`, `001.2`, `001.5` | `dialect_cursor_continuation_test.go`: `TestCursorContinuationEvidence`; native restore test; remote omission and sweep ordering |
-| `001.3`, `001.4` | Continuation admission/refusal and native-only lifecycle/executor tests; missing native identity is covered at the repository/lifecycle boundary; existing replay-safety tests |
-| `002.1` | `TestInterruptionContinuationBudget`: five attempts shared with transient restore failures and no progress reset |
-| `002.2` | `TestInterruptionContinuationOwnership`: timer, restore, admission, dispatch, teardown, queued human work, and multi-viewer races |
-| `002.3`, `003.3` | `TestInterruptionContinuationRestart`: shutdown, stale persisted notice, adopted live execution, and cleanup failure |
-| `002.4` | `TestInterruptionContinuationSettlement`: interrupted turn, queue, workflow, CI outcome, and one successful completion |
-| `002.5` | Registry/profile/features tests and `TestInterruptionContinuationDisabled`: no collection or dispatch on all entry paths |
-| `003.1`, `003.2`, `003.4` | Backend disposition tests and `interruption-recovery-feedback.test.ts`; existing action-message and recovery-model tests |
+| Criteria (prefix `AC-PLATFORM-INTERRUPTION-CONTINUATION-`) | Evidence                                                                                                                                                                       |
+| ---------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `001.1`, `001.2`, `001.5`                                  | `dialect_cursor_continuation_test.go`: `TestCursorContinuationEvidence`; native restore test; remote omission and sweep ordering                                               |
+| `001.3`, `001.4`                                           | Continuation admission/refusal and native-only lifecycle/executor tests; missing native identity is covered at the repository/lifecycle boundary; existing replay-safety tests |
+| `002.1`                                                    | `TestInterruptionContinuationBudget`: five attempts shared with transient restore failures and no progress reset                                                               |
+| `002.2`                                                    | `TestInterruptionContinuationOwnership`: timer, restore, admission, dispatch, teardown, queued human work, and multi-viewer races                                              |
+| `002.3`, `003.3`                                           | `TestInterruptionContinuationRestart`: shutdown, stale persisted notice, adopted live execution, and cleanup failure                                                           |
+| `002.4`                                                    | `TestInterruptionContinuationSettlement`: interrupted turn, queue, workflow, CI outcome, and one successful completion                                                         |
+| `002.5`                                                    | Registry/profile/features tests and `TestInterruptionContinuationDisabled`: no collection or dispatch on all entry paths                                                       |
+| `003.1`, `003.2`, `003.4`                                  | Backend disposition tests and `interruption-recovery-feedback.test.ts`; existing action-message and recovery-model tests                                                       |
 
 ## E2E tests
 
@@ -207,15 +207,15 @@ contract. Set the toggle through `backend.restart(overrides)`; inherited
 `KANDEV_FEATURES_*` values are stripped by the fixture. Restore baseline after
 each scenario and never alter the shipped e2e profile default.
 
-| Flow | Criteria |
-| --- | --- |
-| Output-only and completed-read interruption, native identity retained, no original-prompt resend, partial history preserved, eventual success | `001.1`-`001.5`, `002.4`, `003.1`, `003.3` |
-| Pending read, write, or unknown tool enters manual recovery without false exhaustion; missing restore identity is checked in repository/lifecycle tests | `001.2`, `001.3`, `003.2` |
-| Restore fails transiently then succeeds; hard/ambiguous restore stops | `001.5`, `002.1` |
-| Cancel waiting, cancel dispatched continuation, queued user prompt supersedes, two viewers do not duplicate dispatch | `002.2`, `003.3` |
-| Reload during accepted continuation, persisted manual state after cleanup, backend restart without redispatch, live adoption preserved | `002.3`, `003.3` |
-| Disabled toggle keeps prior behavior and truthful failure copy | `002.5`, `003.2` |
-| Phone Cancel and manual actions have 44px targets; expanded details wrap; no horizontal overflow | `003.4` |
+| Flow                                                                                                                                                    | Criteria                                   |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------ |
+| Output-only and completed-read interruption, native identity retained, no original-prompt resend, partial history preserved, eventual success           | `001.1`-`001.5`, `002.4`, `003.1`, `003.3` |
+| Pending read, write, or unknown tool enters manual recovery without false exhaustion; missing restore identity is checked in repository/lifecycle tests | `001.2`, `001.3`, `003.2`                  |
+| Restore fails transiently then succeeds; hard/ambiguous restore stops                                                                                   | `001.5`, `002.1`                           |
+| Cancel waiting, cancel dispatched continuation, queued user prompt supersedes, two viewers do not duplicate dispatch                                    | `002.2`, `003.3`                           |
+| Reload during accepted continuation, persisted manual state after cleanup, backend restart without redispatch, live adoption preserved                  | `002.3`, `003.3`                           |
+| Disabled toggle keeps prior behavior and truthful failure copy                                                                                          | `002.5`, `003.2`                           |
+| Phone Cancel and manual actions have 44px targets; expanded details wrap; no horizontal overflow                                                        | `003.4`                                    |
 
 Record provider session ID and dispatched prompt count through bounded mock
 evidence/API state, in addition to UI assertions. Arm causal observations before
@@ -297,6 +297,40 @@ race tests and web typecheck pass; this is an internal boundary correction
 without a product-contract change. A shorter focused run also exposed mock
 fixture lifetime cleanup; accepted mock contexts are now explicitly released
 at test teardown without changing production shutdown survival policy.
+
+## PR review remediation
+
+PR #4165 reconciles the main-branch workspace and startup recovery contracts.
+Focused race regressions verify atomic owner publication, uncertain lookup
+refusal, cancellation identity fencing, automation turn binding, failed stop
+claim release, interrupted-turn persistence, and replay notice retirement.
+Adapter regressions cover terminal finalizer retirement and foreign-session
+permissions. All focused backend checks and scoped lint pass. Linux Docker
+also verifies failed native restore reports both startup and worktree-release
+errors; the macOS sandbox could not reach that checkout boundary.
+
+The final web unit run passes 55 tests across the recovery consumers and fixture
+cleanup. Typecheck, localization including Korean, focused lint, catalog/spec
+lint, public-doc validation, and actual changed-file reference checks pass.
+Live Cursor assertions were strengthened but those opt-in probes were not
+rerun in review fixup.
+
+Fresh Docker desktop verification passes 10 checks: nine recovery scenarios and
+one capture. The phone rerun passes all three checks: continuation cancellation,
+legacy retry cancellation, and capture. Its initial failure was a stale legacy
+cancellation-copy expectation; desktop and phone assertions now use the typed
+localized recovery wording. Each run uses one worker and the same production
+build, without intervening production changes.
+
+```bash
+# From apps/web; run these sequentially.
+pnpm e2e:run --docker --shards 1 --project chromium tests/session/provider-interruption-continuation.spec.ts --grep 'integration:|accepted continuation|read-ambiguous|requires manual recovery'
+pnpm e2e:run --docker --no-build --shards 1 --project mobile-chrome tests/session/mobile-provider-interruption-continuation.spec.ts tests/session/mobile-transient-retry.spec.ts
+```
+
+Disposable capture specs add one check per viewport and are removed before
+commit. Phone coverage is Pixel 5 browser emulation; no physical-device or real
+Wi-Fi-change validation is claimed. The continuation toggle remains off.
 
 ## Remaining risks
 

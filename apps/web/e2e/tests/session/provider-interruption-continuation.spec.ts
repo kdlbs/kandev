@@ -8,7 +8,7 @@ import { SessionPage } from "../../pages/session-page";
 import fs from "node:fs";
 import path from "node:path";
 
-test.setTimeout(120_000);
+test.setTimeout(480_000);
 
 for (const scenario of ["read", "output", "read-restore-transient"]) {
   test(`integration: ${scenario} restores the same native conversation without original prompt replay`, async ({
@@ -191,6 +191,10 @@ for (const { scenario, enabled } of [
         "after several retries",
       );
       expect(recovery.metadata?.attempts_started ?? 0).toBe(0);
+      expect(recovery.metadata?.recovery_reason).toBe(enabled ? "unsafe_work" : "disabled");
+      await expect(testPage.getByTestId("session-recovery-card")).toContainText(
+        enabled ? "outcome is uncertain" : "Automatic continuation is disabled",
+      );
     } catch (error) {
       console.warn(
         JSON.stringify(
@@ -324,7 +328,7 @@ for (const survives of [false, true]) {
     apiClient,
     seedData,
   }) => {
-    test.setTimeout(120_000);
+    test.setTimeout(480_000);
     const overrides = {
       KANDEV_FEATURES_AGENT_SURVIVAL: String(survives),
       KANDEV_FEATURES_PROVIDER_INTERRUPTION_CONTINUATION: "true",

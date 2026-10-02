@@ -164,5 +164,9 @@
   "continuationPhase_waiting": "等待重新连接。",
   "continuationPhase_reconnecting": "正在重新连接...",
   "continuationPhase_continuing": "正在继续之前的请求...",
-  "continuationHistoryPreserved": "之前的对话会保留。"
+  "continuationHistoryPreserved": "之前的对话会保留。",
+  "providerRecoveryDisabledBody": "自动继续已禁用。恢复以重试，或启动新会话。",
+  "providerRecoveryUnsafeBody": "自动继续已停止，因为某项操作尚未完成或其结果不确定。请先检查工作，再恢复会话。",
+  "providerRecoveryUnsupportedBody": "此代理无法自动恢复中断的对话。恢复以重试，或启动新会话。",
+  "providerRecoveryEvidenceBody": "自动继续已停止，因为缺少对话标识或安全信息。请先检查工作，再恢复会话。"
 }

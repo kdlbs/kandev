@@ -39,7 +39,7 @@ func TestInterruptionRecoveryDisposition_NoRetryDoesNotClaimExhaustion(t *testin
 			require.NoError(t, svc.createRecoveryStatusMessage(context.Background(), data, ""))
 			require.Len(t, mc.sessionMessages, 1)
 			message := mc.sessionMessages[0]
-			require.NotContains(t, message.content, "after several retries")
+			require.Equal(t, "Agent connection lost. Resume to try again, or start a fresh session.", message.content)
 			require.Equal(t, "provider_interrupted", message.metadata["failure_kind"])
 			require.Equal(t, true, message.metadata["recovery_actions"])
 			require.NotEmpty(t, message.metadata["error_output"])

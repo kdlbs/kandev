@@ -44,9 +44,15 @@ func installContinuationRestoreFixture(t *testing.T, svc *Service) *mockAgentMan
 	mgr.isAgentReadyFn = func(context.Context, string) bool { return true }
 	mgr.launchAgentFunc = func(_ context.Context, req *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error) {
 		now := time.Now().UTC()
-		require.NoError(t, svc.repo.UpsertExecutorRunning(context.Background(), &models.ExecutorRunning{ID: "replacement-runtime", TaskID: "t1", SessionID: "s1", AgentExecutionID: "replacement-1", ResumeToken: "provider-session", Resumable: true, CreatedAt: now, UpdatedAt: now}))
+		if err := svc.repo.UpsertExecutorRunning(context.Background(), &models.ExecutorRunning{ID: "replacement-runtime", TaskID: "t1", SessionID: "s1", AgentExecutionID: "replacement-1", ResumeToken: "provider-session", Resumable: true, CreatedAt: now, UpdatedAt: now}); err != nil {
+			t.Errorf("persist restore fixture: %v", err)
+			return nil, err
+		}
 		_, _, err := svc.repo.UpdateTaskSessionStateIfCurrent(context.Background(), req.SessionID, models.TaskSessionStateStarting, models.TaskSessionStateWaitingForInput, "")
-		require.NoError(t, err)
+		if err != nil {
+			t.Errorf("park restore fixture: %v", err)
+			return nil, err
+		}
 		return &executor.LaunchAgentResponse{AgentExecutionID: "replacement-1"}, nil
 	}
 	return mgr

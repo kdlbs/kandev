@@ -276,7 +276,7 @@ func TestWorkflowEntrySavedPrompt_TrustGuards(t *testing.T) {
 			}
 
 			step := &wfmodels.WorkflowStep{ID: "step-guard", WorkflowID: "wf1", Prompt: test.prompt}
-			prompt, trustedContext, err := svc.buildWorkflowEntryPrompt(ctx, "", step, "task-guard", "session-guard", test.passthrough)
+			prompt, trustedContext, err := svc.buildWorkflowEntryPrompt(ctx, "", step, "task-guard", "session-guard", "", test.passthrough)
 			require.NoError(t, err)
 			if test.visible != "" {
 				require.Contains(t, prompt, test.visible)
@@ -318,7 +318,7 @@ func TestWorkflowEntrySavedPrompt_Composition(t *testing.T) {
 	}
 
 	prompt, trustedContext, err := svc.buildWorkflowEntryPrompt(
-		ctx, "Inspect @workflow-rule.", step, "task-composition", "session-composition", false,
+		ctx, "Inspect @workflow-rule.", step, "task-composition", "session-composition", "", false,
 	)
 	require.NoError(t, err)
 	require.NotEmpty(t, trustedContext)
@@ -377,7 +377,7 @@ func TestWorkflowEntrySavedPrompt_Recovery(t *testing.T) {
 	svc.promptExpander = promptService
 
 	composedPrompt, trustedContext, err := svc.buildWorkflowEntryPrompt(
-		ctx, dbTask.Description, step, taskID, sessionID, false,
+		ctx, dbTask.Description, step, taskID, sessionID, "", false,
 	)
 	require.NoError(t, err)
 	require.NotEmpty(t, trustedContext)

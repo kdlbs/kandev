@@ -83,7 +83,7 @@ synthetic existing backend trigger to force reference validation; do not claim
 it is a production change. After implementation use actual changed paths.
 No GitHub publication/status write is necessary for this local preflight.
 
-Repeatable design-package reference check from repo root:
+Repeatable implementation-package reference check from repo root:
 
 ```bash
 node <<'JS'
@@ -99,7 +99,7 @@ const references = [
 ];
 const fileContents = Object.fromEntries([...docs, ...references]
   .map(filename => [filename, fs.readFileSync(filename, 'utf8')]));
-// Synthetic existing trigger forces document validation; no code change implied.
+// The implemented package changes this existing backend path.
 const changedFiles = [...docs,
   'apps/backend/internal/orchestrator/event_handlers_transient.go'];
 const result = validateCoverage({ changedFiles, fileContents });
@@ -149,3 +149,8 @@ lint, and public-doc validation pass. Actual changed-file coverage validates all
 contracts. Requirements are active, the design is current, the decision is
 accepted, and all work orders are complete. The toggle remains off and changes
 are prepared for publication; no deployment or live-session mutation was performed.
+
+Physical phone testing was unavailable. Phone results use Pixel 5 emulation;
+no physical-device validation or associated issue closure is claimed.
+
+PR review remediation reconciles continuation eligibility and the prior provider-guaranteed replay exception, corrects native probe evidence, and makes backend/browser commands reproducible. Catalog, specification, public-doc, harness, and changed-file documentation coverage checks pass. Phone coverage uses browser emulation; no physical device or real Wi-Fi switch is claimed.

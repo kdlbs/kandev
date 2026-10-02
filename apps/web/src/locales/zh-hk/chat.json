@@ -164,5 +164,9 @@
   "continuationPhase_waiting": "等待重新連接。",
   "continuationPhase_reconnecting": "正在重新連接...",
   "continuationPhase_continuing": "正在繼續之前的請求...",
-  "continuationHistoryPreserved": "之前的對話會保留。"
+  "continuationHistoryPreserved": "之前的對話會保留。",
+  "providerRecoveryDisabledBody": "自動繼續已停用。恢復以重試，或啓動新工作階段。",
+  "providerRecoveryUnsafeBody": "自動繼續已停止，因為某項操作尚未完成或其結果不確定。請先檢查工作，再恢復工作階段。",
+  "providerRecoveryUnsupportedBody": "此代理無法自動恢復中斷的對話。恢復以重試，或啓動新工作階段。",
+  "providerRecoveryEvidenceBody": "自動繼續已停止，因為缺少對話標識或安全資訊。請先檢查工作，再恢復工作階段。"
 }

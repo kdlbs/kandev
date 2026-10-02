@@ -164,5 +164,9 @@
   "continuationPhase_waiting": "再接続を待っています。",
   "continuationPhase_reconnecting": "再接続中...",
   "continuationPhase_continuing": "前のリクエストを続行中...",
-  "continuationHistoryPreserved": "前の会話は保持されます。"
+  "continuationHistoryPreserved": "前の会話は保持されます。",
+  "providerRecoveryDisabledBody": "自動続行は無効です。再開して再試行するか、新しいセッションを開始してください。",
+  "providerRecoveryUnsafeBody": "保留中の操作があるか、結果が不明なため、自動続行を停止しました。再開する前に作業を確認してください。",
+  "providerRecoveryUnsupportedBody": "このエージェントは中断された会話を自動復元できません。再開して再試行するか、新しいセッションを開始してください。",
+  "providerRecoveryEvidenceBody": "会話の識別情報または安全性の情報が不足しているため、自動続行を停止しました。再開する前に作業を確認してください。"
 }

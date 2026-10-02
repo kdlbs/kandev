@@ -1343,6 +1343,10 @@ type startTaskOptions struct {
 	// process to start now: an Office scheduler launch only chose a provider.
 	// Zero value means "derive from autoStart".
 	Origin launchOrigin
+	// AutomationRun names the admitted automation run this start serves. A
+	// start queued by the session ceiling persists it so the replay binds the
+	// session and turn it creates to that run.
+	AutomationRun *automationRunLaunch
 	// ceilingEntryBinding is set only by a replay that owns a persisted
 	// workflow-entry record. The start path rechecks it immediately before
 	// runtime admission so a stale route cannot dispatch the old payload.
@@ -2831,12 +2835,12 @@ func (s *Service) buildWorkflowEntryPrompt(
 	ctx context.Context,
 	taskDescription string,
 	step *wfmodels.WorkflowStep,
-	taskID, sessionID string,
+	taskID, sessionID, incarnationID string,
 	isPassthrough bool,
 ) (string, string, error) {
 	basePrompt := taskDescription
 	if step.Prompt == "" && strings.TrimSpace(taskDescription) != "" {
-		claimed, err := s.repo.ClaimInitialPromptFallback(ctx, sessionID)
+		claimed, err := s.repo.ClaimInitialPromptFallback(ctx, sessionID, incarnationID)
 		if err != nil {
 			return "", "", fmt.Errorf("failed to claim workflow prompt fallback: %w", err)
 		}
@@ -3709,7 +3713,7 @@ func (s *Service) StartSessionForWorkflowStep(ctx context.Context, taskID, sessi
 	}
 
 	effectivePrompt, promptReferenceContext, err := s.buildWorkflowEntryPrompt(
-		ctx, dbTask.Description, step, taskID, sessionID, session.IsPassthrough,
+		ctx, dbTask.Description, step, taskID, sessionID, session.QueueIncarnationID, session.IsPassthrough,
 	)
 	if err != nil {
 		return fmt.Errorf("failed to build workflow prompt: %w", err)
@@ -5463,7 +5467,7 @@ func (s *Service) publishTaskSessionErrorEvent(
 			eventData["attempt_id"] = lastError.AttemptID
 		}
 		if len(lastError.Causes) > 0 {
-			eventData["causes"] = append([]models.AgentErrorCause(nil), lastError.Causes...)
+			eventData["causes"] = models.NormalizeAgentErrorCauses(lastError.Causes)
 		}
 		if lastError.Details != "" {
 			eventData["details"] = lastError.Details
@@ -10399,7 +10403,7 @@ func (s *Service) runExplicitCancellationOwned(ctx context.Context, sessionID st
 	// continuation that is already waiting on ACP readiness will observe this
 	// identity fence and cannot publish a late token, failure, or prompt.
 	if expected, _ := ctx.Value(continuationCancelContextKey{}).(*transientRetryEntry); expected != nil &&
-		!s.continuationCancellationOwnsTurn(sessionID, expected) {
+		!s.continuationCancellationOwnsTurn(ctx, sessionID, expected) {
 		return ErrResumeAttemptCancelled
 	}
 	if expected, _ := ctx.Value(continuationCancelContextKey{}).(*transientRetryEntry); expected == nil {

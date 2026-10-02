@@ -13,7 +13,7 @@ import (
 func (s *Service) settleContinuationFailureLocked(ctx context.Context, data watcher.AgentEventData, entry *transientRetryEntry) func(context.Context) {
 	s.resetTransientRetry(data.SessionID)
 	data.RecoveryMode = recoveryModeContinue
-	data.RecoveryDisposition = "manual"
+	data.RecoveryDisposition = recoveryDispositionManual
 	entry.mu.Lock()
 	started := entry.started
 	entry.mu.Unlock()
@@ -21,6 +21,7 @@ func (s *Service) settleContinuationFailureLocked(ctx context.Context, data watc
 		data.RecoveryDisposition = "exhausted"
 	}
 	nextState := models.TaskSessionStateWaitingForInput
+	s.finalizeAutomationRun(ctx, data.TaskID, false, agentFailureMessage(data))
 	if err := s.settleContinuationInterruption(ctx, data); err != nil {
 		nextState = models.TaskSessionStateFailed
 		s.logger.Warn("failed to persist interrupted continuation", zap.String("session_id", data.SessionID), zap.Error(err))
@@ -28,7 +29,6 @@ func (s *Service) settleContinuationFailureLocked(ctx context.Context, data watc
 	_ = s.persistLastAgentError(ctx, data)
 	_ = s.createContinuationRecoveryMessage(ctx, data, entry)
 	s.retireExecutionActivityAndPublish(context.WithoutCancel(ctx), data.TaskID, data.SessionID, data.AgentExecutionID)
-	s.finalizeAutomationRun(ctx, data.TaskID, false, agentFailureMessage(data))
 	s.updateTaskSessionState(ctx, data.TaskID, data.SessionID, nextState, data.ErrorMessage, false)
 	return func(workerCtx context.Context) {
 		s.cleanupAgentExecutionWithReason(workerCtx, data.AgentExecutionID, data.TaskID, data.SessionID, agentruntime.StopReasonRecoverableAgentFailure)

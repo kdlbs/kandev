@@ -108,7 +108,10 @@ func continuationReadPayload(meta map[string]any, input any) bool {
 }
 
 func (a *Adapter) poisonContinuationSafety() {
-	if !a.cfg.ProviderInterruptionContinuation {
+	a.mu.RLock()
+	enabled := a.cfg.ProviderInterruptionContinuation
+	a.mu.RUnlock()
+	if !enabled {
 		return
 	}
 	turn := a.currentPromptTurn()

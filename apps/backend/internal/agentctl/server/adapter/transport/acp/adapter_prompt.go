@@ -219,6 +219,7 @@ func (a *Adapter) sendPrompt(
 		a.syncNotifQueue()
 		if a.dialect.continuationError != nil && a.dialect.continuationError(err) {
 			if snapshot := a.continuationSafetySnapshot(turn); snapshot != nil {
+				a.cancelAsyncTurnComplete(sessionID)
 				a.sendUpdate(AgentEvent{Type: streams.EventTypeError, SessionID: sessionID,
 					PromptGeneration: promptGeneration, Error: "peer disconnected before response", ContinuationSafety: snapshot})
 				return nil

@@ -3,7 +3,9 @@ package orchestrator
 import (
 	"context"
 	"errors"
+	agentruntime "github.com/kandev/kandev/internal/agent/runtime"
 	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
+	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"sync"
 	"testing"
 
@@ -13,15 +15,9 @@ import (
 )
 
 func TestInterruptionContinuationBudgetNativeInitializationFailure(t *testing.T) {
-	svc, _, data := continuationFailureFixture(t)
+	svc, mc, data := continuationFailureFixture(t)
+	data.ProviderError = &streams.ProviderError{ProviderID: "cursor-acp", ModelID: "cursor-model"}
 	mgr := installContinuationRestoreFixture(t, svc)
-	require.NoError(t, svc.repo.CreateTaskEnvironment(context.Background(), &models.TaskEnvironment{
-		ID: "existing-workspace", TaskID: "t1", ExecutorType: "local", Status: models.TaskEnvironmentStatusReady,
-	}))
-	session, err := svc.repo.GetTaskSession(context.Background(), "s1")
-	require.NoError(t, err)
-	session.TaskEnvironmentID = "existing-workspace"
-	require.NoError(t, svc.repo.UpdateTaskSession(context.Background(), session))
 	launch := mgr.launchAgentFunc
 	var liveMu sync.Mutex
 	liveID := "execution-1"
@@ -87,6 +83,9 @@ func TestInterruptionContinuationBudgetNativeInitializationFailure(t *testing.T)
 	require.NoError(t, err)
 	require.Equal(t, models.TaskSessionStateWaitingForInput, parked.State, "a stopped restore must not retain the startup grace projection")
 	require.Equal(t, 2, next.attempt)
+	latest := mc.sessionMessages[len(mc.sessionMessages)-1]
+	require.Equal(t, "cursor-acp", latest.metadata["provider_name"])
+	require.Equal(t, "cursor-model", latest.metadata["model_id"])
 	require.Empty(t, mgr.capturedPrompts)
 	liveMu.Lock()
 	require.Empty(t, liveID, "failed restore must be stopped before retry scheduling")
@@ -96,6 +95,20 @@ func TestInterruptionContinuationBudgetNativeInitializationFailure(t *testing.T)
 	svc.retryTransientPrompt(next.retryCtx, "t1", "s1", "")
 	require.Len(t, mgr.capturedPrompts, 1)
 	require.Equal(t, continuationInstruction, mgr.capturedPrompts[0])
+}
+
+func TestInterruptionContinuationReservationRetainsImmutableOwner(t *testing.T) {
+	svc, _, data := continuationFailureFixture(t)
+	require.True(t, svc.handleTransientFailure(context.Background(), data))
+	value, _ := svc.transientRetries.Load("s1")
+	previous := value.(*transientRetryEntry)
+	state, release := svc.acquireTransientRetryNoticeState("s1")
+	defer release()
+	state.mu.Lock()
+	defer state.mu.Unlock()
+	next := svc.reserveTransientRetryWithMetadataLocked(state, "s1", 2, nil)
+	require.Equal(t, recoveryModeContinue, next.mode, "published reservations must retain continuation ownership")
+	require.Same(t, previous.continuation, next.continuation)
 }
 
 func TestInterruptionContinuationBudgetCountsEarlierReplay(t *testing.T) {
@@ -117,6 +130,9 @@ func TestInterruptionContinuationBudgetCountsEarlierReplay(t *testing.T) {
 func TestInterruptionContinuationBudgetRestoreFailures(t *testing.T) {
 	svc, mc, data := continuationFailureFixture(t)
 	mgr := svc.agentManager.(*mockAgentManager)
+	mgr.getExecutionIDForSessionFunc = func(context.Context, string) (string, error) {
+		return "", agentruntime.ErrNoExecutionForSession
+	}
 	launches := 0
 	mgr.launchAgentFunc = func(context.Context, *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error) {
 		launches++

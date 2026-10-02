@@ -16,6 +16,7 @@ import {
 import { Button } from "@kandev/ui/button";
 import { openExternalLink } from "@/lib/desktop/external-links";
 import { t } from "@/lib/i18n";
+import { formatCompactDuration } from "@/lib/i18n/formats";
 import type { IntegrationChangeRequestPipelineState } from "./integration-change-request-status-types";
 
 export type ChangeRequestCheckCounts = {
@@ -496,7 +497,10 @@ export function ChangeRequestPopoverFooter({
 
 function defaultElapsed(seconds: number): string {
   if (seconds === 0) return t("integrations:updatedJustNow");
-  const elapsed = seconds < 60 ? `${seconds}s` : `${Math.floor(seconds / 60)}m`;
+  const elapsed =
+    seconds < 60
+      ? formatCompactDuration(seconds, "second")
+      : formatCompactDuration(Math.floor(seconds / 60), "minute");
   return t("integrations:updatedAgo", { elapsed });
 }
 

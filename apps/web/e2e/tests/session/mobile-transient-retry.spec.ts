@@ -49,7 +49,7 @@ test.describe("mobile: transient provider error retry", () => {
     await expect(session.recoveryResumeButton()).toBeVisible({ timeout: 30_000 });
     await expect(session.transientRetryCard()).toBeHidden();
     await expect(testPage.getByTestId("session-recovery-card")).toContainText(
-      "Automatic provider retries cancelled. Resume or start fresh to continue.",
+      "Automatic recovery was cancelled. Resume or start fresh to continue.",
     );
     await expect(testPage.getByTestId("session-recovery-card")).not.toContainText(
       "after several retries",

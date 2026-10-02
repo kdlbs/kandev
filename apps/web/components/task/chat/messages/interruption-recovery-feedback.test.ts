@@ -6,6 +6,14 @@ import {
 } from "./interruption-recovery-feedback";
 
 describe("provider interruption feedback", () => {
+  it.each([
+    ["disabled", "chat:providerRecoveryDisabledBody"],
+    ["unsafe_work", "chat:providerRecoveryUnsafeBody"],
+    ["unsupported_restore", "chat:providerRecoveryUnsupportedBody"],
+    ["missing_evidence", "chat:providerRecoveryEvidenceBody"],
+  ])("explains the attested manual reason %s", (recovery_reason, key) => {
+    expect(interruptionRecoveryKey({ recovery_reason })).toBe(key);
+  });
   it("keeps an owned continuation notice reachable while running", () => {
     expect(
       retryNoticeVisible("RUNNING", {

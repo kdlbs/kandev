@@ -75,3 +75,17 @@ func TestInterruptionContinuationRestartRetiresStaleNoticeWithoutDispatch(t *tes
 	require.NoError(t, err)
 	require.Equal(t, models.TaskSessionStateRunning, session.State, "notice cleanup preserves the adopted session projection")
 }
+
+func TestInterruptionContinuationRestartConvertsAbandonedReplayNotice(t *testing.T) {
+	svc, taskSvc, _ := newPersistentTransientRetryTestService(t)
+	err := svc.repo.UpdateTaskSessionState(context.Background(), "s1", models.TaskSessionStateWaitingForInput, "")
+	require.NoError(t, err)
+	createPersistedTransientRetryNotice(t, svc)
+	svc.reconcileExecutorSessionsOnStartup(context.Background())
+	messages, err := taskSvc.ListMessages(context.Background(), "s1")
+	require.NoError(t, err)
+	require.Empty(t, transientRetryNotices(messages, "t1", "s1"))
+	require.Len(t, messages, 1, "lost in-process replay ownership must leave manual recovery")
+	require.Equal(t, true, messages[0].Metadata["recovery_actions"])
+	require.Equal(t, "restart_interrupted", messages[0].Metadata["recovery_disposition"])
+}

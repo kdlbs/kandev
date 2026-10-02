@@ -94,7 +94,7 @@ func TestLocalProviderForwardsUpdatePayloadToSubscribedClient(t *testing.T) {
 		EventType:    "system.update_available",
 		OccurrenceID: "v1.2.3",
 		UserID:       "user-1",
-		Payload:      map[string]string{"version": "v1.2.3", "url": "https://example.test/releases/v1.2.3"},
+		Payload:      map[string]string{"version": "v1.2.3", "url": "https://example.test/releases/v1.2.3", "agent_name": "gemini", "runtime_id": "npm:@google/gemini-cli", "display_name": "Gemini", "previous_version": "1.0.0", "runtime_update_status": "available"},
 	}); err != nil {
 		t.Fatalf("send notification: %v", err)
 	}
@@ -111,11 +111,19 @@ func TestLocalProviderForwardsUpdatePayloadToSubscribedClient(t *testing.T) {
 		t.Fatalf("decode notification: %v", err)
 	}
 	var payload struct {
-		Version string `json:"version"`
-		URL     string `json:"url"`
+		Version  string `json:"version"`
+		Agent    string `json:"agent_name"`
+		Runtime  string `json:"runtime_id"`
+		Name     string `json:"display_name"`
+		Previous string `json:"previous_version"`
+		Status   string `json:"runtime_update_status"`
+		URL      string `json:"url"`
 	}
 	if err := message.ParsePayload(&payload); err != nil {
 		t.Fatalf("decode payload: %v", err)
+	}
+	if payload.Agent != "gemini" || payload.Runtime != "npm:@google/gemini-cli" || payload.Name != "Gemini" || payload.Previous != "1.0.0" || payload.Status != "available" {
+		t.Fatalf("lost runtime payload: %+v", payload)
 	}
 	if message.Action != "system.update_available" || payload.Version != "v1.2.3" || payload.URL != "https://example.test/releases/v1.2.3" {
 		t.Fatalf("forwarded notification = %#v with payload %#v", message, payload)

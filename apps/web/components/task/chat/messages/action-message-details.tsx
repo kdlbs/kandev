@@ -4,6 +4,7 @@ import { AuthMethodsPanel, GenericAuthPanel } from "./auth-methods-panel";
 import { RemediationLink } from "@/components/task/remediation-link";
 import { HostShellDialog } from "@/components/settings/host-shell-dialog";
 import type { MessageAction, RecoveryAuthMethod } from "@/components/task/chat/types";
+import type { AgentErrorCause } from "@/lib/types/task-status-summary";
 
 export type ActionMeta = {
   actions?: MessageAction[];
@@ -26,13 +27,20 @@ export type ActionMeta = {
   recovery_mode?: string;
   recovery_phase?: string;
   recovery_disposition?: string;
+  recovery_reason?: string;
   attempts_started?: number;
   attempt?: number;
   max_attempts?: number;
   retry_in_seconds?: number;
   retry_at?: string;
   failure_code?: string;
+  code?: string;
+  causes?: AgentErrorCause[];
+  occurred_at?: string;
+  execution_id?: string;
   failure_details?: string;
+  attempt_id?: string;
+  phase?: string;
 };
 
 export function TechnicalDetails({ children }: { children: string }) {

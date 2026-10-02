@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"net/netip"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -245,15 +246,11 @@ func (l *Launcher) buildAndStartProcess(nonce string) error {
 	// CommandContext sends SIGKILL on cancellation, preventing graceful shutdown.
 	l.cmd = exec.Command(l.binaryPath, fmt.Sprintf("-port=%d", l.port))
 
-	// Inject bootstrap nonce and the resolved child contract. Remove inherited
-	// copies first so a managed child cannot observe a conflicting host value.
-	overrides := []string{"AGENTCTL_BOOTSTRAP_NONCE=" + nonce}
-	if l.startupConfig.Configured {
-		encoded, err := commonconfig.EncodeAgentctlStartupConfig(l.startupConfig)
-		if err != nil {
-			return err
-		}
-		overrides = append(overrides, commonconfig.InternalAgentctlStartupConfigEnv+"="+encoded)
+	// Inject the launcher-owned child contract. Remove inherited copies first so
+	// a managed child cannot observe a conflicting host value.
+	overrides, err := l.childEnvOverrides(nonce)
+	if err != nil {
+		return err
 	}
 	l.cmd.Env = environmentWithOverrides(os.Environ(), overrides...)
 	l.cmd.SysProcAttr = buildSysProcAttr(l.startupConfig.AgentSurvivalEnabled)
@@ -267,7 +264,6 @@ func (l *Launcher) buildAndStartProcess(nonce string) error {
 	if l.startupConfig.AgentSurvivalEnabled {
 		clearInheritedLivenessPipeEnv(l.cmd)
 	} else {
-		var err error
 		pipeWrite, err = setupLivenessPipe(l.cmd)
 		if err != nil {
 			return err
@@ -307,6 +303,26 @@ func (l *Launcher) buildAndStartProcess(nonce string) error {
 	go l.monitorExit()
 
 	return nil
+}
+
+// childEnvOverrides returns the environment entries the launcher owns for the
+// agentctl child: the bootstrap nonce, the listen host, and the resolved
+// startup contract. The listen host is the host the backend dials (l.host), so
+// the control server and every instance server it supervises listen only there
+// rather than on every interface.
+func (l *Launcher) childEnvOverrides(nonce string) ([]string, error) {
+	overrides := []string{
+		"AGENTCTL_BOOTSTRAP_NONCE=" + nonce,
+		"AGENTCTL_LISTEN_HOST=" + l.host,
+	}
+	if l.startupConfig.Configured {
+		encoded, err := commonconfig.EncodeAgentctlStartupConfig(l.startupConfig)
+		if err != nil {
+			return nil, err
+		}
+		overrides = append(overrides, commonconfig.InternalAgentctlStartupConfigEnv+"="+encoded)
+	}
+	return overrides, nil
 }
 
 func environmentWithOverrides(base []string, overrides ...string) []string {
@@ -427,37 +443,98 @@ func (l *Launcher) closeParentPipeLocked() {
 	}
 }
 
-// checkPortAvailable reports whether the given port is free, using the same
-// probe contract the process launcher uses (internal/common/netprobe): a
-// dual-stack loopback connect must find nothing listening AND a fresh
-// loopback bind must succeed.
+// checkPortAvailable reports whether the given port is free on the effective
+// listener host, using bounded connect and specific-address bind probes.
 //
-// A bind alone is not enough. A surviving agentctl holds the wildcard
+// A bind alone is not enough. A surviving agentctl can hold the wildcard
 // address, and on macOS/BSD a bind against an active wildcard listener can
 // still succeed, which would report the occupied control port as free and
 // send this launch to a second server on a port the record does not name.
-func checkPortAvailable(port int) error {
-	if !netprobe.PortAvailable(port) {
+func checkPortAvailable(host string, port int) error {
+	if !netprobe.PortAvailableAtHost(host, port) {
 		return fmt.Errorf("port %d is already in use", port)
 	}
 	return nil
 }
 
-// findFreePort asks the OS for an available port by binding to :0.
-func findFreePort() (int, error) {
-	ln, err := net.Listen("tcp", ":0")
+const maxFreePortProbeAttempts = 8
+
+// freePortProbeAddrs returns concrete addresses for bounded temporary binds.
+// Wildcard listeners are expanded to specific interface addresses.
+func freePortProbeAddrs(host string) ([]string, error) {
+	addresses, err := netprobe.ProbeAddresses(host)
 	if err != nil {
-		return 0, err
+		return nil, err
 	}
-	port := ln.Addr().(*net.TCPAddr).Port
-	_ = ln.Close()
-	return port, nil
+	probes := make([]string, 0, len(addresses))
+	for _, address := range addresses {
+		probes = append(probes, net.JoinHostPort(address.String(), "0"))
+	}
+	return probes, nil
+}
+
+// findFreePort asks the OS for a port that is free where an agentctl child
+// listening on host will bind. Each probe binds only a concrete interface
+// address; it never opens a temporary wildcard listener.
+func findFreePort(host string) (int, error) {
+	addresses, err := netprobe.ProbeAddresses(host)
+	if err != nil {
+		return 0, fmt.Errorf("resolve probe addresses for %q: %w", host, err)
+	}
+	if len(addresses) == 0 {
+		return 0, fmt.Errorf("no probe addresses for %q", host)
+	}
+
+	var lastErr error
+	for attempt := 0; attempt < maxFreePortProbeAttempts; attempt++ {
+		first := addresses[0]
+		probe, err := net.Listen(networkForProbeAddress(first), net.JoinHostPort(first.String(), "0"))
+		if err != nil {
+			return 0, err
+		}
+		port := probe.Addr().(*net.TCPAddr).Port
+		_ = probe.Close()
+
+		if !netprobe.PortAvailableAtAddresses(addresses, port) {
+			lastErr = fmt.Errorf("port %d became unavailable during fallback selection", port)
+			continue
+		}
+
+		reservations := make([]net.Listener, 0, len(addresses))
+		available := true
+		for _, address := range addresses {
+			listener, err := net.Listen(networkForProbeAddress(address), net.JoinHostPort(address.String(), fmt.Sprint(port)))
+			if err != nil {
+				lastErr = err
+				available = false
+				break
+			}
+			reservations = append(reservations, listener)
+		}
+		for _, listener := range reservations {
+			_ = listener.Close()
+		}
+		if available {
+			return port, nil
+		}
+	}
+	if lastErr == nil {
+		lastErr = fmt.Errorf("could not reserve a fallback port after %d attempts", maxFreePortProbeAttempts)
+	}
+	return 0, lastErr
+}
+
+func networkForProbeAddress(address netip.Addr) string {
+	if address.Is4() {
+		return "tcp4"
+	}
+	return "tcp6"
 }
 
 // ensurePortAvailable checks if the configured port is free. If not, it
 // immediately falls back to an OS-assigned free port.
 func (l *Launcher) ensurePortAvailable() error {
-	if err := checkPortAvailable(l.port); err == nil {
+	if err := checkPortAvailable(l.host, l.port); err == nil {
 		return nil
 	}
 
@@ -466,7 +543,7 @@ func (l *Launcher) ensurePortAvailable() error {
 	l.logger.Info("port already in use, selecting a free port",
 		zap.Int("port", l.port))
 
-	freePort, err := findFreePort()
+	freePort, err := findFreePort(l.host)
 	if err != nil {
 		return fmt.Errorf("port %d is in use and failed to find alternative: %w", originalPort, err)
 	}

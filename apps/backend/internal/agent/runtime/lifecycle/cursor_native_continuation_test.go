@@ -251,6 +251,7 @@ func cursorNativeSmokeHasCompletedRead(evidence []cursorNativeSmokeToolEvidence,
 
 func requireRestoredCursorSessionID(t *testing.T, sessionIDs []string, expected string) {
 	t.Helper()
+	require.NotEmpty(t, sessionIDs, "native restoration must provide observed session identity")
 	for _, sessionID := range sessionIDs {
 		require.Equal(t, expected, sessionID, "session/load must retain provider identity")
 	}
@@ -258,9 +259,7 @@ func requireRestoredCursorSessionID(t *testing.T, sessionIDs []string, expected 
 
 func requireCursorNativePromptCancelled(t *testing.T, outcome json.RawMessage, probe string) {
 	t.Helper()
-	if len(outcome) == 0 {
-		return
-	}
+	require.NotEmpty(t, outcome, "%s must return a cancellation result", probe)
 	var result struct {
 		StopReason string `json:"stopReason"`
 	}
