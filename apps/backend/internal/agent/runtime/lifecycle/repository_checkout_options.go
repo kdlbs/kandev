@@ -10,6 +10,7 @@ import (
 )
 
 const dockerCloneLine = "git clone --depth=1 --branch {{repository.branch}} {{repository.clone_url}} {{workspace.path}}"
+const globalCredentialUseHTTPPathKey = "credential.useHttpPath"
 
 func checkoutOptionsPrepareScript(script string, options *models.RepositoryCheckoutOptions) (string, error) {
 	options, err := models.NormalizeRepositoryCheckoutOptions(options)
@@ -98,7 +99,9 @@ func checkoutCredentialEnvironment(env map[string]string) map[string]string {
 		if isManagedSetupScriptGitHelper(index, entries) {
 			return true
 		}
-		return strings.HasPrefix(entry.Key, "credential.https://") && strings.HasSuffix(entry.Key, ".useHttpPath") && entry.Value == boolStringTrue
+		return (entry.Key == globalCredentialUseHTTPPathKey ||
+			strings.HasPrefix(entry.Key, "credential.https://") && strings.HasSuffix(entry.Key, ".useHttpPath")) &&
+			entry.Value == boolStringTrue
 	})
 	if err == nil {
 		gitconfigenv.CopyIndexed(result, filtered)
