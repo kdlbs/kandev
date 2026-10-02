@@ -5,7 +5,6 @@ import type { SeedData } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
 import { SessionPage } from "../../pages/session-page";
 import { GitHelper, makeGitEnv, publishSeedCommit } from "../../helpers/git-helper";
-import { KanbanPage } from "../../pages/kanban-page";
 import { dwell } from "../../helpers/causal-waits";
 import { waitForWorkspaceFile } from "../../helpers/session";
 
@@ -252,9 +251,7 @@ test.describe("Preview tab survives session switch", () => {
     const taskA = await seedFinishedTask(apiClient, seedData, "Active Tab Round-Trip A");
     const taskB = await seedFinishedTask(apiClient, seedData, "Active Tab Round-Trip B");
 
-    const kanban = new KanbanPage(testPage);
-    await kanban.goto();
-    await kanban.taskCardByTitle("Active Tab Round-Trip A").click();
+    await testPage.goto(`/t/${taskA.id}`);
     await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
     const session = new SessionPage(testPage);
     await session.waitForLoad();
@@ -302,11 +299,9 @@ test.describe("Preview tab survives session switch", () => {
     git.commit("seed refresh");
     publishSeedCommit(git, seedData.repositoryRemoteURL);
 
-    await seedFinishedTask(apiClient, seedData, "Refresh Active Tab Task");
+    const task = await seedFinishedTask(apiClient, seedData, "Refresh Active Tab Task");
 
-    const kanban = new KanbanPage(testPage);
-    await kanban.goto();
-    await kanban.taskCardByTitle("Refresh Active Tab Task").click();
+    await testPage.goto(`/t/${task.id}`);
     await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
     const session = new SessionPage(testPage);
     await session.waitForLoad();

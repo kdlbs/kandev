@@ -714,3 +714,30 @@ python3 scripts/list-docs.py validate
 python3 scripts/lint-spec-files.py --all
 git diff --check
 ```
+
+### Remaining tab fixture paths and container diagnostics, 2026-10-02
+
+The `f29b4` hosted run exposed the same board-card setup dependency in the active
+center-tab round-trip case. Its screenshot shows both tasks in the sidebar and
+zero board cards under changed workflow columns. The two remaining cases in
+this file now open their seeded task IDs directly. The complete four-case file
+passed three repetitions: 12 passed (2.6m), zero retries. Scoped ESLint and
+Prettier passed. Tab identity, duplicate prevention, active state, and refresh
+persistence assertions are unchanged.
+
+Containers shard 5 failed only while building its Docker fixture image; build
+output was suppressed, and its hosted retry passed. The image built locally.
+The first local product probe then failed because an ignored build receipt from
+revision `34de930` no longer matched rebuilt binaries. That stale receipt was
+preserved outside the build directory. With a CI-style version and current
+build identity, the native Codex Docker case passed in 41.0s without retries.
+No product or fixture build behavior changed on this evidence. New-head hosted
+checks must still pass; a local pass does not settle the original build failure.
+
+```bash
+cd apps/web
+GOCACHE=/tmp/kandev-go-build-preserved-20261001 pnpm e2e:run --host --project chromium tests/layout/preview-tab-session-switch.spec.ts -- --repeat-each=3 --retries=0
+pnpm exec eslint e2e/tests/layout/preview-tab-session-switch.spec.ts
+pnpm exec prettier --check e2e/tests/layout/preview-tab-session-switch.spec.ts
+VERSION=0.0.0-e2e.f29b4bd1a1859ce72d0056dc4d23c0ac54c71a55 GOCACHE=/tmp/kandev-go-build-preserved-20261001 KANDEV_E2E_CONTAINERS=1 E2E_DEBUG=1 pnpm e2e:run --host --project containers tests/docker/codex-app-server.spec.ts -- --retries=0
+```
