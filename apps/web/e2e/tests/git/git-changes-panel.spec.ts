@@ -1513,6 +1513,7 @@ test.describe("Git Changes Panel", () => {
     await expect(session.changes.getByText("Original message")).toBeVisible({ timeout: 5_000 });
 
     // Click the amend button (hover action on commit row)
+    await commitRow.evaluate((row) => row.scrollIntoView({ block: "center", inline: "nearest" }));
     await commitRow.hover();
     const amendButton = commitRow.getByRole("button", { name: "Amend commit message" });
     await expect(amendButton).toBeVisible({ timeout: 5_000 });

@@ -286,3 +286,32 @@ GOCACHE=/tmp/kandev-go-build-preserved-20261001 pnpm e2e:run --host --no-build -
 ```
 
 Catalog validation and full specification lint passed after these records.
+
+### Refreshed main integration checks, 2026-10-02
+
+A complete local Git/history integration run passed 30 tests and exposed two
+further fixture failures with zero retries. The Amend action had the same
+click-time auto-scroll/hover loss as Revert; centering the row before physical
+hover preserves the real click and updated commit-message assertions. Main's
+new header geometry test assumed its default 280px pane could fit the full
+Local checkout commits label on one line. Diagnostic measurement observed a
+33px wrapped row, with matching control/wrapper bounds and no top offset.
+The fixture now uses the existing Dockview resize helper to give the single-line
+28px assertions a 400px pane. Its narrower-viewport dynamic wrapping, refresh,
+Changes reopen, descendant adjacency, and overflow checks remain unchanged.
+Temporary geometry logging was removed. No product styling changed.
+
+Both updated cases passed three repetitions each, zero retries (six passes in
+59.7 seconds). Targeted zero-warning ESLint, formatting, and whitespace passed:
+
+```bash
+cd apps/web
+GOCACHE=/tmp/kandev-go-build-preserved-20261001 pnpm e2e:run --host --no-build --project chromium tests/git/changes-history-regression.spec.ts tests/git/git-changes-panel.spec.ts -- --grep 'keeps collapsed history headers compact|amend commit updates commit message' --repeat-each=3 --retries=0
+pnpm exec eslint --max-warnings 0 e2e/tests/git/changes-history-regression.spec.ts e2e/tests/git/git-changes-panel.spec.ts
+```
+
+Hosted head 31c0f263f9e failed trusted walkthrough context preparation after
+three minutes. The already validated separate PR #4147 fixes that trusted
+main-owned helper; its fresh snapshot has no failed/pending checks or unresolved
+threads. It is not installed on main, and no merge is authorized yet. Current
+head product CI remains in progress; an all-green outcome is not claimed.
