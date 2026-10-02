@@ -745,5 +745,12 @@
   "learningConsideredNote": "由代理报告，未经验证",
   "learningConsideredNone": "没有任何报告。",
   "learningRetireTitle": "停用或取代",
-  "learningRetireNone": "此报告中没有。"
+  "learningRetireNone": "此报告中没有。",
+  "learningGateReason_size": "提案过大",
+  "learningGateReason_thin_evidence": "证据不足",
+  "learningGateReason_citation_unresolved": "找不到所引用的轮次",
+  "learningGateReason_credential": "包含凭据",
+  "learningGateReason_forbidden_target": "目标是协调员不可更改的内容",
+  "learningGateReason_no_target": "未指定目标",
+  "learningGateReason_bad_target": "目标无效"
 }

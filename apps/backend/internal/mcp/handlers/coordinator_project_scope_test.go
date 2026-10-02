@@ -160,5 +160,5 @@ func TestListTasks_ProjectReadFailureFailsClosed(t *testing.T) {
 	resp, err := f.h.handleListTasks(f.ctxFor(nil, false), msg)
 	require.NoError(t, err)
 	require.Equal(t, ws.MessageTypeError, resp.Type)
-	require.Contains(t, string(resp.Payload), "Failed to list tasks")
+	require.Contains(t, string(resp.Payload), "projects")
 }

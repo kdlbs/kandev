@@ -745,5 +745,12 @@
   "learningConsideredNote": "エージェントによる報告で、検証されていません",
   "learningConsideredNone": "報告はありませんでした。",
   "learningRetireTitle": "廃止または置き換え",
-  "learningRetireNone": "このレポートにはありません。"
+  "learningRetireNone": "このレポートにはありません。",
+  "learningGateReason_size": "提案が大きすぎます",
+  "learningGateReason_thin_evidence": "根拠が不足しています",
+  "learningGateReason_citation_unresolved": "引用されたターンが見つかりません",
+  "learningGateReason_credential": "認証情報が含まれています",
+  "learningGateReason_forbidden_target": "コーディネーターが変更できない対象です",
+  "learningGateReason_no_target": "対象が指定されていません",
+  "learningGateReason_bad_target": "対象が無効です"
 }

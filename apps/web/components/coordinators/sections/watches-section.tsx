@@ -16,7 +16,6 @@ import {
   type WorkspaceBoard,
 } from "@/hooks/domains/coordinator/use-workspace-boards";
 import type { useControlDraft } from "@/hooks/domains/coordinator/use-control-draft";
-import { useWorkspaceProjects } from "@/hooks/domains/coordinator/use-workspace-projects";
 import { ProjectsFields, type ProjectsFieldsProps } from "./projects-fields";
 
 type Control = ReturnType<typeof useControlDraft>;
@@ -176,9 +175,8 @@ export function WatchesFields({
 
 export function WatchesSection({ workspaceId, canManage, control }: WatchesSectionProps) {
   const { t } = useTranslation();
-  const { draft, status, retry, setWatches, setProjects } = control;
+  const { draft, status, retry, setWatches, setProjects, projectsRead } = control;
   const boardsRead = useWorkspaceBoards(workspaceId, draft !== null);
-  const projectsRead = useWorkspaceProjects(workspaceId, draft?.projects != null);
 
   if (!draft) {
     if (status === "error") {

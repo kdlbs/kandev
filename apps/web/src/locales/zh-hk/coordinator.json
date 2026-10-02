@@ -745,5 +745,12 @@
   "learningConsideredNote": "由代理報告，未經驗證",
   "learningConsideredNone": "沒有任何報告。",
   "learningRetireTitle": "停用或取代",
-  "learningRetireNone": "此報告中沒有。"
+  "learningRetireNone": "此報告中沒有。",
+  "learningGateReason_size": "提案過大",
+  "learningGateReason_thin_evidence": "證據不足",
+  "learningGateReason_citation_unresolved": "找不到所引用的輪次",
+  "learningGateReason_credential": "包含認證資料",
+  "learningGateReason_forbidden_target": "目標是協調員不可更改的內容",
+  "learningGateReason_no_target": "未指定目標",
+  "learningGateReason_bad_target": "目標無效"
 }

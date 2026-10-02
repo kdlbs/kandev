@@ -34,7 +34,10 @@ export function SectionsRow({ entries }: SectionsRowProps) {
 
   return (
     <SettingsTabs tabs={tabs} value={value} onValueChange={selectSection}>
-      <SettingsTabsList ariaLabel={t("coordinator:sectionsRowLabel")} />
+      <SettingsTabsList
+        ariaLabel={t("coordinator:sectionsRowLabel")}
+        className="md:flex-wrap md:overflow-x-visible"
+      />
       {activeHelp && (
         <p className="mt-3 text-sm text-muted-foreground" data-testid="coordinator-section-help">
           {activeHelp}

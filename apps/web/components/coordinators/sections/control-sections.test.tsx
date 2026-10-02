@@ -4,17 +4,12 @@ import type { ControlDraft } from "@/lib/coordinators/control-draft";
 
 const summaryMock = vi.fn();
 const boardsMock = vi.fn();
-const projectsMock = vi.fn();
 
 vi.mock("@/hooks/domains/coordinator/use-action-summary", () => ({
   useActionSummary: () => summaryMock(),
 }));
 vi.mock("@/hooks/domains/coordinator/use-workspace-boards", () => ({
   useWorkspaceBoards: () => boardsMock(),
-}));
-
-vi.mock("@/hooks/domains/coordinator/use-workspace-projects", () => ({
-  useWorkspaceProjects: () => projectsMock(),
 }));
 
 import { MayDoSection } from "./may-do-section";
@@ -44,6 +39,12 @@ function control(d: ControlDraft | null, status = "ready") {
     setAction: vi.fn(),
     setWatches: vi.fn(),
     setProjects: vi.fn(),
+    projectsRead: {
+      sets: [{ kind: "repository_set", id: "set-1", name: "Payments", repositoryCount: 2 }],
+      loose: [],
+      status: "ready",
+      retry: vi.fn(),
+    },
     policyDirty: false,
     watchesDirty: false,
     invalid: false,
@@ -62,12 +63,6 @@ const allCounts = () => ({
 
 beforeEach(() => {
   summaryMock.mockReturnValue({ counts: allCounts(), status: "ready", retry: vi.fn() });
-  projectsMock.mockReturnValue({
-    sets: [{ kind: "repository_set", id: "set-1", name: "Payments", repositoryCount: 2 }],
-    loose: [],
-    status: "ready",
-    retry: vi.fn(),
-  });
   boardsMock.mockReturnValue({
     boards: [
       { id: "a", name: "Alpha", hidden: false },

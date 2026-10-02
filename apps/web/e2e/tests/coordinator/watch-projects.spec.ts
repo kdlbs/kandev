@@ -161,4 +161,103 @@ test.describe("Coordinator watch projects", () => {
       await release();
     }
   });
+
+  test("a listing failure shows the failed state and no project controls", async ({
+    testPage,
+    apiClient,
+    backend,
+    seedData,
+  }) => {
+    test.setTimeout(120_000);
+    const release = await backend.useEnv(PHASE31_ENV);
+    try {
+      const coordinator = await apiClient.createCoordinator(seedData.workspaceId, {
+        name: "Listing Failure",
+        agent_profile_id: seedData.agentProfileId,
+        executor_profile_id: seedData.worktreeExecutorProfileId,
+        task_agent_profile_id: seedData.agentProfileId,
+        task_executor_profile_id: seedData.worktreeExecutorProfileId,
+      });
+      const base = `/api/v1/workspaces/${seedData.workspaceId}/coordinators/${coordinator.id}`;
+      const seeded = await apiClient.rawRequest("PUT", `${base}/settings`, {
+        projects: {
+          scope: "selected",
+          entries: [{ kind: "repository", id: seedData.repositoryId }],
+          include_no_repository: false,
+        },
+      });
+      expect(seeded.status).toBe(200);
+
+      await testPage.route(/\/api\/v1\/workspaces\/[^/]+\/repositories(\?.*)?$/, (route) =>
+        route.abort(),
+      );
+      await testPage.goto(
+        `${linkToCoordinatorSettings(seedData.workspaceId, coordinator.id)}?section=watches`,
+      );
+      await expect(testPage.getByTestId("watches-projects-failed")).toBeVisible();
+      await testPage.getByTestId("watches-keep-one-project").waitFor({ state: "detached" });
+    } finally {
+      await release();
+    }
+  });
+
+  test("a rejected foreign entry is pruned from the draft after the listing refreshes", async ({
+    testPage,
+    apiClient,
+    backend,
+    seedData,
+  }) => {
+    test.setTimeout(120_000);
+    const release = await backend.useEnv(PHASE31_ENV);
+    try {
+      const other = await createLocalRepository(
+        apiClient,
+        backend.tmpDir,
+        seedData.workspaceId,
+        "Prune Other",
+      );
+      const doomed = await apiClient.createRepositorySet(seedData.workspaceId, "Doomed", [
+        other.id,
+      ]);
+      const coordinator = await apiClient.createCoordinator(seedData.workspaceId, {
+        name: "Prune Watcher",
+        agent_profile_id: seedData.agentProfileId,
+        executor_profile_id: seedData.worktreeExecutorProfileId,
+        task_agent_profile_id: seedData.agentProfileId,
+        task_executor_profile_id: seedData.worktreeExecutorProfileId,
+      });
+      const base = `/api/v1/workspaces/${seedData.workspaceId}/coordinators/${coordinator.id}`;
+      const seeded = await apiClient.rawRequest("PUT", `${base}/settings`, {
+        projects: {
+          scope: "selected",
+          entries: [{ kind: "repository", id: seedData.repositoryId }],
+          include_no_repository: false,
+        },
+      });
+      expect(seeded.status).toBe(200);
+
+      await testPage.goto(
+        `${linkToCoordinatorSettings(seedData.workspaceId, coordinator.id)}?section=watches`,
+      );
+      const doomedRow = testPage.getByTestId(`watches-project-repository_set-${doomed.id}`);
+      await expect(doomedRow).toBeVisible();
+      await testPage.getByTestId(`watches-project-toggle-${doomed.id}`).click();
+      await expect(doomedRow).toContainText("In scope");
+      await apiClient.deleteRepositorySet(doomed.id);
+
+      const rejected = waitForHttp(testPage, "PUT", SETTINGS_PATH);
+      await testPage.getByRole("button", { name: "Save changes" }).click();
+      expect((await rejected).status()).toBe(400);
+
+      await expect(
+        testPage.getByRole("alert").filter({ hasText: "does not belong to this workspace" }),
+      ).toBeVisible();
+      await expect(doomedRow).toHaveCount(0);
+      await expect(
+        testPage.getByTestId(`watches-project-repository-${seedData.repositoryId}`),
+      ).toContainText("In scope");
+    } finally {
+      await release();
+    }
+  });
 });

@@ -356,6 +356,10 @@ func isCoordinatorProposeAction(action string) bool {
 	return isPropose
 }
 
+// errCoordinatorProjectsRead is surfaced to the caller verbatim so an agent
+// can tell a failed projects read from an empty board.
+var errCoordinatorProjectsRead = errors.New("could not read the coordinator's projects")
+
 // filterCoordinatorTasks drops the tasks outside a coordinator principal's
 // projects. Other callers, and a coordinator without phase 2, see the list
 // unchanged. A resolver failure is an error naming projects.
@@ -371,7 +375,7 @@ func (h *Handlers) filterCoordinatorTasks(ctx context.Context, tasks []*taskmode
 	watched, err := h.coordinatorSvc.WatchedTaskIDs(ctx, principal.CoordinatorID, refs)
 	if err != nil {
 		h.logger.Error("coordinator projects read failed", zap.String("coordinator_id", principal.CoordinatorID), zap.Error(err))
-		return nil, errors.New("could not read the coordinator's projects")
+		return nil, errCoordinatorProjectsRead
 	}
 	kept := make([]*taskmodels.Task, 0, len(tasks))
 	for _, t := range tasks {

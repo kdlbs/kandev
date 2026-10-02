@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type MutableRefObject } from "react";
 import { useTranslation } from "react-i18next";
 import { ApiError } from "@/lib/api/client";
 import {
@@ -12,6 +12,7 @@ import {
 import { useSettingsSaveContributor } from "@/components/settings/settings-save-provider";
 import { toast } from "@/lib/toast/sonner";
 import { useWebSocketClient } from "@/lib/ws/connection";
+import { useWorkspaceProjects } from "@/hooks/domains/coordinator/use-workspace-projects";
 import {
   buildPutRequest,
   draftFromSettings,
@@ -135,6 +136,56 @@ function invalidReason(
   return undefined;
 }
 
+/**
+ * The workspace's project listing, re-read after a rejected foreign entry; once
+ * the re-read lands the draft keeps only entries that still exist, and the field
+ * error stays visible.
+ */
+function useProjectsListing(
+  workspaceId: string,
+  draft: ControlDraft | null,
+  draftRef: MutableRefObject<ControlDraft | null>,
+  setDraft: (next: ControlDraft) => void,
+) {
+  const projectsRead = useWorkspaceProjects(workspaceId, draft?.projects != null);
+  const pruneRef = useRef(false);
+  const { sets, repositoryIds, status, retry } = projectsRead;
+  useEffect(() => {
+    if (!pruneRef.current || status !== "ready") return;
+    pruneRef.current = false;
+    const current = draftRef.current;
+    if (!current?.projects) return;
+    const live = new Set([
+      ...sets.map((c) => `repository_set:${c.id}`),
+      ...repositoryIds.map((id) => `repository:${id}`),
+    ]);
+    const entries = current.projects.entries.filter((e) => live.has(`${e.kind}:${e.id}`));
+    if (entries.length === current.projects.entries.length) return;
+    const next = { ...current, projects: { ...current.projects, entries } };
+    draftRef.current = next;
+    setDraft(next);
+  }, [status, sets, repositoryIds, draftRef, setDraft]);
+  const pruneAfterRefresh = useCallback(() => {
+    pruneRef.current = true;
+    retry();
+  }, [retry]);
+  return { projectsRead, pruneAfterRefresh };
+}
+
+function draftFlags(draft: ControlDraft | null, stored: ControlDraft | null) {
+  const both = !!draft && !!stored;
+  const watchesInvalid = both && isWatchesInvalid(draft, stored);
+  const projectsInvalid = both && isProjectsInvalid(draft, stored);
+  return {
+    policyDirty: both && isPolicyDirty(draft, stored),
+    watchesDirty: both && isWatchesDirty(draft, stored),
+    projectsDirty: both && isProjectsDirty(draft, stored),
+    watchesInvalid,
+    projectsInvalid,
+    invalid: watchesInvalid || projectsInvalid,
+  };
+}
+
 type Params = { workspaceId: string; coordinatorId: string; canManage: boolean };
 
 /**
@@ -145,7 +196,6 @@ type Params = { workspaceId: string; coordinatorId: string; canManage: boolean }
  */
 export function useControlDraft({ workspaceId, coordinatorId, canManage }: Params) {
   const { t } = useTranslation();
-  const read = useControlRead(workspaceId, coordinatorId);
   const {
     stored,
     draft,
@@ -158,7 +208,7 @@ export function useControlDraft({ workspaceId, coordinatorId, canManage }: Param
     sequenceRef,
     setStored,
     setDraft,
-  } = read;
+  } = useControlRead(workspaceId, coordinatorId);
 
   const update = useCallback((change: (current: ControlDraft) => ControlDraft) => {
     const current = draftRef.current;
@@ -178,10 +228,15 @@ export function useControlDraft({ workspaceId, coordinatorId, canManage }: Param
     (watches: WatchesDraft) => update((d) => ({ ...d, watches })),
     [update],
   );
-
   const setProjects = useCallback(
     (projects: ProjectsDraft) => update((d) => ({ ...d, projects })),
     [update],
+  );
+  const { projectsRead, pruneAfterRefresh } = useProjectsListing(
+    workspaceId,
+    draft,
+    draftRef,
+    setDraft,
   );
 
   const save = async () => {
@@ -206,27 +261,26 @@ export function useControlDraft({ workspaceId, coordinatorId, canManage }: Param
       const validation = fieldErrorOf(error);
       if (validation) setFieldError(validation);
       else toast.error(t("coordinator:failedToSaveCoordinator"));
+      if (validation?.code === "projects_foreign_entry") pruneAfterRefresh();
       throw error;
     }
   };
 
-  const policyDirty = !!draft && !!stored && isPolicyDirty(draft, stored);
-  const watchesDirty = !!draft && !!stored && isWatchesDirty(draft, stored);
-  const projectsDirty = !!draft && !!stored && isProjectsDirty(draft, stored);
-  const watchesInvalid = !!draft && !!stored && isWatchesInvalid(draft, stored);
-  const projectsInvalid = !!draft && !!stored && isProjectsInvalid(draft, stored);
-  const invalid = watchesInvalid || projectsInvalid;
+  const { policyDirty, watchesDirty, projectsDirty, watchesInvalid, projectsInvalid, invalid } =
+    draftFlags(draft, stored);
+
+  const selected = draft?.projects?.scope === "selected";
 
   useSettingsSaveContributor({
     id: "coordinator-control",
     revision: JSON.stringify(draft),
     isDirty: canManage && (policyDirty || watchesDirty || projectsDirty),
-    canSave: !invalid,
+    canSave: !invalid && !(projectsDirty && selected && projectsRead.status !== "ready"),
     invalidReason: invalidReason(t, watchesInvalid, projectsInvalid),
     save,
     discard: () => {
-      setDraft(storedRef.current);
       draftRef.current = storedRef.current;
+      setDraft(storedRef.current);
       setFieldError(null);
     },
   });
@@ -244,5 +298,6 @@ export function useControlDraft({ workspaceId, coordinatorId, canManage }: Param
     watchesDirty,
     projectsDirty,
     invalid,
+    projectsRead,
   };
 }

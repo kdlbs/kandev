@@ -70,6 +70,28 @@ func TestSaveSettings_ProjectsValidationCodes(t *testing.T) {
 	}
 }
 
+func TestSaveSettings_ProjectsValidationCodeOrderWithSeveralFailures(t *testing.T) {
+	_, c, svc, _ := projectsFixture(t)
+	many := make([]ProjectEntry, 0, 52)
+	for i := 0; i < 51; i++ {
+		many = append(many, repoEntry(fmt.Sprintf("r%02d", i)))
+	}
+	many = append(many, repoEntry("r00"))
+	cases := []struct{ name, body, code string }{
+		{"shape before empty", `{"projects":{"scope":"selected","entries":[{"kind":"x","id":"a"}]}}`, codeInvalidProjects},
+		{"too many before duplicate and foreign", projectsBody("selected", false, many...), codeProjectsTooMany},
+		{"duplicate before foreign", projectsBody("selected", false, repoEntry("repo-x"), repoEntry("repo-x")), codeProjectsDuplicate},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := svc.SaveSettings(context.Background(), c.WorkspaceID, c.ID, []byte(tc.body))
+			if got := settingsCode(t, err); got != tc.code {
+				t.Fatalf("code = %q, want %q", got, tc.code)
+			}
+		})
+	}
+}
+
 func TestSaveSettings_ProjectsChangeArchivesAndRaisesRevisionOnce(t *testing.T) {
 	store, c, svc, _ := projectsFixture(t)
 	got := mustSave(t, svc, c.WorkspaceID, c.ID, projectsBody("selected", true, setEntry("set-1"), repoEntry("repo-d")))

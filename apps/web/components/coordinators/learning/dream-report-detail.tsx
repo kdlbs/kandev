@@ -77,12 +77,16 @@ function ItemCard({ item, rating, canManage, failed, onRate }: ItemProps) {
     <li className="space-y-2 rounded-md border p-3" data-testid={`learning-item-${item.id}`}>
       <p className="flex flex-wrap gap-x-3 text-sm">
         <span className="font-medium">
-          {t("coordinator:learningItemHeading", { n: item.position })}
+          {t("coordinator:learningItemHeading", { n: item.position + 1 })}
         </span>
         <span>{t(`coordinator:learningKind_${item.kind}`, { defaultValue: item.kind })}</span>
         <span data-testid="learning-item-gate">
           {refused
-            ? t("coordinator:learningGateRefused", { reason: item.gate })
+            ? t("coordinator:learningGateRefused", {
+                reason: t(`coordinator:learningGateReason_${item.gate}`, {
+                  defaultValue: item.gate,
+                }),
+              })
             : t("coordinator:learningGatePass")}
         </span>
         <ReplayLine item={item} />
@@ -148,7 +152,8 @@ function Header({ dream }: { dream: DreamDetail }) {
   return (
     <div className="space-y-1 text-sm" data-testid="learning-detail-header">
       <p className="font-medium">
-        {formatDateTime(dream.started_at)}. {t(`coordinator:learningStatus_${dream.status}`)}
+        {formatDateTime(dream.started_at)}.{" "}
+        {t(`coordinator:learningStatus_${dream.status}`, { defaultValue: dream.status })}
       </p>
       <p className="text-muted-foreground">
         {t("coordinator:learningDetailWindow", {

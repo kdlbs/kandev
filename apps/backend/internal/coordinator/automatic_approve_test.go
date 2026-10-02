@@ -409,3 +409,20 @@ func TestAutomaticApproval_IdentityLookupErrorDoesNotLower(t *testing.T) {
 		t.Fatal("a lookup error must not lower the class")
 	}
 }
+
+func TestAutomaticApproval_DailyLimitIgnoresProjectScope(t *testing.T) {
+	store, c, _, svc, _ := raisedFixture(t)
+	for i := 0; i < automaticDailyLimit; i++ {
+		proposeAuto(t, store, c, svc)
+	}
+	mustExec(t, store, `UPDATE coordinators SET project_scope = 'selected', include_no_repository = 0 WHERE id = ?`, c.ID)
+	mustExec(t, store, `INSERT INTO coordinator_watch_projects (coordinator_id, entry_kind, entry_id, workspace_id, created_at) VALUES (?, 'repository', 'elsewhere', ?, ?)`,
+		c.ID, c.WorkspaceID, automaticNow)
+	n, err := store.CountAutomaticDecidedTx(context.Background(), store.db, c.ID, automaticNow.Add(-automaticLimitWindow))
+	if err != nil || n != automaticDailyLimit {
+		t.Fatalf("count after narrowing the scope = %d err = %v, want %d", n, err, automaticDailyLimit)
+	}
+	if _, res := proposeAuto(t, store, c, svc); res == nil || res.Note != limitReachedNote {
+		t.Fatalf("res = %+v", res)
+	}
+}

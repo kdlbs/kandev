@@ -706,8 +706,8 @@
   "learningLoadMore": "Mostrar relatórios mais antigos",
   "learningOpen": "Abrir",
   "learningStatus_running": "em execução",
-  "learningStatus_ok": "ok",
-  "learningStatus_clean": "limpo",
+  "learningStatus_ok": "Concluído",
+  "learningStatus_clean": "Nada a alterar",
   "learningStatus_partial": "parcial",
   "learningStatus_failed": "falhou",
   "learningStatus_skipped": "ignorado",
@@ -745,5 +745,12 @@
   "learningConsideredNote": "Relatado pelo agente, não verificado",
   "learningConsideredNone": "Nada foi relatado.",
   "learningRetireTitle": "Retirar ou substituir",
-  "learningRetireNone": "Nenhum neste relatório."
+  "learningRetireNone": "Nenhum neste relatório.",
+  "learningGateReason_size": "a proposta era demasiado grande",
+  "learningGateReason_thin_evidence": "provas insuficientes",
+  "learningGateReason_citation_unresolved": "não foi possível encontrar um turno citado",
+  "learningGateReason_credential": "continha uma credencial",
+  "learningGateReason_forbidden_target": "visa algo que o coordenador não pode alterar",
+  "learningGateReason_no_target": "não indica nenhum alvo",
+  "learningGateReason_bad_target": "o alvo não é válido"
 }
