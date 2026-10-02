@@ -135,7 +135,7 @@ type literalFileSnapshot struct {
 func snapshotLiteralFile(t *testing.T, dir, path string) literalFileSnapshot {
 	t.Helper()
 	var got literalFileSnapshot
-	got.indexed = runGit(t, dir, "ls-files", "-z", "--", ":(literal)"+path) != ""
+	got.indexed = runGit(t, dir, "--no-literal-pathspecs", "ls-files", "-z", "--", ":(literal)"+path) != ""
 	if got.indexed {
 		got.index = runGit(t, dir, "show", ":"+path)
 	}
@@ -145,6 +145,21 @@ func snapshotLiteralFile(t *testing.T, dir, path string) literalFileSnapshot {
 	}
 	got.exists, got.worktree = err == nil, string(data)
 	return got
+}
+
+// @covers AC-PLATFORM-WORKSPACE-GIT-STATUS-001.37
+func TestGitOperatorLiteralPathspecEnvironment(t *testing.T) {
+	for _, operation := range []string{"stage", "unstage"} {
+		t.Run(operation, func(t *testing.T) {
+			pair := [2]string{"new[ab].txt", "newa.txt"}
+			dir := setupLiteralSelectionRepo(t, pair)
+			t.Setenv("GIT_LITERAL_PATHSPECS", "1")
+			checkLiteralMutation(t, dir, operation, []string{pair[0]}, []string{pair[0]}, []string{pair[1]})
+			if os.Getenv("GIT_LITERAL_PATHSPECS") != "1" {
+				t.Fatal("selected command changed the process environment")
+			}
+		})
+	}
 }
 
 func checkLiteralMutation(t *testing.T, dir, operation string, paths, selected, unselected []string) {

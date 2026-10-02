@@ -76,6 +76,11 @@ names while preserving Git's actual directory-subtree selection.
 Use one small process-local path representation helper shared by selected mutations and patches.
 It does not validate refs, normalize names, enumerate filesystem matches, or alter global Git
 environment/configuration. Git argument validation remains authoritative before execution.
+Selected mutation and per-file patch subprocesses set `GIT_LITERAL_PATHSPECS=0` in their own
+copied environments so an inherited literal-mode setting cannot turn the internal marker into
+filename text. `GitOperator` uses its existing per-command override helper; tracker patches use
+an environment-aware sibling of the capped streaming helper. Generic capped diffs retain their
+inherited environment, and empty-list mutations receive no selection override.
 
 For nonempty selections, Stage keeps `add --` and Unstage keeps `reset HEAD --`, followed by
 the literal path arguments. Empty selections keep `add -A` and `reset HEAD` respectively.

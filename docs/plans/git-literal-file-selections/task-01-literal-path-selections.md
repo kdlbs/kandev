@@ -181,3 +181,31 @@ Catalog validation (340 decisions, 1295 specifications), specification lint, pub
 validation (47 pages), coverage preflight (`covered`, no errors), and whitespace checks passed.
 Normal hook and external CI/review/merge evidence remains in the task plan; implementation
 completion does not assert merge.
+
+
+## Review remediation verification
+
+Real caller environment regressions fail before the scoped environment correction:
+
+```bash
+(cd apps/backend && GOMAXPROCS=2 go test -p 2 ./internal/agentctl/server/process -run '^(TestGitOperatorLiteralPathspecEnvironment|TestWorkspaceGitLiteralPathspecEnvironment|TestWorkspaceGitLiteralCachedFallback)$' -count=1)
+(cd apps/backend && GOMAXPROCS=2 go test -p 2 ./internal/agentctl/server/api -run '^TestHandleGitLiteralSelections/(stage|unstage)/literal-env-1$' -count=1)
+```
+
+After correction, all new/changed caller regressions and the affected streaming contracts run:
+
+```bash
+(cd apps/backend && GOMAXPROCS=2 go test -race -p 2 ./internal/agentctl/server/process -run '^(TestGitOperatorLiteralSelections|TestGitOperatorLiteralPathspecEnvironment|TestWorkspaceGitLiteralPatchSelection|TestWorkspaceGitLiteralPathspecEnvironment|TestWorkspaceGitLiteralCachedFallback|TestCapDiffOutput_Truncation|TestDiffBudgetAndCarryForwardHonorCancellation)$' -count=1)
+(cd apps/backend && GOMAXPROCS=2 go test -race -p 2 ./internal/agentctl/server/process -run '^TestCapDiffOutputCancellationClosesReader$' -count=1)
+(cd apps/backend && GOMAXPROCS=2 go test -race -p 2 ./internal/agentctl/server/api -run '^(TestHandleGitLiteralSelections|TestHandleGitStageAndUnstage)$' -count=1)
+```
+
+Follow with the same scoped lint, document/coverage/whitespace gates and normal hooks above.
+No full-suite or passing unrelated checks are added.
+
+Review remediation RED: process exit 1, package 0.412s; HTTP exit 1, package 0.260s.
+Process caller GREEN: exit 0, package 7.722s, seven selected functions. The initial pattern
+also named a nonexistent cancellation function; the actual cancellation contract was then
+run by the exact name above and passed (package 1.059s). API GREEN: exit 0, package 1.984s. Scoped process/API lint passed with concurrency 2 and
+zero issues. Catalog/specification/public-doc (47 pages)/coverage/whitespace gates passed.
+Normal hooks and exact-head external delivery evidence remain in the task plan.

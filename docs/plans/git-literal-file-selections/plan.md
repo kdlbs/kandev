@@ -146,7 +146,8 @@ coverage preflight and whitespace checks passed. Delivery is externally pending.
 Tracked bracket matching differs from untracked admission, so tracked files are the primary
 regression. Test fixtures must use distinct markers and preserve real rename detection.
 Literal prefixes belong only to selection sites, never raw file keys or filesystem reads.
-Inherited Git pathspec environment settings retain existing handling; do not redesign them.
+Only selected subprocesses override `GIT_LITERAL_PATHSPECS` to parse the internal marker;
+generic queries and the process environment retain their inherited behavior.
 
 One local heavy command at a time: `GOMAXPROCS=2`, Go `-p 2`, lint concurrency 2; retain and
 join every handle. Preserve others' work and shared branches/worktrees/caches. Normal commit
@@ -157,3 +158,19 @@ full review if needed; acknowledge/skipped output is not review evidence.
 Preserve the published SHA as CI runs; main movement alone never warrants rebase. A cheap
 isolated compatibility check and owned byte diff precede any meaningful-overlap decision.
 Parent directions arrive by interrupt and supersede older queued contradictory messages.
+
+
+## Review remediation: inherited literal mode
+
+The authenticated full CodeRabbit review found that `GIT_LITERAL_PATHSPECS=1` disables parsing
+of the internal `:(literal)` marker. Real operator, mixed tracker/facet, cached fallback and
+repository-scoped HTTP regressions reproduced missing selections and empty patches.
+The correction forces marker parsing only in selected subprocess environments, using the
+existing operator override seam and an environment-aware sibling of capped streaming.
+Generic diff commands and the process environment retain inherited literal-mode behavior.
+No ref/flag validation, admission, lifecycle or budget changes are introduced.
+Remediation RED: process 0.412s, HTTP 0.260s, expected missing selection/patch failures.
+Final race checks passed: process seven-function caller/stream selection 7.722s,
+exact streaming-cancellation 1.059s, HTTP selection 1.984s. Scoped lint passed zero issues;
+catalog/spec/public-doc (47 pages)/coverage/whitespace gates passed.
+Exact remediation commands and results are in Task 01. External delivery remains pending.

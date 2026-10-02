@@ -18,41 +18,44 @@ import (
 // @covers AC-PLATFORM-WORKSPACE-GIT-STATUS-001.36, AC-PLATFORM-WORKSPACE-GIT-STATUS-001.37
 func TestHandleGitLiteralSelections(t *testing.T) {
 	for _, operation := range []string{"stage", "unstage"} {
-		t.Run(operation, func(t *testing.T) {
-			root := t.TempDir()
-			for _, repo := range []string{"selected", "other"} {
-				seedLiteralAPIRepo(t, root, repo)
-				if operation == "unstage" || repo == "other" {
-					runGitAPI(t, filepath.Join(root, repo), "add", "-A")
+		for _, setting := range []string{"0", "1"} {
+			t.Run(operation+"/literal-env-"+setting, func(t *testing.T) {
+				root := t.TempDir()
+				for _, repo := range []string{"selected", "other"} {
+					seedLiteralAPIRepo(t, root, repo)
+					if operation == "unstage" || repo == "other" {
+						runGitAPI(t, filepath.Join(root, repo), "add", "-A")
+					}
 				}
-			}
-			log, _ := logger.NewLogger(logger.LoggingConfig{Level: "error"})
-			cfg := &config.InstanceConfig{WorkDir: root, BaseBranches: map[string]string{"selected": "main", "other": "main"}}
-			manager := process.NewManager(cfg, log)
-			t.Cleanup(func() { _ = manager.StopForTeardown(context.Background()) })
-			server := NewServer(cfg, manager, nil, nil, log)
-			rec := postGitAPI(t, server, "/api/v1/git/"+operation, GitStageRequest{Repo: "selected", Paths: []string{"new[ab].txt"}})
-			if rec.Code != http.StatusOK || !decodeGitOperationResult(t, rec).Success {
-				t.Fatalf("%s HTTP %d: %s", operation, rec.Code, rec.Body.String())
-			}
-			checkLiteralAPIBytes(t, root, operation)
-			rec = getGitAPI(t, server, "/api/v1/git/status?repo=selected&fresh=true&details=wait")
-			var status struct {
-				Success     bool                      `json:"success"`
-				DetailState string                    `json:"detail_state"`
-				Files       map[string]types.FileInfo `json:"files"`
-			}
-			if err := json.Unmarshal(rec.Body.Bytes(), &status); err != nil {
-				t.Fatal(err)
-			}
-			file, ok := status.Files["new[ab].txt"]
-			if rec.Code != http.StatusOK || !status.Success || status.DetailState != "ready" || !ok || len(status.Files) != 2 {
-				t.Fatalf("detail-wait HTTP %d: %s", rec.Code, rec.Body.String())
-			}
-			if !strings.Contains(file.Diff, "+selected-selected-marker") || strings.Contains(file.Diff, "unselected-marker") {
-				t.Errorf("selected transport patch: %q", file.Diff)
-			}
-		})
+				t.Setenv("GIT_LITERAL_PATHSPECS", setting)
+				log, _ := logger.NewLogger(logger.LoggingConfig{Level: "error"})
+				cfg := &config.InstanceConfig{WorkDir: root, BaseBranches: map[string]string{"selected": "main", "other": "main"}}
+				manager := process.NewManager(cfg, log)
+				t.Cleanup(func() { _ = manager.StopForTeardown(context.Background()) })
+				server := NewServer(cfg, manager, nil, nil, log)
+				rec := postGitAPI(t, server, "/api/v1/git/"+operation, GitStageRequest{Repo: "selected", Paths: []string{"new[ab].txt"}})
+				if rec.Code != http.StatusOK || !decodeGitOperationResult(t, rec).Success {
+					t.Fatalf("%s HTTP %d: %s", operation, rec.Code, rec.Body.String())
+				}
+				checkLiteralAPIBytes(t, root, operation)
+				rec = getGitAPI(t, server, "/api/v1/git/status?repo=selected&fresh=true&details=wait")
+				var status struct {
+					Success     bool                      `json:"success"`
+					DetailState string                    `json:"detail_state"`
+					Files       map[string]types.FileInfo `json:"files"`
+				}
+				if err := json.Unmarshal(rec.Body.Bytes(), &status); err != nil {
+					t.Fatal(err)
+				}
+				file, ok := status.Files["new[ab].txt"]
+				if rec.Code != http.StatusOK || !status.Success || status.DetailState != "ready" || !ok || len(status.Files) != 2 {
+					t.Fatalf("detail-wait HTTP %d: %s", rec.Code, rec.Body.String())
+				}
+				if !strings.Contains(file.Diff, "+selected-selected-marker") || strings.Contains(file.Diff, "unselected-marker") {
+					t.Errorf("selected transport patch: %q", file.Diff)
+				}
+			})
+		}
 	}
 }
 
