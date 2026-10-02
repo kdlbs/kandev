@@ -240,8 +240,8 @@ func TestContributionHistoryRunningCommandStopsAtObservationDeadline(t *testing.
 	if err != nil {
 		t.Fatalf("ExplainContributionHistory returned error: %v", err)
 	}
-	if elapsed := time.Since(started); elapsed > 4*time.Second {
-		t.Fatalf("observation took %s, want it to stop near the 2-second deadline", elapsed)
+	if elapsed := time.Since(started); elapsed > contributionHistoryObservationTimeout+2*time.Second {
+		t.Fatalf("observation took %s, want it to stop near the %s deadline", elapsed, contributionHistoryObservationTimeout)
 	}
 	assertContributionHistoryNeutral(t, result, contributionHistoryReasonUnavailable)
 }
