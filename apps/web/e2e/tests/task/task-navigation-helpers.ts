@@ -146,13 +146,18 @@ export async function saveExpandedPaths(
 }
 
 export async function showNavigationFiles(page: Page, mobile: boolean) {
-  if (mobile) await page.getByRole("button", { name: "Files", exact: true }).tap();
-  else {
+  if (mobile) {
+    await page.getByRole("button", { name: "Files", exact: true }).tap();
+  } else {
     const session = new SessionPage(page);
     await session.waitForDockviewReady();
     await expect(page.getByTestId("dockview-task-layout")).toHaveAttribute("aria-busy", "false");
     await session.showSessionContext();
     await session.clickTab("Files");
+    const filesTab = page.locator(".dv-tab:visible").filter({
+      has: page.locator(".dv-default-tab").filter({ hasText: /^Files$/ }),
+    });
+    await expect(filesTab).toHaveClass(/dv-active-tab/, { timeout: 15_000 });
   }
   await expect(page.locator('[data-testid="files-panel"]:visible').first()).toBeVisible({
     timeout: 15_000,
