@@ -185,4 +185,17 @@ The retries-disabled replay of the archived shard exposed a fixture failure in t
 - The other initial failed CI leaf was checked against a temporary merge of PR head `b208a2a54cd86a03df03b809e3701865135a8e43` and current `main` `0ec0538aa038f2e8b8617fb4f5be6128f0cedbac`. The exact commit-spacing test passed 1/1 in the CI runtime container with retries disabled; current `main`'s row-size alignment resolves that assertion.
 - Documentation validation remains the prior 339-decision / 1,281-specification pass; no specification files changed during this fixup. `git diff --check` passed after recording these results.
 
-The full archived shard has not been rerun after the fixture correction. Fresh PR CI on the pushed head remains the final full-suite verification.
+PR CI on the pushed head reached terminal with 50 passed, 16 skipped, and no failed checks. Its retry artifact contained seven first-attempt failures that passed on retry, so that run did not validate the final fixture correction below.
+
+## E2E retry finding and fixture isolation (2026-10-02)
+
+The PR retry artifacts showed seven first-attempt failures that all passed on retry, with no final failures or timeouts. One was the changed navigation test: after a review test left `review_cumulative_test.txt` modified in the worker's shared repository checkout, `seedNavigationTasks` failed while checking out `origin/main`. Six retry-only failures came from unchanged review and mobile E2E specs.
+
+Navigation branch setup now creates and pushes fixture commits from a temporary Git worktree. It leaves the shared checkout's branch and local changes untouched. A new browser regression creates a divergent dirty branch, verifies the branch fixture is pushed while the checkout stays unchanged, and cleans up the temporary state. The existing navigation flow remains a separate clean-checkout test.
+
+- Before the fixture isolation change, the regression failed at `git checkout -b` with the same local-change conflict found in the PR artifact.
+- Afterward, `pnpm e2e:run --project chromium tests/task/task-navigation-responsiveness.spec.ts` passed 4/4, including the dirty-checkout regression and the existing navigation flow.
+- `pnpm e2e:run --project mobile-chrome tests/task/mobile-task-navigation-responsiveness.spec.ts` passed 1/1.
+- Web typecheck, targeted ESLint, Prettier, i18n ratchet, E2E sleep ratchet, and `git diff --check` passed.
+
+The fixture isolation change is not yet on the PR head. Fresh PR CI and retry-artifact verification remain outstanding.

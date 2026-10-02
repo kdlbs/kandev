@@ -40,24 +40,36 @@ async function waitForTreeResponse(
     .toBe(true);
 }
 
+export function seedNavigationBranch(backend: BackendContext) {
+  const git = new GitHelper(
+    path.join(backend.tmpDir, "repos", "e2e-repo"),
+    makeGitEnv(backend.tmpDir),
+  );
+  const branch = `e2e-navigation-${randomUUID()}`;
+  const worktreePath = path.join(backend.tmpDir, branch);
+  git.exec("git fetch --no-tags origin main");
+  git.exec(`git worktree add -b ${branch} "${worktreePath}" origin/main`);
+  const branchGit = new GitHelper(worktreePath, makeGitEnv(backend.tmpDir));
+  try {
+    for (const file of [ROOT_FILE, `${AVAILABLE}/available.ts`, `${HELD}/held.ts`])
+      branchGit.createFile(file, "export const navigationFixture = true;\n");
+    branchGit.stageAll();
+    if (branchGit.exec("git status --short").trim())
+      branchGit.commit("seed navigation responsiveness");
+    branchGit.exec(`git push origin ${branch}`);
+  } finally {
+    git.exec(`git worktree remove --force "${worktreePath}"`);
+  }
+  return branch;
+}
+
 export async function seedNavigationTasks(
   api: ApiClient,
   seed: SeedData,
   backend: BackendContext,
   executorProfileId?: string,
 ) {
-  const git = new GitHelper(
-    path.join(backend.tmpDir, "repos", "e2e-repo"),
-    makeGitEnv(backend.tmpDir),
-  );
-  const branch = `e2e-navigation-${randomUUID()}`;
-  git.exec("git fetch --no-tags origin main");
-  git.exec(`git checkout -b ${branch} origin/main`);
-  for (const file of [ROOT_FILE, `${AVAILABLE}/available.ts`, `${HELD}/held.ts`])
-    git.createFile(file, "export const navigationFixture = true;\n");
-  git.stageAll();
-  if (git.exec("git status --short").trim()) git.commit("seed navigation responsiveness");
-  git.exec(`git push origin ${branch}`);
+  const branch = seedNavigationBranch(backend);
   const profile = await createStandardProfile(api, "navigation-responsiveness");
   const tasks = [];
   for (const suffix of ["A", "B"]) {
