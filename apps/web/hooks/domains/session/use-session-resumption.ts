@@ -503,6 +503,7 @@ type ResetAndCheckParams = {
   session: SessionLike;
   setters: ResumeStateSetter;
   preventAutoStart: boolean;
+  preventAutoResume?: boolean;
   taskArchiveState: TaskArchiveState;
 };
 
@@ -521,6 +522,7 @@ function useSessionResetAndCheck({
   session,
   setters,
   preventAutoStart,
+  preventAutoResume,
   taskArchiveState,
 }: ResetAndCheckParams): SessionResetAndCheckResult {
   const requestKey = getSessionRequestKey(taskId, sessionId, taskArchiveState);
@@ -551,7 +553,7 @@ function useSessionResetAndCheck({
       generation: requestGenerationRef.current,
     };
     setCommittedRequest(activeRequestRef.current);
-  }, [requestKey]);
+  }, [requestKey, preventAutoResume]);
 
   // Reset all local state when session or task changes to prevent stale data
   // from a previous session leaking into the new one (e.g. topbar branch).
@@ -564,7 +566,7 @@ function useSessionResetAndCheck({
     setters.setRecoveryFailure?.(null);
     setters.setWorktreePath(null);
     setters.setWorktreeBranch(null);
-  }, [sessionId, taskId, taskArchiveState]); // eslint-disable-line react-hooks/exhaustive-deps -- intentional reset on dep change
+  }, [sessionId, taskId, taskArchiveState, preventAutoResume]); // eslint-disable-line react-hooks/exhaustive-deps -- intentional reset on dep change
 
   // Check session status and auto-resume if needed
   useEffect(() => {
@@ -573,6 +575,7 @@ function useSessionResetAndCheck({
       !sessionId ||
       connectionStatus !== "connected" ||
       taskArchiveState !== false ||
+      preventAutoResume ||
       hasAttemptedResume.current
     )
       return;
@@ -602,10 +605,24 @@ function useSessionResetAndCheck({
       }
     };
     void promise.then(clearIfCurrent, clearIfCurrent);
-  }, [taskId, sessionId, connectionStatus, session, preventAutoStart, taskArchiveState]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [
+    taskId,
+    sessionId,
+    connectionStatus,
+    session,
+    preventAutoStart,
+    preventAutoResume,
+    taskArchiveState,
+  ]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
-    if (!taskId || !sessionId || connectionStatus !== "connected" || taskArchiveState !== false) {
+    if (
+      !taskId ||
+      !sessionId ||
+      connectionStatus !== "connected" ||
+      taskArchiveState !== false ||
+      preventAutoResume
+    ) {
       return;
     }
     const capturedRequest = activeRequestRef.current;
@@ -671,7 +688,16 @@ function useSessionResetAndCheck({
       window.removeEventListener("focus", onWindowFocus);
       document.removeEventListener("visibilitychange", onVisibilityChange);
     };
-  }, [connectionStatus, preventAutoStart, session, sessionId, setters, taskArchiveState, taskId]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [
+    connectionStatus,
+    preventAutoStart,
+    preventAutoResume,
+    session,
+    sessionId,
+    setters,
+    taskArchiveState,
+    taskId,
+  ]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Freshly created remote sessions may return status before runtime metadata is available.
   // Retry a few times so topbar/tooltips can show remote details without manual refresh.
@@ -886,6 +912,7 @@ function useManualResumeSession({
 
 export type SessionResumptionOptions = {
   onTaskArchiveConflict?: () => void;
+  preventAutoResume?: boolean;
 };
 
 export function useSessionResumption(
@@ -953,6 +980,7 @@ export function useSessionResumption(
       session,
       setters,
       preventAutoStart: preventAutoStartAgentOnOpen,
+      preventAutoResume: options.preventAutoResume,
       taskArchiveState,
     });
 

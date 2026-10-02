@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { IconInfoCircle, IconLoader2 } from "@tabler/icons-react";
+import { IconAlertTriangle, IconInfoCircle, IconLoader2 } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { useAppStore } from "@/components/state-provider";
@@ -24,6 +24,7 @@ type QuickChatSetupProps = {
   workspaceId: string;
   canCreateConfigurationChat: boolean;
   pendingAgentId: string | null;
+  error?: string | null;
   onStart: (agentId: string, repositories: QuickChatRepositoryInput[]) => void;
   onCancel: () => void;
   onKindChange: (kind: QuickChatSessionKind) => void;
@@ -193,18 +194,40 @@ function RepositoryContextHelp() {
   );
 }
 
+function QuickChatSetupError({ error }: { error?: string | null }) {
+  const { t } = useTranslation();
+  if (!error) return null;
+  return (
+    <div
+      className="flex items-start gap-2 rounded-md border border-destructive/30 bg-destructive/10 p-3 text-xs text-destructive"
+      data-testid="quick-chat-setup-error"
+      role="alert"
+    >
+      <IconAlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-destructive" />
+      <div className="min-w-0 space-y-1 break-words">
+        <p className="font-medium">{t("chat:failedToStartQuickChat")}</p>
+        <p className="text-muted-foreground">{error}</p>
+      </div>
+    </div>
+  );
+}
+
 function SetupFooter({
   isStarting,
   startDisabled,
+  hasError,
   onCancel,
   onStart,
 }: {
   isStarting: boolean;
   startDisabled: boolean;
+  hasError?: boolean;
   onCancel: () => void;
   onStart: () => void;
 }) {
   const { t } = useTranslation();
+  let startLabel = hasError ? t("task:retry") : t("chat:startChatAction");
+  if (isStarting) startLabel = t("chat:startingChat");
   return (
     <footer
       className="flex shrink-0 items-center justify-end gap-2 border-t bg-popover px-4 py-3 sm:px-8"
@@ -221,7 +244,7 @@ function SetupFooter({
         data-dialog-default-action
       >
         {isStarting ? <IconLoader2 className="h-4 w-4 animate-spin" /> : null}
-        {isStarting ? t("chat:startingChat") : t("chat:startChatAction")}
+        {startLabel}
       </Button>
     </footer>
   );
@@ -231,6 +254,7 @@ export function QuickChatSetup({
   workspaceId,
   canCreateConfigurationChat,
   pendingAgentId,
+  error,
   onStart,
   onCancel,
   onKindChange,
@@ -302,11 +326,13 @@ export function QuickChatSetup({
             onRepositoryChange={handleRepositoryChange}
             onBranchChange={handleBranchChange}
           />
+          <QuickChatSetupError error={error} />
         </div>
       </div>
       <SetupFooter
         isStarting={isStarting}
         startDisabled={startDisabled}
+        hasError={Boolean(error)}
         onCancel={onCancel}
         onStart={() => {
           if (hasSelectedEnabledProfile) onStart(agentProfileId, selectedRepositories);

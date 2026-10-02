@@ -333,3 +333,20 @@ describe("quick terminal tabs", () => {
     expect(terminalState(store).activeKind).toBe("conversation");
   });
 });
+
+describe("late quick chat creation after deletion", () => {
+  it.each(["openQuickChat", "addQuickChatSession"] as const)(
+    "%s respects deletion tombstones",
+    (action) => {
+      const store = makeStore();
+      store.getState().openQuickChat(SESSION_A, WORKSPACE_A, "agent-a", "chat", "task-a");
+      store.getState().removeQuickChatSessionsForTask("task-a");
+      store.getState().openQuickChat(SESSION_B, WORKSPACE_A, "agent-b", "chat", "task-b");
+      store.getState()[action](SESSION_A, WORKSPACE_A, "agent-a", "chat", "task-a");
+      expect(store.getState().quickChat.sessions.map((session) => session.sessionId)).toEqual([
+        SESSION_B,
+      ]);
+      expect(store.getState().quickChat.activeSessionId).toBe(SESSION_B);
+    },
+  );
+});

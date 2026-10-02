@@ -3,6 +3,7 @@ import {
   clearMarker,
   closeQuickChatSession,
   pruneStaleSettledLedger,
+  pruneTombstones,
   reconcileQuickChatSessions,
   reconcileQuickTerminalTabs,
   removeQuickChatSession,
@@ -43,6 +44,8 @@ function upsertQuickChatSessionDraft(
   session: QuickChatSession,
 ): boolean {
   const { sessionId, workspaceId, agentProfileId, kind, taskId } = session;
+  quickChat.tombstonedSessions = pruneTombstones(quickChat.tombstonedSessions);
+  if (quickChat.tombstonedSessions[sessionId]) return false;
   const existing = quickChat.sessions.find((session) => session.sessionId === sessionId);
   if (existing) {
     if (existing.workspaceId !== workspaceId) return false;

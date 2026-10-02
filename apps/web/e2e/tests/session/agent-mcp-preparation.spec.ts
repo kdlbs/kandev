@@ -34,8 +34,8 @@ test.describe("Agent MCP preparation recovery", () => {
       await session.waitForLoad();
 
       const preparation = testPage.getByTestId("prepare-progress-panel");
-      await expect(preparation).toHaveAttribute("data-status", "completed_with_error");
-      await preparation.getByRole("button", { name: "Show preparation details" }).click();
+      await expect(preparation).toHaveAttribute("data-status", "completed_with_warnings");
+      await expect(preparation).toHaveAttribute("data-expanded", "true");
       await expect(preparation).toContainText("Prepare workspace");
       await expect(preparation).toContainText("Discover servers: plugin-atlassian-jira");
       await expect(preparation).toContainText("Apply profile selection: plugin-atlassian-jira");
@@ -46,8 +46,8 @@ test.describe("Agent MCP preparation recovery", () => {
       await testPage.reload();
       await session.waitForLoad();
       const hydratedPreparation = testPage.getByTestId("prepare-progress-panel");
-      await expect(hydratedPreparation).toHaveAttribute("data-status", "completed_with_error");
-      await hydratedPreparation.getByRole("button", { name: "Show preparation details" }).click();
+      await expect(hydratedPreparation).toHaveAttribute("data-status", "completed_with_warnings");
+      await expect(hydratedPreparation).toHaveAttribute("data-expanded", "true");
       await expect(hydratedPreparation).toContainText("Verify connection: plugin-atlassian-jira");
       const actions = hydratedPreparation.getByTestId("agent-mcp-recovery-actions");
       await expect(actions).toContainText("Authentication is required.");

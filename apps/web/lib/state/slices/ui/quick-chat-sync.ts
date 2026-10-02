@@ -28,7 +28,7 @@ export function pruneStaleSettledLedger(
   return Object.fromEntries(retained);
 }
 
-function pruneTombstones(
+export function pruneTombstones(
   tombstones: QuickChatState["tombstonedSessions"],
   now = Date.now(),
 ): QuickChatState["tombstonedSessions"] {

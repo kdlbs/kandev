@@ -33,16 +33,16 @@ test("phone recovery opens the exact MCP sign-in terminal in the terminal panel"
     await session.waitForLoad();
 
     const preparation = testPage.getByTestId("prepare-progress-panel");
-    await expect(preparation).toHaveAttribute("data-status", "completed_with_error");
-    await preparation.getByRole("button", { name: "Show preparation details" }).tap();
+    await expect(preparation).toHaveAttribute("data-status", "completed_with_warnings");
+    await expect(preparation).toHaveAttribute("data-expanded", "true");
     await expect(preparation).toContainText("Discover servers: plugin-atlassian-jira");
     await expect(preparation).toContainText("Verify connection: plugin-atlassian-jira");
 
     await testPage.reload();
     await session.waitForLoad();
     const hydratedPreparation = testPage.getByTestId("prepare-progress-panel");
-    await expect(hydratedPreparation).toHaveAttribute("data-status", "completed_with_error");
-    await hydratedPreparation.getByRole("button", { name: "Show preparation details" }).tap();
+    await expect(hydratedPreparation).toHaveAttribute("data-status", "completed_with_warnings");
+    await expect(hydratedPreparation).toHaveAttribute("data-expanded", "true");
     await expect(hydratedPreparation).toContainText("Verify connection: plugin-atlassian-jira");
     const authenticate = hydratedPreparation.getByTestId("agent-mcp-authenticate");
     const buttonBox = await authenticate.boundingBox();

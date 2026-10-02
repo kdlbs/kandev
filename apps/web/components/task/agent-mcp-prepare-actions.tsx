@@ -12,6 +12,8 @@ import {
   retryAgentMcpConnection,
 } from "@/lib/api/domains/session-api";
 import { fetchTerminals, type TerminalInfo } from "@/lib/api/domains/user-shell-api";
+import { isAgentMcpAuthWarning } from "@/lib/prepare/agent-mcp-warning";
+import { cn } from "@/lib/utils";
 import type { PrepareStepInfo, UserShellInfo } from "@/lib/state/slices/session-runtime/types";
 
 const FAILURE_LABEL_KEYS: Record<string, string> = {
@@ -203,7 +205,14 @@ export function AgentMcpPrepareActions({
 
   return (
     <div className="mt-2 space-y-2" data-testid="agent-mcp-recovery-actions">
-      <p className="text-xs text-destructive">{t(agentMcpFailureLabelKey(step.failureCode))}</p>
+      <p
+        className={cn(
+          "text-xs",
+          isAgentMcpAuthWarning(step) ? "text-amber-500" : "text-destructive",
+        )}
+      >
+        {t(agentMcpFailureLabelKey(step.failureCode))}
+      </p>
       <RecoveryActionControls
         failureCode={step.failureCode}
         pending={pending}

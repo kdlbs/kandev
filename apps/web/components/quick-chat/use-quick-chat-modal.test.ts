@@ -24,6 +24,19 @@ vi.mock("@/components/toast-provider", () => ({
 
 vi.mock("@/lib/api/domains/workspace-api", () => ({
   startQuickChat: (...args: unknown[]) => mockStartQuickChat(...args),
+  getQuickChatRetainedSessionFromError: (err: unknown) => {
+    if (
+      err &&
+      typeof err === "object" &&
+      "body" in err &&
+      err.body &&
+      typeof err.body === "object"
+    ) {
+      const b = err.body as { task_id?: string; session_id?: string };
+      if (b.task_id && b.session_id) return { taskId: b.task_id, sessionId: b.session_id };
+    }
+    return null;
+  },
 }));
 
 vi.mock("@/lib/agent-profile-recent-use", () => ({
@@ -84,6 +97,7 @@ function makeAppState() {
     removeQuickTerminal: vi.fn(),
     renameQuickChatSession: vi.fn(),
     openQuickChat: vi.fn(),
+    upsertQuickChatSessionFromEvent: vi.fn(),
     applyAgentProfileRecentUse: vi.fn(),
     setQuickChatTabOrder: vi.fn(),
     clearQuickChatTabOrder: vi.fn(),
@@ -112,6 +126,7 @@ function makeStore(overrides: Partial<MockStore> = {}): MockStore {
     removeQuickTerminal: vi.fn(),
     renameQuickChatSession: vi.fn(),
     openQuickChat: vi.fn(),
+    upsertQuickChatSessionFromEvent: vi.fn(),
     applyAgentProfileRecentUse: vi.fn(),
     agentProfiles: [
       { id: "agent-a", label: "Agent A", agent_id: "a", agent_name: "Agent A" },
@@ -302,14 +317,17 @@ describe("useQuickChatModal — setup lifecycle", () => {
       await flushPromises();
     });
 
-    expect(mockAppState.openQuickChat).not.toHaveBeenCalledWith(
-      "sess-a",
-      expect.anything(),
-      expect.anything(),
-      expect.anything(),
-      expect.anything(),
+    expect(mockAppState.openQuickChat).not.toHaveBeenCalled();
+    expect(mockDeleteTask).not.toHaveBeenCalled();
+    expect(mockAppState.upsertQuickChatSessionFromEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionId: "sess-a",
+        workspaceId: WORKSPACE_ID,
+        agentProfileId: "agent-a",
+        kind: "chat",
+        taskId: "task-a",
+      }),
     );
-    expect(mockDeleteTask).toHaveBeenCalledWith("task-a");
   });
 });
 
@@ -500,86 +518,8 @@ describe("useAgentSelection — happy path", () => {
   });
 });
 
-describe("useAgentSelection — supersession", () => {
-  it("rapid-pick: a newer pick deletes the older orphan task", async () => {
-    const store = makeStore();
-    let resolveFirst!: (v: { task_id: string; session_id: string }) => void;
-    const firstPromise = new Promise<{ task_id: string; session_id: string }>((r) => {
-      resolveFirst = r;
-    });
-    mockStartQuickChat
-      .mockImplementationOnce(() => firstPromise)
-      .mockResolvedValueOnce({ task_id: "task-b", session_id: "sess-b" });
-
-    const { result } = renderHook(() => useAgentSelection(WORKSPACE_ID, store));
-
-    // Click A — request hangs.
-    act(() => {
-      void result.current.handleSelectAgent("agent-a");
-    });
-    expect(result.current.pendingAgentId).toBe("agent-a");
-
-    // Click B — supersedes A.
-    await act(async () => {
-      await result.current.handleSelectAgent("agent-b");
-    });
-    expect(store.openQuickChat).toHaveBeenCalledWith(
-      "sess-b",
-      WORKSPACE_ID,
-      "agent-b",
-      "chat",
-      "task-b",
-    );
-
-    // Now A resolves — its orphan task is deleted instead of opening a stale session.
-    await act(async () => {
-      resolveFirst({ task_id: "task-a", session_id: "sess-a" });
-      await flushPromises();
-    });
-    expect(mockDeleteTask).toHaveBeenCalledWith("task-a");
-    expect(recordRecentUseMock).toHaveBeenCalledTimes(1);
-    expect(recordRecentUseMock).toHaveBeenCalledWith("quick_chat", "agent-b", expect.any(Function));
-    expect(store.openQuickChat).not.toHaveBeenCalledWith(
-      "sess-a",
-      expect.anything(),
-      expect.anything(),
-    );
-  });
-
-  it("reset() during in-flight request deletes the resolved task", async () => {
-    const store = makeStore();
-    let resolveStart!: (v: { task_id: string; session_id: string }) => void;
-    mockStartQuickChat.mockImplementationOnce(
-      () =>
-        new Promise<{ task_id: string; session_id: string }>((r) => {
-          resolveStart = r;
-        }),
-    );
-
-    const { result } = renderHook(() => useAgentSelection(WORKSPACE_ID, store));
-
-    act(() => {
-      void result.current.handleSelectAgent("agent-a");
-    });
-    expect(result.current.pendingAgentId).toBe("agent-a");
-
-    // User does something that supersedes the in-flight pick (handleNewChat, tab switch, etc.).
-    act(() => {
-      result.current.reset();
-    });
-    expect(result.current.pendingAgentId).toBeNull();
-
-    await act(async () => {
-      resolveStart({ task_id: "task-a", session_id: "sess-a" });
-      await flushPromises();
-    });
-    expect(store.openQuickChat).not.toHaveBeenCalled();
-    expect(mockDeleteTask).toHaveBeenCalledWith("task-a");
-  });
-});
-
 describe("useAgentSelection — error handling", () => {
-  it("does not toast when a superseded request rejects (avoid noise from races)", async () => {
+  it("does not toast or set error when a superseded request rejects", async () => {
     const store = makeStore();
     let rejectStart!: (e: Error) => void;
     mockStartQuickChat.mockImplementationOnce(
@@ -604,9 +544,10 @@ describe("useAgentSelection — error handling", () => {
     });
 
     expect(mockToast).not.toHaveBeenCalled();
+    expect(result.current.setupError).toBeNull();
   });
 
-  it("toasts when the current (non-superseded) request rejects", async () => {
+  it("sets setupError inline without toasting when current request fails before session exists", async () => {
     const store = makeStore();
     mockStartQuickChat.mockRejectedValueOnce(new Error("server exploded"));
     const { result } = renderHook(() => useAgentSelection(WORKSPACE_ID, store));
@@ -615,14 +556,71 @@ describe("useAgentSelection — error handling", () => {
       await result.current.handleSelectAgent("agent-a");
     });
 
-    expect(mockToast).toHaveBeenCalledWith(
+    expect(result.current.setupError).toBe("server exploded");
+    expect(mockToast).not.toHaveBeenCalled();
+    expect(result.current.pendingAgentId).toBeNull();
+  });
+
+  it("opens retained session tab when request fails with retained session identity", async () => {
+    const store = makeStore();
+    const errorWithRetainedSession = {
+      body: { error: "launch failed", task_id: "task-retained-1", session_id: "sess-retained-1" },
+    };
+    mockStartQuickChat.mockRejectedValueOnce(errorWithRetainedSession);
+    const { result } = renderHook(() => useAgentSelection(WORKSPACE_ID, store));
+
+    await act(async () => {
+      await result.current.handleSelectAgent("agent-a");
+    });
+
+    expect(store.openQuickChat).toHaveBeenCalledWith(
+      "sess-retained-1",
+      WORKSPACE_ID,
+      "agent-a",
+      "chat",
+      "task-retained-1",
+    );
+    expect(result.current.setupError).toBeNull();
+    expect(mockToast).not.toHaveBeenCalled();
+  });
+
+  it("upserts retained session without activating when superseded request fails with retained identity", async () => {
+    const store = makeStore();
+    let rejectStart!: (e: unknown) => void;
+    mockStartQuickChat.mockImplementationOnce(
+      () =>
+        new Promise<{ task_id: string; session_id: string }>((_resolve, reject) => {
+          rejectStart = reject;
+        }),
+    );
+
+    const { result } = renderHook(() => useAgentSelection(WORKSPACE_ID, store));
+
+    act(() => {
+      void result.current.handleSelectAgent("agent-a");
+    });
+    act(() => {
+      result.current.reset();
+    });
+
+    await act(async () => {
+      rejectStart({
+        body: { error: "launch failed", task_id: "task-late-1", session_id: "sess-late-1" },
+      });
+      await flushPromises();
+    });
+
+    expect(store.openQuickChat).not.toHaveBeenCalled();
+    expect(store.upsertQuickChatSessionFromEvent).toHaveBeenCalledWith(
       expect.objectContaining({
-        title: "Failed to start quick chat",
-        description: "server exploded",
-        variant: "error",
+        sessionId: "sess-late-1",
+        workspaceId: WORKSPACE_ID,
+        agentProfileId: "agent-a",
+        kind: "chat",
+        taskId: "task-late-1",
       }),
     );
-    expect(result.current.pendingAgentId).toBeNull();
+    expect(mockDeleteTask).not.toHaveBeenCalled();
   });
 });
 

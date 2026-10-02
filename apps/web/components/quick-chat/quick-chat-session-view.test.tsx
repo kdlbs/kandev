@@ -97,7 +97,9 @@ describe("QuickChatSessionView session resumption", () => {
 
     render(<QuickChatSessionView session={{ ...session, taskId: DESCRIPTOR_TASK_ID }} />);
 
-    expect(useSessionResumption).toHaveBeenCalledWith(DESCRIPTOR_TASK_ID, session.sessionId, null);
+    expect(useSessionResumption).toHaveBeenCalledWith(DESCRIPTOR_TASK_ID, session.sessionId, null, {
+      preventAutoResume: false,
+    });
   });
 
   it("waits for session hydration before resuming a descriptor task", () => {
@@ -105,7 +107,9 @@ describe("QuickChatSessionView session resumption", () => {
       <QuickChatSessionView session={{ ...session, taskId: DESCRIPTOR_TASK_ID }} />,
     );
 
-    expect(useSessionResumption).toHaveBeenLastCalledWith(null, session.sessionId, null);
+    expect(useSessionResumption).toHaveBeenLastCalledWith(null, session.sessionId, null, {
+      preventAutoResume: false,
+    });
 
     sessionRows[session.sessionId] = { task_id: HYDRATED_TASK_ID };
     view.rerender(<QuickChatSessionView session={{ ...session, taskId: DESCRIPTOR_TASK_ID }} />);
@@ -114,6 +118,7 @@ describe("QuickChatSessionView session resumption", () => {
       DESCRIPTOR_TASK_ID,
       session.sessionId,
       null,
+      { preventAutoResume: false },
     );
   });
 
@@ -122,7 +127,9 @@ describe("QuickChatSessionView session resumption", () => {
 
     render(<QuickChatSessionView session={session} />);
 
-    expect(useSessionResumption).toHaveBeenCalledWith(HYDRATED_TASK_ID, session.sessionId, null);
+    expect(useSessionResumption).toHaveBeenCalledWith(HYDRATED_TASK_ID, session.sessionId, null, {
+      preventAutoResume: false,
+    });
   });
 
   it("passes the hydrated task archive state to session recovery", () => {
@@ -131,13 +138,17 @@ describe("QuickChatSessionView session resumption", () => {
 
     render(<QuickChatSessionView session={session} />);
 
-    expect(useSessionResumption).toHaveBeenCalledWith(HYDRATED_TASK_ID, session.sessionId, true);
+    expect(useSessionResumption).toHaveBeenCalledWith(HYDRATED_TASK_ID, session.sessionId, true, {
+      preventAutoResume: false,
+    });
   });
 
   it("uses hydrated Quick Chat ownership when the ephemeral task is absent from kanban tasks", () => {
     const view = render(<QuickChatSessionView session={session} />);
 
-    expect(useSessionResumption).toHaveBeenLastCalledWith(null, session.sessionId, null);
+    expect(useSessionResumption).toHaveBeenLastCalledWith(null, session.sessionId, null, {
+      preventAutoResume: false,
+    });
 
     quickChatSessions.push({ sessionId: session.sessionId, taskId: HYDRATED_TASK_ID });
     view.rerender(<QuickChatSessionView session={session} />);
@@ -146,13 +157,16 @@ describe("QuickChatSessionView session resumption", () => {
       HYDRATED_TASK_ID,
       session.sessionId,
       false,
+      { preventAutoResume: true },
     );
   });
 
   it("passes a null task id until session hydration provides one", () => {
     const view = render(<QuickChatSessionView session={session} />);
 
-    expect(useSessionResumption).toHaveBeenLastCalledWith(null, session.sessionId, null);
+    expect(useSessionResumption).toHaveBeenLastCalledWith(null, session.sessionId, null, {
+      preventAutoResume: false,
+    });
 
     sessionRows[session.sessionId] = { task_id: "task-after-hydration" };
     view.rerender(<QuickChatSessionView session={session} />);
@@ -161,7 +175,57 @@ describe("QuickChatSessionView session resumption", () => {
       "task-after-hydration",
       session.sessionId,
       null,
+      { preventAutoResume: false },
     );
+  });
+
+  it("does not treat a dismissed historical error as active", () => {
+    sessionRows[session.sessionId] = {
+      task_id: HYDRATED_TASK_ID,
+      metadata: {
+        last_agent_error: { message: "old failure", dismissed_at: BOOTSTRAP_OCCURRED_AT },
+      },
+    };
+    useTask.mockReturnValue({ isArchived: false, workspaceId: WORKSPACE_ID });
+    render(<QuickChatSessionView session={session} />);
+    expect(useSessionResumption).toHaveBeenLastCalledWith(
+      HYDRATED_TASK_ID,
+      session.sessionId,
+      false,
+      { preventAutoResume: false },
+    );
+  });
+
+  it("waits for the persisted session error before checking a WS-created tab", () => {
+    quickChatSessions.push({ sessionId: session.sessionId, taskId: HYDRATED_TASK_ID });
+    render(<QuickChatSessionView session={session} />);
+    expect(useSessionResumption).toHaveBeenLastCalledWith(
+      HYDRATED_TASK_ID,
+      session.sessionId,
+      false,
+      { preventAutoResume: true },
+    );
+  });
+
+  it("prevents automatic resumption when an active launch error is present", () => {
+    sessionRows[session.sessionId] = {
+      task_id: HYDRATED_TASK_ID,
+      metadata: { last_agent_error: { stamp: "err-1", message: "launch failed" } },
+    };
+    useTask.mockReturnValue({ isArchived: false, workspaceId: WORKSPACE_ID });
+    useTaskStatusSummary.mockReturnValue({
+      active_error: {
+        session_id: session.sessionId,
+        stamp: "err-1",
+        preview: "launch failed",
+      },
+    });
+
+    render(<QuickChatSessionView session={session} />);
+
+    expect(useSessionResumption).toHaveBeenCalledWith(HYDRATED_TASK_ID, session.sessionId, false, {
+      preventAutoResume: true,
+    });
   });
 
   it("keeps a session bootstrap failure in the transcript-owned path", () => {
