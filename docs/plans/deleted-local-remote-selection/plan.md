@@ -62,8 +62,13 @@ into `FindOrCreateRepository` in `service_resources.go` under `repoResolveMu`.
 Only requests with a remote URL and no explicit local path use this policy.
 Keep existing field backfill, creation, and rollback ownership semantics.
 
-After the earliest local candidate is proven absent, enumerate raw workspace
-rows using exact provider identity semantics, deterministically select an
+Validate provider scope on the first candidate and alternatives. Unscoped
+remote selection must exclude scoped rows returned by the legacy SQL lookup.
+Validate each existing local checkout's current origin against the requested
+remote identity, accepting equivalent HTTPS and SSH transports.
+
+After the earliest local candidate is proven absent or the first lookup returns
+a foreign scope, enumerate raw workspace rows, deterministically select an
 eligible row, or use the current provider-row creation path. Repeated calls
 must find a previously created managed row behind the stale local candidate.
 
@@ -126,9 +131,24 @@ test would add an unrelated boundary.
 Public recovery guidance was added to `docs/public/tasks-and-workflows.md`.
 The paired requirement and design are active/current.
 
+## Review remediation
+
+Addressed checkout-origin validation and both directions of provider-scope
+isolation. The new unscoped-admission and changed-origin regressions failed
+before remediation and passed afterward. Scope checks cover initial lookup,
+fallback, reuse, creation, and repeated convergence. Origin checks cover
+retargeted/replaced checkouts, missing or invalid origins, preserved rows,
+explicit ID selection, and equivalent HTTPS/SSH transports across providers.
+
+Post-remediation race checks passed for both affected packages (service:
+65.532s; executor: 11.317s); changed-code lint reported zero issues. The spec
+catalog, full spec lint, public-doc validation, and whitespace checks passed.
+Updated the requirement, design, and public recovery guidance together.
+Remote CI and subsequent review remain pending until the updated head is pushed.
+
 ## Risks
 
-- Raw workspace enumeration must exactly preserve scoped and host identity rules.
+- Initial lookup and raw workspace enumeration must preserve scoped and host identity rules.
 - Missing paths can represent unmounted storage; preserve the original local row.
 - Filesystem disappearance after selection can still fail ordinary preparation.
 - Fallback must not copy local secrets or machine-specific scripts.

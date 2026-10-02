@@ -41,11 +41,15 @@ deleted local checkout or changing its saved identity.
   remains available and passes normal repository validation shall retain its
   current reuse behavior. Permission failures, changed canonical identity,
   invalid Git metadata, and other inspection errors shall not be treated as
-  proof that the directory was deleted.
+  proof that the directory was deleted. Its current origin shall identify the
+  requested remote repository; a replaced checkout, retargeted origin, or
+  missing or unparseable origin shall fail validation without changing any
+  registration. Equivalent HTTPS and SSH transports shall remain reusable.
 - **AC-WORKSPACES-REMOTE-RESOLUTION-001.5:** Candidate selection shall preserve
   workspace and provider identity isolation, including host and scoped provider
   identities. A foreign or ambiguously identified repository shall not satisfy
-  the request.
+  the request. Unscoped remote selection shall not adopt a scoped registration,
+  including when the ordinary identity lookup returns it first.
 - **AC-WORKSPACES-REMOTE-RESOLUTION-001.6:** Managed fallback shall use the
   requested repository and branch under the existing credential policy.
   Authentication, clone, and cancellation failures shall propagate through the

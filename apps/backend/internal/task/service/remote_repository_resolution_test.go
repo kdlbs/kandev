@@ -362,6 +362,7 @@ func seedRemoteResolutionRepo(t *testing.T, store *sqliterepo.Repository, id, so
 	if source == sourceTypeLocal || deleted {
 		r.LocalPath = filepath.Join(t.TempDir(), "checkout")
 		makeRepo(t, r.LocalPath)
+		writeRemoteSelectionOrigin(t, r.LocalPath, "https://github.com/acme/widgets.git")
 		if deleted {
 			if err := os.RemoveAll(r.LocalPath); err != nil {
 				t.Fatal(err)

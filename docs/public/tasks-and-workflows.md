@@ -193,7 +193,10 @@ When you choose **Remote**, Kandev can reuse an available matching checkout.
 If a previously registered local checkout folder was deleted, it uses another
 available source or creates a managed clone. The original local registration
 and its existing task associations remain unchanged; selecting that local
-repository explicitly still requires its checkout to be available.
+repository explicitly still requires its checkout to be available. If an
+existing local checkout's origin no longer matches the selected remote,
+Kandev reports a validation error. Correct its origin or select it explicitly
+as a local repository.
 
 ### Reduce downloads for a large remote repository
 

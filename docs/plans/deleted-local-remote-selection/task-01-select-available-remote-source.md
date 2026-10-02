@@ -77,6 +77,7 @@ paired specs only after implementation and all checks pass.
 - `apps/backend/internal/task/service/service_resources.go`
 - `apps/backend/internal/task/service/remote_repository_resolution.go` (new)
 - `apps/backend/internal/task/service/remote_repository_resolution_test.go` (new)
+- `apps/backend/internal/task/service/remote_repository_admission_test.go` (review regressions)
 - `apps/backend/internal/orchestrator/executor/executor_remote_selection_integration_test.go` (new)
 - This work order, `plan.md`, and the paired requirement/design lifecycle fields.
 - `docs/public/tasks-and-workflows.md` (remote selection recovery guidance).
@@ -133,3 +134,21 @@ Completed in the primary session without delegated agents.
 Node commands used the installed v24.18.0 binary because Node was absent from
 the shell PATH. Public docs retain their task-oriented how-to format. No
 production executor, API, schema, or UI changes were necessary.
+
+### Review remediation results
+
+- Red: `go test -trimpath -tags fts5 ./internal/task/service -run
+  '^TestResolveRepositoryRef_RemoteSelection(UnscopedAdmission|RejectsChangedOrigin)$'
+  -count=1` failed on both findings before the correction.
+- Green: all `TestResolveRepositoryRef_RemoteSelection` cases passed.
+- Final: `go test -trimpath -tags fts5 -race ./internal/task/service
+  ./internal/orchestrator/executor -count=1` passed (65.532s and 11.317s).
+- `golangci-lint run ./internal/task/service ./internal/orchestrator/executor
+  --new-from-rev=HEAD --timeout=5m` before the remediation commit: zero issues.
+- Spec catalog validation, full spec lint, validation of 47 public docs pages,
+  and whitespace checks passed after the requirement/design/public-doc updates.
+
+Added `remote_repository_admission_test.go` for initial and fallback scope
+isolation, changed origin rejection with row preservation, and compatible
+SSH/HTTPS reuse. Local fixtures now carry a matching origin. Remote CI and
+review for the remediation remain pending until publication.

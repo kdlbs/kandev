@@ -40,21 +40,32 @@ Keep the existing provider-identity lookup as the common fast path. Before
 adopting a `source_type=local` result for a remote request, inspect the saved
 directory. A confirmed not-exist result makes it ineligible. An existing path
 must pass the existing canonical Git validation and resolve to its saved
-identity. Permission, I/O, cancellation, invalid Git, and canonical-path
+path. Read its current origin from the common Git configuration and compare
+the normalized host and full repository path with the requested clone URL.
+Use the existing SSH-to-HTTPS conversion, preserving provider context paths;
+Azure DevOps SSH addresses map to their HTTPS organization/project/repository
+identity. GitHub repository paths compare without case sensitivity. Missing,
+unparseable, or mismatched origins fail validation, even if the stored metadata
+still matches. This applies to both the first candidate and alternatives.
+Permission, I/O, cancellation, invalid Git, and canonical-path
 mismatch errors propagate; they do not authorize fallback. Do not create or
 change filesystem content during selection.
 
 `findRepositoryForRemoteSelection` owns this admission. Its
 `findAvailableRemoteRepository` fallback enumerates alternatives only when the
-first local match is confirmed absent.
+first local match is confirmed absent or the initial lookup returns a foreign
+provider scope.
 
 If the first match is a deleted local directory, enumerate workspace repository
 rows through `repoEntities.ListRepositories`, not the presentation-level
-deduplicated list. Filter candidates using the same normalized
-`ProviderRepositoryIdentity` semantics as `GetRepositoryByProviderIdentity`:
+deduplicated list. Filter candidates using normalized
+`ProviderRepositoryIdentity` semantics:
 scope plus immutable repository ID when scoped, otherwise the existing
-workspace/provider/host/owner/name lookup. Preserve the scoped-import refusal
-to adopt an unscoped legacy row. Exclude Kandev task-worktree registrations
+workspace/provider/host/owner/name lookup with an empty candidate scope.
+Validate scope on the initial lookup as well as alternatives; the underlying
+legacy SQL lookup can return a scoped row for an unscoped request. Preserve
+the scoped-import refusal to adopt an unscoped legacy row.
+Exclude Kandev task-worktree registrations
 using the existing replacement guard.
 
 Order matching candidates by `CreatedAt`, then `ID`, as the current lookup
@@ -104,7 +115,10 @@ this correction introduces no background repair or mutation of local rows.
 Service tests use a real SQLite store, create and register a Git checkout,
 delete it, then resolve the same provider URL. Assert separate managed identity,
 preservation of the original row and links, mixed candidate selection, repeated
-and concurrent convergence, usable-local reuse, and identity isolation.
+and concurrent convergence, usable-local reuse, and identity isolation in both
+scope directions. Additional service regressions cover replaced checkouts,
+retargeted or absent origins, and equivalent HTTPS/SSH identities across
+GitHub, nested GitLab, self-managed GitLab, Azure DevOps, and scoped plugins.
 
 A backend integration test crosses real service resolution, persisted task
 attachment, executor repository preparation, and worktree creation. Use a
