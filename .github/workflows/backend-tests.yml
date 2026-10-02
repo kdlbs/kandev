@@ -270,7 +270,7 @@ jobs:
           set -euo pipefail
 
           CHANGED_GO_FILES="$(
-            git diff --name-only --diff-filter=ACMRT "${BASE_SHA}"..."${{ github.sha }}" -- apps/backend \
+            git diff --name-only --diff-filter=ACMRT "${BASE_SHA}...${{ github.sha }}" -- apps/backend \
             | grep -E '^apps/backend/.*\.go$' \
             || true
           )"
@@ -796,14 +796,17 @@ jobs:
           done
 
   test-windows:
-    name: Backend (windows)
+    name: Backend (windows, ${{ matrix.suite }})
     needs: changes
     if: needs.changes.outputs.run == 'true'
     runs-on: windows-latest
-    # Dependency hydration, build, vet, and the race-sensitive package suite
-    # can consume 30 minutes on a cold hosted runner. Keep the cap finite while
-    # leaving the final targeted regression checks time to run.
+    # Isolate the large process suite from build/vet and targeted native checks
+    # so each cold runner has time for its tests and cache upload.
     timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        suite: [process, native]
     # Least-privilege: this job only reads source and runs tests, no PR/issue
     # writes or release operations. Flagged by CodeQL workflow audit + matching
     # CodeRabbit nitpick.
@@ -820,6 +823,7 @@ jobs:
           persist-credentials: false
 
       - name: Test Windows isolated instance safety
+        if: matrix.suite == 'native'
         working-directory: ${{ github.workspace }}
         shell: cmd
         run: powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File scripts\tests\isolated-instance.Tests.ps1
@@ -831,6 +835,7 @@ jobs:
           cache-dependency-path: apps/backend/go.sum
 
       - name: Test Windows copy-file glob tokenization
+        if: matrix.suite == 'native'
         run: >-
           go test -race -v ./internal/worktree/copyfiles
           -run '^(TestParseSpecs_GlobTokenization|TestParseSpecs_NativeEscapes|TestCopyPlan_GlobTokenization|TestCopyPlan_UnclosedClassKeepsFollowingEntries|TestValidateSpec_GlobAdjacentSuffix)$'
@@ -839,10 +844,16 @@ jobs:
       # launcher, shell, signals, sysprocattr, vscode cleanup, …). The rest of
       # the suite is build-tag-gated out automatically.
       - name: Build
+        if: matrix.suite == 'native'
         run: go build ./...
 
       - name: Vet
+        if: matrix.suite == 'native'
         run: go vet ./...
+
+      - name: Test Windows process package
+        if: matrix.suite == 'process'
+        run: go test -race -v -json -timeout 25m ./internal/agentctl/server/process/...
 
       # Scope to packages with non-trivial Windows-specific code paths.
       # Tests that genuinely cannot run on Windows (Unix sockets, POSIX
@@ -851,25 +862,26 @@ jobs:
       # a self-hosting Go helper (see testmain_test.go) so they run on
       # every platform.
       - name: Test windows-sensitive packages
-        # The process package is large and the race detector is slow on
-        # windows-latest. Go's default package timeout is 10 minutes, which can
-        # terminate a healthy suite before the workflow's 30-minute job cap.
-        run: go test -race -v -json -timeout 25m ./internal/agentctl/server/process/... ./internal/agent/runtime/agentctl/launcher/... ./internal/common/ptyexec/... ./internal/backendapp/ownershiplock/... ./internal/system/storage/workspaces/...
+        if: matrix.suite == 'native'
+        run: go test -race -v -json -timeout 25m ./internal/agent/runtime/agentctl/launcher/... ./internal/common/ptyexec/... ./internal/backendapp/ownershiplock/... ./internal/system/storage/workspaces/...
 
       # Keep this targeted: these packages have broader tests, while these
       # native tests verify hidden consoles retain handles for descendants.
       - name: Test Windows helper console behavior
+        if: matrix.suite == 'native'
         run: >-
           go test -tags fts5 -race -v
           -run '^(TestWindowsPrepareGitLifecycleCommandHidesConsoleWindow|TestWindowsDetachedParentKeepsConsoleHiddenForDescendants|TestPrepareNativeMCPProcessHidesConsoleWindow|TestWindowsACPCommandProcAttrHidesConsoleWindow|TestConfigureProcessTreeHidesConsoleWindow)$'
           ./internal/common/subproc ./internal/agent/mcpconfig ./internal/agentctl/server/utility ./internal/agent/acpdbg ./internal/agent/codexdbg
 
       - name: Test Windows managed runtime cache repair
+        if: matrix.suite == 'native'
         run: go test -race -v ./internal/agent/managedruntime -run TestRemoveNpxExecutionTreeTreatsMissingWindowsChildAsAbsent
 
       # Keep port-collision coverage targeted: the instance package contains
       # broader stdio MCP fixture tests that depend on Unix command behavior.
       - name: Test Windows port collision handling
+        if: matrix.suite == 'native'
         shell: bash
         run: |
           go test -race -v ./internal/common/netutil -run '^TestIsAddrInUse'
@@ -879,6 +891,7 @@ jobs:
       # Keep this targeted: the service package has broad subprocess coverage,
       # while this native test is the Windows path-semantics regression.
       - name: Test Windows path semantics
+        if: matrix.suite == 'native'
         run: >-
           go test -race -v
           -run '^(TestExplicitLocalRepositoryWindowsPathSemantics|TestListDirectory.*|TestDriveRootsFromMask|TestSplitAbsForRoot)$'
@@ -887,15 +900,18 @@ jobs:
       # Keep SQLite path coverage targeted: other tests in these packages
       # assert POSIX file modes or depend on Git path output.
       - name: Test Windows SQLite database paths
+        if: matrix.suite == 'native'
         shell: bash
         run: |
           go test -race -tags fts5 -v ./internal/system/backups -run '^TestVerifySnapshotOpensNativeAbsolutePath$'
           go test -race -tags fts5 -v ./internal/task/inventoryrepair -run '^TestOpenDatabase(Reads|Writes)NativeAbsolutePath$'
 
       - name: Test Cursor project slug path normalization
+        if: matrix.suite == 'native'
         run: go test -race -v ./internal/agent/mcpconfig -run '^TestDeriveCursorProjectSlug$'
 
       # Pure GOOS-branch logic (no syscalls), but it must actually observe
       # Windows to prove the unavailable branch, not just compile under it.
       - name: Test Windows agent-survival flag availability
+        if: matrix.suite == 'native'
         run: go test -race -v -run '^TestAgentSurvivalAvailabilityMatchesPlatformScope$' ./internal/runtimeflags

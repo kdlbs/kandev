@@ -326,3 +326,27 @@ scenarios, plus refreshed warning screenshots for both viewports. The new status
 live region required narrowing existing authentication feedback assertions; the
 corrected desktop suite passed. The screenshots were inspected and compressed.
 Remote exact-head CI/review remains tracked in PR #4168 after publication.
+
+
+### Required Windows CI remediation
+
+The original required Windows job exhausted its 40-minute cap twice. Run
+37049891674 attempt 2 completed every test step successfully before cancellation
+during Go cache upload. The large process package consumed about 26 minutes of
+test execution, leaving insufficient time for sequential build/vet, native
+regression checks, and cache cleanup on a cold hosted runner.
+
+The Windows job now has independent `process` and `native` matrix entries, both
+required by the existing backend aggregate. The process package retains its
+full race-enabled command; build/vet and every other native check remain in the
+native entry. Fail-fast is disabled and both entries retain the 40-minute cap.
+Contract tests cover the split, native step ownership, and aggregate dependency.
+This changes internal CI scheduling only; public product behavior is unchanged.
+
+Local checks passed: 12 backend workflow contracts, five runner contracts, nine
+action-pinning tests, actionlint, 268 focused frontend tests, typecheck, backend
+recovery tests, and all eight desktop/phone browser scenarios after integrating
+base a1669c0a5. A parsed-workflow comparison confirms all original Windows
+commands and flags remain covered. Zizmor reports the unchanged CMD-shell
+limitation in this workflow; its other findings are outside the changed workflow.
+Fresh exact-head GitHub execution is the Windows runtime validation.
