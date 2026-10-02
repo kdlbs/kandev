@@ -53,7 +53,9 @@ test.describe("Agent MCP preparation recovery", () => {
       await expect(actions).toContainText("Authentication is required.");
 
       await actions.getByTestId("agent-mcp-authenticate").click();
-      await expect(actions.getByRole("status")).toContainText("Sign-in terminal opened.");
+      await expect(
+        actions.getByRole("status").filter({ hasText: "Sign-in terminal opened." }),
+      ).toContainText("Sign-in terminal opened.");
       const authenticationTerminalTab = testPage.getByTestId(
         `terminal-tab-${fixture.authenticationTerminalId}`,
       );
@@ -87,7 +89,9 @@ test.describe("Agent MCP preparation recovery", () => {
         .toBe(1);
 
       await actions.getByTestId("agent-mcp-retry").click();
-      await expect(actions.getByRole("status")).toHaveText("Connection ready.");
+      await expect(actions.getByRole("status").filter({ hasText: "Connection ready." })).toHaveText(
+        "Connection ready.",
+      );
       expect(requests.retry).toEqual([{ server_id: E2E_MCP_SERVER_ID }]);
       const { sessions } = await apiClient.listTaskSessions(fixture.taskId);
       expect(sessions.map((item) => item.id)).toContain(fixture.sessionId);
