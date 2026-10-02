@@ -454,7 +454,6 @@ test.describe("Mobile queued row controls", () => {
       apiClient,
       seedData,
       "Mobile queued row controls",
-      { startWithGeneratingTurn: true },
     );
     const identity = await apiClient.getQueueSessionIdentity(taskId, sessionId);
     const autoRunResponse = await apiClient.setQueueAutoRun(identity, false);

@@ -777,3 +777,32 @@ pnpm run typecheck
 pnpm exec eslint e2e/scripts/git-status-refresh-bridge.test.ts e2e/tests/git/git-status-refresh-helpers.ts e2e/tests/git/changes-panel-refresh-recovery.spec.ts
 pnpm exec prettier --check e2e/scripts/git-status-refresh-bridge.test.ts e2e/tests/git/git-status-refresh-helpers.ts e2e/tests/git/changes-panel-refresh-recovery.spec.ts
 ```
+
+### Final browser fixture failures, 2026-10-02
+
+The `fc571214694` cohort finished with two failed first browser attempts and
+three failed checks (one shard and its two report gates). All 20 blob reports
+were audited: 3672 passing attempts, 47 skipped, two failed first attempts, and
+two successful retries. Backend, Windows, PostgreSQL and container checks passed.
+
+The preview fixture now explicitly persists the older session as primary before
+reloading, preserving all default-selection, switching, content and URL checks.
+Three repetitions passed (33.6s), zero retries. The earlier diagnostic had two
+passes and an unrelated workspace-setup 404, not a reproduced selection failure.
+
+The mobile queue fixture starts its generating turn after navigation/readiness,
+so slow setup cannot consume the sleep turn. This exposed the shared helper's
+keyboard-only submission: three local failures left the prompt unsent on mobile.
+Using the existing pointer-aware submit-button method fixed all three repetitions
+(47.6s). Desktop cancel and delayed-admission cases also passed (2 cases, 38.7s).
+No prompt retry, product change or timeout increase was added. Scoped ESLint and
+Prettier passed for all three changed files.
+
+```bash
+cd apps/web
+GOCACHE=/tmp/kandev-go-build-preserved-20261001 pnpm e2e:run --host --project chromium tests/kanban/preview-session-tabs.spec.ts -- --repeat-each=3 --retries=0
+GOCACHE=/tmp/kandev-go-build-preserved-20261001 pnpm e2e:run --host --project mobile-chrome tests/chat/mobile-message-queue-management.spec.ts -- --grep 'keeps queued row controls ordered and touchable' --repeat-each=3 --retries=0
+GOCACHE=/tmp/kandev-go-build-preserved-20261001 pnpm e2e:run --host --project chromium tests/chat/cancel-turn-availability.spec.ts tests/chat/queue-admission-reliability.spec.ts -- --grep 'direct input cancel control|clears an attached Task draft' --retries=0
+pnpm exec eslint e2e/helpers/generating-session.ts e2e/tests/chat/mobile-message-queue-management.spec.ts e2e/tests/kanban/preview-session-tabs.spec.ts
+pnpm exec prettier --check e2e/helpers/generating-session.ts e2e/tests/chat/mobile-message-queue-management.spec.ts e2e/tests/kanban/preview-session-tabs.spec.ts
+```

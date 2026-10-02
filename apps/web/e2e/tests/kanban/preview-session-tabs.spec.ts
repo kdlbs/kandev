@@ -84,6 +84,8 @@ test.describe("Preview session tabs", () => {
       60_000,
     );
 
+    await apiClient.setPrimarySession(initialSessionId);
+
     const { sessions: afterSecond } = await apiClient.listTaskSessions(task.id);
     const taskAfterSecond = await apiClient.getTask(task.id);
     const primaryId = taskAfterSecond.primary_session_id;
@@ -100,9 +102,9 @@ test.describe("Preview session tabs", () => {
       throw new Error("Session response markers do not match the task sessions");
     }
 
-    // The direct launch path may promote the new session. Use the task's
-    // persisted primary ID as the expected default instead of changing it via
-    // an out-of-band API call that cannot update the page's active-session state.
+    // Mark the older session primary before the full page load so the fixture
+    // checks the persisted default independently of launch-time promotion.
+    expect(primaryId).toBe(initialSessionId);
 
     const kanban = new KanbanPage(testPage);
 

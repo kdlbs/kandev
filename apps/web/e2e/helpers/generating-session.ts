@@ -67,7 +67,7 @@ export async function seedRunningGeneratingSession(
   await waitForSessionAgentctlReady(testPage, task.session_id);
   if (!startWithGeneratingTurn) {
     await session.waitForChatIdle({ timeout: 30_000 });
-    await session.sendMessage(generatingPrompt);
+    await session.sendMessageViaButton(generatingPrompt);
   }
   await expect(session.agentStatus()).toBeVisible({ timeout: 15_000 });
   await waitForActiveSessionForegroundActivity(testPage, "generating");
