@@ -556,7 +556,6 @@ func TestAgentctlResolverCachePruneDoesNotDelayDeadlineBoundLaunch(t *testing.T)
 	})
 
 	ctx, cancel := context.WithTimeout(context.Background(), 250*time.Millisecond)
-	defer cancel()
 	type resolution struct {
 		path string
 		err  error
@@ -574,6 +573,13 @@ func TestAgentctlResolverCachePruneDoesNotDelayDeadlineBoundLaunch(t *testing.T)
 	case <-ctx.Done():
 		t.Fatal("helper resolution waited for background cache cleanup until the launch deadline")
 	}
+	cacheRoot := filepath.Join(home, "cache", remoteHelperCacheDir)
+	t.Cleanup(func() {
+		cancel()
+		unblockInventory()
+		waitForResolverCachePrune(t, resolver)
+		waitForResolverCacheLeaseRelease(t, cacheRoot, cachePath)
+	})
 	select {
 	case <-inventoryStarted:
 	case <-time.After(5 * time.Second):
