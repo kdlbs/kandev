@@ -130,6 +130,14 @@ features:
     dev:  "false"
     e2e:  "false"
 
+  # Workspace coordinators: a per-workspace copilot conversation that
+  # proposes ordinary, unstarted tasks for a human to approve. Off in
+  # prod/dev until the feature is user-ready; on in e2e so tests exercise it.
+  KANDEV_FEATURES_COORDINATOR:
+    prod: "false"
+    dev:  "false"
+    e2e:  "true"
+
 # ── Mock providers ────────────────────────────────────────────────
 # Swap real third-party services for in-memory fakes. Production
 # leaves all of these unset (real APIs). Dev opts into the mock agent

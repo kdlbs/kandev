@@ -820,6 +820,7 @@
   "kandevListWorkspaces": "Kandev: ワークスペースを一覧表示",
   "kandevMessageTask": "Kandev: タスクにメッセージを送信",
   "kandevMoveTask": "Kandev: タスクを移動",
+  "kandevProposeTask": "Kandev: タスクを提案",
   "kandevUpdateAvailable": "Kandev の更新があります",
   "kandevUpdateTask": "Kandev: タスクを更新",
   "kandevUpdateTaskPlan": "Kandev: タスク計画を更新",

@@ -138,6 +138,10 @@ vi.mock("@/components/integrations/integrations-menu", () => ({
   MobileIntegrationsSection: () => <div data-testid="mobile-integrations-section" />,
 }));
 
+vi.mock("./mobile-coordinators-section", () => ({
+  MobileCoordinatorsSection: () => <section data-testid="mobile-coordinators-section" />,
+}));
+
 vi.mock("@/components/theme/app-theme", () => ({
   useTheme: () => ({ resolvedTheme, setTheme: mocks.setTheme }),
 }));
@@ -306,6 +310,22 @@ describe("AppNavSheet", () => {
       workspaceLabel: "Workspace",
       presentation: "mobile",
     });
+  });
+});
+
+describe("AppNavSheet coordinators", () => {
+  afterEach(() => cleanup());
+
+  // @covers AC-COORDINATOR-NEEDS-YOU-006.1
+  it("offers the Coordinators section above Automations on the default phone layout", () => {
+    render(<AppNavSheet />);
+    fireEvent.click(screen.getByTestId(NAV_TRIGGER));
+
+    const coordinators = screen.getByTestId("mobile-coordinators-section");
+    const automations = screen.getByTestId("mobile-automations-section");
+    expect(
+      Boolean(coordinators.compareDocumentPosition(automations) & Node.DOCUMENT_POSITION_FOLLOWING),
+    ).toBe(true);
   });
 });
 

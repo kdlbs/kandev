@@ -626,6 +626,9 @@ func startAgentInfrastructure(
 		func() bool { return services.Auth != nil && services.Auth.Mode() != auth.ModeDisabled },
 		log,
 	)
+	if services.Coordinator != nil {
+		mcpScopeResolver.SetCoordinatorLookup(services.Coordinator)
+	}
 	// ============================================
 	// AGENT MANAGER
 	// ============================================
@@ -772,6 +775,10 @@ func startAgentInfrastructure(
 	// Watcher dispatch self-heals a binding whose repository was soft-deleted
 	// after the watch was configured, instead of creating an orphan task row.
 	orchestratorSvc.SetRepositoryChecker(&repositoryLookupAdapter{svc: services.Task})
+	if services.Coordinator != nil {
+		orchestratorSvc.SetCoordinatorLookup(services.Coordinator)
+		orchestratorSvc.SetCoordinatorStandingInstructionsReader(coordinatorStandingInstructionsReader(services.Coordinator))
+	}
 
 	// Wire the watcher-dependency enumerator into the agent settings
 	// controller so the profile-delete UI can surface "this will also
@@ -1248,7 +1255,7 @@ func startGatewayAndServe(
 	// Build the real router and register all handlers, which wires the real
 	// dispatcher into lifecycleMgr.SetMCPHandler and installs MCP scope handlers
 	// BEFORE lifecycleMgr.Start recovers sessions.
-	builtServer, err := buildHTTPServer(cfg, log, gateway, repos, services, agentSettingsController,
+	builtServer, err := buildHTTPServer(ctx, cfg, log, gateway, repos, services, agentSettingsController,
 		lifecycleMgr, eventBus, orchestratorSvc, notificationCtrl, msgCreator, agentRegistry, hostUtilityMgr,
 		addCleanup, repoCloner, systemSvc, storageComposition.workspaceRestorer,
 		storageComposition.tempArtifacts, dbPool, agentRuntimeAvailability, sshReachabilityPoller, startup.FromContext(ctx), persistenceHealth)
@@ -2811,6 +2818,7 @@ func resolvedHTTPPort(cfg *config.Config) int {
 // buildHTTPServer creates the HTTP server with all middleware and routes
 // registered against the gateway and service layer.
 func buildHTTPServer(
+	ctx context.Context,
 	cfg *config.Config,
 	log *logger.Logger,
 	gateway *gateways.Gateway,
@@ -2917,6 +2925,7 @@ func buildHTTPServer(
 		return err
 	})
 	registerRoutes(routeParams{
+		ctx:                           ctx,
 		router:                        router,
 		gateway:                       gateway,
 		taskSvc:                       services.Task,

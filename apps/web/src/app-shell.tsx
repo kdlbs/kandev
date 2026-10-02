@@ -17,6 +17,7 @@ import { SessionFailureToastBridge } from "@/components/session-failure-toast-br
 import { TaskDeletedToastBridge } from "@/components/task-deleted-toast-bridge";
 import { UpdateAvailableToastBridge } from "@/components/update-available-toast-bridge";
 import { SidebarViewsSyncBridge } from "@/components/sidebar-views-sync-bridge";
+import { CoordinatorCopilotResetBridge } from "@/components/coordinator-copilot-reset-bridge";
 import { ThemeProvider } from "@/components/theme-provider";
 import { ToastProvider } from "@/components/toast-provider";
 import { WorkspaceScopeProvider } from "@/components/workspace-scope-provider";
@@ -76,6 +77,7 @@ export function AppShell({ children }: AppShellProps) {
               <TaskDeletedToastBridge />
               <UpdateAvailableToastBridge />
               <SidebarViewsSyncBridge />
+              <CoordinatorCopilotResetBridge />
               <LogBufferBridge />
               <CommandRegistryProvider>
                 <DesktopCommandHost />

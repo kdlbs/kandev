@@ -792,6 +792,7 @@
   "kandevListWorkspaces": "Kandev: Listar áreas de trabalho",
   "kandevMessageTask": "Kandev: Enviar mensagem à tarefa",
   "kandevMoveTask": "Kandev: Mover tarefa",
+  "kandevProposeTask": "Kandev: Propor tarefa",
   "kandevUpdateAvailable": "Atualização do Kandev disponível",
   "kandevUpdateTask": "Kandev: Atualizar tarefa",
   "kandevUpdateTaskPlan": "Kandev: Atualizar plano da tarefa",

@@ -997,6 +997,15 @@
         "reason": "Legacy redirect to General Message Queue."
       }
     ],
-    "mcpTools": []
+    "mcpTools": [
+      {
+        "tool": "get_coordinator_item_kandev",
+        "reason": "Workspace coordinator tool behind features.coordinator, off in prod and dev; documented when the feature is promoted."
+      },
+      {
+        "tool": "propose_task_kandev",
+        "reason": "Workspace coordinator tool behind features.coordinator, off in prod and dev; documented when the feature is promoted."
+      }
+    ]
   }
 }

@@ -12,7 +12,7 @@ import (
 // admission sweep step (AC-PLATFORM-STARTUP-PROGRESS-005.2). A Descriptor's
 // Sweep field can only ever hold one value, so "exactly one" reduces to
 // "a valid one"; this test also locks in the current runtime-order split
-// (19 stores.repositories admissions in storage.go, 22 stores.services
+// (19 stores.repositories admissions in storage.go, 23 stores.services
 // admissions elsewhere) so a future catalog entry silently landing on the
 // wrong side of storage.go:215 fails loudly instead of only at startup.
 func TestCatalogSweepAssignmentIsCompleteAndNonOverlapping(t *testing.T) {
@@ -36,7 +36,7 @@ func TestCatalogSweepAssignmentIsCompleteAndNonOverlapping(t *testing.T) {
 	if repositories != 19 {
 		t.Errorf("stores.repositories claims %d catalog entries, want 19", repositories)
 	}
-	if services != 22 {
-		t.Errorf("stores.services claims %d catalog entries, want 22", services)
+	if services != 23 {
+		t.Errorf("stores.services claims %d catalog entries, want 23", services)
 	}
 }

@@ -820,6 +820,7 @@
   "kandevListWorkspaces": "Kandev: List Workspaces",
   "kandevMessageTask": "Kandev: Message Task",
   "kandevMoveTask": "Kandev: Move Task",
+  "kandevProposeTask": "Kandev: Propose Task",
   "kandevUpdateAvailable": "Kandev update available",
   "kandevUpdateTask": "Kandev: Update Task",
   "kandevUpdateTaskPlan": "Kandev: Update Task Plan",
