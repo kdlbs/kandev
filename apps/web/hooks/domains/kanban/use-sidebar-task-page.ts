@@ -433,13 +433,8 @@ function useSidebarPageAutoLoad({
   }, [loader.pendingPage, queuedRefreshRef, refreshTimerRef, setRefreshRevision]);
 }
 
-function useSidebarDeletedTasks(
-  store: SidebarPageStore,
-  loader: SidebarPageLoader,
-  viewKey: string,
-  queryView: SidebarTaskQuery,
-) {
-  const { setResponse, loadPage, pageNumberRef } = loader;
+function useSidebarDeletedTasks(store: SidebarPageStore, loader: SidebarPageLoader) {
+  const { setResponse } = loader;
   useEffect(
     () =>
       sidebarTaskPageCache(store).subscribeDeletedTasks((taskIds) => {
@@ -447,16 +442,15 @@ function useSidebarDeletedTasks(
           current
             ? {
                 ...current,
+                provisional: true,
                 entries: current.entries.filter(
                   (entry) => !entry.task_id || !taskIds.has(entry.task_id),
                 ),
               }
             : current,
         );
-        // Starting the replacement also fences any pre-deletion response still in flight.
-        void loadPage(pageNumberRef.current, viewKey, queryView);
       }),
-    [store, setResponse, loadPage, pageNumberRef, viewKey, queryView],
+    [store, setResponse],
   );
 }
 
@@ -546,7 +540,7 @@ export function useSidebarTaskPage(
   const queryWorkspaceId = enabled && !accessDenied ? workspaceId : null;
   const loader = useSidebarPageLoader(queryWorkspaceId, workspaceGeneration, store, t, viewKeyRef);
   const { loadPage } = loader;
-  useSidebarDeletedTasks(store, loader, viewKey, queryView);
+  useSidebarDeletedTasks(store, loader);
   const cachedResponse = queryWorkspaceId ? sidebarTaskPageCache(store).get(viewKey) : null;
   const {
     pendingPage,

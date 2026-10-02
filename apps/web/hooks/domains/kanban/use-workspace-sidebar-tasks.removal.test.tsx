@@ -26,7 +26,7 @@ vi.mock("./use-sidebar-task-page", () => ({
         },
       ],
     },
-    view: { id: "view", group: "none" },
+    view: { id: "view", group: "none", filters: [] },
     isLoading: false,
     error: null,
   }),

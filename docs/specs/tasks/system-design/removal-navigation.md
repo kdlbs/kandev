@@ -75,9 +75,11 @@ flags on archived rows downstream.
 
 Successful delete reconciliation and authoritative `task.deleted` events notify
 `SidebarTaskPageCache` before local pending membership is released. It clears
-cached pages and aborts prior reads, then each subscribed page removes only the
-confirmed IDs from its accepted response and starts a replacement query. The
-loader generation fences late pre-deletion responses. This avoids an idle-row
+cached pages while retaining in-flight read journals. Each subscribed page removes
+only confirmed IDs and marks its response provisional. Mutation-confirmed
+deletions enter the canonical task-overview journal before notification, just
+like websocket deletions. Late reads reconcile those changes, and the existing
+refresh scheduler coalesces one trailing membership query. This avoids an idle-row
 flash while a delayed refresh catches up, preserves failed/non-target rows, and
 lets newly mounted pickers fetch fresh data without retaining deletion tombstones.
 

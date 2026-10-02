@@ -180,3 +180,35 @@ Final interaction remediation verification: the focused ten-suite command now
 passes 74 tests. Typecheck, targeted lint, and both desktop/phone delete/archive
 scenarios pass with retries disabled. Pending activation is ignored and failed
 removal re-enables selection. Catalog, spec lint and diff checks pass.
+
+## Shared-sidebar integration
+
+Reconciled the newer shared-task sidebar implementation while retaining its
+local inventory, access-denial, and active-task-only paths. Confirmed deletions
+now prune normalized task-ID memberships, with consecutive events applied to
+the latest accepted page before React rerenders. Tests retain both upstream
+archive filtering and deletion loading coverage. Browser checks block optional
+server replacements without requiring a request when local inventory is complete.
+
+Validation: 79 focused sidebar/cache/coordinator/handler tests passed; the
+additional shared-state and consecutive-deletion checks passed (13 tests).
+Frontend typecheck, full lint, catalog/spec lint, and harness checks passed.
+Desktop and phone delete/archive scenarios also passed (four tests, retries disabled).
+
+## CI remediation after rebase
+
+Rebased onto main at `2f74eaf6a0671c7ae5cac8bdabf0a7f3c16e16a7`.
+The frontend progress tests and desktop/phone shared-state scenarios exposed
+deletion invalidation aborting the read journal before live changes could be
+reconciled. Confirmed deletion now prunes displayed membership immediately,
+records mutation success in the canonical journal, and preserves pending reads
+for one coalesced trailing refresh. Restored all manual edits from the earlier
+merge, including consecutive-deletion coverage and local-inventory E2E setup.
+
+Validation completed with the rebased lockfile:
+
+- `pnpm --dir apps/web exec vitest run hooks/domains/kanban lib/sidebar hooks/use-task-removal-coordinator.test.ts lib/ws/handlers/tasks`: 731 tests, 77 suites passed.
+- The three pending-row component suites passed all 14 tests.
+- `NODE_OPTIONS=--max-old-space-size=4096 pnpm --dir apps/web run typecheck` and `pnpm --dir apps/web run lint` passed. Changed TypeScript files passed Prettier.
+- Managed E2E rebuilt runtime and fixtures, then ran immediate delete, immediate archive, and shared-task-state specs for chromium and mobile-chrome: ten tests passed with `--retries=0`.
+- `python3 scripts/list-docs.py validate`, `python3 scripts/lint-spec-files.py --all`, and `git diff --check` passed.

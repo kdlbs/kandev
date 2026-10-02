@@ -213,7 +213,7 @@ it("keeps lookups read-only and treats committed workspace changes as hard barri
   expect(cache.get("b")).toBeNull();
 });
 
-it("clears cached and in-flight pages on confirmed deletion and unsubscribes consumers", async () => {
+it("invalidates cached pages without restarting reads on deletion and unsubscribes consumers", async () => {
   const { cache } = setup();
   await load(cache, "a");
   let resolve!: (value: SidebarTaskPageResponse) => void;
@@ -230,12 +230,12 @@ it("clears cached and in-flight pages on confirmed deletion and unsubscribes con
   const unsubscribe = cache.subscribeDeletedTasks(disposed);
   unsubscribe();
   cache.removeTasks(new Set(["deleted"]));
-  expect(signal?.aborted).toBe(true);
+  expect(signal?.aborted).toBe(false);
   expect(cache.get("a")).toBeNull();
   expect(live).toHaveBeenCalledWith(new Set(["deleted"]));
   expect(disposed).not.toHaveBeenCalled();
   resolve(page("b"));
-  await request.promise;
+  expect((await request.promise).provisional).toBe(true);
   expect(cache.get("b")).toBeNull();
   request.release();
 });

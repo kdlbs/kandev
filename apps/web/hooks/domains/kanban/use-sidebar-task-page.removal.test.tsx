@@ -136,15 +136,16 @@ describe("confirmed sidebar deletion", () => {
       staleRefresh.resolve(response(["parent", "child", "failed", "keep"]));
     });
     expect(result.current.sidebar.allTasks.map((task) => task.id)).toEqual(["failed", "keep"]);
+    await waitFor(() => expect(querySidebarTasks).toHaveBeenCalledTimes(3));
     await act(async () => {
       freshRefresh.resolve(response(["failed", "keep"]));
     });
     expect(result.current.sidebar.allTasks.map((task) => task.id)).toEqual(["failed", "keep"]);
   });
-  it("removes a task from both mounted pickers when its deletion event arrives", async () => {
+  it("removes consecutive deletions from both mounted pickers before a replacement arrives", async () => {
     const refresh = deferred<SidebarTaskPageResponse>();
     vi.mocked(querySidebarTasks)
-      .mockResolvedValueOnce(response(["target", "keep"]))
+      .mockResolvedValueOnce(response(["target", "second", "keep"]))
       .mockReturnValue(refresh.promise);
     const { result } = renderHook(
       () => ({
@@ -154,16 +155,14 @@ describe("confirmed sidebar deletion", () => {
       }),
       { wrapper: Wrapper },
     );
-    await waitFor(() => expect(result.current.phone.allTasks).toHaveLength(2));
-    act(() =>
-      registerTasksHandlers(result.current.store)["task.deleted"]!(
-        makeDeletedMessage({
-          task_id: "target",
-          workspace_id: "ws",
-          workflow_id: "wf",
-        }),
-      ),
-    );
+    await waitFor(() => expect(result.current.phone.allTasks).toHaveLength(3));
+    act(() => {
+      for (const id of ["target", "second"]) {
+        registerTasksHandlers(result.current.store)["task.deleted"]!(
+          makeDeletedMessage({ task_id: id, workspace_id: "ws", workflow_id: "wf" }),
+        );
+      }
+    });
     expect(result.current.desktop.allTasks.map((task) => task.id)).toEqual(["keep"]);
     expect(result.current.phone.allTasks.map((task) => task.id)).toEqual(["keep"]);
     await act(async () => {

@@ -18,11 +18,9 @@ export async function checkImmediateDelete(options: {
   const path = `**/api/v1/tasks/${target.task_id}*`;
   let pending: Route | null = null;
   let deleteRequests = 0;
-  const heldRefreshes: Route[] = [];
   const refreshPath = `**/api/v1/workspaces/${seed.workspaceId}/sidebar/query`;
-  const holdRefresh = (route: Route) => {
-    heldRefreshes.push(route);
-  };
+  // Covered inventories render locally; block any server replacement when one is needed.
+  const holdRefresh = () => undefined;
   const handler = async (route: Route) => {
     if (route.request().method() !== "DELETE") return route.continue();
     deleteRequests += 1;
@@ -107,7 +105,6 @@ export async function checkImmediateDelete(options: {
     await pending!.continue();
     pending = null;
     await expect(targetRow()).toHaveCount(0);
-    await expect.poll(() => heldRefreshes.length).toBeGreaterThan(0);
     await expect(page).toHaveURL(new RegExp(`/t/${nav.task_id}$`));
   } finally {
     if (!page.isClosed()) {

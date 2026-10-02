@@ -162,7 +162,8 @@ export class SidebarTaskPageCache {
 
   removeTasks(taskIds: ReadonlySet<string>) {
     if (taskIds.size === 0) return;
-    this.clear();
+    this.epoch++;
+    this.clearPages();
     for (const listener of this.deletedTaskListeners) listener(taskIds);
   }
 
