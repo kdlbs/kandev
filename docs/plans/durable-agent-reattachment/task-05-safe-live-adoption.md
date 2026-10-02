@@ -806,3 +806,30 @@ GOCACHE=/tmp/kandev-go-build-preserved-20261001 pnpm e2e:run --host --project ch
 pnpm exec eslint e2e/helpers/generating-session.ts e2e/tests/chat/mobile-message-queue-management.spec.ts e2e/tests/kanban/preview-session-tabs.spec.ts
 pnpm exec prettier --check e2e/helpers/generating-session.ts e2e/tests/chat/mobile-message-queue-management.spec.ts e2e/tests/kanban/preview-session-tabs.spec.ts
 ```
+
+### Latest main integration, 2026-10-02
+
+Rebased onto verified main `87dcd788a8f43faa72445bd35c0e86b270e2ebfd`
+(runtime-indicator removal and shared branch-read ordering). No conflicts; all
+89 patches match the prior series in range-diff. The affected upstream unit
+suites passed all 33 tests. Fresh managed desktop checks passed three cases
+(39.5s); mobile queued controls and branch-policy drawer passed two (13.9s),
+all with retries disabled. Full web typecheck, lint and i18n checks passed,
+along with documentation catalog, full specification lint and whitespace.
+No backend source changed in this base increment. Exact-head hosted CI remains
+a delivery gate; native Windows/macOS product containment smoke and live-harness
+resume-matrix limitations remain as previously recorded.
+
+```bash
+cd apps/web
+pnpm exec vitest run components/update-available-toast-bridge.test.tsx hooks/domains/workspace/use-repository-branches.test.tsx
+pnpm run typecheck
+pnpm run lint
+pnpm run i18n:check
+GOCACHE=/tmp/kandev-go-build-preserved-20261001 pnpm e2e:run --host --project chromium tests/kanban/preview-session-tabs.spec.ts tests/chat/cancel-turn-availability.spec.ts tests/chat/queue-admission-reliability.spec.ts -- --grep 'shows all sessions as tabs|direct input cancel control|clears an attached Task draft' --retries=0
+GOCACHE=/tmp/kandev-go-build-preserved-20261001 pnpm e2e:run --host --project mobile-chrome tests/chat/mobile-message-queue-management.spec.ts tests/task/mobile-create-task-branch-policy.spec.ts -- --grep 'keeps queued row controls ordered and touchable|keeps the policy marker and fresh-branch state visible' --retries=0
+cd ../..
+python3 scripts/list-docs.py validate
+python3 scripts/lint-spec-files.py --all
+git diff --check
+```
