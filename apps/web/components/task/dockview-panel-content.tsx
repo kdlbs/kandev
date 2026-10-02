@@ -116,7 +116,7 @@ function ChatContent({ panelId, params }: { panelId: string; params: Record<stri
  * after the target becomes reachable again.
  */
 function useResyncGitStatusOnTabActivate(panelId: string, sessionId: string | null) {
-  return useSessionGitRefresh(sessionId, usePanelActive(panelId));
+  useSessionGitRefresh(sessionId, usePanelActive(panelId));
 }
 
 /** Render the changes/diff viewer for the panel's params (`kind` "all" or

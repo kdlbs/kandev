@@ -67,6 +67,7 @@ const FRONTEND_REPOSITORY = "frontend";
 const BACKEND_REPOSITORY = "backend";
 const FRONTEND_COMMIT = "frontend-commit";
 const TASK_A_CONTEXT = ["task-a", "session-a", "environment-a"] as const;
+const TASK_A_SIBLING_CONTEXT = ["task-a", "session-a-sibling", "environment-a"] as const;
 const TASK_B_CONTEXT = ["task-b", "session-b", "environment-b"] as const;
 const TASK_B_NEW_ENVIRONMENT_CONTEXT = ["task-b", "session-b", "environment-c"] as const;
 const ARIA_EXPANDED = "aria-expanded";
@@ -227,6 +228,34 @@ beforeEach(() => {
 });
 
 afterEach(cleanup);
+
+describe("ChangesPanelBody environment session ownership", () => {
+  it("keeps inline commit details on the environment session across tab switches", async () => {
+    render(
+      <TooltipProvider>
+        <StateProvider>
+          <OwnedChangesPanelBody {...panelProps()} />
+          <StoreCapture />
+        </StateProvider>
+      </TooltipProvider>,
+    );
+    setContext(...TASK_A_CONTEXT);
+
+    fireEvent.click(expandedCommit(FRONTEND_COMMIT));
+    expect(await screen.findByTestId(INLINE_FILE)).toBeTruthy();
+    expect(mocks.requestCommitDetail).toHaveBeenCalledWith(
+      expect.objectContaining({
+        local: expect.objectContaining({ sessionId: "session-a" }),
+      }),
+    );
+
+    setContext(...TASK_A_SIBLING_CONTEXT);
+
+    expect(expandedCommit(FRONTEND_COMMIT).getAttribute(ARIA_EXPANDED)).toBe(EXPANDED);
+    expect(screen.getByTestId(INLINE_FILE)).toBeTruthy();
+    expect(mocks.requestCommitDetail).toHaveBeenCalledOnce();
+  });
+});
 
 describe("ChangesPanelBody history context ownership", () => {
   it("keeps a failed local commit detail request retryable", async () => {

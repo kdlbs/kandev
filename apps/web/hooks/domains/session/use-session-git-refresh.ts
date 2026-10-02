@@ -1,9 +1,10 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { getWebSocketClient } from "@/lib/ws/connection";
+import { isBrowserForeground } from "./git-status-refresh-recovery-utils";
 import {
   monitorGitStatusDetails,
   requestGitStatusRefresh,
@@ -12,14 +13,9 @@ import {
 } from "./git-status-refresh-coordinator";
 
 /** Reuses the focused session stream for one finite, environment-scoped refresh attempt. */
-export function useSessionGitRefresh(
-  sessionId: string | null | undefined,
-  active: boolean,
-): () => void {
+export function useSessionGitRefresh(sessionId: string | null | undefined, active: boolean): void {
   const store = useAppStoreApi();
-  const [foreground, setForeground] = useState(
-    () => typeof document === "undefined" || document.visibilityState === "visible",
-  );
+  const [foreground, setForeground] = useState(isBrowserForeground);
   const context = useAppStore(
     useShallow((state) => ({
       environmentId: sessionId ? (state.environmentIdBySessionId[sessionId] ?? sessionId) : null,
@@ -28,17 +24,9 @@ export function useSessionGitRefresh(
   );
 
   useEffect(() => {
-    const onFocus = () => {
-      if (document.visibilityState === "visible") setForeground(true);
-    };
+    const onFocus = () => setForeground(isBrowserForeground());
     const onBlur = () => setForeground(false);
-    const onVisibilityChange = () => {
-      if (document.visibilityState !== "visible") {
-        setForeground(false);
-      } else if (document.hasFocus()) {
-        setForeground(true);
-      }
-    };
+    const onVisibilityChange = () => setForeground(isBrowserForeground());
 
     document.addEventListener("visibilitychange", onVisibilityChange);
     window.addEventListener("focus", onFocus);
@@ -66,19 +54,4 @@ export function useSessionGitRefresh(
       release();
     };
   }, [active, context, foreground, sessionId, store]);
-
-  return useCallback(() => {
-    const { environmentId, connectionStatus } = context;
-    const client = getWebSocketClient();
-    if (
-      !sessionId ||
-      !environmentId ||
-      connectionStatus !== "connected" ||
-      !client ||
-      client.getStatus() !== "connected"
-    ) {
-      return;
-    }
-    void requestGitStatusRefresh(client, store, sessionId, environmentId).catch(() => undefined);
-  }, [context, sessionId, store]);
 }

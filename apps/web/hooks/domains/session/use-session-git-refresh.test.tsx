@@ -49,7 +49,38 @@ function readyResponse(): SessionGitRefreshResponse {
     task_environment_id: "environment",
     mode: "fresh",
     status_state: "ready",
-    snapshots: [],
+    snapshots: [
+      {
+        type: "notification",
+        action: "session.git.event",
+        payload: {
+          type: "status_update",
+          session_id: "session",
+          task_environment_id: "environment",
+          timestamp: "2026-09-30T10:00:01.000Z",
+          status: {
+            status_state: "ready",
+            files_complete: true,
+            detail_state: "ready",
+            branch: "main",
+            remote_branch: null,
+            modified: [],
+            added: [],
+            deleted: [],
+            untracked: [],
+            renamed: [],
+            ahead: 0,
+            behind: 0,
+            remote_ahead: 0,
+            remote_behind: 0,
+            tracker_id: "tracker-old",
+            tracker_epoch: 1,
+            snapshot_revision: 2,
+            files: {},
+          },
+        },
+      },
+    ],
   };
 }
 
@@ -70,10 +101,12 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   setWebSocketClient(null);
+  vi.restoreAllMocks();
 });
 
 describe("useSessionGitRefresh", () => {
   it("refreshes on activation even when complete membership is cached", () => {
+    vi.spyOn(document, "hasFocus").mockReturnValue(true);
     const { unmount } = renderSessionRead(
       (active: boolean) => useSessionGitRefresh("session", active),
       true,
@@ -86,10 +119,31 @@ describe("useSessionGitRefresh", () => {
     unmount();
   });
 
+  it("waits for focus before reading in a visible but unfocused window", async () => {
+    const hasFocus = vi.spyOn(document, "hasFocus").mockReturnValue(false);
+    const hook = renderSessionRead<void, boolean>(
+      (active: boolean) => useSessionGitRefresh("session", active),
+      true,
+      (store) => store.getState().setGitStatus("environment", cachedStatus()),
+    );
+
+    try {
+      expect(document.visibilityState).toBe("visible");
+      expect(refreshSessionData).not.toHaveBeenCalled();
+
+      hasFocus.mockReturnValue(true);
+      act(() => window.dispatchEvent(new Event("focus")));
+      await vi.waitFor(() => expect(refreshSessionData).toHaveBeenCalledOnce());
+      expect(refreshSessionData).toHaveBeenCalledWith("session", "fresh", expect.any(AbortSignal));
+    } finally {
+      hook.unmount();
+    }
+  });
+
   it("cancels delayed recovery while blurred and refreshes again on focus", async () => {
     vi.useFakeTimers();
     const hasFocus = vi.spyOn(document, "hasFocus").mockReturnValue(true);
-    const hook = renderSessionRead<() => void, boolean>(
+    const hook = renderSessionRead<void, boolean>(
       (active: boolean) => useSessionGitRefresh("session", active),
       true,
       (store) => store.getState().setGitStatus("environment", cachedStatus()),
@@ -119,6 +173,10 @@ describe("useSessionGitRefresh", () => {
       await act(async () => {
         await vi.advanceTimersByTimeAsync(0);
       });
+      expect(pendingRequests).toHaveLength(3);
+      expect(
+        hook.result.current.store.getState().gitStatus.byEnvironmentId.environment?.status_state,
+      ).toBe("ready");
     } finally {
       hasFocus.mockRestore();
       hook.unmount();
@@ -129,7 +187,7 @@ describe("useSessionGitRefresh", () => {
   it("releases the recovery schedule when the Changes surface becomes inactive", async () => {
     vi.useFakeTimers();
     const hasFocus = vi.spyOn(document, "hasFocus").mockReturnValue(true);
-    const hook = renderSessionRead<() => void, boolean>(
+    const hook = renderSessionRead<void, boolean>(
       (active: boolean) => useSessionGitRefresh("session", active),
       true,
     );

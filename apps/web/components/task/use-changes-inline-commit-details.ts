@@ -4,6 +4,7 @@ import { useCallback, useRef, useSyncExternalStore } from "react";
 import { useTranslation } from "react-i18next";
 import { useAppStore } from "@/components/state-provider";
 import { useToast } from "@/components/toast-provider";
+import { useEnvironmentSessionId } from "@/hooks/use-environment-session-id";
 import { requestCommitDetail, CommitDetailProtocolError } from "./commit-detail-request";
 import {
   ChangesInlineCommitState,
@@ -18,7 +19,7 @@ export type ChangesPanelContextIdentity = {
 
 export function useChangesPanelContextIdentity(): ChangesPanelContextIdentity {
   const activeTaskId = useAppStore((state) => state.tasks.activeTaskId);
-  const activeSessionId = useAppStore((state) => state.tasks.activeSessionId);
+  const activeSessionId = useEnvironmentSessionId();
   const environmentId = useAppStore((state) =>
     activeSessionId ? (state.environmentIdBySessionId[activeSessionId] ?? null) : null,
   );

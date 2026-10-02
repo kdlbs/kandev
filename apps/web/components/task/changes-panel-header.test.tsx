@@ -125,7 +125,7 @@ describe("ChangesPanelHeaderLeft feedback", () => {
       />,
     );
 
-    expect(screen.getByRole("status").getAttribute("aria-label")).toBe("Loading changes...");
+    expect(screen.getByRole("status").textContent).toContain("Loading changes...");
     expect(container.querySelector("[data-testid='changes-refresh-status']")).not.toBeNull();
     expect(screen.queryByRole("button", { name: "Review" })).toBeNull();
   });

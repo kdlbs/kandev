@@ -325,7 +325,7 @@ describe("Git status refresh recovery backoff", () => {
     vi.useRealTimers();
   });
 
-  it("uses increasing recovery delays and caps the delay at thirty seconds", async () => {
+  it("uses increasing delays and stops after four automatic recovery retries", async () => {
     vi.useFakeTimers();
     const store = createAppStore();
     const requests: Deferred<SessionGitRefreshResponse>[] = [];
@@ -340,29 +340,25 @@ describe("Git status refresh recovery backoff", () => {
       requests[1].resolve(unavailableResponse());
       await firstAttempt;
 
-      const delays = [5_000, 10_000, 20_000, 30_000, 30_000];
+      const delays = [5_000, 10_000, 20_000, 30_000];
       let nextAttemptStart = 2;
-      for (const [index, delay] of delays.entries()) {
+      for (const delay of delays) {
         await vi.advanceTimersByTimeAsync(delay - 1);
         expect(requests).toHaveLength(nextAttemptStart);
         await vi.advanceTimersByTimeAsync(1);
         await vi.waitFor(() => expect(requests).toHaveLength(nextAttemptStart + 1));
-        if (index === delays.length - 1) {
-          requests[nextAttemptStart].resolve(statusResponse(CURRENT_FILE));
-          await vi.waitFor(() =>
-            expect(store.getState().gitStatus.byEnvironmentId[SESSION]?.files).toHaveProperty(
-              CURRENT_FILE,
-            ),
-          );
-          break;
-        }
         requests[nextAttemptStart].resolve(unavailableResponse());
         await vi.waitFor(() => expect(requests).toHaveLength(nextAttemptStart + 2));
         requests[nextAttemptStart + 1].resolve(unavailableResponse());
         await vi.advanceTimersByTimeAsync(0);
         nextAttemptStart += 2;
       }
-      expect(store.getState().gitStatus.refreshByEnvironmentId?.[SESSION]).toBeUndefined();
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(requests).toHaveLength(nextAttemptStart);
+      expect(store.getState().gitStatus.refreshByEnvironmentId?.[SESSION]).toMatchObject({
+        state: "unavailable",
+      });
+      expect(vi.getTimerCount()).toBe(0);
     } finally {
       stopMonitoring();
       release();

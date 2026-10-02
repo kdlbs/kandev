@@ -52,7 +52,6 @@ function ChangesPanelRefreshStatus({
         <span
           role="status"
           aria-live="polite"
-          aria-label={description}
           tabIndex={0}
           data-testid="changes-refresh-status"
           onFocus={() => {
@@ -63,8 +62,9 @@ function ChangesPanelRefreshStatus({
             setIsFocused(false);
             setIsFocusDismissed(false);
           }}
-          className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-sm text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+          className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-sm text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring [@media(pointer:coarse)]:min-h-11 [@media(pointer:coarse)]:min-w-11"
         >
+          <span className="sr-only">{description}</span>
           {status === "loading" ? (
             <Spinner aria-hidden="true" role="presentation" className="size-3.5" />
           ) : (

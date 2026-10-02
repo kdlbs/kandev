@@ -42,7 +42,7 @@ test.describe("Changes panel Git refresh recovery", () => {
       await bridge.waitForHeldFreshGitRefreshRequests(1);
 
       const status = session.changes.getByTestId("changes-refresh-status");
-      await expect(status).toHaveAttribute("aria-label", "Loading changes...");
+      await expect(status).toContainText("Loading changes...");
       await expect(session.changes.getByText("Your changed files will appear here")).toHaveCount(0);
       const toolbar = session.changes.locator(":scope > div").first();
       const pendingToolbarBox = await toolbar.boundingBox();
@@ -121,7 +121,7 @@ test.describe("Changes panel Git refresh recovery", () => {
       await expect(fileRow).toBeVisible();
       await expect(session.changes.getByText("Diff is loading")).toHaveCount(0);
       const refreshStatus = session.changes.getByTestId("changes-refresh-status");
-      await expect(refreshStatus).toHaveAttribute("aria-label", "Loading changes...");
+      await expect(refreshStatus).toContainText("Loading changes...");
       await refreshStatus.hover();
       await expect(testPage.getByRole("tooltip", { name: "Loading changes..." })).toBeVisible();
 
@@ -213,7 +213,7 @@ test.describe("Changes panel Git refresh recovery", () => {
       await bridge.waitForCommitDiffRequests(2);
 
       const status = session.changes.getByTestId("changes-refresh-status");
-      await expect(status).toHaveAttribute("aria-label", "Loading changes...");
+      await expect(status).toContainText("Loading changes...");
       await expect(status).toHaveCount(1);
       await expect(session.changes.getByText("Diff is loading")).toHaveCount(0);
       await prCapture.screenshot("git-refresh-recovery-desktop-commit-details-pending", {

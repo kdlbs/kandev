@@ -5,6 +5,7 @@ import {
   makeGitEnv,
   openTaskSession,
 } from "../../helpers/git-helper";
+import { expectTouchSquareControl } from "../../helpers/control-sizing";
 import { createGitEnrichmentGate, routeGitStatusRefresh } from "./git-status-refresh-helpers";
 import path from "node:path";
 
@@ -62,7 +63,8 @@ test.describe("Mobile Changes panel Git refresh recovery", () => {
       const refreshStatus = testPage.getByTestId("changes-refresh-status");
       const fileRow = testPage.getByTestId(`file-row-${filePath}`);
       await expect(fileRow).toBeVisible();
-      await expect(refreshStatus).toHaveAttribute("aria-label", "Loading changes...");
+      await expect(refreshStatus).toContainText("Loading changes...");
+      await expectTouchSquareControl(refreshStatus);
 
       const priorRefreshResponses = bridge.responseCount("fresh");
       const priorRecoveryResponses = bridge.responseCount("recover");
@@ -75,8 +77,7 @@ test.describe("Mobile Changes panel Git refresh recovery", () => {
       await bridge.waitForResponse("recover", priorRecoveryResponses);
 
       await expect(refreshStatus).toBeVisible();
-      await expect(refreshStatus).toHaveAttribute(
-        "aria-label",
+      await expect(refreshStatus).toContainText(
         /Changes did not refresh\. Retrying automatically\./,
       );
       await expect(fileRow).toBeVisible();
@@ -110,7 +111,7 @@ test.describe("Mobile Changes panel Git refresh recovery", () => {
       bridge.allowResponses();
       bridge.holdFreshGitRefreshRequests();
       await bridge.waitForHeldFreshGitRefreshRequests(1);
-      await expect(refreshStatus).toHaveAttribute("aria-label", "Loading changes...");
+      await expect(refreshStatus).toContainText("Loading changes...");
       bridge.releaseFreshGitRefreshRequests();
       const response = await bridge.waitForResponse("fresh", retryFreshResponses);
       expect(response.success).toBe(true);
@@ -118,7 +119,7 @@ test.describe("Mobile Changes panel Git refresh recovery", () => {
       expect(bridge.responseIncludesFile("fresh", filePath)).toBe(true);
       expect(bridge.responseHasPendingDetails("fresh", filePath)).toBe(true);
       await expect.poll(() => bridge.droppedPendingCount()).toBeGreaterThan(priorPendingEvents);
-      await expect(refreshStatus).toHaveAttribute("aria-label", "Loading changes...");
+      await expect(refreshStatus).toContainText("Loading changes...");
 
       await expect(fileRow).toBeVisible();
       await expect(diffSheet.getByText("Diff is loading")).toBeVisible();
@@ -198,7 +199,8 @@ test.describe("Mobile Changes panel Git refresh recovery", () => {
       await bridge.waitForCommitDiffRequests(2);
 
       const status = panel.getByTestId("changes-refresh-status");
-      await expect(status).toHaveAttribute("aria-label", "Loading changes...");
+      await expect(status).toContainText("Loading changes...");
+      await expectTouchSquareControl(status);
       await expect(status).toHaveCount(1);
       await expect(panel.getByText("Diff is loading")).toHaveCount(0);
       await prCapture.screenshot("git-refresh-recovery-mobile-commit-details-pending", {

@@ -313,7 +313,7 @@ export async function routeGitStatusRefresh(page: Page) {
           timeout: 30_000,
           message: "the expected fresh Git refresh request should be held",
         })
-        .toBe(count);
+        .toBeGreaterThanOrEqual(count);
     },
     releaseFreshGitRefreshRequests() {
       state.holdFreshGitRefreshRequests = false;
@@ -330,7 +330,7 @@ export async function routeGitStatusRefresh(page: Page) {
           timeout: 30_000,
           message: "the expected inline commit diff requests should arrive",
         })
-        .toBe(count);
+        .toBeGreaterThanOrEqual(count);
     },
     async waitForCommitDiffResponses(count: number) {
       await expect

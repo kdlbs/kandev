@@ -262,7 +262,7 @@ function ChatContent({ panelId, params }: { panelId: string; params: Record<stri
  */
 function useResyncGitStatusOnTabActivate(panelId: string, sessionId: string | null) {
   const isVisible = usePanelActive(panelId);
-  return useSessionGitRefresh(sessionId, isVisible);
+  useSessionGitRefresh(sessionId, isVisible);
 }
 
 /** Render the changes/diff viewer for the panel's params (`kind` "all" or

@@ -40,7 +40,8 @@ export function clearRecoveryTimersForClient(clientId: number) {
 export function scheduleRecoveryTimer(scopeKey: string, callback: () => void) {
   if (recoveryTimers.has(scopeKey)) return;
   const failureCount = recoveryFailureCounts.get(scopeKey) ?? 0;
-  const delay = RECOVERY_DELAYS_MS[Math.min(failureCount, RECOVERY_DELAYS_MS.length - 1)];
+  const delay = RECOVERY_DELAYS_MS[failureCount];
+  if (delay === undefined) return;
   recoveryFailureCounts.set(scopeKey, failureCount + 1);
   const timer: RecoveryTimer = {
     handle: setTimeout(() => {

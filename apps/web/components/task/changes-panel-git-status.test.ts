@@ -214,6 +214,22 @@ describe("recoverable Git detail failures", () => {
 describe("deriveChangesPanelToolbarStatus", () => {
   const ready = deriveChangesPanelGitStatus({ gitStatus: status() });
 
+  it("shows loading for status and detail work without refresh companions", () => {
+    const statusLoading = deriveChangesPanelGitStatus({
+      gitStatus: status({ status_state: "loading", files_complete: false }),
+    });
+    const detailsPending = deriveChangesPanelGitStatus({
+      gitStatus: status({
+        status_state: "ready",
+        files_complete: true,
+        detail_state: "pending",
+      }),
+    });
+
+    expect(deriveChangesPanelToolbarStatus(statusLoading, false)).toBe("loading");
+    expect(deriveChangesPanelToolbarStatus(detailsPending, false)).toBe("loading");
+  });
+
   it("prioritizes an active Git retry over the unavailable warning", () => {
     const unavailable = deriveChangesPanelGitStatus({
       gitStatus: status({ status_state: "unavailable" }),
