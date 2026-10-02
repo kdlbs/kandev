@@ -741,3 +741,39 @@ pnpm exec eslint e2e/tests/layout/preview-tab-session-switch.spec.ts
 pnpm exec prettier --check e2e/tests/layout/preview-tab-session-switch.spec.ts
 VERSION=0.0.0-e2e.f29b4bd1a1859ce72d0056dc4d23c0ac54c71a55 GOCACHE=/tmp/kandev-go-build-preserved-20261001 KANDEV_E2E_CONTAINERS=1 E2E_DEBUG=1 pnpm e2e:run --host --project containers tests/docker/codex-app-server.spec.ts -- --retries=0
 ```
+
+### Controlled initial Git loading fixture, 2026-10-02
+
+The final hosted browser failure held fresh refresh requests but forwarded
+background ready snapshots. Those snapshots could clear the initial loading
+indicator between its text assertion and its layout measurement. The bridge
+now supports an explicit opt-in hold for ready notifications. Only the initial
+loading test enables it, and it releases queued notifications before completing
+the refresh and again during cleanup. Normal forwarding and deliberately dropped
+pending-event behavior remain unchanged. Production code did not change.
+
+A bridge unit regression failed because ready snapshots escaped the hold; both
+bridge tests then passed. The unit test mocks the Playwright assertion module
+because it exercises socket forwarding without a browser. The complete desktop
+Git recovery file passed (3 cases, 18.9s), the affected initial case passed three
+more repetitions (28.4s), and both mobile recovery cases passed (17.2s). Every
+browser run used zero retries. Typecheck, scoped ESLint, and Prettier passed.
+
+All 20 reports from `f29b4` were audited: three failed first attempts, exactly the
+two browser fixture issues and the Docker image build described above. The
+terminal cohort has 58 passed, 11 skipped, 1 neutral, 5 failed checks (three leaf
+jobs and two report gates), and no pending checks. Backend CI is fully green.
+Publication of these verified fixture fixes and fresh complete CI remain gates.
+
+```bash
+cd apps/web
+pnpm exec vitest run e2e/scripts/git-status-refresh-bridge.test.ts
+# RED: one failing hold assertion and one passing default-forwarding case.
+# GREEN: both pass after the bridge hold is implemented.
+GOCACHE=/tmp/kandev-go-build-preserved-20261001 pnpm e2e:run --host --project chromium tests/git/changes-panel-refresh-recovery.spec.ts -- --retries=0
+GOCACHE=/tmp/kandev-go-build-preserved-20261001 pnpm e2e:run --host --project chromium tests/git/changes-panel-refresh-recovery.spec.ts -- --grep 'keeps initial pending' --repeat-each=3 --retries=0
+GOCACHE=/tmp/kandev-go-build-preserved-20261001 pnpm e2e:run --host --project mobile-chrome tests/git/mobile-changes-panel-refresh-recovery.spec.ts -- --retries=0
+pnpm run typecheck
+pnpm exec eslint e2e/scripts/git-status-refresh-bridge.test.ts e2e/tests/git/git-status-refresh-helpers.ts e2e/tests/git/changes-panel-refresh-recovery.spec.ts
+pnpm exec prettier --check e2e/scripts/git-status-refresh-bridge.test.ts e2e/tests/git/git-status-refresh-helpers.ts e2e/tests/git/changes-panel-refresh-recovery.spec.ts
+```

@@ -31,7 +31,7 @@ test.describe("Changes panel Git refresh recovery", () => {
       workflow_step_id: seedData.startStepId,
       repository_ids: [seedData.repositoryId],
     });
-    const bridge = await routeGitStatusRefresh(testPage);
+    const bridge = await routeGitStatusRefresh(testPage, { holdReadyNotifications: true });
     bridge.holdFreshGitRefreshRequests();
 
     try {
@@ -59,6 +59,7 @@ test.describe("Changes panel Git refresh recovery", () => {
       });
 
       const priorFreshResponses = bridge.responseCount("fresh");
+      bridge.releaseReadyGitStatusNotifications();
       bridge.releaseFreshGitRefreshRequests();
       const response = await bridge.waitForResponse("fresh", priorFreshResponses);
       expect(response.success).toBe(true);
@@ -69,6 +70,7 @@ test.describe("Changes panel Git refresh recovery", () => {
         caption: "The loading feedback clears without changing the narrow toolbar height",
       });
     } finally {
+      bridge.releaseReadyGitStatusNotifications();
       bridge.releaseFreshGitRefreshRequests();
     }
   });
