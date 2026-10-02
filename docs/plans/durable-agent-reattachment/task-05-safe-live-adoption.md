@@ -391,3 +391,41 @@ GOCACHE=/tmp/kandev-go-build-preserved-20261001 go test -race ./internal/orchest
 cd ../web
 GOCACHE=/tmp/kandev-go-build-preserved-20261001 pnpm e2e:run --host --project chromium tests/workflow/workflow-step-proceed.spec.ts tests/office/realtime-dashboard.spec.ts tests/task/workspace-file-transfer.spec.ts tests/task/create-task-workflow-agent-overrides.spec.ts tests/task/task-navigation-responsiveness.spec.ts -- --grep 'preserves session settings|does not refetch on cross-workspace|uploads picked files|keeps grouped replacements|Files stays usable' --retries=0
 ```
+
+
+### Further hosted fixture remediation, 2026-10-02
+
+Hosted checks on the preceding head passed the trusted walkthrough helper,
+Linux backend/static checks, both PostgreSQL databases and native Windows build,
+vet and all targeted tests. Windows was cancelled during setup-go's cache archive
+after tests completed, at the existing 40-minute job limit. GitHub rejected a
+rerun while its aggregate was queued; the same-head rerun was accepted after
+that workflow finished. A cancelled job is not reported as passing CI.
+
+Four browser shards exposed one flaky case each. The short-phone question's saved
+page recorded its real MCP call timing out after one minute. Its fixture now
+creates the neighboring task first and the target last, preserving the existing
+MCP timeout, native touch actions, clipping assertions and exact answer receipts.
+Both phone sizes passed three repetitions each, zero retries, in 1.7 minutes.
+The pre-change short-phone baseline passed locally; hosted evidence supplies red.
+
+The workflow shard failed during fixture reset with exactly `session transfer in
+progress`. The existing four-attempt reset poll now recognizes that exact 500
+JSON response as transient cleanup ownership. New unit coverage reproduced the
+old failure, then passed transient success, persistent four-attempt exhaustion
+and immediate rejection of unrelated failures. All eleven helper tests passed.
+No prompt submission or production retry behavior changed.
+
+The PR switcher inherited earlier LSP checkout history. It now resets the owned
+seed checkout to its baseline before creating the PR commit and uses the declared
+repository path. The mobile symlink fixture waits for initial Git hydration before
+opening its action menu. The PR and both adjacent workflow cases passed nine
+repetitions total, zero retries, in 1.4 minutes. Mobile symlink verification passed three repetitions, zero retries, in 19.7s. Scoped ESLint passed; no test retry allowance or timeout was increased.
+
+```bash
+cd apps/web
+pnpm exec vitest run --config vitest.config.ts e2e/helpers/api-client.test.ts
+GOCACHE=/tmp/kandev-go-build-preserved-20261001 pnpm e2e:run --host --no-build --project mobile-chrome tests/task/mobile-threads-composer-disclosure.spec.ts -- --grep 'scrolls and submits a long required question' --repeat-each=3 --retries=0
+GOCACHE=/tmp/kandev-go-build-preserved-20261001 pnpm e2e:run --host --no-build --project chromium tests/pr/pr-switcher-changes.spec.ts tests/workflow/workflow-agent-switch.spec.ts -- --grep 'shows correct PR data|manual step move updates chat UI|on_turn_start transition' --repeat-each=3 --retries=0
+GOCACHE=/tmp/kandev-go-build-preserved-20261001 pnpm e2e:run --host --no-build --project mobile-chrome tests/git/mobile-symlink-identification.spec.ts -- --repeat-each=3 --retries=0
+```

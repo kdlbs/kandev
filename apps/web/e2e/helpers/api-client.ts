@@ -1617,17 +1617,19 @@ export class ApiClient {
         (body.includes("inspect worktrees before delete") ||
           body.includes("capture worktree cleanup identities") ||
           body.includes("capture cleanup identity"));
-      if (!transientWorktreeInspection || attempt === 3) {
+      const sessionTransferInProgress =
+        response.status === 500 && body.trim() === '{"error":"session transfer in progress"}';
+      if ((!transientWorktreeInspection && !sessionTransferInProgress) || attempt === 3) {
         throw new Error(`API DELETE ${path} failed (${response.status}): ${body}`);
       }
 
       // A task cleanup worker can remove a checkout between the reset's
       // inventory read and its dirty-worktree inspection. Retry the complete
-      // reset after the worker has had time to publish its deletion.
+      // reset after cleanup or a workflow session transfer releases its ownership.
       await dwell(
         250 * (attempt + 1),
         "poll-interval",
-        "retry interval for the E2E reset after a transient worktree inspection race",
+        "poll interval for E2E reset after transient cleanup or session transfer ownership",
       );
     }
   }
