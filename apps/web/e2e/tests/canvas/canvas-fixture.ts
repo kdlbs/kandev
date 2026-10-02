@@ -708,10 +708,7 @@ export async function publishTaskCanvas({
     return publishedCanvas;
   } finally {
     removeCanvasSource(workspacePath, canvas.id);
-
-
   }
-
 }
 
 export async function approvePendingCanvas(

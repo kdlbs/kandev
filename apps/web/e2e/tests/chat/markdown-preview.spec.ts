@@ -53,8 +53,10 @@ async function seedTaskWithSession(
   apiClient: ApiClient,
   seedData: SeedData,
   title: string,
-  repositoryId = seedData.repositoryId,
-  afterLoad?: (taskId: string, sessionId: string) => Promise<void>,
+  options: {
+    repositoryId?: string;
+    afterLoad?: (taskId: string, sessionId: string) => Promise<void>;
+  } = {},
 ): Promise<{ session: SessionPage; sessionId: string }> {
   const task = await apiClient.createTaskWithAgent(
     seedData.workspaceId,
@@ -64,14 +66,14 @@ async function seedTaskWithSession(
       description: "/e2e:simple-message",
       workflow_id: seedData.workflowId,
       workflow_step_id: seedData.startStepId,
-      repository_ids: [repositoryId],
+      repository_ids: [options.repositoryId ?? seedData.repositoryId],
     },
   );
   await testPage.goto(`/t/${task.id}`);
   const session = new SessionPage(testPage);
   await session.waitForLoad();
   await session.waitForChatIdle({ timeout: 30_000 });
-  await afterLoad?.(task.id, task.session_id);
+  await options.afterLoad?.(task.id, task.session_id);
   return { session, sessionId: task.session_id };
 }
 
@@ -391,7 +393,7 @@ test.describe("Markdown preview", () => {
       apiClient,
       seedData,
       "Markdown Diff Preview Test",
-      repository.id,
+      { repositoryId: repository.id },
     );
 
     // Open Changes panel — the untracked .md file should appear in the file list.
@@ -539,37 +541,38 @@ test.describe("Markdown preview", () => {
       apiClient,
       seedData,
       "Markdown Code Wrapped Comment Test",
-      seedData.repositoryId,
-      async (taskId, taskSessionId) => {
-        let worktreePath = "";
-        await expect
-          .poll(
-            async () => {
-              worktreePath = await taskRepositoryWorktreePath(
-                apiClient,
-                taskId,
-                taskSessionId,
-                seedData.repositoryId,
-              );
-              return Boolean(worktreePath && fs.existsSync(worktreePath));
-            },
-            {
-              timeout: 30_000,
-              message:
-                "Waiting for the markdown task environment to expose its repository worktree",
-            },
-          )
-          .toBe(true);
-        if (!worktreePath || !fs.existsSync(worktreePath)) {
-          throw new Error("the markdown task session did not expose its repository worktree");
-        }
-        fs.writeFileSync(path.join(worktreePath, fileName), `${wrappedLine}\n`);
-        await testPage.evaluate((sid) => {
-          const refreshFiles = (window as E2EStoreWindow).__KANDEV_E2E_STORE__?.getState()
-            .bumpWorkspaceFilesRefresh;
-          if (!refreshFiles) throw new Error("E2E workspace file refresh action is unavailable");
-          refreshFiles(sid);
-        }, taskSessionId);
+      {
+        afterLoad: async (taskId, taskSessionId) => {
+          let worktreePath = "";
+          await expect
+            .poll(
+              async () => {
+                worktreePath = await taskRepositoryWorktreePath(
+                  apiClient,
+                  taskId,
+                  taskSessionId,
+                  seedData.repositoryId,
+                );
+                return Boolean(worktreePath && fs.existsSync(worktreePath));
+              },
+              {
+                timeout: 30_000,
+                message:
+                  "Waiting for the markdown task environment to expose its repository worktree",
+              },
+            )
+            .toBe(true);
+          if (!worktreePath || !fs.existsSync(worktreePath)) {
+            throw new Error("the markdown task session did not expose its repository worktree");
+          }
+          fs.writeFileSync(path.join(worktreePath, fileName), `${wrappedLine}\n`);
+          await testPage.evaluate((sid) => {
+            const refreshFiles = (window as E2EStoreWindow).__KANDEV_E2E_STORE__?.getState()
+              .bumpWorkspaceFilesRefresh;
+            if (!refreshFiles) throw new Error("E2E workspace file refresh action is unavailable");
+            refreshFiles(sid);
+          }, taskSessionId);
+        },
       },
     );
     await testPage.evaluate(

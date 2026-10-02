@@ -429,3 +429,29 @@ GOCACHE=/tmp/kandev-go-build-preserved-20261001 pnpm e2e:run --host --no-build -
 GOCACHE=/tmp/kandev-go-build-preserved-20261001 pnpm e2e:run --host --no-build --project chromium tests/pr/pr-switcher-changes.spec.ts tests/workflow/workflow-agent-switch.spec.ts -- --grep 'shows correct PR data|manual step move updates chat UI|on_turn_start transition' --repeat-each=3 --retries=0
 GOCACHE=/tmp/kandev-go-build-preserved-20261001 pnpm e2e:run --host --no-build --project mobile-chrome tests/git/mobile-symlink-identification.spec.ts -- --repeat-each=3 --retries=0
 ```
+
+
+### Latest startup-recovery main integration, 2026-10-02
+
+Rebased onto main's standalone listener and startup-failure explanations changes.
+Recovery-hook conflicts preserve main's current-request result fence and apply it
+to context continuation details. Canvas conflicts retain source cleanup in a
+finally block and the existing branch publication completion checks. Markdown
+conflicts retain both repository selection and post-load setup; those options
+share one argument to satisfy the five-parameter lint limit.
+
+Six focused frontend files passed all 99 tests, including recovery actions,
+presentation, service and reset helpers. Full affected runtime/lifecycle and
+orchestrator race suites passed. A fresh managed desktop build passed four
+conflict checks in 51.1s, zero retries; mobile failure-history recovery passed in
+12.3s, zero retries. Conflict-file ESLint, formatting, catalog/specification lint
+and whitespace passed. Current-head hosted CI remains pending after publication.
+
+```bash
+cd apps/backend
+GOCACHE=/tmp/kandev-go-build-preserved-20261001 go test -race ./internal/agent/runtime/agentctl/... ./internal/agent/runtime/lifecycle ./internal/orchestrator/...
+cd ../web
+pnpm exec vitest run hooks/domains/session/use-session-recovery-actions.test.ts lib/active-session-recovery.test.ts lib/session-recovery-presentation.test.ts lib/session-last-agent-error.test.ts lib/services/session-recovery-service.test.ts e2e/helpers/api-client.test.ts
+GOCACHE=/tmp/kandev-go-build-preserved-20261001 pnpm e2e:run --host --project chromium tests/chat/markdown-preview.spec.ts tests/canvas/plugin-canvas.spec.ts tests/task/launch-failure-recovery.spec.ts -- --grep 'open markdown preview from diff|first visual row|reconciles a published task canvas|retains session failure' --retries=0
+GOCACHE=/tmp/kandev-go-build-preserved-20261001 pnpm e2e:run --host --no-build --project mobile-chrome tests/task/mobile-launch-failure-recovery.spec.ts -- --grep 'retains session failure history' --retries=0
+```
