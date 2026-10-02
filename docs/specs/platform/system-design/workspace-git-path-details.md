@@ -36,9 +36,13 @@ they are not independent statistics rows. The destination is the enrichment look
 
 One workspace-specific cursor parser reads the first two tabs and consumes NUL-framed paths.
 It preserves every path byte without trimming, C-unquoting, splitting on newlines, or interpreting arrows/braces.
-Only the numeric columns are converted to counts. Binary `-` columns retain the current zero-count projection.
+Numeric columns must contain unsigned decimal digits that fit the native count type. Invalid, negative,
+overflowing, or half-binary counts reject the record. Paired binary `-` columns retain the current zero-count projection.
 Zero-count rows are retained: pure renames and mode-only changes can still have patch content.
 Incomplete records cannot yield invented destinations or reinterpret a rename's path records as statistics rows.
+Each of the three callers marks details unavailable when a nonempty remainder fails framing or count
+validation. Publication settles only pending file/facet details as unavailable, preserving successful
+already-ready details and existing carry-forward. Empty output remains valid.
 Iteration remains linear and checks caller cancellation between entries.
 
 ## Enrichment integration

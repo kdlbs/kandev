@@ -14,7 +14,7 @@ legacy_specs: []
 ## Overview
 
 Repair workspace diff association in one sequential work order. The parent reviewed the complete
-design package and explicitly authorized implementation on 2026-10-02. Task 01 is complete.
+design package and explicitly authorized implementation on 2026-10-02. Task 01 and parent-approved review remediation are complete.
 Parent owns coordination; no extra workers, tasks, or sessions were used.
 
 ## Confirmed root cause and evidence
@@ -81,6 +81,15 @@ Use private repositories and existing helpers, explicit `core.quotePath=true`, b
 and tracker cleanup. Native Windows skips only invalid filesystem names, never the parser matrix.
 Zero-line mode-only parser coverage is portable; any real chmod regression must be Unix-scoped.
 
+Review remediation within `.33`/`.36` rejects malformed nonbinary counts (including negatives and overflow),
+marks all three loops unavailable on failed framing/count validation, and preserves successful prefixes.
+`TestParseWorkspaceNumstatZRejectsInvalidCounts` covers the numeric boundary on all platforms.
+`TestWorkspaceGitMalformedNumstatDetailsUnavailable` injects deterministic stdout through the existing
+POSIX Git PATH-shim pattern, exercising public publication in all three phases. It preserves healthy
+prefix details and already-ready flattened details while failed pending files/facets become unavailable.
+`TestWorkspaceGitEmptyNumstatDetailsReady` and existing zero/binary parser/real-repository cases constrain
+valid output. Injection tests skip native Windows honestly; portable parser validation remains enabled.
+
 ## End-to-end evidence
 
 The real repository to public details-wait tracker path is the affected end-to-end boundary.
@@ -116,6 +125,15 @@ Implementation checks on 2026-10-02:
 - Focused GREEN command in Task 01 with `-race -p 2`, `GOMAXPROCS=2`: passed (19 selected test functions; package 7.110s). Includes expanded exact-path, mixed-facet, real rename, binary, framing, and existing lifecycle/resource regressions.
 - Focused process-package lint command in Task 01, concurrency 2: passed, zero issues.
 - Catalog validation, full specification lint, and diff whitespace checks: passed.
+
+Review remediation on 2026-10-02:
+
+- New narrow RED in Task 01: exit 1, package 2.189s, expected invalid-count/false-ready failures.
+- Nine-function focused GREEN in Task 01: exit 0, package 9.657s, with race checking.
+- Scoped lint: passed with concurrency 2 and zero issues. Catalog/specification/coverage/whitespace
+  checks passed.
+- Strict count validation and unavailable publication preserve valid empty/zero/binary output,
+  successful prefix details, and already-ready flattened details.
 
 Normal commit hooks and external delivery evidence are recorded in the task plan. Hosted CI/review and verified merge remain external delivery gates; work-order completion does not imply merge.
 

@@ -30,6 +30,8 @@ Prove the correction through focused public tracker regressions before minimal p
 - Permanent RED for the six original real-tracker cases, then staged/unstaged/mixed special paths,
   actual rename destinations, binary rows, and no-content changes as listed in the plan.
 - One shared NUL parser and the three path-bearing numstat callers; cursor consumption of actual old/new records.
+- Focused malformed-output RED/GREEN through the existing POSIX Git PATH shim, including valid
+  prefixes, pending file/facet publication, and legitimate empty output; parser zero/binary controls.
 - Exact affected checks, normal hooks, and synchronized results in this package.
 
 ## Out of scope
@@ -42,7 +44,8 @@ and speculative diagnostic or polish work.
 1. Permanent `TestWorkspaceGitDetailsPreservesExactPaths` fails on the existing implementation for
    the parent's original six cases; all new parser/tracker tests pass after the fix.
 2. All three callers use NUL records; actual rename destinations match membership keys, mixed layer
-   counts/patches remain independent, and legitimate zero-count rows remain usable.
+   counts/patches remain independent, and legitimate zero-count rows remain usable. Invalid numeric fields or incomplete nonempty output
+   publish unavailable details while retaining already-ready files/facets.
 3. Existing affected state, cancellation, budget, carry-forward, and history text-parser checks pass;
    command arguments, comparison identity, and existing API shape remain compatible.
 
@@ -51,12 +54,14 @@ and speculative diagnostic or polish work.
 From repo root, run RED first before production edits:
 
 ```bash
+set -euo pipefail
 (cd apps/backend && GOMAXPROCS=2 go test -p 2 ./internal/agentctl/server/process -run '^TestWorkspaceGitDetailsPreservesExactPaths$' -count=1)
 ```
 
 After implementation, run this single focused Go selection once:
 
 ```bash
+set -euo pipefail
 (cd apps/backend && GOMAXPROCS=2 go test -race -p 2 ./internal/agentctl/server/process -run '^(TestParseWorkspaceNumstatZ|TestWorkspaceGitDetailsPreservesExactPaths|TestWorkspaceGitDetailsPreservesExactMixedPaths|TestWorkspaceGitDetailsPreservesRenameDestinations|TestWorkspaceGitDetailsPreservesBinaryPaths|TestWorkspaceGitStatusPreservesMixedChangeFacets|TestWorkspaceGitStatusPreservesAddedMixedChangeFacets|TestMixedChangeFacetDiffBudgetCountsAllRepresentations|TestCarryForwardMixedChangeFacets|TestCarryForwardMixedChangeFacetsRespectsBudget|TestEnrichStagedDiff_RenamedFile|TestResolveNumstatPath|TestNumstatByPath|TestEnrichWithDiffData_CanceledContextReturnsErrorForTrackedFiles|TestDiffBudgetAndCarryForwardHonorCancellation|TestCarryForwardFileDiffs|TestCarryForwardFileDiff|TestWorkspaceTrackerRetriesOnlyFailedDiffAfterTransientGitFailure|TestWorkspaceTrackerOnlyRetriesUnavailableDetailsOnExplicitRefresh)$' -count=1)
 (cd apps/backend && GOMAXPROCS=2 golangci-lint run ./internal/agentctl/server/process/... --concurrency=2 --new-from-rev=6979c7642d2e73f6c765155a417713c6c05ac088 --timeout=5m)
 python3 scripts/list-docs.py validate
@@ -67,6 +72,7 @@ git diff --check
 Run the repository documentation-coverage preflight from root on the complete linked package:
 
 ```bash
+set -euo pipefail
 PATH="/home/jcfs/.local/share/mise/installs/node/24.21.0/bin:$PATH" node <<'JS'
 const fs = require('node:fs');
 const {validateCoverage} = require('./.github/scripts/pr-docs.cjs');
@@ -90,12 +96,29 @@ Invoke repository commit hooks normally. Read the delivery skills
 at that phase. If hook setup needs pnpm, install from `apps/` with the frozen lockfile once.
 Do not expand this work order to broad backend/E2E audits.
 
+Review remediation runs a separate narrow RED before production edits:
+
+```bash
+set -euo pipefail
+(cd apps/backend && GOMAXPROCS=2 go test -p 2 ./internal/agentctl/server/process -run '^(TestParseWorkspaceNumstatZRejectsInvalidCounts|TestWorkspaceGitMalformedNumstatDetailsUnavailable|TestWorkspaceGitEmptyNumstatDetailsReady)$' -count=1)
+```
+
+Its single focused GREEN is:
+
+```bash
+set -euo pipefail
+(cd apps/backend && GOMAXPROCS=2 go test -race -p 2 ./internal/agentctl/server/process -run '^(TestParseWorkspaceNumstatZ|TestParseWorkspaceNumstatZRejectsInvalidCounts|TestWorkspaceGitMalformedNumstatDetailsUnavailable|TestWorkspaceGitEmptyNumstatDetailsReady|TestWorkspaceGitDetailsPreservesExactPaths|TestWorkspaceGitDetailsPreservesExactMixedPaths|TestWorkspaceGitDetailsPreservesRenameDestinations|TestWorkspaceGitDetailsPreservesBinaryPaths|TestWorkspaceTrackerRetriesOnlyFailedDiffAfterTransientGitFailure)$' -count=1)
+```
+
+Follow with the scoped lint and document gates above. No passing unrelated tests are repeated.
+
 ## Files likely touched
 
 - `apps/backend/internal/agentctl/server/process/workspace_git_diff.go`
 - `apps/backend/internal/agentctl/server/process/workspace_git_numstat.go` (new)
 - `apps/backend/internal/agentctl/server/process/workspace_git_numstat_test.go` (new)
 - `apps/backend/internal/agentctl/server/process/workspace_git_diff_paths_test.go` (new)
+- `apps/backend/internal/agentctl/server/process/workspace_git_numstat_quality_test.go` (new)
 - Requirement/design and this plan/work order for finalized intent/status/results.
 
 ## Dependencies
@@ -122,7 +145,8 @@ parser coverage on all platforms. Keep parser iteration linear and cancellable.
 
 ## Results
 
-Completed 2026-10-02 in this session.
+Initial implementation and approved review remediation completed 2026-10-02: strict numeric
+validation, unavailable publication for malformed rows in all three loops, and fail-fast verification commands.
 
 - Narrow permanent RED: six expected failing cases, package 0.676s, exit 1.
 - Focused GREEN selection above with race checking: exit 0, package 7.110s. All 19 selected test names were verified against actual source before delivery.
@@ -131,5 +155,15 @@ Completed 2026-10-02 in this session.
 - Specification lint and `git diff --check`: exit 0.
 - Documentation-coverage preflight above: covered, zero errors.
 - Native Windows skips only invalid real filenames; all raw parser cases are platform independent.
+
+Review remediation results:
+
+- New narrow RED: exit 1, package 2.189s; invalid numeric fields accepted and all three malformed-output
+  phases falsely published ready. Legitimate empty output passed.
+- Nine-function focused GREEN above: exit 0, package 9.657s with race checking. Valid zero/binary
+  records, successful prefix details, and already-ready flattened details remain usable.
+- Scoped lint: exit 0, zero issues after the required tagged-switch correction in the test helper.
+- Catalog validation (340 decisions, 1295 specifications), specification lint, documentation coverage
+  (`covered`, zero errors), and diff whitespace: exit 0.
 
 Commit hook receipts and external PR/CI/review/merge evidence belong in the task plan. No broad local suite, E2E run, or additional worker was used.

@@ -62,3 +62,20 @@ func TestParseWorkspaceNumstatZ(t *testing.T) {
 		})
 	}
 }
+
+// @covers AC-PLATFORM-WORKSPACE-GIT-STATUS-001.33, AC-PLATFORM-WORKSPACE-GIT-STATUS-001.36
+func TestParseWorkspaceNumstatZRejectsInvalidCounts(t *testing.T) {
+	for _, counts := range []string{
+		"bad\t0", "0\tbad", "\t0", "0\t", "-\t0", "0\t-",
+		"-1\t0", "0\t-1", "999999999999999999999999\t0", "0\t999999999999999999999999",
+		"+1\t0", " 1\t0", "0\t1 ",
+	} {
+		t.Run(counts, func(t *testing.T) {
+			for _, path := range []string{"file.txt\x00", "\x00old\x00new\x00"} {
+				if entry, rest, ok := parseWorkspaceNumstatZ(counts + "\t" + path); ok {
+					t.Errorf("invalid counts accepted: %+v, rest %q", entry, rest)
+				}
+			}
+		})
+	}
+}

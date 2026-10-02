@@ -25,7 +25,24 @@ func parseWorkspaceNumstatZ(output string) (numstatEntry, string, bool) {
 		}
 		path, rest = newPath, afterNew
 	}
-	additions, _ := strconv.Atoi(parts[0])
-	deletions, _ := strconv.Atoi(parts[1])
+	additions, deletions := 0, 0
+	if parts[0] != "-" || parts[1] != "-" {
+		var additionsOK, deletionsOK bool
+		additions, additionsOK = parseWorkspaceNumstatCount(parts[0])
+		deletions, deletionsOK = parseWorkspaceNumstatCount(parts[1])
+		if !additionsOK || !deletionsOK {
+			return numstatEntry{}, "", false
+		}
+	}
 	return numstatEntry{path: path, additions: additions, deletions: deletions}, rest, true
+}
+
+func parseWorkspaceNumstatCount(value string) (int, bool) {
+	for _, digit := range value {
+		if digit < '0' || digit > '9' {
+			return 0, false
+		}
+	}
+	count, err := strconv.Atoi(value)
+	return count, err == nil
 }

@@ -475,6 +475,7 @@ func (wt *WorkspaceTracker) enrichWithUnstagedDiffBudget(ctx context.Context, up
 		}
 		entry, rest, ok := parseWorkspaceNumstatZ(output)
 		if !ok {
+			markGitStatusDetailsUnavailable(update)
 			break
 		}
 		output = rest
@@ -574,6 +575,7 @@ func (wt *WorkspaceTracker) enrichMixedUnstagedDiffsBudget(
 		}
 		entry, rest, ok := parseWorkspaceNumstatZ(output)
 		if !ok {
+			markGitStatusDetailsUnavailable(update)
 			break
 		}
 		output = rest
@@ -693,6 +695,7 @@ func (wt *WorkspaceTracker) enrichWithStagedDiffBudget(ctx context.Context, upda
 		}
 		entry, rest, ok := parseWorkspaceNumstatZ(output)
 		if !ok {
+			markGitStatusDetailsUnavailable(update)
 			break
 		}
 		output = rest
