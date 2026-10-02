@@ -465,6 +465,8 @@ func (r *raceInjectingTaskRepo) GetWorkspaceTaskPrefix(ctx context.Context, work
 // would surface a raw error instead of the winner's task.
 func TestCreateTaskWithExternalIDPrepareFailureAfterStepThreeMissRecovers(t *testing.T) {
 	svc, _, repo := createTestService(t)
+	// This test swaps svc.tasks below, so stop the worker that also reads it.
+	svc.StopTaskResourceCleanupWorker()
 	ctx := context.Background()
 	wfID := seedWorkspaceAndWorkflowForCreate(t, ctx, repo, "ws-prepare-fail")
 

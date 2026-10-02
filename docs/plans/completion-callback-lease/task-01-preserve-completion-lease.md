@@ -190,6 +190,13 @@ Verification results:
 - Documentation coverage preflight returned `covered` with no errors.
 - `git diff --check` and the explicit trailing-whitespace scan passed.
 
+PR fixup also corrected the plan's package-status sentence after review. The
+backend CI shard exposed a test-only race where
+`TestCreateTaskWithExternalIDPrepareFailureAfterStepThreeMissRecovers` replaced
+`svc.tasks` while its task-resource-cleanup worker could read it. The test now
+stops that worker before replacing the repository. The focused race test passed
+20 repetitions, and the full `internal/task/service` race suite passed.
+
 The related-path audit from the plan found no additional recursive startup
 lease in error completion, foreground-idle, disconnect, activity, or event
 publication helpers. Issue #4150, workspace-refresh latency, and reaper policy
