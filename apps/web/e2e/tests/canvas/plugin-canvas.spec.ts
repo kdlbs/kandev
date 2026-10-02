@@ -11,6 +11,7 @@ import {
   expectCanvasFrameFillsHost,
   listCanvasReleases,
   removeCanvas,
+  removeCanvasSource,
   seedCanvasWorkspacePreview,
   seedTaskCanvas,
   waitForSessionWorkspace,
@@ -554,6 +555,7 @@ test.describe("Plugin-backed canvases in the desktop task workbench", () => {
 
     const releaseFeature = await enableCanvasFeature(backend, apiClient, seedData.workspaceId);
     let canvasId: string | undefined;
+    const sourceWorkspacePaths: string[] = [];
     try {
       const seeded = await seedTaskCanvas(testPage, apiClient, seedData, true, {
         noPermissions: true,
@@ -565,6 +567,7 @@ test.describe("Plugin-backed canvases in the desktop task workbench", () => {
         seeded.taskId,
         seeded.taskSessionId,
       );
+      sourceWorkspacePaths.push(workspacePath);
       writeCanvasSource(workspacePath, seeded.canvas, { minimalPermissions: true });
       const publishScript = `e2e:mcp:kandev:publish_canvas_kandev(${JSON.stringify({
         canvas_id: seeded.canvas.id,
@@ -582,6 +585,7 @@ test.describe("Plugin-backed canvases in the desktop task workbench", () => {
         seeded.taskId,
         reviewSession.session_id,
       );
+      sourceWorkspacePaths.push(reviewWorkspacePath);
       writeCanvasSource(reviewWorkspacePath, seeded.canvas, { minimalPermissions: true });
       await waitForSessionDone(
         apiClient,
@@ -635,6 +639,11 @@ test.describe("Plugin-backed canvases in the desktop task workbench", () => {
         }));
       expect(scrollMetrics.scrollHeight).toBeLessThanOrEqual(scrollMetrics.clientHeight);
     } finally {
+      if (canvasId) {
+        for (const workspacePath of sourceWorkspacePaths) {
+          removeCanvasSource(workspacePath, canvasId);
+        }
+      }
       if (canvasId) await removeCanvas(apiClient, canvasId);
       await releaseFeature();
     }

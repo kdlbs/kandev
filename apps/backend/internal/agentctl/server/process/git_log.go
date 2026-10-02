@@ -12,6 +12,11 @@ import (
 	"github.com/kandev/kandev/internal/common/unidiff"
 )
 
+const (
+	fileStatusAdded   = "added"
+	fileStatusRenamed = "renamed"
+)
+
 // GitLogResult represents the result of a git log operation.
 type GitLogResult struct {
 	Success bool             `json:"success"`
@@ -492,16 +497,7 @@ func (g *GitOperator) parseCommitDiffWithOptions(output string, opts parseCommit
 			continue
 		}
 
-		// Determine file status from diff content
-		status := fileStatusModified
-		switch {
-		case strings.Contains(diffContent, "new file mode"):
-			status = "added"
-		case strings.Contains(diffContent, "deleted file mode"):
-			status = fileStatusDeleted
-		case strings.Contains(diffContent, "rename from"):
-			status = "renamed"
-		}
+		status := diffSectionStatus(diffContent)
 
 		// Count additions and deletions (always from the full content).
 		additions, deletions := fileLineCounts(numstat, filePath, diffContent)
@@ -524,6 +520,40 @@ func (g *GitOperator) parseCommitDiffWithOptions(output string, opts parseCommit
 	}
 
 	return files
+}
+
+// diffSectionStatus reads only raw extended headers, between the section's
+// path header and its file headers or payload. Content prefixes are significant.
+func diffSectionStatus(diffContent string) string {
+	_, metadata, _ := strings.Cut(diffContent, "\n")
+	for line := range strings.SplitSeq(metadata, "\n") {
+		if strings.HasPrefix(line, "--- ") || strings.HasPrefix(line, "+++ ") ||
+			strings.HasPrefix(line, "@@") || strings.HasPrefix(line, "Binary files ") || line == "GIT binary patch" {
+			break
+		}
+		if mode, ok := strings.CutPrefix(line, "new file mode "); ok && validDiffFileMode(mode) {
+			return fileStatusAdded
+		}
+		if mode, ok := strings.CutPrefix(line, "deleted file mode "); ok && validDiffFileMode(mode) {
+			return fileStatusDeleted
+		}
+		if path, ok := strings.CutPrefix(line, "rename from "); ok && path != "" {
+			return fileStatusRenamed
+		}
+	}
+	return fileStatusModified
+}
+
+func validDiffFileMode(mode string) bool {
+	if len(mode) != 6 {
+		return false
+	}
+	for _, digit := range mode {
+		if digit < '0' || digit > '7' {
+			return false
+		}
+	}
+	return true
 }
 
 // diffSectionPath extracts the new-side path of one `diff --git` section.

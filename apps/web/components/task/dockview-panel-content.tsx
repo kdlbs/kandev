@@ -32,7 +32,6 @@ import { TaskChangesPanel } from "./task-changes-panel";
 import { TaskChatPanel } from "./task-chat-panel";
 import { TaskPlanPanel } from "./task-plan-panel";
 import { TerminalPanel } from "./terminal-panel";
-import { PromptHistoryContent } from "./prompt-history-panel-host";
 import { TodosContent } from "./todos-panel-content";
 import { VscodePanel } from "./vscode-panel";
 import { BackgroundWorkPanel } from "./chat/background-work/background-work-panel";
@@ -116,7 +115,7 @@ function ChatContent({ panelId, params }: { panelId: string; params: Record<stri
  * after the target becomes reachable again.
  */
 function useResyncGitStatusOnTabActivate(panelId: string, sessionId: string | null) {
-  return useSessionGitRefresh(sessionId, usePanelActive(panelId));
+  useSessionGitRefresh(sessionId, usePanelActive(panelId));
 }
 
 /** Render the changes/diff viewer for the panel's params (`kind` "all" or
@@ -176,7 +175,7 @@ function ChangesContent({ panelId }: { panelId: string }) {
   // Dynamic title with file count - use environment-stable sessionId so the
   // tab title doesn't re-fetch on same-environment session tab switches.
   const activeSessionId = useEnvironmentSessionId();
-  const retryGitStatus = useResyncGitStatusOnTabActivate(panelId, activeSessionId);
+  useResyncGitStatusOnTabActivate(panelId, activeSessionId);
   const totalCount = useSessionChangesCount(activeSessionId);
 
   useEffect(() => {
@@ -211,7 +210,6 @@ function ChangesContent({ panelId }: { panelId: string }) {
 
   return (
     <ChangesPanel
-      onRetryGitStatus={retryGitStatus}
       onOpenDiffFile={handleOpenDiffFile}
       onEditFile={handleEditFile}
       onOpenCommitDetail={handleOpenCommitDetail}
@@ -284,7 +282,6 @@ const PANEL_RENDERERS: Record<string, PanelRenderer> = {
   vscode: (panelId) => <VscodePanel panelId={panelId} />,
   plan: () => <PlanContent />,
   todos: () => <TodosContent />,
-  "prompt-history": () => <PromptHistoryContent />,
   canvas: (_panelId, params) => <CanvasContent params={params} />,
   "pr-detail": (panelId, params) => (
     <ReviewDetailPanelComponent panelId={panelId} params={params} />

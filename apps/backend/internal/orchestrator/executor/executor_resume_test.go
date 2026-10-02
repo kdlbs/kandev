@@ -694,31 +694,27 @@ func TestRollbackResumeStateAfterFailure_SkipsTransitionAfterConcurrentStateChan
 	repo := newMockRepository()
 	setupLiveResumeTestFixture(repo)
 	repo.sessions["sess-1"].State = models.TaskSessionStateCancelled
-
+	repo.sessions["sess-1"].Metadata = map[string]interface{}{
+		models.SessionMetaKeyAgentStartAttemptID: "attempt-current",
+	}
 	exec := newTestExecutor(t, &mockAgentManager{}, repo)
-	exec.SetOnSessionStateTransition(func(
-		context.Context,
-		string,
-		string,
-		*models.TaskSessionState,
-		models.TaskSessionState,
-		string,
-		func(),
-	) (bool, models.TaskSessionState, error) {
-		t.Fatal("state transition must not run after a concurrent state change")
-		return false, models.TaskSessionStateCancelled, nil
-	})
+	var releases int
+	exec.SetOnCeilingReservationRelease(func(string) { releases++ })
 
 	exec.rollbackResumeStateAfterFailure(
 		context.Background(),
 		"task-1",
 		"sess-1",
+		"attempt-current",
 		models.TaskSessionStateFailed,
 		errors.New("launch failed"),
 		nil,
 	)
 	if got := repo.sessions["sess-1"].State; got != models.TaskSessionStateCancelled {
 		t.Fatalf("session state = %s, want %s", got, models.TaskSessionStateCancelled)
+	}
+	if releases != 0 {
+		t.Fatalf("reservation releases = %d, want 0 after cancelled state", releases)
 	}
 }
 

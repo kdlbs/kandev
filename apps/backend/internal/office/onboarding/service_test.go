@@ -5,7 +5,6 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 
@@ -493,11 +492,11 @@ func TestCompleteOnboarding_CreatesTask(t *testing.T) {
 }
 
 func TestDefaultOnboardingBriefMutationsHaveCEOCapabilityCatalog(t *testing.T) {
-	_, sourceFile, _, ok := runtime.Caller(0)
-	if !ok {
-		t.Fatal("resolve onboarding test source path")
+	packageDir, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("locate test package: %v", err)
 	}
-	backendDir := filepath.Clean(filepath.Join(filepath.Dir(sourceFile), "../../.."))
+	backendDir := filepath.Clean(filepath.Join(packageDir, "../../.."))
 	appsDir := filepath.Dir(backendDir)
 
 	brief := readOnboardingContractFile(t,

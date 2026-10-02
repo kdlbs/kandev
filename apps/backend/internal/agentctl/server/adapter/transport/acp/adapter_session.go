@@ -1097,6 +1097,7 @@ func (a *Adapter) setSessionMode(ctx context.Context, modeID, requestedConfigID 
 	a.mu.RLock()
 	conn := a.acpConn
 	sessionID := a.sessionID
+	closed := a.closed
 	availableModes := append([]streams.SessionModeInfo(nil), a.availableModes...)
 	cachedModels := append([]modelInfo(nil), a.availableModels...)
 	cachedConfig := cloneConfigOptions(a.availableConfigOptions)
@@ -1105,17 +1106,35 @@ func (a *Adapter) setSessionMode(ctx context.Context, modeID, requestedConfigID 
 	if conn == nil {
 		return streams.ModeResult{Requested: modeID}, fmt.Errorf("adapter not initialized")
 	}
+	if closed {
+		return streams.ModeResult{Requested: modeID}, errors.New("adapter is closed")
+	}
 	if sessionID == "" {
 		return streams.ModeResult{Requested: modeID}, fmt.Errorf("no active session: call NewSession before SetMode")
 	}
-	generation := a.beginConfigChange()
 	modeOption, hasModeOption, err := selectSessionModeOption(cachedConfig, availableModes, modeID, requestedConfigID)
 	if err != nil {
 		return streams.ModeResult{Requested: modeID}, err
 	}
+	if err := ctx.Err(); err != nil {
+		return streams.ModeResult{Requested: modeID}, err
+	}
+	if !hasModeOption {
+		settingsGeneration, satisfied, err := a.alreadySatisfiedLegacyMode(ctx, conn, sessionID, modeID)
+		if err != nil {
+			return streams.ModeResult{Requested: modeID}, err
+		}
+		if satisfied {
+			result := streams.ModeResult{Requested: modeID, Effective: modeID, Confirmed: true}
+			a.emitSessionModeResult(sessionID, modeID, result, settingsGeneration)
+			return result, nil
+		}
+	}
+	generation := a.beginConfigChange()
 	baseline, uncertain := a.beginModeChange()
+	modeRPCAttempted := false
 	unconfirmed := true
-	defer func() { a.endModeChange(unconfirmed) }()
+	defer func() { a.endModeChange(unconfirmed && modeRPCAttempted) }()
 
 	request := sessionModeRequest{
 		conn: conn, sessionID: sessionID, modeID: modeID, option: modeOption,
@@ -1124,9 +1143,9 @@ func (a *Adapter) setSessionMode(ctx context.Context, modeID, requestedConfigID 
 	}
 	var result streams.ModeResult
 	if hasModeOption {
-		result, err = a.setConfigSessionMode(ctx, request)
+		result, modeRPCAttempted, err = a.setConfigSessionMode(ctx, request)
 	} else {
-		result, err = a.setLegacySessionMode(ctx, conn, sessionID, modeID, baseline, uncertain)
+		result, modeRPCAttempted, err = a.setLegacySessionMode(ctx, conn, sessionID, modeID, baseline, uncertain)
 	}
 	if err != nil {
 		return result, err
@@ -1134,25 +1153,7 @@ func (a *Adapter) setSessionMode(ctx context.Context, modeID, requestedConfigID 
 	if result.Confirmed {
 		unconfirmed = false
 	}
-
-	a.mu.RLock()
-	if a.sessionID != sessionID {
-		a.mu.RUnlock()
-		return result, nil
-	}
-	cachedModes := a.availableModes
-	a.mu.RUnlock()
-
-	reported, requested := sessionModeEventFields(modeID, result)
-	event := AgentEvent{
-		Type:                      streams.EventTypeSessionMode,
-		SessionID:                 sessionID,
-		CurrentModeID:             reported,
-		AvailableModes:            cachedModes,
-		SessionSettingsGeneration: a.nextSessionSettingsGeneration(sessionID),
-	}
-	event.RequestedModeID = requested
-	a.sendUpdate(event)
+	a.emitSessionModeResult(sessionID, modeID, result, 0)
 	return result, nil
 }
 
@@ -1168,22 +1169,22 @@ func (a *Adapter) setLegacySessionMode(
 	sessionID, modeID string,
 	afterGeneration uint64,
 	uncertain bool,
-) (streams.ModeResult, error) {
+) (streams.ModeResult, bool, error) {
 	if err := ctx.Err(); err != nil {
-		return streams.ModeResult{Requested: modeID}, err
+		return streams.ModeResult{Requested: modeID}, false, err
 	}
 	_, err := conn.SetSessionMode(ctx, acp.SetSessionModeRequest{
 		SessionId: acp.SessionId(sessionID),
 		ModeId:    acp.SessionModeId(modeID),
 	})
 	if err != nil {
-		return streams.ModeResult{Requested: modeID}, fmt.Errorf("set session mode failed: %w", err)
+		return streams.ModeResult{Requested: modeID}, true, fmt.Errorf("set session mode failed: %w", err)
 	}
 	result := a.awaitModeSettle(ctx, sessionID, modeID, afterGeneration)
 	if uncertain {
-		return streams.ModeResult{Requested: modeID}, nil
+		return streams.ModeResult{Requested: modeID}, true, nil
 	}
-	return result, nil
+	return result, true, nil
 }
 
 func isModeConfigOption(option streams.ConfigOption) bool {

@@ -31,6 +31,10 @@ localization, feature toggles, health, and shared session recovery services.
 Settings discovery and interface parity belong to Platform. Each settings domain
 retains ownership of its values, validation, authority, and persistence.
 
+Shared Git diff file metadata belongs to Platform, including commit and
+cumulative comparisons. UI retains historical-file navigation and merge-detail
+presentation; Tasks retains environment and repository bindings.
+
 ## Exclusions
 
 - Executor-specific runtime environments belong to the [executor

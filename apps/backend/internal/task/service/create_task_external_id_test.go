@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/repository"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 )
@@ -464,25 +465,26 @@ func (r *raceInjectingTaskRepo) GetWorkspaceTaskPrefix(ctx context.Context, work
 // before its own prepare-stage failure would be invisible, and this request
 // would surface a raw error instead of the winner's task.
 func TestCreateTaskWithExternalIDPrepareFailureAfterStepThreeMissRecovers(t *testing.T) {
-	svc, _, repo := createTestService(t)
-	// This test swaps svc.tasks below, so stop the worker that also reads it.
-	svc.StopTaskResourceCleanupWorker()
 	ctx := context.Background()
-	wfID := seedWorkspaceAndWorkflowForCreate(t, ctx, repo, "ws-prepare-fail")
-
 	const winnerID = "winner-task"
-	svc.tasks = &raceInjectingTaskRepo{
-		Repository: repo,
-		inject: func() {
-			if err := repo.CreateTask(ctx, &models.Task{
-				ID: winnerID, WorkspaceID: "ws-prepare-fail", WorkflowID: wfID,
-				Title: "Winner", ExternalID: "ext-prepare-fail",
-			}); err != nil {
-				t.Fatalf("seed concurrent winner: %v", err)
-			}
-			mustSettle(t, ctx, repo, winnerID, "ext-prepare-fail")
-		},
-	}
+	var wfID string
+	svc, _, repo := createTestServiceWithTaskAndSessionRepos(t, func(repo *sqliterepo.Repository) repository.TaskRepository {
+		return &raceInjectingTaskRepo{
+			Repository: repo,
+			inject: func() {
+				if err := repo.CreateTask(ctx, &models.Task{
+					ID: winnerID, WorkspaceID: "ws-prepare-fail", WorkflowID: wfID,
+					Title: "Winner", ExternalID: "ext-prepare-fail",
+				}); err != nil {
+					t.Fatalf("seed concurrent winner: %v", err)
+				}
+				mustSettle(t, ctx, repo, winnerID, "ext-prepare-fail")
+			},
+		}
+	}, func(repo *sqliterepo.Repository) repository.SessionRepository {
+		return repo
+	})
+	wfID = seedWorkspaceAndWorkflowForCreate(t, ctx, repo, "ws-prepare-fail")
 
 	result, err := svc.CreateTask(ctx, &CreateTaskRequest{
 		WorkspaceID: "ws-prepare-fail",

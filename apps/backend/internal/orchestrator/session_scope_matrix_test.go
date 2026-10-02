@@ -75,6 +75,13 @@ func sessionScopeCases() []deniedCase {
 			_, err := s.RecoverSession(context.Background(), taskID, sessionID, "resume")
 			return err
 		}},
+		{"RecoverSessionWithOptions/workspace-inventory", func(s *Service) error {
+			_, err := s.RecoverSessionWithOptions(
+				context.Background(), taskID, sessionID, "repair_workspace_inventory",
+				RecoverSessionOptions{IdempotencyKey: "scope-test"},
+			)
+			return err
+		}},
 		{"LaunchSession", func(s *Service) error {
 			_, err := s.LaunchSession(context.Background(), &LaunchSessionRequest{
 				TaskID: taskID, SessionID: sessionID,

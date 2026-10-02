@@ -4532,7 +4532,7 @@ func (s *Service) launchAfterOnEnterDispatch(
 	if hasAutoStart || (sessionSwitched && step.Prompt != "") {
 		var err error
 		effectivePrompt, promptReferenceContext, err = s.buildWorkflowEntryPrompt(
-			ctx, taskDescription, step, taskID, sessionID, isPassthrough,
+			ctx, taskDescription, step, taskID, sessionID, session.QueueIncarnationID, isPassthrough,
 		)
 		if err != nil {
 			s.handleWorkflowEntryPromptError(ctx, taskID, session, step, err)
@@ -4651,7 +4651,7 @@ func (s *Service) launchAfterOnEnterDispatch(
 					}
 					replacementCtx := withCeilingEntryBindingForSession(asyncCtx, replacement.ID)
 					replacementPrompt, replacementReferenceContext, promptErr := s.buildWorkflowEntryPrompt(
-						replacementCtx, taskDescription, step, taskID, replacement.ID, isPassthrough,
+						replacementCtx, taskDescription, step, taskID, replacement.ID, replacement.QueueIncarnationID, isPassthrough,
 					)
 					if promptErr != nil {
 						s.handleWorkflowEntryPromptError(replacementCtx, taskID, replacement, step, promptErr)
@@ -4695,7 +4695,7 @@ func (s *Service) launchAfterOnEnterDispatch(
 						}
 						replacementCtx := withCeilingEntryBindingForSession(asyncCtx, replacement.ID)
 						replacementPrompt, replacementReferenceContext, promptErr := s.buildWorkflowEntryPrompt(
-							replacementCtx, taskDescription, step, taskID, replacement.ID, isPassthrough,
+							replacementCtx, taskDescription, step, taskID, replacement.ID, replacement.QueueIncarnationID, isPassthrough,
 						)
 						if promptErr != nil {
 							s.handleWorkflowEntryPromptError(replacementCtx, taskID, replacement, step, promptErr)
@@ -4772,7 +4772,7 @@ func (s *Service) replaceTerminalizedAutoStartSession(
 	}
 	replacementCtx := withCeilingEntryBindingForSession(ctx, replacement.ID)
 	replacementPrompt, replacementReferenceContext, promptErr := s.buildWorkflowEntryPrompt(
-		replacementCtx, taskDescription, step, taskID, replacement.ID, isPassthrough,
+		replacementCtx, taskDescription, step, taskID, replacement.ID, replacement.QueueIncarnationID, isPassthrough,
 	)
 	if promptErr != nil {
 		s.handleWorkflowEntryPromptError(replacementCtx, taskID, replacement, step, promptErr)

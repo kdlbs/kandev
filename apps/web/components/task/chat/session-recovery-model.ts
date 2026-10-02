@@ -17,6 +17,7 @@ import {
   type SessionRecoveryOwner,
 } from "@/lib/session-recovery-presentation";
 import { sessionRecoveryAction } from "./messages/action-message-recovery";
+import { useOptionalAppStore } from "@/components/state-provider";
 
 function recoveryCopy(model: ActiveSessionRecovery, t: ReturnType<typeof useTranslation>["t"]) {
   if (model.kind === "managed_runtime_npm_resolution")
@@ -182,6 +183,16 @@ export function useRecoveryPresentation(
   context: TaskLaunchErrorContextValue | null,
 ) {
   const { t } = useTranslation();
+  const agentDisplayName = useOptionalAppStore((state) => {
+    const session = state.taskSessions.items[model.sessionId];
+    const profileId = session?.execution_profile_id || session?.agent_profile_id;
+    const profile = profileId
+      ? state.agentProfiles.items.find((candidate) => candidate.id === profileId)
+      : undefined;
+    return profile
+      ? state.availableAgents.items.find((agent) => agent.name === profile.agent_name)?.display_name
+      : undefined;
+  }, undefined);
   const automatic = matchingAutomaticRecovery(
     context?.automaticRecovery,
     context?.taskId,
@@ -192,7 +203,7 @@ export function useRecoveryPresentation(
     Boolean(actions.managedCloneRecoveryStamp);
   const bootstrap = managedCloneRelocation
     ? null
-    : buildBootstrapRecoveryModel(model, actions, automatic, t);
+    : buildBootstrapRecoveryModel(model, actions, automatic, t, agentDisplayName);
   const copy = recoveryPresentationCopy(model, bootstrap, managedCloneRelocation, t);
   const busy =
     Boolean(model.loading) ||
@@ -200,13 +211,15 @@ export function useRecoveryPresentation(
     actions.busyAction !== null;
   const busyAction = automatic?.resumptionState === "resuming" ? "resume" : actions.busyAction;
   const causes = bootstrap?.causes ?? automaticRecoveryCauses(automatic, t);
-  const details = recoveryPresentationDetails(model, causes, actions, t);
+  const details = recoveryPresentationDetails(model, bootstrap, causes, actions, t);
+  const detailFields = bootstrap?.detailFields ?? [];
   const failure = recoveryFailureCopy(actions, t);
   return {
     copy: withAutomaticNotice(copy, automatic, actions),
     busy,
     busyAction,
     details,
+    detailFields,
     failure,
   };
 }
@@ -226,14 +239,19 @@ function buildBootstrapRecoveryModel(
   actions: SessionRecoveryActions,
   automatic: SessionRecoveryOwner | null | undefined,
   t: ReturnType<typeof useTranslation>["t"],
+  agentDisplayName?: string,
 ) {
   if (!isBootstrapRecovery(model)) return null;
   return buildRecoveryCardModel({
     error: {
+      session_id: model.sessionId,
       stamp: model.stamp ?? "",
-      occurred_at: "",
+      occurred_at: model.error?.occurredAt ?? "",
       preview: model.summary ?? "",
       details: model.details,
+      phase: model.error?.phase,
+      execution_id: model.error?.executionId ?? model.error?.agentExecutionId,
+      attempt_id: model.error?.attemptId,
       causes: model.error?.causes,
     },
     automaticRecovery: automatic,
@@ -241,6 +259,7 @@ function buildBootstrapRecoveryModel(
     manualError: actions.recoveryError,
     recoveryNotice: actions.recoveryNotice,
     translate: t,
+    agentDisplayName,
   });
 }
 
@@ -251,22 +270,44 @@ function recoveryPresentationCopy(
   t: ReturnType<typeof useTranslation>["t"],
 ) {
   if (managedCloneRelocation)
-    return recoveryCopy({ ...model, kind: "managed_clone_relocation_required" }, t);
+    return {
+      ...recoveryCopy({ ...model, kind: "managed_clone_relocation_required" }, t),
+      hasTypedSelectionCause: false,
+      noPromptSent: false,
+      freshStartWarning: false,
+      workspaceStatus: null,
+    };
   if (bootstrap)
     return {
       title: t(bootstrap.titleKey),
       summary: bootstrap.summary,
       showSummary: bootstrap.showSummary,
+      hasTypedSelectionCause: bootstrap.hasTypedSelectionCause,
+      noPromptSent: bootstrap.noPromptSent,
+      freshStartWarning: bootstrap.freshStartWarning,
+      workspaceStatus: bootstrap.workspaceStatus,
     };
-  return recoveryCopy(model, t);
+  return {
+    ...recoveryCopy(model, t),
+    hasTypedSelectionCause: false,
+    noPromptSent: false,
+    freshStartWarning: false,
+    workspaceStatus: null,
+  };
 }
 
 function recoveryPresentationDetails(
   model: ActiveSessionRecovery,
+  bootstrap: ReturnType<typeof buildRecoveryCardModel> | null,
   causes: NonNullable<ReturnType<typeof buildRecoveryCardModel>>["causes"],
   actions: SessionRecoveryActions,
   t: ReturnType<typeof useTranslation>["t"],
 ) {
+  if (bootstrap?.hasTypedSelectionCause) return "";
+  const manualFailure = actions.manualRecoveryFailure;
+  const ownsManualFailure =
+    !manualFailure ||
+    (manualFailure.sessionId === model.sessionId && manualFailure.errorStamp === model.stamp);
   return [
     model.details,
     ...causes.map((cause) =>
@@ -274,7 +315,7 @@ function recoveryPresentationDetails(
         .filter(Boolean)
         .join("\n"),
     ),
-    actions.recoveryError?.message,
+    ownsManualFailure ? actions.recoveryError?.message : null,
   ]
     .filter(Boolean)
     .join("\n\n");

@@ -1692,6 +1692,134 @@ func (r *Repository) UpdateTaskSessionIfCurrentState(
 	return true, nil
 }
 
+// UpdateTaskSessionWorkspaceBindingIfCurrentAttempt writes only the effective
+// environment binding while the resume lifecycle state and, when present, the
+// agent startup attempt still belong to the caller.
+func (r *Repository) UpdateTaskSessionWorkspaceBindingIfCurrentAttempt(
+	ctx context.Context,
+	session *models.TaskSession,
+	expected models.TaskSessionState,
+	attemptID string,
+) (bool, time.Time, error) {
+	if session == nil || session.ID == "" || session.TaskID == "" {
+		return false, time.Time{}, nil
+	}
+	updatedAt := r.nowUTC()
+	query := `UPDATE task_sessions
+		SET task_environment_id = ?, workspace_path = ?, updated_at = ?
+		WHERE id = ? AND task_id = ? AND state = ?`
+	args := []interface{}{
+		session.TaskEnvironmentID,
+		session.WorkspacePath,
+		updatedAt,
+		session.ID,
+		session.TaskID,
+		expected,
+	}
+	if attemptID != "" {
+		query += " AND " + startAttemptIDPredicate(r.db.DriverName())
+		args = append(args, attemptID)
+	}
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return false, time.Time{}, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := r.ensureTaskSessionEnvironmentAvailableTx(ctx, tx, session.ID, session.TaskEnvironmentID); err != nil {
+		return false, time.Time{}, err
+	}
+	result, err := tx.ExecContext(ctx, r.db.Rebind(query), args...)
+	if err != nil {
+		return false, time.Time{}, err
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return false, time.Time{}, err
+	}
+	if rows != 1 {
+		return false, time.Time{}, nil
+	}
+	if err := tx.Commit(); err != nil {
+		return false, time.Time{}, err
+	}
+	session.UpdatedAt = updatedAt
+	return true, updatedAt, nil
+}
+
+// UpdateTaskSessionResumeStateIfCurrentAttempt changes resume state and the
+// optional credential snapshot only while the captured startup attempt owns
+// STARTING. It preserves unrelated metadata in the same guarded statement.
+func (r *Repository) UpdateTaskSessionResumeStateIfCurrentAttempt(
+	ctx context.Context,
+	taskID, sessionID, attemptID string,
+	expected, next models.TaskSessionState,
+	errorMessage string,
+	updateState bool,
+	restoreCredentialSnapshot, credentialSnapshotPresent bool,
+	credentialSnapshot interface{},
+) (bool, time.Time, error) {
+	if taskID == "" || sessionID == "" || attemptID == "" {
+		return false, time.Time{}, nil
+	}
+	var snapshotJSON string
+	if restoreCredentialSnapshot && credentialSnapshotPresent {
+		payload, err := json.Marshal(credentialSnapshot)
+		if err != nil {
+			return false, time.Time{}, fmt.Errorf("serialize Git credential snapshot: %w", err)
+		}
+		snapshotJSON = string(payload)
+	}
+
+	now := r.nowUTC()
+	updates := make([]string, 0, 5)
+	args := make([]interface{}, 0, 10)
+	if updateState {
+		updates = append(updates, `state = ?`, `error_message = ?`, `completed_at = ?`)
+		args = append(args, string(next), errorMessage, completedAtForTaskSessionState(next, now))
+	}
+	if restoreCredentialSnapshot {
+		update, updateArgs := resumeCredentialSnapshotRestoreUpdate(
+			r.db.DriverName(), credentialSnapshotPresent, snapshotJSON,
+		)
+		updates = append(updates, update)
+		args = append(args, updateArgs...)
+	}
+	updates = append(updates, `updated_at = ?`)
+	args = append(args, now, sessionID, taskID, string(expected), attemptID)
+	query := `UPDATE task_sessions SET ` + strings.Join(updates, `, `) +
+		` WHERE id = ? AND task_id = ? AND state = ? AND ` + startAttemptIDPredicate(r.db.DriverName())
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(query), args...)
+	if err != nil {
+		return false, time.Time{}, err
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return false, time.Time{}, err
+	}
+	return rows == 1, now, nil
+}
+
+func resumeCredentialSnapshotRestoreUpdate(
+	driverName string,
+	present bool,
+	snapshotJSON string,
+) (string, []interface{}) {
+	switch {
+	case dialect.IsPostgres(driverName) && present:
+		return `metadata = jsonb_set(` + postgresMetadataObject + `, ARRAY[?]::text[], ?::jsonb, true)::text`,
+			[]interface{}{models.SessionMetaKeyGitCredentialSnapshot, snapshotJSON}
+	case dialect.IsPostgres(driverName):
+		return `metadata = (` + postgresMetadataObject + ` #- ARRAY[?]::text[])::text`,
+			[]interface{}{models.SessionMetaKeyGitCredentialSnapshot}
+	case present:
+		return `metadata = json_set(` + sqliteMetadataObject + `, ?, json(?))`,
+			[]interface{}{"$." + models.SessionMetaKeyGitCredentialSnapshot, snapshotJSON}
+	default:
+		return `metadata = json_remove(` + sqliteMetadataObject + `, ?)`,
+			[]interface{}{"$." + models.SessionMetaKeyGitCredentialSnapshot}
+	}
+}
+
 // UpdateTaskSessionIfCurrentStateWithStartAttempt persists STARTING and its
 // process-attempt identity atomically. A later turn may advance updated_at
 // before asynchronous startup reports a failure, so bootstrap ownership must
@@ -3818,19 +3946,98 @@ func (r *Repository) CountActiveTaskSessionsByRepository(ctx context.Context, re
 // that are using the specified agent profile. This is used during profile deletion
 // to clean up transient quick chat / config chat tasks.
 func (r *Repository) DeleteEphemeralTasksByAgentProfile(ctx context.Context, agentProfileID string) (int64, error) {
-	// Delete tasks that are ephemeral and have sessions using this profile.
-	// CASCADE will handle session deletion.
-	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
-		DELETE FROM tasks
-		WHERE is_ephemeral = 1
-		  AND id IN (
-			SELECT DISTINCT task_id FROM task_sessions WHERE agent_profile_id = ?
-		  )
-	`), agentProfileID)
+	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {
 		return 0, err
 	}
-	return result.RowsAffected()
+	defer func() { _ = tx.Rollback() }()
+
+	var taskIDs []string
+	if err := tx.SelectContext(ctx, &taskIDs, r.db.Rebind(`
+		SELECT DISTINCT t.id
+		FROM tasks t
+		INNER JOIN task_sessions s ON s.task_id = t.id
+		WHERE t.is_ephemeral = 1
+		  AND s.agent_profile_id = ?
+		ORDER BY t.id
+	`), agentProfileID); err != nil {
+		return 0, err
+	}
+
+	type candidate struct {
+		taskID     string
+		sessionIDs []string
+	}
+	candidates := make([]candidate, 0, len(taskIDs))
+	for _, taskID := range taskIDs {
+		if err := r.lockTaskRowInTx(ctx, tx, taskID); err != nil {
+			if errors.Is(err, ErrTaskNotFound) {
+				continue
+			}
+			return 0, fmt.Errorf("guard ephemeral task %s: %w", taskID, err)
+		}
+		var stillEligible bool
+		if err := tx.GetContext(ctx, &stillEligible, r.db.Rebind(`
+			SELECT EXISTS (
+				SELECT 1
+				FROM tasks t
+				INNER JOIN task_sessions s ON s.task_id = t.id
+				WHERE t.id = ? AND t.is_ephemeral = 1 AND s.agent_profile_id = ?
+			)
+		`), taskID, agentProfileID); err != nil {
+			return 0, err
+		}
+		if !stillEligible {
+			continue
+		}
+		sessions, err := r.taskQueueSessionsInTx(ctx, tx, taskID)
+		if err != nil {
+			return 0, err
+		}
+		if err := lockSessionTurnWrites(ctx, tx, r.db.DriverName(), sessions...); err != nil {
+			return 0, fmt.Errorf("lock ephemeral task sessions %s: %w", taskID, err)
+		}
+		candidates = append(candidates, candidate{taskID: taskID, sessionIDs: sessions})
+	}
+
+	var deleted int64
+	for _, item := range candidates {
+		removed, err := r.deleteEphemeralTaskForProfileTx(ctx, tx, item.taskID, agentProfileID)
+		if err != nil {
+			return 0, err
+		}
+		if !removed {
+			continue
+		}
+		deleted++
+		if err := r.purgePromptSequencesForSessionsTx(ctx, tx, item.sessionIDs); err != nil {
+			return 0, err
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, err
+	}
+	return deleted, nil
+}
+
+func (r *Repository) deleteEphemeralTaskForProfileTx(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	taskID, agentProfileID string,
+) (bool, error) {
+	result, err := tx.ExecContext(ctx, r.db.Rebind(`
+		DELETE FROM tasks
+		WHERE id = ? AND is_ephemeral = 1
+		  AND EXISTS (
+			SELECT 1 FROM task_sessions
+			WHERE task_id = ? AND agent_profile_id = ?
+		  )
+	`), taskID, taskID, agentProfileID)
+	if err != nil {
+		return false, err
+	}
+	rows, err := result.RowsAffected()
+	return rows > 0, err
 }
 
 // scanTaskSessions is a helper to scan multiple agent session rows
@@ -4016,6 +4223,10 @@ func (r *Repository) purgeTaskSessionStateTx(
 	tx *sqlx.Tx,
 	session *models.TaskSession,
 ) ([]*models.TaskMessageAttachment, error) {
+	if err := lockSessionTurnWrites(ctx, tx, r.db.DriverName(), session.ID); err != nil {
+		return nil, err
+	}
+
 	identity := messagequeue.QueueSessionIdentity{
 		TaskID:               session.TaskID,
 		SessionID:            session.ID,
@@ -4050,6 +4261,35 @@ func (r *Repository) purgeTaskSessionStateTx(
 	_, _ = tx.ExecContext(ctx, r.db.Rebind(`DELETE FROM task_session_background_runs WHERE session_id = ?`), session.ID)
 	_, _ = tx.ExecContext(ctx, r.db.Rebind(`DELETE FROM task_session_background_work WHERE session_id = ?`), session.ID)
 	return deletedAttachments, nil
+}
+
+func (r *Repository) purgeTaskPromptSequenceTx(ctx context.Context, tx *sqlx.Tx, taskID string, sessions []string) error {
+	if err := lockSessionTurnWrites(ctx, tx, r.db.DriverName(), sessions...); err != nil {
+		return fmt.Errorf("lock prompt sequence sessions for task %s: %w", taskID, err)
+	}
+	if _, err := tx.ExecContext(ctx, r.db.Rebind(`
+		DELETE FROM task_session_prompt_seq
+		WHERE task_session_id IN (SELECT id FROM task_sessions WHERE task_id = ?)
+	`), taskID); err != nil {
+		return fmt.Errorf("purge prompt sequences for task %s: %w", taskID, err)
+	}
+	return nil
+}
+
+// purgePromptSequencesForSessionsTx assumes the caller holds the turn-write
+// lock for each session through its owning task/session deletion.
+func (r *Repository) purgePromptSequencesForSessionsTx(ctx context.Context, tx *sqlx.Tx, sessionIDs []string) error {
+	if len(sessionIDs) == 0 {
+		return nil
+	}
+	for _, chunk := range chunkIDs(sessionIDs, sqliteMaxHostParams) {
+		placeholders, args := buildInPlaceholders(chunk)
+		query := fmt.Sprintf(`DELETE FROM task_session_prompt_seq WHERE task_session_id IN (%s)`, placeholders)
+		if _, err := tx.ExecContext(ctx, r.db.Rebind(query), args...); err != nil {
+			return fmt.Errorf("purge prompt sequences for deleted sessions: %w", err)
+		}
+	}
+	return nil
 }
 
 //

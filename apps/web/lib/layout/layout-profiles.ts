@@ -11,6 +11,7 @@ import {
 } from "@/lib/state/layout-manager";
 import type { SavedLayout } from "@/lib/types/http";
 import { generateUUID } from "@/lib/utils";
+import { filterLayoutStateByComponents } from "@/lib/state/layout-manager/sanitize-serialized-layout";
 
 export type BuiltInLayoutProfileId = Exclude<BuiltInPreset, "compact">;
 
@@ -327,7 +328,12 @@ export function validateReusableLayout(layout: unknown): ReusableLayoutValidatio
     };
   }
 
-  const normalized = normalizeReusableSessionPanels(layout);
+  const normalized = normalizeReusableSessionPanels(
+    // Drop panels whose component the renderer can no longer instantiate before
+    // validating, so a profile that references a retired component keeps
+    // applying with its surviving panels instead of being demoted to legacy.
+    filterLayoutStateByComponents(layout),
+  );
   const counts = new Map<string, number>();
   const issues = invalidActivePanelIssues(layout);
   issues.push(

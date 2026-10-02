@@ -5,6 +5,10 @@ const RESOLVED_AT = "2026-09-20T11:00:00Z";
 const NEW_FAILURE_AT = "2026-09-20T12:00:00Z";
 const error = { message: "Connection lost", stamp: "current", details: "diagnostic" };
 const session = { id: "session", state: "FAILED", metadata: { last_agent_error: error } };
+const resolution = (stamp = "current") => ({
+  recovery_resolved_at: RESOLVED_AT,
+  recovery_resolutions: [{ error_stamp: stamp, resolved_at: RESOLVED_AT, attempt_id: "resume-1" }],
+});
 const message = (stamp: string, kind?: string) => ({
   id: stamp,
   session_id: "session",
@@ -27,14 +31,14 @@ describe("resolved session recovery ownership", () => {
             ...session,
             state,
             error_message: error.message,
-            metadata: { ...session.metadata, recovery_resolved_at: RESOLVED_AT },
+            metadata: { ...session.metadata, ...resolution() },
           },
           [message("current", "provider_quota_limited")],
         ),
       ).toBeNull();
     },
   );
-  it("does not reuse a failed recovery after a successful boot from the same session", () => {
+  it("does not infer stamped recovery from an uncorrelated successful boot", () => {
     expect(
       selectActiveSessionRecovery(session, [
         message("current", "provider_quota_limited"),
@@ -46,7 +50,7 @@ describe("resolved session recovery ownership", () => {
           metadata: { script_type: "agent_boot", status: "exited", exit_code: 0 },
         },
       ]),
-    ).toBeNull();
+    ).not.toBeNull();
   });
   it("keeps a new failure actionable after an earlier recovery", () => {
     const model = selectActiveSessionRecovery(
@@ -68,7 +72,7 @@ describe("resolved session recovery ownership", () => {
           ...session,
           metadata: {
             last_agent_error: { ...error, occurred_at: FAILED_AT },
-            recovery_resolved_at: RESOLVED_AT,
+            ...resolution(),
           },
         },
         [],
@@ -87,6 +91,88 @@ describe("resolved session recovery ownership", () => {
       },
     ]);
     expect(model?.kind).toBe("provider_quota_limited");
+  });
+});
+
+describe("selection failure recovery occurrence ownership", () => {
+  const selectionError = {
+    ...error,
+    causes: [{ operation: "resume", code: "model_unavailable" }],
+  };
+  const selectionMessage = {
+    ...message("current"),
+    metadata: {
+      ...message("current").metadata,
+      causes: [{ operation: "resume", code: "model_unavailable" }],
+    },
+  };
+  const success = (stamp: string) => ({
+    id: `success-${stamp}`,
+    session_id: "session",
+    type: "status",
+    created_at: RESOLVED_AT,
+    metadata: {
+      variant: "resume_settings_provider_restored",
+      resolved_error_stamp: stamp,
+    },
+  });
+
+  it("resolves only when the successful attempt names the same error stamp", () => {
+    const failedSession = { ...session, metadata: { last_agent_error: selectionError } };
+    expect(
+      selectActiveSessionRecovery(failedSession, [selectionMessage, success("other")]),
+    ).not.toBeNull();
+    expect(
+      selectActiveSessionRecovery(failedSession, [selectionMessage, success("current")]),
+    ).not.toBeNull();
+    expect(
+      selectActiveSessionRecovery(
+        {
+          ...failedSession,
+          metadata: { ...failedSession.metadata, ...resolution() },
+        },
+        [selectionMessage],
+      ),
+    ).toBeNull();
+  });
+
+  it("keeps a later selection failure active after an older success", () => {
+    const laterFailure = {
+      ...selectionMessage,
+      id: "later-selection-failure",
+      created_at: NEW_FAILURE_AT,
+      metadata: { ...selectionMessage.metadata, error_stamp: "failure-later" },
+    };
+    const model = selectActiveSessionRecovery(
+      {
+        ...session,
+        metadata: {
+          last_agent_error: {
+            ...selectionError,
+            stamp: "failure-later",
+            occurred_at: NEW_FAILURE_AT,
+          },
+          ...resolution(),
+        },
+      },
+      [success("current"), laterFailure],
+    );
+    expect(model?.stamp).toBe("failure-later");
+  });
+
+  it("does not treat manual dismissal as successful recovery", () => {
+    expect(
+      selectActiveSessionRecovery(
+        {
+          ...session,
+          state: "FAILED",
+          metadata: {
+            last_agent_error: { ...selectionError, dismissed_at: RESOLVED_AT },
+          },
+        },
+        [selectionMessage, success("other")],
+      ),
+    ).toBeNull();
   });
 });
 
@@ -163,22 +249,25 @@ it("keeps the composer usable after durable recovery or a successful later boot"
     selectActiveSessionRecovery(
       {
         ...waiting,
-        metadata: { ...session.metadata, recovery_resolved_at: RESOLVED_AT },
+        metadata: { ...session.metadata, ...resolution() },
       },
       [message("current")],
     ),
   ).toBeNull();
   expect(
-    selectActiveSessionRecovery(waiting, [
-      message("current"),
-      {
-        id: "boot",
-        session_id: "session",
-        type: "script_execution",
-        created_at: RESOLVED_AT,
-        metadata: { script_type: "agent_boot", status: "exited", exit_code: 0 },
-      },
-    ]),
+    selectActiveSessionRecovery(
+      { ...waiting, metadata: { ...session.metadata, ...resolution() } },
+      [
+        message("current"),
+        {
+          id: "boot",
+          session_id: "session",
+          type: "script_execution",
+          created_at: RESOLVED_AT,
+          metadata: { script_type: "agent_boot", status: "exited", exit_code: 0 },
+        },
+      ],
+    ),
   ).toBeNull();
 });
 
@@ -205,7 +294,7 @@ it("reconstructs unresolved recovery on a fresh STARTING mount", () => {
     selectActiveSessionRecovery(
       {
         ...starting,
-        metadata: { ...session.metadata, recovery_resolved_at: RESOLVED_AT },
+        metadata: { ...session.metadata, ...resolution() },
       },
       [message("current")],
     ),
@@ -223,7 +312,7 @@ it("retains a durable unresolved startup failure before history finishes loading
     selectActiveSessionRecovery(
       {
         ...starting,
-        metadata: { ...starting.metadata, recovery_resolved_at: RESOLVED_AT },
+        metadata: { ...starting.metadata, ...resolution() },
       },
       [],
     ),

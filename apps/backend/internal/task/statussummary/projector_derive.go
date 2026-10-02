@@ -81,7 +81,7 @@ func cloneActiveError(value *ActiveErrorSummary) *ActiveErrorSummary {
 	}
 	copy := *value
 	copy.RecoveryActions = append([]string(nil), value.RecoveryActions...)
-	copy.Causes = append([]models.AgentErrorCause(nil), value.Causes...)
+	copy.Causes = models.NormalizeAgentErrorCauses(value.Causes)
 	return &copy
 }
 

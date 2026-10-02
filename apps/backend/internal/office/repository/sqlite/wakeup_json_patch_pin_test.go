@@ -4,8 +4,8 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"os"
 	"path/filepath"
-	"runtime"
 	"testing"
 )
 
@@ -26,11 +26,11 @@ import (
 // an unqualified "exactly once" assertion would FAIL against the correct
 // implementation.
 func TestWakeupRequestsJSONPatchAppearsOnce(t *testing.T) {
-	_, sourceFile, _, ok := runtime.Caller(0)
-	if !ok {
-		t.Fatal("runtime.Caller failed")
+	packageDir, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("locate test package: %v", err)
 	}
-	targetPath := filepath.Join(filepath.Dir(sourceFile), "wakeup_requests.go")
+	targetPath := filepath.Join(packageDir, "wakeup_requests.go")
 
 	fileSet := token.NewFileSet()
 	file, err := parser.ParseFile(fileSet, targetPath, nil, 0)

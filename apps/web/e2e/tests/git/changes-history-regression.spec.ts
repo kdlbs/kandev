@@ -8,6 +8,7 @@ import {
   expectDivergedHistory,
   expectHeaderGeometry,
   expectExpandedPRContiguous,
+  measurePRSectionGeometry,
   expectRepositoryToggleTouchTarget,
 } from "./changes-history-regression-helpers";
 
@@ -53,7 +54,7 @@ test.describe("Changes history regression", () => {
     const session = await openHistoryRegression(testPage, apiClient, seedData, false);
     await seedHistoryRelation(testPage, "diverged");
     await expectDivergedHistory(testPage);
-    await expectHeaderGeometry(testPage, 28);
+    await expectHeaderGeometry(testPage, 28, true);
     await expectExpandedPRContiguous(testPage);
     for (const width of [1040, 768, 1280]) {
       await testPage.setViewportSize({ width, height: 900 });
@@ -62,11 +63,32 @@ test.describe("Changes history regression", () => {
     }
     await session.clickSessionChatTab();
     await session.clickTab("Changes");
-    await expectHeaderGeometry(testPage, 28);
+    await expectHeaderGeometry(testPage, 28, true);
     await expectNoPageHorizontalOverflow(testPage);
     await prCapture.screenshot("history-header-spacing-desktop", {
       caption: "Compact Changes history headers",
     });
+  });
+
+  test("preserves residual history spacing after compact headers", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    await testPage.setViewportSize({ width: 1280, height: 900 });
+    await openHistoryRegression(testPage, apiClient, seedData, false);
+    await seedHistoryRelation(testPage, "diverged");
+    await expectDivergedHistory(testPage);
+    const prToggle = testPage.getByTestId("pr-changes-section-collapse-toggle");
+    if ((await prToggle.getAttribute("aria-expanded")) === "false") await prToggle.click();
+    await expect(
+      testPage.locator('[data-testid="pr-files-section"] [data-changes-file]'),
+    ).toHaveCount(5);
+
+    const geometry = await measurePRSectionGeometry(testPage);
+    expect(geometry.siblingGaps).toEqual([2, 2, 2, 2]);
+    expect(geometry.sectionGap).toBeCloseTo(10, 0);
+    expect(geometry.contentOffset).toBeCloseTo(-4, 0);
   });
 
   // @covers AC-UI-BOUNDED-CHANGES-001.8
