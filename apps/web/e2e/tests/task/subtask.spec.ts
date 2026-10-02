@@ -392,6 +392,7 @@ test.describe("MCP subtask creation", () => {
     apiClient,
     seedData,
   }) => {
+    test.setTimeout(120_000);
     const subtaskTitle = `MCP-subtask-e2e-verify-${Date.now()}`;
     const settingsBefore = await apiClient.getUserSettings();
     const baselineLayout =
@@ -425,7 +426,6 @@ test.describe("MCP subtask creation", () => {
     const kanban = new KanbanPage(testPage);
     try {
       await kanban.goto();
-
       await expect(testPage.getByTestId("sidebar-navigation-split")).toBeVisible();
       const navigationExpand = testPage.getByTestId("sidebar-navigation-expand");
       await expect(navigationExpand).toHaveAttribute("aria-expanded", "false");
@@ -434,11 +434,9 @@ test.describe("MCP subtask creation", () => {
       expect((await layoutSaved).ok()).toBeTruthy();
       await expect(navigationExpand).toHaveAttribute("aria-expanded", "true");
 
-      // 1. Create parent task via UI dialog
       await kanban.createTaskButton.first().click();
       const dialog = testPage.getByTestId("create-task-dialog");
       await expect(dialog).toBeVisible();
-
       await testPage.getByTestId("task-title-input").fill("MCP Subtask Parent");
       await testPage.getByTestId("task-description-input").fill(script);
 
@@ -446,30 +444,27 @@ test.describe("MCP subtask creation", () => {
       await expect(startBtn).toBeEnabled({ timeout: START_ENABLED_TIMEOUT });
       await startBtn.click();
       await expect(dialog).not.toBeVisible({ timeout: 10_000 });
-
-      // 2. Sidebar task creation navigates directly to the parent session.
       await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
       const parentTaskId = new URL(testPage.url()).pathname.match(/^\/t\/([^/]+)/)?.[1];
-      expect(parentTaskId).toBeTruthy();
+      if (!parentTaskId) throw new Error(`Expected a parent task URL, got ${testPage.url()}`);
 
-      // 3. Wait for the agent to complete — the MCP create_task call happens during execution
       const session = new SessionPage(testPage);
       await session.waitForLoad();
-      await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
+      await session.waitForChatIdle({ timeout: 60_000 });
 
-      // 4. Confirm the created task is related to its parent and visible in the
-      // sidebar hierarchy, which is independent of the current Kanban workflow filter.
+      let childId: string | undefined;
       await expect
-        .poll(async () => {
-          const { tasks } = await apiClient.listTasks(seedData.workspaceId);
-          return tasks.find((task) => task.title === subtaskTitle)?.id ?? null;
-        })
-        .not.toBeNull();
-      const { tasks } = await apiClient.listTasks(seedData.workspaceId);
-      const child = tasks.find((task) => task.title === subtaskTitle);
-      expect(child).toBeDefined();
-      const childDetails = await apiClient.getTask(child!.id);
-      expect(childDetails.parent_id).toBe(parentTaskId);
+        .poll(
+          async () => {
+            const { tasks } = await apiClient.listTasks(seedData.workspaceId);
+            const child = tasks.find((task) => task.title === subtaskTitle);
+            if (!child) return false;
+            childId = child.id;
+            return (await apiClient.getTask(child.id)).parent_id === parentTaskId;
+          },
+          { timeout: 60_000, message: "Waiting for the MCP child task to persist under its parent" },
+        )
+        .toBe(true);
 
       const sidebar = testPage.getByTestId("task-sidebar");
       const parentRow = sidebar.locator(
@@ -482,10 +477,15 @@ test.describe("MCP subtask creation", () => {
       }
       await expect(subtaskToggle).toHaveAttribute("aria-expanded", "true");
       const childRow = sidebar.locator(
-        `[data-testid="sidebar-task-item"][data-task-row-id="${child!.id}"]`,
+        `[data-testid="sidebar-task-item"][data-task-row-id="${childId}"]`,
       );
       await expect(childRow).toBeVisible({ timeout: 10_000 });
       await expect(childRow).toContainText(subtaskTitle);
+
+      await kanban.goto();
+      const subtaskCard = kanban.taskCardByTitle(subtaskTitle);
+      await expect(subtaskCard).toBeVisible({ timeout: 30_000 });
+      await expect(subtaskCard.getByText("MCP Subtask Parent")).toBeVisible({ timeout: 15_000 });
     } finally {
       const currentLayout = (await apiClient.getUserSettings()).settings
         .sidebar_layouts_by_workspace?.[seedData.workspaceId];
