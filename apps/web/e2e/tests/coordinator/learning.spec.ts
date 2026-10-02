@@ -30,13 +30,28 @@ test.describe("Coordinator Learning section", () => {
         `${linkToCoordinatorSettings(seedData.workspaceId, coordinator.id)}?section=learning`,
       );
       await expect(testPage.getByTestId("learning-section")).toBeVisible();
+      // Every section tab stays fully inside the tab list at desktop width.
+      const tablist = testPage.getByRole("tablist").first();
+      const lastTab = tablist.getByRole("tab").last();
+      await expect(lastTab).toBeInViewport({ ratio: 1 });
+      const [listBox, tabBox] = await Promise.all([tablist.boundingBox(), lastTab.boundingBox()]);
+      expect(tabBox!.x + tabBox!.width).toBeLessThanOrEqual(listBox!.x + listBox!.width + 1);
       await expect(testPage.getByTestId("learning-health")).toBeVisible();
       await expect(testPage.getByTestId("learning-measure-approval_without_edit")).toBeVisible();
       await expect(testPage.getByTestId(`learning-report-${DREAM_ID}`)).toBeVisible();
+      await expect(testPage.getByTestId("learning-report-status").first()).toHaveText(
+        "Nothing to change",
+      );
 
       await testPage.getByTestId(`learning-report-open-${DREAM_ID}`).click();
       await expect(testPage.getByTestId("learning-detail")).toBeVisible();
       await expect(testPage.getByTestId(`learning-item-${ITEM_ID}`)).toContainText(ITEM_TEXT);
+      await expect(testPage.getByTestId(`learning-item-${ITEM_ID}`)).toContainText("Item 1");
+      const refused = testPage.getByTestId("learning-item-dream-item-e2e-2");
+      await expect(refused).toContainText("Item 2");
+      await expect(refused.getByTestId("learning-item-gate")).toHaveText(
+        "Gate: refused (not enough evidence)",
+      );
       await expect(testPage.getByTestId("learning-considered")).toContainText("Raise the ceiling");
 
       const put = waitForHttp(testPage, "PUT", /\/dreams\/[^/]+\/items\/[^/]+\/rating$/);
