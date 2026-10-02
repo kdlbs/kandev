@@ -55,7 +55,7 @@ type TaskItemProps = {
    */
   parkedOnBackgroundWork?: boolean;
   isArchived?: boolean;
-  isPendingArchive?: boolean;
+  isPendingRemoval?: boolean;
   isSelected?: boolean;
   /** Whether this row is part of an active multi-selection (distinct from the active-task highlight). */
   isMultiSelected?: boolean;
@@ -131,9 +131,11 @@ function handleTaskItemKeyDown(
   e: React.KeyboardEvent<HTMLDivElement>,
   onSelect: ((e: React.KeyboardEvent) => void) | undefined,
   onClick: (() => void) | undefined,
+  isPendingRemoval?: boolean,
 ): void {
   if (e.key !== "Enter" && e.key !== " ") return;
   e.preventDefault();
+  if (isPendingRemoval) return;
   // Keyboard activation mirrors mouse: when a selection-aware handler is wired,
   // Enter/Space toggles/extends the selection just like a click would.
   if (onSelect) onSelect(e);
@@ -178,12 +180,17 @@ function taskItemRowClassName(
 function taskItemRowClick(
   onSelect: ((e: React.MouseEvent | React.KeyboardEvent) => void) | undefined,
   onClick: (() => void) | undefined,
+  isPendingRemoval?: boolean,
 ): (e: React.MouseEvent) => void {
-  return (e) => (onSelect ? onSelect(e) : onClick?.());
+  return (e) => {
+    if (isPendingRemoval) return;
+    if (onSelect) onSelect(e);
+    else onClick?.();
+  };
 }
 
-function pendingArchiveRowProps(isPendingArchive?: boolean) {
-  if (!isPendingArchive) return {};
+function pendingRemovalRowProps(isPendingRemoval?: boolean) {
+  if (!isPendingRemoval) return {};
   return {
     "aria-busy": true as const,
     "aria-disabled": true as const,
@@ -349,7 +356,7 @@ export const TaskItem = memo(function TaskItem({
   foregroundActivity,
   parkedOnBackgroundWork,
   isArchived,
-  isPendingArchive,
+  isPendingRemoval,
   isSelected = false,
   isMultiSelected = false,
   onClick,
@@ -391,7 +398,7 @@ export const TaskItem = memo(function TaskItem({
   taskRowPresentation,
 }: TaskItemProps) {
   const effectiveMenuOpen = menuOpen || isDeleting === true;
-  const pendingProps = pendingArchiveRowProps(isPendingArchive);
+  const pendingProps = pendingRemovalRowProps(isPendingRemoval);
   const resolvedTaskRow = resolveTaskRowPresentation(taskRowPresentation, { showRepository });
   const relativeTime = showActivityTime ? (lastActivityAt ?? updatedAt) : updatedAt;
   const taskColor = useTaskColor(taskId);
@@ -406,8 +413,8 @@ export const TaskItem = memo(function TaskItem({
       data-task-row-id={taskId}
       {...pendingProps}
       {...taskItemStateAttrs(isSelected, isMultiSelected)}
-      onClick={taskItemRowClick(onSelect, onClick)}
-      onKeyDown={(e) => handleTaskItemKeyDown(e, onSelect, onClick)}
+      onClick={taskItemRowClick(onSelect, onClick, isPendingRemoval)}
+      onKeyDown={(e) => handleTaskItemKeyDown(e, onSelect, onClick, isPendingRemoval)}
       style={indent.depth > 0 ? { paddingLeft: indent.paddingLeftPx } : undefined}
       className={cn(
         taskItemRowClassName(
@@ -432,7 +439,7 @@ export const TaskItem = memo(function TaskItem({
         parkedOnBackgroundWork={parkedOnBackgroundWork}
         hasPendingClarification={hasPendingClarification}
         hasPendingPermission={hasPendingPermission}
-        isPendingArchive={isPendingArchive}
+        isPendingRemoval={isPendingRemoval}
         interrupted={interrupted}
         isOnLastWorkflowStep={isOnLastWorkflowStep}
         showBackgroundTooltip

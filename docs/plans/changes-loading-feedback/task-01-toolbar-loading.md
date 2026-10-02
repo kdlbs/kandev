@@ -23,9 +23,9 @@ acceptance_criteria:
   - AC-PLATFORM-WORKSPACE-GIT-STATUS-001.29
   - AC-PLATFORM-WORKSPACE-GIT-STATUS-001.31
   - AC-PLATFORM-WORKSPACE-GIT-STATUS-001.35
-  - AC-PLATFORM-WORKSPACE-GIT-STATUS-001.36
   - AC-PLATFORM-WORKSPACE-GIT-STATUS-001.37
   - AC-PLATFORM-WORKSPACE-GIT-STATUS-001.38
+  - AC-PLATFORM-WORKSPACE-GIT-STATUS-001.39
 system_design:
   - ../../specs/ui/system-design/changes-loading-feedback.md
   - ../../specs/platform/system-design/changes-refresh-recovery.md

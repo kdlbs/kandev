@@ -223,6 +223,11 @@ export type TaskDeletedNotification = {
 };
 
 export type UpdateAvailableNotification = {
+  agent_name?: string;
+  runtime_id?: string;
+  display_name?: string;
+  previous_version?: string;
+  runtime_update_status?: "available" | "succeeded" | "failed" | "interrupted";
   version: string;
   url?: string;
   title: string;
@@ -323,6 +328,7 @@ export type UISliceState = {
   taskDeletedNotification: TaskDeletedNotification | null;
   /** Set when the background updates poller reports a newly detected release. */
   updateAvailableNotification: UpdateAvailableNotification | null;
+  updateAvailableNotificationQueue: UpdateAvailableNotification[];
   bottomTerminal: BottomTerminalState;
   sidebarViews: SidebarSliceState;
   sidebarViewsByWorkspace: Record<string, SidebarSliceState>;

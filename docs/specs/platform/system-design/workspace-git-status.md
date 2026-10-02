@@ -4,7 +4,7 @@ system: platform
 requirements:
   - REQ-PLATFORM-WORKSPACE-GIT-STATUS-001
 created: 2026-07-19
-updated: 2026-10-01
+updated: 2026-10-02
 owners:
   - kandev
 ---
@@ -37,6 +37,8 @@ The full status observer and the untracked monitor fingerprint use one shared ar
 This contract follows [ADR-2026-08-30-bound-untracked-dependency-enumeration](../../../decisions/2026-08-30-bound-untracked-dependency-enumeration.md).
 
 ### Mixed index and working-tree changes
+
+Exact filename association during enrichment follows [Workspace Git path details](workspace-git-path-details.md).
 
 `GitStatusUpdate.Files` stays unique by repository-relative path.
 `FileInfo` retains flattened compatibility fields and optional `staged_change`/`unstaged_change` facets for mixed paths.

@@ -34,8 +34,8 @@ export type TaskStateIconProps = {
    * foregroundActivity (AC-34).
    */
   parkedOnBackgroundWork?: boolean;
-  /** True while an accepted archive request is still in flight. */
-  isPendingArchive?: boolean;
+  /** True while an accepted archive or delete request is still in flight. */
+  isPendingRemoval?: boolean;
   accessibleLabel?: string;
   showBackgroundTooltip?: boolean;
 };
@@ -135,11 +135,12 @@ function TaskReviewIcon({
   );
 }
 
-function PendingArchiveTaskIcon() {
+function PendingRemovalTaskIcon() {
   return (
     <CompositorSpin
       aria-hidden="true"
-      data-testid="task-state-archive-pending"
+      data-testid="task-state-removal-pending"
+      data-legacy-testid="task-state-archive-pending"
       className="mt-[1px] h-3.5 w-3.5 shrink-0 text-muted-foreground/60"
     >
       <IconCircleDashed className="size-full" />
@@ -148,7 +149,7 @@ function PendingArchiveTaskIcon() {
 }
 
 export function TaskStateIcon(props: TaskStateIconProps) {
-  if (props.isPendingArchive) return <PendingArchiveTaskIcon />;
+  if (props.isPendingRemoval) return <PendingRemovalTaskIcon />;
   return <TaskStateIconContent {...props} />;
 }
 

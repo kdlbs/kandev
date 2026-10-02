@@ -30,9 +30,12 @@ type SidebarPageStore = ReturnType<typeof useAppStoreApi>;
 function useSidebarPageState(store: SidebarPageStore) {
   const [pendingPage, setPendingPage] = useState<number | null>(null);
   const [response, setPageResponse] = useState<SidebarTaskPageResponse | null>(null);
+  const responseRef = useRef<SidebarTaskPageResponse | null>(null);
   const [owner] = useState(() => `sidebar:display:${generateUUID()}`);
   const setResponse = useCallback(
-    (page: SidebarTaskPageResponse | null) => {
+    (update: SetStateAction<SidebarTaskPageResponse | null>) => {
+      const page = typeof update === "function" ? update(responseRef.current) : update;
+      responseRef.current = page;
       const state = store.getState();
       const tasks =
         page?.entries.flatMap((entry) => {
@@ -430,6 +433,27 @@ function useSidebarPageAutoLoad({
   }, [loader.pendingPage, queuedRefreshRef, refreshTimerRef, setRefreshRevision]);
 }
 
+function useSidebarDeletedTasks(store: SidebarPageStore, loader: SidebarPageLoader) {
+  const { setResponse } = loader;
+  useEffect(
+    () =>
+      sidebarTaskPageCache(store).subscribeDeletedTasks((taskIds) => {
+        setResponse((current) =>
+          current
+            ? {
+                ...current,
+                provisional: true,
+                entries: current.entries.filter(
+                  (entry) => !entry.task_id || !taskIds.has(entry.task_id),
+                ),
+              }
+            : current,
+        );
+      }),
+    [store, setResponse],
+  );
+}
+
 function useSidebarPageNavigation({
   currentResponse,
   pendingPage,
@@ -516,6 +540,7 @@ export function useSidebarTaskPage(
   const queryWorkspaceId = enabled && !accessDenied ? workspaceId : null;
   const loader = useSidebarPageLoader(queryWorkspaceId, workspaceGeneration, store, t, viewKeyRef);
   const { loadPage } = loader;
+  useSidebarDeletedTasks(store, loader);
   const cachedResponse = queryWorkspaceId ? sidebarTaskPageCache(store).get(viewKey) : null;
   const {
     pendingPage,

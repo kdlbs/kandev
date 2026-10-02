@@ -58,19 +58,19 @@ describe("toSheetItem repository projection", () => {
   it("marks active rows covered by a pending archive", () => {
     const item = toSheetItem(task(), {
       ...emptyCtx(),
-      pendingArchiveTaskIds: new Set(["t1"]),
+      pendingRemovalTaskIds: new Set(["t1"]),
     });
 
-    expect(item.isPendingArchive).toBe(true);
+    expect(item.isPendingRemoval).toBe(true);
   });
 
-  it("does not mark confirmed archived rows as pending", () => {
+  it("marks archived rows when deletion includes them", () => {
     const item = toSheetItem(task({ isArchived: true }), {
       ...emptyCtx(),
-      pendingArchiveTaskIds: new Set(["t1"]),
+      pendingRemovalTaskIds: new Set(["t1"]),
     });
 
-    expect(item.isPendingArchive).toBe(false);
+    expect(item.isPendingRemoval).toBe(true);
   });
 });
 

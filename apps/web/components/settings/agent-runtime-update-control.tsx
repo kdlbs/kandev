@@ -172,7 +172,13 @@ function RuntimeUpdatePreviewDetails({
         onSelectDefault={onSelectDefault}
       />
       <div className="space-y-0.5 text-xs text-muted-foreground">
-        <p>{t("agents:runtimeUpdateExplainer")}</p>
+        <p>
+          {t(
+            preview.managed_fallback
+              ? "agents:runtimeFallbackExplainer"
+              : "agents:runtimeUpdateExplainer",
+          )}
+        </p>
         <p>{t("agents:runtimeUpdateSessionsNote")}</p>
       </div>
       <div className="space-y-0.5">
@@ -499,6 +505,7 @@ export function AgentRuntimeUpdateControl({
         onOpen={() => handleOpenChange(true)}
       />
       <AgentRuntimeUpdateSurface
+        managedFallback={runtimeUpdate.managed_fallback}
         agentName={agentName}
         displayName={displayName}
         isMobile={isMobile}

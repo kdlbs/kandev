@@ -376,7 +376,11 @@
         "apps/backend/internal/runtimeflags/registry.go",
         "apps/web/components/settings/agents/agent-profiles-section.tsx",
         "apps/web/components/task/chat/conversation-usage-display.tsx",
-        "apps/backend/internal/task/handlers/task_usage_handlers.go"
+        "apps/backend/internal/task/handlers/task_usage_handlers.go",
+        "apps/backend/internal/agent/agents/runtime_update_capability.go",
+        "apps/backend/internal/agent/settings/controller/agent_autoupdate.go",
+        "apps/web/components/settings/agent-runtime-policies.tsx",
+        "apps/web/components/update-available-toast-bridge.tsx"
       ],
       "tests": [
         "apps/backend/internal/profiles/profiles_test.go",
@@ -391,7 +395,11 @@
         "apps/backend/internal/runtimeflags/registry_test.go",
         "apps/web/components/settings/agents/agent-profiles-section.test.tsx",
         "apps/web/components/task/chat/conversation-usage-display.test.tsx",
-        "apps/web/lib/api/domains/conversation-usage-api.test.ts"
+        "apps/web/lib/api/domains/conversation-usage-api.test.ts",
+        "apps/backend/internal/agent/registry/runtime_update_coverage_test.go",
+        "apps/backend/internal/agent/settings/controller/agent_autoupdate_test.go",
+        "apps/web/e2e/tests/settings/agent-runtime-notifications.spec.ts",
+        "apps/web/e2e/tests/settings/mobile-agent-runtime-notifications.spec.ts"
       ],
       "settingsRoutes": [
         "/settings/agents",

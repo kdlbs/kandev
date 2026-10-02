@@ -2,7 +2,7 @@
 status: active
 system: platform
 created: 2026-07-19
-updated: 2026-10-01
+updated: 2026-10-02
 owners:
   - kandev
 ---
@@ -68,15 +68,17 @@ A failed live source still cannot authorize an unmarked persisted fallback.
 - **AC-PLATFORM-WORKSPACE-GIT-STATUS-001.33:** A failed Git detail command cannot certify an empty diff or zero statistics as ready. Healthy files and facets retain ready detail where available, failed detail is identifiable, ordinary same-fingerprint observations do not restart unavailable enrichment, and an explicit refresh can retry it without repository mutation.
 - **AC-PLATFORM-WORKSPACE-GIT-STATUS-001.34:** An unavailable implicit comparison reference can make ancestry totals unavailable without invalidating independently successful per-file diffs.
 - **AC-PLATFORM-WORKSPACE-GIT-STATUS-001.35:** A WebSocket connection admits at most four concurrent session Git refresh operations. Excess requests receive a correlated unavailable result without starting source work.
-- **AC-PLATFORM-WORKSPACE-GIT-STATUS-001.36:** A failed status or unavailable detail refresh shall schedule a delayed read retry while Changes remains active, focused, visible, and connected.
+- **AC-PLATFORM-WORKSPACE-GIT-STATUS-001.36:** For every eligible tracked changed path in a stable observation, successful diff enrichment shall associate statistics and patch content with the exact repository-relative path in the file-membership snapshot, including Unicode, quoting characters, literal rename-like text, tabs, newlines, and leading or trailing whitespace supported by the task filesystem. Actual renames shall enrich the destination path while preserving observed rename metadata. This applies independently to flattened, staged, and unstaged representations; binary and content-unchanged changes may legitimately have zero line counts.
+- **AC-PLATFORM-WORKSPACE-GIT-STATUS-001.37:** A failed status or unavailable detail refresh shall schedule a delayed read retry while Changes remains active, focused, visible, and connected.
   Consecutive failures shall increase the delay to a bounded maximum.
   Retry shall preserve prior valid data and shall not change Git content, credentials, or transport.
-- **AC-PLATFORM-WORKSPACE-GIT-STATUS-001.37:** Sibling consumers in one environment shall share a recovery schedule and at most one refresh attempt.
+- **AC-PLATFORM-WORKSPACE-GIT-STATUS-001.38:** Sibling consumers in one environment shall share a recovery schedule and at most one refresh attempt.
   Context replacement, loss of the last active consumer, page hiding, unfocus, or disconnection shall cancel delayed recovery.
   Accepted live recovery shall stop the schedule and reset its backoff without replaying older results.
-- **AC-PLATFORM-WORKSPACE-GIT-STATUS-001.38:** Partial failure shall preserve healthy repositories and retain unavailable freshness until every failed repository recovers.
+- **AC-PLATFORM-WORKSPACE-GIT-STATUS-001.39:** Partial failure shall preserve healthy repositories and retain unavailable freshness until every failed repository recovers.
   Ready notifications shall cancel unnecessary retries.
   A same-state rerender shall not restart the retry delay or create another request.
+
 
 ## Out of scope
 
