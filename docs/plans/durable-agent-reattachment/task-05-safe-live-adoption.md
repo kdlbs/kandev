@@ -376,3 +376,18 @@ GOCACHE=/tmp/kandev-go-build-preserved-20261001 pnpm e2e:run --host --no-build -
 ```
 Native Windows/macOS containment smoke and live harness relocation coverage
 remain release evidence limits; cross-compilation does not replace native checks.
+
+
+The final main refresh incorporated literal Git path handling and bounded archive
+manifest cleanup without conflicts. All four affected backend package race suites
+passed (executor 6.9s, process 182.7s, task service 103.6s, worktree 101.2s).
+A fresh managed desktop build then passed all five affected cases, zero retries,
+in 1.3 minutes. Normal commit hooks passed without bypass. Hosted checks remain
+pending until the rebased head is published and validated.
+
+```bash
+cd apps/backend
+GOCACHE=/tmp/kandev-go-build-preserved-20261001 go test -race ./internal/orchestrator/executor ./internal/agentctl/server/process ./internal/task/service ./internal/worktree
+cd ../web
+GOCACHE=/tmp/kandev-go-build-preserved-20261001 pnpm e2e:run --host --project chromium tests/workflow/workflow-step-proceed.spec.ts tests/office/realtime-dashboard.spec.ts tests/task/workspace-file-transfer.spec.ts tests/task/create-task-workflow-agent-overrides.spec.ts tests/task/task-navigation-responsiveness.spec.ts -- --grep 'preserves session settings|does not refetch on cross-workspace|uploads picked files|keeps grouped replacements|Files stays usable' --retries=0
+```
