@@ -223,11 +223,17 @@ Passed after these corrections:
 - `go test -race ./internal/backendapp -count=1`, including the recovery fixture and backend goroutine-leak regressions
 - The exact backend recovery/quarantine test selection and the focused race selection containing the recovery fixture and listener cleanup tests
 - `make -C apps/backend build`
-- `golangci-lint run ./... --new-from-rev=517249b5e609aef76e9ad06496b8f1a13cd00516 --timeout=5m` (0 issues)
+- `golangci-lint run ./... --new-from-rev=68542f03983a56b9c9c42fd1afed10842e1beff0 --timeout=5m` (0 issues)
 - `python3 scripts/list-docs.py validate` (340 decisions and 1284 specifications), 36 specification-linter tests, full specification lint, 62 public-doc tests, and validation of 47 published pages
 - Actual changed-package documentation coverage: `ok: true`, `status: covered`; `git diff --check`
 
 One additional local run of `go test ./internal/agent/runtime/lifecycle ./internal/system/storage/gocache -count=1` reached the 10-minute package timeout in `TestOpenSSHRuntimeAPITunnel_ResumeRebindsPersistedRemotePort`; the Go-cache provider package passed in that run. The exact SSH test then passed 20 repeated race-enabled runs with `-timeout=90s`. This separate suite-order timeout did not reproduce in the focused run.
+
+### Advanced-base validation (2026-10-02)
+
+The authoritative `main` tip was `68542f03983a56b9c9c42fd1afed10842e1beff0`. The PR changes and advanced-base changes had no overlapping paths. A synthetic merge against the current base was conflict-free.
+
+In the synthetic worktree, `go test ./internal/agent/runtime/lifecycle -run 'ManagedGoCache' -count=1`, the race-enabled backendapp recovery/listener regression selection, and `make -C apps/backend GOFLAGS='-v -buildvcs=false' build` passed. The worktree was removed after validation. The build-only `-buildvcs=false` flag was required because the synthetic worktree is outside the repository's `.git` filesystem boundary.
 
 ## Compatibility and risks
 
