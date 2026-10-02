@@ -19,7 +19,11 @@ The [workflow reset design](../../tasks/system-design/workflow-step-agent-start-
 | --- | --- |
 | `.1`, `.2`, `.5` | Completion finalization |
 | `.3`, `.4` | Dispatch acknowledgement |
-| `.4`, `.6` | Failure and compatibility |
+| `.6` | Terminal status ordering |
+| `.7` | Captured terminal event |
+| `.8` | Terminal event publication |
+| `.9` | Terminal admission |
+| `.10`, `.11` | Missing-completion compatibility |
 
 ## Components and state
 
@@ -51,9 +55,9 @@ Clear it before that lease ends and before `AgentReady` publication can admit a 
 Retain signal-before-`AgentReady` ordering and generation checks in waiting consumers.
 
 For an accepted numbered error, apply FAILED or shutdown STOPPED under the lifecycle lease before signaling completion or clearing pending.
-Capture the terminal event payload, attempt identity, and failure evidence at that transition.
+Capture the terminal event payload, terminal status, prompt generation, turn and attempt identity, and failure evidence at that transition.
 Then signal completion, clear pending, and release `promptLifecycleMu`.
-Persist terminal state, run failure classification or shutdown teardown, and publish the captured `AgentFailed` or `AgentStopped` event only after unlocking.
+Persist terminal state, run failure classification or shutdown teardown, and publish the captured `AgentFailed` or `AgentStopped` payload only after unlocking. Terminal logs use the captured status so a later prompt cannot change the reported outcome.
 A synchronous subscriber can wait on dispatch acknowledgement ownership without holding the lock acknowledgement needs to run its callback.
 A waiting successor observes terminal status after its completion signal and cannot create another prompt generation for that execution.
 
@@ -81,10 +85,14 @@ Completion handlers must not acquire `promptMu` because its owner can await thei
 Generation-zero completion retains its existing autonomous-work path.
 It remains rejected while a dispatch-only foreground prompt is pending.
 This change does not broaden admission of unnumbered events during foreground work.
+Startup-owner deferral remains limited to generation-zero process-exit failures; an error attached to a numbered prompt is a terminal prompt result, including before session initialization completes.
 
 Preserve cancellation ownership, timeout behavior, reset cleanup, and blocking-prompt completion consumption.
 Update test fixtures that currently require pending state after an already accepted completion.
 Do not weaken their ownership, timeout, or next-prompt assertions.
+Keep the existing bounded wait without clearing pending state when completion is absent.
+Preserve cancellation escalation and its original transport or completion error.
+Reject a later prompt request after a numbered completion makes the execution FAILED or STOPPED.
 Apply failed/stopped status before releasing the error completion fence, and never publish its synchronous terminal event while holding `promptLifecycleMu`.
 
 The separate recursive startup-lock problem in issue #4149 remains outside this correction.

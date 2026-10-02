@@ -14,6 +14,11 @@ acceptance_criteria:
   - AC-PLATFORM-PROMPT-COMPLETION-OWNERSHIP-001.4
   - AC-PLATFORM-PROMPT-COMPLETION-OWNERSHIP-001.5
   - AC-PLATFORM-PROMPT-COMPLETION-OWNERSHIP-001.6
+  - AC-PLATFORM-PROMPT-COMPLETION-OWNERSHIP-001.7
+  - AC-PLATFORM-PROMPT-COMPLETION-OWNERSHIP-001.8
+  - AC-PLATFORM-PROMPT-COMPLETION-OWNERSHIP-001.9
+  - AC-PLATFORM-PROMPT-COMPLETION-OWNERSHIP-001.10
+  - AC-PLATFORM-PROMPT-COMPLETION-OWNERSHIP-001.11
 system_design:
   - ../../specs/platform/system-design/prompt-completion-ownership.md
 ---
@@ -29,11 +34,12 @@ Prove that later autonomous completion permits another prompt on the same execut
 ## In scope
 
 - Implement the completion-finalization and acknowledgement rules in the referenced design.
-- Add all six named regression groups in the plan before production changes.
+- Add the plan's regression groups before production changes.
 - Update the early-completion assumption in `newDispatchCancelFixture` and directly affected tests.
 - Cover successful/error completion, both acknowledgement orders, blocked finalization, and existing waiters.
 - Cover stale/duplicate events, replacement execution, and an older completed generation beside a live successor.
 - Cover error-before-acknowledgement with a synchronous failure subscriber, and error finalization paused before terminal status application while a successor is waiting.
+- Cover numbered startup errors and prove terminal publication uses captured status, generation, turn, attempt, and failure evidence after newer prompt state begins.
 - Run the exact compatibility checks below and record results.
 
 ## Out of scope
@@ -45,7 +51,7 @@ Prove that later autonomous completion permits another prompt on the same execut
 ## Acceptance
 
 1. Both acknowledgement orders leave the completed generation non-pending; its later autonomous completion reaches Ready.
-2. Stale, duplicate, and unnumbered events cannot release a live successor; predecessor finalization and completion consumption remain ordered.
+2. Stale, duplicate, and unnumbered events cannot release a live successor; numbered terminal errors apply failure state before signaling and reject later admission.
 3. The protocol integration test observes exactly one successor request on the same execution without restart or readiness timeout. Compatibility checks pass.
 
 ## TDD sequence
@@ -67,6 +73,9 @@ Run each command from the repository root:
 
 ```bash
 (cd apps/backend && go test ./internal/agent/runtime/lifecycle -run '^TestDispatchCompletion_' -count=1 -v)
+(cd apps/backend && go test -race ./internal/agent/runtime/lifecycle -run '^TestDispatchCompletion_TerminalPublicationUsesCapturedGeneration$' -count=1)
+(cd apps/backend && go test -race ./internal/agent/runtime/lifecycle -run '^TestHandleAgentEvent_ErrorClaimCannotRaceReplacementPrompt$' -count=20)
+(cd apps/backend && go test -race ./internal/agent/runtime/lifecycle -count=1)
 (cd apps/backend && go test -race ./internal/agent/runtime/lifecycle -run '^(TestDispatchCompletion_|TestHandleAgentEvent_(UnnumberedCompleteCannotReleasePendingPrompt|DelayedCompleteCannotFinishReplacementPrompt)|TestWaitForPendingDispatchedPrompt_|TestManager_CancelAgent_|TestManager_ResetAgentContext_|TestManager_RestartAgentProcess_Success|TestSendPrompt|TestWakeup_)' -count=1)
 make -C apps/backend build
 python3 scripts/list-docs.py validate
@@ -103,8 +112,8 @@ All lifecycle paths below are under `apps/backend/internal/agent/runtime/lifecyc
 - `manager_events.go`: numbered completion finalization.
 - `manager_interaction.go`: terminal error state capture and post-unlock failure/stop publication.
 - `session.go`: dispatch acknowledgement bookkeeping.
-- `manager_events_dispatch_completion_test.go`: new focused regression file.
-- `manager_interaction_dispatch_cancel_test.go`: early-completion fixture expectations and existing cancellation assertions.
+- `manager_events_dispatch_completion_test.go`: focused completion, terminal ordering, startup-error, and captured-publication regressions.
+- `manager_interaction_dispatch_cancel_test.go` and `session_pending_prompt_test.go`: cancellation fixture expectations and missing-completion compatibility coverage.
 - `docs/specs/platform/README.md`: link the accepted requirement and current design.
 - This package's documents: final results and statuses.
 
@@ -124,7 +133,7 @@ No live provider replay is required for the deterministic lifecycle correction.
 
 ## Inputs
 
-- [Requirements](../../specs/platform/requirements/prompt-completion-ownership.md), all six criteria.
+- [Requirements](../../specs/platform/requirements/prompt-completion-ownership.md), all eleven criteria.
 - [System design](../../specs/platform/system-design/prompt-completion-ownership.md), all sections.
 - [Plan](plan.md), evidence and regression matrix.
 - [ADR 0035](../../decisions/0035-version-agent-ready-events-by-prompt-generation.md).
@@ -141,3 +150,9 @@ The targeted Go test, the work-order race test, `make -C apps/backend build`, `p
 The two review regressions first failed against the reviewed implementation: error-before-ack blocked the acknowledgement callback behind the synchronous failure subscriber, and a successor reopened an execution while failure finalization was paused. After the correction, both passed. The full dispatch-completion group and the specified race-enabled lifecycle compatibility suite passed again, as did the backend build and documentation gates. The failure path now records FAILED or shutdown STOPPED before it signals completion or clears pending; it publishes the captured terminal identity and evidence after releasing `promptLifecycleMu`. Coordinate release with #4149 because its separate startup-lock race remains out of scope.
 
 The full lifecycle package also passed with `go test ./internal/agent/runtime/lifecycle -count=1` (80.486s).
+
+PR review reproduced a numbered error on an uninitialized startup remaining RUNNING with no `AgentFailed` event. Removing startup-owner deferral from the numbered error path makes that execution terminal while preserving generation-zero process-exit deferral. The captured-publication regression holds lifecycle generation reads while checking prompt identity and failure evidence on the event. The criteria and regression map now keep terminal status, immutable event capture, subscriber progress, successor admission, bounded waiting, and cancellation escalation separate.
+
+The first PR backend test run found a race in the full lifecycle package: error finalization logged mutable `execution.Status` after releasing `promptLifecycleMu`, while `BeginPrompt` could advance the execution. The publication snapshot now carries the applied terminal status, and the captured-publication test advances the prompt before finalization then checks that failure logs still report FAILED. Before the production change, the test reported RUNNING; after it, the focused test passes and the CI-failing race test passes 20 consecutive runs.
+
+After the final production and test edits, `go test -race ./internal/agent/runtime/lifecycle -count=1` passed in 130.320s. `make -C apps/backend build` passed; the only warnings were the expected missing macOS signing tools.

@@ -9,8 +9,12 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
+	"go.uber.org/zap/zaptest/observer"
 
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
+	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
@@ -445,7 +449,133 @@ func TestDispatchCompletion_ErrorReleasesOnlyMatchingGeneration(t *testing.T) {
 	})
 }
 
-// @covers AC-PLATFORM-PROMPT-COMPLETION-OWNERSHIP-001.3, AC-PLATFORM-PROMPT-COMPLETION-OWNERSHIP-001.6
+// @covers AC-PLATFORM-PROMPT-COMPLETION-OWNERSHIP-001.6
+func TestDispatchCompletion_UninitializedStartupFailureIsTerminal(t *testing.T) {
+	failurePublished := make(chan struct{}, 1)
+	fixture := setupDispatchCompletionFixture(t, func(fixture *dispatchCompletionFixture) {
+		fixture.execution.beginStartupAttemptWithID("startup-attempt")
+		eventBus, ok := fixture.manager.eventPublisher.eventBus.(*MockEventBus)
+		require.True(t, ok)
+		eventBus.OnPublish = func(subject string, _ *bus.Event) {
+			if subject == events.AgentFailed {
+				failurePublished <- struct{}{}
+			}
+		}
+	}, func(fixture *dispatchCompletionFixture, generation uint64) {
+		if generation != 1 {
+			return
+		}
+		fixture.completionAccepted <- fixture.manager.handleCompleteEvent(fixture.execution, &agentctl.AgentEvent{
+			Type: "complete", SessionID: fixture.execution.SessionID, PromptGeneration: generation,
+			Error: "startup prompt failed", Data: map[string]any{"is_error": true},
+		})
+	})
+
+	_, err := fixture.manager.PromptAgent(context.Background(), fixture.execution.ID, "dispatch-only", nil, true)
+	require.NoError(t, err)
+	require.Equal(t, uint64(1), receiveDispatchPromptGeneration(t, fixture.promptGenerations))
+	require.True(t, receiveDispatchCompletion(t, fixture.completionAccepted), "the numbered startup failure must be accepted")
+	require.Equal(t, v1.AgentStatusFailed, fixture.execution.Status,
+		"startup deferral must remain limited to process-exit completions without a prompt generation")
+	select {
+	case <-failurePublished:
+	default:
+		t.Fatal("numbered startup error did not publish agent.failed")
+	}
+}
+
+// @covers AC-PLATFORM-PROMPT-COMPLETION-OWNERSHIP-001.7
+// This review-requested test documents the existing immutable-publication contract.
+func TestDispatchCompletion_TerminalPublicationUsesCapturedGeneration(t *testing.T) {
+	var logs *observer.ObservedLogs
+	fixture := setupDispatchCompletionFixture(t, func(fixture *dispatchCompletionFixture) {
+		core, observedLogs := observer.New(zapcore.DebugLevel)
+		observedLogger, err := logger.NewFromZap(zap.New(core))
+		require.NoError(t, err)
+		fixture.manager.logger = observedLogger
+		logs = observedLogs
+	}, nil)
+	_, err := fixture.manager.PromptAgent(context.Background(), fixture.execution.ID, "dispatch-only", nil, true)
+	require.NoError(t, err)
+	require.Equal(t, uint64(1), receiveDispatchPromptGeneration(t, fixture.promptGenerations))
+	eventBus, ok := fixture.manager.eventPublisher.eventBus.(*MockEventBus)
+	require.True(t, ok)
+
+	generation := fixture.execution.promptGenerationSnapshot()
+	event := &agentctl.AgentEvent{
+		Type: "complete", SessionID: fixture.execution.SessionID, PromptGeneration: generation,
+		TurnID: "terminal-turn", AttemptID: "terminal-attempt",
+		Error: "provider failed", Data: map[string]any{"is_error": true},
+	}
+	fixture.execution.promptLifecycleMu.Lock()
+	locked := true
+	defer func() {
+		if locked {
+			fixture.execution.promptLifecycleMu.Unlock()
+		}
+	}()
+
+	evidence := &PromptAttemptEvidence{
+		EvidenceKnown: true, OutputObserved: true, EffectObserved: true,
+		ProviderDiagnosticCandidate: true, ProviderDiagnosticText: "captured diagnostic",
+	}
+	publication, err := fixture.manager.preparePromptErrorCompletion(fixture.execution, event, evidence)
+	require.NoError(t, err)
+	require.NotNil(t, publication)
+	capturedGeneration := publication.payload.PromptGeneration
+	require.Equal(t, generation, capturedGeneration)
+	beginExecutionPromptLocked(fixture.execution)
+
+	published := make(chan AgentEventPayload, 1)
+	eventBus.OnPublish = func(subject string, event *bus.Event) {
+		if subject != events.AgentFailed {
+			return
+		}
+		payload, ok := event.Data.(AgentEventPayload)
+		if ok {
+			published <- payload
+		}
+	}
+	finished := make(chan struct{})
+	go func() {
+		fixture.manager.finishPromptErrorCompletion(publication)
+		close(finished)
+	}()
+
+	var payload AgentEventPayload
+	select {
+	case payload = <-published:
+	case <-time.After(time.Second):
+		fixture.execution.promptLifecycleMu.Unlock()
+		locked = false
+		select {
+		case <-finished:
+		case <-time.After(time.Second):
+			t.Fatal("terminal publication did not finish after generation reads resumed")
+		}
+		t.Fatal("terminal publication attempted to read mutable prompt state after its generation snapshot")
+	}
+	fixture.execution.promptLifecycleMu.Unlock()
+	locked = false
+	select {
+	case <-finished:
+	case <-time.After(time.Second):
+		t.Fatal("terminal publication did not finish after publishing its captured payload")
+	}
+	require.Equal(t, capturedGeneration, payload.PromptGeneration)
+	require.Equal(t, "terminal-turn", payload.TurnID)
+	require.Equal(t, "terminal-attempt", payload.AttemptID)
+	require.True(t, payload.EvidenceKnown)
+	require.True(t, payload.OutputObserved)
+	require.True(t, payload.EffectObserved)
+	require.True(t, payload.ProviderDiagnosticCandidate)
+	require.Equal(t, "captured diagnostic", payload.ProviderDiagnosticText)
+	terminalLog := logs.FilterMessage("error completion received, marking execution as failed").All()
+	require.Len(t, terminalLog, 1)
+	require.Equal(t, string(v1.AgentStatusFailed), terminalLog[0].ContextMap()["status"])
+}
+
+// @covers AC-PLATFORM-PROMPT-COMPLETION-OWNERSHIP-001.3, AC-PLATFORM-PROMPT-COMPLETION-OWNERSHIP-001.8
 func TestDispatchCompletion_ErrorBeforeAcknowledgementReleasesDispatchGuard(t *testing.T) {
 	guard := sync.Mutex{}
 	guard.Lock()
@@ -547,7 +677,7 @@ func TestDispatchCompletion_ErrorBeforeAcknowledgementReleasesDispatchGuard(t *t
 	guard.Unlock()
 }
 
-// @covers AC-PLATFORM-PROMPT-COMPLETION-OWNERSHIP-001.4, AC-PLATFORM-PROMPT-COMPLETION-OWNERSHIP-001.5
+// @covers AC-PLATFORM-PROMPT-COMPLETION-OWNERSHIP-001.4, AC-PLATFORM-PROMPT-COMPLETION-OWNERSHIP-001.5, AC-PLATFORM-PROMPT-COMPLETION-OWNERSHIP-001.9
 func TestDispatchCompletion_ErrorFinalizationRejectsWaitingSuccessor(t *testing.T) {
 	fixture := newDispatchCompletionFixture(t, false)
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)

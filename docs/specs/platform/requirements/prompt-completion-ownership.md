@@ -33,7 +33,12 @@ Task workflows consume completion events but retain their own admission and tran
 - **AC-PLATFORM-PROMPT-COMPLETION-OWNERSHIP-001.3:** If completion precedes dispatch acknowledgement, that acknowledgement shall not make the completed prompt pending again.
 - **AC-PLATFORM-PROMPT-COMPLETION-OWNERSHIP-001.4:** An unnumbered, stale, or duplicate completion shall not release a pending newer foreground prompt or change its transcript.
 - **AC-PLATFORM-PROMPT-COMPLETION-OWNERSHIP-001.5:** The system shall preserve completion delivery and finish predecessor transcript processing before a successor prompt resets shared transcript state.
-- **AC-PLATFORM-PROMPT-COMPLETION-OWNERSHIP-001.6:** A matching terminal error shall apply its failed or stopped state before releasing its completed prompt barrier, publish terminal handling after the lifecycle lock is released, and reject successor admission to that terminal execution. Missing completion shall retain bounded waiting and cancellation recovery.
+- **AC-PLATFORM-PROMPT-COMPLETION-OWNERSHIP-001.6:** When a matching numbered completion reports an error, the execution shall reach FAILED or, during shutdown, STOPPED before its dispatch barrier is released.
+- **AC-PLATFORM-PROMPT-COMPLETION-OWNERSHIP-001.7:** A terminal event for a numbered error shall retain the prompt generation, turn ID, attempt ID, and failure evidence captured for that completion.
+- **AC-PLATFORM-PROMPT-COMPLETION-OWNERSHIP-001.8:** When a synchronous terminal-event subscriber waits for dispatch acknowledgement, delivery shall not prevent the acknowledgement callback from running.
+- **AC-PLATFORM-PROMPT-COMPLETION-OWNERSHIP-001.9:** When a numbered completion moves an execution to FAILED or STOPPED, a later prompt request shall be rejected without creating a new prompt generation.
+- **AC-PLATFORM-PROMPT-COMPLETION-OWNERSHIP-001.10:** When a dispatch-only prompt receives no completion, a waiting successor shall return the existing bounded timeout without clearing the prompt's pending barrier.
+- **AC-PLATFORM-PROMPT-COMPLETION-OWNERSHIP-001.11:** When cancellation of a dispatch-only prompt exhausts its completion wait, recovery shall preserve the original transport or completion error when reporting escalation.
 
 ## Out of scope
 

@@ -2518,11 +2518,6 @@ func (m *Manager) preparePromptErrorCompletion(
 ) (*promptErrorCompletionPublication, error) {
 	errorMsg := extractErrorMessage(event)
 	wasShutdown := m.IsShuttingDown()
-	if !wasShutdown && isUninitializedStartupExecution(execution) {
-		m.logger.Debug("deferring uninitialized startup failure to startup owner",
-			zap.String("execution_id", execution.ID))
-		return nil, nil
-	}
 	eventType := events.AgentFailed
 	terminalStatus := v1.AgentStatusFailed
 	if wasShutdown {
@@ -2611,7 +2606,7 @@ func (m *Manager) finishPromptErrorCompletion(publication *promptErrorCompletion
 			zap.String("execution_id", execution.ID),
 			zap.String("task_id", execution.TaskID),
 			zap.String("error", publication.errorMsg),
-			zap.String("status", string(execution.Status)),
+			zap.String("status", publication.payload.Status),
 			zap.String("agent_command", execution.AgentCommand),
 			zap.String("acp_session_id", execution.ACPSessionID))
 	}
@@ -2623,7 +2618,7 @@ func (m *Manager) finishPromptErrorCompletion(publication *promptErrorCompletion
 		m.logger.Info("execution completed",
 			zap.String("execution_id", execution.ID),
 			zap.Int("exit_code", publication.exitCode),
-			zap.String("status", string(execution.Status)))
+			zap.String("status", publication.payload.Status))
 		m.classifyAndMaybeRemediate(execution, publication.exitCode, publication.errorMsg)
 	}
 	m.eventPublisher.publishAgentEventPayload(context.Background(), publication.eventType, publication.payload)

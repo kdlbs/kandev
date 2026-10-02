@@ -77,7 +77,7 @@ The requested result is normal completion and subsequent input without a stale b
 
 Follow the [system design](../../specs/platform/system-design/prompt-completion-ownership.md).
 Change `manager_events.go` completion finalization and `session.go` dispatch acknowledgement.
-Use existing generation state and mutexes; capture terminal event identity and evidence before unlocking.
+Use existing generation state and mutexes; capture terminal status, event identity, and evidence before unlocking.
 Successful completion signals before ready publication. Error completion applies terminal state, signals, releases pending, unlocks, and only then publishes failure or shutdown-stop handling.
 Do not clear pending at claim entry or acquire `promptMu` in the event handler.
 
@@ -103,9 +103,12 @@ The new test file is `apps/backend/internal/agent/runtime/lifecycle/manager_even
 | `.3`, `.4` | `TestDispatchCompletion_AcknowledgementOwnership`, completed, successor, and replacement cases |
 | `.4` | `TestDispatchCompletion_StaleAndDuplicateEvents`, including an older completed generation plus a live successor |
 | `.5` | `TestDispatchCompletion_FinalizationBarrier`, delayed transcript flush and an already waiting successor |
-| `.6` | `TestDispatchCompletion_ErrorReleasesOnlyMatchingGeneration` |
-| `.3`, `.6` | `TestDispatchCompletion_ErrorBeforeAcknowledgementReleasesDispatchGuard`, synchronous failure subscriber and dispatch callback guard |
-| `.4`, `.5`, `.6` | `TestDispatchCompletion_ErrorFinalizationRejectsWaitingSuccessor`, terminal-state barrier before successor admission |
+| `.6` | `TestDispatchCompletion_ErrorReleasesOnlyMatchingGeneration`, `TestDispatchCompletion_UninitializedStartupFailureIsTerminal` |
+| `.7` | `TestDispatchCompletion_TerminalPublicationUsesCapturedGeneration`, captured generation, turn, attempt, and failure evidence |
+| `.3`, `.8` | `TestDispatchCompletion_ErrorBeforeAcknowledgementReleasesDispatchGuard`, synchronous failure subscriber and dispatch callback guard |
+| `.4`, `.5`, `.9` | `TestDispatchCompletion_ErrorFinalizationRejectsWaitingSuccessor`, terminal-state barrier before successor admission |
+| `.10` | `TestWaitForPendingDispatchedPrompt_TimesOutWithoutClearingGate` |
+| `.11` | `TestManager_CancelAgent_DispatchCompletionTimeoutPreservesTransportFailure` |
 | `.2`, `.5` | `TestDispatchCompletion_NextPromptUsesSameExecution` through real `Manager.PromptAgent` and the WebSocket mock |
 
 Existing compatibility suites include `session_pending_prompt_test.go`, `manager_interaction_dispatch_cancel_test.go`,
@@ -152,6 +155,12 @@ Review remediation reproduced both findings before production changes. A synchro
 The reproduction establishes the lifecycle defect, not the complete provider-specific 30-second restart sequence. Issue #4149's separate startup-lock race and pi notification filtering remain outside this correction; coordinate release with #4149.
 
 After review remediation, `TestDispatchCompletion_ErrorBeforeAcknowledgementReleasesDispatchGuard` and `TestDispatchCompletion_ErrorFinalizationRejectsWaitingSuccessor` both passed alongside the full `TestDispatchCompletion_` group. The specified lifecycle compatibility suite passed with `-race`; `make -C apps/backend build`, specification validation, specification lint, documentation-coverage preflight, and `git diff --check` also passed. The build reported only the expected missing macOS signing-tool warnings.
+
+PR review added a numbered error during uninitialized startup and a terminal-publication test that blocks mutable generation reads while checking captured identity and failure evidence. The startup regression failed before removing startup-owner deferral from numbered prompt errors. The requirement now separates terminal status ordering, immutable event identity, synchronous subscriber progress, failed-execution admission, bounded missing-completion waiting, and cancellation escalation into independently testable criteria. Generation-zero process-exit deferral and the #4149 release caveat remain intact.
+
+Backend CI exposed a race in `TestHandleAgentEvent_ErrorClaimCannotRaceReplacementPrompt`: post-unlock error logs read `execution.Status` after a replacement prompt could set it to RUNNING. The terminal publication now captures the applied status with its payload, and the regression asserts that the error outcome remains FAILED after a newer prompt begins. The deterministic publication test and 20 race-enabled repetitions of the CI-failing test pass.
+
+The complete lifecycle package also passes under `go test -race ./internal/agent/runtime/lifecycle -count=1` (130.320s) after the snapshot change.
 
 ## Risks
 

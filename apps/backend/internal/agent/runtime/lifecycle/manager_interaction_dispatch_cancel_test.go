@@ -717,6 +717,7 @@ func TestManager_CancelAgent_DispatchCompletionTransportFailureEscalates(t *test
 	require.False(t, fixture.execution.dispatchedPromptPending.Load())
 }
 
+// @covers AC-PLATFORM-PROMPT-COMPLETION-OWNERSHIP-001.11
 func TestManager_CancelAgent_DispatchCompletionTimeoutPreservesTransportFailure(t *testing.T) {
 	previousWait := cancelWaitTimeout
 	previousEscalation := cancelEscalationTimeout
