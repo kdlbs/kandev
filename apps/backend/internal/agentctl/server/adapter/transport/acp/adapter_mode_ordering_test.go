@@ -13,6 +13,19 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 )
 
+type modeLockAttemptContext struct {
+	context.Context
+	errCalls chan struct{}
+}
+
+func (c *modeLockAttemptContext) Err() error {
+	select {
+	case c.errCalls <- struct{}{}:
+	default:
+	}
+	return c.Context.Err()
+}
+
 func TestModeAndOtherConfigSnapshotsShareOrdering(t *testing.T) {
 	for _, modeFirst := range []bool{true, false} {
 		name := "effort first"
@@ -140,6 +153,102 @@ func TestModeAndOtherConfigSnapshotsShareOrdering(t *testing.T) {
 				t.Fatalf("cached model = %q, want model-a", got)
 			}
 		})
+	}
+}
+
+// @covers AC-AGENTS-PERMISSION-CONTROL-INTEGRITY-007.9
+func TestQueuedSetModeRechecksAlreadySatisfiedLegacyMode(t *testing.T) {
+	requests := make(chan acpsdk.SetSessionModeRequest, 2)
+	firstEntered := make(chan struct{})
+	releaseFirst := make(chan struct{})
+	var releaseFirstOnce sync.Once
+	releaseFirstCall := func() { releaseFirstOnce.Do(func() { close(releaseFirst) }) }
+	defer releaseFirstCall()
+	var adapter *Adapter
+	var agent *setModeTestAgent
+	var processed chan string
+	var requestCount atomic.Int32
+	adapter, agent, processed = newSetModeTestAdapter(t, func(ctx context.Context, _ acpsdk.SetSessionModeRequest) (acpsdk.SetSessionModeResponse, error) {
+		if requestCount.Add(1) == 1 {
+			close(firstEntered)
+			select {
+			case <-releaseFirst:
+			case <-ctx.Done():
+				return acpsdk.SetSessionModeResponse{}, ctx.Err()
+			}
+			if err := reportModeFromAgent(agent, "ask"); err != nil {
+				return acpsdk.SetSessionModeResponse{}, err
+			}
+			select {
+			case <-processed:
+			case <-ctx.Done():
+				return acpsdk.SetSessionModeResponse{}, ctx.Err()
+			}
+		}
+		return acpsdk.SetSessionModeResponse{}, nil
+	})
+	agent.legacyRequests = requests
+	adapter.availableModes = legacyModeInfos()
+
+	type outcome struct {
+		result streams.ModeResult
+		err    error
+	}
+	firstDone := make(chan outcome, 1)
+	go func() {
+		result, err := adapter.SetMode(context.Background(), "ask")
+		firstDone <- outcome{result: result, err: err}
+	}()
+	select {
+	case <-firstEntered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("first mode request did not enter the agent")
+	}
+
+	secondCtx := &modeLockAttemptContext{Context: context.Background(), errCalls: make(chan struct{}, 8)}
+	secondDone := make(chan outcome, 1)
+	go func() {
+		result, err := adapter.SetMode(secondCtx, "ask")
+		secondDone <- outcome{result: result, err: err}
+	}()
+	// lockModeChange checks the request context before each try-lock. Its second
+	// check can only happen after the first try-lock failed and the ticker woke
+	// the waiter, which establishes that this successor reached the held gate.
+	for range 2 {
+		select {
+		case <-secondCtx.errCalls:
+		case <-time.After(2 * time.Second):
+			t.Fatal("successor did not retry the mode gate while the first request was held")
+		}
+	}
+	if got := requestCount.Load(); got != 1 {
+		t.Fatalf("provider mode requests before releasing first call = %d, want 1", got)
+	}
+	if got := len(requests); got != 1 {
+		t.Fatalf("captured provider mode requests before release = %d, want 1", got)
+	}
+	select {
+	case got := <-secondDone:
+		t.Fatalf("successor returned before the first request released the mode gate: %+v, %v", got.result, got.err)
+	default:
+	}
+	releaseFirstCall()
+
+	for name, done := range map[string]<-chan outcome{"first": firstDone, "second": secondDone} {
+		select {
+		case got := <-done:
+			if got.err != nil || !got.result.Applied() || got.result.Effective != "ask" {
+				t.Fatalf("%s SetMode = %+v, %v; want confirmed ask", name, got.result, got.err)
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatalf("%s SetMode did not finish", name)
+		}
+	}
+	if got := requestCount.Load(); got != 1 {
+		t.Fatalf("provider mode requests = %d, want only the in-flight request", got)
+	}
+	if request := <-requests; string(request.ModeId) != "ask" {
+		t.Fatalf("provider request = %+v, want ask", request)
 	}
 }
 
@@ -465,6 +574,34 @@ func TestUnrelatedConfigResponseDoesNotClearModeTimeoutUncertainty(t *testing.T)
 	adapter.mu.RUnlock()
 	if !uncertain {
 		t.Fatal("unrelated config response cleared unresolved permission-mode uncertainty")
+	}
+}
+
+// @covers AC-AGENTS-PERMISSION-CONTROL-INTEGRITY-007.10
+func TestCorrelatedModeConfigSnapshotClearsLegacyModeUncertainty(t *testing.T) {
+	adapter, agent, _ := newSetModeTestAdapter(t, func(context.Context, acpsdk.SetSessionModeRequest) (acpsdk.SetSessionModeResponse, error) {
+		t.Fatal("advertised mode option unexpectedly used session/set_mode")
+		return acpsdk.SetSessionModeResponse{}, nil
+	})
+	adapter.availableConfigOptions = convertACPConfigOptions([]acpsdk.SessionConfigOption{groupedModeConfigOption("default")})
+	adapter.mu.Lock()
+	adapter.modeOutcomeUncertain = true
+	adapter.mu.Unlock()
+	agent.configHandler = func(_ context.Context, request acpsdk.SetSessionConfigOptionRequest) (acpsdk.SetSessionConfigOptionResponse, error) {
+		return acpsdk.SetSessionConfigOptionResponse{ConfigOptions: []acpsdk.SessionConfigOption{
+			groupedModeConfigOption(string(request.ValueId.Value)),
+		}}, nil
+	}
+
+	result, err := adapter.SetMode(context.Background(), "default")
+	if err != nil || !result.Applied() || result.Effective != "default" {
+		t.Fatalf("SetMode = %+v, %v; want correlated mode-config confirmation", result, err)
+	}
+	adapter.mu.RLock()
+	uncertain := adapter.modeOutcomeUncertain
+	adapter.mu.RUnlock()
+	if uncertain {
+		t.Fatal("correlated mode-config snapshot left the prior uncertainty unresolved")
 	}
 }
 

@@ -1,7 +1,7 @@
 ---
 id: "02-lifecycle-wire-regression"
 title: "Prove lifecycle prompt admission for confirmed legacy modes"
-status: pending
+status: done
 wave: 2
 depends_on:
   - "01-confirm-existing-legacy-mode"
@@ -31,8 +31,9 @@ adapter's result so this test reproduces the original failure before Task 01.
 
 ## In scope
 
-- Add `TestLegacyConfirmedModeLifecycle` with fresh-start and native-load cases
-  plus a different-mode negative case. Use a temporary workspace and ACP pipe
+- Add `TestLegacyConfirmedModeLifecycle` with fresh-start, native-load, and
+  context-reset cases plus different-mode and missing-report negative cases.
+  Use a temporary workspace and ACP pipe
   agent reporting Auggie's legacy-only shape, with `{}` and no notification for
   any mode mutation. The fixture advertises `default` and `ask`.
 - Connect a real `acp.Adapter` to that fixture and initialize it normally. Reuse
@@ -55,8 +56,10 @@ model fallback changes, and broader Office/provider policy changes.
 
 - Fresh `session/new` and ordinary `session/load` with matching `default` each
   admit exactly one first provider prompt and send zero mode mutation RPCs.
-- A different silent selected mode fails before prompt dispatch; a resumed
-  session missing its own mode report cannot borrow previous-session state.
+- A matching report from the replacement context-reset session admits its next
+  prompt with zero redundant mode RPCs. A different silent selected mode fails
+  before prompt dispatch; resumed and reset sessions missing their own report
+  cannot borrow previous-session state.
 - Existing winning-mode, strict Auggie mode/model, reset, and explicit recovery
   behavior passes its focused checks; fixture cleanup is race/leak clean.
 
@@ -111,4 +114,28 @@ so lifecycle package leak checks remain meaningful.
 
 ## Results
 
-Pending.
+Implemented `TestLegacyConfirmedModeLifecycle` as a real lifecycle-to-adapter
+fixture. Fresh start, native load, and reset each use the adapter's session
+report. Matching reports admit one provider prompt with no provider mode
+mutation; a silent `default -> ask` change fails before prompt dispatch. Load
+and reset cases prove that missing replacement-session mode state cannot reuse
+the prior session's cached mode. The test also checks the final selected mode
+and request ordering, drains adapter updates, closes the client and ACP pipes,
+and joins the fixture's disconnect/update/ACP goroutines.
+
+The lifecycle regression was red with the guarded shortcut disabled: fresh,
+load, and reset matching-mode cases all failed because the silent provider
+response was unconfirmed. Restoring the guard made all cases pass.
+
+Validation passed:
+
+```text
+go test -tags fts5 ./internal/agent/runtime/lifecycle -run '^TestLegacyConfirmedModeLifecycle$' -count=1
+go test -tags fts5 ./internal/agent/runtime/lifecycle -run '^(TestLegacyConfirmedModeLifecycle|TestInitializeAndPromptWithLayers_AuggieTaskRejectsUnappliedMode|TestInitializeAndPromptWithLayers_AppliesOnlyWinningModeBeforePrompt|TestInitializeAndPromptWithLayers_ReappliesModeAfterResumeBeforePrompt|TestInitializeAndPromptWithLayers_ProviderRestoredOmitsSavedStartupSettings|TestAuggieTaskStartRequiresSelectedModel)$' -count=1
+go test -tags fts5 ./internal/agent/runtime/lifecycle -run '^(TestApplySessionModeAfterResetDoesNotCacheUnconfirmedRequest|TestManager_ResetAgentContext_FailsClosedOnSessionModeRestore|TestManager_ResetAgentContext_ReappliesSessionMode)$' -count=1
+go test -tags fts5 -race ./internal/agent/runtime/lifecycle -run '^TestLegacyConfirmedModeLifecycle$' -count=1
+make -C apps/backend build
+python3 scripts/list-docs.py validate
+python3 scripts/lint-spec-files.py --all
+git diff --check
+```

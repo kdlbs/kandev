@@ -77,3 +77,54 @@ func (a *Adapter) setConfigSessionMode(ctx context.Context, request sessionModeR
 	}
 	return result, nil
 }
+
+func (a *Adapter) alreadySatisfiedLegacyMode(
+	ctx context.Context,
+	conn *acp.ClientSideConnection,
+	sessionID, modeID string,
+) (uint64, bool, error) {
+	if err := ctx.Err(); err != nil {
+		return 0, false, err
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return 0, false, err
+	}
+	if a.closed || a.acpConn != conn || a.sessionID != sessionID || a.modeSessionID != sessionID ||
+		a.currentModeID != modeID || a.modeOutcomeUncertain {
+		return 0, false, nil
+	}
+	if _, hasModeOption := modeConfigOption(a.availableConfigOptions); hasModeOption {
+		return 0, false, nil
+	}
+	if !legacyModesAdvertise(a.availableModes, modeID) {
+		return 0, false, nil
+	}
+	a.sessionSettingsGeneration++
+	return a.sessionSettingsGeneration, true, nil
+}
+
+func (a *Adapter) emitSessionModeResult(sessionID, modeID string, result streams.ModeResult, settingsGeneration uint64) {
+	a.mu.RLock()
+	if a.sessionID != sessionID {
+		a.mu.RUnlock()
+		return
+	}
+	cachedModes := append([]streams.SessionModeInfo(nil), a.availableModes...)
+	a.mu.RUnlock()
+
+	reported, requested := sessionModeEventFields(modeID, result)
+	event := AgentEvent{
+		Type:           streams.EventTypeSessionMode,
+		SessionID:      sessionID,
+		CurrentModeID:  reported,
+		AvailableModes: cachedModes,
+	}
+	if settingsGeneration == 0 {
+		settingsGeneration = a.nextSessionSettingsGeneration(sessionID)
+	}
+	event.SessionSettingsGeneration = settingsGeneration
+	event.RequestedModeID = requested
+	a.sendUpdate(event)
+}

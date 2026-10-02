@@ -255,8 +255,20 @@ For the legacy method, accept current-mode reports and mode values in
 Serialize mode changes, including changes through the generic config API.
 Reject reports from another session and observations from before the request.
 Keep bounded waiting and timeout ambiguity handling for asynchronous reports.
-A correlated settings response does not inherit ambiguity from an earlier
+A correlated mode-config response does not inherit ambiguity from an earlier
 uncorrelated legacy notification.
+
+An unconfirmed legacy operation makes mode certainty sticky for that session.
+ACP mode reports have no request ID, so a `current_mode_update` or an
+unsolicited `config_option_update` can arrive late after the operation has
+returned. Such a report may update the displayed observation, but it cannot
+clear `modeOutcomeUncertain`, even while no mode request is active. A matching
+cached value therefore remains ineligible for the already-satisfied shortcut.
+Certainty can be restored only by a correlated mode-config response that
+contains the provider's current mode, or by a session transition that clears
+the old observation and receives a mode report for the replacement session.
+Unrelated config responses and uncorrelated mode reports are not recovery
+evidence.
 
 All consumers receive the same authoritative mode. This includes mode events,
 settings snapshots, lifecycle caches, persistence, and the desktop/mobile selector.
@@ -295,7 +307,10 @@ If any condition fails, retain the existing RPC selection, observation-generatio
 check, 750 ms settle window, and uncertainty handling. In particular, an empty
 successful legacy RPC response still cannot confirm a genuine mode change. A
 late report or a cached matching value after an uncertain request must not
-activate the short path. A replacement session must establish its own report.
+activate the short path. Reports received while idle do not restore that
+session's certainty. A correlated mode-config response can restore certainty
+when it includes the actual mode value; otherwise only a replacement session's
+own mode report can do so.
 
 `NewSession`, `LoadSession`, and `ResetSession` already replace session-scoped
 mode observations. Reuse those paths. `SessionManager.applyExplicitSessionMode`
@@ -312,7 +327,11 @@ the design records the local decision rather than introducing another ADR.
 Deterministic adapter tests must assert zero provider mode RPCs and the emitted
 confirmed result. A lifecycle-to-adapter wire fixture must prove prompt admission
 for fresh and loaded matching sessions and non-admission for a different silent
-mode. Config-option clamps and timeout ambiguity remain regression controls.
+mode. Include a late mode report delivered while idle before the next request,
+and prove it does not restore the shortcut; cover the correlated mode-config
+response and replacement-session report as the evidence that can restore
+certainty. Config-option clamps and timeout ambiguity remain regression
+controls.
 
 ### Attribution
 

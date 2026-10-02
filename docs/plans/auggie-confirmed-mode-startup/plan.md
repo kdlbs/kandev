@@ -1,6 +1,6 @@
 ---
 created: 2026-10-01
-status: draft
+status: implemented
 requirements:
   - REQ-AGENTS-PERMISSION-CONTROL-INTEGRITY-002
   - REQ-AGENTS-PERMISSION-CONTROL-INTEGRITY-007
@@ -111,10 +111,11 @@ or documented recovery flow changes; no public-doc edit is planned.
 
 | Criteria | Test evidence |
 | --- | --- |
-| 007.9, 002.3 | New `TestSetModeAlreadySatisfiedLegacyMode` in `adapter_mode_set_test.go`: confirmed result and normal event, zero RPCs for matching `default`/`ask`, repeated selection |
-| 007.10, 007.4 | New `TestSetModeAlreadySatisfiedLegacyModeGuards`: unknown/current-session mismatch, closed adapter, unadvertised value, cancelled caller, preceding unconfirmed operation |
-| 007.8-007.11 | New `TestSetModeAlreadySatisfiedLegacyModeSessionTransitions`: new/load/reset replace observations, missing report cannot reuse old mode, matching fresh report qualifies |
+| 007.9, 002.3 | New `TestSetModeAlreadySatisfiedLegacyMode` in `adapter_mode_satisfied_test.go`: confirmed result and normal event, zero RPCs for matching `default`/`ask`, repeated selection |
+| 007.10, 007.4 | New `TestSetModeAlreadySatisfiedLegacyModeGuards` in `adapter_mode_satisfied_test.go`: unknown/current-session mismatch, closed adapter, unadvertised value, cancelled caller, preceding unconfirmed operation |
+| 007.8-007.11 | New `TestSetModeAlreadySatisfiedLegacyModeSessionTransitions` in `adapter_mode_satisfied_test.go`: new/load/reset replace observations, missing report cannot reuse old mode, matching fresh report qualifies |
 | 007.10-007.11 | New `TestSetModeAlreadySatisfiedLegacyModeOrdering`: a request waits behind an actual mutation or transition and rechecks state/cancellation after obtaining both gates |
+| 007.10 | `TestLateTimedOutModeReportWhileIdleDoesNotRestoreShortcutCertainty` in `adapter_mode_satisfied_test.go` proves an idle, uncorrelated report cannot clear uncertainty; `TestCorrelatedModeConfigSnapshotClearsLegacyModeUncertainty` covers the correlated recovery evidence |
 | 002.7, 007.4, 007.9 | New `TestLegacyConfirmedModeLifecycle` in `session_mode_legacy_integration_test.go`: real lifecycle -> agentctl WS client -> real ACP adapter -> ACP pipe fixture -> prompt callback |
 | Existing isolation/clamp guarantees | Existing `TestSetModeUsesAdvertisedModeConfigOptionAndAuthoritativeClamp`, `TestLateTimedOutModeReportCannotConfirmNextRequest`, `TestAwaitModeSettleDoesNotConfirmPreRequestMode`, and concurrent mode/config regressions |
 
@@ -130,16 +131,17 @@ wire/lifecycle fixture uses the real adapter, `SessionManager`, and agentctl
 client. The test server routes new/load/mode/prompt actions to the adapter;
 it must not return a handcrafted confirmed mode result. Assert exactly one
 provider prompt on matching fresh/load flows and zero on different silent modes.
-Reset is covered at the adapter transition boundary and existing lifecycle
-reset gate. No Playwright file/project is added because rendered UI is unchanged.
+Reset is covered through the real lifecycle-to-adapter fixture, including the
+replacement session's own report and missing-report rejection. No Playwright
+file/project is added because rendered UI is unchanged.
 No real model inference or developer credentials are required.
 
 ## Work orders
 
-- [ ] [Task 01: Confirm already satisfied legacy modes](task-01-confirm-existing-legacy-mode.md) (`pending`)
-- [ ] [Task 02: Prove lifecycle prompt admission](task-02-lifecycle-wire-regression.md) (`pending`, depends on 01)
+- [x] [Task 01: Confirm already satisfied legacy modes](task-01-confirm-existing-legacy-mode.md) (`done`)
+- [x] [Task 02: Prove lifecycle prompt admission](task-02-lifecycle-wire-regression.md) (`done`, depends on 01)
 
-Execute sequentially. Implementation and tests require a later explicit request.
+Execute sequentially. Both work orders are complete.
 
 ## Related delivery packages
 
@@ -171,15 +173,38 @@ Design-package checks passed on October 1, 2026:
 - `git status --short` confirms the two existing spec edits and the untracked
   package directory. Everything remains unstaged and uncommitted.
 
-Implementation commands and red/green results are pending, to be recorded in
-each work order after an explicit implementation request. No production code or
-permanent tests were changed during planning.
+## Implementation results
 
-Publication checks on main revision `994807230d7a03385dc80b001d8a2fd6f8adb4f3`:
+Both work orders are complete. Task 01 adds a session-scoped uncertainty rule:
+an uncorrelated legacy-mode report cannot restore certainty after an
+unconfirmed operation, including when the report arrives while idle. A
+correlated mode-config response or a fresh report from a replacement session
+can restore certainty. Task 02 proves prompt admission through the lifecycle,
+agentctl WebSocket client, production ACP adapter, and ACP pipe fixture,
+including reset replacement and missing-report behavior.
+
+The lifecycle fixture was red with the shortcut disabled for fresh start,
+native load, and context reset, and green after restoration. Work-order checks
+passed, including the adapter package suite and race regressions recorded in
+Task 01, the lifecycle and reset matrices, the lifecycle fixture under `-race`,
+`make -C apps/backend build`, the docs catalog and specification lint, and
+`git diff --check`.
+
+Code-review follow-up moved the new satisfied-mode and idle late-report tests
+to `adapter_mode_satisfied_test.go`; the touched adapter test files are 762,
+299, and 671 physical lines, below revive's 800-line limit. The queued-mode
+regression now waits for a signaling context to prove that the successor's
+mode-gate try-lock failed while the first operation was held, asserts no early
+result or second RPC, then verifies both results and one provider mutation.
+The regression failed as expected under a temporary overlay that cached mode
+state before the gate; the overlay was removed.
+The full ACP adapter suite and race target passed after these test changes, and
+the queued-mode regression passed 20 consecutive runs.
+
+Planning-time publication checks on main revision `994807230d7a03385dc80b001d8a2fd6f8adb4f3`:
 the package applies cleanly; the catalog validates 339 decisions and 1283
 specifications; specification lint, all 36 linter tests, package coverage
-preflight, and the normal pre-commit and commit-message checks pass. No
-implementation or provider inference was run for this documentation-only draft.
+preflight, and the normal pre-commit and commit-message checks passed.
 
 ## Risks
 

@@ -1,7 +1,7 @@
 ---
 id: "01-confirm-existing-legacy-mode"
 title: "Confirm already satisfied legacy modes"
-status: pending
+status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
@@ -36,7 +36,11 @@ responses, and uncertain outcomes on their existing strict paths.
 - Cover repeated selections, new/load/reset, stale and missing state, closed
   adapter, cancellation, and no-op requests queued behind another operation.
 - Assert that a preceding unconfirmed mutation disables the shortcut even when
-  the old cached mode matches. Keep all existing clamp/config/late-report tests.
+  the old cached mode matches, including when its uncorrelated late report
+  arrives while idle before the successor request. A correlated mode-config
+  response or a fresh report after a session transition may restore certainty;
+  unrelated config responses may not. Keep all existing clamp/config/late-report
+  tests.
 
 ## Out of scope
 
@@ -49,7 +53,9 @@ acknowledgment, changes to `awaitModeSettle`, settings writes, and frontend work
   normal confirmed event with zero provider mode RPCs; fresh transition state
   can qualify, while stale state cannot.
 - Unknown, unavailable, cancelled, closed, or uncertain state cannot confirm by
-  shortcut. Genuine mode changes and config-option clamps retain existing rules.
+  shortcut. An uncorrelated late report while idle cannot clear uncertainty; a
+  correlated mode-config snapshot and a replacement session's own report can.
+  Genuine mode changes and config-option clamps retain existing rules.
 - All existing mode/config serialization, timeout, cancellation, and session
   isolation regressions pass, including race checks.
 
@@ -61,7 +67,7 @@ implementation, then run these exact commands after the correction:
 ```bash
 (cd apps/backend && go test -tags fts5 ./internal/agentctl/server/adapter/transport/acp -run '^TestSetModeAlreadySatisfiedLegacyMode' -count=1)
 (cd apps/backend && go test -tags fts5 ./internal/agentctl/server/adapter/transport/acp -count=1)
-(cd apps/backend && go test -tags fts5 -race ./internal/agentctl/server/adapter/transport/acp -run '^(TestSetModeAlreadySatisfiedLegacyMode.*|TestConcurrentSetModeRequestsCannotShareAReport|TestLateTimedOutModeReportCannotConfirmNextRequest|TestModeAndOtherConfigSnapshotsShareOrdering)$' -count=1)
+(cd apps/backend && go test -tags fts5 -race ./internal/agentctl/server/adapter/transport/acp -run '^(TestSetModeAlreadySatisfiedLegacyMode.*|TestConcurrentSetModeRequestsCannotShareAReport|TestLateTimedOutModeReportCannotConfirmNextRequest|TestLateTimedOutModeReportWhileIdleDoesNotRestoreShortcutCertainty|TestQueuedSetModeRechecksAlreadySatisfiedLegacyMode|TestCorrelatedModeConfigSnapshotClearsLegacyModeUncertainty|TestUnrelatedConfigResponseDoesNotClearModeTimeoutUncertainty|TestModeAndOtherConfigSnapshotsShareOrdering)$' -count=1)
 git diff --check
 ```
 
@@ -69,7 +75,8 @@ git diff --check
 
 - `apps/backend/internal/agentctl/server/adapter/transport/acp/adapter_session.go`
 - `apps/backend/internal/agentctl/server/adapter/transport/acp/adapter_mode_state.go`
-- `apps/backend/internal/agentctl/server/adapter/transport/acp/adapter_mode_set_test.go`
+- `apps/backend/internal/agentctl/server/adapter/transport/acp/adapter_mode_satisfied_test.go`
+- `apps/backend/internal/agentctl/server/adapter/transport/acp/adapter_mode_set_test.go` (existing config-mode regressions)
 - `apps/backend/internal/agentctl/server/adapter/transport/acp/adapter_mode_ordering_test.go`
 
 ## Dependencies
@@ -96,4 +103,38 @@ or accepting a request value as an observation can defeat strict startup.
 
 ## Results
 
-Pending.
+Implemented the guarded legacy-mode shortcut after both existing gates and
+capability validation. The check reads session identity, reported value, and
+uncertainty under one lock; a satisfied result reserves its settings generation
+at that same boundary and uses the normal mode event. Closed adapters return an
+error before a provider request. Uncorrelated mode reports no longer clear a
+timed-out operation's session-scoped uncertainty. A correlated mode-config
+snapshot and a replacement session's fresh report remain the only recovery
+evidence.
+
+The idle late-report regression failed before the state-handling change with
+`uncorrelated idle report cleared the timed-out operation's uncertainty` and
+passed afterward. Already-satisfied coverage includes `default`, `ask`, repeat
+selection, result/event output, and zero provider RPCs. Guards cover unknown,
+stale, mismatched, uncertain, canceled, and closed state. Transition coverage
+includes new, load, reset, and a missing replacement report. The queued-operation
+regression verifies that the successor rechecks mode after the preceding mode
+request releases its gate. The queued test waits for the successor to perform a
+failed gate attempt through a signaling context, then asserts no early result
+or second provider RPC before releasing the first operation. It fails as
+expected under a temporary Go overlay that caches legacy-mode state before the
+gate: the successor returns unconfirmed instead of using the new report. The
+overlay was deleted after the run. New satisfied-mode and idle late-report
+cases live in `adapter_mode_satisfied_test.go` to keep the
+focused ACP test files below the backend file-length limit. Their physical line
+counts are 762 (`adapter_mode_set_test.go`), 299 (`adapter_mode_satisfied_test.go`),
+and 671 (`adapter_mode_ordering_test.go`), all below revive's 800-line limit.
+
+Validation passed:
+
+```text
+go test -tags fts5 ./internal/agentctl/server/adapter/transport/acp -run '^TestSetModeAlreadySatisfiedLegacyMode' -count=1
+go test -tags fts5 ./internal/agentctl/server/adapter/transport/acp -count=1
+go test -tags fts5 -race ./internal/agentctl/server/adapter/transport/acp -run '^(TestSetModeAlreadySatisfiedLegacyMode.*|TestConcurrentSetModeRequestsCannotShareAReport|TestLateTimedOutModeReportCannotConfirmNextRequest|TestLateTimedOutModeReportWhileIdleDoesNotRestoreShortcutCertainty|TestQueuedSetModeRechecksAlreadySatisfiedLegacyMode|TestCorrelatedModeConfigSnapshotClearsLegacyModeUncertainty|TestUnrelatedConfigResponseDoesNotClearModeTimeoutUncertainty|TestModeAndOtherConfigSnapshotsShareOrdering)$' -count=1
+go test -tags fts5 ./internal/agentctl/server/adapter/transport/acp -run '^TestQueuedSetModeRechecksAlreadySatisfiedLegacyMode$' -count=20
+```

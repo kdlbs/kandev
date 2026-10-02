@@ -1097,6 +1097,7 @@ func (a *Adapter) setSessionMode(ctx context.Context, modeID, requestedConfigID 
 	a.mu.RLock()
 	conn := a.acpConn
 	sessionID := a.sessionID
+	closed := a.closed
 	availableModes := append([]streams.SessionModeInfo(nil), a.availableModes...)
 	cachedModels := append([]modelInfo(nil), a.availableModels...)
 	cachedConfig := cloneConfigOptions(a.availableConfigOptions)
@@ -1105,14 +1106,31 @@ func (a *Adapter) setSessionMode(ctx context.Context, modeID, requestedConfigID 
 	if conn == nil {
 		return streams.ModeResult{Requested: modeID}, fmt.Errorf("adapter not initialized")
 	}
+	if closed {
+		return streams.ModeResult{Requested: modeID}, errors.New("adapter is closed")
+	}
 	if sessionID == "" {
 		return streams.ModeResult{Requested: modeID}, fmt.Errorf("no active session: call NewSession before SetMode")
 	}
-	generation := a.beginConfigChange()
 	modeOption, hasModeOption, err := selectSessionModeOption(cachedConfig, availableModes, modeID, requestedConfigID)
 	if err != nil {
 		return streams.ModeResult{Requested: modeID}, err
 	}
+	if err := ctx.Err(); err != nil {
+		return streams.ModeResult{Requested: modeID}, err
+	}
+	if !hasModeOption {
+		settingsGeneration, satisfied, err := a.alreadySatisfiedLegacyMode(ctx, conn, sessionID, modeID)
+		if err != nil {
+			return streams.ModeResult{Requested: modeID}, err
+		}
+		if satisfied {
+			result := streams.ModeResult{Requested: modeID, Effective: modeID, Confirmed: true}
+			a.emitSessionModeResult(sessionID, modeID, result, settingsGeneration)
+			return result, nil
+		}
+	}
+	generation := a.beginConfigChange()
 	baseline, uncertain := a.beginModeChange()
 	unconfirmed := true
 	defer func() { a.endModeChange(unconfirmed) }()
@@ -1134,25 +1152,7 @@ func (a *Adapter) setSessionMode(ctx context.Context, modeID, requestedConfigID 
 	if result.Confirmed {
 		unconfirmed = false
 	}
-
-	a.mu.RLock()
-	if a.sessionID != sessionID {
-		a.mu.RUnlock()
-		return result, nil
-	}
-	cachedModes := a.availableModes
-	a.mu.RUnlock()
-
-	reported, requested := sessionModeEventFields(modeID, result)
-	event := AgentEvent{
-		Type:                      streams.EventTypeSessionMode,
-		SessionID:                 sessionID,
-		CurrentModeID:             reported,
-		AvailableModes:            cachedModes,
-		SessionSettingsGeneration: a.nextSessionSettingsGeneration(sessionID),
-	}
-	event.RequestedModeID = requested
-	a.sendUpdate(event)
+	a.emitSessionModeResult(sessionID, modeID, result, 0)
 	return result, nil
 }
 
