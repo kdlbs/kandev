@@ -55,7 +55,7 @@ Add active-error/no-auto-resume and explicit retry identity assertions.
 From repo root, run red before implementation and green after:
 
 ```bash
-(cd apps/backend && go test ./internal/task/handlers -run 'TestQuickChatFailureRetention|TestHTTPListQuickChatSessions' -count=1)
+(cd apps/backend && go test -trimpath -tags fts5 ./internal/task/handlers -run 'TestQuickChatFailureRetention|TestHTTPListQuickChatSessions' -count=1)
 (cd apps/web && pnpm exec vitest run components/quick-chat/use-quick-chat-modal.test.ts components/quick-chat/quick-chat-setup.test.tsx components/quick-chat/quick-chat-session-view.test.tsx lib/state/slices/ui/quick-chat-sync.test.ts hooks/use-quick-chat-resync.test.ts lib/ws/handlers/tasks-quick-chat.test.ts)
 (cd apps/web && pnpm e2e:run --project chromium tests/chat/setup-recovery.spec.ts)
 (cd apps/web && pnpm e2e:run --project mobile-chrome tests/chat/mobile-setup-recovery.spec.ts)

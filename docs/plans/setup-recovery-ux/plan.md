@@ -321,5 +321,8 @@ Final backend command, from `apps/backend`:
 GOCACHE=/tmp/kandev-setup-review-go-cache go test -trimpath -tags fts5 ./internal/orchestrator ./internal/orchestrator/executor ./internal/task/handlers -run 'TestQuickChatLaunch|TestHandledLaunchFailure|TestHandleSessionLaunchFailure|TestTransitionLaunchFailure|TestQuickChatFailureRetention|TestHTTPListQuickChatSessions' -count=1
 ```
 
-Updated rendered verification and remote exact-head CI/review remain pending
-until the remediation commit is published and checked.
+Rendered remediation verification passed: five desktop and three phone regression
+scenarios, plus refreshed warning screenshots for both viewports. The new status
+live region required narrowing existing authentication feedback assertions; the
+corrected desktop suite passed. The screenshots were inspected and compressed.
+Remote exact-head CI/review remains tracked in PR #4168 after publication.
