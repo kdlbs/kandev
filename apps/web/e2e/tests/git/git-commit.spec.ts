@@ -1,5 +1,6 @@
 import { test, expect } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
+import { waitForSessionDone, waitForWorkspacePath } from "../../helpers/session";
 import { KanbanPage } from "../../pages/kanban-page";
 import { SessionPage } from "../../pages/session-page";
 import type { Page } from "@playwright/test";
@@ -103,12 +104,21 @@ test.describe("Git commit body", () => {
   }) => {
     const profile = await createStandardProfile(apiClient, "Git Commit Body Profile");
 
-    await apiClient.createTaskWithAgent(seedData.workspaceId, "Git Commit Body Test", profile.id, {
-      description: "/e2e:simple-message",
-      workflow_id: seedData.workflowId,
-      workflow_step_id: seedData.startStepId,
-      repository_ids: [seedData.repositoryId],
-    });
+    const task = await apiClient.createTaskWithAgent(
+      seedData.workspaceId,
+      "Git Commit Body Test",
+      profile.id,
+      {
+        description: "/e2e:simple-message",
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+        repository_ids: [seedData.repositoryId],
+      },
+    );
+
+    expect(task.session_id).toBeTruthy();
+    await waitForSessionDone(apiClient, task.id, task.session_id!, "Commit body fixture settled");
+    const repoDir = await waitForWorkspacePath(apiClient, task.id, task.session_id!);
 
     const session = await openTaskSession(testPage, "Git Commit Body Test");
 
@@ -116,7 +126,6 @@ test.describe("Git commit body", () => {
     await session.waitForChatIdle({ timeout: 30_000 });
 
     // Set up git helper
-    const repoDir = path.join(backend.tmpDir, "repos", "e2e-repo");
     const gitEnv = {
       ...process.env,
       HOME: backend.tmpDir,

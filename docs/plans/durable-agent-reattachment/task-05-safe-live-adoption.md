@@ -222,3 +222,67 @@ GOCACHE=/tmp/kandev-go-build-preserved-20261001 pnpm e2e:run --host --no-build -
 ```
 
 Both commands passed 3/3. Catalog validation also passed after the result updates.
+
+
+### Additional current-head fixture readiness, 2026-10-02
+
+Hosted head `21392d854d8` exposed four fixture readiness failures across browser
+shards 3, 9, and 12. Strict flaky-test enforcement remains enabled. The workflow
+picker fixture now uses the deterministic response used by its desktop counterpart,
+preserving all primary, parked-session, selection, touch-target, and overflow checks.
+The profile-warning fixture waits for the host catalog probe to complete before
+loading the page. The commit-body fixture waits for the exact session to settle
+and modifies its persisted workspace path. The nested mobile Review fixture waits
+for root and both nested README sections before asserting their repository labels,
+preserving the original diff, sticky-header, and viewport checks.
+
+The pre-change desktop probe/commit cases and mobile nested case passed locally;
+the hosted failures provide red evidence. The mobile workflow baseline passed
+three zero-retry repetitions in 31.6–50.5 seconds. All 72 existing commits then
+rebased without conflicts onto main `0ec0538aa038f2e8b8617fb4f5be6128f0cedbac`.
+The updated mobile workflow and nested Review each passed three zero-retry
+repetitions (six tests total). Targeted zero-warning ESLint and whitespace checks
+passed. Exact commands:
+
+```bash
+cd apps/web
+GOCACHE=/tmp/kandev-go-build-preserved-20261001 pnpm e2e:run --host --no-build --project mobile-chrome tests/review/mobile-submodule-review.spec.ts tests/workflow/mobile-workflow-agent-switch.spec.ts -- --repeat-each=3 --retries=0
+pnpm exec eslint --max-warnings 0 e2e/tests/git/git-commit.spec.ts e2e/tests/settings/pr3473-qa-visual-capture.spec.ts e2e/tests/workflow/mobile-workflow-agent-switch.spec.ts e2e/tests/review/mobile-submodule-review.spec.ts
+```
+
+The first desktop repetition run passed five tests and failed once during backend
+fixture startup, before test assertions. A diagnostic rerun and final pushed-head
+CI outcomes are recorded below or in the task plan.
+
+The diagnostic desktop rerun passed all six tests (three repetitions of each
+case), zero retries, in 50.5 seconds. The earlier startup failure did not recur;
+its cause remains unconfirmed. This rerun enabled only existing fixture logging:
+
+```bash
+cd apps/web
+E2E_DEBUG=1 GOCACHE=/tmp/kandev-go-build-preserved-20261001 pnpm e2e:run --host --no-build --project chromium tests/settings/pr3473-qa-visual-capture.spec.ts tests/git/git-commit.spec.ts -- --grep 'captures desktop warning|commit dialog includes body' --repeat-each=3 --retries=0
+```
+
+Hosted shard 10 also reported a native conversation-fork setup race: idle controls
+were visible before the browser store had an assistant message with a turn ID.
+The shared desktop/mobile helper now waits for the exact backend session to settle
+and for that session's assistant turn to hydrate before applying fixture-only native
+metadata. The real fork confirmation, selected-session, geometry, and overflow
+assertions remain unchanged. The pre-change mobile case passed locally; the hosted
+failure supplies red evidence. The updated desktop case passed three zero-retry
+repetitions in 22.3 seconds. Targeted ESLint passed.
+
+```bash
+cd apps/web
+GOCACHE=/tmp/kandev-go-build-preserved-20261001 pnpm e2e:run --host --no-build --project chromium tests/chat/codex-app-server.spec.ts -- --repeat-each=3 --retries=0
+```
+
+The updated mobile fork case also passed three zero-retry repetitions in
+22.9 seconds:
+
+```bash
+cd apps/web
+GOCACHE=/tmp/kandev-go-build-preserved-20261001 pnpm e2e:run --host --no-build --project mobile-chrome tests/chat/mobile-codex-app-server.spec.ts -- --repeat-each=3 --retries=0
+```
+
+Catalog validation and full specification lint passed after these records.
