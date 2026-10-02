@@ -46,7 +46,19 @@ export async function compactRuntimeSettings(
   } else {
     expect((await action.boundingBox())!.height).toBeCloseTo(28, 0);
   }
-  await summary.scrollIntoViewIfNeeded();
+  if (capture?.capturing) {
+    await summary.evaluate((element) => {
+      element.scrollIntoView({ block: "start" });
+      for (let ancestor = element.parentElement; ancestor; ancestor = ancestor.parentElement) {
+        if (["auto", "scroll"].includes(getComputedStyle(ancestor).overflowY)) {
+          ancestor.scrollBy({ top: -64 });
+          break;
+        }
+      }
+    });
+    await expect(summary).toBeInViewport();
+    await expect(action).toBeInViewport();
+  }
   await capture?.screenshot("runtime-settings-expanded", {
     caption:
       "Compact runtime rows share help and keep policy controls and update guidance available.",
