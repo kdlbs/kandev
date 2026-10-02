@@ -1720,7 +1720,15 @@ func (r *Repository) UpdateTaskSessionWorkspaceBindingIfCurrentAttempt(
 		query += " AND " + startAttemptIDPredicate(r.db.DriverName())
 		args = append(args, attemptID)
 	}
-	result, err := r.db.ExecContext(ctx, r.db.Rebind(query), args...)
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return false, time.Time{}, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := r.ensureTaskSessionEnvironmentAvailableTx(ctx, tx, session.ID, session.TaskEnvironmentID); err != nil {
+		return false, time.Time{}, err
+	}
+	result, err := tx.ExecContext(ctx, r.db.Rebind(query), args...)
 	if err != nil {
 		return false, time.Time{}, err
 	}
@@ -1730,6 +1738,9 @@ func (r *Repository) UpdateTaskSessionWorkspaceBindingIfCurrentAttempt(
 	}
 	if rows != 1 {
 		return false, time.Time{}, nil
+	}
+	if err := tx.Commit(); err != nil {
+		return false, time.Time{}, err
 	}
 	session.UpdatedAt = updatedAt
 	return true, updatedAt, nil

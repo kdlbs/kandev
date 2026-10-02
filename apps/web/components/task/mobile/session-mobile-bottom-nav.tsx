@@ -266,6 +266,7 @@ function MobileNavButton({
         mobileNavColorClass(item, activePanel, issueDetails !== null),
       )}
       aria-label={issueDetails?.description}
+      data-testid={item.panel === "changes" ? "mobile-session-nav-changes" : undefined}
       data-connection-severity={item.connectionIssueSeverity}
     >
       <span className="relative">

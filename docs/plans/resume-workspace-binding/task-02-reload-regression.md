@@ -111,3 +111,18 @@ Passed:
 
 The mobile fixture disables automatic resume on open so the regression invokes
 the manual recovery action explicitly, then restores the setting during cleanup.
+
+### PR review follow-up (2026-10-02)
+
+The fixture now removes its dirty file, resets its disposable task, and restores
+the auto-resume setting if any seeding step fails. The reload helper waits for
+the authoritative backend `FAILED` state before reloading and uses Playwright's
+default enabled-state timeout. Stable test IDs identify the Git-status Retry
+control and phone Changes navigation button.
+
+Passed after these changes:
+
+- Desktop Chromium reload regression: 1 test passed.
+- Phone `mobile-chrome` reload regression: 1 test passed.
+- Web typecheck, changed-file ESLint, Prettier, and production Vite build through
+  the managed E2E runs.

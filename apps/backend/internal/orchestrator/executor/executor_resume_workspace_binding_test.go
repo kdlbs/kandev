@@ -10,6 +10,23 @@ import (
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
+func TestMockRepositoryMissingWorkspaceBindingSessionReturnsNoChange(t *testing.T) {
+	repo := newMockRepository()
+	changed, updatedAt, err := repo.UpdateTaskSessionWorkspaceBindingIfCurrentAttempt(
+		context.Background(), &models.TaskSession{ID: "missing", TaskID: "task"},
+		models.TaskSessionStateStarting, "attempt",
+	)
+	if err != nil {
+		t.Fatalf("UpdateTaskSessionWorkspaceBindingIfCurrentAttempt: %v", err)
+	}
+	if changed {
+		t.Fatal("changed = true, want false for a missing session")
+	}
+	if !updatedAt.IsZero() {
+		t.Fatalf("updatedAt = %s, want zero time for a missing session", updatedAt)
+	}
+}
+
 func TestResumeSessionPersistsMaterializedWorkspaceBinding(t *testing.T) {
 	const (
 		workspacePath = "/tasks/task-1/materialized"

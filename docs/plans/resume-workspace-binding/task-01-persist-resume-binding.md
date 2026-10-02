@@ -121,3 +121,29 @@ Passed:
 The environment-gated PostgreSQL tests were invoked but skipped because no
 owned test instance or `KANDEV_TEST_POSTGRES_DSN` was available. PostgreSQL
 behavior therefore remains unexecuted locally. No schema change was required.
+
+### PR review follow-up (2026-10-02)
+
+The final workspace-binding write now runs in a transaction and checks both
+the current and requested environment against an active recovery claim before
+updating. SQLite coverage proves an unclaimed write is rejected with
+`ErrBusy`, while the matching admitted claim can complete the write. A
+PostgreSQL behavior test uses an isolated database and raw read-back checks for
+the rejected and admitted writes, state, error, binding, and unrelated
+metadata.
+
+SQLite and PostgreSQL rollback coverage now also exercises an originally
+absent Git credential snapshot and verifies rollback removes the key while
+preserving the startup attempt and unrelated metadata. The executor fake now
+matches the repository's no-row result for a missing session.
+
+Passed after these changes:
+
+- Full executor and SQLite race suites.
+- Full orchestrator race suite.
+- Backend build, SQL guard, and persistence store conformance race suite.
+- Focused SQLite tests for recovery-claim admission and absent-snapshot removal.
+
+The PostgreSQL behavior tests compile and are runnable, but were skipped because
+`KANDEV_TEST_POSTGRES_DSN` is not configured in this environment. CI runs them
+when its PostgreSQL test service is available.

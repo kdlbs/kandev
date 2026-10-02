@@ -564,7 +564,7 @@ func (m *mockRepository) UpdateTaskSessionWorkspaceBindingIfCurrentAttempt(
 	defer m.mu.Unlock()
 	current, ok := m.sessions[session.ID]
 	if !ok {
-		return false, time.Time{}, models.ErrTaskSessionNotFound
+		return false, time.Time{}, nil
 	}
 	if current.TaskID != session.TaskID || current.State != expected {
 		return false, time.Time{}, nil

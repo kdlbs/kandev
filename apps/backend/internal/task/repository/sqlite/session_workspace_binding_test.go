@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/recoveryclaim"
 	"github.com/kandev/kandev/internal/testutil"
 	"github.com/stretchr/testify/require"
 )
@@ -171,6 +172,123 @@ func TestPostgresUpdateTaskSessionWorkspaceBindingIfCurrentAttempt(t *testing.T)
 	}
 }
 
+func TestUpdateTaskSessionWorkspaceBindingChecksRecoveryClaim(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+	const (
+		taskID        = "task-workspace-binding-recovery-claim"
+		environmentID = "environment-workspace-binding-recovery-claim"
+		sessionID     = "session-workspace-binding-recovery-claim"
+	)
+	seedRecoveryClaimEnvironment(t, repo, taskID, environmentID)
+	require.NoError(t, repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID: sessionID, TaskID: taskID, TaskEnvironmentID: environmentID,
+		State: models.TaskSessionStateCreated, ErrorMessage: "preserve this error",
+		Metadata: map[string]interface{}{"retained": "value"},
+	}))
+	claim, err := repo.AcquireTaskEnvironmentRecoveryClaim(ctx, recoveryClaimRequest(
+		environmentID, taskID, sessionID, "operation-workspace-binding-recovery-claim", 1,
+	))
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, repo.ReleaseTaskEnvironmentRecoveryClaim(ctx, claim)) })
+
+	update := &models.TaskSession{
+		ID: sessionID, TaskID: taskID,
+		TaskEnvironmentID: environmentID,
+		WorkspacePath:     "/tasks/recovery-claim-workspace",
+	}
+	changed, _, err := repo.UpdateTaskSessionWorkspaceBindingIfCurrentAttempt(
+		ctx, update, models.TaskSessionStateCreated, "",
+	)
+	require.ErrorIs(t, err, recoveryclaim.ErrBusy)
+	require.False(t, changed)
+	assertRawWorkspaceBinding(t, repo, ctx, sessionID, environmentID, "")
+
+	claimedContext := recoveryclaim.WithClaim(ctx, claim)
+	changed, _, err = repo.UpdateTaskSessionWorkspaceBindingIfCurrentAttempt(
+		claimedContext, update, models.TaskSessionStateCreated, "",
+	)
+	require.NoError(t, err)
+	require.True(t, changed)
+	assertRawWorkspaceBinding(t, repo, ctx, sessionID, environmentID, "/tasks/recovery-claim-workspace")
+	stored, err := repo.GetTaskSession(ctx, sessionID)
+	require.NoError(t, err)
+	require.Equal(t, "value", stored.Metadata["retained"])
+}
+
+func TestPostgresUpdateTaskSessionWorkspaceBindingChecksRecoveryClaim(t *testing.T) {
+	db := testutil.OpenIsolatedPostgres(t, testutil.PostgresDSNFromEnv(t))
+	repo, err := NewWithDB(db, db, nil)
+	require.NoError(t, err)
+	ctx := context.Background()
+	const (
+		taskID        = "task-workspace-binding-recovery-claim-postgres"
+		environmentID = "environment-workspace-binding-recovery-claim-postgres"
+		sessionID     = "session-workspace-binding-recovery-claim-postgres"
+	)
+	seedRecoveryClaimEnvironment(t, repo, taskID, environmentID)
+	require.NoError(t, repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID: sessionID, TaskID: taskID, TaskEnvironmentID: environmentID,
+		State: models.TaskSessionStateCreated, ErrorMessage: "preserve this error",
+		Metadata: map[string]interface{}{"retained": "value"},
+	}))
+	claim, err := repo.AcquireTaskEnvironmentRecoveryClaim(ctx, recoveryClaimRequest(
+		environmentID, taskID, sessionID, "operation-workspace-binding-recovery-claim-postgres", 1,
+	))
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, repo.ReleaseTaskEnvironmentRecoveryClaim(ctx, claim)) })
+
+	update := &models.TaskSession{
+		ID: sessionID, TaskID: taskID,
+		TaskEnvironmentID: environmentID,
+		WorkspacePath:     "/tasks/recovery-claim-workspace-postgres",
+	}
+	changed, _, err := repo.UpdateTaskSessionWorkspaceBindingIfCurrentAttempt(
+		ctx, update, models.TaskSessionStateCreated, "",
+	)
+	require.ErrorIs(t, err, recoveryclaim.ErrBusy)
+	require.False(t, changed)
+	var state, message, environmentIDRead, workspacePathRead string
+	require.NoError(t, repo.db.QueryRowContext(ctx, repo.db.Rebind(`
+		SELECT state, error_message, task_environment_id, workspace_path FROM task_sessions WHERE id = ?
+	`), sessionID).Scan(&state, &message, &environmentIDRead, &workspacePathRead))
+	require.Equal(t, string(models.TaskSessionStateCreated), state)
+	require.Equal(t, "preserve this error", message)
+	require.Equal(t, environmentID, environmentIDRead)
+	require.Empty(t, workspacePathRead)
+
+	claimedContext := recoveryclaim.WithClaim(ctx, claim)
+	changed, _, err = repo.UpdateTaskSessionWorkspaceBindingIfCurrentAttempt(
+		claimedContext, update, models.TaskSessionStateCreated, "",
+	)
+	require.NoError(t, err)
+	require.True(t, changed)
+	rawMetadata := ""
+	require.NoError(t, repo.db.QueryRowContext(ctx, repo.db.Rebind(`
+		SELECT task_environment_id, workspace_path, metadata FROM task_sessions WHERE id = ?
+	`), sessionID).Scan(&environmentIDRead, &workspacePathRead, &rawMetadata))
+	require.Equal(t, environmentID, environmentIDRead)
+	require.Equal(t, update.WorkspacePath, workspacePathRead)
+	var metadata map[string]interface{}
+	require.NoError(t, json.Unmarshal([]byte(rawMetadata), &metadata))
+	require.Equal(t, "value", metadata["retained"])
+}
+
+func assertRawWorkspaceBinding(
+	t *testing.T,
+	repo *Repository,
+	ctx context.Context,
+	sessionID, expectedEnvironmentID, expectedWorkspacePath string,
+) {
+	t.Helper()
+	var environmentID, workspacePath string
+	require.NoError(t, repo.db.QueryRowContext(ctx, repo.db.Rebind(`
+		SELECT task_environment_id, workspace_path FROM task_sessions WHERE id = ?
+	`), sessionID).Scan(&environmentID, &workspacePath))
+	require.Equal(t, expectedEnvironmentID, environmentID)
+	require.Equal(t, expectedWorkspacePath, workspacePath)
+}
+
 type postgresWorkspaceBindingCase struct {
 	name          string
 	state         models.TaskSessionState
@@ -246,8 +364,9 @@ func TestPostgresUpdateTaskSessionResumeStateIfCurrentAttempt(t *testing.T) {
 	ctx := context.Background()
 	const taskID = "task-resume-rollback-postgres"
 	seedPostgresTask(t, repo, taskID)
-	assertPostgresResumeRollback(t, repo, ctx, taskID, "session-resume-rollback-postgres", "attempt-rollback", true)
-	assertPostgresResumeRollback(t, repo, ctx, taskID, "session-resume-rollback-successor-postgres", "attempt-successor", false)
+	assertPostgresResumeRollback(t, repo, ctx, taskID, "session-resume-rollback-postgres", "attempt-rollback", true, true)
+	assertPostgresResumeRollback(t, repo, ctx, taskID, "session-resume-rollback-successor-postgres", "attempt-successor", false, true)
+	assertPostgresResumeRollback(t, repo, ctx, taskID, "session-resume-rollback-absent-postgres", "attempt-rollback", true, false)
 }
 
 func assertPostgresResumeRollback(
@@ -255,30 +374,34 @@ func assertPostgresResumeRollback(
 	repo *Repository,
 	ctx context.Context,
 	taskID, sessionID, storedAttempt string,
-	wantChanged bool,
+	wantChanged, initialCredentialSnapshotPresent bool,
 ) {
 	t.Helper()
 	message, source := "old error", "current"
 	if !wantChanged {
 		message, source = "successor error", "successor"
 	}
+	metadata := map[string]interface{}{
+		models.SessionMetaKeyAgentStartAttemptID: storedAttempt,
+		"retained":                               "value",
+	}
+	if initialCredentialSnapshotPresent {
+		metadata[models.SessionMetaKeyGitCredentialSnapshot] = map[string]interface{}{"source": source}
+	}
 	require.NoError(t, repo.CreateTaskSession(ctx, &models.TaskSession{
 		ID: sessionID, TaskID: taskID, State: models.TaskSessionStateStarting,
-		ErrorMessage: message,
-		Metadata: map[string]interface{}{
-			models.SessionMetaKeyAgentStartAttemptID:   storedAttempt,
-			models.SessionMetaKeyGitCredentialSnapshot: map[string]interface{}{"source": source},
-			"retained": "value",
-		},
+		ErrorMessage: message, Metadata: metadata,
 	}))
 	changed, _, err := repo.UpdateTaskSessionResumeStateIfCurrentAttempt(
 		ctx, taskID, sessionID, "attempt-rollback",
 		models.TaskSessionStateStarting, models.TaskSessionStateFailed,
-		"resume failed", true, true, true, map[string]interface{}{"source": "previous", "transport": "profile"},
+		"resume failed", true, true, initialCredentialSnapshotPresent,
+		map[string]interface{}{"source": "previous", "transport": "profile"},
 	)
 	require.NoError(t, err)
 	require.Equal(t, wantChanged, changed)
-	assertPostgresResumeRollbackReadback(t, repo, ctx, sessionID, storedAttempt, message, source, wantChanged)
+	assertPostgresResumeRollbackReadback(t, repo, ctx, sessionID, storedAttempt, message, source,
+		wantChanged, initialCredentialSnapshotPresent)
 }
 
 func assertPostgresResumeRollbackReadback(
@@ -286,7 +409,7 @@ func assertPostgresResumeRollbackReadback(
 	repo *Repository,
 	ctx context.Context,
 	sessionID, storedAttempt, expectedMessage, expectedCredentialSource string,
-	wantChanged bool,
+	wantChanged, initialCredentialSnapshotPresent bool,
 ) {
 	t.Helper()
 	var state, message, rawMetadata string
@@ -301,13 +424,21 @@ func assertPostgresResumeRollbackReadback(
 	if wantChanged {
 		expectedState = models.TaskSessionStateFailed
 		wantMessage = "resume failed"
-		credentialSource = "previous"
+		if initialCredentialSnapshotPresent {
+			credentialSource = "previous"
+		} else {
+			credentialSource = ""
+		}
 	}
 	require.Equal(t, string(expectedState), state)
 	require.Equal(t, wantMessage, message)
 	require.Equal(t, storedAttempt, metadata[models.SessionMetaKeyAgentStartAttemptID])
-	require.Equal(t, credentialSource,
-		metadata[models.SessionMetaKeyGitCredentialSnapshot].(map[string]interface{})["source"])
+	if credentialSource == "" {
+		require.NotContains(t, metadata, models.SessionMetaKeyGitCredentialSnapshot)
+	} else {
+		require.Equal(t, credentialSource,
+			metadata[models.SessionMetaKeyGitCredentialSnapshot].(map[string]interface{})["source"])
+	}
 	require.Equal(t, "value", metadata["retained"])
 }
 
@@ -361,6 +492,34 @@ func TestUpdateTaskSessionResumeStateIfCurrentAttempt(t *testing.T) {
 			require.Equal(t, "value", stored.Metadata["retained"])
 		})
 	}
+}
+
+func TestUpdateTaskSessionResumeStateIfCurrentAttemptRemovesAbsentCredentialSnapshot(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+	const taskID, sessionID = "task-resume-rollback-absent", "session-resume-rollback-absent"
+	require.NoError(t, repo.CreateTask(ctx, &models.Task{ID: taskID, Title: "Resume rollback"}))
+	require.NoError(t, repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID: sessionID, TaskID: taskID, State: models.TaskSessionStateStarting,
+		Metadata: map[string]interface{}{
+			models.SessionMetaKeyAgentStartAttemptID: "attempt-current",
+			"retained":                               "value",
+		},
+	}))
+
+	changed, _, err := repo.UpdateTaskSessionResumeStateIfCurrentAttempt(
+		ctx, taskID, sessionID, "attempt-current",
+		models.TaskSessionStateStarting, models.TaskSessionStateFailed,
+		"resume failed", true, true, false, nil,
+	)
+	require.NoError(t, err)
+	require.True(t, changed)
+	stored, err := repo.GetTaskSession(ctx, sessionID)
+	require.NoError(t, err)
+	require.Equal(t, models.TaskSessionStateFailed, stored.State)
+	require.NotContains(t, stored.Metadata, models.SessionMetaKeyGitCredentialSnapshot)
+	require.Equal(t, "attempt-current", stored.Metadata[models.SessionMetaKeyAgentStartAttemptID])
+	require.Equal(t, "value", stored.Metadata["retained"])
 }
 
 func TestUpdateTaskSessionCredentialSnapshotIfCurrentAttemptPreservesState(t *testing.T) {

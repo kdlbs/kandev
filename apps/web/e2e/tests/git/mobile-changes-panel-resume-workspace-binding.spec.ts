@@ -40,9 +40,7 @@ test.describe("Mobile Changes after resume workspace binding recovery", () => {
       );
 
       await test.step("open the phone Changes panel", async () => {
-        const changesButton = testPage
-          .getByRole("navigation")
-          .getByRole("button", { name: /Changes$/ });
+        const changesButton = testPage.getByTestId("mobile-session-nav-changes");
         await expect(changesButton).toHaveCount(1);
         await expectTouchControl(changesButton);
         await changesButton.tap();
@@ -66,7 +64,7 @@ test.describe("Mobile Changes after resume workspace binding recovery", () => {
 
       const fileRow = changes.getByTestId(`file-row-${fixture.dirtyFileName}`);
       await expect(fileRow).toBeVisible();
-      await expect(changes.getByRole("button", { name: "Retry", exact: true })).toHaveCount(0);
+      await expect(changes.getByTestId("changes-git-status-retry")).toHaveCount(0);
       await fileRow.tap();
 
       const diffSheet = testPage.getByTestId("mobile-diff-sheet");

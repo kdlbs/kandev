@@ -128,6 +128,7 @@ function GitStatusNotice(props: ChangesPanelBodyProps) {
             variant="outline"
             className="h-11 min-h-11 shrink-0 px-3 md:h-7 md:min-h-7"
             onClick={props.onRetryGitStatus}
+            data-testid="changes-git-status-retry"
           >
             {t("task:gitStatusRetry")}
           </Button>

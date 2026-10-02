@@ -58,9 +58,7 @@ test.describe("Changes after resume workspace binding recovery", () => {
 
       const fileRow = session.changes.getByTestId(`file-row-${fixture.dirtyFileName}`);
       await expect(fileRow).toBeVisible();
-      await expect(session.changes.getByRole("button", { name: "Retry", exact: true })).toHaveCount(
-        0,
-      );
+      await expect(session.changes.getByTestId("changes-git-status-retry")).toHaveCount(0);
       expect(fs.readFileSync(fixture.dirtyFilePath, "utf8")).toBe(`${fixture.dirtyFileContent}\n`);
 
       const afterEnvironment = await apiClient.getTaskEnvironment(fixture.taskId);
