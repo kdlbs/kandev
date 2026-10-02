@@ -165,3 +165,102 @@ describe("swimlane repository projections", () => {
     expect(result.current.focused.occupancyTasks.map((task) => task.id)).toEqual([FIRST_TASK_ID]);
   });
 });
+
+// @covers AC-UI-BOARD-REPOSITORY-MATCHING-001.4, AC-UI-BOARD-REPOSITORY-MATCHING-001.5
+it.each(["CLIENT-UI", "/projects/client"])(
+  "searches secondary repository metadata in live swimlanes: %s",
+  (searchQuery) => {
+    const selected = ["web"];
+    const repoFilter = new Set(selected);
+    const { result } = renderHook(
+      () => ({
+        store: useAppStoreApi(),
+        overview: useSwimlaneRenderData(null, selected, searchQuery),
+        focused: useWorkflowSwimlaneData("first", repoFilter, searchQuery),
+      }),
+      { wrapper: ({ children }) => <StateProvider>{children}</StateProvider> },
+    );
+    const first = snapshot("first");
+    first.tasks[0].repositoryId = "backend";
+    first.tasks[0].repositories = [
+      { id: "backend-link", repository_id: "backend", base_branch: "main", position: 0 },
+      { id: "web-link", repository_id: "web", base_branch: "main", position: 1 },
+    ];
+    const second = snapshot("second");
+    second.tasks[0].repositoryId = "web";
+    const metadata = [
+      { id: "web", name: "client-ui", local_path: "/projects/client" },
+    ] as Repository[];
+    act(() => {
+      result.current.store.setState((state) => ({
+        kanbanMulti: { ...state.kanbanMulti, snapshots: { first, second } },
+        workflows: {
+          ...state.workflows,
+          items: [
+            { id: "first", name: "First", workspaceId: "active" },
+            { id: "second", name: "Second", workspaceId: "other" },
+          ],
+        },
+        repositories: { ...state.repositories, itemsByWorkspaceId: { other: metadata } },
+      }));
+    });
+    expect(result.current.overview.getFilteredTasks("first")).toEqual([]);
+    expect(result.current.focused.tasks).toEqual([]);
+    expect(result.current.overview.getFilteredTasks("second").map((t) => t.id)).toEqual([
+      "second-task",
+    ]);
+    expect(result.current.focused.occupancyTasks.map((t) => t.id)).toEqual([FIRST_TASK_ID]);
+    act(() => {
+      result.current.store.setState((state) => ({
+        repositories: {
+          ...state.repositories,
+          itemsByWorkspaceId: { active: metadata, other: metadata },
+        },
+      }));
+    });
+    const matching = result.current.overview.getFilteredTasks("first");
+    expect(matching.map((t) => t.id)).toEqual([FIRST_TASK_ID]);
+    expect(result.current.focused.tasks.map((t) => t.id)).toEqual([FIRST_TASK_ID]);
+    act(() => {
+      result.current.store.setState((state) => ({
+        repositories: {
+          ...state.repositories,
+          itemsByWorkspaceId: {
+            active: [{ id: "web", name: "renamed", local_path: "/moved" }] as Repository[],
+            other: metadata,
+          },
+        },
+      }));
+    });
+    expect(result.current.overview.getFilteredTasks("first")).toEqual([]);
+    expect(result.current.focused.tasks).toEqual([]);
+    act(() => {
+      result.current.store.setState((state) => ({
+        repositories: {
+          ...state.repositories,
+          itemsByWorkspaceId: { active: [], other: metadata },
+        },
+      }));
+    });
+    expect(result.current.overview.getFilteredTasks("first")).toEqual([]);
+    expect(result.current.focused.tasks).toEqual([]);
+    expect(result.current.focused.occupancyTasks.map((t) => t.id)).toEqual([FIRST_TASK_ID]);
+    act(() => {
+      result.current.store.setState((state) => ({
+        workflows: {
+          ...state.workflows,
+          items: state.workflows.items.map((workflow) => ({ ...workflow, workspaceId: "other" })),
+        },
+      }));
+    });
+    expect(result.current.overview.getFilteredTasks("first").map((t) => t.id)).toEqual([
+      FIRST_TASK_ID,
+    ]);
+    expect(result.current.focused.tasks.map((t) => t.id)).toEqual([FIRST_TASK_ID]);
+    act(() => {
+      result.current.store.setState((state) => ({ workflows: { ...state.workflows, items: [] } }));
+    });
+    expect(result.current.overview.getFilteredTasks("first")).toEqual([]);
+    expect(result.current.focused.tasks).toEqual([]);
+  },
+);

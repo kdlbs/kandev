@@ -31,7 +31,8 @@ multi-repository cards and occupied columns.
 ## In scope
 
 - Minimal membership shape/helper and selection predicate in `filters.ts`.
-- Existing repository-name/path search arm in `use-kanban-data.ts`.
+- Repository-name/path search in `use-kanban-data.ts` and the live shared
+  projection; owning-workflow workspace lookups and metadata cache invalidation.
 - Regression tests through real helper, hook, workflow and swimlane projections.
 - Add a concise multi-repository board-filter sentence to the existing public
   tasks/workflows guide; preserve sidebar distinctions.
@@ -58,7 +59,7 @@ workspace dependencies are lost. Respect configured worker budgets.
 
 ```bash
 (cd apps/web && pnpm exec vitest run lib/kanban/filters.test.ts hooks/domains/kanban/use-kanban-data.test.tsx lib/kanban/task-projections.test.ts hooks/domains/kanban/use-swimlane-render-data.test.tsx components/kanban/swimlane-container.test.ts lib/kanban/workflow-swimlanes.test.ts)
-(cd apps/web && pnpm exec eslint --max-warnings 0 lib/kanban/filters.ts hooks/domains/kanban/use-kanban-data.ts lib/kanban/filters.test.ts hooks/domains/kanban/use-kanban-data.test.tsx lib/kanban/task-projections.test.ts hooks/domains/kanban/use-swimlane-render-data.test.tsx)
+(cd apps/web && pnpm exec eslint --max-warnings 0 lib/kanban/filters.ts hooks/domains/kanban/use-kanban-data.ts lib/kanban/task-projections.ts hooks/domains/kanban/use-swimlane-render-data.ts lib/kanban/filters.test.ts hooks/domains/kanban/use-kanban-data.test.tsx lib/kanban/task-projections.test.ts hooks/domains/kanban/use-swimlane-render-data.test.tsx)
 (cd apps/web && pnpm run typecheck)
 (cd apps/web && pnpm run i18n:ratchet)
 python3 scripts/list-docs.py validate
@@ -102,6 +103,8 @@ JS
 - `apps/web/lib/kanban/filters.test.ts`
 - `apps/web/hooks/domains/kanban/use-kanban-data.ts`
 - `apps/web/hooks/domains/kanban/use-kanban-data.test.tsx`
+- `apps/web/lib/kanban/task-projections.ts`
+- `apps/web/hooks/domains/kanban/use-swimlane-render-data.ts`
 - `apps/web/lib/kanban/task-projections.test.ts`
 - `apps/web/hooks/domains/kanban/use-swimlane-render-data.test.tsx`
 - `docs/public/tasks-and-workflows.md`
@@ -156,3 +159,20 @@ later turn. Implementation and targeted local validation are complete.
   sentence documenting secondary repository selection on Kanban/Pipeline boards.
 - Exact-head documentation preflight and PR CI/review/merge remain delivery
   gates, recorded externally after commit/publication. No schema or API change.
+
+## Review remediation status
+
+Parent approved the amended design and released this task on 2026-10-02.
+Implemented shared repository metadata search for real live cards, scoped by
+owning workflow.workspaceId, with metadata/cache invalidation and an ID lookup
+instead of repeated scans. Four permanent live-hook/projection regressions
+failed before these source changes. Final focused Vitest: 6 files, 71 tests
+passed. Focused ESLint and typecheck passed. Additional cases prove metadata
+arrival, name/path edits, removal and workflow workspace updates recompute
+visible search results without changing occupancy. Earlier 67-test results above
+are the initial implementation evidence.
+
+The original dependency/docs/public checks remain applicable; unchanged broad
+local suites are not repeated. Normal hooks and exact-head hosted gates remain
+required. Publication, review-thread dispositions, authenticated substantive
+head-qualified CodeRabbit review and normal merge are pending externally.

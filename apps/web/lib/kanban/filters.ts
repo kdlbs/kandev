@@ -17,6 +17,22 @@ export function getTaskRepositoryIds(task: FilterableTask): string[] {
   );
 }
 
+export type RepositorySearchLookup = ReadonlyMap<string, Pick<Repository, "name" | "local_path">>;
+
+export function taskMatchesRepositorySearch(
+  task: FilterableTask,
+  query: string,
+  repositoriesById?: RepositorySearchLookup,
+): boolean {
+  return getTaskRepositoryIds(task).some((id) => {
+    const repository = repositoriesById?.get(id);
+    return Boolean(
+      repository?.name?.toLowerCase().includes(query) ||
+      repository?.local_path?.toLowerCase().includes(query),
+    );
+  });
+}
+
 export function mapSelectedRepositoryIds(
   repositories: Repository[],
   selectedIds: string[],

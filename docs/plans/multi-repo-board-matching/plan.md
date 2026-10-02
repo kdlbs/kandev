@@ -37,8 +37,10 @@ is complete only after exact-head checks, trusted semantic review, and merge.
 Extend `FilterableTask` and introduce a minimal shared ID helper in
 `apps/web/lib/kanban/filters.ts`. Reuse it in the existing repository search arm
 of `use-kanban-data.ts`. Preserve explicit empty collections and the no-filter
-array reference. Existing `task-projections.ts` callers propagate corrected
-membership to both visibility and occupancy without source changes there.
+array reference. `task-projections.ts` propagates corrected membership to both visibility and
+occupancy and applies repository name/path search to visible cards. The live
+swimlane hooks supply workspace-scoped lookups and invalidate caches on metadata
+changes.
 
 Root cause: `filterTasksByRepositories` and the hook's repository search arm
 read only `repositoryId`, despite the full optional collection in the existing
@@ -122,3 +124,26 @@ ASCII layout preview is needed for this projection-only package.
 - Attachment IDs must not be mistaken for `repository_id`.
 - PR #1512 or another main update may require adapting hook fixtures and source
   reads, then rerunning all affected checks before publication/merge.
+
+## Review remediation results
+
+Parent approved the bounded design amendment and explicitly released this task
+for sequential implementation on 2026-10-02. Live board cards now search the same
+repository name/path fields as the legacy hook, using canonical membership and
+owning-workflow workspace lookups. Overview caches and focused memos recompute
+when metadata or workflow workspace changes. Occupancy excludes the search lens.
+Repeated per-task repository scans are replaced by ID lookups.
+
+Two permanent real-swimlane and two direct projection tests failed before the
+live search fix. Final targeted Vitest passed: 6 files, 71 tests. Focused ESLint
+and typecheck passed. Coverage includes metadata arrival, rename/path changes,
+removal, workflow workspace changes, missing workflow metadata, collection
+fallback/authority and mobile navigator counts. No full local E2E suite run.
+
+Current main compatibility is checked using an isolated synthetic merge rather
+than rewriting the published candidate to chase unrelated changes. #1512 remains
+open at its previously inspected head; main has no intervening changes to the
+owned board projection source. Local implementation is complete; exact-head
+hosted checks, all thread dispositions, substantive authenticated CodeRabbit
+review and normal merge remain external delivery gates. Initial Claude workflow
+success had no semantic verdict and `is_error: true`; it is not review evidence.

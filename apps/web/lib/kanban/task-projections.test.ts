@@ -5,6 +5,7 @@ import { filterTasks, projectWorkflowTasks } from "./task-projections";
 const WORKFLOW_ID = "wf-1";
 const CRITICAL_ID = "critical-1";
 const HIGH_ID = "high-1";
+const PLUGIN_REJECTED_ID = "plugin-rejected";
 
 function task(id: string, priority?: Task["priority"]): Task {
   return { id, title: id, workflowStepId: "step-1", priority } as Task;
@@ -128,7 +129,7 @@ describe("projectWorkflowTasks repository membership", () => {
           id: "other",
           repositories: [{ id: "other-link", repository_id: "other", position: 0 }],
         },
-        { ...linked, id: "plugin-rejected" },
+        { ...linked, id: PLUGIN_REJECTED_ID },
       ],
     },
     second: {
@@ -140,7 +141,7 @@ describe("projectWorkflowTasks repository membership", () => {
   it("retains a secondary-linked task in occupancy even when search removes its card", () => {
     const first = projectWorkflowTasks(workflows, "first", new Set(["web"]), {
       searchQuery: "absent",
-      matchesPluginTaskFilters: (id) => id !== "plugin-rejected",
+      matchesPluginTaskFilters: (id) => id !== PLUGIN_REJECTED_ID,
     });
     expect(first.visibleTasks).toEqual([]);
     expect(first.occupancyTasks).toEqual([linked]);
@@ -153,7 +154,7 @@ describe("projectWorkflowTasks repository membership", () => {
   it("composes membership with search, hidden steps and plugins for visible cards", () => {
     const options = {
       searchQuery: "rendering",
-      matchesPluginTaskFilters: (id: string) => id !== "plugin-rejected",
+      matchesPluginTaskFilters: (id: string) => id !== PLUGIN_REJECTED_ID,
     };
     expect(
       projectWorkflowTasks(workflows, "first", new Set(["backend", "web"]), options).visibleTasks,
@@ -165,4 +166,25 @@ describe("projectWorkflowTasks repository membership", () => {
     expect(hidden.visibleTasks).toEqual([]);
     expect(hidden.occupancyTasks).toEqual([linked]);
   });
+  it.each(["CLIENT-UI", "/projects/client"])(
+    "matches repository search with collection authority: %s",
+    (searchQuery) => {
+      const options = {
+        searchQuery,
+        repositoriesById: new Map([["web", { name: "client-ui", local_path: "/projects/client" }]]),
+        matchesPluginTaskFilters: (id: string) => id !== PLUGIN_REJECTED_ID,
+      };
+      const first = projectWorkflowTasks(workflows, "first", new Set(), options);
+      expect(first.visibleTasks).toEqual([linked]);
+      expect(first.occupancyTasks).toHaveLength(3);
+      expect(
+        projectWorkflowTasks(workflows, "second", new Set(), options).visibleTasks.map(
+          (entry) => entry.id,
+        ),
+      ).toEqual(["legacy"]);
+      expect(
+        projectWorkflowTasks(workflows, "first", new Set(["other"]), options).visibleTasks,
+      ).toEqual([]);
+    },
+  );
 });

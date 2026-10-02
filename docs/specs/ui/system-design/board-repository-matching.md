@@ -47,16 +47,25 @@ match; title and description remain independent search arms. Search runs over
 repository-filtered tasks and remains memoized on tasks, query, workspace and
 repository metadata.
 
-This changes membership in the existing search arm, not the set of searchable
-fields in other board projections. A later data-source migration may supply
-workspace repositories through a hook rather than Zustand; the matching
-semantics and active-workspace boundary stay the same.
+Live board cards are rendered through `SwimlaneContainer`, not through the
+legacy hook's `filteredTasks`. The shared `task-projections.ts` search predicate
+must therefore receive repository metadata for the owning workflow's workspace
+and apply the same name/path arm. Build an ID lookup once for the relevant
+workspace rather than repeatedly scanning all repository records per task.
+Overview projection caches must include that lookup as an input; metadata
+arrival, rename, removal, or workflow workspace changes must recompute search.
+Focused projections use the same workspace boundary. Search metadata remains
+absent from the occupancy lens.
+
+A later data-source migration may supply workspace repositories through a hook
+rather than Zustand; the matching semantics and workspace boundary stay the
+same. No new searchable repository fields or unrelated search surface is added.
 
 ## Shared board and swimlane projections
 
 `apps/web/lib/kanban/task-projections.ts` already calls the shared repository
-filter for both `visibleTasks` and `occupancyTasks`. Keep those call sites and
-lens separation. `useSwimlaneRenderData` and `useWorkflowSwimlaneData` consume
+filter for both `visibleTasks` and `occupancyTasks`. Keep those membership call sites and lens separation while adding repository
+metadata to the visible search predicate. `useSwimlaneRenderData` and `useWorkflowSwimlaneData` consume
 that projection for multi-workflow lanes and focused workflow views.
 
 The latter exposes occupancy separately so auto-hide logic retains an occupied
