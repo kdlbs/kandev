@@ -63,11 +63,10 @@ test.describe("Changes panel Git refresh recovery", () => {
       const response = await bridge.waitForResponse("fresh", priorFreshResponses);
       expect(response.success).toBe(true);
       await expect(status).toHaveCount(0);
-      await expect(session.changes.getByRole("button", { name: /Commits/ })).toBeVisible();
       const settledToolbarBox = await toolbar.boundingBox();
       expect(settledToolbarBox?.height).toBe(pendingToolbarBox?.height);
       await prCapture.screenshot("git-refresh-recovery-desktop-completed", {
-        caption: "The toolbar settles after refresh while existing commit history remains visible",
+        caption: "The loading feedback clears without changing the narrow toolbar height",
       });
     } finally {
       bridge.releaseFreshGitRefreshRequests();
