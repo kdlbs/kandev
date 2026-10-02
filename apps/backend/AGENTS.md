@@ -289,10 +289,10 @@ For persistence changes, run `go run ./cmd/sqlguard ./internal` and `go test -ra
 ## Code-quality limits
 
 Enforced by `apps/backend/.golangci.yml` (errors on new code only):
-- **Build cache reuse:** Make build/test targets use `-trimpath`. Include it in direct `go build` and `go test` commands, including race/coverage runs, so identical packages share artifacts across worktrees. Diagnostic source paths use module paths instead of absolute worktree paths.
 - Functions: ≤80 lines, ≤50 statements · Cyclomatic complexity: ≤15 · Cognitive complexity: ≤30 · Nesting depth: ≤5 · Naked returns only in functions ≤30 lines · No duplicated blocks (≥150 tokens) · Repeated strings → constants (≥3 occurrences) · Revive's 800-effective-line file limit also applies to test files; put new tests in a new file instead of appending to an already-large test file.
 
 When a PR fixup touches backend code, run `golangci-lint run ./... --new-from-rev="<base-sha>" --timeout=5m` from `apps/backend` with the PR base SHA before pushing; CI enforces changed-file complexity thresholds.
+- **Build cache reuse:** Make build/test targets use `-trimpath`. Include it in direct `go build` and `go test` commands, including race/coverage runs, so identical packages share artifacts across worktrees. Diagnostic source paths use module paths instead of absolute worktree paths.
 - `internal/launcher/` — native launcher owning every entrypoint (`dev`, `start`, `run`, `service`); `dev` runs `make -C apps/backend dev` with Vite as a supervised child, state under `<repoRoot>/.kandev-dev/`. The root `make dev` prebuilds only the copied launcher; the backend dev target builds the native agentctl and a linux/amd64 helper when the host is not Linux/amd64 (`docs/plans/go-dev-launcher/`).
 - `internal/agentctl/AGENTS.md` — server routes, adapters, ACP; `cmd/mock-agent/AGENTS.md` — E2E scenario patterns and rebuild requirements
 - `internal/agentctl/server/api/AGENTS.md` — reverse-proxy body rewriting (`Accept-Encoding`), iframe-blocking header stripping

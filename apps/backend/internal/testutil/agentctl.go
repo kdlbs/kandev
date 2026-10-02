@@ -25,7 +25,11 @@ func BuildAgentctl(t testing.TB) string {
 	if err != nil {
 		t.Fatalf("resolve agentctl test helper module: %v", err)
 	}
-	backendDir := filepath.Dir(strings.TrimSpace(string(moduleFile)))
+	modulePath := strings.TrimSpace(string(moduleFile))
+	if modulePath == "" || modulePath == os.DevNull {
+		t.Fatal("resolve agentctl test helper module: not inside a Go module")
+	}
+	backendDir := filepath.Dir(modulePath)
 	cmd := exec.CommandContext(ctx, "go", "build", "-trimpath", "-buildvcs=false", "-o", path, "./cmd/agentctl")
 	cmd.Dir = backendDir
 	if output, err := cmd.CombinedOutput(); err != nil {
