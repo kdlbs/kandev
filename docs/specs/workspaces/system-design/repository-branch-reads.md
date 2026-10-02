@@ -99,9 +99,17 @@ timers, authorization rules, metrics, or logs are required.
 
 ## Consumers and verification
 
-The five direct consumers are workspace repository chips, watcher repository
+The six direct consumers are workspace repository chips, watcher repository
 fields, task launch branch picker, task base branch picker, and settings branch
-policies. Their production code remains unchanged.
+policies, plus `RepositorySetBaseBranchPicker` in
+`apps/web/app/settings/workspace/workspace-repository-set-editor-members.tsx`.
+Their production code remains unchanged.
+
+The repository-set picker uses an id source, loads on dropdown demand, and
+passes shared `isLoading` to the pill's `refreshing` state. Its data and loading
+contract is covered by the real-hook/store tests for demand loading, sibling
+consumers, overlapping refreshes, and failure cleanup, alongside the rendered
+branch-list regression below.
 
 Use deferred network replies through the actual hook, real `StateProvider`, and
 production `createAppStore`/Zustand actions. Replace the existing mocked-store
