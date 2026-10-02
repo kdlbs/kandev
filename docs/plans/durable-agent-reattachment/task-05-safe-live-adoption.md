@@ -659,3 +659,29 @@ python3 scripts/list-docs.py validate
 python3 scripts/lint-spec-files.py --all
 git diff --check
 ```
+
+### Published browser fixture follow-up, 2026-10-02
+
+The published `c2bf20` backend workflow passed, including native Windows and
+PostgreSQL. Browser shards 11 and 13 reported one first-attempt failure each.
+The promoted-tab screenshot shows both seeded tasks in the sidebar and no board
+cards. Its setup now opens the task's stable route, as the adjacent case does.
+The workflow helper searched concatenated text with `indexOf`, so valid repeated
+or overlapping titles could never satisfy it. A real picker regression with
+`Review complete`, `Review`, `Review` failed before the fix. The helper now
+compares the individual rendered titles exactly and in order. This also provides
+an actual/expected diff if the hosted failure has another cause. The initial
+hosted screenshot was captured after cleanup and does not identify its mismatched
+workflow. No timeout or product assertion was relaxed.
+
+The new regression and both affected cases passed three repetitions each:
+9 passed (1.4m), zero retries. Scoped ESLint and Prettier checks passed.
+
+```bash
+cd apps/web
+GOCACHE=/tmp/kandev-go-build-preserved-20261001 pnpm e2e:run --host --project chromium tests/task/task-create-workflow-step-previews.spec.ts -- --grep 'titles repeat' --retries=0
+# RED: one failure with the old substring assertion.
+GOCACHE=/tmp/kandev-go-build-preserved-20261001 pnpm e2e:run --host --project chromium tests/task/task-create-workflow-step-previews.spec.ts tests/layout/preview-tab-session-switch.spec.ts -- --grep 'titles repeat|scrolls ten|promoted file tab' --repeat-each=3 --retries=0
+pnpm exec eslint e2e/tests/task/task-create-workflow-step-previews.spec.ts e2e/tests/task/workflow-step-previews-helpers.ts e2e/tests/layout/preview-tab-session-switch.spec.ts
+pnpm exec prettier --check e2e/tests/task/task-create-workflow-step-previews.spec.ts e2e/tests/task/workflow-step-previews-helpers.ts e2e/tests/layout/preview-tab-session-switch.spec.ts
+```

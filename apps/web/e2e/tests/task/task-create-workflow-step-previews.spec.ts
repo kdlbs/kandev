@@ -162,6 +162,32 @@ test("loads every workflow preview from a task page and retries one failed row",
   }
 });
 
+test("checks workflow preview order when titles repeat or contain another title", async ({
+  testPage,
+  apiClient,
+  seedData,
+}) => {
+  const scenario = await seedWorkflowStepPreviewScenario(apiClient, seedData.workspaceId);
+  const names = ["Review complete", "Review", "Review"];
+  const { steps } = await apiClient.listWorkflowSteps(scenario.review.id);
+  try {
+    for (const step of steps) await apiClient.deleteWorkflowStep(step.id);
+    for (const [position, name] of names.entries()) {
+      await apiClient.createWorkflowStep(scenario.review.id, name, position);
+    }
+    await testPage.goto(`/t/${scenario.taskId}`);
+    await testPage.getByTestId("create-task-button").first().click();
+    const dialog = testPage.getByTestId("create-task-dialog");
+    await expect(dialog).toBeVisible();
+    const response = workflowStepsResponse(testPage, scenario.review.id);
+    await dialog.getByTestId("workflow-selector-trigger").click();
+    expect((await response).ok()).toBe(true);
+    await expectStepsInOrder(testPage, scenario.review.id, names);
+  } finally {
+    await cleanupWorkflowStepPreviewScenario(apiClient, scenario);
+  }
+});
+
 // @covers AC-TASKS-CREATE-WORKFLOW-STEPS-001.5 AC-TASKS-CREATE-WORKFLOW-STEPS-001.6 AC-TASKS-CREATE-WORKFLOW-STEPS-001.7
 test("scrolls ten workflow options in both directions without losing the task draft", async ({
   testPage,

@@ -24,18 +24,7 @@ export async function expectWorkflowStepPreviewsLoaded(
 export async function expectStepsInOrder(page: Page, workflowId: string, stepNames: string[]) {
   const group = page.getByTestId("workflow-option-steps-" + workflowId);
   await expect(group).toBeVisible();
-  await expect
-    .poll(async () => {
-      const text = (await group.textContent()) ?? "";
-      let previousPosition = -1;
-      for (const name of stepNames) {
-        const position = text.indexOf(name);
-        if (position <= previousPosition) return false;
-        previousPosition = position;
-      }
-      return true;
-    })
-    .toBe(true);
+  await expect(group.locator("span.wrap-anywhere")).toHaveText(stepNames);
 }
 
 export async function expectUnbrokenStepToFitGroup(
