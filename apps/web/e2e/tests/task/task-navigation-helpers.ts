@@ -145,14 +145,45 @@ export async function saveExpandedPaths(
   );
 }
 
-export async function showNavigationFiles(page: Page, mobile: boolean) {
+export async function showNavigationFiles(page: Page, mobile: boolean, sessionId?: string) {
   if (mobile) {
     await page.getByRole("button", { name: "Files", exact: true }).tap();
   } else {
     const session = new SessionPage(page);
     await session.waitForDockviewReady();
+    if (!sessionId) throw new Error("A session ID is required to open desktop Files navigation");
+    const sessionTab = session.sessionTabBySessionId(sessionId);
+    await expect(sessionTab).toBeVisible();
+    await sessionTab.click();
+    await expect(session.activeChat()).toBeVisible();
+    await session.waitForChatIdle();
     await expect(page.getByTestId("dockview-task-layout")).toHaveAttribute("aria-busy", "false");
-    await session.showSessionContext();
+    let previousGroups: string | null = null;
+    await expect
+      .poll(
+        async () => {
+          const currentGroups = await page.evaluate(() => {
+            const layout = document.querySelector('[data-testid="dockview-task-layout"]');
+            if (layout?.getAttribute("aria-busy") !== "false") return null;
+            return JSON.stringify(
+              Array.from(document.querySelectorAll(".dv-groupview")).map((element) => {
+                const rect = element.getBoundingClientRect();
+                return [
+                  Math.round(rect.x),
+                  Math.round(rect.y),
+                  Math.round(rect.width),
+                  Math.round(rect.height),
+                ];
+              }),
+            );
+          });
+          const settled = currentGroups !== null && currentGroups === previousGroups;
+          previousGroups = currentGroups;
+          return settled;
+        },
+        { timeout: 15_000, message: "Dockview did not settle after session navigation" },
+      )
+      .toBe(true);
     await session.clickTab("Files");
     const filesTab = page.locator(".dv-tab:visible").filter({
       has: page.locator(".dv-default-tab").filter({ hasText: /^Files$/ }),
@@ -193,7 +224,7 @@ export async function assertProgressiveNavigation(
   await session.waitForLoad();
   await session.waitForChatIdle();
   await waitForSessionGitHydration(page, a.session_id!);
-  await showNavigationFiles(page, mobile);
+  await showNavigationFiles(page, mobile, a.session_id!);
   await waitForTreeResponse(gate, initialRequestOffset, a.session_id!, "");
   await expect(session.fileTreeNode(ROOT_FILE)).toBeVisible({ timeout: 15_000 });
   await saveExpandedPaths(page, a.session_id!, [AVAILABLE, HELD], mobile);
@@ -202,7 +233,7 @@ export async function assertProgressiveNavigation(
   await page.reload();
   await session.waitForLoad();
   await waitForSessionGitHydration(page, a.session_id!);
-  await showNavigationFiles(page, mobile);
+  await showNavigationFiles(page, mobile, a.session_id!);
   await expect.poll(() => gate.heldCount(), { timeout: 15_000 }).toBeGreaterThan(0);
   await waitForTreeResponse(gate, reloadRequestOffset, a.session_id!, "");
   await waitForTreeResponse(gate, reloadRequestOffset, a.session_id!, AVAILABLE);
@@ -210,7 +241,7 @@ export async function assertProgressiveNavigation(
   await expect(session.fileTreeNode(ROOT_FILE)).toBeVisible({ timeout: 15_000 });
   await expect(session.fileTreeNode(`${AVAILABLE}/available.ts`)).toBeVisible({ timeout: 15_000 });
   gate.release("temporary navigation folder failure");
-  await showNavigationFiles(page, mobile);
+  await showNavigationFiles(page, mobile, a.session_id!);
   const status = page
     .locator('[data-testid="files-panel"]:visible')
     .getByTestId("file-tree-refresh-status");
@@ -234,14 +265,14 @@ export async function assertProgressiveNavigation(
   await expect(page).toHaveURL(new RegExp(`/t/${b.id}$`));
   await session.waitForChatIdle();
   await waitForSessionGitHydration(page, b.session_id!);
-  await showNavigationFiles(page, mobile);
+  await showNavigationFiles(page, mobile, b.session_id!);
   await waitForTreeResponse(gate, taskBRequestOffset, b.session_id!, "");
   await expect(session.fileTreeNode(ROOT_FILE)).toBeVisible({ timeout: 15_000 });
   // Task A's environment-scoped tree cache remains available while returning from B.
   await selectNavigationTask(page, a.title, mobile);
   await expect(page).toHaveURL(new RegExp(`/t/${a.id}$`));
-  await waitForNavigationGitHydration(page, a.session_id!);
-  await showNavigationFiles(page, mobile);
+  await waitForSessionGitHydration(page, a.session_id!);
+  await showNavigationFiles(page, mobile, a.session_id!);
   await expect(session.fileTreeNode(`${AVAILABLE}/available.ts`)).toBeVisible();
   if (mobile) {
     await session.fileTreeNodeActions(ROOT_FILE).tap();
