@@ -135,3 +135,90 @@ Completed 2026-09-28.
 - A newly authorized launch without an explicit message submission uses an execution-bound initial submission identity. Native restore preserves the harness generation while distinct authorized launches cannot collide in the retained journal. Legacy initial submission identities remain recognizable during adoption.
 - The launch-identity regression failed before the fix. The complete lifecycle, process, and task-service packages passed with the race detector, using the command recorded in task 03.
 - Added Korean translations for the existing recovery surfaces after main introduced that locale. Complete locale validation passes; composition and interaction remain unchanged. Published-head CI verification remains pending.
+
+
+### Adjacent browser CI regression (2026-10-02)
+
+E2E Shard 3/14 on `a71fe177551` (run `36944067239`, job `110654853231`)
+reported 258 passing tests, three existing skips, and one strict flaky failure.
+The Git changes Revert test exposed its hover-only action, then Playwright's
+click scroll removed hover. The action stayed hidden until the 60-second
+fixture deadline. Its retry passed, which still fails the strict CI policy.
+
+The fixture now centers the row before hovering. It retains the same real
+button click, commit-removal assertion, and staged-file assertion. Product
+components, mobile composition, operation semantics, timeouts, retry policy,
+and skip policy are unchanged. This is test geometry preparation for the
+existing desktop pointer interaction, not a new UI contract.
+
+Commands from `apps/web`:
+
+- `GOCACHE=/tmp/kandev-go-build-preserved-20261001 pnpm e2e:run --host
+  --project chromium tests/git/git-changes-panel.spec.ts -- --grep
+  'revert commit undoes commit and stages changes' --repeat-each=3 --retries=0`
+  passed: three tests in 33.1 seconds, with a managed fresh build.
+- `GOCACHE=/tmp/kandev-go-build-preserved-20261001 pnpm e2e:run --host
+  --no-build --project chromium tests/git/git-changes-panel.spec.ts --
+  --retries=0` passed: 27 tests in 4.4 minutes.
+- `pnpm exec eslint e2e/tests/git/git-changes-panel.spec.ts --max-warnings 0`
+  passed.
+
+Other current-head hosted checks were still finishing when these local results
+were recorded. The final CI outcome belongs to the exact subsequently pushed
+head and is recorded in the task plan and PR checks.
+
+### Remaining browser-shard remediation, 2026-10-02
+
+The first complete browser run on `a71fe1775513` reported three flaky cases in
+shards 3 and 6. Strict flaky-test failure remains enabled. The Revert hover case
+is recorded above. Shard 6 also exposed two missing fixture checkpoints:
+
+- The right-pane maximize/reload fixture selected Files and immediately entered
+  maximize before its debounced layout save was observable. It now waits on the
+  existing persisted-layout helper for the selected Files view, then performs the
+  original maximize, disabled-control, exit, reload, visibility, and healthy-layout
+  assertions. It does not activate Files or toggle the pane after reload.
+- The mobile PR-only fixture mutated native Git history before proving the agent
+  had settled or the local commit snapshot had arrived. It now waits for the
+  existing quiet-session completion barrier and observes the shared commit through
+  the production mobile Changes panel before installing the provider-only overlay.
+  The remote-only SHA remains absent from native Git, and pushed provenance,
+  warning absence, remote detail, patch, and sheet-dismissal assertions remain.
+
+All 70 existing commits were rebased without content conflicts onto verified main
+`68542f03983a56b9c9c42fd1afed10842e1beff0`. Before these two checkpoint changes,
+both reported cases passed three repetitions with zero retries against that main;
+the actual hosted shard failures supply the red evidence for the fixture races.
+The owning desktop file then passed all 10 tests with zero retries:
+
+```bash
+cd apps/web
+GOCACHE=/tmp/kandev-go-build-preserved-20261001 pnpm e2e:run --host --no-build --project chromium tests/layout/right-panel-visibility.spec.ts -- --retries=0
+```
+
+The rebased Git-status handler tests passed 22 tests in one file. Browser setup
+changes preserve the existing desktop/mobile interactions and do not change product
+UI composition or weaken recovery contracts.
+
+The owning mobile Changes file passed all 9 tests with zero retries:
+
+```bash
+cd apps/web
+GOCACHE=/tmp/kandev-go-build-preserved-20261001 pnpm e2e:run --host --no-build --project mobile-chrome tests/task/mobile-changes-panel.spec.ts -- --retries=0
+```
+
+Zero-warning ESLint for all three changed browser fixtures, Prettier checks,
+full specification lint, and whitespace validation passed. Native Windows
+journal throughput is now proven by the hosted `a71fe1775513` run; native
+desktop containment/OS smoke and a live harness version matrix remain distinct
+release validation limits. Final pushed-head CI is recorded in the task plan.
+
+The final checkpoint changes also passed three repetitions each with zero retries:
+
+```bash
+cd apps/web
+GOCACHE=/tmp/kandev-go-build-preserved-20261001 pnpm e2e:run --host --no-build --project mobile-chrome tests/task/mobile-changes-panel.spec.ts -- --grep 'PR-only commit opens the remote commit sheet' --repeat-each=3 --retries=0
+GOCACHE=/tmp/kandev-go-build-preserved-20261001 pnpm e2e:run --host --no-build --project chromium tests/layout/right-panel-visibility.spec.ts -- --grep 'keeps the toggle disabled while maximized' --repeat-each=3 --retries=0
+```
+
+Both commands passed 3/3. Catalog validation also passed after the result updates.

@@ -115,4 +115,7 @@ and forwarding code are unchanged.
   ./internal/agentctl/server/process -run
   'TestDetachedDurableProducerExceedsQueue|TestCancelledDeliveryRetainsOneTerminalForBackendSettlement|TestLateTerminalKeepsItsSubmissionDuringSuccessorDispatch'
   -count=3` from `apps/backend`: passed.
-- Native Windows execution remains pending on the updated CI head.
+- Native Windows passed on `a71fe177551`: run `36944067281`, job
+  `110645757952`. `TestDetachedDurableProducerExceedsQueue` passed in 0.88
+  seconds. This verifies the backend regression on Windows; native desktop
+  containment and OS smoke checks retain their separate release scope.

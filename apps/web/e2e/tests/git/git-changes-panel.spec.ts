@@ -1314,7 +1314,8 @@ test.describe("Git Changes Panel", () => {
     // Verify the commit message is shown
     await expect(session.changes.getByText("Add file to revert")).toBeVisible({ timeout: 5_000 });
 
-    // Click the revert button (hover action on the commit row)
+    // Center the row before hover so click auto-scrolling cannot hide its actions.
+    await commitRow.evaluate((row) => row.scrollIntoView({ block: "center", inline: "nearest" }));
     await commitRow.hover();
     const revertButton = commitRow.getByRole("button", { name: "Revert commit" });
     await expect(revertButton).toBeVisible({ timeout: 5_000 });
