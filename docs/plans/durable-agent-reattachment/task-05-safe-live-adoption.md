@@ -455,3 +455,23 @@ pnpm exec vitest run hooks/domains/session/use-session-recovery-actions.test.ts 
 GOCACHE=/tmp/kandev-go-build-preserved-20261001 pnpm e2e:run --host --project chromium tests/chat/markdown-preview.spec.ts tests/canvas/plugin-canvas.spec.ts tests/task/launch-failure-recovery.spec.ts -- --grep 'open markdown preview from diff|first visual row|reconciles a published task canvas|retains session failure' --retries=0
 GOCACHE=/tmp/kandev-go-build-preserved-20261001 pnpm e2e:run --host --no-build --project mobile-chrome tests/task/mobile-launch-failure-recovery.spec.ts -- --grep 'retains session failure history' --retries=0
 ```
+
+
+### Windows CI job budget correction, 2026-10-02
+
+Two successive hosted heads passed every Windows build, vet and native test
+step but were cancelled during setup-go cache publication at the 40-minute
+workflow cap. On the latest run, native checks took 28 minutes including
+compilation, and final targeted tests ended at 39m38s. Only 25 seconds remained
+for cache publication. The Windows job now has a finite 50-minute total budget.
+Its 25-minute package timeout, assertions, test selections and all browser
+timeouts/retry allowances remain unchanged.
+
+The existing job-headroom workflow contract was changed first and failed RED.
+The configuration correction passed all ten workflow contract tests and action
+pinning lint. Hosted validation is pending on the next published revision.
+
+```bash
+python3 .github/scripts/backend-tests-workflow-contract_test.py
+python3 .github/scripts/lint-action-pinning.py
+```
