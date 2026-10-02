@@ -33,6 +33,7 @@
   "configurationChat": "구성 채팅",
   "configurationChatDescription": "에이전트가 Kandev 설정, 워크플로, 에이전트 프로필, MCP 구성을 업데이트하도록 합니다.",
   "configurationChatTab": "구성 채팅",
+  "coordinatorAboutTag": "{{id}} 관련",
   "delete": "삭제",
   "deleteQuickChat": "빠른 채팅을 삭제하시겠습니까?",
   "deleteQuickChatIntro": "이 빠른 채팅 세션을 영구적으로 삭제합니다. 삭제 항목:",
