@@ -45,6 +45,8 @@ exact paths before `doublestar.FilepathGlob`. The dependency's literal shortcut
 unescapes metacharacters only, so exact escaped commas need this contained
 literal fallback. Unescaped glob metacharacters and dangling escapes keep the
 existing glob/error path. Pattern bytes and native Windows paths stay unchanged.
+For POSIX globs, unescape commas only in the literal directory prefix selected
+by `doublestar.SplitPattern`, preserving all remaining expression escapes.
 Tests exercise these public package pipelines using temporary source and target
 directories, checking exact paths, bytes, warnings, and mode precedence.
 

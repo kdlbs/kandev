@@ -559,6 +559,12 @@ func (s *copyState) expandPattern(pattern string) error {
 		}
 	}
 
+	if normalized := unescapeGlobDirectoryCommas(pattern); normalized != pattern {
+		joined = normalized
+		if !filepath.IsAbs(joined) {
+			joined = filepath.Join(s.canonRoot, joined)
+		}
+	}
 	matches, err := doublestar.FilepathGlob(joined)
 	if err != nil {
 		s.warn("invalid pattern %q: %v", pattern, err)
@@ -601,6 +607,28 @@ func unescapeLiteralPattern(pattern string) (string, bool) {
 		literal.WriteByte(pattern[i])
 	}
 	return literal.String(), true
+}
+
+// Only literal directory prefixes lose comma escapes; glob expressions retain
+// their escapes. Native paths are checked before this POSIX normalization.
+func unescapeGlobDirectoryCommas(pattern string) string {
+	if filepath.Separator == '\\' || !strings.Contains(pattern, `\,`) {
+		return pattern
+	}
+	_, glob := doublestar.SplitPattern(pattern)
+	prefixEnd := len(pattern) - len(glob)
+	var normalized strings.Builder
+	for i := 0; i < prefixEnd; i++ {
+		if pattern[i] == '\\' && i+1 < prefixEnd {
+			if pattern[i+1] != ',' {
+				normalized.WriteByte('\\')
+			}
+			i++
+		}
+		normalized.WriteByte(pattern[i])
+	}
+	normalized.WriteString(pattern[prefixEnd:])
+	return normalized.String()
 }
 
 // handleMatch dispatches a single literal/match path to file or directory copy.
