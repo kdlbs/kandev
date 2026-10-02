@@ -189,8 +189,10 @@ including prior-file preservation across a failed refresh, automatic retry, a
 held selected diff, concurrent commit reads, full-height diff-sheet geometry,
 and zero document overflow. `prCapture` recorded pending and ready states.
 
-The combined plan remains in progress. Task 02 is pending PR #4145 landing and
-the required post-merge geometry measurements.
+The combined plan remains in progress. Task 02 was completed after PR #4145
+landed at merge commit `0ec0538aa038f2e8b8617fb4f5be6128f0cedbac`; its
+post-merge geometry measurements and validation are recorded in
+[Task 02](task-02-section-spacing.md).
 
 Review follow-up: recovery monitoring now runs only when the watched session's
 environment binding or scoped Git status/refresh state changes. A shared detail

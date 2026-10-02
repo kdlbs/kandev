@@ -25,8 +25,8 @@ opening. This design changes inline row lifetime, not full diff viewers.
 | --- | --- |
 | .1, .2, .3 | Timeline model; Virtual viewport; Complexity |
 | .4, .5 | Identity and interaction |
-| .6, .7 | Measurement and lifecycle; Section and child geometry |
-| .8 | Mobile composition; Section and child geometry |
+| .6, .7 | Measurement and lifecycle |
+| .8 | Mobile composition |
 | .9 | Commit detail ownership; Failure states |
 
 All criterion suffixes refer to `AC-UI-BOUNDED-CHANGES-001`.
@@ -136,55 +136,33 @@ current task/session/environment mapping and backend/auth context. Old requests
 cannot publish into a replacement context, including an A-to-B-to-A transition.
 Follow existing domain invalidation and unavailable-workspace rules.
 
-## Section and child geometry
+## Section spacing
 
-Flattening a section must preserve the spacing previously supplied by its
-normal-flow container. `TimelineSection` places `pb-3` after the complete
-section, while its header uses `mb-1` and `-mt-0.5`. Moving that footer padding
-onto a standalone header creates a large header-to-content gap and removes the
-separation before the next section. Singleton `space-y-0.5` lists also lose the
-spacing that previously separated their sibling rows.
+The [sidebar repair package](../../../plans/changes-sidebar-history-spacing/plan.md)
+implements existing geometry criteria .6 and .8. History and working-tree
+headers use one disclosure row, with descendants rendered as separate virtual
+items. Whole-section bottom padding does not belong inside these header rows.
 
-[PR #4145](https://github.com/kdlbs/kandev/pull/4145), inspected at head
-`489f509f0446`, owns header padding removal and disclosure geometry. Preserve
-its 28px desktop / at least 44px phone or coarse-pointer controls and direct
-first-descendant adjacency. Do not restore the legacy negative header margin
-or 4px header gap. Collapsed headers must remain compact.
+Both section kinds use one measured disclosure row: 28px at the standard root
+font on fine-pointer desktop, at least 44px on phone widths below 768px and
+coarse pointers. The header has no section-bottom padding or negative margins.
+Controls, counts, dots, and actions stay within the row. Section estimates
+match the corresponding presentation mode; positive measurements remain the
+authority for wrapping and font scaling. Do not set a fixed height on virtual
+wrappers or add spacer descriptors for this repair.
 
-Integrate that repair before measuring any remaining geometry defect. The
-original 10px expanded-section separation, 2px sibling gap, and 16px content
-gutter are reference targets for defects still present. Any required spacing
-belongs inside measured history-row shells, after the final visible child for
-section separation and between siblings for list gaps. Do not add an extra
-trailing sibling gap. Preserve tree depth indentation and existing file-control
-negative margins. Do not duplicate the colleague's header implementation.
+History repository sub-headers also keep at least 44px disclosure targets on
+phone widths, including fine pointers, and on coarse pointers. Their measured
+wrappers retain the existing repository-row padding and desktop density.
 
-Controlled expanded commits require the same treatment at their inner boundary.
-Where a defect remains, separately rendered files must retain `CommitRow` content padding
-and `CommitRowFiles` sibling spacing. Allocate the commit's trailing padding
-after its final visible child, preserving the collapsed header's padding.
-Repository and directory headers keep their existing indentation and controls.
+Rendered checks must measure the disclosures, header wrappers, and first
+descendants, as well as adjacent virtual transforms. Wrapper adjacency alone
+cannot detect excessive internal header padding. Exercise collapsed/expanded
+PR and commit sections, presentation refresh, and the 767/768px boundary with
+a fine pointer, plus phone/coarse-pointer target containment.
 
-Derive the section, list, and expanded-commit boundaries from semantic row inputs
-when the model changes. Record any required leading/trailing spacing on the
-descriptors or an equivalent local history-row shell projection. Recompute the
-final visible row on collapse, expansion, and accepted data updates. Apply the
-same spacing to the row's initial size estimate and its measured wrapper.
-This work must account for history rows split before and after the working tree.
-An empty working tree must not drop the separation between PR and Commits.
-
-Virtual wrappers remain contiguous. Inner padding represents deliberate blank
-space, so it participates in actual measurement and anchor restoration. An
-absolute-positioned group wrapper cannot supply that measured space. Do not add
-a global virtualizer gap, nested scroller, or fixed height to reproduce it.
-Keep the existing presentation invalidation and mounted-row refresh algorithm.
-Phone headers and rows retain their measured wrapping and 44px action targets.
-
-Browser regressions measure inner header/content and section gaps separately
-from wrapper contiguity. Cover PR plus commits, flat/tree files, expanded and
-collapsed commits, empty sections, repository groups, and refresh/resize/reopen.
-The [toolbar and section repair plan](../../../plans/changes-loading-feedback/plan.md)
-records the comparison against the earlier normal-flow rendering.
+Residual spacing verification after toolbar loading-row removal is tracked in
+[the Changes toolbar work order](../../../plans/changes-loading-feedback/task-02-section-spacing.md).
 
 ## Commit detail ownership
 
@@ -263,4 +241,3 @@ CSS hiding retains components, and nested scrollers weaken navigation.
 
 - [Implementation plan](../../../plans/bounded-changes-rendering/plan.md)
 - [Measurement refresh repair](../../../plans/changes-timeline-measurement-refresh/plan.md)
-- [Toolbar feedback and section spacing repair](../../../plans/changes-loading-feedback/plan.md)

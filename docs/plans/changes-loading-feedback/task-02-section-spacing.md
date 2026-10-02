@@ -1,7 +1,7 @@
 ---
 id: "02-section-spacing"
 title: "Verify and repair section spacing after PR 4145"
-status: pending
+status: done
 wave: 2
 depends_on:
   - "01-toolbar-loading"
@@ -90,11 +90,9 @@ This preview maps to AC-UI-BOUNDED-CHANGES-001.6 and `.8`.
 
 ## Implementation approach
 
-Integrate or rebase onto PR #4145 before changing residual spacing. If it is
-still open, this work order's production changes wait for its baseline to land.
-Task 01 may proceed with its independent toolbar/recovery scope.
-Run its existing header regression before adding residual cases.
-If no residual defect reproduces, record verification and omit a spacing patch.
+PR #4145 is merged. Verify its existing header regression before changing
+residual spacing. Task 01 may proceed independently. If no residual defect
+reproduces, record verification and omit a spacing patch.
 
 Use the existing bounded-rendering design's Section and child geometry rules.
 Derive section/list/expanded-commit boundaries alongside semantic descriptors,
@@ -209,12 +207,26 @@ The existing measurement-refresh repair remains the current measurement algorith
 
 Planning diagnostic: the disposable real-component Chromium comparison reproduced
 the lost section/sibling spacing and 16px child alignment shift. Its server,
-browser, and temporary files were removed. No production or permanent test changes
-were made. Production implementation and phone/expanded-commit verification are pending.
-PR #4145 at head `489f509f0446` covers header compaction. Remaining spacing work
-is verification-first and conditional on the integrated result.
+browser, and temporary files were removed. PR #4145 later landed at head
+`c5038084dc3d2a3f05294c0797e48905d5fb8953` in merge commit
+`0ec0538aa038f2e8b8617fb4f5be6128f0cedbac`; its header work remains unchanged.
 
-On 2026-10-02 at 04:01 WEST, PR #4145 remained open at head
-`c5038084dc3d2a3f05294c0797e48905d5fb8953`. The required integrated baseline is
-not available yet, so Task 02 production edits and post-merge browser measurements
-remain pending as specified above.
+The integrated five-file/two-commit fixture measured 0px sibling gaps, 0px
+expanded-section separation, and a 20px leftward content shift at 1280px before
+the repair. After the repair, it measures 2px between PR files, 10px before the
+next section, and a -4px file-to-header offset. PR #4145's 28px desktop headers,
+44px phone controls, and direct first-descendant adjacency remain intact.
+
+The expanded commit fixture measures 0px from the commit header wrapper to its
+first detail file, 2px between sibling detail files, and 6px after the final
+detail file before the next commit (4px commit footer plus 2px list gap).
+The virtualizer estimate includes each shell's measured spacing and removes the
+expanded header's displaced footer. Phone geometry passed at 393px and 767px
+with one scroll owner and no document overflow.
+
+Verification passed: seven focused Vitest suites (46 tests), desktop history
+regressions (6 tests), phone history regressions (4 tests), desktop and phone
+commit-spacing regressions (1 each), and expanded commit file navigation (1).
+The managed production Vite build, web typecheck, targeted ESLint, documentation
+catalog/specification checks, and `git diff --check` passed. The combined plan
+remains in progress while PR #4155's fixup and review continue.

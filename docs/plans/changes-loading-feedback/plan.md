@@ -56,12 +56,12 @@ No material open question blocks this local change.
 
 ### Coordination with PR #4145
 
-The user requests no duplicated work. The latest check on 2026-10-02 at
-03:41 WEST found [PR #4145](https://github.com/kdlbs/kandev/pull/4145) still
-open at head `c5038084dc3d2a3f05294c0797e48905d5fb8953`. Its changed files
-include the history row and working-tree rendering, geometry E2E coverage, and
-the bounded-rendering docs. Task 02 remains deferred until this PR lands; do not
-duplicate its header or history-spacing work.
+The user requests no duplicated work. [PR #4145](https://github.com/kdlbs/kandev/pull/4145)
+merged on 2026-10-02 at head `c5038084dc3d2a3f05294c0797e48905d5fb8953`
+with merge commit `0ec0538aa038f2e8b8617fb4f5be6128f0cedbac`. It owns the
+compact header and direct-child geometry. Task 02 measured the integrated
+baseline and repaired only the remaining gaps and content inset. Preserve its
+header design, spacing tests, and compact controls.
 
 Task 01's toolbar, tooltip, and refresh-recovery changes remain independent.
 After PR #4145 integrates, measure its rendered section geometry and repair only
@@ -269,7 +269,7 @@ header regressions, adding only residual checks. Task 02 specifies the gates.
 ## Work orders
 
 - [x] [Task 01: Consolidate Changes loading feedback](task-01-toolbar-loading.md)
-- [ ] [Task 02: Verify and repair remaining section spacing after #4145](task-02-section-spacing.md)
+- [x] [Task 02: Verify and repair remaining section spacing after #4145](task-02-section-spacing.md)
 
 ## Verification results
 
@@ -281,12 +281,13 @@ Design validation passed after the PR #4145 overlap reconciliation:
 - Repository `validateCoverage` preflight: both work orders and their UI/Platform delivery references are complete.
 - `git diff --check`: passed.
 
-The disposable desktop comparison above confirmed the section regression.
-Task 01 implementation and its desktop/phone regression tests now pass. Task 02
-production implementation and post-#4145 browser verification remain pending
-while PR #4145 is open at head `c5038084dc3d2a3f05294c0797e48905d5fb8953`
-(checked 2026-10-02 at 04:01 WEST).
-Exact commands are in Tasks 01 and 02.
+The disposable pre-#4145 desktop comparison confirmed the original regression.
+Task 01 and the post-merge Task 02 implementation and desktop/phone regression
+tests now pass. Task 02's integrated baseline measured 0px sibling spacing,
+0px section separation, and a 20px content-column shift; the repair measures
+2px sibling gaps, a 10px section gap, and the original 4px child inset while
+preserving compact headers. Exact commands and results are in Tasks 01 and 02.
+The combined plan remains in progress while PR #4155's fixup and review continue.
 
 Task 01 validation passed: 13 targeted Vitest files (88 tests), web typecheck,
 scoped ESLint, Prettier, locale generation and checks, public-doc validation,

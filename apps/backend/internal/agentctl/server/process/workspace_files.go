@@ -171,7 +171,10 @@ func (wt *WorkspaceTracker) buildFileTreeNode(safePath, relPath string, info os.
 	entries, err := os.ReadDir(safePath)
 	if err != nil {
 		wt.recordFilesystemFailure("workspace.file_tree", "user_select", err)
-		return node, nil // Return node without children on error
+		if currentDepth == 0 {
+			return nil, fmt.Errorf("failed to read directory: %w", err)
+		}
+		return node, nil
 	}
 
 	// Build children
