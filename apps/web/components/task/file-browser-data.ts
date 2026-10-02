@@ -48,9 +48,9 @@ export function useFileBrowserData(sessionId: string, environmentId: string | nu
   const gitStatus = useSessionGitStatus(sessionId);
   const folderAction = useTaskFolderAction(sessionId);
   const { copied, copy: copyPath } = useCopyToClipboard(1000);
-  const search = useFileBrowserSearch(sessionId);
   const resetKey = useFileBrowserResetKey(sessionId, environmentId);
   const cacheBinding = useFileTreeCacheBinding(environmentId ?? sessionId, resetKey);
+  const search = useFileBrowserSearch(sessionId, cacheBinding, resetKey);
   const treeState = useFileBrowserTree(sessionId, resetKey, cacheBinding);
   const isTreeLoaded = !treeState.isLoadingTree && treeState.tree !== null;
   const fileStatuses = useMemo(

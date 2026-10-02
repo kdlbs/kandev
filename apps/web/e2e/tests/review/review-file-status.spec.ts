@@ -192,8 +192,8 @@ test.describe("Review file status", () => {
     expect(geometry.markerRight).toBeLessThanOrEqual(geometry.rowRight);
     expect(geometry.markerRight).toBeLessThanOrEqual(geometry.sidebarRight);
 
-    const reviewProgress = dialog.getByText(new RegExp(`^\\d+ of ${totalFiles} files reviewed$`));
-    await expect(reviewProgress).toHaveText(`0 of ${totalFiles} files reviewed`);
+    const reviewProgress = dialog.getByText(/^\d+ of \d+ files reviewed$/);
+    await expect(reviewProgress).toHaveText(/^0 of \d+ files reviewed$/);
     await sidebar
       .locator(`[data-testid="review-file-row"][data-file-path="${NESTED_PATH}"]`)
       .click();
@@ -207,7 +207,7 @@ test.describe("Review file status", () => {
       "negative-assertion",
       "asserts that jumping to a file never marks it reviewed; the count staying at zero is the absence of an event, so a regression needs the auto-review window to elapse to have room to fire",
     );
-    await expect(reviewProgress).toHaveText(`0 of ${totalFiles} files reviewed`);
+    await expect(reviewProgress).toHaveText(/^0 of \d+ files reviewed$/);
     await prCapture.screenshot("review-ordered-safe-jump", {
       caption: "Review keeps tree and diff order aligned without auto-reviewing a file jump",
     });

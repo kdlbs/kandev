@@ -41,6 +41,7 @@ func TestWorkspaceTrackerDirtyFilesVisibleBeforeEnrichment(t *testing.T) {
 	t.Cleanup(tracker.Stop)
 	enrichmentStarted := make(chan struct{})
 	releaseEnrichment := make(chan struct{})
+	var enrichmentStartedOnce sync.Once
 	var released bool
 	defer func() {
 		if !released {
@@ -48,7 +49,7 @@ func TestWorkspaceTrackerDirtyFilesVisibleBeforeEnrichment(t *testing.T) {
 		}
 	}()
 	tracker.gitStatusBeforeEnrich = func() {
-		close(enrichmentStarted)
+		enrichmentStartedOnce.Do(func() { close(enrichmentStarted) })
 		<-releaseEnrichment
 	}
 

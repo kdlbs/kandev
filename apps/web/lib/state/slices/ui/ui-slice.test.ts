@@ -729,3 +729,23 @@ describe("sidebar view backend state", () => {
     });
   });
 });
+
+// @covers AC-AGENTS-RUNTIME-NOTIFY-001.3
+it("queues runtime notices arriving in one render and preserves their occurrence identities", () => {
+  const store = makeStore();
+  const gemini = {
+    version: "2.0.0",
+    agent_name: "gemini",
+    title: "Gemini",
+    body: "runtime update",
+    occurrence_id: "gemini-2",
+  };
+  const codex = { ...gemini, agent_name: "codex-app-server", occurrence_id: "codex-2" };
+  store.getState().setUpdateAvailableNotification(gemini);
+  store.getState().setUpdateAvailableNotification(codex);
+  expect(store.getState().updateAvailableNotification).toEqual(gemini);
+  store.getState().setUpdateAvailableNotification(null);
+  expect(store.getState().updateAvailableNotification).toEqual(codex);
+  store.getState().setUpdateAvailableNotification(null);
+  expect(store.getState().updateAvailableNotification).toBeNull();
+});

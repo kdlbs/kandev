@@ -27,8 +27,11 @@ The state transitions are separate operations. Inspect the diff before staging, 
 ### When task and PR histories differ
 
 For an associated pull request, Kandev keeps the task checkout and the published PR history
-separate when their commit histories differ. It may identify a completed local rebase when the
-current repository evidence supports that explanation. If the evidence is missing or incomplete,
+separate when current evidence confirms that both histories contain commits absent from the other.
+Different head commits alone can also mean that one version is simply ahead. When cached upstream
+data cannot establish the relationship to the current PR head, Kandev keeps a unified history and
+withholds remote mutation actions until it has enough evidence. It may identify a completed local
+rebase when the current repository evidence supports that explanation. If the evidence is missing or incomplete,
 Kandev uses neutral wording instead of guessing which history changed.
 
 Choose **Compare versions** first. Kandev opens **Changes** with the task and PR histories visible;

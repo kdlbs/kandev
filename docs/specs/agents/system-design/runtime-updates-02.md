@@ -100,10 +100,9 @@ This design preserves the technical source detail for `REQ-AGENTS-RUNTIME-UPDATE
 
 ## Out of scope
 
-- Automatic runtime installation, selection changes outside default-generation
-  activation, and automatic rollback after launch failure.
-- Global npm cache cleanup, registry replacement, dependency substitution, or
-  automatic selection of another package version.
+- Automatic rollback after launch failure. Opt-in runtime installation and
+  selection are defined by [runtime update notifications](runtime-update-notifications.md).
+- Global npm cache cleanup, registry replacement, or dependency substitution.
 - Prerelease, tag, arbitrary package-spec, registry, or shell-command input.
 - Kandev-owned npm artifact retention or a package lockfile.
 - Removing npm or network access from the launch path, or locking transitive

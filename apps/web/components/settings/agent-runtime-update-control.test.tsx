@@ -40,6 +40,20 @@ vi.mock("@kandev/ui/drawer", () => ({
 const AGENT_NAME = "claude-acp";
 const PACKAGE_NAME = "@agentclientprotocol/claude-agent-acp";
 const ACTIVE_VERSION = "0.70.0";
+const RUNTIME_STATUS_META = {
+  display_name: "Claude",
+  runtime_id: "npm:" + PACKAGE_NAME,
+  owner: "kandev",
+  mechanism: "npm_candidate",
+  management: "managed",
+  source: PACKAGE_NAME,
+  guidance_url: "",
+  current_version: ACTIVE_VERSION,
+  available: true,
+  enabled: true,
+  auto_update_supported: true,
+  auto_update: false,
+} as const;
 
 function preview(overrides: Partial<AgentUpdatePreview> = {}): AgentUpdatePreview {
   return {
@@ -164,6 +178,7 @@ describe("AgentRuntimeUpdateControl", () => {
           effective_version: ACTIVE_VERSION,
         }}
         runtimeUpdateStatus={{
+          ...RUNTIME_STATUS_META,
           agent_name: AGENT_NAME,
           package: PACKAGE_NAME,
           default_version: ACTIVE_VERSION,
@@ -196,6 +211,7 @@ describe("AgentRuntimeUpdateControl", () => {
           effective_version: ACTIVE_VERSION,
         }}
         runtimeUpdateStatus={{
+          ...RUNTIME_STATUS_META,
           agent_name: AGENT_NAME,
           package: PACKAGE_NAME,
           default_version: ACTIVE_VERSION,
@@ -233,6 +249,7 @@ describe("AgentRuntimeUpdateControl", () => {
           effective_version: ACTIVE_VERSION,
         }}
         runtimeUpdateStatus={{
+          ...RUNTIME_STATUS_META,
           agent_name: AGENT_NAME,
           package: PACKAGE_NAME,
           default_version: ACTIVE_VERSION,

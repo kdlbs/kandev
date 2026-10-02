@@ -167,7 +167,7 @@ The status shown on this page is authoritative for the current host. A CLI that 
 ### Update a managed agent runtime
 
 The update icon is available on managed Claude, Codex, OpenCode, Copilot,
-Gemini, Pi, and Muse agent cards. It updates the runtime on the Kandev host.
+Gemini, Pi, and Muse agent cards when Kandev owns their managed runtime. It prepares the runtime on the Kandev host.
 
 Each managed runtime has a reviewed Kandev default. If you have not selected a
 version, Kandev uses that exact default for probes, sessions, standalone
@@ -201,14 +201,14 @@ the control has no dot but remains usable.
 2. Review the current version, active version, available stable versions, and command.
 3. Keep the latest version selected for a normal update, or select an older stable version to roll back.
 4. Select **Update runtime**, **Roll back runtime**, or **Repair runtime**.
-5. Wait for the exact version to prepare and pass its ACP capability probe.
+5. Wait for the exact version to prepare and pass its runtime capability probe.
 
-OpenCode has one additional host-runtime rule. When the `opencode` executable
-is on the Kandev host `PATH`, the update installs the selected `opencode-ai`
-package version globally and the follow-up capability probe runs that same
-executable. Containers, SSH executors, and hosts without that executable keep
-using the managed `npx` runtime. This keeps the update result aligned with the
-runtime that Kandev will use for host utility calls.
+When the `opencode` executable is on the Kandev host `PATH`, Kandev treats it
+as externally managed. The runtime update section links to OpenCode's supported
+upgrade guidance instead of changing a global installation. Hosts without that
+executable use the managed `npx` runtime. Containers and SSH executors retain
+their existing executor-safe command and selected version; updating an external
+host CLI does not update those environments.
 
 Kandev enables the action only after the backend validates the selected version
 against the trusted package catalogue. It does not accept package names, npm
@@ -226,6 +226,8 @@ configuration options, commands, and runtime version without a page reload.
   in their own environment. Running sessions and containers are unchanged.
 - If preparation, ACP validation, authentication, or persistence fails, Kandev keeps the previous active version and capability catalogue. Select another stable version or retry the same target.
 - Kandev may prepare the exact version again if npm removes its cache entry. Kandev does not own an offline package inventory, and global npm cache cleanup is not required.
+
+When a native OpenCode installation is present on the host, its vendor update guidance stays separate from **Manage fallback versions**. That control selects the managed package used by remote and container launches; it does not update the native host or a remote native installation. Update, rollback and return to the Kandev default remain available for the managed fallback. A rejected or busy manual request leaves automatic-update consent unchanged; an accepted manual selection turns it off.
 
 #### Recover a stale npm runtime lookup
 
@@ -272,6 +274,48 @@ uses the expected npm installation and configured registry. Run `npm config get 
 
 <details>
 <summary>Add a custom terminal agent</summary>
+
+### Runtime notifications and automatic updates
+
+Kandev checks enabled, available agent runtimes in the background, including
+native CLIs with a verified release source. Outside Settings, an **agent runtime
+updates** indicator remains visible while a known newer version is available.
+Notifications name the affected runtime and link directly to its row in
+**Settings > Agents > Agent runtime updates**. The existing update-available
+notification preferences apply; repeated notices for the same runtime and version
+are suppressed across reloads.
+
+The runtime section shows the selected or observed version, latest known version,
+and who manages the installation. **Unknown** means Kandev could not verify the
+version or release source. It does not mean the runtime is up to date. Unavailable
+and disabled registrations remain listed separately, without background checks.
+Offline and source failures do not create error notifications.
+
+Automatic updates are off by default. An administrator can enable **Automatic
+updates** for each eligible managed runtime, then select the shared **Save changes**
+action. This consent applies to the Kandev installation and survives reloads.
+Kandev checks on startup and every 15 minutes; successful release lookups are
+cached for six hours and failed lookups for 15 minutes.
+
+An automatic update prepares a stable exact version and validates it before
+activating it for future launches. Running sessions keep their existing process
+and version. The retained result records the old and target versions. If
+preparation, validation, or activation fails, that attempt preserves the previous
+selection. Kandev reports the failure and does not repeatedly retry that target. An interrupted
+update has an unconfirmed result; review the current selection before retrying.
+
+Use **Manage versions** to retry manually, choose an older stable version, or
+return to the Kandev default. A manual version choice turns off automatic updates,
+so Kandev does not undo your choice. Disabling automatic updates also prevents a
+candidate still being prepared from activating. To retry automatically after a
+failure, turn the option off and save, then turn it on and save again.
+
+Externally managed npm packages and native CLIs show **Manual update guidance**
+when vendor documentation is available. Their supported vendor or package-manager
+updates remain owned by the operator. Kandev does not infer update authority from
+`PATH` or run an unverified global updater. Custom commands, virtual agents, and
+other runtimes without a supported updater explicitly show the unsupported state.
+
 
 ### Add a custom terminal agent
 
