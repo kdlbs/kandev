@@ -527,6 +527,8 @@ Example request and normal operation result:
 
 Read-only Git actions used by the Changes panel include `session.commit_diff`, `session.git.commits`, `session.cumulative_diff`, and `session.git.snapshots`. See [WebSocket API](websocket-api.md) for transport and subscription behavior.
 
+Commit details and cumulative Review take each file's added, deleted, renamed, or modified status from Git change metadata; matching words in a filename or patch content do not change its status.
+
 `agentctl` also implements `/api/v1/git/*` HTTP routes inside the execution runtime. Those routes are an internal backend-to-runtime control surface, not the public Kandev backend API. External clients should not discover or expose executor-local agentctl ports; use the registered Kandev WebSocket actions.
 
 </details>
