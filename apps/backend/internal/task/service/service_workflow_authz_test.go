@@ -147,11 +147,11 @@ func TestTaskCountsDenyForeignWorkflowAndStep(t *testing.T) {
 	svc, _, repo := createTestService(t)
 	seedAuthzWorkflowFixture(t, svc, repo)
 
-	if _, err := svc.CountTasksByWorkflow(ctxAs("user-a"), "wf-b"); !errors.Is(err, repoerrors.ErrWorkspaceNotFound) {
-		t.Fatalf("foreign workflow count error = %v, want ErrWorkspaceNotFound", err)
+	if _, err := svc.CountTasksByWorkflow(ctxAs("user-a"), "wf-b"); !errors.Is(err, repoerrors.ErrWorkflowNotFound) {
+		t.Fatalf("foreign workflow count error = %v, want ErrWorkflowNotFound", err)
 	}
-	if _, err := svc.CountTasksByWorkflowStep(ctxAs("user-a"), "step-b-1"); !errors.Is(err, repoerrors.ErrWorkspaceNotFound) {
-		t.Fatalf("foreign step count error = %v, want ErrWorkspaceNotFound", err)
+	if _, err := svc.CountTasksByWorkflowStep(ctxAs("user-a"), "step-b-1"); !errors.Is(err, repoerrors.ErrWorkflowNotFound) {
+		t.Fatalf("foreign step count error = %v, want ErrWorkflowNotFound", err)
 	}
 	if count, err := svc.CountTasksByWorkflow(ctxAs("user-b"), "wf-b"); err != nil || count != 1 {
 		t.Fatalf("owner workflow count = %d, %v; want 1, nil", count, err)

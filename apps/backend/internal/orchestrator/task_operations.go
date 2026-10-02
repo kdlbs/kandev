@@ -1075,6 +1075,8 @@ func (s *Service) wrapCreatedSessionPrompt(
 			s.WorkflowStepRequiresCompletionSignal(ctx, dbTask.WorkflowStepID),
 			referenceContext, promptReferenceContext, pullRequestTargetContext,
 		)
+	case dbTask.Origin == models.TaskOriginCoordinator:
+		return s.wrapCoordinatorStandingInstructions(ctx, prompt, dbTask)
 	default:
 		return sysprompt.InjectKandevContextWithOptions(taskID, sessionID, prompt, sysprompt.KandevContextOptions{
 			RequiresCompletionSignal:       s.WorkflowStepRequiresCompletionSignal(ctx, dbTask.WorkflowStepID),
@@ -4577,6 +4579,11 @@ const (
 	autoResumeBlockedLaunchQueued         = "launch_queued"
 	autoResumeBlockedOwnershipUnavailable = "ownership_unavailable"
 	autoResumeBlockedDynamicRoute         = "dynamic_route_pending"
+	// autoResumeBlockedCoordinatorMessageOnly blocks passive/startup/reconnect
+	// resume of a coordinator conversation task
+	// (docs/specs/coordinator/system-design/copilot.md#attended-only): the
+	// session may only be resumed by a manager's message.add turn start.
+	autoResumeBlockedCoordinatorMessageOnly = "coordinator_message_only"
 )
 
 func (s *Service) sessionOpenRecoveryBlockReason(
@@ -4609,6 +4616,9 @@ func (s *Service) autoResumeEligibility(
 ) (bool, string) {
 	if session == nil || task == nil {
 		return false, autoResumeBlockedOwnershipUnavailable
+	}
+	if task.Origin == models.TaskOriginCoordinator {
+		return false, autoResumeBlockedCoordinatorMessageOnly
 	}
 	if session.RouteState != "" && session.RouteState != dynamicRouteStatusActive {
 		return false, autoResumeBlockedDynamicRoute

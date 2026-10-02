@@ -252,6 +252,12 @@ func (s *Service) CreateTask(ctx context.Context, req *CreateTaskRequest) (Creat
 	if err != nil {
 		return CreateTaskResult{}, err
 	}
+	if err := refuseReservedExternalIDPrefix(externalID, req.AllowReservedExternalID); err != nil {
+		return CreateTaskResult{}, err
+	}
+	if err := refuseReservedMetadata(req.Metadata, req.AllowReservedMetadata); err != nil {
+		return CreateTaskResult{}, err
+	}
 	req.ExternalID = externalID
 
 	if found, result, err := s.findTaskByExternalIDIfPresent(ctx, req.WorkspaceID, externalID); found {
@@ -2022,6 +2028,9 @@ func (s *Service) hydrateTaskRelations(ctx context.Context, task *models.Task) {
 // UpdateTask updates an existing task and publishes a task.updated event
 func (s *Service) UpdateTask(ctx context.Context, id string, req *UpdateTaskRequest) (*models.Task, error) {
 	if err := s.authorizeTaskScope(ctx, id, authz.ScopeTaskWrite); err != nil {
+		return nil, err
+	}
+	if err := refuseReservedMetadata(req.Metadata, req.AllowReservedMetadata); err != nil {
 		return nil, err
 	}
 	if req.Title != nil {

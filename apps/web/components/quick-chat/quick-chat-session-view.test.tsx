@@ -33,6 +33,7 @@ const useSessionResumption = vi.hoisted(() =>
   })),
 );
 const useTaskStatusSummary = vi.hoisted(() => vi.fn());
+const quickChatContentSpy = vi.hoisted(() => vi.fn());
 const TEST_IDS = vi.hoisted(() => ({
   sessionRecoveryCard: "session-bootstrap-recovery-card",
   quickChatContent: "quick-chat-content",
@@ -56,7 +57,10 @@ vi.mock("@/components/task/passthrough-terminal", () => ({
   PassthroughTerminal: () => <div data-testid="passthrough-terminal" />,
 }));
 vi.mock("./quick-chat-content", () => ({
-  QuickChatContent: () => <div data-testid={TEST_IDS.quickChatContent} />,
+  QuickChatContent: (props: Record<string, unknown>) => {
+    quickChatContentSpy(props);
+    return <div data-testid={TEST_IDS.quickChatContent} />;
+  },
 }));
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({ t: (key: string) => key }),
@@ -97,7 +101,9 @@ describe("QuickChatSessionView session resumption", () => {
 
     render(<QuickChatSessionView session={{ ...session, taskId: DESCRIPTOR_TASK_ID }} />);
 
-    expect(useSessionResumption).toHaveBeenCalledWith(DESCRIPTOR_TASK_ID, session.sessionId, null);
+    expect(useSessionResumption).toHaveBeenCalledWith(DESCRIPTOR_TASK_ID, session.sessionId, null, {
+      skipAutomaticRecovery: false,
+    });
   });
 
   it("waits for session hydration before resuming a descriptor task", () => {
@@ -105,7 +111,9 @@ describe("QuickChatSessionView session resumption", () => {
       <QuickChatSessionView session={{ ...session, taskId: DESCRIPTOR_TASK_ID }} />,
     );
 
-    expect(useSessionResumption).toHaveBeenLastCalledWith(null, session.sessionId, null);
+    expect(useSessionResumption).toHaveBeenLastCalledWith(null, session.sessionId, null, {
+      skipAutomaticRecovery: false,
+    });
 
     sessionRows[session.sessionId] = { task_id: HYDRATED_TASK_ID };
     view.rerender(<QuickChatSessionView session={{ ...session, taskId: DESCRIPTOR_TASK_ID }} />);
@@ -114,6 +122,7 @@ describe("QuickChatSessionView session resumption", () => {
       DESCRIPTOR_TASK_ID,
       session.sessionId,
       null,
+      { skipAutomaticRecovery: false },
     );
   });
 
@@ -122,7 +131,9 @@ describe("QuickChatSessionView session resumption", () => {
 
     render(<QuickChatSessionView session={session} />);
 
-    expect(useSessionResumption).toHaveBeenCalledWith(HYDRATED_TASK_ID, session.sessionId, null);
+    expect(useSessionResumption).toHaveBeenCalledWith(HYDRATED_TASK_ID, session.sessionId, null, {
+      skipAutomaticRecovery: false,
+    });
   });
 
   it("passes the hydrated task archive state to session recovery", () => {
@@ -131,13 +142,17 @@ describe("QuickChatSessionView session resumption", () => {
 
     render(<QuickChatSessionView session={session} />);
 
-    expect(useSessionResumption).toHaveBeenCalledWith(HYDRATED_TASK_ID, session.sessionId, true);
+    expect(useSessionResumption).toHaveBeenCalledWith(HYDRATED_TASK_ID, session.sessionId, true, {
+      skipAutomaticRecovery: false,
+    });
   });
 
   it("uses hydrated Quick Chat ownership when the ephemeral task is absent from kanban tasks", () => {
     const view = render(<QuickChatSessionView session={session} />);
 
-    expect(useSessionResumption).toHaveBeenLastCalledWith(null, session.sessionId, null);
+    expect(useSessionResumption).toHaveBeenLastCalledWith(null, session.sessionId, null, {
+      skipAutomaticRecovery: false,
+    });
 
     quickChatSessions.push({ sessionId: session.sessionId, taskId: HYDRATED_TASK_ID });
     view.rerender(<QuickChatSessionView session={session} />);
@@ -146,13 +161,16 @@ describe("QuickChatSessionView session resumption", () => {
       HYDRATED_TASK_ID,
       session.sessionId,
       false,
+      { skipAutomaticRecovery: false },
     );
   });
 
   it("passes a null task id until session hydration provides one", () => {
     const view = render(<QuickChatSessionView session={session} />);
 
-    expect(useSessionResumption).toHaveBeenLastCalledWith(null, session.sessionId, null);
+    expect(useSessionResumption).toHaveBeenLastCalledWith(null, session.sessionId, null, {
+      skipAutomaticRecovery: false,
+    });
 
     sessionRows[session.sessionId] = { task_id: "task-after-hydration" };
     view.rerender(<QuickChatSessionView session={session} />);
@@ -161,6 +179,7 @@ describe("QuickChatSessionView session resumption", () => {
       "task-after-hydration",
       session.sessionId,
       null,
+      { skipAutomaticRecovery: false },
     );
   });
 
@@ -287,5 +306,73 @@ describe("QuickChatSessionView session resumption", () => {
     );
     expect(screen.getByTestId("passthrough-terminal")).toBeTruthy();
     expect(screen.queryByTestId(TEST_IDS.quickChatContent)).toBeNull();
+  });
+});
+
+// @covers task-05-popover-shell.md#build-decisions "automaticRecovery" "hideSessionSelectors" "taskArchiveState" "initialDraft" "transformOutgoing"
+describe("QuickChatSessionView new props", () => {
+  it("maps automaticRecovery false to skipAutomaticRecovery true", () => {
+    sessionRows[session.sessionId] = { task_id: HYDRATED_TASK_ID };
+
+    render(<QuickChatSessionView session={session} automaticRecovery={false} />);
+
+    expect(useSessionResumption).toHaveBeenCalledWith(HYDRATED_TASK_ID, session.sessionId, null, {
+      skipAutomaticRecovery: true,
+    });
+  });
+
+  it("keeps skipAutomaticRecovery false when automaticRecovery is left at its default", () => {
+    sessionRows[session.sessionId] = { task_id: HYDRATED_TASK_ID };
+
+    render(<QuickChatSessionView session={session} />);
+
+    expect(useSessionResumption).toHaveBeenCalledWith(HYDRATED_TASK_ID, session.sessionId, null, {
+      skipAutomaticRecovery: false,
+    });
+  });
+
+  it("overrides resolveTaskArchiveState with an explicit taskArchiveState prop, null included", () => {
+    sessionRows[session.sessionId] = { task_id: HYDRATED_TASK_ID };
+    useTask.mockReturnValue({ isArchived: true });
+
+    render(<QuickChatSessionView session={session} taskArchiveState={null} />);
+
+    expect(useSessionResumption).toHaveBeenCalledWith(HYDRATED_TASK_ID, session.sessionId, null, {
+      skipAutomaticRecovery: false,
+    });
+  });
+
+  it("forwards hideSessionSelectors to QuickChatContent's minimalToolbar", () => {
+    render(<QuickChatSessionView session={session} hideSessionSelectors />);
+
+    expect(quickChatContentSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ minimalToolbar: true }),
+    );
+  });
+
+  it("keeps kind config's minimal toolbar when hideSessionSelectors is left unset", () => {
+    render(<QuickChatSessionView session={{ ...session, kind: "config" }} />);
+
+    expect(quickChatContentSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ minimalToolbar: true }),
+    );
+  });
+
+  it("forwards initialDraft to QuickChatContent unchanged", () => {
+    render(<QuickChatSessionView session={session} initialDraft="why is KAN-418 here?" />);
+
+    expect(quickChatContentSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ initialDraft: "why is KAN-418 here?" }),
+    );
+  });
+
+  it("forwards transformOutgoing to QuickChatContent unchanged", () => {
+    const transformOutgoing = (message: string) => `About t-1: ${message}`;
+
+    render(<QuickChatSessionView session={session} transformOutgoing={transformOutgoing} />);
+
+    expect(quickChatContentSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ transformOutgoing }),
+    );
   });
 });

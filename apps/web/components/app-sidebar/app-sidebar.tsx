@@ -23,6 +23,7 @@ import { AppSidebarResizeHandle } from "./app-sidebar-resize-handle";
 import { AppSidebarSettingsMode } from "./app-sidebar-settings-mode";
 import { AgentsSection } from "./sections/agents-section";
 import { AutomationsSection } from "./sections/automations-section";
+import { CoordinatorsSection } from "./sections/coordinators-section";
 import { CanvasesSection } from "./sections/canvases-section";
 import { IntegrationsSection } from "./sections/integrations-section";
 import { OfficeNavigationSection } from "./sections/office-navigation-section";
@@ -65,6 +66,7 @@ function AppSidebarUnresolvedNav({ collapsed }: { collapsed: boolean }) {
   return (
     <div className="flex flex-col gap-1" data-testid="app-sidebar-scroll">
       <AppSidebarPrimaryNav collapsed={collapsed} />
+      <CoordinatorsSection collapsed={collapsed} />
       <PluginNavItems collapsed={collapsed} />
     </div>
   );
@@ -89,6 +91,7 @@ function AppSidebarModeNav({ collapsed, inOffice }: { collapsed: boolean; inOffi
             {/* Directly under New Task: an automation is a thing you keep, the
                 same weight as a project, and the list IS the nav — picking one
                 opens its history rather than a settings form. */}
+            <CoordinatorsSection collapsed={collapsed} />
             {!inOffice && <AutomationsSection collapsed={collapsed} />}
             {!inOffice && <CanvasesSection collapsed={collapsed} />}
             <PluginNavItems collapsed={collapsed} />

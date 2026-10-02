@@ -43,6 +43,7 @@ import {
   defaultFeaturesState,
   defaultAuthState,
   defaultAutomationsState,
+  defaultCoordinatorsState,
   defaultSystemState,
   defaultPluginsState,
   defaultReviewState,
@@ -218,6 +219,9 @@ export type AppState = KanbanSlice & {
   // Automations slice
   automations: (typeof defaultAutomationsState)["automations"];
   automationRuns: (typeof defaultAutomationsState)["automationRuns"];
+
+  // Coordinators slice
+  coordinators: (typeof defaultCoordinatorsState)["coordinators"];
 
   // System slice (actions merged via SystemSliceActions intersection on AppState)
   system: (typeof defaultSystemState)["system"];

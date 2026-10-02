@@ -556,6 +556,17 @@ type FeaturesConfig struct {
 	// an adoption handshake, which is untested there).
 	AgentSurvival bool `mapstructure:"agent_survival" json:"agentSurvival"`
 
+	// Coordinator gates workspace coordinators: a per-workspace agent
+	// configuration whose copilot conversation proposes ordinary, unstarted
+	// tasks for a human to approve. Off in prod/dev until the feature is
+	// user-ready; on in e2e so tests exercise it.
+	Coordinator bool `mapstructure:"coordinator" json:"coordinator"`
+
+	// CoordinatorPhase2 gates the coordinator control surface (policy,
+	// watches, standing orders, goals, activity log and the new proposal
+	// kinds). It only takes effect together with Coordinator.
+	CoordinatorPhase2 bool `mapstructure:"coordinator_phase2" json:"coordinatorPhase2"`
+
 	// CodexAppServer enables the separate native Codex app-server agent. It is
 	// off in every shipped profile and requires a restart because its protocol
 	// adapter and profile catalogue are composed at startup.

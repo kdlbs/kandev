@@ -17,6 +17,7 @@ export type { SessionBackendMessageMap } from "./session-events";
 export type { OfficeEventType, OfficeEventPayload } from "./office-events";
 import type { RunEventAppendedPayload } from "./run-events";
 export type { RunEventAppendedPayload } from "./run-events";
+import type { CoordinatorUpdatedPayload } from "@/lib/api/domains/coordinator-api";
 
 import type {
   Agent,
@@ -536,6 +537,7 @@ export type BackendMessageMap = SessionBackendMessageMap &
     "workspace.created": BackendMessage<"workspace.created", WorkspacePayload>;
     "workspace.updated": BackendMessage<"workspace.updated", WorkspacePayload>;
     "workspace.deleted": BackendMessage<"workspace.deleted", WorkspacePayload>;
+    "coordinator.updated": BackendMessage<"coordinator.updated", CoordinatorUpdatedPayload>;
     "repository_set.created": BackendMessage<"repository_set.created", RepositorySetPayload>;
     "repository_set.updated": BackendMessage<"repository_set.updated", RepositorySetPayload>;
     "repository_set.deleted": BackendMessage<"repository_set.deleted", RepositorySetPayload>;

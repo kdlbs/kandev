@@ -20,6 +20,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/runtime/activity"
 	"github.com/kandev/kandev/internal/agent/settings/cliflags"
 	"github.com/kandev/kandev/internal/agentruntime"
+	"github.com/kandev/kandev/internal/common/mcpmode"
 	"github.com/kandev/kandev/internal/common/subproc"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/gitconfigenv"
@@ -350,6 +351,15 @@ func buildLaunchMetadata(req *LaunchRequest, mainRepoGitDir, worktreeID, worktre
 			metadata[mcpprofile.ManagedToolPolicyMetadataKey] = encoded
 		}
 	}
+	delete(metadata, mcpprofile.CoordinatorToolPolicyMetadataKey)
+	if req.McpProfile != nil && req.McpProfile.CoordinatorToolPolicy != nil {
+		encoded, err := mcpprofile.MarshalCoordinatorToolPolicy(*req.McpProfile.CoordinatorToolPolicy)
+		if err != nil {
+			metadata[mcpprofile.CoordinatorToolPolicyMetadataKey] = map[string]any{"invalid": true}
+		} else {
+			metadata[mcpprofile.CoordinatorToolPolicyMetadataKey] = encoded
+		}
+	}
 	putPrimaryCheckoutOptions(metadata, req)
 	for k, v := range req.ExecutorConfig {
 		if isTrustedExecutorConfigKey(k) {
@@ -357,6 +367,9 @@ func buildLaunchMetadata(req *LaunchRequest, mainRepoGitDir, worktreeID, worktre
 			// or buggy task metadata payload can't swap out the SSH host /
 			// pinned fingerprint and pivot the launch to a different target.
 			metadata[k] = v
+			continue
+		}
+		if k == mcpprofile.CoordinatorToolPolicyMetadataKey {
 			continue
 		}
 		if _, exists := metadata[k]; !exists {
@@ -1268,6 +1281,13 @@ func (m *Manager) launchBuildExecutorRequest(ctx context.Context, executionID st
 	var autoApproveOverride *bool
 	if profileInfo != nil {
 		autoApproveOverride = boolPtr(profileInfo.AutoApprove)
+	}
+	// A coordinator session ignores the profile's auto-approve flag and the
+	// agentctl auto-approve environment variable: only the exact six
+	// coordinator tool names are auto-approved, decided by agentctl's own
+	// mode check (docs/specs/coordinator/system-design/copilot.md#permission-policy).
+	if reqWithWorktree.McpMode == mcpmode.Coordinator {
+		autoApproveOverride = boolPtr(false)
 	}
 
 	providerGatewayAuth, providerKeyEnvVar, providerKey, err := m.resolveProviderGatewayAuth(

@@ -5170,7 +5170,7 @@ func (r *Repository) ListExpiredQuickChatTasks(ctx context.Context, cutoff time.
 			LEFT JOIN task_sessions ts ON ts.task_id = t.id
 			WHERE t.is_ephemeral = 1
 				AND COALESCE(t.workflow_id, '') = ''
-				AND COALESCE(t.origin, '') != ?
+				AND COALESCE(t.origin, '') NOT IN (?, ?)
 				AND %s
 				AND t.archived_at IS NULL
 				AND NOT EXISTS (
@@ -5193,6 +5193,7 @@ func (r *Repository) ListExpiredQuickChatTasks(ctx context.Context, cutoff time.
 	)
 	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(query),
 		models.TaskOriginAutomationRun,
+		models.TaskOriginCoordinator,
 		models.TaskSessionStateRunning,
 		models.TaskSessionStateIdle,
 		cutoff,
@@ -5218,7 +5219,7 @@ func (r *Repository) DeleteExpiredQuickChatTask(ctx context.Context, id string, 
 			WHERE t.id = ?
 				AND t.is_ephemeral = 1
 				AND COALESCE(t.workflow_id, '') = ''
-				AND COALESCE(t.origin, '') != ?
+				AND COALESCE(t.origin, '') NOT IN (?, ?)
 				AND %s
 				AND t.archived_at IS NULL
 				AND NOT EXISTS (
@@ -5240,6 +5241,7 @@ func (r *Repository) DeleteExpiredQuickChatTask(ctx context.Context, id string, 
 	result, err := r.db.ExecContext(ctx, r.db.Rebind(query),
 		id,
 		models.TaskOriginAutomationRun,
+		models.TaskOriginCoordinator,
 		models.TaskSessionStateRunning,
 		models.TaskSessionStateIdle,
 		cutoff,
@@ -5250,6 +5252,29 @@ func (r *Repository) DeleteExpiredQuickChatTask(ctx context.Context, id string, 
 	}
 	rows, _ := result.RowsAffected()
 	return rows > 0, nil
+}
+
+// ListCoordinatorOriginTasks returns every task with origin "coordinator"
+// (all workspaces when workspaceID is empty), ordered by id
+// (docs/specs/coordinator/system-design/copilot.md#conversation-cleanup).
+// Archived and unarchived tasks are both included: the coordinator deletion
+// and startup cleanup callers both need to see and act on archived rows too.
+// coordinator_id is read from the returned Metadata in Go, so this query has
+// no dialect-specific JSON extraction.
+func (r *Repository) ListCoordinatorOriginTasks(ctx context.Context, workspaceID string) ([]*models.Task, error) {
+	query := fmt.Sprintf(`SELECT %s FROM tasks t WHERE t.origin = ?`, taskSelectColumns("t"))
+	args := []interface{}{models.TaskOriginCoordinator}
+	if workspaceID != "" {
+		query += " AND t.workspace_id = ?"
+		args = append(args, workspaceID)
+	}
+	query += " ORDER BY t.id"
+	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(query), args...)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	return r.scanTasks(rows)
 }
 
 // isSafeMetadataKey reports whether s is a safe JSON metadata key to splice

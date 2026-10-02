@@ -12,6 +12,9 @@ import type { AppState } from "@/lib/state/store";
 import { MessageActions } from "./message-actions";
 
 const TOUCH_DRAWER = vi.hoisted(() => ({ enabled: false }));
+const { copyToClipboard } = vi.hoisted(() => ({
+  copyToClipboard: vi.fn().mockResolvedValue(true),
+}));
 const FORK = vi.hoisted(() => ({ request: vi.fn() }));
 
 vi.mock("@/lib/services/session-launch-service", () => ({
@@ -21,6 +24,8 @@ vi.mock("@/lib/services/session-launch-service", () => ({
 vi.mock("@/hooks/use-compact-task-chrome", () => ({
   useTouchDrawer: () => TOUCH_DRAWER.enabled,
 }));
+
+vi.mock("@/lib/utils/copy-to-clipboard", () => ({ copyToClipboard }));
 
 const MESSAGE_TIMESTAMP = "2026-07-20T10:15:00Z";
 const MESSAGE_TURN_DURATION_TEST_ID = "message-turn-duration";
@@ -95,7 +100,23 @@ afterEach(() => {
   TOUCH_DRAWER.enabled = false;
   cleanup();
   storeApi = null;
+  copyToClipboard.mockClear();
   FORK.request.mockReset();
+});
+
+describe("MessageActions copy", () => {
+  it("copies the full stored text, prefix included, for a coordinator About-prefixed message", () => {
+    const content = "About KAN-418: why is this here?";
+    render(
+      <StateProvider>
+        <MessageActions message={userMessage({ content })} />
+      </StateProvider>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /copy message to clipboard/i }));
+
+    expect(copyToClipboard).toHaveBeenCalledWith(content);
+  });
 });
 
 describe("MessageActions timestamp tooltip", () => {

@@ -33,6 +33,7 @@
   "configurationChat": "設定聊天",
   "configurationChatDescription": "讓代理程式更新 Kandev 設定、工作流程、代理程式設定檔和 MCP 設定。",
   "configurationChatTab": "設定聊天",
+  "coordinatorAboutTag": "關於 {{id}}",
   "delete": "刪除",
   "deleteQuickChat": "刪除快速聊天？",
   "deleteQuickChatIntro": "這將永久刪除此快速聊天工作階段，包括：",

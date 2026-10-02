@@ -10,6 +10,8 @@ const (
 	External         = "external"
 	Office           = "office"
 	Automation       = "automation"
+	// Coordinator identifies a workspace coordinator's conversation session.
+	Coordinator = "coordinator"
 )
 
 var instanceModes = [...]string{
@@ -18,6 +20,7 @@ var instanceModes = [...]string{
 	Config,
 	Office,
 	Automation,
+	Coordinator,
 }
 
 // InstanceModes returns the modes accepted by the agentctl instance API.

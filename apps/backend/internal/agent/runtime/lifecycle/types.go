@@ -1666,6 +1666,14 @@ type WorkspaceInfo struct {
 	RuntimeName      agentruntime.Runtime   // Runtime name from ExecutorRunning record
 	AgentExecutionID string                 // Previous execution ID (for remote reconnect)
 	Metadata         map[string]interface{} // Additional metadata (reconnect flags)
+
+	// McpMode carries the MCP tool mode to an agentctl instance the lifecycle
+	// builds from WorkspaceInfo alone (workspace-only restore/admission),
+	// which never passes through the executor's mode resolvers. Set by
+	// GetWorkspaceInfoForSession from the task row alone: mcpmode.Coordinator
+	// for a coordinator-origin task, empty otherwise
+	// (docs/specs/coordinator/system-design/copilot.md#fail-closed).
+	McpMode string
 }
 
 // WorkspaceInfoProvider provides workspace information for tasks

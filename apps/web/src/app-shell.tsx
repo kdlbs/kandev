@@ -17,6 +17,8 @@ import { SessionFailureToastBridge } from "@/components/session-failure-toast-br
 import { TaskDeletedToastBridge } from "@/components/task-deleted-toast-bridge";
 import { UpdateAvailableToastBridge } from "@/components/update-available-toast-bridge";
 import { SidebarViewsSyncBridge } from "@/components/sidebar-views-sync-bridge";
+import { WorkspaceCopilotHost } from "@/app/coordinator/copilot/workspace-copilot-host";
+import { CoordinatorCopilotResetBridge } from "@/components/coordinator-copilot-reset-bridge";
 import { ThemeProvider } from "@/components/theme-provider";
 import { ToastProvider } from "@/components/toast-provider";
 import { WorkspaceScopeProvider } from "@/components/workspace-scope-provider";
@@ -76,6 +78,7 @@ export function AppShell({ children }: AppShellProps) {
               <TaskDeletedToastBridge />
               <UpdateAvailableToastBridge />
               <SidebarViewsSyncBridge />
+              <CoordinatorCopilotResetBridge />
               <LogBufferBridge />
               <CommandRegistryProvider>
                 <DesktopCommandHost />
@@ -100,7 +103,11 @@ export function AppShell({ children }: AppShellProps) {
                         <AppSidebar />
                         <AppStatusSurfaceProvider>
                           <MobileTaskNavigationProvider>
-                            <main className="flex min-h-0 min-w-0 flex-1 flex-col">{children}</main>
+                            <WorkspaceCopilotHost>
+                              <main className="flex min-h-0 min-w-0 flex-1 flex-col">
+                                {children}
+                              </main>
+                            </WorkspaceCopilotHost>
                           </MobileTaskNavigationProvider>
                         </AppStatusSurfaceProvider>
                       </div>

@@ -849,6 +849,7 @@ func mapKanbanTaskState(task taskdto.TaskDTO) map[string]any {
 		"isRemoteExecutor":            task.IsRemoteExecutor,
 		"foregroundActivity":          task.ForegroundActivity,
 		"workflowStepId":              task.WorkflowStepID,
+		"identifier":                  nullString(task.Identifier),
 		"title":                       task.Title,
 		"description":                 task.Description,
 		"position":                    task.Position,

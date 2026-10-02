@@ -51,6 +51,51 @@ func TestService_MoveTaskPromotesMovedTaskFromFeederAndRefreshesResult(t *testin
 	}
 }
 
+func TestService_MoveIntoFeederPromotesQueuedTaskIntoAutoStartStep(t *testing.T) {
+	svc, eventBus, repo := createTestService(t)
+	ctx := context.Background()
+	seedMoveWorkflows(t, ctx, repo)
+	svc.SetWorkflowStepGetter(&fakeWorkflowStepGetter{steps: map[string]*wfmodels.WorkflowStep{
+		"step-feeder": {ID: "step-feeder", WorkflowID: "wf-source", Name: "Feeder", Position: 0},
+		"step-auto": {
+			ID: "step-auto", WorkflowID: "wf-source", Name: "Auto start", Position: 1,
+			WIPLimit: 1, PullFromStepID: "step-feeder",
+			Events: wfmodels.StepEvents{OnEnter: []wfmodels.OnEnterAction{{Type: wfmodels.OnEnterAutoStartAgent}}},
+		},
+		"step-current": {ID: "step-current", WorkflowID: "wf-source", Name: "Current", Position: 2},
+	}})
+	createMoveTask(t, ctx, repo, "task-returning", "wf-source", "step-current", nil)
+	if err := repo.CreateTask(ctx, &models.Task{
+		ID: "task-queued", WorkspaceID: "ws-1", WorkflowID: "wf-source", WorkflowStepID: "step-feeder",
+		Title: "Queued feeder task", State: v1.TaskStateTODO, QueuedForStepID: "step-auto",
+	}); err != nil {
+		t.Fatalf("CreateTask(queued feeder): %v", err)
+	}
+	eventBus.ClearEvents()
+
+	if _, err := svc.MoveTaskWithOptions(ctx, "task-returning", "wf-source", "step-feeder", 0, MoveTaskOptions{}); err != nil {
+		t.Fatalf("MoveTaskWithOptions: %v", err)
+	}
+
+	promoted, err := repo.GetTask(ctx, "task-queued")
+	if err != nil {
+		t.Fatalf("GetTask(task-queued): %v", err)
+	}
+	if promoted.WorkflowStepID != "step-auto" || !promoted.WIPAdmitted {
+		t.Fatalf("queued feeder task = step %q, admitted %v; want auto-start step and admitted", promoted.WorkflowStepID, promoted.WIPAdmitted)
+	}
+	for _, event := range eventBus.GetPublishedEvents() {
+		if event.Type != events.TaskMoved {
+			continue
+		}
+		data, ok := event.Data.(map[string]interface{})
+		if ok && data["task_id"] == "task-queued" && data["to_step_id"] == "step-auto" {
+			return
+		}
+	}
+	t.Fatal("task.moved event for feeder promotion into the auto-start step was not published")
+}
+
 func TestService_MoveTaskWithActiveSessionDefersFeederPullUntilLifecycleCompletes(t *testing.T) {
 	svc, _, repo := createTestService(t)
 	ctx := context.Background()
