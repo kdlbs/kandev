@@ -833,3 +833,26 @@ python3 scripts/list-docs.py validate
 python3 scripts/lint-spec-files.py --all
 git diff --check
 ```
+
+### Latest main Windows matrix reconciliation, 2026-10-02
+
+Main advanced to `8a1229e6d70a`, whose earlier workflow change separates the
+Windows process race suite from the native build, vet and targeted tests in a
+40-minute non-fail-fast matrix. The rebase conflict was resolved in favor of
+that complete matrix; branch-only 50-minute edits were superseded. The main
+workflow contract suite passes all 12 tests after resolution. The 08ab run's
+Windows job had reached its 50-minute ceiling during the combined suite, so the
+matrix will be validated by fresh CI on this rebased head.
+
+The same 08ab run's rich-output chart case failed once when the lazy bar plot
+was absent and passed on automatic retry. Four isolated local attempts passed
+with retries disabled. It remains unchanged pending a fresh hosted result; any
+repeat on the rebased head is actionable.
+
+```bash
+python3 .github/scripts/backend-tests-workflow-contract_test.py
+python3 .github/scripts/lint-action-pinning.py
+python3 scripts/list-docs.py validate
+python3 scripts/lint-spec-files.py --all
+git diff --check
+```
