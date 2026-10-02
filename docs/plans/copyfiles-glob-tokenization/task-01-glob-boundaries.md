@@ -143,3 +143,14 @@ unchanged validation policy and containment. Final remediation results:
 - Diff whitespace checks: passed.
 - Native exact-path priority is covered with distinct escaped and literal files.
   Malformed-class recovery verifies the following entry survives with one warning.
+
+## Native CI correction
+
+Native Windows run `36910633806`, job `110538457789`, passed every focused case
+except the stale Windows expectation for an unclosed class after a native
+separator. Its actual three entries match the malformed-class recovery contract;
+update the expectation only. Production code remains unchanged. Rebased onto
+`daab1c45647e7ac9e002f15e02f6e910a3e778a4`; package race tests, catalog validation,
+full spec lint and 36 linter tests, 62 public-validator tests and 47-page live
+validation, and 10 backend workflow-contract tests passed again. Native CI will
+verify the corrected assertion before merge.

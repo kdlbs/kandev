@@ -49,7 +49,7 @@ func TestParseSpecs_NativeEscapes(t *testing.T) {
 		{`config/\{.env, .env.local`, []string{`config/\{.env`, `.env.local`}, []string{`config/\{.env, .env.local`}},
 		{`config\, .env.local`, []string{`config\, .env.local`}, []string{`config\`, `.env.local`}},
 		{`config/a\,b.env, .env.local`, []string{`config/a\,b.env`, `.env.local`}, []string{`config/a\`, `b.env`, `.env.local`}},
-		{`config/\[a,b.env, .env.local`, []string{`config/\[a`, `b.env`, `.env.local`}, []string{`config/\[a,b.env, .env.local`}},
+		{`config/\[a,b.env, .env.local`, []string{`config/\[a`, `b.env`, `.env.local`}, []string{`config/\[a`, `b.env`, `.env.local`}},
 		{`config/[\],{].env, .env.local`, []string{`config/[\],{].env`, `.env.local`}, []string{`config/[\]`, `{].env, .env.local`}},
 		{`config/{a\},b}.env, .env.local`, []string{`config/{a\},b}.env`, `.env.local`}, []string{`config/{a\}`, `b}.env`, `.env.local`}},
 		{`config\[a,b].env, .env.local`, []string{`config\[a`, `b].env`, `.env.local`}, []string{`config\[a,b].env`, `.env.local`}},

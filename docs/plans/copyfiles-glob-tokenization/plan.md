@@ -86,3 +86,14 @@ Final remediation checks passed: package race tests, full changed-revision backe
 lint (zero issues on warmed-cache retry), all named specification/public-doc and
 workflow validators, documentation coverage preflight, and diff whitespace checks.
 The work order records the initial cold-cache timeout and exact final results.
+
+## Native CI and base refresh
+
+Backend run `36910633806` executed the focused suite on native Windows. All
+materialization and grammar cases passed except one stale expectation for
+`config/\[a,b.env, .env.local`: with Windows separators and no closing bracket,
+the malformed class must leave the following comma-separated entries independent.
+Correct the expectation without changing production behavior. Rebased onto
+`daab1c45647e7ac9e002f15e02f6e910a3e778a4` and reran the package race tests,
+specification/catalog and public-document checks, and backend workflow contract.
+All passed; final native CI must confirm the corrected expectation.
