@@ -2,6 +2,7 @@ package auth
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/kandev/kandev/internal/auth/authn"
@@ -97,5 +98,41 @@ func TestIdentityForUserFalseForEmptyUserID(t *testing.T) {
 
 	if _, ok := f.svc.IdentityForUser(context.Background(), ""); ok {
 		t.Error("an empty user ID must not resolve")
+	}
+}
+
+func TestResolveUserIdentitySeparatesMissingFromUndecidable(t *testing.T) {
+	f := newServiceFixture(t, false)
+	setupEnabled(t, f)
+	member, err := f.svc.AdminCreateUser(context.Background(), "member@x.dev", "memberpass123", "Member", usermodels.RoleMember)
+	if err != nil {
+		t.Fatalf("create member: %v", err)
+	}
+	if id, ok, err := f.svc.ResolveUserIdentity(context.Background(), member.ID); err != nil || !ok || id.UserID != member.ID {
+		t.Fatalf("member: id=%+v ok=%v err=%v", id, ok, err)
+	}
+	if _, ok, err := f.svc.ResolveUserIdentity(context.Background(), "no-such-user"); ok || err != nil {
+		t.Fatalf("missing user: ok=%v err=%v, want false and nil", ok, err)
+	}
+	if _, ok, err := f.svc.ResolveUserIdentity(context.Background(), ""); ok || !errors.Is(err, ErrIdentityUnavailable) {
+		t.Fatalf("empty id: ok=%v err=%v, want ErrIdentityUnavailable", ok, err)
+	}
+}
+
+func TestUserDisplayName(t *testing.T) {
+	f := newServiceFixture(t, false)
+	setupEnabled(t, f)
+	member, err := f.svc.AdminCreateUser(context.Background(), "ada@x.dev", "memberpass123", "Ada", usermodels.RoleMember)
+	if err != nil {
+		t.Fatalf("create member: %v", err)
+	}
+	if name, ok, err := f.svc.UserDisplayName(context.Background(), member.ID); err != nil || !ok || name != "Ada" {
+		t.Fatalf("member: name=%q ok=%v err=%v", name, ok, err)
+	}
+	if _, ok, err := f.svc.UserDisplayName(context.Background(), "no-such-user"); ok || err != nil {
+		t.Fatalf("missing user: ok=%v err=%v, want false and nil", ok, err)
+	}
+	if _, ok, err := f.svc.UserDisplayName(context.Background(), ""); ok || err != nil {
+		t.Fatalf("empty id: ok=%v err=%v", ok, err)
 	}
 }

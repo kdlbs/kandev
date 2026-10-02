@@ -231,7 +231,7 @@ export const ExecutorSelector = memo(function ExecutorSelector({
   );
 });
 
-type ExecutorProfileSelectorProps = {
+export type ExecutorProfileSelectorProps = {
   options: ComboboxOption[];
   value: string;
   onValueChange: (value: string) => void;

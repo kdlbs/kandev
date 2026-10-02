@@ -25,11 +25,8 @@ import { workspaceId, workflowId } from "@/lib/types/ids";
 import type { ListWorkspacesResponse, UserSettingsResponse } from "@/lib/types/http";
 import { DEFAULT_SETTINGS_PATH } from "@/lib/settings/last-settings-page";
 import { scopedCookieName } from "@/lib/routing/route-bootstrap";
-import {
-  buildSettingsInitialStateForRoute,
-  renderSettingsRoute,
-  SETTINGS_ROUTE_PATHS,
-} from "./settings-routes";
+import { renderSettingsRoute, SETTINGS_ROUTE_PATHS } from "./settings-routes";
+import { buildSettingsInitialStateForRoute } from "./settings-routes.bootstrap";
 
 vi.mock("@/components/settings/system/updates-card", () => ({ UpdatesCard: () => null }));
 

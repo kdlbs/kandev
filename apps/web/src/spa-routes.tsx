@@ -60,6 +60,7 @@ import type {
 } from "@/lib/types/http";
 import { TaskDetailRoute } from "./task-detail-route";
 import { CanvasRoute } from "./canvas-route";
+import { CoordinatorRoute } from "./coordinator-route";
 import { NeedsYouInboxRoute } from "./needs-you-inbox-route";
 import { AuthRouteRedirect, RouteLoading } from "./spa-route-chrome";
 import { NEEDS_YOU_INBOX_HREF } from "@/lib/navigation/needs-you-inbox-destination";
@@ -108,6 +109,12 @@ type SpaRoute =
   | { kind: "runDetail"; automationId: string; tab?: string; runId?: string }
   | { kind: "canvas"; canvasId: string }
   | { kind: "canvasSettings"; workspaceId: string }
+  | {
+      kind: "coordinator";
+      workspaceId: string;
+      coordinatorId: string | null;
+      view: "needs-you" | "queue";
+    }
   | { kind: "needsYouInbox" }
   | { kind: "settings"; pathname: string }
   | { kind: "office"; pathname: string }
@@ -123,6 +130,7 @@ type DataBackedSpaRoute = Exclude<
       | "kanban"
       | "canvas"
       | "canvasSettings"
+      | "coordinator"
       | "needsYouInbox"
       | "settings"
       | "office"
@@ -143,6 +151,7 @@ type RouteDataState = {
 type SpaRouteOptions = {
   canvasesEnabled?: boolean;
   needsYouInboxEnabled?: boolean;
+  coordinatorEnabled?: boolean;
 };
 
 export function resolveSpaRoute(
@@ -157,6 +166,7 @@ export function resolveSpaRoute(
     resolveTopLevelRoute(normalized, searchParams) ??
     resolveCanvasRoute(normalized, options.canvasesEnabled === true) ??
     resolveNeedsYouInboxRoute(normalized, options.needsYouInboxEnabled === true) ??
+    resolveCoordinatorRoute(normalized, options.coordinatorEnabled === true) ??
     resolveNestedRoute(normalized) ??
     resolvePluginRoute(normalized) ??
     resolveKanbanRoute(searchParams)
@@ -168,6 +178,39 @@ export function resolveSpaRoute(
 function resolveNeedsYouInboxRoute(normalized: string, enabled: boolean): SpaRoute | null {
   if (!enabled) return null;
   return normalized === NEEDS_YOU_INBOX_HREF ? { kind: "needsYouInbox" } : null;
+}
+
+// The destination resolves only where the flag is enabled; disabled falls
+// through to the kanban catch-all like an unrecognized path would (same
+// shape as resolveNeedsYouInboxRoute).
+function resolveCoordinatorRoute(normalized: string, enabled: boolean): SpaRoute | null {
+  if (!enabled) return null;
+
+  const queueMatch = normalized.match(/^\/workspaces\/([^/]+)\/coordinator\/([^/]+)\/queue$/);
+  if (queueMatch) {
+    const workspaceId = safeDecodePathSegment(queueMatch[1]);
+    const coordinatorId = safeDecodePathSegment(queueMatch[2]);
+    if (!workspaceId || !coordinatorId) return null;
+    return { kind: "coordinator", workspaceId, coordinatorId, view: "queue" };
+  }
+
+  const withId = normalized.match(/^\/workspaces\/([^/]+)\/coordinator\/([^/]+)$/);
+  if (withId) {
+    const workspaceId = safeDecodePathSegment(withId[1]);
+    const coordinatorId = safeDecodePathSegment(withId[2]);
+    if (!workspaceId || !coordinatorId) return null;
+    return { kind: "coordinator", workspaceId, coordinatorId, view: "needs-you" };
+  }
+
+  const generic = normalized.match(/^\/workspaces\/([^/]+)\/coordinator$/);
+  if (generic) {
+    const workspaceId = safeDecodePathSegment(generic[1]);
+    return workspaceId
+      ? { kind: "coordinator", workspaceId, coordinatorId: null, view: "needs-you" }
+      : null;
+  }
+
+  return null;
 }
 
 function resolveCanvasRoute(normalized: string, canvasesEnabled: boolean): SpaRoute | null {
@@ -294,15 +337,29 @@ function resolveKanbanRoute(searchParams: URLSearchParams): SpaRoute {
   };
 }
 
-export function SpaRoutes({ routeData }: { routeData?: BootRouteData }) {
-  // Subscribe so a plugin route registered after first paint (async bundle
-  // load) re-resolves without requiring a navigation.
-  usePluginRegistry();
+/** The location resolved with the feature options the router itself uses, so
+ *  every reader of "what page is this" agrees with `SpaRoutes`. */
+export function useResolvedSpaRoute(): SpaRoute {
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const canvasesEnabled = useFeature("canvases");
   const needsYouInboxEnabled = useFeature("needsYouInbox");
-  const route = resolveSpaRoute(pathname, searchParams, { canvasesEnabled, needsYouInboxEnabled });
+  const coordinatorEnabled = useFeature("coordinator");
+  return resolveSpaRoute(pathname, searchParams, {
+    canvasesEnabled,
+    needsYouInboxEnabled,
+    coordinatorEnabled,
+  });
+}
+
+export function SpaRoutes({ routeData }: { routeData?: BootRouteData }) {
+  // Subscribe so a plugin route registered after first paint (async bundle
+  // load) re-resolves without requiring a navigation.
+  usePluginRegistry();
+  const canvasesEnabled = useFeature("canvases");
+  const needsYouInboxEnabled = useFeature("needsYouInbox");
+  const coordinatorEnabled = useFeature("coordinator");
+  const route = useResolvedSpaRoute();
 
   // Reaching /login, /setup, or /invite here means the pre-auth gate in
   // main.tsx already decided the app shell should render (authenticated, or
@@ -315,6 +372,16 @@ export function SpaRoutes({ routeData }: { routeData?: BootRouteData }) {
   }
   if (route.kind === "needsYouInbox") {
     return <NeedsYouInboxRoute enabled={needsYouInboxEnabled} />;
+  }
+  if (route.kind === "coordinator") {
+    return (
+      <CoordinatorRoute
+        enabled={coordinatorEnabled}
+        view={route.view}
+        workspaceId={route.workspaceId}
+        coordinatorId={route.coordinatorId}
+      />
+    );
   }
   if (route.kind === "plugin") {
     return <PluginRoute path={route.path} />;

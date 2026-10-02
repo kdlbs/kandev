@@ -788,6 +788,16 @@ type Service struct {
 	sessionPromptCheck  func(ctx context.Context, sessionID string) error
 	taskPromptCheck     func(ctx context.Context, taskID string) error
 
+	// coordinatorStandingInstructions builds the Standing Instructions
+	// system-prompt content for a coordinator conversation's first turn
+	// (docs/specs/coordinator/system-design/copilot.md#standing-instructions).
+	// Nil = no block is attached. See SetCoordinatorStandingInstructionsReader.
+	coordinatorStandingInstructions func(ctx context.Context, coordinatorID, workspaceName, workspaceID string) (string, error)
+
+	// unattendedPermissionHandler denies a permission request of a coordinator's
+	// unattended turn; nil = requests wait for a person. Set once at wiring.
+	unattendedPermissionHandler UnattendedPermissionHandler
+
 	// backgroundProbeConfig holds the validated KANDEV_PARKED_PROBE_BUDGET /
 	// KANDEV_PARKED_PROBE_INTERVAL tuning knobs for the background-workload
 	// liveness probe (spec docs/specs/disambiguate-waiting/spec.md). Loaded
@@ -1983,6 +1993,15 @@ func (s *Service) SetAttachmentReader(reader AttachmentReader) {
 func (s *Service) SetCanvasesEnabled(enabled bool) {
 	if s.executor != nil {
 		s.executor.SetCanvasesEnabled(enabled)
+	}
+}
+
+// SetCoordinatorLookup forwards the coordinator lookup to the executor's
+// fail-closed coordinator-session-start check. Guarded by the caller on the
+// coordinator feature flag (docs/specs/coordinator/system-design/copilot.md#fail-closed).
+func (s *Service) SetCoordinatorLookup(lookup executor.CoordinatorLookup) {
+	if s.executor != nil {
+		s.executor.SetCoordinatorLookup(lookup)
 	}
 }
 

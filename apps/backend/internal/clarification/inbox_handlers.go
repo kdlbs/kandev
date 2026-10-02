@@ -323,14 +323,14 @@ func (h *Handlers) buildInboxBundleViews(
 				zap.String("pending_id", b.PendingID))
 			continue
 		}
-		ordered := orderInboxMessages(msgs)
+		content := bundleContentFromMessages(msgs)
 		views = append(views, inboxBundleView{
 			PendingID:    b.PendingID,
 			TaskID:       b.TaskID,
 			SessionID:    b.SessionID,
 			CreatedAt:    b.CreatedAt.UTC().Format(time.RFC3339),
-			Context:      inboxBundleContext(ordered),
-			Messages:     renderInboxMessages(ordered),
+			Context:      content.Context,
+			Messages:     content.Messages,
 			TaskTitle:    taskTitles[b.TaskID],
 			SessionState: sessionStates[b.SessionID],
 		})

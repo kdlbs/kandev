@@ -93,6 +93,18 @@ describe("snapshotToState", () => {
     expect(state.kanban?.tasks[0]?.assigneeUserId).toBe("user-7");
   });
 
+  // The task page chip reads its label from kanban.tasks[].identifier, so a
+  // page load must carry it.
+  it("hydrates the task identifier into the initial kanban state", () => {
+    const snapshot = snapshotWithPendingAction(undefined);
+    snapshot.tasks[0].identifier = "KAN-42";
+
+    const state = snapshotToState(snapshot);
+
+    expect(state.kanban?.tasks[0]?.identifier).toBe("KAN-42");
+    expect(state.kanban?.tasks[0]?.workspaceId).toBe(workspaceID);
+  });
+
   it("hydrates task metadata into the initial kanban state", () => {
     const snapshot = snapshotWithPendingAction(undefined);
     snapshot.tasks[0].metadata = {

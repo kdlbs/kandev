@@ -1,0 +1,271 @@
+package coordinator
+
+import (
+	"fmt"
+
+	"github.com/kandev/kandev/internal/db"
+	"github.com/kandev/kandev/internal/db/dialect"
+)
+
+// phase2ColumnMigrations add the control-surface columns to the phase-1
+// tables. They run after the phase-1 tables exist and never appear in
+// createTablesSQL, so an existing database gains them by ALTER TABLE.
+var phase2ColumnMigrations = []struct{ name, stmt string }{
+	{"coordinators.policy_json", `ALTER TABLE coordinators ADD COLUMN policy_json TEXT`},
+	{"coordinators.policy_revision", `ALTER TABLE coordinators ADD COLUMN policy_revision INTEGER NOT NULL DEFAULT 0`},
+	{"coordinators.watch_scope", `ALTER TABLE coordinators ADD COLUMN watch_scope TEXT NOT NULL DEFAULT 'all'`},
+	{"coordinators.project_scope", `ALTER TABLE coordinators ADD COLUMN project_scope TEXT NOT NULL DEFAULT 'all'`},
+	{"coordinators.include_no_repository", `ALTER TABLE coordinators ADD COLUMN include_no_repository INTEGER NOT NULL DEFAULT 0`},
+	{"coordinator_proposals.kind", `ALTER TABLE coordinator_proposals ADD COLUMN kind TEXT NOT NULL DEFAULT 'create_task'`},
+	{"coordinator_proposals.target_task_id", `ALTER TABLE coordinator_proposals ADD COLUMN target_task_id TEXT`},
+	{"coordinator_proposals.standing_order_ids", `ALTER TABLE coordinator_proposals ADD COLUMN standing_order_ids TEXT NOT NULL DEFAULT '[]'`},
+	{"coordinator_proposals.starts_agent", `ALTER TABLE coordinator_proposals ADD COLUMN starts_agent {{boolean}} NOT NULL DEFAULT FALSE`},
+	{"coordinator_proposals.outcome_json", `ALTER TABLE coordinator_proposals ADD COLUMN outcome_json TEXT`},
+	{"coordinators.autonomy_enabled", `ALTER TABLE coordinators ADD COLUMN autonomy_enabled INTEGER NOT NULL DEFAULT 0`},
+	{"coordinators.cost_ceiling_subcents", `ALTER TABLE coordinators ADD COLUMN cost_ceiling_subcents BIGINT`},
+	{"coordinators.paused_at", `ALTER TABLE coordinators ADD COLUMN paused_at {{timestamp}}`},
+	{"coordinators.paused_by", `ALTER TABLE coordinators ADD COLUMN paused_by TEXT`},
+	{"coordinator_proposals.reply_text", `ALTER TABLE coordinator_proposals ADD COLUMN reply_text TEXT`},
+	{"coordinator_proposals.reply_delivered_at", `ALTER TABLE coordinator_proposals ADD COLUMN reply_delivered_at {{timestamp}}`},
+	{"coordinator_proposals.reply_delivery_claimed_at", `ALTER TABLE coordinator_proposals ADD COLUMN reply_delivery_claimed_at {{timestamp}}`},
+	{"coordinator_proposals.in_reply_to", `ALTER TABLE coordinator_proposals ADD COLUMN in_reply_to TEXT`},
+	{"coordinator_proposals.decided_automatically", `ALTER TABLE coordinator_proposals ADD COLUMN decided_automatically INTEGER NOT NULL DEFAULT 0`},
+	{"coordinator_proposals.claimed_automatically", `ALTER TABLE coordinator_proposals ADD COLUMN claimed_automatically INTEGER NOT NULL DEFAULT 0`},
+	{"coordinator_proposals.automatic_at", `ALTER TABLE coordinator_proposals ADD COLUMN automatic_at {{timestamp}}`},
+}
+
+// taskPairColumnMigrations add the Agent for created tasks pair; the backfill
+// that follows fills only empty values from the coordinator's own pair.
+var taskPairColumnMigrations = []struct{ name, stmt string }{
+	{"coordinators.task_agent_profile_id", `ALTER TABLE coordinators ADD COLUMN task_agent_profile_id TEXT NOT NULL DEFAULT ''`},
+	{"coordinators.task_executor_profile_id", `ALTER TABLE coordinators ADD COLUMN task_executor_profile_id TEXT NOT NULL DEFAULT ''`},
+}
+
+var taskPairBackfills = []string{
+	`UPDATE coordinators SET task_agent_profile_id = agent_profile_id WHERE task_agent_profile_id = ''`,
+	`UPDATE coordinators SET task_executor_profile_id = executor_profile_id WHERE task_executor_profile_id = ''`,
+}
+
+// migrateTaskPair adds the task pair columns and backfills every empty value
+// in one transaction, so no request sees a half-filled pair.
+func (s *Store) migrateTaskPair(migrate *db.MigrateLogger) error {
+	for _, m := range taskPairColumnMigrations {
+		if err := migrate.Apply(m.name, m.stmt); err != nil {
+			return fmt.Errorf("coordinator column %s: %w", m.name, err)
+		}
+	}
+	if err := migrate.Err(); err != nil {
+		return err
+	}
+	tx, err := s.db.Beginx()
+	if err != nil {
+		return fmt.Errorf("begin task pair backfill: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	for _, stmt := range taskPairBackfills {
+		if _, err := tx.Exec(stmt); err != nil {
+			return fmt.Errorf("task pair backfill: %w", err)
+		}
+	}
+	return tx.Commit()
+}
+
+// phase2LateColumnMigrations add columns to tables phase2TablesSQL creates, so
+// they run after it: coordinator_activity does not exist on a phase 1 database
+// until then.
+var phase2LateColumnMigrations = []struct{ name, stmt string }{
+	{"coordinator_activity.unattended_turn_id", `ALTER TABLE coordinator_activity ADD COLUMN unattended_turn_id TEXT`},
+	{"coordinator_unattended_turns.reserved_turn_id", `ALTER TABLE coordinator_unattended_turns ADD COLUMN reserved_turn_id TEXT`},
+	{"coordinator_unattended_turns.pause_requested_at", `ALTER TABLE coordinator_unattended_turns ADD COLUMN pause_requested_at {{timestamp}}`},
+	{"coordinator_unattended_turns.pause_cancel_at", `ALTER TABLE coordinator_unattended_turns ADD COLUMN pause_cancel_at {{timestamp}}`},
+}
+
+// phase2TablesSQL creates the phase-2 tables. Indexes over columns added by
+// phase2ColumnMigrations live in phase2IndexesSQL, which runs afterwards.
+const phase2TablesSQL = `
+	CREATE TABLE IF NOT EXISTS coordinator_watches (
+		coordinator_id TEXT NOT NULL,
+		workflow_id TEXT NOT NULL,
+		workspace_id TEXT NOT NULL,
+		created_at {{timestamp}} NOT NULL,
+		PRIMARY KEY (coordinator_id, workflow_id)
+	);
+
+	CREATE TABLE IF NOT EXISTS coordinator_watch_projects (
+		coordinator_id TEXT NOT NULL,
+		entry_kind TEXT NOT NULL,
+		entry_id TEXT NOT NULL,
+		workspace_id TEXT NOT NULL,
+		created_at {{timestamp}} NOT NULL,
+		PRIMARY KEY (coordinator_id, entry_kind, entry_id)
+	);
+
+	CREATE TABLE IF NOT EXISTS coordinator_activity (
+		id TEXT PRIMARY KEY,
+		coordinator_id TEXT NOT NULL,
+		workspace_id TEXT NOT NULL,
+		action_class TEXT NOT NULL,
+		outcome TEXT NOT NULL,
+		"authorization" TEXT NOT NULL,
+		target_task_id TEXT,
+		proposal_id TEXT,
+		actor_user_id TEXT,
+		reason_code TEXT,
+		detail TEXT NOT NULL DEFAULT '',
+		refusal_count INTEGER NOT NULL DEFAULT 1,
+		edited {{boolean}} NOT NULL DEFAULT FALSE,
+		undone_at {{timestamp}},
+		undone_by TEXT,
+		undo_of_id TEXT,
+		created_at {{timestamp}} NOT NULL,
+		updated_at {{timestamp}} NOT NULL
+	);
+
+	CREATE TABLE IF NOT EXISTS coordinator_standing_orders (
+		id TEXT PRIMARY KEY,
+		coordinator_id TEXT NOT NULL,
+		workspace_id TEXT NOT NULL,
+		text TEXT NOT NULL,
+		created_by TEXT NOT NULL,
+		created_at {{timestamp}} NOT NULL,
+		retired_at {{timestamp}},
+		retired_by TEXT,
+		source_proposal_id TEXT,
+		last_applied_at {{timestamp}}
+	);
+
+	CREATE TABLE IF NOT EXISTS coordinator_goals (
+		id TEXT PRIMARY KEY,
+		coordinator_id TEXT NOT NULL,
+		workspace_id TEXT NOT NULL,
+		name TEXT NOT NULL,
+		due_on TEXT,
+		status TEXT NOT NULL DEFAULT 'active',
+		criteria_json TEXT NOT NULL DEFAULT '[]',
+		baseline_json TEXT NOT NULL DEFAULT '{}',
+		set_at {{timestamp}} NOT NULL,
+		met_at {{timestamp}},
+		met_by TEXT,
+		created_at {{timestamp}} NOT NULL,
+		updated_at {{timestamp}} NOT NULL
+	);
+
+	CREATE TABLE IF NOT EXISTS coordinator_wakes (
+		id TEXT PRIMARY KEY,
+		coordinator_id TEXT NOT NULL,
+		workspace_id TEXT NOT NULL,
+		task_id TEXT NOT NULL,
+		kind TEXT NOT NULL,
+		episode_key TEXT NOT NULL,
+		status TEXT NOT NULL,
+		turn_id TEXT,
+		created_at {{timestamp}} NOT NULL,
+		updated_at {{timestamp}} NOT NULL
+	);
+
+	CREATE TABLE IF NOT EXISTS coordinator_unattended_turns (
+		id TEXT PRIMARY KEY,
+		coordinator_id TEXT NOT NULL,
+		conversation_task_id TEXT NOT NULL,
+		session_id TEXT NOT NULL,
+		message_id TEXT,
+		session_turn_id TEXT,
+		wake_count INTEGER NOT NULL,
+		denied_permissions INTEGER NOT NULL DEFAULT 0,
+		start_ceiling_subcents BIGINT NOT NULL,
+		stop_requested_at {{timestamp}},
+		outcome TEXT,
+		cost_subcents BIGINT,
+		started_at {{timestamp}} NOT NULL,
+		finished_at {{timestamp}}
+	);
+
+	CREATE TABLE IF NOT EXISTS coordinator_unattended_denials (
+		turn_id TEXT NOT NULL,
+		pending_id TEXT NOT NULL,
+		created_at {{timestamp}} NOT NULL,
+		PRIMARY KEY (turn_id, pending_id)
+	);
+
+	CREATE TABLE IF NOT EXISTS coordinator_class_reviews (
+		id TEXT PRIMARY KEY,
+		coordinator_id TEXT NOT NULL,
+		class TEXT NOT NULL,
+		reviewed_by TEXT NOT NULL,
+		reviewed_at {{timestamp}} NOT NULL,
+		window_start {{timestamp}} NOT NULL,
+		window_end {{timestamp}} NOT NULL,
+		row_count INTEGER NOT NULL
+	);
+
+	CREATE TABLE IF NOT EXISTS coordinator_pending_changes (
+		id TEXT PRIMARY KEY,
+		coordinator_id TEXT NOT NULL,
+		proposal_id TEXT NOT NULL UNIQUE,
+		field TEXT NOT NULL,
+		base_value TEXT NOT NULL,
+		new_value TEXT NOT NULL,
+		status TEXT NOT NULL,
+		decided_by TEXT,
+		created_at {{timestamp}} NOT NULL,
+		updated_at {{timestamp}} NOT NULL
+	);
+
+	CREATE TABLE IF NOT EXISTS coordinator_class_changes (
+		id TEXT PRIMARY KEY,
+		coordinator_id TEXT NOT NULL,
+		class TEXT NOT NULL,
+		from_value TEXT NOT NULL,
+		to_value TEXT NOT NULL,
+		changed_by TEXT,
+		reason TEXT,
+		changed_at {{timestamp}} NOT NULL
+	);
+`
+
+const phase2IndexesSQL = `
+	CREATE INDEX IF NOT EXISTS idx_coordinator_watches_workflow ON coordinator_watches(workflow_id);
+	CREATE INDEX IF NOT EXISTS idx_coordinator_watches_workspace ON coordinator_watches(workspace_id);
+	CREATE INDEX IF NOT EXISTS idx_coordinator_watch_projects_entry ON coordinator_watch_projects(entry_kind, entry_id);
+	CREATE INDEX IF NOT EXISTS idx_coordinator_activity_list ON coordinator_activity(coordinator_id, created_at DESC, id DESC);
+	CREATE INDEX IF NOT EXISTS idx_coordinator_activity_class ON coordinator_activity(coordinator_id, action_class, created_at);
+	CREATE INDEX IF NOT EXISTS idx_coordinator_activity_created ON coordinator_activity(created_at);
+	CREATE INDEX IF NOT EXISTS idx_coordinator_activity_workspace ON coordinator_activity(workspace_id);
+	CREATE INDEX IF NOT EXISTS idx_coordinator_standing_orders_active ON coordinator_standing_orders(coordinator_id, retired_at, created_at, id);
+	CREATE INDEX IF NOT EXISTS idx_coordinator_standing_orders_workspace ON coordinator_standing_orders(workspace_id);
+	CREATE UNIQUE INDEX IF NOT EXISTS idx_coordinator_goals_active ON coordinator_goals(coordinator_id) WHERE status = 'active';
+	CREATE INDEX IF NOT EXISTS idx_coordinator_goals_workspace ON coordinator_goals(workspace_id);
+	CREATE INDEX IF NOT EXISTS idx_coordinator_goals_history ON coordinator_goals(coordinator_id, created_at, id);
+	CREATE UNIQUE INDEX IF NOT EXISTS coordinator_proposals_open_target ON coordinator_proposals(coordinator_id, kind, target_task_id)
+		WHERE kind <> 'create_task' AND status IN ('pending','approving','failed');
+	CREATE UNIQUE INDEX IF NOT EXISTS idx_coordinator_wakes_episode ON coordinator_wakes(coordinator_id, task_id, kind, episode_key);
+	CREATE INDEX IF NOT EXISTS idx_coordinator_wakes_status ON coordinator_wakes(coordinator_id, status, created_at, id);
+	CREATE UNIQUE INDEX IF NOT EXISTS idx_coordinator_unattended_turns_open ON coordinator_unattended_turns(coordinator_id) WHERE outcome IS NULL;
+	CREATE INDEX IF NOT EXISTS idx_coordinator_unattended_turns_started ON coordinator_unattended_turns(coordinator_id, started_at, id);
+	CREATE INDEX IF NOT EXISTS idx_coordinator_class_reviews_class ON coordinator_class_reviews(coordinator_id, class, reviewed_at);
+	CREATE INDEX IF NOT EXISTS idx_coordinator_pending_changes_status ON coordinator_pending_changes(coordinator_id, status, created_at);
+	CREATE INDEX IF NOT EXISTS idx_coordinator_class_changes_class ON coordinator_class_changes(coordinator_id, class, changed_at DESC);
+`
+
+// migratePhase2 applies the additive phase-2 schema: column migrations,
+// then tables, then indexes over the new columns. Every step is replayable.
+func (s *Store) migratePhase2(migrate *db.MigrateLogger) error {
+	driver := s.db.DriverName()
+	for _, m := range phase2ColumnMigrations {
+		if err := migrate.Apply(m.name, dialect.MustRenderSchema(driver, m.stmt)); err != nil {
+			return fmt.Errorf("coordinator phase 2 column %s: %w", m.name, err)
+		}
+	}
+	if _, err := s.db.Exec(dialect.MustRenderSchema(driver, phase2TablesSQL)); err != nil {
+		return fmt.Errorf("coordinator phase 2 tables: %w", err)
+	}
+	for _, m := range phase2LateColumnMigrations {
+		if err := migrate.Apply(m.name, dialect.MustRenderSchema(driver, m.stmt)); err != nil {
+			return fmt.Errorf("coordinator phase 2 column %s: %w", m.name, err)
+		}
+	}
+	if _, err := s.db.Exec(dialect.MustRenderSchema(driver, phase2IndexesSQL)); err != nil {
+		return fmt.Errorf("coordinator phase 2 indexes: %w", err)
+	}
+	return nil
+}

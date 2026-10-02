@@ -136,6 +136,9 @@ func (m *mockRepository) ListExpiredQuickChatTasks(ctx context.Context, cutoff t
 func (m *mockRepository) DeleteExpiredQuickChatTask(ctx context.Context, id string, cutoff time.Time) (bool, error) {
 	return false, nil
 }
+func (m *mockRepository) ListCoordinatorOriginTasks(ctx context.Context, workspaceID string) ([]*models.Task, error) {
+	return nil, nil
+}
 func (m *mockRepository) CountOpenWatcherCreatedTasks(_ context.Context, _, _ string) (int, error) {
 	return 0, nil
 }

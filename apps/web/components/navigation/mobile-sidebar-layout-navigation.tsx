@@ -32,6 +32,7 @@ import { selectOfficeInboxCount } from "@/lib/state/slices/office/selectors";
 import { NEEDS_YOU_INBOX_HREF } from "@/lib/navigation/needs-you-inbox-destination";
 import { DestinationRows } from "./destination-rows";
 import { MobileAutomationsSection } from "./mobile-automations-section";
+import { MobileCoordinatorsSection } from "./mobile-coordinators-section";
 import { MobileCanvasesSection } from "./mobile-canvases-section";
 import { MobileIntegrationsSection } from "@/components/integrations/integrations-menu";
 
@@ -149,14 +150,29 @@ function MobileNewTaskRow({ onNavigate }: { onNavigate: () => void }) {
   );
 }
 
+function hasNoFixedRows(
+  fixedDestinationCount: number,
+  mode: ReturnType<typeof useOfficeModeState>,
+  needsYouEnabled: boolean,
+  coordinatorEnabled: boolean,
+  workspaceId: string | null,
+): boolean {
+  if (fixedDestinationCount > 0 || mode === "office") return false;
+  if (needsYouEnabled && workspaceId) return false;
+  if (coordinatorEnabled && workspaceId) return false;
+  return true;
+}
+
 function MobileRequiredRows({
   onNavigate,
   omitSections,
   omitDestinations,
+  coordinatorsWithAutomations,
 }: {
   onNavigate: () => void;
   omitSections: Set<string>;
   omitDestinations: string[];
+  coordinatorsWithAutomations: boolean;
 }) {
   const { t } = useTranslation();
   const primary = useStaticDestinations("mobileMenu", "primary");
@@ -166,13 +182,16 @@ function MobileRequiredRows({
   const needsYouCount = useAppStore(selectNeedsYouInboxCount);
   const needsYouHasMore = useAppStore(selectNeedsYouInboxHasMore);
   const officeInboxCount = useAppStore(selectOfficeInboxCount);
+  const coordinatorEnabled = useFeature("coordinator") && !coordinatorsWithAutomations;
   if (omitSections.has("primary")) return null;
   const fixedDestinations = primary.filter(
     (destination) =>
       (destination.id === "tasks" || destination.id === "threads") &&
       !omitDestinations.includes(destination.id),
   );
-  if (fixedDestinations.length === 0 && mode !== "office" && !(needsYouEnabled && workspaceId))
+  if (
+    hasNoFixedRows(fixedDestinations.length, mode, needsYouEnabled, coordinatorEnabled, workspaceId)
+  )
     return null;
   return (
     <div className="flex flex-col gap-3" data-testid="mobile-sidebar-fixed-navigation">
@@ -211,6 +230,7 @@ function MobileRequiredRows({
           </Link>
         </Button>
       )}
+      {coordinatorEnabled && workspaceId && <MobileCoordinatorsSection onNavigate={onNavigate} />}
     </div>
   );
 }
@@ -304,7 +324,7 @@ function MobilePhoneResource(props: MobileLayoutNodeProps) {
   }
 }
 
-function MobileBuiltinNode(props: MobileLayoutNodeProps) {
+function MobileBuiltinNodeContent(props: MobileLayoutNodeProps) {
   const {
     node,
     homeCoversListings,
@@ -355,6 +375,16 @@ function MobileBuiltinNode(props: MobileLayoutNodeProps) {
       onActivateShortcut={onActivateShortcut}
       onNavigate={onNavigate}
     />
+  );
+}
+
+function MobileBuiltinNode(props: MobileLayoutNodeProps) {
+  if (props.node.destinationId !== "automations") return <MobileBuiltinNodeContent {...props} />;
+  return (
+    <>
+      <MobileCoordinatorsSection onNavigate={props.onNavigate} />
+      <MobileBuiltinNodeContent {...props} />
+    </>
   );
 }
 
@@ -442,6 +472,9 @@ export function MobileSidebarLayoutNavigation({
   const afterTasks = homeCoversListings
     ? visibleNodes.filter((node) => node.destinationId !== "home")
     : [];
+  const coordinatorsWithAutomations = visibleNodes.some(
+    (node) => node.destinationId === "automations",
+  );
   const renderNode = (node: ProjectedSidebarNode) => (
     <MobileLayoutNode
       key={node.id}
@@ -474,6 +507,7 @@ export function MobileSidebarLayoutNavigation({
           onNavigate={onNavigate}
           omitSections={omitSections}
           omitDestinations={omitDestinations}
+          coordinatorsWithAutomations={coordinatorsWithAutomations}
         />
       </div>
       {afterPrimary}

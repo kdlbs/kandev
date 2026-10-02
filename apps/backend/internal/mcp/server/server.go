@@ -60,6 +60,9 @@ const (
 	// ModeAutomation registers the fixed workspace coordinator catalog for
 	// scheduled automation agents.
 	ModeAutomation = mcpmode.Automation
+	// ModeCoordinator registers the fixed six-tool catalog for a workspace
+	// coordinator's conversation session.
+	ModeCoordinator = mcpmode.Coordinator
 	// ModeManagedConversation exposes only the selected plugin agent tools.
 	ModeManagedConversation = "managed-conversation"
 )
@@ -99,7 +102,7 @@ func locatorCount(locators ...string) int {
 // normalizeMode returns a valid MCP mode, defaulting unknown values to ModeTask.
 func normalizeMode(mode string) string {
 	switch mode {
-	case ModeConfig, ModeExternal, ModeOffice, ModeAutomation, ModeTaskTitlePending:
+	case ModeConfig, ModeExternal, ModeOffice, ModeAutomation, ModeTaskTitlePending, ModeCoordinator:
 		return mode
 	default:
 		return ModeTask
@@ -351,6 +354,8 @@ func modeForProfile(profileContext mcpprofile.Context) string {
 		return ModeOffice
 	case mcpprofile.SurfaceAutomation:
 		return ModeAutomation
+	case mcpprofile.SurfaceCoordinator:
+		return ModeCoordinator
 	case mcpprofile.SurfaceKanbanTask:
 		if profileContext.HasCapability(mcpprofile.CapabilityTaskTitle) {
 			return ModeTaskTitlePending
@@ -739,13 +744,19 @@ func (s *Server) SetMode(mode string) {
 	}
 	previousMode := s.mode
 	capabilities := s.profile.Capabilities
-	if normalizedMode == ModeAutomation {
-		s.legacyModeCapabilities = slices.Clone(capabilities)
-		// The automation surface is a fixed coordinator catalog and never
-		// carries task-local capabilities. The snapshot lets a later legacy
-		// mode change restore the profile that was active before automation.
+	if isFixedCatalogMode(normalizedMode) {
+		// Only snapshot when entering a fixed mode from a non-fixed one.
+		// Fixed catalogs never carry task-local capabilities themselves, so a
+		// fixed-to-fixed transition (e.g. coordinator -> automation) would
+		// otherwise re-snapshot the already-nil current capabilities over the
+		// real snapshot taken on the first transition, losing it.
+		if !isFixedCatalogMode(previousMode) {
+			s.legacyModeCapabilities = slices.Clone(capabilities)
+		}
+		// The snapshot lets a later legacy mode change restore the profile
+		// that was active before the switch.
 		capabilities = nil
-	} else if previousMode == ModeAutomation {
+	} else if isFixedCatalogMode(previousMode) {
 		capabilities = slices.Clone(s.legacyModeCapabilities)
 	}
 	s.mode = normalizedMode
@@ -755,10 +766,18 @@ func (s *Server) SetMode(mode string) {
 	} else {
 		s.profile = s.profile.WithoutCapability(mcpprofile.CapabilityTaskTitle)
 	}
-	if normalizedMode != ModeAutomation {
+	if !isFixedCatalogMode(normalizedMode) {
 		s.legacyModeCapabilities = slices.Clone(s.profile.Capabilities)
 	}
 	s.rebuildTools()
+}
+
+// isFixedCatalogMode reports whether mode uses a fixed tool catalog that never
+// carries task-local capabilities (docs/specs/coordinator/system-design/
+// copilot.md#attended-only), mirroring mcpprofile.Legacy's own exclusion of
+// SurfaceAutomation and SurfaceCoordinator from CapabilityUserQuestion.
+func isFixedCatalogMode(mode string) bool {
+	return mode == ModeAutomation || mode == ModeCoordinator
 }
 
 func surfaceForMode(mode string) mcpprofile.Surface {
@@ -771,6 +790,8 @@ func surfaceForMode(mode string) mcpprofile.Surface {
 		return mcpprofile.SurfaceOfficeTask
 	case ModeAutomation:
 		return mcpprofile.SurfaceAutomation
+	case ModeCoordinator:
+		return mcpprofile.SurfaceCoordinator
 	default:
 		return mcpprofile.SurfaceKanbanTask
 	}
@@ -826,6 +847,16 @@ func (s *Server) SetProfile(profileContext mcpprofile.Context) {
 	s.rebuildTools()
 }
 
+// sameCoordinatorToolPolicy compares two bindings by their marshalled form.
+func sameCoordinatorToolPolicy(left, right *mcpprofile.CoordinatorToolPolicy) bool {
+	if left == nil || right == nil {
+		return left == right
+	}
+	l, lerr := mcpprofile.MarshalCoordinatorToolPolicy(*left)
+	r, rerr := mcpprofile.MarshalCoordinatorToolPolicy(*right)
+	return lerr == nil && rerr == nil && l == r
+}
+
 func sameProfile(left, right mcpprofile.Context) bool {
 	if left.Surface != right.Surface || len(left.Capabilities) != len(right.Capabilities) || len(left.Providers) != len(right.Providers) {
 		return false
@@ -839,6 +870,9 @@ func sameProfile(left, right mcpprofile.Context) bool {
 		if left.Providers[i] != right.Providers[i] {
 			return false
 		}
+	}
+	if !sameCoordinatorToolPolicy(left.CoordinatorToolPolicy, right.CoordinatorToolPolicy) {
+		return false
 	}
 	if (left.ManagedToolPolicy == nil) != (right.ManagedToolPolicy == nil) {
 		return false
@@ -1100,12 +1134,14 @@ func (s *Server) profileToolGroups() []profileToolGroup {
 	office := surfaceEnabled(mcpprofile.SurfaceOfficeTask)
 	kanban := surfaceEnabled(mcpprofile.SurfaceKanbanTask)
 	automation := surfaceEnabled(mcpprofile.SurfaceAutomation)
+	coordinatorSurface := surfaceEnabled(mcpprofile.SurfaceCoordinator)
 	if s.profile.Surface == mcpprofile.SurfaceManagedConversation {
 		return nil
 	}
 	return []profileToolGroup{
 		{name: "configuration-automations", enabled: config, register: func(s *Server) { s.registerConfigAutomationTools() }},
 		{name: "automation", enabled: automation, register: func(s *Server) { s.registerAutomationTools() }},
+		{name: "coordinator", enabled: coordinatorSurface, register: func(s *Server) { s.registerCoordinatorTools() }},
 		{name: "configuration-workflows", enabled: func(ctx mcpprofile.Context) bool { return config(ctx) || external(ctx) }, register: func(s *Server) { s.registerConfigWorkflowTools() }},
 		{name: "configuration-agents", enabled: func(ctx mcpprofile.Context) bool { return config(ctx) || external(ctx) }, register: func(s *Server) { s.registerConfigAgentTools() }},
 		{name: "configuration-mcp", enabled: func(ctx mcpprofile.Context) bool { return config(ctx) || external(ctx) }, register: func(s *Server) { s.registerConfigMcpTools() }},
@@ -1175,7 +1211,7 @@ func (s *Server) registerTools() {
 			group.register(s)
 		}
 	}
-	if s.profile.Surface != mcpprofile.SurfaceAutomation {
+	if s.profile.Surface != mcpprofile.SurfaceAutomation && s.profile.Surface != mcpprofile.SurfaceCoordinator {
 		s.registerPluginTools()
 	}
 	s.logger.Info("registered MCP tools",

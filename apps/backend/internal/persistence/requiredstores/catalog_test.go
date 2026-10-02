@@ -10,7 +10,7 @@ func TestCatalog(t *testing.T) {
 
 	wantIDs := map[string]struct{}{
 		"agent-settings": {}, "analytics": {}, "auth": {}, "auth-hostnames": {}, "automation": {},
-		"azure-devops": {}, "canvas": {}, "delivery": {}, "editor": {},
+		"azure-devops": {}, "canvas": {}, "coordinator": {}, "delivery": {}, "editor": {},
 		"github": {}, "gitlab": {}, "jira": {}, "linear": {}, "message-queue": {},
 		"notification": {}, "office": {}, "office-config-sync": {}, "organization-units": {},
 		"organizations": {}, "plugin-instance-state": {}, "plugin-instances": {},
@@ -108,4 +108,27 @@ func TestValidateCatalogRejectsInvalidDescriptors(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestCatalogCoordinatorListsPhase3Tables(t *testing.T) {
+	want := []string{
+		"coordinator_wakes", "coordinator_unattended_turns", "coordinator_unattended_denials",
+		"coordinator_class_changes", "coordinator_class_reviews", "coordinator_pending_changes",
+	}
+	for _, d := range Catalog() {
+		if d.ID != "coordinator" {
+			continue
+		}
+		have := map[string]bool{}
+		for _, table := range d.RequiredTables {
+			have[table] = true
+		}
+		for _, table := range want {
+			if !have[table] {
+				t.Errorf("coordinator entry is missing required table %q", table)
+			}
+		}
+		return
+	}
+	t.Fatal("coordinator entry not found in the catalog")
 }

@@ -134,6 +134,14 @@ const (
 	MetaKeyAutomationTaskMode       = "automation_task_mode"
 	MetaKeyAutomationRepositoryMode = "automation_repository_mode"
 	MetaKeyDeferredLaunch           = "deferred_launch"
+	// MetaKeyCoordinatorID records the coordinator that owns a conversation
+	// task, set at creation and read by the startup cleanup pass that
+	// archives/deletes conversation tasks whose coordinator no longer exists.
+	MetaKeyCoordinatorID = "coordinator_id"
+	// MetaKeyCoordinatorPurpose marks a coordinator-origin task that is not a
+	// conversation. CoordinatorPurposeDream is the shadow dream episode task.
+	MetaKeyCoordinatorPurpose = "coordinator_purpose"
+	CoordinatorPurposeDream   = "dream"
 	// MetaKeyWorkflowInitialSession is a write-once task-local snapshot of
 	// the first session identity used by workflow session targeting.
 	MetaKeyWorkflowInitialSession = "workflow_initial_session"
@@ -1327,6 +1335,9 @@ const (
 	// TaskOriginAutomationTask is a normal, user-visible task created by an
 	// automation. Unlike automation_run, it remains in Kanban/sidebar flows.
 	TaskOriginAutomationTask = "automation_task"
+	// TaskOriginCoordinator marks a coordinator's conversation task, created
+	// on popover open and archived/deleted alongside the coordinator.
+	TaskOriginCoordinator = "coordinator"
 )
 
 // Task represents a task in the database
@@ -1865,6 +1876,9 @@ const (
 	PermissionActorPersonalAccessToken PermissionResolutionActorKind = "personal_access_token"
 	PermissionActorAutomation          PermissionResolutionActorKind = "automation"
 	PermissionActorSynthetic           PermissionResolutionActorKind = "synthetic"
+	// PermissionActorCoordinatorUnattended marks a denial made by the backend
+	// for a coordinator's unattended turn, where no person is present.
+	PermissionActorCoordinatorUnattended PermissionResolutionActorKind = "coordinator_unattended"
 )
 
 type PermissionResolutionSource string
@@ -1878,6 +1892,9 @@ const (
 	// fixed in-session coordinator surface. It is distinct from legacy
 	// backend automation and from the authenticated external MCP bridge.
 	PermissionSourceAutomationMCP PermissionResolutionSource = "automation_mcp"
+	// PermissionSourceCoordinatorWake identifies a denial made during a
+	// coordinator wake's unattended turn.
+	PermissionSourceCoordinatorWake PermissionResolutionSource = "coordinator_wake"
 )
 
 type PermissionResolutionResult string
@@ -1906,6 +1923,8 @@ type PermissionResolutionAudit struct {
 	SelectedAt  time.Time                     `json:"selected_at"`
 	FinalizedAt *time.Time                    `json:"finalized_at,omitempty"`
 	Result      PermissionResolutionResult    `json:"result"`
+	// UnattendedTurnID is the coordinator unattended turn row a denial belongs to.
+	UnattendedTurnID string `json:"unattended_turn_id,omitempty"`
 }
 
 type PermissionResolutionClaimOutcome string

@@ -15,18 +15,12 @@ test("collapsed sidebar reveals after dwell without moving page content", async 
   await sidebar.getByRole("button", { name: "Collapse sidebar", exact: true }).click();
   await testPage.mouse.move(600, 400);
   await expect(sidebar).toHaveCSS("width", "56px");
-  const pageBefore = await testPage
-    .getByTestId("app-shell")
-    .locator(":scope > div > main")
-    .boundingBox();
+  const pageBefore = await testPage.getByTestId("app-shell").locator("main").boundingBox();
   await sidebar.hover({ position: { x: 20, y: 200 } });
   await waitForSidebarReveal(sidebar);
   await expect(testPage.getByTestId("app-sidebar-layout")).toHaveCSS("width", "56px");
   await expect(sidebar).toHaveAttribute("data-collapsed", "true");
-  const pageAfter = await testPage
-    .getByTestId("app-shell")
-    .locator(":scope > div > main")
-    .boundingBox();
+  const pageAfter = await testPage.getByTestId("app-shell").locator("main").boundingBox();
   expect(pageAfter).toEqual(pageBefore);
   await testPage.screenshot({ path: testInfo.outputPath("sidebar-hover.png") });
   await testPage.mouse.move(600, 400);

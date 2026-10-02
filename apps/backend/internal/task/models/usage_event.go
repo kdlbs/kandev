@@ -61,3 +61,11 @@ type TaskUsageTurnEvents struct {
 	Cursor int64
 	Events []*TaskUsageEvent
 }
+
+// UsageSum is the priced cost of a set of ledger rows. HasUnpriced reports
+// that at least one row in the set carries no price, so CostSubcents is a
+// lower bound.
+type UsageSum struct {
+	CostSubcents int64
+	HasUnpriced  bool
+}

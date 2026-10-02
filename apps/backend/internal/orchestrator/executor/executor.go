@@ -685,6 +685,11 @@ const McpModeOffice = mcpmode.Office
 // created by a user-configured automation.
 const McpModeAutomation = mcpmode.Automation
 
+// McpModeCoordinator selects the fixed six-tool MCP surface for a workspace
+// coordinator's conversation session
+// (docs/specs/coordinator/system-design/copilot.md#principal-and-mode).
+const McpModeCoordinator = mcpmode.Coordinator
+
 // McpModeManagedConversation selects the isolated managed-conversation MCP surface.
 const McpModeManagedConversation = "managed-conversation"
 
@@ -712,7 +717,7 @@ type LaunchOptions struct {
 	// selected session already has an active agent. Other internal launch paths
 	// retain their existing workspace reuse behavior.
 	RefuseIfAgentRunning bool
-	McpMode              string // MCP tool mode: empty task default, McpModeTaskTitlePending, McpModeConfig, McpModeOffice, or McpModeAutomation
+	McpMode              string // MCP tool mode: empty task default, McpModeTaskTitlePending, McpModeConfig, McpModeOffice, McpModeAutomation, McpModeCoordinator, or McpModeManagedConversation
 	McpProfile           *mcpprofile.Context
 	Attachments          []v1.MessageAttachment
 	Env                  map[string]string
@@ -999,6 +1004,17 @@ type GitLabCredentialResolver interface {
 	ResolveGitLabExecutionCredentials(ctx context.Context, workspaceID string) (host, token string, err error)
 }
 
+// CoordinatorLookup resolves a coordinator conversation task to its
+// coordinator and reports whether that coordinator's agent and executor
+// profiles are both usable, for the fail-closed coordinator-session-start
+// check (docs/specs/coordinator/system-design/copilot.md#fail-closed).
+// Implemented by *coordinator.Service.
+type CoordinatorLookup interface {
+	CoordinatorForConversationTask(ctx context.Context, taskID string) (coordinatorID string, ok bool, err error)
+	CoordinatorProfilesReady(ctx context.Context, coordinatorID string) (bool, error)
+	Phase2Enabled() bool
+}
+
 // Executor manages agent execution for tasks
 type Executor struct {
 	agentManager      AgentManagerClient
@@ -1010,6 +1026,14 @@ type Executor struct {
 	gitlabCredentials GitLabCredentialResolver
 	logger            *logger.Logger
 	canvasesEnabled   bool
+
+	// coordinators resolves a coordinator conversation task to its
+	// coordinator and reports profile readiness, for the fail-closed
+	// coordinator-session-start check in resolveTaskSessionMCPMode/Profile
+	// (docs/specs/coordinator/system-design/copilot.md#fail-closed). nil
+	// (unset) means the coordinator feature is off or this executor was
+	// never wired with it — a coordinator-origin task then fails to start.
+	coordinators CoordinatorLookup
 
 	gitCredentialIssuer            GitCredentialLeaseIssuer
 	gitCredentialBrokerURL         string
@@ -1551,6 +1575,14 @@ func (e *Executor) SetCapabilities(c ExecutorTypeCapabilities) {
 // SetGitLabCredentialResolver wires workspace-scoped GitLab execution auth.
 func (e *Executor) SetGitLabCredentialResolver(resolver GitLabCredentialResolver) {
 	e.gitlabCredentials = resolver
+}
+
+// SetCoordinatorLookup wires the coordinator lookup used by the fail-closed
+// coordinator-session-start check. Guarded by the caller on the coordinator
+// feature flag; an Executor with no lookup set refuses every
+// coordinator-origin task (docs/specs/coordinator/system-design/copilot.md#fail-closed).
+func (e *Executor) SetCoordinatorLookup(lookup CoordinatorLookup) {
+	e.coordinators = lookup
 }
 
 // ProbeBackgroundWorkloads samples a session's agent process for

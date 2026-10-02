@@ -603,6 +603,41 @@ func TestResolveTaskAgentProfile_TaskOverrideWinsOverTaskMetadata(t *testing.T) 
 	}
 }
 
+func TestResolveTaskAgentProfile_WorkflowDefaultWinsOverTaskMetadata(t *testing.T) {
+	repo := setupTestRepo(t)
+	stepGetter := newMockStepGetter()
+	stepGetter.steps["step1"] = &wfmodels.WorkflowStep{ID: "step1", WorkflowID: "wf1"}
+	stepGetter.workflowAgentProfileID = "wf-profile"
+	svc := createTestService(repo, stepGetter, newMockTaskRepo())
+
+	task := &models.Task{
+		ID:             "t1",
+		WorkflowStepID: "step1",
+		Metadata:       map[string]interface{}{"agent_profile_id": "task-profile"},
+	}
+	if got, _ := svc.resolveTaskAgentProfile(context.Background(), task); got != "wf-profile" {
+		t.Errorf("expected wf-profile, got %q", got)
+	}
+}
+
+func TestResolveTaskAgentProfile_SessionTargetStepSkipsWorkflowDefault(t *testing.T) {
+	repo := setupTestRepo(t)
+	stepGetter := newMockStepGetter()
+	target := &wfmodels.WorkflowSessionTarget{Kind: wfmodels.WorkflowSessionTargetStep, StepID: "other-step"}
+	stepGetter.steps["step1"] = &wfmodels.WorkflowStep{ID: "step1", WorkflowID: "wf1", SessionTarget: target}
+	stepGetter.workflowAgentProfileID = "wf-profile"
+	svc := createTestService(repo, stepGetter, newMockTaskRepo())
+
+	task := &models.Task{
+		ID:             "t1",
+		WorkflowStepID: "step1",
+		Metadata:       map[string]interface{}{"agent_profile_id": "task-profile"},
+	}
+	if got, _ := svc.resolveTaskAgentProfile(context.Background(), task); got != "task-profile" {
+		t.Errorf("expected task-profile, got %q", got)
+	}
+}
+
 func TestResolveTaskAgentProfile_StepThenWorkflowThenWorkspace(t *testing.T) {
 	ctx := context.Background()
 	now := time.Now().UTC()
