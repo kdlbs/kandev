@@ -13,8 +13,15 @@ import (
 )
 
 const (
-	mockContinuationOutputScenario        = "output"
-	mockContinuationReadAmbiguousScenario = "read-ambiguous"
+	mockContinuationOutputScenario               = "output"
+	mockContinuationReadScenario                 = "read"
+	mockContinuationWriteScenario                = "write"
+	mockContinuationPendingScenario              = "pending"
+	mockContinuationUnknownScenario              = "unknown"
+	mockContinuationReadHoldScenario             = "read-hold"
+	mockContinuationReadRestoreTransientScenario = "read-restore-transient"
+	mockContinuationReadRestoreHardScenario      = "read-restore-hard"
+	mockContinuationReadAmbiguousScenario        = "read-ambiguous"
 )
 
 type mockContinuationEpisode struct {
@@ -33,7 +40,9 @@ func (a *mockAgent) handleMockInterruptionContinuation(ctx context.Context, sid 
 	scenario := strings.TrimPrefix(prompt, "/continuation-")
 	if strings.HasPrefix(prompt, "/continuation-") {
 		switch scenario {
-		case mockContinuationOutputScenario, "read", "write", "pending", "unknown", "read-hold", "read-restore-transient", "read-restore-hard", mockContinuationReadAmbiguousScenario:
+		case mockContinuationOutputScenario, mockContinuationReadScenario, mockContinuationWriteScenario,
+			mockContinuationPendingScenario, mockContinuationUnknownScenario, mockContinuationReadHoldScenario,
+			mockContinuationReadRestoreTransientScenario, mockContinuationReadRestoreHardScenario, mockContinuationReadAmbiguousScenario:
 			return a.emitMockInterruption(ctx, sid, scenario)
 		}
 	}
@@ -54,7 +63,7 @@ func (a *mockAgent) handleMockInterruptionContinuation(ctx context.Context, sid 
 		e.text("Mock continuation acceptance uncertain.\n")
 		return acp.PromptResponse{}, &acp.RequestError{Code: -32603, Message: "continuation acceptance uncertain"}, true
 	}
-	if episode.Scenario == "read-hold" {
+	if episode.Scenario == mockContinuationReadHoldScenario {
 		e.text(fmt.Sprintf("Mock continuation accepted: original=%d continuation=%d native=%s\n", episode.Original, episode.Continuation, sid))
 		<-ctx.Done()
 		return acp.PromptResponse{StopReason: acp.StopReasonCancelled}, nil, true
@@ -76,10 +85,10 @@ func mockContinuationRestoreFailure(sid acp.SessionId) error {
 	if err := saveMockContinuation(sid, episode); err != nil {
 		return err
 	}
-	if episode.Scenario == "read-restore-hard" {
+	if episode.Scenario == mockContinuationReadRestoreHardScenario {
 		return &acp.RequestError{Code: -32603, Message: "saved conversation unavailable"}
 	}
-	if episode.Scenario == "read-restore-transient" && episode.RestoreAttempts == 1 {
+	if episode.Scenario == mockContinuationReadRestoreTransientScenario && episode.RestoreAttempts == 1 {
 		return &acp.RequestError{Code: -32603, Message: "dial tcp: network is unreachable"}
 	}
 	return nil
@@ -106,14 +115,14 @@ func (a *mockAgent) emitMockInterruption(ctx context.Context, sid acp.SessionId,
 	e.text("Mock interruption: partial history preserved.\n")
 	if scenario != mockContinuationOutputScenario {
 		kind := acp.ToolKindRead
-		if scenario == "write" {
+		if scenario == mockContinuationWriteScenario {
 			kind = acp.ToolKindEdit
 		}
-		if scenario == "unknown" {
+		if scenario == mockContinuationUnknownScenario {
 			kind = acp.ToolKindOther
 		}
 		e.startTool("interrupted-tool", "Fixture inspection", kind, map[string]any{"path": "fixture.txt"})
-		if scenario != "pending" {
+		if scenario != mockContinuationPendingScenario {
 			e.completeTool("interrupted-tool", "fixture read result")
 		}
 	}

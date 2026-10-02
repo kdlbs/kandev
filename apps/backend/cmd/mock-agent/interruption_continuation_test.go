@@ -16,7 +16,7 @@ const mockContinuationPrompt = "Your previous turn was interrupted by a temporar
 func TestMockInterruptionContinuationRequiresFixturePrefix(t *testing.T) {
 	a := newTransportLostTestAgent()
 	a.conn = newCapturingUpdater()
-	for _, prompt := range []string{"read", "output", "write", "unknown"} {
+	for _, prompt := range []string{mockContinuationReadScenario, mockContinuationOutputScenario, mockContinuationWriteScenario, mockContinuationUnknownScenario} {
 		_, _, handled := a.handleMockInterruptionContinuation(t.Context(), "ordinary", prompt)
 		require.False(t, handled, "ordinary prompts cannot enter an interruption fixture")
 	}
@@ -29,7 +29,7 @@ func TestMockInterruptionContinuationCancelledCompletion(t *testing.T) {
 	a := newTransportLostTestAgent()
 	a.conn = newCapturingUpdater()
 	t.Cleanup(func() { _ = os.Remove(mockContinuationPath(sid)) })
-	_, _, _ = a.handleMockInterruptionContinuation(t.Context(), sid, "/continuation-read")
+	_, _, _ = a.handleMockInterruptionContinuation(t.Context(), sid, "/continuation-"+mockContinuationReadScenario)
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 	response, err, handled := a.handleMockInterruptionContinuation(ctx, sid, mockContinuationPrompt)
@@ -39,7 +39,7 @@ func TestMockInterruptionContinuationCancelledCompletion(t *testing.T) {
 }
 
 func TestMockInterruptionContinuationRestoresSameConversation(t *testing.T) {
-	for _, scenario := range []string{"output", "read", "write", "pending", "unknown"} {
+	for _, scenario := range []string{mockContinuationOutputScenario, mockContinuationReadScenario, mockContinuationWriteScenario, mockContinuationPendingScenario, mockContinuationUnknownScenario} {
 		t.Run(scenario, func(t *testing.T) {
 			sid := acp.SessionId(t.Name())
 			_ = os.Remove(mockContinuationPath(sid))
@@ -71,7 +71,7 @@ func TestMockInterruptionContinuationAcceptedCancelAndClose(t *testing.T) {
 	a := newTransportLostTestAgent()
 	a.conn = newCapturingUpdater()
 	t.Cleanup(func() { _, _ = a.CloseSession(context.Background(), acp.CloseSessionRequest{SessionId: sid}) })
-	_, _, handled := a.handleMockInterruptionContinuation(t.Context(), sid, "/continuation-read-hold")
+	_, _, handled := a.handleMockInterruptionContinuation(t.Context(), sid, "/continuation-"+mockContinuationReadHoldScenario)
 	require.True(t, handled)
 	updater := newCapturingUpdater()
 	a.conn = updater
@@ -102,7 +102,7 @@ func TestMockInterruptionContinuationAcceptedCancelAndClose(t *testing.T) {
 }
 
 func TestMockInterruptionContinuationRestoreOutcomes(t *testing.T) {
-	for _, scenario := range []string{"read-restore-transient", "read-restore-hard", mockContinuationReadAmbiguousScenario} {
+	for _, scenario := range []string{mockContinuationReadRestoreTransientScenario, mockContinuationReadRestoreHardScenario, mockContinuationReadAmbiguousScenario} {
 		t.Run(scenario, func(t *testing.T) {
 			sid := acp.SessionId(t.Name())
 			_ = os.Remove(mockContinuationPath(sid))
@@ -114,11 +114,11 @@ func TestMockInterruptionContinuationRestoreOutcomes(t *testing.T) {
 			restored := newTransportLostTestAgent()
 			restored.conn = newCapturingUpdater()
 			_, err := restored.LoadSession(t.Context(), acp.LoadSessionRequest{SessionId: sid})
-			if scenario == "read-restore-hard" {
+			if scenario == mockContinuationReadRestoreHardScenario {
 				require.ErrorContains(t, err, "saved conversation unavailable")
 				return
 			}
-			if scenario == "read-restore-transient" {
+			if scenario == mockContinuationReadRestoreTransientScenario {
 				require.ErrorContains(t, err, "network is unreachable")
 				_, err = restored.LoadSession(t.Context(), acp.LoadSessionRequest{SessionId: sid})
 			}
