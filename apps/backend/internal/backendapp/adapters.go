@@ -443,6 +443,7 @@ func buildLifecycleLaunchRequest(
 		TaskID:                        req.TaskID,
 		TaskScope:                     req.TaskScope,
 		SessionSettingsPolicy:         lifecycleSessionSettingsPolicy(req.SessionSettingsPolicy),
+		RequiredNativeConversationID:  req.RequiredNativeConversationID,
 		WorkspaceID:                   req.WorkspaceID,
 		SessionID:                     req.SessionID,
 		TaskEnvironmentID:             req.TaskEnvironmentID,

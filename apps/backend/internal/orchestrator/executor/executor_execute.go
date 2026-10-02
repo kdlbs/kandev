@@ -225,13 +225,16 @@ func (e *Executor) runAgentProcessAsyncWithObservation(
 	onSuccess func(context.Context),
 	escalateTaskOnFailure, fromResume bool,
 	expectedStartAttemptID ...string,
-) {
+) <-chan error {
+	result := make(chan error, 1)
 	e.auditCeilingBypass(ctx, "runAgentProcessAsync", sessionID, true, zap.String("agent_execution_id", agentExecutionID))
 	var startAttemptID string
 	if len(expectedStartAttemptID) > 0 {
 		startAttemptID = expectedStartAttemptID[0]
 	}
 	go func() {
+		var startupErr error
+		defer func() { result <- startupErr; close(result) }()
 		startParent := context.WithoutCancel(ctx)
 		updateCtx := startParent
 		if isCancellableResumeContext(ctx) {
@@ -246,6 +249,13 @@ func (e *Executor) runAgentProcessAsyncWithObservation(
 		}
 
 		if err := e.agentManager.StartAgentProcess(startCtx, agentExecutionID); err != nil {
+			startupErr = err
+			if isNativeRestoreStartupContext(ctx) {
+				// Native restore has a caller waiting for this result. That owner
+				// classifies the actual error and tears down this exact execution.
+				e.logger.Warn("native conversation restore failed", zap.String("agent_execution_id", agentExecutionID), zap.Error(routingerr.SanitizeError(err)))
+				return
+			}
 			if isCancellableResumeContext(ctx) && ctx.Err() != nil {
 				// A cancelled resume owns no failure projection. Use the exact
 				// execution ID for bounded cleanup, then let the orchestrator
@@ -275,9 +285,14 @@ func (e *Executor) runAgentProcessAsyncWithObservation(
 			"terminal post-start race",
 			startAttemptID,
 		); terminal {
+			startupErr = lifecycle.ErrSessionTerminal
 			return
 		}
 		if isCancellableResumeContext(ctx) && ctx.Err() != nil {
+			startupErr = ctx.Err()
+			if isNativeRestoreStartupContext(ctx) {
+				return
+			}
 			// The provider ignored cancellation and reported success late. Do
 			// not run the resume success callback or restore task/session state.
 			// Teardown is exact-execution scoped so a retry cannot be stopped.
@@ -295,6 +310,7 @@ func (e *Executor) runAgentProcessAsyncWithObservation(
 			e.onAgentProcessStarted(updateCtx, taskID, sessionID, agentExecutionID)
 		}
 	}()
+	return result
 }
 
 func (e *Executor) handleAgentProcessStartFailure(

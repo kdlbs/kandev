@@ -502,12 +502,13 @@ type AgentProfileInfo struct {
 
 // LaunchAgentRequest contains parameters for launching an agent
 type LaunchAgentRequest struct {
-	TaskID                string
-	TaskScope             lifecycle.TaskLaunchScope
-	SessionSettingsPolicy ResumeSettingsPolicy
-	WorkspaceID           string // Kandev workspace ID — used to build scratch dir for repo-less tasks
-	SessionID             string
-	TaskEnvironmentID     string // Env owning this session (shared across sessions in the same task)
+	RequiredNativeConversationID string
+	TaskID                       string
+	TaskScope                    lifecycle.TaskLaunchScope
+	SessionSettingsPolicy        ResumeSettingsPolicy
+	WorkspaceID                  string // Kandev workspace ID — used to build scratch dir for repo-less tasks
+	SessionID                    string
+	TaskEnvironmentID            string // Env owning this session (shared across sessions in the same task)
 	// WorkspaceReuseRequired selects attach-only preparation of an already-ready
 	// task environment. It must never be inferred from a sibling execution ID.
 	WorkspaceReuseRequired bool

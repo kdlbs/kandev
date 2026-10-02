@@ -1,0 +1,111 @@
+package main
+
+import (
+	"context"
+	"crypto/sha256"
+	"encoding/json"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+
+	acp "github.com/coder/acp-go-sdk"
+)
+
+type mockContinuationEpisode struct {
+	Scenario        string `json:"scenario"`
+	Original        int    `json:"original"`
+	Continuation    int    `json:"continuation"`
+	RestoreAttempts int    `json:"restore_attempts"`
+}
+
+func mockContinuationPath(sid acp.SessionId) string {
+	return filepath.Join(os.TempDir(), fmt.Sprintf("kandev-mock-continuation-%x.json", sha256.Sum256([]byte(sid))))
+}
+
+func (a *mockAgent) handleMockInterruptionContinuation(ctx context.Context, sid acp.SessionId, prompt string) (acp.PromptResponse, error, bool) {
+	prompt = stripKandevSystem(strings.TrimSpace(prompt))
+	scenario := strings.TrimPrefix(prompt, "/continuation-")
+	switch scenario {
+	case "output", "read", "write", "pending", "unknown", "read-hold", "read-restore-transient", "read-restore-hard", "read-ambiguous":
+		return a.emitMockInterruption(ctx, sid, scenario)
+	}
+	if !strings.HasPrefix(prompt, "Your previous turn was interrupted by a temporary connection failure. Continue the unfinished request") {
+		return acp.PromptResponse{}, nil, false
+	}
+	raw, err := os.ReadFile(mockContinuationPath(sid))
+	var episode mockContinuationEpisode
+	if err != nil || json.Unmarshal(raw, &episode) != nil {
+		return acp.PromptResponse{}, nil, false
+	}
+	episode.Continuation++
+	if err := saveMockContinuation(sid, episode); err != nil {
+		return acp.PromptResponse{}, err, true
+	}
+	e := &emitter{ctx: ctx, conn: a.conn, sid: sid}
+	if episode.Scenario == "read-ambiguous" {
+		e.text("Mock continuation acceptance uncertain.\n")
+		return acp.PromptResponse{}, &acp.RequestError{Code: -32603, Message: "continuation acceptance uncertain"}, true
+	}
+	if episode.Scenario == "read-hold" {
+		e.text(fmt.Sprintf("Mock continuation accepted: original=%d continuation=%d native=%s\n", episode.Original, episode.Continuation, sid))
+		<-ctx.Done()
+		return acp.PromptResponse{StopReason: acp.StopReasonCancelled}, nil, true
+	}
+	e.text(fmt.Sprintf("Mock continuation complete: original=%d continuation=%d native=%s\n", episode.Original, episode.Continuation, sid))
+	return acp.PromptResponse{StopReason: acp.StopReasonEndTurn}, nil, true
+}
+
+func mockContinuationRestoreFailure(sid acp.SessionId) error {
+	raw, err := os.ReadFile(mockContinuationPath(sid))
+	var episode mockContinuationEpisode
+	if err != nil || json.Unmarshal(raw, &episode) != nil {
+		return nil
+	}
+	episode.RestoreAttempts++
+	if err := saveMockContinuation(sid, episode); err != nil {
+		return err
+	}
+	if episode.Scenario == "read-restore-hard" {
+		return &acp.RequestError{Code: -32603, Message: "saved conversation unavailable"}
+	}
+	if episode.Scenario == "read-restore-transient" && episode.RestoreAttempts == 1 {
+		return &acp.RequestError{Code: -32603, Message: "dial tcp: network is unreachable"}
+	}
+	return nil
+}
+
+func saveMockContinuation(sid acp.SessionId, episode mockContinuationEpisode) error {
+	raw, err := json.Marshal(episode)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(mockContinuationPath(sid), raw, 0600)
+}
+
+func (a *mockAgent) emitMockInterruption(ctx context.Context, sid acp.SessionId, scenario string) (acp.PromptResponse, error, bool) {
+	var episode mockContinuationEpisode
+	if raw, err := os.ReadFile(mockContinuationPath(sid)); err == nil {
+		_ = json.Unmarshal(raw, &episode)
+	}
+	episode.Scenario, episode.Original = scenario, episode.Original+1
+	if err := saveMockContinuation(sid, episode); err != nil {
+		return acp.PromptResponse{}, err, true
+	}
+	e := &emitter{ctx: ctx, conn: a.conn, sid: sid}
+	e.text("Mock interruption: partial history preserved.\n")
+	if scenario != "output" {
+		kind := acp.ToolKindRead
+		if scenario == "write" {
+			kind = acp.ToolKindEdit
+		}
+		if scenario == "unknown" {
+			kind = acp.ToolKindOther
+		}
+		e.startTool("interrupted-tool", "Fixture inspection", kind, map[string]any{"path": "fixture.txt"})
+		if scenario != "pending" {
+			e.completeTool("interrupted-tool", "fixture read result")
+		}
+	}
+	return acp.PromptResponse{}, &acp.RequestError{Code: -32603, Message: "peer disconnected before response", Data: map[string]any{"kandevMock": map[string]any{"continuationInterruption": true}}}, true
+}

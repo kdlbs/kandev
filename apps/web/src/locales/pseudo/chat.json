@@ -155,5 +155,14 @@
   "emptyTurnKnownCommand": "`/{{command}}` ŕàń ƀũţ ƥŕōďũćēď ńō ōũţƥũţ. {{hint}}",
   "emptyTurnNoOutput": "Ţĥē àĝēńţ ƒĩńĩśĥēď ŵĩţĥōũţ ƥŕōďũćĩńĝ àńŷ ōũţƥũţ.",
   "emptyTurnResendHint": "Ţŕŷ ŕēśēńďĩńĝ ŷōũŕ ŕēqũēśţ àś à ńōŕḿàĺ ḿēśśàĝē, ŵĩţĥōũţ ţĥē ĺēàďĩńĝ śĺàśĥ.",
-  "emptyTurnUnknownCommand": "`/{{command}}` ĩśń'ţ à ćōḿḿàńď ţĥĩś àĝēńţ ŕēćōĝńĩźēś, śō ĩţ ŕēţũŕńēď ńō ōũţƥũţ. {{hint}}"
+  "emptyTurnUnknownCommand": "`/{{command}}` ĩśń'ţ à ćōḿḿàńď ţĥĩś àĝēńţ ŕēćōĝńĩźēś, śō ĩţ ŕēţũŕńēď ńō ōũţƥũţ. {{hint}}",
+  "providerManualRecoveryBody": "Ţĥē àĝēńţ ŵàś ĩńţēŕŕũƥţēď. Ŕēśũḿē ţō ţŕŷ àĝàĩń, ōŕ śţàŕţ à ƒŕēśĥ śēśśĩōń.",
+  "providerRecoveryExhaustedBody_one": "Ţĥē ćōńńēćţĩōń ƒàĩĺēď àƒţēŕ {{count}} àũţōḿàţĩć ŕēţŕŷ. Ŕēśũḿē ōŕ śţàŕţ ƒŕēśĥ ţō ćōńţĩńũē.",
+  "providerRecoveryExhaustedBody_other": "Ţĥē ćōńńēćţĩōń ƒàĩĺēď àƒţēŕ {{count}} àũţōḿàţĩć ŕēţŕĩēś. Ŕēśũḿē ōŕ śţàŕţ ƒŕēśĥ ţō ćōńţĩńũē.",
+  "providerRecoveryCancelledBody": "Àũţōḿàţĩć ŕēćōvēŕŷ ŵàś ćàńćēĺĺēď. Ŕēśũḿē ōŕ śţàŕţ ƒŕēśĥ ţō ćōńţĩńũē.",
+  "continuationIn": "Ćōńţĩńũĩńĝ ĩń {{countdown}}.",
+  "continuationPhase_waiting": "Ŵàĩţĩńĝ ţō ŕēćōńńēćţ.",
+  "continuationPhase_reconnecting": "Ŕēćōńńēćţĩńĝ...",
+  "continuationPhase_continuing": "Ćōńţĩńũĩńĝ ƥŕēvĩōũś ŕēqũēśţ...",
+  "continuationHistoryPreserved": "Ƥŕēvĩōũś ćōńvēŕśàţĩōń ĩś ƥŕēśēŕvēď."
 }

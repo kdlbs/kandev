@@ -145,9 +145,9 @@ An unknown string alone never authorizes recovery. Historical attempts retain th
 
 Classification does not by itself authorize retry or switching.
 
-- Automatic retry, reset waiting, or fallback requires evidence tied to the
-  current invocation and a failure boundary that is known to be pre-result and
-  effect-safe.
+- Original-prompt replay, reset waiting, and fallback require current-invocation,
+  pre-result, effect-safe evidence. Native continuation has a separate
+  [interruption contract](provider-interruption-continuation.md).
 - A provider-supported resumable retry guarantee can satisfy this gate when it
   identifies the same provider-native session and generation.
 - Assistant output, tool activity, partial utility output, ambiguous prompt
@@ -174,12 +174,11 @@ Cursor recovery choices. They preserve the provider-neutral safety boundary in
    tool call, and missing evidence all fail closed. The observed incident had
    thoughts and a `Read File` call in flight, so it enters manual recovery even
    though its classification is transient.
-2. **Continuation mode.** An eligible concrete-profile retry retains the
-   selected execution profile. It uses the existing provider-native resume
-   identity before it sends the cached original prompt again. It does not create
-   a fresh provider route or switch providers. This replay is allowed only at
-   the safe point above. An unsafe turn exposes the existing manual Resume and
-   Start fresh choices. The user, not the classifier, chooses continuation.
+2. **Replay mode.** Eligible retries retain the execution profile and native
+   identity before sending the cached original prompt at the safe point above.
+   Separate opt-in native continuation preserves this replay fence, sends a
+   continuation instruction, and refuses writes or uncertain work. Otherwise
+   the existing manual Resume and Start fresh choices remain available.
 3. **Cursor-owned retry.** Kandev does not schedule while the original
    `session/prompt` RPC remains open. Provider progress after a marker clears
    the pending marker. Only a later terminal marker can re-arm it. The prompt

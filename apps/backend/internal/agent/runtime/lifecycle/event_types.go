@@ -42,9 +42,10 @@ type AgentEventPayload struct {
 	// captured by lifecycle before the terminal event is published so consumers
 	// do not have to infer output or effects from independently subscribed
 	// stream events.
-	EvidenceKnown  bool `json:"evidence_known,omitempty"`
-	OutputObserved bool `json:"output_observed,omitempty"`
-	EffectObserved bool `json:"effect_observed,omitempty"`
+	EvidenceKnown      bool                                `json:"evidence_known,omitempty"`
+	OutputObserved     bool                                `json:"output_observed,omitempty"`
+	EffectObserved     bool                                `json:"effect_observed,omitempty"`
+	ContinuationSafety *streams.ContinuationSafetySnapshot `json:"continuation_safety,omitempty"`
 	// ProviderDiagnosticCandidate carries the bounded text marker captured from
 	// a marked diagnostic stream event. It lets a terminal failure consumer
 	// correlate the diagnostic even when the stream subscription is delayed.
@@ -56,6 +57,7 @@ type AgentEventPayload struct {
 // terminal failure event. Lifecycle conservatively treats any genuine turn
 // content as both output and effect evidence, which fails replay closed.
 type PromptAttemptEvidence struct {
+	ContinuationSafety          *streams.ContinuationSafetySnapshot
 	EvidenceKnown               bool
 	OutputObserved              bool
 	EffectObserved              bool

@@ -104,12 +104,21 @@ type capturedPrompt struct {
 // transientRetryEntry tracks one session's in-progress retry loop: the current
 // attempt count and the cancel func for the armed backoff timer.
 type transientRetryEntry struct {
-	attempt  int
-	cancel   func()
-	retryCtx context.Context
-	mu       sync.Mutex
-	claimed  bool
-	armed    bool
+	attempt            int
+	mode               string
+	continuation       *continuationBinding
+	providerID         string
+	modelID            string
+	cancel             func()
+	retryCtx           context.Context
+	mu                 sync.Mutex
+	claimed            bool
+	armed              bool
+	started            int
+	predecessorStopped bool
+	acceptedExecution  string
+	acceptedGeneration uint64
+	restoredExecution  string
 }
 
 func (e *transientRetryEntry) claim() bool {
@@ -294,7 +303,21 @@ func (s *Service) handleTransientFailure(ctx context.Context, data watcher.Agent
 		return true
 	}
 	data = s.withPromptAttemptEvidenceLocked(data)
-	if data.DynamicRouteAttempt || !s.promptAttemptPreResultSafe(data) {
+	mode := recoveryModeReplay
+	var binding *continuationBinding
+	previous, _ := s.transientRetries.Load(data.SessionID)
+	previousEntry, _ := previous.(*transientRetryEntry)
+	continuing := previousEntry != nil && previousEntry.mode == recoveryModeContinue
+	if continuing || !s.promptAttemptPreResultSafe(data) {
+		binding = s.continuationBindingForFailure(ctx, data)
+		if continuing && binding != nil && *binding != *previousEntry.continuation {
+			binding = nil
+		}
+		if binding != nil {
+			mode = recoveryModeContinue
+		}
+	}
+	if data.DynamicRouteAttempt || ((continuing || !s.promptAttemptPreResultSafe(data)) && binding == nil) {
 		noticeState.mu.Unlock()
 		releaseNoticeState()
 		s.logger.Debug("refusing automatic transient retry without safe prompt-attempt evidence",
@@ -339,6 +362,7 @@ func (s *Service) handleTransientFailure(ctx context.Context, data watcher.Agent
 		zap.Int("max_attempts", transientMaxAttempts),
 		zap.Duration("delay", delay))
 
+	data.RecoveryMode = mode
 	// Emit the yellow status (against the failed turn) before completing it.
 	s.createTransientRetryStatusMessageLocked(noticeState, ctx, data, classified, attempt, delay, retryAt)
 	// Reserve the next timer while the notice lifecycle is still serialized. A
@@ -354,11 +378,33 @@ func (s *Service) handleTransientFailure(ctx context.Context, data watcher.Agent
 		retryAt,
 		classified,
 	)
+	if entry != nil {
+		entry.mode = mode
+		entry.continuation = binding
+		entry.providerID = data.AgentID
+		if data.ProviderError != nil {
+			if data.ProviderError.ProviderID != "" {
+				entry.providerID = data.ProviderError.ProviderID
+			}
+			entry.modelID = data.ProviderError.ModelID
+		}
+	}
 	noticeState.mu.Unlock()
 	releaseNoticeState()
 
-	s.reconcileCIAutoFixTurnBeforeCompletion(ctx, data.TaskID, data.SessionID, "")
-	s.completeTurnForSession(ctx, data.SessionID)
+	if mode == recoveryModeContinue {
+		if err := s.settleContinuationInterruption(ctx, data); err != nil {
+			if entry != nil {
+				cleanup := s.settleContinuationFailureLocked(ctx, data, entry)
+				go cleanup(context.WithoutCancel(ctx))
+			}
+			return true
+		}
+		s.lastTurnPrompt.Delete(data.SessionID)
+	} else {
+		s.reconcileCIAutoFixTurnBeforeCompletion(ctx, data.TaskID, data.SessionID, "")
+		s.completeTurnForSession(ctx, data.SessionID)
+	}
 
 	// Park the session in WAITING_FOR_INPUT (a calm, banner-less state that
 	// also lets the yellow retry card render — ActionMessage hides itself while
@@ -457,6 +503,14 @@ func (s *Service) reserveTransientRetryWithMetadataLocked(
 	}
 	retryCtx, cancel := context.WithCancel(context.Background())
 	entry := &transientRetryEntry{attempt: attempt, cancel: cancel, retryCtx: retryCtx}
+	if previous, ok := s.transientRetries.Load(sessionID); ok {
+		if previous, ok := previous.(*transientRetryEntry); ok {
+			previous.mu.Lock()
+			entry.started = previous.started
+			entry.providerID, entry.modelID = previous.providerID, previous.modelID
+			previous.mu.Unlock()
+		}
+	}
 	state.owned.Store(true)
 	s.transientRetries.Store(sessionID, entry)
 	return entry
@@ -501,6 +555,12 @@ func (s *Service) retryTransientPrompt(ctx context.Context, taskID, sessionID, e
 	if ctx.Err() != nil {
 		return
 	}
+	if value, ok := s.transientRetries.Load(sessionID); ok {
+		if entry, ok := value.(*transientRetryEntry); ok && entry.mode == recoveryModeContinue {
+			s.retryInterruptedContinuation(ctx, taskID, sessionID, execID, entry)
+			return
+		}
+	}
 	v, ok := s.lastTurnPrompt.Load(sessionID)
 	if !ok {
 		if ctx.Err() != nil {
@@ -523,6 +583,13 @@ func (s *Service) retryTransientPrompt(ctx context.Context, taskID, sessionID, e
 	}
 	cp, _ := v.(capturedPrompt)
 	initialCreatePromptPassthrough := false
+	if value, ok := s.transientRetries.Load(sessionID); ok {
+		if entry, ok := value.(*transientRetryEntry); ok {
+			entry.mu.Lock()
+			entry.started++
+			entry.mu.Unlock()
+		}
+	}
 	if session, sessionErr := s.repo.GetTaskSession(ctx, sessionID); sessionErr == nil && session != nil {
 		_, initialCreatePromptPassthrough = s.hydrateInitialCreatePromptPassthrough(session)
 	}
@@ -622,6 +689,13 @@ func (s *Service) createTransientRetryStatusMessageLocked(
 	if s.messageCreator == nil || state.retired.Load() {
 		return
 	}
+	if value, ok := s.transientRetries.Load(data.SessionID); ok {
+		if entry, ok := value.(*transientRetryEntry); ok {
+			entry.mu.Lock()
+			data.RecoveryAttemptsStarted = entry.started
+			entry.mu.Unlock()
+		}
+	}
 	content, meta := transientRetryStatusMessage(data, classified, attempt, delay, retryAt)
 	if s.transientRetryMessages != nil {
 		s.updateTransientRetryStatusMessageLocked(ctx, data, content, meta)
@@ -639,12 +713,19 @@ func transientRetryStatusMessage(
 ) (string, map[string]interface{}) {
 	secs := int(delay.Seconds())
 	label := transientFailureLabel(classified)
-	content := fmt.Sprintf("%s — retrying in %ds (attempt %d/%d)", label, secs, attempt, transientMaxAttempts)
+	content := fmt.Sprintf("%s. Retrying in %ds (attempt %d/%d)", label, secs, attempt, transientMaxAttempts)
+	phase := data.RecoveryPhase
+	if phase == "" {
+		phase = "waiting"
+	}
 	cancelAction := wsRecoveryAction(data.TaskID, data.SessionID, recoverActionCancelRetry,
 		"Cancel", "x", "Stop retrying and choose how to recover", recoveryCancelRetryButtonTestID)
 	meta := map[string]interface{}{
 		metaKeyVariant:     metaVariantWarning,
 		"retrying":         true,
+		"recovery_mode":    data.RecoveryMode,
+		"recovery_phase":   phase,
+		"attempts_started": data.RecoveryAttemptsStarted,
 		"attempt":          attempt,
 		"max_attempts":     transientMaxAttempts,
 		"retry_in_seconds": secs,
@@ -677,13 +758,17 @@ func (s *Service) createTransientRetryStatusMessageRecord(
 	content string,
 	meta map[string]interface{},
 ) {
+	turnID := ""
+	if data.RecoveryMode != recoveryModeContinue {
+		turnID = s.getActiveTurnID(data.SessionID)
+	}
 	if err := s.messageCreator.CreateSessionMessage(
 		ctx,
 		data.TaskID,
 		content,
 		data.SessionID,
 		string(v1.MessageTypeStatus),
-		s.getActiveTurnID(data.SessionID),
+		turnID,
 		meta,
 		false,
 	); err != nil {
@@ -842,25 +927,8 @@ func transientFailureLabel(classified *routingerr.Error) string {
 	}
 }
 
-func transientFailureExhaustedMessage(classified *routingerr.Error) string {
-	condition := "The provider remained unavailable"
-	if classified != nil {
-		switch classified.Code {
-		case routingerr.CodeModelCapacity:
-			condition = "The selected model remained at capacity"
-		case routingerr.CodeNetworkUnavailable:
-			condition = "The network remained unavailable"
-		case routingerr.CodeProviderOverloaded:
-			condition = "The provider remained overloaded"
-		case routingerr.CodeRateLimited:
-			condition = "The rate limit remained active"
-		case routingerr.CodeProviderUnavailable:
-			condition = "The provider remained unavailable"
-		case routingerr.CodeAgentTransportLost:
-			condition = "The agent connection kept dropping"
-		}
-	}
-	return condition + " after several retries. Resume to try again, or start a fresh session."
+func transientFailureManualMessage(classified *routingerr.Error) string {
+	return transientFailureLabel(classified) + ". Resume to try again, or start a fresh session."
 }
 
 // clearTransientRetryState clears a session's retry entry, cancels its timer,
@@ -982,10 +1050,16 @@ func (s *Service) retireAndClearTransientRetryState(sessionID string) {
 	release()
 }
 
-// cancelAllTransientRetries drains every armed retry timer at shutdown.
+// cancelAllTransientRetries drains local retry ownership at shutdown.
+// Continuation notices survive for startup reconciliation; accepted work
+// belongs to the runtime's shutdown and live-adoption policy.
 func (s *Service) cancelAllTransientRetries() {
-	s.transientRetries.Range(func(key, _ interface{}) bool {
+	s.transientRetries.Range(func(key, value interface{}) bool {
 		if keyStr, ok := key.(string); ok {
+			if entry, ok := value.(*transientRetryEntry); ok && entry.mode == recoveryModeContinue {
+				s.retireContinuationOnShutdown(keyStr, entry)
+				return true
+			}
 			s.resetTransientRetry(keyStr)
 		}
 		return true
@@ -1011,7 +1085,12 @@ func (s *Service) CancelTransientRetry(ctx context.Context, taskID, sessionID st
 		return false
 	}
 	noticeState.mu.Lock()
-	_, active := s.transientRetries.Load(sessionID)
+	value, active := s.transientRetries.Load(sessionID)
+	if entry, ok := value.(*transientRetryEntry); ok && entry.mode == recoveryModeContinue {
+		noticeState.mu.Unlock()
+		releaseNoticeState()
+		return s.cancelContinuationRetry(ctx, taskID, sessionID, entry)
+	}
 	s.resetTransientRetryWithContextLocked(noticeState, ctx, sessionID, true)
 	noticeState.mu.Unlock()
 	releaseNoticeState()

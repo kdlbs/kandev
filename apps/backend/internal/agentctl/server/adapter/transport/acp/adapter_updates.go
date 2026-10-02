@@ -165,6 +165,8 @@ func (a *Adapter) handleACPUpdate(
 		}
 	}
 
+	a.observeContinuationSafety(n, promptGeneration)
+
 	// Marshal once for both debug logging and tracing.
 	rawData, _ := json.Marshal(n)
 	if len(rawData) > 0 {

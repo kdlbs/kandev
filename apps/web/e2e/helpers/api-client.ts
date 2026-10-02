@@ -2739,7 +2739,12 @@ export class ApiClient {
   }
 
   async listSessionTurns(sessionId: string): Promise<{
-    turns: Array<{ id: string; completed_at?: string | null }>;
+    turns: Array<{
+      id: string;
+      started_at?: string;
+      completed_at?: string | null;
+      metadata?: Record<string, unknown>;
+    }>;
   }> {
     return this.request("GET", `/api/v1/task-sessions/${sessionId}/turns`);
   }

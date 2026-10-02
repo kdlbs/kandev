@@ -113,7 +113,9 @@ func (r *resumeAttemptRegistry) begin(parent context.Context, taskID, sessionID 
 	if parent == nil {
 		parent = context.Background()
 	}
-	parent = context.WithoutCancel(parent)
+	if owned, _ := parent.Value(continuationOwnedContextKey{}).(bool); !owned {
+		parent = context.WithoutCancel(parent)
+	}
 
 	r.mu.Lock()
 	defer r.mu.Unlock()

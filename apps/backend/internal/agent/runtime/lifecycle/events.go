@@ -166,6 +166,10 @@ func newAgentEventPayloadWithTurnIDAndEvidence(
 		payload.EvidenceKnown = evidence.EvidenceKnown
 		payload.OutputObserved = evidence.OutputObserved
 		payload.EffectObserved = evidence.EffectObserved
+		if evidence.ContinuationSafety != nil {
+			snapshot := *evidence.ContinuationSafety
+			payload.ContinuationSafety = &snapshot
+		}
 		payload.ProviderDiagnosticCandidate = evidence.ProviderDiagnosticCandidate
 		payload.ProviderDiagnosticText = evidence.ProviderDiagnosticText
 	}

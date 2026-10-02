@@ -131,6 +131,8 @@ const (
 //
 // Stream endpoint: ws://.../api/v1/agent/events
 type AgentEvent struct {
+	ContinuationSafety *ContinuationSafetySnapshot `json:"continuation_safety,omitempty"`
+
 	// Type identifies the event type. Use the EventType* constants for supported
 	// values.
 	Type string `json:"type"`

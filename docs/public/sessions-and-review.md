@@ -64,6 +64,7 @@ Stopping a session is not deletion. Resume needs the executor's session record. 
 When startup or resume fails:
 
 - Kandev adds one recovery entry to the selected session's chat.
+- A temporary provider failure can still need manual recovery when a turn has already produced output or used tools. The recovery message does not imply that automatic retries ran. Select **Resume** to restore the saved conversation, or expand **Technical details** to inspect the failure.
 - The current unresolved failure replaces the blocked message composer with one recovery card. Automatic resume and workspace-restore failures appear in that card, with separate causes in Technical details, rather than a second session banner. Older entries keep their message and technical details without stale controls.
 - In Kanban preview, selecting Plan keeps the recovery card below the Plan content, in the composer area.
 - Repeated delivery of the same failure does not add another entry.
@@ -73,6 +74,35 @@ For eligible failed Auggie ACP task sessions, the recovery card explains that
 **Resume** keeps the same conversation and skips saved mode and model overrides
 for that attempt. A successful recovery leaves a notice in chat, and the model
 and mode selectors show the provider-reported values when known.
+
+### Experimental interruption continuation
+
+**Interrupted conversation continuation** is off by default. When enabled, a
+supported Cursor ACP connection failure can continue the unfinished request in
+the same saved conversation after output or completed file reads. Kandev sends
+a continuation instruction, preserves the transcript, and allows files to be
+read again when Cursor did not save an interrupted read result. It does not
+resend the original request or create a replacement conversation automatically.
+
+Recovery shares the existing five-attempt budget and paced backoff. One notice
+shows waiting, reconnecting, or continuing, with **Cancel** available while the
+continued turn runs. Cancellation returns to manual recovery. An exhaustion
+message reports attempts that actually started; a refused recovery does not
+claim retries ran. Writes, shell commands, pending or unknown tool outcomes,
+permissions, background work, missing saved identity, and unsupported agents
+require manual recovery. New human work takes priority. Backend restart retires
+the old automatic notice without launching a continuation or interrupting
+adopted live work.
+
+To try this on a selected installation, enable
+**Interrupted conversation continuation** (`features.providerInterruptionContinuation`)
+under **Settings > System > Feature Toggles**, then restart Kandev. Alternatively set
+`KANDEV_FEATURES_PROVIDER_INTERRUPTION_CONTINUATION=true` before startup. An
+explicit environment value takes precedence over the persisted toggle, which
+takes precedence over the shipped profile. To roll back, disable the toggle or
+set that environment variable to `false`, then restart. The flag is experimental,
+high risk, and off in production, development, and E2E profiles. No exactly-once
+execution guarantee is implied.
 
 **Restore read-only workspace** makes the existing files available for inspection without claiming that the agent resumed. The session entry remains visible until the session resumes successfully. Kandev uses stacked touch-sized actions on phones. A failure in another session remains in that session's history.
 

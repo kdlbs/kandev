@@ -357,6 +357,9 @@ func ptr(s string) *string {
 // is only reached on resume, so no resumed-guard is needed here (unlike TUI).
 func (a *mockAgent) LoadSession(ctx context.Context, req acp.LoadSessionRequest) (acp.LoadSessionResponse, error) {
 	traceACP("session_load", string(req.SessionId), nil)
+	if err := mockContinuationRestoreFailure(req.SessionId); err != nil {
+		return acp.LoadSessionResponse{}, err
+	}
 	if parseFailOnResumeFlag() {
 		_, _ = fmt.Fprintf(logOutput, "mock-agent[%d]: refusing resume for session %s (--fail-on-resume), exiting 1\n", os.Getpid(), req.SessionId)
 		os.Exit(1)
@@ -456,6 +459,9 @@ func (a *mockAgent) Prompt(ctx context.Context, req acp.PromptRequest) (acp.Prom
 	// Dynamic unclassified fallback scenarios must return a terminal ACP
 	// RequestError directly from Prompt, just like real provider failures.
 	if resp, err, handled := a.handleDynamicUnclassifiedFallback(promptCtx, req.SessionId, prompt); handled {
+		return resp, err
+	}
+	if resp, err, handled := a.handleMockInterruptionContinuation(promptCtx, req.SessionId, prompt); handled {
 		return resp, err
 	}
 	// The /overloaded scenario must surface a real prompt-time ACP *error*
@@ -654,6 +660,7 @@ func (a *mockAgent) CloseSession(_ context.Context, req acp.CloseSessionRequest)
 	}
 	_ = os.Remove(overloadedCounterPath(req.SessionId))
 	_ = os.Remove(transportLostCounterPath(req.SessionId))
+	_ = os.Remove(mockContinuationPath(req.SessionId))
 	if dynamicFallbackCounterID == "" {
 		_ = os.Remove(dynamicUnclassifiedFallbackCounterPath(req.SessionId))
 	}

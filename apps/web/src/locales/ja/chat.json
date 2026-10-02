@@ -155,5 +155,14 @@
   "emptyTurnKnownCommand": "`/{{command}}` は実行されましたが、出力はありませんでした。{{hint}}",
   "emptyTurnNoOutput": "エージェントは出力を生成せずに終了しました。",
   "emptyTurnResendHint": "先頭のスラッシュなしで、通常のメッセージとしてリクエストを再送信してください。",
-  "emptyTurnUnknownCommand": "`/{{command}}` はこのエージェントが認識するコマンドではないため、出力はありませんでした。{{hint}}"
+  "emptyTurnUnknownCommand": "`/{{command}}` はこのエージェントが認識するコマンドではないため、出力はありませんでした。{{hint}}",
+  "providerManualRecoveryBody": "エージェントの処理が中断されました。セッションを再開して再試行するか、新しいセッションを開始してください。",
+  "providerRecoveryExhaustedBody_one": "{{count}} 回の自動再試行後に接続が失敗しました。再開するか、新しいセッションを開始してください。",
+  "providerRecoveryExhaustedBody_other": "{{count}} 回の自動再試行後に接続が失敗しました。再開するか、新しいセッションを開始してください。",
+  "providerRecoveryCancelledBody": "自動復旧がキャンセルされました。再開するか、新しいセッションを開始してください。",
+  "continuationIn": "{{countdown}} 後に続行します。",
+  "continuationPhase_waiting": "再接続を待っています。",
+  "continuationPhase_reconnecting": "再接続中...",
+  "continuationPhase_continuing": "前のリクエストを続行中...",
+  "continuationHistoryPreserved": "前の会話は保持されます。"
 }

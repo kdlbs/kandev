@@ -17,8 +17,20 @@ import {
   type SessionRecoveryOwner,
 } from "@/lib/session-recovery-presentation";
 import { sessionRecoveryAction } from "./messages/action-message-recovery";
+import { interruptionRecoveryKey } from "./messages/interruption-recovery-feedback";
 
-function recoveryCopy(model: ActiveSessionRecovery, t: ReturnType<typeof useTranslation>["t"]) {
+export function recoveryCopy(
+  model: ActiveSessionRecovery,
+  t: ReturnType<typeof useTranslation>["t"],
+) {
+  if (model.kind === "provider_interrupted")
+    return {
+      title: t("task:sessionRecoveryFailed"),
+      summary: t(interruptionRecoveryKey(model.metadata ?? {}), {
+        count: model.metadata?.attempts_started,
+      }),
+      showSummary: true,
+    };
   if (model.kind === "managed_runtime_npm_resolution")
     return {
       title: t("chat:managedRuntimeNpmTitle"),
@@ -31,19 +43,7 @@ function recoveryCopy(model: ActiveSessionRecovery, t: ReturnType<typeof useTran
       summary: t("chat:managedRuntimeNpmPolicyBody"),
       showSummary: true,
     };
-  if (model.kind === "provider_quota_limited") {
-    const reset = model.metadata?.reset_at ? new Date(model.metadata.reset_at) : null;
-    return {
-      title: t("chat:providerQuotaTitle", {
-        provider: model.metadata?.provider_name || t("chat:providerQuotaProviderFallback"),
-      }),
-      summary:
-        reset && !Number.isNaN(reset.getTime())
-          ? t("chat:providerQuotaReset", { resetAt: formatDateTime(reset) })
-          : t("chat:providerQuotaResetUnknown"),
-      showSummary: true,
-    };
-  }
+  if (model.kind === "provider_quota_limited") return providerQuotaRecoveryCopy(model, t);
   if (model.kind === "managed_clone_relocation_required")
     return {
       title: t("task:managedCloneRelocationTitle"),
@@ -55,6 +55,23 @@ function recoveryCopy(model: ActiveSessionRecovery, t: ReturnType<typeof useTran
   return {
     title: t("task:sessionRecoveryFailed"),
     summary: safe ? summary : t("task:agentHasStopped"),
+    showSummary: true,
+  };
+}
+
+function providerQuotaRecoveryCopy(
+  model: ActiveSessionRecovery,
+  t: ReturnType<typeof useTranslation>["t"],
+) {
+  const reset = model.metadata?.reset_at ? new Date(model.metadata.reset_at) : null;
+  return {
+    title: t("chat:providerQuotaTitle", {
+      provider: model.metadata?.provider_name || t("chat:providerQuotaProviderFallback"),
+    }),
+    summary:
+      reset && !Number.isNaN(reset.getTime())
+        ? t("chat:providerQuotaReset", { resetAt: formatDateTime(reset) })
+        : t("chat:providerQuotaResetUnknown"),
     showSummary: true,
   };
 }

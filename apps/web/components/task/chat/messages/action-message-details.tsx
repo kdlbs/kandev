@@ -23,6 +23,10 @@ export type ActionMeta = {
   reset_at?: string;
   remediation_url?: string;
   retrying?: boolean;
+  recovery_mode?: string;
+  recovery_phase?: string;
+  recovery_disposition?: string;
+  attempts_started?: number;
   attempt?: number;
   max_attempts?: number;
   retry_in_seconds?: number;
