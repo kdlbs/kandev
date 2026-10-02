@@ -270,7 +270,10 @@ test.describe("Changes panel focus behavior", () => {
     git.createFile("single-discard.txt", "discard me");
     const file = session.changesFileRow("single-discard.txt");
     await expect(file).toBeVisible({ timeout: 15_000 });
-    await file.hover();
+    const hoverActions = file.getByTestId("file-row-hover-actions");
+    await file.focus();
+    await expect(hoverActions).toHaveCSS("pointer-events", "auto");
+    await expect(hoverActions).toHaveCSS("opacity", "1");
 
     const discard = file.getByRole("button", { name: "Discard changes" });
     await expect(discard).toBeVisible();

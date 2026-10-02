@@ -17,6 +17,7 @@ type E2EStoreWindow = Window & {
       sessionAgentctl: {
         itemsBySessionId: Record<string, { status?: string; agentExecutionId?: string }>;
       };
+      connection: { status?: string };
       setAvailableCommands: (sessionId: string, commands: AvailableCommand[]) => void;
       setSessionModels: (sessionId: string, data: SessionModelsData) => void;
       setAuthState: (state: {
@@ -96,6 +97,16 @@ export async function setStoreRole(
       });
     },
     { role, overrides },
+  );
+}
+
+/** Wait until the app-level WebSocket is connected before starting a session. */
+export async function waitForWebSocketConnected(page: Page, timeout = 15_000): Promise<void> {
+  await page.waitForFunction(
+    () =>
+      (window as E2EStoreWindow).__KANDEV_E2E_STORE__?.getState().connection.status === "connected",
+    undefined,
+    { timeout, message: "the app WebSocket did not connect" },
   );
 }
 

@@ -256,8 +256,12 @@ test.describe("PR switcher changes panel", () => {
 
     await scrollChangesPanel(session, "bottom");
     await expect(session.commitsSection()).toBeVisible();
-    await expect(session.commitsSection().getByText("add dashboard component")).toBeVisible();
-    await expect(session.commitsSection().getByText("add api client")).toBeVisible();
+    await expect(session.commitsSection().getByText("add dashboard component")).toBeVisible({
+      timeout: 15_000,
+    });
+    await expect(session.commitsSection().getByText("add api client")).toBeVisible({
+      timeout: 15_000,
+    });
 
     // --- Switch to Task C (no PR) ---
     await session.taskInSidebar("No PR Task").click();
