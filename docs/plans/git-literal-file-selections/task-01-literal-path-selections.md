@@ -209,3 +209,35 @@ also named a nonexistent cancellation function; the actual cancellation contract
 run by the exact name above and passed (package 1.059s). API GREEN: exit 0, package 1.984s. Scoped process/API lint passed with concurrency 2 and
 zero issues. Catalog/specification/public-doc (47 pages)/coverage/whitespace gates passed.
 Normal hooks and exact-head external delivery evidence remain in the task plan.
+
+
+## Case matching and captured tracker environment remediation
+
+The current-head full review identified inherited `GIT_ICASE_PATHSPECS=1` broadening
+literal selection to case-distinct siblings, and per-file detail execution reading live
+ambient environment rather than the existing captured tracker environment. Both are
+corrected within the six selected command sites: selected subprocesses override case
+matching, and tracker patches reuse `gitCommandEnv(ctx, false)` before applying overrides.
+This keeps the captured snapshot, index-file context and final Git preparation seam.
+No manager/environment architecture or generic Git-query policy is changed.
+
+Permanent actual-Git regressions exercise both index mutations and all mixed patch
+representations with distinct case siblings; the cached fallback also covers inherited
+case matching. Case tests skip only when the actual filesystem identifies both names
+as the same file. A captured `diff.noprefix` setting and a distinct later ambient setting
+verify real patch output and preservation of the tracker snapshot. The index oracle
+compares NUL-delimited filenames exactly; an initially unsupported Git oracle option
+was removed before collecting the meaningful RED result.
+
+```bash
+(cd apps/backend && GOMAXPROCS=2 go test -p 2 ./internal/agentctl/server/process -run '^(TestGitOperatorLiteralCaseSelection|TestWorkspaceGitLiteralCaseSelection|TestWorkspaceGitLiteralCapturedEnvironment)$' -count=1)
+(cd apps/backend && GOMAXPROCS=2 go test -race -p 2 ./internal/agentctl/server/process -run '^(TestGitOperatorLiteralSelections|TestGitOperatorLiteralPathspecEnvironment|TestGitOperatorLiteralCaseSelection|TestWorkspaceGitLiteralPatchSelection|TestWorkspaceGitLiteralPathspecEnvironment|TestWorkspaceGitLiteralCaseSelection|TestWorkspaceGitLiteralCapturedEnvironment|TestWorkspaceGitLiteralCachedFallback|TestManagerTrackerGitEnvironmentUsesInstanceEnvironment|TestCapDiffOutputCancellationClosesReader|TestCapDiffOutput_Truncation|TestDiffBudgetAndCarryForwardHonorCancellation)$' -count=1)
+(cd apps/backend && GOMAXPROCS=2 go test -race -p 2 ./internal/agentctl/server/api -run '^(TestHandleGitLiteralSelections|TestHandleGitStageAndUnstage)$' -count=1)
+```
+
+RED exited 1 (package 0.353s), proving unrelated index mutation, sibling patch content
+and lost captured diff configuration. Process race GREEN passed (package 7.926s).
+Affected API race checks passed (package 1.943s). Scoped process/API lint passed
+with concurrency 2 and zero issues. Catalog/specification/public-doc (47 pages),
+coverage and whitespace gates passed. Normal hooks follow before publication. External CI, authenticated
+full review, thread disposition and actual merge remain pending in the task plan.

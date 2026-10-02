@@ -1012,7 +1012,7 @@ func (g *GitOperator) Stage(ctx context.Context, paths []string) (*GitOperationR
 		for _, path := range paths {
 			args = append(args, literalGitPathspec(path))
 		}
-		environmentOverrides = map[string]string{gitLiteralPathspecEnv: "0"}
+		environmentOverrides = map[string]string{gitLiteralPathspecEnv: "0", gitICasePathspecEnv: "0"}
 	}
 
 	output, err := g.runGitCommandWithEnvironment(ctx, environmentOverrides, args...)
@@ -1057,7 +1057,7 @@ func (g *GitOperator) Unstage(ctx context.Context, paths []string) (*GitOperatio
 		for _, path := range paths {
 			args = append(args, literalGitPathspec(path))
 		}
-		environmentOverrides = map[string]string{gitLiteralPathspecEnv: "0"}
+		environmentOverrides = map[string]string{gitLiteralPathspecEnv: "0", gitICasePathspecEnv: "0"}
 	}
 
 	output, err := g.runGitCommandWithEnvironment(ctx, environmentOverrides, args...)

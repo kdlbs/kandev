@@ -1,6 +1,9 @@
 package process
 
-const gitLiteralPathspecEnv = "GIT_LITERAL_PATHSPECS"
+const (
+	gitLiteralPathspecEnv = "GIT_LITERAL_PATHSPECS"
+	gitICasePathspecEnv   = "GIT_ICASE_PATHSPECS"
+)
 
 // literalGitPathspec selects a named file or directory without wildcard or magic expansion.
 func literalGitPathspec(path string) string {

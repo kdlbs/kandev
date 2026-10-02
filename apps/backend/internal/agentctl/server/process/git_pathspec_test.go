@@ -135,7 +135,11 @@ type literalFileSnapshot struct {
 func snapshotLiteralFile(t *testing.T, dir, path string) literalFileSnapshot {
 	t.Helper()
 	var got literalFileSnapshot
-	got.indexed = runGit(t, dir, "--no-literal-pathspecs", "ls-files", "-z", "--", ":(literal)"+path) != ""
+	for _, indexedPath := range strings.Split(runGit(t, dir, "--no-literal-pathspecs", "ls-files", "-z", "--", ":(literal)"+path), "\x00") {
+		if indexedPath == path {
+			got.indexed = true
+		}
+	}
 	if got.indexed {
 		got.index = runGit(t, dir, "show", ":"+path)
 	}
@@ -202,5 +206,36 @@ func checkLiteralMutation(t *testing.T, dir, operation string, paths, selected, 
 		if got := snapshotLiteralFile(t, dir, path); got != before[path] {
 			t.Errorf("unselected %q = %+v, want preserved %+v", path, got, before[path])
 		}
+	}
+}
+
+// @covers AC-PLATFORM-WORKSPACE-GIT-STATUS-001.37
+func TestGitOperatorLiteralCaseSelection(t *testing.T) {
+	for _, operation := range []string{"stage", "unstage"} {
+		t.Run(operation, func(t *testing.T) {
+			pair := [2]string{"Foo.txt", "foo.txt"}
+			dir := setupLiteralSelectionRepo(t, pair)
+			skipCaseInsensitiveLiteralFilesystem(t, dir, pair)
+			t.Setenv("GIT_ICASE_PATHSPECS", "1")
+			checkLiteralMutation(t, dir, operation, []string{pair[0]}, []string{pair[0]}, []string{pair[1]})
+			if os.Getenv("GIT_ICASE_PATHSPECS") != "1" {
+				t.Fatal("selected command changed the process environment")
+			}
+		})
+	}
+}
+
+func skipCaseInsensitiveLiteralFilesystem(t *testing.T, dir string, pair [2]string) {
+	t.Helper()
+	first, err := os.Stat(filepath.Join(dir, pair[0]))
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := os.Stat(filepath.Join(dir, pair[1]))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if os.SameFile(first, second) {
+		t.Skip("filesystem cannot represent case-distinct sibling files")
 	}
 }

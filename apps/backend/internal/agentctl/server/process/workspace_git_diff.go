@@ -403,7 +403,7 @@ func (wt *WorkspaceTracker) capDiffOutput(ctx context.Context, args ...string) (
 	if wt.gitStatusDiffOutput != nil {
 		return wt.gitStatusDiffOutput(ctx, wt.workDir, args...)
 	}
-	environment := withEnvironmentOverrides(os.Environ(), map[string]string{gitLiteralPathspecEnv: "0"})
+	environment := withEnvironmentOverrides(wt.gitCommandEnv(ctx, false), map[string]string{gitLiteralPathspecEnv: "0", gitICasePathspecEnv: "0"})
 	return capDiffOutputWithEnvironment(ctx, wt.workDir, environment, args...)
 }
 
