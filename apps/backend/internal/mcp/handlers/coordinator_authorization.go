@@ -356,13 +356,13 @@ func isCoordinatorProposeAction(action string) bool {
 	return isPropose
 }
 
-// filterCoordinatorTasks drops the tasks outside a coordinator principal's
-// projects. Other callers, and a coordinator without phase 2, see the list
-// unchanged. A resolver failure is an error naming projects.
 // errCoordinatorProjectsRead is surfaced to the caller verbatim so an agent
 // can tell a failed projects read from an empty board.
 var errCoordinatorProjectsRead = errors.New("could not read the coordinator's projects")
 
+// filterCoordinatorTasks drops the tasks outside a coordinator principal's
+// projects. Other callers, and a coordinator without phase 2, see the list
+// unchanged. A resolver failure is an error naming projects.
 func (h *Handlers) filterCoordinatorTasks(ctx context.Context, tasks []*taskmodels.Task) ([]*taskmodels.Task, error) {
 	principal, ok := mcpscope.PrincipalFromContext(ctx)
 	if !ok || !principal.IsCoordinator() || h.coordinatorSvc == nil || !h.coordinatorSvc.Phase2() {

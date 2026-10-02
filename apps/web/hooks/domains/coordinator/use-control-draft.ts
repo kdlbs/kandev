@@ -149,19 +149,22 @@ function useProjectsListing(
 ) {
   const projectsRead = useWorkspaceProjects(workspaceId, draft?.projects != null);
   const pruneRef = useRef(false);
-  const { sets, loose, status, retry } = projectsRead;
+  const { sets, repositoryIds, status, retry } = projectsRead;
   useEffect(() => {
     if (!pruneRef.current || status !== "ready") return;
     pruneRef.current = false;
     const current = draftRef.current;
     if (!current?.projects) return;
-    const live = new Set([...sets, ...loose].map((c) => `${c.kind}:${c.id}`));
+    const live = new Set([
+      ...sets.map((c) => `repository_set:${c.id}`),
+      ...repositoryIds.map((id) => `repository:${id}`),
+    ]);
     const entries = current.projects.entries.filter((e) => live.has(`${e.kind}:${e.id}`));
     if (entries.length === current.projects.entries.length) return;
     const next = { ...current, projects: { ...current.projects, entries } };
     draftRef.current = next;
     setDraft(next);
-  }, [status, sets, loose, draftRef, setDraft]);
+  }, [status, sets, repositoryIds, draftRef, setDraft]);
   const pruneAfterRefresh = useCallback(() => {
     pruneRef.current = true;
     retry();
@@ -266,12 +269,13 @@ export function useControlDraft({ workspaceId, coordinatorId, canManage }: Param
   const { policyDirty, watchesDirty, projectsDirty, watchesInvalid, projectsInvalid, invalid } =
     draftFlags(draft, stored);
 
+  const selected = draft?.projects?.scope === "selected";
+
   useSettingsSaveContributor({
     id: "coordinator-control",
     revision: JSON.stringify(draft),
     isDirty: canManage && (policyDirty || watchesDirty || projectsDirty),
-    canSave:
-      !invalid && !(draft?.projects?.scope === "selected" && projectsRead.status !== "ready"),
+    canSave: !invalid && !(projectsDirty && selected && projectsRead.status !== "ready"),
     invalidReason: invalidReason(t, watchesInvalid, projectsInvalid),
     save,
     discard: () => {

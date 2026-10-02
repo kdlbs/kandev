@@ -21,9 +21,10 @@ const byName = (a: ProjectChoice, b: ProjectChoice) => {
 export function projectChoices(
   sets: readonly RepositorySet[],
   repositories: readonly Repository[],
-): { sets: ProjectSetChoice[]; loose: ProjectChoice[] } {
+): { sets: ProjectSetChoice[]; loose: ProjectChoice[]; repositoryIds: string[] } {
   const inSet = new Set(sets.flatMap((set) => set.repositories.map((item) => item.repository_id)));
   return {
+    repositoryIds: repositories.map((repository) => repository.id),
     sets: sets
       .map((set) => ({
         kind: "repository_set" as const,
@@ -49,9 +50,10 @@ export function projectChoices(
  * already loaded.
  */
 export function useWorkspaceProjects(workspaceId: string, enabled = true) {
-  const [choices, setChoices] = useState<{ sets: ProjectSetChoice[]; loose: ProjectChoice[] }>({
+  const [choices, setChoices] = useState<ReturnType<typeof projectChoices>>({
     sets: [],
     loose: [],
+    repositoryIds: [],
   });
   const [status, setStatus] = useState<ProjectsStatus>("loading");
   const sequenceRef = useRef(0);
@@ -75,7 +77,7 @@ export function useWorkspaceProjects(workspaceId: string, enabled = true) {
   useEffect(() => {
     if (!enabled) return;
     loadedRef.current = false;
-    setChoices({ sets: [], loose: [] });
+    setChoices({ sets: [], loose: [], repositoryIds: [] });
     setStatus("loading");
     reload();
     return () => {

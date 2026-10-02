@@ -231,19 +231,19 @@ describe("useControlDraft failures and validity", () => {
   });
 });
 
-describe("useControlDraft projects scope", () => {
-  const selectedProjects = (ids: string[]) =>
-    settings({
-      projects_config: {
-        scope: "selected",
-        entries: ids.map((id) => ({ kind: "repository" as const, id })),
-        include_no_repository: false,
-      },
-    });
-  const repos = (ids: string[]) => ({
-    repositories: ids.map((id) => ({ id, name: id })),
+const selectedProjects = (ids: string[]) =>
+  settings({
+    projects_config: {
+      scope: "selected",
+      entries: ids.map((id) => ({ kind: "repository" as const, id })),
+      include_no_repository: false,
+    },
   });
+const repos = (ids: string[]) => ({
+  repositories: ids.map((id) => ({ id, name: id })),
+});
 
+describe("useControlDraft projects scope", () => {
   it("blocks Save for a selected draft while the project listing failed", async () => {
     listSetsMock.mockRejectedValue(new Error("down"));
     listReposMock.mockRejectedValue(new Error("down"));
@@ -315,5 +315,44 @@ describe("useControlDraft projects scope", () => {
     expect(contributor?.canSave).toBe(true);
     await act(async () => contributor?.save());
     expect(putMock.mock.calls[0][2].projects).toBeUndefined();
+  });
+});
+
+describe("useControlDraft projects listing", () => {
+  it("keeps a stored repository entry that belongs to a listed set when pruning", async () => {
+    listSetsMock.mockResolvedValue({
+      repository_sets: [{ id: "s1", name: "S", repositories: [{ repository_id: "r1" }] }],
+    });
+    listReposMock.mockResolvedValue(repos(["r1"]));
+    getMock.mockResolvedValue(selectedProjects(["r1", "gone"]));
+    putMock.mockRejectedValueOnce(
+      new ApiError("gone", 400, {
+        field: "projects",
+        code: "projects_foreign_entry",
+        error: "gone",
+      }),
+    );
+    const { result } = mount();
+    await waitFor(() => expect(result.current.projectsRead.status).toBe("ready"));
+    act(() =>
+      result.current.setProjects({ ...result.current.draft!.projects!, includeNoRepository: true }),
+    );
+    await act(async () => {
+      await contributor?.save().catch(() => {});
+    });
+    await waitFor(() =>
+      expect(result.current.draft?.projects?.entries).toEqual([{ kind: "repository", id: "r1" }]),
+    );
+  });
+
+  it("lets a policy-only save through while the project listing failed", async () => {
+    listSetsMock.mockRejectedValue(new Error("down"));
+    listReposMock.mockRejectedValue(new Error("down"));
+    getMock.mockResolvedValue(selectedProjects(["r1"]));
+    const { result } = mount();
+    await waitFor(() => expect(result.current.projectsRead.status).toBe("error"));
+    act(() => result.current.setAction("message", "requires_approval"));
+    expect(contributor?.isDirty).toBe(true);
+    expect(contributor?.canSave).toBe(true);
   });
 });
