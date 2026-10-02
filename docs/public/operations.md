@@ -387,7 +387,12 @@ service temp path short enough for local Unix-domain socket paths; an excessivel
 exceed the platform socket-address limit.
 
 Persistent Go build caching is separate: Go's default `GOCACHE` is not derived from `TMPDIR`, and
-Kandev injects its managed Go-cache location only when that opt-in Storage setting is enabled.
+Kandev injects its managed Go-cache location only when that opt-in Storage setting is enabled. If
+Kandev cannot prepare that cache for a host-local execution, the agent still starts without the
+managed override. This fallback does not change the saved setting or cache data. Go tools then use
+an independently configured `GOCACHE` or Go's normal default; a tool can still fail if that cache
+is unusable. Adoption, cleanup, restore, and deletion keep strict path checks and reject unsafe
+symlinks.
 Scratch cleanup in the inherited temporary directory belongs to the operating system or the host's
 temporary-file policy. Archive and delete stop and reap the task's host-local processes, but do not
 recursively delete shared temporary files.
@@ -746,6 +751,18 @@ Before archive, delete, reset, or manual cleanup:
 5. check logs and the remote provider afterward, because timeout, network, or permission failures can leave a container, directory, or sandbox behind.
 
 Never delete a managed task directory merely because its database row looks terminal. A borrowed environment or pending asynchronous cleanup can still own it.
+
+### Recover a preserved Worktree inventory mismatch
+
+If a session resume reports that canonical workspace repository inventory is incomplete, first preserve the checkout exactly as it is. Record its branch and HEAD, and inspect tracked, dirty, untracked, and ignored files. Do not use **Reset Environment**, archive/delete cleanup, `git clean`, worktree removal, or a provider reset as an inventory repair.
+
+The task-scoped `repair_workspace_inventory` session recovery action is safe only for a Kandev-managed local Git worktree with exactly one missing or stale repository/branch slot. It performs read-only reciprocal Git inspection, hashes the checkout state, compares current database revisions, rejects another active session, changes only the proven inventory row, appends an immutable receipt identity, verifies the checkout again, durably records monotonic matching post-repair evidence on that receipt, and resumes once through the ordinary validator. Retrying the same operation requires the same idempotency key. See [WebSocket API](websocket-api.md#repair-preserved-workspace-inventory) for the request and receipt contract.
+
+Stop and investigate manually when the action returns a conflict. Common causes are multiple unmatched rows, duplicate repository/branch attachments, a moved or symlinked path, a detached or unexpected branch, a missing Git worktree registration, a user-owned local repository, a Docker/SSH/Sprites-only checkout, another active session (including a child sharing the environment), configured external Git clean/process filters, or state that changed during inspection. A conflict is intentionally preservation-first: Kandev leaves checkout files and provider resources untouched and does not fall back to rematerialization.
+
+A fresh or additional-session launch (a brand-new session, `spawn_session_kandev`, or on-entry auto-start) runs this same guarded repair automatically when it hits the identical single-slot mismatch, using a server-derived idempotency key scoped to that session; no manual action is needed. If automatic repair cannot prove a safe single match, the launch fails exactly as it did before this behavior existed, with no orphaned STARTING/RUNNING session and no primary-session change, and the manual `repair_workspace_inventory` action above remains available.
+
+If Kandev commits the inventory row but cannot durably store positive post-repair evidence, the launch or resume remains blocked and retryable. Use the same idempotency key for manual retries; Kandev re-inspects the preserved checkout and proceeds only after it records matching evidence. Once divergent evidence is durably recorded, retries cannot replace it with a match; preserve the checkout and investigate manually.
 
 ## Updates
 

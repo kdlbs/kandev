@@ -113,6 +113,24 @@ type managedRuntimeStartupFailureMetadata struct {
 	npmCode  string
 }
 
+func (e *AgentExecution) setStartupFailureMetadata(metadata managedRuntimeStartupFailureMetadata) {
+	e.startupFailureMu.Lock()
+	defer e.startupFailureMu.Unlock()
+	e.StartupFailureReason = metadata.reason
+	e.StartupFailureAttempts = metadata.attempts
+	e.StartupFailureNPMCode = metadata.npmCode
+}
+
+func (e *AgentExecution) startupFailureMetadataSnapshot() managedRuntimeStartupFailureMetadata {
+	e.startupFailureMu.RLock()
+	defer e.startupFailureMu.RUnlock()
+	return managedRuntimeStartupFailureMetadata{
+		reason:   e.StartupFailureReason,
+		attempts: e.StartupFailureAttempts,
+		npmCode:  e.StartupFailureNPMCode,
+	}
+}
+
 type managedRuntimeRetryFailurePhase string
 
 const (
@@ -133,9 +151,7 @@ func (m *Manager) updateExecutionFailure(
 		execution.ErrorMessage = message
 		execution.FailureCode = code
 		execution.FailureDetails = details
-		execution.StartupFailureReason = startup.reason
-		execution.StartupFailureAttempts = startup.attempts
-		execution.StartupFailureNPMCode = startup.npmCode
+		execution.setStartupFailureMetadata(startup)
 		execution.Status = v1.AgentStatusFailed
 	})
 }
@@ -430,9 +446,7 @@ func (m *Manager) resetManagedRuntimeExecutionForRetry(execution *AgentExecution
 		current.ErrorMessage = ""
 		current.FailureCode = ""
 		current.FailureDetails = ""
-		current.StartupFailureReason = ""
-		current.StartupFailureAttempts = 0
-		current.StartupFailureNPMCode = ""
+		current.setStartupFailureMetadata(managedRuntimeStartupFailureMetadata{})
 		current.setSessionInitialized(false)
 		m.resetStreamingStateWithHistory(current)
 		select {

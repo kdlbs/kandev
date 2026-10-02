@@ -391,8 +391,6 @@
   "runtimeFailedBody": "{{agent}} はランタイム {{version}} を有効にできませんでした（以前：{{previous}}）。今回の試行で選択は維持されました。手動で再試行するか、自動更新をオフにしてください。",
   "runtimeRunning": "{{previous}} から {{version}} への更新を準備中",
   "runtimeReview": "ランタイムを確認",
-  "runtimeIndicator_one": "{{count}} 件のエージェントランタイム更新",
-  "runtimeIndicator_other": "{{count}} 件のエージェントランタイム更新",
   "runtimePolicySaveFailed": "自動更新の設定を保存できませんでした。再試行してください。",
   "runtimeOtherRegistrations_one": "その他の登録済みランタイム（{{count}}）",
   "runtimeOtherRegistrations_other": "その他の登録済みランタイム（{{count}}）",

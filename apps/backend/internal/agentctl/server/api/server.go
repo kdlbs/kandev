@@ -441,7 +441,8 @@ type StartResponse struct {
 }
 
 func (s *Server) handleStart(c *gin.Context) {
-	if err := s.procMgr.Start(c.Request.Context()); err != nil {
+	processGeneration, err := s.procMgr.StartWithGeneration(c.Request.Context())
+	if err != nil {
 		s.logger.Error("failed to start agent", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, StartResponse{
 			Success: false,
@@ -454,7 +455,7 @@ func (s *Server) handleStart(c *gin.Context) {
 		Success:           true,
 		Message:           "agent started",
 		Command:           s.procMgr.GetFinalCommand(),
-		ProcessGeneration: s.procMgr.ProcessGeneration(),
+		ProcessGeneration: processGeneration,
 	})
 }
 

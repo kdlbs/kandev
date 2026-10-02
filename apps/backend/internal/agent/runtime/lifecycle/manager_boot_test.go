@@ -2,11 +2,14 @@ package lifecycle
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"testing"
 	"time"
 
+	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/task/models"
+	"go.uber.org/zap/zapcore"
 )
 
 // MockBootMessageService implements BootMessageService for testing
@@ -125,6 +128,63 @@ func TestFinalizeBootMessage_Failed(t *testing.T) {
 		if _, ok := lastMsg.Metadata["exit_code"]; ok {
 			t.Error("expected no exit_code for failed status")
 		}
+	}
+}
+
+func TestFinalizeBootMessageLogsPersistenceFailureAtWarn(t *testing.T) {
+	mgr := newTestManager(t)
+	log, logs := observedLogger(t)
+	mgr.logger = log
+	mgr.bootMessageService = &MockBootMessageService{updateErr: errors.New("database unavailable")}
+
+	mgr.finalizeBootMessage(nil, &models.Message{
+		ID:       "boot-msg-failed-update",
+		Metadata: map[string]interface{}{"status": "running"},
+	}, nil, "failed")
+
+	entries := logs.FilterMessage("failed to update agent boot message").All()
+	if len(entries) != 1 || entries[0].Level != zapcore.WarnLevel {
+		t.Fatalf("boot-status persistence logs = %#v, want one warning", entries)
+	}
+}
+
+func TestFinalizeBootMessageClearsStderrFromEarlierStartupAttempt(t *testing.T) {
+	mgr := newTestManager(t)
+	bootSvc := &MockBootMessageService{}
+	mgr.bootMessageService = bootSvc
+	mock := newRestartMockAgentctlServer(t, false, false)
+	mock.mu.Lock()
+	mock.stderrConfigured = true
+	mock.stderrLines = nil
+	mock.mu.Unlock()
+	client := createTestClient(t, mock.server.URL)
+	t.Cleanup(client.Close)
+	streamCtx, stopStream := context.WithCancel(context.Background())
+	t.Cleanup(stopStream)
+	if err := client.StreamUpdates(streamCtx, func(agentctl.AgentEvent) {}, nil, nil); err != nil {
+		t.Fatalf("connect agent event stream: %v", err)
+	}
+
+	message := &models.Message{
+		ID:       "boot-msg-retried",
+		Content:  "npm error code ECONNRESET",
+		Metadata: map[string]interface{}{"status": "running", "startup_retrying": true},
+	}
+	execution := &AgentExecution{agentctl: client}
+	mgr.finalizeBootMessage(execution, message, nil, containerStateExited)
+
+	lastMessage := bootSvc.getLastUpdatedMessage()
+	if lastMessage == nil {
+		t.Fatal("expected boot message finalization")
+	}
+	if lastMessage.Content != "" {
+		t.Fatalf("final boot message content = %q, want cleared stderr from the successful silent retry", lastMessage.Content)
+	}
+	mgr.updateBootMessage(execution, message, false, func(message *models.Message) {
+		message.Content = "late first-attempt stderr"
+	})
+	if lastMessage = bootSvc.getLastUpdatedMessage(); lastMessage.Content != "" {
+		t.Fatalf("late stderr poll overwrote the final message content with %q", lastMessage.Content)
 	}
 }
 

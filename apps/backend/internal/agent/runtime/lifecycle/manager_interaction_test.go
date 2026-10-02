@@ -232,8 +232,11 @@ func newRestartMockAgentctlServer(t *testing.T, failStop, failSessionNew bool) *
 	})
 	mux.HandleFunc("/api/v1/agent/configure", func(w http.ResponseWriter, _ *http.Request) {
 		m.recordHTTP("configure")
-		if m.configureError != "" {
-			_ = json.NewEncoder(w).Encode(map[string]any{"success": false, "error": m.configureError})
+		m.mu.Lock()
+		configureError := m.configureError
+		m.mu.Unlock()
+		if configureError != "" {
+			_ = json.NewEncoder(w).Encode(map[string]any{"success": false, "error": configureError})
 			return
 		}
 		_, _ = w.Write([]byte(`{"success":true}`))
@@ -243,9 +246,10 @@ func newRestartMockAgentctlServer(t *testing.T, failStop, failSessionNew bool) *
 		m.httpActions = append(m.httpActions, "start")
 		m.processGeneration++
 		generation := m.processGeneration
+		startError := m.startError
 		m.mu.Unlock()
-		if m.startError != "" {
-			_ = json.NewEncoder(w).Encode(map[string]any{"success": false, "error": m.startError})
+		if startError != "" {
+			_ = json.NewEncoder(w).Encode(map[string]any{"success": false, "error": startError})
 			return
 		}
 		_ = json.NewEncoder(w).Encode(map[string]any{
@@ -287,10 +291,13 @@ func newRestartMockAgentctlServer(t *testing.T, failStop, failSessionNew bool) *
 			var resp *ws.Message
 			switch msg.Action {
 			case "agent.initialize":
-				if m.initializeError != "" {
+				m.mu.Lock()
+				initializeError := m.initializeError
+				m.mu.Unlock()
+				if initializeError != "" {
 					resp, _ = ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
 						"success": false,
-						"error":   m.initializeError,
+						"error":   initializeError,
 					})
 					break
 				}
@@ -305,8 +312,12 @@ func newRestartMockAgentctlServer(t *testing.T, failStop, failSessionNew bool) *
 				if m.onSessionNew != nil {
 					m.onSessionNew()
 				}
-				if m.failSessionNew || m.sessionNewError != "" {
-					message := m.sessionNewError
+				m.mu.Lock()
+				failSessionNew := m.failSessionNew
+				sessionNewError := m.sessionNewError
+				m.mu.Unlock()
+				if failSessionNew || sessionNewError != "" {
+					message := sessionNewError
 					if message == "" {
 						message = "session new failed"
 					}

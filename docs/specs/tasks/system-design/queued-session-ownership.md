@@ -148,8 +148,9 @@ WAITING_FOR_INPUT alone does not meet this predicate.
 
 If the candidate is primary, ordinary recovery remains eligible. No primary is
 not proof of supersession. Multiple primary rows or a missing candidate are
-ambiguous ownership and suppress passive recovery. Inventory read failure also
-suppresses a non-primary FAILED candidate, using `ownership_unavailable`.
+ambiguous ownership and suppress passive recovery. Inventory read failure
+suppresses every FAILED candidate because current ownership and sibling state
+are unavailable, using `ownership_unavailable`.
 Use `failed_session_sibling_working` for the confirmed suppression.
 Do not make historical parking metadata part of this decision.
 

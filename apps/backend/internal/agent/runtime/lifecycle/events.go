@@ -135,6 +135,7 @@ func newAgentEventPayloadWithTurnIDAndEvidence(
 	turnID string,
 	evidence *PromptAttemptEvidence,
 ) AgentEventPayload {
+	startupFailure := execution.startupFailureMetadataSnapshot()
 	payload := AgentEventPayload{
 		AgentExecutionID:       execution.ID,
 		AttemptID:              execution.currentStartupAttemptID(),
@@ -157,9 +158,9 @@ func newAgentEventPayloadWithTurnIDAndEvidence(
 		ErrorMessage:           execution.ErrorMessage,
 		FailureCode:            execution.FailureCode,
 		FailureDetails:         execution.FailureDetails,
-		StartupFailureReason:   execution.StartupFailureReason,
-		StartupFailureAttempts: execution.StartupFailureAttempts,
-		StartupFailureNPMCode:  execution.StartupFailureNPMCode,
+		StartupFailureReason:   startupFailure.reason,
+		StartupFailureAttempts: startupFailure.attempts,
+		StartupFailureNPMCode:  startupFailure.npmCode,
 		ProviderError:          execution.ProviderError,
 		SessionSettingsPolicy:  sessionSettingsProjectionPolicy(execution.sessionSettingsProjectionPolicy()),
 		ExitCode:               execution.ExitCode,
@@ -190,6 +191,7 @@ func (p *EventPublisher) PublishAgentctlEvent(ctx context.Context, eventType str
 		worktreeBranch, _ = branch.(string)
 	}
 
+	startupFailure := execution.startupFailureMetadataSnapshot()
 	payload := AgentctlEventPayload{
 		OwnerKind:              executionOwnerKind(execution),
 		WorkspaceID:            execution.WorkspaceID,
@@ -204,9 +206,9 @@ func (p *EventPublisher) PublishAgentctlEvent(ctx context.Context, eventType str
 		ErrorMessage:           errMsg,
 		FailureCode:            execution.FailureCode,
 		FailureDetails:         execution.FailureDetails,
-		StartupFailureReason:   execution.StartupFailureReason,
-		StartupFailureAttempts: execution.StartupFailureAttempts,
-		StartupFailureNPMCode:  execution.StartupFailureNPMCode,
+		StartupFailureReason:   startupFailure.reason,
+		StartupFailureAttempts: startupFailure.attempts,
+		StartupFailureNPMCode:  startupFailure.npmCode,
 		WorktreeID:             worktreeID,
 		WorktreePath:           execution.WorkspacePath,
 		WorktreeBranch:         worktreeBranch,

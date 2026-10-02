@@ -2,10 +2,9 @@
 
 import { useState, useEffect, useMemo, memo, type ReactElement } from "react";
 import { useSessionComposerRecovery } from "../session-recovery-context";
-import { SessionErrorDetails } from "@/components/task/session-error-details";
+import { useAppStore } from "@/components/state-provider";
 import { Trans, useTranslation } from "react-i18next";
 import { IconAlertTriangle } from "@tabler/icons-react";
-import { sanitizeSessionErrorDetails } from "@/lib/session-error-details";
 import { cn } from "@/lib/utils";
 import {
   useActionMessageSession,
@@ -19,12 +18,14 @@ import { ManagedRuntimeStartupRecoveryMessage } from "./managed-runtime-startup-
 import { ManagedRuntimeNpmRecoveryMessage } from "./managed-runtime-npm-recovery-message";
 import { formatDateTime } from "@/lib/i18n/formats";
 import { parseRetryAt, retryCountdownLabel } from "./transient-retry";
-import { hasSessionRecoveryResolutionAfter } from "@/hooks/processed-message-filtering";
 import { ActionButtons } from "./action-message-actions";
 import { SessionRecoveryActionButtons, sessionRecoveryAction } from "./action-message-recovery";
+import { RecoveryHistory, resolveRecoveryHistoryState } from "./action-message-recovery-history";
+import { readableFailureSummary } from "./action-message-utils";
 import {
   lastAgentErrorStamp,
   readLastAgentError,
+  readLastAgentErrorIncludingDismissed,
   type LastAgentError,
 } from "@/lib/session-last-agent-error";
 import { legacyRecoveryMessageMatchesError } from "@/lib/session-recovery-presentation";
@@ -43,11 +44,15 @@ function isCurrentRecoveryMessage(
   messageRecoveryStamp: string | undefined,
   currentRecoveryError: LastAgentError | null,
   comment: Message,
+  sessionMetadata: Record<string, unknown> | null | undefined,
 ) {
   if (!isRecoveryMessage) return true;
+  if (messageRecoveryStamp) {
+    const latestError = readLastAgentErrorIncludingDismissed(sessionMetadata);
+    if (!latestError || latestError.dismissedAt) return false;
+    return lastAgentErrorStamp(latestError) === messageRecoveryStamp;
+  }
   if (!currentRecoveryError) return true;
-  const currentRecoveryStamp = lastAgentErrorStamp(currentRecoveryError);
-  if (messageRecoveryStamp) return currentRecoveryStamp === messageRecoveryStamp;
   return legacyRecoveryMessageMatchesError(
     comment.content,
     comment.created_at,
@@ -85,9 +90,25 @@ export const ActionMessage = memo(function ActionMessage({ comment }: { comment:
     comment,
     metadata?.action_visibility === "running" && comment.type === "status",
   );
+  const sessionMetadata = useAppStore((state) =>
+    comment.session_id ? state.taskSessions.items[comment.session_id]?.metadata : undefined,
+  );
   if (runningNoticeResolved) return null;
-  if (metadata?.recovery_actions && owner?.model)
-    return <RecoveryHistory message={comment.content} metadata={metadata} />;
+  const historyState = resolveRecoveryHistoryState(
+    comment,
+    metadata,
+    owner?.model?.messageId,
+    sessionMetadata,
+  );
+  if (historyState) {
+    return (
+      <RecoveryHistory
+        comment={comment}
+        metadata={metadata}
+        activeOwner={historyState.activeOwner}
+      />
+    );
+  }
   return <ActionMessageControls comment={comment} />;
 });
 
@@ -106,6 +127,7 @@ const ActionMessageControls = memo(function ActionMessageControls({
   const metadata = comment.metadata as ActionMeta | undefined;
   const message = comment.content || t("task:anErrorOccurred");
   const isRecoveryMessage = metadata?.recovery_actions === true;
+  const messageRecoveryStamp = metadata?.recovery_stamp ?? metadata?.error_stamp;
   // The recovery acknowledgment lives here, on the message row that stays
   // mounted, not on SettledFailureMessage: a successful resume drives the
   // session through STARTING/RUNNING (which unmounts the card via
@@ -117,24 +139,22 @@ const ActionMessageControls = memo(function ActionMessageControls({
   // records that the agent booted again after this failure. It survives a
   // reload or task switch and also covers auto-resume-on-open, where the card
   // would otherwise linger until the next prompt flipped the session to RUNNING.
-  const { agentRebooted, agentBootFailed } = useAgentBootOutcomeAfterMessage(
-    comment,
-    isRecoveryMessage,
-  );
-  const recoveryResolvedDurably = isRecoveryMessage
-    ? hasSessionRecoveryResolutionAfter(sessionMetadata, comment.created_at)
-    : false;
+  const {
+    agentRebooted,
+    agentBootFailed,
+    recoveryResolved: recoveryResolvedDurably,
+  } = useAgentBootOutcomeAfterMessage(comment, isRecoveryMessage, sessionMetadata);
   // The click acknowledgment only covers the wait for that outcome. A recovery
   // that came back failed — a failed boot row, or a session driven to FAILED —
   // must surface its card again, buttons included, or the retry is unreachable.
   const recoveryFailedAgain = agentBootFailed || sessionState === "FAILED";
   const currentRecoveryError = currentSessionRecoveryError(sessionMetadata ?? null);
-  const messageRecoveryStamp = metadata?.recovery_stamp ?? metadata?.error_stamp;
   const isCurrentRecovery = isCurrentRecoveryMessage(
     isRecoveryMessage,
     messageRecoveryStamp,
     currentRecoveryError,
     comment,
+    sessionMetadata,
   );
   const recoveryActionsVisible = shouldShowRecoveryActions({
     isRecoveryMessage,
@@ -286,11 +306,6 @@ function failureDetailsMetadata(
   message: string,
 ) {
   return needsDetails ? { ...metadata, error_output: metadata?.error_output || message } : metadata;
-}
-
-function readableFailureSummary(message: string): string | null {
-  const safe = sanitizeSessionErrorDetails(message);
-  return safe !== message || message.length > 240 || message.includes("\n") ? null : safe;
 }
 
 function withoutRecoveryActions(metadata: ActionMeta | undefined): ActionMeta | undefined {
@@ -593,20 +608,5 @@ function MissingBranchRecovery({
         </div>
       </div>
     </section>
-  );
-}
-
-function RecoveryHistory({ message, metadata }: { message: string; metadata?: ActionMeta }) {
-  const { t } = useTranslation();
-  return (
-    <div
-      className="min-w-0 py-2 text-xs text-muted-foreground"
-      data-testid="session-recovery-history"
-    >
-      <p className="wrap-anywhere">
-        {readableFailureSummary(message) ?? t("task:anErrorOccurred")}
-      </p>
-      <SessionErrorDetails>{metadata?.error_output ?? message}</SessionErrorDetails>
-    </div>
   );
 }

@@ -80,7 +80,7 @@ Do not advertise a confirmed npm race.
 Run sequentially from the repository root. Install dependencies once if missing.
 
 ```bash
-(cd apps/backend && go test ./internal/agent/runtime/lifecycle -run 'TestManagedStartupProgress' -count=1)
+(cd apps/backend && go test -tags fts5 ./internal/agent/runtime/lifecycle -run 'TestManagedStartupProgress' -count=1)
 (cd apps && pnpm install --frozen-lockfile)
 (cd apps/web && pnpm exec vitest run components/task/chat/session-bootstrap-recovery-card.test.tsx components/task/chat/managed-runtime-startup-recovery.test.tsx)
 (cd apps/web && pnpm run typecheck && pnpm run i18n:check)

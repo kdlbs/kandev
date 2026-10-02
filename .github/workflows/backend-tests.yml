@@ -594,9 +594,9 @@ jobs:
     permissions:
       contents: read
       packages: read
-    # The env-gated package suite runs with the race detector and can exceed
-    # ten minutes on a hosted runner as the repository test set grows.
-    timeout-minutes: 20
+    # Allow the full race-enabled persistence suite twenty minutes per package,
+    # plus time for the service, cold compilation, and job cleanup.
+    timeout-minutes: 30
     container: ghcr.io/kdlbs/kandev-ci:build-latest
     services:
       postgres:
@@ -671,7 +671,7 @@ jobs:
             ./internal/workflowsync
             ./internal/worktree
           )
-          go test -v -race -timeout 15m "${POSTGRES_PACKAGES[@]}"
+          go test -v -race -timeout 20m "${POSTGRES_PACKAGES[@]}"
 
   sidebar-resources:
     name: Sidebar resource bounds (${{ matrix.mode }})
@@ -855,6 +855,14 @@ jobs:
         # windows-latest. Go's default package timeout is 10 minutes, which can
         # terminate a healthy suite before the workflow's 30-minute job cap.
         run: go test -race -v -json -timeout 25m ./internal/agentctl/server/process/... ./internal/agent/runtime/agentctl/launcher/... ./internal/common/ptyexec/... ./internal/backendapp/ownershiplock/... ./internal/system/storage/workspaces/...
+
+      # Keep this targeted: these packages have broader tests, while these
+      # native tests verify hidden consoles retain handles for descendants.
+      - name: Test Windows helper console behavior
+        run: >-
+          go test -tags fts5 -race -v
+          -run '^(TestWindowsPrepareGitLifecycleCommandHidesConsoleWindow|TestWindowsDetachedParentKeepsConsoleHiddenForDescendants|TestPrepareNativeMCPProcessHidesConsoleWindow|TestWindowsACPCommandProcAttrHidesConsoleWindow|TestConfigureProcessTreeHidesConsoleWindow)$'
+          ./internal/common/subproc ./internal/agent/mcpconfig ./internal/agentctl/server/utility ./internal/agent/acpdbg ./internal/agent/codexdbg
 
       - name: Test Windows managed runtime cache repair
         run: go test -race -v ./internal/agent/managedruntime -run TestRemoveNpxExecutionTreeTreatsMissingWindowsChildAsAbsent

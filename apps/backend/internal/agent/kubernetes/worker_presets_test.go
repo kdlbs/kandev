@@ -3,7 +3,6 @@ package kubernetes
 import (
 	"os"
 	"path/filepath"
-	"runtime"
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
@@ -87,11 +86,11 @@ func TestKubernetesWorkerPresetsPreserveRuntimeOwnership(t *testing.T) {
 
 func readWorkerPreset(t *testing.T, name string) string {
 	t.Helper()
-	_, source, _, ok := runtime.Caller(0)
-	if !ok {
-		t.Fatal("runtime.Caller failed")
+	packageDir, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("locate test package: %v", err)
 	}
-	root := filepath.Join(filepath.Dir(source), "../../../../..")
+	root := filepath.Join(packageDir, "../../../../..")
 	raw, err := os.ReadFile(filepath.Join(root, "k8s", "presets", name+".yaml"))
 	if err != nil {
 		t.Fatalf("read %s preset: %v", name, err)

@@ -268,6 +268,34 @@ describe("FileRow truncation (regression: path overlaps diff stats in narrow pan
 });
 
 describe("FileRow status marker", () => {
+  it("does not repeat pending diff text or show unknown line counts", () => {
+    const { container, queryByText } = render(
+      <TooltipProvider>
+        <ul>
+          <FileRow
+            file={{
+              ...baseFile,
+              path: "src/pending.ts",
+              plus: undefined,
+              minus: undefined,
+              diffState: "pending",
+            }}
+            isPending={false}
+            onSelect={noopSelect}
+            onOpenDiff={noop}
+            onStage={noop}
+            onUnstage={noop}
+            onDiscard={noop}
+            onEditFile={noop}
+          />
+        </ul>
+      </TooltipProvider>,
+    );
+
+    expect(queryByText("Diff is loading")).toBeNull();
+    expect(container.querySelector("[data-file-status='modified']")).not.toBeNull();
+  });
+
   it("shows previous-path context for a moved file", () => {
     const { container } = render(
       <TooltipProvider>

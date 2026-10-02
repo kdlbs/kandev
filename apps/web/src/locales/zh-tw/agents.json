@@ -391,8 +391,6 @@
   "runtimeFailedBody": "{{agent}} 無法啟用執行時 {{version}}（原版本：{{previous}}）。此次嘗試保留了您的選擇。請手動重試或關閉自動更新。",
   "runtimeRunning": "正在準備從 {{previous}} 更新到 {{version}}",
   "runtimeReview": "檢視執行時",
-  "runtimeIndicator_one": "{{count}} 個代理執行時更新",
-  "runtimeIndicator_other": "{{count}} 個代理執行時更新",
   "runtimePolicySaveFailed": "無法儲存自動更新設定。請重試。",
   "runtimeOtherRegistrations_one": "其他已註冊的執行時（{{count}}）",
   "runtimeOtherRegistrations_other": "其他已註冊的執行時（{{count}}）",

@@ -316,13 +316,15 @@ export function getEnvLayout(envId: string): object | null {
   }
 }
 
-/** Save the dockview layout for a task environment. */
-export function setEnvLayout(envId: string, layout: object): void {
-  if (typeof window === "undefined") return;
+/** Save the dockview layout and report whether session storage accepted it. */
+export function setEnvLayout(envId: string, layout: object): boolean {
+  if (typeof window === "undefined") return false;
   try {
     window.sessionStorage.setItem(`${DOCKVIEW_ENV_LAYOUT_PREFIX}${envId}`, JSON.stringify(layout));
+    return true;
   } catch {
     // Ignore write failures (storage full, blocked, etc.)
+    return false;
   }
 }
 
@@ -688,18 +690,7 @@ function normalizeAttachmentDeliveryMode(
  *  stripping `preview` to halve storage cost. */
 export function setChatDraftAttachments(
   sessionId: string,
-  attachments: Array<{
-    id: string;
-    file?: File;
-    data?: string;
-    attachmentId?: string;
-    mimeType: string;
-    fileName: string;
-    size: number;
-    isImage: boolean;
-    deliveryMode?: "prompt" | "path";
-    preview?: string;
-  }>,
+  attachments: Array<StoredFileAttachment & { file?: File; preview?: string }>,
 ): void {
   if (attachments.length === 0) {
     removeSessionStorage(`${CHAT_DRAFT_ATTACHMENTS_KEY}.${sessionId}`);

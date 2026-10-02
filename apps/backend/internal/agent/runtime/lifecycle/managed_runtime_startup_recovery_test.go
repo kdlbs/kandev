@@ -459,6 +459,7 @@ func TestManagedStartupRecoveryRetriesTransientNpmAndSilentExit(t *testing.T) {
 			mock.stderrLines = append([]string(nil), tt.stderr...)
 			mock.stderrConfigured = tt.stderrConfigured
 			mock.mu.Unlock()
+			initialArgs := append([]string(nil), execution.AgentArgs...)
 
 			attempted, err := mgr.retryManagedRuntimeStartup(
 				context.Background(), execution,
@@ -474,7 +475,7 @@ func TestManagedStartupRecoveryRetriesTransientNpmAndSilentExit(t *testing.T) {
 			if got := mock.getManagedRuntimeRepairSpecs(); len(got) != 0 {
 				t.Fatalf("recovery called cache repair: %#v", got)
 			}
-			wantArgs := append([]string(nil), execution.AgentArgs...)
+			wantArgs := append([]string(nil), initialArgs...)
 			if tt.wantOnline {
 				for i, arg := range wantArgs {
 					if arg == managedRuntimePreferOfflineArg {

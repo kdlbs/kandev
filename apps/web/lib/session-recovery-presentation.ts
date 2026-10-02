@@ -1,10 +1,15 @@
 import type { TaskStatusSummaryActiveError } from "./types/task-status-summary";
-import { lastAgentErrorStamp, readLastAgentError } from "./session-last-agent-error";
+import {
+  lastAgentErrorStamp,
+  normalizeAgentErrorCauses,
+  readLastAgentError,
+} from "./session-last-agent-error";
 import type { LastAgentError } from "./session-last-agent-error";
 import type {
   ResumptionState,
   SessionRecoveryFailure,
 } from "@/hooks/domains/session/use-session-resumption";
+import { parseTurnTimestamp } from "@/lib/state/slices/session/turn-actions";
 
 /** Automatic recovery state shared with the session-owned bootstrap card. */
 export type SessionRecoveryOwner = {
@@ -67,10 +72,41 @@ export function selectSessionRecoveryError(
 ): TaskStatusSummaryActiveError | null {
   if (!sessionId) return null;
   const persistedError = sessionMetadataRecoveryError(sessionId, sessionMetadata);
-  if (persistedError) return persistedError;
-  if (!isBootstrapSessionRecoveryError(activeError) || !activeError) return null;
-  if (activeError.scope === "task") return null;
-  return activeError.session_id === sessionId ? activeError : null;
+  const currentError = currentSessionRecoveryError(activeError, sessionId);
+  if (!persistedError) return currentError;
+  if (!currentError) return persistedError;
+  if (persistedError.stamp === currentError.stamp) {
+    const causes = persistedError.causes?.length ? persistedError.causes : currentError.causes;
+    return {
+      ...persistedError,
+      execution_id: persistedError.execution_id ?? currentError.execution_id,
+      attempt_id: persistedError.attempt_id ?? currentError.attempt_id,
+      ...(causes?.length ? { causes } : {}),
+    };
+  }
+  return newerRecoveryError(persistedError, currentError);
+}
+
+function currentSessionRecoveryError(
+  error: TaskStatusSummaryActiveError | null | undefined,
+  sessionId: string,
+): TaskStatusSummaryActiveError | null {
+  if (!isBootstrapSessionRecoveryError(error) || !error) return null;
+  if (error.scope === "task" || error.session_id !== sessionId) return null;
+  const causes = normalizeAgentErrorCauses(error.causes);
+  return { ...error, ...(causes.length > 0 ? { causes } : {}) };
+}
+
+function newerRecoveryError(
+  persisted: TaskStatusSummaryActiveError,
+  current: TaskStatusSummaryActiveError,
+): TaskStatusSummaryActiveError {
+  const persistedTime = parseTurnTimestamp(persisted.occurred_at);
+  const currentTime = parseTurnTimestamp(current.occurred_at);
+  if (persistedTime !== null && currentTime !== null) {
+    return currentTime >= persistedTime ? current : persisted;
+  }
+  return current;
 }
 
 export function ownsSessionRecoveryChat(

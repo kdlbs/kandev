@@ -61,6 +61,13 @@ test("shows startup retry progress on phone and finishes in the same conversatio
     expect(fs.readFileSync(managedRuntimeStartupAttemptFile(launchId), "utf8").trim()).toBe("2");
     const { sessions } = await apiClient.listTaskSessions(task.id);
     expect(sessions.map((candidate) => candidate.id)).toContain(task.session_id);
+    const { messages } = await apiClient.listSessionMessages(task.session_id);
+    expect(
+      messages.some(
+        (message) =>
+          message.author_type === "agent" && message.content.includes("simple mock response"),
+      ),
+    ).toBe(true);
     await assertNoDocumentHorizontalOverflow(testPage, "phone managed runtime startup retry");
     await testPage.screenshot({
       path: testInfo.outputPath("managed-runtime-startup-retry-mobile.png"),

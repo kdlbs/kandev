@@ -13,7 +13,7 @@ import (
 
 func TestManagedStartupEvidenceSignalExit(t *testing.T) {
 	mgr, generation := startManagedStartupEvidenceHelper(t, "hold")
-	stderrDone := make(chan struct{})
+	stderrDone := make(chan stderrReadResult, 1)
 	waitDone := make(chan struct{})
 	mgr.wg.Add(2)
 	go mgr.readStderr(stderrDone)

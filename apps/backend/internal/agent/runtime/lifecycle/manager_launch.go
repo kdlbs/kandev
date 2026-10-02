@@ -1898,9 +1898,6 @@ func (m *Manager) launchInternal(ctx context.Context, req *LaunchRequest) (*Agen
 	if err := validateManagedToolPolicyProvider(req.McpProfile, agentTypeName, agentConfig.Runtime()); err != nil {
 		return nil, err
 	}
-	if err := m.prepareManagedGoCacheEnvironment(ctx, req); err != nil {
-		return nil, err
-	}
 
 	// 3. Check if session already has an agent running. A workspace-only
 	// execution created by EnsureWorkspaceExecutionForSession /
@@ -1913,6 +1910,9 @@ func (m *Manager) launchInternal(ctx context.Context, req *LaunchRequest) (*Agen
 			}
 			return nil, fmt.Errorf("%w: session %q (execution: %s)", ErrAgentAlreadyRunning, req.SessionID, existingExecution.ID)
 		}
+	}
+	if err := m.prepareManagedGoCacheEnvironment(ctx, req); err != nil {
+		return nil, err
 	}
 
 	// 4. Resolve workspace path (non-worktree executors use this directly)

@@ -19,5 +19,12 @@ func managedProcessExitDisposition(err error) (types.ManagedStartupExitDispositi
 		return types.ManagedStartupExitUnknown, nil
 	}
 	code := exitErr.ExitCode()
+	if isWindowsNTStatusExceptionExitCode(uint32(code)) {
+		return types.ManagedStartupExitUnknown, nil
+	}
 	return types.ManagedStartupExitOrdinary, &code
+}
+
+func isWindowsNTStatusExceptionExitCode(code uint32) bool {
+	return uint32(code)&0xc0000000 == 0xc0000000
 }

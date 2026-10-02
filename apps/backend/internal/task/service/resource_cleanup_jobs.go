@@ -432,6 +432,20 @@ func (s *Service) startTaskResourceCleanup(job *models.TaskResourceCleanupJob) {
 // StartTaskResourceCleanupWorker owns the install-wide durable task cleanup
 // loop. StopTaskResourceCleanupWorker joins it during backend shutdown.
 func (s *Service) StartTaskResourceCleanupWorker(ctx context.Context) error {
+	if ctx == nil {
+		return errors.New("task resource cleanup worker context is required")
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if s.resourceCleanups == nil {
+		return nil
+	}
+	s.cleanupWorkerLifecycleMu.Lock()
+	defer s.cleanupWorkerLifecycleMu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if s.resourceCleanups == nil {
 		return nil
 	}
@@ -447,21 +461,33 @@ func (s *Service) StartTaskResourceCleanupWorker(ctx context.Context) error {
 	s.cleanupWorkerWake = wake
 	s.cleanupWorkerWG.Add(1)
 	s.cleanupWorkerMu.Unlock()
-	resumeErr := s.resumeTaskResourceCleanupJobs(workerCtx, startupPreparedCutoff)
-	go s.runTaskResourceCleanupWorker(workerCtx, wake, resumeErr != nil, startupPreparedCutoff)
-	return resumeErr
+	go s.runTaskResourceCleanupWorker(workerCtx, wake, startupPreparedCutoff)
+	return nil
 }
 
 func (s *Service) runTaskResourceCleanupWorker(
 	ctx context.Context,
 	wake <-chan struct{},
-	resumePending bool,
 	startupPreparedCutoff time.Time,
 ) {
 	defer s.cleanupWorkerWG.Done()
 	ticker := time.NewTicker(taskResourceCleanupRetryDelay)
 	defer ticker.Stop()
+	resumePending := true
 	for {
+		if ctx.Err() != nil {
+			return
+		}
+		if resumePending {
+			if err := s.resumeTaskResourceCleanupJobs(ctx, startupPreparedCutoff); err != nil {
+				if ctx.Err() == nil {
+					s.logger.Warn("resume task resource cleanup jobs", zap.Error(err))
+				}
+			} else {
+				resumePending = false
+				continue
+			}
+		}
 		select {
 		case <-ctx.Done():
 			return
@@ -469,13 +495,6 @@ func (s *Service) runTaskResourceCleanupWorker(
 		case <-wake:
 		}
 		if resumePending {
-			if err := s.resumeTaskResourceCleanupJobs(ctx, startupPreparedCutoff); err != nil {
-				if ctx.Err() == nil {
-					s.logger.Warn("resume task resource cleanup jobs", zap.Error(err))
-				}
-				continue
-			}
-			resumePending = false
 			continue
 		}
 		if err := s.processDueTaskResourceCleanupJobs(ctx); err != nil && ctx.Err() == nil {
@@ -485,6 +504,8 @@ func (s *Service) runTaskResourceCleanupWorker(
 }
 
 func (s *Service) StopTaskResourceCleanupWorker() {
+	s.cleanupWorkerLifecycleMu.Lock()
+	defer s.cleanupWorkerLifecycleMu.Unlock()
 	s.cleanupWorkerMu.Lock()
 	cancel := s.cleanupWorkerCancel
 	s.cleanupWorkerCancel = nil

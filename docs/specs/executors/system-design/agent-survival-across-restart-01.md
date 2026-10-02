@@ -62,7 +62,7 @@ part 3 holds the recovery data contracts.
 | `REQ-EXECUTORS-SURVIVAL-003` | [Startup](agent-survival-across-restart-02.md#startup), [Persistence](agent-survival-across-restart-02.md#persistence) |
 | `REQ-EXECUTORS-SURVIVAL-004` | [Turn outcome across the detached gap](agent-survival-across-restart-03.md#turn-outcome-across-the-detached-gap) |
 | `REQ-EXECUTORS-SURVIVAL-005` | [Capability gating and scope](agent-survival-across-restart-02.md#capability-gating-and-scope) |
-| `REQ-EXECUTORS-CONTROL-OWNERSHIP-001` | [Ownership identity and credential](#ownership-identity-and-credential) |
+| `REQ-EXECUTORS-CONTROL-OWNERSHIP-001` | [Ownership identity and credential](#ownership-identity-and-credential), [Control-server listen address](agent-survival-across-restart-03.md#control-server-listen-address) |
 | `REQ-EXECUTORS-CONTROL-OWNERSHIP-002` | [Single driver](#single-driver) |
 | `REQ-EXECUTORS-CONTROL-OWNERSHIP-003` | [Unowned shutdown](#unowned-shutdown) |
 | `REQ-EXECUTORS-CONTROL-OWNERSHIP-004` | [Capability compatibility](#capability-compatibility) |

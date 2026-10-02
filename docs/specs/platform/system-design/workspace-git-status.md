@@ -310,9 +310,10 @@ Every activation starts or joins a fresh request, even with cached membership; o
 If the fresh response fails to supply complete membership, run `recover` once for that foreground attempt.
 If details remain pending past the worker deadline, use `replay` once to recover a missed completion or failure frame.
 If replay still reports pending with no live job, expose unavailable details.
-Every attempt terminates in accepted data or an unavailable state with Retry.
-There is no interval refresh loop. Timers clear on scope replacement, unfocus, disconnect, or unmount.
-Retry and later activation can begin a new attempt. A same-state rerender cannot.
+Every attempt terminates in accepted data or an unavailable state.
+[Delayed recovery](changes-refresh-recovery.md) schedules failed reads with capped backoff while Changes remains eligible.
+Timers clear on scope replacement, unfocus, hiding, disconnect, or unmount.
+Later activation can begin a new attempt. A same-state rerender cannot.
 Allow four concurrent `session.git.refresh` operations per WebSocket; reject overflow with a correlated error before provider work.
 
 ## Frontend and mobile
@@ -330,11 +331,11 @@ Enrichment-only arrival must not steal focus through an empty intermediate state
 | Condition | Presentation |
 | --- | --- |
 | No complete snapshot, request active | Loading status without the clean empty message. |
-| No complete snapshot, request failed | Unavailable status and Retry. |
+| No complete snapshot, request failed | Toolbar warning and delayed automatic recovery. |
 | Complete clean snapshot, no other Changes content | Existing clean empty message. |
 | Dirty basic snapshot | File rows immediately, with pending line totals and diffs. |
-| Valid prior snapshot during refresh/failure | Keep rows; show refreshing or last-observed notice and Retry on failure. |
-| Partial multi-repository failure | Keep healthy rows and name each failed repository. |
+| Valid prior snapshot during refresh/failure | Keep rows; show toolbar loading or warning status. |
+| Partial multi-repository failure | Keep healthy rows; identify failures in the warning tooltip and recover automatically. |
 
 Workspace restoration and comparison-target notices remain distinct from Git observation failure.
 Known PR or commit content remains available even while worktree status loads or fails.
@@ -344,12 +345,12 @@ Only complete accepted membership can prove file or facet removal.
 Review source projection and diff headers retain pending files.
 Review hashes and editor diff models cannot treat a pending empty string as fresh content.
 
-Desktop uses an inline status row inside the existing Changes body and localized diff placeholder.
-Phone uses the same state row inside `MobileChangesPanel` and a placeholder inside `MobileDiffSheet`.
-This shared composition follows the shipped phone Changes exemplar. No new overlay or navigation destination is required.
-The existing full-height diff drawer retains Back/dismiss, focus return, dynamic viewport, and safe-area behavior.
-Changes keeps one vertical scroller. Retry targets are at least 44px on phones/coarse pointers and 28px on desktop.
-Loading uses `role=status` with restrained announcements. Failures use an accessible named Retry control.
+Desktop and phone use the shared [toolbar loading/warning presentation](../../ui/system-design/changes-loading-feedback.md).
+Git read failures recover automatically without a body banner or manual Retry control.
+Diff viewers retain localized pending placeholders and their existing recovery behavior.
+The full-height phone drawer retains Back/dismiss, focus return, dynamic viewport, and safe-area behavior.
+Changes keeps one vertical scroller. Existing actions retain their desktop and touch geometry.
+Status uses restrained, localized accessible announcements.
 All new copy uses `t()` and complete locale catalogs. Generate Traditional Chinese through `pnpm run i18n:zh-hant`.
 
 ## Observability and verification
@@ -394,4 +395,8 @@ Each failure is defined at its owning phase above. Accepted membership survives 
 
 ## Implementation plan
 
-Implementation and verification are tracked in [Changes panel Git refresh](../../../plans/changes-panel-git-refresh/plan.md). Earlier related packages remain historical records in `docs/plans/`.
+Exact-path polling follows the [dirty-path monitor supplement](workspace-dirty-path-monitor.md)
+and its [repair package](../../../plans/workspace-dirty-path-monitor/plan.md).
+
+Original delivery is recorded in [Changes panel Git refresh](../../../plans/changes-panel-git-refresh/plan.md).
+The draft [loading and recovery follow-up](../../../plans/changes-loading-feedback/plan.md) owns the new toolbar and delayed-retry behavior.

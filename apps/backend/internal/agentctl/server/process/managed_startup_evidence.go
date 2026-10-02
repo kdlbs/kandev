@@ -91,6 +91,7 @@ func newManagedStartupEvidence(
 	intentionalStop bool,
 	collectionComplete bool,
 	stderrRetainedComplete bool,
+	stderrPresent bool,
 	stderr []string,
 ) *types.ManagedStartupEvidence {
 	disposition, exitCode := managedProcessExitDisposition(exitErr)
@@ -99,7 +100,8 @@ func newManagedStartupEvidence(
 		exitCode = nil
 	}
 	diagnostics := npmresolution.AnalyzeManagedStartupDiagnostics(strings.Join(stderr, "\n"))
-	diagnosticComplete := collectionComplete && stderrRetainedComplete && diagnostics.Complete
+	diagnosticComplete := collectionComplete && stderrRetainedComplete && diagnostics.Complete &&
+		(!stderrPresent || diagnostics.Present)
 	npmCode := ""
 	if diagnosticComplete {
 		npmCode = preferredManagedStartupCode(diagnostics.Codes)

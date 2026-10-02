@@ -161,6 +161,9 @@ cannot detect excessive internal header padding. Exercise collapsed/expanded
 PR and commit sections, presentation refresh, and the 767/768px boundary with
 a fine pointer, plus phone/coarse-pointer target containment.
 
+Residual spacing verification after toolbar loading-row removal is tracked in
+[the Changes toolbar work order](../../../plans/changes-loading-feedback/task-02-section-spacing.md).
+
 ## Commit detail ownership
 
 `CommitRow` currently owns `expanded` and `hasExpanded`, and retains a hidden

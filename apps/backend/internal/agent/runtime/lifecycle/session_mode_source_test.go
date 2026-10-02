@@ -2,7 +2,10 @@ package lifecycle
 
 import (
 	"context"
+	"errors"
 	"testing"
+
+	"github.com/kandev/kandev/internal/task/models"
 )
 
 type stubWorkspaceInfoProvider struct {
@@ -16,6 +19,25 @@ func (s *stubWorkspaceInfoProvider) GetWorkspaceInfoForSession(_ context.Context
 
 func (s *stubWorkspaceInfoProvider) GetWorkspaceInfoForEnvironment(_ context.Context, _ string) (*WorkspaceInfo, error) {
 	return s.info, s.err
+}
+
+func TestApplyExplicitSessionModeReportsUnavailableClient(t *testing.T) {
+	execution := &AgentExecution{ID: "exec-mode", TaskID: "task-mode", SessionID: "session-mode"}
+	manager := &SessionManager{logger: newTestLogger()}
+	err := manager.applyExplicitSessionMode(context.Background(), execution, "acp-session", "plan")
+	var failure *BootstrapFailure
+	if !errors.As(err, &failure) {
+		t.Fatalf("error %T does not preserve typed bootstrap evidence: %v", err, err)
+	}
+	if failure.Code != models.AgentErrorCauseCodePermissionModeFailed || failure.Reason != models.AgentErrorCauseReasonClientUnavailable {
+		t.Errorf("cause = (%q, %q), want (permission_mode_failed, client_unavailable)", failure.Code, failure.Reason)
+	}
+	if failure.RequestedMode != "plan" || failure.EffectiveMode != "" {
+		t.Errorf("mode evidence = (%q, %q), want (plan, empty)", failure.RequestedMode, failure.EffectiveMode)
+	}
+	if failure.PromptNotSent == nil || !*failure.PromptNotSent {
+		t.Error("prompt_not_sent evidence = false or unknown, want true")
+	}
 }
 
 // AC-AGENTS-PERMISSION-CONTROL-INTEGRITY-002.4, .6

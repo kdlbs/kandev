@@ -31,12 +31,12 @@ func TestHandleWSInitializeCarriesExactProcessEvidence(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	t.Cleanup(func() { _ = s.procMgr.Stop(context.Background()) })
-	if err := s.procMgr.Start(ctx); err != nil {
+	generation, err := s.procMgr.StartWithGeneration(ctx)
+	if err != nil {
 		t.Fatalf("start child process: %v", err)
 	}
-	generation := s.procMgr.ProcessGeneration()
 	if generation == 0 {
-		t.Fatal("successful process start returned generation 0")
+		t.Fatal("successful process start did not return its generation")
 	}
 	evidence := s.procMgr.ManagedStartupEvidence(ctx, generation)
 	if evidence == nil || evidence.ExitDisposition != types.ManagedStartupExitOrdinary || evidence.ExitCode == nil || *evidence.ExitCode != 1 {
@@ -73,5 +73,35 @@ func TestHandleWSInitializeCarriesExactProcessEvidence(t *testing.T) {
 	}
 	if got.ProcessGeneration != generation || got.ExitDisposition != types.ManagedStartupExitOrdinary || got.ExitCode == nil || *got.ExitCode != 1 || !got.CollectionComplete {
 		t.Fatalf("initialize startup evidence = %#v, want generation %d and complete ordinary exit code 1", got, generation)
+	}
+
+	if err := s.procMgr.Stop(ctx); err != nil {
+		t.Fatalf("stop first child process: %v", err)
+	}
+	nextGeneration, err := s.procMgr.StartWithGeneration(ctx)
+	if err != nil {
+		t.Fatalf("start replacement child process: %v", err)
+	}
+	if nextGeneration == 0 || nextGeneration == generation {
+		t.Fatalf("replacement generation = %d, want a new nonzero generation after %d", nextGeneration, generation)
+	}
+	if adapter, current := s.procMgr.GetAdapterForGeneration(generation); current || adapter != nil {
+		t.Fatalf("old generation selected replacement adapter: (%v, %v)", adapter, current)
+	}
+	if adapter, current := s.procMgr.GetAdapterForGeneration(nextGeneration); !current || adapter == nil {
+		t.Fatalf("current generation selection = (%v, %v), want its adapter", adapter, current)
+	}
+
+	staleMsg, err := ws.NewRequest("req-stale", "agent.initialize", InitializeRequest{
+		ClientName:        "test",
+		ClientVersion:     "1.0.0",
+		ProcessGeneration: generation,
+	})
+	if err != nil {
+		t.Fatalf("create stale initialize request: %v", err)
+	}
+	staleResp := s.handleWSInitialize(ctx, staleMsg)
+	if staleResp.Type != ws.MessageTypeError {
+		t.Fatalf("stale initialize response type = %q, want error", staleResp.Type)
 	}
 }

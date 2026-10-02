@@ -95,6 +95,50 @@ it.each([
   },
 );
 
+it("keeps bootstrap causes visible on managed runtime recovery", () => {
+  const model: ActiveSessionRecovery = {
+    sessionId: "session-1",
+    kind: "managed_runtime_startup",
+    summary: "managed runtime startup failed",
+    error: {
+      message: "managed runtime startup failed",
+      phase: "bootstrap",
+      causes: [
+        {
+          operation: "start",
+          code: "permission_denied",
+          detail: "The provider rejected the configured credential.",
+        },
+      ],
+    },
+    metadata: {
+      failure_kind: "managed_runtime_startup",
+      startup_reason: "retry_initialize_failed",
+      startup_attempts: 2,
+    } as never,
+  };
+
+  render(
+    <StateProvider
+      initialState={
+        {
+          taskSessions: {
+            items: { "session-1": { agent_profile_id: "profile-1" } },
+          },
+          agentProfiles: { items: [{ id: "profile-1" }] },
+        } as unknown as Partial<AppState>
+      }
+    >
+      <SessionRecoveryCard model={model} actions={actions} onNewSession={vi.fn()} />
+    </StateProvider>,
+  );
+
+  fireEvent.click(screen.getByText("Technical details"));
+  expect(screen.getByTestId("session-recovery-card").textContent).toContain(
+    "The provider rejected the configured credential.",
+  );
+});
+
 it("shows retry progress in the existing agent boot message", () => {
   const message = {
     id: "boot-1",

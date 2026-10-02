@@ -391,8 +391,6 @@
   "runtimeFailedBody": "{{agent}} ćōũĺď ńōţ àćţĩvàţē ŕũńţĩḿē {{version}} (ƥŕēvĩōũś: {{previous}}). Ţĥĩś àţţēḿƥţ ƥŕēśēŕvēď ŷōũŕ śēĺēćţĩōń. Ŕēţŕŷ ḿàńũàĺĺŷ ōŕ ţũŕń ōƒƒ àũţōḿàţĩć ũƥďàţēś.",
   "runtimeRunning": "Ƥŕēƥàŕĩńĝ {{previous}} ţō {{version}}",
   "runtimeReview": "Ŕēvĩēŵ ŕũńţĩḿē",
-  "runtimeIndicator_one": "{{count}} àĝēńţ ŕũńţĩḿē ũƥďàţē",
-  "runtimeIndicator_other": "{{count}} àĝēńţ ŕũńţĩḿē ũƥďàţēś",
   "runtimePolicySaveFailed": "Ũńàƀĺē ţō śàvē àũţōḿàţĩć ũƥďàţēś. Ţŕŷ àĝàĩń.",
   "runtimeOtherRegistrations_one": "Ōţĥēŕ ŕēĝĩśţēŕēď ŕũńţĩḿē ({{count}})",
   "runtimeOtherRegistrations_other": "Ōţĥēŕ ŕēĝĩśţēŕēď ŕũńţĩḿēś ({{count}})",

@@ -157,22 +157,111 @@ function readOptionalAgentErrorRecovery(
 }
 
 function readAgentErrorCauses(value: unknown): AgentErrorCause[] {
+  return normalizeAgentErrorCauses(value);
+}
+
+export function normalizeAgentErrorCauses(value: unknown): AgentErrorCause[] {
   if (!Array.isArray(value)) return [];
   return value
     .filter((cause): cause is Record<string, unknown> =>
-      Boolean(cause && typeof cause === "object"),
+      Boolean(cause && typeof cause === "object" && !Array.isArray(cause)),
     )
     .slice(0, 2)
-    .map((cause) => ({
-      ...(typeof cause.operation === "string" ? { operation: cause.operation } : {}),
-      ...(typeof cause.code === "string" ? { code: cause.code } : {}),
-      ...(typeof cause.detail === "string" ? { detail: cause.detail } : {}),
-    }))
+    .map(readAgentErrorCause)
     .filter((cause) => Boolean(cause.operation || cause.code || cause.detail));
 }
 
+function readAgentErrorCause(record: Record<string, unknown>): AgentErrorCause {
+  const cause: AgentErrorCause = {
+    ...(boundedString(record.operation, 64)
+      ? { operation: boundedString(record.operation, 64) }
+      : {}),
+    ...(boundedString(record.code, 64) ? { code: boundedString(record.code, 64) } : {}),
+    ...(boundedString(record.detail, 1024) ? { detail: boundedString(record.detail, 1024) } : {}),
+  };
+  const reason = typeof record.reason === "string" ? record.reason : "";
+  if (!isKnownSelectionReason(cause.code, reason)) return cause;
+  cause.reason = reason;
+  if (cause.code === "model_unavailable" || cause.code === "model_selection_failed") {
+    const requested = safeAgentErrorSelector(record.requested_model);
+    const effective = safeAgentErrorSelector(record.effective_model);
+    const attempted = safeAgentErrorSelector(record.attempted_model);
+    if (requested) cause.requested_model = requested;
+    if (effective) cause.effective_model = effective;
+    if (attempted) cause.attempted_model = attempted;
+  } else {
+    const requested = safeAgentErrorSelector(record.requested_mode);
+    const effective = safeAgentErrorSelector(record.effective_mode);
+    if (requested) cause.requested_mode = requested;
+    if (effective) cause.effective_mode = effective;
+  }
+  if (typeof record.prompt_not_sent === "boolean") {
+    cause.prompt_not_sent = record.prompt_not_sent;
+  }
+  return cause;
+}
+
+function boundedString(value: unknown, maxLength: number): string | undefined {
+  return typeof value === "string" && value.length > 0 ? value.slice(0, maxLength) : undefined;
+}
+
+function isKnownSelectionReason(code: string | undefined, reason: string): boolean {
+  switch (code) {
+    case "model_unavailable":
+      return reason === "requested_not_advertised";
+    case "model_selection_failed":
+      return [
+        "catalog_empty",
+        "selection_unsupported",
+        "application_failed",
+        "selection_missing",
+      ].includes(reason);
+    case "permission_mode_failed":
+      return reason === "client_unavailable" || reason === "application_failed";
+    case "permission_mode_unconfirmed":
+      return reason === "confirmation_missing";
+    case "permission_mode_mismatch":
+      return reason === "effective_mismatch";
+    default:
+      return false;
+  }
+}
+
+function safeAgentErrorSelector(value: unknown): string | undefined {
+  if (typeof value !== "string" || value.length === 0 || value.length > 256) return undefined;
+  if (new TextEncoder().encode(value).length > 256 || value.trim() !== value) return undefined;
+  const lower = value.toLowerCase();
+  if (
+    /[\\=@\s\u0000-\u001f\u007f]/u.test(value) ||
+    value.includes("://") ||
+    value.startsWith("/") ||
+    value.startsWith("~") ||
+    /^(?:[a-z]:[\\/])/iu.test(value) ||
+    ["token", "secret", "password", "api_key", "apikey", "bearer "].some((part) =>
+      lower.includes(part),
+    ) ||
+    /^(?:sk-|ghp_|github_pat_|kandev_pat_)/iu.test(value)
+  ) {
+    return undefined;
+  }
+  const segments = value.split("/");
+  if (
+    segments.length > 3 ||
+    segments.some(
+      (segment) =>
+        segment === "." ||
+        segment === ".." ||
+        segment.startsWith(".") ||
+        (segment.length >= 32 && /^[A-Za-z0-9+/=_-]+$/u.test(segment)),
+    )
+  ) {
+    return undefined;
+  }
+  return value;
+}
+
 function readStructuredFailureMetadata(record: Record<string, unknown>) {
-  const startupAttempts = record.startup_attempts;
+  const startupAttempts = record.startup_attempts ?? record.startupAttempts;
   return {
     code: readFirstOptionalString(record, ["code", "failure_code", "failureCode"]),
     details: readFirstOptionalString(record, [

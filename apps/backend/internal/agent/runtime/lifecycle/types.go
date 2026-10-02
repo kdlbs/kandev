@@ -90,8 +90,10 @@ type AgentExecution struct {
 	StartupFailureReason   string
 	StartupFailureAttempts int
 	StartupFailureNPMCode  string
+	startupFailureMu       sync.RWMutex
 	ProviderError          *streams.ProviderError
 	bootMessageMu          sync.Mutex
+	bootMessageFinalized   bool
 	// metadata is unexported on purpose: it is touched from the launch, prompt
 	// and stop paths concurrently, so all access must go through the metadataMu
 	// helpers in execution_metadata.go.

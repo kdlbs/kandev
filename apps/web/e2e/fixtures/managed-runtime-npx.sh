@@ -65,9 +65,11 @@ if [ "$failure_mode" != "stale-etarget" ]; then
 	startup_sibling="$cache_root/_npx/0123456789abcdef"
 	startup_sentinel="$startup_tree/retry-sentinel-$safe_launch_id"
 	sibling_sentinel="$startup_sibling/sibling-sentinel-$safe_launch_id"
-	mkdir -p "$startup_tree" "$startup_sibling"
-	if [ ! -e "$startup_sentinel" ]; then printf 'preserved\n' > "$startup_sentinel"; fi
-	if [ ! -e "$sibling_sentinel" ]; then printf 'preserved\n' > "$sibling_sentinel"; fi
+	if [ "$attempt" = "1" ]; then
+		mkdir -p "$startup_tree" "$startup_sibling"
+		printf 'preserved\n' > "$startup_sentinel"
+		printf 'preserved\n' > "$sibling_sentinel"
+	fi
 	printf '%s\t%s\t%s\t%s\n' "$safe_launch_id" "$attempt" "$failure_mode" "$preference" >> "$cache_root/kandev-e2e-launches"
 	if [ "$attempt" -gt 1 ] && { [ ! -e "$startup_sentinel" ] || [ ! -e "$sibling_sentinel" ]; }; then
 		printf 'managed runtime tree was not preserved across retry\n' >&2

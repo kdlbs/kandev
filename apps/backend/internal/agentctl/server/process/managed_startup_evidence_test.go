@@ -3,6 +3,7 @@ package process
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"strings"
@@ -69,27 +70,45 @@ func TestManagedStartupEvidence(t *testing.T) {
 }
 
 func TestManagedStartupEvidenceSeparatesEmptyUnknownAndIncompleteDiagnostics(t *testing.T) {
-	empty := newManagedStartupEvidence(1, nil, false, true, true, nil)
+	empty := newManagedStartupEvidence(1, nil, false, true, true, false, nil)
 	if !empty.CollectionComplete || !empty.NPMDiagnosticComplete || empty.NPMDiagnosticPresent || empty.UnclassifiedNPMCode {
 		t.Fatalf("empty diagnostic evidence = %#v, want complete and genuinely empty", empty)
+	}
+
+	ordinaryStderr := newManagedStartupEvidence(4, nil, false, true, true, true, []string{"startup configuration is invalid"})
+	if ordinaryStderr.NPMDiagnosticComplete {
+		t.Fatalf("ordinary stderr evidence = %#v, want it to be ineligible for empty-stderr recovery", ordinaryStderr)
 	}
 
 	unknownLine, keep := safeManagedNpmStderrLine("npm error code EUSAGE")
 	if !keep {
 		t.Fatal("expected an unknown canonical npm code to retain a safe marker")
 	}
-	unknown := newManagedStartupEvidence(2, nil, false, true, true, []string{unknownLine})
+	unknown := newManagedStartupEvidence(2, nil, false, true, true, true, []string{unknownLine})
 	if !unknown.NPMDiagnosticPresent || !unknown.NPMDiagnosticComplete || !unknown.UnclassifiedNPMCode || unknown.NPMCode != "" {
 		t.Fatalf("unclassified npm diagnostic evidence = %#v, want complete unknown marker without retry code", unknown)
 	}
 
-	oversized := newManagedStartupEvidence(3, nil, false, true, true, []string{
+	oversized := newManagedStartupEvidence(3, nil, false, true, true, true, []string{
 		"npm error code EACCES",
 		strings.Repeat("diagnostic ", 2_000),
 	})
 	if !oversized.NPMDiagnosticPresent || oversized.NPMDiagnosticComplete || oversized.NPMCode != "" {
 		t.Fatalf("oversized npm diagnostic evidence = %#v, want incomplete and no trusted code", oversized)
 	}
+}
+
+func TestManagedStartupEvidenceRejectsIncompleteStderrReader(t *testing.T) {
+	mgr := &Manager{stderr: io.NopCloser(strings.NewReader(strings.Repeat("x", 70<<10) + "\n")), logger: newTestLogger(t)}
+	stderrDone := make(chan stderrReadResult, 1)
+	mgr.wg.Add(1)
+	go mgr.readStderr(stderrDone)
+
+	complete, _ := mgr.waitForStderrDrain(stderrDone)
+	if complete {
+		t.Fatal("stderr scanner error must make startup evidence incomplete")
+	}
+	mgr.wg.Wait()
 }
 
 func TestManagedStartupEvidenceMarksTruncatedStderrRingIncomplete(t *testing.T) {
@@ -158,7 +177,7 @@ func waitManagedStartupEvidence(
 	if setStopping != nil {
 		setStopping()
 	}
-	stderrDone := make(chan struct{})
+	stderrDone := make(chan stderrReadResult, 1)
 	mgr.wg.Add(2)
 	go mgr.readStderr(stderrDone)
 	mgr.waitForExitGeneration(stderrDone, generation)

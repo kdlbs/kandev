@@ -386,12 +386,16 @@ function ensureSiblingPanels(
 function resolveCurrentSessionIds(appStore: ReturnType<typeof useAppStoreApi>): {
   tid: string | null;
   currentSessionIds: string[];
+  sessionListLoaded: boolean;
 } {
-  const tid = appStore.getState().tasks.activeTaskId;
-  const currentSessions = tid
-    ? (appStore.getState().taskSessionsByTask.itemsByTaskId[tid] ?? [])
-    : [];
-  return { tid: tid ?? null, currentSessionIds: currentSessions.map((s) => s.id) };
+  const state = appStore.getState();
+  const tid = state.tasks.activeTaskId;
+  const currentSessions = tid ? (state.taskSessionsByTask.itemsByTaskId[tid] ?? []) : [];
+  return {
+    tid: tid ?? null,
+    currentSessionIds: currentSessions.map((session) => session.id),
+    sessionListLoaded: tid ? (state.taskSessionsByTask.loadedByTaskId[tid] ?? false) : false,
+  };
 }
 
 /**
@@ -503,6 +507,22 @@ function updateAutoSessionTabRefs(
   refs.prevTaskIdRef.current = tid;
   refs.prevSessionIdRef.current = effectiveSessionId;
 }
+function reconcileLoadedSessionPanels(
+  api: DockviewApi,
+  refs: AutoSessionTabRefs,
+  currentSessionIds: string[],
+  effectiveSessionId: string | null,
+  sessionListLoaded: boolean,
+): void {
+  if (!sessionListLoaded) return;
+  reconcileRemovedSessionPanels(
+    api,
+    refs.sessionTabCreatedRef.current,
+    currentSessionIds,
+    effectiveSessionId ?? "",
+  );
+  useDockviewStore.getState().reconcileMaximizeSessionList(effectiveSessionId, currentSessionIds);
+}
 
 function workflowFocusRequestIdForSession(
   appStore: ReturnType<typeof useAppStoreApi>,
@@ -525,7 +545,7 @@ export function runAutoSessionTabEffect(
   const api = useDockviewStore.getState().api;
   if (!api) return;
 
-  const { tid, currentSessionIds } = resolveCurrentSessionIds(appStore);
+  const { tid, currentSessionIds, sessionListLoaded } = resolveCurrentSessionIds(appStore);
 
   logAutoSessionTabEffectEntry(api, effectiveSessionId, tid, currentSessionIds, refs);
 
@@ -536,12 +556,7 @@ export function runAutoSessionTabEffect(
     return;
   }
 
-  reconcileRemovedSessionPanels(
-    api,
-    refs.sessionTabCreatedRef.current,
-    currentSessionIds,
-    effectiveSessionId ?? "",
-  );
+  reconcileLoadedSessionPanels(api, refs, currentSessionIds, effectiveSessionId, sessionListLoaded);
   pruneHiddenSessionIds(api, appStore.getState);
 
   if (!effectiveSessionId) {
@@ -670,6 +685,10 @@ export function useAutoSessionTab(effectiveSessionId: string | null) {
     if (!list || list.length === 0) return EMPTY_SESSION_IDS_KEY;
     return list.map((ss) => ss.id).join(",");
   });
+  const sessionListLoaded = useAppStore((s) => {
+    const tid = s.tasks.activeTaskId;
+    return tid ? (s.taskSessionsByTask.loadedByTaskId[tid] ?? false) : false;
+  });
   const workflowFocusRequestId = useAppStore((s) => {
     const request = s.workflowSessionFocus.request;
     return request?.taskId === s.tasks.activeTaskId && request.sessionId === effectiveSessionId
@@ -683,5 +702,12 @@ export function useAutoSessionTab(effectiveSessionId: string | null) {
       prevTaskIdRef,
       prevSessionIdRef,
     });
-  }, [appStore, dockviewApi, effectiveSessionId, sessionIdsKey, workflowFocusRequestId]);
+  }, [
+    appStore,
+    dockviewApi,
+    effectiveSessionId,
+    sessionIdsKey,
+    sessionListLoaded,
+    workflowFocusRequestId,
+  ]);
 }

@@ -309,7 +309,13 @@ describe("useSessionRecoveryActions", () => {
     });
 
     expect(result.current.recoveryError?.message).toBe(PROVIDER_UNAVAILABLE);
-    expect(result.current.manualRecoveryFailure).toEqual({ operation: "resume" });
+    expect(result.current.manualRecoveryFailure).toMatchObject({
+      operation: "resume",
+      sessionId: SESSION_ID,
+      errorStamp: null,
+      requestKey: `${TASK_ID}\u0000${SESSION_ID}\u0000`,
+      operationId: 1,
+    });
     expect(result.current.busyAction).toBeNull();
 
     await act(async () => {
@@ -339,7 +345,13 @@ describe("useSessionRecoveryActions", () => {
     await act(async () => {
       await result.current.handleRestore();
     });
-    expect(result.current.manualRecoveryFailure).toEqual({ operation: "restore_workspace" });
+    expect(result.current.manualRecoveryFailure).toMatchObject({
+      operation: "restore_workspace",
+      sessionId: SESSION_ID,
+      errorStamp: null,
+      requestKey: `${TASK_ID}\u0000${SESSION_ID}\u0000`,
+      operationId: 1,
+    });
     expect(result.current.recoveryError?.message).toBe(rawError);
     expect(result.current.busyAction).toBeNull();
 
@@ -347,7 +359,13 @@ describe("useSessionRecoveryActions", () => {
       await result.current.handleRestore();
     });
     expect(mocks.restoreSessionWorkspace).toHaveBeenCalledTimes(2);
-    expect(result.current.manualRecoveryFailure).toEqual({ operation: "restore_workspace" });
+    expect(result.current.manualRecoveryFailure).toMatchObject({
+      operation: "restore_workspace",
+      sessionId: SESSION_ID,
+      errorStamp: null,
+      requestKey: `${TASK_ID}\u0000${SESSION_ID}\u0000`,
+      operationId: 2,
+    });
     expect(result.current.busyAction).toBeNull();
   });
 
@@ -391,6 +409,8 @@ describe("useSessionRecoveryActions", () => {
     expect(result.current.recoveryError?.message).toBe(PROVIDER_UNAVAILABLE);
 
     rerender({ errorStamp: "bootstrap-2" });
+    expect(result.current.recoveryError).toBeNull();
+    expect(result.current.manualRecoveryFailure).toBeNull();
     await waitFor(() => expect(result.current.recoveryError).toBeNull());
   });
 

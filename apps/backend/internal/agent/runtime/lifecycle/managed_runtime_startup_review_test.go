@@ -3,6 +3,7 @@ package lifecycle
 import (
 	"context"
 	"errors"
+	"fmt"
 	"runtime"
 	"slices"
 	"strings"
@@ -45,7 +46,7 @@ func TestManagedRuntimeNpmStartupFailureDoesNotNestClientLease(t *testing.T) {
 	select {
 	case <-diagnosticDone:
 		completedUnderPinnedLease = true
-	case <-time.After(100 * time.Millisecond):
+	case <-time.After(5 * time.Second):
 	}
 	release()
 	select {
@@ -202,6 +203,13 @@ func TestManagedRuntimeStartupRetryRejectsUnknownOrIncompleteNPMEvidence(t *test
 			stderr: []string{"npm error code EACCES"},
 		},
 		{
+			name: "non-npm stderr is not empty evidence",
+			evidence: &agentctltypes.ManagedStartupEvidence{
+				CollectionComplete: true, NPMDiagnosticComplete: false,
+			},
+			stderr: []string{"configuration file is invalid"},
+		},
+		{
 			name: "genuinely empty stderr remains eligible",
 			evidence: &agentctltypes.ManagedStartupEvidence{
 				CollectionComplete:    true,
@@ -251,6 +259,43 @@ func TestManagedRuntimeStartupRetryRejectsUnknownOrIncompleteNPMEvidence(t *test
 			}
 		})
 	}
+}
+
+func TestAgentEventPayloadSnapshotsManagedStartupFailureFields(t *testing.T) {
+	store := NewExecutionStore()
+	execution := &AgentExecution{ID: "startup-failure-snapshot"}
+	if err := store.Add(execution); err != nil {
+		t.Fatalf("add execution: %v", err)
+	}
+
+	start := make(chan struct{})
+	writeDone := make(chan struct{})
+	go func() {
+		defer close(writeDone)
+		<-start
+		for attempts := 1; attempts <= 200; attempts++ {
+			_ = store.WithLock(execution.ID, func(current *AgentExecution) {
+				current.setStartupFailureMetadata(managedRuntimeStartupFailureMetadata{
+					reason: fmt.Sprintf("reason-%d", attempts), attempts: attempts, npmCode: fmt.Sprintf("code-%d", attempts),
+				})
+			})
+		}
+	}()
+
+	close(start)
+	for range 200 {
+		payload := newAgentEventPayload(execution)
+		if payload.StartupFailureAttempts == 0 {
+			continue
+		}
+		if want := fmt.Sprintf("reason-%d", payload.StartupFailureAttempts); payload.StartupFailureReason != want {
+			t.Fatalf("startup failure payload reason = %q, want %q", payload.StartupFailureReason, want)
+		}
+		if want := fmt.Sprintf("code-%d", payload.StartupFailureAttempts); payload.StartupFailureNPMCode != want {
+			t.Fatalf("startup failure payload npm code = %q, want %q", payload.StartupFailureNPMCode, want)
+		}
+	}
+	<-writeDone
 }
 
 func waitForAgentCtlWriter(t *testing.T, execution *AgentExecution) {

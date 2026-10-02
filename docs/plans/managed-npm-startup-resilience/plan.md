@@ -73,7 +73,7 @@ The [design](../../specs/agents/system-design/managed-npm-runtime-recovery.md#bo
 and [decision](../../decisions/2026-10-02-bounded-managed-npm-startup-retry.md) own the full contracts.
 
 1. Agentctl records generation-scoped process exit and canonical npm diagnostics. Start and initialize messages carry optional generation evidence.
-2. The backend preserves a typed initialize-phase failure. Recovery requires trusted managed ACP commands plus exact-generation evidence.
+2. The backend preserves a typed initialize-phase failure. The new transient-npm and ordinary early-exit classifications require a trusted managed ACP command plus exact-generation evidence. Existing exact-package `ETARGET` handling remains compatible with peers that do not send that evidence.
 3. One startup owner consumes `beginStartupRecovery`, confirms cleanup, delays, and starts the same command.
 4. npm-classified recovery uses online-preferred metadata. Unexplained early exit preserves the original preference. Neither deletes shared cache files.
 5. Existing generation fences suppress obsolete exits. Final failure passes through the existing recovery pipeline once.
@@ -172,7 +172,7 @@ Design validation passed:
 
 Task 03 implementation and verification passed. This includes backend and web builds, focused lifecycle and component tests, typecheck and i18n validation, desktop and mobile browser tests, real Docker and SSH executor tests, public documentation checks, specification validation, and whitespace validation. See [Task 03 results](task-03-recovery-experience.md#results) for the executed commands and counts.
 The temporary ECONNRESET diagnostic produced the expected behavioral failure and was removed.
-Issue 4152 remains assigned to carlosflorencio. No commit or PR has been created.
+At the initial package handoff on 2026-10-02, issue 4152 remained assigned to carlosflorencio and no implementation commit or PR had been created. PR #4172 was opened later from this package.
 
 Code-review remediation completed on 2026-10-02. The Task 02 results record the three repaired findings and validation. All affected backend package tests, review-specific race tests, the scoped backend linter, the full backend build, specification validation, and whitespace validation passed. The original incident cause remains unknown.
 

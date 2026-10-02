@@ -87,7 +87,7 @@ func TestWaitForExitDoesNotWarnWhileProcessIsRunning(t *testing.T) {
 		t.Fatalf("close parent stderr pipe: %v", err)
 	}
 
-	stderrDone := make(chan struct{})
+	stderrDone := make(chan stderrReadResult, 1)
 	m.wg.Add(2)
 	go m.readStderr(stderrDone)
 	waitDone := make(chan struct{})
@@ -162,7 +162,7 @@ func TestWaitForExitPreservesStderrAfterProcessExit(t *testing.T) {
 
 	require.NoError(t, cmd.Start())
 	require.NoError(t, stderrWriter.Close())
-	stderrDone := make(chan struct{})
+	stderrDone := make(chan stderrReadResult, 1)
 	m.wg.Add(2)
 	go m.readStderr(stderrDone)
 	select {
@@ -223,7 +223,7 @@ func TestWaitForExitWaitsForStderrReaderBeforePublishingError(t *testing.T) {
 		}
 		m.wg.Wait()
 	})
-	stderrDone := make(chan struct{})
+	stderrDone := make(chan stderrReadResult, 1)
 	m.wg.Add(2)
 	go m.readStderr(stderrDone)
 
@@ -261,8 +261,8 @@ func TestWaitForExitWaitsForStderrReaderBeforePublishingError(t *testing.T) {
 }
 
 func TestReadStderrClosesOnlyItsGenerationChannel(t *testing.T) {
-	oldDone := make(chan struct{})
-	replacementDone := make(chan struct{})
+	oldDone := make(chan stderrReadResult, 1)
+	replacementDone := make(chan stderrReadResult, 1)
 	m := &Manager{
 		stderr: io.NopCloser(strings.NewReader("old generation\n")),
 		logger: newTestLogger(t),
@@ -287,8 +287,8 @@ func TestReadStderrDelayedGenerationCannotCloseReplacementChannel(t *testing.T) 
 	oldRelease := make(chan struct{})
 	replacementStarted := make(chan struct{})
 	replacementRelease := make(chan struct{})
-	oldDone := make(chan struct{})
-	replacementDone := make(chan struct{})
+	oldDone := make(chan stderrReadResult, 1)
+	replacementDone := make(chan stderrReadResult, 1)
 	m := &Manager{
 		logger: newTestLogger(t),
 	}
@@ -375,7 +375,7 @@ func TestReadStderrPreservesSafeManagedNpmResolutionLines(t *testing.T) {
 		logger: newTestLogger(t),
 	}
 	m.wg.Add(1)
-	m.readStderr(make(chan struct{}))
+	m.readStderr(make(chan stderrReadResult, 1))
 
 	require.Equal(t, []string{
 		"npm error code ETARGET",

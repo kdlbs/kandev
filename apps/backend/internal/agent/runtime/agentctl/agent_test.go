@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -423,7 +424,7 @@ func TestInitialize_ServerError(t *testing.T) {
 
 func TestInitializeStartupEvidence(t *testing.T) {
 	const generation = 43
-	var gotGeneration uint64
+	var gotGeneration atomic.Uint64
 	c, ts := newTestClientWithStream(t, func(msg ws.Message) *ws.Message {
 		if msg.Action != "agent.initialize" {
 			t.Errorf("action = %q, want agent.initialize", msg.Action)
@@ -434,7 +435,7 @@ func TestInitializeStartupEvidence(t *testing.T) {
 		if err := msg.ParsePayload(&request); err != nil {
 			t.Errorf("parse initialize request: %v", err)
 		}
-		gotGeneration = request.ProcessGeneration
+		gotGeneration.Store(request.ProcessGeneration)
 		resp, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "process exited", map[string]any{
 			"startup_evidence": map[string]any{
 				"process_generation":      generation,
@@ -460,8 +461,8 @@ func TestInitializeStartupEvidence(t *testing.T) {
 	if !errors.As(err, &initializeErr) {
 		t.Fatalf("error type = %T, want *InitializeError", err)
 	}
-	if gotGeneration != generation {
-		t.Fatalf("initialize process_generation = %d, want %d", gotGeneration, generation)
+	if got := gotGeneration.Load(); got != generation {
+		t.Fatalf("initialize process_generation = %d, want %d", got, generation)
 	}
 	if initializeErr.StartupEvidence == nil ||
 		initializeErr.StartupEvidence.ProcessGeneration != generation ||

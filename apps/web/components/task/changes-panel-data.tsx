@@ -59,7 +59,16 @@ import { useRemoteContributionResolution } from "./use-remote-contribution-resol
 import { useTranslation } from "react-i18next";
 import { useWorkspaceRestoration } from "@/hooks/domains/session/use-workspace-restoration";
 import type { WorkspaceRestorationAttempt } from "@/lib/state/slices/session-runtime/workspace-restoration";
-import { useChangesPanelGitStatus, type ChangesPanelGitStatus } from "./changes-panel-git-status";
+import {
+  deriveChangesPanelToolbarStatus,
+  useChangesPanelGitStatus,
+  type ChangesPanelGitStatus,
+} from "./changes-panel-git-status";
+import { ChangesInlineCommitState } from "./changes-inline-commit-state";
+import {
+  useChangesInlineCommitDetails,
+  useChangesPanelContextIdentity,
+} from "./use-changes-inline-commit-details";
 
 function useChangesPanelStoreData() {
   const { t } = useTranslation();
@@ -134,7 +143,6 @@ export type ChangesPanelBodyProps = {
     fileNavigation?: CommitFileNavigationRequest,
   ) => void;
   onOpenReview?: () => void;
-  onRetryGitStatus?: () => void;
   onRevertCommit?: (sha: string, repo?: string) => void;
   onStageAll: () => void;
   onUnstageAll: () => void;
@@ -166,6 +174,9 @@ export type ChangesPanelBodyProps = {
   restoreWorkspaceDisabled?: boolean;
   /** Monotonic token used to expand both histories after comparison navigation. */
   comparisonRequestToken?: number;
+  inlineCommitDetails: ChangesInlineCommitState;
+  inlineCommitDetailVersion: number;
+  contextKey: string;
 };
 
 function usePerRepoCallbacks(
@@ -357,9 +368,21 @@ function hasCumulativeFiles(files: Record<string, unknown> | null | undefined): 
   return Object.keys(files ?? {}).length > 0;
 }
 
+function useReviewRepositoryNames(
+  repoNames: string[],
+  cumulativeFiles: Parameters<typeof getCumulativeReviewRepositoryNames>[0],
+) {
+  return useMemo(
+    () => [...repoNames, ...getCumulativeReviewRepositoryNames(cumulativeFiles)],
+    [repoNames, cumulativeFiles],
+  );
+}
+
 export function useChangesPanelData() {
   const { activeTaskId, activeSessionId, baseBranch, gitCredentialDisplay } =
     useChangesPanelStoreData();
+  const changesContext = useChangesPanelContextIdentity();
+  const inlineCommitDetails = useChangesInlineCommitDetails(changesContext);
   const workspaceRestoration = useWorkspaceRestoration(activeTaskId, activeSessionId);
   const baseBranchByRepo = useBaseBranchByRepo(activeTaskId);
   const git = useSessionGit(activeSessionId);
@@ -368,12 +391,13 @@ export function useChangesPanelData() {
     git.gitStatus,
     git.statusByRepo,
   );
+  const refreshStatus = deriveChangesPanelToolbarStatus(
+    gitStatusPresentation,
+    inlineCommitDetails.pendingRequestCount > 0,
+  );
   const { toast } = useToast();
   const { reviews } = useSessionFileReviews(activeSessionId);
-  const reviewRepositoryNames = useMemo(
-    () => [...git.repoNames, ...getCumulativeReviewRepositoryNames(git.cumulativeDiff?.files)],
-    [git.repoNames, git.cumulativeDiff],
-  );
+  const reviewRepositoryNames = useReviewRepositoryNames(git.repoNames, git.cumulativeDiff?.files);
   const prData = useChangesPanelPRData(reviewRepositoryNames, activeSessionId);
   const resolution = useRemoteContributionResolution(
     activeSessionId,
@@ -423,6 +447,9 @@ export function useChangesPanelData() {
   return {
     activeTaskId,
     activeSessionId,
+    contextKey: changesContext.contextKey,
+    inlineCommitDetails,
+    refreshStatus,
     git,
     gitStatusPresentation,
     baseBranchDisplay,
@@ -459,7 +486,6 @@ type ChangesPanelCallbacks = {
     fileNavigation?: CommitFileNavigationRequest,
   ) => void;
   onOpenReview?: () => void;
-  onRetryGitStatus?: () => void;
 };
 
 type ChangesPanelWorkspaceActions = Pick<
@@ -569,7 +595,9 @@ export function buildChangesPanelBodyProps(
     comparisonUnavailable: git.comparisonUnavailable,
     comparisonErrorCode: git.comparisonErrorCode,
     gitStatus: data.gitStatusPresentation,
-    onRetryGitStatus: callbacks.onRetryGitStatus,
+    inlineCommitDetails: data.inlineCommitDetails.state,
+    inlineCommitDetailVersion: data.inlineCommitDetails.version,
+    contextKey: data.contextKey,
     isLoading: git.isLoading,
     loadingOperation: git.loadingOperation,
     dialogs: data.dialogs,

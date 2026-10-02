@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/google/uuid"
 	"go.uber.org/zap"
@@ -582,8 +583,11 @@ func (s *Service) handleAgentBootReady(ctx context.Context, data watcher.AgentEv
 	// clearTaskInterruptedMarker.
 	// Ordinary sessions without a marker take the same no-op path; only an
 	// immutable marker captured for this attempt can clear the warning.
-	recoveryResolvedAt := s.markRecoveryResolved(
-		ctx, data.SessionID, session, markerSnapshot, markerSnapshotKnown,
+	recoveryResolvedAt := s.markRecoveryResolvedForAttempt(
+		ctx, data.SessionID, session,
+		data.AttemptID,
+		s.resumeAttemptStore().recoveryErrorStamp(data.SessionID, data.AttemptID),
+		markerSnapshot, markerSnapshotKnown,
 	)
 
 	// Idempotent: if the session is already WAITING_FOR_INPUT (e.g. revived
@@ -658,14 +662,25 @@ func (s *Service) persistProviderRestoredResumeNotice(
 		"effective_mode_known":      false,
 	}
 	if snapshot, ok := lifecycle.LoadSessionModelsSnapshot(session.Metadata[models.SessionMetaKeyACPModelState]); ok && snapshot.SettingsAttemptID == data.AttemptID {
-		if modelID := boundedProviderSelectorID(snapshot.CurrentModelID); modelID != "" {
+		if modelID := models.SafeAgentErrorSelector(snapshot.CurrentModelID); modelID != "" {
 			metadata["effective_model_known"] = true
 			metadata["effective_model_id"] = modelID
+			for _, model := range snapshot.Models {
+				if model.ModelID == modelID {
+					if modelName := safeProviderModelLabel(model.Name); modelName != "" {
+						metadata["effective_model_name"] = modelName
+					}
+					break
+				}
+			}
 		}
 		if modeID := boundedProviderSelectorID(snapshot.CurrentModeID); modeID != "" {
 			metadata["effective_mode_known"] = true
 			metadata["effective_mode_id"] = modeID
 		}
+	}
+	if stamp := s.resumeAttemptStore().recoveryErrorStamp(data.SessionID, data.AttemptID); stamp != "" {
+		metadata["resolved_error_stamp"] = stamp
 	}
 
 	messageID := uuid.NewSHA1(
@@ -688,6 +703,19 @@ func (s *Service) persistProviderRestoredResumeNotice(
 func boundedProviderSelectorID(value string) string {
 	if value == "" || len(value) > 256 || strings.TrimSpace(value) != value || strings.ContainsAny(value, "\r\n\t") {
 		return ""
+	}
+	return value
+}
+
+func safeProviderModelLabel(value string) string {
+	if value == "" || len(value) > 256 || !utf8.ValidString(value) ||
+		strings.TrimSpace(value) != value || routingerr.SanitizeFullUnbounded(value) != value {
+		return ""
+	}
+	for _, char := range value {
+		if char < 0x20 || char == 0x7f {
+			return ""
+		}
 	}
 	return value
 }
@@ -3243,7 +3271,7 @@ func (s *Service) persistLastAgentError(ctx context.Context, data watcher.AgentE
 			eventData["attempt_id"] = lastErr.AttemptID
 		}
 		if len(lastErr.Causes) > 0 {
-			eventData["causes"] = append([]models.AgentErrorCause(nil), lastErr.Causes...)
+			eventData["causes"] = models.NormalizeAgentErrorCauses(lastErr.Causes)
 		}
 		if lastErr.RemediationURL != "" {
 			eventData["remediation_url"] = lastErr.RemediationURL
@@ -3455,6 +3483,24 @@ func (s *Service) markRecoveryResolved(
 	markerSnapshot interruptedMarkerSnapshot,
 	markerSnapshotKnown bool,
 ) *time.Time {
+	errorStamp := ""
+	if lastError, found := models.LoadLastAgentError(session.Metadata); found && !lastError.IsDismissed() {
+		errorStamp = lastError.Stamp()
+	}
+	return s.markRecoveryResolvedForAttempt(
+		ctx, sessionID, session, "", errorStamp, markerSnapshot, markerSnapshotKnown,
+	)
+}
+
+func (s *Service) markRecoveryResolvedForAttempt(
+	ctx context.Context,
+	sessionID string,
+	session *models.TaskSession,
+	attemptID string,
+	errorStamp string,
+	markerSnapshot interruptedMarkerSnapshot,
+	markerSnapshotKnown bool,
+) *time.Time {
 	resolvedAt := time.Now().UTC()
 	resolvedAtValue := resolvedAt.Format(time.RFC3339Nano)
 	if err := s.repo.SetSessionMetadataKey(
@@ -3472,8 +3518,14 @@ func (s *Service) markRecoveryResolved(
 		session.Metadata = make(map[string]interface{})
 	}
 	session.Metadata[models.SessionMetaKeyRecoveryResolvedAt] = resolvedAtValue
+	resolutionRecorded := errorStamp == ""
+	if errorStamp != "" {
+		resolutionRecorded = s.recordRecoveryResolutionForAttempt(
+			ctx, sessionID, session, attemptID, errorStamp, resolvedAt,
+		)
+	}
 	if session.TaskID != "" {
-		s.dismissRecoveredAgentError(ctx, session.TaskID, session, resolvedAt)
+		s.dismissRecoveredAgentErrorForAttempt(ctx, session.TaskID, session, errorStamp, resolutionRecorded, resolvedAt)
 		// Boot-ready is the provider-confirmed recovery boundary. Keeping this
 		// out of the STARTING/RUNNING state funnel leaves the durable warning in
 		// place when a launch later fails or is cancelled.
@@ -3488,6 +3540,83 @@ func (s *Service) markRecoveryResolved(
 		s.clearRecoveryMetadataAfterBoot(ctx, sessionID, session)
 	}
 	return &resolvedAt
+}
+
+func (s *Service) recordRecoveryResolutionForAttempt(
+	ctx context.Context,
+	sessionID string,
+	session *models.TaskSession,
+	attemptID string,
+	errorStamp string,
+	resolvedAt time.Time,
+) bool {
+	if attemptID == "" {
+		s.logger.Warn("cannot persist stamp-specific recovery resolution without an owned attempt",
+			zap.String("session_id", sessionID))
+		return false
+	}
+	recorder, supported := s.repo.(interface {
+		RecordSessionRecoveryResolution(context.Context, string, models.SessionRecoveryResolution) (bool, error)
+	})
+	if !supported {
+		s.logger.Warn("repository cannot persist stamp-specific recovery resolution",
+			zap.String("session_id", sessionID))
+		return false
+	}
+	stored, err := recorder.RecordSessionRecoveryResolution(ctx, sessionID, models.SessionRecoveryResolution{
+		ErrorStamp: errorStamp,
+		AttemptID:  attemptID,
+		ResolvedAt: resolvedAt,
+	})
+	if err != nil {
+		s.logger.Warn("failed to persist stamp-specific recovery resolution",
+			zap.String("session_id", sessionID), zap.Error(err))
+		return false
+	}
+	if stored {
+		s.reloadRecoveryResolutionMetadata(ctx, sessionID, session)
+	}
+	return stored
+}
+
+func (s *Service) reloadRecoveryResolutionMetadata(
+	ctx context.Context,
+	sessionID string,
+	session *models.TaskSession,
+) {
+	latest, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		s.logger.Warn("failed to reload stamp-specific recovery resolution",
+			zap.String("session_id", sessionID), zap.Error(err))
+		return
+	}
+	if latest == nil {
+		return
+	}
+	if session.Metadata == nil {
+		session.Metadata = make(map[string]interface{})
+	}
+	if resolutions, exists := latest.Metadata[models.SessionMetaKeyRecoveryResolutions]; exists {
+		session.Metadata[models.SessionMetaKeyRecoveryResolutions] = resolutions
+	} else {
+		delete(session.Metadata, models.SessionMetaKeyRecoveryResolutions)
+	}
+}
+
+func (s *Service) dismissRecoveredAgentErrorForAttempt(
+	ctx context.Context,
+	taskID string,
+	session *models.TaskSession,
+	errorStamp string,
+	resolutionRecorded bool,
+	resolvedAt time.Time,
+) {
+	if !resolutionRecorded || errorStamp == "" {
+		return
+	}
+	if lastError, found := models.LoadLastAgentError(session.Metadata); found && lastError.MatchesStamp(errorStamp) {
+		s.dismissRecoveredAgentError(ctx, taskID, session, resolvedAt)
+	}
 }
 
 func (s *Service) clearRecoveryMetadataAfterBoot(
@@ -3598,6 +3727,18 @@ func (s *Service) createRecoveryStatusMessage(ctx context.Context, data watcher.
 		"has_resume_token": hasResumeToken,
 		"is_auth_error":    authErr,
 		"resume_corrupted": resumeCorrupted,
+	}
+	if causes := models.NormalizeAgentErrorCauses(data.Causes); len(causes) > 0 {
+		meta["causes"] = causes
+	}
+	if data.AttemptID != "" {
+		meta["attempt_id"] = data.AttemptID
+	}
+	if data.AgentExecutionID != "" {
+		meta["execution_id"] = data.AgentExecutionID
+	}
+	if data.Phase != "" {
+		meta["phase"] = data.Phase
 	}
 	managedRuntimeStartupFailure := isManagedRuntimeStartupFailureCode(data.FailureCode)
 	if managedRuntimeStartupFailure {
@@ -3776,16 +3917,14 @@ func (s *Service) handleAgentStartFailed(ctx context.Context, taskID, sessionID,
 			taskID, sessionID, agentExecutionID, failureData.AttemptID, models.LaunchErrorPhaseBootstrap,
 		)
 		operation := bootstrapFailure.Operation
-		if operation == "" && fromResume {
-			operation = models.AgentErrorCauseOperationResume
+		if operation == "" {
+			operation = models.AgentErrorCauseOperationStart
+			if fromResume {
+				operation = models.AgentErrorCauseOperationResume
+			}
 		}
-		if operation == models.AgentErrorCauseOperationResume ||
-			operation == models.AgentErrorCauseOperationRestoreWorkspace {
-			failureData.Causes = models.NormalizeAgentErrorCauses([]models.AgentErrorCause{{
-				Operation: operation,
-				Code:      bootstrapFailure.SafeCode(),
-				Detail:    bootstrapFailure.SafeDetail(),
-			}})
+		if cause, ok := bootstrapFailure.SafeAgentErrorCause(operation); ok {
+			failureData.Causes = models.NormalizeAgentErrorCauses([]models.AgentErrorCause{cause})
 		}
 	}
 	var structuredStartupFailure *routingerr.ManagedRuntimeStartupError

@@ -360,6 +360,7 @@ func cloneBootMessageForUpdate(message *models.Message) *models.Message {
 func (m *Manager) updateBootMessage(
 	execution *AgentExecution,
 	message *models.Message,
+	final bool,
 	update func(*models.Message),
 ) {
 	if message == nil || m.bootMessageService == nil {
@@ -368,6 +369,12 @@ func (m *Manager) updateBootMessage(
 	if execution != nil {
 		execution.bootMessageMu.Lock()
 		defer execution.bootMessageMu.Unlock()
+		if execution.bootMessageFinalized && !final {
+			return
+		}
+		if final {
+			execution.bootMessageFinalized = true
+		}
 	}
 	if message.Metadata == nil {
 		message.Metadata = make(map[string]interface{})
@@ -376,14 +383,20 @@ func (m *Manager) updateBootMessage(
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	if err := m.bootMessageService.UpdateMessage(ctx, cloneBootMessageForUpdate(message)); err != nil {
-		m.logger.Debug("failed to update agent boot message",
-			zap.String("message_id", message.ID),
-			zap.Error(err))
+		if final {
+			m.logger.Warn("failed to update agent boot message",
+				zap.String("message_id", message.ID),
+				zap.Error(err))
+		} else {
+			m.logger.Debug("failed to update agent boot message",
+				zap.String("message_id", message.ID),
+				zap.Error(err))
+		}
 	}
 }
 
 func (m *Manager) updateBootMessageStartupRetryProgress(execution *AgentExecution, message *models.Message) {
-	m.updateBootMessage(execution, message, func(message *models.Message) {
+	m.updateBootMessage(execution, message, false, func(message *models.Message) {
 		message.Metadata["startup_retrying"] = true
 		message.Metadata["startup_retry_attempt"] = 2
 		message.Metadata["startup_retry_max_attempts"] = 2
@@ -420,7 +433,7 @@ func (m *Manager) pollAgentStderr(execution *AgentExecution, msg *models.Message
 			if len(lines) > lastLineCount {
 				lastLineCount = len(lines)
 				content := strings.Join(lines, "\n")
-				m.updateBootMessage(execution, msg, func(message *models.Message) {
+				m.updateBootMessage(execution, msg, false, func(message *models.Message) {
 					message.Content = content
 				})
 			}
@@ -446,20 +459,21 @@ func (m *Manager) finalizeBootMessage(execution *AgentExecution, msg *models.Mes
 		client, releaseClient := execution.AcquireAgentCtlClient()
 		var lines []string
 		var err error
+		stderrSnapshotAvailable := client != nil
 		if client != nil {
 			lines, err = client.GetAgentStderr(ctx)
 			releaseClient()
 		}
 		cancel()
-		if err == nil && len(lines) > 0 {
+		if stderrSnapshotAvailable && err == nil {
 			content := strings.Join(lines, "\n")
-			m.updateBootMessage(execution, msg, func(message *models.Message) {
+			m.updateBootMessage(execution, msg, true, func(message *models.Message) {
 				message.Content = content
 			})
 		}
 	}
 
-	m.updateBootMessage(execution, msg, func(message *models.Message) {
+	m.updateBootMessage(execution, msg, true, func(message *models.Message) {
 		message.Metadata["status"] = status
 		message.Metadata["completed_at"] = time.Now().UTC().Format(time.RFC3339Nano)
 		delete(message.Metadata, "startup_retrying")
@@ -549,25 +563,54 @@ func (m *Manager) buildEnvForExecution(ctx context.Context, executionID string, 
 }
 
 func (m *Manager) prepareManagedGoCacheEnvironment(ctx context.Context, req *LaunchRequest) error {
-	if req == nil || m.managedGoCache == nil || !isHostLocalExecutor(req.ExecutorType) {
+	if req == nil {
 		return nil
 	}
+	if req.Metadata != nil {
+		managedMetadata := make(map[string]interface{}, len(req.Metadata))
+		for key, value := range req.Metadata {
+			managedMetadata[key] = value
+		}
+		delete(managedMetadata, managedGoCacheMetadataKey)
+		req.Metadata = managedMetadata
+	}
+	req.managedGoCachePath = ""
+	warnFallback := func(reason string) {
+		fields := []zap.Field{zap.String("reason", reason)}
+		if req.TaskID != "" {
+			fields = append(fields, zap.String("task_id", req.TaskID))
+		}
+		if req.SessionID != "" {
+			fields = append(fields, zap.String("session_id", req.SessionID))
+		}
+		m.logger.Warn("managed Go cache preparation skipped; continuing without managed override", fields...)
+	}
+	if m.managedGoCache == nil || !isHostLocalExecutor(req.ExecutorType) {
+		return nil
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	env, err := m.managedGoCache.ExecutionEnvironment(ctx)
+	if contextErr := ctx.Err(); contextErr != nil {
+		return contextErr
+	}
 	if err != nil {
-		return fmt.Errorf("prepare managed Go cache: %w", err)
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return fmt.Errorf("prepare managed Go cache: %w", err)
+		}
+		warnFallback("preparation_failed")
+		return nil
 	}
 	path := env["GOCACHE"]
 	if path == "" {
 		return nil
 	}
 	if !filepath.IsAbs(path) {
-		return fmt.Errorf("managed GOCACHE must be absolute: %q", path)
+		warnFallback("invalid_output")
+		return nil
 	}
 	path = filepath.Clean(path)
-	if req.Env == nil {
-		req.Env = make(map[string]string)
-	}
-	req.Env["GOCACHE"] = path
 	if req.Metadata == nil {
 		req.Metadata = make(map[string]interface{})
 	}

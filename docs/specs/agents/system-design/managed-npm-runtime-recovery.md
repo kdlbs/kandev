@@ -141,9 +141,12 @@ remain unchanged on both success and failure.
 
 ## Failure behavior
 
-If replacement cleanup or preparation fails, Kandev emits `agent_runtime`.
-An exhausted exact-version resolution failure retains `managed_runtime_npm_resolution`.
-Other exhausted eligible setup failures use `managed_runtime_startup` with a bounded reason.
+If Kandev cannot stop and reap the failed process, it emits
+`managed_runtime_startup` with `reason=cleanup_failed`. Replacement configure
+or start failures keep their normal `agent_runtime` classification. An
+exhausted exact-version resolution failure retains
+`managed_runtime_npm_resolution`. Other exhausted eligible setup failures use
+`managed_runtime_startup` with a bounded reason.
 
 These errors contain bounded sanitized details. The UI keeps the existing
 single **Retry runtime** action. Kandev does not change the active version.

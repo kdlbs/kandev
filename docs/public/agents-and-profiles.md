@@ -231,12 +231,15 @@ When a native OpenCode installation is present on the host, its vendor update gu
 
 #### Recover a managed runtime startup failure
 
-Managed runtime startup can retry once when npm reports a recognized temporary
-network or cache error, or when the child process exits normally before ACP
-initialization completes. Kandev first confirms that the failed process has
-stopped, then waits two to three seconds before the replacement starts. A
-permanent npm error, cancellation, signal termination, or failure after ACP
-initialization does not trigger this automatic retry.
+Managed runtime startup can retry once when npm reports a strict `ETARGET` for
+the selected exact package or a recognized temporary network or cache error.
+The `ETARGET` retry prefers an online lookup. Kandev can also retry an ordinary
+process exit before ACP initialization when complete, generation-matched
+startup evidence confirms that stderr was empty. Incomplete evidence, other
+permanent or unrecognized npm errors, cancellation, signal termination, and
+failures after ACP initialization do not trigger this automatic retry. Kandev first confirms
+that the failed process has stopped, then waits two to three seconds before the
+replacement starts.
 
 The retry uses the same agent, package, exact version, environment, executor,
 session, and initial prompt. It does not delete the selected npm execution tree
@@ -269,16 +272,16 @@ uses the expected npm installation and configured registry. Run `npm config get 
 ### Runtime notifications and automatic updates
 
 Kandev checks enabled, available agent runtimes in the background, including
-native CLIs with a verified release source. Outside Settings, an **agent runtime
-updates** indicator remains visible while a known newer version is available.
-Notifications name the affected runtime and link directly to its row in
+native CLIs with a verified release source. Open **Settings > Agents** to review
+runtime versions and update policies. Notifications name the affected runtime
+and link directly to its row in
 **Settings > Agents > Agent runtime updates**. The existing update-available
 notification preferences apply; repeated notices for the same runtime and version
 are suppressed across reloads.
 
 The **Agent runtime updates** section is at the bottom of **Settings > Agents**,
 after your installed agents, and starts collapsed. Expand it to manage runtime
-policies. Notification and indicator links open the section automatically and
+policies. Notification links open the section automatically and
 reveal their destination. Collapsing the section preserves unsaved policy changes.
 
 The runtime section shows the selected or observed version, latest known version,
@@ -509,7 +512,8 @@ to take effect before it sends the first prompt. If a failed session offers the
 explicit recovery **Resume** action, it keeps the same conversation and skips
 saved mode and model overrides for that attempt only. Saved profile and session
 settings remain unchanged, and later ordinary starts or resumes enforce them
-again.
+again. See [Manage session state](sessions-and-review.md#manage-session-state)
+for the recovery notice and resolved or dismissed history in Chat.
 
 The host model list is only an editing hint. A missing host-probe model keeps a
 profile selectable and shows an advisory warning; the executor catalog decides
@@ -721,7 +725,7 @@ Only custom TUI agents can be deleted from the agent list. Built-in definitions 
 - **Login required:** use the agent card's login terminal or sign in under Kandev's operating-system user; signing in as another user does not help the service.
 - **Model, mode, or command probe fails:** authenticate first, refresh discovery, and choose a value advertised by the installed version.
 - **Launch fails after editing flags:** inspect the command preview, remove stale arguments, and correct unmatched quotes or trailing escapes.
-- **Managed npm runtime cannot start:** Kandev retries one recognized temporary npm setup error or ordinary pre-initialization process exit after it confirms cleanup. It keeps the selected package and npm trees. If startup still fails, review the card's technical details and verify the service user's npm configuration and registry. Use **Settings > Agents** to prepare another trusted stable version when needed. Do not start with `npm cache clean --force`.
+- **Managed npm runtime cannot start:** Retry is limited to strict exact-package `ETARGET`, recognized temporary npm errors, and an ordinary pre-ACP exit with complete generation-matched evidence of empty stderr. Other permanent or unclassified errors and incomplete evidence do not retry. Kandev confirms cleanup and keeps the selected package and npm trees. If startup still fails, review the card's technical details and verify the service user's npm configuration and registry. Use **Settings > Agents** to prepare another trusted stable version when needed. Do not start with `npm cache clean --force`.
 - **Environment value is absent:** confirm the secret still exists, the key is not reserved, and an executor/runtime variable is not already taking precedence.
 - **MCP server is absent:** confirm agent MCP support, valid JSON, transport mode, executor policy, and the session warning logs.
 - **MCP tools are missing from one agent session:** open **MCP servers** in that

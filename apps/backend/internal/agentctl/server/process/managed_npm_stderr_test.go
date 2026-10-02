@@ -85,7 +85,7 @@ func TestReadStderrProjectsUnclassifiedNpmCodesBeforeProviderSanitizer(t *testin
 		logger: newTestLogger(t),
 	}
 	m.wg.Add(1)
-	m.readStderr(make(chan struct{}))
+	m.readStderr(make(chan stderrReadResult, 1))
 
 	if got := m.GetRecentStderr(); len(got) != 1 || got[0] != npmUnknownCodeMarker {
 		t.Fatalf("retained stderr = %#v, want one bounded unknown npm-code marker", got)
