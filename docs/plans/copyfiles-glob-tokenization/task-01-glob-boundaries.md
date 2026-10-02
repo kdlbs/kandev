@@ -154,3 +154,19 @@ update the expectation only. Production code remains unchanged. Rebased onto
 full spec lint and 36 linter tests, 62 public-validator tests and 47-page live
 validation, and 10 backend workflow-contract tests passed again. Native CI will
 verify the corrected assertion before merge.
+
+## Windows CI evidence correction
+
+Windows job `110743714815` and its original attempt both reached the existing
+40-minute job cap before the focused copyfiles step. The last command was the
+unchanged Windows-sensitive package suite; buffered output exposed no assertion
+or proof of compilation-only delay. Current-main job `110746572298` passed the
+same command and limits. Move copyfiles coverage immediately after Go setup and
+enable streaming JSON for the existing suite while preserving `-race`, `-v`,
+`-timeout 25m`, every package, the job cap, and native shell exit propagation.
+This change supplies native evidence and bounded diagnostics; it does not claim
+the unexplained slowness is fixed. Only focused workflow/specification checks and
+normal hooks are required locally; unchanged Go suites await hosted execution.
+Post-edit workflow contract (10 tests), action pinning (9 tests), catalog
+validation (339 decisions, 1283 specifications), full specification lint, and
+diff whitespace checks passed. Normal hooks and final native CI remain pending.

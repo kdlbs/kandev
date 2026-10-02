@@ -50,6 +50,14 @@ by `doublestar.SplitPattern`, preserving all remaining expression escapes.
 Tests exercise these public package pipelines using temporary source and target
 directories, checking exact paths, bytes, warnings, and mode precedence.
 
+Native Windows CI runs the focused copyfiles regression immediately after Go
+setup, before the longer existing Windows-sensitive suite. That suite emits
+streaming JSON diagnostics while retaining verbose output, race detection,
+all package scopes, its 25-minute test timeout, and the 40-minute job cap.
+This ordering provides native grammar evidence before a later suite cancellation;
+streaming output distinguishes test execution from compilation without changing
+assertions or establishing that hosted-runner slowness has been corrected.
+
 ## Failure, security, and observability
 
 Malformed reserved suffixes continue to fail save validation. Invalid globs and

@@ -97,3 +97,18 @@ Correct the expectation without changing production behavior. Rebased onto
 `daab1c45647e7ac9e002f15e02f6e910a3e778a4` and reran the package race tests,
 specification/catalog and public-document checks, and backend workflow contract.
 All passed; final native CI must confirm the corrected expectation.
+
+## Windows CI evidence correction
+
+The current-head Windows job and its single authorized retry hit the existing
+40-minute job cap in the Windows-sensitive suite, before the focused copyfiles
+step. No assertion output was available; multi-package verbose output is buffered,
+so the logs do not establish whether compilation or a running test consumed the
+time. A current-main Windows job passed the same suite and unchanged limits.
+Move the focused copyfiles step immediately after Go setup and add streaming JSON
+to the existing suite. Preserve all package scopes, race/verbose flags, test
+timeouts, job cap, and exit propagation. This corrects missing native evidence
+and failure diagnostics, not the unexplained slowness. Focused workflow checks
+(10 tests), action pinning (9 tests), catalog validation, full specification lint,
+and diff whitespace checks passed. Normal hooks and new hosted gates remain
+pending before publication and merge respectively.
