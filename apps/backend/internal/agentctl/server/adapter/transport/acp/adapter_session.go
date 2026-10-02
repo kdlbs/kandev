@@ -1132,8 +1132,9 @@ func (a *Adapter) setSessionMode(ctx context.Context, modeID, requestedConfigID 
 	}
 	generation := a.beginConfigChange()
 	baseline, uncertain := a.beginModeChange()
+	modeRPCAttempted := false
 	unconfirmed := true
-	defer func() { a.endModeChange(unconfirmed) }()
+	defer func() { a.endModeChange(unconfirmed && modeRPCAttempted) }()
 
 	request := sessionModeRequest{
 		conn: conn, sessionID: sessionID, modeID: modeID, option: modeOption,
@@ -1142,9 +1143,9 @@ func (a *Adapter) setSessionMode(ctx context.Context, modeID, requestedConfigID 
 	}
 	var result streams.ModeResult
 	if hasModeOption {
-		result, err = a.setConfigSessionMode(ctx, request)
+		result, modeRPCAttempted, err = a.setConfigSessionMode(ctx, request)
 	} else {
-		result, err = a.setLegacySessionMode(ctx, conn, sessionID, modeID, baseline, uncertain)
+		result, modeRPCAttempted, err = a.setLegacySessionMode(ctx, conn, sessionID, modeID, baseline, uncertain)
 	}
 	if err != nil {
 		return result, err
@@ -1168,22 +1169,22 @@ func (a *Adapter) setLegacySessionMode(
 	sessionID, modeID string,
 	afterGeneration uint64,
 	uncertain bool,
-) (streams.ModeResult, error) {
+) (streams.ModeResult, bool, error) {
 	if err := ctx.Err(); err != nil {
-		return streams.ModeResult{Requested: modeID}, err
+		return streams.ModeResult{Requested: modeID}, false, err
 	}
 	_, err := conn.SetSessionMode(ctx, acp.SetSessionModeRequest{
 		SessionId: acp.SessionId(sessionID),
 		ModeId:    acp.SessionModeId(modeID),
 	})
 	if err != nil {
-		return streams.ModeResult{Requested: modeID}, fmt.Errorf("set session mode failed: %w", err)
+		return streams.ModeResult{Requested: modeID}, true, fmt.Errorf("set session mode failed: %w", err)
 	}
 	result := a.awaitModeSettle(ctx, sessionID, modeID, afterGeneration)
 	if uncertain {
-		return streams.ModeResult{Requested: modeID}, nil
+		return streams.ModeResult{Requested: modeID}, true, nil
 	}
-	return result, nil
+	return result, true, nil
 }
 
 func isModeConfigOption(option streams.ConfigOption) bool {

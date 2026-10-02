@@ -65,15 +65,16 @@ From repository root. Record the primary test's expected red failure before
 implementation, then run these exact commands after the correction:
 
 ```bash
-(cd apps/backend && go test -tags fts5 ./internal/agentctl/server/adapter/transport/acp -run '^TestSetModeAlreadySatisfiedLegacyMode' -count=1)
+(cd apps/backend && go test -tags fts5 ./internal/agentctl/server/adapter/transport/acp -run '^(TestSetModeAlreadySatisfiedLegacyMode.*|TestSetModeCanceledBefore(LegacyRPC|ModeConfigRPC)DoesNotMakeOutcomeUncertain)$' -count=1)
 (cd apps/backend && go test -tags fts5 ./internal/agentctl/server/adapter/transport/acp -count=1)
-(cd apps/backend && go test -tags fts5 -race ./internal/agentctl/server/adapter/transport/acp -run '^(TestSetModeAlreadySatisfiedLegacyMode.*|TestConcurrentSetModeRequestsCannotShareAReport|TestLateTimedOutModeReportCannotConfirmNextRequest|TestLateTimedOutModeReportWhileIdleDoesNotRestoreShortcutCertainty|TestQueuedSetModeRechecksAlreadySatisfiedLegacyMode|TestCorrelatedModeConfigSnapshotClearsLegacyModeUncertainty|TestUnrelatedConfigResponseDoesNotClearModeTimeoutUncertainty|TestModeAndOtherConfigSnapshotsShareOrdering)$' -count=1)
+(cd apps/backend && go test -tags fts5 -race ./internal/agentctl/server/adapter/transport/acp -run '^(TestSetModeAlreadySatisfiedLegacyMode.*|TestSetModeCanceledBefore(LegacyRPC|ModeConfigRPC)DoesNotMakeOutcomeUncertain|TestConcurrentSetModeRequestsCannotShareAReport|TestLateTimedOutModeReportCannotConfirmNextRequest|TestLateTimedOutModeReportWhileIdleDoesNotRestoreShortcutCertainty|TestQueuedSetModeRechecksAlreadySatisfiedLegacyMode|TestCorrelatedModeConfigSnapshotClearsLegacyModeUncertainty|TestUnrelatedConfigResponseDoesNotClearModeTimeoutUncertainty|TestModeAndOtherConfigSnapshotsShareOrdering)$' -count=1)
 git diff --check
 ```
 
 ## Files likely touched
 
 - `apps/backend/internal/agentctl/server/adapter/transport/acp/adapter_session.go`
+- `apps/backend/internal/agentctl/server/adapter/transport/acp/adapter_session_mode.go`
 - `apps/backend/internal/agentctl/server/adapter/transport/acp/adapter_mode_state.go`
 - `apps/backend/internal/agentctl/server/adapter/transport/acp/adapter_mode_satisfied_test.go`
 - `apps/backend/internal/agentctl/server/adapter/transport/acp/adapter_mode_set_test.go` (existing config-mode regressions)
@@ -126,15 +127,21 @@ expected under a temporary Go overlay that caches legacy-mode state before the
 gate: the successor returns unconfirmed instead of using the new report. The
 overlay was deleted after the run. New satisfied-mode and idle late-report
 cases live in `adapter_mode_satisfied_test.go` to keep the
-focused ACP test files below the backend file-length limit. Their physical line
-counts are 762 (`adapter_mode_set_test.go`), 299 (`adapter_mode_satisfied_test.go`),
-and 671 (`adapter_mode_ordering_test.go`), all below revive's 800-line limit.
+focused ACP test files below the backend file-length limit. The changed ACP
+test files are 402 lines (`adapter_mode_satisfied_test.go`) and 671 lines
+(`adapter_mode_ordering_test.go`), both below revive's 800-line limit.
+`adapter_mode_set_test.go` is unchanged at 762 lines.
+
+PR fixup also covers cancellation at the final pre-RPC check for legacy and
+mode-config setters. Neither path marks the outcome uncertain unless its
+mode-setting RPC is attempted; both regressions failed before the change and
+passed after it.
 
 Validation passed:
 
 ```text
-go test -tags fts5 ./internal/agentctl/server/adapter/transport/acp -run '^TestSetModeAlreadySatisfiedLegacyMode' -count=1
+go test -tags fts5 ./internal/agentctl/server/adapter/transport/acp -run '^(TestSetModeAlreadySatisfiedLegacyMode.*|TestSetModeCanceledBefore(LegacyRPC|ModeConfigRPC)DoesNotMakeOutcomeUncertain)$' -count=1
 go test -tags fts5 ./internal/agentctl/server/adapter/transport/acp -count=1
-go test -tags fts5 -race ./internal/agentctl/server/adapter/transport/acp -run '^(TestSetModeAlreadySatisfiedLegacyMode.*|TestConcurrentSetModeRequestsCannotShareAReport|TestLateTimedOutModeReportCannotConfirmNextRequest|TestLateTimedOutModeReportWhileIdleDoesNotRestoreShortcutCertainty|TestQueuedSetModeRechecksAlreadySatisfiedLegacyMode|TestCorrelatedModeConfigSnapshotClearsLegacyModeUncertainty|TestUnrelatedConfigResponseDoesNotClearModeTimeoutUncertainty|TestModeAndOtherConfigSnapshotsShareOrdering)$' -count=1
+go test -tags fts5 -race ./internal/agentctl/server/adapter/transport/acp -run '^(TestSetModeAlreadySatisfiedLegacyMode.*|TestSetModeCanceledBefore(LegacyRPC|ModeConfigRPC)DoesNotMakeOutcomeUncertain|TestConcurrentSetModeRequestsCannotShareAReport|TestLateTimedOutModeReportCannotConfirmNextRequest|TestLateTimedOutModeReportWhileIdleDoesNotRestoreShortcutCertainty|TestQueuedSetModeRechecksAlreadySatisfiedLegacyMode|TestCorrelatedModeConfigSnapshotClearsLegacyModeUncertainty|TestUnrelatedConfigResponseDoesNotClearModeTimeoutUncertainty|TestModeAndOtherConfigSnapshotsShareOrdering)$' -count=1
 go test -tags fts5 ./internal/agentctl/server/adapter/transport/acp -run '^TestQueuedSetModeRechecksAlreadySatisfiedLegacyMode$' -count=20
 ```

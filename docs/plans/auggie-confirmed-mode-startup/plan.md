@@ -191,11 +191,14 @@ Task 01, the lifecycle and reset matrices, the lifecycle fixture under `-race`,
 `git diff --check`.
 
 Code-review follow-up moved the new satisfied-mode and idle late-report tests
-to `adapter_mode_satisfied_test.go`; the touched adapter test files are 762,
-299, and 671 physical lines, below revive's 800-line limit. The queued-mode
-regression now waits for a signaling context to prove that the successor's
-mode-gate try-lock failed while the first operation was held, asserts no early
-result or second RPC, then verifies both results and one provider mutation.
+to `adapter_mode_satisfied_test.go`. The PR's changed test files are 493 lines
+(`session_mode_legacy_integration_test.go`), 402
+(`adapter_mode_satisfied_test.go`), and 671 (`adapter_mode_ordering_test.go`),
+each below revive's 800-line limit. The unchanged `adapter_mode_set_test.go`
+remains 762 lines. The queued-mode regression waits for a signaling context to
+prove the successor's mode-gate try-lock failed while the first operation was
+held, asserts no early result or second RPC, then verifies both results and one
+provider mutation.
 The regression failed as expected under a temporary overlay that cached mode
 state before the gate; the overlay was removed.
 The full ACP adapter suite and race target passed after these test changes, and

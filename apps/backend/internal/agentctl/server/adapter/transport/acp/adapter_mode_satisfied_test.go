@@ -2,6 +2,7 @@ package acp
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -296,4 +297,106 @@ func TestLateTimedOutModeReportWhileIdleDoesNotRestoreShortcutCertainty(t *testi
 	default:
 		t.Fatal("matching cached mode bypassed the provider RPC after an idle late report")
 	}
+}
+
+func TestSetModeCanceledBeforeLegacyRPCDoesNotMakeOutcomeUncertain(t *testing.T) {
+	requests := make(chan acpsdk.SetSessionModeRequest, 1)
+	adapter, agent, _ := newSetModeTestAdapter(t, func(context.Context, acpsdk.SetSessionModeRequest) (acpsdk.SetSessionModeResponse, error) {
+		return acpsdk.SetSessionModeResponse{}, nil
+	})
+	agent.legacyRequests = requests
+	adapter.availableModes = []streams.SessionModeInfo{{ID: "default"}, {ID: "ask"}}
+
+	baseCtx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	ctx := &cancelOnErrContext{Context: baseCtx, cancel: cancel, cancelAt: 9} // Final legacy pre-RPC check.
+	result, err := adapter.SetMode(ctx, "ask")
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("SetMode before legacy RPC error = %v, want context canceled", err)
+	}
+	if result.Applied() {
+		t.Fatalf("canceled SetMode result = %+v, want unapplied", result)
+	}
+	select {
+	case request := <-requests:
+		t.Fatalf("canceled SetMode sent legacy RPC: %+v", request)
+	default:
+	}
+	adapter.mu.RLock()
+	uncertain := adapter.modeOutcomeUncertain
+	adapter.mu.RUnlock()
+	if uncertain {
+		t.Fatal("cancellation before the legacy RPC made the mode outcome uncertain")
+	}
+
+	adapter.noteCurrentMode("session-1", "ask")
+	result, err = adapter.SetMode(context.Background(), "ask")
+	if err != nil || !result.Applied() || result.Effective != "ask" {
+		t.Fatalf("SetMode after matching report = %+v, %v; want confirmed already-satisfied mode", result, err)
+	}
+	select {
+	case request := <-requests:
+		t.Fatalf("matching report should avoid a redundant legacy RPC: %+v", request)
+	default:
+	}
+}
+
+func TestSetModeCanceledBeforeModeConfigRPCDoesNotMakeOutcomeUncertain(t *testing.T) {
+	requests := make(chan acpsdk.SetSessionConfigOptionRequest, 1)
+	adapter, agent, _ := newSetModeTestAdapter(t, func(context.Context, acpsdk.SetSessionModeRequest) (acpsdk.SetSessionModeResponse, error) {
+		return acpsdk.SetSessionModeResponse{}, nil
+	})
+	agent.configRequests = requests
+	adapter.availableConfigOptions = convertACPConfigOptions([]acpsdk.SessionConfigOption{groupedModeConfigOption("default")})
+
+	baseCtx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	ctx := &cancelOnErrContext{Context: baseCtx, cancel: cancel, cancelAt: 7} // Mode-config pre-RPC check.
+	result, err := adapter.SetMode(ctx, "bypassPermissions")
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("SetMode before mode config RPC error = %v, want context canceled", err)
+	}
+	if result.Applied() {
+		t.Fatalf("canceled SetMode result = %+v, want unapplied", result)
+	}
+	select {
+	case request := <-requests:
+		t.Fatalf("canceled SetMode sent mode config RPC: %+v", request)
+	default:
+	}
+	adapter.mu.RLock()
+	uncertain := adapter.modeOutcomeUncertain
+	adapter.mu.RUnlock()
+	if uncertain {
+		t.Fatal("cancellation before the mode config RPC made the mode outcome uncertain")
+	}
+
+	adapter.mu.Lock()
+	adapter.availableConfigOptions = nil
+	adapter.mu.Unlock()
+	adapter.noteCurrentMode("session-1", "bypassPermissions")
+	result, err = adapter.SetMode(context.Background(), "bypassPermissions")
+	if err != nil || !result.Applied() || result.Effective != "bypassPermissions" {
+		t.Fatalf("SetMode after matching report = %+v, %v; want confirmed already-satisfied mode", result, err)
+	}
+	select {
+	case request := <-requests:
+		t.Fatalf("matching report should avoid a redundant mode config RPC: %+v", request)
+	default:
+	}
+}
+
+type cancelOnErrContext struct {
+	context.Context
+	cancel   context.CancelFunc
+	cancelAt int
+	errCalls int
+}
+
+func (c *cancelOnErrContext) Err() error {
+	c.errCalls++
+	if c.errCalls == c.cancelAt {
+		c.cancel()
+	}
+	return c.Context.Err()
 }
