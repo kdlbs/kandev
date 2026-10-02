@@ -900,6 +900,14 @@ func TestHandleAgentBootReady_DoesNotTriggerOnTurnComplete(t *testing.T) {
 				executor:           exec,
 			}
 			svc.SetWorkflowStepGetter(stepGetter)
+			attempt, owner, err := svc.beginResumeAttempt(ctx, "task-1", sessionID)
+			if err != nil {
+				t.Fatalf("begin resume attempt: %v", err)
+			}
+			if !owner {
+				t.Fatal("resume attempt was not admitted")
+			}
+			defer attempt.finish(svc.resumeAttemptStore())
 
 			// Reset task to step-current in case a prior subtest moved it.
 			tk, _ := repo.GetTask(ctx, "task-1")
@@ -911,6 +919,7 @@ func TestHandleAgentBootReady_DoesNotTriggerOnTurnComplete(t *testing.T) {
 				TaskID: "task-1", SessionID: sessionID,
 				AgentExecutionID: "ae-current",
 				AgentProfileID:   "profile-impl",
+				AttemptID:        attempt.identity(),
 			})
 
 			finalTask, err := repo.GetTask(ctx, "task-1")

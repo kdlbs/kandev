@@ -458,9 +458,9 @@ func collectComparisonTargets(req *LaunchRequest) (map[string]models.ComparisonT
 		if err := spec.ComparisonTarget.Validate(); err != nil {
 			return nil, fmt.Errorf("validate comparison target for repository %q: %w", spec.RepoName, err)
 		}
-		key := ""
-		if index > 0 {
-			key = baseBranchMetadataKey(spec)
+		key, err := launchRepositoryProjectionKey(req, spec, index)
+		if err != nil {
+			return nil, fmt.Errorf("resolve comparison target workspace for repository %q: %w", spec.RepoName, err)
 		}
 		if existing, ok := targets[key]; ok && !existing.Equal(*spec.ComparisonTarget) {
 			return nil, fmt.Errorf("multiple comparison targets map to workspace repository %q", key)
@@ -473,11 +473,12 @@ func collectComparisonTargets(req *LaunchRequest) (map[string]models.ComparisonT
 	return targets, nil
 }
 
-func comparisonTargetsFromWorkspaceRepositories(specs []WorkspaceRepositorySpec) (map[string]models.ComparisonTarget, error) {
+func comparisonTargetsFromWorkspaceRepositories(specs []WorkspaceRepositorySpec, executorType string) (map[string]models.ComparisonTarget, error) {
 	if len(specs) == 0 {
 		return nil, nil
 	}
 	targets := make(map[string]models.ComparisonTarget)
+	request := &LaunchRequest{ExecutorType: executorType}
 	for index, spec := range specs {
 		if spec.ComparisonTarget == nil {
 			continue
@@ -485,12 +486,12 @@ func comparisonTargetsFromWorkspaceRepositories(specs []WorkspaceRepositorySpec)
 		if err := spec.ComparisonTarget.Validate(); err != nil {
 			return nil, fmt.Errorf("validate comparison target for repository %q: %w", spec.RepoName, err)
 		}
-		key := ""
-		if index > 0 {
-			key = baseBranchMetadataKey(RepoLaunchSpec{
-				RepoName:   spec.RepoName,
-				BranchSlug: spec.BranchSlug,
-			})
+		key, err := launchRepositoryProjectionKey(request, RepoLaunchSpec{
+			RepoName: spec.RepoName, BaseBranch: spec.BaseBranch, CheckoutBranch: spec.CheckoutBranch,
+			BranchSlug: spec.BranchSlug,
+		}, index)
+		if err != nil {
+			return nil, fmt.Errorf("resolve comparison target workspace for repository %q: %w", spec.RepoName, err)
 		}
 		if existing, ok := targets[key]; ok && !existing.Equal(*spec.ComparisonTarget) {
 			return nil, fmt.Errorf("comparison target collision for workspace repository %q", key)
@@ -503,10 +504,9 @@ func comparisonTargetsFromWorkspaceRepositories(specs []WorkspaceRepositorySpec)
 	return targets, nil
 }
 
-// collectRemoteContributions projects the validated per-repository bindings
-// into the workspace-subpath keys understood by agentctl. The first repository
-// owns the workspace root; sibling destinations use the same deterministic key
-// as base-branch and workspace materialization projection.
+// collectRemoteContributions projects validated per-repository bindings into
+// the workspace keys understood by agentctl. Remote keys follow the actual
+// materialized directories; repo-less legacy launches keep the root key.
 func collectRemoteContributions(req *LaunchRequest) (map[string]models.RemoteContribution, error) {
 	if req == nil {
 		return nil, nil
@@ -529,9 +529,9 @@ func collectRemoteContributions(req *LaunchRequest) (map[string]models.RemoteCon
 		if err := spec.RemoteContribution.Validate(); err != nil {
 			return nil, fmt.Errorf("validate remote contribution for repository %q: %w", spec.RepoName, err)
 		}
-		key := ""
-		if index > 0 {
-			key = baseBranchMetadataKey(spec)
+		key, err := launchRepositoryProjectionKey(req, spec, index)
+		if err != nil {
+			return nil, fmt.Errorf("resolve remote contribution workspace for repository %q: %w", spec.RepoName, err)
 		}
 		if existing, ok := bindings[key]; ok && existing.CanonicalURL != spec.RemoteContribution.CanonicalURL {
 			return nil, fmt.Errorf("multiple remote contributions target workspace repository %q", key)
@@ -568,9 +568,9 @@ func collectContributionDestinations(req *LaunchRequest) (map[string]models.Cont
 		if err := spec.ContributionDestination.Validate(); err != nil {
 			return nil, fmt.Errorf("validate contribution destination for repository %q: %w", spec.RepoName, err)
 		}
-		key := ""
-		if index > 0 {
-			key = baseBranchMetadataKey(spec)
+		key, err := launchRepositoryProjectionKey(req, spec, index)
+		if err != nil {
+			return nil, fmt.Errorf("resolve contribution destination workspace for repository %q: %w", spec.RepoName, err)
 		}
 		if existing, ok := destinations[key]; ok {
 			if !sameContributionDestinationTarget(existing, *spec.ContributionDestination) {
@@ -593,26 +593,37 @@ func sameContributionDestinationTarget(left, right models.ContributionDestinatio
 		left.TargetRepository.RemoteURL == right.TargetRepository.RemoteURL
 }
 
-// collectBaseBranches builds the per-repo {RepositoryName → base_branch}
-// map that agentctl reads to scope diff stats. Single-repo legacy launches
-// are recorded under the empty key "" so single-repo trackers (which have
-// no repositoryName) still find their value. Repos missing a base_branch
-// are skipped so the existing fallback list applies to them.
+// collectBaseBranches builds the per-workspace-entry base-branch map that
+// agentctl reads to scope diff stats. Entries at the workspace root use the
+// empty key; plugin remote entries use their materialized directory names.
+// Repositories without a base branch are skipped so agentctl can use its
+// existing fallback list.
 func collectBaseBranches(req *LaunchRequest) map[string]string {
 	specs := req.RepoSpecs()
 	if len(specs) == 0 {
 		return nil
 	}
 	out := make(map[string]string, len(specs)+1)
-	for _, spec := range specs {
+	for index, spec := range specs {
 		if spec.BaseBranch == "" {
 			continue
 		}
-		if key := baseBranchMetadataKey(spec); key != "" {
-			out[key] = spec.BaseBranch
+		key := baseBranchMetadataKey(spec)
+		if req != nil && models.IsRemoteExecutorType(models.ExecutorType(req.ExecutorType)) {
+			if req.ExecutorType == string(models.ExecutorTypePluginRemote) || index > 0 {
+				key = remoteWorkspaceRepositoryDirectory(spec)
+			} else {
+				key = ""
+			}
+			if key == "" && (req.ExecutorType == string(models.ExecutorTypePluginRemote) || index > 0) {
+				continue
+			}
+		} else if key == "" {
+			continue
 		}
+		out[key] = spec.BaseBranch
 	}
-	if req.BaseBranch != "" {
+	if req.BaseBranch != "" && req.ExecutorType != string(models.ExecutorTypePluginRemote) {
 		if _, ok := out[""]; !ok {
 			out[""] = req.BaseBranch
 		}
@@ -1329,18 +1340,9 @@ func (m *Manager) launchBuildExecutorRequest(ctx context.Context, executionID st
 		ProviderGatewayAuth:            providerGatewayAuth,
 	}
 	if reqWithWorktree.ExecutorType == string(models.ExecutorTypePluginRemote) {
-		if m.pluginExecutorProfileLoader == nil {
-			return nil, nil, nil, errors.New("plugin executor profile loader is unavailable")
+		if err := m.preparePluginExecutorLaunch(ctx, execReq, metadata, reqWithWorktree.TaskEnvironmentID); err != nil {
+			return nil, nil, nil, err
 		}
-		profileID := strings.TrimSpace(getMetadataString(metadata, MetadataKeyExecutorProfileID))
-		profile, loadErr := m.pluginExecutorProfileLoader.ExecutorProviderProfileForLaunch(ctx, profileID, reqWithWorktree.TaskEnvironmentID)
-		if loadErr != nil {
-			return nil, nil, nil, fmt.Errorf("resolve plugin executor profile: %w", loadErr)
-		}
-		if profile == nil {
-			return nil, nil, nil, errors.New("plugin executor profile is unavailable")
-		}
-		execReq.PluginExecutor = &PluginExecutorLaunch{Profile: *profile}
 	}
 	m.wireKubernetesInventoryPersistence(execReq, reqWithWorktree.ExecutorType)
 	m.wirePluginExecutorInventoryPersistence(execReq, reqWithWorktree.ExecutorType)
@@ -1916,9 +1918,6 @@ func (m *Manager) launchInternal(ctx context.Context, req *LaunchRequest) (*Agen
 	if err := validateManagedToolPolicyProvider(req.McpProfile, agentTypeName, agentConfig.Runtime()); err != nil {
 		return nil, err
 	}
-	if err := m.prepareManagedGoCacheEnvironment(ctx, req); err != nil {
-		return nil, err
-	}
 
 	// 3. Check if session already has an agent running. A workspace-only
 	// execution created by EnsureWorkspaceExecutionForSession /
@@ -1931,6 +1930,9 @@ func (m *Manager) launchInternal(ctx context.Context, req *LaunchRequest) (*Agen
 			}
 			return nil, fmt.Errorf("%w: session %q (execution: %s)", ErrAgentAlreadyRunning, req.SessionID, existingExecution.ID)
 		}
+	}
+	if err := m.prepareManagedGoCacheEnvironment(ctx, req); err != nil {
+		return nil, err
 	}
 
 	// 4. Resolve workspace path (non-worktree executors use this directly)
@@ -2013,8 +2015,15 @@ func (m *Manager) launchInternal(ctx context.Context, req *LaunchRequest) (*Agen
 	// A reset/relaunch receives the complete durable repository projection from
 	// the orchestrator. Reconcile it through the fresh live agentctl rather than
 	// relying on the legacy primary-repository prepare script alone.
-	if rt.RequiresCloneURL() && len(reqWithWorktree.RepoSpecs()) > 1 && execInstance != nil && execInstance.Client != nil {
-		projection, projectionErr := remoteWorkspaceProjectionFromLaunch(&reqWithWorktree)
+	// Plugin environments have no prepare script, so the primary repository is
+	// materialized the same way.
+	pluginRemote := reqWithWorktree.ExecutorType == string(models.ExecutorTypePluginRemote)
+	minimumRepos := 2
+	if pluginRemote {
+		minimumRepos = 1
+	}
+	if rt.RequiresCloneURL() && len(reqWithWorktree.RepoSpecs()) >= minimumRepos && execInstance != nil && execInstance.Client != nil {
+		projection, projectionErr := remoteWorkspaceProjectionFromLaunch(&reqWithWorktree, pluginRemote)
 		if projectionErr == nil {
 			projectionErr = materializeWorkspaceRepositories(ctx, execInstance.Client, projection)
 		}
@@ -2029,13 +2038,12 @@ func (m *Manager) launchInternal(ctx context.Context, req *LaunchRequest) (*Agen
 		}
 	}
 
-	// Remote executors (Docker, Sprites) clone the workspace inside the
+	// Remote executors clone the workspace inside the
 	// container, so the worktree path's host-side copy_files never ran.
 	// Ship the bytes through agentctl now that the instance is up. The
 	// worktree path is already gated by reqWithWorktree.UseWorktree, so
-	// it's safe to skip when that's true. For multi-repo launches, loop
-	// over every per-repo spec — each repo's CopyFiles ships into its
-	// own RepoName subdir under the workspace.
+	// it's safe to skip when that's true. For multi-repo launches, use each
+	// repository's materialized workspace path.
 	if !reqWithWorktree.UseWorktree && execInstance != nil && execInstance.Client != nil {
 		shipRemoteCopyfilesForLaunch(ctx, m.logger, &reqWithWorktree, execInstance.Client, runtimeProgress, progressRecorder)
 	}
@@ -2506,6 +2514,9 @@ func (m *Manager) stopRegisteredLaunchRuntime(
 	if rt != nil && execInstance != nil {
 		cleanupCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		retainedKubernetesResume := execution.RuntimeName == agentruntime.RuntimeKubernetes && execution.isResumedSession
+		if !execution.isResumedSession && execInstance.StopReason == "" {
+			execInstance.StopReason = StopReasonLaunchRollback
+		}
 		err := rt.StopInstance(cleanupCtx, execInstance, !retainedKubernetesResume)
 		if err == nil && execution.RuntimeName == agentruntime.RuntimeKubernetes && !retainedKubernetesResume {
 			err = m.deleteKubernetesRuntimeSecrets(cleanupCtx, execution.MetadataSnapshot())

@@ -47,9 +47,9 @@ type TaskPR = NonNullable<Awaited<ReturnType<ApiClient["getTaskPR"]>>>;
 
 function visibleTaskPRSummary(page: Page, number: number) {
   return page
-    .locator(
-      '[data-slot="tooltip-content"]:not([data-state="closed"]) > [data-testid="pr-task-status-summary"]',
-    )
+    .locator('[data-slot="tooltip-content"]:not([data-state="closed"])')
+    .getByTestId("pr-task-summary-scroll-body")
+    .getByTestId("pr-task-status-summary")
     .filter({ hasText: `PR #${number}` })
     .first();
 }
@@ -344,9 +344,9 @@ test.describe("PR status badge", () => {
 
     await icon.hover();
     const tooltip = testPage.locator('div[data-slot="tooltip-content"]:not([data-state="closed"])');
-    const automationDetails = tooltip.locator(
-      ':scope > [data-testid="pr-task-automation-details"]',
-    );
+    const automationDetails = tooltip
+      .getByTestId("pr-task-summary-scroll-body")
+      .getByTestId("pr-task-automation-details");
     await expect(automationDetails).toBeVisible();
     await expect(
       automationDetails.getByText(`testorg/testrepo PR #${activePRNumber}`),

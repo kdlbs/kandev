@@ -404,9 +404,9 @@ type MessageRepository interface {
 	// prompt. The durable prompt sequence remains after message deletion.
 	HasUserPromptHistory(ctx context.Context, sessionID string) (bool, error)
 	// ClaimInitialPromptFallback atomically admits the task-description fallback
-	// for a never-prompted session. It returns false when another prompt or
-	// fallback has already claimed the session's first prompt slot.
-	ClaimInitialPromptFallback(ctx context.Context, sessionID string) (bool, error)
+	// for the expected incarnation of a never-prompted session. It returns false
+	// when another prompt/fallback claimed the first slot or the session was replaced.
+	ClaimInitialPromptFallback(ctx context.Context, sessionID, incarnationID string) (bool, error)
 	// GetMessageWithPromptIndex retrieves a message by ID with its computed
 	// prompt_index (1-based ordinal among the session's user messages).
 	// Used by the idempotent WS replay/response path and user update-event

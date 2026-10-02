@@ -176,7 +176,9 @@ func (wt *WorkspaceTracker) GetGitStatusReplay(ctx context.Context) (types.GitSt
 // fresh=true.
 func (wt *WorkspaceTracker) GetGitStatus(ctx context.Context, fresh bool) (types.GitStatusUpdate, error) {
 	if fresh {
-		return wt.getBasicGitStatusClass(ctx, subproc.GitInteractive)
+		// Do not join a basic observation that may have started before the
+		// change that prompted this fresh read.
+		return wt.getBasicGitStatusFreshClass(ctx, subproc.GitInteractive)
 	}
 
 	wt.mu.RLock()
@@ -279,6 +281,14 @@ func (wt *WorkspaceTracker) getBasicGitStatusClass(ctx context.Context, class su
 	return wt.observeGitStatusClass(ctx, class, "basic", observer, true)
 }
 
+func (wt *WorkspaceTracker) getBasicGitStatusFreshClass(ctx context.Context, class subproc.GitWorkClass) (types.GitStatusUpdate, error) {
+	observer := wt.gitStatusBasicObserver
+	if observer == nil {
+		observer = wt.gitStatusObserver
+	}
+	return wt.observeGitStatusClass(ctx, class, "basic_fresh", observer, true)
+}
+
 func (wt *WorkspaceTracker) getBasicGitStatusRetryClass(ctx context.Context, class subproc.GitWorkClass) (types.GitStatusUpdate, error) {
 	observer := wt.gitStatusBasicObserver
 	if observer == nil {
@@ -341,7 +351,7 @@ func (wt *WorkspaceTracker) computeGitStatusObservation(
 	observer func(context.Context) (types.GitStatusUpdate, error),
 	correctionPermitted bool,
 ) (types.GitStatusUpdate, string, *gitStatusEnrichmentJob, error) {
-	if observer == nil && (observation == "basic" || observation == "basic_retry") {
+	if observer == nil && (observation == "basic" || observation == "basic_fresh" || observation == "basic_retry") {
 		capture, err := wt.captureBasicGitStatus(ctx)
 		if err != nil {
 			return types.GitStatusUpdate{}, "", nil, err

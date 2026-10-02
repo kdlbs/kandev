@@ -17,6 +17,7 @@ import {
   PullDropdown,
 } from "./changes-panel-header-actions";
 import type { RenameBranchResult } from "./changes-panel-header-actions";
+import type { ChangesPanelRefreshStatus } from "./changes-panel-refresh-status";
 
 export { PullDropdown } from "./changes-panel-header-actions";
 
@@ -32,6 +33,9 @@ function buildHeaderBranchRows(props: ChangesPanelHeaderProps) {
 }
 
 type ChangesPanelHeaderProps = {
+  refreshStatus: ChangesPanelRefreshStatus;
+  hasPriorData: boolean;
+  failedRepositories: string[];
   hasChanges: boolean;
   hasCommits: boolean;
   hasPRFiles?: boolean;
@@ -158,6 +162,9 @@ export function ChangesPanelHeader(props: ChangesPanelHeaderProps) {
     <PanelHeaderBarSplit
       left={
         <ChangesPanelHeaderLeft
+          refreshStatus={props.refreshStatus}
+          hasPriorData={props.hasPriorData}
+          failedRepositories={props.failedRepositories}
           showDiffReview={showDiffReview}
           onOpenDiffAll={onOpenDiffAll}
           onOpenReview={onOpenReview}
@@ -167,6 +174,9 @@ export function ChangesPanelHeader(props: ChangesPanelHeaderProps) {
       }
       leftWhenOverflow={
         <ChangesPanelHeaderLeft
+          refreshStatus={props.refreshStatus}
+          hasPriorData={props.hasPriorData}
+          failedRepositories={props.failedRepositories}
           showDiffReview={showDiffReview}
           primaryOnly
           onOpenDiffAll={onOpenDiffAll}

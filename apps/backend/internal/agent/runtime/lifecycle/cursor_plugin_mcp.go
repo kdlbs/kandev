@@ -168,6 +168,7 @@ func (m *Manager) reconcileCursorProjectMCPFiles(
 		allowedProfileServers,
 		userOwnedProjectServers,
 		allowedImportCandidates,
+		m.agentMCPHost(execution),
 	)
 	if err := ctx.Err(); err != nil {
 		return nil, err

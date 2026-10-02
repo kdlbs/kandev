@@ -22,6 +22,7 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/common/appctx"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/task/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	"go.opentelemetry.io/otel/trace"
 )
@@ -863,22 +864,59 @@ func (sm *SessionManager) applyExplicitSessionMode(ctx context.Context, executio
 	client, releaseClient := execution.AcquireAgentCtlClient()
 	defer releaseClient()
 	if client == nil {
-		return fmt.Errorf("requested permission mode %q cannot be applied: agentctl client is unavailable", mode)
+		return permissionModeBootstrapFailure(
+			execution, mode, "", models.AgentErrorCauseCodePermissionModeFailed,
+			models.AgentErrorCauseReasonClientUnavailable,
+			fmt.Errorf("requested permission mode %q cannot be applied: agentctl client is unavailable", mode),
+		)
 	}
 	result, err := client.SetMode(ctx, sessionID, mode)
 	if err != nil {
-		return fmt.Errorf("apply requested permission mode %q before the first prompt: %w", mode, err)
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return err
+		}
+		return permissionModeBootstrapFailure(
+			execution, mode, "", models.AgentErrorCauseCodePermissionModeFailed,
+			models.AgentErrorCauseReasonApplicationFailed,
+			fmt.Errorf("apply requested permission mode %q before the first prompt: %w", mode, err),
+		)
 	}
 	if !result.Confirmed || result.Effective == "" {
-		return fmt.Errorf("requested permission mode %q was not confirmed by the agent; the first prompt was not sent", mode)
+		return permissionModeBootstrapFailure(
+			execution, mode, result.Effective, models.AgentErrorCauseCodePermissionModeUnconfirmed,
+			models.AgentErrorCauseReasonConfirmationMissing,
+			fmt.Errorf("requested permission mode %q was not confirmed by the agent; the first prompt was not sent", mode),
+		)
 	}
 	if result.Effective != mode {
-		return fmt.Errorf("requested permission mode %q was not applied; agent reported %q and the first prompt was not sent", mode, result.Effective)
+		return permissionModeBootstrapFailure(
+			execution, mode, result.Effective, models.AgentErrorCauseCodePermissionModeMismatch,
+			models.AgentErrorCauseReasonEffectiveMismatch,
+			fmt.Errorf("requested permission mode %q was not applied; agent reported %q and the first prompt was not sent", mode, result.Effective),
+		)
 	}
 	sm.logger.Info("session mode confirmed before first prompt",
 		zap.String("execution_id", execution.ID), zap.String("session_id", sessionID),
 		zap.String("requested_mode", mode), zap.String("effective_mode", result.Effective))
 	return nil
+}
+
+func permissionModeBootstrapFailure(
+	execution *AgentExecution,
+	requestedMode, effectiveMode, code, reason string,
+	cause error,
+) *BootstrapFailure {
+	promptNotSent := true
+	return &BootstrapFailure{
+		Operation:     bootstrapOperation(execution),
+		Code:          code,
+		Reason:        reason,
+		Detail:        bootstrapFailureDetail(code),
+		RequestedMode: requestedMode,
+		EffectiveMode: effectiveMode,
+		PromptNotSent: &promptNotSent,
+		Cause:         cause,
+	}
 }
 
 func sortedConfigOptionKeys(options map[string]string) []string {

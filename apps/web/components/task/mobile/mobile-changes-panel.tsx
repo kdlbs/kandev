@@ -110,7 +110,7 @@ export const MobileChangesPanel = memo(function MobileChangesPanel({
   const { sourceCounts } = useReviewSources(activeSessionId);
   const [diffSheet, setDiffSheet] = useState<DiffSheetMode | null>(null);
 
-  const retryGitStatus = useSessionGitRefresh(data.activeSessionId, true);
+  useSessionGitRefresh(data.activeSessionId, true);
 
   const requestWalkthrough = useRequestChangesWalkthrough({
     taskId: data.activeTaskId,
@@ -146,7 +146,6 @@ export const MobileChangesPanel = memo(function MobileChangesPanel({
   }, []);
 
   const bodyProps = buildChangesPanelBodyProps(data, {
-    onRetryGitStatus: retryGitStatus,
     onOpenDiffFile: handleOpenDiffFile,
     onEditFile: onOpenFile ?? (() => {}),
     onOpenCommitDetail: (target, fileNavigation?: CommitFileNavigationRequest) => {
@@ -159,6 +158,9 @@ export const MobileChangesPanel = memo(function MobileChangesPanel({
     <>
       <PanelRoot className="@container/changes-panel" data-testid="mobile-changes-panel">
         <ChangesPanelHeader
+          refreshStatus={data.refreshStatus}
+          hasPriorData={data.gitStatusPresentation.hasPriorData}
+          failedRepositories={data.gitStatusPresentation.failedRepositories}
           hasChanges={data.git.hasChanges}
           hasCommits={data.git.hasCommits}
           hasPRFiles={data.hasPRFiles}

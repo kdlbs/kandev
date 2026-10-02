@@ -15,7 +15,6 @@ const {
   mockAddPRPanel,
   mockAddReviewPanel,
   mockAddTodosPanel,
-  mockAddPromptHistoryPanel,
   mockListTaskCanvases,
   mockAddCanvasPanel,
 } = vi.hoisted(() => ({
@@ -23,7 +22,6 @@ const {
   mockAddPRPanel: vi.fn(),
   mockAddReviewPanel: vi.fn(),
   mockAddTodosPanel: vi.fn(),
-  mockAddPromptHistoryPanel: vi.fn(),
   mockListTaskCanvases: vi.fn(),
   mockAddCanvasPanel: vi.fn(),
 }));
@@ -40,7 +38,6 @@ const mockDockviewStore = vi.hoisted(() => ({
   addPlanPanel: vi.fn(),
   addPluginPanel: vi.fn(),
   addTodosPanel: mockAddTodosPanel,
-  addPromptHistoryPanel: mockAddPromptHistoryPanel,
   addChangesPanel: vi.fn(),
   addFilesPanel: vi.fn(),
   addPRPanel: mockAddPRPanel,
@@ -251,7 +248,6 @@ beforeEach(() => {
   mockAddPRPanel.mockClear();
   mockAddReviewPanel.mockClear();
   mockAddTodosPanel.mockClear();
-  mockAddPromptHistoryPanel.mockClear();
 });
 
 afterEach(() => cleanup());
@@ -605,22 +601,6 @@ describe("AddPanelMenuItems — port forwarding preference", () => {
     expect(row.getAttribute("data-disabled")).toBe("");
     fireEvent.click(row);
     expect(togglePortForwarding).not.toHaveBeenCalled();
-  });
-});
-
-describe("AddPanelMenuItems — Prompt history", () => {
-  it("renders a row that opens the panel in the invoking group", () => {
-    renderMenu();
-    const item = screen.getByTestId("add-panel-prompt-history-item");
-    expect(item.textContent).toBe("Prompt history");
-
-    fireEvent.click(item);
-    expect(mockAddPromptHistoryPanel).toHaveBeenCalledWith({ groupId: INVOKING_GROUP });
-  });
-
-  it("hides the Prompt history row for a passthrough session", () => {
-    renderMenu({ isPassthrough: true });
-    expect(screen.queryByTestId("add-panel-prompt-history-item")).toBeNull();
   });
 });
 

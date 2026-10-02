@@ -766,6 +766,7 @@ func classifyKanbanFailure(data watcher.AgentEventData) *routingerr.Error {
 	providerID := data.AgentID
 	message := data.ErrorMessage
 	var resetHint *time.Time
+	var occurredAt time.Time
 	if providerError := data.ProviderError; providerError != nil {
 		// Provider rules are keyed by agent ID. OpenCode diagnostics carry the
 		// model-provider ID instead ("opencode-go"), which has no rules; keeping
@@ -779,6 +780,7 @@ func classifyKanbanFailure(data watcher.AgentEventData) *routingerr.Error {
 			message = providerError.Message
 		}
 		resetHint = providerError.ResetAt
+		occurredAt = providerError.OccurredAt
 	}
 	phase := routingerr.PhasePromptSend
 	if data.DynamicRouteAttempt {
@@ -798,6 +800,7 @@ func classifyKanbanFailure(data watcher.AgentEventData) *routingerr.Error {
 		Phase:      phase,
 		ProviderID: providerID,
 		ResetHint:  resetHint,
+		OccurredAt: occurredAt,
 		Stderr:     message,
 	})
 	if data.DynamicRouteAttempt && data.EvidenceKnown && !data.OutputObserved && !data.EffectObserved &&

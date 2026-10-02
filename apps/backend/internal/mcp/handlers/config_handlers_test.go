@@ -152,7 +152,6 @@ func TestHandleReorderWorkflowSteps_MissingStepIDs(t *testing.T) {
 	h := &Handlers{}
 	msg := makeWSMessage(t, ws.ActionMCPReorderWorkflowStep, map[string]interface{}{
 		"workflow_id": "wf-123",
-		"step_ids":    []string{},
 	})
 
 	resp, err := h.handleReorderWorkflowSteps(context.Background(), msg)

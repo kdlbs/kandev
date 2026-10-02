@@ -2,6 +2,10 @@
 
 import {
   forwardRef,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type KeyboardEventHandler,
   type FocusEventHandler,
   type MouseEventHandler,
   type PointerEventHandler,
@@ -228,23 +232,63 @@ export function PRTaskIconTooltip({
 }: PRTaskIconDisclosureProps & {
   tooltip: ReturnType<typeof useChangeRequestTaskTooltipState>;
 }) {
+  const { t } = useTranslation();
+  const triggerRef = useRef<HTMLElement>(null);
+  const scrollBodyRef = useRef<HTMLDivElement>(null);
+  const [tooltipDescription, setTooltipDescription] = useState(props.ariaLabel);
+  useLayoutEffect(() => {
+    const scrollBody = scrollBodyRef.current;
+    if (!scrollBody) return;
+    const description = (scrollBody.innerText || scrollBody.textContent || "")
+      .replace(/\s+/g, " ")
+      .trim();
+    if (description) setTooltipDescription(description);
+  }, [props.ariaLabel, props.content, tooltip.open]);
+  const onEscapeKeyDown = (event: Event) => {
+    if (tooltip.onEscapeKeyDown(event)) triggerRef.current?.focus();
+  };
+  const onTriggerKeyDown: KeyboardEventHandler<HTMLSpanElement> = (event) => {
+    if (event.key !== "Tab" || event.shiftKey || !tooltip.open) return;
+    event.preventDefault();
+    scrollBodyRef.current?.focus();
+  };
+
   return (
     <Tooltip open={tooltip.open}>
       <TooltipTrigger asChild>
         <PRTaskIconTrigger
           {...props}
+          ref={triggerRef}
           onPointerEnter={tooltip.onPointerEnter}
           onPointerLeave={tooltip.onPointerLeave}
           onFocus={tooltip.onFocus}
           onBlur={tooltip.onBlur}
+          onKeyDown={onTriggerKeyDown}
         />
       </TooltipTrigger>
       <TooltipContent
         sideOffset={6}
-        onEscapeKeyDown={tooltip.onEscapeKeyDown}
-        className="w-80 max-w-[calc(100vw-1rem)] p-3"
+        onEscapeKeyDown={onEscapeKeyDown}
+        onPointerEnter={tooltip.onContentPointerEnter}
+        onPointerLeave={tooltip.onContentPointerLeave}
+        onFocus={tooltip.onContentFocus}
+        onBlur={tooltip.onContentBlur}
+        aria-label={tooltipDescription}
+        className="pointer-events-auto flex w-80 max-w-[calc(100vw-1rem)] flex-col p-3"
+        style={{
+          maxHeight: "min(var(--radix-tooltip-content-available-height), calc(100dvh - 1rem))",
+        }}
       >
-        {props.content}
+        <div
+          ref={scrollBodyRef}
+          data-testid="pr-task-summary-scroll-body"
+          tabIndex={0}
+          role="region"
+          aria-label={t("github:pullRequestCiStatusReviewsAnd")}
+          className="min-h-0 flex-1 overflow-y-auto overscroll-contain rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        >
+          {props.content}
+        </div>
       </TooltipContent>
     </Tooltip>
   );
@@ -258,6 +302,7 @@ type PRTaskIconTriggerProps = PRTaskIconDisclosureProps & {
   onPointerLeave?: PointerEventHandler<HTMLSpanElement>;
   onFocus?: FocusEventHandler<HTMLSpanElement>;
   onBlur?: FocusEventHandler<HTMLSpanElement>;
+  onKeyDown?: KeyboardEventHandler<HTMLSpanElement>;
 };
 
 export const PRTaskIconTrigger = forwardRef<HTMLElement, PRTaskIconTriggerProps>(
@@ -286,6 +331,7 @@ export const PRTaskIconTrigger = forwardRef<HTMLElement, PRTaskIconTriggerProps>
       onPointerLeave,
       onFocus,
       onBlur,
+      onKeyDown,
       ...triggerAttributes
     },
     ref: Ref<HTMLElement>,
@@ -340,6 +386,7 @@ export const PRTaskIconTrigger = forwardRef<HTMLElement, PRTaskIconTriggerProps>
         onPointerLeave={onPointerLeave}
         onFocus={onFocus}
         onBlur={onBlur}
+        onKeyDown={onKeyDown}
       >
         {contents}
       </span>

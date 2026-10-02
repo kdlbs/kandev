@@ -11,23 +11,24 @@ function intlLocale(): string {
 }
 
 /**
- * Compact relative time without the "ago" suffix — for rows that already
- * carry an elapsed-time affordance (e.g. the prompt history duration
- * hourglass), where "5h ago" would be redundant. Same buckets as
- * `formatRelative`; "just now" is kept as-is.
+ * Format a compact duration unit in the active locale. Callers choose the
+ * unit and bucket boundaries so existing time displays keep their behavior.
  */
-export function formatRelativeCompact(dateStr: string, now: number = Date.now()): string {
-  if (!dateStr) return "";
-  const date = new Date(dateStr);
-  if (Number.isNaN(date.getTime())) return "";
-  const diffSec = Math.floor((now - date.getTime()) / 1000);
-  if (diffSec < 60) return t("common:justNow");
-  const diffMin = Math.floor(diffSec / 60);
-  if (diffMin < 60) return t("common:mShort", { diffMin });
-  const diffHr = Math.floor(diffMin / 60);
-  if (diffHr < 24) return t("common:hShort", { diffHr });
-  const diffDay = Math.floor(diffHr / 24);
-  return t("common:dShort", { diffDay });
+export function formatCompactDuration(
+  count: number,
+  unit: "second" | "minute" | "hour" | "day",
+): string {
+  const safeCount = Math.max(0, Math.floor(count));
+  switch (unit) {
+    case "second":
+      return t("common:sidebarSeconds", { count: safeCount });
+    case "minute":
+      return t("common:sidebarMinutes", { count: safeCount });
+    case "hour":
+      return t("common:sidebarHours", { count: safeCount });
+    case "day":
+      return t("common:sidebarDays", { count: safeCount });
+  }
 }
 
 /**
@@ -41,16 +42,16 @@ export function formatSidebarElapsedTime(dateStr: string, now: number = Date.now
   if (Number.isNaN(date.getTime())) return "";
 
   const elapsedSeconds = Math.max(0, Math.floor((now - date.getTime()) / 1000));
-  if (elapsedSeconds < 60) return t("common:sidebarSeconds", { count: elapsedSeconds });
+  if (elapsedSeconds < 60) return formatCompactDuration(elapsedSeconds, "second");
 
   const elapsedMinutes = Math.floor(elapsedSeconds / 60);
-  if (elapsedMinutes < 60) return t("common:sidebarMinutes", { count: elapsedMinutes });
+  if (elapsedMinutes < 60) return formatCompactDuration(elapsedMinutes, "minute");
 
   const elapsedHours = Math.floor(elapsedMinutes / 60);
-  if (elapsedHours < 24) return t("common:sidebarHours", { count: elapsedHours });
+  if (elapsedHours < 24) return formatCompactDuration(elapsedHours, "hour");
 
   const elapsedDays = Math.floor(elapsedHours / 24);
-  if (elapsedDays < 7) return t("common:sidebarDays", { count: elapsedDays });
+  if (elapsedDays < 7) return formatCompactDuration(elapsedDays, "day");
 
   const elapsedWeeks = Math.floor(elapsedDays / 7);
   if (elapsedDays < 365) return t("common:sidebarWeeks", { count: elapsedWeeks });

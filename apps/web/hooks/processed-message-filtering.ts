@@ -181,6 +181,28 @@ export function isSuccessfulScriptExecutionMetadata(
   );
 }
 
+const SELECTION_FAILURE_CODES = new Set([
+  "model_unavailable",
+  "model_selection_failed",
+  "permission_mode_failed",
+  "permission_mode_unconfirmed",
+  "permission_mode_mismatch",
+]);
+
+export function isSelectionFailureRecoveryMetadata(value: unknown): boolean {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const metadata = value as Record<string, unknown>;
+  const causes = Array.isArray(metadata.causes) ? metadata.causes : [];
+  return [metadata.failure_code, metadata.code, ...causes.map(selectionCauseCode)].some(
+    (code) => typeof code === "string" && SELECTION_FAILURE_CODES.has(code),
+  );
+}
+
+function selectionCauseCode(value: unknown): unknown {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  return (value as Record<string, unknown>).code;
+}
+
 /** True when a script_execution row reports an agent that finished booting
  *  successfully, whether resumed or freshly started. Mirrors the success rule
  *  the boot header renders with (script-execution-message.tsx): an "exited"
@@ -223,7 +245,14 @@ export function hasFailedAgentBootAfter(
 export function hasSuccessfulAgentBootAfter(
   messages: Message[] | undefined,
   afterCreatedAt: string | undefined,
+  errorStamp?: string,
+  requireExactStamp = false,
+  sessionMetadata?: Record<string, unknown> | null,
 ): boolean {
+  if (errorStamp) {
+    return hasSessionRecoveryResolutionAfter(sessionMetadata, afterCreatedAt, errorStamp);
+  }
+  if (requireExactStamp) return false;
   const failedAt = Date.parse(afterCreatedAt ?? "");
   if (Number.isNaN(failedAt) || !messages?.length) return false;
   return messages.some((message) => {
@@ -237,12 +266,57 @@ export function hasSuccessfulAgentBootAfter(
 export function hasSessionRecoveryResolutionAfter(
   metadata: Record<string, unknown> | null | undefined,
   afterCreatedAt: string | undefined,
+  errorStamp?: string,
+  messages?: readonly {
+    type?: string;
+    metadata?: Record<string, unknown> | null;
+  }[],
+  requireExactStamp = false,
 ): boolean {
+  const failedAt = Date.parse(afterCreatedAt ?? "");
+  if (Number.isNaN(failedAt)) return false;
+  if (errorStamp) {
+    const entries = Array.isArray(metadata?.recovery_resolutions)
+      ? metadata.recovery_resolutions.slice(-16)
+      : [];
+    return entries.some((entry) => {
+      if (!entry || typeof entry !== "object" || Array.isArray(entry)) return false;
+      const resolution = entry as Record<string, unknown>;
+      const resolvedStamp = resolution.error_stamp;
+      const resolvedAt = Date.parse(
+        typeof resolution.resolved_at === "string" ? resolution.resolved_at : "",
+      );
+      return (
+        isSafeRecoveryStamp(resolvedStamp) &&
+        resolvedStamp === errorStamp &&
+        isHostResumeAttemptID(resolution.attempt_id) &&
+        !Number.isNaN(resolvedAt) &&
+        resolvedAt > failedAt
+      );
+    });
+  }
+  if (requireExactStamp) return false;
   const resolvedAt = Date.parse(
     typeof metadata?.recovery_resolved_at === "string" ? metadata.recovery_resolved_at : "",
   );
-  const failedAt = Date.parse(afterCreatedAt ?? "");
   return !Number.isNaN(resolvedAt) && !Number.isNaN(failedAt) && resolvedAt > failedAt;
+}
+
+function isSafeRecoveryStamp(value: unknown): value is string {
+  return (
+    typeof value === "string" &&
+    value.length > 0 &&
+    value.length <= 256 &&
+    value.trim() === value &&
+    !/[\u0000-\u001f\u007f]/u.test(value)
+  );
+}
+
+function isHostResumeAttemptID(value: unknown): value is string {
+  const match = typeof value === "string" ? /^resume-(0|[1-9][0-9]{0,19})$/u.exec(value) : null;
+  if (!match) return false;
+  const sequence = match[1];
+  return sequence.length < 20 || sequence <= "18446744073709551615";
 }
 
 export function isSetupScriptMessage(message: Message): boolean {

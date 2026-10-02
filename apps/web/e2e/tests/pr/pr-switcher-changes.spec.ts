@@ -1,5 +1,6 @@
 import { test, expect } from "../../fixtures/test-base";
 import { GitHelper, makeGitEnv } from "../../helpers/git-helper";
+import { watchWs } from "../../helpers/causal-waits";
 import { KanbanPage } from "../../pages/kanban-page";
 import { SessionPage } from "../../pages/session-page";
 import path from "node:path";
@@ -143,6 +144,7 @@ test.describe("PR switcher changes panel", () => {
     // <100ms; if we navigate after moveTask the events are emitted before
     // the browser subscribes and the kanban never receives them.
     const kanban = new KanbanPage(testPage);
+    const gateway = watchWs(testPage);
     await kanban.goto();
 
     // Move tasks to Working one at a time so their shared E2E checkout stays
@@ -192,6 +194,7 @@ test.describe("PR switcher changes panel", () => {
     });
 
     // --- Click Task A to enter session view ---
+    const taskACommitsLoaded = gateway.waitForResponse("github.pr_commits.get");
     await kanban.taskCardInColumn("Auth Fix Task", doneStep.id).click();
     await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
 
@@ -200,6 +203,7 @@ test.describe("PR switcher changes panel", () => {
 
     // --- Switch to the Changes tab (Files tab is active by default) ---
     await session.clickTab("Changes");
+    await taskACommitsLoaded;
 
     // --- Verify Task A PR data ---
     await expect(session.prFilesSection()).toBeVisible({ timeout: 15_000 });
@@ -219,11 +223,13 @@ test.describe("PR switcher changes panel", () => {
     );
 
     // --- Switch to Task B ---
+    const taskBCommitsLoaded = gateway.waitForResponse("github.pr_commits.get");
     await session.taskInSidebar("Dashboard Task").click();
     await expect(testPage).toHaveURL((url) => url.pathname.includes(taskB.id), {
       timeout: 15_000,
     });
     await session.clickTab("Changes");
+    await taskBCommitsLoaded;
 
     // Wait for PR data to load for Task B
     await expect(session.prFilesSection()).toBeVisible({ timeout: 15_000 });

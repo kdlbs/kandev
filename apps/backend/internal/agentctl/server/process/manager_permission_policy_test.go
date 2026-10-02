@@ -247,6 +247,20 @@ func TestInjectedKandevPermissionPolicyRejectsUntrustedRequests(t *testing.T) {
 	}
 }
 
+func TestInjectedKandevPermissionPolicyUsesConfiguredMCPHost(t *testing.T) {
+	cfg := (&config.Config{AuthToken: "test-token", ListenHostOverride: "192.0.2.10"}).NewInstanceConfig(43210, nil)
+	if !injectedKandevMCPConfigured(cfg) {
+		t.Fatal("generated configured-host MCP endpoints were not recognized as injected")
+	}
+
+	cfg.McpServers = []config.McpServerConfig{{
+		Name: "kandev", Type: "http", URL: "http://localhost:43210/mcp",
+	}}
+	if injectedKandevMCPConfigured(cfg) {
+		t.Fatal("localhost URL was trusted when the injected endpoint targets another host")
+	}
+}
+
 func injectedKandevPermissionManager(t *testing.T, servers []config.McpServerConfig) *Manager {
 	t.Helper()
 	return &Manager{

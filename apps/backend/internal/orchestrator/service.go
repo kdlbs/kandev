@@ -419,8 +419,8 @@ type sessionExecutorStore interface {
 	// task description is still eligible as the initial prompt.
 	HasUserPromptHistory(ctx context.Context, sessionID string) (bool, error)
 	// ClaimInitialPromptFallback atomically reserves the first prompt slot for
-	// an empty workflow-step task-description fallback.
-	ClaimInitialPromptFallback(ctx context.Context, sessionID string) (bool, error)
+	// an empty workflow-step task-description fallback in the expected incarnation.
+	ClaimInitialPromptFallback(ctx context.Context, sessionID, incarnationID string) (bool, error)
 	GetActiveTaskSessionByTaskID(ctx context.Context, taskID string) (*models.TaskSession, error)
 	ListActiveTaskSessionsByTaskID(ctx context.Context, taskID string) ([]*models.TaskSession, error)
 	SetSessionPrimary(ctx context.Context, sessionID string) error
@@ -1835,6 +1835,7 @@ func NewService(
 		return nil
 	})
 	exec.SetOnSessionStateTransition(s.transitionTaskSessionState)
+	exec.SetOnResumeFailureRollback(s.rollbackResumeFailureIfCurrentAttempt)
 	exec.SetOnBootstrapFailureTransition(s.transitionBootstrapFailure)
 	exec.SetOnBootstrapFailureMessageRepair(s.persistBootstrapFailureMessage)
 	exec.SetOnSessionStarting(func(

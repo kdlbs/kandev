@@ -27,8 +27,11 @@ The state transitions are separate operations. Inspect the diff before staging, 
 ### When task and PR histories differ
 
 For an associated pull request, Kandev keeps the task checkout and the published PR history
-separate when their commit histories differ. It may identify a completed local rebase when the
-current repository evidence supports that explanation. If the evidence is missing or incomplete,
+separate when current evidence confirms that both histories contain commits absent from the other.
+Different head commits alone can also mean that one version is simply ahead. When cached upstream
+data cannot establish the relationship to the current PR head, Kandev keeps a unified history and
+withholds remote mutation actions until it has enough evidence. It may identify a completed local
+rebase when the current repository evidence supports that explanation. If the evidence is missing or incomplete,
 Kandev uses neutral wording instead of guessing which history changed.
 
 Choose **Compare versions** first. Kandev opens **Changes** with the task and PR histories visible;
@@ -39,6 +42,25 @@ branch, pull request, and both displayed heads before choosing a replacement act
 confirmation. **Restore published PR version...** replaces the task checkout history, creates a
 recovery branch at the current task head first, and requires a clean working tree. If the provider
 head changes before confirmation, Kandev leaves both versions unchanged and asks for a fresh review.
+
+## Seed ignored files into worktrees
+
+Repository copy-file settings seed files before a new worktree's setup script
+runs. Enter repository-relative paths or glob patterns separated by commas,
+for example `.env.local, config/{local,dev}.env`.
+
+Commas inside character classes and brace alternation belong to the pattern.
+`config/[a,b].env` matches `a.env`, `b.env`, or `,.env` in `config`.
+Braces inside classes are literal: `config/[{].env, .env.local` selects
+`config/{.env` and `.env.local`. On POSIX hosts, backslashes escape the next
+character, including commas and braces. On Windows, backslashes are path
+separators; use character classes for literal glob characters.
+
+Append `:symlink` to share a source file through a relative host-worktree link,
+for example `.env.local:symlink`. Remote executors copy its bytes instead.
+Windows link creation can require extra privileges. The first entry wins when
+patterns overlap, and existing destinations are skipped. Other colons remain
+literal; use `::symlink` for a filename ending in `:symlink`.
 
 ## Prerequisites and trust boundary
 
@@ -385,8 +407,8 @@ All operations below run in the selected repository workspace.
 | Rebase | If `origin` exists, fetches `origin BASE` and rebases onto `origin/BASE`. Without `origin`, rebases onto the local `refs/heads/BASE`. | Rewrites local commits. If conflict files are detected from Git output, Kandev attempts `git rebase --abort` automatically and returns the file list. |
 | Merge | If `origin` exists, fetches `origin BASE` and merges `origin/BASE`. Without `origin`, merges the local `refs/heads/BASE`. | Conflicts are deliberately left in the worktree. Resolve and commit them, or use Abort Merge. |
 | Abort | Runs `git merge --abort` or `git rebase --abort`. | Fails when that operation is not in progress or the repository cannot be restored. |
-| Stage | With paths, `git add -- PATHS`; with an empty path list, `git add -A`. | Empty means all changes, including deletions. |
-| Unstage | With paths, `git reset HEAD -- PATHS`; with an empty path list, `git reset HEAD`. | Keeps working-tree content. |
+| Stage | With paths, `git add --` with each path selected literally; with an empty path list, `git add -A`. | Named files select only those files. Actual directories select their subtrees. Empty means all changes, including deletions. |
+| Unstage | With paths, `git reset HEAD --` with each path selected literally; with an empty path list, `git reset HEAD`. | Keeps working-tree content. Named files and actual directory subtrees use the same literal selection as Stage. |
 | Commit | Optionally runs `git add -A`, then `git commit -m MESSAGE`; Amend adds `--amend`. | The normal UI defaults to staging all when it invokes this helper. Amend rewrites `HEAD`. |
 | Discard | Restores tracked paths from `HEAD`; added and untracked files are unstaged and deleted. | Removes both staged and unstaged work. Explicit paths are required, but deletion is not recoverable through Kandev. |
 | Edit branch | `git branch -m NEW_NAME` for the current local branch. | Does not rename/delete the old remote branch or automatically repair every external reference. Push the new branch explicitly. |
@@ -411,6 +433,12 @@ A fan-out can partially succeed. The UI continues after a failure and reports pe
 ## Commit history and reset behavior
 
 The Changes panel's session history is calculated relative to the session's recorded base commit or current merge base, so it focuses on commits created on the task branch. Kandev refreshes status and emits session Git updates after mutations, but the underlying Git repository remains authoritative.
+
+The Changes toolbar shows a spinner while Git status or inline commit details load.
+If a read fails, it shows a warning and retries automatically with increasing
+delays. The panel keeps the last available file and history data visible while
+it retries. Diff viewers continue to show their own loading state until their
+details arrive.
 
 Two similarly named actions have very different semantics:
 
@@ -460,8 +488,8 @@ These are the registered Kandev WebSocket actions. Every payload requires `sessi
 | `worktree.merge` | required `base_branch` |
 | `worktree.abort` | `operation`: exactly `merge` or `rebase` |
 | `worktree.commit` | required non-empty `message`; `stage_all`; `amend` |
-| `worktree.stage` | `paths` list; empty means all |
-| `worktree.unstage` | `paths` list; empty means all |
+| `worktree.stage` | `paths` list of literal repository-relative files or directories; empty means all |
+| `worktree.unstage` | `paths` list of literal repository-relative files or directories; empty means all |
 | `worktree.discard` | required non-empty `paths` list |
 | `worktree.create_pr` | required `title`; `body`; `base_branch`; `draft`; response can include `pr_url` and `provider` (`github`, `gitlab`, or `azure_repos`) |
 | `worktree.revert_commit` | required `commit_sha`, which must be exact `HEAD` |

@@ -22,7 +22,7 @@ export type SidebarItemContext = {
   repositoriesById?: ReadonlyMap<string, Repository>;
   stepColorById?: ReadonlyMap<string, string>;
   automaticColorSettings?: SidebarTaskColorAutomation;
-  pendingArchiveTaskIds?: ReadonlySet<string>;
+  pendingRemovalTaskIds?: ReadonlySet<string>;
 };
 
 const EMPTY_REPOSITORIES_BY_ID = new Map<string, Repository>();
@@ -122,12 +122,11 @@ function sidebarStatus(
   };
 }
 
-function isPendingArchive(
+function isPendingRemoval(
   task: KanbanState["tasks"][number],
   context: SidebarItemContext,
 ): boolean {
-  if (task.isArchived === true) return false;
-  return context.pendingArchiveTaskIds?.has(task.id) === true;
+  return context.pendingRemovalTaskIds?.has(task.id) === true;
 }
 
 /** Map a task-level status projection to a sidebar item without session streams. */
@@ -169,7 +168,7 @@ export function buildSidebarItem(
     remoteExecutorName: task.primaryExecutorName ?? undefined,
     createdAt: task.createdAt,
     isArchived: task.isArchived === true,
-    isPendingArchive: isPendingArchive(task, context),
+    isPendingRemoval: isPendingRemoval(task, context),
     isFromOffice: task.isFromOffice,
     parentTaskTitle: task.parentTaskId ? context.titleById.get(task.parentTaskId) : undefined,
     parentTaskId: task.parentTaskId ?? undefined,

@@ -866,6 +866,29 @@ type SessionStateTransitionFunc func(
 	onChanged func(),
 ) (changed bool, finalState models.TaskSessionState, err error)
 
+// ResumeCredentialSnapshotRestore describes the prior non-secret Git
+// credential-routing value. Present=false removes the key during rollback.
+type ResumeCredentialSnapshotRestore struct {
+	Value   interface{}
+	Present bool
+}
+
+// ResumeFailureRollbackRequest contains the immutable attempt identity and
+// state projection needed to roll back a failed resume atomically.
+type ResumeFailureRollbackRequest struct {
+	TaskID             string
+	SessionID          string
+	AttemptID          string
+	ExpectedState      models.TaskSessionState
+	NextState          models.TaskSessionState
+	ErrorMessage       string
+	CredentialSnapshot *ResumeCredentialSnapshotRestore
+}
+
+// ResumeFailureRollbackFunc commits an attempt-fenced resume rollback and
+// publishes its accepted session transition.
+type ResumeFailureRollbackFunc func(context.Context, ResumeFailureRollbackRequest) (bool, error)
+
 // BootstrapFailureTransitionFunc atomically commits a bootstrap error and
 // its FAILED session transition, then publishes the accepted transition.
 // expectedState, expectedStamp, and expectedStartAttemptID come from the
@@ -1063,6 +1086,9 @@ type Executor struct {
 	// Strict session-state callback used by operations that need to distinguish
 	// accepted writes from terminal/no-op races.
 	onSessionStateTransition SessionStateTransitionFunc
+
+	// Attempt-fenced resume rollback callback that publishes accepted transitions.
+	onResumeFailureRollback ResumeFailureRollbackFunc
 
 	// Atomic bootstrap-failure callback used by the orchestrator to commit the
 	// typed error, FAILED state, and corresponding publication as one ownership
@@ -1447,6 +1473,12 @@ func (e *Executor) SetOnSessionStateChange(fn SessionStateChangeFunc) {
 // detailed lifecycle operations.
 func (e *Executor) SetOnSessionStateTransition(fn SessionStateTransitionFunc) {
 	e.onSessionStateTransition = fn
+}
+
+// SetOnResumeFailureRollback wires the attempt-fenced state transition and
+// event publication used when an agent resume fails after entering STARTING.
+func (e *Executor) SetOnResumeFailureRollback(fn ResumeFailureRollbackFunc) {
+	e.onResumeFailureRollback = fn
 }
 
 // SetOnBootstrapFailureTransition wires the atomic bootstrap-failure commit

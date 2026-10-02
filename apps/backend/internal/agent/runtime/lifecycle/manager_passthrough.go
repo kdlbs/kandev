@@ -456,7 +456,7 @@ func (m *Manager) passthroughMCPServers(
 	servers := []agentctltypes.McpServer{{
 		Name: kandevMCPServerName,
 		Type: string(mcpconfig.ServerTypeHTTP),
-		URL:  fmt.Sprintf("http://localhost:%d/mcp", port),
+		URL:  m.agentMCPURL(execution, port, "/mcp"),
 	}}
 	profileServers, err := m.resolveMcpServersWithParams(ctx, execution.AgentProfileID, execution.MetadataSnapshot(), agentConfig)
 	if err != nil {

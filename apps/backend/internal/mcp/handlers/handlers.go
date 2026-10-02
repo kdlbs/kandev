@@ -2644,9 +2644,11 @@ func (h *Handlers) handleStepComplete(ctx context.Context, msg *ws.Message) (*ws
 // actually move the task, alongside the accepted:true response
 // handleStepComplete always returns. accepted only means the signal was
 // durably recorded — a step whose AutoAdvanceRequiresSignal is false never
-// reads it, so the caller can accept a signal that changes nothing. ok is
-// false (both other return values ignored) when the current step cannot be
-// resolved: the caller must never guess this field into existence.
+// reads it, and a signal-gated step whose on_turn_complete has no move that
+// runs automatically reads it without transitioning, so the caller can accept
+// a signal that changes nothing. ok is false (both other return values
+// ignored) when the current step cannot be resolved: the caller must never
+// guess this field into existence.
 func (h *Handlers) resolveStepCompletionAdvances(ctx context.Context, workflowStepID string) (advances bool, note string, ok bool) {
 	if h.workflowCtrl == nil || workflowStepID == "" {
 		return false, "", false
@@ -2655,10 +2657,14 @@ func (h *Handlers) resolveStepCompletionAdvances(ctx context.Context, workflowSt
 	if err != nil || resp == nil || resp.Step == nil {
 		return false, "", false
 	}
-	if resp.Step.AutoAdvanceRequiresSignal {
-		return true, "", true
+	if !resp.Step.AutoAdvanceRequiresSignal {
+		return false, "this step does not advance on a completion signal", true
 	}
-	return false, "this step does not advance on a completion signal", true
+	if !resp.Step.AdvancesOnTurnComplete() {
+		return false, "this step has no on_turn_complete move that runs automatically, " +
+			"so the signal will not move the task", true
+	}
+	return true, "", true
 }
 
 func (h *Handlers) stepCompletionLaunchStep(ctx context.Context, sessionID, fallback string) (string, error) {

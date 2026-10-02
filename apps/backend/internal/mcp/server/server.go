@@ -117,6 +117,7 @@ type Server struct {
 	disableAskQuestion         bool
 	mode                       string // "task" (default), "task-title-pending", "config", "external", "office", or "automation"
 	mcpProviders               []string
+	sseBaseURL                 string
 	profile                    mcpprofile.Context
 	legacyModeCapabilities     []mcpprofile.Capability
 	namespacesMCPToolsByServer bool
@@ -150,6 +151,14 @@ func WithMCPToolNamespacingByServer(enabled bool) ServerOption {
 	}
 }
 
+// WithSSEBaseURL sets the origin advertised in the SSE message endpoint event.
+// The default remains localhost for callers that do not set an instance host.
+func WithSSEBaseURL(baseURL string) ServerOption {
+	return func(s *Server) {
+		s.sseBaseURL = strings.TrimSuffix(baseURL, "/")
+	}
+}
+
 type mcpAttachmentAttemptContextKey struct{}
 
 // New creates a new MCP server for agentctl.
@@ -166,7 +175,7 @@ func New(backend BackendClient, sessionID, taskID string, port int, log *logger.
 	// WithBaseURL ensures the SSE endpoint event includes the full message URL
 	// (e.g. http://localhost:10005/message?sessionId=xxx) so MCP clients can POST back.
 	s.sseServer = server.NewSSEServer(s.mcpServer,
-		server.WithBaseURL(fmt.Sprintf("http://localhost:%d", port)),
+		server.WithBaseURL(s.sseBaseURLForPort(port)),
 	)
 
 	// Create Streamable HTTP server for Codex
@@ -188,13 +197,20 @@ func NewWithProfile(backend BackendClient, sessionID, taskID string, port int, l
 	}
 	s := newServerWithProfile(backend, sessionID, taskID, log, mcpLogFile, profileContext, options...)
 	s.sseServer = server.NewSSEServer(s.mcpServer,
-		server.WithBaseURL(fmt.Sprintf("http://localhost:%d", port)),
+		server.WithBaseURL(s.sseBaseURLForPort(port)),
 	)
 	s.httpServer = server.NewStreamableHTTPServer(s.mcpServer,
 		server.WithEndpointPath("/mcp"),
 		server.WithHTTPContextFunc(s.mcpHTTPContext),
 	)
 	return s
+}
+
+func (s *Server) sseBaseURLForPort(port int) string {
+	if s.sseBaseURL != "" {
+		return s.sseBaseURL
+	}
+	return fmt.Sprintf("http://localhost:%d", port)
 }
 
 // NewExternal creates an MCP server for the Kandev backend's external endpoint.
