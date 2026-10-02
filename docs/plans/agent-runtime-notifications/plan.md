@@ -84,8 +84,10 @@ Task 01: capability coverage and cached status/source tests. Task 02: policy per
 
 ## Verification results
 
-Implementation and local acceptance checks are complete; delivery gates remain in progress. Results and exact commands are recorded in each work order. Workspace dependencies installed with pnpm install --frozen-lockfile. Initial base: 08e4ffdb99caf40b0df5baa67b29cf4313188f15; integrated main: 517249b5e609aef76e9ad06496b8f1a13cd00516. Expanded issue body and jcfs assignment verified. Open PR #4014 overlaps OpenCode selection; #3940 overlaps host discovery. Neither is a dependency or current-main contract.
+Implementation and local acceptance checks are complete; delivery gates remain in progress. Results and exact commands are recorded in each work order. Workspace dependencies installed with pnpm install --frozen-lockfile. Initial base: 08e4ffdb99caf40b0df5baa67b29cf4313188f15; integrated main: 68542f03983a56b9c9c42fd1afed10842e1beff0. Expanded issue body and jcfs assignment verified. Open PR #4014 overlaps OpenCode selection; #3940 overlaps host discovery. Neither is a dependency or current-main contract.
 
 ## Risks
 
 The previous native OpenCode update path inferred global npm ownership from PATH; the reviewed capability boundary now uses vendor guidance for that external installation. Existing managed selections and remote executor command resolution are preserved. Native version metadata can be non-SemVer or omit the runtime package version, so comparison must remain unknown. Opt-out/manual selection can race candidate staging, requiring an activation guard. Release source changes must not inherit consent. Shared settings and notification stores must preserve per-user notification ownership and install-wide permission boundaries.
+
+CI remediation integrates current main after its existing scoped Git-status fix was reproduced against the old handler. Root diff enrichment must compare the root tracker rather than the latest child tracker. This is upstream behavior, with no new runtime-update requirement or ownership change. Exact post-integration CI and merge evidence remains in the Kandev task plan.
