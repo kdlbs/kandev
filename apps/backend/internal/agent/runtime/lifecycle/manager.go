@@ -252,6 +252,7 @@ type Manager struct {
 	executorProfileReader         ExecutorProfileReader
 	sessionSettingsSnapshotWriter SessionSettingsSnapshotWriter
 	pluginExecutorProfileLoader   PluginExecutorProfileLoader
+	pluginRuntimeAPIURL           string
 	pluginExecutorCallbackMu      sync.Mutex
 	pluginExecutorCallbacks       map[string]*ExecutorCreateRequest
 

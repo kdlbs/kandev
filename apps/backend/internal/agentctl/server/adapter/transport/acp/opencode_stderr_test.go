@@ -10,8 +10,33 @@ import (
 	"time"
 
 	sdk "github.com/coder/acp-go-sdk"
+	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 )
+
+// @covers AC-AGENTS-CLAUDE-SESSION-LIMIT-001.1, AC-AGENTS-CLAUDE-SESSION-LIMIT-001.2
+func TestProviderErrorFromErrorClaudeSessionLimit(t *testing.T) {
+	const notice = "Internal error: You've hit your session limit · resets 11:10am (Europe/Helsinki)"
+	providerErr := ProviderErrorFromError(&sdk.RequestError{Code: -32603, Message: notice}, "claude-acp", "claude-sonnet")
+	if providerErr == nil {
+		t.Fatal("ProviderErrorFromError() = nil, want projected Claude session-limit notice")
+	}
+	if providerErr.Source != streams.ProviderErrorSourceACPPrompt || providerErr.ProviderID != "claude-acp" {
+		t.Fatalf("projected provider error = %+v, want Claude ACP prompt diagnostic", providerErr)
+	}
+	if !strings.Contains(providerErr.Message, "Europe/Helsinki") {
+		t.Fatalf("projected message = %q, want the explicit reset zone to survive sanitization", providerErr.Message)
+	}
+
+	classified := routingerr.Classify(routingerr.Input{
+		Phase:      routingerr.PhaseStreaming,
+		ProviderID: providerErr.ProviderID,
+		Stderr:     providerErr.Message,
+	})
+	if classified.Code != routingerr.CodeQuotaLimited || classified.Class != routingerr.ClassHard || classified.ResetHint == nil {
+		t.Fatalf("classification from projected terminal error = %+v, want hard quota with reset hint", classified)
+	}
+}
 
 func TestNormalizeOpenCodeActionURLAcceptsOnlyAllowlistedRoute(t *testing.T) {
 	const want = "https://opencode.ai/workspace/wrk_01KQM7K5CYT715264YKKFB17ZY/go"

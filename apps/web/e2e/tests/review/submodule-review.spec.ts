@@ -84,9 +84,14 @@ test.describe("Nested submodule Review", () => {
         '[data-testid="review-file-row"][data-file-path="README.md"]',
       );
       await expect(readmeRows).toHaveCount(3);
+      await review
+        .locator(
+          '[data-testid="review-file-row"][data-file-path="README.md"][data-repository-name=""]',
+        )
+        .click();
       await expect
         .poll(() => session.reviewDiffText(), { timeout: 45_000 })
-        .toEqual(expect.stringContaining("parent working-tree change"));
+        .toContain("parent working-tree change");
       for (const [repositoryName, expected] of [
         ["vendor/outer", "outer committed change"],
         ["vendor/outer/vendor/inner", "inner committed change"],

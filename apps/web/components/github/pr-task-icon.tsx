@@ -607,7 +607,7 @@ function PRTaskIconView({
   const hydrateOnDisclosure = useCallback(() => {
     if (needsHydration) void hydrate();
   }, [hydrate, needsHydration]);
-  const tooltip = useChangeRequestTaskTooltipState(hydrateOnDisclosure);
+  const tooltip = useChangeRequestTaskTooltipState(hydrateOnDisclosure, { hoverable: true });
   const {
     singlePR,
     readyToMerge,

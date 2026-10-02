@@ -12,6 +12,7 @@ import (
 	taskrepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	"github.com/kandev/kandev/internal/task/service"
 	workflowmove "github.com/kandev/kandev/internal/workflow/move"
+	"github.com/kandev/kandev/internal/worktree"
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"go.uber.org/zap"
 )
@@ -77,8 +78,16 @@ func handleNotFound(c *gin.Context, log *logger.Logger, err error, fallback stri
 		c.JSON(http.StatusBadRequest, taskErrorBody(err))
 		return
 	}
-	log.Error("request failed", zap.Error(err))
+	log.Error("request failed", append(cleanupInspectionFields(err), zap.Error(err))...)
 	c.JSON(http.StatusInternalServerError, gin.H{"error": "request failed"})
+}
+
+func cleanupInspectionFields(err error) []zap.Field {
+	var inspection *worktree.CleanupInspectionError
+	if !errors.As(err, &inspection) {
+		return nil
+	}
+	return []zap.Field{zap.String("stage", inspection.Stage), zap.String("reason", inspection.Reason)}
 }
 
 func taskErrorBody(err error) gin.H {
