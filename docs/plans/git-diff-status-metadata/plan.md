@@ -135,3 +135,22 @@ with the existing cache for normal hooks; no tracked dependency files changed.
   a newly created file would legitimately report added and conceal the defect.
 - Preserve native Windows portability by distinguishing grammar fixtures from
   filesystem-specific names or mode operations.
+
+## Hosted remediation
+
+PR #4162 at `d25a678b643cd3d7cf52eec1d32e9e0d92165c4a` exposed two
+`goconst` findings in the full-backend static check (run `37020135230`, job
+`110881458429`). Naming the existing added/renamed status values in the same
+source file addresses the findings without behavior or scope changes. The
+recovered runtime lost the previous waiter handle and temporary receipts; it
+provided no terminal verdict. Delivery continues in the existing task/session
+with focused remediation, current-head hosted evidence and owned cleanup.
+
+Remediation local validation: affected parser/budget race tests
+(`^TestParseCommitDiffWithOptions_StatusMetadata`) passed in 1.055s, handle
+3551 joined; scoped process lint with concurrency 2 and serial runners passed
+with zero issues, handle 7578 joined. A mistaken repository-relative edit
+launched an unchanged focused check first (1.054s, handle 98351 joined); it was
+not GREEN evidence. No caller/API or broad local checks were replayed. Local
+implementation status is complete; delivery still requires current-head hosted
+review/CI, expected-head normal merge and independent merge/cleanup evidence.

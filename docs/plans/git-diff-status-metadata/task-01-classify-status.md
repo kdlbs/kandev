@@ -207,3 +207,22 @@ in the task/session plan; this status records implementation and local validatio
   index/worktree observations, root/empty comparisons, and budgeted output.
 - Specification/public-doc/coverage/diff gates are recorded in the sibling
   manifest. No desktop/mobile flow or broad local suite was added or run.
+
+## Hosted static-check remediation
+
+Exact-head backend run `37020135230`, attempt 1, failed in static-check job
+`110881458429`: full-backend `goconst` reported the new `added` and `renamed`
+return literals. The fix names those existing string values in `git_log.go`;
+no status identity, enum, parser boundary, or caller changes. The hosted failure
+is RED evidence; run only the affected parser race tests and scoped process lint
+before a normal hooked fixup commit. Original passing caller/API checks are not
+replayed. Record actual remediation results here before publishing.
+
+Remediation local validation: affected parser/budget race tests
+(`^TestParseCommitDiffWithOptions_StatusMetadata`) passed in 1.055s, handle
+3551 joined; scoped process lint with concurrency 2 and serial runners passed
+with zero issues, handle 7578 joined. A mistaken repository-relative edit
+launched an unchanged focused check first (1.054s, handle 98351 joined); it was
+not GREEN evidence. No caller/API or broad local checks were replayed. Local
+implementation status is complete; delivery still requires current-head hosted
+review/CI, expected-head normal merge and independent merge/cleanup evidence.

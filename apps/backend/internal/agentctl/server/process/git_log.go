@@ -12,6 +12,11 @@ import (
 	"github.com/kandev/kandev/internal/common/unidiff"
 )
 
+const (
+	fileStatusAdded   = "added"
+	fileStatusRenamed = "renamed"
+)
+
 // GitLogResult represents the result of a git log operation.
 type GitLogResult struct {
 	Success bool             `json:"success"`
@@ -527,13 +532,13 @@ func diffSectionStatus(diffContent string) string {
 			break
 		}
 		if mode, ok := strings.CutPrefix(line, "new file mode "); ok && validDiffFileMode(mode) {
-			return "added"
+			return fileStatusAdded
 		}
 		if mode, ok := strings.CutPrefix(line, "deleted file mode "); ok && validDiffFileMode(mode) {
 			return fileStatusDeleted
 		}
 		if path, ok := strings.CutPrefix(line, "rename from "); ok && path != "" {
-			return "renamed"
+			return fileStatusRenamed
 		}
 	}
 	return fileStatusModified
