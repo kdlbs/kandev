@@ -29,7 +29,7 @@ test.describe("PR switcher changes panel", () => {
     seedData,
     backend,
   }) => {
-    test.setTimeout(120_000);
+    test.setTimeout(180_000);
 
     // --- Seed workflow ---
     const workflow = await apiClient.createWorkflow(seedData.workspaceId, "PR Switcher Workflow");
@@ -205,17 +205,27 @@ test.describe("PR switcher changes panel", () => {
     // --- Click Task A to enter session view ---
     const taskACommitsLoaded = gateway.waitForResponse("github.pr_commits.get");
     await kanban.taskCardInColumn("Auth Fix Task", doneStep.id).click();
-    await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
+    await expect(testPage).toHaveURL((url) => url.pathname === `/t/${taskA.id}`, {
+      timeout: 15_000,
+    });
 
     const session = new SessionPage(testPage);
     await session.waitForLoad();
+    await expect(
+      testPage.getByRole("navigation", { name: "breadcrumb" }).getByRole("button", {
+        name: "Auth Fix Task",
+        exact: true,
+      }),
+    ).toBeVisible({ timeout: 15_000 });
+    await session.waitForChatIdle({ timeout: 45_000 });
 
     // --- Switch to the Changes tab (Files tab is active by default) ---
     await session.clickTab("Changes");
+    await expect(session.changes).toBeVisible({ timeout: 15_000 });
     await taskACommitsLoaded;
 
     // --- Verify Task A PR data ---
-    await expect(session.prFilesSection()).toBeVisible({ timeout: 15_000 });
+    await expect(session.prFilesSection()).toBeVisible({ timeout: 30_000 });
     await session.expandPRChangesSection();
     await session.expandCommitsSection();
     await scrollChangesPanel(session, "top");
@@ -239,11 +249,18 @@ test.describe("PR switcher changes panel", () => {
     await expect(testPage).toHaveURL((url) => url.pathname.includes(taskB.id), {
       timeout: 15_000,
     });
+    await expect(
+      testPage.getByRole("navigation", { name: "breadcrumb" }).getByRole("button", {
+        name: "Dashboard Task",
+        exact: true,
+      }),
+    ).toBeVisible({ timeout: 15_000 });
+    await session.waitForChatIdle({ timeout: 45_000 });
     await session.clickTab("Changes");
     await taskBCommitsLoaded;
 
     // Wait for PR data to load for Task B
-    await expect(session.prFilesSection()).toBeVisible({ timeout: 15_000 });
+    await expect(session.prFilesSection()).toBeVisible({ timeout: 30_000 });
     await session.expandPRChangesSection();
     await session.expandCommitsSection();
     await scrollChangesPanel(session, "top");
@@ -268,6 +285,13 @@ test.describe("PR switcher changes panel", () => {
     await expect(testPage).toHaveURL((url) => url.pathname.includes(taskC.id), {
       timeout: 15_000,
     });
+    await expect(
+      testPage.getByRole("navigation", { name: "breadcrumb" }).getByRole("button", {
+        name: "No PR Task",
+        exact: true,
+      }),
+    ).toBeVisible({ timeout: 15_000 });
+    await session.waitForChatIdle({ timeout: 45_000 });
     await session.clickTab("Changes");
 
     // PR-specific content must not leak from the previous task. The unified
@@ -299,9 +323,16 @@ test.describe("PR switcher changes panel", () => {
     await expect(testPage).toHaveURL((url) => url.pathname.includes(taskA.id), {
       timeout: 15_000,
     });
+    await expect(
+      testPage.getByRole("navigation", { name: "breadcrumb" }).getByRole("button", {
+        name: "Auth Fix Task",
+        exact: true,
+      }),
+    ).toBeVisible({ timeout: 15_000 });
+    await session.waitForChatIdle({ timeout: 45_000 });
     await session.clickTab("Changes");
 
-    await expect(session.prFilesSection()).toBeVisible({ timeout: 15_000 });
+    await expect(session.prFilesSection()).toBeVisible({ timeout: 30_000 });
     await session.expandPRChangesSection();
     await session.expandCommitsSection();
     await scrollChangesPanel(session, "top");
