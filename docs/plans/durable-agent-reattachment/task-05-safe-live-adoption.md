@@ -584,3 +584,56 @@ also passed. No product behavior or CI limit was changed.
 python3 .github/scripts/lint-harness-files.py --all
 python3 scripts/lint-harness-files.test.py
 ```
+
+### Browser fixture isolation follow-up, 2026-10-02
+
+Run `37035996596` passed Windows native tests and cache publication. Its twenty
+browser/container blob reports recorded seven failed attempts across six browser
+shards. All seven were inspected. Navigation task setup now resets only the
+fixture checkout before launching; a new dirty-checkout regression failed before
+this change and passed afterward. Independent branch seeding still preserves a
+dirty checkout. Settings navigation uses an owned, unreferenced profile instead
+of disabling a shared profile with retained dynamic-profile references. Workflow
+preview expectations read current seed metadata. The mobile branch refresh test
+waits for selector closure and popover animation before measuring its touch area.
+Context reset waits for its new response before checking idle and persisted
+settings, rather than accepting the previous turn's idle state.
+
+The unchanged mobile workflow-move case passed three diagnostic runs; the
+unchanged drag-cancellation case passed in the desktop sequence. No production
+change was inferred from those isolated successes. Initial reset coverage also
+passed three runs. Focused ESLint, catalog validation, and full spec lint passed.
+A local animation-wait edit incorrectly selected an ancestor of the popover;
+that setup failure was corrected before final validation. Hosted checks remain
+a publication gate. Native operating-system containment and live harness resume
+matrix limitations recorded above remain unchanged.
+
+```bash
+cd apps/web
+GOCACHE=/tmp/kandev-go-build-preserved-20261001 pnpm e2e:run --host --project chromium tests/task/task-navigation-responsiveness.spec.ts -- --grep 'task setup restores a dirty' --retries=0
+# RED: dirty-checkout assertion failed before the fixture reset.
+GOCACHE=/tmp/kandev-go-build-preserved-20261001 pnpm e2e:run --host --project chromium tests/task/task-navigation-responsiveness.spec.ts -- --grep 'task setup restores a dirty|branch setup leaves a dirty' --retries=0
+# GREEN: both cases passed.
+GOCACHE=/tmp/kandev-go-build-preserved-20261001 E2E_DEBUG=1 pnpm e2e:run --host --project mobile-chrome tests/settings/mobile-workspace-repository-sets.spec.ts tests/task/mobile-create-task-workflow-agent-overrides.spec.ts -- --grep 'contained full-height drawer|routes the selected profile' --repeat-each=3 --retries=0
+# Diagnostic baseline: six cases passed.
+GOCACHE=/tmp/kandev-go-build-preserved-20261001 pnpm e2e:run --host --project chromium tests/kanban/swimlane-height.spec.ts tests/settings/hide-disabled-agent-profiles-nav.spec.ts tests/task/task-create-workflow-step-previews.spec.ts tests/workflow/workflow-step-proceed.spec.ts -- --grep 'live content grows|off by default|scrolls ten|preserves session settings' --retries=0
+# Four cases passed; preview metadata change requires the final run below.
+```
+
+Final fixture validation passed six mobile cases (55.5s) and twelve desktop cases
+(1.8m), with three repetitions and zero retries. Targeted ESLint and Prettier
+checks passed. The original hosted run reached terminal state with 55 passing
+checks and eight failed checks (six browser shards and their two report gates);
+its snapshot was complete with no API errors.
+
+```bash
+cd apps/web
+GOCACHE=/tmp/kandev-go-build-preserved-20261001 pnpm e2e:run --host --project mobile-chrome tests/settings/mobile-workspace-repository-sets.spec.ts tests/task/mobile-task-route-responsiveness.spec.ts -- --grep 'contained full-height drawer|cached conversation' --repeat-each=3 --retries=0
+GOCACHE=/tmp/kandev-go-build-preserved-20261001 pnpm e2e:run --host --project chromium tests/kanban/swimlane-height.spec.ts tests/settings/hide-disabled-agent-profiles-nav.spec.ts tests/task/task-create-workflow-step-previews.spec.ts tests/workflow/workflow-step-proceed.spec.ts -- --grep 'live content grows|off by default|scrolls ten|preserves session settings' --repeat-each=3 --retries=0
+pnpm exec eslint e2e/tests/settings/mobile-workspace-repository-sets.spec.ts e2e/tests/settings/hide-disabled-agent-profiles-nav.spec.ts e2e/tests/task/task-create-workflow-step-previews.spec.ts e2e/tests/task/task-navigation-helpers.ts e2e/tests/task/task-navigation-responsiveness.spec.ts e2e/tests/workflow/workflow-step-proceed.spec.ts
+pnpm exec prettier --check e2e/tests/settings/mobile-workspace-repository-sets.spec.ts e2e/tests/settings/hide-disabled-agent-profiles-nav.spec.ts e2e/tests/task/task-create-workflow-step-previews.spec.ts e2e/tests/task/task-navigation-helpers.ts e2e/tests/task/task-navigation-responsiveness.spec.ts e2e/tests/workflow/workflow-step-proceed.spec.ts
+cd ../..
+python3 scripts/list-docs.py validate
+python3 scripts/lint-spec-files.py --all
+git diff --check
+```

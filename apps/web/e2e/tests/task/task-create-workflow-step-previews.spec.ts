@@ -173,11 +173,12 @@ test("scrolls ten workflow options in both directions without losing the task dr
     extraWorkflowCount: 7,
     longWorkflowSteps: true,
   });
+  const { steps: seedSteps } = await apiClient.listWorkflowSteps(seedData.workflowId);
   const pickerWorkflows = [
     {
       id: seedData.workflowId,
       name: "E2E Workflow",
-      stepNames: seedData.steps.map(({ name }) => name),
+      stepNames: [...seedSteps].sort((a, b) => a.position - b.position).map(({ name }) => name),
     },
     ...scenario.allWorkflows,
   ];

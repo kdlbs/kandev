@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import path from "node:path";
 import { expect, type Page } from "@playwright/test";
-import type { SeedData } from "../../fixtures/test-base";
+import { resetSeedRepositoryCheckout, type SeedData } from "../../fixtures/test-base";
 import type { BackendContext } from "../../fixtures/backend";
 import type { ApiClient } from "../../helpers/api-client";
 import { GitHelper, makeGitEnv, createStandardProfile } from "../../helpers/git-helper";
@@ -70,6 +70,7 @@ export async function seedNavigationTasks(
   backend: BackendContext,
   executorProfileId?: string,
 ) {
+  resetSeedRepositoryCheckout(seed, backend.tmpDir);
   const branch = seedNavigationBranch(backend);
   const profile = await createStandardProfile(api, "navigation-responsiveness");
   const tasks = [];

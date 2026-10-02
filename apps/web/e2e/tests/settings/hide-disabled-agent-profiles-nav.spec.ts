@@ -10,21 +10,21 @@ test.describe("hide disabled agent profiles from left panel navigation", () => {
   test("off by default keeps a disabled profile visible; on hides it; re-enabling reveals it", async ({
     testPage,
     apiClient,
-    seedData,
   }) => {
     test.setTimeout(120_000);
 
     const { agents } = await apiClient.listAgents();
     const agent = getMockAgent(agents);
-    const profile = agent.profiles.find((candidate) => candidate.id === seedData.agentProfileId);
-    if (!profile) throw new Error("Seeded mock profile unavailable");
+    const profile = await apiClient.createAgentProfile(agent.id, "Navigation visibility profile", {
+      model: "mock-fast",
+    });
     // The Settings tree's profile leaf is labelled with the profile name and
     // appends the "Disabled" badge while the profile is disabled — an
     // unanchored regex matches both states.
     const profileLink = new RegExp(escapeRegExp(profile.name));
 
     try {
-      // Disable the seeded profile via the API. The profile editor toggle
+      // Disable this test's unreferenced profile via the API. The profile editor toggle
       // itself is covered by agent-profile-disable.spec.ts.
       await apiClient.updateAgentProfile(profile.id, { enabled: false });
 
@@ -75,8 +75,7 @@ test.describe("hide disabled agent profiles from left panel navigation", () => {
       await settingsTree.getByRole("button", { name: "Expand Mock" }).click();
       await expect(disabledLink).toBeVisible({ timeout: 15_000 });
     } finally {
-      // Always restore so worker-scoped seedData stays valid for later tests.
-      await apiClient.updateAgentProfile(profile.id, { enabled: true }).catch(() => {});
+      await apiClient.deleteAgentProfile(profile.id);
     }
   });
 });

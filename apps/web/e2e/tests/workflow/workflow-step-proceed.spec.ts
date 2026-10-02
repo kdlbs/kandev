@@ -277,6 +277,7 @@ test.describe("Manual proceed to next workflow step", () => {
     await expect(session.stepperStep("Reset")).toHaveAttribute("aria-current", "step", {
       timeout: 15_000,
     });
+    await session.expectChatResponseVisible("reset complete");
     await session.waitForChatIdle({ timeout: 30_000 });
     await expect(modelTrigger).toHaveText("Mock Smart / Max", { timeout: 15_000 });
     await expect(modeTrigger).toHaveText("Plan Mock", { timeout: 15_000 });
