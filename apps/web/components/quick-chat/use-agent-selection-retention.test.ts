@@ -1,3 +1,4 @@
+import { ApiError } from "@/lib/api/client";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { renderHook, act } from "@testing-library/react";
 
@@ -11,21 +12,9 @@ vi.mock("@/components/toast-provider", () => ({
   useToast: () => ({ toast: mockToast }),
 }));
 
-vi.mock("@/lib/api/domains/workspace-api", () => ({
+vi.mock("@/lib/api/domains/workspace-api", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/api/domains/workspace-api")>()),
   startQuickChat: (...args: unknown[]) => mockStartQuickChat(...args),
-  getQuickChatRetainedSessionFromError: (err: unknown) => {
-    if (
-      err &&
-      typeof err === "object" &&
-      "body" in err &&
-      err.body &&
-      typeof err.body === "object"
-    ) {
-      const b = err.body as { task_id?: string; session_id?: string };
-      if (b.task_id && b.session_id) return { taskId: b.task_id, sessionId: b.session_id };
-    }
-    return null;
-  },
 }));
 
 vi.mock("@/lib/agent-profile-recent-use", () => ({
@@ -204,7 +193,7 @@ describe("late quick chat creation with real store actions", () => {
         .openQuickChat("selected-session", WORKSPACE_ID, "agent-b", "chat", "selected-task");
       await act(async () => {
         const body = { task_id: "late-task", session_id: "late-session" };
-        if (failed) pending.reject({ body });
+        if (failed) pending.reject(new ApiError("failed to start session", 500, body));
         else pending.resolve(body);
         await request;
       });

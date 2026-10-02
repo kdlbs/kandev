@@ -350,3 +350,18 @@ describe("late quick chat creation after deletion", () => {
     },
   );
 });
+
+describe("rejected late responses preserve pending opens", () => {
+  it.each(["openQuickChat", "addQuickChatSession"] as const)(
+    "%s preserves the pending selection",
+    (action) => {
+      const store = makeStore();
+      store.getState().openQuickChat(SESSION_A, WORKSPACE_A, "agent-a", "chat", "task-a");
+      store.getState().removeQuickChatSessionsForTask("task-a");
+      const pendingOpen = { workspaceId: WORKSPACE_B, kind: "chat" as const, selectionRevision: 3 };
+      store.setState((state) => ({ quickChat: { ...state.quickChat, pendingOpen } }));
+      store.getState()[action](SESSION_A, WORKSPACE_A, "agent-a", "chat", "task-a");
+      expect(store.getState().quickChat.pendingOpen).toEqual(pendingOpen);
+    },
+  );
+});

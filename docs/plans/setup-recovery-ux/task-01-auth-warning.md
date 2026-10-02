@@ -109,3 +109,9 @@ scope, regressions, results, and Chromium sandbox blocker. Earlier E2E counts
 above are historical implementation results, not validation of the revised
 working tree. Rendered verification subsequently passed on desktop and phone;
 see the plan publication-validation follow-up for commands and fixture corrections.
+
+## PR review remediation
+
+Use amber-700 text on light surfaces and amber-400 in dark mode for the small
+authentication warning label. Keep warning severity and existing recovery actions.
+The plan records the refreshed desktop/phone checks and screenshot publication.

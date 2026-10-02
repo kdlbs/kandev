@@ -41,6 +41,9 @@ connections. Server approval is separate from permission to invoke tools.
 - **AC-AGENTS-MCP-PREP-002.4:** Readiness shall require a native connection/tool-discovery check rather than configuration or token presence alone. Verification shall not invoke business tools. Authentication-required, approval-failed, unavailable and connection-failed outcomes shall remain distinct; raw process output or secrets shall not enter chat, logs or persisted preparation output.
 - **AC-AGENTS-MCP-PREP-002.5:** Fresh launches, resumes and workspace promotion shall apply the same selected profile and trusted source context. Remote/container/unknown executors and different runtime homes shall remain isolated. Cancellation, stale concurrent preparation and unsafe filesystem changes shall not approve or publish a successor's or unrelated definition.
 
+- **AC-AGENTS-MCP-PREP-002.6:** When imported plugin connection verification requires authentication but environment preparation succeeds, the preparation summary, server row, and authentication message shall show a warning rather than an error. The server shall remain explicitly unavailable until authentication and verification succeed; the agent can continue without those tools.
+- **AC-AGENTS-MCP-PREP-002.7:** When an authentication warning coexists with a genuine preparation failure, the failure shall retain error priority. Live updates and persisted preparation results shall produce the same severity, including older authentication-required rows recorded as failed.
+
 ### REQ-AGENTS-MCP-PREP-003: Authentication recovery
 
 Users complete genuinely required provider consent through Kandev rather than
@@ -55,13 +58,7 @@ retained; native Windows login terminals are outside this implementation.
 - **AC-AGENTS-MCP-PREP-003.3:** Recovery shall validate current session, runtime eligibility and selected server identity; unsupported or stale requests shall fail without launching arbitrary commands. Authentication actions shall be available on desktop and phone, with explicit busy/failure feedback.
 - **AC-AGENTS-MCP-PREP-003.4:** A successful native refresh/login shall not be overwritten by older discovered credential data on the next preparation. Removed source credentials shall not be resurrected indefinitely from an unmanaged stale snapshot.
 
-### Setup warning amendment (2026-10-02, draft)
-
-- **AC-AGENTS-MCP-PREP-002.6:** When imported plugin connection verification requires authentication but environment preparation succeeds, the preparation summary, server row, and authentication message shall show a warning rather than an error. The server shall remain explicitly unavailable until authentication and verification succeed; the agent can continue without those tools.
-- **AC-AGENTS-MCP-PREP-002.7:** When an authentication warning coexists with a genuine preparation failure, the failure shall retain error priority. Live updates and persisted preparation results shall produce the same severity, including older authentication-required rows recorded as failed.
 - **AC-AGENTS-MCP-PREP-003.5:** Authentication warnings shall retain Authenticate and Retry connection actions on desktop and phone. Successful verification shall clear the current warning without erasing other servers' failures or warnings.
-
-Delivery: [Setup recovery UX](../../../plans/setup-recovery-ux/plan.md).
 
 ## Out of scope
 
@@ -72,4 +69,5 @@ business operations during readiness checks are excluded.
 
 ## Implementation plans
 
+- [Setup recovery UX](../../../plans/setup-recovery-ux/plan.md)
 - [Agent MCP preparation](../../../plans/agent-mcp-preparation/plan.md)

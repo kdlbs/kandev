@@ -167,3 +167,14 @@ scope, regressions, results, and Chromium sandbox blocker. Earlier E2E counts
 above are historical implementation results, not validation of the revised
 working tree. Rendered verification subsequently passed on desktop and phone;
 see the plan publication-validation follow-up for commands and fixture corrections.
+
+## PR review remediation
+
+Cover post-allocation admission failures through the real orchestrator launch
+path and executor typed-failure transition. Preserve unrelated pending opens when
+rejecting tombstones, scope automatic-recovery suppression to the current session
+or task, and exercise retained errors with the real `ApiError` parser.
+Additional owned files: `apps/backend/internal/orchestrator/quick_chat_launch_failure.go`, `apps/backend/internal/orchestrator/task_operations.go`,
+`apps/backend/internal/orchestrator/quick_chat_launch_failure_test.go`, and
+`apps/backend/internal/orchestrator/executor/launch_failure.go`.
+The plan records final tagged backend and frontend verification results.

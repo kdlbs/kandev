@@ -44,7 +44,7 @@ test.describe("Setup recovery UX (desktop)", () => {
       await expect(actions).toBeVisible();
       const authMessage = actions.getByText("Authentication is required.");
       await expect(authMessage).toBeVisible();
-      await expect(authMessage).toHaveClass(/text-amber-500/);
+      await expect(authMessage).toHaveClass(/text-amber-700/);
 
       await expect(actions.getByTestId("agent-mcp-authenticate")).toBeVisible();
       await expect(actions.getByTestId("agent-mcp-retry")).toBeVisible();

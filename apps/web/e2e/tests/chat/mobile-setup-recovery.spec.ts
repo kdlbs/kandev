@@ -39,7 +39,7 @@ test.describe("Setup recovery UX (mobile)", () => {
       await expect(actions).toBeVisible();
       const authMessage = actions.getByText("Authentication is required.");
       await expect(authMessage).toBeVisible();
-      await expect(authMessage).toHaveClass(/text-amber-500/);
+      await expect(authMessage).toHaveClass(/text-amber-700/);
 
       const authenticate = actions.getByTestId("agent-mcp-authenticate");
       await expect(authenticate).toBeVisible();
@@ -70,7 +70,7 @@ test.describe("Setup recovery UX (mobile)", () => {
     });
 
     await testPage.goto("/");
-    await testPage.waitForLoadState("networkidle");
+    await expect(testPage.getByTestId("app-nav-trigger")).toBeVisible();
     await testPage.getByTestId("app-nav-trigger").tap();
     await testPage.getByTestId("mobile-quick-chat-button").tap();
 

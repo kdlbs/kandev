@@ -193,8 +193,8 @@ function openQuickChat(set: ImmerSet, get: ImmerGet) {
     taskId?: string,
   ) => {
     set((draft) => {
-      draft.quickChat.pendingOpen = null;
       if (!sessionId) {
+        draft.quickChat.pendingOpen = null;
         const existing =
           kind === "config"
             ? findWorkspaceConfigSession(draft.quickChat.sessions, workspaceId)
@@ -224,6 +224,7 @@ function openQuickChat(set: ImmerSet, get: ImmerGet) {
         })
       )
         return;
+      draft.quickChat.pendingOpen = null;
       draft.quickChat.isOpen = true;
       draft.quickChat.activeSessionId = sessionId;
       draft.quickChat.activeKind = "conversation";
@@ -246,7 +247,6 @@ function addQuickChatSession(set: ImmerSet, get: ImmerGet) {
     taskId?: string,
   ) => {
     set((draft) => {
-      draft.quickChat.pendingOpen = null;
       const activeWorkspaceId = draft.quickChat.sessions.find(
         (session) => session.sessionId === draft.quickChat.activeSessionId,
       )?.workspaceId;
@@ -260,6 +260,7 @@ function addQuickChatSession(set: ImmerSet, get: ImmerGet) {
         })
       )
         return;
+      draft.quickChat.pendingOpen = null;
       if (!draft.quickChat.isOpen || !activeWorkspaceId || activeWorkspaceId === workspaceId) {
         draft.quickChat.activeSessionId = sessionId;
         draft.quickChat.activeKind = "conversation";

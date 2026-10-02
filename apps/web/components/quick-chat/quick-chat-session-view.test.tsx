@@ -228,6 +228,26 @@ describe("QuickChatSessionView session resumption", () => {
     });
   });
 
+  it("does not block resumption for another session's active error", () => {
+    sessionRows[session.sessionId] = { task_id: HYDRATED_TASK_ID };
+    useTask.mockReturnValue({ isArchived: false, workspaceId: WORKSPACE_ID });
+    useTaskStatusSummary.mockReturnValue({
+      active_error: {
+        scope: "session",
+        session_id: "other-session",
+        stamp: "other",
+        preview: "failed",
+      },
+    });
+    render(<QuickChatSessionView session={session} />);
+    expect(useSessionResumption).toHaveBeenLastCalledWith(
+      HYDRATED_TASK_ID,
+      session.sessionId,
+      false,
+      { preventAutoResume: false },
+    );
+  });
+
   it("keeps a session bootstrap failure in the transcript-owned path", () => {
     sessionRows[session.sessionId] = { task_id: HYDRATED_TASK_ID };
     useTask.mockReturnValue({ isArchived: false, workspaceId: WORKSPACE_ID });

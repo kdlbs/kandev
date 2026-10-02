@@ -206,9 +206,11 @@ export function AgentMcpPrepareActions({
   return (
     <div className="mt-2 space-y-2" data-testid="agent-mcp-recovery-actions">
       <p
+        role="status"
+        aria-live="polite"
         className={cn(
           "text-xs",
-          isAgentMcpAuthWarning(step) ? "text-amber-500" : "text-destructive",
+          isAgentMcpAuthWarning(step) ? "text-amber-700 dark:text-amber-400" : "text-destructive",
         )}
       >
         {t(agentMcpFailureLabelKey(step.failureCode))}

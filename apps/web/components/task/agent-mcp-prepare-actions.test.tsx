@@ -49,7 +49,7 @@ describe("agent MCP recovery feedback", () => {
     render(<AgentMcpPrepareActions step={step} sessionId="session-1" taskId="task-1" />);
 
     const message = screen.getByText("Authentication is required.");
-    expect(message.className).toContain("text-amber-500");
+    expect(message.className).toContain("text-amber-700");
     expect(screen.getByTestId("agent-mcp-authenticate")).toBeTruthy();
     expect(screen.getByTestId("agent-mcp-retry")).toBeTruthy();
   });

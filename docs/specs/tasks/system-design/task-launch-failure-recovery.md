@@ -26,6 +26,7 @@ task-owned projection.
 | --- | --- |
 | REQ-TASKS-TASK-LAUNCH-FAILURE-RECOVERY-001 | PR gate, initial prompt admission, error projection, recovery actions |
 | REQ-TASKS-TASK-LAUNCH-FAILURE-RECOVERY-002 | Error scope, durable session history, shared task surface |
+| REQ-TASKS-TASK-LAUNCH-FAILURE-RECOVERY-003 | Quick Chat retention amendment, retained response contract, recovery and navigation |
 
 ## PR gate and launch paths
 
@@ -353,3 +354,17 @@ errors, tab navigation during a delayed response, explicit deletion racing a lat
 response, reload/reconnect, and retry identity. Include mixed healthy/failed tabs.
 Public recovery guidance belongs in `docs/public/tasks-and-workflows.md` when
 implementation lands. See [delivery package](../../../plans/setup-recovery-ux/plan.md).
+
+### Quick Chat launch admission coverage
+
+For a newly allocated ephemeral session, the orchestrator retains the allocated
+identity through initial-prompt persistence and later launch admission failures.
+The prepared-launch failure helper invokes the executor's existing conditional typed
+failure transition, including sanitization, recovery actions and primary-aware
+task reconciliation. Already-settled sessions retain their original error history;
+intentional capacity deferral is not a launch failure. The HTTP handler returns
+the retained identity only after the launch path has attempted this bookkeeping.
+
+Automatic recovery considers task-owned errors and this session's active error.
+A sibling session's error does not block this conversation. Rejecting a late
+response for a tombstoned conversation preserves any pending selection request.

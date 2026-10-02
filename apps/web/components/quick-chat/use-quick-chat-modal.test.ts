@@ -1,8 +1,10 @@
+import { ApiError } from "@/lib/api/client";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { renderHook, act } from "@testing-library/react";
 import type { QuickTerminalTab } from "@/lib/state/slices/ui/types";
 
 // Mocks must be declared before importing the hook so vi.mock hoists correctly.
+const LAUNCH_FAILED = "launch failed";
 const mockToast = vi.fn();
 const mockStartQuickChat = vi.fn();
 const mockDeleteTask = vi.fn();
@@ -22,21 +24,9 @@ vi.mock("@/components/toast-provider", () => ({
   useToast: () => ({ toast: mockToast }),
 }));
 
-vi.mock("@/lib/api/domains/workspace-api", () => ({
+vi.mock("@/lib/api/domains/workspace-api", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/api/domains/workspace-api")>()),
   startQuickChat: (...args: unknown[]) => mockStartQuickChat(...args),
-  getQuickChatRetainedSessionFromError: (err: unknown) => {
-    if (
-      err &&
-      typeof err === "object" &&
-      "body" in err &&
-      err.body &&
-      typeof err.body === "object"
-    ) {
-      const b = err.body as { task_id?: string; session_id?: string };
-      if (b.task_id && b.session_id) return { taskId: b.task_id, sessionId: b.session_id };
-    }
-    return null;
-  },
 }));
 
 vi.mock("@/lib/agent-profile-recent-use", () => ({
@@ -563,9 +553,11 @@ describe("useAgentSelection — error handling", () => {
 
   it("opens retained session tab when request fails with retained session identity", async () => {
     const store = makeStore();
-    const errorWithRetainedSession = {
-      body: { error: "launch failed", task_id: "task-retained-1", session_id: "sess-retained-1" },
-    };
+    const errorWithRetainedSession = new ApiError(LAUNCH_FAILED, 500, {
+      error: LAUNCH_FAILED,
+      task_id: "task-retained-1",
+      session_id: "sess-retained-1",
+    });
     mockStartQuickChat.mockRejectedValueOnce(errorWithRetainedSession);
     const { result } = renderHook(() => useAgentSelection(WORKSPACE_ID, store));
 
@@ -604,9 +596,13 @@ describe("useAgentSelection — error handling", () => {
     });
 
     await act(async () => {
-      rejectStart({
-        body: { error: "launch failed", task_id: "task-late-1", session_id: "sess-late-1" },
-      });
+      rejectStart(
+        new ApiError(LAUNCH_FAILED, 500, {
+          error: LAUNCH_FAILED,
+          task_id: "task-late-1",
+          session_id: "sess-late-1",
+        }),
+      );
       await flushPromises();
     });
 

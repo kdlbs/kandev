@@ -184,7 +184,7 @@ They do not validate the revised browser scenarios.
 - `python3 scripts/lint-spec-files.py --all`: passed.
 - `node scripts/validate-public-docs.mjs`: passed, 47 published docs pages.
 - `git diff --check`: passed.
-- Backend tests: `go test ./internal/task/handlers -run 'TestQuickChatFailureRetention|TestHTTPListQuickChatSessions' -count=1`: passed.
+- Backend coverage (rechecked during PR fixup): `go test -trimpath -tags fts5 ./internal/task/handlers -run 'TestQuickChatFailureRetention|TestHTTPListQuickChatSessions' -count=1`: passed.
 - Frontend unit tests: `pnpm exec vitest run lib/prepare/agent-mcp-warning.test.ts components/session/prepare-progress-status.test.ts components/session/prepare-progress.test.tsx components/task/agent-mcp-prepare-actions.test.tsx components/quick-chat/use-quick-chat-modal.test.ts components/quick-chat/quick-chat-setup.test.tsx components/quick-chat/quick-chat-session-view.test.tsx lib/state/slices/ui/quick-chat-sync.test.ts hooks/use-quick-chat-resync.test.ts lib/ws/handlers/tasks-quick-chat.test.ts`: passed (113 tests).
 - E2E tests: desktop `e2e/tests/chat/setup-recovery.spec.ts` (4 tests) and mobile `e2e/tests/chat/mobile-setup-recovery.spec.ts` (2 tests): passed.
 - `pnpm run typecheck`, `pnpm run i18n:check`, `pnpm run i18n:ratchet`: passed.
@@ -236,7 +236,7 @@ Validation at the initial review checkpoint:
 - Targeted frontend run: 26 files, 258 tests passed, including the complete
   `components/quick-chat` folder, preparation/action tests, real-store retention,
   API parser, reconnect/WS, and session resumption tests.
-- `GOCACHE=/tmp/kandev-setup-review-go-cache go test ./internal/task/handlers -run
+- `GOCACHE=/tmp/kandev-setup-review-go-cache go test -trimpath -tags fts5 ./internal/task/handlers -run
   'TestQuickChatFailureRetention|TestHTTPListQuickChatSessions' -count=1`: passed.
 - `pnpm run typecheck`, `pnpm run i18n:check`, and targeted ESLint: passed.
 - The managed desktop E2E run built successfully with a writable Go cache but
@@ -293,3 +293,33 @@ A temporary capture script initially passed an extra fixture argument; after
 correcting that capture-only argument, all three desktop captures passed.
 All three permanent phone scenarios and both refreshed phone captures passed
 on the rebased branch. The five final assets were inspected and compressed.
+
+## PR review remediation
+
+- Real orchestrator coverage reproduced a post-allocation reload failure leaving
+  the session in CREATED. The prepared-launch failure helper now delegates newly
+  allocated Quick Chats to the existing executor typed-failure transition, while
+  already-settled sessions and intentional capacity deferrals keep their ownership.
+  Initial-prompt persistence errors retain the allocated identity for this path.
+- Rejecting tombstoned open/add responses preserves unrelated pending opens.
+  Recovery suppression considers only task errors or the current session's error.
+- Retained-response hook tests use real `ApiError` objects and the production
+  parser. The small auth warning uses readable light/dark amber text and a
+  polite live region. Mobile setup waits for the navigation control to be ready.
+- Acceptance criteria now live inside their owning requirement sections, the
+  design mapping includes requirement 003, and the older repository-context
+  rollback rule explicitly preserves allocated conversations.
+- The focused frontend command passed 261 tests in 27 files; typecheck passed.
+  Backend verification uses `-trimpath -tags fts5`, matching the repository build
+  configuration. Historical backend counts above were rechecked with those flags.
+- Local documentation coverage evaluation now passes against the PR's changed
+  file list and its seven linked plan/specification documents.
+
+Final backend command, from `apps/backend`:
+
+```bash
+GOCACHE=/tmp/kandev-setup-review-go-cache go test -trimpath -tags fts5 ./internal/orchestrator ./internal/orchestrator/executor ./internal/task/handlers -run 'TestQuickChatLaunch|TestHandledLaunchFailure|TestHandleSessionLaunchFailure|TestTransitionLaunchFailure|TestQuickChatFailureRetention|TestHTTPListQuickChatSessions' -count=1
+```
+
+Updated rendered verification and remote exact-head CI/review remain pending
+until the remediation commit is published and checked.

@@ -46,13 +46,15 @@ function resolveTaskArchiveState(
 }
 
 function preventQuickChatAutoResume(
+  sessionId: string,
   taskId: string | null,
   taskSession: TaskSession | null,
   summary: TaskStatusSummary | null | undefined,
 ): boolean {
   return Boolean(
     (taskId && !taskSession) ||
-    summary?.active_error ||
+    (summary?.active_error &&
+      (summary.active_error.scope === "task" || summary.active_error.session_id === sessionId)) ||
     summary?.task_error ||
     readLastAgentError(taskSession?.metadata),
   );
@@ -76,7 +78,12 @@ export function QuickChatSessionView({
   const statusSummary = useTaskStatusSummary(taskId, task?.statusSummary);
   const taskArchiveState = resolveTaskArchiveState(taskId, task, quickChatTaskId);
   const resumption = useSessionResumption(taskId, session.sessionId, taskArchiveState, {
-    preventAutoResume: preventQuickChatAutoResume(taskId, taskSession, statusSummary),
+    preventAutoResume: preventQuickChatAutoResume(
+      session.sessionId,
+      taskId,
+      taskSession,
+      statusSummary,
+    ),
   });
   const isPassthrough = useIsQuickChatPassthrough(session.sessionId);
   const recoveryFeedback = (
