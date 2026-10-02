@@ -247,7 +247,7 @@ Implementation and package checks passed on October 2, 2026:
   were skipped because `KANDEV_TEST_POSTGRES_DSN` was unavailable.
 - Six focused frontend Vitest files passed (100 tests) in the implementation run;
   web typecheck, full lint, `i18n:check`, and `i18n:ratchet` passed. The review
-  follow-up focused set passed 91 tests across five files, and repeated typecheck,
+  follow-up focused set passed 95 tests across six files after rebasing, and repeated typecheck,
   full lint, and both i18n checks passed.
 - Guarded desktop and phone multi-repository E2E scenarios passed, as did the
   existing single-repository dirty-relocation scenarios on both platforms. Each
@@ -263,9 +263,10 @@ Implementation and package checks passed on October 2, 2026:
 Review follow-up: All reported inventory-CAS, stale-execution expectation, and
 post-wait snapshot findings were fixed in the existing work orders. The final
 race-enabled backend regressions, SQL guard, specification validation, and
-backend build passed. Desktop and mobile multi-repository browser regressions
-passed after fresh host builds. PostgreSQL cases compiled but were skipped because
-`KANDEV_TEST_POSTGRES_DSN` was unavailable.
+  backend build passed. Desktop and mobile multi-repository browser regressions
+  passed after fresh host builds. Rebased specification validation passed at 343
+  decisions and 1,309 specifications; 36 linter tests passed. PostgreSQL cases
+  compiled but were skipped because `KANDEV_TEST_POSTGRES_DSN` was unavailable.
 
 ### Documentation coverage preflight command
 

@@ -126,7 +126,13 @@ test.describe("multi-repository managed clone recovery", () => {
       readManagedCloneRecoveryConsumers(backend.tmpDir, beforeEnvironment.id),
     );
 
-    await fixture.session.waitForChatIdle({ timeout: 60_000 });
+    await waitForSessionState(apiClient, {
+      taskId: fixture.task.id,
+      sessionId,
+      expectedState: "WAITING_FOR_INPUT",
+      message: "Waiting for the same desktop session to resume",
+      timeout: 60_000,
+    });
     let afterEnvironment: Awaited<ReturnType<typeof apiClient.getTaskEnvironment>> = null;
     await expect
       .poll(

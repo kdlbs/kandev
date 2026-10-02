@@ -134,7 +134,13 @@ export async function seedMultiRepoManagedCloneRelocationFixture(
     await page.goto(`/t/${task.id}`);
     const session = new SessionPage(page);
     await session.waitForLoad();
-    await session.waitForChatIdle({ timeout: 60_000 });
+    await waitForSessionState(apiClient, {
+      taskId: task.id,
+      sessionId: task.session_id,
+      expectedState: "WAITING_FOR_INPUT",
+      message: "Waiting for the initial multi-repository session turn to finish",
+      timeout: 60_000,
+    });
     const environment = await apiClient.getTaskEnvironment(task.id);
     if (!environment || environment.repos?.length !== 2) {
       throw new Error("multi-repository relocation task did not create two selected worktrees");

@@ -376,7 +376,13 @@ describe("SessionBootstrapRecoveryCard", () => {
   });
 
   it("changes a cancelled legacy restore failure to one relocation action", () => {
-    recoveryActionState.manualRecoveryFailure = { operation: "restore_workspace" };
+    recoveryActionState.manualRecoveryFailure = {
+      operation: "restore_workspace",
+      sessionId: "session-1",
+      errorStamp: "bootstrap-1",
+      requestKey: "task-1\u0000session-1\u0000bootstrap-1",
+      operationId: 1,
+    };
     recoveryActionState.recoveryError = new Error("workspace needs relocation");
     const { rerender } = render(
       <SessionBootstrapRecoveryCard taskId="task-1" sessionId="session-1" error={error} />,

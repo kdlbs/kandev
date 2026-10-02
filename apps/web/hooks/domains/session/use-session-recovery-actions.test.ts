@@ -435,7 +435,7 @@ describe("useSessionRecoveryActions", () => {
     });
 
     expect(result.current.managedCloneRecoveryStamp).toBe(MANAGED_CLONE_RECOVERY_STAMP);
-    expect(result.current.manualRecoveryFailure).toEqual({ operation: "restore_workspace" });
+    expect(result.current.manualRecoveryFailure).toMatchObject({ operation: "restore_workspace" });
     expect(mocks.requestSessionRecover).not.toHaveBeenCalled();
     await act(async () => {
       await result.current.handleManagedCloneRelocation();
@@ -503,7 +503,7 @@ describe("useSessionRecoveryActions", () => {
     });
 
     expect(result.current.managedCloneRecoveryStamp).toBe(MANAGED_CLONE_RECOVERY_STAMP);
-    expect(result.current.manualRecoveryFailure).toEqual({ operation: "restore_workspace" });
+    expect(result.current.manualRecoveryFailure).toMatchObject({ operation: "restore_workspace" });
     expect(result.current.recoveryError?.message).toBe(MANAGED_CLONE_RELOCATION_ERROR);
   });
 

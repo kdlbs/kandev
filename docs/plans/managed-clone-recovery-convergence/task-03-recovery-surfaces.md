@@ -182,9 +182,10 @@ not prove continuation. Count a new response after recovery and a later prompt.
 
 ## Results
 
-The Restore-response hook regression and CANCELLED legacy-to-typed recovery model
-tests passed. All six focused Vitest files passed (100 tests); typecheck, full
-web lint, `i18n:check`, and `i18n:ratchet` passed.
+Initial implementation validation: The Restore-response hook regression and
+CANCELLED legacy-to-typed recovery model tests passed. All six focused Vitest files
+passed (100 tests); typecheck, full web lint, `i18n:check`, and `i18n:ratchet`
+passed.
 
 Both new multi-repository browser scenarios passed: desktop Resume and phone
 Restore-first, one test each. The existing single-repository dirty-relocation
@@ -198,11 +199,15 @@ specifications, and 36 linter tests). The PR documentation coverage preflight an
 `git diff --check` passed. The only validation limitation is unavailable
 PostgreSQL configuration for the Task 02 connection-gated cases.
 
-Review follow-up validation: The latest focused frontend set passed 91 tests across
-five files, including the fixture regression that preserves stopped resumable
+Review follow-up validation: The rebased focused frontend set passed 95 tests across
+six files, including the fixture regression that preserves stopped resumable
 executor rows and refuses seeding while a live process is recorded. Typecheck,
 full web lint, `i18n:check`, and `i18n:ratchet` passed. After a fresh host build,
 the mobile multi-repository Restore-first scenario and desktop multi-repository
 recovery scenario each passed (one test each). The existing single-repository
 desktop and phone cases had passed earlier in the implementation run. PostgreSQL
 execution remains unavailable because `KANDEV_TEST_POSTGRES_DSN` is unset.
+
+The rebased specification catalog validated 343 decisions and 1,309
+specifications; all 36 specification-linter tests passed. Public documentation
+tests passed (62 tests) and all 47 published pages validated.
