@@ -146,7 +146,15 @@ test.describe("Changes panel Git refresh recovery", () => {
         await testPage.keyboard.press("Tab");
       }
       await expect(refreshStatus).toBeFocused();
-      await expect(testPage.getByRole("tooltip", { name: "Loading changes..." })).toBeVisible();
+      const loadingTooltip = testPage.getByRole("tooltip", { name: "Loading changes..." });
+      await expect(loadingTooltip).toBeVisible();
+      await loadingTooltip.evaluate(async (element) => {
+        await Promise.all(
+          element
+            .getAnimations({ subtree: true })
+            .map((animation) => animation.finished.catch(() => undefined)),
+        );
+      });
       await prCapture.screenshot("git-refresh-recovery-desktop-pending", {
         caption: "Complete changed-file membership is visible while Git diff enrichment is held",
       });
