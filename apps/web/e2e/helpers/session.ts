@@ -2,6 +2,8 @@ import { expect, type Page } from "@playwright/test";
 import type { SeedData } from "../fixtures/test-base";
 import type { ApiClient } from "./api-client";
 import type { SessionPage } from "../pages/session-page";
+import type { AppState } from "../../lib/state/store";
+import type { StoreApi } from "zustand";
 import { pollUntil } from "./poll-until";
 
 const DONE_STATES = ["COMPLETED", "WAITING_FOR_INPUT"];
@@ -217,4 +219,23 @@ export async function seedIdleSession(
   await session.waitForChatIdle({ timeout: 30_000 });
   await session.composerReady();
   return session;
+}
+
+export async function waitForSessionGitHydration(page: Page, sessionId: string) {
+  // Initial commit discovery can activate Changes. Select Files after both Git reads settle.
+  await expect
+    .poll(() =>
+      page.evaluate((sessionId) => {
+        const state = (
+          window as Window & { __KANDEV_E2E_STORE__: StoreApi<AppState> }
+        ).__KANDEV_E2E_STORE__.getState();
+        const env = state.environmentIdBySessionId[sessionId] ?? sessionId;
+        return (
+          state.gitStatus.byEnvironmentRepo[env] !== undefined &&
+          state.sessionCommits.byEnvironmentId[env] !== undefined &&
+          state.sessionCommits.loading[env] !== true
+        );
+      }, sessionId),
+    )
+    .toBe(true);
 }

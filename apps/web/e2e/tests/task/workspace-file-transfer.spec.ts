@@ -4,6 +4,7 @@ import { expect, resetSeedRepositoryCheckout, test, type SeedData } from "../../
 import { waitForFiniteAnimations } from "../../helpers/animations";
 import { expectControlHeight } from "../../helpers/control-sizing";
 import { waitForHttp } from "../../helpers/causal-waits";
+import { waitForSessionDone, waitForSessionGitHydration } from "../../helpers/session";
 import {
   GitHelper,
   makeGitEnv,
@@ -32,13 +33,16 @@ async function openFilesPanel(
   taskTitle: string,
 ) {
   const profile = await createStandardProfile(apiClient, profileName);
-  await apiClient.createTaskWithAgent(seedData.workspaceId, taskTitle, profile.id, {
+  const task = await apiClient.createTaskWithAgent(seedData.workspaceId, taskTitle, profile.id, {
     description: "/e2e:simple-message",
     workflow_id: seedData.workflowId,
     workflow_step_id: seedData.startStepId,
     repository_ids: [seedData.repositoryId],
   });
+  expect(task.session_id).toBeTruthy();
+  await waitForSessionDone(apiClient, task.id, task.session_id!, "File transfer fixture settled");
   const session = await openTaskSession(testPage, taskTitle);
+  await waitForSessionGitHydration(testPage, task.session_id!);
   await session.clickTab("Files");
   return session;
 }

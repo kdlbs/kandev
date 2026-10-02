@@ -313,5 +313,66 @@ pnpm exec eslint --max-warnings 0 e2e/tests/git/changes-history-regression.spec.
 Hosted head 31c0f263f9e failed trusted walkthrough context preparation after
 three minutes. The already validated separate PR #4147 fixes that trusted
 main-owned helper; its fresh snapshot has no failed/pending checks or unresolved
-threads. It is not installed on main, and no merge is authorized yet. Current
-head product CI remains in progress; an all-green outcome is not claimed.
+threads. That snapshot is historical: the user subsequently authorized merging only
+PR #4147. Its verified merge commit is d22fbaab1fcdf35add3272c0a6fcafebb4ed8e2b.
+PR #3598 remains open; an all-green outcome is not claimed.
+
+
+### Post-helper main reconciliation, 2026-10-02
+
+Rebased onto main including the authorized helper merge and Windows process
+startup changes. The Windows conflict resolution retains both `HideWindow`
+and suspended startup before Job Object assignment. Existing tests for both
+invariants remain. Windows launcher cross-compilation passed:
+
+```bash
+cd apps/backend
+GOOS=windows GOARCH=amd64 GOCACHE=/tmp/kandev-go-build-preserved-20261001 go test -c -o /tmp/kandev-launcher-conflict-windows-oct2.test.exe ./internal/agent/runtime/agentctl/launcher
+```
+
+The rebase exposed a missing startup-attempt argument in synchronous resume
+failure rollback. Supplying an empty identity to make the old behavior compile
+reproduced an owned attempt left in STARTING. The regression now covers restoration
+of the prior WAITING_FOR_INPUT state and preservation of a successor attempt.
+Passing the current attempt identity fixes rollback while retaining its ownership
+fence. The first green run exposed an incorrect FAILED expectation in the new
+fixture; correcting it to the existing prior-state contract yields a passing
+resume/workspace race suite. Scoped Go lint reports zero issues.
+
+```bash
+cd apps/backend
+GOCACHE=/tmp/kandev-go-build-preserved-20261001 go test -race ./internal/orchestrator/executor -run 'Test.*(Resume|WorkspaceBinding)' -count=1
+GOCACHE=/tmp/kandev-go-build-preserved-20261001 golangci-lint run ./internal/orchestrator/executor/...
+```
+
+Hosted browser failures exposed setup races in file transfer, reused workflow
+sessions, live settings persistence and the Office negative refetch baseline.
+Fixtures now wait for exact session settlement, both initial Git reads, accepted
+configuration writes and initial page hydration. The shared Git readiness helper
+is moved from existing navigation coverage. Original behavior and geometry
+assertions remain; no timeout or retry allowance was increased.
+
+The desktop batch passed twelve cases across four fixtures (three repetitions
+of each), with three failures caused by an incorrect model-write endpoint in the
+new wait. Correcting it to the actual ACP config-option endpoint passed all three
+reset-setting repetitions. Zero-warning targeted ESLint and formatting passed.
+
+```bash
+cd apps/web
+GOCACHE=/tmp/kandev-go-build-preserved-20261001 pnpm e2e:run --host --no-build --project chromium tests/workflow/workflow-step-proceed.spec.ts tests/office/realtime-dashboard.spec.ts tests/task/workspace-file-transfer.spec.ts tests/task/create-task-workflow-agent-overrides.spec.ts tests/task/task-navigation-responsiveness.spec.ts -- --grep 'preserves session settings|does not refetch on cross-workspace|uploads picked files|keeps grouped replacements|Files stays usable' --repeat-each=3 --retries=0
+GOCACHE=/tmp/kandev-go-build-preserved-20261001 pnpm e2e:run --host --no-build --project chromium tests/workflow/workflow-step-proceed.spec.ts -- --grep 'preserves session settings' --repeat-each=3 --retries=0
+```
+
+A fresh mobile build passed all nine session-refresh cases, zero retries.
+The three file-header repetitions exposed an accidentally removed `node:path`
+fixture import. Restoring it preserves directory and filename assertions.
+The corrected file-header rerun passed three repetitions in 29.8 seconds,
+zero retries. Current-head hosted CI remains pending.
+
+```bash
+cd apps/web
+GOCACHE=/tmp/kandev-go-build-preserved-20261001 pnpm e2e:run --host --project mobile-chrome tests/review/mobile-review-file-status.spec.ts tests/session/mobile-session-refresh-efficiency.spec.ts -- --repeat-each=3 --retries=0
+GOCACHE=/tmp/kandev-go-build-preserved-20261001 pnpm e2e:run --host --no-build --project mobile-chrome tests/review/mobile-review-file-status.spec.ts -- --repeat-each=3 --retries=0
+```
+Native Windows/macOS containment smoke and live harness relocation coverage
+remain release evidence limits; cross-compilation does not replace native checks.

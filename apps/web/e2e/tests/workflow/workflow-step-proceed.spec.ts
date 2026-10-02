@@ -248,16 +248,29 @@ test.describe("Manual proceed to next workflow step", () => {
     // Change the live session after launch. These values intentionally differ
     // from the profile defaults so reset coverage exercises the live caches.
     await modelTrigger.click();
+    const modelSaved = waitForHttp(testPage, "POST", /\/set-config-option$/, {
+      predicate: (response) =>
+        response.ok() && response.request().postDataJSON().config_id === "model",
+    });
     await testPage.getByRole("option", { name: /Mock Smart/ }).click();
+    await modelSaved;
     await expect(modelTrigger).toContainText("Mock Smart", { timeout: 5_000 });
     await modelTrigger.click();
     await testPage.getByTestId("config-option-trigger-effort").click();
+    const effortSaved = waitForHttp(testPage, "POST", /\/set-config-option$/, {
+      predicate: (response) => response.ok(),
+    });
     await testPage.getByRole("button", { name: "Max", exact: true }).click();
+    await effortSaved;
     await expect(modelTrigger).toHaveText("Mock Smart / Max", { timeout: 5_000 });
     await testPage.keyboard.press("Escape");
 
     await modeTrigger.click();
+    const modeSaved = waitForHttp(testPage, "POST", /\/set-mode$/, {
+      predicate: (response) => response.ok(),
+    });
     await testPage.getByRole("menuitem", { name: /^Plan Mock/ }).click();
+    await modeSaved;
     await expect(modeTrigger).toHaveText("Plan Mock", { timeout: 5_000 });
 
     await session.proceedNextStepButton().click();

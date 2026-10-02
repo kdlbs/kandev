@@ -10,7 +10,7 @@ import {
   type NavigationResponseGate,
 } from "../../helpers/navigation-response-hold";
 import { SessionPage } from "../../pages/session-page";
-import { waitForSessionDone } from "../../helpers/session";
+import { waitForSessionDone, waitForSessionGitHydration } from "../../helpers/session";
 import type { AppState } from "../../../lib/state/store";
 import type { StoreApi } from "zustand";
 
@@ -140,25 +140,6 @@ export async function showNavigationFiles(page: Page, mobile: boolean) {
   }
 }
 
-async function waitForNavigationGitHydration(page: Page, sessionId: string) {
-  // Initial commit discovery can activate Changes. Select Files after both Git reads settle.
-  await expect
-    .poll(() =>
-      page.evaluate((sessionId) => {
-        const state = (
-          window as Window & { __KANDEV_E2E_STORE__: StoreApi<AppState> }
-        ).__KANDEV_E2E_STORE__.getState();
-        const env = state.environmentIdBySessionId[sessionId] ?? sessionId;
-        return (
-          state.gitStatus.byEnvironmentRepo[env] !== undefined &&
-          state.sessionCommits.byEnvironmentId[env] !== undefined &&
-          state.sessionCommits.loading[env] !== true
-        );
-      }, sessionId),
-    )
-    .toBe(true);
-}
-
 export async function selectNavigationTask(page: Page, title: string, mobile = false) {
   if (mobile) {
     await page.getByTestId("mobile-task-picker-trigger").tap();
@@ -186,7 +167,7 @@ export async function assertProgressiveNavigation(
   const session = new SessionPage(page);
   await session.waitForLoad();
   await session.waitForChatIdle();
-  await waitForNavigationGitHydration(page, a.session_id!);
+  await waitForSessionGitHydration(page, a.session_id!);
   await showNavigationFiles(page, mobile);
   await waitForTreeResponse(gate, initialRequestOffset, a.session_id!, "");
   await expect(session.fileTreeNode(ROOT_FILE)).toBeVisible();
@@ -194,7 +175,7 @@ export async function assertProgressiveNavigation(
   gate.hold((r) => r.action === "workspace.tree.get" && r.payload.path === HELD);
   const reloadRequestOffset = gate.requests.length;
   await page.reload();
-  await waitForNavigationGitHydration(page, a.session_id!);
+  await waitForSessionGitHydration(page, a.session_id!);
   await showNavigationFiles(page, mobile);
   await expect.poll(() => gate.heldCount()).toBeGreaterThan(0);
   await waitForTreeResponse(gate, reloadRequestOffset, a.session_id!, "");
@@ -223,7 +204,7 @@ export async function assertProgressiveNavigation(
   await selectNavigationTask(page, b.title, mobile);
   await expect(page).toHaveURL(new RegExp(`/t/${b.id}$`));
   await session.waitForChatIdle();
-  await waitForNavigationGitHydration(page, b.session_id!);
+  await waitForSessionGitHydration(page, b.session_id!);
   await showNavigationFiles(page, mobile);
   await waitForTreeResponse(gate, taskBRequestOffset, b.session_id!, "");
   await expect(session.fileTreeNode(ROOT_FILE)).toBeVisible();
