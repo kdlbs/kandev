@@ -391,8 +391,6 @@
   "runtimeFailedBody": "{{agent}} 无法激活运行时 {{version}}（原版本：{{previous}}）。此次尝试保留了您的选择。请手动重试或关闭自动更新。",
   "runtimeRunning": "正在准备从 {{previous}} 更新到 {{version}}",
   "runtimeReview": "查看运行时",
-  "runtimeIndicator_one": "{{count}} 个代理运行时更新",
-  "runtimeIndicator_other": "{{count}} 个代理运行时更新",
   "runtimePolicySaveFailed": "无法保存自动更新设置。请重试。",
   "runtimeOtherRegistrations_one": "其他已注册的运行时（{{count}}）",
   "runtimeOtherRegistrations_other": "其他已注册的运行时（{{count}}）",

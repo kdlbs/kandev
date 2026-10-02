@@ -275,16 +275,16 @@ uses the expected npm installation and configured registry. Run `npm config get 
 ### Runtime notifications and automatic updates
 
 Kandev checks enabled, available agent runtimes in the background, including
-native CLIs with a verified release source. Outside Settings, an **agent runtime
-updates** indicator remains visible while a known newer version is available.
-Notifications name the affected runtime and link directly to its row in
+native CLIs with a verified release source. Open **Settings > Agents** to review
+runtime versions and update policies. Notifications name the affected runtime
+and link directly to its row in
 **Settings > Agents > Agent runtime updates**. The existing update-available
 notification preferences apply; repeated notices for the same runtime and version
 are suppressed across reloads.
 
 The **Agent runtime updates** section is at the bottom of **Settings > Agents**,
 after your installed agents, and starts collapsed. Expand it to manage runtime
-policies. Notification and indicator links open the section automatically and
+policies. Notification links open the section automatically and
 reveal their destination. Collapsing the section preserves unsaved policy changes.
 
 The runtime section shows the selected or observed version, latest known version,

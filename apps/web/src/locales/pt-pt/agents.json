@@ -391,8 +391,6 @@
   "runtimeFailedBody": "{{agent}} não conseguiu ativar o runtime {{version}} (anterior: {{previous}}). Esta tentativa preservou a sua seleção. Tente novamente manualmente ou desative as atualizações automáticas.",
   "runtimeRunning": "A preparar de {{previous}} para {{version}}",
   "runtimeReview": "Rever runtime",
-  "runtimeIndicator_one": "{{count}} atualização de runtime de agente",
-  "runtimeIndicator_other": "{{count}} atualizações de runtimes de agentes",
   "runtimePolicySaveFailed": "Não foi possível guardar as atualizações automáticas. Tente novamente.",
   "runtimeOtherRegistrations_one": "Outro runtime registado ({{count}})",
   "runtimeOtherRegistrations_other": "Outros runtimes registados ({{count}})",
