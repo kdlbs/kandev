@@ -3,8 +3,9 @@ status: draft
 system: system-page
 requirements:
   - REQ-SYSTEM-PAGE-STORAGE-MAINTENANCE-001
+  - REQ-SYSTEM-PAGE-STORAGE-MAINTENANCE-006
 created: 2026-07-14
-updated: 2026-08-12
+updated: 2026-10-01
 owners:
   - cfl
 ---
@@ -23,6 +24,7 @@ adds two measurements to the existing category list when implemented.
 | Requirement | Design section |
 | --- | --- |
 | `REQ-SYSTEM-PAGE-STORAGE-MAINTENANCE-001` | [Migrated source detail](#migrated-source-detail) |
+| `REQ-SYSTEM-PAGE-STORAGE-MAINTENANCE-006` | [Managed-cache launch integration](#managed-cache-launch-integration) |
 
 ## Migrated source detail
 
@@ -213,7 +215,7 @@ Retention override:
 
 ### Go build cache
 
-- Enabling managed Go cache changes new host-local task executions to use
+- Successful preparation of an enabled managed Go cache changes new host-local task executions to use
   `<KANDEV_HOME_DIR>/cache/go-build` through an injected absolute `GOCACHE` value. Kandev setup,
   cleanup, shell, agent, test, and build processes for that execution observe the same value.
 - Containerized and remote executors keep an executor-local cache. Kandev does not inject a host
@@ -241,6 +243,90 @@ Retention override:
 - Disabling managed Go cache stops injecting `GOCACHE` into new executions. It does not delete the
   previously managed cache. Scheduled cleanup and a global manual run with no resource selection
   leave it untouched; only a manual run whose non-empty selection includes `go_cache` may rotate it.
+
+### Managed-cache launch integration
+
+This implemented extension satisfies `REQ-SYSTEM-PAGE-STORAGE-MAINTENANCE-006`.
+The storage system owns the setting, provider, and safety contract.
+Task and agent recovery consume this contract without duplicating its requirements.
+The decision is recorded in [optional managed Go cache](../../../decisions/2026-10-01-optional-managed-go-cache.md).
+
+#### Preparation boundary
+
+`gocache.Provider.ExecutionEnvironment` retains strict validation and returns preparation errors.
+`storage.ValidateNoSymlinkPath` remains unchanged.
+The lifecycle integration in `Manager.prepareManagedGoCacheEnvironment` decides whether to omit the optional override.
+It does not resolve a symlink, retry against another managed directory, or grant ownership of a target.
+
+For a new host-local execution, the integration removes previous `managedGoCachePath` and reserved `managed_go_cache_path` metadata.
+Clone metadata before editing a caller-owned map.
+Check the caller context before and after the provider call, including successful or empty results.
+If the caller context ended, return its cancellation or deadline error.
+If `errors.Is` finds provider cancellation or deadline expiry, propagate that wrapped error.
+Other provider errors produce fallback.
+A nonempty relative `GOCACHE` result also produces fallback.
+An empty result is disabled management and produces no warning.
+Successful preparation records one clean absolute path for the execution.
+
+Keep `LaunchRequest.Env` as input during cache selection.
+Remove the helper's eager `req.Env["GOCACHE"]` mutation.
+`buildEnvForExecution` and `resolveStrictEnvironment` already apply `managedGoCachePath` at final environment composition.
+`launchInternal` assigns that final environment to its copied request before preparation and runtime creation.
+This preserves successful precedence and avoids destroying an independently configured request value before a later fallback.
+Update existing helper-level tests to observe the resolved environment and production preparation sequence.
+Do not remove an independent value merely because it equals an earlier managed path.
+Finalized environment copies remain internal to their execution and are not fresh request inputs.
+
+#### Launch, recovery, and promotion
+
+`launchInternal` resolves the cache after its existing-session lookup has selected creation of a new execution.
+An existing workspace-only execution uses its established environment and metadata during `promoteWorkspaceExecution`.
+A request that joins workspace creation through `doCoalescedExecution` uses that execution's decision as well.
+Neither promotion path probes the provider again or mixes a new managed path with the old runtime environment.
+An existing running agent retains the existing duplicate-launch response.
+
+`prepareExecutionEnvironment` constructs a new request and rebuilds repository, executor, and agent profile definitions.
+It uses the same optional preparation helper.
+`prepareExecutionCreateRequest` copies `WorkspaceInfo.Metadata`, removes its old `managed_go_cache_path`, and adds only a current successful result.
+It does not restore cache authority from persisted execution metadata.
+This closes the stale override path used by `processEnvironment` for shell and build commands.
+Keep request input maps, environment definitions, unrelated metadata, and secret approvals intact.
+
+Fresh recovery still passes through `Service.RecoverSession`, `Executor.ResumeSessionWithOptions`, and the backend lifecycle adapter.
+Cache fallback changes no conversation-token, session-admission, archive, or workspace-recovery rules.
+New executions evaluate settings again. Live executions retain their established snapshot.
+Remote/container paths bypass the host provider and discard stale host-managed cache metadata when creating a replacement execution.
+Their independently configured executor-local `GOCACHE` remains unchanged.
+
+#### Diagnostics and maintenance
+
+Emit one `WARN` named `managed Go cache skipped` for each failed preparation decision.
+Use a fixed explanation that launch continues with ordinary environment resolution.
+Use only finite reasons: `preparation_failed` and `invalid_output`.
+Task/session identifiers can provide correlation through existing structured fields.
+Do not attach `zap.Error`, cache paths, raw provider output, or environment values.
+Disabled management, successful preparation, and execution promotion emit no skip warning.
+Cancellation remains an error and emits no fallback warning.
+
+Fallback changes no storage settings, cleanup permissions, or activity-gate behavior.
+Analysis can still report an unsafe cache as unavailable.
+Maintenance still validates ownership, path components, markers, trash, and quarantine at its existing boundaries.
+A launch warning cannot authorize cleanup, adoption, rotation, restore, or deletion through a symlink.
+Go tools can still use an independently configured or inherited symlink path under normal tool semantics.
+That use grants Kandev no maintenance authority.
+
+#### Verification boundaries
+
+Use real temporary-directory providers for adopted-root and ancestor symlink regressions.
+Use deterministic provider errors and non-directory blockers rather than root-dependent permission changes.
+Assert resolved preparation/runtime/process environments, retained independent values, and removal of stale metadata.
+Exercise legacy, strict, and finalized environment consumers through the production launch sequence.
+Use counting providers to prove one decision per execution and no provider call for remote execution or promotion.
+Cover cancellation before, during, and after preparation with channel-controlled fixtures.
+Observe warning count and fields, including a provider error containing sensitive and oversized content.
+Maintenance regressions retain sentinel contents and require that no quarantine intent or path mutation occurred.
+Backend flow coverage runs real recovery dispatch and lifecycle integration with only process transport faked.
+The [fix plan](../../../plans/managed-go-cache-launch-fallback/plan.md) names test files and commands.
 
 ### Agent session temporary data
 

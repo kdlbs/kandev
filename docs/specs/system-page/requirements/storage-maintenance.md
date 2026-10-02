@@ -2,7 +2,7 @@
 status: active
 system: system-page
 created: 2026-07-14
-updated: 2026-09-22
+updated: 2026-10-02
 owners:
   - cfl
 ---
@@ -135,7 +135,34 @@ are outside this extension. Whole-host disk reconciliation remains outside stora
 New categories, sorting controls, saved order preferences, per-file drilldown, cleanup policy changes,
 scan deadline changes, and host-wide disk attribution are outside this extension.
 
+### REQ-SYSTEM-PAGE-STORAGE-MAINTENANCE-006: Optional managed Go cache
+
+**Status:** Active.
+
+**Intent:** An unusable optional cache does not prevent otherwise valid task execution.
+
+#### Acceptance criteria
+
+- **AC-SYSTEM-PAGE-STORAGE-MAINTENANCE-006.1:** When managed Go-cache preparation fails, an otherwise valid host-local launch shall continue without a managed cache override. This includes adopted-root symlinks, ancestor symlinks, settings errors, and filesystem errors.
+- **AC-SYSTEM-PAGE-STORAGE-MAINTENANCE-006.2:** Resume, Start fresh, and workspace recovery shall use the same fallback. A cache-only error shall not create a task or session launch failure.
+- **AC-SYSTEM-PAGE-STORAGE-MAINTENANCE-006.3:** Fallback shall preserve independently configured `GOCACHE` values and normal environment precedence. Without such a value, tools shall retain their ordinary inherited environment and defaults.
+- **AC-SYSTEM-PAGE-STORAGE-MAINTENANCE-006.4:** A valid enabled cache shall supply the same managed `GOCACHE` to preparation, agent, shell, cleanup, test, and build processes within one execution. Fallback shall remain consistent within that execution. Promotion of a live workspace execution shall retain its established cache decision.
+- **AC-SYSTEM-PAGE-STORAGE-MAINTENANCE-006.5:** A new or recovered execution shall not inherit a managed override rejected during its preparation. A later execution shall evaluate the current setting again.
+- **AC-SYSTEM-PAGE-STORAGE-MAINTENANCE-006.6:** Caller cancellation or deadline expiry shall prevent startup. Wrapped provider cancellation or deadline errors shall remain errors rather than cache fallbacks.
+- **AC-SYSTEM-PAGE-STORAGE-MAINTENANCE-006.7:** Disabled management shall add no managed override. Container and remote executions shall receive no host-managed cache override or host cache preparation.
+- **AC-SYSTEM-PAGE-STORAGE-MAINTENANCE-006.8:** Cache fallback shall emit one bounded backend warning per preparation decision. The warning shall explain the skipped managed override without exposing paths, credentials, or raw provider output.
+- **AC-SYSTEM-PAGE-STORAGE-MAINTENANCE-006.9:** Fallback shall preserve saved cache settings and filesystem ownership. Adoption, cleanup, rotation, quarantine, restore, and permanent deletion shall continue rejecting unsafe symlink paths without changing their targets.
+
+#### Exclusions
+
+Host cache repair, automatic adoption of symlink targets, new settings, and new interface controls are outside this extension.
+Fallback does not guarantee that an independently configured cache or a tool's default cache is usable.
+
 ## System design
+
+The implemented optional-cache contract is defined in the
+[managed-cache launch integration](../system-design/storage-maintenance-01.md#managed-cache-launch-integration).
+Its [fix package](../../../plans/managed-go-cache-launch-fallback/plan.md) records completed implementation and verification evidence.
 
 The implemented usage bars and timeout feedback are defined in
 [Storage analysis presentation](../system-design/storage-analysis-presentation.md).

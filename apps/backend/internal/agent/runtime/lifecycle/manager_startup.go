@@ -513,25 +513,46 @@ func (m *Manager) buildEnvForExecution(ctx context.Context, executionID string, 
 }
 
 func (m *Manager) prepareManagedGoCacheEnvironment(ctx context.Context, req *LaunchRequest) error {
-	if req == nil || m.managedGoCache == nil || !isHostLocalExecutor(req.ExecutorType) {
+	if req == nil {
 		return nil
 	}
+	if req.Metadata != nil {
+		managedMetadata := make(map[string]interface{}, len(req.Metadata))
+		for key, value := range req.Metadata {
+			managedMetadata[key] = value
+		}
+		delete(managedMetadata, managedGoCacheMetadataKey)
+		req.Metadata = managedMetadata
+	}
+	req.managedGoCachePath = ""
+	if m.managedGoCache == nil || !isHostLocalExecutor(req.ExecutorType) {
+		return nil
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	env, err := m.managedGoCache.ExecutionEnvironment(ctx)
+	if contextErr := ctx.Err(); contextErr != nil {
+		return contextErr
+	}
 	if err != nil {
-		return fmt.Errorf("prepare managed Go cache: %w", err)
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return fmt.Errorf("prepare managed Go cache: %w", err)
+		}
+		m.logger.Warn("managed Go cache preparation skipped; continuing without managed override",
+			zap.String("reason", "preparation_failed"))
+		return nil
 	}
 	path := env["GOCACHE"]
 	if path == "" {
 		return nil
 	}
 	if !filepath.IsAbs(path) {
-		return fmt.Errorf("managed GOCACHE must be absolute: %q", path)
+		m.logger.Warn("managed Go cache preparation skipped; continuing without managed override",
+			zap.String("reason", "invalid_output"))
+		return nil
 	}
 	path = filepath.Clean(path)
-	if req.Env == nil {
-		req.Env = make(map[string]string)
-	}
-	req.Env["GOCACHE"] = path
 	if req.Metadata == nil {
 		req.Metadata = make(map[string]interface{})
 	}
