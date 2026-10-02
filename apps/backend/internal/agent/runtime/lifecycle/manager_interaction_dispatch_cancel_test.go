@@ -107,7 +107,12 @@ func newDispatchCancelFixture(t *testing.T, options dispatchCancelFixtureOptions
 			t.Fatal("provider completion did not arrive before prompt acknowledgement")
 		}
 	}
-	require.True(t, execution.dispatchedPromptPending.Load())
+	if options.completeBeforePromptAck {
+		require.False(t, execution.dispatchedPromptPending.Load(),
+			"a completion accepted before dispatch acknowledgement must not restore the pending gate")
+	} else {
+		require.True(t, execution.dispatchedPromptPending.Load())
+	}
 	prompt, exists := manager.executionStore.promptLifecycleSnapshot(execution.ID)
 	require.True(t, exists)
 	generation := prompt.generation

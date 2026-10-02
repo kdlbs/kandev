@@ -341,7 +341,33 @@ func (m *Manager) finishPromptCompletion(
 	claim promptCompletionClaim,
 	failureEvidence *PromptAttemptEvidence,
 ) {
+	if claim.locked && event.PromptGeneration != 0 && isError {
+		setProviderError(execution, event.ProviderError)
+		publication, err := m.preparePromptErrorCompletion(execution, event, failureEvidence)
+		if err != nil {
+			m.logger.Error("failed to mark execution as failed after error completion",
+				zap.String("execution_id", execution.ID),
+				zap.Error(err))
+		}
+
+		// Publish the terminal state before waking a waiter or releasing the
+		// dispatch barrier. Admission must observe FAILED/STOPPED after this
+		// generation's completion signal.
+		handleCompleteEventSignalLeased(execution, event, isError)
+		execution.dispatchedPromptPending.Store(false)
+		execution.promptLifecycleMu.Unlock()
+		if publication != nil {
+			m.finishPromptErrorCompletion(publication)
+		}
+		return
+	}
+
 	handleCompleteEventSignalLeased(execution, event, isError)
+	if claim.locked && event.PromptGeneration != 0 {
+		// Finalization and signal delivery are complete, so a later prompt can
+		// pass the dispatch barrier after this lifecycle lease ends.
+		execution.dispatchedPromptPending.Store(false)
+	}
 	if event.PromptGeneration == 0 || isError {
 		if isError {
 			setProviderError(execution, event.ProviderError)

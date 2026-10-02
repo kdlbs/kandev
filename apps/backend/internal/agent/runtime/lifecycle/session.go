@@ -1945,6 +1945,25 @@ func acceptPendingPromptSignal(
 	return nil, true
 }
 
+func (sm *SessionManager) markDispatchedPromptPending(execution *AgentExecution, generation uint64) {
+	execution.promptLifecycleMu.Lock()
+	defer execution.promptLifecycleMu.Unlock()
+
+	if sm.executionStore != nil {
+		snapshot, exists := sm.executionStore.promptLifecycleSnapshot(execution.ID)
+		if !exists || snapshot.execution != execution || snapshot.generation != generation ||
+			snapshot.dispatchedGeneration != generation || snapshot.completedGeneration == generation {
+			return
+		}
+	} else if generation == 0 || execution.promptGeneration != generation ||
+		execution.dispatchedPromptGeneration != generation ||
+		execution.promptCompletionGeneration == generation {
+		return
+	}
+
+	execution.dispatchedPromptPending.Store(true)
+}
+
 func (sm *SessionManager) finishAcceptedPrompt(
 	ctx context.Context,
 	execution *AgentExecution,
@@ -1953,7 +1972,7 @@ func (sm *SessionManager) finishAcceptedPrompt(
 	promptGeneration uint64,
 ) (*PromptResult, error) {
 	if dispatchOnly {
-		execution.dispatchedPromptPending.Store(true)
+		sm.markDispatchedPromptPending(execution, promptGeneration)
 	}
 	if onDispatched != nil {
 		onDispatched()
