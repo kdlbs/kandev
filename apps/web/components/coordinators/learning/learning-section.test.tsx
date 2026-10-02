@@ -112,7 +112,7 @@ describe("LearningSection", () => {
   it("lists reports and shows an unknown cost as unknown", async () => {
     render31();
     const row = await screen.findByTestId("learning-report-d1");
-    expect(row.textContent).toContain("partial");
+    expect(row.textContent).toContain("Partly completed");
     expect(row.textContent).toContain("Cost unknown");
     expect(row.textContent).toContain("22 turns");
   });
@@ -186,8 +186,9 @@ describe("DreamReportDetail", () => {
   it("shows the gate, the considered list as unverified, and retirements", async () => {
     await open();
     expect(screen.getByTestId("learning-item-i2").textContent).toContain(
-      "Gate: refused (thin_evidence)",
+      "Gate: refused (not enough evidence)",
     );
+    expect(screen.getByTestId("learning-item-i2").textContent).toContain("Item 3");
     expect(screen.getByTestId("learning-considered").textContent).toContain(
       "Reported by the agent, not verified",
     );

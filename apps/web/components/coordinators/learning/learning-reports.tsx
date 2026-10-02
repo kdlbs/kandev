@@ -26,7 +26,7 @@ function ReportRow({ dream, onOpen }: { dream: DreamSummary; onOpen: (id: string
       <p className="text-sm">
         <span className="font-medium">{formatDateTime(dream.started_at)}</span>{" "}
         <span data-testid="learning-report-status">
-          {t(`coordinator:learningStatus_${dream.status}`)}
+          {t(`coordinator:learningStatus_${dream.status}`, { defaultValue: dream.status })}
         </span>
         {". "}
         {t("coordinator:learningTurns", { count: dream.turn_count })}
