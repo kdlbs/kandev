@@ -475,3 +475,72 @@ pinning lint. Hosted validation is pending on the next published revision.
 python3 .github/scripts/backend-tests-workflow-contract_test.py
 python3 .github/scripts/lint-action-pinning.py
 ```
+
+### Current-main integration, 2026-10-02
+
+Rebased onto main `341f8941376e29f21b0873ae94a989cf2a595c58`, including
+Changes-loading feedback, Git-read retry behavior, and Go artifact reuse.
+Japanese and Korean catalog conflicts preserve both Git and recovery copy;
+strict duplicate-key validation passed. History fixture reconciliation retains
+exact 28px checks in a 400px pane, dynamic narrow-pane wrapping checks, and
+main's separate residual-spacing assertions. PR-switcher fixture checkout
+isolation remains intact.
+
+Validation: 24 Git-refresh/Changes unit tests across five files passed;
+localization checks, web typecheck, full web lint, scoped fixture lint, and
+Makefile shell checks passed. Three desktop browser cases (compact history,
+residual spacing, PR switching) and two mobile history cases passed with zero
+retries. Existing native runtime/recovery checks from the preceding integration
+remain recorded above; these checks do not replace native OS containment smoke
+or live harness relocation validation.
+
+```bash
+cd apps/web
+pnpm exec vitest run hooks/domains/session/use-session-git-refresh.test.tsx hooks/domains/session/git-status-refresh-coordinator.test.ts components/task/changes-panel-refresh-status.test.tsx components/task/mobile/mobile-changes-panel.test.tsx components/task/changes-panel-header.test.tsx
+pnpm run i18n:check
+pnpm run typecheck
+pnpm run lint
+GOCACHE=/tmp/kandev-go-build-preserved-20261001 pnpm e2e:run --host --project chromium tests/git/changes-history-regression.spec.ts tests/pr/pr-switcher-changes.spec.ts -- --grep 'keeps collapsed history headers compact|preserves residual history spacing|shows correct PR data' --retries=0
+GOCACHE=/tmp/kandev-go-build-preserved-20261001 pnpm e2e:run --host --no-build --project mobile-chrome tests/git/mobile-changes-history-regression.spec.ts tests/git/mobile-changes-panel-refresh-recovery.spec.ts -- --grep 'preserves residual PR spacing|keeps collapsed history|retry' --retries=0
+cd ../..
+scripts/check-make-shells
+```
+
+### Hosted browser follow-ups, 2026-10-02
+
+The preceding hosted head exposed three fixture assumptions. Conditional-read
+coverage compared a 304 with the first 200 despite intervening session metadata
+updates. It now requires that the conditional request's exact validator was
+observed on a full response, and that the 304 returns that same validator.
+The mobile host-model warning fixture now waits for the advertised catalog,
+matching the existing desktop prerequisite. File-transfer fixtures open their
+known task ID directly; the failed artifact showed the task in the sidebar but
+an empty filtered home board.
+
+The complete conditional-read suite passed nine cases across three runs;
+the complete file-transfer suite passed fifteen cases across three runs.
+Retries were disabled. The separate hosted workflow-switch recovery failure
+was inspected and reproduced three times with backend diagnostics: all three
+passed with unchanged lifecycle assertions. Its hosted outcome remains pending;
+no speculative lifecycle change or timeout increase was made.
+
+Go cache integration checks also passed: `go test -trimpath ./internal/testutil`
+and Makefile shell-dispatch checks. A freshly rebuilt mobile Git-recovery test
+passed, preserving pending diff selection through automatic recovery.
+
+```bash
+cd apps/backend
+GOCACHE=/tmp/kandev-go-build-preserved-20261001 go test -trimpath ./internal/testutil
+cd ../web
+GOCACHE=/tmp/kandev-go-build-preserved-20261001 pnpm e2e:run --host --project mobile-chrome tests/git/mobile-changes-panel-refresh-recovery.spec.ts -- --grep 'retries automatically after failure' --retries=0
+GOCACHE=/tmp/kandev-go-build-preserved-20261001 pnpm e2e:run --host --no-build --project chromium tests/session/session-refresh-efficiency.spec.ts -- --repeat-each=3 --retries=0
+GOCACHE=/tmp/kandev-go-build-preserved-20261001 pnpm e2e:run --host --no-build --project chromium tests/task/workspace-file-transfer.spec.ts -- --repeat-each=3 --retries=0
+E2E_DEBUG=1 GOCACHE=/tmp/kandev-go-build-preserved-20261001 pnpm e2e:run --host --no-build --project chromium tests/task/change-workflow.spec.ts -- --grep 'updates the open task stepper after changing workflow' --repeat-each=3 --retries=0
+```
+
+The mobile warning follow-up passed three runs with zero retries:
+
+```bash
+cd apps/web
+GOCACHE=/tmp/kandev-go-build-preserved-20261001 pnpm e2e:run --host --no-build --project mobile-chrome tests/settings/mobile-pr3473-qa-visual-capture.spec.ts -- --repeat-each=3 --retries=0
+```

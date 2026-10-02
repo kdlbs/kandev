@@ -1,16 +1,12 @@
 import fs from "node:fs";
 import path from "node:path";
 import { expect, resetSeedRepositoryCheckout, test, type SeedData } from "../../fixtures/test-base";
+import { SessionPage } from "../../pages/session-page";
 import { waitForFiniteAnimations } from "../../helpers/animations";
 import { expectControlHeight } from "../../helpers/control-sizing";
 import { waitForHttp } from "../../helpers/causal-waits";
 import { waitForSessionDone, waitForSessionGitHydration } from "../../helpers/session";
-import {
-  GitHelper,
-  makeGitEnv,
-  openTaskSession,
-  createStandardProfile,
-} from "../../helpers/git-helper";
+import { GitHelper, makeGitEnv, createStandardProfile } from "../../helpers/git-helper";
 
 /**
  * End-to-end coverage for workspace file transfer.
@@ -41,7 +37,9 @@ async function openFilesPanel(
   });
   expect(task.session_id).toBeTruthy();
   await waitForSessionDone(apiClient, task.id, task.session_id!, "File transfer fixture settled");
-  const session = await openTaskSession(testPage, taskTitle);
+  await testPage.goto(`/t/${task.id}`);
+  const session = new SessionPage(testPage);
+  await session.waitForLoad();
   await waitForSessionGitHydration(testPage, task.session_id!);
   await session.clickTab("Files");
   return session;
