@@ -319,8 +319,23 @@ type mockRepository struct {
 	// lookup failure (e.g. the AC-003.7 re-read-after-conflict arm in
 	// createOfficeSessionWithBoundedRecovery), which the default map lookup
 	// can never produce on its own.
-	getTaskSessionByTaskAndAgentFunc   func(ctx context.Context, taskID, agentInstanceID string) (*models.TaskSession, error)
-	updateTaskSessionStateFunc         func(ctx context.Context, sessionID string, state models.TaskSessionState, errorMessage string) error
+	getTaskSessionByTaskAndAgentFunc      func(ctx context.Context, taskID, agentInstanceID string) (*models.TaskSession, error)
+	updateTaskSessionStateFunc            func(ctx context.Context, sessionID string, state models.TaskSessionState, errorMessage string) error
+	updateTaskSessionWorkspaceBindingFunc func(
+		ctx context.Context,
+		session *models.TaskSession,
+		expected models.TaskSessionState,
+		attemptID string,
+	) (bool, time.Time, error)
+	updateTaskSessionResumeStateIfCurrentAttemptFunc func(
+		ctx context.Context,
+		taskID, sessionID, attemptID string,
+		expected, next models.TaskSessionState,
+		errorMessage string,
+		updateState bool,
+		restoreCredentialSnapshot, credentialSnapshotPresent bool,
+		credentialSnapshot interface{},
+	) (bool, time.Time, error)
 	listActiveTaskSessionsByTaskIDFunc func(ctx context.Context, taskID string) ([]*models.TaskSession, error)
 	// listTaskSessionsFunc, when non-nil, overrides ListTaskSessions
 	// entirely — used to simulate a transient sibling-session read failure
@@ -344,6 +359,7 @@ type mockRepository struct {
 	createTaskSessionCalls                 []*models.TaskSession
 	updateTaskSessionCalls                 []*models.TaskSession
 	updateTaskSessionSnapshots             []*models.TaskSession
+	workspaceBindingWrites                 []workspaceBindingWrite
 	updateTaskSessionIfCurrentCalls        int
 	updateTaskSessionIfCurrentFailOn       int
 	updateTaskSessionIfCurrentFailErr      error
@@ -369,6 +385,14 @@ type mockRepository struct {
 type sharedWorkspaceBindingCall struct {
 	Session *models.TaskSession
 	GroupID string
+}
+
+type workspaceBindingWrite struct {
+	SessionID         string
+	TaskEnvironmentID string
+	WorkspacePath     string
+	ExpectedState     models.TaskSessionState
+	AttemptID         string
 }
 
 // updateTaskStateIfCurrentInCall records one UpdateTaskStateIfCurrentIn
@@ -522,6 +546,95 @@ func (m *mockRepository) UpdateTaskSessionIfCurrentStateWithStartAttempt(
 	}
 	session.Metadata[models.SessionMetaKeyAgentStartAttemptID] = attemptID
 	return m.UpdateTaskSessionIfCurrentState(ctx, session, expected)
+}
+
+func (m *mockRepository) UpdateTaskSessionWorkspaceBindingIfCurrentAttempt(
+	ctx context.Context,
+	session *models.TaskSession,
+	expected models.TaskSessionState,
+	attemptID string,
+) (bool, time.Time, error) {
+	m.mu.Lock()
+	fn := m.updateTaskSessionWorkspaceBindingFunc
+	m.mu.Unlock()
+	if fn != nil {
+		return fn(ctx, session, expected, attemptID)
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	current, ok := m.sessions[session.ID]
+	if !ok {
+		return false, time.Time{}, models.ErrTaskSessionNotFound
+	}
+	if current.TaskID != session.TaskID || current.State != expected {
+		return false, time.Time{}, nil
+	}
+	if attemptID != "" && models.StringFromAny(current.Metadata[models.SessionMetaKeyAgentStartAttemptID]) != attemptID {
+		return false, time.Time{}, nil
+	}
+	now := time.Now().UTC()
+	m.workspaceBindingWrites = append(m.workspaceBindingWrites, workspaceBindingWrite{
+		SessionID:         session.ID,
+		TaskEnvironmentID: session.TaskEnvironmentID,
+		WorkspacePath:     session.WorkspacePath,
+		ExpectedState:     expected,
+		AttemptID:         attemptID,
+	})
+	current.TaskEnvironmentID = session.TaskEnvironmentID
+	current.WorkspacePath = session.WorkspacePath
+	current.UpdatedAt = now
+	session.UpdatedAt = now
+	return true, now, nil
+}
+
+func (m *mockRepository) UpdateTaskSessionResumeStateIfCurrentAttempt(
+	ctx context.Context,
+	taskID, sessionID, attemptID string,
+	expected, next models.TaskSessionState,
+	errorMessage string,
+	updateState bool,
+	restoreCredentialSnapshot, credentialSnapshotPresent bool,
+	credentialSnapshot interface{},
+) (bool, time.Time, error) {
+	m.mu.Lock()
+	fn := m.updateTaskSessionResumeStateIfCurrentAttemptFunc
+	m.mu.Unlock()
+	if fn != nil {
+		return fn(ctx, taskID, sessionID, attemptID, expected, next, errorMessage, updateState,
+			restoreCredentialSnapshot, credentialSnapshotPresent, credentialSnapshot)
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	current, ok := m.sessions[sessionID]
+	if !ok || current == nil || current.TaskID != taskID || current.State != expected ||
+		models.StringFromAny(current.Metadata[models.SessionMetaKeyAgentStartAttemptID]) != attemptID {
+		return false, time.Time{}, nil
+	}
+	now := time.Now().UTC()
+	if updateState {
+		current.State = next
+		current.ErrorMessage = errorMessage
+		if next == models.TaskSessionStateCompleted || next == models.TaskSessionStateFailed ||
+			next == models.TaskSessionStateCancelled {
+			current.CompletedAt = &now
+		} else {
+			current.CompletedAt = nil
+		}
+	}
+	current.UpdatedAt = now
+	if restoreCredentialSnapshot {
+		if current.Metadata == nil {
+			current.Metadata = make(map[string]interface{})
+		} else {
+			current.Metadata = cloneMockSessionMap(current.Metadata)
+		}
+		if credentialSnapshotPresent {
+			current.Metadata[models.SessionMetaKeyGitCredentialSnapshot] = credentialSnapshot
+		} else {
+			delete(current.Metadata, models.SessionMetaKeyGitCredentialSnapshot)
+		}
+	}
+	return true, now, nil
 }
 
 // UpdateTaskSessionStateIfCurrent mirrors the production narrow-CAS

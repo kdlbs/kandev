@@ -1829,6 +1829,7 @@ func NewService(
 		return nil
 	})
 	exec.SetOnSessionStateTransition(s.transitionTaskSessionState)
+	exec.SetOnResumeFailureRollback(s.rollbackResumeFailureIfCurrentAttempt)
 	exec.SetOnBootstrapFailureTransition(s.transitionBootstrapFailure)
 	exec.SetOnBootstrapFailureMessageRepair(s.persistBootstrapFailureMessage)
 	exec.SetOnSessionStarting(func(

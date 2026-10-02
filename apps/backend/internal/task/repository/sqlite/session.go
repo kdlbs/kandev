@@ -1692,6 +1692,123 @@ func (r *Repository) UpdateTaskSessionIfCurrentState(
 	return true, nil
 }
 
+// UpdateTaskSessionWorkspaceBindingIfCurrentAttempt writes only the effective
+// environment binding while the resume lifecycle state and, when present, the
+// agent startup attempt still belong to the caller.
+func (r *Repository) UpdateTaskSessionWorkspaceBindingIfCurrentAttempt(
+	ctx context.Context,
+	session *models.TaskSession,
+	expected models.TaskSessionState,
+	attemptID string,
+) (bool, time.Time, error) {
+	if session == nil || session.ID == "" || session.TaskID == "" {
+		return false, time.Time{}, nil
+	}
+	updatedAt := r.nowUTC()
+	query := `UPDATE task_sessions
+		SET task_environment_id = ?, workspace_path = ?, updated_at = ?
+		WHERE id = ? AND task_id = ? AND state = ?`
+	args := []interface{}{
+		session.TaskEnvironmentID,
+		session.WorkspacePath,
+		updatedAt,
+		session.ID,
+		session.TaskID,
+		expected,
+	}
+	if attemptID != "" {
+		query += " AND " + startAttemptIDPredicate(r.db.DriverName())
+		args = append(args, attemptID)
+	}
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(query), args...)
+	if err != nil {
+		return false, time.Time{}, err
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return false, time.Time{}, err
+	}
+	if rows != 1 {
+		return false, time.Time{}, nil
+	}
+	session.UpdatedAt = updatedAt
+	return true, updatedAt, nil
+}
+
+// UpdateTaskSessionResumeStateIfCurrentAttempt changes resume state and the
+// optional credential snapshot only while the captured startup attempt owns
+// STARTING. It preserves unrelated metadata in the same guarded statement.
+func (r *Repository) UpdateTaskSessionResumeStateIfCurrentAttempt(
+	ctx context.Context,
+	taskID, sessionID, attemptID string,
+	expected, next models.TaskSessionState,
+	errorMessage string,
+	updateState bool,
+	restoreCredentialSnapshot, credentialSnapshotPresent bool,
+	credentialSnapshot interface{},
+) (bool, time.Time, error) {
+	if taskID == "" || sessionID == "" || attemptID == "" {
+		return false, time.Time{}, nil
+	}
+	var snapshotJSON string
+	if restoreCredentialSnapshot && credentialSnapshotPresent {
+		payload, err := json.Marshal(credentialSnapshot)
+		if err != nil {
+			return false, time.Time{}, fmt.Errorf("serialize Git credential snapshot: %w", err)
+		}
+		snapshotJSON = string(payload)
+	}
+
+	now := r.nowUTC()
+	updates := make([]string, 0, 5)
+	args := make([]interface{}, 0, 10)
+	if updateState {
+		updates = append(updates, `state = ?`, `error_message = ?`, `completed_at = ?`)
+		args = append(args, string(next), errorMessage, completedAtForTaskSessionState(next, now))
+	}
+	if restoreCredentialSnapshot {
+		update, updateArgs := resumeCredentialSnapshotRestoreUpdate(
+			r.db.DriverName(), credentialSnapshotPresent, snapshotJSON,
+		)
+		updates = append(updates, update)
+		args = append(args, updateArgs...)
+	}
+	updates = append(updates, `updated_at = ?`)
+	args = append(args, now, sessionID, taskID, string(expected), attemptID)
+	query := `UPDATE task_sessions SET ` + strings.Join(updates, `, `) +
+		` WHERE id = ? AND task_id = ? AND state = ? AND ` + startAttemptIDPredicate(r.db.DriverName())
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(query), args...)
+	if err != nil {
+		return false, time.Time{}, err
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return false, time.Time{}, err
+	}
+	return rows == 1, now, nil
+}
+
+func resumeCredentialSnapshotRestoreUpdate(
+	driverName string,
+	present bool,
+	snapshotJSON string,
+) (string, []interface{}) {
+	switch {
+	case dialect.IsPostgres(driverName) && present:
+		return `metadata = jsonb_set(` + postgresMetadataObject + `, ARRAY[?]::text[], ?::jsonb, true)::text`,
+			[]interface{}{models.SessionMetaKeyGitCredentialSnapshot, snapshotJSON}
+	case dialect.IsPostgres(driverName):
+		return `metadata = (` + postgresMetadataObject + ` #- ARRAY[?]::text[])::text`,
+			[]interface{}{models.SessionMetaKeyGitCredentialSnapshot}
+	case present:
+		return `metadata = json_set(` + sqliteMetadataObject + `, ?, json(?))`,
+			[]interface{}{"$." + models.SessionMetaKeyGitCredentialSnapshot, snapshotJSON}
+	default:
+		return `metadata = json_remove(` + sqliteMetadataObject + `, ?)`,
+			[]interface{}{"$." + models.SessionMetaKeyGitCredentialSnapshot}
+	}
+}
+
 // UpdateTaskSessionIfCurrentStateWithStartAttempt persists STARTING and its
 // process-attempt identity atomically. A later turn may advance updated_at
 // before asynchronous startup reports a failure, so bootstrap ownership must
