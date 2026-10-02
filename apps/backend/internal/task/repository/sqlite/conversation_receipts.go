@@ -303,6 +303,64 @@ func (r *Repository) UpdateMessageWithConversationReceipt(ctx context.Context, m
 	return receipt, nil
 }
 
+// SetMessageMetadataStringIfEmptyWithConversationReceipt stores value only
+// when the current row does not already contain a non-empty string at key.
+// The read, first-write decision, update, and conversation receipt share one
+// session-serialized transaction.
+func (r *Repository) SetMessageMetadataStringIfEmptyWithConversationReceipt(
+	ctx context.Context,
+	messageID, expectedSessionID, key, value string,
+) (*models.Message, *models.ConversationMutationReceipt, bool, error) {
+	tx, base, err := r.beginConversationMutation(ctx, expectedSessionID)
+	if err != nil {
+		return nil, nil, false, err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	message, err := r.readConversationMessageTx(ctx, tx, messageID)
+	if err != nil {
+		return nil, nil, false, err
+	}
+	if message.TaskSessionID != expectedSessionID {
+		return nil, nil, false, fmt.Errorf("message %s moved outside session %s", messageID, expectedSessionID)
+	}
+	if existing, ok := message.Metadata[key].(string); ok && existing != "" {
+		return message, nil, false, nil
+	}
+	if message.Metadata == nil {
+		message.Metadata = map[string]any{}
+	}
+	message.Metadata[key] = value
+	metadataJSON, err := json.Marshal(message.Metadata)
+	if err != nil {
+		return nil, nil, false, fmt.Errorf("serialize message metadata: %w", err)
+	}
+	updatedAt := r.nowUTC()
+	result, err := tx.ExecContext(ctx, tx.Rebind(`
+		UPDATE task_session_messages
+		SET metadata = ?, updated_at = ?
+		WHERE id = ? AND task_session_id = ? AND updated_at = ?
+	`), string(metadataJSON), updatedAt, message.ID, expectedSessionID, message.UpdatedAt)
+	if err != nil {
+		return nil, nil, false, err
+	}
+	if affected, err := result.RowsAffected(); err != nil || affected != 1 {
+		if err != nil {
+			return nil, nil, false, err
+		}
+		return nil, nil, false, fmt.Errorf("update message %s: stale metadata snapshot", message.ID)
+	}
+	message.UpdatedAt = updatedAt
+	receipt := &models.ConversationMutationReceipt{}
+	if err := r.populateConversationMessageReceipt(ctx, tx, receipt, base, message, models.ConversationMutationUpsert); err != nil {
+		return nil, nil, false, err
+	}
+	if err := r.finishConversationMutation(tx); err != nil {
+		return nil, nil, false, err
+	}
+	return message, receipt, true, nil
+}
+
 func (r *Repository) DeleteMessageWithConversationReceipt(ctx context.Context, messageID string) (*models.ConversationMutationReceipt, error) {
 	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {

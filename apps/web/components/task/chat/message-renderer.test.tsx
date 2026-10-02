@@ -151,3 +151,25 @@ it.each(["tool_read", "tool_edit", "tool_search", "tool_call"])(
     view.unmount();
   },
 );
+
+it("suppresses dismissed Git push errors for direct renderer callers", () => {
+  const view = render(
+    <MessageRenderer
+      comment={message({
+        type: "error",
+        content: "Git push failed: remote rejected the branch",
+        metadata: {
+          git_operation_error: true,
+          operation: "push",
+          git_operation_error_dismissed_at: "2026-09-25T10:00:00Z",
+          actions: [
+            { type: "ws_request", label: "Fix", params: { method: "agent.prompt", payload: {} } },
+          ],
+        },
+      })}
+      isTaskDescription={false}
+    />,
+  );
+
+  expect(view.container.firstChild).toBeNull();
+});
