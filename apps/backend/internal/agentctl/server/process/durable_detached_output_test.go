@@ -13,7 +13,9 @@ import (
 )
 
 func TestDetachedDurableProducerExceedsQueue(t *testing.T) {
-	const messageCount = 2501
+	// Exceed the one-slot notification queue without making disk throughput
+	// part of the detached-delivery assertion. Every event still commits to disk.
+	const messageCount = 33
 	ctx := context.Background()
 	journalPath := filepath.Join(t.TempDir(), "delivery.bbolt")
 	deliveryJournal, err := journal.Open(journal.Config{Path: journalPath})

@@ -97,3 +97,22 @@ Completed 2026-09-27.
 - Focused race checks passed: `go test -race ./internal/agentctl/server/process -run '^(TestDetachedDurableProducerExceedsQueue|TestSendUpdateBlockingParksUntilRoomFreesUp|TestForwardUpdatesUsesItsGenerationStopChannel)$' -count=1`; API and journal packages passed the task's full race command.
 - `make -C apps/backend lint`, `python3 scripts/list-docs.py validate`, `python3 scripts/lint-spec-files.py --all`, and `git diff --check` passed.
 - Full task race command still fails in the existing process suite at `TestWorkspaceTracker_StopsWhenGitBroken` (goroutine shutdown timeout). An initial attempt also hit the host's full `/tmp`; rerunning in a private mount namespace removed the temp-directory failures but not that unrelated timeout. The process package's focused new and legacy regressions pass.
+
+
+### Windows CI fixture correction (2026-10-02)
+
+Windows run `36940917348`, job `110632755786`, failed the detached-producer
+fixture after 90 seconds. It had committed 604 events, with zero events in the
+live notification queue. The fixture serialized 2,502 disk commits despite
+using a one-slot notification queue; its deadline measured disk throughput.
+
+The fixture now commits 33 chunks and one terminal event, still exceeding its
+notification queue without a consumer. It retains every exact replay, sequence,
+high-water, payload, and terminal-tail assertion. Production journal durability
+and forwarding code are unchanged.
+
+- `GOCACHE=/tmp/kandev-go-build-preserved-20261001 go test -race -tags fts5
+  ./internal/agentctl/server/process -run
+  'TestDetachedDurableProducerExceedsQueue|TestCancelledDeliveryRetainsOneTerminalForBackendSettlement|TestLateTerminalKeepsItsSubmissionDuringSuccessorDispatch'
+  -count=3` from `apps/backend`: passed.
+- Native Windows execution remains pending on the updated CI head.
