@@ -544,3 +544,32 @@ The mobile warning follow-up passed three runs with zero retries:
 cd apps/web
 GOCACHE=/tmp/kandev-go-build-preserved-20261001 pnpm e2e:run --host --no-build --project mobile-chrome tests/settings/mobile-pr3473-qa-visual-capture.spec.ts -- --repeat-each=3 --retries=0
 ```
+
+### Inventory preservation integration, 2026-10-02
+
+Rebased onto main `14d473d3e0cc747ab3cb9e8455da812a665d6b90`, which adds
+preserved workspace inventory repair. Merged recovery requests retain inventory
+idempotency, receipt propagation, guarded preflight admission, native-only
+inventory repair, explicit context-continuation authority, checkpoint settlement,
+and the independent retry-connection action. PostgreSQL retains main's 20-minute
+package deadline and this branch's 40-minute total setup/test/cleanup budget.
+
+A compile check caught a stale error variable after conflict resolution; it was
+corrected to preserve joined preflight/settlement errors. Validation passed:
+executor and remaining orchestrator subpackage race tests, lifecycle race tests
+(100.893s), orchestrator race tests (123.290s), handlers race tests (6.944s),
+changed-scope orchestrator lint (zero issues), and all ten workflow contract tests.
+Freshly rebuilt browser coverage passed conditional revalidation, workflow
+switching, and file upload (three cases, zero retries).
+
+```bash
+cd apps/backend
+GOCACHE=/tmp/kandev-go-build-preserved-20261001 go test -race ./internal/orchestrator/... ./internal/agent/runtime/lifecycle
+# Re-run packages that failed compilation after correcting the merge variable:
+GOCACHE=/tmp/kandev-go-build-preserved-20261001 go test -race ./internal/orchestrator ./internal/orchestrator/handlers
+GOCACHE=/tmp/kandev-go-build-preserved-20261001 golangci-lint run ./internal/orchestrator/... --new-from-rev=14d473d3e0cc747ab3cb9e8455da812a665d6b90 --timeout=5m
+cd ../web
+GOCACHE=/tmp/kandev-go-build-preserved-20261001 pnpm e2e:run --host --project chromium tests/task/change-workflow.spec.ts tests/task/workspace-file-transfer.spec.ts tests/session/session-refresh-efficiency.spec.ts -- --grep 'updates the open task stepper after changing workflow|uploads picked files|revalidates an unchanged session' --retries=0
+cd ../..
+python3 .github/scripts/backend-tests-workflow-contract_test.py
+```
