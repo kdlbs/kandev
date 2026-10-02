@@ -405,6 +405,7 @@ func (m *Manager) publishCanonicalStreamingContent(
 	messageID string,
 	content string,
 	isAppend bool,
+	diagnostic bool,
 ) {
 	if content == "" {
 		return
@@ -416,6 +417,8 @@ func (m *Manager) publishCanonicalStreamingContent(
 		isAppend:            isAppend,
 		attemptID:           execution.currentStartupAttemptID(),
 		canonicalProjection: true,
+		diagnostic:          diagnostic,
+		promptGeneration:    execution.promptGenerationSnapshot(),
 	})
 }
 

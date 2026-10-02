@@ -48,6 +48,7 @@ func (m *Manager) handleMessageChunkEvent(execution *AgentExecution, event agent
 			event.CanonicalMessageID,
 			event.Text,
 			event.CanonicalMessageAppend,
+			event.ProviderDiagnosticCandidate,
 		)
 		return
 	}
@@ -128,6 +129,7 @@ func (m *Manager) handleReasoningEvent(execution *AgentExecution, event agentctl
 			event.CanonicalMessageID,
 			event.ReasoningText,
 			event.CanonicalMessageAppend,
+			false,
 		)
 		return
 	}

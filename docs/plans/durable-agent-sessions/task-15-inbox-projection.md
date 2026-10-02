@@ -99,3 +99,64 @@ Stable message identities coalesce newline-free chunks, and canonical message mu
 projected cursor commit in one SQL transaction. Projection retains message ordering and
 stale-generation auditability. Focused lifecycle/repository race tests, SQL guard, persistence
 conformance, and lint pass; PostgreSQL execution remains environment-dependent.
+
+### Projected stream evidence correction, 2026-10-02
+
+Hosted PR #3598 shard 7 failed the dynamic unclassified output-evidence scenario
+on all attempts. Two local zero-retry reproductions also settled the session to
+`WAITING_FOR_INPUT` while its route incorrectly remained `active`. The durable
+canonical publisher omitted the lifecycle prompt generation, invalidating the
+orchestrator's current-attempt evidence. It also dropped the provider-diagnostic
+marker that the ordinary publisher retained.
+
+`TestCanonicalStreamingEventsRetainPromptEvidence` first failed for message,
+reasoning, and diagnostic chunks (generation zero), and for the diagnostic marker.
+The canonical coalescer now captures the same prompt generation as ordinary
+streaming and preserves diagnostic provenance. The existing routing admission,
+stale-event, output/effect, and automatic resend fences remain intact.
+The focused lifecycle race regression passed. The original desktop browser case,
+including both output and tool-effect manual-recovery scenarios, passed with:
+
+```bash
+cd apps/web
+GOCACHE=/tmp/kandev-go-build-preserved-20261001 pnpm e2e:run --host --project chromium tests/session/dynamic-unclassified-fallback.spec.ts -- --retries=0
+```
+
+Result: 1/1 passed (all scenarios in the owning case). Temporary diagnostic
+instrumentation and exploratory tests were removed before final validation.
+The lifecycle regression covers projected message identity, generation, reasoning,
+and provider-diagnostic provenance directly.
+
+Mobile recovery passed 1/1 with zero retries:
+
+```bash
+cd apps/web
+GOCACHE=/tmp/kandev-go-build-preserved-20261001 pnpm e2e:run --host --no-build --project mobile-chrome tests/session/mobile-dynamic-unclassified-fallback.spec.ts -- --retries=0
+```
+
+The focused race checks used:
+
+```bash
+cd apps/backend
+GOCACHE=/tmp/kandev-go-build-preserved-20261001 go test -race ./internal/agent/runtime/lifecycle -run '^(TestCanonical.*|TestStreamingEventsCarryActivePromptGeneration|Test.*Flush.*Generation.*|Test.*Unclassified.*)$' -count=1
+```
+
+Result: passed. Desktop and mobile continue to exercise their existing recovery
+controls, without a new UI composition or an automatic resend path.
+
+Broader final validation passed:
+
+```bash
+cd apps/backend
+GOCACHE=/tmp/kandev-go-build-preserved-20261001 go test -race ./internal/agent/runtime/lifecycle ./internal/orchestrator -count=1
+cd ../..
+GOCACHE=/tmp/kandev-go-build-preserved-20261001 make -C apps/backend lint
+python3 scripts/list-docs.py validate
+python3 scripts/lint-spec-files.py --all
+git diff --check
+```
+
+Both complete race suites passed (lifecycle 114.806s; orchestrator 179.127s).
+Backend lint reported zero issues; catalog/specification and whitespace checks
+passed. The owning design records the metadata invariant within its existing
+32 KiB budget. Hosted current-head validation follows publication.

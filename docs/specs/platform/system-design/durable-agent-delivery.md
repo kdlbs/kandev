@@ -262,9 +262,9 @@ They require tests for the current startup-recovery path, not only tests for a n
 
 ## Event protocol
 
-The journal allocates the sequence and records the normalized payload before publication.
-Every durable event carries submission identity where applicable.
-Tool IDs, message IDs, permission-request IDs, and terminal outcomes retain their stable association.
+The journal commits normalized payloads with assigned sequences before publication.
+Events retain applicable submission identity and stable tool, message, permission, and terminal IDs.
+Canonical notifications retain prompt generation and provider-diagnostic provenance.
 
 The backend reconnects using its highest contiguous projected sequence.
 This implementation acknowledges after projection, so acknowledged pruning cannot remove work still needed by the projector.
