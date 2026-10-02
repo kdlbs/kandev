@@ -452,7 +452,7 @@ func (wt *WorkspaceTracker) enrichWithUnstagedDiffBudget(ctx context.Context, up
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	numstatOut, err := wt.runGitOutput(ctx, "diff", "--numstat", baseRef)
+	numstatOut, err := wt.runGitOutput(ctx, "diff", "--numstat", "-z", baseRef)
 	if err != nil {
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			return ctxErr
@@ -468,15 +468,16 @@ func (wt *WorkspaceTracker) enrichWithUnstagedDiffBudget(ctx context.Context, up
 		return nil
 	}
 
-	lines := strings.Split(string(numstatOut), "\n")
-	for _, line := range lines {
+	output := string(numstatOut)
+	for output != "" {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		entry, ok := parseNumstatEntry(line)
+		entry, rest, ok := parseWorkspaceNumstatZ(output)
 		if !ok {
-			continue
+			break
 		}
+		output = rest
 		if err := wt.enrichUnstagedFileDiff(ctx, update, baseRef, prior, budget, entry); err != nil {
 			return err
 		}
@@ -549,7 +550,7 @@ func (wt *WorkspaceTracker) enrichMixedUnstagedDiffsBudget(
 	if !hasMixedFacet {
 		return nil
 	}
-	numstatOut, err := wt.runGitOutput(ctx, "diff", "--numstat")
+	numstatOut, err := wt.runGitOutput(ctx, "diff", "--numstat", "-z")
 	if err != nil {
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			return ctxErr
@@ -566,14 +567,16 @@ func (wt *WorkspaceTracker) enrichMixedUnstagedDiffsBudget(
 		}
 		return nil
 	}
-	for _, line := range strings.Split(string(numstatOut), "\n") {
+	output := string(numstatOut)
+	for output != "" {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		entry, ok := parseNumstatEntry(line)
+		entry, rest, ok := parseWorkspaceNumstatZ(output)
 		if !ok {
-			continue
+			break
 		}
+		output = rest
 		if err := wt.enrichMixedUnstagedFileDiff(ctx, update, prior, budget, entry); err != nil {
 			return err
 		}
@@ -661,7 +664,7 @@ func (wt *WorkspaceTracker) enrichWithStagedDiffBudget(ctx context.Context, upda
 	// For staged files that don't have unstaged changes, we need to get the diff from the index.
 	// The first diff (git diff baseRef) shows worktree vs baseRef, but if a file is staged
 	// and has no additional unstaged changes, its diff won't appear there.
-	stagedOut, err := wt.runGitOutput(ctx, "diff", "--cached", "--numstat", baseRef)
+	stagedOut, err := wt.runGitOutput(ctx, "diff", "--cached", "--numstat", "-z", baseRef)
 	if err != nil {
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			return ctxErr
@@ -683,15 +686,16 @@ func (wt *WorkspaceTracker) enrichWithStagedDiffBudget(ctx context.Context, upda
 		return nil
 	}
 
-	lines := strings.Split(string(stagedOut), "\n")
-	for _, line := range lines {
+	output := string(stagedOut)
+	for output != "" {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		entry, ok := parseNumstatEntry(line)
+		entry, rest, ok := parseWorkspaceNumstatZ(output)
 		if !ok {
-			continue
+			break
 		}
+		output = rest
 		if err := wt.enrichStagedFileDiff(ctx, update, baseRef, prior, budget, entry); err != nil {
 			return err
 		}
