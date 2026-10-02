@@ -1,6 +1,7 @@
 package process
 
 import (
+	"io"
 	"strings"
 	"testing"
 )
@@ -46,5 +47,47 @@ func TestSafeManagedNpmStderrLineRejectsMalformedReleaseAgeDiagnostics(t *testin
 		if got, keep := safeManagedNpmStderrLine(raw); keep || got != "" {
 			t.Fatalf("safeManagedNpmStderrLine(%q) = (%q, %v), want empty and false", raw, got, keep)
 		}
+	}
+}
+
+func TestSafeManagedNpmStderrLineProjectsTransientStartupCodes(t *testing.T) {
+	for _, code := range []string{"ECONNRESET", "ECONNREFUSED", "ETIMEDOUT", "EAI_AGAIN", "E502", "E503", "E504", "EBUSY", "ENOTEMPTY", "EINTEGRITY"} {
+		t.Run(code, func(t *testing.T) {
+			got, keep := safeManagedNpmStderrLine("npm error code " + code)
+			want := "npm error code " + code
+			if !keep || got != want {
+				t.Fatalf("safeManagedNpmStderrLine() = (%q, %v), want (%q, true)", got, keep, want)
+			}
+		})
+	}
+}
+
+func TestSafeManagedNpmStderrLineMarksUnclassifiedCanonicalCodes(t *testing.T) {
+	for _, code := range []string{"EUSAGE", "EBADPLATFORM"} {
+		t.Run(code, func(t *testing.T) {
+			got, keep := safeManagedNpmStderrLine("npm error code " + code)
+			if !keep || got != npmUnknownCodeMarker {
+				t.Fatalf("safeManagedNpmStderrLine() = (%q, %v), want bounded unknown-code marker", got, keep)
+			}
+			if strings.Contains(got, code) {
+				t.Fatalf("safe diagnostic exposed an unclassified npm code: %q", got)
+			}
+		})
+	}
+}
+
+func TestReadStderrProjectsUnclassifiedNpmCodesBeforeProviderSanitizer(t *testing.T) {
+	m := &Manager{
+		stderr: io.NopCloser(strings.NewReader("npm error code EBADPLATFORM\n")),
+		stderrSanitizer: stderrLineSanitizerFunc(func(string) (string, bool) {
+			return "provider failure", true
+		}),
+		logger: newTestLogger(t),
+	}
+	m.wg.Add(1)
+	m.readStderr(make(chan struct{}))
+
+	if got := m.GetRecentStderr(); len(got) != 1 || got[0] != npmUnknownCodeMarker {
+		t.Fatalf("retained stderr = %#v, want one bounded unknown npm-code marker", got)
 	}
 }

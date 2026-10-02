@@ -131,6 +131,55 @@ picker and one conversation scroll area. Both show ordinary recovery after open.
 Test provider readiness independently of workspace-only readiness. Recovery must
 preserve context without resending an interrupted or settled workflow prompt.
 
+## Superseded failed conversation recovery
+
+Criteria 001.13 through 001.15 add a narrow exception to conversation recovery.
+[The decision](../../../decisions/2026-10-02-superseded-failed-session-recovery.md)
+retains explicit concurrent execution and remembered conversation selection.
+
+Extend `autoResumeEligibility` through a small helper in
+`internal/orchestrator/session_open_failed_recovery.go`.
+Keep queue and dynamic-route restrictions authoritative. For a FAILED candidate,
+read `ListTaskSessions` and evaluate the candidate from that current inventory.
+A different primary marks the candidate as superseded. At least one other row
+must satisfy `sessionstate.IsWorking`: STARTING or RUNNING. Ignore nil rows and
+the candidate itself. A failed or idle sibling cannot cancel a working match.
+WAITING_FOR_INPUT alone does not meet this predicate.
+
+If the candidate is primary, ordinary recovery remains eligible. No primary is
+not proof of supersession. Multiple primary rows or a missing candidate are
+ambiguous ownership and suppress passive recovery. Inventory read failure also
+suppresses a non-primary FAILED candidate, using `ownership_unavailable`.
+Use `failed_session_sibling_working` for the confirmed suppression.
+Do not make historical parking metadata part of this decision.
+
+`GetTaskSessionStatus` keeps explicit resumability and workspace information.
+It sets `auto_resume_allowed=false` and the reason for passive suppression.
+`passiveLaunchResponse` returns the existing successful suppressed disposition.
+Recheck through `sessionOpenRecoveryBlockReason` inside the existing task admission
+guard. Reload the candidate there; do not trust its earlier state or primary flag.
+No runtime start, prompt creation, fresh fallback, or queue replacement follows
+suppression. Check deferred `session_open` replay through the same admission path.
+
+This is an admission-time observation, not a task-wide writer lock. It does not
+prevent a later authorized sibling start. Retain existing lock order and keep
+runtime calls outside the task admission guard. Add deterministic race tests
+for a sibling starting or primary ownership changing after status was read.
+
+The web hook already sends `activation_source=session_open` and respects
+`auto_resume_allowed=false`. Preserve explicit `user_action` requests. Verify
+that suppression keeps the historical failure and existing recovery controls.
+Workspace access remains independent. Do not route every status denial through
+a no-workspace path. Browser focus cannot bypass this rule by claiming idle
+suspension without valid provenance.
+
+Desktop tabs and the phone session picker retain their current composition.
+No new banner, confirmation, copy, state enum, configuration, schema, or metric
+is needed. Integration tests assert no runtime launch or prompt mutation.
+Desktop and phone E2E tests assert passive inspection and explicit recovery.
+
+Delivery: [Issue 4152 fix package](../../../plans/superseded-failed-session-recovery/plan.md).
+
 ## Recovery metadata and prompt turns
 
 This section implements criteria 001.10 through 001.12. The

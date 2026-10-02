@@ -183,6 +183,7 @@ func TestManagerProcessExitUsesSanitizedStderr(t *testing.T) {
 	if err := cmd.Start(); err != nil {
 		t.Fatalf("start process: %v", err)
 	}
+	generation := m.beginManagedStartupGeneration()
 	if err := stderrWriter.Close(); err != nil {
 		t.Fatalf("close parent stderr pipe: %v", err)
 	}
@@ -199,6 +200,10 @@ func TestManagerProcessExitUsesSanitizedStderr(t *testing.T) {
 	data := event.Data
 	if data == nil {
 		t.Fatal("event data is nil")
+	}
+	evidence, ok := data["startup_evidence"].(*types.ManagedStartupEvidence)
+	if !ok || evidence.ProcessGeneration != generation || evidence.ExitDisposition != types.ManagedStartupExitOrdinary || !evidence.CollectionComplete {
+		t.Fatalf("startup evidence = %#v, want complete ordinary exit evidence for generation %d", data["startup_evidence"], generation)
 	}
 	recent, ok := data["recent_stderr"].([]string)
 	if !ok || !slices.Equal(recent, []string{"OpenCode provider failure"}) {

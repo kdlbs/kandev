@@ -87,6 +87,7 @@
   "agentBootResuming": "에이전트 {{agentName}} 재개 중",
   "agentBootStarted": "에이전트 {{agentName}} 시작됨",
   "agentBootStarting": "에이전트 {{agentName}} 시작 중",
+  "agentBootRetrying": "{{maxAttempts}}회 중 {{attempt}}회째 에이전트 시작 재시도 중",
   "agentCount_one": "에이전트 {{count}}개",
   "agentCount_other": "에이전트 {{count}}개",
   "agentFallbackName": "에이전트",

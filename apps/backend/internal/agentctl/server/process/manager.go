@@ -128,10 +128,11 @@ type Manager struct {
 	exitErr            atomic.Value // error
 
 	// Stderr buffering for error context
-	stderrBuffer    []string
-	stderrMu        sync.RWMutex
-	stderrConsumer  adapter.StderrLineConsumer
-	stderrSanitizer adapter.StderrLineSanitizer
+	stderrBuffer          []string
+	stderrBufferTruncated bool
+	stderrMu              sync.RWMutex
+	stderrConsumer        adapter.StderrLineConsumer
+	stderrSanitizer       adapter.StderrLineSanitizer
 
 	// Workspace tracker for git status and file changes
 	workspaceTracker *WorkspaceTracker
@@ -290,6 +291,10 @@ type Manager struct {
 	lifetimeCtx           context.Context
 	lifetimeCancel        context.CancelFunc
 	mainReapPending       atomic.Bool
+	startupEvidenceMu     sync.Mutex
+	startupGeneration     uint64
+	startupEvidence       *types.ManagedStartupEvidence
+	startupEvidenceDone   chan struct{}
 	// stopChClosed guards close(stopCh), which is the only part of teardown
 	// that is not naturally idempotent. It is reset wherever stopCh itself is
 	// created so the flag always describes the current channel — a Start that
@@ -1345,12 +1350,14 @@ func (m *Manager) Start(ctx context.Context) error {
 		return err
 	}
 
+	m.ClearStderrBuffer()
 	// Start the subprocess now that pipes are connected
 	if err := m.cmd.Start(); err != nil {
 		_ = m.closeStderrPipe()
 		m.status.Store(StatusError)
 		return formatAgentStartError(err, m.cfg.AgentEnv)
 	}
+	processGeneration := m.beginManagedStartupGeneration()
 	if err := m.closeStderrWriter(); err != nil {
 		m.logger.Debug("failed to close parent stderr pipe", zap.Error(err))
 	}
@@ -1390,7 +1397,7 @@ func (m *Manager) Start(ctx context.Context) error {
 	stderrDone := make(chan struct{})
 	m.wg.Add(2)
 	go m.readStderr(stderrDone)
-	go m.waitForExit(stderrDone)
+	go m.waitForExitGeneration(stderrDone, processGeneration)
 
 	// Forward adapter updates to our channel
 	m.wg.Add(1)
@@ -2640,12 +2647,12 @@ func (m *Manager) readStderr(stderrDone chan<- struct{}) {
 			m.stderrConsumer.ConsumeStderrLine(rawLine)
 		}
 
-		line, keep := rawLine, true
-		if m.stderrSanitizer != nil {
-			line, keep = m.stderrSanitizer.SanitizeStderrLine(rawLine)
-		}
+		line, keep := safeManagedNpmStderrLine(rawLine)
 		if !keep {
-			line, keep = safeManagedNpmStderrLine(rawLine)
+			line, keep = rawLine, true
+			if m.stderrSanitizer != nil {
+				line, keep = m.stderrSanitizer.SanitizeStderrLine(rawLine)
+			}
 		}
 		if !keep || line == "" {
 			continue
@@ -2661,17 +2668,19 @@ func (m *Manager) readStderr(stderrDone chan<- struct{}) {
 	}
 }
 
-func (m *Manager) waitForStderrDrain(stderrDone <-chan struct{}) {
+func (m *Manager) waitForStderrDrain(stderrDone <-chan struct{}) bool {
 	if stderrDone == nil {
-		return
+		return false
 	}
 	timer := time.NewTimer(processStderrDrainTimeout)
 	defer timer.Stop()
 	select {
 	case <-stderrDone:
+		return true
 	case <-timer.C:
 		m.logger.Warn("timed out waiting for agent stderr to drain")
 		_ = m.closeStderrReader()
+		return false
 	}
 }
 
@@ -2694,6 +2703,7 @@ func (m *Manager) appendStderr(line string) {
 	if len(m.stderrBuffer) >= defaultStderrBufferSize {
 		// Ring buffer: drop oldest line
 		m.stderrBuffer = m.stderrBuffer[1:]
+		m.stderrBufferTruncated = true
 	}
 	m.stderrBuffer = append(m.stderrBuffer, cleanLine)
 }
@@ -2708,15 +2718,28 @@ func (m *Manager) GetRecentStderr() []string {
 	return result
 }
 
+func (m *Manager) managedStartupStderrSnapshot() ([]string, bool) {
+	m.stderrMu.RLock()
+	defer m.stderrMu.RUnlock()
+	result := make([]string, len(m.stderrBuffer))
+	copy(result, m.stderrBuffer)
+	return result, !m.stderrBufferTruncated
+}
+
 // ClearStderrBuffer clears the stderr buffer (e.g., after successful operation)
 func (m *Manager) ClearStderrBuffer() {
 	m.stderrMu.Lock()
 	defer m.stderrMu.Unlock()
 	m.stderrBuffer = nil
+	m.stderrBufferTruncated = false
 }
 
 // waitForExit waits for the process to exit
 func (m *Manager) waitForExit(stderrDone <-chan struct{}) {
+	m.waitForExitGeneration(stderrDone, m.ProcessGeneration())
+}
+
+func (m *Manager) waitForExitGeneration(stderrDone <-chan struct{}, generation uint64) {
 	defer m.wg.Done()
 	defer close(m.doneCh)
 
@@ -2726,9 +2749,12 @@ func (m *Manager) waitForExit(stderrDone <-chan struct{}) {
 	err := m.cmd.Wait()
 	// Wait has observed process exit; now bound the reader drain in case a child
 	// process inherited the stderr writer and kept the pipe open.
-	m.waitForStderrDrain(stderrDone)
+	stderrComplete := m.waitForStderrDrain(stderrDone)
 	_ = m.closeStderrReader()
 	intentionalStop := m.Status() == StatusStopping
+	recentStderr, stderrRetainedComplete := m.managedStartupStderrSnapshot()
+	evidence := newManagedStartupEvidence(generation, err, intentionalStop, stderrComplete, stderrRetainedComplete, recentStderr)
+	m.recordManagedStartupEvidence(evidence)
 
 	switch {
 	case intentionalStop:
@@ -2742,7 +2768,6 @@ func (m *Manager) waitForExit(stderrDone <-chan struct{}) {
 			m.exitCode.Store(int32(exitCode))
 		}
 		// Include recent stderr for better error diagnostics
-		recentStderr := m.GetRecentStderr()
 		m.logger.Error("agent process exited with error",
 			zap.Error(err),
 			zap.Int("exit_code", exitCode),
@@ -2764,8 +2789,10 @@ func (m *Manager) waitForExit(stderrDone <-chan struct{}) {
 			Type:  adapter.EventTypeError,
 			Error: errorMsg,
 			Data: map[string]any{
-				"exit_code":     exitCode,
-				"recent_stderr": recentStderr,
+				"exit_code":          exitCode,
+				"recent_stderr":      recentStderr,
+				"process_generation": generation,
+				"startup_evidence":   evidence,
 			},
 		})
 	default:

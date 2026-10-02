@@ -2993,7 +2993,7 @@ func TestClassifyManagedRuntimeNpmStartFailureUsesStructuredError(t *testing.T) 
 		Details: "npm error code ETARGET\nnpm error notarget No matching version found for managed-acp@1.2.3",
 	})
 
-	classified := classifyManagedRuntimeNpmStartFailure(err)
+	classified := classifyManagedRuntimeStartupFailure(err)
 	if classified == nil {
 		t.Fatal("expected structured npm startup error to classify")
 	}
@@ -3008,22 +3008,34 @@ func TestClassifyManagedRuntimeNpmStartFailureUsesStructuredError(t *testing.T) 
 		Code:    routingerr.CodeAgentRuntime,
 		Details: "sanitized runtime failure",
 	})
-	if classifyManagedRuntimeNpmStartFailure(generic) != nil {
+	if classifyManagedRuntimeStartupFailure(generic) != nil {
 		t.Fatal("generic structured startup failure must not use the npm recovery card")
 	}
 
-	if classifyManagedRuntimeNpmStartFailure(errors.New(
+	if classifyManagedRuntimeStartupFailure(errors.New(
 		"npm error code ETARGET\nnpm error notarget No matching version found for managed-acp@1.2.3",
 	)) != nil {
 		t.Fatal("unstructured npm text must not select the managed runtime recovery card")
 	}
 
-	policy := classifyManagedRuntimeNpmStartFailure(fmt.Errorf("failed to initialize ACP: %w", &routingerr.ManagedRuntimeStartupError{
+	policy := classifyManagedRuntimeStartupFailure(fmt.Errorf("failed to initialize ACP: %w", &routingerr.ManagedRuntimeStartupError{
 		Code:    routingerr.Code("managed_runtime_npm_policy"),
 		Details: "npm error code ETARGET\nnpm error notarget No matching version found with a date before <release-date>",
 	}))
 	if policy == nil || policy.Code != routingerr.Code("managed_runtime_npm_policy") {
 		t.Fatalf("policy startup failure = %#v, want managed runtime policy classification", policy)
+	}
+
+	startup := classifyManagedRuntimeStartupFailure(fmt.Errorf("failed to initialize ACP: %w", &routingerr.ManagedRuntimeStartupError{
+		Code:    routingerr.CodeManagedRuntimeStartup,
+		Details: "reason=unexpected_process_exit attempts=2",
+	}))
+	if startup == nil || startup.Code != routingerr.CodeManagedRuntimeStartup ||
+		startup.RawExcerpt != "reason=unexpected_process_exit attempts=2" || startup.AutoRetryable || startup.FallbackAllowed {
+		t.Fatalf("managed startup classification = %#v, want exact safe details without generic recovery", startup)
+	}
+	if !isManagedRuntimeStartupFailureCode(string(routingerr.CodeManagedRuntimeStartup)) {
+		t.Fatal("managed startup code must route through managed-runtime recovery")
 	}
 }
 

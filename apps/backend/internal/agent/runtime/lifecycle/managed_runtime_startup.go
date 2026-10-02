@@ -3,13 +3,17 @@ package lifecycle
 import (
 	"context"
 	"errors"
+	"math/rand"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/kandev/kandev/internal/agent/agents"
+	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
 	agentctltypes "github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/agentruntime"
+	"github.com/kandev/kandev/internal/common/npmresolution"
 	"github.com/kandev/kandev/pkg/api/v1"
 	"go.uber.org/zap"
 )
@@ -18,21 +22,59 @@ const managedRuntimeStartupStderrTimeout = 2 * time.Second
 
 const managedRuntimeStartupSettleDelay = 500 * time.Millisecond
 
+const (
+	managedRuntimeStartupRecoveryBudget = 90 * time.Second
+	managedRuntimeStartupBackoff        = 2 * time.Second
+	managedRuntimeStartupJitter         = time.Second
+)
+
+func managedRuntimeStartupDelay(jitter time.Duration) time.Duration {
+	if jitter < 0 {
+		jitter = 0
+	}
+	if jitter >= managedRuntimeStartupJitter {
+		jitter = managedRuntimeStartupJitter - time.Nanosecond
+	}
+	return managedRuntimeStartupBackoff + jitter
+}
+
+func managedRuntimeStartupRecoveryContext(parent context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(parent, managedRuntimeStartupRecoveryBudget)
+}
+
+func (m *Manager) waitManagedRuntimeStartupBackoff(ctx context.Context) error {
+	jitter := time.Duration(rand.Int63n(int64(managedRuntimeStartupJitter)))
+	delay := managedRuntimeStartupDelay(jitter)
+	if m.startupRecoveryDelay != nil {
+		delay = m.startupRecoveryDelay()
+	}
+	if delay <= 0 {
+		return managedRuntimeRecoveryAborted(ctx, m)
+	}
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-timer.C:
+		return managedRuntimeRecoveryAborted(ctx, m)
+	case <-ctx.Done():
+		if cause := context.Cause(ctx); cause != nil {
+			return cause
+		}
+		return ctx.Err()
+	}
+}
+
 // managedRuntimeNpmStartupFailure captures only the bounded stderr needed to
 // classify an ACP initialization failure. The command is never built from
 // this data.
 func (m *Manager) managedRuntimeNpmStartupFailure(
 	ctx context.Context,
+	client *agentctl.Client,
 	execution *AgentExecution,
 	initErr error,
 	packageSpec string,
 ) *routingerr.Error {
-	if execution == nil || initErr == nil {
-		return nil
-	}
-	client, release := execution.AcquireAgentCtlClient()
-	defer release()
-	if client == nil {
+	if execution == nil || initErr == nil || client == nil {
 		return nil
 	}
 	stderrCtx, cancel := context.WithTimeout(ctx, managedRuntimeStartupStderrTimeout)
@@ -65,7 +107,25 @@ func managedRuntimeRecoveryAborted(ctx context.Context, m *Manager) error {
 	return nil
 }
 
-func (m *Manager) updateExecutionFailure(executionID, message, code, details string) {
+type managedRuntimeStartupFailureMetadata struct {
+	reason   string
+	attempts int
+	npmCode  string
+}
+
+type managedRuntimeRetryFailurePhase string
+
+const (
+	managedRuntimeRetryFailureNone          managedRuntimeRetryFailurePhase = ""
+	managedRuntimeRetryFailureProcessSetup  managedRuntimeRetryFailurePhase = "process_setup"
+	managedRuntimeRetryFailureACPInitialize managedRuntimeRetryFailurePhase = "acp_initialize"
+	managedRuntimeRetryFailureSessionSetup  managedRuntimeRetryFailurePhase = "session_setup"
+)
+
+func (m *Manager) updateExecutionFailure(
+	executionID, message, code, details string,
+	startup managedRuntimeStartupFailureMetadata,
+) {
 	if m.executionStore == nil {
 		return
 	}
@@ -73,6 +133,9 @@ func (m *Manager) updateExecutionFailure(executionID, message, code, details str
 		execution.ErrorMessage = message
 		execution.FailureCode = code
 		execution.FailureDetails = details
+		execution.StartupFailureReason = startup.reason
+		execution.StartupFailureAttempts = startup.attempts
+		execution.StartupFailureNPMCode = startup.npmCode
 		execution.Status = v1.AgentStatusFailed
 	})
 }
@@ -82,41 +145,115 @@ func (m *Manager) publishManagedRuntimeStartupFailure(
 	message string,
 	code routingerr.Code,
 	details string,
+	startup managedRuntimeStartupFailureMetadata,
 	cause error,
 ) error {
-	m.updateExecutionFailure(execution.ID, message, string(code), details)
+	m.updateExecutionFailure(execution.ID, message, string(code), details, startup)
 	return &routingerr.ManagedRuntimeStartupError{
-		Code:    code,
-		Details: details,
-		Cause:   cause,
+		Code:     code,
+		Details:  details,
+		Reason:   startup.reason,
+		Attempts: startup.attempts,
+		NPMCode:  startup.npmCode,
+		Cause:    cause,
 	}
 }
 
 type managedRuntimeStartupRetry struct {
-	preferOnlineArgs []string
-	packageSpec      string
-	failureCode      routingerr.Code
-	failureDetails   string
+	retryArgs       []string
+	failureCode     routingerr.Code
+	failureReason   string
+	failureNPMCode  string
+	failureEvidence string
+	terminal        bool
 }
 
-func managedRuntimeRetryFailureClassification(
-	initialCode routingerr.Code,
-	initialDetails string,
-	retryErr error,
-	initializationFailed bool,
-	second *routingerr.Error,
-) (routingerr.Code, string) {
-	if retryErr == nil {
-		return initialCode, initialDetails
+func managedRuntimeStartupFailureDetails(reason string, attempts int, evidence string) string {
+	details := "reason=" + reason + " attempts=" + strconv.Itoa(attempts)
+	if evidence != "" {
+		details += "\n" + evidence
 	}
-	if !initializationFailed || second == nil {
-		return routingerr.CodeAgentRuntime, routingerr.Sanitize(retryErr.Error())
+	return details
+}
+
+func managedRuntimeStartupRetryForLegacyClassification(
+	classification *routingerr.Error,
+	preferOnlineArgs []string,
+) (*managedRuntimeStartupRetry, bool) {
+	if classification == nil {
+		return nil, false
 	}
-	details := second.RawExcerpt
-	if details == "" {
-		details = routingerr.Sanitize(retryErr.Error())
+	switch classification.Code {
+	case routingerr.CodeManagedRuntimeNpmPolicy:
+		return &managedRuntimeStartupRetry{
+			failureCode:     classification.Code,
+			failureReason:   "npm_release_policy",
+			failureEvidence: classification.RawExcerpt,
+			terminal:        true,
+		}, true
+	case routingerr.CodeManagedRuntimeNpmResolution:
+		return &managedRuntimeStartupRetry{
+			retryArgs:       preferOnlineArgs,
+			failureCode:     classification.Code,
+			failureReason:   "npm_resolution",
+			failureNPMCode:  "ETARGET",
+			failureEvidence: classification.RawExcerpt,
+		}, true
+	default:
+		return nil, false
 	}
-	return second.Code, details
+}
+
+func managedRuntimeStartupRetryForEvidence(
+	evidence *agentctltypes.ManagedStartupEvidence,
+	classification *routingerr.Error,
+	preferOnlineArgs, originalArgs []string,
+) *managedRuntimeStartupRetry {
+	if !managedStartupEvidenceAllowsClassification(evidence) {
+		return nil
+	}
+	if evidence.NPMCode == "ETARGET" || (evidence.NPMCode == "" && classification != nil && classification.Code == routingerr.CodeManagedRuntimeNpmResolution) {
+		if classification == nil || classification.Code != routingerr.CodeManagedRuntimeNpmResolution {
+			return nil
+		}
+		return &managedRuntimeStartupRetry{
+			retryArgs:       preferOnlineArgs,
+			failureCode:     classification.Code,
+			failureReason:   "npm_resolution",
+			failureNPMCode:  "ETARGET",
+			failureEvidence: classification.RawExcerpt,
+		}
+	}
+	if npmresolution.IsTransientManagedStartupCode(evidence.NPMCode) {
+		return &managedRuntimeStartupRetry{
+			retryArgs:       preferOnlineArgs,
+			failureCode:     routingerr.CodeManagedRuntimeStartup,
+			failureReason:   "npm_transient",
+			failureNPMCode:  strings.ToUpper(evidence.NPMCode),
+			failureEvidence: "npm_code=" + strings.ToUpper(evidence.NPMCode),
+		}
+	}
+	if evidence.NPMCode != "" {
+		return nil
+	}
+	if evidence.NPMDiagnosticPresent {
+		return nil
+	}
+	return &managedRuntimeStartupRetry{
+		retryArgs:     append([]string(nil), originalArgs...),
+		failureCode:   routingerr.CodeManagedRuntimeStartup,
+		failureReason: "early_exit",
+	}
+}
+
+func managedStartupEvidenceAllowsClassification(evidence *agentctltypes.ManagedStartupEvidence) bool {
+	if evidence == nil || !evidence.CollectionComplete || !evidence.NPMDiagnosticComplete || evidence.UnclassifiedNPMCode {
+		return false
+	}
+	if evidence.NPMCode != "" && !evidence.NPMDiagnosticPresent {
+		return false
+	}
+	return true
 }
 
 func (m *Manager) prepareManagedRuntimeStartupRetry(
@@ -125,7 +262,10 @@ func (m *Manager) prepareManagedRuntimeStartupRetry(
 	initErr error,
 	agentConfig agents.Agent,
 ) (*managedRuntimeStartupRetry, bool) {
-	if execution == nil {
+	if execution == nil || ctx.Err() != nil || !isManagedACPInitializeFailure(initErr) {
+		return nil, false
+	}
+	if routingerr.IsAuthenticationFailureDiagnostic(initErr.Error()) {
 		return nil, false
 	}
 	managed, ok := agentConfig.(agents.ManagedNPMRuntimeAgent)
@@ -136,31 +276,56 @@ func (m *Manager) prepareManagedRuntimeStartupRetry(
 	if !ok {
 		return nil, false
 	}
-	classification := m.managedRuntimeNpmStartupFailure(ctx, execution, initErr, packageSpec)
-	if classification == nil {
+	client, release := execution.AcquireAgentCtlClient()
+	if client == nil {
+		release()
 		return nil, false
 	}
-	if classification.Code == routingerr.CodeManagedRuntimeNpmPolicy {
+	defer release()
+	var initializeErr *agentctl.InitializeError
+	if errors.As(initErr, &initializeErr) && initializeErr.StartupEvidence != nil {
+		evidence := initializeErr.StartupEvidence
+		if evidence.ProcessGeneration == 0 || evidence.ProcessGeneration != client.ProcessGeneration() ||
+			!managedStartupEvidenceAllowsClassification(evidence) || evidence.ExitDisposition != agentctltypes.ManagedStartupExitOrdinary {
+			return nil, false
+		}
+		if npmresolution.IsPermanentManagedStartupCode(evidence.NPMCode) {
+			return &managedRuntimeStartupRetry{
+				failureCode:     routingerr.CodeManagedRuntimeStartup,
+				failureReason:   "permanent_npm_error",
+				failureNPMCode:  strings.ToUpper(evidence.NPMCode),
+				failureEvidence: "npm_code=" + strings.ToUpper(evidence.NPMCode),
+				terminal:        true,
+			}, true
+		}
+	}
+	classification := m.managedRuntimeNpmStartupFailure(ctx, client, execution, initErr, packageSpec)
+	if classification != nil && classification.Code == routingerr.CodeManagedRuntimeNpmPolicy {
 		return &managedRuntimeStartupRetry{
-			failureCode:    classification.Code,
-			failureDetails: classification.RawExcerpt,
+			failureCode:     classification.Code,
+			failureReason:   "npm_release_policy",
+			failureEvidence: classification.RawExcerpt,
+			terminal:        true,
 		}, true
 	}
-	if classification.Code != routingerr.CodeManagedRuntimeNpmResolution {
+	if !supportsManagedRuntimeStartupRecovery(execution.RuntimeName) {
 		return nil, false
 	}
-	if !supportsManagedRuntimeCacheRepair(execution.RuntimeName) {
-		return nil, false
+	if initializeErr == nil || initializeErr.StartupEvidence == nil {
+		return managedRuntimeStartupRetryForLegacyClassification(classification, preferOnlineArgs)
 	}
-	return &managedRuntimeStartupRetry{
-		preferOnlineArgs: preferOnlineArgs,
-		packageSpec:      packageSpec,
-		failureCode:      classification.Code,
-		failureDetails:   classification.RawExcerpt,
-	}, true
+	retry := managedRuntimeStartupRetryForEvidence(
+		initializeErr.StartupEvidence, classification, preferOnlineArgs, execution.AgentArgs,
+	)
+	return retry, retry != nil
 }
 
-func supportsManagedRuntimeCacheRepair(runtime agentruntime.Runtime) bool {
+func isManagedACPInitializeFailure(err error) bool {
+	var phaseErr *SessionInitializationPhaseError
+	return errors.As(err, &phaseErr) && phaseErr.Phase == SessionInitializationPhaseACPInitialize
+}
+
+func supportsManagedRuntimeStartupRecovery(runtime agentruntime.Runtime) bool {
 	switch runtime {
 	case agentruntime.RuntimeStandalone, agentruntime.RuntimeDocker, agentruntime.RuntimeSSH:
 		return true
@@ -169,14 +334,12 @@ func supportsManagedRuntimeCacheRepair(runtime agentruntime.Runtime) bool {
 	}
 }
 
-// stopAndRepairManagedRuntime stops the failed child and asks its colocated
-// agentctl process to remove only the trusted npm execution tree.
+// stopManagedRuntimeBeforeRetry stops the failed child before a replacement.
 // needsFailure distinguishes an ordinary repair error from cancellation or
 // shutdown, which must win over recovery.
-func (m *Manager) stopAndRepairManagedRuntime(
+func (m *Manager) stopManagedRuntimeBeforeRetry(
 	ctx context.Context,
 	execution *AgentExecution,
-	retry *managedRuntimeStartupRetry,
 ) (needsFailure bool, err error) {
 	client, release := execution.AcquireAgentCtlClient()
 	defer release()
@@ -187,23 +350,13 @@ func (m *Manager) stopAndRepairManagedRuntime(
 		if aborted := managedRuntimeRecoveryAborted(ctx, m); aborted != nil {
 			return false, aborted
 		}
-		m.logger.Warn("managed runtime process stop failed before retry; continuing",
-			zap.String("execution_id", execution.ID), zap.Error(stopErr))
+		return true, stopErr
 	}
 	client.CloseUpdatesStream()
 	if aborted := managedRuntimeRecoveryAborted(ctx, m); aborted != nil {
 		return false, aborted
 	}
 
-	if err := client.RepairManagedRuntimeCache(ctx, retry.packageSpec); err != nil {
-		if aborted := managedRuntimeRecoveryAborted(ctx, m); aborted != nil {
-			return false, aborted
-		}
-		return true, err
-	}
-	if aborted := managedRuntimeRecoveryAborted(ctx, m); aborted != nil {
-		return false, aborted
-	}
 	return false, nil
 }
 
@@ -214,12 +367,12 @@ func (m *Manager) startManagedRuntimeRetry(
 	taskDescription string,
 	attachments []MessageAttachment,
 	mcpServers []agentctltypes.McpServer,
-) (initializationFailed bool, err error) {
+) (managedRuntimeRetryFailurePhase, error) {
 	if _, err := m.configureAndStartAgent(ctx, execution); err != nil {
-		return false, err
+		return managedRuntimeRetryFailureProcessSetup, err
 	}
 	if err := managedRuntimeRecoveryAborted(ctx, m); err != nil {
-		return false, err
+		return managedRuntimeRetryFailureNone, err
 	}
 	settleTimer := time.NewTimer(managedRuntimeStartupSettleDelay)
 	defer settleTimer.Stop()
@@ -227,17 +380,46 @@ func (m *Manager) startManagedRuntimeRetry(
 	case <-settleTimer.C:
 	case <-ctx.Done():
 		if cause := context.Cause(ctx); cause != nil {
-			return false, cause
+			return managedRuntimeRetryFailureNone, cause
 		}
-		return false, ctx.Err()
+		return managedRuntimeRetryFailureNone, ctx.Err()
 	}
 	if err := managedRuntimeRecoveryAborted(ctx, m); err != nil {
-		return false, err
+		return managedRuntimeRetryFailureNone, err
 	}
 	if err := m.initializeACPSession(ctx, execution, agentConfig, taskDescription, attachments, mcpServers); err != nil {
-		return true, err
+		if isManagedACPInitializeFailure(err) {
+			return managedRuntimeRetryFailureACPInitialize, err
+		}
+		return managedRuntimeRetryFailureSessionSetup, err
 	}
-	return false, nil
+	return managedRuntimeRetryFailureNone, nil
+}
+
+func managedRuntimeStartupFailureEvidenceWithFinalDiagnostic(evidence string, cause error) string {
+	if cause == nil {
+		return evidence
+	}
+	diagnostic := routingerr.Sanitize(cause.Error())
+	if diagnostic == "" {
+		return evidence
+	}
+	combined := "final_diagnostic=" + diagnostic
+	if evidence != "" {
+		combined += "\n" + evidence
+	}
+	return routingerr.Sanitize(combined)
+}
+
+func managedRuntimeRetryFailureReason(phase managedRuntimeRetryFailurePhase) string {
+	switch phase {
+	case managedRuntimeRetryFailureACPInitialize:
+		return "retry_initialize_failed"
+	case managedRuntimeRetryFailureSessionSetup:
+		return "retry_session_setup_failed"
+	default:
+		return "retry_process_setup_failed"
+	}
 }
 
 func (m *Manager) resetManagedRuntimeExecutionForRetry(execution *AgentExecution, args []string) {
@@ -248,6 +430,9 @@ func (m *Manager) resetManagedRuntimeExecutionForRetry(execution *AgentExecution
 		current.ErrorMessage = ""
 		current.FailureCode = ""
 		current.FailureDetails = ""
+		current.StartupFailureReason = ""
+		current.StartupFailureAttempts = 0
+		current.StartupFailureNPMCode = ""
 		current.setSessionInitialized(false)
 		m.resetStreamingStateWithHistory(current)
 		select {
@@ -270,6 +455,24 @@ func (m *Manager) retryManagedRuntimeStartup(
 	attachments []MessageAttachment,
 	mcpServers []agentctltypes.McpServer,
 ) (attempted bool, err error) {
+	return m.retryManagedRuntimeStartupWithProgress(
+		ctx, execution, initErr, agentConfig, taskDescription, attachments, mcpServers, nil,
+	)
+}
+
+func (m *Manager) retryManagedRuntimeStartupWithProgress(
+	ctx context.Context,
+	execution *AgentExecution,
+	initErr error,
+	agentConfig agents.Agent,
+	taskDescription string,
+	attachments []MessageAttachment,
+	mcpServers []agentctltypes.McpServer,
+	onRetry func(),
+) (attempted bool, err error) {
+	if aborted := managedRuntimeRecoveryAborted(ctx, m); aborted != nil {
+		return false, aborted
+	}
 	retry, ok := m.prepareManagedRuntimeStartupRetry(ctx, execution, initErr, agentConfig)
 	if !ok {
 		return false, initErr
@@ -277,53 +480,55 @@ func (m *Manager) retryManagedRuntimeStartup(
 	if err := managedRuntimeRecoveryAborted(ctx, m); err != nil {
 		return false, err
 	}
-	if retry.failureCode == routingerr.CodeManagedRuntimeNpmPolicy {
+	if retry.terminal {
 		return true, m.publishManagedRuntimeStartupFailure(
 			execution,
-			"managed npm runtime blocked by npm release-date policy",
+			"managed runtime startup was blocked",
 			retry.failureCode,
-			retry.failureDetails,
+			managedRuntimeStartupFailureDetails(retry.failureReason, 1, retry.failureEvidence),
+			managedRuntimeStartupFailureMetadata{reason: retry.failureReason, attempts: 1, npmCode: retry.failureNPMCode},
 			initErr,
 		)
 	}
-	failureCode := retry.failureCode
-	if failureCode == "" {
-		failureCode = routingerr.CodeManagedRuntimeNpmResolution
-	}
-	failureDetails := retry.failureDetails
-	var failureCause error
+	recoveryCtx, cancelRecovery := managedRuntimeStartupRecoveryContext(ctx)
+	defer cancelRecovery()
 	retryGeneration, ok := execution.beginStartupRecovery()
 	if !ok {
 		return false, initErr
 	}
 	defer execution.finishStartupRecovery()
+	if onRetry != nil {
+		onRetry()
+	}
 
-	m.logger.Warn("retrying managed npm runtime startup with online metadata",
+	m.logger.Warn("retrying managed runtime startup",
 		zap.String("execution_id", execution.ID),
 		zap.String("agent_id", execution.AgentID),
 		zap.Uint64("startup_generation", retryGeneration))
 
 	// Stop only the child process. The agentctl server remains alive so the
 	// same execution can reconnect its streams and retain its identity.
-	if needsFailure, err := m.stopAndRepairManagedRuntime(ctx, execution, retry); err != nil {
+	if needsFailure, err := m.stopManagedRuntimeBeforeRetry(recoveryCtx, execution); err != nil {
 		if needsFailure {
-			failureCode = routingerr.CodeAgentRuntime
-			failureDetails = routingerr.Sanitize(err.Error())
-			failureCause = err
+			failureDetails := managedRuntimeStartupFailureDetails("cleanup_failed", 1, "")
 			return false, m.publishManagedRuntimeStartupFailure(
-				execution, "managed runtime cache repair failed", failureCode, failureDetails, failureCause,
+				execution, "managed runtime process could not be stopped", routingerr.CodeManagedRuntimeStartup, failureDetails,
+				managedRuntimeStartupFailureMetadata{reason: "cleanup_failed", attempts: 1}, err,
 			)
 		}
 		return false, err
 	}
-	if err := managedRuntimeRecoveryAborted(ctx, m); err != nil {
+	if err := managedRuntimeRecoveryAborted(recoveryCtx, m); err != nil {
+		return false, err
+	}
+	if err := m.waitManagedRuntimeStartupBackoff(recoveryCtx); err != nil {
 		return false, err
 	}
 
-	m.resetManagedRuntimeExecutionForRetry(execution, retry.preferOnlineArgs)
+	m.resetManagedRuntimeExecutionForRetry(execution, retry.retryArgs)
 
-	initializationFailed, retryErr := m.startManagedRuntimeRetry(
-		ctx,
+	failurePhase, retryErr := m.startManagedRuntimeRetry(
+		recoveryCtx,
 		execution,
 		agentConfig,
 		taskDescription,
@@ -331,20 +536,58 @@ func (m *Manager) retryManagedRuntimeStartup(
 		mcpServers,
 	)
 	if retryErr != nil {
-		if aborted := managedRuntimeRecoveryAborted(ctx, m); aborted != nil {
-			return false, aborted
-		}
-		failureCause = retryErr
-		var second *routingerr.Error
-		if initializationFailed {
-			second = m.managedRuntimeNpmStartupFailure(ctx, execution, retryErr, retry.packageSpec)
-		}
-		failureCode, failureDetails = managedRuntimeRetryFailureClassification(
-			failureCode, failureDetails, retryErr, initializationFailed, second,
-		)
-		return true, m.publishManagedRuntimeStartupFailure(
-			execution, "managed npm runtime failed to prepare", failureCode, failureDetails, failureCause,
-		)
+		return m.publishManagedRuntimeRetryFailure(recoveryCtx, execution, agentConfig, failurePhase, retryErr)
 	}
 	return true, nil
+}
+
+func (m *Manager) publishManagedRuntimeRetryFailure(
+	ctx context.Context,
+	execution *AgentExecution,
+	agentConfig agents.Agent,
+	phase managedRuntimeRetryFailurePhase,
+	cause error,
+) (bool, error) {
+	if aborted := managedRuntimeRecoveryAborted(ctx, m); aborted != nil {
+		return false, aborted
+	}
+	if routingerr.IsAuthenticationFailureDiagnostic(routingerr.Sanitize(cause.Error())) {
+		reason := managedRuntimeRetryFailureReason(phase)
+		failureDetails := managedRuntimeStartupFailureDetails(
+			reason, 2, managedRuntimeStartupFailureEvidenceWithFinalDiagnostic("", cause),
+		)
+		return true, m.publishManagedRuntimeStartupFailure(
+			execution, "managed runtime startup failed", routingerr.CodeAgentRuntime, failureDetails,
+			managedRuntimeStartupFailureMetadata{reason: reason, attempts: 2}, cause,
+		)
+	}
+	if phase == managedRuntimeRetryFailureACPInitialize {
+		second, recognized := m.prepareManagedRuntimeStartupRetry(ctx, execution, cause, agentConfig)
+		if recognized {
+			failureDetails := managedRuntimeStartupFailureDetails(
+				second.failureReason, 2,
+				managedRuntimeStartupFailureEvidenceWithFinalDiagnostic(second.failureEvidence, cause),
+			)
+			return true, m.publishManagedRuntimeStartupFailure(
+				execution, "managed runtime startup failed", second.failureCode, failureDetails,
+				managedRuntimeStartupFailureMetadata{reason: second.failureReason, attempts: 2, npmCode: second.failureNPMCode}, cause,
+			)
+		}
+		reason := "retry_initialize_failed"
+		failureDetails := managedRuntimeStartupFailureDetails(
+			reason, 2, managedRuntimeStartupFailureEvidenceWithFinalDiagnostic("", cause),
+		)
+		return true, m.publishManagedRuntimeStartupFailure(
+			execution, "managed runtime startup failed", routingerr.CodeManagedRuntimeStartup, failureDetails,
+			managedRuntimeStartupFailureMetadata{reason: reason, attempts: 2}, cause,
+		)
+	}
+	reason := managedRuntimeRetryFailureReason(phase)
+	failureDetails := managedRuntimeStartupFailureDetails(
+		reason, 2, managedRuntimeStartupFailureEvidenceWithFinalDiagnostic("", cause),
+	)
+	return true, m.publishManagedRuntimeStartupFailure(
+		execution, "managed runtime startup failed", routingerr.CodeAgentRuntime, failureDetails,
+		managedRuntimeStartupFailureMetadata{reason: reason, attempts: 2}, cause,
+	)
 }

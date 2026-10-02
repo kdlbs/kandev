@@ -18,6 +18,9 @@ export type LastAgentError = {
   remediationUrl?: string;
   code?: string;
   details?: string;
+  startupReason?: string;
+  startupAttempts?: number;
+  startupNpmCode?: string;
   recoveryActions?: TaskLaunchRecoveryAction[];
   taskRepositoryId?: string;
   stamp?: string;
@@ -169,6 +172,7 @@ function readAgentErrorCauses(value: unknown): AgentErrorCause[] {
 }
 
 function readStructuredFailureMetadata(record: Record<string, unknown>) {
+  const startupAttempts = record.startup_attempts;
   return {
     code: readFirstOptionalString(record, ["code", "failure_code", "failureCode"]),
     details: readFirstOptionalString(record, [
@@ -177,6 +181,13 @@ function readStructuredFailureMetadata(record: Record<string, unknown>) {
       "failureDetails",
       "error_output",
     ]),
+    startupReason: readFirstOptionalString(record, ["startup_reason", "startupReason"]),
+    ...(typeof startupAttempts === "number" &&
+    Number.isInteger(startupAttempts) &&
+    startupAttempts >= 0
+      ? { startupAttempts }
+      : {}),
+    startupNpmCode: readFirstOptionalString(record, ["startup_npm_code", "startupNpmCode"]),
   };
 }
 

@@ -87,6 +87,7 @@
   "agentBootResuming": "エージェント {{agentName}} を再開中",
   "agentBootStarted": "エージェント {{agentName}} を起動",
   "agentBootStarting": "エージェント {{agentName}} を起動中",
+  "agentBootRetrying": "エージェントの起動を再試行中 ({{maxAttempts}} 回中 {{attempt}} 回目)",
   "agentCount_one": "{{count}} エージェント",
   "agentCount_other": "{{count}} エージェント",
   "agentFallbackName": "エージェント",

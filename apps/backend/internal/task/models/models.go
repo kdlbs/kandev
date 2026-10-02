@@ -1042,6 +1042,9 @@ type LastAgentError struct {
 	RemediationURL   string            `json:"remediation_url,omitempty"`
 	Code             string            `json:"code,omitempty"`
 	Details          string            `json:"details,omitempty"`
+	StartupReason    string            `json:"startup_reason,omitempty"`
+	StartupAttempts  int               `json:"startup_attempts,omitempty"`
+	StartupNPMCode   string            `json:"startup_npm_code,omitempty"`
 	RecoveryActions  []string          `json:"recovery_actions,omitempty"`
 	TaskRepositoryID string            `json:"task_repository_id,omitempty"`
 	StampValue       string            `json:"stamp,omitempty"`
@@ -1076,7 +1079,9 @@ func mapToLastAgentError(raw interface{}, out *LastAgentError) error {
 	// Optional bootstrap fields are deliberately decoded independently. A
 	// malformed optional field must not hide a valid legacy session error.
 	optional := map[string]json.RawMessage{}
-	for _, key := range []string{"execution_id", "phase", "attempt_id", "causes"} {
+	for _, key := range []string{
+		"execution_id", "phase", "attempt_id", "causes", "startup_reason", "startup_attempts", "startup_npm_code",
+	} {
 		if value, ok := fields[key]; ok {
 			optional[key] = value
 			delete(fields, key)
@@ -1111,6 +1116,24 @@ func mapToLastAgentError(raw interface{}, out *LastAgentError) error {
 		var causes []AgentErrorCause
 		if json.Unmarshal(value, &causes) == nil {
 			out.Causes = causes
+		}
+	}
+	if value, ok := optional["startup_reason"]; ok {
+		var reason string
+		if json.Unmarshal(value, &reason) == nil {
+			out.StartupReason = reason
+		}
+	}
+	if value, ok := optional["startup_attempts"]; ok {
+		var attempts int
+		if json.Unmarshal(value, &attempts) == nil && attempts >= 0 {
+			out.StartupAttempts = attempts
+		}
+	}
+	if value, ok := optional["startup_npm_code"]; ok {
+		var npmCode string
+		if json.Unmarshal(value, &npmCode) == nil {
+			out.StartupNPMCode = npmCode
 		}
 	}
 	return nil

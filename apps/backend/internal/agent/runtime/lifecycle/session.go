@@ -193,7 +193,7 @@ func (sm *SessionManager) InitializeSessionWithSettingsPolicy(
 		sm.logger.Error("ACP initialize failed",
 			zap.String("agent_type", agentConfig.ID()),
 			zap.Error(err))
-		return nil, fmt.Errorf("initialize failed: %w", err)
+		return nil, &SessionInitializationPhaseError{Phase: SessionInitializationPhaseACPInitialize, Cause: err}
 	}
 
 	result := &InitializeResult{

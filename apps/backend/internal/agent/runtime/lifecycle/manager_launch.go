@@ -2863,7 +2863,7 @@ func (m *Manager) initializeAgentSession(ctx context.Context, execution *AgentEx
 
 	attachments := getAttachmentsFromMetadata(execution)
 	if err := m.initializeACPSession(ctx, execution, agentConfig, taskDescription, attachments, mcpServers); err != nil {
-		attempted, retryErr := m.retryManagedRuntimeStartup(
+		attempted, retryErr := m.retryManagedRuntimeStartupWithProgress(
 			ctx,
 			execution,
 			err,
@@ -2871,6 +2871,7 @@ func (m *Manager) initializeAgentSession(ctx context.Context, execution *AgentEx
 			taskDescription,
 			attachments,
 			mcpServers,
+			func() { m.updateBootMessageStartupRetryProgress(execution, bootMsg) },
 		)
 		if attempted {
 			if retryErr == nil {

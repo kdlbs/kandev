@@ -229,35 +229,29 @@ configuration options, commands, and runtime version without a page reload.
 
 When a native OpenCode installation is present on the host, its vendor update guidance stays separate from **Manage fallback versions**. That control selects the managed package used by remote and container launches; it does not update the native host or a remote native installation. Update, rollback and return to the Kandev default remain available for the managed fallback. A rejected or busy manual request leaves automatic-update consent unchanged; an accepted manual selection turns it off.
 
-#### Recover a stale npm runtime lookup
+#### Recover a managed runtime startup failure
 
-Host-local managed runtimes normally start with npm's offline-preferred lookup.
-If npm has stale package metadata and cannot resolve the selected
-`package@version`, the first ACP startup can fail even though the configured
-registry contains that exact version. Kandev recognizes this specific npm
-resolution error, removes only the deterministic `_npx` execution tree for the
-selected package and version, then retries the same command once with an
-online-preferred metadata lookup.
+Managed runtime startup can retry once when npm reports a recognized temporary
+network or cache error, or when the child process exits normally before ACP
+initialization completes. Kandev first confirms that the failed process has
+stopped, then waits two to three seconds before the replacement starts. A
+permanent npm error, cancellation, signal termination, or failure after ACP
+initialization does not trigger this automatic retry.
 
-Kandev also performs this recovery while it builds the host capability
-catalogue used by agent profiles. A successful retry publishes the recovered
-models and keeps the saved model, fallback model, mode, runtime version, and
-enabled state unchanged. The profile remains selectable and does not show a
-capability warning. Kandev reports a failed capability status if it cannot
-prepare the retry or repair the cache, or if the one online retry fails.
+The retry uses the same agent, package, exact version, environment, executor,
+session, and initial prompt. It does not delete the selected npm execution tree
+or a sibling tree. While it waits, the existing session status shows the second
+attempt. If that attempt succeeds, the conversation continues without a
+recovery card. If it fails, the card reports the cause and actual attempt count
+and shows one **Retry runtime** action with collapsed technical details.
 
-The same recovery applies to managed runtime startup on a local PC, in a local
-Docker executor, or in a remote SSH executor. Kandev sends the repair request
-to the agentctl process that owns the failed execution. That process resolves
-npm's cache with the agent environment and removes only the selected execution
-tree. It does not repair the Kandev host cache, delete sibling execution trees,
-change the registry, or clear the global npm cache.
-
-The retry keeps the selected package, exact version, command prefix, model,
-permissions, and session identity. It does not change the npm registry or
-silently select another version. When the retry succeeds, no recovery card is
-shown. When it fails again, Kandev and Office show one **Retry runtime** action
-with collapsed technical details.
+This startup recovery applies to managed npm runtimes on a local PC, in a local
+Docker executor, or in a remote SSH executor. It does not establish that an npm
+race caused any particular startup failure. Host capability discovery has a
+separate, narrower recovery: an exact-package `ETARGET` result can retry once
+with an online-preferred lookup. That probe retry also preserves npm execution
+trees and keeps the saved model, fallback model, mode, runtime version, and
+enabled state unchanged.
 
 Managed `npx` runtimes use a Kandev-owned npm project directory, so an `.npmrc`
 in the task repository does not change the managed runtime's package lookup.
@@ -727,7 +721,7 @@ Only custom TUI agents can be deleted from the agent list. Built-in definitions 
 - **Login required:** use the agent card's login terminal or sign in under Kandev's operating-system user; signing in as another user does not help the service.
 - **Model, mode, or command probe fails:** authenticate first, refresh discovery, and choose a value advertised by the installed version.
 - **Launch fails after editing flags:** inspect the command preview, remove stale arguments, and correct unmatched quotes or trailing escapes.
-- **Managed npm runtime cannot resolve its selected version:** Kandev checks the configured registry and retries the same version once after refreshing its exact `_npx` execution tree. If the retry fails, verify the service user's npm configuration and registry, then use **Settings > Agents** to prepare another trusted stable version. Do not start with `npm cache clean --force`.
+- **Managed npm runtime cannot start:** Kandev retries one recognized temporary npm setup error or ordinary pre-initialization process exit after it confirms cleanup. It keeps the selected package and npm trees. If startup still fails, review the card's technical details and verify the service user's npm configuration and registry. Use **Settings > Agents** to prepare another trusted stable version when needed. Do not start with `npm cache clean --force`.
 - **Environment value is absent:** confirm the secret still exists, the key is not reserved, and an executor/runtime variable is not already taking precedence.
 - **MCP server is absent:** confirm agent MCP support, valid JSON, transport mode, executor policy, and the session warning logs.
 - **MCP tools are missing from one agent session:** open **MCP servers** in that

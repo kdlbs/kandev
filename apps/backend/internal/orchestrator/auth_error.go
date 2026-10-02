@@ -3,28 +3,13 @@ package orchestrator
 import (
 	"encoding/json"
 	"strings"
-)
 
-// authErrorPatterns are substrings that indicate an authentication-related error.
-var authErrorPatterns = []string{
-	"authentication_error",
-	"authentication required",
-	"token has expired",
-	"Failed to authenticate",
-	"authorization_error",
-	"invalid_api_key",
-	"invalid api key",
-}
+	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
+)
 
 // isAuthError returns true if the error message indicates an authentication failure.
 func isAuthError(errorMsg string) bool {
-	lower := strings.ToLower(errorMsg)
-	for _, pattern := range authErrorPatterns {
-		if strings.Contains(lower, strings.ToLower(pattern)) {
-			return true
-		}
-	}
-	return false
+	return routingerr.IsAuthenticationFailureDiagnostic(errorMsg)
 }
 
 // extractReadableAuthError attempts to extract a human-readable authentication

@@ -17,20 +17,46 @@ import {
   type SessionRecoveryOwner,
 } from "@/lib/session-recovery-presentation";
 import { sessionRecoveryAction } from "./messages/action-message-recovery";
+import { managedRuntimeStartupCopy } from "./managed-runtime-startup-copy";
+
+type RecoveryCopy = { title: string; summary: string; showSummary: boolean };
+
+function managedRuntimeFailureCopy(
+  model: ActiveSessionRecovery,
+  t: ReturnType<typeof useTranslation>["t"],
+): RecoveryCopy | null {
+  switch (model.kind) {
+    case "managed_runtime_npm_resolution":
+      return {
+        title: t("chat:managedRuntimeNpmTitle"),
+        summary: t("chat:managedRuntimeNpmBody"),
+        showSummary: true,
+      };
+    case "managed_runtime_npm_policy":
+      return {
+        title: t("chat:managedRuntimeNpmPolicyTitle"),
+        summary: t("chat:managedRuntimeNpmPolicyBody"),
+        showSummary: true,
+      };
+    case "managed_runtime_startup": {
+      const startupCopy = managedRuntimeStartupCopy(
+        {
+          startup_reason: model.metadata?.startup_reason ?? model.error?.startupReason,
+          startup_attempts: model.metadata?.startup_attempts ?? model.error?.startupAttempts,
+          startup_npm_code: model.metadata?.startup_npm_code ?? model.error?.startupNpmCode,
+        },
+        t,
+      );
+      return { ...startupCopy, showSummary: true };
+    }
+    default:
+      return null;
+  }
+}
 
 function recoveryCopy(model: ActiveSessionRecovery, t: ReturnType<typeof useTranslation>["t"]) {
-  if (model.kind === "managed_runtime_npm_resolution")
-    return {
-      title: t("chat:managedRuntimeNpmTitle"),
-      summary: t("chat:managedRuntimeNpmBody"),
-      showSummary: true,
-    };
-  if (model.kind === "managed_runtime_npm_policy")
-    return {
-      title: t("chat:managedRuntimeNpmPolicyTitle"),
-      summary: t("chat:managedRuntimeNpmPolicyBody"),
-      showSummary: true,
-    };
+  const managedRuntimeCopy = managedRuntimeFailureCopy(model, t);
+  if (managedRuntimeCopy) return managedRuntimeCopy;
   if (model.kind === "provider_quota_limited") {
     const reset = model.metadata?.reset_at ? new Date(model.metadata.reset_at) : null;
     return {
@@ -304,5 +330,9 @@ function isBootstrapRecovery(model: ActiveSessionRecovery) {
 }
 
 function isManagedRuntimeFailure(kind: string) {
-  return kind === "managed_runtime_npm_resolution" || kind === "managed_runtime_npm_policy";
+  return (
+    kind === "managed_runtime_npm_resolution" ||
+    kind === "managed_runtime_npm_policy" ||
+    kind === "managed_runtime_startup"
+  );
 }

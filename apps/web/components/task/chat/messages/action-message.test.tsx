@@ -641,6 +641,49 @@ describe("ActionMessage — provider quota recovery", () => {
   });
 });
 
+describe("ActionMessage — managed runtime startup recovery", () => {
+  it("shows typed early-exit cause and actual attempts in the startup recovery card", () => {
+    renderAction(
+      retryMessage({
+        type: "error",
+        content: "managed runtime startup failed",
+        metadata: {
+          variant: "error",
+          recovery_actions: true,
+          failure_kind: "managed_runtime_startup",
+          startup_reason: "early_exit",
+          startup_attempts: 2,
+          error_output: "reason=early_exit attempts=2",
+          actions: [
+            {
+              type: "ws_request",
+              label: "Retry runtime",
+              test_id: MANAGED_RUNTIME_RETRY_TEST_ID,
+              params: {
+                method: SESSION_RECOVER_METHOD,
+                payload: {
+                  task_id: TEST_TASK_ID,
+                  session_id: TEST_SESSION_ID,
+                  action: "runtime_retry",
+                },
+              },
+            },
+          ],
+        },
+      } as Partial<Message>),
+      "FAILED",
+    );
+
+    const card = screen.getByTestId("managed-runtime-startup-recovery");
+    expect(card.textContent).toContain("Agent stopped during startup");
+    expect(card.textContent).toContain(
+      "The agent process exited before initialization. Startup was attempted 2 times.",
+    );
+    expect(screen.getAllByTestId(MANAGED_RUNTIME_RETRY_TEST_ID)).toHaveLength(1);
+    expect(screen.getByText(TECHNICAL_DETAILS).closest("details")?.open).toBe(false);
+  });
+});
+
 describe("ActionMessage — managed npm runtime recovery", () => {
   it("renders one localized retry action with collapsed technical details", async () => {
     renderAction(

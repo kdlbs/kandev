@@ -29,6 +29,9 @@ export type ActionMeta = {
   retry_at?: string;
   failure_code?: string;
   failure_details?: string;
+  startup_reason?: string;
+  startup_attempts?: number;
+  startup_npm_code?: string;
 };
 
 export function TechnicalDetails({ children }: { children: string }) {

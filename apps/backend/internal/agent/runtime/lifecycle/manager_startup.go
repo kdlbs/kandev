@@ -348,6 +348,48 @@ func contributionPreflightDisplayLabel(key string) string {
 	return key
 }
 
+func cloneBootMessageForUpdate(message *models.Message) *models.Message {
+	clone := *message
+	clone.Metadata = make(map[string]interface{}, len(message.Metadata))
+	for key, value := range message.Metadata {
+		clone.Metadata[key] = value
+	}
+	return &clone
+}
+
+func (m *Manager) updateBootMessage(
+	execution *AgentExecution,
+	message *models.Message,
+	update func(*models.Message),
+) {
+	if message == nil || m.bootMessageService == nil {
+		return
+	}
+	if execution != nil {
+		execution.bootMessageMu.Lock()
+		defer execution.bootMessageMu.Unlock()
+	}
+	if message.Metadata == nil {
+		message.Metadata = make(map[string]interface{})
+	}
+	update(message)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := m.bootMessageService.UpdateMessage(ctx, cloneBootMessageForUpdate(message)); err != nil {
+		m.logger.Debug("failed to update agent boot message",
+			zap.String("message_id", message.ID),
+			zap.Error(err))
+	}
+}
+
+func (m *Manager) updateBootMessageStartupRetryProgress(execution *AgentExecution, message *models.Message) {
+	m.updateBootMessage(execution, message, func(message *models.Message) {
+		message.Metadata["startup_retrying"] = true
+		message.Metadata["startup_retry_attempt"] = 2
+		message.Metadata["startup_retry_max_attempts"] = 2
+	})
+}
+
 // pollAgentStderr polls the agent's stderr buffer every 2 seconds and updates the boot message.
 func (m *Manager) pollAgentStderr(execution *AgentExecution, msg *models.Message, stopCh chan struct{}) {
 	ticker := time.NewTicker(2 * time.Second)
@@ -377,14 +419,10 @@ func (m *Manager) pollAgentStderr(execution *AgentExecution, msg *models.Message
 
 			if len(lines) > lastLineCount {
 				lastLineCount = len(lines)
-				msg.Content = strings.Join(lines, "\n")
-				ctx2, cancel2 := context.WithTimeout(context.Background(), 5*time.Second)
-				if updateErr := m.bootMessageService.UpdateMessage(ctx2, msg); updateErr != nil {
-					m.logger.Debug("failed to update boot message with stderr",
-						zap.String("message_id", msg.ID),
-						zap.Error(updateErr))
-				}
-				cancel2()
+				content := strings.Join(lines, "\n")
+				m.updateBootMessage(execution, msg, func(message *models.Message) {
+					message.Content = content
+				})
 			}
 		}
 	}
@@ -414,23 +452,21 @@ func (m *Manager) finalizeBootMessage(execution *AgentExecution, msg *models.Mes
 		}
 		cancel()
 		if err == nil && len(lines) > 0 {
-			msg.Content = strings.Join(lines, "\n")
+			content := strings.Join(lines, "\n")
+			m.updateBootMessage(execution, msg, func(message *models.Message) {
+				message.Content = content
+			})
 		}
 	}
 
-	msg.Metadata["status"] = status
-	msg.Metadata["completed_at"] = time.Now().UTC().Format(time.RFC3339Nano)
-	if status == containerStateExited {
-		msg.Metadata["exit_code"] = 0
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	if updateErr := m.bootMessageService.UpdateMessage(ctx, msg); updateErr != nil {
-		m.logger.Warn("failed to update boot message with final status",
-			zap.String("message_id", msg.ID),
-			zap.Error(updateErr))
-	}
+	m.updateBootMessage(execution, msg, func(message *models.Message) {
+		message.Metadata["status"] = status
+		message.Metadata["completed_at"] = time.Now().UTC().Format(time.RFC3339Nano)
+		delete(message.Metadata, "startup_retrying")
+		if status == containerStateExited {
+			message.Metadata["exit_code"] = 0
+		}
+	})
 }
 
 // buildEnvForExecution builds environment variables for any runtime.

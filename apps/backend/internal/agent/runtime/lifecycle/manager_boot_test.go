@@ -187,6 +187,25 @@ func TestCreateBootMessage_MarksResumedSession(t *testing.T) {
 	}
 }
 
+func TestManagedStartupProgress(t *testing.T) {
+	mgr := newTestManager(t)
+	bootSvc := &MockBootMessageService{}
+	mgr.bootMessageService = bootSvc
+	execution := &AgentExecution{ID: "execution-1"}
+	message := &models.Message{Metadata: map[string]interface{}{"status": "running"}}
+
+	mgr.updateBootMessageStartupRetryProgress(execution, message)
+
+	updated := bootSvc.getLastUpdatedMessage()
+	if updated == nil {
+		t.Fatal("boot message was not updated with retry progress")
+	}
+	if updated.Metadata["startup_retrying"] != true || updated.Metadata["startup_retry_attempt"] != 2 ||
+		updated.Metadata["startup_retry_max_attempts"] != 2 {
+		t.Fatalf("retry progress metadata = %#v", updated.Metadata)
+	}
+}
+
 func TestPollAgentStderr_StopsOnClose(t *testing.T) {
 	mgr := newTestManager(t)
 	bootSvc := &MockBootMessageService{}

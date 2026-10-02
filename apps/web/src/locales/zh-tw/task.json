@@ -75,6 +75,7 @@
   "agentBootResuming": "正在恢復代理程式 {{agentName}}",
   "agentBootStarted": "已啟動代理程式 {{agentName}}",
   "agentBootStarting": "正在啟動代理程式 {{agentName}}",
+  "agentBootRetrying": "正在重試代理程式啟動 (第 {{attempt}} 次，共 {{maxAttempts}} 次)",
   "agentCount_one": "{{count}} 個代理程式",
   "agentCount_other": "{{count}} 個代理程式",
   "agentFallbackName": "代理程式",
