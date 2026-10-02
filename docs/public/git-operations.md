@@ -43,6 +43,25 @@ confirmation. **Restore published PR version...** replaces the task checkout his
 recovery branch at the current task head first, and requires a clean working tree. If the provider
 head changes before confirmation, Kandev leaves both versions unchanged and asks for a fresh review.
 
+## Seed ignored files into worktrees
+
+Repository copy-file settings seed files before a new worktree's setup script
+runs. Enter repository-relative paths or glob patterns separated by commas,
+for example `.env.local, config/{local,dev}.env`.
+
+Commas inside character classes and brace alternation belong to the pattern.
+`config/[a,b].env` matches `a.env`, `b.env`, or `,.env` in `config`.
+Braces inside classes are literal: `config/[{].env, .env.local` selects
+`config/{.env` and `.env.local`. On POSIX hosts, backslashes escape the next
+character, including commas and braces. On Windows, backslashes are path
+separators; use character classes for literal glob characters.
+
+Append `:symlink` to share a source file through a relative host-worktree link,
+for example `.env.local:symlink`. Remote executors copy its bytes instead.
+Windows link creation can require extra privileges. The first entry wins when
+patterns overlap, and existing destinations are skipped. Other colons remain
+literal; use `::symlink` for a filename ending in `:symlink`.
+
 ## Prerequisites and trust boundary
 
 The repository must be a valid Git checkout in the executor workspace and the session's `agentctl` must be reachable. Remote commands use the remote named `origin`; configure its URL and credentials in the executor where the command runs before relying on Pull, Push, or change-request creation. Rebase and Merge use `origin` when it exists, or a local base branch when it does not. The workspace's provider automation identity does not replace the task's Git credential policy or executor-local SSH setup; see [Executors](executors.md#workspace-automation-identity-and-task-git-transport).
