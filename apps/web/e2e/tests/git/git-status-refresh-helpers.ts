@@ -114,26 +114,35 @@ type GitRefreshBridgeState = {
   readyNotifications: GitStatusSnapshot[];
   forcedFailureModes: Set<string>;
   failureEnvironmentId: string;
+  holdFreshGitRefreshRequests: boolean;
+  heldFreshGitRefreshRequests: Array<{ frame: string; server: BridgeSocket }>;
+  holdCommitDiffRequests: boolean;
+  commitDiffRequestCount: number;
+  commitDiffResponseCount: number;
+  heldCommitDiffRequests: Array<{ frame: string; server: BridgeSocket }>;
 };
 
-function consumeClientRequest(
+function holdCommitDiffRequest(
   part: string,
+  server: BridgeSocket,
+  state: GitRefreshBridgeState,
+): boolean {
+  state.commitDiffRequestCount += 1;
+  if (state.holdCommitDiffRequests) {
+    state.heldCommitDiffRequests.push({ frame: part.trim(), server });
+    return true;
+  }
+  return false;
+}
+
+function failGitRefreshRequest(
+  frame: WireFrame,
+  payload: Record<string, unknown> | null,
+  mode: string,
   socket: BridgeSocket,
   state: GitRefreshBridgeState,
 ): boolean {
-  const frame = parseFrame(part.trim());
-  const payload = recordValue(frame?.payload);
-  if (
-    frame?.type !== "request" ||
-    frame.action !== "session.git.refresh" ||
-    typeof frame.id !== "string"
-  ) {
-    return false;
-  }
-  const mode = typeof payload?.mode === "string" ? payload.mode : "fresh";
-  state.requests.push(mode);
   if (!state.forcedFailureModes.has(mode)) return false;
-
   socket.send(
     JSON.stringify({
       id: frame.id,
@@ -161,6 +170,38 @@ function consumeClientRequest(
   return true;
 }
 
+function handleGitRefreshRequest(
+  part: string,
+  socket: BridgeSocket,
+  server: BridgeSocket,
+  frame: WireFrame,
+  state: GitRefreshBridgeState,
+): boolean {
+  const payload = recordValue(frame.payload);
+  const mode = typeof payload?.mode === "string" ? payload.mode : "fresh";
+  state.requests.push(mode);
+  if (mode === "fresh" && state.holdFreshGitRefreshRequests) {
+    state.heldFreshGitRefreshRequests.push({ frame: part.trim(), server });
+    return true;
+  }
+  return failGitRefreshRequest(frame, payload, mode, socket, state);
+}
+
+function consumeClientRequest(
+  part: string,
+  socket: BridgeSocket,
+  server: BridgeSocket,
+  state: GitRefreshBridgeState,
+): boolean {
+  const frame = parseFrame(part.trim());
+  if (frame?.type !== "request" || typeof frame.id !== "string") return false;
+  if (frame.action === "session.commit_diff") {
+    return holdCommitDiffRequest(part, server, state);
+  }
+  if (frame.action !== "session.git.refresh") return false;
+  return handleGitRefreshRequest(part, socket, server, frame, state);
+}
+
 function recordRefreshResponse(
   frame: WireFrame | null,
   payload: Record<string, unknown> | null,
@@ -184,6 +225,9 @@ function recordRefreshResponse(
 function consumeServerFrame(part: string, state: GitRefreshBridgeState): boolean {
   const frame = parseFrame(part.trim());
   const payload = recordValue(frame?.payload);
+  if (frame?.type === "response" && frame.action === "session.commit_diff") {
+    state.commitDiffResponseCount += 1;
+  }
   recordRefreshResponse(frame, payload, state);
   const event = frame ? statusEvent(frame) : null;
   const detailState = event?.payload?.status?.detail_state;
@@ -207,7 +251,7 @@ function forwardClientMessage(
   }
   const forwarded = message
     .split("\n")
-    .filter((part) => !consumeClientRequest(part, socket, state));
+    .filter((part) => !consumeClientRequest(part, socket, server, state));
   const output = forwarded.join("\n");
   if (output.trim()) server.send(output);
 }
@@ -240,6 +284,12 @@ export async function routeGitStatusRefresh(page: Page) {
     readyNotifications: [],
     forcedFailureModes: new Set(),
     failureEnvironmentId: "",
+    holdFreshGitRefreshRequests: false,
+    heldFreshGitRefreshRequests: [],
+    holdCommitDiffRequests: false,
+    commitDiffRequestCount: 0,
+    commitDiffResponseCount: 0,
+    heldCommitDiffRequests: [],
   };
 
   await page.routeWebSocket(/\/ws$/, (socket) => connectGitRefreshBridge(socket, state));
@@ -253,6 +303,53 @@ export async function routeGitStatusRefresh(page: Page) {
     },
     allowResponses() {
       state.forcedFailureModes = new Set();
+    },
+    holdFreshGitRefreshRequests() {
+      state.holdFreshGitRefreshRequests = true;
+    },
+    async waitForHeldFreshGitRefreshRequests(count: number) {
+      await expect
+        .poll(() => state.heldFreshGitRefreshRequests.length, {
+          timeout: 30_000,
+          message: "the expected fresh Git refresh request should be held",
+        })
+        .toBe(count);
+    },
+    releaseFreshGitRefreshRequests() {
+      state.holdFreshGitRefreshRequests = false;
+      for (const request of state.heldFreshGitRefreshRequests.splice(0)) {
+        request.server.send(request.frame);
+      }
+    },
+    holdCommitDiffRequests() {
+      state.holdCommitDiffRequests = true;
+    },
+    async waitForCommitDiffRequests(count: number) {
+      await expect
+        .poll(() => state.commitDiffRequestCount, {
+          timeout: 30_000,
+          message: "the expected inline commit diff requests should arrive",
+        })
+        .toBe(count);
+    },
+    async waitForCommitDiffResponses(count: number) {
+      await expect
+        .poll(() => state.commitDiffResponseCount, {
+          timeout: 30_000,
+          message: "the released inline commit diff request should complete",
+        })
+        .toBeGreaterThanOrEqual(count);
+    },
+    releaseNextCommitDiffRequest() {
+      const request = state.heldCommitDiffRequests.shift();
+      if (!request) throw new Error("No held inline commit diff request is available to release");
+      request.server.send(request.frame);
+    },
+    releaseCommitDiffRequests() {
+      state.holdCommitDiffRequests = false;
+      for (const request of state.heldCommitDiffRequests.splice(0)) {
+        request.server.send(request.frame);
+      }
     },
     requestCount(mode: string) {
       return state.requests.filter((candidate) => candidate === mode).length;

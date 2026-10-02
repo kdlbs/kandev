@@ -1,8 +1,11 @@
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { PullDropdown } from "./changes-panel-header";
-import { ChangesPanelHeaderOverflowActions } from "./changes-panel-header-actions";
+import {
+  ChangesPanelHeaderLeft,
+  ChangesPanelHeaderOverflowActions,
+} from "./changes-panel-header-actions";
 
 vi.mock("@kandev/ui/button", () => ({
   Button: ({ children, ...props }: React.ButtonHTMLAttributes<HTMLButtonElement>) => (
@@ -23,7 +26,9 @@ vi.mock("@kandev/ui/dropdown-menu", () => ({
 
 vi.mock("@kandev/ui/tooltip", () => ({
   Tooltip: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-  TooltipContent: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+  TooltipContent: ({ children }: { children: React.ReactNode }) => (
+    <div data-testid="tooltip-content">{children}</div>
+  ),
   TooltipTrigger: ({ children }: { children: React.ReactNode }) => <>{children}</>,
 }));
 
@@ -106,5 +111,45 @@ describe("ChangesPanelHeaderOverflowActions", () => {
 
     expect(screen.getByText("Diff")).toBeTruthy();
     expect(screen.getByText("Review")).toBeTruthy();
+  });
+});
+
+describe("ChangesPanelHeaderLeft feedback", () => {
+  it("keeps initial loading visible when review actions are unavailable", () => {
+    const { container } = render(
+      <ChangesPanelHeaderLeft
+        showDiffReview={false}
+        refreshStatus="loading"
+        hasPriorData={false}
+        failedRepositories={[]}
+      />,
+    );
+
+    expect(screen.getByRole("status").getAttribute("aria-label")).toBe("Loading changes...");
+    expect(container.querySelector("[data-testid='changes-refresh-status']")).not.toBeNull();
+    expect(screen.queryByRole("button", { name: "Review" })).toBeNull();
+  });
+
+  it("places refresh status after Review and shows a localized Review tooltip", () => {
+    const onOpenReview = vi.fn();
+    render(
+      <ChangesPanelHeaderLeft
+        showDiffReview
+        primaryOnly
+        onOpenReview={onOpenReview}
+        refreshStatus="loading"
+        hasPriorData
+        failedRepositories={[]}
+      />,
+    );
+
+    const review = screen.getByRole("button", { name: "Review" });
+    const status = screen.getByTestId("changes-refresh-status");
+    expect(review.compareDocumentPosition(status) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(
+      screen.getAllByTestId("tooltip-content").some((item) => item.textContent === "Review"),
+    ).toBe(true);
+    fireEvent.click(review);
+    expect(onOpenReview).toHaveBeenCalledTimes(1);
   });
 });

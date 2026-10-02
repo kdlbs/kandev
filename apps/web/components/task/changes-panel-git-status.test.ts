@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { deriveChangesPanelGitStatus } from "./changes-panel-git-status";
+import {
+  deriveChangesPanelGitStatus,
+  deriveChangesPanelToolbarStatus,
+} from "./changes-panel-git-status";
 import type {
   GitStatusEntry,
   GitStatusRefreshState,
@@ -105,5 +108,145 @@ describe("deriveChangesPanelGitStatus", () => {
     expect(summaryOnly.loading).toBe(true);
     expect(unavailable.membershipReady).toBe(false);
     expect(unavailable.unavailable).toBe(true);
+  });
+});
+
+describe("recoverable Git detail failures", () => {
+  it("names a hydrated legacy repository when its details are unavailable", () => {
+    const result = deriveChangesPanelGitStatus({
+      gitStatus: status({
+        repository_name: "frontend",
+        status_state: "ready",
+        files_complete: true,
+        detail_state: "unavailable",
+      }),
+    });
+
+    expect(result.unavailable).toBe(true);
+    expect(result.membershipReady).toBe(true);
+    expect(result.failedRepositories).toEqual(["frontend"]);
+  });
+
+  it("warns for unavailable details on complete membership without a refresh companion", () => {
+    const result = deriveChangesPanelGitStatus({
+      statusByRepo: [
+        {
+          repository_name: "frontend",
+          status: status({
+            status_state: "ready",
+            files_complete: true,
+            detail_state: "unavailable",
+            files: {
+              "src/a.ts": { path: "src/a.ts", status: "modified", staged: false },
+            },
+          }),
+        },
+      ],
+    });
+
+    expect(result).toMatchObject({
+      hasPriorData: true,
+      membershipReady: true,
+      unavailable: true,
+      failedRepositories: ["frontend"],
+    });
+  });
+
+  it("marks only repositories with unavailable file facets as failed", () => {
+    const result = deriveChangesPanelGitStatus({
+      statusByRepo: [
+        { repository_name: "backend", status: status() },
+        {
+          repository_name: "frontend",
+          status: status({
+            files: {
+              "src/a.ts": {
+                path: "src/a.ts",
+                status: "modified",
+                staged: false,
+                staged_change: { status: "modified", diff_state: "unavailable" },
+              },
+            },
+          }),
+        },
+      ],
+    });
+
+    expect(result).toMatchObject({
+      hasPriorData: true,
+      membershipReady: true,
+      unavailable: true,
+      failedRepositories: ["frontend"],
+    });
+  });
+
+  it.each(["too_large", "binary", "truncated", "budget_exceeded"] as const)(
+    "does not warn when unavailable details were intentionally skipped (%s)",
+    (diff_skip_reason) => {
+      const result = deriveChangesPanelGitStatus({
+        statusByRepo: [
+          {
+            repository_name: "frontend",
+            status: status({
+              files: {
+                "src/a.ts": {
+                  path: "src/a.ts",
+                  status: "modified",
+                  staged: false,
+                  unstaged_change: {
+                    status: "modified",
+                    diff_state: "unavailable",
+                    diff_skip_reason,
+                  },
+                },
+              },
+            }),
+          },
+        ],
+      });
+
+      expect(result.unavailable).toBe(false);
+      expect(result.failedRepositories).toEqual([]);
+    },
+  );
+});
+
+describe("deriveChangesPanelToolbarStatus", () => {
+  const ready = deriveChangesPanelGitStatus({ gitStatus: status() });
+
+  it("prioritizes an active Git retry over the unavailable warning", () => {
+    const unavailable = deriveChangesPanelGitStatus({
+      gitStatus: status({ status_state: "unavailable" }),
+      environmentRefresh: { state: "pending" },
+    });
+
+    expect(deriveChangesPanelToolbarStatus(unavailable, true)).toBe("loading");
+  });
+
+  it("keeps loading priority while detail failure recovery is pending", () => {
+    const detailFailure = deriveChangesPanelGitStatus({
+      statusByRepo: [
+        {
+          repository_name: "frontend",
+          status: status({ detail_state: "unavailable" }),
+        },
+      ],
+      repositoryRefresh: { frontend: { state: "pending" } },
+    });
+
+    expect(deriveChangesPanelToolbarStatus(detailFailure, false)).toBe("loading");
+  });
+
+  it("prioritizes unresolved Git failure over unrelated pending details", () => {
+    const unavailable = deriveChangesPanelGitStatus({
+      gitStatus: status({ status_state: "unavailable", detail_state: "pending" }),
+    });
+
+    expect(deriveChangesPanelToolbarStatus(unavailable, true)).toBe("unavailable");
+  });
+
+  it("shows loading for commit detail reads and hides the status when ready", () => {
+    expect(deriveChangesPanelToolbarStatus(ready, true)).toBe("loading");
+    expect(deriveChangesPanelToolbarStatus(ready, false)).toBeNull();
   });
 });

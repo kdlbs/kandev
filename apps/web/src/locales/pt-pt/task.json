@@ -2571,5 +2571,7 @@
   "gitStatusRepositoryUnavailable": "Não foi possível atualizar {{repository}}.",
   "gitDiffLoading": "A diferença está a carregar",
   "gitDiffUnavailable": "A diferença não está disponível",
+  "gitStatusAutomaticRetry": "As alterações não foram atualizadas. A tentar novamente automaticamente.",
+  "gitStatusShowingLastAvailable": "A mostrar as últimas alterações disponíveis.",
   "gitStatusRetry": "Tentar novamente"
 }

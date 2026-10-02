@@ -2571,5 +2571,7 @@
   "gitStatusRepositoryUnavailable": "{{repository}} ćōũĺď ńōţ ƀē ŕēƒŕēśĥēď.",
   "gitDiffLoading": "Ďĩƒƒ ĩś ĺōàďĩńĝ",
   "gitDiffUnavailable": "Ďĩƒƒ ĩś ũńàvàĩĺàƀĺē",
+  "gitStatusAutomaticRetry": "Ćĥàńĝēś ďĩď ńōţ ŕēƒŕēśĥ. Ŕēţŕŷĩńĝ àũţōḿàţĩćàĺĺŷ.",
+  "gitStatusShowingLastAvailable": "Śĥōŵĩńĝ ţĥē ĺàśţ àvàĩĺàƀĺē ćĥàńĝēś.",
   "gitStatusRetry": "Ŕēţŕŷ"
 }

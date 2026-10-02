@@ -1,4 +1,4 @@
-import { cleanup } from "@testing-library/react";
+import { act, cleanup } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { setWebSocketClient } from "@/lib/ws/connection";
 import type { WebSocketClient, SessionGitRefreshResponse } from "@/lib/ws/client";
@@ -28,6 +28,28 @@ function cachedStatus(): GitStatusEntry {
     tracker_epoch: 1,
     snapshot_revision: 1,
     timestamp: "2026-09-30T10:00:00.000Z",
+  };
+}
+
+function unavailableResponse(): SessionGitRefreshResponse {
+  return {
+    success: false,
+    session_id: "session",
+    task_environment_id: "environment",
+    mode: "fresh",
+    status_state: "unavailable",
+    snapshots: [],
+  };
+}
+
+function readyResponse(): SessionGitRefreshResponse {
+  return {
+    success: true,
+    session_id: "session",
+    task_environment_id: "environment",
+    mode: "fresh",
+    status_state: "ready",
+    snapshots: [],
   };
 }
 
@@ -62,5 +84,73 @@ describe("useSessionGitRefresh", () => {
     expect(refreshSessionData).toHaveBeenCalledWith("session", "fresh", expect.any(AbortSignal));
     expect(pendingRequests).toHaveLength(1);
     unmount();
+  });
+
+  it("cancels delayed recovery while blurred and refreshes again on focus", async () => {
+    vi.useFakeTimers();
+    const hasFocus = vi.spyOn(document, "hasFocus").mockReturnValue(true);
+    const hook = renderSessionRead<() => void, boolean>(
+      (active: boolean) => useSessionGitRefresh("session", active),
+      true,
+      (store) => store.getState().setGitStatus("environment", cachedStatus()),
+    );
+
+    try {
+      pendingRequests[0].resolve(unavailableResponse());
+      await vi.waitFor(() => expect(pendingRequests).toHaveLength(2));
+      pendingRequests[1].resolve(unavailableResponse());
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0);
+      });
+
+      act(() => {
+        window.dispatchEvent(new Event("blur"));
+      });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(5_000);
+      });
+      expect(pendingRequests).toHaveLength(2);
+
+      act(() => {
+        window.dispatchEvent(new Event("focus"));
+      });
+      await vi.waitFor(() => expect(pendingRequests).toHaveLength(3));
+      pendingRequests[2].resolve(readyResponse());
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0);
+      });
+    } finally {
+      hasFocus.mockRestore();
+      hook.unmount();
+      vi.useRealTimers();
+    }
+  });
+
+  it("releases the recovery schedule when the Changes surface becomes inactive", async () => {
+    vi.useFakeTimers();
+    const hasFocus = vi.spyOn(document, "hasFocus").mockReturnValue(true);
+    const hook = renderSessionRead<() => void, boolean>(
+      (active: boolean) => useSessionGitRefresh("session", active),
+      true,
+    );
+
+    try {
+      pendingRequests[0].resolve(unavailableResponse());
+      await vi.waitFor(() => expect(pendingRequests).toHaveLength(2));
+      pendingRequests[1].resolve(unavailableResponse());
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0);
+      });
+
+      hook.rerender(false);
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(5_000);
+      });
+      expect(pendingRequests).toHaveLength(2);
+    } finally {
+      hasFocus.mockRestore();
+      hook.unmount();
+      vi.useRealTimers();
+    }
   });
 });

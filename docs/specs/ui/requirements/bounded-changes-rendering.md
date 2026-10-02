@@ -54,3 +54,4 @@ cache-directory cleanup, and automatic Git exclusions are outside this contract.
 
 - [Bounded Changes rendering](../../../plans/bounded-changes-rendering/plan.md)
 - [Changes timeline measurement refresh](../../../plans/changes-timeline-measurement-refresh/plan.md)
+- [Toolbar feedback and section spacing repair](../../../plans/changes-loading-feedback/plan.md)

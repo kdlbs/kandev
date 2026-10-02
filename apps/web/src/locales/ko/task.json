@@ -2571,5 +2571,7 @@
   "gitStatusRepositoryUnavailable": "다음 리포지토리를 새로 고치지 못했습니다: {{repository}}",
   "gitDiffLoading": "diff를 불러오는 중입니다",
   "gitDiffUnavailable": "diff를 사용할 수 없습니다",
+  "gitStatusAutomaticRetry": "변경 사항을 새로 고치지 못했습니다. 자동으로 다시 시도합니다.",
+  "gitStatusShowingLastAvailable": "마지막으로 사용 가능한 변경 사항을 표시합니다.",
   "gitStatusRetry": "다시 시도"
 }

@@ -14,6 +14,7 @@ const MODIFIED_STATUS = "modified" as const;
 const BACKEND_REPOSITORY = "backend";
 const COMMITS_SECTION_TEST_ID = "commits-section";
 const HISTORY_SECTION_ROW_KIND = "history-section";
+const HISTORY_REPOSITORY_ROW_KIND = "history-repository";
 
 function file(path: string, repositoryName?: string): ChangedFile {
   return {
@@ -220,6 +221,32 @@ describe("buildChangesHistoryTimelineRows: commit headers", () => {
     expect(commitRows.at(-1)).toMatchObject({ target: commits.at(-1)?.commit.detailTarget });
     expect(new Set(rows.map((row) => row.key)).size).toBe(rows.length);
   });
+
+  it("keeps an expanded loading commit without adding a virtual status row", () => {
+    const commit = historyCommit("pending-commit", BACKEND_REPOSITORY);
+    const rows = buildChangesHistoryTimelineRows(
+      [
+        {
+          kind: "commits",
+          sectionKey: "local",
+          label: "Commits",
+          testId: COMMITS_SECTION_TEST_ID,
+          collapsed: false,
+          commits: [{ commit, detail: { expanded: true, status: "loading", files: [] } }],
+          collapsedRepositories: new Set(),
+          collapsedDirectories: new Set(),
+          layout: "flat",
+        },
+      ],
+      new Set(),
+    );
+
+    expect(rows.map((row) => row.kind)).toEqual([
+      HISTORY_SECTION_ROW_KIND,
+      HISTORY_REPOSITORY_ROW_KIND,
+      "commit",
+    ]);
+  });
 });
 
 describe("buildChangesHistoryTimelineRows: collapsed scopes", () => {
@@ -250,7 +277,7 @@ describe("buildChangesHistoryTimelineRows: collapsed scopes", () => {
         {
           ...commitSection,
           collapsedRepositories: new Set([
-            JSON.stringify(["changes", "history-repository", "local", BACKEND_REPOSITORY]),
+            JSON.stringify(["changes", HISTORY_REPOSITORY_ROW_KIND, "local", BACKEND_REPOSITORY]),
           ]),
         },
       ],
@@ -263,12 +290,12 @@ describe("buildChangesHistoryTimelineRows: collapsed scopes", () => {
 
     expect(collapsedCommit.map((row) => row.kind)).toEqual([
       HISTORY_SECTION_ROW_KIND,
-      "history-repository",
+      HISTORY_REPOSITORY_ROW_KIND,
       "commit",
     ]);
     expect(collapsedRepository.map((row) => row.kind)).toEqual([
       HISTORY_SECTION_ROW_KIND,
-      "history-repository",
+      HISTORY_REPOSITORY_ROW_KIND,
     ]);
     expect(collapsedSection.map((row) => row.kind)).toEqual([HISTORY_SECTION_ROW_KIND]);
   });

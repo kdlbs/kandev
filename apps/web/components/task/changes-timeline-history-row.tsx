@@ -1,11 +1,6 @@
 "use client";
 
-import {
-  IconAlertCircle,
-  IconChevronDown,
-  IconChevronRight,
-  IconLoader2,
-} from "@tabler/icons-react";
+import { IconAlertCircle, IconChevronDown, IconChevronRight } from "@tabler/icons-react";
 import { useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@kandev/ui/button";
@@ -316,14 +311,6 @@ function CommitStatusHistoryRow({
   onRetryCommit: ChangesTimelineHistoryRowProps["onRetryCommit"];
 }) {
   const { t } = useTranslation();
-  if (row.status === "loading") {
-    return (
-      <div className="flex items-center gap-2 px-3 py-3 text-xs text-muted-foreground">
-        <IconLoader2 className="size-3.5 animate-spin" />
-        {t("task:loadingFiles")}
-      </div>
-    );
-  }
   if (row.status === "empty") {
     return (
       <div className="px-3 py-3 text-xs text-muted-foreground">{t("task:noFilesInThisCommit")}</div>

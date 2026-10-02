@@ -2571,5 +2571,7 @@
   "gitStatusRepositoryUnavailable": "{{repository}} could not be refreshed.",
   "gitDiffLoading": "Diff is loading",
   "gitDiffUnavailable": "Diff is unavailable",
+  "gitStatusAutomaticRetry": "Changes did not refresh. Retrying automatically.",
+  "gitStatusShowingLastAvailable": "Showing the last available changes.",
   "gitStatusRetry": "Retry"
 }

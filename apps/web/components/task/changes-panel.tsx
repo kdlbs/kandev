@@ -34,7 +34,6 @@ type ChangesPanelProps = {
   ) => void;
   onOpenDiffAll?: () => void;
   onOpenReview?: () => void;
-  onRetryGitStatus?: () => void;
 };
 
 const ChangesPanel = memo(function ChangesPanel(props: ChangesPanelProps) {
@@ -73,6 +72,9 @@ const ChangesPanel = memo(function ChangesPanel(props: ChangesPanelProps) {
   return (
     <PanelRoot className="@container/changes-panel" data-testid="changes-panel">
       <ChangesPanelHeader
+        refreshStatus={data.refreshStatus}
+        hasPriorData={data.gitStatusPresentation.hasPriorData}
+        failedRepositories={data.gitStatusPresentation.failedRepositories}
         hasChanges={data.git.hasChanges}
         hasCommits={data.git.hasCommits}
         hasPRFiles={data.hasPRFiles}

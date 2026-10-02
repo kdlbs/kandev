@@ -81,7 +81,7 @@ export type ChangesHistoryTimelineRow =
   | (ChangesHistoryRowBase & {
       kind: "commit-status";
       target: CommitDetailTarget;
-      status: "loading" | "error" | "empty";
+      status: "error" | "empty";
       error?: string;
     });
 
@@ -398,9 +398,7 @@ function appendCommitRows(
     groups,
   });
   if (!expanded) return;
-  if (detail.status === "loading" || detail.status === "idle") {
-    appendCommitStatusRow({ rows, section, commit, targetKey, status: "loading", groups });
-  } else if (detail.status === "error") {
+  if (detail.status === "error") {
     appendCommitStatusRow({
       rows,
       section,
@@ -410,9 +408,9 @@ function appendCommitRows(
       groups,
       error: detail.error,
     });
-  } else if (detail.files.length === 0) {
+  } else if (detail.status === "loaded" && detail.files.length === 0) {
     appendCommitStatusRow({ rows, section, commit, targetKey, status: "empty", groups });
-  } else {
+  } else if (detail.status === "loaded") {
     appendCommitFileRows(rows, section, item, groups, targetKey);
   }
 }
@@ -422,7 +420,7 @@ function appendCommitStatusRow(options: {
   section: Extract<ChangesHistorySectionInput, { kind: "commits" }>;
   commit: CommitItem;
   targetKey: string;
-  status: "loading" | "error" | "empty";
+  status: "error" | "empty";
   groups: ChangesTimelineGroupDescriptor[];
   error?: string;
 }): void {
@@ -510,7 +508,7 @@ function historyCommitStatusRow(options: {
   sectionKey: string;
   targetKey: string;
   target: CommitDetailTarget;
-  status: "loading" | "error" | "empty";
+  status: "error" | "empty";
   groups: ChangesTimelineGroupDescriptor[];
   error?: string;
 }): ChangesHistoryTimelineRow {

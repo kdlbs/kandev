@@ -2571,5 +2571,7 @@
   "gitStatusRepositoryUnavailable": "{{repository}} を更新できませんでした。",
   "gitDiffLoading": "差分を読み込み中",
   "gitDiffUnavailable": "差分を利用できません",
+  "gitStatusAutomaticRetry": "変更を更新できませんでした。自動で再試行します。",
+  "gitStatusShowingLastAvailable": "利用可能な最新の変更を表示しています。",
   "gitStatusRetry": "再試行"
 }
