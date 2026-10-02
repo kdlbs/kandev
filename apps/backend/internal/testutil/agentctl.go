@@ -14,11 +14,6 @@ import (
 // BuildAgentctl builds the credential helper into a test-owned temporary directory.
 func BuildAgentctl(t testing.TB) string {
 	t.Helper()
-	_, source, _, ok := runtime.Caller(0)
-	if !ok {
-		t.Fatal("resolve agentctl test helper source path")
-	}
-	backendDir := filepath.Clean(filepath.Join(filepath.Dir(source), "../.."))
 	name := "agentctl"
 	if runtime.GOOS == "windows" {
 		name += ".exe"
@@ -26,7 +21,12 @@ func BuildAgentctl(t testing.TB) string {
 	path := filepath.Join(t.TempDir(), name)
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, "go", "build", "-buildvcs=false", "-o", path, "./cmd/agentctl")
+	moduleFile, err := exec.CommandContext(ctx, "go", "env", "GOMOD").Output()
+	if err != nil {
+		t.Fatalf("resolve agentctl test helper module: %v", err)
+	}
+	backendDir := filepath.Dir(strings.TrimSpace(string(moduleFile)))
+	cmd := exec.CommandContext(ctx, "go", "build", "-trimpath", "-buildvcs=false", "-o", path, "./cmd/agentctl")
 	cmd.Dir = backendDir
 	if output, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("build agentctl test helper: %v: %s", err, output)

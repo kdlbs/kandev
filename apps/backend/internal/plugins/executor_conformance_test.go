@@ -10,7 +10,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"testing"
 	"time"
 
@@ -25,10 +24,10 @@ func TestPluginExecutorPackagedRecovery(t *testing.T) {
 	defer cancel()
 	dataDir := t.TempDir()
 	binary := filepath.Join(t.TempDir(), "plugin-fixture")
-	_, sourceFile, _, ok := runtime.Caller(0)
-	require.True(t, ok)
-	fixturePackage := filepath.Clean(filepath.Join(filepath.Dir(sourceFile), "../../cmd/plugin-fixture"))
-	build := exec.CommandContext(ctx, "go", "build", "-o", binary, ".")
+	packageDir, err := os.Getwd()
+	require.NoError(t, err)
+	fixturePackage := filepath.Clean(filepath.Join(packageDir, "../../cmd/plugin-fixture"))
+	build := exec.CommandContext(ctx, "go", "build", "-trimpath", "-o", binary, ".")
 	build.Dir = fixturePackage
 	build.Env = append(os.Environ(), "CGO_ENABLED=0")
 	output, err := build.CombinedOutput()
