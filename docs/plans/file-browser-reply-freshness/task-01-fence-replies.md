@@ -31,6 +31,9 @@ tree behavior in one focused PR.
 - `useFileBrowserSearch` query/session/context generations and debounce cleanup.
 - `useFileChangeSubscription` per-owner/path ordering, including a partially
   superseded batch and retirement before pending publication.
+- Requested-directory read-error propagation at `currentDepth == 0`, retaining
+  the existing HTTP/WS error shape and descendant partial-tree behavior.
+- Privileged-safe directory-disappearance and HTTP-client regressions.
 - Authoritative direct children with loaded descendant/sibling preservation.
 - Production-hook tests for query reversal, clear/close, pending debounce,
   session/context changes, A-to-B-to-A, unmount, stale success/error/finally,
@@ -39,7 +42,8 @@ tree behavior in one focused PR.
 
 ## Out of scope
 
-Backend, tree-loader scheduling, general caches, layout, new UI copy, and
+Backend changes outside requested-directory read errors, tree-loader scheduling,
+general caches, layout, new UI copy, and
 unrelated concurrent fix scopes. Do not operate on a live instance or delegate.
 
 ## Acceptance
@@ -53,6 +57,9 @@ unrelated concurrent fix scopes. Do not operate on a live instance or delegate.
    changes neither tree nor load state.
 3. Refresh merges use the latest tree and preserve loaded descendants beneath
    depth-one placeholders; authoritative empty direct children clear rows.
+   Failed requested-directory reads reject through existing transport errors,
+   preserve the loaded folder, and allow current siblings to publish. Descendant
+   partial trees and depth/path semantics remain unchanged.
    Existing desktop/touch composition and tests remain valid.
 
 ## Verification
@@ -61,6 +68,9 @@ Dependency installation was completed in the design turn. In a fresh checkout,
 first run `(cd apps && pnpm install --frozen-lockfile)`.
 
 ```bash
+(cd apps/backend && GOMAXPROCS=2 go test -race -p 2 ./internal/agentctl/server/process -run "^(TestFileTree|TestGetFileTree_)" -count=1)
+(cd apps/backend && GOMAXPROCS=2 go test -race -p 2 ./internal/agent/runtime/agentctl ./internal/agent/handlers -run "^(TestRequestFileTree|TestWorkspaceFileHandlers.*Error)" -count=1)
+(cd apps/web && pnpm exec vitest run components/task/file-browser-refresh-freshness.test.ts components/task/file-browser-apply-changes.test.ts)
 (cd apps/web && pnpm exec vitest run components/task/file-browser-search-freshness.test.ts components/task/file-browser-refresh-freshness.test.ts components/task/file-browser-apply-changes.test.ts components/task/file-browser-search-context-action.test.tsx components/task/file-browser-restore-loader.test.tsx components/task/file-browser-tree-state.test.tsx)
 (cd apps/web && pnpm run typecheck)
 (cd apps/web && pnpm exec eslint --max-warnings 0 components/task/file-browser-hooks.ts components/task/file-browser-data.ts components/task/file-browser-search.ts components/task/file-browser-refresh.ts components/task/file-browser-search-freshness.test.ts components/task/file-browser-refresh-freshness.test.ts)
@@ -109,6 +119,9 @@ in the [plan](plan.md#e2e-tests-and-mobile-parity).
 - `apps/web/components/task/file-browser-refresh-freshness.test.ts`
 - `apps/web/components/task/file-browser-search.ts`
 - `apps/web/components/task/file-browser-refresh.ts`
+- `apps/backend/internal/agentctl/server/process/workspace_files.go`
+- `apps/backend/internal/agentctl/server/process/workspace_tree_read_test.go`
+- `apps/backend/internal/agent/runtime/agentctl/client_tree_read_test.go`
 - This work order, `plan.md`, and the unique design supplement.
 
 ## Dependencies
@@ -180,3 +193,30 @@ internal async-state correction. No additional workers or live data operations.
 Local implementation is done. Exact-head CI/review disposition and authorized
 normal merge are tracked externally and remain pending until merged. Report
 PR URL and merged SHA to parent `14825981-b175-411d-999a-31ddc2aa5fc3`.
+
+## Approved read-error remediation results
+
+Parent explicitly approved the bounded backend extension and released this task
+as sole heavy-command owner after #4141 merged. Permanent RED ran
+`GOMAXPROCS=2 go test -p 2 ./internal/agentctl/server/process -run
+"^TestFileTree(Requested|Descendant|Empty)" -count=1`: requested depths 0, 1,
+and 2 incorrectly returned a successful directory after it disappeared. This
+fixture works under privileged execution without permission-bit assumptions.
+
+The three targeted remediation commands added above pass: producer and existing
+path/symlink/depth controls under the race detector; serialized HTTP failure
+versus omitted-children success and existing WebSocket error mapping; **23**
+refresh/apply tests, including the new failed-read/current-sibling/genuine-empty
+sequence. Only requested-directory read failures now return a wrapped error.
+Descendant failures still yield placeholders. No layout or response-schema
+change, new error copy, fixture/test expectation edits, or broad local replay.
+
+Current-main synthetic merge `5a4c21b294c263111e69c0c42ada0451824b8c5e`
+against main `68542f03983a56b9c9c42fd1afed10842e1beff0` is conflict-free.
+The three Go packages pass their focused race checks; **46** affected Files
+Vitest tests and typecheck pass. Backend changed-scope lint on that merge with
+`--new-from-rev=68542f03983a56b9c9c42fd1afed10842e1beff0 --concurrency=2`
+reports **0 issues**. Normal hook validation is recorded externally before
+publication. Historical E2E failures are superseded
+by main fixture and Git-status corrections; fresh hosted CI remains the remote
+E2E gate. No late results-only commit or body edit will restart published gates.

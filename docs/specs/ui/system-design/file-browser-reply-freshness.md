@@ -32,6 +32,9 @@ remain authoritative for filesystem contents and authorization.
   authority; search does not create a second context registry or tree cache.
 - `applyFileChanges` refreshes affected folders through `requestFileTree` and
   merges accepted children into the latest tree through a functional setter.
+- `WorkspaceTracker.buildFileTreeNode` propagates requested-directory read
+  failures through the existing error response. Descendant failures retain
+  their partial-tree placeholder behavior.
 - Existing content/header components render the hook state in both desktop and
   phone Files surfaces.
 
@@ -76,6 +79,13 @@ requested folder means empty; descendant placeholders preserve already loaded
 subtrees. A late child reply cannot recreate a parent removed by a current root.
 Do not turn a transient tree-read error into authoritative deletion.
 
+At the filesystem producer, an `os.ReadDir` failure for the requested directory
+(`currentDepth == 0`) returns a wrapped filesystem error and no root. The existing
+GetFileTree/HTTP error response and WebSocket rejection keep that failure out of
+successful refresh publication. A genuinely empty directory still succeeds
+with omitted children. Failed descendant reads remain directory placeholders;
+depth limits, path validation, and containment retain their existing semantics.
+
 ## Shared presentation
 
 Desktop Dockview and phone full-height Files keep their existing composition,
@@ -95,6 +105,11 @@ Existing logging remains sufficient. No metrics or identifier labels are added.
 Deferred-promise tests cover reversed search and tree completion, clear, close,
 unmount, session/context retirement, stale failures/finally, independent
 siblings, partially superseded batches, and loaded descendant preservation.
+A removed-directory fixture covers requested read failures without relying on
+permission enforcement, plus descendant/depth and genuine-empty controls. HTTP
+client tests use the existing serialized response types; hook coverage proves
+a rejected read preserves its loaded subtree while a successful empty reply
+clears it and independent siblings publish.
 The existing file-tree search E2E contract covers clear returning to tree mode.
 
 The [System Info query-cache ownership ADR](../../../decisions/2026-09-26-system-info-query-cache-ownership.md)

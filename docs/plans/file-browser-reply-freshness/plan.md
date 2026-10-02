@@ -45,7 +45,9 @@ The active requirement is reused without new requirement identities. A focused
 design supplement defines search intent and per-folder publication ordering.
 The approved scope settles the material choices: latest intent wins for the
 same resource; independent siblings and loaded descendants remain available.
-No unresolved product, security, API, or persistence decision blocks execution.
+Parent explicitly approved the bounded backend read-error extension after review
+found that unreadable and empty directories had indistinguishable successful
+wire replies. No new schema or API shape is required.
 
 Related-package inventory: [task navigation responsiveness](../task-navigation-responsiveness/plan.md)
 and its Files restoration work orders own retained trees and progressive loads.
@@ -64,6 +66,8 @@ work. Other concurrent fix scopes and their artifacts are independently owned.
 - Functional merges against the latest tree that retain loaded subtrees and
   independent sibling results.
 - Permanent hook/apply-changes regression tests and targeted verification.
+- Requested-directory filesystem read-error propagation through the existing
+  error contract, with privileged-safe Go and HTTP-client coverage.
 
 ### Out of scope
 
@@ -129,3 +133,20 @@ in the external task plan; local completion does not declare the task merged.
 - Retiring a session must also suppress its debounce and finally paths.
 - Depth-one placeholders must not discard still-loaded descendants, while an
   authoritative empty folder must clear its direct children.
+
+## Approved review remediation
+
+Parent released this task sequentially after workflow PR #4141 merged and
+authorized requested-directory read-error propagation in `workspace_files.go`.
+Preserve descendant placeholders and genuine-empty clearing. Add deterministic
+producer, existing HTTP-contract, and failed-read/sibling hook regressions.
+No broad local E2E replay is authorized. Historical markdown/submodule CI
+failures have corresponding main fixture/status corrections; validate the
+current-main synthetic merge and rely on fresh hosted CI after fixup publication.
+Keep the published fixup head stable through CI/review and normal merge.
+
+Remediation producer/transport race checks and 23 refresh/apply tests pass. The
+current-main synthetic merge is conflict-free; 46 affected Files tests and
+typecheck pass. Remaining lint/hook and immutable merge evidence is recorded
+in the external task plan before publication. Local completion does not claim
+remote CI/review or merge completion.

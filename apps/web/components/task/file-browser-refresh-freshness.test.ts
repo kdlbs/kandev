@@ -196,6 +196,27 @@ describe("Files file-watch refresh publication", () => {
   });
 });
 
+// @covers AC-UI-TASK-NAVIGATION-RESPONSIVENESS-001.3
+// @covers AC-UI-TASK-NAVIGATION-RESPONSIVENESS-001.4
+it("preserves a failed folder read, accepts its sibling, then clears a genuine empty reply", async () => {
+  const hook = await mount();
+  const src = deferred();
+  const other = deferred();
+  mocks.request.mockReturnValueOnce(src.promise).mockReturnValueOnce(other.promise);
+  emit([SRC_CURRENT, OTHER_CURRENT]);
+  await act(async () => other.resolve({ root: node("other", [node(OTHER_CURRENT)]) }));
+  await act(async () => src.reject(new Error("read directory: filesystem unavailable")));
+  expect(paths(hook.result.current.tree, "src")).toEqual(["src/deep"]);
+  expect(paths(hook.result.current.tree, "src/deep")).toEqual(["src/deep/keep.ts"]);
+  expect(paths(hook.result.current.tree, "other")).toEqual([OTHER_CURRENT]);
+  expect(hook.result.current.loadState).toBe("loaded");
+
+  mocks.request.mockResolvedValueOnce({ root: node("src") });
+  emit(["src/deep"]);
+  await waitFor(() => expect(paths(hook.result.current.tree, "src") ?? []).toEqual([]));
+  expect(paths(hook.result.current.tree, "other")).toEqual([OTHER_CURRENT]);
+});
+
 it("rejects a queued updater when the owner retires", async () => {
   const reply = deferred();
   mocks.request.mockReturnValueOnce(reply.promise);
