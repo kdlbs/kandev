@@ -1007,7 +1007,10 @@ func (g *GitOperator) Stage(ctx context.Context, paths []string) (*GitOperationR
 		args = []string{"add", "-A"}
 	} else {
 		// Stage specific files
-		args = append([]string{"add", "--"}, paths...)
+		args = []string{"add", "--"}
+		for _, path := range paths {
+			args = append(args, literalGitPathspec(path))
+		}
 	}
 
 	output, err := g.runGitCommand(ctx, args...)
@@ -1047,7 +1050,10 @@ func (g *GitOperator) Unstage(ctx context.Context, paths []string) (*GitOperatio
 		args = []string{"reset", "HEAD"}
 	} else {
 		// Unstage specific files
-		args = append([]string{"reset", "HEAD", "--"}, paths...)
+		args = []string{"reset", "HEAD", "--"}
+		for _, path := range paths {
+			args = append(args, literalGitPathspec(path))
+		}
 	}
 
 	output, err := g.runGitCommand(ctx, args...)
