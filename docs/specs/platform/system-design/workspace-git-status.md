@@ -178,6 +178,7 @@ Keep these consumers explicit. Add `details=wait` to the existing status routes 
 The runtime client methods used by these consumers request that mode. Foreground Changes requests do not.
 
 The wait joins the current fingerprint's bounded enrichment completion, without another job or caller-owned publication.
+Record each ready result's basic source revision. Under the enrichment lock, accept that completion for the observed epoch/revision before selecting a job.
 If a newer fingerprint replaces that job, return a superseded/unavailable result instead of unrelated details.
 Caller cancellation ends only its wait. Tracker cancellation still drains the worker.
 If detail generation fails, these consumers receive an error or explicit unavailable result under their existing retry policy.

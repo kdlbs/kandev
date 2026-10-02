@@ -10,7 +10,9 @@ requirements:
   - REQ-PLATFORM-INTERRUPTION-CONTINUATION-001
   - REQ-PLATFORM-INTERRUPTION-CONTINUATION-002
   - REQ-PLATFORM-INTERRUPTION-CONTINUATION-003
+  - REQ-PLATFORM-WORKSPACE-GIT-STATUS-001
 acceptance_criteria:
+  - AC-PLATFORM-WORKSPACE-GIT-STATUS-001.21
   - AC-PLATFORM-INTERRUPTION-CONTINUATION-001.1
   - AC-PLATFORM-INTERRUPTION-CONTINUATION-001.2
   - AC-PLATFORM-INTERRUPTION-CONTINUATION-001.3
@@ -27,6 +29,7 @@ acceptance_criteria:
   - AC-PLATFORM-INTERRUPTION-CONTINUATION-003.4
 system_design:
   - ../../specs/platform/system-design/provider-interruption-continuation.md
+  - ../../specs/platform/system-design/workspace-git-status.md
 ---
 
 # Task 04: Prove isolated desktop and phone recovery
@@ -39,6 +42,12 @@ well as recovery UI, so a success label cannot conceal original-prompt replay.
 
 ## In scope
 
+- Leave a finite 60-minute Windows CI job budget for cold setup, tests, helper
+  regressions, and cache publication; retain the 25-minute package deadline.
+- Required-CI remediation of the existing recovered-base-branch API test:
+  details waiters accept their own completed enrichment without treating its
+  publication revision as a superseding basic observation. Preserve actual
+  replacement, cancellation, and unavailable-detail fences.
 - Mock-only typed support using existing mock dialect provenance. Add named
   scenarios for output-only, completed read, pending read, write, unknown work,
   resumed progress before settlement, transient/hard restore failure, and
@@ -89,6 +98,9 @@ API polling; time-based assertions are not evidence of a dispatch outcome.
 
 ## Files likely touched
 
+- `.github/workflows/backend-tests.yml` and its workflow contract test
+- `apps/backend/internal/agentctl/server/process/workspace_git_status*.go`
+  and `workspace_tracker.go` for the required-CI details-wait handoff repair
 - `apps/backend/cmd/mock-agent/{handler,scenarios,emitter}.go` and focused tests
 - Mock-only ACP dialect hook and tests
 - `apps/web/e2e/helpers/provider-interruption-continuation.ts` (new)
@@ -158,3 +170,51 @@ exhausted temporary space. Resetting this task's generated Go cache recovered
 about 50GB, and the host rerun passed. Shared Docker data was not altered.
 The UI is unchanged by this cleanup, so the screenshots from the UI fixup
 commit remain representative.
+
+The Windows job reached its 40-minute workflow limit on two successive heads.
+The first run had completed every test and was saving its cache; the second
+had passed the core race suite but was interrupted during helper regressions.
+The job budget is now 60 minutes, while the 25-minute Go package deadline stays
+unchanged. Its existing ten-test workflow contract fails against the former
+budget and passes against the updated workflow.
+
+A broad host process-package attempt exposed the unchanged parent-process
+inspection test returning `-1` in this sandbox, and then exceeded the default
+ten-minute package-total deadline during its third repetition. An isolated
+parent-process test reproduces the same host restriction. These attempts are
+failed evidence, not successful full-package validation. CI's process-package
+race tests passed on the preceding head; focused Git-status validation uses
+explicit package-total deadlines and excludes unrelated process inspection.
+
+The recovered-base-branch API failure exposed a details-wait handoff race:
+a ready enrichment publication can advance the revision before the caller
+receives its accepted basic observation. The channel-controlled regression
+fails against the former implementation, then passes for both that completion
+and rejection of a superseding observation. Ready publications retain their
+basic source revision; selecting the current result and pending job is atomic
+under the enrichment lock.
+
+An earlier host stress run also returned a completed but unavailable detail
+result. That is a separate quality-failure path, and the exact command cause
+was not reproduced. Temporary tracing runs passed 40 and then 100 repetitions
+of the recovered-base-branch API test, the full API package three times with
+the race detector, and the workspace tracker suite. These results do not
+prove the earlier unavailable result fixed. Temporary tracing was removed
+before final production-source verification. Unavailable results remain
+errors and are not accepted by the new handoff rule.
+
+Final checks after tracing removal pass: the recovered-base-branch API race
+regression (with atomic coverage), the complete selected workspace tracker
+race suite, all ten workflow contract tests, documentation catalog/spec lint,
+and six-work-order PR coverage. The backend changed-line lint reports zero
+issues against fetched main `a1669c0a5584d390d210b9d5570df81c41d3936e`.
+
+```bash
+# From apps/backend. The process invocation disables only the host Git ignore
+# file through an invocation-scoped Git wrapper.
+go test -race -v -covermode=atomic ./internal/agentctl/server/api -run '^TestRecoveredBaseBranches_FirstGitResponses$' -count=1 -timeout=5m
+go test -race -v ./internal/agentctl/server/process -run 'Test(WorkspaceTracker|GitStatus)' -count=1 -timeout=20m
+```
+
+These checks validate the handoff repair, not a physical network transition.
+Current-head CI and review results must still be refreshed after publication.

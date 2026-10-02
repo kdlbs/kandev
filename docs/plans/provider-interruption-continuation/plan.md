@@ -5,8 +5,10 @@ requirements:
   - REQ-PLATFORM-INTERRUPTION-CONTINUATION-001
   - REQ-PLATFORM-INTERRUPTION-CONTINUATION-002
   - REQ-PLATFORM-INTERRUPTION-CONTINUATION-003
+  - REQ-PLATFORM-WORKSPACE-GIT-STATUS-001
 system_design:
   - ../../specs/platform/system-design/provider-interruption-continuation.md
+  - ../../specs/platform/system-design/workspace-git-status.md
 legacy_specs: []
 ---
 
@@ -365,3 +367,12 @@ commit remain representative.
   timer cleanup alone. Teardown/adoption races must not stop the successor.
 - The package promises neither write recovery nor exactly-once arbitrary agent
   actions. Promotion beyond conservative scope requires a separate design.
+
+Required-CI follow-up repairs the recovered-base-branch details-wait handoff
+using the existing platform Git-status contract, with deterministic completion
+and supersession tests. The Windows workflow now has a finite 60-minute job
+budget after two successive 40-minute job cancellations, while retaining the
+25-minute package deadline. Task 04 records the diagnostic stress runs and
+host-only failures without treating failed attempts as successful validation.
+These changes do not alter the recovery UI or public API shape, so the fresh
+UI-fixup screenshots and public recovery documentation remain applicable.
