@@ -172,3 +172,17 @@ Review follow-ups on 2026-10-02 fixed four projection gaps: terminal lifecycle w
 - `python3 scripts/list-docs.py validate`: 339 decisions and 1,281 specifications validated.
 - `python3 scripts/lint-spec-files.py --all`: all specification files passed.
 - `git diff --check`: passed after recording results.
+
+## PR fixup verification (2026-10-02)
+
+The retries-disabled replay of the archived shard exposed a fixture failure in the initial root tree: the response succeeded, but the task workspace did not contain `navigation-root.ts` or its sibling fixture files. `seedNavigationTasks` had committed them only to the local checkout. It now creates and pushes a unique branch from `origin/main`, then pins both tasks to that branch. The desktop Files panel is foregrounded before opening its tab, and the test waits for each matching tree response before checking the rendered rows.
+
+- Before the fixture fix, the exact archived shard replay ran in the CI runtime container with one worker and retries disabled: 254 passed, 6 skipped, 1 failed in 22.5 minutes. The response capture confirmed the absent fixture files in the successful root response.
+- Ordered regression after the fix: `file-tree-chat-context.spec.ts`, `large-file-tree-virtualization.spec.ts`, and `task-navigation-responsiveness.spec.ts` passed 7/7 in Chromium with retries disabled.
+- Fresh-build Chromium navigation spec passed 3/3; Mobile Chrome navigation spec passed 1/1 with retries disabled.
+- WebSocket client suite passed 29/29, including the queued-request timeout regression. The six disclosure unit/component files passed 90/90.
+- Web typecheck, warning-free targeted ESLint, Prettier check, and i18n ratchet passed. The E2E production build passed.
+- The other initial failed CI leaf was checked against a temporary merge of PR head `b208a2a54cd86a03df03b809e3701865135a8e43` and current `main` `0ec0538aa038f2e8b8617fb4f5be6128f0cedbac`. The exact commit-spacing test passed 1/1 in the CI runtime container with retries disabled; current `main`'s row-size alignment resolves that assertion.
+- Documentation validation remains the prior 339-decision / 1,281-specification pass; no specification files changed during this fixup. `git diff --check` passed after recording these results.
+
+The full archived shard has not been rerun after the fixture correction. Fresh PR CI on the pushed head remains the final full-suite verification.
