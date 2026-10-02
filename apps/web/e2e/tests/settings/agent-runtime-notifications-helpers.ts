@@ -3,6 +3,7 @@ import type { AgentUpdateStatus } from "../../../lib/api/domains/agent-update-ap
 import { waitForFiniteAnimations } from "../../helpers/animations";
 import type { PrAssetCapture } from "../../helpers/pr-asset-capture";
 import { installRuntimeUpdateFixture } from "./agent-runtime-update-helpers";
+import { compactRuntimeSettings, retainRuntimePolicyDraft } from "./agent-runtime-settings-helpers";
 
 export async function runtimeAwareness(page: Page, mobile = false, capture?: PrAssetCapture) {
   let statuses: AgentUpdateStatus[] = [
@@ -67,6 +68,14 @@ export async function runtimeAwareness(page: Page, mobile = false, capture?: PrA
       check_state: "unknown",
     },
   ];
+  statuses.push({
+    ...statuses[2],
+    agent_name: "disabled-cli",
+    display_name: "Disabled CLI",
+    runtime_id: "disabled-cli",
+    available: false,
+    enabled: false,
+  });
   const command = [
     "npm",
     "--prefix",
@@ -110,11 +119,16 @@ export async function runtimeAwareness(page: Page, mobile = false, capture?: PrA
     runtime.setStatusResponse(statuses);
     await route.fulfill({ json: { enabled } });
   });
+  await compactRuntimeSettings(page, mobile, capture);
   await page.goto("/");
   const indicator = page.getByTestId("agent-runtime-update-indicator");
   await expect(indicator).toContainText("2 agent runtime updates");
   if (mobile) expect((await indicator.boundingBox())!.height).toBeGreaterThanOrEqual(44);
   expect(runtime.postCount()).toBe(0);
+  await indicator.click();
+  await expect(page).toHaveURL(/settings\/agents#runtime-updates$/);
+  await expect(page.locator("#runtime-updates > details")).toHaveAttribute("open");
+  await page.goto("/");
   await runtime.emit("system.update_available", {
     agent_name: "kimi-acp",
     runtime_id: "kimi-acp",
@@ -145,6 +159,7 @@ export async function runtimeAwareness(page: Page, mobile = false, capture?: PrA
   const automatic = managed.getByRole("switch", { name: "Automatic updates" });
   await expect(automatic).not.toBeChecked();
   await automatic.click();
+  await retainRuntimePolicyDraft(page);
   expect(policyWrites).toBe(0);
   await page.getByTestId("settings-floating-save").getByRole("button", { name: /Save/i }).click();
   await expect.poll(() => policyWrites).toBe(1);

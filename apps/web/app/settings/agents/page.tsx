@@ -427,13 +427,6 @@ export default function AgentsSettingsPage() {
 
       <Separator />
 
-      <AgentRuntimePolicies
-        hasRuntimeControl={(name) =>
-          installedAgents.some((agent) => agent.name === name) &&
-          Boolean(resolveRuntimeUpdate(name)?.supported)
-        }
-      />
-
       <InstalledAgentsSection
         canManage={canManage}
         installedAgents={installedAgents}
@@ -452,6 +445,13 @@ export default function AgentsSettingsPage() {
         startUpdate={startUpdate}
         setTuiDialogOpen={setTuiDialogOpen}
         handleRescan={handleRescan}
+      />
+
+      <AgentRuntimePolicies
+        hasRuntimeControl={(name) =>
+          installedAgents.some((agent) => agent.name === name) &&
+          Boolean(resolveRuntimeUpdate(name)?.supported)
+        }
       />
 
       <AddTUIAgentDialog

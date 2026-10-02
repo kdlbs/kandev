@@ -14,6 +14,13 @@ test("narrow fine-pointer runtime flow retains phone controls", async ({ testPag
   await runtimeAwareness(testPage, true);
 });
 
+for (const width of [767, 768]) {
+  test(`runtime settings controls respect the ${width}px phone boundary`, async ({ testPage }) => {
+    await testPage.setViewportSize({ width, height: 900 });
+    await runtimeAwareness(testPage, width < 768);
+  });
+}
+
 test("native host keeps managed fallback version controls reachable", async ({
   testPage,
   prCapture,

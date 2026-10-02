@@ -285,6 +285,11 @@ Notifications name the affected runtime and link directly to its row in
 notification preferences apply; repeated notices for the same runtime and version
 are suppressed across reloads.
 
+The **Agent runtime updates** section is at the bottom of **Settings > Agents**,
+after your installed agents, and starts collapsed. Expand it to manage runtime
+policies. Notification and indicator links open the section automatically and
+reveal their destination. Collapsing the section preserves unsaved policy changes.
+
 The runtime section shows the selected or observed version, latest known version,
 and who manages the installation. **Unknown** means Kandev could not verify the
 version or release source. It does not mean the runtime is up to date. Unavailable

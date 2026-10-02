@@ -28,6 +28,8 @@ All registered agents receive truthful capability/status coverage. Eligible mana
 
 ## ASCII UI preview
 
+These previews record the original delivery. The [compact settings follow-up](../agent-runtime-settings-compact/plan.md) owns the new collapsed, bottom-of-page settings composition; app notification and indicator presentation remain as shown here.
+
 ### UI-01: Runtime awareness outside Settings
 
 Desktop and phone use the same notification/indicator entry; phone action height is at least 44px and stays above safe-area navigation.
