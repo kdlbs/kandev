@@ -28,14 +28,15 @@ type QuarantineController interface {
 }
 
 type OperationsConfig struct {
-	Settings   *SettingsStore
-	Store      *Store
-	Jobs       *jobs.Tracker
-	Activity   *activity.Coordinator
-	Providers  []CleanupProvider
-	Overview   OverviewRefresher
-	GoCache    GoCacheAdopter
-	Quarantine QuarantineController
+	Settings         *SettingsStore
+	Store            *Store
+	Jobs             *jobs.Tracker
+	Activity         *activity.Coordinator
+	Providers        []CleanupProvider
+	Overview         OverviewRefresher
+	GoCache          GoCacheAdopter
+	GoCacheMutations *MutationGate
+	Quarantine       QuarantineController
 }
 
 type Operations struct {
@@ -51,6 +52,11 @@ func (o *Operations) AdoptGoCache(
 	path string,
 	confirmation string,
 ) (StorageMaintenanceSettings, Capabilities, error) {
+	release, err := o.config.GoCacheMutations.Acquire(ctx)
+	if err != nil {
+		return StorageMaintenanceSettings{}, Capabilities{}, err
+	}
+	defer release()
 	if o.config.GoCache == nil {
 		return StorageMaintenanceSettings{}, Capabilities{}, errors.New("go-cache provider is unavailable")
 	}
@@ -97,8 +103,10 @@ func (o *Operations) RunNow(ctx context.Context, resources []string, force bool)
 	if err != nil {
 		return "", err
 	}
-	if err := o.preflight(ctx, force); err != nil {
-		return "", err
+	if !goCacheBusyPreflightBypass(providers, settings) {
+		if err := o.preflight(ctx, force); err != nil {
+			return "", err
+		}
 	}
 	return o.startTracked(ctx, JobKindCleanup, func(jobCtx context.Context, id string) (map[string]any, error) {
 		runner := NewRunner(RunnerConfig{
@@ -108,6 +116,26 @@ func (o *Operations) RunNow(ctx context.Context, resources []string, force bool)
 		run, runErr := runner.Run(jobCtx, RunTriggerManual, settings)
 		return runResultMap(run), runErr
 	}), nil
+}
+
+func goCacheBusyPreflightBypass(
+	providers []CleanupProvider,
+	settings StorageMaintenanceSettings,
+) bool {
+	if !settings.GoCache.AllowCleanupWhileBusy {
+		return false
+	}
+	for _, provider := range providers {
+		if provider.Name() == "go_cache" {
+			if settings.GoCache.Enabled {
+				return true
+			}
+			if explicitlySelected, ok := provider.(ExplicitlySelectedCleanupProvider); ok && explicitlySelected.ExplicitlySelected() {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func (o *Operations) RestoreQuarantine(ctx context.Context, id string) (QuarantineEntry, error) {
@@ -289,6 +317,8 @@ type explicitCleanupSelection struct {
 func (p explicitCleanupSelection) Cleanup(ctx context.Context) (map[string]any, error) {
 	return p.explicit.CleanupExplicit(ctx)
 }
+
+func (explicitCleanupSelection) ExplicitlySelected() bool { return true }
 
 func (p explicitCleanupSelection) CleanupWithSettings(
 	ctx context.Context,

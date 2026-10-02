@@ -13,9 +13,11 @@ import {
 } from "@/lib/i18n/formats";
 import type {
   StorageMaintenanceSettings,
+  StorageMaintenanceRun,
   StorageOverviewResponse,
   StorageSummaryPartial,
 } from "@/lib/types/system";
+import { StorageGoCacheResult } from "./storage-go-cache-result";
 import { StorageActionButton } from "./storage-action-button";
 import { StorageSettingHelp } from "./storage-setting-help";
 import {
@@ -36,6 +38,7 @@ interface Props {
   loading?: boolean;
   error?: string | null;
   disabledReason?: string;
+  latestGoCacheRun?: StorageMaintenanceRun;
   onRunGoCache: () => void;
   onRunTemporaryArtifacts?: () => void;
   onReviewTemporaryArtifacts?: () => void;
@@ -83,6 +86,7 @@ function temporaryArtifactsDisabledReason(
 interface ResourceRowProps {
   resource: StorageResource;
   goCacheCleanupDisabledReason?: string;
+  latestGoCacheRun?: StorageMaintenanceRun;
   onRunGoCache: () => void;
   temporaryArtifactsCleanupDisabledReason?: string;
   onRunTemporaryArtifacts: () => void;
@@ -106,9 +110,47 @@ function ResourceBar({ resource }: { resource: StorageResource }) {
   );
 }
 
+function GoCacheResourceActions({
+  latestRun,
+  disabledReason,
+  onRun,
+}: {
+  latestRun?: StorageMaintenanceRun;
+  disabledReason?: string;
+  onRun: () => void;
+}) {
+  const { t } = useTranslation();
+  return (
+    <>
+      {latestRun && (
+        <div className="mt-3 border-t pt-3">
+          <StorageGoCacheResult
+            result={latestRun.result}
+            busyPolicyEnabled={
+              latestRun.settings_snapshot.go_cache?.allow_cleanup_while_busy === true
+            }
+            testId="storage-go-cache-inline-result"
+          />
+        </div>
+      )}
+      <StorageActionButton
+        variant="outline"
+        className="mt-3 w-full sm:w-auto"
+        disabledReason={disabledReason}
+        onClick={onRun}
+        data-testid="storage-go-cache-clean"
+        focusId="go-cache-clean"
+      >
+        <IconTrash className="size-4" /> {t("system:storageCleanGoCache")}
+      </StorageActionButton>
+    </>
+  );
+}
+
 function ResourceRow({
   resource,
   goCacheCleanupDisabledReason,
+  latestGoCacheRun,
   onRunGoCache,
   temporaryArtifactsCleanupDisabledReason,
   onRunTemporaryArtifacts,
@@ -171,16 +213,11 @@ function ResourceRow({
           />
         )}
         {resource.id === "go-cache" && (
-          <StorageActionButton
-            variant="outline"
-            className="mt-3 w-full sm:w-auto"
+          <GoCacheResourceActions
+            latestRun={latestGoCacheRun}
             disabledReason={goCacheCleanupDisabledReason}
-            onClick={onRunGoCache}
-            data-testid="storage-go-cache-clean"
-            focusId="go-cache-clean"
-          >
-            <IconTrash className="size-4" /> {t("system:storageCleanGoCache")}
-          </StorageActionButton>
+            onRun={onRunGoCache}
+          />
         )}
         {resource.id === TEMPORARY_ARTIFACTS_RESOURCE_ID && (
           <StorageActionButton
@@ -381,6 +418,7 @@ function StorageOverviewResources({
   focusTemporaryCleanup,
   cleanupDisabledReason,
   temporaryArtifactsCleanupDisabledReason,
+  latestGoCacheRun,
   onRunGoCache,
   onRunTemporaryArtifacts,
   onReviewTemporaryArtifacts,
@@ -390,6 +428,7 @@ function StorageOverviewResources({
   focusTemporaryCleanup?: number;
   cleanupDisabledReason?: string;
   temporaryArtifactsCleanupDisabledReason?: string;
+  latestGoCacheRun?: StorageMaintenanceRun;
   onRunGoCache: () => void;
   onRunTemporaryArtifacts: () => void;
   onReviewTemporaryArtifacts: () => void;
@@ -420,6 +459,7 @@ function StorageOverviewResources({
             key={resource.id}
             resource={resource}
             goCacheCleanupDisabledReason={cleanupDisabledReason}
+            latestGoCacheRun={latestGoCacheRun}
             onRunGoCache={onRunGoCache}
             temporaryArtifactsCleanupDisabledReason={temporaryArtifactsCleanupDisabledReason}
             onRunTemporaryArtifacts={onRunTemporaryArtifacts}
@@ -437,6 +477,7 @@ export function StorageOverviewCard({
   loading,
   error,
   disabledReason,
+  latestGoCacheRun,
   onRunGoCache,
   onRunTemporaryArtifacts = () => {},
   focusTemporaryEntries,
@@ -471,6 +512,7 @@ export function StorageOverviewCard({
         focusTemporaryCleanup={focusTemporaryCleanup}
         cleanupDisabledReason={cleanupDisabledReason}
         temporaryArtifactsCleanupDisabledReason={temporaryArtifactsCleanupDisabledReason}
+        latestGoCacheRun={latestGoCacheRun}
         onRunGoCache={onRunGoCache}
         onRunTemporaryArtifacts={onRunTemporaryArtifacts}
         onReviewTemporaryArtifacts={onReviewTemporaryArtifacts}

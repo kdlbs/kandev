@@ -20,6 +20,12 @@ This design preserves the technical source detail for `REQ-SYSTEM-PAGE-STORAGE-M
 | --- | --- |
 | `REQ-SYSTEM-PAGE-STORAGE-MAINTENANCE-001` | [Migrated source detail](#migrated-source-detail) |
 
+## Planned Go-cache replacement
+
+The [Go cache reclamation package](../../../plans/go-cache-reclamation/plan.md)
+replaces new managed-cache quarantine scenarios when implemented. Historical
+quarantine, adopted-path safety, and non-Go scenarios remain regression coverage.
+
 ## Migrated source detail
 
 The [temporary storage visibility and cleanup design](storage-temporary-folders.md) supersedes the

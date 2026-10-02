@@ -24,6 +24,12 @@ adds two measurements to the existing category list when implemented.
 | --- | --- |
 | `REQ-SYSTEM-PAGE-STORAGE-MAINTENANCE-001` | [Migrated source detail](#migrated-source-detail) |
 
+## Planned Go-cache replacement
+
+The draft [Go cache reclamation design](go-cache-reclamation.md) replaces the
+Go-only quarantine and global idle rules when implemented. The source detail
+below remains the current baseline for legacy caches and other resources.
+
 ## Migrated source detail
 
 ## Why

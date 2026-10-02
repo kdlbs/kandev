@@ -3,65 +3,9 @@ import { TooltipProvider } from "@kandev/ui/tooltip";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { formatDateTime } from "@/lib/i18n/formats";
 import { activateLocale } from "@/lib/i18n";
-import type { StorageAnalysisState, StorageOverviewResponse } from "@/lib/types/system";
+import type { StorageOverviewResponse } from "@/lib/types/system";
 import { StorageOverviewCard } from "./storage-overview-card";
-
-const degradedOverview = {
-  settings: {
-    enabled: false,
-    check_interval_hours: 24,
-    idle_for_minutes: 10,
-    orphan_grace_hours: 168,
-    quarantine_retention_hours: 168,
-    workspaces: { enabled: true, dependency_cleanup_enabled: false },
-    kandev_containers: { enabled: true },
-    go_cache: { enabled: false, max_bytes: 16106127360, adopted_path: "" },
-    docker: {
-      dedicated_daemon_acknowledged: false,
-      build_cache_enabled: false,
-      build_cache_keep_bytes: 10737418240,
-      build_cache_unused_hours: 168,
-      unused_images_enabled: false,
-      unused_images_hours: 168,
-    },
-  },
-  capabilities: {
-    managed_go_cache_path: "/data/cache/go-build",
-    go_cache_adoption_available: true,
-    temporary_artifacts_available: false,
-    docker_available: false,
-    docker_host: "",
-    host_global_docker_cleanup_allowed: false,
-  },
-  summary: {
-    workspaces: { active_bytes: 0, candidate_bytes: 0 },
-    go_cache: { path: "/data/cache/go-build", size_bytes: 0, owned: true, enabled: false },
-    quarantine: { available: false, warning: "quarantine database unavailable" },
-    temporary_artifacts: { available: false, warning: "temporary artifact registry unavailable" },
-    docker: {
-      available: false,
-      build_cache_bytes: 0,
-      unused_image_bytes: 0,
-      managed_container_count: 0,
-      managed_container_bytes: 0,
-    },
-  },
-  analysis: {
-    generation: 1,
-    state: "ready",
-    started_at: "2026-07-23T11:59:00Z",
-    completed_at: "2026-07-23T12:00:00Z",
-    duration_ms: 60000,
-    cache_ttl_seconds: 900,
-    refresh_due_at: "2099-07-23T12:15:00Z",
-    stale: false,
-    error: null,
-    progress: { completed_sources: 8, total_sources: 8, sources: {} },
-    partial_summary: null,
-  } satisfies StorageAnalysisState,
-  analyzed_at: "2026-07-23T12:00:00Z",
-  last_run: null,
-} satisfies StorageOverviewResponse;
+import { degradedOverview } from "./storage-overview-card.test-fixtures";
 
 const DATABASE_PATH = "/data/kandev.db";
 const DATABASE_BACKUP_PATH = "/data/backups";

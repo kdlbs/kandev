@@ -158,6 +158,13 @@ scan deadline changes, and host-wide disk attribution are outside this extension
 Host cache repair, automatic adoption of symlink targets, new settings, and new interface controls are outside this extension.
 Fallback does not guarantee that an independently configured cache or a tool's default cache is usable.
 
+## Planned Go-cache extension
+
+The draft [Go cache reclamation requirements](go-cache-reclamation.md) define
+one shared cache and optional direct deletion during active work. They preserve
+requirement 006's optional fallback. Existing maintenance behavior remains the
+baseline until that package is implemented.
+
 ## System design
 
 The implemented optional-cache contract is defined in the

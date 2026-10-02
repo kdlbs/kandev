@@ -1,8 +1,42 @@
 import fs from "node:fs";
 import path from "node:path";
 import type { Page, Route } from "@playwright/test";
+import type { StorageMaintenanceSettings, StorageSettingsResponse } from "../../lib/types/system";
+import type { ApiClient } from "./api-client";
 
 const ABOVE_DEFAULT_LIMIT_BYTES = 16 * 1024 * 1024 * 1024;
+const STORAGE_SETTINGS_PATH = "/api/v1/system/storage/settings";
+
+export async function requestStorageMaintenanceSettings(
+  apiClient: ApiClient,
+  method: "GET" | "PATCH",
+  settings?: StorageMaintenanceSettings,
+): Promise<StorageSettingsResponse> {
+  const response = await apiClient.rawRequest(
+    method,
+    STORAGE_SETTINGS_PATH,
+    settings ? { settings } : undefined,
+  );
+  if (!response.ok) {
+    throw new Error(
+      `${method} ${STORAGE_SETTINGS_PATH} failed (${response.status}): ${await response.text()}`,
+    );
+  }
+  return response.json() as Promise<StorageSettingsResponse>;
+}
+
+export async function restoreStorageMaintenanceSettings(
+  apiClient: ApiClient,
+  settings: StorageMaintenanceSettings,
+): Promise<void> {
+  const current = await requestStorageMaintenanceSettings(apiClient, "GET");
+  // Adoption has a dedicated endpoint and no undo operation. Keep the current
+  // path while restoring ordinary policy fields in this disposable E2E backend.
+  await requestStorageMaintenanceSettings(apiClient, "PATCH", {
+    ...settings,
+    go_cache: { ...settings.go_cache, adopted_path: current.settings.go_cache.adopted_path },
+  });
+}
 
 export function seedManagedGoCache(tmpDir: string): { artifact: string } {
   const cacheRoot = path.join(tmpDir, ".kandev", "cache");

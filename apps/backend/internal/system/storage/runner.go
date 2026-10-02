@@ -34,6 +34,10 @@ type ExplicitCleanupProvider interface {
 	CleanupExplicit(ctx context.Context) (map[string]any, error)
 }
 
+type ExplicitlySelectedCleanupProvider interface {
+	ExplicitlySelected() bool
+}
+
 type RunnerConfig struct {
 	Activity  *activity.Coordinator
 	Store     RunStore
@@ -87,6 +91,9 @@ func (r *Runner) Run(
 	if err != nil {
 		return MaintenanceRun{}, err
 	}
+	if r.shouldRunGoCacheWhileBusy(trigger, settings) {
+		return r.runGoCacheWhileBusy(ctx, run, trigger, settings)
+	}
 	quietPeriod := quietPeriodForTrigger(trigger, settings)
 	lease, busy, err := r.acquireMaintenance(ctx, quietPeriod, trigger)
 	if errors.Is(err, activity.ErrBusy) {
@@ -118,8 +125,85 @@ func (r *Runner) Run(
 	if _, err := r.transitionRun(ctx, run.ID, RunStateRunning, nil, ""); err != nil {
 		return MaintenanceRun{}, err
 	}
-	result, runErr := r.runProviders(lease.Context(), settings)
+	result, runErr := r.runProviders(lease.Context(), settings, r.providers)
 	return r.finishRun(ctx, run.ID, lease.Context(), result, runErr)
+}
+
+func (r *Runner) shouldRunGoCacheWhileBusy(
+	trigger RunTrigger,
+	settings StorageMaintenanceSettings,
+) bool {
+	if !settings.GoCache.AllowCleanupWhileBusy {
+		return false
+	}
+	if trigger == RunTriggerScheduled && (!settings.Enabled || !settings.GoCache.Enabled) {
+		return false
+	}
+	for _, provider := range r.providers {
+		if provider.Name() != string(ResourceTypeGoCache) {
+			continue
+		}
+		if settings.GoCache.Enabled {
+			return true
+		}
+		if explicitlySelected, ok := provider.(ExplicitlySelectedCleanupProvider); ok && explicitlySelected.ExplicitlySelected() {
+			return true
+		}
+	}
+	return false
+}
+
+func (r *Runner) runGoCacheWhileBusy(
+	ctx context.Context,
+	run MaintenanceRun,
+	trigger RunTrigger,
+	settings StorageMaintenanceSettings,
+) (MaintenanceRun, error) {
+	if _, err := r.transitionRun(ctx, run.ID, RunStateRunning, nil, ""); err != nil {
+		return MaintenanceRun{}, err
+	}
+	goProviders, otherProviders := partitionGoCacheProviders(r.providers)
+	result, goErr := r.runProviders(ctx, settings, goProviders)
+	if len(otherProviders) == 0 {
+		return r.finishRun(ctx, run.ID, ctx, result, goErr)
+	}
+	lease, busy, err := r.acquireMaintenance(ctx, quietPeriodForTrigger(trigger, settings), trigger)
+	if errors.Is(err, activity.ErrBusy) {
+		result["skipped_providers"] = skippedProviders(otherProviders, busy)
+		return r.finishRun(ctx, run.ID, ctx, result, goErr)
+	}
+	if err != nil {
+		return r.finishRun(ctx, run.ID, ctx, result, errors.Join(goErr, err))
+	}
+	defer lease.Release()
+	otherResult, otherErr := r.runProviders(lease.Context(), settings, otherProviders)
+	for name, providerResult := range otherResult {
+		result[name] = providerResult
+	}
+	return r.finishRun(ctx, run.ID, lease.Context(), result, errors.Join(goErr, otherErr))
+}
+
+func partitionGoCacheProviders(providers []CleanupProvider) ([]CleanupProvider, []CleanupProvider) {
+	goCache := make([]CleanupProvider, 0, 1)
+	others := make([]CleanupProvider, 0, len(providers))
+	for _, provider := range providers {
+		if provider.Name() == string(ResourceTypeGoCache) {
+			goCache = append(goCache, provider)
+			continue
+		}
+		others = append(others, provider)
+	}
+	return goCache, others
+}
+
+func skippedProviders(providers []CleanupProvider, busy []activity.Kind) map[string]any {
+	skipped := make(map[string]any, len(providers))
+	for _, provider := range providers {
+		skipped[provider.Name()] = map[string]any{
+			"reason": "activity_busy", "busy_resources": busy,
+		}
+	}
+	return skipped
 }
 
 func (r *Runner) acquireMaintenance(
@@ -171,10 +255,11 @@ func (r *Runner) createRun(
 func (r *Runner) runProviders(
 	ctx context.Context,
 	settings StorageMaintenanceSettings,
+	providers []CleanupProvider,
 ) (map[string]any, error) {
-	results := make(map[string]any, len(r.providers))
+	results := make(map[string]any, len(providers))
 	var errs []error
-	for _, provider := range r.providers {
+	for _, provider := range providers {
 		if ctx.Err() != nil {
 			break
 		}
@@ -220,7 +305,8 @@ func (r *Runner) finishRun(
 	if err != nil {
 		return MaintenanceRun{}, err
 	}
-	if state == RunStateSucceeded && r.overview != nil {
+	_, goCacheResultPresent := result[string(ResourceTypeGoCache)]
+	if r.overview != nil && (state == RunStateSucceeded || goCacheResultPresent) {
 		r.overview.Invalidate()
 	}
 	return run, runErr

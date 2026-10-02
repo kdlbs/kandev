@@ -316,6 +316,7 @@ export interface StorageGoCacheSettings {
   enabled: boolean;
   max_bytes: number;
   adopted_path: string;
+  allow_cleanup_while_busy: boolean;
 }
 
 export interface StorageDockerSettings {
