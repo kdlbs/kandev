@@ -391,8 +391,6 @@
   "runtimeFailedBody": "{{agent}} could not activate runtime {{version}} (previous: {{previous}}). This attempt preserved your selection. Retry manually or turn off automatic updates.",
   "runtimeRunning": "Preparing {{previous}} to {{version}}",
   "runtimeReview": "Review runtime",
-  "runtimeIndicator_one": "{{count}} agent runtime update",
-  "runtimeIndicator_other": "{{count}} agent runtime updates",
   "runtimePolicySaveFailed": "Unable to save automatic updates. Try again.",
   "runtimeOtherRegistrations_one": "Other registered runtime ({{count}})",
   "runtimeOtherRegistrations_other": "Other registered runtimes ({{count}})",
