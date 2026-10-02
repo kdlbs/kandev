@@ -99,6 +99,33 @@ func TestWorktreeRecoveryLaunchIntegration(t *testing.T) {
 	assertSelectedWorktreeRecoveryRequest(t, admissionRequest, taskID, sessionID)
 }
 
+func TestPreparedSessionRecoveryBindsSelectedEnvironmentBeforeAdmission(t *testing.T) {
+	const taskID = "task-prepared-recovery-binding"
+	const existingSessionID = "session-prepared-recovery-existing"
+	repo := newMockRepository()
+	seedSelectedWorktreeRecoveryEnvironment(repo, taskID, existingSessionID, models.TaskSessionStateCancelled)
+
+	var admissionRequest worktree.RecoveryAdmissionRequest
+	exec := newTestExecutor(t, &mockAgentManager{}, repo)
+	exec.SetSelectedWorktreeRecoveryAdmission(func(_ context.Context, req worktree.RecoveryAdmissionRequest) (*worktree.RecoveryAdmission, error) {
+		admissionRequest = req
+		return nil, nil
+	})
+
+	_, err := exec.prepareSessionAttempt(context.Background(), &v1.Task{
+		ID: taskID, WorkspaceID: "workspace-recovery", Title: "Prepared recovery binding",
+	}, "profile-recovery", models.ExecutorIDWorktree, "", "", true, "", nil)
+	if err != nil {
+		t.Fatalf("prepareSessionAttempt: %v", err)
+	}
+	if got := admissionRequest.SelectionSnapshot.SessionTaskEnvironmentID; got != "environment-recovery" {
+		t.Fatalf("snapshot session environment ID = %q, want selected environment ID", got)
+	}
+	if !admissionRequest.SelectionSnapshot.SessionEnvironmentMatchesSelected() {
+		t.Fatal("prepared-session recovery snapshot does not match its selected environment")
+	}
+}
+
 func TestWorktreeRecoveryResumeIntegration(t *testing.T) {
 	const taskID = "task-recovery-resume"
 	const sessionID = "session-recovery-resume"

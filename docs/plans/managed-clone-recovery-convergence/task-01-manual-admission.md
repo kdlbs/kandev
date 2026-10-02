@@ -90,6 +90,7 @@ Do not add a generic broad verification pass.
 - `apps/backend/internal/worktree/errors.go`
 - `apps/backend/internal/worktree/recovery_admission_wait_policy_test.go` (new)
 - `apps/backend/internal/orchestrator/executor/executor_worktree_recovery.go`
+- `apps/backend/internal/orchestrator/executor/executor_execute.go`
 - `apps/backend/internal/orchestrator/executor/executor_manual_recovery_contention_test.go` (new)
 - `apps/backend/internal/orchestrator/session_launch.go`
 - `apps/backend/internal/orchestrator/handlers/handlers.go`
@@ -161,3 +162,11 @@ the selected environment, generation, and full inventory checks.
 `TestMissingCheckoutRecoveryLaunchAndResume` and
 `TestSQLiteStore_ReadRecoverySelectionSnapshotTracksProspectiveSessionAbsence`
 cover that pre-insert path.
+
+Review follow-up: `TestPreparedSessionRecoveryBindsSelectedEnvironmentBeforeAdmission`
+reproduced a prepared launch whose selected task environment was absent from the
+session snapshot. `prepareSessionAttempt` now assigns the selected environment ID
+before admission when the new session will bind to that workspace. The regression
+failed on the empty snapshot ID before the fix and passes after it. The full
+recovery-focused race command, including executor, handler, service, and SQLite
+repository packages, passed.

@@ -267,6 +267,9 @@ race-enabled backend regressions, SQL guard, specification validation, and
   passed after fresh host builds. Rebased specification validation passed at 343
   decisions and 1,309 specifications; 36 linter tests passed. PostgreSQL cases
   compiled but were skipped because `KANDEV_TEST_POSTGRES_DSN` was unavailable.
+The follow-up also binds the selected environment onto a prepared session before
+capturing its recovery snapshot; the new regression failed before the fix and
+passed with the recovery-focused race-enabled backend tests.
 
 ### Documentation coverage preflight command
 
