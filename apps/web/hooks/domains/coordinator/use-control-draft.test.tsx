@@ -23,6 +23,12 @@ vi.mock("@/components/settings/settings-save-provider", () => ({
     contributor = c;
   },
 }));
+const listSetsMock = vi.fn();
+const listReposMock = vi.fn();
+vi.mock("@/lib/api/domains/workspace-api", () => ({
+  listRepositorySets: (...a: unknown[]) => listSetsMock(...a),
+  listRepositories: (...a: unknown[]) => listReposMock(...a),
+}));
 vi.mock("@/lib/toast/sonner", () => ({ toast: { error: (...a: unknown[]) => toastError(...a) } }));
 vi.mock("@/lib/ws/connection", () => ({ useWebSocketClient: () => null }));
 vi.mock("react-i18next", () => ({ useTranslation: () => ({ t: (key: string) => key }) }));
@@ -222,5 +228,92 @@ describe("useControlDraft failures and validity", () => {
     getMock.mockResolvedValueOnce(settings());
     act(() => result.current.retry());
     await waitFor(() => expect(result.current.status).toBe("ready"));
+  });
+});
+
+describe("useControlDraft projects scope", () => {
+  const selectedProjects = (ids: string[]) =>
+    settings({
+      projects_config: {
+        scope: "selected",
+        entries: ids.map((id) => ({ kind: "repository" as const, id })),
+        include_no_repository: false,
+      },
+    });
+  const repos = (ids: string[]) => ({
+    repositories: ids.map((id) => ({ id, name: id })),
+  });
+
+  it("blocks Save for a selected draft while the project listing failed", async () => {
+    listSetsMock.mockRejectedValue(new Error("down"));
+    listReposMock.mockRejectedValue(new Error("down"));
+    getMock.mockResolvedValue(selectedProjects(["r1", "r2"]));
+    const { result } = mount();
+    await waitFor(() => expect(result.current.projectsRead.status).toBe("error"));
+    act(() =>
+      result.current.setProjects({
+        ...result.current.draft!.projects!,
+        entries: [{ kind: "repository", id: "r1" }],
+      }),
+    );
+    expect(contributor?.isDirty).toBe(true);
+    expect(contributor?.canSave).toBe(false);
+  });
+
+  it("refreshes the listings and prunes the draft on projects_foreign_entry", async () => {
+    listSetsMock.mockResolvedValue({ repository_sets: [] });
+    listReposMock.mockResolvedValueOnce(repos(["r1", "r2"]));
+    getMock.mockResolvedValue(selectedProjects(["r1", "r2"]));
+    const { result } = mount();
+    await waitFor(() => expect(result.current.projectsRead.status).toBe("ready"));
+    act(() =>
+      result.current.setProjects({
+        ...result.current.draft!.projects!,
+        entries: [
+          { kind: "repository", id: "r1" },
+          { kind: "repository", id: "r2" },
+        ],
+      }),
+    );
+    act(() =>
+      result.current.setProjects({
+        ...result.current.draft!.projects!,
+        includeNoRepository: true,
+      }),
+    );
+    putMock.mockRejectedValueOnce(
+      new ApiError("gone", 400, {
+        field: "projects",
+        code: "projects_foreign_entry",
+        error: "gone",
+      }),
+    );
+    listReposMock.mockResolvedValueOnce(repos(["r1"]));
+    await act(async () => {
+      await contributor?.save().catch(() => {});
+    });
+    await waitFor(() =>
+      expect(result.current.draft?.projects?.entries).toEqual([{ kind: "repository", id: "r1" }]),
+    );
+    expect(listReposMock).toHaveBeenCalledTimes(2);
+    expect(result.current.fieldError?.code).toBe("projects_foreign_entry");
+  });
+
+  it("lets an unrelated save through after the project list is emptied", async () => {
+    listSetsMock.mockResolvedValue({ repository_sets: [] });
+    listReposMock.mockResolvedValue(repos(["r1"]));
+    getMock.mockResolvedValue(selectedProjects([]));
+    putMock.mockImplementation(async (_w, _c, req) =>
+      settings({
+        policy: req.policy ?? settings().policy,
+        projects_config: { scope: "selected", entries: [], include_no_repository: false },
+      }),
+    );
+    const { result } = mount();
+    await waitFor(() => expect(result.current.projectsRead.status).toBe("ready"));
+    act(() => result.current.setAction("message", "requires_approval"));
+    expect(contributor?.canSave).toBe(true);
+    await act(async () => contributor?.save());
+    expect(putMock.mock.calls[0][2].projects).toBeUndefined();
   });
 });

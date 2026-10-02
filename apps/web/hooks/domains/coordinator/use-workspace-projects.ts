@@ -67,8 +67,8 @@ export function useWorkspaceProjects(workspaceId: string, enabled = true) {
         setStatus("ready");
       })
       .catch(() => {
-        if (sequence !== sequenceRef.current || loadedRef.current) return;
-        setStatus("error");
+        if (sequence !== sequenceRef.current) return;
+        setStatus(loadedRef.current ? "ready" : "error");
       });
   }, [workspaceId]);
 
