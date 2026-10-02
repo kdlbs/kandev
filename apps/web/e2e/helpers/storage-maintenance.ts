@@ -153,6 +153,13 @@ export async function mockPartialSystemTemporaryOverview(page: Page, root: strin
   });
 }
 
+function resolveGoCacheCleanupEligibleSize(options: {
+  goCache?: number;
+  goCacheCleanupEligible?: number;
+}): number {
+  return options.goCacheCleanupEligible ?? options.goCache ?? 7 * 1024 ** 3;
+}
+
 export function storageBarsSnapshot(
   options: {
     workspaces?: number;
@@ -161,6 +168,7 @@ export function storageBarsSnapshot(
     quarantine?: number;
     systemTemporary?: number;
     goCache?: number;
+    goCacheCleanupEligible?: number;
     goCacheWarning?: string;
     unmanagedGoCache?: number;
     temporaryArtifacts?: number;
@@ -179,6 +187,7 @@ export function storageBarsSnapshot(
     go_cache: {
       path: "/data/cache/go-build",
       size_bytes: options.goCache ?? 7 * 1024 ** 3,
+      cleanup_eligible_size_bytes: resolveGoCacheCleanupEligibleSize(options),
       owned: true,
       unmanaged_path: "/data/home/.cache/go-build",
       unmanaged_size_bytes: options.unmanagedGoCache ?? 6 * 1024 ** 3,
