@@ -37,6 +37,14 @@ type mockRepository struct {
 	executors     map[string]*models.Executor
 }
 
+func (m *mockRepository) CommitWorkspaceRecoveryErrorIfCurrent(
+	ctx context.Context,
+	observation models.WorkspaceRecoveryErrorObservation,
+	errorValue models.LastAgentError,
+) (bool, string, error) {
+	return false, "", nil
+}
+
 func (m *mockRepository) HasUserPromptHistory(context.Context, string) (bool, error) {
 	return false, nil
 }
