@@ -48,6 +48,12 @@ import { useTranslation } from "react-i18next";
 import type { Canvas } from "@/lib/api/domains/canvas-api";
 import type { TaskCanvasesLoadStatus } from "@/hooks/domains/task/use-task-canvases";
 import { CursorCloudTaskPage } from "@/components/task/cursor-cloud-task-page";
+import {
+  isCursorCloudTask,
+  resolveRemoteExecutor,
+  type RemoteExecutorStatus,
+  type ResolvedRemoteExecutor,
+} from "@/components/task/remote-executor-view";
 import { useTaskStatusSummary } from "@/hooks/domains/task/use-task-status-summary";
 
 import { useAutomaticRecoveryChatOwner } from "@/hooks/domains/session/use-automatic-recovery-chat-owner";
@@ -80,55 +86,6 @@ export type TaskPageInnerProps = {
   taskCanvases?: Canvas[];
   taskCanvasesStatus?: TaskCanvasesLoadStatus;
 };
-
-type RemoteExecutorStatus = {
-  is_remote_executor?: boolean;
-  executor_type?: string | null;
-  executor_name?: string | null;
-  remote_name?: string | null;
-  remote_state?: string | null;
-  remote_created_at?: string | null;
-  remote_checked_at?: string | null;
-  remote_status_error?: string | null;
-  remote_repository_id?: string | null;
-  remote_branch?: string | null;
-  remote_pull_request_url?: string | null;
-  remote_agent_url?: string | null;
-  remote_history_gap?: boolean;
-  capabilities?: {
-    embedded_vscode?: boolean;
-  };
-};
-
-function toNullable(value: string | null | undefined): string | null {
-  return value ?? null;
-}
-
-function resolveRemoteExecutor(status?: RemoteExecutorStatus | null) {
-  const remoteExecutorName = status?.remote_name ?? status?.executor_name ?? null;
-  return {
-    isRemoteExecutor: status?.is_remote_executor ?? false,
-    remoteExecutorType: toNullable(status?.executor_type),
-    remoteExecutorName,
-    remoteState: toNullable(status?.remote_state),
-    remoteCreatedAt: toNullable(status?.remote_created_at),
-    remoteCheckedAt: toNullable(status?.remote_checked_at),
-    remoteStatusError: toNullable(status?.remote_status_error),
-    remoteHistoryGap: status?.remote_history_gap ?? false,
-    ...resolveRemoteExecutorResults(status),
-  };
-}
-
-export type ResolvedRemoteExecutor = ReturnType<typeof resolveRemoteExecutor>;
-
-function resolveRemoteExecutorResults(status?: RemoteExecutorStatus | null) {
-  return {
-    remoteRepositoryID: toNullable(status?.remote_repository_id),
-    remoteBranch: toNullable(status?.remote_branch),
-    remotePullRequestURL: toNullable(status?.remote_pull_request_url),
-    remoteAgentURL: toNullable(status?.remote_agent_url),
-  };
-}
 
 function resolveCurrentStepId(
   sessionStepId: string | null,
@@ -553,9 +510,7 @@ export function TaskPageInner(props: TaskPageInnerProps) {
   const [taskMoveError, setTaskMoveError] = useState<unknown>(null);
   const clearTaskMoveError = useCallback(() => setTaskMoveError(null), []);
   const reportTaskMoveError = useCallback((error: unknown) => setTaskMoveError(error), []);
-  useEffect(() => {
-    setTaskMoveError(null);
-  }, [task?.id]);
+  useEffect(() => setTaskMoveError(null), [task?.id]);
   const {
     taskProps,
     debugEntries,
@@ -568,11 +523,9 @@ export function TaskPageInner(props: TaskPageInnerProps) {
   } = useTaskPageDerivedProps(props, taskMoveError);
   if (!task) return null;
 
-  const isCursorCloudTask =
-    task.primary_executor_type === "cursor_cloud" ||
-    props.resumption.sessionStatus?.executor_type === "cursor_cloud";
-
-  if (isCursorCloudTask) {
+  if (
+    isCursorCloudTask(task.primary_executor_type, props.resumption.sessionStatus?.executor_type)
+  ) {
     return renderCursorCloudTaskPage(props, task, remote, topBarProps.repositoryLabel);
   }
 

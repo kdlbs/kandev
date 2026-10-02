@@ -5,7 +5,8 @@ import { TaskCommands } from "@/components/task-commands";
 import { TaskLaunchErrorProvider } from "@/components/task/task-launch-error-context";
 import { CursorCloudTaskSurface } from "@/components/task/cursor-cloud-task-surface";
 import { buildArchivedValue } from "@/components/task/task-page-content-helpers";
-import type { TaskPageInnerProps, ResolvedRemoteExecutor } from "@/components/task/task-page-inner";
+import type { TaskPageInnerProps } from "@/components/task/task-page-inner";
+import type { ResolvedRemoteExecutor } from "@/components/task/remote-executor-view";
 
 export function CursorCloudTaskPage({
   page,
