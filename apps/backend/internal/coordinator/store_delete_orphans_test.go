@@ -19,6 +19,7 @@ func TestDeleteWorkspaceState_RemovesOrphanPhase2Rows(t *testing.T) {
 			args []any
 		}{
 			{`INSERT INTO coordinator_watches (coordinator_id, workflow_id, workspace_id, created_at) VALUES (?, 'wf', ?, ?)`, []any{id, ws, now}},
+			{`INSERT INTO coordinator_watch_projects (coordinator_id, entry_kind, entry_id, workspace_id, created_at) VALUES (?, 'repository', 'repo', ?, ?)`, []any{id, ws, now}},
 			{`INSERT INTO coordinator_standing_orders (id, coordinator_id, workspace_id, text, created_by, created_at) VALUES (?, ?, ?, 't', 'u', ?)`, []any{"so-" + id, id, ws, now}},
 			{`INSERT INTO coordinator_goals (id, coordinator_id, workspace_id, name, status, baseline_json, set_at, created_at, updated_at) VALUES (?, ?, ?, 'n', 'active', '{}', ?, ?, ?)`, []any{"g-" + id, id, ws, now, now, now}},
 		}
