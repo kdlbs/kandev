@@ -282,3 +282,14 @@ Publication hook follow-up: removed a redundant Go return and split the hook
 retention tests and preparation-warning group to satisfy existing size limits.
 The affected frontend rerun passed all 41 tests across three files. The broader
 258-test result above precedes the file split; no regression assertions were removed.
+
+### Validation after integrating the current base
+
+The branch rebased cleanly onto the current base. The complete focused frontend
+command above passed again: 27 files, 258 tests. The backend retention command,
+frontend typecheck, harness test/lint, and full specification lint also passed.
+All five permanent desktop browser scenarios passed after the fresh build.
+A temporary capture script initially passed an extra fixture argument; after
+correcting that capture-only argument, all three desktop captures passed.
+All three permanent phone scenarios and both refreshed phone captures passed
+on the rebased branch. The five final assets were inspected and compressed.
