@@ -18,7 +18,8 @@ order covers the regression, minimal correction, and compatibility checks.
 
 The issue is assigned to `carlosflorencio`, verified through the GitHub API on
 2026-10-02. The implementation and required verification are complete. The
-source and delivery documents remain uncommitted.
+source, requirements, system design, plan, and work order are committed in this
+fix package.
 
 ## Evidence and root cause
 
