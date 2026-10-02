@@ -132,7 +132,6 @@ export type AppState = KanbanSlice & {
 
   // Session slice
   messages: (typeof defaultSessionState)["messages"];
-  messagePrompts: (typeof defaultSessionState)["messagePrompts"];
   turns: (typeof defaultSessionState)["turns"];
   taskSessions: (typeof defaultSessionState)["taskSessions"];
   taskSessionsByTask: (typeof defaultSessionState)["taskSessionsByTask"];
@@ -489,18 +488,6 @@ export type AppState = KanbanSlice & {
     },
   ) => void;
   setMessagesLoading: (sessionId: string, loading: boolean) => void;
-  replacePromptMessages: (
-    sessionId: string,
-    messages: Message[],
-    meta?: { hasMore?: boolean; oldestCursor?: string | null },
-  ) => void;
-  prependPromptMessages: (
-    sessionId: string,
-    messages: Message[],
-    meta?: { hasMore?: boolean; oldestCursor?: string | null },
-  ) => void;
-  setPromptMessagesLoading: (sessionId: string, loading: boolean) => void;
-  setPromptMessagesLoadingMore: (sessionId: string, loading: boolean) => void;
   setTaskSession: (
     session: TaskSession,
     hydrationEpochAtRequestStart?: TaskSessionHydrationEpoch,

@@ -3,6 +3,7 @@ package worktree
 import (
 	"context"
 	"crypto/sha256"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -27,12 +28,15 @@ type ArchiveSourceManifest struct {
 	Entries           []ArchiveSourceManifestEntry `json:"entries,omitempty"`
 }
 
+var errArchiveSourceManifestHandleClose = errors.New("archive source manifest handle close failed")
+
 // ArchiveSourceManifestEntry identifies one changed path without retaining its
-// source bytes. A missing digest represents a deleted path.
+// source bytes. A missing digest without an omission marker represents deletion.
 type ArchiveSourceManifestEntry struct {
-	Path          string `json:"path"`
-	Status        string `json:"status"`
-	ContentSHA256 string `json:"content_sha256,omitempty"`
+	Path            string `json:"path"`
+	Status          string `json:"status"`
+	ContentSHA256   string `json:"content_sha256,omitempty"`
+	ContentOmission string `json:"content_omission,omitempty"`
 }
 
 // CaptureArchiveSourceManifests reads the git state of exact registered
@@ -43,6 +47,9 @@ func (m *Manager) CaptureArchiveSourceManifests(
 ) (map[string]ArchiveSourceManifest, error) {
 	manifests := make(map[string]ArchiveSourceManifest, len(worktrees))
 	for _, wt := range worktrees {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		if wt == nil {
 			continue
 		}
@@ -66,6 +73,9 @@ func (m *Manager) CaptureArchiveSourceManifests(
 			return nil, captureErr
 		}
 		manifests[wt.ID] = manifest
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
 	}
 	return manifests, nil
 }
@@ -113,7 +123,7 @@ func (m *Manager) capturePresentArchiveSourceManifest(ctx context.Context, wt *W
 	if err != nil {
 		return ArchiveSourceManifest{}, fmt.Errorf("capture archive source status for %s: %w", wt.ID, err)
 	}
-	entries, err := archiveSourceManifestEntries(wt.Path, status)
+	entries, err := archiveSourceManifestEntries(ctx, wt.Path, status)
 	if err != nil {
 		return ArchiveSourceManifest{}, fmt.Errorf("capture archive source entries for %s: %w", wt.ID, err)
 	}
@@ -232,52 +242,94 @@ func archiveSourceResolvePath(pointer, relativeTo string) (string, bool) {
 	return filepath.Clean(abs), true
 }
 
-func archiveSourceManifestEntries(root, output string) ([]ArchiveSourceManifestEntry, error) {
+func archiveSourceManifestEntries(ctx context.Context, root, output string) ([]ArchiveSourceManifestEntry, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	fields := strings.Split(output, "\x00")
 	entries := make([]ArchiveSourceManifestEntry, 0, len(fields))
 	for index := 0; index < len(fields); index++ {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		if fields[index] == "" {
 			continue
 		}
-		entry, consumed, err := archiveSourceManifestEntry(root, fields, index)
+		entry, consumed, err := archiveSourceManifestEntry(ctx, root, fields, index)
 		if err != nil {
 			return nil, err
 		}
 		entries = append(entries, entry)
 		index += consumed
 	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	return entries, nil
 }
 
-func archiveSourceManifestEntry(root string, fields []string, index int) (ArchiveSourceManifestEntry, int, error) {
+func archiveSourceManifestEntry(ctx context.Context, root string, fields []string, index int) (ArchiveSourceManifestEntry, int, error) {
+	if err := ctx.Err(); err != nil {
+		return ArchiveSourceManifestEntry{}, 0, err
+	}
+	path, status, consumed, err := archiveSourceManifestStatusPath(fields, index)
+	if err != nil {
+		return ArchiveSourceManifestEntry{}, 0, err
+	}
+	if err := archiveSourceManifestPath(root, path); err != nil {
+		return ArchiveSourceManifestEntry{}, 0, err
+	}
+	entry := ArchiveSourceManifestEntry{Path: path, Status: status}
+	digest, omitted, err := archiveSourceManifestDigestForEntry(ctx, root, path, status)
+	if err != nil {
+		if archiveSourceManifestIsDeletedPath(status, err) {
+			return entry, consumed, nil
+		}
+		if archiveSourceManifestIsMissingPathError(err) {
+			return ArchiveSourceManifestEntry{}, 0, fmt.Errorf("source path disappeared before content identity was captured")
+		}
+		return ArchiveSourceManifestEntry{}, 0, err
+	}
+	if omitted {
+		entry.ContentOmission = "ignored_directory"
+		return entry, consumed, nil
+	}
+	if err := ctx.Err(); err != nil {
+		return ArchiveSourceManifestEntry{}, 0, err
+	}
+	entry.ContentSHA256 = digest
+	return entry, consumed, nil
+}
+
+func archiveSourceManifestStatusPath(fields []string, index int) (string, string, int, error) {
 	field := fields[index]
 	if len(field) < 4 || field[2] != ' ' {
-		return ArchiveSourceManifestEntry{}, 0, fmt.Errorf("invalid git status record")
+		return "", "", 0, fmt.Errorf("invalid git status record")
 	}
 	path := field[3:]
 	consumed := 0
 	if field[0] == 'R' || field[0] == 'C' || field[1] == 'R' || field[1] == 'C' {
 		if index+1 >= len(fields) || fields[index+1] == "" {
-			return ArchiveSourceManifestEntry{}, 0, fmt.Errorf("git rename or copy record lacks its original path")
+			return "", "", 0, fmt.Errorf("git rename or copy record lacks its original path")
 		}
 		consumed = 1
 	}
-	if err := archiveSourceManifestPath(root, path); err != nil {
-		return ArchiveSourceManifestEntry{}, 0, err
+	return path, field[:2], consumed, nil
+}
+
+func archiveSourceManifestIsDeletedPath(status string, err error) bool {
+	return len(status) == 2 && (status[0] == 'D' || status[1] == 'D') && archiveSourceManifestIsMissingPathError(err)
+}
+
+func archiveSourceManifestIsMissingPathError(err error) bool {
+	return errors.Is(err, os.ErrNotExist) && !errors.Is(err, errArchiveSourceManifestHandleClose)
+}
+
+func archiveSourceManifestCloseError(err error) error {
+	if err == nil {
+		return nil
 	}
-	entry := ArchiveSourceManifestEntry{Path: path, Status: field[:2]}
-	digest, err := archiveSourceManifestDigest(root, path)
-	if err != nil {
-		if os.IsNotExist(err) && (field[0] == 'D' || field[1] == 'D') {
-			return entry, consumed, nil
-		}
-		if os.IsNotExist(err) {
-			return ArchiveSourceManifestEntry{}, 0, fmt.Errorf("source path disappeared before content identity was captured")
-		}
-		return ArchiveSourceManifestEntry{}, 0, err
-	}
-	entry.ContentSHA256 = digest
-	return entry, consumed, nil
+	return fmt.Errorf("%w: %w", errArchiveSourceManifestHandleClose, err)
 }
 
 func archiveSourceManifestPath(root, path string) error {
@@ -291,41 +343,63 @@ func archiveSourceManifestPath(root, path string) error {
 	return nil
 }
 
-func archiveSourceManifestDigest(root, path string) (string, error) {
-	parent, name, err := archiveSourceManifestOpenParent(root, path)
+func archiveSourceManifestDigestForEntry(ctx context.Context, root, path, status string) (string, bool, error) {
+	parent, name, err := archiveSourceManifestOpenParent(ctx, root, path)
 	if err != nil {
-		return "", err
+		return "", false, err
 	}
-	defer func() { _ = parent.Close() }()
+	digest, omitted, captureErr := archiveSourceManifestDigestEntryAt(ctx, parent, name, status)
+	closeErr := archiveSourceManifestCloseError(parent.Close())
+	return digest, omitted, errors.Join(captureErr, closeErr)
+}
+
+func archiveSourceManifestDigestEntryAt(
+	ctx context.Context,
+	parent storageworkspaces.DirectoryHandle,
+	name, status string,
+) (string, bool, error) {
+	if err := ctx.Err(); err != nil {
+		return "", false, err
+	}
 	mode, err := parent.LstatEntry(name)
 	if err != nil {
-		return "", err
+		return "", false, err
+	}
+	if err := ctx.Err(); err != nil {
+		return "", false, err
+	}
+	if status == "!!" && mode.IsDir() {
+		return "", true, nil
 	}
 	if mode&os.ModeSymlink != 0 {
 		target, readErr := parent.ReadLink(name)
 		if readErr != nil {
-			return "", readErr
+			return "", false, readErr
+		}
+		if err := ctx.Err(); err != nil {
+			return "", false, err
 		}
 		sum := sha256.Sum256([]byte("symlink:\x00" + target))
-		return fmt.Sprintf("%x", sum), nil
+		return fmt.Sprintf("%x", sum), false, nil
 	}
 	if !mode.IsRegular() {
 		if !mode.IsDir() {
-			return "", fmt.Errorf("source path is not a regular file or directory")
+			return "", false, fmt.Errorf("source path is not a regular file or directory")
 		}
 		directory, err := parent.OpenSubdirectory(name)
 		if err != nil {
-			return "", err
+			return "", false, err
 		}
-		defer func() { _ = directory.Close() }()
-		digest, err := archiveSourceManifestDirectoryDigestHandle(directory)
-		return digest, err
+		digest, digestErr := archiveSourceManifestDirectoryDigestHandle(ctx, directory)
+		closeErr := archiveSourceManifestCloseError(directory.Close())
+		return digest, false, errors.Join(digestErr, closeErr)
 	}
 	f, err := parent.OpenFile(name)
 	if err != nil {
-		return "", err
+		return "", false, err
 	}
-	return archiveSourceManifestReadDigest(f)
+	digest, digestErr := archiveSourceManifestReadDigest(ctx, f)
+	return digest, false, digestErr
 }
 
 type archiveSourceManifestDirectoryRecord struct {
@@ -341,14 +415,17 @@ const (
 	archiveSourceManifestKindFile      = "file"
 )
 
-func archiveSourceManifestDirectoryDigestHandle(root storageworkspaces.DirectoryHandle) (string, error) {
+func archiveSourceManifestDirectoryDigestHandle(ctx context.Context, root storageworkspaces.DirectoryHandle) (string, error) {
 	records := make([]archiveSourceManifestDirectoryRecord, 0)
-	if err := archiveSourceManifestCollectDirectory(root, "", &records); err != nil {
+	if err := archiveSourceManifestCollectDirectory(ctx, root, "", &records); err != nil {
 		return "", err
 	}
 	sort.Slice(records, func(i, j int) bool { return records[i].path < records[j].path })
 	h := sha256.New()
 	for _, record := range records {
+		if err := ctx.Err(); err != nil {
+			return "", err
+		}
 		_, _ = io.WriteString(h, record.path+"\x00")
 		switch record.kind {
 		case archiveSourceManifestKindSymlink:
@@ -359,20 +436,33 @@ func archiveSourceManifestDirectoryDigestHandle(root storageworkspaces.Directory
 			_, _ = io.WriteString(h, "file:\x00"+record.digest+"\x00")
 		}
 	}
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
 	return fmt.Sprintf("%x", h.Sum(nil)), nil
 }
 
 func archiveSourceManifestCollectDirectory(
+	ctx context.Context,
 	directory storageworkspaces.DirectoryHandle,
 	prefix string,
 	records *[]archiveSourceManifestDirectoryRecord,
 ) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	entries, err := directory.ReadDir()
 	if err != nil {
 		return err
 	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	sort.Slice(entries, func(i, j int) bool { return entries[i].Name() < entries[j].Name() })
 	for _, entry := range entries {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		name := entry.Name()
 		if name == ".git" {
 			continue
@@ -381,11 +471,14 @@ func archiveSourceManifestCollectDirectory(
 		if err != nil {
 			return err
 		}
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		path := name
 		if prefix != "" {
 			path = filepath.Join(prefix, name)
 		}
-		if err := archiveSourceManifestCollectEntry(directory, name, path, mode, records); err != nil {
+		if err := archiveSourceManifestCollectEntry(ctx, directory, name, path, mode, records); err != nil {
 			return err
 		}
 	}
@@ -393,24 +486,31 @@ func archiveSourceManifestCollectDirectory(
 }
 
 func archiveSourceManifestCollectEntry(
+	ctx context.Context,
 	directory storageworkspaces.DirectoryHandle,
 	name, path string,
 	mode os.FileMode,
 	records *[]archiveSourceManifestDirectoryRecord,
 ) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	switch {
 	case mode&os.ModeSymlink != 0:
 		target, err := directory.ReadLink(name)
 		if err != nil {
 			return err
 		}
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		*records = append(*records, archiveSourceManifestDirectoryRecord{
 			path: path, kind: archiveSourceManifestKindSymlink, target: target,
 		})
 	case mode.IsDir():
-		return archiveSourceManifestCollectSubdirectory(directory, name, path, records)
+		return archiveSourceManifestCollectSubdirectory(ctx, directory, name, path, records)
 	case mode.IsRegular():
-		return archiveSourceManifestCollectFile(directory, name, path, records)
+		return archiveSourceManifestCollectFile(ctx, directory, name, path, records)
 	default:
 		return fmt.Errorf("directory source path is not a regular file, directory, or symlink")
 	}
@@ -418,10 +518,14 @@ func archiveSourceManifestCollectEntry(
 }
 
 func archiveSourceManifestCollectSubdirectory(
+	ctx context.Context,
 	directory storageworkspaces.DirectoryHandle,
 	name, path string,
 	records *[]archiveSourceManifestDirectoryRecord,
 ) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	*records = append(*records, archiveSourceManifestDirectoryRecord{
 		path: path, kind: archiveSourceManifestKindDirectory,
 	})
@@ -429,24 +533,25 @@ func archiveSourceManifestCollectSubdirectory(
 	if err != nil {
 		return err
 	}
-	collectErr := archiveSourceManifestCollectDirectory(child, path, records)
-	closeErr := child.Close()
-	if collectErr != nil {
-		return collectErr
-	}
-	return closeErr
+	collectErr := archiveSourceManifestCollectDirectory(ctx, child, path, records)
+	closeErr := archiveSourceManifestCloseError(child.Close())
+	return errors.Join(collectErr, closeErr)
 }
 
 func archiveSourceManifestCollectFile(
+	ctx context.Context,
 	directory storageworkspaces.DirectoryHandle,
 	name, path string,
 	records *[]archiveSourceManifestDirectoryRecord,
 ) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	file, err := directory.OpenFile(name)
 	if err != nil {
 		return err
 	}
-	digest, err := archiveSourceManifestReadDigest(file)
+	digest, err := archiveSourceManifestReadDigest(ctx, file)
 	if err != nil {
 		return err
 	}
@@ -457,8 +562,12 @@ func archiveSourceManifestCollectFile(
 }
 
 func archiveSourceManifestOpenParent(
+	ctx context.Context,
 	root, path string,
 ) (storageworkspaces.DirectoryHandle, string, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, "", err
+	}
 	if err := archiveSourceManifestPath(root, path); err != nil {
 		return nil, "", err
 	}
@@ -472,18 +581,28 @@ func archiveSourceManifestOpenParent(
 	}
 	components := strings.Split(filepath.ToSlash(filepath.Clean(path)), "/")
 	for _, component := range components[:len(components)-1] {
+		if err := ctx.Err(); err != nil {
+			return nil, "", errors.Join(err, archiveSourceManifestCloseError(directory.Close()))
+		}
 		child, err := directory.OpenSubdirectory(component)
 		if err != nil {
-			_ = directory.Close()
-			return nil, "", err
+			return nil, "", errors.Join(err, archiveSourceManifestCloseError(directory.Close()))
 		}
-		_ = directory.Close()
+		if closeErr := archiveSourceManifestCloseError(directory.Close()); closeErr != nil {
+			return nil, "", errors.Join(closeErr, archiveSourceManifestCloseError(child.Close()))
+		}
 		directory = child
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, "", errors.Join(err, archiveSourceManifestCloseError(directory.Close()))
 	}
 	return directory, components[len(components)-1], nil
 }
 
-func archiveSourceManifestFileDigest(root, path string) (string, error) {
+func archiveSourceManifestFileDigest(ctx context.Context, root, path string) (string, error) {
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
 	rootPath, err := filepath.Rel(root, filepath.Dir(path))
 	if err != nil {
 		return "", err
@@ -492,31 +611,54 @@ func archiveSourceManifestFileDigest(root, path string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	defer func() { _ = parent.Close() }()
 	mode, err := parent.LstatEntry(filepath.Base(path))
 	if err != nil {
-		return "", err
+		return "", errors.Join(err, archiveSourceManifestCloseError(parent.Close()))
 	}
 	if !mode.IsRegular() {
-		return "", fmt.Errorf("source path is not a regular file")
+		return "", errors.Join(fmt.Errorf("source path is not a regular file"), archiveSourceManifestCloseError(parent.Close()))
 	}
 	f, err := parent.OpenFile(filepath.Base(path))
 	if err != nil {
-		return "", err
+		return "", errors.Join(err, archiveSourceManifestCloseError(parent.Close()))
 	}
-	return archiveSourceManifestReadDigest(f)
+	digest, digestErr := archiveSourceManifestReadDigest(ctx, f)
+	return digest, errors.Join(digestErr, archiveSourceManifestCloseError(parent.Close()))
 }
 
 func openArchiveSourceDirectory(root, target string) (storageworkspaces.DirectoryHandle, error) {
 	return storageworkspaces.OpenDirectoryNoFollow(root, target)
 }
 
-func archiveSourceManifestReadDigest(f io.ReadCloser) (string, error) {
+func archiveSourceManifestReadDigest(ctx context.Context, f io.ReadCloser) (string, error) {
 	h := sha256.New()
-	_, copyErr := io.Copy(h, f)
-	closeErr := f.Close()
-	if copyErr != nil {
-		return "", copyErr
+	buffer := make([]byte, 32*1024)
+	var readErr error
+	for {
+		if err := ctx.Err(); err != nil {
+			readErr = err
+			break
+		}
+		n, err := f.Read(buffer)
+		if n > 0 {
+			_, _ = h.Write(buffer[:n])
+		}
+		if err != nil {
+			if errors.Is(err, io.EOF) {
+				break
+			}
+			readErr = err
+			break
+		}
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			readErr = ctxErr
+			break
+		}
+	}
+	closeErr := archiveSourceManifestCloseError(f.Close())
+	readErr = errors.Join(readErr, ctx.Err())
+	if readErr != nil {
+		return "", errors.Join(readErr, closeErr)
 	}
 	if closeErr != nil {
 		return "", closeErr

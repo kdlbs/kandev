@@ -5,7 +5,6 @@ import { createSessionSlice } from "./session-slice";
 import { createSessionRuntimeSlice } from "../session-runtime/session-runtime-slice";
 import type { SessionSlice } from "./types";
 import type { SessionRuntimeSlice } from "../session-runtime/types";
-import type { Message } from "@/lib/types/http";
 
 type CombinedSlice = SessionSlice & SessionRuntimeSlice;
 
@@ -54,18 +53,6 @@ describe("removeTaskSession cleanup cascade", () => {
     s.reconcileWorkspaceSourcesAdopted([SESSION_ID], "2026-07-23T10:00:00Z");
 
     expect(store.getState().messages.bySession[SESSION_ID]).toHaveLength(1);
-    s.replacePromptMessages(SESSION_ID, [
-      {
-        id: "prompt-1",
-        session_id: SESSION_ID,
-        task_id: TASK_ID,
-        author_type: "user",
-        type: "message",
-        content: "prompt",
-        created_at: "2026-08-22T00:00:00Z",
-      } as unknown as Message,
-    ]);
-    expect(store.getState().messagePrompts.bySession[SESSION_ID]).toHaveLength(1);
     expect(store.getState().turns.bySession[SESSION_ID]).toHaveLength(1);
     expect(store.getState().turns.loadedBySession[SESSION_ID]).toBe(true);
     expect(store.getState().turns.settledBoundaryBySession[SESSION_ID]).toBe(
@@ -77,8 +64,6 @@ describe("removeTaskSession cleanup cascade", () => {
 
     const after = store.getState();
     expect(after.messages.bySession[SESSION_ID]).toBeUndefined();
-    expect(after.messagePrompts.bySession[SESSION_ID]).toBeUndefined();
-    expect(after.messagePrompts.generationBySession[SESSION_ID]).toBe(1);
     expect(after.turns.bySession[SESSION_ID]).toBeUndefined();
     expect(after.turns.loadedBySession[SESSION_ID]).toBeUndefined();
     expect(after.turns.settledBoundaryBySession[SESSION_ID]).toBeUndefined();

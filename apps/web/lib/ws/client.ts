@@ -372,7 +372,9 @@ export class WebSocketClient {
     {
       resolve: (payload: unknown) => void;
       reject: (error: Error) => void;
-      timeout: ReturnType<typeof setTimeout>;
+      timeout: ReturnType<typeof setTimeout> | null;
+      timeoutMs: number;
+      action: string;
       signal?: AbortSignal;
       abortHandler?: () => void;
     }
@@ -484,6 +486,7 @@ export class WebSocketClient {
       return;
     }
     this.socket.send(data);
+    this.startRequestTimeoutFromPayload(payload);
   }
 
   request<T>(action: string, payload: unknown, timeoutMs = 5000, signal?: AbortSignal): Promise<T> {
@@ -493,14 +496,12 @@ export class WebSocketClient {
         reject(requestAbortError(signal));
         return;
       }
-      const timeout = setTimeout(() => {
-        this.removePendingRequest(id);
-        reject(new WebSocketRequestTimeoutError(action));
-      }, timeoutMs);
       const pending = {
         resolve: resolve as (payload: unknown) => void,
         reject,
-        timeout,
+        timeout: null,
+        timeoutMs,
+        action,
         signal,
         abortHandler: undefined as (() => void) | undefined,
       };
@@ -1160,7 +1161,7 @@ export class WebSocketClient {
   private removePendingRequest(msgId: string) {
     const pending = this.pendingRequests.get(msgId);
     if (!pending) return;
-    clearTimeout(pending.timeout);
+    if (pending.timeout !== null) clearTimeout(pending.timeout);
     if (pending.signal && pending.abortHandler) {
       pending.signal.removeEventListener("abort", pending.abortHandler);
     }
@@ -1722,8 +1723,26 @@ export class WebSocketClient {
 
   private flushQueue() {
     if (!this.socket || this.status !== "connected") return;
-    this.pendingQueue.forEach((data) => this.socket?.send(data));
+    this.pendingQueue.forEach((data) => {
+      this.socket?.send(data);
+      this.startRequestTimeoutFromPayload(JSON.parse(data));
+    });
     this.pendingQueue = [];
+  }
+
+  private startRequestTimeout(id: string) {
+    const pending = this.pendingRequests.get(id);
+    if (!pending || pending.timeout !== null) return;
+    pending.timeout = setTimeout(() => {
+      this.removePendingRequest(id);
+      pending.reject(new WebSocketRequestTimeoutError(pending.action));
+    }, pending.timeoutMs);
+  }
+
+  private startRequestTimeoutFromPayload(payload: unknown) {
+    const request = payload as { id?: unknown; type?: unknown } | null;
+    if (request?.type !== "request" || typeof request.id !== "string") return;
+    this.startRequestTimeout(request.id);
   }
 
   private setStatus(status: WebSocketStatus) {

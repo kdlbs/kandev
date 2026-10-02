@@ -206,3 +206,5 @@ Short-content coverage confirms that no unnecessary scroll region appears.
 ## Related designs
 
 - [Bounded Task Status Delivery](../../platform/system-design/bounded-task-status-delivery.md)
+
+- [Negative approval disclosure](../../integrations/system-design/github-workflow-attention.md#negative-approval-disclosure) defines identity retention after newer workflow evidence clears approval.

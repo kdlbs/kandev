@@ -31,7 +31,12 @@ func (m *Manager) resolveStrictEnvironment(
 	profileInfo *AgentProfileInfo,
 ) (map[string]string, error) {
 	definitions := append([]runtimeenv.Definition(nil), req.EnvironmentDefinitions...)
-	appendMapDefinitions(&definitions, req.Env, runtimeenv.OriginManagedRuntime)
+	requestEnv := req.Env
+	if req.managedGoCachePath != "" {
+		requestEnv = cloneStringMap(requestEnv)
+		delete(requestEnv, "GOCACHE")
+	}
+	appendMapDefinitions(&definitions, requestEnv, runtimeenv.OriginManagedRuntime)
 	appendAgentProfileDefinitions(&definitions, profileInfo)
 
 	appendStandardDefinitions(&definitions, executionID, req)

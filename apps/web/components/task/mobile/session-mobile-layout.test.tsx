@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, renderHook, act, fireEvent, screen } from "@testing-library/react";
+import { render, renderHook, act, screen } from "@testing-library/react";
 import { useState } from "react";
 import type { OpenFileTab } from "@/lib/types/backend";
 import type { ReviewItemSummary } from "@/lib/plugins/types";
@@ -55,22 +55,6 @@ vi.mock("../review-detail-panel", async () => {
     },
   };
 });
-
-vi.mock("../prompt-history-panel-content", () => ({
-  PromptHistoryPanelContent: ({
-    onNavigateToPrompt,
-  }: {
-    onNavigateToPrompt?: (messageId: string) => void;
-  }) => (
-    <button
-      type="button"
-      data-testid="mobile-prompt-history-content"
-      onClick={() => onNavigateToPrompt?.("prompt-1")}
-    >
-      Prompt history
-    </button>
-  ),
-}));
 
 import {
   MobilePanelArea,
@@ -408,39 +392,6 @@ describe("MobilePanelArea PR identity", () => {
 
     expect(screen.queryByRole("button", { name: "feedback for pr-a" })).toBeNull();
     expect(screen.getByRole("button", { name: "feedback for pr-b" })).not.toBeNull();
-  });
-});
-
-describe("MobilePanelArea Prompt history", () => {
-  it("renders the history surface and forwards prompt navigation", () => {
-    const handleNavigateToPrompt = vi.fn();
-
-    render(
-      <MobilePanelArea
-        currentMobilePanel="prompt-history"
-        activeTaskId="task-1"
-        isPassthroughMode={false}
-        effectiveSessionId="session-1"
-        selectedFile={null}
-        selectedFilePreview={false}
-        selectedDiff={null}
-        handleOpenFileFromChat={vi.fn()}
-        handleClearSelectedDiff={vi.fn()}
-        handleOpenFile={vi.fn()}
-        handlePanelChangeAndClearSheet={vi.fn()}
-        onNavigateToPrompt={handleNavigateToPrompt}
-        mobileScrollTarget={null}
-        topPadding="3.5rem"
-        bottomNavHeight="3.25rem"
-        reviews={[]}
-        selectedReview={null}
-        onSelectReview={vi.fn()}
-      />,
-    );
-
-    expect(screen.getByTestId("mobile-prompt-history-content")).toBeTruthy();
-    fireEvent.click(screen.getByTestId("mobile-prompt-history-content"));
-    expect(handleNavigateToPrompt).toHaveBeenCalledWith("prompt-1");
   });
 });
 

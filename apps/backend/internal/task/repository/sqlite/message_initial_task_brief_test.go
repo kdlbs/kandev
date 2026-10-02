@@ -298,6 +298,7 @@ func TestInitialTaskBriefAdmissionCompetesWithWorkflowFallback(t *testing.T) {
 	}
 
 	message := initialTaskBriefMessage(taskID, sessionID, turnID, "initial-brief-fallback-race", "direct instruction")
+	incarnationID := promptHistoryIncarnation(t, repo, ctx, sessionID)
 	candidate := initialTaskBriefCandidate(brief, "Fallback race task brief\n\ndirect instruction")
 	start := make(chan struct{})
 	var wg sync.WaitGroup
@@ -308,7 +309,7 @@ func TestInitialTaskBriefAdmissionCompetesWithWorkflowFallback(t *testing.T) {
 	go func() {
 		defer wg.Done()
 		<-start
-		claimed, claimErr = claimer.ClaimInitialPromptFallback(ctx, sessionID)
+		claimed, claimErr = claimer.ClaimInitialPromptFallback(ctx, sessionID, incarnationID)
 	}()
 	go func() {
 		defer wg.Done()
@@ -350,7 +351,7 @@ func TestInitialTaskBriefAdmissionRespectsZeroValuedFallbackReservation(t *testi
 	seedForMsgTest(t, repo, taskID, sessionID, turnID)
 	setInitialTaskBriefDescription(t, repo, taskID, brief)
 	claimer := any(repo).(promptHistoryClaimer)
-	claimed, err := claimer.ClaimInitialPromptFallback(ctx, sessionID)
+	claimed, err := claimer.ClaimInitialPromptFallback(ctx, sessionID, promptHistoryIncarnation(t, repo, ctx, sessionID))
 	if err != nil || !claimed {
 		t.Fatalf("fallback reservation = %t, %v; want claimed", claimed, err)
 	}

@@ -154,3 +154,5 @@ do not align, and secondary merge-queue text begins under the icon instead of th
 [PR task status hover hydration](../../../plans/pr-task-status-hover-hydration/plan.md)
 
 [PR task summary scrolling](../../../plans/pr-task-summary-scrolling/plan.md)
+
+- [Preserve PR details after approval clears](../../../plans/pr-task-disclosure-negative-projection/plan.md).

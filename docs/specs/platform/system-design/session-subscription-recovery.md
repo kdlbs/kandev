@@ -56,7 +56,7 @@ The hook result supplies the state to `use-chat-panel-state.ts`, `task-chat-pane
 A successful snapshot alone establishes history initialization, including a successful empty snapshot.
 
 `doFetchMessages` in `use-session-message-fetch.ts` must not clear messages on rejection or mark failed hydration as successful.
-Preserve message reconciliation, prompt-history independence, draft state, and scroll anchoring.
+Preserve message reconciliation, the plugin conversation facade's projection independence, draft state, and scroll anchoring.
 An obsolete response cannot overwrite another session or clear a newer episode's error.
 Partial live messages remain visible while initial reconciliation is pending.
 

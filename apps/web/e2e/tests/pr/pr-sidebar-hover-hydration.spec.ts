@@ -2,6 +2,7 @@ import type { Page } from "@playwright/test";
 import { expect } from "@playwright/test";
 import { test } from "../../fixtures/test-base";
 import { SessionPage } from "../../pages/session-page";
+import { installNewerNegativePRProjectionFixture } from "../../helpers/pr-negative-projection-fixture";
 
 const NAVIGATION_TITLE = "PR summary navigation";
 const TARGET_TITLE = "Inactive PR summary target";
@@ -284,5 +285,107 @@ test.describe("inactive task PR summary hydration", () => {
     await icon.hover();
     await expect(summary).toBeVisible();
     await expect.poll(() => taskDetailRequests).toBe(1);
+  });
+
+  // @covers AC-UI-PR-TASK-STATUS-SUMMARY-001.2/.3/.17/.24
+  // @covers AC-INTEGRATIONS-GITHUB-WORKFLOW-ATTENTION-003.4/.8
+  test("retains merged PR details after a newer negative approval projection", async ({
+    testPage,
+    apiClient,
+    seedData,
+    prCapture,
+  }) => {
+    test.setTimeout(90_000);
+    await testPage.setViewportSize({ width: 1280, height: 720 });
+    const stepOptions = {
+      workflow_id: seedData.workflowId,
+      workflow_step_id: seedData.startStepId,
+    };
+    const navigationTask = await apiClient.seedTask(
+      seedData.workspaceId,
+      "Negative projection navigation",
+      stepOptions,
+    );
+    const targetTask = await apiClient.seedTask(
+      seedData.workspaceId,
+      "Merged negative projection target",
+      { ...stepOptions, state: "IN_PROGRESS" },
+    );
+    await apiClient.seedTaskSession(navigationTask.task_id, {
+      state: "WAITING_FOR_INPUT",
+      agentProfileId: seedData.agentProfileId,
+    });
+    await apiClient.seedTaskSession(targetTask.task_id, {
+      state: "WAITING_FOR_INPUT",
+      agentProfileId: seedData.agentProfileId,
+    });
+    await apiClient.mockGitHubReset();
+    await apiClient.mockGitHubSetUser("test-user");
+    await apiClient.mockGitHubAssociateTaskPR({
+      workspace_id: seedData.workspaceId,
+      repository_id: seedData.repositoryId,
+      task_id: targetTask.task_id,
+      owner: "kandev-e2e",
+      repo: "sidebar-summary-fixtures",
+      pr_number: 190,
+      pr_url: "https://github.test/kandev-e2e/sidebar-summary-fixtures/pull/190",
+      pr_title: "Merged negative approval fixture",
+      head_branch: "feature/negative-approval",
+      base_branch: "main",
+      author_login: "negative-author",
+      state: "merged",
+      review_state: "approved",
+      checks_state: "success",
+      mergeable_state: "clean",
+    });
+
+    const assertProjectionTimestamps = await installNewerNegativePRProjectionFixture(
+      testPage,
+      targetTask.task_id,
+      190,
+    );
+    let detailRequests = 0;
+    testPage.on("request", (request) => {
+      if (
+        request.url().includes("/api/v1/github/task-prs?") &&
+        request.url().includes(`task_ids=${targetTask.task_id}`)
+      ) {
+        detailRequests += 1;
+      }
+    });
+
+    await testPage.goto(`/t/${navigationTask.task_id}`);
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
+    const targetRow = session.sidebarTaskItem("Merged negative projection target");
+    const icon = targetRow.getByTestId(`pr-task-icon-${targetTask.task_id}`);
+    await icon.hover();
+    await expect.poll(() => detailRequests).toBe(1);
+    await assertProjectionTimestamps();
+
+    const tooltip = await expectVisibleTooltipInsideViewport(testPage);
+    const summary = tooltip.getByTestId("pr-task-status-summary");
+    await expect(summary.getByTestId("pr-task-status-number")).toHaveText("PR #190");
+    await expect(summary.getByTestId("pr-task-status-title")).toHaveText(
+      "Merged negative approval fixture",
+    );
+    await expect(summary.getByTestId("pr-task-status-title-author")).toHaveText(
+      "by negative-author",
+    );
+    await expect(summary.getByTestId("pr-task-status-state-value")).toContainText("Merged");
+    await expect(summary).not.toContainText("Awaiting maintainer approval");
+    await prCapture.screenshot("desktop-pr-negative-projection-merged", {
+      caption: "Desktop PR disclosure retains the merged PR after approval clears.",
+    });
+
+    await testPage.mouse.move(0, 0);
+    await expect(tooltip).toBeHidden();
+    await icon.focus();
+    const keyboardTooltip = await expectVisibleTooltipInsideViewport(testPage);
+    const keyboardSummary = keyboardTooltip.getByTestId("pr-task-status-summary");
+    await expect(keyboardSummary.getByTestId("pr-task-status-title")).toHaveText(
+      "Merged negative approval fixture",
+    );
+    expect(detailRequests).toBe(1);
   });
 });
