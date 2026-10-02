@@ -1,0 +1,96 @@
+import { test, expect } from "../../fixtures/test-base";
+import { openMobileQuickChatSetup } from "./quick-chat-saved-prompt-delivery-helpers";
+import {
+  completeQuickChatOpening,
+  expectNoHorizontalOverflow,
+  expectTouchTarget,
+} from "./quick-chat-opening-composer-helpers";
+
+test("opens the phone picker and delivers the opening prompt", async ({
+  testPage,
+  apiClient,
+}, testInfo) => {
+  test.setTimeout(120_000);
+  await testPage.setViewportSize({ width: 390, height: 844 });
+  const { agents } = await apiClient.listAgents();
+  const mockAgent = agents.find((agent) => agent.name === "mock-agent");
+  if (!mockAgent) throw new Error("mock-agent is required for the phone profile picker test");
+
+  const temporaryProfiles = await Promise.all(
+    Array.from({ length: 8 }, (_, index) =>
+      apiClient.createAgentProfile(
+        mockAgent.id,
+        `Quick Chat Picker ${testInfo.workerIndex} ${Date.now()} ${index}`,
+        { model: "mock-fast" },
+      ),
+    ),
+  );
+  try {
+    const dialog = await openMobileQuickChatSetup(testPage);
+    await expect
+      .poll(async () => {
+        const box = await dialog.boundingBox();
+        return box !== null && box.x <= 1 && box.y <= 1;
+      })
+      .toBe(true);
+    const dialogBox = await dialog.boundingBox();
+    expect(dialogBox).not.toBeNull();
+    expect(dialogBox?.x ?? -1).toBeLessThanOrEqual(1);
+    expect(dialogBox?.y ?? -1).toBeLessThanOrEqual(1);
+    expect(Math.abs((dialogBox?.width ?? 0) - 390)).toBeLessThanOrEqual(2);
+    expect(Math.abs((dialogBox?.height ?? 0) - 844)).toBeLessThanOrEqual(2);
+
+    const editor = dialog.getByTestId("task-description-input");
+    const send = dialog.getByTestId("quick-chat-send");
+    const attach = dialog.getByRole("button", { name: "Attach files" });
+    await expectTouchTarget(attach);
+    await expectTouchTarget(send);
+    await expect(editor).toBeVisible();
+    await testInfo.attach("quick-chat-opening-phone", {
+      body: await testPage.screenshot(),
+      contentType: "image/png",
+    });
+
+    const agentTrigger = dialog.getByTestId("agent-profile-selector");
+    await expectTouchTarget(agentTrigger);
+    const repositoryHelp = dialog.getByRole("button", { name: "About repository context" });
+    await expectTouchTarget(repositoryHelp);
+    await repositoryHelp.tap();
+    await expect(testPage.getByRole("heading", { name: "About repository context" })).toBeVisible();
+    await testPage.keyboard.press("Escape");
+    await expect(testPage.getByRole("heading", { name: "About repository context" })).toBeHidden();
+
+    await agentTrigger.tap();
+    const picker = testPage.getByTestId("quick-chat-agent-picker-content");
+    await expect(picker).toBeVisible();
+    const list = picker.locator("[cmdk-list]");
+    await expect(list.getByRole("option")).toHaveCount(9, { timeout: 10_000 });
+    const listMetrics = await list.evaluate((element) => ({
+      scrollHeight: element.scrollHeight,
+      clientHeight: element.clientHeight,
+    }));
+    expect(listMetrics.scrollHeight).toBeGreaterThan(listMetrics.clientHeight);
+    await list.evaluate((element) => {
+      element.scrollTop = element.scrollHeight;
+    });
+    await expect.poll(() => list.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
+    await testPage.keyboard.press("Escape");
+    await expect(picker).toBeHidden();
+    await expect(agentTrigger).toBeFocused();
+    await agentTrigger.tap();
+    await picker.getByRole("option").last().tap();
+    await expect(agentTrigger).not.toContainText("Select agent");
+
+    const prompt = "Review this feature from my phone";
+    await completeQuickChatOpening(testPage, dialog, apiClient, prompt, {
+      submit: (button) => button.tap(),
+    });
+    await expectNoHorizontalOverflow(testPage);
+  } finally {
+    await Promise.all(
+      temporaryProfiles.map((profile) =>
+        apiClient.deleteAgentProfile(profile.id, true).catch(() => undefined),
+      ),
+    );
+  }
+});

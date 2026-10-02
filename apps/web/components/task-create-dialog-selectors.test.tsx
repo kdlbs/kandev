@@ -21,7 +21,6 @@ const TOAST_MESSAGE_TEST_ID = "toast-message";
 const LAUNCH_PREVIEW_TOGGLE_TEST_ID = "task-create-launch-preview-toggle";
 const DESCRIPTION_INPUT_TEST_ID = "task-description-input";
 const ORIGINAL_PROMPT = "keep this prompt";
-
 vi.mock("@/components/task/chat/file-attachment", async () => {
   const actual = await vi.importActual<typeof import("@/components/task/chat/file-attachment")>(
     "@/components/task/chat/file-attachment",

@@ -45,6 +45,7 @@ import { deleteAttachment, uploadAttachment } from "@/lib/api/domains/attachment
 import { ApiError } from "@/lib/api/client";
 import { useTranslation } from "react-i18next";
 import { t } from "@/lib/i18n";
+import { matchesSubmittedAttachments } from "./chat-input-payload";
 
 type UseChatInputStateProps = {
   sessionId: string | null;
@@ -582,6 +583,33 @@ export function useChatInputState({
     ],
   );
 
+  const clearAcceptedPayload = useCallback(
+    (payload: Pick<ChatSubmitPayload, "message" | "attachments">, resetHeight: () => void) => {
+      const submittedText = payload.message.trim();
+      const currentAttachments = attachmentsRef.current;
+      if (
+        valueRef.current.trim() !== submittedText ||
+        !matchesSubmittedAttachments(currentAttachments, payload.attachments)
+      ) {
+        return false;
+      }
+      clearSubmittedInput({
+        valueRef,
+        submittedText,
+        attachmentsRef,
+        submittedAttachments: attachmentSnapshot(currentAttachments),
+        inputRef,
+        setValue,
+        setAttachments,
+        setHistoryIndex,
+        resetHeight,
+        sessionId,
+      });
+      return true;
+    },
+    [sessionId, setAttachments],
+  );
+
   const allItems = useMemo((): ContextItem[] => {
     const attachmentItems: (ImageContextItem | FileAttachmentContextItem)[] = attachments.map(
       (att) =>
@@ -616,5 +644,16 @@ export function useChatInputState({
   const hasPendingAttachmentUploads = attachments.some((attachment) => !attachment.attachmentId);
 
   // prettier-ignore
-  return { value, attachments, inputRef, addFiles, handleChange, handleSubmit, allItems, getAttachments, hasPendingAttachmentUploads };
+  return {
+    value,
+    attachments,
+    inputRef,
+    addFiles,
+    handleChange,
+    handleSubmit,
+    clearAcceptedPayload,
+    allItems,
+    getAttachments,
+    hasPendingAttachmentUploads,
+  };
 }

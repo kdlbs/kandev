@@ -9,6 +9,7 @@ import { startConfigChat } from "@/lib/api/domains/workspace-api";
 import { recordAgentProfileRecentUseBestEffort } from "@/lib/agent-profile-recent-use";
 import { getQuickChatSetupSessionId } from "@/lib/state/slices/ui/quick-chat-session";
 import { persistQuickChatRename } from "@/lib/quick-chat/rename";
+import type { QuickChatInitialPrompt, QuickChatOpeningPayload } from "@/lib/state/slices/ui/types";
 import {
   agentProfileId as toAgentProfileId,
   sessionId as toSessionId,
@@ -17,6 +18,7 @@ import {
 
 type StartConfigChatOptions = {
   openInQuickChat?: boolean;
+  setupSessionId?: string;
 };
 
 function useConfigChatStore() {
@@ -43,9 +45,10 @@ type RegisterStartedSessionParams = {
   response: StartedConfigChat;
   workspaceId: string;
   agentProfileId: string;
-  prompt: string;
+  prompt: QuickChatInitialPrompt;
   isPassthrough: boolean;
   openInQuickChat: boolean;
+  setupSessionId?: string;
 };
 
 function useUpdateWorkspaceInStore() {
@@ -75,7 +78,9 @@ function registerStartedSession({
   prompt,
   isPassthrough,
   openInQuickChat,
+  setupSessionId,
 }: RegisterStartedSessionParams) {
+  const promptText = typeof prompt === "string" ? prompt : prompt.message;
   const now = new Date().toISOString();
   storeApi.getState().setTaskSession({
     id: toSessionId(response.session_id),
@@ -87,7 +92,9 @@ function registerStartedSession({
     agent_profile_id: toAgentProfileId(agentProfileId),
   });
   if (openInQuickChat) {
-    store.closeQuickChatSession(getQuickChatSetupSessionId(workspaceId, "config"));
+    store.closeQuickChatSession(
+      setupSessionId ?? getQuickChatSetupSessionId(workspaceId, "config"),
+    );
     store.openQuickChat(
       response.session_id,
       workspaceId,
@@ -114,7 +121,7 @@ function registerStartedSession({
   // on surfaces this directory does not own. Same call as the built-in layout
   // profile names and the seeded workflow step names.
   // i18n-exempt: persisted as the task title. See the comment above.
-  const derivedName = prompt.slice(0, 40) || "Config Chat";
+  const derivedName = promptText.slice(0, 40) || "Config Chat";
   store.renameQuickChatSession(response.session_id, derivedName);
   void persistQuickChatRename(response.session_id, response.task_id, derivedName).catch(
     () => undefined,
@@ -144,6 +151,26 @@ function recordConfigChatProfileUse(profileId: string, storeApi: AppStoreApi) {
   );
 }
 
+function configChatLaunchPayload(
+  agentProfileId: string,
+  prompt: QuickChatInitialPrompt,
+  isPassthrough: boolean,
+) {
+  const openingPayload: QuickChatOpeningPayload =
+    typeof prompt === "string" ? { message: prompt } : prompt;
+  return {
+    agent_profile_id: agentProfileId,
+    ...(isPassthrough
+      ? {
+          prompt: openingPayload.message,
+          ...(openingPayload.attachments?.length
+            ? { attachments: openingPayload.attachments }
+            : {}),
+        }
+      : {}),
+  };
+}
+
 export function useConfigChat(workspaceId: string) {
   const store = useConfigChatStore();
   const storeApi = useAppStoreApi();
@@ -168,7 +195,7 @@ export function useConfigChat(workspaceId: string) {
   const startSession = useCallback(
     async (
       agentProfileId: string,
-      prompt: string,
+      prompt: QuickChatInitialPrompt,
       options: StartConfigChatOptions = {},
     ): Promise<string | undefined> => {
       if (activeRequestId.current !== null) return undefined;
@@ -190,10 +217,10 @@ export function useConfigChat(workspaceId: string) {
         const isPassthrough = profile.cli_passthrough === true;
         // ACP chats send through the subscribed shell so a fast turn cannot
         // finish before WS attaches. Passthrough chats render only a terminal.
-        const response = await startConfigChat(workspaceId, {
-          agent_profile_id: agentProfileId,
-          ...(isPassthrough ? { prompt } : {}),
-        });
+        const response = await startConfigChat(
+          workspaceId,
+          configChatLaunchPayload(agentProfileId, prompt, isPassthrough),
+        );
         if (latestRequestId.current !== requestId) {
           await deleteSupersededConfigChatTask(response.task_id);
           return undefined;
@@ -209,6 +236,7 @@ export function useConfigChat(workspaceId: string) {
           prompt,
           isPassthrough,
           openInQuickChat: options.openInQuickChat !== false,
+          setupSessionId: options.setupSessionId,
         });
         await saveDefaultConfigProfile(
           workspaceId,

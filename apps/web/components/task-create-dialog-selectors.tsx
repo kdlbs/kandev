@@ -75,6 +75,7 @@ import {
 } from "@/lib/plugins/composer-capability";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { useTouchDrawer } from "@/hooks/use-compact-task-chrome";
+import { ChatInputPluginActions } from "@/components/task/chat/chat-input-plugin-actions";
 
 export { BranchSelector } from "./branch-selector";
 export type { BranchOption, BranchSelectorProps } from "./branch-selector";
@@ -415,6 +416,12 @@ type TaskFormInputsProps = {
   autoFocus?: boolean;
   initialDescription: string;
   onDescriptionChange: (hasContent: boolean) => void;
+  onDescriptionValueChange?: (value: string) => void;
+  initialAttachments?: FileAttachment[];
+  onAttachmentsChange?: (attachments: FileAttachment[]) => boolean | void;
+  quickChatComposer?: boolean;
+  composerSubmitDisabled?: boolean;
+  toolbarActions?: React.ReactNode;
   onPendingAttachmentUploadsChange?: (pending: boolean) => void;
   onKeyDown: (e: React.KeyboardEvent) => void;
   descriptionValueRef: React.RefObject<TaskFormInputsHandle | null>;
@@ -447,24 +454,28 @@ type TaskFormInputsProps = {
 function useFileAttachments(
   workspaceId: string | null | undefined,
   onPendingAttachmentUploadsChange?: (pending: boolean) => void,
+  initialAttachments: FileAttachment[] = [],
+  onAttachmentsChange?: (attachments: FileAttachment[]) => boolean | void,
 ) {
-  const [attachments, setAttachments] = useState<FileAttachment[]>([]);
-  const attachmentsRef = useRef<FileAttachment[]>([]);
+  const [attachments, setAttachments] = useState<FileAttachment[]>(initialAttachments);
+  const attachmentsRef = useRef<FileAttachment[]>(initialAttachments);
 
-  const updateAttachment = useCallback((id: string, update: Partial<FileAttachment>) => {
-    setAttachments((prev) => {
-      const next = prev.map((attachment) =>
+  const updateAttachment = useCallback(
+    (id: string, update: Partial<FileAttachment>): boolean => {
+      const next = attachmentsRef.current.map((attachment) =>
         attachment.id === id ? { ...attachment, ...update } : attachment,
       );
       attachmentsRef.current = next;
-      return next;
-    });
-  }, []);
+      setAttachments(next);
+      return onAttachmentsChange?.(next) !== false;
+    },
+    [onAttachmentsChange],
+  );
 
   const uploadPendingAttachment = useCallback(
     async (attachment: FileAttachment) => {
       if (!workspaceId || !attachment.file || attachment.attachmentId) return;
-      updateAttachment(attachment.id, { uploadStatus: "uploading" });
+      if (!updateAttachment(attachment.id, { uploadStatus: "uploading" })) return;
       try {
         const uploaded = await uploadAttachment(attachment.file, {
           workspaceId,
@@ -475,11 +486,12 @@ function useFileAttachments(
           void deleteAttachment(uploaded.attachment_id).catch(() => undefined);
           return;
         }
-        updateAttachment(attachment.id, {
+        const keptByDraft = updateAttachment(attachment.id, {
           attachmentId: uploaded.attachment_id,
           uploadStatus: "ready",
           size: uploaded.size_bytes,
         });
+        if (!keptByDraft) void deleteAttachment(uploaded.attachment_id).catch(() => undefined);
       } catch (error) {
         updateAttachment(attachment.id, {
           uploadStatus: "failed",
@@ -558,6 +570,16 @@ function useFileAttachments(
     if (removed?.attachmentId) void deleteAttachment(removed.attachmentId).catch(() => undefined);
   }, []);
 
+  const clearAttachments = useCallback(() => {
+    const current = attachmentsRef.current;
+    attachmentsRef.current = [];
+    setAttachments([]);
+    current.forEach((attachment) => {
+      if (attachment.attachmentId)
+        void deleteAttachment(attachment.attachmentId).catch(() => undefined);
+    });
+  }, []);
+
   const handleRetryAttachment = useCallback(
     (id: string) => {
       const attachment = attachmentsRef.current.find((item) => item.id === id);
@@ -573,6 +595,7 @@ function useFileAttachments(
     addFiles,
     handleRemoveAttachment,
     handleRetryAttachment,
+    clearAttachments,
   };
 }
 
@@ -666,6 +689,7 @@ function toContextItems(
 
 function AttachButton({ onClick, disabled }: { onClick: () => void; disabled?: boolean }) {
   const { t } = useTranslation();
+  const usesTouchTarget = useTouchDrawer() || useResponsiveBreakpoint().isMobile;
   return (
     <div className="flex items-center px-1 pb-1">
       <Tooltip>
@@ -673,7 +697,7 @@ function AttachButton({ onClick, disabled }: { onClick: () => void; disabled?: b
           <button
             type="button"
             aria-label={t("task:attachFiles")}
-            className={`h-7 w-7 inline-flex items-center justify-center rounded-md text-muted-foreground hover:bg-muted/40 hover:text-foreground ${disabled ? "cursor-not-allowed opacity-50" : "cursor-pointer"}`}
+            className={`inline-flex items-center justify-center rounded-md text-muted-foreground hover:bg-muted/40 hover:text-foreground ${usesTouchTarget ? "h-11 w-11" : "h-7 w-7"} ${disabled ? "cursor-not-allowed opacity-50" : "cursor-pointer"}`}
             onClick={onClick}
             disabled={disabled}
           >
@@ -686,13 +710,25 @@ function AttachButton({ onClick, disabled }: { onClick: () => void; disabled?: b
   );
 }
 
-function useDescriptionInput(
-  initialDescription: string,
-  autoFocus: boolean | undefined,
-  descriptionValueRef: React.RefObject<TaskFormInputsHandle | null>,
-  onDescriptionChange: (hasContent: boolean) => void,
-  attachments: FileAttachment[],
-) {
+type DescriptionInputOptions = {
+  initialDescription: string;
+  autoFocus: boolean | undefined;
+  descriptionValueRef: React.RefObject<TaskFormInputsHandle | null>;
+  onDescriptionChange: (hasContent: boolean) => void;
+  onDescriptionValueChange?: (value: string) => void;
+  attachments: FileAttachment[];
+  clearAttachments: () => void;
+};
+
+function useDescriptionInput({
+  initialDescription,
+  autoFocus,
+  descriptionValueRef,
+  onDescriptionChange,
+  onDescriptionValueChange,
+  attachments,
+  clearAttachments,
+}: DescriptionInputOptions) {
   const [description, setDescription] = useState(initialDescription);
   const descriptionRef = useRef(initialDescription);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -707,9 +743,10 @@ function useDescriptionInput(
       const hasContent = newValue.trim().length > 0;
       descriptionRef.current = newValue;
       setDescription(newValue);
+      onDescriptionValueChange?.(newValue);
       if (hadContent !== hasContent) onDescriptionChange(hasContent);
     },
-    [onDescriptionChange],
+    [onDescriptionChange, onDescriptionValueChange],
   );
 
   useEffect(() => {
@@ -719,9 +756,10 @@ function useDescriptionInput(
         getValue: () => descriptionRef.current,
         setValue: setDescriptionValue,
         getAttachments: () => attachments,
+        clearAttachments,
       };
     }
-  }, [attachments, descriptionValueRef, setDescriptionValue]);
+  }, [attachments, clearAttachments, descriptionValueRef, setDescriptionValue]);
 
   useEffect(() => {
     const textarea = textareaRef.current;
@@ -786,6 +824,7 @@ type FormInputsToolbarProps = {
   jiraImport?: TaskFormInputsProps["jiraImport"];
   linearImport?: TaskFormInputsProps["linearImport"];
   pluginActions?: React.ReactNode;
+  toolbarActions?: React.ReactNode;
 };
 
 function FormInputsToolbar({
@@ -800,6 +839,7 @@ function FormInputsToolbar({
   jiraImport,
   linearImport,
   pluginActions,
+  toolbarActions,
 }: FormInputsToolbarProps) {
   return (
     <div className="flex items-center px-1 pb-1">
@@ -833,7 +873,10 @@ function FormInputsToolbar({
           onImport={linearImport.onImport}
         />
       )}
-      <div className="ml-auto flex items-center">{pluginActions}</div>
+      <div className="ml-auto flex items-center gap-1">
+        {pluginActions}
+        {toolbarActions}
+      </div>
     </div>
   );
 }
@@ -860,6 +903,8 @@ function PromptMentionPopover({
 
 function useCreationComposerPluginActions(args: {
   isSessionMode: boolean;
+  quickChatComposer?: boolean;
+  composerSubmitDisabled?: boolean;
   taskId: string | null;
   disabled: boolean;
   description: string;
@@ -869,7 +914,7 @@ function useCreationComposerPluginActions(args: {
   submit?: () => boolean | Promise<boolean>;
 }) {
   const { isMobile } = useResponsiveBreakpoint();
-  const surface = args.isSessionMode ? "new-session" : "task-create";
+  const surface = getCreationComposerSurface(args);
   const composer = useStablePluginComposerCapability(
     {
       insertText: (text) => {
@@ -881,12 +926,33 @@ function useCreationComposerPluginActions(args: {
       // reads its editor: insert-then-submit in one callback happens before
       // React re-renders with the new description.
       submit: async () => {
-        if (args.disabled || !args.descriptionRef.current.trim() || !args.submit) return false;
+        if (
+          args.disabled ||
+          args.composerSubmitDisabled ||
+          !args.descriptionRef.current.trim() ||
+          !args.submit
+        )
+          return false;
         return await args.submit();
       },
     },
     composerIdentity(surface, args.taskId, null),
   );
+  if (args.quickChatComposer) {
+    return (
+      <ChatInputPluginActions
+        sessionId={null}
+        taskId={null}
+        surface="quick-chat"
+        presentation={isMobile ? "mobile" : "desktop"}
+        disabled={args.disabled || args.composerSubmitDisabled}
+        submittable={
+          !args.disabled && !args.composerSubmitDisabled && args.description.trim().length > 0
+        }
+        composer={composer}
+      />
+    );
+  }
   return (
     <PluginSlot
       name={args.isSessionMode ? "new-session-input-actions" : "task-create-input-actions"}
@@ -903,6 +969,15 @@ function useCreationComposerPluginActions(args: {
       actionSurface={{ surface: "composer", presentation: isMobile ? "mobile" : "desktop" }}
     />
   );
+}
+
+function getCreationComposerSurface(args: {
+  quickChatComposer?: boolean;
+  isSessionMode: boolean;
+}): "quick-chat" | "new-session" | "task-create" {
+  if (args.quickChatComposer) return "quick-chat";
+  if (args.isSessionMode) return "new-session";
+  return "task-create";
 }
 
 function useTextareaHandlers(
@@ -1055,6 +1130,12 @@ export const TaskFormInputs = memo(function TaskFormInputs({
   autoFocus,
   initialDescription,
   onDescriptionChange,
+  onDescriptionValueChange,
+  initialAttachments,
+  onAttachmentsChange,
+  quickChatComposer,
+  composerSubmitDisabled,
+  toolbarActions,
   onPendingAttachmentUploadsChange,
   onKeyDown,
   descriptionValueRef,
@@ -1082,7 +1163,13 @@ export const TaskFormInputs = memo(function TaskFormInputs({
     addFiles,
     handleRemoveAttachment,
     handleRetryAttachment,
-  } = useFileAttachments(workspaceId, onPendingAttachmentUploadsChange);
+    clearAttachments,
+  } = useFileAttachments(
+    workspaceId,
+    onPendingAttachmentUploadsChange,
+    initialAttachments,
+    onAttachmentsChange,
+  );
   const { handlePaste, handleDragOver, handleDragLeave, handleDrop } = useAttachmentHandlers(
     disabled,
     addFiles,
@@ -1093,13 +1180,18 @@ export const TaskFormInputs = memo(function TaskFormInputs({
     [attachments, handleRemoveAttachment, handleRetryAttachment],
   );
   const { description, descriptionRef, textareaRef, setDescriptionValue, insertAtCursor } =
-    useDescriptionInput(
+    useDescriptionInput({
       initialDescription,
       autoFocus,
       descriptionValueRef,
       onDescriptionChange,
+      onDescriptionValueChange,
       attachments,
-    );
+      clearAttachments,
+    });
+  useEffect(() => {
+    onAttachmentsChange?.(attachments);
+  }, [attachments, onAttachmentsChange]);
   const referenceInputRef = useRef<RichTextInputHandle | null>(null);
   const mention = useTaskCreatePromptMention({
     textareaRef,
@@ -1154,6 +1246,8 @@ export const TaskFormInputs = memo(function TaskFormInputs({
   }, [autoFocus, promptReferencesEnabled]);
   const pluginActions = useCreationComposerPluginActions({
     isSessionMode,
+    quickChatComposer,
+    composerSubmitDisabled,
     taskId,
     disabled: Boolean(disabled),
     description,
@@ -1208,6 +1302,7 @@ export const TaskFormInputs = memo(function TaskFormInputs({
           jiraImport={jiraImport}
           linearImport={linearImport}
           pluginActions={pluginActions}
+          toolbarActions={toolbarActions}
         />
         <HiddenFileInput inputRef={fileInputRef} onChange={handleFileInputChange} />
       </div>

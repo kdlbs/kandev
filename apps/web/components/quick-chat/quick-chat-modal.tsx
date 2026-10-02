@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useMemo, useRef, type CSSProperties } from "react";
+import { memo, useCallback, useMemo, useRef, type CSSProperties } from "react";
 import { useTranslation } from "react-i18next";
 import { Dialog, DialogContent, DialogTitle } from "@kandev/ui/dialog";
 import dynamic from "@/lib/routing/client-dynamic";
@@ -17,12 +17,13 @@ import {
   type ClarificationEscapePredicate,
   type ClarificationEscapeGuardRegistry,
 } from "@/hooks/use-clarification-escape-guard";
-import { ConfigChatSetup } from "@/components/config-chat/config-chat-setup";
 import { useConfigChat } from "@/components/config-chat/use-config-chat";
 import {
   MobileConfirmationHost,
   MobileConfirmationHostBody,
 } from "@/components/confirmation/mobile-confirmation-host";
+import type { QuickChatInitialPrompt } from "@/lib/state/slices/ui/types";
+import { useQuickChatSetupDraft } from "./use-quick-chat-setup-draft";
 
 const QuickTerminalTabView = dynamic(
   () => import("./quick-terminal-tab-view").then((module) => module.QuickTerminalTabView),
@@ -37,14 +38,27 @@ type QuickChatContentProps = {
   workspaceId: string;
   configChat: ReturnType<typeof useConfigChat>;
   quickChat: ReturnType<typeof useQuickChatModal>;
-  setQuickChatInitialPrompt: (sessionId: string, prompt?: string) => void;
+  setQuickChatInitialPrompt: (sessionId: string, prompt?: QuickChatInitialPrompt) => void;
+  setupDraft: ReturnType<typeof useQuickChatSetupDraft>;
+  discardSetupDraft: () => void;
+  onCloseModal: () => void;
+  onRegisterSetupDiscard: (discard: () => void) => () => void;
 };
+
+type QuickChatActiveContentProps = Omit<
+  QuickChatContentProps,
+  "discardSetupDraft" | "onCloseModal"
+>;
 
 function QuickChatContent({
   workspaceId,
   configChat,
   quickChat,
   setQuickChatInitialPrompt,
+  setupDraft,
+  discardSetupDraft,
+  onCloseModal,
+  onRegisterSetupDiscard,
 }: QuickChatContentProps) {
   return (
     <>
@@ -55,13 +69,19 @@ function QuickChatContent({
         activeSessionId={quickChat.activeSessionId}
         activeTerminalTabId={quickChat.activeTerminalTabId}
         onTabChange={quickChat.setActiveQuickChatSession}
-        onTabClose={quickChat.handleCloseTab}
-        onNewChat={quickChat.handleNewChat}
+        onTabClose={(sessionId) => {
+          if (isQuickChatSetupSessionId(sessionId)) discardSetupDraft();
+          quickChat.handleCloseTab(sessionId);
+        }}
+        onNewChat={() => {
+          discardSetupDraft();
+          quickChat.handleNewChat();
+        }}
         onNewTerminal={quickChat.handleNewTerminal}
         onTerminalActivate={quickChat.handleActivateTerminal}
         onTerminalClose={quickChat.handleCloseTerminal}
         onRename={quickChat.handleRename}
-        onCloseModal={() => quickChat.handleOpenChange(false)}
+        onCloseModal={onCloseModal}
         tabOrderSyncError={quickChat.tabOrderSyncError}
         tabOrder={quickChat.tabOrder}
         onTabOrderChange={quickChat.persistTabOrder}
@@ -71,6 +91,8 @@ function QuickChatContent({
         configChat={configChat}
         quickChat={quickChat}
         setQuickChatInitialPrompt={setQuickChatInitialPrompt}
+        setupDraft={setupDraft}
+        onRegisterSetupDiscard={onRegisterSetupDiscard}
       />
     </>
   );
@@ -81,9 +103,11 @@ function QuickChatActiveContent({
   configChat,
   quickChat,
   setQuickChatInitialPrompt,
-}: QuickChatContentProps) {
+  setupDraft,
+  onRegisterSetupDiscard,
+}: QuickChatActiveContentProps) {
   const canCreateConfigurationChat = !quickChat.sessions.some(
-    (session) => session.kind === "config",
+    (session) => session.kind === "config" && !isQuickChatSetupSessionId(session.sessionId),
   );
 
   if (quickChat.pendingQuickChatOpen) return <QuickChatSelectionLoading />;
@@ -96,6 +120,8 @@ function QuickChatActiveContent({
         configChat={configChat}
         quickChat={quickChat}
         setQuickChatInitialPrompt={setQuickChatInitialPrompt}
+        setupDraft={setupDraft}
+        onRegisterSetupDiscard={onRegisterSetupDiscard}
         canCreateConfigurationChat={canCreateConfigurationChat}
       />
     </>
@@ -139,8 +165,10 @@ function QuickChatConversationContent({
   configChat,
   quickChat,
   setQuickChatInitialPrompt,
+  setupDraft,
+  onRegisterSetupDiscard,
   canCreateConfigurationChat,
-}: QuickChatContentProps & { canCreateConfigurationChat: boolean }) {
+}: QuickChatActiveContentProps & { canCreateConfigurationChat: boolean }) {
   if (
     quickChat.activeKind !== "conversation" ||
     !quickChat.activeSessionId ||
@@ -161,29 +189,35 @@ function QuickChatConversationContent({
       />
     );
   }
-  if (setupKind === "chat") {
+  if (setupKind) {
     return (
       <QuickChatSetup
         key={`${workspaceId}:${quickChat.setupKey}`}
         workspaceId={workspaceId}
+        kind={setupKind}
         canCreateConfigurationChat={canCreateConfigurationChat}
+        defaultConfigProfileId={configChat.defaultProfileId}
         pendingAgentId={quickChat.pendingAgentId}
-        onStart={quickChat.handleSelectAgent}
-        onCancel={() => quickChat.handleOpenChange(false)}
+        configurationStarting={configChat.isStarting}
+        configurationError={configChat.error}
+        quickChatError={quickChat.startError}
+        draft={setupDraft.draft}
+        onDraftChange={setupDraft.update}
+        onStartQuickChat={async (agentId, repositories, payload) => {
+          const started = await quickChat.handleSelectAgent(agentId, repositories, payload);
+          if (started) setupDraft.clear(false);
+          return started;
+        }}
+        onStartConfigChat={async (agentId, payload) => {
+          const sessionId = await configChat.startSession(agentId, payload, {
+            setupSessionId: quickChat.activeSessionId ?? undefined,
+          });
+          if (sessionId) setupDraft.clear(false);
+          return Boolean(sessionId);
+        }}
         onKindChange={quickChat.handleSetupKindChange}
-      />
-    );
-  }
-  if (setupKind === "config") {
-    return (
-      <ConfigChatSetup
-        key={`${workspaceId}:config:${quickChat.setupKey}`}
-        defaultProfileId={configChat.defaultProfileId}
-        isStarting={configChat.isStarting}
-        error={configChat.error}
-        onStart={(profileId, prompt) => configChat.startSession(profileId, prompt)}
-        onCancel={() => quickChat.handleOpenChange(false)}
-        onKindChange={quickChat.handleSetupKindChange}
+        onDiscardDraft={() => setupDraft.clear(false)}
+        onRegisterDiscard={onRegisterSetupDiscard}
       />
     );
   }
@@ -223,7 +257,27 @@ function QuickChatResizeHandle({
 export const QuickChatModal = memo(function QuickChatModal({ workspaceId }: QuickChatModalProps) {
   const { t } = useTranslation();
   const configChat = useConfigChat(workspaceId);
-  const quickChat = useQuickChatModal(workspaceId, configChat.reset);
+  const setupDraftUserId = useAppStore((state) => state.auth?.user?.id ?? "local");
+  const setupDraft = useQuickChatSetupDraft(workspaceId, setupDraftUserId);
+  const setupDiscardRef = useRef<(() => void) | null>(null);
+  const registerSetupDiscard = useCallback((discard: () => void) => {
+    setupDiscardRef.current = discard;
+    return () => {
+      if (setupDiscardRef.current === discard) setupDiscardRef.current = null;
+    };
+  }, []);
+  const discardSetupDraft = useCallback(() => {
+    if (setupDiscardRef.current) setupDiscardRef.current();
+    else setupDraft.clear(true);
+  }, [setupDraft.clear]);
+  const quickChat = useQuickChatModal(workspaceId, configChat.reset, discardSetupDraft);
+  const handleOpenChange = useCallback(
+    (open: boolean) => {
+      if (!open) discardSetupDraft();
+      quickChat.handleOpenChange(open);
+    },
+    [discardSetupDraft, quickChat.handleOpenChange],
+  );
   const setQuickChatInitialPrompt = useAppStore((state) => state.setQuickChatInitialPrompt);
   const { width, leftResizeHandleProps, rightResizeHandleProps } = useQuickChatWidth();
   // A ref, not state: several widgets (a pending clarification, an open
@@ -243,7 +297,7 @@ export const QuickChatModal = memo(function QuickChatModal({ workspaceId }: Quic
     <ClarificationEscapeGuardProvider value={escapeGuardRegistry}>
       <MobileConfirmationHost open={quickChat.isOpen} key={workspaceId}>
         {({ contentProps }) => (
-          <Dialog open={quickChat.isOpen} onOpenChange={quickChat.handleOpenChange}>
+          <Dialog open={quickChat.isOpen} onOpenChange={handleOpenChange}>
             <DialogContent
               {...contentProps}
               className="!left-0 !top-0 !h-dvh !max-h-dvh !w-screen !max-w-none !translate-x-0 !translate-y-0 flex flex-col gap-0 p-0 pt-safe pb-safe shadow-2xl sm:!left-1/2 sm:!top-1/2 sm:!h-[85vh] sm:!max-h-[85vh] sm:!w-[var(--quick-chat-width)] sm:!max-w-[calc(100vw-2rem)] sm:!-translate-x-1/2 sm:!-translate-y-1/2"
@@ -281,6 +335,10 @@ export const QuickChatModal = memo(function QuickChatModal({ workspaceId }: Quic
                   configChat={configChat}
                   quickChat={quickChat}
                   setQuickChatInitialPrompt={setQuickChatInitialPrompt}
+                  setupDraft={setupDraft}
+                  discardSetupDraft={discardSetupDraft}
+                  onCloseModal={() => handleOpenChange(false)}
+                  onRegisterSetupDiscard={registerSetupDiscard}
                 />
               </MobileConfirmationHostBody>
             </DialogContent>

@@ -12,6 +12,7 @@ import type {
   Repository,
   TaskSession,
 } from "@/lib/types/http";
+import type { MessageAttachment } from "@/lib/services/session-launch-service";
 
 // Workspace operations
 export async function createWorkspace(
@@ -301,6 +302,7 @@ type StartQuickChatCommon = {
   agent_profile_id?: string;
   executor_id?: string;
   prompt?: string;
+  attachments?: MessageAttachment[];
   auto_title?: boolean;
 };
 
@@ -380,6 +382,7 @@ export type StartConfigChatRequest = {
   agent_profile_id?: string;
   executor_id?: string;
   prompt?: string;
+  attachments?: MessageAttachment[];
 };
 
 export type StartConfigChatResponse = {

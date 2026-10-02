@@ -1,6 +1,12 @@
 import { act, renderHook } from "@testing-library/react";
+import { useEffect, useState } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { getChatDraftText, setChatDraftText } from "@/lib/local-storage";
+import {
+  getChatDraftAttachments,
+  getChatDraftText,
+  setChatDraftAttachments,
+  setChatDraftText,
+} from "@/lib/local-storage";
 import type {
   ChatSubmitPayload,
   ChatSubmitResult,
@@ -8,6 +14,10 @@ import type {
 import { useQuickChatInitialPrompt } from "./use-quick-chat-initial-prompt";
 
 const LAUNCH_PROMPT = "Start here";
+const SESSION_ID = "session-1";
+const TRACE_FILE_NAME = "trace.txt";
+const MANUAL_FOLLOW_UP = "manual follow-up";
+const TEXT_MIME_TYPE = "text/plain";
 
 beforeEach(() => {
   localStorage.clear();
@@ -29,7 +39,7 @@ describe("useQuickChatInitialPrompt draft recovery", () => {
       const mount = () =>
         renderHook(() =>
           useQuickChatInitialPrompt({
-            sessionId: "session-1",
+            sessionId: SESSION_ID,
             taskId: "task-1",
             prompt: pending,
             blocked: false,
@@ -45,8 +55,8 @@ describe("useQuickChatInitialPrompt draft recovery", () => {
       await act(async () => {});
 
       expect(submit).toHaveBeenCalledTimes(1);
-      expect(getChatDraftText("session-1")).toBe(LAUNCH_PROMPT);
-      expect(onRejected).toHaveBeenCalledWith("session-1", LAUNCH_PROMPT);
+      expect(getChatDraftText(SESSION_ID)).toBe(LAUNCH_PROMPT);
+      expect(onRejected).toHaveBeenCalledWith(SESSION_ID, LAUNCH_PROMPT);
       second.unmount();
     },
   );
@@ -61,7 +71,7 @@ describe("useQuickChatInitialPrompt draft recovery", () => {
     );
     renderHook(() =>
       useQuickChatInitialPrompt({
-        sessionId: "session-1",
+        sessionId: SESSION_ID,
         taskId: "task-1",
         prompt: LAUNCH_PROMPT,
         blocked: false,
@@ -69,14 +79,14 @@ describe("useQuickChatInitialPrompt draft recovery", () => {
       }),
     );
     await act(async () => {});
-    const recoveryDraft = getChatDraftText("session-1");
-    setChatDraftText("session-1", "manual follow-up");
+    const recoveryDraft = getChatDraftText(SESSION_ID);
+    setChatDraftText(SESSION_ID, MANUAL_FOLLOW_UP);
     await act(async () => accept(true));
     expect(recoveryDraft).toBe(LAUNCH_PROMPT);
-    expect(getChatDraftText("session-1")).toBe("manual follow-up");
+    expect(getChatDraftText(SESSION_ID)).toBe(MANUAL_FOLLOW_UP);
   });
 
-  it("keeps an attempted prompt bound to its original session submitter", async () => {
+  it("keeps a blocked prompt bound to its original session submitter", async () => {
     const firstSubmit = vi.fn().mockResolvedValue(true);
     const nextSubmit = vi.fn().mockResolvedValue(true);
     const view = renderHook(
@@ -88,9 +98,15 @@ describe("useQuickChatInitialPrompt draft recovery", () => {
           submit,
           blocked,
         }),
-      { initialProps: { sessionId: "session-1", submit: firstSubmit, blocked: false } },
+      { initialProps: { sessionId: SESSION_ID, submit: firstSubmit, blocked: false } },
     );
     view.rerender({ sessionId: "session-2", submit: nextSubmit, blocked: true });
+    await act(async () => {});
+
+    expect(firstSubmit).not.toHaveBeenCalled();
+    expect(nextSubmit).not.toHaveBeenCalled();
+
+    view.rerender({ sessionId: SESSION_ID, submit: firstSubmit, blocked: false });
     await act(async () => {});
     expect(firstSubmit).toHaveBeenCalledOnce();
     expect(nextSubmit).not.toHaveBeenCalled();
@@ -98,13 +114,208 @@ describe("useQuickChatInitialPrompt draft recovery", () => {
 });
 
 describe("useQuickChatInitialPrompt admission", () => {
-  it("waits for migration and clears the launch prompt only after acceptance", async () => {
+  it("rechecks prerequisites after an earlier passive effect blocks admission", async () => {
+    const submit = vi.fn().mockResolvedValue(true);
+    const onAttempted = vi.fn();
+    const view = renderHook(() => {
+      const [blocked, setBlocked] = useState(false);
+      useEffect(() => setBlocked(true), []);
+      useQuickChatInitialPrompt({
+        sessionId: SESSION_ID,
+        taskId: "task-1",
+        prompt: LAUNCH_PROMPT,
+        blocked,
+        submit,
+        onAttempted,
+      });
+      return setBlocked;
+    });
+
+    await act(async () => {});
+    expect(submit).not.toHaveBeenCalled();
+    expect(onAttempted).not.toHaveBeenCalled();
+
+    act(() => view.result.current(false));
+    await act(async () => {});
+    expect(submit).toHaveBeenCalledOnce();
+    expect(onAttempted).toHaveBeenCalledOnce();
+  });
+
+  it("waits for admission prerequisites and submits once they are ready", async () => {
+    const submit = vi.fn().mockResolvedValue(true);
+    const view = renderHook(
+      ({ blocked }) =>
+        useQuickChatInitialPrompt({
+          sessionId: SESSION_ID,
+          taskId: "task-1",
+          prompt: LAUNCH_PROMPT,
+          blocked,
+          submit,
+        }),
+      { initialProps: { blocked: true } },
+    );
+
+    await act(async () => {});
+    expect(submit).not.toHaveBeenCalled();
+
+    view.rerender({ blocked: false });
+    await act(async () => {});
+    expect(submit).toHaveBeenCalledOnce();
+    expect(submit).toHaveBeenCalledWith({ message: LAUNCH_PROMPT });
+  });
+});
+
+describe("useQuickChatInitialPrompt rejected payload recovery", () => {
+  it("submits and recovers the full opening payload without replay", async () => {
+    const openingPayload = {
+      message: "Review this trace",
+      clientMessageId: "opening-message-1",
+      attachments: [
+        {
+          type: "resource" as const,
+          attachment_id: "attachment-1",
+          mime_type: TEXT_MIME_TYPE,
+          name: TRACE_FILE_NAME,
+          size_bytes: 42,
+          delivery_mode: "path" as const,
+        },
+      ],
+    };
+    let pending: typeof openingPayload | undefined = openingPayload;
+    const submit = vi.fn().mockResolvedValue(false);
+    const onRejected = vi.fn();
+    const mount = () =>
+      renderHook(() =>
+        useQuickChatInitialPrompt({
+          sessionId: SESSION_ID,
+          taskId: "task-1",
+          prompt: pending,
+          blocked: false,
+          submit,
+          onAttempted: () => {
+            pending = undefined;
+          },
+          onRejected,
+        }),
+      );
+    const first = mount();
+    await act(async () => {});
+    first.unmount();
+    const second = mount();
+    await act(async () => {});
+
+    expect(submit).toHaveBeenCalledOnce();
+    expect(submit).toHaveBeenCalledWith(openingPayload);
+    expect(getChatDraftText(SESSION_ID)).toBe(openingPayload.message);
+    expect(getChatDraftAttachments(SESSION_ID)).toEqual([
+      expect.objectContaining({
+        attachmentId: "attachment-1",
+        fileName: TRACE_FILE_NAME,
+        mimeType: TEXT_MIME_TYPE,
+        size: 42,
+        deliveryMode: "path",
+      }),
+    ]);
+    expect(onRejected).toHaveBeenCalledWith(SESSION_ID, openingPayload);
+    second.unmount();
+  });
+});
+
+describe("useQuickChatInitialPrompt accepted payload cleanup", () => {
+  it("clears only the accepted opening snapshot and its matching file descriptors", async () => {
+    const openingPayload = {
+      message: "Review this trace",
+      clientMessageId: "opening-message-2",
+      attachments: [
+        {
+          type: "resource" as const,
+          attachment_id: "attachment-2",
+          mime_type: TEXT_MIME_TYPE,
+          name: TRACE_FILE_NAME,
+          size_bytes: 42,
+          delivery_mode: "path" as const,
+        },
+      ],
+    };
+    const submit = vi.fn().mockResolvedValue(true);
+    renderHook(() =>
+      useQuickChatInitialPrompt({
+        sessionId: SESSION_ID,
+        taskId: "task-1",
+        prompt: openingPayload,
+        blocked: false,
+        submit,
+      }),
+    );
+    await act(async () => {});
+
+    expect(submit).toHaveBeenCalledWith(openingPayload);
+    expect(getChatDraftText(SESSION_ID)).toBe("");
+    expect(getChatDraftAttachments(SESSION_ID)).toEqual([]);
+  });
+
+  it("preserves a newer text and attachment draft when the opening send settles", async () => {
+    let accept!: (value: boolean) => void;
+    const openingPayload = {
+      message: "Review this trace",
+      clientMessageId: "opening-message-3",
+      attachments: [
+        {
+          type: "resource" as const,
+          attachment_id: "attachment-3",
+          mime_type: TEXT_MIME_TYPE,
+          name: TRACE_FILE_NAME,
+          size_bytes: 42,
+          delivery_mode: "path" as const,
+        },
+      ],
+    };
+    const submit = vi.fn(
+      () =>
+        new Promise<boolean>((resolve) => {
+          accept = resolve;
+        }),
+    );
+    renderHook(() =>
+      useQuickChatInitialPrompt({
+        sessionId: SESSION_ID,
+        taskId: "task-1",
+        prompt: openingPayload,
+        blocked: false,
+        submit,
+      }),
+    );
+    await act(async () => {});
+    setChatDraftText(SESSION_ID, MANUAL_FOLLOW_UP);
+    setChatDraftAttachments(SESSION_ID, [
+      {
+        id: "new-file",
+        attachmentId: "attachment-new",
+        mimeType: TEXT_MIME_TYPE,
+        fileName: "follow-up.txt",
+        size: 18,
+        isImage: false,
+        deliveryMode: "path",
+      },
+    ]);
+
+    await act(async () => accept(true));
+
+    expect(getChatDraftText(SESSION_ID)).toBe(MANUAL_FOLLOW_UP);
+    expect(getChatDraftAttachments(SESSION_ID)).toEqual([
+      expect.objectContaining({ attachmentId: "attachment-new", fileName: "follow-up.txt" }),
+    ]);
+  });
+});
+
+describe("useQuickChatInitialPrompt admission outcomes", () => {
+  it("waits for admission prerequisites and clears only after acceptance", async () => {
     const submit = vi.fn().mockResolvedValue(true);
     const onAccepted = vi.fn();
     const view = renderHook(
       ({ blocked }) =>
         useQuickChatInitialPrompt({
-          sessionId: "session-1",
+          sessionId: SESSION_ID,
           taskId: "task-1",
           prompt: LAUNCH_PROMPT,
           blocked,
@@ -127,7 +338,7 @@ describe("useQuickChatInitialPrompt admission", () => {
     const onAccepted = vi.fn();
     renderHook(() =>
       useQuickChatInitialPrompt({
-        sessionId: "session-1",
+        sessionId: SESSION_ID,
         taskId: "task-1",
         prompt: LAUNCH_PROMPT,
         blocked: false,
@@ -146,7 +357,7 @@ describe("useQuickChatInitialPrompt admission", () => {
     const view = renderHook(
       ({ submit }: { submit: (payload: ChatSubmitPayload) => ChatSubmitResult }) =>
         useQuickChatInitialPrompt({
-          sessionId: "session-1",
+          sessionId: SESSION_ID,
           taskId: "task-1",
           prompt: LAUNCH_PROMPT,
           blocked: false,
@@ -173,7 +384,7 @@ describe("useQuickChatInitialPrompt admission", () => {
     const view = renderHook(
       ({ submit }: { submit: (payload: ChatSubmitPayload) => ChatSubmitResult }) =>
         useQuickChatInitialPrompt({
-          sessionId: "session-1",
+          sessionId: SESSION_ID,
           taskId: "task-1",
           prompt: LAUNCH_PROMPT,
           blocked: false,

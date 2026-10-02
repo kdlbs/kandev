@@ -58,11 +58,16 @@ contribute to this activity indicator.
 
 ### Start a chat
 
-1. Turn on **Configuration chat** when the conversation should inspect or change Kandev configuration. This option is hidden when the workspace already has a configuration conversation.
-2. Choose an agent profile. Quick Chat requires one and defaults to the workspace's default agent profile when configured.
-3. For an ordinary Quick Chat, optionally add one or more workspace repositories.
-4. For each repository, choose a branch. The same repository cannot be added twice.
-5. Select **Start chat**.
+1. Enter the opening prompt. Add files when they help explain the request.
+2. Choose an enabled agent profile. Quick Chat uses the workspace default when available.
+3. For an ordinary Quick Chat, add workspace repositories when code context helps.
+4. Choose a branch for each repository. Do not add the same repository twice.
+5. To inspect or change Kandev configuration, turn on **Configuration chat**. This option is hidden when the workspace already has a configuration conversation.
+6. Select **Send**. Quick Chat creates the conversation and delivers the opening prompt.
+
+Quick Chat keeps the prompt, files, profile, and repositories in the setup after a creation error. Correct the problem and select **Send** again. After a conversation exists, a delivery error keeps the opening prompt in that chat for an explicit retry.
+
+Configuration Chat does not use repository selections. Its existing workspace permissions and Settings entry point remain in effect.
 
 Each selected repository gets an isolated worktree from the chosen branch. Uncommitted changes in your original checkout are not copied. Without a repository, Kandev creates an ephemeral working directory under `<KANDEV_HOME_DIR>/quick-chat/` (by default `~/.kandev/quick-chat/`).
 
@@ -79,7 +84,13 @@ or rename the chat first, the provisional or user-selected title remains authori
 
 Closing a real chat tab permanently deletes its conversation, hidden backing task data, and associated worktree. There is no undo. Kandev also deletes abandoned chats after seven days; cleanup runs when the backend starts and then once per day. Only chats whose session is `RUNNING` or `IDLE` are protected from age-based cleanup. Old `CREATED`, `STARTING`, or `WAITING_FOR_INPUT` chats can expire, so do not use Quick Chat for durable work.
 
-If **Start chat** is disabled, select a profile and finish every repository/branch row. If a repository is missing, confirm that it belongs to the current workspace and refresh the repository configuration. Use a normal task when the result must remain visible on a board or become a reviewed PR.
+If **Send** stays disabled, complete these steps:
+
+- Enter a prompt.
+- Select an enabled profile.
+- Complete every repository and branch row.
+
+If a repository is missing, make sure that it belongs to the current workspace. Then refresh the repository configuration. Use a normal task when the result must remain visible on a board or become a reviewed PR.
 
 ### Agent continuation goals
 

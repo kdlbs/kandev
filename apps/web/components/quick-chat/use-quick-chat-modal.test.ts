@@ -83,6 +83,7 @@ function makeAppState() {
     activateQuickTerminal: vi.fn(),
     removeQuickTerminal: vi.fn(),
     renameQuickChatSession: vi.fn(),
+    setQuickChatInitialPrompt: vi.fn(),
     openQuickChat: vi.fn(),
     applyAgentProfileRecentUse: vi.fn(),
     setQuickChatTabOrder: vi.fn(),
@@ -111,6 +112,7 @@ function makeStore(overrides: Partial<MockStore> = {}): MockStore {
     activateQuickTerminal: vi.fn(),
     removeQuickTerminal: vi.fn(),
     renameQuickChatSession: vi.fn(),
+    setQuickChatInitialPrompt: vi.fn(),
     openQuickChat: vi.fn(),
     applyAgentProfileRecentUse: vi.fn(),
     agentProfiles: [
@@ -623,6 +625,13 @@ describe("useAgentSelection — error handling", () => {
       }),
     );
     expect(result.current.pendingAgentId).toBeNull();
+    expect(result.current.startError).toBe("server exploded");
+
+    mockStartQuickChat.mockResolvedValueOnce({ task_id: "task-retry", session_id: "sess-retry" });
+    await act(async () => {
+      await result.current.handleSelectAgent("agent-a");
+    });
+    expect(result.current.startError).toBeNull();
   });
 });
 

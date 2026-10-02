@@ -5,6 +5,7 @@ created: 2026-07-14
 owners:
   - kandev
 ---
+
 # Quick Chat Repository Context Requirements
 
 ## Overview
@@ -49,9 +50,9 @@ context without changing their checked-out branches or creating a kanban task.
 - The desktop quick-chat dialog stays horizontally centered and can be resized from either
   horizontal edge. Its last user-selected width is restored across browser sessions and clamped
   to the current viewport.
-- The quick-chat message history and composer retain the dialog's popover surface color. The setup
-  footer uses that same continuous surface, and the new chat action appears immediately after the
-  last chat tab.
+- The quick-chat message history and opening composer retain the dialog's popover surface color.
+  Send appears in the composer action row. Quick Chat has no separate setup footer.
+- The new-chat action remains immediately after the last chat tab.
 - Quick-chat tabs remain in creation order across reloads; later activity does not reorder them.
 - On `/t/:id` and `/office/tasks/:id` task-detail routes, Quick Chat hydration follows the
   task's workspace even when the persisted active-workspace cookie or user setting points
@@ -73,9 +74,14 @@ Decision: [ADR 0038](../../../decisions/0038-quick-chat-repository-isolation.md)
   "repositories": [
     { "repository_id": "repo-1", "base_branch": "main" },
     { "repository_id": "repo-2", "base_branch": "develop" }
-  ]
+  ],
+  "prompt": "Review this request"
 }
 ```
+
+`prompt` and `attachments` are optional opening-message fields for terminal-backed profiles.
+`attachments` uses the existing message-attachment shape. Structured profiles receive the opening
+message through the subscribed chat message path. The two paths deliver the full payload once.
 
 `agent_profile_id` is required after workspace-default resolution. `repositories` is optional
 and ordered. The legacy singleton repository fields remain accepted, but callers cannot mix
@@ -93,8 +99,10 @@ The response remains:
 - A missing agent, foreign repository, duplicate repository, invalid branch, or mixed request
   shape fails validation and does not launch an agent.
 - If repository preparation or agent launch fails, the backend deletes the ephemeral task and
-  its materialized worktrees. The setup remains visible with its selections and reports the
-  error.
+  its materialized worktrees. Before a conversation opens, the setup retains its prompt, files,
+  profile, and repositories for correction or retry.
+- If first-message delivery fails after a conversation opens, that conversation retains the
+  prompt and files for an explicit retry. It does not create another conversation.
 - A superseded in-flight start still deletes the completed orphan task.
 
 ## Persistence guarantees

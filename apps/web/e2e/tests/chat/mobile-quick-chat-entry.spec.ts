@@ -111,7 +111,7 @@ test.describe("Quick Chat entry points on mobile", () => {
     await expect(testPage.getByTestId("app-nav-trigger")).toBeFocused();
   });
 
-  test("chooses configuration mode from the setup panel", async ({ testPage }) => {
+  test("chooses configuration mode on the opening composer", async ({ testPage }) => {
     await testPage.goto("/");
     const context = testPage.getByTestId("app-nav-trigger");
     await context.tap();
@@ -119,10 +119,9 @@ test.describe("Quick Chat entry points on mobile", () => {
 
     const dialog = testPage.getByRole("dialog", { name: "Quick Chat" });
     const setup = dialog.getByTestId("quick-chat-setup");
-    await expect(setup.getByText(/quick chats stay outside your task board/i)).toBeVisible();
-    await setup.getByRole("switch", { name: "Configuration chat" }).tap();
-
-    await expect(dialog.getByTestId("config-chat-setup")).toBeVisible();
+    const modeSwitch = setup.getByRole("switch", { name: "Configuration chat" });
+    await modeSwitch.tap();
+    await expect(modeSwitch).toBeChecked();
     await assertNoDocumentHorizontalOverflow(testPage);
     await dialog.getByTestId("quick-chat-close").tap();
     await expect(dialog).toBeHidden();
