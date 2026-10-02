@@ -151,12 +151,13 @@ func isUninitializedStartupExecution(execution *AgentExecution) bool {
 	return execution.Status == v1.AgentStatusStarting || execution.Status == v1.AgentStatusRunning
 }
 
-// handleCompleteEventMarkState marks the execution state after a complete event:
-// failed+removed on error, ready on success.
 func isUninitializedStartupFailure(execution *AgentExecution, event *agentctl.AgentEvent) bool {
 	return event != nil && event.PromptGeneration == 0 && isUninitializedStartupExecution(execution)
 }
 
+// handleCompleteEventMarkState marks the execution state after a complete event.
+// Its success path runs under the event's startup callback lease and must keep
+// using lease-free helpers through readiness publication.
 func (m *Manager) handleCompleteEventMarkState(
 	execution *AgentExecution,
 	event *agentctl.AgentEvent,
@@ -222,7 +223,9 @@ func (m *Manager) handleCompleteEventMarkState(
 		}
 		m.eventPublisher.PublishAgentEvent(context.Background(), events.AgentRunning, execution)
 	}
-	if err := m.MarkReady(execution.ID); err != nil {
+	if err := m.markReadyEventForExecution(
+		context.Background(), execution, events.AgentReady, false, event.AttemptID,
+	); err != nil {
 		m.logger.Error("failed to mark execution as ready after complete",
 			zap.String("execution_id", execution.ID),
 			zap.Error(err))
