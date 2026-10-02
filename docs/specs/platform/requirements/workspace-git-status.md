@@ -80,6 +80,7 @@ A failed live source still cannot authorize an unmarked persisted fallback.
 - **AC-PLATFORM-WORKSPACE-GIT-STATUS-001.41:** Partial failure shall preserve healthy repositories and retain unavailable freshness until every failed repository recovers.
   Ready notifications shall cancel unnecessary retries.
   A same-state rerender shall not restart the retry delay or create another request.
+- **AC-PLATFORM-WORKSPACE-GIT-STATUS-001.42:** During an eligible workspace monitor tick, every already-dirty tracked path whose filesystem modification time changed shall trigger the existing repository-scoped file refresh and background Git-status refresh attempt. Detection shall preserve exact supported filenames, including leading or trailing whitespace, tabs, newlines, quoting characters, and Unicode, independently of Git path-quoting configuration. An unchanged worktree shall not trigger another monitor refresh. Existing admission, cadence, deadlines, and bounded subscriber delivery remain in force; writes preserving the observed modification time are outside this polling guarantee.
 
 
 
@@ -98,3 +99,5 @@ A failed live source still cannot authorize an unmarked persisted fallback.
 See the [workspace status design](../system-design/workspace-git-status.md) and [delivery plan](../../../plans/changes-panel-git-refresh/plan.md).
 The [delayed recovery design](../system-design/changes-refresh-recovery.md) and
 [follow-up plan](../../../plans/changes-loading-feedback/plan.md) own automatic recovery delivery.
+The [dirty-path monitor design](../system-design/workspace-dirty-path-monitor.md) and
+[repair package](../../../plans/workspace-dirty-path-monitor/plan.md) own exact-path polling refresh.
