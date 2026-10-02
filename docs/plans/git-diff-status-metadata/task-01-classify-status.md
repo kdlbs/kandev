@@ -32,6 +32,9 @@ then deliver the complete repair through the parent's authorized normal PR loop.
 - Replace only classification in `parseCommitDiffWithOptions` using the small
   metadata helper described by the owning design; GREEN without assertion changes.
 - Assert status plus exact keys/paths, patch bytes, counts, and preserved metadata.
+- Apply the parent-approved test-only external-ID CI fixture dependency
+  injection before `NewService` and worker startup, using the shared builder
+  with the same active worker and original winner-recovery assertions.
 - Update requirement/design status when accepted, manifest/order results, and
   bounded public-doc sentence. No new ADR is needed for this existing boundary.
 
@@ -226,3 +229,22 @@ launched an unchanged focused check first (1.054s, handle 98351 joined); it was
 not GREEN evidence. No caller/API or broad local checks were replayed. Local
 implementation status is complete; delivery still requires current-head hosted
 review/CI, expected-head normal merge and independent merge/cleanup evidence.
+
+## Bounded CI fixture result
+
+Backend shard 1/2 job `110901597055`, artifact `11235949221`, reported an
+actual repository-pointer race in
+`TestCreateTaskWithExternalIDPrepareFailureAfterStepThreeMissRecovers`. Parent
+approved the test-only fix in `internal/task/service/service_test.go` and
+`create_task_external_id_test.go`: existing session-wrapper fixture delegates
+to one shared builder that also accepts a task wrapper; this test installs
+its task wrapper before `NewService` and the unchanged active cleanup worker.
+Original winner/outcome/unique-task assertions remain unchanged. No production
+service change or other fixture repair is included.
+
+Exact pre-change `-race -p 2 -count=10` test passed (1.472s, handle 51616
+joined); CI artifact is RED evidence. The same exact test passed after the
+construction-time fix (1.431s, handle 8347 joined). Changed-package task service lint passed with zero issues (handle 44786
+joined), concurrency 2 and serial runners. Normal hooks and hosted gates remain; no broad service suite or passing
+Git/API/synthetic checks are replayed. Prior full semantic and compatibility
+reports become historical when the corrected fixture is published.

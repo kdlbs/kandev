@@ -27,6 +27,8 @@ This package records supplied evidence, not a new permanent test run.
 - Focused parser, real `ShowCommit`/cumulative, and real-router repository regressions.
 - Owning Platform requirement/design, boundary note, and one public reference clarification.
 - Preserve paths/bytes, counts, comparison semantics, budgets, schemas, and routing.
+- Approved test-only CI repair: inject the external-ID race fixture dependency
+  during shared service construction, before its active cleanup worker starts.
 
 Git commands/environments, workspace mutation, live porcelain/NUL numstat,
 history providers, frontend layout, and new status enums are excluded.
@@ -154,3 +156,21 @@ launched an unchanged focused check first (1.054s, handle 98351 joined); it was
 not GREEN evidence. No caller/API or broad local checks were replayed. Local
 implementation status is complete; delivery still requires current-head hosted
 review/CI, expected-head normal merge and independent merge/cleanup evidence.
+
+## Bounded hosted race-fixture remediation
+
+At `8e26e95b93da7ddfec33f15c94130408ae6b483d`, backend shard 1/2 job
+`110901597055` (run `37026200617`, artifact `11235949221`) reported a data
+race only in `TestCreateTaskWithExternalIDPrepareFailureAfterStepThreeMissRecovers`.
+The test replaced the task repository after the shared fixture started its
+cleanup worker. The parent approved test-only construction-time injection
+through the shared fixture, retaining the active worker and exact assertions.
+No production service or other fixture changes are included. The exact local
+pre-change race run passed ten iterations (1.472s, handle 51616 joined); it does
+not negate the authoritative CI race artifact. The corrected exact ten-iteration
+race regression passed in 1.431s (handle 8347 joined). No service suite, caller
+replay, synthetic replay, sleeps, retries or race suppression was used.
+
+Changed-package task service lint passed with zero issues (handle 44786 joined),
+concurrency 2 and serial runners. Actual current-PR documentation coverage is
+checked before the normal hooked commit; hosted delivery remains pending.
