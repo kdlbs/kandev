@@ -159,3 +159,15 @@ Remote CI and subsequent review remain pending until the updated head is pushed.
 - Filesystem disappearance after selection can still fail ordinary preparation.
 - Fallback must not copy local secrets or machine-specific scripts.
 - Rollback must only delete registrations actually created by that request.
+
+## Additional CI remediation
+
+After the origin fixtures were corrected, CI exposed concurrent navigation
+fixture checkout preparation and premature history geometry sampling. The
+helper now settles each shared-checkout turn before starting another task,
+and the spacing test polls its existing measured-layout expectations. The
+helper regression passed after failing before the correction; all 17 affected
+desktop/mobile browser tests passed with retries disabled under CI resource
+limits. Observer-delivery diagnostics reproduced and explained the spacing
+failure, then were removed. No production or durable behavior changes were
+needed. See the work order for verification evidence.

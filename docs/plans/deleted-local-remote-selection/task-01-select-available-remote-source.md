@@ -82,6 +82,7 @@ paired specs only after implementation and all checks pass.
 - `apps/web/e2e/helpers/github-origin.ts` and its test (offline provider fixture setup).
 - Desktop GitHub URL, subtask, and external file-link E2E fixtures.
 - Mobile external file-link fixture and shared fork-PR launch fixture.
+- Navigation fixture preparation and history spacing E2E assertions (CI remediation).
 - This work order, `plan.md`, and the paired requirement/design lifecycle fields.
 - `docs/public/tasks-and-workflows.md` (remote selection recovery guidance).
 
@@ -203,3 +204,30 @@ asserts launch failure.
 - Playwright discovery for Chromium, mobile, and containers reported zero errors.
 - Documentation coverage preflight returned `covered`; catalog validation,
   full specification lint, and whitespace checks passed.
+
+### Additional CI remediation
+
+Run 37081307204 on fixture commit `a8cfb8d13` exposed two setup/readiness
+defects after the origin failures were corrected. Navigation tasks started
+concurrent branch preparation in one local checkout, producing `index.lock`
+failures in all three CI attempts. The fixture now settles each initial turn
+before starting the next task. A helper regression failed before this change
+and passed afterward (`pnpm exec vitest run
+e2e/tests/task/task-navigation-helpers.test.ts`, one test).
+
+The history spacing test sampled rows before observer measurement. Holding
+timeline ResizeObserver delivery reproduced the CI geometry: four 8px sibling
+gaps and a 16px section gap. Releasing delivery restored 2px/10px/-4px. The
+diagnostic was removed; the assertion now polls the same expected geometry
+and precision, without adding sleeps or increasing timeouts.
+
+- The preceding shard-14 spec sequence passed all 56 tests with one worker,
+  retries disabled, and the CI runtime limited to two CPUs and 4GiB.
+- All six affected history/navigation desktop and mobile specs passed all 17
+  tests in 2.7 minutes under the same limits and with retries disabled.
+- The helper regression, web typecheck, changed-file ESLint, Prettier, and
+  whitespace checks passed.
+
+These are test setup and measurement corrections. Production behavior, public
+copy, and the durable repository-selection contract are unchanged. Final
+remote CI and review evidence are recorded in the task plan and PR checks.

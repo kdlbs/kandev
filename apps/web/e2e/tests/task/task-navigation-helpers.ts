@@ -74,17 +74,20 @@ export async function seedNavigationTasks(
   const profile = await createStandardProfile(api, "navigation-responsiveness");
   const tasks = [];
   for (const suffix of ["A", "B"]) {
-    tasks.push(
-      await api.createTaskWithAgent(seed.workspaceId, `Navigation ${suffix}`, profile.id, {
+    const task = await api.createTaskWithAgent(
+      seed.workspaceId,
+      `Navigation ${suffix}`,
+      profile.id,
+      {
         description: "/e2e:simple-message",
         workflow_id: seed.workflowId,
         workflow_step_id: seed.startStepId,
         repositories: [{ repository_id: seed.repositoryId, base_branch: branch }],
         executor_profile_id: executorProfileId,
-      }),
+      },
     );
-  }
-  for (const task of tasks) {
+    tasks.push(task);
+    // Local executor sessions share the checkout's Git index.
     await waitForSessionDone(
       api,
       task.id,
