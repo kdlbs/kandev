@@ -21,6 +21,7 @@ const PROMPT_MESSAGE = "Review this code";
 let defaultAgentId = AGENT_A_ID;
 let defaultConfigAgentId = AGENT_B_ID;
 let chatSubmitKey: "enter" | "cmd_enter" = "enter";
+let touchDrawer = false;
 let agentProfiles: Array<{ id: string; enabled?: boolean }> = [
   { id: AGENT_A_ID },
   { id: AGENT_B_ID },
@@ -43,6 +44,10 @@ vi.mock("@/components/state-provider", () => ({
         ],
       },
     }),
+}));
+
+vi.mock("@/hooks/use-compact-task-chrome", () => ({
+  useTouchDrawer: () => touchDrawer,
 }));
 
 vi.mock("@/components/task-create-dialog-options", () => ({
@@ -128,7 +133,6 @@ vi.mock("@/hooks/domains/workspace/use-repositories", () => ({
 }));
 
 vi.mock("@/hooks/domains/features/use-feature", () => ({ useFeature: () => true }));
-vi.mock("@/hooks/use-compact-task-chrome", () => ({ useTouchDrawer: () => false }));
 
 vi.mock("@kandev/ui/tooltip", () => ({
   Tooltip: ({ children }: { children: ReactNode }) => <>{children}</>,
@@ -200,6 +204,7 @@ beforeEach(() => {
   defaultAgentId = AGENT_A_ID;
   defaultConfigAgentId = AGENT_B_ID;
   chatSubmitKey = "enter";
+  touchDrawer = false;
   agentProfiles = [{ id: AGENT_A_ID }, { id: AGENT_B_ID }];
   vi.clearAllMocks();
 });
@@ -318,6 +323,21 @@ describe("QuickChatSetup", () => {
     expect(props.onStartQuickChat.mock.calls[1]?.[2]).toMatchObject({
       message: "Retry this opening prompt",
     });
+  });
+});
+
+describe("QuickChatSetup responsive hook order", () => {
+  it("stays stable when the Send button changes touch mode", () => {
+    const view = render(<QuickChatSetupHarness />);
+    const send = () => screen.getByTestId(SEND_TEST_ID);
+
+    touchDrawer = true;
+    view.rerender(<QuickChatSetupHarness />);
+    expect(send().className).toContain("h-12 w-12");
+
+    touchDrawer = false;
+    view.rerender(<QuickChatSetupHarness />);
+    expect(send().className).toContain("h-9 w-9");
   });
 });
 

@@ -77,7 +77,9 @@ function QuickChatSendButton({
   onClick: () => void;
 }) {
   const { t } = useTranslation();
-  const usesTouchDrawer = useTouchDrawer() || useResponsiveBreakpoint().isMobile;
+  const usesTouchDrawer = useTouchDrawer();
+  const isMobile = useResponsiveBreakpoint().isMobile;
+  const usesTouchTarget = usesTouchDrawer || isMobile;
   return (
     <Button
       type="button"
@@ -86,7 +88,7 @@ function QuickChatSendButton({
       aria-label={busy ? t("chat:startingChat") : t("task:sendInput")}
       data-testid="quick-chat-send"
       data-dialog-default-action
-      className={`cursor-pointer ${usesTouchDrawer ? "h-12 w-12" : "h-9 w-9"}`}
+      className={`cursor-pointer ${usesTouchTarget ? "h-12 w-12" : "h-9 w-9"}`}
     >
       {busy ? (
         <IconLoader2 className="h-4 w-4 animate-spin" aria-hidden />

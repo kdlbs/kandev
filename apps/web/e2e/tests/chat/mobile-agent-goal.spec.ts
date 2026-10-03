@@ -30,9 +30,9 @@ test.describe("mobile agent goal visibility", () => {
     await expect(
       dialog.getByText("Please get ready for my next question.", { exact: false }).first(),
     ).toBeVisible();
-    await expect
-      .poll(() => proxy.requestCount("message.add"), { timeout: 10_000 })
-      .toBeGreaterThan(0);
+    // The opening prompt can be carried by launch for passthrough profiles or
+    // by message.add for structured profiles. The settled conversation above
+    // is the baseline; this test measures only the following user submission.
     const openingMessageRequestCount = proxy.requestCount("message.add");
     proxy.delayNextResponses("message.add", 1, 3_500, "exercise asynchronous composer clearing");
 

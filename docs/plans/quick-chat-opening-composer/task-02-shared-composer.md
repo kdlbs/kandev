@@ -145,6 +145,8 @@ uses the existing task-less plugin capability.
 
 - Focused Vitest suite passed: 28 files, 316 tests.
 - `pnpm run typecheck` passed; focused ESLint passed with no warnings.
+- The responsive-hook-order regression reproduces the hook-count error when
+  touch mode changes and passes with the Send button's hooks unconditional.
 - `pnpm run i18n:zh-hant`, `pnpm run i18n:pseudo`, `pnpm run i18n:check`, and
   `pnpm run i18n:ratchet` passed.
 - Desktop and mobile opening-composer E2E flows passed. Desktop creation retry
