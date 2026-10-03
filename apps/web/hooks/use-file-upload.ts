@@ -3,6 +3,7 @@
 import {
   useCallback,
   useEffect,
+  useMemo,
   useRef,
   useState,
   type Dispatch,
@@ -55,7 +56,10 @@ export type UploadFilesResult = {
   skipped: string[];
 };
 
+type UploadLifetime = { sessionId: string | null; live: boolean };
+
 type PendingBatch = {
+  lifetime: UploadLifetime;
   id: number;
   sessionId: string;
   dir: string;
@@ -104,26 +108,37 @@ function markBatchFailed(
   );
 }
 
-function useSessionChangeReset(
+function useUploadLifetime(
   sessionId: string | null,
   pendingRef: MutableRefObject<PendingBatch | null>,
   activeBatchRef: MutableRefObject<PendingBatch | null>,
   setConflicts: Dispatch<SetStateAction<PendingConflicts | null>>,
   setUploads: Dispatch<SetStateAction<UploadItem[]>>,
 ) {
+  const lifetime = useMemo<UploadLifetime>(() => ({ sessionId, live: false }), [sessionId]);
   const previousSessionRef = useRef(sessionId);
   useEffect(() => {
-    if (previousSessionRef.current === sessionId) return;
-    previousSessionRef.current = sessionId;
-    const pending = pendingRef.current;
-    pendingRef.current = null;
-    activeBatchRef.current = null;
-    setConflicts(null);
-    setUploads([]);
-    if (pending) {
-      pending.resolve({ ...CANCELLED_RESULT, skipped: pending.skipped });
+    lifetime.live = true;
+    if (previousSessionRef.current !== sessionId) {
+      previousSessionRef.current = sessionId;
+      setConflicts(null);
+      setUploads([]);
     }
-  }, [sessionId, pendingRef, activeBatchRef, setConflicts, setUploads]);
+    return () => {
+      lifetime.live = false;
+      const pending = pendingRef.current;
+      if (pending?.lifetime === lifetime) {
+        pendingRef.current = null;
+        pending.resolve({ ...CANCELLED_RESULT, skipped: pending.skipped });
+      }
+      if (activeBatchRef.current?.lifetime === lifetime) activeBatchRef.current = null;
+    };
+  }, [lifetime, sessionId, pendingRef, activeBatchRef, setConflicts, setUploads]);
+  return lifetime;
+}
+
+function isBatchActive(activeBatchRef: MutableRefObject<PendingBatch | null>, batch: PendingBatch) {
+  return batch.lifetime.live && activeBatchRef.current === batch;
 }
 
 function itemId(batchId: number, destinationPath: string, index: number): string {
@@ -200,7 +215,8 @@ function parkUploadBatch({
     ),
   );
   return new Promise<UploadFilesResult>((resolve) => {
-    pendingRef.current = { ...batch, resolve };
+    batch.resolve = resolve;
+    pendingRef.current = batch;
     setConflicts({ conflicts: found, byDestination: destinationIndex(dir, entries) });
   });
 }
@@ -251,17 +267,37 @@ async function performUploads({
         resolution: choice,
       });
       uploaded.push(result);
-      patch(id, { status: "ready", writtenPath: result.path });
+      if (isActive()) patch(id, { status: "ready", writtenPath: result.path });
     } catch (error) {
       failed += 1;
-      patch(id, {
-        status: "failed",
-        error: error instanceof Error ? error.message : undefined,
-      });
+      if (isActive())
+        patch(id, {
+          status: "failed",
+          error: error instanceof Error ? error.message : undefined,
+        });
     }
   }
 
   return { uploaded, cancelled: !isActive(), failed, skipped: batch.skipped };
+}
+
+function useBatchRunner(
+  activeBatchRef: MutableRefObject<PendingBatch | null>,
+  setUploads: Dispatch<SetStateAction<UploadItem[]>>,
+) {
+  return useCallback(
+    (batch: PendingBatch, choices: Map<string, ConflictChoice>) =>
+      performUploads({
+        sessionId: batch.sessionId,
+        batch,
+        choices,
+        patch: (id, patch) =>
+          setUploads((prev) => prev.map((item) => (item.id === id ? { ...item, ...patch } : item))),
+        drop: (id) => setUploads((prev) => prev.filter((item) => item.id !== id)),
+        isActive: () => isBatchActive(activeBatchRef, batch),
+      }),
+    [activeBatchRef, setUploads],
+  );
 }
 
 /**
@@ -279,31 +315,19 @@ export function useFileUpload(sessionId: string | null) {
   const pendingRef = useRef<PendingBatch | null>(null);
   const activeBatchRef = useRef<PendingBatch | null>(null);
   const nextBatchIdRef = useRef(0);
-  useSessionChangeReset(sessionId, pendingRef, activeBatchRef, setConflicts, setUploads);
-
-  const patchItem = useCallback<ItemPatcher>((id, patch) => {
-    setUploads((prev) => prev.map((item) => (item.id === id ? { ...item, ...patch } : item)));
-  }, []);
-
-  const dropItem = useCallback((id: string) => {
-    setUploads((prev) => prev.filter((item) => item.id !== id));
-  }, []);
-
-  const runBatch = useCallback(
-    (batch: PendingBatch, choices: Map<string, ConflictChoice>) =>
-      performUploads({
-        sessionId: batch.sessionId,
-        batch,
-        choices,
-        patch: patchItem,
-        drop: dropItem,
-        isActive: () => activeBatchRef.current?.id === batch.id,
-      }),
-    [patchItem, dropItem],
+  const lifetime = useUploadLifetime(
+    sessionId,
+    pendingRef,
+    activeBatchRef,
+    setConflicts,
+    setUploads,
   );
+
+  const runBatch = useBatchRunner(activeBatchRef, setUploads);
 
   const uploadFiles = useCallback(
     async (dir: string, files: ArrayLike<File>, repo?: string): Promise<UploadFilesResult> => {
+      if (!lifetime.live) return CANCELLED_RESULT;
       if (!sessionId) return EMPTY_RESULT;
       const { entries, skipped } = normalizeUploadSelection(files);
       if (activeBatchRef.current) {
@@ -313,6 +337,7 @@ export function useFileUpload(sessionId: string | null) {
         return handleEmptyUploadSelection(dir, skipped, ++nextBatchIdRef.current, setUploads);
 
       const batch: PendingBatch = {
+        lifetime,
         id: ++nextBatchIdRef.current,
         sessionId,
         dir,
@@ -328,19 +353,22 @@ export function useFileUpload(sessionId: string | null) {
       try {
         found = await preflightBatch(sessionId, dir, repo, entries);
       } catch (error) {
+        if (!isBatchActive(activeBatchRef, batch)) {
+          return { ...CANCELLED_RESULT, skipped: batch.skipped };
+        }
         const message = error instanceof Error ? error.message : undefined;
         markBatchFailed(batch.id, message, setUploads);
-        if (activeBatchRef.current?.id === batch.id) activeBatchRef.current = null;
+        if (isBatchActive(activeBatchRef, batch)) activeBatchRef.current = null;
         return failedUploadResult(entries.length + skipped.length, skipped);
       }
 
-      if (activeBatchRef.current?.id !== batch.id) {
+      if (!isBatchActive(activeBatchRef, batch)) {
         return { ...CANCELLED_RESULT, skipped: batch.skipped };
       }
 
       if (found.length === 0) {
         const result = await runBatch(batch, new Map());
-        if (activeBatchRef.current?.id === batch.id) activeBatchRef.current = null;
+        if (isBatchActive(activeBatchRef, batch)) activeBatchRef.current = null;
         return result;
       }
 
@@ -355,34 +383,38 @@ export function useFileUpload(sessionId: string | null) {
         setUploads,
       });
     },
-    [sessionId, runBatch],
+    [sessionId, lifetime, runBatch],
   );
 
   /** Apply the dialog's per-file decisions and upload what survives. */
   const resolveConflicts = useCallback(
     async (choices: Map<string, ConflictChoice>) => {
+      if (!lifetime.live) return;
       const batch = pendingRef.current;
       pendingRef.current = null;
       setConflicts(null);
       if (!batch) return;
       const result = await runBatch(batch, choices);
-      if (activeBatchRef.current?.id === batch.id) activeBatchRef.current = null;
+      if (isBatchActive(activeBatchRef, batch)) activeBatchRef.current = null;
       batch.resolve(result);
     },
-    [runBatch],
+    [lifetime, runBatch],
   );
 
   /** Cancel the parked batch. Nothing is uploaded, not even unconflicted files. */
   const cancelConflicts = useCallback(() => {
+    if (!lifetime.live) return;
     const batch = pendingRef.current;
     pendingRef.current = null;
     setConflicts(null);
     setUploads([]);
     if (activeBatchRef.current?.id === batch?.id) activeBatchRef.current = null;
     batch?.resolve({ ...CANCELLED_RESULT, skipped: batch.skipped });
-  }, []);
+  }, [lifetime]);
 
-  const clearUploads = useCallback(() => setUploads([]), []);
+  const clearUploads = useCallback(() => {
+    if (lifetime.live) setUploads([]);
+  }, [lifetime]);
 
   return { uploads, conflicts, uploadFiles, resolveConflicts, cancelConflicts, clearUploads };
 }

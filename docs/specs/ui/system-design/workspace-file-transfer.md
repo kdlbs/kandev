@@ -33,7 +33,7 @@ Adjacent contracts this design consumes but does not own:
 | --- | --- |
 | `REQ-UI-WORKSPACE-FILE-TRANSFER-001` | [Components and responsibilities](#components-and-responsibilities), [Control flow](#control-flow) |
 | `REQ-UI-WORKSPACE-FILE-TRANSFER-002` | [Components and responsibilities](#components-and-responsibilities), [Control flow](#control-flow) |
-| `REQ-UI-WORKSPACE-FILE-TRANSFER-003` | [Security](#security), [Failure and recovery](#failure-and-recovery), [Persistence](#persistence) |
+| `REQ-UI-WORKSPACE-FILE-TRANSFER-003` | [Upload owner lifetime](#upload-owner-lifetime), [Security](#security), [Failure and recovery](#failure-and-recovery), [Persistence](#persistence) |
 | `REQ-UI-WORKSPACE-FILE-TRANSFER-004` | [Data and contracts](#data-and-contracts), [Control flow](#control-flow) |
 
 ## Components and responsibilities
@@ -174,6 +174,60 @@ Download needs no new transport. The viewer already holds the content that
 `REQ-UI-WORKSPACE-FILE-TRANSFER-002` carries no backend work: `useFileLoader` fetches before either
 viewer renders and `resolveFileCategory` only chooses a viewer after that fetch resolves, so any
 file that can display a download button is already loaded and already under the read cap.
+
+## Upload owner lifetime
+
+`useFileUpload` owns at most one unfinished batch per hook instance and active session. The
+owning surface is the component mounting `useFileUploadEntryPoints`, currently `FileBrowser`.
+Unmount and a committed session change retire that lifetime across preflight, parked conflict
+choices, direct uploads, and uploads started by `resolveConflicts`. A new setup creates a live
+lifetime; React StrictMode setup/cleanup/setup must not permanently disable the mounted hook.
+
+Keep lifecycle identity and batch identity in stable instance-local refs. A continuation is current
+only when its captured lifetime is live, its session still belongs to that lifetime, and its batch
+is the active batch. Retirement invalidates identity before any settlement callback runs. Reuse
+one local retirement path for session cleanup and disposal; reset visible state for the new session
+without writing state from unmount cleanup. Do not share lifecycle refs between hook instances.
+Do not reset the instance's monotonic batch identity during cleanup.
+
+Settlement depends on what is outstanding:
+
+| Phase at retirement | Caller settlement | Late transport handling |
+| --- | --- | --- |
+| Preflight awaiting transport | Cancelled when preflight resolves or rejects | No conflict publication, failure-state publication, or upload dispatch |
+| Parked for conflict choices | Cancelled during cleanup | Release the parked resolver exactly once; stale dialog callbacks have no work to resume |
+| Upload awaiting transport, including conflict resolution | Cancelled after that request settles | Retain its confirmed write or failure in the accumulated result, suppress state patches, and send no next file |
+| Result complete, caller reporting still pending | Existing result remains evidence | Entry-point reporting must not publish into a retired surface/session |
+
+Clear active/pending ownership on retirement, but let an already dispatched request finish. Local
+accumulators retain completed `UploadedWorkspaceFile` records, failure counts, and skipped paths;
+`cancelled: true` describes the batch lifetime, not the absence of workspace writes. There is no
+abort, rollback, backend change, new public hook API, retry policy, or transport coordinator.
+
+Guard both success and failure continuations before state publication, conflict parking, or
+clearing ownership. In particular, a rejected old preflight is cancellation rather than a new
+live failure, and an old finalizer cannot clear a replacement batch. Retained upload callbacks
+from a retired lifetime start no request. Per-file choices, skip behavior, request order, and
+manual parked cancellation continue to use the existing two-phase flow.
+
+`useFileUploadEntryPoints` suppresses reports for cancelled results and captures a local reporting
+scope before awaiting `uploadFiles`. Its effect invalidates that scope on disposal/session change
+and creates a fresh scope on setup. The caller checks the captured scope before reporting, because
+an upload can complete before retirement while its caller continuation is still pending. Real
+input/dialog rendering with mocked transport covers both retirement during the request and this
+completion-to-report boundary. Successful-write evidence remains intact; no generic reporting API
+is introduced.
+
+Desktop and phone consume the same state owner. This change affects only lifetime and result
+delivery: picker controls, conflict dialog composition, touch sizing, navigation, scrolling, and
+localization remain governed by their existing surfaces. Targeted hook and rendered entry-point
+tests satisfy the mobile-parity state/data exception; no browser geometry test is required.
+
+The lifecycle correction is local to this hook and its immediate caller; its rationale fits this
+design and does not require a separate ADR. Verify real request counts, cancelled settlement,
+retained write evidence, conflict removal, replacement-session state, toast routing, independent
+owners, and live uploads after StrictMode replay. Do not test only an internal guard predicate.
+Delivery is recorded in the [upload owner lifetime plan](../../../plans/upload-owner-lifetime/plan.md).
 
 ## Failure and recovery
 
