@@ -2,6 +2,21 @@ package securityutil
 
 import "testing"
 
+// @covers AC-PLATFORM-GIT-DIFF-FILE-METADATA-001.6
+func TestIsKnownSafeGitFlagAllowsNoColor(t *testing.T) {
+	if !IsKnownSafeGitFlag("--no-color") {
+		t.Fatal("the plain comparison output flag must be allowed")
+	}
+}
+
+func TestIsKnownSafeGitFlagRejectsNoColorVariants(t *testing.T) {
+	for _, flag := range []string{"--no-col", "--no-color=always", "--no-color=never", "--no-color=", "--no-color-moved", "--no-colors", "--no-color "} {
+		if IsKnownSafeGitFlag(flag) {
+			t.Errorf("IsKnownSafeGitFlag(%q) = true, want false", flag)
+		}
+	}
+}
+
 // TestIsKnownSafeGitFlagAllowsDiffPrefixFlags pins the output-formatting flags
 // GetCumulativeDiff and ShowCommit pass to force stable a/ and b/ path
 // prefixes regardless of a user's diff.noprefix config. They only affect diff

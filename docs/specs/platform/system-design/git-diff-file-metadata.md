@@ -4,6 +4,7 @@ system: platform
 requirements:
   - REQ-PLATFORM-GIT-DIFF-FILE-METADATA-001
 created: 2026-10-02
+updated: 2026-10-03
 owners:
   - kandev
 ---
@@ -15,7 +16,8 @@ owners:
 Platform owns source classification shared by local commit and cumulative
 comparisons. `GitOperator.ShowCommit` and `GitOperator.GetCumulativeDiff` in
 `apps/backend/internal/agentctl/server/process/git_log.go` both use
-`parseCommitDiffWithOptions`. Only its per-section status decision changes.
+`parseCommitDiffWithOptions`. The producers supply plain Git patch output;
+the parser classifies each section from raw extended headers.
 
 The [merge-detail requirement](../../ui/requirements/merge-commit-details.md)
 retains first-parent/root/empty comparison semantics and uncapped commit detail.
@@ -31,6 +33,32 @@ literal selection, and porcelain-owned workspace classification.
 | AC-PLATFORM-GIT-DIFF-FILE-METADATA-001.1, .2 | Raw extended-header classification |
 | AC-PLATFORM-GIT-DIFF-FILE-METADATA-001.3 | Callers and transport |
 | AC-PLATFORM-GIT-DIFF-FILE-METADATA-001.4, .5 | Preserved contracts |
+| AC-PLATFORM-GIT-DIFF-FILE-METADATA-001.6, .7 | Plain comparison output; Callers and transport |
+
+## Plain comparison output
+
+Pass `--no-color` to the patch-producing `git show --stat --numstat -p`
+invocation in `ShowCommit` and the patch-producing `git diff` invocation in
+`GetCumulativeDiff`. Keep it after the subcommand and before the comparison ref.
+Register only exact `--no-color` in `securityutil.IsKnownSafeGitFlag`
+(`apps/backend/internal/common/securityutil/git.go`), retaining rejection of
+value forms and suffixed variants. No safe-prefix expansion or validator bypass
+is permitted. This is a per-invocation output contract, not a repository configuration write
+or a shared subprocess color policy. The separate no-patch commit metadata
+query retains its existing custom format.
+
+`splitDiffSections` recognizes `diff --git ` at column zero. Git display color
+can prefix that header with escape sequences, making both methods report a
+successful empty file map. Prevent decoration at its source rather than
+changing the parser or stripping ANSI sequences from output. Escape bytes in
+file content and Git-quoted paths remain data and must survive unchanged.
+
+Use the existing `runGitCommand` validation, selected operator environment,
+interactive admission, after-acquire budget, cancellation, and managed process
+lifetime. No extra subprocess, environment override, config/ref write, retry,
+or new error path is needed. The [managed execution design](git-subprocess-execution.md)
+continues to own shared execution policy. Live tracker patches and workspace
+path selection remain independent under the [path design](workspace-git-path-details.md).
 
 ## Raw extended-header classification
 
@@ -83,7 +111,7 @@ application instance, browser, database, or external service is needed.
 
 ## Preserved contracts
 
-Keep Git argv/environments, first-parent and root behavior, genuinely empty
+Apart from the two plain-output flags, keep Git argv/environments, first-parent and root behavior, genuinely empty
 results, fixed prefixes, exact paths and patch bytes, line counts and aggregates,
 per-file/total/file-count limits, skip reasons, and all response shapes.
 Workspace mutation and history-provider code are outside this helper's boundary.
@@ -114,3 +142,23 @@ Git operations reference explaining status provenance. It remains a how-to page
 with a bounded reference subsection, and adds no new page or navigation entry.
 
 See the [one-work-order repair package](../../../plans/git-diff-status-metadata/plan.md).
+
+Plain-output regressions use disposable real Git repositories with unset color
+defaults, UI-only forced color, diff-only forced color overriding disabled UI,
+both forced, and disabled diff overriding forced UI. Assert explicit membership,
+statuses, counts, commit metadata and exact plain patch bytes; include literal
+ANSI source content and an escape-containing filename on supported filesystems (exclude only that fixture
+on native Windows, which rejects control characters in filenames). Cover dirty
+cumulative reads, binary and empty-file changes, root/first-parent merge and
+genuinely empty comparisons. Existing budget/limit tests remain authoritative.
+Registered HTTP tests cover single, selected and aggregate reads across two
+independent repositories with the same path and distinct content. Snapshot
+owned config bytes, HEAD, refs, index entries and worktree status/content before
+and after reads. Test setup may configure disposable fixtures; production reads
+may not. Tests use existing captured-environment seams and do not replace them.
+
+For the plain-output repair, no public-doc change is needed: the existing Git
+operations reference already describes faithful read-only comparison data.
+No user-facing option, workflow, schema, or rendered surface changes. The
+source-data-only mobile assessment above applies. Delivery is recorded in the
+[plain-output package](../../../plans/git-comparison-plain-output/plan.md).

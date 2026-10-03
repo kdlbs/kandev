@@ -292,6 +292,7 @@ func (g *GitOperator) GetCumulativeDiff(ctx context.Context, baseCommit string) 
 	diffOutput, err := g.runGitCommand(
 		ctx,
 		"diff",
+		"--no-color",
 		"--src-prefix=a/",
 		"--dst-prefix=b/",
 		baseCommit,
@@ -427,6 +428,7 @@ func (g *GitOperator) ShowCommit(ctx context.Context, commitSHA string) (*Commit
 		ctx,
 		"show",
 		"--first-parent",
+		"--no-color",
 		"--format=",
 		"--stat",
 		"--numstat",
