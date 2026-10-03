@@ -103,6 +103,83 @@ func TestAppendSessionModelsMessageUsesPersistedConfigAfterCacheRestart(t *testi
 	}
 }
 
+func TestAppendSessionModelsMessagePrefersPersistedRuntimeOverridesOverStaleCache(t *testing.T) {
+	model := streams.SessionModelInfo{ModelID: "mock-smart", Name: "Mock Smart"}
+	fastModel := streams.SessionModelInfo{ModelID: "mock-fast", Name: "Mock Fast"}
+	modelOption := streams.ConfigOption{
+		Type:         "select",
+		ID:           "model",
+		Category:     "model",
+		CurrentValue: "mock-fast",
+		Options: []streams.ConfigOptionValue{
+			{Value: "mock-fast", Name: "Mock Fast"},
+			{Value: "mock-smart", Name: "Mock Smart"},
+		},
+	}
+	effortOption := streams.ConfigOption{
+		Type:         "select",
+		ID:           "effort",
+		CurrentValue: "high",
+		Options: []streams.ConfigOptionValue{
+			{Value: "high", Name: "High"},
+			{Value: "max", Name: "Max"},
+		},
+	}
+	session := &models.TaskSession{
+		ID:     "session-1",
+		TaskID: "task-1",
+		Metadata: map[string]interface{}{
+			models.SessionMetaKeyRuntimeConfigOverrides: models.SessionRuntimeConfig{
+				Model: "mock-smart",
+				ConfigOptions: map[string]string{
+					"model":  "mock-smart",
+					"effort": "max",
+				},
+			},
+		},
+	}
+	liveState := &lifecycle.CachedModelState{
+		CurrentModelID: "mock-fast",
+		Models:         []streams.SessionModelInfo{fastModel, model},
+		ConfigOptions:  []streams.ConfigOption{modelOption, effortOption},
+	}
+
+	messages := appendSessionModelsMessageFromState(session.ID, session, liveState, nil)
+	if len(messages) != 1 {
+		t.Fatalf("messages = %d, want 1", len(messages))
+	}
+	var payload lifecycle.SessionModelsEventPayload
+	if err := json.Unmarshal(messages[0].Payload, &payload); err != nil {
+		t.Fatalf("decode session models payload: %v", err)
+	}
+	if payload.CurrentModelID != "mock-smart" {
+		t.Fatalf("current model = %q, want persisted explicit override mock-smart", payload.CurrentModelID)
+	}
+	if payload.ConfigOptions[0].CurrentValue != "mock-smart" {
+		t.Fatalf("model option = %q, want persisted explicit override mock-smart", payload.ConfigOptions[0].CurrentValue)
+	}
+	if payload.ConfigOptions[1].CurrentValue != "max" {
+		t.Fatalf("effort = %q, want persisted explicit override max", payload.ConfigOptions[1].CurrentValue)
+	}
+	if liveState.ConfigOptions[1].CurrentValue != "high" {
+		t.Fatalf("live cache effort = %q, want unchanged high", liveState.ConfigOptions[1].CurrentValue)
+	}
+
+	session.Metadata[models.SessionMetaKeyRuntimeConfigOverrides] = models.SessionRuntimeConfig{
+		ConfigOptions: map[string]string{"effort": "low"},
+	}
+	messages = appendSessionModelsMessageFromState(session.ID, session, liveState, nil)
+	if len(messages) != 1 {
+		t.Fatalf("messages with unsupported override = %d, want 1", len(messages))
+	}
+	if err := json.Unmarshal(messages[0].Payload, &payload); err != nil {
+		t.Fatalf("decode session models payload with unsupported override: %v", err)
+	}
+	if payload.ConfigOptions[1].CurrentValue != "high" {
+		t.Fatalf("effort with unsupported override = %q, want live value high", payload.ConfigOptions[1].CurrentValue)
+	}
+}
+
 func TestAppendSessionModeMessageUsesProviderRestoredSnapshot(t *testing.T) {
 	session := &models.TaskSession{
 		ID:     "session-1",
