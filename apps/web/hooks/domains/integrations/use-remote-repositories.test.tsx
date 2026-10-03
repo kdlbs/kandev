@@ -451,6 +451,7 @@ describe("useRemoteRepositories provider refreshes", () => {
     await waitFor(() => expect(result.current.loading).toBe(false));
     expect(mocks.listUserProjects).toHaveBeenCalledTimes(1);
     expect(mocks.listAzureDevOpsProjects).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(result.current.availableProviders).toEqual(["github"]));
   });
 
   it("keeps currently eligible providers available while a refresh is loading", async () => {

@@ -343,7 +343,6 @@ function WorkflowList({
     () => new Map(savedWorkflowItems.map((workflow) => [workflow.id, workflow])),
     [savedWorkflowItems],
   );
-
   const handleDragEnd = (event: DragEndEvent) => {
     const { active, over } = event;
     if (!over || active.id === over.id) return;
@@ -373,22 +372,24 @@ function WorkflowList({
               isDirty={orderDirtyIds.has(workflow.id)}
               readOnly={isImproveWorkspace}
             >
-              <WorkflowCard
-                workflow={workflow}
-                savedWorkflow={savedWorkflowsById.get(workflow.id)}
-                isWorkflowDirty={isWorkflowDirty(workflow)}
-                isOrderDirty={orderDirtyIds.has(workflow.id)}
-                initialWorkflowSteps={initialStepsByWorkflowId.get(workflow.id)}
-                otherWorkflows={workflowItems.filter((w) => w.id !== workflow.id)}
-                isImproveWorkspace={isImproveWorkspace}
-                onUpdateWorkflow={(updates) => onUpdate(workflow.id, updates)}
-                onDeleteWorkflow={async () => {
-                  await onDelete(workflow.id);
-                }}
-                onDuplicateWorkflow={(steps) => onDuplicate(workflow, steps)}
-                onWorkflowSaved={onWorkflowSaved}
-                onDiscardWorkflow={() => onDiscard(workflow.id)}
-              />
+              <div className="min-w-0 space-y-2">
+                <WorkflowCard
+                  workflow={workflow}
+                  savedWorkflow={savedWorkflowsById.get(workflow.id)}
+                  isWorkflowDirty={isWorkflowDirty(workflow)}
+                  isOrderDirty={orderDirtyIds.has(workflow.id)}
+                  initialWorkflowSteps={initialStepsByWorkflowId.get(workflow.id)}
+                  otherWorkflows={workflowItems.filter((w) => w.id !== workflow.id)}
+                  isImproveWorkspace={isImproveWorkspace}
+                  onUpdateWorkflow={(updates) => onUpdate(workflow.id, updates)}
+                  onDeleteWorkflow={async () => {
+                    await onDelete(workflow.id);
+                  }}
+                  onDuplicateWorkflow={(steps) => onDuplicate(workflow, steps)}
+                  onWorkflowSaved={onWorkflowSaved}
+                  onDiscardWorkflow={() => onDiscard(workflow.id)}
+                />
+              </div>
             </SortableWorkflowItem>
           ))}
         </div>

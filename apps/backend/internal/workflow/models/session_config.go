@@ -101,8 +101,12 @@ func ValidateStepEvents(events StepEvents, hasAgentProfile bool) error {
 // step shape that may select an explicit session target.
 func ValidateStepEventsWithRouting(events StepEvents, hasAgentProfile, hasSessionTarget bool) error {
 	configureCount := 0
-	for _, action := range events.OnEnter {
+	for index, action := range events.OnEnter {
 		switch action.Type {
+		case OnEnterRunScript:
+			if _, err := ParseWorkflowScriptAction(action.Config); err != nil {
+				return fmt.Errorf("on_enter action %d: %w", index, err)
+			}
 		case OnEnterConfigureSession:
 			configureCount++
 			if hasAgentProfile {
@@ -122,6 +126,22 @@ func ValidateStepEventsWithRouting(events StepEvents, hasAgentProfile, hasSessio
 	}
 	if configureCount > 1 {
 		return fmt.Errorf("workflow step may contain at most one configure_session action")
+	}
+	for index, action := range events.OnTurnComplete {
+		if action.Type != OnTurnCompleteRunScript {
+			continue
+		}
+		if _, err := ParseWorkflowScriptAction(action.Config); err != nil {
+			return fmt.Errorf("on_turn_complete action %d: %w", index, err)
+		}
+	}
+	for index, action := range events.OnExit {
+		if action.Type != OnExitRunScript {
+			continue
+		}
+		if _, err := ParseWorkflowScriptAction(action.Config); err != nil {
+			return fmt.Errorf("on_exit action %d: %w", index, err)
+		}
 	}
 	return nil
 }

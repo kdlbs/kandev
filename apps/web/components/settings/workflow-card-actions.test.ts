@@ -376,6 +376,18 @@ describe("persistWorkflowDraft", () => {
       expect.objectContaining({ pull_from_step_id: SERVER_STEP_ONE }),
     );
   });
+
+  it("deletes persisted steps explicitly removed from the route draft", async () => {
+    await persistWorkflowDraft({
+      workflow,
+      draftSteps: [step(SERVER_STEP_TWO, "Done", 0, true)],
+      savedSteps: [step(SERVER_STEP_ONE, "Todo", 0, true), step(SERVER_STEP_TWO, "Done", 1, false)],
+      progress: createWorkflowDraftSaveProgress(),
+      deletedStepIds: [SERVER_STEP_ONE],
+    });
+
+    expect(deleteWorkflowStepAction).toHaveBeenCalledWith(SERVER_STEP_ONE);
+  });
 });
 
 describe("persistWorkflowDraft cancellation policy", () => {

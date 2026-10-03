@@ -7,6 +7,8 @@ import { pushNavigationState, replaceNavigationState } from "./navigation-guard"
 
 type NavigateOptions = {
   scroll?: boolean;
+  /** Keep same-route editor history entries outside the dirty-page guard. */
+  shallow?: boolean;
   /**
    * Runs only once the navigation has actually committed. The unsaved-changes
    * guard can cancel a `push`, and `push` itself returns void, so a caller that
@@ -54,10 +56,12 @@ export function useParams(): Record<string, string> {
 }
 
 function navigate(mode: "push" | "replace", href: string, options?: NavigateOptions): void {
+  const shallowRoute = options?.shallow ? window.location.pathname : undefined;
+  const navigationOptions = options?.shallow ? { bypassBlocker: true, shallowRoute } : undefined;
   if (mode === "push") {
-    pushNavigationState({}, "", href, () => finishNavigation(options));
+    pushNavigationState({}, "", href, () => finishNavigation(options), navigationOptions);
   } else {
-    replaceNavigationState({}, "", href, () => finishNavigation(options));
+    replaceNavigationState({}, "", href, () => finishNavigation(options), navigationOptions);
   }
 }
 
