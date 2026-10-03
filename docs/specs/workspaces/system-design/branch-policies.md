@@ -76,6 +76,58 @@ inserts all four policies or none. The branch can still disappear after this
 check, so task creation and later runtime operations retain their existing
 missing-branch recovery behavior.
 
+### Atomic starter admission
+
+AC-WORKSPACES-BRANCH-POLICIES-002.3, 002.4 and 002.6 require one repository-scoped
+conditional operation. The production insert inventory is
+`sqlite.Repository.CreateRepositoryBranchPoliciesIfEmpty` and
+`sqlite.Repository.CreateRepositoryBranchPolicy` in `repository_branch_policy.go`.
+The Gitflow and ordinary-create service methods, registered REST routes and WS
+actions converge on those writers. `repository.Provide` returns the concrete
+store; there is no separate branch-policy forwarder. Both writers participate
+in the same transaction admission boundary, including direct store callers.
+
+Begin a writer transaction and acquire admission before the first canonical
+predicate read or insert. PostgreSQL uses
+`pg_advisory_xact_lock(hashtextextended($1, 0))` with the dedicated namespace
+`repository-branch-policy-admission:` plus repository ID. SQLite uses a
+repository-scoped no-op write to `repository_branch_policies` (`SET id = id`
+with `WHERE repository_id = ?`) before the initial read; even an empty result
+obtains the database writer lock across independent pools. Keep this operation
+transaction-bound and roll it back with every failure. SQLite retains its
+existing database-wide writer serialization; PostgreSQL uses separate keys
+for different repositories. A per-service mutex or pool size is insufficient.
+
+The admitted starter reads the canonical count on the transaction. Any positive
+count returns `repoerrors.ErrRepositoryBranchPoliciesExist` before insertion.
+Otherwise insert the complete service-generated four-policy set and commit
+before reporting success. An ordinary create takes the same admission lock
+and inserts its single policy without an empty-set condition. It can therefore
+precede the starter (which rejects) or follow it (which permits a distinct
+custom policy). Preserve service Git branch listing, production/default-branch
+and development/`develop` defaults, trimming, safe refs and existing tuples.
+The ordinary service's existing name lookup remains a preflight check; the
+transaction insert and named uniqueness constraint determine its final result.
+
+Reuse the narrow `isBranchPolicyNameConflict` classifier and existing
+`repoerrors.ErrRepositoryBranchPolicyNameConflict` for an actual named
+case-insensitive uniqueness failure, including an ordinary create whose name
+collides after waiting. Insert classification also requires a typed PostgreSQL
+constraint error or SQLite unique-constraint code, so an unrelated trigger
+message containing the index name remains a storage failure. Only an observed
+nonempty starter predicate means already seeded. Primary-key, foreign-key, cancellation, connection and commit
+errors retain their existing failure semantics; do not classify all SQL errors
+or every `23505` as already seeded. No aborted-transaction reread is used to
+invent a conflict. PostgreSQL remains on the established read-committed path.
+
+Repository/policy deletion retains existing cascade and affected-row behavior;
+a deleted parent is not recreated. Full legacy writes and per-policy patches
+do not add rows and need no admission lock. Preserve the patch namespace
+`repository-branch-policy:` plus policy ID, canonical row lock, pure effective
+normalizer and omitted-field ownership. No new nested lock order, schema,
+interface, ETag, global revision, retry framework or general concurrency engine
+is needed. Admission ends at commit/rollback, independent of event publication.
+
 ### Atomic partial policy updates
 
 The patch repair implements AC-WORKSPACES-BRANCH-POLICIES-001.7 through
@@ -158,6 +210,18 @@ publishers deliver events in commit order. Failed mutations publish no success.
 Conflicts return `409`; invalid refs, templates, or Gitflow pairs return a
 validation error; an inaccessible or cross-repository policy is indistinguishable
 from not found.
+
+`CreateGitflowRepositoryBranchPolicies` maps the store's existence sentinel to
+`ErrRepositoryBranchPolicyAlreadySeeded`; `branchPolicyStatus` and `wsError`
+already map that domain error to REST `409` and `ws.ErrorCodeConflict`.
+Registered `POST /api/v1/repositories/:id/branch-policies/gitflow` and
+`ws.ActionRepositoryBranchPolicyGitflow` must exercise that real path. Only
+after the store commits does the service publish four
+`repository_branch_policy.created` events. A losing or failed starter publishes
+none. Responses/events contain the winning normalized tuples and persisted
+identities/timestamps (with the existing transport timestamp precision).
+This does not promise global event ordering or durable delivery after an event
+bus failure.
 
 ### Task creation and snapshot resolution
 
@@ -290,8 +354,9 @@ identity and use a touch drawer for their detailed preview.
   recovery; Kandev does not rewrite the policy.
 - A failed CRUD mutation leaves the confirmed list unchanged and shows the
   backend error.
-- Concurrent Gitflow starter calls are serialized by the empty-set check and
-  unique constraints.
+- Concurrent Gitflow starter and ordinary-create admission is serialized before
+  the canonical empty-set read. A losing starter receives a typed conflict;
+  constraints remain a backstop rather than the admission mechanism.
 
 ## Security and observability
 
@@ -336,6 +401,23 @@ tests remain environment-gated; an absent DSN is a skip, and hosted evidence mus
 show the new behavioral test names executed, not merely database boot.
 
 Repair delivery: [Preserve branch-policy workflow edits](../../../plans/branch-policy-patch/plan.md).
+
+Starter admission coverage uses real SQLite independent pools and PostgreSQL
+independent physical connections with observed admission waits before predicate
+resolution. Competing branch pairs verify typed loser errors and exactly the
+winner's four rows. Ordinary-create overlaps verify both legal admission orders,
+including five rows when a distinct custom create follows initialization;
+different-repository PostgreSQL work must proceed while one key is held.
+Registered REST and WS concurrency tests verify winning responses, stored rows,
+four events after commit, meaningful loser conflicts and no loser events.
+Service tests use real Git fixtures and bounded validation/scope/read-only
+controls. Store tests cover cancellation, insert rollback, missing/deleted
+parents, uniqueness and successful work after lock release. Tests own deadlines,
+cancel/release/join on every path and no production hooks. An absent PG DSN is
+a truthful skip requiring hosted execution receipts for the actual new tests.
+No rendered UI or mobile interaction changes require browser coverage.
+
+Starter repair delivery: [Serialize Gitflow starter admission](../../../plans/gitflow-starter-admission/plan.md).
 
 ## Requirement traceability
 

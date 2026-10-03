@@ -134,9 +134,21 @@ policies. It MUST create the complete starter set atomically.
   development, `release/{title}-{suffix}`, and production. Each tuple is base,
   template, and pull-request target.
 - **AC-WORKSPACES-BRANCH-POLICIES-002.4:** The starter is rejected without partial writes when the
-  repository already has a policy or another request creates one concurrently.
+  repository has any policy at its atomic admission decision, including a
+  policy committed by an ordinary create admitted before the starter. Competing
+  starters on an empty repository admit one complete set; the loser receives
+  an already-seeded conflict and preserves the winner's values. An ordinary
+  create admitted after the starter retains normal creation semantics and can
+  add a custom policy; overlapping request lifetimes alone do not forbid it.
 - **AC-WORKSPACES-BRANCH-POLICIES-002.5:** Starter policy names are persisted configuration values. Their
   field guidance and built-in descriptions are localized presentation copy.
+- **AC-WORKSPACES-BRANCH-POLICIES-002.6:** A successful starter response and its four created events
+  describe the complete committed starter set for the winning branch pair.
+  A losing starter returns REST `409` or a WebSocket conflict, commits no rows,
+  and publishes no successful creation events. Independent repositories retain
+  independent admission decisions. Validation, authorization, read-only,
+  missing-parent, cancellation, and rollback failures publish no success;
+  unrelated storage errors are not reported as already seeded.
 
 ### REQ-WORKSPACES-BRANCH-POLICIES-003: Task-create policy selection
 
@@ -240,3 +252,4 @@ and touch input and MUST preserve existing repository and task contracts.
 - Decision: [Snapshot task branch policies](../../../decisions/2026-08-24-task-snapshotted-branch-policies.md)
 - Implementation plan: [Branch policies plan](../../../plans/branch-policies/plan.md)
 - Patch repair plan: [Preserve branch-policy workflow edits](../../../plans/branch-policy-patch/plan.md)
+- Starter admission repair plan: [Serialize Gitflow starter admission](../../../plans/gitflow-starter-admission/plan.md)
