@@ -190,11 +190,16 @@ type QueueRunAction struct {
 type ClearDecisionsAction struct{}
 
 // QueueRunForEachParticipantAction fans out QueueRun against every step
-// participant matching the configured role. Declared but not yet wired.
+// participant matching the configured role.
+//
+// SkipDecided, when true, drops every seat holding a non-superseded decision
+// at the step from the fan-out (REQ-OFFICE-GATE-COMMENT-001). It defaults to
+// false, preserving the step-entry fan-out's "wake everyone" behaviour.
 type QueueRunForEachParticipantAction struct {
-	Role    string
-	Reason  string
-	Payload map[string]any
+	Role        string
+	Reason      string
+	Payload     map[string]any
+	SkipDecided bool
 }
 
 // EnsureParticipantSeatAction declares the role that must hold a
@@ -513,7 +518,9 @@ func readQueueRunConfig(config map[string]any) *QueueRunAction {
 }
 
 // readQueueRunForEachParticipantConfig reads the role/reason/payload for a
-// queue_run_for_each_participant action.
+// queue_run_for_each_participant action. skip_decided is read only as a
+// boolean; a missing key, false, or any non-boolean value all leave it off
+// (AC-OFFICE-GATE-COMMENT-005.3).
 func readQueueRunForEachParticipantConfig(config map[string]any) *QueueRunForEachParticipantAction {
 	if config == nil {
 		return &QueueRunForEachParticipantAction{}
@@ -521,10 +528,12 @@ func readQueueRunForEachParticipantConfig(config map[string]any) *QueueRunForEac
 	role, _ := config["role"].(string)
 	reason, _ := config["reason"].(string)
 	payload, _ := config["payload"].(map[string]any)
+	skipDecided, _ := config["skip_decided"].(bool)
 	return &QueueRunForEachParticipantAction{
-		Role:    role,
-		Reason:  reason,
-		Payload: payload,
+		Role:        role,
+		Reason:      reason,
+		Payload:     payload,
+		SkipDecided: skipDecided,
 	}
 }
 

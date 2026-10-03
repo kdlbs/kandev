@@ -1163,6 +1163,9 @@ func (si *SchedulerIntegration) buildPromptContext(
 
 	if reason == RunReasonTaskComment {
 		si.enrichCommentContext(ctx, pc, parsed["comment_id"])
+		if parsed["stage_type"] != "" {
+			pc.StageType = si.svc.resolveGateCommentStage(ctx, parsed)
+		}
 	}
 
 	if reason == RunReasonAgentError {
