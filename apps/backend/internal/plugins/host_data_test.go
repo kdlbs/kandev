@@ -80,6 +80,18 @@ func (f *fakeTaskDataSource) ListWorkflowTransitionGroups(_ context.Context, wor
 	return f.transitionGroups[workflowID], "", nil
 }
 
+type fakeTaskRelationsSource struct {
+	relations *pluginsdk.TaskRelations
+	err       error
+	workspace string
+	taskID    string
+}
+
+func (f *fakeTaskRelationsSource) GetTaskRelations(_ context.Context, workspaceID, taskID string) (*pluginsdk.TaskRelations, error) {
+	f.workspace, f.taskID = workspaceID, taskID
+	return f.relations, f.err
+}
+
 func (f *fakeTaskDataSource) ListWorkspaces(context.Context) ([]*taskmodels.Workspace, error) {
 	return f.workspaces, nil
 }
@@ -366,6 +378,7 @@ type testDataHost struct {
 	defaultProfile *fakeDefaultUtilityProfileSource
 	utilRun        *fakeUtilityRunner
 	taskWriter     *fakeTaskWriter
+	relations      *fakeTaskRelationsSource
 	messenger      *fakeMessenger
 	starter        *fakeTaskStarter
 
@@ -387,6 +400,7 @@ func newTestDataHost(caps manifest.Capabilities) *testDataHost {
 		defaultProfile: &fakeDefaultUtilityProfileSource{},
 		utilRun:        &fakeUtilityRunner{text: "ok"},
 		taskWriter:     &fakeTaskWriter{},
+		relations:      &fakeTaskRelationsSource{},
 		messenger:      &fakeMessenger{},
 		starter:        &fakeTaskStarter{},
 
@@ -404,7 +418,10 @@ func newTestDataHost(caps manifest.Capabilities) *testDataHost {
 		messageData:      d.messages,
 		interactionData:  d.interactions,
 		taskWriter:       d.taskWriter,
-		configs:          &fakeConfigReader{configs: map[string]any{"utility_agent": "utility-agent-42"}},
+		taskRelations: func() taskRelationsSource {
+			return d.relations
+		},
+		configs: &fakeConfigReader{configs: map[string]any{"utility_agent": "utility-agent-42"}},
 		utilityDeps: func() (utilityDefaultProfileSource, agentProfileSource, utilityRunner) {
 			return d.defaultProfile, d.profiles, d.utilRun
 		},
@@ -443,6 +460,50 @@ func TestPluginHost_Tasks_DeniedWithoutCapability(t *testing.T) {
 
 	_, err = d.host.Tasks().Get(context.Background(), "task-1")
 	assertPermissionDenied(t, err, "api_read:tasks")
+}
+
+func TestPluginHost_TaskRelations_RequiresDedicatedCapabilityAndForwardsScope(t *testing.T) {
+	d := newTestDataHost(manifest.Capabilities{})
+	_, err := d.host.TaskRelations().Get(context.Background(), "workspace-a", "task-a")
+	assertPermissionDenied(t, err, "api_read:task_relations")
+
+	d = newTestDataHost(manifest.Capabilities{APIRead: []string{"task_relations"}})
+	d.relations.relations = &pluginsdk.TaskRelations{
+		Task: pluginsdk.RelationTask{ID: "task-a", WorkspaceID: "workspace-a", Title: "Compact", State: "running"},
+	}
+	relations, err := d.host.TaskRelations().Get(context.Background(), "workspace-a", "task-a")
+	if err != nil {
+		t.Fatalf("TaskRelations().Get: %v", err)
+	}
+	if relations.Task.ID != "task-a" || d.relations.workspace != "workspace-a" || d.relations.taskID != "task-a" {
+		t.Fatalf("TaskRelations().Get forwarded (%q, %q), want workspace-a/task-a; result=%+v", d.relations.workspace, d.relations.taskID, relations)
+	}
+}
+
+func TestPluginHost_TaskRelations_HidesForeignAndUnknownTargets(t *testing.T) {
+	d := newTestDataHost(manifest.Capabilities{APIRead: []string{"task_relations"}})
+	d.relations.err = repoerrors.ErrTaskNotFound
+	_, err := d.host.TaskRelations().Get(context.Background(), "workspace-a", "not-visible")
+	if status.Code(err) != codes.NotFound {
+		t.Fatalf("TaskRelations().Get error code = %s, want NotFound: %v", status.Code(err), err)
+	}
+}
+
+func TestPluginHost_TaskRelations_ResolvesLateWiring(t *testing.T) {
+	d := newTestDataHost(manifest.Capabilities{APIRead: []string{"task_relations"}})
+	var source taskRelationsSource
+	d.host.taskRelations = func() taskRelationsSource { return source }
+	_, err := d.host.TaskRelations().Get(context.Background(), "workspace-a", "task-a")
+	if status.Code(err) != codes.Unimplemented {
+		t.Fatalf("unwired TaskRelations().Get code = %s, want Unimplemented: %v", status.Code(err), err)
+	}
+
+	d.relations.relations = &pluginsdk.TaskRelations{Task: pluginsdk.RelationTask{ID: "task-a", WorkspaceID: "workspace-a"}}
+	source = d.relations
+	relations, err := d.host.TaskRelations().Get(context.Background(), "workspace-a", "task-a")
+	if err != nil || relations.Task.ID != "task-a" {
+		t.Fatalf("late-wired TaskRelations().Get = %+v, %v", relations, err)
+	}
 }
 
 func TestPluginHost_Sessions_DeniedWithoutCapability(t *testing.T) {

@@ -3,11 +3,40 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"errors"
 
+	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
+	"go.uber.org/zap"
 )
+
+// backendErrorToolResult converts a BackendClient.RequestPayload failure into
+// a CallToolResult. When the backend returned a structured websocket error
+// (BackendError), its code/message/details survive the MCP callable boundary
+// as both JSON text content and StructuredContent, so a caller can branch on
+// a stable machine-readable reason (e.g. details.reason=
+// related_task_scope_required) instead of only matching a flattened error
+// string. Errors without structured details fall back to the plain message.
+func backendErrorToolResult(err error) *mcp.CallToolResult {
+	var backendErr *BackendError
+	if errors.As(err, &backendErr) && len(backendErr.Details) > 0 {
+		payload := map[string]interface{}{
+			"code":    backendErr.Code,
+			"message": backendErr.Message,
+			"details": backendErr.Details,
+		}
+		if data, marshalErr := json.MarshalIndent(payload, "", "  "); marshalErr == nil {
+			return &mcp.CallToolResult{
+				Content:           []mcp.Content{mcp.TextContent{Type: mcp.ContentTypeText, Text: string(data)}},
+				StructuredContent: payload,
+				IsError:           true,
+			}
+		}
+	}
+	return mcp.NewToolResultError(err.Error())
+}
 
 // registerRelatedTasksTool registers list_related_tasks_kandev, which lets an
 // agent discover parent / child / sibling / blocker task IDs. Useful in both
@@ -16,7 +45,7 @@ import (
 func (s *Server) registerRelatedTasksTool() {
 	s.mcpServer.AddTool(
 		mcp.NewTool("list_related_tasks_kandev",
-			mcp.WithDescription(`List a task's parent, children, siblings, blockers, and blocked tasks. Entries include identity, state, and linked pull requests; Office entries also include document keys. Descriptions are omitted unless verbose=true. task_id defaults to the current task and may inspect another task in the same workspace.`),
+			mcp.WithDescription(`List a task's parent, children, siblings, blockers, and blocked tasks. Entries include identity, state, and linked pull requests. Access is relation-scoped by default; an authorized Office Coordinator with workspace-task-tree-read can inspect compact relation trees for unrelated tasks in its workspace. The Coordinator scope does not grant document keys or descriptions. Descriptions are omitted unless verbose=true, and verbose remains document-read scoped. task_id defaults to the current task.`),
 			mcp.WithString("task_id", mcp.Description("Defaults to the current task.")),
 			mcp.WithBoolean("verbose", mcp.Description(
 				"Include each related task's full description. Defaults to false, which returns the compact projection.")),
@@ -73,26 +102,65 @@ coordination docs to the shared parent.`,
 func (s *Server) listRelatedTasksHandler() server.ToolHandlerFunc {
 	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		taskID := req.GetString("task_id", "")
+		verbose := req.GetBool("verbose", false)
+		if s.taskID == "" || s.sessionID == "" {
+			s.logRelatedReadAttestationDenial(taskID, verbose)
+			return backendErrorToolResult(&BackendError{
+				Code:    ws.ErrorCodeForbidden,
+				Message: "related task access denied",
+				Details: map[string]interface{}{"reason": "related_task_scope_required"},
+			}), nil
+		}
 		if taskID == "" || taskID == "self" {
 			taskID = s.taskID
 		}
 		if taskID == "" {
 			return mcp.NewToolResultError("task_id is required (no current task context)"), nil
 		}
-		payload := map[string]string{
-			"task_id":        taskID,
-			"caller_task_id": s.taskID,
+		payload := map[string]interface{}{
+			"task_id":            taskID,
+			"caller_task_id":     s.taskID,
+			"caller_session_id":  s.sessionID,
+			"mcp_surface":        string(s.Profile().Surface),
+			"verbose":            verbose,
+			"related_read_scope": s.relatedReadScope(),
 		}
 		var result map[string]interface{}
 		if err := s.backend.RequestPayload(ctx, ws.ActionMCPListRelatedTasks, payload, &result); err != nil {
-			return mcp.NewToolResultError(err.Error()), nil
+			return backendErrorToolResult(err), nil
 		}
-		if !req.GetBool("verbose", false) {
+		// The backend authorizes and constructs the compact projection. Keep this
+		// defensive response shaping for older backends during rolling upgrades;
+		// it is not an authorization boundary.
+		if !verbose {
 			stripRelatedTaskDescriptions(result)
 		}
 		data, _ := json.MarshalIndent(result, "", "  ")
 		return mcp.NewToolResultText(string(data)), nil
 	}
+}
+
+func (s *Server) logRelatedReadAttestationDenial(targetTaskID string, verbose bool) {
+	s.logger.Info("mcp.related_task_read.authorization",
+		zap.String("caller_task_id", s.taskID),
+		zap.String("caller_session_id", s.sessionID),
+		zap.String("target_task_id", targetTaskID),
+		zap.String("mcp_surface", string(s.Profile().Surface)),
+		zap.String("related_read_scope", s.relatedReadScope()),
+		zap.Bool("verbose", verbose),
+		zap.String("outcome", "denied"),
+		zap.String("public_reason", "related_task_scope_required"),
+		zap.String("internal_reason", "caller task or session identity missing"),
+	)
+}
+
+func (s *Server) relatedReadScope() string {
+	profileContext := s.Profile()
+	if profileContext.Surface == mcpprofile.SurfaceOfficeTask &&
+		profileContext.HasCapability(mcpprofile.CapabilityWorkspaceTaskTreeRead) {
+		return "workspace-task-tree"
+	}
+	return "relation"
 }
 
 // relatedTaskGroups are the explicit keys of the ActionMCPListRelatedTasks
@@ -133,7 +201,7 @@ func (s *Server) listTaskDocumentsHandler() server.ToolHandlerFunc {
 		}
 		var result map[string]interface{}
 		if err := s.backend.RequestPayload(ctx, ws.ActionMCPListTaskDocuments, payload, &result); err != nil {
-			return mcp.NewToolResultError(err.Error()), nil
+			return backendErrorToolResult(err), nil
 		}
 		data, _ := json.MarshalIndent(result, "", "  ")
 		return mcp.NewToolResultText(string(data)), nil
@@ -157,7 +225,7 @@ func (s *Server) getTaskDocumentHandler() server.ToolHandlerFunc {
 		}
 		var result map[string]interface{}
 		if err := s.backend.RequestPayload(ctx, ws.ActionMCPGetTaskDocument, payload, &result); err != nil {
-			return mcp.NewToolResultError(err.Error()), nil
+			return backendErrorToolResult(err), nil
 		}
 		// If a 'content' field is present, return it directly so the agent
 		// reads markdown — same affordance get_task_plan_kandev offers.
@@ -193,7 +261,7 @@ func (s *Server) writeTaskDocumentHandler() server.ToolHandlerFunc {
 		}
 		var result map[string]interface{}
 		if err := s.backend.RequestPayload(ctx, ws.ActionMCPWriteTaskDocument, payload, &result); err != nil {
-			return mcp.NewToolResultError(err.Error()), nil
+			return backendErrorToolResult(err), nil
 		}
 		data, _ := json.MarshalIndent(result, "", "  ")
 		return mcp.NewToolResultText(string(data)), nil
