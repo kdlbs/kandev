@@ -30,6 +30,10 @@ visit and editor incarnation while preserving the existing action contracts.
 
 - Implement the paired design's local ownership rule in save/delete/reload,
   immediate hook lifecycle/saving-state glue and file-state installation.
+- Apply the same captured-owner rule to the tablet TaskCenterPanel mutation
+  consumer and immediate tab installation/typing/pending state glue. Prove
+  deferred navigation save/delete against the real hook and React tab state;
+  cover return, reopen/replacement, disposal, typing, repos and current errors.
 - Real AppStore/StateProvider + Dockview store + production hook publication,
   panel removal/persistence wiring and observable LSP arguments with mocked
   transport. Reconcile the existing repo-threading harness as necessary.
@@ -123,6 +127,10 @@ logical diff unless this repair actually requires it.
 - `apps/web/hooks/use-file-editors.mutation-ownership.test.tsx` (new)
 - `apps/web/hooks/use-file-save-delete.test.ts` (existing harness compatibility)
 - `apps/web/lib/state/dockview-file-state.test.ts` (new)
+- `apps/web/components/task/task-center-panel-restoration.ts`
+- `apps/web/components/task/task-center-panel-file-tabs.ts`
+- `apps/web/components/task/task-center-panel.tsx`
+- Their targeted tablet mutation/restoration/file-tab tests.
 - Owning requirement/design, UI boundary note and this plan/work order.
 
 `file-editor-panel.tsx` is a consumer to preserve; no markup or loader/resync
@@ -193,3 +201,33 @@ Local implementation status is `done`. PR creation, exact-head full review,
 hosted gates, actual merge and resource cleanup remain delivery gates in the
 live Kandev task plan, with queued parent callbacks. No hosted result is claimed
 by this pre-publication record.
+
+PR 4177 review correction: the parent authorized the reachable tablet
+TaskCenterPanel handler within this same work order. Navigation save/delete
+RED failed twice with A baseline/hash published into B and B's tab removed
+(handle 29870 joined, exit 1). The local tablet visit/tab-incarnation guard,
+guarded functional publication and per-action pending markers now cover that
+consumer. Existing typing/preview updates preserve incarnations; installation
+and restoration create them. Explicit descriptor/request projections retain
+their existing shapes. No viewport markup or responsive interactions changed.
+
+Focused tablet GREEN:
+
+```bash
+(cd apps/web && NODE_OPTIONS=--max-old-space-size=4096 pnpm exec vitest run components/task/task-center-panel-mutation-ownership.test.tsx components/task/task-center-panel-restoration.test.ts components/task/task-center-panel-file-tabs.test.ts --maxWorkers=1)
+(cd apps/web && NODE_OPTIONS=--max-old-space-size=4096 pnpm exec eslint components/task/task-center-panel-restoration.ts components/task/task-center-panel-file-tabs.ts components/task/task-center-panel.tsx components/task/task-center-panel-mutation-ownership.test.tsx components/task/task-center-panel-restoration.test.ts components/task/task-center-panel-file-tabs.test.ts --max-warnings 0)
+```
+
+Three files/27 tests passed, including 14 faithful real-hook/React-tab-state
+cases (handle 90916 joined, exit 0). Tablet lint and typecheck passed (handle
+52105 joined, exit 0). The unchanged six Dockview suites were not replayed.
+The reviewer-requested store test now compares reopen against the immediately
+preceding incarnation; its one test and lint passed (57943 joined, exit 0).
+Requirement terminology now includes panel host and clean-save wording retains
+content while clearing dirty indicators. Optional callback-identity polish was
+deferred. Corrective-head hosted review/checks and merge remain live-plan gates.
+
+Corrective i18n check/ratchet passed (22132 joined, exit 0); docs catalog/spec
+lint/whitespace passed (43638 joined, exit 0). Actual-diff PR coverage accepted
+all 18 paths, including the tablet consumer, with zero errors. No generated or
+foreign paths entered the diff.

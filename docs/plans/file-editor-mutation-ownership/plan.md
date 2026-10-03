@@ -58,6 +58,8 @@ No ADR is needed for the local guard extension; the design records alternatives.
 - Same-session typing, clean saves, repo independence, current failures, LSP
   save boundary and current remote reload behavior.
 - Real hook/store/panel integration regressions and owning documentation.
+- Tablet TaskCenterPanel's separate mutation handler and immediate tab lifetime
+  and saving-state glue, with real hook/local-state deferred regressions.
 
 ### Out of scope
 
@@ -73,6 +75,11 @@ glue, `FileEditorState` and file-state actions only as needed for stable buffer
 incarnations. The paired design defines visit/buffer/host ownership, per-owner
 pending markers and guarded remote-hash publication. Preserve public editor
 action signatures, repo-scoped panel IDs and `savingFiles` Set consumption.
+
+The authorized review correction extends the same rule to tablet file tabs in
+`task-center-panel-restoration.ts`, `task-center-panel-file-tabs.ts` and the
+immediate TaskCenterPanel consumer. Run only the newly affected tablet suites
+after faithful navigation save/delete RED; no unchanged Dockview replay.
 
 Use a new `hooks/use-file-editors.mutation-ownership.test.tsx` with real
 `useFileEditors`, AppStore/StateProvider and `useDockviewStore`. Mock transport
@@ -111,7 +118,7 @@ test or browser build is warranted for this correction.
 
 ## Verification results
 
-Implementation is complete after the later explicit release. One frozen pnpm
+Initial implementation completed after the later explicit release. One frozen pnpm
 installation completed (923 packages, lockfile unchanged). The permanent RED
 selected only navigation save and pinned/preview delete: three assertion
 failures proved baseline/hash corruption and replacement-panel removal. One
@@ -126,6 +133,14 @@ passed 343 decisions/1319 specifications and 36 spec-linter tests; final docs an
 actual-diff coverage results are recorded in Task 01. All local command handles
 are joined. Hosted PR/review/merge evidence and delivery cleanup are tracked in
 the live Kandev task plan; local completion does not assert those future gates.
+
+The parent subsequently authorized the tablet consumer omission identified in
+PR 4177. Two permanent production-hook navigation regressions failed before
+its correction; only the newly affected tablet suites then ran (three files,
+27 tests passed, including 14 ownership cases). Tablet changed-file lint and
+typecheck passed. Three valid test/requirement precision findings were also
+corrected. Task 01 records exact commands/handles; no unchanged Dockview replay,
+second install, optional polish, browser/build or broad suite was performed.
 
 ## Documentation and delivery
 

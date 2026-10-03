@@ -16,6 +16,15 @@ local reply-owner pattern in [Files reply freshness](file-browser-reply-freshnes
 The existing WebSocket filesystem APIs remain authoritative. Rejecting local
 publication does not undo a successful remote mutation.
 
+Tablet `TaskCenterPanel` uses a separate local file-tab action consumer in
+`components/task/task-center-panel-restoration.ts`. It applies the same owner
+rule with a local visit token and tab incarnation. New/restored tabs receive a
+transient token; typing and preview changes preserve it. Explicit persisted
+descriptor and request projections exclude the token. Save/delete feedback,
+LSP publication and functional tab updates require the live owner; per-action
+pending markers cannot clear a replacement save. A missing tab cannot authorize
+closure. No common coordinator or responsive layout change is introduced.
+
 ## Requirement mapping
 
 | Criteria | Design section |

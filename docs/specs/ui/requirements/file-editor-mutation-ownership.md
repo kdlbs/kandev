@@ -17,6 +17,9 @@ session eligibility and lifecycle. This supplements the stale-view boundary in
 [task navigation responsiveness](task-navigation-responsiveness.md), whose
 existing read coordination does not define editor mutation completion.
 
+The contract covers both Dockview editors and the tablet TaskCenterPanel file
+tabs. Each owns its local buffer lifetime and action consumer.
+
 ## Terminology
 
 - **Editor incarnation:** One open buffer lifetime. Editing the buffer preserves
@@ -24,7 +27,7 @@ existing read coordination does not define editor mutation completion.
 - **Session visit:** A continuous selection of one session by a mounted action
   consumer. Returning after selecting another session starts another visit.
 - **Owned completion:** A completion whose originating consumer, session visit,
-  and affected editor incarnation remain available.
+  affected editor incarnation, and panel host remain available.
 
 ## Requirements
 
@@ -50,7 +53,8 @@ filesystem actions finish.
   the baseline and hash to the snapshot actually saved. If typing continued,
   it shall preserve that newer buffer and its dirty indication, and synchronize
   language-server live content to that newer buffer with the actual disk-save
-  boundary. Without later edits it shall clear the buffer and panel dirty state.
+  boundary. Without later edits it shall retain the saved content and clear the
+  buffer and panel dirty indicators.
 - **AC-UI-FILE-EDITOR-MUTATION-001.4:** An owned successful delete shall close
   its pinned or preview editor only after success. An owned rejected response
   or transport failure shall preserve the editor and report the existing error;
@@ -62,7 +66,7 @@ filesystem actions finish.
 - **AC-UI-FILE-EDITOR-MUTATION-001.6:** Applying a current remote update shall
   retain the existing reload outcome. If local preparation finishes after its
   consumer, session visit or editor incarnation retires, it shall not overwrite
-  the replacement editor. Desktop and phone shall retain their existing
+  the replacement editor. Desktop, tablet and phone shall retain their existing
   composition, navigation, scrolling and touch behavior.
 
 ## Out of scope

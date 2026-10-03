@@ -26,10 +26,11 @@ describe("file buffer lifetime", () => {
     expect(useDockviewStore.getState().openFiles.get(file.path)?.instanceId).not.toBe(
       installed.instanceId,
     );
+    const previousInstanceId = useDockviewStore.getState().openFiles.get(file.path)?.instanceId;
     store.removeFileState(file.path);
     store.setFileState(file.path, installed);
     expect(useDockviewStore.getState().openFiles.get(file.path)?.instanceId).not.toBe(
-      installed.instanceId,
+      previousInstanceId,
     );
     store.clearFileStates();
     expect(useDockviewStore.getState().openFiles.size).toBe(0);
