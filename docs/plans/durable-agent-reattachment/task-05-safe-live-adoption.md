@@ -856,3 +856,28 @@ python3 scripts/list-docs.py validate
 python3 scripts/lint-spec-files.py --all
 git diff --check
 ```
+
+### Persisted session-setting replay and latest-main rebase, 2026-10-03
+
+The b861 run exposed a reload race in the adjacent workflow context-reset test:
+the agent's live model cache could still report `High` after the synchronous
+setting endpoint had durably recorded the explicit `Max` override. Session boot
+projection preferred that stale cache and omitted the persisted override. The
+projection now overlays valid persisted model and option choices onto a cloned
+boot snapshot, while rejecting values absent from the current option catalog.
+The regression test failed before the change, then passed with the fix; it also
+checks that the cache remains unchanged and unsupported values are ignored.
+
+- `GOCACHE=/tmp/kandev-go-build-preserved-20261001 go test -trimpath ./internal/backendapp -count=1`
+  passed (46 seconds).
+- `GOCACHE=/tmp/kandev-go-build-preserved-20261001 pnpm e2e:run --host
+  --project chromium tests/workflow/workflow-step-proceed.spec.ts --
+  --grep 'preserves session settings across context reset' --repeat-each=3
+  --retries=0` passed all three runs (one minute).
+- Normal commit hooks passed, including changed-package Go lint and gofmt.
+- Rebased onto main `b330ad97a8712eb7b1a8ee2863b46ba302a92acb` without
+  conflicts. `git range-diff` retained the preceding 91 branch patches
+  unchanged and includes the new backend fix as patch 92.
+- The superseded b861 hosted run was cancelled after strict browser flakes; its
+  checks are not current-head evidence. Fresh hosted CI and review evidence for
+  the published rebased head remain pending.
