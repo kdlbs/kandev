@@ -171,3 +171,7 @@ desktop/mobile browser tests passed with retries disabled under CI resource
 limits. Observer-delivery diagnostics reproduced and explained the spacing
 failure, then were removed. No production or durable behavior changes were
 needed. See the work order for verification evidence.
+
+Full CI catalog validation also required placing the fixture unit regression
+in `e2e/helpers/`, outside Playwright's browser-test root. The moved unit test,
+all-project discovery, and duration-aware manifest generation passed.

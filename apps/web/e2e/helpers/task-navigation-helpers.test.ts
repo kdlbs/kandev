@@ -1,12 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
-import type { ApiClient } from "../../helpers/api-client";
-import type { BackendContext } from "../../fixtures/backend";
-import type { SeedData } from "../../fixtures/test-base";
-import { seedNavigationTasks } from "./task-navigation-helpers";
+import type { ApiClient } from "./api-client";
+import type { BackendContext } from "../fixtures/backend";
+import type { SeedData } from "../fixtures/test-base";
+import { seedNavigationTasks } from "../tests/task/task-navigation-helpers";
 
 vi.mock("@playwright/test", async () => ({ expect: (await import("vitest")).expect }));
 
-vi.mock("../../helpers/git-helper", () => ({
+vi.mock("./git-helper", () => ({
   GitHelper: class {
     exec() {
       return "";

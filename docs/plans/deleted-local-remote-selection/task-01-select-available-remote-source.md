@@ -213,7 +213,7 @@ concurrent branch preparation in one local checkout, producing `index.lock`
 failures in all three CI attempts. The fixture now settles each initial turn
 before starting the next task. A helper regression failed before this change
 and passed afterward (`pnpm exec vitest run
-e2e/tests/task/task-navigation-helpers.test.ts`, one test).
+e2e/helpers/task-navigation-helpers.test.ts`, one test).
 
 The history spacing test sampled rows before observer measurement. Holding
 timeline ResizeObserver delivery reproduced the CI geometry: four 8px sibling
@@ -231,3 +231,12 @@ and precision, without adding sleeps or increasing timeouts.
 These are test setup and measurement corrections. Production behavior, public
 copy, and the durable repository-selection contract are unchanged. Final
 remote CI and review evidence are recorded in the task plan and PR checks.
+
+### Unit-test discovery boundary
+
+Full CI catalog discovery exposed that the new Vitest fixture regression was
+inside Playwright's browser-test root. It was relocated to `e2e/helpers/`,
+alongside the existing unit-helper tests. The moved regression passes, and
+full Chromium/mobile/container discovery reports zero errors. Duration-aware
+manifest generation also passes with CI's selected timing profile. This
+changes test ownership only; the browser fixtures and runtime are unchanged.
