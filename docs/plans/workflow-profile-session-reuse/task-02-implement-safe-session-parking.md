@@ -137,3 +137,38 @@ The targeted Go suite, changed-scope lint, web lint/typecheck/build, selector
 unit tests (9), E2E ratchets, formatting, backend/E2E artifact builds, and all
 three browser regressions passed locally. New-head hosted CI and review status
 remain pending publication; this local evidence does not claim hosted CI green.
+
+### PR #3598 exact-head CI fixup, 2026-10-03
+
+The previous hosted head exposed two independent recovery failures and a
+browser layout failure. ACP reports a transient `session/load` network error
+as a generic `-32603` error, so it did not carry the typed restore code. The
+restore policy now treats only high-confidence `network_unavailable` evidence
+with the short-retry decision as transport failure; other untyped and provider
+failures remain blocked. Automatic continuation prompts now receive a unique
+durable delivery-submission ID before dispatch, allowing SQL and a retained
+agentctl to agree on the active submission during restart adoption. The dialog
+layout test closes its option menu with Escape instead of clicking a possibly
+disabled option.
+
+Validation passed: both targeted Go regression suites; complete lifecycle and
+orchestrator package suites; changed-scope Go lint (0 issues); the modified
+E2E file's ESLint and Prettier checks; backend and E2E plugin artifact builds;
+and `git diff --check`. The two affected continuation/restart browser cases
+passed together (2/2) with retries disabled, and the long-text dialog browser
+case passed (1/1) with retries disabled. The transient case preserved its
+native conversation and did not replay the original prompt. These are local
+results only; fresh hosted CI and review evidence remain pending publication.
+
+```bash
+cd apps/backend && go test ./internal/agent/runtime/lifecycle -run 'TestRestorePolicy(UsesTypedAgentctlReason|RecognizesTransientUnstructuredACPTransportError)|TestInitializeSessionNativeLoadFailure' -count=1
+cd apps/backend && go test ./internal/orchestrator -run 'TestInterruptionContinuationPreparation' -count=1
+cd apps/backend && go test ./internal/agent/runtime/lifecycle/... ./internal/orchestrator/... -count=1
+cd apps/backend && golangci-lint run ./internal/agent/runtime/lifecycle/... ./internal/orchestrator/... --timeout=5m
+cd apps/web && pnpm exec eslint e2e/tests/task/dialog-long-text-overflow.spec.ts
+cd apps/web && pnpm exec prettier --check e2e/tests/task/dialog-long-text-overflow.spec.ts
+cd apps/backend && make build && make e2e-plugin-package
+cd apps/web && pnpm e2e:run --host --no-build --shards 1 --project chromium e2e/tests/session/provider-interruption-continuation.spec.ts -- --grep 'read-restore-transient restores|backend restart, agent survival=true' --retries=0
+cd apps/web && pnpm e2e:run --host --no-build --shards 1 --project chromium e2e/tests/task/dialog-long-text-overflow.spec.ts -- --retries=0
+git diff --check
+```

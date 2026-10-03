@@ -4,8 +4,10 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
+	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
 )
 
 // RestoreAction identifies an operation that may change the native harness
@@ -215,6 +217,9 @@ func classifyRestoreFailure(err error) RestoreReason {
 	if isMethodNotFoundErr(err) || strings.Contains(err.Error(), "LoadSession capability is false") {
 		return RestoreReasonNativeResumeUnsupported
 	}
+	if isRetryableNetworkRestoreFailure(err) {
+		return RestoreReasonTransport
+	}
 	message := strings.ToLower(err.Error())
 	switch {
 	case strings.Contains(message, "authentication") || strings.Contains(message, "auth required"):
@@ -242,6 +247,22 @@ func classifyTypedRestoreFailure(err error) (RestoreReason, bool) {
 	case string(RestoreReasonWorkspaceIncompatible):
 		return RestoreReasonWorkspaceIncompatible, true
 	default:
+		if isRetryableNetworkRestoreFailure(typed) {
+			return RestoreReasonTransport, true
+		}
 		return RestoreReasonUnknown, true
 	}
+}
+
+func isRetryableNetworkRestoreFailure(err error) bool {
+	if err == nil {
+		return false
+	}
+	classified := routingerr.Classify(routingerr.Input{
+		Phase:  routingerr.PhaseSessionInit,
+		Stderr: err.Error(),
+	})
+	return classified.Code == routingerr.CodeNetworkUnavailable &&
+		classified.Confidence == routingerr.ConfHigh &&
+		routingerr.Decide(routingerr.ContextKanban, classified, time.Now().UTC()) == routingerr.DecisionShortRetry
 }

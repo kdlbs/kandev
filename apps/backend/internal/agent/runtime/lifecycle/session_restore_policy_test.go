@@ -112,6 +112,24 @@ func TestRestorePolicyUsesTypedAgentctlReason(t *testing.T) {
 	if got := classifyRestoreFailure(unknown); got != RestoreReasonUnknown {
 		t.Fatalf("unknown typed restore reason = %q, want %q", got, RestoreReasonUnknown)
 	}
+
+	transient := &agentctl.SessionRestoreOperationError{
+		Code:    "SESSION_RESTORE_BLOCKED",
+		Message: `session restore failed: {"code":-32603,"message":"dial tcp: network is unreachable"}`,
+		Details: map[string]interface{}{"reason": "unknown_failure"},
+	}
+	if got := classifyRestoreFailure(transient); got != RestoreReasonTransport {
+		t.Fatalf("typed transient restore reason = %q, want %q", got, RestoreReasonTransport)
+	}
+}
+
+func TestRestorePolicyRecognizesTransientUnstructuredACPTransportError(t *testing.T) {
+	t.Parallel()
+
+	err := errors.New(`load session failed: session restore failed: {"code":-32603,"message":"dial tcp: network is unreachable"}`)
+	if got := classifyRestoreFailure(err); got != RestoreReasonTransport {
+		t.Fatalf("transient unstructured restore reason = %q, want %q", got, RestoreReasonTransport)
+	}
 }
 
 func TestInitializeSessionNativeLoadFailureDoesNotCreateReplacement(t *testing.T) {
