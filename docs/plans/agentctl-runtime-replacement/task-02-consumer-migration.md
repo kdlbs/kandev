@@ -137,3 +137,13 @@ The current-head Chromium shard intermittently timed out waiting for `sessionAge
 - `pnpm run typecheck`, `pnpm run lint`, targeted Prettier, and `git diff --check` passed.
 - A first E2E rerun used an outdated ignored `apps/web/dist` bundle. After `pnpm run build:e2e`, the terminal context-reset E2E passed (2.9s), the workflow target-delivery E2E passed (27.8s), and the mobile workspace-repository drawer E2E passed (2.4s), each with retries disabled.
 - Fresh hosted CI for the final published head remains required.
+
+### Rebase and post-conflict validation (2026-10-03)
+
+The branch was rebased onto `2254b51f14e89a1ec14ed63fd67800b746d88798`. The single conflict in `task-navigation-helpers.ts` was resolved by keeping the base's explicit worktree executor-profile fallback and the branch's serialized checkout/session setup. `git range-diff` confirms all 96 prior patches are represented; the adjusted fixture patch retains both behaviors.
+
+- `pnpm run typecheck` and `pnpm run lint` passed from `apps/web`.
+- `pnpm --filter @kandev/web test -- --run lib/state/hydration/hydrator.test.ts lib/state/slices/session/session-slice.upsert.test.ts lib/ws/handlers/agent-session.test.ts` passed (147 tests).
+- Targeted Prettier and `git diff origin/main..HEAD --check` passed.
+- `make -C apps/backend build e2e-plugin-package` and `pnpm run build:e2e` passed. The fresh zero-retry Chromium run passed all four cases: session readiness after context reset (7.1s), workflow target delivery (35.2s), dirty-checkout restoration (5.4s), and progressive task navigation (12.0s). The zero-retry mobile repository-set drawer case passed (2.4s).
+- Hosted checks for the published exact head remain required.
