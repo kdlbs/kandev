@@ -42,7 +42,7 @@ feedback, and a usable blank replacement, with unit and browser evidence.
   turn the temporary absence of a session into permission to create another.
 - Header control and shared responsive confirmation, including fixed header,
   phone touch sizes, disabled setup state, progress and mounted-session errors.
-- Six real locales, generated pseudo/Traditional Chinese, desktop/mobile E2E.
+- All supported real locales, generated pseudo/Traditional Chinese, desktop/mobile E2E.
 - Update Configuration Chat recovery guidance in `docs/public/developer-tools.md`
   and its feature-status row. Reconcile the no-new-session-action wording in
   `quick-chat-expiration.md` with replacement-only recovery. Do not claim more
@@ -193,3 +193,15 @@ Completed on 2026-10-01 in the primary session.
   decisions, 1248 specs, 36 linter tests), delivery-package coverage and
   whitespace checks passed. The successful phone command used an isolated Go
   cache and a 2048MB Node heap after build-only host/cache failures; see plan.
+
+## Delivery validation (2026-10-03)
+
+Current-base integration preserves TaskOverviewSlice, failure-aware ordinary
+Quick Chat auto-resumption and tombstone admission. Added all 16 restart keys
+in Korean, the new supported locale, and kept guidance within its line budget.
+The eight listed suites passed again with 131 tests; type checking, all-locale
+i18n validation and the copy ratchet passed. Fresh managed desktop 12/12 and
+phone 4/4 runs passed sequentially with one worker. Their three screenshots
+supersede the original publication captures and were visually inspected.
+Harness checks (19 tests, 200 files), specification/catalog checks (343
+decisions, 1323 specs), and public-doc checks (62 tests, 47 pages) passed.

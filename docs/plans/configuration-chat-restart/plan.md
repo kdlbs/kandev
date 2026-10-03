@@ -194,3 +194,27 @@ in the work orders. Changes remain uncommitted.
   intact old conversation, cleared conversation, and retained failed replacement.
 - Session lifecycle/cancellation lock ordering must be covered by deferred
   stop/resume tests rather than holding a broad lock across arbitrary callbacks.
+
+## Delivery validation (2026-10-03)
+
+The publication branch was integrated with the current base. The AppState
+resolution retains its canonical task-overview slice and the restart actions;
+Quick Chat keeps the base's failure-aware auto-resume and tombstone behavior.
+The frontend guidance stays within 300 lines. Restart copy now covers Korean,
+which became a supported locale after the original implementation.
+
+- Backend restart race tests and the listed handler/startup regression commands
+  passed again. Scoped Go lint against the current base reported zero issues.
+- The eight listed frontend suites passed again (131 tests, including the
+  additional baseline recovery cases). Type checking, i18n completeness and the
+  new-copy ratchet passed for every supported locale.
+- Fresh managed desktop 12/12 and phone 4/4 browser checks passed sequentially
+  with one worker and a 2048MB Node heap. Fresh publication screenshots cover
+  the desktop confirmation, phone drawer and recovered phone conversation.
+- Harness checks (19 tests and all 200 files), specification/catalog validation
+  (343 decisions and 1323 specs), and public-doc checks (62 tests and 47 pages)
+  passed after integration. The normal commit hooks ran without bypass.
+
+The earlier implementation evidence remains historical. This delivery run
+supersedes it for PR validation and screenshot publication. CI and automated
+reviews own the remaining publication gate; no remote merge is claimed here.

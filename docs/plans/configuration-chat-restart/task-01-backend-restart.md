@@ -127,3 +127,10 @@ Completed on 2026-10-01 in the primary session.
 - Scoped `golangci-lint run --allow-serial-runners --timeout=5m
   --new-from-rev=HEAD` passed with zero issues. No migrations or public launch
   request fields were added.
+
+## Delivery validation (2026-10-03)
+
+After current-base integration, all listed restart race and handler/startup
+regression commands passed again. Scoped Go lint against the current base
+reported zero issues. The merge retains the base's ordinary recovery and
+settings-policy behavior alongside the restart-only blank-start option.

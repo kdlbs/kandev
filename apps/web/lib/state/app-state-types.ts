@@ -703,6 +703,7 @@ export type AppState = KanbanSlice & {
     | "syncConfigChatRestart"
     | "replaceConfigChatSession"
   >;
+
 // Most callers hydrate a fully-shaped slice per top-level key (see
 // mergeInitialState / hydrateState), but `system` is a grab-bag of many
 // independently-fetched fields (info, diskUsage, updates, ...). Callers that
