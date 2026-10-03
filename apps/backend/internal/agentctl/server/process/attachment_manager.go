@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/agentctl/journal"
+	"github.com/kandev/kandev/internal/agentctl/types/streams"
 )
 
 // agentLinkBudgetJournalFailedTotal counts every time journalAndEnd exhausts
@@ -94,17 +95,15 @@ func (m *Manager) journalOfflineBudgetExhausted(ctx context.Context, pause Budge
 	if err != nil {
 		return err
 	}
-	payload, err := json.Marshal(struct {
-		DetachedSince string `json:"detached_since"`
-		ExhaustedAt   string `json:"exhausted_at"`
-		Outcome       string `json:"outcome"`
-		CancelError   string `json:"cancel_error,omitempty"`
-	}{
-		DetachedSince: pause.DetachedSince.Format(time.RFC3339Nano),
-		ExhaustedAt:   pause.ExhaustedAt.Format(time.RFC3339Nano),
-		Outcome:       pause.Outcome,
-		CancelError:   errString(pause.CancelError),
-	})
+	data := map[string]any{
+		"detached_since": pause.DetachedSince.Format(time.RFC3339Nano),
+		"exhausted_at":   pause.ExhaustedAt.Format(time.RFC3339Nano),
+		"outcome":        pause.Outcome,
+	}
+	if msg := errString(pause.CancelError); msg != "" {
+		data["cancel_error"] = msg
+	}
+	payload, err := json.Marshal(streams.AgentEvent{Type: offlineBudgetEventType, Data: data})
 	if err != nil {
 		return err
 	}

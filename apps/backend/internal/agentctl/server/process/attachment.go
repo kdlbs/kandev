@@ -287,7 +287,7 @@ func (as *attachmentState) ReaperGate() (hold bool, enforcementEndedAt time.Time
 	as.mu.Lock()
 	defer as.mu.Unlock()
 	enforcementEndedAt = as.enforcementEndedAt
-	if as.current != nil {
+	if as.current != nil && as.current.confirmed {
 		return false, enforcementEndedAt
 	}
 	if as.enforcing {
@@ -372,6 +372,11 @@ func (as *attachmentState) FinalizeStreamStart(
 	as.mu.Lock()
 	defer as.mu.Unlock()
 	if as.startingID != "" && as.startingID != streamID {
+		return 0, false, false
+	}
+	// Enforcement that began after StreamStart returned must finish, and
+	// journal its budget event, before a stream's attachedAtSequence is read.
+	if as.enforcing {
 		return 0, false, false
 	}
 	oldConfirmed := as.current != nil && as.current.confirmed

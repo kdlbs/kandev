@@ -280,6 +280,23 @@ func (c *ChannelBackendClient) RequestPayload(ctx context.Context, action string
 
 	respChan := make(chan backendResponse, 1)
 	for {
+		// A response queued while the call was parked (session reset) is
+		// terminal: re-registering and sending would execute a call the agent
+		// was told was cancelled.
+		select {
+		case parked := <-respChan:
+			if !errors.Is(parked.err, errRequestNotSent) {
+				if parked.err == nil {
+					return fmt.Errorf("MCP request cancelled: unexpected parked response")
+				}
+				return parked.err
+			}
+		default:
+		}
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+
 		c.pendingMu.Lock()
 		c.pending[id] = &pendingRequest{result: respChan, sessionID: sessionID}
 		c.pendingMu.Unlock()

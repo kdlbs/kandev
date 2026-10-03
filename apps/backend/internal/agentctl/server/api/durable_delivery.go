@@ -412,6 +412,9 @@ func writeAgentStreamReplayEvent(event journal.Event, write func(adapter.AgentEv
 	if err := json.Unmarshal(event.Payload, &notification); err != nil {
 		return err
 	}
+	if notification.Type == "" {
+		notification.Type = event.Type
+	}
 	notification.DeliveryStreamID = event.StreamID
 	notification.DeliveryIncarnationID = event.IncarnationID
 	notification.DeliveryHarnessGeneration = event.HarnessGeneration

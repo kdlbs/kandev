@@ -246,3 +246,36 @@ func TestFailRequestNotSentRetriesSendLoop(t *testing.T) {
 	client.HandleResponse(response)
 	require.NoError(t, <-errCh)
 }
+
+func TestResetWhileParkedDetachedDoesNotSendAfterReattach(t *testing.T) {
+	client := NewChannelBackendClient(nil)
+	t.Cleanup(client.Close)
+	att := newTestAttachment(false)
+	client.SetAttachmentSnapshotter(att.snapshot)
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- client.RequestPayload(context.Background(), "test.action", nil, nil)
+	}()
+
+	require.Eventually(t, func() bool {
+		client.pendingMu.Lock()
+		defer client.pendingMu.Unlock()
+		return len(client.pending) == 1
+	}, time.Second, 5*time.Millisecond)
+
+	client.Reset()
+	att.reattach()
+
+	select {
+	case err := <-errCh:
+		require.ErrorContains(t, err, "session reset")
+	case <-time.After(time.Second):
+		t.Fatal("parked call did not return after reset")
+	}
+	select {
+	case <-client.GetRequestChannel():
+		t.Fatal("a reset call was sent after reattach")
+	default:
+	}
+}

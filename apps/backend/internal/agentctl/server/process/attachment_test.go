@@ -564,3 +564,36 @@ func TestBudgetJournalAppendFailure(t *testing.T) {
 		t.Fatal("the next confirmed stream must clear the unjournaled budget pause")
 	}
 }
+
+// TestReaperGateHoldsForUnconfirmedStream pins that only a confirmed current
+// stream lifts the unowned reaper's hold.
+func TestReaperGateHoldsForUnconfirmedStream(t *testing.T) {
+	as := testAttachment(t, time.Hour, nil)
+	as.FinalizeStreamStart("s1", "attach-1", noopClose, doneCh())
+	if hold, _ := as.ReaperGate(); !hold {
+		t.Fatal("ReaperGate() hold = false for an unconfirmed stream, want true")
+	}
+	as.Confirm("attach-1")
+	if hold, _ := as.ReaperGate(); hold {
+		t.Fatal("ReaperGate() hold = true for a confirmed stream, want false")
+	}
+}
+
+// TestFinalizeStreamStartRefusesWhileEnforcing pins that a stream whose start
+// began before enforcement cannot be installed while enforcement runs.
+func TestFinalizeStreamStartRefusesWhileEnforcing(t *testing.T) {
+	release := make(chan struct{})
+	as := testAttachment(t, 5*time.Millisecond, func(h *attachmentHooks) {
+		h.hasActiveTurn = func() bool { return true }
+		h.cancelTurn = func(context.Context) error { <-release; return nil }
+	})
+	if _, err := as.StreamStart(context.Background(), "s2"); err != nil {
+		t.Fatalf("StreamStart() error = %v", err)
+	}
+	time.Sleep(30 * time.Millisecond) // expiry starts enforcement
+
+	if _, _, stillCurrent := as.FinalizeStreamStart("s2", "", noopClose, doneCh()); stillCurrent {
+		t.Fatal("FinalizeStreamStart() stillCurrent = true while enforcing, want false")
+	}
+	close(release)
+}
