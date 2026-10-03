@@ -158,6 +158,10 @@ Final focused browser checks were run sequentially from `apps/web`:
 - `pnpm e2e:run --host --no-build --project mobile-chrome e2e/tests/chat/mobile-quick-chat-opening-composer.spec.ts`: 1 passed, including 390x560 overflow and Send containment.
 - `pnpm e2e:run --host --no-build --project chromium e2e/tests/chat/agent-profile-recent-use.spec.ts`: 1 passed after closing the setup tab through the supported tab action and reopening from the still-open add menu.
 - `pnpm e2e:run --host --no-build --project mobile-chrome e2e/tests/chat/mobile-agent-goal.spec.ts --grep 'submits once while the message acknowledgement is delayed' --retries=0`: 1 passed; the opening prompt can use launch payload or `message.add` according to profile, and the delayed user send produces exactly one additional `message.add` request.
+- The merged-base PR shard exposed a test assumption about the Changes timeline's
+  virtualized commit rows. The PR-switcher E2E now scrolls the Changes panel
+  before checking pushed commit messages; its targeted, retries-disabled run
+  passed with the CI runtime image.
 - `pnpm e2e:run --host --no-build --project chromium e2e/tests/chat/queue-admission-reliability.spec.ts --grep 'reconciles without duplicating a queued message' --retries=0`: 1 passed. Queue-add diagnostics now reset at fault injection; the targeted lost-response attempt sends once. The initial whole-test count included queue traffic before the fault was armed.
 - `pnpm e2e:run --host --no-build --project mobile-chrome e2e/tests/chat/mobile-queue-admission-reliability.spec.ts --grep 'reconciles through a touch submit' --retries=0`: 1 passed.
 - `pnpm e2e:run --host --no-build --project chromium e2e/tests/plugins/composer-actions.spec.ts --grep 'Quick Chat setup'`: 1 passed.

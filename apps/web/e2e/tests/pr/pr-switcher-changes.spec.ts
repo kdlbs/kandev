@@ -5,6 +5,14 @@ import { KanbanPage } from "../../pages/kanban-page";
 import { SessionPage } from "../../pages/session-page";
 import path from "node:path";
 
+async function scrollChangesPanelToBottom(session: SessionPage): Promise<void> {
+  // Earlier shard tests add local commits to the shared checkout. The timeline
+  // virtualizes rows, so PR commits can sit below its initial rendered window.
+  await session.changes.getByTestId("changes-panel-scroll-owner").evaluate((element) => {
+    element.scrollTop = element.scrollHeight;
+  });
+}
+
 test.describe("PR switcher changes panel", () => {
   /**
    * Verifies that the changes panel shows the correct PR files and commits
@@ -209,6 +217,7 @@ test.describe("PR switcher changes panel", () => {
     await expect(session.prFilesSection()).toBeVisible({ timeout: 15_000 });
     await session.expandPRChangesSection();
     await session.expandCommitsSection();
+    await scrollChangesPanelToBottom(session);
     await expect(session.prFilesSection().getByText("auth.go")).toBeVisible();
     await expect(session.prFilesSection().getByText("auth_test.go")).toBeVisible();
 
@@ -235,6 +244,7 @@ test.describe("PR switcher changes panel", () => {
     await expect(session.prFilesSection()).toBeVisible({ timeout: 15_000 });
     await session.expandPRChangesSection();
     await session.expandCommitsSection();
+    await scrollChangesPanelToBottom(session);
     await expect(session.prFilesSection().getByText("dashboard.tsx")).toBeVisible();
     await expect(session.prFilesSection().getByText("api.ts")).toBeVisible();
     await expect(session.prFilesSection().getByText("styles.css")).toBeVisible();
@@ -287,6 +297,7 @@ test.describe("PR switcher changes panel", () => {
     await expect(session.prFilesSection()).toBeVisible({ timeout: 15_000 });
     await session.expandPRChangesSection();
     await session.expandCommitsSection();
+    await scrollChangesPanelToBottom(session);
     await expect(session.prFilesSection().getByText("auth.go")).toBeVisible();
     await expect(session.prFilesSection().getByText("auth_test.go")).toBeVisible();
     await expect(session.commitsSection().getByText("fix auth token expiry")).toBeVisible();
