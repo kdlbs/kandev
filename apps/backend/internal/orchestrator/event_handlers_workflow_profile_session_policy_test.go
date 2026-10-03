@@ -313,6 +313,62 @@ func TestHandleAgentStopped_ProfileSessionStopIntentSuppressesParkedSwitch(t *te
 	}
 }
 
+// @covers AC-TASKS-WORKFLOW-PROFILE-SESSIONS-001.4
+func TestHandleAgentFailed_ProfileSessionStopIntentSuppressesParkedSwitch(t *testing.T) {
+	ctx := context.Background()
+	repo, svc, turnID := newParkedProfileSwitchEventFixture(t)
+
+	svc.handleAgentFailed(ctx, watcher.AgentEventData{
+		TaskID: "t1", SessionID: "session-a", AgentExecutionID: "execution-a",
+		ErrorMessage: "agent updates stream disconnected during profile switch",
+	})
+
+	turn, err := repo.GetTurn(ctx, turnID)
+	if err != nil {
+		t.Fatalf("reload turn: %v", err)
+	}
+	if turn.CompletedAt != nil {
+		t.Fatal("parked-switch failure must not complete the source turn")
+	}
+	session, err := repo.GetTaskSession(ctx, "session-a")
+	if err != nil {
+		t.Fatalf("reload session: %v", err)
+	}
+	if session.State != models.TaskSessionStateWaitingForInput {
+		t.Fatalf("session state = %s, want WAITING_FOR_INPUT", session.State)
+	}
+	intent, ok := workflowProfileSwitchStopIntentFromMetadata(session.Metadata)
+	if !ok || !intent.Consumed {
+		t.Fatalf("matching failure stop intent = %#v, want durable consumed tombstone", session.Metadata[models.SessionMetaKeyWorkflowProfileSwitchStopIntent])
+	}
+	messages, err := repo.ListMessages(ctx, session.ID)
+	if err != nil {
+		t.Fatalf("list parked session messages: %v", err)
+	}
+	if len(messages) != 0 {
+		t.Fatalf("parked-switch failure messages = %d, want no user-visible recovery message", len(messages))
+	}
+}
+
+func TestHandleAgentFailed_ProfileSessionStopIntentDoesNotConsumeForDifferentExecution(t *testing.T) {
+	ctx := context.Background()
+	repo, svc, _ := newParkedProfileSwitchEventFixture(t)
+
+	svc.handleAgentFailed(ctx, watcher.AgentEventData{
+		TaskID: "t1", SessionID: "session-a", AgentExecutionID: "execution-new",
+		ErrorMessage: "stale execution stream disconnected",
+	})
+
+	session, err := repo.GetTaskSession(ctx, "session-a")
+	if err != nil {
+		t.Fatalf("reload session: %v", err)
+	}
+	intent, ok := workflowProfileSwitchStopIntentFromMetadata(session.Metadata)
+	if !ok || intent.Consumed {
+		t.Fatalf("stop intent after a different execution failed = %#v, want active intent", session.Metadata[models.SessionMetaKeyWorkflowProfileSwitchStopIntent])
+	}
+}
+
 func TestHandleAgentCompleted_ProfileSessionStopIntentSuppressesParkedSwitchAfterRestart(t *testing.T) {
 	ctx := context.Background()
 	repo, svc, turnID := newParkedProfileSwitchEventFixture(t)
