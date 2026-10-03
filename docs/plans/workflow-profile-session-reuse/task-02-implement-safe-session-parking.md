@@ -101,3 +101,39 @@ cd apps/backend && golangci-lint run ./internal/orchestrator/... --timeout=5m
 cd apps/web && pnpm lint
 cd apps/web && pnpm exec prettier --check e2e/tests/task/workflow-step-previews-helpers.ts
 ```
+
+### Live-main rebase and CI follow-up, 2026-10-03
+
+Rebased the branch onto `origin/main` at `a81c68fe838a`. Conflict resolution
+preserved both native-restore identity and live-agent startup disposition in
+the lifecycle execution, and kept both explicit cancellation ownership and
+exact resume-startup termination. In the executor start path, a failed live
+reattachment continues to avoid newly-created-start cleanup; native restore
+still returns its actual startup error to its recovery owner. The rebase also
+exposed an outdated test call after the restore API gained its execution
+argument; that test now supplies the expected nil execution.
+
+The workflow preview-title matcher and mobile fixture passed again after the
+rebase. The mobile preview scroll case and mobile workflow-agent switch each
+passed three repetitions with retries disabled. The hosted dynamic-unclassified
+fallback case passed once and then three further repetitions with retries
+disabled. A first overlapping Go package run exposed one lifecycle cache-prune
+temporary-directory cleanup failure; the case passed five isolated repetitions,
+the lifecycle packages passed in isolation, and the complete targeted recovery
+suite then passed without concurrent runs.
+
+```bash
+cd apps/backend && go test ./internal/orchestrator/... ./internal/agent/runtime/lifecycle/... ./internal/agent/runtime/agentctl/... -count=1
+cd apps/backend && golangci-lint run ./internal/orchestrator/... ./internal/agent/runtime/lifecycle/... ./internal/agent/runtime/agentctl/... --timeout=5m
+cd apps && pnpm --filter @kandev/web lint
+cd apps/web && pnpm run typecheck && pnpm run e2e:sleep-ratchet && pnpm run i18n:ratchet
+cd apps/web && pnpm exec vitest run components/workflow-selector-row.test.tsx
+cd apps/web && pnpm exec prettier --check e2e/tests/task/workflow-step-previews-helpers.ts components/workflow-selector-row.tsx
+cd apps/backend && make build && make e2e-plugin-package
+cd apps && pnpm --filter @kandev/web build:vite
+```
+
+The targeted Go suite, changed-scope lint, web lint/typecheck/build, selector
+unit tests (9), E2E ratchets, formatting, backend/E2E artifact builds, and all
+three browser regressions passed locally. New-head hosted CI and review status
+remain pending publication; this local evidence does not claim hosted CI green.
