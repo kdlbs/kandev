@@ -121,12 +121,11 @@ export async function createStandardProfile(
   preferredProfileId?: string,
 ) {
   const { agents } = await apiClient.listAgents();
-  const candidates =
-    preferredProfileId
-      ? agents.filter((candidate) =>
-          candidate.profiles.some((profile) => profile.id === preferredProfileId),
-        )
-      : agents;
+  const candidates = preferredProfileId
+    ? agents.filter((candidate) =>
+        candidate.profiles.some((profile) => profile.id === preferredProfileId),
+      )
+    : agents;
   const agentId = getMockAgentId(candidates);
   return apiClient.createAgentProfile(agentId, name, {
     model: "mock-fast",

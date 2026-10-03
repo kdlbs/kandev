@@ -34,7 +34,7 @@ func (s *Service) applyMCPServerSelections(ctx context.Context, taskID, sessionI
 }
 
 func (s *Service) applyMCPServerSelectionsForTask(ctx context.Context, task *v1.Task, sessionID string, ids []string) error {
-	if task == nil {
+	if task == nil || ids == nil {
 		return nil
 	}
 	if err := s.validateMCPSelectionSession(ctx, task.ID, sessionID); err != nil {
