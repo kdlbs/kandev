@@ -135,7 +135,7 @@ Use new focused files rather than growing already-large suites.
 | AC-001.7, AC-001.8 | `TestBranchPolicyPatchConcurrentEdits`: description/workflow both orders, bounded name/template/target mix; `TestBranchPolicyPatchControls`: null/empty/full/same-field/delete/read-only/foreign/deleted-parent |
 | AC-001.10 | `TestBranchPolicyPatchTargetDefaults`: omitted vs blank with earlier concurrent base commit, whitespace, combined base+blank, create default control |
 | AC-001.7, AC-001.9 | `TestBranchPolicyPatchHTTP`, `TestBranchPolicyPatchWS`: one omitted-field integration each, response/event matches full committed DB policy; failure publication control |
-| AC-004.1, AC-004.2, AC-004.7, AC-001.5 | `TestBranchPolicyPatchTaskSnapshots`: actual new and pre-existing task rows, complete tuple and post-delete preservation; actual task event serialization |
+| AC-004.7, AC-001.5 | `TestBranchPolicyPatchTaskSnapshots`: actual new and pre-existing task rows, complete tuple and post-delete preservation; actual task event serialization |
 | AC-001.7 through AC-001.10 | `TestBranchPolicyPatchSQLite`: independent writer handles, presence/defaults/atomicity/uniqueness/deletion; `TestPostgresBranchPolicyPatchBehavior`, `TestPostgresBranchPolicyPatchConcurrency`: independent physical connections and observed advisory wait before canonical read, row-lock interaction with legacy update/delete |
 
 AC abbreviations in this table mean `AC-WORKSPACES-BRANCH-POLICIES-*`.
