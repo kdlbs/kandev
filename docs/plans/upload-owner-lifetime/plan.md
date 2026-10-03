@@ -135,7 +135,8 @@ Task 01 implementation is done; see its [results](task-01-retire-upload-batches.
 - One frozen dependency install using existing pnpm 9.15.9: passed; lockfile unchanged.
 - Permanent production-hook RED and real rendered completion-to-report RED observed before
   their respective production changes. All owned RED handles joined.
-- Exact affected hook/entry-point/conflict-dialog suites: 52 passed. Final affected rendered
+- Exact affected hook/entry-point/conflict-dialog suites: 54 passed after the commit-boundary
+  correction (initial owner-disposal implementation: 52 passed). Final affected rendered
   suite after a test-only type correction: 12 passed. All test handles joined.
 - Changed-file eslint, typecheck, i18n check and ratchet: passed, one heavy command at a time
   with one Vitest worker and the 4096 MiB Node cap. All check handles joined.
@@ -178,3 +179,13 @@ archive read-only until merge and owns archive/next-child release.
 Implementation explicitly released by parent on 2026-10-03 in this same session. Task 01 implementation is
 done. Use existing installed pnpm 9.15.9 via mise exec, with no packageManager/lockfile
 change. The design checkpoint remains historical; production work is now authorized.
+
+PR review found commit-time retirement must precede passive effects. Task 01 reopened only for
+that causal correction. Real React concurrent-commit transport REDs assert actual request
+counts (0 vs 1 after preflight retirement, 1 vs 2 after active retirement). The fix uses the
+existing local lifecycle and reporting effects at layout time; no new API or framework.
+
+Commit-boundary correction completed: two faithful additional REDs became GREEN, all 54
+exact affected tests passed, changed lint/typecheck/i18n/docs/actual coverage passed. Task 01
+is done again; published-head update is justified only by the actual review finding. No main
+rebase or extra local suites occurred. Hosted/review/merge gates remain in the MCP task plan.

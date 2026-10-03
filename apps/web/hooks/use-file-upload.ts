@@ -2,7 +2,7 @@
 
 import {
   useCallback,
-  useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -117,7 +117,7 @@ function useUploadLifetime(
 ) {
   const lifetime = useMemo<UploadLifetime>(() => ({ sessionId, live: false }), [sessionId]);
   const previousSessionRef = useRef(sessionId);
-  useEffect(() => {
+  useLayoutEffect(() => {
     lifetime.live = true;
     if (previousSessionRef.current !== sessionId) {
       previousSessionRef.current = sessionId;

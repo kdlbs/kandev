@@ -1,4 +1,6 @@
+import { startTransition, useLayoutEffect } from "react";
 import { flushSync } from "react-dom";
+import { createRoot } from "react-dom/client";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useFileUploadEntryPoints } from "./use-file-upload-entry-points";
@@ -15,8 +17,11 @@ vi.mock("@/lib/api/domains/workspace-file-api", () => ({
 }));
 vi.mock("@/components/toast-provider", () => ({ useToast: () => ({ toast }) }));
 
-function Owner({ sessionId }: { sessionId: string }) {
+function Owner({ sessionId, onCommit }: { sessionId: string; onCommit?: () => void }) {
   const { elements, openPicker } = useFileUploadEntryPoints(sessionId);
+  useLayoutEffect(() => {
+    onCommit?.();
+  }, [sessionId, onCommit]);
   return (
     <>
       <button onClick={() => openPicker("files", "fixtures")}>Pick files</button>
@@ -164,4 +169,56 @@ describe("workspace upload current reports", () => {
     expect(upload).not.toHaveBeenCalled();
     expect(toast).not.toHaveBeenCalled();
   });
+});
+
+// @covers AC-UI-WORKSPACE-FILE-TRANSFER-003.7, AC-UI-WORKSPACE-FILE-TRANSFER-003.10
+describe("workspace upload committed retirement", () => {
+  it.each(["preflight", "upload"])(
+    "retires %s before passive cleanup after a concurrent commit",
+    async (phase) => {
+      const transport = deferredUpload();
+      let releasePreflight!: () => void;
+      const preflightResult = new Promise<[]>((resolve) => {
+        releasePreflight = () => resolve([]);
+      });
+      if (phase === "preflight") preflight.mockReturnValueOnce(preflightResult);
+      const container = document.createElement("div");
+      document.body.append(container);
+      const root = createRoot(container);
+      let now = performance.now();
+      const clock = vi.spyOn(performance, "now").mockImplementation(() => now);
+      let committed!: () => void;
+      const commit = new Promise<void>((resolve) => {
+        committed = resolve;
+      });
+      try {
+        await act(async () => root.render(<Owner sessionId="sess-1" />));
+        pickFiles();
+        if (phase === "upload") await waitFor(() => expect(upload).toHaveBeenCalledTimes(1));
+        const onCommit = () => {
+          // Yield the real React scheduler at this commit, before passive effects.
+          // Releasing the transport queues its continuation in that exact interval.
+          if (phase === "preflight") releasePreflight();
+          else transport.resolve({ path: FIRST_PATH, size_bytes: 5 });
+          now += 100;
+          committed();
+        };
+        startTransition(() => root.render(<Owner sessionId="sess-2" onCommit={onCommit} />));
+        await commit;
+        if (phase === "preflight") await preflightResult;
+        else await transport.promise;
+        await Promise.resolve();
+        await Promise.resolve();
+        expect(upload).toHaveBeenCalledTimes(phase === "preflight" ? 0 : 1);
+        expect(toast).not.toHaveBeenCalled();
+      } finally {
+        releasePreflight();
+        transport.resolve({ path: FIRST_PATH, size_bytes: 5 });
+        await act(async () => root.unmount());
+        await transport.promise;
+        clock.mockRestore();
+        container.remove();
+      }
+    },
+  );
 });

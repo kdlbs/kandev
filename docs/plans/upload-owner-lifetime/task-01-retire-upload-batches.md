@@ -204,3 +204,21 @@ Implemented after the parent's later explicit release in the same session.
 
 Normal commit hooks and hosted review/merge are the remaining delivery gates, recorded in the
 MCP task plan; task completion still requires actual verified merge and joined cleanup.
+
+### PR review correction
+
+The configured full all-eight-file CodeRabbit review and three Codex/Cubic threads identified
+passive cleanup lagging committed retirement. Two real concurrent React/entry-point transport
+regressions failed with preflight retirement sending one request instead of zero and upload
+retirement sending two instead of one. A controlled scheduler clock yields at the commit
+boundary; no hook or lifecycle function is mocked. Move the existing owner/reporting effects
+to layout effects, preserving their settlement, reset and result-evidence behavior. Re-run the
+exact three suites and affected lint/typecheck/i18n/docs checks. Published head may change only
+for this actual corrective finding; no rebase, new work order, or scope expansion.
+
+Correction results: exact three suites passed 54 tests; all four changed-file eslint, typecheck,
+i18n check/ratchet, catalog (343 decisions/1319 specs), spec lint, diff check and actual coverage
+passed. All owned correction check handles joined. Codex/Cubic threads and the grouped
+CodeRabbit finding share commit-time invalidation; existing effects now use layout cleanup.
+Normal corrective hooks/push, thread disposition and current-head hosted/full-review gates
+remain delivery work in the MCP task plan.

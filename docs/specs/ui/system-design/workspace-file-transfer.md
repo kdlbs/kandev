@@ -179,6 +179,8 @@ file that can display a download button is already loaded and already under the 
 
 `useFileUpload` owns at most one unfinished batch per hook instance and active session. The
 owning surface is the component mounting `useFileUploadEntryPoints`, currently `FileBrowser`.
+Layout-effect cleanup invalidates ownership during the retirement commit, before a transport
+continuation can resume ahead of passive effects. Setup also runs at commit time.
 Unmount and a committed session change retire that lifetime across preflight, parked conflict
 choices, direct uploads, and uploads started by `resolveConflicts`. A new setup creates a live
 lifetime; React StrictMode setup/cleanup/setup must not permanently disable the mounted hook.
@@ -211,7 +213,7 @@ from a retired lifetime start no request. Per-file choices, skip behavior, reque
 manual parked cancellation continue to use the existing two-phase flow.
 
 `useFileUploadEntryPoints` suppresses reports for cancelled results and captures a local reporting
-scope before awaiting `uploadFiles`. Its effect invalidates that scope on disposal/session change
+scope before awaiting `uploadFiles`. Its layout effect invalidates that scope during the disposal/session-change commit
 and creates a fresh scope on setup. The caller checks the captured scope before reporting, because
 an upload can complete before retirement while its caller continuation is still pending. Real
 input/dialog rendering with mocked transport covers both retirement during the request and this
