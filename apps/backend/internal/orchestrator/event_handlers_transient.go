@@ -731,7 +731,7 @@ func (s *Service) transientReplayFailure(ctx context.Context, entry *transientRe
 			failure.EffectObserved = false
 		} else {
 			failure.EvidenceKnown = evidence.EvidenceKnown
-			failure.OutputObserved = failure.OutputObserved || evidence.OutputObserved
+			failure.OutputObserved = failure.OutputObserved || s.lifecyclePromptAttemptOutputObserved(failure, evidence)
 			failure.EffectObserved = failure.EffectObserved || evidence.EffectObserved
 			if evidence.ProviderDiagnosticCandidate {
 				failure.ProviderDiagnosticCandidate = true
@@ -740,6 +740,21 @@ func (s *Service) transientReplayFailure(ctx context.Context, entry *transientRe
 		}
 	}
 	return s.withPromptAttemptEvidence(failure), true
+}
+
+func (s *Service) lifecyclePromptAttemptOutputObserved(
+	data watcher.AgentEventData,
+	evidence agentruntime.PromptAttemptEvidence,
+) bool {
+	if !evidence.OutputObserved {
+		return false
+	}
+	if !evidence.ProviderDiagnosticCandidate {
+		return true
+	}
+	diagnostic := &promptAttemptEvidence{}
+	s.observeLifecycleProviderDiagnosticLocked(diagnostic, data.AgentID, evidence.ProviderDiagnosticText)
+	return diagnostic.outputObservedLocked(data)
 }
 
 func (s *Service) stopTransientRetryExecution(ctx context.Context, executionID string) error {

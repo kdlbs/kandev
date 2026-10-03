@@ -166,6 +166,50 @@ func TestRetryTransientPromptRechecksLifecycleEvidenceBeforeReplay(t *testing.T)
 	}
 }
 
+func TestTransientReplayDoesNotTreatMatchingLifecycleDiagnosticAsOutput(t *testing.T) {
+	svc, _ := newTransientTestService(t)
+	t.Cleanup(svc.cancelAllTransientRetries)
+	manager := svc.agentManager.(*mockAgentManager)
+	manager.currentPromptExecutionID = "execution-1"
+	manager.currentPromptGeneration.Store(7)
+	manager.isAgentReadyFn = func(context.Context, string) bool { return true }
+	manager.isAgentRunningFn = func(context.Context, string) bool { return true }
+
+	const diagnostic = "HTTP 529 Overloaded"
+	reader := &transientRetryEvidenceAgentManager{
+		mockAgentManager: manager,
+		executionID:      "execution-1",
+		generation:       7,
+		found:            true,
+		evidence: lifecycle.PromptAttemptEvidence{
+			EvidenceKnown: true, OutputObserved: true,
+			ProviderDiagnosticCandidate: true, ProviderDiagnosticText: diagnostic,
+		},
+	}
+	svc.agentManager = reader
+	svc.beginPromptAttempt("s1", "execution-1", 7, false)
+	svc.rememberTurnPrompt("s1", "original prompt", "", false, nil)
+
+	failure := watcher.AgentEventData{
+		TaskID: "t1", SessionID: "s1", AgentExecutionID: "execution-1", AgentID: "mock-agent",
+		PromptGeneration: 7, EvidenceKnown: true, ErrorMessage: diagnostic,
+		ProviderDiagnosticCandidate: true, ProviderDiagnosticText: diagnostic,
+	}
+	svc.handleAgentFailed(context.Background(), failure)
+	value, ok := svc.transientRetries.Load("s1")
+	if !ok {
+		t.Fatal("matching provider diagnostic did not arm the original replay retry")
+	}
+
+	retryFailure, tracked := svc.transientReplayFailure(context.Background(), value.(*transientRetryEntry))
+	if !tracked {
+		t.Fatal("replay retry lost its terminal failure snapshot")
+	}
+	if !svc.promptAttemptPreResultSafe(retryFailure) {
+		t.Fatalf("matching provider diagnostic was treated as generated output: %+v", retryFailure)
+	}
+}
+
 func TestPromptAttemptEvidence_ObservesThoughtAndToolActivity(t *testing.T) {
 	svc, _ := newTransientTestService(t)
 	t.Cleanup(svc.cancelAllTransientRetries)
