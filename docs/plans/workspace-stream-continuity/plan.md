@@ -120,17 +120,18 @@ Run these orders sequentially in the primary session. Task 02 depends on Task 01
 ## Verification results
 
 - Investigation reproduction: expected callback-loss failure, as recorded above.
-- Catalog validation: passed (346 decisions and 1328 specifications).
+- Catalog validation after merging the current base: passed (347 decisions and 1330 specifications).
 - Specification linter tests: passed (36 tests).
 - Full specification lint: passed.
 - Local PR coverage preflight: covered, both work orders, no reference errors.
   The preflight included the proposed `streams.go` edit to exercise implementation coverage.
-- Local Markdown links and `git diff --check`: passed.
+- Local Markdown links, documentation validation, and `git diff --check`: passed.
 - Runtime change preserves captured agentctl-client fencing while removing the obsolete ACP startup-generation check from common workspace callbacks.
-- Targeted callback-lifetime and transport-to-publisher tests passed under the race detector. The full lifecycle race suite passed in 122.582 seconds after adding the transport fixture.
-- Desktop prepared-session promotion and completed-workspace restoration passed with the host-mode managed E2E runner. The phone promotion and Changes suite passed all 10 tests. Final focused promotion reruns passed on both viewports.
-- Web typecheck, targeted ESLint, and fresh E2E backend/frontend builds passed.
-- Specification catalog validation, linter tests, full spec lint, Markdown link validation, and `git diff --check` passed.
+- Targeted callback-lifetime and transport-to-publisher tests passed under the race detector. After merging the current base, the full tagged lifecycle race suite passed in 104.243 seconds.
+- Desktop prepared-session promotion and completed-workspace restoration passed with the host-managed E2E runner (2 tests). The phone promotion and Changes suite passed all 10 tests. Both runs built fresh backend and frontend assets.
+- Web typecheck and targeted ESLint passed, including both shared promotion helper modules and the desktop and phone scenarios. `gofmt` reported no files to format.
+- PR review fixes added fixture cleanup on setup failures, tied membership assertions to the post-mutation event, removed a redundant connection loop, and split the shared E2E helpers to meet the web file-size limit. The Task 02 race command includes the required `fts5` build tag.
+- After merging the current base, specification catalog validation, linter tests, full spec lint, Markdown link validation, and `git diff --check` passed.
 
 ## Documentation impact
 

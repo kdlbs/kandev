@@ -65,7 +65,7 @@ Run from repository root. Record the behavioral RED command and its failed asser
 
 ```bash
 (cd apps/backend && go test -trimpath ./internal/agent/runtime/lifecycle -run 'TestBuildWorkspaceCallbacks|TestWorkspaceStreamPromotion' -count=1 -timeout=60s -v)
-(cd apps/backend && go test -trimpath -race ./internal/agent/runtime/lifecycle -count=1 -timeout=300s)
+(cd apps/backend && go test -trimpath -tags fts5 -race ./internal/agent/runtime/lifecycle -count=1 -timeout=300s)
 git diff --check
 ```
 
@@ -80,5 +80,5 @@ Completed.
 
 - RED: `go test -trimpath ./internal/agent/runtime/lifecycle -run '^TestBuildWorkspaceCallbacksContinueAfterRepeatedStartup$' -count=1 -timeout=60s -v` failed because no callbacks were forwarded after promotion.
 - GREEN: `go test -trimpath ./internal/agent/runtime/lifecycle -run 'TestBuildWorkspaceCallbacks|TestWorkspaceStreamPromotion' -count=1 -timeout=60s -v` passed.
-- Final race re-run after adding the transport-to-publisher fixture: `go test -trimpath -race ./internal/agent/runtime/lifecycle -count=1 -timeout=300s` passed in 122.582s.
+- After merging the current base, the full tagged race suite passed: `go test -trimpath -tags fts5 -race ./internal/agent/runtime/lifecycle -count=1 -timeout=300s` (104.243s).
 - Added repeated-startup coverage for every workspace channel, client replacement and detachment rejection, and channel-controlled source-lease ownership.
