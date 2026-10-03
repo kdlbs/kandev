@@ -10,6 +10,8 @@ import type { RepositoryDiscoveryResponse } from "@/lib/types/http";
 
 export const REPOSITORY_DISCOVERY_REFRESH_AGE_MS = 30 * 60 * 1000;
 
+export type RepositoryDiscoveryReadKind = "load" | "refresh";
+
 export type RepositoryDiscoveryState = {
   response: RepositoryDiscoveryResponse | null;
   isLoading: boolean;
@@ -175,6 +177,21 @@ export class RepositoryDiscoveryCoordinator {
     return this.entries.get(workspaceId)?.state.response ?? null;
   }
 
+  async synchronizeAfterRootMutation(
+    workspaceId: string,
+    kind: RepositoryDiscoveryReadKind,
+  ): Promise<RepositoryDiscoveryResponse | null> {
+    const entry = this.entry(workspaceId);
+    // Both read kinds reflect the roots that existed when their transport started.
+    entry.responseOwner = null;
+    entry.snapshotPromise = null;
+    entry.refreshPromise = null;
+    await (kind === "load"
+      ? this.startSnapshot(workspaceId, entry)
+      : this.startRefresh(workspaceId, entry, "manual_refresh"));
+    return this.entries.get(workspaceId)?.state.response ?? null;
+  }
+
   dispose(): void {
     if (this.listeningForVisibility && this.visibilityDocument) {
       this.visibilityDocument.removeEventListener("visibilitychange", this.handleVisibilityChange);
@@ -313,8 +330,10 @@ export class RepositoryDiscoveryCoordinator {
     patch: Partial<RepositoryDiscoveryState>,
   ): void {
     if (this.entries.get(workspaceId) !== entry) return;
-    if (entry[operation.kind] === operation.promise) entry[operation.kind] = null;
+    const ownsPending = entry[operation.kind] === operation.promise;
     const ownsResponse = entry.responseOwner === operation.owner;
+    if (!ownsPending && !ownsResponse) return;
+    if (ownsPending) entry[operation.kind] = null;
     this.setState(entry, ownsResponse ? patch : {});
     if (
       operation.kind === "snapshotPromise" &&
@@ -333,6 +352,9 @@ function discoveryView(
   state: RepositoryDiscoveryState,
   refresh: () => Promise<RepositoryDiscoveryResponse | null>,
   load: () => Promise<RepositoryDiscoveryResponse | null>,
+  synchronizeAfterRootMutation: (
+    kind: RepositoryDiscoveryReadKind,
+  ) => Promise<RepositoryDiscoveryResponse | null>,
 ) {
   const response = state.response;
   return {
@@ -350,6 +372,7 @@ function discoveryView(
     desktopRuntime: response?.desktop_runtime === true,
     refresh,
     load,
+    synchronizeAfterRootMutation,
   };
 }
 
@@ -381,6 +404,13 @@ export function useRepositoryDiscovery(workspaceId: string | null, enabled = tru
     if (!activeWorkspaceId) return null;
     return repositoryDiscoveryCoordinator.load(activeWorkspaceId);
   }, [activeWorkspaceId]);
+  const synchronizeAfterRootMutation = useCallback(
+    async (kind: RepositoryDiscoveryReadKind) => {
+      if (!activeWorkspaceId) return null;
+      return repositoryDiscoveryCoordinator.synchronizeAfterRootMutation(activeWorkspaceId, kind);
+    },
+    [activeWorkspaceId],
+  );
 
-  return discoveryView(state, refresh, load);
+  return discoveryView(state, refresh, load, synchronizeAfterRootMutation);
 }
