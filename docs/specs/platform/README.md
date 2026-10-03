@@ -35,6 +35,11 @@ Shared Git diff file metadata belongs to Platform, including commit and
 cumulative comparisons. UI retains historical-file navigation and merge-detail
 presentation; Tasks retains environment and repository bindings.
 
+Shared local Git commit evidence also belongs to Platform, including pushed
+reachability against the repository's tracked upstream. Tasks retains provider
+contribution provenance and mutation policy; Workspaces retains comparison-base
+and repository-context identity.
+
 ## Exclusions
 
 - Executor-specific runtime environments belong to the [executor
@@ -86,6 +91,7 @@ presentation; Tasks retains environment and repository bindings.
 - [Semantic Notifications](requirements/notifications.md)
 - [Apprise rescan](requirements/apprise-rescan.md)
 - [Required Persisted Store Parity](requirements/postgres-domain-store-parity.md)
+- [Prompt completion ownership](requirements/prompt-completion-ownership.md)
 - [Provider Error Recovery](requirements/provider-error-recovery.md)
 - [Session Config Reconciliation Across Agent Types](requirements/session-config-cross-agent-reconcile.md)
 - [Session subscription recovery](requirements/session-subscription-recovery.md)
@@ -132,6 +138,7 @@ presentation; Tasks retains environment and repository bindings.
 - [LSP File Intelligence System Design Part 2](system-design/lsp-file-intelligence-02.md)
 - [LSP continuity graduation](system-design/lsp-continuity-graduation.md)
 - [Session MCP Attachment Observability](system-design/mcp-session-observability.md)
+- [Prompt completion ownership](system-design/prompt-completion-ownership.md)
 - [Required Persisted Store Parity](system-design/postgres-domain-store-parity.md)
 - [Provider Error Recovery](system-design/provider-error-recovery.md)
 - [Provider Response-Attempt Recovery](system-design/provider-response-attempt-recovery.md)

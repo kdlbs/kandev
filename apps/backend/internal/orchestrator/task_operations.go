@@ -1697,12 +1697,15 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 	// agent) EnsureSessionForAgent so runs reuse one row across turns.
 	var sessionID string
 	var sessionCreated bool
+	failPreparedLaunch := func(err error) error {
+		return s.handleQuickChatStartFailure(ctx, task, sessionID, sessionCreated, err)
+	}
 	if selectedExplicitSession != nil {
 		var promoted bool
 		var promoteErr error
 		sessionID, promoted, promoteErr = s.promoteSelectedExplicitWorkflowSession(ctx, task.ID, selectedExplicitSession, explicitStartRoute)
 		if promoteErr != nil {
-			return nil, promoteErr
+			return nil, failPreparedLaunch(promoteErr)
 		}
 		if !promoted {
 			selectedExplicitSession = nil
@@ -1715,16 +1718,16 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 			sessionID, sessionCreated, err = s.prepareSessionForStart(ctx, task, agentProfileID, officeAgentProfileID, executorID, executorProfileID, workflowStepID)
 		}
 		if err != nil {
-			return nil, err
+			return nil, failPreparedLaunch(err)
 		}
 	}
 	if explicitStartRoute != nil && selectedExplicitSession == nil {
 		promoted, promoteErr := s.promoteWorkflowSessionRoute(ctx, task.ID, &models.TaskSession{ID: sessionID}, explicitStartRoute)
 		if promoteErr != nil {
-			return nil, fmt.Errorf("promote explicit workflow start session: %w", promoteErr)
+			return nil, failPreparedLaunch(fmt.Errorf("promote explicit workflow start session: %w", promoteErr))
 		}
 		if !promoted {
-			return nil, fmt.Errorf("explicit workflow start session became terminal before promotion")
+			return nil, failPreparedLaunch(fmt.Errorf("explicit workflow start session became terminal before promotion"))
 		}
 	}
 	seam1Res.rebindToSession(sessionID)
@@ -1764,21 +1767,21 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 	isPassthrough := s.resolveIsPassthroughForLaunch(ctx, sessionID)
 	launchSession, err := s.repo.GetTaskSession(ctx, sessionID)
 	if err != nil {
-		return nil, fmt.Errorf("failed to reload launch session: %w", err)
+		return nil, failPreparedLaunch(fmt.Errorf("failed to reload launch session: %w", err))
 	}
 	if explicitStartRoute == nil && workflowSessionConfigStepID != "" && s.workflowStepGetter != nil {
 		if sourceStep, stepErr := s.workflowStepGetter.GetStep(ctx, workflowSessionConfigStepID); stepErr != nil {
-			return nil, fmt.Errorf("load workflow source step for session binding: %w", stepErr)
+			return nil, failPreparedLaunch(fmt.Errorf("load workflow source step for session binding: %w", stepErr))
 		} else if sourceStep != nil {
 			if bindErr := s.recordWorkflowSourceBinding(ctx, task.ID, sourceStep, launchSession, opts.WorkflowEntryID); bindErr != nil {
-				return nil, bindErr
+				return nil, failPreparedLaunch(bindErr)
 			}
 		}
 	}
 
 	if route == nil {
 		if agentProfileID, err = s.resolveDynamicLaunchExecution(ctx, launchSession, agentProfileID, false); err != nil {
-			return nil, err
+			return nil, failPreparedLaunch(err)
 		}
 	}
 	if schedulingClaim != nil {
@@ -1819,7 +1822,7 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 	if !configMode && !isOfficeTask {
 		titleOwner, err = s.ClaimTaskTitleSession(ctx, task.ID, sessionID)
 		if err != nil {
-			return nil, fmt.Errorf("failed to claim first-turn task title: %w", err)
+			return nil, failPreparedLaunch(fmt.Errorf("failed to claim first-turn task title: %w", err))
 		}
 	}
 
@@ -1844,7 +1847,7 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 		if !isOfficeTask && !skipKandevMCPWrap && !configMode {
 			includeCanvasGuidance, err = s.taskSessionCanvasGuidanceEnabled(ctx, task.ID, launchSession, true)
 			if err != nil {
-				return nil, fmt.Errorf("failed to resolve canvas prompt capability: %w", err)
+				return nil, failPreparedLaunch(fmt.Errorf("failed to resolve canvas prompt capability: %w", err))
 			}
 		}
 		effectivePrompt = s.applyLaunchPromptContext(ctx, launchPromptContext{
@@ -1872,7 +1875,7 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 	}
 	if claimedCeilingBinding {
 		if err := s.validateClaimedCeilingBinding(ctx, taskID, opts.ceilingEntryBinding); err != nil {
-			return nil, err
+			return nil, failPreparedLaunch(err)
 		}
 	}
 	initialTurnID, initialTurnCreated := s.startTurnForSessionWithOwnership(ctx, sessionID)
@@ -1881,7 +1884,7 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 			if initialTurnCreated {
 				s.completeTurnIfCurrent(ctx, sessionID, initialTurnID)
 			}
-			return nil, err
+			return nil, failPreparedLaunch(err)
 		}
 	}
 
@@ -1907,7 +1910,7 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 		if initialTurnCreated {
 			s.completeTurnIfCurrent(ctx, sessionID, initialTurnID)
 		}
-		return nil, s.handleSessionLaunchFailure(ctx, taskID, sessionID, err)
+		return nil, s.handleSessionLaunchFailure(ctx, taskID, sessionID, failPreparedLaunch(err))
 	}
 
 	s.postLaunchStart(ctx, taskID, execution, effectivePrompt, planModeActive || configMode, planModeActive, autoStart, attachments)
@@ -2149,7 +2152,7 @@ func (s *Service) prepareSessionForStartWithWorkflowRoute(
 	}
 	if created {
 		if err := s.persistInitialPromptPreviewFromContext(ctx, task.ID, sessionID); err != nil {
-			return "", false, err
+			return sessionID, created, err
 		}
 	}
 	return sessionID, created, nil

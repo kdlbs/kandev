@@ -3,6 +3,7 @@ import {
   clearMarker,
   closeQuickChatSession,
   pruneStaleSettledLedger,
+  pruneTombstones,
   reconcileQuickChatSessions,
   reconcileQuickTerminalTabs,
   removeQuickChatSession,
@@ -43,6 +44,8 @@ function upsertQuickChatSessionDraft(
   session: QuickChatSession,
 ): boolean {
   const { sessionId, workspaceId, agentProfileId, kind, taskId } = session;
+  quickChat.tombstonedSessions = pruneTombstones(quickChat.tombstonedSessions);
+  if (quickChat.tombstonedSessions[sessionId]) return false;
   const existing = quickChat.sessions.find((session) => session.sessionId === sessionId);
   if (existing) {
     if (existing.workspaceId !== workspaceId) return false;
@@ -190,8 +193,8 @@ function openQuickChat(set: ImmerSet, get: ImmerGet) {
     taskId?: string,
   ) => {
     set((draft) => {
-      draft.quickChat.pendingOpen = null;
       if (!sessionId) {
+        draft.quickChat.pendingOpen = null;
         const existing =
           kind === "config"
             ? findWorkspaceConfigSession(draft.quickChat.sessions, workspaceId)
@@ -221,6 +224,7 @@ function openQuickChat(set: ImmerSet, get: ImmerGet) {
         })
       )
         return;
+      draft.quickChat.pendingOpen = null;
       draft.quickChat.isOpen = true;
       draft.quickChat.activeSessionId = sessionId;
       draft.quickChat.activeKind = "conversation";
@@ -243,7 +247,6 @@ function addQuickChatSession(set: ImmerSet, get: ImmerGet) {
     taskId?: string,
   ) => {
     set((draft) => {
-      draft.quickChat.pendingOpen = null;
       const activeWorkspaceId = draft.quickChat.sessions.find(
         (session) => session.sessionId === draft.quickChat.activeSessionId,
       )?.workspaceId;
@@ -257,6 +260,7 @@ function addQuickChatSession(set: ImmerSet, get: ImmerGet) {
         })
       )
         return;
+      draft.quickChat.pendingOpen = null;
       if (!draft.quickChat.isOpen || !activeWorkspaceId || activeWorkspaceId === workspaceId) {
         draft.quickChat.activeSessionId = sessionId;
         draft.quickChat.activeKind = "conversation";

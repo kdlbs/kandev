@@ -51,10 +51,50 @@ class BackendTestsWorkflowContractTest(unittest.TestCase):
         self.assertIn('"postgres-18:${POSTGRES_18_RESULT}"', self.workflow)
         self.assertIn("TestPreviousStableUpgrade", self.workflow)
 
-    def test_windows_job_leaves_time_for_post_job_cleanup(self) -> None:
+    def test_windows_job_has_headroom_for_hosted_runner_variance(self) -> None:
         _, marker, windows_job = self.workflow.partition("  test-windows:\n")
         self.assertTrue(marker)
-        self.assertIn("timeout-minutes: 50", windows_job)
+        self.assertIn("timeout-minutes: 40", windows_job)
+
+    def test_windows_suites_run_independently_without_fail_fast(self) -> None:
+        windows_job = self.workflow.partition("  test-windows:\n")[2]
+        self.assertIn("suite: [process, native]", windows_job)
+        self.assertIn("fail-fast: false", windows_job)
+        self.assertIn("name: Backend (windows, ${{ matrix.suite }})", windows_job)
+        self.assertNotIn("continue-on-error", windows_job)
+        process = step_block(windows_job, "Test Windows process package")
+        self.assertIn("if: matrix.suite == 'process'", process)
+        self.assertIn("go test -race -v -json -timeout 25m ./internal/agentctl/server/process/...", process)
+        native = step_block(windows_job, "Test windows-sensitive packages")
+        self.assertNotIn("./internal/agentctl/server/process/", native)
+        for package in (
+            "./internal/agent/runtime/agentctl/launcher/...",
+            "./internal/common/ptyexec/...",
+            "./internal/backendapp/ownershiplock/...",
+            "./internal/system/storage/workspaces/...",
+        ):
+            self.assertIn(package, native)
+
+    def test_windows_native_checks_remain_required_in_native_suite(self) -> None:
+        windows_job = self.workflow.partition("  test-windows:\n")[2]
+        for name in (
+            "Test Windows isolated instance safety",
+            "Test Windows copy-file glob tokenization",
+            "Build", "Vet", "Test windows-sensitive packages",
+            "Test Windows helper console behavior",
+            "Test Windows managed runtime cache repair",
+            "Test Windows port collision handling",
+            "Test Windows path semantics",
+            "Test Windows SQLite database paths",
+            "Test Cursor project slug path normalization",
+            "Test Windows agent-survival flag availability",
+        ):
+            with self.subTest(step=name):
+                self.assertIn("if: matrix.suite == 'native'", step_block(windows_job, name))
+        gate = self.workflow.partition("  test:\n")[2].partition("  postgres-boot:\n")[0]
+        self.assertIn("- test-windows", gate)
+        self.assertIn("TEST_WINDOWS_RESULT: ${{ needs['test-windows'].result }}", gate)
+        self.assertIn('"test-windows:${TEST_WINDOWS_RESULT}"', gate)
 
     def test_linux_sharded_tests_use_go_default_package_timeout(self) -> None:
         test_step = step_block(self.workflow, "Run tests")

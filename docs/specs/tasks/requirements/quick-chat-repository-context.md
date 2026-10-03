@@ -92,9 +92,11 @@ The response remains:
 - An incomplete repository row keeps Start Chat disabled.
 - A missing agent, foreign repository, duplicate repository, invalid branch, or mixed request
   shape fails validation and does not launch an agent.
-- If repository preparation or agent launch fails, the backend deletes the ephemeral task and
-  its materialized worktrees. The setup remains visible with its selections and reports the
-  error.
+- If repository preparation or agent launch fails before any session exists, the
+  backend may roll back the ephemeral task and its worktrees. Once a session is
+  allocated, retain its task, conversation, workspace and safe failure details for
+  inspection and explicit recovery, as specified by
+  [REQ-TASKS-TASK-LAUNCH-FAILURE-RECOVERY-003](task-launch-failure-recovery.md#req-tasks-task-launch-failure-recovery-003-retained-quick-chat-setup-failures).
 - A superseded in-flight start still deletes the completed orphan task.
 
 ## Persistence guarantees

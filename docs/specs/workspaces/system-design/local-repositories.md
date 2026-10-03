@@ -1,8 +1,8 @@
 ---
-status: draft
+status: current
 system: workspaces
 created: 2026-08-27
-updated: 2026-09-25
+updated: 2026-10-02
 owners:
   - kandev
 requirements:
@@ -240,6 +240,53 @@ hidden. It starts no new scan until both conditions are true again.
 No interval runs when the activation count is zero. A manual Refresh action
 bypasses the freshness test but still shares an active scan.
 
+### Shared coordinator response ordering
+
+`RepositoryDiscoveryCoordinator` in
+`apps/web/hooks/domains/workspace/use-repository-discovery.ts` implements
+AC-WORKSPACES-LOCAL-REPOSITORIES-003.13 within each workspace entry. Cached
+snapshot reads and refresh scans retain separate single-flight pending handles,
+but share one publication owner. Starting a new transport operation takes
+ownership across both kinds. Joining an existing same-kind handle does not
+take ownership again and does not start a replacement request. Request start
+order, rather than completion order or scan timestamps, determines eligibility.
+
+Register ownership and the pending handle before notifying subscribers. Only
+the current owner of a still-registered entry can publish a normalized response
+or error. A successful empty response is authoritative. A current failure keeps
+the last accepted response and publishes its error; an obsolete success cannot
+erase that error or supply an unaccepted fallback. Each operation clears only
+its own pending handle. Busy state is derived from actual pending work by kind;
+refresh state also preserves the accepted response's `refreshing` metadata.
+Obsolete cleanup cannot overwrite current data, metadata, or error, and cannot
+clear a newer operation's busy state. Settlement must publish coherent state
+before subscriber callbacks can start another operation.
+
+Snapshot follow-up freshness work belongs only to an accepted successful
+snapshot. Recheck ownership and entry identity after publication, because a
+subscriber can synchronously start a newer operation or dispose the coordinator.
+Follow-up also requires a visible document and an active lease. Preserve the
+existing stale/refreshing decision, failed-root freshness suppression, and
+explicit manual recovery. An obsolete snapshot cannot schedule a scan from
+shared state; a failed snapshot does not initiate new automatic work.
+
+Releasing the last lease retains the entry and permits an already active
+operation to populate its cache, but starts no automatic follow-up. `dispose()`
+removes entries and visibility listening. Late settlement from a removed entry
+cannot publish, notify, schedule work, or affect a replacement entry with the
+same workspace ID. Public `load()` and `refresh()` return the currently
+registered entry's accepted response after their joined operation settles, or
+`null` when that entry has been removed, without recreating it.
+
+The hook keeps its existing result shape. Root Add, Reconnect, and Home
+confirmation synchronize through `load()`; Remove and manual Refresh use
+`refresh()`. Workspace Repositories, root controls, Office, Automations,
+Create Task, and Add Workspace Sources share this coordinator. Root mutation
+does not invalidate a pending same-kind request under this contract; a joined
+read retains its original authority. This ordering repair adds no timers,
+trailing retries, backend cache keys, cancellation protocol, or store/API shapes.
+Desktop and phone reuse their existing presentation and interaction patterns.
+
 ## User interface
 
 Create Task, Add Workspace Sources, Automations, Office project setup, and
@@ -403,6 +450,10 @@ repository trust](../../../decisions/2026-08-28-explicit-submodule-repository-tr
 - Rust tests cover origin checks, cancellation, directory-only selection, and
   the absence of generic filesystem commands.
 - Frontend tests cover all repository-selection consumers through one shared hook.
+- Deterministic deferred coordinator tests cover both overlap directions,
+  failures, empty results, same-kind sharing, workspace isolation, reentrant
+  subscriptions, lease release, and disposal. Real shared-hook/Office-consumer
+  integration covers exposed choices and flags with only transport mocked.
 - Web E2E uses a stubbed native-picker adapter for selection, cancellation,
   cache, denial, reconnect, removal, and migration states.
 - Browser E2E covers server Home discovery at desktop and phone widths. It also
@@ -414,6 +465,7 @@ repository trust](../../../decisions/2026-08-28-explicit-submodule-repository-tr
 
 ## Implementation plans
 
+- [Repository Discovery Ordering](../../../plans/repository-discovery-ordering/plan.md)
 - [Repository Discovery Failure Recovery](../../../plans/repository-discovery-failure-recovery/plan.md)
 
 ## Decisions
