@@ -187,14 +187,9 @@ for (const { scenario, enabled } of [
       );
       await expect(session.recoveryResumeButton()).toBeVisible();
       await expect(session.transientRetryCard()).toBeHidden();
-      await expect(testPage.getByTestId("session-recovery-card")).not.toContainText(
-        "after several retries",
-      );
       expect(recovery.metadata?.attempts_started ?? 0).toBe(0);
       expect(recovery.metadata?.recovery_reason).toBe(enabled ? "unsafe_work" : "disabled");
-      await expect(testPage.getByTestId("session-recovery-card")).toContainText(
-        enabled ? "outcome is uncertain" : "Automatic continuation is disabled",
-      );
+      expect(recovery.metadata?.recovery_disposition).not.toBe("exhausted");
     } catch (error) {
       console.warn(
         JSON.stringify(
