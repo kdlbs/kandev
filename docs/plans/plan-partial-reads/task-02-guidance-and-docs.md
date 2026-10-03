@@ -64,7 +64,7 @@ If workspace dependencies are absent, first run
 `(cd apps && pnpm install --frozen-lockfile)`.
 
 ```bash
-(cd apps/backend && go test -trimpath ./internal/sysprompt -count=1)
+(cd apps/backend && go test -trimpath -tags fts5 ./internal/sysprompt -count=1)
 (cd apps/web && pnpm exec vitest run hooks/use-message-handler.test.ts hooks/use-message-handler.plan-comments.test.ts)
 (cd apps/web && pnpm exec eslint hooks/use-message-handler.ts)
 (cd apps/web && pnpm run i18n:ratchet)
@@ -150,3 +150,9 @@ Completed in the primary session after Task 01 passed.
 
 No rendered UI or viewport-dependent behavior changed. The shared prompt-builder
 unit coverage exercises the frontend change; no browser/mobile E2E was added.
+
+PR review follow-up: guidance now explicitly maps the first response's `version`
+to the next request's `expected_version`. New backend/frontend assertions failed
+before the correction, then the complete sysprompt suite and 47 hook tests
+passed. The public tool table remains contiguous after moving the explanatory
+paragraph below its final row. Public-doc, catalog, and spec validation passed.

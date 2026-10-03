@@ -71,8 +71,8 @@ full reads, task authorization, and existing safe writes remain compatible.
 Run from the repository root after implementing the named tests:
 
 ```bash
-(cd apps/backend && go test -trimpath ./internal/task/service -run 'PlanPartialRead|ExactEdit|AgentReplace|AgentAppend' -count=1)
-(cd apps/backend && go test -trimpath ./internal/mcp/server ./internal/mcp/handlers ./internal/task/planws -run 'PlanPartialRead|PlanSafeEditsMCPJourney|PlanReadReturnsMetadataAndExactContentBlocks|MCPPlanExactEdit|GetTaskPlan|GetError|PlanSafety|PlanTools_Descriptions' -count=1)
+(cd apps/backend && go test -trimpath -tags fts5 ./internal/task/service -run 'PlanPartialRead|ExactEdit|AgentReplace|AgentAppend' -count=1)
+(cd apps/backend && go test -trimpath -tags fts5 ./internal/mcp/server ./internal/mcp/handlers ./internal/task/planws -run 'PlanPartialRead|PlanSafeEditsMCPJourney|PlanReadReturnsMetadataAndExactContentBlocks|MCPPlanExactEdit|GetTaskPlan|GetError|PlanSafety|PlanTools_Descriptions' -count=1)
 git diff --check
 ```
 
@@ -139,3 +139,7 @@ now accept the mixed string/integer payload without changing wire behavior.
   versions, and absent discovery fields before the implementation.
 
 No storage migration, browser DTO change, or new write mode was needed.
+
+PR review follow-up: the stale-version service test now also asserts that no
+result is returned. Both verification commands passed again with `-tags fts5`,
+matching the backend test target's SQLite configuration.

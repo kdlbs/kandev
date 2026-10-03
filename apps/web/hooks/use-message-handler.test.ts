@@ -177,6 +177,7 @@ describe("buildDocumentContext", () => {
       "offset",
       "limit",
       "expected_version",
+      "first page's version as expected_version",
       "edit_task_plan_kandev",
       'mode="append"',
     ]) {

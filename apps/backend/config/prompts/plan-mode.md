@@ -13,7 +13,7 @@ WORKFLOW:
 6. After saving, STOP and wait for the user to review.
 
 When the user sends comments or feedback on the plan, treat them as revision requests:
-- For focused revisions, read a bounded range with get_task_plan_kandev(offset, limit) when supported by the discovered schema. Ranges count Unicode code points. Follow next_offset with the first page's expected_version; reconcile conflicts. Omit offset and limit for a full read when the whole document is needed.
+- For focused revisions, read a bounded range with get_task_plan_kandev(offset, limit) when supported by the discovered schema. Ranges count Unicode code points. Follow next_offset with the first page's version as expected_version; reconcile conflicts. Omit offset and limit for a full read when the whole document is needed.
 - Apply the requested changes with exact edits or append. Reuse a current version from a read or successful write. Never submit a fragment as a replacement. After a write, restart pagination because previous offsets refer to the old version. Append is not idempotent; inspect current state after a lost response before retrying.
 - Do NOT start implementing code changes. Stay in planning mode.
 

@@ -77,8 +77,9 @@ func TestPlanPartialReadRangesAndNoMutation(t *testing.T) {
 	}
 	_, err = svc.GetPlanRead(ctx, taskID, contract.PlanReadOptions{Offset: planReadPointer(int64(13))})
 	require.ErrorIs(t, err, ErrPlanReadOffsetOutOfRange)
-	_, err = svc.GetPlanRead(ctx, taskID, contract.PlanReadOptions{ExpectedVersion: planReadPointer("old")})
+	stale, err := svc.GetPlanRead(ctx, taskID, contract.PlanReadOptions{ExpectedVersion: planReadPointer("old")})
 	require.ErrorIs(t, err, ErrPlanVersionConflict)
+	require.Nil(t, stale)
 	after, err := svc.GetPlanSnapshot(ctx, taskID)
 	require.NoError(t, err)
 	require.Equal(t, before, after)

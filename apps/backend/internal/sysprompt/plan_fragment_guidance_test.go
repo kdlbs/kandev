@@ -17,6 +17,7 @@ func TestPlanFragmentGuidance(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			for _, instruction := range []string{
 				"get_task_plan_kandev", "offset", "limit", "Unicode", "expected_version",
+				"first page's version as expected_version",
 				"edit_task_plan_kandev", `mode="append"`, "full", "replacement",
 			} {
 				require.Contains(t, prompt, instruction)

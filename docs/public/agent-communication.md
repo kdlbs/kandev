@@ -280,13 +280,13 @@ These tools complement cross-task communication for common coordination patterns
 | `list_task_plan_revisions_kandev` | List bounded metadata for a reachable task plan's history |
 | `get_task_plan_revision_kandev` | Read one exact revision before a conditional restore |
 | `restore_task_plan_revision_kandev` | Restore a revision after checking current and source versions |
+| `step_complete_kandev` | Signal that the current workflow step is done (task-mode only) |
+| `ask_user_question_kandev` | Escalate to a human when agent negotiation cannot resolve a question |
 
 For focused plan changes, combine a bounded read with an exact edit or append.
 Ranges count Unicode code points and preserve the stored text. A partial read
 is a fragment, so never submit it as a whole-document replacement. See
 [partial plan reads](automation-and-mcp.md#read-only-the-relevant-part-of-a-plan)
 for continuation and conflict handling.
-| `step_complete_kandev` | Signal that the current workflow step is done (task-mode only) |
-| `ask_user_question_kandev` | Escalate to a human when agent negotiation cannot resolve a question |
 
 Related: [Coordinate Work](coordination.md), [Automation and MCP](automation-and-mcp.md), [Tasks and workflows](tasks-and-workflows.md).
