@@ -74,7 +74,7 @@ Run sequentially from repository root. If dependencies are absent, first install
 Managed browser runs rebuild the backend and web assets and enforce the repository worker budget.
 
 ```bash
-(cd apps/backend && go test -trimpath -race ./internal/agent/runtime/lifecycle -run 'TestWorkspaceStreamPromotion' -count=1 -timeout=120s -v)
+(cd apps/backend && go test -trimpath -tags fts5 -race ./internal/agent/runtime/lifecycle -run 'TestWorkspaceStreamPromotion' -count=1 -timeout=120s -v)
 (cd apps/web && pnpm e2e:run --host --project chromium tests/session/workspace-stream-promotion.spec.ts tests/session/completed-workspace-restoration.spec.ts)
 (cd apps/web && pnpm e2e:run --host --project mobile-chrome tests/session/mobile-workspace-stream-promotion.spec.ts tests/task/mobile-changes-panel.spec.ts)
 python3 scripts/list-docs.py validate

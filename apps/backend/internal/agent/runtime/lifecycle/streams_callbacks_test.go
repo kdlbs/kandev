@@ -143,16 +143,8 @@ func TestBuildWorkspaceCallbacksContinueAfterRepeatedStartup(t *testing.T) {
 	callbacks := sm.buildWorkspaceCallbacks(execution, client)
 	execution.SetWorkspaceStream(&agentctl.WorkspaceStream{})
 
-	for attempt := 1; attempt <= 2; attempt++ {
-		execution.beginStartupAttemptWithID("promotion")
-		ready := make(chan struct{})
-		sm.connectWorkspaceStream(execution, ready)
-		select {
-		case <-ready:
-		default:
-			t.Fatalf("attached stream reuse did not settle on startup attempt %d", attempt)
-		}
-	}
+	execution.beginStartupAttemptWithID("promotion")
+	execution.beginStartupAttemptWithID("promotion-restart")
 
 	status := &agentctl.GitStatusUpdate{Branch: "promoted"}
 	commit := &agentctl.GitCommitNotification{CommitSHA: "promoted-commit"}

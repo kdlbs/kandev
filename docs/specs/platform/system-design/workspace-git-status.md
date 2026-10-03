@@ -225,10 +225,9 @@ The implementation must reject all observable identity/content changes across it
 Preserving timestamps alone cannot defeat content validation for enriched files.
 Continuously mutating files can remain pending or unavailable. They must not receive unrelated old details.
 
-Runtime delivery captures immutable execution identity, environment binding, workspace identity, and stream generation.
-Revalidate these before publishing a delayed callback, initial-subscribe read, or HTTP result. Workspace callbacks are checked against the execution currently registered for their session.
-Attached callbacks retain client lifetime across ACP startup.
-See the [workspace stream continuity design](workspace-stream-continuity.md).
+Before publishing callbacks or reads, revalidate execution, environment, workspace, and stream identity.
+Reject callbacks from executions no longer current for their session.
+See [stream continuity](workspace-stream-continuity.md) for ACP callback lifetime.
 After root promotion, the current environment root or active `TaskEnvironmentRepo.WorktreePath` may authorize an existing execution's exact working directory. Revalidate the inventory after async refresh; reject removed paths.
 Tracker epochs from different sibling executions are not numerically ordered.
 Preserve requested-session-first source probing. Eligible siblings remain valid sources for their common environment.
