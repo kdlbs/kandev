@@ -88,7 +88,8 @@ export async function seedNavigationTasks(
       },
     );
     tasks.push(task);
-    // Local executor sessions share the checkout's Git index.
+    // Local executor sessions share the checkout's Git index, so finish each
+    // branch checkout before launching the next session.
     await waitForSessionDone(
       api,
       task.id,
