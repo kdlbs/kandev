@@ -348,6 +348,11 @@ Open **Settings → Workspaces → _workspace_ → Repositories**, edit a reposi
 Policies belong to that repository. Create, edit, and delete actions take effect immediately.
 The branch controls list local and remote branches. You can search the list or refresh it from Git.
 
+Partial policy updates preserve fields they omit, including the saved pull-request target when
+only the base changes. Independent edits to different fields both survive. Supplying an empty or
+whitespace-only target resets it to the policy's effective base branch at the time of the update.
+An omitted target on creation defaults to the base branch.
+
 The base branch is the starting point for the new task branch. The pull-request target is its merge
 destination. These values are usually the same. A Gitflow Release policy can start from `develop`
 and target `main`.
