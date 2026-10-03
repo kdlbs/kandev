@@ -29,7 +29,21 @@ const gitSnapshotPersistInterval = 30 * time.Second
 
 const gitSnapshotTriggeredByAgentCompleted = "agent_completed"
 
-const gitSnapshotStatusReady = "ready"
+const (
+	gitSnapshotStatusReady        = "ready"
+	gitSnapshotStatusStateKey     = "status_state"
+	gitSnapshotFilesCompleteKey   = "files_complete"
+	gitSnapshotDetailStateKey     = "detail_state"
+	gitSnapshotRepositoryNameKey  = "repository_name"
+	gitSnapshotTimestampKey       = "timestamp"
+	gitSnapshotModifiedKey        = "modified"
+	gitSnapshotAddedKey           = "added"
+	gitSnapshotDeletedKey         = "deleted"
+	gitSnapshotUntrackedKey       = "untracked"
+	gitSnapshotRenamedKey         = "renamed"
+	gitSnapshotBranchAdditionsKey = "branch_additions"
+	gitSnapshotBranchDeletionsKey = "branch_deletions"
+)
 
 const automaticPermissionMessageWriteMaxAttempts = 3
 
@@ -235,21 +249,21 @@ func (s *Service) persistGitStatusSnapshot(ctx context.Context, data watcher.Git
 		Behind:            st.Behind,
 		Files:             nil, // intentional: badge only needs totals
 		Metadata: map[string]interface{}{
-			"repository_name":       st.RepositoryName,
-			"branch_additions":      st.BranchAdditions,
-			"branch_deletions":      st.BranchDeletions,
-			"comparison_target":     st.ComparisonTarget,
-			"comparison_status":     st.ComparisonStatus,
-			"comparison_error_code": st.ComparisonErrorCode,
-			"modified":              st.Modified,
-			"added":                 st.Added,
-			"deleted":               st.Deleted,
-			"untracked":             st.Untracked,
-			"renamed":               st.Renamed,
-			"timestamp":             data.Timestamp,
-			"status_state":          gitSnapshotStatusReady,
-			"files_complete":        false,
-			"detail_state":          gitSnapshotStatusReady,
+			gitSnapshotRepositoryNameKey:  st.RepositoryName,
+			gitSnapshotBranchAdditionsKey: st.BranchAdditions,
+			gitSnapshotBranchDeletionsKey: st.BranchDeletions,
+			"comparison_target":           st.ComparisonTarget,
+			"comparison_status":           st.ComparisonStatus,
+			"comparison_error_code":       st.ComparisonErrorCode,
+			gitSnapshotModifiedKey:        st.Modified,
+			gitSnapshotAddedKey:           st.Added,
+			gitSnapshotDeletedKey:         st.Deleted,
+			gitSnapshotUntrackedKey:       st.Untracked,
+			gitSnapshotRenamedKey:         st.Renamed,
+			gitSnapshotTimestampKey:       data.Timestamp,
+			gitSnapshotStatusStateKey:     gitSnapshotStatusReady,
+			gitSnapshotFilesCompleteKey:   false,
+			gitSnapshotDetailStateKey:     gitSnapshotStatusReady,
 		},
 	}
 	if err := s.repo.UpsertLatestLiveGitSnapshot(ctx, snapshot); err != nil {
@@ -982,11 +996,8 @@ func (s *Service) failAutomationRunOnPermission(ctx context.Context, data watche
 			zap.Error(err))
 	}
 
-	errMsg := fmt.Sprintf("Permission required: %s — automation runs cannot answer prompts", data.Title)
-	if err := s.automationService.MarkRunFailedByTaskID(ctx, data.TaskID, errMsg); err != nil {
-		s.logger.Warn("failed to mark automation run failed after permission prompt",
-			zap.String("task_id", data.TaskID), zap.Error(err))
-	}
+	errMsg := fmt.Sprintf("permission required: %s; automation runs cannot answer prompts", data.Title)
+	s.markAutomationRunTerminal(ctx, data.TaskID, false, errMsg)
 }
 
 // pickRejectOption returns the first option_id with a reject-kind, or "" if

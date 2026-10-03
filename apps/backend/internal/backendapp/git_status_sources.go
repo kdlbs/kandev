@@ -75,7 +75,7 @@ func resolveGitStatusSources(
 func gitStatusWorkspacePaths(env *models.TaskEnvironment) map[string]struct{} {
 	paths := map[string]struct{}{env.WorkspacePath: {}}
 	for _, repo := range env.Repos {
-		if repo == nil || repo.WorktreePath == "" || repo.DeletedAt != nil || repo.Status == "failed" || repo.Status == "deleted" {
+		if repo == nil || repo.WorktreePath == "" || repo.DeletedAt != nil || repo.Status == taskRepositoryStatusFailed || repo.Status == deletedFieldKey {
 			continue
 		}
 		paths[repo.WorktreePath] = struct{}{}

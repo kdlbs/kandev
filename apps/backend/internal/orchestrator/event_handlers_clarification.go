@@ -103,7 +103,7 @@ func (s *Service) handleClarificationStaleDismissed(ctx context.Context, event *
 	}
 
 	s.captureGitStatusSnapshot(writeCtx, data.SessionID)
-	s.finalizeAutomationRun(writeCtx, data.TaskID, true, "")
+	s.markAutomationRunTerminalForTurn(writeCtx, data.TaskID, data.SessionID, data.ClarificationTurnID, true, "")
 	transitioned := s.processOnTurnCompleteViaEngine(writeCtx, data.TaskID, session)
 	if !transitioned {
 		s.writeTaskReviewState(writeCtx, data.TaskID, data.SessionID)

@@ -12,6 +12,7 @@ import {
   resolveNormalizedRepositoryIds,
   resolveRepositoryIdsForMode,
   resolveRepositoryIds,
+  retryPolicyAfterModeChange,
 } from "./automation-payload";
 import type { FormState } from "./automation-payload";
 
@@ -31,6 +32,13 @@ function baseForm(overrides: Partial<FormState> = {}): FormState {
     enabled: true,
     maxConcurrentRuns: 1,
     continuationPolicy: "new_task",
+    retryPolicy: {
+      mode: "disabled",
+      max_retries: "0",
+      delay_seconds: "0",
+      backoff: "fixed",
+      history_mode: "attempts",
+    },
     ...overrides,
   };
 }
@@ -197,7 +205,9 @@ describe("buildCreatePayload / buildUpdatePayload", () => {
       repository_mode: "selected",
     });
   });
+});
 
+describe("managed destination and retry payloads", () => {
   it("persists only the portable managed destination identity", () => {
     const form = baseForm({
       taskMode: "managed_conversation",
@@ -238,5 +248,30 @@ describe("buildCreatePayload / buildUpdatePayload", () => {
 
     expect(result.ids).toEqual([]);
     expect(createRepositoryAction).not.toHaveBeenCalled();
+  });
+  it("sends decimal retry policy values unchanged", () => {
+    const policy = {
+      mode: "finite" as const,
+      max_retries: "0007",
+      delay_seconds: "3600",
+      backoff: "exponential" as const,
+      history_mode: "timeline" as const,
+    };
+    const form = baseForm({ retryPolicy: policy });
+    expect(buildCreatePayload("ws-1", form, [], []).retry_policy).toEqual(policy);
+    expect(buildUpdatePayload(form, []).retry_policy).toEqual(policy);
+  });
+});
+
+describe("retryPolicyAfterModeChange", () => {
+  it("sets a valid finite retry count after disabled mode", () => {
+    const disabled = { ...baseForm().retryPolicy, mode: "disabled" as const, max_retries: "0" };
+    expect(retryPolicyAfterModeChange(disabled, "finite")).toMatchObject({
+      mode: "finite",
+      max_retries: "1",
+    });
+    expect(retryPolicyAfterModeChange({ ...disabled, max_retries: "00" }, "finite")).toMatchObject({
+      max_retries: "1",
+    });
   });
 });

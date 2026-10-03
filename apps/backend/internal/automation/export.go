@@ -37,6 +37,7 @@ type exportAutomation struct {
 	TaskMode           TaskMode                              `yaml:"task_mode"`
 	ManagedDestination *exportManagedConversationDestination `yaml:"managed_destination,omitempty"`
 	RepositoryMode     RepositoryMode                        `yaml:"repository_mode"`
+	RetryPolicy        exportRetryPolicy                     `yaml:"retry_policy"`
 	TaskTitleTemplate  string                                `yaml:"task_title_template,omitempty"`
 	Prompt             *yaml.Node                            `yaml:"prompt,omitempty"`
 	AgentProfile       *exportAgentProfile                   `yaml:"agent_profile,omitempty"`
@@ -49,6 +50,14 @@ type exportAutomation struct {
 type exportManagedConversationDestination struct {
 	PluginID    string `yaml:"plugin_id"`
 	InstanceKey string `yaml:"instance_key"`
+}
+
+type exportRetryPolicy struct {
+	Mode         RetryMode        `yaml:"mode"`
+	MaxRetries   string           `yaml:"max_retries"`
+	DelaySeconds string           `yaml:"delay_seconds"`
+	Backoff      RetryBackoff     `yaml:"backoff"`
+	HistoryMode  RetryHistoryMode `yaml:"history_mode"`
 }
 
 // exportAgentProfile is the portable {agent_name, model, mode} descriptor resolved

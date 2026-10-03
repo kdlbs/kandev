@@ -5,13 +5,44 @@ import { t } from "@/lib/i18n";
 import { toast } from "@/lib/toast/sonner";
 import {
   listAutomationRuns,
+  listAutomationRunPage,
+  listAutomationRetryHistory,
   deleteAutomationRun,
   deleteAllAutomationRuns,
+  stopAutomationRun,
 } from "@/lib/api/domains/automation-api";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
-import type { AutomationRun } from "@/lib/types/automation";
+import type { AutomationRun, RetryHistoryMode } from "@/lib/types/automation";
+import { retryPollDelay } from "./automation-run-polling";
+import { collectCursorPages } from "./automation-run-history";
 
 const EMPTY_RUNS: AutomationRun[] = [];
+const RETRY_HISTORY_PAGE_SIZE = 50;
+const RETRY_PENDING_STATUSES: Record<string, true> = {
+  scheduled_retry: true,
+};
+
+function listAllAutomationRuns(automationId: string): Promise<AutomationRun[]> {
+  return collectCursorPages((cursor) => listAutomationRunPage(automationId, cursor, 200));
+}
+
+async function listAllAutomationRetryHistory(automationId: string): Promise<AutomationRun[]> {
+  const groups = await collectCursorPages((cursor) =>
+    listAutomationRetryHistory(automationId, cursor, RETRY_HISTORY_PAGE_SIZE),
+  );
+  return groups.flatMap((group) => group.attempts ?? []);
+}
+
+function mergeAutomationRuns(
+  regularRuns: AutomationRun[],
+  retryHistoryRuns: AutomationRun[],
+): AutomationRun[] {
+  const byID = new Map<string, AutomationRun>();
+  for (const run of [...regularRuns, ...retryHistoryRuns]) {
+    if (!byID.has(run.id)) byID.set(run.id, run);
+  }
+  return [...byID.values()];
+}
 
 const COULD_NOT_REFRESH_RUNS = "automations:couldNotRefreshRuns";
 
@@ -47,21 +78,30 @@ function clearLatestListRequest(storeApi: object, automationId: string, token: s
     byAutomation.delete(automationId);
   }
 }
-
 type FetchRunsOptions = {
   getEpoch: () => number;
   setRunsLoading: (automationId: string, loading: boolean) => void;
   setRuns: (automationId: string, runs: AutomationRun[]) => void;
+  historyMode?: RetryHistoryMode;
   onError?: () => void;
   onSettled?: () => void;
 };
 
 function fetchRuns(storeApi: object, automationId: string, options: FetchRunsOptions): void {
-  const { getEpoch, setRunsLoading, setRuns, onError, onSettled } = options;
+  const { getEpoch, setRunsLoading, setRuns, historyMode, onError, onSettled } = options;
   const captured = getEpoch();
   const token = registerListRequest(storeApi, automationId);
   setRunsLoading(automationId, true);
-  listAutomationRuns(automationId)
+  const request =
+    historyMode === "timeline"
+      ? Promise.all([
+          listAllAutomationRuns(automationId),
+          listAllAutomationRetryHistory(automationId),
+        ]).then(([regularRuns, retryHistoryRuns]) =>
+          mergeAutomationRuns(regularRuns ?? [], retryHistoryRuns),
+        )
+      : listAutomationRuns(automationId);
+  request
     .then((result) => {
       // A newer request superseded this one: its result owns the store.
       if (!isLatestListRequest(storeApi, automationId, token)) return;
@@ -266,7 +306,12 @@ function executeDeleteRun(
     });
 }
 
-export function useAutomationRuns(automationId: string | null, workspaceId: string) {
+// eslint-disable-next-line max-lines-per-function -- coordinates shared store state with serialized run mutations.
+export function useAutomationRuns(
+  automationId: string | null,
+  workspaceId: string,
+  historyMode: RetryHistoryMode = "attempts",
+) {
   const runs = useAppStore((state) =>
     automationId ? (state.automationRuns.byAutomationId[automationId] ?? EMPTY_RUNS) : EMPTY_RUNS,
   );
@@ -310,22 +355,54 @@ export function useAutomationRuns(automationId: string | null, workspaceId: stri
       getEpoch: () => storeApi.getState().automationRuns.mutationEpoch[automationId] ?? 0,
       setRunsLoading,
       setRuns,
+      historyMode,
       onError: () => setRuns(automationId, []),
     });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [automationId]);
+  }, [automationId, historyMode]);
+
+  useEffect(() => {
+    if (!automationId) return;
+    let timeout = 0;
+    let poll = () => {};
+    const scheduleNextPoll = () => {
+      const currentRuns =
+        storeApi.getState().automationRuns.byAutomationId[automationId] ?? EMPTY_RUNS;
+      if (!currentRuns.some((run) => RETRY_PENDING_STATUSES[run.status])) return;
+      timeout = window.setTimeout(poll, retryPollDelay(currentRuns));
+    };
+    poll = () => {
+      const state = storeApi.getState().automationRuns;
+      if (
+        state.loading[automationId] ||
+        (state.deleting[automationId] !== false && state.deleting[automationId] !== undefined)
+      ) {
+        scheduleNextPoll();
+        return;
+      }
+      fetchRuns(storeApi, automationId, {
+        getEpoch: () => storeApi.getState().automationRuns.mutationEpoch[automationId] ?? 0,
+        setRunsLoading,
+        setRuns,
+        historyMode,
+      });
+      scheduleNextPoll();
+    };
+    scheduleNextPoll();
+    return () => window.clearTimeout(timeout);
+  }, [automationId, historyMode, runs, setRuns, setRunsLoading, storeApi]);
 
   const refresh = useCallback(() => {
     if (!automationId) return;
+    if ((storeApi.getState().automationRuns.deleting[automationId] ?? false) !== false) return;
     // See the mount effect: while a delete is in flight its reconciliation /
     // recovery owns the list state and must not be superseded.
-    if ((storeApi.getState().automationRuns.deleting[automationId] ?? false) !== false) return;
     fetchRuns(storeApi, automationId, {
       getEpoch: () => storeApi.getState().automationRuns.mutationEpoch[automationId] ?? 0,
       setRunsLoading,
       setRuns,
+      historyMode,
     });
-  }, [automationId, setRuns, setRunsLoading, storeApi]);
+  }, [automationId, historyMode, setRuns, setRunsLoading, storeApi]);
 
   const makeStore = useCallback(
     (end: () => void): DeleteStore => ({
@@ -380,6 +457,14 @@ export function useAutomationRuns(automationId: string | null, workspaceId: stri
     },
     [automationId, beginDelete, endDelete, makeStore, workspaceId],
   );
+  const stopRun = useCallback(
+    async (runId: string) => {
+      if (!automationId) return;
+      await stopAutomationRun(automationId, runId);
+      refresh();
+    },
+    [automationId, refresh],
+  );
 
-  return { runs, loading, refresh, deleteRun, deleteAllRuns, deleting };
+  return { runs, loading, refresh, deleteRun, deleteAllRuns, stopRun, deleting };
 }

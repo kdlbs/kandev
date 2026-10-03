@@ -23,6 +23,7 @@ import type {
   AutomationTrigger,
   TriggerTypeInfo,
   UpdateAutomationRequest,
+  RetryPolicy,
 } from "@/lib/types/automation";
 import { RunsSection } from "./runs-section";
 import {
@@ -59,6 +60,14 @@ type AutomationEditorProps = {
 // i18n-exempt: persisted prompt, sent to the agent and compared with ===. See the comment above.
 const DEFAULT_PROMPT = "Run scheduled automation.\n\nTrigger: {{trigger.type}}";
 
+const DEFAULT_RETRY_POLICY: RetryPolicy = {
+  mode: "disabled",
+  max_retries: "0",
+  delay_seconds: "0",
+  backoff: "fixed",
+  history_mode: "attempts",
+};
+
 const defaultForm: FormState = {
   name: "",
   description: "",
@@ -75,8 +84,8 @@ const defaultForm: FormState = {
   taskMode: "automation_run",
   managedDestination: undefined,
   repositoryMode: "none",
+  retryPolicy: DEFAULT_RETRY_POLICY,
 };
-
 function formFromAutomation(a: Automation): FormState {
   return {
     name: a.name,
@@ -101,6 +110,7 @@ function formFromAutomation(a: Automation): FormState {
     enabled: a.enabled,
     maxConcurrentRuns: a.max_concurrent_runs,
     continuationPolicy: a.continuation_policy ?? "new_task",
+    retryPolicy: a.retry_policy ?? DEFAULT_RETRY_POLICY,
   };
 }
 
@@ -523,7 +533,11 @@ export function AutomationEditor({ workspaceId, automationId }: AutomationEditor
         updateField={updateField}
       />
       <Separator />
-      <RunsSection automationId={currentId} workspaceId={workspaceId} />
+      <RunsSection
+        automationId={currentId}
+        workspaceId={workspaceId}
+        historyMode={form.retryPolicy.history_mode}
+      />
       <AutomationDeleteControls
         saving={saving}
         isNew={isNew}

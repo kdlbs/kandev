@@ -18,16 +18,24 @@ import { Badge } from "@kandev/ui/badge";
 import { Button } from "@kandev/ui/button";
 import { Label } from "@kandev/ui/label";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@kandev/ui/table";
-import { IconChevronDown, IconChevronUp, IconRefresh, IconTrash } from "@tabler/icons-react";
+import {
+  IconChevronDown,
+  IconChevronUp,
+  IconPlayerStop,
+  IconRefresh,
+  IconTrash,
+} from "@tabler/icons-react";
 import { useAutomationRuns } from "@/hooks/domains/settings/use-automation-runs";
 import { buildRunOutcomeReasonSuffix } from "@/lib/automation-run-reason";
 import { linkToTask } from "@/lib/links";
-import type { AutomationRun, RunStatus } from "@/lib/types/automation";
+import { expandRetryGroupRunIDs, projectAutomationHistory } from "./automation-history";
+import type { AutomationRun, RetryHistoryMode, RunStatus } from "@/lib/types/automation";
 import { formatRelativeTime } from "@/lib/utils";
 
 type RunsSectionProps = {
   automationId: string | null;
   workspaceId: string;
+  historyMode?: RetryHistoryMode;
 };
 
 const STATUS_BADGE: Record<
@@ -36,6 +44,11 @@ const STATUS_BADGE: Record<
 > = {
   triggered: { variant: "secondary", labelKey: "automations:runStatusTriggered" },
   task_created: { variant: "secondary", labelKey: "automations:runStatusRunning" },
+  scheduled_retry: { variant: "secondary", labelKey: "automations:runStatusScheduledRetry" },
+  retry_scheduling_failed: {
+    variant: "destructive",
+    labelKey: "automations:runStatusRetrySchedulingFailed",
+  },
   succeeded: { variant: "default", labelKey: "automations:runStatusSucceeded" },
   failed: { variant: "destructive", labelKey: "automations:runStatusFailed" },
   skipped: { variant: "outline", labelKey: "automations:runStatusSkipped" },
@@ -49,22 +62,18 @@ const STATUS_BADGE: Record<
   // See internal/automation.RunStatusCancelled.
   cancelled: { variant: "outline", labelKey: "automations:runStatusCancelled" },
 };
-
 type RunRowProps = {
   run: AutomationRun;
   deleting: boolean;
+  stopping: boolean;
   onDelete: (id: string) => void;
+  onStop: (id: string) => void;
   onNavigate: (taskId: string) => void;
 };
-
-function RunRow({ run, deleting, onDelete, onNavigate }: RunRowProps) {
+function RunDetailsCells({ run }: { run: AutomationRun }) {
   const { t } = useTranslation();
   const badge = STATUS_BADGE[run.status] ?? STATUS_BADGE.triggered;
   const reasonSuffix = buildRunOutcomeReasonSuffix(t, run);
-  // Any run that produced a task links to it, run-mode included. Run mode
-  // keeps the task off the board, which is not a reason to withhold the only
-  // route to what the run actually said.
-  const rowClickable = !!run.task_id;
   const deliveryLabelKey = run.delivery_status
     ? `automations:deliveryStatus${run.delivery_status
         .split("_")
@@ -72,20 +81,15 @@ function RunRow({ run, deleting, onDelete, onNavigate }: RunRowProps) {
         .join("")}`
     : null;
   return (
-    <TableRow
-      className={
-        rowClickable
-          ? "group cursor-pointer hover:bg-muted/50"
-          : "group hover:bg-transparent focus-within:bg-transparent"
-      }
-      onClick={rowClickable ? () => onNavigate(run.task_id) : undefined}
-      data-testid={`run-row-${run.id}`}
-      // The truncated task id used to be a column, and tooling identified a row
-      // by reading it. That column collapsed into Outcome, so the association
-      // lives here instead of being inferred from rendered copy.
-      data-task-id={run.task_id || undefined}
-    >
-      <TableCell className="text-sm">{run.trigger_type}</TableCell>
+    <>
+      <TableCell className="text-sm">
+        <div>{run.trigger_type}</div>
+        {(run.attempt_number ?? 1) > 1 && (
+          <div className="text-xs text-muted-foreground">
+            {t("automations:retryAttempt", { attempt: run.attempt_number })}
+          </div>
+        )}
+      </TableCell>
       <TableCell>
         <Badge variant={badge.variant}>{t(badge.labelKey)}</Badge>
         {deliveryLabelKey ? (
@@ -112,25 +116,82 @@ function RunRow({ run, deleting, onDelete, onNavigate }: RunRowProps) {
         {reasonSuffix && <span data-testid="run-outcome-reason"> {reasonSuffix}</span>}
       </TableCell>
       <TableCell className="text-sm text-muted-foreground whitespace-nowrap">
-        {formatRelativeTime(run.created_at)}
+        {run.retry_scheduled_at
+          ? t("automations:retryDue", { when: formatRelativeTime(run.retry_scheduled_at) })
+          : formatRelativeTime(run.created_at)}
       </TableCell>
-      <TableCell>
+    </>
+  );
+}
+
+function RunActions({
+  run,
+  deleting,
+  stopping,
+  onDelete,
+  onStop,
+}: Pick<RunRowProps, "run" | "deleting" | "stopping" | "onDelete" | "onStop">) {
+  const { t } = useTranslation();
+  return (
+    <TableCell>
+      {(run.status === "scheduled_retry" || run.retry_state === "claimed") && (
         <Button
           variant="ghost"
           size="icon-sm"
-          className="cursor-pointer text-muted-foreground hover:text-destructive opacity-0 pointer-events-none transition-opacity group-hover:opacity-100 group-hover:pointer-events-auto focus-visible:opacity-100 focus-visible:pointer-events-auto [@media(hover:none)]:opacity-100 [@media(hover:none)]:pointer-events-auto"
-          onClick={(e) => {
-            e.stopPropagation();
-            e.preventDefault();
-            onDelete(run.id);
+          className="cursor-pointer text-muted-foreground hover:text-destructive [@media(hover:none)]:min-h-11 [@media(hover:none)]:min-w-11"
+          onClick={(event) => {
+            event.stopPropagation();
+            onStop(run.id);
           }}
-          disabled={deleting}
-          title={t("automations:deleteRun")}
-          data-testid="delete-run"
+          disabled={stopping}
+          title={t("automations:stopRetry")}
+          aria-label={t("automations:stopRetry")}
+          data-testid="stop-retry"
         >
-          <IconTrash className="h-3.5 w-3.5" />
+          <IconPlayerStop className="h-3.5 w-3.5" />
         </Button>
-      </TableCell>
+      )}
+      <Button
+        variant="ghost"
+        size="icon-sm"
+        className="cursor-pointer text-muted-foreground hover:text-destructive opacity-0 pointer-events-none transition-opacity group-hover:opacity-100 group-hover:pointer-events-auto focus-visible:opacity-100 focus-visible:pointer-events-auto [@media(hover:none)]:opacity-100 [@media(hover:none)]:pointer-events-auto"
+        onClick={(event) => {
+          event.stopPropagation();
+          event.preventDefault();
+          onDelete(run.id);
+        }}
+        disabled={deleting}
+        title={t("automations:deleteRun")}
+        data-testid="delete-run"
+      >
+        <IconTrash className="h-3.5 w-3.5" />
+      </Button>
+    </TableCell>
+  );
+}
+
+function RunRow({ run, deleting, stopping, onDelete, onStop, onNavigate }: RunRowProps) {
+  const taskId = run.task_id;
+  const rowClickable = !!taskId;
+  return (
+    <TableRow
+      className={
+        rowClickable
+          ? "group cursor-pointer hover:bg-muted/50"
+          : "group hover:bg-transparent focus-within:bg-transparent"
+      }
+      onClick={taskId ? () => onNavigate(taskId) : undefined}
+      data-testid={`run-row-${run.id}`}
+      data-task-id={taskId || undefined}
+    >
+      <RunDetailsCells run={run} />
+      <RunActions
+        run={run}
+        deleting={deleting}
+        stopping={stopping}
+        onDelete={onDelete}
+        onStop={onStop}
+      />
     </TableRow>
   );
 }
@@ -144,14 +205,21 @@ function RunRow({ run, deleting, onDelete, onNavigate }: RunRowProps) {
 const STATUS_FILTERS: { value: RunStatus | "all"; labelKey: string }[] = [
   { value: "all", labelKey: "automations:runAll" },
   { value: "task_created", labelKey: "automations:runStatusRunning" },
+  { value: "scheduled_retry", labelKey: "automations:runStatusScheduledRetry" },
+  { value: "retry_scheduling_failed", labelKey: "automations:runStatusRetrySchedulingFailed" },
   { value: "succeeded", labelKey: "automations:runStatusSucceeded" },
   { value: "failed", labelKey: "automations:runStatusFailed" },
   { value: "skipped", labelKey: "automations:runStatusSkipped" },
-  // Both are read-time-derived terminal statuses the table already renders, so
-  // leaving them out here made those runs visible but unfilterable.
   { value: "archived", labelKey: "automations:runStatusArchived" },
   { value: "cancelled", labelKey: "automations:runStatusCancelled" },
 ];
+function matchesStatusFilter(run: AutomationRun, filter: RunStatus | "all"): boolean {
+  if (filter === "all") return true;
+  if (filter === "task_created") {
+    return run.status === "triggered" || run.status === "task_created";
+  }
+  return run.status === filter;
+}
 
 type DeleteAllButtonProps = {
   disabled: boolean;
@@ -233,7 +301,7 @@ function StatusFilter({
         const count =
           filter.value === "all"
             ? runs.length
-            : runs.filter((run) => run.status === filter.value).length;
+            : runs.filter((run) => matchesStatusFilter(run, filter.value)).length;
         // Only offer a filter that would show something, so the row of chips
         // reflects what this automation has actually done.
         if (count === 0 && filter.value !== "all" && value !== filter.value) return null;
@@ -255,20 +323,23 @@ function StatusFilter({
   );
 }
 
-export function RunsSection({ automationId, workspaceId }: RunsSectionProps) {
+// eslint-disable-next-line max-lines-per-function -- coordinates the responsive run history and retry actions.
+export function RunsSection({ automationId, workspaceId, historyMode }: RunsSectionProps) {
   const { t } = useTranslation();
   const [expanded, setExpanded] = useState(false);
   const [statusFilter, setStatusFilter] = useState<RunStatus | "all">("all");
-  const { runs, loading, refresh, deleteRun, deleteAllRuns, deleting } = useAutomationRuns(
+  const { runs, loading, refresh, deleteRun, deleteAllRuns, stopRun, deleting } = useAutomationRuns(
     automationId,
     workspaceId,
+    historyMode,
   );
   const router = useRouter();
-
-  if (!automationId) return null;
-
+  const projectedRuns = projectAutomationHistory(runs, historyMode);
   const visibleRuns =
-    statusFilter === "all" ? runs : runs.filter((run) => run.status === statusFilter);
+    statusFilter === "all"
+      ? projectedRuns
+      : projectedRuns.filter((run) => matchesStatusFilter(run, statusFilter));
+
   const emptyMessage = runs.length === 0 ? "No runs yet" : "No runs match this filter";
 
   return (
@@ -279,7 +350,7 @@ export function RunsSection({ automationId, workspaceId }: RunsSectionProps) {
           onClick={() => setExpanded(!expanded)}
         >
           <Label className="text-xs uppercase tracking-wider text-muted-foreground cursor-pointer">
-            {t("automations:recentRuns", { count: runs.length })}
+            {t("automations:recentRuns", { count: projectedRuns.length })}
           </Label>
           {expanded ? (
             <IconChevronUp className="h-3.5 w-3.5 text-muted-foreground" />
@@ -303,7 +374,7 @@ export function RunsSection({ automationId, workspaceId }: RunsSectionProps) {
         )}
       </div>
       {expanded && runs.length > 0 && (
-        <StatusFilter runs={runs} value={statusFilter} onChange={setStatusFilter} />
+        <StatusFilter runs={projectedRuns} value={statusFilter} onChange={setStatusFilter} />
       )}
       {expanded && (
         <div className="rounded-md border">
@@ -323,7 +394,7 @@ export function RunsSection({ automationId, workspaceId }: RunsSectionProps) {
                         if (statusFilter === "all") {
                           deleteAllRuns();
                         } else {
-                          deleteAllRuns(visibleRuns.map((run) => run.id));
+                          deleteAllRuns(expandRetryGroupRunIDs(runs, visibleRuns));
                         }
                       }}
                     />
@@ -343,6 +414,8 @@ export function RunsSection({ automationId, workspaceId }: RunsSectionProps) {
                   <RunRow
                     key={run.id}
                     run={run}
+                    stopping={deleting}
+                    onStop={stopRun}
                     deleting={deleting}
                     onDelete={deleteRun}
                     onNavigate={(id) => router.push(linkToTask(id))}

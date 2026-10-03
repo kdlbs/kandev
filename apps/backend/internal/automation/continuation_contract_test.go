@@ -3,6 +3,7 @@ package automation
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -350,4 +351,113 @@ func TestDispatchRunBindsExactIdentityAndRejectsStoppedAdmission(t *testing.T) {
 	})
 	require.ErrorIs(t, err, ErrAutomationRunNotDispatchable)
 	require.False(t, called)
+}
+
+func TestDispatchRunFailureSchedulesRetryChild(t *testing.T) {
+	svc := newTestService(t)
+	ctx := context.Background()
+	a := &Automation{
+		WorkspaceID: "ws-dispatch-retry", Name: "dispatch retry", Enabled: true,
+		RetryPolicy: RetryPolicy{Mode: RetryModeFinite, MaxRetries: "1", DelaySeconds: "0"},
+	}
+	require.NoError(t, svc.store.CreateAutomation(ctx, a))
+	trigger := &AutomationTrigger{ID: "dispatch-trigger", AutomationID: a.ID, Type: TriggerTypeManual, Enabled: true}
+	require.NoError(t, svc.store.CreateTrigger(ctx, trigger))
+	fire, err := svc.FireTrigger(ctx, a.ID, trigger.ID, trigger.Type, json.RawMessage(`{"delivery_id":"d1"}`), DedupKey("dispatch-d1"))
+	require.NoError(t, err)
+
+	originalErr := errors.New("provider rejected dispatch")
+	require.ErrorIs(t, svc.DispatchRun(ctx, fire.RunID, ThreadActionCreated, "created", func() (RunDispatch, error) {
+		return RunDispatch{}, originalErr
+	}), originalErr)
+	runs, err := svc.store.ListRuns(ctx, a.ID, 10)
+	require.NoError(t, err)
+	require.Len(t, runs, 2)
+	require.Equal(t, RunStatusScheduledRetry, runs[0].Status)
+	require.Equal(t, RetryStateScheduled, runs[0].RetryState)
+}
+
+func TestDispatchRunKeepsAmbiguousAcceptedContinuationOpen(t *testing.T) {
+	svc := newTestService(t)
+	ctx := context.Background()
+	a := &Automation{
+		WorkspaceID: "ws-ambiguous-continuation", Name: "ambiguous continuation", Enabled: true,
+		RetryPolicy: RetryPolicy{Mode: RetryModeFinite, MaxRetries: "1", DelaySeconds: "0"},
+	}
+	require.NoError(t, svc.store.CreateAutomation(ctx, a))
+	trigger := &AutomationTrigger{
+		ID: "ambiguous-continuation-trigger", AutomationID: a.ID,
+		Type: TriggerTypeManual, Enabled: true,
+	}
+	require.NoError(t, svc.store.CreateTrigger(ctx, trigger))
+	fire, err := svc.FireTrigger(ctx, a.ID, trigger.ID, trigger.Type, json.RawMessage(`{}`), DedupKey("ambiguous-continuation"))
+	require.NoError(t, err)
+	run, err := svc.store.GetRun(ctx, fire.RunID)
+	require.NoError(t, err)
+	leased, err := svc.store.BeginRetryTaskOperation(ctx, run.ID, 1)
+	require.NoError(t, err)
+	require.NoError(t, svc.store.MarkRetryOperationAmbiguous(ctx, run.ID, 1, leased.LeaseToken, RunDispatch{
+		TaskID: "accepted-task", SessionID: "accepted-session", TurnID: "accepted-turn",
+	}))
+
+	dispatchErr := errors.New("accepted turn identity commit failed")
+	require.ErrorIs(t, svc.DispatchRun(ctx, run.ID, ThreadActionResumed, "continuation", func() (RunDispatch, error) {
+		return RunDispatch{}, dispatchErr
+	}), dispatchErr)
+
+	operation, err := svc.store.GetRetryTaskOperation(ctx, run.ID, 1)
+	require.NoError(t, err)
+	require.Equal(t, retryOperationAmbiguous, operation.State)
+	require.Equal(t, "accepted-task", operation.ExternalTaskID)
+	require.Equal(t, "accepted-session", operation.ExternalSessionID)
+	require.Equal(t, "accepted-turn", operation.ExternalTurnID)
+	runs, err := svc.store.ListRuns(ctx, a.ID, 10)
+	require.NoError(t, err)
+	require.Len(t, runs, 1)
+}
+
+func TestDispatchRunKeepsCommittedContinuationOpenWhenBindingFails(t *testing.T) {
+	svc := newTestService(t)
+	ctx := context.Background()
+	a := &Automation{
+		WorkspaceID: "ws-continuation-bind", Name: "continuation bind", Enabled: true,
+		RetryPolicy: RetryPolicy{Mode: RetryModeFinite, MaxRetries: "1", DelaySeconds: "0"},
+	}
+	require.NoError(t, svc.store.CreateAutomation(ctx, a))
+	trigger := &AutomationTrigger{
+		ID: "continuation-bind-trigger", AutomationID: a.ID,
+		Type: TriggerTypeManual, Enabled: true,
+	}
+	require.NoError(t, svc.store.CreateTrigger(ctx, trigger))
+	fire, err := svc.FireTrigger(ctx, a.ID, trigger.ID, trigger.Type, json.RawMessage(`{}`), DedupKey("continuation-bind"))
+	require.NoError(t, err)
+	run, err := svc.store.GetRun(ctx, fire.RunID)
+	require.NoError(t, err)
+	leased, err := svc.store.BeginRetryTaskOperation(ctx, run.ID, 1)
+	require.NoError(t, err)
+	require.NoError(t, svc.store.CommitRetryContinuationOperation(ctx, run.ID, 1, leased.LeaseToken, RunDispatch{
+		TaskID: "continuation-task", SessionID: "continuation-session", TurnID: "continuation-turn",
+	}))
+	_, err = svc.store.db.ExecContext(ctx, `
+		CREATE TRIGGER fail_continuation_bind
+		BEFORE UPDATE OF status ON automation_runs
+		WHEN NEW.status = 'task_created'
+		BEGIN
+			SELECT RAISE(ABORT, 'simulated continuation binding failure');
+		END`)
+	require.NoError(t, err)
+
+	bindErr := svc.DispatchRun(ctx, run.ID, ThreadActionResumed, "continuation", func() (RunDispatch, error) {
+		return RunDispatch{TaskID: "continuation-task", SessionID: "continuation-session", TurnID: "continuation-turn"}, nil
+	})
+	require.Error(t, bindErr)
+
+	operation, err := svc.store.GetRetryTaskOperation(ctx, run.ID, 1)
+	require.NoError(t, err)
+	require.Equal(t, retryOperationCommitted, operation.State)
+	require.Equal(t, "continuation-task", operation.ExternalTaskID)
+	runs, err := svc.store.ListRuns(ctx, a.ID, 10)
+	require.NoError(t, err)
+	require.Len(t, runs, 1)
+	require.Equal(t, RunStatusTriggered, runs[0].Status)
 }

@@ -19,6 +19,11 @@ import (
 	"github.com/kandev/kandev/internal/webapp"
 )
 
+const (
+	taskOriginFieldKey   = defaultGitRemote
+	taskMetadataFieldKey = "metadata"
+)
+
 // tasksPageBootData builds the tasks page boot payload: workspaces, repositories, workflows, steps, tasks, and the user's settings.
 func (b bootStateBuilder) tasksPageBootData(ctx context.Context, req *http.Request) (map[string]any, map[string]any) {
 	if b.p.taskSvc == nil {
@@ -838,8 +843,8 @@ func mapKanbanTaskState(task taskdto.TaskDTO) map[string]any {
 		"id":                          task.ID,
 		"workspaceId":                 task.WorkspaceID,
 		"workflowId":                  task.WorkflowID,
-		"origin":                      task.Origin,
-		"metadata":                    task.Metadata,
+		taskOriginFieldKey:            task.Origin,
+		taskMetadataFieldKey:          task.Metadata,
 		"isArchived":                  task.ArchivedAt != nil,
 		"isFromOffice":                task.IsFromOffice,
 		"primaryExecutorId":           task.PrimaryExecutorID,

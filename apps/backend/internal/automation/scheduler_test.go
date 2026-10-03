@@ -3,13 +3,13 @@ package automation
 import (
 	"context"
 	"encoding/json"
-	"go.uber.org/zap"
-	"testing"
-	"time"
-
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
+	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
+	"testing"
+	"time"
 )
 
 // TestFireTrigger_SkippedForConcurrencyCap_UpdatesLastEvaluatedAt guards
@@ -379,5 +379,59 @@ func TestFireTrigger_ArchivedTaskRun_DoesNotBlockConcurrencyCap(t *testing.T) {
 		if r.Status == RunStatusSkipped {
 			t.Fatalf("expected the new trigger to fire instead of skip for the cap; runs=%+v", runs)
 		}
+	}
+}
+
+func TestRetrySchedulerReplaysPendingCommittedContinuation(t *testing.T) {
+	svc := newTestService(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	automation := &Automation{
+		ID: "scheduler-recovery-automation", WorkspaceID: "scheduler-recovery-workspace",
+		Name: "scheduler recovery", Enabled: true,
+	}
+	require.NoError(t, svc.store.CreateAutomation(ctx, automation))
+	require.NoError(t, svc.store.CreateRetryGroup(ctx, &RetryGroup{
+		ID: "scheduler-recovery-group", AutomationID: automation.ID,
+		Generation: 1, State: RetryGroupLive,
+	}))
+	run := &AutomationRun{
+		ID: "scheduler-recovery-run", AutomationID: automation.ID,
+		Status: RunStatusTriggered, RetryState: RetryStateTriggered,
+		RetryGroupID: "scheduler-recovery-group", RetryGroupGeneration: 1,
+	}
+	require.NoError(t, svc.store.CreateRun(ctx, run))
+	require.NoError(t, svc.store.CreateRetryIntent(ctx, &RetryTaskIntent{
+		ID: "scheduler-recovery-intent", RunID: run.ID,
+		GroupGeneration: 1, State: retryIntentAdmitted,
+	}))
+	require.NoError(t, svc.store.CreateRetryOperation(ctx, &RetryOperation{
+		ID: "scheduler-recovery-operation", IntentID: "scheduler-recovery-intent",
+		RunID: run.ID, GroupGeneration: 1, Kind: retryTaskOperationKind,
+		State: retryOperationCommitted, ExternalTaskID: "provider-task",
+		ExternalSessionID: "provider-session", ExternalTurnID: "provider-turn",
+	}))
+	require.NoError(t, svc.store.CreateRetryOutbox(ctx, &RetryOutbox{
+		EventID: "scheduler-recovery-event", RunID: run.ID, SnapshotVersion: 1,
+		State: retryOutboxPending,
+	}))
+
+	replayed := make(chan *AutomationTriggeredEvent, 1)
+	_, err := svc.eventBus.Subscribe(events.AutomationTriggered, func(_ context.Context, event *bus.Event) error {
+		replayed <- event.Data.(*AutomationTriggeredEvent)
+		return nil
+	})
+	require.NoError(t, err)
+
+	scheduler := NewRetryScheduler(svc, svc.logger)
+	scheduler.Start(ctx)
+	defer scheduler.Stop()
+
+	select {
+	case event := <-replayed:
+		require.Equal(t, run.ID, event.RunID)
+	case <-time.After(3 * time.Second):
+		t.Fatal("pending committed continuation was not replayed in process")
 	}
 }

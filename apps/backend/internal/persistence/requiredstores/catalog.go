@@ -102,7 +102,7 @@ var catalog = []Descriptor{
 	{ID: "azure-devops", OwnerPackage: "internal/azuredevops", RequiredTables: []string{"azure_devops_configs"}, DependsOn: []string{storeIDTask, storeIDUser}, Capabilities: []Capability{CapabilityBoolean, CapabilityTimestamp, CapabilityConflict}, Sweep: startup.StepStoresServices},
 	{ID: "workflow-sync", OwnerPackage: "internal/workflowsync", RequiredTables: []string{"workflow_sync_configs"}, DependsOn: []string{storeIDWorkflow}, Capabilities: []Capability{CapabilityBoolean, CapabilityTimestamp, CapabilityConflict}, Sweep: startup.StepStoresServices},
 	{ID: "office-config-sync", OwnerPackage: "internal/office/configsync", RequiredTables: []string{"office_config_sync_configs"}, DependsOn: []string{"office"}, Capabilities: []Capability{CapabilityBoolean, CapabilityTimestamp, CapabilityConflict}, Sweep: startup.StepStoresServices},
-	{ID: "automation", OwnerPackage: "internal/automation", RequiredTables: []string{"automations", "automation_runs"}, DependsOn: []string{storeIDTask, storeIDUser}, Capabilities: []Capability{CapabilityBoolean, CapabilityTimestamp, CapabilityConflict, CapabilityTransaction}, Sweep: startup.StepStoresServices},
+	{ID: "automation", OwnerPackage: "internal/automation", RequiredTables: []string{"automations", "automation_runs", "automation_retry_groups", "automation_run_task_intents", "automation_run_operations", "automation_retry_outbox", "automation_retry_event_receipts"}, DependsOn: []string{storeIDTask, storeIDUser}, Capabilities: []Capability{CapabilityBoolean, CapabilityTimestamp, CapabilityConflict, CapabilityTransaction}, Sweep: startup.StepStoresServices},
 }
 
 // Catalog returns a deep copy of the authoritative store catalog.

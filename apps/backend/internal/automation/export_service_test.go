@@ -295,8 +295,7 @@ func TestExportAutomationsDocument_TriggerBadConfig_EmitsRenderedWarning(t *test
 		},
 	})
 
-	// validateWebhookConfig rejects malformed JSON at every save-time entry
-	// point (CreateAutomation, AddTrigger, UpdateTrigger), so a stored
+	// validateTriggerConfig rejects malformed JSON at every save-time entry
 	// non-JSON config can now only arise from post-creation corruption.
 	// Write straight to the store to simulate that and exercise export's
 	// defensive handling of it.

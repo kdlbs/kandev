@@ -5,6 +5,7 @@ import (
 	"errors"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/kandev/kandev/pkg/pluginsdk"
 )
@@ -185,7 +186,8 @@ func TestManagedConversationDestination(t *testing.T) {
 			t.Fatalf("create managed schedule: %v", err)
 		}
 		run, skipReason, duplicate, err := svc.admitTrigger(ctx, schedule, schedule.Triggers[0].ID,
-			TriggerTypeScheduled, []byte(`{"summary":"queue work"}`), DedupNotConfigured())
+			TriggerTypeScheduled, []byte(`{"summary":"queue work"}`), DedupNotConfigured(),
+			time.Now().UTC(), []string{schedule.Triggers[0].ID})
 		if err != nil || run == nil || skipReason != "" || duplicate {
 			t.Fatalf("admit run = %+v, skip=%q, duplicate=%t, err=%v", run, skipReason, duplicate, err)
 		}
@@ -240,7 +242,8 @@ func TestManagedConversationDestination(t *testing.T) {
 			t.Fatalf("create managed schedule: %v", err)
 		}
 		run, skipReason, duplicate, err := svc.admitTrigger(ctx, schedule, schedule.Triggers[0].ID,
-			TriggerTypeScheduled, []byte(`{}`), DedupNotConfigured())
+			TriggerTypeScheduled, []byte(`{}`), DedupNotConfigured(),
+			time.Now().UTC(), []string{schedule.Triggers[0].ID})
 		if err != nil || run == nil || skipReason != "" || duplicate {
 			t.Fatalf("admit run = %+v, skip=%q, duplicate=%t, err=%v", run, skipReason, duplicate, err)
 		}

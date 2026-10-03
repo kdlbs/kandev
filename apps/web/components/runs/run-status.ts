@@ -12,6 +12,8 @@ export const ALL_STATUSES: RunStatusFilter = "all";
 export const RUN_STATUS_LABEL_KEY: Record<RunStatus, string> = {
   triggered: "automations:runTriggered",
   task_created: "automations:runRunning",
+  scheduled_retry: "automations:runStatusScheduledRetry",
+  retry_scheduling_failed: "automations:runStatusRetrySchedulingFailed",
   succeeded: "automations:runSucceeded",
   failed: "automations:runFailed",
   skipped: "automations:runSkipped",
@@ -22,6 +24,8 @@ export const RUN_STATUS_LABEL_KEY: Record<RunStatus, string> = {
 export const RUN_STATUS_DOT: Record<RunStatus, string> = {
   triggered: "bg-muted-foreground",
   task_created: "bg-blue-500",
+  scheduled_retry: "bg-amber-500",
+  retry_scheduling_failed: "bg-red-500",
   succeeded: "bg-emerald-500",
   failed: "bg-red-500",
   skipped: "bg-muted-foreground/50",
@@ -39,6 +43,8 @@ export const STATUS_FILTER_OPTIONS: { value: RunStatusFilter; labelKey: string }
   // the feed but cannot be filtered leaves the reader unable to narrow to it.
   { value: "triggered", labelKey: RUN_STATUS_LABEL_KEY.triggered },
   { value: "task_created", labelKey: RUN_STATUS_LABEL_KEY.task_created },
+  { value: "scheduled_retry", labelKey: RUN_STATUS_LABEL_KEY.scheduled_retry },
+  { value: "retry_scheduling_failed", labelKey: RUN_STATUS_LABEL_KEY.retry_scheduling_failed },
   { value: "succeeded", labelKey: RUN_STATUS_LABEL_KEY.succeeded },
   { value: "failed", labelKey: RUN_STATUS_LABEL_KEY.failed },
   // Kept in the list even though a skipped run says almost nothing: a schedule

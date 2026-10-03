@@ -5936,21 +5936,21 @@ func (s *Service) saveGitStatusSnapshot(ctx context.Context, sessionID string, f
 	}
 
 	metadata := map[string]interface{}{
-		"repository_name":       status.RepositoryName,
-		"timestamp":             status.Timestamp,
-		"modified":              status.Modified,
-		"added":                 status.Added,
-		"deleted":               status.Deleted,
-		"untracked":             status.Untracked,
-		"renamed":               status.Renamed,
-		"branch_additions":      status.BranchAdditions,
-		"branch_deletions":      status.BranchDeletions,
-		"comparison_target":     status.ComparisonTarget,
-		"comparison_status":     status.ComparisonStatus,
-		"comparison_error_code": status.ComparisonErrorCode,
-		"status_state":          "ready",
-		"files_complete":        true,
-		"detail_state":          "ready",
+		gitSnapshotRepositoryNameKey:  status.RepositoryName,
+		gitSnapshotTimestampKey:       status.Timestamp,
+		gitSnapshotModifiedKey:        status.Modified,
+		gitSnapshotAddedKey:           status.Added,
+		gitSnapshotDeletedKey:         status.Deleted,
+		gitSnapshotUntrackedKey:       status.Untracked,
+		gitSnapshotRenamedKey:         status.Renamed,
+		gitSnapshotBranchAdditionsKey: status.BranchAdditions,
+		gitSnapshotBranchDeletionsKey: status.BranchDeletions,
+		"comparison_target":           status.ComparisonTarget,
+		"comparison_status":           status.ComparisonStatus,
+		"comparison_error_code":       status.ComparisonErrorCode,
+		gitSnapshotStatusStateKey:     gitSnapshotStatusReady,
+		gitSnapshotFilesCompleteKey:   true,
+		gitSnapshotDetailStateKey:     gitSnapshotStatusReady,
 	}
 
 	if err := s.repo.CreateGitSnapshot(ctx, &models.GitSnapshot{

@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { request as playwrightRequest } from "@playwright/test";
 import { test, expect, type Page } from "../fixtures/test-base";
 import { AutomationsPage } from "../pages/automations-page";
@@ -33,14 +34,16 @@ async function revealWebhookSecret(
 // Uses an isolated APIRequestContext rather than testPage.request: the page's
 // request context shares cookies with the authenticated browser session, so a
 // webhook route that incorrectly required or trusted that session could still
-// pass. A fresh context with no storage state proves the route works from an
-// unauthenticated caller carrying only X-Webhook-Secret, matching how a real
-// external vendor calls it.
+// pass. A fresh context with no storage state proves the route works for an
+// unauthenticated caller with the webhook secret and a unique delivery ID.
 async function postWebhook(webhookUrl: string, secret: string, body: unknown) {
   const context = await playwrightRequest.newContext();
   try {
     const res = await context.post(webhookUrl, {
-      headers: { "X-Webhook-Secret": secret },
+      headers: {
+        "X-Webhook-Secret": secret,
+        "X-Kandev-Delivery-ID": randomUUID(),
+      },
       data: body,
     });
     expect(res.status()).toBe(200);

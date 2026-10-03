@@ -135,6 +135,8 @@ type ReviewTaskRequest struct {
 	// Origin tags the task with a provenance label (see task/models.TaskOrigin*).
 	// Defaults to TaskOriginManual when empty.
 	Origin string
+	// ExternalID is the stable provider identity for retry task creation.
+	ExternalID string
 }
 
 // ReviewTaskRepository associates a repository with a review task.

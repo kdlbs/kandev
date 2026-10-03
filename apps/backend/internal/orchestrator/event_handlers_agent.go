@@ -653,10 +653,10 @@ func (s *Service) persistProviderRestoredResumeNotice(
 	}
 
 	metadata := map[string]interface{}{
-		"variant":                   "resume_settings_provider_restored",
+		metaKeyVariant:              "resume_settings_provider_restored",
 		"settings_policy":           string(streams.SessionSettingsPolicyProviderRestored),
 		"attempt_id":                data.AttemptID,
-		"skipped_settings":          []string{"mode", "model"},
+		"skipped_settings":          []string{previewSettingMode, sessionModelConfigKey},
 		"skipped_selection_sources": []string{"agent_profile", "runtime_config", "workflow_overrides", "provider_config_options"},
 		"effective_model_known":     false,
 		"effective_mode_known":      false,

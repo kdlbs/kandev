@@ -1,7 +1,9 @@
 package automation
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"testing"
 	"time"
 
@@ -183,5 +185,96 @@ func TestPostgresStoreSchemaReplay(t *testing.T) {
 	}
 	if err := store.DeleteCleanupJob(ctx, "task-cleanup"); err != nil {
 		t.Fatalf("delete cleanup job: %v", err)
+	}
+}
+func TestPostgresRetryConcurrencyContracts(t *testing.T) {
+	database := testutil.OpenIsolatedPostgres(t, testutil.PostgresDSNFromEnv(t))
+	store, err := NewStore(database, database)
+	if err != nil {
+		t.Fatalf("create automation store: %v", err)
+	}
+	ctx := context.Background()
+	a := &Automation{ID: "pg-retry-automation", WorkspaceID: "pg-retry-workspace",
+		Name: "PostgreSQL retry", Enabled: true}
+	if err := store.CreateAutomation(ctx, a); err != nil {
+		t.Fatalf("create automation: %v", err)
+	}
+
+	group := &RetryGroup{ID: "pg-retry-group", AutomationID: a.ID,
+		Generation: 1, State: RetryGroupLive}
+	if err := store.CreateRetryGroup(ctx, group); err != nil {
+		t.Fatalf("create retry group: %v", err)
+	}
+	parent := &AutomationRun{ID: "pg-retry-parent", AutomationID: a.ID,
+		TriggerType: TriggerTypeManual, Status: RunStatusTriggered,
+		RetryGroupID: group.ID, RetryGroupGeneration: 1, RetryState: RetryStateTriggered,
+		AttemptNumber:       1,
+		RetryPolicySnapshot: `{"mode":"finite","max_retries":"2","delay_seconds":"0","backoff":"fixed"}`}
+	if err := store.CreateRun(ctx, parent); err != nil {
+		t.Fatalf("create parent run: %v", err)
+	}
+	child, err := store.FinalizeRetryFailure(ctx, parent.ID, 1, errors.New("provider failed"), "launch")
+	if err != nil {
+		t.Fatalf("finalize retry: %v", err)
+	}
+	replayed, err := store.FinalizeRetryFailure(ctx, parent.ID, 1, errors.New("replayed"), "launch")
+	if err != nil || replayed == nil || replayed.ID != child.ID {
+		t.Fatalf("idempotent retry replay = %+v, err %v", replayed, err)
+	}
+
+	leaseRun := &AutomationRun{ID: "pg-retry-lease-run", AutomationID: a.ID,
+		TriggerType: TriggerTypeManual, Status: RunStatusTriggered,
+		RetryGroupID: group.ID, RetryGroupGeneration: 1, RetryState: RetryStateTriggered, AttemptNumber: 3}
+	if err := store.CreateRun(ctx, leaseRun); err != nil {
+		t.Fatalf("create lease run: %v", err)
+	}
+	intent := &RetryTaskIntent{ID: "pg-retry-lease-intent", RunID: leaseRun.ID,
+		GroupGeneration: 1, State: retryIntentAdmitted}
+	if err := store.CreateRetryIntent(ctx, intent); err != nil {
+		t.Fatalf("create lease intent: %v", err)
+	}
+	if err := store.CreateRetryOperation(ctx, &RetryOperation{
+		ID: "pg-retry-lease-operation", IntentID: intent.ID, RunID: leaseRun.ID,
+		GroupGeneration: 1, Kind: retryTaskOperationKind, State: retryOperationRequested,
+	}); err != nil {
+		t.Fatalf("create lease operation: %v", err)
+	}
+	first, err := store.BeginRetryTaskOperation(ctx, leaseRun.ID, 1)
+	if err != nil {
+		t.Fatalf("first lease: %v", err)
+	}
+	if _, err := store.BeginRetryTaskOperation(ctx, leaseRun.ID, 1); !errors.Is(err, ErrRetryOperationUndispatchable) {
+		t.Fatalf("unexpired lease error = %v", err)
+	}
+	if _, err := database.Exec(`UPDATE automation_run_operations SET lease_expires_at = $1 WHERE operation_id = $2`,
+		time.Now().UTC().Add(-time.Minute), first.ID); err != nil {
+		t.Fatalf("expire lease: %v", err)
+	}
+	reacquired, err := store.BeginRetryTaskOperation(ctx, leaseRun.ID, 1)
+	if err != nil || reacquired.LeaseToken == first.LeaseToken {
+		t.Fatalf("expired lease reacquisition = %+v, err %v", reacquired, err)
+	}
+
+	cancelGroup := &RetryGroup{ID: "pg-cancel-group", AutomationID: a.ID,
+		Generation: 1, State: RetryGroupLive}
+	if err := store.CreateRetryGroup(ctx, cancelGroup); err != nil {
+		t.Fatalf("create cancel group: %v", err)
+	}
+	cancelRun := &AutomationRun{ID: "pg-cancel-run", AutomationID: a.ID,
+		TriggerType: TriggerTypeManual, Status: RunStatusTaskCreated,
+		TaskID: "pg-cancel-task", SessionID: "pg-cancel-session", TurnID: "pg-cancel-turn",
+		RetryGroupID: cancelGroup.ID, RetryGroupGeneration: 1, RetryState: RetryStateTriggered}
+	if err := store.CreateRun(ctx, cancelRun); err != nil {
+		t.Fatalf("create cancel run: %v", err)
+	}
+	if err := store.CancelRetryGroup(ctx, cancelGroup.ID, 1); err != nil {
+		t.Fatalf("cancel retry group: %v", err)
+	}
+	if err := store.BindRun(ctx, cancelRun.ID, "new-task", "new-session", "new-turn", ThreadActionCreated, ""); !errors.Is(err, ErrRetryGenerationMismatch) {
+		t.Fatalf("bind cancelled retry error = %v", err)
+	}
+	storedCancel, err := store.GetRun(ctx, cancelRun.ID)
+	if err != nil || storedCancel.RetryState != RetryStateCancelled {
+		t.Fatalf("cancelled retry run = %+v, err %v", storedCancel, err)
 	}
 }

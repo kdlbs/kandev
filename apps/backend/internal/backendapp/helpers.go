@@ -129,6 +129,15 @@ const (
 	readyRoutePath                     = "/ready"
 	websocketRoutePath                 = "/ws"
 	gitStatusReadyState                = "ready"
+	gitStatusUnavailableState          = "unavailable"
+	gitStatusUnavailableErrorCode      = "status_unavailable"
+	statusStateFieldKey                = "status_state"
+	statusFilesCompleteFieldKey        = "files_complete"
+	statusDetailStateFieldKey          = "detail_state"
+	statusErrorCodeFieldKey            = "error_code"
+	headCommitFieldKey                 = "head_commit"
+	baseCommitFieldKey                 = "base_commit"
+	taskRepositoryStatusFailed         = "failed"
 	gitStatusLiveSourceUnavailableCode = "live_source_unavailable"
 	gitStatusRepositoryUnavailableCode = "repository_unavailable"
 )
@@ -180,7 +189,7 @@ func buildSessionGitRefreshProvider(taskRepo *sqliterepo.Repository, lifecycleMg
 
 func getSessionGitStatusRefresh(ctx context.Context, taskRepo *sqliterepo.Repository, lifecycleMgr *lifecycle.Manager, log *logger.Logger, sessionID, mode string) (gateways.SessionGitRefreshResult, error) {
 	result := gateways.SessionGitRefreshResult{
-		SessionID: sessionID, Mode: mode, StatusState: "unavailable", Snapshots: []*ws.Message{},
+		SessionID: sessionID, Mode: mode, StatusState: gitStatusUnavailableState, Snapshots: []*ws.Message{},
 	}
 	session, err := taskRepo.GetTaskSession(ctx, sessionID)
 	if err != nil || session == nil {
@@ -269,7 +278,7 @@ func appendGitStatusRefreshSnapshots(result *gateways.SessionGitRefreshResult, s
 		}
 	}
 	if !result.Success {
-		result.ErrorCode = "status_unavailable"
+		result.ErrorCode = gitStatusUnavailableErrorCode
 	}
 }
 
@@ -277,9 +286,9 @@ func markFailedGitRepositoryUnavailable(status *client.GitStatusResult) {
 	if status.Success {
 		return
 	}
-	status.StatusState = "unavailable"
+	status.StatusState = gitStatusUnavailableState
 	status.FilesComplete = false
-	status.DetailState = "unavailable"
+	status.DetailState = gitStatusUnavailableState
 	if status.ErrorCode == "" {
 		status.ErrorCode = gitStatusRepositoryUnavailableCode
 	}
@@ -676,36 +685,36 @@ func buildGitStatusNotification(sessionID, taskEnvironmentID, repositoryName str
 			statusState = gitStatusReadyState
 			filesComplete = true
 		} else {
-			statusState = "unavailable"
+			statusState = gitStatusUnavailableState
 		}
 	}
 	if detailState == "" {
 		if status.Success {
 			detailState = gitStatusReadyState
 		} else {
-			detailState = "unavailable"
+			detailState = gitStatusUnavailableState
 		}
 	}
 	errorCode := status.ErrorCode
 	if !status.Success && errorCode == "" {
-		errorCode = "status_unavailable"
+		errorCode = gitStatusUnavailableErrorCode
 	}
 	statusPayload := map[string]interface{}{
-		branchFieldKey:          status.Branch,
-		"remote_branch":         status.RemoteBranch,
-		"head_commit":           status.HeadCommit,
-		"base_commit":           status.BaseCommit,
-		"status_state":          statusState,
-		"files_complete":        filesComplete,
-		"detail_state":          detailState,
-		"error_code":            errorCode,
-		"tracker_id":            status.TrackerID,
-		"tracker_epoch":         status.TrackerEpoch,
-		"snapshot_revision":     status.SnapshotRevision,
-		"comparison_target":     status.ComparisonTarget,
-		"comparison_status":     status.ComparisonStatus,
-		"comparison_error_code": status.ComparisonErrorCode,
-		"is_submodule":          status.IsSubmodule,
+		branchFieldKey:              status.Branch,
+		"remote_branch":             status.RemoteBranch,
+		headCommitFieldKey:          status.HeadCommit,
+		baseCommitFieldKey:          status.BaseCommit,
+		statusStateFieldKey:         statusState,
+		statusFilesCompleteFieldKey: filesComplete,
+		statusDetailStateFieldKey:   detailState,
+		statusErrorCodeFieldKey:     errorCode,
+		"tracker_id":                status.TrackerID,
+		"tracker_epoch":             status.TrackerEpoch,
+		"snapshot_revision":         status.SnapshotRevision,
+		"comparison_target":         status.ComparisonTarget,
+		"comparison_status":         status.ComparisonStatus,
+		"comparison_error_code":     status.ComparisonErrorCode,
+		"is_submodule":              status.IsSubmodule,
 	}
 	if filesComplete {
 		statusPayload["files"] = status.Files
@@ -820,8 +829,8 @@ func buildGitSnapshotNotification(sessionID, repositoryName string, snapshot *mo
 			statusPayload[branchAdditionsFieldKey] = metadata[branchAdditionsFieldKey]
 			statusPayload[branchDeletionsFieldKey] = metadata[branchDeletionsFieldKey]
 		} else {
-			statusPayload["status_state"] = "unavailable"
-			statusPayload["detail_state"] = "unavailable"
+			statusPayload["status_state"] = gitStatusUnavailableState
+			statusPayload["detail_state"] = gitStatusUnavailableState
 		}
 	} else {
 		statusPayload["files"] = snapshot.Files

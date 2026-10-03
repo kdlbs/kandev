@@ -4,7 +4,7 @@
 
 ## Spec authority
 
-`docs/specs/office/` (16 files, plus later requirements/system-design additions below) is the authority for what Office is and why — it outranks any card, register, or comment. **Where code and spec disagree, that is a defect in one of them; do not silently follow the code.** A seventeenth office-tagged spec, [per-agent + per-role tier selection](../../../../docs/specs/office-agent-tier-routing/spec.md), lives in a sibling directory, not under `docs/specs/office/`.
+`docs/specs/office/` is the authority for what Office is and why — it outranks any card, register, or comment. **Where code and spec disagree, that is a defect in one of them; do not silently follow the code.** A seventeenth office-tagged spec, [per-agent + per-role tier selection](../../../../docs/specs/office-agent-tier-routing/spec.md), lives in a sibling directory, not under `docs/specs/office/`.
 
 | Spec | Status | Covers |
 |---|---|---|
@@ -27,8 +27,9 @@
 | `requirements/task-session-termination.md` + `system-design/task-session-termination-01.md` | shipped | Retained-capacity precondition on the three session-termination call sites (role removal, seat-claim displacement, reassignment): don't end a shared (task, agent) session while the agent still holds another capacity |
 | `requirements/seat-claim-decision-guard.md` + `system-design/seat-claim-decision-guard-01.md` | shipped | `claimAutoSeat`'s `NOT EXISTS` guard against a roleless decision race; latent on every shipped decision path but the only defense on that path |
 | `requirements/assignment-wake-rate-limit.md` + `system-design/assignment-wake-rate-limit-01.md` | shipped | Per-task rolling-window admission gate (5 admitted agent-initiated `task_assigned` wakes per 10-minute window) bounding self-reassignment run spam from an agent holding `can_assign_tasks` |
+| `requirements/automation-retries.md` + `system-design/automation-retries.md` | draft | Durable retry policy, attempt scheduling, safe recovery, and paged run history |
 
-The two rows above are the only entries reflecting the newer `requirements/` + `system-design/` split; the other 15 predate that migration and this table has not been reconciled with the full current Office spec set. `docs/specs/office/README.md` no longer carries a tracked specification map (see ADR `2026-09-07-on-demand-document-catalogs`) — run `python3 scripts/list-docs.py specs --system office --format paths` for the authoritative, current list of anything not covered here.
+The four rows above are the only entries reflecting the newer `requirements/` + `system-design/` split; the other 15 predate that migration and this table has not been reconciled with the full current Office spec set. `docs/specs/office/README.md` no longer carries a tracked specification map (see ADR `2026-09-07-on-demand-document-catalogs`) — run `python3 scripts/list-docs.py specs --system office --format paths` for the authoritative, current list of anything not covered here.
 
 `office-agent-tier-routing/spec.md`'s own front matter still calls `routing.md` "authoritative" for tiers, provider order, execution profiles, provider health, and wake-reason policy — that predates `routing.md`'s archival in `docs/specs/INDEX.md` and is now stale; trust the INDEX status over the sibling spec's own text.
 

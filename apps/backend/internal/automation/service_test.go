@@ -246,6 +246,105 @@ func TestService_DeleteRun_TaskNotFound_StillDeletesRun(t *testing.T) {
 	}
 }
 
+func TestService_DeleteRun_DeletesCommittedRetryTaskBeforeBind(t *testing.T) {
+	svc := newTestService(t)
+	deleter := &fakeTaskDeleter{}
+	svc.SetTaskDeleter(deleter)
+	ctx := context.Background()
+	a := &Automation{WorkspaceID: "ws-delete-committed", Name: "delete committed", Enabled: true}
+	require.NoError(t, svc.store.CreateAutomation(ctx, a))
+	group := &RetryGroup{ID: "delete-committed-group", AutomationID: a.ID, Generation: 1, State: RetryGroupLive}
+	require.NoError(t, svc.store.CreateRetryGroup(ctx, group))
+	run := &AutomationRun{
+		ID: "delete-committed-run", AutomationID: a.ID, Status: RunStatusTriggered,
+		RetryGroupID: group.ID, RetryGroupGeneration: 1, RetryState: RetryStateTriggered,
+	}
+	require.NoError(t, svc.store.CreateRun(ctx, run))
+	intent := &RetryTaskIntent{ID: "delete-committed-intent", RunID: run.ID, GroupGeneration: 1, State: retryIntentCreated}
+	require.NoError(t, svc.store.CreateRetryIntent(ctx, intent))
+	require.NoError(t, svc.store.CreateRetryOperation(ctx, &RetryOperation{
+		ID: "delete-committed-operation", IntentID: intent.ID, RunID: run.ID,
+		GroupGeneration: 1, Kind: retryTaskOperationKind, State: retryOperationCommitted,
+		ExternalTaskID: "committed-task",
+	}))
+
+	require.NoError(t, svc.DeleteRun(ctx, run.ID))
+	require.Equal(t, []string{"committed-task"}, deleter.deleted)
+}
+
+func TestService_DeleteAllRuns_DeletesCommittedRetryTaskBeforeBind(t *testing.T) {
+	svc := newTestService(t)
+	deleter := &fakeTaskDeleter{}
+	svc.SetTaskDeleter(deleter)
+	ctx := context.Background()
+	a := &Automation{WorkspaceID: "ws-delete-all-committed", Name: "delete all committed", Enabled: true}
+	require.NoError(t, svc.store.CreateAutomation(ctx, a))
+	group := &RetryGroup{ID: "delete-all-committed-group", AutomationID: a.ID, Generation: 1, State: RetryGroupLive}
+	require.NoError(t, svc.store.CreateRetryGroup(ctx, group))
+	run := &AutomationRun{
+		ID: "delete-all-committed-run", AutomationID: a.ID, Status: RunStatusTriggered,
+		RetryGroupID: group.ID, RetryGroupGeneration: 1, RetryState: RetryStateTriggered,
+	}
+	require.NoError(t, svc.store.CreateRun(ctx, run))
+	intent := &RetryTaskIntent{ID: "delete-all-committed-intent", RunID: run.ID, GroupGeneration: 1, State: retryIntentCreated}
+	require.NoError(t, svc.store.CreateRetryIntent(ctx, intent))
+	require.NoError(t, svc.store.CreateRetryOperation(ctx, &RetryOperation{
+		ID: "delete-all-committed-operation", IntentID: intent.ID, RunID: run.ID,
+		GroupGeneration: 1, Kind: retryTaskOperationKind, State: retryOperationCommitted,
+		ExternalTaskID: "committed-task-all",
+	}))
+
+	require.NoError(t, svc.DeleteAllRuns(ctx, a.ID))
+	require.Equal(t, []string{"committed-task-all"}, deleter.deleted)
+}
+
+func TestService_DeleteRunAfterPreBindFailureDoesNotBreakRetryRecovery(t *testing.T) {
+	svc := newTestService(t)
+	ctx := context.Background()
+	automation := &Automation{
+		ID:          "automation-delete-prebind",
+		WorkspaceID: "workspace-delete-prebind",
+		Name:        "delete prebind",
+		Enabled:     true,
+	}
+	require.NoError(t, svc.store.CreateAutomation(ctx, automation))
+	group := &RetryGroup{
+		ID:           "group-delete-prebind",
+		AutomationID: automation.ID,
+		Generation:   1,
+		State:        RetryGroupLive,
+	}
+	require.NoError(t, svc.store.CreateRetryGroup(ctx, group))
+	parent := &AutomationRun{
+		ID:                   "run-delete-prebind",
+		AutomationID:         automation.ID,
+		TriggerType:          TriggerTypeManual,
+		Status:               RunStatusTriggered,
+		RetryGroupID:         group.ID,
+		RetryGroupGeneration: 1,
+		AttemptNumber:        1,
+		RetryState:           RetryStateTriggered,
+		RetryPolicySnapshot:  `{"mode":"finite","max_retries":"1","delay_seconds":"1","backoff":"fixed"}`,
+	}
+	require.NoError(t, svc.store.CreateRun(ctx, parent))
+	require.NoError(t, svc.store.CreateRetryOutbox(ctx, &RetryOutbox{
+		EventID: "run-delete-prebind:initial",
+		RunID:   parent.ID,
+		State:   retryOutboxPending,
+	}))
+
+	_, err := svc.FinalizeAutomationRetryFailure(ctx, parent.ID, 1, errors.New("provider failed before bind"), "launch")
+	require.NoError(t, err)
+	require.NoError(t, svc.DeleteRun(ctx, parent.ID))
+
+	rows, err := svc.store.ListPendingRetryOutbox(ctx, time.Now().UTC())
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	require.NotEmpty(t, rows[0].RunID)
+	require.NotEqual(t, "run-delete-prebind:initial", rows[0].EventID)
+	require.NoError(t, svc.ReplayPendingRetryEvents(ctx))
+}
+
 func TestService_DeleteRun_PreservesVisibleAutomationTask(t *testing.T) {
 	svc := newTestService(t)
 	deleter := &fakeTaskDeleter{}
@@ -260,6 +359,26 @@ func TestService_DeleteRun_PreservesVisibleAutomationTask(t *testing.T) {
 	run := &AutomationRun{
 		AutomationID: a.ID, TriggerType: TriggerTypeScheduled, Status: RunStatusTaskCreated,
 		TaskID: "visible-task", TriggerData: json.RawMessage(`{}`),
+	}
+	require.NoError(t, svc.store.CreateRun(ctx, run))
+
+	require.NoError(t, svc.DeleteRun(ctx, run.ID))
+	require.Empty(t, deleter.deleted)
+}
+
+func TestService_DeleteRun_SkipsTaskWhenOriginLookupIsUnavailable(t *testing.T) {
+	svc := newTestService(t)
+	deleter := &fakeTaskDeleter{}
+	svc.SetTaskDeleter(deleter)
+	svc.SetTaskOriginLookup(&fakeTaskOriginLookup{results: map[string]fakeOriginResult{
+		"lookup-unavailable-task": {isAutomationRun: true, ok: false},
+	}})
+	ctx := context.Background()
+	a := &Automation{WorkspaceID: "ws-lookup-unavailable", Name: "lookup unavailable", Enabled: true}
+	require.NoError(t, svc.store.CreateAutomation(ctx, a))
+	run := &AutomationRun{
+		AutomationID: a.ID, TriggerType: TriggerTypeScheduled, Status: RunStatusTaskCreated,
+		TaskID: "lookup-unavailable-task",
 	}
 	require.NoError(t, svc.store.CreateRun(ctx, run))
 
@@ -361,6 +480,25 @@ func TestService_DeleteAllRuns_PreservesVisibleAutomationTasks(t *testing.T) {
 
 	require.NoError(t, svc.DeleteAllRuns(ctx, a.ID))
 	require.Equal(t, []string{"hidden-task"}, deleter.deleted)
+}
+
+func TestService_DeleteAllRuns_SkipsTasksWhenOriginLookupIsUnavailable(t *testing.T) {
+	svc := newTestService(t)
+	deleter := &fakeTaskDeleter{}
+	svc.SetTaskDeleter(deleter)
+	svc.SetTaskOriginLookup(&fakeTaskOriginLookup{results: map[string]fakeOriginResult{
+		"bulk-lookup-unavailable-task": {isAutomationRun: true, ok: false},
+	}})
+	ctx := context.Background()
+	a := &Automation{WorkspaceID: "ws-bulk-lookup-unavailable", Name: "bulk lookup unavailable", Enabled: true}
+	require.NoError(t, svc.store.CreateAutomation(ctx, a))
+	require.NoError(t, svc.store.CreateRun(ctx, &AutomationRun{
+		AutomationID: a.ID, TriggerType: TriggerTypeScheduled, Status: RunStatusSucceeded,
+		TaskID: "bulk-lookup-unavailable-task",
+	}))
+
+	require.NoError(t, svc.DeleteAllRuns(ctx, a.ID))
+	require.Empty(t, deleter.deleted)
 }
 
 func TestService_DeleteAllRuns_TaskNotFound_StillClearsRuns(t *testing.T) {
@@ -597,11 +735,11 @@ func TestWorkspaceAuthorizerGatesAccess(t *testing.T) {
 	if _, err := svc.GetWebhookSecret(ctx, a.ID); !errors.Is(err, denied) {
 		t.Fatalf("GetWebhookSecret: %v", err)
 	}
-	if _, err := svc.ListRuns(ctx, a.ID, 10); !errors.Is(err, denied) {
-		t.Fatalf("ListRuns: %v", err)
+	if _, err := svc.ListRetryHistory(ctx, a.ID, "", 10); !errors.Is(err, denied) {
+		t.Fatalf("ListRetryHistory: %v", err)
 	}
-	if _, err := svc.ListWorkspaceRuns(ctx, "ws-a", 10); !errors.Is(err, denied) {
-		t.Fatalf("ListWorkspaceRuns: %v", err)
+	if _, err := svc.ListWorkspaceRetryHistory(ctx, "ws-a", "", 10); !errors.Is(err, denied) {
+		t.Fatalf("ListWorkspaceRetryHistory: %v", err)
 	}
 	if _, err := svc.ListAutomationSummaries(ctx, "ws-a"); !errors.Is(err, denied) {
 		t.Fatalf("ListAutomationSummaries: %v", err)
@@ -724,4 +862,44 @@ func TestDeleteAllRuns_RefusesAForeignWorkspace(t *testing.T) {
 	if err := svc.DeleteAllRuns(ctx, a.ID); !errors.Is(err, denied) {
 		t.Fatalf("expected the workspace check to refuse, got %v", err)
 	}
+}
+
+func TestWebhookTriggerConfigValidatedAtMutationAndImport(t *testing.T) {
+	svc := newTestService(t)
+	ctx := context.Background()
+	a := &Automation{WorkspaceID: "ws-webhook-config", Name: "webhook config", Enabled: true}
+	require.NoError(t, svc.store.CreateAutomation(ctx, a))
+
+	tooDeep := "/a/b/c/d/e/f/g/h/i"
+	tooMany := make([]string, 33)
+	for i := range tooMany {
+		tooMany[i] = "/value"
+	}
+	tooManyConfig, err := json.Marshal(WebhookTriggerConfig{SafeJSONPointers: tooMany})
+	require.NoError(t, err)
+	invalidConfigs := []json.RawMessage{
+		json.RawMessage(`{"safe_json_pointers":["/value~2"]}`),
+		json.RawMessage(`{"safe_json_pointers":["` + tooDeep + `"]}`),
+		tooManyConfig,
+	}
+	for i, config := range invalidConfigs {
+		_, err := svc.AddTrigger(ctx, &AddTriggerRequest{
+			AutomationID: a.ID, Type: TriggerTypeWebhook, Config: config,
+		})
+		require.Error(t, err, "invalid config %d must be rejected", i)
+	}
+
+	validConfig := json.RawMessage(`{"safe_json_pointers":["/object/01"]}`)
+	trigger, err := svc.AddTrigger(ctx, &AddTriggerRequest{
+		AutomationID: a.ID, Type: TriggerTypeWebhook, Config: validConfig,
+	})
+	require.NoError(t, err)
+	invalidUpdate := json.RawMessage(`{"safe_json_pointers":["/value~2"]}`)
+	require.Error(t, svc.UpdateTrigger(ctx, trigger.ID, &UpdateTriggerRequest{Config: &invalidUpdate}))
+
+	_, err = svc.CreateAutomation(ctx, &CreateAutomationRequest{
+		WorkspaceID: "ws-webhook-import", Name: "webhook import",
+		Triggers: []CreateTriggerSpec{{Type: TriggerTypeWebhook, Config: invalidUpdate}},
+	})
+	require.Error(t, err)
 }

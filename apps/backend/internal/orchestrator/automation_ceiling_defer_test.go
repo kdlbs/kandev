@@ -115,7 +115,7 @@ func deferAutomationStartAtCeilingOnStep(
 		taskID: "occupier", sessionID: deferredAutomationOccupierSession, origin: launchOriginAutomatic, seam: "test-setup",
 	}).admitted)
 	f.svc.autoStartAutomationTaskForRun(ctx, f.auto, &models.Task{ID: taskID, Description: "sweep"}, workflowStepID,
-		run.ID, automation.ThreadActionCreated, deferredAutomationThreadReason)
+		run.ID, automation.ThreadActionCreated, deferredAutomationThreadReason, false, nil)
 
 	deferred := f.run(t)
 	surviving, taskErr := base.repo.GetTask(ctx, taskID)

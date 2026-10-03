@@ -93,6 +93,30 @@ test.describe("Automations settings page", () => {
     await expect(testPage.getByRole("spinbutton")).toHaveValue("1");
   });
 
+  test("persists retry policy and history mode", async ({ testPage, seedData }) => {
+    const automations = new AutomationsPage(testPage, seedData.workspaceId);
+    await automations.gotoNew();
+
+    await automations.nameInput.fill("Retry Settings");
+    await automations.selectFrequency("every day");
+    await automations.selectWorkflow("E2E Workflow");
+    await testPage.getByRole("radio", { name: "Retry a fixed number of times" }).check();
+    await testPage.locator("#automation-retry-max").fill("3");
+    await testPage.locator("#automation-retry-delay").fill("12");
+    await testPage.locator("#automation-retry-backoff").click();
+    await testPage.getByRole("option", { name: "Exponential delay", exact: true }).click();
+    await testPage.locator("#automation-retry-history").click();
+    await testPage.getByRole("option", { name: "Retry timeline", exact: true }).click();
+    await automations.saveButton.click();
+
+    await expect(testPage).toHaveURL(/automations$/, { timeout: 15_000 });
+    await automations.openByName("Retry Settings");
+    await expect(testPage.locator("#automation-retry-max")).toHaveValue("3");
+    await expect(testPage.locator("#automation-retry-delay")).toHaveValue("12");
+    await expect(testPage.locator("#automation-retry-backoff")).toContainText("Exponential delay");
+    await expect(testPage.locator("#automation-retry-history")).toContainText("Retry timeline");
+  });
+
   test("create automation with custom schedule expression", async ({ testPage, seedData }) => {
     const automations = new AutomationsPage(testPage, seedData.workspaceId);
     await automations.gotoNew();
