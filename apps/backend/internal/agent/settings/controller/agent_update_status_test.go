@@ -224,3 +224,63 @@ func TestListAgentUpdateStatusesBoundsConcurrentLookups(t *testing.T) {
 		t.Fatalf("maximum concurrent lookups = %d, want at most 5", maximum)
 	}
 }
+
+func TestListAgentUpdateStatusesCallerCancellationKeepsSharedLookup(t *testing.T) {
+	controller := newTestController(map[string]agents.Agent{
+		"claude-acp": agents.NewClaudeACP(),
+	})
+	firstLookupStarted := make(chan struct{})
+	releaseFirstLookup := make(chan struct{})
+	var calls int
+	controller.SetRuntimeUpdateStatusResolver(func(ctx context.Context, _ string) (string, error) {
+		calls++
+		if calls == 1 {
+			close(firstLookupStarted)
+			<-releaseFirstLookup
+		}
+		return "0.71.0", nil
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	type response struct {
+		statuses *dto.ListAgentUpdateStatusResponse
+		err      error
+	}
+	firstDone := make(chan response, 1)
+	go func() {
+		statuses, err := controller.ListAgentUpdateStatuses(ctx)
+		firstDone <- response{statuses: statuses, err: err}
+	}()
+	select {
+	case <-firstLookupStarted:
+	case <-time.After(time.Second):
+		t.Fatal("first registry lookup did not start")
+	}
+	cancel()
+
+	first := <-firstDone
+	if first.err != nil {
+		t.Fatalf("canceled ListAgentUpdateStatuses: %v", first.err)
+	}
+	if got := first.statuses.Statuses[0].CheckState; got != dto.AgentUpdateCheckStateUnknown {
+		t.Fatalf("canceled status state = %q, want unknown", got)
+	}
+
+	retryDone := make(chan response, 1)
+	go func() {
+		statuses, err := controller.ListAgentUpdateStatuses(context.Background())
+		retryDone <- response{statuses: statuses, err: err}
+	}()
+	close(releaseFirstLookup)
+	retry := <-retryDone
+	if retry.err != nil {
+		t.Fatalf("retry ListAgentUpdateStatuses: %v", retry.err)
+	}
+	if got := retry.statuses.Statuses[0].LatestVersion; got != "0.71.0" {
+		t.Fatalf("retry latest version = %q, want 0.71.0", got)
+	}
+	if calls != 1 {
+		t.Fatalf("resolver calls = %d, want one shared lookup", calls)
+	}
+}

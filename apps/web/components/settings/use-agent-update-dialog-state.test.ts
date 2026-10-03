@@ -15,6 +15,7 @@ function deferred<T>() {
 }
 
 const FIRST_PREVIEW: AgentUpdatePreview = {
+  update_mode: "pinned",
   agent_name: "claude-acp",
   package: "@agentclientprotocol/claude-agent-acp",
   current_version: "0.62.0",
@@ -229,6 +230,7 @@ describe("useAgentUpdateDialogState approval", () => {
   it("approves the selected exact target", async () => {
     const onUpdate = vi.fn().mockResolvedValue({
       job_id: "job-1",
+      update_mode: "pinned",
       agent_name: AGENT_NAME,
       status: "queued",
       started_at: "2026-01-01T00:00:00.000Z",
@@ -268,6 +270,7 @@ describe("useAgentUpdateDialogState approval", () => {
     const onPreview = vi.fn().mockResolvedValue(defaultPreview);
     const onUpdate = vi.fn().mockResolvedValue({
       job_id: "job-2",
+      update_mode: "pinned",
       agent_name: AGENT_NAME,
       status: "queued",
       started_at: "2026-01-01T00:00:00.000Z",
@@ -293,10 +296,86 @@ describe("useAgentUpdateDialogState approval", () => {
   });
 });
 
+describe("useAgentUpdateDialogState self-update", () => {
+  it("approves a targetless repair and renders an empty-ID terminal result locally until reset", async () => {
+    const selfPreview: AgentUpdatePreview = {
+      ...FIRST_PREVIEW,
+      update_mode: "self_update",
+      agent_name: "omp-acp",
+      current_version: "",
+      target_version: "",
+      stable_latest_version: "1.1.0",
+      operation: "repair",
+      command: ["omp", "update"],
+      command_string: "omp update",
+    };
+    const terminal: AgentUpdateJob = {
+      update_mode: "self_update",
+      job_id: "",
+      agent_name: "omp-acp",
+      status: "succeeded",
+      operation: "up_to_date",
+      current_version: "1.1.0",
+      started_at: "2026-09-26T12:00:00Z",
+    };
+    const onUpdate = vi.fn().mockResolvedValue(terminal);
+    const { result } = renderHook(() =>
+      useAgentUpdateDialogState({
+        agentName: "omp-acp",
+        onPreview: vi.fn().mockResolvedValue(selfPreview),
+        onUpdate,
+      }),
+    );
+    await act(async () => {
+      await result.current.loadPreview();
+    });
+    await act(async () => {
+      await result.current.approve();
+    });
+    expect(onUpdate).toHaveBeenCalledWith("omp-acp", "", false, "self_update");
+    expect(result.current.activeJob).toEqual(terminal);
+    act(() => result.current.handleOpenChange(false));
+    expect(result.current.activeJob).toBeUndefined();
+  });
+});
+
+describe("useAgentUpdateDialogState no-op selection", () => {
+  it("clears a terminal no-op when the user selects a different target", async () => {
+    const noOp: AgentUpdateJob = {
+      job_id: "",
+      update_mode: "pinned",
+      agent_name: AGENT_NAME,
+      status: "succeeded",
+      operation: "up_to_date",
+      current_version: "0.61.0",
+      started_at: "2026-09-26T12:00:00Z",
+    };
+    const { result } = renderHook(() =>
+      useAgentUpdateDialogState({
+        agentName: AGENT_NAME,
+        onPreview: vi.fn().mockResolvedValue(FIRST_PREVIEW),
+        onUpdate: vi.fn().mockResolvedValue(noOp),
+      }),
+    );
+    await act(async () => {
+      await result.current.loadPreview();
+    });
+    await act(async () => {
+      await result.current.approve();
+    });
+    expect(result.current.activeJob).toEqual(noOp);
+
+    act(() => result.current.selectTarget("0.60.0"));
+
+    expect(result.current.activeJob).toBeUndefined();
+  });
+});
+
 describe("useAgentUpdateDialogState failed target selection", () => {
   it("clears a failed active job when selecting a new target", async () => {
     const failedJob: AgentUpdateJob = {
       job_id: "runtime-update-job-1",
+      update_mode: "pinned",
       agent_name: AGENT_NAME,
       status: "failed",
       operation: "update",

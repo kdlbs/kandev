@@ -29,6 +29,7 @@ function conflict(activeKind: "install" | "update", jobId = "job-1") {
 
 function updateJob(overrides: Partial<AgentUpdateJob> = {}): AgentUpdateJob {
   return {
+    update_mode: "pinned",
     job_id: "job-1",
     agent_name: AGENT,
     status: "updating",
@@ -107,5 +108,27 @@ describe("useAgentRuntimeUpdates", () => {
     await expect(result.current.startUpdate(AGENT, "1.1.0")).resolves.toMatchObject({
       status: "queued",
     });
+  });
+
+  it("returns a terminal self-update no-job result without registering a shared job", async () => {
+    const terminal = updateJob({
+      job_id: "",
+      agent_name: "omp-acp",
+      update_mode: "self_update",
+      status: "succeeded",
+      operation: "up_to_date",
+      current_version: "1.1.0",
+    });
+    updateAgentMock.mockResolvedValueOnce(terminal).mockResolvedValueOnce(terminal);
+    const { result } = render();
+    await expect(result.current.startUpdate("omp-acp", "", false, "self_update")).resolves.toEqual(
+      terminal,
+    );
+    await expect(result.current.startUpdate("omp-acp", "", false, "self_update")).resolves.toEqual(
+      terminal,
+    );
+    expect(updateAgentMock).toHaveBeenCalledTimes(2);
+    expect(updateAgentMock).toHaveBeenCalledWith("omp-acp", { update_mode: "self_update" });
+    expect(result.current.updateJobs["omp-acp"]).toBeUndefined();
   });
 });
