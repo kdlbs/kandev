@@ -207,32 +207,6 @@ describe("ActionMessage — recovery history remains after the agent is back", (
     expect(screen.getByTestId(RESTORE_BUTTON_TEST_ID)).toBeTruthy();
   });
 
-  it("offers history continuation when native session restore is unavailable", async () => {
-    requestMock.mockRejectedValueOnce(
-      new WebSocketRequestError("Native session state is unavailable.", "CONFLICT", {
-        kind: "session_restore_required",
-        recovery_action: "continue_from_history",
-        reason: "native_state_missing",
-      }),
-    );
-
-    renderWithTranscript("WAITING_FOR_INPUT", []);
-    fireEvent.click(screen.getByTestId(RESUME_TEST_ID));
-
-    expect(await screen.findByTestId(RECOVERY_ERROR_TEST_ID)).toBeTruthy();
-    fireEvent.click(await screen.findByTestId("recovery-continue-from-history-button"));
-
-    await waitFor(() => expect(requestMock).toHaveBeenCalledTimes(2));
-    expect(requestMock.mock.calls[1].slice(0, 2)).toEqual([
-      "session.recover",
-      {
-        task_id: TEST_TASK_ID,
-        session_id: TEST_SESSION_ID,
-        action: "continue_from_history",
-      },
-    ]);
-  });
-
   it("retains both causes when manual resume and read-only restore fail", async () => {
     requestMock
       .mockRejectedValueOnce(
@@ -269,6 +243,34 @@ describe("ActionMessage — recovery history remains after the agent is back", (
     expect(screen.queryByTestId("recovery-new-branch-button")).toBeNull();
 
     expect(screen.getByTestId(RESTORE_BUTTON_TEST_ID)).toBeTruthy();
+  });
+});
+
+describe("ActionMessage history continuation", () => {
+  it("offers history continuation when native session restore is unavailable", async () => {
+    requestMock.mockRejectedValueOnce(
+      new WebSocketRequestError("Native session state is unavailable.", "CONFLICT", {
+        kind: "session_restore_required",
+        recovery_action: "continue_from_history",
+        reason: "native_state_missing",
+      }),
+    );
+
+    renderWithTranscript("WAITING_FOR_INPUT", []);
+    fireEvent.click(screen.getByTestId(RESUME_TEST_ID));
+
+    expect(await screen.findByTestId(RECOVERY_ERROR_TEST_ID)).toBeTruthy();
+    fireEvent.click(await screen.findByTestId("recovery-continue-from-history-button"));
+
+    await waitFor(() => expect(requestMock).toHaveBeenCalledTimes(2));
+    expect(requestMock.mock.calls[1].slice(0, 2)).toEqual([
+      SESSION_RECOVERY_METHOD,
+      {
+        task_id: TEST_TASK_ID,
+        session_id: TEST_SESSION_ID,
+        action: "continue_from_history",
+      },
+    ]);
   });
 });
 

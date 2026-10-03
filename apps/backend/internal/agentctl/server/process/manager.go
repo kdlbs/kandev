@@ -1659,7 +1659,7 @@ func (m *Manager) StartWithGeneration(ctx context.Context) (uint64, error) {
 	}
 	if m.cfg.DurableJournalPath != "" && m.deliveryJournalErr != nil {
 		m.status.Store(StatusError)
-		return fmt.Errorf("durable delivery journal unavailable: %w", m.deliveryJournalErr)
+		return 0, fmt.Errorf("durable delivery journal unavailable: %w", m.deliveryJournalErr)
 	}
 
 	// A previous lifecycle may still be live: an agent that exited on its own
