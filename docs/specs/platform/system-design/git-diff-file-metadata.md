@@ -34,6 +34,7 @@ literal selection, and porcelain-owned workspace classification.
 | AC-PLATFORM-GIT-DIFF-FILE-METADATA-001.3 | Callers and transport |
 | AC-PLATFORM-GIT-DIFF-FILE-METADATA-001.4, .5 | Preserved contracts |
 | AC-PLATFORM-GIT-DIFF-FILE-METADATA-001.6, .7 | Plain comparison output; Callers and transport |
+| AC-PLATFORM-GIT-DIFF-FILE-METADATA-001.8, .9 | Built-in cumulative patches; Callers and transport |
 
 ## Plain comparison output
 
@@ -59,6 +60,28 @@ lifetime. No extra subprocess, environment override, config/ref write, retry,
 or new error path is needed. The [managed execution design](git-subprocess-execution.md)
 continues to own shared execution policy. Live tracker patches and workspace
 path selection remain independent under the [path design](workspace-git-path-details.md).
+
+## Built-in cumulative patches
+
+Pass exact `--no-ext-diff` after `diff`, before the comparison ref, in
+`GetCumulativeDiff`'s existing patch invocation. Register it only in the exact
+argument list of `securityutil.IsKnownSafeGitFlag`; reject abbreviated, value,
+suffixed and whitespace variants. This dependency belongs to the same repair,
+with no prefix widening or validation bypass.
+
+An external helper selected by `diff.external` or `GIT_EXTERNAL_DIFF` can
+replace unified patch output with arbitrary text. A zero-exit helper output
+without column-zero `diff --git ` sections reaches the existing parser as a
+successful empty comparison. Select built-in output at the producer rather
+than teaching the parser arbitrary helper formats. `ShowCommit`'s existing
+`git show` uses built-in output by default and remains a positive control;
+this defect does not justify adding a flag there.
+
+Keep `--no-color`, fixed prefixes, base-to-worktree semantics and captured
+environment handling. Do not clear helper variables, rewrite configuration,
+add subprocesses, or change shared execution policy. Other Git producers,
+text conversion, rename detection and comparison-base selection retain their
+existing contracts.
 
 ## Raw extended-header classification
 
@@ -111,7 +134,7 @@ application instance, browser, database, or external service is needed.
 
 ## Preserved contracts
 
-Apart from the two plain-output flags, keep Git argv/environments, first-parent and root behavior, genuinely empty
+Apart from the plain-output flags and cumulative external-diff suppression, keep Git argv/environments, first-parent and root behavior, genuinely empty
 results, fixed prefixes, exact paths and patch bytes, line counts and aggregates,
 per-file/total/file-count limits, skip reasons, and all response shapes.
 Workspace mutation and history-provider code are outside this helper's boundary.
@@ -162,3 +185,28 @@ operations reference already describes faithful read-only comparison data.
 No user-facing option, workflow, schema, or rendered surface changes. The
 source-data-only mobile assessment above applies. Delivery is recorded in the
 [plain-output package](../../../plans/git-comparison-plain-output/plan.md).
+
+External-helper regressions use actual Git through the public cumulative
+operator and registered selected/aggregate HTTP routes. Independent repositories
+carry the same path with distinct content and bases. Cover configured helpers,
+environment-selected helpers and both together, with plain and commit positive
+controls, dirty tracked changes, empty results and cumulative limits. Assert
+explicit expected membership, counts, metadata and patch bytes from a built-in
+raw Git oracle. A native helper fixture emits custom output and writes an owned
+execution sentinel; a deliberate fixture control proves it can run, while
+comparison reads must leave that sentinel absent. Keep the actual Git executable
+in use. Prefer re-executing the native test binary over a POSIX-only script;
+scope only demonstrated platform-specific assertions, not functional coverage.
+
+Snapshots bracket production reads after fixture setup and retain config bytes,
+HEAD, refs, index entries, worktree status and file bytes. Snapshot/oracle Git
+diffs must select built-in output too, so fixture helpers cannot corrupt the
+oracle or execute during observation. Establish helper environment overrides
+before manager construction, or use the existing explicit operator environment
+provider; ambient changes after captured-environment construction are invalid
+coverage. Do not alter existing shared fixture helpers for this repair.
+
+The mobile and public-docs assessment remains data-only: the existing Git
+operations guide's comparison metadata and read-only guidance is accurate;
+there is no UI, copy, schema, user setting or workflow change. Delivery is in the
+[built-in cumulative package](../../../plans/git-cumulative-built-in-patch/plan.md).

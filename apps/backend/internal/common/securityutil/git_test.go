@@ -2,6 +2,21 @@ package securityutil
 
 import "testing"
 
+// @covers AC-PLATFORM-GIT-DIFF-FILE-METADATA-001.8
+func TestIsKnownSafeGitFlagAllowsNoExtDiff(t *testing.T) {
+	if !IsKnownSafeGitFlag("--no-ext-diff") {
+		t.Fatal("the built-in cumulative patch flag must be allowed")
+	}
+}
+
+func TestIsKnownSafeGitFlagRejectsNoExtDiffVariants(t *testing.T) {
+	for _, flag := range []string{"--no-ext-dif", "--no-ext-diff=true", "--no-ext-diff=", "--no-ext-diff-more", "--no-ext-diffs", "--no-ext-diff ", " --no-ext-diff"} {
+		if IsKnownSafeGitFlag(flag) {
+			t.Errorf("IsKnownSafeGitFlag(%q) = true, want false", flag)
+		}
+	}
+}
+
 // @covers AC-PLATFORM-GIT-DIFF-FILE-METADATA-001.6
 func TestIsKnownSafeGitFlagAllowsNoColor(t *testing.T) {
 	if !IsKnownSafeGitFlag("--no-color") {

@@ -293,6 +293,7 @@ func (g *GitOperator) GetCumulativeDiff(ctx context.Context, baseCommit string) 
 		ctx,
 		"diff",
 		"--no-color",
+		"--no-ext-diff",
 		"--src-prefix=a/",
 		"--dst-prefix=b/",
 		baseCommit,
