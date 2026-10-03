@@ -788,6 +788,16 @@ mcp.write_task_document
 
 These registrations back Kandev's agent/MCP bridge. The subset registered in a process depends on its MCP handler mode and enabled capabilities. They are internal transport shims: raw `/ws` rejects every one of them before handler dispatch. Use the MCP tools exposed to the agent so tool schemas, task/session scoping, and compatibility handling remain intact. In particular, `mcp.stop_task` is the internal action behind task-mode `stop_task_kandev`; External MCP does not register that tool.
 
+The `mcp.get_task_plan` shim accepts optional `offset`, `limit`, and
+`expected_version` from the agent tool. Offset and limit count Unicode code
+points. Supplying either selects an exact bounded fragment; omitting both
+preserves the full read. Partial results include the snapshot version, whole
+plan lengths, returned lengths, `has_more`, and `next_offset`; a stale expected
+version returns a conflict without content. These fields do not change the
+browser's `task.plan.get` contract. Use
+[the MCP plan-read guide](automation-and-mcp.md#read-only-the-relevant-part-of-a-plan)
+for defaults, bounds, and examples.
+
 ## Emitted notifications and recipients
 
 The following catalog lists actions with current non-test emission paths. It intentionally excludes constants for which no active emitter was found, including the old `acp.*` compatibility constants, `permission.requested`, `input.requested`, `agent.updated`, and `office.activity.created`. Permission and clarification state currently arrives through session message records instead.

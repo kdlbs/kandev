@@ -774,7 +774,15 @@ Kandev retries temporary connection issues in the background.
 - **Run** stays available when the selected comment and primary session are eligible.
 - A recovered comment must finish browser-draft cleanup before you can run it.
 
-Agents use `create_task_plan_kandev`, `get_task_plan_kandev`, `update_task_plan_kandev`, and `delete_task_plan_kandev`. Human edits are therefore visible to the next agent that reads the plan. A plan records intent; verify that code and review still match it. For safe agent corrections, see [Protect task plan writes](automation-and-mcp.md#protect-task-plan-writes).
+Agents use `create_task_plan_kandev`, `get_task_plan_kandev`, `edit_task_plan_kandev`, `update_task_plan_kandev`, and `delete_task_plan_kandev`. Human edits are therefore visible to the next agent that reads the plan. A plan records intent; verify that code and review still match it. For safe agent corrections, see [Protect task plan writes](automation-and-mcp.md#protect-task-plan-writes).
+
+Large plans support bounded reads through `get_task_plan_kandev(offset, limit)`.
+Ranges count Unicode code points and return exact fragments with a version and
+continuation offset. Pass that version as `expected_version` on later pages
+to detect intervening edits. Omit both range arguments to read the whole plan;
+never use a fragment as a replacement document. See
+[Read only the relevant part of a plan](automation-and-mcp.md#read-only-the-relevant-part-of-a-plan)
+for bounds, pagination, and a fragment-edit example.
 
 ### Protect agent plan writes
 
