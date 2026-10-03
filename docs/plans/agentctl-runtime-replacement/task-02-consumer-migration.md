@@ -147,3 +147,13 @@ The branch was rebased onto `2254b51f14e89a1ec14ed63fd67800b746d88798`. The sing
 - Targeted Prettier and `git diff origin/main..HEAD --check` passed.
 - `make -C apps/backend build e2e-plugin-package` and `pnpm run build:e2e` passed. The fresh zero-retry Chromium run passed all four cases: session readiness after context reset (7.1s), workflow target delivery (35.2s), dirty-checkout restoration (5.4s), and progressive task navigation (12.0s). The zero-retry mobile repository-set drawer case passed (2.4s).
 - Hosted checks for the published exact head remain required.
+
+### Hosted CI regression fixes (2026-10-03)
+
+The first hosted run on the rebased head exposed two independent test failures. In run `37102564005`, `task-navigation-helpers.test.ts` mocked `@playwright/test` without its `test` export; importing the fixture module then failed before the unit assertions. The test now isolates the runtime fixture module and keeps the Vitest `expect` adapter. In run `37102564044`, the file-tree search E2E expected a collapsed directory row to be immediately visible even though the tree can restore a virtualized scroll position. It now uses the existing bounded row waiter to mount the collapsed row before checking it.
+
+- RED: the focused Vitest suite failed with `No "test" export is defined on the "@playwright/test" mock`; the hosted E2E artifact failed while locating the `deep` row.
+- GREEN: `pnpm --filter @kandev/web test -- --run e2e/helpers/task-navigation-helpers.test.ts` passed (2 tests).
+- GREEN: `pnpm --dir apps/web e2e:run --host --shards 1 --project chromium tests/task/file-tree-search.spec.ts --grep 'search reveals matches inside collapsed folders'` passed (1 test, retries disabled by the managed runner).
+- `pnpm --filter @kandev/web lint`, `pnpm --filter @kandev/web run e2e:sleep-ratchet` (12 added and 145 modified E2E files clean), and `git diff --check` passed.
+- Hosted validation on a new published head is still required; no green CI claim is made from these focused local runs.
