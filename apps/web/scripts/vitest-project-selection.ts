@@ -44,6 +44,7 @@ export const REVIEWED_NODE_TEST_FILES: readonly string[] = [
   "scripts/lib/nonjsx-copy.test.ts",
   "scripts/lib/nonjsx-scope.test.ts",
   "scripts/lib/removed-literals.test.ts",
+  "e2e/helpers/git-helper.test.ts",
   "scripts/vitest-project-selection.test.ts",
   "scripts/vitest-worker-budget.test.ts",
 ];

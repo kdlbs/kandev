@@ -600,6 +600,7 @@ export type SessionRuntimeSliceActions = {
       currentModelId: string;
       models: SessionModelEntry[];
       configOptions: ConfigOptionEntry[];
+      configOptionsSettled?: boolean;
       configBaseline?: Record<string, string>;
       settingsPolicy?: "provider_restored";
       /** Set when the session started on the profile's fallback model

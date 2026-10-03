@@ -48,6 +48,8 @@ type Manager struct {
 	ownerAdmission        OwnerAdmission
 	worktreeMgr           *worktree.Manager
 	mcpProvider           McpConfigProvider
+	mcpResolver           MCPResolutionProvider
+	mcpStateRepo          mcpconfig.SessionMCPSelectionStateRepository
 	cursorInventoryLoader func(context.Context) (mcpconfig.CursorNativeInventory, error)
 	cursorNativeMCPRunner mcpconfig.NativeMCPCommandRunner
 	logger                *logger.Logger
@@ -345,6 +347,18 @@ func (m *Manager) SetManagedGoCacheEnvironmentProvider(provider ManagedGoCacheEn
 // resolver used by standalone managed-agent launches.
 func (m *Manager) SetManagedRuntimeSelectionStore(store managedruntime.SelectionReader) {
 	m.managedRuntimeSelections = store
+}
+
+// SetMCPResolver wires the workspace catalog and additive scope resolver.
+// Leaving it unset preserves legacy profile JSON behavior for compatibility.
+func (m *Manager) SetMCPResolver(resolver MCPResolutionProvider) {
+	m.mcpResolver = resolver
+}
+
+// SetMCPSelectionStateRepository wires durable desired/applied state for
+// task-session MCP reconfiguration. It is optional for embedded managers.
+func (m *Manager) SetMCPSelectionStateRepository(repo mcpconfig.SessionMCPSelectionStateRepository) {
+	m.mcpStateRepo = repo
 }
 
 // SetActivityCoordinator wires the install-wide host-resource activity gate.

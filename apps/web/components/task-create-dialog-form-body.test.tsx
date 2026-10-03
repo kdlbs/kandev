@@ -163,6 +163,10 @@ function makeFs(): DialogFormState {
   return {
     blockedBy: [],
     setBlockedBy: () => undefined,
+    mcpServerIds: [],
+    setMcpServerIds: () => undefined,
+    mcpServerIdsDirty: false,
+    setMcpServerIdsDirty: () => undefined,
     taskName: "",
     autopilot: false,
     setAutopilot: () => {},

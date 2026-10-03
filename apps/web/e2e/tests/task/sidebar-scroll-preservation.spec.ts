@@ -296,6 +296,7 @@ test.describe("sidebar scrolling", () => {
       created.push({ id: task.id, title });
     }
 
+    // Start on a different task so selecting the off-screen target changes routes.
     const initialTask = created.at(-2)!;
     await testPage.goto(`/t/${initialTask.id}`);
     const session = new SessionPage(testPage);
@@ -506,23 +507,28 @@ test.describe("sidebar scrolling", () => {
     });
     await expect(scrollContainer).toHaveAttribute("data-can-scroll-down", "false");
 
-    const aboveTitle = await scrollContainer.evaluate(
-      (element, { taskTitles, activeTitle }) => {
+    const aboveTitles = await scrollContainer.evaluate(
+      (element, taskTitles) => {
         const containerRect = element.getBoundingClientRect();
         const rows = element.querySelectorAll<HTMLElement>("[data-testid='sidebar-task-item']");
+        const titles: string[] = [];
         for (const row of rows) {
           const rowRect = row.getBoundingClientRect();
           if (rowRect.bottom <= containerRect.top + 1) {
             const title = taskTitles.find((candidate) => row.textContent?.includes(candidate));
-            if (title && title !== activeTitle) return title;
+            if (title) titles.push(title);
           }
         }
-        return null;
+        return titles;
       },
-      { taskTitles: created.map(({ title }) => title), activeTitle: initialTask.title },
+      created.map(({ title }) => title),
     );
-    if (!aboveTitle) throw new Error("Expected a rendered task row above the viewport");
-    const targetTask = created.find(({ title }) => title === aboveTitle)!;
+    const targetTask = created.find(
+      ({ id, title }) => id !== initialTask.id && aboveTitles.includes(title),
+    );
+    if (!targetTask) {
+      throw new Error("Expected an off-screen task other than the currently selected task");
+    }
     expect(targetTask.id).not.toBe(initialTask.id);
     const targetRow = session.sidebarTaskItem(targetTask.title);
     const before = await Promise.all([scrollContainer.boundingBox(), targetRow.boundingBox()]);

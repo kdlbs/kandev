@@ -24,6 +24,7 @@ export function buildStartRequest(
     autoStart?: boolean;
     profileExplicit?: boolean;
     attachments?: MessageAttachment[];
+    mcpServerIds?: string[];
   },
 ): BuildResult {
   return {
@@ -39,6 +40,9 @@ export function buildStartRequest(
       auto_start: opts?.autoStart,
       attachments: opts?.attachments,
       ...(opts?.profileExplicit !== undefined ? { profile_explicit: opts.profileExplicit } : {}),
+      ...(opts?.mcpServerIds && opts.mcpServerIds.length > 0
+        ? { mcp_server_ids: opts.mcpServerIds }
+        : {}),
     },
     layout: opts?.planMode ? "plan" : "default",
   };

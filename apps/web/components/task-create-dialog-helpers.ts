@@ -215,6 +215,8 @@ export type BuildCreatePayloadArgs = {
   priority?: TaskPriority;
   /** Task-only replacements for fixed workflow step agent profiles. */
   workflowAgentOverrides?: Record<string, string>;
+  /** Task-scoped MCP additions. */
+  mcpServerIds?: string[];
 };
 
 function optionalString(value?: string): string | undefined {
@@ -288,6 +290,7 @@ export function buildCreateTaskPayload(args: BuildCreatePayloadArgs): CreateTask
     // records the requested agent start as a start-when-unblocked intent rather
     // than launching now, so a chain runs in order instead of all at once.
     blocked_by: nonEmptyArray(args.blockedBy),
+    mcp_server_ids: nonEmptyArray(args.mcpServerIds),
   };
 }
 

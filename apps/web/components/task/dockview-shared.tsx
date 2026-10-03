@@ -11,7 +11,6 @@ import { useAppStore } from "@/components/state-provider";
 import { useFileEditors } from "@/hooks/use-file-editors";
 import { usePanelActive } from "@/hooks/use-panel-active";
 import { useSessionGitStatus } from "@/hooks/domains/session/use-session-git-status";
-import { useSessionGitRefresh } from "@/hooks/domains/session/use-session-git-refresh";
 import { useSessionCommits } from "@/hooks/domains/session/use-session-commits";
 import { useEnvironmentSessionId } from "@/hooks/use-environment-session-id";
 import type { ReviewSource } from "@/hooks/domains/session/use-review-sources";
@@ -51,6 +50,7 @@ import { BackgroundWorkPanel } from "./chat/background-work/background-work-pane
 import { setPanelTitle } from "@/lib/layout/panel-portal-manager";
 import { usePortalSlot } from "@/lib/layout/panel-portal-host";
 import { ENV_SCOPED_DOCKVIEW_COMPONENTS } from "@/lib/state/dockview-env-scoped-components";
+import { useResyncGitStatusOnTabActivate } from "@/hooks/use-resync-git-status-on-tab-activate";
 import { useTranslation } from "react-i18next";
 
 // ---------------------------------------------------------------------------
@@ -236,31 +236,6 @@ function ChatContent({ panelId, params }: { panelId: string; params: Record<stri
       panelId={panelId}
     />
   );
-}
-
-/**
- * Force a fresh git-status push whenever the diff panel becomes visible.
- *
- * Background: the diff panel's content is derived from `gitStatus` (the
- * per-file `.diff` string), which only refreshes when a `session.git.event`
- * status_update arrives from agentctl's workspace poll loop. That loop runs at
- * 3s (fast) only while the workspace is in fast poll mode; if the focus→fast
- * upgrade lost a race with agentctl startup the loop can sit in slow mode (30s)
- * and the open diff shows stale content until the next slow tick.
- *
- * This is the diff-side analog of `useResyncOnTabActivate` in
- * file-editor-panel.tsx (which force-syncs editor content on activation). Tab
- * activation is a deterministic, user-driven "I'm about to look at this diff"
- * signal, so we ask the backend for a fresh git-status snapshot via the
- * explicit `session.git.refresh` request. Focus itself remains an ACK-only
- * control signal, avoiding replay on ordinary task switching. No-op when the
- * session isn't focused. Visibility is used instead of active state because
- * a right-column group can remain visible while another dockview group owns
- * global focus.
- */
-function useResyncGitStatusOnTabActivate(panelId: string, sessionId: string | null) {
-  const isVisible = usePanelActive(panelId);
-  useSessionGitRefresh(sessionId, isVisible);
 }
 
 /** Render the changes/diff viewer for the panel's params (`kind` "all" or
