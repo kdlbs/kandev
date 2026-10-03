@@ -36,6 +36,7 @@ type AgentStreamEventPayload = lifecycle.AgentStreamEventPayload
 type AgentExecution = lifecycle.AgentExecution
 type CachedModeState = lifecycle.CachedModeState
 type IdleSuspensionIdentity = lifecycle.IdleSuspensionIdentity
+type RetainedPromptFailureError = lifecycle.RetainedPromptFailureError
 type WorkspaceRecoveryProjectionError = lifecycle.WorkspaceRecoveryProjectionError
 type BackgroundWorkloadProbeResult = client.ProbeResult
 

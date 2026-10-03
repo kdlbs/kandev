@@ -33,23 +33,24 @@ test("phone: continuation Cancel is visible while running and preserves history"
     await assertNoDocumentHorizontalOverflow(testPage);
     assertNativeContinuationTrace(fixture.tracePath, "read-hold");
     await session.recoveryCancelRetryButton().tap();
-    await waitForContinuationMessage(
+    const cancelled = await waitForContinuationMessage(
       apiClient,
       fixture.sessionId,
       (message) => message.metadata?.recovery_disposition === "cancelled",
     );
-    await expect(session.recoveryResumeButton()).toBeVisible();
+    expect(cancelled.metadata?.runtime_retained).toBe(true);
+    await expect(session.recoveryResumeButton()).toHaveCount(0);
+    await expect(session.recoveryFreshButton()).toHaveCount(0);
     await expect(session.transientRetryCard()).toBeHidden();
-    for (const action of [session.recoveryResumeButton(), session.recoveryFreshButton()]) {
-      const target = await action.boundingBox();
-      expect(target?.height).toBeGreaterThanOrEqual(44);
-    }
     await expect(session.activeChat()).toContainText("partial history preserved");
-    const recovery = testPage.getByTestId("session-recovery-card");
-    await expect(recovery).not.toContainText("exhausted");
-    const details = recovery.getByText("Technical details", { exact: true });
-    await details.click();
-    await expect(recovery).toContainText("Automatic continuation");
+    await expect(testPage.getByTestId("session-recovery-card")).toHaveCount(0);
+    await expect
+      .poll(async () => {
+        const { sessions } = await apiClient.listTaskSessions(fixture.taskId);
+        return sessions.find((candidate) => candidate.id === fixture.sessionId)?.state;
+      })
+      .toBe("WAITING_FOR_INPUT");
+    assertNativeContinuationTrace(fixture.tracePath, "read-hold");
     await assertNoDocumentHorizontalOverflow(testPage);
   } finally {
     await fixture.dispose();

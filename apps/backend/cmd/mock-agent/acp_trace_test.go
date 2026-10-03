@@ -21,7 +21,8 @@ func TestTraceACPIsOptInAndRecordsRequestIdentity(t *testing.T) {
 	if err := json.Unmarshal(data, &record); err != nil {
 		t.Fatalf("decode ACP trace: %v", err)
 	}
-	if record["event"] != "set_mode" || record["session_id"] != "native-session" || record["mode_id"] != "plan-mock" {
+	if record["event"] != "set_mode" || record["session_id"] != "native-session" || record["mode_id"] != "plan-mock" ||
+		record["process_id"] == "" || record["connection_id"] == "" {
 		t.Fatalf("ACP trace record = %#v", record)
 	}
 }

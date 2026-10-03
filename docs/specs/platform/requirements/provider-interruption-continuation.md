@@ -62,8 +62,10 @@ when conversation restoration and the interrupted work are unambiguous.
 - **AC-PLATFORM-INTERRUPTION-CONTINUATION-001.3:** Automatic continuation shall
   preserve the task session, workspace, provider conversation, selected
   execution profile, model, mode, and permission settings. It shall retain
-  the transcript and tool results already persisted by Kandev, restore the
-  provider's saved history under the same native session ID, and permit confirmed
+  the transcript and tool results already persisted by Kandev. The
+  [runtime continuity contract](transient-turn-runtime-continuity.md) preserves
+  a proven usable runtime; otherwise, restore the provider's saved history
+  under the same native session ID. Permit confirmed
   read-only inspection when interrupted read results are absent. It shall send
   a continuation instruction instead
   of the original prompt or its attachments, and never silently create a fresh
@@ -97,7 +99,8 @@ bounded and subordinate to user actions.
   delete, start fresh, a new user prompt, and model or profile changes shall
   supersede pending automatic work. Late callbacks shall not resume the old
   episode or affect its successor. Cancelling waiting recovery shall expose
-  manual actions; cancelling dispatched continuation shall stop that turn
+  the normal composer when runtime continuity is proven, or manual recovery
+  actions otherwise; cancelling dispatched continuation shall stop that turn
   through the ordinary cancellation path.
 - **AC-PLATFORM-INTERRUPTION-CONTINUATION-002.3:** Browser reload or multiple
   viewers shall not dispatch additional attempts. Backend shutdown shall

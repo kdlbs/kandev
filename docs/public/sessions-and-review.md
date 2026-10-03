@@ -61,11 +61,11 @@ Right-click an agent tab on desktop to manage it. Available actions depend on it
 
 Stopping a session is not deletion. Resume needs the executor's session record. A removed worktree, expired remote environment, restarted executor, removed profile, or missing runtime record can require a fresh session.
 
-When startup or resume fails:
+When a turn, startup, or resume fails:
 
-- Kandev adds one recovery entry to the selected session's chat.
-- A temporary provider failure can still need manual recovery when a turn has already produced output or used tools. The recovery message does not imply that automatic retries ran. Select **Resume** to restore the saved conversation, or expand **Technical details** to inspect the failure.
-- The current unresolved failure replaces the blocked message composer with one recovery card. Automatic resume and workspace-restore failures appear in that card, with separate causes in Technical details, rather than a second session banner. Older entries keep their message and technical details without stale controls.
+- For a supported ACP provider's classified temporary capacity, overload, or rate-limit error, Kandev records a failed turn and keeps the same runtime available when it can confirm that runtime is still usable. It retries only when it can establish that the prompt produced no assistant output or tool activity; otherwise, it does not replay the prompt. You can send another message or choose a supported model in the same session, and retry feedback reports only attempts that started.
+- When startup or resume fails, or Kandev detects an unusable runtime, it adds one recovery entry to the selected session's chat. Select **Resume** to restore the saved conversation, or expand **Technical details** to inspect the failure.
+- For failures that require manual startup or runtime recovery, the current unresolved failure replaces the blocked message composer with one recovery card. Automatic resume and workspace-restore failures appear in that card, with separate causes in Technical details, rather than a second session banner. Older entries keep their message and technical details without stale controls.
 - In Kanban preview, selecting Plan keeps the recovery card below the Plan content, in the composer area.
 - Repeated delivery of the same failure does not add another entry.
 - History loading and new messages keep the normal chat scroll behavior.
@@ -93,13 +93,16 @@ resend the original request or create a replacement conversation automatically.
 
 Recovery shares the existing five-attempt budget and paced backoff. One notice
 shows waiting, reconnecting, or continuing, with **Cancel** available while the
-continued turn runs. Cancellation returns to manual recovery. An exhaustion
-message reports attempts that actually started; a refused recovery does not
-claim retries ran. Writes, shell commands, pending or unknown tool outcomes,
-permissions, background work, missing saved identity, and unsupported agents
-require manual recovery. New human work takes priority. Backend restart retires
-the old automatic notice without launching a continuation or interrupting
-adopted live work.
+continued turn runs. Cancellation returns control to Chat when the ACP runtime
+is still usable; normal recovery actions remain available if it is not. An
+exhaustion message reports attempts that actually started; a refused recovery
+does not claim retries ran. Writes, shell commands, pending or unknown tool
+outcomes, permissions, and background work prevent automatic continuation. If
+the runtime remains usable, send a follow-up in the same conversation. If it is
+unavailable, use the manual recovery actions. Missing saved identity and
+unsupported agents also require manual recovery. New human work takes priority.
+Backend restart retires the old automatic notice without launching a
+continuation or interrupting adopted live work.
 
 To try this on a selected installation, enable
 **Interrupted conversation continuation** (`features.providerInterruptionContinuation`)

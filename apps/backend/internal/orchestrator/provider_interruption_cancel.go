@@ -58,6 +58,10 @@ func (s *Service) cancelContinuationRetry(ctx context.Context, taskID, sessionID
 	if err := s.CancelAgent(ctx, sessionID); err != nil {
 		return false
 	}
+	if entry.retainedRuntime != nil {
+		s.finishRetainedRetryWithoutDispatch(context.WithoutCancel(ctx), taskID, sessionID, entry, "cancelled")
+		return true
+	}
 	s.finishContinuationManual(context.WithoutCancel(ctx), taskID, sessionID, "", entry, "cancelled")
 	return true
 }

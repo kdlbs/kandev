@@ -85,6 +85,23 @@ func TestRecordTerminalOutcomeRetainsCompleteAndErrorEvents(t *testing.T) {
 	}
 }
 
+func TestRecordTerminalOutcomePreservesRetainedPromptFailureDisposition(t *testing.T) {
+	recorder := &fakeTurnOutcomeRecorder{}
+	m := &Manager{}
+	m.SetTurnOutcomeRecorder("instance-1", recorder)
+	event := adapter.AgentEvent{
+		Type:                     adapter.EventTypeError,
+		PromptFailureDisposition: streams.PromptFailureDispositionRetainRuntime,
+	}
+	m.recordTerminalOutcome(&event)
+	if len(recorder.calls) != 1 {
+		t.Fatalf("recorder calls = %d, want 1", len(recorder.calls))
+	}
+	if got := recorder.calls[0].event.PromptFailureDisposition; got != streams.PromptFailureDispositionRetainRuntime {
+		t.Fatalf("retained disposition = %q, want retain_runtime", got)
+	}
+}
+
 // TestRecordTerminalOutcomeIgnoresNonTerminalEvents pins that every other
 // event type -- including the two excluded MCP-attachment sites' type and
 // the permission lifecycle types -- must never reach the recorder. AC-004 is

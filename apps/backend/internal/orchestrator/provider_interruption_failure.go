@@ -18,7 +18,7 @@ func (s *Service) settleContinuationFailureLocked(ctx context.Context, data watc
 	started := entry.started
 	entry.mu.Unlock()
 	if started >= transientMaxAttempts && data.ContinuationSafety.SafeFor(data.PromptGeneration) {
-		data.RecoveryDisposition = "exhausted"
+		data.RecoveryDisposition = recoveryDispositionExhausted
 	}
 	nextState := models.TaskSessionStateWaitingForInput
 	s.finalizeAutomationRun(ctx, data.TaskID, false, agentFailureMessage(data))

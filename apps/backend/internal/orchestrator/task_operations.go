@@ -9011,6 +9011,10 @@ func (s *Service) checkSessionPromptable(taskID, sessionID string, state models.
 // task to REVIEW for non-transient errors, and completes the in-flight turn.
 // Returns the (possibly remapped) error for the caller to surface.
 func (s *Service) handlePromptError(ctx context.Context, taskID, sessionID string, previousSessionState models.TaskSessionState, err error) error {
+	var retainedFailure *lifecycle.RetainedPromptFailureError
+	if errors.As(err, &retainedFailure) {
+		return err
+	}
 	if isTransientPromptError(err) && s.isSessionResetInProgress(sessionID) {
 		s.logger.Warn("prompt deferred while session reset is in progress; retry expected",
 			zap.String("task_id", taskID),

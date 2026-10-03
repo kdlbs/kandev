@@ -14,6 +14,7 @@ import (
 const recoveryModeContinue = "continue"
 const recoveryModeReplay = "replay"
 const recoveryDispositionManual = "manual"
+const recoveryDispositionExhausted = "exhausted"
 const failureKindProviderInterrupted = "provider_interrupted"
 
 // continuationBinding is an immutable admission snapshot, retained only in process.

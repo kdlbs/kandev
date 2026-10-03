@@ -43,6 +43,38 @@ func TestAgentLifecycleSettingsPolicyReachesWatcher(t *testing.T) {
 	}
 }
 
+func TestAgentTurnFailedEventReachesHandlerWithFailureIdentity(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	eventBus := newMockEventBus()
+	received := make(chan AgentEventData, 1)
+	w := NewWatcher(eventBus, EventHandlers{
+		OnAgentTurnFailed: func(_ context.Context, data AgentEventData) { received <- data },
+	}, "turn-failure-test", createTestLogger())
+	if err := w.Start(ctx); err != nil {
+		t.Fatalf("start watcher: %v", err)
+	}
+	t.Cleanup(func() { _ = w.Stop() })
+
+	payload := lifecycle.AgentEventPayload{
+		TaskID: "task-1", SessionID: "session-1", AgentExecutionID: "execution-1",
+		TurnID: "turn-1", PromptGeneration: 9, ErrorMessage: "capacity",
+		PromptFailureDisposition: streams.PromptFailureDispositionRetainRuntime,
+	}
+	if err := eventBus.Publish(ctx, events.AgentTurnFailed, bus.NewEvent(events.AgentTurnFailed, "test", payload)); err != nil {
+		t.Fatalf("publish retained failure: %v", err)
+	}
+	select {
+	case got := <-received:
+		if got.PromptFailureDisposition != streams.PromptFailureDispositionRetainRuntime ||
+			got.PromptGeneration != 9 || got.TurnID != "turn-1" || got.ErrorMessage != "capacity" {
+			t.Fatalf("watcher changed retained failure identity: %+v", got)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("watcher did not dispatch agent.turn_failed")
+	}
+}
+
 func (s *mockSubscription) Unsubscribe() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()

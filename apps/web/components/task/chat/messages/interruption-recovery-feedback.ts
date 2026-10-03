@@ -5,6 +5,7 @@ type RecoveryMetadata = {
   recovery_disposition?: string;
   recovery_reason?: string;
   attempts_started?: number;
+  runtime_retained?: boolean;
 };
 
 export function continuationPhase(metadata: RecoveryMetadata) {
@@ -31,6 +32,23 @@ export function interruptionRecoveryKey(metadata: RecoveryMetadata) {
       return "chat:providerRecoveryEvidenceBody";
   }
   return "chat:providerManualRecoveryBody";
+}
+
+export function retainedTurnRecoveryKey(metadata: RecoveryMetadata) {
+  if (!metadata.runtime_retained) return undefined;
+  if (metadata.recovery_disposition === "cancelled") {
+    return "chat:retainedTurnRecoveryCancelledBody";
+  }
+  if (metadata.recovery_disposition === "exhausted") {
+    const count = metadata.attempts_started;
+    return Number.isInteger(count) && count! > 0
+      ? "chat:retainedTurnRecoveryExhaustedBody"
+      : "chat:retainedTurnRecoveryStoppedBody";
+  }
+  if (metadata.recovery_disposition === "refused") {
+    return "chat:retainedTurnRecoveryStoppedBody";
+  }
+  return undefined;
 }
 
 export function retryNoticeVisible(state: string | undefined, metadata: RecoveryMetadata) {

@@ -117,6 +117,7 @@ func main() {
 // are gated on this negotiated advertisement, so the mock must earn eligibility
 // the same way a real bridge does or E2E would prove nothing about the gate.
 func (a *mockAgent) Initialize(_ context.Context, _ acp.InitializeRequest) (acp.InitializeResponse, error) {
+	traceACP("initialize", "", nil)
 	var meta map[string]any
 	if mockPromptQueueingEnabled() {
 		meta = map[string]any{
@@ -357,6 +358,7 @@ func ptr(s string) *string {
 // is only reached on resume, so no resumed-guard is needed here (unlike TUI).
 func (a *mockAgent) LoadSession(ctx context.Context, req acp.LoadSessionRequest) (acp.LoadSessionResponse, error) {
 	traceACP("session_load", string(req.SessionId), nil)
+	traceACP("resume", string(req.SessionId), nil)
 	if err := mockContinuationRestoreFailure(req.SessionId); err != nil {
 		return acp.LoadSessionResponse{}, err
 	}
@@ -462,6 +464,9 @@ func (a *mockAgent) Prompt(ctx context.Context, req acp.PromptRequest) (acp.Prom
 		return resp, err
 	}
 	if resp, err, handled := a.handleMockInterruptionContinuation(promptCtx, req.SessionId, prompt); handled {
+		return resp, err
+	}
+	if resp, err, handled := a.handleRetainedCapacity(promptCtx, req.SessionId, prompt); handled {
 		return resp, err
 	}
 	// The /overloaded scenario must surface a real prompt-time ACP *error*
@@ -659,6 +664,7 @@ func (a *mockAgent) CloseSession(_ context.Context, req acp.CloseSessionRequest)
 		}
 	}
 	_ = os.Remove(overloadedCounterPath(req.SessionId))
+	_ = os.Remove(retainedCapacityCounterPath(req.SessionId))
 	_ = os.Remove(transportLostCounterPath(req.SessionId))
 	_ = os.Remove(mockContinuationPath(req.SessionId))
 	if dynamicFallbackCounterID == "" {

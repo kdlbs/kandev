@@ -110,10 +110,10 @@ func buildReplaySessionUpdate(frame replayfixtures.Frame) (acp.SessionUpdate, bo
 // real acp.AgentSideConnection wrapping the fixture-driven fake agent. It
 // returns the live Adapter (so callers can read state the replay actually
 // settled, such as ProviderErrorContext), the tokenized event sequence
-// observed on updatesCh (excluding the terminal error, which has no
-// AgentEvent counterpart on this path), and the error Adapter.Prompt
-// returned.
-func replayFixtureThroughAdapter(t *testing.T, fx replayfixtures.Fixture) (*Adapter, []string, error) {
+// observed on updatesCh, and the error Adapter.Prompt returned. Retainable
+// provider errors are represented by a terminal error event and a nil return;
+// other errors remain returned to the caller.
+func replayFixtureThroughAdapter(t *testing.T, fx replayfixtures.Fixture) (*Adapter, []AgentEvent, error) {
 	t.Helper()
 
 	clientToAgentR, clientToAgentW := io.Pipe()
@@ -153,7 +153,7 @@ func replayFixtureThroughAdapter(t *testing.T, fx replayfixtures.Fixture) (*Adap
 		t.Fatal("Adapter.Prompt did not return")
 	}
 
-	return a, tokenizeEvents(drainEvents(a)), promptErr
+	return a, drainEvents(a), promptErr
 }
 
 // tokenizeEvents keeps only the events whose type is in the closed
@@ -177,6 +177,8 @@ func tokenizeEvents(events []AgentEvent) []string {
 			tokens = append(tokens, "tool_call")
 		case streams.EventTypeToolUpdate:
 			tokens = append(tokens, "tool_update")
+		case streams.EventTypeError:
+			tokens = append(tokens, "error")
 		}
 	}
 	return tokens
@@ -185,18 +187,21 @@ func tokenizeEvents(events []AgentEvent) []string {
 // TestReplayFixtureTransportLayer drives every fixture in the shared ACP
 // replay corpus through a live Adapter and asserts the two things
 // provider-error-recovery-02.md#replay-harness-semantics assigns to the ACP
-// transport layer: expect.events up to (but excluding) the trailing error
-// token, and the error token plus expect.providerError/expect.diagnosticCode
-// derived from ProviderErrorFromError applied to the error Adapter.Prompt
-// returned.
+// transport layer: expect.events, plus expect.providerError/expect.diagnosticCode
+// derived from either a retained terminal error event or the error Adapter.Prompt
+// returned for a terminal provider failure.
 func TestReplayFixtureTransportLayer(t *testing.T) {
 	fixtures := replayfixtures.MustLoad()
 
 	for _, fx := range fixtures {
 		t.Run(fx.FileName, func(t *testing.T) {
-			a, tokens, promptErr := replayFixtureThroughAdapter(t, fx)
+			a, observedEvents, promptErr := replayFixtureThroughAdapter(t, fx)
+			tokens := tokenizeEvents(observedEvents)
 
-			wantTokens := fx.Expect.Events[:len(fx.Expect.Events)-1]
+			wantTokens := fx.Expect.Events
+			if promptErr != nil {
+				wantTokens = wantTokens[:len(wantTokens)-1]
+			}
 			if len(tokens) != len(wantTokens) {
 				t.Fatalf("tokenized events = %v, want %v", tokens, wantTokens)
 			}
@@ -209,17 +214,30 @@ func TestReplayFixtureTransportLayer(t *testing.T) {
 				t.Fatalf("fixture %s: expect.events must end with error", fx.FileName)
 			}
 
+			var got *streams.ProviderError
 			if promptErr == nil {
-				t.Fatal("Adapter.Prompt returned nil, want the fixture's prompt_error")
-			}
+				var terminal *AgentEvent
+				for i := range observedEvents {
+					if observedEvents[i].Type == streams.EventTypeError {
+						terminal = &observedEvents[i]
+					}
+				}
+				if terminal == nil {
+					t.Fatal("Adapter.Prompt returned nil without a terminal error event")
+				}
+				if terminal.PromptFailureDisposition != streams.PromptFailureDispositionRetainRuntime {
+					t.Fatalf("terminal disposition = %q, want retain_runtime", terminal.PromptFailureDisposition)
+				}
+				got = terminal.ProviderError
+			} else {
+				var reqErr *acp.RequestError
+				if !errors.As(promptErr, &reqErr) {
+					t.Fatalf("Adapter.Prompt error = %v, want *acp.RequestError", promptErr)
+				}
 
-			var reqErr *acp.RequestError
-			if !errors.As(promptErr, &reqErr) {
-				t.Fatalf("Adapter.Prompt error = %v, want *acp.RequestError", promptErr)
+				providerID, modelID := a.ProviderErrorContext()
+				got = ProviderErrorFromError(promptErr, providerID, modelID)
 			}
-
-			providerID, modelID := a.ProviderErrorContext()
-			got := ProviderErrorFromError(promptErr, providerID, modelID)
 			if got == nil {
 				t.Fatal("ProviderErrorFromError() = nil, want a projection")
 			}

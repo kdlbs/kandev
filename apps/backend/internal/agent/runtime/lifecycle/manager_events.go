@@ -9,6 +9,7 @@ import (
 	"go.uber.org/zap"
 
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
+	"github.com/kandev/kandev/internal/agentctl/acpcompat"
 	"github.com/kandev/kandev/internal/agentctl/tracing"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/events"
@@ -246,10 +247,11 @@ func handleCompleteEventSignalLeased(execution *AgentExecution, event *agentctl.
 	execution.signalPromptCompletionForStartupGenerationLeased(
 		execution.startupAttemptSnapshot(),
 		PromptCompletionSignal{
-			StopReason:       stopReason,
-			IsError:          isError,
-			Error:            errorMsg,
-			PromptGeneration: event.PromptGeneration,
+			StopReason:               stopReason,
+			IsError:                  isError,
+			Error:                    errorMsg,
+			PromptFailureDisposition: event.PromptFailureDisposition,
+			PromptGeneration:         event.PromptGeneration,
 		},
 	)
 }
@@ -346,6 +348,25 @@ func (m *Manager) finishPromptCompletion(
 ) {
 	if claim.locked && event.PromptGeneration != 0 && isError {
 		setProviderError(execution, event.ProviderError)
+		if payload, retained := m.retainPromptFailureRuntime(execution, event, failureEvidence); retained {
+			// Keep the prompt generation fenced while synchronous subscribers
+			// settle the failed turn, but do not hold the lifecycle lock across
+			// publication: explicit cancellation reads this generation while it
+			// owns the orchestrator's session guard.
+			m.persistExecutorRunning(context.Background(), execution)
+			execution.promptLifecycleMu.Unlock()
+			m.eventPublisher.publishAgentEventPayload(context.Background(), events.AgentTurnFailed, payload)
+			execution.promptLifecycleMu.Lock()
+			ownsSettlement := execution.promptSettlementGeneration == event.PromptGeneration &&
+				execution.promptGeneration == event.PromptGeneration
+			handleCompleteEventSignalLeased(execution, event, isError)
+			if ownsSettlement {
+				execution.promptSettlementGeneration = 0
+				execution.dispatchedPromptPending.Store(false)
+			}
+			execution.promptLifecycleMu.Unlock()
+			return
+		}
 		publication, err := m.preparePromptErrorCompletion(execution, event, failureEvidence)
 		if err != nil {
 			m.logger.Error("failed to mark execution as failed after error completion",
@@ -388,6 +409,97 @@ func (m *Manager) finishPromptCompletion(
 		m.eventPublisher.publishAgentEventPayload(context.Background(), events.AgentRunning, claim.runningPayload)
 	}
 	m.eventPublisher.publishAgentEventPayload(context.Background(), events.AgentReady, claim.readyPayload)
+}
+
+const claudeACPAgentID = "claude-acp"
+const codexACPAgentID = "codex-acp"
+
+func (m *Manager) retainPromptFailureRuntime(
+	execution *AgentExecution,
+	event *agentctl.AgentEvent,
+	failureEvidence *PromptAttemptEvidence,
+) (AgentEventPayload, bool) {
+	if !validRetainedPromptFailureEvent(event) || m.IsShuttingDown() ||
+		!retainedPromptFailureExecutionEligible(execution) {
+		return AgentEventPayload{}, false
+	}
+
+	var payload AgentEventPayload
+	retained := false
+	err := m.executionStore.WithLock(execution.ID, func(current *AgentExecution) {
+		if !retainedPromptFailureExecutionMatches(current, execution, event.PromptGeneration) {
+			return
+		}
+
+		current.Status = v1.AgentStatusReady
+		current.ErrorMessage = ""
+		current.promptSettlementGeneration = event.PromptGeneration
+		payload = newAgentEventPayloadWithTurnIDAndEvidence(current, event.TurnID, failureEvidence)
+		payload.ErrorMessage = extractErrorMessage(event)
+		payload.PromptFailureDisposition = event.PromptFailureDisposition
+		if event.AttemptID != "" {
+			payload.AttemptID = event.AttemptID
+		}
+		retained = true
+	})
+	if err != nil || !retained {
+		return AgentEventPayload{}, false
+	}
+	return payload, true
+}
+
+func validRetainedPromptFailureEvent(event *agentctl.AgentEvent) bool {
+	return event != nil && event.PromptGeneration != 0 &&
+		event.PromptFailureDisposition == streams.PromptFailureDispositionRetainRuntime &&
+		event.PromptFailureDisposition.Valid()
+}
+
+func retainedPromptFailureExecutionEligible(execution *AgentExecution) bool {
+	if execution == nil {
+		return false
+	}
+	return execution.isSessionInitialized() && execution.agentctl != nil &&
+		execution.agentctl.HasAgentStream() && execution.TaskScope == TaskLaunchScopeTask &&
+		!execution.IsPassthrough && execution.TaskID != "" && execution.SessionID != "" &&
+		execution.AgentProfileID != "" && retainedTurnTaskOwnerMatches(execution) &&
+		isRetainableACPAgent(execution.AgentID)
+}
+
+func retainedPromptFailureExecutionMatches(
+	current, expected *AgentExecution,
+	promptGeneration uint64,
+) bool {
+	if current == nil || current != expected || current.Status != v1.AgentStatusRunning ||
+		current.promptGeneration != promptGeneration || current.promptCompletionGeneration != promptGeneration {
+		return false
+	}
+	return retainedPromptFailureOwnerMatches(current, expected)
+}
+
+func retainedPromptFailureOwnerMatches(current, expected *AgentExecution) bool {
+	return current != nil && expected != nil && retainedTurnTaskOwnerMatches(current) &&
+		current.TaskScope == TaskLaunchScopeTask && current.TaskID == expected.TaskID &&
+		current.SessionID == expected.SessionID && current.AgentProfileID != "" &&
+		!current.IsPassthrough && current.ExitCode == nil && current.FinishedAt == nil
+}
+
+func retainedTurnTaskOwnerMatches(execution *AgentExecution) bool {
+	if execution == nil || executionOwnerKind(execution) != ExecutionOwnerTask ||
+		execution.Owner.Kind == ExecutionOwnerRun ||
+		(execution.Owner.Kind != "" && execution.Owner.Kind != ExecutionOwnerTask) {
+		return false
+	}
+	return (execution.Owner.TaskID == "" || execution.Owner.TaskID == execution.TaskID) &&
+		(execution.Owner.SessionID == "" || execution.Owner.SessionID == execution.SessionID)
+}
+
+func isRetainableACPAgent(agentID string) bool {
+	switch agentID {
+	case claudeACPAgentID, codexACPAgentID, acpcompat.CursorAgentID, "mock-agent":
+		return true
+	default:
+		return false
+	}
 }
 
 func setProviderError(execution *AgentExecution, providerError *streams.ProviderError) {

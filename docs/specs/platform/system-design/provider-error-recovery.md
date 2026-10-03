@@ -4,7 +4,7 @@ system: platform
 requirements:
   - REQ-PLATFORM-PROVIDER-ERROR-RECOVERY-001
 created: 2026-08-08
-updated: 2026-09-15
+updated: 2026-10-03
 owners:
   - Kandev
 ---
@@ -12,13 +12,14 @@ owners:
 
 ## Purpose and boundaries
 
-This design preserves the technical source detail for `REQ-PLATFORM-PROVIDER-ERROR-RECOVERY-001` during migration.
+Design for `REQ-PLATFORM-PROVIDER-ERROR-RECOVERY-001`.
+Usable-runtime lifetime follows [turn continuity](transient-turn-runtime-continuity.md).
 
 ## Requirement mapping
 
 | Requirement | Design section |
 | --- | --- |
-| `REQ-PLATFORM-PROVIDER-ERROR-RECOVERY-001` | [Migrated source detail](#migrated-source-detail), [Cursor normal-completion failure projection](#cursor-normal-completion-failure-projection), [Cursor retry-safety semantics](#cursor-retry-safety-semantics), [Interactive transient retry notice lifecycle](#interactive-transient-retry-notice-lifecycle). Matching ACP diagnostic and error projection is owned by [Part 3](provider-error-recovery-03.md#matching-acp-diagnostic-and-error-projection). |
+| `REQ-PLATFORM-PROVIDER-ERROR-RECOVERY-001` | [Source detail](#migrated-source-detail), [Cursor failure projection](#cursor-normal-completion-failure-projection), [Cursor retry safety](#cursor-retry-safety-semantics), [Retry notice lifecycle](#interactive-transient-retry-notice-lifecycle). ACP diagnostic/error projection: [Part 3](provider-error-recovery-03.md#matching-acp-diagnostic-and-error-projection). |
 
 ## Migrated source detail
 
@@ -556,7 +557,8 @@ relocated there at the size limit, and extended since.
   without creating a manual recovery message.
 - **GIVEN** an authorized user selects Cancel while a retry loop is active,
   **WHEN** cancellation completes, **THEN** the retry notice is retired and the
-  manual Resume and Start fresh recovery message is rendered.
+  composer remains available when retention is proven. Otherwise,
+  the manual Resume and Start fresh recovery message is rendered.
 
 ## Out of scope
 

@@ -60,7 +60,7 @@ func (m *Manager) GetSessionAuthMethods(sessionID string) []streams.AuthMethodIn
 // on first prompt before the agent could report its own auth methods).
 func fallbackAuthMethods(agentID string) []streams.AuthMethodInfo {
 	switch agentID {
-	case "claude-acp":
+	case claudeACPAgentID:
 		return []streams.AuthMethodInfo{
 			{
 				ID:          "claude-auth-login",

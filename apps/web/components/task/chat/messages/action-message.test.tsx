@@ -41,6 +41,7 @@ afterEach(() => {
 
 const CANCEL_TEST_ID = "recovery-cancel-retry-button";
 const TECHNICAL_DETAILS = "Technical details";
+const RECOVERY_HISTORY_TEST_ID = "session-recovery-history";
 const RECOVERY_MESSAGE = "Agent encountered an error";
 const RESUME_LABEL = "Resume session";
 const RESUME_TEST_ID = "recovery-resume-button";
@@ -446,7 +447,7 @@ describe("ActionMessage recovery settlement", () => {
 
     expect(screen.getByTestId("session-recovery-resolved").textContent).toBe("Resolved");
     expect(screen.queryByTestId("session-recovery-dismissed")).toBeNull();
-    expect(screen.getByTestId("session-recovery-history").querySelector("p")?.textContent).toBe(
+    expect(screen.getByTestId(RECOVERY_HISTORY_TEST_ID).querySelector("p")?.textContent).toBe(
       "The requested model was not available to the agent.",
     );
   });
@@ -505,7 +506,7 @@ describe("ActionMessage active legacy recovery ownership", () => {
       </StateProvider>,
     );
 
-    expect(screen.getByTestId("session-recovery-history").textContent).toContain(
+    expect(screen.getByTestId(RECOVERY_HISTORY_TEST_ID).textContent).toContain(
       "This failure is explained in the recovery card above.",
     );
     expect(screen.queryByTestId("legacy-recovery-archive-button")).toBeNull();
@@ -513,6 +514,24 @@ describe("ActionMessage active legacy recovery ownership", () => {
 });
 
 describe("ActionMessage historical typed recovery evidence", () => {
+  it("keeps a legacy capacity failure out of the startup recovery model", () => {
+    const capacityFailure = recoveryHistoryMessage("failure-capacity");
+    capacityFailure.content = "Selected model is at capacity. Please try a different model.";
+    capacityFailure.metadata = {
+      ...(capacityFailure.metadata as Record<string, unknown>),
+      causes: [],
+      phase: undefined,
+      attempt_id: undefined,
+      execution_id: "650e8400-e29b-41d4-a716-446655440000",
+    };
+
+    renderRecoveryHistory(capacityFailure, [capacityFailure]);
+
+    const history = screen.getByTestId(RECOVERY_HISTORY_TEST_ID);
+    expect(history.querySelector("p")?.textContent).toBe(capacityFailure.content);
+    expect(history.textContent).not.toContain("The agent could not start");
+  });
+
   it("renders same-text historical failures from their own evidence after a successor replaces the current error", async () => {
     const first = recoveryHistoryMessage("failure-first");
     first.created_at = "2026-09-29T09:00:00Z";
@@ -569,7 +588,7 @@ describe("ActionMessage historical typed recovery evidence", () => {
       ],
     });
 
-    const rows = screen.getAllByTestId("session-recovery-history");
+    const rows = screen.getAllByTestId(RECOVERY_HISTORY_TEST_ID);
     expect(rows).toHaveLength(2);
     expect(screen.getByTestId("session-recovery-resolved").textContent).toBe("Resolved");
     expect(rows[0].textContent).toContain("first-model");
@@ -586,6 +605,72 @@ describe("ActionMessage historical typed recovery evidence", () => {
     fireEvent.click(screen.getAllByRole("button", { name: "Copy details" })[0]);
     await waitFor(() => expect(writeText).toHaveBeenCalledWith(displayed));
   });
+});
+
+describe("ActionMessage retained provider turn recovery feedback", () => {
+  it("shows provider diagnostics in the existing technical details disclosure", () => {
+    const providerError = retryMessage({
+      content: "Selected model is at capacity. Please try a different model.",
+      metadata: {
+        variant: "error",
+        runtime_retained: true,
+        provider_error: {
+          source: "acp_prompt",
+          provider_id: "mock-agent",
+          error_kind: "server_error",
+          rpc_code: -32603,
+        },
+      },
+    });
+
+    renderAction(providerError, "WAITING_FOR_INPUT");
+
+    const summary = screen.getByText(TECHNICAL_DETAILS);
+    const details = summary.closest("details");
+    expect(details?.open).toBe(false);
+    fireEvent.click(summary);
+    expect(details?.textContent).toContain("Source: acp_prompt");
+    expect(details?.textContent).toContain("Provider: mock-agent");
+    expect(details?.textContent).toContain("Error kind: server_error");
+    expect(details?.textContent).toContain("RPC code: -32603");
+  });
+
+  it.each([
+    {
+      disposition: "refused",
+      attempts: 0,
+      copy: "Automatic retry stopped. You can send another message.",
+    },
+    {
+      disposition: "cancelled",
+      attempts: 1,
+      copy: "Automatic retry was cancelled. You can send another message.",
+    },
+    {
+      disposition: "exhausted",
+      attempts: 5,
+      copy: "Automatic retry stopped after 5 attempts. You can send another message.",
+    },
+  ])(
+    "shows $disposition without replacing the provider error",
+    ({ disposition, attempts, copy }) => {
+      const providerError = retryMessage({
+        content: "Selected model is at capacity. Please try a different model.",
+        metadata: {
+          variant: "error",
+          runtime_retained: true,
+          recovery_disposition: disposition,
+          attempts_started: attempts,
+          recovery_actions: false,
+        },
+      });
+
+      renderAction(providerError, "WAITING_FOR_INPUT");
+
+      expect(screen.getByText(providerError.content)).toBeTruthy();
+      expect(screen.getByTestId("retained-turn-recovery-feedback").textContent).toBe(copy);
+    },
+  );
 });
 
 function recoveryHistoryMessage(stamp: string): Message {

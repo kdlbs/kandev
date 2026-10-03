@@ -26,6 +26,12 @@ and classifier remain intact; criteria `.8` and `.15` cross-reference this
 separate continuation lifecycle. Completed companion plans remain historical
 delivery evidence.
 
+The [transient turn continuity amendment](transient-turn-runtime-continuity.md)
+governs runtime lifetime when a settled provider error leaves ACP usable.
+That path keeps the runtime and skips the teardown/restore steps below.
+Real runtime loss still requires native restoration. Episode ownership, effect
+safety, provider support, acceptance, and rollout defaults remain unchanged.
+
 ## Requirement mapping
 
 | Requirement                                  | Design sections                                                      |

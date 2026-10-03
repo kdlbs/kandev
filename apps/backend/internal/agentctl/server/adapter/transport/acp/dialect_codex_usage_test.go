@@ -29,8 +29,9 @@ func TestCodexUsageLimitNoticeProjectsMatchingGenericPromptError(t *testing.T) {
 	if promptErr == nil {
 		t.Fatal("Adapter.Prompt returned nil, want the generic ACP prompt error")
 	}
-	if len(events) != 1 || events[0] != "message_chunk:diagnostic" {
-		t.Fatalf("events = %v, want the marked Codex diagnostic before the terminal error", events)
+	tokens := tokenizeEvents(events)
+	if len(tokens) != 1 || tokens[0] != "message_chunk:diagnostic" {
+		t.Fatalf("events = %v, want the marked Codex diagnostic before the terminal error", tokens)
 	}
 	var requestErr *acp.RequestError
 	if !errors.As(promptErr, &requestErr) {

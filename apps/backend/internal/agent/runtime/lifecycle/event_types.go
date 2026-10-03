@@ -10,31 +10,32 @@ import (
 
 // AgentEventPayload is the payload for agent lifecycle events (started, stopped, ready, completed, failed).
 type AgentEventPayload struct {
-	AgentExecutionID       string                 `json:"agent_execution_id"`
-	AttemptID              string                 `json:"attempt_id,omitempty"`
-	OwnerKind              ExecutionOwnerKind     `json:"owner_kind,omitempty"`
-	WorkspaceID            string                 `json:"workspace_id,omitempty"`
-	RunID                  string                 `json:"run_id,omitempty"`
-	RunSessionID           string                 `json:"run_session_id,omitempty"`
-	RunAttempt             int                    `json:"run_attempt,omitempty"`
-	TaskID                 string                 `json:"task_id"`
-	SessionID              string                 `json:"session_id,omitempty"`
-	TaskEnvironmentID      string                 `json:"task_environment_id,omitempty"`
-	TurnID                 string                 `json:"turn_id,omitempty"`
-	AgentID                string                 `json:"agent_id,omitempty"`
-	AgentProfileID         string                 `json:"agent_profile_id"`
-	ExecutionProfileID     string                 `json:"execution_profile_id,omitempty"`
-	ContainerID            string                 `json:"container_id,omitempty"`
-	Status                 string                 `json:"status"`
-	StartedAt              time.Time              `json:"started_at"`
-	FinishedAt             *time.Time             `json:"finished_at,omitempty"`
-	ErrorMessage           string                 `json:"error_message,omitempty"`
-	FailureCode            string                 `json:"failure_code,omitempty"`
-	FailureDetails         string                 `json:"failure_details,omitempty"`
-	StartupFailureReason   string                 `json:"startup_reason,omitempty"`
-	StartupFailureAttempts int                    `json:"startup_attempts,omitempty"`
-	StartupFailureNPMCode  string                 `json:"startup_npm_code,omitempty"`
-	ProviderError          *streams.ProviderError `json:"provider_error,omitempty"`
+	AgentExecutionID         string                           `json:"agent_execution_id"`
+	AttemptID                string                           `json:"attempt_id,omitempty"`
+	OwnerKind                ExecutionOwnerKind               `json:"owner_kind,omitempty"`
+	WorkspaceID              string                           `json:"workspace_id,omitempty"`
+	RunID                    string                           `json:"run_id,omitempty"`
+	RunSessionID             string                           `json:"run_session_id,omitempty"`
+	RunAttempt               int                              `json:"run_attempt,omitempty"`
+	TaskID                   string                           `json:"task_id"`
+	SessionID                string                           `json:"session_id,omitempty"`
+	TaskEnvironmentID        string                           `json:"task_environment_id,omitempty"`
+	TurnID                   string                           `json:"turn_id,omitempty"`
+	AgentID                  string                           `json:"agent_id,omitempty"`
+	AgentProfileID           string                           `json:"agent_profile_id"`
+	ExecutionProfileID       string                           `json:"execution_profile_id,omitempty"`
+	ContainerID              string                           `json:"container_id,omitempty"`
+	Status                   string                           `json:"status"`
+	StartedAt                time.Time                        `json:"started_at"`
+	FinishedAt               *time.Time                       `json:"finished_at,omitempty"`
+	ErrorMessage             string                           `json:"error_message,omitempty"`
+	FailureCode              string                           `json:"failure_code,omitempty"`
+	FailureDetails           string                           `json:"failure_details,omitempty"`
+	StartupFailureReason     string                           `json:"startup_reason,omitempty"`
+	StartupFailureAttempts   int                              `json:"startup_attempts,omitempty"`
+	StartupFailureNPMCode    string                           `json:"startup_npm_code,omitempty"`
+	ProviderError            *streams.ProviderError           `json:"provider_error,omitempty"`
+	PromptFailureDisposition streams.PromptFailureDisposition `json:"prompt_failure_disposition,omitempty"`
 	// SessionSettingsPolicy is a host-owned snapshot of the policy used by this
 	// execution's startup. It lets delayed lifecycle callbacks retain their
 	// startup provenance after the orchestrator releases the admission attempt.

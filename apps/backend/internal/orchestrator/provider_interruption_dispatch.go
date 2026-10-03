@@ -20,8 +20,23 @@ const continuationInstruction = "Your previous turn was interrupted by a tempora
 
 func (s *Service) retryInterruptedContinuation(ctx context.Context, taskID, sessionID, execID string, entry *transientRetryEntry) {
 	if err := s.validateContinuationOwner(ctx, taskID, sessionID, entry); err != nil {
+		if entry.retainedRuntime != nil {
+			s.finishRetainedRetryWithoutDispatch(ctx, taskID, sessionID, entry, "refused")
+			return
+		}
 		s.finishContinuationManual(ctx, taskID, sessionID, execID, entry)
 		return
+	}
+	if entry.retainedRuntime != nil {
+		switch s.retainedRuntimeRetryDisposition(ctx, taskID, sessionID, entry) {
+		case retainedRuntimeRetryUsable:
+			if s.retryRetainedRuntimeContinuation(ctx, taskID, sessionID, entry) {
+				return
+			}
+		case retainedRuntimeRetryBlocked:
+			s.finishRetainedRetryWithoutDispatch(ctx, taskID, sessionID, entry, "refused")
+			return
+		}
 	}
 	entry.mu.Lock()
 	entry.started++
@@ -85,6 +100,68 @@ func (s *Service) retryInterruptedContinuation(ctx context.Context, taskID, sess
 		}
 		s.finishContinuationManual(ctx, taskID, sessionID, execID, entry)
 	}
+}
+
+func (s *Service) retryRetainedRuntimeContinuation(
+	ctx context.Context,
+	taskID, sessionID string,
+	entry *transientRetryEntry,
+) bool {
+	if s.retainedRuntimeRetryDisposition(ctx, taskID, sessionID, entry) != retainedRuntimeRetryUsable {
+		return false
+	}
+	dispatchStarted := false
+	dispatchAccepted := false
+	beforeDispatch := func() error {
+		if err := s.validateContinuationOwner(ctx, taskID, sessionID, entry); err != nil {
+			return err
+		}
+		if s.retainedRuntimeRetryDisposition(ctx, taskID, sessionID, entry) != retainedRuntimeRetryUsable {
+			return ErrResumeAttemptCancelled
+		}
+		if !dispatchStarted {
+			entry.mu.Lock()
+			entry.started++
+			entry.mu.Unlock()
+			dispatchStarted = true
+		}
+		return nil
+	}
+	onAccepted := func(string) {
+		dispatchAccepted = true
+		s.recordContinuationAcceptance(sessionID, entry)
+		s.updateContinuationPhase(context.WithoutCancel(ctx), taskID, sessionID, entry, "continuing")
+	}
+	_, err := s.promptTask(ctx, taskID, sessionID, continuationInstruction, "", false, nil, false,
+		launchOriginAutomatic, promptTaskOptions{
+			internalContinuation:      true,
+			preservePromptContext:     true,
+			disableDispatchRetry:      true,
+			requireNonterminalSession: true,
+			reserveTurnUntilDispatch:  true,
+			beforeDispatch:            beforeDispatch,
+			onAccepted:                onAccepted,
+		})
+	if err == nil || dispatchAccepted {
+		return true
+	}
+	var retainedFailure *agentruntime.RetainedPromptFailureError
+	if errors.As(err, &retainedFailure) {
+		return true
+	}
+	if ctx.Err() != nil {
+		return true
+	}
+	if current, ok := s.transientRetries.Load(sessionID); !ok || current != entry {
+		return true
+	}
+	if !dispatchStarted && s.retainedRuntimeRetryDisposition(ctx, taskID, sessionID, entry) == retainedRuntimeRetryLost {
+		return false
+	}
+	s.logger.Warn("retained-runtime continuation could not dispatch",
+		zap.String("task_id", taskID), zap.String("session_id", sessionID), zap.Error(routingerr.SanitizeError(err)))
+	s.finishRetainedRetryWithoutDispatch(ctx, taskID, sessionID, entry, "refused")
+	return true
 }
 
 func (s *Service) validateContinuationOwner(ctx context.Context, taskID, sessionID string, entry *transientRetryEntry) error {

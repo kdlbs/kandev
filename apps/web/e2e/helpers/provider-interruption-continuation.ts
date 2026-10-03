@@ -7,7 +7,13 @@ import type { ApiClient } from "./api-client";
 import { pollUntil } from "./poll-until";
 
 type Message = Awaited<ReturnType<ApiClient["listSessionMessages"]>>["messages"][number];
-type Trace = { event: string; session_id: string; prompt?: string };
+type Trace = {
+  event: string;
+  session_id: string;
+  process_id?: string;
+  connection_id?: string;
+  prompt?: string;
+};
 
 export async function createContinuationFixture(
   backend: BackendContext,
@@ -81,7 +87,28 @@ export async function waitForContinuationMessage(
   );
 }
 
-export function assertNativeContinuationTrace(tracePath: string, scenario: string, loads = 1) {
+export function assertNativeNoContinuationTrace(tracePath: string, scenario: string) {
+  const records: Trace[] = fs
+    .readFileSync(tracePath, "utf8")
+    .trim()
+    .split("\n")
+    .map((line) => JSON.parse(line) as Trace);
+  const originals = records.filter(
+    (record) => record.event === "prompt" && record.prompt?.includes(`/continuation-${scenario}`),
+  );
+  expect(originals).toHaveLength(1);
+  const nativeRecords = records.filter((record) => record.session_id);
+  expect(new Set(nativeRecords.map((record) => record.process_id)).size).toBe(1);
+  expect(new Set(nativeRecords.map((record) => record.connection_id)).size).toBe(1);
+  expect(new Set(nativeRecords.map((record) => record.session_id)).size).toBe(1);
+  expect(records.filter((record) => record.event === "initialize")).toHaveLength(1);
+  expect(records.filter((record) => record.event === "session_new")).toHaveLength(1);
+  expect(records.filter((record) => record.event === "session_load")).toHaveLength(0);
+  expect(records.filter((record) => record.event === "resume")).toHaveLength(0);
+  expect(records.filter((record) => record.event === "prompt")).toHaveLength(1);
+}
+
+export function assertNativeContinuationTrace(tracePath: string, scenario: string, loads = 0) {
   const records: Trace[] = fs
     .readFileSync(tracePath, "utf8")
     .trim()
@@ -101,8 +128,15 @@ export function assertNativeContinuationTrace(tracePath: string, scenario: strin
   expect(continuations).toHaveLength(1);
   const nativeId = originals[0].session_id;
   expect(continuations[0].session_id).toBe(nativeId);
+  const nativeRecords = records.filter((record) => record.session_id === nativeId);
+  expect(new Set(nativeRecords.map((record) => record.process_id)).size).toBe(1);
+  expect(new Set(nativeRecords.map((record) => record.connection_id)).size).toBe(1);
+  expect(records.filter((record) => record.event === "initialize")).toHaveLength(1);
   expect(
     records.filter((record) => record.event === "session_load" && record.session_id === nativeId),
+  ).toHaveLength(loads);
+  expect(
+    records.filter((record) => record.event === "resume" && record.session_id === nativeId),
   ).toHaveLength(loads);
   expect(records.filter((record) => record.event === "session_new")).toHaveLength(1);
 }

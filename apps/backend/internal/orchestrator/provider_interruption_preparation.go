@@ -99,7 +99,7 @@ func (s *Service) createContinuationRecoveryMessage(ctx context.Context, data wa
 	if data.RecoveryDisposition == "" {
 		data.RecoveryDisposition = recoveryDispositionManual
 		if data.RecoveryAttemptsStarted >= transientMaxAttempts {
-			data.RecoveryDisposition = "exhausted"
+			data.RecoveryDisposition = recoveryDispositionExhausted
 		}
 	}
 	return s.createRecoveryStatusMessage(ctx, data, "")

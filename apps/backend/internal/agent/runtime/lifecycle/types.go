@@ -110,6 +110,10 @@ type AgentExecution struct {
 	// promptCompletionGeneration prevents duplicate terminal events for the
 	// same prompt from replacing the first terminal outcome or provider error.
 	promptCompletionGeneration uint64
+	// promptSettlementGeneration fences successor admission while a retained
+	// turn failure is synchronously delivered to its durable owner. Protected by
+	// promptLifecycleMu.
+	promptSettlementGeneration uint64
 	// dispatchedPromptGeneration is the generation of the prompt that has been
 	// accepted by agentctl and is still in flight. It is set only after the
 	// ordinary prompt's triggerPrompt succeeds and reset by beginExecutionPrompt.
@@ -387,13 +391,16 @@ const (
 )
 
 // TaskLaunchScope records the canonical owner of a task session at launch.
-// Unknown is retained for legacy callers and never opts into task-only policy.
+// Automation task failure and concurrency remain owned by the coordinator, so
+// automation launches do not opt into interactive retained-turn settlement.
+// Unknown is retained for legacy callers and opts into no scope-specific policy.
 type TaskLaunchScope string
 
 const (
-	TaskLaunchScopeUnknown TaskLaunchScope = ""
-	TaskLaunchScopeTask    TaskLaunchScope = "task"
-	TaskLaunchScopeOffice  TaskLaunchScope = "office"
+	TaskLaunchScopeUnknown    TaskLaunchScope = ""
+	TaskLaunchScopeTask       TaskLaunchScope = "task"
+	TaskLaunchScopeOffice     TaskLaunchScope = "office"
+	TaskLaunchScopeAutomation TaskLaunchScope = "automation"
 )
 
 // OwnerSnapshot returns the immutable durable owner carried by this
@@ -551,11 +558,31 @@ func (e *AgentExecution) officeProfileID() string {
 
 // PromptCompletionSignal carries the result from a complete event or disconnect.
 type PromptCompletionSignal struct {
-	StopReason        string
-	IsError           bool
-	Error             string
-	PromptGeneration  uint64
-	StartupGeneration uint64
+	StopReason               string
+	IsError                  bool
+	Error                    string
+	PromptFailureDisposition streams.PromptFailureDisposition
+	PromptGeneration         uint64
+	StartupGeneration        uint64
+}
+
+// RetainedPromptFailureError marks a failed prompt whose lifecycle event owns
+// the durable turn settlement. Callers must not settle the session a second
+// time while that event is being processed.
+type RetainedPromptFailureError struct {
+	Message     string
+	Disposition streams.PromptFailureDisposition
+}
+
+func (e *RetainedPromptFailureError) Error() string {
+	if e == nil || e.Message == "" {
+		return ErrAgentReported.Error()
+	}
+	return e.Message
+}
+
+func (e *RetainedPromptFailureError) Unwrap() error {
+	return ErrAgentReported
 }
 
 func (e *AgentExecution) promptGenerationSnapshot() uint64 {

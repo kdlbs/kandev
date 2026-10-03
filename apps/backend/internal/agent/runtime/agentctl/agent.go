@@ -590,6 +590,14 @@ func (c *Client) readUpdatesStream(
 	for {
 		_, message, err := conn.ReadMessage()
 		if err != nil {
+			// Retention/admission checks must observe transport loss before the
+			// ordered event worker drains. Keep the disconnect callback delayed
+			// until after that drain, but retire this connection's live handle now.
+			c.mu.Lock()
+			if c.agentStreamConn == conn {
+				c.agentStreamConn = nil
+			}
+			c.mu.Unlock()
 			if websocket.IsCloseError(err, websocket.CloseNormalClosure, websocket.CloseGoingAway) {
 				c.logger.Info("updates stream closed normally")
 				// Normal close — don't report as disconnect error

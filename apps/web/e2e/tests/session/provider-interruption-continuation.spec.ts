@@ -3,6 +3,7 @@ import {
   createContinuationFixture,
   waitForContinuationMessage,
   assertNativeContinuationTrace,
+  assertNativeNoContinuationTrace,
 } from "../../helpers/provider-interruption-continuation";
 import { SessionPage } from "../../pages/session-page";
 import fs from "node:fs";
@@ -10,8 +11,8 @@ import path from "node:path";
 
 test.setTimeout(480_000);
 
-for (const scenario of ["read", "output", "read-restore-transient"]) {
-  test(`integration: ${scenario} restores the same native conversation without original prompt replay`, async ({
+for (const scenario of ["read", "output", "read-restore-transient", "read-restore-hard"]) {
+  test(`integration: ${scenario} continues in the same live native conversation without original prompt replay`, async ({
     backend,
     apiClient,
     seedData,
@@ -24,11 +25,7 @@ for (const scenario of ["read", "output", "read-restore-transient"]) {
         (message) => message.content?.includes("Mock continuation complete:") === true,
       );
       expect(result.content).toContain("original=1 continuation=1");
-      assertNativeContinuationTrace(
-        fixture.tracePath,
-        scenario,
-        scenario === "read-restore-transient" ? 2 : 1,
-      );
+      assertNativeContinuationTrace(fixture.tracePath, scenario);
       await expect
         .poll(
           async () =>
@@ -141,9 +138,16 @@ test("desktop: accepted continuation survives reload and can be cancelled", asyn
       (message) => message.metadata?.recovery_disposition === "cancelled",
     );
     expect(cancelled.metadata?.attempts_started).toBe(1);
-    await expect(session.recoveryResumeButton()).toBeVisible();
+    expect(cancelled.metadata?.runtime_retained).toBe(true);
+    await expect(session.recoveryResumeButton()).toHaveCount(0);
+    await expect(session.recoveryFreshButton()).toHaveCount(0);
     await expect(session.transientRetryCard()).toBeHidden();
-    await expect(testPage.getByTestId("session-recovery-card")).not.toContainText("exhausted");
+    await expect(testPage.getByTestId("session-recovery-card")).toHaveCount(0);
+    const { sessions } = await apiClient.listTaskSessions(fixture.taskId);
+    expect(sessions.find((candidate) => candidate.id === fixture.sessionId)?.state).toBe(
+      "WAITING_FOR_INPUT",
+    );
+    assertNativeContinuationTrace(fixture.tracePath, "read-hold");
   } catch (error) {
     console.warn(
       JSON.stringify(
@@ -161,40 +165,33 @@ test("desktop: accepted continuation survives reload and can be cancelled", asyn
   }
 });
 
-for (const { scenario, enabled } of [
-  { scenario: "write", enabled: true },
-  { scenario: "pending", enabled: true },
-  { scenario: "unknown", enabled: true },
-  { scenario: "read", enabled: false },
-]) {
-  test(`desktop: ${scenario}, continuation=${enabled} requires manual recovery`, async ({
+for (const scenario of ["write", "pending", "unknown"]) {
+  test(`desktop: ${scenario} refuses replay and keeps the live runtime`, async ({
     testPage,
     backend,
     apiClient,
     seedData,
   }) => {
-    const fixture = await createContinuationFixture(backend, apiClient, seedData, scenario, {
-      enabled,
-    });
+    const fixture = await createContinuationFixture(backend, apiClient, seedData, scenario);
     try {
       await testPage.goto(`/t/${fixture.taskId}`);
       const session = new SessionPage(testPage);
       await session.waitForLoad();
-      const recovery = await waitForContinuationMessage(
+      const failure = await waitForContinuationMessage(
         apiClient,
         fixture.sessionId,
-        (message) => message.metadata?.recovery_actions === true,
+        (message) => message.metadata?.runtime_retained === true,
       );
-      await expect(session.recoveryResumeButton()).toBeVisible();
+      expect(failure.metadata?.attempts_started ?? 0).toBe(0);
+      await expect(session.recoveryResumeButton()).toHaveCount(0);
+      await expect(session.recoveryFreshButton()).toHaveCount(0);
       await expect(session.transientRetryCard()).toBeHidden();
-      await expect(testPage.getByTestId("session-recovery-card")).not.toContainText(
-        "after several retries",
+      await expect(testPage.getByTestId("session-recovery-card")).toHaveCount(0);
+      const { sessions } = await apiClient.listTaskSessions(fixture.taskId);
+      expect(sessions.find((candidate) => candidate.id === fixture.sessionId)?.state).toBe(
+        "WAITING_FOR_INPUT",
       );
-      expect(recovery.metadata?.attempts_started ?? 0).toBe(0);
-      expect(recovery.metadata?.recovery_reason).toBe(enabled ? "unsafe_work" : "disabled");
-      await expect(testPage.getByTestId("session-recovery-card")).toContainText(
-        enabled ? "outcome is uncertain" : "Automatic continuation is disabled",
-      );
+      assertNativeNoContinuationTrace(fixture.tracePath, scenario);
     } catch (error) {
       console.warn(
         JSON.stringify(
@@ -212,6 +209,39 @@ for (const { scenario, enabled } of [
     }
   });
 }
+
+test("desktop: disabled continuation preserves manual recovery without native replay", async ({
+  testPage,
+  backend,
+  apiClient,
+  seedData,
+}) => {
+  const fixture = await createContinuationFixture(backend, apiClient, seedData, "read", {
+    enabled: false,
+  });
+  try {
+    await testPage.goto(`/t/${fixture.taskId}`);
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
+    const recovery = await waitForContinuationMessage(
+      apiClient,
+      fixture.sessionId,
+      (message) => message.metadata?.recovery_reason === "disabled",
+    );
+    expect(recovery.metadata?.recovery_actions).toBe(true);
+    expect(recovery.metadata?.runtime_retained).not.toBe(true);
+    expect(recovery.metadata?.attempts_started ?? 0).toBe(0);
+    await expect(session.recoveryResumeButton()).toBeVisible();
+    await expect(session.transientRetryCard()).toBeHidden();
+    const trace = fs.readFileSync(fixture.tracePath, "utf8");
+    expect(trace.match(/"event":"session_new"/g)).toHaveLength(1);
+    expect(trace).not.toContain(
+      "Your previous turn was interrupted by a temporary connection failure.",
+    );
+  } finally {
+    await fixture.dispose();
+  }
+});
 
 test("desktop: Cancel while waiting prevents native restore", async ({
   testPage,
@@ -232,19 +262,24 @@ test("desktop: Cancel while waiting prevents native restore", async ({
       (message) => message.metadata?.recovery_disposition === "cancelled",
     );
     expect(cancelled.metadata?.attempts_started).toBe(0);
-    await expect(session.recoveryResumeButton()).toBeVisible();
+    expect(cancelled.metadata?.runtime_retained).toBe(true);
+    await expect(session.recoveryResumeButton()).toHaveCount(0);
+    await expect(session.recoveryFreshButton()).toHaveCount(0);
     await expect(session.transientRetryCard()).toBeHidden();
-    const trace = fs.readFileSync(fixture.tracePath, "utf8");
-    expect(trace).not.toContain('"event":"session_load"');
-    expect(trace).not.toContain(
-      "Your previous turn was interrupted by a temporary connection failure.",
+    const { sessions } = await apiClient.listTaskSessions(fixture.taskId);
+    expect(sessions.find((candidate) => candidate.id === fixture.sessionId)?.state).toBe(
+      "WAITING_FOR_INPUT",
     );
+    await expect(
+      session.activeChat().locator('.tiptap.ProseMirror[contenteditable="true"]'),
+    ).toBeVisible();
+    assertNativeNoContinuationTrace(fixture.tracePath, "read-hold");
   } finally {
     await fixture.dispose();
   }
 });
 
-for (const scenario of ["read-restore-hard", "read-ambiguous"]) {
+for (const scenario of ["read-ambiguous"]) {
   test(`desktop: ${scenario} stops automatic recovery without replay`, async ({
     testPage,
     backend,
@@ -301,21 +336,22 @@ test("desktop: queued human work takes priority over automatic continuation", as
     await waitForContinuationMessage(
       apiClient,
       fixture.sessionId,
-      (message) => message.metadata?.recovery_actions === true,
+      (message) => message.metadata?.runtime_retained === true,
     );
     const queue = await apiClient.getQueueStatus(identity);
     expect(queue.count).toBe(1);
     expect(queue.entries[0].content).toBe("new human request awaiting explicit dispatch");
-    const trace = fs.readFileSync(fixture.tracePath, "utf8");
-    expect(trace).not.toContain('"event":"session_load"');
-    expect(trace).not.toContain(
-      "Your previous turn was interrupted by a temporary connection failure.",
-    );
+    assertNativeNoContinuationTrace(fixture.tracePath, "read-hold");
     await testPage.goto(`/t/${fixture.taskId}`);
     const session = new SessionPage(testPage);
     await session.waitForLoad();
-    await expect(session.recoveryResumeButton()).toBeVisible();
+    await expect(session.recoveryResumeButton()).toHaveCount(0);
+    await expect(session.recoveryFreshButton()).toHaveCount(0);
     await expect(session.transientRetryCard()).toBeHidden();
+    const { sessions } = await apiClient.listTaskSessions(fixture.taskId);
+    expect(sessions.find((candidate) => candidate.id === fixture.sessionId)?.state).toBe(
+      "WAITING_FOR_INPUT",
+    );
   } finally {
     await fixture.dispose();
   }

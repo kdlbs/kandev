@@ -29,7 +29,11 @@ import {
   type LastAgentError,
 } from "@/lib/session-last-agent-error";
 import { legacyRecoveryMessageMatchesError } from "@/lib/session-recovery-presentation";
-import { interruptionRecoveryKey, retryNoticeVisible } from "./interruption-recovery-feedback";
+import {
+  interruptionRecoveryKey,
+  retainedTurnRecoveryKey,
+  retryNoticeVisible,
+} from "./interruption-recovery-feedback";
 
 function isSessionActive(state?: TaskSessionState) {
   return state === "RUNNING" || state === "STARTING" || state === "COMPLETED";
@@ -286,6 +290,7 @@ function SettledFailureMessage({
           <div className={cn("text-xs wrap-anywhere", textClass)}>
             {needsDetails ? t("task:anErrorOccurred") : safeMessage}
           </div>
+          <RetainedTurnRecoveryFeedback metadata={metadata} />
           {renderSettledActionButtons({
             actions: renderedMetadata?.actions,
             taskId,
@@ -300,6 +305,17 @@ function SettledFailureMessage({
         </div>
       </div>
     </div>
+  );
+}
+
+function RetainedTurnRecoveryFeedback({ metadata }: { metadata: ActionMeta | undefined }) {
+  const { t } = useTranslation();
+  const key = retainedTurnRecoveryKey(metadata ?? {});
+  if (!key) return null;
+  return (
+    <p className="mt-1 text-xs text-muted-foreground" data-testid="retained-turn-recovery-feedback">
+      {t(key, { count: metadata?.attempts_started })}
+    </p>
   );
 }
 

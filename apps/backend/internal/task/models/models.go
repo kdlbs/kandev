@@ -1462,6 +1462,12 @@ const (
 	TaskOriginAutomationTask = "automation_task"
 )
 
+// IsAutomationTaskOrigin reports whether origin identifies work whose turn
+// lifecycle is owned by the automation coordinator.
+func IsAutomationTaskOrigin(origin string) bool {
+	return origin == TaskOriginAutomationRun || origin == TaskOriginAutomationTask
+}
+
 // Task represents a task in the database
 type Task struct {
 	ID             string `json:"id"`

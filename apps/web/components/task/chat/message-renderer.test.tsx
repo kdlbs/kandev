@@ -18,6 +18,18 @@ vi.mock("@/hooks/use-file-editors", () => ({
   useOpenFileAtLine,
 }));
 
+vi.mock("@/components/task/chat/messages/action-message", () => ({
+  ActionMessage: ({ comment }: { comment: { content: string } }) => (
+    <div data-testid="action-message-renderer">{comment.content}</div>
+  ),
+}));
+
+vi.mock("@/components/task/chat/messages/status-message", () => ({
+  StatusMessage: ({ comment }: { comment: { content: string } }) => (
+    <div data-testid="status-message-renderer">{comment.content}</div>
+  ),
+}));
+
 vi.mock("@/components/state-provider", () => ({
   useAppStore: () => null,
 }));
@@ -151,3 +163,26 @@ it.each(["tool_read", "tool_edit", "tool_search", "tool_call"])(
     view.unmount();
   },
 );
+
+it("routes retained provider turn failures through the settled action renderer", () => {
+  render(
+    <MessageRenderer
+      comment={message({
+        type: "status",
+        content: "Selected model is at capacity.",
+        metadata: {
+          variant: "error",
+          failure_scope: "turn",
+          runtime_retained: true,
+          recovery_actions: false,
+        },
+      })}
+      isTaskDescription={false}
+    />,
+  );
+
+  expect(screen.getByTestId("action-message-renderer").textContent).toBe(
+    "Selected model is at capacity.",
+  );
+  expect(screen.queryByTestId("status-message-renderer")).toBeNull();
+});

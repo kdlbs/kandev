@@ -195,7 +195,5 @@ function hasHistoricalRecoveryEvidence(
   causes: ReturnType<typeof normalizeAgentErrorCauses>,
   metadata: ActionMeta | undefined,
 ): boolean {
-  return (
-    causes.length > 0 || Boolean(metadata?.phase || metadata?.attempt_id || metadata?.execution_id)
-  );
+  return causes.length > 0 || metadata?.phase === "bootstrap";
 }

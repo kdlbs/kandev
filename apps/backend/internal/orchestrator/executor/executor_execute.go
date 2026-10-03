@@ -53,6 +53,9 @@ func (e *Executor) resolveTaskLaunchScope(ctx context.Context, taskID string) (l
 	if task.IsFromOffice {
 		return lifecycle.TaskLaunchScopeOffice, nil
 	}
+	if models.IsAutomationTaskOrigin(task.Origin) {
+		return lifecycle.TaskLaunchScopeAutomation, nil
+	}
 	return lifecycle.TaskLaunchScopeTask, nil
 }
 

@@ -547,7 +547,9 @@ func strictAuggieTaskStartModelPolicy(
 	execution *AgentExecution,
 	agentConfig agents.Agent,
 ) StartModelPolicy {
-	if execution == nil || execution.TaskScope != TaskLaunchScopeTask || execution.IsPassthrough ||
+	if execution == nil ||
+		(execution.TaskScope != TaskLaunchScopeTask && execution.TaskScope != TaskLaunchScopeAutomation) ||
+		execution.IsPassthrough ||
 		agentConfig == nil || agentConfig.ID() != "auggie" {
 		return policy
 	}
@@ -1310,6 +1312,13 @@ func (sm *SessionManager) waitForPromptDone(
 				if isCancelReleaseError(signal.Error) {
 					return nil, fmt.Errorf("%w: %s: %w", ErrAgentReported, signal.Error, ErrCancelEscalated)
 				}
+				if signal.PromptFailureDisposition == streams.PromptFailureDispositionRetainRuntime &&
+					signal.PromptFailureDisposition.Valid() {
+					return nil, &RetainedPromptFailureError{
+						Message:     signal.Error,
+						Disposition: signal.PromptFailureDisposition,
+					}
+				}
 				return nil, fmt.Errorf("%w: %s", ErrAgentReported, signal.Error)
 			}
 
@@ -1906,7 +1915,13 @@ func (sm *SessionManager) admitPrompt(execution *AgentExecution, validateStatus 
 			return 0, err
 		}
 	default:
-		promptGeneration = beginExecutionPrompt(execution)
+		execution.promptLifecycleMu.Lock()
+		if execution.promptSettlementGeneration != 0 {
+			execution.promptLifecycleMu.Unlock()
+			return 0, ErrPromptSettlementPending
+		}
+		promptGeneration = beginExecutionPromptLocked(execution)
+		execution.promptLifecycleMu.Unlock()
 	}
 	execution.messageMu.Lock()
 	execution.resetStreamingStateLocked()

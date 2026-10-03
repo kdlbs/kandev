@@ -2,8 +2,7 @@ package orchestrator
 
 import (
 	"context"
-	"fmt"
-	"sort"
+	"errors"
 	"sync"
 	"time"
 
@@ -119,7 +118,25 @@ type transientRetryEntry struct {
 	acceptedExecution  string
 	acceptedGeneration uint64
 	restoredExecution  string
+	retainedRuntime    *retainedRuntimeRetry
 }
+
+type retainedRuntimeRetry struct {
+	executionID string
+	generation  uint64
+	profileID   string
+	nativeID    string
+	identity    [32]byte
+	failure     watcher.AgentEventData
+}
+
+type retainedRuntimeRetryDisposition uint8
+
+const (
+	retainedRuntimeRetryLost retainedRuntimeRetryDisposition = iota
+	retainedRuntimeRetryUsable
+	retainedRuntimeRetryBlocked
+)
 
 func (e *transientRetryEntry) claim() bool {
 	e.mu.Lock()
@@ -139,119 +156,6 @@ func (e *transientRetryEntry) arm() bool {
 	}
 	e.armed = true
 	return true
-}
-
-func (s *Service) transientRetryNoticeFenceDuration() time.Duration {
-	if s.transientRetryNoticeFenceTTL > 0 {
-		return s.transientRetryNoticeFenceTTL
-	}
-	return defaultTransientRetryNoticeFenceTTL
-}
-
-// acquireTransientRetryNoticeState returns the one state object for a
-// session. The release function keeps the map entry alive until no caller can
-// still hold its mutex, even when a lifecycle operation is waiting behind
-// another caller.
-func (s *Service) acquireTransientRetryNoticeState(sessionID string) (*transientRetryNoticeState, func()) {
-	if sessionID == "" {
-		return nil, func() {}
-	}
-
-	s.transientRetryNoticeStatesMu.Lock()
-	if s.transientRetryNoticeStates == nil {
-		s.transientRetryNoticeStates = make(map[string]*transientRetryNoticeState)
-	}
-	state := s.transientRetryNoticeStates[sessionID]
-	if state == nil {
-		state = &transientRetryNoticeState{}
-		s.transientRetryNoticeStates[sessionID] = state
-	}
-	state.refs++
-	s.transientRetryNoticeStatesMu.Unlock()
-
-	var releaseOnce sync.Once
-	release := func() {
-		releaseOnce.Do(func() {
-			s.releaseTransientRetryNoticeState(sessionID, state)
-		})
-	}
-	return state, release
-}
-
-func (s *Service) releaseTransientRetryNoticeState(sessionID string, state *transientRetryNoticeState) {
-	s.transientRetryNoticeStatesMu.Lock()
-	if state.refs > 0 {
-		state.refs--
-	}
-	s.reclaimTransientRetryNoticeStateLocked(sessionID, state)
-	s.transientRetryNoticeStatesMu.Unlock()
-}
-
-func (s *Service) reclaimTransientRetryNoticeStateLocked(sessionID string, state *transientRetryNoticeState) {
-	if state.refs != 0 || state.owned.Load() {
-		return
-	}
-	if state.retired.Load() && state.retiredUntil.Load() > time.Now().UnixNano() {
-		return
-	}
-	if current, ok := s.transientRetryNoticeStates[sessionID]; !ok || current != state {
-		return
-	}
-	if state.fenceTimer != nil {
-		state.fenceTimer.Stop()
-		state.fenceTimer = nil
-	}
-	delete(s.transientRetryNoticeStates, sessionID)
-}
-
-func (s *Service) retireTransientRetryNoticeLocked(sessionID string, state *transientRetryNoticeState) {
-	// Callers hold state.mu. Keep this order, state.mu -> statesMu, everywhere
-	// that touches the lifecycle map so a waiter cannot observe a replacement
-	// state while another caller still owns this state's mutex.
-	state.retired.Store(true)
-	ttl := s.transientRetryNoticeFenceDuration()
-	state.retiredUntil.Store(time.Now().Add(ttl).UnixNano())
-
-	s.transientRetryNoticeStatesMu.Lock()
-	if current, ok := s.transientRetryNoticeStates[sessionID]; ok && current == state {
-		if state.fenceTimer != nil {
-			state.fenceTimer.Stop()
-		}
-		state.fenceTimer = time.AfterFunc(ttl, func() {
-			s.expireTransientRetryNoticeFence(sessionID, state)
-		})
-	}
-	s.transientRetryNoticeStatesMu.Unlock()
-}
-
-func (s *Service) expireTransientRetryNoticeFence(sessionID string, state *transientRetryNoticeState) {
-	s.transientRetryNoticeStatesMu.Lock()
-	if current, ok := s.transientRetryNoticeStates[sessionID]; !ok || current != state {
-		s.transientRetryNoticeStatesMu.Unlock()
-		return
-	}
-	state.fenceTimer = nil
-	if state.retired.Load() {
-		if remaining := time.Until(time.Unix(0, state.retiredUntil.Load())); remaining > 0 {
-			state.fenceTimer = time.AfterFunc(remaining, func() {
-				s.expireTransientRetryNoticeFence(sessionID, state)
-			})
-		} else {
-			s.reclaimTransientRetryNoticeStateLocked(sessionID, state)
-		}
-	}
-	s.transientRetryNoticeStatesMu.Unlock()
-}
-
-func (s *Service) clearTransientRetryNoticeFenceLocked(sessionID string, state *transientRetryNoticeState) {
-	state.retired.Store(false)
-	state.retiredUntil.Store(0)
-	s.transientRetryNoticeStatesMu.Lock()
-	if current, ok := s.transientRetryNoticeStates[sessionID]; ok && current == state && state.fenceTimer != nil {
-		state.fenceTimer.Stop()
-		state.fenceTimer = nil
-	}
-	s.transientRetryNoticeStatesMu.Unlock()
 }
 
 // rememberTurnPrompt caches the raw outbound prompt so a transient retry can
@@ -363,6 +267,7 @@ func (s *Service) handleTransientFailure(ctx context.Context, data watcher.Agent
 		zap.Duration("delay", delay))
 
 	data.RecoveryMode = mode
+	retainedRuntime := s.retainedRuntimeRetryForFailure(ctx, data)
 	// Emit the yellow status (against the failed turn) before completing it.
 	s.createTransientRetryStatusMessageLocked(noticeState, ctx, data, classified, attempt, delay, retryAt)
 	// Reserve the next timer while the notice lifecycle is still serialized. A
@@ -378,6 +283,7 @@ func (s *Service) handleTransientFailure(ctx context.Context, data watcher.Agent
 			}
 			entry.modelID = data.ProviderError.ModelID
 		}
+		entry.retainedRuntime = retainedRuntime
 	})
 	noticeState.mu.Unlock()
 	releaseNoticeState()
@@ -547,15 +453,23 @@ func (s *Service) retryTransientPrompt(ctx context.Context, taskID, sessionID, e
 	if ctx.Err() != nil {
 		return
 	}
+	var retryEntry *transientRetryEntry
 	if value, ok := s.transientRetries.Load(sessionID); ok {
-		if entry, ok := value.(*transientRetryEntry); ok && entry.mode == recoveryModeContinue {
-			s.retryInterruptedContinuation(ctx, taskID, sessionID, execID, entry)
-			return
+		if entry, ok := value.(*transientRetryEntry); ok {
+			retryEntry = entry
+			if entry.mode == recoveryModeContinue {
+				s.retryInterruptedContinuation(ctx, taskID, sessionID, execID, entry)
+				return
+			}
 		}
 	}
 	v, ok := s.lastTurnPrompt.Load(sessionID)
 	if !ok {
 		if ctx.Err() != nil {
+			return
+		}
+		if retryEntry != nil && retryEntry.retainedRuntime != nil {
+			s.finishRetainedRetryWithoutDispatch(ctx, taskID, sessionID, retryEntry, "refused")
 			return
 		}
 		// No prompt to re-drive (e.g. an uncached launch path). Don't leave the
@@ -574,14 +488,22 @@ func (s *Service) retryTransientPrompt(ctx context.Context, taskID, sessionID, e
 		return
 	}
 	cp, _ := v.(capturedPrompt)
-	initialCreatePromptPassthrough := false
-	if value, ok := s.transientRetries.Load(sessionID); ok {
-		if entry, ok := value.(*transientRetryEntry); ok {
-			entry.mu.Lock()
-			entry.started++
-			entry.mu.Unlock()
+	if retryEntry != nil && retryEntry.retainedRuntime != nil {
+		switch s.retainedRuntimeRetryDisposition(ctx, taskID, sessionID, retryEntry) {
+		case retainedRuntimeRetryUsable:
+			s.retryRetainedRuntimePrompt(ctx, taskID, sessionID, retryEntry, cp)
+			return
+		case retainedRuntimeRetryBlocked:
+			s.finishRetainedRetryWithoutDispatch(ctx, taskID, sessionID, retryEntry, "refused")
+			return
 		}
 	}
+	if retryEntry != nil {
+		retryEntry.mu.Lock()
+		retryEntry.started++
+		retryEntry.mu.Unlock()
+	}
+	initialCreatePromptPassthrough := false
 	if session, sessionErr := s.repo.GetTaskSession(ctx, sessionID); sessionErr == nil && session != nil {
 		_, initialCreatePromptPassthrough = s.hydrateInitialCreatePromptPassthrough(session)
 	}
@@ -625,6 +547,10 @@ func (s *Service) retryTransientPrompt(ctx context.Context, taskID, sessionID, e
 		if ctx.Err() != nil {
 			return
 		}
+		var retainedFailure *agentruntime.RetainedPromptFailureError
+		if errors.As(err, &retainedFailure) {
+			return
+		}
 		s.logger.Error("transient retry prompt failed synchronously; surfacing recovery banner",
 			zap.String("task_id", taskID),
 			zap.String("session_id", sessionID),
@@ -651,459 +577,3 @@ func (s *Service) stopTransientRetryExecution(ctx context.Context, executionID s
 // createTransientRetryStatusMessage emits the calm yellow "retrying" status
 // (variant=warning) with a Cancel action, driving the frontend's
 // AgentWarningStatus instead of the red AgentErrorStatus.
-func (s *Service) createTransientRetryStatusMessage(
-	ctx context.Context,
-	data watcher.AgentEventData,
-	classified *routingerr.Error,
-	attempt int,
-	delay time.Duration,
-	retryAt time.Time,
-) {
-	state, release := s.acquireTransientRetryNoticeState(data.SessionID)
-	if state == nil {
-		return
-	}
-	state.mu.Lock()
-	s.createTransientRetryStatusMessageLocked(state, ctx, data, classified, attempt, delay, retryAt)
-	state.mu.Unlock()
-	release()
-}
-
-func (s *Service) createTransientRetryStatusMessageLocked(
-	state *transientRetryNoticeState,
-	ctx context.Context,
-	data watcher.AgentEventData,
-	classified *routingerr.Error,
-	attempt int,
-	delay time.Duration,
-	retryAt time.Time,
-) {
-	if s.messageCreator == nil || state.retired.Load() {
-		return
-	}
-	if value, ok := s.transientRetries.Load(data.SessionID); ok {
-		if entry, ok := value.(*transientRetryEntry); ok {
-			entry.mu.Lock()
-			data.RecoveryAttemptsStarted = entry.started
-			entry.mu.Unlock()
-		}
-	}
-	content, meta := transientRetryStatusMessage(data, classified, attempt, delay, retryAt)
-	if s.transientRetryMessages != nil {
-		s.updateTransientRetryStatusMessageLocked(ctx, data, content, meta)
-		return
-	}
-	s.createTransientRetryStatusMessageRecord(ctx, data, content, meta)
-}
-
-func transientRetryStatusMessage(
-	data watcher.AgentEventData,
-	classified *routingerr.Error,
-	attempt int,
-	delay time.Duration,
-	retryAt time.Time,
-) (string, map[string]interface{}) {
-	secs := int(delay.Seconds())
-	label := transientFailureLabel(classified)
-	content := fmt.Sprintf("%s. Retrying in %ds (attempt %d/%d)", label, secs, attempt, transientMaxAttempts)
-	phase := data.RecoveryPhase
-	if phase == "" {
-		phase = "waiting"
-	}
-	cancelAction := wsRecoveryAction(data.TaskID, data.SessionID, recoverActionCancelRetry,
-		"Cancel", "x", "Stop retrying and choose how to recover", recoveryCancelRetryButtonTestID)
-	meta := map[string]interface{}{
-		metaKeyVariant:     metaVariantWarning,
-		"retrying":         true,
-		"recovery_mode":    data.RecoveryMode,
-		"recovery_phase":   phase,
-		"attempts_started": data.RecoveryAttemptsStarted,
-		"attempt":          attempt,
-		"max_attempts":     transientMaxAttempts,
-		"retry_in_seconds": secs,
-		"retry_at":         retryAt.UTC().Format(time.RFC3339Nano),
-		metaKeySessionID:   data.SessionID,
-		metaKeyTaskID:      data.TaskID,
-		"actions":          []map[string]interface{}{cancelAction},
-	}
-	if classified != nil {
-		meta["failure_code"] = string(classified.Code)
-	}
-	providerID := data.AgentID
-	if providerError := data.ProviderError; providerError != nil {
-		if providerError.ProviderID != "" {
-			providerID = providerError.ProviderID
-		}
-		if modelID := routingerr.Sanitize(providerError.ModelID); modelID != "" {
-			meta["model_id"] = modelID
-		}
-	}
-	if providerID = routingerr.Sanitize(providerID); providerID != "" {
-		meta["provider_name"] = providerID
-	}
-	return content, meta
-}
-
-func (s *Service) createTransientRetryStatusMessageRecord(
-	ctx context.Context,
-	data watcher.AgentEventData,
-	content string,
-	meta map[string]interface{},
-) {
-	turnID := ""
-	if data.RecoveryMode != recoveryModeContinue {
-		turnID = s.getActiveTurnID(data.SessionID)
-	}
-	if err := s.messageCreator.CreateSessionMessage(
-		ctx,
-		data.TaskID,
-		content,
-		data.SessionID,
-		string(v1.MessageTypeStatus),
-		turnID,
-		meta,
-		false,
-	); err != nil {
-		s.logger.Warn("failed to create transient retry status message",
-			zap.String("task_id", data.TaskID),
-			zap.Error(err))
-	}
-}
-
-func (s *Service) updateTransientRetryStatusMessageLocked(
-	ctx context.Context,
-	data watcher.AgentEventData,
-	content string,
-	metadata map[string]interface{},
-) {
-	// state.mu intentionally covers this DB I/O. Retirement and notice writes
-	// must serialize so cancellation cannot delete a row that this update then
-	// resurrects.
-	messages, err := s.transientRetryMessages.ListMessages(ctx, data.SessionID)
-	if err != nil {
-		s.logger.Warn("failed to list transient retry status messages before write",
-			zap.String("task_id", data.TaskID),
-			zap.String("session_id", data.SessionID),
-			zap.Error(err))
-		return
-	}
-	notices := transientRetryNotices(messages, data.TaskID, data.SessionID)
-	if len(notices) == 0 {
-		s.createTransientRetryStatusMessageRecord(ctx, data, content, metadata)
-		return
-	}
-
-	current := notices[0]
-	current.Content = content
-	current.Type = models.MessageTypeStatus
-	current.Metadata = metadata
-	current.RequestsInput = false
-	if err := s.transientRetryMessages.UpdateMessage(ctx, current); err != nil {
-		s.logger.Warn("failed to update transient retry status message",
-			zap.String("task_id", data.TaskID),
-			zap.String("session_id", data.SessionID),
-			zap.String("message_id", current.ID),
-			zap.Error(err))
-		return
-	}
-
-	for _, duplicate := range notices[1:] {
-		if err := s.transientRetryMessages.DeleteMessage(ctx, duplicate.ID); err != nil {
-			s.logger.Warn("failed to delete duplicate transient retry status message",
-				zap.String("task_id", data.TaskID),
-				zap.String("session_id", data.SessionID),
-				zap.String("message_id", duplicate.ID),
-				zap.Error(err))
-		}
-	}
-}
-
-func transientRetryNotices(messages []*models.Message, taskID, sessionID string) []*models.Message {
-	notices := make([]*models.Message, 0, len(messages))
-	for _, message := range messages {
-		if message == nil || message.TaskID != taskID || message.TaskSessionID != sessionID ||
-			message.Type != models.MessageTypeStatus || message.Metadata == nil {
-			continue
-		}
-		if retrying, ok := message.Metadata["retrying"].(bool); !ok || !retrying {
-			continue
-		}
-		notices = append(notices, message)
-	}
-	sort.SliceStable(notices, func(i, j int) bool {
-		if notices[i].CreatedAt.Equal(notices[j].CreatedAt) {
-			return notices[i].ID > notices[j].ID
-		}
-		return notices[i].CreatedAt.After(notices[j].CreatedAt)
-	})
-	return notices
-}
-
-func classifyKanbanFailure(data watcher.AgentEventData) *routingerr.Error {
-	providerID := data.AgentID
-	message := data.ErrorMessage
-	var resetHint *time.Time
-	var occurredAt time.Time
-	if providerError := data.ProviderError; providerError != nil {
-		// Provider rules are keyed by agent ID. OpenCode diagnostics carry the
-		// model-provider ID instead ("opencode-go"), which has no rules; keeping
-		// the agent ID there lets the OpenCode usage-limit rule classify the
-		// failure so dynamic routing can advance to the next candidate.
-		if id := providerError.ProviderID; id != "" &&
-			!routingerr.HasProviderRules(providerID) && routingerr.HasProviderRules(id) {
-			providerID = id
-		}
-		if providerError.Message != "" {
-			message = providerError.Message
-		}
-		resetHint = providerError.ResetAt
-		occurredAt = providerError.OccurredAt
-	}
-	phase := routingerr.PhasePromptSend
-	if data.DynamicRouteAttempt {
-		switch {
-		case data.EffectObserved:
-			phase = routingerr.PhaseToolExecution
-		case data.OutputObserved:
-			phase = routingerr.PhaseStreaming
-		case !data.EvidenceKnown:
-			// Unknown attempt state is deliberately classified outside the
-			// pre-result phases. The dynamic route gate also requires explicit
-			// evidence, so this remains a defensive second fence.
-			phase = routingerr.PhaseStreaming
-		}
-	}
-	classified := routingerr.Classify(routingerr.Input{
-		Phase:      phase,
-		ProviderID: providerID,
-		ResetHint:  resetHint,
-		OccurredAt: occurredAt,
-		Stderr:     message,
-	})
-	if data.DynamicRouteAttempt && data.EvidenceKnown && !data.OutputObserved && !data.EffectObserved &&
-		data.ProviderError != nil && data.ProviderError.Valid() &&
-		data.ProviderError.DiagnosticIdentityComplete && completeProviderDiagnosticSource(data.ProviderError.Source) &&
-		classified.Code == routingerr.CodeAgentRuntime && classified.Class == routingerr.ClassUnclassified &&
-		classified.ClassifierRule == "phase.poststart.unknown" {
-		// An exact terminal provider diagnostic can identify the unknown result
-		// shape without changing the global post-start classifier contract.
-		classified = cloneRoutingErrorWithCode(classified, routingerr.CodeUnknownProvider)
-	}
-	return classified
-}
-
-func cloneRoutingErrorWithCode(classified *routingerr.Error, code routingerr.Code) *routingerr.Error {
-	if classified == nil {
-		return nil
-	}
-	clone := *classified
-	clone.Code = code
-	clone.Class = routingerr.ClassForCode(code)
-	return &clone
-}
-
-func transientFailureLabel(classified *routingerr.Error) string {
-	if classified == nil {
-		return "Provider temporarily unavailable"
-	}
-	switch classified.Code {
-	case routingerr.CodeModelCapacity:
-		return "Model at capacity"
-	case routingerr.CodeNetworkUnavailable:
-		return "Network unavailable"
-	case routingerr.CodeProviderOverloaded:
-		return "Provider overloaded"
-	case routingerr.CodeRateLimited:
-		return "Rate limited"
-	case routingerr.CodeAgentTransportLost:
-		return "Agent connection lost"
-	default:
-		return "Provider temporarily unavailable"
-	}
-}
-
-func transientFailureManualMessage(classified *routingerr.Error) string {
-	return transientFailureLabel(classified) + ". Resume to try again, or start a fresh session."
-}
-
-// clearTransientRetryState clears a session's retry entry, cancels its timer,
-// and drops the cached prompt (which may hold large/sensitive attachment data).
-func (s *Service) clearTransientRetryState(sessionID string) bool {
-	if sessionID == "" {
-		return false
-	}
-	state, release := s.acquireTransientRetryNoticeState(sessionID)
-	state.mu.Lock()
-	active := s.clearTransientRetryStateLocked(sessionID, state)
-	state.mu.Unlock()
-	release()
-	return active
-}
-
-func (s *Service) clearTransientRetryStateLocked(sessionID string, state *transientRetryNoticeState) bool {
-	s.lastTurnPrompt.Delete(sessionID)
-	v, ok := s.transientRetries.LoadAndDelete(sessionID)
-	if ok {
-		if entry, ok := v.(*transientRetryEntry); ok && entry.cancel != nil {
-			entry.cancel()
-		}
-	}
-	state.owned.Store(false)
-	return ok
-}
-
-// resetTransientRetry clears in-memory retry state and retires the persisted
-// retry notice(s). The detached context keeps durable cleanup best effort even
-// when the event that ended the retry was cancelled by its caller.
-func (s *Service) resetTransientRetry(sessionID string) {
-	s.resetTransientRetryWithContext(context.Background(), sessionID, false)
-}
-
-// forceResolve is used by explicit stop/cancel and terminal paths where a
-// persisted notice can outlive the in-memory retry entry. Normal successful
-// turns skip the transcript scan when no retry loop was owned.
-func (s *Service) resetTransientRetryWithContext(ctx context.Context, sessionID string, forceResolve bool) {
-	if sessionID == "" {
-		return
-	}
-	state, release := s.acquireTransientRetryNoticeState(sessionID)
-	state.mu.Lock()
-	s.resetTransientRetryWithContextLocked(state, ctx, sessionID, forceResolve)
-	state.mu.Unlock()
-	release()
-}
-
-func (s *Service) resetTransientRetryWithContextLocked(
-	state *transientRetryNoticeState,
-	ctx context.Context,
-	sessionID string,
-	forceResolve bool,
-) {
-	if !s.clearTransientRetryStateLocked(sessionID, state) && !forceResolve {
-		return
-	}
-	s.retireTransientRetryNoticeLocked(sessionID, state)
-	s.resolveTransientRetryMessagesLocked(context.WithoutCancel(ctx), sessionID)
-}
-
-// resolveTransientRetryMessages removes every persisted retry status message
-// for a session. The task service owns the durable write and MessageDeleted
-// publication. Cleanup is intentionally non-fatal to the transition that
-// ended the retry loop.
-func (s *Service) resolveTransientRetryMessages(ctx context.Context, sessionID string) {
-	if sessionID == "" {
-		return
-	}
-	state, release := s.acquireTransientRetryNoticeState(sessionID)
-	state.mu.Lock()
-	s.retireTransientRetryNoticeLocked(sessionID, state)
-	s.resolveTransientRetryMessagesLocked(ctx, sessionID)
-	state.mu.Unlock()
-	release()
-}
-
-func (s *Service) resolveTransientRetryMessagesLocked(ctx context.Context, sessionID string) {
-	if s.transientRetryMessages == nil || sessionID == "" {
-		return
-	}
-	messages, err := s.transientRetryMessages.ListMessages(ctx, sessionID)
-	if err != nil {
-		s.logger.Warn("failed to list transient retry status messages",
-			zap.String("session_id", sessionID),
-			zap.Error(err))
-		return
-	}
-	for _, message := range messages {
-		if message == nil || message.Metadata == nil {
-			continue
-		}
-		retrying, ok := message.Metadata["retrying"].(bool)
-		if !ok || !retrying {
-			continue
-		}
-		if err := s.transientRetryMessages.DeleteMessage(ctx, message.ID); err != nil {
-			s.logger.Warn("failed to delete transient retry status message",
-				zap.String("session_id", sessionID),
-				zap.String("message_id", message.ID),
-				zap.Error(err))
-		}
-	}
-}
-
-// retireAndClearTransientRetryState closes the in-memory lifecycle under the
-// notice mutex. Callers use it when they already hold the task runtime mutex;
-// durable cleanup remains outside that broader runtime critical section.
-func (s *Service) retireAndClearTransientRetryState(sessionID string) {
-	if sessionID == "" {
-		return
-	}
-	state, release := s.acquireTransientRetryNoticeState(sessionID)
-	state.mu.Lock()
-	s.retireTransientRetryNoticeLocked(sessionID, state)
-	s.clearTransientRetryStateLocked(sessionID, state)
-	state.mu.Unlock()
-	release()
-}
-
-// cancelAllTransientRetries drains local retry ownership at shutdown.
-// Continuation notices survive for startup reconciliation; accepted work
-// belongs to the runtime's shutdown and live-adoption policy.
-func (s *Service) cancelAllTransientRetries() {
-	s.transientRetries.Range(func(key, value interface{}) bool {
-		if keyStr, ok := key.(string); ok {
-			if entry, ok := value.(*transientRetryEntry); ok && entry.mode == recoveryModeContinue {
-				s.retireContinuationOnShutdown(keyStr, entry)
-				return true
-			}
-			s.resetTransientRetry(keyStr)
-		}
-		return true
-	})
-}
-
-// CancelTransientRetry stops an in-progress retry loop (user clicked Cancel)
-// and surfaces the manual recovery banner so they can Resume or Start fresh.
-// Returns true if a retry loop was active.
-func (s *Service) CancelTransientRetry(ctx context.Context, taskID, sessionID string) bool {
-	// Reports "nothing to cancel" on denial: the bool return carries no error
-	// channel, and a foreign session must not be distinguishable from an idle
-	// one. Guard first — resetTransientRetry below mutates retry state.
-	//
-	// Both IDs: taskID is handed to handleRecoverableFailure, which writes
-	// against that task, so the session check alone would leave it free to
-	// point at someone else's.
-	if err := s.authorizeTaskSessionPair(ctx, taskID, sessionID); err != nil {
-		return false
-	}
-	noticeState, releaseNoticeState := s.acquireTransientRetryNoticeState(sessionID)
-	if noticeState == nil {
-		return false
-	}
-	noticeState.mu.Lock()
-	value, active := s.transientRetries.Load(sessionID)
-	if entry, ok := value.(*transientRetryEntry); ok && entry.mode == recoveryModeContinue {
-		noticeState.mu.Unlock()
-		releaseNoticeState()
-		return s.cancelContinuationRetry(ctx, taskID, sessionID, entry)
-	}
-	s.resetTransientRetryWithContextLocked(noticeState, ctx, sessionID, true)
-	noticeState.mu.Unlock()
-	releaseNoticeState()
-	if !active {
-		return false
-	}
-	s.logger.Info("user cancelled transient retry loop",
-		zap.String("task_id", taskID),
-		zap.String("session_id", sessionID))
-
-	execID, _ := s.agentManager.GetExecutionIDForSession(ctx, sessionID)
-	s.handleRecoverableFailure(ctx, watcher.AgentEventData{
-		TaskID:              taskID,
-		SessionID:           sessionID,
-		AgentExecutionID:    execID,
-		ErrorMessage:        "Automatic provider retries cancelled. Resume or start fresh to continue.",
-		RecoveryDisposition: "cancelled",
-		UserInitiated:       true,
-	})
-	return true
-}
