@@ -34,6 +34,39 @@ test.describe("Workflow settings on mobile", () => {
     ).toBe(false);
   });
 
+  // @covers AC-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-007.7
+  test("enables automatic start for a prompt template", async ({
+    testPage,
+    apiClient,
+    seedData,
+    prCapture,
+  }) => {
+    const workflow = await apiClient.createWorkflow(seedData.workspaceId, "Mobile Prompt Defaults");
+    await apiClient.createWorkflowStep(workflow.id, "Review", 0, {
+      is_start_step: true,
+    });
+
+    const page = new WorkflowSettingsPage(testPage);
+    await page.goto(seedData.workspaceId);
+    const card = await page.findWorkflowCard("Mobile Prompt Defaults");
+    const panel = await page.selectStep(card, "Review", true);
+    const autoStart = panel.getByRole("checkbox", { name: "Auto-start agent" });
+
+    await expect(autoStart).not.toBeChecked();
+    await panel.getByRole("button", { name: "Plan", exact: true }).tap();
+    await expect(autoStart).toBeChecked();
+    await expect(panel.getByTestId("workflow-step-prompt-auto-start-warning")).toHaveCount(0);
+    if (prCapture.capturing) {
+      await autoStart.scrollIntoViewIfNeeded();
+    }
+    await prCapture.screenshot("mobile-step-prompt-auto-start-default", {
+      caption: "Prompt templates enable automatic start at a phone viewport width.",
+    });
+    expect(
+      await testPage.evaluate(() => document.documentElement.scrollWidth > window.innerWidth),
+    ).toBe(false);
+  });
+
   test("remove sync confirmation keeps 44px inline actions", async ({
     testPage,
     apiClient,
