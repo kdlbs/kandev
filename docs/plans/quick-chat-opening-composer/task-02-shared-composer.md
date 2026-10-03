@@ -211,3 +211,14 @@ configuration round trips with repository restoration, reduced viewport scrollin
 and focus return when selecting the final available repository disables Add.
 Public docs validation and its 62 tests passed; specification catalog validation,
 full specification lint, and diff whitespace checks passed.
+
+### Configuration accent and balanced toolbar padding
+
+The enabled configuration icon uses the primary accent background and foreground.
+The shared composer toolbar uses 4px padding on every side, so its buttons have
+matching space above and below. Desktop and phone opening-composer regressions
+assert equal nonzero vertical padding and the configuration icon's active variant.
+The padding assertion reproduced the original 0px/4px mismatch before the fix.
+
+Validation passed: managed desktop opening/retry E2Es (2), phone opening E2E (1),
+fresh Vite E2E build, focused ESLint without warnings, and diff whitespace checks.

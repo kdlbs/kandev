@@ -37,7 +37,7 @@ export function ConfigurationChatAction({
     <Button
       ref={triggerRef}
       type="button"
-      variant={checked ? "secondary" : "ghost"}
+      variant={checked ? "default" : "ghost"}
       size="icon"
       role={usesSheet ? undefined : "switch"}
       aria-checked={usesSheet ? undefined : checked}

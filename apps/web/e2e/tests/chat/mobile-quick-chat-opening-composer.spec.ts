@@ -47,6 +47,12 @@ test("opens the phone picker and delivers the opening prompt", async ({
     const setupScroll = dialog.getByTestId("quick-chat-setup-scroll");
     await expectTouchTarget(attach);
     await expectTouchTarget(send);
+    const padding = await send.locator("xpath=../..").evaluate((element) => {
+      const style = getComputedStyle(element);
+      return { top: style.paddingTop, bottom: style.paddingBottom };
+    });
+    expect(padding.top).toBe(padding.bottom);
+    expect(parseFloat(padding.top)).toBeGreaterThan(0);
     await expect(editor).toBeVisible();
 
     await testPage.setViewportSize({ width: 390, height: 360 });
@@ -113,6 +119,7 @@ test("opens the phone picker and delivers the opening prompt", async ({
         .last(),
     ).toBeVisible();
     await testPage.getByRole("switch", { name: "Configuration chat" }).tap();
+    await expect(configurationAction).toHaveAttribute("data-variant", "default");
     await expect(addRepository).toBeDisabled();
     await configurationAction.tap();
     await testPage.getByRole("switch", { name: "Configuration chat" }).tap();

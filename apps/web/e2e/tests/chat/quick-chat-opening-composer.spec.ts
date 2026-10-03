@@ -51,6 +51,12 @@ test.describe("Quick Chat opening composer", () => {
     const attach = dialog.getByRole("button", { name: "Attach files" });
     const addRepo = dialog.getByTestId("add-repository");
     const send = dialog.getByTestId("quick-chat-send");
+    const toolbarPadding = await send.locator("xpath=../..").evaluate((element) => {
+      const style = getComputedStyle(element);
+      return { top: style.paddingTop, bottom: style.paddingBottom };
+    });
+    expect(toolbarPadding.top).toBe(toolbarPadding.bottom);
+    expect(parseFloat(toolbarPadding.top)).toBeGreaterThan(0);
     const bounds = await Promise.all([
       addRepo.boundingBox(),
       attach.boundingBox(),
@@ -105,7 +111,14 @@ test.describe("Quick Chat opening composer", () => {
     await expect(testPage.getByRole("tooltip")).toContainText(
       "settings, workflows, agent profiles",
     );
+    const inactiveColor = await configurationToggle.evaluate(
+      (element) => getComputedStyle(element).backgroundColor,
+    );
     await configurationToggle.click();
+    await expect(configurationToggle).toHaveAttribute("data-variant", "default");
+    expect(
+      await configurationToggle.evaluate((element) => getComputedStyle(element).backgroundColor),
+    ).not.toBe(inactiveColor);
     await expect(configurationToggle).toHaveAttribute("aria-checked", "true");
     await expect(dialog.getByTestId("add-repository")).toBeDisabled();
     await expect(composer.getByRole("status")).toHaveText("Configuration chat");
