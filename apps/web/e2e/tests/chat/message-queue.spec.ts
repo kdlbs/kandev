@@ -415,7 +415,9 @@ test.describe("Task session queue", () => {
     if (!sessionID) throw new Error("task did not have a primary session");
     await queueMessages(apiClient, taskID, sessionID, [
       scriptedQueueMessage(markerA),
-      scriptedQueueMessage(markerB, 5_000),
+      // Keep the remaining queue visible long enough for the async Send Now
+      // interruption and status update to settle on a loaded CI runner.
+      scriptedQueueMessage(markerB, 15_000),
       scriptedQueueMessage(markerC),
     ]);
 
@@ -435,17 +437,19 @@ test.describe("Task session queue", () => {
     await expect(sendNow).toBeEnabled({ timeout: 10_000 });
     await sendNow.click();
 
-    await expect(panel.getByTestId("queue-entry-text")).toHaveCount(2, { timeout: 10_000 });
-    await expect(panel.getByTestId("queue-entry-text").nth(0)).toContainText(markerA);
-    await expect(panel.getByTestId("queue-entry-text").nth(1)).toContainText(markerC);
+    const selectedMessage = session.chat
+      .getByTestId("user-message-bubble")
+      .filter({ hasText: markerB });
+    await expect(selectedMessage).toHaveCount(1, { timeout: 30_000 });
+    const remainingEntries = panel.getByTestId("queue-entry-text");
+    await expect(remainingEntries).toHaveCount(2, { timeout: 30_000 });
+    await expect(remainingEntries.nth(0)).toContainText(markerA);
+    await expect(remainingEntries.nth(1)).toContainText(markerC);
     await expect(autoRun).toHaveAttribute("data-state", "checked", { timeout: 10_000 });
 
     // Send Now's internal interruption must not behave like an explicit user
     // cancellation. Check while the selected replacement turn is still active;
     // successful turn completion may legitimately advance the workflow later.
-    await expect(
-      session.chat.getByTestId("user-message-bubble").filter({ hasText: markerB }),
-    ).toHaveCount(1, { timeout: 20_000 });
     await expect(session.agentStatus()).toBeVisible({ timeout: 20_000 });
     expect((await apiClient.getTask(taskID)).workflow_step_id).toBe(workflowStepBefore);
 

@@ -323,6 +323,7 @@ func (h *LSPHandler) serveContinuityConnection(
 	generation uint64,
 	sessionID, language string,
 ) {
+	lease.startUpstreamReader()
 	defer lease.detach(generation)
 	for {
 		messageType, message, readErr := browserConn.ReadMessage()

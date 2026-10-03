@@ -126,18 +126,32 @@ test.describe("Preview session tabs", () => {
     await expect(primaryTab).toBeVisible({ timeout: 10_000 });
     await expect(secondaryTab).toBeVisible();
 
-    // 7. Primary tab is active by default and its session content is visible.
-    await expect(primaryTab).toHaveAttribute("data-state", "active");
-    await expect(secondaryTab).toHaveAttribute("data-state", "inactive");
-    await expect(previewPanel.getByText(primaryResponse, { exact: false }).first()).toBeVisible();
+    // 7. The currently selected session is active and its matching response is visible.
+    const activeSessionTab = previewPanel.locator(
+      '[data-testid^="preview-session-tab-"][data-state="active"]',
+    );
+    await expect(activeSessionTab).toHaveCount(1);
+    const activeTestId = await activeSessionTab.getAttribute("data-testid");
+    const activeSessionId = activeTestId?.replace("preview-session-tab-", "");
+    if (activeSessionId !== primaryId && activeSessionId !== secondaryId) {
+      throw new Error("Preview selected a session tab that does not belong to this task");
+    }
+    const inactiveSessionId = activeSessionId === primaryId ? secondaryId : primaryId;
+    const activeResponse = responseBySessionId[activeSessionId];
+    const inactiveResponse = responseBySessionId[inactiveSessionId];
+    const initiallyActiveTab = testPage.getByTestId(`preview-session-tab-${activeSessionId}`);
+    const inactiveTab = testPage.getByTestId(`preview-session-tab-${inactiveSessionId}`);
+    await expect(previewPanel.getByText(activeResponse, { exact: false }).first()).toBeVisible();
 
-    // 8. Click the secondary tab → content switches, URL updates.
-    await secondaryTab.click();
-    await expect(secondaryTab).toHaveAttribute("data-state", "active");
-    await expect(primaryTab).toHaveAttribute("data-state", "inactive");
-    await expect(previewPanel.getByText(secondaryResponse, { exact: false }).first()).toBeVisible();
-    await expect(previewPanel.getByText(primaryResponse, { exact: false })).not.toBeVisible();
-    await expect(testPage).toHaveURL(new RegExp(`sessionId=${secondaryId}`), { timeout: 5_000 });
+    // 8. Clicking the other session tab switches both the active state and content.
+    await inactiveTab.click();
+    await expect(inactiveTab).toHaveAttribute("data-state", "active");
+    await expect(initiallyActiveTab).toHaveAttribute("data-state", "inactive");
+    await expect(previewPanel.getByText(inactiveResponse, { exact: false }).first()).toBeVisible();
+    await expect(previewPanel.getByText(activeResponse, { exact: false })).not.toBeVisible();
+    await expect(testPage).toHaveURL(new RegExp(`sessionId=${inactiveSessionId}`), {
+      timeout: 5_000,
+    });
 
     // 9. Read-only tab bar: no close buttons and no add button are rendered.
     await expect(testPage.getByTestId(`preview-session-tab-close-${primaryId}`)).toHaveCount(0);

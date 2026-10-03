@@ -66,7 +66,7 @@ for (const debug of [false, true]) {
       await cdp.send("Profiler.enable");
       await cdp.send("Profiler.start");
       await selectNavigationTask(testPage, a.task.title);
-      await showNavigationFiles(testPage, false);
+      await showNavigationFiles(testPage, false, a.task.session_id!);
       await expect(
         testPage.locator(`[data-testid="file-tree-node"][data-path="${a.marker}"]:visible`),
       ).toBeVisible();

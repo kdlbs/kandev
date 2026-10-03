@@ -555,7 +555,6 @@ func TestAgentctlResolverCachePruneDoesNotDelayDeadlineBoundLaunch(t *testing.T)
 	})
 
 	ctx, cancel := context.WithTimeout(context.Background(), 250*time.Millisecond)
-	defer cancel()
 	type resolution struct {
 		path string
 		err  error
@@ -573,6 +572,13 @@ func TestAgentctlResolverCachePruneDoesNotDelayDeadlineBoundLaunch(t *testing.T)
 	case <-ctx.Done():
 		t.Fatal("helper resolution waited for background cache cleanup until the launch deadline")
 	}
+	cacheRoot := filepath.Join(home, "cache", remoteHelperCacheDir)
+	t.Cleanup(func() {
+		cancel()
+		unblockInventory()
+		waitForResolverCachePrune(t, resolver)
+		waitForResolverCacheLeaseRelease(t, cacheRoot, cachePath)
+	})
 	select {
 	case <-inventoryStarted:
 	case <-time.After(5 * time.Second):
@@ -680,10 +686,14 @@ func TestAgentctlResolverKeepsHelperSelectedByPendingOlderLaunch(t *testing.T) {
 		t.Fatal(err)
 	}
 	oldCtx, cancelOld := context.WithCancel(context.Background())
-	defer cancelOld()
 	if got, err := oldResolver.ResolveRemoteBinaryContext(oldCtx, platform, nil); err != nil || got != oldPath {
 		t.Fatalf("old launch helper = %q, err=%v; want %q", got, err, oldPath)
 	}
+	cacheRoot := filepath.Join(home, "cache", remoteHelperCacheDir)
+	t.Cleanup(func() {
+		cancelOld()
+		waitForResolverCacheLeaseRelease(t, cacheRoot, oldPath)
+	})
 
 	newBundle := t.TempDir()
 	newPayload := []byte("current helper")

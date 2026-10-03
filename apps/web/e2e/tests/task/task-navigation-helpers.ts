@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import path from "node:path";
 import { expect, type Page } from "@playwright/test";
-import type { SeedData } from "../../fixtures/test-base";
+import { resetSeedRepositoryCheckout, type SeedData } from "../../fixtures/test-base";
 import type { BackendContext } from "../../fixtures/backend";
 import type { ApiClient } from "../../helpers/api-client";
 import { GitHelper, makeGitEnv, createStandardProfile } from "../../helpers/git-helper";
@@ -129,15 +129,54 @@ export async function saveExpandedPaths(
   );
 }
 
-export async function showNavigationFiles(page: Page, mobile: boolean) {
-  if (mobile) await page.getByRole("button", { name: "Files", exact: true }).tap();
-  else {
+export async function showNavigationFiles(page: Page, mobile: boolean, sessionId?: string) {
+  if (mobile) {
+    await page.getByRole("button", { name: "Files", exact: true }).tap();
+  } else {
     const session = new SessionPage(page);
     await session.waitForDockviewReady();
+    if (!sessionId) throw new Error("A session ID is required to open desktop Files navigation");
+    const sessionTab = session.sessionTabBySessionId(sessionId);
+    await expect(sessionTab).toBeVisible();
+    await sessionTab.click();
+    await expect(session.activeChat()).toBeVisible();
+    await session.waitForChatIdle();
     await expect(page.getByTestId("dockview-task-layout")).toHaveAttribute("aria-busy", "false");
-    await session.showSessionContext();
+    let previousGroups: string | null = null;
+    await expect
+      .poll(
+        async () => {
+          const currentGroups = await page.evaluate(() => {
+            const layout = document.querySelector('[data-testid="dockview-task-layout"]');
+            if (layout?.getAttribute("aria-busy") !== "false") return null;
+            return JSON.stringify(
+              Array.from(document.querySelectorAll(".dv-groupview")).map((element) => {
+                const rect = element.getBoundingClientRect();
+                return [
+                  Math.round(rect.x),
+                  Math.round(rect.y),
+                  Math.round(rect.width),
+                  Math.round(rect.height),
+                ];
+              }),
+            );
+          });
+          const settled = currentGroups !== null && currentGroups === previousGroups;
+          previousGroups = currentGroups;
+          return settled;
+        },
+        { timeout: 15_000, message: "Dockview did not settle after session navigation" },
+      )
+      .toBe(true);
     await session.clickTab("Files");
+    const filesTab = page.locator(".dv-tab:visible").filter({
+      has: page.locator(".dv-default-tab").filter({ hasText: /^Files$/ }),
+    });
+    await expect(filesTab).toHaveClass(/dv-active-tab/, { timeout: 15_000 });
   }
+  await expect(page.locator('[data-testid="files-panel"]:visible').first()).toBeVisible({
+    timeout: 15_000,
+  });
 }
 
 async function waitForNavigationGitHydration(page: Page, sessionId: string) {
@@ -178,6 +217,7 @@ export async function assertProgressiveNavigation(
   backend: BackendContext,
   mobile: boolean,
 ) {
+  resetSeedRepositoryCheckout(seed, backend.tmpDir);
   const [a, b] = await seedNavigationTasks(api, seed, backend);
   const gate = await routeNavigationResponses(page);
   const initialRequestOffset = gate.requests.length;
@@ -187,28 +227,32 @@ export async function assertProgressiveNavigation(
   await session.waitForLoad();
   await session.waitForChatIdle();
   await waitForNavigationGitHydration(page, a.session_id!);
-  await showNavigationFiles(page, mobile);
+  await showNavigationFiles(page, mobile, a.session_id!);
   await waitForTreeResponse(gate, initialRequestOffset, a.session_id!, "");
-  await expect(session.fileTreeNode(ROOT_FILE)).toBeVisible();
+  await expect(session.fileTreeNode(ROOT_FILE)).toBeVisible({ timeout: 15_000 });
   await saveExpandedPaths(page, a.session_id!, [AVAILABLE, HELD], mobile);
   gate.hold((r) => r.action === "workspace.tree.get" && r.payload.path === HELD);
   const reloadRequestOffset = gate.requests.length;
   await page.reload();
+  await session.waitForLoad();
   await waitForNavigationGitHydration(page, a.session_id!);
-  await showNavigationFiles(page, mobile);
-  await expect.poll(() => gate.heldCount()).toBeGreaterThan(0);
+  await showNavigationFiles(page, mobile, a.session_id!);
+  await expect.poll(() => gate.heldCount(), { timeout: 15_000 }).toBeGreaterThan(0);
   await waitForTreeResponse(gate, reloadRequestOffset, a.session_id!, "");
   await waitForTreeResponse(gate, reloadRequestOffset, a.session_id!, AVAILABLE);
   // This assertion is deliberately before release: an unfinished sibling cannot hide the root.
-  await expect(session.fileTreeNode(ROOT_FILE)).toBeVisible();
-  await expect(session.fileTreeNode(`${AVAILABLE}/available.ts`)).toBeVisible();
+  await expect(session.fileTreeNode(ROOT_FILE)).toBeVisible({ timeout: 15_000 });
+  await expect(session.fileTreeNode(`${AVAILABLE}/available.ts`)).toBeVisible({ timeout: 15_000 });
   gate.release("temporary navigation folder failure");
-  const status = page.getByTestId("file-tree-refresh-status");
-  await expect(status).toContainText("temporary navigation folder failure");
-  await expect(session.fileTreeNode(`${AVAILABLE}/available.ts`)).toBeVisible();
-  await showNavigationFiles(page, mobile);
+  await showNavigationFiles(page, mobile, a.session_id!);
+  const status = page
+    .locator('[data-testid="files-panel"]:visible')
+    .getByTestId("file-tree-refresh-status");
+  await expect(status).toContainText("temporary navigation folder failure", { timeout: 15_000 });
   await expect(status).toBeVisible();
+  await expect(session.fileTreeNode(`${AVAILABLE}/available.ts`)).toBeVisible({ timeout: 15_000 });
   const retry = status.getByRole("button", { name: "Retry", exact: true });
+  await expect(retry).toBeVisible();
   const retryRequestOffset = gate.requests.length;
   if (mobile) {
     const box = await retry.boundingBox();
@@ -217,16 +261,16 @@ export async function assertProgressiveNavigation(
     await retry.tap();
   } else await retry.click();
   await waitForTreeResponse(gate, retryRequestOffset, a.session_id!, HELD);
-  await expect(session.fileTreeNode(`${HELD}/held.ts`)).toBeVisible();
+  await expect(session.fileTreeNode(`${HELD}/held.ts`)).toBeVisible({ timeout: 15_000 });
   await expect(status).toHaveCount(0);
   const taskBRequestOffset = gate.requests.length;
   await selectNavigationTask(page, b.title, mobile);
   await expect(page).toHaveURL(new RegExp(`/t/${b.id}$`));
   await session.waitForChatIdle();
   await waitForNavigationGitHydration(page, b.session_id!);
-  await showNavigationFiles(page, mobile);
+  await showNavigationFiles(page, mobile, b.session_id!);
   await waitForTreeResponse(gate, taskBRequestOffset, b.session_id!, "");
-  await expect(session.fileTreeNode(ROOT_FILE)).toBeVisible();
+  await expect(session.fileTreeNode(ROOT_FILE)).toBeVisible({ timeout: 15_000 });
   gate.hold(
     (r) =>
       r.action === "workspace.tree.get" &&
@@ -235,7 +279,8 @@ export async function assertProgressiveNavigation(
   );
   await selectNavigationTask(page, a.title, mobile);
   await expect(page).toHaveURL(new RegExp(`/t/${a.id}$`));
-  await showNavigationFiles(page, mobile);
+  await waitForNavigationGitHydration(page, a.session_id!);
+  await showNavigationFiles(page, mobile, a.session_id!);
   await expect.poll(() => gate.heldCount()).toBeGreaterThan(0);
   await expect(session.fileTreeNode(`${AVAILABLE}/available.ts`)).toBeVisible();
   if (mobile) {

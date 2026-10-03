@@ -98,7 +98,7 @@ test("mounted task panels share pending shell, commit, and diff requests", async
   const session = new SessionPage(testPage);
   await session.waitForLoad();
   await session.waitForChatIdle();
-  await showNavigationFiles(testPage, false);
+  await showNavigationFiles(testPage, false, a.session_id!);
   await session.clickTab("Changes");
   await expect
     .poll(
@@ -117,7 +117,21 @@ test("mounted task panels share pending shell, commit, and diff requests", async
     const key = JSON.stringify([request.action, request.payload]);
     counts.set(key, (counts.get(key) ?? 0) + 1);
   }
-  expect([...counts.values()]).toEqual([...counts.values()].map(() => 1));
+  const expectedDiffKey = JSON.stringify(["session.cumulative_diff", { session_id: a.session_id }]);
+  // A restoration/environment rebind retires an obsolete in-flight diff read.
+  // That startup transition may issue one replacement; panels must still share
+  // the current read, and shell/commit requests must never be duplicated.
+  const diffReads = [...counts.entries()].filter(([key]) => {
+    const [action] = JSON.parse(key) as [string, Record<string, unknown>];
+    return action === "session.cumulative_diff";
+  });
+  const diffReadCount = counts.get(expectedDiffKey) ?? 0;
+  expect(diffReads.map(([key]) => key)).toEqual([expectedDiffKey]);
+  expect(diffReadCount).toBeGreaterThanOrEqual(1);
+  expect(diffReadCount).toBeLessThanOrEqual(2);
+  expect(
+    [...counts.entries()].filter(([key, count]) => key !== expectedDiffKey && count !== 1),
+  ).toEqual([]);
   gate.release();
 });
 

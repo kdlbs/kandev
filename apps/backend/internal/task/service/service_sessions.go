@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"sort"
 	"time"
 
 	"go.uber.org/zap"
@@ -12,6 +13,7 @@ import (
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/task/models"
+	taskrepository "github.com/kandev/kandev/internal/task/repository"
 )
 
 // ErrInvalidMarkSessionRead marks a MarkSessionRead failure as caused by bad
@@ -72,6 +74,126 @@ func (s *Service) ListTaskSessions(ctx context.Context, taskID string) ([]*model
 		return nil, err
 	}
 	return s.sessions.ListTaskSessions(ctx, taskID)
+}
+
+// ListSessionsForPlugin returns sessions across tasks with the filters applied
+// before pagination when the repository supports the optimized query. The
+// fallback keeps lightweight repository adapters source compatible while the
+// production SQLite repository uses one SQL query for the full selection.
+func (s *Service) ListSessionsForPlugin(ctx context.Context, filter models.PluginSessionFilter) ([]*models.TaskSession, error) {
+	if optimized, ok := s.sessions.(taskrepository.PluginSessionRepository); ok {
+		return optimized.ListTaskSessionsForPlugin(ctx, filter)
+	}
+	return s.listSessionsForPluginFallback(ctx, filter)
+}
+
+//nolint:cyclop,gocognit,nestif,funlen // Compatibility adapters must preserve the full filter contract without repository support.
+func (s *Service) listSessionsForPluginFallback(ctx context.Context, filter models.PluginSessionFilter) ([]*models.TaskSession, error) {
+	taskIDs := append([]string(nil), filter.TaskIDs...)
+	if len(taskIDs) == 0 {
+		workspaceIDs := append([]string(nil), filter.WorkspaceIDs...)
+		if len(workspaceIDs) == 0 {
+			workspaces, err := s.workspaces.ListWorkspaces(ctx)
+			if err != nil {
+				return nil, err
+			}
+			workspaceIDs = make([]string, 0, len(workspaces))
+			for _, workspace := range workspaces {
+				workspaceIDs = append(workspaceIDs, workspace.ID)
+			}
+		}
+		for _, workspaceID := range workspaceIDs {
+			for page := 1; ; page++ {
+				workspaceTaskCount := 0
+				tasks, total, err := s.tasks.ListTasksByWorkspace(
+					ctx, workspaceID, "", "", "", page, 200, "", true, true, false, true,
+				)
+				if err != nil {
+					return nil, err
+				}
+				for _, task := range tasks {
+					taskIDs = append(taskIDs, task.ID)
+					workspaceTaskCount++
+				}
+				if len(tasks) == 0 || workspaceTaskCount >= total {
+					break
+				}
+			}
+		}
+	} else if len(filter.WorkspaceIDs) > 0 {
+		allowed := make(map[string]struct{}, len(filter.WorkspaceIDs))
+		for _, workspaceID := range filter.WorkspaceIDs {
+			allowed[workspaceID] = struct{}{}
+		}
+		filtered := taskIDs[:0]
+		for _, taskID := range taskIDs {
+			task, err := s.tasks.GetTask(ctx, taskID)
+			if err != nil {
+				if errors.Is(err, taskrepository.ErrTaskNotFound) {
+					continue
+				}
+				return nil, err
+			}
+			if _, ok := allowed[task.WorkspaceID]; ok {
+				filtered = append(filtered, taskID)
+			}
+		}
+		taskIDs = filtered
+	}
+
+	stateSet := make(map[models.TaskSessionState]struct{}, len(filter.States))
+	for _, state := range filter.States {
+		stateSet[state] = struct{}{}
+	}
+	sessionSet := make(map[string]struct{}, len(filter.SessionIDs))
+	for _, sessionID := range filter.SessionIDs {
+		sessionSet[sessionID] = struct{}{}
+	}
+	var sessions []*models.TaskSession
+	for _, taskID := range taskIDs {
+		items, err := s.sessions.ListTaskSessions(ctx, taskID)
+		if err != nil {
+			return nil, err
+		}
+		for _, session := range items {
+			if len(stateSet) > 0 {
+				if _, ok := stateSet[session.State]; !ok {
+					continue
+				}
+			}
+			if len(sessionSet) > 0 {
+				if _, ok := sessionSet[session.ID]; !ok {
+					continue
+				}
+			}
+			if filter.UpdatedSince != nil && session.UpdatedAt.Before(*filter.UpdatedSince) {
+				continue
+			}
+			sessions = append(sessions, session)
+		}
+	}
+	sort.Slice(sessions, func(i, j int) bool {
+		if !sessions[i].StartedAt.Equal(sessions[j].StartedAt) {
+			return sessions[i].StartedAt.After(sessions[j].StartedAt)
+		}
+		return sessions[i].ID < sessions[j].ID
+	})
+	offset := filter.Offset
+	if offset < 0 {
+		offset = 0
+	}
+	if offset >= len(sessions) {
+		return []*models.TaskSession{}, nil
+	}
+	limit := filter.Limit
+	if limit <= 0 {
+		limit = 200
+	}
+	end := offset + limit
+	if end > len(sessions) {
+		end = len(sessions)
+	}
+	return sessions[offset:end], nil
 }
 
 // GetTaskSession returns a single session by ID.

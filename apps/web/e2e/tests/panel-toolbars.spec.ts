@@ -1,4 +1,4 @@
-import { expect, test } from "../fixtures/test-base";
+import { expect, resetSeedRepositoryCheckout, test } from "../fixtures/test-base";
 import type { SeedData } from "../fixtures/test-base";
 import type { Locator, Page } from "@playwright/test";
 import type { ApiClient } from "../helpers/api-client";
@@ -147,6 +147,10 @@ async function constrainDockviewPanel(panel: import("@playwright/test").Locator,
 }
 
 test.describe("shared panel toolbars", () => {
+  test.beforeEach(async ({ seedData, backend }) => {
+    resetSeedRepositoryCheckout(seedData, backend.tmpDir);
+  });
+
   test("centers Files copy path icons in every state", async ({
     testPage,
     apiClient,

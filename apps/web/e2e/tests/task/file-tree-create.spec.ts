@@ -1,7 +1,7 @@
 import { type Page } from "@playwright/test";
 import fs from "node:fs";
 import path from "node:path";
-import { test, expect } from "../../fixtures/test-base";
+import { test, expect, resetSeedRepositoryCheckout } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
 import { SessionPage } from "../../pages/session-page";
 import { GitHelper, makeGitEnv, createStandardProfile } from "../../helpers/git-helper";
@@ -73,6 +73,14 @@ async function startCreateAtRoot(testPage: Page) {
 
 test.describe("File tree create file", () => {
   test.describe.configure({ timeout: 180_000 });
+
+  test.beforeEach(({ backend, seedData }) => {
+    resetSeedRepositoryCheckout(seedData, backend.tmpDir);
+  });
+
+  test.afterEach(({ backend, seedData }) => {
+    resetSeedRepositoryCheckout(seedData, backend.tmpDir);
+  });
 
   test("New file at root creates a file on disk and in the tree", async ({
     testPage,

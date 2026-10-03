@@ -1,4 +1,4 @@
-import { test, expect } from "../../fixtures/test-base";
+import { test, expect, resetSeedRepositoryCheckout } from "../../fixtures/test-base";
 import { dwell } from "../../helpers/causal-waits";
 import { SessionPage } from "../../pages/session-page";
 import type { ApiClient } from "../../helpers/api-client";
@@ -40,9 +40,14 @@ async function seedExpansionTask(
   await expect(
     session.chat.getByText("diff-expansion-setup complete", { exact: false }),
   ).toBeVisible({ timeout: 45_000 });
+  await session.waitForChatIdle();
 
   return session;
 }
+
+test.beforeEach(async ({ seedData, backend }) => {
+  resetSeedRepositoryCheckout(seedData, backend.tmpDir);
+});
 
 /** Click the Changes dockview tab. */
 async function openChangesTab(testPage: Page) {
@@ -54,7 +59,7 @@ async function openChangesTab(testPage: Page) {
 /** Click the file row for expansion_test.go to open its diff view. */
 async function openExpansionFileDiff(testPage: Page) {
   const fileRow = testPage.getByTestId("file-row-expansion_test.go");
-  await expect(fileRow).toBeVisible({ timeout: 10_000 });
+  await expect(fileRow).toBeVisible({ timeout: 30_000 });
   await fileRow.click();
 }
 

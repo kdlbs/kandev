@@ -386,7 +386,12 @@ test.describe("Subtask basics", () => {
 });
 
 test.describe("MCP subtask creation", () => {
-  test("agent creates subtask via MCP create_task with parent_id", async ({ testPage }) => {
+  test("agent creates subtask via MCP create_task with parent_id", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(120_000);
     const subtaskTitle = "MCP-subtask-e2e-verify";
 
     const script = [
@@ -419,14 +424,33 @@ test.describe("MCP subtask creation", () => {
     // 3. Wait for the agent to complete — the MCP create_task call happens during execution
     const session = new SessionPage(testPage);
     await session.waitForLoad();
-    await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
+    await session.waitForChatIdle({ timeout: 60_000 });
 
-    // 4. Go back to kanban — subtask card should be visible with parent badge
+    const parentTaskId = new URL(testPage.url()).pathname.match(/^\/t\/([^/]+)$/)?.[1];
+    if (!parentTaskId) throw new Error(`Expected a parent task URL, got ${testPage.url()}`);
+
+    let subtaskId: string | undefined;
+    await expect
+      .poll(
+        async () => {
+          const { tasks } = await apiClient.listTasks(seedData.workspaceId);
+          const subtask = tasks.find((task) => task.title === subtaskTitle);
+          if (!subtask) return false;
+          subtaskId = subtask.id;
+          return (await apiClient.getTask(subtask.id)).parent_id === parentTaskId;
+        },
+        { timeout: 60_000, message: "Waiting for the MCP child task to persist under its parent" },
+      )
+      .toBe(true);
+
+    // The workspace API is authoritative; navigating back to Kanban gives the
+    // view a fresh task snapshot even if its initial task-created event was missed.
     await kanban.goto();
 
     const subtaskCard = kanban.taskCardByTitle(subtaskTitle);
-    await expect(subtaskCard).toBeVisible({ timeout: 10_000 });
-    await expect(subtaskCard.getByText("MCP Subtask Parent")).toBeVisible();
+    await expect(subtaskCard).toBeVisible({ timeout: 30_000 });
+    await expect(subtaskCard.getByText("MCP Subtask Parent")).toBeVisible({ timeout: 15_000 });
+    expect(subtaskId).toBeTruthy();
   });
 
   test("MCP-created subtask inherits parent task repositories", async ({

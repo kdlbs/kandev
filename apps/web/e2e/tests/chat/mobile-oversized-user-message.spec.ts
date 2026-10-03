@@ -220,5 +220,16 @@ test("mobile oversized previews stay bounded, downloadable, and touch-sized", as
     "the mobile follow-up session should finish",
     60_000,
   );
+  await expect
+    .poll(
+      async () => {
+        const { messages } = await apiClient.listSessionMessages(task.session_id!);
+        return messages.some(
+          (message) => message.author_type === "user" && message.content === slowPrompt,
+        );
+      },
+      { timeout: 30_000, message: "the mobile follow-up prompt should be stored" },
+    )
+    .toBe(true);
   await assertNoDocumentHorizontalOverflow(testPage, "mobile queued oversized message flow");
 });

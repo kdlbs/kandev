@@ -161,14 +161,14 @@ test.describe("Mobile workspace repository sets", () => {
     await expect(remoteMainOption.getByText("origin", { exact: true })).toBeVisible();
 
     const refreshButton = dropdown.getByTestId("branch-refresh-button");
+    await waitForFiniteAnimations(dropdown);
     await expect(refreshButton).toBeVisible();
     await expect(refreshButton).toBeEnabled();
+    await expect(refreshButton).toBeInViewport();
     const refreshButtonBox = await refreshButton.boundingBox();
     expect(refreshButtonBox).not.toBeNull();
     expect(refreshButtonBox!.height).toBeGreaterThanOrEqual(44);
     expect(refreshButtonBox!.width).toBeGreaterThanOrEqual(44);
-    await refreshButton.scrollIntoViewIfNeeded();
-    await waitForFiniteAnimations(dropdown);
     const refreshReceivesCenterTap = await refreshButton.evaluate((element) => {
       const rect = element.getBoundingClientRect();
       const target = document.elementFromPoint(

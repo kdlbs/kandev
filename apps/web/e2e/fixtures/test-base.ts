@@ -527,18 +527,22 @@ export const test = backendFixture.extend<
  * branches, not only the local branch that remains checked out.
  */
 export function restoreSeedRepositoryOrigin(seedData: SeedData) {
+  const isolatedHome = path.dirname(path.dirname(seedData.repositoryPath));
+  const env = makeGitEnv(isolatedHome);
   const baseArgs = ["-C", seedData.repositoryPath, "remote"];
   try {
     execFileSync("git", [...baseArgs, "set-url", "origin", seedData.repositoryRemoteURL], {
+      env,
       stdio: "ignore",
     });
   } catch {
     execFileSync("git", [...baseArgs, "add", "origin", seedData.repositoryRemoteURL], {
+      env,
       stdio: "ignore",
     });
   }
   execFileSync("git", ["-C", seedData.repositoryPath, "fetch", "--no-tags", "origin"], {
-    stdio: "ignore",
+    env,
   });
 }
 

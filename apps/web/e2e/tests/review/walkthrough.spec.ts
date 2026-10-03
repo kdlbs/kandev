@@ -427,6 +427,8 @@ test.describe("Code walkthrough", () => {
       "asserts the walkthrough behind the dialog never scrolls the review or advances its progress; both checks are absences, so they need the window in which a stray scroll or auto-review would land to elapse first",
     );
     await expect(reviewDialog.getByTestId("review-diff-scroll")).toHaveJSProperty("scrollTop", 0);
+    // File discovery may add more diff entries while the dialog is open; the
+    // invariant here is that the walkthrough did not mark any of them reviewed.
     await expect(reviewProgress).toHaveText(/^0 of \d+ files reviewed$/);
     await expectWalkthroughBehindDialog(testPage, reviewDialog, [
       { locator: card, name: "walkthrough window" },

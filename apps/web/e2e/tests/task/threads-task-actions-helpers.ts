@@ -103,9 +103,19 @@ export class ThreadActionsPage {
   async open(taskId: string) {
     await this.trigger(taskId).scrollIntoViewIfNeeded();
     await this.press(this.trigger(taskId));
-    await expect(
-      this.page.getByTestId(this.mobile ? "task-management-drawer" : "task-management-menu"),
-    ).toBeVisible();
+    const surface = this.page.getByTestId(
+      this.mobile ? "task-management-drawer" : "task-management-menu",
+    );
+    await expect(surface).toBeVisible();
+    if (this.mobile) {
+      await surface.evaluate(async (element) => {
+        await Promise.all(
+          element
+            .getAnimations({ subtree: true })
+            .map((animation) => animation.finished.catch(() => undefined)),
+        );
+      });
+    }
   }
   choice(name: string) {
     return this.page.getByRole(this.mobile ? "button" : "menuitem", { name, exact: true });

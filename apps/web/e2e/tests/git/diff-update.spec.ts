@@ -1,4 +1,4 @@
-import { test, expect } from "../../fixtures/test-base";
+import { test, expect, resetSeedRepositoryCheckout } from "../../fixtures/test-base";
 import { dwell } from "../../helpers/causal-waits";
 import {
   fileDiffTab,
@@ -12,6 +12,10 @@ import {
   waitForDiffTextAbsent,
   waitForStoreFileDiffText,
 } from "./diff-update-helpers";
+
+test.beforeEach(async ({ seedData, backend }) => {
+  resetSeedRepositoryCheckout(seedData, backend.tmpDir);
+});
 
 test.describe("Diff update on file change", () => {
   test.describe.configure({ retries: 2, timeout: 120_000 });
