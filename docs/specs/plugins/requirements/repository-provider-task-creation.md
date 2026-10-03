@@ -98,7 +98,7 @@ to register the repository in a separate step.
   provider results through URL resolution and use the existing built-in or
   unsupported-URL behavior.
 - **AC-PLUGINS-REPOSITORY-TASK-CREATION-001.12:** Repeated or concurrent checks
-  of the same trimmed URL under unchanged provider availability shall share
+  of the same trimmed URL under an unchanged registry version shall share
   one resolution attempt, including a settled error or empty result. Explicit
   retry shall permit a fresh attempt. Results shall remain isolated between
   dialogs and workspaces, including a workspace change with requests pending.
