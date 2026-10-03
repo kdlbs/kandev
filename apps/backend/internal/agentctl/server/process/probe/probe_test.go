@@ -40,7 +40,7 @@ func TestProbeWithReader_AllDescendantsPreTurn_Settled(t *testing.T) {
 		},
 	}
 
-	got, err := probeWithReader(reader, testAgentPID, turnStart)
+	got, err := probeWithReader(reader, testAgentPID, turnStart, "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -60,7 +60,7 @@ func TestProbeWithReader_DescendantAtOrAfterTurnStart_Live(t *testing.T) {
 		},
 	}
 
-	got, err := probeWithReader(reader, testAgentPID, turnStart)
+	got, err := probeWithReader(reader, testAgentPID, turnStart, "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -84,7 +84,7 @@ func TestProbeWithReader_TransitiveGrandchildStillCounted(t *testing.T) {
 		},
 	}
 
-	got, err := probeWithReader(reader, testAgentPID, turnStart)
+	got, err := probeWithReader(reader, testAgentPID, turnStart, "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -103,7 +103,7 @@ func TestProbeWithReader_PreTurnThenPostTurnDescendant(t *testing.T) {
 	}
 
 	settledReader := fakeProcessTableReader{resolution: time.Millisecond, table: preTurnOnly}
-	got, err := probeWithReader(settledReader, testAgentPID, turnStart)
+	got, err := probeWithReader(settledReader, testAgentPID, turnStart, "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -115,7 +115,7 @@ func TestProbeWithReader_PreTurnThenPostTurnDescendant(t *testing.T) {
 		PID: 201, PPID: testAgentPID, StartTime: turnStart.Add(time.Second),
 	})
 	liveReader := fakeProcessTableReader{resolution: time.Millisecond, table: withNewDescendant}
-	got, err = probeWithReader(liveReader, testAgentPID, turnStart)
+	got, err = probeWithReader(liveReader, testAgentPID, turnStart, "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -140,7 +140,7 @@ func TestProbeWithReader_TruncationBoundary(t *testing.T) {
 		},
 	}
 
-	got, err := probeWithReader(reader, testAgentPID, turnStart)
+	got, err := probeWithReader(reader, testAgentPID, turnStart, "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -161,7 +161,7 @@ func TestProbeWithReader_ZombieDescendantYieldsSettled(t *testing.T) {
 		},
 	}
 
-	got, err := probeWithReader(reader, testAgentPID, turnStart)
+	got, err := probeWithReader(reader, testAgentPID, turnStart, "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -175,7 +175,7 @@ func TestProbeWithReader_ZombieDescendantYieldsSettled(t *testing.T) {
 func TestProbeWithReader_ReadErrorYieldsUnknown(t *testing.T) {
 	reader := fakeProcessTableReader{resolution: time.Millisecond, err: errors.New("boom")}
 
-	got, err := probeWithReader(reader, testAgentPID, time.Unix(1000, 0))
+	got, err := probeWithReader(reader, testAgentPID, time.Unix(1000, 0), "")
 	if err == nil {
 		t.Fatalf("expected the read error to be surfaced")
 	}
@@ -190,7 +190,7 @@ func TestProbeWithReader_ReadErrorYieldsUnknown(t *testing.T) {
 func TestProbeWithReader_NoDescendantsYieldsSettled(t *testing.T) {
 	reader := fakeProcessTableReader{resolution: time.Millisecond, table: []processInfo{rootEntry}}
 
-	got, err := probeWithReader(reader, testAgentPID, time.Unix(1000, 0))
+	got, err := probeWithReader(reader, testAgentPID, time.Unix(1000, 0), "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -205,7 +205,7 @@ func TestProbeWithReader_NoDescendantsYieldsSettled(t *testing.T) {
 func TestProbeWithReader_RootAbsentYieldsUnknown(t *testing.T) {
 	reader := fakeProcessTableReader{resolution: time.Millisecond}
 
-	got, err := probeWithReader(reader, testAgentPID, time.Unix(1000, 0))
+	got, err := probeWithReader(reader, testAgentPID, time.Unix(1000, 0), "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -226,7 +226,7 @@ func TestProbeWithReader_NonPositiveAgentPIDYieldsUnknown(t *testing.T) {
 		},
 	}
 
-	got, err := probeWithReader(reader, 0, time.Unix(1000, 0))
+	got, err := probeWithReader(reader, 0, time.Unix(1000, 0), "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -257,7 +257,7 @@ func TestTransitiveDescendants_ExcludesRootProcessItself(t *testing.T) {
 // ProbeBackgroundWorkloads must never panic, on any platform, for an
 // arbitrary pid.
 func TestProbeBackgroundWorkloads_DoesNotPanicForAnArbitraryPID(t *testing.T) {
-	got, err := ProbeBackgroundWorkloads(1, time.Now())
+	got, err := ProbeBackgroundWorkloads(1, time.Now(), "")
 	if err != nil {
 		return
 	}
