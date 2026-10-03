@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/kandev/kandev/internal/agentctl/server/config"
 	"github.com/kandev/kandev/internal/agentctl/server/process"
@@ -133,13 +134,16 @@ func assertPushedAPIRows(t *testing.T, rows []*process.GitCommitInfo, f *pushedA
 		t.Fatalf("unexpected first-parent rows: %+v", rows)
 	}
 	for i, c := range rows {
-		parent, files, message, date := f.feature, 2, "Merge side", "2026-04-01T00:00:00+00:00"
+		parent, files, message := f.feature, 2, "Merge side"
+		date := time.Date(2026, time.April, 1, 0, 0, 0, 0, time.UTC)
 		if i == 1 {
-			parent, files, message, date = f.base, 1, "feature.txt", "2026-01-01T00:00:00+00:00"
+			parent, files, message = f.base, 1, "feature.txt"
+			date = time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)
 		}
+		committedAt, dateErr := time.Parse(time.RFC3339, c.CommittedAt)
 		if c.Pushed != pushed || c.ParentSHA != parent || c.FilesChanged != files ||
 			c.Insertions != files || c.Deletions != 0 || c.CommitMessage != message ||
-			c.CommittedAt != date || c.AuthorName != "Test User" || c.AuthorEmail != "test@test.com" {
+			dateErr != nil || !committedAt.Equal(date) || c.AuthorName != "Test User" || c.AuthorEmail != "test@test.com" {
 			t.Errorf("unexpected published commit fields: %+v, want pushed=%v", c, pushed)
 		}
 	}
