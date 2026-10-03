@@ -8,6 +8,7 @@ import (
 
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/orchestrator"
+	"github.com/kandev/kandev/internal/worktree"
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"github.com/stretchr/testify/require"
 )
@@ -114,6 +115,19 @@ func TestBranchRecoveryConflictResponsePreservesRecoveryDetails(t *testing.T) {
 	require.Equal(t, "feature/lost", payload.Details["original_branch"])
 	require.Equal(t, "main", payload.Details["base_branch"])
 	require.Equal(t, "resume_new_branch", payload.Details["recovery_action"])
+}
+
+func TestRecoveryInspectionConflictResponseIsSanitized(t *testing.T) {
+	msg := createTestMessage(t, ws.ActionSessionRecover, map[string]interface{}{})
+	err := &worktree.RecoveryInspectionContentionError{}
+
+	response, responseErr := recoveryInspectionConflictResponse(msg, err)
+	require.NoError(t, responseErr)
+	require.NotNil(t, response)
+	payload := parseError(t, response)
+	require.Equal(t, ws.ErrorCodeConflict, payload.Code)
+	require.Equal(t, "workspace recovery inspection is busy", payload.Message)
+	require.Equal(t, "recovery_inspection_busy", payload.Details["kind"])
 }
 
 func TestSessionRecoveryGuardConflictResponseMapsRetryableToConflict(t *testing.T) {

@@ -89,6 +89,29 @@ describe("RunErrorEntry", () => {
     expect(screen.queryByTestId(RUN_ERROR_RESUME_TEST_ID)).toBeNull();
   });
 
+  it("uses typed startup metadata for managed runtime early exits", () => {
+    render(
+      <RunErrorEntry
+        taskId="task-1"
+        workspaceId="workspace-1"
+        error={{
+          ...runError("managed_runtime_startup"),
+          startupReason: "early_exit",
+          startupAttempts: 2,
+          failureDetails: "reason=early_exit attempts=2",
+        }}
+      />,
+    );
+
+    const recovery = screen.getByTestId("run-error-managed-runtime-npm-recovery");
+    expect(recovery.textContent).toContain("Agent stopped during startup");
+    expect(recovery.textContent).toContain(
+      "The agent process exited before initialization. Startup was attempted 2 times.",
+    );
+    expect(screen.getByTestId("run-error-managed-runtime-retry-button")).toBeTruthy();
+    expect(screen.queryByTestId(RUN_ERROR_RESUME_TEST_ID)).toBeNull();
+  });
+
   it.each(["provider_auth_required", "model_capacity"])(
     "keeps ordinary failure code %s on the resumable error surface",
     (failureCode) => {

@@ -9,6 +9,8 @@ import {
   removeQuickChatSession,
   removeQuickChatSessionsForTask,
   upsertQuickChatSession,
+  replaceConfigChatSession,
+  applyConfigChatRestartSnapshot,
 } from "./quick-chat-sync";
 import {
   clearRememberedQuickChatSelection,
@@ -536,6 +538,45 @@ function buildQuickChatSelectionActions(set: ImmerSet) {
 
 export function buildQuickChatActions(set: ImmerSet, get: ImmerGet) {
   return {
+    setConfigChatRestart: (
+      workspaceId: string,
+      restart: QuickChatState["configChatRestarts"][string] | null,
+    ) =>
+      set((draft) => {
+        if (restart) draft.quickChat.configChatRestarts[workspaceId] = restart;
+        else delete draft.quickChat.configChatRestarts[workspaceId];
+        draft.quickChat.syncRevisionByWorkspace[workspaceId] =
+          (draft.quickChat.syncRevisionByWorkspace[workspaceId] ?? 0) + 1;
+      }),
+    syncConfigChatRestart: (workspaceId: string, pending: boolean, sessionId?: string) =>
+      set((draft) => {
+        draft.quickChat = applyConfigChatRestartSnapshot(
+          draft.quickChat,
+          workspaceId,
+          pending,
+          sessionId,
+        );
+      }),
+    replaceConfigChatSession: (
+      workspaceId: string,
+      oldSessionId: string,
+      replacement: QuickChatSession,
+    ) => {
+      set((draft) => {
+        draft.quickChat = replaceConfigChatSession(
+          draft.quickChat,
+          workspaceId,
+          oldSessionId,
+          replacement,
+        );
+        clearRememberedSession(
+          draft.quickChat,
+          [{ sessionId: oldSessionId, workspaceId, kind: "config" }],
+          oldSessionId,
+        );
+      });
+      persistRememberedSelection(get);
+    },
     ...buildQuickChatOrderActions(set),
     ...buildQuickChatSessionActions(set, get),
     ...buildQuickChatActivityActions(set, get),

@@ -33,6 +33,8 @@ type handlerRepo interface {
 type TaskHandlers struct {
 	service                       *service.Service
 	orchestrator                  OrchestratorStarter
+	configChatRetirer             ConfigChatSessionRetirer
+	configChatAdmission           configChatAdmission
 	movePreviewer                 WorkflowMovePreviewer
 	foregroundActivity            dto.ForegroundActivityProvider
 	cancellationPending           dto.CancellationPendingProvider
@@ -176,6 +178,9 @@ func NewTaskHandlers(svc *service.Service, orchestrator OrchestratorStarter, rep
 	if previewer, ok := orchestrator.(WorkflowMovePreviewer); ok {
 		h.movePreviewer = previewer
 	}
+	if retirer, ok := orchestrator.(ConfigChatSessionRetirer); ok {
+		h.configChatRetirer = retirer
+	}
 	// The orchestrator also surfaces the in-memory fine-grained busy substate
 	// (ADR-0049). Derive the narrow provider from it so the
 	// session-fetch handlers can stamp foreground_activity onto sessions without
@@ -286,6 +291,7 @@ func (h *TaskHandlers) registerHTTP(router *gin.Engine) {
 
 	// Config chat endpoint - creates ephemeral task with config-mode MCP tools
 	api.POST("/workspaces/:id/config-chat", h.httpStartConfigChat)
+	api.POST("/workspaces/:id/config-chat/restart", h.httpRestartConfigChat)
 }
 
 func (h *TaskHandlers) registerWS(dispatcher *ws.Dispatcher) {

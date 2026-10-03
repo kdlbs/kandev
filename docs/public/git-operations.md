@@ -130,9 +130,11 @@ By default, managed worktrees live under the configured task-data directory, com
 
 Additional branches are siblings of the primary repository worktree, not directories nested inside it. Multi-repository tasks have one worktree per repository. Kandev reuses a valid session/repository worktree; if its directory is missing, it attempts to recreate it from the recorded local or remote branch.
 
-Managed worktrees can remain registered to an older repository clone after the repository path changes. For supported GitHub and GitLab repositories, Kandev checks the provider origin, linked-worktree registration, branch, and commit. When the worktree is clean, Kandev moves it to the current workspace clone before it starts an agent. Kandev keeps the old checkout.
+Managed worktrees can remain registered to an older repository clone after the repository path changes. For supported GitHub and GitLab repositories, Kandev checks the provider origin, linked-worktree registration, branch, and commit. When the worktree is clean, Kandev moves it to the current workspace clone before it starts an agent and retains a recovery snapshot of the old checkout.
 
-If the worktree contains local changes, Kandev stops and offers **Move files and resume**. Before you confirm, note that Kandev keeps the original checkout and a file snapshot. Git staging state does not transfer. Review the moved changes before you commit. Kandev blocks worktrees with unsupported filters, sparse checkout, or submodules.
+If a worktree contains local changes, Resume or **Restore workspace** stops before agent startup and offers **Move files and resume**. Kandev leaves the original worktree untouched until you confirm. It then preserves a recovery snapshot and copies tracked, untracked, and ignored file content, deletions, file modes, and symbolic links to the replacement worktree. Git's index and staging choices do not transfer, so stage the files again before committing. Review the changes after recovery. Kandev blocks worktrees with unsupported filters, sparse checkout, or submodules.
+
+If an older task still shows a generic recovery error, use Resume or **Restore workspace** once to check the current workspace and reveal the relocation action. A busy inspection leaves every checkout unchanged. Wait for it to finish, then retry manually.
 
 For a new task branch, the repository default template is:
 

@@ -2,7 +2,7 @@
 status: current
 system: workspaces
 created: 2026-08-27
-updated: 2026-10-02
+updated: 2026-10-03
 owners:
   - kandev
 requirements:
@@ -248,7 +248,7 @@ AC-WORKSPACES-LOCAL-REPOSITORIES-003.13 within each workspace entry. Cached
 snapshot reads and refresh scans retain separate single-flight pending handles,
 but share one publication owner. Starting a new transport operation takes
 ownership across both kinds. Joining an existing same-kind handle does not
-take ownership again and does not start a replacement request. Request start
+take ownership again for unchanged roots or start a replacement request. Request start
 order, rather than completion order or scan timestamps, determines eligibility.
 
 Register ownership and the pending handle before notifying subscribers. Only
@@ -278,14 +278,61 @@ same workspace ID. Public `load()` and `refresh()` return the currently
 registered entry's accepted response after their joined operation settles, or
 `null` when that entry has been removed, without recreating it.
 
-The hook keeps its existing result shape. Root Add, Reconnect, and Home
-confirmation synchronize through `load()`; Remove and manual Refresh use
-`refresh()`. Workspace Repositories, root controls, Office, Automations,
-Create Task, and Add Workspace Sources share this coordinator. Root mutation
-does not invalidate a pending same-kind request under this contract; a joined
-read retains its original authority. This ordering repair adds no timers,
-trailing retries, backend cache keys, cancellation protocol, or store/API shapes.
+Ordinary `load()` and `refresh()` keep their existing coalescing contract.
+Workspace Repositories, root controls, Office, Automations, Create Task, and
+Add Workspace Sources share this coordinator. Successful root changes use
+the separate synchronization boundary below. No timers, trailing retries,
+backend cache keys, cancellation protocol, or store shapes are added.
 Desktop and phone reuse their existing presentation and interaction patterns.
+
+### Successful root mutation synchronization
+
+This section implements AC-WORKSPACES-LOCAL-REPOSITORIES-003.14. Desktop root
+records and mutation endpoints are install-wide; browser coordinator entries
+remain keyed by workspace ID. The guarantee applies to every subscriber and
+hook consumer of the initiating workspace entry in this coordinator, not all
+entries, browser tabs, or connected clients. Other workspace entries retain
+their existing independent reads and normal activation/freshness behavior.
+There is no new cross-workspace or backend broadcast mechanism.
+
+Add a narrow `synchronizeAfterRootMutation(workspaceId, kind)` coordinator
+method, exposed as `synchronizeAfterRootMutation(kind)` by the discovery hook,
+where `kind` is `"load"` or `"refresh"`. Invoke it only after a root mutation's
+transport succeeds. In one synchronous boundary, revoke the entry's prior
+publication owner, detach both pending handles, and start the chosen new
+operation using the existing request machinery. Reserve its new handle and
+owner before the first notification; subscriber reentry can then join the
+new same-kind operation or start a newer distinct operation under AC-003.13.
+Do not notify between invalidation and reserving the fresh operation. Do not
+clear the last accepted response optimistically or infer results from paths.
+
+Detached transports still settle and their callers still await them. They
+cannot publish responses/errors, clear replacement handles, recreate busy
+state, notify consumers as accepted work, or initiate snapshot follow-up.
+Ignore settlement that owns neither a current handle nor publication. Current
+pending handles and accepted `refreshing` metadata determine busy state;
+detached work does not keep a successful new result busy until the old read
+returns. Entry identity still fences disposal and same-ID recreation. New
+load/refresh await returns retain the registered accepted-response convention.
+A later distinct read can take authority normally. A second successful
+mutation fences the preceding synchronization as well as ordinary reads.
+
+`useDiscoveryRootActions` requests `"load"` after Add, Home confirmation, and
+Reconnect; Remove requests `"refresh"`. Its manual Refresh continues through
+ordinary `refresh()` and does not invalidate. Preserve mutation serialization,
+Home admission refs, finally cleanup, and existing error reporting. Rejection
+or picker cancellation does not invoke this boundary; a current synchronization
+failure preserves the accepted response with the current discovery error.
+Visibility, leases, freshness, and failed-root policies still govern automatic
+follow-up of accepted snapshots.
+
+The settings root-action file is a reexport of this hook. Two direct successful
+Add Home call sites also replace their post-action `load()` with this boundary:
+`components/task-create-dialog-repo-chips.tsx` and
+`components/task/add-workspace-sources/saved-repository-source-row.tsx`.
+They keep their existing action and UI admission semantics. No root mutation
+client or backend signature changes are required. Backend mutations already
+invalidate their discovery cache; the fresh transport reads that authority.
 
 ## User interface
 
@@ -454,6 +501,11 @@ repository trust](../../../decisions/2026-08-28-explicit-submodule-repository-tr
   failures, empty results, same-kind sharing, workspace isolation, reentrant
   subscriptions, lease release, and disposal. Real shared-hook/Office-consumer
   integration covers exposed choices and flags with only transport mocked.
+- Root-mutation regressions cover each successful action with pending same-kind
+  and opposite-kind reads, both settlement orders and failure directions,
+  authoritative empty state, fresh pending flags, ordinary sharing, sequential
+  mutations, reentry, workspace isolation, release, and disposal. Real discovery
+  and root-action hooks plus a real shared Office consumer mock only transport.
 - Web E2E uses a stubbed native-picker adapter for selection, cancellation,
   cache, denial, reconnect, removal, and migration states.
 - Browser E2E covers server Home discovery at desktop and phone widths. It also
@@ -465,6 +517,7 @@ repository trust](../../../decisions/2026-08-28-explicit-submodule-repository-tr
 
 ## Implementation plans
 
+- [Repository Discovery Root Mutations](../../../plans/repository-discovery-root-mutations/plan.md)
 - [Repository Discovery Ordering](../../../plans/repository-discovery-ordering/plan.md)
 - [Repository Discovery Failure Recovery](../../../plans/repository-discovery-failure-recovery/plan.md)
 

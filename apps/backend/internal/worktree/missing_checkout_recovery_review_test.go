@@ -49,6 +49,7 @@ func TestMissingCheckoutRecoveryUsesTheSurvivingBranchIdentity(t *testing.T) {
 		if err := fixture.store.UpdateWorktree(context.Background(), worktree); err != nil {
 			t.Fatalf("persist compaction recovery identity: %v", err)
 		}
+		fixture.refreshSelectionSnapshot(t)
 		runGit(t, fixture.repositoryPath, "update-ref", recoveryRefName(fixture.worktreeID), fixture.branchHead)
 		runGit(t, fixture.repositoryPath, "branch", "-D", fixture.branch)
 		runGit(t, fixture.repositoryPath, "update-ref", "-d", "refs/remotes/origin/"+fixture.branch)

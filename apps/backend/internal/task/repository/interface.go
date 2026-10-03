@@ -620,6 +620,15 @@ type SessionRepository interface {
 	UpdateSessionReviewStatus(ctx context.Context, sessionID string, status string) error
 	UpdateSessionMetadata(ctx context.Context, sessionID string, metadata map[string]interface{}) error
 	SetSessionMetadataKey(ctx context.Context, sessionID, key string, value interface{}) error
+	// CommitWorkspaceRecoveryErrorIfCurrent projects a verified workspace
+	// recovery refusal only while the captured session, execution, environment,
+	// complete selected repository inventory, ownership generation, and current
+	// error stamp still match.
+	CommitWorkspaceRecoveryErrorIfCurrent(
+		ctx context.Context,
+		observation models.WorkspaceRecoveryErrorObservation,
+		errorValue models.LastAgentError,
+	) (stored bool, activeStamp string, err error)
 	SetSessionACPSessionID(ctx context.Context, sessionID, acpSessionID string) (bool, error)
 	DismissLastAgentError(ctx context.Context, sessionID string, expected models.LastAgentError, dismissedAt time.Time) (bool, error)
 	GetLastAgentMessage(ctx context.Context, sessionID string) (string, error)

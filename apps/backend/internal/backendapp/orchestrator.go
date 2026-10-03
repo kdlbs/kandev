@@ -185,6 +185,7 @@ func provideOrchestrator(
 	// the manager to enforce the per-automation retention window.
 	orchestratorSvc.SetWorktreeManager(lifecycleMgr.WorktreeManager())
 	orchestratorSvc.SetTaskLaunchRecoveryService(taskSvc)
+	orchestratorSvc.SetWorkspaceRecoveryErrorReporter(taskSvc)
 
 	msgCreator := &messageCreatorAdapter{svc: taskSvc, logger: log}
 	orchestratorSvc.SetMessageCreator(msgCreator)

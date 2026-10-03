@@ -85,9 +85,15 @@ type AgentExecution struct {
 	// FailureCode and FailureDetails carry a bounded, structured startup
 	// diagnostic to the orchestrator. They remain separate from the generic
 	// error message so user-facing recovery can choose a stable presentation.
-	FailureCode    string
-	FailureDetails string
-	ProviderError  *streams.ProviderError
+	FailureCode            string
+	FailureDetails         string
+	StartupFailureReason   string
+	StartupFailureAttempts int
+	StartupFailureNPMCode  string
+	startupFailureMu       sync.RWMutex
+	ProviderError          *streams.ProviderError
+	bootMessageMu          sync.Mutex
+	bootMessageFinalized   bool
 	// metadata is unexported on purpose: it is touched from the launch, prompt
 	// and stop paths concurrently, so all access must go through the metadataMu
 	// helpers in execution_metadata.go.
@@ -1618,6 +1624,9 @@ type WorkspaceInfo struct {
 	TaskID            string
 	SessionID         string // Task session ID (from task_sessions table)
 	TaskEnvironmentID string // Env this session belongs to (shared across sessions in same task)
+	// RecoveryErrorObservation captures session and owner identity before
+	// selected-workspace inspection so a refusal can be conditionally recorded.
+	RecoveryErrorObservation *models.WorkspaceRecoveryErrorObservation
 	// EnvironmentOwnerTaskID and OwnershipGeneration are the durable identity
 	// used to guard host worktree recovery across inherited environments.
 	EnvironmentOwnerTaskID string

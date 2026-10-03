@@ -2,6 +2,7 @@
 status: active
 system: platform
 created: 2026-10-02
+updated: 2026-10-03
 owners:
   - kandev
 ---
@@ -19,6 +20,10 @@ The active [merge-detail contract](../../ui/requirements/merge-commit-details.md
 already requires status preservation in `.2` and ordinary/root behavior in `.4`.
 This contract makes classification explicit for both commit and cumulative
 comparisons without extending merge-only behavior to another comparison type.
+Comparison data must also remain usable when the user's Git configuration
+forces terminal display color. Display decoration is not patch content.
+Cumulative comparisons must retain built-in patch data when a user's Git setup
+selects an external diff helper.
 The [workspace status contract](workspace-git-status.md) separately owns live
 porcelain membership, staged/unstaged facets, and detail enrichment.
 
@@ -36,6 +41,10 @@ of arbitrary path and content bytes.
 - **AC-PLATFORM-GIT-DIFF-FILE-METADATA-001.3:** Commit and cumulative responses shall preserve each exact file key, path, patch bytes, line counts, and existing response fields while correcting status. Repository-selected reads shall return only the selected repository; aggregate reads shall retain distinct repository-qualified file identities and repository metadata for identical paths.
 - **AC-PLATFORM-GIT-DIFF-FILE-METADATA-001.4:** Status classification shall remain correct when emitted patch content is truncated or skipped by existing budgets. Single-commit detail remains uncapped, and cumulative byte limits, file limits, truncation counts, and skip reasons shall retain their behavior.
 - **AC-PLATFORM-GIT-DIFF-FILE-METADATA-001.5:** Ordinary, first-parent merge, root, and empty commit comparisons shall retain their existing bases and file membership. Correcting status shall not mutate the checkout or index, change repository selection, or introduce new public fields or status values.
+- **AC-PLATFORM-GIT-DIFF-FILE-METADATA-001.6:** With default color settings, forced `color.ui=always`, or an overriding `color.diff=always`, commit and cumulative comparisons shall return the same file membership, paths, statuses, counts, metadata, and plain patch data as color-disabled comparisons. A nonempty comparison shall not become a successful empty result because of display color. Existing genuinely empty results and output budgets shall retain their behavior.
+- **AC-PLATFORM-GIT-DIFF-FILE-METADATA-001.7:** Suppressing display color shall preserve literal escape bytes in source content and filenames and shall not change repository configuration, HEAD, refs, index, or worktree state. Repository-selected and aggregate comparisons shall retain their existing routing and repository identities.
+- **AC-PLATFORM-GIT-DIFF-FILE-METADATA-001.8:** With `diff.external`, `GIT_EXTERNAL_DIFF`, or both selecting external diff helpers, every cumulative comparison shall return the same built-in patch data, exact file membership, paths, statuses, counts, and metadata as a comparison without those helpers. This applies to committed and dirty tracked changes, genuinely empty comparisons, and repository-selected and aggregate reads; nonempty comparisons shall not become successful empty results because of helper output. Existing byte and file budgets, truncation counts, and skip reasons shall retain their behavior.
+- **AC-PLATFORM-GIT-DIFF-FILE-METADATA-001.9:** Cumulative comparison reads shall not execute configured or environment-selected external diff helpers and shall not change repository configuration, HEAD, refs, index, worktree state, or the caller's helper environment settings.
 
 ## Cross-surface outcome
 
@@ -45,7 +54,7 @@ required. Provider-only history remains governed by its existing source contract
 
 ## Out of scope
 
-- Git invocation, environment, history-provider, rename-detection, or comparison-base changes.
+- Git invocation or flag-validation changes beyond per-comparison display-color suppression and built-in cumulative patch selection; shared environment policy, history-provider, rename-detection, text conversion, or comparison-base changes.
 - Live workspace porcelain parsing, NUL numstat parsing, literal path selection, and worktree mutations.
 - Frontend layout, file-navigation changes, new status enums, or transport schemas.
 
@@ -53,3 +62,5 @@ required. Provider-only history remains governed by its existing source contract
 
 - [Git diff file metadata design](../system-design/git-diff-file-metadata.md)
 - [Metadata status repair package](../../../plans/git-diff-status-metadata/plan.md)
+- [Plain comparison output repair package](../../../plans/git-comparison-plain-output/plan.md)
+- [Built-in cumulative patch repair package](../../../plans/git-cumulative-built-in-patch/plan.md)

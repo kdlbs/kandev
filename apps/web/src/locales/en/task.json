@@ -87,6 +87,7 @@
   "agentBootResuming": "Resuming agent {{agentName}}",
   "agentBootStarted": "Started agent {{agentName}}",
   "agentBootStarting": "Starting agent {{agentName}}",
+  "agentBootRetrying": "Retrying agent startup (attempt {{attempt}} of {{maxAttempts}})",
   "agentCount_one": "{{count}} agent",
   "agentCount_other": "{{count}} agents",
   "agentFallbackName": "agent",

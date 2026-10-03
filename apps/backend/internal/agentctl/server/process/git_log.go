@@ -192,7 +192,7 @@ func (g *GitOperator) GetLog(ctx context.Context, baseCommit string, limit int) 
 		})
 	}
 
-	g.markPushedCommits(ctx, result.Commits)
+	g.markPushedCommits(ctx, result.Commits, baseCommit)
 
 	result.Success = true
 	return result, nil
@@ -203,7 +203,7 @@ func (g *GitOperator) GetLog(ctx context.Context, baseCommit string, limit int) 
 // pushed iff it is not in that "ahead" set. When the branch has no upstream
 // (never been pushed) or the lookup fails, all commits stay Pushed=false — the
 // safer default than falsely claiming a commit is on the remote.
-func (g *GitOperator) markPushedCommits(ctx context.Context, commits []*GitCommitInfo) {
+func (g *GitOperator) markPushedCommits(ctx context.Context, commits []*GitCommitInfo, baseCommit string) {
 	if len(commits) == 0 {
 		return
 	}
@@ -223,12 +223,19 @@ func (g *GitOperator) markPushedCommits(ctx context.Context, commits []*GitCommi
 	if upstreamSHA == "" {
 		return
 	}
-	// Cap the walk to the number of commits we're marking. Without this, a
-	// branch with many local-only commits would walk unbounded history per
-	// GetLog call. rev-list walks newest-first the same way GetLog does, so
-	// the N most recent unpushed SHAs cover the N commits in our result.
-	output, err := g.runGitCommand(ctx, "rev-list",
-		fmt.Sprintf("-n%d", len(commits)), "HEAD", "^"+upstreamSHA)
+	// Match the returned log's positive traversal so the capped ahead set
+	// covers every local row. Exclusions retain full ancestry, including
+	// commits reachable through an upstream merge's side parents.
+	// The returned tip pins the walk even if HEAD advances after the log read.
+	args := []string{"rev-list", fmt.Sprintf("-n%d", len(commits))}
+	tip := commits[0].CommitSHA
+	if baseCommit != "" {
+		args = append(args, "--first-parent", baseCommit+".."+tip)
+	} else {
+		args = append(args, tip)
+	}
+	args = append(args, "^"+upstreamSHA)
+	output, err := g.runGitCommand(ctx, args...)
 	if err != nil {
 		return
 	}
@@ -285,6 +292,8 @@ func (g *GitOperator) GetCumulativeDiff(ctx context.Context, baseCommit string) 
 	diffOutput, err := g.runGitCommand(
 		ctx,
 		"diff",
+		"--no-color",
+		"--no-ext-diff",
 		"--src-prefix=a/",
 		"--dst-prefix=b/",
 		baseCommit,
@@ -420,6 +429,7 @@ func (g *GitOperator) ShowCommit(ctx context.Context, commitSHA string) (*Commit
 		ctx,
 		"show",
 		"--first-parent",
+		"--no-color",
 		"--format=",
 		"--stat",
 		"--numstat",

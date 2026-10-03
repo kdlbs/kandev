@@ -1,9 +1,47 @@
 import { getStoredQuickChatNames } from "@/lib/local-storage";
-import { isQuickChatSetupSessionId } from "./quick-chat-session";
+import { getQuickChatSetupSessionId, isQuickChatSetupSessionId } from "./quick-chat-session";
 import type { QuickChatSession, QuickChatState, QuickTerminalTab } from "./types";
 
 const QUICK_CHAT_LIFECYCLE_RETENTION_MS = 60 * 60 * 1000;
 const SETTLED_LEDGER_MAX_ENTRIES = 500;
+
+export function applyConfigChatRestartSnapshot(
+  state: QuickChatState,
+  workspaceId: string,
+  pending: boolean,
+  sessionId?: string,
+): QuickChatState {
+  const current = state.configChatRestarts?.[workspaceId];
+  if (current?.source === "local") return state;
+  const configChatRestarts = { ...state.configChatRestarts };
+  if (pending && sessionId) {
+    configChatRestarts[workspaceId] = { sessionId, status: "restarting", source: "server" };
+  } else {
+    delete configChatRestarts[workspaceId];
+  }
+  return { ...state, configChatRestarts };
+}
+
+export function replaceConfigChatSession(
+  state: QuickChatState,
+  workspaceId: string,
+  oldSessionId: string,
+  replacement: QuickChatSession,
+): QuickChatState {
+  if (replacement.workspaceId !== workspaceId || replacement.kind !== "config") return state;
+  const wasActive = state.activeSessionId === oldSessionId;
+  const removed = removeQuickChatSession(state, oldSessionId);
+  const withoutSetup = closeQuickChatSession(
+    removed,
+    getQuickChatSetupSessionId(workspaceId, "config"),
+  );
+  const next = upsertQuickChatSession(withoutSetup, { ...replacement, initialPrompt: undefined });
+  return {
+    ...next,
+    isOpen: state.isOpen,
+    activeSessionId: wasActive ? replacement.sessionId : next.activeSessionId,
+  };
+}
 
 /** Applies locally stored tab renames over a server-provided session list. */
 export function applyStoredQuickChatNames(sessions: QuickChatSession[]): QuickChatSession[] {

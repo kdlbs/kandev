@@ -35,6 +35,23 @@ describe("readLastAgentError", () => {
     });
   });
 
+  it("reads typed managed runtime startup metadata", () => {
+    expect(
+      readLastAgentError({
+        last_agent_error: {
+          message: "Agent stopped during startup",
+          failure_code: "managed_runtime_startup",
+          startup_reason: "early_exit",
+          startup_attempts: 2,
+        },
+      }),
+    ).toMatchObject({
+      code: "managed_runtime_startup",
+      startupReason: "early_exit",
+      startupAttempts: 2,
+    });
+  });
+
   it("reads structured failure fields in camelCase", () => {
     expect(
       readLastAgentError({
@@ -42,11 +59,13 @@ describe("readLastAgentError", () => {
           message: AGENT_ERROR_MESSAGE,
           code: MANAGED_RUNTIME_NPM_FAILURE,
           details: NPM_ERROR_CODE_ETARGET,
+          startupAttempts: 2,
         },
       }),
     ).toMatchObject({
       code: MANAGED_RUNTIME_NPM_FAILURE,
       details: NPM_ERROR_CODE_ETARGET,
+      startupAttempts: 2,
     });
   });
 });

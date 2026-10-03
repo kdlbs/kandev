@@ -177,6 +177,13 @@ export type QuickChatSessionTombstone = {
   tombstonedAt: string;
 };
 
+export type ConfigChatRestartState = {
+  sessionId: string;
+  status: "restarting" | "uncertain";
+  source: "local" | "server";
+  error?: string;
+};
+
 export type QuickChatState = {
   isOpen: boolean;
   sessions: QuickChatSession[];
@@ -189,6 +196,7 @@ export type QuickChatState = {
   lastSettledAtBySession: Record<string, string>;
   sessionOwnership: Record<string, QuickChatSessionOwnership>;
   syncRevisionByWorkspace: Record<string, number>;
+  configChatRestarts: Record<string, ConfigChatRestartState>;
   tombstonedSessions: Record<string, QuickChatSessionTombstone>;
   /** Optimistic mixed-tab order keyed by workspace until the save settles. */
   tabOrderByWorkspace: Record<string, string[]>;
@@ -436,6 +444,13 @@ export type UISliceActions = {
     state: { pending: boolean; error: string | null },
   ) => void;
   setQuickChatInitialPrompt: (sessionId: string, prompt?: QuickChatInitialPrompt) => void;
+  setConfigChatRestart: (workspaceId: string, restart: ConfigChatRestartState | null) => void;
+  syncConfigChatRestart: (workspaceId: string, pending: boolean, sessionId?: string) => void;
+  replaceConfigChatSession: (
+    workspaceId: string,
+    oldSessionId: string,
+    replacement: QuickChatSession,
+  ) => void;
   /** Opens Quick Chat after the requested workspace list becomes authoritative. */
   requestQuickChatOpen: (
     workspaceId: string,

@@ -87,6 +87,7 @@
   "agentBootResuming": "Ŕēśũḿĩńĝ àĝēńţ {{agentName}}",
   "agentBootStarted": "Śţàŕţēď àĝēńţ {{agentName}}",
   "agentBootStarting": "Śţàŕţĩńĝ àĝēńţ {{agentName}}",
+  "agentBootRetrying": "Ŕēţŕŷĩńĝ àĝēńţ śţàŕţũƥ (àţţēḿƥţ {{attempt}} ōƒ {{maxAttempts}})",
   "agentCount_one": "{{count}} àĝēńţ",
   "agentCount_other": "{{count}} àĝēńţś",
   "agentFallbackName": "àĝēńţ",

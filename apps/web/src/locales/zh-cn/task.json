@@ -75,6 +75,7 @@
   "agentBootResuming": "正在恢复智能体 {{agentName}}",
   "agentBootStarted": "已启动智能体 {{agentName}}",
   "agentBootStarting": "正在启动智能体 {{agentName}}",
+  "agentBootRetrying": "正在重试智能体启动 (第 {{attempt}} 次，共 {{maxAttempts}} 次)",
   "agentCount_one": "{{count}} 个智能体",
   "agentCount_other": "{{count}} 个智能体",
   "agentFallbackName": "智能体",

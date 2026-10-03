@@ -75,6 +75,7 @@
   "agentBootResuming": "A retomar o agente {{agentName}}",
   "agentBootStarted": "Agente {{agentName}} iniciado",
   "agentBootStarting": "A iniciar o agente {{agentName}}",
+  "agentBootRetrying": "A tentar novamente o arranque do agente (tentativa {{attempt}} de {{maxAttempts}})",
   "agentCount_one": "{{count}} agente",
   "agentCount_other": "{{count}} agentes",
   "agentFallbackName": "agente",

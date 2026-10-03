@@ -146,6 +146,7 @@ export const defaultUIState: UISliceState = {
     lastSettledAtBySession: {},
     sessionOwnership: {},
     syncRevisionByWorkspace: {},
+    configChatRestarts: {},
     tombstonedSessions: {},
     tabOrderByWorkspace: {},
     tabOrderSyncErrorByWorkspace: {},

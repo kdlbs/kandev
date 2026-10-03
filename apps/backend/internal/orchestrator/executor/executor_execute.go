@@ -1407,7 +1407,10 @@ func (e *Executor) prepareSessionAttempt(ctx context.Context, task *v1.Task, age
 		if envErr != nil {
 			return "", envErr
 		}
-		recoveryAdmission, envErr = e.admitSelectedWorktreeRecovery(ctx, task.ID, session, selectedEnv, execConfig.ExecutorType, false)
+		if bindWorkspace && selectedEnv != nil && selectedEnv.ID != "" && session.TaskEnvironmentID == "" {
+			session.TaskEnvironmentID = selectedEnv.ID
+		}
+		recoveryAdmission, envErr = e.admitSelectedWorktreeRecovery(ctx, task.ID, session, selectedEnv, execConfig.ExecutorType, false, 0, false)
 		if envErr != nil {
 			return "", envErr
 		}
@@ -1890,7 +1893,7 @@ func (e *Executor) LaunchPreparedSession(ctx context.Context, task *v1.Task, ses
 	}
 
 	var recoveryAdmission *worktree.RecoveryAdmission
-	recoveryAdmission, err = e.admitSelectedWorktreeRecovery(ctx, task.ID, session, existingEnv, req.ExecutorType, false)
+	recoveryAdmission, err = e.admitSelectedWorktreeRecovery(ctx, task.ID, session, existingEnv, req.ExecutorType, false, 0, true)
 	if err != nil {
 		return nil, err
 	}

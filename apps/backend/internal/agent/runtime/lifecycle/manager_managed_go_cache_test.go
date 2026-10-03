@@ -462,7 +462,7 @@ func TestManagedGoCacheCancellationPreventsLaunch(t *testing.T) {
 	result := make(chan error, 1)
 	go func() {
 		_, err := mgr.Launch(ctx, &LaunchRequest{
-			TaskID: "task-1", SessionID: "session-canceled", AgentProfileID: "profile-1", IsEphemeral: true,
+			TaskID: "task-1", AgentProfileID: "profile-1", IsEphemeral: true,
 		})
 		result <- err
 	}()
