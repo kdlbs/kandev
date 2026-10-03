@@ -113,3 +113,14 @@ Validation passed:
 - `git diff --check`
 
 The first race run exposed a tunnel shutdown goroutine leak when a compatibility client supplied a non-cancelable background context. The tunnel now derives its own cancelable context while preserving runtime-retirement cancellation; the websocket race test and final full race command passed. The linter's nested-branch finding in host-utility cleanup was extracted into a helper; the final backend lint passed.
+
+### Runtime-epoch capability refresh (2026-10-03)
+
+The shard 5 settings failure followed the local runtime-replacement E2E. Its profile-specific capability probe successfully reattached the host-utility instance, while the general capability cache stayed empty after epoch invalidation. `/api/v1/agents/available` therefore reported `not_configured` until the worker restarted.
+
+Runtime-epoch reconciliation now schedules bounded host-utility reprobes under the manager lifetime context. Rebound probes share instance creation, publish only for the current runtime epoch and instance, and stop before owned instances are removed. Initial bootstrap results use the same epoch fence.
+
+- RED: `go test ./internal/agent/hostutility -run '^TestHostUtilityRuntimeRebind$' -count=1 -timeout=30s` failed because the successor capability snapshot was absent.
+- GREEN: the focused regression passed, then `go test -race ./internal/agent/hostutility -count=1 -timeout=180s` and the complete five-package race command passed: `go test -race ./internal/backendapp ./internal/agent/runtime/lifecycle ./internal/agent/hostutility ./internal/gateway/websocket ./internal/plugins -count=1` (backendapp 84.211s, lifecycle 105.719s, hostutility 1.558s, websocket 5.383s, plugins 22.486s).
+- `make -C apps/backend lint` passed with 0 issues. Targeted ESLint, Prettier, and `git diff --check` passed.
+- The six-case Chromium reproduction passed with retries disabled: `bash e2e/scripts/run-raw-e2e.sh --project=chromium e2e/tests/layout/agent-runtime-replacement.spec.ts e2e/tests/settings/agent-profile-acp.spec.ts --reporter=list --retries=0` (6 passed, 33.0s). The full pre-fix shard reproduced the same dynamic-config failure (246 passed, 8 skipped, 1 failed); a full post-fix shard and fresh hosted CI remain pending.

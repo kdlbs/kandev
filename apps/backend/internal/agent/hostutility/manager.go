@@ -78,6 +78,10 @@ type Manager struct {
 	profileGroup                  singleflight.Group
 	managedRuntimeSelections      managedruntime.SelectionReader
 	startCancel                   context.CancelFunc
+	runtimeCtx                    context.Context
+	runtimeCancel                 context.CancelFunc
+	runtimeRebindWG               sync.WaitGroup
+	runtimeRebindEpoch            uint64
 	stopped                       bool
 	runtimeEpoch                  uint64
 }
@@ -203,6 +207,9 @@ func (m *Manager) Start(ctx context.Context) error {
 		cancel()
 		return nil
 	}
+	runtimeCtx, runtimeCancel := context.WithCancel(ctx)
+	m.runtimeCtx = runtimeCtx
+	m.runtimeCancel = runtimeCancel
 	m.startCancel = cancel
 	m.mu.Unlock()
 	defer func() {
@@ -281,8 +288,11 @@ func (m *Manager) Stop(ctx context.Context) {
 	}
 	m.mu.Lock()
 	m.stopped = true
-	cancel := m.startCancel
+	startCancel := m.startCancel
 	m.startCancel = nil
+	runtimeCancel := m.runtimeCancel
+	m.runtimeCancel = nil
+	m.runtimeCtx = nil
 	instances := make([]*instance, 0, len(m.instances))
 	for _, inst := range m.instances {
 		instances = append(instances, inst)
@@ -294,9 +304,13 @@ func (m *Manager) Stop(ctx context.Context) {
 	m.tempLease = nil
 	m.mu.Unlock()
 
-	if cancel != nil {
-		cancel()
+	if startCancel != nil {
+		startCancel()
 	}
+	if runtimeCancel != nil {
+		runtimeCancel()
+	}
+	m.runtimeRebindWG.Wait()
 
 	for _, inst := range instances {
 		deleteCtx, cancel := hostUtilityDeleteContext(ctx)
@@ -387,6 +401,7 @@ func (m *Manager) reconcileRuntimeEpoch(ctx context.Context) error {
 		m.mu.Unlock()
 		return nil
 	}
+	shouldRebootstrap := m.runtimeEpoch != 0
 	oldInstances := make([]*instance, 0, len(m.instances))
 	for _, inst := range m.instances {
 		oldInstances = append(oldInstances, inst)
@@ -400,7 +415,89 @@ func (m *Manager) reconcileRuntimeEpoch(ctx context.Context) error {
 	for _, inst := range oldInstances {
 		m.deleteInstance(ctx, inst)
 	}
+	if shouldRebootstrap {
+		m.scheduleRuntimeEpochRebootstrap(epoch)
+	}
 	return nil
+}
+
+func (m *Manager) scheduleRuntimeEpochRebootstrap(epoch uint64) {
+	targets := m.eligibleAgents()
+	if len(targets) == 0 {
+		return
+	}
+
+	m.mu.Lock()
+	if m.stopped || m.runtimeCtx == nil || m.runtimeEpoch != epoch || m.runtimeRebindEpoch == epoch {
+		m.mu.Unlock()
+		return
+	}
+	ctx := m.runtimeCtx
+	m.runtimeRebindEpoch = epoch
+	m.runtimeRebindWG.Add(1)
+	for _, ia := range targets {
+		m.cache.set(AgentCapabilities{
+			AgentType:     ia.(agents.Agent).ID(),
+			Status:        StatusProbing,
+			LastCheckedAt: time.Now(),
+		})
+	}
+	m.mu.Unlock()
+
+	go func() {
+		defer m.runtimeRebindWG.Done()
+		g, gctx := errgroup.WithContext(ctx)
+		g.SetLimit(maxConcurrentBootstraps)
+		for _, ia := range targets {
+			ia := ia
+			g.Go(func() error {
+				m.rebootstrapAgent(gctx, ia, epoch)
+				return nil
+			})
+		}
+		_ = g.Wait()
+	}()
+}
+
+func (m *Manager) rebootstrapAgent(ctx context.Context, ia agents.InferenceAgent, epoch uint64) {
+	ag, ok := ia.(agents.Agent)
+	if !ok {
+		return
+	}
+	inst, resolvedAgent, err := m.getInstance(ctx, ag.ID())
+	if err != nil {
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return
+		}
+		status := StatusFailed
+		if errors.Is(err, errAgentNotInstalled) {
+			status = StatusNotInstalled
+		}
+		m.publishCapabilitiesForEpoch(epoch, nil, probeFailureCapabilities(
+			ag.ID(), status, err.Error(), 0, time.Now(),
+		))
+		return
+	}
+	caps := m.probe(ctx, inst, resolvedAgent, false)
+	m.publishCapabilitiesForEpoch(epoch, inst, caps)
+}
+
+func (m *Manager) publishCapabilitiesForEpoch(epoch uint64, inst *instance, caps AgentCapabilities) {
+	m.mu.RLock()
+	current := !m.stopped && m.runtimeEpoch == epoch
+	if inst != nil {
+		current = current && m.instances[inst.agentType] == inst && inst.runtimeEpoch == epoch
+	}
+	m.mu.RUnlock()
+	if current {
+		m.cache.set(caps)
+	}
+}
+
+func (m *Manager) currentRuntimeEpoch() uint64 {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.runtimeEpoch
 }
 
 // eligibleAgents returns enabled agents that implement supported inference
@@ -429,10 +526,14 @@ func (m *Manager) bootstrapAgent(ctx context.Context, ia agents.InferenceAgent) 
 	ag := ia.(agents.Agent)
 	agentType := ag.ID()
 	log := m.log.WithFields(zap.String("agent_type", agentType))
+	epoch := m.currentRuntimeEpoch()
+	publish := func(inst *instance, caps AgentCapabilities) {
+		m.publishCapabilitiesForEpoch(epoch, inst, caps)
+	}
 
 	// Publish "probing" synchronously so the UI can distinguish "not started"
 	// (cache miss) from "in flight".
-	m.cache.set(AgentCapabilities{
+	publish(nil, AgentCapabilities{
 		AgentType:     agentType,
 		Status:        StatusProbing,
 		LastCheckedAt: time.Now(),
@@ -440,7 +541,7 @@ func (m *Manager) bootstrapAgent(ctx context.Context, ia agents.InferenceAgent) 
 
 	cfg := inferenceConfigForHostUtility(ia)
 	if cfg == nil || !cfg.Supported {
-		m.cache.set(AgentCapabilities{
+		publish(nil, AgentCapabilities{
 			AgentType:     agentType,
 			Status:        StatusNotConfigured,
 			Error:         "inference config not available",
@@ -456,7 +557,7 @@ func (m *Manager) bootstrapAgent(ctx context.Context, ia agents.InferenceAgent) 
 			msg = err.Error()
 		}
 		log.Info("skipping host utility bootstrap: agent not installed")
-		m.cache.set(AgentCapabilities{
+		publish(nil, AgentCapabilities{
 			AgentType:     agentType,
 			Status:        StatusNotInstalled,
 			Error:         msg,
@@ -468,7 +569,7 @@ func (m *Manager) bootstrapAgent(ctx context.Context, ia agents.InferenceAgent) 
 	inst, err := m.createInstance(ctx, agentType)
 	if err != nil {
 		log.Warn("failed to create host utility instance", zap.Error(err))
-		m.cache.set(AgentCapabilities{
+		publish(nil, AgentCapabilities{
 			AgentType:     agentType,
 			Status:        StatusFailed,
 			Error:         err.Error(),
@@ -496,7 +597,7 @@ func (m *Manager) bootstrapAgent(ctx context.Context, ia agents.InferenceAgent) 
 	m.mu.Unlock()
 
 	caps := m.probe(ctx, inst, ia, false)
-	m.cache.set(caps)
+	publish(inst, caps)
 	log.Info("host utility bootstrap completed",
 		zap.String("status", string(caps.Status)),
 		zap.Int("models", len(caps.Models)),
