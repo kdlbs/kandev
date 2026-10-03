@@ -78,18 +78,22 @@ test.describe("Setup recovery UX (mobile)", () => {
     await expect(dialog.getByTestId("quick-chat-setup")).toBeVisible({ timeout: 10_000 });
     await selectAgentIfNeeded(dialog, testPage);
 
-    const startButton = dialog.getByTestId("quick-chat-start");
-    await expect(startButton).toBeEnabled({ timeout: 10_000 });
-    await startButton.tap();
+    const openingPrompt = "Keep this request available for retry.";
+    const prompt = dialog.getByTestId("task-description-input");
+    await prompt.fill(openingPrompt);
+    const sendButton = dialog.getByTestId("quick-chat-send");
+    await expect(sendButton).toBeEnabled({ timeout: 10_000 });
+    await sendButton.tap();
 
     const setupError = dialog.getByTestId("quick-chat-setup-error");
     await expect(setupError).toBeVisible({ timeout: 10_000 });
     await expect(setupError).toContainText("Invalid mobile repository configuration");
-    await expect(startButton).toHaveText("Retry");
+    await expect(prompt).toHaveValue(openingPrompt);
+    await expect(sendButton).toBeEnabled();
 
-    const startBox = await startButton.boundingBox();
-    expect(startBox).not.toBeNull();
-    expect(startBox!.height).toBeGreaterThanOrEqual(44);
+    const sendBox = await sendButton.boundingBox();
+    expect(sendBox).not.toBeNull();
+    expect(sendBox!.height).toBeGreaterThanOrEqual(44);
 
     const scrollWidth = await testPage.evaluate(() => document.documentElement.scrollWidth);
     const clientWidth = await testPage.evaluate(() => document.documentElement.clientWidth);

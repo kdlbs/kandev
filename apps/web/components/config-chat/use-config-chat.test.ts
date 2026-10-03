@@ -201,20 +201,84 @@ describe("useConfigChat unified launch", () => {
     expect(setQuickChatInitialPrompt).toHaveBeenCalledWith(SESSION_ID, PROMPT);
   });
 
-  it("starts a passthrough profile with its prompt instead of stranding it outside the terminal", async () => {
+  it("closes the active shared setup placeholder after accepting configuration launch", async () => {
+    const setupSessionId = getQuickChatSetupSessionId(WORKSPACE_ID, "chat");
     const { result } = renderHook(() => useConfigChat(WORKSPACE_ID));
 
     await act(async () => {
-      await result.current.startSession(PASSTHROUGH_PROFILE_ID, PROMPT);
+      await result.current.startSession(CONFIG_PROFILE_ID, PROMPT, { setupSessionId });
+    });
+
+    expect(closeQuickChatSession).toHaveBeenCalledWith(setupSessionId);
+    expect(openQuickChat).toHaveBeenCalledWith(
+      SESSION_ID,
+      WORKSPACE_ID,
+      CONFIG_PROFILE_ID,
+      "config",
+      TASK_ID,
+    );
+  });
+});
+
+describe("useConfigChat opening payload delivery", () => {
+  it("starts a passthrough profile with its prompt instead of stranding it outside the terminal", async () => {
+    const { result } = renderHook(() => useConfigChat(WORKSPACE_ID));
+    const openingPayload = {
+      message: PROMPT,
+      clientMessageId: "opening-config-message",
+      attachments: [
+        {
+          type: "resource" as const,
+          attachment_id: "attachment-config",
+          mime_type: "text/plain",
+          name: "config.txt",
+          size_bytes: 42,
+          delivery_mode: "path" as const,
+        },
+      ],
+    };
+
+    await act(async () => {
+      await result.current.startSession(PASSTHROUGH_PROFILE_ID, openingPayload);
     });
 
     expect(startConfigChat).toHaveBeenCalledWith(WORKSPACE_ID, {
       agent_profile_id: PASSTHROUGH_PROFILE_ID,
       prompt: PROMPT,
+      attachments: openingPayload.attachments,
     });
     expect(setQuickChatInitialPrompt).not.toHaveBeenCalled();
   });
 
+  it("keeps a structured opening payload in the subscribed session", async () => {
+    const { result } = renderHook(() => useConfigChat(WORKSPACE_ID));
+    const openingPayload = {
+      message: PROMPT,
+      clientMessageId: "opening-config-message",
+      attachments: [
+        {
+          type: "resource" as const,
+          attachment_id: "attachment-config",
+          mime_type: "text/plain",
+          name: "config.txt",
+          size_bytes: 42,
+          delivery_mode: "path" as const,
+        },
+      ],
+    };
+
+    await act(async () => {
+      await result.current.startSession(CONFIG_PROFILE_ID, openingPayload);
+    });
+
+    expect(startConfigChat).toHaveBeenCalledWith(WORKSPACE_ID, {
+      agent_profile_id: CONFIG_PROFILE_ID,
+    });
+    expect(setQuickChatInitialPrompt).toHaveBeenCalledWith(SESSION_ID, openingPayload);
+  });
+});
+
+describe("useConfigChat launch validation and recovery", () => {
   it("waits for the selected profile before deciding how to deliver the prompt", async () => {
     appState.agentProfiles.items = [];
     const { result } = renderHook(() => useConfigChat(WORKSPACE_ID));

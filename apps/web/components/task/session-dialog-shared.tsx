@@ -218,6 +218,7 @@ export function useDialogAttachments(disabled: boolean, workspaceId?: string | n
         }
         updateAttachment(attachment.id, {
           attachmentId: uploaded.attachment_id,
+          expiresAt: uploaded.expires_at,
           uploadStatus: "ready",
           size: uploaded.size_bytes,
         });

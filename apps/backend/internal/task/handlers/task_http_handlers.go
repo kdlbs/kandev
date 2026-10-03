@@ -2198,6 +2198,7 @@ type httpStartQuickChatRequest struct {
 	AgentProfileID    string                         `json:"agent_profile_id,omitempty"`
 	ExecutorID        string                         `json:"executor_id,omitempty"`
 	Prompt            string                         `json:"prompt,omitempty"`
+	Attachments       []v1.MessageAttachment         `json:"attachments,omitempty"`
 	AutoTitle         bool                           `json:"auto_title,omitempty"`
 	LocalPath         string                         `json:"local_path,omitempty"`
 	RepositoryName    string                         `json:"repository_name,omitempty"`
@@ -2229,6 +2230,16 @@ func (body *httpStartQuickChatRequest) validateRepositories() error {
 			return fmt.Errorf("repository %q can only be selected once", repo.RepositoryID)
 		}
 		seen[repo.RepositoryID] = struct{}{}
+	}
+	return nil
+}
+
+func validateQuickChatOpeningPayload(prompt string, attachments []v1.MessageAttachment) error {
+	if err := validateAttachments(attachments); err != nil {
+		return err
+	}
+	if len(attachments) > 0 && strings.TrimSpace(prompt) == "" {
+		return errors.New("prompt is required when attachments are provided")
 	}
 	return nil
 }
@@ -2321,6 +2332,10 @@ func (h *TaskHandlers) httpStartQuickChat(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
+	if err := validateQuickChatOpeningPayload(body.Prompt, body.Attachments); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
 
 	ctx := c.Request.Context()
 
@@ -2361,9 +2376,20 @@ func (h *TaskHandlers) httpStartQuickChat(c *gin.Context) {
 		Intent:         orchestrator.IntentStart,
 		AgentProfileID: params.agentProfileID,
 		ExecutorID:     params.executorID,
+		Prompt:         body.Prompt,
+		Attachments:    body.Attachments,
 	})
 	if err != nil {
-		h.respondQuickChatLaunchFailure(c, task.ID, err)
+		rollbackCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), constants.TaskDeleteTimeout)
+		restoreErr := h.service.RestoreLaunchMessageAttachments(
+			rollbackCtx, task.ID, "", body.Attachments,
+		)
+		cancel()
+		if restoreErr != nil {
+			h.logger.Error("failed to restore quick chat attachments after launch failure",
+				zap.String("task_id", task.ID), zap.Error(restoreErr))
+		}
+		h.respondQuickChatLaunchFailure(c, task.ID, err, restoreErr == nil)
 		return
 	}
 
@@ -2379,19 +2405,27 @@ func (h *TaskHandlers) httpStartQuickChat(c *gin.Context) {
 	})
 }
 
-func (h *TaskHandlers) respondQuickChatLaunchFailure(c *gin.Context, taskID string, err error) {
-	retentionCtx, cancelRetention := context.WithTimeout(context.WithoutCancel(c.Request.Context()), constants.TaskDeleteTimeout)
+func (h *TaskHandlers) respondQuickChatLaunchFailure(
+	c *gin.Context,
+	taskID string,
+	launchErr error,
+	attachmentsRestored bool,
+) {
+	retentionCtx, cancelRetention := context.WithTimeout(
+		context.WithoutCancel(c.Request.Context()), constants.TaskDeleteTimeout,
+	)
 	defer cancelRetention()
 	retainedSessionID, lookupErr := h.quickChatRetainedSessionID(retentionCtx, taskID)
 	if lookupErr != nil {
-		h.logger.Error("failed to determine quick chat session retention", zap.Error(lookupErr), zap.String("task_id", taskID))
+		h.logger.Error("failed to determine quick chat session retention",
+			zap.Error(lookupErr), zap.String("task_id", taskID))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to start session"})
 		return
 	}
 
 	if retainedSessionID != "" {
 		h.logger.Error("failed to start quick chat session (retained created session)",
-			zap.Error(err),
+			zap.Error(launchErr),
 			zap.String("task_id", taskID),
 			zap.String("session_id", retainedSessionID))
 		c.JSON(http.StatusInternalServerError, gin.H{
@@ -2401,20 +2435,20 @@ func (h *TaskHandlers) respondQuickChatLaunchFailure(c *gin.Context, taskID stri
 		})
 		return
 	}
+	if !attachmentsRestored {
+		h.logger.Error("retaining quick chat task after attachment restore failure",
+			zap.Error(launchErr), zap.String("task_id", taskID))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to start session"})
+		return
+	}
 
-	// Rollback: delete the ephemeral task to prevent orphans when no session exists.
-	// Use a fresh background context — the request context may already be cancelled
-	// (e.g. client aborted, deadline exceeded), and we still want cleanup
-	// to run. TaskDeleteTimeout matches the other DeleteTask call sites
-	// in this file so a future change to the constant covers this path too.
-	rollbackCtx, cancel := context.WithTimeout(context.Background(), constants.TaskDeleteTimeout)
-	defer cancel()
+	rollbackCtx, cancelRollback := context.WithTimeout(context.Background(), constants.TaskDeleteTimeout)
+	defer cancelRollback()
 	if deleteErr := h.service.DeleteTaskWithLifecycle(rollbackCtx, taskID); deleteErr != nil {
 		h.logger.Error("failed to rollback quick chat task",
-			zap.String("task_id", taskID),
-			zap.Error(deleteErr))
+			zap.String("task_id", taskID), zap.Error(deleteErr))
 	}
-	h.logger.Error("failed to start quick chat session", zap.Error(err), zap.String("task_id", taskID))
+	h.logger.Error("failed to start quick chat session", zap.Error(launchErr), zap.String("task_id", taskID))
 	c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to start session"})
 }
 
@@ -2490,9 +2524,10 @@ func (h *TaskHandlers) httpListQuickChatSessions(c *gin.Context) {
 
 // httpStartConfigChatRequest is the request body for starting a config chat session.
 type httpStartConfigChatRequest struct {
-	AgentProfileID string `json:"agent_profile_id,omitempty"`
-	ExecutorID     string `json:"executor_id,omitempty"`
-	Prompt         string `json:"prompt,omitempty"`
+	AgentProfileID string                 `json:"agent_profile_id,omitempty"`
+	ExecutorID     string                 `json:"executor_id,omitempty"`
+	Prompt         string                 `json:"prompt,omitempty"`
+	Attachments    []v1.MessageAttachment `json:"attachments,omitempty"`
 }
 
 // httpStartConfigChat creates an ephemeral task with config_mode and prepares a session.
@@ -2527,6 +2562,10 @@ func (h *TaskHandlers) httpStartConfigChat(c *gin.Context) {
 	var body httpStartConfigChatRequest
 	if err := c.ShouldBindJSON(&body); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload"})
+		return
+	}
+	if err := validateQuickChatOpeningPayload(body.Prompt, body.Attachments); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
@@ -2574,7 +2613,7 @@ func (h *TaskHandlers) httpStartConfigChat(c *gin.Context) {
 		// profile isn't eagerly launched here with an empty prompt. With no
 		// prompt there is no follow-up, so keep the eager upgrade that gives the
 		// terminal a PTY to attach to.
-		DeferredStart: body.Prompt != "",
+		DeferredStart: strings.TrimSpace(body.Prompt) != "",
 	})
 	if err != nil {
 		h.deleteTaskOnError(task.ID, "config chat", err)
@@ -2585,9 +2624,40 @@ func (h *TaskHandlers) httpStartConfigChat(c *gin.Context) {
 	sessionID := resp.SessionID
 
 	// If a prompt was provided, launch the agent asynchronously so it starts
-	// processing immediately. The frontend receives WS updates when it starts.
-	if body.Prompt != "" {
-		go h.launchConfigChatAgent(task.ID, sessionID, agentProfileID, body.Prompt)
+	// processing immediately. Wait for launch admission before returning so the
+	// frontend does not clear an opening payload that failed to dispatch.
+	if strings.TrimSpace(body.Prompt) != "" {
+		launchCtx, cancel := context.WithTimeout(
+			context.WithoutCancel(ctx), constants.AgentLaunchTimeout,
+		)
+		defer cancel()
+		launchResult := make(chan error, 1)
+		go func() {
+			launchResult <- h.launchConfigChatAgent(
+				launchCtx, task.ID, sessionID, agentProfileID, body.Prompt, body.Attachments,
+			)
+		}()
+		if launchErr := <-launchResult; launchErr != nil {
+			rollbackCtx, rollbackCancel := context.WithTimeout(
+				context.WithoutCancel(ctx), constants.TaskDeleteTimeout,
+			)
+			restoreErr := h.service.RestoreLaunchMessageAttachments(
+				rollbackCtx, task.ID, sessionID, body.Attachments,
+			)
+			if restoreErr != nil {
+				h.logger.Error("failed to restore config chat attachments after launch failure",
+					zap.String("task_id", task.ID), zap.Error(restoreErr))
+			} else if deleteErr := h.service.DeleteTaskWithLifecycle(rollbackCtx, task.ID); deleteErr != nil {
+				h.logger.Error("failed to rollback config chat task",
+					zap.String("task_id", task.ID), zap.Error(deleteErr))
+			}
+			rollbackCancel()
+			h.logger.Error("failed to start config chat agent",
+				zap.Error(launchErr), zap.String("task_id", task.ID),
+				zap.String("session_id", sessionID))
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to start session"})
+			return
+		}
 	}
 
 	h.logger.Info("config chat session created",
@@ -2612,27 +2682,24 @@ func (h *TaskHandlers) deleteTaskOnError(taskID, label string, err error) {
 }
 
 func (h *TaskHandlers) launchConfigChatAgent(
+	ctx context.Context,
 	taskID, sessionID, agentProfileID, prompt string,
-) {
-	startCtx, cancel := context.WithTimeout(
-		context.Background(), constants.AgentLaunchTimeout,
-	)
-	defer cancel()
-	launchResp, err := h.orchestrator.LaunchSession(startCtx, &orchestrator.LaunchSessionRequest{
+	attachments []v1.MessageAttachment,
+) error {
+	launchResp, err := h.orchestrator.LaunchSession(ctx, &orchestrator.LaunchSessionRequest{
 		TaskID:         taskID,
 		Intent:         orchestrator.IntentStartCreated,
 		SessionID:      sessionID,
 		AgentProfileID: agentProfileID,
 		Prompt:         prompt,
+		Attachments:    attachments,
 	})
 	if err != nil {
-		h.logger.Error("failed to start config chat agent",
-			zap.Error(err), zap.String("task_id", taskID),
-			zap.String("session_id", sessionID))
-		return
+		return err
 	}
 	h.logger.Info("config chat agent started",
 		zap.String("task_id", taskID),
 		zap.String("session_id", launchResp.SessionID),
 		zap.String("execution_id", launchResp.AgentExecutionID))
+	return nil
 }

@@ -1,5 +1,6 @@
 import { test, expect } from "../../fixtures/test-base";
 import { assertNoDocumentHorizontalOverflow } from "../../helpers/layout-assertions";
+import { startQuickChatFromSetup } from "./quick-chat-helpers";
 
 test.describe("Quick Chat repository context on mobile", () => {
   test("selects an agent and repository branch without hidden actions", async ({ testPage }) => {
@@ -23,14 +24,13 @@ test.describe("Quick Chat repository context on mobile", () => {
       await testPage.getByRole("option").first().click();
     }
     await dialog.getByTestId("add-repository").click();
-    await dialog.getByTestId("repo-chip-trigger").click();
     await testPage.getByRole("option").first().click();
     await expect(dialog.getByTestId("branch-chip-trigger")).toContainText("main", {
       timeout: 10_000,
     });
     await assertNoDocumentHorizontalOverflow(testPage);
 
-    await dialog.getByTestId("quick-chat-start").click();
+    await startQuickChatFromSetup(dialog, testPage);
     await expect(dialog.locator(".tiptap.ProseMirror")).toBeVisible({ timeout: 30_000 });
     await assertNoDocumentHorizontalOverflow(testPage);
 
@@ -42,7 +42,7 @@ test.describe("Quick Chat repository context on mobile", () => {
       await secondAgentSelector.click();
       await testPage.getByRole("option").first().click();
     }
-    await dialog.getByTestId("quick-chat-start").click();
+    await startQuickChatFromSetup(dialog, testPage);
     await expect(dialog.locator(".tiptap.ProseMirror")).toBeVisible({ timeout: 30_000 });
 
     const originalTabs = dialog.getByTestId("quick-chat-tab");

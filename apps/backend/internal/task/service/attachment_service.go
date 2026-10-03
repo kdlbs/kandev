@@ -439,6 +439,27 @@ func (s *AttachmentService) RestoreQueued(
 	return repo.RestoreQueuedMessageAttachments(ctx, ids, ownerID, taskID, sessionID, queueID)
 }
 
+// RestoreLaunchClaim returns unreferenced launch attachments to staging after
+// synchronous launch admission fails, so an explicit retry can reuse the files.
+func (s *AttachmentService) RestoreLaunchClaim(
+	ctx context.Context,
+	ownerID, taskID, sessionID string,
+	ids []string,
+) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	repo, ok := s.repo.(repository.LaunchAttachmentRollbackRepository)
+	if !ok {
+		return errors.New("launch attachment rollback is unavailable")
+	}
+	s.lifecycleMu.Lock()
+	defer s.lifecycleMu.Unlock()
+	return repo.RestoreLaunchMessageAttachments(
+		ctx, ids, ownerID, taskID, sessionID, time.Now().UTC().Add(AttachmentStagedTTL),
+	)
+}
+
 // Release removes claimed descriptors that are no longer referenced by a
 // queued message. It is used after an atomic queue replacement succeeds.
 func (s *AttachmentService) Release(ctx context.Context, ownerID, taskID, sessionID string, ids []string) error {

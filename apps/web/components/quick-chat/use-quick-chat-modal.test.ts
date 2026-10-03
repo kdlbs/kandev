@@ -87,6 +87,7 @@ function makeAppState() {
     removeQuickTerminal: vi.fn(),
     renameQuickChatSession: vi.fn(),
     openQuickChat: vi.fn(),
+    setQuickChatInitialPrompt: vi.fn(),
     upsertQuickChatSessionFromEvent: vi.fn(),
     applyAgentProfileRecentUse: vi.fn(),
     setQuickChatTabOrder: vi.fn(),
@@ -116,6 +117,7 @@ function makeStore(overrides: Partial<MockStore> = {}): MockStore {
     removeQuickTerminal: vi.fn(),
     renameQuickChatSession: vi.fn(),
     openQuickChat: vi.fn(),
+    setQuickChatInitialPrompt: vi.fn(),
     upsertQuickChatSessionFromEvent: vi.fn(),
     applyAgentProfileRecentUse: vi.fn(),
     agentProfiles: [
@@ -450,6 +452,20 @@ describe("useAgentSelection — happy path", () => {
       WORKSPACE_ID,
       expect.objectContaining({ repositories }),
     );
+  });
+
+  it("queues the opening payload for structured profiles after creating the session", async () => {
+    const store = makeStore();
+    const payload = { message: "Review this code", clientMessageId: "opening-message-1" };
+    mockStartQuickChat.mockResolvedValue({ task_id: "task-a", session_id: "sess-a" });
+    const { result } = renderHook(() => useAgentSelection(WORKSPACE_ID, store));
+
+    await act(async () => {
+      await result.current.handleSelectAgent("agent-a", [], payload);
+    });
+
+    expect(mockStartQuickChat.mock.calls[0][1]).not.toHaveProperty("prompt");
+    expect(store.setQuickChatInitialPrompt).toHaveBeenCalledWith("sess-a", payload);
   });
 
   it("forwards the enabled agent-title preference to the start request", async () => {

@@ -9,6 +9,7 @@ import { startConfigChat } from "@/lib/api/domains/workspace-api";
 import { recordAgentProfileRecentUseBestEffort } from "@/lib/agent-profile-recent-use";
 import { getQuickChatSetupSessionId } from "@/lib/state/slices/ui/quick-chat-session";
 import { persistQuickChatRename } from "@/lib/quick-chat/rename";
+import type { QuickChatInitialPrompt, QuickChatOpeningPayload } from "@/lib/state/slices/ui/types";
 import { activeConfigChatOperations } from "./config-chat-operations";
 import { useConfigChatRestart } from "./use-config-chat-restart";
 import {
@@ -19,6 +20,7 @@ import {
 
 type StartConfigChatOptions = {
   openInQuickChat?: boolean;
+  setupSessionId?: string;
 };
 
 function useConfigChatStore() {
@@ -43,9 +45,10 @@ type RegisterStartedSessionParams = {
   response: StartedConfigChat;
   workspaceId: string;
   agentProfileId: string;
-  prompt: string;
+  prompt: QuickChatInitialPrompt;
   isPassthrough: boolean;
   openInQuickChat: boolean;
+  setupSessionId?: string;
   configuredProfile: boolean;
   updateWorkspaceInStore: (workspaceId: string, updates: Record<string, unknown>) => void;
 };
@@ -68,6 +71,13 @@ async function deleteSupersededConfigChatTask(taskId: string) {
   );
 }
 
+function isConfigChatOperationBlocked(workspaceId: string, storeApi: AppStoreApi) {
+  return (
+    activeConfigChatOperations.has(workspaceId) ||
+    storeApi.getState().quickChat.configChatRestarts[workspaceId] !== undefined
+  );
+}
+
 async function registerStartedSession({
   store,
   storeApi,
@@ -77,10 +87,12 @@ async function registerStartedSession({
   prompt,
   isPassthrough,
   openInQuickChat,
+  setupSessionId,
   configuredProfile,
   updateWorkspaceInStore,
 }: RegisterStartedSessionParams) {
   recordConfigChatProfileUse(agentProfileId, storeApi);
+  const promptText = typeof prompt === "string" ? prompt : prompt.message;
   const now = new Date().toISOString();
   storeApi.getState().setTaskSession({
     id: toSessionId(response.session_id),
@@ -92,7 +104,9 @@ async function registerStartedSession({
     agent_profile_id: toAgentProfileId(agentProfileId),
   });
   if (openInQuickChat) {
-    store.closeQuickChatSession(getQuickChatSetupSessionId(workspaceId, "config"));
+    store.closeQuickChatSession(
+      setupSessionId ?? getQuickChatSetupSessionId(workspaceId, "config"),
+    );
     store.openQuickChat(
       response.session_id,
       workspaceId,
@@ -119,7 +133,7 @@ async function registerStartedSession({
   // on surfaces this directory does not own. Same call as the built-in layout
   // profile names and the seeded workflow step names.
   // i18n-exempt: persisted as the task title. See the comment above.
-  const derivedName = prompt.slice(0, 40) || "Config Chat";
+  const derivedName = promptText.slice(0, 40) || "Config Chat";
   store.renameQuickChatSession(response.session_id, derivedName);
   void persistQuickChatRename(response.session_id, response.task_id, derivedName).catch(
     () => undefined,
@@ -155,6 +169,26 @@ function recordConfigChatProfileUse(profileId: string, storeApi: AppStoreApi) {
   );
 }
 
+function configChatLaunchPayload(
+  agentProfileId: string,
+  prompt: QuickChatInitialPrompt,
+  isPassthrough: boolean,
+) {
+  const openingPayload: QuickChatOpeningPayload =
+    typeof prompt === "string" ? { message: prompt } : prompt;
+  return {
+    agent_profile_id: agentProfileId,
+    ...(isPassthrough
+      ? {
+          prompt: openingPayload.message,
+          ...(openingPayload.attachments?.length
+            ? { attachments: openingPayload.attachments }
+            : {}),
+        }
+      : {}),
+  };
+}
+
 export function useConfigChat(workspaceId: string) {
   const restart = useConfigChatRestart(workspaceId);
   const store = useConfigChatStore();
@@ -181,7 +215,7 @@ export function useConfigChat(workspaceId: string) {
   const startSession = useCallback(
     async (
       agentProfileId: string,
-      prompt: string,
+      prompt: QuickChatInitialPrompt,
       options: StartConfigChatOptions = {},
     ): Promise<string | undefined> => {
       if (activeRequestId.current !== null) return undefined;
@@ -192,11 +226,7 @@ export function useConfigChat(workspaceId: string) {
         setError(t("configChat:profileUnavailable"));
         return undefined;
       }
-      if (
-        activeConfigChatOperations.has(workspaceId) ||
-        storeApi.getState().quickChat.configChatRestarts[workspaceId]
-      )
-        return undefined;
+      if (isConfigChatOperationBlocked(workspaceId, storeApi)) return undefined;
       const requestId = ++latestRequestId.current;
       const workspaceStart = Symbol(workspaceId);
       activeRequestId.current = requestId;
@@ -207,10 +237,10 @@ export function useConfigChat(workspaceId: string) {
         const isPassthrough = profile.cli_passthrough === true;
         // ACP chats send through the subscribed shell so a fast turn cannot
         // finish before WS attaches. Passthrough chats render only a terminal.
-        const response = await startConfigChat(workspaceId, {
-          agent_profile_id: agentProfileId,
-          ...(isPassthrough ? { prompt } : {}),
-        });
+        const response = await startConfigChat(
+          workspaceId,
+          configChatLaunchPayload(agentProfileId, prompt, isPassthrough),
+        );
         if (latestRequestId.current !== requestId) {
           await deleteSupersededConfigChatTask(response.task_id);
           return undefined;
@@ -224,6 +254,7 @@ export function useConfigChat(workspaceId: string) {
           prompt,
           isPassthrough,
           openInQuickChat: options.openInQuickChat !== false,
+          setupSessionId: options.setupSessionId,
           configuredProfile: Boolean(workspace?.default_config_agent_profile_id),
           updateWorkspaceInStore,
         });

@@ -20,16 +20,28 @@ async function openMobileQuickChat(page: Page): Promise<Locator> {
 }
 
 test.describe("mobile agent goal visibility", () => {
+  test.describe.configure({ retries: 0 });
+
   test("submits once while the message acknowledgement is delayed", async ({ testPage }) => {
     const proxy = await routeSessionEntryRecovery(testPage);
     const dialog = await openMobileQuickChat(testPage);
     await startQuickChatFromSetup(dialog, testPage);
     await waitForQuickChatDirectInput(dialog);
+    await expect(
+      dialog.getByText("Please get ready for my next question.", { exact: false }).first(),
+    ).toBeVisible();
+    // The opening prompt can be carried by launch for passthrough profiles or
+    // by message.add for structured profiles. The settled conversation above
+    // is the baseline; this test measures only the following user submission.
+    const openingMessageRequestCount = proxy.requestCount("message.add");
     proxy.delayNextResponses("message.add", 1, 3_500, "exercise asynchronous composer clearing");
 
     await sendQuickChatMessage(dialog, testPage, "/e2e:goal-active");
 
-    expect(proxy.requestCount("message.add")).toBe(1);
+    await expect.poll(() => proxy.delayedResponseCount("message.add"), { timeout: 15_000 }).toBe(1);
+    await expect
+      .poll(() => proxy.requestCount("message.add"), { timeout: 15_000 })
+      .toBe(openingMessageRequestCount + 1);
     await expect(dialog.getByTestId("agent-goal-chip")).toBeVisible();
   });
 

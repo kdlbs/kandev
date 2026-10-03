@@ -1,6 +1,7 @@
 import type { ConnectionIssueSeverity, ConnectionStatus } from "@/lib/types/connection";
 import type { HealthCheckSummary, HealthIssue, SystemHealthResponse } from "@/lib/types/health";
 import type { SettingsMenuMode } from "@/lib/settings/settings-menu-mode";
+import type { MessageAttachment } from "@/lib/services/session-launch-service";
 import type {
   FilterClause,
   GroupKey,
@@ -111,6 +112,14 @@ export type SystemHealthState = {
 
 export type QuickChatSessionKind = "chat" | "config";
 
+export type QuickChatOpeningPayload = {
+  message: string;
+  clientMessageId?: string;
+  attachments?: MessageAttachment[];
+};
+
+export type QuickChatInitialPrompt = string | QuickChatOpeningPayload;
+
 export type QuickChatSelection = Partial<Record<QuickChatSessionKind, string>>;
 
 export type QuickChatSelectionByWorkspace = Record<string, QuickChatSelection>;
@@ -153,7 +162,7 @@ export type QuickChatSession = {
   taskId?: string;
   name?: string;
   agentProfileId?: string;
-  initialPrompt?: string;
+  initialPrompt?: QuickChatInitialPrompt;
 };
 
 export type QuickChatActiveKind = "conversation" | "terminal";
@@ -434,7 +443,7 @@ export type UISliceActions = {
     workspaceId: string,
     state: { pending: boolean; error: string | null },
   ) => void;
-  setQuickChatInitialPrompt: (sessionId: string, prompt?: string) => void;
+  setQuickChatInitialPrompt: (sessionId: string, prompt?: QuickChatInitialPrompt) => void;
   setConfigChatRestart: (workspaceId: string, restart: ConfigChatRestartState | null) => void;
   syncConfigChatRestart: (workspaceId: string, pending: boolean, sessionId?: string) => void;
   replaceConfigChatSession: (

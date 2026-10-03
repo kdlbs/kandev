@@ -68,14 +68,19 @@ test.describe("Setup recovery UX (desktop)", () => {
 
     const dialog = await openQuickChatSetup(testPage);
     await selectAgentIfNeeded(dialog, testPage);
-    await expect(dialog.getByTestId("quick-chat-start")).toBeEnabled({ timeout: 10_000 });
+    const openingPrompt = "Keep this request available for retry.";
+    const prompt = dialog.getByTestId("task-description-input");
+    await prompt.fill(openingPrompt);
+    const send = dialog.getByTestId("quick-chat-send");
+    await expect(send).toBeEnabled({ timeout: 10_000 });
 
-    await dialog.getByTestId("quick-chat-start").click();
+    await send.click();
 
     const setupError = dialog.getByTestId("quick-chat-setup-error");
     await expect(setupError).toBeVisible({ timeout: 10_000 });
     await expect(setupError).toContainText("Invalid repository configuration");
-    await expect(dialog.getByTestId("quick-chat-start")).toHaveText("Retry");
+    await expect(prompt).toHaveValue(openingPrompt);
+    await expect(send).toBeEnabled();
   });
 
   test("retains a real quick chat without changing selection after a delayed response", async ({
@@ -99,7 +104,8 @@ test.describe("Setup recovery UX (desktop)", () => {
     });
     const dialog = await openQuickChatSetup(testPage);
     await selectAgentIfNeeded(dialog, testPage);
-    await dialog.getByTestId("quick-chat-start").click();
+    await dialog.getByTestId("task-description-input").fill("Prepare a short implementation plan.");
+    await dialog.getByTestId("quick-chat-send").click();
     const created = await accepted.promise;
     try {
       // The real backend announces the persisted session before HTTP completes.
@@ -210,11 +216,12 @@ test.describe("Setup recovery UX (desktop)", () => {
     });
     const dialog = await openQuickChatSetup(testPage);
     await selectAgentIfNeeded(dialog, testPage);
+    await dialog.getByTestId("task-description-input").fill("Keep this request for recovery.");
     const retainedResponse = testPage.waitForResponse(
       (response) =>
         response.url().endsWith("/quick-chat") && response.request().method() === "POST",
     );
-    await dialog.getByTestId("quick-chat-start").click();
+    await dialog.getByTestId("quick-chat-send").click();
     expect((await retainedResponse).status()).toBe(500);
     await expect(
       dialog.getByTestId("session-recovery-action-message").getByText(failure, { exact: true }),

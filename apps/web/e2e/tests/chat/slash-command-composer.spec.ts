@@ -6,7 +6,7 @@ import { SessionPage } from "../../pages/session-page";
 import type { ApiClient } from "../../helpers/api-client";
 import type { SeedData } from "../../fixtures/test-base";
 import type { CreateTaskResponse } from "../../../lib/types/http";
-import { waitForQuickChatComposerReady } from "./quick-chat-helpers";
+import { startQuickChatFromSetup } from "./quick-chat-helpers";
 
 const SLOW_COMMAND = {
   name: "slow",
@@ -83,9 +83,7 @@ async function openQuickChatWithAgent(page: Page): Promise<Locator> {
     await agentSelector.click();
     await page.getByRole("option").first().click();
   }
-  await dialog.getByTestId("quick-chat-start").click();
-
-  await waitForQuickChatComposerReady(dialog);
+  await startQuickChatFromSetup(dialog, page);
   return dialog;
 }
 

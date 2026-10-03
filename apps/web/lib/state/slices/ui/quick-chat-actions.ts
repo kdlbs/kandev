@@ -24,8 +24,22 @@ import {
   loadQuickChatSelection,
   persistQuickChatSelection,
 } from "@/lib/quick-chat/selection-storage";
+import {
+  getChatDraftAttachments,
+  getChatDraftText,
+  setChatDraftAttachments,
+  setChatDraftText,
+} from "@/lib/local-storage";
+import { toQuickChatDraftAttachments } from "./quick-chat-opening-draft";
 import { getQuickChatSetupSessionId, isQuickChatSetupSessionId } from "./quick-chat-session";
-import type { QuickChatSession, QuickChatSessionKind, QuickChatState, UISlice } from "./types";
+import type {
+  QuickChatInitialPrompt,
+  QuickChatOpeningPayload,
+  QuickChatSession,
+  QuickChatSessionKind,
+  QuickChatState,
+  UISlice,
+} from "./types";
 
 type ImmerSet = (recipe: (draft: Draft<UISlice>) => void) => void;
 type ImmerGet = () => Pick<UISlice, "quickChat"> & {
@@ -76,6 +90,14 @@ function bumpSelectionRevision(quickChat: Draft<QuickChatState>, workspaceId: st
   quickChat.selectionRevisionByWorkspace[workspaceId] =
     (quickChat.selectionRevisionByWorkspace[workspaceId] ?? 0) + 1;
   if (quickChat.pendingOpen?.workspaceId === workspaceId) quickChat.pendingOpen = null;
+}
+
+function seedQuickChatOpeningDraft(sessionId: string, prompt: QuickChatInitialPrompt): void {
+  const payload: QuickChatOpeningPayload =
+    typeof prompt === "string" ? { message: prompt } : prompt;
+  if (getChatDraftText(sessionId) || getChatDraftAttachments(sessionId).length > 0) return;
+  setChatDraftText(sessionId, payload.message);
+  setChatDraftAttachments(sessionId, toQuickChatDraftAttachments(payload.attachments));
 }
 
 function rememberSelectedSession(
@@ -421,7 +443,7 @@ function buildQuickChatSessionActions(set: ImmerSet, get: ImmerGet) {
   };
 }
 
-function buildQuickChatActivityActions(set: ImmerSet) {
+function buildQuickChatActivityActions(set: ImmerSet, get: ImmerGet) {
   return {
     markQuickChatUnseenIdle: (sessionId: string, workspaceId: string) =>
       set((draft) => {
@@ -463,11 +485,18 @@ function buildQuickChatActivityActions(set: ImmerSet) {
       });
       return recorded;
     },
-    setQuickChatInitialPrompt: (sessionId: string, prompt?: string) =>
+    setQuickChatInitialPrompt: (sessionId: string, prompt?: QuickChatInitialPrompt) => {
+      if (
+        prompt !== undefined &&
+        get().quickChat.sessions.some((item) => item.sessionId === sessionId)
+      ) {
+        seedQuickChatOpeningDraft(sessionId, prompt);
+      }
       set((draft) => {
         const session = draft.quickChat.sessions.find((item) => item.sessionId === sessionId);
         if (session) session.initialPrompt = prompt;
-      }),
+      });
+    },
   };
 }
 
@@ -550,7 +579,7 @@ export function buildQuickChatActions(set: ImmerSet, get: ImmerGet) {
     },
     ...buildQuickChatOrderActions(set),
     ...buildQuickChatSessionActions(set, get),
-    ...buildQuickChatActivityActions(set),
+    ...buildQuickChatActivityActions(set, get),
     ...buildQuickChatSelectionActions(set),
   };
 }

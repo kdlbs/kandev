@@ -54,6 +54,7 @@ function makeStore(overrides: Partial<MockStore> = {}): MockStore {
     removeQuickTerminal: vi.fn(),
     renameQuickChatSession: vi.fn(),
     openQuickChat: vi.fn(),
+    setQuickChatInitialPrompt: vi.fn(),
     upsertQuickChatSessionFromEvent: vi.fn(),
     applyAgentProfileRecentUse: vi.fn(),
     agentProfiles: [
@@ -181,7 +182,7 @@ describe("late quick chat creation with real store actions", () => {
         taskSessions: app.getState().taskSessions.items,
       });
       const { result } = renderHook(() => useAgentSelection(WORKSPACE_ID, store));
-      let request!: Promise<void>;
+      let request!: Promise<boolean>;
       act(() => {
         request = result.current.handleSelectAgent("agent-a");
       });
