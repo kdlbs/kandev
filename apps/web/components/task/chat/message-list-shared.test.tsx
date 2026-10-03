@@ -98,6 +98,8 @@ import {
   filterLaunchErrorMessages,
   resolveLastPromptControls,
   resolveLastPromptEdge,
+  findPromptNeighbors,
+  resolveUnloadedPromptEdge,
   shouldAutoScrollToBottom,
 } from "./message-list-shared";
 
@@ -769,6 +771,69 @@ describe("resolveLastPromptEdge", () => {
 
     expect(resolveLastPromptEdge(container, elementWithRect(40, 80))).toBe("visible");
     expect(resolveLastPromptEdge(container, elementWithRect(38, 78))).toBe("visible");
+  });
+});
+
+describe("unloaded last prompt geometry", () => {
+  const container = elementWithRect(40, 200);
+  const olderAbove = elementWithRect(10, 35);
+  const olderBelow = elementWithRect(220, 260);
+  const newerAbove = elementWithRect(10, 35);
+  const newerBelow = elementWithRect(220, 260);
+
+  it("classifies empty and one-sided windows without inventing a prompt row", () => {
+    expect(resolveUnloadedPromptEdge(container, null, null)).toBe("visible");
+    expect(resolveUnloadedPromptEdge(container, olderAbove, null)).toBe("below");
+    expect(resolveUnloadedPromptEdge(container, null, newerBelow)).toBe("above");
+  });
+
+  it("classifies bounded slots from both row edges with two-pixel tolerance", () => {
+    expect(resolveUnloadedPromptEdge(container, olderAbove, newerBelow)).toBe("visible");
+    expect(resolveUnloadedPromptEdge(container, olderAbove, newerAbove)).toBe("above");
+    expect(resolveUnloadedPromptEdge(container, olderBelow, newerBelow)).toBe("below");
+    expect(
+      resolveUnloadedPromptEdge(container, elementWithRect(10, 39), elementWithRect(201, 240)),
+    ).toBe("visible");
+  });
+
+  it("uses row containment for grouped messages that straddle the prompt", () => {
+    const prompt = { id: "prompt", created_at: "2026-08-22T00:00:02Z" } as Message;
+    const items: RenderItem[] = [
+      {
+        type: "turn_group",
+        id: "both-sides",
+        turnId: "turn",
+        messages: [
+          { id: "before", created_at: "2026-08-22T00:00:01Z" } as Message,
+          { id: "after", created_at: "2026-08-22T00:00:03Z" } as Message,
+        ],
+      },
+    ];
+    expect(findPromptNeighbors(items, prompt)).toEqual({
+      olderKey: "both-sides",
+      newerKey: "both-sides",
+      unordered: false,
+    });
+  });
+
+  it("does not let synthetic or unordered rows imply a missing bound", () => {
+    const prompt = { id: "prompt", created_at: "2026-08-22T00:00:02Z" } as Message;
+    expect(
+      findPromptNeighbors(
+        [
+          {
+            type: "message",
+            message: { id: TASK_DESCRIPTION_SYNTHETIC_ID, created_at: "" } as Message,
+          },
+          { type: "message", message: { id: "malformed", created_at: "invalid" } as Message },
+          {
+            type: "message",
+            message: { id: "newer", created_at: "2026-08-22T00:00:03Z" } as Message,
+          },
+        ],
+        prompt,
+      ),
+    ).toEqual({ olderKey: null, newerKey: "newer", unordered: true });
   });
 });
 

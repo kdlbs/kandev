@@ -17,6 +17,30 @@ describe("turn hydration state", () => {
   });
 });
 
+describe("prompt hydration authority (AC-UI-PINNED-PROMPT-AVAILABILITY-001.6)", () => {
+  it("hydrates only rows and metadata, not observed or deleted prompt identities", () => {
+    const state = mergeInitialState({
+      messagePrompts: {
+        bySession: { session: [] },
+        metaBySession: {},
+        authoritativeBySession: { session: true },
+        observedBySession: {
+          session: {
+            ids: { old: true },
+            newestKey: { id: "old", created_at: "2026-08-22T00:00:00Z" },
+          },
+        },
+        deletedIdsBySession: { session: { old: true } },
+      },
+    } as unknown as HydrationState);
+
+    expect(state.messagePrompts.bySession).toEqual({ session: [] });
+    expect(state.messagePrompts.authoritativeBySession).toEqual({});
+    expect(state.messagePrompts.observedBySession).toEqual({});
+    expect(state.messagePrompts.deletedIdsBySession).toEqual({});
+  });
+});
+
 describe("quick chat hydration state", () => {
   it("marks an empty boot snapshot ready for the active workspace", () => {
     const state = mergeInitialState({

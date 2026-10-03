@@ -371,6 +371,8 @@ Why a script instead of raw `docker run`: in docker mode it builds the CGO/`fts5
 
 > **Profile-managed environment variables:** when adding an environment variable with an `e2e:` or `dev:` profile default, add it to `sanitizeInheritedEnv` in `e2e/fixtures/backend.ts` so inherited shell/task values cannot override the selected profile. Keep explicit `backend.restart({ ... })` overrides applied after baseline sanitization, so a spec can still opt into a deliberate per-test value.
 
+> **Service install identity:** the fixture strips `KANDEV_RUNNING_AS_SERVICE`, `KANDEV_SERVICE_MODE`, `KANDEV_SERVICE_MANAGER`, `KANDEV_INSTALL_KIND`, and `KANDEV_SERVICE_METADATA` from the host environment. Inheriting a managed-service identity makes the source-built E2E backend appear eligible for Nightly updates. A spec that exercises a managed service can set these values through `backend.restart({ ... })`.
+
 > **Host oversubscription:** running >=5 heavy shards concurrently on one machine (each = Go backend + Vite-served SPA assets + Chromium + mock agent) starves CPU/IO and induces timing flakes that CI's isolated runners never see. The managed runner allows at most three local shards and one Playwright worker per shard, with a lower shard limit on hosts with less available memory. Use the default single shard or two to three concurrent shards locally for a clean signal. A deliberate pressure experiment must set `KANDEV_E2E_ALLOW_UNSAFE_PARALLELISM=1`.
 
 > **Worker flag aliases:** the local guard rejects every Playwright worker override above one, including `--workers`, `--workers=N`, `-j N`, `-j=N`, and compact `-jN`. Shard limits use the lower of host `MemAvailable` and remaining cgroup v1/v2 memory when E2E runs in a memory-limited container.

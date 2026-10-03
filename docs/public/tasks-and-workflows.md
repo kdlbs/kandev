@@ -332,6 +332,10 @@ transcript** appears when the first prompt is no longer fully visible. You can
 show or hide each action independently in **Settings → Preferences → Task
 Behavior → Conversation and panels**.
 
+The control also appears when your latest prompt is
+no longer part of the loaded transcript window, as after a long agent run; selecting it
+loads that part of the transcript and aligns the prompt at the top.
+
 For a compact reminder while you read later replies, enable **Show anchored
 prompt bar** in the same settings section. On desktop, it pins a shortened
 copy of your latest prompt below the session tabs once you've scrolled past

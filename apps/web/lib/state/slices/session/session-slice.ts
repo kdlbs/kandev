@@ -17,6 +17,13 @@ import {
 } from "./task-session-projection-actions";
 import { reconcileMessages } from "./message-signature";
 import { resolveRunningNotices } from "./running-notice-activity";
+import {
+  buildPromptMessageActions,
+  fanOutTranscriptPrompts,
+  removePromptMessage,
+  observeLivePrompt,
+  updatePromptMessage,
+} from "./prompt-message-actions";
 import { purgeSessionRuntimeState } from "@/lib/state/slices/session-runtime/session-runtime-slice";
 import { mergeTaskSession } from "./session-merge";
 import { syncEnvironmentMapping, syncPrepareProgress } from "./session-environment-sync";
@@ -231,6 +238,15 @@ function reconcileActiveTurnForIdleSession(draft: SessionSliceState, session: Ta
 
 export const defaultSessionState: SessionSliceState = {
   messages: { bySession: {}, metaBySession: {} },
+  messagePrompts: {
+    bySession: {},
+    metaBySession: {},
+    generationBySession: {},
+    refreshGenerationBySession: {},
+    authoritativeBySession: {},
+    observedBySession: {},
+    deletedIdsBySession: {},
+  },
   turns: {
     bySession: {},
     activeBySession: {},
@@ -315,6 +331,27 @@ function buildUpdateMessage(set: ImmerSet) {
           messages[index] = merged;
         }
       }
+      updatePromptMessage(draft, message);
+    });
+}
+
+/** Builds bulk transcript updates and keeps the prompt cache in sync. */
+function buildUpdateMessages(set: ImmerSet) {
+  return (messages: Parameters<SessionSlice["updateMessages"]>[0]) =>
+    set((draft) => {
+      for (const message of messages) {
+        let sessionMessages = draft.messages.bySession[message.session_id];
+        if (!sessionMessages && isTransientRetryNotice(message)) {
+          sessionMessages = draft.messages.bySession[message.session_id] = [];
+        }
+        if (sessionMessages) {
+          resolveRunningNotices(sessionMessages, message);
+          const hasMessage = sessionMessages.some((entry) => entry.id === message.id);
+          if (hasMessage) mergeMessageAtIndex(sessionMessages, message);
+          else if (isTransientRetryNotice(message)) sessionMessages.push(message);
+        }
+        updatePromptMessage(draft, message);
+      }
     });
 }
 
@@ -332,6 +369,7 @@ function buildMessageActions(set: ImmerSet) {
         );
         ensureMessageMeta(draft.messages.metaBySession, sessionId);
         if (meta) applyMessageMeta(draft.messages.metaBySession, sessionId, meta);
+        fanOutTranscriptPrompts(draft, messages);
       }),
     addMessage: (message: Parameters<SessionSlice["addMessage"]>[0]) =>
       set((draft) => {
@@ -352,23 +390,11 @@ function buildMessageActions(set: ImmerSet) {
             message as unknown as Record<string, unknown>,
           );
         }
+        observeLivePrompt(draft, message);
+        fanOutTranscriptPrompts(draft, [message]);
       }),
     updateMessage: buildUpdateMessage(set),
-    updateMessages: (messages: Parameters<SessionSlice["updateMessages"]>[0]) =>
-      set((draft) => {
-        for (const message of messages) {
-          let sessionMessages = draft.messages.bySession[message.session_id];
-          if (!sessionMessages && isTransientRetryNotice(message)) {
-            sessionMessages = draft.messages.bySession[message.session_id] = [];
-          }
-          if (sessionMessages) {
-            resolveRunningNotices(sessionMessages, message);
-            const hasMessage = sessionMessages.some((entry) => entry.id === message.id);
-            if (hasMessage) mergeMessageAtIndex(sessionMessages, message);
-            else if (isTransientRetryNotice(message)) sessionMessages.push(message);
-          }
-        }
-      }),
+    updateMessages: buildUpdateMessages(set),
     removeMessage: (
       sessionId: Parameters<SessionSlice["removeMessage"]>[0],
       messageId: Parameters<SessionSlice["removeMessage"]>[1],
@@ -376,6 +402,7 @@ function buildMessageActions(set: ImmerSet) {
       set((draft) => {
         const messages = draft.messages.bySession[sessionId];
         if (messages) draft.messages.bySession[sessionId] = removeMessageByID(messages, messageId);
+        removePromptMessage(draft, sessionId, messageId);
       }),
     mergeMessages: (
       sessionId: string,
@@ -395,6 +422,7 @@ function buildMessageActions(set: ImmerSet) {
         }
         ensureMessageMeta(draft.messages.metaBySession, sessionId);
         if (meta) applyMessageMeta(draft.messages.metaBySession, sessionId, meta);
+        fanOutTranscriptPrompts(draft, messages);
       }),
     prependMessages: (
       sessionId: string,
@@ -410,9 +438,11 @@ function buildMessageActions(set: ImmerSet) {
         ];
         ensureMessageMeta(draft.messages.metaBySession, sessionId);
         if (meta) applyMessageMeta(draft.messages.metaBySession, sessionId, meta);
+        fanOutTranscriptPrompts(draft, messages);
       }),
     setMessagesMetadata: buildSetMessagesMetadata(set),
     setMessagesLoading: buildSetMessagesLoading(set),
+    ...buildPromptMessageActions(set),
   };
 }
 
@@ -679,6 +709,13 @@ function buildRemoveTaskSessionAction(set: ImmerSet) {
       // Drop the conversation history owned by this session.
       delete draft.messages.bySession[sessionId];
       delete draft.messages.metaBySession[sessionId];
+      delete draft.messagePrompts.bySession[sessionId];
+      delete draft.messagePrompts.metaBySession[sessionId];
+      delete draft.messagePrompts.authoritativeBySession[sessionId];
+      delete draft.messagePrompts.observedBySession[sessionId];
+      delete draft.messagePrompts.deletedIdsBySession[sessionId];
+      const generations = (draft.messagePrompts.generationBySession ??= {});
+      generations[sessionId] = (generations[sessionId] ?? 0) + 1;
       delete draft.turns.bySession[sessionId];
       delete draft.turns.activeBySession[sessionId];
       delete draft.turns.loadedBySession[sessionId];

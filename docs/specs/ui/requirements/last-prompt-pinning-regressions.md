@@ -95,3 +95,12 @@ The desktop anchored last-prompt bar currently appears once the prompt's top cro
 
 - Changing the default setting value.
 - Altering the transcript's tab layout or dockview geometry.
+
+## Related contracts
+
+This document owns the pinned prompt's and scroll-to-last-prompt control's
+rendered behavior. Whether that prompt remains available when its row is not part
+of the loaded transcript window is owned by
+[pinned prompt availability](pinned-prompt-availability.md); the bounded window
+and its pagination are owned by
+[transcript history visibility](task-prompt-transcript-visibility.md).

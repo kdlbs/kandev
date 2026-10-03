@@ -6,6 +6,7 @@ import type { ApiClient } from "../../helpers/api-client";
 import { waitForLatestSessionDone } from "../../helpers/session";
 import { waitForSessionAgentctlReady } from "../../helpers/session-store";
 import { SessionPage } from "../../pages/session-page";
+import { readTerminalBuffer } from "./mobile-terminal-helpers";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -65,18 +66,6 @@ async function focusTerminal(page: Page, session: SessionPage): Promise<void> {
 
   const xterm = session.terminal.locator(".xterm");
   await xterm.click();
-}
-
-/** Read the terminal panel's xterm buffer text. */
-async function readTerminalBuffer(page: Page): Promise<string> {
-  return page.evaluate(() => {
-    const panel = document.querySelector('[data-testid="terminal-panel"]');
-    if (!panel) return "";
-    const xtermEl = panel.querySelector(".xterm");
-    type XC = HTMLElement & { __xtermReadBuffer?: () => string };
-    const container = xtermEl?.parentElement as XC | null | undefined;
-    return container?.__xtermReadBuffer?.() ?? "";
-  });
 }
 
 // ---------------------------------------------------------------------------

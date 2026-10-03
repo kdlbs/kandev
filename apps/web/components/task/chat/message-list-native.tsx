@@ -20,7 +20,7 @@ import type { RenderItem } from "@/hooks/use-processed-messages";
 import { OLDER_PAGE_LIMIT, useLazyLoadMessages } from "@/hooks/use-lazy-load-messages";
 import { useSessionTurn } from "@/hooks/domains/session/use-session-turn";
 import { MessageListFooter } from "./message-list-footer";
-import { useNativeScrollManagement } from "./message-list-native-scroll";
+import { findMessageRow, useNativeScrollManagement } from "./message-list-native-scroll";
 import { scheduleAfterPanelRestore, useActivationPending } from "./transcript-auto-scroll";
 import { useTranscriptAutoScrollEnabled } from "./use-transcript-auto-scroll-enabled";
 import { useDockviewStore } from "@/lib/state/dockview-store";
@@ -28,6 +28,7 @@ import {
   type MessageListProps,
   type MessageListHandle,
   type LastPromptEdge,
+  type PromptNeighbors,
   MessageListStatus,
   MessageItem,
   UnreadDivider,
@@ -42,48 +43,87 @@ import {
   filterLaunchErrorItems,
   filterLaunchErrorMessages,
   resolveLastPromptEdge,
+  findPromptNeighbors,
+  resolveUnloadedPromptEdge,
   isElementFullyVisible,
 } from "./message-list-shared";
 
 const DIVIDER_SETTLING_WINDOW_MS = 4000;
 
-/** Notifies `onLastPromptEdgeChange`/`onFirstMessageHiddenChange` whenever the
- * last-prompt or first message crosses the container's viewport edges, so
- * the composer's scroll buttons and the anchored-bar affordance know when to
- * show themselves. A single scroll/resize listener drives both checks. */
-function useTranscriptEdgeTracking({
-  scrollRef,
-  lastPromptMessageId,
-  onLastPromptEdgeChange,
-  firstMessageId,
-  onFirstMessageHiddenChange,
-  hasContent,
-  onLatestVisibilityChange,
-}: {
-  scrollRef: React.RefObject<HTMLDivElement | null>;
+type PromptEdgeTrackingOptions = {
   lastPromptMessageId: string | null | undefined;
   onLastPromptEdgeChange: ((edge: LastPromptEdge) => void) | undefined;
   firstMessageId: string | null | undefined;
   onFirstMessageHiddenChange: ((isHidden: boolean) => void) | undefined;
   hasContent: boolean;
   onLatestVisibilityChange: ((isVisible: boolean) => void) | undefined;
-}) {
+  prompt?: Message | null;
+  unloaded?: boolean;
+  items: RenderItem[];
+};
+
+function resolveTrackedPromptEdge(
+  container: HTMLElement,
+  messageId: string | null | undefined,
+  neighbors: PromptNeighbors | null,
+  olderRow: HTMLElement | null,
+  newerRow: HTMLElement | null,
+): LastPromptEdge {
+  const row = findMessageRow(container, messageId ?? null);
+  if (row) return resolveLastPromptEdge(container, row);
+  if (!neighbors || (neighbors.unordered && (!neighbors.olderKey || !neighbors.newerKey)))
+    return "visible";
+  return resolveUnloadedPromptEdge(container, olderRow, newerRow);
+}
+
+function observeTrackedRows(
+  observer: ResizeObserver,
+  last: HTMLElement | null,
+  older: HTMLElement | null,
+  newer: HTMLElement | null,
+  first: HTMLElement | null,
+) {
+  if (last) observer.observe(last);
+  if (older && older !== last) observer.observe(older);
+  if (newer && newer !== older && newer !== last) observer.observe(newer);
+  if (first && first !== last && first !== older && first !== newer) observer.observe(first);
+}
+
+/** Tracks prompt edges and scroll-position affordances within this transcript. */
+export function useTranscriptEdgeTracking(
+  scrollRef: React.RefObject<HTMLDivElement | null>,
+  {
+    lastPromptMessageId,
+    onLastPromptEdgeChange,
+    firstMessageId,
+    onFirstMessageHiddenChange,
+    hasContent,
+    onLatestVisibilityChange,
+    prompt,
+    unloaded,
+    items,
+  }: PromptEdgeTrackingOptions,
+) {
   useEffect(() => {
     const container = scrollRef.current;
-    const lastTarget = lastPromptMessageId
-      ? document.getElementById(`msg-${lastPromptMessageId}`)
-      : null;
-    const firstTarget = firstMessageId ? document.getElementById(`msg-${firstMessageId}`) : null;
-    if (!container || !lastTarget) onLastPromptEdgeChange?.("visible");
-    if (!container || !firstTarget) onFirstMessageHiddenChange?.(false);
     if (!container) {
+      onLastPromptEdgeChange?.("visible");
+      onFirstMessageHiddenChange?.(false);
       onLatestVisibilityChange?.(false);
       return;
     }
-
+    const lastTarget = findMessageRow(container, lastPromptMessageId ?? null);
+    const firstTarget = findMessageRow(container, firstMessageId ?? null);
+    const neighbors = unloaded && prompt && !lastTarget ? findPromptNeighbors(items, prompt) : null;
+    const olderRow = findMessageRow(container, neighbors?.olderKey ?? null);
+    const newerRow = findMessageRow(container, neighbors?.newerKey ?? null);
     const update = () => {
-      if (lastTarget) onLastPromptEdgeChange?.(resolveLastPromptEdge(container, lastTarget));
-      if (firstTarget) onFirstMessageHiddenChange?.(!isElementFullyVisible(container, firstTarget));
+      onLastPromptEdgeChange?.(
+        resolveTrackedPromptEdge(container, lastPromptMessageId, neighbors, olderRow, newerRow),
+      );
+      onFirstMessageHiddenChange?.(
+        firstTarget ? !isElementFullyVisible(container, firstTarget) : false,
+      );
       onLatestVisibilityChange?.(
         hasTranscriptContentBelowViewport({
           hasContent,
@@ -99,8 +139,7 @@ function useTranscriptEdgeTracking({
     resizeObserver.observe(container);
     const content = container.querySelector<HTMLElement>("[data-chat-content]");
     if (content) resizeObserver.observe(content);
-    if (lastTarget) resizeObserver.observe(lastTarget);
-    if (firstTarget && firstTarget !== lastTarget) resizeObserver.observe(firstTarget);
+    observeTrackedRows(resizeObserver, lastTarget, olderRow, newerRow, firstTarget);
     return () => {
       container.removeEventListener("scroll", update);
       resizeObserver.disconnect();
@@ -111,6 +150,9 @@ function useTranscriptEdgeTracking({
     onLastPromptEdgeChange,
     firstMessageId,
     onFirstMessageHiddenChange,
+    prompt,
+    unloaded,
+    items,
     hasContent,
     onLatestVisibilityChange,
   ]);
@@ -134,6 +176,8 @@ type NativeMessageListScrollParams = {
   isLoadingMore: boolean;
   loadMore: () => Promise<number>;
   lastPromptMessageId: string | null | undefined;
+  lastPromptMessage: Message | null | undefined;
+  lastPromptUnloaded: boolean | undefined;
   onLastPromptEdgeChange: ((edge: LastPromptEdge) => void) | undefined;
   firstMessageId: string | null | undefined;
   onFirstMessageHiddenChange: ((isHidden: boolean) => void) | undefined;
@@ -272,6 +316,8 @@ function useNativeMessageListScroll(params: NativeMessageListScrollParams) {
     isLoadingMore,
     loadMore,
     lastPromptMessageId,
+    lastPromptMessage,
+    lastPromptUnloaded,
     onLastPromptEdgeChange,
     firstMessageId,
     onFirstMessageHiddenChange,
@@ -329,12 +375,14 @@ function useNativeMessageListScroll(params: NativeMessageListScrollParams) {
     }),
     [claimReaderPosition, handleScrollToMessage, handleScrollToLatest],
   );
-  useTranscriptEdgeTracking({
-    scrollRef,
+  useTranscriptEdgeTracking(scrollRef, {
     lastPromptMessageId,
     onLastPromptEdgeChange,
     firstMessageId,
     onFirstMessageHiddenChange,
+    prompt: lastPromptMessage,
+    unloaded: lastPromptUnloaded,
+    items,
     hasContent: items.length > 0,
     onLatestVisibilityChange,
   });
@@ -705,6 +753,8 @@ export const NativeMessageList = memo(
       worktreePath,
       onOpenFile,
       lastPromptMessageId,
+      lastPromptMessage,
+      lastPromptUnloaded,
       onLastPromptEdgeChange,
       firstMessageId,
       onFirstMessageHiddenChange,
@@ -780,6 +830,8 @@ export const NativeMessageList = memo(
         isLoadingMore,
         loadMore,
         lastPromptMessageId,
+        lastPromptMessage,
+        lastPromptUnloaded,
         onLastPromptEdgeChange,
         firstMessageId,
         onFirstMessageHiddenChange,

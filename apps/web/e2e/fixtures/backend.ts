@@ -573,9 +573,7 @@ function writeGitShimLauncher(shimDir: string, shimScript: string): void {
   fs.writeFileSync(path.join(shimDir, "git"), launcher, { mode: 0o755 });
 }
 
-/** Strip GH_TOKEN / GITHUB_TOKEN so the mock client is used. */
-// Sanitize the inherited environment before handing it to the e2e backend.
-// Four classes of vars must not leak through the `...process.env` spread:
+/** Strip host-specific state before spawning E2E backends. */
 //   - GitHub tokens — tests must hit the mock GitHub, never a real token.
 //   - KANDEV_FEATURES_* flags — these are profile-managed (profiles.yaml `e2e:`
 //     column turns them on). When the suite is launched from inside a kandev
@@ -591,12 +589,23 @@ function writeGitShimLauncher(shimDir: string, shimScript: string): void {
 //   - PATH casing aliases — Windows commonly inherits `Path`; retaining it
 //     beside the fixture's new `PATH` makes child-process lookup order
 //     ambiguous. The caller restores one canonical PATH after sanitizing.
+//   - Service-install markers — a host's managed service identity must not make
+//     the source-built e2e backend appear eligible for managed updates.
 //   - Remote helper paths — container-backed tests must exercise the standard
 //     package cache path, never an inherited helper override.
 function sanitizeInheritedEnv(env: Record<string, string>): Record<string, string> {
   const cleaned = { ...env };
   delete cleaned.GH_TOKEN;
   delete cleaned.GITHUB_TOKEN;
+  for (const key of [
+    "KANDEV_RUNNING_AS_SERVICE",
+    "KANDEV_SERVICE_MODE",
+    "KANDEV_SERVICE_MANAGER",
+    "KANDEV_INSTALL_KIND",
+    "KANDEV_SERVICE_METADATA",
+  ]) {
+    delete cleaned[key];
+  }
   for (const key of Object.keys(cleaned)) {
     if (key === "KANDEV_WEB_TITLE_PREFIX" || key.startsWith("KANDEV_FEATURES_")) {
       delete cleaned[key];

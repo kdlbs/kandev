@@ -72,6 +72,7 @@ export const defaultState = {
   userSettings: defaultSettingsState.userSettings,
   agentProfileRecentUse: defaultSettingsState.agentProfileRecentUse,
   messages: defaultSessionState.messages,
+  messagePrompts: defaultSessionState.messagePrompts,
   turns: defaultSessionState.turns,
   taskSessions: defaultSessionState.taskSessions,
   taskSessionsByTask: defaultSessionState.taskSessionsByTask,
@@ -324,6 +325,26 @@ function mergeAgentReviewArtifacts(initialState: HydrationState) {
   };
 }
 
+/** Merges the latest-prompt projection and resets its client-only authority. */
+function mergePromptHistoryState(initialState: HydrationState) {
+  return {
+    ...defaultState.messagePrompts,
+    bySession: initialState.messagePrompts?.bySession ?? defaultState.messagePrompts.bySession,
+    metaBySession:
+      initialState.messagePrompts?.metaBySession ?? defaultState.messagePrompts.metaBySession,
+    generationBySession: {
+      ...defaultState.messagePrompts.generationBySession,
+      ...initialState.messagePrompts?.generationBySession,
+    },
+    refreshGenerationBySession: {
+      ...defaultState.messagePrompts.refreshGenerationBySession,
+      ...initialState.messagePrompts?.refreshGenerationBySession,
+    },
+    authoritativeBySession: {},
+    observedBySession: {},
+    deletedIdsBySession: {},
+  };
+}
 /** Merges the GitHub slices for initial (SSR/boot) hydration. */
 /** Merges the GitHub slices for initial (SSR/boot) hydration. */
 function mergeGitHubState(initialState: HydrationState) {
@@ -481,6 +502,7 @@ export function mergeInitialState(initialState?: HydrationState): DefaultState {
       initialState.agentProfileRecentUse ?? {},
     ),
     messages: { ...defaultState.messages, ...initialState.messages },
+    messagePrompts: mergePromptHistoryState(initialState),
     turns: mergeTurnsState(defaultState.turns, initialState.turns, initialState.taskSessions),
     ...mergeTaskSessionState(initialState),
     sessionAgentctl: { ...defaultState.sessionAgentctl, ...initialState.sessionAgentctl },

@@ -29,11 +29,11 @@ export function compareMessageTimestamps(left: string | undefined, right: string
   return 0;
 }
 
-/** Reports whether an incoming row is at least as fresh as a cached row. */
+/** Reports whether an incoming row is strictly newer than a cached row. */
 export function isIncomingMessageAtLeastAsFresh(existing: Message, incoming: Message) {
   const existingTimestamp = messageTimestampNanoseconds(existing.updated_at);
   const incomingTimestamp = messageTimestampNanoseconds(incoming.updated_at);
   if (existingTimestamp === null) return true;
   if (incomingTimestamp === null) return false;
-  return incomingTimestamp >= existingTimestamp;
+  return incomingTimestamp > existingTimestamp;
 }
