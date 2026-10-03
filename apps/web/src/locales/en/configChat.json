@@ -15,6 +15,7 @@
   "restartCreateFailed": "The old conversation was deleted, but a new session could not be created. Start a new chat.",
   "restartDeleteFailed": "The agent stopped, but the conversation could not be deleted. Try restarting again.",
   "restartDescription": "Delete this conversation and unsent prompts, stop the current agent, and start a fresh session. Configuration changes already made are kept.",
+  "restartDirtyWorktree": "Commit changes in this conversation's worktree before restarting the session.",
   "restartExecutorUnavailable": "The current executor or its profile is unavailable or incompatible. Check its settings before restarting.",
   "restartNotCompleted": "The session was not restarted. Try again.",
   "restartProfileUnavailable": "The current agent profile is unavailable. Check its settings before restarting.",

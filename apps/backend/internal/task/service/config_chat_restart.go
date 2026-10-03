@@ -98,6 +98,9 @@ func (s *Service) validateConfigChatRestartSelection(ctx context.Context, worksp
 	if err != nil || executorID == "" {
 		return nil, invalidConfigChatRestart("config_chat_restart_executor_unavailable")
 	}
+	if selection.ExecutorProfileID != "" && s.ValidateExecutorProfileAdmission(ctx, selection.ExecutorProfileID) != nil {
+		return nil, invalidConfigChatRestart("config_chat_restart_executor_unavailable")
+	}
 	executor, err := s.executors.GetExecutor(ctx, executorID)
 	if err != nil || executor == nil || executor.DeletedAt != nil || executor.Status == models.ExecutorStatusDisabled {
 		return nil, invalidConfigChatRestart("config_chat_restart_executor_unavailable")

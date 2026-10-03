@@ -345,6 +345,40 @@ describe("useConfigChat restart", () => {
 });
 
 describe("useConfigChat restart reconciliation", () => {
+  it("shares refresh progress while reconciling an uncertain result", async () => {
+    appState.quickChat.configChatRestarts[WORKSPACE_ID] = {
+      sessionId: SESSION_ID,
+      status: "uncertain",
+      source: "local",
+    };
+    let resolve!: (value: {
+      sessions: never[];
+      task_sessions: never[];
+      config_chat_restart_pending: boolean;
+    }) => void;
+    listQuickChatSessions.mockImplementationOnce(
+      () =>
+        new Promise((complete) => {
+          resolve = complete;
+        }),
+    );
+    const { result } = renderHook(() => useConfigChat(WORKSPACE_ID));
+    let pending!: Promise<void>;
+    await act(async () => {
+      pending = result.current.refreshRestart();
+      await Promise.resolve();
+    });
+    try {
+      expect(appState.quickChat.configChatRestarts[WORKSPACE_ID].status).toBe("restarting");
+    } finally {
+      await act(async () => {
+        resolve({ sessions: [], task_sessions: [], config_chat_restart_pending: false });
+        await pending;
+      });
+    }
+    expect(appState.quickChat.configChatRestarts[WORKSPACE_ID]).toBeUndefined();
+    expect(restartConfigChat).not.toHaveBeenCalled();
+  });
   it("reconciles a lost response by adopting the server's unique replacement", async () => {
     restartConfigChat.mockRejectedValueOnce(new TypeError("network disconnected"));
     listQuickChatSessions.mockResolvedValueOnce({
@@ -398,6 +432,41 @@ describe("useConfigChat restart reconciliation", () => {
 });
 
 describe("useConfigChat restart failures", () => {
+  it("does not carry a completed restart error into another workspace", async () => {
+    restartConfigChat.mockRejectedValueOnce(
+      new ApiError("stop failed", 500, {
+        code: "config_chat_restart_stop_failed",
+        stage: "stop",
+        old_deleted: false,
+      }),
+    );
+    const hook = renderHook(({ workspaceId }) => useConfigChat(workspaceId), {
+      initialProps: { workspaceId: WORKSPACE_ID },
+    });
+    await act(async () => {
+      await hook.result.current.restartSession(existing);
+    });
+    expect(hook.result.current.error).toBeTruthy();
+    hook.rerender({ workspaceId: "other-workspace" });
+    expect(hook.result.current.error).toBeNull();
+  });
+
+  it("requires committing worktree changes without allowing destructive retry", async () => {
+    getTaskDeletePreflight.mockResolvedValueOnce({
+      confirmation_id: "dirty",
+      requires_discard_consent: true,
+    });
+    const { result } = renderHook(() => useConfigChat(WORKSPACE_ID));
+    await act(async () => {
+      await result.current.restartSession(existing);
+    });
+    expect(result.current.error).toBe(
+      "Commit changes in this conversation's worktree before restarting the session.",
+    );
+    expect(restartConfigChat).not.toHaveBeenCalled();
+    expect(removeQuickChatSession).not.toHaveBeenCalled();
+    expect(appState.quickChat.configChatRestarts[WORKSPACE_ID]).toBeUndefined();
+  });
   it.each([
     ["validate", false, false],
     ["stop", false, false],

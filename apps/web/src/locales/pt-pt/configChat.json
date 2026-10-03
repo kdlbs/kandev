@@ -15,6 +15,7 @@
   "restartCreateFailed": "A conversa anterior foi eliminada, mas não foi possível criar uma nova sessão. Inicie uma nova conversa.",
   "restartDeleteFailed": "O agente foi parado, mas não foi possível eliminar a conversa. Tente reiniciar novamente.",
   "restartDescription": "Eliminar esta conversa e os pedidos por enviar, parar o agente atual e iniciar uma nova sessão. As alterações de configuração já efetuadas são mantidas.",
+  "restartDirtyWorktree": "Faça commit das alterações na árvore de trabalho desta conversa antes de reiniciar a sessão.",
   "restartExecutorUnavailable": "O executor atual ou o seu perfil não está disponível ou é incompatível. Verifique as definições antes de reiniciar.",
   "restartNotCompleted": "A sessão não foi reiniciada. Tente novamente.",
   "restartProfileUnavailable": "O perfil do agente atual não está disponível. Verifique as definições antes de reiniciar.",

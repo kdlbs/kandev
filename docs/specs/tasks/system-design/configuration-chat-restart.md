@@ -33,7 +33,8 @@ stop, canonical deletion, and creation on the backend.
 Add `POST /api/v1/workspaces/:id/config-chat/restart` alongside the existing
 creation route. The request contains `task_id` and `session_id` for the captured
 conversation and the existing `X-Kandev-Task-Delete-Confirmation` header. It
-accepts no prompt, replacement profile, config-mode override, or cascade option.
+accepts exactly one JSON document and no prompt, replacement profile, config-mode
+override, or cascade option.
 The client obtains a fresh `getTaskDeletePreflight` ticket after confirmation.
 Success returns the existing `StartConfigChatResponse` identity shape.
 
@@ -45,7 +46,7 @@ active workspace operations, removes entries on settlement, and is shared with
 config-chat creation admission. While it is active, `httpStartConfigChat`
 rejects a competing creation with a typed conflict. This closes the temporary
 empty-list window even for another browser. The list response must be consistent
-with admission: detect an operation change across its session read and retry or
+with admission: detect an operation change in that workspace across its session read and retry or
 report pending rather than declaring an authoritative empty result. These
 additive fields reveal no state before workspace authorization.
 
@@ -71,7 +72,7 @@ Existing authorization and lifecycle helpers remain integration boundaries.
    when present. Sessions with neither executor nor executor profile persist the
    implicit host runtime as empty; pin it to the system local executor during
    replacement. Do not fall back to changed workspace defaults. This validates
-   known incompatibilities, not future provider availability.
+   known incompatibilities and current provider availability, not future availability.
 3. Under the same exclusion, consume the native preview through
    `WithTaskDeleteConfirmation` before any stop mutates the previewed state.
    Reject missing, stale, replayed, or mismatched tickets with existing error
@@ -103,7 +104,10 @@ Existing authorization and lifecycle helpers remain integration boundaries.
    with the first real prompt. These options are not accepted on the wire.
    This avoids a double passthrough launch and does not rely on automatic
    open-time resumption. Use the normal launch response/state for admitted or
-   queued startup; never invent a completed turn or a synthetic user message.
+   queued startup; never invent a conversational turn or a synthetic user message.
+   Boot diagnostics without an active prompt use the existing completed
+   lifecycle-only turn contract and never acquire current-turn authority.
+   Ordinary prompted startup retains its already-created conversational turn.
 
 The accepted operation uses a bounded context derived with
 `context.WithoutCancel` so browser dismissal does not strand half the sequence
@@ -122,7 +126,8 @@ Before deletion, preserve the old descriptor and transcript, even if the agent
 has stopped. After deletion, remove them and never attempt to recreate the old
 history. On prepare failure, inspect the new task's primary session: retain and
 return an already-persisted session, or use `DeleteTaskWithLifecycle` for an
-unprepared task. On startup failure after preparation, retain and return the
+unprepared task. Use a fresh bounded cleanup context with the original identity
+if preparation exhausted the operation deadline. On startup failure after preparation, retain and return the
 new session and its normal launch error for retry. A partial successful create
 must not become an unreachable config task.
 
@@ -133,7 +138,8 @@ session effects. After pending clears, adopt a unique replacement when present;
 retain the old target if it still exists; show setup with a cleared-conversation
 notice only when the list is authoritatively empty. Reopening uses the same
 resync path. Poll only while an observed operation is pending, with the existing
-bounded request/reconnect behavior; a failed read keeps Refresh feedback and
+bounded request/reconnect behavior; each status read has a ten-second deadline
+and settles independently of terminal-tab resync. A failed read keeps Refresh feedback and
 does not permit creation. Multiple eligible results are an error to reconcile,
 not permission to choose or delete one arbitrarily. After a backend crash,
 normal persisted chat restoration and durable cleanup own the surviving state.
@@ -189,9 +195,15 @@ unconfirmed decisions on identity changes. Cancel/Escape returns focus to the
 header control. Confirmation closes before dispatch; progress and errors live
 in the panel, including when an old session still exists.
 
+Uncertain restart results expose Refresh status in both the floating panel and
+expanded chat. In expanded phone chat, keep feedback and its 44px recovery action
+inline in the existing full-screen surface, using the same shared admission and
+read-only reconciliation. Dirty-worktree preflight tells the user to commit
+changes before retrying; restart never discards them.
+
 Use one localized `role="status"` for progress and an accessible error region
 with recovery actions. Keep the button's accessible name stable. All new copy
-belongs to `configChat` in en, pt-pt, zh-cn, zh-hk, zh-tw, ja and generated pseudo;
+belongs to `configChat` in en, pt-pt, zh-cn, zh-hk, zh-tw, ja, ko and generated pseudo;
 generate Traditional Chinese through `i18n:zh-hant`.
 
 ## Evidence and existing decisions

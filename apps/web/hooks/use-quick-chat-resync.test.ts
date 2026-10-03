@@ -20,12 +20,16 @@ const storeApiMock = vi.hoisted(() => ({
 
 type MockState = {
   connection: { status: string };
-  quickChat: { syncRevisionByWorkspace: Record<string, number> };
+  quickChat: {
+    syncRevisionByWorkspace: Record<string, number>;
+    configChatRestarts: Record<string, { sessionId: string; source: string; status: string }>;
+  };
   taskSessions: { items: Record<string, TaskSession> };
   setTaskSession: (session: TaskSession) => void;
   syncQuickChatSessions: (...args: unknown[]) => void;
   syncQuickTerminalTabs: (...args: unknown[]) => void;
   syncConfigChatRestart: (...args: unknown[]) => void;
+  setConfigChatRestart: (...args: unknown[]) => void;
 };
 
 let mockState: MockState;
@@ -78,12 +82,13 @@ describe("useQuickChatResync", () => {
   beforeEach(() => {
     mockState = {
       connection: { status: "connected" },
-      quickChat: { syncRevisionByWorkspace: { [WORKSPACE_ID]: 0 } },
+      quickChat: { syncRevisionByWorkspace: { [WORKSPACE_ID]: 0 }, configChatRestarts: {} },
       setTaskSession: vi.fn(),
       taskSessions: { items: {} },
       syncQuickChatSessions: vi.fn(),
       syncQuickTerminalTabs: vi.fn(),
       syncConfigChatRestart: vi.fn(),
+      setConfigChatRestart: vi.fn(),
     };
     vi.clearAllMocks();
   });
@@ -256,5 +261,63 @@ describe("useQuickChatResync", () => {
 
     await waitFor(() => expect(mockState.syncQuickChatSessions).toHaveBeenCalledTimes(1));
     expect(apiMock.listQuickChatSessions).toHaveBeenCalledTimes(6);
+  });
+
+  it("settles chat restart even when terminal tab resync fails", async () => {
+    apiMock.listQuickChatSessions.mockReset().mockResolvedValue({
+      ...EMPTY_SESSIONS_RESPONSE,
+      config_chat_restart_pending: false,
+    });
+    apiMock.listQuickTerminalTabs.mockReset().mockRejectedValue(new Error("terminal unavailable"));
+    mockState.quickChat.configChatRestarts[WORKSPACE_ID] = {
+      sessionId: "old",
+      source: "server",
+      status: "restarting",
+    };
+    renderHook(() => useQuickChatResync(WORKSPACE_ID));
+    await waitFor(() =>
+      expect(mockState.syncConfigChatRestart).toHaveBeenCalledWith(WORKSPACE_ID, false, undefined),
+    );
+    expect(mockState.setConfigChatRestart).not.toHaveBeenCalled();
+  });
+
+  it("makes a hanging restart status request recoverable after its deadline", async () => {
+    vi.useFakeTimers();
+    const timeout = vi.spyOn(AbortSignal, "timeout").mockImplementation((delay) => {
+      const controller = new AbortController();
+      setTimeout(() => controller.abort(), delay);
+      return controller.signal;
+    });
+    apiMock.listQuickChatSessions.mockReset().mockImplementation(
+      (_workspace, options) =>
+        new Promise((_resolve, reject) => {
+          options?.init?.signal?.addEventListener(
+            "abort",
+            () => reject(new DOMException("aborted", "AbortError")),
+            { once: true },
+          );
+        }),
+    );
+    apiMock.listQuickTerminalTabs.mockReset().mockResolvedValue(EMPTY_TABS_RESPONSE);
+    mockState.quickChat.configChatRestarts[WORKSPACE_ID] = {
+      sessionId: "old",
+      source: "server",
+      status: "restarting",
+    };
+    renderHook(() => useQuickChatResync(WORKSPACE_ID));
+    try {
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(10_000);
+      });
+      expect(mockState.setConfigChatRestart).toHaveBeenCalledWith(WORKSPACE_ID, {
+        sessionId: "old",
+        source: "server",
+        status: "uncertain",
+      });
+    } finally {
+      cleanup();
+      timeout.mockRestore();
+      vi.useRealTimers();
+    }
   });
 });

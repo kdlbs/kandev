@@ -134,3 +134,20 @@ After current-base integration, all listed restart race and handler/startup
 regression commands passed again. Scoped Go lint against the current base
 reported zero issues. The merge retains the base's ordinary recovery and
 settings-policy behavior alongside the restart-only blank-start option.
+
+## Review remediation (2026-10-03)
+
+Review regression tests first reproduced blank-start active turns, trailing JSON
+acceptance, unavailable-provider retirement, cross-workspace list starvation,
+incorrect validation responses, lost deadline cleanup, and the nil-session error.
+The fixes retain the canonical launch, provider admission, authorization and
+cleanup paths. Fresh blank-start boot diagnostics now use completed lifecycle-only
+turns; ordinary prompted startup retains its active conversational turn.
+
+- `go test -race ./internal/backendapp ./internal/orchestrator
+  ./internal/task/handlers -run 'Test(BootMessageAdapter|ConfigChat|HTTPRestartConfigChat)'
+  -count=1`: passed, with 25 discovered test functions and their subtests.
+- Both existing handler/listing and empty-prompt/config-mode startup regression
+  commands above passed again.
+- `golangci-lint run ./... --new-from-rev=3e45498eb175294fc5482fb1d2f8646f6bf37e12
+  --timeout=5m`: passed with zero issues.

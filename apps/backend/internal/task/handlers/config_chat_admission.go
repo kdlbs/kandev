@@ -8,9 +8,9 @@ import (
 )
 
 type configChatAdmission struct {
-	mu         sync.Mutex
-	operations map[string]string
-	generation uint64
+	mu          sync.Mutex
+	operations  map[string]string
+	generations map[string]uint64
 }
 
 // An empty session denotes ordinary creation; a nonempty session denotes its
@@ -23,21 +23,22 @@ func (a *configChatAdmission) begin(workspaceID, retiringSessionID string) (func
 	}
 	if a.operations == nil {
 		a.operations = make(map[string]string)
+		a.generations = make(map[string]uint64)
 	}
 	a.operations[workspaceID] = retiringSessionID
-	a.generation++
+	a.generations[workspaceID]++
 	return func() {
 		a.mu.Lock()
 		defer a.mu.Unlock()
 		delete(a.operations, workspaceID)
-		a.generation++
+		a.generations[workspaceID]++
 	}, true
 }
 
 func (a *configChatAdmission) snapshot(workspaceID string) (uint64, string) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	return a.generation, a.operations[workspaceID]
+	return a.generations[workspaceID], a.operations[workspaceID]
 }
 
 func (h *TaskHandlers) listQuickChatsWithRestart(ctx context.Context, workspaceID string) ([]service.QuickChatSession, string, error) {

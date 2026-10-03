@@ -1,8 +1,11 @@
 import { test, expect } from "../../fixtures/test-base";
+import { PrAssetCapture } from "../../helpers/pr-asset-capture";
 import {
   openConfigurationChat,
   confirmConfigurationChatRestart,
   sendConfigurationPrompt,
+  waitForConfigurationResponse,
+  openUncertainExpandedConfigChat,
 } from "../../helpers/config-chat-restart";
 
 test.describe("Configuration Chat restart", () => {
@@ -21,6 +24,53 @@ test.describe("Configuration Chat restart", () => {
     await expect.poll(async () => (await restart.boundingBox())?.height).toBe(28);
   });
 
+  test("refreshes an uncertain restart from expanded chat without another restart", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const capture = new PrAssetCapture(testPage, "config-chat-restart.spec.ts", {
+      captureKey: "expanded",
+    });
+    const old = await apiClient.startConfigChat(
+      seedData.workspaceId,
+      seedData.agentProfileId,
+      'e2e:message("expanded original response")',
+    );
+    await waitForConfigurationResponse(apiClient, old.session_id, "expanded original response");
+    let restartRequests = 0;
+    testPage.on("request", (request) => {
+      if (request.method() === "POST" && request.url().endsWith("/config-chat/restart"))
+        restartRequests++;
+    });
+    const dialog = await openUncertainExpandedConfigChat(
+      testPage,
+      seedData.workspaceId,
+      old.session_id,
+    );
+    const refresh = dialog.getByRole("button", { name: "Refresh status", exact: true });
+    await expect(refresh).toHaveCount(1);
+    await capture.screenshot("desktop-expanded-restart-recovery", {
+      caption: "Expanded Configuration Chat can refresh an uncertain restart",
+    });
+    capture.flush();
+    expect(
+      await refresh.evaluate((element) => {
+        const rect = element.getBoundingClientRect();
+        return element.contains(
+          document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2),
+        );
+      }),
+    ).toBe(true);
+    await refresh.click();
+    await expect(dialog.getByText("expanded original response", { exact: true })).toBeVisible();
+    await expect(dialog.getByRole("button", { name: "Refresh status", exact: true })).toHaveCount(
+      0,
+    );
+    expect((await apiClient.getTaskSession(old.session_id)).session.id).toBe(old.session_id);
+    expect(restartRequests).toBe(0);
+  });
+
   test("cancels without losing a draft, then replaces and restores a blank conversation", async ({
     testPage,
     apiClient,
@@ -33,9 +83,8 @@ test.describe("Configuration Chat restart", () => {
       'e2e:message("old configuration response")',
     );
     const panel = await openConfigurationChat(testPage);
-    await expect(panel.getByText("old configuration response", { exact: true })).toBeVisible({
-      timeout: 30_000,
-    });
+    await waitForConfigurationResponse(apiClient, old.session_id, "old configuration response");
+    await expect(panel.getByText("old configuration response", { exact: true })).toBeVisible();
     const editor = panel.getByTestId("chat-input-editor");
     await editor.fill("unsent configuration prompt");
     await panel.getByRole("button", { name: "Restart session", exact: true }).click();
@@ -60,6 +109,9 @@ test.describe("Configuration Chat restart", () => {
     await expect
       .poll(async () => (await apiClient.getTaskSession(replacement.session_id)).session.state)
       .toBe("WAITING_FOR_INPUT");
+    const { turns } = await apiClient.listSessionTurns(replacement.session_id);
+    expect(turns.filter((turn) => turn.metadata?.lifecycle_only !== true)).toEqual([]);
+    expect(turns.every((turn) => Boolean(turn.completed_at))).toBe(true);
     const { messages } = await apiClient.listSessionMessages(replacement.session_id);
     expect(
       messages.filter(
@@ -68,19 +120,21 @@ test.describe("Configuration Chat restart", () => {
           message.type?.startsWith("tool_"),
       ),
     ).toEqual([]);
-    await sendConfigurationPrompt(panel, 'e2e:message("after restart response")');
-    await expect(panel.getByText("after restart response", { exact: true })).toBeVisible({
-      timeout: 30_000,
-    });
+    await sendConfigurationPrompt(
+      panel,
+      'e2e:message("after restart response")',
+      apiClient,
+      replacement.session_id,
+    );
+    await waitForConfigurationResponse(apiClient, replacement.session_id, "after restart response");
+    await expect(panel.getByText("after restart response", { exact: true })).toBeVisible();
     await panel.getByRole("button", { name: "Open in Quick Chat" }).click();
     const expanded = testPage.getByRole("dialog", { name: "Quick Chat" });
     await expect(expanded.getByText("after restart response", { exact: true })).toBeVisible();
     await expect(expanded.getByText("old configuration response", { exact: true })).toHaveCount(0);
     await testPage.reload();
     await testPage.getByRole("button", { name: "Configuration Chat", exact: true }).click();
-    await expect(panel.getByText("after restart response", { exact: true })).toBeVisible({
-      timeout: 20_000,
-    });
+    await expect(panel.getByText("after restart response", { exact: true })).toBeVisible();
     await expect(panel.getByText("old configuration response", { exact: true })).toHaveCount(0);
   });
 
@@ -108,10 +162,18 @@ test.describe("Configuration Chat restart", () => {
           timeout: 30_000,
         })
         .toBe("WAITING_FOR_INPUT");
-      await sendConfigurationPrompt(panel, 'e2e:message("active restart response")');
-      await expect(panel.getByText("active restart response", { exact: true })).toBeVisible({
-        timeout: 30_000,
-      });
+      await sendConfigurationPrompt(
+        panel,
+        'e2e:message("active restart response")',
+        apiClient,
+        replacement.session_id,
+      );
+      await waitForConfigurationResponse(
+        apiClient,
+        replacement.session_id,
+        "active restart response",
+      );
+      await expect(panel.getByText("active restart response", { exact: true })).toBeVisible();
     } finally {
       await apiClient.saveUserSettings({ prevent_auto_start_agent_on_open: false });
     }
@@ -122,13 +184,14 @@ test.describe("Configuration Chat restart", () => {
     apiClient,
     seedData,
   }) => {
-    await apiClient.startConfigChat(
+    const old = await apiClient.startConfigChat(
       seedData.workspaceId,
       seedData.agentProfileId,
       'e2e:message("resize response")',
     );
+    await waitForConfigurationResponse(apiClient, old.session_id, "resize response");
     const panel = await openConfigurationChat(testPage);
-    await expect(panel.getByTestId("chat-input-editor")).toBeVisible({ timeout: 30_000 });
+    await expect(panel.getByTestId("chat-input-editor")).toBeVisible();
     await testPage.setViewportSize({ width: 767, height: 900 });
     for (const label of ["Restart session", "Open in Quick Chat", "Close configuration chat"]) {
       const control = panel.getByRole("button", { name: label, exact: true });
@@ -195,15 +258,14 @@ test.describe("Configuration Chat restart", () => {
     apiClient,
     seedData,
   }) => {
-    await apiClient.startConfigChat(
+    const old = await apiClient.startConfigChat(
       seedData.workspaceId,
       seedData.agentProfileId,
       'e2e:message("preserved conversation")',
     );
     const panel = await openConfigurationChat(testPage);
-    await expect(panel.getByText("preserved conversation", { exact: true })).toBeVisible({
-      timeout: 30_000,
-    });
+    await waitForConfigurationResponse(apiClient, old.session_id, "preserved conversation");
+    await expect(panel.getByText("preserved conversation", { exact: true })).toBeVisible();
     await testPage.route("**/config-chat/restart", async (route) =>
       route.fulfill({
         status: 500,
@@ -220,12 +282,16 @@ test.describe("Configuration Chat restart", () => {
     await expect(panel.getByRole("alert")).toContainText("Could not stop the current agent.");
     await expect(panel.getByText("preserved conversation", { exact: true })).toBeVisible();
     await testPage.unroute("**/config-chat/restart");
-    await confirmConfigurationChatRestart(testPage, panel);
+    const replacement = await confirmConfigurationChatRestart(testPage, panel);
     await expect(panel.getByRole("alert")).toHaveCount(0);
     await expect(panel.getByText("preserved conversation", { exact: true })).toHaveCount(0);
-    await sendConfigurationPrompt(panel, 'e2e:message("retry response")');
-    await expect(panel.getByText("retry response", { exact: true })).toBeVisible({
-      timeout: 30_000,
-    });
+    await sendConfigurationPrompt(
+      panel,
+      'e2e:message("retry response")',
+      apiClient,
+      replacement.session_id,
+    );
+    await waitForConfigurationResponse(apiClient, replacement.session_id, "retry response");
+    await expect(panel.getByText("retry response", { exact: true })).toBeVisible();
   });
 });

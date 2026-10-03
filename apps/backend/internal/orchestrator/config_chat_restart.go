@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	runtimeapi "github.com/kandev/kandev/internal/agent/runtime"
+	"github.com/kandev/kandev/internal/task/models"
 )
 
 // RetireConfigChatSession holds conversation lifecycle exclusion until the
@@ -28,9 +29,13 @@ func (s *Service) RetireConfigChatSession(ctx context.Context, taskID, sessionID
 		return err
 	}
 	session, err := s.repo.GetTaskSession(ctx, sessionID)
-	if err != nil || session == nil {
+	if err != nil {
 		guard.release()
 		return fmt.Errorf("configuration chat session unavailable: %w", err)
+	}
+	if session == nil {
+		guard.release()
+		return models.ErrTaskSessionNotFound
 	}
 	if session.TaskID != taskID {
 		guard.release()

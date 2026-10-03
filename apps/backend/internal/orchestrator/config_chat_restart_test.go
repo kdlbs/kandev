@@ -19,6 +19,15 @@ type configChatRetirerUnderTest interface {
 }
 
 func TestConfigChatRestartBlankStartDoesNotDispatchConfigInstructions(t *testing.T) {
+	testConfigChatInitialTurn(t, true)
+}
+
+func TestConfigChatRestartNormalPromptCreatesTurn(t *testing.T) {
+	testConfigChatInitialTurn(t, false)
+}
+
+func testConfigChatInitialTurn(t *testing.T, blank bool) {
+	t.Helper()
 	ctx := context.Background()
 	repo := setupTestRepo(t)
 	seedTaskAndSession(t, repo, "new-task", "new-session", models.TaskSessionStateCreated)
@@ -40,12 +49,30 @@ func TestConfigChatRestartBlankStartDoesNotDispatchConfigInstructions(t *testing
 		return &executor.LaunchAgentResponse{AgentExecutionID: "new-execution", Status: v1.AgentStatusStarting}, nil
 	}}
 	svc := createTestServiceWithScheduler(repo, newMockStepGetter(), taskRepo, manager)
-	_, err = svc.LaunchSession(ctx, &LaunchSessionRequest{TaskID: task.ID, SessionID: session.ID, AgentProfileID: "profile1", Intent: IntentStartCreated, ActivationSource: LaunchActivationSourceUserAction, NoInitialPrompt: true, SkipMessageRecord: true})
+	svc.turnService = &repoTurnService{repo: repo}
+	prompt := ""
+	if !blank {
+		prompt = "Hello configuration"
+	}
+	_, err = svc.LaunchSession(ctx, &LaunchSessionRequest{Prompt: prompt, TaskID: task.ID, SessionID: session.ID, AgentProfileID: "profile1", Intent: IntentStartCreated, ActivationSource: LaunchActivationSourceUserAction, NoInitialPrompt: blank, SkipMessageRecord: true})
 	require.NoError(t, err)
 	require.NotNil(t, launched)
 	assert.True(t, launched.StartAgent)
 	assert.Equal(t, executor.McpModeConfig, launched.McpMode)
-	assert.Empty(t, launched.TaskDescription, "configuration instructions accompany a real prompt, not an empty start")
+	if blank {
+		assert.Empty(t, launched.TaskDescription, "configuration instructions accompany a real prompt, not an empty start")
+	} else {
+		assert.Contains(t, launched.TaskDescription, prompt)
+	}
+	turn, err := svc.turnService.GetActiveTurn(ctx, session.ID)
+	require.NoError(t, err)
+	if blank {
+		assert.Nil(t, turn, "blank agent startup must not create a durable turn")
+		assert.Empty(t, launched.TurnID)
+	} else {
+		require.NotNil(t, turn)
+		assert.Equal(t, turn.ID, launched.TurnID)
+	}
 }
 
 func TestConfigChatRestartPhysicalStopBeforeDelete(t *testing.T) {

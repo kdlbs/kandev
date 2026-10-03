@@ -86,6 +86,9 @@ Desktop anchored / phone bottom confirmation:
 During restart: fixed header, Restart/Expand disabled,
 one "Restarting session..." status, no active composer.
 Failure: visible cause + recovery action in the panel.
+Expanded recovery on both viewports:
+  [ Could not check whether restart finished. ]
+  [ Refresh status ]  (44px phone touch target)
 ```
 
 R represents the restart icon; use a stable localized accessible name. Same
@@ -205,3 +208,28 @@ phone 4/4 runs passed sequentially with one worker. Their three screenshots
 supersede the original publication captures and were visually inspected.
 Harness checks (19 tests, 200 files), specification/catalog checks (343
 decisions, 1323 specs), and public-doc checks (62 tests, 47 pages) passed.
+
+## Review remediation (2026-10-03)
+
+RED coverage reproduced stale workspace errors, misleading dirty-worktree copy,
+terminal-list failures blocking chat reconciliation, unbounded status requests,
+and missing shared refresh progress. The expanded view now exposes the same
+read-only Refresh status controller as the panel. Desktop and phone browser
+regressions reproduced the missing action before the markup change.
+
+- All eight listed frontend suites passed with 136 tests; type checking,
+  scoped ESLint, all supported locales and the new-copy ratchet passed.
+- Fresh desktop 13/13 passed. Fresh phone restart/popover 3/3 passed, then the
+  same built artifacts passed all five listed phone cases, including ordinary
+  full-screen expansion and clarification. The new recovery test runs at 320px,
+  verifies a 44px target, checks `elementFromPoint`, taps Refresh status, restores
+  the authoritative chat, and verifies no document overflow.
+- Browser prompt assertions now first await session readiness and persisted
+  agent responses. Blank replacements have no conversational turns or messages;
+  any boot diagnostic turns are explicitly completed and lifecycle-only.
+- Simplified Chinese agent terminology was corrected; Traditional Chinese and
+  pseudo catalogs were regenerated. Public recovery guidance now explains
+  expanded-view refresh and committing dirty-worktree changes.
+
+Screenshots captured before these UI fixes are superseded. Publication requires
+fresh desktop and phone captures from the final committed source.

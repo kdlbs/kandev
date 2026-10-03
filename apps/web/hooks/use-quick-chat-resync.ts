@@ -67,10 +67,21 @@ export function useQuickChatResync(workspaceId: string | null): void {
       while (!cancelled) {
         const revision = store.getState().quickChat.syncRevisionByWorkspace[workspaceId] ?? 0;
         try {
-          const [response, terminalResponse] = await Promise.all([
-            listQuickChatSessions(workspaceId),
-            listQuickTerminalTabs(workspaceId),
-          ]);
+          void listQuickTerminalTabs(workspaceId)
+            .then((terminalResponse) => {
+              if (
+                !cancelled &&
+                (store.getState().quickChat.syncRevisionByWorkspace[workspaceId] ?? 0) === revision
+              )
+                syncQuickTerminalTabs(workspaceId, terminalResponse.tabs.map(toQuickTerminalTab));
+            })
+            .catch(() => {
+              if (!cancelled) lastSyncedConnection.current = null;
+            });
+          const response = await listQuickChatSessions(workspaceId, {
+            cache: "no-store",
+            init: { signal: AbortSignal.timeout(10_000) },
+          });
           if (cancelled) return;
 
           const currentRevision =
@@ -90,7 +101,6 @@ export function useQuickChatResync(workspaceId: string | null): void {
           // never regress state a newer WebSocket event already applied.
           hydrateResyncedSessions(store, response.task_sessions, setTaskSession);
           syncQuickChatSessions(workspaceId, sessions);
-          syncQuickTerminalTabs(workspaceId, terminalResponse.tabs.map(toQuickTerminalTab));
           if (response.config_chat_restart_pending !== undefined) {
             syncConfigChatRestart(
               workspaceId,

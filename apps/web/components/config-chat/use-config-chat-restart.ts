@@ -9,7 +9,7 @@ import { performConfigChatRestart, reconcileConfigChatRestart } from "./config-c
 export function useConfigChatRestart(workspaceId: string) {
   const store = useAppStoreApi();
   const restart = useAppStore((state) => state.quickChat.configChatRestarts[workspaceId]);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<{ workspaceId: string; message: string } | null>(null);
   const owner = useRef({ workspaceId, revision: 0, mounted: true });
   useEffect(() => {
     owner.current.workspaceId = workspaceId;
@@ -38,7 +38,7 @@ export function useConfigChatRestart(workspaceId: string) {
           owner.current.workspaceId === workspaceId &&
           owner.current.revision === revision
         )
-          setError(nextError);
+          setError(nextError ? { workspaceId, message: nextError } : null);
       } finally {
         if (activeConfigChatOperations.get(workspaceId) === token)
           activeConfigChatOperations.delete(workspaceId);
@@ -65,9 +65,13 @@ export function useConfigChatRestart(workspaceId: string) {
   const refreshRestart = useCallback(async () => {
     const current = store.getState().quickChat.configChatRestarts[workspaceId];
     if (!current || current.status !== "uncertain") return;
-    await run(() => reconcileConfigChatRestart(store, workspaceId, current.sessionId));
+    await run(() => {
+      store.getState().setConfigChatRestart(workspaceId, { ...current, status: "restarting" });
+      return reconcileConfigChatRestart(store, workspaceId, current.sessionId);
+    });
   }, [workspaceId, store, run]);
 
+  const localError = error?.workspaceId === workspaceId ? error.message : null;
   return {
     restartSession,
     refreshRestart,
@@ -75,6 +79,8 @@ export function useConfigChatRestart(workspaceId: string) {
     isRestarting: restart?.status === "restarting",
     restartBlocked: !!restart,
     restartError:
-      restart?.status === "uncertain" ? (restart.error ?? t("configChat:restartUncertain")) : error,
+      restart?.status === "uncertain"
+        ? (restart.error ?? t("configChat:restartUncertain"))
+        : localError,
   };
 }

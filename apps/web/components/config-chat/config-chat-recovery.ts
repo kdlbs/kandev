@@ -161,7 +161,7 @@ export async function performConfigChatRestart(
     const preview = await getTaskDeletePreflight([session.taskId!], false, false);
     if (preview.requires_discard_consent) {
       settleRestart(store, workspaceId);
-      return t("configChat:restartConfirmationFailed");
+      return t("configChat:restartDirtyWorktree");
     }
     submitted = true;
     const response = await restartConfigChat(

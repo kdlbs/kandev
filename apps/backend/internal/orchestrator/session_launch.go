@@ -540,6 +540,7 @@ func (s *Service) launchStartCreated(ctx context.Context, req *LaunchSessionRequ
 	if req.NoInitialPrompt {
 		options.skipTaskDescriptionFallback = true
 		options.promptAlreadyComposed = true
+		options.noInitialTurn = true
 	}
 	execution, err := s.startCreatedSession(
 		ctx, req.TaskID, req.SessionID, req.AgentProfileID,

@@ -83,7 +83,10 @@ func (r *restartHTTPRepo) CreateTask(ctx context.Context, task *models.Task) err
 	return nil
 }
 
-func (r *restartHTTPRepo) ListTaskSessions(_ context.Context, taskID string) ([]*models.TaskSession, error) {
+func (r *restartHTTPRepo) ListTaskSessions(ctx context.Context, taskID string) ([]*models.TaskSession, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	var result []*models.TaskSession
@@ -142,6 +145,9 @@ func (r *restartHTTPRepo) ValidateAgentProfileForExecutor(context.Context, *sett
 }
 
 func (r *restartHTTPRepo) DeleteTaskTree(ctx context.Context, id string, cascade bool) (*service.CascadeOutcome, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.calls = append(r.calls, "delete")
@@ -164,6 +170,7 @@ type restartHTTPOrchestrator struct {
 	requests                      []*orchestrator.LaunchSessionRequest
 	identity                      authn.Identity
 	preparePartial                bool
+	prepareCancel                 context.CancelFunc
 }
 
 func (o *restartHTTPOrchestrator) EnsureSession(context.Context, string, ...orchestrator.EnsureSessionOptions) (*orchestrator.EnsureSessionResponse, error) {
@@ -188,6 +195,9 @@ func (o *restartHTTPOrchestrator) RetireConfigChatSession(ctx context.Context, _
 func (o *restartHTTPOrchestrator) LaunchSession(ctx context.Context, req *orchestrator.LaunchSessionRequest) (*orchestrator.LaunchSessionResponse, error) {
 	o.requests = append(o.requests, req)
 	if req.Intent == orchestrator.IntentPrepare {
+		if o.prepareCancel != nil {
+			o.prepareCancel()
+		}
 		if o.prepareErr != nil && !o.preparePartial {
 			return nil, o.prepareErr
 		}

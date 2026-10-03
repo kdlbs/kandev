@@ -218,3 +218,21 @@ which became a supported locale after the original implementation.
 The earlier implementation evidence remains historical. This delivery run
 supersedes it for PR validation and screenshot publication. CI and automated
 reviews own the remaining publication gate; no remote merge is claimed here.
+
+## Review remediation (2026-10-03)
+
+All 14 review threads and the aggregate review findings were inspected against
+current source. Changes cover blank startup turn ownership, strict request
+framing, provider admission, workspace-scoped list generations, HTTP failure
+classification, bounded recovery after preparation deadlines, workspace-specific
+client errors, independent bounded chat resync, and expanded-view status refresh.
+Localized recovery copy, supported-locale design coverage and causal browser
+waits were reconciled with the final behavior.
+
+Backend race checks passed for 25 discovered test functions plus subtests across
+three packages; handler/startup regressions and current-base Go lint passed.
+The eight frontend suites passed 136 tests, and type, lint and locale checks
+passed. Fresh desktop 13/13 and fresh phone restart/popover 3/3 passed; all five
+listed phone cases passed again against those built artifacts. Work orders record
+commands and regression evidence. Final committed-source captures, hooked commit,
+new exact-head CI, thread dispositions and remote merge remain delivery gates.

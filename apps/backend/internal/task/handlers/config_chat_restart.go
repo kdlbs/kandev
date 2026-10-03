@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -43,6 +44,10 @@ func (h *TaskHandlers) httpRestartConfigChat(c *gin.Context) {
 	decoder := json.NewDecoder(c.Request.Body)
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&body); err != nil || body.TaskID == "" || body.SessionID == "" {
+		c.JSON(http.StatusBadRequest, configChatRestartFailure{Code: "config_chat_restart_invalid_target", Stage: configChatRestartStageValidate})
+		return
+	}
+	if err := decoder.Decode(new(any)); err != io.EOF {
 		c.JSON(http.StatusBadRequest, configChatRestartFailure{Code: "config_chat_restart_invalid_target", Stage: configChatRestartStageValidate})
 		return
 	}
@@ -124,11 +129,13 @@ func (h *TaskHandlers) createConfigChatReplacement(ctx context.Context, workspac
 		ExecutorID: selection.ExecutorID, ExecutorProfileID: selection.ExecutorProfileID, DeferredStart: true,
 	})
 	if err != nil {
-		retained, lookupErr := h.preparedConfigChatReplacement(ctx, result.Task.ID, selection.AgentProfileID)
+		cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), constants.TaskDeleteTimeout)
+		defer cancel()
+		retained, lookupErr := h.preparedConfigChatReplacement(cleanupCtx, result.Task.ID, selection.AgentProfileID)
 		if retained != nil {
 			return retained, err
 		}
-		return nil, errors.Join(err, lookupErr, h.service.DeleteTaskWithLifecycle(ctx, result.Task.ID))
+		return nil, errors.Join(err, lookupErr, h.service.DeleteTaskWithLifecycle(cleanupCtx, result.Task.ID))
 	}
 	return &httpStartQuickChatResponse{TaskID: result.Task.ID, SessionID: response.SessionID, AgentProfileID: selection.AgentProfileID}, nil
 }
@@ -150,6 +157,10 @@ func (h *TaskHandlers) respondConfigChatRestartFailure(c *gin.Context, failure c
 	status := http.StatusInternalServerError
 	failure.Code = "config_chat_restart_" + failure.Stage + "_failed"
 	if failure.Stage == configChatRestartStageValidate {
+		if !isConfigChatConfirmationError(err) {
+			handleNotFound(c, h.logger, err, "configuration chat not found")
+			return
+		}
 		failure.Code = "config_chat_restart_confirmation_invalid"
 		status = http.StatusConflict
 		if errors.Is(err, service.ErrTaskDeleteConfirmationRequired) {
@@ -162,4 +173,15 @@ func (h *TaskHandlers) respondConfigChatRestartFailure(c *gin.Context, failure c
 	}
 	h.logger.Warn("configuration chat restart failed", zap.String("stage", failure.Stage), zap.Bool("old_deleted", failure.OldDeleted), zap.Error(err))
 	c.JSON(status, failure)
+}
+
+func isConfigChatConfirmationError(err error) bool {
+	for _, confirmationErr := range []error{service.ErrTaskDeleteConfirmationRequired, service.ErrTaskDeleteConfirmationExpired,
+		service.ErrTaskDeleteConfirmationStale, service.ErrTaskDeleteConfirmationReplay, service.ErrTaskDeleteConfirmationMismatch,
+		service.ErrTaskDeleteConfirmationIdentity} {
+		if errors.Is(err, confirmationErr) {
+			return true
+		}
+	}
+	return false
 }
