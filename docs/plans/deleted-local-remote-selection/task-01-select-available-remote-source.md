@@ -240,3 +240,33 @@ alongside the existing unit-helper tests. The moved regression passes, and
 full Chromium/mobile/container discovery reports zero errors. Duration-aware
 manifest generation also passes with CI's selected timing profile. This
 changes test ownership only; the browser fixtures and runtime are unchanged.
+
+### Phone geometry readiness
+
+Run 37089516388 on `5402dfd8b` passed full catalog discovery but exposed the
+equivalent immediate geometry sample in the phone history test on shard 12.
+The shard blob contains one failed assertion, 238 passed attempts, four
+skipped tests, and no retries or parse errors. Its screenshot and DOM context
+show the expected five PR files; sibling gaps were 20px instead of 2px.
+Holding row ResizeObserver delivery reproduced that exact assertion failure
+with a 28px section gap. Releasing delivery restored 2px/10px/-4px.
+
+The phone assertion now polls the same complete geometry object at 393px and
+767px, matching the desktop readiness correction. No sleeps, timeout changes,
+production changes, or mobile composition changes were introduced.
+
+- The temporary held-observer diagnostic failed before the correction and
+  passed afterward; it was removed after recording both results.
+- `pnpm e2e:run --docker --no-build --project mobile-chrome --
+  e2e/tests/git/mobile-changes-history-regression.spec.ts --grep
+  'preserves residual PR spacing' --retries=0 --reporter=list` passed.
+- Ten repeats of that test passed in 1.3 minutes using the CI runtime image,
+  one worker, two CPUs, 4GiB memory, and retries disabled.
+- Both complete history specs and shard 12's five preceding mobile specs
+  passed all 16 tests in 2.5 minutes under the same resource limits and with
+  retries disabled. The read-only shared Git metadata mount also removed the
+  initial pressure container's repository-discovery warning.
+- Changed-file ESLint, Prettier, and web typecheck passed.
+
+Remote CI, artifact reconciliation, current-base proof, and final merge
+evidence remain tracked in the platform task plan and PR checks.

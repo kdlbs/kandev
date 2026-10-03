@@ -175,3 +175,10 @@ needed. See the work order for verification evidence.
 Full CI catalog validation also required placing the fixture unit regression
 in `e2e/helpers/`, outside Playwright's browser-test root. The moved unit test,
 all-project discovery, and duration-aware manifest generation passed.
+
+The following CI run exposed the same premature geometry sample in the phone
+history test. Holding observer delivery reproduced its exact 20px sibling
+gaps; measured geometry returned to 2px/10px/-4px. The phone assertion now
+polls the existing expectations at both widths. Ten resource-bounded repeats
+and the 16-test desktop/mobile history and preceding-mobile sequence passed
+with retries disabled. Production behavior and layout remain unchanged.
