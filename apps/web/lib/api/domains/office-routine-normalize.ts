@@ -193,6 +193,7 @@ export function buildCreateRoutineBody(input: CreateRoutineInput): WireRecord {
     body.catch_up_max = input.catchUpMax;
   }
   assignIfDefined(body, "variables", stringifyJSONField(input.variables));
+  if (input.trigger) body.trigger = buildCreateTriggerBody(input.trigger);
   return body;
 }
 

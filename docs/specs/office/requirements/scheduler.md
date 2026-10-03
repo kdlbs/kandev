@@ -44,6 +44,7 @@ queue](../../tasks/requirements/run-scheduling.md) and
 - **AC-OFFICE-SCHEDULER-001.11:** A cron routine trigger that can never fire (an impossible date, or an empty expression) is rejected at trigger-create time with a client error, not accepted as a silent no-op or a wrong daily fallback.
 - **AC-OFFICE-SCHEDULER-001.12:** A routine trigger's timezone defaults to UTC when not supplied; there is no workspace-level timezone.
 - **AC-OFFICE-SCHEDULER-001.13:** A routine run in `task_created` with no linked task is not an active run. The next dispatch that finds it for its fingerprint closes it as `failed` and does not skip or coalesce into it. A heavy run whose linked task is live still gates its fingerprint.
+- **AC-OFFICE-SCHEDULER-001.14:** The IANA timezone database is embedded in the distributed binary (`time/tzdata`), so a zone named by a routine trigger resolves with no system zoneinfo directory and no build-machine `GOROOT`, as on a deployed Windows host.
 
 ### REQ-OFFICE-SCHEDULER-002: Assignment wake respects step auto-start
 

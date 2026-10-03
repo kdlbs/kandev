@@ -722,7 +722,6 @@
   "routeOutcomeSkippedUserAction": "ignorado por ação do utilizador",
   "routineActivated": "Rotina ativada",
   "routineCreated": "Rotina criada",
-  "routineCreatedWithoutSchedule": "A rotina foi criada sem agendamento: {{error}}",
   "routineDeleted": "Rotina eliminada",
   "routineFired": "Rotina disparada",
   "routineNotFiring": "Não é possível executar: o estado da rotina é {{status}}",

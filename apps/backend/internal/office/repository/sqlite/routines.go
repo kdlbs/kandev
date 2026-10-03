@@ -246,6 +246,39 @@ func (r *Repository) CreateRoutineTx(ctx context.Context, tx *sqlx.Tx, routine *
 	return r.insertRoutine(ctx, tx, routine)
 }
 
+// CreateRoutineWithTrigger inserts routine and, when trigger is non-nil, its
+// trigger inside one transaction, so a failed trigger insert rolls the routine
+// back rather than leaving an unscheduled routine behind. routine.ID is
+// assigned before the trigger is written and copied onto trigger.RoutineID.
+func (r *Repository) CreateRoutineWithTrigger(
+	ctx context.Context, routine *models.Routine, trigger *models.RoutineTrigger,
+) error {
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			_ = tx.Rollback()
+		}
+	}()
+	if err := r.CreateRoutineTx(ctx, tx, routine); err != nil {
+		return err
+	}
+	if trigger != nil {
+		trigger.RoutineID = routine.ID
+		if err := r.CreateRoutineTriggerTx(ctx, tx, trigger); err != nil {
+			return err
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	committed = true
+	return nil
+}
+
 // insertRoutine is the single write-time normalization funnel for
 // catch_up_policy and catch_up_max: it reassigns both fields on the
 // passed-in struct, before the statement binds them, so a handler that

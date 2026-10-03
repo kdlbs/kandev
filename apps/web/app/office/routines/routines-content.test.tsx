@@ -6,7 +6,6 @@ import type { AgentProfile } from "@/lib/state/slices/office/types";
 import { RoutinesContent } from "./routines-content";
 import {
   createRoutine,
-  createRoutineTrigger,
   listAllRoutineRuns,
   listRoutines,
   listRoutineTriggers,
@@ -23,7 +22,6 @@ vi.mock("@/lib/api/domains/office-api", async () => {
     listAllRoutineRuns: vi.fn(),
     listRoutineTriggers: vi.fn(),
     createRoutine: vi.fn(),
-    createRoutineTrigger: vi.fn(),
   };
 });
 
@@ -33,7 +31,6 @@ const listRoutinesMock = vi.mocked(listRoutines);
 const listAllRoutineRunsMock = vi.mocked(listAllRoutineRuns);
 const listRoutineTriggersMock = vi.mocked(listRoutineTriggers);
 const createRoutineMock = vi.mocked(createRoutine);
-const createRoutineTriggerMock = vi.mocked(createRoutineTrigger);
 
 afterEach(() => {
   cleanup();
@@ -59,6 +56,17 @@ const AGENT: AgentProfile = {
   budgetMonthlyCents: 0,
   maxConcurrentSessions: 1,
 } as AgentProfile;
+
+const CREATED_ROUTINE = {
+  id: "routine-1",
+  workspaceId: WORKSPACE_ID,
+  name: ROUTINE_NAME,
+  taskTemplate: {},
+  status: "active",
+  concurrencyPolicy: "coalesce_if_active",
+  createdAt: TIMESTAMP,
+  updatedAt: TIMESTAMP,
+};
 
 function renderContent() {
   return render(
@@ -88,31 +96,14 @@ async function openCreateDialogToScheduleStep() {
   fireEvent.click(screen.getByRole("button", { name: /next/i }));
 }
 
+// AC-002.2 / AC-002.10: the routine and its cron trigger are created in one
+// request, so a rejected trigger cannot leave a routine behind.
 describe("RoutinesContent create-routine cron arm (AC-002.2, AC-002.10)", () => {
-  it("arms a cron trigger after the routine is created and shows one success toast", async () => {
+  it("creates the routine and its cron trigger in one request and shows one success toast", async () => {
     listRoutinesMock.mockResolvedValue({ routines: [] });
     listAllRoutineRunsMock.mockResolvedValue({ runs: [] });
     listRoutineTriggersMock.mockResolvedValue({ triggers: [] });
-    createRoutineMock.mockResolvedValue({
-      id: "routine-1",
-      workspaceId: WORKSPACE_ID,
-      name: ROUTINE_NAME,
-      taskTemplate: {},
-      status: "active",
-      concurrencyPolicy: "coalesce_if_active",
-      createdAt: TIMESTAMP,
-      updatedAt: TIMESTAMP,
-    });
-    createRoutineTriggerMock.mockResolvedValue({
-      id: "trigger-1",
-      routineId: "routine-1",
-      kind: "cron",
-      cronExpression: "0 9 * * *",
-      timezone: "UTC",
-      enabled: true,
-      createdAt: TIMESTAMP,
-      updatedAt: TIMESTAMP,
-    });
+    createRoutineMock.mockResolvedValue(CREATED_ROUTINE);
 
     renderContent();
     await openCreateDialogToScheduleStep();
@@ -122,12 +113,15 @@ describe("RoutinesContent create-routine cron arm (AC-002.2, AC-002.10)", () => 
     fireEvent.click(screen.getByRole("button", { name: /create/i }));
 
     await waitFor(() => {
-      expect(createRoutineTriggerMock).toHaveBeenCalledWith("routine-1", {
-        kind: "cron",
-        cronExpression: "0 9 * * *",
-        timezone: "UTC",
-      });
+      expect(createRoutineMock).toHaveBeenCalledWith(
+        WORKSPACE_ID,
+        expect.objectContaining({
+          name: ROUTINE_NAME,
+          trigger: { kind: "cron", cronExpression: "0 9 * * *", timezone: "UTC" },
+        }),
+      );
     });
+    expect(createRoutineMock).toHaveBeenCalledTimes(1);
     expect(toast.success).toHaveBeenCalledWith("Routine created");
     expect(toast.error).not.toHaveBeenCalled();
   });
@@ -144,47 +138,34 @@ describe("RoutinesContent create-routine cron arm (AC-002.2, AC-002.10)", () => 
     );
   });
 
-  it("shows an error toast naming the trigger failure and no success toast when the cron trigger create fails", async () => {
+  it("keeps the dialog open with an error toast and no success toast when the atomic create fails", async () => {
     listRoutinesMock.mockResolvedValue({ routines: [] });
     listAllRoutineRunsMock.mockResolvedValue({ runs: [] });
     listRoutineTriggersMock.mockResolvedValue({ triggers: [] });
-    createRoutineMock.mockResolvedValue({
-      id: "routine-1",
-      workspaceId: WORKSPACE_ID,
-      name: ROUTINE_NAME,
-      taskTemplate: {},
-      status: "active",
-      concurrencyPolicy: "coalesce_if_active",
-      createdAt: TIMESTAMP,
-      updatedAt: TIMESTAMP,
-    });
-    createRoutineTriggerMock.mockRejectedValue(new Error("invalid cron expression"));
+    createRoutineMock.mockRejectedValue(new Error("invalid cron expression"));
 
     renderContent();
     await openCreateDialogToScheduleStep();
     fireEvent.change(screen.getByLabelText(CRON_EXPRESSION_LABEL), {
-      target: { value: "bad cron" },
+      target: { value: "0 9 * * *" },
     });
+    const callsBeforeCreate = listRoutinesMock.mock.calls.length;
     fireEvent.click(screen.getByRole("button", { name: /create/i }));
 
-    await waitFor(() => {
-      expect(toast.error).toHaveBeenCalledWith(
-        "The routine was created without a schedule: invalid cron expression",
-      );
-    });
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith("invalid cron expression"));
     expect(toast.success).not.toHaveBeenCalled();
-    // TS-004: the failure branch must still close the dialog and refetch,
-    // not just toast.
-    expect(screen.queryByRole("button", { name: /^create$/i })).toBeNull();
-    expect(listRoutinesMock).toHaveBeenCalledTimes(2);
+    // Nothing was created, so the list must not be refetched and the dialog
+    // must stay open for a retry.
+    expect(listRoutinesMock.mock.calls.length).toBe(callsBeforeCreate);
+    expect(screen.getByRole("button", { name: /^create$/i })).toBeTruthy();
   });
 });
 
 // TS-006: a rejected createRoutine call must leave the dialog open for the
-// user to correct and retry, and must not attempt to arm a trigger or
-// refetch the routine list for a routine that was never created.
+// user to correct and retry, and must not refetch the routine list for a
+// routine that was never created.
 describe("RoutinesContent create failure (TS-006)", () => {
-  it("keeps the dialog open and shows the create error without calling fetchRoutines or arming a trigger when createRoutine rejects", async () => {
+  it("keeps the dialog open and shows the create error without refetching when createRoutine rejects", async () => {
     listRoutinesMock.mockResolvedValue({ routines: [] });
     listAllRoutineRunsMock.mockResolvedValue({ runs: [] });
     listRoutineTriggersMock.mockResolvedValue({ triggers: [] });
@@ -200,17 +181,14 @@ describe("RoutinesContent create failure (TS-006)", () => {
 
     await waitFor(() => expect(toast.error).toHaveBeenCalledWith("duplicate name"));
     expect(toast.success).not.toHaveBeenCalled();
-    expect(createRoutineTriggerMock).not.toHaveBeenCalled();
     expect(listRoutinesMock.mock.calls.length).toBe(callsBeforeCreate);
     expect(screen.getByRole("button", { name: /^create$/i })).toBeTruthy();
   });
 });
 
-// Regression coverage: handleCreate's refactor into two try/catch blocks
-// (create, then optional cron-arm) left the post-mutation `fetchRoutines()`
-// calls unguarded. A refetch failure there must not swallow the toast
-// reporting the create/trigger outcome, and must not become an unhandled
-// promise rejection.
+// Regression coverage: the post-create `fetchRoutines()` is guarded, so a
+// refetch failure must not swallow the toast reporting the create outcome,
+// and must not become an unhandled promise rejection.
 describe("RoutinesContent post-create refetch failure", () => {
   // The mount effect also calls fetchRoutines, so a fixed call-count
   // assumption ("call 2 is the post-create refetch") is fragile. Instead,
@@ -235,16 +213,7 @@ describe("RoutinesContent post-create refetch failure", () => {
     const armFailure = mockListRoutinesFailingNextCallAfterArmed();
     listAllRoutineRunsMock.mockResolvedValue({ runs: [] });
     listRoutineTriggersMock.mockResolvedValue({ triggers: [] });
-    createRoutineMock.mockResolvedValue({
-      id: "routine-1",
-      workspaceId: WORKSPACE_ID,
-      name: ROUTINE_NAME,
-      taskTemplate: {},
-      status: "active",
-      concurrencyPolicy: "coalesce_if_active",
-      createdAt: TIMESTAMP,
-      updatedAt: TIMESTAMP,
-    });
+    createRoutineMock.mockResolvedValue(CREATED_ROUTINE);
 
     renderContent();
     fireEvent.click(screen.getByRole("button", { name: /new routine/i }));
@@ -265,37 +234,9 @@ describe("RoutinesContent post-create refetch failure", () => {
 
     await waitFor(() => expect(toast.success).toHaveBeenCalledWith("Routine created"));
     expect(toast.error).toHaveBeenCalledWith("Failed to load");
-  });
-
-  it("still shows the trigger-failure toast when that branch's refetch also fails", async () => {
-    const armFailure = mockListRoutinesFailingNextCallAfterArmed();
-    listAllRoutineRunsMock.mockResolvedValue({ runs: [] });
-    listRoutineTriggersMock.mockResolvedValue({ triggers: [] });
-    createRoutineMock.mockResolvedValue({
-      id: "routine-1",
-      workspaceId: WORKSPACE_ID,
-      name: ROUTINE_NAME,
-      taskTemplate: {},
-      status: "active",
-      concurrencyPolicy: "coalesce_if_active",
-      createdAt: TIMESTAMP,
-      updatedAt: TIMESTAMP,
-    });
-    createRoutineTriggerMock.mockRejectedValue(new Error("invalid cron expression"));
-
-    renderContent();
-    await openCreateDialogToScheduleStep();
-    fireEvent.change(screen.getByLabelText(CRON_EXPRESSION_LABEL), {
-      target: { value: "bad cron" },
-    });
-    armFailure();
-    fireEvent.click(screen.getByRole("button", { name: /create/i }));
-
-    await waitFor(() =>
-      expect(toast.error).toHaveBeenCalledWith(
-        "The routine was created without a schedule: invalid cron expression",
-      ),
+    expect(createRoutineMock).toHaveBeenCalledWith(
+      WORKSPACE_ID,
+      expect.not.objectContaining({ trigger: expect.anything() }),
     );
-    expect(toast.error).toHaveBeenCalledWith("Failed to load");
   });
 });

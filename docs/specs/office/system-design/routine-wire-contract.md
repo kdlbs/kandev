@@ -233,10 +233,11 @@ functions.
 
 ## Control flow
 
-Create routine: dialog state, then the write mapper, then `POST
-/workspaces/:wsId/routines`, then the read normalizer on the 201 body, then the
-routine id for the optional trigger step. Workspace comes from the path and
-status is forced server-side, so neither is in the body.
+Create routine: dialog state, then the write mapper, then one `POST
+/workspaces/:wsId/routines` carrying the optional trigger, then the read
+normalizer on the 201 body. The routine and its trigger commit in one
+transaction, so a rejected trigger creates no routine. Workspace comes from the
+path and status is forced server-side, so neither is in the body.
 
 Save routine: the write mapper over the patch fields only, then `PATCH
 /routines/:id`, then the cron reconciliation below. The list toggle is the same
@@ -254,10 +255,10 @@ the same way on the way in, so a stored `UTC` and an unset draft are the same
 schedule and must not churn the trigger.
 
 Cron emptiness is decided on the trimmed expression, and the trimmed string is
-what is sent (AC-002.14). Three live sites disagree today:
-`create-routine-dialog.tsx`'s step gate trims, `routines-content.tsx`'s arm step
-gates on raw truthiness, and `syncCronTrigger` trims the gate but transmits
-`draft.cronExpression` untrimmed. That disagreement is invisible while the key
+what is sent (AC-002.14). `create-routine-dialog.tsx`'s step gate and
+`routines-content.tsx`'s arm step both trim; `syncCronTrigger` trims the gate
+but transmits `draft.cronExpression` untrimmed. That disagreement is invisible
+while the key
 is dropped and observable once it transmits: `"   "` becomes a silent no-op on
 one path and a server 400 toast on another, and an untrimmed stored expression
 compares unequal to the trimmed draft on every later save (AC-002.4). No stored
@@ -307,20 +308,20 @@ same API functions, so all three get model shape with no per-caller unwrap.
   server owns cron validity.
 - `listRoutineTriggers` already has a per-routine `.catch` returning an empty
   list. That stays: one routine's trigger fetch failing must not blank the list.
-- The create-routine flow is two calls. A trigger failure after a successful
-  routine create leaves an unscheduled routine, reported rather than undone
-  (AC-002.10). The same split applies to the detail save (AC-002.9).
+- The create-routine flow is one request: the routine and its optional trigger
+  commit together, so a rejected trigger leaves no routine behind (AC-002.10).
+  The detail save keeps its two-call split (AC-002.9).
 - The four partial-failure paths each have a named observable, because
   "surface the error" is not one. A rejected replacement create (AC-002.6) and
-  a rejected create-flow trigger (AC-002.10) show the server's message, and
-  AC-002.10 also closes the dialog and refreshes the list rather than inviting a
-  second create. A failed delete (AC-002.7) and a failed trigger step after a committed routine
-  update (AC-002.9) both re-list first and report what that list shows. None of
-  the four shows a success toast.
-- AC-002.7, AC-002.9 and AC-002.10 need copy that does not exist today: each
-  path is `toast.error(err.message)` now, and the server's message cannot say
-  which half of a two-call flow succeeded. That is new `office`-namespace copy,
-  so it carries the five-locale obligation (`pt-pt`, `zh-cn`, `zh-hk`, `zh-tw`
+  a rejected create-flow trigger (AC-002.10) show the server's message;
+  AC-002.10 keeps the dialog open with the entered values and refreshes
+  nothing. A failed delete (AC-002.7) and a failed trigger step after a
+  committed routine update (AC-002.9) both re-list first and report what that
+  list shows. None of the four shows a success toast.
+- AC-002.7 and AC-002.9 need copy that does not exist today: each path is
+  `toast.error(err.message)` now, and the server's message cannot say which half
+  of a two-call flow succeeded. That is new `office`-namespace copy, so it
+  carries the five-locale obligation (`pt-pt`, `zh-cn`, `zh-hk`, `zh-tw`
   alongside English, `pnpm run i18n:zh-hant` for the Traditional pair) and the
   new-code ratchet enforces it. AC-002.12 states it so the build does not meet
   it as a surprise.
@@ -427,8 +428,8 @@ shape for:
   that also fails reports the state as unknown (AC-002.7)
 - a routine update that succeeds followed by a failing trigger step reports both
   halves and shows no success toast (AC-002.9)
-- a create-flow trigger failure closes the dialog, refreshes the list, and
-  reports the routine as created without a schedule (AC-002.10)
+- a create-flow trigger failure is one rejected request that keeps the dialog
+  open, reports the server's message, and refreshes nothing (AC-002.10)
 - reconciliation renders the re-listed triggers, not a spliced array (AC-002.11)
 - a whitespace-only expression arms nothing in the create flow and issues
   neither create nor delete on the detail save (AC-002.14)

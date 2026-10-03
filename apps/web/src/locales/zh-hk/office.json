@@ -722,7 +722,6 @@
   "routeOutcomeSkippedUserAction": "已跳過（用戶操作）",
   "routineActivated": "例行程序已激活",
   "routineCreated": "例行程序已建立",
-  "routineCreatedWithoutSchedule": "例行程序已建立，但未設定計劃：{{error}}",
   "routineDeleted": "例行程序已刪除",
   "routineFired": "例行程序已觸發",
   "routineNotFiring": "無法執行：例行程序狀態為 {{status}}",

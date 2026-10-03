@@ -722,7 +722,6 @@
   "routeOutcomeSkippedUserAction": "사용자 조치로 건너뜀",
   "routineActivated": "루틴을 활성화했습니다",
   "routineCreated": "루틴을 만들었습니다",
-  "routineCreatedWithoutSchedule": "루틴이 일정 없이 생성되었습니다: {{error}}",
   "routineDeleted": "루틴을 삭제했습니다",
   "routineFired": "루틴이 실행되었습니다",
   "routineNotFiring": "실행할 수 없음: 루틴 상태가 {{status}}",

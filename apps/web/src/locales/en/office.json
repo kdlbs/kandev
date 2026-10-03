@@ -722,7 +722,6 @@
   "routeOutcomeSkippedUserAction": "skipped user action",
   "routineActivated": "Routine activated",
   "routineCreated": "Routine created",
-  "routineCreatedWithoutSchedule": "The routine was created without a schedule: {{error}}",
   "routineDeleted": "Routine deleted",
   "routineFired": "Routine fired",
   "routineNotFiring": "Cannot run: routine status is {{status}}",

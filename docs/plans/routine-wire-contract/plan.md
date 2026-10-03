@@ -6,8 +6,10 @@ requirements:
   - REQ-OFFICE-ROUTINE-WIRE-002
   - REQ-OFFICE-ROUTINE-WIRE-003
   - REQ-OFFICE-ROUTINE-WIRE-004
+  - REQ-OFFICE-SCHEDULER-001
 system_design:
   - ../../specs/office/system-design/routine-wire-contract.md
+  - ../../specs/office/system-design/scheduler-01.md
 ---
 
 # Implementation plan: Office routine wire contract (camelCase/snake_case adapter)
@@ -75,6 +77,7 @@ in the system design's Testing section.
 ## Implementation waves and parallel candidates
 
 - [x] [Task 01: camelCase/snake_case adapter and cron-reconcile control flow](task-01-wire-adapter.md) (`done`) — REQ-001, REQ-002, REQ-003, REQ-004
+- [x] [Task 02: embedded tzdata and atomic routine + trigger create](task-02-tzdata-atomic-create.md) (`done`) — REQ-001, REQ-002, REQ-OFFICE-SCHEDULER-001
 
 Single wave: the request builder, response adapter, and the UI components
 that consume them all change together behind one contract, so there is no

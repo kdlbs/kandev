@@ -863,7 +863,7 @@ jobs:
       # every platform.
       - name: Test windows-sensitive packages
         if: matrix.suite == 'native'
-        run: go test -race -v -json -timeout 25m ./internal/agent/runtime/agentctl/launcher/... ./internal/common/ptyexec/... ./internal/backendapp/ownershiplock/... ./internal/system/storage/workspaces/...
+        run: go test -race -v -json -timeout 25m ./internal/agent/runtime/agentctl/launcher/... ./internal/common/ptyexec/... ./internal/backendapp/ownershiplock/... ./internal/system/storage/workspaces/... ./cmd/kandev/...
 
       # Keep this targeted: these packages have broader tests, while these
       # native tests verify hidden consoles retain handles for descendants.
