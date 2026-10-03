@@ -38,7 +38,7 @@ Add `repository_branch_policies`:
 | `description` | Optional text, at most 500 characters. |
 | `base_branch` | Safe Git ref used as task base. |
 | `branch_template` | Template validated and rendered by `internal/worktree`. |
-| `pull_request_target` | Safe Git ref; defaults to `base_branch` when omitted by a client. |
+| `pull_request_target` | Safe Git ref; omitted on create defaults to base, omitted on update preserves saved target, explicit blank resets to effective base. |
 | `created_at`, `updated_at` | UTC timestamps. |
 
 A unique index on `(repository_id, lower(name))` enforces name uniqueness. Lists
@@ -65,7 +65,7 @@ atomic Gitflow-starter operations. The service owns:
 
 - workspace/repository authorization;
 - normalized validation and case-insensitive conflicts;
-- defaulting an omitted pull-request target to the normalized base branch;
+- defaulting the target on creation and preserving update field presence;
 - branch-template validation through the existing renderer;
 - transactions and structured mutation logs.
 
@@ -75,6 +75,63 @@ checks that the repository has no policies inside the same transaction, and
 inserts all four policies or none. The branch can still disappear after this
 check, so task creation and later runtime operations retain their existing
 missing-branch recovery behavior.
+
+### Atomic partial policy updates
+
+The patch repair implements AC-WORKSPACES-BRANCH-POLICIES-001.7 through
+001.10. `UpdateRepositoryBranchPolicyRequest` and the REST/WS update bodies
+already carry five optional string pointers. Keep those pointers through a
+proposed `models.RepositoryBranchPolicyPatch` and a policy-specific
+`PatchRepositoryBranchPolicy` repository operation. JSON null and omission both
+decode to nil today; neither introduces a new reset operation. Empty description
+clears the description. Empty target explicitly requests the existing reset.
+
+`Service.UpdateRepositoryBranchPolicy` retains workspace membership and writable
+repository checks. Its initial read establishes authorized repository identity,
+not a candidate for persistence. The patch operation receives that repository
+ID and rejects any missing or mismatched canonical row. The concrete provider
+returns `sqlite.Repository` directly; there is no branch-policy forwarding layer.
+
+Use one transaction for the canonical read, patch, normalization, uniqueness
+check, update and result. PostgreSQL first takes
+`pg_advisory_xact_lock(hashtextextended($1, 0))` using the dedicated namespace
+`repository-branch-policy:` plus policy ID, before any canonical read or update;
+then lock the policy row for update. The row lock also coordinates with retained
+full writes and deletes that do not take the advisory lock. SQLite first obtains
+its writer lock by an identity-scoped no-op update (`SET id = id`), before reading
+the row. The single connection per writer pool alone does not coordinate
+independent pools. The scoped lock/read/write includes both policy ID and
+authorized repository ID. Use transaction-bound queries, never the reader pool.
+
+Overlay supplied pointers on the locked current row and invoke the existing
+service normalizer on that complete effective policy. A single policy-specific
+pure normalization function parameter keeps ref/template/length validation in
+the service without importing service into storage or moving worktree-dependent
+validation into models. It performs no database, event or other external work;
+this is not a generic mutation callback framework. Nil target retains the saved
+target; a supplied blank target defaults to the overlaid current base. Creation
+continues to use the same normalizer's original default behavior. Make update
+normalization presence-aware: only a supplied blank target invokes reset
+on update. An omitted legacy blank target must not silently reset; complete
+validation rejects an invalid effective row without writing.
+
+Check normalized name uniqueness inside the transaction, excluding this policy,
+and retain the existing case-insensitive database constraint for competing policy
+identities and creates. Translate both observed and constraint conflicts to the
+existing service conflict error. An advisory lock on one policy cannot serialize
+all repository names. Write the normalized locked candidate, preserve identity
+and creation time, check affected rows, and capture the full result inside the
+transaction. Return it only after commit succeeds. Rollback includes the initial
+SQLite lock write and timestamp on any failure. Keep the existing intentional
+whole-set `UpdateRepositoryBranchPolicy` store method compatible for direct
+callers; the partial service path must not forward a stale full row to it.
+
+This follows existing transaction/locking patterns in `message_agent_plan.go`
+and the presence boundary of `PatchRepositorySet`; branch-policy defaults and
+whole-policy validation require a current row. No schema change, ETag, global
+revision, service mutex, general concurrency framework or new public endpoint
+is needed. Create, delete and the Gitflow initializer retain their current
+semantics. The existing zero-affected-row guard already handles deletion.
 
 ### API and events
 
@@ -90,6 +147,13 @@ REST and WebSocket transports call the same service methods. Semantic
 `repository_branch_policy.created`, `.updated`, and `.deleted` events keep
 clients synchronized. The active-workspace boot payload includes policies
 grouped by repository so task creation does not add a first-open request.
+
+Responses and `repository_branch_policy.updated` publish the patch transaction's
+complete normalized result after commit, including its timestamps. Do not
+publish the pre-transaction candidate or reread through the reader pool to form
+the result. This is an observation of this mutation's committed row, not a
+promise that it remains the latest row when delivered or that independent
+publishers deliver events in commit order. Failed mutations publish no success.
 
 Conflicts return `409`; invalid refs, templates, or Gitflow pairs return a
 validation error; an inaccessible or cross-repository policy is indistinguishable
@@ -128,11 +192,24 @@ policy. Repeated record-and-launch wrapping replaces the same hidden target
 block, so the agent receives one copy. Agent skills and shell environments do
 not receive a separate target value.
 
+For AC-WORKSPACES-BRANCH-POLICIES-004.7, task creation after the patch calls finish
+resolves the complete committed tuple through `validateTaskRepositoryPolicies`
+in `service_task_branch_policy_snapshot.go`. Verify via actual `CreateTask` and
+persisted `TaskRepository` rows, including the pre-existing row's preservation;
+checking only resolver inputs is insufficient. This repair does not redefine
+task creation that overlaps a policy mutation or rewrite snapshot consumers.
+
 ## Frontend state and transport
 
 Add a repository-policy API domain and a `repositoryBranchPolicies` store slice
 keyed by repository ID. Boot hydration and semantic events update the same
 slice. Store mutations occur only after API success.
+
+The existing `toBranchPolicyPayload` preserves undefined-field omission, while
+the settings editor deliberately sends complete drafts. Retain both contracts.
+This backend state repair changes no rendered surface, mobile composition,
+touch behavior or localized copy; registered REST/WS tests and real task
+persistence cover the changed outcome without browser tests.
 
 Task repository draft rows add a tagged selection:
 
@@ -244,6 +321,21 @@ is unchanged and policies are opt-in.
   tagged selector options, local fork transition, and submit payload.
 - Desktop and `mobile-chrome` Playwright tests cover collapsed settings, help
   access, Gitflow seeding, policy selection, and visible post-selection state.
+
+The patch repair adds deterministic real-service/SQLite regressions with
+independent services and stores, joined context-bound write barriers, both
+metadata/workflow orders, a bounded name/template/target mix, omitted versus
+blank target defaults, invalid effective-policy rollback, same-field ordering,
+and delete/authorization/read-only controls. Registered REST PATCH and WS
+dispatch each prove one omitted-field request, response and event against a
+real database. Actual task creation proves both new persisted workflow values
+and immutable old snapshots. Store tests cover SQLite atomicity and real
+PostgreSQL independent physical connections, observed advisory-lock waits,
+current-base defaults, row-lock interaction, rollback and uniqueness. PostgreSQL
+tests remain environment-gated; an absent DSN is a skip, and hosted evidence must
+show the new behavioral test names executed, not merely database boot.
+
+Repair delivery: [Preserve branch-policy workflow edits](../../../plans/branch-policy-patch/plan.md).
 
 ## Requirement traceability
 

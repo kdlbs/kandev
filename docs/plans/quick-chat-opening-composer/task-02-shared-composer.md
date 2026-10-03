@@ -232,3 +232,10 @@ reproduced the original 12px imbalance before the fix.
 
 Validation passed: desktop opening/retry E2Es (2), phone opening E2E (1), fresh
 Vite E2E build, focused ESLint without warnings, and diff whitespace checks.
+
+### Merge conflict resolution
+
+Merged main at `c827368313266d67c32e9719e68d61b4d19cfdf7`. The shared composer
+retains main's task-created callback registration and this branch's Quick Chat
+surface identity. Focused composer/callback tests passed (5 files, 92 tests),
+as did web typecheck, focused ESLint, staged Go formatting and whitespace checks.

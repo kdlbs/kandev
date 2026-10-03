@@ -2,7 +2,7 @@
 status: active
 system: platform
 created: 2026-07-19
-updated: 2026-10-02
+updated: 2026-10-03
 owners:
   - kandev
 ---
@@ -53,7 +53,7 @@ A failed live source still cannot authorize an unmarked persisted fallback.
 
 - **AC-PLATFORM-WORKSPACE-GIT-STATUS-001.19:** Every eligible changed path and its staged or unstaged classification appears before slow diff or branch-total work completes. Mixed facets, rename origins, symlink identity, and submodule identity remain correct.
 - **AC-PLATFORM-WORKSPACE-GIT-STATUS-001.20:** If a requesting client times out or disconnects, an accepted shared refresh result remains available for later reads and existing subscribers. Recovery does not require another workspace mutation.
-- **AC-PLATFORM-WORKSPACE-GIT-STATUS-001.21:** Each tracker lifetime has a unique opaque source identity. Revisions order results only within that identity; capture timestamps order eligible sources across identities. Older observations cannot replace newer accepted state, and diff data cannot attach to a different checkout, index, worktree state, repository, or comparison target.
+- **AC-PLATFORM-WORKSPACE-GIT-STATUS-001.21:** Each tracker lifetime has a unique opaque source identity. Revisions order results only within that identity; capture timestamps order eligible sources across identities. Older observations cannot replace newer accepted state, and diff data cannot attach to a different checkout, index, worktree state, repository, or comparison target. A details waiter accepts completed enrichment derived from its accepted basic observation even when enrichment advances the publication revision before the waiter joins; a superseding observation remains unavailable to that waiter.
 - **AC-PLATFORM-WORKSPACE-GIT-STATUS-001.22:** Fresh interactive file observations retain interactive admission independently of background observations. At most one enrichment job executes per repository tracker, with bounded replacement work and no duplicate job for an unchanged observation.
 - **AC-PLATFORM-WORKSPACE-GIT-STATUS-001.23:** Before a complete file snapshot arrives, Changes shows loading or unavailable status. Only a successful complete empty snapshot permits the normal clean empty state.
 - **AC-PLATFORM-WORKSPACE-GIT-STATUS-001.24:** Dirty files remain visible while diff enrichment is pending or unavailable. Opening a pending diff shows its state. Missing diff content cannot close the panel or imply that the file was discarded.
@@ -81,8 +81,9 @@ A failed live source still cannot authorize an unmarked persisted fallback.
   Ready notifications shall cancel unnecessary retries.
   A same-state rerender shall not restart the retry delay or create another request.
 - **AC-PLATFORM-WORKSPACE-GIT-STATUS-001.42:** During an eligible workspace monitor tick, every already-dirty tracked path whose filesystem modification time changed shall trigger the existing repository-scoped file refresh and background Git-status refresh attempt. Detection shall preserve exact supported filenames, including leading or trailing whitespace, tabs, newlines, quoting characters, and Unicode, independently of Git path-quoting configuration. An unchanged monitor observation shall not trigger another monitor refresh. Existing admission, cadence, deadlines, and bounded subscriber delivery remain in force; writes preserving the observed modification time are outside this polling guarantee.
-
-
+- **AC-PLATFORM-WORKSPACE-GIT-STATUS-001.43:** When agent startup advances on the same current execution and agentctl client, an attached workspace stream shall continue forwarding accepted Git snapshots.
+  Promotion from workspace-only operation shall not require another foreground refresh or stream reconnection to deliver later membership and detail updates.
+  Replaced executions and clients shall retain the rejection required by criterion `.27`.
 
 ## Out of scope
 
@@ -101,3 +102,5 @@ The [delayed recovery design](../system-design/changes-refresh-recovery.md) and
 [follow-up plan](../../../plans/changes-loading-feedback/plan.md) own automatic recovery delivery.
 The [dirty-path monitor design](../system-design/workspace-dirty-path-monitor.md) and
 [repair package](../../../plans/workspace-dirty-path-monitor/plan.md) own exact-path polling refresh.
+The [workspace stream continuity design](../system-design/workspace-stream-continuity.md)
+defines the callback lifetime required by criterion `.43`.

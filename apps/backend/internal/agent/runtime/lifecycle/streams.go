@@ -398,22 +398,19 @@ func (sm *StreamManager) connectMCPStream(execution *AgentExecution) {
 	}
 }
 
-// buildWorkspaceCallbacks creates callbacks scoped to the startup generation
-// and optional agentctl client that owns the workspace stream.
+// buildWorkspaceCallbacks creates callbacks scoped to the agentctl client that
+// owns the workspace stream. Their lifetime follows that stream across ACP startup.
 func (sm *StreamManager) buildWorkspaceCallbacks(execution *AgentExecution, streamClient ...*agentctl.Client) agentctl.WorkspaceStreamCallbacks {
-	startupGeneration := execution.StartupAttemptGeneration()
 	var sourceClient *agentctl.Client
 	if len(streamClient) > 0 {
 		sourceClient = streamClient[0]
 	}
 	forward := func(callback func()) {
-		execution.withStartupAttempt(startupGeneration, func(string) {
-			if sourceClient == nil {
-				callback()
-				return
-			}
-			execution.withAgentCtlClient(sourceClient, callback)
-		})
+		if sourceClient == nil {
+			callback()
+			return
+		}
+		execution.withAgentCtlClient(sourceClient, callback)
 	}
 	return agentctl.WorkspaceStreamCallbacks{
 		OnShellOutput: func(data string) {

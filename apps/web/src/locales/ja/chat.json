@@ -164,5 +164,18 @@
   "emptyTurnKnownCommand": "`/{{command}}` は実行されましたが、出力はありませんでした。{{hint}}",
   "emptyTurnNoOutput": "エージェントは出力を生成せずに終了しました。",
   "emptyTurnResendHint": "先頭のスラッシュなしで、通常のメッセージとしてリクエストを再送信してください。",
-  "emptyTurnUnknownCommand": "`/{{command}}` はこのエージェントが認識するコマンドではないため、出力はありませんでした。{{hint}}"
+  "emptyTurnUnknownCommand": "`/{{command}}` はこのエージェントが認識するコマンドではないため、出力はありませんでした。{{hint}}",
+  "providerManualRecoveryBody": "エージェントの処理が中断されました。セッションを再開して再試行するか、新しいセッションを開始してください。",
+  "providerRecoveryExhaustedBody_one": "{{count}} 回の自動再試行後に接続が失敗しました。再開するか、新しいセッションを開始してください。",
+  "providerRecoveryExhaustedBody_other": "{{count}} 回の自動再試行後に接続が失敗しました。再開するか、新しいセッションを開始してください。",
+  "providerRecoveryCancelledBody": "自動復旧がキャンセルされました。再開するか、新しいセッションを開始してください。",
+  "continuationIn": "{{countdown}} 後に続行します。",
+  "continuationPhase_waiting": "再接続を待っています。",
+  "continuationPhase_reconnecting": "再接続中...",
+  "continuationPhase_continuing": "前のリクエストを続行中...",
+  "continuationHistoryPreserved": "前の会話は保持されます。",
+  "providerRecoveryDisabledBody": "自動続行は無効です。再開して再試行するか、新しいセッションを開始してください。",
+  "providerRecoveryUnsafeBody": "保留中の操作があるか、結果が不明なため、自動続行を停止しました。再開する前に作業を確認してください。",
+  "providerRecoveryUnsupportedBody": "このエージェントは中断された会話を自動復元できません。再開して再試行するか、新しいセッションを開始してください。",
+  "providerRecoveryEvidenceBody": "会話の識別情報または安全性の情報が不足しているため、自動続行を停止しました。再開する前に作業を確認してください。"
 }

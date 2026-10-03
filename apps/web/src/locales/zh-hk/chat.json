@@ -164,5 +164,18 @@
   "emptyTurnKnownCommand": "`/{{command}}` 已執行，但沒有產生任何輸出。{{hint}}",
   "emptyTurnNoOutput": "代理程式已結束，但沒有產生任何輸出。",
   "emptyTurnResendHint": "請嘗試作為普通訊息重新傳送你的請求，不要帶開頭的斜槓。",
-  "emptyTurnUnknownCommand": "`/{{command}}` 不是該代理程式識別的命令，因此沒有返回任何內容。{{hint}}"
+  "emptyTurnUnknownCommand": "`/{{command}}` 不是該代理程式識別的命令，因此沒有返回任何內容。{{hint}}",
+  "providerManualRecoveryBody": "代理執行中斷。恢復工作階段以重試，或開始新工作階段。",
+  "providerRecoveryExhaustedBody_one": "連接在 {{count}} 次自動重試後失敗。請恢復或新建工作階段以繼續。",
+  "providerRecoveryExhaustedBody_other": "連接在 {{count}} 次自動重試後失敗。請恢復或新建工作階段以繼續。",
+  "providerRecoveryCancelledBody": "自動恢復已取消。請恢復或新建工作階段以繼續。",
+  "continuationIn": "將在 {{countdown}} 後繼續。",
+  "continuationPhase_waiting": "等待重新連接。",
+  "continuationPhase_reconnecting": "正在重新連接...",
+  "continuationPhase_continuing": "正在繼續之前的請求...",
+  "continuationHistoryPreserved": "之前的對話會保留。",
+  "providerRecoveryDisabledBody": "自動繼續已停用。恢復以重試，或啓動新工作階段。",
+  "providerRecoveryUnsafeBody": "自動繼續已停止，因為某項操作尚未完成或其結果不確定。請先檢查工作，再恢復工作階段。",
+  "providerRecoveryUnsupportedBody": "此代理無法自動恢復中斷的對話。恢復以重試，或啓動新工作階段。",
+  "providerRecoveryEvidenceBody": "自動繼續已停止，因為缺少對話標識或安全資訊。請先檢查工作，再恢復工作階段。"
 }

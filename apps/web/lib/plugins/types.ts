@@ -23,11 +23,18 @@ export type {
   IntegrationSettingsActionProps,
   IntegrationSettingsActionSurface,
   ChatTopBarSlotProps,
+  PluginComposerCapability,
+  PluginComposerSlotProps,
+  PluginComposerSubmitResult,
+  PluginComposerSurface,
   PluginContextApi,
   PluginHostRepository,
   MainTopBarSlotProps,
   PluginNavSection,
+  PluginTaskCreatedHandler,
+  PluginTaskCreatedIdentity,
   PluginUIApi,
+  RegisterPluginTaskCreatedHandler,
 } from "@kandev/plugin-sdk";
 export type { PluginIcon } from "@kandev/plugin-sdk";
 
@@ -327,32 +334,6 @@ export type ChatSubmitDecorationSlotProps = {
   /** True when plan mode is on (the button sends a plan request). */
   planModeEnabled: boolean;
 };
-
-export type PluginComposerSurface = "task-chat" | "quick-chat" | "task-create" | "new-session";
-
-export type PluginComposerSubmitResult =
-  | { status: "submitted" }
-  | { status: "blocked"; reason?: string }
-  | { status: "unavailable" };
-
-export interface PluginComposerCapability {
-  insertText(text: string): { status: "inserted" | "ignored" | "unavailable" };
-  focus(): { status: "focused" | "unavailable" };
-  submit(): Promise<PluginComposerSubmitResult>;
-}
-
-export interface PluginComposerSlotProps {
-  surface: PluginComposerSurface;
-  presentation: PluginPresentation;
-  taskId: string | null;
-  taskTitle?: string;
-  activeSessionId: string | null;
-  sessionIds: string[];
-  disabled: boolean;
-  submittable: boolean;
-  disabledReason?: string;
-  composer: PluginComposerCapability;
-}
 
 /** Props passed to a `TaskPanelRegistration.Component`. */
 export type PluginTaskPanelProps = PluginSDK.PluginTaskPanelProps;

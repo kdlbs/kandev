@@ -164,5 +164,18 @@
   "emptyTurnKnownCommand": "`/{{command}}` correu mas não produziu qualquer resultado. {{hint}}",
   "emptyTurnNoOutput": "O agente terminou sem produzir qualquer resultado.",
   "emptyTurnResendHint": "Experimente reenviar o seu pedido como mensagem normal, sem a barra inicial.",
-  "emptyTurnUnknownCommand": "`/{{command}}` não é um comando que este agente reconheça, por isso não devolveu nada. {{hint}}"
+  "emptyTurnUnknownCommand": "`/{{command}}` não é um comando que este agente reconheça, por isso não devolveu nada. {{hint}}",
+  "providerManualRecoveryBody": "O agente foi interrompido. Retome a sessão para tentar novamente ou inicie uma nova sessão.",
+  "providerRecoveryExhaustedBody_one": "A ligação falhou após {{count}} tentativa automática. Retome ou inicie uma nova sessão para continuar.",
+  "providerRecoveryExhaustedBody_other": "A ligação falhou após {{count}} tentativas automáticas. Retome ou inicie uma nova sessão para continuar.",
+  "providerRecoveryCancelledBody": "A recuperação automática foi cancelada. Retome ou inicie uma nova sessão para continuar.",
+  "continuationIn": "A continuar em {{countdown}}.",
+  "continuationPhase_waiting": "A aguardar a reconexão.",
+  "continuationPhase_reconnecting": "A restabelecer a ligação...",
+  "continuationPhase_continuing": "A continuar o pedido anterior...",
+  "continuationHistoryPreserved": "A conversa anterior é preservada.",
+  "providerRecoveryDisabledBody": "A continuação automática está desativada. Retome para tentar novamente ou inicie uma nova sessão.",
+  "providerRecoveryUnsafeBody": "A continuação automática parou porque há uma ação pendente ou o seu resultado é incerto. Reveja o trabalho antes de retomar.",
+  "providerRecoveryUnsupportedBody": "Este agente não consegue restaurar automaticamente a conversa interrompida. Retome para tentar novamente ou inicie uma nova sessão.",
+  "providerRecoveryEvidenceBody": "A continuação automática parou porque falta a identidade da conversa ou informação de segurança. Reveja o trabalho antes de retomar."
 }

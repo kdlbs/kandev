@@ -746,6 +746,9 @@ type RepositorySetRepository interface {
 	// non-nil, replaces its whole membership in the same transaction so the two
 	// cannot land apart. A nil repositoryItems leaves membership untouched.
 	UpdateRepositorySet(ctx context.Context, set *models.RepositorySet, repositoryItems *[]models.RepositorySetItem) error
+	// PatchRepositorySet writes only supplied metadata and membership fields in
+	// one transaction. Omitted fields retain their current persisted values.
+	PatchRepositorySet(ctx context.Context, id string, patch *models.RepositorySetPatch) error
 	DeleteRepositorySet(ctx context.Context, id string) (bool, error)
 }
 
@@ -758,6 +761,9 @@ type RepositoryBranchPolicyRepository interface {
 	ListRepositoryBranchPolicies(ctx context.Context, repositoryID string) ([]*models.RepositoryBranchPolicy, error)
 	ListRepositoryBranchPoliciesByWorkspace(ctx context.Context, workspaceID string) ([]*models.RepositoryBranchPolicy, error)
 	UpdateRepositoryBranchPolicy(ctx context.Context, policy *models.RepositoryBranchPolicy) error
+	PatchRepositoryBranchPolicy(ctx context.Context, id, repositoryID string, patch *models.RepositoryBranchPolicyPatch,
+		normalize func(*models.RepositoryBranchPolicy) (*models.RepositoryBranchPolicy, error),
+	) (*models.RepositoryBranchPolicy, error)
 	DeleteRepositoryBranchPolicy(ctx context.Context, id string) (bool, error)
 	CreateRepositoryBranchPoliciesIfEmpty(ctx context.Context, repositoryID string, policies []*models.RepositoryBranchPolicy) error
 }

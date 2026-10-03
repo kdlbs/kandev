@@ -199,6 +199,23 @@ var registrations = []runtimeFlagRegistration{
 	},
 	{
 		definition: RuntimeFlagDefinition{
+			Key:             "features.providerInterruptionContinuation",
+			EnvVar:          "KANDEV_FEATURES_PROVIDER_INTERRUPTION_CONTINUATION",
+			Kind:            KindFeature,
+			Label:           "Interrupted conversation continuation",
+			Description:     "Restores supported interrupted conversations and continues safe read-only work.",
+			Stability:       StabilityExperimental,
+			RiskLevel:       RiskHigh,
+			RiskDescription: "Native restoration and tool outcomes must be verified. Uncertain work requires manual recovery.",
+			RestartRequired: true,
+			Mutable:         true,
+		},
+		read:  func(cfg *config.Config) bool { return cfg.Features.ProviderInterruptionContinuation },
+		apply: func(cfg *config.Config, value bool) { cfg.Features.ProviderInterruptionContinuation = value },
+	},
+
+	{
+		definition: RuntimeFlagDefinition{
 			Key:             "features.agentBackgroundWork",
 			EnvVar:          "KANDEV_FEATURES_AGENT_BACKGROUND_WORK",
 			Kind:            KindFeature,

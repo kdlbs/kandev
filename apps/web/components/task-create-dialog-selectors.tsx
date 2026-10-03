@@ -1,7 +1,16 @@
 /* eslint-disable max-lines -- groups all create-dialog selector subcomponents; splitting per-selector files is a separate refactor. */
 "use client";
 
-import { useEffect, useLayoutEffect, useRef, useState, memo, useCallback, useMemo } from "react";
+import {
+  useContext,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  memo,
+  useCallback,
+  useMemo,
+} from "react";
 import { Textarea } from "@kandev/ui/textarea";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { IconPaperclip } from "@tabler/icons-react";
@@ -68,6 +77,7 @@ import { ApiError } from "@/lib/api/client";
 import { useTranslation } from "react-i18next";
 import { t } from "@/lib/i18n";
 import { PluginSlot } from "@/components/plugins/plugin-slot";
+import { TaskCreateDialogTaskCreatedContext } from "./task-create-dialog-task-created";
 import {
   composerIdentity,
   composerInsertionText,
@@ -934,6 +944,7 @@ function useCreationComposerPluginActions(args: {
   submit?: () => boolean | Promise<boolean>;
 }) {
   const { isMobile } = useResponsiveBreakpoint();
+  const registerTaskCreatedHandler = useContext(TaskCreateDialogTaskCreatedContext);
   const surface = getCreationComposerSurface(args);
   const composer = useStablePluginComposerCapability(
     {
@@ -985,6 +996,9 @@ function useCreationComposerPluginActions(args: {
         disabled: args.disabled,
         submittable: !args.disabled && args.description.trim().length > 0,
         composer,
+        ...(!args.isSessionMode && registerTaskCreatedHandler
+          ? { registerTaskCreatedHandler }
+          : {}),
       }}
       actionSurface={{ surface: "composer", presentation: isMobile ? "mobile" : "desktop" }}
     />

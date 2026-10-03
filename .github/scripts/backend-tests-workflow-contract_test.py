@@ -55,6 +55,7 @@ class BackendTestsWorkflowContractTest(unittest.TestCase):
         _, marker, windows_job = self.workflow.partition("  test-windows:\n")
         self.assertTrue(marker)
         self.assertIn("timeout-minutes: 40", windows_job)
+        self.assertIn("-timeout 25m", windows_job)
 
     def test_windows_suites_run_independently_without_fail_fast(self) -> None:
         windows_job = self.workflow.partition("  test-windows:\n")[2]

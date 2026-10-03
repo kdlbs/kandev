@@ -57,6 +57,12 @@ The structured `reason` is `preparation_failed` or `invalid_output`. When presen
 
 The lifecycle regression suite covers cache selection, environment composition, promotion, coalescing, recovery metadata, cancellation, warning fields, and provider call counts. Backend integration tests cover initial launch, Resume, Start fresh, non-cache failure, and cancellation through real recovery dispatch. Provider and quarantine tests retain sentinel and symlink safety controls. Exact commands and outcomes are recorded in the [implementation plan](../../../plans/managed-go-cache-launch-fallback/plan.md) and its work orders.
 
+## Current cache cleanup policy
+
+The current [Go cache reclamation design](go-cache-reclamation.md) adds optional busy cleanup and
+direct deletion. It preserves this fallback contract without adding consumer leases or changing
+execution recovery.
+
 ## Related decisions
 
 - [Optional managed Go cache and strict maintenance safety](../../../decisions/2026-10-01-optional-managed-go-cache.md)

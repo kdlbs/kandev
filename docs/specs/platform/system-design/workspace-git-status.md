@@ -4,7 +4,7 @@ system: platform
 requirements:
   - REQ-PLATFORM-WORKSPACE-GIT-STATUS-001
 created: 2026-07-19
-updated: 2026-10-02
+updated: 2026-10-03
 owners:
   - kandev
 ---
@@ -178,6 +178,7 @@ Keep these consumers explicit. Add `details=wait` to the existing status routes 
 The runtime client methods used by these consumers request that mode. Foreground Changes requests do not.
 
 The wait joins the current fingerprint's bounded enrichment completion, without another job or caller-owned publication.
+Record each ready result's basic source revision. Under the enrichment lock, accept that completion for the observed epoch/revision before selecting a job.
 If a newer fingerprint replaces that job, return a superseded/unavailable result instead of unrelated details.
 Caller cancellation ends only its wait. Tracker cancellation still drains the worker.
 If detail generation fails, these consumers receive an error or explicit unavailable result under their existing retry policy.
@@ -225,8 +226,9 @@ The implementation must reject all observable identity/content changes across it
 Preserving timestamps alone cannot defeat content validation for enriched files.
 Continuously mutating files can remain pending or unavailable. They must not receive unrelated old details.
 
-Runtime delivery captures immutable execution identity, environment binding, workspace identity, and stream generation.
-Revalidate these before publishing a delayed callback, initial-subscribe read, or HTTP result. Workspace callbacks are checked against the execution currently registered for their session.
+Before publishing callbacks or reads, revalidate execution, environment, workspace, and stream identity.
+Reject callbacks from executions no longer current for their session.
+See [stream continuity](workspace-stream-continuity.md) for ACP callback lifetime.
 After root promotion, the current environment root or active `TaskEnvironmentRepo.WorktreePath` may authorize an existing execution's exact working directory. Revalidate the inventory after async refresh; reject removed paths.
 Tracker epochs from different sibling executions are not numerically ordered.
 Preserve requested-session-first source probing. Eligible siblings remain valid sources for their common environment.

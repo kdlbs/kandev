@@ -217,6 +217,14 @@ func (a *Adapter) sendPrompt(
 		// asynchronously. Drain it before returning the error so a diagnostic
 		// agent_message_chunk cannot be overtaken by the terminal failure event.
 		a.syncNotifQueue()
+		if a.dialect.continuationError != nil && a.dialect.continuationError(err) {
+			if snapshot := a.continuationSafetySnapshot(turn); snapshot != nil {
+				a.cancelAsyncTurnComplete(sessionID)
+				a.sendUpdate(AgentEvent{Type: streams.EventTypeError, SessionID: sessionID,
+					PromptGeneration: promptGeneration, Error: "peer disconnected before response", ContinuationSafety: snapshot})
+				return nil
+			}
+		}
 		normalizedErr := normalizePromptErrorAfterCancel(traceCtx, err)
 		if a.agentID == codexAgentID &&
 			!errors.Is(normalizedErr, errPromptAbandonedAfterCancel) &&
@@ -245,6 +253,7 @@ func (a *Adapter) sendPrompt(
 
 	// Cancel any tool calls still in-flight (e.g. a denied permission leaves the
 	// tool_call without a terminal status update from the agent).
+	continuationSafety := a.continuationSafetySnapshot(turn)
 	a.cancelPromptEndToolCalls(sessionID)
 
 	// Mark any tracked Monitors as ended. They live longer than a typical tool
@@ -267,10 +276,11 @@ func (a *Adapter) sendPrompt(
 			zap.Uint64("prompt_generation", promptGeneration))
 		a.cancelAsyncTurnComplete(sessionID)
 		a.sendUpdate(AgentEvent{
-			Type:             streams.EventTypeError,
-			SessionID:        sessionID,
-			PromptGeneration: promptGeneration,
-			Error:            safeMessage,
+			Type:               streams.EventTypeError,
+			SessionID:          sessionID,
+			PromptGeneration:   promptGeneration,
+			Error:              safeMessage,
+			ContinuationSafety: continuationSafety,
 			ProviderError: &streams.ProviderError{
 				Source:     streams.ProviderErrorSourceCursorACP,
 				ProviderID: acpcompat.CursorAgentID,

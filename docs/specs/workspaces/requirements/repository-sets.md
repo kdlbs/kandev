@@ -60,6 +60,19 @@ task.
   clients through the repository-set event stream.
 - **AC-WORKSPACES-REPOSITORY-SETS-001.8:** Set writes shall be atomic. A
   rejected name, member, order, or saved base shall not cause a partial write.
+- **AC-WORKSPACES-REPOSITORY-SETS-001.9:** HTTP PATCH and WebSocket update
+  requests shall change only supplied name, description, and membership fields.
+  Omitted fields shall retain their persisted values, including member order
+  and saved bases. A supplied empty description shall clear it; a supplied
+  empty name or membership list shall remain invalid.
+- **AC-WORKSPACES-REPOSITORY-SETS-001.10:** When concurrent successful updates
+  supply disjoint fields of the same set, the final persisted set shall retain
+  every supplied change, regardless of which request read the set first or
+  committed last. This shall hold across independent service instances.
+- **AC-WORKSPACES-REPOSITORY-SETS-001.11:** When concurrent successful updates
+  supply the same field, the last committed write to that field shall prevail.
+  A supplied membership list shall replace the complete ordered membership
+  and saved bases together.
 
 ### REQ-WORKSPACES-REPOSITORY-SETS-002: Saved base branches
 
@@ -144,6 +157,8 @@ do not select every branch for each task.
 - Existing create and update clients that send ordered `repository_ids` shall
   remain valid. Those members shall have no saved bases.
 - Deleting a set shall not change its repositories or tasks that used it.
+- Fully specified updates shall remain fully specified writes. The omission
+  contract shall not detect conflicts in stale drafts that supply all fields.
 
 ## Out of scope
 
@@ -152,8 +167,11 @@ do not select every branch for each task.
   executor profiles, or workflows in a set.
 - Remote-URL sources, folder sources, cross-workspace sets, and per-user sets.
 - Automatic repair of unavailable saved bases.
+- Conditional updates, optimistic conflict detection, and globally ordered
+  repository-set response or event revisions.
 
 ## Traceability
 
 - System design: [Repository sets](../system-design/repository-sets.md)
 - Implementation plan: [Repository set base branches](../../../plans/repository-set-base-branches/plan.md)
+- Repair plan: [Preserve concurrent repository-set patches](../../../plans/repository-set-concurrent-patches/plan.md)

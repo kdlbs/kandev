@@ -17,6 +17,7 @@ import type { TaskFormInputsHandle } from "./task-create-dialog-types";
 import type { TaskCreateLaunchPreview } from "./task-create-dialog-launch-preview";
 import type { PluginComposerSlotProps } from "@/lib/plugins/types";
 
+import { TaskCreateDialogTaskCreatedContext } from "./task-create-dialog-task-created";
 const TOAST_MESSAGE_TEST_ID = "toast-message";
 const LAUNCH_PREVIEW_TOGGLE_TEST_ID = "task-create-launch-preview-toggle";
 const DESCRIPTION_INPUT_TEST_ID = "task-description-input";
@@ -241,6 +242,41 @@ describe("TaskFormInputs plugin composer action — rendering", () => {
     expect(lastPluginSlotProps().surface).toBe("new-session");
   });
 
+  it("forwards task-created registration only from create-mode composer slots", () => {
+    const registerTaskCreatedHandler = vi.fn(() => () => undefined);
+    const createRefValue = createRef<TaskFormInputsHandle>();
+    render(
+      <TaskCreateDialogTaskCreatedContext.Provider value={registerTaskCreatedHandler}>
+        <TaskFormInputs
+          isSessionMode={false}
+          autoFocus={false}
+          initialDescription=""
+          onDescriptionChange={() => {}}
+          onKeyDown={() => {}}
+          descriptionValueRef={createRefValue}
+        />
+      </TaskCreateDialogTaskCreatedContext.Provider>,
+      { wrapper: Wrapper },
+    );
+    expect(lastPluginSlotProps().registerTaskCreatedHandler).toBe(registerTaskCreatedHandler);
+
+    pluginSlotCalls.length = 0;
+    const sessionRef = createRef<TaskFormInputsHandle>();
+    render(
+      <TaskCreateDialogTaskCreatedContext.Provider value={registerTaskCreatedHandler}>
+        <TaskFormInputs
+          isSessionMode
+          autoFocus={false}
+          initialDescription=""
+          onDescriptionChange={() => {}}
+          onKeyDown={() => {}}
+          descriptionValueRef={sessionRef}
+        />
+      </TaskCreateDialogTaskCreatedContext.Provider>,
+      { wrapper: Wrapper },
+    );
+    expect(lastPluginSlotProps().registerTaskCreatedHandler).toBeUndefined();
+  });
   it("reports the form's disabled state to the plugin", () => {
     const ref = createRef<TaskFormInputsHandle>();
     render(

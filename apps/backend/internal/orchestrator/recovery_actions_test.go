@@ -260,7 +260,7 @@ func TestCreateRecoveryStatusMessage_ResumeCorrupted(t *testing.T) {
 	}
 }
 
-func TestCreateRecoveryStatusMessage_TransientExhaustionUsesSafeReason(t *testing.T) {
+func TestCreateRecoveryStatusMessage_TransientManualRecoveryUsesSafeReason(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
 	seedSession(t, repo, "t-capacity", "s-capacity", "step1")
@@ -280,12 +280,14 @@ func TestCreateRecoveryStatusMessage_TransientExhaustionUsesSafeReason(t *testin
 		t.Fatalf("expected 1 session message, got %d", len(mc.sessionMessages))
 	}
 	content := mc.sessionMessages[0].content
-	if !strings.Contains(content, "model remained at capacity") {
+	if !strings.Contains(content, "Model at capacity") {
 		t.Fatalf("content = %q, want provider-neutral capacity reason", content)
 	}
 	if strings.Contains(content, "Please try a different model") {
 		t.Fatalf("content copied raw provider evidence: %q", content)
 	}
+	require.NotContains(t, content, "after several retries")
+	require.Equal(t, "provider_interrupted", mc.sessionMessages[0].metadata["failure_kind"])
 }
 
 func TestCreateRecoveryStatusMessage_OpenCodeQuotaCarriesSafeMetadata(t *testing.T) {
