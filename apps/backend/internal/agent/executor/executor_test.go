@@ -16,6 +16,14 @@ func TestExecutorTypeToBackendMapsKubernetes(t *testing.T) {
 	}
 }
 
+func TestExecutorTypeToBackendMapsCursorCloudWithoutStandaloneFallback(t *testing.T) {
+	t.Parallel()
+
+	if got := ExecutorTypeToBackend(models.ExecutorTypeCursorCloud); got != agentruntime.RuntimeCursorCloud {
+		t.Fatalf("ExecutorTypeToBackend(cursor_cloud) = %q, want %q", got, agentruntime.RuntimeCursorCloud)
+	}
+}
+
 func TestExecutorTypeToBackendDoesNotFallBackForUnknownOrPluginRemote(t *testing.T) {
 	if got := ExecutorTypeToBackend(models.ExecutorType("unknown-provider")); got != NameUnknown {
 		t.Fatalf("unknown executor mapped to %q, want NameUnknown", got)

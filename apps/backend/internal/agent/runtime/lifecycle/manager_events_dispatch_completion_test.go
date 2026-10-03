@@ -449,6 +449,47 @@ func TestDispatchCompletion_ErrorReleasesOnlyMatchingGeneration(t *testing.T) {
 	})
 }
 
+func TestDispatchCompletion_ErrorDoesNotBecomePromptOutputEvidence(t *testing.T) {
+	t.Run("terminal error without content", func(t *testing.T) {
+		fixture := newDispatchCompletionFixture(t, false)
+		require.True(t, fixture.manager.handleCompleteEvent(fixture.execution, &agentctl.AgentEvent{
+			Type: "complete", SessionID: fixture.execution.SessionID, PromptGeneration: 1,
+			Error: "provider failed", Data: map[string]any{"is_error": true},
+		}))
+
+		_, generation, evidence, found := fixture.manager.GetPromptAttemptEvidenceForSession(
+			context.Background(), fixture.execution.SessionID,
+		)
+		require.True(t, found)
+		require.Equal(t, uint64(1), generation)
+		require.True(t, evidence.EvidenceKnown)
+		require.False(t, evidence.OutputObserved,
+			"a terminal error with no stream content must not count as prompt output")
+		require.False(t, evidence.EffectObserved,
+			"a terminal error with no tool activity must not count as an effect")
+	})
+
+	t.Run("terminal error after content", func(t *testing.T) {
+		fixture := newDispatchCompletionFixture(t, false)
+		fixture.manager.handleAgentEvent(fixture.execution, agentctl.AgentEvent{
+			Type: "message_chunk", Text: "partial response",
+		})
+		require.True(t, fixture.manager.handleCompleteEvent(fixture.execution, &agentctl.AgentEvent{
+			Type: "complete", SessionID: fixture.execution.SessionID, PromptGeneration: 1,
+			Error: "provider failed", Data: map[string]any{"is_error": true},
+		}))
+
+		_, _, evidence, found := fixture.manager.GetPromptAttemptEvidenceForSession(
+			context.Background(), fixture.execution.SessionID,
+		)
+		require.True(t, found)
+		require.True(t, evidence.OutputObserved,
+			"genuine stream content before failure must remain visible as output")
+		require.True(t, evidence.EffectObserved,
+			"genuine stream content before failure must remain a conservative effect")
+	})
+}
+
 // @covers AC-PLATFORM-PROMPT-COMPLETION-OWNERSHIP-001.6
 func TestDispatchCompletion_UninitializedStartupFailureIsTerminal(t *testing.T) {
 	failurePublished := make(chan struct{}, 1)

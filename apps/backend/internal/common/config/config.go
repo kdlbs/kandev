@@ -495,6 +495,10 @@ type OfficeConfig struct {
 type FeaturesConfig struct {
 	// ProviderInterruptionContinuation enables conservative native conversation recovery.
 	ProviderInterruptionContinuation bool `mapstructure:"provider_interruption_continuation" json:"providerInterruptionContinuation"`
+	// CursorCloud gates managed Cursor Cloud configuration, discovery, and new
+	// dispatch. Existing bound conversations retain the narrow observation and
+	// cancellation drain path while the feature is disabled.
+	CursorCloud bool `mapstructure:"cursor_cloud" json:"cursorCloud"`
 
 	// LSPBrowserContinuity gates runtime-owned language-server leases that stay
 	// connected across browser attachment loss. Off in every embedded profile.

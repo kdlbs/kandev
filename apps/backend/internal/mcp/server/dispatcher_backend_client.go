@@ -25,6 +25,7 @@ type DispatcherBackendClient struct {
 	dispatcher               Dispatcher
 	logger                   *logger.Logger
 	trustedExternalTransport bool
+	trustedManagedTransport  bool
 }
 
 // NewExternalDispatcherBackendClient creates the trusted bridge used only by
@@ -32,6 +33,14 @@ type DispatcherBackendClient struct {
 func NewExternalDispatcherBackendClient(d Dispatcher, log *logger.Logger) *DispatcherBackendClient {
 	client := NewDispatcherBackendClient(d, log)
 	client.trustedExternalTransport = true
+	return client
+}
+
+// NewManagedDispatcherBackendClient creates the narrow bridge used after the
+// managed callback transport has validated an operation-scoped grant.
+func NewManagedDispatcherBackendClient(d Dispatcher, log *logger.Logger) *DispatcherBackendClient {
+	client := NewDispatcherBackendClient(d, log)
+	client.trustedManagedTransport = true
 	return client
 }
 
@@ -51,6 +60,8 @@ func NewDispatcherBackendClient(d Dispatcher, log *logger.Logger) *DispatcherBac
 func (c *DispatcherBackendClient) RequestPayload(ctx context.Context, action string, payload, result interface{}) error {
 	if c.trustedExternalTransport {
 		ctx = mcporigin.WithTrustedExternalTransport(ctx)
+	} else if c.trustedManagedTransport {
+		ctx = mcporigin.WithTrustedManagedTransport(ctx)
 	}
 	id := uuid.New().String()
 	msg, err := ws.NewRequest(id, action, payload)

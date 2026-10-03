@@ -52,8 +52,11 @@ const units: CatalogUnit[] = [
 describe("duration-aware shard planning", () => {
   it("discovers specs below the web e2e test root and hashes their source", () => {
     const webRoot = fs.mkdtempSync(path.join(os.tmpdir(), "kandev-planner-"));
-    const testDir = path.join(webRoot, "e2e", "tests", "chat");
-    fs.mkdirSync(testDir, { recursive: true });
+    const testDir = path.join(webRoot, "e2e", "tests");
+    const chatDir = path.join(testDir, "chat");
+    const sessionDir = path.join(testDir, "session");
+    fs.mkdirSync(chatDir, { recursive: true });
+    fs.mkdirSync(sessionDir, { recursive: true });
     fs.symlinkSync(path.resolve("node_modules"), path.join(webRoot, "node_modules"), "dir");
     fs.writeFileSync(
       path.join(webRoot, "e2e", "playwright.config.ts"),
@@ -62,15 +65,17 @@ describe("duration-aware shard planning", () => {
         "export default defineConfig({",
         '  testDir: "./tests",',
         "  projects: [",
-        '    { name: "chromium", testIgnore: [/mobile-.*\\.spec\\.ts$/, /tests\\/(docker|ssh)\\//] },',
-        '    { name: "mobile-chrome", testMatch: /mobile-.*\\.spec\\.ts$/ },',
+        '    { name: "chromium", testIgnore: [/mobile-.*\\.spec\\.ts$/, /cursor-cloud.*\\.spec\\.ts$/, /tests\\/(docker|ssh)\\//] },',
+        '    { name: "mobile-chrome", testMatch: /mobile-.*\\.spec\\.ts$/, testIgnore: /mobile-cursor-cloud.*\\.spec\\.ts$/ },',
+        '    { name: "cursor-cloud", testMatch: /tests\\/session\\/cursor-cloud.*\\.spec\\.ts/ },',
+        '    { name: "cursor-cloud-mobile", testMatch: /tests\\/session\\/mobile-cursor-cloud.*\\.spec\\.ts/ },',
         '    { name: "containers", testMatch: /tests\\/(docker|ssh)\\/.*\\.spec\\.ts$/ },',
         "  ],",
         "});",
       ].join("\n"),
     );
     fs.writeFileSync(
-      path.join(testDir, "example.spec.ts"),
+      path.join(chatDir, "example.spec.ts"),
       [
         'import { test } from "@playwright/test";',
         'test.describe("suite", () => {',
@@ -83,6 +88,14 @@ describe("duration-aware shard planning", () => {
         "});",
       ].join("\n"),
     );
+    fs.writeFileSync(
+      path.join(sessionDir, "cursor-cloud.spec.ts"),
+      'import { test } from "@playwright/test"; test("cloud", async () => {});',
+    );
+    fs.writeFileSync(
+      path.join(sessionDir, "mobile-cursor-cloud.spec.ts"),
+      'import { test } from "@playwright/test"; test("mobile cloud", async () => {});',
+    );
 
     expect(discoverTestCatalog(webRoot, "normal")).toEqual([
       expect.objectContaining({
@@ -90,6 +103,14 @@ describe("duration-aware shard planning", () => {
         file: "tests/chat/example.spec.ts",
         testCount: 4,
         fileHash: expect.stringMatching(/^[a-f0-9]{64}$/),
+      }),
+      expect.objectContaining({
+        project: "cursor-cloud-mobile",
+        file: "tests/session/mobile-cursor-cloud.spec.ts",
+      }),
+      expect.objectContaining({
+        project: "cursor-cloud",
+        file: "tests/session/cursor-cloud.spec.ts",
       }),
     ]);
   });

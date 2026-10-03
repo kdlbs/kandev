@@ -166,6 +166,8 @@ function makeFs(): DialogFormState {
     taskName: "",
     autopilot: false,
     setAutopilot: () => {},
+    autoCreatePR: false,
+    setAutoCreatePR: () => {},
     priority: "medium",
     setPriority: () => {},
     setTaskName: () => {},

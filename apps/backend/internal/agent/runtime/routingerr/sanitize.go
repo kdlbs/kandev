@@ -58,10 +58,10 @@ var redactions = append(append([]redaction{
 	literalRedaction(`(https?://)(?:[^@\s/]+@)?([^/\s?#]+)[^\s]*`, "$1$2"),
 	literalRedaction(`\b(?:wrk|ses|run)_[A-Za-z0-9_-]+\b`, "[redacted-id]"),
 }, credentialRedactions...), []redaction{
-	literalRedaction(`[A-Za-z0-9+/=_-]{32,}`, redactionMask),
 	literalRedaction(`/Users/[^/\s]+/`, "/Users/<redacted>/"),
 	literalRedaction(`/home/[^/\s]+/`, "/home/<redacted>/"),
 	redactLocalPaths,
+	literalRedaction(`[A-Za-z0-9+/=_-]{32,}`, redactionMask),
 }...)
 
 // credentialAssignmentKey matches a password/secret/token/api-key field name

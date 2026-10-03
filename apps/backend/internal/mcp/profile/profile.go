@@ -21,6 +21,7 @@ type Surface string
 
 const (
 	SurfaceKanbanTask          Surface = "kanban-task"
+	SurfaceManagedTask         Surface = "managed-task"
 	SurfaceOfficeTask          Surface = "office-task"
 	SurfaceConfiguration       Surface = "configuration"
 	SurfaceExternal            Surface = "external"
@@ -240,7 +241,7 @@ func Legacy(mode string, disableAskQuestion bool, providers []string) Context {
 
 func normalizeSurface(surface Surface) Surface {
 	switch surface {
-	case SurfaceKanbanTask, SurfaceOfficeTask, SurfaceConfiguration, SurfaceExternal, SurfaceAutomation, SurfaceManagedConversation:
+	case SurfaceKanbanTask, SurfaceManagedTask, SurfaceOfficeTask, SurfaceConfiguration, SurfaceExternal, SurfaceAutomation, SurfaceManagedConversation:
 		return surface
 	default:
 		return SurfaceKanbanTask

@@ -136,12 +136,14 @@ func TestManager_StartAllWorkspaceTrackers_StartsRootAndRepoTrackers(t *testing.
 		}
 	})
 
-	// initialScanDone closes once the monitor goroutine ran — confirms Start() actually fired.
+	// Start records its state synchronously. Do not wait for the initial Git scan
+	// here: filesystem and Git startup latency varies substantially on CI hosts.
 	for i, tr := range append([]*WorkspaceTracker{mgr.workspaceTracker}, mgr.repoTrackers...) {
-		select {
-		case <-tr.initialScanDone:
-		case <-time.After(2 * time.Second):
-			t.Fatalf("tracker %d (workDir=%q) never completed initial scan — Start did not run", i, tr.workDir)
+		tr.mu.RLock()
+		started := tr.started
+		tr.mu.RUnlock()
+		if !started {
+			t.Fatalf("tracker %d (workDir=%q) was not started", i, tr.workDir)
 		}
 	}
 

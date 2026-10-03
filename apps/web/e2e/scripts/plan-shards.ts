@@ -106,6 +106,8 @@ function readPlaywrightListReport(webRoot: string): PlaywrightListReport {
       path.join(resolvedRoot, "e2e", "playwright.config.ts"),
       "--project=chromium",
       "--project=mobile-chrome",
+      "--project=cursor-cloud",
+      "--project=cursor-cloud-mobile",
       "--project=containers",
       "--list",
       "--reporter=json",
@@ -156,7 +158,9 @@ function collectPlaywrightCounts(
 
 export function discoverTestCatalog(webRoot: string, cohort: Cohort): CatalogUnit[] {
   const allowedProjects = new Set(
-    cohort === "containers" ? ["containers"] : ["chromium", "mobile-chrome"],
+    cohort === "containers"
+      ? ["containers"]
+      : ["chromium", "mobile-chrome", "cursor-cloud", "cursor-cloud-mobile"],
   );
   const counts = new Map<string, { project: string; file: string; testCount: number }>();
   collectPlaywrightCounts(readPlaywrightListReport(webRoot).suites, allowedProjects, counts);

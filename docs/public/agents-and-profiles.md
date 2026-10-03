@@ -363,6 +363,23 @@ interactive credential flow when a secret is required.
 
 Model and mode choices are probed from the locally installed CLI. Opening a saved concrete profile probes its saved environment, CLI flags, and command prefix. If you edit any of these launch settings, select **Refresh models** before you choose a model. Kandev probes the current draft without saving it or sending a prompt. A secret reference is resolved on the Kandev host and its value is not sent back to the browser. Probe status can report **auth required**, **not installed**, **not configured**, **unsupported**, or **failed**; a saved model name does not prove that the current provider account can use it.
 
+### Cursor Cloud agent profiles
+
+The **Cursor Cloud** agent type appears after your workspace has a saved,
+configured Cursor Cloud executor profile. An unsaved or incomplete executor
+does not make the agent type available. A temporary API connection failure does
+not hide it, and removing the last configured executor does not delete its
+saved agent profiles or existing task conversations. See
+[Cursor Cloud executor setup](executors.md#cursor-cloud) for the API key,
+callback, billing, and rollout requirements.
+
+Open **Settings > Agents > Cursor Cloud** and create an agent profile. The
+model selector uses the catalog from the saved Cursor Cloud executor profiles
+you can access. Test the executor connection and save its profile before
+selecting a model. Each task keeps its selected executor, model, repository,
+and starting ref for that cloud conversation. Changing an agent profile does
+not change an existing conversation.
+
 ### Use an OpenAI-compatible provider
 
 Open the **Provider** section in a profile that supports this feature. Select

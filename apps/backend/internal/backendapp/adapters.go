@@ -20,6 +20,7 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/clarification"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/events"
 	githubsvc "github.com/kandev/kandev/internal/github"
 	"github.com/kandev/kandev/internal/orchestrator"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
@@ -308,6 +309,7 @@ type lifecycleAdapter struct {
 var _ interface {
 	OwnsPromptGeneration(sessionID, executionID string, generation uint64) bool
 	GetPromptGenerationForSession(ctx context.Context, sessionID string) (uint64, error)
+	GetPromptAttemptEvidenceForSession(ctx context.Context, sessionID string) (executionID string, generation uint64, evidence runtimeapi.PromptAttemptEvidence, found bool)
 	GetACPSessionIDForSession(sessionID string) (string, bool)
 	OwnsPromptActivity(sessionID, executionID string, generation, activityEpoch uint64) bool
 	GetPromptActivityForSession(ctx context.Context, sessionID string) (executionID string, generation, activityEpoch uint64, lastActivityAt time.Time, err error)
@@ -761,6 +763,13 @@ func (a *lifecycleAdapter) OwnsPromptGeneration(sessionID, executionID string, g
 
 func (a *lifecycleAdapter) GetPromptGenerationForSession(ctx context.Context, sessionID string) (uint64, error) {
 	return a.mgr.GetPromptGenerationForSession(ctx, sessionID)
+}
+
+func (a *lifecycleAdapter) GetPromptAttemptEvidenceForSession(
+	ctx context.Context,
+	sessionID string,
+) (executionID string, generation uint64, evidence runtimeapi.PromptAttemptEvidence, found bool) {
+	return a.mgr.GetPromptAttemptEvidenceForSession(ctx, sessionID)
 }
 
 func (a *lifecycleAdapter) OwnsPromptActivity(sessionID, executionID string, generation, activityEpoch uint64) bool {
@@ -1834,6 +1843,22 @@ func (a *messageCreatorAdapter) CreateAgentMessageStreaming(ctx context.Context,
 // AppendAgentMessage appends additional content to an existing streaming message.
 func (a *messageCreatorAdapter) AppendAgentMessage(ctx context.Context, messageID, additionalContent string) error {
 	return a.svc.AppendMessageContent(ctx, messageID, additionalContent)
+}
+
+func (a *messageCreatorAdapter) PublishManagedAgentStreamMessage(
+	ctx context.Context,
+	messageID string,
+	updated bool,
+) error {
+	message, err := a.svc.GetMessage(ctx, messageID)
+	if err != nil {
+		return err
+	}
+	eventType := events.MessageAdded
+	if updated {
+		eventType = events.MessageUpdated
+	}
+	return a.svc.PublishMessageEvent(ctx, eventType, message)
 }
 
 // CreateThinkingMessageStreaming creates a new thinking message with a pre-generated ID.

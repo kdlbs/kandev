@@ -20,6 +20,7 @@ const (
 	NameSprites           = agentruntime.RuntimeSprites
 	NameSSH               = agentruntime.RuntimeSSH
 	NameKubernetes        = agentruntime.RuntimeKubernetes
+	NameCursorCloud       = agentruntime.RuntimeCursorCloud
 	NamePluginRemote      = agentruntime.RuntimePluginRemote
 )
 
@@ -42,6 +43,8 @@ func ExecutorTypeToBackend(execType models.ExecutorType) Name {
 		return NameKubernetes
 	case models.ExecutorTypeMockRemote:
 		return NameStandalone
+	case models.ExecutorTypeCursorCloud:
+		return NameCursorCloud
 	case models.ExecutorTypePluginRemote:
 		return NamePluginRemote
 	default:

@@ -94,6 +94,7 @@ func provideServices(ctx context.Context, cfg *config.Config, log *logger.Logger
 	userSecretStore := secrets.NewUserVisibleStore(repos.Secrets)
 	agentSettingsController := agentsettingscontroller.NewController(repos.AgentSettings, discoveryRegistry, agentRegistry, repos.Task, log)
 	agentSettingsController.SetDynamicAgentRoutingEnabled(cfg.Features.DynamicAgentRouting)
+	agentSettingsController.SetCursorCloudEnabled(cfg.Features.CursorCloud)
 	agentSettingsController.SetSecretStore(userSecretStore)
 	agentSettingsController.SetManagedRuntimeSelectionStore(managedRuntimeSelections)
 	agentSettingsController.SetRuntimeAutoUpdateStore(managedruntime.NewAutoUpdateStore(repos.SystemSettings))
@@ -103,6 +104,9 @@ func provideServices(ctx context.Context, cfg *config.Config, log *logger.Logger
 		return nil, nil, err
 	}
 	taskSvc, workflowSvc, promptSvc := core.taskSvc, core.workflowSvc, core.promptSvc
+	agentSettingsController.SetManagedAgentAvailability(func(ctx context.Context) bool {
+		return cursorCloudAgentAvailable(ctx, taskSvc, userSecretStore)
+	})
 
 	wireTaskWorkflowCrossReferences(taskSvc, workflowSvc, userSecretStore, repos, log)
 
@@ -261,9 +265,11 @@ func initCoreTaskServices(
 			BackgroundWork:    repos.Task,
 			AgentProfiles:     repos.AgentSettings,
 			AgentProfileExecutorValidator: taskAgentExecutorCompatibilityValidator{
-				profiles:        repos.AgentSettings,
-				agentRegistry:   agentRegistry,
-				dynamicResolver: dynamicResolver,
+				profiles:           repos.AgentSettings,
+				agentRegistry:      agentRegistry,
+				dynamicResolver:    dynamicResolver,
+				secretStore:        secrets.NewUserVisibleStore(repos.Secrets),
+				cursorCloudEnabled: cfg.Features.CursorCloud,
 			},
 		},
 		eventBus,
@@ -275,6 +281,7 @@ func initCoreTaskServices(
 			DesktopRuntime:    strings.EqualFold(strings.TrimSpace(os.Getenv("KANDEV_DESKTOP_RUNTIME")), "true"),
 		},
 	)
+	taskSvc.SetCursorCloudEnabled(cfg.Features.CursorCloud)
 	wireSidebarWorkspaceAccess(userSvc, taskSvc)
 	taskSvc.SetPendingActionProjectionEpoch(pendingActionProjectionEpoch)
 	// Workspace membership needs to resolve colleague names and reject

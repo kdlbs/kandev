@@ -19,6 +19,11 @@ describe("feature flag repository contract", () => {
   it("keeps interrupted-conversation continuation disabled by default", () => {
     expect(defaultFeatureFlags).toHaveProperty("providerInterruptionContinuation", false);
   });
+
+  it("keeps Cursor Cloud disabled by default", () => {
+    expect(defaultFeatureFlags.cursorCloud).toBe(false);
+  });
+
   it("omits retired Office session identity from frontend defaults", () => {
     expect(defaultFeatureFlags).not.toHaveProperty("officeSessionIdentity");
   });

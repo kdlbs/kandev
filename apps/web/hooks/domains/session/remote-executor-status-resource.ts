@@ -12,6 +12,11 @@ export type RemoteExecutorStatusData = {
   remote_status_error?: string;
   remote_restarts?: number;
   remote_workspace_kind?: string;
+  remote_repository_id?: string;
+  remote_branch?: string;
+  remote_pull_request_url?: string;
+  remote_agent_url?: string;
+  remote_history_gap?: boolean;
 };
 
 export type RemoteExecutorStatusRequest = {
