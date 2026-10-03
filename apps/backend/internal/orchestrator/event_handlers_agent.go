@@ -2738,7 +2738,12 @@ func (s *Service) handleAgentFailed(ctx context.Context, data watcher.AgentEvent
 // recovery work that must run after that guard is released.
 func (s *Service) handleAgentFailedLocked(ctx context.Context, data watcher.AgentEventData) func(context.Context) {
 	data = s.withPromptAttemptEvidence(data)
-	defer s.clearPromptAttemptEvidence(data.SessionID, data.AgentExecutionID, data.PromptGeneration)
+	clearPromptEvidence := true
+	defer func() {
+		if clearPromptEvidence {
+			s.clearPromptAttemptEvidence(data.SessionID, data.AgentExecutionID, data.PromptGeneration)
+		}
+	}()
 	s.logger.Warn("handling agent failed",
 		zap.String("task_id", data.TaskID),
 		zap.String("session_id", data.SessionID),
@@ -2764,10 +2769,14 @@ func (s *Service) handleAgentFailedLocked(ctx context.Context, data watcher.Agen
 	// errors, office tasks, or an exhausted budget.
 	continuation, _ := s.transientRetries.Load(data.SessionID)
 	if data.SessionID != "" && s.handleTransientFailure(ctx, data) {
+		clearPromptEvidence = !s.transientReplayOwnsPromptAttempt(data)
 		return nil
 	}
-	if entry, ok := continuation.(*transientRetryEntry); ok && entry.mode == recoveryModeContinue {
-		return s.settleContinuationFailureLocked(ctx, data, entry)
+	if entry, ok := continuation.(*transientRetryEntry); ok {
+		mode, _ := entry.recovery()
+		if mode == recoveryModeContinue {
+			return s.settleContinuationFailureLocked(ctx, data, entry)
+		}
 	}
 	s.retireInitialCreatePromptPassthroughForEvent(ctx, data)
 	if data.SessionID != "" {

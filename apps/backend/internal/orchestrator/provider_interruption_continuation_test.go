@@ -2,14 +2,16 @@ package orchestrator
 
 import (
 	"context"
+	"testing"
+	"time"
+
+	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/orchestrator/watcher"
 	"github.com/kandev/kandev/internal/task/models"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	"github.com/stretchr/testify/require"
-	"testing"
-	"time"
 )
 
 func continuationFailureFixture(t *testing.T) (*Service, *mockMessageCreator, watcher.AgentEventData) {
@@ -82,6 +84,63 @@ func TestInterruptionContinuationDispatchUsesNativeIdentity(t *testing.T) {
 	require.Len(t, mgr.capturedPrompts, 1)
 	require.Contains(t, mgr.capturedPrompts[0], "Continue the unfinished request")
 	require.NotContains(t, mgr.capturedPrompts[0], "test original request")
+}
+
+func TestTransientReplayPromotesLateSafeActivityToNativeContinuation(t *testing.T) {
+	svc, _, data := continuationFailureFixture(t)
+	data.OutputObserved = false
+	data.EffectObserved = false
+	manager := svc.agentManager.(*mockAgentManager)
+	manager.currentPromptExecutionID = "execution-1"
+	manager.currentPromptGeneration.Store(7)
+	manager.isAgentRunning = true
+	manager.isAgentReadyFn = func(context.Context, string) bool { return true }
+	reader := &transientRetryEvidenceAgentManager{
+		mockAgentManager: manager,
+		executionID:      "execution-1",
+		generation:       7,
+		found:            true,
+		evidence:         lifecycle.PromptAttemptEvidence{EvidenceKnown: true},
+	}
+	svc.agentManager = reader
+
+	svc.handleAgentFailed(context.Background(), data)
+	value, ok := svc.transientRetries.Load("s1")
+	require.True(t, ok, "output-free failure snapshot should initially reserve replay")
+	entry := value.(*transientRetryEntry)
+	mode, _ := entry.recovery()
+	require.Equal(t, recoveryModeReplay, mode)
+
+	reader.evidence.OutputObserved = true
+	reader.evidence.EffectObserved = true
+	launches := make(chan *executor.LaunchAgentRequest, 1)
+	manager.launchAgentFunc = func(_ context.Context, req *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error) {
+		launches <- req
+		now := time.Now().UTC()
+		require.NoError(t, svc.repo.UpsertExecutorRunning(context.Background(), &models.ExecutorRunning{
+			ID: "runtime-replacement", TaskID: "t1", SessionID: "s1", AgentExecutionID: "replacement-1",
+			ResumeToken: "provider-session", Resumable: true, CreatedAt: now, UpdatedAt: now,
+		}))
+		_, _, err := svc.repo.UpdateTaskSessionStateIfCurrent(
+			context.Background(), "s1", models.TaskSessionStateStarting, models.TaskSessionStateWaitingForInput, "",
+		)
+		require.NoError(t, err)
+		return &executor.LaunchAgentResponse{AgentExecutionID: "replacement-1"}, nil
+	}
+	require.True(t, entry.claim())
+	svc.retryTransientPrompt(entry.retryCtx, "t1", "s1", "execution-1")
+
+	select {
+	case launch := <-launches:
+		require.Equal(t, "provider-session", launch.RequiredNativeConversationID)
+		require.Equal(t, "provider-session", launch.ACPSessionID)
+	case <-time.After(time.Second):
+		t.Fatal("late safe lifecycle evidence did not promote replay to native restore")
+	}
+	manager.mu.Lock()
+	defer manager.mu.Unlock()
+	require.Len(t, manager.capturedPrompts, 1)
+	require.Contains(t, manager.capturedPrompts[0], "Continue the unfinished request")
 }
 
 func TestInterruptionContinuationOwnershipContextCancellation(t *testing.T) {

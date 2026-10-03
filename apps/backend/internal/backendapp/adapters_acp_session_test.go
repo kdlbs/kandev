@@ -122,6 +122,35 @@ func TestLifecycleAdapter_GetACPSessionIDForSession_ForwardsLiveIdentity(t *test
 	}
 }
 
+func TestLifecycleAdapter_GetPromptAttemptEvidenceForSession_ForwardsCurrentActivity(t *testing.T) {
+	mgr := lifecycle.NewManager(nil, nil, nil, nil, nil, nil, lifecycle.ExecutorFallbackDeny, t.TempDir(), newTestLogger())
+	adapter := newLifecycleAdapter(mgr, nil, newTestLogger())
+
+	const sessionID = "sess-prompt-attempt-evidence"
+	const executionID = "exec-prompt-attempt-evidence"
+	if err := mgr.ExecutionStoreForTesting().Add(&lifecycle.AgentExecution{
+		ID: executionID, TaskID: "task-1", SessionID: sessionID, WorkspacePath: t.TempDir(),
+	}); err != nil {
+		t.Fatalf("seed execution: %v", err)
+	}
+	generation, err := mgr.BeginPrompt(executionID)
+	if err != nil {
+		t.Fatalf("begin prompt: %v", err)
+	}
+
+	var client orchestratorexecutor.AgentManagerClient = adapter
+	provider, ok := client.(interface {
+		GetPromptAttemptEvidenceForSession(context.Context, string) (string, uint64, lifecycle.PromptAttemptEvidence, bool)
+	})
+	if !ok {
+		t.Fatal("production lifecycleAdapter does not expose prompt-attempt evidence through the runtime seam")
+	}
+	gotExecutionID, gotGeneration, evidence, found := provider.GetPromptAttemptEvidenceForSession(context.Background(), sessionID)
+	if !found || gotExecutionID != executionID || gotGeneration != generation || !evidence.EvidenceKnown {
+		t.Fatalf("prompt evidence = (%q, %d, %+v, %v), want current attempt for %q", gotExecutionID, gotGeneration, evidence, found, executionID)
+	}
+}
+
 func TestLifecycleAdapter_RegistersInitialPromptAdmissionOnRestart(t *testing.T) {
 	mgr := lifecycle.NewManager(nil, nil, nil, nil, nil, nil, lifecycle.ExecutorFallbackDeny, t.TempDir(), newTestLogger())
 	if err := mgr.ExecutionStoreForTesting().Add(&lifecycle.AgentExecution{

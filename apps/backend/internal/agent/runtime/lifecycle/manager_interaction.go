@@ -2124,6 +2124,21 @@ func (m *Manager) GetPromptGenerationForSession(_ context.Context, sessionID str
 	return execution.promptGenerationSnapshot(), nil
 }
 
+// GetPromptAttemptEvidenceForSession returns the lifecycle-owned replay-safety
+// snapshot for the current prompt. The orchestrator re-reads it before a
+// delayed replay because stream and terminal notifications can cross separate
+// subscriptions.
+func (m *Manager) GetPromptAttemptEvidenceForSession(
+	_ context.Context,
+	sessionID string,
+) (executionID string, generation uint64, evidence PromptAttemptEvidence, found bool) {
+	execution, exists := m.executionStore.GetBySessionID(sessionID)
+	if !exists || execution == nil {
+		return "", 0, PromptAttemptEvidence{}, false
+	}
+	return execution.ID, execution.promptGenerationSnapshot(), execution.promptAttemptEvidenceSnapshot(), true
+}
+
 // GetPromptActivityForSession returns the execution ID, prompt generation,
 // activity epoch, and last-activity timestamp currently owned by sessionID's
 // active prompt. Unlike OwnsPromptGeneration/OwnsPromptActivity (which check

@@ -309,6 +309,7 @@ type lifecycleAdapter struct {
 var _ interface {
 	OwnsPromptGeneration(sessionID, executionID string, generation uint64) bool
 	GetPromptGenerationForSession(ctx context.Context, sessionID string) (uint64, error)
+	GetPromptAttemptEvidenceForSession(ctx context.Context, sessionID string) (executionID string, generation uint64, evidence runtimeapi.PromptAttemptEvidence, found bool)
 	GetACPSessionIDForSession(sessionID string) (string, bool)
 	OwnsPromptActivity(sessionID, executionID string, generation, activityEpoch uint64) bool
 	GetPromptActivityForSession(ctx context.Context, sessionID string) (executionID string, generation, activityEpoch uint64, lastActivityAt time.Time, err error)
@@ -762,6 +763,13 @@ func (a *lifecycleAdapter) OwnsPromptGeneration(sessionID, executionID string, g
 
 func (a *lifecycleAdapter) GetPromptGenerationForSession(ctx context.Context, sessionID string) (uint64, error) {
 	return a.mgr.GetPromptGenerationForSession(ctx, sessionID)
+}
+
+func (a *lifecycleAdapter) GetPromptAttemptEvidenceForSession(
+	ctx context.Context,
+	sessionID string,
+) (executionID string, generation uint64, evidence runtimeapi.PromptAttemptEvidence, found bool) {
+	return a.mgr.GetPromptAttemptEvidenceForSession(ctx, sessionID)
 }
 
 func (a *lifecycleAdapter) OwnsPromptActivity(sessionID, executionID string, generation, activityEpoch uint64) bool {

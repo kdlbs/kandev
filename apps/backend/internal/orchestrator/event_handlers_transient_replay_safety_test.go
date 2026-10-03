@@ -95,6 +95,77 @@ func TestHandleTransientFailure_ReplayUsesCurrentPromptAttempt(t *testing.T) {
 	}
 }
 
+type transientRetryEvidenceAgentManager struct {
+	*mockAgentManager
+	executionID string
+	generation  uint64
+	evidence    lifecycle.PromptAttemptEvidence
+	found       bool
+}
+
+func (m *transientRetryEvidenceAgentManager) GetPromptAttemptEvidenceForSession(
+	_ context.Context,
+	_ string,
+) (string, uint64, lifecycle.PromptAttemptEvidence, bool) {
+	return m.executionID, m.generation, m.evidence, m.found
+}
+
+func TestRetryTransientPromptRechecksLifecycleEvidenceBeforeReplay(t *testing.T) {
+	svc, mc := newTransientTestService(t)
+	t.Cleanup(svc.cancelAllTransientRetries)
+	manager := svc.agentManager.(*mockAgentManager)
+	manager.currentPromptExecutionID = "execution-1"
+	manager.currentPromptGeneration.Store(7)
+	manager.isAgentReadyFn = func(context.Context, string) bool { return true }
+	manager.isAgentRunningFn = func(context.Context, string) bool { return true }
+	reader := &transientRetryEvidenceAgentManager{
+		mockAgentManager: manager,
+		executionID:      "execution-1",
+		generation:       7,
+		found:            true,
+		evidence:         lifecycle.PromptAttemptEvidence{EvidenceKnown: true},
+	}
+	svc.agentManager = reader
+	svc.beginPromptAttempt("s1", "execution-1", 7, false)
+	svc.rememberTurnPrompt("s1", "original prompt", "", false, nil)
+
+	failure := watcher.AgentEventData{
+		TaskID:           "t1",
+		SessionID:        "s1",
+		AgentExecutionID: "execution-1",
+		AgentID:          "cursor-acp",
+		PromptGeneration: 7,
+		EvidenceKnown:    true,
+		ErrorMessage:     cursorTransportLostDiagnostic,
+	}
+	svc.handleAgentFailed(context.Background(), failure)
+	if _, ok := svc.transientRetries.Load("s1"); !ok {
+		t.Fatal("initial output-free lifecycle snapshot did not schedule its replay retry")
+	}
+
+	// Stream and terminal notifications use separate subscriptions. The agent
+	// manager can observe real work after the failure snapshot armed a retry.
+	reader.evidence.OutputObserved = true
+	reader.evidence.EffectObserved = true
+	svc.retryTransientPrompt(context.Background(), "t1", "s1", "execution-1")
+
+	if len(manager.capturedPrompts) != 0 {
+		t.Fatalf("replayed prompts = %v, want none after lifecycle observed turn work", manager.capturedPrompts)
+	}
+	if _, ok := svc.transientRetries.Load("s1"); ok {
+		t.Fatal("unsafe replay retry remained armed after late lifecycle evidence")
+	}
+	var recovery map[string]interface{}
+	for _, message := range mc.sessionMessages {
+		if message.metadata["recovery_actions"] == true {
+			recovery = message.metadata
+		}
+	}
+	if recovery == nil || recovery["recovery_reason"] != "disabled" {
+		t.Fatalf("manual recovery metadata = %v, want disabled continuation after observed work", recovery)
+	}
+}
+
 func TestPromptAttemptEvidence_ObservesThoughtAndToolActivity(t *testing.T) {
 	svc, _ := newTransientTestService(t)
 	t.Cleanup(svc.cancelAllTransientRetries)

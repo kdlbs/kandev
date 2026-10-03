@@ -36,6 +36,7 @@ type ExecutionReference = lifecycle.ExecutionReference
 type AgentStreamEventData = lifecycle.AgentStreamEventData
 type AgentStreamEventPayload = lifecycle.AgentStreamEventPayload
 type AgentExecution = lifecycle.AgentExecution
+type PromptAttemptEvidence = lifecycle.PromptAttemptEvidence
 type CachedModeState = lifecycle.CachedModeState
 type IdleSuspensionIdentity = lifecycle.IdleSuspensionIdentity
 type WorkspaceRecoveryProjectionError = lifecycle.WorkspaceRecoveryProjectionError
