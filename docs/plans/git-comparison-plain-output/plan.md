@@ -212,3 +212,32 @@ GOMEMLIMIT=1GiB, retaining concurrency 2, serial runners and the five-minute lin
 timeout at the exact base above. Recovery handle 15675 joined exit 0 with zero
 issues. Original passing process/securityutil checks were not replayed.
 Corrected-head CI/review and actual merge remain externally pending.
+
+## Bounded hosted cancellation-fixture correction
+
+At the intermediate corrective head, Backend Tests (2/2), run 37109953388,
+job 111165825596, failed only `TestManagedGoCacheCancellationPreventsLaunch`
+on temporary-directory cleanup: directory not empty. The parent released a
+test-only repair in this same order after reading the direct/coalesced launch
+contract. Empty `SessionID` selects direct launch with the caller context;
+session-keyed coalescing deliberately detaches caller cancellation and can
+continue after a canceled waiter returns. The fixture now exercises direct
+launch, so the result channel joins cache preparation before zero-create
+assertions and cleanup. Provider barriers, successful cache output, cancellation
+and zero-create assertions remain intact. Production lifecycle behavior is
+unchanged, consistent with the existing [cache cancellation design](../../specs/system-page/system-design/managed-go-cache-launch-fallback.md#cache-decision-and-recovery).
+
+Only the exact cancellation test and preparation cancellation control ran with
+`-race -trimpath -tags fts5 -p=1 -count=10`; corrected GREEN passed in 1.149s
+(handle 42267 joined). Git checks were not replayed. The previous monitor was
+intentionally stopped and joined (84748, exit 143, no terminal CI verdict).
+A wrong-cwd edit attempt made no mutation; its unchanged-fixture test pass
+(54535, 1.414s) is historical, not correction evidence. A prematurely overlapping
+lint was stopped and joined (13917, exit 143, no verdict). After both handles
+were joined and owned descendants absent, the parent authorized one sequential
+replacement full changed-backend lint under the same bounded recovery flags.
+Corrected-head semantic review, CI and actual merge remain pending.
+
+Replacement full changed-backend lint joined exit 0 with zero issues (35060),
+using the exact base and bounded flags above. Local remediation is complete;
+new-head hosted review/CI and actual merge remain delivery gates.

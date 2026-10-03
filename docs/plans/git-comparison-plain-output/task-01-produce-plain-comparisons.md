@@ -171,3 +171,28 @@ joined exit 4 for timeout (handle 27034); zero issues was not a pass. Parent
 authorized one recovery with OS timeout 6m and GOMEMLIMIT=1GiB, all other flags
 unchanged. Recovery joined exit 0 with zero issues (handle 15675). Local
 remediation is complete; corrected-head hosted gates and merge remain pending.
+
+## Parent-released hosted fixture remediation
+
+The exact hosted lifecycle cancellation cleanup failure and direct-versus-shared
+launch analysis are recorded in the [plan](plan.md#bounded-hosted-cancellation-fixture-correction).
+The bounded added file is
+`apps/backend/internal/agent/runtime/lifecycle/manager_managed_go_cache_test.go`:
+remove only the cancellation fixture SessionID to use existing direct launch.
+No production cache/coalescing behavior, assertion, sleep or cleanup policy changes.
+Affected check, from `apps/backend`:
+
+```bash
+GOMAXPROCS=2 GOMEMLIMIT=512MiB go test -race -trimpath -tags fts5 -p=1 ./internal/agent/runtime/lifecycle -run '^TestManagedGoCacheCancellation(PreventsLaunch|Preserved)$' -count=10
+```
+
+Corrected GREEN joined exit 0 in 1.149s (42267). Retain earlier Git and API
+checks; no package/full-suite replay. Full changed-backend lint replacement is
+sequential after joined test/stopped lint handles, with GNU OS timeout 6m,
+GOMAXPROCS=2, GOMEMLIMIT=1GiB, exact base above, concurrency 2, serial runners
+and CLI timeout 5m. Normal hooks, corrective publication, one necessary full
+all-file review and one hosted monitor precede actual verified merge/cleanup.
+
+Replacement full changed-backend lint joined exit 0 with zero issues (35060),
+using the exact base and bounded flags above. Local remediation is complete;
+new-head hosted review/CI and actual merge remain delivery gates.
