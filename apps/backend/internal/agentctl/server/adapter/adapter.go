@@ -347,7 +347,8 @@ type Config struct {
 	NotificationQueueCapacity int
 
 	// PromptCancelJoinTimeout is an optional per-adapter ACP cancellation join bound.
-	PromptCancelJoinTimeout time.Duration
+	PromptCancelJoinTimeout          time.Duration
+	ProviderInterruptionContinuation bool
 
 	// ProviderGatewayAuth authenticates the ACP agent against an
 	// OpenAI-compatible gateway right after initialize.
@@ -369,22 +370,23 @@ func (c *Config) ToSharedConfig() *shared.Config {
 		}
 	}
 	return &shared.Config{
-		WorkDir:                   c.WorkDir,
-		AutoApprove:               c.AutoApprove,
-		McpServers:                mcpServers,
-		AgentID:                   c.AgentID,
-		AgentName:                 c.AgentName,
-		BaseURL:                   c.BaseURL,
-		AuthHeader:                c.AuthHeader,
-		AuthValue:                 c.AuthValue,
-		Headers:                   c.Headers,
-		Extra:                     c.Extra,
-		AssumeMcpSse:              c.AssumeMcpSse,
-		AssumeMcpHttp:             c.AssumeMcpHttp,
-		RequiresProcessKill:       c.RequiresProcessKill,
-		NotificationQueueCapacity: c.NotificationQueueCapacity,
-		PromptCancelJoinTimeout:   c.PromptCancelJoinTimeout,
-		ProviderGatewayAuth:       c.ProviderGatewayAuth,
+		WorkDir:                          c.WorkDir,
+		AutoApprove:                      c.AutoApprove,
+		McpServers:                       mcpServers,
+		AgentID:                          c.AgentID,
+		AgentName:                        c.AgentName,
+		BaseURL:                          c.BaseURL,
+		AuthHeader:                       c.AuthHeader,
+		AuthValue:                        c.AuthValue,
+		Headers:                          c.Headers,
+		Extra:                            c.Extra,
+		AssumeMcpSse:                     c.AssumeMcpSse,
+		AssumeMcpHttp:                    c.AssumeMcpHttp,
+		RequiresProcessKill:              c.RequiresProcessKill,
+		NotificationQueueCapacity:        c.NotificationQueueCapacity,
+		PromptCancelJoinTimeout:          c.PromptCancelJoinTimeout,
+		ProviderInterruptionContinuation: c.ProviderInterruptionContinuation,
+		ProviderGatewayAuth:              c.ProviderGatewayAuth,
 	}
 }
 

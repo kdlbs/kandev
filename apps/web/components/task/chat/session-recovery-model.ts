@@ -17,7 +17,9 @@ import {
   type SessionRecoveryOwner,
 } from "@/lib/session-recovery-presentation";
 import { sessionRecoveryAction } from "./messages/action-message-recovery";
+import { interruptionRecoveryKey } from "./messages/interruption-recovery-feedback";
 import { managedRuntimeStartupCopy } from "./managed-runtime-startup-copy";
+import { useOptionalAppStore } from "@/components/state-provider";
 
 type RecoveryCopy = { title: string; summary: string; showSummary: boolean };
 
@@ -53,24 +55,22 @@ function managedRuntimeFailureCopy(
       return null;
   }
 }
-import { useOptionalAppStore } from "@/components/state-provider";
 
-function recoveryCopy(model: ActiveSessionRecovery, t: ReturnType<typeof useTranslation>["t"]) {
-  const managedRuntimeCopy = managedRuntimeFailureCopy(model, t);
-  if (managedRuntimeCopy) return managedRuntimeCopy;
-  if (model.kind === "provider_quota_limited") {
-    const reset = model.metadata?.reset_at ? new Date(model.metadata.reset_at) : null;
+export function recoveryCopy(
+  model: ActiveSessionRecovery,
+  t: ReturnType<typeof useTranslation>["t"],
+) {
+  if (model.kind === "provider_interrupted")
     return {
-      title: t("chat:providerQuotaTitle", {
-        provider: model.metadata?.provider_name || t("chat:providerQuotaProviderFallback"),
+      title: t("task:sessionRecoveryFailed"),
+      summary: t(interruptionRecoveryKey(model.metadata ?? {}), {
+        count: model.metadata?.attempts_started,
       }),
-      summary:
-        reset && !Number.isNaN(reset.getTime())
-          ? t("chat:providerQuotaReset", { resetAt: formatDateTime(reset) })
-          : t("chat:providerQuotaResetUnknown"),
       showSummary: true,
     };
-  }
+  const managedRuntimeCopy = managedRuntimeFailureCopy(model, t);
+  if (managedRuntimeCopy) return managedRuntimeCopy;
+  if (model.kind === "provider_quota_limited") return providerQuotaRecoveryCopy(model, t);
   if (model.kind === "managed_clone_relocation_required")
     return {
       title: t("task:managedCloneRelocationTitle"),
@@ -82,6 +82,23 @@ function recoveryCopy(model: ActiveSessionRecovery, t: ReturnType<typeof useTran
   return {
     title: t("task:sessionRecoveryFailed"),
     summary: safe ? summary : t("task:agentHasStopped"),
+    showSummary: true,
+  };
+}
+
+function providerQuotaRecoveryCopy(
+  model: ActiveSessionRecovery,
+  t: ReturnType<typeof useTranslation>["t"],
+) {
+  const reset = model.metadata?.reset_at ? new Date(model.metadata.reset_at) : null;
+  return {
+    title: t("chat:providerQuotaTitle", {
+      provider: model.metadata?.provider_name || t("chat:providerQuotaProviderFallback"),
+    }),
+    summary:
+      reset && !Number.isNaN(reset.getTime())
+        ? t("chat:providerQuotaReset", { resetAt: formatDateTime(reset) })
+        : t("chat:providerQuotaResetUnknown"),
     showSummary: true,
   };
 }

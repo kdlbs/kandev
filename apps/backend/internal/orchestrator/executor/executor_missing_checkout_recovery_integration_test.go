@@ -169,6 +169,7 @@ type executorMissingCheckoutRecoveryFixture struct {
 	sessionState      models.TaskSessionState
 	store             *worktree.SQLiteStore
 	manager           *worktree.Manager
+	config            worktree.Config
 }
 
 func newExecutorMissingCheckoutRecoveryFixture(t *testing.T, route string) *executorMissingCheckoutRecoveryFixture {
@@ -218,6 +219,7 @@ func newExecutorMissingCheckoutRecoveryFixture(t *testing.T, route string) *exec
 
 	basePath := filepath.Join(t.TempDir(), "tasks")
 	cfg := worktree.Config{TasksBasePath: basePath}
+	fixture.config = cfg
 	fixture.worktreePath, err = cfg.TaskWorktreePath(fixture.taskDirName, "repository", fixture.branchSlug)
 	if err != nil {
 		t.Fatalf("build canonical worktree path: %v", err)

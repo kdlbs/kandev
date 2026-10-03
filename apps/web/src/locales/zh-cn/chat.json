@@ -164,5 +164,18 @@
   "emptyTurnKnownCommand": "`/{{command}}` 已运行，但没有产生任何输出。{{hint}}",
   "emptyTurnNoOutput": "智能体已结束，但没有产生任何输出。",
   "emptyTurnResendHint": "请尝试作为普通消息重新发送你的请求，不要带开头的斜杠。",
-  "emptyTurnUnknownCommand": "`/{{command}}` 不是该智能体识别的命令，因此没有返回任何内容。{{hint}}"
+  "emptyTurnUnknownCommand": "`/{{command}}` 不是该智能体识别的命令，因此没有返回任何内容。{{hint}}",
+  "providerManualRecoveryBody": "代理运行中断。恢复会话以重试，或开始新会话。",
+  "providerRecoveryExhaustedBody_one": "连接在 {{count}} 次自动重试后失败。请恢复或新建会话以继续。",
+  "providerRecoveryExhaustedBody_other": "连接在 {{count}} 次自动重试后失败。请恢复或新建会话以继续。",
+  "providerRecoveryCancelledBody": "自动恢复已取消。请恢复或新建会话以继续。",
+  "continuationIn": "将在 {{countdown}} 后继续。",
+  "continuationPhase_waiting": "等待重新连接。",
+  "continuationPhase_reconnecting": "正在重新连接...",
+  "continuationPhase_continuing": "正在继续之前的请求...",
+  "continuationHistoryPreserved": "之前的对话会保留。",
+  "providerRecoveryDisabledBody": "自动继续已禁用。恢复以重试，或启动新会话。",
+  "providerRecoveryUnsafeBody": "自动继续已停止，因为某项操作尚未完成或其结果不确定。请先检查工作，再恢复会话。",
+  "providerRecoveryUnsupportedBody": "此代理无法自动恢复中断的对话。恢复以重试，或启动新会话。",
+  "providerRecoveryEvidenceBody": "自动继续已停止，因为缺少对话标识或安全信息。请先检查工作，再恢复会话。"
 }

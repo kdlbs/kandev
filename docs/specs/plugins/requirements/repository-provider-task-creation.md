@@ -84,6 +84,24 @@ to register the repository in a separate step.
 - **AC-PLUGINS-REPOSITORY-TASK-CREATION-001.9:** Desktop and phone users shall
   have the same repository selection, branch selection, submit, success, and
   failure capabilities through the shared native task dialog.
+- **AC-PLUGINS-REPOSITORY-TASK-CREATION-001.10:** When the native task dialog
+  rechecks remote URLs after provider registration, replacement, or removal,
+  every previously cached URL in the same dialog and workspace shall be
+  evaluated using the current provider availability, regardless of URL order.
+  This includes URLs previously resolved successfully, failed, empty, or
+  unsupported. Branch choices and inspected repository or pull-request data
+  shall recover for every newly supported URL without re-entering it.
+- **AC-PLUGINS-REPOSITORY-TASK-CREATION-001.11:** Once that recheck begins,
+  results from requests made under the previous provider availability shall
+  neither replace current URL results nor suppress their loading. Replacement
+  shall use the new provider's results; removal shall stop exposing obsolete
+  provider results through URL resolution and use the existing built-in or
+  unsupported-URL behavior.
+- **AC-PLUGINS-REPOSITORY-TASK-CREATION-001.12:** Repeated or concurrent checks
+  of the same trimmed URL under an unchanged registry version shall share
+  one resolution attempt, including a settled error or empty result. Explicit
+  retry shall permit a fresh attempt. Results shall remain isolated between
+  dialogs and workspaces, including a workspace change with requests pending.
 
 ## Out of scope
 
@@ -92,6 +110,8 @@ to register the repository in a separate step.
 - Trusting a browser descriptor when the inspect action is unavailable.
 - Changing built-in GitHub, GitLab, or Azure DevOps URL parsing.
 - Changing how a plugin authenticates to its external code host.
+- Global cache freshness across browser tabs or unrelated workspaces.
+- Automatically rewriting committed repository selections after provider removal.
 
 ## System design
 

@@ -209,16 +209,9 @@ func (wt *WorkspaceTracker) GetGitStatusWithDetails(ctx context.Context, fresh b
 		return status, errGitStatusDetailsUnavailable
 	}
 
-	wt.mu.RLock()
-	current := cloneGitStatusUpdate(wt.currentStatus)
-	fingerprint := wt.gitStatusFingerprint
-	wt.mu.RUnlock()
-	if current.TrackerEpoch != status.TrackerEpoch || current.SnapshotRevision != status.SnapshotRevision {
-		return current, errGitStatusEvidenceChanged
-	}
-	job := wt.gitStatusEnrichmentForFingerprint(fingerprint)
-	if job == nil {
-		return current, errGitStatusDetailsUnavailable
+	current, fingerprint, job, err := wt.gitStatusDetailsWaitTarget(status)
+	if err != nil || current.DetailState == gitStatusDetailReady {
+		return current, err
 	}
 	if wt.gitStatusDetailsWaitJoined != nil {
 		wt.gitStatusDetailsWaitJoined()
@@ -247,6 +240,10 @@ func (wt *WorkspaceTracker) GetGitStatusWithDetails(ctx context.Context, fresh b
 func (wt *WorkspaceTracker) gitStatusEnrichmentForFingerprint(fingerprint string) *gitStatusEnrichmentJob {
 	wt.gitStatusEnrichmentMu.Lock()
 	defer wt.gitStatusEnrichmentMu.Unlock()
+	return wt.gitStatusEnrichmentForFingerprintLocked(fingerprint)
+}
+
+func (wt *WorkspaceTracker) gitStatusEnrichmentForFingerprintLocked(fingerprint string) *gitStatusEnrichmentJob {
 	if wt.gitStatusEnrichmentNext != nil && wt.gitStatusEnrichmentNext.fingerprint == fingerprint {
 		return wt.gitStatusEnrichmentNext
 	}

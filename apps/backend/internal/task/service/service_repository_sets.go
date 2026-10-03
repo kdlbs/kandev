@@ -136,14 +136,19 @@ func (s *Service) UpdateRepositorySet(
 	if err := s.prepareRepositorySetUpdate(ctx, set, req); err != nil {
 		return nil, err
 	}
-	// One call, one transaction: a rename that lands while the membership
-	// replacement fails would leave the set renamed but still holding the old
-	// repositories, with this method reporting failure and publishing nothing.
-	var repositoryItems *[]models.RepositorySetItem
-	if req.Repositories != nil || req.RepositoryIDs != nil {
-		repositoryItems = &set.Items
+	// Only supplied fields participate in the atomic mutation. The initial
+	// snapshot supplies authorization and validation context, not omitted values.
+	patch := &models.RepositorySetPatch{}
+	if req.Name != nil {
+		patch.Name = &set.Name
 	}
-	if err := s.repositorySets.UpdateRepositorySet(ctx, set, repositoryItems); err != nil {
+	if req.Description != nil {
+		patch.Description = &set.Description
+	}
+	if req.Repositories != nil || req.RepositoryIDs != nil {
+		patch.Items = &set.Items
+	}
+	if err := s.repositorySets.PatchRepositorySet(ctx, set.ID, patch); err != nil {
 		return nil, err
 	}
 	updated, err := s.repositorySets.GetRepositorySet(ctx, set.ID)

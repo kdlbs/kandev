@@ -735,6 +735,9 @@ type RepositorySetRepository interface {
 	// non-nil, replaces its whole membership in the same transaction so the two
 	// cannot land apart. A nil repositoryItems leaves membership untouched.
 	UpdateRepositorySet(ctx context.Context, set *models.RepositorySet, repositoryItems *[]models.RepositorySetItem) error
+	// PatchRepositorySet writes only supplied metadata and membership fields in
+	// one transaction. Omitted fields retain their current persisted values.
+	PatchRepositorySet(ctx context.Context, id string, patch *models.RepositorySetPatch) error
 	DeleteRepositorySet(ctx context.Context, id string) (bool, error)
 }
 

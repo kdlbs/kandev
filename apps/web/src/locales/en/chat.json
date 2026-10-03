@@ -164,5 +164,18 @@
   "emptyTurnKnownCommand": "`/{{command}}` ran but produced no output. {{hint}}",
   "emptyTurnNoOutput": "The agent finished without producing any output.",
   "emptyTurnResendHint": "Try resending your request as a normal message, without the leading slash.",
-  "emptyTurnUnknownCommand": "`/{{command}}` isn't a command this agent recognizes, so it returned no output. {{hint}}"
+  "emptyTurnUnknownCommand": "`/{{command}}` isn't a command this agent recognizes, so it returned no output. {{hint}}",
+  "providerManualRecoveryBody": "The agent was interrupted. Resume to try again, or start a fresh session.",
+  "providerRecoveryExhaustedBody_one": "The connection failed after {{count}} automatic retry. Resume or start fresh to continue.",
+  "providerRecoveryExhaustedBody_other": "The connection failed after {{count}} automatic retries. Resume or start fresh to continue.",
+  "providerRecoveryCancelledBody": "Automatic recovery was cancelled. Resume or start fresh to continue.",
+  "continuationIn": "Continuing in {{countdown}}.",
+  "continuationPhase_waiting": "Waiting to reconnect.",
+  "continuationPhase_reconnecting": "Reconnecting...",
+  "continuationPhase_continuing": "Continuing previous request...",
+  "continuationHistoryPreserved": "Previous conversation is preserved.",
+  "providerRecoveryDisabledBody": "Automatic continuation is disabled. Resume to try again, or start a fresh session.",
+  "providerRecoveryUnsafeBody": "Automatic continuation stopped because an action is pending or its outcome is uncertain. Review the work before resuming.",
+  "providerRecoveryUnsupportedBody": "This agent cannot automatically restore the interrupted conversation. Resume to try again, or start a fresh session.",
+  "providerRecoveryEvidenceBody": "Automatic continuation stopped because conversation identity or safety evidence is missing. Review the work before resuming."
 }

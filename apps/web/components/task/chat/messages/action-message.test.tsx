@@ -230,6 +230,27 @@ function renderActionWithStore(
 }
 
 describe("ActionMessage — transient retry (warning variant)", () => {
+  it("announces legacy retry status politely", () => {
+    renderAction(retryMessage(), "WAITING_FOR_INPUT");
+    const notice = screen.getByTestId("transient-retry-card");
+    expect(notice.getAttribute("role")).toBe("status");
+    expect(notice.getAttribute("aria-live")).toBe("polite");
+  });
+  it.each(["FAILED", "CANCELLED", "COMPLETED"] as const)(
+    "hides an orphaned continuation notice in %s after cleanup fails",
+    (state) => {
+      const message = retryMessage();
+      message.metadata = {
+        ...message.metadata,
+        recovery_mode: "continue",
+        recovery_phase: "continuing",
+      };
+      renderAction(message, state);
+      expect(screen.queryByTestId("transient-retry-card")).toBeNull();
+      expect(screen.queryByTestId(CANCEL_TEST_ID)).toBeNull();
+    },
+  );
+
   it("renders the retrying copy in amber, not red", () => {
     renderAction(retryMessage(), "WAITING_FOR_INPUT");
     const text = screen.getByLabelText("Retry countdown");

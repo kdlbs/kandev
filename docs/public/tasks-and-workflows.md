@@ -413,7 +413,10 @@ DELETE /api/v1/repository-sets/:id
 `base_branch`; an empty or omitted base uses task defaulting. A supplied list replaces the whole
 membership list, which is also how you reorder one. Omit the field to leave membership untouched.
 Existing clients may send ordered `repository_ids`; those members have no saved bases. Do not send both
-member fields in one request. The same five operations exist as
+member fields in one request. Omitted `name` and `description` fields are also preserved; send an empty
+description to clear it. Concurrent updates to different fields preserve both changes. Updates to the
+same field use the last committed value, and each supplied membership list replaces the entire list.
+The same five operations exist as
 `repository_set.list|create|get|update|delete` WebSocket actions, and
 `repository_set.created|updated|deleted` notifications keep every open client current. See
 [WebSocket API](websocket-api.md).
