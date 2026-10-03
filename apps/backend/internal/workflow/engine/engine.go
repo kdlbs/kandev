@@ -48,6 +48,15 @@ type ActionInput struct {
 	// in phase2_callbacks.go. Empty for every trigger other than step
 	// entry.
 	EntryID string
+	// CausingStepTransitionID is the same ledger row as EntryID, carried
+	// separately so a marker-bearing action (routed through
+	// MarkerBearingStepEntryExecutor, which must keep the
+	// step_entry:<entry>:<pos> idempotency key and therefore never sets
+	// EntryID) can still forward the ledger identity to a causation
+	// resolver. DispatchStepEntry's session-independent path sets both
+	// fields to the same value; the marker-bearing path sets only this
+	// one. Empty for every trigger other than step entry.
+	CausingStepTransitionID string
 }
 
 // ActionResult communicates side effects back to the engine.
