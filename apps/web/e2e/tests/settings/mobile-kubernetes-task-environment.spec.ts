@@ -1,6 +1,7 @@
 import path from "node:path";
 import type { Locator } from "@playwright/test";
 import { expect, test } from "../../fixtures/test-base";
+import { expectTouchControl, expectTouchSquareControl } from "../../helpers/control-sizing";
 import { assertNoDocumentHorizontalOverflow } from "../../helpers/layout-assertions";
 import { SessionPage } from "../../pages/session-page";
 import { seedKubernetesTaskEnvironment } from "./kubernetes-task-environment-helpers";
@@ -9,9 +10,7 @@ const POD_NAME = "kandev-mobile-task-pod";
 
 async function expectTouchLocator(locator: Locator, label: string) {
   await expect(locator).toBeVisible();
-  const box = await locator.boundingBox();
-  expect(box, `${label} must have geometry`).not.toBeNull();
-  expect(box!.height, `${label} must be at least 44px tall`).toBeGreaterThanOrEqual(44);
+  await expectTouchControl(locator, label);
 }
 
 async function expectExpandedTouchTarget(locator: Locator, label: string) {
@@ -177,10 +176,7 @@ test("Kubernetes task disclosure exposes live Pod details and safe actions by to
     const trigger = testPage.getByTestId("executor-settings-button");
     await expect(trigger).toBeVisible();
     await expect(trigger).toHaveAccessibleName(/executor settings/i);
-    const triggerBox = await trigger.boundingBox();
-    expect(triggerBox).not.toBeNull();
-    expect(triggerBox!.height).toBeGreaterThanOrEqual(44);
-    expect(triggerBox!.width).toBeGreaterThanOrEqual(44);
+    await expectTouchSquareControl(trigger);
 
     deferNextSessionRead = true;
     await trigger.tap();

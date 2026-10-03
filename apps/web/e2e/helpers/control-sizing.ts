@@ -35,8 +35,11 @@ export async function expectTouchSquareControl(locator: Locator): Promise<void> 
   expect(box!.width + TOUCH_TARGET_PIXEL_TOLERANCE).toBeGreaterThanOrEqual(44);
 }
 
-export async function expectTouchControl(locator: Locator): Promise<void> {
+export async function expectTouchControl(locator: Locator, label = "touch control"): Promise<void> {
   const box = await locator.boundingBox();
-  expect(box, "touch control should have a rendered bounding box").not.toBeNull();
-  expect(box!.height + TOUCH_TARGET_PIXEL_TOLERANCE).toBeGreaterThanOrEqual(44);
+  expect(box, `${label} should have a rendered bounding box`).not.toBeNull();
+  expect(
+    box!.height + TOUCH_TARGET_PIXEL_TOLERANCE,
+    `${label} must be at least 44px tall`,
+  ).toBeGreaterThanOrEqual(44);
 }

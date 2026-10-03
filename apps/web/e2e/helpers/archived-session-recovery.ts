@@ -1,4 +1,4 @@
-import type { Page } from "@playwright/test";
+import { expect, type Page } from "@playwright/test";
 
 export type GatewayRequest = {
   action?: string;
@@ -247,4 +247,29 @@ export function sessionLaunchRequests(
   return requests.filter(
     (request) => request.action === "session.launch" && request.payload.session_id === sessionId,
   );
+}
+
+/** Wait for both the unarchive mutation and the task-details refresh it triggers. */
+export async function waitForTaskUnarchive(page: Page, taskId: string): Promise<void> {
+  const unarchiveResponse = page.waitForResponse((response) =>
+    response.url().endsWith(`/api/v1/tasks/${taskId}/unarchive`),
+  );
+  const refreshedTaskResponse = page.waitForResponse(async (response) => {
+    if (
+      response.request().method() !== "GET" ||
+      !response.url().endsWith(`/api/v1/tasks/${taskId}`) ||
+      !response.ok()
+    ) {
+      return false;
+    }
+
+    const task = (await response.json()) as { archived_at?: string | null };
+    return task.archived_at == null;
+  });
+
+  const [response] = await Promise.all([unarchiveResponse, refreshedTaskResponse]);
+  expect(response.ok()).toBe(true);
+  const result = (await response.json()) as { success: boolean; unarchived_ids: string[] };
+  expect(result.success).toBe(true);
+  expect(result.unarchived_ids).toContain(taskId);
 }

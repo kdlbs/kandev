@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"strconv"
+	"sync"
 	"time"
 
 	agentruntime "github.com/kandev/kandev/internal/agent/runtime"
@@ -13,14 +14,19 @@ import (
 	"github.com/kandev/kandev/internal/common/config"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/common/ownershipperiod"
+	"github.com/kandev/kandev/internal/common/processidentity"
 	"github.com/kandev/kandev/internal/secrets"
 	"go.uber.org/zap"
 )
 
 // agentctlLauncherResult holds the outputs of provideAgentctlLauncher.
 type agentctlLauncherResult struct {
-	cleanup    func() error
-	binaryPath string
+	cleanup         func() error
+	stopRenewal     func()
+	binaryPath      string
+	processIdentity processidentity.Identity
+	serverIdentity  string
+	adopted         bool
 	// recoveryDeadlineStart is the AC-EXECUTORS-SURVIVAL-003.7 recovery
 	// deadline's clock start (the instant this launch first contacted a
 	// recorded control endpoint). Zero when this launch never contacted one
@@ -32,6 +38,14 @@ type agentctlLauncherResult struct {
 	// left by an earlier launch, which cannot be judged against a server this
 	// backend started itself.
 	inheritedRecordScope agentruntime.InheritedRecordScope
+	// peerCapabilities is the authenticated capability set from an adopted
+	// control server. Fresh servers do not need recovery negotiation here.
+	peerCapabilities []string
+}
+
+type agentctlProvisionOptions struct {
+	onRuntimeLoss        agentctlclient.RuntimeLossHandler
+	requireControlRecord bool
 }
 
 // provideAgentctlLauncher starts or adopts the agentctl control server for
@@ -51,13 +65,82 @@ func provideAgentctlLauncher(
 	availability *agentctlclient.Availability,
 	store agentruntime.AdoptionRecordStore,
 	secretStore secrets.SecretStore,
+	options agentctlProvisionOptions,
 ) (*agentctlLauncherResult, error) {
+	candidate, err := availability.PrepareBinding()
+	if err != nil {
+		return nil, err
+	}
 	result, scope := resolveSurvivingAgentctl(ctx, cfg, log, store, secretStore)
 	if result != nil {
-		availability.MarkAvailable()
+		var adoptedMonitor *agentctlclient.AdoptedRuntimeMonitor
+		if result.adopted {
+			probe := agentctlclient.NewControlClient(cfg.Agent.StandaloneHost, cfg.Agent.StandalonePort, log,
+				agentctlclient.WithControlAuthToken(cfg.Agent.StandaloneAuthToken))
+			adoptedMonitor = agentctlclient.NewAdoptedRuntimeMonitor(probe, result.serverIdentity,
+				result.processIdentity, 5*time.Second, cfg.Agentctl.RecoveryReadTimeout,
+				cfg.Agentctl.RecoveryReadRetries, nil, func(observation agentctlclient.RuntimeObservation) {
+					log.Warn("adopted agentctl runtime requires recovery action",
+						zap.String("evidence", string(observation.Evidence)))
+					if result.stopRenewal != nil {
+						result.stopRenewal()
+					}
+					reason := agentctlclient.AvailabilityReasonOwnershipUnverified
+					safeToReplace := false
+					if observation.Evidence == agentctlclient.RuntimeEvidenceProcessExited {
+						containCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+						containErr := processidentity.TerminateOwnedSession(containCtx, observation.ProcessIdentity, time.Second)
+						cancel()
+						if containErr == nil {
+							reason = agentctlclient.AvailabilityReasonAgentctlExited
+							safeToReplace = true
+						} else {
+							log.Warn("adopted agentctl descendants could not be verified and contained",
+								zap.String("recovery_outcome", "ownership_unverified"))
+						}
+					}
+					if !candidate.MarkUnexpectedExitWithReason(reason) {
+						log.Debug("ignored adopted agentctl health result for a retired runtime epoch",
+							zap.String("evidence", string(observation.Evidence)))
+						return
+					}
+					if options.onRuntimeLoss != nil {
+						options.onRuntimeLoss(candidate.Epoch(), reason, safeToReplace)
+					}
+				})
+			previousCleanup := result.cleanup
+			result.cleanup = func() error {
+				adoptedMonitor.Stop()
+				if previousCleanup != nil {
+					return previousCleanup()
+				}
+				return nil
+			}
+		}
+		result.cleanup = onceCleanup(result.cleanup)
+		if err := candidate.SetProcessIdentity(result.processIdentity); err != nil {
+			_ = result.cleanup()
+			_ = candidate.Abort()
+			return nil, err
+		}
+		if err := candidate.Configure(cfg.Agent.StandaloneHost, cfg.Agent.StandalonePort,
+			cfg.Agent.StandaloneAuthToken, cfg.Agent.StandalonePID, result.cleanup); err != nil {
+			_ = result.cleanup()
+			_ = candidate.Abort()
+			return nil, err
+		}
+		if err := candidate.Commit(); err != nil {
+			return nil, err
+		}
+		if adoptedMonitor != nil {
+			adoptedMonitor.Start(ctx)
+		}
 		return result, nil
 	}
-	fresh, err := spawnFreshAgentctl(ctx, cfg, log, availability, store, secretStore)
+	fresh, err := spawnFreshAgentctl(ctx, cfg, log, candidate, store, secretStore, options)
+	if err != nil {
+		_ = candidate.Abort()
+	}
 	if fresh != nil {
 		// The server this launch just started never launched the instances a
 		// prior launch recorded, so recovery needs to know what was found at
@@ -163,9 +246,18 @@ func adoptSurvivingAgentctl(
 			}
 			return nil
 		},
+		stopRenewal: func() {
+			if renewer != nil {
+				renewer.Stop()
+			}
+		},
 		binaryPath:            launcher.FindAgentctlBinary(),
+		processIdentity:       outcome.ProcessIdentity,
+		serverIdentity:        outcome.ServerIdentity,
+		adopted:               true,
 		recoveryDeadlineStart: outcome.ContactedAt,
 		inheritedRecordScope:  agentruntime.InheritedRecordScopeAdopted,
+		peerCapabilities:      append([]string(nil), outcome.Capabilities...),
 	}, agentruntime.InheritedRecordScopeAdopted
 }
 
@@ -179,20 +271,41 @@ func spawnFreshAgentctl(
 	ctx context.Context,
 	cfg *config.Config,
 	log *logger.Logger,
-	availability *agentctlclient.Availability,
+	candidate *agentctlclient.RuntimeBindingCandidate,
 	store agentruntime.AdoptionRecordStore,
 	secretStore secrets.SecretStore,
+	options agentctlProvisionOptions,
 ) (*agentctlLauncherResult, error) {
+	var renewalMu sync.Mutex
+	var renewer *agentruntime.OwnershipRenewer
+	exitObserved := false
+	stopRenewal := func() {
+		renewalMu.Lock()
+		exitObserved = true
+		current := renewer
+		renewalMu.Unlock()
+		if current != nil {
+			current.Stop()
+		}
+	}
 	l, cleanup, err := launcher.Provide(ctx, launcher.Config{
-		Host:             cfg.Agent.StandaloneHost,
-		Port:             cfg.Agent.StandalonePort,
-		StartupConfig:    cfg.ManagedAgentctlStartupConfig(),
-		OnUnexpectedExit: availability.MarkUnavailable,
+		Host:          cfg.Agent.StandaloneHost,
+		Port:          cfg.Agent.StandalonePort,
+		StartupConfig: cfg.ManagedAgentctlStartupConfig(),
+		OnRuntimeExit: func(report launcher.ExitReport) {
+			stopRenewal()
+			reason := agentctlclient.AvailabilityReasonOwnershipUnverified
+			if report.Contained {
+				reason = agentctlclient.AvailabilityReasonAgentctlExited
+			}
+			if candidate.MarkUnexpectedExitWithReason(reason) && options.onRuntimeLoss != nil {
+				options.onRuntimeLoss(candidate.Epoch(), reason, report.Contained)
+			}
+		},
 	}, log)
 	if err != nil {
 		return nil, err
 	}
-	availability.MarkAvailable()
 	// Update config with the actual port (may differ if fallback was used)
 	if actualPort := l.Port(); actualPort != cfg.Agent.StandalonePort {
 		log.Info("agentctl port changed from configured value",
@@ -206,13 +319,20 @@ func spawnFreshAgentctl(
 	// carry a real host-local liveness handle (executors_running.local_pid).
 	cfg.Agent.StandalonePID = l.Pid()
 
-	var renewer *agentruntime.OwnershipRenewer
 	if cfg.Features.AgentSurvival {
 		endpoint := net.JoinHostPort(cfg.Agent.StandaloneHost, strconv.Itoa(cfg.Agent.StandalonePort))
 		client, err := controlClientFactory(log)(endpoint)
 		if err != nil {
+			if options.requireControlRecord {
+				_ = cleanup()
+				return nil, fmt.Errorf("build control client for replacement agentctl: %w", err)
+			}
 			log.Warn("failed to build control client for the freshly spawned agentctl; adoption record not written", zap.Error(err))
 		} else if err := agentruntime.RecordFreshControlServer(ctx, store, secretStore, client, endpoint, l.AuthToken()); err != nil {
+			if options.requireControlRecord {
+				_ = cleanup()
+				return nil, fmt.Errorf("persist replacement agentctl ownership record: %w", err)
+			}
 			log.Warn("failed to record freshly spawned control server", zap.Error(err))
 		}
 		// AC-EXECUTORS-CONTROL-OWNERSHIP-003.8: the bootstrap handshake this
@@ -222,18 +342,51 @@ func spawnFreshAgentctl(
 		// (unlike the adopted path above) the local resolution IS the value
 		// the server itself enforces.
 		period, _ := ownershipperiod.Resolve(cfg.Agentctl.UnownedPeriod, cfg.Agentctl.IdleTimeout)
-		renewer = startOwnershipRenewal(ctx, log, endpoint, l.AuthToken(), period)
+		startedRenewer := startOwnershipRenewal(ctx, log, endpoint, l.AuthToken(), period)
+		renewalMu.Lock()
+		if exitObserved {
+			renewalMu.Unlock()
+			startedRenewer.Stop()
+		} else {
+			renewer = startedRenewer
+			renewalMu.Unlock()
+		}
 	}
 
+	ownedCleanup := onceCleanup(func() error {
+		stopRenewal()
+		return cleanup()
+	})
+	if err := candidate.SetProcessIdentity(l.ProcessIdentity()); err != nil {
+		_ = ownedCleanup()
+		return nil, err
+	}
+	if err := candidate.Configure(cfg.Agent.StandaloneHost, cfg.Agent.StandalonePort,
+		cfg.Agent.StandaloneAuthToken, cfg.Agent.StandalonePID, ownedCleanup); err != nil {
+		_ = ownedCleanup()
+		return nil, err
+	}
+	if err := candidate.Commit(); err != nil {
+		return nil, err
+	}
 	return &agentctlLauncherResult{
-		cleanup: func() error {
-			if renewer != nil {
-				renewer.Stop()
-			}
-			return cleanup()
-		},
-		binaryPath: l.BinaryPath(),
+		cleanup:         ownedCleanup,
+		stopRenewal:     stopRenewal,
+		binaryPath:      l.BinaryPath(),
+		processIdentity: l.ProcessIdentity(),
 	}, nil
+}
+
+func onceCleanup(cleanup func() error) func() error {
+	if cleanup == nil {
+		return nil
+	}
+	var once sync.Once
+	var result error
+	return func() error {
+		once.Do(func() { result = cleanup() })
+		return result
+	}
 }
 
 // startOwnershipRenewal builds a dedicated control client authenticated with

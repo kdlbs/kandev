@@ -1,10 +1,11 @@
-import { execSync } from "node:child_process";
+import { execFileSync, execSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { test, expect } from "../../fixtures/test-base";
 import { waitForFiniteAnimations } from "../../helpers/animations";
 import { assertNoDocumentHorizontalOverflow } from "../../helpers/layout-assertions";
 import { makeGitEnv } from "../../helpers/git-helper";
+import { waitForHttp } from "../../helpers/causal-waits";
 
 test.describe("Mobile workspace repository sets", () => {
   const createdRepositorySetIds = new Set<string>();
@@ -22,13 +23,20 @@ test.describe("Mobile workspace repository sets", () => {
     backend,
     prCapture,
   }) => {
+    test.setTimeout(120_000);
     const dir = path.join(backend.tmpDir, "repos", "mobile-set-scroll");
     fs.mkdirSync(dir, { recursive: true });
     const gitEnv = makeGitEnv(backend.tmpDir);
     execSync('git init -b main && git commit --allow-empty -m "init"', { cwd: dir, env: gitEnv });
-    for (let index = 0; index < 40; index++) {
-      execSync(`git branch scroll-test-${index}`, { cwd: dir, env: gitEnv });
-    }
+    const branches = Array.from(
+      { length: 40 },
+      (_, index) => `create refs/heads/scroll-test-${index} HEAD`,
+    ).join("\n");
+    execFileSync("git", ["update-ref", "--stdin"], {
+      cwd: dir,
+      env: gitEnv,
+      input: `${branches}\n`,
+    });
     const repository = await apiClient.createRepository(seedData.workspaceId, dir, "main", {
       name: "Mobile branch scrolling",
     });
@@ -108,24 +116,30 @@ test.describe("Mobile workspace repository sets", () => {
       "Add repositories in task order. Base branches are optional.",
     );
     const addRepository = testPage.getByTestId("repository-set-add-repository");
-    const membersLayout = await membersHint.evaluate((hint) => {
-      const addControl = document.querySelector<HTMLElement>(
-        '[data-testid="repository-set-add-repository"]',
-      );
-      if (!addControl) return null;
-      const hintBox = hint.getBoundingClientRect();
-      const addBox = addControl.getBoundingClientRect();
-      return {
-        hint: { y: hintBox.y, height: hintBox.height, width: hintBox.width },
-        add: { y: addBox.y, width: addBox.width },
-      };
-    });
-    if (!membersLayout) throw new Error("repository section controls are not mounted");
-    expect(membersLayout.add.y).toBeGreaterThan(membersLayout.hint.y + membersLayout.hint.height);
-    expect(membersLayout.add.width).toBeCloseTo(membersLayout.hint.width, 0);
+    await waitForFiniteAnimations(surface);
+    await expect
+      .poll(
+        async () => {
+          const [hintBox, addBox] = await Promise.all([
+            membersHint.boundingBox(),
+            addRepository.boundingBox(),
+          ]);
+          return Boolean(hintBox && addBox && addBox.y > hintBox.y + hintBox.height);
+        },
+        { timeout: 10_000, message: "repository selector should follow its task-order hint" },
+      )
+      .toBe(true);
+    const [membersHintBox, addRepositoryBox] = await Promise.all([
+      membersHint.boundingBox(),
+      addRepository.boundingBox(),
+    ]);
+    expect(membersHintBox).not.toBeNull();
+    expect(addRepositoryBox).not.toBeNull();
+    expect(addRepositoryBox!.width).toBeCloseTo(membersHintBox!.width, 0);
     await testPage.getByTestId(`repository-set-remove-${seedData.repositoryId}`).tap();
     await addRepository.tap();
     await testPage.getByRole("option", { name: /E2E Repo/ }).tap();
+    await expect(testPage.getByRole("option", { name: /E2E Repo/ })).toHaveCount(0);
     await expect(
       testPage.getByTestId(`repository-set-base-${seedData.repositoryId}`),
     ).toBeVisible();
@@ -154,6 +168,7 @@ test.describe("Mobile workspace repository sets", () => {
     await basePicker.tap();
     const dropdown = testPage.getByTestId(`repository-set-base-dropdown-${seedData.repositoryId}`);
     await expect(dropdown).toBeVisible();
+    await waitForFiniteAnimations(dropdown);
     await expect(dropdown.getByPlaceholder("Search branches...")).toBeVisible();
     await expect(dropdown.getByText("origin/main")).toBeVisible();
     const remoteMainOption = dropdown.getByRole("option", { name: /^origin\/main origin/ });
@@ -167,7 +182,6 @@ test.describe("Mobile workspace repository sets", () => {
     expect(refreshButtonBox).not.toBeNull();
     expect(refreshButtonBox!.height).toBeGreaterThanOrEqual(44);
     expect(refreshButtonBox!.width).toBeGreaterThanOrEqual(44);
-    await refreshButton.scrollIntoViewIfNeeded();
     await waitForFiniteAnimations(dropdown);
     const refreshReceivesCenterTap = await refreshButton.evaluate((element) => {
       const rect = element.getBoundingClientRect();
@@ -178,7 +192,15 @@ test.describe("Mobile workspace repository sets", () => {
       return target === element || (target instanceof Node && element.contains(target));
     });
     expect(refreshReceivesCenterTap).toBe(true);
+    const refreshResponse = waitForHttp(
+      testPage,
+      "GET",
+      new RegExp(`/api/v1/repositories/${seedData.repositoryId}/branches$`),
+      { predicate: (response) => new URL(response.url()).searchParams.get("refresh") === "true" },
+    );
     await refreshButton.tap({ timeout: 5_000 });
+    expect((await refreshResponse).ok()).toBe(true);
+    await expect(dropdown).toBeVisible();
     await expect(dropdown.getByRole("option", { name: /^origin\/main origin/ })).toBeVisible();
 
     const search = dropdown.getByPlaceholder("Search branches...");

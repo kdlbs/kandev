@@ -1,6 +1,7 @@
 import type { TaskSession } from "@/lib/types/http";
 import { mergePendingActionProjection } from "./task-session-projection-actions";
 import { getAgentGoal, isAgentGoalSnapshotNewer, mergeAgentGoalMetadata } from "@/lib/agent-goal";
+import { readAgentDeliveryRecovery } from "@/lib/session-agent-delivery-recovery";
 import { parseTurnTimestamp } from "./turn-actions";
 
 function asMetadataRecord(value: unknown): Record<string, unknown> | undefined {
@@ -90,6 +91,29 @@ function hasIncomingGoalClear(session: TaskSession): boolean {
   return meta?.goal === null && Object.prototype.hasOwnProperty.call(meta ?? {}, "goal");
 }
 
+function mergeDeliveryRecoveryMetadata(
+  current: Record<string, unknown>,
+  incoming: Record<string, unknown>,
+  next: Record<string, unknown>,
+): void {
+  if (!Object.prototype.hasOwnProperty.call(incoming, "agent_delivery_recovery")) return;
+  const currentRecovery = readAgentDeliveryRecovery(current);
+  const incomingRecovery = readAgentDeliveryRecovery(incoming);
+  if (
+    !currentRecovery ||
+    (incomingRecovery && incomingRecovery.revision >= currentRecovery.revision)
+  )
+    return;
+
+  // Keep the legacy error paired with the revisioned recovery snapshot.
+  next.agent_delivery_recovery = current.agent_delivery_recovery;
+  if (Object.prototype.hasOwnProperty.call(current, "last_agent_error")) {
+    next.last_agent_error = current.last_agent_error;
+  } else {
+    delete next.last_agent_error;
+  }
+}
+
 function mergeSessionMetadata(
   existing: TaskSession,
   incoming: TaskSession,
@@ -97,6 +121,7 @@ function mergeSessionMetadata(
   if (incoming.metadata == null) return existing.metadata;
   const current = existing.metadata ?? {};
   const next = { ...current, ...incoming.metadata };
+  mergeDeliveryRecoveryMetadata(current, incoming.metadata, next);
   const currentACP = asMetadataRecord(current.acp);
   const incomingACP = asMetadataRecord(incoming.metadata.acp);
   if (!currentACP && !incomingACP) return next;

@@ -165,6 +165,20 @@ func (o *firstTurnCaptureOrchestrator) StartCreatedSessionWithPromptContextAndCa
 	return &executor.TaskExecution{}, nil
 }
 
+func (o *firstTurnCaptureOrchestrator) StartCreatedSessionWithDeliverySubmission(
+	_ context.Context,
+	_, _, _, content string,
+	options orchestrator.DirectPromptStartOptions,
+) (*executor.TaskExecution, error) {
+	o.started <- capturedFirstTurn{
+		content:                content,
+		references:             append([]v1.EntityReference(nil), options.References...),
+		promptReferenceContext: options.PromptReferenceContext,
+		deliverySubmissionID:   options.DeliverySubmissionID,
+	}
+	return &executor.TaskExecution{}, nil
+}
+
 // @covers AC-TASKS-INITIAL-TASK-BRIEF-001.1, AC-TASKS-INITIAL-TASK-BRIEF-001.2
 func TestWSAddMessage_InitialTaskBrief(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
@@ -229,7 +243,25 @@ func TestWSAddMessage_InitialTaskBrief(t *testing.T) {
 		require.Contains(t, dispatched.content, brief)
 		require.Contains(t, dispatched.content, instruction)
 		require.Equal(t, stored, dispatched.content)
+		require.Equal(t, "initial-brief-message", dispatched.deliverySubmissionID)
 	})
+}
+
+func (o *switchingTurnStartOrchestrator) StartCreatedSessionWithDeliverySubmission(
+	_ context.Context,
+	_, sessionID, _, _ string,
+	options orchestrator.DirectPromptStartOptions,
+) (*executor.TaskExecution, error) {
+	o.mu.Lock()
+	o.startedSession = sessionID
+	o.startedSubmission = options.DeliverySubmissionID
+	o.mu.Unlock()
+	o.startOnce.Do(func() {
+		if o.started != nil {
+			close(o.started)
+		}
+	})
+	return &executor.TaskExecution{}, nil
 }
 
 // @covers AC-TASKS-INITIAL-TASK-BRIEF-001.4, AC-TASKS-INITIAL-TASK-BRIEF-001.8

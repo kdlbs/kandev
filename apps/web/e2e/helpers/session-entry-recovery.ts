@@ -1,5 +1,9 @@
-import type { Page } from "@playwright/test";
+import type { Page, WebSocketRoute } from "@playwright/test";
 import { injectLatency } from "./causal-waits";
+import type { SeedData } from "../fixtures/test-base";
+import type { CreateTaskResponse } from "../../lib/types/http";
+import type { ApiClient } from "./api-client";
+import { waitForSessionDone } from "./session";
 
 type WireFrame = {
   id?: unknown;
@@ -19,6 +23,10 @@ type DropRule = {
   sessionId?: string;
 };
 
+type HoldRule = {
+  sessionId?: string;
+};
+
 type RejectRule = {
   message: string;
   sessionId?: string;
@@ -28,6 +36,21 @@ type DelayRule = {
   remaining: number;
   delayMs: number;
   reason: string;
+};
+
+type ResponseHandlingState = {
+  requestContexts: Map<string, RequestContext>;
+  rejectRules: Map<string, RejectRule>;
+  rejectedCounts: Map<string, number>;
+  holdRules: Map<string, HoldRule>;
+  heldCounts: Map<string, number>;
+  heldMessages: Map<string, string[]>;
+  failureMessages: Map<string, string>;
+  failedCounts: Map<string, number>;
+  dropRules: Map<string, DropRule>;
+  droppedCounts: Map<string, number>;
+  delayRules: Map<string, DelayRule>;
+  delayedCounts: Map<string, number>;
 };
 
 export type SessionEntryRecoveryProxy = {
@@ -43,7 +66,42 @@ export type SessionEntryRecoveryProxy = {
   delayedResponseCount: (action: string) => number;
   droppedResponseCount: (action: string) => number;
   rejectedResponseCount: (action: string) => number;
+  failResponses: (action: string, message: string) => void;
+  allowResponses: (action: string) => void;
+  holdResponses: (action: string, scope?: { sessionId?: string }) => void;
+  releaseHeldResponses: (action: string) => void;
+  pendingRequestCount: (action: string) => number;
+  failedResponseCount: (action: string) => number;
+  heldResponseCount: (action: string) => number;
 };
+
+export async function createSettledHistoryTask(
+  apiClient: ApiClient,
+  seedData: SeedData,
+  title: string,
+): Promise<CreateTaskResponse> {
+  const task = await apiClient.createTaskWithAgent(
+    seedData.workspaceId,
+    title,
+    seedData.agentProfileId,
+    {
+      description: "/e2e:simple-message",
+      workflow_id: seedData.workflowId,
+      workflow_step_id: seedData.startStepId,
+      repository_ids: [seedData.repositoryId],
+    },
+  );
+  if (!task.session_id) throw new Error("history recovery task has no session_id");
+
+  await waitForSessionDone(
+    apiClient,
+    task.id,
+    task.session_id,
+    "Waiting for the history recovery task's initial prompt to finish",
+    60_000,
+  );
+  return task;
+}
 
 function parseFrame(value: string): WireFrame | null {
   try {
@@ -105,6 +163,18 @@ function consumeRejectRule(
   return context.rejectionMessage;
 }
 
+function consumeHoldRule(
+  context: RequestContext | undefined,
+  holdRules: Map<string, HoldRule>,
+  heldCounts: Map<string, number>,
+): boolean {
+  if (!context) return false;
+  const rule = holdRules.get(context.action);
+  if (!rule || (rule.sessionId && context.sessionId !== rule.sessionId)) return false;
+  heldCounts.set(context.action, (heldCounts.get(context.action) ?? 0) + 1);
+  return true;
+}
+
 function consumeDelayRule(
   action: string | undefined,
   message: string,
@@ -124,9 +194,84 @@ function consumeDelayRule(
   return true;
 }
 
+function interceptServerResponse(
+  message: string,
+  frame: WireFrame | null,
+  context: RequestContext | undefined,
+  socket: WebSocketRoute,
+  state: ResponseHandlingState,
+): boolean {
+  const rejection = consumeRejectRule(context, state.rejectedCounts);
+  if (rejection && frame) {
+    socket.send(
+      JSON.stringify({
+        ...frame,
+        type: "error",
+        payload: { code: "E2E_SIMULATED_ERROR", message: rejection },
+      }),
+    );
+    return true;
+  }
+
+  if (context && consumeHoldRule(context, state.holdRules, state.heldCounts)) {
+    const messages = state.heldMessages.get(context.action) ?? [];
+    messages.push(message);
+    state.heldMessages.set(context.action, messages);
+    return true;
+  }
+
+  if (frame && context && state.failureMessages.has(context.action)) {
+    state.failedCounts.set(context.action, (state.failedCounts.get(context.action) ?? 0) + 1);
+    socket.send(
+      JSON.stringify({
+        ...frame,
+        type: "error",
+        payload: {
+          code: "INTERNAL_ERROR",
+          message: state.failureMessages.get(context.action),
+        },
+      }),
+    );
+    return true;
+  }
+
+  if (consumeDropRule(context, state.dropRules, state.droppedCounts)) return true;
+  return consumeDelayRule(
+    context?.action,
+    message,
+    state.delayRules,
+    state.delayedCounts,
+    (delayedMessage) => socket.send(delayedMessage),
+  );
+}
+
+function forwardServerMessage(
+  message: string | Buffer,
+  socket: WebSocketRoute,
+  state: ResponseHandlingState,
+) {
+  if (typeof message !== "string") {
+    socket.send(message);
+    return;
+  }
+
+  for (const part of message.split("\n")) {
+    const trimmed = part.trim();
+    if (!trimmed) continue;
+    const frame = parseFrame(trimmed);
+    const context = takeResponseContext(frame, state.requestContexts);
+    if (
+      !isResponseFrame(frame) ||
+      !interceptServerResponse(trimmed, frame, context, socket, state)
+    ) {
+      socket.send(trimmed);
+    }
+  }
+}
+
 /**
- * Fail, delay, or drop selected gateway responses while forwarding every other
- * frame. Rules correlate replies by request id, so the test never relies on
+ * Fail, delay, drop, or hold selected gateway responses while forwarding other frames.
+ * Rules correlate replies by request id, so the test never relies on
  * action-only or payload timing and does not inspect message contents.
  */
 export async function routeSessionEntryRecovery(page: Page): Promise<SessionEntryRecoveryProxy> {
@@ -135,11 +280,32 @@ export async function routeSessionEntryRecovery(page: Page): Promise<SessionEntr
   const delayedCounts = new Map<string, number>();
   const droppedCounts = new Map<string, number>();
   const rejectedCounts = new Map<string, number>();
+  const failedCounts = new Map<string, number>();
+  const heldCounts = new Map<string, number>();
   const rules = new Map<string, DelayRule>();
   const dropRules = new Map<string, DropRule>();
   const rejectRules = new Map<string, RejectRule>();
+  const holdRules = new Map<string, HoldRule>();
+  const heldMessages = new Map<string, string[]>();
+  const failureMessages = new Map<string, string>();
+  let sendHeldMessage: ((message: string) => void) | undefined;
+  const responseState: ResponseHandlingState = {
+    requestContexts,
+    rejectRules,
+    rejectedCounts,
+    holdRules,
+    heldCounts,
+    heldMessages,
+    failureMessages,
+    failedCounts,
+    dropRules,
+    droppedCounts,
+    delayRules: rules,
+    delayedCounts,
+  };
 
   await page.routeWebSocket(/\/ws$/, (ws) => {
+    sendHeldMessage = (message) => ws.send(message);
     const server = ws.connectToServer();
 
     ws.onMessage((message) => {
@@ -175,37 +341,7 @@ export async function routeSessionEntryRecovery(page: Page): Promise<SessionEntr
       server.send(message);
     });
 
-    server.onMessage((message) => {
-      if (typeof message !== "string") {
-        ws.send(message);
-        return;
-      }
-
-      for (const part of message.split("\n")) {
-        const trimmed = part.trim();
-        if (!trimmed) continue;
-        const frame = parseFrame(trimmed);
-        const context = takeResponseContext(frame, requestContexts);
-        if (isResponseFrame(frame)) {
-          const rejection = consumeRejectRule(context, rejectedCounts);
-          if (rejection && frame) {
-            ws.send(
-              JSON.stringify({
-                ...frame,
-                type: "error",
-                payload: { code: "E2E_SIMULATED_ERROR", message: rejection },
-              }),
-            );
-            continue;
-          }
-          if (consumeDropRule(context, dropRules, droppedCounts)) continue;
-          if (consumeDelayRule(context?.action, trimmed, rules, delayedCounts, ws.send.bind(ws)))
-            continue;
-        }
-
-        ws.send(trimmed);
-      }
-    });
+    server.onMessage((message) => forwardServerMessage(message, ws, responseState));
   });
 
   return {
@@ -223,10 +359,29 @@ export async function routeSessionEntryRecovery(page: Page): Promise<SessionEntr
       rejectRules.set(action, { message, sessionId: scope?.sessionId });
     },
     releaseRejectedResponses: (action) => rejectRules.delete(action),
+    rejectedResponseCount: (action) => rejectedCounts.get(action) ?? 0,
+    failResponses: (action, message) => {
+      if (!message) throw new Error("failResponses requires an error message");
+      failureMessages.set(action, message);
+    },
+    allowResponses: (action) => {
+      failureMessages.delete(action);
+    },
+    holdResponses: (action, scope) => {
+      holdRules.set(action, { sessionId: scope?.sessionId });
+    },
+    releaseHeldResponses: (action) => {
+      holdRules.delete(action);
+      for (const message of heldMessages.get(action) ?? []) sendHeldMessage?.(message);
+      heldMessages.delete(action);
+    },
+    pendingRequestCount: (action) =>
+      [...requestContexts.values()].filter((context) => context.action === action).length,
     requestCount: (action) => requestCounts.get(action) ?? 0,
     delayedResponseCount: (action) => delayedCounts.get(action) ?? 0,
     droppedResponseCount: (action) => droppedCounts.get(action) ?? 0,
-    rejectedResponseCount: (action) => rejectedCounts.get(action) ?? 0,
+    failedResponseCount: (action) => failedCounts.get(action) ?? 0,
+    heldResponseCount: (action) => heldCounts.get(action) ?? 0,
   };
 }
 

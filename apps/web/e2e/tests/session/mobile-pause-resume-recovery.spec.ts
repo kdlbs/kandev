@@ -6,8 +6,6 @@ import { typeWhileBusy } from "../../helpers/type-while-busy";
 import { SessionPage } from "../../pages/session-page";
 
 test.describe("mobile: pause queue recovery", () => {
-  test.describe.configure({ retries: 1 });
-
   test("Cancel persists Auto-run OFF across reload and the switch resumes", async ({
     testPage,
     apiClient,

@@ -577,7 +577,7 @@ async function waitForReadyInstances(instancesDir, count, tick) {
     .slice(0, count);
 }
 
-async function readInstances(instancesDir) {
+export async function readInstances(instancesDir) {
   const entries = await readdir(instancesDir, { withFileTypes: true });
   const instances = [];
   for (const entry of entries) {
@@ -587,7 +587,7 @@ async function readInstances(instancesDir) {
         JSON.parse(await readFile(join(instancesDir, entry.name, "instance.json"), "utf8")),
       );
     } catch (error) {
-      if (error.code !== "ENOENT") throw error;
+      if (error.code !== "ENOENT" && !(error instanceof SyntaxError)) throw error;
     }
   }
   return instances;

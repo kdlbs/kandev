@@ -4,9 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
+
+	"github.com/google/uuid"
 	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
 	"go.uber.org/zap"
-	"time"
 
 	agentruntime "github.com/kandev/kandev/internal/agent/runtime"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
@@ -56,6 +58,7 @@ func (s *Service) retryInterruptedContinuation(ctx context.Context, taskID, sess
 			entry.mu.Unlock()
 			_, err := s.promptTask(promptCtx, taskID, sessionID, continuationInstruction, "", false, nil, true, launchOriginAutomatic, promptTaskOptions{
 				resumeAttempt: attempt, internalContinuation: true, preservePromptContext: true, disableDispatchRetry: true, requireNonterminalSession: true, reserveTurnUntilDispatch: true,
+				deliverySubmissionID: "continuation:" + uuid.NewString(),
 				beforeDispatch: func() error {
 					if err := s.validateContinuationOwner(promptCtx, taskID, sessionID, entry); err != nil {
 						return err

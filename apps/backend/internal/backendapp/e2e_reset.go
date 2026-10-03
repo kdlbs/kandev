@@ -13,8 +13,10 @@ import (
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
 
+	agentruntime "github.com/kandev/kandev/internal/agent/runtime"
 	"github.com/kandev/kandev/internal/automation"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/common/processidentity"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/github"
@@ -44,6 +46,8 @@ func registerE2EResetRoutes(
 	githubSvc *github.Service,
 	gitlabSvc *gitlab.Service,
 	eventBus bus.EventBus,
+	agentRuntimeAvailability *agentruntime.RuntimeOwner,
+	lifecycleMgr agentruntime.SessionExecutionControl,
 	log *logger.Logger,
 ) {
 	mockMode := os.Getenv("KANDEV_MOCK_AGENT")
@@ -52,6 +56,12 @@ func registerE2EResetRoutes(
 	}
 
 	api := router.Group("/api/v1/e2e")
+	if os.Getenv("KANDEV_E2E_MOCK") == "true" && agentRuntimeAvailability != nil {
+		api.POST("/agent-runtime/kill-child", handleE2EKillAgentRuntimeChild(agentRuntimeAvailability))
+	}
+	if os.Getenv("KANDEV_E2E_MOCK") == "true" && lifecycleMgr != nil {
+		api.POST("/agent-runtime/disconnect-session-stream", handleE2EDisconnectSessionAgentStream(lifecycleMgr))
+	}
 	api.DELETE("/reset/:workspaceId", handleE2EReset(repo, taskSvc, automationSvc, githubSvc, gitlabSvc, log))
 	if githubSvc != nil {
 		api.POST("/tasks/:id/remote-contribution", handleE2EAttachGitHubContribution(repo, taskSvc, githubSvc, log))
@@ -91,6 +101,70 @@ func registerE2EResetRoutes(
 	api.PATCH("/tasks/:id/origin", handleE2ESetTaskOrigin(repo, log))
 
 	log.Info("registered E2E endpoints (test-only)")
+}
+
+type e2eDisconnectSessionAgentStreamRequest struct {
+	SessionID string `json:"session_id"`
+}
+
+func handleE2EDisconnectSessionAgentStream(manager agentruntime.SessionExecutionControl) gin.HandlerFunc {
+	return func(ctx *gin.Context) {
+		var req e2eDisconnectSessionAgentStreamRequest
+		if err := ctx.ShouldBindJSON(&req); err != nil || req.SessionID == "" {
+			ctx.JSON(http.StatusBadRequest, gin.H{errKey: "session_id is required"})
+			return
+		}
+		execution, ok := manager.GetExecutionBySessionID(req.SessionID)
+		if !ok || execution.DeliveryMode != agentruntime.DurableDeliveryV1 {
+			ctx.JSON(http.StatusNotFound, gin.H{errKey: "durable delivery session is not running"})
+			return
+		}
+		client, releaseClient := execution.AcquireAgentCtlClient()
+		defer releaseClient()
+		if client == nil || !client.HasAgentStream() {
+			ctx.JSON(http.StatusConflict, gin.H{errKey: "agent updates stream is not connected"})
+			return
+		}
+		client.CloseUpdatesStream()
+		ctx.JSON(http.StatusAccepted, gin.H{"disconnected": true})
+	}
+}
+
+func handleE2EKillAgentRuntimeChild(owner *agentruntime.RuntimeOwner) gin.HandlerFunc {
+	return func(ctx *gin.Context) {
+		lease, err := owner.Acquire(ctx.Request.Context())
+		if err != nil {
+			ctx.JSON(http.StatusConflict, gin.H{"error": "local agent runtime is not available"})
+			return
+		}
+		defer lease.Close()
+
+		identity := lease.ProcessIdentity()
+		if identity.Validate() != nil || identity.PID != lease.ProcessID() || lease.CheckCurrent() != nil {
+			ctx.JSON(http.StatusConflict, gin.H{"error": "local runtime process ownership cannot be verified"})
+			return
+		}
+		state, err := processidentity.Inspect(identity)
+		if err != nil || state != processidentity.StateAlive {
+			ctx.JSON(http.StatusConflict, gin.H{"error": "local runtime process is not confirmed alive"})
+			return
+		}
+		process, err := os.FindProcess(identity.PID)
+		if err != nil {
+			ctx.JSON(http.StatusServiceUnavailable, gin.H{"error": "local runtime process could not be reached"})
+			return
+		}
+		state, err = processidentity.Inspect(identity)
+		if err != nil || state != processidentity.StateAlive || lease.CheckCurrent() != nil {
+			ctx.JSON(http.StatusConflict, gin.H{"error": "local runtime process ownership changed before termination"})
+			return
+		}
+		if err := process.Kill(); err != nil {
+			ctx.JSON(http.StatusServiceUnavailable, gin.H{"error": "local runtime process could not be stopped"})
+			return
+		}
+		ctx.JSON(http.StatusAccepted, gin.H{"killed": true, "process_id": identity.PID, "runtime_epoch": lease.Epoch()})
+	}
 }
 
 type e2eAttachGitHubContributionRequest struct {

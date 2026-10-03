@@ -1,4 +1,5 @@
 import { test, expect } from "../../fixtures/test-base";
+import { waitForSessionDone } from "../../helpers/session";
 import { SessionPage } from "../../pages/session-page";
 import { WorkflowSettingsPage } from "../../pages/workflow-settings-page";
 import {
@@ -147,6 +148,18 @@ test.describe("Workflow session targeting", () => {
 
     await apiClient.moveTask(task.id, workflow.id, reviewReuse.id);
     await waitForAgentMarker(apiClient, initialSessionId, "initial-target-reuse");
+    await expect
+      .poll(
+        async () => {
+          const metadata = (await apiClient.getTask(task.id)).metadata ?? {};
+          return (
+            metadata.manual_move_lifecycle_pending === undefined &&
+            metadata.manual_move_lifecycle_completed === true
+          );
+        },
+        { timeout: 30_000, message: "reuse move lifecycle did not settle" },
+      )
+      .toBe(true);
     const afterReuse = (await apiClient.listTaskSessions(task.id)).sessions;
     expect(afterReuse.filter((session) => session.agent_profile_id === profileA.id)).toHaveLength(
       1,
@@ -183,7 +196,7 @@ test.describe("Workflow session targeting", () => {
     apiClient,
     seedData,
   }) => {
-    test.setTimeout(120_000);
+    test.setTimeout(180_000);
     const { profileA } = await createWorkflowAgentProfiles(apiClient, seedData.agentProfileId);
     const workflow = await apiClient.createWorkflow(
       seedData.workspaceId,
@@ -240,6 +253,13 @@ test.describe("Workflow session targeting", () => {
         timeout: 15_000,
       })
       .toBe(destination.id);
+    await waitForSessionDone(
+      apiClient,
+      task.id,
+      destinationSessionId,
+      "same-profile topbar session did not finish its workflow prompt",
+      60_000,
+    );
     await waitForAgentMarker(apiClient, destinationSessionId, marker);
 
     const movedSessions = (await apiClient.listTaskSessions(task.id)).sessions;
@@ -310,6 +330,7 @@ test.describe("Workflow session targeting", () => {
       "Source target runtime",
       profileA.id,
       {
+        description: "/e2e:simple-message",
         workflow_id: workflow.id,
         workflow_step_id: plan.id,
         repository_ids: [seedData.repositoryId],

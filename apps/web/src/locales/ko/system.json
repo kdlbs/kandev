@@ -803,5 +803,11 @@
   "toolPayload.firstRun": "첫 실행은 백업 준비 후 시작됩니다.",
   "toolPayload.analysisDetails": "분석 세부 정보",
   "toolPayload.runDetails": "실행 세부 정보",
+  "agentRuntimeAdminRequired": "워크스페이스 관리자에게 런타임 복구를 다시 시도해 달라고 요청하세요.",
+  "agentRuntimeRecoveringBody": "저장된 대화와 워크스페이스는 유지됩니다.",
+  "agentRuntimeRecoveringTitle": "로컬 에이전트 런타임 복구 중",
+  "agentRuntimeRetry": "에이전트 런타임 다시 시도",
+  "agentRuntimeRetryFailed": "Kandev에서 런타임 복구를 시작할 수 없습니다. 다시 시도하세요.",
+  "agentRuntimeRetryStale": "런타임 상태가 변경되었습니다. 최신 상태가 표시될 때까지 기다린 후 다시 시도하세요.",
   "storageGoCacheBusyPolicySnapshot": "이번 실행에서는 작업 중 Go 캐시 정리 설정이 켜져 있었습니다."
 }

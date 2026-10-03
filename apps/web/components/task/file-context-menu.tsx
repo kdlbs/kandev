@@ -539,26 +539,16 @@ export function TreeNodeName({
   rename: ReturnType<typeof useFileRename>;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
-  const blurEnabledRef = useRef(false);
 
   useEffect(() => {
     if (rename.isRenaming) {
-      blurEnabledRef.current = false;
       inputRef.current?.focus();
       inputRef.current?.select();
-      const blurTimer = setTimeout(() => {
-        blurEnabledRef.current = true;
-      }, 400);
-      return () => {
-        clearTimeout(blurTimer);
-      };
     }
   }, [rename.isRenaming]);
 
   const handleBlur = useCallback(() => {
-    if (blurEnabledRef.current) {
-      rename.handleConfirmRename();
-    }
+    rename.handleConfirmRename();
   }, [rename]);
 
   if (rename.isRenaming) {

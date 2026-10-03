@@ -11,12 +11,36 @@ import (
 	"github.com/kandev/kandev/internal/events/bus"
 )
 
+func TestAvailabilitySnapshotsCarryMonotonicRevision(t *testing.T) {
+	availability := NewAvailability(nil, newTestLogger())
+	availability.MarkAvailable()
+	available, ok := availability.Snapshot()
+	if !ok {
+		t.Fatal("available snapshot was not published")
+	}
+	availableRevision := available.Revision
+
+	availability.MarkUnavailable()
+	unavailable, ok := availability.Snapshot()
+	if !ok {
+		t.Fatal("unavailable snapshot was not published")
+	}
+	unavailableRevision := unavailable.Revision
+	if unavailableRevision <= availableRevision {
+		t.Fatalf("unavailable revision = %d, want greater than available revision %d", unavailableRevision, availableRevision)
+	}
+}
+
 func TestAvailabilityPublishesSanitizedMonotonicSnapshots(t *testing.T) {
 	eventBus := bus.NewMemoryEventBus(newTestLogger())
 	t.Cleanup(eventBus.Close)
-	var published []*bus.Event
+	published := make(chan AvailabilitySnapshot, 2)
 	_, err := eventBus.Subscribe(events.AgentRuntimeAvailabilityChanged, func(_ context.Context, event *bus.Event) error {
-		published = append(published, event)
+		snapshot, ok := event.Data.(AvailabilitySnapshot)
+		if !ok {
+			t.Fatalf("availability event data = %T, want AvailabilitySnapshot", event.Data)
+		}
+		published <- snapshot
 		return nil
 	})
 	if err != nil {
@@ -24,6 +48,7 @@ func TestAvailabilityPublishesSanitizedMonotonicSnapshots(t *testing.T) {
 	}
 
 	availability := NewAvailability(eventBus, newTestLogger())
+	t.Cleanup(availability.Stop)
 	if _, ok := availability.Snapshot(); ok {
 		t.Fatal("startup availability must not be published before health and auth")
 	}
@@ -56,8 +81,11 @@ func TestAvailabilityPublishesSanitizedMonotonicSnapshots(t *testing.T) {
 	if final.OccurredAt == nil || !final.OccurredAt.Equal(occurredAt) {
 		t.Fatalf("unavailable occurrence changed: got %v, want %v", final.OccurredAt, occurredAt)
 	}
-	if len(published) != 2 {
-		t.Fatalf("published event count = %d, want available and unavailable", len(published))
+	firstPublished := <-published
+	secondPublished := <-published
+	if firstPublished.Status != AvailabilityStatusAvailable || secondPublished.Status != AvailabilityStatusUnavailable ||
+		firstPublished.Revision >= secondPublished.Revision {
+		t.Fatalf("published transitions = %+v then %+v, want increasing available then unavailable", firstPublished, secondPublished)
 	}
 }
 
@@ -95,8 +123,7 @@ func TestAvailabilitySnapshotReadsAreSafeDuringTransition(t *testing.T) {
 func TestAvailabilityPublishesTransitionsInCommitOrder(t *testing.T) {
 	eventBus := bus.NewMemoryEventBus(newTestLogger())
 	t.Cleanup(eventBus.Close)
-	var published []AvailabilitySnapshot
-	var publishedMu sync.Mutex
+	published := make(chan AvailabilitySnapshot, 2)
 	firstPublishStarted := make(chan struct{})
 	releaseFirstPublish := make(chan struct{})
 	var publishCalls atomic.Int32
@@ -112,9 +139,7 @@ func TestAvailabilityPublishesTransitionsInCommitOrder(t *testing.T) {
 		if !ok {
 			t.Fatalf("availability event data = %T, want AvailabilitySnapshot", event.Data)
 		}
-		publishedMu.Lock()
-		published = append(published, snapshot)
-		publishedMu.Unlock()
+		published <- snapshot
 		return nil
 	})
 	if err != nil {
@@ -122,6 +147,7 @@ func TestAvailabilityPublishesTransitionsInCommitOrder(t *testing.T) {
 	}
 
 	availability := NewAvailability(eventBus, newTestLogger())
+	t.Cleanup(availability.Stop)
 	availableDone := make(chan struct{})
 	go func() {
 		availability.MarkAvailable()
@@ -135,12 +161,7 @@ func TestAvailabilityPublishesTransitionsInCommitOrder(t *testing.T) {
 		close(unavailableDone)
 	}()
 
-	select {
-	case <-unavailableDone:
-		t.Fatal("unavailable transition completed before available publication was released")
-	case <-time.After(25 * time.Millisecond):
-	}
-
+	<-unavailableDone
 	close(releaseFirstPublish)
 	select {
 	case <-availableDone:
@@ -153,10 +174,10 @@ func TestAvailabilityPublishesTransitionsInCommitOrder(t *testing.T) {
 		t.Fatal("unavailable transition did not complete")
 	}
 
-	publishedMu.Lock()
-	defer publishedMu.Unlock()
-	if len(published) != 2 || published[0].Status != AvailabilityStatusAvailable ||
-		published[1].Status != AvailabilityStatusUnavailable {
-		t.Fatalf("published availability transitions = %+v, want available then unavailable", published)
+	firstSnapshot := <-published
+	secondSnapshot := <-published
+	if firstSnapshot.Status != AvailabilityStatusAvailable || secondSnapshot.Status != AvailabilityStatusUnavailable ||
+		firstSnapshot.Revision >= secondSnapshot.Revision {
+		t.Fatalf("published availability transitions = %+v, then %+v, want increasing available then unavailable", firstSnapshot, secondSnapshot)
 	}
 }

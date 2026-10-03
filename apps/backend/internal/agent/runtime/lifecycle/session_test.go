@@ -55,6 +55,10 @@ type mockAgentServer struct {
 	httpActionLog        []string
 	rejectStreamAttempts int
 	agentStatus          string
+	instanceID           string
+	taskSessionID        string
+	nativeSessionID      string
+	deliveryStatus       *agentctl.DeliveryStatus
 	upgrader             websocket.Upgrader
 	handler              func(msg ws.Message) *ws.Message
 	afterResponse        func(msg ws.Message)
@@ -115,6 +119,39 @@ func newMockAgentServer(t *testing.T) *mockAgentServer {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = fmt.Fprintf(w, `{"agent_status":%q}`, status)
+	})
+	mux.HandleFunc("/api/v1/agent/session", func(w http.ResponseWriter, _ *http.Request) {
+		m.mu.Lock()
+		status := m.agentStatus
+		if status == "" {
+			status = "running"
+		}
+		identity := map[string]any{
+			"instance_id":        m.instanceID,
+			"session_id":         m.taskSessionID,
+			"native_session_id":  m.nativeSessionID,
+			"agent_status":       status,
+			"incarnation_id":     "",
+			"harness_generation": uint64(0),
+		}
+		if m.deliveryStatus != nil {
+			identity["incarnation_id"] = m.deliveryStatus.IncarnationID
+			identity["harness_generation"] = m.deliveryStatus.HarnessGeneration
+		}
+		m.mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(identity)
+	})
+	mux.HandleFunc("/api/v1/agent/delivery", func(w http.ResponseWriter, r *http.Request) {
+		m.mu.Lock()
+		status := m.deliveryStatus
+		m.mu.Unlock()
+		if status == nil {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(status)
 	})
 
 	// Agent stream WebSocket endpoint
@@ -2003,9 +2040,13 @@ func TestInitializeSession_CreatesNewSession(t *testing.T) {
 		},
 	}
 
-	result, err := sm.InitializeSession(ctx, client, agentConfig, "", "/workspace", nil)
+	execution := &AgentExecution{DeliveryStreamID: "legacy-stream"}
+	result, err := sm.InitializeSession(ctx, execution, client, agentConfig, "", "/workspace", nil)
 	if err != nil {
 		t.Fatalf("InitializeSession failed: %v", err)
+	}
+	if execution.DeliveryMode != DurableDeliveryLegacy {
+		t.Errorf("delivery mode = %q, want %q", execution.DeliveryMode, DurableDeliveryLegacy)
 	}
 
 	if result.AgentName != "test-agent" {
@@ -2157,7 +2198,7 @@ func TestInitializeSession_LoadsExistingSession(t *testing.T) {
 		},
 	}
 
-	result, err := sm.InitializeSession(ctx, client, agentConfig, "existing-session", "/workspace", nil)
+	result, err := sm.InitializeSession(ctx, nil, client, agentConfig, "existing-session", "/workspace", nil)
 	if err != nil {
 		t.Fatalf("InitializeSession failed: %v", err)
 	}

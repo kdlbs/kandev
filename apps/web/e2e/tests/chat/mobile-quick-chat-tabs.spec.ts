@@ -48,7 +48,7 @@ test.describe("mobile quick chat tabs", () => {
         (response) =>
           response.url().includes("/quick-chat") && response.request().method() === "POST",
       );
-      await startQuickChatFromSetup(dialog, testPage);
+      await startQuickChatFromSetup(dialog, testPage, firstStart);
       const first = (await (await firstStart).json()) as { session_id: string };
       const firstReference = `conversation:${first.session_id}`;
 
@@ -76,7 +76,7 @@ test.describe("mobile quick chat tabs", () => {
         (response) =>
           response.url().includes("/quick-chat") && response.request().method() === "POST",
       );
-      await startQuickChatFromSetup(dialog, testPage);
+      await startQuickChatFromSetup(dialog, testPage, secondStart);
       const second = (await (await secondStart).json()) as { session_id: string };
       const secondReference = `conversation:${second.session_id}`;
 

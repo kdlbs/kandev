@@ -108,14 +108,23 @@ func (m *Manager) startAgentProcess(ctx context.Context, executionID string) (re
 	if !exists {
 		return fmt.Errorf("execution %q not found", executionID)
 	}
+	startupDisposition := execution.startupDispositionSnapshot()
 	defer func() {
-		if retErr == nil {
-			return
+		if retErr != nil {
+			_, _, onInitialPromptFailure := execution.takeInitialPromptDispatchCallbacks()
+			if onInitialPromptFailure != nil {
+				onInitialPromptFailure()
+			}
+			if startupDisposition == AgentStartupReattachedExisting {
+				retErr = &AgentReattachmentFailure{
+					ExecutionID:     execution.ID,
+					SessionID:       execution.SessionID,
+					ResumeAttemptID: ResumeAttemptIDFromContext(ctx),
+					Cause:           retErr,
+				}
+			}
 		}
-		_, _, onInitialPromptFailure := execution.takeInitialPromptDispatchCallbacks()
-		if onInitialPromptFailure != nil {
-			onInitialPromptFailure()
-		}
+		retErr = wrapBootstrapFailure(execution, retErr)
 	}()
 	if err := execution.contextResetAdmissionError(); err != nil {
 		return err
@@ -126,9 +135,6 @@ func (m *Manager) startAgentProcess(ctx context.Context, executionID string) (re
 	}); err != nil {
 		return err
 	}
-	defer func() {
-		retErr = wrapBootstrapFailure(execution, retErr)
-	}()
 	if err := m.ensureLaunchSessionStillActive(ctx, execution.SessionID, executionAdmissionAgent); err != nil {
 		return err
 	}
@@ -179,10 +185,9 @@ func (m *Manager) startAgentProcess(ctx context.Context, executionID string) (re
 		return fmt.Errorf("execution %q has no agentctl client", executionID)
 	}
 
-	// Check if we're reconnecting to an existing running agent process.
-	// When the existing process is still alive inside a remote executor (e.g., Sprites),
-	// we skip subprocess launch and go directly to ACP session initialization.
-	reuseExisting := execution.metadataBool(MetadataKeyReuseExistingProcess)
+	// The executor selected this instance because its existing process already
+	// owns the task session. The immutable disposition fences all later cleanup.
+	reuseExisting := startupDisposition == AgentStartupReattachedExisting
 
 	if !reuseExisting && execution.AgentCommand == "" {
 		return fmt.Errorf("execution %q has no agent command configured", executionID)
@@ -199,14 +204,16 @@ func (m *Manager) startAgentProcess(ctx context.Context, executionID string) (re
 		m.updateExecutionError(executionID, "agentctl not ready: "+err.Error())
 		return fmt.Errorf("agentctl not ready: %w", err)
 	}
-	err = m.preflightRemoteContributionPushes(operationCtx, execution)
-	if err != nil {
-		m.updateExecutionError(executionID, "contribution push preflight failed: "+err.Error())
-		return err
+	var taskDescription, agentDisplayName string
+	if !reuseExisting {
+		err = m.preflightRemoteContributionPushes(operationCtx, execution)
+		if err != nil {
+			m.updateExecutionError(executionID, "contribution push preflight failed: "+err.Error())
+			return err
+		}
+		taskDescription = getTaskDescriptionFromMetadata(execution)
+		agentDisplayName = m.resolveAgentDisplayName(operationCtx, execution)
 	}
-
-	taskDescription := getTaskDescriptionFromMetadata(execution)
-	agentDisplayName := m.resolveAgentDisplayName(operationCtx, execution)
 
 	execution.remoteInstanceLifecycleMu.Lock()
 	if err := m.admitExecutionOwner(operationCtx, &LaunchRequest{
@@ -222,13 +229,12 @@ func (m *Manager) startAgentProcess(ctx context.Context, executionID string) (re
 	}
 	var bootCommand string
 	if reuseExisting {
-		// Agent subprocess is already running inside the remote executor.
-		// Skip configureAndStartAgent (which would spawn a conflicting subprocess)
-		// and go directly to ACP session initialization.
-		bootCommand = "reconnecting to running agent"
-		m.logger.Info("reusing existing agent process, skipping subprocess launch",
+		m.logger.Info("reattaching to existing agent session without ACP initialization",
 			zap.String("execution_id", executionID),
 			zap.String("task_id", execution.TaskID))
+		err := m.adoptExistingAgentSession(operationCtx, execution, client)
+		execution.remoteInstanceLifecycleMu.Unlock()
+		return err
 	} else {
 		m.logger.Info("StartAgentProcess: starting subprocess",
 			zap.String("execution_id", executionID),

@@ -59,6 +59,7 @@ type AgentEventData struct {
 	ProviderError           *streams.ProviderError              `json:"provider_error,omitempty"`
 	SessionSettingsPolicy   streams.SessionSettingsPolicy       `json:"session_settings_policy,omitempty"`
 	PromptGeneration        uint64                              `json:"prompt_generation,omitempty"`
+	TurnID                  string                              `json:"turn_id,omitempty"`
 	// DynamicRouteAttempt marks failures and stream evidence that belong to a
 	// dynamic provider attempt. Fallback is fail-closed unless the evidence is
 	// explicitly known to contain no output or effects.
@@ -80,11 +81,14 @@ type AgentEventData struct {
 
 // ACPSessionEventData contains data from ACP session events
 type ACPSessionEventData struct {
-	TaskID           string `json:"task_id"`
-	SessionID        string `json:"session_id"`
-	AgentExecutionID string `json:"agent_execution_id"`
-	AttemptID        string `json:"attempt_id,omitempty"`
-	ACPSessionID     string `json:"acp_session_id"`
+	TaskID                    string `json:"task_id"`
+	SessionID                 string `json:"session_id"`
+	AgentExecutionID          string `json:"agent_execution_id"`
+	AttemptID                 string `json:"attempt_id,omitempty"`
+	ACPSessionID              string `json:"acp_session_id"`
+	DeliveryStreamID          string `json:"delivery_stream_id,omitempty"`
+	DeliveryIncarnationID     string `json:"delivery_incarnation_id,omitempty"`
+	DeliveryHarnessGeneration uint64 `json:"delivery_harness_generation,omitempty"`
 }
 
 // PermissionRequestData contains data from permission_request events
@@ -158,6 +162,7 @@ type EventHandlers struct {
 	OnAgentFailed       func(ctx context.Context, data AgentEventData)
 	OnAgentStalled      func(ctx context.Context, payload lifecycle.AgentStalledPayload)
 	OnAgentStopped      func(ctx context.Context, data AgentEventData)
+	OnAgentctlError     func(ctx context.Context, payload lifecycle.AgentctlEventPayload)
 	OnACPSessionCreated func(ctx context.Context, data ACPSessionEventData)
 
 	// Agent stream events (tool calls, message chunks, complete, etc.)
@@ -379,7 +384,28 @@ func (w *Watcher) subscribeToAgentEvents() error {
 		}
 		w.subscriptions = append(w.subscriptions, sub)
 	}
+	if w.handlers.OnAgentctlError != nil {
+		sub, err := w.eventBus.QueueSubscribe(events.AgentctlError, w.queue, w.createAgentctlErrorEventHandler())
+		if err != nil {
+			w.logger.Error("Failed to subscribe to agentctl error event",
+				zap.String("subject", events.AgentctlError), zap.String("queue", w.queue), zap.Error(err))
+			return err
+		}
+		w.subscriptions = append(w.subscriptions, sub)
+	}
 	return nil
+}
+
+func (w *Watcher) createAgentctlErrorEventHandler() bus.EventHandler {
+	return func(ctx context.Context, event *bus.Event) error {
+		var payload lifecycle.AgentctlEventPayload
+		if err := w.parseEventData(event.Data, &payload); err != nil {
+			w.logger.Error("Failed to parse agentctl error event", zap.Error(err))
+			return nil
+		}
+		w.handlers.OnAgentctlError(ctx, payload)
+		return nil
+	}
 }
 
 func (w *Watcher) subscribeToAgentStallEvents() error {

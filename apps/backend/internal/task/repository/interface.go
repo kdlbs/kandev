@@ -35,6 +35,11 @@ var ErrWIPLimitExceeded = wfmodels.ErrWIPLimitExceeded
 var ErrExternalIDConflict = repoerrors.ErrExternalIDConflict
 var ErrStepChanged = repoerrors.ErrStepChanged
 var ErrInvalidReorder = repoerrors.ErrInvalidReorder
+var ErrAgentDeliverySubmissionConflict = repoerrors.ErrAgentDeliverySubmissionConflict
+var ErrAgentDeliverySubmissionNotFound = repoerrors.ErrAgentDeliverySubmissionNotFound
+var ErrAgentDeliveryEventConflict = repoerrors.ErrAgentDeliveryEventConflict
+var ErrAgentDeliveryEffectConflict = repoerrors.ErrAgentDeliveryEffectConflict
+var ErrAgentDeliveryEffectNotFound = repoerrors.ErrAgentDeliveryEffectNotFound
 
 // WorkspaceRepository handles workspace CRUD.
 type WorkspaceRepository interface {
@@ -622,6 +627,53 @@ type SessionRepository interface {
 	DismissLastAgentError(ctx context.Context, sessionID string, expected models.LastAgentError, dismissedAt time.Time) (bool, error)
 	GetLastAgentMessage(ctx context.Context, sessionID string) (string, error)
 	UpdateTaskSessionLastReadMessageID(ctx context.Context, id, messageID string) error
+}
+
+// SessionContinuityRepository persists native harness generations and the
+// operator-visible recovery records associated with a task session.
+type SessionContinuityRepository interface {
+	CreateHarnessSessionGeneration(ctx context.Context, generation *models.HarnessSessionGeneration) error
+	GetCurrentHarnessSessionGeneration(ctx context.Context, sessionID, incarnationID string) (*models.HarnessSessionGeneration, error)
+	CommitHarnessSessionGeneration(ctx context.Context, generation *models.HarnessSessionGeneration, expectedGeneration int64) (bool, error)
+	CreateRestoreAttempt(ctx context.Context, attempt *models.RestoreAttempt) error
+	CompleteRestoreAttempt(ctx context.Context, id, outcome string, completedAt time.Time) error
+	CreateContinuationSnapshot(ctx context.Context, snapshot *models.ContinuationSnapshot) error
+	GetContinuationSnapshot(ctx context.Context, id string) (*models.ContinuationSnapshot, error)
+	CompleteContinuationSnapshot(ctx context.Context, id, status string, resolvedAt time.Time) error
+	UpsertSessionRecoveryBlock(ctx context.Context, block *models.SessionRecoveryBlock) error
+	GetOpenSessionRecoveryBlock(ctx context.Context, sessionID, incarnationID string, expectedGeneration int64) (*models.SessionRecoveryBlock, error)
+	ResolveSessionRecoveryBlock(ctx context.Context, id, action string, resolvedAt time.Time) (bool, error)
+}
+
+// AgentDeliveryRecoveryRepository persists the revisioned session notice for
+// an uncertain durable prompt outcome.
+type AgentDeliveryRecoveryRepository interface {
+	UpsertAgentDeliveryRecovery(ctx context.Context, recovery *models.AgentDeliveryRecovery, block *models.SessionRecoveryBlock) (bool, error)
+	ResolveAgentDeliveryRecovery(ctx context.Context, recovery *models.AgentDeliveryRecovery, action string) (bool, error)
+	ClearAgentDeliveryRecovery(ctx context.Context, sessionID, incarnationID, submissionID string, harnessGeneration int64) (bool, error)
+}
+
+// AgentDeliveryRepository owns the backend side of the durable agentctl
+// protocol. Inbox receipt and projection watermarks are deliberately separate.
+type AgentDeliveryRepository interface {
+	PrepareAgentDeliverySubmission(ctx context.Context, submission *models.AgentDeliverySubmission) (bool, error)
+	GetAgentDeliverySubmission(ctx context.Context, id string) (*models.AgentDeliverySubmission, error)
+	TransitionAgentDeliverySubmission(ctx context.Context, id string, from, to models.DeliverySubmissionState, outcome string, updatedAt time.Time) (bool, error)
+	ReceiveAgentDeliveryEvent(ctx context.Context, event *models.AgentDeliveryEvent, remoteHighWater int64) (bool, error)
+	GetAgentDeliveryCursor(ctx context.Context, streamID string) (*models.AgentDeliveryCursor, error)
+	ListUnprojectedAgentDeliveryEvents(ctx context.Context, streamID string, limit int) ([]*models.AgentDeliveryEvent, error)
+	ProjectAgentDeliveryEvent(ctx context.Context, event *models.AgentDeliveryEvent, effect *models.AgentDeliveryEffect) (bool, error)
+	PutAgentDeliveryEffect(ctx context.Context, effect *models.AgentDeliveryEffect) (bool, error)
+	GetAgentDeliveryEffect(ctx context.Context, effectKey string) (*models.AgentDeliveryEffect, error)
+}
+
+// AgentDeliverySettlementRepository exposes the durable outbox used to finish
+// exact terminal submissions after ordered projection. Implementations retain
+// non-completed effects until queue-claim cleanup succeeds.
+type AgentDeliverySettlementRepository interface {
+	SettleAgentDeliveryTerminal(ctx context.Context, streamID string, sequence int64, outcome models.DeliverySubmissionState, settledAt time.Time) (bool, error)
+	ListPendingAgentDeliverySettlements(ctx context.Context, sessionID string) ([]*models.AgentDeliveryEffect, error)
+	CompleteAgentDeliveryTerminalSettlement(ctx context.Context, effectKey string, completedAt time.Time) (bool, error)
 }
 
 // SessionWorktreeRepository exposes session-scoped worktree projections over

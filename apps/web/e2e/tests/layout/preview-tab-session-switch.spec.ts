@@ -4,34 +4,12 @@ import { test } from "../../fixtures/test-base";
 import type { SeedData } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
 import { SessionPage } from "../../pages/session-page";
-import { GitHelper, makeGitEnv } from "../../helpers/git-helper";
-import { KanbanPage } from "../../pages/kanban-page";
+import { GitHelper, makeGitEnv, publishSeedCommit } from "../../helpers/git-helper";
 import { dwell } from "../../helpers/causal-waits";
+import { waitForWorkspaceFile } from "../../helpers/session";
 
 const FILE_A = "alpha.ts";
 const DONE_STATES = ["COMPLETED", "WAITING_FOR_INPUT"];
-
-async function waitForWorkspaceFile(
-  apiClient: ApiClient,
-  sessionId: string,
-  filename: string,
-): Promise<void> {
-  await expect
-    .poll(
-      async () => {
-        try {
-          const response = await apiClient.wsRequest<{
-            root?: { children?: Array<{ path?: string }> } | null;
-          }>("workspace.tree.get", { session_id: sessionId, path: "", depth: 1 });
-          return response.root?.children?.some((child) => child.path === filename) ?? false;
-        } catch {
-          return false;
-        }
-      },
-      { timeout: 30_000, message: `Waiting for ${filename} in the task workspace` },
-    )
-    .toBe(true);
-}
 
 async function openFileInPreview(page: Page, session: SessionPage, filename: string) {
   await session.clickTab("Files");
@@ -82,19 +60,6 @@ async function seedFinishedTask(
 /** `.dv-tab` is the wrapper dockview toggles `dv-active-tab` on. */
 function tabWrapperByText(page: Page, text: string) {
   return page.locator(".dv-tab", { has: page.locator(".dv-default-tab", { hasText: text }) });
-}
-
-function publishSeedCommit(git: GitHelper, remoteURL: string) {
-  // Task workspaces are created from the repository's configured origin. A
-  // commit that only exists in the fixture's checkout can therefore be
-  // absent from the task file tree under CI load.
-  const remotes = git.exec("git remote").split(/\r?\n/);
-  if (remotes.includes("origin")) {
-    git.exec(`git remote set-url origin "${remoteURL}"`);
-  } else {
-    git.exec(`git remote add origin "${remoteURL}"`);
-  }
-  git.exec("git push origin HEAD:main");
 }
 
 test.describe("Preview tab survives session switch", () => {
@@ -233,9 +198,7 @@ test.describe("Preview tab survives session switch", () => {
     const taskA = await seedFinishedTask(apiClient, seedData, "Promote Round-Trip A");
     const taskB = await seedFinishedTask(apiClient, seedData, "Promote Round-Trip B");
 
-    const kanban = new KanbanPage(testPage);
-    await kanban.goto();
-    await kanban.taskCardByTitle("Promote Round-Trip A").click();
+    await testPage.goto(`/t/${taskA.id}`);
     await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
     const session = new SessionPage(testPage);
     await session.waitForLoad();
@@ -288,9 +251,7 @@ test.describe("Preview tab survives session switch", () => {
     const taskA = await seedFinishedTask(apiClient, seedData, "Active Tab Round-Trip A");
     const taskB = await seedFinishedTask(apiClient, seedData, "Active Tab Round-Trip B");
 
-    const kanban = new KanbanPage(testPage);
-    await kanban.goto();
-    await kanban.taskCardByTitle("Active Tab Round-Trip A").click();
+    await testPage.goto(`/t/${taskA.id}`);
     await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
     const session = new SessionPage(testPage);
     await session.waitForLoad();
@@ -338,11 +299,9 @@ test.describe("Preview tab survives session switch", () => {
     git.commit("seed refresh");
     publishSeedCommit(git, seedData.repositoryRemoteURL);
 
-    await seedFinishedTask(apiClient, seedData, "Refresh Active Tab Task");
+    const task = await seedFinishedTask(apiClient, seedData, "Refresh Active Tab Task");
 
-    const kanban = new KanbanPage(testPage);
-    await kanban.goto();
-    await kanban.taskCardByTitle("Refresh Active Tab Task").click();
+    await testPage.goto(`/t/${task.id}`);
     await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
     const session = new SessionPage(testPage);
     await session.waitForLoad();

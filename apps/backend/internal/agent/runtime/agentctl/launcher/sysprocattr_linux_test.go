@@ -18,8 +18,8 @@ func TestBuildSysProcAttrOmitsPdeathsigWhenSurvivalEnabled(t *testing.T) {
 	if attr.Pdeathsig != 0 {
 		t.Fatalf("Pdeathsig = %v, want unset (0) when the capability is engaged", attr.Pdeathsig)
 	}
-	if !attr.Setpgid {
-		t.Error("Setpgid must stay true regardless of the capability: it isolates agentctl from terminal Ctrl+C, unrelated to survival")
+	if !attr.Setsid {
+		t.Error("Setsid must stay true regardless of the capability: it isolates the owned runtime process tree")
 	}
 }
 

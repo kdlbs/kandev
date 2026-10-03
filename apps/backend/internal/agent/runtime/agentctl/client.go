@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -34,6 +35,7 @@ type Client struct {
 	sessionID             string
 	authToken             string // shared secret for Bearer auth
 	processGeneration     uint64
+	runtimeGuard          *runtimeBindingGuard
 
 	// Optional trace context for session-scoped spans in background goroutines.
 	// When set, stream read loops use this as parent context for tracing instead of context.Background().
@@ -52,8 +54,9 @@ type Client struct {
 	// stream is not gated on this flag because the cascade flow legitimately
 	// stops + restarts the agent stream on the same client; gating it would
 	// strand workflow step transitions on a closed client.
-	closed bool
-	mu     sync.RWMutex
+	closed       bool
+	mu           sync.RWMutex
+	runtimeConns map[*websocket.Conn]func() bool
 	// endpointTransport is present only for plugin-managed remote environments.
 	// It resolves a short-lived connection lease for every new request.
 	endpointTransport *endpointRoundTripper
@@ -70,6 +73,20 @@ type Client struct {
 	// session/load responses and by asynchronous session_models events. Lifecycle
 	// policy evaluation can use it before the event reaches its handler.
 	lastSessionModelState *streams.SessionModelState
+
+	// durableDelivery records the agentctl transport capability returned during
+	// initialize. It is separate from ACP capabilities because it describes the
+	// retained agentctl-to-backend journal rather than the native harness.
+	durableDelivery *DurableDeliveryInfo
+	// deliveryStatus is populated by authenticated recovery discovery. It lets
+	// a newly constructed client carry the adopted owner's capability and
+	// identity before any prompt or ACP operation is considered.
+	deliveryStatus *DeliveryStatus
+
+	// lastDeliverySubmissionID is the immutable agentctl record returned for
+	// the most recent accepted prompt. It lets lifecycle reconcile a disconnect
+	// even when no terminal event reached the backend yet.
+	lastDeliverySubmissionID string
 }
 
 func (c *Client) setLastSessionModelState(state *streams.SessionModelState) {
@@ -209,7 +226,50 @@ func newClient(baseURL string, log *logger.Logger, opts ...ClientOption) *Client
 		c.httpClient.Transport = &instanceIDTransport{instanceID: c.executionID, base: c.httpClient.Transport}
 		c.longRunningHTTPClient.Transport = &instanceIDTransport{instanceID: c.executionID, base: c.longRunningHTTPClient.Transport}
 	}
+	if c.runtimeGuard != nil {
+		c.httpClient.Transport = &runtimeBindingTransport{guard: c.runtimeGuard, base: c.httpClient.Transport}
+		c.longRunningHTTPClient.Transport = &runtimeBindingTransport{guard: c.runtimeGuard, base: c.longRunningHTTPClient.Transport}
+	}
 	return c
+}
+
+// RuntimeEpoch returns the local agentctl generation bound to this client, or
+// zero for executor-owned clients that do not use the backend local runtime.
+func (c *Client) RuntimeEpoch() uint64 {
+	if c == nil || c.runtimeGuard == nil || c.runtimeGuard.binding == nil {
+		return 0
+	}
+	return c.runtimeGuard.binding.epoch
+}
+
+// RuntimeProcessID reports the local agentctl process identity bound to this
+// client, or zero when the client belongs to another executor.
+func (c *Client) RuntimeProcessID() int {
+	if c == nil || c.runtimeGuard == nil || c.runtimeGuard.binding == nil {
+		return 0
+	}
+	return c.runtimeGuard.binding.processID
+}
+
+// RuntimeCurrent reports whether this client still targets the published
+// local runtime generation. Clients owned by remote executors are unbound and
+// remain current for this purpose.
+func (c *Client) RuntimeCurrent() bool {
+	return c == nil || c.runtimeGuard == nil || c.runtimeGuard.current()
+}
+
+// RuntimeBoundContext returns a context canceled when this client's local
+// runtime generation is retired. The caller must invoke the returned cancel
+// function when the operation ends.
+func (c *Client) RuntimeBoundContext(ctx context.Context) (context.Context, context.CancelFunc, error) {
+	if c == nil {
+		return nil, func() {}, errors.New("agentctl client is nil")
+	}
+	boundCtx, cancel, err := c.runtimeGuard.bindContext(ctx)
+	if err != nil {
+		return nil, func() {}, err
+	}
+	return boundCtx, cancel, nil
 }
 
 // ProxyTransport returns the same authenticated upstream transport used by
@@ -888,7 +948,20 @@ func (c *Client) Close() {
 	c.mu.Lock()
 	c.closed = true
 	ws := c.workspaceStream
+	connections := make([]*websocket.Conn, 0, len(c.runtimeConns))
+	stops := make([]func() bool, 0, len(c.runtimeConns))
+	for conn, stop := range c.runtimeConns {
+		connections = append(connections, conn)
+		stops = append(stops, stop)
+	}
+	c.runtimeConns = nil
 	c.mu.Unlock()
+	for _, stop := range stops {
+		stop()
+	}
+	for _, conn := range connections {
+		_ = conn.Close()
+	}
 
 	c.CloseUpdatesStream()
 	// CloseWorkspaceStream closes the raw conn to wake the blocked read loop.

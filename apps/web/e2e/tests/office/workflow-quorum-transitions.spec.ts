@@ -156,6 +156,15 @@ test.describe("Office workflow quorum-guarded transitions", () => {
       role: "worker",
     })) as Record<string, unknown>;
     const approverId = approver.id as string;
+    // The seat caster admits CEOs and specialists as reviewers, not generic
+    // workers. Keep an eligible non-runner available so this setup does not
+    // depend on the shared onboarding CEO's status after earlier Office runs.
+    await officeApi.createAgent(officeSeed.workspaceId, {
+      name: `Quorum Auto Seat Candidate ${Date.now()}`,
+      role: "specialist",
+      agent_profile_id: seedData.agentProfileId,
+      executor_preference: JSON.stringify({ type: "local_pc" }),
+    });
 
     // EnsureSession requires a resolvable agent profile (PrepareSession
     // rejects an empty one); a task with no assignee and a workspace with no
@@ -188,7 +197,7 @@ test.describe("Office workflow quorum-guarded transitions", () => {
     await expect
       .poll(async () => (await getParticipants(apiClient, task.id, "reviewers")).length, {
         timeout: 90_000,
-        message: "Waiting for the Review participant seat",
+        message: "Waiting for Review entry to create its automatic reviewer seat",
       })
       .toBe(1);
 

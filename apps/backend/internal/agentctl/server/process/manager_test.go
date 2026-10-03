@@ -23,6 +23,20 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestStartWithGenerationReturnsNoGenerationWhenJournalIsUnavailable(t *testing.T) {
+	journalErr := errors.New("journal unavailable")
+	manager := &Manager{
+		cfg:                &config.InstanceConfig{DurableJournalPath: "unavailable"},
+		deliveryJournalErr: journalErr,
+	}
+	manager.status.Store(StatusStopped)
+
+	generation, err := manager.StartWithGeneration(context.Background())
+
+	assert.Zero(t, generation)
+	require.ErrorIs(t, err, journalErr)
+}
+
 func TestManagerRefreshWorkspaceNormalizesTriggerForEveryTracker(t *testing.T) {
 	log := newTestLogger(t)
 	rootDir, cleanupRoot := setupTestRepo(t)

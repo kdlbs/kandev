@@ -134,16 +134,33 @@ func (j KillOnCloseJob) TerminateAndWait(ctx context.Context) error {
 		return nil
 	}
 
-	active, err := activeJobProcesses(j.state.handle)
+	if err := TerminateJobAndWaitHandle(ctx, uintptr(j.state.handle)); err != nil {
+		return err
+	}
+
+	if err := windows.CloseHandle(j.state.handle); err != nil {
+		return err
+	}
+	j.state.handle = 0
+	return nil
+}
+
+// TerminateJobAndWaitHandle terminates and waits for every process in an
+// already-owned Job Object. It leaves the handle open for its owner to release.
+func TerminateJobAndWaitHandle(ctx context.Context, rawHandle uintptr) error {
+	if rawHandle == 0 {
+		return nil
+	}
+	handle := windows.Handle(rawHandle)
+	active, err := activeJobProcesses(handle)
 	if err != nil {
 		return err
 	}
 	if active > 0 {
-		if err := windows.TerminateJobObject(j.state.handle, 1); err != nil {
+		if err := windows.TerminateJobObject(handle, 1); err != nil {
 			return fmt.Errorf("TerminateJobObject: %w", err)
 		}
 	}
-
 	ticker := time.NewTicker(10 * time.Millisecond)
 	defer ticker.Stop()
 	for active > 0 {
@@ -152,16 +169,11 @@ func (j KillOnCloseJob) TerminateAndWait(ctx context.Context) error {
 			return fmt.Errorf("wait for job processes: %w", ctx.Err())
 		case <-ticker.C:
 		}
-		active, err = activeJobProcesses(j.state.handle)
+		active, err = activeJobProcesses(handle)
 		if err != nil {
 			return err
 		}
 	}
-
-	if err := windows.CloseHandle(j.state.handle); err != nil {
-		return err
-	}
-	j.state.handle = 0
 	return nil
 }
 

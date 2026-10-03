@@ -639,7 +639,7 @@ func buildReconnectCreateInstanceRequest(req *ExecutorCreateRequest, instanceID 
 			stripEnv = rt.StripEnv
 		}
 	}
-	return &agentctl.CreateInstanceRequest{
+	createReq := &agentctl.CreateInstanceRequest{
 		ID:                    instanceID,
 		WorkspacePath:         dockerWorkspacePath,
 		Protocol:              req.Protocol,
@@ -668,7 +668,16 @@ func buildReconnectCreateInstanceRequest(req *ExecutorCreateRequest, instanceID 
 		RemoteContributions:        req.RemoteContributions,
 		ContributionDestinations:   req.ContributionDestinations,
 		ComparisonTargets:          req.ComparisonTargets,
+		DeliveryStreamID:           req.DeliveryStreamID,
+		DeliveryIncarnationID:      req.DeliveryIncarnationID,
+		DeliveryHarnessGeneration:  req.DeliveryHarnessGeneration,
 	}
+	if req.DurableJournalHostRoot != "" && req.DurableJournalOwnerID != "" {
+		if path, err := durableJournalContainerPath(req); err == nil {
+			createReq.DurableJournalPath = path
+		}
+	}
+	return createReq
 }
 
 // healthChecker is the narrow interface waitForAgentctlHealth needs from the

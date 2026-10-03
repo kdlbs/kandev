@@ -18,6 +18,35 @@ describe("createAppStore", () => {
     expect(store.getState().agentRuntime).toEqual(available);
   });
 
+  it("ignores stale runtime revisions from the same backend boot", () => {
+    const recovering = {
+      status: "recovering" as const,
+      boot_id: "boot-1",
+      runtime_epoch: 5,
+      revision: 8,
+    };
+    const store = createAppStore({
+      agentRuntime: {
+        status: "unavailable",
+        boot_id: "boot-1",
+        runtime_epoch: 5,
+        revision: 7,
+      },
+    });
+
+    store.getState().setAgentRuntime(recovering);
+    store.getState().setAgentRuntime({
+      status: "unavailable",
+      boot_id: "boot-1",
+      runtime_epoch: 5,
+      revision: 7,
+    });
+
+    expect(store.getState().agentRuntime).toEqual(recovering);
+  });
+});
+
+describe("createAppStore boot settings", () => {
   it("retains sidebar boot settings after slice initialization", () => {
     const store = createAppStore({
       userSettings: {

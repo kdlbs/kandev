@@ -1,5 +1,6 @@
 import type { Page } from "@playwright/test";
 import { test, expect } from "../../fixtures/test-base";
+import { waitForSessionAgentctlReady } from "../../helpers/session-store";
 import { SessionPage } from "../../pages/session-page";
 
 const TERMINAL_STATES = ["COMPLETED", "FAILED", "CANCELLED"];
@@ -110,6 +111,7 @@ test.describe("terminal on an ended session", () => {
 
         const session = new SessionPage(testPage);
         await session.waitForLoad();
+        if (restore) await waitForSessionAgentctlReady(testPage, sessionId as string);
 
         const terminalPanel = testPage.getByTestId("terminal-panel").first();
         await expect(terminalPanel).toBeVisible({ timeout: 15_000 });
@@ -124,6 +126,8 @@ test.describe("terminal on an ended session", () => {
               }, sessionId!),
             )
             .toBe("ready");
+          await session.expectTerminalConnected(30_000);
+          await expect(terminalPanel.getByTestId("workspace-unavailable")).toBeHidden();
           await expect
             .poll(() =>
               terminalPanel.locator(".xterm").evaluate((element) => {

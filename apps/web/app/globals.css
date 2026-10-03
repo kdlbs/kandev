@@ -426,6 +426,13 @@ html[data-rendering-engine="webkit"] [data-webkit-safe-motion="true"][data-state
     bottom: calc(4rem + env(safe-area-inset-bottom, 0px)) !important;
   }
 
+  /* The review file actions sheet needs its positioner pinned to the viewport;
+     other mobile menus keep the shared 8px inset and trigger placement. */
+  [data-radix-popper-content-wrapper]:has(> .mobile-menu-root.mobile-review-file-actions-menu) {
+    inset: 0 !important;
+    transform: none !important;
+  }
+
   /* The root positioner owns one backdrop outside the scrolling menu.
      Submenus keep that layer, and Radix retains outside-interaction handling. */
   [data-radix-popper-content-wrapper]:has(> .mobile-menu-root)::before {

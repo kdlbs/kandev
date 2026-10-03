@@ -427,6 +427,23 @@ test.describe("Transcript auto-scroll toggle", () => {
     const toggle = firstChat.getByTestId("auto-scroll-toggle-button");
     await toggle.click();
     await expect(toggle).toHaveAttribute("aria-pressed", "false");
+    await expect
+      .poll(
+        async () =>
+          testPage.evaluate(
+            ({ sessionId, expectedScrollTop }) => {
+              const saved = (window as E2EMessageStoreWindow).__KANDEV_E2E_STORE__?.getState()
+                .transcriptAutoScroll.scrollTopBySessionId[sessionId];
+              return saved !== undefined && Math.abs(saved - expectedScrollTop) <= 20;
+            },
+            { sessionId: firstSessionId, expectedScrollTop: targetScrollTop },
+          ),
+        {
+          timeout: 15_000,
+          message: "disabled transcript position should be persisted before switching sessions",
+        },
+      )
+      .toBe(true);
 
     await refreshedSession.sessionTabBySessionId(secondSessionId).click();
     await waitForStableActiveSession(testPage, secondSessionId);

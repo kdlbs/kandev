@@ -6,6 +6,7 @@ import { typeWhileBusy, waitForComposerQueueMode } from "../../helpers/type-whil
 import { SessionPage } from "../../pages/session-page";
 import { seedRunningGeneratingSession } from "../../helpers/generating-session";
 import { waitForAgentMessage, waitForSessionDone } from "../../helpers/session";
+import { waitForSessionAgentctlReady } from "../../helpers/session-store";
 import { expectFullQueueScrolls, seedFullQueueTask } from "./message-queue-scroll-helpers";
 import { waitForQuickChatComposerReady } from "./quick-chat-helpers";
 import {
@@ -16,7 +17,7 @@ import {
   registerSeparateQueueRows,
   requestMessageQueueSettings,
 } from "../../helpers/message-queue-settings";
-import { watchWs } from "../../helpers/causal-waits";
+import { waitForHttp, watchWs } from "../../helpers/causal-waits";
 
 registerSeparateQueueRows(test);
 
@@ -73,7 +74,12 @@ async function openQuickChatWithAgent(page: Page): Promise<Locator> {
     await agentSelector.click();
     await page.getByRole("option").first().click();
   }
+  const quickChatStarted = waitForHttp(page, "POST", /^\/api\/v1\/workspaces\/[^/]+\/quick-chat$/, {
+    timeout: 30_000,
+  });
   await dialog.getByTestId("quick-chat-start").click();
+  const startResponse = await quickChatStarted;
+  expect(startResponse.ok(), "Quick Chat startup request should succeed").toBe(true);
 
   await waitForQuickChatComposerReady(dialog);
   return dialog;
@@ -584,7 +590,7 @@ test.describe("Task session queue", () => {
     apiClient,
     seedData,
   }) => {
-    test.setTimeout(90_000);
+    test.setTimeout(120_000);
     const gateway = watchWs(testPage);
 
     const session = await seedTaskAndWaitForIdle(
@@ -593,6 +599,7 @@ test.describe("Task session queue", () => {
       seedData,
       "Queue edit lease ordering test",
     );
+    await waitForSessionAgentctlReady(testPage, session.sessionId);
     await session.sendMessage("/slow 10s");
     await expect(session.agentStatus()).toBeVisible({ timeout: 15_000 });
     await waitForComposerQueueMode(testPage);

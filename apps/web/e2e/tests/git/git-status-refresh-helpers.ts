@@ -112,6 +112,8 @@ type GitRefreshBridgeState = {
   responses: GitRefreshTrace[];
   pendingEventsDropped: GitStatusSnapshot[];
   readyNotifications: GitStatusSnapshot[];
+  holdReadyNotifications: boolean;
+  heldReadyNotifications: Array<{ frame: string; socket: BridgeSocket }>;
   forcedFailureModes: Set<string>;
   failureEnvironmentId: string;
   holdFreshGitRefreshRequests: boolean;
@@ -265,7 +267,19 @@ function forwardServerMessage(
     socket.send(message);
     return;
   }
-  const forwarded = message.split("\n").filter((part) => consumeServerFrame(part, state));
+  const forwarded = message.split("\n").filter((part) => {
+    const forward = consumeServerFrame(part, state);
+    const event = statusEvent(parseFrame(part.trim()) ?? {});
+    if (
+      forward &&
+      state.holdReadyNotifications &&
+      event?.payload?.status?.detail_state === "ready"
+    ) {
+      state.heldReadyNotifications.push({ frame: part, socket });
+      return false;
+    }
+    return forward;
+  });
   const output = forwarded.join("\n");
   if (output.trim()) socket.send(output);
 }
@@ -276,12 +290,17 @@ function connectGitRefreshBridge(socket: ClientBridgeSocket, state: GitRefreshBr
   server.onMessage((message) => forwardServerMessage(message, socket, state));
 }
 
-export async function routeGitStatusRefresh(page: Page) {
+export async function routeGitStatusRefresh(
+  page: Page,
+  { holdReadyNotifications = false }: { holdReadyNotifications?: boolean } = {},
+) {
   const state: GitRefreshBridgeState = {
     requests: [],
     responses: [],
     pendingEventsDropped: [],
     readyNotifications: [],
+    holdReadyNotifications,
+    heldReadyNotifications: [],
     forcedFailureModes: new Set(),
     failureEnvironmentId: "",
     holdFreshGitRefreshRequests: false,
@@ -295,6 +314,12 @@ export async function routeGitStatusRefresh(page: Page) {
   await page.routeWebSocket(/\/ws$/, (socket) => connectGitRefreshBridge(socket, state));
 
   return {
+    releaseReadyGitStatusNotifications() {
+      state.holdReadyNotifications = false;
+      for (const { frame, socket } of state.heldReadyNotifications.splice(0)) {
+        socket.send(frame);
+      }
+    },
     setFailureEnvironmentId(environmentId: string) {
       state.failureEnvironmentId = environmentId;
     },

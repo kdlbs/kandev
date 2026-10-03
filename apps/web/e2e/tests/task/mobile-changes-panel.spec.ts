@@ -2,6 +2,7 @@ import { test, expect } from "../../fixtures/test-base";
 import { SessionPage } from "../../pages/session-page";
 import { GitHelper, makeGitEnv } from "../../helpers/git-helper";
 import { waitForFiniteAnimations } from "../../helpers/animations";
+import { waitForLatestSessionDone } from "../../helpers/session";
 import type { Page } from "@playwright/test";
 import path from "node:path";
 
@@ -624,6 +625,7 @@ test.describe("Mobile changes panel", () => {
       },
     );
 
+    await waitForLatestSessionDone(apiClient, task.id, 1, "quiet PR-only commit fixture");
     await testPage.goto(`/t/${task.id}`);
     const session = new SessionPage(testPage);
     await session.waitForLoad();
@@ -633,6 +635,13 @@ test.describe("Mobile changes panel", () => {
     git.createFile("mobile-pr-shared-marker.ts", "shared provider checkout commit");
     git.stageFile("mobile-pr-shared-marker.ts");
     const sharedSha = git.commit("Shared provider checkout commit");
+
+    // Establish the local snapshot before overlaying a provider-only remote commit.
+    await openMobileChangesPanel(testPage);
+    await expandSection(testPage, "commits-section");
+    await expect(testPage.getByTestId(`commit-row-${sharedSha.slice(0, 7)}`)).toBeVisible({
+      timeout: 20_000,
+    });
 
     const remoteSha = "e".repeat(40);
     const remoteMessage = "Mobile force-pushed commit";

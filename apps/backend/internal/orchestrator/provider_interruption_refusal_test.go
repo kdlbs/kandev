@@ -101,6 +101,29 @@ func TestInterruptionContinuationPreparationLookupFailureStaysManual(t *testing.
 	require.Same(t, entry, current, "uncertain liveness cannot publish a successor reservation")
 }
 
+func TestInterruptionContinuationPreparationRetriesTypedTransientRestore(t *testing.T) {
+	svc, _, data := continuationFailureFixture(t)
+	require.True(t, svc.handleTransientFailure(context.Background(), data))
+	value, _ := svc.transientRetries.Load("s1")
+	entry := value.(*transientRetryEntry)
+	mgr := svc.agentManager.(*mockAgentManager)
+	mgr.getExecutionIDForSessionFunc = func(context.Context, string) (string, error) {
+		return "", lifecycle.ErrNoExecutionForSession
+	}
+	failure := &lifecycle.RestoreRequiredError{
+		Decision: lifecycle.RestoreDecision{Reason: lifecycle.RestoreReasonTransport},
+		Cause:    errors.New("session restore failed: dial tcp: network is unreachable"),
+	}
+
+	require.True(t, svc.retryContinuationPreparation(context.Background(), "t1", "s1", entry, failure))
+	nextValue, owned := svc.transientRetries.Load("s1")
+	require.True(t, owned, "a definitely pre-dispatch transient restore failure keeps the episode owner")
+	next := nextValue.(*transientRetryEntry)
+	require.NotSame(t, entry, next)
+	require.Equal(t, 2, next.attempt)
+	require.Empty(t, mgr.capturedPrompts, "restore preparation must not dispatch the continuation")
+}
+
 func TestInterruptionContinuationCancellationRechecksRestoredExecution(t *testing.T) {
 	svc, _, data := continuationFailureFixture(t)
 	require.True(t, svc.handleTransientFailure(context.Background(), data))

@@ -1115,6 +1115,10 @@ func (m *Manager) prepareExecutionCreateRequest(
 	}
 
 	officeAgentProfileID := workspaceOfficeAgentProfileID(info)
+	journalOwnerID := info.SessionID
+	if journalOwnerID == "" {
+		journalOwnerID = info.TaskEnvironmentID
+	}
 	preparation := &executionCreatePreparation{
 		request: &ExecutorCreateRequest{
 			InstanceID:                     executionID,
@@ -1122,6 +1126,11 @@ func (m *Manager) prepareExecutionCreateRequest(
 			TaskID:                         taskID,
 			SessionID:                      info.SessionID,
 			TaskEnvironmentID:              info.TaskEnvironmentID,
+			DurableJournalHostRoot:         m.dataDir,
+			DurableJournalOwnerID:          journalOwnerID,
+			DeliveryIncarnationID:          info.DeliveryIncarnationID,
+			DeliveryHarnessGeneration:      info.DeliveryHarnessGeneration,
+			DeliveryStreamID:               info.DeliveryStreamID,
 			WorkspaceReuseRequired:         info.TaskEnvironmentID != "",
 			AgentProfileID:                 executionProfileID,
 			OfficeAgentProfileID:           officeAgentProfileID,

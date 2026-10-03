@@ -2,8 +2,16 @@ import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ChatInputContainer } from "./chat-input-container";
 
-const { bodyProps, containerState } = vi.hoisted(() => ({
+const SESSION_ID = "session-1";
+
+const { bodyProps, containerState, composerRecovery, testIds } = vi.hoisted(() => ({
+  testIds: {
+    stoppedBanner: "session-stopped-banner",
+    recoveryCard: "session-recovery-card",
+    chatInputBody: "chat-input-body",
+  },
   bodyProps: { current: null as Record<string, unknown> | null },
+  composerRecovery: { current: null as { sessionId: string; model: { sessionId: string } } | null },
   containerState: {
     showNewSessionDialog: false,
     setShowNewSessionDialog: vi.fn(),
@@ -38,13 +46,25 @@ vi.mock("./use-chat-input-container", () => ({
 }));
 
 vi.mock("./session-stopped-banner", () => ({
-  SessionStoppedBanner: () => <div data-testid="session-stopped-banner" />,
+  SessionStoppedBanner: () => <div data-testid={testIds.stoppedBanner} />,
+}));
+
+vi.mock("./session-recovery-context", () => ({
+  useSessionComposerRecovery: () => composerRecovery.current,
+}));
+
+vi.mock("./session-recovery-card", () => ({
+  SessionRecoveryCard: () => <div data-testid={testIds.recoveryCard} />,
+}));
+
+vi.mock("@/components/task/new-session-dialog", () => ({
+  NewSessionDialog: () => null,
 }));
 
 vi.mock("./chat-input-body", () => ({
   ChatInputBody: (props: Record<string, unknown>) => {
     bodyProps.current = props;
-    return <div data-testid="chat-input-body" />;
+    return <div data-testid={testIds.chatInputBody} />;
   },
 }));
 
@@ -80,7 +100,7 @@ vi.mock("@/lib/i18n", async (original) => ({
 
 const baseProps = {
   onSubmit: vi.fn(),
-  sessionId: "session-1",
+  sessionId: SESSION_ID,
   taskId: "task-1",
   taskDescription: "",
   planModeEnabled: false,
@@ -95,28 +115,38 @@ const baseProps = {
 afterEach(() => {
   cleanup();
   bodyProps.current = null;
+  composerRecovery.current = null;
 });
 
 describe("ChatInputContainer launch-error ownership", () => {
   it("hides the editor when the task launch card owns a failed session", () => {
     render(<ChatInputContainer {...baseProps} isFailed launchErrorOwned />);
 
-    expect(screen.queryByTestId("chat-input-body")).toBeNull();
-    expect(screen.queryByTestId("session-stopped-banner")).toBeNull();
+    expect(screen.queryByTestId(testIds.chatInputBody)).toBeNull();
+    expect(screen.queryByTestId(testIds.stoppedBanner)).toBeNull();
   });
 
   it("renders the stopped banner when the failed session has no launch-card owner", () => {
     render(<ChatInputContainer {...baseProps} isFailed />);
 
-    expect(screen.queryByTestId("chat-input-body")).toBeNull();
-    expect(screen.getByTestId("session-stopped-banner")).toBeTruthy();
+    expect(screen.queryByTestId(testIds.chatInputBody)).toBeNull();
+    expect(screen.getByTestId(testIds.stoppedBanner)).toBeTruthy();
+  });
+
+  it("uses the uncertain-delivery controls instead of generic recovery choices", () => {
+    composerRecovery.current = { sessionId: SESSION_ID, model: { sessionId: SESSION_ID } };
+
+    render(<ChatInputContainer {...baseProps} uncertainDelivery />);
+
+    expect(screen.getByTestId(testIds.stoppedBanner)).toBeTruthy();
+    expect(screen.queryByTestId(testIds.recoveryCard)).toBeNull();
   });
 
   it("keeps the editor visible when the owned launch error is not a failed session", () => {
     render(<ChatInputContainer {...baseProps} launchErrorOwned />);
 
-    expect(screen.getByTestId("chat-input-body")).toBeTruthy();
-    expect(screen.queryByTestId("session-stopped-banner")).toBeNull();
+    expect(screen.getByTestId(testIds.chatInputBody)).toBeTruthy();
+    expect(screen.queryByTestId(testIds.stoppedBanner)).toBeNull();
   });
 });
 

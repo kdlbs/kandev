@@ -726,6 +726,7 @@ type SessionEntryFetchParams = {
   connectionStatus: string;
   messagesLength: number;
   historyInitialized: boolean;
+  historyStatus: MessageHistoryStatus;
   store: ReturnType<typeof useAppStoreApi>;
   prevSessionIdRef: MutableRefObject<string | null>;
   fetchState: ReturnType<typeof useMessageFetchState>;
@@ -734,7 +735,7 @@ type SessionEntryFetchParams = {
   sessionFetchGenerationRef: MutableRefObject<number>;
 };
 function useInitialMessagesWait(params: SessionEntryFetchParams): void {
-  const { taskSessionId, messagesLength, historyInitialized, fetchState } = params;
+  const { taskSessionId, messagesLength, historyInitialized, historyStatus, fetchState } = params;
   const {
     initialFetchStartRef,
     lastFetchedSessionIdRef,
@@ -755,7 +756,7 @@ function useInitialMessagesWait(params: SessionEntryFetchParams): void {
     }
     if (messagesLength > 0) {
       setIsWaitingForInitialMessages(false);
-      if (historyInitialized) {
+      if (historyInitialized && historyStatus === "loading") {
         setHistoryStatus("ready");
         setHistoryError(null);
       }
@@ -775,6 +776,7 @@ function useInitialMessagesWait(params: SessionEntryFetchParams): void {
     setHistoryStatus,
     setHistoryError,
     historyInitialized,
+    historyStatus,
   ]);
 }
 function useSessionEntryMessageFetch(params: SessionEntryFetchParams): void {
@@ -782,7 +784,6 @@ function useSessionEntryMessageFetch(params: SessionEntryFetchParams): void {
     taskSessionId,
     connectionStatus,
     messagesLength,
-    historyInitialized,
     store,
     prevSessionIdRef,
     fetchState,
@@ -813,7 +814,6 @@ function useSessionEntryMessageFetch(params: SessionEntryFetchParams): void {
     if (messagesLength > 0 && !sessionChanged && !isFreshMount) {
       lastFetchedSessionIdRef.current = taskSessionId;
       setIsWaitingForInitialMessages(false);
-      if (historyInitialized) fetchRefs.setHistoryStatus("ready");
       return;
     }
     if (isFreshMount && messagesLength > 0) {
@@ -853,7 +853,6 @@ function useSessionEntryMessageFetch(params: SessionEntryFetchParams): void {
     taskSessionId,
     connectionStatus,
     messagesLength,
-    historyInitialized,
     store,
     prevSessionIdRef,
     lastFetchedSessionIdRef,
@@ -1089,6 +1088,7 @@ export function useSessionMessages(taskSessionId: string | null): UseSessionMess
     connectionStatus,
     messagesLength: messages.length,
     historyInitialized: messagesMeta.historyInitialized,
+    historyStatus,
     store,
     prevSessionIdRef,
     fetchState,

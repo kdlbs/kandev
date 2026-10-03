@@ -49,6 +49,41 @@ func TestKubernetesCreateInstanceAcceptsCompleteTypedConfiguration(t *testing.T)
 	}
 }
 
+func TestApplyKubernetesDurableJournalPathUsesPersistentWorkspace(t *testing.T) {
+	for _, mode := range []kubeexecutor.WorkspaceMode{
+		kubeexecutor.WorkspaceModeManagedPVC,
+		kubeexecutor.WorkspaceModeExistingClaim,
+	} {
+		t.Run(string(mode), func(t *testing.T) {
+			request := &agentctl.CreateInstanceRequest{DurableJournalPath: "/stale/path"}
+			executorRequest := &ExecutorCreateRequest{
+				DurableJournalOwnerID: "environment-1",
+				Metadata: map[string]interface{}{
+					MetadataKeyKubernetesRuntimeWorkspaceMode: string(mode),
+				},
+			}
+
+			applyKubernetesDurableJournalPath(request, executorRequest)
+
+			require.Equal(t, "/workspace/.kandev/agentctl-journals/environment-1/delivery.bbolt", request.DurableJournalPath)
+		})
+	}
+}
+
+func TestApplyKubernetesDurableJournalPathRejectsEphemeralWorkspace(t *testing.T) {
+	request := &agentctl.CreateInstanceRequest{DurableJournalPath: "/stale/path"}
+	executorRequest := &ExecutorCreateRequest{
+		DurableJournalOwnerID: "environment-1",
+		Metadata: map[string]interface{}{
+			MetadataKeyKubernetesWorkspaceMode: string(kubeexecutor.WorkspaceModeEmptyDir),
+		},
+	}
+
+	applyKubernetesDurableJournalPath(request, executorRequest)
+
+	require.Empty(t, request.DurableJournalPath)
+}
+
 func TestKubernetesAgentctlCreateReconcilesAmbiguousResponse(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()

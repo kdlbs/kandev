@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/office/models"
+	runsmodels "github.com/kandev/kandev/internal/runs/models"
 )
 
 // likeEscaper escapes SQLite LIKE metacharacters so a caller-supplied
@@ -123,9 +124,35 @@ func (r *Repository) ParkRunForProviderCapacity(
 		    priority_class = CASE WHEN priority_class = ? THEN priority_class ELSE ? END
 		WHERE id = ?
 	`), blockedStatus, retryAt, retryAt,
-		models.PriorityClassHuman, models.PriorityClassRecovery, runID)
+		runsmodels.PriorityClassHuman, runsmodels.PriorityClassRecovery, runID)
 	if err != nil {
 		return fmt.Errorf("run_routing: park: %w", err)
+	}
+	return nil
+}
+
+// ParkRunForSessionRecovery preserves a pending Office run after its session
+// cannot be restored. It intentionally clears all retry timestamps so the
+// scheduler's timed wake-up path cannot turn an operator decision into an
+// automatic retry.
+func (r *Repository) ParkRunForSessionRecovery(
+	ctx context.Context, runID, blockID, reason string,
+) error {
+	blocked := runsmodels.RoutingBlockedSessionRecoveryRequired
+	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
+		UPDATE runs
+		SET status = 'queued',
+		    routing_blocked_status = ?,
+		    session_recovery_block_id = ?,
+		    session_recovery_reason = ?,
+		    earliest_retry_at = NULL,
+		    scheduled_retry_at = NULL,
+		    claimed_at = NULL,
+		    finished_at = NULL
+		WHERE id = ?
+	`), blocked, blockID, reason, runID)
+	if err != nil {
+		return fmt.Errorf("run_routing: park for session recovery: %w", err)
 	}
 	return nil
 }
@@ -143,9 +170,33 @@ func (r *Repository) ClearRoutingBlock(ctx context.Context, runID string) error 
 		    earliest_retry_at = NULL,
 		    scheduled_retry_at = NULL
 		WHERE id = ?
-	`), runID)
+		  AND routing_blocked_status != ?
+	`), runID, runsmodels.RoutingBlockedSessionRecoveryRequired)
 	if err != nil {
 		return fmt.Errorf("run_routing: clear block: %w", err)
+	}
+	return nil
+}
+
+// ClearSessionRecoveryPark releases an Office run only after its canonical
+// task-owned recovery block has been resolved by an explicit operator action.
+func (r *Repository) ClearSessionRecoveryPark(
+	ctx context.Context, runID, blockID string,
+) error {
+	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
+		UPDATE runs
+		SET routing_blocked_status = NULL,
+		    session_recovery_block_id = NULL,
+		    session_recovery_reason = NULL,
+		    earliest_retry_at = NULL,
+		    scheduled_retry_at = NULL,
+		    status = 'queued'
+		WHERE id = ?
+		  AND routing_blocked_status = ?
+		  AND session_recovery_block_id = ?
+	`), runID, runsmodels.RoutingBlockedSessionRecoveryRequired, blockID)
+	if err != nil {
+		return fmt.Errorf("run_routing: clear session recovery park: %w", err)
 	}
 	return nil
 }
@@ -184,7 +235,7 @@ func (r *Repository) RequeueRunForNextCandidate(
 		    claimed_at = NULL, finished_at = NULL,
 		    priority_class = CASE WHEN priority_class = ? THEN priority_class ELSE ? END
 		WHERE id = ?
-	`), models.PriorityClassHuman, models.PriorityClassRecovery, runID)
+	`), runsmodels.PriorityClassHuman, runsmodels.PriorityClassRecovery, runID)
 	if err != nil {
 		return fmt.Errorf("run_routing: requeue: %w", err)
 	}
@@ -196,7 +247,7 @@ func (r *Repository) RequeueRunForNextCandidate(
 // Used by the scheduler wake-up tick to lift parked runs.
 func (r *Repository) ListPendingProviderCapacityRuns(
 	ctx context.Context, now time.Time,
-) ([]models.Run, error) {
+) ([]runsmodels.Run, error) {
 	rows, err := r.ro.QueryxContext(ctx, r.ro.Rebind(`
 		SELECT * FROM runs
 		WHERE routing_blocked_status = 'waiting_for_provider_capacity'
@@ -209,11 +260,36 @@ func (r *Repository) ListPendingProviderCapacityRuns(
 		return nil, fmt.Errorf("run_routing: list pending: %w", err)
 	}
 	defer func() { _ = rows.Close() }()
-	out := make([]models.Run, 0)
+	out := make([]runsmodels.Run, 0)
 	for rows.Next() {
-		var run models.Run
+		var run runsmodels.Run
 		if err := rows.StructScan(&run); err != nil {
 			return nil, fmt.Errorf("run_routing: scan pending: %w", err)
+		}
+		out = append(out, run)
+	}
+	return out, rows.Err()
+}
+
+// ListSessionRecoveryRuns returns queued Office runs held behind a canonical
+// session recovery decision. The scheduler checks the task-owned block state
+// before calling ClearSessionRecoveryPark.
+func (r *Repository) ListSessionRecoveryRuns(ctx context.Context) ([]runsmodels.Run, error) {
+	rows, err := r.ro.QueryxContext(ctx, r.ro.Rebind(`
+		SELECT * FROM runs
+		WHERE routing_blocked_status = ? AND status = 'queued'
+		ORDER BY requested_at ASC
+		LIMIT 50
+	`), runsmodels.RoutingBlockedSessionRecoveryRequired)
+	if err != nil {
+		return nil, fmt.Errorf("run_routing: list session recovery: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	out := make([]runsmodels.Run, 0)
+	for rows.Next() {
+		var run runsmodels.Run
+		if err := rows.StructScan(&run); err != nil {
+			return nil, fmt.Errorf("run_routing: scan session recovery: %w", err)
 		}
 		out = append(out, run)
 	}
@@ -228,7 +304,7 @@ func (r *Repository) ListPendingProviderCapacityRuns(
 // resolver re-evaluates eligibility on the next attempt.
 func (r *Repository) ListRunsWaitingOnProvider(
 	ctx context.Context, workspaceID, providerID string,
-) ([]models.Run, error) {
+) ([]runsmodels.Run, error) {
 	// providerID is caller-supplied; escape LIKE metacharacters so a value
 	// like "%" cannot match every parked run in the workspace.
 	escaped := likeEscaper.Replace(providerID)
@@ -245,9 +321,9 @@ func (r *Repository) ListRunsWaitingOnProvider(
 		return nil, fmt.Errorf("run_routing: list waiting: %w", err)
 	}
 	defer func() { _ = rows.Close() }()
-	out := make([]models.Run, 0)
+	out := make([]runsmodels.Run, 0)
 	for rows.Next() {
-		var run models.Run
+		var run runsmodels.Run
 		if err := rows.StructScan(&run); err != nil {
 			return nil, fmt.Errorf("run_routing: scan waiting: %w", err)
 		}
@@ -296,10 +372,12 @@ func (r *Repository) ClearAllParkedRoutingForWorkspace(
 		    scheduled_retry_at = NULL,
 		    priority_class = CASE WHEN priority_class = ? THEN priority_class ELSE ? END
 		WHERE routing_blocked_status IS NOT NULL
+		  AND routing_blocked_status != ?
 		  AND agent_profile_id IN (
 		    SELECT id FROM agent_profiles WHERE workspace_id = ?
 		  )
-	`), models.PriorityClassHuman, models.PriorityClassRecovery, workspaceID)
+	`), runsmodels.PriorityClassHuman, runsmodels.PriorityClassRecovery,
+		runsmodels.RoutingBlockedSessionRecoveryRequired, workspaceID)
 	if err != nil {
 		return fmt.Errorf("run_routing: clear parked workspace=%s: %w",
 			workspaceID, err)
@@ -311,7 +389,7 @@ func (r *Repository) ClearAllParkedRoutingForWorkspace(
 // callers can distinguish "not found" from generic errors. Mirrors the
 // runs queue GetRun method but lives on the office repo for consumers
 // that already hold an office repo handle.
-func (r *Repository) GetRunByID(ctx context.Context, id string) (*models.Run, error) {
+func (r *Repository) GetRunByID(ctx context.Context, id string) (*runsmodels.Run, error) {
 	run, err := r.GetRun(ctx, id)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, sql.ErrNoRows

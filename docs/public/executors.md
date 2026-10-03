@@ -125,6 +125,16 @@ endpoints, or host paths that do not work in the executor. A fresh provision or
 **Reset Environment** can replace the target file. A warm resume keeps the
 existing executor file and does not read the host again.
 
+Kandev also keeps durable delivery records in retained executor storage when
+the executor supports them. The records help Kandev replay accepted output
+after an agentctl replacement or backend restart. A compatible surviving
+agentctl keeps its delivery identity, and Kandev replays committed records
+before it accepts new work. These records do not replace native harness state.
+Durable delivery is independent of the optional process-survival setting. When
+process survival is disabled, the agent process stops and there is no live
+agentctl to adopt. If the retained journal is unavailable, Kandev blocks unsafe
+prompt admission. It does not silently use a less durable path.
+
 Each file is limited to 1 MiB and each launch is limited to 4 MiB. Kandev
 writes copied files with owner-only mode `0600`. Missing, unreadable, invalid,
 or oversized optional files produce a preparation warning and do not stop the
@@ -358,7 +368,7 @@ Docker profiles can inject resolved environment secrets. For agent file-based au
 
 A container is a useful boundary, not a hostile-code security sandbox. The Docker daemon has host-level power, bind mounts expose their sources, the agent can use every injected secret, and the default image has outbound network access. Kandev does **not** mount the Docker socket into agent containers automatically.
 
-Plain Stop preserves a healthy container for resume. A later launch reconnects to an existing running container, or starts one in a stopped/exited state; if reconnect fails, it creates a fresh container. Archive, delete, stale cleanup, explicit removal in the profile page, and **Reset Environment** can stop or force-remove it. Inspect matching containers before manual cleanup:
+Plain Stop preserves a healthy container for resume. Recoverable agent failure also retains the established container and workspace, including when the container was stopped externally. This does not resend an interrupted prompt. A later launch reconnects to an existing running container, or starts one in a stopped/exited state; if reconnect fails, it creates a fresh container. Stale execution cleanup stops the container and preserves it for resume. Archive, delete, explicit force-stop, removal in the profile page, and **Reset Environment** can remove it. Inspect matching containers before manual cleanup:
 
 ```bash
 docker ps -a --filter label=kandev.managed=true

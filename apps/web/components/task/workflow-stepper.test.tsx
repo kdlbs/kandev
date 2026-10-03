@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { ComponentProps, ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { moveTask } from "@/lib/api";
@@ -30,7 +30,7 @@ const { moveTaskMock, previewWorkflowMoveMock, appStoreState } = vi.hoisted(() =
     setActiveDocument: vi.fn(),
   },
 }));
-const mocks = vi.hoisted(() => ({ touchDrawer: false }));
+const mocks = vi.hoisted(() => ({ touchDrawer: false, forceMountDrawer: false }));
 
 function Passthrough({ children }: { children: ReactNode }) {
   return <>{children}</>;
@@ -101,8 +101,8 @@ vi.mock("@kandev/ui/drawer", async () => {
     },
     DrawerContent: ({ children, ...props }: React.HTMLAttributes<HTMLDivElement>) => {
       const context = React.useContext(DrawerContext);
-      return context?.open ? (
-        <div role="dialog" {...props}>
+      return context?.open || mocks.forceMountDrawer ? (
+        <div role="dialog" hidden={!context?.open} {...props}>
           {children}
         </div>
       ) : null;
@@ -121,9 +121,11 @@ vi.mock("@kandev/ui/drawer", async () => {
 
 afterEach(() => {
   cleanup();
+  vi.useRealTimers();
   vi.clearAllMocks();
   previewWorkflowMoveMock.mockResolvedValue(undefined);
   mocks.touchDrawer = false;
+  mocks.forceMountDrawer = false;
   appStoreState.kanban.tasks.length = 0;
   const taskSessions = appStoreState.taskSessions.items as Record<string, unknown>;
   for (const key of Object.keys(taskSessions)) {
@@ -573,6 +575,35 @@ describe("WorkflowStepper compact disclosure options", () => {
 });
 
 describe("WorkflowStepper compact disclosure preview queue", () => {
+  it("waits to request previews until a mounted coarse-pointer drawer opens", async () => {
+    const previewQueueTaskId = "task-preview-queue";
+    collapsedMock.mockReturnValue(true);
+    mocks.touchDrawer = true;
+    mocks.forceMountDrawer = true;
+    vi.useFakeTimers();
+    render(
+      <WorkflowStepper
+        steps={DISCLOSURE_STEPS}
+        currentStepId="b"
+        taskId={previewQueueTaskId}
+        workflowId={WORKFLOW_ID}
+      />,
+    );
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(250);
+    });
+    expect(previewWorkflowMoveMock).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: TRIGGER_LABEL }));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(250);
+    });
+    expect(
+      previewWorkflowMoveMock.mock.calls.some(([, payload]) => payload?.workflow_step_id === "c"),
+    ).toBe(true);
+  });
+
   it("requests a later movable row after the first two destinations", async () => {
     collapsedMock.mockReturnValue(true);
     render(

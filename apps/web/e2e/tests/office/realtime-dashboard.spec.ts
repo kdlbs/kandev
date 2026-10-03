@@ -45,6 +45,7 @@ test.describe("Real-time dashboard updates", () => {
     // User stays on the active office workspace dashboard.
     await testPage.goto("/office");
     await expect(testPage.getByText("Agents Enabled")).toBeVisible({ timeout: 10_000 });
+    await testPage.waitForLoadState("networkidle");
 
     // Spy on dashboard refetches for the active workspace.
     const fetchTimes: number[] = [];

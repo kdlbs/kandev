@@ -16,6 +16,7 @@ import {
   waitForHttp,
   writeJsonAtomically,
   createAtomicRecordWriter,
+  readInstances,
   waitForFile,
   writeInstanceRecord,
   writeFakeRuntime,
@@ -139,6 +140,21 @@ test("instance records remain valid during concurrent updates", async () => {
       assert.equal(record.payload.length, 100_000);
     });
     await Promise.all([...writes, ...reads]);
+  });
+});
+
+test("readInstances skips a record while the fake runtime is writing it", async () => {
+  await withTempDir(async (dir) => {
+    const instancesDir = join(dir, "instances");
+    const instanceDir = join(instancesDir, "123");
+    const instancePath = join(instanceDir, "instance.json");
+    await mkdir(instanceDir, { recursive: true });
+    await writeFile(instancePath, '{"pid":123,"home":');
+
+    assert.deepEqual(await readInstances(instancesDir), []);
+
+    await writeFile(instancePath, JSON.stringify({ pid: 123, home: "/tmp/kandev" }));
+    assert.deepEqual(await readInstances(instancesDir), [{ pid: 123, home: "/tmp/kandev" }]);
   });
 });
 

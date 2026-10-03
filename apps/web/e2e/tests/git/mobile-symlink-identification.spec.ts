@@ -3,7 +3,7 @@ import path from "node:path";
 import { test, expect } from "../../fixtures/test-base";
 import { waitForFiniteAnimations } from "../../helpers/animations";
 import { SessionPage } from "../../pages/session-page";
-import { waitForLatestSessionDone } from "../../helpers/session";
+import { waitForLatestSessionDone, waitForSessionGitHydration } from "../../helpers/session";
 
 // @covers AC-WORKSPACES-SYMLINK-001.1, AC-WORKSPACES-SYMLINK-001.2, AC-WORKSPACES-SYMLINK-001.4
 test("identifies a symlink in Changes and the mobile file viewer", async ({
@@ -58,6 +58,7 @@ test("identifies a symlink in Changes and the mobile file viewer", async ({
     const session = new SessionPage(testPage);
     await session.waitForLoad();
     await session.waitForChatIdle();
+    await waitForSessionGitHydration(testPage, task.session_id!);
     await testPage.getByRole("button", { name: /Changes/ }).tap();
     const row = testPage.getByTestId(`file-row-${name}`);
     await expect(row).toBeVisible({ timeout: 20_000 });

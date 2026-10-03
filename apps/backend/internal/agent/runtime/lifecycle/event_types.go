@@ -90,25 +90,31 @@ type AgentStalledPayload struct {
 
 // AgentctlEventPayload is the payload for agentctl lifecycle events (starting, ready, error).
 type AgentctlEventPayload struct {
-	OwnerKind              ExecutionOwnerKind `json:"owner_kind,omitempty"`
-	WorkspaceID            string             `json:"workspace_id,omitempty"`
-	RunID                  string             `json:"run_id,omitempty"`
-	RunSessionID           string             `json:"run_session_id,omitempty"`
-	RunAttempt             int                `json:"run_attempt,omitempty"`
-	TaskID                 string             `json:"task_id"`
-	SessionID              string             `json:"session_id"`
-	TaskEnvironmentID      string             `json:"task_environment_id,omitempty"`
-	AgentExecutionID       string             `json:"agent_execution_id"`
-	AttemptID              string             `json:"attempt_id,omitempty"`
-	ErrorMessage           string             `json:"error_message,omitempty"`
-	FailureCode            string             `json:"failure_code,omitempty"`
-	FailureDetails         string             `json:"failure_details,omitempty"`
-	StartupFailureReason   string             `json:"startup_reason,omitempty"`
-	StartupFailureAttempts int                `json:"startup_attempts,omitempty"`
-	StartupFailureNPMCode  string             `json:"startup_npm_code,omitempty"`
-	WorktreeID             string             `json:"worktree_id,omitempty"`
-	WorktreePath           string             `json:"worktree_path,omitempty"`
-	WorktreeBranch         string             `json:"worktree_branch,omitempty"`
+	OwnerKind                 ExecutionOwnerKind `json:"owner_kind,omitempty"`
+	WorkspaceID               string             `json:"workspace_id,omitempty"`
+	RunID                     string             `json:"run_id,omitempty"`
+	RunSessionID              string             `json:"run_session_id,omitempty"`
+	RunAttempt                int                `json:"run_attempt,omitempty"`
+	TaskID                    string             `json:"task_id"`
+	SessionID                 string             `json:"session_id"`
+	TaskEnvironmentID         string             `json:"task_environment_id,omitempty"`
+	AgentExecutionID          string             `json:"agent_execution_id"`
+	AttemptID                 string             `json:"attempt_id,omitempty"`
+	ErrorMessage              string             `json:"error_message,omitempty"`
+	FailureCode               string             `json:"failure_code,omitempty"`
+	FailureDetails            string             `json:"failure_details,omitempty"`
+	StartupFailureReason      string             `json:"startup_reason,omitempty"`
+	StartupFailureAttempts    int                `json:"startup_attempts,omitempty"`
+	StartupFailureNPMCode     string             `json:"startup_npm_code,omitempty"`
+	DeliveryRecoveryPhase     string             `json:"delivery_recovery_phase,omitempty"`
+	DeliverySubmissionID      string             `json:"delivery_submission_id,omitempty"`
+	DeliveryStreamID          string             `json:"delivery_stream_id,omitempty"`
+	DeliveryIncarnationID     string             `json:"delivery_incarnation_id,omitempty"`
+	DeliveryHarnessGeneration uint64             `json:"delivery_harness_generation,omitempty"`
+	PromptGeneration          uint64             `json:"prompt_generation,omitempty"`
+	WorktreeID                string             `json:"worktree_id,omitempty"`
+	WorktreePath              string             `json:"worktree_path,omitempty"`
+	WorktreeBranch            string             `json:"worktree_branch,omitempty"`
 	// TaskWorkspacePath is the task root that contains every per-repo
 	// worktree as a sibling subdir, populated when the event signals a
 	// sibling worktree being added (multi-branch add_branch flow) rather
@@ -124,12 +130,15 @@ type AgentctlEventPayload struct {
 // canonical key the watcher / orchestrator uses, added so downstream code
 // (resume-token CAS) can rely on a single field name across event types.
 type ACPSessionCreatedPayload struct {
-	TaskID           string `json:"task_id"`
-	SessionID        string `json:"session_id"`
-	AgentProfileID   string `json:"agent_profile_id"`
-	AgentExecutionID string `json:"agent_execution_id"`
-	AttemptID        string `json:"attempt_id,omitempty"`
-	ACPSessionID     string `json:"acp_session_id"`
+	TaskID                    string `json:"task_id"`
+	SessionID                 string `json:"session_id"`
+	AgentProfileID            string `json:"agent_profile_id"`
+	AgentExecutionID          string `json:"agent_execution_id"`
+	AttemptID                 string `json:"attempt_id,omitempty"`
+	ACPSessionID              string `json:"acp_session_id"`
+	DeliveryStreamID          string `json:"delivery_stream_id,omitempty"`
+	DeliveryIncarnationID     string `json:"delivery_incarnation_id,omitempty"`
+	DeliveryHarnessGeneration uint64 `json:"delivery_harness_generation,omitempty"`
 }
 
 // PrepareProgressEventPayload is the payload for environment preparation progress events.
@@ -204,6 +213,7 @@ type AgentStreamEventData struct {
 	PromptGeneration            uint64                        `json:"prompt_generation,omitempty"`
 	TurnID                      string                        `json:"turn_id,omitempty"`
 	Data                        interface{}                   `json:"data,omitempty"`
+	CanonicalProjection         bool                          `json:"canonical_projection,omitempty"`
 
 	// ParentToolCallID identifies the parent Task tool call when this event
 	// comes from a subagent. Used for visual nesting in the UI.

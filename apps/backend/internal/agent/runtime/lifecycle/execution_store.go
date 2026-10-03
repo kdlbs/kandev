@@ -376,6 +376,7 @@ func beginExecutionPromptLocked(execution *AgentExecution) uint64 {
 	// recovered-but-not-yet-adopted generation must not later clobber it with
 	// a stale pre-restart completion (see recoveredPromptGenerationPending).
 	execution.recoveredPromptGenerationPending.Store(false)
+	execution.cancelEscalatedPromptGeneration.Store(0)
 	execution.promptGeneration++
 	if execution.promptTurnID != "" {
 		if execution.promptTurnIDs == nil {
