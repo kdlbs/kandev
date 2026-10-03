@@ -1074,7 +1074,7 @@ func (m *Manager) ResetAgentContext(ctx context.Context, executionID string) err
 	// request has its own bound so an unanswered response cannot hold the
 	// execution lifecycle lock indefinitely.
 	resetCtx, cancelReset := context.WithTimeout(ctx, resetAgentContextRequestTimeout)
-	newSessionID, err := client.ResetSession(resetCtx, execution.WorkspacePath, mcpServers)
+	newSessionID, err := client.ResetSessionWithAdditionalDirectories(resetCtx, execution.WorkspacePath, mcpServers, execution.ProjectWritableRoots)
 	resetErr := resetCtx.Err()
 	cancelReset()
 	releaseClient()
@@ -1706,6 +1706,7 @@ func (m *Manager) initializeACPSessionForRestart(
 		"", // empty — force session/new
 		execution.WorkspacePath,
 		mcpServers,
+		execution.ProjectWritableRoots,
 	)
 	if err != nil {
 		return fmt.Errorf("ACP session initialization failed: %w", err)

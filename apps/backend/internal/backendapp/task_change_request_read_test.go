@@ -94,6 +94,37 @@ func TestTaskChangeRequestReaderPreservesProviderAvailabilityAndFailures(t *test
 	assert.Equal(t, mcphandlers.TaskChangeRequestProviderGitLab, got.Errors[0].Provider)
 }
 
+func TestTaskChangeRequestReaderProjectsBoundedWorkerChangeRequestSummary(t *testing.T) {
+	draft := true
+	reader := taskChangeRequestReader{
+		tasks: taskChangeRequestReadTaskLookup{task: &models.Task{ID: "worker-1", WorkspaceID: "workspace-1"}},
+		providers: []taskChangeRequestProviderAdapter{
+			taskChangeRequestReadProviderFake{
+				name: mcphandlers.TaskChangeRequestProviderGitHub,
+				result: taskChangeRequestProviderResult{
+					Configured: true,
+					Available:  true,
+					ChangeRequests: []mcphandlers.TaskChangeRequest{{
+						Provider: mcphandlers.TaskChangeRequestProviderGitHub,
+						Number:   412, URL: "https://github.com/acme/repo/pull/412",
+						Title: "Improve the worker handoff", State: "open", Draft: &draft,
+					}},
+				},
+			},
+		},
+	}
+
+	got, err := reader.ListWorkerChangeRequests(context.Background(), "worker-1")
+	require.NoError(t, err)
+	require.Len(t, got, 1)
+	assert.Equal(t, "github", got[0].Provider)
+	assert.Equal(t, 412, got[0].Number)
+	assert.Equal(t, "https://github.com/acme/repo/pull/412", got[0].URL)
+	assert.Equal(t, "Improve the worker handoff", got[0].Title)
+	assert.Equal(t, "open", got[0].State)
+	assert.True(t, got[0].Draft)
+}
+
 func TestGitHubTaskChangeRequestReadMapsSwitchesAndAutomationStatus(t *testing.T) {
 	repositoryID := "repo-gh"
 	change := githubTaskChangeRequest(&github.TaskPR{

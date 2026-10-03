@@ -9,6 +9,7 @@ export const defaultFeatureFlags = {
   // overwrites this with the backend's effective values after startup.
   lspBrowserContinuity: false,
   office: false,
+  agentProjects: false,
   auth: false,
   canvases: false,
   multiTenancy: false,

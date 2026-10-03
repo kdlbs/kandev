@@ -365,12 +365,36 @@ func TestManagedCloneRelocationProofIncludesLegacyOwnerNamePath(t *testing.T) {
 		ID: "repo-legacy", WorkspaceID: "workspace-legacy", SourceType: "provider", Provider: "github",
 		ProviderHost: "https://github.com", ProviderOwner: "acme", ProviderName: "widget",
 	}
+	_, _, _, destination, managed, err := cloner.ManagedCloneRelocationPaths(repository)
+	if err != nil || !managed {
+		t.Fatalf("ManagedCloneRelocationPaths() = destination %q, managed %t, err %v", destination, managed, err)
+	}
+	if err := os.MkdirAll(destination, 0o755); err != nil {
+		t.Fatalf("create managed destination: %v", err)
+	}
+	repository.LocalPath = destination
 	proof := managedCloneRelocationProof(cloner, repository, "", "")
 	if proof == nil {
 		t.Fatal("managedCloneRelocationProof() returned nil for a managed provider repository")
 	}
 	if want := filepath.Join(root, "acme", "widget"); proof.LegacyOwnerNameSourcePath != want {
 		t.Fatalf("legacy owner/name source = %q, want %q", proof.LegacyOwnerNameSourcePath, want)
+	}
+}
+
+func TestManagedCloneRelocationProofIgnoresProviderTaggedExternalCheckout(t *testing.T) {
+	root := t.TempDir()
+	cloner := repoclone.NewCloner(repoclone.Config{BasePath: filepath.Join(root, "managed-repos")}, repoclone.ProtocolHTTPS, "", nil)
+	externalCheckout := filepath.Join(root, "fixture-checkout")
+	if err := os.MkdirAll(externalCheckout, 0o755); err != nil {
+		t.Fatalf("create external checkout: %v", err)
+	}
+	repository := &models.Repository{
+		ID: "repo-external", WorkspaceID: "workspace-external", SourceType: "provider", Provider: "github",
+		ProviderHost: "https://github.com", ProviderOwner: "fixture", ProviderName: "repo", LocalPath: externalCheckout,
+	}
+	if proof := managedCloneRelocationProof(cloner, repository, "", ""); proof != nil {
+		t.Fatalf("managedCloneRelocationProof() = %+v, want nil for external checkout", proof)
 	}
 }
 

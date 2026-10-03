@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"reflect"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -31,6 +32,22 @@ import (
 	"github.com/kandev/kandev/internal/task/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
+
+func TestRecordRecoveredProjectWorkspaceRepositoryUsesPrimaryRepositoryID(t *testing.T) {
+	info := &WorkspaceInfo{
+		ProjectWorkspace: &ProjectWorkspaceAccess{PrimaryRepositoryID: "repo-primary"},
+	}
+	recordRecoveredProjectWorkspaceRepository(info, "repo-worker", "/worktrees/worker", 0)
+	recordRecoveredProjectWorkspaceRepository(info, "repo-primary", "/worktrees/primary", 1)
+
+	if info.WorkspacePath != "/worktrees/primary" {
+		t.Fatalf("recovered workspace path = %q, want primary repository worktree", info.WorkspacePath)
+	}
+	wantRoots := []string{"/worktrees/worker", "/worktrees/primary"}
+	if !slices.Equal(info.ProjectWorkspace.RepositoryWorktreePaths, wantRoots) {
+		t.Fatalf("project worktree paths = %v, want %v", info.ProjectWorkspace.RepositoryWorktreePaths, wantRoots)
+	}
+}
 
 func TestErrSessionWorkspaceNotReady_ErrorsIs(t *testing.T) {
 	// The production code wraps ErrSessionWorkspaceNotReady with fmt.Errorf("%w", ...).

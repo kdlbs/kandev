@@ -19,8 +19,7 @@ import { Dialog } from "@kandev/ui/dialog";
 **Do NOT** import from `@/components/ui/*` - always use `@kandev/ui` package.
 
 - Always prefer native shadcn components over custom implementations. For async-status UI, do not rely on a changing button label as a live announcement: use one translated `role="status"` region, keep the button's accessible name stable, and override `@kandev/ui/spinner`'s default English `aria-label` with `t(...)` when it is announced (or use `aria-hidden` when another live status covers it).
-- Check `apps/packages/ui/src/` for available components (pagination, table, dialog, etc.).
-- For data tables, use `@kandev/ui/table` with TanStack Table; use shadcn Pagination components.
+- Check `apps/packages/ui/src/` for available components; use `@kandev/ui/table` with TanStack Table and shadcn Pagination for data tables.
 - Only create custom components when shadcn doesn't provide what's needed.
 
 ### Responsive and touch surfaces
@@ -61,9 +60,10 @@ lib/state/
 │   ├── comments/                  # code review diff comments
 │   ├── github/                    # GitHub PRs, reviews
 │   ├── gitlab/                    # GitLab MRs, watches, MR automation options
+│   ├── agent-projects/            # Agent Project lists and task/context metadata
 │   └── ui/                        # preview, connection, active state, sidebar views
 ├── hydration/                     # SSR merge strategies
-hooks/domains/{kanban,session,workspace,settings,comments,github,gitlab}/  # Domain-organized hooks
+hooks/domains/{kanban,session,workspace,settings,comments,github,gitlab,agent-projects}/  # Domain-organized hooks
 lib/api/domains/                    # API clients
 ├── kanban-api, session-api, workspace-api, settings-api, process-api
 ├── plan-api, queue-api, workflow-api, stats-api, github-api

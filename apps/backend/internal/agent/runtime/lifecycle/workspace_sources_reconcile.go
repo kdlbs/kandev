@@ -9,6 +9,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/common/logger"
+	storageworkspaces "github.com/kandev/kandev/internal/system/storage/workspaces"
 	"github.com/kandev/kandev/internal/worktree"
 )
 
@@ -36,6 +37,90 @@ func reconcileWorkspaceSources(_ context.Context, root string, folders []Workspa
 		if _, err := worktree.EnsureOwnedDirectoryLink(root, folder.Name, folder.LocalPath, owner); err != nil {
 			return fmt.Errorf("link workspace folder %q: %w", folder.Name, err)
 		}
+	}
+	return nil
+}
+
+func reconcileProjectWorkspace(primaryRepositoryPath, contextPath, taskID, workspaceID, taskDirName string) (string, error) {
+	if primaryRepositoryPath == "" || contextPath == "" || taskID == "" || taskDirName == "" {
+		return "", fmt.Errorf("project workspace identity or path is incomplete")
+	}
+	taskRoot := filepath.Dir(primaryRepositoryPath)
+	if err := validateProjectWorkspaceOwner(taskRoot, taskID, workspaceID, taskDirName); err != nil {
+		return "", err
+	}
+	absContextPath, contextInfo, err := canonicalProjectContext(contextPath)
+	if err != nil {
+		return "", err
+	}
+	if err := validateProjectContextLink(taskRoot, absContextPath, contextInfo); err != nil {
+		return "", err
+	}
+	if _, err := worktree.EnsureOwnedDirectoryLink(taskRoot, "context", absContextPath, worktree.OwnedDirectoryLinkOwner{
+		TaskID: taskID, TaskDirName: taskDirName,
+	}); err != nil {
+		return "", fmt.Errorf("link project context into task workspace: %w", err)
+	}
+	return taskRoot, nil
+}
+
+func validateProjectWorkspaceOwner(taskRoot, taskID, workspaceID, taskDirName string) error {
+	marker, found, err := storageworkspaces.ReadOwnershipMarker(taskRoot)
+	if err != nil || !found || marker.TaskID != taskID || marker.TaskDirName != taskDirName ||
+		(workspaceID != "" && marker.WorkspaceID != "" && marker.WorkspaceID != workspaceID) {
+		return fmt.Errorf("project task workspace ownership could not be verified")
+	}
+	return nil
+}
+
+func canonicalProjectContext(contextPath string) (string, os.FileInfo, error) {
+	absContextPath, err := filepath.Abs(contextPath)
+	if err != nil {
+		return "", nil, fmt.Errorf("resolve project context path: %w", err)
+	}
+	if filepath.Base(absContextPath) != "context" || filepath.Base(filepath.Dir(filepath.Dir(absContextPath))) != "agent-projects" {
+		return "", nil, fmt.Errorf("project context path is outside the canonical agent-projects root")
+	}
+	for current := absContextPath; ; current = filepath.Dir(current) {
+		info, err := os.Lstat(current)
+		if err != nil || !info.IsDir() || worktree.IsDirectoryLink(current) {
+			return "", nil, fmt.Errorf("project context path contains a non-directory or link")
+		}
+		if filepath.Base(current) == "agent-projects" {
+			break
+		}
+		parent := filepath.Dir(current)
+		if parent == current {
+			return "", nil, fmt.Errorf("project context path is outside the canonical agent-projects root")
+		}
+	}
+	resolvedContextPath, err := filepath.EvalSymlinks(absContextPath)
+	if err != nil || filepath.Clean(resolvedContextPath) != filepath.Clean(absContextPath) {
+		return "", nil, fmt.Errorf("project context path is not canonical")
+	}
+	contextInfo, err := os.Lstat(absContextPath)
+	if err != nil || !contextInfo.IsDir() || worktree.IsDirectoryLink(absContextPath) {
+		return "", nil, fmt.Errorf("project context path is not a real directory")
+	}
+	return absContextPath, contextInfo, nil
+}
+
+func validateProjectContextLink(taskRoot, absContextPath string, contextInfo os.FileInfo) error {
+	linkPath := filepath.Join(taskRoot, "context")
+	_, linkErr := os.Lstat(linkPath)
+	if linkErr == nil {
+		if !worktree.IsDirectoryLink(linkPath) {
+			return fmt.Errorf("project context entry is not a directory link")
+		}
+		linkedContext, statErr := os.Stat(linkPath)
+		if statErr != nil {
+			return fmt.Errorf("project context link target is unavailable: %w", statErr)
+		}
+		if !os.SameFile(linkedContext, contextInfo) {
+			return fmt.Errorf("project context link points to an unexpected directory")
+		}
+	} else if !os.IsNotExist(linkErr) {
+		return fmt.Errorf("inspect project context link: %w", linkErr)
 	}
 	return nil
 }
@@ -171,7 +256,11 @@ func workspaceRepositorySpecsFromLaunch(req *LaunchRequest) []WorkspaceRepositor
 	return result
 }
 
-func workspaceSourceRoots(folders []WorkspaceFolderSpec, repositories []WorkspaceRepositorySpec) []string {
+func workspaceSourceRoots(
+	folders []WorkspaceFolderSpec,
+	repositories []WorkspaceRepositorySpec,
+	projectWorkspace *ProjectWorkspaceAccess,
+) []string {
 	roots := make([]string, 0, len(folders)+len(repositories))
 	seen := make(map[string]struct{}, cap(roots))
 	add := func(path string) {
@@ -192,8 +281,51 @@ func workspaceSourceRoots(folders []WorkspaceFolderSpec, repositories []Workspac
 	for _, folder := range folders {
 		add(folder.LocalPath)
 	}
-	for _, repository := range repositories {
-		add(repository.RepositoryPath)
+	if projectWorkspace != nil {
+		add(projectWorkspace.ContextPath)
+		for _, path := range projectWorkspace.RepositoryWorktreePaths {
+			add(path)
+		}
+	} else {
+		for _, repository := range repositories {
+			add(repository.RepositoryPath)
+		}
 	}
 	return roots
+}
+
+func projectWritableRoots(projectWorkspace *ProjectWorkspaceAccess) ([]string, error) {
+	if projectWorkspace == nil {
+		return nil, nil
+	}
+	if projectWorkspace.ContextPath == "" {
+		return nil, fmt.Errorf("agent project context write root is unavailable")
+	}
+	if len(projectWorkspace.RepositoryWorktreePaths) == 0 {
+		return nil, fmt.Errorf("agent project repository write roots are unavailable")
+	}
+	roots := make([]string, 0, len(projectWorkspace.RepositoryWorktreePaths)+1)
+	seen := make(map[string]struct{}, cap(roots))
+	for _, path := range append([]string{projectWorkspace.ContextPath}, projectWorkspace.RepositoryWorktreePaths...) {
+		if path == "" {
+			return nil, fmt.Errorf("agent project repository write root is unavailable")
+		}
+		resolved, err := filepath.EvalSymlinks(filepath.Clean(path))
+		if err != nil {
+			return nil, fmt.Errorf("resolve agent project write root %q: %w", path, err)
+		}
+		info, err := os.Stat(resolved)
+		if err != nil {
+			return nil, fmt.Errorf("stat agent project write root %q: %w", path, err)
+		}
+		if !info.IsDir() {
+			return nil, fmt.Errorf("agent project write root %q is not a directory", path)
+		}
+		if _, ok := seen[resolved]; ok {
+			continue
+		}
+		seen[resolved] = struct{}{}
+		roots = append(roots, resolved)
+	}
+	return roots, nil
 }

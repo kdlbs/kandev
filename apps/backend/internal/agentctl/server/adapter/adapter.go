@@ -171,6 +171,14 @@ type SessionResettableAdapter interface {
 	ResetSession(ctx context.Context, mcpServers []types.McpServer) (string, error)
 }
 
+// ProjectWorkspaceAdapter is implemented by ACP adapters that accept the
+// server-granted project context and repository roots on session transitions.
+type ProjectWorkspaceAdapter interface {
+	NewSessionWithAdditionalDirectories(ctx context.Context, mcpServers []types.McpServer, directories []string) (string, error)
+	LoadSessionWithAdditionalDirectories(ctx context.Context, sessionID string, mcpServers []types.McpServer, directories []string) error
+	ResetSessionWithAdditionalDirectories(ctx context.Context, mcpServers []types.McpServer, directories []string) (string, error)
+}
+
 // ForkableSession is an optional capability for providers that can fork a
 // completed conversation without changing the active session.
 type ForkableSession interface {

@@ -8,6 +8,16 @@ import (
 	acp "github.com/coder/acp-go-sdk"
 )
 
+func TestInitializeAdvertisesAdditionalDirectorySupport(t *testing.T) {
+	response, err := (&mockAgent{}).Initialize(context.Background(), acp.InitializeRequest{})
+	if err != nil {
+		t.Fatalf("Initialize() error = %v", err)
+	}
+	if response.AgentCapabilities.SessionCapabilities.AdditionalDirectories == nil {
+		t.Fatal("Initialize() did not advertise additionalDirectories support")
+	}
+}
+
 func TestSetSessionConfigOptionReturnsAuthoritativeState(t *testing.T) {
 	sessionID := acp.SessionId("session-config-test")
 	agent := &mockAgent{
