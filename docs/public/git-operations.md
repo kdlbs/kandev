@@ -364,7 +364,10 @@ line in the picker. Point to or focus its information icon to see the saved valu
 tap the icon.
 
 The **Gitflow starter** can create Feature, Bugfix, Hotfix, and Release policies in one operation.
-It requires two different existing branches and does not change Git branches. A task stores the
+It requires two different existing branches and an empty policy list. Concurrent starters admit
+one complete set; the other receives an already-seeded conflict. An ordinary policy added before
+the starter's admission also makes it reject. You can add custom policies after initialization.
+The starter does not change Git branches. A task stores the
 selected policy values when it is created. Later policy edits or deletion do not change that task's
 branch or pull-request target. Kandev's pull-request dialog uses the saved target by default. You can
 select a different target before creation.
