@@ -161,3 +161,5 @@ Final PR-review validation:
 - The managed-runtime component suite passed 61 tests across the session recovery model, startup recovery card, and action message. After the complexity refactor, the focused startup card suite passed 5 tests; TypeScript typecheck and i18n validation passed.
 - Backend `golangci-lint` passed with zero issues. The commit hooks passed documentation, spec, formatting, scoped lint, web lint, i18n, E2E sleep, public-copy, and commit-message checks.
 - `python3 scripts/list-docs.py validate`, `python3 scripts/lint-spec-files.py --all`, and public-document validation passed.
+
+On 2026-10-03, the first PR CI attempt failed the lifecycle package at its 10-minute test timeout. The exact local race-and-coverage command passed in 105 seconds. A retry passed both Linux backend test shards and every Windows test step, but the Windows job reached its 40-minute limit during Go cache cleanup. The workflow timeout is now 45 minutes to leave time for post-job cleanup; a full current-head CI run remains pending.
