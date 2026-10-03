@@ -77,9 +77,26 @@ func plainHTTPRepositoryState(t *testing.T, repo string) string {
 // @covers AC-PLATFORM-GIT-DIFF-FILE-METADATA-001.6
 // @covers AC-PLATFORM-GIT-DIFF-FILE-METADATA-001.7
 func TestGitComparisonPlainOutputMultiRepoHTTP(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("XDG_CONFIG_HOME", home)
+	colorConfig := "[color]\n\tui = always\n\tdiff = always\n"
+	configPath := filepath.Join(home, ".gitconfig")
+	if err := os.WriteFile(configPath, []byte(colorConfig), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		data, err := os.ReadFile(configPath)
+		if err != nil || string(data) != colorConfig {
+			t.Errorf("comparison changed global color config: %q, err = %v", data, err)
+		}
+	})
 	root := t.TempDir()
 	alpha := seedStatusMetadataHTTPRepo(t, root, "alpha", plainHTTPPath, false)
 	beta := seedStatusMetadataHTTPRepo(t, root, "beta", plainHTTPPath, true)
+	alpha.patch = runGitAPI(t, alpha.dir, "diff", "--no-color", "--src-prefix=a/", "--dst-prefix=b/", alpha.base)
+	beta.patch = runGitAPI(t, beta.dir, "diff", "--no-color", "--src-prefix=a/", "--dst-prefix=b/", beta.base)
 	for _, repo := range []statusMetadataHTTPRepo{alpha, beta} {
 		runGitAPI(t, repo.dir, "config", "color.ui", "always")
 		runGitAPI(t, repo.dir, "config", "color.diff", "always")

@@ -1,7 +1,7 @@
 ---
 id: "01-produce-plain-comparisons"
 title: "Produce plain comparison patches"
-status: done
+status: completed
 wave: 1
 depends_on: []
 plan: "plan.md"
@@ -62,12 +62,12 @@ retain each result even when the expected failure is exit 1. Then add the two
 flags and run each affected package's exact GREEN command once.
 
 ```bash
-(cd apps/backend && GOMAXPROCS=2 GOMEMLIMIT=512MiB go test -race -trimpath -p=1 ./internal/agentctl/server/process -run '^TestGitComparisonPlainOutput' -count=1)
-(cd apps/backend && GOMAXPROCS=2 GOMEMLIMIT=512MiB go test -race -trimpath -p=1 ./internal/agentctl/server/api -run '^TestGitComparisonPlainOutput' -count=1)
-(cd apps/backend && GOMAXPROCS=2 GOMEMLIMIT=512MiB go test -race -trimpath -p=1 ./internal/agentctl/server/process -run '^(TestGitComparisonPlainOutput.*|TestGitDiffStatusMetadataCallers|TestShowCommit_StatusMetadataRootAndEmpty|TestParseCommitDiffWithOptions_StatusMetadata.*|TestShowCommit_MergeCommitUsesFirstParentDiff|TestShowCommit_CountsDashAndPlusPrefixedContent|TestGetCumulativeDiff_CountsDashAndPlusPrefixedContent|TestGetCumulativeDiff_StablePrefixesIgnoreGitDiffConfig|TestGetCumulativeDiff_ModeOnlyBSlashPath|TestGetCumulativeDiff_TruncatesLargeFile|TestGetCumulativeDiff_BudgetExceeded|TestGetCumulativeDiff_CapsFileCount|TestShowCommit_NotCapped)$' -count=1)
-(cd apps/backend && GOMAXPROCS=2 GOMEMLIMIT=512MiB go test -race -trimpath -p=1 ./internal/agentctl/server/api -run '^(TestGitComparisonPlainOutput.*|TestGitDiffStatusMetadataHTTP|TestGitDiffStatusMetadataMultiRepoHTTP|TestHandleGitShowCommit_.*)$' -count=1)
+(cd apps/backend && GOMAXPROCS=2 GOMEMLIMIT=512MiB go test -race -trimpath -tags fts5 -p=1 ./internal/agentctl/server/process -run '^TestGitComparisonPlainOutput' -count=1)
+(cd apps/backend && GOMAXPROCS=2 GOMEMLIMIT=512MiB go test -race -trimpath -tags fts5 -p=1 ./internal/agentctl/server/api -run '^TestGitComparisonPlainOutput' -count=1)
+(cd apps/backend && GOMAXPROCS=2 GOMEMLIMIT=512MiB go test -race -trimpath -tags fts5 -p=1 ./internal/agentctl/server/process -run '^(TestGitComparisonPlainOutput.*|TestGitDiffStatusMetadataCallers|TestShowCommit_StatusMetadataRootAndEmpty|TestParseCommitDiffWithOptions_StatusMetadata.*|TestShowCommit_MergeCommitUsesFirstParentDiff|TestShowCommit_CountsDashAndPlusPrefixedContent|TestGetCumulativeDiff_CountsDashAndPlusPrefixedContent|TestGetCumulativeDiff_StablePrefixesIgnoreGitDiffConfig|TestGetCumulativeDiff_ModeOnlyBSlashPath|TestGetCumulativeDiff_TruncatesLargeFile|TestGetCumulativeDiff_BudgetExceeded|TestGetCumulativeDiff_CapsFileCount|TestShowCommit_NotCapped)$' -count=1)
+(cd apps/backend && GOMAXPROCS=2 GOMEMLIMIT=512MiB go test -race -trimpath -tags fts5 -p=1 ./internal/agentctl/server/api -run '^(TestGitComparisonPlainOutput.*|TestGitDiffStatusMetadataHTTP|TestGitDiffStatusMetadataMultiRepoHTTP|TestHandleGitShowCommit_.*)$' -count=1)
 (cd apps/backend && GOMAXPROCS=2 GOMEMLIMIT=512MiB golangci-lint run ./internal/agentctl/server/process ./internal/agentctl/server/api ./internal/common/securityutil --new-from-rev=678a4d19ad5ffd8f6f9c5f7be419bbdc02609d24 --concurrency=2 --allow-serial-runners --timeout=5m)
-(cd apps/backend && GOMAXPROCS=2 GOMEMLIMIT=512MiB go test -race -trimpath -p=1 ./internal/common/securityutil -run '^TestIsKnownSafeGitFlag' -count=1)
+(cd apps/backend && GOMAXPROCS=2 GOMEMLIMIT=512MiB go test -race -trimpath -tags fts5 -p=1 ./internal/common/securityutil -run '^TestIsKnownSafeGitFlag' -count=1)
 python3 scripts/list-docs.py validate
 python3 scripts/lint-spec-files.py --all
 git diff --check
@@ -158,3 +158,16 @@ lint and whitespace checks passed. Actual changed-file `validateCoverage`
 returned `covered`, no errors. No full backend suite, browser/E2E or build ran.
 Local implementation is complete; normal hooks and hosted delivery are tracked
 in the external task plan and remain completion gates for the child.
+
+Hosted review remediation: future scoped commands above now include `-tags fts5`
+to match repository Make/CI configuration. The original RED/GREEN receipts were
+run without that tag as originally reviewed. New affected API oracle regression
+with disposable global forced color failed as expected on patch equality
+(tagged RED, 0.246s, handle 59363 joined). The affected API race GREEN passed in 1.797s (handle 91801 joined);
+unchanged passing process/securityutil checks retain their actual receipts.
+The mandatory full-backend changed lint uses exact PR base
+`678a4d19ad5ffd8f6f9c5f7be419bbdc02609d24`. First full changed lint
+joined exit 4 for timeout (handle 27034); zero issues was not a pass. Parent
+authorized one recovery with OS timeout 6m and GOMEMLIMIT=1GiB, all other flags
+unchanged. Recovery joined exit 0 with zero issues (handle 15675). Local
+remediation is complete; corrected-head hosted gates and merge remain pending.

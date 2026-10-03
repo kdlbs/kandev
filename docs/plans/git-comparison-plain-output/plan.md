@@ -113,15 +113,16 @@ documentation change is needed.
 
 ## Delivery gates
 
-Finish the design turn with these four artifacts unstaged and uncommitted.
-Send a queued handoff to parent `14825981-b175-411d-999a-31ddc2aa5fc3` and end
-the turn. Await a later explicit parent INTERRUPT implementation release in
-task `2d3cd45e-8d4e-4996-91d3-14bdeaa88a5f`, session
-`fccd06a9-126d-45e1-ab32-13504ff36364`. No operator approval or model-switch
-question, additional agent, worker, task or session is authorized.
+The design turn ended with four unstaged/uncommitted artifacts and a queued
+handoff to parent `14825981-b175-411d-999a-31ddc2aa5fc3`. The later explicit
+parent INTERRUPT released implementation in task
+`2d3cd45e-8d4e-4996-91d3-14bdeaa88a5f`, session
+`fccd06a9-126d-45e1-ab32-13504ff36364`. That handoff gate is complete. No
+operator approval/model-switch question or additional agent, worker, task or
+session is authorized.
 
-After release, implement with permanent RED/GREEN and the exact work-order
-checks, normal hooks, commit/push and a ready PR promptly. Keep one heavy local
+Implementation completed with permanent RED/GREEN, exact work-order checks,
+normal hooks, commit/push and ready PR #4179. Local review remediation is complete; corrected-head hosted delivery remains pending. Keep one heavy local
 command at a time; retain and join every handle. Preserve others' edits,
 processes, worktrees and caches. If dependencies are absent, one project-pinned
 pnpm 9.15.9 frozen install from `apps/` precedes hooks; no lockfile change.
@@ -154,10 +155,10 @@ Design checks on 2026-10-03:
   This is design coverage, not hosted PR evidence or an implementation pass.
 - `git diff --check` and package status: passed; both work-package files exist.
 
-All four owned artifacts remain unstaged/uncommitted. No production/permanent
-test change, Go test/lint/build or dependency install occurred. No owned live
-handle exists. Next action is the queued parent handoff and end of design turn;
-implementation remains pending a later explicit parent INTERRUPT release.
+At the design checkpoint, all four artifacts were unstaged/uncommitted; no
+production/permanent tests, Go checks or dependency install had occurred. The
+queued parent handoff ended that turn. The later explicit release and results
+below supersede that historical pending state.
 
 Implementation results: permanent process and registered-HTTP RED failed on
 forced-color empty membership while controls passed. After the parent-released
@@ -166,8 +167,8 @@ in 3.067s/1.867s/1.012s, all handles joined. Scoped changed lint passed with zer
 issues. Catalog/spec lint, actual changed-file documentation coverage and
 whitespace checks passed. One pinned pnpm 9.15.9 frozen install completed with
 no tracked dependency changes. No full suite/browser/E2E/build was run.
-Local order is complete; normal hooks, publication, hosted gates, actual merge
-and joined owned cleanup remain external task completion gates.
+Local order is complete. Initial normal hooks and publication passed; corrected-head
+hooks, hosted gates, actual merge and joined owned cleanup remain delivery gates.
 
 ## Bounded validation dependency
 
@@ -186,3 +187,28 @@ The work order preserves all failed-run and joined-handle receipts.
 - Root/merge/empty branches and binary metadata need positive controls independent
   of the initial two-text-file proof.
 - Broader Git configuration behavior and unrelated producers stay outside scope.
+
+## Hosted review remediation
+
+Initial published head `6c00c2095784807c65910f67116375cfd1aa3c5f` passed
+55 hosted checks (18 skipped, none failed/pending); waiter handle 50384 joined
+exit 1 solely for unresolved review threads. CodeRabbit full review processed
+all nine files and identified a valid colored fixture-oracle dependency. The
+owned API test now seeds disposable global forced color before manager creation
+and recomputes each oracle with explicit plain output, without changing the
+shared fixture helper or production code. Its new tagged RED failed on exact
+patch equality (0.246s, handle 59363 joined). Cubic findings are addressed by
+recording the handoff as historical and matching future scoped commands to the
+repository fts5 test configuration. Original untagged RED/GREEN receipts remain
+accurate; unchanged passing process/securityutil tests are not replayed. Only
+affected API validation and the mandatory full-backend changed lint run before
+fixup push. Corrected-head hosted evidence remains required.
+
+Local remediation verification: tagged affected API race GREEN passed in 1.797s
+(handle 91801 joined). The mandatory full-backend changed lint first timed out
+(exit 4, handle 27034 joined); zero reported issues did not constitute a pass.
+The parent released one bounded recovery with an OS six-minute deadline and
+GOMEMLIMIT=1GiB, retaining concurrency 2, serial runners and the five-minute lint
+timeout at the exact base above. Recovery handle 15675 joined exit 0 with zero
+issues. Original passing process/securityutil checks were not replayed.
+Corrected-head CI/review and actual merge remain externally pending.
