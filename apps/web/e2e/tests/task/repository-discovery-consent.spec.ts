@@ -1,6 +1,7 @@
 import { expect, test } from "../../fixtures/test-base";
 import { useRegularMode } from "../../helpers/regular-mode";
 import { waitForFiniteAnimations } from "../../helpers/animations";
+import { openAddLocalRepositoryDialog } from "../../helpers/add-repository-menu";
 import { KanbanPage } from "../../pages/kanban-page";
 import {
   DISCOVERY_FAILURE_ROOT,
@@ -100,10 +101,8 @@ test.describe("Desktop repository discovery consent", () => {
 
     try {
       await testPage.goto(`/settings/workspaces/${seedData.workspaceId}/repositories`);
-      await testPage.getByRole("button", { name: "Add Local Repository" }).click();
-      const controls = testPage
-        .getByRole("dialog", { name: "Add Local Repository" })
-        .getByTestId("discovery-root-controls");
+      const consentDialog = await openAddLocalRepositoryDialog(testPage);
+      const controls = consentDialog.getByTestId("discovery-root-controls");
       const continueHome = controls.getByRole("button", { name: "Continue Home Discovery" });
       await expect(continueHome).toBeVisible();
       await continueHome.click();
@@ -264,8 +263,7 @@ test.describe("Desktop repository discovery consent", () => {
       testPage.on("request", onRequest);
 
       await testPage.goto(`/settings/workspaces/${seedData.workspaceId}/repositories`);
-      await testPage.getByRole("button", { name: "Add Local Repository" }).click();
-      const dialog = testPage.getByRole("dialog", { name: "Add Local Repository" });
+      const dialog = await openAddLocalRepositoryDialog(testPage);
       const controls = dialog.getByTestId("discovery-root-controls");
       await expect(controls).toBeVisible();
 

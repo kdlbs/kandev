@@ -713,7 +713,7 @@ test.describe("Improve Kandev dialog", () => {
     await testPage.goto(`/settings/workspaces/${dedicated.id}/repositories`);
 
     await expect(testPage.getByText(/cannot be changed/i)).toBeVisible({ timeout: 15_000 });
-    await expect(testPage.getByRole("button", { name: /Add Local Repository/i })).toHaveCount(0);
+    await expect(testPage.getByRole("button", { name: /Add repository/i })).toHaveCount(0);
   });
 
   // The gate must ask "is there any GitHub credential at all", not "is every
