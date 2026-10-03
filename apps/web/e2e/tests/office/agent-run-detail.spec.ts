@@ -263,20 +263,24 @@ test.describe("Office agent run detail", () => {
       sessionId: session.session_id,
       errorMessage: "Session recovery is required",
     });
+    const response = await apiClient.rawRequest(
+      "GET",
+      `/api/v1/office/agents/${officeSeed.agentId}/runs/${run.run_id}`,
+    );
+    expect(response.status).toBe(200);
+    const detail = (await response.json()) as Record<string, unknown> & {
+      routing?: Record<string, unknown>;
+    };
+    detail.routing = {
+      ...(detail.routing ?? {}),
+      blocked_status: "session_recovery_required",
+      session_recovery_block_id: "recovery-block-e2e",
+      session_recovery_reason: "native_state_missing",
+    };
 
     await testPage.route(
       `**/api/v1/office/agents/${officeSeed.agentId}/runs/${run.run_id}`,
-      async (route) => {
-        const response = await route.fetch();
-        const detail = await response.json();
-        detail.routing = {
-          ...(detail.routing ?? {}),
-          blocked_status: "session_recovery_required",
-          session_recovery_block_id: "recovery-block-e2e",
-          session_recovery_reason: "native_state_missing",
-        };
-        await route.fulfill({ response, json: detail });
-      },
+      (route) => route.fulfill({ status: response.status, json: detail }),
     );
 
     await testPage.goto(`/office/agents/${officeSeed.agentId}/runs/${run.run_id}`);

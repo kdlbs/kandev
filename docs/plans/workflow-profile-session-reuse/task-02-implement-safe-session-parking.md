@@ -172,3 +172,31 @@ cd apps/web && pnpm e2e:run --host --no-build --shards 1 --project chromium e2e/
 cd apps/web && pnpm e2e:run --host --no-build --shards 1 --project chromium e2e/tests/task/dialog-long-text-overflow.spec.ts -- --retries=0
 git diff --check
 ```
+
+### Reproduced browser-fixture races, 2026-10-03
+
+The d5cb3049 hosted run also exposed two test races. The Office recovery-link
+test now reads its seeded run detail before installing the route and fulfills
+the browser request from that stable payload; it no longer parses a fetched
+Playwright response inside the route callback. The configuration-chat restart
+test waits for the original session to reach `WAITING_FOR_INPUT` before opening
+the deletion confirmation, so its confirmation digest is created after the
+previous prompt settles. Both cases passed five repetitions with retries
+disabled (10/10).
+
+The same hosted backend shard reported one failure in
+`TestRuntimeReplacementKeepsBackendBoot`: its child test process did not
+publish its loopback endpoint. The exact test passed five isolated repetitions
+locally; no product change was made for this single parallel-suite occurrence.
+The d5cb3049 workflow reached terminal with 58 passing, 10 skipped, one neutral,
+and six failed checks, with none pending. Failures were the backend shard and
+aggregate, the two E2E shards, and their report gates. These browser fixture
+changes have not yet been published.
+
+```bash
+cd apps/backend && go test ./internal/agent/runtime/agentctl -run '^TestRuntimeReplacementKeepsBackendBoot$' -count=5
+cd apps/web && pnpm e2e:run --host --no-build --shards 1 --project chromium e2e/tests/office/agent-run-detail.spec.ts e2e/tests/settings/config-chat-restart.spec.ts -- --grep 'parked run links to the selected session recovery action|cancels without losing a draft, then replaces and restores a blank conversation' --retries=0 --repeat-each=5
+cd apps/web && pnpm exec eslint e2e/tests/office/agent-run-detail.spec.ts e2e/tests/settings/config-chat-restart.spec.ts
+cd apps/web && pnpm exec prettier --check e2e/tests/office/agent-run-detail.spec.ts e2e/tests/settings/config-chat-restart.spec.ts
+git diff --check
+```
