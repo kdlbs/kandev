@@ -216,10 +216,13 @@ func TestLogicalStatsCacheDoesNotOverlapAnInvalidatedScan(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("replacement scan did not start after the old scan finished")
 	}
-	release(releaseSecond, &secondReleaseOnce)
 	cache.mu.Lock()
 	secondFlight := cache.flight
 	cache.mu.Unlock()
+	if secondFlight == nil {
+		t.Fatal("replacement scan flight disappeared before release")
+	}
+	release(releaseSecond, &secondReleaseOnce)
 	select {
 	case <-secondFlight.done:
 	case <-time.After(time.Second):

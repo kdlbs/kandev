@@ -384,3 +384,46 @@ execution, authenticated full current-head
 CodeRabbit review and actual merge remain pending. Keep order in progress;
 external final receipts belong in the platform plan to preserve published head.
 No completion or hardware crash immunity claimed.
+
+
+### Authorized hosted CI fixture correction
+
+At head `c73b333e66ae44e14026b4ed94a7a46b3a8bc469`, hosted Backend Tests (1/2)
+failed only in `TestLogicalStatsCacheDoesNotOverlapAnInvalidatedScan` with a
+nil-pointer panic at `stats_cache_test.go:224`. The test released its second
+worker before capturing `cache.flight`, so completion could clear that pointer.
+The file was unchanged from the PR base; artifact `11283527363` and the actual
+source establish the fixture race. Root inspected production completion and
+explicitly authorized this bounded test-only extension in the same session.
+
+Capture the second flight under `cache.mu` while its worker remains held,
+assert it exists, then release and wait on its captured completion channel.
+Retain the nonoverlap assertion, both completion waits/deadlines and final
+ready snapshot/value assertion. No production cache behavior, timeout, retry,
+race or leak-check changes. This is a CI fixture correction, not a new product
+requirement or architecture decision.
+
+Exact targeted verification (only this test; no repeated policy checks):
+
+```bash
+(cd apps/backend && GOMAXPROCS=2 GOMEMLIMIT=512MiB go test -trimpath -tags fts5 -race -p=1 ./internal/system/database -run '^TestLogicalStatsCacheDoesNotOverlapAnInvalidatedScan$' -count=10)
+```
+
+Then one mandatory full changed-revision lint against the exact live PR base,
+with the existing GOMAXPROCS 2 / GOMEMLIMIT 1GiB, concurrency 2, serial runner,
+CLI 5-minute / GNU 6-minute bounds. Resource failures require parent direction.
+Normal hooks, minimal fixup push and updated live PR validation follow; fresh
+corrected-head hosted gates and App 347564 full review cover all 17 changed
+paths including this fixture. No hosted retry of the proved panic.
+
+Old-head monitor 13266 was explicitly stopped and joined at exit 143 before
+this test run; its partial CI report is not a terminal verdict. No duplicate
+monitor or active old-head command remains. Runtime branch-policy production
+bytes are unchanged. Final receipts are recorded in the platform plan.
+
+Targeted fixture verification handle 22561 joined exit 0 (1.536s), count 10 with
+the race detector and exact command above. No policy tests were rerun. Full
+changed-revision lint handle 20900 joined exit 0, zero issues, using freshly
+verified live base `b0dc2bef512eda8def545ba5cf2edc67bbedf73d` and the unchanged
+resource bounds. Normal commit and push follow. External review/merge receipts remain in the platform
+plan, preserving the published head unless another valid finding requires work.
