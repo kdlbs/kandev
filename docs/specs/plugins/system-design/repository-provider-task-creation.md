@@ -31,6 +31,9 @@ calls and external credentials.
 | `AC-PLUGINS-REPOSITORY-TASK-CREATION-001.7` | [Compatibility](#compatibility) |
 | `AC-PLUGINS-REPOSITORY-TASK-CREATION-001.8` | [Failure contract](#failure-contract) |
 | `AC-PLUGINS-REPOSITORY-TASK-CREATION-001.9` | [Responsive behavior](#responsive-behavior) |
+| `AC-PLUGINS-REPOSITORY-TASK-CREATION-001.10` | [Native URL cache refresh](#native-url-cache-refresh) |
+| `AC-PLUGINS-REPOSITORY-TASK-CREATION-001.11` | [Native URL cache refresh](#native-url-cache-refresh) |
+| `AC-PLUGINS-REPOSITORY-TASK-CREATION-001.12` | [Native URL cache refresh](#native-url-cache-refresh) |
 
 ## Components and responsibilities
 
@@ -239,6 +242,56 @@ settings are recorded.
   compatibility period. Public documentation defines the nested form as the
   preferred shape.
 
+## Native URL cache refresh
+
+`useBranchesByURL` and `usePRInfoByURL` own separate per-URL caches within
+one hook instance and workspace. `usePluginRegistry().getVersion()` changes
+their `ensure` callback identities. `RemoteRepoChipsRow` already responds by
+ensuring every nonempty row through both hooks, then applies structured
+inspection to the corresponding row. No coordinator or registry API changes
+are needed.
+
+On the first valid `ensure` call that observes a different registry version,
+each hook invalidates its entire local cache before the per-URL deduplication
+check. It advances existing per-URL request sequences, aborts outstanding
+controllers, clears in-flight and loaded sets, and clears visible URL state.
+Only then does it record the observed version and resolve the requested URL
+through the existing candidate inspection and built-in fallback paths. Other
+URLs remain eligible for their next `ensure`; the first URL cannot consume
+their invalidation. Empty input remains a no-op.
+
+The existing sequence comparisons fence success, failure, and finalization
+callbacks. Sequence values advance rather than reset, so a late callback
+cannot match a new request for the same URL or clear its in-flight slot.
+Workspace ID and epoch checks continue to isolate workspace switches.
+Unmount and explicit `clear(url)` retain their current cleanup and retry
+behavior. No request identity fields or exported result shapes are added.
+
+Settled success, error, empty, and unsupported entries all lose their loaded
+markers on a version transition. Within one version, loaded and in-flight
+deduplication still applies per trimmed URL. Pending old requests cannot
+repopulate invalidated entries. Provider removal clears obsolete inspection,
+metadata, branch, and error output from the loaders; subsequent resolution
+uses the existing built-in or unsupported result. This does not rewrite
+committed dialog row selections or change the existing unsupported URL
+`settled` semantics.
+
+The registry version is the existing coarse invalidation signal, including
+notifications from other contributions. This correction introduces no
+provider-specific registry revision or shared cache. Hook callers are
+`task-create-dialog-state.ts`, `task/new-subtask-form-state.ts`, and the
+per-row `RemoteRepositoryRow` in
+`task/add-workspace-sources/add-workspace-sources-dialog.tsx`. The first two
+share a multi-URL form cache; the attachment row owns one URL per hook
+instance. Consumer effects and picker markup retain their existing contracts.
+
+Focused hook tests use the real `pluginRegistry` and real URL inspection,
+mocking only API/provider transports. Multi-URL sentinels and reversed ensure
+order prove every cached URL recovers. Replacement/removal and controlled
+pending settlement cover the invalidation boundary. A rendered
+`RemoteRepoChipsRow` test with real chips and both real hooks proves automatic
+row hydration and distinct branch choices after late provider registration.
+
 ## Responsive behavior
 
 The feature uses the existing shared task dialog and repository picker. It
@@ -249,6 +302,12 @@ Playwright must prove the complete first-use flow in a desktop project and a
 phone project. The phone test also verifies that the repository and branch
 controls remain reachable, the submit action has a touch-sized target, and the
 dialog has no horizontal overflow.
+
+URL cache refresh is pure state/data behavior within that unchanged dialog.
+The focused hook and rendered chips tests satisfy the mobile-parity exception:
+no layout, copy, touch target, scrolling, navigation, or breakpoint behavior
+changes, and no additional browser build or mobile E2E is needed for this
+correction.
 
 ## Observability
 
