@@ -19,11 +19,14 @@ vi.mock("./git-helper", () => ({
 }));
 
 describe("seedNavigationTasks", () => {
-  it("settles shared-checkout preparation before starting the next task", async () => {
+  it.each([
+    { requested: undefined, expected: "worktree-profile" },
+    { requested: "explicit-profile", expected: "explicit-profile" },
+  ])("settles preparation and selects $expected", async ({ requested, expected }) => {
     let preparingSession: string | undefined;
     const sessions = new Map<string, string>();
     const api = {
-      createTaskWithAgent: vi.fn(async () => {
+      createTaskWithAgent: vi.fn(async (..._args: unknown[]) => {
         if (preparingSession) throw new Error("Shared checkout index.lock is held");
         const id = `task-${sessions.size + 1}`;
         const sessionId = `session-${id}`;
@@ -45,12 +48,17 @@ describe("seedNavigationTasks", () => {
         workflowId: "workflow",
         startStepId: "start",
         repositoryId: "repository",
+        worktreeExecutorProfileId: "worktree-profile",
       } as SeedData,
       { tmpDir: "/navigation-fixture" } as BackendContext,
+      requested,
     );
 
     expect(tasks.map((task) => task.id)).toEqual(["task-1", "task-2"]);
     expect(api.listTaskSessions).toHaveBeenCalledTimes(2);
+    for (const call of api.createTaskWithAgent.mock.calls) {
+      expect(call[3]).toEqual(expect.objectContaining({ executor_profile_id: expected }));
+    }
     expect(preparingSession).toBeUndefined();
   });
 });

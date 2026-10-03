@@ -193,3 +193,12 @@ owned clone and verifies that the shared checkout is preserved. Quick Chat
 selects its seeded repository by ID, and the default-layout test explicitly
 establishes the default Todos preferences. Production behavior and existing
 assertions remain unchanged. See the work order for verification evidence.
+
+
+The subsequent complete CI run passed every check, including Windows, with
+two remaining setup retries. Their controlled reproductions confirmed that
+task startup could switch an inherited dirty shared checkout and that the
+file-tree fixture's local main could be behind its offline origin. Navigation
+tasks now default to the existing seeded worktree executor, retaining explicit
+executor overrides. File-tree setup uses the existing fetch/rebase push helper.
+Both corrections preserve production behavior and the original assertions.

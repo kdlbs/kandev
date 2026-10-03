@@ -311,3 +311,41 @@ and mobile behavior preserved.
   tested there after diagnostic cleanup.
 - Catalog validation (343 decisions, 1313 specifications), full specification
   lint, and whitespace checks passed.
+
+
+### Navigation task isolation and advanced offline origin
+
+The next full run on `cfc7649d9` completed with 61 passing checks, 12 skips,
+no failures, and no pending checks. Windows process tests passed without a
+source change or rerun. All 20 E2E blobs contain 3662 first-pass tests, two
+passed-after-retry tests, and 47 skips. The artifact audit's exit 1 is retained
+because both initial attempts had errors; no retry-free claim is made.
+
+- File-tree setup's raw main push was non-fast-forward. Advancing the offline
+  origin from an independent worktree reproduced the exact rejection before
+  correction. Using the existing fetch/rebase push helper completed the push
+  without forcing the remote update.
+- Navigation task startup used the shared local checkout. Committing and then
+  modifying `review_cumulative_test.txt` reproduced the exact checkout failure
+  beneath the 30-second settlement error. Defaulting task preparation to the
+  existing worktree executor passed while leaving the inherited source diff
+  intact. Explicit executor overrides remain supported.
+- The default/override helper unit regression had one failure before correction
+  and both cases passed afterward. Both browser diagnostics failed before
+  correction and passed afterward (31.5s). They were removed after recording
+  the evidence. No timeout, sleep, or production source change was needed.
+
+Current main advanced through editor mutation ownership PR #4177. Validation
+uses synthetic merge `449e603a2` of `cfc7649d9` with main `2d3306711`, a fresh
+frozen-lockfile install, and a fresh managed backend/web/plugin build. Remote
+CI and final review/merge evidence remain in the platform task plan.
+
+
+- All nine affected desktop browser tests passed in 1.6 minutes with retries
+  disabled; two optional profiling cases were skipped.
+- Both mobile navigation and route-return tests passed (39.0s) with retries
+  disabled. All browser runs used one worker, two CPUs, and 4GiB.
+- All 58 focused unit tests passed across seven files, including navigation
+  default/override selection and the incoming editor mutation ownership tests.
+- Root and current-main web typecheck passed. Changed-file ESLint, Prettier,
+  and whitespace checks passed.

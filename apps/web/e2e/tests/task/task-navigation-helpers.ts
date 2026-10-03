@@ -83,7 +83,7 @@ export async function seedNavigationTasks(
         workflow_id: seed.workflowId,
         workflow_step_id: seed.startStepId,
         repositories: [{ repository_id: seed.repositoryId, base_branch: branch }],
-        executor_profile_id: executorProfileId,
+        executor_profile_id: executorProfileId ?? seed.worktreeExecutorProfileId,
       },
     );
     tasks.push(task);
