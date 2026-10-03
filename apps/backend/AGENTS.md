@@ -59,9 +59,7 @@ apps/backend/
 │   │   ├── repository/   # Database access (SQLite)
 │   │   └── service/      # Task business logic
 │   ├── runs/             # Generic run queue: models, repository, service, scheduler
-│   ├── office/           # Autonomous agent management (agents, approvals, channels, config, configsync,
-│   │                     # costs, dashboard, infra, labels, onboarding, projects, repository, runtime,
-│   │                     # routines, routing, scheduler, service, shared, skills, workspaces)
+│   ├── office/           # Autonomous agent management; see internal/office/AGENTS.md
 │   ├── projects/         # Agent Project identity, worker policy, shared context, and HTTP routes
 │   ├── events/           # Event bus for internal pub/sub
 │   ├── gateway/          # WebSocket gateway, including task-owned LSP lease lifecycle
