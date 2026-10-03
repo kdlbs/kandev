@@ -7,7 +7,7 @@ Numbers here describe this dated inventory, not a second live database.
 
 | ID     | Boundary                       | Inventory                                              | Status              | Next bounded result                                                                |
 | ------ | ------------------------------ | ------------------------------------------------------ | ------------------- | ---------------------------------------------------------------------------------- |
-| DEP-01 | Typed root-store composition   | 46 unsafe-cast findings after Features removed three   | Proposed            | One small slice accepts its actual dependencies without assertions                 |
+| DEP-01 | Typed root-store composition   | 45 unsafe-cast findings after Azure DevOps removal     | Complete            | Azure DevOps slice typed without a root-store cast ([PR #4009](https://github.com/kdlbs/kandev/pull/4009)) |
 | DEP-02 | Office run aliases             | 31 registered aliases after shared contract extraction | Proposed            | Migrate a coherent consumer group, then remove aliases with no remaining consumers |
 | DEP-03 | Runs importing Office          | Six exact edges remain                                 | Needs design        | Classify policy adapters before selecting an edge                                  |
 | DEP-04 | Runtime implementation imports | 61 exact findings                                      | Needs investigation | Select one caller group and identify missing facade capability                     |
@@ -16,12 +16,15 @@ Numbers here describe this dated inventory, not a second live database.
 
 ## DEP-01: type one slice
 
-Use the [Features delivery record](../plans/features-slice-root-typing/plan.md) as evidence, not a universal setter template.
-That slice needs only an Immer recipe setter. Other slices can need getters or additional operations.
+Use the [Features delivery record](../plans/features-slice-root-typing/plan.md) as an example, not a universal setter template.
+The Azure DevOps slice uses only an Immer recipe setter; other slices can need getters or additional operations.
 Avoid a root-store redesign or new unsafe casts elsewhere.
 
-Completion requires root composition typechecks, focused slice tests, and unchanged unrelated root-state references.
-The same PR removes only the obsolete baseline entries.
+The Azure DevOps slice now accepts its recipe-only setter directly, and root composition passes `set` without an assertion.
+The change removes exactly one obsolete baseline entry, reducing the count from 46 to 45.
+Focused Azure, root-store, and hydration tests passed (47 tests); web typecheck and lint, architecture lint, all 99 architecture-lint tests, and `git diff --check` passed.
+Unrelated task and workspace state references remain unchanged.
+Delivery: [PR #4009](https://github.com/kdlbs/kandev/pull/4009).
 
 ## DEP-02: retire Office aliases
 
