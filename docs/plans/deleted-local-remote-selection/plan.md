@@ -16,6 +16,12 @@ Correct remote repository selection so a deleted local checkout does not strand
 new tasks. One sequential work order implements the selector and proves the
 service-to-preparation flow. Production changes and regression coverage are complete.
 
+CI follow-through also updates desktop and mobile GitHub URL, file-link, and
+pasted-URL subtask fixtures to carry matching origins. Offline remotes remain
+available through checkout-local Git URL rewrites, restored after shared
+checkout use. All 13 reported failures pass locally with retries disabled;
+delivery continues through exact-head CI and review.
+
 The workspace system owns the selection contract because it owns repository
 registrations. Existing task-worktree recovery contracts remain separate.
 

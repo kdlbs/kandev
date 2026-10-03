@@ -79,6 +79,9 @@ paired specs only after implementation and all checks pass.
 - `apps/backend/internal/task/service/remote_repository_resolution_test.go` (new)
 - `apps/backend/internal/task/service/remote_repository_admission_test.go` (review regressions)
 - `apps/backend/internal/orchestrator/executor/executor_remote_selection_integration_test.go` (new)
+- `apps/web/e2e/helpers/github-origin.ts` and its test (offline provider fixture setup).
+- Desktop GitHub URL, subtask, and external file-link E2E fixtures.
+- Mobile external file-link fixture and shared fork-PR launch fixture.
 - This work order, `plan.md`, and the paired requirement/design lifecycle fields.
 - `docs/public/tasks-and-workflows.md` (remote selection recovery guidance).
 
@@ -152,3 +155,51 @@ Added `remote_repository_admission_test.go` for initial and fallback scope
 isolation, changed origin rejection with row preservation, and compatible
 SSH/HTTPS reuse. Local fixtures now carry a matching origin. Remote CI and
 review for the remediation remain pending until publication.
+
+### CI fixture remediation results
+
+E2E run 37072282028, attempt 1 at head `a8a89ba9`, reported three failures
+in shard 14. The file-link and pasted-URL subtask fixtures advertised GitHub
+identities without matching checkout origins. The subtask trace confirmed the
+same HTTP 400 origin-validation error as both file-link tests.
+
+- Red: the three exact failing tests reproduced in the CI runtime image with
+  one worker and `--retries=0` against a fresh managed production build.
+- Green: the same three tests passed (24.5s) after adding matching origins to
+  their disposable repositories. Production validation remains unchanged.
+- Command: from `apps/web`, run `pnpm e2e:run --docker --no-build
+  tests/review/external-vcs-file-link.spec.ts tests/task/subtask.spec.ts --
+  --grep 'opens a linked pull request file|uses the base branch for an existing
+  file|user creates subtask via pasted GitHub URL' --retries=0`, with the grep
+  pattern on one line. The initial Red run omitted `--no-build`.
+
+The relevant fixtures and validation code are identical on the PR head and the
+CI merge result (`2eaf4230`, head plus base `8a1229e6`). No public behavior,
+requirements, or system-design change is needed for this fixture correction.
+
+The final CI report identified 13 failed tests across shards 1, 9, 13, and 14,
+all with this origin mismatch. Both aggregate failures were downstream shard
+gates, with no additional assertion. The remaining desktop GitHub URL and
+mobile fixtures reproduced their failures with retries disabled before setup
+changes. Offline provider fixtures now expose canonical origins while using
+checkout-local URL rewrites for push/fetch against their disposable bare
+repositories. Shared checkout origins and rewrite entries are restored after
+each test. The missing-PR-snapshot case uses an empty offline origin and still
+asserts launch failure.
+
+- Full desktop GitHub URL spec: 10 passed (1.4m) with the describe-level retry
+  temporarily set to zero and CLI `--retries=0`; restored the existing retry
+  policy after verification.
+- Mobile file-link and fork-PR launch cases: 2 passed (15.4s), using
+  `pnpm e2e:run --docker --no-build --project mobile-chrome
+  tests/task/mobile-external-vcs-file-link.spec.ts
+  tests/task/mobile-create-task-remote-repo.spec.ts -- --grep
+  'opens the provider file|starts a target-attached fork PR' --retries=0`.
+- `pnpm exec vitest run e2e/helpers/github-origin.test.ts`: one passed, proving
+  offline push and cleanup while preserving an unrelated rewrite entry.
+- Existing phone touch-size, overflow, branch, and persisted-state assertions
+  remain intact; no rendered UI or mobile composition changed.
+- Changed-file ESLint and Prettier checks passed. Web typecheck passed.
+- Playwright discovery for Chromium, mobile, and containers reported zero errors.
+- Documentation coverage preflight returned `covered`; catalog validation,
+  full specification lint, and whitespace checks passed.
