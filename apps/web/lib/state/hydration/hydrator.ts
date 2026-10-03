@@ -31,6 +31,7 @@ import {
 import { normalizeAgentProfiles } from "@/lib/api/domains/agent-profile-normalize";
 import { preserveOmittedExecutorFields } from "@/lib/kanban/map-task";
 import { newerAgentRuntimeSnapshot } from "@/lib/types/agent-runtime";
+import { sessionStateConfirmsAgentctlExecutionReady } from "@/lib/session-state";
 import { mergeStepOrderRevisions } from "@/lib/kanban/workflow-step-order";
 import { deepMerge, mergeSessionMap, mergeLoadingState } from "./merge-strategies";
 
@@ -517,6 +518,36 @@ function hydrateTaskSessionsByTask(
   deepMerge(draft.taskSessionsByTask, { ...incoming, itemsByTaskId });
 }
 
+function hydrateSessionAgentctlStatuses(
+  draft: Draft<AppState>,
+  incoming: NonNullable<HydrationState["sessionAgentctl"]>,
+  activeSessionId: string | null,
+  forceMergeSessionId: string | null,
+): void {
+  mergeSessionMap(
+    draft.sessionAgentctl.itemsBySessionId,
+    incoming.itemsBySessionId,
+    activeSessionId,
+    forceMergeSessionId,
+  );
+}
+
+function reconcileSessionAgentctlStatusesWithLiveSessions(draft: Draft<AppState>): void {
+  for (const [sessionId, status] of Object.entries(draft.sessionAgentctl.itemsBySessionId)) {
+    if (status.status !== "starting") continue;
+    const session = draft.taskSessions.items[sessionId];
+    if (
+      sessionStateConfirmsAgentctlExecutionReady(
+        session?.state,
+        session?.agent_execution_id,
+        status.agentExecutionId,
+      )
+    ) {
+      status.status = "ready";
+    }
+  }
+}
+
 /** Hydrate session slices, protecting active sessions. */
 function hydrateSession(
   draft: Draft<AppState>,
@@ -561,14 +592,14 @@ function hydrateSession(
       new Set(Object.keys(state.taskSessions?.items ?? {})),
     );
   }
-  if (state.sessionAgentctl) {
-    mergeSessionMap(
-      draft.sessionAgentctl.itemsBySessionId,
-      state.sessionAgentctl?.itemsBySessionId,
+  if (state.sessionAgentctl)
+    hydrateSessionAgentctlStatuses(
+      draft,
+      state.sessionAgentctl,
       activeSessionId,
       forceMergeSessionId,
     );
-  }
+  reconcileSessionAgentctlStatusesWithLiveSessions(draft);
   if (state.worktrees) deepMerge(draft.worktrees, state.worktrees);
   if (state.sessionWorktreesBySessionId)
     deepMerge(draft.sessionWorktreesBySessionId, state.sessionWorktreesBySessionId);

@@ -9,6 +9,10 @@ import type { AppState } from "@/lib/state/store";
 import type { MCPAttachmentHistory } from "@/lib/state/slices/session-runtime/types";
 
 const TERMINAL_TAB_ID = "terminal-1";
+const AGENTCTL_SESSION_ID = "session-1";
+const AGENTCTL_TASK_ID = "task-1";
+const FIRST_AGENT_EXECUTION_ID = "execution-1";
+const SECOND_AGENT_EXECUTION_ID = "execution-2";
 const DEFAULT_TASK_ROW = {
   detailsEnabled: true,
   detailOrder: ["relative_time", "repository", "pull_request_number"],
@@ -93,6 +97,95 @@ describe("hydrateState — agent runtime availability", () => {
     });
 
     expect(result.agentRuntime).toEqual(draft.agentRuntime);
+  });
+});
+
+describe("hydrateState — agentctl readiness", () => {
+  it("promotes a hydrated live session over a stale starting lifecycle status", () => {
+    const result = produce(makeAppDraft(), (draft: Draft<AppState>) => {
+      hydrateState(draft, {
+        taskSessions: {
+          items: {
+            [AGENTCTL_SESSION_ID]: {
+              id: AGENTCTL_SESSION_ID,
+              task_id: AGENTCTL_TASK_ID,
+              state: "WAITING_FOR_INPUT",
+              agent_execution_id: FIRST_AGENT_EXECUTION_ID,
+            },
+          },
+        },
+        sessionAgentctl: {
+          itemsBySessionId: {
+            [AGENTCTL_SESSION_ID]: {
+              status: "starting",
+              agentExecutionId: FIRST_AGENT_EXECUTION_ID,
+            },
+          },
+        },
+      } as unknown as Partial<AppState>);
+    });
+
+    expect(result.sessionAgentctl.itemsBySessionId[AGENTCTL_SESSION_ID]).toEqual({
+      status: "ready",
+      agentExecutionId: FIRST_AGENT_EXECUTION_ID,
+    });
+  });
+
+  it("keeps starting when the live session belongs to another agent execution", () => {
+    const result = produce(makeAppDraft(), (draft: Draft<AppState>) => {
+      hydrateState(draft, {
+        taskSessions: {
+          items: {
+            [AGENTCTL_SESSION_ID]: {
+              id: AGENTCTL_SESSION_ID,
+              task_id: AGENTCTL_TASK_ID,
+              state: "WAITING_FOR_INPUT",
+              agent_execution_id: FIRST_AGENT_EXECUTION_ID,
+            },
+          },
+        },
+        sessionAgentctl: {
+          itemsBySessionId: {
+            [AGENTCTL_SESSION_ID]: {
+              status: "starting",
+              agentExecutionId: SECOND_AGENT_EXECUTION_ID,
+            },
+          },
+        },
+      } as unknown as Partial<AppState>);
+    });
+
+    expect(result.sessionAgentctl.itemsBySessionId[AGENTCTL_SESSION_ID]).toEqual({
+      status: "starting",
+      agentExecutionId: SECOND_AGENT_EXECUTION_ID,
+    });
+  });
+
+  it("reconciles a live session hydrated separately from its lifecycle status", () => {
+    const result = produce(makeAppDraft(), (draft: Draft<AppState>) => {
+      draft.sessionAgentctl.itemsBySessionId[AGENTCTL_SESSION_ID] = {
+        status: "starting",
+        agentExecutionId: FIRST_AGENT_EXECUTION_ID,
+      };
+
+      hydrateState(draft, {
+        taskSessions: {
+          items: {
+            [AGENTCTL_SESSION_ID]: {
+              id: AGENTCTL_SESSION_ID,
+              task_id: AGENTCTL_TASK_ID,
+              state: "WAITING_FOR_INPUT",
+              agent_execution_id: FIRST_AGENT_EXECUTION_ID,
+            },
+          },
+        },
+      } as unknown as Partial<AppState>);
+    });
+
+    expect(result.sessionAgentctl.itemsBySessionId[AGENTCTL_SESSION_ID]).toEqual({
+      status: "ready",
+      agentExecutionId: FIRST_AGENT_EXECUTION_ID,
+    });
   });
 });
 

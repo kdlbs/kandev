@@ -664,6 +664,8 @@ export type TaskSession = ActiveSubagentCountFields & {
   container_id?: string;
   executor_id?: string;
   environment_id?: string;
+  /** Current backend agent process execution identity for this session. */
+  agent_execution_id?: string;
   repository_id?: RepositoryId;
   base_branch?: string;
   base_commit_sha?: string;
