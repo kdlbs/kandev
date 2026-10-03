@@ -75,6 +75,14 @@ test.describe("Quick Chat opening composer", () => {
     await repositoryPicker.getByRole("option").first().click();
     await expect(composer.getByTestId("repo-chip")).toHaveCount(1);
     await expect(dialog.getByTestId("branch-chip-trigger")).toContainText("main");
+    const chipRowBox = await dialog.getByTestId("quick-chat-repository-chips").boundingBox();
+    const chipBox = await dialog.getByTestId("repo-chip").boundingBox();
+    if (!chipRowBox || !chipBox) throw new Error("repository chip bounds missing");
+    expect(
+      Math.abs(
+        chipBox.y - chipRowBox.y - (chipRowBox.y + chipRowBox.height - chipBox.y - chipBox.height),
+      ),
+    ).toBeLessThanOrEqual(1);
     await prCapture.screenshot("toolbar-desktop", {
       caption: "Quick Chat composer with repository chips and compact toolbar",
     });

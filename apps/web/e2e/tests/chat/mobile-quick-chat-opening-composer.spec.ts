@@ -95,6 +95,14 @@ test("opens the phone picker and delivers the opening prompt", async ({
     const branch = dialog.getByTestId("branch-chip-trigger");
     await expectTouchTarget(branch);
     await expect(branch).toContainText("main");
+    const chipRowBox = await dialog.getByTestId("quick-chat-repository-chips").boundingBox();
+    const chipBox = await dialog.getByTestId("repo-chip").boundingBox();
+    if (!chipRowBox || !chipBox) throw new Error("repository chip bounds missing");
+    expect(
+      Math.abs(
+        chipBox.y - chipRowBox.y - (chipRowBox.y + chipRowBox.height - chipBox.y - chipBox.height),
+      ),
+    ).toBeLessThanOrEqual(1);
     await prCapture.screenshot("toolbar-phone", {
       caption: "Phone Quick Chat composer with touch controls and repository chips",
     });

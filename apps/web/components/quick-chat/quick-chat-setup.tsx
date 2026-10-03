@@ -361,7 +361,7 @@ function QuickChatComposerContext({
   if (draft.repositories.length === 0) return null;
   return (
     <div
-      className="flex flex-wrap items-center gap-2 px-3 pt-3"
+      className="flex flex-wrap items-center gap-2 p-3"
       data-testid="quick-chat-repository-chips"
     >
       {touch || isMobile ? (

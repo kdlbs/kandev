@@ -222,3 +222,13 @@ The padding assertion reproduced the original 0px/4px mismatch before the fix.
 
 Validation passed: managed desktop opening/retry E2Es (2), phone opening E2E (1),
 fresh Vite E2E build, focused ESLint without warnings, and diff whitespace checks.
+
+### Repository chip row centering
+
+The repository context row uses 12px padding on every side. Its previous top-only
+padding left chips against the bottom edge. Desktop and phone browser regressions
+compare the chip's space above and below within the row; the desktop regression
+reproduced the original 12px imbalance before the fix.
+
+Validation passed: desktop opening/retry E2Es (2), phone opening E2E (1), fresh
+Vite E2E build, focused ESLint without warnings, and diff whitespace checks.
