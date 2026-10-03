@@ -694,8 +694,15 @@ export type AppState = KanbanSlice & {
   dismissAgentError: UIA["dismissAgentError"];
 } & TaskOverviewSlice &
   AppStateExtraActions &
-  Pick<UIA, "setQuickChatInitialPrompt" | "requestQuickChatOpen" | "setQuickChatSelectionIdentity">;
-
+  Pick<
+    UIA,
+    | "setQuickChatInitialPrompt"
+    | "requestQuickChatOpen"
+    | "setQuickChatSelectionIdentity"
+    | "setConfigChatRestart"
+    | "syncConfigChatRestart"
+    | "replaceConfigChatSession"
+  >;
 // Most callers hydrate a fully-shaped slice per top-level key (see
 // mergeInitialState / hydrateState), but `system` is a grab-bag of many
 // independently-fetched fields (info, diskUsage, updates, ...). Callers that

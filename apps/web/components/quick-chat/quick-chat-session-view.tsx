@@ -65,6 +65,34 @@ export function QuickChatSessionView({
   onInitialPromptAttempted,
 }: QuickChatSessionViewProps) {
   const { t } = useTranslation();
+  const restart = useAppStore((state) => state.quickChat.configChatRestarts?.[session.workspaceId]);
+  if (session.kind === "config" && restart) {
+    return (
+      <div
+        role="status"
+        className="flex min-h-0 flex-1 items-center justify-center p-6 text-sm text-muted-foreground"
+      >
+        {t(
+          restart.status === "restarting"
+            ? "configChat:restartingSession"
+            : "configChat:restartUncertain",
+        )}
+      </div>
+    );
+  }
+  return (
+    <ActiveQuickChatSessionView
+      session={session}
+      onInitialPromptAttempted={onInitialPromptAttempted}
+    />
+  );
+}
+
+function ActiveQuickChatSessionView({
+  session,
+  onInitialPromptAttempted,
+}: QuickChatSessionViewProps) {
+  const { t } = useTranslation();
   // A tab can arrive from a task event, which carries no session payload.
   // Fetch the row on open so such a tab is usable, not just visible.
   useEnsureTaskSession(session.sessionId);

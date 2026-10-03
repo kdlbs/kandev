@@ -25,6 +25,7 @@ type MockState = {
   setTaskSession: (session: TaskSession) => void;
   syncQuickChatSessions: (...args: unknown[]) => void;
   syncQuickTerminalTabs: (...args: unknown[]) => void;
+  syncConfigChatRestart: (...args: unknown[]) => void;
 };
 
 let mockState: MockState;
@@ -82,11 +83,30 @@ describe("useQuickChatResync", () => {
       taskSessions: { items: {} },
       syncQuickChatSessions: vi.fn(),
       syncQuickTerminalTabs: vi.fn(),
+      syncConfigChatRestart: vi.fn(),
     };
     vi.clearAllMocks();
   });
 
   afterEach(cleanup);
+
+  it("projects an in-flight restart instead of treating an empty list as permission to create", async () => {
+    apiMock.listQuickChatSessions.mockResolvedValue({
+      sessions: [],
+      task_sessions: [],
+      config_chat_restart_pending: true,
+      config_chat_retiring_session_id: "retiring-session",
+    });
+    apiMock.listQuickTerminalTabs.mockResolvedValue({ tabs: [] });
+    renderHook(() => useQuickChatResync(WORKSPACE_ID));
+    await waitFor(() =>
+      expect(mockState.syncConfigChatRestart).toHaveBeenCalledWith(
+        WORKSPACE_ID,
+        true,
+        "retiring-session",
+      ),
+    );
+  });
 
   it("discards a superseded response and retries the latest workspace state", async () => {
     const firstSessions = deferred<ListQuickChatSessionsResponse>();

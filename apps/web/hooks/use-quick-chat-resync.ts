@@ -7,10 +7,13 @@ import { listQuickTerminalTabs, toQuickTerminalTab } from "@/lib/api/domains/qui
 import { getStoredQuickChatNames } from "@/lib/local-storage";
 import { toQuickChatSessions } from "@/lib/quick-chat/map-sessions";
 import { migrateStoredQuickChatNames } from "@/lib/quick-chat/rename";
+import type { TaskSession } from "@/lib/types/http";
 
 /** How many times a resync may refetch after observing a newer revision. */
 const MAX_RESYNC_RETRIES = 3;
 const RESYNC_RETRY_DELAY_MS = 50;
+const RESTART_RESYNC_ATTEMPTS = 60;
+const RESTART_RESYNC_DELAY_MS = 1000;
 
 /**
  * Whether a reconnect snapshot is older than the live row. Parses both
@@ -45,6 +48,7 @@ export function useQuickChatResync(workspaceId: string | null): void {
   const syncQuickChatSessions = useAppStore((state) => state.syncQuickChatSessions);
   const syncQuickTerminalTabs = useAppStore((state) => state.syncQuickTerminalTabs);
   const setTaskSession = useAppStore((state) => state.setTaskSession);
+  const syncConfigChatRestart = useAppStore((state) => state.syncConfigChatRestart);
   // Resync once per connection, not on every unrelated status re-render.
   const lastSyncedConnection = useRef<string | null>(null);
 
@@ -59,6 +63,7 @@ export function useQuickChatResync(workspaceId: string | null): void {
     let cancelled = false;
     const resync = async () => {
       let retryCount = 0;
+      let restartCount = 0;
       while (!cancelled) {
         const revision = store.getState().quickChat.syncRevisionByWorkspace[workspaceId] ?? 0;
         try {
@@ -83,20 +88,34 @@ export function useQuickChatResync(workspaceId: string | null): void {
           // throws), so a resync-only tab would otherwise render but be dead.
           // Rows older than the live row are skipped: a reconnect snapshot must
           // never regress state a newer WebSocket event already applied.
-          for (const taskSession of response.task_sessions) {
-            const liveSession = store.getState().taskSessions.items[taskSession.id];
-            if (isStaleTaskSession(liveSession, taskSession.updated_at)) continue;
-            setTaskSession(taskSession);
-          }
+          hydrateResyncedSessions(store, response.task_sessions, setTaskSession);
           syncQuickChatSessions(workspaceId, sessions);
           syncQuickTerminalTabs(workspaceId, terminalResponse.tabs.map(toQuickTerminalTab));
+          if (response.config_chat_restart_pending !== undefined) {
+            syncConfigChatRestart(
+              workspaceId,
+              response.config_chat_restart_pending,
+              response.config_chat_retiring_session_id,
+            );
+          }
           // Renames made before names were stored server-side live only in this
           // browser; push them up once so they reach the user's other devices.
           void migrateStoredQuickChatNames(sessions, getStoredQuickChatNames());
+          if (response.config_chat_restart_pending) {
+            if (++restartCount >= RESTART_RESYNC_ATTEMPTS) {
+              markRestartUncertain(store, workspaceId);
+              return;
+            }
+            await new Promise((resolve) => setTimeout(resolve, RESTART_RESYNC_DELAY_MS));
+            continue;
+          }
           return;
         } catch {
           // A failed resync must not clear the user's tabs; retry on next connect.
-          if (!cancelled) lastSyncedConnection.current = null;
+          if (!cancelled) {
+            markRestartUncertain(store, workspaceId);
+            lastSyncedConnection.current = null;
+          }
           return;
         }
       }
@@ -113,5 +132,24 @@ export function useQuickChatResync(workspaceId: string | null): void {
     setTaskSession,
     syncQuickChatSessions,
     syncQuickTerminalTabs,
+    syncConfigChatRestart,
   ]);
+}
+
+function hydrateResyncedSessions(
+  store: ReturnType<typeof useAppStoreApi>,
+  sessions: TaskSession[],
+  setTaskSession: (session: TaskSession) => void,
+) {
+  for (const session of sessions) {
+    if (isStaleTaskSession(store.getState().taskSessions.items[session.id], session.updated_at))
+      continue;
+    setTaskSession(session);
+  }
+}
+
+function markRestartUncertain(store: ReturnType<typeof useAppStoreApi>, workspaceId: string) {
+  const restart = store.getState().quickChat.configChatRestarts?.[workspaceId];
+  if (restart?.source === "server")
+    store.getState().setConfigChatRestart(workspaceId, { ...restart, status: "uncertain" });
 }

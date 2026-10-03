@@ -127,6 +127,8 @@ Configuration Chat uses a repository-less ephemeral task. Its configuration-mode
 
 Closing the floating Settings panel preserves the conversation. To delete it, open it in Quick Chat, close its tab, and confirm deletion. Configuration tasks are excluded from the seven-day Quick Chat sweeper and remain available until explicitly deleted or their workspace is deleted.
 
+If the session is broken, choose **Restart session** in the Settings panel header and confirm. Kandev stops the current agent, deletes the conversation and unsent prompts, and starts a blank session with the same agent profile and executor. Configuration changes already made are kept. On phones, confirmation opens in a bottom drawer. If the connection drops during restart, use **Refresh status** to recover the result before starting again.
+
 </details>
 
 ## Saved prompts

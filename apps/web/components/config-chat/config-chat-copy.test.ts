@@ -30,6 +30,9 @@ const CONFIG_CHAT_COPY: Array<[key: string, english: string]> = [
   ["configChat:openInQuickChat", "Open in Quick Chat"],
   ["configChat:closePanel", "Close configuration chat"],
   ["configChat:tagline", "Configure Kandev with natural language"],
+  ["configChat:restartSession", "Restart session"],
+  ["configChat:restartTitle", "Restart session?"],
+  ["configChat:restartingSession", "Restarting session..."],
   // The setup surface, shared by the floating panel and the quick-chat dialog.
   ["configChat:agentProfileHeading", "Configuration agent profile"],
   [
