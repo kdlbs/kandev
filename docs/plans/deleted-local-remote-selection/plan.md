@@ -182,3 +182,14 @@ gaps; measured geometry returned to 2px/10px/-4px. The phone assertion now
 polls the existing expectations at both widths. Ten resource-bounded repeats
 and the 16-test desktop/mobile history and preceding-mobile sequence passed
 with retries disabled. Production behavior and layout remain unchanged.
+
+
+The next E2E run passed all shards but exposed three fixtures that needed a
+retry. Controlled reproductions confirmed each setup assumption: a navigation
+regression inherited an unrelated dirty tracked file, Quick Chat selected a
+different registered repository by position, and the default-layout assertion
+inherited an enabled Todos preference. The navigation regression now uses an
+owned clone and verifies that the shared checkout is preserved. Quick Chat
+selects its seeded repository by ID, and the default-layout test explicitly
+establishes the default Todos preferences. Production behavior and existing
+assertions remain unchanged. See the work order for verification evidence.

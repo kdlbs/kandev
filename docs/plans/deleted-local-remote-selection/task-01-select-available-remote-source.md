@@ -270,3 +270,44 @@ production changes, or mobile composition changes were introduced.
 
 Remote CI, artifact reconciliation, current-base proof, and final merge
 evidence remain tracked in the platform task plan and PR checks.
+
+
+### Shared-worker fixture assumptions
+
+Run 37092365952 on `132b539b7` passed all E2E shards: 3661 tests passed on the
+first attempt, three passed after retry, and 47 were skipped. All 20 shard
+blobs were audited; the diagnostic audit exited 1 because three attempts had
+errors. Each retry had a reproducible fixture explanation.
+
+- An inherited modified tracked file caused the navigation regression's
+  shared-checkout branch switch to fail. Its setup now clones the offline
+  origin into an owned directory and also asserts that the shared checkout's
+  branch and status are unchanged. An injected committed-and-modified
+  `review_cumulative_test.txt` reproduced the failure before the correction
+  and passed afterward. The diagnostic was removed.
+- A decoy repository registered after the seed appeared first in Quick Chat's
+  picker. Positional selection chose that repository, whose branch list did
+  not contain the context branch, reproducing the exact CI timeout. Selecting
+  the seed repository ID passed with the same decoy present.
+- Enabling the Todos preference before the default-layout test reproduced
+  the extra `todos` panel in CI. Explicitly setting both visibility
+  preferences to their defaults passed with the same inherited preference.
+
+The temporary decoy/preference diagnostics both failed before remediation
+and both passed afterward (46.0s) on synthetic merge `ee50d0391`, combining
+this branch with current main `5f08b1b3e`. Diagnostic source was restored
+after each run. Changed-file ESLint, Prettier, and web typecheck passed.
+These corrections change test setup only, with existing product assertions
+and mobile behavior preserved.
+
+
+- Complete Quick Chat, task-default-layout, and navigation-responsiveness
+  desktop specs passed all 30 tests in 4.5 minutes with retries disabled,
+  one worker, two CPUs, and 4GiB memory.
+- The mobile navigation-responsiveness spec passed (21.4s) under the same
+  limits with retries disabled.
+- The current-base worktree had a fresh frozen-lockfile install and managed
+  backend/web/plugin build. All three corrected specs matched the source
+  tested there after diagnostic cleanup.
+- Catalog validation (343 decisions, 1313 specifications), full specification
+  lint, and whitespace checks passed.

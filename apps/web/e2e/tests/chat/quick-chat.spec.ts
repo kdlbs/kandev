@@ -652,7 +652,7 @@ test.describe("Quick Chat", () => {
 
       await dialog.getByTestId("add-repository").click();
       await dialog.getByTestId("repo-chip-trigger").click();
-      await testPage.getByRole("option").first().click();
+      await testPage.locator(`[role="option"][data-value="${seedData.repositoryId}"]`).click();
       await dialog.getByTestId("branch-chip-trigger").click();
       await testPage.locator(`[role="option"][data-value="${contextBranch}"]`).click();
 
