@@ -2,6 +2,8 @@ package lifecycle
 
 import (
 	"context"
+	"runtime"
+	"sync"
 	"testing"
 	"time"
 
@@ -131,16 +133,62 @@ func TestBuildWorkspaceCallbacksToleratesUnwiredHandlers(t *testing.T) {
 	callbacks.OnError("boom")
 }
 
-func TestBuildWorkspaceCallbacksRejectsRetiredStartupGeneration(t *testing.T) {
+// AC-PLATFORM-WORKSPACE-GIT-STATUS-001.43: the attached workspace stream's
+// callbacks remain valid while the same execution is promoted and restarted.
+func TestBuildWorkspaceCallbacksContinueAfterRepeatedStartup(t *testing.T) {
 	var recorded []recordedWorkspaceCallback
 	sm := newRecordingStreamManager(t, &recorded)
-	execution := &AgentExecution{ID: "exec-1", SessionID: "session-1"}
-	callbacks := sm.buildWorkspaceCallbacks(execution)
-	execution.beginStartupAttemptWithID("replacement")
+	client := &agentctl.Client{}
+	execution := &AgentExecution{ID: "exec-1", SessionID: "session-1", agentctl: client}
+	callbacks := sm.buildWorkspaceCallbacks(execution, client)
+	execution.SetWorkspaceStream(&agentctl.WorkspaceStream{})
 
-	callbacks.OnGitStatus(&agentctl.GitStatusUpdate{Branch: "retired"})
+	for attempt := 1; attempt <= 2; attempt++ {
+		execution.beginStartupAttemptWithID("promotion")
+		ready := make(chan struct{})
+		sm.connectWorkspaceStream(execution, ready)
+		select {
+		case <-ready:
+		default:
+			t.Fatalf("attached stream reuse did not settle on startup attempt %d", attempt)
+		}
+	}
 
-	require.Empty(t, recorded)
+	status := &agentctl.GitStatusUpdate{Branch: "promoted"}
+	commit := &agentctl.GitCommitNotification{CommitSHA: "promoted-commit"}
+	reset := &agentctl.GitResetNotification{PreviousHead: "before", CurrentHead: "after"}
+	branchSwitch := &agentctl.GitBranchSwitchNotification{CurrentBranch: "promoted"}
+	fileChange := &agentctl.FileChangeNotification{Path: "after-promotion.go"}
+	processOutput := &agentctl.ProcessOutput{ProcessID: "proc-1", Data: "promoted output"}
+	processStatus := &agentctl.ProcessStatusUpdate{ProcessID: "proc-1", Status: "running"}
+	callbacks.OnShellOutput("promoted shell output")
+	callbacks.OnShellExit(0)
+	callbacks.OnGitStatus(status)
+	callbacks.OnGitCommit(commit)
+	callbacks.OnGitReset(reset)
+	callbacks.OnBranchSwitch(branchSwitch)
+	callbacks.OnFileChange(fileChange)
+	callbacks.OnProcessOutput(processOutput)
+	callbacks.OnProcessStatus(processStatus)
+
+	require.Len(t, recorded, 9)
+	wantOrder := []string{
+		"shell_output", "shell_exit", "git_status", "git_commit", "git_reset",
+		"branch_switch", "file_change", "process_output", "process_status",
+	}
+	wantPayloads := []any{
+		"promoted shell output", 0, status, commit, reset, branchSwitch,
+		fileChange, processOutput, processStatus,
+	}
+	for i := range recorded {
+		require.Equal(t, wantOrder[i], recorded[i].name)
+		require.Same(t, execution, recorded[i].execution)
+		if i < 2 {
+			require.Equal(t, wantPayloads[i], recorded[i].payload)
+		} else {
+			require.Same(t, wantPayloads[i], recorded[i].payload)
+		}
+	}
 }
 
 func TestBuildWorkspaceCallbacksRejectsReplacedAgentctlClient(t *testing.T) {
@@ -157,6 +205,114 @@ func TestBuildWorkspaceCallbacksRejectsReplacedAgentctlClient(t *testing.T) {
 	callbacks.OnGitStatus(&agentctl.GitStatusUpdate{Branch: "retired"})
 
 	require.Empty(t, recorded)
+}
+
+func TestBuildWorkspaceCallbacksRejectsDetachedAgentctlClient(t *testing.T) {
+	var recorded []recordedWorkspaceCallback
+	sm := newRecordingStreamManager(t, &recorded)
+	client := &agentctl.Client{}
+	execution := &AgentExecution{ID: "exec-1", SessionID: "session-1", agentctl: client}
+	callbacks := sm.buildWorkspaceCallbacks(execution, client)
+
+	execution.agentctlLifecycleMu.Lock()
+	execution.detachAgentctlClient()
+	execution.agentctlLifecycleMu.Unlock()
+	callbacks.OnGitStatus(&agentctl.GitStatusUpdate{Branch: "detached"})
+
+	require.Empty(t, recorded)
+}
+
+func TestBuildWorkspaceCallbacksLeaseFencesClientReplacement(t *testing.T) {
+	stopCh := newTestStopCh(t)
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	var calls int
+	sm := NewStreamManager(newTestLogger(), StreamCallbacks{
+		OnGitStatus: func(*AgentExecution, *agentctl.GitStatusUpdate) {
+			calls++
+			if calls == 1 {
+				close(entered)
+				<-release
+			}
+		},
+	}, nil, stopCh)
+	cleanupStreamManager(t, stopCh, sm)
+
+	streamClient := &agentctl.Client{}
+	replacementClient := &agentctl.Client{}
+	execution := &AgentExecution{ID: "exec-1", SessionID: "session-1", agentctl: streamClient}
+	callbacks := sm.buildWorkspaceCallbacks(execution, streamClient)
+
+	callbackDone := make(chan struct{})
+	go func() {
+		callbacks.OnGitStatus(&agentctl.GitStatusUpdate{Branch: "in-flight"})
+		close(callbackDone)
+	}()
+	<-entered
+	leaseHeld := !execution.agentctlSourceMu.TryLock()
+	if !leaseHeld {
+		execution.agentctlSourceMu.Unlock()
+	}
+	require.True(t, leaseHeld,
+		"the active callback must hold the client source lease through its handler")
+
+	replacementDone := make(chan struct{})
+	replacementReady := make(chan struct{})
+	var releaseOnce sync.Once
+	releaseCallback := func() { releaseOnce.Do(func() { close(release) }) }
+	defer releaseCallback()
+	go func() {
+		execution.agentctlLifecycleMu.Lock()
+		close(replacementReady)
+		execution.replaceAgentctlClient(replacementClient)
+		execution.agentctlLifecycleMu.Unlock()
+		close(replacementDone)
+	}()
+	<-replacementReady
+
+	writerWaiting := make(chan struct{})
+	observerStop := make(chan struct{})
+	defer close(observerStop)
+	go func() {
+		for {
+			if !execution.agentctlSourceMu.TryRLock() {
+				close(writerWaiting)
+				return
+			}
+			execution.agentctlSourceMu.RUnlock()
+			select {
+			case <-observerStop:
+				return
+			default:
+			}
+			runtime.Gosched()
+		}
+	}()
+	select {
+	case <-writerWaiting:
+	case <-time.After(5 * time.Second):
+		t.Fatal("client replacement did not reach the active source lease")
+	}
+	select {
+	case <-replacementDone:
+		t.Fatal("client replacement crossed an in-flight workspace callback")
+	default:
+	}
+
+	releaseCallback()
+	select {
+	case <-callbackDone:
+	case <-time.After(5 * time.Second):
+		t.Fatal("workspace callback did not finish after releasing its handler")
+	}
+	select {
+	case <-replacementDone:
+	case <-time.After(5 * time.Second):
+		t.Fatal("client replacement did not finish after the callback lease released")
+	}
+
+	callbacks.OnGitStatus(&agentctl.GitStatusUpdate{Branch: "retired"})
+	require.Equal(t, 1, calls, "the old stream client must be rejected after replacement")
 }
 
 // TestStreamManagerStartRejectsWorkAfterWait pins the drain barrier: once Wait

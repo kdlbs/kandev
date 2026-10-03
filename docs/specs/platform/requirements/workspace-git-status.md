@@ -2,7 +2,7 @@
 status: active
 system: platform
 created: 2026-07-19
-updated: 2026-10-02
+updated: 2026-10-03
 owners:
   - kandev
 ---
@@ -81,8 +81,9 @@ A failed live source still cannot authorize an unmarked persisted fallback.
   Ready notifications shall cancel unnecessary retries.
   A same-state rerender shall not restart the retry delay or create another request.
 - **AC-PLATFORM-WORKSPACE-GIT-STATUS-001.42:** During an eligible workspace monitor tick, every already-dirty tracked path whose filesystem modification time changed shall trigger the existing repository-scoped file refresh and background Git-status refresh attempt. Detection shall preserve exact supported filenames, including leading or trailing whitespace, tabs, newlines, quoting characters, and Unicode, independently of Git path-quoting configuration. An unchanged monitor observation shall not trigger another monitor refresh. Existing admission, cadence, deadlines, and bounded subscriber delivery remain in force; writes preserving the observed modification time are outside this polling guarantee.
-
-
+- **AC-PLATFORM-WORKSPACE-GIT-STATUS-001.43:** When agent startup advances on the same current execution and agentctl client, an attached workspace stream shall continue forwarding accepted Git snapshots.
+  Promotion from workspace-only operation shall not require another foreground refresh or stream reconnection to deliver later membership and detail updates.
+  Replaced executions and clients shall retain the rejection required by criterion `.27`.
 
 ## Out of scope
 
@@ -101,3 +102,5 @@ The [delayed recovery design](../system-design/changes-refresh-recovery.md) and
 [follow-up plan](../../../plans/changes-loading-feedback/plan.md) own automatic recovery delivery.
 The [dirty-path monitor design](../system-design/workspace-dirty-path-monitor.md) and
 [repair package](../../../plans/workspace-dirty-path-monitor/plan.md) own exact-path polling refresh.
+The [workspace stream continuity design](../system-design/workspace-stream-continuity.md)
+defines the callback lifetime required by criterion `.43`.

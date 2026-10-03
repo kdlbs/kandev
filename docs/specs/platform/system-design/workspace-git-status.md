@@ -4,7 +4,7 @@ system: platform
 requirements:
   - REQ-PLATFORM-WORKSPACE-GIT-STATUS-001
 created: 2026-07-19
-updated: 2026-10-02
+updated: 2026-10-03
 owners:
   - kandev
 ---
@@ -227,6 +227,8 @@ Continuously mutating files can remain pending or unavailable. They must not rec
 
 Runtime delivery captures immutable execution identity, environment binding, workspace identity, and stream generation.
 Revalidate these before publishing a delayed callback, initial-subscribe read, or HTTP result. Workspace callbacks are checked against the execution currently registered for their session.
+Attached callbacks retain client lifetime across ACP startup.
+See the [workspace stream continuity design](workspace-stream-continuity.md).
 After root promotion, the current environment root or active `TaskEnvironmentRepo.WorktreePath` may authorize an existing execution's exact working directory. Revalidate the inventory after async refresh; reject removed paths.
 Tracker epochs from different sibling executions are not numerically ordered.
 Preserve requested-session-first source probing. Eligible siblings remain valid sources for their common environment.
