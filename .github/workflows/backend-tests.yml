@@ -801,9 +801,9 @@ jobs:
     if: needs.changes.outputs.run == 'true'
     runs-on: windows-latest
     # Dependency hydration, build, vet, and the race-sensitive package suite
-    # can consume 40 minutes on a cold hosted runner. Leave a finite buffer for
+    # can exceed 40 minutes on a cold hosted runner. Leave a finite buffer for
     # post-job Go cache cleanup after the targeted regression checks complete.
-    timeout-minutes: 45
+    timeout-minutes: 50
     # Least-privilege: this job only reads source and runs tests, no PR/issue
     # writes or release operations. Flagged by CodeQL workflow audit + matching
     # CodeRabbit nitpick.

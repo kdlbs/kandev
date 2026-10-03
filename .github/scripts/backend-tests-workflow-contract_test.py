@@ -54,7 +54,7 @@ class BackendTestsWorkflowContractTest(unittest.TestCase):
     def test_windows_job_leaves_time_for_post_job_cleanup(self) -> None:
         _, marker, windows_job = self.workflow.partition("  test-windows:\n")
         self.assertTrue(marker)
-        self.assertIn("timeout-minutes: 45", windows_job)
+        self.assertIn("timeout-minutes: 50", windows_job)
 
     def test_linux_sharded_tests_use_go_default_package_timeout(self) -> None:
         test_step = step_block(self.workflow, "Run tests")
