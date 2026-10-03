@@ -10,28 +10,31 @@ import (
 
 // AgentEventPayload is the payload for agent lifecycle events (started, stopped, ready, completed, failed).
 type AgentEventPayload struct {
-	AgentExecutionID   string                 `json:"agent_execution_id"`
-	AttemptID          string                 `json:"attempt_id,omitempty"`
-	OwnerKind          ExecutionOwnerKind     `json:"owner_kind,omitempty"`
-	WorkspaceID        string                 `json:"workspace_id,omitempty"`
-	RunID              string                 `json:"run_id,omitempty"`
-	RunSessionID       string                 `json:"run_session_id,omitempty"`
-	RunAttempt         int                    `json:"run_attempt,omitempty"`
-	TaskID             string                 `json:"task_id"`
-	SessionID          string                 `json:"session_id,omitempty"`
-	TaskEnvironmentID  string                 `json:"task_environment_id,omitempty"`
-	TurnID             string                 `json:"turn_id,omitempty"`
-	AgentID            string                 `json:"agent_id,omitempty"`
-	AgentProfileID     string                 `json:"agent_profile_id"`
-	ExecutionProfileID string                 `json:"execution_profile_id,omitempty"`
-	ContainerID        string                 `json:"container_id,omitempty"`
-	Status             string                 `json:"status"`
-	StartedAt          time.Time              `json:"started_at"`
-	FinishedAt         *time.Time             `json:"finished_at,omitempty"`
-	ErrorMessage       string                 `json:"error_message,omitempty"`
-	FailureCode        string                 `json:"failure_code,omitempty"`
-	FailureDetails     string                 `json:"failure_details,omitempty"`
-	ProviderError      *streams.ProviderError `json:"provider_error,omitempty"`
+	AgentExecutionID       string                 `json:"agent_execution_id"`
+	AttemptID              string                 `json:"attempt_id,omitempty"`
+	OwnerKind              ExecutionOwnerKind     `json:"owner_kind,omitempty"`
+	WorkspaceID            string                 `json:"workspace_id,omitempty"`
+	RunID                  string                 `json:"run_id,omitempty"`
+	RunSessionID           string                 `json:"run_session_id,omitempty"`
+	RunAttempt             int                    `json:"run_attempt,omitempty"`
+	TaskID                 string                 `json:"task_id"`
+	SessionID              string                 `json:"session_id,omitempty"`
+	TaskEnvironmentID      string                 `json:"task_environment_id,omitempty"`
+	TurnID                 string                 `json:"turn_id,omitempty"`
+	AgentID                string                 `json:"agent_id,omitempty"`
+	AgentProfileID         string                 `json:"agent_profile_id"`
+	ExecutionProfileID     string                 `json:"execution_profile_id,omitempty"`
+	ContainerID            string                 `json:"container_id,omitempty"`
+	Status                 string                 `json:"status"`
+	StartedAt              time.Time              `json:"started_at"`
+	FinishedAt             *time.Time             `json:"finished_at,omitempty"`
+	ErrorMessage           string                 `json:"error_message,omitempty"`
+	FailureCode            string                 `json:"failure_code,omitempty"`
+	FailureDetails         string                 `json:"failure_details,omitempty"`
+	StartupFailureReason   string                 `json:"startup_reason,omitempty"`
+	StartupFailureAttempts int                    `json:"startup_attempts,omitempty"`
+	StartupFailureNPMCode  string                 `json:"startup_npm_code,omitempty"`
+	ProviderError          *streams.ProviderError `json:"provider_error,omitempty"`
 	// SessionSettingsPolicy is a host-owned snapshot of the policy used by this
 	// execution's startup. It lets delayed lifecycle callbacks retain their
 	// startup provenance after the orchestrator releases the admission attempt.
@@ -87,22 +90,25 @@ type AgentStalledPayload struct {
 
 // AgentctlEventPayload is the payload for agentctl lifecycle events (starting, ready, error).
 type AgentctlEventPayload struct {
-	OwnerKind         ExecutionOwnerKind `json:"owner_kind,omitempty"`
-	WorkspaceID       string             `json:"workspace_id,omitempty"`
-	RunID             string             `json:"run_id,omitempty"`
-	RunSessionID      string             `json:"run_session_id,omitempty"`
-	RunAttempt        int                `json:"run_attempt,omitempty"`
-	TaskID            string             `json:"task_id"`
-	SessionID         string             `json:"session_id"`
-	TaskEnvironmentID string             `json:"task_environment_id,omitempty"`
-	AgentExecutionID  string             `json:"agent_execution_id"`
-	AttemptID         string             `json:"attempt_id,omitempty"`
-	ErrorMessage      string             `json:"error_message,omitempty"`
-	FailureCode       string             `json:"failure_code,omitempty"`
-	FailureDetails    string             `json:"failure_details,omitempty"`
-	WorktreeID        string             `json:"worktree_id,omitempty"`
-	WorktreePath      string             `json:"worktree_path,omitempty"`
-	WorktreeBranch    string             `json:"worktree_branch,omitempty"`
+	OwnerKind              ExecutionOwnerKind `json:"owner_kind,omitempty"`
+	WorkspaceID            string             `json:"workspace_id,omitempty"`
+	RunID                  string             `json:"run_id,omitempty"`
+	RunSessionID           string             `json:"run_session_id,omitempty"`
+	RunAttempt             int                `json:"run_attempt,omitempty"`
+	TaskID                 string             `json:"task_id"`
+	SessionID              string             `json:"session_id"`
+	TaskEnvironmentID      string             `json:"task_environment_id,omitempty"`
+	AgentExecutionID       string             `json:"agent_execution_id"`
+	AttemptID              string             `json:"attempt_id,omitempty"`
+	ErrorMessage           string             `json:"error_message,omitempty"`
+	FailureCode            string             `json:"failure_code,omitempty"`
+	FailureDetails         string             `json:"failure_details,omitempty"`
+	StartupFailureReason   string             `json:"startup_reason,omitempty"`
+	StartupFailureAttempts int                `json:"startup_attempts,omitempty"`
+	StartupFailureNPMCode  string             `json:"startup_npm_code,omitempty"`
+	WorktreeID             string             `json:"worktree_id,omitempty"`
+	WorktreePath           string             `json:"worktree_path,omitempty"`
+	WorktreeBranch         string             `json:"worktree_branch,omitempty"`
 	// TaskWorkspacePath is the task root that contains every per-repo
 	// worktree as a sibling subdir, populated when the event signals a
 	// sibling worktree being added (multi-branch add_branch flow) rather

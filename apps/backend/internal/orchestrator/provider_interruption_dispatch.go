@@ -154,7 +154,7 @@ func (s *Service) finishContinuationManual(ctx context.Context, taskID, sessionI
 		return
 	}
 	cancelConfirmed := true
-	if len(disposition) == 0 || disposition[0] != "cancelled" {
+	if len(disposition) == 0 || disposition[0] != stopReasonCancelled {
 		cancelConfirmed = s.cancelRestoredContinuation(ctx, sessionID, entry)
 	}
 	guard, release := s.acquireCancelInFlightGuard(sessionID)

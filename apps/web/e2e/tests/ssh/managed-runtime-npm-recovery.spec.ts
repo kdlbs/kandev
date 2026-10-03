@@ -1,16 +1,18 @@
 import { test, expect } from "../../fixtures/ssh-test-base";
+import { randomUUID } from "node:crypto";
 import { readRemoteFile, remotePathExists } from "../../helpers/ssh";
 import { waitForLatestSessionDone } from "../../helpers/session";
 import {
   MANAGED_RUNTIME_CACHE_ROOT,
-  managedRuntimeExecutionCacheKey,
+  managedRuntimeStartupAttemptFile,
+  managedRuntimeStartupSentinels,
   prepareManagedRuntimeProfile,
   restoreE2EAgentRegistry,
 } from "../../helpers/managed-runtime-recovery";
 import { SessionPage } from "../../pages/session-page";
 
 test.describe("SSH executor - managed npm runtime recovery", () => {
-  test("repairs the remote cache and completes the original session", async ({
+  test("retries online without deleting the remote tree", async ({
     apiClient,
     backend,
     seedData,
@@ -19,7 +21,11 @@ test.describe("SSH executor - managed npm runtime recovery", () => {
     test.setTimeout(240_000);
     let profileId = "";
     try {
-      const { profile, packageSpec } = await prepareManagedRuntimeProfile(apiClient, backend);
+      const launchId = randomUUID();
+      const { profile, packageSpec } = await prepareManagedRuntimeProfile(apiClient, backend, {
+        startupMode: "transient",
+        launchId,
+      });
       profileId = profile.id;
       const task = await apiClient.createTaskWithAgent(
         seedData.workspaceId,
@@ -39,16 +45,24 @@ test.describe("SSH executor - managed npm runtime recovery", () => {
         (candidate) => candidate.task_id === task.id,
       );
       expect(session?.remote_task_dir).toBeTruthy();
-      const target = `${MANAGED_RUNTIME_CACHE_ROOT}/_npx/${managedRuntimeExecutionCacheKey(packageSpec)}`;
-      const sibling = `${MANAGED_RUNTIME_CACHE_ROOT}/_npx/0123456789abcdef`;
-      expect(remotePathExists(seedData.sshTarget, `${target}/stale-marker`)).toBe(false);
-      expect(readRemoteFile(seedData.sshTarget, `${target}/fresh-marker`)).toBe("fresh\n");
-      expect(readRemoteFile(seedData.sshTarget, `${sibling}/sibling-marker`)).toBe("sibling\n");
-      const onlineInvocations = readRemoteFile(
+      expect(
+        readRemoteFile(seedData.sshTarget, managedRuntimeStartupAttemptFile(launchId)).trim(),
+      ).toBe("2");
+      const sentinels = managedRuntimeStartupSentinels(packageSpec, launchId);
+      expect(remotePathExists(seedData.sshTarget, sentinels.selected)).toBe(true);
+      expect(readRemoteFile(seedData.sshTarget, sentinels.selected)).toBe("preserved\n");
+      expect(readRemoteFile(seedData.sshTarget, sentinels.sibling)).toBe("preserved\n");
+      const launches = readRemoteFile(
         seedData.sshTarget,
-        `${MANAGED_RUNTIME_CACHE_ROOT}/online-invocations`,
-      );
-      expect(onlineInvocations.trim().split(/\r?\n/)).toEqual([packageSpec]);
+        `${MANAGED_RUNTIME_CACHE_ROOT}/kandev-e2e-launches`,
+      )
+        .trim()
+        .split(/\r?\n/)
+        .filter((line) => line.startsWith(`${launchId}\t`));
+      expect(launches.map((line) => line.split("\t")[3])).toEqual([
+        "--prefer-offline",
+        "--prefer-online",
+      ]);
 
       await testPage.goto(`/t/${task.id}`);
       const page = new SessionPage(testPage);

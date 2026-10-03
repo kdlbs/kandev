@@ -15,6 +15,7 @@ import type { QuickChatSession } from "@/lib/state/slices/ui/types";
 import { QuickChatContent } from "./quick-chat-content";
 import { readLastAgentError } from "@/lib/session-last-agent-error";
 import { useTranslation } from "react-i18next";
+import { ConfigChatRestartStatus } from "@/components/config-chat/config-chat-restart-status";
 
 function useIsQuickChatPassthrough(sessionId: string) {
   return useAppStore((state) => {
@@ -61,6 +62,22 @@ function preventQuickChatAutoResume(
 }
 
 export function QuickChatSessionView({
+  session,
+  onInitialPromptAttempted,
+}: QuickChatSessionViewProps) {
+  const restart = useAppStore((state) => state.quickChat.configChatRestarts?.[session.workspaceId]);
+  if (session.kind === "config" && restart) {
+    return <ConfigChatRestartStatus workspaceId={session.workspaceId} />;
+  }
+  return (
+    <ActiveQuickChatSessionView
+      session={session}
+      onInitialPromptAttempted={onInitialPromptAttempted}
+    />
+  );
+}
+
+function ActiveQuickChatSessionView({
   session,
   onInitialPromptAttempted,
 }: QuickChatSessionViewProps) {

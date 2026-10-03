@@ -10,9 +10,12 @@ import (
 // a managed-runtime startup attempt through the lifecycle and orchestrator
 // error wrappers. Details are already sanitized and bounded by the caller.
 type ManagedRuntimeStartupError struct {
-	Code    Code
-	Details string
-	Cause   error
+	Code     Code
+	Details  string
+	Reason   string
+	Attempts int
+	NPMCode  string
+	Cause    error
 }
 
 func (e *ManagedRuntimeStartupError) Error() string {

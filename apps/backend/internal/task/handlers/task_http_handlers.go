@@ -2449,8 +2449,10 @@ type httpQuickChatSession struct {
 // httpListQuickChatSessionsResponse mirrors the quick-chat slice of the boot
 // payload so a running client can resync its tab strip without a full reload.
 type httpListQuickChatSessionsResponse struct {
-	Sessions     []httpQuickChatSession `json:"sessions"`
-	TaskSessions []dto.TaskSessionDTO   `json:"task_sessions"`
+	Sessions                    []httpQuickChatSession `json:"sessions"`
+	TaskSessions                []dto.TaskSessionDTO   `json:"task_sessions"`
+	ConfigChatRestartPending    bool                   `json:"config_chat_restart_pending"`
+	ConfigChatRetiringSessionID string                 `json:"config_chat_retiring_session_id,omitempty"`
 }
 
 // httpListQuickChatSessions returns the workspace's restorable quick-chat tabs.
@@ -2458,14 +2460,16 @@ type httpListQuickChatSessionsResponse struct {
 // (re)connect to converge on the server's list instead of drifting apart.
 func (h *TaskHandlers) httpListQuickChatSessions(c *gin.Context) {
 	workspaceID := c.Param("id")
-	items, err := h.service.ListQuickChatSessions(c.Request.Context(), workspaceID)
+	items, retiringSessionID, err := h.listQuickChatsWithRestart(c.Request.Context(), workspaceID)
 	if err != nil {
 		handleNotFound(c, h.logger, err, "workspace not found")
 		return
 	}
 	response := httpListQuickChatSessionsResponse{
-		Sessions:     make([]httpQuickChatSession, 0, len(items)),
-		TaskSessions: make([]dto.TaskSessionDTO, 0, len(items)),
+		Sessions:                    make([]httpQuickChatSession, 0, len(items)),
+		TaskSessions:                make([]dto.TaskSessionDTO, 0, len(items)),
+		ConfigChatRestartPending:    retiringSessionID != "",
+		ConfigChatRetiringSessionID: retiringSessionID,
 	}
 	for _, item := range items {
 		response.Sessions = append(response.Sessions, httpQuickChatSession{
@@ -2533,6 +2537,12 @@ func (h *TaskHandlers) httpStartConfigChat(c *gin.Context) {
 		handleNotFound(c, h.logger, err, "workspace not found")
 		return
 	}
+	release, admitted := h.configChatAdmission.begin(workspaceID, "")
+	if !admitted {
+		c.JSON(http.StatusConflict, configChatRestartFailure{Code: "config_chat_restart_busy", Stage: "validate"})
+		return
+	}
+	defer release()
 
 	agentProfileID, executorID, metadata := resolveConfigChatDefaults(body, workspace)
 	if agentProfileID == "" {

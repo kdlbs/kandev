@@ -109,6 +109,9 @@ type LaunchSessionRequest struct {
 	// Start agent button launches it later. It is an internal server-side flag
 	// set from EnsureSessionOptions, kept off the wire protocol (`json:"-"`).
 	NoAgentLaunch bool `json:"-"`
+	// NoInitialPrompt starts an explicitly replaced utility session without
+	// composing configuration instructions into an otherwise empty first turn.
+	NoInitialPrompt bool `json:"-"`
 	// DeferredStart marks a prepare whose caller will follow up with an explicit
 	// IntentStartCreated that carries the prompt (the two-phase create flow:
 	// cheap sync prepare + async start). It suppresses the passthrough
@@ -533,9 +536,15 @@ func (s *Service) launchStartCreated(ctx context.Context, req *LaunchSessionRequ
 	}
 	autoStart := req.AutoStart || req.ActivationSource == LaunchActivationSourceSessionOpen
 	parkingStamp := s.captureWorkflowParkingStamp(ctx, req.SessionID)
-	execution, err := s.StartCreatedSession(
+	options := startCreatedSessionOptions{}
+	if req.NoInitialPrompt {
+		options.skipTaskDescriptionFallback = true
+		options.promptAlreadyComposed = true
+		options.noInitialTurn = true
+	}
+	execution, err := s.startCreatedSession(
 		ctx, req.TaskID, req.SessionID, req.AgentProfileID,
-		req.Prompt, req.SkipMessageRecord, req.PlanMode, autoStart, req.Attachments, nil,
+		req.Prompt, req.SkipMessageRecord, req.PlanMode, autoStart, req.Attachments, nil, "", options,
 	)
 	if err != nil {
 		return nil, err

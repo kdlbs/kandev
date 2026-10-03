@@ -715,12 +715,15 @@ func (m *Manager) recoverManagedRuntimeProbe(
 	failedRequest *agentctlutil.ProbeRequest,
 	initial *agentctlutil.ProbeResponse,
 ) *agentctlutil.ProbeResponse {
+	if ctx.Err() != nil {
+		return initial
+	}
 	managed, ok := ia.(agents.ManagedNPMRuntimeAgent)
 	if !ok {
 		return initial
 	}
 	spec := managed.ManagedNPMRuntime()
-	retryCommand, packageSpec, ok := managedRuntimeProbeRetry(failedCommand, spec)
+	retryCommand, _, ok := managedRuntimeProbeRetry(failedCommand, spec)
 	if !ok {
 		return initial
 	}
@@ -728,16 +731,6 @@ func (m *Manager) recoverManagedRuntimeProbe(
 		zap.String("agent_type", inst.agentType),
 		zap.String("recovery_scope", "host_capability_probe"),
 		zap.Int("attempt", 1))
-	failedConfig := failedRequest.InferenceConfig
-	if err := inst.client.RepairManagedRuntimeCacheWithEnvironment(
-		ctx, packageSpec, failedConfig.Env, failedConfig.StripEnv,
-	); err != nil {
-		m.log.Warn("managed runtime host capability probe cache repair failed",
-			zap.String("agent_type", inst.agentType),
-			zap.String("recovery_scope", "host_capability_probe"),
-			zap.Error(err))
-		return initial
-	}
 	response, err := inst.client.Probe(ctx, cloneProbeRequestWithCommand(failedRequest, retryCommand))
 	if err != nil {
 		m.log.Warn("managed runtime host capability probe retry failed",

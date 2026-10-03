@@ -17,6 +17,9 @@ const quickChatSessions = vi.hoisted(
   () => [] as Array<{ sessionId: string; taskId?: string; agentProfileId?: string }>,
 );
 const useEnsureTaskSession = vi.hoisted(() => vi.fn());
+const configChatRestarts = vi.hoisted(
+  () => ({}) as Record<string, { sessionId: string; status: string; source: string }>,
+);
 const useTask = vi.hoisted(() => vi.fn());
 const useSessionResumption = vi.hoisted(() =>
   vi.fn(() => ({
@@ -43,7 +46,7 @@ vi.mock("@/components/state-provider", () => ({
   useAppStore: (selector: (state: unknown) => unknown) =>
     selector({
       taskSessions: { items: sessionRows },
-      quickChat: { sessions: quickChatSessions },
+      quickChat: { sessions: quickChatSessions, configChatRestarts },
       agentProfiles: { items: [] },
     }),
 }));
@@ -82,11 +85,25 @@ afterEach(() => {
   cleanup();
   delete sessionRows[session.sessionId];
   quickChatSessions.length = 0;
+  delete configChatRestarts[WORKSPACE_ID];
   vi.clearAllMocks();
   useTask.mockReset();
   useTask.mockReturnValue(null);
   useTaskStatusSummary.mockReset();
   useTaskStatusSummary.mockReturnValue(undefined);
+});
+
+it("unmounts retired configuration content before hydration or automatic resumption can run", () => {
+  configChatRestarts[WORKSPACE_ID] = {
+    sessionId: session.sessionId,
+    status: "restarting",
+    source: "local",
+  };
+  render(<QuickChatSessionView session={{ ...session, kind: "config" }} />);
+  expect(useEnsureTaskSession).not.toHaveBeenCalled();
+  expect(useSessionResumption).not.toHaveBeenCalled();
+  expect(screen.queryByTestId(TEST_IDS.quickChatContent)).toBeNull();
+  expect(screen.getByRole("status").textContent).toBe("configChat:restartingSession");
 });
 
 // @covers AC-TASKS-QUICK-CHAT-EXPIRATION-001.2

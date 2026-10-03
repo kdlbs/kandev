@@ -128,10 +128,11 @@ type Manager struct {
 	exitErr            atomic.Value // error
 
 	// Stderr buffering for error context
-	stderrBuffer    []string
-	stderrMu        sync.RWMutex
-	stderrConsumer  adapter.StderrLineConsumer
-	stderrSanitizer adapter.StderrLineSanitizer
+	stderrBuffer          []string
+	stderrBufferTruncated bool
+	stderrMu              sync.RWMutex
+	stderrConsumer        adapter.StderrLineConsumer
+	stderrSanitizer       adapter.StderrLineSanitizer
 
 	// Workspace tracker for git status and file changes
 	workspaceTracker *WorkspaceTracker
@@ -290,6 +291,10 @@ type Manager struct {
 	lifetimeCtx           context.Context
 	lifetimeCancel        context.CancelFunc
 	mainReapPending       atomic.Bool
+	startupEvidenceMu     sync.Mutex
+	startupGeneration     uint64
+	startupEvidence       *types.ManagedStartupEvidence
+	startupEvidenceDone   chan struct{}
 	// stopChClosed guards close(stopCh), which is the only part of teardown
 	// that is not naturally idempotent. It is reset wherever stopCh itself is
 	// created so the flag always describes the current channel — a Start that
@@ -1290,16 +1295,23 @@ func (m *Manager) JoinRepoPath(subpath, path string) (string, error) {
 
 // Start starts the agent process
 func (m *Manager) Start(ctx context.Context) error {
+	_, err := m.StartWithGeneration(ctx)
+	return err
+}
+
+// StartWithGeneration starts the agent process and returns the generation
+// created by this call while startup remains serialized against replacement.
+func (m *Manager) StartWithGeneration(ctx context.Context) (uint64, error) {
 	m.startMu.Lock()
 	defer m.startMu.Unlock()
 	release, err := m.admitStart()
 	if err != nil {
-		return err
+		return 0, err
 	}
 	defer release()
 
 	if m.Status() == StatusRunning || m.Status() == StatusStarting {
-		return fmt.Errorf("agent is already running")
+		return 0, fmt.Errorf("agent is already running")
 	}
 
 	// A previous lifecycle may still be live: an agent that exited on its own
@@ -1318,39 +1330,47 @@ func (m *Manager) Start(ctx context.Context) error {
 
 	if err := config.ValidateCommandArgs(m.cfg.AgentArgs); err != nil {
 		m.status.Store(StatusError)
-		return err
+		return 0, err
 	}
 
 	// Build adapter config and create protocol adapter
 	if err := m.buildAdapterConfig(); err != nil {
 		m.status.Store(StatusError)
-		return err
+		return 0, err
 	}
 
 	// One-shot adapters manage their own subprocess per prompt.
 	// Skip process creation — the adapter spawns processes in Prompt().
 	if oneShotAdapter, ok := m.adapter.(adapter.OneShotAdapter); ok && oneShotAdapter.IsOneShot() {
-		return m.startOneShot()
+		if err := m.startOneShot(); err != nil {
+			return 0, err
+		}
+		return m.ProcessGeneration(), nil
 	}
 
 	// Assemble final command (does not start the process yet)
 	if err := m.buildFinalCommand(); err != nil {
 		m.status.Store(StatusError)
-		return err
+		return 0, err
 	}
+	return m.startManagedProcess()
+}
 
+func (m *Manager) startManagedProcess() (uint64, error) {
 	// Set up stdin/stdout/stderr pipes (must happen before process starts)
 	if err := m.startProcessPipes(); err != nil {
 		m.status.Store(StatusError)
-		return err
+		return 0, err
 	}
 
+	m.ClearStderrBuffer()
 	// Start the subprocess now that pipes are connected
 	if err := m.cmd.Start(); err != nil {
 		_ = m.closeStderrPipe()
 		m.status.Store(StatusError)
-		return formatAgentStartError(err, m.cfg.AgentEnv)
+		return 0, formatAgentStartError(err, m.cfg.AgentEnv)
 	}
+	processGeneration := m.beginManagedStartupGeneration()
 	if err := m.closeStderrWriter(); err != nil {
 		m.logger.Debug("failed to close parent stderr pipe", zap.Error(err))
 	}
@@ -1359,7 +1379,7 @@ func (m *Manager) Start(ctx context.Context) error {
 		reapErr := killAndWaitStartedCommand(m.cmd)
 		_ = m.closeStderrReader()
 		m.status.Store(StatusError)
-		return errors.Join(fmt.Errorf("failed to install agent process lifecycle: %w", err), reapErr)
+		return 0, errors.Join(fmt.Errorf("failed to install agent process lifecycle: %w", err), reapErr)
 	}
 	m.processLifecycle = processLifecycle
 
@@ -1382,15 +1402,15 @@ func (m *Manager) Start(ctx context.Context) error {
 		}
 		_ = m.closeStderrReader()
 		m.status.Store(StatusError)
-		return errors.Join(fmt.Errorf("failed to connect adapter: %w", err), reapErr)
+		return 0, errors.Join(fmt.Errorf("failed to connect adapter: %w", err), reapErr)
 	}
 
 	// Start stderr reader and exit waiter. Keep the completion channel local to
 	// this process generation so a delayed reader cannot signal a replacement.
-	stderrDone := make(chan struct{})
+	stderrDone := make(chan stderrReadResult, 1)
 	m.wg.Add(2)
 	go m.readStderr(stderrDone)
-	go m.waitForExit(stderrDone)
+	go m.waitForExitGeneration(stderrDone, processGeneration)
 
 	// Forward adapter updates to our channel
 	m.wg.Add(1)
@@ -1409,7 +1429,7 @@ func (m *Manager) Start(ctx context.Context) error {
 	m.status.Store(StatusRunning)
 	m.logger.Info("agent process started", zap.Int("pid", m.cmd.Process.Pid))
 
-	return nil
+	return processGeneration, nil
 }
 
 // startOneShot initialises a one-shot adapter without spawning a long-lived subprocess.
@@ -2098,6 +2118,17 @@ func (m *Manager) GetAdapter() adapter.AgentAdapter {
 	return m.adapter
 }
 
+// GetAdapterForGeneration validates and captures the adapter while startup is
+// serialized, so a stale request cannot select a replacement process adapter.
+func (m *Manager) GetAdapterForGeneration(generation uint64) (adapter.AgentAdapter, bool) {
+	m.startMu.Lock()
+	defer m.startMu.Unlock()
+	if generation != 0 && generation != m.ProcessGeneration() {
+		return nil, false
+	}
+	return m.GetAdapter(), true
+}
+
 // GetSessionID returns the current session ID from the adapter.
 // The adapter is the single source of truth for session ID.
 func (m *Manager) GetSessionID() string {
@@ -2626,13 +2657,19 @@ func waitForProcessGroupExit(ctx context.Context, pid int) bool {
 	}
 }
 
+type stderrReadResult struct {
+	readErr   error
+	sawOutput bool
+}
+
 // readStderr reads and logs stderr from the agent.
-func (m *Manager) readStderr(stderrDone chan<- struct{}) {
+func (m *Manager) readStderr(stderrDone chan<- stderrReadResult) {
 	defer m.wg.Done()
-	defer close(stderrDone)
 
 	scanner := bufio.NewScanner(m.stderr)
+	result := stderrReadResult{}
 	for scanner.Scan() {
+		result.sawOutput = true
 		rawLine := stripANSI(scanner.Text())
 		if m.stderrConsumer != nil {
 			// Protocol-specific consumers inspect the line in memory. Their
@@ -2641,12 +2678,12 @@ func (m *Manager) readStderr(stderrDone chan<- struct{}) {
 			m.stderrConsumer.ConsumeStderrLine(rawLine)
 		}
 
-		line, keep := rawLine, true
-		if m.stderrSanitizer != nil {
-			line, keep = m.stderrSanitizer.SanitizeStderrLine(rawLine)
-		}
+		line, keep := safeManagedNpmStderrLine(rawLine)
 		if !keep {
-			line, keep = safeManagedNpmStderrLine(rawLine)
+			line, keep = rawLine, true
+			if m.stderrSanitizer != nil {
+				line, keep = m.stderrSanitizer.SanitizeStderrLine(rawLine)
+			}
 		}
 		if !keep || line == "" {
 			continue
@@ -2657,22 +2694,27 @@ func (m *Manager) readStderr(stderrDone chan<- struct{}) {
 		m.appendStderr(line)
 	}
 
-	if err := scanner.Err(); err != nil {
-		m.logger.Debug("stderr reader error", zap.Error(err))
+	result.readErr = scanner.Err()
+	if result.readErr != nil {
+		m.logger.Debug("stderr reader error", zap.Error(result.readErr))
 	}
+	stderrDone <- result
+	close(stderrDone)
 }
 
-func (m *Manager) waitForStderrDrain(stderrDone <-chan struct{}) {
+func (m *Manager) waitForStderrDrain(stderrDone <-chan stderrReadResult) (complete bool, sawOutput bool) {
 	if stderrDone == nil {
-		return
+		return false, false
 	}
 	timer := time.NewTimer(processStderrDrainTimeout)
 	defer timer.Stop()
 	select {
-	case <-stderrDone:
+	case result, ok := <-stderrDone:
+		return ok && result.readErr == nil, !ok || result.sawOutput
 	case <-timer.C:
 		m.logger.Warn("timed out waiting for agent stderr to drain")
 		_ = m.closeStderrReader()
+		return false, true
 	}
 }
 
@@ -2695,6 +2737,7 @@ func (m *Manager) appendStderr(line string) {
 	if len(m.stderrBuffer) >= defaultStderrBufferSize {
 		// Ring buffer: drop oldest line
 		m.stderrBuffer = m.stderrBuffer[1:]
+		m.stderrBufferTruncated = true
 	}
 	m.stderrBuffer = append(m.stderrBuffer, cleanLine)
 }
@@ -2709,15 +2752,28 @@ func (m *Manager) GetRecentStderr() []string {
 	return result
 }
 
+func (m *Manager) managedStartupStderrSnapshot() ([]string, bool) {
+	m.stderrMu.RLock()
+	defer m.stderrMu.RUnlock()
+	result := make([]string, len(m.stderrBuffer))
+	copy(result, m.stderrBuffer)
+	return result, !m.stderrBufferTruncated
+}
+
 // ClearStderrBuffer clears the stderr buffer (e.g., after successful operation)
 func (m *Manager) ClearStderrBuffer() {
 	m.stderrMu.Lock()
 	defer m.stderrMu.Unlock()
 	m.stderrBuffer = nil
+	m.stderrBufferTruncated = false
 }
 
 // waitForExit waits for the process to exit
-func (m *Manager) waitForExit(stderrDone <-chan struct{}) {
+func (m *Manager) waitForExit(stderrDone <-chan stderrReadResult) {
+	m.waitForExitGeneration(stderrDone, m.ProcessGeneration())
+}
+
+func (m *Manager) waitForExitGeneration(stderrDone <-chan stderrReadResult, generation uint64) {
 	defer m.wg.Done()
 	defer close(m.doneCh)
 
@@ -2727,9 +2783,12 @@ func (m *Manager) waitForExit(stderrDone <-chan struct{}) {
 	err := m.cmd.Wait()
 	// Wait has observed process exit; now bound the reader drain in case a child
 	// process inherited the stderr writer and kept the pipe open.
-	m.waitForStderrDrain(stderrDone)
+	stderrComplete, stderrPresent := m.waitForStderrDrain(stderrDone)
 	_ = m.closeStderrReader()
 	intentionalStop := m.Status() == StatusStopping
+	recentStderr, stderrRetainedComplete := m.managedStartupStderrSnapshot()
+	evidence := newManagedStartupEvidence(generation, err, intentionalStop, stderrComplete, stderrRetainedComplete, stderrPresent, recentStderr)
+	m.recordManagedStartupEvidence(evidence)
 
 	switch {
 	case intentionalStop:
@@ -2743,7 +2802,6 @@ func (m *Manager) waitForExit(stderrDone <-chan struct{}) {
 			m.exitCode.Store(int32(exitCode))
 		}
 		// Include recent stderr for better error diagnostics
-		recentStderr := m.GetRecentStderr()
 		m.logger.Error("agent process exited with error",
 			zap.Error(err),
 			zap.Int("exit_code", exitCode),
@@ -2765,8 +2823,10 @@ func (m *Manager) waitForExit(stderrDone <-chan struct{}) {
 			Type:  adapter.EventTypeError,
 			Error: errorMsg,
 			Data: map[string]any{
-				"exit_code":     exitCode,
-				"recent_stderr": recentStderr,
+				"exit_code":          exitCode,
+				"recent_stderr":      recentStderr,
+				"process_generation": generation,
+				"startup_evidence":   evidence,
 			},
 		})
 	default:

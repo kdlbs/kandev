@@ -39,6 +39,9 @@ export type ActionMeta = {
   occurred_at?: string;
   execution_id?: string;
   failure_details?: string;
+  startup_reason?: string;
+  startup_attempts?: number;
+  startup_npm_code?: string;
   attempt_id?: string;
   phase?: string;
 };

@@ -35,6 +35,11 @@ Shared Git diff file metadata belongs to Platform, including commit and
 cumulative comparisons. UI retains historical-file navigation and merge-detail
 presentation; Tasks retains environment and repository bindings.
 
+Shared local Git commit evidence also belongs to Platform, including pushed
+reachability against the repository's tracked upstream. Tasks retains provider
+contribution provenance and mutation policy; Workspaces retains comparison-base
+and repository-context identity.
+
 ## Exclusions
 
 - Executor-specific runtime environments belong to the [executor

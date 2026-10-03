@@ -54,14 +54,27 @@ type InitializeResponse struct {
 	Error     string     `json:"error,omitempty"`
 }
 
+// InitializeError preserves bounded process evidence returned by agentctl.
+type InitializeError struct {
+	Message         string
+	StartupEvidence *types.ManagedStartupEvidence
+}
+
+func (e *InitializeError) Error() string { return "initialize failed: " + e.Message }
+
 // Initialize sends the ACP initialize request via the agent WebSocket stream.
 func (c *Client) Initialize(ctx context.Context, clientName, clientVersion string) (*AgentInfo, error) {
+	c.mu.RLock()
+	processGeneration := c.processGeneration
+	c.mu.RUnlock()
 	payload := struct {
-		ClientName    string `json:"client_name"`
-		ClientVersion string `json:"client_version"`
+		ClientName        string `json:"client_name"`
+		ClientVersion     string `json:"client_version"`
+		ProcessGeneration uint64 `json:"process_generation,omitempty"`
 	}{
-		ClientName:    clientName,
-		ClientVersion: clientVersion,
+		ClientName:        clientName,
+		ClientVersion:     clientVersion,
+		ProcessGeneration: processGeneration,
 	}
 
 	resp, err := c.sendStreamRequest(ctx, "agent.initialize", payload)
@@ -74,7 +87,10 @@ func (c *Client) Initialize(ctx context.Context, clientName, clientVersion strin
 		if err := resp.ParsePayload(&errPayload); err != nil {
 			return nil, fmt.Errorf("initialize failed: unable to parse error")
 		}
-		return nil, fmt.Errorf("initialize failed: %s", errPayload.Message)
+		return nil, &InitializeError{
+			Message:         errPayload.Message,
+			StartupEvidence: managedStartupEvidenceFromDetails(errPayload.Details),
+		}
 	}
 
 	var result InitializeResponse
@@ -85,6 +101,22 @@ func (c *Client) Initialize(ctx context.Context, clientName, clientVersion strin
 		return nil, fmt.Errorf("initialize failed: %s", result.Error)
 	}
 	return result.AgentInfo, nil
+}
+
+func managedStartupEvidenceFromDetails(details map[string]any) *types.ManagedStartupEvidence {
+	value, ok := details["startup_evidence"]
+	if !ok || value == nil {
+		return nil
+	}
+	data, err := json.Marshal(value)
+	if err != nil {
+		return nil
+	}
+	var evidence types.ManagedStartupEvidence
+	if err := json.Unmarshal(data, &evidence); err != nil || evidence.ProcessGeneration == 0 {
+		return nil
+	}
+	return &evidence
 }
 
 // NewSessionResponse from agentctl

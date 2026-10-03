@@ -49,6 +49,9 @@ type AgentEventData struct {
 	ErrorMessage            string                              `json:"error_message,omitempty"`
 	FailureCode             string                              `json:"failure_code,omitempty"`
 	FailureDetails          string                              `json:"failure_details,omitempty"`
+	StartupFailureReason    string                              `json:"startup_reason,omitempty"`
+	StartupFailureAttempts  int                                 `json:"startup_attempts,omitempty"`
+	StartupFailureNPMCode   string                              `json:"startup_npm_code,omitempty"`
 	Phase                   string                              `json:"phase,omitempty"`
 	AttemptID               string                              `json:"attempt_id,omitempty"`
 	ErrorStamp              string                              `json:"error_stamp,omitempty"`

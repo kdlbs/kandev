@@ -1,6 +1,14 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type RefObject,
+} from "react";
 import { useTranslation } from "react-i18next";
 import { useAppStore } from "@/components/state-provider";
 import { useToast } from "@/components/toast-provider";
@@ -46,6 +54,22 @@ function detailErrorMessage(error: unknown, unexpectedError: string): string {
   return unexpectedError;
 }
 
+function useDetailLifetime(
+  target: CommitDetailTarget,
+  localRequest: ReturnType<typeof buildLocalRequest>,
+  requestSeqRef: RefObject<number>,
+) {
+  const lifetime = useMemo(() => ({ live: false }), [target, localRequest]);
+  useLayoutEffect(() => {
+    lifetime.live = true;
+    return () => {
+      lifetime.live = false;
+      requestSeqRef.current++;
+    };
+  }, [lifetime, requestSeqRef]);
+  return lifetime;
+}
+
 /**
  * Loads commit details from the source encoded in the target. GitHub targets
  * never use the local session/worktree request, including after an error.
@@ -87,8 +111,11 @@ export function useCommitDetail(target: CommitDetailTarget): UseCommitDetailResu
     [stableTarget, activeSessionId, sessionTaskId, activeTaskId, agentctlReady],
   );
 
+  const lifetime = useDetailLifetime(stableTarget, localRequest, requestSeqRef);
   const fetchDetail = useCallback(async () => {
+    if (!lifetime.live) return;
     const requestSeq = ++requestSeqRef.current;
+    const isCurrentRequest = () => lifetime.live && requestSeq === requestSeqRef.current;
     setLoading(true);
     setError(null);
     try {
@@ -96,7 +123,7 @@ export function useCommitDetail(target: CommitDetailTarget): UseCommitDetailResu
         target: stableTarget,
         ...(localRequest ? { local: localRequest } : {}),
       });
-      if (requestSeq !== requestSeqRef.current) return;
+      if (!isCurrentRequest()) return;
       if (stableTarget.source === "github" && !response.success) {
         throw new CommitDetailProtocolError("invalid_response");
       }
@@ -104,7 +131,7 @@ export function useCommitDetail(target: CommitDetailTarget): UseCommitDetailResu
       setFiles(response.success && response.files ? response.files : null);
       setCommit(response.source === "github" ? (response.commit ?? null) : null);
     } catch (err) {
-      if (requestSeq !== requestSeqRef.current) return;
+      if (!isCurrentRequest()) return;
       const message = detailErrorMessage(err, unexpectedError);
       setLoadedKey(key);
       setFiles(null);
@@ -116,9 +143,9 @@ export function useCommitDetail(target: CommitDetailTarget): UseCommitDetailResu
         variant: "error",
       });
     } finally {
-      if (requestSeq === requestSeqRef.current) setLoading(false);
+      if (isCurrentRequest()) setLoading(false);
     }
-  }, [key, localRequest, requestFailed, stableTarget, toast, unexpectedError]);
+  }, [key, lifetime, localRequest, requestFailed, stableTarget, toast, unexpectedError]);
 
   useEffect(() => {
     void fetchDetail();

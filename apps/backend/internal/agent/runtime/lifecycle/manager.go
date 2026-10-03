@@ -83,6 +83,9 @@ type Manager struct {
 	// bootMessageService creates boot messages displayed in chat during agent startup.
 	bootMessageService BootMessageService
 
+	// startupRecoveryDelay overrides the managed-runtime retry delay in tests.
+	startupRecoveryDelay func() time.Duration
+
 	// preparerRegistry maps executor types to environment preparers.
 	preparerRegistry *PreparerRegistry
 

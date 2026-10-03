@@ -2,7 +2,7 @@
 status: active
 system: workspaces
 created: 2026-07-20
-updated: 2026-09-25
+updated: 2026-10-03
 owners:
   - kandev
 ---
@@ -19,7 +19,7 @@ so macOS does not receive unexpected protected-folder access.
 
 ### REQ-WORKSPACES-LOCAL-REPOSITORIES-001: Local Workspace Repositories
 
-**Intent:** Users need to connect repositories already present on the machine running Kandev, including native Windows repositories outside the user's home directory. Explicitly adding one repository should work without widening automatic filesystem scans or editing packaged runtime configuration.
+**Intent:** Users need to connect accessible local repositories, including native Windows paths outside Home, without widening automatic scans or editing packaged runtime configuration.
 
 #### Acceptance criteria
 
@@ -140,6 +140,22 @@ can display a permission dialog after the user leaves the application.
 - **AC-WORKSPACES-LOCAL-REPOSITORIES-003.12:** A missing clone directory shall
   not prevent results from other roots from appearing on initial or later scans.
   Discovery shall not create the directory to recover from this condition.
+- **AC-WORKSPACES-LOCAL-REPOSITORIES-003.13:** When cached reads and refreshes
+  overlap for one workspace, only the latest started distinct request shall replace
+  shared choices, root/freshness metadata, or errors, including empty results.
+  Its failure shall preserve accepted choices. Older successes or failures
+  shall not reverse that outcome or trigger automatic refresh. Joining pending
+  unchanged-root work shall retain its order. Browser and phone consumers shall
+  share accepted state. Busy indicators shall clear after pending work finishes
+  unless accepted metadata reports a scan.
+- **AC-WORKSPACES-LOCAL-REPOSITORIES-003.14:** After successful Add, Home
+  confirmation, Reconnect, or Remove, the initiating workspace in that tab shall
+  synchronize through a new read. Every consumer sharing its discovery state
+  shall observe the accepted changed-root result, including empty collections.
+  Pre-mutation reads shall not publish data, metadata, errors, busy state, or
+  automatic follow-up afterward. Failed mutations shall not invalidate reads.
+  Unchanged-root reads shall still share work. Immediate synchronization of
+  other workspaces or tabs is outside this guarantee.
 
 ### REQ-WORKSPACES-LOCAL-REPOSITORIES-004: Filesystem access diagnostics
 
@@ -164,29 +180,8 @@ behind a macOS access failure.
 
 ## Migrated source detail
 
-## Why
-
-Users need to connect repositories already present on the machine running Kandev, including native
-Windows repositories outside the user's home directory. Explicitly adding one repository should
-work without widening automatic filesystem scans or editing packaged runtime configuration.
-
 ## What
 
-- A user can add a local Git repository by entering or selecting an absolute path that the Kandev
-  process can access.
-- Manual selection is valid independently of `repositoryDiscovery.roots`; those roots govern only
-  automatic discovery scans.
-- Kandev validates and canonicalizes a non-empty local repository path before saving it. A saved
-  repository records the exact canonical path the user selected.
-- Trusting one repository does not trust its parent directory, filesystem volume, or sibling
-  repositories.
-- Saved repositories remain usable for branch listing, current status, refresh, task creation, and
-  fresh-branch workflows after restart.
-- A saved repository without an `origin` remote supports Merge and Rebase when the selected base
-  branch exists locally.
-- A repository with an `origin` remote refreshes and uses `origin/<base>` for Merge and Rebase.
-- A missing local base branch causes a clear error before Merge or Rebase changes repository
-  history.
 - A saved repository must continue resolving to its recorded canonical location. Git metadata
   outside that location is accepted only for a verifiable linked worktree or initialized submodule
   with reciprocal canonical `core.worktree` metadata.
@@ -310,6 +305,8 @@ the repository record removes that exact durable grant from the workspace.
 
 ## Implementation Plans
 
+- [Repository Discovery Root Mutations](../../../plans/repository-discovery-root-mutations/plan.md)
+- [Repository Discovery Ordering](../../../plans/repository-discovery-ordering/plan.md)
 - [Repository Discovery Failure Recovery](../../../plans/repository-discovery-failure-recovery/plan.md)
 
 - [Explicit Local Repository Trust](../../../plans/explicit-local-repository-trust/plan.md)

@@ -85,10 +85,13 @@ test.describe("Changes history regression", () => {
       testPage.locator('[data-testid="pr-files-section"] [data-changes-file]'),
     ).toHaveCount(5);
 
-    const geometry = await measurePRSectionGeometry(testPage);
-    expect(geometry.siblingGaps).toEqual([2, 2, 2, 2]);
-    expect(geometry.sectionGap).toBeCloseTo(10, 0);
-    expect(geometry.contentOffset).toBeCloseTo(-4, 0);
+    await expect
+      .poll(() => measurePRSectionGeometry(testPage))
+      .toEqual({
+        siblingGaps: [2, 2, 2, 2],
+        sectionGap: expect.closeTo(10, 0),
+        contentOffset: expect.closeTo(-4, 0),
+      });
   });
 
   // @covers AC-UI-BOUNDED-CHANGES-001.8
