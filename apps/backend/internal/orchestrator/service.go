@@ -897,7 +897,8 @@ type Service struct {
 	// raw state write. Nil-safe: when unset, terminal completion for an
 	// Office task is skipped rather than falling back to the raw write,
 	// which would bypass the gate.
-	officeTaskStatusUpdater OfficeTaskStatusUpdater
+	officeTaskStatusUpdater        OfficeTaskStatusUpdater
+	workspaceRecoveryErrorReporter workspaceRecoveryErrorReporter
 
 	// Resolves the agent family names written in configure_session rules onto
 	// canonical agent IDs. Nil-safe: when unset, rule matching falls back to an

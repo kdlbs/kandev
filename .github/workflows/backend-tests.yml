@@ -41,6 +41,7 @@ env:
   # Container jobs may override HOME. Keep Corepack pointed at the pnpm cache
   # prepared in the CI image.
   COREPACK_HOME: /root/.cache/node/corepack
+  GOFLAGS: -trimpath
 
 jobs:
   runner_plan:

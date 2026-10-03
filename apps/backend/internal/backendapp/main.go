@@ -645,6 +645,7 @@ func startAgentInfrastructure(
 		inheritedRecordScope,
 		services.Task,
 		services.Task,
+		services.Task,
 		repos.Task,
 		startupRecoveryGuard,
 	)

@@ -13,6 +13,7 @@ import (
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/task/models"
 	taskrepo "github.com/kandev/kandev/internal/task/repository/sqlite"
+	"github.com/kandev/kandev/internal/worktree"
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"go.uber.org/zap"
 )
@@ -141,6 +142,12 @@ func (h *Handlers) wsLaunchSession(ctx context.Context, msg *ws.Message) (*ws.Me
 
 	resp, err := h.service.LaunchSession(ctx, &req)
 	if err != nil {
+		if recoveryResponse, responseErr := managedCloneRelocationConflictResponse(msg, err); recoveryResponse != nil || responseErr != nil {
+			return recoveryResponse, responseErr
+		}
+		if recoveryResponse, responseErr := recoveryInspectionConflictResponse(msg, err); recoveryResponse != nil || responseErr != nil {
+			return recoveryResponse, responseErr
+		}
 		if guardResponse, responseErr := sessionRecoveryGuardConflictResponse(msg, err); guardResponse != nil || responseErr != nil {
 			return guardResponse, responseErr
 		}
@@ -313,6 +320,16 @@ func managedCloneRelocationConflictResponse(msg *ws.Message, err error) (*ws.Mes
 	return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeConflict, err.Error(), recoveryErr.Details())
 }
 
+func recoveryInspectionConflictResponse(msg *ws.Message, err error) (*ws.Message, error) {
+	var contention *worktree.RecoveryInspectionContentionError
+	if !errors.As(err, &contention) {
+		return nil, nil
+	}
+	return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeConflict, contention.Error(), map[string]interface{}{
+		"kind": "recovery_inspection_busy",
+	})
+}
+
 func branchRecoveryConflictResponse(msg *ws.Message, err error) (*ws.Message, error) {
 	var branchRecoveryErr *orchestrator.BranchRecoveryError
 	if !errors.As(err, &branchRecoveryErr) {
@@ -395,6 +412,9 @@ func (h *Handlers) wsRecoverSession(ctx context.Context, msg *ws.Message) (*ws.M
 	})
 	if err != nil {
 		if recoveryResponse, responseErr := managedCloneRelocationConflictResponse(msg, err); recoveryResponse != nil || responseErr != nil {
+			return recoveryResponse, responseErr
+		}
+		if recoveryResponse, responseErr := recoveryInspectionConflictResponse(msg, err); recoveryResponse != nil || responseErr != nil {
 			return recoveryResponse, responseErr
 		}
 		if recoveryResponse, responseErr := taskArchivedConflictResponse(msg, err); recoveryResponse != nil || responseErr != nil {

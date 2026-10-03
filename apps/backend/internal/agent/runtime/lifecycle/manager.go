@@ -75,7 +75,8 @@ type Manager struct {
 	historyManager *SessionHistoryManager // Stores session history for context injection (fork_session pattern)
 
 	// Workspace info provider for on-demand instance creation
-	workspaceInfoProvider WorkspaceInfoProvider
+	workspaceInfoProvider          WorkspaceInfoProvider
+	workspaceRecoveryErrorReporter WorkspaceRecoveryErrorReporter
 
 	// taskRuntimeFences serialize runtime creation with task-scoped cleanup.
 	taskRuntimeFences taskRuntimeOwnershipFences
@@ -849,6 +850,12 @@ func (m *Manager) CheckTaskEnvironmentAccess(ctx context.Context, taskID, taskEn
 // Without this, EnsureWorkspaceExecutionForSession will fail.
 func (m *Manager) SetWorkspaceInfoProvider(provider WorkspaceInfoProvider) {
 	m.workspaceInfoProvider = provider
+}
+
+// SetWorkspaceRecoveryErrorReporter installs the task-service callback for
+// verified managed-clone relocation refusals.
+func (m *Manager) SetWorkspaceRecoveryErrorReporter(reporter WorkspaceRecoveryErrorReporter) {
+	m.workspaceRecoveryErrorReporter = reporter
 }
 
 // SetBootMessageService sets the service used to create boot messages in chat

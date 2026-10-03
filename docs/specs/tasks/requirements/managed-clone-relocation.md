@@ -2,6 +2,7 @@
 status: active
 system: tasks
 created: 2026-09-27
+updated: 2026-10-02
 owners:
   - kandev
 ---
@@ -121,3 +122,12 @@ desktop and phone.
 - [Worktree metadata recovery](worktree-metadata-recovery.md)
 - [Task launch failure recovery](task-launch-failure-recovery.md)
 - [System design](../system-design/managed-clone-relocation.md)
+
+## Implementation plans
+
+- [Original relocation package](../../../plans/managed-clone-relocation/plan.md)
+- [Unchanged legacy clone admission](../../../plans/legacy-clone-resume/plan.md)
+- [Resume and workspace recovery convergence](../../../plans/managed-clone-recovery-convergence/plan.md)
+
+The convergence package repairs violations of the existing acceptance criteria.
+It does not authorize automatic relocation of dirty worktrees.
