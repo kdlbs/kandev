@@ -51,10 +51,10 @@ class BackendTestsWorkflowContractTest(unittest.TestCase):
         self.assertIn('"postgres-18:${POSTGRES_18_RESULT}"', self.workflow)
         self.assertIn("TestPreviousStableUpgrade", self.workflow)
 
-    def test_windows_job_has_headroom_for_hosted_runner_variance(self) -> None:
+    def test_windows_job_leaves_time_for_post_job_cleanup(self) -> None:
         _, marker, windows_job = self.workflow.partition("  test-windows:\n")
         self.assertTrue(marker)
-        self.assertIn("timeout-minutes: 40", windows_job)
+        self.assertIn("timeout-minutes: 45", windows_job)
 
     def test_linux_sharded_tests_use_go_default_package_timeout(self) -> None:
         test_step = step_block(self.workflow, "Run tests")
