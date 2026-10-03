@@ -132,6 +132,7 @@
     {"file": "internal/utility/store/sqlite.go", "symbol": "migrateTemplatePlaceholders", "rule": "boolean-integer", "reason": "The utility SQLite schema stores builtin as an INTEGER flag"},
     {"file": "internal/utility/store/sqlite.go", "symbol": "NormalizeEmptyBuiltinBinding", "rule": "boolean-integer", "reason": "The utility SQLite schema stores builtin as an INTEGER flag"},
     {"file": "internal/utility/store/sqlite.go", "symbol": "DeleteAgent", "rule": "boolean-integer", "reason": "The utility SQLite schema stores builtin as an INTEGER flag"},
+    {"file": "internal/workflowsync/store.go", "symbol": "RecordSyncFailure", "rule": "boolean-integer", "reason": "The workflow-sync schema stores last_ok as an INTEGER flag"},
     {"file": "internal/workflowsync/store.go", "symbol": "UpsertConfigForWorkspace", "rule": "boolean-integer", "reason": "The workflow-sync schema stores last_ok as an INTEGER flag"}
   ]
 }
