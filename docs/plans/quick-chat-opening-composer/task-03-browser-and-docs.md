@@ -164,3 +164,16 @@ Final focused browser checks were run sequentially from `apps/web`:
 - `pnpm e2e:run --host --no-build --project chromium e2e/tests/session/session-resume-prompt-queue.spec.ts`: 3 passed.
 - `pnpm e2e:run --host --no-build --project chromium e2e/tests/settings/config-chat-popover.spec.ts`: 6 passed. `pnpm e2e:run --host --no-build --project mobile-chrome e2e/tests/settings/mobile-config-chat-popover.spec.ts`: 1 passed.
 - The first mobile workflow-preview run reproduced a touch-dismissal defect: a long popover covered the task-description editor, so its tap was intercepted by workflow-option content. The touch popover now exposes a localized 44px close control. `(cd apps/web && pnpm e2e:run --host --project mobile-chrome e2e/tests/task/mobile-task-create-workflow-step-previews.spec.ts --grep 'keeps long workflow previews contained and touch-usable on a phone' --retries=0)` rebuilt the app and passed 1 test. The other long-option scrolling case passed in the initial two-test run.
+
+Merged-base PR fixup verification also passed:
+
+- `pnpm e2e:run tests/chat/setup-recovery.spec.ts` passed 4 desktop tests with a
+  fresh managed backend and Vite build. This covers setup retry, late-session
+  tab retention, persisted post-allocation recovery, and preparation warnings.
+- `pnpm e2e:run --no-build --project mobile-chrome tests/chat/mobile-setup-recovery.spec.ts`
+  passed 2 phone tests using that fresh production bundle, including inline
+  error recovery and the 44px Send target.
+- Public-document validation passed all 62 tests and 47 published pages.
+  Specification catalog validation and full specification lint passed.
+- All 15 changed frontend test files passed (225 tests); focused Quick Chat tests
+  passed all 151 tests. `git diff --check` passed.

@@ -379,7 +379,7 @@ describe("QuickChatSetup launch errors", () => {
         }}
       />,
     );
-    expect(screen.getByRole("alert").textContent).toBe("Launch failed");
+    expect(screen.getByRole("alert").textContent).toContain("Launch failed");
   });
 
   it("shows ordinary chat creation failures beside the retained prompt", () => {
@@ -392,10 +392,27 @@ describe("QuickChatSetup launch errors", () => {
       />,
     );
 
-    expect(screen.getByRole("alert").textContent).toBe("Quick Chat could not start");
+    expect(screen.getByRole("alert").textContent).toContain("Quick Chat could not start");
     expect(screen.getByTestId(DESCRIPTION_TEST_ID)).toHaveProperty(
       "value",
       "Keep this request for retry",
     );
+  });
+
+  it("keeps the opening prompt and Send available after a creation failure", () => {
+    const error = "Could not connect to workspace repository.";
+    render(
+      <QuickChatSetupHarness
+        overrides={{
+          quickChatError: error,
+          draft: { ...initialDraft, message: "Retained request" },
+        }}
+      />,
+    );
+
+    expect(screen.getByTestId("quick-chat-setup-error")).toBeTruthy();
+    expect(screen.getByText(error)).toBeTruthy();
+    expect(screen.getByTestId(DESCRIPTION_TEST_ID)).toHaveProperty("value", "Retained request");
+    expect((screen.getByTestId(SEND_TEST_ID) as HTMLButtonElement).disabled).toBe(false);
   });
 });

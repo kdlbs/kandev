@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef } from "react";
 import { useTranslation } from "react-i18next";
-import { IconLoader2, IconSend2 } from "@tabler/icons-react";
+import { IconAlertTriangle, IconLoader2, IconSend2 } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { useAppStore } from "@/components/state-provider";
 import { useRepositories } from "@/hooks/domains/workspace/use-repositories";
@@ -94,6 +94,24 @@ function QuickChatSendButton({
         <IconSend2 className="h-4 w-4" aria-hidden />
       )}
     </Button>
+  );
+}
+
+function QuickChatSetupError({ error }: { error: string | null }) {
+  const { t } = useTranslation();
+  if (!error) return null;
+  return (
+    <div
+      className="flex items-start gap-2 rounded-md border border-destructive/30 bg-destructive/10 p-3 text-xs text-destructive"
+      data-testid="quick-chat-setup-error"
+      role="alert"
+    >
+      <IconAlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-destructive" />
+      <div className="min-w-0 space-y-1 break-words">
+        <p className="font-medium">{t("chat:failedToStartQuickChat")}</p>
+        <p className="text-muted-foreground">{error}</p>
+      </div>
+    </div>
   );
 }
 
@@ -359,11 +377,7 @@ function QuickChatSetupLayout({
             }
           />
 
-          {(kind === "config" ? configurationError : quickChatError) && (
-            <p role="alert" className="text-sm text-destructive">
-              {kind === "config" ? configurationError : quickChatError}
-            </p>
-          )}
+          <QuickChatSetupError error={kind === "config" ? configurationError : quickChatError} />
 
           <QuickChatSetupSelectionFields
             workspaceId={workspaceId}

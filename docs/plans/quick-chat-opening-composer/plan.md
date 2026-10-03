@@ -161,10 +161,12 @@ opens; the editor and Send remain reachable. Desktop spacing must not leak here.
 | [Attach]                                      [Send ^]       |
 ```
 
-Creation failure remains in setup. Post-creation delivery failure remains in the
-created session with its recoverable prompt and files. An explicit retry does not
-create another conversation. Busy state disables duplicate submission and mode
-changes. Use live status/error announcements without moving keyboard focus.
+A failure before session allocation remains in setup with its recoverable prompt
+and files. A launch failure after allocation opens the retained session for
+explicit recovery. Post-creation delivery failure remains in the created session
+with its recoverable prompt and files. An explicit retry does not create another
+conversation. Busy state disables duplicate submission and mode changes. Use live
+status/error announcements without moving keyboard focus.
 
 ## Tests
 
@@ -232,6 +234,12 @@ before implementation; update affected tests rather than weakening their asserti
 - Public-document validation, documentation-coverage validation, specification
   catalog validation, all specification-linter tests, full spec lint, and
   `git diff --check` passed after the results/status updates.
+- Merged-base PR fixup verification passed: backend task-handler tests including
+  race detection, orchestrator tests, 23 Quick Chat frontend test files (151
+  tests), 15 changed frontend test files (225 tests), the deferred-upload
+  lifecycle test, typecheck, changed-file ESLint/Prettier, i18n check/ratchet,
+  desktop setup-recovery E2E (4 tests), mobile setup-recovery E2E (2 tests), and
+  the public-document and specification validators.
 
 Implementation resolves the identified risks: mode changes preserve the setup
 draft, both launch paths carry the opening payload once, attachment rollback

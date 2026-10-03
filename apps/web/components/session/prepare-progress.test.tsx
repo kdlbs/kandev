@@ -161,6 +161,70 @@ describe("PrepareProgress", () => {
   });
 });
 
+describe("PrepareProgress imported MCP warnings", () => {
+  afterEach(resetPrepareProgressMocks);
+
+  it("presents auth-required imported MCP verification as a warning when overall prepare completes", () => {
+    mockPrepareStatus = "completed";
+    mockSessionState = "RUNNING";
+    mockSteps = [
+      {
+        name: "",
+        kind: "agent_mcp_verification",
+        mcpServerId: "plugin-atlassian-atlassian",
+        failureCode: "authentication_required",
+        status: "failed",
+      },
+    ];
+
+    render(<PrepareProgress sessionId="session-1" />);
+
+    expect(screen.getByText("Environment prepared with warnings")).toBeTruthy();
+    expect(screen.getByText("Verify connection: plugin-atlassian-atlassian")).toBeTruthy();
+    expect(screen.getByTestId("prepare-step-warning-icon")).toBeTruthy();
+  });
+
+  it("preserves error header when an auth warning coexists with a genuine step failure", () => {
+    mockPrepareStatus = "completed";
+    mockSessionState = "RUNNING";
+    mockSteps = [
+      {
+        name: CREATE_WORKTREE,
+        status: "failed",
+      },
+      {
+        name: "",
+        kind: "agent_mcp_verification",
+        mcpServerId: "plugin-atlassian-atlassian",
+        failureCode: "authentication_required",
+        status: "failed",
+      },
+    ];
+
+    render(<PrepareProgress sessionId="session-1" />);
+
+    expect(screen.getByText("Environment setup finished with errors")).toBeTruthy();
+  });
+
+  it("preserves error header for non-authentication MCP verification failure", () => {
+    mockPrepareStatus = "completed";
+    mockSessionState = "RUNNING";
+    mockSteps = [
+      {
+        name: "",
+        kind: "agent_mcp_verification",
+        mcpServerId: "plugin-atlassian-atlassian",
+        failureCode: "connection_failed",
+        status: "failed",
+      },
+    ];
+
+    render(<PrepareProgress sessionId="session-1" />);
+
+    expect(screen.getByText("Environment setup finished with errors")).toBeTruthy();
+  });
+});
+
 describe("PrepareProgress remote helper feedback", () => {
   afterEach(resetPrepareProgressMocks);
 

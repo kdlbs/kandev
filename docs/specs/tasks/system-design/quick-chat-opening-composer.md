@@ -118,8 +118,10 @@ A newer manual draft must survive settlement of an older submission.
 
 Do not retry automatically after an uncertain acknowledgement. Retain the stable
 message identity for the existing admission path and expose explicit recovery.
-Preserve request-generation guards and cleanup for superseded starts, including
-workspace changes and setup closure. A late response must not steal active focus.
+Preserve request-generation guards for superseded starts, including workspace
+changes and setup closure. Reconcile a late completed session into the workspace
+tabs without activating or deleting it. A late response must not steal active
+focus.
 
 ## Responsive composition
 

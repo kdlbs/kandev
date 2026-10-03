@@ -206,7 +206,7 @@ function QuickChatConversationContent({
         pendingAgentId={quickChat.pendingAgentId}
         configurationStarting={configChat.isStarting}
         configurationError={configChat.error}
-        quickChatError={quickChat.startError}
+        quickChatError={quickChat.setupError}
         draft={setupDraft.draft}
         onDraftChange={setupDraft.update}
         onStartQuickChat={async (agentId, repositories, payload) => {

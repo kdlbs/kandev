@@ -167,6 +167,16 @@ late staged upload instead of restoring it.
   repopulate a cleared draft.
 - `git diff --check` passed.
 
+Merged-base PR fixup verification also passed:
+
+- The deferred-upload lifecycle test passed: one file becomes ready after the
+  setup unmounts and returns; rejection remains retryable; a late staged upload
+  is deleted after explicit discard.
+- All 23 Quick Chat component test files passed (151 tests), including setup
+  draft persistence and deferred opening delivery.
+- `pnpm run typecheck`, changed-file ESLint, Prettier, i18n check, and the
+  changed-code i18n ratchet passed.
+
 The final reduced-viewport browser checks passed with strict scroll evidence:
 
 - `(cd apps/web && pnpm e2e:run --host --no-build --project chromium e2e/tests/chat/quick-chat-opening-composer.spec.ts)` passed 2 tests. The short desktop case uses a 1440x400 viewport and requires the setup scroll region to overflow.

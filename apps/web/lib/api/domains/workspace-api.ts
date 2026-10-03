@@ -1,4 +1,4 @@
-import { fetchJson, fetchJsonWithRetry, type ApiRequestOptions } from "../client";
+import { ApiError, fetchJson, fetchJsonWithRetry, type ApiRequestOptions } from "../client";
 import type {
   ListWorkspacesResponse,
   ListRepositoriesResponse,
@@ -331,6 +331,29 @@ export type QuickChatRepositoryInput = {
   repository_id: string;
   base_branch: string;
 };
+
+export type QuickChatStartErrorBody = {
+  error?: string;
+  task_id?: string;
+  session_id?: string;
+};
+
+export function getQuickChatRetainedSessionFromError(
+  error: unknown,
+): { taskId: string; sessionId: string } | null {
+  if (error instanceof ApiError && error.body && typeof error.body === "object") {
+    const body = error.body as QuickChatStartErrorBody;
+    if (
+      typeof body.task_id === "string" &&
+      body.task_id &&
+      typeof body.session_id === "string" &&
+      body.session_id
+    ) {
+      return { taskId: body.task_id, sessionId: body.session_id };
+    }
+  }
+  return null;
+}
 
 export type StartQuickChatResponse = {
   task_id: string;

@@ -2380,25 +2380,16 @@ func (h *TaskHandlers) httpStartQuickChat(c *gin.Context) {
 		Attachments:    body.Attachments,
 	})
 	if err != nil {
-		// Rollback: delete the ephemeral task to prevent orphans. Use a fresh
-		// request context without cancellation so authentication and tracing
-		// values remain available while cleanup completes. TaskDeleteTimeout
-		// matches the other DeleteTask call sites in this file.
 		rollbackCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), constants.TaskDeleteTimeout)
-		defer cancel()
 		restoreErr := h.service.RestoreLaunchMessageAttachments(
 			rollbackCtx, task.ID, "", body.Attachments,
 		)
+		cancel()
 		if restoreErr != nil {
 			h.logger.Error("failed to restore quick chat attachments after launch failure",
 				zap.String("task_id", task.ID), zap.Error(restoreErr))
-		} else if deleteErr := h.service.DeleteTaskWithLifecycle(rollbackCtx, task.ID); deleteErr != nil {
-			h.logger.Error("failed to rollback quick chat task",
-				zap.String("task_id", task.ID),
-				zap.Error(deleteErr))
 		}
-		h.logger.Error("failed to start quick chat session", zap.Error(err), zap.String("task_id", task.ID))
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to start session"})
+		h.respondQuickChatLaunchFailure(c, task.ID, err, restoreErr == nil)
 		return
 	}
 
@@ -2412,6 +2403,71 @@ func (h *TaskHandlers) httpStartQuickChat(c *gin.Context) {
 		SessionID:      resp.SessionID,
 		AgentProfileID: firstNonEmpty(resp.AgentProfileID, params.agentProfileID),
 	})
+}
+
+func (h *TaskHandlers) respondQuickChatLaunchFailure(
+	c *gin.Context,
+	taskID string,
+	launchErr error,
+	attachmentsRestored bool,
+) {
+	retentionCtx, cancelRetention := context.WithTimeout(
+		context.WithoutCancel(c.Request.Context()), constants.TaskDeleteTimeout,
+	)
+	defer cancelRetention()
+	retainedSessionID, lookupErr := h.quickChatRetainedSessionID(retentionCtx, taskID)
+	if lookupErr != nil {
+		h.logger.Error("failed to determine quick chat session retention",
+			zap.Error(lookupErr), zap.String("task_id", taskID))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to start session"})
+		return
+	}
+
+	if retainedSessionID != "" {
+		h.logger.Error("failed to start quick chat session (retained created session)",
+			zap.Error(launchErr),
+			zap.String("task_id", taskID),
+			zap.String("session_id", retainedSessionID))
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error":      "failed to start session",
+			"task_id":    taskID,
+			"session_id": retainedSessionID,
+		})
+		return
+	}
+	if !attachmentsRestored {
+		h.logger.Error("retaining quick chat task after attachment restore failure",
+			zap.Error(launchErr), zap.String("task_id", taskID))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to start session"})
+		return
+	}
+
+	rollbackCtx, cancelRollback := context.WithTimeout(context.Background(), constants.TaskDeleteTimeout)
+	defer cancelRollback()
+	if deleteErr := h.service.DeleteTaskWithLifecycle(rollbackCtx, taskID); deleteErr != nil {
+		h.logger.Error("failed to rollback quick chat task",
+			zap.String("task_id", taskID), zap.Error(deleteErr))
+	}
+	h.logger.Error("failed to start quick chat session", zap.Error(launchErr), zap.String("task_id", taskID))
+	c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to start session"})
+}
+
+// Failed lookups cannot establish that a task is safe to remove.
+func (h *TaskHandlers) quickChatRetainedSessionID(ctx context.Context, taskID string) (string, error) {
+	primary, primaryErr := h.service.GetPrimarySession(ctx, taskID)
+	if primaryErr == nil && primary != nil {
+		return primary.ID, nil
+	}
+	sessions, err := h.service.ListTaskSessions(ctx, taskID)
+	if err != nil {
+		return "", err
+	}
+	for _, session := range sessions {
+		if session != nil {
+			return session.ID, nil
+		}
+	}
+	return "", nil
 }
 
 // httpQuickChatSession is one restorable quick-chat tab.

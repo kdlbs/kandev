@@ -2,7 +2,7 @@
 status: active
 system: workspaces
 created: 2026-07-20
-updated: 2026-09-25
+updated: 2026-10-02
 owners:
   - kandev
 ---
@@ -140,6 +140,15 @@ can display a permission dialog after the user leaves the application.
 - **AC-WORKSPACES-LOCAL-REPOSITORIES-003.12:** A missing clone directory shall
   not prevent results from other roots from appearing on initial or later scans.
   Discovery shall not create the directory to recover from this condition.
+- **AC-WORKSPACES-LOCAL-REPOSITORIES-003.13:** When cached discovery reads and
+  refreshes overlap for one workspace, only the most recently started distinct
+  request shall replace shared repository choices, root and freshness metadata,
+  or the discovery error, including when its result is empty. Its failure shall
+  preserve the previously accepted choices. Older successes or failures shall
+  not reverse that outcome or trigger another automatic refresh. Joining an
+  already pending request shall retain that request's order. Browser and phone
+  consumers shall observe the same accepted state, and busy indicators shall
+  clear when pending work finishes unless accepted metadata reports a scan.
 
 ### REQ-WORKSPACES-LOCAL-REPOSITORIES-004: Filesystem access diagnostics
 
@@ -164,22 +173,8 @@ behind a macOS access failure.
 
 ## Migrated source detail
 
-## Why
-
-Users need to connect repositories already present on the machine running Kandev, including native
-Windows repositories outside the user's home directory. Explicitly adding one repository should
-work without widening automatic filesystem scans or editing packaged runtime configuration.
-
 ## What
 
-- A user can add a local Git repository by entering or selecting an absolute path that the Kandev
-  process can access.
-- Manual selection is valid independently of `repositoryDiscovery.roots`; those roots govern only
-  automatic discovery scans.
-- Kandev validates and canonicalizes a non-empty local repository path before saving it. A saved
-  repository records the exact canonical path the user selected.
-- Trusting one repository does not trust its parent directory, filesystem volume, or sibling
-  repositories.
 - Saved repositories remain usable for branch listing, current status, refresh, task creation, and
   fresh-branch workflows after restart.
 - A saved repository without an `origin` remote supports Merge and Rebase when the selected base
@@ -310,6 +305,7 @@ the repository record removes that exact durable grant from the workspace.
 
 ## Implementation Plans
 
+- [Repository Discovery Ordering](../../../plans/repository-discovery-ordering/plan.md)
 - [Repository Discovery Failure Recovery](../../../plans/repository-discovery-failure-recovery/plan.md)
 
 - [Explicit Local Repository Trust](../../../plans/explicit-local-repository-trust/plan.md)

@@ -34,7 +34,8 @@ Keep current setup callers functional while adding attachment-aware delivery.
   claim, and deliver through existing services and launch intents. Cover rollback
   and explicit same-session recovery after an accepted launch fails.
 - Preserve no-prompt API callers, saved-prompt behavior, config tool mode, title
-  generation, request-generation guards, and superseded-start cleanup.
+  generation, and request-generation guards. Reconcile a superseded start's
+  completed session into the workspace tabs without activating or deleting it.
 - Review follow-up: retain authenticated attachment ownership in detached
   configuration launches and bind deferred delivery to its original session
   and task generation.
@@ -102,8 +103,10 @@ sessions, including attachment descriptors and stable message identity. Persiste
 opening drafts before structured dispatch, retained text and attachment recovery
 after rejection, and preserved a newer manual draft. Both HTTP launch paths now
 validate and deliver the prompt and attachments through their existing launch
-intents. Quick Chat launch rollback restores claimed attachments before deleting
-the ephemeral task.
+intents. Failed launch attachments return to staging before cleanup. Quick Chat
+rolls back only when no session was allocated; otherwise it retains the task and
+returns the session identity for explicit recovery. Late completed sessions are
+reconciled into tabs without taking active focus or deleting the task.
 
 TDD regressions first failed because the HTTP routes dropped the opening payload
 and accepted attachments without a prompt. The frontend recovery tests first
@@ -126,3 +129,14 @@ session B before the microtask flush, and proves B only consumes its own payload
   passed: 31 files, 320 tests.
 - `pnpm run typecheck`, focused ESLint, and `pnpm run build:vite` passed.
 - `git diff --check` passed.
+
+Merged-base PR fixup verification also passed:
+
+- `go test -trimpath ./internal/task/handlers -count=1` and
+  `go test -trimpath -race ./internal/task/handlers -count=1` passed. The suite
+  includes a real file-backed staged upload claimed by its owner after request
+  cancellation and rejected for a foreign user.
+- `go test -trimpath ./internal/orchestrator -count=1` passed.
+- The focused deferred-delivery regression passed with the Quick Chat suite; an
+  unblocked session B received only its own payload and handoff callback.
+- `git diff --check` passed after the merge integration.
