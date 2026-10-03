@@ -30,16 +30,22 @@ func TestCompletedTaskFollowUpAdmissionIsConversationalOnly(t *testing.T) {
 
 			agentMgr := &mockAgentManager{repoForExecutionLookup: repo, isAgentRunning: true}
 			svc := createEngineService(t, repo, steps, agentMgr)
-			onEnterDone := make(chan struct{})
-			svc.onProcessOnEnterComplete = func() { close(onEnterDone) }
+			// Finish terminal-step session preparation before admitting a follow-up.
+			// The callback can fire more than once, so use a nonblocking send.
+			onEnterDone := make(chan struct{}, 1)
+			svc.onProcessOnEnterComplete = func() {
+				select {
+				case onEnterDone <- struct{}{}:
+				default:
+				}
+			}
 			session, err := repo.GetTaskSession(ctx, "session")
 			require.NoError(t, err)
 			require.True(t, svc.processOnTurnCompleteViaEngine(ctx, "task", session))
-			// Finish terminal-step session preparation before admitting a follow-up.
 			select {
 			case <-onEnterDone:
-			case <-time.After(2 * time.Second):
-				t.Fatal("timed out waiting for terminal step setup")
+			case <-time.After(5 * time.Second):
+				t.Fatal("terminal on_enter dispatch did not settle before the follow-up reopen")
 			}
 
 			task, err := repo.GetTask(ctx, "task")

@@ -533,31 +533,19 @@ wording fails against any data with mixed positions or priorities, and the
 `(pin)` convention would then have pointed the implementer at a shared-path
 regression that does not exist.
 
-### The plugin path does not rebase onto a concurrent writer's state
+### The plugin path uses source-generation CAS
 
-AC-005.10 pins concurrent-move behavior, and what it can pin is bounded by which
-admission writer this path uses. `updateTaskWithWorkflowStepAdmission` runs
-`rebaseTaskForStepAdmissionCAS` only when `expectedStepID != ""`, and the sole
-caller passing a non-empty expected step is the workflow engine's guarded
-re-evaluation (`orchestrator/workflow_store.go:429`). `MoveTaskWithOptions`
-reaches the writer with no expected step and captures `oldStepID` from a read
-taken before the transaction.
+AC-005.10 pins concurrent-move behavior at the shared arbiter. The first task
+read in `MoveTaskWithOptions` stamps `ExpectedWorkflowStepID`; the admission
+writer rechecks it under the task-row lock. If another route has already left
+that source, the stale request fails without a write or ledger row.
 
-That is deliberate. The writer's own comment: "The unconditional
-(`expectedStepID == ""`) callers — manual/bulk/feeder moves — must NOT call
-this: their caller-built `task` already carries this operation's own field
-changes (Position, move-lifecycle metadata, …) that have no other source of
-truth, so rebasing from a fresh row would drop them instead of protecting them."
-
-So the plugin path serializes on the workspace row lock, commits in arrival
-order, and writes the caller's snapshot: the *destination* and caller-built
-fields are the ones this caller asked for, not a rebase onto what the earlier
-writer committed. The recorded *from*-step is a separate read — `readTaskStepInTx`,
-inside the write transaction under its row lock — so the ledger chain stays
-contiguous even where the caller's snapshot had gone stale. AC-005.10 states that
-split rather than promising a rebase, because promising one would mean changing
-shared move semantics for every existing caller — out of scope, and the reason the
-CAS variant exists as a separate entry point in the first place.
+`rebaseTaskForStepAdmissionCAS` preserves the caller-owned destination,
+position, deferred-launch state, and move-lifecycle metadata while rebasing
+unrelated fields from the locked row. This prevents a stale snapshot from
+overwriting a completed route without dropping fields that exist only in the
+current move request. The one winning transition still reads and writes its
+ledger link in the same transaction, preserving the chain invariant.
 
 ## Reach
 

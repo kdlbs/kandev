@@ -25,6 +25,7 @@ func (r *Repository) initSchemaContext(ctx context.Context) error {
 	steps := []func() error{
 		r.initDesktopDiscoverySchema,
 		r.initCoreSchema,
+		r.initCoordinatorGrantSchema,
 		r.initRepositorySetsSchema,
 		r.initRepositoryBranchPoliciesSchema,
 		r.initPlansSchema,
@@ -33,6 +34,7 @@ func (r *Repository) initSchemaContext(ctx context.Context) error {
 		r.initSessionSchema,
 		r.initDynamicRoutingSchema,
 		r.initStepTransitionsSchema,
+		r.initWorkflowRoutingSchema,
 		r.initStepEntriesSchema,
 		r.initTaskUsageEventsSchema,
 		r.initAttachmentsSchema,

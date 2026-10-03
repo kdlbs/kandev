@@ -323,9 +323,10 @@ func TestApplyPendingMove_RecordsManualStepHistory(t *testing.T) {
 		t.Fatalf("load review session: %v", err)
 	}
 	sc.svc.applyPendingMove(sc.ctx, "task-1", sc.reviewSessionID, session, &messagequeue.PendingMove{
-		TaskID:         "task-1",
-		WorkflowID:     "wf1",
-		WorkflowStepID: stepInProgressID,
+		TaskID:                 "task-1",
+		WorkflowID:             "wf1",
+		WorkflowStepID:         stepInProgressID,
+		ExpectedWorkflowStepID: stepInReviewID,
 	})
 
 	calls := recorder.Calls()
@@ -356,9 +357,10 @@ func TestApplyPendingMove_HistoryWriteFailureDoesNotBlockTransition(t *testing.T
 		t.Fatalf("load review session: %v", err)
 	}
 	sc.svc.applyPendingMove(sc.ctx, "task-1", sc.reviewSessionID, session, &messagequeue.PendingMove{
-		TaskID:         "task-1",
-		WorkflowID:     "wf1",
-		WorkflowStepID: stepInProgressID,
+		TaskID:                 "task-1",
+		WorkflowID:             "wf1",
+		WorkflowStepID:         stepInProgressID,
+		ExpectedWorkflowStepID: stepInReviewID,
 	})
 
 	task, err := sc.repo.GetTask(sc.ctx, "task-1")
@@ -390,9 +392,10 @@ func TestApplyPendingMove_ForeignWorkflowMismatchRecordsNoHistory(t *testing.T) 
 		t.Fatalf("load review session: %v", err)
 	}
 	sc.svc.applyPendingMove(sc.ctx, "task-1", sc.reviewSessionID, session, &messagequeue.PendingMove{
-		TaskID:         "task-1",
-		WorkflowID:     "wf1",
-		WorkflowStepID: "foreign-step",
+		TaskID:                 "task-1",
+		WorkflowID:             "wf1",
+		WorkflowStepID:         "foreign-step",
+		ExpectedWorkflowStepID: stepInReviewID,
 	})
 
 	if calls := recorder.Calls(); len(calls) != 0 {
