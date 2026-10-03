@@ -418,6 +418,98 @@ function handleTaskUpsert(
   logTaskMerge(action, beforeState, store.getState(), message.payload);
 }
 
+function handleTaskDeleted(
+  store: StoreApi<AppState>,
+  message: Parameters<NonNullable<WsHandlers["task.deleted"]>>[0],
+): void {
+  publishAgentProjectTaskEvent(message.payload);
+  const deletedId = message.payload.task_id;
+  const currentState = store.getState();
+  currentState.cancelWorkflowSessionFocus?.({ taskId: deletedId });
+  removeRecentTask(deletedId);
+  // A quick chat closed on another device must not linger here as a tab
+  // pointing at a task the backend already deleted.
+  store.getState().removeQuickChatSessionsForTask(deletedId);
+
+  const sessionIds = Array.from(
+    new Set([
+      ...(currentState.taskSessionsByTask.itemsByTaskId[deletedId] ?? []).map(
+        (session) => session.id,
+      ),
+      ...Object.values(currentState.taskSessions?.items ?? {})
+        .filter((session) => session.task_id === deletedId)
+        .map((session) => session.id),
+    ]),
+  );
+  const task = currentState.kanban.tasks.find((t) => t.id === deletedId);
+  if (task?.primarySessionId) {
+    const primaryId = toSessionId(task.primarySessionId);
+    if (!sessionIds.includes(primaryId)) {
+      sessionIds.push(primaryId);
+    }
+  }
+  const envIds = Array.from(
+    new Set(
+      sessionIds
+        .map((sid) => currentState.environmentIdBySessionId[sid])
+        .filter((eid): eid is string => Boolean(eid)),
+    ),
+  );
+  cleanupTaskStorage(deletedId, sessionIds, envIds);
+  // Remove the deleted task before the next sidebar preference PATCH.
+  currentState.removeTaskFromSidebarPrefs(deletedId);
+  for (const sid of sessionIds) {
+    useContextFilesStore.getState().clearSession(sid);
+    currentState.clearQueueStatus?.(sid);
+  }
+
+  const wasActive = currentState.tasks.activeTaskId === deletedId;
+
+  store.setState((state) =>
+    bumpSidebarTaskQueryRevision(
+      clearDeletedTaskWalkthrough(
+        clearRemovedTaskSelection(
+          removeTaskFromBothKanbans(
+            applyTaskOverviewPatch(state, deletedId, null, message.payload.workspace_id),
+            deletedId,
+          ),
+          deletedId,
+        ),
+        deletedId,
+      ),
+      message.payload.workspace_id ??
+        archivedTaskWorkspaceId(state, message.payload) ??
+        state.workspaces?.activeId ??
+        undefined,
+    ),
+  );
+
+  sidebarTaskPageCache(store).removeTasks(new Set([deletedId]));
+
+  // Capture the route match before any redirect mutates the pathname. This
+  // covers a fresh load where the browser is parked on the task's route
+  // but TaskPageContent hasn't hydrated `activeTaskId` yet, so `wasActive`
+  // is still false.
+  const onDeletedRoute =
+    typeof window !== "undefined" &&
+    removedTaskRedirectHref(window.location.pathname, deletedId) !== null;
+
+  // Only react to genuine auto-deletions, which the backend tags with a
+  // reason (e.g. a review task whose PR was approved). User-initiated deletes
+  // carry no reason: their local delete flow (useTaskRemoval) owns
+  // navigation by switching to the next task, so redirecting here would
+  // preempt it and strand the user on the home route. For auto-deletions we
+  // move off the now-dead route (helper is route-guarded) and explain why.
+  if (message.payload.reason && (wasActive || onDeletedRoute)) {
+    redirectAwayFromRemovedTask(deletedId);
+    store.getState().setTaskDeletedNotification({
+      taskId: deletedId,
+      title: message.payload.title,
+      reason: message.payload.reason,
+    });
+  }
+}
+
 export function registerTasksHandlers(store: StoreApi<AppState>): WsHandlers {
   return {
     "task.created": (message) => {
@@ -428,94 +520,7 @@ export function registerTasksHandlers(store: StoreApi<AppState>): WsHandlers {
       publishAgentProjectTaskEvent(message.payload);
       handleTaskUpdated(store, message);
     },
-    "task.deleted": (message) => {
-      publishAgentProjectTaskEvent(message.payload);
-      const deletedId = message.payload.task_id;
-      const currentState = store.getState();
-      currentState.cancelWorkflowSessionFocus?.({ taskId: deletedId });
-      removeRecentTask(deletedId);
-      // A quick chat closed on another device must not linger here as a tab
-      // pointing at a task the backend already deleted.
-      store.getState().removeQuickChatSessionsForTask(deletedId);
-
-      const sessionIds = Array.from(
-        new Set([
-          ...(currentState.taskSessionsByTask.itemsByTaskId[deletedId] ?? []).map(
-            (session) => session.id,
-          ),
-          ...Object.values(currentState.taskSessions?.items ?? {})
-            .filter((session) => session.task_id === deletedId)
-            .map((session) => session.id),
-        ]),
-      );
-      const task = currentState.kanban.tasks.find((t) => t.id === deletedId);
-      if (task?.primarySessionId) {
-        const primaryId = toSessionId(task.primarySessionId);
-        if (!sessionIds.includes(primaryId)) {
-          sessionIds.push(primaryId);
-        }
-      }
-      const envIds = Array.from(
-        new Set(
-          sessionIds
-            .map((sid) => currentState.environmentIdBySessionId[sid])
-            .filter((eid): eid is string => Boolean(eid)),
-        ),
-      );
-      cleanupTaskStorage(deletedId, sessionIds, envIds);
-      // Remove the deleted task before the next sidebar preference PATCH.
-      currentState.removeTaskFromSidebarPrefs(deletedId);
-      for (const sid of sessionIds) {
-        useContextFilesStore.getState().clearSession(sid);
-        currentState.clearQueueStatus?.(sid);
-      }
-
-      const wasActive = currentState.tasks.activeTaskId === deletedId;
-
-      store.setState((state) =>
-        bumpSidebarTaskQueryRevision(
-          clearDeletedTaskWalkthrough(
-            clearRemovedTaskSelection(
-              removeTaskFromBothKanbans(
-                applyTaskOverviewPatch(state, deletedId, null, message.payload.workspace_id),
-                deletedId,
-              ),
-              deletedId,
-            ),
-            deletedId,
-          ),
-          message.payload.workspace_id ??
-            archivedTaskWorkspaceId(state, message.payload) ??
-            state.workspaces?.activeId ??
-            undefined,
-        ),
-      );
-
-      sidebarTaskPageCache(store).removeTasks(new Set([deletedId]));
-
-      // Capture the route match before any redirect mutates the pathname. This
-      // covers a fresh load where the browser is parked on the task's route
-      // but TaskPageContent hasn't hydrated `activeTaskId` yet, so `wasActive`
-      // is still false.
-      const onDeletedRoute =
-        typeof window !== "undefined" &&
-        removedTaskRedirectHref(window.location.pathname, deletedId) !== null;
-
-      // Only react to genuine auto-deletions, which the backend tags with a
-      // reason (e.g. a review task whose PR was approved). User-initiated deletes
-      // carry no reason: their local delete flow (useTaskRemoval) owns
-      // navigation by switching to the next task, so redirecting here would
-      // preempt it and strand the user on the home route. For auto-deletions we
-      // move off the now-dead route (helper is route-guarded) and explain why.
-      if (message.payload.reason && (wasActive || onDeletedRoute)) {
-        redirectAwayFromRemovedTask(deletedId);
-        store.getState().setTaskDeletedNotification({
-          taskId: deletedId,
-          title: message.payload.title,
-          reason: message.payload.reason,
-        });
-      }
-    },
+    "task.deleted": (message) => handleTaskDeleted(store, message),
     "task.state_changed": (message) => {
       publishAgentProjectTaskEvent(message.payload);
       handleTaskUpsert("task.state_changed", store, message);
