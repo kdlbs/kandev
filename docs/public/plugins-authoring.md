@@ -18,6 +18,9 @@ The official scaffold is
 Production plugins live in their own repositories. The in-tree fixture is test
 support, not a starter repository.
 
+For an experimental external-memory example using task MCP tools and a human
+save action, see the [MemCode project memory recipe](memcode-project-memory.md).
+
 ## Quick workflow
 
 1. Choose the closest recipe in this page.
