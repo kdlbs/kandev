@@ -640,13 +640,10 @@ test.describe("Quick Chat", () => {
       await expect(dialog.getByTestId("quick-chat-introduction")).toContainText(
         "Chat with an agent about an idea, question, or codebase.",
       );
-      await expect(
-        dialog.getByText("Add repository context to focus on specific code and branches."),
-      ).toBeVisible();
+      await expect(dialog.getByTestId("add-repository")).toBeVisible();
       await selectAgentIfNeeded(dialog, testPage);
 
       await dialog.getByTestId("add-repository").click();
-      await dialog.getByTestId("repo-chip-trigger").click();
       await testPage.locator(`[role="option"][data-value="${seedData.repositoryId}"]`).click();
       await dialog.getByTestId("branch-chip-trigger").click();
       await testPage.locator(`[role="option"][data-value="${contextBranch}"]`).click();

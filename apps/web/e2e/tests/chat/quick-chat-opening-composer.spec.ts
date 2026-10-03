@@ -32,6 +32,7 @@ test.describe("Quick Chat opening composer", () => {
     testPage,
     apiClient,
     backend,
+    prCapture,
   }, testInfo) => {
     await testPage.setViewportSize({ width: 1440, height: 900 });
     await testPage.goto("/");
@@ -44,8 +45,34 @@ test.describe("Quick Chat opening composer", () => {
 
     await expect(editor).toBeFocused();
     await selectAgentIfNeeded(dialog, testPage);
-    await expect(dialog.locator("#quick-chat-agent-label")).toBeVisible();
-    await expect(dialog.locator("#quick-chat-repositories-label")).toBeVisible();
+    await expect(dialog.getByTestId("agent-profile-selector")).toContainText("Mock");
+    await expect(dialog.getByTestId("add-repository")).toBeEnabled();
+
+    const attach = dialog.getByRole("button", { name: "Attach files" });
+    const addRepo = dialog.getByTestId("add-repository");
+    const send = dialog.getByTestId("quick-chat-send");
+    const bounds = await Promise.all([
+      addRepo.boundingBox(),
+      attach.boundingBox(),
+      send.boundingBox(),
+    ]);
+    const [repoBounds, attachBounds, sendBounds] = bounds;
+    if (!repoBounds || !attachBounds || !sendBounds) throw new Error("toolbar bounds missing");
+    expect(repoBounds.x + repoBounds.width).toBeLessThanOrEqual(attachBounds.x);
+    expect(
+      Math.abs(attachBounds.y + attachBounds.height / 2 - sendBounds.y - sendBounds.height / 2),
+    ).toBeLessThanOrEqual(1);
+    await addRepo.click();
+    const repositoryPicker = testPage.getByTestId("quick-chat-repository-picker");
+    await expect(repositoryPicker).toBeVisible();
+    await expect(dialog.getByTestId("repo-chip")).toHaveCount(0);
+    await repositoryPicker.getByRole("option").first().click();
+    await expect(composer.getByTestId("repo-chip")).toHaveCount(1);
+    await expect(dialog.getByTestId("branch-chip-trigger")).toContainText("main");
+    await prCapture.screenshot("toolbar-desktop", {
+      caption: "Quick Chat composer with repository chips and compact toolbar",
+    });
+    await composer.getByTestId("remove-repo-chip").click();
 
     const desktopGeometry = await Promise.all([
       dialog.boundingBox(),
@@ -59,6 +86,14 @@ test.describe("Quick Chat opening composer", () => {
       Math.abs(composerBox.x + composerBox.width / 2 - (dialogBox.x + dialogBox.width / 2)),
     ).toBeLessThanOrEqual(4);
     expect(composerBox.y).toBeGreaterThan(setupBox.y);
+    const introductionBox = await dialog.getByTestId("quick-chat-introduction").boundingBox();
+    const agentBox = await dialog.getByTestId("agent-profile-selector").boundingBox();
+    if (!introductionBox || !agentBox) throw new Error("composer group bounds missing");
+    expect(
+      Math.abs(
+        (introductionBox.y + agentBox.y + agentBox.height) / 2 - (setupBox.y + setupBox.height / 2),
+      ),
+    ).toBeLessThanOrEqual(4);
     await testInfo.attach("quick-chat-opening-desktop", {
       body: await testPage.screenshot(),
       contentType: "image/png",
@@ -66,12 +101,17 @@ test.describe("Quick Chat opening composer", () => {
 
     await editor.fill("Keep this draft while switching setup modes");
     const configurationToggle = dialog.getByRole("switch", { name: "Configuration chat" });
+    await configurationToggle.hover();
+    await expect(testPage.getByRole("tooltip")).toContainText(
+      "settings, workflows, agent profiles",
+    );
     await configurationToggle.click();
     await expect(configurationToggle).toHaveAttribute("aria-checked", "true");
-    await expect(dialog.locator("#quick-chat-repositories-label")).toHaveCount(0);
+    await expect(dialog.getByTestId("add-repository")).toBeDisabled();
+    await expect(composer.getByRole("status")).toHaveText("Configuration chat");
     await expect(editor).toHaveValue("Keep this draft while switching setup modes");
     await configurationToggle.click();
-    await expect(dialog.locator("#quick-chat-repositories-label")).toBeVisible();
+    await expect(dialog.getByTestId("add-repository")).toBeEnabled();
     await expect(editor).toHaveValue("Keep this draft while switching setup modes");
     await editor.fill("");
 
@@ -90,7 +130,7 @@ test.describe("Quick Chat opening composer", () => {
     await testPage.setViewportSize({ width: 768, height: 850 });
     await expect.poll(async () => (await narrowAgent.boundingBox())?.height ?? 0).toBeLessThan(44);
 
-    await testPage.setViewportSize({ width: 1440, height: 400 });
+    await testPage.setViewportSize({ width: 1440, height: 300 });
     await expect
       .poll(() => scrollRegion.evaluate((element) => element.scrollHeight - element.clientHeight), {
         timeout: 5_000,

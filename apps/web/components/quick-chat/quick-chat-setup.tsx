@@ -16,12 +16,13 @@ import type { QuickChatOpeningPayload, QuickChatSessionKind } from "@/lib/state/
 import type { TaskRepoRow, TaskFormInputsHandle } from "@/components/task-create-dialog-types";
 import type { FileAttachment } from "@/components/task/chat/file-attachment";
 import { TaskFormInputs } from "@/components/task-create-dialog-selectors";
+import { WorkspaceRepoChips } from "@/components/task-create-dialog-workspace-repo-chips";
+import { QuickChatRepositoryAction } from "./quick-chat-repository-action";
+import { QuickChatMobileRepositoryChip } from "./quick-chat-mobile-repository-chip";
+import { ConfigurationChatAction } from "./configuration-chat-action";
 import { generateUUID } from "@/lib/utils";
 import type { QuickChatSetupDraft } from "./use-quick-chat-setup-draft";
-import {
-  QuickChatSetupSelectionFields,
-  type QuickChatSetupRepositoryState,
-} from "./quick-chat-setup-fields";
+import { QuickChatAgentField, type QuickChatSetupRepositoryState } from "./quick-chat-setup-fields";
 import {
   buildOpeningPayload,
   hasUnavailableAttachment,
@@ -83,12 +84,13 @@ function QuickChatSendButton({
   return (
     <Button
       type="button"
+      size="icon"
       onClick={onClick}
       disabled={disabled}
       aria-label={busy ? t("chat:startingChat") : t("task:sendInput")}
       data-testid="quick-chat-send"
       data-dialog-default-action
-      className={`cursor-pointer ${usesTouchTarget ? "h-12 w-12" : "h-9 w-9"}`}
+      className={`cursor-pointer ${usesTouchTarget ? "h-11 w-11" : "h-7 w-7"}`}
     >
       {busy ? (
         <IconLoader2 className="h-4 w-4 animate-spin" aria-hidden />
@@ -196,7 +198,12 @@ function useQuickChatSetupRepositories(
     [updateRepositories],
   );
   const addRepository = useCallback(
-    () => updateRepositories((rows) => [...rows, { key: generateUUID(), branch: "" }]),
+    (repositoryId: string) =>
+      updateRepositories((rows) =>
+        rows.some((row) => row.repositoryId === repositoryId)
+          ? rows
+          : [...rows, { key: generateUUID(), repositoryId, branch: "" }],
+      ),
     [updateRepositories],
   );
   const removeRepository = useCallback(
@@ -316,6 +323,74 @@ type QuickChatSetupLayoutProps = {
   handlePromptKeyDown: (event: React.KeyboardEvent) => void;
 };
 
+function QuickChatAddRepositoryButton({
+  kind,
+  draft,
+  repositories,
+  isStarting,
+}: Pick<QuickChatSetupLayoutProps, "kind" | "draft" | "repositories" | "isStarting">) {
+  return (
+    <QuickChatRepositoryAction
+      repositories={repositories.repositories}
+      selectedIds={draft.repositories.flatMap((row) =>
+        row.repositoryId ? [row.repositoryId] : [],
+      )}
+      disabled={isStarting || kind === "config" || !repositories.canAddMore}
+      hint={repositories.addHint}
+      onSelect={repositories.addRepository}
+    />
+  );
+}
+
+function QuickChatComposerContext({
+  workspaceId,
+  kind,
+  draft,
+  repositories,
+}: Pick<QuickChatSetupLayoutProps, "workspaceId" | "kind" | "draft" | "repositories">) {
+  const { t } = useTranslation();
+  const touch = useTouchDrawer();
+  const { isMobile } = useResponsiveBreakpoint();
+  if (kind === "config") {
+    return (
+      <div role="status" className="px-3 pt-3 text-xs font-medium text-muted-foreground">
+        {t("chat:configurationChat")}
+      </div>
+    );
+  }
+  if (draft.repositories.length === 0) return null;
+  return (
+    <div
+      className="flex flex-wrap items-center gap-2 px-3 pt-3"
+      data-testid="quick-chat-repository-chips"
+    >
+      {touch || isMobile ? (
+        draft.repositories.map((row) => (
+          <QuickChatMobileRepositoryChip
+            key={row.key}
+            row={row}
+            workspaceId={workspaceId}
+            repositories={repositories}
+          />
+        ))
+      ) : (
+        <WorkspaceRepoChips
+          rows={draft.repositories}
+          repositories={repositories.repositories}
+          workspaceId={workspaceId}
+          canAddMore={false}
+          showAddButton={false}
+          allowDuplicateRepositories={false}
+          onAdd={() => {}}
+          onRemove={repositories.removeRepository}
+          onRowRepositoryChange={repositories.handleRepositoryChange}
+          onRowBranchChange={repositories.handleBranchChange}
+        />
+      )}
+    </div>
+  );
+}
+
 function QuickChatSetupLayout({
   workspaceId,
   kind,
@@ -370,6 +445,31 @@ function QuickChatSetupLayout({
             composerSubmitDisabled={composerSubmitDisabled}
             placeholder={t("task:writeAPromptForTheAgent")}
             onComposerSubmit={handleSend}
+            toolbarLeadingActions={
+              <QuickChatAddRepositoryButton
+                kind={kind}
+                draft={draft}
+                repositories={repositories}
+                isStarting={isStarting}
+              />
+            }
+            toolbarAttachmentActions={
+              canCreateConfigurationChat && (
+                <ConfigurationChatAction
+                  checked={kind === "config"}
+                  disabled={isStarting}
+                  onCheckedChange={(checked) => onKindChange(checked ? "config" : "chat")}
+                />
+              )
+            }
+            contextLeadingContent={
+              <QuickChatComposerContext
+                workspaceId={workspaceId}
+                kind={kind}
+                draft={draft}
+                repositories={repositories}
+              />
+            }
             toolbarActions={
               <QuickChatSendButton
                 disabled={!canSubmit || isStarting}
@@ -378,26 +478,19 @@ function QuickChatSetupLayout({
               />
             }
           />
-
           <QuickChatSetupError error={kind === "config" ? configurationError : quickChatError} />
-
-          <QuickChatSetupSelectionFields
-            workspaceId={workspaceId}
+          <QuickChatAgentField
             kind={kind}
-            canCreateConfigurationChat={canCreateConfigurationChat}
-            draft={draft}
             profiles={profiles}
-            repositories={repositories}
-            isStarting={isStarting}
+            draft={draft}
+            disabled={isStarting}
             onDraftChange={onDraftChange}
-            onKindChange={onKindChange}
           />
         </div>
       </div>
     </div>
   );
 }
-
 export function QuickChatSetup(props: QuickChatSetupProps) {
   const { workspaceId, kind, defaultConfigProfileId, pendingAgentId, configurationStarting } =
     props;

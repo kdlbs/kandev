@@ -80,21 +80,20 @@ All production copy uses locale keys. UI-01 through UI-04 cover AC 1-12.
 ### UI-01: Desktop, New Chat, empty draft
 
 ```text
-+----------------------------------------------------------------+
-| Chat 1 x    New Chat x    +                                     |
-+----------------------------------------------------------------+
-|                                                                |
-|              What would you like to discuss?                    |
-|                                                                |
-|       +------------------------------------------------+       |
-|       | Write a prompt...                              |       |
-|       |                                                |       |
-|       | [Attach]                       [Mic] [Send ^]   |       |
-|       +------------------------------------------------+       |
-|       [Codex / Astra Medium v]      [+ Add repository]          |
-|       [off] Configuration session                              |
-|                                                                |
-+----------------------------------------------------------------+
++----------------------------------------------------------+
+| Chat 1 x        New Chat x        +                      |
++----------------------------------------------------------+
+|                                                          |
+|              What would you like to discuss?             |
+|                                                          |
+|       +------------------------------------------+       |
+|       | Write a prompt...                        |       |
+|       |                                          |       |
+|       | [+] [Attach] [Config]       [Mic] [Send]  |       |
+|       +------------------------------------------+       |
+|       [Codex               Astra Medium        v]        |
+|                                                          |
++----------------------------------------------------------+
 ```
 
 The tab strip is fixed. The remaining setup region owns scrolling. Center the
@@ -104,29 +103,29 @@ an installed compatible voice action, not an unconditional host control.
 ### UI-02: Desktop, expanded selections and configuration
 
 ```text
-       [kandev / origin/main v  x] [+ Add repository]
-       +------------------------------------------------+
-       | [screenshot.png x]                             |
-       | Explain session routing.                       |
-       | [Attach]                       [Mic] [Send ^]   |
-       +------------------------------------------------+
-       [Codex / Astra Medium v]
-       [off] Configuration session
++--------------------------------------------------+
+| [kandev / main v x] [screenshot.png x]             |
+| Explain session routing.                         |
+| [+] [Attach] [Config]               [Mic] [Send] |
++--------------------------------------------------+
+[Codex                            Astra Medium   v]
 
-       Configuration mode (same draft, repositories hidden):
-       +------------------------------------------------+
-       | [screenshot.png x]                             |
-       | Explain session routing.                       |
-       | [Attach]                       [Mic] [Send ^]   |
-       +------------------------------------------------+
-       [Codex / Astra Medium v]
-       [on] Configuration session
-       Allow the agent to update Kandev settings,
-       workflows, agent profiles, and MCP configuration.
+Configuration mode (same draft, repositories hidden):
++--------------------------------------------------+
+| Configuration chat                               |
+| [screenshot.png x]                               |
+| Explain session routing.                         |
+| [+ disabled] [Attach] [Config on]   [Mic] [Send] |
++--------------------------------------------------+
+[Codex                            Astra Medium   v]
+
+Hover/focus help: update settings, workflows,
+agent profiles, and MCP configuration.
 ```
 
 The selected repositories survive mode changes but never enter a config request.
-The enabled explanation is inline, not a tooltip. No Cancel/Start footer exists.
+Desktop configuration help appears on hover and keyboard focus; a visible mode
+indicator remains inside the composer when enabled. Phones use a settings sheet. No Cancel/Start footer exists.
 
 ### UI-03: Phone, New Chat and picker
 
@@ -138,11 +137,11 @@ The enabled explanation is inline, not a tooltip. No Cancel/Start footer exists.
 | +------------------------------+ |   | +------------------------------+ |
 | | Write a prompt...            | |   | | Choose agent                 | |
 | |                              | |   | | [Search agents...]           | |
-| | [Attach]    [Mic] [Send ^]    | |   | | Codex / Astra Medium       o | |
+| | [+] [Attach] [Config] [Send ^]| |   | | Codex / Astra Medium       o | |
 | +------------------------------+ |   | | Claude / profile           o | |
 | [Codex / Astra Medium v]         |   | |                              | |
-| [+ Add repository]              |   | +------------------------------+ |
-| [off] Configuration session     |   +----------------------------------+
+|                                 |   | +------------------------------+ |
+|                                 |   +----------------------------------+
 +----------------------------------+
 ```
 
@@ -260,3 +259,15 @@ the deferred-upload tab-switch/retry/discard cases, and the unblocked
 session-generation case pass. Verification after these fixes: Go handler tests;
 31 affected frontend test files (320 tests); web typecheck; focused ESLint with
 no warnings; Vite production build; and `git diff --check`.
+
+### Approved toolbar refinement
+
+The composer now uses a direct repository plus picker before Attach, selected
+repository chips inside the prompt box, and a configuration icon after Attach.
+Desktop exposes configuration help on hover/focus; phones use a description and
+switch in a bottom sheet. Send shares the toolbar baseline, and one selector
+shows the agent and profile labels. Removing the old form's expanding agent row
+keeps the complete composer group vertically centered.
+
+Focused validation and screenshot evidence are recorded in Task 02. The existing
+PR is #4173; source changes and refreshed desktop/phone assets are delivered there.

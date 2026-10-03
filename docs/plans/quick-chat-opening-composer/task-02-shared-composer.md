@@ -66,18 +66,22 @@ UI-01 and UI-03 excerpts; [full previews](plan.md#ascii-ui-preview). Covers AC 1
 
 ```text
 Desktop                              Phone
-What would you like to discuss?      +-----------------------------+
-+--------------------------------+   | < Chats       New Chat      |
-| Write a prompt...              |   | What would you discuss?     |
-| [Attach]       [Mic] [Send ^]   |   | +-------------------------+ |
-+--------------------------------+   | | Prompt...               | |
-[Agent/profile v] [+ Repository]     | | [Attach] [Mic] [Send ^] | |
-[off] Configuration session          | +-------------------------+ |
-                                     | [Agent/profile v]           |
-                                     | [+ Repository]              |
-                                     | [off] Configuration session |
-                                     +-----------------------------+
+What would you like to discuss?      +-------------------------------+
++--------------------------------+   | < Chats       New Chat        |
+| [repo / main v x] [image x]     |   | What would you discuss?       |
+| Write a prompt...              |   | +---------------------------+ |
+| [+] [Attach] [Config] [Mic] [^] |   | | [repo / main v x]         | |
++--------------------------------+   | | Prompt...                 | |
+[Agent      Profile label      v]    | | [+] [Attach] [Config] [^] | |
+                                     | +---------------------------+ |
+                                     | [Agent     Profile label   v] |
+                                     +-------------------------------+
 ```
+
+Plus opens a repository picker directly. Configuration uses hover/focus help on
+desktop and a description with a switch in a phone sheet. Its enabled indicator
+appears inside the composer; repository chips return when the mode is disabled.
+
 
 Desktop centers the bounded composer beneath fixed tabs. Phone uses a full-height
 surface with one form scroll owner and inset bottom pickers. Mic is conditional
@@ -189,3 +193,21 @@ Final PR review validation also passed:
 - `(cd apps/web && pnpm exec vitest run components/quick-chat/use-quick-chat-setup-draft.test.ts lib/local-storage.test.ts components/task-create-dialog-selectors-attachment-lifecycle.test.tsx)`: 3 files, 44 tests passed after extracting stored attachment serialization.
 - `pnpm run typecheck`, `pnpm run i18n:check`, `pnpm run i18n:ratchet`, focused ESLint with zero warnings, and `pnpm run build:vite` passed.
 - `(cd apps/web && pnpm e2e:run --host --project mobile-chrome e2e/tests/task/mobile-task-create-workflow-step-previews.spec.ts --grep 'keeps long workflow previews contained and touch-usable on a phone' --retries=0)` passed 1 test with a fresh Vite bundle after extracting the touch close control.
+
+## Toolbar refinement
+
+User-approved refinement: direct repository plus picker before Attach, selected
+repository chips inside the composer, explanatory configuration icon after Attach,
+aligned Send, and one compact selector displaying agent and profile labels.
+Focused picker, composer, and responsive regressions cover the revised controls.
+
+Refinement validation: focused Vitest suites passed (3 files, 40 tests), web
+typecheck and focused ESLint passed without warnings, and i18n checks passed.
+Desktop Playwright passed the opening/retry and existing configuration/repository
+flows (4 tests); the final centering rerun passed both opening-composer cases.
+Phone entry cases (6), repository startup, and the opening flow passed in focused
+runs. The opening flow also proves branch-sheet selection, touch targets,
+configuration round trips with repository restoration, reduced viewport scrolling,
+and focus return when selecting the final available repository disables Add.
+Public docs validation and its 62 tests passed; specification catalog validation,
+full specification lint, and diff whitespace checks passed.

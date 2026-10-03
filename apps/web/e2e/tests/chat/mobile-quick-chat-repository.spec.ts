@@ -24,7 +24,6 @@ test.describe("Quick Chat repository context on mobile", () => {
       await testPage.getByRole("option").first().click();
     }
     await dialog.getByTestId("add-repository").click();
-    await dialog.getByTestId("repo-chip-trigger").click();
     await testPage.getByRole("option").first().click();
     await expect(dialog.getByTestId("branch-chip-trigger")).toContainText("main", {
       timeout: 10_000,

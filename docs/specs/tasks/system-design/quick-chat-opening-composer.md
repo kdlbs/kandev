@@ -126,9 +126,10 @@ focus.
 ## Responsive composition
 
 Desktop retains the resizable Quick Chat dialog and tab strip. Center a bounded
-composer in the remaining slot. Repository chips occupy a row above the input
-once selected; agent and Add repository controls occupy the row below it.
-The configuration toggle and its enabled-only explanation follow that row.
+composer in the remaining slot. Repository chips occupy the context area inside the composer above the input.
+Add repository precedes Attach and opens a picker without allocating a blank row.
+The configuration icon follows Attach, with explanatory hover/focus help and a
+visible mode indicator when enabled. One agent/profile selector follows the composer.
 The Send control lives inside the input action row. There is no setup footer.
 
 Phone uses the existing full-height Quick Chat surface. Reuse the interaction
@@ -137,7 +138,8 @@ inset bottom pickers with internal scrolling and focus return. Keep a single
 setup scroll body below fixed navigation. Collapse decorative vertical space
 when the keyboard reduces the viewport; scroll the focused editor/action into
 view. Use dynamic viewport height and bottom safe-area padding. Do not center
-against a fixed screen height. Agent and repository controls occupy separate rows.
+against a fixed screen height. Repository selection uses an inset bottom picker; configuration help and its
+switch use a bottom sheet. The agent selector occupies the row below the composer.
 
 Use `useResponsiveBreakpoint`, shared UI tokens, 28px ordinary desktop controls,
 and at least 44px phone/coarse-pointer targets. State survives breakpoint changes.

@@ -68,6 +68,9 @@ vi.mock("@/components/task-create-dialog-selectors", () => ({
     onAttachmentsChange,
     onKeyDown,
     toolbarActions,
+    toolbarLeadingActions,
+    toolbarAttachmentActions,
+    contextLeadingContent,
   }: {
     initialDescription: string;
     initialAttachments?: FileAttachment[];
@@ -76,6 +79,9 @@ vi.mock("@/components/task-create-dialog-selectors", () => ({
     onAttachmentsChange?: (attachments: FileAttachment[]) => void;
     onKeyDown?: (event: React.KeyboardEvent<HTMLTextAreaElement>) => void;
     toolbarActions?: ReactNode;
+    toolbarLeadingActions?: ReactNode;
+    toolbarAttachmentActions?: ReactNode;
+    contextLeadingContent?: ReactNode;
   }) => {
     const [attachments] = useState(initialAttachments ?? []);
     const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -97,6 +103,9 @@ vi.mock("@/components/task-create-dialog-selectors", () => ({
           onChange={(event) => onDescriptionValueChange?.(event.target.value)}
           onKeyDown={onKeyDown}
         />
+        {contextLeadingContent}
+        {toolbarLeadingActions}
+        {toolbarAttachmentActions}
         {toolbarActions}
       </div>
     );
@@ -333,11 +342,11 @@ describe("QuickChatSetup responsive hook order", () => {
 
     touchDrawer = true;
     view.rerender(<QuickChatSetupHarness />);
-    expect(send().className).toContain("h-12 w-12");
+    expect(send().className).toContain("h-11 w-11");
 
     touchDrawer = false;
     view.rerender(<QuickChatSetupHarness />);
-    expect(send().className).toContain("h-9 w-9");
+    expect(send().className).toContain("h-7 w-7");
   });
 });
 

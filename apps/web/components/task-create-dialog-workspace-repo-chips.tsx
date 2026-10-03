@@ -46,6 +46,7 @@ type WorkspaceRepoChipsProps = {
   onAddHomeAndOpenDiscovery?: () => void;
   ariaDescribedBy?: string;
   canAddMore: boolean;
+  showAddButton?: boolean;
   addHint?: string;
   addLabel?: string;
   allowDuplicateRepositories?: boolean;
@@ -86,6 +87,7 @@ export function WorkspaceRepoChips({
   onAddHomeAndOpenDiscovery,
   ariaDescribedBy,
   canAddMore,
+  showAddButton = true,
   addHint,
   addLabel,
   allowDuplicateRepositories = true,
@@ -156,13 +158,15 @@ export function WorkspaceRepoChips({
         />
       ))}
       {freshBranchToggle}
-      <AddRepositoryButton
-        canAddMore={canAddMore}
-        addHint={addHint}
-        addLabel={addLabel}
-        ariaDescribedBy={ariaDescribedBy}
-        onAdd={onAdd}
-      />
+      {showAddButton && (
+        <AddRepositoryButton
+          canAddMore={canAddMore}
+          addHint={addHint}
+          addLabel={addLabel}
+          ariaDescribedBy={ariaDescribedBy}
+          onAdd={onAdd}
+        />
+      )}
     </>
   );
 }

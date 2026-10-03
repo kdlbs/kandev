@@ -9,6 +9,7 @@ import {
 test("opens the phone picker and delivers the opening prompt", async ({
   testPage,
   apiClient,
+  prCapture,
 }, testInfo) => {
   test.setTimeout(120_000);
   await testPage.setViewportSize({ width: 390, height: 844 });
@@ -48,7 +49,7 @@ test("opens the phone picker and delivers the opening prompt", async ({
     await expectTouchTarget(send);
     await expect(editor).toBeVisible();
 
-    await testPage.setViewportSize({ width: 390, height: 560 });
+    await testPage.setViewportSize({ width: 390, height: 360 });
     await expect
       .poll(() => setupScroll.evaluate((element) => element.scrollHeight - element.clientHeight), {
         timeout: 5_000,
@@ -61,7 +62,7 @@ test("opens the phone picker and delivers the opening prompt", async ({
     expect(shortViewportMetrics.scrollHeight).toBeGreaterThan(shortViewportMetrics.clientHeight);
     const shortSendBox = await send.boundingBox();
     expect(shortSendBox).not.toBeNull();
-    expect(shortSendBox!.y + shortSendBox!.height).toBeLessThanOrEqual(560);
+    expect(shortSendBox!.y + shortSendBox!.height).toBeLessThanOrEqual(360);
     await expect(send).toBeVisible();
     await expectNoHorizontalOverflow(testPage);
 
@@ -73,12 +74,51 @@ test("opens the phone picker and delivers the opening prompt", async ({
 
     const agentTrigger = dialog.getByTestId("agent-profile-selector");
     await expectTouchTarget(agentTrigger);
-    const repositoryHelp = dialog.getByRole("button", { name: "About repository context" });
-    await expectTouchTarget(repositoryHelp);
-    await repositoryHelp.tap();
-    await expect(testPage.getByRole("heading", { name: "About repository context" })).toBeVisible();
-    await testPage.keyboard.press("Escape");
-    await expect(testPage.getByRole("heading", { name: "About repository context" })).toBeHidden();
+    const addRepository = dialog.getByTestId("add-repository");
+    await expectTouchTarget(addRepository);
+    await addRepository.tap();
+    const repoPicker = testPage.getByTestId("quick-chat-repository-picker");
+    await expect(repoPicker).toBeVisible();
+    await expect(dialog.getByTestId("repo-chip")).toHaveCount(0);
+    await repoPicker.getByRole("option").first().tap();
+    await expect(repoPicker).toBeHidden();
+    await expect(attach).toBeFocused();
+    await expect(
+      dialog.getByTestId("quick-chat-repository-chips").getByTestId("repo-chip"),
+    ).toHaveCount(1);
+    const branch = dialog.getByTestId("branch-chip-trigger");
+    await expectTouchTarget(branch);
+    await expect(branch).toContainText("main");
+    await prCapture.screenshot("toolbar-phone", {
+      caption: "Phone Quick Chat composer with touch controls and repository chips",
+    });
+    await branch.tap();
+    const branchPicker = testPage.getByTestId("quick-chat-branch-picker");
+    await expect(branchPicker).toBeVisible();
+    await branchPicker.getByRole("option").first().tap();
+    await expect(branchPicker).toBeHidden();
+    await expect(branch).toBeFocused();
+    await expectTouchTarget(dialog.getByTestId("remove-repo-chip"));
+
+    const configurationAction = dialog.getByTestId("quick-chat-configuration-action");
+    await expectTouchTarget(configurationAction);
+    await configurationAction.tap();
+    await expect(testPage.getByRole("heading", { name: "Configuration chat" })).toBeVisible();
+    await expect(
+      testPage
+        .getByText(
+          "Let the agent update Kandev settings, workflows, agent profiles, and MCP configuration.",
+          { exact: true },
+        )
+        .last(),
+    ).toBeVisible();
+    await testPage.getByRole("switch", { name: "Configuration chat" }).tap();
+    await expect(addRepository).toBeDisabled();
+    await configurationAction.tap();
+    await testPage.getByRole("switch", { name: "Configuration chat" }).tap();
+    await expect(dialog.getByTestId("repo-chip")).toHaveCount(1);
+    await dialog.getByTestId("remove-repo-chip").tap();
+    await expect(addRepository).toBeEnabled();
 
     await agentTrigger.tap();
     const picker = testPage.getByTestId("quick-chat-agent-picker-content");

@@ -14,6 +14,7 @@ import {
 import { IconCheck, IconChevronDown } from "@tabler/icons-react";
 import { AgentSelector } from "@/components/task-create-dialog-selectors";
 import { MobilePickerSheet } from "@/components/task/mobile/mobile-picker-sheet";
+import { useTouchDrawer } from "@/hooks/use-compact-task-chrome";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 
 type AgentOption = ComponentProps<typeof AgentSelector>["options"][number];
@@ -39,11 +40,12 @@ export function QuickChatAgentPicker({
 }: QuickChatAgentPickerProps) {
   const { t } = useTranslation();
   const { isMobile } = useResponsiveBreakpoint();
+  const touch = useTouchDrawer();
   const [open, setOpen] = useState(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const selected = options.find((option) => option.value === value);
 
-  if (!isMobile) {
+  if (!isMobile && !touch) {
     return (
       <AgentSelector
         options={options}
@@ -51,7 +53,7 @@ export function QuickChatAgentPicker({
         onValueChange={onValueChange}
         disabled={disabled}
         placeholder={placeholder}
-        triggerClassName="h-9 w-full justify-between border border-input bg-background px-3 shadow-xs hover:bg-accent/50"
+        triggerClassName="h-7 w-full justify-between px-1 hover:bg-accent/50"
         popoverPortal
         testId="agent-profile-selector"
         ariaDescribedBy={ariaDescribedBy}
@@ -75,7 +77,7 @@ export function QuickChatAgentPicker({
         className="h-11 min-h-11 w-full justify-between cursor-pointer"
         onClick={() => setOpen(true)}
       >
-        <span id="quick-chat-agent-selected-value" className="min-w-0 truncate text-left">
+        <span id="quick-chat-agent-selected-value" className="min-w-0 flex-1 text-left">
           {selected?.renderTriggerLabel?.() ??
             selected?.renderLabel?.() ??
             selected?.label ??

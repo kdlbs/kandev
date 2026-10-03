@@ -119,9 +119,10 @@ test.describe("Quick Chat entry points on mobile", () => {
 
     const dialog = testPage.getByRole("dialog", { name: "Quick Chat" });
     const setup = dialog.getByTestId("quick-chat-setup");
-    const modeSwitch = setup.getByRole("switch", { name: "Configuration chat" });
+    const modeSwitch = setup.getByTestId("quick-chat-configuration-action");
     await modeSwitch.tap();
-    await expect(modeSwitch).toBeChecked();
+    await testPage.getByRole("switch", { name: "Configuration chat" }).tap();
+    await expect(setup.getByRole("status")).toHaveText("Configuration chat");
     await assertNoDocumentHorizontalOverflow(testPage);
     await dialog.getByTestId("quick-chat-close").tap();
     await expect(dialog).toBeHidden();

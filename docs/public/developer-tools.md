@@ -61,9 +61,13 @@ contribute to this activity indicator.
 1. Enter a non-empty opening prompt. Add files when they help explain the request. Wait for each
    file to finish uploading before selecting **Send**. Retry or remove a failed upload first.
 2. Choose an enabled agent profile. Quick Chat uses the workspace default when available.
-3. For an ordinary Quick Chat, add workspace repositories when code context helps.
+3. For an ordinary Quick Chat, select **+** beside Attach to choose a workspace repository.
+   Each selected repository appears as a removable chip inside the prompt box.
 4. Choose a branch for each repository. Do not add the same repository twice.
-5. To inspect or change Kandev configuration, turn on **Configuration chat**. This option is hidden when the workspace already has a configuration conversation.
+5. To inspect or change Kandev settings, workflows, agent profiles, or MCP configuration,
+   select the settings icon beside Attach. Hover or focus the icon to read its description.
+   On phones, the icon opens a sheet with that description and the **Configuration chat** switch.
+   This option is hidden when the workspace already has a configuration conversation.
 6. Select **Send**. Quick Chat creates the conversation and delivers the opening prompt.
 
 Quick Chat keeps the prompt, files, profile, and repositories in the setup after a creation error. Correct the problem and select **Send** again. After a conversation exists, a delivery error keeps the opening prompt in that chat for an explicit retry.

@@ -430,6 +430,9 @@ type TaskFormInputsProps = {
   quickChatComposer?: boolean;
   composerSubmitDisabled?: boolean;
   toolbarActions?: React.ReactNode;
+  toolbarLeadingActions?: React.ReactNode;
+  toolbarAttachmentActions?: React.ReactNode;
+  contextLeadingContent?: React.ReactNode;
   onPendingAttachmentUploadsChange?: (pending: boolean) => void;
   onKeyDown: (e: React.KeyboardEvent) => void;
   descriptionValueRef: React.RefObject<TaskFormInputsHandle | null>;
@@ -702,7 +705,7 @@ function AttachButton({ onClick, disabled }: { onClick: () => void; disabled?: b
   const isMobile = useResponsiveBreakpoint().isMobile;
   const usesTouchTarget = usesTouchDrawer || isMobile;
   return (
-    <div className="flex items-center px-1 pb-1">
+    <div className="flex items-center">
       <Tooltip>
         <TooltipTrigger asChild>
           <button
@@ -836,6 +839,8 @@ type FormInputsToolbarProps = {
   linearImport?: TaskFormInputsProps["linearImport"];
   pluginActions?: React.ReactNode;
   toolbarActions?: React.ReactNode;
+  toolbarLeadingActions?: React.ReactNode;
+  toolbarAttachmentActions?: React.ReactNode;
 };
 
 function FormInputsToolbar({
@@ -851,10 +856,14 @@ function FormInputsToolbar({
   linearImport,
   pluginActions,
   toolbarActions,
+  toolbarLeadingActions,
+  toolbarAttachmentActions,
 }: FormInputsToolbarProps) {
   return (
     <div className="flex items-center px-1 pb-1">
+      {toolbarLeadingActions}
       <AttachButton onClick={onAttach} disabled={disabled} />
+      {toolbarAttachmentActions}
       {onEnhancePrompt && (
         <EnhancePromptButton
           onClick={onEnhancePrompt}
@@ -1145,8 +1154,11 @@ export const TaskFormInputs = memo(function TaskFormInputs({
   initialAttachments,
   onAttachmentsChange,
   quickChatComposer,
+  contextLeadingContent,
   composerSubmitDisabled,
   toolbarActions,
+  toolbarLeadingActions,
+  toolbarAttachmentActions,
   onPendingAttachmentUploadsChange,
   onKeyDown,
   descriptionValueRef,
@@ -1282,6 +1294,7 @@ export const TaskFormInputs = memo(function TaskFormInputs({
       <div
         className={`min-w-0 max-w-full rounded-md border border-input bg-transparent focus-within:ring-2 focus-within:ring-ring/30 ${contextItems.length > 0 ? "ring-0" : ""}`}
       >
+        {contextLeadingContent}
         <ContextZone items={contextItems} />
         <TaskDescriptionInput
           isLaunchPromptPreview={isLaunchPromptPreview}
@@ -1314,6 +1327,8 @@ export const TaskFormInputs = memo(function TaskFormInputs({
           linearImport={linearImport}
           pluginActions={pluginActions}
           toolbarActions={toolbarActions}
+          toolbarLeadingActions={toolbarLeadingActions}
+          toolbarAttachmentActions={toolbarAttachmentActions}
         />
         <HiddenFileInput inputRef={fileInputRef} onChange={handleFileInputChange} />
       </div>
