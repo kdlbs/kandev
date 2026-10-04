@@ -257,7 +257,7 @@ Task 01 implementation checks passed in the current implementation turn:
 - The exact documentation coverage preflight below passed for actual changes and planned source coverage.
 - The production backend lifecycle adapter acknowledgement regression test passed, and a real-runtime continuation E2E passed against the backend plus mock ACP process.
 - Race-instrumented lifecycle, orchestrator, backendapp, agentctl regression checks and `make -C apps/backend build` passed. `TestStreamUpdates_DisconnectCleansPending` passed 20 race-instrumented repetitions after its test synchronization was fixed.
-- The working tree remains uncommitted while final PR fixup review is in progress.
+- Implementation and review remediations are committed on `feature/investigate-acp-capa-781` and are being delivered through PR #4193.
 
 Review follow-up for the four reported defects also passed: retained lifecycle publication no longer holds the prompt lock and fences successor admission through synchronous settlement; retry finalization compare-retires only its exact owner; both automation origins retain their existing terminal failure owner; and inconclusive runtime probes block without teardown. Race-instrumented barrier tests cover the cancellation inversion and stale retry successor handoff. Replay and continuation separately cover confirmed runtime absence. The corresponding test commands and outcomes are recorded in work orders 01 and 02.
 
