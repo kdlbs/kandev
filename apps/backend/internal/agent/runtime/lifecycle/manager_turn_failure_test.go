@@ -180,6 +180,44 @@ func TestTransientTurnFailurePublishesOutsidePromptLockAndFencesSuccessor(t *tes
 	require.Equal(t, successor, execution.promptGenerationSnapshot())
 }
 
+func TestTransientTurnFailurePublicationFailureUsesTerminalFallback(t *testing.T) {
+	fixture := readyForRetainedTurnFailure(t)
+	failingBus := &rejectAgentTurnFailedBus{
+		MockEventBus: fixture.manager.eventBus.(*MockEventBus),
+	}
+	fixture.manager.eventBus = failingBus
+	fixture.manager.eventPublisher = NewEventPublisher(failingBus, fixture.manager.logger)
+
+	require.True(t, fixture.manager.handleCompleteEvent(fixture.execution, retainedCapacityEvent(fixture.execution)))
+	require.Equal(t, v1.AgentStatusFailed, fixture.execution.Status,
+		"a failed retained-event publish must use the ordinary terminal failure path")
+	require.NotNil(t, fixture.execution.ExitCode)
+	require.NotNil(t, fixture.execution.FinishedAt)
+
+	var turnFailed, failed bool
+	for _, published := range failingBus.PublishedEvents {
+		switch published.Type {
+		case events.AgentTurnFailed:
+			turnFailed = true
+		case events.AgentFailed:
+			failed = true
+		}
+	}
+	require.False(t, turnFailed, "the bus must reject the retained-turn publication")
+	require.True(t, failed, "terminal failure must be published after the retained event is rejected")
+}
+
+type rejectAgentTurnFailedBus struct {
+	*MockEventBus
+}
+
+func (b *rejectAgentTurnFailedBus) Publish(ctx context.Context, subject string, event *bus.Event) error {
+	if subject == events.AgentTurnFailed {
+		return errors.New("simulated NATS publish failure")
+	}
+	return b.MockEventBus.Publish(ctx, subject, event)
+}
+
 func TestRetainedPromptFailureEligibilityUsesCurrentAgentCtlClient(t *testing.T) {
 	mock := newMockAgentServer(t)
 	t.Cleanup(mock.Close)
