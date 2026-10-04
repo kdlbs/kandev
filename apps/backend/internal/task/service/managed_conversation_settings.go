@@ -5,6 +5,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/kandev/kandev/internal/events"
+	"github.com/kandev/kandev/internal/events/bus"
 	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
 	"github.com/kandev/kandev/internal/task/models"
 	taskrepo "github.com/kandev/kandev/internal/task/repository"
@@ -13,10 +20,6 @@ import (
 	"github.com/kandev/kandev/pkg/pluginsdk"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
-	"sort"
-	"strconv"
-	"strings"
-	"time"
 )
 
 // EnsureManaged creates or reconciles a retained conversation keyed by the
@@ -113,8 +116,23 @@ func (s *AgentConversationService) admitManagedConversation(
 	if result.Created {
 		outcome = AgentConversationStatusCreated
 		s.publishTaskCreated(ctx, result.Task)
+	} else if result.Changed {
+		s.publishManagedTaskUpdated(ctx, result.Task)
 	}
 	return managedConversationDescriptor(installationID, result.Task, result.Primary), outcome, nil
+}
+
+func (s *AgentConversationService) publishManagedTaskUpdated(ctx context.Context, task *models.Task) {
+	if s.eventer == nil {
+		return
+	}
+	eventCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+	defer cancel()
+	event := bus.NewEvent(events.TaskUpdated, "agent-conversation-service", map[string]interface{}{
+		"task_id": task.ID, "workspace_id": task.WorkspaceID, "title": task.Title,
+		"updated_at": task.UpdatedAt.Format(time.RFC3339Nano), "is_ephemeral": true,
+	})
+	_ = s.eventer.Publish(eventCtx, events.TaskUpdated, event)
 }
 
 func managedAdmissionError(err error) error {
@@ -206,6 +224,9 @@ func (s *AgentConversationService) SetManagedPaused(
 	})
 	if err != nil {
 		return pluginsdk.ManagedAgentConversationDescriptor{}, managedAdmissionError(err)
+	}
+	if !result.Replayed {
+		s.publishManagedTaskUpdated(ctx, result.Task)
 	}
 	if !paused && result.Primary != nil {
 		s.notifyManagedInputQueue(ctx, task.ID, result.Primary.ID)
@@ -311,6 +332,9 @@ func (s *AgentConversationService) changeManagedLifecycleTask(ctx context.Contex
 	}
 	if err != nil {
 		return managedAdmissionError(err)
+	}
+	if result.Changed {
+		s.publishManagedTaskUpdated(ctx, result.Task)
 	}
 	return s.stopManagedConversationExecution(ctx, result.Task)
 }

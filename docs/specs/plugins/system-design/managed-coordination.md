@@ -152,8 +152,8 @@ v1 conversation into the new lifetime while idle, with human confirmation.
 ### Atomic managed settings admission
 
 The [correction plan](../../../plans/managed-conversation-admission/plan.md) covers
-AC-PLUGINS-MANAGED-COORDINATION-002.1 and .4-.8. Keep draft status and delivery history. This released correction implements the
-host contract without schema, wire/SDK, or execution redesign.
+AC-PLUGINS-MANAGED-COORDINATION-002.1 and .4-.8. Preserve draft status and history;
+no schema, wire/SDK or execution redesign.
 
 Discovery reads are advisory. Native admission authorizes from current rows,
 replacing service-local locks and separate full task/session configuration writes.
@@ -211,7 +211,8 @@ errors/completion. Overlay only managed config, invalidated reset, revision and
 operation/digest into CURRENT task metadata using raw JSON members plus timestamp; preserve other scalars
 and keys, pause/detach/retention, empty-field semantics, effective profile, instruction
 and policy comparison. One change or non-replay primary repair increments once.
-Create deterministic task+primary together at revision 1; reconcile competing
+Reuse normal task creation defaults, including labels `[]`. Create task+primary
+together at revision 1; reconcile competing
 creation against committed ownership. Failure rolls both back. Historical partial
 rows/replay repair retain identity/transcript. Replace the fake expectation of a
 new failed creation leaving a task with atomic rollback plus successful retry.
@@ -239,12 +240,13 @@ blocked behind it resume under their existing rules.
 #### Results and evidence
 
 Descriptors use the committed projection. Rejection has no applied descriptor,
-creation event, wake or stop. pluginHostManagedConversationManager retains actual
+creation/update event, wake or stop. pluginHostManagedConversationManager retains actual
 CommandStore.Admit/Complete; Aborted/FailedPrecondition remain CONFLICT. Operation
 stamps support replay after lost receipt acknowledgement; preserve
 command_receipt_unavailable with committed descriptor, not an effect-free claim.
-Publish best-effort task.created only after new-task commit, not repair/replay/
-nochange; resume notification follows committed pause admission.
+Publish task.created after new-task commit and narrow task.updated after each
+committed task-row change. No updates for rejection, replay or write-free nochange.
+Resume notification follows committed pause admission.
 
 The work order defines permanent existing-API RED before correction without ROOT
 proof replay. Independent real SQLite and registered Host v2 prove status/receipts;

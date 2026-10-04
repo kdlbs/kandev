@@ -139,6 +139,9 @@ func (r *Repository) createManagedConversationTx(ctx context.Context, tx *sqlx.T
 	if input.Task == nil || !managed.Matches(input.Task, input.Identity) {
 		return managed.Result{}, managed.ErrNotFound
 	}
+	if err := r.prepareTaskForCreate(input.Task); err != nil {
+		return managed.Result{}, err
+	}
 	if _, err := r.insertTaskTx(ctx, tx.Tx, input.Task); err != nil {
 		return managed.Result{}, err
 	}

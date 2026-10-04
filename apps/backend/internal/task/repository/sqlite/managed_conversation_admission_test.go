@@ -52,6 +52,7 @@ func TestManagedConversationAdmissionPostgresRollback(t *testing.T) {
 			} else {
 				stored, err := b.GetTask(ctx, taskID)
 				require.NoError(t, err)
+				require.Equal(t, "[]", stored.Labels)
 				require.Equal(t, "original", stored.Metadata["kandev.base_prompt"])
 				require.Equal(t, "1", stored.Metadata[models.MetaKeyManagedConversationRevision])
 				if mode == "repair" {

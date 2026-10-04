@@ -80,7 +80,9 @@ Use `@covers` beside the actual tests.
 | Criteria | Planned meaningful evidence |
 | --- | --- |
 | 002.1, .4, .5 | `TestManagedConversationAdmissionInterleavings` in service/managed_conversation_admission_test.go: launch_after_idle_read and competing_revision_after_read, independent services, handles, real state/attempt/executor writes and accepted-winner readback |
-| 002.2, .3, .5 | `TestManagedConversationAdmissionLifecycle`: exact pause, installation pause, invalidation, detach race accepted settings; installation/workspace/instance isolation and retained transcript |
+| 002.5, .8 | `TestManagedConversationAdmissionLifecycle`: exact pause, installation pause, invalidation and detach races; retained transcript and accepted settings |
+| 002.2, .3 | Existing `TestManagedConversationLifetime`, `TestManagedConversationDisableKeepsInstallationOwnedHistory`, `TestManagedConversationUninstallDetachesAndReinstallCannotAdopt` in plugins/host_managed_conversations_test.go cover lifetime, disable, uninstall/reinstall; existing managed service controls cover retained identity |
+| 002.6, .8 | `TestManagedConversationAdmissionPublication`: normal creation defaults and committed task.updated events for settings and each participating lifecycle writer; publication-time independent readback, replay and failure controls |
 | 002.6, .8 | `TestManagedConversationAdmissionRollback`: update/create/repair failure between writes, cancellation, disposal; task/session bytes, unrelated metadata/scalars, events and callbacks |
 | 002.7 | `TestManagedConversationAdmissionControls`: current/stale/latest/busy/execution-only, empty/nochange, replay-before-revision, missing-primary replay using stored config and ordinary repair |
 | 002.4-.8 | `TestManagedConversationAdmissionPostgresWaits`, `TestManagedConversationAdmissionPostgresRegistrationFence`, `TestManagedConversationAdmissionPostgresRollback` in repository/sqlite/managed_conversation_admission_postgres_test.go: independent physical task/session/executor waits, READ COMMITTED current results, absent-registration fence, cancellation and rollback |
@@ -152,6 +154,16 @@ Local implementation is complete. Normal hooks, publication, current-head review
 and actual verified merge remain external delivery gates, not completed outcomes.
 Current main snapshot99f509743b29d3d021d76167f920304790485d42 is fetched for changed-revision
 lint and static compatibility; the original proof base/history remain unchanged.
+
+Required review fixup retains this boundary: native creation reuses normal labels
+and other defaults; accepted task-row changes publish narrow task.updated after
+commit. Existing-API RED and independent publication-time readback cover creation,
+configuration and all participating lifecycle paths. Final fixup89conversation/Host/
+provider tests passed; current PG16 waits/rollback and six lifetime/Host suites passed.
+Original installed full lint5 passed0issues/397.177s with the same immutable base,
+binary hash and resource limits. All clients joined before owned PG3 cleanup.
+Normal fixup hooks, current-head CI/review and verified merge remain external gates;
+previous full-lint4 evidence is historical after source changes.
 
 ## Risks
 

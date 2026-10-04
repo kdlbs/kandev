@@ -7,6 +7,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kandev/kandev/internal/events"
+	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc/codes"
@@ -36,6 +38,7 @@ func TestManagedConversationAdmissionControls(t *testing.T) {
 		services[0].SetManagedExecutionStopper(func(context.Context, string) error { stops++; return nil })
 		require.NoError(t, services[0].PauseManagedForInstallation(ctx, "installation"))
 		require.Equal(t, 1, stops)
+		events.ClearEvents()
 		stops = 0
 		_, err = repos[1].DB().ExecContext(ctx, `CREATE TRIGGER fail_effect_metadata BEFORE UPDATE OF metadata ON tasks BEGIN SELECT RAISE(ABORT, 'metadata unavailable'); END`)
 		require.NoError(t, err)
@@ -223,4 +226,75 @@ func TestManagedConversationAdmissionLifecycle(t *testing.T) {
 		require.True(t, current.DesiredPaused)
 		require.Equal(t, first.Revision+1, current.Revision)
 	})
+}
+
+// @covers AC-PLUGINS-MANAGED-COORDINATION-002.6, AC-PLUGINS-MANAGED-COORDINATION-002.8
+func TestManagedConversationAdmissionPublication(t *testing.T) {
+	t.Run("creation_defaults", func(t *testing.T) {
+		services, repos, _ := managedAdmissionPair(t)
+		spec := managedAdmissionSpec()
+		first, _, err := services[0].EnsureManaged(context.Background(), "plugin", "installation", spec, "create", "digest")
+		require.NoError(t, err)
+		stored, err := repos[1].GetTask(context.Background(), first.TaskID)
+		require.NoError(t, err)
+		require.Equal(t, "[]", stored.Labels)
+	})
+	for _, mode := range []string{"configuration", "exact_pause", "installation_pause", "invalidation", "detach"} {
+		t.Run(mode, func(t *testing.T) {
+			services, repos, _ := managedAdmissionPair(t)
+			ctx := context.Background()
+			eventBus := NewMockEventBus()
+			services[0].eventer = managedAdmissionEventObserver{MockEventBus: eventBus, observe: func(event *bus.Event) {
+				if event.Type != events.TaskUpdated {
+					return
+				}
+				data := event.Data.(map[string]interface{})
+				stored, err := repos[1].GetTask(ctx, data["task_id"].(string))
+				require.NoError(t, err)
+				require.Equal(t, stored.UpdatedAt.Format(time.RFC3339Nano), data["updated_at"])
+			}}
+			spec := managedAdmissionSpec()
+			first, _, err := services[0].EnsureManaged(ctx, "plugin", "installation", spec, "create", "digest")
+			require.NoError(t, err)
+			eventBus.ClearEvents()
+			switch mode {
+			case "configuration":
+				spec.ExpectedRevision, spec.BasePrompt = first.Revision, "updated instructions"
+				_, _, err = services[0].EnsureManaged(ctx, "plugin", "installation", spec, "update", "update-digest")
+			case "exact_pause":
+				_, err = services[0].SetManagedPaused(ctx, "installation", spec.WorkspaceID, spec.InstanceKey, first.Revision, true, "pause", "pause-digest")
+			case "installation_pause":
+				err = services[0].PauseManagedForInstallation(ctx, "installation")
+			case "invalidation":
+				err = services[0].InvalidateManagedForInstallationWorkspace(ctx, "installation", spec.WorkspaceID)
+			case "detach":
+				err = services[0].DetachManagedForInstallation(ctx, "installation")
+			}
+			require.NoError(t, err)
+			published := eventBus.GetPublishedEvents()
+			require.Len(t, published, 1)
+			require.Equal(t, events.TaskUpdated, published[0].Type)
+			stored, err := repos[1].GetTask(ctx, first.TaskID)
+			require.NoError(t, err)
+			data := published[0].Data.(map[string]interface{})
+			require.Equal(t, first.TaskID, data["task_id"])
+			require.Equal(t, stored.UpdatedAt.Format(time.RFC3339Nano), data["updated_at"])
+			eventBus.ClearEvents()
+			if mode == "configuration" {
+				_, _, err = services[0].EnsureManaged(ctx, "plugin", "installation", spec, "update", "update-digest")
+				require.NoError(t, err)
+				require.Empty(t, eventBus.GetPublishedEvents())
+			}
+		})
+	}
+}
+
+type managedAdmissionEventObserver struct {
+	*MockEventBus
+	observe func(*bus.Event)
+}
+
+func (b managedAdmissionEventObserver) Publish(ctx context.Context, subject string, event *bus.Event) error {
+	b.observe(event)
+	return b.MockEventBus.Publish(ctx, subject, event)
 }
