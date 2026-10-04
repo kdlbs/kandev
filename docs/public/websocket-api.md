@@ -470,6 +470,13 @@ behavior. It does not merge arbitrary keys from competing requests. Server-owned
 lifecycle and handoff records remain protected, and an explicit title resolves pending
 agent naming.
 
+The REST `PATCH /api/v1/tasks/:id/port-forwarding` preference uses the explicit
+metadata merge path. Concurrent admitted merges preserve different ordinary top-level
+keys and omitted task fields across backend services. Supplying the same key uses the
+last committed value. This does not extend ordinary metadata replacement or later
+full-snapshot writes into per-key merges, and nested/null behavior keeps the current
+pending-title database semantics.
+
 This guarantee covers ordinary partial updates and participating field-scoped writes.
 Internal full-snapshot and exact/versioned commands retain their own contracts. Responses
 and notifications may observe a later commit; they do not establish a total event order

@@ -52,9 +52,10 @@ type fieldProtocolFixture struct {
 	dispatcher *ws.Dispatcher
 	gate       *protocolFieldReadGate
 	published  chan *bus.Event
+	service    *service.Service
 }
 
-func fieldProtocolPair(t *testing.T) [2]fieldProtocolFixture {
+func fieldProtocolPair(t *testing.T, owners ...string) [2]fieldProtocolFixture {
 	t.Helper()
 	log, err := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "json", OutputPath: "stdout"})
 	require.NoError(t, err)
@@ -85,10 +86,14 @@ func fieldProtocolPair(t *testing.T) [2]fieldProtocolFixture {
 		t.Cleanup(svc.StopTaskResourceCleanupWorker)
 		router, dispatcher := gin.New(), ws.NewDispatcher()
 		RegisterTaskRoutes(router, dispatcher, svc, nil, repo, nil, log)
-		pair[i] = fieldProtocolFixture{router, dispatcher, gate, published}
+		pair[i] = fieldProtocolFixture{router, dispatcher, gate, published, svc}
 	}
 	repo := pair[0].gate.Repository
-	require.NoError(t, repo.CreateWorkspace(context.Background(), &models.Workspace{ID: "protocol-ws", Name: "Protocol fields"}))
+	var owner string
+	if len(owners) > 0 {
+		owner = owners[0]
+	}
+	require.NoError(t, repo.CreateWorkspace(context.Background(), &models.Workspace{ID: "protocol-ws", Name: "Protocol fields", OwnerID: owner}))
 	for _, id := range []string{"protocol-fields", "protocol-parent"} {
 		require.NoError(t, repo.CreateTask(context.Background(), &models.Task{ID: id, WorkspaceID: "protocol-ws", Title: "Original", Description: "Original description", Priority: "medium", Metadata: map[string]interface{}{"keep": "current"}}))
 	}

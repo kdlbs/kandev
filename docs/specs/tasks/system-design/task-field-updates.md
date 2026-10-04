@@ -7,6 +7,9 @@ requirements:
 
 # Task field updates system design
 
+The explicit metadata-merge boundary below covers criteria .8 through
+.12. The preceding ordinary-field implementation and criteria .1 through .7 remain current.
+
 ## Ownership and dependencies
 
 Tasks owns request intent, the task-row mutation, and its publication. This extends ordinary
@@ -143,7 +146,8 @@ committed* data, but does not promise that its later stale snapshot preserves th
 | Parent writes: old hierarchy method, `DetachTask`, bulk reparent, conditional restore, Office scalar parent | Prior workspace/task serialization and normalization remain mandatory. New patch reuses validator and preservation; no stricter Office cycle/depth rules or new parent authority. |
 | Four legacy full-row variants: `UpdateTask`, `UpdateTaskPreservingDeferredLaunch`, `UpdateTaskIfWorkflowMatches`, `UpdateTaskWithExplicitPosition` | Intentionally full snapshots. Do not reinterpret their arguments or globally promise preservation of arbitrary fields; current parent/workspace/position/title/provenance protections remain. |
 | Exact/update operations and workflow admission wrappers, `MarkDeferredMoveAppliedForSession`, two full-row capacity/promotion paths | Existing full-snapshot, version/CAS, receipt, WIP, queue, and runner contracts; excluded from symmetric arbitrary-field guarantee. Patch uses their committed current row when it follows them. |
-| `Service.UpdateTaskMetadata` and runtime/workflow callers of full-row methods | Retain intentional merge/snapshot behavior. This repair does not silently convert them into ordinary request patches. Step-handoff's legitimate internal writes remain supported. |
+| `Service.UpdateTaskMetadata` | Explicit merge intent uses the metadata-only canonical boundary below; it is not an ordinary replacement patch. |
+| Runtime/workflow callers of full-row methods | Retain intentional snapshot behavior and legitimate step-handoff writes. No silent migration. |
 | Office agent assignment/checkout/generation fields; workflow participant and step deletion writes | Small independent bundles/projections: current task read supplies the latest projection, but no Office scheduling, ownership or runner redesign. |
 | Creation/import/migrations/reset; archive/unarchive/delete, workspace cascades; sequence/default repairs | Existing initialization/lifecycle authority. Native row/workspace barriers and prior hierarchy checks remain. No live partial-edit guarantee for intentional rebuilds or deleted tasks. |
 | Association/folder/set writers, document/plan/comment/attachment/canvas/issue-watcher/queue writers | Separate owned tables or narrow task touches. Retain their guards and transactions; no cross-table global transaction or lifetime snapshot guarantee. |
@@ -202,3 +206,150 @@ would alter contracts beyond the demonstrated defect.
 
 All criteria refer to `AC-TASKS-FIELD-UPDATES-001`. Delivery is recorded in
 [the implementation plan](../../../plans/concurrent-task-field-edits/plan.md).
+
+
+## Explicit metadata-merge boundary
+
+### Entry points, interfaces and dependencies
+
+Inventory is grounded in base `93c80f75454f11a60c3e8458d70b3148194d7dac`.
+The direct production caller of `Service.UpdateTaskMetadata` is
+`TaskHandlers.httpUpdateTaskPortForwarding`, registered by `registerHTTP` as
+`PATCH /api/v1/tasks/:id/port-forwarding`. It passes only `port_forwarding_enabled`, retains
+strict boolean/body validation, calls the real service, and returns `dto.FromTask`.
+
+Two GitHub issue operations call the *similarly named* `TaskIssueStore.UpdateTaskMetadata`.
+`backendapp.githubTaskIssueStoreAdapter` implements that method using ordinary
+`Service.UpdateTask` with supplied `Metadata`, not the merge service. Link copies a snapshot;
+unlink deletes keys before replacement. Leave both calls, the adapter and its interface alone.
+Migrating them to merge would break unlink and claim snapshot safety outside this contract.
+There is no current WS metadata-merge action or new metadata wire field.
+
+| Boundary | Reuse or bounded change |
+| --- | --- |
+| `service/service_workflow.go` | Keep `UpdateTaskMetadata` authorization, early existence observation, error propagation and postcommit reread/publication; send supplied intent instead of an early full task. |
+| `repository/interface.go` | Add required `MergeTaskMetadata(context.Context, string, map[string]interface{}) error` to `TaskRepository`. No optional assertion or snapshot fallback. |
+| `repository/sqlite/task_metadata_merge.go` | New domain-specific canonical implementation shared by SQLite and PG through existing driver detection and binding. Writes metadata and timestamp only. |
+| `repository/sqlite/task.go` | Reuse `pendingTaskMetadataMergeExpression`, metadata object normalizers and existing timestamp source. Leave full-row methods and title CAS predicates unchanged. |
+| `repository/sqlite/task_hierarchy_admission.go` | Reuse `hierarchyTxOptions`, SQLite writer reservation through `lockTaskHierarchy(ctx, tx, nil, nil)`, and materialized workspace identity rule. No parent validator or graph mutation. |
+| `models/task_metadata_update.go`, `models/models.go` | Reuse protected key names and carrier stripping; preserve existing ordinary replacement helper. Any small raw-document merge protection helper stays domain-specific, not a general callback/merge API. |
+| Storage primitives | `SetTaskMetadataKey*` and tx-capable `setTaskMetadataKeyWithExecutor` are one-key operations. They cannot provide one all-keys commit plus pending-title compatibility and ownership rules by independent calls. `lockMetadataRow` has PG row locking but textual missing-row errors and no independent-handle SQLite reservation; reuse its pattern without weakening typed task errors. |
+
+`*sqlite.Repository` is the sole concrete production task repository and implements both
+supported SQL dialects. Required membership forwards through embedded `TaskRepository` and
+`*Repository` wrappers. Standalone existing fakes with the typed method occur in
+`service/service_test.go`, `handlers/process_handlers_test.go`,
+`handlers/task_http_handlers_external_id_test.go`, `handlers/task_update_repositories_test.go`,
+and `orchestrator/executor/executor_mocks_test.go`; adapt only actual required implementations.
+The construction-time gate in `service/service_task_field_updates_test.go` embeds the real
+repository. `handlers/task_port_forwarding_test.go` currently intercepts the old snapshot
+writer; update its data behavior and retain body-validation cases, with real registered-route
+storage evidence in a separate test. Re-inventory method sets during compilation; do not hide
+required capability behind permissive stubs used by the merge regressions.
+
+### Canonical operation and lock order
+
+1. The service checks task-write scope and performs its existing `GetTask` existence read.
+   That task is never a write payload. It may be stale by admission to storage. Keep the
+   observation boundary so existing-API RED can pause real early reads before real commits.
+2. The repository shallow-copies the supplied map and filters server-owned input. Encode the
+   complete admitted overlay before any mutation, without mutating nested input maps. Caller
+   mutation concurrent with encoding is outside map ownership support. Ignore deferred-launch,
+   step-handoff carry, handoff source/handoffs, Office carrier keys and generated-title control
+   markers in this ordinary merge intent. These owner records remain in the current document;
+   their sanctioned writers retain their own predicates. No owner record is restored from
+   the early service read. No new namespace is made writable by a metadata endpoint.
+3. Begin a writer transaction with `hierarchyTxOptions`. Before reads, SQLite reserves the
+   writer via the existing empty-ID `lockTaskHierarchy` call. PG acquires transaction-scoped
+   `pg_advisory_xact_lock(hashtextextended('task-metadata-merge:' + taskID, 0))`, as required
+   by backend read-modify-write guidance, then reads this physical task row `FOR UPDATE`.
+   The advisory namespace is task-specific and only coordinates this operation; the physical
+   row lock is what interoperates with native scalar/CAS/ordinary writers. Never depend on
+   process mutexes or one particular writer pool. Do not lock workspace/step rows after the
+   task: this operation has no hierarchy or workflow mutation and requires no later locks.
+4. Read only canonical metadata from the writer transaction, not a read-pool task projection.
+   Translate missing rows to wrapped `ErrTaskNotFound`. Normalize SQL NULL, empty text or JSON
+   `null` to an object; reject malformed JSON and non-object persisted values without repair.
+   Use `map[string]json.RawMessage` for current document values to avoid round-tripping
+   unrelated large numbers through `float64`. Raw bytes need not retain whitespace/order.
+5. Protect current materialized `workspace.mode=shared_group` and `group_id` if the overlay
+   supplies `workspace`, using the existing `preserveHierarchyWorkspace` identity rule with
+   an isolated envelope or equivalent raw subdocument splice. Do not change ordinary sibling
+   workspace keys or overwrite the caller map. Parent and all row identity fields stay outside
+   the statement. Preserve raw unrelated fields and protected records, including literal null.
+6. If current title is pending, apply the existing dialect-specific pending merge expression
+   to the *supplied admitted overlay only*. Otherwise apply top-level replacement of supplied
+   keys to the current raw object and encode once. Write one `UPDATE tasks SET metadata=?,
+   updated_at=? WHERE id=?` (using the pending expression when applicable). Timestamp comes
+   from `r.nowUTC()` after the physical lock and canonical read, never the early service read.
+   Check affected rows and every database error. Commit all keys and timestamp together.
+7. Return only after commit. Do not call `updateTaskTx`, `UpdateTaskFieldsWithParentAdmission`,
+   parent/workflow validators, runner synchronization, ledger/entry allocation or postcommit
+   step dispatch. Rollback on every failure; retain wrapped encoding/store/context causes.
+   There is no new retry, schema, revision, metric or exact-command receipt.
+8. Service rereads through its existing repository and publishes one `TaskUpdated` describing
+   that returned observation. Do not publish an earlier candidate or synthesize state events.
+   A later write can be observed. Keep existing behavior on postcommit read failure: return
+   error and suppress publication, with the successful mutation still durable. Publish errors
+   retain the existing event-bus contract. No cross-request event ordering is promised.
+
+### Supported value compatibility
+
+| Input/current context | Canonical merge result |
+| --- | --- |
+| Nil/empty overlay | Preserve current keys, including current explicit null; normalize absent metadata to an object; successful call still advances the modification timestamp and publishes after reread. |
+| Nonpending current title | Replace each supplied ordinary top-level value, including JSON null, empty object/array, false and zero. A nested object replaces that key's old object; omission preserves other top-level keys. |
+| Pending title on SQLite | Existing `json_patch` semantics for supplied values: explicit null deletes that supplied key and nested object patches recursively. An omitted current null is no longer accidentally resubmitted as deletion. Arrays replace. |
+| Pending title on PG | Existing JSONB object concatenation: supplied top-level values replace, explicit null is stored, and nested objects replace. No new uniform recursive merge is introduced. |
+| Protected ownership input | Ignore forged/replayed owner values. Retain canonical present/absent owner records and title/owner CAS outcomes. Ordinary metadata replacement still keeps its own existing title-control behavior. |
+| Shared materialized workspace | Preserve current mode/group identity even for attempted null/object replacement; ordinary workspace subkeys follow the applicable supported merge rule. |
+| Literal key punctuation | Keys are object members, including dots/quotes; do not route map keys through the existing unescaped `jsonPath` utility or interpret them as nested SQL paths. |
+
+Preserving omitted nulls is part of omission intent, not an extension of explicit null support.
+This correction removes incidental deletion caused by copying an early full document. Supplied
+ordinary replacement and legacy full-snapshot pending-title null behavior remain unchanged.
+The merge does not confer authority to set or clear generated-title controls; human title and
+agent naming still use their existing typed/CAS paths. Tests must pin owner outcomes in both
+race directions, including a human title committed after the merge and an owner record removed
+before the merge. Protected-only input is an empty admitted overlay, not an ownership update.
+
+### Writer relationships and exclusions
+
+The earlier inventory remains authoritative for ordinary updates. For this explicit merge:
+
+- Two merges have a symmetric guarantee for disjoint admitted top-level intents. Two nested
+  changes under one top-level key do not qualify as disjoint, regardless of dialect behavior.
+- Ordinary typed patches with omitted metadata (including human title, priority, assignment,
+  parent, state, step and position) retain both edits in either order. An ordinary patch with
+  explicit metadata retains replacement/pending-title rules: replacement committed after a
+  merge may remove it; a merge committed after replacement overlays current metadata only.
+- Native priority/project/position/state writers and title claim/set CAS serialize on the row.
+  Merge changes no scalar column, and the metadata read follows their already committed writes.
+  Metadata key/CAS, deferred-launch, handoff and provenance, carrier, orphan/recovery/launch
+  error writers keep predicates and receipts. Omitted ordinary keys and protected owner values
+  survive a preceding commit; later owner writes are authoritative under their own rules.
+- Intentional full-row variants, exact/versioned commands, workflow admission, runner capacity
+  and promotion, Office bundles, creation/import/reset, hierarchy writes and lifecycle deletion
+  keep existing contracts. A later stale snapshot can overwrite ordinary merged keys or fields
+  its own contract permits. No arbitrary later full-snapshot safety is asserted.
+- Associations remain their separate atomic operation and F19 contract. Plans, messages, queues,
+  canvas, integration and other task-touching tables retain ownership; no cross-table transaction
+  is introduced. A merge must leave those tables, row fields and workflow effects untouched.
+
+### Evidence and acceptance mapping for the amendment
+
+Delivery uses [one sequential work order](../../../plans/concurrent-task-metadata-merges/task-01-canonical-metadata-merge.md).
+Its test matrix maps `.8` to both real service merge orders/same-key/sequential controls, `.9`
+to typed/scalar interactions and replacement exclusions, `.10` to value/owner/input controls,
+`.11` to real store/encoding/cancellation rollback and row/effect isolation, and `.12` to actual
+registered REST plus postcommit DB/DTO/event/error behavior. PostgreSQL evidence must exercise
+this method through independent physical connections, observe a row-owner lock wait without a
+workspace/advisory blocker, commit changed metadata/title before release, and verify the merged
+row and timestamp. SKIP, mocked predicates, calls counted, or elapsed time are not lock proof.
+
+No new browser/build/E2E work is causal: backend persisted state only, unchanged desktop/mobile
+DTOs, layout, touch, navigation, copy and frontend behavior. The reference clarification in
+`docs/public/websocket-api.md` next to partial updates describes the existing REST preference endpoint,
+explicitly retaining ordinary metadata replacement and full-snapshot exclusions. No new public
+page or UI wire field. The operation uses an existing persistence boundary; the named contract,
+compatibility matrix and work order preserve rationale sufficiently, so `/record` adds no ADR.

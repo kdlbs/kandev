@@ -65,6 +65,9 @@ type WorkspaceRepository interface {
 // TaskRepository handles task CRUD and workflow placement.
 // Note: models.TaskRepository is a struct in internal/task/models; no Go conflict exists.
 type TaskRepository interface {
+	// MergeTaskMetadata applies ordinary supplied keys to canonical current metadata.
+	// It writes metadata and its timestamp atomically without task-row effects.
+	MergeTaskMetadata(ctx context.Context, id string, metadata map[string]interface{}) error
 	CreateTask(ctx context.Context, task *models.Task) error
 	GetTask(ctx context.Context, id string) (*models.Task, error)
 	GetTasksByIDs(ctx context.Context, ids []string) ([]*models.Task, error)
