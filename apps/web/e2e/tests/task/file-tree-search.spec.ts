@@ -8,6 +8,7 @@ import {
   openTaskSession,
   createStandardProfile,
 } from "../../helpers/git-helper";
+import type { SessionPage } from "../../pages/session-page";
 
 // File panel search lives in file-browser-search-header.tsx (input) +
 // file-browser-hooks.ts (useFileBrowserSearch with 300ms debounce + WS call
@@ -33,8 +34,18 @@ async function setupTask(
     repository_ids: [seedData.repositoryId],
   });
   const session = await openTaskSession(testPage, taskTitle);
-  await session.clickTab("Files");
   return session;
+}
+
+async function openFileSearch(session: SessionPage) {
+  await session.clickTab("Files");
+  const button = session.fileTree.fileSearchButton();
+  await expect(button).toBeVisible({ timeout: 5_000 });
+  await button.click();
+
+  const input = session.fileTree.fileSearchInput();
+  await expect(input).toBeVisible({ timeout: 5_000 });
+  return input;
 }
 
 test.describe("File tree search", () => {
@@ -68,9 +79,7 @@ test.describe("File tree search", () => {
     // The parent is visibly collapsed, not merely outside the virtualized viewport.
     await expect(session.fileTreeNode("deep/nested/needle-target.ts")).toHaveCount(0);
 
-    await testPage.getByRole("button", { name: "Search files" }).click();
-    const input = testPage.getByPlaceholder("Search files...");
-    await expect(input).toBeVisible({ timeout: 5_000 });
+    const input = await openFileSearch(session);
     await input.fill("needle-target");
 
     // Search panel shows the matching path even though the parent folders
@@ -103,8 +112,7 @@ test.describe("File tree search", () => {
     );
 
     await session.fileTree.waitForFileTreeNode("clear-alpha.ts", 15_000);
-    await testPage.getByRole("button", { name: "Search files" }).click();
-    const input = testPage.getByPlaceholder("Search files...");
+    const input = await openFileSearch(session);
     await input.fill("clear-alpha");
     // Wait for the debounced search and the filtered list to settle.
     await expect(session.files.getByText("clear-alpha.ts", { exact: false })).toBeVisible({
@@ -122,11 +130,15 @@ test.describe("File tree search", () => {
     apiClient,
     seedData,
   }) => {
-    await setupTask(testPage, apiClient, seedData, "ft-search-escape", "FT Search Escape");
+    const session = await setupTask(
+      testPage,
+      apiClient,
+      seedData,
+      "ft-search-escape",
+      "FT Search Escape",
+    );
 
-    await testPage.getByRole("button", { name: "Search files" }).click();
-    const input = testPage.getByPlaceholder("Search files...");
-    await expect(input).toBeVisible({ timeout: 5_000 });
+    const input = await openFileSearch(session);
     await input.press("Escape");
 
     await expect(input).toHaveCount(0, { timeout: 5_000 });

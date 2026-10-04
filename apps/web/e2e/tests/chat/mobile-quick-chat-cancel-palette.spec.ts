@@ -12,6 +12,7 @@ import {
   sendQuickChatMessage,
   startQuickChatFromSetup,
   waitForQuickChatDirectInput,
+  waitForSessionSettledBaseline,
 } from "./quick-chat-helpers";
 
 function commandDialog(page: Page) {
@@ -63,6 +64,7 @@ test.describe.serial("Mobile Quick Chat cancellation", () => {
   test("mobile Quick Chat exposes one touch cancellation command", async ({
     testPage,
     prCapture,
+    apiClient,
   }) => {
     test.setTimeout(120_000);
     await testPage.goto("/");
@@ -70,11 +72,14 @@ test.describe.serial("Mobile Quick Chat cancellation", () => {
     await testPage.getByTestId("mobile-quick-chat-button").tap();
 
     const quickChat = testPage.getByRole("dialog", { name: "Quick Chat" });
-    await startQuickChatFromSetup(quickChat, testPage);
+    const started = await startQuickChatFromSetup(quickChat, testPage);
+    const quickSessionId = started.session_id;
+    await waitForSessionSettledBaseline(apiClient, started.task_id, started.session_id);
+
     await sendQuickChatMessage(quickChat, testPage, "/slow 30s");
-    await expect(
-      quickChat.getByRole("status", { name: /Agent is (starting|running)/ }),
-    ).toBeVisible({
+    expect(await waitForActiveQuickChatSupportsSteering(testPage)).toBe(quickSessionId);
+    await waitForActiveQuickChatForegroundActivity(testPage, "generating");
+    await expect(quickChat.getByRole("status", { name: "Agent is running" })).toBeVisible({
       timeout: 15_000,
     });
 
@@ -88,6 +93,8 @@ test.describe.serial("Mobile Quick Chat cancellation", () => {
     await cancelOption.tap();
 
     await expect(quickChat.getByTestId("cancel-agent-button")).toBeDisabled({ timeout: 5_000 });
+    await waitForQuickChatCancellationPending(testPage, quickSessionId, true);
+    await waitForQuickChatSessionSettled(testPage, quickSessionId);
     await waitForQuickChatDirectInput(quickChat);
     await prCapture.screenshot("mobile-quick-chat-cancel-palette", {
       caption: "Quick Chat cancellation remains available through the touch-sized command palette",
