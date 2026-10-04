@@ -86,7 +86,7 @@ func validateReparentDepth(ctx context.Context, reader TaskHierarchyReader, task
 	// depth 2 under the new parent.
 	children, err := reader.ListChildren(ctx, task.ID)
 	if err != nil {
-		return fmt.Errorf("%w: failed to check existing subtasks: %v", ErrInvalidParent, err)
+		return err
 	}
 	if len(children) > 0 {
 		return fmt.Errorf("%w: %w", ErrInvalidParent, ErrSubtaskDepthExceeded)

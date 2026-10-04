@@ -196,7 +196,9 @@ Keep `parentChainWalkLimit` (1000) and add visited-identifier detection for malf
 do not reach the subject. Fail with `ErrInvalidParent` on a repeated ancestor or exhausted bound.
 Translate only a typed missing direct target to the existing invalid-parent error. Preserve
 genuine storage/decode/context failures, including their errors.Is identity, rather than reporting
-bad input; missing subjects retain their existing classification. Keep the historical positively
+bad input; child-list read failures follow the same rule, while actual depth violations retain
+both `ErrInvalidParent` and `ErrSubtaskDepthExceeded`. Missing subjects retain their existing
+classification. Keep the historical positively
 missing-ancestor-as-root behavior and propagate genuine failures rather than treating them as a
 missing root. Do not migrate or repair old
 relationships. Keep `ListChildren`'s active/non-ephemeral/non-automation depth population and the

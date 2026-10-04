@@ -421,3 +421,31 @@ Explicit duration-exception full changed lint64185 ACTUALLY JOINED exit0, `0 iss
 exact-base gate passed on the combined validated candidate at the authorized10m/11m bound.
 No timeout cause inferred and no prior failure reclassified. Normal active-hook commit and
 corrective publication can now proceed; exact new-head full review/terminal CI/merge remain gates.
+
+
+ROOT explicitly releases the valid grouped child-list error finding from current FULL5404824789.
+Exact new selector `^TestTaskHierarchyAdmissionChild(ReadCancellation|DecodeAndDepthErrors)$`
+uses malformed persisted-child overrides through real Service.UpdateTask and cancellation before
+delegating actual transaction ListChildren; check original typed error identity, complete subject
+row/event preservation, and normal ErrInvalidParent+ErrSubtaskDepthExceeded controls. Meaningful
+RED precedes minimal unchanged-error return; no reader/query/lock/getter/create/Office/lifecycle
+changes. Other returns in the same policy.go reviewed read-only: direct typed missing retains
+invalid-parent, genuine target/ancestor failures propagate, creation wraps with %w as before.
+After affected GREEN, ONE new-code full CHANGED exact-base gate at explicitly authorized10m/11m
+duration only, same resources; old64185 pass is historical,99037/99256 stay failed.
+Capacity recovery lost watcher97850: handle unavailable and recordedPIDPGID3861033 absent, stdout
+empty; LOST/INTERRUPTED NO VERDICT, not terminal/pass. No duplicate watcher; one replacement
+after actual corrective publication.
+
+
+Child-read RED88410 ACTUALLY JOINED1 service0.346s: real persisted child decode and actual admitted
+transaction ListChildren cancellation both masked as invalid-parent; normal depth control passed.
+Minimal genuine-error return GREEN43646 ACTUALLY JOINED0 service1.333s verifies typed decode and
+cancellation identity, complete subject/event preservation, and both normal depth error identities.
+Catalog/all-spec/whitespace checks passed. One authorized corrected-code full gate now runs with
+explicit10m/11m duration bound and otherwise unchanged exact base/resources.
+
+
+Corrected child-read full CHANGED lint13074 ACTUALLY JOINED0, zero issues; full ./... at immutable
+base d5142d9 with explicitly authorized10m/11m duration and unchanged resources. Normal active
+hooks/publication and new-head review/CI/delivery remain; earlier head/failure receipts unchanged.
