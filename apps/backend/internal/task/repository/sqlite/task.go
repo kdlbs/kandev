@@ -22,6 +22,7 @@ import (
 	"github.com/kandev/kandev/internal/steptelemetry"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/recoveryclaim"
+	"github.com/kandev/kandev/internal/task/repository/hierarchy"
 	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 	usermodels "github.com/kandev/kandev/internal/user/models"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
@@ -237,11 +238,17 @@ func (r *Repository) CreateTaskWithWorkflowStepAdmission(
 	ctx, unlock = r.withStepArrivalLocks(ctx, targetStepID, feederStepID)
 	defer unlock()
 
-	tx, err := r.db.BeginTx(ctx, nil)
+	tx, err := r.db.BeginTx(ctx, r.hierarchyTxOptions())
 	if err != nil {
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err := r.lockTaskHierarchy(ctx, tx, []string{task.WorkspaceID}, []string{task.ParentID}); err != nil {
+		return err
+	}
+	if err := r.validateCreationParentTx(ctx, tx, task); err != nil {
+		return err
+	}
 
 	// Same order as createTask and the workspace cascade: workspace row
 	// first, then workflow-step locks. Without it an admission holding a step
@@ -335,11 +342,17 @@ func (r *Repository) createTask(ctx context.Context, task *models.Task, targetSt
 		defer unlock()
 	}
 
-	tx, err := r.db.BeginTx(ctx, nil)
+	tx, err := r.db.BeginTx(ctx, r.hierarchyTxOptions())
 	if err != nil {
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err := r.lockTaskHierarchy(ctx, tx, []string{task.WorkspaceID}, []string{task.ParentID}); err != nil {
+		return err
+	}
+	if err := r.validateCreationParentTx(ctx, tx, task); err != nil {
+		return err
+	}
 
 	// Serialize with the workspace delete cascade: the cascade locks the
 	// workspace row before inventorying its tasks, so a task created here
@@ -1033,18 +1046,20 @@ func (r *Repository) UpdateTaskPreservingDeferredLaunch(ctx context.Context, tas
 }
 
 func (r *Repository) updateTaskCommit(ctx context.Context, task *models.Task, expectedWorkflowID string, preservePosition, protectDeferredLaunch bool) error {
-	metadata, err := json.Marshal(task.Metadata)
-	if err != nil {
-		metadata = []byte("{}")
-	}
 
-	tx, err := r.db.BeginTx(ctx, nil)
+	tx, err := r.db.BeginTx(ctx, r.hierarchyTxOptions())
 	if err != nil {
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err := r.lockTaskHierarchy(ctx, tx, nil, []string{task.ID}); err != nil {
+		return err
+	}
+	if err := r.lockTaskUpdateSteps(ctx, tx, task); err != nil {
+		return err
+	}
 
-	entryID, markerEntryID, err := r.updateTaskTx(ctx, tx, task, metadata, expectedWorkflowID, preservePosition, protectDeferredLaunch, nil)
+	entryID, markerEntryID, err := r.updateTaskTx(ctx, tx, task, expectedWorkflowID, preservePosition, protectDeferredLaunch, nil)
 	if err != nil {
 		return err
 	}
@@ -1087,11 +1102,14 @@ func (r *Repository) UpdateTaskExactOperation(
 		fence = claimFence[0]
 	}
 
-	tx, err := r.db.BeginTx(ctx, nil)
+	tx, err := r.db.BeginTx(ctx, r.hierarchyTxOptions())
 	if err != nil {
 		return false, err
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err := r.lockTaskHierarchy(ctx, tx, nil, []string{task.ID}); err != nil {
+		return false, err
+	}
 
 	var storedWorkspaceID, storedTaskID, storedDigest, resultVersion string
 	err = tx.QueryRowContext(ctx, r.db.Rebind(`
@@ -1115,6 +1133,9 @@ func (r *Repository) UpdateTaskExactOperation(
 		return false, err
 	}
 
+	if err := r.lockTaskUpdateSteps(ctx, tx, task); err != nil {
+		return false, err
+	}
 	query := `SELECT workspace_id, updated_at FROM tasks WHERE id = ?`
 	if dialect.IsPostgres(r.db.DriverName()) {
 		query += forUpdateClause
@@ -1150,11 +1171,7 @@ func (r *Repository) UpdateTaskExactOperation(
 		return false, err
 	}
 
-	metadata, err := json.Marshal(task.Metadata)
-	if err != nil {
-		metadata = []byte("{}")
-	}
-	entryID, markerEntryID, err := r.updateTaskTx(ctx, tx, task, metadata, "", true, false, nil)
+	entryID, markerEntryID, err := r.updateTaskTx(ctx, tx, task, "", true, false, nil)
 	if err != nil {
 		return false, err
 	}
@@ -1352,7 +1369,6 @@ func (r *Repository) updateTaskTx(
 	ctx context.Context,
 	tx *sql.Tx,
 	task *models.Task,
-	metadata []byte,
 	expectedWorkflowID string,
 	preservePosition, protectDeferredLaunch bool,
 	workflowChangeSource *models.WorkflowChangeSource,
@@ -1373,6 +1389,10 @@ func (r *Repository) updateTaskTx(
 	}
 	if err := r.guardTaskCompletionTransitionTx(ctx, tx, task.ID, currentState, task.State,
 		fromWorkflowID, fromStepID, task.WorkflowID, task.WorkflowStepID); err != nil {
+		return "", 0, err
+	}
+	metadata, err := r.preserveTaskHierarchySnapshot(ctx, tx, task)
+	if err != nil {
 		return "", 0, err
 	}
 	metadata, err = r.preserveLiveHandoffProvenance(ctx, tx, task.ID, metadata)
@@ -1634,11 +1654,17 @@ func (r *Repository) MarkDeferredMoveAppliedForSession(
 	taskID, moveID string,
 	record messagequeue.PendingMoveRecord,
 ) (bool, error) {
-	tx, err := r.db.BeginTx(ctx, nil)
+	tx, err := r.db.BeginTx(ctx, r.hierarchyTxOptions())
 	if err != nil {
 		return false, err
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err := r.lockTaskHierarchy(ctx, tx, nil, []string{taskID}); err != nil {
+		return false, err
+	}
+	if err := r.lockTaskUpdateSteps(ctx, tx, &models.Task{ID: taskID}); err != nil {
+		return false, err
+	}
 	if err := r.validateDeferredMoveGuardTx(ctx, tx, record); err != nil {
 		return false, err
 	}
@@ -1665,11 +1691,11 @@ func (r *Repository) MarkDeferredMoveAppliedForSession(
 	applied[moveID] = true
 	task.Metadata[models.MetaKeyAppliedDeferredMoves] = applied
 	task.UpdatedAt = time.Now().UTC()
-	metadata, err := json.Marshal(task.Metadata)
+	_, err = json.Marshal(task.Metadata)
 	if err != nil {
 		return false, err
 	}
-	if _, _, err := r.updateTaskTx(ctx, tx, task, metadata, "", true, false, nil); err != nil {
+	if _, _, err := r.updateTaskTx(ctx, tx, task, "", true, false, nil); err != nil {
 		return false, err
 	}
 	if err := r.deleteDeferredMoveGuardTx(ctx, tx, record); err != nil {
@@ -1954,11 +1980,14 @@ func (r *Repository) updateTaskWithWorkflowStepAdmissionAttempt(
 		task.Metadata = map[string]interface{}{}
 	}
 
-	tx, err := r.db.BeginTx(ctx, nil)
+	tx, err := r.db.BeginTx(ctx, r.hierarchyTxOptions())
 	if err != nil {
 		return false, false, err
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err := r.lockTaskHierarchy(ctx, tx, nil, []string{task.ID}); err != nil {
+		return false, false, err
+	}
 
 	if exactOperation != nil {
 		var storedWorkspaceID, storedTaskID, storedDigest, resultVersion string
@@ -2144,11 +2173,7 @@ func (r *Repository) updateTaskWithWorkflowStepAdmissionAttempt(
 	} else {
 		delete(task.Metadata, models.MetaKeyTaskManagementDeferredFence)
 	}
-	metadata, err := json.Marshal(task.Metadata)
-	if err != nil {
-		metadata = []byte("{}")
-	}
-	entryID, markerEntryID, err := r.updateTaskTx(ctx, tx, task, metadata, expectedWorkflowID, false, false, workflowChangeSource)
+	entryID, markerEntryID, err := r.updateTaskTx(ctx, tx, task, expectedWorkflowID, false, false, workflowChangeSource)
 	if err != nil {
 		return false, false, err
 	}
@@ -2885,11 +2910,14 @@ func protectedTaskMetadataMergeExpression(driver string) string {
 // this as a targeted update prevents concurrent task edits from being replaced
 // by a stale full-row write.
 func (r *Repository) DetachTask(ctx context.Context, taskID string) (bool, error) {
-	tx, err := r.db.BeginTxx(ctx, nil)
+	tx, err := r.db.BeginTxx(ctx, r.hierarchyTxOptions())
 	if err != nil {
 		return false, err
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err := r.lockTaskHierarchy(ctx, tx, nil, []string{taskID}); err != nil {
+		return false, err
+	}
 
 	parentID, groupID, err := r.loadDetachmentState(ctx, tx, taskID)
 	if err != nil {
@@ -3188,10 +3216,6 @@ func detachTaskQuery(driver string) string {
 // UpdateTaskIfWorkflowStepHasCapacity updates a task inside the same write
 // transaction that checks a WIP-limited target step's current occupancy.
 func (r *Repository) UpdateTaskIfWorkflowStepHasCapacity(ctx context.Context, task *models.Task, targetStepID, excludeTaskID string, limit int) error {
-	metadata, err := json.Marshal(task.Metadata)
-	if err != nil {
-		metadata = []byte("{}")
-	}
 	workflowAgentOverrides, err := encodeWorkflowAgentOverridesValue(task.WorkflowAgentOverrides)
 	if err != nil {
 		return err
@@ -3201,11 +3225,17 @@ func (r *Repository) UpdateTaskIfWorkflowStepHasCapacity(ctx context.Context, ta
 	ctx, unlock = r.withStepArrivalLocks(ctx, targetStepID)
 	defer unlock()
 
-	tx, err := r.db.BeginTx(ctx, nil)
+	tx, err := r.db.BeginTx(ctx, r.hierarchyTxOptions())
 	if err != nil {
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err := r.lockTaskHierarchy(ctx, tx, nil, []string{task.ID}); err != nil {
+		return err
+	}
+	if err := r.lockTaskUpdateSteps(ctx, tx, task); err != nil {
+		return err
+	}
 
 	// Always an arrival into targetStepID (the fallback promotion path used
 	// when the atomic PromoteQueuedTaskIfWorkflowStepHasCapacity is
@@ -3230,6 +3260,10 @@ func (r *Repository) UpdateTaskIfWorkflowStepHasCapacity(ctx context.Context, ta
 	}
 
 	fromWorkflowID, fromStepID, _, err := r.readTaskStepInTx(ctx, tx, task.ID)
+	if err != nil {
+		return err
+	}
+	metadata, err := r.preserveTaskHierarchySnapshot(ctx, tx, task)
 	if err != nil {
 		return err
 	}
@@ -3298,11 +3332,14 @@ func (r *Repository) PromoteQueuedTaskIfWorkflowStepHasCapacity(
 	ctx, unlock = r.withStepArrivalLocks(ctx, destinationStepID, fromStepID)
 	defer unlock()
 
-	tx, err := r.db.BeginTx(ctx, nil)
+	tx, err := r.db.BeginTx(ctx, r.hierarchyTxOptions())
 	if err != nil {
 		return false, err
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err := r.lockTaskHierarchy(ctx, tx, nil, []string{task.ID}); err != nil {
+		return false, err
+	}
 
 	// A promotion also leaves fromStepID's queued/admitted band, not only
 	// destinationStepID's, so a concurrent reorder of fromStepID must see
@@ -3346,9 +3383,9 @@ func (r *Repository) PromoteQueuedTaskIfWorkflowStepHasCapacity(
 		}
 	}
 	delete(task.Metadata, models.MetaKeyTaskManagementDeferredFence)
-	metadata, err := json.Marshal(task.Metadata)
+	metadata, err := r.preserveTaskHierarchySnapshot(ctx, tx, task)
 	if err != nil {
-		metadata = []byte("{}")
+		return false, err
 	}
 	queuePredicate := `
 		  AND workflow_step_id = ?
@@ -3531,11 +3568,14 @@ func (r *Repository) DeleteTask(ctx context.Context, id string) error {
 // DeleteTaskWithVacatedStep deletes a task and returns the workflow step read
 // under the same task-row lock as the deletion.
 func (r *Repository) DeleteTaskWithVacatedStep(ctx context.Context, id string) (string, error) {
-	tx, err := r.db.BeginTxx(ctx, nil)
+	tx, err := r.db.BeginTxx(ctx, r.hierarchyTxOptions())
 	if err != nil {
 		return "", err
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err := r.lockTaskHierarchy(ctx, tx, nil, []string{id}); err != nil {
+		return "", err
+	}
 	// Lock the task's step first, so a concurrent ReorderStepTasks of that
 	// step cannot straddle this delete (see lockTaskStepForWrite): either the
 	// reorder's whole read-then-write runs first and sees this task still
@@ -3557,6 +3597,13 @@ func (r *Repository) DeleteTaskWithVacatedStep(ctx context.Context, id string) (
 	}
 	if !found {
 		return "", fmt.Errorf("%w: %s", ErrTaskNotFound, id)
+	}
+	var hasChildren bool
+	if err := tx.QueryRowContext(ctx, r.db.Rebind(`SELECT EXISTS (SELECT 1 FROM tasks WHERE parent_id = ?)`), id).Scan(&hasChildren); err != nil {
+		return "", err
+	}
+	if hasChildren {
+		return "", repoerrors.ErrTaskHierarchyConflict
 	}
 	if err := recoveryclaim.EnsureTaskAvailableTx(ctx, r.db, tx, id); err != nil {
 		return "", err
@@ -3892,11 +3939,22 @@ func (r *Repository) ReparentDirectChildren(ctx context.Context, oldParentID, ne
 	if oldParentID == "" {
 		return nil
 	}
-	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
+	tx, err := r.db.BeginTx(ctx, r.hierarchyTxOptions())
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := r.lockTaskHierarchy(ctx, tx, nil, []string{oldParentID, newParentID}); err != nil {
+		return err
+	}
+	_, err = tx.ExecContext(ctx, r.db.Rebind(`
 		UPDATE tasks SET parent_id = ?, updated_at = ?
 		WHERE parent_id = ?
 	`), newParentID, time.Now().UTC(), oldParentID)
-	return err
+	if err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 // ReparentDirectChildrenInWorkspace limits no-cascade reparenting to the
@@ -3911,11 +3969,22 @@ func (r *Repository) ReparentDirectChildrenInWorkspace(
 	if workspaceID == "" {
 		return errors.New("workspace id is required")
 	}
-	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
+	tx, err := r.db.BeginTx(ctx, r.hierarchyTxOptions())
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := r.lockTaskHierarchy(ctx, tx, nil, []string{oldParentID, newParentID}); err != nil {
+		return err
+	}
+	_, err = tx.ExecContext(ctx, r.db.Rebind(`
 		UPDATE tasks SET parent_id = ?, updated_at = ?
 		WHERE parent_id = ? AND workspace_id = ?
 	`), newParentID, time.Now().UTC(), oldParentID, workspaceID)
-	return err
+	if err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 // ListSiblings returns non-archived, non-ephemeral sibling tasks. A task
@@ -4177,12 +4246,26 @@ func (r *Repository) RestoreTaskParentIfUnchanged(
 	taskID, expectedParentID, restoredParentID string,
 	restoredWorkspaceMode string,
 ) error {
-	tx, err := r.db.BeginTxx(ctx, nil)
+	tx, err := r.db.BeginTxx(ctx, r.hierarchyTxOptions())
 	if err != nil {
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err := r.lockTaskHierarchy(ctx, tx, nil, []string{taskID, restoredParentID}); err != nil {
+		return err
+	}
 
+	reader := taskHierarchyReader{r, tx.Tx}
+	current, err := reader.GetTask(ctx, taskID)
+	if err != nil {
+		return err
+	}
+	if current.ParentID != expectedParentID {
+		return fmt.Errorf("task %s parent changed during compensation", taskID)
+	}
+	if err := hierarchy.ValidateParent(ctx, reader, current, restoredParentID); err != nil {
+		return err
+	}
 	query := `SELECT parent_id, metadata FROM tasks WHERE id = ?`
 	if dialect.IsPostgres(r.db.DriverName()) {
 		query += ` FOR UPDATE`
@@ -4531,11 +4614,14 @@ func (r *Repository) GetTasksByIDs(ctx context.Context, ids []string) ([]*models
 // ArchiveTask sets the archived_at timestamp on a task
 func (r *Repository) ArchiveTask(ctx context.Context, id string) error {
 	now := time.Now().UTC()
-	tx, err := r.db.BeginTxx(ctx, nil)
+	tx, err := r.db.BeginTxx(ctx, r.hierarchyTxOptions())
 	if err != nil {
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err := r.lockTaskHierarchy(ctx, tx, nil, []string{id}); err != nil {
+		return err
+	}
 	if err := r.lockTaskStepForWrite(ctx, tx, id); err != nil {
 		return err
 	}
@@ -4584,11 +4670,14 @@ func (r *Repository) ArchiveTaskExact(
 	if len(claimFences) == 1 {
 		fence = claimFences[0]
 	}
-	tx, err := r.db.BeginTxx(ctx, nil)
+	tx, err := r.db.BeginTxx(ctx, r.hierarchyTxOptions())
 	if err != nil {
 		return false, err
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err := r.lockTaskHierarchy(ctx, tx, nil, []string{taskID}); err != nil {
+		return false, err
+	}
 	if found, err := exactTaskCommandOperationInTx(ctx, tx, r.db.Rebind, workspaceID, taskID, operationID, payloadDigest); err != nil {
 		return false, err
 	} else if found {
@@ -4728,11 +4817,14 @@ func (r *Repository) ArchiveTaskIfAutoArchiveEligible(
 	expectedUpdatedAt time.Time,
 	cascadeID string,
 ) (bool, error) {
-	tx, err := r.db.BeginTxx(ctx, nil)
+	tx, err := r.db.BeginTxx(ctx, r.hierarchyTxOptions())
 	if err != nil {
 		return false, err
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err := r.lockTaskHierarchy(ctx, tx, nil, []string{id}); err != nil {
+		return false, err
+	}
 	now := time.Now().UTC()
 	query := fmt.Sprintf(`
 		UPDATE tasks AS t
@@ -4778,11 +4870,14 @@ func (r *Repository) ArchiveTaskIfActiveWithVacatedStep(
 	id string,
 	cascadeID string,
 ) (string, bool, error) {
-	tx, err := r.db.BeginTxx(ctx, nil)
+	tx, err := r.db.BeginTxx(ctx, r.hierarchyTxOptions())
 	if err != nil {
 		return "", false, err
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err := r.lockTaskHierarchy(ctx, tx, nil, []string{id}); err != nil {
+		return "", false, err
+	}
 	if err := r.lockTaskStepForWrite(ctx, tx, id); err != nil {
 		return "", false, err
 	}
@@ -4973,11 +5068,14 @@ func (r *Repository) UnarchiveTaskByCascade(ctx context.Context, id, cascadeID s
 	if cascadeID == "" {
 		return false, fmt.Errorf("cascadeID is required")
 	}
-	tx, err := r.db.BeginTxx(ctx, nil)
+	tx, err := r.db.BeginTxx(ctx, r.hierarchyTxOptions())
 	if err != nil {
 		return false, err
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err := r.lockTaskHierarchy(ctx, tx, nil, []string{id}); err != nil {
+		return false, err
+	}
 	locked, err := r.lockTaskArchiveLifecycleForWrite(ctx, tx, id)
 	if err != nil {
 		return false, err
@@ -5012,11 +5110,14 @@ func (r *Repository) UnarchiveTaskByCascade(ctx context.Context, id, cascadeID s
 // rows are only restored via UnarchiveTaskByCascade. Returns whether a
 // row was actually updated.
 func (r *Repository) UnarchiveTask(ctx context.Context, id string) (bool, error) {
-	tx, err := r.db.BeginTxx(ctx, nil)
+	tx, err := r.db.BeginTxx(ctx, r.hierarchyTxOptions())
 	if err != nil {
 		return false, err
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err := r.lockTaskHierarchy(ctx, tx, nil, []string{id}); err != nil {
+		return false, err
+	}
 	locked, err := r.lockTaskArchiveLifecycleForWrite(ctx, tx, id)
 	if err != nil {
 		return false, err

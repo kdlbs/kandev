@@ -11,6 +11,7 @@ import (
 
 	"github.com/jmoiron/sqlx"
 
+	internaldb "github.com/kandev/kandev/internal/db"
 	"github.com/kandev/kandev/internal/db/dialect"
 	taskmodels "github.com/kandev/kandev/internal/task/models"
 	taskrepo "github.com/kandev/kandev/internal/task/repository/sqlite"
@@ -976,21 +977,32 @@ func (r *Repository) UpdateTaskProjectID(ctx context.Context, taskID, projectID 
 // so a repeated PATCH with the same parent_id is a no-op for workspace
 // semantics.
 func (r *Repository) UpdateTaskParentID(ctx context.Context, taskID, parentID string) error {
-	query := `
-		UPDATE tasks
-		SET parent_id = ?,
-			metadata = CASE
-				WHEN parent_id IS NOT ? AND json_valid(metadata) THEN CASE
-					WHEN json_extract(metadata, '$.workspace.mode') = 'inherit_parent'
-					THEN json_set(metadata, '$.workspace.mode', 'shared_group')
-					ELSE metadata
-				END
-				ELSE metadata
-			END,
-			updated_at = CURRENT_TIMESTAMP
-		WHERE id = ?
-	`
-	result, err := r.db.ExecContext(ctx, r.db.Rebind(query), parentID, parentID, taskID)
+	var options *sql.TxOptions
+	if dialect.IsPostgres(r.db.DriverName()) {
+		options = &sql.TxOptions{Isolation: sql.LevelReadCommitted}
+	}
+	tx, err := r.db.BeginTxx(ctx, options)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := internaldb.LockTaskHierarchy(ctx, tx, r.db.DriverName(), r.db.Rebind, nil, []string{taskID, parentID}); err != nil {
+		return err
+	}
+	for _, id := range []string{taskID, parentID} {
+		if id == "" {
+			continue
+		}
+		var exists string
+		if err := tx.QueryRowContext(ctx, r.db.Rebind(`SELECT id FROM tasks WHERE id = ?`), id).Scan(&exists); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return fmt.Errorf("%w: %s", ErrTaskNotFound, id)
+			}
+			return err
+		}
+	}
+	query := taskParentUpdateQuery(r.db.DriverName())
+	result, err := tx.ExecContext(ctx, r.db.Rebind(query), parentID, parentID, taskID)
 	if err != nil {
 		return err
 	}
@@ -998,7 +1010,26 @@ func (r *Repository) UpdateTaskParentID(ctx context.Context, taskID, parentID st
 	if rows == 0 {
 		return fmt.Errorf("task not found: %s", taskID)
 	}
-	return nil
+	return tx.Commit()
+}
+
+func taskParentUpdateQuery(driver string) string {
+	if dialect.IsPostgres(driver) {
+		return `UPDATE tasks SET parent_id = ?,
+			metadata = CASE WHEN parent_id IS DISTINCT FROM ? AND metadata IS JSON THEN
+				CASE WHEN metadata::jsonb #>> '{workspace,mode}' = 'inherit_parent'
+					THEN jsonb_set(metadata::jsonb, '{workspace,mode}', '"shared_group"'::jsonb, true)::text
+					ELSE metadata END
+				ELSE metadata END,
+			updated_at = CURRENT_TIMESTAMP WHERE id = ?`
+	}
+	return `UPDATE tasks SET parent_id = ?,
+		metadata = CASE WHEN parent_id IS NOT ? AND json_valid(metadata) THEN
+			CASE WHEN json_extract(metadata, '$.workspace.mode') = 'inherit_parent'
+				THEN json_set(metadata, '$.workspace.mode', 'shared_group')
+				ELSE metadata END
+			ELSE metadata END,
+		updated_at = CURRENT_TIMESTAMP WHERE id = ?`
 }
 
 // taskScalarColumns enumerates the only columns execTaskScalar may target.

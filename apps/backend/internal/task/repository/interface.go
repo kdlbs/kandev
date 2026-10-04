@@ -23,6 +23,7 @@ var ErrTaskCompletionCriteriaConflict = repoerrors.ErrTaskCompletionCriteriaConf
 var ErrTaskCompletionEvidenceChanged = repoerrors.ErrTaskCompletionEvidenceChanged
 var ErrTaskCompletionHumanConfirmationRequired = repoerrors.ErrTaskCompletionHumanConfirmationRequired
 var ErrNoPrimarySession = repoerrors.ErrNoPrimarySession
+var ErrTaskHierarchyConflict = repoerrors.ErrTaskHierarchyConflict
 var ErrTaskParentMismatch = repoerrors.ErrTaskParentMismatch
 var ErrTaskPlanNotFound = repoerrors.ErrTaskPlanNotFound
 var ErrTaskPlanCommentsChanged = repoerrors.ErrTaskPlanCommentsChanged
@@ -67,7 +68,9 @@ type TaskRepository interface {
 	CreateTask(ctx context.Context, task *models.Task) error
 	GetTask(ctx context.Context, id string) (*models.Task, error)
 	GetTasksByIDs(ctx context.Context, ids []string) ([]*models.Task, error)
-	// UpdateTask writes the full task row, preserving whatever position is
+	// UpdateTask writes the full task row, preserving the current parent and
+	// normalized materialized workspace mode/group unless parent intent was
+	// admitted through TaskHierarchyAdmission. It also preserves whatever position is
 	// currently persisted regardless of what task.Position holds — a
 	// pre-transaction read is not authoritative once a concurrent reorder or
 	// arrival may have moved the row (REQ-TASKS-KANBAN-TASK-REORDERING-001.28/
@@ -82,9 +85,9 @@ type TaskRepository interface {
 	// task snapshot old enough to race the session ceiling's deferred_launch
 	// compare-and-set writers: deferred_launch in the write payload is
 	// replaced by the row's own current value at write time, so a stale
-	// snapshot can never resurrect or clobber a concurrent CAS write. Every
-	// other key keeps ordinary replace semantics, including deletion by
-	// omission.
+	// snapshot can never resurrect or clobber a concurrent CAS write. Outside
+	// hierarchy-owned workspace identity and other server provenance guards,
+	// metadata keeps ordinary replacement/deletion semantics.
 	UpdateTaskPreservingDeferredLaunch(ctx context.Context, task *models.Task) error
 	DeleteTask(ctx context.Context, id string) error
 	ListTasks(ctx context.Context, workflowID string) ([]*models.Task, error)

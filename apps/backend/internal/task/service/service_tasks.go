@@ -27,6 +27,7 @@ import (
 	"github.com/kandev/kandev/internal/steptelemetry"
 	"github.com/kandev/kandev/internal/task/models"
 	taskrepo "github.com/kandev/kandev/internal/task/repository"
+	"github.com/kandev/kandev/internal/task/repository/hierarchy"
 	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 	"github.com/kandev/kandev/internal/worktree"
@@ -63,7 +64,7 @@ const (
 // ErrSubtaskDepthExceeded is returned when a caller tries to create a
 // subtask of a kanban subtask (nesting depth > 1). Office task trees are
 // intentionally exempt.
-var ErrSubtaskDepthExceeded = fmt.Errorf("cannot create a subtask of a subtask — maximum nesting depth is 1 for kanban tasks. Create a sibling task under the same parent or a top-level task instead")
+var ErrSubtaskDepthExceeded = hierarchy.ErrSubtaskDepthExceeded
 
 // ErrInvalidTaskWorkflow identifies task creation requests whose explicit
 // workflow or workflow step relationship is inconsistent.
@@ -269,6 +270,7 @@ func (s *Service) CreateTask(ctx context.Context, req *CreateTaskRequest) (Creat
 		return CreateTaskResult{}, err
 	}
 
+	ctx = taskrepo.WithTaskCreationParentValidator(ctx, hierarchy.ValidateCreationParent)
 	if err := s.createTaskWithCapacity(ctx, prepared.task); err != nil {
 		if found, ok := s.recoverFoundTaskAfterInsertFailure(ctx, req.WorkspaceID, externalID); ok {
 			return found, nil
@@ -898,14 +900,10 @@ func (s *Service) validateSubtaskDepth(ctx context.Context, req *CreateTaskReque
 	if req.ParentID == "" {
 		return nil
 	}
-	parent, err := s.tasks.GetTask(ctx, req.ParentID)
-	if err != nil {
-		return fmt.Errorf("invalid parent_id: %w", err)
+	if admission, ok := s.tasks.(taskrepo.TaskHierarchyAdmission); ok {
+		return admission.ValidateTaskCreationParent(ctx, req.WorkspaceID, req.ParentID, hierarchy.ValidateCreationParent)
 	}
-	if parent.ParentID != "" && !parent.IsFromOffice {
-		return ErrSubtaskDepthExceeded
-	}
-	return nil
+	return hierarchy.ValidateCreationParent(ctx, s.tasks, nil, req.ParentID)
 }
 
 // resolveOfficeWorkflow sets WorkflowID on the request from the workspace's office workflow.
@@ -2078,15 +2076,6 @@ func (s *Service) UpdateTask(ctx context.Context, id string, req *UpdateTaskRequ
 			delete(task.Metadata, models.MetaKeyAgentTitleOwnerSessionID)
 		}
 	}
-	if req.ParentID != nil && *req.ParentID != task.ParentID {
-		parentCleared = *req.ParentID == ""
-		task.ParentID = *req.ParentID
-		// Re-parenting (or un-nesting) an inherit_parent subtask keeps its
-		// materialized workspace as shared_group instead of silently
-		// inheriting a different parent's workspace — the same composite
-		// semantics as detach-then-nest.
-		normalizeWorkspaceModeAfterReparent(task)
-	}
 	task.UpdatedAt = time.Now().UTC()
 
 	updateCtx := ctx
@@ -2097,7 +2086,11 @@ func (s *Service) UpdateTask(ctx context.Context, id string, req *UpdateTaskRequ
 		})
 	}
 	var updateErr error
-	if req.Position != nil {
+	if admission, ok := s.tasks.(taskrepo.TaskHierarchyAdmission); ok {
+		var parentChanged bool
+		parentChanged, updateErr = admission.UpdateTaskWithParentAdmission(updateCtx, task, req.ParentID, req.Position != nil, s.resolveParentWithReader)
+		parentCleared = parentChanged && req.ParentID != nil && *req.ParentID == ""
+	} else if req.Position != nil {
 		updateErr = s.tasks.UpdateTaskWithExplicitPosition(updateCtx, task)
 	} else {
 		updateErr = s.tasks.UpdateTaskPreservingDeferredLaunch(updateCtx, task)
@@ -2165,8 +2158,8 @@ func (s *Service) validateTaskUpdateReferences(ctx context.Context, task *models
 		}
 		assignee = resolved
 	}
-	if req.ParentID != nil && *req.ParentID != task.ParentID {
-		if err := s.resolveParentID(ctx, task, *req.ParentID); err != nil {
+	if req.ParentID != nil {
+		if err := s.validateParentAdmission(ctx, task, *req.ParentID); err != nil {
 			return "", err
 		}
 	}
@@ -2245,11 +2238,6 @@ func (s *Service) SetPendingAgentTitle(ctx context.Context, id, sessionID, title
 	return task, true, "", nil
 }
 
-// parentChainWalkLimit bounds the ancestor walk in resolveParentID so a
-// corrupted parent chain can never spin forever. Real subtask trees are
-// nowhere near this depth.
-const parentChainWalkLimit = 1000
-
 // parentIDEventField is the task-event payload key carrying a task's parent.
 // Emitting it explicitly (as nil) on un-nest lets clients tell "parent
 // removed" apart from "parent unchanged".
@@ -2258,100 +2246,18 @@ const parentIDEventField = "parent_id"
 // ErrInvalidParent wraps every rejection from resolveParentID so HTTP/WS
 // handlers can classify a bad re-parent request as a client error (400)
 // rather than an internal error (500).
-var ErrInvalidParent = errors.New("invalid parent")
+var ErrInvalidParent = hierarchy.ErrInvalidParent
 
-// normalizeWorkspaceModeAfterReparent applies the detach operation's
-// workspace policy to an explicit parent change: an inherit_parent subtask
-// whose hierarchy is being changed must not silently start inheriting a
-// different parent's workspace, so its mode becomes shared_group (its
-// materialized workspace and group membership are unchanged). Other modes
-// pass through.
-func normalizeWorkspaceModeAfterReparent(task *models.Task) {
-	workspace, ok := task.Metadata["workspace"].(map[string]interface{})
-	if !ok {
-		return
+// validateParentAdmission completes the locked preflight before entity preparation.
+func (s *Service) validateParentAdmission(ctx context.Context, task *models.Task, parent string) error {
+	if admission, ok := s.tasks.(taskrepo.TaskHierarchyAdmission); ok {
+		return admission.ValidateTaskParent(ctx, task.ID, parent, s.resolveParentWithReader)
 	}
-	if workspace["mode"] == workspaceModeInheritParent {
-		workspace["mode"] = workspaceModeSharedGroup
-	}
+	return errors.New("task repository does not support hierarchy admission")
 }
 
-// resolveParentID validates a proposed parent assignment for task. An empty
-// parentID (un-nest) is always allowed. A non-empty parentID must reference a
-// different, existing, non-archived task in the same workspace, and must not
-// introduce a cycle (nesting a task under one of its own descendants).
-func (s *Service) resolveParentID(ctx context.Context, task *models.Task, parentID string) error {
-	if parentID == "" {
-		return nil
-	}
-	if parentID == task.ID {
-		return fmt.Errorf("%w: a task cannot be its own parent", ErrInvalidParent)
-	}
-	parent, err := s.tasks.GetTask(ctx, parentID)
-	if err != nil {
-		return fmt.Errorf("%w: parent task not found: %s", ErrInvalidParent, parentID)
-	}
-	if parent.WorkspaceID != task.WorkspaceID {
-		return fmt.Errorf("%w: parent task must belong to the same workspace", ErrInvalidParent)
-	}
-	if parent.ArchivedAt != nil {
-		return fmt.Errorf("%w: parent task is archived", ErrInvalidParent)
-	}
-	// Cycle detection runs before the depth guard so a self-referential
-	// re-parent reports the more specific "cycle" error rather than a depth
-	// violation.
-	if err := s.checkParentCycle(ctx, task, parent); err != nil {
-		return err
-	}
-	return s.validateReparentDepth(ctx, task, parent)
-}
-
-// checkParentCycle walks up the parent's ancestor chain. Reaching task.ID means
-// the new edge would close a cycle (task -> ... -> parent -> task).
-func (s *Service) checkParentCycle(ctx context.Context, task, parent *models.Task) error {
-	current := parent
-	for i := 0; i < parentChainWalkLimit; i++ {
-		if current.ID == task.ID {
-			return fmt.Errorf("%w: nesting would create a cycle", ErrInvalidParent)
-		}
-		if current.ParentID == "" {
-			return nil
-		}
-		ancestor, err := s.tasks.GetTask(ctx, current.ParentID)
-		if err != nil {
-			// Broken chain — treat the missing ancestor as a root so we don't
-			// block a legitimate re-parent on inconsistent data.
-			return nil
-		}
-		current = ancestor
-	}
-	return fmt.Errorf("%w: parent chain too deep", ErrInvalidParent)
-}
-
-// validateReparentDepth enforces the one-level subtask limit for kanban
-// (non-office) tasks on the re-parent path, mirroring validateSubtaskDepth on
-// the create path. Office task trees intentionally allow arbitrary depth, so
-// the guard is skipped when either endpoint is an Office task. The returned
-// error wraps both ErrInvalidParent (so handlers map it to HTTP 400) and
-// ErrSubtaskDepthExceeded (so callers can still classify the depth violation).
-func (s *Service) validateReparentDepth(ctx context.Context, task, parent *models.Task) error {
-	if task.IsFromOffice || parent.IsFromOffice {
-		return nil
-	}
-	// Nesting under a task that is itself a subtask would create a grandchild.
-	if parent.ParentID != "" {
-		return fmt.Errorf("%w: %w", ErrInvalidParent, ErrSubtaskDepthExceeded)
-	}
-	// Moving a task that already has children would push those children to
-	// depth 2 under the new parent.
-	children, err := s.tasks.ListChildren(ctx, task.ID)
-	if err != nil {
-		return fmt.Errorf("%w: failed to check existing subtasks: %v", ErrInvalidParent, err)
-	}
-	if len(children) > 0 {
-		return fmt.Errorf("%w: %w", ErrInvalidParent, ErrSubtaskDepthExceeded)
-	}
-	return nil
+func (s *Service) resolveParentWithReader(ctx context.Context, reader taskrepo.TaskHierarchyReader, task *models.Task, parentID string) error {
+	return hierarchy.ValidateParent(ctx, reader, task, parentID)
 }
 
 type taskMessageRollbackRepository interface {

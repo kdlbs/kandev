@@ -45,6 +45,10 @@ func handleNotFound(c *gin.Context, log *logger.Logger, err error, fallback stri
 		c.JSON(status, taskErrorBody(err))
 		return
 	}
+	if errors.Is(err, taskrepository.ErrTaskHierarchyConflict) {
+		c.JSON(http.StatusConflict, taskErrorBody(err))
+		return
+	}
 	if errors.Is(err, taskrepository.ErrTaskCompletionGateBlocked) {
 		c.JSON(http.StatusConflict, gin.H{"code": "task_completion_gate_blocked"})
 		return
