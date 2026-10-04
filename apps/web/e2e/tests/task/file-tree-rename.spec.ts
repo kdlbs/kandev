@@ -5,9 +5,9 @@ import { test, expect } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
 import { GitHelper, makeGitEnv, createStandardProfile } from "../../helpers/git-helper";
 import { SessionPage } from "../../pages/session-page";
-import { dwell, watchWs } from "../../helpers/causal-waits";
+import { watchWs } from "../../helpers/causal-waits";
 
-// Inline rename lives in file-context-menu.tsx (useFileRename + TreeNodeName).
+// Inline rename lives in file-context-menu.tsx and file-tree-node-name.tsx.
 // Entry points (today, in product code):
 //   - Right-click -> "Rename" menu item
 //   - The input is focused immediately after isRenaming=true, while blur-commit is
@@ -186,12 +186,7 @@ test.describe("File tree inline rename", () => {
     const input = await startRenameViaContextMenu(testPage, node);
     await input.press("ControlOrMeta+A");
     await input.fill("blur-final.ts");
-    await dwell(
-      testPage,
-      500,
-      "product-timer",
-      "the product gates blur-commit on a ~400ms timer after isRenaming flips; that timer publishes nothing to observe, so the wait has to outlast it",
-    );
+    await expect(input).toHaveAttribute("data-blur-commit-ready", "true");
     // Click another file to blur the input. The other node also belongs to
     // the tree, so we don't lose tree-container focus state.
     await (await session.fileTree.waitForFileTreeNode("other.ts")).click();

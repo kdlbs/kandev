@@ -1,7 +1,7 @@
 import { test, expect } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
 import { pollUntil } from "../../helpers/poll-until";
-import { seedIdleSession } from "../../helpers/session";
+import { seedIdleSession, waitForSessionDone } from "../../helpers/session";
 import { listTransientRetryNotices } from "../../helpers/transient-retry";
 import { SessionPage } from "../../pages/session-page";
 
@@ -104,6 +104,15 @@ test.describe("transient provider error (529 Overloaded) retry", () => {
     const session = await seedIdleSession(testPage, apiClient, seedData, "Overloaded Backoff Test");
     const sessionId = await session.activeChat().getAttribute("data-session-id");
     if (!sessionId) throw new Error("active chat did not expose a session id");
+    const taskId = new URL(testPage.url()).pathname.split("/").filter(Boolean).at(-1);
+    if (!taskId) throw new Error("task page did not expose a task id");
+    await waitForSessionDone(
+      apiClient,
+      taskId,
+      sessionId,
+      "waiting for the seeded turn to settle before sending the transient failure",
+      15_000,
+    );
 
     // /overloaded:9 keeps failing, so each backoff retry re-drives the prompt
     // and the orchestrator advances the attempt counter. Read the persisted
