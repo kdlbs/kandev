@@ -2,7 +2,12 @@ import fs from "node:fs";
 import path from "node:path";
 import { test, expect } from "../../fixtures/test-base";
 import { openQuickChatSetup, selectAgentIfNeeded } from "./quick-chat-helpers";
-import { completeQuickChatOpening, expectTouchTarget } from "./quick-chat-opening-composer-helpers";
+import {
+  completeQuickChatOpening,
+  expectContextRowSpacing,
+  expectMixedContextRow,
+  expectTouchTarget,
+} from "./quick-chat-opening-composer-helpers";
 
 function findMaterializedAttachment(root: string, name: string): string | null {
   const pending: string[] = [root];
@@ -75,17 +80,13 @@ test.describe("Quick Chat opening composer", () => {
     await repositoryPicker.getByRole("option").first().click();
     await expect(composer.getByTestId("repo-chip")).toHaveCount(1);
     await expect(dialog.getByTestId("branch-chip-trigger")).toContainText("main");
-    const chipRowBox = await dialog.getByTestId("quick-chat-repository-chips").boundingBox();
-    const chipBox = await dialog.getByTestId("repo-chip").boundingBox();
-    if (!chipRowBox || !chipBox) throw new Error("repository chip bounds missing");
-    expect(
-      Math.abs(
-        chipBox.y - chipRowBox.y - (chipRowBox.y + chipRowBox.height - chipBox.y - chipBox.height),
-      ),
-    ).toBeLessThanOrEqual(1);
+    await expectContextRowSpacing(dialog, dialog.getByTestId("repo-chip"));
+    await expectMixedContextRow(dialog, true);
     await prCapture.screenshot("toolbar-desktop", {
-      caption: "Quick Chat composer with repository chips and compact toolbar",
+      caption: "Quick Chat with repositories and images sharing a compact context row",
     });
+    await dialog.getByTestId("context-chip-remove").nth(1).click();
+    await dialog.getByTestId("context-chip-remove").click();
     await composer.getByTestId("remove-repo-chip").click();
 
     const desktopGeometry = await Promise.all([
@@ -130,6 +131,7 @@ test.describe("Quick Chat opening composer", () => {
     await expect(configurationToggle).toHaveAttribute("aria-checked", "true");
     await expect(dialog.getByTestId("add-repository")).toBeDisabled();
     await expect(composer.getByRole("status")).toHaveText("Configuration chat");
+    await expectContextRowSpacing(dialog, composer.getByRole("status"));
     await expect(editor).toHaveValue("Keep this draft while switching setup modes");
     await configurationToggle.click();
     await expect(dialog.getByTestId("add-repository")).toBeEnabled();

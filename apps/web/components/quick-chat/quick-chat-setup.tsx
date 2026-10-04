@@ -353,17 +353,14 @@ function QuickChatComposerContext({
   const { isMobile } = useResponsiveBreakpoint();
   if (kind === "config") {
     return (
-      <div role="status" className="px-3 pt-3 text-xs font-medium text-muted-foreground">
+      <div role="status" className="text-xs font-medium text-muted-foreground">
         {t("chat:configurationChat")}
       </div>
     );
   }
   if (draft.repositories.length === 0) return null;
   return (
-    <div
-      className="flex flex-wrap items-center gap-2 p-3"
-      data-testid="quick-chat-repository-chips"
-    >
+    <div className="contents" data-testid="quick-chat-repository-chips">
       {touch || isMobile ? (
         draft.repositories.map((row) => (
           <QuickChatMobileRepositoryChip

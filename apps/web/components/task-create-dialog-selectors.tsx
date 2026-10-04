@@ -1308,8 +1308,12 @@ export const TaskFormInputs = memo(function TaskFormInputs({
       <div
         className={`min-w-0 max-w-full rounded-md border border-input bg-transparent focus-within:ring-2 focus-within:ring-ring/30 ${contextItems.length > 0 ? "ring-0" : ""}`}
       >
-        {contextLeadingContent}
-        <ContextZone items={contextItems} />
+        <ContextZone
+          items={contextItems}
+          leadingContent={contextLeadingContent}
+          rowClassName={quickChatComposer ? "gap-2 px-3 py-2" : undefined}
+          scrollable={!quickChatComposer}
+        />
         <TaskDescriptionInput
           isLaunchPromptPreview={isLaunchPromptPreview}
           launchPromptPreview={launchPromptPreview}

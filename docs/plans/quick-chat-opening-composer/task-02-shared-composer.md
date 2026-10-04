@@ -81,6 +81,7 @@ What would you like to discuss?      +-------------------------------+
 Plus opens a repository picker directly. Configuration uses hover/focus help on
 desktop and a description with a switch in a phone sheet. Its enabled indicator
 appears inside the composer; repository chips return when the mode is disabled.
+Repository and attachment chips share one row and wrap when the viewport is narrow.
 
 
 Desktop centers the bounded composer beneath fixed tabs. Phone uses a full-height
@@ -239,3 +240,21 @@ Merged main at `c827368313266d67c32e9719e68d61b4d19cfdf7`. The shared composer
 retains main's task-created callback registration and this branch's Quick Chat
 surface identity. Focused composer/callback tests passed (5 files, 92 tests),
 as did web typecheck, focused ESLint, staged Go formatting and whitespace checks.
+
+### Shared context row and tighter spacing
+
+Repository chips, image/file attachments, and the configuration label use the
+shared context row. Its 8px vertical padding centers the label and reduces the
+repository row's former 12px padding. Horizontal padding remains 12px. On phones,
+chips wrap within the setup scroll body and retain their touch controls.
+
+The browser regression first reproduced the former 12px padding. Final managed
+desktop opening/retry tests passed (2), and the phone opening test passed (1)
+against the fresh backend and Vite build. The initial desktop retry check timed
+out at its existing five-second message poll; its isolated rerun and the final
+full desktop suite passed. Desktop and phone screenshots were inspected.
+
+Focused frontend tests passed (4 files, 71 tests), along with web typecheck,
+changed-file ESLint without warnings, specification catalog validation, full
+specification lint, and whitespace checks. Public instructions and labels remain
+accurate; this follow-up changes spacing and placement only.

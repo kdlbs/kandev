@@ -91,3 +91,54 @@ export async function expectNoHorizontalOverflow(page: Page): Promise<void> {
     true,
   );
 }
+
+export async function expectContextRowSpacing(dialog: Locator, chip: Locator): Promise<void> {
+  const padding = await chip.evaluate((element) => {
+    let parent = element.parentElement;
+    while (parent && getComputedStyle(parent).display === "contents") {
+      parent = parent.parentElement;
+    }
+    if (!parent) throw new Error("context row missing");
+    const style = getComputedStyle(parent);
+    return { top: parseFloat(style.paddingTop), bottom: parseFloat(style.paddingBottom) };
+  });
+  expect(padding).toEqual({ top: 8, bottom: 8 });
+  const row = dialog.getByTestId("composer-context-row");
+  await expect(row).toHaveCount(1);
+  const rowBox = await row.boundingBox();
+  const chipBox = await chip.boundingBox();
+  if (!rowBox || !chipBox) throw new Error("context row bounds missing");
+  expect(
+    Math.abs(chipBox.y - rowBox.y - (rowBox.y + rowBox.height - chipBox.y - chipBox.height)),
+  ).toBeLessThanOrEqual(1);
+}
+
+export async function expectMixedContextRow(dialog: Locator, sameLine: boolean): Promise<void> {
+  const buffer = Buffer.from(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+j7xkAAAAASUVORK5CYII=",
+    "base64",
+  );
+  await dialog.locator('input[type="file"]').setInputFiles([
+    { name: "context-one.png", mimeType: "image/png", buffer },
+    { name: "context-two.png", mimeType: "image/png", buffer },
+  ]);
+  const row = dialog.getByTestId("composer-context-row");
+  const images = row.getByTestId("context-chip-remove").locator("xpath=..");
+  await expect(images).toHaveCount(2);
+  await expect(row.getByTestId("repo-chip")).toHaveCount(1);
+  expect(
+    await images.evaluateAll((elements) =>
+      elements.every((element) => element.parentElement?.dataset.testid === "composer-context-row"),
+    ),
+  ).toBe(true);
+  expect(await row.evaluate((element) => getComputedStyle(element).display)).toBe("flex");
+  if (sameLine) {
+    const repoBox = await row.getByTestId("repo-chip").boundingBox();
+    const imageBox = await images.nth(1).boundingBox();
+    if (!repoBox || !imageBox) throw new Error("mixed context bounds missing");
+    expect(imageBox.x).toBeGreaterThan(repoBox.x + repoBox.width);
+    expect(
+      Math.abs(repoBox.y + repoBox.height / 2 - imageBox.y - imageBox.height / 2),
+    ).toBeLessThanOrEqual(1);
+  }
+}

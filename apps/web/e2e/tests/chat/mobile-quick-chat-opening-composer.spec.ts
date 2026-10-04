@@ -2,6 +2,8 @@ import { test, expect } from "../../fixtures/test-base";
 import { openMobileQuickChatSetup } from "./quick-chat-saved-prompt-delivery-helpers";
 import {
   completeQuickChatOpening,
+  expectContextRowSpacing,
+  expectMixedContextRow,
   expectNoHorizontalOverflow,
   expectTouchTarget,
 } from "./quick-chat-opening-composer-helpers";
@@ -95,17 +97,14 @@ test("opens the phone picker and delivers the opening prompt", async ({
     const branch = dialog.getByTestId("branch-chip-trigger");
     await expectTouchTarget(branch);
     await expect(branch).toContainText("main");
-    const chipRowBox = await dialog.getByTestId("quick-chat-repository-chips").boundingBox();
-    const chipBox = await dialog.getByTestId("repo-chip").boundingBox();
-    if (!chipRowBox || !chipBox) throw new Error("repository chip bounds missing");
-    expect(
-      Math.abs(
-        chipBox.y - chipRowBox.y - (chipRowBox.y + chipRowBox.height - chipBox.y - chipBox.height),
-      ),
-    ).toBeLessThanOrEqual(1);
+    await expectContextRowSpacing(dialog, dialog.getByTestId("repo-chip"));
+    await expectMixedContextRow(dialog, false);
+    await expectNoHorizontalOverflow(testPage);
     await prCapture.screenshot("toolbar-phone", {
-      caption: "Phone Quick Chat composer with touch controls and repository chips",
+      caption: "Phone Quick Chat with repositories and images in one wrapping context row",
     });
+    await dialog.getByTestId("context-chip-remove").nth(1).click();
+    await dialog.getByTestId("context-chip-remove").click();
     await branch.tap();
     const branchPicker = testPage.getByTestId("quick-chat-branch-picker");
     await expect(branchPicker).toBeVisible();
@@ -129,6 +128,9 @@ test("opens the phone picker and delivers the opening prompt", async ({
     await testPage.getByRole("switch", { name: "Configuration chat" }).tap();
     await expect(configurationAction).toHaveAttribute("data-variant", "default");
     await expect(addRepository).toBeDisabled();
+    const configurationLabel = dialog.getByTestId("quick-chat-setup").getByRole("status");
+    await expect(configurationLabel).toHaveText("Configuration chat");
+    await expectContextRowSpacing(dialog, configurationLabel);
     await configurationAction.tap();
     await testPage.getByRole("switch", { name: "Configuration chat" }).tap();
     await expect(dialog.getByTestId("repo-chip")).toHaveCount(1);

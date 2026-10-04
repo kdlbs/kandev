@@ -126,7 +126,11 @@ focus.
 ## Responsive composition
 
 Desktop retains the resizable Quick Chat dialog and tab strip. Center a bounded
-composer in the remaining slot. Repository chips occupy the context area inside the composer above the input.
+composer in the remaining slot. Repository chips and attachments share one
+wrapping context row above the input. The configuration label uses that same row
+in configuration mode. Center its contents vertically with balanced 8px padding
+above and below; keep 12px horizontal padding. Phone chips wrap naturally within
+the setup scroll body without a separate context scrollbar.
 Add repository precedes Attach and opens a picker without allocating a blank row.
 The configuration icon follows Attach, with explanatory hover/focus help and a
 visible mode indicator when enabled. One agent/profile selector follows the composer.
