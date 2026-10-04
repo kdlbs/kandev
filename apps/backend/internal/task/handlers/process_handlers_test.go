@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/kandev/kandev/internal/task/repository"
+	managed "github.com/kandev/kandev/internal/task/repository/managedconversation"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -35,6 +36,14 @@ type mockRepository struct {
 	scriptsByRepo map[string][]*models.RepositoryScript
 	sessions      map[string]*models.TaskSession
 	executors     map[string]*models.Executor
+}
+
+func (*mockRepository) EnsureManagedConversation(context.Context, managed.EnsureRequest) (managed.Result, error) {
+	return managed.Result{}, managed.ErrUnavailable
+}
+
+func (*mockRepository) ChangeManagedConversationState(context.Context, managed.StateRequest) (managed.Result, error) {
+	return managed.Result{}, managed.ErrUnavailable
 }
 
 func (m *mockRepository) UpdateTaskFieldsWithParentAdmission(context.Context, string, models.TaskFieldUpdate, repository.TaskParentValidator) (*models.TaskFieldUpdateResult, error) {
