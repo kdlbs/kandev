@@ -204,7 +204,10 @@ missing root. Do not migrate or repair old
 relationships. Keep `ListChildren`'s active/non-ephemeral/non-automation depth population and the
 update exemption when **either** endpoint is Office. Creation retains its existing distinct
 `validateSubtaskDepth` predicate based on the parent, including its current error shape and
-historical workspace/archive eligibility; do not unify those policies by accident.
+historical workspace/archive eligibility; do not unify those policies by accident. Creation
+retains `invalid parent_id: %w` and `ErrTaskNotFound` for a typed missing target, while genuine
+parent-read failures return unchanged rather than adding that validation prefix. The existing
+legacy transport string classifier is outside this correction.
 
 ## Request presence and snapshot writers
 

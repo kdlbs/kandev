@@ -3,6 +3,8 @@ package sqlite_test
 import (
 	"context"
 	"errors"
+	"net/url"
+	"strings"
 	"testing"
 	"time"
 
@@ -31,14 +33,25 @@ func TestTaskHierarchyAdmissionOfficeSerialization(t *testing.T) {
 	if err := first.QueryRow(`SELECT current_schema()`).Scan(&schema); err != nil {
 		t.Fatal(err)
 	}
-	raw, err := internaldb.OpenPostgres(testutil.PostgresDSNFromEnv(t), 1, 1)
+	raw, err := internaldb.OpenPostgres(officeHierarchySchemaDSN(testutil.PostgresDSNFromEnv(t), schema), 1, 1)
 	if err != nil {
 		t.Fatal(err)
 	}
 	second := sqlx.NewDb(raw, "pgx")
 	t.Cleanup(func() { _ = second.Close() })
-	if _, err := second.Exec(`SET search_path TO ` + schema); err != nil {
+	var initialPID int
+	if err := second.QueryRow(`SELECT pg_backend_pid()`).Scan(&initialPID); err != nil {
 		t.Fatal(err)
+	}
+	second.SetMaxIdleConns(0)
+	var renewedSchema string
+	var renewedPID int
+	if err := second.QueryRow(`SELECT current_schema(), pg_backend_pid()`).Scan(&renewedSchema, &renewedPID); err != nil {
+		t.Fatal(err)
+	}
+	second.SetMaxIdleConns(1)
+	if renewedPID == initialPID || renewedSchema != schema {
+		t.Fatalf("renewed connection PID %d (was %d), schema %q, want isolated %q", renewedPID, initialPID, renewedSchema, schema)
 	}
 	office, err := officesqlite.NewWithDB(second, second, nil)
 	if err != nil {
@@ -152,4 +165,18 @@ func TestTaskHierarchyAdmissionOfficeSerialization(t *testing.T) {
 	if metadata != "{" || parent != "" {
 		t.Fatalf("invalid metadata control: metadata=%q parent=%q", metadata, parent)
 	}
+}
+
+func officeHierarchySchemaDSN(dsn, schema string) string {
+	if strings.HasPrefix(dsn, "postgres://") || strings.HasPrefix(dsn, "postgresql://") {
+		parsed, err := url.Parse(dsn)
+		if err != nil {
+			panic(err)
+		}
+		query := parsed.Query()
+		query.Set("search_path", schema)
+		parsed.RawQuery = query.Encode()
+		return parsed.String()
+	}
+	return dsn + " search_path=" + schema
 }

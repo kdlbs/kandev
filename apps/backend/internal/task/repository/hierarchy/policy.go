@@ -101,7 +101,10 @@ func ValidateCreationParent(ctx context.Context, reader TaskHierarchyReader, _ *
 	}
 	parent, err := reader.GetTask(ctx, parentID)
 	if err != nil {
-		return fmt.Errorf("invalid parent_id: %w", err)
+		if errors.Is(err, repoerrors.ErrTaskNotFound) {
+			return fmt.Errorf("invalid parent_id: %w", err)
+		}
+		return err
 	}
 	if parent.ParentID != "" && !parent.IsFromOffice {
 		return ErrSubtaskDepthExceeded

@@ -449,3 +449,61 @@ explicit10m/11m duration bound and otherwise unchanged exact base/resources.
 Corrected child-read full CHANGED lint13074 ACTUALLY JOINED0, zero issues; full ./... at immutable
 base d5142d9 with explicitly authorized10m/11m duration and unchanged resources. Normal active
 hooks/publication and new-head review/CI/delivery remain; earlier head/failure receipts unchanged.
+
+
+ROOT releases both findings in FULL5404893556 with creation missing-target contract preserved.
+Office fixture RED35741 joined1 store0.462s observed real retirement PID919->920 restoring public
+schema before NewWithDB; no public-table access or initialization. Minimal startup DSN URI/keyword
+helper and retained retirement assertion GREEN13953 joined0 store1.525s, physical workspace wait
+PID926 and all existing normalization/same-parent/malformed/target-existence controls retained.
+Exact affected selector `^TestTaskHierarchyAdmissionOfficeSerialization$`, existing owned PG only.
+Creation selector `^TestTaskHierarchyAdmissionRegisteredWSCreationReadErrors$` uses registered WS
+with real SQLite service/store; decorator delegates actual admitted parent read and predicate,
+optionally cancels only that reader context. Malformed persisted-target/cancellation must avoid
+the added invalid-prefix; typed missing keeps exact invalid parent_id:%w and ErrTaskNotFound,
+depth keeps its existing distinct sentinel; full raw task rows/events must remain unchanged.
+First35350 joined1 compile fixture Queryx/*sql.DB mismatch is not behavioral RED; fixed via existing
+sqlx wrapper with no production changes. Actual behavior RED69772 pending. Existing global
+legacy string classifier is unchanged; no blanket transport error-taxonomy claim.
+After both affected GREEN, ONE new-code full CHANGED gate authorized10m/11m with original
+binary/full ./.../immutablebase/resources; prior13074/64185 historicalPASS and99037/99256FAILED.
+
+
+Creation69772 joined1 handlers0.648s: cancellation reached intended branch and reproduced
+VALIDATION_ERROR, but malformed/missing fixtures stopped at the earlier real project-inheritance
+read; depth control passed. Fixture now mutates real target storage after that project read and
+before admission (malformed record or real ordinary deletion), then delegates all admitted reads
+and predicate decisions. No project boundary changes. RED96221 ACTUALLY JOINED1 handlers0.609s
+reproduced both malformed-target and actual-reader cancellation VALIDATION_ERROR vs INTERNAL_ERROR;
+exact typed-missing prefix/identity/validation and existing depth controls passed. Minimal creation
+error branch preserves typed-missing wrapper verbatim and returns only genuine errors unchanged.
+
+
+Creation GREEN88815 ACTUALLY JOINED0 handlers1.593s: registered real WS malformed/decode and actual
+transaction-reader cancellation now INTERNAL_ERROR with original identities; exact missing
+prefix/ErrTaskNotFound/VALIDATION_ERROR and existing depth sentinel retained. Complete task rows
+and no-created/no-updated event controls pass after real admission-stage fixture mutation.
+Office13953 passing modified fixture is unaffected and retained without replay. Catalog/all-spec/
+whitespace pass. The single ROOT-authorized combined corrected-code full CHANGED gate now runs
+at explicit10m/11m duration with immutablebase/originalbinary/fullscope/unchanged resources.
+
+
+Combined full CHANGED lint23309 ACTUALLY JOINED1 with one concrete QF1003 Staticcheck diagnostic
+in the new creation fixture's state if/else. Not a timeout or pass. Minimal tagged switch correction
+leaves all fixture branches identical; only affected creation selector is rerun before ROOT
+checkpoint for another full-gate allowance. Office13953 and prior passing controls are unreplayed.
+No automatic full lint recovery.
+
+
+Tagged-switch affected creation GREEN36614 ACTUALLY JOINED0 handlers1.591s, all four cases and
+original controls retained. Both causal corrections are now validated; required full gate remains
+blocked until ROOT's explicit next allowance after the concrete diagnostic checkpoint. No other
+source changes, test replay, resource escalation, hook/commit/push or full rerun performed.
+
+
+ROOT explicitly authorized one corrected-candidate full gate after the concrete QF1003 fix.
+Full CHANGED lint82345 ACTUALLY JOINED0, zero issues; original binary/full ./.../immutablebase,
+authorized10m/11m duration and unchanged resources. Five scoped paths staged, including the new
+registered WS fixture. Prior23309 remains failed diagnostic and all historical pass/timeout
+receipts remain true. Normal active hooks/commit/promptpublication, BOTH grouped dispositions,
+newhead ALL35 review/terminal CI/expectedhead actualmerge/independent proof+cleanup remain gates.
