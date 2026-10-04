@@ -1,5 +1,6 @@
 import { type Locator, type Page } from "@playwright/test";
 import { test, expect } from "../../fixtures/test-base";
+import { waitForFiniteAnimations } from "../../helpers/animations";
 import { expectElementsNotToIntersect } from "../../helpers/layout-assertions";
 
 async function openConfigChatPopover(page: Page): Promise<Locator> {
@@ -115,6 +116,8 @@ test.describe("Configuration Chat", () => {
       await configChatButton.click();
       const configChatPopover = testPage.getByTestId("config-chat-popover");
       await expect(configChatPopover).toBeVisible();
+      await waitForFiniteAnimations(configChatPopover);
+      await waitForFiniteAnimations(surface);
       await expectElementAbove(saveButton, configChatPopover);
       await expectElementAbove(surface, configChatPopover);
       const [surfaceBox, popoverBox] = await Promise.all([

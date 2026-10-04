@@ -65,12 +65,15 @@ test.describe("transient provider error (529 Overloaded) retry", () => {
     seedData,
   }) => {
     const session = await seedIdleSession(testPage, apiClient, seedData, "Overloaded Cancel Test");
-
-    await session.sendMessage("/overloaded:9");
     const sessionId = await session.activeChat().getAttribute("data-session-id");
     if (!sessionId) throw new Error("active chat did not expose a session id");
+    const firstRetryNotice = waitForRetryNotice(apiClient, sessionId, 1, 60_000);
 
-    await expect(session.recoveryCancelRetryButton()).toBeVisible({ timeout: 30_000 });
+    await session.sendMessage("/overloaded:9");
+    await firstRetryNotice;
+
+    await expect(session.transientRetryCard()).toBeVisible({ timeout: 60_000 });
+    await expect(session.recoveryCancelRetryButton()).toBeVisible({ timeout: 15_000 });
 
     await session.recoveryCancelRetryButton().click();
 
