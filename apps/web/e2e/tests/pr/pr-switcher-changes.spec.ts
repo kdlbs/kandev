@@ -206,7 +206,10 @@ test.describe("PR switcher changes panel", () => {
     });
 
     // --- Click Task A to enter session view ---
-    const taskACommitsLoaded = gateway.waitForResponse("github.pr_commits.get");
+    const taskACommitsLoaded = gateway.waitForResponse("github.pr_commits.get", {
+      where: (payload) =>
+        payload.owner === "testorg" && payload.repo === "testrepo" && payload.number === 101,
+    });
     await kanban.taskCardInColumn("Auth Fix Task", doneStep.id).click();
     await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
 
@@ -237,7 +240,10 @@ test.describe("PR switcher changes panel", () => {
     );
 
     // --- Switch to Task B ---
-    const taskBCommitsLoaded = gateway.waitForResponse("github.pr_commits.get");
+    const taskBCommitsLoaded = gateway.waitForResponse("github.pr_commits.get", {
+      where: (payload) =>
+        payload.owner === "testorg" && payload.repo === "testrepo" && payload.number === 202,
+    });
     await session.taskInSidebar("Dashboard Task").click();
     await expect(testPage).toHaveURL((url) => url.pathname.includes(taskB.id), {
       timeout: 15_000,
