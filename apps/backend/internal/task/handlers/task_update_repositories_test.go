@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -14,6 +15,7 @@ import (
 
 	"github.com/kandev/kandev/internal/task/dto"
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/repository"
 	"github.com/kandev/kandev/internal/task/service"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	ws "github.com/kandev/kandev/pkg/websocket"
@@ -35,6 +37,22 @@ func (m *captureUpdateTaskRepo) GetTask(_ context.Context, id string) (*models.T
 		Title:       "Old title",
 		State:       v1.TaskStateTODO,
 	}, nil
+}
+
+// These mapper tests exercise title-only updates or association-only replacement.
+func (m *captureUpdateTaskRepo) UpdateTaskFieldsWithParentAdmission(ctx context.Context, id string, update models.TaskFieldUpdate, _ repository.TaskParentValidator) (*models.TaskFieldUpdateResult, error) {
+	if update.Description != nil || update.Priority != nil || update.State != nil || update.WorkflowStepID != nil || update.Position != nil || update.ParentID != nil || update.AssigneeUserID != nil || update.Metadata != nil {
+		return nil, errors.New("unsupported field in association mapper fixture")
+	}
+	task, err := m.GetTask(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	result := &models.TaskFieldUpdateResult{Task: task, PriorState: task.State, PriorWorkflowStepID: task.WorkflowStepID}
+	if update.Title != nil {
+		task.Title = *update.Title
+	}
+	return result, nil
 }
 
 func (m *captureUpdateTaskRepo) DeleteTaskRepositoriesByTask(_ context.Context, _ string) error {

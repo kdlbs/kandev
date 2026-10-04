@@ -68,6 +68,9 @@ type TaskRepository interface {
 	CreateTask(ctx context.Context, task *models.Task) error
 	GetTask(ctx context.Context, id string) (*models.Task, error)
 	GetTasksByIDs(ctx context.Context, ids []string) ([]*models.Task, error)
+	// UpdateTaskFieldsWithParentAdmission applies request presence to the locked
+	// current row, admitting explicit parent intent through the existing policy.
+	UpdateTaskFieldsWithParentAdmission(ctx context.Context, id string, update models.TaskFieldUpdate, validate TaskParentValidator) (*models.TaskFieldUpdateResult, error)
 	// UpdateTask writes the full task row, preserving the current parent and
 	// normalized materialized workspace mode/group unless parent intent was
 	// admitted through TaskHierarchyAdmission. It also preserves whatever position is

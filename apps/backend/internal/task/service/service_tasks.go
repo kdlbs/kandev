@@ -108,7 +108,8 @@ func isPriorityOnlyTaskUpdate(req *UpdateTaskRequest) bool {
 		req.Repositories == nil &&
 		req.Position == nil &&
 		req.Metadata == nil &&
-		req.ParentID == nil
+		req.ParentID == nil &&
+		req.AssigneeUserID == nil
 }
 
 type taskStopTarget struct {
@@ -2040,43 +2041,14 @@ func (s *Service) UpdateTask(ctx context.Context, id string, req *UpdateTaskRequ
 			return updated, err
 		}
 	}
-	oldWorkflowStepID := task.WorkflowStepID
-	var oldState *v1.TaskState
-	stateChanged := false
-	parentCleared := false
-
-	if req.Description != nil {
-		task.Description = *req.Description
-	}
-	if req.Priority != nil {
-		task.Priority = *req.Priority
-	}
-	if req.State != nil && task.State != *req.State {
-		current := task.State
-		oldState = &current
-		task.State = *req.State
-		stateChanged = true
-	}
-	if req.WorkflowStepID != nil {
-		task.WorkflowStepID = *req.WorkflowStepID
-	}
-	if req.Position != nil {
-		task.Position = *req.Position
+	update := models.TaskFieldUpdate{
+		Title: req.Title, Description: req.Description, Priority: req.Priority,
+		State: req.State, WorkflowStepID: req.WorkflowStepID, Position: req.Position,
+		ParentID: req.ParentID, Metadata: req.Metadata,
 	}
 	if req.AssigneeUserID != nil {
-		task.AssigneeUserID = assignee
+		update.AssigneeUserID = &assignee
 	}
-	if req.Metadata != nil {
-		task.Metadata = protectedTaskMetadataUpdate(task.Metadata, req.Metadata)
-	}
-	if req.Title != nil {
-		task.Title = *req.Title
-		if task.Metadata != nil {
-			delete(task.Metadata, models.MetaKeyAgentTitlePending)
-			delete(task.Metadata, models.MetaKeyAgentTitleOwnerSessionID)
-		}
-	}
-	task.UpdatedAt = time.Now().UTC()
 
 	updateCtx := ctx
 	if req.WorkflowStepID != nil {
@@ -2085,23 +2057,17 @@ func (s *Service) UpdateTask(ctx context.Context, id string, req *UpdateTaskRequ
 			Trigger: steptelemetry.TriggerTaskUpdate, ActorKind: actorKind, ActorID: actorID,
 		})
 	}
-	var updateErr error
-	if admission, ok := s.tasks.(taskrepo.TaskHierarchyAdmission); ok {
-		var parentChanged bool
-		parentChanged, updateErr = admission.UpdateTaskWithParentAdmission(updateCtx, task, req.ParentID, req.Position != nil, s.resolveParentWithReader)
-		parentCleared = parentChanged && req.ParentID != nil && *req.ParentID == ""
-	} else if req.Position != nil {
-		updateErr = s.tasks.UpdateTaskWithExplicitPosition(updateCtx, task)
-	} else {
-		updateErr = s.tasks.UpdateTaskPreservingDeferredLaunch(updateCtx, task)
+	result, err := s.tasks.UpdateTaskFieldsWithParentAdmission(updateCtx, id, update, s.resolveParentWithReader)
+	if err != nil {
+		s.logger.Error("failed to update task", zap.String("task_id", id), zap.Error(err))
+		return nil, err
 	}
-	if updateErr != nil {
-		s.logger.Error("failed to update task", zap.String("task_id", id), zap.Error(updateErr))
-		return nil, updateErr
-	}
-	// UpdateTask may have applied a conditional title/metadata patch because
-	// this snapshot was stale. Publish and return the row that actually won so
-	// callers never receive the provisional title or pending marker again.
+	task = result.Task
+	oldWorkflowStepID := result.PriorWorkflowStepID
+	oldState := result.PriorState
+	stateChanged := req.State != nil && oldState != task.State
+	parentCleared := result.ParentChanged && req.ParentID != nil && *req.ParentID == ""
+	// Preserve the existing postcommit observation contract for responses and events.
 	task = s.reloadTaskAfterMutation(ctx, id, task, "update")
 	if req.WorkflowStepID != nil && oldWorkflowStepID != task.WorkflowStepID {
 		sessionID := ""
@@ -2131,8 +2097,8 @@ func (s *Service) UpdateTask(ctx context.Context, id string, req *UpdateTaskRequ
 		task.Repositories = repos
 	}
 
-	if stateChanged && oldState != nil {
-		s.publishTaskEvent(ctx, events.TaskStateChanged, task, oldState)
+	if stateChanged {
+		s.publishTaskEvent(ctx, events.TaskStateChanged, task, &oldState)
 	}
 	if parentCleared {
 		// Explicitly signal the un-nest with parent_id: nil so clients can

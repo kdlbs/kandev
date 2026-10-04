@@ -1033,10 +1033,9 @@ func (r *Repository) UpdateTask(ctx context.Context, task *models.Task) error {
 
 // UpdateTaskPreservingDeferredLaunch is UpdateTask for callers that hold a
 // task snapshot old enough to have missed a concurrent write to
-// deferred_launch — the service layer's request-driven UpdateTask, which
-// reads the task once at the start of a request and can commit after the
-// session ceiling's own compare-and-set writers (SetTaskDeferredLaunchIfUnchanged)
-// have moved that key on. It performs the same write as UpdateTask, except
+// deferred_launch. Internal snapshot callers can commit after the session
+// ceiling's compare-and-set writers (SetTaskDeferredLaunchIfUnchanged) have
+// moved that key on. It performs the same write as UpdateTask, except
 // deferred_launch in the write payload is replaced by the row's own current
 // value at write time, so a stale in-memory snapshot can never resurrect or
 // clobber whatever those writers did to it in the meantime. Every other key
@@ -1301,7 +1300,7 @@ func (r *Repository) applyPreservedPositionInTx(ctx context.Context, tx *sql.Tx,
 // whatever the session ceiling's own CAS writers did to that key in the
 // meantime.
 func (r *Repository) buildTaskUpdateQuery(
-	task *models.Task, metadata []byte, protectDeferredLaunch bool,
+	task *models.Task, metadata []byte, protectDeferredLaunch, preserveLockedMetadata bool,
 ) (query string, finalMetadata []byte, workflowAgentOverrides interface{}, err error) {
 	encodedWorkflowAgentOverrides, err := models.EncodeWorkflowAgentOverrides(task.WorkflowAgentOverrides)
 	if err != nil {
@@ -1313,7 +1312,7 @@ func (r *Repository) buildTaskUpdateQuery(
 		workflowAgentOverrides = encodedWorkflowAgentOverrides
 	}
 	metadataExpr := "?"
-	if protectDeferredLaunch {
+	if protectDeferredLaunch && !preserveLockedMetadata {
 		stripped, marshalErr := stripProtectedTaskMetadata(metadata)
 		if marshalErr != nil {
 			return "", nil, nil, marshalErr
@@ -1330,6 +1329,11 @@ func (r *Repository) buildTaskUpdateQuery(
 	if models.IsAgentTitlePending(task.Metadata) {
 		pending := agentTitlePendingPredicate(r.db.DriverName())
 		metadataMerge := pendingTaskMetadataMergeExpression(r.db.DriverName())
+		if preserveLockedMetadata {
+			// Omitted metadata comes from this transaction's locked row. Merge
+			// patch null deletion applies only to supplied metadata maps.
+			metadataMerge = "?"
+		}
 		updateQuery = fmt.Sprintf(`
 			UPDATE tasks SET workspace_id = ?, workflow_id = ?, workflow_step_id = ?, workflow_agent_overrides = ?,
 				title = CASE WHEN %s THEN ? ELSE title END,
@@ -1409,7 +1413,8 @@ func (r *Repository) updateTaskTx(
 	// was invisible until exercised against Postgres with real concurrency.
 	task.UpdatedAt = r.nowUTC()
 
-	updateQuery, metadata, workflowAgentOverrides, err := r.buildTaskUpdateQuery(task, metadata, protectDeferredLaunch)
+	preserveLockedMetadata, _ := ctx.Value(taskFieldMetadataOmittedKey{}).(bool)
+	updateQuery, metadata, workflowAgentOverrides, err := r.buildTaskUpdateQuery(task, metadata, protectDeferredLaunch, preserveLockedMetadata)
 	if err != nil {
 		return "", 0, err
 	}

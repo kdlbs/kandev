@@ -1,0 +1,204 @@
+---
+status: current
+system: tasks
+requirements:
+  - REQ-TASKS-FIELD-UPDATES-001
+---
+
+# Task field updates system design
+
+## Ownership and dependencies
+
+Tasks owns request intent, the task-row mutation, and its publication. This extends ordinary
+field updates without converting internal full snapshots into patches. It reuses
+[canonical parent admission](subtask-reparenting-drag-drop.md),
+[association replacement](attach-workspace-source-replacement.md),
+[human assignment](human-assignee.md), and [completion gating](task-completion.md).
+
+Existing interfaces and dependencies, before implementation:
+
+| Boundary | Current source and responsibility |
+| --- | --- |
+| Ordinary request | `service/service_requests.go`: `UpdateTaskRequest` pointers plus nullable metadata map and repository slice |
+| Application | `service/service_tasks.go`: `UpdateTask`, `validateTaskUpdateReferences`, `isPriorityOnlyTaskUpdate`, `tryUpdateTaskPriorityOnly`, `reloadTaskAfterMutation`; authorization, value checks, preflight, preparation, publication |
+| Metadata ownership | `service/service_task_metadata.go`: `protectedTaskMetadataUpdate`; `models` metadata constants, `StripOfficeCarrierMetadata`, `RestoreOfficeCarrierMetadata` |
+| Assignee reach | `service/service_members.go`: `resolveTaskAssignee`, current assignable-user/workspace reach checks and dangling-workspace fallback |
+| Required repository | `repository/interface.go`: `TaskRepository`; optional `TaskPriorityRepository` scalar fast path |
+| Hierarchy | `repository/hierarchy/hierarchy.go`: `TaskHierarchyAdmission`, `TaskParentValidator`, `TaskHierarchyReader`; repository aliases in `repository/hierarchy.go` |
+| Concrete storage | `repository/sqlite/task_hierarchy_admission.go`: hierarchy reader, `lockTaskHierarchy`, `lockTaskUpdateSteps`, existing parent writer and normalization helpers |
+| Existing full write | `repository/sqlite/task.go`: `updateTaskTx`, source/position/completion guards, title and metadata SQL expressions, ledger/entry allocation, runner projection, postcommit dispatch |
+| Cross-dialect locking | `internal/db/taskhierarchy.go`: SQLite writer reservation; PostgreSQL READ COMMITTED workspace reservation before steps and task-row locks |
+| Associations | `preparedRepositoryReplacement`, `prepareRepositoryReplacement`, `ReplaceTaskRepositories` and `finalize`; separate task-serialized complete-set transaction |
+| Transport | `handlers/task_http_handlers.go`: `httpUpdateTask`; `task_ws_handlers.go`: `wsUpdateTask`; `task_handlers.go`: registered PATCH/WS dispatch and `convertUpdateRepositories`; DTO and ordinary event projections |
+
+Paths above are relative to `apps/backend/internal/task/` except the shared DB helper.
+Neither ordinary REST nor WS currently exposes `WorkflowStepID`; it exists on the service
+request only. Do not add a transport mapping as part of this repair.
+
+## Request-presence inventory
+
+| Request field | Locked-row application and existing coupling |
+| --- | --- |
+| `Title *string` | Set only when present. Preserve current title otherwise. Explicit title removes `agent_title_pending` and `agent_title_owner_session_id` after metadata processing. Existing length check and REST/WS trimming remain. |
+| `Description *string` | Present replaces, including empty. No title/owner mutation when omitted or description-only. |
+| `Priority *string` | Present replaces after enum validation. Genuine priority-only requests retain scalar path. Add `AssigneeUserID == nil` to the fast-path guard: priority plus assignee currently drops the assignee. |
+| `State *TaskState` | Present applies to current state; absent retains it. Completion guard evaluates actual current-to-requested transition. Return prior locked state for event bookkeeping. |
+| `WorkflowStepID *string` | Service-level present applies to current workflow context. Absent retains current step, queue/WIP fields, workflow identity/overrides and runner projection. Existing transition/entry rules remain; no new WIP admission policy. |
+| `Position *int` | Present retains literal position, including zero; absent retains current position and existing arrival behavior. Keep current explicit-position flags in `updateTaskTx`. |
+| `ParentID *string` | Present goes through existing locked final parent validator, including explicit empty; absent uses current parent. Use existing materialized workspace mode/group normalization and admitted-parent marker. |
+| `AssigneeUserID *string` | Preserve presence separately from the service-resolved/trimmed user ID. Absent retains current human assignee; empty clears it. No agent/session/runner reassignment. Existing reach validation stays before entity preparation; no new transaction-wide membership policy. |
+| `Metadata map` | Nil preserves current. Non-nil goes through the existing protection operation against current metadata, then existing SQL replacement/pending-title behavior. Empty map is intentional ordinary replacement; do not merge arbitrary ordinary keys. |
+| `Repositories slice` | Nil/no wire field/null omits; non-nil (including empty) prepares and later atomically replaces the set. Never carry it into the task-row patch or its transaction. |
+
+## Typed repository boundary
+
+Introduce `models.TaskFieldUpdate` and `models.TaskFieldUpdateResult` in a small model file.
+The patch contains eight scalar pointers (title, description, priority, state, workflow step,
+position, assignee, parent) and the nullable metadata map, using the existing types.
+It carries the resolved assignee pointer, not an early
+complete `Task`. It contains no repository inputs, policy callback, revision, or opaque field
+mask. The result carries the committed candidate task, prior state, prior workflow step, and
+effective parent-change flag, captured under the mutation lock. These identifiers are implemented; existing dependencies retain their own contracts.
+
+Add the required method to `TaskRepository`:
+
+```go
+UpdateTaskFieldsWithParentAdmission(context.Context, string, models.TaskFieldUpdate,
+    TaskParentValidator) (*models.TaskFieldUpdateResult, error)
+```
+
+Use the existing repository alias for the validator type. Implement the method in
+`repository/sqlite/task_field_updates.go`. Required interface membership makes wrappers that
+embed `TaskRepository` forward the concrete implementation. Update standalone interface fakes
+only as necessary to compile and preserve their test purpose. There is no silent snapshot
+fallback for an ordinary update. Keep the old `UpdateTaskWithParentAdmission` API and its
+snapshot semantics for intentional callers; it still implements prior hierarchy tests.
+
+Share the existing metadata protection calculation from a neutral task-model helper,
+`models.ProtectedTaskMetadataUpdate`, retaining a service wrapper for existing callers/tests.
+Move the calculation without changing its protected namespaces or shallow-copy behavior.
+Do not import service into repository, duplicate its rules, or change other metadata endpoints.
+
+## Mutation sequence
+
+1. Keep authorization, supplied title/priority checks, early task lookup, normalized assignee
+   reference check, and locked parent preflight before repository-entity preparation.
+2. Genuine priority-only updates keep `UpdateTaskPriority`; all other ordinary updates supply
+   the typed patch. Early snapshots remain preparation/authorization observations, never the
+   source of omitted task fields at commit.
+3. Begin the existing hierarchy transaction. Reserve SQLite's writer before reads. PostgreSQL
+   uses READ COMMITTED, immutable workspace location and sorted workspace locks, then sorted
+   current source/destination step locks, then the task row. Preserve the existing lock order
+   and any arrival mutex required by the existing pipeline before opening the transaction.
+4. Locate current source step under hierarchy reservation, using the explicit destination step
+   only if supplied. Acquire existing step locks. Read the complete current task through the
+   writer transaction, with `FOR UPDATE` on PostgreSQL **after step locks**. This last read is
+   necessary: scalar priority/title/metadata writers can bypass workspace reservation and
+   commit while a candidate is between its graph read and task-row lock. A workspace-only
+   reread does not cover them. No read-pool escape is allowed.
+5. Validate explicit parent against this current subject and transaction-bound reader with
+   the existing validator. Build the candidate from current data, apply only patch presence,
+   protect supplied metadata against current metadata, resolve explicit human title ownership,
+   and reuse parent/workspace normalization. Preserve graph policy, cancellation and typed
+   errors, including errors from related-row reads and encoding.
+6. Call existing `updateTaskTx` with the same explicit-position-dependent position/deferred
+   protection flags and attribution. It remains responsible for completion guards, source
+   checks, hierarchy/provenance protection, encoding, ledger, entries, runner projection, and
+   timestamp. No new workflow/runner/launch policy is introduced. Locked-current data naturally
+   prevents an omitted state, workflow or other field from reverting a scalar prior commit.
+   The typed writer also attaches private `taskFieldMetadataOmittedKey` presence to this
+   transaction only; postcommit dispatch receives the original caller context so nested
+   legacy writes cannot inherit patch presence. `updateTaskTx` passes it as
+   `preserveLockedMetadata` to
+   `buildTaskUpdateQuery`. Omitted metadata writes the locked current document, including
+   sanctioned hierarchy/provenance/title-owner processing, rather than submitting it as a
+   pending-title merge patch that deletes current JSON-null values on SQLite. Protected
+   deferred-launch stripping is unnecessary for this locked document. Supplied maps retain
+   the existing deferred protection, replacement and pending-title merge expressions; legacy
+   full-snapshot callers supply no marker and retain their existing behavior.
+7. Commit before returning the result and before dispatching existing step-entry effects.
+   On failure return the original wrapped error and no successful result/dispatch. The service
+   uses locked prior state/step for its existing state/manual-transition bookkeeping; state
+   change requires an explicit state and an effective difference at this boundary.
+8. Keep the ordinary response reread, separate association replacement/finalize, relation list,
+   and events. A reread can observe a later commit; do not label it an exact receipt. Preserve
+   the fallback candidate on reread failure and existing clear-parent marker. Association
+   failure retains its own rollback and success-event suppression, without undoing the task row.
+
+## Writer inventory and guarantee limits
+
+Every category below was inventoried before selecting the patch boundary. Participation is
+directional where a method remains a full snapshot: a patch preserves that method's *already
+committed* data, but does not promise that its later stale snapshot preserves the patch.
+
+| Writer family | Relationship to this repair |
+| --- | --- |
+| Ordinary `Service.UpdateTask`, including MCP/plugin/Office delegates | Uses the required typed method, except genuine scalar priority-only path. Symmetric disjoint-field guarantee between these requests. |
+| `TaskPriorityRepository.UpdateTaskPriority` and Office scalar `UpdateTaskPriority`/`UpdateTaskProjectID` | Field-scoped SQL participates through native task-row serialization. Omitted priority/project survives a prior commit; later scalar writes change only their field. Office policy and publication remain owned by Office. |
+| `ClaimTaskTitleSession`, `SetTaskTitleIfPending` | Native atomic owner/title writes serialize on the row; preserve current omitted title/metadata and explicit human-title precedence. Keep CAS predicates; no replacement with an early service predicate. |
+| `SetTaskMetadataKey*`, `RemoveTaskMetadataKey*`, `TakeTaskMetadataKeyIfDestinationStep`, `ClearManualMoveLifecycleMarkersIfCompleted`; deferred-launch CAS and prompt writers | Field-scoped metadata SQL retains its current predicates. Omitted metadata sees their current values; explicit metadata retains existing replacement/protection rules. Do not promise every arbitrary key survives explicit replacement. |
+| Provenance writers (`task_handoffs`, carry/causation owners), workspace orphan/recovery/launch-error metadata CAS, management-claim and completion metadata | Current-row patch plus existing SQL/provenance protection; preserve protections already defined by their owners, without introducing a global per-key merge. Owner predicates and receipts unchanged. |
+| `UpdateTaskState*`, Office state/step-conditioned state and `tree_holds` writes | Field-scoped state or small owned bundles; omitted state survives a prior commit. Current-state completion guard and ordinary event bookkeeping remain coherent. No new state priority against a later intentional writer. |
+| `task_reorder.go` position updates | Prior omitted position survives; explicit position remains literal. Existing arrival/reorder locking and slot semantics unchanged. |
+| Parent writes: old hierarchy method, `DetachTask`, bulk reparent, conditional restore, Office scalar parent | Prior workspace/task serialization and normalization remain mandatory. New patch reuses validator and preservation; no stricter Office cycle/depth rules or new parent authority. |
+| Four legacy full-row variants: `UpdateTask`, `UpdateTaskPreservingDeferredLaunch`, `UpdateTaskIfWorkflowMatches`, `UpdateTaskWithExplicitPosition` | Intentionally full snapshots. Do not reinterpret their arguments or globally promise preservation of arbitrary fields; current parent/workspace/position/title/provenance protections remain. |
+| Exact/update operations and workflow admission wrappers, `MarkDeferredMoveAppliedForSession`, two full-row capacity/promotion paths | Existing full-snapshot, version/CAS, receipt, WIP, queue, and runner contracts; excluded from symmetric arbitrary-field guarantee. Patch uses their committed current row when it follows them. |
+| `Service.UpdateTaskMetadata` and runtime/workflow callers of full-row methods | Retain intentional merge/snapshot behavior. This repair does not silently convert them into ordinary request patches. Step-handoff's legitimate internal writes remain supported. |
+| Office agent assignment/checkout/generation fields; workflow participant and step deletion writes | Small independent bundles/projections: current task read supplies the latest projection, but no Office scheduling, ownership or runner redesign. |
+| Creation/import/migrations/reset; archive/unarchive/delete, workspace cascades; sequence/default repairs | Existing initialization/lifecycle authority. Native row/workspace barriers and prior hierarchy checks remain. No live partial-edit guarantee for intentional rebuilds or deleted tasks. |
+| Association/folder/set writers, document/plan/comment/attachment/canvas/issue-watcher/queue writers | Separate owned tables or narrow task touches. Retain their guards and transactions; no cross-table global transaction or lifetime snapshot guarantee. |
+
+SQL inventory included task storage (`task.go`, reorder, step transitions, management claims,
+orphan guard, completion gates, workspace folders and association replacement), Office
+`tasks.go`/`tree_holds.go`/exact blockers, workflow repository writes, shared hierarchy and
+recovery claims, and the task-touching plan/message/queue/integration/initialization paths.
+Do not expand this guarantee to unlisted raw SQL; record newly found material writers rather
+than assuming coverage or silently redesigning them.
+
+## Failure, validation, and observations
+
+Actual current-row validation/encoding/storage/cancellation failures roll back the task row,
+ledger, entry allocations and runner effects in the existing transaction. Preserve `errors.Is`
+for parent, missing task, cancellation and completion errors. Postcommit reads/events keep
+their existing observation contract, including later commits and relation-read fallbacks.
+There is no new revision, retry, mutex, event order, schema, flag, metric, or exact update mode.
+
+## Verification and scope audit
+
+Real-service SQLite tests must hold two independent services' delegated initial reads after
+both actual snapshots exist, then explicitly release and join APIs in both write orders.
+This reproduces the defect before the new API exists; a compile error is not RED. Add mixed
+requests, omission/null/empty/same-field controls, metadata/title-owner races, real current-row
+validation/rollback/cancellation failures, and state/workflow ledger/event checks.
+
+Registered PATCH and WS dispatch use real service/storage and verify stored row, response and
+actual events. Transport shapes stay unchanged; if a mapper must change, add its registered
+case before publication. PostgreSQL tests run the touched new method through independent
+connections in one private schema and observe actual backend lock waits, including a task-row
+blocker that owns no workspace lock; elapsed time or a mocked validator is not proof.
+
+Mobile-parity audit: backend persisted-data correction only; no UI, copy, layout, navigation,
+touch, breakpoint or frontend state changes. Existing desktop/mobile subscriptions consume
+unchanged DTO/events; browser/build/E2E work is not causal. Public docs are assessed through
+`tasks-and-workflows.md` and `websocket-api.md`: design intent stays here; at implementation
+add only a short ordinary-field omission/concurrency clarification if the current reference
+needs it, explicitly excluding intentional metadata replacement/internal full snapshots.
+
+## Decision scope
+
+The existing workspace/step/task transaction is reused. A local typed patch boundary and this
+explicit guarantee preserve enough rationale; `/record` does not warrant a separate ADR.
+An in-process mutex cannot cover independent services/connections. Another early reread still
+loses intent. Global revisions, generic transaction callbacks and arbitrary per-key merging
+would alter contracts beyond the demonstrated defect.
+
+## Requirement mapping
+
+| Criteria | Design sections |
+| --- | --- |
+| `.1` to `.3` | Request-presence inventory; Typed repository boundary; Mutation sequence |
+| `.4` and `.5` | Request-presence inventory; Writer inventory and guarantee limits |
+| `.6` and `.7` | Failure, validation, and observations; Verification and scope audit |
+
+All criteria refer to `AC-TASKS-FIELD-UPDATES-001`. Delivery is recorded in
+[the implementation plan](../../../plans/concurrent-task-field-edits/plan.md).

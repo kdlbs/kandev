@@ -997,6 +997,10 @@ func (m *mockRepository) GetTasksByIDs(ctx context.Context, ids []string) ([]*mo
 	return out, nil
 }
 func (m *mockRepository) UpdateTask(ctx context.Context, task *models.Task) error { return nil }
+
+func (m *mockRepository) UpdateTaskFieldsWithParentAdmission(context.Context, string, models.TaskFieldUpdate, repository.TaskParentValidator) (*models.TaskFieldUpdateResult, error) {
+	return nil, fmt.Errorf("field updates are not supported by this test repository")
+}
 func (m *mockRepository) UpdateTaskWithExplicitPosition(ctx context.Context, task *models.Task) error {
 	return nil
 }

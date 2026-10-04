@@ -37,6 +37,10 @@ type mockRepository struct {
 	executors     map[string]*models.Executor
 }
 
+func (m *mockRepository) UpdateTaskFieldsWithParentAdmission(context.Context, string, models.TaskFieldUpdate, repository.TaskParentValidator) (*models.TaskFieldUpdateResult, error) {
+	return nil, fmt.Errorf("field updates are not supported by this test repository")
+}
+
 func (m *mockRepository) CommitWorkspaceRecoveryErrorIfCurrent(
 	ctx context.Context,
 	observation models.WorkspaceRecoveryErrorObservation,

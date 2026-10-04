@@ -39,6 +39,13 @@ type MockEventBus struct {
 	publishErrors map[string]error
 }
 
+// These read/cascade fakes reject a field mutation outside their test scope.
+type unsupportedTaskFieldUpdater struct{}
+
+func (unsupportedTaskFieldUpdater) UpdateTaskFieldsWithParentAdmission(context.Context, string, models.TaskFieldUpdate, repository.TaskParentValidator) (*models.TaskFieldUpdateResult, error) {
+	return nil, errors.New("field updates are not supported by this test repository")
+}
+
 type recordingTaskClarificationCanceller struct {
 	sessions    []string
 	hasDeadline []bool

@@ -457,6 +457,24 @@ task.walkthrough.get
 
 There are no ordinary dispatcher registrations for direct workflow-step update, delete, or reorder requests. Those operations are available through the workflow HTTP/configuration surfaces and relevant MCP tools.
 
+### Partial task updates
+
+`task.update` and REST `PATCH /api/v1/tasks/:id` change only supplied fields. Concurrent
+ordinary updates to different fields retain both edits, including requests handled by
+separate backend services. Omitted fields and JSON `null` retain current values; explicit
+empty strings keep the field's existing clear behavior, and `repositories: []` clears
+repository associations.
+
+A supplied `metadata` object retains the existing replacement or pending-title merge
+behavior. It does not merge arbitrary keys from competing requests. Server-owned
+lifecycle and handoff records remain protected, and an explicit title resolves pending
+agent naming.
+
+This guarantee covers ordinary partial updates and participating field-scoped writes.
+Internal full-snapshot and exact/versioned commands retain their own contracts. Responses
+and notifications may observe a later commit; they do not establish a total event order
+or an exact mutation receipt.
+
 ### Sessions, messages, agents, and orchestration
 
 ```text
