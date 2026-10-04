@@ -49,6 +49,7 @@ test.describe("Quick Chat opening composer", () => {
     const composer = editor.locator("xpath=..");
 
     await expect(editor).toBeFocused();
+    await expect(composer.getByTestId("composer-context-row")).toHaveCount(0);
     await selectAgentIfNeeded(dialog, testPage);
     await expect(dialog.getByTestId("agent-profile-selector")).toContainText("Mock");
     await expect(dialog.getByTestId("add-repository")).toBeEnabled();

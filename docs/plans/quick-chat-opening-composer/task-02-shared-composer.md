@@ -247,6 +247,8 @@ Repository chips, image/file attachments, and the configuration label use the
 shared context row. Its 8px vertical padding centers the label and reduces the
 repository row's former 12px padding. Horizontal padding remains 12px. On phones,
 chips wrap within the setup scroll body and retain their touch controls.
+An ordinary empty composer does not reserve a context row. Desktop and phone
+regressions check that the row appears only after context is added.
 
 The browser regression first reproduced the former 12px padding. Final managed
 desktop opening/retry tests passed (2), and the phone opening test passed (1)

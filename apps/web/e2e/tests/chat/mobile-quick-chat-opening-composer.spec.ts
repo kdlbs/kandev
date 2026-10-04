@@ -56,6 +56,7 @@ test("opens the phone picker and delivers the opening prompt", async ({
     expect(padding.top).toBe(padding.bottom);
     expect(parseFloat(padding.top)).toBeGreaterThan(0);
     await expect(editor).toBeVisible();
+    await expect(dialog.getByTestId("composer-context-row")).toHaveCount(0);
 
     await testPage.setViewportSize({ width: 390, height: 360 });
     await expect

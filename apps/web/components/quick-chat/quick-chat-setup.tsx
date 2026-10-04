@@ -388,6 +388,13 @@ function QuickChatComposerContext({
   );
 }
 
+function renderQuickChatComposerContext(
+  props: Pick<QuickChatSetupLayoutProps, "workspaceId" | "kind" | "draft" | "repositories">,
+) {
+  if (props.kind === "chat" && props.draft.repositories.length === 0) return null;
+  return <QuickChatComposerContext {...props} />;
+}
+
 function QuickChatSetupLayout({
   workspaceId,
   kind,
@@ -459,14 +466,12 @@ function QuickChatSetupLayout({
                 />
               )
             }
-            contextLeadingContent={
-              <QuickChatComposerContext
-                workspaceId={workspaceId}
-                kind={kind}
-                draft={draft}
-                repositories={repositories}
-              />
-            }
+            contextLeadingContent={renderQuickChatComposerContext({
+              workspaceId,
+              kind,
+              draft,
+              repositories,
+            })}
             toolbarActions={
               <QuickChatSendButton
                 disabled={!canSubmit || isStarting}
