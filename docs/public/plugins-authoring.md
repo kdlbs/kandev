@@ -155,10 +155,13 @@ With `data_scope_kind: workspace`, a canvas can GET
 `./_kandev/v1/data/workflows/{workflow_id}/transition-groups` with both
 `api_read:tasks` and `api_read:workflows`. This route requires workspace data
 access, regardless of canvas placement. Both routes return bounded
-`{items,page_info}` pages. Use the opaque `next_cursor` to continue.
-The equivalent optional backend Host extension is
-`pluginsdk.TransitionHistory(host)`. It exposes `ListTask` and
-`ListWorkflowGroups` with the same fields and grants.
+`{items,page_info}` pages with an opaque `page_info.next_cursor` for the next
+page.
+
+Backend plugins can use the optional Host SDK extension
+`pluginsdk.TransitionHistory(host)`. Its `ListTask` and `ListWorkflowGroups`
+readers use the same fields and declared read grants. They do not enforce a
+canvas's data scope or workspace boundary.
 
 Kandev injects a reserved startup bootstrap into the packaged entry document.
 It runs before authored scripts, reports an initial document error when one is
