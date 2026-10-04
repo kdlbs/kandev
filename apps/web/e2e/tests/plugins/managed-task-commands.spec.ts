@@ -76,8 +76,48 @@ test.describe("managed task commands", () => {
     const deleteAction = staleDialog.getByRole("button", { name: "Delete", exact: true });
     await expect(deleteAction).toBeEnabled();
 
+    let signalDeleteStarted!: () => void;
+    let signalDeleteHandled!: () => void;
+    let releaseDeleteResponse!: () => void;
+    let deleteRequestStarted = false;
+    const deleteStarted = new Promise<void>((resolve) => {
+      signalDeleteStarted = resolve;
+    });
+    const deleteHandled = new Promise<void>((resolve) => {
+      signalDeleteHandled = resolve;
+    });
+    const deleteResponseGate = new Promise<void>((resolve) => {
+      releaseDeleteResponse = resolve;
+    });
+    const deleteRoute = `**/api/v1/tasks/${taskId}*`;
+    await testPage.route(deleteRoute, async (route) => {
+      if (route.request().method() !== "DELETE") {
+        await route.continue();
+        return;
+      }
+      deleteRequestStarted = true;
+      signalDeleteStarted();
+      await deleteResponseGate;
+      try {
+        await route.continue();
+      } finally {
+        signalDeleteHandled();
+      }
+    });
+
     await apiClient.updateTaskTitle(child.id, "Child changed after deletion preview");
-    await deleteAction.click();
+    try {
+      await deleteAction.click();
+      await deleteStarted;
+      await expect(staleDialog).toHaveCount(0, { timeout: 5_000 });
+      await expect(
+        testPage.locator('[data-slot="dropdown-menu-content"][data-state="open"]'),
+      ).toHaveCount(0);
+    } finally {
+      releaseDeleteResponse();
+      if (deleteRequestStarted) await deleteHandled;
+      await testPage.unroute(deleteRoute);
+    }
     await expect.poll(() => readTaskStatus(apiClient, taskId), { timeout: 15_000 }).toBe(200);
     await expect.poll(() => readTaskStatus(apiClient, child.id), { timeout: 15_000 }).toBe(200);
     await expect(staleDialog).toHaveCount(0, { timeout: 5_000 });
