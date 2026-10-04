@@ -90,8 +90,9 @@ watch reservation/deduplication, UI/layout/copy/browser/E2E/build/broad suites.
 
 ## Tests and acceptance mapping
 
-All new names below are planned, not executed. Companion files keep existing
-oversized source/test files within lint limits. Full matrix/commands belong to
+The mapping below was established during planning; executed acceptance results
+are recorded in the verification section and Task 01. Companion files keep
+existing oversized source/test files within lint limits. Full matrix/commands belong to
 [Task 01](task-01-atomic-issue-mutation.md).
 
 | Criteria | Required evidence |

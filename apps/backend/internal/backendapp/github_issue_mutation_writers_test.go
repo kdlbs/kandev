@@ -47,8 +47,9 @@ func TestGitHubIssueMutationWriterCompatibility(t *testing.T) {
 					}
 					write()
 					close(gate.release)
-					require.NoError(t, <-result)
+					resultErr := <-result
 					joined = true
+					require.NoError(t, resultErr)
 				} else {
 					require.NoError(t, runIssueMutation(ctx, gh, 42))
 					write()

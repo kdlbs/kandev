@@ -48,8 +48,9 @@ func TestGitHubIssueMutationCoherence(t *testing.T) {
 			}
 			require.NoError(t, runIssueMutation(ctx, first, pair[0]))
 			close(gate.release)
-			require.NoError(t, <-result)
+			resultErr := <-result
 			joined = true
+			require.NoError(t, resultErr)
 			stored, err := h.repos[0].GetTask(ctx, "issue-task")
 			require.NoError(t, err)
 			assertIssueMutationIdentity(t, stored.Metadata, pair[1])
