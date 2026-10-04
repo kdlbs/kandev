@@ -25,7 +25,7 @@ func TestCodexUsageLimitNoticeProjectsMatchingGenericPromptError(t *testing.T) {
 		},
 	}
 
-	a, events, promptErr := replayFixtureThroughAdapter(t, fixture)
+	a, events, _, promptErr := replayFixtureThroughAdapter(t, fixture)
 	if promptErr == nil {
 		t.Fatal("Adapter.Prompt returned nil, want the generic ACP prompt error")
 	}
@@ -88,7 +88,7 @@ func TestCodexUsageLimitNoticeDoesNotReplaceNonGenericPromptErrors(t *testing.T)
 					{Kind: replayfixtures.FramePromptError, Code: tc.code, Message: tc.message},
 				},
 			}
-			a, _, promptErr := replayFixtureThroughAdapter(t, fixture)
+			a, _, _, promptErr := replayFixtureThroughAdapter(t, fixture)
 			if promptErr == nil {
 				t.Fatal("Adapter.Prompt returned nil, want the prompt error")
 			}
