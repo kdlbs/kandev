@@ -1,4 +1,4 @@
-import type { Page } from "@playwright/test";
+import { expect, type Page } from "@playwright/test";
 import type { SeedData } from "../fixtures/test-base";
 import type { ApiClient } from "./api-client";
 import type { SessionPage } from "../pages/session-page";
@@ -194,4 +194,16 @@ export async function seedIdleSession(
   await session.waitForChatIdle({ timeout: 30_000 });
   await session.composerReady();
   return session;
+}
+
+/** Waits until a session's advertised slash-command list is available in the composer. */
+export async function waitForSlashCommandAvailable(
+  page: Page,
+  session: SessionPage,
+  command: string,
+): Promise<void> {
+  const editor = await session.composerReady();
+  await editor.fill("/");
+  await expect(page.getByText(`/${command}`, { exact: true })).toBeVisible({ timeout: 10_000 });
+  await editor.fill("");
 }

@@ -1,4 +1,4 @@
-import { test, expect } from "../../fixtures/test-base";
+import { test, expect, resetSeedRepositoryCheckout } from "../../fixtures/test-base";
 import { SessionPage } from "../../pages/session-page";
 import { GitHelper, makeGitEnv } from "../../helpers/git-helper";
 import { waitForFiniteAnimations } from "../../helpers/animations";
@@ -73,18 +73,13 @@ async function expectDiffTextAbsent(testPage: Page, text: string, timeout = 10_0
 }
 
 test.describe("Mobile changes panel", () => {
-  test.describe.configure({ retries: 1, timeout: 120_000 });
+  test.describe.configure({ retries: 0, timeout: 120_000 });
 
-  test.beforeEach(({ backend }) => {
-    // The worker reuses its fixture repository across tests. Restore a clean
-    // working tree so staged/untracked files from an earlier scenario cannot
-    // move and remount the PR Changes section during async status hydration.
-    const git = new GitHelper(
-      path.join(backend.tmpDir, "repos", "e2e-repo"),
-      makeGitEnv(backend.tmpDir),
-    );
-    git.exec("git reset --hard HEAD");
-    git.exec("git clean -fd");
+  test.beforeEach(({ backend, seedData }) => {
+    // Restore the shared worker checkout to its immutable fixture baseline.
+    // Resetting only the working tree leaves commits from earlier scenarios
+    // in the local history and changes which commits the panel renders.
+    resetSeedRepositoryCheckout(seedData, backend.tmpDir);
   });
 
   // @covers AC-UI-CHANGES-FILE-ROW-CONTAINMENT-002.1 through 002.3

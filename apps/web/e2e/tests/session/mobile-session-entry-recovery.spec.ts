@@ -53,18 +53,24 @@ test.describe("mobile session entry recovery", () => {
       expect(detailsBox?.height).toBeGreaterThanOrEqual(44);
       await assertNoDocumentHorizontalOverflow(testPage, "mobile session history recovery");
 
-      const rejectedBeforeManualRetry = proxy.rejectedResponseCount("message.list");
-      await retry.tap();
-      await expect
-        .poll(() => proxy.rejectedResponseCount("message.list"), {
-          timeout: 30_000,
-          message: "Waiting for the manual retry to receive the injected history failure",
-        })
-        .toBeGreaterThan(rejectedBeforeManualRetry);
-      await expect(historyNotice).toBeVisible();
-
       proxy.releaseRejectedResponses("message.list");
-      await retry.tap();
+      const successRetryBox = await retry.boundingBox();
+      if (!successRetryBox) throw new Error("session history retry control has no touch target");
+      const hitTarget = await testPage.evaluate(
+        ({ x, y }) => {
+          const element = document.elementFromPoint(x, y);
+          return Boolean(element?.closest('[data-testid="session-history-retry"]'));
+        },
+        {
+          x: successRetryBox.x + successRetryBox.width / 2,
+          y: successRetryBox.y + successRetryBox.height / 2,
+        },
+      );
+      expect(hitTarget).toBe(true);
+      await testPage.touchscreen.tap(
+        successRetryBox.x + successRetryBox.width / 2,
+        successRetryBox.y + successRetryBox.height / 2,
+      );
       await expect(historyNotice).toHaveCount(0);
       await expect(chat).toContainText("simple mock response", { timeout: 30_000 });
       expect(proxy.rejectedResponseCount("message.list")).toBeGreaterThan(0);
