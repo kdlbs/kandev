@@ -53,6 +53,16 @@ test.describe("mobile session entry recovery", () => {
       expect(detailsBox?.height).toBeGreaterThanOrEqual(44);
       await assertNoDocumentHorizontalOverflow(testPage, "mobile session history recovery");
 
+      const rejectedBeforeManualRetry = proxy.rejectedResponseCount("message.list");
+      await retry.tap();
+      await expect
+        .poll(() => proxy.rejectedResponseCount("message.list"), {
+          timeout: 30_000,
+          message: "Waiting for the manual retry to receive the injected history failure",
+        })
+        .toBeGreaterThan(rejectedBeforeManualRetry);
+      await expect(historyNotice).toBeVisible();
+
       proxy.releaseRejectedResponses("message.list");
       await retry.tap();
       await expect(historyNotice).toHaveCount(0);
