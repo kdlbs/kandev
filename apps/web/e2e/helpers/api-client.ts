@@ -1657,17 +1657,19 @@ export class ApiClient {
         (body.includes("inspect worktrees before delete") ||
           body.includes("capture worktree cleanup identities") ||
           body.includes("capture cleanup identity"));
-      if (!transientWorktreeInspection || attempt === 3) {
+      const transientTaskHierarchyConflict =
+        response.status === 500 &&
+        body.includes("task has children at final deletion; retry the task deletion");
+      if ((!transientWorktreeInspection && !transientTaskHierarchyConflict) || attempt === 3) {
         throw new Error(`API DELETE ${path} failed (${response.status}): ${body}`);
       }
 
-      // A task cleanup worker can remove a checkout between the reset's
-      // inventory read and its dirty-worktree inspection. Retry the complete
-      // reset after the worker has had time to publish its deletion.
+      // Re-run the complete reset so it rebuilds its task inventory after a
+      // concurrent cleanup or child-task mutation.
       await dwell(
         250 * (attempt + 1),
         "poll-interval",
-        "retry interval for the E2E reset after a transient worktree inspection race",
+        "retry interval for the E2E reset after a transient cleanup race",
       );
     }
   }

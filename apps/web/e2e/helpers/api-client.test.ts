@@ -275,3 +275,64 @@ describe("ApiClient.cleanupTestProfiles", () => {
     expect(deleted).toEqual(["/api/v1/agent-profiles/test-profile"]);
   });
 });
+
+describe("ApiClient.e2eReset", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("retries when a task is added during hierarchy-aware cleanup", async () => {
+    let resetAttempts = 0;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = new URL(String(input));
+        if (url.pathname === "/api/v1/app-state") {
+          return Response.json({ interimSettingsInterlockToken: "test-token" });
+        }
+        if (url.pathname === "/api/v1/e2e/reset/workspace-1") {
+          expect(init?.method).toBe("DELETE");
+          resetAttempts += 1;
+          if (resetAttempts === 1) {
+            return Response.json(
+              { error: "task has children at final deletion; retry the task deletion" },
+              { status: 500 },
+            );
+          }
+          return Response.json({ deleted_tasks: 1 });
+        }
+        throw new Error(`unexpected request: ${url}`);
+      }),
+    );
+
+    await expect(
+      new ApiClient("http://backend.test").e2eReset("workspace-1", ["workflow-1"]),
+    ).resolves.toBeUndefined();
+
+    expect(resetAttempts).toBe(2);
+  });
+
+  it("does not retry permanent reset failures", async () => {
+    let resetAttempts = 0;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = new URL(String(input));
+        if (url.pathname === "/api/v1/app-state") {
+          return Response.json({ interimSettingsInterlockToken: "test-token" });
+        }
+        if (url.pathname === "/api/v1/e2e/reset/workspace-1") {
+          resetAttempts += 1;
+          return Response.json({ error: "workspace is unavailable" }, { status: 500 });
+        }
+        throw new Error(`unexpected request: ${url}`);
+      }),
+    );
+
+    await expect(
+      new ApiClient("http://backend.test").e2eReset("workspace-1", ["workflow-1"]),
+    ).rejects.toThrow(
+      'API DELETE /api/v1/e2e/reset/workspace-1?keep_workflows=workflow-1 failed (500): {"error":"workspace is unavailable"}',
+    );
+
+    expect(resetAttempts).toBe(1);
+  });
+});
