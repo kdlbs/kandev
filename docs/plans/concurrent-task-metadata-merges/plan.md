@@ -29,7 +29,8 @@ checks; delivery remains in progress. Do not reopen the historical
 
 ## Confirmed cause and retained evidence
 
-Authoritative base and local HEAD are `93c80f75454f11a60c3e8458d70b3148194d7dac`.
+Immutable implementation and PR base: `93c80f75454f11a60c3e8458d70b3148194d7dac`.
+Current delivery-head receipts belong to the external Kandev task plan.
 `Service.UpdateTaskMetadata` merges supplied keys into an early task and calls
 `UpdateTaskPreservingDeferredLaunch`, which writes stale scalar and ordinary metadata state.
 DB serialization of that snapshot does not preserve intent. ROOT's accepted proof used two
@@ -135,6 +136,11 @@ IMPLEMENTATION results so far on 2026-10-04:
   initially used the legacy scanner before normalization. Moving the scalar baseline observation
   before deliberate raw NULL assignment fixed that fixture and the focused case passed (1.205s).
   The driver lock-error after cancellation is normalized to the context cause by the new operation.
+  A review correction replaces pool-checkout synchronization with a construction-installed native
+  driver forwarding probe: actual SQLITE_BUSY from the held independent writer is observed before
+  cancellation at the error-return boundary. No SQL result is simulated. PG separately proves
+  cancellation during an actual physical row wait. The affected corrected SQLite check passed
+  with race detection (package 6.386s).
 - Required SQLite regression passed (8.838s); SQL guard passed. Public documentation validator
   passed (47 pages) and its 62 tests passed. Catalog/spec/whitespace gates passed.
 
