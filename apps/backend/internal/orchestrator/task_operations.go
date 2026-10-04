@@ -10124,7 +10124,9 @@ func (s *Service) claimCancellationWithActionExclusive(
 func (s *Service) claimExplicitCancellation(
 	sessionID string,
 	action func(context.Context, *cancelOperation) (bool, error),
+	actionOnOwner ...bool,
 ) (*cancelOperation, bool, *cancellationAction) {
+	registerOwnerAction := len(actionOnOwner) > 0 && actionOnOwner[0]
 	s.cancellationOperationsMu.Lock()
 	defer s.cancellationOperationsMu.Unlock()
 	if s.cancellationOperations == nil {
@@ -10135,7 +10137,7 @@ func (s *Service) claimExplicitCancellation(
 			return operation, false, nil
 		}
 		operation.markJoinedLocked()
-		if operation.kind == cancellationKindExplicit || action == nil {
+		if action == nil || (operation.kind == cancellationKindExplicit && !registerOwnerAction) {
 			return operation, false, nil
 		}
 		registered := &cancellationAction{done: make(chan struct{}), run: action}
@@ -10148,6 +10150,11 @@ func (s *Service) claimExplicitCancellation(
 		kind:   cancellationKindExplicit,
 	}
 	s.cancellationOperations[sessionID] = operation
+	if registerOwnerAction && action != nil {
+		registered := &cancellationAction{done: make(chan struct{}), run: action}
+		operation.actions = append(operation.actions, registered)
+		return operation, true, registered
+	}
 	return operation, true, nil
 }
 
@@ -10753,14 +10760,33 @@ func (s *Service) CancelAgent(ctx context.Context, sessionID string) (err error)
 	var operation *cancelOperation
 	var owner bool
 	var action *cancellationAction
-	operation, owner, action = s.claimExplicitCancellation(sessionID, func(actionCtx context.Context, operation *cancelOperation) (bool, error) {
-		return false, s.reconcileJoinedExplicitCancellationLocked(actionCtx, sessionID, operation)
-	})
+	expectedContinuation, _ := ctx.Value(continuationCancelContextKey{}).(*transientRetryEntry)
+	continuationDisposition, settleContinuation := ctx.Value(continuationCancelDispositionContextKey{}).(string)
+	continuationTaskID, _ := ctx.Value(continuationCancelTaskContextKey{}).(string)
+	continuationAction := settleContinuation && expectedContinuation != nil
+	operation, owner, action = s.claimExplicitCancellation(
+		sessionID,
+		func(actionCtx context.Context, operation *cancelOperation) (bool, error) {
+			if continuationAction {
+				s.finishContinuationManualLocked(
+					actionCtx, continuationTaskID, sessionID,
+					"", expectedContinuation, true, continuationDisposition,
+				)
+				return true, nil
+			}
+			return false, s.reconcileJoinedExplicitCancellationLocked(actionCtx, sessionID, operation)
+		},
+		continuationAction,
+	)
 	if !owner {
 		if err := operation.wait(ctx); err != nil {
 			return err
 		}
 		if operation.kind == cancellationKindExplicit {
+			if action != nil {
+				_, err := action.wait(ctx)
+				return err
+			}
 			return nil
 		}
 		if operation.kind == cancellationKindQueueSendNow {

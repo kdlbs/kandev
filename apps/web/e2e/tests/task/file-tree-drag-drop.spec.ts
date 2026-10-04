@@ -5,7 +5,7 @@ import { test, expect } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
 import { SessionPage } from "../../pages/session-page";
 import type { FileTreePage } from "../../pages/file-tree-page";
-import { GitHelper, makeGitEnv, createStandardProfile } from "../../helpers/git-helper";
+import { createStandardProfile } from "../../helpers/git-helper";
 
 // DnD in file-browser.tsx uses native HTML5 drag events (dragstart, dragover,
 // drop) keyed off React's onDragStart/Over/Drop. Playwright's locator.dragTo()
@@ -24,14 +24,14 @@ async function setupTask({
   seedData,
   profileName,
   taskTitle,
-  requiredPath,
+  fixtureFiles,
 }: {
   testPage: Page;
   apiClient: ApiClient;
   seedData: { workspaceId: string; workflowId: string; startStepId: string; repositoryId: string };
   profileName: string;
   taskTitle: string;
-  requiredPath: string;
+  fixtureFiles: Record<string, string>;
 }) {
   const profile = await createStandardProfile(apiClient, profileName);
   const task = await apiClient.createTaskWithAgent(seedData.workspaceId, taskTitle, profile.id, {
@@ -53,24 +53,19 @@ async function setupTask({
     })
     .toBe("ready");
 
-  // Environment readiness and repository materialization are separate
-  // transitions. Wait for the exact fixture file in the task worktree before
-  // the first tree snapshot, otherwise a valid early tree can be retained
-  // while the checkout is still being populated.
+  // Seed the task checkout only after its path is published and materialized.
   await expect
     .poll(
       async () => {
         const environment = await apiClient.getTaskEnvironment(task.id);
-        const repositoryWorktree = environment?.repos?.find(
-          (repository) => repository.repository_id === seedData.repositoryId,
-        )?.worktree_path;
-        // The environment root and the repository checkout are separate
-        // paths. The executor can publish either path first, and the first
-        // repository snapshot can omit repository_id, so check every
-        // advertised candidate and keep the one that contains the fixture.
-        const candidatePaths = [
-          repositoryWorktree,
-          ...(environment?.repos ?? []).map((repository) => repository.worktree_path),
+        const repositoryPaths = (environment?.repos ?? [])
+          .filter(
+            (repository) =>
+              !repository.repository_id || repository.repository_id === seedData.repositoryId,
+          )
+          .map((repository) => repository.worktree_path);
+        const candidates = [
+          ...repositoryPaths,
           environment?.workspace_path,
           environment?.worktree_path,
         ].filter(
@@ -78,19 +73,53 @@ async function setupTask({
             Boolean(candidate) && paths.indexOf(candidate) === index,
         );
         workspacePath =
-          candidatePaths.find((candidate) => fs.existsSync(path.join(candidate, requiredPath))) ??
-          "";
+          candidates.find((candidate) => {
+            try {
+              return fs.statSync(candidate).isDirectory();
+            } catch {
+              return false;
+            }
+          }) ?? "";
         return workspacePath !== "";
       },
-      { timeout: 90_000, message: `Waiting for ${requiredPath} in the ${taskTitle} worktree` },
+      { timeout: 30_000, message: `Waiting for the ${taskTitle} repository worktree` },
     )
     .toBe(true);
 
-  await testPage.goto(`/t/${task.id}`);
-  const session = new SessionPage(testPage);
-  await session.waitForLoad();
-  await session.clickTab("Files");
-  return session;
+  for (const [relativePath, contents] of Object.entries(fixtureFiles)) {
+    const absolutePath = path.join(workspacePath, relativePath);
+    fs.mkdirSync(path.dirname(absolutePath), { recursive: true });
+    fs.writeFileSync(absolutePath, contents);
+  }
+
+  try {
+    await testPage.goto(`/t/${task.id}`);
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
+    await session.clickTab("Files");
+    return { session, workspacePath };
+  } catch (error) {
+    removeFixtureFiles(workspacePath, Object.keys(fixtureFiles));
+    throw error;
+  }
+}
+
+function removeFixtureFiles(workspacePath: string, fixturePaths: string[]) {
+  for (const relativePath of fixturePaths) {
+    const absolutePath = path.join(workspacePath, relativePath);
+    if (fs.existsSync(absolutePath) && fs.statSync(absolutePath).isFile()) {
+      fs.unlinkSync(absolutePath);
+    }
+    let directory = path.dirname(absolutePath);
+    while (directory !== workspacePath) {
+      try {
+        fs.rmdirSync(directory);
+      } catch {
+        break;
+      }
+      directory = path.dirname(directory);
+    }
+  }
 }
 
 async function dispatchHtmlDnd(
@@ -168,77 +197,59 @@ test.describe("File tree drag and drop", () => {
     testPage,
     apiClient,
     seedData,
-    backend,
   }) => {
-    const repoDir = path.join(backend.tmpDir, "repos", "e2e-repo");
-    const git = new GitHelper(repoDir, makeGitEnv(backend.tmpDir));
-    git.createFile("movable.ts", "m");
-    git.createFile("target-dir/keep.ts", "k");
-    git.stageAll();
-    git.commit("seed dnd");
-
-    const session = await setupTask({
+    const fixtureFiles = { "movable.ts": "m", "target-dir/keep.ts": "k" };
+    const { session, workspacePath } = await setupTask({
       testPage,
       apiClient,
       seedData,
       profileName: "ft-dnd-move",
       taskTitle: "FT DnD Move",
-      requiredPath: "movable.ts",
+      fixtureFiles,
     });
+    try {
+      await dispatchHtmlDnd(testPage, session.fileTree, "movable.ts", "target-dir");
 
-    await dispatchHtmlDnd(testPage, session.fileTree, "movable.ts", "target-dir");
+      await expect(session.fileTreeNode("movable.ts")).toHaveCount(0, { timeout: 10_000 });
+      await session.fileTreeNode("target-dir").click();
+      await expect(session.fileTreeNode("target-dir/movable.ts")).toBeVisible({ timeout: 10_000 });
 
-    // The file is removed from the root immediately (optimistic update).
-    await expect(session.fileTreeNode("movable.ts")).toHaveCount(0, { timeout: 10_000 });
-    // Expand the target folder to verify the moved child landed inside.
-    // moveNodesInTree does not auto-expand the drop target.
-    await session.fileTreeNode("target-dir").click();
-    await expect(session.fileTreeNode("target-dir/movable.ts")).toBeVisible({ timeout: 10_000 });
-
-    await expect
-      .poll(() => fs.existsSync(path.join(repoDir, "target-dir", "movable.ts")), {
-        timeout: 10_000,
-      })
-      .toBe(true);
-    expect(fs.existsSync(path.join(repoDir, "movable.ts"))).toBe(false);
+      expect(fs.existsSync(path.join(workspacePath, "target-dir", "movable.ts"))).toBe(true);
+      expect(fs.existsSync(path.join(workspacePath, "movable.ts"))).toBe(false);
+    } finally {
+      removeFixtureFiles(workspacePath, [
+        "movable.ts",
+        "target-dir/movable.ts",
+        "target-dir/keep.ts",
+      ]);
+    }
   });
 
   test("drop is rejected when dragging a folder onto itself", async ({
     testPage,
     apiClient,
     seedData,
-    backend,
   }) => {
-    const repoDir = path.join(backend.tmpDir, "repos", "e2e-repo");
-    const git = new GitHelper(repoDir, makeGitEnv(backend.tmpDir));
-    git.createFile("selfdir/leaf.ts", "leaf");
-    git.stageAll();
-    git.commit("seed selfdir");
-
-    const session = await setupTask({
+    const fixtureFiles = { "selfdir/leaf.ts": "leaf" };
+    const { session, workspacePath } = await setupTask({
       testPage,
       apiClient,
       seedData,
       profileName: "ft-dnd-self",
       taskTitle: "FT DnD Self Reject",
-      requiredPath: "selfdir/leaf.ts",
+      fixtureFiles,
     });
+    try {
+      await session.fileTree.waitForFileTreeNode("selfdir");
+      await dispatchHtmlDnd(testPage, session.fileTree, "selfdir", "selfdir");
 
-    await session.fileTree.waitForFileTreeNode("selfdir");
+      await expect(session.fileTreeNode("selfdir")).toBeVisible({ timeout: 5_000 });
+      await session.fileTreeNode("selfdir").click();
+      await expect(session.fileTreeNode("selfdir/leaf.ts")).toBeVisible({ timeout: 10_000 });
 
-    // Drop onto self: handleDragOver short-circuits via isDropInvalid so
-    // preventDefault is never called, which means the browser would never
-    // fire drop in real usage. Dispatching events directly bypasses that
-    // guard, but the drop handler also calls isDropInvalid and bails.
-    await dispatchHtmlDnd(testPage, session.fileTree, "selfdir", "selfdir");
-
-    // Tree is unchanged: folder is still at root with its original child.
-    await expect(session.fileTreeNode("selfdir")).toBeVisible({ timeout: 5_000 });
-    // Expand and confirm the child is still there.
-    await session.fileTreeNode("selfdir").click();
-    await expect(session.fileTreeNode("selfdir/leaf.ts")).toBeVisible({ timeout: 10_000 });
-
-    // Disk untouched - no self-nested directory created.
-    expect(fs.existsSync(path.join(repoDir, "selfdir", "selfdir"))).toBe(false);
+      expect(fs.existsSync(path.join(workspacePath, "selfdir", "selfdir"))).toBe(false);
+    } finally {
+      removeFixtureFiles(workspacePath, ["selfdir/leaf.ts"]);
+    }
   });
 });

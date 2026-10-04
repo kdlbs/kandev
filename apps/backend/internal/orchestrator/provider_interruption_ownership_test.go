@@ -65,6 +65,46 @@ func TestInterruptionContinuationOwnershipCancelAcceptedTurn(t *testing.T) {
 	require.Equal(t, int32(1), mgr.cancelAgentCalls.Load(), "Cancel must stop the accepted continuation at the provider")
 }
 
+type continuationCancellationOrderMessageCreator struct {
+	*mockMessageCreator
+	cancellationPending              func() bool
+	pendingAtCancellationNoticeWrite bool
+}
+
+func (m *continuationCancellationOrderMessageCreator) CreateSessionMessageIdempotent(
+	ctx context.Context,
+	messageID, taskID, content, sessionID, messageType, turnID string,
+	metadata map[string]interface{},
+	requestsInput bool,
+) error {
+	if metadata["recovery_disposition"] == "cancelled" {
+		m.pendingAtCancellationNoticeWrite = m.cancellationPending()
+	}
+	return m.mockMessageCreator.CreateSessionMessageIdempotent(
+		ctx, messageID, taskID, content, sessionID, messageType, turnID, metadata, requestsInput,
+	)
+}
+
+func TestInterruptionContinuationCancellationSettlesBeforeReleasingOwnership(t *testing.T) {
+	svc, _, _ := dispatchContinuationFixture(t)
+	creator := &continuationCancellationOrderMessageCreator{
+		mockMessageCreator: svc.messageCreator.(*mockMessageCreator),
+		cancellationPending: func() bool {
+			return svc.currentCancellation("s1") != nil
+		},
+	}
+	svc.messageCreator = creator
+
+	require.True(t, svc.CancelTransientRetry(context.Background(), "t1", "s1"))
+	latest := creator.sessionMessages[len(creator.sessionMessages)-1]
+	require.Equal(t, "cancelled", latest.metadata["recovery_disposition"])
+	require.True(t, creator.pendingAtCancellationNoticeWrite,
+		"continuation recovery must be persisted before cancellation releases session ownership")
+	session, err := svc.repo.GetTaskSession(context.Background(), "s1")
+	require.NoError(t, err)
+	require.Equal(t, models.TaskSessionStateWaitingForInput, session.State)
+}
+
 func TestInterruptionContinuationOwnershipOrdinaryStopRetiresEpisode(t *testing.T) {
 	svc, mgr, _ := dispatchContinuationFixture(t)
 	require.NoError(t, svc.CancelAgent(context.Background(), "s1"))

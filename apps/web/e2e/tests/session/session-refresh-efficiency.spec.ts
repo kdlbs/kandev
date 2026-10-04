@@ -1,4 +1,5 @@
 import { expect, test } from "../../fixtures/test-base";
+import type { Response } from "@playwright/test";
 import { SessionPage } from "../../pages/session-page";
 import { waitForSessionState } from "../../helpers/session";
 import { seedPluginExecutorStatusTask } from "../../helpers/plugin-executor-status";
@@ -31,24 +32,47 @@ test.describe("session refresh efficiency", () => {
       message: "Waiting for the conditional-read fixture to run",
     });
 
-    const initialRead = testPage.waitForResponse(
-      (response) => matchesTaskSessionRead(response.url(), sessionId) && response.status() === 200,
-      { timeout: 60_000 },
-    );
-    const unchangedRead = testPage.waitForResponse(
-      (response) => matchesTaskSessionRead(response.url(), sessionId) && response.status() === 304,
-      { timeout: 60_000 },
-    );
+    const reads: Array<{
+      status: number;
+      etag: string | undefined;
+      requestEtag: string | undefined;
+    }> = [];
+    const onResponse = (response: Response) => {
+      if (!matchesTaskSessionRead(response.url(), sessionId)) return;
+      reads.push({
+        status: response.status(),
+        etag: response.headers()["etag"],
+        requestEtag: response.request().headers()["if-none-match"],
+      });
+    };
+    testPage.on("response", onResponse);
     try {
       await testPage.goto(`/t/${task.id}`);
       const session = new SessionPage(testPage);
       await session.waitForLoad();
-      const [initial, unchanged] = await Promise.all([initialRead, unchangedRead]);
-
-      expect(initial.headers()["etag"]).toMatch(/^"[a-f0-9]{64}"$/);
-      expect(unchanged.headers()["etag"]).toMatch(/^"[a-f0-9]{64}"$/);
-      expect(unchanged.headers()["etag"]).toBe(unchanged.request().headers()["if-none-match"]);
+      await expect
+        .poll(
+          () =>
+            reads.some(
+              (read, index) =>
+                read.status === 304 &&
+                read.etag === read.requestEtag &&
+                reads
+                  .slice(0, index)
+                  .some(
+                    (previous) => previous.status === 200 && previous.etag === read.requestEtag,
+                  ),
+            ),
+          {
+            timeout: 60_000,
+            message: "A 304 should revalidate a previously observed session ETag",
+          },
+        )
+        .toBe(true);
+      const fullRead = reads.find((read) => read.status === 200);
+      expect(fullRead?.etag).toMatch(/^"[a-f0-9]{64}"$/);
     } finally {
+      testPage.off("response", onResponse);
       await apiClient
         .stopSession({ session_id: sessionId, reason: "session refresh E2E cleanup", force: true })
         .catch(() => undefined);
