@@ -194,7 +194,9 @@ No new architecture or unrelated CI scope without a ROOT checkpoint.
 
 ## Results
 
-Implementation in progress; local regression checks passed, full lint and delivery pending.
+Local implementation and required full lint passed. The checkpoints below preserve
+actual diagnostic history; publication, CI/review and verified merge are tracked
+externally until complete.
 Design receipts remain in plan.md. All returned handles below were actually joined.
 
 - Permanent existing-API interleavings RED50828: three real races failed, two controls passed;
@@ -220,8 +222,8 @@ Design receipts remain in plan.md. All returned handles below were actually join
 - Original full installed lint19895 joined exit1 after559.836s on a concrete handler-test
   typecheck failure: shared mockRepository lacked the newly required native methods.
   Minimal common fixture forwarding now fails closed as unavailable; affected handler
-  six explicit tests passed1.101s (joined3417); a distinct original full-lint receipt
-  is pending. No production fallback.
+  six explicit tests passed1.101s (joined3417); later full-lint receipts below
+  supersede this diagnostic checkpoint. No production fallback.
 - Second distinct original full lint92844 joined exit1 after237.807s: nine concrete
   cyclop/constant/test-switch/unused-assignment/file-size findings. The managed settings
   block moved intact into its focused service file, pure closed intent helpers reduced
@@ -237,7 +239,9 @@ Design receipts remain in plan.md. All returned handles below were actually join
   Binary SHA25667342f8c4ce658ed63692675a906a43293597ab526f97e1c2b60a2900355f06b;
   receipt /tmp/kandev-managed-admission-full-lint4-receipt.json. Earlier diagnostic
   receipts are retained. Local implementation is done; normal delivery remains pending.
-- Normal hooks, publication/review/merge remain pending.
+- Normal active hooks passed without bypass (joined51991,40.252s), then the clean
+  commit was published as ready PR4207. CI/review and actual verified merge remain
+  external delivery gates; this work order does not claim them complete.
   Authoritative current main snapshot for lint is99f509743b29d3d021d76167f920304790485d42;
   proof/design base remains1a2c60cf81e9da95d3572aa689c1b5c9e3a2271b. No main-only rebase.
 
