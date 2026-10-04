@@ -255,3 +255,44 @@ Dependencies were absent: one frozen install from apps using pinned pnpm 9.15.9 
 reused packages, zero downloads. Existing pre-commit and commit-msg hooks are active. Owned temporary
 wrappers keep the actual hook linter bounded at concurrency 2, CLI 5m/GNU 6m/kill-after 10s and route
 pnpm to the verified cached 9.15.9; neither hook nor assertions are bypassed. Primary session only.
+
+
+PR fixup on actual hosted/review evidence: the empty-list HTTP fixture inherited a fail-closed
+replacement stub. Its existing capture fixture now obtains a snapshot, runs the actual builder, and
+changes its rows only on success; the original HTTP 200/explicit-clear assertions remain intact.
+The PostgreSQL holder-entry wait now selects callback entry, actual holder completion/error, or a
+bounded holder-context failure, retaining physical-wait and joined cleanup assertions.
+
+A new real-DB ordering RED, handle 33675 joined exit 1 (package 0.357s), showed both invalid assignee
+and invalid parent requests creating one extra remote entity plus a creation success event; exact
+old associations remained. The valid remote control passed without network. The minimal correction
+validates those references before side-effectful preparation and reuses results during mutation.
+It retains existing task identity/workspace and pre-update capability context and adds no compensation.
+GREEN handle 31227 joined exit 0 (package 1.497s): new assignee/parent/control scenarios, five existing
+parent validation controls and two assignee controls matched. Exact previously failed HTTP test,
+handle 82896 joined exit 0 (package 1.089s). Real PostgreSQL serialization only, handle 92099 joined
+exit 0 (package 2.839s), both predecessor/cancellation cases matched. Its exact owned container
+`7deb079305852a515e3541765d7548c30e6d0b4e59db95d95bfd5237e58cd2d0` had no volumes or binds;
+all mounts were recorded before testing and removal/absence plus credential cleanup were verified.
+No passing rollback, store conformance, ordering, SQLguard or unrelated service matrix was replayed.
+
+Baseline old-profile capability validation, inherited local-checkout rejection and original-input
+checkout ambiguity are retained by the reviewed contract. Review preferences to change those rules
+are dispositioned with exact base-source/design evidence rather than changing launch/checkout policy.
+The obsolete-head local monitor was terminated and joined without a gate verdict; hosted workflows
+were untouched. Current-head publication, hosted gates and full semantic review remain tracked in
+the Kandev plan. The bounded full CHANGED lint for these corrective backend changes, handle 93359, joined exit 0
+with zero issues at the unchanged base and resource bounds; log `/tmp/kandev-root23-fixup-lint.log`.
+Catalog/spec/reference coverage (all 19 changed files) and whitespace passed.
+
+
+Exact corrective commands from apps/backend, all tagged race runs with count 1 and a 5m test limit:
+
+```bash
+GOMAXPROCS=2 GOMEMLIMIT=512MiB go test -v -trimpath -tags fts5 -race -p 1 ./internal/task/service -run '^TestTaskRepositoryReplacementRejectsTaskReferencesBeforeEntityCreation$' -count=1 -timeout=5m
+GOMAXPROCS=2 GOMEMLIMIT=512MiB go test -v -trimpath -tags fts5 -race -p 1 ./internal/task/service -run '^(TestTaskRepositoryReplacementRejectsTaskReferencesBeforeEntityCreation|TestService_UpdateTask_(RejectsArchivedParent|ValidationErrorsWrapErrInvalidParent|RejectsSelfParent|RejectsMissingParent|RejectsCrossWorkspaceParent)|TestUpdateTask_(AssigneeSurvivesOfficeMigration|HumanAndAgentAssigneesAreIndependent))$' -count=1 -timeout=5m
+GOMAXPROCS=2 GOMEMLIMIT=512MiB go test -v -trimpath -tags fts5 -race -p 1 ./internal/task/handlers -run '^TestHTTPUpdateTaskExplicitEmptyRepositoriesClears$' -count=1 -timeout=5m
+KANDEV_TEST_POSTGRES_DSN="$(cat /tmp/kandev-root23-pg-fixup-dsn)" GOMAXPROCS=2 GOMEMLIMIT=512MiB go test -v -trimpath -tags fts5 -race -p 1 ./internal/task/repository/sqlite -run '^TestPostgresTaskRepositoryReplacementSerialization$' -count=1 -timeout=5m
+```
+
+The private DSN file exists only while the proven-owned fixture is live and was removed on cleanup.

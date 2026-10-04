@@ -20,11 +20,11 @@ import (
 )
 
 // captureUpdateTaskRepo backs the update-task tests: it serves a task with an
-// attached repository and records whether the task's repository rows were
-// wiped (the replace path always deletes before recreating).
+// attached repository and records committed replacements.
 type captureUpdateTaskRepo struct {
 	mockRepository
 	deleteReposCalled bool
+	replacementRows   []*models.TaskRepository
 }
 
 func (m *captureUpdateTaskRepo) GetTask(_ context.Context, id string) (*models.Task, error) {
@@ -42,9 +42,23 @@ func (m *captureUpdateTaskRepo) DeleteTaskRepositoriesByTask(_ context.Context, 
 	return nil
 }
 
+func (m *captureUpdateTaskRepo) ReplaceTaskRepositories(ctx context.Context, taskID string, build func(models.TaskRepositoryReplacementSnapshot) ([]*models.TaskRepository, error)) ([]*models.TaskRepository, error) {
+	prior, err := m.ListTaskRepositories(ctx, taskID)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := build(models.TaskRepositoryReplacementSnapshot{Repositories: prior})
+	if err != nil {
+		return nil, err
+	}
+	m.replacementRows = rows
+	m.deleteReposCalled = true
+	return rows, nil
+}
+
 func (m *captureUpdateTaskRepo) ListTaskRepositories(_ context.Context, taskID string) ([]*models.TaskRepository, error) {
 	if m.deleteReposCalled {
-		return nil, nil
+		return m.replacementRows, nil
 	}
 	return []*models.TaskRepository{
 		{ID: "tr-1", TaskID: taskID, RepositoryID: "repo-1", BaseBranch: "main"},

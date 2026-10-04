@@ -170,6 +170,10 @@ exit 1 with four new-test lint findings. ROOT then authorized their minimal test
 six affected service scenarios and twelve REST/WS cases passed, and corrected-code full CHANGED
 lint handle 85224 joined exit 0 with zero issues at the same base and bounds. The first timeout's
 cause remains unproved; it is not cleanliness evidence.
+Actual hosted/review findings required a narrow correction: faithful empty-list HTTP fixture,
+bounded PostgreSQL holder-entry diagnostics, and assignee/parent validation before side-effectful
+preparation. The new ordering RED and focused GREEN receipts are in Task01; the association/task/Git
+boundary and existing checkout/profile semantics remain unchanged.
 Published-head hooks/CI/full semantic review/expected-head squash/independent content verification
 remain external completion gates recorded in the existing Kandev task plan.
 

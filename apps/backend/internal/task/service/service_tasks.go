@@ -2025,6 +2025,10 @@ func (s *Service) UpdateTask(ctx context.Context, id string, req *UpdateTaskRequ
 	if err != nil {
 		return nil, err
 	}
+	assignee, err := s.validateTaskUpdateReferences(ctx, task, req)
+	if err != nil {
+		return nil, err
+	}
 	var replacement *preparedRepositoryReplacement
 	if req.Repositories != nil {
 		replacement, err = s.prepareRepositoryReplacement(ctx, task.WorkspaceID, req.Repositories, task)
@@ -2062,10 +2066,6 @@ func (s *Service) UpdateTask(ctx context.Context, id string, req *UpdateTaskRequ
 		task.Position = *req.Position
 	}
 	if req.AssigneeUserID != nil {
-		assignee, err := s.resolveTaskAssignee(ctx, task, *req.AssigneeUserID)
-		if err != nil {
-			return nil, err
-		}
 		task.AssigneeUserID = assignee
 	}
 	if req.Metadata != nil {
@@ -2079,9 +2079,6 @@ func (s *Service) UpdateTask(ctx context.Context, id string, req *UpdateTaskRequ
 		}
 	}
 	if req.ParentID != nil && *req.ParentID != task.ParentID {
-		if err := s.resolveParentID(ctx, task, *req.ParentID); err != nil {
-			return nil, err
-		}
 		parentCleared = *req.ParentID == ""
 		task.ParentID = *req.ParentID
 		// Re-parenting (or un-nesting) an inherit_parent subtask keeps its
@@ -2156,6 +2153,24 @@ func (s *Service) UpdateTask(ctx context.Context, id string, req *UpdateTaskRequ
 	s.logger.Info("task updated", zap.String("task_id", task.ID))
 
 	return task, nil
+}
+
+// Validate task references before repository preparation can create entities.
+func (s *Service) validateTaskUpdateReferences(ctx context.Context, task *models.Task, req *UpdateTaskRequest) (string, error) {
+	assignee := task.AssigneeUserID
+	if req.AssigneeUserID != nil {
+		resolved, err := s.resolveTaskAssignee(ctx, task, *req.AssigneeUserID)
+		if err != nil {
+			return "", err
+		}
+		assignee = resolved
+	}
+	if req.ParentID != nil && *req.ParentID != task.ParentID {
+		if err := s.resolveParentID(ctx, task, *req.ParentID); err != nil {
+			return "", err
+		}
+	}
+	return assignee, nil
 }
 
 func (s *Service) reloadTaskAfterMutation(ctx context.Context, id string, fallback *models.Task, operation string) *models.Task {

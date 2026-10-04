@@ -78,7 +78,9 @@ failure makes no association write at all.
 - **AC-TASKS-ATTACH-WORKSPACE-SOURCES-002.7:** When resolving inputs, the system shall retain
   workspace and provider trust boundaries, typed resolution errors, duplicate-key rejection and
   policy validation. Association replacement shall not introduce runner-mutability gating or
-  change launch eligibility. Existing authorization of each entry point remains applicable.
+  change launch eligibility. Existing authorization of each entry point remains applicable. Task
+  updates shall validate requested assignees and changed parents before preparation can create
+  repository entities; a rejection shall create neither an entity nor its creation success event.
 - **AC-TASKS-ATTACH-WORKSPACE-SOURCES-002.8:** When replacement fails after other task fields or
   external repository/Git operations have succeeded, the association set shall be preserved without
   promising rollback of those separate operations. On restart the database shall contain the old

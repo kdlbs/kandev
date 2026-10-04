@@ -372,3 +372,46 @@ func testReplacementContributionMetadata(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, rows, actual)
 }
+
+// @covers AC-TASKS-ATTACH-WORKSPACE-SOURCES-002.7
+func TestTaskRepositoryReplacementRejectsTaskReferencesBeforeEntityCreation(t *testing.T) {
+	for _, scenario := range []string{"assignee", "parent", "valid_control"} {
+		t.Run(scenario, func(t *testing.T) {
+			svc, eventBus, repo, original := replacementFixture(t)
+			ctx := context.Background()
+			before, err := repo.ListRepositories(ctx, "ws-title")
+			require.NoError(t, err)
+			request := &UpdateTaskRequest{Repositories: []TaskRepositoryInput{{RemoteURL: "https://github.com/acme/new-reference.git", Provider: "github", DefaultBranch: "main", BaseBranch: "main"}}}
+			var expectedError error
+			switch scenario {
+			case "assignee":
+				svc.SetUserDirectory(tenancyReviewDirectory{users: map[string]string{}})
+				assignee := "missing-user"
+				request.AssigneeUserID = &assignee
+				expectedError = ErrMemberUserNotFound
+			case "parent":
+				parent := "missing-parent"
+				request.ParentID = &parent
+				expectedError = ErrInvalidParent
+			}
+			result, updateErr := svc.UpdateTask(ctx, "task-replacement", request)
+			after, err := repo.ListRepositories(ctx, "ws-title")
+			require.NoError(t, err)
+			if expectedError == nil {
+				require.NoError(t, updateErr)
+				require.Len(t, after, len(before)+1, "the same remote input must actually create an entity without network access")
+				require.Len(t, result.Repositories, 1)
+				require.NotEmpty(t, eventBus.GetPublishedEvents())
+				return
+			}
+			require.ErrorIs(t, updateErr, expectedError)
+			actual, err := repo.ListTaskRepositories(ctx, "task-replacement")
+			require.NoError(t, err)
+			require.Equal(t, original, actual)
+			if len(after) != len(before) {
+				t.Errorf("rejected task references created repository entities: before=%d after=%d", len(before), len(after))
+			}
+			require.Empty(t, eventBus.GetPublishedEvents(), "rejected task references must emit no creation success event")
+		})
+	}
+}

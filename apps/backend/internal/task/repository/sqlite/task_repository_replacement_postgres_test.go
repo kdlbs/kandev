@@ -60,6 +60,8 @@ func TestPostgresTaskRepositoryReplacementSerialization(t *testing.T) {
 			require.NotEqual(t, holderPID, workerPID)
 			require.NotEqual(t, holderPID, observerPID)
 			require.NotEqual(t, workerPID, observerPID)
+			holderCtx, cancelHolder := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancelHolder()
 			held, release := make(chan struct{}), make(chan struct{})
 			holderDone := make(chan error, 1)
 			holderFinished := make(chan struct{})
@@ -68,7 +70,7 @@ func TestPostgresTaskRepositoryReplacementSerialization(t *testing.T) {
 			t.Cleanup(func() { unblock(); <-holderFinished })
 			go func() {
 				defer close(holderFinished)
-				_, err := holder.ReplaceTaskRepositories(context.Background(), "replacement-task", func(snapshot models.TaskRepositoryReplacementSnapshot) ([]*models.TaskRepository, error) {
+				_, err := holder.ReplaceTaskRepositories(holderCtx, "replacement-task", func(snapshot models.TaskRepositoryReplacementSnapshot) ([]*models.TaskRepository, error) {
 					close(held)
 					<-release
 					if cancelWaiting {
@@ -78,7 +80,15 @@ func TestPostgresTaskRepositoryReplacementSerialization(t *testing.T) {
 				})
 				holderDone <- err
 			}()
-			<-held
+			select {
+			case <-held:
+			case <-holderFinished:
+				require.FailNow(t, "holder exited before invoking callback", "error: %v", <-holderDone)
+			case <-holderCtx.Done():
+				unblock()
+				<-holderFinished
+				require.FailNow(t, "holder did not enter callback", "error: %v", <-holderDone)
+			}
 			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 			defer cancel()
 			var called atomic.Bool

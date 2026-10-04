@@ -47,7 +47,11 @@ positions and materialization compensation; it cannot serve full replacement unc
 
 Use two narrowly scoped phases rather than running provider resolution inside a held writer transaction.
 
-1. Copy request inputs so preparation and inheritance never modify caller-owned slices or snapshots.
+1. Validate and resolve the update's requested assignee and changed parent against the existing task
+   identity/workspace before any preparation can create repository entities. Reuse those outcomes
+   during the ordinary task mutation instead of repeating lookups. This orders validation; it does
+   not add task-field or entity compensation. Copy request inputs so preparation and inheritance
+   never modify caller-owned slices or snapshots.
    Preserve the registered update's omitted/null versus explicit-empty conversion. Prepare every
    repository identity, scoped local-path lookup, remote descriptor, contribution binding, base-branch
    candidate and supported metadata outside the association transaction. Reuse `resolveRepoInput`,
@@ -71,8 +75,10 @@ Use two narrowly scoped phases rather than running provider resolution inside a 
 4. Select explicit policy snapshots first, otherwise the first complete existing snapshot matching
    the original request repository ID and policy ID, otherwise the prepared selected policy. Validate
    the chosen snapshot's repository identity as today. Preserve original-input matching when a safe
-   repository resolver redirects an ID. Apply policy base-branch precedence and `PreserveBaseBranch`,
-   check remote-contribution agreement, apply checkout omission/matching/ambiguity, and reject an
+   repository resolver redirects an ID. Checkout inheritance retains the existing original-request
+   branch tuple matching and ambiguity rule; do not use a later policy-derived base to disambiguate
+   a request that was previously ambiguous. Apply policy base-branch precedence and `PreserveBaseBranch`,
+   check remote-contribution agreement, and reject an
    explicit changed checkout if an environment already exists. Missing checkout-mutability support and
    capability errors retain the existing rejection behavior when a change actually needs evaluation.
 5. Produce all final rows, metadata and input positions, then enforce the existing
