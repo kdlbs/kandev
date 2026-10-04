@@ -1053,15 +1053,6 @@ func (s *Service) assignIdentifier(ctx context.Context, task *models.Task) error
 	return nil
 }
 
-// createTaskRepositories creates task-repository associations, resolving local paths to repository IDs.
-func (s *Service) createTaskRepositories(ctx context.Context, taskID, workspaceID string, repositories []TaskRepositoryInput) error {
-	rows, err := s.resolveTaskRepositoryRows(ctx, workspaceID, repositories)
-	if err != nil {
-		return err
-	}
-	return s.persistTaskRepositoryRows(ctx, taskID, rows)
-}
-
 // persistTaskRepositoryRows writes already-resolved task-repository rows,
 // stamping them with the owning task. Split from resolution so CreateTask can
 // resolve BEFORE inserting the task row: every reference failure that used to
@@ -1164,7 +1155,11 @@ func (s *Service) resolveTaskRepositoryRow(
 	if err != nil {
 		return nil, err
 	}
-	baseBranch, err = applyBranchPolicyBaseBranch(baseBranch, repoInput, policy)
+	return buildResolvedTaskRepositoryRow(repositoryID, baseBranch, index, repoInput, policy)
+}
+
+func buildResolvedTaskRepositoryRow(repositoryID, baseBranch string, index int, repoInput TaskRepositoryInput, policy *models.RepositoryBranchPolicy) (*models.TaskRepository, error) {
+	baseBranch, err := applyBranchPolicyBaseBranch(baseBranch, repoInput, policy)
 	if err != nil {
 		return nil, err
 	}
@@ -1310,7 +1305,7 @@ func (s *Service) repoDisplayLabel(ctx context.Context, repoInput TaskRepository
 // ResolveRepositoryRef resolves a single TaskRepositoryInput to a
 // (repositoryID, baseBranch) pair within the given workspace, creating the
 // repository if necessary. Mirrors the resolution used during task creation
-// (`createTaskRepositories`), but builds the local-path lookup map on demand
+// (`resolveTaskRepositoryRows`), but builds the local-path lookup map on demand
 // so callers that only resolve one input (e.g. add_branch) don't need to
 // thread the map themselves.
 //
@@ -1926,22 +1921,14 @@ func (s *Service) ReplaceTaskRepositories(ctx context.Context, taskID, workspace
 	return s.replaceTaskRepositories(ctx, taskID, workspaceID, repositories)
 }
 
-// replaceTaskRepositories deletes all existing task-repository associations and recreates them.
+// replaceTaskRepositories prepares references before atomically replacing the locked set.
 func (s *Service) replaceTaskRepositories(ctx context.Context, taskID, workspaceID string, repositories []TaskRepositoryInput) error {
-	existing, err := s.taskRepos.ListTaskRepositories(ctx, taskID)
+	prepared, err := s.prepareRepositoryReplacement(ctx, workspaceID, repositories, nil)
 	if err != nil {
-		s.logger.Error("failed to load existing task repositories", zap.Error(err))
 		return err
 	}
-	preserveTaskRepositoryPolicySnapshots(repositories, existing)
-	if err := s.validateTaskRepositoryPolicies(ctx, workspaceID, repositories); err != nil {
-		return err
-	}
-	if err := s.taskRepos.DeleteTaskRepositoriesByTask(ctx, taskID); err != nil {
-		s.logger.Error("failed to delete task repositories", zap.Error(err))
-		return err
-	}
-	return s.createTaskRepositories(ctx, taskID, workspaceID, repositories)
+	_, err = s.taskRepos.ReplaceTaskRepositories(ctx, taskID, prepared.finalize)
+	return err
 }
 
 // GetTask retrieves a task by ID and populates repositories
@@ -2038,11 +2025,10 @@ func (s *Service) UpdateTask(ctx context.Context, id string, req *UpdateTaskRequ
 	if err != nil {
 		return nil, err
 	}
+	var replacement *preparedRepositoryReplacement
 	if req.Repositories != nil {
-		if err := s.preserveRepositoryCheckoutOptions(ctx, task, req.Repositories); err != nil {
-			return nil, err
-		}
-		if err := s.preflightRepositoryInputs(ctx, task.WorkspaceID, req.Repositories); err != nil {
+		replacement, err = s.prepareRepositoryReplacement(ctx, task.WorkspaceID, req.Repositories, task)
+		if err != nil {
 			return nil, err
 		}
 	}
@@ -2140,9 +2126,11 @@ func (s *Service) UpdateTask(ctx context.Context, id string, req *UpdateTaskRequ
 
 	// Update task repositories if provided
 	if req.Repositories != nil {
-		if err := s.replaceTaskRepositories(ctx, task.ID, task.WorkspaceID, req.Repositories); err != nil {
+		committed, err := s.taskRepos.ReplaceTaskRepositories(ctx, task.ID, replacement.finalize)
+		if err != nil {
 			return nil, err
 		}
+		task.Repositories = committed
 	}
 
 	// Load repositories into task for response

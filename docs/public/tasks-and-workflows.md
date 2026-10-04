@@ -352,6 +352,8 @@ A task can include several local or remote repository rows. Multi-repository cre
 
 If Kandev cannot resolve a pasted remote URL or its branch, the repository row keeps the URL and shows the provider error. Use **Retry** after correcting the URL or when a transient provider failure has cleared.
 
+If replacing a task's repository associations fails before the database commit, Kandev keeps the complete previous association set. Other task edits, repository setup, or Git work completed earlier can remain; a fresh-branch persistence error still requires checking the repository.
+
 Changes and review are scoped by repository. State the expected deliverable, base branch, and pull-request target for every attachment. See [Coordinate work](coordination.md) for adding branches after creation and splitting multi-repository work.
 
 </details>
