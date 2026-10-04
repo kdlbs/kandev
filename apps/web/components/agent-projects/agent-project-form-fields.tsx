@@ -5,6 +5,7 @@ import { useAppStore } from "@/components/state-provider";
 import type { AppState } from "@/lib/state/store";
 import { isRemoteBackedProjectRepository } from "@/lib/agent-projects/repositories";
 import { Button } from "@kandev/ui/button";
+import { controlSizingClassName } from "@kandev/ui/control-sizing";
 import { useRepositories } from "@/hooks/domains/workspace/use-repositories";
 import { useSettingsData } from "@/hooks/domains/settings/use-settings-data";
 import { isSelectableAgentProfile } from "@/lib/state/slices/settings/types";
@@ -38,6 +39,7 @@ function ProjectSelect({
   options,
   unavailableId,
   unavailableOptionLabel,
+  placeholder,
   mobile,
   onChange,
 }: {
@@ -46,6 +48,7 @@ function ProjectSelect({
   options: Array<{ id: string; label: string }>;
   unavailableId?: string;
   unavailableOptionLabel?: string;
+  placeholder?: string;
   mobile: boolean;
   onChange: (value: string) => void;
 }) {
@@ -56,12 +59,13 @@ function ProjectSelect({
       <select
         className={cn(
           "w-full rounded-md border bg-background px-2 text-sm",
-          mobile ? "min-h-11" : "h-8",
+          controlSizingClassName("standard"),
+          mobile && "min-h-11",
         )}
         value={value}
         onChange={(event) => onChange(event.currentTarget.value)}
       >
-        <option value="">{t("projects:chooseProfile")}</option>
+        <option value="">{placeholder ?? t("projects:chooseProfile")}</option>
         {unavailableId && !options.some((option) => option.id === unavailableId) && (
           <option value={unavailableId}>
             {unavailableOptionLabel ?? t("projects:unavailableProfile", { id: unavailableId })}
@@ -174,7 +178,8 @@ function ProjectNameField({
         maxLength={120}
         className={cn(
           "w-full rounded-md border bg-background px-3 text-sm",
-          mobile ? "min-h-11" : "h-8",
+          controlSizingClassName("standard"),
+          mobile && "min-h-11",
         )}
         value={name}
         onChange={(event) => onChange(event.currentTarget.value)}
@@ -201,7 +206,7 @@ function ProjectRepositoriesField({
 }) {
   const { t } = useTranslation();
   const empty = repositories.length === 0 && unavailableRepositoryIds.length === 0;
-  const rowHeight = mobile ? "min-h-11" : "min-h-8";
+  const rowHeight = mobile ? "min-h-11" : "min-h-8 [@media(pointer:coarse)]:min-h-11";
   return (
     <fieldset className="space-y-2">
       <legend className="text-sm font-medium">{t("projects:repositories")}</legend>
@@ -265,6 +270,7 @@ function ProjectPrimaryRepositoryField({
   return (
     <ProjectSelect
       label={t("projects:primaryRepository")}
+      placeholder={t("kanban:selectRepository")}
       value={draft.primaryRepositoryId}
       unavailableId={project?.primary_repository_id}
       unavailableOptionLabel={t("projects:unavailableRepository", {
@@ -312,7 +318,7 @@ function ProjectExecutionField({
         <label
           className={cn(
             "flex cursor-pointer items-center gap-2 rounded-md border px-3 text-sm",
-            mobile ? "min-h-11" : "min-h-8",
+            mobile ? "min-h-11" : "min-h-8 [@media(pointer:coarse)]:min-h-11",
           )}
         >
           <input
@@ -407,7 +413,12 @@ function ProjectFormFields({
   const availableIds = new Set<string>(formData.repositories.map((repository) => repository.id));
   const unavailableIds = draft.repositoryIds.filter((id) => !availableIds.has(id));
   return (
-    <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-4 py-3">
+    <div
+      className={cn(
+        "min-h-0 flex-1 space-y-4 overflow-y-auto overscroll-contain pb-3",
+        mobile && "px-4 pt-3",
+      )}
+    >
       <ProjectNameField name={draft.name} mobile={mobile} onChange={onNameChange} />
       <ProjectRepositoriesField
         repositories={formData.repositories}
@@ -467,16 +478,16 @@ function ProjectFormFooter({
   return (
     <footer
       className={cn(
-        "flex shrink-0 gap-2 border-t px-4 py-3",
+        "flex shrink-0 gap-2 border-t pt-3",
         mobile
-          ? "pb-[calc(0.75rem+env(safe-area-inset-bottom,0px))] flex-col-reverse"
+          ? "px-4 pb-[calc(0.75rem+env(safe-area-inset-bottom,0px))] flex-col-reverse"
           : "justify-end",
       )}
     >
       <Button
         type="button"
         variant="outline"
-        className={mobile ? "min-h-11" : "h-8"}
+        className={mobile ? "min-h-11" : undefined}
         onClick={onClose}
       >
         {t("common:cancel")}
@@ -484,7 +495,7 @@ function ProjectFormFooter({
       <Button
         type="submit"
         disabled={!ready || saving}
-        className={mobile ? "min-h-11" : "h-8"}
+        className={mobile ? "min-h-11" : undefined}
         data-testid="agent-project-submit"
       >
         {saving ? t("projects:saving") : t(project ? "common:save" : "projects:createProject")}

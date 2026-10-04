@@ -1,6 +1,7 @@
 import { act, renderHook } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { useProjectFormData } from "./agent-project-form-fields";
+import type { AgentProject } from "@/lib/types/http-agent-projects";
 
 const mocks = vi.hoisted(() => ({
   create: vi.fn(),
@@ -58,5 +59,29 @@ describe("useAgentProjectFormController", () => {
     expect(mocks.create.mock.calls[0][1].requestKey).toBe("request-key-1");
     expect(mocks.create.mock.calls[1][1].requestKey).toBe("request-key-1");
     expect(mocks.generateUUID).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps the edited draft and exposes a stale-revision failure", async () => {
+    mocks.update.mockRejectedValue(new Error("project was changed by another request"));
+    const project = {
+      id: "project-1",
+      name: "Original name",
+      revision: 1,
+      repository_ids: ["repo-1"],
+      primary_repository_id: "repo-1",
+      coordinator_profile_id: "coordinator",
+      economy_profile_id: "economy",
+      frontier_profile_id: "frontier",
+    } as AgentProject;
+    const onOpenChange = vi.fn();
+    const { result } = renderHook(() =>
+      useAgentProjectFormController(true, "ws-1", project, formData, onOpenChange),
+    );
+    act(() => result.current.updateDraft({ name: "Keep this edit" }));
+    await act(async () => result.current.submit({ preventDefault: vi.fn() } as never));
+    expect(result.current.draft.name).toBe("Keep this edit");
+    expect(result.current.error).toBe("project was changed by another request");
+    expect(result.current.saving).toBe(false);
+    expect(onOpenChange).not.toHaveBeenCalled();
   });
 });

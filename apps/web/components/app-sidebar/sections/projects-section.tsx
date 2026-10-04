@@ -230,7 +230,10 @@ function AgentProjectRow({
         <button
           type="button"
           onClick={() => onOpenTask(project.main_task_id)}
-          className="flex min-w-0 flex-1 items-center gap-2 text-left"
+          className={cn(
+            "flex min-w-0 flex-1 items-center gap-2 text-left",
+            mobile ? "min-h-11" : "min-h-8",
+          )}
           data-testid={`agent-project-open-${project.id}`}
         >
           <span className="h-3 w-3 shrink-0 rounded-sm bg-primary/70" />
@@ -266,7 +269,8 @@ function AgentProjectRow({
 function OfficeProjectsSection({ collapsed, onNavigate }: ProjectsSectionProps) {
   const { t } = useTranslation();
   const router = useRouter();
-  const { isMobile } = useResponsiveBreakpoint();
+  const { isMobile, isFinePointer } = useResponsiveBreakpoint();
+  const touch = isMobile || isFinePointer === false;
   const projects = useAppStore(selectOfficeProjects).filter(
     (project) => project.status !== "archived",
   );
@@ -275,7 +279,7 @@ function OfficeProjectsSection({ collapsed, onNavigate }: ProjectsSectionProps) 
     onNavigate?.();
   };
   const headerAction = (
-    <ProjectsHeaderAction onAdd={() => navigate("/office/projects")} mobile={isMobile} />
+    <ProjectsHeaderAction onAdd={() => navigate("/office/projects")} mobile={touch} />
   );
   return (
     <AppSidebarSection
@@ -505,7 +509,8 @@ function AgentProjectsSection({ collapsed, onNavigate }: ProjectsSectionProps) {
   const archivedProjects = useAgentProjects(workspaceId, true, projectsEnabled && archivedOpen);
   useSettingsData(projectsEnabled);
   const mutations = useAgentProjectMutations();
-  const { isMobile } = useResponsiveBreakpoint();
+  const { isMobile, isFinePointer } = useResponsiveBreakpoint();
+  const touch = isMobile || isFinePointer === false;
   const navigate: Navigate = (path) => {
     router.push(path);
     onNavigate?.();
@@ -520,7 +525,7 @@ function AgentProjectsSection({ collapsed, onNavigate }: ProjectsSectionProps) {
     <ProjectsHeaderAction
       onAdd={() => setCreateOpen(true)}
       testId="agent-project-create-open"
-      mobile={isMobile}
+      mobile={touch}
     />
   );
   const openTask = (taskId: string) => navigate(linkToTask(taskId));
@@ -541,7 +546,7 @@ function AgentProjectsSection({ collapsed, onNavigate }: ProjectsSectionProps) {
           loading={projects.loading}
           loaded={projects.loaded}
           error={projects.error}
-          mobile={isMobile}
+          mobile={touch}
           expanded={expanded}
           onOpenTask={openTask}
           onRefresh={() => void projects.refresh()}
@@ -552,7 +557,7 @@ function AgentProjectsSection({ collapsed, onNavigate }: ProjectsSectionProps) {
         />
         <ArchivedAgentProjects
           open={archivedOpen}
-          mobile={isMobile}
+          mobile={touch}
           projects={archivedProjects.projects}
           onToggle={() => setArchivedOpen((current) => !current)}
           onOpenTask={openTask}

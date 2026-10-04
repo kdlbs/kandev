@@ -22,12 +22,13 @@ export function useAgentProjectContext(workspaceId: string, projectId: string) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const generation = useRef(0);
-  const dirty = file?.content !== draft;
+  const dirty = Boolean(file && file.content !== draft);
 
   const loadDirectory = useCallback(
     async (path: string) => {
       const request = ++generation.current;
       setStatus("loading");
+      setBusy(false);
       setError(null);
       setFile(null);
       try {
@@ -76,6 +77,7 @@ export function useAgentProjectContext(workspaceId: string, projectId: string) {
 
   const save = useCallback(async () => {
     if (!file || !dirty) return;
+    const request = ++generation.current;
     setBusy(true);
     setError(null);
     try {
@@ -84,13 +86,15 @@ export function useAgentProjectContext(workspaceId: string, projectId: string) {
         content: draft,
         expectedHash: file.hash,
       });
+      if (request !== generation.current) return;
       setFile({ ...file, content: draft, hash: response.hash });
     } catch (caught) {
+      if (request !== generation.current) return;
       setError(caught instanceof Error ? caught.message : String(caught));
     } finally {
-      setBusy(false);
+      if (request === generation.current) setBusy(false);
     }
-  }, [directory, dirty, draft, file, loadDirectory, projectId, workspaceId]);
+  }, [dirty, draft, file, projectId, workspaceId]);
 
   const goUp = useCallback(() => {
     const parentDirectory = file ? directory : directory.split("/").slice(0, -1).join("/");

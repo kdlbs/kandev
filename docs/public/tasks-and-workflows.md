@@ -181,10 +181,13 @@ An administrator must enable **Agent Projects** in **Settings → System → Fea
 1. Open **Projects** in the sidebar and select **New project**.
 2. Enter a name, select one or more remote repositories, and choose the primary repository.
 3. Choose the coordinator, economy worker, and frontier worker profiles.
-4. Select **Create project**. Kandev opens the coordinator task without starting an agent turn.
-5. Send a prompt to start the coordinator. Ask it to create an economy or frontier worker when you need separate work.
+4. Select **New project**. The project appears in the sidebar.
+5. Open the project row. Kandev prepares the coordinator task without starting an agent turn.
+6. Send a prompt to start the coordinator. Ask it to create an economy or frontier worker when you need separate work.
 
 Expand the project row to open its worker tasks. Each worker has its own repository checkout and status. Worker completion does not start a new coordinator turn.
+
+Use **Edit project** to change the name or agent profiles. Coordinator profile changes apply to new sessions. Existing sessions and workers keep their assigned profiles.
 
 The coordinator's **Files** panel starts at **Context**. Select **Workspace** to browse repository files. A worker's Files panel starts at its workspace and also gives access to project context. Context files are shared by project tasks and do not appear in **Changes**.
 

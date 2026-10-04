@@ -45,10 +45,10 @@ function AgentProjectFormFrame({
         shouldScaleBackground={false}
       >
         <DrawerContent
-          className="!inset-x-0 !bottom-0 !h-[100dvh] !max-h-[100dvh] !rounded-none !p-0"
+          className="!inset-x-0 !bottom-0 !h-[100dvh] !max-h-[100dvh] !rounded-none !p-0 before:inset-0 before:rounded-none [&>div:first-child]:hidden"
           data-testid="agent-project-form-mobile"
         >
-          <DrawerHeader className="shrink-0 border-b text-left">
+          <DrawerHeader className="shrink-0 border-b group-data-[vaul-drawer-direction=bottom]/drawer-content:text-left">
             <DrawerTitle>{title}</DrawerTitle>
             <DrawerDescription>{description}</DrawerDescription>
           </DrawerHeader>
@@ -60,10 +60,10 @@ function AgentProjectFormFrame({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
-        className="flex max-h-[min(85dvh,760px)] flex-col overflow-hidden sm:max-w-xl"
+        className="flex max-h-[min(85dvh,760px)] flex-col overflow-hidden sm:max-w-xl [&>[data-slot=dialog-close]]:[@media(pointer:coarse)]:size-11"
         data-testid="agent-project-form-desktop"
       >
-        <DialogHeader className="shrink-0">
+        <DialogHeader className="shrink-0 [@media(pointer:coarse)]:pr-9">
           <DialogTitle>{title}</DialogTitle>
           <DialogDescription>{description}</DialogDescription>
         </DialogHeader>

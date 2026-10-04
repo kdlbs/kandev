@@ -3,6 +3,11 @@ import { waitForLatestSessionDone } from "../../helpers/session";
 import { SessionPage } from "../../pages/session-page";
 import type { ApiClient } from "../../helpers/api-client";
 import {
+  assertFullHeightProjectSurface,
+  assertProjectFormGeometry,
+  assertProjectTouchTarget,
+} from "./agent-projects-geometry";
+import {
   readAgentProject,
   setupAgentProjectFixture,
   type AgentProjectView,
@@ -46,6 +51,8 @@ test("phone navigation manages Agent Projects and opens shared context in coordi
     await menu.getByTestId("agent-project-create-open").tap();
     const form = testPage.getByTestId("agent-project-form-mobile");
     await expect(form).toBeVisible();
+    await assertProjectFormGeometry(form, true);
+    await testPage.screenshot({ path: test.info().outputPath("phone-project-form.png") });
     await form.getByTestId("agent-project-name").fill(projectName);
     await form
       .locator("label")
@@ -69,6 +76,9 @@ test("phone navigation manages Agent Projects and opens shared context in coordi
     menu = await openMobileProjects(testPage);
     const projectRow = menu.getByTestId(`agent-project-row-${projectId}`);
     await expect(projectRow).toBeVisible();
+    await expect(menu.locator(`[data-task-row-id="${project.main_task_id}"]`)).toHaveCount(0);
+    await assertProjectTouchTarget(menu.getByTestId(`agent-project-open-${projectId}`));
+    await assertProjectTouchTarget(menu.getByRole("button", { name: "Projects", exact: true }));
     await projectRow.getByRole("button", { name: `Actions for ${projectName}` }).tap();
     await testPage.getByRole("menuitem", { name: "Edit project" }).tap();
     const editForm = testPage.getByTestId("agent-project-form-mobile");
@@ -78,7 +88,7 @@ test("phone navigation manages Agent Projects and opens shared context in coordi
     await expect(menu.getByTestId(`agent-project-open-${projectId}`)).toContainText(projectName);
 
     project = await readAgentProject(apiClient, seedData.workspaceId, projectId);
-    await menu.getByTestId(`agent-project-open-${projectId}`).tap();
+    await menu.getByTestId(`agent-project-open-${projectId}`).tap({ position: { x: 16, y: 40 } });
     await expect(testPage).toHaveURL(new RegExp(`/t/${project.main_task_id}$`));
     const coordinator = new SessionPage(testPage);
     await coordinator.waitForLoad();
@@ -193,6 +203,9 @@ test("phone navigation manages Agent Projects and opens shared context in coordi
     const activeRow = menu.getByTestId(`agent-project-row-${projectId}`);
     await activeRow.getByRole("button", { name: `Actions for ${projectName}` }).tap();
     await testPage.getByRole("menuitem", { name: "Archive project" }).tap();
+    await assertFullHeightProjectSurface(
+      testPage.getByTestId("agent-project-archive-confirmation"),
+    );
     await testPage.getByTestId("agent-project-archive-confirm").tap();
     await expect(testPage.getByTestId("agent-project-archive-confirmation")).toBeHidden({
       timeout: 30_000,
@@ -221,6 +234,8 @@ test("phone navigation manages Agent Projects and opens shared context in coordi
     await testPage.getByRole("menuitem", { name: "Delete project" }).tap();
     const confirmation = testPage.getByTestId("agent-project-delete-confirmation");
     await expect(confirmation).toBeVisible();
+    await assertFullHeightProjectSurface(confirmation);
+    await testPage.screenshot({ path: test.info().outputPath("phone-project-delete.png") });
     await confirmation.getByRole("checkbox", { name: "Also delete shared context" }).check();
     await confirmation
       .getByRole("checkbox", { name: /Permanently discard tracked and untracked changes/ })

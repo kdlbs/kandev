@@ -149,9 +149,9 @@ export function AgentProjectContextPanel({
   workspaceId: string;
   projectId: string;
 }) {
-  const { isMobile } = useResponsiveBreakpoint();
+  const { isMobile, isFinePointer } = useResponsiveBreakpoint();
   const context = useAgentProjectContext(workspaceId, projectId);
-  const touchButton = isMobile ? "min-h-11" : "min-h-7";
+  const touchButton = isMobile || isFinePointer === false ? "min-h-11" : "min-h-7";
   return context.file ? (
     <AgentProjectContextFile context={context} touchButton={touchButton} />
   ) : (

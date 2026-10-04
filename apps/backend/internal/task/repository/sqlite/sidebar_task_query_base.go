@@ -69,7 +69,8 @@ func sidebarBaseCTE(
 	}
 	return `WITH RECURSIVE ` + colorSettingsCTE + `scoped_tasks AS NOT MATERIALIZED (
 		SELECT t.* FROM tasks t
-		WHERE t.workspace_id = ? AND (t.is_ephemeral = 0 OR t.is_ephemeral IS NULL)
+		WHERE t.workspace_id = ? AND COALESCE(t.agent_project_id, '') = ''
+			AND (t.is_ephemeral = 0 OR t.is_ephemeral IS NULL)
 			AND COALESCE(t.origin, '') <> 'automation_run'
 			AND ` + excludeConfigModePredicate(driver, "t.metadata") + `
 			AND ` + scopeSQL + `

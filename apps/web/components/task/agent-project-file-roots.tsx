@@ -38,7 +38,7 @@ export function AgentProjectFileRoots({ children }: { children: React.ReactNode 
             className={cn(
               "rounded px-3 text-sm font-medium text-muted-foreground hover:bg-muted/70 hover:text-foreground",
               selectedRoot === root && "bg-muted text-foreground",
-              isMobile ? "min-h-11 flex-1" : "min-h-7",
+              isMobile ? "min-h-11 flex-1" : "min-h-7 [@media(pointer:coarse)]:min-h-11",
             )}
             onClick={() => setSelectedRoot(root)}
           >

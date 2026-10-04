@@ -87,6 +87,10 @@ vi.mock("@/components/state-provider", () => ({
   useAppStore: (selector: (state: typeof mockState) => unknown) => selector(mockState),
 }));
 
+vi.mock("@/hooks/domains/agent-projects/use-agent-project-session-profile", () => ({
+  useAgentProjectSessionProfile: () => ({ kind: "ordinary" }),
+}));
+
 vi.mock("@/components/toast-provider", () => ({
   useToast: () => ({ toast: mockToast }),
 }));

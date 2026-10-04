@@ -500,6 +500,7 @@ func (s *Service) AuthorizeTaskLifecycle(ctx context.Context, projectID, taskID 
 func (s *Service) ResolveTaskLaunch(
 	ctx context.Context,
 	task *models.Task,
+	existingSession *models.TaskSession,
 	requestedProfileID, requestedExecutorID, requestedExecutorProfileID string,
 ) (string, string, string, error) {
 	if err := s.requireEnabled(); err != nil {
@@ -513,7 +514,7 @@ func (s *Service) ResolveTaskLaunch(
 	if err != nil {
 		return "", "", "", err
 	}
-	profileID, err := requestedProjectProfile(task, configuredProfile, requestedProfileID)
+	profileID, err := requestedProjectProfile(task, configuredProfile, requestedProfileID, existingSession)
 	if err != nil {
 		return "", "", "", err
 	}
@@ -570,14 +571,46 @@ func configuredProjectProfile(task *models.Task, project *Project) (string, erro
 	}
 }
 
-func requestedProjectProfile(task *models.Task, configured, requested string) (string, error) {
+func requestedProjectProfile(
+	task *models.Task,
+	configured, requested string,
+	existingSession *models.TaskSession,
+) (string, error) {
 	if configured == "" || task.AgentProjectProfileID == "" {
 		return "", ErrLaunchBlocked
 	}
-	if requested == "" || requested == configured || requested == task.AgentProjectProfileID {
-		if requested != "" {
-			return requested, nil
+	if existingSession != nil {
+		return requestedExistingProjectProfile(task, requested, existingSession)
+	}
+	return requestedNewProjectProfile(task, configured, requested)
+}
+
+func requestedExistingProjectProfile(
+	task *models.Task,
+	requested string,
+	existingSession *models.TaskSession,
+) (string, error) {
+	if existingSession.ID == "" || existingSession.TaskID != task.ID || existingSession.AgentProfileID == "" {
+		return "", taskservice.ErrAgentProjectTaskForbidden
+	}
+	if requested != "" && requested != existingSession.AgentProfileID {
+		return "", taskservice.ErrAgentProjectTaskForbidden
+	}
+	if task.AgentProjectTier != models.AgentProjectTierCoordinator &&
+		existingSession.AgentProfileID != task.AgentProjectProfileID {
+		return "", taskservice.ErrAgentProjectTaskForbidden
+	}
+	return existingSession.AgentProfileID, nil
+}
+
+func requestedNewProjectProfile(task *models.Task, configured, requested string) (string, error) {
+	if task.AgentProjectTier == models.AgentProjectTierCoordinator {
+		if requested == "" || requested == configured || requested == task.AgentProjectProfileID {
+			return configured, nil
 		}
+		return "", taskservice.ErrAgentProjectTaskForbidden
+	}
+	if requested == "" || requested == configured {
 		return configured, nil
 	}
 	return "", taskservice.ErrAgentProjectTaskForbidden

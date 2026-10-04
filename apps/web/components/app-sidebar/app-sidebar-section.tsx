@@ -7,6 +7,7 @@ import { Collapsible, CollapsibleContent } from "@kandev/ui/collapsible";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { useAppStore } from "@/components/state-provider";
 import { cn } from "@/lib/utils";
+import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 
 type AppSidebarSectionProps = {
   id: string;
@@ -56,14 +57,24 @@ function SectionHeader({
   headerRef,
 }: SectionHeaderProps) {
   const showHeaderAction = !!headerAction && (expanded || headerActionVisibility === "always");
+  const { isMobile, isFinePointer } = useResponsiveBreakpoint();
+  const touch = isMobile || isFinePointer === false;
 
   return (
-    <div className="group/section flex items-center px-2 min-h-9 shrink-0 [@media(pointer:coarse)]:min-h-11">
+    <div
+      className={cn(
+        "group/section flex items-center px-2 shrink-0 min-h-9 [@media(pointer:coarse)]:min-h-11",
+        touch && "h-11",
+      )}
+    >
       <button
         ref={headerRef}
         type="button"
         onClick={onToggle}
-        className="flex min-h-7 [@media(pointer:coarse)]:min-h-11 min-w-0 flex-1 items-center gap-1.5 text-left cursor-pointer text-foreground/70 hover:text-foreground transition-colors"
+        className={cn(
+          "flex min-h-7 [@media(pointer:coarse)]:min-h-11 min-w-0 flex-1 items-center gap-1.5 text-left cursor-pointer text-foreground/70 hover:text-foreground transition-colors",
+          touch && "min-h-11",
+        )}
         aria-expanded={expanded}
         aria-controls={`sidebar-section-${id}`}
       >
@@ -83,7 +94,10 @@ function SectionHeader({
         onClick={onToggle}
         tabIndex={-1}
         aria-hidden="true"
-        className="shrink-0 flex h-5 w-5 items-center justify-center text-muted-foreground/60 hover:text-foreground/70 cursor-pointer transition-colors"
+        className={cn(
+          "shrink-0 flex items-center justify-center text-muted-foreground/60 hover:text-foreground/70 cursor-pointer transition-colors",
+          touch ? "h-11 w-11" : "h-5 w-5",
+        )}
       >
         <IconChevronRight
           className={cn("h-3.5 w-3.5 transition-transform", expanded && "rotate-90")}

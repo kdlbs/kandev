@@ -60,10 +60,10 @@ function AgentProjectActionFrame({
     return (
       <Drawer direction="bottom" open={open} onOpenChange={onOpenChange}>
         <DrawerContent
-          className="flex h-[100dvh] max-h-[100dvh] flex-col rounded-t-none"
+          className="!inset-x-0 !bottom-0 !h-[100dvh] !max-h-[100dvh] !rounded-none !p-0 before:inset-0 before:rounded-none [&>div:first-child]:hidden"
           data-testid={testId}
         >
-          <DrawerHeader className="shrink-0 text-left">
+          <DrawerHeader className="shrink-0 border-b group-data-[vaul-drawer-direction=bottom]/drawer-content:text-left">
             <DrawerTitle>{title}</DrawerTitle>
             <DrawerDescription>{description}</DrawerDescription>
           </DrawerHeader>
