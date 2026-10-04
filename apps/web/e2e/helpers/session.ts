@@ -205,5 +205,9 @@ export async function waitForSlashCommandAvailable(
   const editor = await session.composerReady();
   await editor.fill("/");
   await expect(page.getByText(`/${command}`, { exact: true })).toBeVisible({ timeout: 10_000 });
-  await editor.fill("");
+  const modifier = process.platform === "darwin" ? "Meta" : "Control";
+  await editor.press(`${modifier}+A`);
+  await editor.press("Backspace");
+  await expect(editor).toBeEmpty();
+  await session.waitForDirectInput();
 }

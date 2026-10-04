@@ -48,11 +48,12 @@ test.describe("Agent profile recent use", () => {
       // necessarily received the corresponding client-side state change.
       await expect(cancelledOptions.first()).toContainText(profileB.name);
       await cancelledOptions.filter({ hasText: profileA.name }).click();
-      await cancelledSetup
-        .getByTestId("quick-chat-setup-footer")
-        .getByRole("button", { name: "Cancel", exact: true })
-        .click();
+      const cancelledSetupTab = cancelledSetup
+        .getByTestId("quick-chat-tab")
+        .filter({ hasText: "New Chat" });
+      await cancelledSetupTab.getByRole("button", { name: "Close New Chat", exact: true }).click();
 
+      await expect(cancelledSetupTab).toHaveCount(0);
       await expect(cancelledSetup.getByTestId("quick-chat-setup")).toHaveCount(0);
       await cancelledSetup.getByTestId("quick-chat-add-menu-trigger").click();
       await testPage.getByTestId("quick-chat-new-agent").click();
