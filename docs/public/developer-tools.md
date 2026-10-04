@@ -56,6 +56,13 @@ opens. The topbar menu button shows Quick Chat activity: a blue dot while a chat
 is running and a green dot when a reply is ready to read. Terminal tabs do not
 contribute to this activity indicator.
 
+On a phone, Quick Terminal includes the same shortcut row as a task terminal:
+**Ctrl**, **Shift**, **^C**, **^D**, **Esc**, **Tab**, navigation keys, and symbols.
+Swipe the row to reach more keys. Tap **^C** to interrupt a command. Tap a modifier
+once for the next input, twice to keep it enabled, and again to turn it off.
+Shortcuts target the selected terminal and keep the keyboard focused. The row
+stays above the on-screen keyboard.
+
 ### Start a chat
 
 1. Turn on **Configuration chat** when the conversation should inspect or change Kandev configuration. This option is hidden when the workspace already has a configuration conversation.

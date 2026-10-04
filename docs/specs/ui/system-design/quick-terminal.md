@@ -5,7 +5,7 @@ requirements:
   - REQ-UI-QUICK-TERMINAL-001
   - REQ-UI-QUICK-TERMINAL-002
 created: 2026-08-03
-updated: 2026-08-28
+updated: 2026-10-04
 owners:
   - kandev
 ---
@@ -486,3 +486,19 @@ checks, and Agents-page authorization behavior remain unchanged.
 [Quick Terminal durable session lifecycle and menu alignment](../../../plans/quick-terminal-durable-lifecycle/plan.md)
 
 [Quick Chat tab order and editing](../../../plans/quick-chat-tab-order/plan.md)
+
+## Phone terminal shortcut controls
+
+`QuickTerminalTabView` enables inline `MobileTerminalKeybar` controls through
+`PtyTerminalView` on phones. Local send/focus callbacks target the host PTY's
+socket and xterm, bypassing the task terminal sender registry. Physical and
+shortcut input share Ctrl/Shift transforms; latched modifiers are consumed only
+after an open socket accepts input. Authentication PTYs retain raw input.
+
+The task terminal keybar is the mobile exemplar. The terminal owns vertical
+scrolling; the shortcut row owns horizontal overflow and uses 44px targets.
+Visual viewport occlusion reduces terminal panel space above the keyboard;
+dialog safe-area padding stays authoritative. Desktop omits the row.
+
+[Shortcut parity repair](../../../plans/quick-terminal-mobile-controls/plan.md)
+implements AC-UI-QUICK-TERMINAL-001.13 and preserves sibling isolation (001.8).

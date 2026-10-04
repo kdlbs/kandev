@@ -1,4 +1,4 @@
-import { act, cleanup, render, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { StrictMode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -12,7 +12,8 @@ const mocks = vi.hoisted(() => {
     open = vi.fn();
     write = vi.fn();
     dispose = vi.fn();
-    onData = vi.fn(() => ({ dispose: vi.fn() }));
+    focus = vi.fn();
+    onData = vi.fn((_listener: (data: string) => void) => ({ dispose: vi.fn() }));
     constructor() {
       terminals.push(this);
     }
@@ -67,6 +68,7 @@ vi.mock("@/lib/api", () => ({
 
 import { PtyTerminalView, type StartPtySession } from "./pty-terminal-view";
 import { cancelPtyTerminalStart } from "./pty-terminal-lifecycle";
+import { useShellModifiersStore } from "@/lib/terminal/shell-modifiers";
 
 const session = {
   session_id: "session-1",
@@ -81,6 +83,7 @@ function startSession(): ReturnType<StartPtySession> {
 }
 
 beforeEach(() => {
+  useShellModifiersStore.getState().reset();
   mocks.stopAgentLogin.mockClear();
   mocks.getAgentLoginStatus.mockReset();
   mocks.resizeAgentLogin.mockClear();
@@ -98,6 +101,22 @@ beforeEach(() => {
       }
     },
   );
+});
+
+describe("PtyTerminalView mobile input", () => {
+  it("routes shortcut and modified physical input through its own socket and focus target", async () => {
+    mocks.getAgentLoginStatus.mockResolvedValue(session);
+    render(<PtyTerminalView startSession={startSession} sessionId="session-1" mobileControls />);
+    // This instance attaches through the provided identity.
+    await waitFor(() => expect(mocks.sockets).toHaveLength(1));
+    fireEvent.click(screen.getByTestId("keybar-key-ctrl-c"));
+    expect(new TextDecoder().decode(mocks.sockets[0].send.mock.calls[0][0])).toBe("\x03");
+    expect(mocks.terminals[0].focus).toHaveBeenCalled();
+    fireEvent.click(screen.getByTestId("keybar-key-ctrl"));
+    mocks.terminals[0].onData.mock.calls[0][0]("u");
+    expect(new TextDecoder().decode(mocks.sockets[0].send.mock.calls[1][0])).toBe("\x15");
+    expect(useShellModifiersStore.getState().ctrl.latched).toBe(false);
+  });
 });
 
 afterEach(() => {
