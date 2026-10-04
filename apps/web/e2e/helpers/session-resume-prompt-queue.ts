@@ -98,7 +98,10 @@ export async function waitForSessionReady(
     .toEqual({ api: true, browser: true });
 }
 
-async function createDelayedResumeProfile(apiClient: ApiClient, delay = "30s"): Promise<string> {
+export async function createDelayedResumeProfile(
+  apiClient: ApiClient,
+  delay = "30s",
+): Promise<string> {
   const { agents } = await apiClient.listAgents();
   const mockAgent = agents.find((agent) => agent.name === "mock-agent");
   if (!mockAgent) throw new Error("mock-agent not found while creating delayed resume profile");

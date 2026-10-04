@@ -2768,7 +2768,7 @@ export class ApiClient {
       from_step_id?: string | null;
       to_step_id: string;
       trigger: string;
-    }>;
+    }> | null;
   }> {
     return this.request("GET", `/api/v1/sessions/${sessionId}/workflow/history`);
   }
