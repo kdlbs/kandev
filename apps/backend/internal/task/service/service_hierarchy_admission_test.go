@@ -326,7 +326,7 @@ func TestTaskHierarchyAdmissionFinalDeletion(t *testing.T) {
 }
 
 func TestTaskHierarchyAdmissionMalformedAncestry(t *testing.T) {
-	for _, state := range []string{"missing", "cycle", "read_failure"} {
+	for _, state := range []string{"missing", "cycle", "read_failure", "target_read_failure"} {
 		t.Run(state, func(t *testing.T) {
 			svc, bus, repo, create := reparentFixture(t)
 			a, b, subject := create("A"), create("B"), create("Subject")
@@ -348,6 +348,10 @@ func TestTaskHierarchyAdmissionMalformedAncestry(t *testing.T) {
 				if _, err := repo.DB().ExecContext(ctx, `UPDATE tasks SET parent_id=? WHERE id=?`, a.ID, b.ID); err != nil {
 					t.Fatal(err)
 				}
+			case "target_read_failure":
+				if _, err := repo.DB().ExecContext(ctx, `UPDATE tasks SET workflow_agent_overrides='{' WHERE id=?`, a.ID); err != nil {
+					t.Fatal(err)
+				}
 			case "read_failure":
 				if _, err := repo.DB().ExecContext(ctx, `UPDATE tasks SET workflow_agent_overrides='{' WHERE id=?`, b.ID); err != nil {
 					t.Fatal(err)
@@ -367,8 +371,13 @@ func TestTaskHierarchyAdmissionMalformedAncestry(t *testing.T) {
 			if state == "cycle" && !errors.Is(err, ErrInvalidParent) {
 				t.Fatalf("cycle error=%v", err)
 			}
-			if state == "read_failure" && errors.Is(err, ErrInvalidParent) {
-				t.Fatalf("real ancestor decode failure masked as invalid input: %v", err)
+			if (state == "read_failure" || state == "target_read_failure") && errors.Is(err, ErrInvalidParent) {
+				t.Fatalf("real hierarchy decode failure masked as invalid input: %v", err)
+			}
+			if state == "target_read_failure" {
+				if !errors.Is(err, models.ErrMalformedWorkflowAgentOverrides) {
+					t.Fatalf("direct target decode error identity lost: %v", err)
+				}
 			}
 			current, readErr := repo.GetTask(ctx, subject.ID)
 			if readErr != nil {

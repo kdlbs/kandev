@@ -153,11 +153,12 @@ GNU timeout 6m/kill10s, GOMAXPROCS=2/GOMEMLIMIT=1GiB. At execution record the ac
 comparison base as `KANDEV_HIERARCHY_PR_BASE` and expand only the concrete changed packages:
 
 ```bash
-(cd apps/backend && GOMAXPROCS=2 GOMEMLIMIT=1GiB timeout --kill-after=10s 6m golangci-lint run ./internal/db ./internal/task/repository ./internal/task/repository/hierarchy ./internal/task/repository/repoerrors ./internal/task/repository/sqlite ./internal/task/service ./internal/task/handlers ./internal/office/dashboard ./internal/office/repository/sqlite --new-from-rev="$KANDEV_HIERARCHY_PR_BASE" --concurrency=2 --allow-serial-runners --timeout=5m)
+(cd apps/backend && GOMAXPROCS=2 GOMEMLIMIT=1GiB timeout --kill-after=10s 6m golangci-lint run ./... --new-from-rev="$KANDEV_HIERARCHY_PR_BASE" --concurrency=2 --allow-serial-runners --timeout=5m)
 ```
 
-Remove unchanged package arguments; add a changed owning package only with concrete evidence.
-Keep active ordinary hooks. If `apps/node_modules` is missing, perform one pinned pnpm 9.15.9
+Backend PR fixups require the full `./...` changed-revision gate before pushing, in addition to
+ordinary changed-package hooks. This filters diagnostics to the immutable PR base; no unrestricted
+lint-all-issues run or unaffected product suite is implied. Keep active ordinary hooks. If `apps/node_modules` is missing, perform one pinned pnpm 9.15.9
 frozen install from `apps/` before hooks; no install is authorized for this design turn.
 No automatic resource retry, cache wipe or foreign process kill.
 
@@ -343,3 +344,80 @@ HTTP409). The Office selector was unmatched, so only missing exact OfficeSeriali
 and joined exit 0, 1.516s, actual workspace wait567 plus current normalization/same-parent/malformed
 controls. SQLguard9611 joined exit 0. Catalog347 decisions/1332 specs, all-spec lint and whitespace
 passed. Ordinary corrective hooks and exact-head publication/review/terminal CI/merge remain gates.
+
+
+Hosted run37181836703 supplied real failing receipts for three fixtures. Preserve production
+admission and final structural-child conflict. `TestUpdateTaskIfWorkflowStepHasCapacity_ReturnsTypedWIPError`
+now persists the real candidate in other-step before its actual update and checks unchanged candidate
+and full-target occupant rows. The two existing borrowed-environment positives move into
+`service_hierarchy_admission_delete_test.go` so the oversized stop-test file does not grow.
+`TestDeleteTask_TransfersBorrowedEnvironmentBeforeDeletingOwner` retains actual Service.DeleteTask
+transfer after real workspace-scoped no-cascade structural promotion; its ungrouped environment
+fixture needs the original service borrower-transfer path, rather than pretending a nil-group
+Handoff transfer would preserve it. `TestCleanupTaskResources_TransfersBorrowedEnvironmentBeforeCascadeDelete`
+retains actual cleanup(true), then models valid structural promotion before final raw ordinary
+delete. This is a component cleanup stage, not full cascade promotion. Both retain original post-owner
+delete environment/child-owner assertions and add absent-parent/live-root child, unchanged running
+session/environment link and complete environment identity/resource preservation controls.
+
+Exact new affected selectors, run serial with existing race/fts5/trimpath/p1/caps: service
+`^(TestDeleteTask_TransfersBorrowedEnvironmentBeforeDeletingOwner|TestCleanupTaskResources_TransfersBorrowedEnvironmentBeforeCascadeDelete)$`;
+repository `^TestUpdateTaskIfWorkflowStepHasCapacity_ReturnsTypedWIPError$`. No production missing-task
+precedence or lifecycle change. Required full lint99037 joined4 FAILED_TIMEOUT remains failed
+forever (0issues then Timeout exceeded); ROOT allows one recovery only after validated corrected
+code, same full ./... scope/base/resources, with no automatic second recovery.
+
+
+Bounded hosted-fixture correction40552 ACTUALLY JOINED0 service1.363s, exact two borrowed-resource
+positives with all strengthened post-delete controls. Exact typed-WIP fixture89928 ACTUALLY JOINED0
+repository1.205s, candidate/occupant complete rows unchanged. No production deletion/WIP policy
+change. One recovery full lint is authorized but has not run yet; actual completed current0ed
+CodeRabbit FULL5404607777 has one additional valid direct-target lookup error finding, scoped
+real-data correction pending before spending the single recovery gate on a validated candidate.
+
+
+ROOT explicitly includes two further causal cases before the same unused recovery gate.
+Direct-target `GetTask` translates only typed missing to existing invalid-parent; real decode/
+storage/context failures preserve identity, subject missing is unchanged. Permanent real-service
+`^TestTaskHierarchyAdmissionMalformedAncestry$/^target_read_failure$` and actual admitted SQLite
+reader `^TestTaskHierarchyAdmissionDirectParentCancellation$` provide RED before correction.
+The cancellation decorator only cancels before delegating the actual transaction reader; it does
+not replace any business predicate or read result. Affected GREEN also selects existing positive
+`^TestService_UpdateTask_RejectsMissingParent$`. PG compatibility selector is exactly
+`^TestPostgresUpdateTaskPreservingDeferredLaunchWithNilMetadataStaysAnObject$`: seed only its
+owning ws-task-nil-metadata-pg through the real repository, retain shared raw task helper and all
+object/deferred-launch/description assertions. Use the existing proven-owned PG fixture, no skip
+as completion. Prior40552/89928 passing unaffected fixture controls are retained without replay.
+
+
+Direct-target RED23061 ACTUALLY JOINED1 reproduced decode/cancellation masking. First GREEN82828
+joined1 because the decode oracle incorrectly required json.SyntaxError; the existing getter owns
+models.ErrMalformedWorkflowAgentOverrides. Corrected typed-identity oracle without getter changes.
+GREEN96953 ACTUALLY JOINED0 service1.686s covers direct-target malformed record, exact actual reader
+cancellation identity, unchanged subject/events, and positive missing-parent classification. Exact
+real PG nil-metadata compatibility24797 ACTUALLY JOINED0 store1.346s: owning workspace seeded,
+original object/deferred-launch/description assertions retained. Old watcher65017 joined1 terminal
+(56pass,13skip,4failed) on historical0ed; no active watcher. The single authorized full changed-lint
+recovery now runs on this combined validated candidate; previous99037 remains failed timeout.
+
+
+Single full changed-lint recovery99256 ACTUALLY JOINED4 FAILED_TIMEOUT on the combined validated
+candidate: `0 issues` followed by `Timeout exceeded`, not a pass. Exact immutable base d5142d9,
+original binary/full ./..., GOMAX2/GOMEM1GiB/concurrency2/allowserial/CLI5m/GNU6m/kill10s.
+No further heavy operations, hook/commit/push or automatic retry; published0ed remains unchanged.
+ROOT must provide bounded recovery direction. Both99037 and99256 remain failed receipts.
+
+
+ROOT explicitly authorizes one adjusted-duration full changed-lint recovery on this validated
+candidate: same original binary/full ./.../immutable d5142d9 base/GOMAX2/GOMEM1GiB/concurrency2/
+allowserial, CLI timeout10m and GNU hard cap11m with kill-after10s only. This duration exception
+does not change the standard check limits or infer timeout cause. Both99037/99256 stay failed.
+No test replay, cache deletion, memory increase, foreign kill or automatic additional recovery.
+Join before hooks/publication; concrete diagnostics require minimal correction and checkpoint
+before another full gate allowance.
+
+
+Explicit duration-exception full changed lint64185 ACTUALLY JOINED exit0, `0 issues`. Full ./...
+exact-base gate passed on the combined validated candidate at the authorized10m/11m bound.
+No timeout cause inferred and no prior failure reclassified. Normal active-hook commit and
+corrective publication can now proceed; exact new-head full review/terminal CI/merge remain gates.

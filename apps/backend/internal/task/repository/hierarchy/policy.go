@@ -23,7 +23,10 @@ func ValidateParent(ctx context.Context, reader TaskHierarchyReader, task *model
 	}
 	parent, err := reader.GetTask(ctx, parentID)
 	if err != nil {
-		return fmt.Errorf("%w: parent task not found: %s", ErrInvalidParent, parentID)
+		if errors.Is(err, repoerrors.ErrTaskNotFound) {
+			return fmt.Errorf("%w: parent task not found: %s", ErrInvalidParent, parentID)
+		}
+		return err
 	}
 	if parent.WorkspaceID != task.WorkspaceID {
 		return fmt.Errorf("%w: parent task must belong to the same workspace", ErrInvalidParent)

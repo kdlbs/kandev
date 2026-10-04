@@ -194,8 +194,11 @@ remains allowed. Same-parent requests retain the current no-new-edge semantics.
 
 Keep `parentChainWalkLimit` (1000) and add visited-identifier detection for malformed cycles that
 do not reach the subject. Fail with `ErrInvalidParent` on a repeated ancestor or exhausted bound.
-Keep the historical positively missing-ancestor-as-root behavior; propagate genuine storage or
-cancellation failures rather than treating them as a missing root. Do not migrate or repair old
+Translate only a typed missing direct target to the existing invalid-parent error. Preserve
+genuine storage/decode/context failures, including their errors.Is identity, rather than reporting
+bad input; missing subjects retain their existing classification. Keep the historical positively
+missing-ancestor-as-root behavior and propagate genuine failures rather than treating them as a
+missing root. Do not migrate or repair old
 relationships. Keep `ListChildren`'s active/non-ephemeral/non-automation depth population and the
 update exemption when **either** endpoint is Office. Creation retains its existing distinct
 `validateSubtaskDepth` predicate based on the parent, including its current error shape and
