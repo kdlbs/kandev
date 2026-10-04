@@ -179,4 +179,13 @@ backend:
 - `(cd apps/web && pnpm run typecheck)`: passed.
 - `make -C apps/backend build`: passed.
 
+PR fixup on 2026-10-04 removed duplicate session-state readers by reusing the
+queue helper and changed zero-transition checks to observe the complete
+negative-assertion window before reading workflow history. The rerun suites
+passed after those changes:
+
+- `(cd apps/web && pnpm e2e:run --project chromium e2e/tests/session/session-resume-turn-start.spec.ts e2e/tests/session/session-resume-prompt-queue.spec.ts -- --retries=0)`: 4 passed.
+- `(cd apps/web && pnpm e2e:run --project mobile-chrome e2e/tests/session/mobile-session-resume-turn-start.spec.ts e2e/tests/session/mobile-session-resume-prompt-queue.spec.ts -- --retries=0)`: 3 passed.
+- `(cd apps/web && pnpm run typecheck)`: passed.
+
 Final documentation validation and coverage results are recorded in the plan.

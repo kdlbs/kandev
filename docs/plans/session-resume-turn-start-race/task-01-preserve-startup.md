@@ -93,9 +93,7 @@ Confirm each selector discovers its intended cases.
 - `apps/backend/internal/orchestrator/workflow_turn_start_resume_test.go` (new)
 - `apps/backend/internal/orchestrator/workflow_turn_start_profile_error_test.go` (new)
 - `apps/backend/internal/orchestrator/workflow_turn_start_state_test.go` (new)
-- `apps/backend/internal/orchestrator/task_operations_resume_turn_start_test.go` (new)
-- `apps/backend/internal/orchestrator/executor/executor_resume_turn_start_test.go` (new, if required by the credential harness)
-- `apps/backend/internal/task/handlers/message_handlers_resume_turn_start_test.go` (new)
+- `apps/backend/internal/orchestrator/workflow_turn_start_transition_error_test.go` (new during PR fixup)
 
 Read `event_handlers_streaming.go`, `task_operations.go`, and
 `executor/executor_resume.go` for state and admission boundaries.
@@ -179,3 +177,29 @@ refactored regression passed again under `-race`:
 
 The executor and task-handler selectors above also passed.
 `make -C apps/backend build` passed.
+
+PR fixup on 2026-10-04 added a strict legacy-evaluation regression for a target
+step lookup failure while the recipient remains `STARTING`. The first run was
+red because strict evaluation returned no error even though the transition did
+not commit:
+
+```text
+go test -trimpath -tags fts5 ./internal/orchestrator -run '^TestLegacyTurnStartTransitionFailureSurfacesForStartingSession$' -count=1 -v
+strict on_turn_start error = <nil>, want injected transition error
+```
+
+The correction records the original transition error before workflow-specific
+state preparation. The focused regression then passed. The same follow-up fixed
+the lost-write fake to invoke the embedded repository CAS; its targeted test
+passed with the profile-preparation regression:
+
+```text
+go test -trimpath -tags fts5 ./internal/orchestrator -run '^(TestPrepareWorkflowTurnStartSessionStatePreservesLostWrite|TestLegacyTurnStartTransitionFailureSurfacesForStartingSession|TestTurnStartProfilePreparationFailurePreservesResume)$' -count=1 -v
+```
+
+The expanded race selector also passed, including the strict legacy transition
+error and credential-boundary cases:
+
+```bash
+(cd apps/backend && go test -trimpath -race -tags fts5 ./internal/orchestrator -run 'TestOnTurnStartDuringResume|TestResumeCredentialSnapshotSurvivesTurnStart|TestTurnStartPreparation|TestResumeTurnStartGenuineFailure|TestLegacyTurnStartTransitionFailure|TestSendNowWorkflowTransitionPreservesRunningState|TestOnTurnStartBeforeAdmissionKeepsSessionPromptable|TestResumePromptQueue|TestResumeTaskSession.*Cancel|TestResumeAttemptCancellation|TestTurnStartProfilePreparationFailurePreservesResume|TestPrepareWorkflowTurnStartSessionState' -count=1)
+```

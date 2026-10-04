@@ -485,11 +485,12 @@ func (s *Service) onTurnStartTaskAdmission(ctx context.Context, taskID string) (
 // If triggerOnEnter is true, on_enter actions (like auto_start_agent) are processed.
 // If false, only the step change is applied (used for on_turn_start where the user is about to send a message).
 func (s *Service) executeStepTransition(ctx context.Context, taskID, sessionID string, fromStep *wfmodels.WorkflowStep, toStepID string, triggerOnEnter bool) {
-	settleFailedTransitionSession := func() {
+	settleFailedTransitionSession := func(transitionErr error) {
 		if triggerOnEnter {
 			s.setSessionWaitingForInput(ctx, taskID, sessionID)
 			return
 		}
+		recordWorkflowTransitionError(ctx, transitionErr)
 		s.reportWorkflowTurnStartPreparationError(
 			ctx,
 			taskID,
@@ -503,7 +504,7 @@ func (s *Service) executeStepTransition(ctx context.Context, taskID, sessionID s
 		s.logger.Warn("failed to get target workflow step",
 			zap.String("target_step_id", toStepID),
 			zap.Error(err))
-		settleFailedTransitionSession()
+		settleFailedTransitionSession(err)
 		return
 	}
 
@@ -513,7 +514,7 @@ func (s *Service) executeStepTransition(ctx context.Context, taskID, sessionID s
 		s.logger.Warn("failed to get task for workflow transition",
 			zap.String("task_id", taskID),
 			zap.Error(err))
-		settleFailedTransitionSession()
+		settleFailedTransitionSession(err)
 		return
 	}
 	// Atomically admit the target step before exit side effects. A full target
@@ -553,7 +554,7 @@ func (s *Service) executeStepTransition(ctx context.Context, taskID, sessionID s
 			zap.String("from_step", fromStep.Name),
 			zap.String("to_step", targetStep.Name),
 			zap.Error(err))
-		settleFailedTransitionSession()
+		settleFailedTransitionSession(err)
 		return
 	}
 	queued := task.QueuedForStepID != ""

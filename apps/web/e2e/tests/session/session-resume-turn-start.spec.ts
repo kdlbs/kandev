@@ -54,7 +54,7 @@ test.describe("Desktop message during resumed workflow turn start", () => {
         fixture.identity.sessionId,
         15_000,
       );
-      await waitForResumeTurnStartTransition(apiClient, fixture, 1);
+      await waitForResumeTurnStartTransition(testPage, apiClient, fixture, 1);
 
       const duringStartup = await apiClient.listTaskSessions(fixture.task.id);
       const startingSession = duringStartup.sessions.find(
@@ -75,7 +75,7 @@ test.describe("Desktop message during resumed workflow turn start", () => {
         .filter({ hasText: marker });
       await expect(response).toHaveCount(1, { timeout: 60_000 });
       await assertOneTurnStartPromptAndResponse(apiClient, fixture, marker);
-      await waitForResumeTurnStartTransition(apiClient, fixture, 1);
+      await waitForResumeTurnStartTransition(testPage, apiClient, fixture, 1);
       await expect
         .poll(() => countResumeBootMessages(apiClient, fixture.identity.sessionId))
         .toBe(1);

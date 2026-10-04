@@ -59,7 +59,7 @@ test.describe("mobile: message during resumed workflow turn start", () => {
         fixture.task.id,
         fixture.identity.sessionId,
       );
-      await waitForResumeTurnStartTransition(apiClient, fixture, 0, 2_000);
+      await waitForResumeTurnStartTransition(testPage, apiClient, fixture, 0, 2_000);
       await assertNoDocumentHorizontalOverflow(testPage, "mobile resume turn-start startup");
 
       await waitForResumeSessionReady(
@@ -69,7 +69,7 @@ test.describe("mobile: message during resumed workflow turn start", () => {
         fixture.identity.sessionId,
       );
       await waitForQueuedCount(apiClient, fixture.identity, 0);
-      await waitForResumeTurnStartTransition(apiClient, fixture, 1);
+      await waitForResumeTurnStartTransition(testPage, apiClient, fixture, 1);
 
       const response = fixture.session
         .activeChat()
@@ -77,7 +77,7 @@ test.describe("mobile: message during resumed workflow turn start", () => {
         .filter({ hasText: marker });
       await expect(response).toHaveCount(1, { timeout: 60_000 });
       await assertOneTurnStartPromptAndResponse(apiClient, fixture, marker);
-      await waitForResumeTurnStartTransition(apiClient, fixture, 1);
+      await waitForResumeTurnStartTransition(testPage, apiClient, fixture, 1);
       await expect
         .poll(() => countResumeBootMessages(apiClient, fixture.identity.sessionId))
         .toBe(1);
@@ -133,7 +133,7 @@ test.describe("mobile: message during resumed workflow turn start", () => {
         fixture.identity.sessionId,
       );
       await waitForQueuedCount(apiClient, fixture.identity, 1);
-      await waitForResumeTurnStartTransition(apiClient, fixture, 0, 2_000);
+      await waitForResumeTurnStartTransition(testPage, apiClient, fixture, 0, 2_000);
 
       const readyChat = fixture.session.activeChat();
       await readyChat.getByTestId("queue-chip").click();
@@ -142,14 +142,14 @@ test.describe("mobile: message during resumed workflow turn start", () => {
       await autoRun.click();
 
       await waitForQueuedCount(apiClient, fixture.identity, 0);
-      await waitForResumeTurnStartTransition(apiClient, fixture, 1);
+      await waitForResumeTurnStartTransition(testPage, apiClient, fixture, 1);
       const response = fixture.session
         .activeChat()
         .locator("[data-agent-message-body][data-message-id]")
         .filter({ hasText: marker });
       await expect(response).toHaveCount(1, { timeout: 60_000 });
       await assertOneTurnStartPromptAndResponse(apiClient, fixture, marker);
-      await waitForResumeTurnStartTransition(apiClient, fixture, 1);
+      await waitForResumeTurnStartTransition(testPage, apiClient, fixture, 1);
       await expect
         .poll(() => countResumeBootMessages(apiClient, fixture.identity.sessionId))
         .toBe(1);

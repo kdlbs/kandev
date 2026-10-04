@@ -36,14 +36,17 @@ type E2EStoreWindow = Window & {
   };
 };
 
-async function getBrowserSessionState(page: Page, sessionId: string): Promise<string | null> {
+export async function getBrowserSessionState(
+  page: Page,
+  sessionId: string,
+): Promise<string | null> {
   return page.evaluate((id) => {
     const state = (window as E2EStoreWindow).__KANDEV_E2E_STORE__?.getState();
     return state?.taskSessions.items[id]?.state ?? null;
   }, sessionId);
 }
 
-async function getSessionState(
+export async function getSessionState(
   apiClient: ApiClient,
   taskId: string,
   sessionId: string,

@@ -121,9 +121,11 @@ All suffixes refer to `AC-TASKS-RESUME-PROMPT-QUEUE-001`.
 | --- | --- |
 | `.4`, `.10` | `TestOnTurnStartDuringResumePreservesStarting`, `TestResumeCredentialSnapshotSurvivesTurnStart` |
 | `.4`, `.10` | `TestTurnStartPreparationPreservesConcurrentStartup`: stale snapshot and lost conditional write |
-| `.5`, `.11` | `TestTurnStartPreparationPreservesTerminalState`: cancellation, failure, completion, errors |
+| `.4`, `.10` | `TestPrepareWorkflowTurnStartSessionStatePreservesLostWrite`: preserve a startup claim that wins the conditional write |
+| `.5`, `.11` | `TestPrepareWorkflowTurnStartSessionState`: cancellation, failure, completion, errors |
 | `.7`, `.11` | `TestResumeTurnStartGenuineFailureRetainsRecovery`: accepted input retained after a real launch failure |
-| `.8`, `.10` | `TestTurnStartPreparationRecipientState`: same/new recipient and current identity |
+| `.8`, `.10` | `TestPrepareWorkflowTurnStartSessionStateRejectsForeignOrUnreadableRecipient`, `TestTurnStartPreparationPreservesConcurrentStartup`: recipient ownership and current identity |
+| `.10`, `.11` | `TestLegacyTurnStartTransitionFailureSurfacesForStartingSession`: strict evaluation preserves the original transition error |
 | `.3`, `.4`, `.5`, `.10` | Existing Send Now/FIFO tests plus legacy and WIP startup cases |
 
 Use new small test files. Do not append to oversized workflow or resume tests.
@@ -219,7 +221,20 @@ const fileContents = Object.fromEntries(docs.map(name => [
 const changedFiles = [
   { filename: 'apps/backend/internal/orchestrator/event_handlers_workflow.go', status: 'modified' },
   { filename: 'apps/backend/internal/orchestrator/workflow_turn_start_profile_error_test.go', status: 'added' },
+  { filename: 'apps/backend/internal/orchestrator/workflow_turn_start_resume_test.go', status: 'added' },
+  { filename: 'apps/backend/internal/orchestrator/workflow_turn_start_state.go', status: 'added' },
+  { filename: 'apps/backend/internal/orchestrator/workflow_turn_start_state_test.go', status: 'added' },
+  { filename: 'apps/backend/internal/orchestrator/workflow_turn_start_transition_error_test.go', status: 'added' },
+  { filename: 'apps/web/e2e/helpers/api-client.ts', status: 'modified' },
+  { filename: 'apps/web/e2e/helpers/session-resume-prompt-queue.ts', status: 'modified' },
+  { filename: 'apps/web/e2e/helpers/session-resume-turn-start.ts', status: 'added' },
+  { filename: 'apps/web/e2e/tests/session/mobile-session-resume-turn-start.spec.ts', status: 'added' },
+  { filename: 'apps/web/e2e/tests/session/session-resume-turn-start.spec.ts', status: 'added' },
+  { filename: 'docs/plans/resume-prompt-queue/plan.md', status: 'modified' },
+  { filename: 'docs/plans/session-resume-turn-start-race/plan.md', status: 'added' },
   ...tasks.map(filename => ({ filename, status: 'added' })),
+  { filename: 'docs/specs/tasks/requirements/resume-prompt-queue.md', status: 'modified' },
+  { filename: 'docs/specs/tasks/system-design/resume-prompt-queue.md', status: 'modified' },
 ];
 const result = validateCoverage({ changedFiles, fileContents });
 console.log(JSON.stringify({ ok: result.ok, status: result.status, errors: result.errors }, null, 2));
@@ -227,10 +242,8 @@ if (!result.ok) process.exitCode = 1;
 JS
 ```
 
-The production path is a planned trigger for this local coverage check.
-Package creation changes documentation only. This preflight validates the
-reference chain without staging files or pretending production changed.
-At delivery, use the actual changed production paths and work-order statuses.
+This preflight mirrors the package's complete delivery path set so the local
+coverage result matches the PR file inventory and completed work orders.
 
 ## Risks
 

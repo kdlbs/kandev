@@ -2,10 +2,13 @@ import { expect, type Page } from "@playwright/test";
 import type { BackendContext } from "../fixtures/backend";
 import type { SeedData } from "../fixtures/test-base";
 import type { CreateTaskResponse } from "../../lib/types/http";
+import { dwell } from "./causal-waits";
 import type { ApiClient, QueueSessionIdentityInput } from "./api-client";
 import { SessionPage } from "../pages/session-page";
 import {
   createDelayedResumeProfile,
+  getBrowserSessionState,
+  getSessionState,
   readSessionMessageIdsContaining,
   readSessionRuntimeIdentity,
   waitForSessionStarting,
@@ -22,30 +25,6 @@ export type ResumeTurnStartFixture = {
   destinationStepId: string;
   savedRuntime: SessionRuntimeIdentity;
 };
-
-type E2EStoreWindow = Window & {
-  __KANDEV_E2E_STORE__?: {
-    getState: () => {
-      taskSessions: { items: Record<string, { state?: string } | undefined> };
-    };
-  };
-};
-
-async function getBrowserSessionState(page: Page, sessionId: string): Promise<string | null> {
-  return page.evaluate((id) => {
-    const state = (window as E2EStoreWindow).__KANDEV_E2E_STORE__?.getState();
-    return state?.taskSessions.items[id]?.state ?? null;
-  }, sessionId);
-}
-
-async function getSessionState(
-  apiClient: ApiClient,
-  taskId: string,
-  sessionId: string,
-): Promise<string | null> {
-  const { sessions } = await apiClient.listTaskSessions(taskId);
-  return sessions.find((session) => session.id === sessionId)?.state ?? null;
-}
 
 /** Seed a saved conversation, then resume it with an armed turn-start workflow transition. */
 export async function seedResumeTurnStartFixture(
@@ -137,27 +116,37 @@ export async function cleanupResumeTurnStartFixture(
 }
 
 export async function waitForResumeTurnStartTransition(
+  page: Page,
   apiClient: ApiClient,
   fixture: ResumeTurnStartFixture,
   count: number,
   timeout = 30_000,
 ): Promise<void> {
+  const readTransitions = async () => {
+    const { history } = await apiClient.listWorkflowHistory(fixture.identity.sessionId);
+    return (history ?? []).filter(
+      (transition) =>
+        transition.from_step_id === fixture.startStepId &&
+        transition.to_step_id === fixture.destinationStepId &&
+        transition.trigger === "on_turn_start",
+    );
+  };
+  if (count === 0) {
+    await dwell(
+      page,
+      timeout,
+      "negative-assertion",
+      "no transition event exists until resume readiness or Auto-run admits the prompt",
+    );
+    expect(await readTransitions()).toHaveLength(0);
+    return;
+  }
+
   await expect
-    .poll(
-      async () => {
-        const { history } = await apiClient.listWorkflowHistory(fixture.identity.sessionId);
-        return (history ?? []).filter(
-          (transition) =>
-            transition.from_step_id === fixture.startStepId &&
-            transition.to_step_id === fixture.destinationStepId &&
-            transition.trigger === "on_turn_start",
-        );
-      },
-      {
-        timeout,
-        message: `session ${fixture.identity.sessionId} should record ${count} turn-start transition(s)`,
-      },
-    )
+    .poll(readTransitions, {
+      timeout,
+      message: `session ${fixture.identity.sessionId} should record ${count} turn-start transition(s)`,
+    })
     .toHaveLength(count);
 }
 

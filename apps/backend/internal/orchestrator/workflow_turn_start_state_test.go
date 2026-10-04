@@ -81,7 +81,7 @@ func (r *turnStartCASRaceRepository) UpdateTaskSessionStateIfCurrent(
 			return false, time.Time{}, err
 		}
 	}
-	return r.UpdateTaskSessionStateIfCurrent(ctx, sessionID, expected, next, errorMessage)
+	return r.Repository.UpdateTaskSessionStateIfCurrent(ctx, sessionID, expected, next, errorMessage)
 }
 
 // @covers AC-TASKS-RESUME-PROMPT-QUEUE-001.10
