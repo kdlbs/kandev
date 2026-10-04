@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"reflect"
 	"sync"
 	"testing"
 	"time"
@@ -377,5 +378,48 @@ func TestTaskHierarchyAdmissionMalformedAncestry(t *testing.T) {
 				t.Fatal("invalid ancestry changed task or published success")
 			}
 		})
+	}
+}
+
+func TestTaskHierarchyAdmissionSnapshotEncodingFailure(t *testing.T) {
+	svc, bus, repo, create := reparentFixture(t)
+	parent, child := create("Parent"), create("Child")
+	ctx := context.Background()
+	if _, err := svc.UpdateTask(ctx, child.ID, &UpdateTaskRequest{ParentID: &parent.ID}); err != nil {
+		t.Fatal(err)
+	}
+	setInheritedWorkspaceMode(t, ctx, repo, child.ID)
+	empty := ""
+	if _, err := svc.UpdateTask(ctx, child.ID, &UpdateTaskRequest{ParentID: &empty}); err != nil {
+		t.Fatal(err)
+	}
+	session := &models.TaskSession{ID: "encoding-session", TaskID: child.ID, State: models.TaskSessionStateRunning, IsPrimary: true}
+	if err := repo.CreateTaskSession(ctx, session); err != nil {
+		t.Fatal(err)
+	}
+	before, err := repo.GetTask(ctx, child.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	beforeSession, err := repo.GetTaskSession(ctx, session.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bus.ClearEvents()
+	title := "Must not commit"
+	_, err = svc.UpdateTask(ctx, child.ID, &UpdateTaskRequest{Title: &title, Metadata: map[string]interface{}{"invalid": func() {}, "keep": "requested"}})
+	if err == nil {
+		t.Fatal("unencodable snapshot was accepted")
+	}
+	after, err := repo.GetTask(ctx, child.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	afterSession, err := repo.GetTaskSession(ctx, session.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(before, after) || !reflect.DeepEqual(beforeSession, afterSession) || len(bus.GetPublishedEvents()) != 0 {
+		t.Fatal("encoding failure changed task/session or published success")
 	}
 }

@@ -220,7 +220,9 @@ identifier. Derive preservation from the current hierarchy-owned workspace state
 from parent inequality.
 For a materialized workspace, retain the current group identity while applying normalization;
 other metadata keys retain existing replacement/merge semantics, including deletion by omission.
-Do not globally turn full-row updates into request patches or freeze unrelated metadata.
+Do not globally turn full-row updates into request patches or freeze unrelated metadata. If the
+post-preservation snapshot cannot be encoded, abort the transaction; writing an empty object would
+discard hierarchy-owned workspace state and cannot count as a successful update.
 
 `UpdateTaskExact` has no parent field. Its version, operation receipt replay, management fence,
 labels and state contracts stay intact; exact workflow moves also cannot gain parent authority
@@ -245,7 +247,7 @@ workflow moves, priority-only writes, or project classification policy.
 | `ArchiveTask`, `ArchiveTaskExact`, `ArchiveTaskIfAutoArchiveEligible`, `ArchiveTaskIfActiveWithVacatedStep` (also used by `ArchiveTaskIfActive`); `UnarchiveTask` and `UnarchiveTaskByCascade` | Shared hierarchy admission before step/task locks so canonical archive eligibility and child-depth reads cannot straddle these writers. No new archive/unarchive depth policy. |
 | `DeleteTaskWithVacatedStep` (also `DeleteTask`) | Shared admission before step locks, then check all structural children before deletion. Refuse a late child instead of deleting its parent. Existing service tree cleanup/retry retains cascade choice. |
 | Workspace cascade in `workspace.go` | Reuse its workspace-first boundary; SQLite writer reservation must precede task inventory. No cascade redesign. |
-| Office `DashboardService.UpdateTaskParentID` / Office `Repository.UpdateTaskParentID` | Acquire shared admission and recheck existence inside the scalar write transaction. Preserve direct-self/existence service checks and atomic normalization, without adding deeper cycle, archive, workspace, or depth rules. Empty dashboard parent still calls canonical detach. |
+| Office `DashboardService.UpdateTaskParentID` / Office `Repository.UpdateTaskParentID` | Acquire shared admission and recheck existence inside the scalar write transaction. On PostgreSQL lock the subject row before checking metadata with Go `json.Valid`, then bind that guard into the native normalization query; do not add a SQL/JSON version dependency or cast malformed historical metadata. Preserve direct-self/existence service checks and atomic normalization, without adding deeper cycle, archive, workspace, or depth rules. Empty dashboard parent still calls canonical detach. |
 
 Inventory refers to mutation families rather than only task IDs: request handlers, workflow and
 orchestrator callers that reuse these methods inherit preservation. During implementation audit
@@ -285,6 +287,12 @@ historical imports/fixtures that bypass validated creation are also not cycle-fr
 Project assignment/removal can change Office classification after a canonical commit; neither
 that policy nor revival of archived children is newly constrained. Bounded canonical reads must
 handle such data safely.
+
+Cascade inventory deliberately excludes ephemeral and automation-origin children. Final ordinary
+deletion still refuses their structural references, retaining the parent with a conflict until the
+owning child lifecycle removes the relation. Refresh alone does not guarantee that a cascade retry
+can finish. This package does not broaden ordinary cascade ownership to delete those excluded
+children; no-cascade promotion retains its existing workspace-scoped structural update.
 
 Quick-chat expiry (`DeleteExpiredQuickChatTask`) and profile-owned ephemeral deletion
 (`DeleteEphemeralTasksByAgentProfile` in `session.go`) are legacy specialized deletion paths;

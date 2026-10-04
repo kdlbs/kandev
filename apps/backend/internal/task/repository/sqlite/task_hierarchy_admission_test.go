@@ -242,3 +242,81 @@ func TestTaskHierarchyAdmissionPromotionReadFailure(t *testing.T) {
 		t.Fatal("failed read changed the task or transition ledger")
 	}
 }
+
+func TestTaskHierarchyAdmissionPromotionEncodingFailure(t *testing.T) {
+	repo := newStepTransitionsTestRepo(t)
+	ctx := context.Background()
+	task := createStepTransitionsTestTask(t, repo, "promotion-encoding", "wf-1", "step-queue")
+	if _, err := repo.db.Exec(`UPDATE tasks SET metadata='{"workspace":{"mode":"shared_group","group_id":"encoding-group"},"keep":"current"}' WHERE id=?`, task.ID); err != nil {
+		t.Fatal(err)
+	}
+	before := stepTransitionRowsForTask(t, repo, task.ID)
+	task.Metadata = map[string]interface{}{"invalid": func() {}}
+	task.WorkflowStepID = "step-dest"
+	promoted, err := repo.PromoteQueuedTaskIfWorkflowStepHasCapacity(ctx, task, "step-queue", "step-dest", 5)
+	if err == nil || promoted {
+		t.Fatalf("unencodable promotion: promoted=%t error=%v", promoted, err)
+	}
+	stored, err := repo.GetTask(ctx, task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	workspace, _ := stored.Metadata["workspace"].(map[string]interface{})
+	if stored.WorkflowStepID != "step-queue" || workspace["mode"] != "shared_group" || workspace["group_id"] != "encoding-group" || stored.Metadata["keep"] != "current" || len(stepTransitionRowsForTask(t, repo, task.ID)) != len(before) {
+		t.Fatal("encoding failure changed promotion state or ledger")
+	}
+}
+
+func TestTaskHierarchyAdmissionLegacyMetadata(t *testing.T) {
+	for _, variant := range []string{"ordinary", "promotion"} {
+		for _, shape := range []struct {
+			name       string
+			value      interface{}
+			nullParent bool
+		}{
+			{"null", nil, false}, {"empty", "", false}, {"whitespace", " \n\t ", false}, {"json_null", "null", false}, {"null_parent", "{}", true},
+		} {
+			t.Run(variant+"/"+shape.name, func(t *testing.T) {
+				repo := newStepTransitionsTestRepo(t)
+				ctx := context.Background()
+				task := createStepTransitionsTestTask(t, repo, "legacy", "wf-1", "step-queue")
+				task, err := repo.GetTask(ctx, task.ID)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if _, err := repo.db.Exec(`UPDATE tasks SET metadata=? WHERE id=?`, shape.value, task.ID); err != nil {
+					t.Fatal(err)
+				}
+				if shape.nullParent {
+					if _, err := repo.db.Exec(`UPDATE tasks SET parent_id=NULL WHERE id=?`, task.ID); err != nil {
+						t.Fatal(err)
+					}
+				}
+				task.Title = "Legacy rename"
+				task.Metadata = map[string]interface{}{"keep": "requested"}
+				expectedStep := "step-queue"
+				if variant == "ordinary" {
+					err = repo.UpdateTask(ctx, task)
+				} else {
+					task.WorkflowStepID = "step-dest"
+					expectedStep = task.WorkflowStepID
+					var promoted bool
+					promoted, err = repo.PromoteQueuedTaskIfWorkflowStepHasCapacity(ctx, task, "step-queue", "step-dest", 5)
+					if err == nil && !promoted {
+						t.Fatal("legacy promotion was not applied")
+					}
+				}
+				if err != nil {
+					t.Fatal(err)
+				}
+				stored, err := repo.GetTask(ctx, task.ID)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if stored.ParentID != "" || stored.Title != "Legacy rename" || stored.Metadata["keep"] != "requested" || stored.WorkflowStepID != expectedStep {
+					t.Fatalf("legacy update=%+v", stored)
+				}
+			})
+		}
+	}
+}

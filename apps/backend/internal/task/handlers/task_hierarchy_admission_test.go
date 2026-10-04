@@ -14,6 +14,7 @@ import (
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 	taskrepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	"github.com/kandev/kandev/internal/task/service"
 	ws "github.com/kandev/kandev/pkg/websocket"
@@ -197,4 +198,22 @@ func TestTaskHierarchyAdmissionRegisteredWS(t *testing.T) {
 			require.Nil(t, parent)
 		})
 	}
+}
+
+func TestTaskHierarchyAdmissionDeleteConflictMapping(t *testing.T) {
+	_, h, repo := newQueuedTaskDTOBuilder(t)
+	ctx := context.Background()
+	parent := &models.Task{ID: "conflict-parent", WorkspaceID: "ws-1", Title: "Parent"}
+	require.NoError(t, repo.CreateTask(ctx, parent))
+	require.NoError(t, repo.CreateTask(ctx, &models.Task{ID: "conflict-child", WorkspaceID: "ws-1", Title: "Child", ParentID: parent.ID, IsEphemeral: true, Origin: models.TaskOriginAutomationRun}))
+	err := repo.DeleteTask(ctx, parent.ID)
+	require.ErrorIs(t, err, repoerrors.ErrTaskHierarchyConflict)
+	response := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(response)
+	c.Request = httptest.NewRequest(http.MethodDelete, "/api/v1/tasks/"+parent.ID, nil)
+	handleNotFound(c, h.logger, fmt.Errorf("delete task: %w", err), "task not deleted")
+	require.Equal(t, http.StatusConflict, response.Code)
+	current, err := repo.GetTask(ctx, parent.ID)
+	require.NoError(t, err)
+	require.Equal(t, parent.Title, current.Title)
 }

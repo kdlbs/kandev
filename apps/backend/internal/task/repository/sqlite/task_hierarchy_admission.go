@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"strings"
 
 	internaldb "github.com/kandev/kandev/internal/db"
 	"github.com/kandev/kandev/internal/db/dialect"
@@ -178,12 +179,12 @@ func (r *Repository) lockTaskUpdateSteps(ctx context.Context, tx *sql.Tx, task *
 }
 
 func (r *Repository) preserveTaskHierarchySnapshot(ctx context.Context, tx *sql.Tx, task *models.Task) ([]byte, error) {
-	query := `SELECT parent_id, metadata FROM tasks WHERE id = ?`
+	query := `SELECT COALESCE(parent_id, ''), metadata FROM tasks WHERE id = ?`
 	if dialect.IsPostgres(r.db.DriverName()) {
 		query += forUpdateClause
 	}
 	var parent string
-	var encoded string
+	var encoded sql.NullString
 	if err := tx.QueryRowContext(ctx, r.db.Rebind(query), task.ID).Scan(&parent, &encoded); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrTaskNotFound
@@ -196,13 +197,15 @@ func (r *Repository) preserveTaskHierarchySnapshot(ctx context.Context, tx *sql.
 		task.ParentID = parent
 	}
 	var metadata map[string]interface{}
-	if err := json.Unmarshal([]byte(encoded), &metadata); err != nil {
-		return nil, err
+	if encoded.Valid && strings.TrimSpace(encoded.String) != "" {
+		if err := json.Unmarshal([]byte(encoded.String), &metadata); err != nil {
+			return nil, err
+		}
 	}
 	preserveHierarchyWorkspace(task, metadata)
 	result, err := json.Marshal(task.Metadata)
 	if err != nil {
-		return []byte("{}"), nil
+		return nil, err
 	}
 	return result, nil
 }

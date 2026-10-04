@@ -483,3 +483,48 @@ func TestTaskHierarchyAdmissionDeferredMarker(t *testing.T) {
 		t.Fatalf("pending=%+v err=%v", pending, err)
 	}
 }
+
+func TestTaskHierarchyAdmissionLegacyMetadataPostgres(t *testing.T) {
+	for _, shape := range []struct {
+		name       string
+		value      interface{}
+		nullParent bool
+	}{
+		{"null", nil, false}, {"empty", "", false}, {"whitespace", " \n\t ", false}, {"json_null", "null", false}, {"null_parent", "{}", true},
+	} {
+		t.Run(shape.name, func(t *testing.T) {
+			a, b, _ := newHierarchyPostgresRepoPair(t)
+			ctx := context.Background()
+			if err := a.CreateWorkspace(ctx, &models.Workspace{ID: "legacy-ws", Name: "Legacy"}); err != nil {
+				t.Fatal(err)
+			}
+			if err := a.CreateTask(ctx, &models.Task{ID: "legacy", WorkspaceID: "legacy-ws", Title: "Legacy"}); err != nil {
+				t.Fatal(err)
+			}
+			task, err := b.GetTask(ctx, "legacy")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := a.DB().Exec(`UPDATE tasks SET metadata=$1 WHERE id='legacy'`, shape.value); err != nil {
+				t.Fatal(err)
+			}
+			if shape.nullParent {
+				if _, err := a.DB().Exec(`UPDATE tasks SET parent_id=NULL WHERE id='legacy'`); err != nil {
+					t.Fatal(err)
+				}
+			}
+			task.Title = "Legacy rename"
+			task.Metadata = map[string]interface{}{"keep": "requested"}
+			if err := b.UpdateTask(ctx, task); err != nil {
+				t.Fatal(err)
+			}
+			stored, err := b.GetTask(ctx, "legacy")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if stored.ParentID != "" || stored.Title != "Legacy rename" || stored.Metadata["keep"] != "requested" {
+				t.Fatalf("PG legacy update=%+v", stored)
+			}
+		})
+	}
+}

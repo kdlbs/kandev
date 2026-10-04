@@ -1002,7 +1002,15 @@ func (r *Repository) UpdateTaskParentID(ctx context.Context, taskID, parentID st
 		}
 	}
 	query := taskParentUpdateQuery(r.db.DriverName())
-	result, err := tx.ExecContext(ctx, r.db.Rebind(query), parentID, parentID, taskID)
+	args := []interface{}{parentID, parentID, taskID}
+	if dialect.IsPostgres(r.db.DriverName()) {
+		valid, err := taskParentMetadataIsJSON(ctx, tx, r.db.Rebind, taskID)
+		if err != nil {
+			return err
+		}
+		args = []interface{}{parentID, parentID, valid, taskID}
+	}
+	result, err := tx.ExecContext(ctx, r.db.Rebind(query), args...)
 	if err != nil {
 		return err
 	}
@@ -1013,10 +1021,23 @@ func (r *Repository) UpdateTaskParentID(ctx context.Context, taskID, parentID st
 	return tx.Commit()
 }
 
+// The task row stays locked until normalization commits, including against
+// scalar metadata writers that do not participate in hierarchy admission.
+func taskParentMetadataIsJSON(ctx context.Context, tx *sqlx.Tx, bind func(string) string, taskID string) (bool, error) {
+	var metadata sql.NullString
+	if err := tx.QueryRowContext(ctx, bind(`SELECT metadata FROM tasks WHERE id = ? FOR UPDATE`), taskID).Scan(&metadata); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return false, fmt.Errorf("%w: %s", ErrTaskNotFound, taskID)
+		}
+		return false, err
+	}
+	return metadata.Valid && json.Valid([]byte(metadata.String)), nil
+}
+
 func taskParentUpdateQuery(driver string) string {
 	if dialect.IsPostgres(driver) {
 		return `UPDATE tasks SET parent_id = ?,
-			metadata = CASE WHEN parent_id IS DISTINCT FROM ? AND metadata IS JSON THEN
+			metadata = CASE WHEN parent_id IS DISTINCT FROM ? AND ? THEN
 				CASE WHEN metadata::jsonb #>> '{workspace,mode}' = 'inherit_parent'
 					THEN jsonb_set(metadata::jsonb, '{workspace,mode}', '"shared_group"'::jsonb, true)::text
 					ELSE metadata END

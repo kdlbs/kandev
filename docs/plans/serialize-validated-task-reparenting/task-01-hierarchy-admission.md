@@ -98,9 +98,9 @@ cases from skipped or unmatched cases; neither a zero-test match nor a skipped P
 | Criteria | Permanent real-data tests / controls |
 | --- | --- |
 | .3, .4, .6, .10 | `service/service_hierarchy_admission_test.go`: `TestTaskHierarchyAdmissionConcurrentMoves` (two/three nodes, Kanban and canonical Office-shaped), `TestTaskHierarchyAdmissionCreationDepth`, existing `TestService_UpdateTask_*` (self/missing/archive/workspace/cycle/depth, ordinary nest, sequential reversal, mixed Office depth), `TestTaskHierarchyAdmissionMalformedAncestry` (unrelated cycle, bounded visited-node walk, positive missing ancestor and real malformed ancestor decode failure). |
-| .6, .8, .9 | `repository/sqlite/task_hierarchy_admission_test.go` and `task_hierarchy_admission_postgres_test.go`: `TestTaskHierarchyAdmissionSQLiteIndependentHandles`, `TestTaskHierarchyAdmissionSQLiteWriterBeforeRead`, `TestTaskHierarchyAdmissionPostgresWaits`, `TestTaskHierarchyAdmissionPostgresCancellation`, `TestTaskHierarchyAdmissionCreateMove`, `TestTaskHierarchyAdmissionTargetLifecycle`, `TestTaskHierarchyAdmissionDeletionCompensation`, `TestTaskHierarchyAdmissionDeferredMarker`, `TestTaskHierarchyAdmissionPromotionReadFailure`. Observe own PID wait before releasing PG holder; join both workers; verify rows after commit and cancellation. |
+| .6, .8, .9 | `repository/sqlite/task_hierarchy_admission_test.go` and `task_hierarchy_admission_postgres_test.go`: `TestTaskHierarchyAdmissionSQLiteIndependentHandles`, `TestTaskHierarchyAdmissionSQLiteWriterBeforeRead`, `TestTaskHierarchyAdmissionPostgresWaits`, `TestTaskHierarchyAdmissionPostgresCancellation`, `TestTaskHierarchyAdmissionCreateMove`, `TestTaskHierarchyAdmissionTargetLifecycle`, `TestTaskHierarchyAdmissionDeletionCompensation`, `TestTaskHierarchyAdmissionDeferredMarker`, `TestTaskHierarchyAdmissionPromotionReadFailure`, `TestTaskHierarchyAdmissionSnapshotEncodingFailure`, `TestTaskHierarchyAdmissionPromotionEncodingFailure`, `TestTaskHierarchyAdmissionLegacyMetadata`, `TestTaskHierarchyAdmissionLegacyMetadataPostgres`. Observe own PID wait before releasing PG holder; join both workers; verify rows after commit and cancellation. |
 | .7, .8 | Store/service `TestTaskHierarchyAdmissionSnapshotPreservation`, registered REST/WS request-presence controls, `TestDetachTask*`, `TestExactTask*`, `TestUpdateTaskIfWorkflowStepHasCapacity*`, `TestPromoteQueuedTaskIfWorkflowStepHasCapacity*`: stale rename/metadata/workflow/capacity/promotion snapshots, nil/empty/same parent, explicit position, complete field/association/group/session controls, exact version conflict/receipt replay, normalization and failure rollback. |
-| .6 through .10 | `handlers/task_hierarchy_admission_test.go`: `TestTaskHierarchyAdmissionRegisteredREST`, `TestTaskHierarchyAdmissionRegisteredWS`; use `RegisterTaskRoutes` and actual dispatcher invocation, real service/store/event bus. Concurrent reversal plus sequential validation/request-presence/position controls, no loser success event. No direct private-handler-only substitute. |
+| .6 through .10 | `handlers/task_hierarchy_admission_test.go`: `TestTaskHierarchyAdmissionRegisteredREST`, `TestTaskHierarchyAdmissionRegisteredWS`; use `RegisterTaskRoutes` and actual dispatcher invocation, real service/store/event bus. Concurrent reversal plus sequential validation/request-presence/position controls, no loser success event. `TestTaskHierarchyAdmissionDeleteConflictMapping` complements registered mutation coverage with an actual structural-child store error wrapped through the Gin 409 mapper. No direct private-handler-only substitute for registered parent mutation coverage. |
 | .10 | `office/dashboard/service_hierarchy_admission_test.go` / `office/repository/sqlite/task_hierarchy_admission_test.go`: `TestTaskHierarchyAdmissionOfficePolicy` and `TestTaskHierarchyAdmissionOfficeSerialization`. Deeper cycle still accepted by dashboard/scalar policy, direct-self/missing rejected, same-parent normalization unchanged, shared lock waits and existence recheck; do not replace policy checks with a mock answer. |
 
 Preserve and run existing `TestService_UpdateTask_*`, `TestDetachTask*`, `TestExactTask*`,
@@ -307,3 +307,39 @@ No schema/repair or Office deeper-cycle/depth policy change. Single conditional 
 install21264 joined exit 0 (pnpm9.15.9, 1.9s, frozen lockfile, 923 cached packages, no downloads); dependencies are retained for ordinary active hooks. The final hook lint must cover all
 changed Go packages at the immutable comparison base d5142d9db89fa7afc42a3570eeafb4eb681ca0f0
 with concurrency2/allowserial/CLI5m/GNU6m kill10s/GOMAX2/GOMEM1GiB.
+
+
+Review remediation at published head1b360b5f96a8b8ad5b0c2dfc60f39eaae5e09c97: actual inline
+4176285850 raised the new SQL/JSON availability dependency; the proposed null/empty guard would
+break the permanent malformed-metadata control. Use Go json.Valid on PostgreSQL subject metadata
+read under FOR UPDATE after workspace admission, binding the result into the native UPDATE. This
+keeps the existing malformed/same-parent policy without a new database minimum. Inline4176286046
+identified snapshot marshal fallback data loss; an encoding failure must abort, preserve all fields
+and sessions, and emit no success rather than erase current hierarchy-owned workspace state.
+The owned CI waiter30295 was interrupted and joined130 before remediation (no verdict, no hosted
+cancellations); only its process group3679446 was stopped and confirmed absent.
+
+
+Review correction RED95792 actually joined exit 1 (store3.540s): valid snapshots captured before raw
+legacy injection isolate NULL/blank metadata and NULL parent failures in the new preservation read,
+including SQLite ordinary/promotion and PG ordinary writes. Preserve nullable/blank legacy values
+with NullString and root COALESCE, while malformed nonempty JSON remains an error. Previous59830
+joined exit 1 had service encoding and actual-store 409 controls passing, but NULL fixtures stopped
+at the pre-existing public getter; no global getter compatibility expansion was made. The native
+PG16 IS JSON guard described above is superseded by locked current-row Go json.Valid, preserving
+malformed bytes and same-parent behavior without changing the supported PostgreSQL floor.
+
+CodeRabbit grouped cascade finding: the final store guard deliberately retains parents referenced
+by excluded ephemeral/automation children. Existing cascade inventory ownership remains filtered;
+refresh alone need not clear the conflict. The owning child lifecycle must remove that relation.
+No-cascade promotion and ordinary cascade selection/partial cleanup/compensation/retry semantics
+remain unchanged. Broadening deletion ownership is outside the reviewed package.
+
+
+Correction GREEN39255 joined exit 0: service2.515s (four ABA variants and encoding-failure exact
+row/session/event preservation), store5.197s (all fifteen legacy SQLite/PG ordinary/promotion
+shapes, malformed-read and encoding rollback), handlers1.423s (actual store conflict wrapped to
+HTTP409). The Office selector was unmatched, so only missing exact OfficeSerialization93680 ran
+and joined exit 0, 1.516s, actual workspace wait567 plus current normalization/same-parent/malformed
+controls. SQLguard9611 joined exit 0. Catalog347 decisions/1332 specs, all-spec lint and whitespace
+passed. Ordinary corrective hooks and exact-head publication/review/terminal CI/merge remain gates.
