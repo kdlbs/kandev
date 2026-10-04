@@ -147,13 +147,18 @@ lists, follow `page_info.next_cursor` to load every page. Do not set
 
 For recorded workflow movement, the browser can GET
 `./_kandev/v1/data/tasks/{task_id}/step-transitions` with
-`api_read:tasks`. A workspace canvas can GET
+`api_read:tasks`. With `data_scope_kind: task`, a canvas can read only its own
+task's history. With `data_scope_kind: workspace`, it can read any task's
+history in the current workspace, even with `scope_kind: task`.
+
+With `data_scope_kind: workspace`, a canvas can GET
 `./_kandev/v1/data/workflows/{workflow_id}/transition-groups` with both
-`api_read:tasks` and `api_read:workflows`. The latter is denied to a task
-canvas until the user promotes it. Both return bounded `{items,page_info}`
-pages; use the opaque `next_cursor` to continue. The equivalent optional
-backend Host extension is `pluginsdk.TransitionHistory(host)`. It exposes
-`ListTask` and `ListWorkflowGroups` with the same fields and grants.
+`api_read:tasks` and `api_read:workflows`. This route requires workspace data
+access, regardless of canvas placement. Both routes return bounded
+`{items,page_info}` pages. Use the opaque `next_cursor` to continue.
+The equivalent optional backend Host extension is
+`pluginsdk.TransitionHistory(host)`. It exposes `ListTask` and
+`ListWorkflowGroups` with the same fields and grants.
 
 Kandev injects a reserved startup bootstrap into the packaged entry document.
 It runs before authored scripts, reports an initial document error when one is
