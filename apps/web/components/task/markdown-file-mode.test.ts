@@ -19,6 +19,8 @@ describe("markdown file mode", () => {
     );
     expect(resolveStoredMarkdownFileMode({ markdownPreview: true })).toBe("preview");
     expect(resolveStoredMarkdownFileMode({ markdownPreview: false })).toBe("source");
+    expect(resolveStoredMarkdownFileMode({ renderedPreview: true })).toBe("preview");
+    expect(resolveStoredMarkdownFileMode({ renderedPreview: false })).toBe("source");
     expect(resolveStoredMarkdownFileMode({})).toBe("source");
   });
 

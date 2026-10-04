@@ -30,7 +30,8 @@ import {
 import { scrollEditorIfMounted, setPendingCursorPosition } from "./file-editor-cursor";
 import {
   defaultMarkdownFileMode,
-  type MarkdownFileMode,
+  resolveStoredMarkdownFileMode,
+  type StoredMarkdownFileMode,
 } from "@/components/task/markdown-file-mode";
 export {
   consumePendingCursorPosition,
@@ -130,15 +131,14 @@ function buildPersistedTabs(
 type RestoreTabsParams = {
   activeSessionId: string;
   activeSessionIdRef: React.MutableRefObject<string | null>;
-  savedTabs: Array<{
-    path: string;
-    name: string;
-    repo?: string;
-    renderedPreview?: boolean;
-    markdownMode?: MarkdownFileMode;
-    markdownPreview?: boolean;
-    pinned?: boolean;
-  }>;
+  savedTabs: Array<
+    {
+      path: string;
+      name: string;
+      repo?: string;
+      pinned?: boolean;
+    } & StoredMarkdownFileMode
+  >;
   savedActiveTab: string;
   setFileState: (path: string, state: FileEditorState) => void;
   addFileEditorPanel: (
@@ -147,18 +147,6 @@ type RestoreTabsParams = {
     opts?: { quiet?: boolean; pin?: boolean; repo?: string },
   ) => void;
 };
-
-function getRestoredMarkdownMode(tab: {
-  markdownMode?: MarkdownFileMode;
-  markdownPreview?: boolean;
-  renderedPreview?: boolean;
-}): { markdownMode: MarkdownFileMode } | Record<string, never> {
-  if (tab.markdownMode) return { markdownMode: tab.markdownMode };
-  if (tab.markdownPreview !== undefined || tab.renderedPreview !== undefined) {
-    return { markdownMode: tab.markdownPreview || tab.renderedPreview ? "preview" : "source" };
-  }
-  return {};
-}
 
 async function loadAndRestoreTabs(params: RestoreTabsParams, retryCount = 0): Promise<void> {
   const {
@@ -209,7 +197,7 @@ async function loadAndRestoreTabs(params: RestoreTabsParams, retryCount = 0): Pr
       originalContent: "",
       originalHash: "",
       isDirty: false,
-      ...getRestoredMarkdownMode(savedTab),
+      markdownMode: resolveStoredMarkdownFileMode(savedTab),
       renderedPreview:
         getFilePreviewKind(savedTab.path) === "markdown" ? savedTab.renderedPreview : undefined,
     });
@@ -242,7 +230,7 @@ async function loadAndRestoreTabs(params: RestoreTabsParams, retryCount = 0): Pr
           getFilePreviewKind(savedTab.path, response.is_binary) === "markdown"
             ? savedTab.renderedPreview
             : undefined,
-        ...getRestoredMarkdownMode(savedTab),
+        markdownMode: resolveStoredMarkdownFileMode(savedTab),
       });
     } catch {
       /* useFileLoader will retry when executor is ready */
