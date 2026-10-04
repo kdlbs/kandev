@@ -25,14 +25,7 @@ func (r *Repository) MergeTaskMetadata(ctx context.Context, id string, requested
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
-	if dialect.IsPostgres(r.db.DriverName()) {
-		if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, "task-metadata-merge:"+id); err != nil {
-			return err
-		}
-	} else if err := r.lockTaskHierarchy(ctx, tx, nil, nil); err != nil {
-		if ctx.Err() != nil {
-			return ctx.Err()
-		}
+	if err := r.lockTaskMetadataMutation(ctx, tx, id); err != nil {
 		return err
 	}
 	current, err := r.currentMetadataForMerge(ctx, tx, id)
@@ -64,6 +57,20 @@ func (r *Repository) MergeTaskMetadata(ctx context.Context, id string, requested
 		return fmt.Errorf("%w: %s", ErrTaskNotFound, id)
 	}
 	return tx.Commit()
+}
+
+func (r *Repository) lockTaskMetadataMutation(ctx context.Context, tx *sql.Tx, id string) error {
+	if dialect.IsPostgres(r.db.DriverName()) {
+		_, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, "task-metadata-merge:"+id)
+		return err
+	}
+	if err := r.lockTaskHierarchy(ctx, tx, nil, nil); err != nil {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		return err
+	}
+	return nil
 }
 
 func ordinaryMetadataMergeOverlay(requested map[string]interface{}) (map[string]json.RawMessage, error) {

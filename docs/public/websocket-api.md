@@ -477,6 +477,11 @@ last committed value. This does not extend ordinary metadata replacement or late
 full-snapshot writes into per-key merges, and nested/null behavior keeps the current
 pending-title database semantics.
 
+GitHub issue linking and unlinking preserve unrelated metadata and omitted task fields,
+including concurrent port-forwarding preference changes. A link replaces the complete
+issue identity together; unlink removes its five issue keys. Legacy issue-watch metadata
+remains separate. These operations retain the ordinary task update notification path.
+
 This guarantee covers ordinary partial updates and participating field-scoped writes.
 Internal full-snapshot and exact/versioned commands retain their own contracts. Responses
 and notifications may observe a later commit; they do not establish a total event order

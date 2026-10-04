@@ -65,6 +65,9 @@ type WorkspaceRepository interface {
 // TaskRepository handles task CRUD and workflow placement.
 // Note: models.TaskRepository is a struct in internal/task/models; no Go conflict exists.
 type TaskRepository interface {
+	// UpdateTaskGitHubIssue sets a complete issue link, or removes it for nil.
+	// It preserves current unrelated metadata and returns the committed candidate.
+	UpdateTaskGitHubIssue(ctx context.Context, id string, link *models.TaskGitHubIssueLink) (*models.Task, error)
 	// MergeTaskMetadata applies ordinary supplied keys to canonical current metadata.
 	// It writes metadata and its timestamp atomically without task-row effects.
 	MergeTaskMetadata(ctx context.Context, id string, metadata map[string]interface{}) error

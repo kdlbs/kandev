@@ -1314,8 +1314,8 @@ func (a githubTaskIssueStoreAdapter) GetRepository(ctx context.Context, reposito
 	return a.svc.GetRepository(ctx, repositoryID)
 }
 
-func (a githubTaskIssueStoreAdapter) UpdateTaskMetadata(ctx context.Context, taskID string, metadata map[string]interface{}) (*models.Task, error) {
-	task, err := a.svc.UpdateTask(ctx, taskID, &taskservice.UpdateTaskRequest{Metadata: metadata})
+func (a githubTaskIssueStoreAdapter) UpdateTaskGitHubIssue(ctx context.Context, taskID string, link *models.TaskGitHubIssueLink) (*models.Task, error) {
+	task, err := a.svc.UpdateTaskGitHubIssue(ctx, taskID, link)
 	if err != nil {
 		return nil, wrapGitHubTaskIssueStoreError(err)
 	}
