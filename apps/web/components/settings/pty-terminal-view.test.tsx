@@ -104,6 +104,44 @@ beforeEach(() => {
 });
 
 describe("PtyTerminalView mobile input", () => {
+  it("leaves unrelated modifiers armed for standard PTY views", async () => {
+    useShellModifiersStore.getState().toggleCtrl();
+    const view = render(<PtyTerminalView startSession={startSession} />);
+    await waitFor(() => expect(mocks.sockets).toHaveLength(1));
+    mocks.terminals[0].onData.mock.calls[0][0]("c");
+    expect(new TextDecoder().decode(mocks.sockets[0].send.mock.calls[0][0])).toBe("c");
+    view.unmount();
+    expect(useShellModifiersStore.getState().ctrl.latched).toBe(true);
+  });
+
+  it("clears modifiers when mobile control ownership starts, changes, or ends", async () => {
+    mocks.getAgentLoginStatus.mockResolvedValue(session);
+    useShellModifiersStore.getState().toggleCtrl();
+    const view = render(
+      <PtyTerminalView
+        startSession={startSession}
+        sessionId="session-1"
+        ownerId="tab-1"
+        mobileControls
+      />,
+    );
+    await waitFor(() => expect(mocks.sockets).toHaveLength(1));
+    expect(useShellModifiersStore.getState().ctrl.latched).toBe(false);
+    fireEvent.click(screen.getByTestId("keybar-key-ctrl"));
+    view.rerender(
+      <PtyTerminalView
+        startSession={startSession}
+        sessionId="session-1"
+        ownerId="tab-2"
+        mobileControls
+      />,
+    );
+    expect(useShellModifiersStore.getState().ctrl.latched).toBe(false);
+    fireEvent.click(screen.getByTestId("keybar-key-shift"));
+    view.unmount();
+    expect(useShellModifiersStore.getState().shift.latched).toBe(false);
+  });
+
   it("routes shortcut and modified physical input through its own socket and focus target", async () => {
     mocks.getAgentLoginStatus.mockResolvedValue(session);
     render(<PtyTerminalView startSession={startSession} sessionId="session-1" mobileControls />);

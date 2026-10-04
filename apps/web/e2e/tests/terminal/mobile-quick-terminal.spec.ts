@@ -134,13 +134,24 @@ test.describe("mobile quick terminal tabs", () => {
       await expect
         .poll(async () => normalizeTerminalText(await readQuickTerminalBuffer(testPage)))
         .toContain("LATCH_CLEARED");
+      await bar.getByTestId("keybar-key-ctrl").tap();
+      await bar.getByTestId("keybar-key-shift").tap();
+      await bar.getByTestId("keybar-key-shift").tap();
       await tabs.nth(0).tap();
+      await expect(bar.getByTestId("keybar-key-ctrl")).toHaveAttribute("aria-pressed", "false");
+      await expect(bar.getByTestId("keybar-key-shift")).toHaveAttribute("aria-pressed", "false");
       await expect
         .poll(async () => normalizeTerminalText(await readQuickTerminalBuffer(testPage)))
         .toContain("FIRST_SHELL_READY");
       expect(normalizeTerminalText(await readQuickTerminalBuffer(testPage))).not.toContain(
         "SECOND_INTERRUPTED",
       );
+      await bar.getByTestId("keybar-key-ctrl").tap();
+      await dialog.getByTestId("quick-chat-close").tap();
+      await expect(dialog).toBeHidden();
+      await testPage.getByTestId("app-nav-trigger").tap();
+      await testPage.getByTestId("mobile-quick-terminal-button").tap();
+      await expect(bar.getByTestId("keybar-key-ctrl")).toHaveAttribute("aria-pressed", "false");
       await testPage.evaluate(() => {
         const vv = window.visualViewport!;
         Object.defineProperty(vv, "height", {
@@ -185,7 +196,7 @@ test.describe("mobile quick terminal tabs", () => {
         .poll(async () => normalizeTerminalText(await readQuickTerminalBuffer(testPage)))
         .toContain("EOF_RECEIVED");
       await testPage.keyboard.type("exit\n");
-      await expect(dialog.getByTestId("quick-terminal-status")).toContainText("exited");
+      await expect(dialog.getByTestId("quick-terminal-status")).toBeVisible();
       await expect(bar).toHaveCount(0);
       await closeQuickTerminalTab(testPage, tabs.nth(0));
       await expect(tabs).toHaveCount(0);

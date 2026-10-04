@@ -61,7 +61,8 @@ On a phone, Quick Terminal includes the same shortcut row as a task terminal:
 Swipe the row to reach more keys. Tap **^C** to interrupt a command. Tap a modifier
 once for the next input, twice to keep it enabled, and again to turn it off.
 Shortcuts target the selected terminal and keep the keyboard focused. The row
-stays above the on-screen keyboard.
+stays above the on-screen keyboard. Modifiers reset when you switch terminal
+tabs or close the view.
 
 ### Start a chat
 

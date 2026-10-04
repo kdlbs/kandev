@@ -20,7 +20,7 @@ records and Quick Terminal descriptors remain owned by their existing backend se
 
 | Requirement | Design section |
 | --- | --- |
-| `REQ-UI-QUICK-TERMINAL-001` | [Migrated source detail](#migrated-source-detail), [Launcher focus return](#launcher-focus-return), [Launcher toggle and terminal Escape routing](#launcher-toggle-and-terminal-escape-routing) |
+| `REQ-UI-QUICK-TERMINAL-001` | [Migrated source detail](#migrated-source-detail), [Launcher focus return](#launcher-focus-return), [Launcher toggle and terminal Escape routing](#launcher-toggle-and-terminal-escape-routing), [Phone terminal shortcut controls](#phone-terminal-shortcut-controls) |
 | `REQ-UI-QUICK-TERMINAL-002` | [Tab order and editing](#tab-order-and-editing) |
 
 Remembered conversation selection is defined in the
@@ -492,11 +492,12 @@ checks, and Agents-page authorization behavior remain unchanged.
 `QuickTerminalTabView` enables inline `MobileTerminalKeybar` controls through
 `PtyTerminalView` on phones. Local send/focus callbacks target the host PTY's
 socket and xterm, bypassing the task terminal sender registry. Physical and
-shortcut input share Ctrl/Shift transforms; latched modifiers are consumed only
+shortcut input share Ctrl/Shift transforms. Control activation, owner changes,
+and dismissal reset modifiers. Latched modifiers are consumed only
 after an open socket accepts input. Authentication PTYs retain raw input.
 
-The task terminal keybar is the mobile exemplar. The terminal owns vertical
-scrolling; the shortcut row owns horizontal overflow and uses 44px targets.
+The task terminal keybar is the mobile exemplar: output scrolls vertically,
+while the 44px shortcut row scrolls horizontally.
 Visual viewport occlusion reduces terminal panel space above the keyboard;
 dialog safe-area padding stays authoritative. Desktop omits the row.
 

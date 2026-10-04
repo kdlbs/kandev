@@ -33,7 +33,7 @@ Quick Chat and Quick Terminal are both short-lived utilities reached from the sa
 - **AC-UI-QUICK-TERMINAL-001.11:** When a connected agent passthrough terminal owns keyboard focus inside the shared dialog, with its xterm AttachAddon installed on an open terminal WebSocket, unmodified Escape shall reach the agent TUI and the dialog shall remain open. Escape from non-terminal focus targets, or while that terminal connection is unavailable, retains the existing dialog and nested-widget behavior.
 - **AC-UI-QUICK-TERMINAL-001.12:** Phone and coarse-pointer users shall retain the existing visible Quick Chat close action and touch dismissal paths without depending on a hardware keyboard shortcut.
 
-- **AC-UI-QUICK-TERMINAL-001.13:** On phones, the selected running Quick Terminal exposes the same shortcut controls as a task terminal, including Ctrl/Shift, interrupt, EOF, Escape, Tab, navigation keys, and symbols. Shortcuts and modified keyboard input target only that terminal. The controls retain terminal focus, remain reachable above the on-screen keyboard, and disappear when selecting a conversation or dismissing the dialog.
+- **AC-UI-QUICK-TERMINAL-001.13:** On phones, the selected running Quick Terminal exposes the same shortcut controls as a task terminal, including Ctrl/Shift, interrupt, EOF, Escape, Tab, navigation keys, and symbols. Shortcuts and modified keyboard input target only that terminal. The controls retain terminal focus, remain reachable above the on-screen keyboard, and disappear when selecting a conversation or dismissing the dialog. Modifiers reset when leaving the selected terminal.
 
 ## Out of scope
 
