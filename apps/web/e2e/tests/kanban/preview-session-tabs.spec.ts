@@ -141,21 +141,21 @@ test.describe("Preview session tabs", () => {
     // The selected response marker appears only in its agent reply, not in a prompt.
     await expect(primaryTab).toHaveAttribute("data-state", "active", { timeout: 15_000 });
     await expect(secondaryTab).toHaveAttribute("data-state", "inactive", { timeout: 15_000 });
-    await expect(
-      previewPanel.getByText(primaryResponse, { exact: false }).first(),
-    ).toBeVisible({ timeout: 15_000 });
+    await expect(previewPanel.getByText(primaryResponse, { exact: false }).first()).toBeVisible({
+      timeout: 15_000,
+    });
 
     // 8. Click the secondary tab → content switches, URL updates.
     await secondaryTab.click();
     await expect(testPage).toHaveURL(new RegExp(`sessionId=${secondaryId}`), { timeout: 20_000 });
     await expect(secondaryTab).toHaveAttribute("data-state", "active", { timeout: 20_000 });
     await expect(primaryTab).toHaveAttribute("data-state", "inactive", { timeout: 20_000 });
-    await expect(
-      previewPanel.getByText(secondaryResponse, { exact: false }).first(),
-    ).toBeVisible({ timeout: 15_000 });
-    await expect(
-      previewPanel.getByText(primaryResponse, { exact: false }),
-    ).not.toBeVisible({ timeout: 15_000 });
+    await expect(previewPanel.getByText(secondaryResponse, { exact: false }).first()).toBeVisible({
+      timeout: 15_000,
+    });
+    await expect(previewPanel.getByText(primaryResponse, { exact: false })).not.toBeVisible({
+      timeout: 15_000,
+    });
 
     // 9. Read-only tab bar: no close buttons and no add button are rendered.
     await expect(testPage.getByTestId(`preview-session-tab-close-${primaryId}`)).toHaveCount(0);
