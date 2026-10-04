@@ -507,3 +507,14 @@ authorized10m/11m duration and unchanged resources. Five scoped paths staged, in
 registered WS fixture. Prior23309 remains failed diagnostic and all historical pass/timeout
 receipts remain true. Normal active hooks/commit/promptpublication, BOTH grouped dispositions,
 newhead ALL35 review/terminal CI/expectedhead actualmerge/independent proof+cleanup remain gates.
+
+
+FULL5405049118 authenticated App347564 covers published1729764ac/all35 paths. Its sole grouped
+finding is valid: the public deletion guide implied refresh/retry always resolves a conflict,
+although excluded ephemeral/automation children can retain the relation. Correct only the existing
+paragraph to state this limitation, matching the reviewed system design; no cascade policy or
+backend change. Run public-doc validator tests and validator plus whitespace, then normal hooks
+and prompt publication. Backend blobs retain full CHANGED lint82345 PASS without passing replay.
+
+Public validator tests:62 passed (corrected configured Node PATH after initial127); validator:47
+pages validated, both terminal0. Whitespace passes. No backend changes or Go checks replayed.
