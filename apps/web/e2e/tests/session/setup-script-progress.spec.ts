@@ -55,6 +55,10 @@ test.describe("Setup script progress UX", () => {
     expect(repositoryResponse.ok).toBeTruthy();
     const repository = (await repositoryResponse.json()) as { pull_before_worktree?: boolean };
     try {
+      // The shared local seed repository does not pull by default. Enable the
+      // repository's real pre-worktree fetch so this test gate observes the
+      // preparation phase it is intended to cover.
+      await apiClient.updateRepository(seedData.repositoryId, { pull_before_worktree: true });
       fs.writeFileSync(
         gitGateFile,
         JSON.stringify({ startedFile: gitStartedFile, releaseFile: gitReleaseFile }),
@@ -138,6 +142,9 @@ test.describe("Setup script progress UX", () => {
       if (fs.existsSync(gitReleaseFile)) fs.unlinkSync(gitReleaseFile);
       if (fs.existsSync(startedFile)) fs.unlinkSync(startedFile);
       if (fs.existsSync(releaseFile)) fs.unlinkSync(releaseFile);
+      await apiClient
+        .updateRepository(seedData.repositoryId, { pull_before_worktree: false })
+        .catch(() => {});
     }
   });
 

@@ -145,7 +145,9 @@ func runSidebarMemoryChild(t *testing.T, testName string, count int) {
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Minute)
 	defer cancel()
 	command := exec.CommandContext(ctx, executable, "-test.run=^"+testName+"$", "-test.v")
-	command.Env = append(os.Environ(), sidebarMemoryChild+"="+strconv.Itoa(count))
+	// Keep glibc's freed per-thread arena pages from obscuring the retained
+	// SQLite pool measurement in this isolated high-concurrency probe.
+	command.Env = append(os.Environ(), sidebarMemoryChild+"="+strconv.Itoa(count), "MALLOC_ARENA_MAX=1")
 	output, err := command.CombinedOutput()
 	t.Log(string(output))
 	if err != nil {

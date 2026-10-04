@@ -16,12 +16,39 @@ import (
 
 	"github.com/kandev/kandev/internal/db"
 	taskmodels "github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 	taskservice "github.com/kandev/kandev/internal/task/service"
 )
 
 type e2eResetTaskDeleterStub struct {
 	taskID  string
 	options taskservice.DeleteTaskOptions
+}
+
+type e2eResetHierarchyDeleter struct {
+	parents map[string]string
+	active  map[string]struct{}
+	calls   []string
+}
+
+func (s *e2eResetHierarchyDeleter) DeleteTaskWithOptions(
+	_ context.Context,
+	taskID string,
+	_ taskservice.DeleteTaskOptions,
+) error {
+	s.calls = append(s.calls, taskID)
+	if _, exists := s.active[taskID]; !exists {
+		return errors.New("task not found")
+	}
+	for childID, parentID := range s.parents {
+		if parentID == taskID {
+			if _, childExists := s.active[childID]; childExists {
+				return repoerrors.ErrTaskHierarchyConflict
+			}
+		}
+	}
+	delete(s.active, taskID)
+	return nil
 }
 
 type e2eAttachTaskAuthorizerStub struct {
@@ -55,6 +82,54 @@ func TestDeleteTaskForE2EResetDiscardsWorktreeChanges(t *testing.T) {
 	}
 	if !deleter.options.DiscardWorktreeChanges {
 		t.Fatal("E2E reset must discard disposable worktree changes")
+	}
+}
+
+func TestDeleteE2ETasksForResetDefersParentsUntilChildrenAreDeleted(t *testing.T) {
+	deleter := &e2eResetHierarchyDeleter{
+		parents: map[string]string{"child": "parent", "grandchild": "child"},
+		active:  map[string]struct{}{"parent": {}, "child": {}, "grandchild": {}},
+	}
+	tasks := []*taskmodels.Task{
+		{ID: "parent"},
+		{ID: "child", ParentID: "parent"},
+		{ID: "grandchild", ParentID: "child"},
+	}
+
+	deleted, deletedIDs, err := deleteE2ETasksForReset(context.Background(), deleter, tasks)
+	if err != nil {
+		t.Fatalf("deleteE2ETasksForReset: %v", err)
+	}
+	if deleted != 3 {
+		t.Fatalf("deleted count = %d, want 3", deleted)
+	}
+	if got, want := strings.Join(deleter.calls, ","), "parent,child,grandchild,parent,child,parent"; got != want {
+		t.Fatalf("delete order = %q, want %q", got, want)
+	}
+	if got, want := strings.Join(deletedIDs, ","), "grandchild,child,parent"; got != want {
+		t.Fatalf("deleted IDs = %q, want %q", got, want)
+	}
+	if len(deleter.active) != 0 {
+		t.Fatalf("tasks remaining after reset = %#v", deleter.active)
+	}
+}
+
+func TestDeleteE2ETasksForResetStopsWhenHierarchyCannotProgress(t *testing.T) {
+	deleter := &e2eResetHierarchyDeleter{
+		parents: map[string]string{"task-a": "task-b", "task-b": "task-a"},
+		active:  map[string]struct{}{"task-a": {}, "task-b": {}},
+	}
+	tasks := []*taskmodels.Task{{ID: "task-a"}, {ID: "task-b"}}
+
+	deleted, deletedIDs, err := deleteE2ETasksForReset(context.Background(), deleter, tasks)
+	if !errors.Is(err, repoerrors.ErrTaskHierarchyConflict) {
+		t.Fatalf("deleteE2ETasksForReset error = %v, want hierarchy conflict", err)
+	}
+	if deleted != 0 || len(deletedIDs) != 0 {
+		t.Fatalf("deleted = %d, IDs = %v, want no deletions", deleted, deletedIDs)
+	}
+	if got, want := strings.Join(deleter.calls, ","), "task-a,task-b"; got != want {
+		t.Fatalf("delete attempts = %q, want %q", got, want)
 	}
 }
 

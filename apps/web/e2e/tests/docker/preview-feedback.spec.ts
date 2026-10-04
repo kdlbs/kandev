@@ -58,7 +58,7 @@ test.describe("Docker web preview feedback", () => {
 
       const frame = session.browserPanel.frameLocator("iframe");
       await expect(frame.locator("#deploy")).toBeVisible({ timeout: 60_000 });
-      await chooseCapture(testPage, "Select element");
+      await chooseCapture(testPage, "Select element", frame);
       await frame.locator("#deploy").click();
       await saveDraft(testPage, "Clarify the result of this container action");
 

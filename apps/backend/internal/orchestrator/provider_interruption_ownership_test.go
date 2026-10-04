@@ -65,6 +65,29 @@ func TestInterruptionContinuationOwnershipCancelAcceptedTurn(t *testing.T) {
 	require.Equal(t, int32(1), mgr.cancelAgentCalls.Load(), "Cancel must stop the accepted continuation at the provider")
 }
 
+func TestInterruptionContinuationCancelPersistsRecoveryAfterEpisodeRetires(t *testing.T) {
+	svc, mgr, _ := dispatchContinuationFixture(t)
+	messages := svc.messageCreator.(*mockMessageCreator)
+	mgr.cancelAgentFunc = func(_ context.Context, sessionID string) error {
+		svc.resetTransientRetry(sessionID)
+		return nil
+	}
+
+	require.True(t, svc.CancelTransientRetry(context.Background(), "t1", "s1"))
+	_, owned := svc.transientRetries.Load("s1")
+	require.False(t, owned)
+	require.Condition(t, func() bool {
+		messages.mu.Lock()
+		defer messages.mu.Unlock()
+		for _, message := range messages.sessionMessages {
+			if message.metadata["recovery_disposition"] == "cancelled" && message.metadata["recovery_mode"] == recoveryModeContinue {
+				return true
+			}
+		}
+		return false
+	}, "accepted continuation cancellation must persist a recoverable cancelled status")
+}
+
 func TestInterruptionContinuationOwnershipOrdinaryStopRetiresEpisode(t *testing.T) {
 	svc, mgr, _ := dispatchContinuationFixture(t)
 	require.NoError(t, svc.CancelAgent(context.Background(), "s1"))

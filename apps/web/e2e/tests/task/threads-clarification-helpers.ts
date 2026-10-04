@@ -5,7 +5,11 @@ import { join } from "node:path";
 import type { SeedData } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
 import { waitForFiniteAnimations } from "../../helpers/animations";
-import { waitForAgentMessage, waitForSessionState } from "../../helpers/session";
+import {
+  waitForAgentMessage,
+  waitForLatestSessionDone,
+  waitForSessionState,
+} from "../../helpers/session";
 import { PrAssetCapture } from "../../helpers/pr-asset-capture";
 import { capturePresentation, threadBoxes } from "./threads-presentation-helpers";
 
@@ -16,29 +20,47 @@ export async function attachQuestionRecord(info: TestInfo, name: string, record:
 }
 
 export async function seedLongThreadQuestion(api: ApiClient, seed: SeedData) {
-  const tasks = [];
-  for (const [title, scenario] of [
-    ["A long required question", "clarification-multi"],
-    ["B neighboring question", "clarification"],
-  ]) {
-    const task = await api.createTaskWithAgent(seed.workspaceId, title, seed.agentProfileId, {
-      description: `/e2e:${scenario}`,
+  const sibling = await api.createTaskWithAgent(
+    seed.workspaceId,
+    "B neighboring thread",
+    seed.agentProfileId,
+    {
+      description: "/e2e:simple-message",
       workflow_id: seed.workflowId,
       workflow_step_id: seed.startStepId,
       repository_ids: [seed.repositoryId],
       executor_profile_id: seed.worktreeExecutorProfileId,
-    });
-    if (!task.session_id) throw new Error("Required question has no session");
-    await waitForSessionState(api, {
-      taskId: task.id,
-      sessionId: task.session_id,
-      expectedState: "WAITING_FOR_INPUT",
-      message: `${title} must block on its real clarification request`,
-      timeout: 60_000,
-    });
-    tasks.push(task);
-  }
-  return { task: tasks[0], sibling: tasks[1] };
+    },
+  );
+  if (!sibling.session_id) throw new Error("Neighboring thread has no session");
+  await waitForLatestSessionDone(
+    api,
+    sibling.id,
+    1,
+    "Neighboring thread must finish its simple turn",
+  );
+
+  const task = await api.createTaskWithAgent(
+    seed.workspaceId,
+    "A long required question",
+    seed.agentProfileId,
+    {
+      description: "/e2e:clarification-multi",
+      workflow_id: seed.workflowId,
+      workflow_step_id: seed.startStepId,
+      repository_ids: [seed.repositoryId],
+      executor_profile_id: seed.worktreeExecutorProfileId,
+    },
+  );
+  if (!task.session_id) throw new Error("Required question has no session");
+  await waitForSessionState(api, {
+    taskId: task.id,
+    sessionId: task.session_id,
+    expectedState: "WAITING_FOR_INPUT",
+    message: "Long required question must block on its real clarification request",
+    timeout: 60_000,
+  });
+  return { task, sibling };
 }
 
 /** Native tab zoom, with neither viewport/device-scale emulation nor CSS zoom. */

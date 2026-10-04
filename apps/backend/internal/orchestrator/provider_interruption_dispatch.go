@@ -162,7 +162,9 @@ func (s *Service) finishContinuationManual(ctx context.Context, taskID, sessionI
 	defer guard.Unlock()
 	defer release()
 	current, ok := s.transientRetries.Load(sessionID)
-	if !ok || current != entry {
+	expectedCancel, _ := ctx.Value(continuationCancelContextKey{}).(*transientRetryEntry)
+	retiredByAcceptedCancel := !ok && expectedCancel == entry && len(disposition) > 0 && disposition[0] == stopReasonCancelled
+	if (!ok && !retiredByAcceptedCancel) || (ok && current != entry) {
 		return
 	}
 	settlementCtx := context.WithoutCancel(ctx)

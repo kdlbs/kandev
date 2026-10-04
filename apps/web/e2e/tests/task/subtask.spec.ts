@@ -386,7 +386,11 @@ test.describe("Subtask basics", () => {
 });
 
 test.describe("MCP subtask creation", () => {
-  test("agent creates subtask via MCP create_task with parent_id", async ({ testPage }) => {
+  test("agent creates subtask via MCP create_task with parent_id", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
     const subtaskTitle = "MCP-subtask-e2e-verify";
 
     const script = [
@@ -421,12 +425,24 @@ test.describe("MCP subtask creation", () => {
     await session.waitForLoad();
     await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
 
-    // 4. Go back to kanban — subtask card should be visible with parent badge
-    await kanban.goto();
+    // 4. Subtasks are nested in the sidebar rather than rendered as Kanban cards.
+    type TaskEntry = { id: string; title: string; parent_id?: string };
+    await expect
+      .poll(
+        async () => {
+          const { tasks } = await apiClient.listTasks(seedData.workspaceId);
+          const parent = tasks.find((task: TaskEntry) => task.title === "MCP Subtask Parent");
+          const subtask = tasks.find((task: TaskEntry) => task.title === subtaskTitle);
+          return Boolean(parent && subtask && subtask.parent_id === parent.id);
+        },
+        { timeout: 15_000, message: "the MCP-created subtask should reference its parent" },
+      )
+      .toBe(true);
 
-    const subtaskCard = kanban.taskCardByTitle(subtaskTitle);
-    await expect(subtaskCard).toBeVisible({ timeout: 10_000 });
-    await expect(subtaskCard.getByText("MCP Subtask Parent")).toBeVisible();
+    await kanban.goto();
+    await expect(
+      testPage.getByTestId("sidebar-task-item").filter({ hasText: subtaskTitle }),
+    ).toBeVisible({ timeout: 10_000 });
   });
 
   test("MCP-created subtask inherits parent task repositories", async ({

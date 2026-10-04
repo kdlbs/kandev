@@ -106,7 +106,7 @@ export async function seedForkPRComparisonTask(
         `url.${comparisonTargetURL}.insteadOf`,
         targetURL,
       ],
-      { env: gitEnv },
+      { cwd: backend.tmpDir, env: gitEnv },
     );
 
     let releaseBackendEnv: (() => Promise<void>) | undefined;

@@ -17,7 +17,10 @@ export async function expectWorkflowStepPreviewsLoaded(
   responses: ReturnType<typeof armWorkflowStepPreviewResponses>,
 ) {
   const receivedResponses = await Promise.all(responses);
-  for (const response of receivedResponses) expect(response.ok()).toBe(true);
+  for (const response of receivedResponses) {
+    await response.finished();
+    expect(response.ok()).toBe(true);
+  }
   await Promise.all(workflows.map(({ id, stepNames }) => expectStepsInOrder(page, id, stepNames)));
 }
 

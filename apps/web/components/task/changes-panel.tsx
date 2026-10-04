@@ -17,6 +17,8 @@ import type {
   OpenDiffOptions,
 } from "@/lib/state/diff-target-types";
 import { useRequestChangesWalkthrough } from "@/hooks/domains/session/use-request-changes-walkthrough";
+import { useSessionGitRefresh } from "@/hooks/domains/session/use-session-git-refresh";
+import { usePanelActive } from "@/hooks/use-panel-active";
 import {
   consumeContributionComparisonRequest,
   useContributionComparisonRequest,
@@ -26,6 +28,7 @@ import { contributionHistoryExplanationKey } from "@/hooks/domains/session/use-c
 export { filterUnpushedCommits, mergeCommits, separateCommitHistories };
 
 type ChangesPanelProps = {
+  panelId: string;
   onOpenDiffFile: (path: string, options?: OpenDiffOptions) => void;
   onEditFile: (path: string, repo?: string) => void;
   onOpenCommitDetail?: (
@@ -39,6 +42,8 @@ type ChangesPanelProps = {
 const ChangesPanel = memo(function ChangesPanel(props: ChangesPanelProps) {
   const isArchived = useIsTaskArchived();
   const data = useChangesPanelData();
+  const isVisible = usePanelActive(props.panelId);
+  useSessionGitRefresh(data.activeSessionId, isVisible);
   const requestWalkthrough = useRequestChangesWalkthrough({
     taskId: data.activeTaskId,
     sessionId: data.activeSessionId,

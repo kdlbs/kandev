@@ -59,7 +59,8 @@ type AgentExecution struct {
 	WorkspaceID                     string
 	// ExecutorType preserves launch locality for features that must only access
 	// the backend user's host filesystem. Empty means locality is unknown.
-	ExecutorType string
+	ExecutorType  string
+	RepositoryIDs []string
 	// AgentProfileID is the concrete profile used by the running CLI. The
 	// historical name is retained inside lifecycle because profile resolution,
 	// MCP, env, and command construction all consume this value.
@@ -1619,6 +1620,13 @@ type BootMessageRequest struct {
 // McpConfigProvider returns MCP configuration for a given agent profile ID.
 type McpConfigProvider interface {
 	GetConfigByProfileID(ctx context.Context, profileID string) (*mcpconfig.ProfileConfig, error)
+}
+
+// MCPResolutionProvider is the typed effective-set boundary used when catalog
+// and scope-selection storage is available. Legacy providers remain supported
+// for unimported workspaces and focused test managers.
+type MCPResolutionProvider interface {
+	Resolve(context.Context, mcpconfig.ResolutionContext, mcpconfig.Policy) (*mcpconfig.EffectiveMCPResolution, error)
 }
 
 // WorkspaceInfo contains information about a task's workspace for on-demand execution creation

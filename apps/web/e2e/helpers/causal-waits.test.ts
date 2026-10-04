@@ -290,6 +290,43 @@ describe("watchWs().waitForResponse", () => {
     );
   });
 
+  it("filters correlated responses by the originating request payload", async () => {
+    const { page, fake } = fakePage();
+    const ws = watchWs(page);
+    const socket = fake.openSocket(GATEWAY);
+    const pending = ws.waitForResponse("github.pr_commits.get", {
+      where: (payload) => payload.number === 202,
+    });
+    socket.emit("framesent", {
+      id: "task-a",
+      type: "request",
+      action: "github.pr_commits.get",
+      payload: { number: 101 },
+    });
+    socket.emit("framereceived", {
+      id: "task-a",
+      type: "response",
+      action: "github.pr_commits.get",
+      payload: { commits: ["task a"] },
+    });
+    socket.emit("framesent", {
+      id: "task-b",
+      type: "request",
+      action: "github.pr_commits.get",
+      payload: { number: 202 },
+    });
+    socket.emit("framereceived", {
+      id: "task-b",
+      type: "response",
+      action: "github.pr_commits.get",
+      payload: { commits: ["task b"] },
+    });
+    await expect(pending).resolves.toMatchObject({
+      id: "task-b",
+      payload: { commits: ["task b"] },
+    });
+  });
+
   it("only correlates requests sent after it was armed", async () => {
     const { page, fake } = fakePage();
     const ws = watchWs(page);

@@ -5,6 +5,7 @@ package repoclone
 import (
 	"fmt"
 	"os"
+	"strings"
 	"sync"
 )
 
@@ -44,11 +45,16 @@ func gitCredentialHelperCommand(
 		cleanupHelper()
 		return "", nil, nil, nil, err
 	}
-	return helper.Name(), []*os.File{passwordReader, usernameReader}, nil, func() {
+	helperCommand := "sh " + quoteGitCredentialHelperPath(helper.Name())
+	return helperCommand, []*os.File{passwordReader, usernameReader}, nil, func() {
 		stopPassword()
 		stopUsername()
 		cleanupHelper()
 	}, nil
+}
+
+func quoteGitCredentialHelperPath(path string) string {
+	return "'" + strings.ReplaceAll(path, "'", "'\\''") + "'"
 }
 
 func repeatingCredentialPipe(value string) (*os.File, func(), error) {

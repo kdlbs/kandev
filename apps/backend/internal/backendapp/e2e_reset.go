@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -20,6 +21,7 @@ import (
 	"github.com/kandev/kandev/internal/github"
 	"github.com/kandev/kandev/internal/gitlab"
 	taskmodels "github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	taskservice "github.com/kandev/kandev/internal/task/service"
 )
@@ -367,25 +369,23 @@ func handleE2EReset(
 			})
 			return
 		}
-		var deletedTasks int64
 		deletedTaskIDs := append([]string(nil), taskIDsForCleanup...)
 		deletedTaskIDSet := make(map[string]struct{}, len(deletedTaskIDs))
 		for _, taskID := range deletedTaskIDs {
 			deletedTaskIDSet[taskID] = struct{}{}
 		}
-		for _, t := range tasks {
-			if err := deleteTaskForE2EReset(ctx, taskSvc, t.ID); err != nil {
-				// Abort: leaving an undeleted task with its workflow gone
-				// would create orphan rows visible to subsequent tests.
-				log.Error("e2e reset: failed to delete task",
-					zap.String("task_id", t.ID), zap.Error(err))
-				c.JSON(http.StatusInternalServerError, gin.H{errKey: err.Error()})
-				return
-			}
-			deletedTasks++
-			if _, exists := deletedTaskIDSet[t.ID]; !exists {
-				deletedTaskIDSet[t.ID] = struct{}{}
-				deletedTaskIDs = append(deletedTaskIDs, t.ID)
+		deletedTasks, resetDeletedTaskIDs, err := deleteE2ETasksForReset(ctx, taskSvc, tasks)
+		if err != nil {
+			// Abort: leaving an undeleted task with its workflow gone
+			// would create orphan rows visible to subsequent tests.
+			log.Error("e2e reset: failed to delete task", zap.Error(err))
+			c.JSON(http.StatusInternalServerError, gin.H{errKey: err.Error()})
+			return
+		}
+		for _, taskID := range resetDeletedTaskIDs {
+			if _, exists := deletedTaskIDSet[taskID]; !exists {
+				deletedTaskIDSet[taskID] = struct{}{}
+				deletedTaskIDs = append(deletedTaskIDs, taskID)
 			}
 		}
 
@@ -421,6 +421,42 @@ func handleE2EReset(
 
 type e2eResetTaskDeleter interface {
 	DeleteTaskWithOptions(context.Context, string, taskservice.DeleteTaskOptions) error
+}
+
+func deleteE2ETasksForReset(
+	ctx context.Context,
+	taskDeleter e2eResetTaskDeleter,
+	tasks []*taskmodels.Task,
+) (int64, []string, error) {
+	pending := append([]*taskmodels.Task(nil), tasks...)
+	deletedIDs := make([]string, 0, len(tasks))
+	var deleted int64
+	for len(pending) > 0 {
+		deferred := make([]*taskmodels.Task, 0, len(pending))
+		deletedThisPass := false
+		var firstHierarchyConflict error
+		for _, task := range pending {
+			err := deleteTaskForE2EReset(ctx, taskDeleter, task.ID)
+			if errors.Is(err, repoerrors.ErrTaskHierarchyConflict) {
+				deferred = append(deferred, task)
+				if firstHierarchyConflict == nil {
+					firstHierarchyConflict = fmt.Errorf("delete task %s: %w", task.ID, err)
+				}
+				continue
+			}
+			if err != nil {
+				return deleted, deletedIDs, fmt.Errorf("delete task %s: %w", task.ID, err)
+			}
+			deleted++
+			deletedIDs = append(deletedIDs, task.ID)
+			deletedThisPass = true
+		}
+		if len(deferred) > 0 && !deletedThisPass {
+			return deleted, deletedIDs, firstHierarchyConflict
+		}
+		pending = deferred
+	}
+	return deleted, deletedIDs, nil
 }
 
 func deleteTaskForE2EReset(

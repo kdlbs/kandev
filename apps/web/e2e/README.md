@@ -309,8 +309,8 @@ baseline.
 
 ### Flake rate and trend
 
-CI retries hide flakes: with `retries: 2` and `failOnFlakyTests: false`, a test
-that fails and then passes never fails the build. The **E2E flake rate** section
+CI keeps two retries for diagnostics and sets `E2E_FAIL_ON_FLAKY=1`, so a test
+that fails and then passes still fails the build. The **E2E flake rate** section
 of the `e2e-report` job summary makes that number visible without downloading
 anything. It reports, for the run:
 

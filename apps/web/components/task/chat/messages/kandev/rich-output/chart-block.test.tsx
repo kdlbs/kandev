@@ -1,5 +1,6 @@
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import type { ReactNode } from "react";
+import { useLayoutEffect } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { RichOutputChartBlock } from "./types";
 
@@ -114,6 +115,36 @@ function setDocumentVisibility(value: DocumentVisibilityState) {
   document.dispatchEvent(new Event("visibilitychange"));
 }
 
+function RevealDocumentBeforePassiveEffects({ children }: { children: ReactNode }) {
+  useLayoutEffect(() => setDocumentVisibility("visible"), []);
+  return children;
+}
+
+function PositionChartPlotBeforePassiveEffects({
+  top,
+  children,
+}: {
+  top: number;
+  children: ReactNode;
+}) {
+  useLayoutEffect(() => {
+    const plot = document.querySelector<HTMLElement>('[data-testid="rich-output-chart-plot"]');
+    if (!plot) return;
+    vi.spyOn(plot, "getBoundingClientRect").mockReturnValue({
+      x: 0,
+      y: top,
+      top,
+      right: 320,
+      bottom: top + 208,
+      left: 0,
+      width: 320,
+      height: 208,
+      toJSON: () => ({}),
+    });
+  }, [top]);
+  return children;
+}
+
 beforeEach(() => {
   observerRecords.length = 0;
   for (const values of Object.values(captured)) values.length = 0;
@@ -133,7 +164,11 @@ afterEach(() => {
 
 describe("ChartBlock plot scheduling", () => {
   it("defers the Recharts plot until the chart approaches the viewport", () => {
-    render(<ChartBlock block={BLOCK} />);
+    render(
+      <PositionChartPlotBeforePassiveEffects top={1000}>
+        <ChartBlock block={BLOCK} />
+      </PositionChartPlotBeforePassiveEffects>,
+    );
 
     expect(screen.queryByTestId(MOCK_LINE_CHART)).toBeNull();
     expect(screen.getByText(BLOCK.title)).not.toBeNull();
@@ -143,6 +178,123 @@ describe("ChartBlock plot scheduling", () => {
     expect(screen.getByTestId(MOCK_LINE_CHART)).not.toBeNull();
   });
 
+  it("mounts the plot when it is already in the scroll range before observing it", () => {
+    render(
+      <PositionChartPlotBeforePassiveEffects top={100}>
+        <ChartBlock block={BLOCK} />
+      </PositionChartPlotBeforePassiveEffects>,
+    );
+
+    expect(screen.getByTestId(MOCK_LINE_CHART)).not.toBeNull();
+  });
+
+  it("mounts a deferred plot when scrolling its owner brings it into range", () => {
+    const { container } = render(
+      <div
+        data-testid="scroll-owner"
+        ref={(element) => {
+          if (!element) return;
+          Object.defineProperties(element, {
+            clientHeight: { configurable: true, value: 300 },
+            scrollHeight: { configurable: true, value: 900 },
+          });
+        }}
+        style={{ overflowY: "auto" }}
+      >
+        <ChartBlock block={BLOCK} />
+      </div>,
+    );
+    const scrollOwner = container.querySelector<HTMLElement>('[data-testid="scroll-owner"]')!;
+    const plot = container.querySelector<HTMLElement>('[data-testid="rich-output-chart-plot"]')!;
+    let plotTop = 1000;
+    vi.spyOn(scrollOwner, "getBoundingClientRect").mockReturnValue({
+      x: 0,
+      y: 0,
+      top: 0,
+      right: 400,
+      bottom: 300,
+      left: 0,
+      width: 400,
+      height: 300,
+      toJSON: () => ({}),
+    });
+    vi.spyOn(plot, "getBoundingClientRect").mockImplementation(() => ({
+      x: 0,
+      y: plotTop,
+      top: plotTop,
+      right: 320,
+      bottom: plotTop + 208,
+      left: 0,
+      width: 320,
+      height: 208,
+      toJSON: () => ({}),
+    }));
+
+    expect(screen.queryByTestId(MOCK_LINE_CHART)).toBeNull();
+    plotTop = 100;
+    act(() => scrollOwner.dispatchEvent(new Event("scroll")));
+
+    expect(screen.getByTestId(MOCK_LINE_CHART)).not.toBeNull();
+  });
+});
+
+describe("ChartBlock scroll root selection", () => {
+  it("observes the nearest scrollable transcript container", () => {
+    const { container } = render(
+      <div
+        ref={(element) => {
+          if (!element) return;
+          Object.defineProperties(element, {
+            clientHeight: { configurable: true, value: 100 },
+            scrollHeight: { configurable: true, value: 300 },
+          });
+        }}
+        style={{ overflowY: "auto" }}
+      >
+        <ChartBlock block={BLOCK} />
+      </div>,
+    );
+
+    const scrollRoot = container.firstElementChild as HTMLElement;
+    expect(observerRecords[0].options?.root).toBe(scrollRoot);
+  });
+
+  it("uses the vertical scroll owner instead of a horizontal-only overflow ancestor", () => {
+    const { container } = render(
+      <div
+        data-testid="vertical-scroll-root"
+        ref={(element) => {
+          if (!element) return;
+          Object.defineProperties(element, {
+            clientHeight: { configurable: true, value: 100 },
+            scrollHeight: { configurable: true, value: 300 },
+          });
+        }}
+        style={{ overflowY: "auto" }}
+      >
+        <div
+          data-testid="horizontal-overflow"
+          ref={(element) => {
+            if (!element) return;
+            Object.defineProperties(element, {
+              clientHeight: { configurable: true, value: 100 },
+              scrollHeight: { configurable: true, value: 100 },
+              clientWidth: { configurable: true, value: 100 },
+              scrollWidth: { configurable: true, value: 500 },
+            });
+          }}
+          style={{ overflowX: "auto" }}
+        >
+          <ChartBlock block={BLOCK} />
+        </div>
+      </div>,
+    );
+    const verticalRoot = container.querySelector('[data-testid="vertical-scroll-root"]')!;
+    expect(observerRecords[0].options?.root).toBe(verticalRoot);
+  });
+});
+
+describe("ChartBlock plot visibility and rendering", () => {
   it("waits for a background tab to become visible after intersection", () => {
     setDocumentVisibility("hidden");
     render(<ChartBlock block={BLOCK} />);
@@ -151,6 +303,19 @@ describe("ChartBlock plot scheduling", () => {
     expect(screen.queryByTestId(MOCK_LINE_CHART)).toBeNull();
 
     act(() => setDocumentVisibility("visible"));
+    expect(screen.getByTestId(MOCK_LINE_CHART)).not.toBeNull();
+  });
+
+  it("syncs current visibility when the change precedes listener registration", () => {
+    setDocumentVisibility("hidden");
+    render(
+      <RevealDocumentBeforePassiveEffects>
+        <ChartBlock block={BLOCK} />
+      </RevealDocumentBeforePassiveEffects>,
+    );
+
+    intersect();
+
     expect(screen.getByTestId(MOCK_LINE_CHART)).not.toBeNull();
   });
 

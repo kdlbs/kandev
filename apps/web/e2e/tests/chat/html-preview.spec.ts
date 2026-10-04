@@ -225,7 +225,7 @@ test.describe("HTML preview", () => {
     const frame = preview.frameLocator("iframe");
     await expect(frame.locator("#increment")).toBeVisible({ timeout: 15_000 });
 
-    await chooseCapture(testPage, "Select element");
+    await chooseCapture(testPage, "Select element", frame);
     await frame.locator("#increment").click();
     await saveDraft(testPage, "Keep this HTML preview action visible");
 

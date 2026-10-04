@@ -357,19 +357,27 @@ test.describe("User-save then diff view (colleague repro)", () => {
     // Click Files and verify the file row becomes visible. If a late
     // auto-activate stole focus back to Changes, click Files again.
     const fileRow = session.fileTreeNode("diff_update_test.txt");
-    await expect
-      .poll(
-        async () => {
-          await session.clickTab("Files");
-          return await fileRow.isVisible();
-        },
-        { timeout: 20_000, intervals: [500, 1000, 2000] },
-      )
-      .toBe(true);
-    await fileRow.click();
     const editorTab = testPage.locator(".dv-default-tab[type='file-editor']", {
       hasText: "diff_update_test.txt",
     });
+    await expect
+      .poll(
+        async () => {
+          try {
+            await session.clickTab("Files");
+            await fileRow.click({ timeout: 1_000 });
+            return await editorTab.isVisible();
+          } catch {
+            return await editorTab.isVisible();
+          }
+        },
+        {
+          timeout: 20_000,
+          intervals: [100, 250, 500],
+          message: "the file tree should settle long enough to open the edited file",
+        },
+      )
+      .toBe(true);
     await expect(editorTab).toBeVisible({ timeout: 10_000 });
     const editorContent = testPage.locator(".view-lines").first();
     await expect(editorContent).toContainText("FIRST_MODIFICATION", { timeout: 30_000 });

@@ -530,15 +530,20 @@ test("keeps the native model picker and attachment-only draft available after po
   const task = await startPresentationThread(testPage, apiClient, seedData, "Composer controls");
   await apiClient.seedAgentMessages(task.session_id!, 1, "Composer controls readiness");
   await seedThreadPresentation(apiClient, { layout: "columns", autoHideComposer: true });
+  await testPage.mouse.move(0, 0);
   await testPage.goto("/threads");
   await expect(testPage.getByTestId("threads-board")).toBeVisible({ timeout: 15_000 });
   const tile = testPage.getByTestId(`thread-column-${task.id}`);
   await expect(tile).toBeVisible({ timeout: 15_000 });
   const editor = tile.getByTestId("chat-input-editor");
+  await expect(tile.getByTestId("session-chat")).toBeVisible();
+  await expect(editor).toHaveCount(1);
+  await expect(editor).toBeHidden();
   await expect(
     tile.locator(".chat-message-list").getByText("Composer controls readiness 1", { exact: true }),
   ).toBeVisible();
   await tile.locator("header").hover();
+  await expect(editor).toBeVisible();
   const model = tile.getByRole("button", { name: "Session model settings" });
   await expect(model).toBeVisible();
   await model.click();

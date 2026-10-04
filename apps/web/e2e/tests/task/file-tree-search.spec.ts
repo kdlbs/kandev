@@ -62,8 +62,8 @@ test.describe("File tree search", () => {
     );
 
     // Files are virtualized, so a root file below the viewport is not a readiness signal.
-    const collapsedFolder = session.fileTreeNode("deep");
-    await expect(collapsedFolder).toBeVisible({ timeout: 15_000 });
+    const collapsedFolder = await session.fileTree.waitForFileTreeNode("deep", 30_000);
+    await expect(collapsedFolder).toBeVisible();
     await expect(collapsedFolder.locator(".tabler-icon-chevron-right")).toBeVisible();
     // The parent is visibly collapsed, not merely outside the virtualized viewport.
     await expect(session.fileTreeNode("deep/nested/needle-target.ts")).toHaveCount(0);

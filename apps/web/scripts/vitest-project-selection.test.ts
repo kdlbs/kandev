@@ -47,6 +47,7 @@ describe("Vitest project selection", () => {
 
     expect(files.length).toBeGreaterThan(1000);
     expect(files.some((file) => file.startsWith("e2e/") && file.endsWith(".test.ts"))).toBe(true);
+    expect(matchingProjects("e2e/helpers/git-helper.test.ts")).toEqual([NODE_PROJECT]);
 
     for (const file of files) {
       expect(matchingProjects(file), file).toHaveLength(1);

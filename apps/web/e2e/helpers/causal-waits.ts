@@ -117,8 +117,9 @@ export async function waitForHttp(
  * The echoed `action` is not enough to identify *your* round trip: several
  * `task.plan.get` requests can be in flight from different components, and a
  * reply to one sent before you started waiting would satisfy an action-only
- * match. {@link WsWatcher.waitForResponse} therefore correlates by `id`,
- * which is also what makes its arm-before-you-act guarantee real.
+ * match. {@link WsWatcher.waitForResponse} therefore correlates by `id` and
+ * can filter originating request payloads when several subjects share an
+ * action.
  */
 export type WsFrame = {
   id?: string;
@@ -143,9 +144,10 @@ export type WsWatcher = {
   /**
    * Resolve when a WS request the client sends with this `action` *after
    * arming* gets its reply, correlated by frame `id`. Rejects if the backend
-   * answers with an `error` frame.
+   * answers with an `error` frame. `where`, when provided, filters request
+   * payloads before their IDs are tracked.
    */
-  waitForResponse(action: string, options?: { timeout?: number }): Promise<WsFrame>;
+  waitForResponse(action: string, options?: WaitForWsOptions): Promise<WsFrame>;
 };
 
 function decodeFrame(payload: string | Buffer | Uint8Array): WsFrame | null {
@@ -248,9 +250,9 @@ function waitForEvent(
 function waitForResponse(
   channels: Channels,
   action: string,
-  options: { timeout?: number },
+  options: WaitForWsOptions,
 ): Promise<WsFrame> {
-  const { timeout = DEFAULT_TIMEOUT } = options;
+  const { timeout = DEFAULT_TIMEOUT, where } = options;
   return new Promise<WsFrame>((resolve, reject) => {
     const requestIds = new Set<string>();
     const wait = armWsWait(
@@ -259,7 +261,9 @@ function waitForResponse(
       reject,
     );
     wait.listen(channels.sent, (frame) => {
-      if (frame.action === action && frame.id) requestIds.add(frame.id);
+      if (frame.action !== action || !frame.id) return;
+      if (where && !where(frame.payload)) return;
+      requestIds.add(frame.id);
     });
     wait.listen(channels.received, (frame) => {
       if (!frame.id || !requestIds.has(frame.id)) return;

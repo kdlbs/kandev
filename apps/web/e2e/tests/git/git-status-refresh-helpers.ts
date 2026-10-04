@@ -115,7 +115,8 @@ type GitRefreshBridgeState = {
   forcedFailureModes: Set<string>;
   failureEnvironmentId: string;
   holdFreshGitRefreshRequests: boolean;
-  heldFreshGitRefreshRequests: Array<{ frame: string; server: BridgeSocket }>;
+  holdFreshGitRefreshSessionId: string;
+  heldFreshGitRefreshRequests: Array<{ frame: string; server: BridgeSocket; sessionId: string }>;
   holdCommitDiffRequests: boolean;
   commitDiffRequestCount: number;
   commitDiffResponseCount: number;
@@ -180,8 +181,17 @@ function handleGitRefreshRequest(
   const payload = recordValue(frame.payload);
   const mode = typeof payload?.mode === "string" ? payload.mode : "fresh";
   state.requests.push(mode);
-  if (mode === "fresh" && state.holdFreshGitRefreshRequests) {
-    state.heldFreshGitRefreshRequests.push({ frame: part.trim(), server });
+  if (
+    mode === "fresh" &&
+    state.holdFreshGitRefreshRequests &&
+    (!state.holdFreshGitRefreshSessionId ||
+      state.holdFreshGitRefreshSessionId === payload?.session_id)
+  ) {
+    state.heldFreshGitRefreshRequests.push({
+      frame: part.trim(),
+      server,
+      sessionId: typeof payload?.session_id === "string" ? payload.session_id : "",
+    });
     return true;
   }
   return failGitRefreshRequest(frame, payload, mode, socket, state);
@@ -285,6 +295,7 @@ export async function routeGitStatusRefresh(page: Page) {
     forcedFailureModes: new Set(),
     failureEnvironmentId: "",
     holdFreshGitRefreshRequests: false,
+    holdFreshGitRefreshSessionId: "",
     heldFreshGitRefreshRequests: [],
     holdCommitDiffRequests: false,
     commitDiffRequestCount: 0,
@@ -304,15 +315,24 @@ export async function routeGitStatusRefresh(page: Page) {
     allowResponses() {
       state.forcedFailureModes = new Set();
     },
-    holdFreshGitRefreshRequests() {
+    holdFreshGitRefreshRequests(sessionId?: string) {
       state.holdFreshGitRefreshRequests = true;
+      state.holdFreshGitRefreshSessionId = sessionId ?? "";
     },
-    async waitForHeldFreshGitRefreshRequests(count: number) {
+    async waitForHeldFreshGitRefreshRequests(count: number, sessionId?: string) {
       await expect
-        .poll(() => state.heldFreshGitRefreshRequests.length, {
-          timeout: 30_000,
-          message: "the expected fresh Git refresh request should be held",
-        })
+        .poll(
+          () =>
+            sessionId
+              ? state.heldFreshGitRefreshRequests.filter(
+                  (request) => request.sessionId === sessionId,
+                ).length
+              : state.heldFreshGitRefreshRequests.length,
+          {
+            timeout: 30_000,
+            message: "the expected fresh Git refresh request should be held",
+          },
+        )
         .toBeGreaterThanOrEqual(count);
     },
     releaseFreshGitRefreshRequests() {
@@ -354,8 +374,10 @@ export async function routeGitStatusRefresh(page: Page) {
     requestCount(mode: string) {
       return state.requests.filter((candidate) => candidate === mode).length;
     },
-    responseCount(mode: string) {
-      return state.responses.filter((candidate) => candidate.mode === mode).length;
+    responseCount(mode: string, sessionId?: string) {
+      return state.responses.filter(
+        (candidate) => candidate.mode === mode && (!sessionId || candidate.sessionId === sessionId),
+      ).length;
     },
     droppedPendingCount() {
       return state.pendingEventsDropped.length;
@@ -363,14 +385,19 @@ export async function routeGitStatusRefresh(page: Page) {
     readyNotificationCount() {
       return state.readyNotifications.length;
     },
-    async waitForResponse(mode: string, afterCount = 0) {
+    async waitForResponse(mode: string, afterCount = 0, sessionId?: string) {
+      const matchingResponses = () =>
+        state.responses.filter(
+          (candidate) =>
+            candidate.mode === mode && (!sessionId || candidate.sessionId === sessionId),
+        );
       await expect
-        .poll(() => state.responses.filter((candidate) => candidate.mode === mode).length, {
+        .poll(() => matchingResponses().length, {
           timeout: 30_000,
-          message: `the correlated ${mode} Git refresh response should arrive`,
+          message: `the correlated ${mode} Git refresh response should arrive${sessionId ? ` for session ${sessionId}` : ""}`,
         })
         .toBeGreaterThan(afterCount);
-      return state.responses.filter((candidate) => candidate.mode === mode).at(-1)!;
+      return matchingResponses().at(-1)!;
     },
     async waitForDroppedPendingStatus() {
       await expect
@@ -388,17 +415,19 @@ export async function routeGitStatusRefresh(page: Page) {
         })
         .toBeGreaterThan(0);
     },
-    responseIncludesFile(mode: string, filePath: string) {
+    responseIncludesFile(mode: string, filePath: string, sessionId?: string) {
       return state.responses.some(
         (response) =>
           response.mode === mode &&
+          (!sessionId || response.sessionId === sessionId) &&
           response.snapshots.some((snapshot) => snapshotContainsPath(snapshot, filePath)),
       );
     },
-    responseHasPendingDetails(mode: string, filePath: string) {
+    responseHasPendingDetails(mode: string, filePath: string, sessionId?: string) {
       return state.responses.some(
         (response) =>
           response.mode === mode &&
+          (!sessionId || response.sessionId === sessionId) &&
           response.snapshots.some(
             (snapshot) =>
               snapshotContainsPath(snapshot, filePath) &&

@@ -51,7 +51,12 @@ export function useSessionCommits(sessionId: string | null) {
   useEffect(() => {
     read?.ensure(refetchTrigger, commits === undefined);
   }, [read, scope, refetchTrigger, commits]);
-  return { commits: commits ?? [], loading: snapshot.loading, refetch: read?.refetch ?? noRefetch };
+  return {
+    commits: commits ?? [],
+    loaded: snapshot.data !== undefined || commits !== undefined,
+    loading: snapshot.loading,
+    refetch: read?.refetch ?? noRefetch,
+  };
 }
 
 async function noRefetch() {}

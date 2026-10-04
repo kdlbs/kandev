@@ -66,6 +66,18 @@ describe("authoritative shared commit snapshots", () => {
     expect(result.current.value.loading).toBe(false);
   });
 
+  it("distinguishes initial commit hydration from an empty commit snapshot", async () => {
+    const response = deferred<{ commits: SessionCommit[] }>();
+    request.mockReturnValue(response.promise);
+    const { result } = renderSessionRead(() => useSessionCommits("session"), undefined);
+
+    expect(result.current.value.loaded).toBe(false);
+    await act(async () => response.resolve({ commits: [] }));
+
+    expect(result.current.value.commits).toEqual([]);
+    expect(result.current.value.loaded).toBe(true);
+  });
+
   it("preserves a newer live commit against an initial empty snapshot", async () => {
     const response = deferred<{ commits: SessionCommit[] }>();
     request.mockReturnValue(response.promise);

@@ -949,14 +949,14 @@ func configureGitCommand(cmd *exec.Cmd, auth *cloneAuth) (func(), error) {
 	if err := validateCloneAuth(auth); err != nil {
 		return nil, err
 	}
-	helperPath, files, helperEnv, cleanup, err := gitCredentialHelperCommand(auth)
+	helperCommand, files, helperEnv, cleanup, err := gitCredentialHelperCommand(auth)
 	if err != nil {
 		return nil, err
 	}
 	env = append(env,
 		"GIT_CONFIG_COUNT=3",
 		"GIT_CONFIG_KEY_0=credential.helper", "GIT_CONFIG_VALUE_0=",
-		"GIT_CONFIG_KEY_1=credential."+auth.origin+".helper", "GIT_CONFIG_VALUE_1=!"+helperPath,
+		"GIT_CONFIG_KEY_1=credential."+auth.origin+".helper", "GIT_CONFIG_VALUE_1=!"+helperCommand,
 		"GIT_CONFIG_KEY_2=credential.useHttpPath", "GIT_CONFIG_VALUE_2=true",
 	)
 	env = append(env, helperEnv...)

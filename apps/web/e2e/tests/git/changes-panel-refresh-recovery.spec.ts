@@ -25,21 +25,25 @@ test.describe("Changes panel Git refresh recovery", () => {
     git.exec("git clean -fd");
 
     const profile = await createStandardProfile(apiClient, "Initial Git Loading Profile");
-    await apiClient.createTaskWithAgent(seedData.workspaceId, "Initial Git Loading", profile.id, {
-      description: "e2e:delay(120000)",
-      workflow_id: seedData.workflowId,
-      workflow_step_id: seedData.startStepId,
-      repository_ids: [seedData.repositoryId],
-    });
+    const task = await apiClient.createTaskWithAgent(
+      seedData.workspaceId,
+      "Initial Git Loading",
+      profile.id,
+      {
+        description: "e2e:delay(120000)",
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+        repository_ids: [seedData.repositoryId],
+      },
+    );
+    if (!task.session_id) throw new Error("created task has no session ID");
     const bridge = await routeGitStatusRefresh(testPage);
-    bridge.holdFreshGitRefreshRequests();
-
     try {
       const session = await openTaskSession(testPage, "Initial Git Loading");
-      await expect(session.agentStatus()).toBeVisible({ timeout: 30_000 });
+      bridge.holdFreshGitRefreshRequests(task.session_id);
       await session.clickTab("Changes");
       await expect(session.changes).toBeVisible();
-      await bridge.waitForHeldFreshGitRefreshRequests(1);
+      await bridge.waitForHeldFreshGitRefreshRequests(1, task.session_id);
 
       const status = session.changes.getByTestId("changes-refresh-status");
       await expect(status).toContainText("Loading changes...");
@@ -93,7 +97,7 @@ test.describe("Changes panel Git refresh recovery", () => {
 
     try {
       const profile = await createStandardProfile(apiClient, "Git Refresh Recovery Profile");
-      await apiClient.createTaskWithAgent(
+      const task = await apiClient.createTaskWithAgent(
         seedData.workspaceId,
         "Git Refresh Recovery",
         profile.id,
@@ -104,16 +108,17 @@ test.describe("Changes panel Git refresh recovery", () => {
           repository_ids: [seedData.repositoryId],
         },
       );
-      const priorFreshResponses = bridge.responseCount("fresh");
+      if (!task.session_id) throw new Error("created task has no session ID");
+      const priorFreshResponses = bridge.responseCount("fresh", task.session_id);
       const session = await openTaskSession(testPage, "Git Refresh Recovery");
       await gate.waitUntilStarted();
 
       await session.clickTab("Changes");
       await expect(session.changes).toBeVisible();
-      const response = await bridge.waitForResponse("fresh", priorFreshResponses);
+      const response = await bridge.waitForResponse("fresh", priorFreshResponses, task.session_id);
       expect(response.success).toBe(true);
-      expect(bridge.responseIncludesFile("fresh", filePath)).toBe(true);
-      expect(bridge.responseHasPendingDetails("fresh", filePath)).toBe(true);
+      expect(bridge.responseIncludesFile("fresh", filePath, task.session_id)).toBe(true);
+      expect(bridge.responseHasPendingDetails("fresh", filePath, task.session_id)).toBe(true);
       await bridge.waitForDroppedPendingStatus();
 
       const fileRow = session.changes.getByTestId(`file-row-${filePath}`);

@@ -1074,12 +1074,23 @@ export class SessionPage {
 
   /** Click a dockview tab by its visible label (e.g. "Changes", "Files", "Terminal"). */
   async clickTab(label: string, options: { force?: boolean } = {}): Promise<void> {
+    const dockviewLayout = this.page.locator('[data-testid="dockview-task-layout"]:visible');
+    const layoutCount = await dockviewLayout.count();
+    if (layoutCount > 0) {
+      await expect(dockviewLayout).toHaveCount(1);
+      await expect(dockviewLayout).toHaveAttribute("aria-busy", "false", { timeout: 15_000 });
+    }
+
     const tab = this.page
       .locator(".dv-default-tab:visible")
       .filter({ hasText: new RegExp(`^${escapeRegExp(label)}(?: \\(\\d+\\))?$`) })
       .first();
     await expect(tab).toBeVisible();
     await tab.click(options);
+    const tabWrapper = tab.locator(
+      "xpath=ancestor::*[contains(concat(' ', normalize-space(@class), ' '), ' dv-tab ')][1]",
+    );
+    await expect(tabWrapper).toHaveClass(/dv-active-tab/, { timeout: 10_000 });
   }
 
   /** Open the Changes Diff action in its direct or width-aware overflow presentation. */
