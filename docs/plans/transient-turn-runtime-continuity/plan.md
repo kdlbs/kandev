@@ -234,7 +234,7 @@ Work order 03 owns exact browser commands and updated fixture scenarios.
 
 ## Verification results
 
-Implementation and verification completed on 2026-10-03:
+Implementation completed on 2026-10-03; review-fix verification completed on 2026-10-04:
 Design-package checks passed on 2026-10-03:
 
 - `python3 scripts/list-docs.py validate`: 348 decisions and 1331 specifications validated.
@@ -246,16 +246,18 @@ Design-package checks passed on 2026-10-03:
 
 Task 01 implementation checks passed in the current implementation turn:
 
-- `go test -trimpath -race ./internal/agentctl/types/streams ./internal/agentctl/server/adapter/transport/acp ./internal/agentctl/server/process ./internal/agentctl/server/instance -count=1`: all four packages passed.
-- `go test -trimpath -race ./internal/agent/runtime/lifecycle ./internal/orchestrator/watcher ./internal/orchestrator -run 'TurnFailure|TransientTurnFailure|CapacityAfterTools|PromptFailureDisposition|SessionRecovery|Completion' -count=1`: lifecycle and orchestrator passed; the full watcher package also passed separately.
+- `go test -trimpath -race -tags fts5 ./internal/agentctl/types/streams ./internal/agentctl/server/adapter/transport/acp ./internal/agentctl/server/process ./internal/agentctl/server/instance -count=1`: all four packages passed.
+- `go test -trimpath -race -tags fts5 ./internal/agent/runtime/lifecycle ./internal/orchestrator/watcher ./internal/orchestrator -run 'TurnFailure|TransientTurnFailure|CapacityAfterTools|PromptFailureDisposition|SessionRecovery|Completion' -count=1`: lifecycle and orchestrator passed; the full watcher package also passed separately.
 - Task 02 orchestrator and lifecycle/ACP retained-runtime race blocks passed; the mock-agent race suite passed.
 - Focused Chat Vitest: 7 files, 117 tests passed. TypeScript typecheck, changed-file ESLint with zero warnings, Prettier, and i18n check/ratchet passed.
-- Managed desktop Playwright: 23 tests passed. Managed phone Playwright: 12 tests passed. The runs were sequential and used the repository runner limits.
+- Final managed desktop Playwright rerun: 23 tests passed; final phone rerun: 12 tests passed. Both used one worker and ran sequentially after the mock prompt fixture and production lifecycle adapter fixes.
 - Backend build and frontend pseudo-locale QA build passed during implementation.
 - Public-doc tests: 62 passed; all 47 public docs validated.
 - `python3 scripts/list-docs.py validate`, `python3 scripts/lint-spec-files.test.py`, and `python3 scripts/lint-spec-files.py --all` passed after implementation.
 - The exact documentation coverage preflight below passed for actual changes and planned source coverage.
-- `git diff --check` passed. Uncommitted implementation and design artifacts remain available for review.
+- The production backend lifecycle adapter acknowledgement regression test passed, and a real-runtime continuation E2E passed against the backend plus mock ACP process.
+- Race-instrumented lifecycle, orchestrator, backendapp, agentctl regression checks and `make -C apps/backend build` passed. `TestStreamUpdates_DisconnectCleansPending` passed 20 race-instrumented repetitions after its test synchronization was fixed.
+- The working tree remains uncommitted while final PR fixup review is in progress.
 
 Review follow-up for the four reported defects also passed: retained lifecycle publication no longer holds the prompt lock and fences successor admission through synchronous settlement; retry finalization compare-retires only its exact owner; both automation origins retain their existing terminal failure owner; and inconclusive runtime probes block without teardown. Race-instrumented barrier tests cover the cancellation inversion and stale retry successor handoff. Replay and continuation separately cover confirmed runtime absence. The corresponding test commands and outcomes are recorded in work orders 01 and 02.
 

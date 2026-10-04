@@ -66,8 +66,8 @@ Add the planned test names from the manifest; run each focused regression before
 Run this complete block from the repository root:
 
 ```bash
-(cd apps/backend && go test -trimpath -race ./internal/agentctl/types/streams ./internal/agentctl/server/adapter/transport/acp ./internal/agentctl/server/process ./internal/agentctl/server/instance -count=1)
-(cd apps/backend && go test -trimpath -race ./internal/agent/runtime/lifecycle ./internal/orchestrator/watcher ./internal/orchestrator -run 'TurnFailure|TransientTurnFailure|CapacityAfterTools|PromptFailureDisposition|SessionRecovery|Completion' -count=1)
+(cd apps/backend && go test -trimpath -race -tags fts5 ./internal/agentctl/types/streams ./internal/agentctl/server/adapter/transport/acp ./internal/agentctl/server/process ./internal/agentctl/server/instance -count=1)
+(cd apps/backend && go test -trimpath -race -tags fts5 ./internal/agent/runtime/lifecycle ./internal/orchestrator/watcher ./internal/orchestrator -run 'TurnFailure|TransientTurnFailure|CapacityAfterTools|PromptFailureDisposition|SessionRecovery|Completion' -count=1)
 python3 scripts/list-docs.py validate
 python3 scripts/lint-spec-files.py --all
 git diff --check
@@ -125,8 +125,8 @@ Implemented host-validated retained-turn evidence, lifecycle settlement, caller 
 
 Verification passed:
 
-- `(cd apps/backend && go test -trimpath -race ./internal/agentctl/types/streams ./internal/agentctl/server/adapter/transport/acp ./internal/agentctl/server/process ./internal/agentctl/server/instance -count=1)`
-- `(cd apps/backend && go test -trimpath -race ./internal/agent/runtime/lifecycle ./internal/orchestrator/watcher ./internal/orchestrator -run 'TurnFailure|TransientTurnFailure|CapacityAfterTools|PromptFailureDisposition|SessionRecovery|Completion' -count=1)`
+- `(cd apps/backend && go test -trimpath -race -tags fts5 ./internal/agentctl/types/streams ./internal/agentctl/server/adapter/transport/acp ./internal/agentctl/server/process ./internal/agentctl/server/instance -count=1)`
+- `(cd apps/backend && go test -trimpath -race -tags fts5 ./internal/agent/runtime/lifecycle ./internal/orchestrator/watcher ./internal/orchestrator -run 'TurnFailure|TransientTurnFailure|CapacityAfterTools|PromptFailureDisposition|SessionRecovery|Completion' -count=1)`
 - `python3 scripts/list-docs.py validate`
 - `python3 scripts/lint-spec-files.py --all`
 - `git diff --check`
@@ -135,6 +135,8 @@ Review follow-up closed the cross-package lock-order and automation ownership ga
 
 Additional verification passed:
 
-- `go test -trimpath -race ./internal/agent/runtime/lifecycle -run 'TestTransientTurnFailure(PublishesOutsidePromptLockAndFencesSuccessor|KeepsExecutionReady|RequiresCurrentEligibleRuntime|DuplicateDoesNotRepublish|DoesNotOverrideRuntimeDisconnect)' -count=1`: passed, including the synchronous memory-bus/cancel barrier and successor-generation fence.
-- `go test -trimpath -race ./internal/agent/runtime/lifecycle ./internal/orchestrator/watcher ./internal/orchestrator -run 'TurnFailure|TransientTurnFailure|CapacityAfterTools|PromptFailureDisposition|SessionRecovery|Completion' -count=1`: all three packages passed.
+- `go test -trimpath -race -tags fts5 ./internal/agent/runtime/lifecycle -run 'TestTransientTurnFailure(PublishesOutsidePromptLockAndFencesSuccessor|KeepsExecutionReady|RequiresCurrentEligibleRuntime|DuplicateDoesNotRepublish|DoesNotOverrideRuntimeDisconnect)' -count=1`: passed, including the synchronous memory-bus/cancel barrier and successor-generation fence.
+- `go test -trimpath -race -tags fts5 ./internal/agent/runtime/lifecycle ./internal/orchestrator/watcher ./internal/orchestrator -run 'TurnFailure|TransientTurnFailure|CapacityAfterTools|PromptFailureDisposition|SessionRecovery|Completion' -count=1`: all three packages passed.
 - Automation-origin regression tests cover both `automation_run` and `automation_task` after observable work, including single terminal settlement and cleanup with no retained interactive failure.
+- `go test -trimpath -race -tags fts5 ./internal/backendapp -run '^TestLifecycleAdapter_SatisfiesRetainedPromptFailureAcknowledgementSeam$' -count=1`: passed; the production lifecycle adapter forwards the generation acknowledgement required to release successor admission.
+- The managed desktop E2E `integration: read continues in the same live native conversation without original prompt replay` passed against the real backend and mock ACP runtime after the adapter wiring fix.

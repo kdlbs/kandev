@@ -157,9 +157,51 @@ func TestTransientTurnFailurePublishesOutsidePromptLockAndFencesSuccessor(t *tes
 		t.Fatal("retained completion did not finish after its synchronous callback")
 	}
 
+	execution.promptLifecycleMu.Lock()
+	settlementGeneration := execution.promptSettlementGeneration
+	execution.promptLifecycleMu.Unlock()
+	require.Equal(t, uint64(1), settlementGeneration,
+		"publication completion is not proof that durable turn settlement finished")
+	_, err = fixture.manager.BeginPrompt(execution.ID)
+	require.ErrorIs(t, err, ErrPromptSettlementPending,
+		"a prompt must remain fenced until its durable owner acknowledges the generation")
+
+	acknowledger, ok := any(fixture.manager).(interface {
+		AcknowledgeRetainedPromptFailure(string, uint64) bool
+	})
+	require.True(t, ok, "lifecycle must expose exact-generation settlement acknowledgement")
+	require.True(t, acknowledger.AcknowledgeRetainedPromptFailure(execution.ID, 1),
+		"the durable owner may release the exact settled generation")
 	successor, err := fixture.manager.BeginPrompt(execution.ID)
 	require.NoError(t, err)
 	require.Equal(t, uint64(2), successor, "the successor may be admitted after the old settlement signal")
+	require.False(t, acknowledger.AcknowledgeRetainedPromptFailure(execution.ID, 1),
+		"a stale acknowledgement must not release or alter a successor generation")
+	require.Equal(t, successor, execution.promptGenerationSnapshot())
+}
+
+func TestRetainedPromptFailureEligibilityUsesCurrentAgentCtlClient(t *testing.T) {
+	mock := newMockAgentServer(t)
+	t.Cleanup(mock.Close)
+	client := createTestClient(t, mock.server.URL)
+	t.Cleanup(client.Close)
+	streamCtx, streamCancel := context.WithCancel(context.Background())
+	t.Cleanup(streamCancel)
+	require.NoError(t, client.StreamUpdates(streamCtx, func(agentctl.AgentEvent) {}, nil, nil))
+	waitForWSConnected(t, mock)
+
+	execution := &AgentExecution{
+		ID: "exec-current-client", TaskID: "task-current-client", SessionID: "session-current-client",
+		Status: v1.AgentStatusRunning, AgentProfileID: "profile-codex", AgentID: "codex-acp",
+		TaskScope: TaskLaunchScopeTask,
+		agentctl:  agentctl.NewClient("127.0.0.1", 1, newTestLogger()),
+		Owner:     ExecutionOwner{Kind: ExecutionOwnerTask, TaskID: "task-current-client", SessionID: "session-current-client"},
+	}
+	execution.setSessionInitialized(true)
+	execution.agentctlOverride.Store(client)
+
+	require.True(t, retainedPromptFailureExecutionEligible(execution),
+		"retention must inspect the leased override client that owns the live stream")
 }
 
 func TestTransientTurnFailureRequiresCurrentEligibleRuntime(t *testing.T) {

@@ -35,9 +35,7 @@ async function expectRetainedTurnReady(session: SessionPage) {
   await expect(session.recoveryResumeButton()).toHaveCount(0);
   await expect(session.recoveryFreshButton()).toHaveCount(0);
   await expect(session.activeChat().getByTestId("session-recovery-card")).toHaveCount(0);
-  await expect(
-    session.activeChat().locator('.tiptap.ProseMirror[contenteditable="true"]'),
-  ).toBeVisible();
+  await expect(session.activeChat().getByTestId("chat-input-area")).toBeVisible();
   await expect(
     session.activeChat().getByRole("button", { name: "Session model settings" }),
   ).toBeVisible();
@@ -118,7 +116,7 @@ test("desktop: capacity after tools keeps one error and the same runtime for mod
       ),
     ).toBe(true);
 
-    await session.sendMessage("Continue after the provider capacity error.");
+    await session.sendMessage("/e2e:simple-message");
     await expect
       .poll(
         () =>
@@ -131,6 +129,16 @@ test("desktop: capacity after tools keeps one error and the same runtime for mod
         return sessions.find((candidate) => candidate.id === fixture.sessionId)?.state;
       })
       .toBe("WAITING_FOR_INPUT");
+    await expect
+      .poll(async () => {
+        const { messages } = await apiClient.listSessionMessages(fixture.sessionId);
+        return messages.filter(
+          (message) =>
+            message.author_type === "agent" &&
+            message.content?.includes("simple mock response") === true,
+        ).length;
+      })
+      .toBeGreaterThan(0);
     await expect
       .poll(async () => (await countRetainedFailures(apiClient, fixture.sessionId)).length)
       .toBe(1);

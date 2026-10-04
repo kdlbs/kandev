@@ -118,7 +118,7 @@ Run this block from the repository root:
 
 ```bash
 if [ ! -d apps/node_modules ]; then (cd apps && pnpm install --frozen-lockfile); fi
-(cd apps/backend && go test -trimpath -race ./cmd/mock-agent -count=1)
+(cd apps/backend && go test -trimpath -race -tags fts5 ./cmd/mock-agent -count=1)
 (cd apps/web && pnpm exec vitest run components/task/chat/messages/action-message-recovery.test.tsx components/task/chat/messages/action-message.test.tsx components/task/chat/session-recovery-model.test.ts components/task/chat/session-bootstrap-recovery-model.test.ts lib/session-last-agent-error.test.ts lib/session-recovery-presentation.test.ts)
 (cd apps/web && pnpm run i18n:zh-hant && pnpm run i18n:pseudo && pnpm run i18n:check && pnpm run i18n:ratchet)
 (cd apps/web && pnpm run typecheck)
@@ -192,13 +192,13 @@ Completed in the primary session. Retained provider failures render as truthful 
 - `(cd apps/web && pnpm run typecheck)`: passed.
 - ESLint with `--max-warnings 0` and Prettier checks passed for changed frontend and E2E files.
 - `pnpm run i18n:check` and `pnpm run i18n:ratchet`: passed. Locale catalogs include all required languages; unrelated generated labels were excluded from the diff.
-- Desktop managed Playwright command from this work order: 23 tests passed across capacity continuity, transient replay, provider continuation, and real transport loss.
-- Phone managed Playwright command from this work order: 12 tests passed across capacity continuity, transient replay, provider continuation, and startup recovery.
+- Final desktop managed Playwright run: 23 tests passed across capacity continuity, transient replay, provider continuation, and real transport loss. The full suite was rerun after correcting the mock capacity prompt fixture and after wiring production lifecycle acknowledgement.
+- Final phone managed Playwright run: 12 tests passed across capacity continuity, transient replay, provider continuation, and startup recovery.
 - Exact managed Playwright commands:
 
   ```bash
-  (cd apps/web && pnpm e2e:run --project chromium e2e/tests/session/transient-turn-runtime-continuity.spec.ts e2e/tests/session/transient-retry.spec.ts e2e/tests/session/provider-interruption-continuation.spec.ts e2e/tests/session/transient-retry-transport-lost.spec.ts)
-  (cd apps/web && pnpm e2e:run --project mobile-chrome e2e/tests/session/mobile-transient-turn-runtime-continuity.spec.ts e2e/tests/session/mobile-transient-retry.spec.ts e2e/tests/session/mobile-provider-interruption-continuation.spec.ts e2e/tests/session/mobile-session-error-recovery-ui.spec.ts)
+  (cd apps/web && pnpm e2e:run --host --shards 1 --project chromium --retries=0 e2e/tests/session/transient-turn-runtime-continuity.spec.ts e2e/tests/session/transient-retry.spec.ts e2e/tests/session/provider-interruption-continuation.spec.ts e2e/tests/session/transient-retry-transport-lost.spec.ts)
+  (cd apps/web && pnpm e2e:run --host --shards 1 --project mobile-chrome --retries=0 e2e/tests/session/mobile-transient-turn-runtime-continuity.spec.ts e2e/tests/session/mobile-transient-retry.spec.ts e2e/tests/session/mobile-provider-interruption-continuation.spec.ts e2e/tests/session/mobile-session-error-recovery-ui.spec.ts)
   ```
 - Backend build and frontend pseudo-locale QA build passed during implementation.
 - Public documentation validation, documentation catalog/specification checks, the actual-change work-order coverage preflight, and `git diff --check` are recorded in the completed manifest.

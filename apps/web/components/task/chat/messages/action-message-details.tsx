@@ -32,6 +32,7 @@ export type ActionMeta = {
   recovery_reason?: string;
   attempts_started?: number;
   runtime_retained?: boolean;
+  failure_scope?: "turn" | "execution";
   provider_error?: {
     source?: string;
     provider_id?: string;

@@ -190,21 +190,22 @@ type AgentStreamEventData struct {
 	ACPSessionID string `json:"acp_session_id,omitempty"`
 	// OperationID carries a provider operation identity when the protocol
 	// emits one. Native Codex turn IDs use it at turn boundaries.
-	OperationID                 string                        `json:"operation_id,omitempty"`
-	Text                        string                        `json:"text,omitempty"`
-	ProviderDiagnosticCandidate bool                          `json:"provider_diagnostic_candidate,omitempty"`
-	ToolCallID                  string                        `json:"tool_call_id,omitempty"`
-	ToolName                    string                        `json:"tool_name,omitempty"`
-	ToolTitle                   string                        `json:"tool_title,omitempty"`
-	ToolStatus                  string                        `json:"tool_status,omitempty"`
-	Error                       string                        `json:"error,omitempty"`
-	ProviderError               *streams.ProviderError        `json:"provider_error,omitempty"`
-	SessionStatus               string                        `json:"session_status,omitempty"` // "resumed" or "new" for session_status events
-	SessionSettingsPolicy       streams.SessionSettingsPolicy `json:"session_settings_policy,omitempty"`
-	SessionSettingsGeneration   uint64                        `json:"session_settings_generation,omitempty"`
-	PromptGeneration            uint64                        `json:"prompt_generation,omitempty"`
-	TurnID                      string                        `json:"turn_id,omitempty"`
-	Data                        interface{}                   `json:"data,omitempty"`
+	OperationID                 string                           `json:"operation_id,omitempty"`
+	Text                        string                           `json:"text,omitempty"`
+	ProviderDiagnosticCandidate bool                             `json:"provider_diagnostic_candidate,omitempty"`
+	ToolCallID                  string                           `json:"tool_call_id,omitempty"`
+	ToolName                    string                           `json:"tool_name,omitempty"`
+	ToolTitle                   string                           `json:"tool_title,omitempty"`
+	ToolStatus                  string                           `json:"tool_status,omitempty"`
+	Error                       string                           `json:"error,omitempty"`
+	PromptFailureDisposition    streams.PromptFailureDisposition `json:"prompt_failure_disposition,omitempty"`
+	ProviderError               *streams.ProviderError           `json:"provider_error,omitempty"`
+	SessionStatus               string                           `json:"session_status,omitempty"` // "resumed" or "new" for session_status events
+	SessionSettingsPolicy       streams.SessionSettingsPolicy    `json:"session_settings_policy,omitempty"`
+	SessionSettingsGeneration   uint64                           `json:"session_settings_generation,omitempty"`
+	PromptGeneration            uint64                           `json:"prompt_generation,omitempty"`
+	TurnID                      string                           `json:"turn_id,omitempty"`
+	Data                        interface{}                      `json:"data,omitempty"`
 
 	// ParentToolCallID identifies the parent Task tool call when this event
 	// comes from a subagent. Used for visual nesting in the UI.

@@ -173,7 +173,7 @@ function historicalRecoveryPresentation(
 ) {
   const causes = normalizeAgentErrorCauses(metadata?.causes);
   if (!hasHistoricalRecoveryEvidence(causes, metadata)) return null;
-  return buildRecoveryCardModel({
+  const recoveryModel = buildRecoveryCardModel({
     error: {
       session_id: comment.session_id ?? undefined,
       stamp: String(metadata?.recovery_stamp ?? metadata?.error_stamp ?? ""),
@@ -189,11 +189,22 @@ function historicalRecoveryPresentation(
     recoveryNotice: null,
     translate,
   });
+  if (metadata?.phase !== "bootstrap" && causes.length === 0) {
+    return {
+      ...recoveryModel,
+      summary: readableFailureSummary(comment.content) ?? translate("task:anErrorOccurred"),
+    };
+  }
+  return recoveryModel;
 }
 
 function hasHistoricalRecoveryEvidence(
   causes: ReturnType<typeof normalizeAgentErrorCauses>,
   metadata: ActionMeta | undefined,
 ): boolean {
-  return causes.length > 0 || metadata?.phase === "bootstrap";
+  return (
+    causes.length > 0 ||
+    metadata?.phase === "bootstrap" ||
+    Boolean(metadata?.attempt_id || metadata?.execution_id)
+  );
 }

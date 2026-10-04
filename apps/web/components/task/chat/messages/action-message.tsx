@@ -221,12 +221,22 @@ function SettledActionMessage({
   recoveryActionsVisible: boolean;
   onRecoveryRequested: () => void;
 }) {
+  const isRetainedTurnFailure =
+    metadata?.variant === "error" &&
+    metadata.failure_scope === "turn" &&
+    metadata.runtime_retained === true;
   if (metadata?.retrying) {
     return retryNoticeVisible(sessionState, metadata) ? (
       <TransientRetryNotice metadata={metadata} taskId={taskId} />
     ) : null;
   }
-  if (isSessionActive(sessionState) && metadata?.recovery_actions !== true) return null;
+  if (
+    isSessionActive(sessionState) &&
+    metadata?.recovery_actions !== true &&
+    !isRetainedTurnFailure
+  ) {
+    return null;
+  }
 
   return (
     <SettledFailureMessage
@@ -264,7 +274,7 @@ function SettledFailureMessage({
       ? t(interruptionRecoveryKey(metadata), { count: metadata.attempts_started })
       : readableFailureSummary(message);
   const needsDetails = safeMessage === null;
-  const renderedMetadata = recoveryActionsVisible ? metadata : withoutRecoveryActions(metadata);
+  const renderedMetadata = settledFailureMetadata(metadata, recoveryActionsVisible);
 
   const specialRecovery = renderSpecialRecovery({
     metadata: renderedMetadata,
@@ -306,6 +316,17 @@ function SettledFailureMessage({
       </div>
     </div>
   );
+}
+
+function settledFailureMetadata(metadata: ActionMeta | undefined, recoveryActionsVisible: boolean) {
+  const isRetainedTurnFailure =
+    metadata?.variant === "error" &&
+    metadata.failure_scope === "turn" &&
+    metadata.runtime_retained === true;
+  if (isRetainedTurnFailure || !recoveryActionsVisible) {
+    return withoutRecoveryActions(metadata);
+  }
+  return metadata;
 }
 
 function RetainedTurnRecoveryFeedback({ metadata }: { metadata: ActionMeta | undefined }) {

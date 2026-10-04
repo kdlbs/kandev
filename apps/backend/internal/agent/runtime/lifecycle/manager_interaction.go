@@ -2124,6 +2124,33 @@ func (m *Manager) GetPromptGenerationForSession(_ context.Context, sessionID str
 	return execution.promptGenerationSnapshot(), nil
 }
 
+// AcknowledgeRetainedPromptFailure releases successor admission only after the
+// durable owner has settled this exact failed turn and its completion waiter
+// has observed the error outcome.
+func (m *Manager) AcknowledgeRetainedPromptFailure(executionID string, generation uint64) bool {
+	if m == nil || executionID == "" || generation == 0 || m.executionStore == nil {
+		return false
+	}
+	execution, exists := m.executionStore.Get(executionID)
+	if !exists || execution == nil {
+		return false
+	}
+	execution.promptLifecycleMu.Lock()
+	defer execution.promptLifecycleMu.Unlock()
+	current, exists := m.executionStore.Get(executionID)
+	if !exists || current != execution || execution.promptGeneration != generation ||
+		execution.promptSettlementGeneration != generation {
+		return false
+	}
+	execution.promptSettlementAcknowledgedGeneration = generation
+	if execution.promptSettlementWaiterReleasedGeneration == generation {
+		execution.promptSettlementGeneration = 0
+		execution.promptSettlementAcknowledgedGeneration = 0
+		execution.promptSettlementWaiterReleasedGeneration = 0
+	}
+	return true
+}
+
 // GetPromptActivityForSession returns the execution ID, prompt generation,
 // activity epoch, and last-activity timestamp currently owned by sessionID's
 // active prompt. Unlike OwnsPromptGeneration/OwnsPromptActivity (which check

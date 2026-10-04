@@ -132,7 +132,7 @@ func (s *Service) retryRetainedRuntimeContinuation(
 		s.recordContinuationAcceptance(sessionID, entry)
 		s.updateContinuationPhase(context.WithoutCancel(ctx), taskID, sessionID, entry, "continuing")
 	}
-	_, err := s.promptTask(ctx, taskID, sessionID, continuationInstruction, "", false, nil, false,
+	_, err := s.promptTask(ctx, taskID, sessionID, continuationInstruction, "", false, nil, true,
 		launchOriginAutomatic, promptTaskOptions{
 			internalContinuation:      true,
 			preservePromptContext:     true,

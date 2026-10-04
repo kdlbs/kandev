@@ -98,6 +98,12 @@ export function readMockACPTrace(tracePath: string): MockACPTrace[] {
 export function assertRetainedACPTrace(tracePath: string, expectedPrompts: number) {
   const records = readMockACPTrace(tracePath);
   const nativeRecords = records.filter((record) => record.session_id);
+  expect(nativeRecords.length).toBeGreaterThan(0);
+  for (const record of nativeRecords) {
+    expect(record.process_id).toBeTruthy();
+    expect(record.connection_id).toBeTruthy();
+    expect(record.session_id).toBeTruthy();
+  }
   expect(new Set(nativeRecords.map((record) => record.process_id)).size).toBe(1);
   expect(new Set(nativeRecords.map((record) => record.connection_id)).size).toBe(1);
   expect(new Set(nativeRecords.map((record) => record.session_id)).size).toBe(1);

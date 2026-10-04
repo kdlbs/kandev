@@ -1,5 +1,5 @@
 ---
-status: draft
+status: current
 system: platform
 created: 2026-10-03
 requirements:
@@ -90,6 +90,7 @@ Existing background-work authority remains independent of foreground readiness.
 Introduce internal `events.AgentTurnFailed` with the current identity, sanitized diagnostic, failure disposition, and immutable prompt-attempt evidence.
 Register it in the watcher and route it to a dedicated turn-failure handler.
 Keep `AgentFailed` authoritative for terminal runtime failure and existing unsupported errors.
+Carry the retained disposition on the complete stream projection so orchestration defers session settlement and prompt-evidence cleanup to the synchronous `AgentTurnFailed` owner.
 This avoids making runtime-ready status look like successful task completion.
 
 The prompt waiter must receive an error outcome, not a normal end-turn result.

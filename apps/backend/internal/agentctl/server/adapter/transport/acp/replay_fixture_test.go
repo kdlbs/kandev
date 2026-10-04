@@ -196,6 +196,13 @@ func TestReplayFixtureTransportLayer(t *testing.T) {
 	for _, fx := range fixtures {
 		t.Run(fx.FileName, func(t *testing.T) {
 			a, observedEvents, promptErr := replayFixtureThroughAdapter(t, fx)
+			wantRetainedFailure := fx.Expect.DiagnosticCode == string(routingerr.CodeProviderOverloaded) ||
+				fx.Expect.DiagnosticCode == string(routingerr.CodeModelCapacity) ||
+				fx.Expect.DiagnosticCode == string(routingerr.CodeRateLimited)
+			if (promptErr == nil) != wantRetainedFailure {
+				t.Fatalf("Adapter.Prompt retained failure = %v, want %v for diagnostic %q",
+					promptErr == nil, wantRetainedFailure, fx.Expect.DiagnosticCode)
+			}
 			tokens := tokenizeEvents(observedEvents)
 
 			wantTokens := fx.Expect.Events

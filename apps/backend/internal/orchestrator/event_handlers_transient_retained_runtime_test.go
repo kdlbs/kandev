@@ -41,6 +41,28 @@ func TestTransientReplayUsesRetainedRuntime(t *testing.T) {
 	require.Equal(t, "execution-1", mgr.capturedPromptCalls[0].ExecutionID)
 }
 
+func TestRetainedFailureAcknowledgesAcceptedRetryOwnership(t *testing.T) {
+	svc, _ := newTransientTestService(t)
+	t.Cleanup(svc.cancelAllTransientRetries)
+	mgr := configureRetainedReplayRuntime(t, svc)
+	armTransientPromptEvidence(svc)
+	svc.rememberTurnPrompt("s1", "retry the request", "", false, nil)
+	var promptLifecycleMu sync.Mutex
+	ackManager := &retainedPromptAckAgentManager{
+		mockAgentManager:  mgr,
+		promptLifecycleMu: &promptLifecycleMu,
+		pending:           true,
+	}
+	svc.agentManager = ackManager
+
+	svc.handleAgentTurnFailed(context.Background(), retainedTurnFailureDataForReplay())
+
+	ackManager.mu.Lock()
+	defer ackManager.mu.Unlock()
+	require.False(t, ackManager.pending, "the accepted retry must release admission for this exact failed generation")
+	require.Equal(t, []retainedPromptAck{{executionID: "execution-1", generation: 7}}, ackManager.acks)
+}
+
 func TestRetainedRetryCancelAndExhaustionKeepRuntime(t *testing.T) {
 	t.Run("idle cancellation", func(t *testing.T) {
 		svc, mc := newTransientTestService(t)
@@ -163,6 +185,49 @@ func TestRetainedRuntimeStatusProbeErrorBlocksReplayAndContinuation(t *testing.T
 	})
 }
 
+func TestRetainedRetryCancellationRejectsStaleGenerationAndExecution(t *testing.T) {
+	for _, test := range []struct {
+		name          string
+		currentExecID string
+		currentGen    uint64
+	}{
+		{name: "successor execution", currentExecID: "execution-successor", currentGen: 7},
+		{name: "successor generation", currentExecID: "execution-1", currentGen: 8},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			svc, _ := newTransientTestService(t)
+			t.Cleanup(svc.cancelAllTransientRetries)
+			mgr := configureRetainedReplayRuntime(t, svc)
+			mgr.currentPromptExecutionID = test.currentExecID
+			mgr.currentPromptGeneration.Store(test.currentGen)
+			mgr.getExecutionIDForSessionFunc = func(context.Context, string) (string, error) {
+				return test.currentExecID, nil
+			}
+			svc.beginPromptAttempt("s1", "execution-1", 7, false)
+
+			data := retainedTurnFailureDataForReplay()
+			entry := &transientRetryEntry{
+				mode:               recoveryModeReplay,
+				started:            1,
+				acceptedExecution:  "execution-1",
+				acceptedGeneration: 7,
+				retainedRuntime:    svc.retainedRuntimeRetryForFailure(context.Background(), data),
+			}
+			require.NotNil(t, entry.retainedRuntime)
+			svc.transientRetries.Store("s1", entry)
+
+			ctx := context.WithValue(context.Background(), continuationCancelContextKey{}, entry)
+			err := svc.runExplicitCancellationOwned(ctx, "s1", &cancelOperation{})
+
+			require.ErrorIs(t, err, ErrResumeAttemptCancelled,
+				"explicit cancellation must refuse when its retry execution or prompt generation is stale")
+			require.Zero(t, mgr.cancelAgentCalls.Load(), "stale retry cancellation must not cancel the successor turn")
+			require.Empty(t, mgr.stopAgentWithReasonArgs)
+			require.Empty(t, mgr.stopAgentArgs)
+		})
+	}
+}
+
 func TestRetainedRuntimeConfirmedAbsenceUsesExistingReplayFallback(t *testing.T) {
 	svc, _ := newTransientTestService(t)
 	t.Cleanup(svc.cancelAllTransientRetries)
@@ -196,13 +261,11 @@ func TestRetainedRetryFinalizerCannotRetireSuccessorOwner(t *testing.T) {
 				entered:            make(chan struct{}),
 				release:            make(chan struct{}),
 			}
+			var persistenceRelease sync.Once
+			releasePersistence := func() { persistenceRelease.Do(func() { close(blockingCreator.release) }) }
+			t.Cleanup(releasePersistence)
 			svc.messageCreator = blockingCreator
-			notices := &transientRetryMessageServiceStub{
-				messages: []*models.Message{{
-					ID:       "successor-notice",
-					Metadata: map[string]interface{}{"retrying": true},
-				}},
-			}
+			notices := &transientRetryMessageServiceStub{}
 			svc.SetTransientRetryMessageService(notices)
 
 			oldFailure := retainedTurnFailureDataForReplay()
@@ -227,22 +290,43 @@ func TestRetainedRetryFinalizerCannotRetireSuccessorOwner(t *testing.T) {
 			}
 
 			state, releaseState := svc.acquireTransientRetryNoticeState("s1")
-			state.mu.Lock()
-			successor := svc.reserveTransientRetryWithMetadataLocked(state, "s1", 2, func(entry *transientRetryEntry) {
-				entry.retainedRuntime = &retainedRuntimeRetry{failure: retainedTurnFailureDataForReplay()}
-			})
-			require.NotNil(t, successor)
-			svc.armTransientRetryEntryLocked("t1", "s1", "execution-successor", successor, time.Hour)
-			svc.lastTurnPrompt.Store("s1", capturedPrompt{text: "successor prompt"})
-			state.mu.Unlock()
+			require.False(t, state.mu.TryLock(),
+				"the finalizer must serialize its durable disposition with successor ownership")
 			releaseState()
 
-			close(blockingCreator.release)
+			successorInstalled := make(chan *transientRetryEntry, 1)
+			installStarted := make(chan struct{})
+			go func() {
+				close(installStarted)
+				state, releaseState := svc.acquireTransientRetryNoticeState("s1")
+				state.mu.Lock()
+				svc.clearTransientRetryNoticeFenceLocked("s1", state)
+				successor := svc.reserveTransientRetryWithMetadataLocked(state, "s1", 2, func(entry *transientRetryEntry) {
+					entry.retainedRuntime = &retainedRuntimeRetry{failure: retainedTurnFailureDataForReplay()}
+				})
+				svc.armTransientRetryEntryLocked("t1", "s1", "execution-successor", successor, time.Hour)
+				svc.lastTurnPrompt.Store("s1", capturedPrompt{text: "successor prompt"})
+				notices.messages = []*models.Message{{
+					ID: "successor-notice", Metadata: map[string]interface{}{"retrying": true},
+				}}
+				state.mu.Unlock()
+				releaseState()
+				successorInstalled <- successor
+			}()
+			<-installStarted
+			releasePersistence()
 			select {
 			case <-finalizerDone:
 			case <-time.After(time.Second):
 				t.Fatal("old retained failure finalizer did not finish")
 			}
+			var successor *transientRetryEntry
+			select {
+			case successor = <-successorInstalled:
+			case <-time.After(time.Second):
+				t.Fatal("successor retry could not install after the old finalizer released ownership")
+			}
+			require.NotNil(t, successor)
 
 			current, ok := svc.transientRetries.Load("s1")
 			require.True(t, ok, "the successor retry entry must remain installed")
@@ -253,7 +337,8 @@ func TestRetainedRetryFinalizerCannotRetireSuccessorOwner(t *testing.T) {
 			require.True(t, ok, "the successor prompt must remain cached")
 			require.Equal(t, "successor prompt", cached.(capturedPrompt).text)
 			require.Empty(t, notices.deleted, "the old finalizer must not resolve a successor notice")
-			require.Equal(t, 0, notices.listCalls, "a stale finalizer must not scan session-wide notices")
+			require.Equal(t, 1, notices.listCalls,
+				"the old owner's cleanup must finish before a successor notice can be installed")
 		})
 	}
 }

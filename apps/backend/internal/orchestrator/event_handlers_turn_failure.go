@@ -54,12 +54,21 @@ func (s *Service) handleAgentTurnFailed(ctx context.Context, data watcher.AgentE
 	if s.handleAutomationOwnedTurnFailure(ctx, task, data, releaseGuard) {
 		return
 	}
-	if task.IsFromOffice || !s.currentRetainedTurnFailureAttempt(
-		data.SessionID, data.AgentExecutionID, data.PromptGeneration,
-	) {
+	if task.IsFromOffice {
+		releaseGuard()
+		s.handleAgentFailed(ctx, data)
 		return
 	}
-	s.settleRetainedTurnFailure(ctx, data, session)
+	if !s.currentRetainedTurnFailureAttempt(data.SessionID, data.AgentExecutionID, data.PromptGeneration) {
+		return
+	}
+	if s.settleRetainedTurnFailure(ctx, data, session) {
+		s.acknowledgeRetainedTurnFailure(data)
+	} else {
+		s.logger.Warn("retained turn failure settlement did not complete; successor admission remains fenced",
+			zap.String("session_id", data.SessionID), zap.String("execution_id", data.AgentExecutionID),
+			zap.Uint64("prompt_generation", data.PromptGeneration))
+	}
 }
 
 func validRetainedTurnFailureEvent(data watcher.AgentEventData) bool {
@@ -115,10 +124,14 @@ func (s *Service) settleRetainedTurnFailure(
 	ctx context.Context,
 	data watcher.AgentEventData,
 	session *models.TaskSession,
-) {
+) bool {
 	priorRetry, priorAttempt, priorStarted := s.retainedRetryProgress(data.SessionID)
 	if s.handleTransientFailure(ctx, data) {
-		return
+		// handleTransientFailure has already accepted durable ownership of this
+		// generation. Its timer can finish and retire the entry before this call
+		// returns, so do not re-read the session-wide retry map as an ownership
+		// test here.
+		return true
 	}
 	if priorRetry {
 		data.RecoveryAttemptsStarted = priorStarted
@@ -144,7 +157,7 @@ func (s *Service) settleRetainedTurnFailure(
 			zap.String("task_id", data.TaskID), zap.String("session_id", data.SessionID),
 			zap.String("execution_id", data.AgentExecutionID), zap.Uint64("prompt_generation", data.PromptGeneration),
 			zap.Error(err))
-		return
+		return false
 	}
 	inputState, inputOutcome := retainedFailureManagedInputDisposition(data)
 	if err := s.settleManagedInputTurn(
@@ -153,27 +166,46 @@ func (s *Service) settleRetainedTurnFailure(
 		s.logger.Warn("failed to settle managed input after provider turn failure",
 			zap.String("task_id", data.TaskID), zap.String("session_id", data.SessionID),
 			zap.String("turn_id", failedTurnID), zap.Error(err))
-		return
+		return false
 	}
 	if err := s.persistRetainedTurnFailureMessage(ctx, data, failedTurnID); err != nil {
 		s.logger.Warn("failed to persist retained provider turn failure",
 			zap.String("task_id", data.TaskID), zap.String("session_id", data.SessionID),
 			zap.String("turn_id", failedTurnID), zap.Error(err))
-		return
+		return false
 	}
 	if err := s.completeTurnForTaskSessionCheckedOwned(ctx, data.TaskID, data.SessionID, failedTurnID); err != nil {
 		s.logger.Warn("failed to complete retained provider turn",
 			zap.String("task_id", data.TaskID), zap.String("session_id", data.SessionID),
 			zap.String("turn_id", failedTurnID), zap.Error(err))
-		return
+		return false
 	}
 	if _, changed := s.updateTaskSessionStateWithHook(
 		ctx, data.TaskID, data.SessionID, models.TaskSessionStateWaitingForInput, "", false, nil, session,
 	); !changed {
-		return
+		return false
 	}
 	s.writeTaskReviewState(ctx, data.TaskID, data.SessionID)
 	s.clearPromptAttemptEvidence(data.SessionID, data.AgentExecutionID, data.PromptGeneration)
+	return true
+}
+
+func (s *Service) acknowledgeRetainedTurnFailure(data watcher.AgentEventData) {
+	acknowledger, ok := s.agentManager.(interface {
+		AcknowledgeRetainedPromptFailure(string, uint64) bool
+	})
+	if !ok {
+		s.logger.Warn("agent manager cannot acknowledge retained prompt settlement",
+			zap.String("session_id", data.SessionID),
+			zap.String("execution_id", data.AgentExecutionID))
+		return
+	}
+	if !acknowledger.AcknowledgeRetainedPromptFailure(data.AgentExecutionID, data.PromptGeneration) {
+		s.logger.Debug("retained prompt settlement acknowledgement was stale",
+			zap.String("session_id", data.SessionID),
+			zap.String("execution_id", data.AgentExecutionID),
+			zap.Uint64("prompt_generation", data.PromptGeneration))
+	}
 }
 
 func retainedFailureManagedInputDisposition(

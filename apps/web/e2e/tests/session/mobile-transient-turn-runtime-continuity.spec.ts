@@ -43,9 +43,7 @@ test("phone: capacity after tools shows one inline error and keeps the composer 
     await expect(session.recoveryResumeButton()).toHaveCount(0);
     await expect(session.recoveryFreshButton()).toHaveCount(0);
     await expect(session.activeChat().getByTestId("session-recovery-card")).toHaveCount(0);
-    await expect(
-      session.activeChat().locator('.tiptap.ProseMirror[contenteditable="true"]'),
-    ).toBeVisible();
+    await expect(session.activeChat().getByTestId("chat-input-area")).toBeVisible();
     await expect(
       session.activeChat().getByRole("button", { name: "Session model settings" }),
     ).toBeVisible();
@@ -58,7 +56,7 @@ test("phone: capacity after tools shows one inline error and keeps the composer 
     await expect(details.locator("pre")).toContainText("-32603");
     await assertNoDocumentHorizontalOverflow(testPage);
 
-    await session.sendMessageViaButton("Continue after the provider capacity error.");
+    await session.sendMessageViaButton("/e2e:simple-message");
     await expect
       .poll(
         () =>
@@ -71,6 +69,16 @@ test("phone: capacity after tools shows one inline error and keeps the composer 
         return sessions.find((candidate) => candidate.id === fixture.sessionId)?.state;
       })
       .toBe("WAITING_FOR_INPUT");
+    await expect
+      .poll(async () => {
+        const { messages } = await apiClient.listSessionMessages(fixture.sessionId);
+        return messages.filter(
+          (message) =>
+            message.author_type === "agent" &&
+            message.content?.includes("simple mock response") === true,
+        ).length;
+      })
+      .toBeGreaterThan(0);
     await expect
       .poll(async () => {
         const { messages } = await apiClient.listSessionMessages(fixture.sessionId);
@@ -92,9 +100,7 @@ test("phone: capacity after tools shows one inline error and keeps the composer 
       1,
     );
     await expect(session.recoveryResumeButton()).toHaveCount(0);
-    await expect(
-      session.activeChat().locator('.tiptap.ProseMirror[contenteditable="true"]'),
-    ).toBeVisible();
+    await expect(session.activeChat().getByTestId("chat-input-area")).toBeVisible();
     await assertNoDocumentHorizontalOverflow(testPage);
   } finally {
     await fixture.dispose();

@@ -36,8 +36,8 @@ func TestPromptFailureDispositionWireValidation(t *testing.T) {
 				t.Fatalf("unmarshal encoded event: %v", err)
 			}
 			if got := wire["prompt_failure_disposition"]; test.want == "" {
-				if got != nil {
-					t.Fatalf("omitted disposition encoded as %v", got)
+				if _, exists := wire["prompt_failure_disposition"]; exists {
+					t.Fatalf("omitted disposition unexpectedly encoded as %v", got)
 				}
 			} else if got != string(test.want) {
 				t.Fatalf("wire disposition = %v, want %q", got, test.want)

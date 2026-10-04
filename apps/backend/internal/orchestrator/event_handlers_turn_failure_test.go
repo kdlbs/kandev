@@ -3,15 +3,19 @@ package orchestrator
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/automation"
+	"github.com/kandev/kandev/internal/events"
+	"github.com/kandev/kandev/internal/events/bus"
 	agentexecutor "github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/orchestrator/watcher"
 	"github.com/kandev/kandev/internal/task/models"
+	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	"github.com/stretchr/testify/require"
 )
@@ -51,6 +55,39 @@ func TestAgentTurnFailedSettlesDurableErrorWithoutStoppingRuntime(t *testing.T) 
 	agentMgr.mu.Unlock()
 }
 
+func TestRetainedFailureCompleteStreamDefersSettlementToTurnOwner(t *testing.T) {
+	ctx := context.Background()
+	svc, messageCreator := newTransientTestService(t)
+	svc.beginPromptAttempt("s1", "execution-1", 7, false)
+	svc.observePromptAttempt("s1", "execution-1", 7, true, true)
+
+	svc.handleAgentStreamEvent(ctx, &lifecycle.AgentStreamEventPayload{
+		TaskID: "t1", SessionID: "s1", ExecutionID: "execution-1", OwnerKind: lifecycle.ExecutionOwnerTask,
+		Data: &lifecycle.AgentStreamEventData{
+			Type: agentEventComplete, TurnID: "turn-1", PromptGeneration: 7,
+			Error:                    "Selected model is at capacity. Please try a different model.",
+			PromptFailureDisposition: streams.PromptFailureDispositionRetainRuntime,
+			Data:                     map[string]interface{}{"is_error": true},
+		},
+	})
+
+	session, err := svc.repo.GetTaskSession(ctx, "s1")
+	require.NoError(t, err)
+	require.Equal(t, models.TaskSessionStateRunning, session.State,
+		"the stream completion must not settle a retained provider failure")
+	require.True(t, svc.currentRetainedTurnFailureAttempt("s1", "execution-1", 7),
+		"the retained turn owner still needs the live execution and generation evidence")
+	require.Empty(t, messageCreator.sessionMessages)
+
+	svc.handleAgentTurnFailed(ctx, retainedTurnFailureData())
+
+	session, err = svc.repo.GetTaskSession(ctx, "s1")
+	require.NoError(t, err)
+	require.Equal(t, models.TaskSessionStateWaitingForInput, session.State)
+	require.Len(t, messageCreator.sessionMessages, 1,
+		"the retained turn-failure owner must persist the sole durable error outcome")
+}
+
 func TestAgentTurnFailureStorageErrorKeepsSessionAdmissionClosed(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
@@ -67,6 +104,185 @@ func TestAgentTurnFailureStorageErrorKeepsSessionAdmissionClosed(t *testing.T) {
 	require.Equal(t, models.TaskSessionStateRunning, session.State)
 	_, ok := svc.promptAttemptForSession("s1")
 	require.True(t, ok, "the failed settlement must retain its ownership fence")
+}
+
+func TestSynchronousTurnFailureWatcherDoesNotDeadlockWithExplicitCancel(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	svc, messageCreator := newTransientTestService(t)
+	mgr := svc.agentManager.(*mockAgentManager)
+	var promptLifecycleMu sync.Mutex
+	ackManager := &retainedPromptAckAgentManager{
+		mockAgentManager:  mgr,
+		promptLifecycleMu: &promptLifecycleMu,
+		pending:           true,
+	}
+	svc.agentManager = ackManager
+	mgr.currentPromptExecutionID = "execution-1"
+	mgr.currentPromptGeneration.Store(7)
+	seedExecutorRunning(t, svc.repo.(*sqliterepo.Repository), "s1", "t1", "execution-1")
+	armTransientPromptEvidence(svc)
+
+	promptLifecycleMu.Lock()
+	var releasePromptLifecycleOnce sync.Once
+	releasePromptLifecycle := func() {
+		releasePromptLifecycleOnce.Do(promptLifecycleMu.Unlock)
+	}
+	generationRead := make(chan struct{})
+	var readOnce sync.Once
+	mgr.getPromptGenerationForSessionFunc = func(context.Context, string) (uint64, error) {
+		readOnce.Do(func() { close(generationRead) })
+		promptLifecycleMu.Lock()
+		defer promptLifecycleMu.Unlock()
+		return mgr.currentPromptGeneration.Load(), nil
+	}
+	cancelRPCStarted := make(chan struct{})
+	releaseCancelRPC := make(chan struct{})
+	mgr.cancelAgentFunc = func(context.Context, string) error {
+		close(cancelRPCStarted)
+		<-releaseCancelRPC
+		return nil
+	}
+
+	eventBus := bus.NewMemoryEventBus(testLogger())
+	t.Cleanup(func() { eventBus.Close() })
+	handlerEntered := make(chan struct{})
+	handlerDone := make(chan struct{})
+	var handlerEnteredOnce sync.Once
+	var handlerDoneOnce sync.Once
+	watch := watcher.NewWatcher(eventBus, watcher.EventHandlers{
+		OnAgentTurnFailed: func(handlerCtx context.Context, data watcher.AgentEventData) {
+			handlerEnteredOnce.Do(func() { close(handlerEntered) })
+			svc.handleAgentTurnFailed(handlerCtx, data)
+			handlerDoneOnce.Do(func() { close(handlerDone) })
+		},
+	}, "turn-failure-cancel-race", testLogger())
+	require.NoError(t, watch.Start(ctx))
+	t.Cleanup(func() { require.NoError(t, watch.Stop()) })
+	t.Cleanup(releasePromptLifecycle)
+
+	cancelDone := make(chan error, 1)
+	go func() {
+		cancelDone <- svc.CancelAgent(ctx, "s1")
+	}()
+	select {
+	case <-generationRead:
+	case <-time.After(time.Second):
+		t.Fatal("explicit cancellation did not reach prompt identity capture")
+	}
+
+	publishDone := make(chan error, 1)
+	go func() {
+		payload := lifecycle.AgentEventPayload{
+			TaskID: "t1", SessionID: "s1", AgentExecutionID: "execution-1", OwnerKind: lifecycle.ExecutionOwnerTask,
+			AgentProfileID: "profile-codex", AgentID: "codex-acp", TurnID: "turn-1", PromptGeneration: 7,
+			ErrorMessage:             "Selected model is at capacity. Please try a different model.",
+			PromptFailureDisposition: streams.PromptFailureDispositionRetainRuntime,
+		}
+		publishDone <- eventBus.Publish(ctx, events.AgentTurnFailed,
+			bus.NewEvent(events.AgentTurnFailed, "lifecycle-manager", payload))
+	}()
+	select {
+	case <-handlerEntered:
+	case <-time.After(time.Second):
+		t.Fatal("synchronous watcher did not enter the real retained turn-failure handler")
+	}
+
+	releasePromptLifecycle()
+	select {
+	case <-cancelRPCStarted:
+	case <-time.After(time.Second):
+		t.Fatal("explicit cancel did not proceed after prompt identity capture")
+	}
+	select {
+	case <-handlerDone:
+	case <-time.After(time.Second):
+		t.Fatal("retained turn-failure callback did not finish while cancellation RPC was in flight")
+	}
+	select {
+	case err := <-publishDone:
+		require.NoError(t, err)
+	case <-time.After(time.Second):
+		t.Fatal("synchronous event publication did not settle")
+	}
+	close(releaseCancelRPC)
+	select {
+	case err := <-cancelDone:
+		require.NoError(t, err)
+	case <-time.After(time.Second):
+		t.Fatal("explicit cancellation did not finish")
+	}
+	ackManager.mu.Lock()
+	require.Equal(t, []retainedPromptAck{{executionID: "execution-1", generation: 7}}, ackManager.acks,
+		"the cancellation owner must settle the exact retained failure generation that its handler declined")
+	ackManager.mu.Unlock()
+
+	retainedCount := 0
+	for _, message := range messageCreator.sessionMessages {
+		if message.metadata["runtime_retained"] == true {
+			retainedCount++
+		}
+	}
+	require.Zero(t, retainedCount, "the explicit cancellation owner wins the in-flight turn settlement")
+
+	repo := svc.repo.(*sqliterepo.Repository)
+	require.NoError(t, repo.UpdateTaskSessionState(ctx, "s1", models.TaskSessionStateRunning, ""))
+	mgr.currentPromptGeneration.Store(8)
+	svc.beginPromptAttempt("s1", "execution-1", 8, false)
+	payload := lifecycle.AgentEventPayload{
+		TaskID: "t1", SessionID: "s1", AgentExecutionID: "execution-1", OwnerKind: lifecycle.ExecutionOwnerTask,
+		AgentProfileID: "profile-codex", AgentID: "codex-acp", TurnID: "turn-1", PromptGeneration: 7,
+		ErrorMessage:             "Selected model is at capacity. Please try a different model.",
+		PromptFailureDisposition: streams.PromptFailureDispositionRetainRuntime,
+	}
+	require.NoError(t, eventBus.Publish(ctx, events.AgentTurnFailed,
+		bus.NewEvent(events.AgentTurnFailed, "lifecycle-manager", payload)))
+	retainedCount = 0
+	for _, message := range messageCreator.sessionMessages {
+		if message.metadata["runtime_retained"] == true {
+			retainedCount++
+		}
+	}
+	require.Zero(t, retainedCount, "a stale completion cannot mutate successor prompt generation")
+	session, err := svc.repo.GetTaskSession(ctx, "s1")
+	require.NoError(t, err)
+	require.Equal(t, models.TaskSessionStateRunning, session.State,
+		"a stale completion cannot settle the successor session")
+	attempt, ok := svc.promptAttemptForSession("s1")
+	require.True(t, ok)
+	if ok {
+		require.Equal(t, uint64(8), attempt.promptGeneration,
+			"the successor prompt ownership must remain current")
+	}
+}
+
+type retainedPromptAck struct {
+	executionID string
+	generation  uint64
+}
+
+type retainedPromptAckAgentManager struct {
+	*mockAgentManager
+	promptLifecycleMu *sync.Mutex
+	mu                sync.Mutex
+	acks              []retainedPromptAck
+	pending           bool
+}
+
+func (m *retainedPromptAckAgentManager) AcknowledgeRetainedPromptFailure(executionID string, generation uint64) bool {
+	m.promptLifecycleMu.Lock()
+	defer m.promptLifecycleMu.Unlock()
+	if executionID != m.currentPromptExecutionID || generation != m.currentPromptGeneration.Load() {
+		return false
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if !m.pending {
+		return false
+	}
+	m.pending = false
+	m.acks = append(m.acks, retainedPromptAck{executionID: executionID, generation: generation})
+	return true
 }
 
 func TestHandlePromptErrorDoesNotSettleRetainedTurnTwice(t *testing.T) {
@@ -163,6 +379,42 @@ func TestAgentTurnFailedRoutesAutomationOriginsToTerminalFailureOwner(t *testing
 			}
 		})
 	}
+}
+
+func TestAgentTurnFailedRoutesOfficeTasksToTerminalFailureOwner(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t-office", "s-office", "step1")
+	task, err := repo.GetTask(ctx, "t-office")
+	require.NoError(t, err)
+	task.ProjectID = "office-project"
+	require.NoError(t, repo.UpdateTask(ctx, task))
+	agentManager := &mockAgentManager{repoForExecutionLookup: repo, isAgentRunning: true}
+	svc := createTestServiceWithScheduler(repo, newMockStepGetter(), newMockTaskRepo(), agentManager)
+	messageCreator := &mockMessageCreator{}
+	svc.messageCreator = messageCreator
+	svc.beginPromptAttempt("s-office", "execution-office", 7, false)
+
+	data := retainedTurnFailureData()
+	data.TaskID = "t-office"
+	data.SessionID = "s-office"
+	data.AgentExecutionID = "execution-office"
+	svc.handleAgentTurnFailed(ctx, data)
+
+	session, err := repo.GetTaskSession(ctx, "s-office")
+	require.NoError(t, err)
+	require.Equal(t, models.TaskSessionStateFailed, session.State,
+		"Office turn failures must use the existing terminal failure owner")
+	for _, message := range messageCreator.sessionMessages {
+		require.NotEqual(t, true, message.metadata["runtime_retained"],
+			"Office failures must not use the interactive retained-turn presentation")
+	}
+	_, retryOwned := svc.transientRetries.Load("s-office")
+	require.False(t, retryOwned, "Office failures must not enter interactive retained retry ownership")
+	agentManager.mu.Lock()
+	require.Len(t, agentManager.stopAgentWithReasonArgs, 1,
+		"the terminal failure owner must clean up the Office execution once")
+	agentManager.mu.Unlock()
 }
 
 type continuityAutomationBindingRecorder struct {

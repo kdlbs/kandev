@@ -230,6 +230,7 @@ func (s *Service) cancelRetainedRuntimeRetry(
 	if entry.mode == recoveryModeContinue {
 		return s.cancelContinuationRetry(ctx, taskID, sessionID, entry)
 	}
+	ctx = context.WithValue(ctx, continuationCancelContextKey{}, entry)
 	if err := s.CancelAgent(ctx, sessionID); err != nil {
 		return false
 	}

@@ -349,22 +349,50 @@ func (m *Manager) finishPromptCompletion(
 	if claim.locked && event.PromptGeneration != 0 && isError {
 		setProviderError(execution, event.ProviderError)
 		if payload, retained := m.retainPromptFailureRuntime(execution, event, failureEvidence); retained {
-			// Keep the prompt generation fenced while synchronous subscribers
-			// settle the failed turn, but do not hold the lifecycle lock across
-			// publication: explicit cancellation reads this generation while it
-			// owns the orchestrator's session guard.
+			// Keep the prompt generation fenced through durable owner settlement,
+			// but do not hold the lifecycle lock across publication: explicit
+			// cancellation reads this generation while it owns the session guard.
 			m.persistExecutorRunning(context.Background(), execution)
 			execution.promptLifecycleMu.Unlock()
-			m.eventPublisher.publishAgentEventPayload(context.Background(), events.AgentTurnFailed, payload)
+			publishErr := m.eventPublisher.publishAgentEventPayload(context.Background(), events.AgentTurnFailed, payload)
 			execution.promptLifecycleMu.Lock()
 			ownsSettlement := execution.promptSettlementGeneration == event.PromptGeneration &&
 				execution.promptGeneration == event.PromptGeneration
+			var terminalPublication *promptErrorCompletionPublication
+			if publishErr != nil {
+				// A failed publication has no durable owner. Fall back to the
+				// established terminal path so the caller does not mistake an
+				// unsettled turn for a retained, acknowledged failure.
+				event.PromptFailureDisposition = ""
+				if ownsSettlement {
+					var terminalErr error
+					terminalPublication, terminalErr = m.preparePromptErrorCompletion(execution, event, failureEvidence)
+					if terminalErr != nil {
+						m.logger.Error("failed to apply terminal fallback after turn-failure publication error",
+							zap.String("execution_id", execution.ID), zap.Error(terminalErr))
+					} else if terminalPublication != nil {
+						execution.promptSettlementGeneration = 0
+						execution.promptSettlementAcknowledgedGeneration = 0
+						execution.promptSettlementWaiterReleasedGeneration = 0
+					}
+				}
+			}
 			handleCompleteEventSignalLeased(execution, event, isError)
 			if ownsSettlement {
-				execution.promptSettlementGeneration = 0
+				if terminalPublication == nil {
+					execution.promptSettlementWaiterReleasedGeneration = event.PromptGeneration
+					if execution.promptSettlementAcknowledgedGeneration == event.PromptGeneration {
+						execution.promptSettlementGeneration = 0
+						execution.promptSettlementAcknowledgedGeneration = 0
+						execution.promptSettlementWaiterReleasedGeneration = 0
+					}
+				}
 				execution.dispatchedPromptPending.Store(false)
 			}
 			execution.promptLifecycleMu.Unlock()
+			if terminalPublication != nil {
+				m.finishPromptErrorCompletion(terminalPublication)
+			}
 			return
 		}
 		publication, err := m.preparePromptErrorCompletion(execution, event, failureEvidence)
@@ -458,8 +486,13 @@ func retainedPromptFailureExecutionEligible(execution *AgentExecution) bool {
 	if execution == nil {
 		return false
 	}
-	return execution.isSessionInitialized() && execution.agentctl != nil &&
-		execution.agentctl.HasAgentStream() && execution.TaskScope == TaskLaunchScopeTask &&
+	client, release := execution.AcquireAgentCtlClient()
+	if client == nil {
+		return false
+	}
+	defer release()
+	return execution.isSessionInitialized() && client.HasAgentStream() &&
+		execution.TaskScope == TaskLaunchScopeTask &&
 		!execution.IsPassthrough && execution.TaskID != "" && execution.SessionID != "" &&
 		execution.AgentProfileID != "" && retainedTurnTaskOwnerMatches(execution) &&
 		isRetainableACPAgent(execution.AgentID)

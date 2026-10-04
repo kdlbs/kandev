@@ -1067,10 +1067,13 @@ func TestStreamUpdates_DisconnectCleansPending(t *testing.T) {
 
 	// Add a pending request
 	ch := make(chan *ws.Message, 1)
+	c.mu.Lock()
+	streamConn := c.agentStreamConn
+	c.mu.Unlock()
 	c.pendingMu.Lock()
 	c.pendingRequests["pending-test"] = ch
 	c.pendingRequestConns = make(map[string]*websocket.Conn)
-	c.pendingRequestConns["pending-test"] = c.agentStreamConn
+	c.pendingRequestConns["pending-test"] = streamConn
 	c.pendingMu.Unlock()
 
 	// Wait for disconnect

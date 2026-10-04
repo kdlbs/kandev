@@ -215,9 +215,18 @@ func (s *Service) finishRetainedRetryWithoutDispatch(
 	entry *transientRetryEntry,
 	disposition string,
 ) {
-	if entry == nil || entry.retainedRuntime == nil {
+	if entry == nil || entry.retainedRuntime == nil || sessionID == "" {
 		return
 	}
+	state, release := s.acquireTransientRetryNoticeState(sessionID)
+	if state == nil {
+		return
+	}
+	state.mu.Lock()
+	defer func() {
+		state.mu.Unlock()
+		release()
+	}()
 	if current, ok := s.transientRetries.Load(sessionID); !ok || current != entry {
 		return
 	}
@@ -233,18 +242,9 @@ func (s *Service) finishRetainedRetryWithoutDispatch(
 		return
 	}
 
-	state, release := s.acquireTransientRetryNoticeState(sessionID)
-	if state == nil {
-		return
-	}
-	state.mu.Lock()
 	if !s.clearTransientRetryEntryLocked(sessionID, state, entry) {
-		state.mu.Unlock()
-		release()
 		return
 	}
 	s.retireTransientRetryNoticeLocked(sessionID, state)
 	s.resolveTransientRetryMessagesLocked(settlementCtx, sessionID)
-	state.mu.Unlock()
-	release()
 }

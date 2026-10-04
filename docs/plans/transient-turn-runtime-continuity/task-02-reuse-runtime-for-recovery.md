@@ -73,8 +73,8 @@ Add failing service tests for retained replay and retained Cursor continuation b
 Run the following block from the repository root:
 
 ```bash
-(cd apps/backend && go test -trimpath -race ./internal/orchestrator -run 'Transient|Continuation|Interruption|TurnFailure|CapacityAfterTools' -count=1)
-(cd apps/backend && go test -trimpath -race ./internal/agent/runtime/lifecycle ./internal/agentctl/server/adapter/transport/acp -run 'Continuation|TurnFailure|TransientTurnFailure|CodexCapacity' -count=1)
+(cd apps/backend && go test -trimpath -race -tags fts5 ./internal/orchestrator -run 'Transient|Continuation|Interruption|TurnFailure|CapacityAfterTools' -count=1)
+(cd apps/backend && go test -trimpath -race -tags fts5 ./internal/agent/runtime/lifecycle ./internal/agentctl/server/adapter/transport/acp -run 'Continuation|TurnFailure|TransientTurnFailure|CodexCapacity' -count=1)
 python3 scripts/list-docs.py validate
 python3 scripts/lint-spec-files.py --all
 git diff --check
@@ -126,20 +126,20 @@ The full browser sequence belongs to work order 03.
 
 Completed in the primary session. The retained-runtime replay and Cursor continuation paths passed the targeted race-instrumented checks:
 
-- `(cd apps/backend && go test -trimpath -race ./internal/orchestrator -run 'Transient|Continuation|Interruption|TurnFailure|CapacityAfterTools' -count=1)`: passed.
-- `(cd apps/backend && go test -trimpath -race ./internal/agent/runtime/lifecycle ./internal/agentctl/server/adapter/transport/acp -run 'Continuation|TurnFailure|TransientTurnFailure|CodexCapacity' -count=1)`: both packages passed.
-- `(cd apps/backend && go test -trimpath -race ./internal/orchestrator/watcher -count=1)`: passed.
+- `(cd apps/backend && go test -trimpath -race -tags fts5 ./internal/orchestrator -run 'Transient|Continuation|Interruption|TurnFailure|CapacityAfterTools' -count=1)`: passed.
+- `(cd apps/backend && go test -trimpath -race -tags fts5 ./internal/agent/runtime/lifecycle ./internal/agentctl/server/adapter/transport/acp -run 'Continuation|TurnFailure|TransientTurnFailure|CodexCapacity' -count=1)`: both packages passed.
+- `(cd apps/backend && go test -trimpath -race -tags fts5 ./internal/orchestrator/watcher -count=1)`: passed.
 - Task 01 lifecycle, watcher, and orchestrator regression block passed after integration; the agentctl/ACP, process, and instance race block also passed.
-- `(cd apps/backend && go test -trimpath -race ./cmd/mock-agent -count=1)`: passed with the integrated fixture checks.
+- `(cd apps/backend && go test -trimpath -race -tags fts5 ./cmd/mock-agent -count=1)`: passed with the integrated fixture checks.
 
 Review follow-up added exact-owner finalization and an error-aware liveness decision. A stale finalizer now retires only its own retry entry under notice serialization; the barrier regression covers both cancellation and refusal while preserving a successor entry, timer, cached prompt, and notice. Replay and continuation treat probe errors as inconclusive and retain the runtime; confirmed absence still takes the existing loss fallback.
 
 Additional verification passed:
 
-- `go test -trimpath -race ./internal/orchestrator -run 'Test(RetainedRetryFinalizerCannotRetireSuccessorOwner|RetainedRuntime(StatusProbeErrorBlocksReplayAndContinuation|ConfirmedAbsenceUsesExistingReplayFallback)|AgentTurnFailedRoutesAutomationOriginsToTerminalFailureOwner|AgentTurnFailedSettlesDurableErrorWithoutStoppingRuntime)' -count=1`: passed.
-- `go test -trimpath -race ./internal/orchestrator -run 'Transient|Continuation|Interruption|TurnFailure|CapacityAfterTools' -count=1`: passed.
-- `go test -trimpath -race ./internal/agent/runtime/lifecycle ./internal/agentctl/server/adapter/transport/acp -run 'Continuation|TurnFailure|TransientTurnFailure|CodexCapacity' -count=1`: both packages passed.
-- `go test -trimpath -race ./cmd/mock-agent ./internal/orchestrator/executor -count=1`: both packages passed.
+- `go test -trimpath -race -tags fts5 ./internal/orchestrator -run 'Test(RetainedRetryFinalizerCannotRetireSuccessorOwner|RetainedRuntime(StatusProbeErrorBlocksReplayAndContinuation|ConfirmedAbsenceUsesExistingReplayFallback)|AgentTurnFailedRoutesAutomationOriginsToTerminalFailureOwner|AgentTurnFailedSettlesDurableErrorWithoutStoppingRuntime)' -count=1`: passed.
+- `go test -trimpath -race -tags fts5 ./internal/orchestrator -run 'Transient|Continuation|Interruption|TurnFailure|CapacityAfterTools' -count=1`: passed.
+- `go test -trimpath -race -tags fts5 ./internal/agent/runtime/lifecycle ./internal/agentctl/server/adapter/transport/acp -run 'Continuation|TurnFailure|TransientTurnFailure|CodexCapacity' -count=1`: both packages passed.
+- `go test -trimpath -race -tags fts5 ./cmd/mock-agent ./internal/orchestrator/executor -count=1`: both packages passed.
 - `make -C apps/backend build`: passed for host binaries and configured cross-build targets.
 
 Final catalog, specification, documentation-coverage, and whitespace validation results are recorded in the manifest after work order 03.

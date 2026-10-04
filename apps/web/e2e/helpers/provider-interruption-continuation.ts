@@ -98,6 +98,12 @@ export function assertNativeNoContinuationTrace(tracePath: string, scenario: str
   );
   expect(originals).toHaveLength(1);
   const nativeRecords = records.filter((record) => record.session_id);
+  expect(nativeRecords.length).toBeGreaterThan(0);
+  for (const record of nativeRecords) {
+    expect(record.process_id).toBeTruthy();
+    expect(record.connection_id).toBeTruthy();
+    expect(record.session_id).toBeTruthy();
+  }
   expect(new Set(nativeRecords.map((record) => record.process_id)).size).toBe(1);
   expect(new Set(nativeRecords.map((record) => record.connection_id)).size).toBe(1);
   expect(new Set(nativeRecords.map((record) => record.session_id)).size).toBe(1);
@@ -127,8 +133,15 @@ export function assertNativeContinuationTrace(tracePath: string, scenario: strin
   expect(originals).toHaveLength(1);
   expect(continuations).toHaveLength(1);
   const nativeId = originals[0].session_id;
+  expect(nativeId).toBeTruthy();
   expect(continuations[0].session_id).toBe(nativeId);
   const nativeRecords = records.filter((record) => record.session_id === nativeId);
+  expect(nativeRecords.length).toBeGreaterThan(0);
+  for (const record of nativeRecords) {
+    expect(record.process_id).toBeTruthy();
+    expect(record.connection_id).toBeTruthy();
+    expect(record.session_id).toBeTruthy();
+  }
   expect(new Set(nativeRecords.map((record) => record.process_id)).size).toBe(1);
   expect(new Set(nativeRecords.map((record) => record.connection_id)).size).toBe(1);
   expect(records.filter((record) => record.event === "initialize")).toHaveLength(1);

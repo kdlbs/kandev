@@ -43,6 +43,7 @@ const CANCEL_TEST_ID = "recovery-cancel-retry-button";
 const TECHNICAL_DETAILS = "Technical details";
 const RECOVERY_HISTORY_TEST_ID = "session-recovery-history";
 const RECOVERY_MESSAGE = "Agent encountered an error";
+const CAPACITY_ERROR = "Selected model is at capacity. Please try a different model.";
 const RESUME_LABEL = "Resume session";
 const RESUME_TEST_ID = "recovery-resume-button";
 const STALL_CANCEL_TEST_ID = "stall-cancel-turn-button";
@@ -330,6 +331,29 @@ describe("ActionMessage — transient retry (warning variant)", () => {
 });
 
 describe("ActionMessage recovery ownership", () => {
+  it("keeps a retained provider turn error visible after a later session completion", () => {
+    const error = recoveryMessage(true);
+    error.content = CAPACITY_ERROR;
+    error.type = "error";
+    error.metadata = {
+      ...(error.metadata as Record<string, unknown>),
+      variant: "error",
+      failure_scope: "turn",
+      runtime_retained: true,
+      execution_id: "execution-1",
+      prompt_generation: 7,
+      recovery_actions: false,
+    };
+
+    renderAction(error, "COMPLETED");
+
+    expect(screen.getByTestId("session-recovery-action-message").textContent).toContain(
+      "Selected model is at capacity.",
+    );
+    expect(screen.queryByTestId(RESUME_TEST_ID)).toBeNull();
+    expect(screen.queryByTestId("session-recovery-card")).toBeNull();
+  });
+
   it("keeps the recovery entry after its Resume request succeeds and removes controls", async () => {
     const errorMsg = recoveryMessage(true);
 
@@ -516,12 +540,12 @@ describe("ActionMessage active legacy recovery ownership", () => {
 describe("ActionMessage historical typed recovery evidence", () => {
   it("keeps a legacy capacity failure out of the startup recovery model", () => {
     const capacityFailure = recoveryHistoryMessage("failure-capacity");
-    capacityFailure.content = "Selected model is at capacity. Please try a different model.";
+    capacityFailure.content = CAPACITY_ERROR;
     capacityFailure.metadata = {
       ...(capacityFailure.metadata as Record<string, unknown>),
       causes: [],
       phase: undefined,
-      attempt_id: undefined,
+      attempt_id: "resume-3",
       execution_id: "650e8400-e29b-41d4-a716-446655440000",
     };
 
@@ -530,6 +554,11 @@ describe("ActionMessage historical typed recovery evidence", () => {
     const history = screen.getByTestId(RECOVERY_HISTORY_TEST_ID);
     expect(history.querySelector("p")?.textContent).toBe(capacityFailure.content);
     expect(history.textContent).not.toContain("The agent could not start");
+    fireEvent.click(history.querySelector("summary")!);
+    expect(history.querySelector("pre")?.textContent).toContain("Attempt: resume-3");
+    expect(history.querySelector("pre")?.textContent).toContain(
+      "650e8400-e29b-41d4-a716-446655440000",
+    );
   });
 
   it("renders same-text historical failures from their own evidence after a successor replaces the current error", async () => {
@@ -610,7 +639,7 @@ describe("ActionMessage historical typed recovery evidence", () => {
 describe("ActionMessage retained provider turn recovery feedback", () => {
   it("shows provider diagnostics in the existing technical details disclosure", () => {
     const providerError = retryMessage({
-      content: "Selected model is at capacity. Please try a different model.",
+      content: CAPACITY_ERROR,
       metadata: {
         variant: "error",
         runtime_retained: true,
@@ -655,7 +684,7 @@ describe("ActionMessage retained provider turn recovery feedback", () => {
     "shows $disposition without replacing the provider error",
     ({ disposition, attempts, copy }) => {
       const providerError = retryMessage({
-        content: "Selected model is at capacity. Please try a different model.",
+        content: CAPACITY_ERROR,
         metadata: {
           variant: "error",
           runtime_retained: true,

@@ -33,15 +33,15 @@ func TestParseRetainedCapacityCmd(t *testing.T) {
 
 func TestHandleRetainedCapacityUsesAttestedRequestError(t *testing.T) {
 	const sid acp.SessionId = "retained-capacity-error-test"
-	_ = os.Remove(retainedCapacityCounterPath(sid))
-	t.Cleanup(func() { _ = os.Remove(retainedCapacityCounterPath(sid)) })
-	a := &mockAgent{}
+	_ = os.Remove(retainedCapacityCounterPath(sid, "retry"))
+	t.Cleanup(func() { _ = os.Remove(retainedCapacityCounterPath(sid, "retry")) })
+	a := &mockAgent{conn: &mockUpdater{}}
 	_, err, handled := a.handleRetainedCapacity(context.Background(), sid, "/capacity-retry")
 	if !handled {
 		t.Fatal("handled = false, want capacity scenario")
 	}
 	requestErr, ok := err.(*acp.RequestError)
-	if !ok || requestErr.Message != retainedCapacityMessage {
+	if !ok || requestErr.Code != -32603 || requestErr.Message != retainedCapacityMessage {
 		t.Fatalf("error = %#v, want retained capacity RequestError", err)
 	}
 	data, ok := requestErr.Data.(map[string]any)
@@ -54,10 +54,29 @@ func TestHandleRetainedCapacityUsesAttestedRequestError(t *testing.T) {
 	}
 }
 
+func TestRetainedCapacityCountersAreIndependentByScenario(t *testing.T) {
+	const sid acp.SessionId = "retained-capacity-counter-isolation-test"
+	clearRetainedCapacityCounters(sid)
+	t.Cleanup(func() { clearRetainedCapacityCounters(sid) })
+	a := &mockAgent{conn: &mockUpdater{}}
+	_, afterToolsErr, afterToolsHandled := a.handleRetainedCapacity(context.Background(), sid, "/capacity-after-tools")
+	if !afterToolsHandled || afterToolsErr == nil {
+		t.Fatalf("after-tools handled=%v error=%v, want one failure", afterToolsHandled, afterToolsErr)
+	}
+	_, retryErr, retryHandled := a.handleRetainedCapacity(context.Background(), sid, "/capacity-retry")
+	if !retryHandled {
+		t.Fatal("retry scenario was not handled")
+	}
+	requestErr, ok := retryErr.(*acp.RequestError)
+	if !ok || requestErr.Code != -32603 {
+		t.Fatalf("retry error = %#v, want its first marked request failure", retryErr)
+	}
+}
+
 func TestHandleRetainedCapacityAfterToolsEmitsVisibleReadBeforeFailure(t *testing.T) {
 	const sid acp.SessionId = "retained-capacity-tools-test"
-	_ = os.Remove(retainedCapacityCounterPath(sid))
-	t.Cleanup(func() { _ = os.Remove(retainedCapacityCounterPath(sid)) })
+	_ = os.Remove(retainedCapacityCounterPath(sid, "after-tools"))
+	t.Cleanup(func() { _ = os.Remove(retainedCapacityCounterPath(sid, "after-tools")) })
 	updater := &mockUpdater{}
 	a := &mockAgent{conn: updater}
 	_, err, handled := a.handleRetainedCapacity(context.Background(), sid, "/capacity-after-tools")

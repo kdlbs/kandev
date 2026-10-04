@@ -143,10 +143,14 @@ test("desktop: accepted continuation survives reload and can be cancelled", asyn
     await expect(session.recoveryFreshButton()).toHaveCount(0);
     await expect(session.transientRetryCard()).toBeHidden();
     await expect(testPage.getByTestId("session-recovery-card")).toHaveCount(0);
-    const { sessions } = await apiClient.listTaskSessions(fixture.taskId);
-    expect(sessions.find((candidate) => candidate.id === fixture.sessionId)?.state).toBe(
-      "WAITING_FOR_INPUT",
-    );
+    await expect
+      .poll(
+        async () =>
+          (await apiClient.listTaskSessions(fixture.taskId)).sessions.find(
+            (candidate) => candidate.id === fixture.sessionId,
+          )?.state,
+      )
+      .toBe("WAITING_FOR_INPUT");
     assertNativeContinuationTrace(fixture.tracePath, "read-hold");
   } catch (error) {
     console.warn(
@@ -187,10 +191,14 @@ for (const scenario of ["write", "pending", "unknown"]) {
       await expect(session.recoveryFreshButton()).toHaveCount(0);
       await expect(session.transientRetryCard()).toBeHidden();
       await expect(testPage.getByTestId("session-recovery-card")).toHaveCount(0);
-      const { sessions } = await apiClient.listTaskSessions(fixture.taskId);
-      expect(sessions.find((candidate) => candidate.id === fixture.sessionId)?.state).toBe(
-        "WAITING_FOR_INPUT",
-      );
+      await expect
+        .poll(
+          async () =>
+            (await apiClient.listTaskSessions(fixture.taskId)).sessions.find(
+              (candidate) => candidate.id === fixture.sessionId,
+            )?.state,
+        )
+        .toBe("WAITING_FOR_INPUT");
       assertNativeNoContinuationTrace(fixture.tracePath, scenario);
     } catch (error) {
       console.warn(
@@ -266,10 +274,14 @@ test("desktop: Cancel while waiting prevents native restore", async ({
     await expect(session.recoveryResumeButton()).toHaveCount(0);
     await expect(session.recoveryFreshButton()).toHaveCount(0);
     await expect(session.transientRetryCard()).toBeHidden();
-    const { sessions } = await apiClient.listTaskSessions(fixture.taskId);
-    expect(sessions.find((candidate) => candidate.id === fixture.sessionId)?.state).toBe(
-      "WAITING_FOR_INPUT",
-    );
+    await expect
+      .poll(
+        async () =>
+          (await apiClient.listTaskSessions(fixture.taskId)).sessions.find(
+            (candidate) => candidate.id === fixture.sessionId,
+          )?.state,
+      )
+      .toBe("WAITING_FOR_INPUT");
     await expect(
       session.activeChat().locator('.tiptap.ProseMirror[contenteditable="true"]'),
     ).toBeVisible();
@@ -348,10 +360,14 @@ test("desktop: queued human work takes priority over automatic continuation", as
     await expect(session.recoveryResumeButton()).toHaveCount(0);
     await expect(session.recoveryFreshButton()).toHaveCount(0);
     await expect(session.transientRetryCard()).toBeHidden();
-    const { sessions } = await apiClient.listTaskSessions(fixture.taskId);
-    expect(sessions.find((candidate) => candidate.id === fixture.sessionId)?.state).toBe(
-      "WAITING_FOR_INPUT",
-    );
+    await expect
+      .poll(
+        async () =>
+          (await apiClient.listTaskSessions(fixture.taskId)).sessions.find(
+            (candidate) => candidate.id === fixture.sessionId,
+          )?.state,
+      )
+      .toBe("WAITING_FOR_INPUT");
   } finally {
     await fixture.dispose();
   }

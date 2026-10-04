@@ -103,9 +103,9 @@ func (p *EventPublisher) PublishAgentStalled(
 }
 
 // publishAgentEventPayload publishes an immutable agent lifecycle snapshot.
-func (p *EventPublisher) publishAgentEventPayload(ctx context.Context, eventType string, payload AgentEventPayload) {
+func (p *EventPublisher) publishAgentEventPayload(ctx context.Context, eventType string, payload AgentEventPayload) error {
 	if p.eventBus == nil {
-		return
+		return fmt.Errorf("event bus is unavailable")
 	}
 
 	event := bus.NewEvent(eventType, "agent-manager", payload)
@@ -115,11 +115,13 @@ func (p *EventPublisher) publishAgentEventPayload(ctx context.Context, eventType
 			zap.String("event_type", eventType),
 			zap.String("instance_id", payload.AgentExecutionID),
 			zap.Error(err))
+		return err
 	} else {
 		p.logger.Debug("published agent event",
 			zap.String("event_type", eventType),
 			zap.String("instance_id", payload.AgentExecutionID))
 	}
+	return nil
 }
 
 func newAgentEventPayload(execution *AgentExecution) AgentEventPayload {
@@ -343,6 +345,7 @@ func buildAgentStreamEventData(event agentctl.AgentEvent) *AgentStreamEventData 
 		ToolTitle:                   event.ToolTitle,
 		ToolStatus:                  event.ToolStatus,
 		Error:                       event.Error,
+		PromptFailureDisposition:    event.PromptFailureDisposition,
 		ProviderError:               event.ProviderError,
 		SessionStatus:               event.SessionStatus,
 		SessionSettingsPolicy:       event.SessionSettingsPolicy,

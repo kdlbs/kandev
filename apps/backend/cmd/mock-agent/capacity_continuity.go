@@ -44,12 +44,23 @@ func parseRetainedCapacityCmd(prompt string) (retainedCapacityScenario, bool) {
 	return scenario, true
 }
 
-func retainedCapacityCounterPath(sid acp.SessionId) string {
-	return filepath.Join(os.TempDir(), fmt.Sprintf("kandev-mock-retained-capacity-%x.count", sha256.Sum256([]byte(sid))))
+func retainedCapacityCounterPrefix(sid acp.SessionId) string {
+	return filepath.Join(os.TempDir(), fmt.Sprintf("kandev-mock-retained-capacity-%x", sha256.Sum256([]byte(sid))))
 }
 
-func nextRetainedCapacityAttempt(sid acp.SessionId) int {
-	path := retainedCapacityCounterPath(sid)
+func retainedCapacityCounterPath(sid acp.SessionId, scenario string) string {
+	return retainedCapacityCounterPrefix(sid) + "-" + scenario + ".count"
+}
+
+func clearRetainedCapacityCounters(sid acp.SessionId) {
+	paths, _ := filepath.Glob(retainedCapacityCounterPrefix(sid) + "-*.count")
+	for _, path := range paths {
+		_ = os.Remove(path)
+	}
+}
+
+func nextRetainedCapacityAttempt(sid acp.SessionId, scenario string) int {
+	path := retainedCapacityCounterPath(sid, scenario)
 	previous := 0
 	if raw, err := os.ReadFile(path); err == nil {
 		previous, _ = strconv.Atoi(strings.TrimSpace(string(raw)))
@@ -64,7 +75,7 @@ func (a *mockAgent) handleRetainedCapacity(ctx context.Context, sid acp.SessionI
 	if !ok {
 		return acp.PromptResponse{}, nil, false
 	}
-	attempt := nextRetainedCapacityAttempt(sid)
+	attempt := nextRetainedCapacityAttempt(sid, scenario.name)
 	e := &emitter{ctx: ctx, conn: a.conn, sid: sid}
 	if attempt <= scenario.failTimes {
 		if scenario.withTools && attempt == 1 {
@@ -80,7 +91,7 @@ func (a *mockAgent) handleRetainedCapacity(ctx context.Context, sid acp.SessionI
 			},
 		}, true
 	}
-	_ = os.Remove(retainedCapacityCounterPath(sid))
+	_ = os.Remove(retainedCapacityCounterPath(sid, scenario.name))
 	e.text(fmt.Sprintf("Mock provider recovered after %d retained capacity error(s).", scenario.failTimes))
 	return acp.PromptResponse{StopReason: acp.StopReasonEndTurn}, nil, true
 }

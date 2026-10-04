@@ -39,6 +39,8 @@ func TestContinuationUsesRetainedRuntime(t *testing.T) {
 	require.Empty(t, mgr.stopAgentArgs)
 	require.Len(t, mgr.capturedPromptCalls, 1)
 	require.Equal(t, "execution-1", mgr.capturedPromptCalls[0].ExecutionID)
+	require.True(t, mgr.capturedPromptCalls[0].DispatchOnly,
+		"the retry owner settles at prompt acceptance and does not wait for the provider turn")
 	require.Contains(t, mgr.capturedPrompts[0], "Continue the unfinished request")
 	require.NotContains(t, mgr.capturedPrompts[0], "test original request")
 }
