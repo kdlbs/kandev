@@ -26,11 +26,12 @@ storage evidence in one coherent sequential pass. Preserve unrelated current raw
 metadata, omitted scalars/effects, existing validation and ordinary postcommit
 fallback/publication; all five issue keys form one atomic domain.
 
-Status remains pending at DESIGN handoff. ROOT must send a later explicit reviewed
-implementation interrupt to this same session before permanent tests, production,
-install, DB, build, commit or PR work. Keep the same primary session/profile;
-no delegation/tasks/tabs/model switch. Read `/tdd` and its backend test guidance
-after release, set this work order in_progress, and retain actual results here.
+ROOT reviewed the ended DESIGN package and explicitly released implementation
+to this same primary on 2026-10-04, satisfying the implementation release barrier.
+Local implementation and acceptance checks are verified; this work order remains
+in_progress for actual verified delivery. The `/tdd` backend guidance was applied,
+and actual results are retained below. Keep the same primary session/profile;
+no delegation/tasks/tabs/model switch.
 
 ## In scope and owned boundaries
 

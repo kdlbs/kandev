@@ -19,9 +19,9 @@ owns permanent existing-API RED, the coherent implementation and scoped protocol
 storage, compatibility and delivery evidence.
 
 ROOT reviewed the ended DESIGN package and explicitly released implementation
-to this same primary on 2026-10-04. Task 01 is in progress. Only ROOT's later explicit reviewed implementation message via
-interrupt to this same primary session releases production/permanent test edits,
-install, DB, build, commit or PR work. No agents/tasks/tabs/model switch.
+to this same primary on 2026-10-04, satisfying the implementation release barrier.
+Task 01 remains in progress for actual verified delivery after local implementation
+and acceptance checks. No agents/tasks/tabs/model switch.
 
 Tasks owns the existing
 [external-link requirement](../../specs/tasks/requirements/link-existing-task-github-issue.md).
