@@ -219,6 +219,7 @@ with joined handles. Preserve normal active commit hooks and hosted gates.
 - `apps/web/lib/state/slices/automations/automations-slice.test.ts` (new)
 - `apps/web/components/settings/use-settings-breadcrumbs.ts`
 - `apps/web/components/automations/automations-list-page.integration.test.tsx` (new)
+- `apps/web/AGENTS.md` (required scoped cache ownership guidance)
 - `docs/specs/office/requirements/automations-settings.md`
 - `docs/specs/office/system-design/automations-settings-02.md`
 - `docs/plans/automation-list-publication/plan.md`
@@ -288,8 +289,9 @@ Every started command handle was actually joined before the next heavy check.
   advisory is unchanged. Required `pnpm run i18n:ratchet` joined 54779,
   exit 0; all four changed production files clean, allowlist intact.
 
-Only the four production paths, three new focused test files and four-document
-package changed. No backend, runtime, hydration, trigger/run-state, public copy,
+Only the four production paths, three new focused test files, four-document
+package and scoped frontend ownership guide changed. No backend, runtime,
+hydration, trigger/run-state, public copy,
 browser/build/E2E, lockfile/config, delegate/task/tab/session, or child30 edits.
 ROOT's proof remains read-only and unreplayed. Initial-state compatibility uses
 an optional public `byWorkspace` field with an empty default map. The flat row
@@ -307,3 +309,30 @@ Delivery remains gated on normal active hooks, required terminal hosted checks,
 current-head full authenticated semantic coverage, every finding disposition,
 normal expected-head squash, independently verified merge and joined owned
 cleanup. Task completion is not inferred from local checks alone.
+
+PR review correction: the scoped frontend guide now records the workspace cache,
+store-owned generations and legacy compatibility boundary, as required by the
+root engineering guide. ROOT explicitly authorized this documentation-only
+scope addition. Production and tests are unchanged; passing product checks are
+not replayed. The guide stays at its existing 300-line boundary. Harness unit
+tests (19), harness lint (201 files), spec-linter tests (36), spec lint,
+documentation catalog (351 decisions / 1,348 specs), whitespace and the targeted
+harness hook passed in joined handle 55535, exit 0. Exact commands:
+
+```bash
+python3 scripts/lint-harness-files.test.py
+python3 .github/scripts/lint-harness-files.py --all
+python3 scripts/lint-spec-files.test.py
+python3 scripts/lint-spec-files.py --all
+python3 scripts/list-docs.py validate
+git diff --check
+wc -l -w -c apps/web/AGENTS.md
+pre-commit run harness-lint --files apps/web/AGENTS.md
+```
+
+Guide counts: 300 lines, 4,452 words, 36,714 bytes (previously 300 lines,
+4,384 words, 36,013 bytes). It adds one local cache boundary to existing key
+state-path guidance; no common workflow or generic rule changes.
+The sidebar optimization suggestion is outside this repair: the reviewed design
+retains the flat reference invalidation signal and the sidebar's independent
+workspace-scoped fetch.

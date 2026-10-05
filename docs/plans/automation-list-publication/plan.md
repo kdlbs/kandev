@@ -211,6 +211,13 @@ Design validation completed on 2026-10-05:
 Task 01 is `done`; the package is `implemented`. Local implementation evidence
 is recorded above and in the work order. Delivery is not complete yet.
 
+PR review required the scoped frontend guide to document the additive cache
+ownership, shared generations and flat compatibility boundary. ROOT authorized
+the minimal `apps/web/AGENTS.md` update. No production or test change follows
+from this correction, and passing product checks are not replayed. The sidebar
+reference invalidation contract remains as designed; workspace-specific
+invalidation optimization is excluded.
+
 ## Risks
 
 - An instance-only guard would leave sibling refresh publication unordered.
