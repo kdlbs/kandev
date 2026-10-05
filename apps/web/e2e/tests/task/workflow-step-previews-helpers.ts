@@ -19,9 +19,34 @@ export async function expectWorkflowStepPreviewsLoaded(
   const receivedResponses = await Promise.all(responses);
   for (const response of receivedResponses) expect(response.ok()).toBe(true);
   await Promise.all(receivedResponses.map((response) => response.finished()));
-  for (const { id, stepNames } of workflows) {
-    await expectStepsInOrder(page, id, stepNames);
-  }
+  await Promise.all(
+    workflows.map(({ id }) =>
+      expect(page.getByTestId("workflow-option-steps-" + id)).toBeVisible(),
+    ),
+  );
+  await expect
+    .poll(
+      () =>
+        page.evaluate((expectedWorkflows) => {
+          return expectedWorkflows
+            .filter(({ id, stepNames }) => {
+              const group = document.querySelector<HTMLElement>(
+                `[data-testid="workflow-option-steps-${id}"]`,
+              );
+              const text = group?.textContent ?? "";
+              let previousPosition = -1;
+              for (const name of stepNames) {
+                const position = text.indexOf(name);
+                if (position <= previousPosition) return true;
+                previousPosition = position;
+              }
+              return false;
+            })
+            .map(({ id }) => id);
+        }, workflows),
+      { message: "Workflow preview steps should render in order" },
+    )
+    .toEqual([]);
 }
 
 export async function expectStepsInOrder(page: Page, workflowId: string, stepNames: string[]) {
