@@ -50,7 +50,7 @@ func configureRuntimeObservationCommand(
 	if cmd.SysProcAttr == nil {
 		cmd.SysProcAttr = &syscall.SysProcAttr{}
 	}
-	cmd.SysProcAttr.CmdLine = syscall.EscapeArg(shell) + " /d /s /c " + syscall.EscapeArg(command)
+	cmd.SysProcAttr.CmdLine = syscall.EscapeArg(shell) + " /d /s /c " + command
 	return nil
 }
 
