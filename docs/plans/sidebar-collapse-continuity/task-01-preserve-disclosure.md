@@ -86,6 +86,7 @@ on hover. Phone keeps existing 44px targets and safe-area containment.
 - `apps/web/e2e/tests/task/sidebar-collapse-loading.spec.ts` (new)
 - `apps/web/e2e/tests/task/mobile-sidebar-collapse-loading.spec.ts` (new)
 - `apps/web/e2e/tests/task/sidebar-collapse-loading-fixtures.ts` (new)
+- `apps/web/e2e/helpers/sidebar-disclosure-request.ts` and `.test.ts` for held-request cleanup
 - This plan/work order and the linked requirement/system design
 
 If return-shape changes affect mocks, find and update every affected consumer.
@@ -104,7 +105,7 @@ root, sequentially for the browser projects:
 ```bash
 (cd apps/web && pnpm exec vitest run hooks/domains/kanban/use-sidebar-task-page.test.tsx hooks/domains/kanban/use-sidebar-task-page.disclosure.test.tsx hooks/domains/kanban/use-sidebar-task-page.removal.test.tsx hooks/domains/kanban/use-workspace-sidebar-tasks.test.ts hooks/domains/kanban/use-sidebar-store-tasks.test.tsx lib/sidebar/sidebar-task-page-cache.test.ts components/task/sidebar-task-pagination.test.tsx components/task/sidebar-task-query-status.test.tsx)
 (cd apps/web && pnpm run typecheck)
-(cd apps/web && pnpm exec eslint --max-warnings 0 hooks/domains/kanban/use-sidebar-page-context.ts hooks/domains/kanban/use-sidebar-task-page.ts hooks/domains/kanban/sidebar-task-page-display.ts hooks/domains/kanban/use-sidebar-task-page.disclosure.test.tsx hooks/domains/kanban/use-sidebar-task-page.removal.test.tsx components/task/sidebar-task-page-content.tsx components/task/mobile/mobile-task-list.tsx components/task/mobile/session-task-switcher-sheet.tsx e2e/tests/task/sidebar-collapse-loading-fixtures.ts e2e/tests/task/sidebar-collapse-loading.spec.ts e2e/tests/task/mobile-sidebar-collapse-loading.spec.ts)
+(cd apps/web && pnpm exec eslint --max-warnings 0 hooks/domains/kanban/use-sidebar-page-context.ts hooks/domains/kanban/use-sidebar-task-page.ts hooks/domains/kanban/sidebar-task-page-display.ts hooks/domains/kanban/use-sidebar-task-page.disclosure.test.tsx hooks/domains/kanban/use-sidebar-task-page.removal.test.tsx components/task/sidebar-task-page-content.tsx components/task/mobile/mobile-task-list.tsx components/task/mobile/session-task-switcher-sheet.tsx e2e/helpers/sidebar-disclosure-request.ts e2e/helpers/sidebar-disclosure-request.test.ts e2e/tests/task/sidebar-collapse-loading-fixtures.ts e2e/tests/task/sidebar-collapse-loading.spec.ts e2e/tests/task/mobile-sidebar-collapse-loading.spec.ts)
 pnpm --dir apps/web e2e:run --host --shards 1 --project chromium tests/task/sidebar-collapse-loading.spec.ts
 pnpm --dir apps/web e2e:run --host --shards 1 --project mobile-chrome tests/task/mobile-sidebar-collapse-loading.spec.ts
 python3 scripts/list-docs.py validate
@@ -151,3 +152,27 @@ an explicit deletion request. Report any external human-approval gate precisely.
 
 Implementation checks are complete. CI, review disposition, and protected merge
 are delivery gates to verify against the published head.
+
+## PR remediation
+
+Greptile identified that an assertion failure could be replaced by the held
+response's timeout, which also prevented route removal. Extracted the HTTP gate
+into an isolated E2E helper: release and remove the route on every failure,
+preserve the first error, and consume a late waiter rejection. The red unit
+regression reproduced the masked assertion; four focused tests now pass,
+including missing and failed responses, secondary cleanup failure, and success.
+Targeted ESLint and web typecheck passed. Browser checks below validate the same
+helper on desktop and both phone surfaces; the built production UI is unchanged.
+
+```bash
+(cd apps/web && pnpm exec vitest run e2e/helpers/sidebar-disclosure-request.test.ts)
+(cd apps/web && pnpm exec eslint --max-warnings 0 e2e/helpers/sidebar-disclosure-request.ts e2e/helpers/sidebar-disclosure-request.test.ts e2e/tests/task/sidebar-collapse-loading-fixtures.ts)
+(cd apps/web && pnpm run typecheck)
+pnpm --dir apps/web e2e:run --host --no-build --shards 1 --project chromium tests/task/sidebar-collapse-loading.spec.ts
+pnpm --dir apps/web e2e:run --host --no-build --shards 1 --project mobile-chrome tests/task/mobile-sidebar-collapse-loading.spec.ts
+```
+
+The first published head's architecture job was cancelled without steps because
+GitHub failed to acquire a hosted runner (run 37374049388, job 111978000886).
+This is runner evidence; the normal commit architecture hook passed. The new
+published head must receive fresh CI/review evidence before merge.

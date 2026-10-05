@@ -1,21 +1,14 @@
 import { execFileSync } from "node:child_process";
 import { mkdtempSync, rmSync } from "node:fs";
 import path from "node:path";
-import { expect, type Page, type Locator } from "@playwright/test";
+import { expect, type Page } from "@playwright/test";
 import type { SeedData } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
 import type { PrAssetCapture } from "../../helpers/pr-asset-capture";
 import { SessionPage } from "../../pages/session-page";
 import { waitForFiniteAnimations } from "../../helpers/pr-capture";
 import { expectTouchControl } from "../../helpers/control-sizing";
-
-function gate() {
-  let release!: () => void;
-  const promise = new Promise<void>((resolve) => {
-    release = resolve;
-  });
-  return { promise, release };
-}
+import { heldDisclosure } from "../../helpers/sidebar-disclosure-request";
 
 async function seedRepositories(
   api: ApiClient,
@@ -74,36 +67,6 @@ async function seedRepositories(
     },
   });
   return { names, tasks, current };
-}
-
-async function heldDisclosure(page: Page, header: Locator, verify: () => Promise<void>) {
-  const arrived = gate();
-  const release = gate();
-  const key = await header.getAttribute("data-group-key");
-  const collapsing = (await header.getAttribute("aria-expanded")) === "true";
-  const matches = (query: { collapsed_group_keys: string[] }) =>
-    query.collapsed_group_keys.includes(key!) === collapsing;
-  await page.route("**/sidebar/query", async (route) => {
-    if (!matches(route.request().postDataJSON())) return route.continue();
-    arrived.release();
-    await release.promise;
-    await route.continue();
-  });
-  const response = page.waitForResponse(
-    (result) =>
-      result.url().endsWith("/sidebar/query") &&
-      result.request().method() === "POST" &&
-      matches(result.request().postDataJSON()),
-  );
-  try {
-    await header.click();
-    await arrived.promise;
-    await verify();
-  } finally {
-    release.release();
-    await response;
-    await page.unrouteAll({ behavior: "wait" });
-  }
 }
 
 // @covers AC-UI-SIDEBAR-ARCHIVED-FILTER-002.25

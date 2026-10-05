@@ -154,6 +154,9 @@ Implementation completed after the user's later execution request.
 - Hook/cache/paging/error suite: 73 tests passed. The disclosure test extraction
   also passed all three affected hook suites (37 tests).
 - Web typecheck and targeted ESLint with zero warnings: passed.
+- PR remediation: four E2E request-cleanup unit tests passed after reproducing
+  an assertion masked by a response timeout. The work order records the
+  isolated helper, desktop/phone reruns, and runner cancellation evidence.
 - Managed Chromium regression: one test passed; original-loader red reproduced
   missing headings while the response was held.
 - Managed mobile-chrome regression: one test passed, covering both phone entry
