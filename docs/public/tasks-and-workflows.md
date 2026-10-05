@@ -664,6 +664,11 @@ for up to five minutes. Task changes, workspace changes, and signing out invalid
 the relevant pages. Switching views leaves your open conversation in place,
 including in the phone **Tasks** drawer.
 
+Collapsing a repository group or a task's subtasks keeps the other rows visible
+while its page refreshes. Expanding shows already available rows immediately;
+any additional rows appear when the refresh finishes. This also applies in the
+phone **Tasks** drawer and navigation menu.
+
 If loading fails, the sidebar shows one message. **Retry** reloads a recoverable
 failure; rows already shown remain visible during a failed refresh. If a filter
 is invalid, use **Filters** to correct the indicated selection instead. Repository

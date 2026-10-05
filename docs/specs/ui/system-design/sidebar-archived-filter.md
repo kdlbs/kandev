@@ -1,5 +1,5 @@
 ---
-status: draft
+status: current
 system: ui
 requirements:
   - REQ-UI-SIDEBAR-ARCHIVED-FILTER-001
@@ -18,7 +18,7 @@ The [shared pagination requirement](../requirements/sidebar-task-pagination.md) 
 The existing archive requirements remain authoritative for archive membership and navigation. This design replaces the eager
 loading and URL-only navigation described in the original implementation plan.
 [The proposed decision](../../../decisions/2026-09-26-bounded-archived-sidebar-queries.md)
-records the pagination tradeoff. The design remains draft until implementation review.
+records the pagination tradeoff. The implementation retains those query boundaries.
 The [bounded view reuse decision](../../../decisions/2026-09-28-sidebar-view-page-reuse.md)
 revises its single-page retention rule for responsive return switching.
 
@@ -278,6 +278,50 @@ An uncovered view uses the optimized server query and merges returned records in
 Ordinary changes can make a response require refresh without making it unsafe to show reconciled rows.
 The client separates those cases from hard identity, authorization, and deletion barriers.
 
+### Disclosure continuity
+
+For AC-UI-SIDEBAR-ARCHIVED-FILTER-002.25, distinguish display continuity from
+query-page reuse. `useSidebarPageContext` keeps the full `viewKey`, including
+`collapsed_group_keys` and `collapsed_task_ids`, for requests, cache membership,
+and response fencing. Derive a companion content identity from the same inputs,
+excluding only those two disclosure fields. Include workspace and account scope,
+context generation, filters, sort, grouping, locale, pins, and ordering preferences.
+Do not weaken the server query or cache key to avoid a loading placeholder.
+
+`useSidebarTaskPage` derives the accepted response's content identity from its
+existing bounded displayed-page identity. Prefer complete local projection,
+then a matching accepted or cached response. Only when the current content
+identity matches the accepted displayed page may a disclosure change retain
+that page as a transitional display. Do not retain an additional inventory,
+accumulate pages, write the transition into the reusable cache, or classify it
+as authoritative membership for the new query.
+
+The existing `TaskSwitcher` group and subtask collapse preferences hide rows
+immediately. On expansion, only previously available rows can appear until the
+server supplies the bounded replacement. Keep eligible headings visible when
+all groups collapse. Preserve known-removal reconciliation and hard context and
+access invalidation; a deleted task must not reappear from the transition.
+Mark transition state explicitly so intentional collapsed headings do not enter
+the deletion-recovery empty-provisional loading path.
+
+Request page 1 under the new full key, even when the source display was a later
+page. Preserve the source page's identity instead of relabelling its rows as a
+new authoritative page. Disable page navigation based on that transitional
+snapshot until a current-query response establishes bounds. A transient failure
+keeps eligible display content and uses the existing refresh-error and Retry
+presentation; Retry must request page 1. Access denial clears content immediately.
+Only an accepted current-key response clears transition state. Rapid disclosures
+retain the last eligible accepted display; old completions cannot replace or
+finalize the latest request. Ordinary same-context mutations retain existing
+entity reconciliation and refresh scheduling rather than bypassing it.
+
+Desktop sidebar, phone task picker, and phone app-navigation outlet consume the
+same controller. Retain their existing scroll owners, group controls, touch
+sizes, focus behavior, and screen-reader refresh status. Collapse does not move
+the conversation, reset the list scroll explicitly, introduce a new overlay,
+or create new user-facing copy. Existing normal initial-load, deletion-recovery,
+view-switch, local-coverage, and exact-key cache-hit behavior stays separately tested.
+
 ## Active-task actions and independent detail
 
 All views consume the same paged projection, derived from complete shared data or a bounded server response.
@@ -387,3 +431,5 @@ instructions are superseded by this package, not recorded as successful new vali
 The [memory repair](../../../plans/sidebar-query-memory/plan.md) adds native-allocation evidence and SQLite scratch-relation ownership.
 
 [Shared task reuse](sidebar-shared-task-state.md) extends this repair to homepage reuse and initial-load progress under live invalidation.
+
+The [disclosure continuity repair](../../../plans/sidebar-collapse-continuity/plan.md) extends same-view display continuity without changing query-page identity.

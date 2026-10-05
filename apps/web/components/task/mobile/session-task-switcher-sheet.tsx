@@ -332,6 +332,7 @@ function TaskSwitcherSurfaceContent({
               pageEntries={data.pageEntries}
               page={data.page.response}
               pagePending={data.page.requestedPage !== null}
+              pageTransitioning={data.page.isDisclosureTransition}
               pageError={data.page.error}
               pageCanRetry={data.page.canRetry}
               onPageChange={data.page.goToPage}
