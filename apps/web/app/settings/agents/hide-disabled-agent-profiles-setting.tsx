@@ -5,6 +5,8 @@ import { Label } from "@kandev/ui/label";
 import { Switch } from "@kandev/ui/switch";
 import { useHideDisabledAgentProfilesInNav } from "@/hooks/domains/settings/use-hide-disabled-agent-profiles-in-nav";
 
+export const HIDE_DISABLED_AGENT_PROFILES_SWITCH_ID = "hide-disabled-agent-profiles-in-nav";
+
 /** The Agent options switch saves immediately and keeps the surface open. */
 export function HideDisabledAgentProfilesSetting({
   isTouchTarget = false,
@@ -16,7 +18,7 @@ export function HideDisabledAgentProfilesSetting({
   return (
     <div className="flex items-start justify-between gap-4">
       <div className="min-w-0 space-y-0.5">
-        <Label htmlFor="hide-disabled-agent-profiles-in-nav">
+        <Label htmlFor={HIDE_DISABLED_AGENT_PROFILES_SWITCH_ID}>
           {t("settings:hideDisabledAgentProfilesFromNav")}
         </Label>
         <p id="hide-disabled-agent-profiles-description" className="text-xs text-muted-foreground">
@@ -24,7 +26,7 @@ export function HideDisabledAgentProfilesSetting({
         </p>
       </div>
       <Label
-        htmlFor="hide-disabled-agent-profiles-in-nav"
+        htmlFor={HIDE_DISABLED_AGENT_PROFILES_SWITCH_ID}
         data-testid={isTouchTarget ? "agent-options-switch-target" : undefined}
         className={
           isTouchTarget
@@ -33,7 +35,7 @@ export function HideDisabledAgentProfilesSetting({
         }
       >
         <Switch
-          id="hide-disabled-agent-profiles-in-nav"
+          id={HIDE_DISABLED_AGENT_PROFILES_SWITCH_ID}
           aria-describedby="hide-disabled-agent-profiles-description"
           checked={hideDisabled}
           onCheckedChange={setHideDisabled}

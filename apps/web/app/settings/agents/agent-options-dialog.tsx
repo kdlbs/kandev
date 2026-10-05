@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { IconAdjustments, IconX } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
@@ -24,7 +24,10 @@ import {
 } from "@kandev/ui/drawer";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { settingsActionClassName } from "@/components/settings/settings-control";
-import { HideDisabledAgentProfilesSetting } from "@/app/settings/agents/hide-disabled-agent-profiles-setting";
+import {
+  HideDisabledAgentProfilesSetting,
+  HIDE_DISABLED_AGENT_PROFILES_SWITCH_ID,
+} from "@/app/settings/agents/hide-disabled-agent-profiles-setting";
 
 function AgentOptionsBody({ isTouchTarget }: { isTouchTarget: boolean }) {
   const { t } = useTranslation();
@@ -42,7 +45,18 @@ export function AgentOptionsDialog() {
   const { t } = useTranslation();
   const { isMobile, isFinePointer } = useResponsiveBreakpoint();
   const [open, setOpen] = useState(false);
+  const previousIsMobile = useRef(isMobile);
   const isTouchTarget = isMobile || !isFinePointer;
+  useEffect(() => {
+    const breakpointChanged = previousIsMobile.current !== isMobile;
+    previousIsMobile.current = isMobile;
+    if (!breakpointChanged || !open) return;
+    const frame = requestAnimationFrame(() => {
+      document.getElementById(HIDE_DISABLED_AGENT_PROFILES_SWITCH_ID)?.focus();
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [isMobile, open]);
+
   const triggerClassName = settingsActionClassName(
     isTouchTarget ? "min-h-11 cursor-pointer" : "cursor-pointer",
   );

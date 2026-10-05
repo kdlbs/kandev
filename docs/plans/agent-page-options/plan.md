@@ -158,14 +158,17 @@ row is removed.
 - `pnpm run typecheck` and the production build used by managed E2E: passed.
 - `pnpm run i18n:check`: passed; all six translated catalogs and the pseudo
   locale passed completeness checks.
-- Managed Chromium E2E: 6 tests passed for toolbar order, dialog behavior,
-  member access, breakpoint changes, navigation filtering, and touch-sized
-  controls on a coarse-pointer tablet.
+- Managed Chromium E2E: 7 tests passed across the options and navigation specs.
+  Coverage includes toolbar order, dialog behavior, Enter activation, focus
+  across breakpoint changes and dismissal, member access, navigation filtering,
+  and touch-sized controls on a coarse-pointer tablet.
 - Managed Pixel 5 mobile Chromium E2E: 1 test passed. The rendered drawer stays
   content-sized at less than 70% of the viewport for the single-preference
   surface, with an 80dvh dynamic maximum. It stays within the viewport, uses
-  one internal scroll region, clears the footer safe area, and has 44px Options
-  and switch targets plus a 48px Done button.
+  one internal scroll region, clears the footer safe area, and asserts the
+  Options, switch, and Done targets meet the 44px minimum in both dimensions.
+  Rendered measurements were 44px high for Options, 44x44px for the switch, and
+  48px high for Done.
 - Host-rendered desktop and phone screenshots were compared with UI-02 and
   UI-03; both match the approved structure.
 - Public documentation tests: 62 passed; all 47 published pages validated.

@@ -25,7 +25,8 @@ test.describe("Mobile agent page options", () => {
         .toBeGreaterThanOrEqual(44);
       const optionsBox = await options.boundingBox();
       expect(optionsBox).not.toBeNull();
-      expect(optionsBox!.height).toBe(44);
+      expect(optionsBox!.width).toBeGreaterThanOrEqual(44);
+      expect(optionsBox!.height).toBeGreaterThanOrEqual(44);
 
       await options.tap();
       const drawer = testPage.getByTestId("agent-options-drawer");
@@ -82,8 +83,8 @@ test.describe("Mobile agent page options", () => {
       const switchTarget = drawer.getByTestId("agent-options-switch-target");
       const targetBox = await switchTarget.boundingBox();
       expect(targetBox).not.toBeNull();
-      expect(targetBox!.width).toBe(44);
-      expect(targetBox!.height).toBe(44);
+      expect(targetBox!.width).toBeGreaterThanOrEqual(44);
+      expect(targetBox!.height).toBeGreaterThanOrEqual(44);
       const preference = drawer.getByRole("switch", { name: SWITCH_LABEL });
       await expect(preference).toHaveAccessibleDescription(
         "Disabled profiles remain available on this page.",
@@ -103,7 +104,8 @@ test.describe("Mobile agent page options", () => {
       const done = drawer.getByRole("button", { name: "Done", exact: true });
       const doneBox = await done.boundingBox();
       expect(doneBox).not.toBeNull();
-      expect(doneBox!.height).toBe(48);
+      expect(doneBox!.width).toBeGreaterThanOrEqual(44);
+      expect(doneBox!.height).toBeGreaterThanOrEqual(44);
       await test.info().attach("agent-options-mobile-measurements.txt", {
         body: [
           `Options button: ${optionsBox!.height}px high`,

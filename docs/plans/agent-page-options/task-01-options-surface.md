@@ -153,22 +153,26 @@ Completed on 2026-10-05. The route-local Options trigger now appears before
 Terminal and owns the responsive dialog/drawer open state. The existing profile
 visibility preference is inside that surface, applies immediately, stays open
 after a toggle, and retains its value when reopened, reloaded, or resized across
-the 768px boundary. The standalone preference row is removed. Options remains
-available to a member while the management-only Add custom agent action is
-hidden.
+the 768px boundary. Focus follows the preference when the open surface changes
+at that breakpoint and returns to Options on dismissal. The standalone
+preference row is removed. Options remains available to a member while the
+management-only Add custom agent action is hidden.
 
 - Focused Vitest suite passed: 4 files, 23 tests.
 - Targeted ESLint (`--max-warnings 0`) and Prettier checks passed.
 - `pnpm run typecheck` passed. The production Vite build completed in the
   managed E2E runner.
 - `pnpm run i18n:check` passed for all supported catalogs and the pseudo locale.
-- Managed Chromium E2E passed: 6 tests across
-  `agent-page-options.spec.ts` and `hide-disabled-agent-profiles-nav.spec.ts`,
-  including 44px-or-larger Options, switch, Done, and Close controls at 900px
-  with a coarse pointer.
+- Managed Chromium E2E passed: 7 tests across
+  `agent-page-options.spec.ts` (6) and
+  `hide-disabled-agent-profiles-nav.spec.ts` (1). Coverage includes keyboard
+  Enter activation, focus across both breakpoint transitions and dismissal,
+  navigation filtering, member access, and 44px touch targets on a coarse
+  pointer.
 - Managed Pixel 5 mobile Chromium E2E passed: 1 test in
-  `mobile-agent-page-options.spec.ts`. For the single-preference surface, the
-  drawer is below 70% of viewport height and has an 80dvh dynamic maximum.
+  `mobile-agent-page-options.spec.ts`. All three touch targets are asserted to
+  meet the 44px minimum in both dimensions. For the single-preference surface,
+  the drawer is below 70% of viewport height and has an 80dvh dynamic maximum.
   Rendered measurements: Options 44px high, switch target 44x44px, Done 48px
   high, and footer bottom padding at least 16px. The drawer remains within the
   viewport, has one internal scroll region, and adds no horizontal document

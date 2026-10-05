@@ -77,6 +77,25 @@ test.describe("Agent page options", () => {
     await expect(options).toBeFocused();
   });
 
+  test("Enter toggles the focused preference without closing the dialog", async ({ testPage }) => {
+    await testPage.goto("/settings/agents");
+    const options = testPage.getByTestId("agent-options-trigger");
+    const dialog = testPage.getByTestId("agent-options-dialog");
+
+    await options.click();
+    await expect(dialog).toBeVisible();
+    const preference = dialog.getByRole("switch", { name: SWITCH_LABEL });
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      if (await preference.evaluate((element) => element === document.activeElement)) break;
+      await testPage.keyboard.press("Tab");
+    }
+
+    await expect(preference).toBeFocused();
+    await testPage.keyboard.press("Enter");
+    await expect(preference).toHaveAttribute("aria-checked", "true");
+    await expect(dialog).toBeVisible();
+  });
+
   test("keeps Options available to a member without agent-management access", async ({
     testPage,
   }) => {
@@ -137,22 +156,25 @@ test.describe("Agent page options", () => {
     const preference = drawer.getByRole("switch", { name: SWITCH_LABEL });
     await preference.click();
     await expect(preference).toHaveAttribute("aria-checked", "true");
+    await expect(preference).toBeFocused();
 
     await testPage.setViewportSize({ width: 768, height: 850 });
     const dialog = testPage.getByTestId("agent-options-dialog");
     await expect(dialog).toBeVisible();
     await expect(drawer).toHaveCount(0);
-    await expect(dialog.getByRole("switch", { name: SWITCH_LABEL })).toHaveAttribute(
-      "aria-checked",
-      "true",
-    );
+    const desktopPreference = dialog.getByRole("switch", { name: SWITCH_LABEL });
+    await expect(desktopPreference).toHaveAttribute("aria-checked", "true");
+    await expect(desktopPreference).toBeFocused();
 
     await testPage.setViewportSize({ width: 767, height: 850 });
     await expect(drawer).toBeVisible();
     await expect(dialog).toHaveCount(0);
-    await expect(drawer.getByRole("switch", { name: SWITCH_LABEL })).toHaveAttribute(
-      "aria-checked",
-      "true",
-    );
+    const mobilePreference = drawer.getByRole("switch", { name: SWITCH_LABEL });
+    await expect(mobilePreference).toHaveAttribute("aria-checked", "true");
+    await expect(mobilePreference).toBeFocused();
+
+    await drawer.getByRole("button", { name: "Done", exact: true }).click();
+    await expect(drawer).toHaveCount(0);
+    await expect(options).toBeFocused();
   });
 });
