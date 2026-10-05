@@ -11,6 +11,8 @@ import { PrAssetCapture } from "../helpers/pr-asset-capture";
 import { makeGitEnv } from "../helpers/git-helper";
 import type { WorkflowStep } from "../../lib/types/http";
 
+export { resetSeedRepositoryCheckout } from "../helpers/seed-repository-checkout";
+
 const DEFAULT_SIDEBAR_VIEW = {
   id: "view-all-tasks",
   name: "All tasks",
@@ -532,27 +534,6 @@ export const test = backendFixture.extend<
     { auto: true },
   ],
 });
-
-/** Restores the shared seed checkout to the immutable fixture baseline. */
-export function resetSeedRepositoryCheckout(seedData: SeedData, tmpDir: string) {
-  const env = makeGitEnv(tmpDir);
-  execFileSync("git", ["-C", seedData.repositoryPath, "checkout", "-f", "main"], {
-    env,
-    stdio: "ignore",
-  });
-  execFileSync(
-    "git",
-    ["-C", seedData.repositoryPath, "reset", "--hard", seedData.repositoryBaselineOID],
-    {
-      env,
-      stdio: "ignore",
-    },
-  );
-  execFileSync("git", ["-C", seedData.repositoryPath, "clean", "-fd"], {
-    env,
-    stdio: "ignore",
-  });
-}
 
 /** Points the seed repository at a non-empty remote whose HEAD cannot resolve. */
 export function pointSeedRepositoryAtUnresolvedOrigin(seedData: SeedData, tmpDir: string) {
