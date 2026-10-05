@@ -224,8 +224,11 @@ test("touch scrolls ten workflow options and selects either end", async ({
   ];
 
   try {
-    for (const workflow of scenario.allWorkflows) {
+    for (const workflow of scenario.allWorkflows.slice(0, 3)) {
       expect(workflow.stepNames).toHaveLength(15);
+    }
+    for (const workflow of scenario.allWorkflows.slice(3)) {
+      expect(workflow.stepNames).toHaveLength(1);
     }
     await testPage.setViewportSize({ width: 390, height: 640 });
     expect(await testPage.evaluate(() => matchMedia("(pointer: coarse)").matches)).toBe(true);

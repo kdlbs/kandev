@@ -67,6 +67,7 @@ test.describe("Completed workspace restoration", () => {
     expect(retryBox?.height ?? 0).toBeGreaterThanOrEqual(28);
     failure.allowNextRestores();
     await retry.click();
+    await expect(workspaceUnavailable).toHaveCount(0);
 
     // Workspace recovery can refresh the right-pane layout. Foreground Files
     // again before querying its virtualized tree so the wait never targets a
