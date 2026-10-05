@@ -21,9 +21,6 @@ vi.mock("@/hooks/domains/azure-devops/use-azure-devops-availability", () => ({
 vi.mock("@/hooks/domains/github/use-github-status", () => ({
   useGitHubStatus: (id: string) => ({ status: { token_configured: connected(id) } }),
 }));
-vi.mock("@/hooks/domains/gitlab/use-task-mr", () => ({
-  useGitLabAvailable: () => connected("ws-1"),
-}));
 vi.mock("@/hooks/domains/gitlab/use-gitlab-status", () => ({
   useGitLabStatus: (id: string) => ({ status: { authenticated: connected(id) } }),
 }));

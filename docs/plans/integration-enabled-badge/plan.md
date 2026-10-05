@@ -58,9 +58,9 @@ Saved GitLab re-enabled, credentials connected:
 After:  GitLab    [Enabled]
 ```
 
-Desktop reuses its existing Settings sidebar composition and scroll owner.
-On phones the Settings sidebar is hidden; the `/settings` route is the menu,
-without these badge rows. No control moves. The row remains reachable while hide-disabled
+Desktop reuses its Settings sidebar composition and scroll owner. On phones
+`/settings` renders the same `SettingsTree` through `SettingsPageNav` as touch
+rows, including these integration badges. No control moves. The row remains reachable while hide-disabled
 is off; when on, existing filtering removes it. Unsaved drafts preserve the
 saved badge. Badge removal is required; spacing is illustrative.
 
@@ -78,9 +78,10 @@ Run existing reader and tree suites to protect migration, visibility and plugins
 Extend `integrations-index-enabled-toggle.spec.ts` on `chromium` with connected
 GitLab, save disable, badge absent with row retained, then save re-enable and
 badge restored. Assert unsaved changes do not alter the saved badge.
-State-only normalization qualifies for the mobile-parity component-test
-exception. Existing `mobile-settings-sidebar.spec.ts` verifies the changed
-sidebar is hidden on phones; no phone badge capture applies.
+On `mobile-chrome`, `mobile-settings-index.spec.ts` verifies the visible phone
+Settings tree before disabling, after saving both providers off and after
+re-enabling. `mobile-settings-sidebar.spec.ts` protects the hidden desktop
+sidebar composition. Capture the disabled phone tree for PR evidence.
 
 ## Work orders
 
@@ -105,3 +106,15 @@ for exact command scopes and execution evidence.
 - Toggles are drafts until Save; checking before Save cannot prove persistence.
 - GitLab's tree row may belong to a workspace other than the active workspace.
 - Connection probes must be mocked independently from enabled preferences.
+
+## Review remediation
+
+Correct the phone surface description: the phone Settings index contains the
+same integration badge rows even though its desktop sidebar is hidden. Add
+phone saved-off/re-enable coverage and screenshot evidence, and remove the
+unused `useGitLabAvailable` mock. The Sentry double-filter note is informational;
+keep the uniform eligibility predicate. No product logic changes are required.
+Local remediation verification passed: 65 unit tests, six phone browser
+tests, changed-file lint, typecheck, specification checks and diff checks.
+A fresh synthetic phone screenshot now covers the visible badge rows.
+Current-head CI and review evidence remain externally pending after push.

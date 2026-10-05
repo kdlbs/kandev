@@ -66,6 +66,7 @@ From repository root; install only if workspace dependencies are missing.
 (cd apps/web && pnpm exec eslint hooks/domains/integrations/use-enabled-integrations.ts components/app-sidebar/sections/settings/integration-enabled.tsx components/app-sidebar/sections/settings/use-settings-menu-branches.ts)
 (cd apps/web && pnpm run typecheck)
 (cd apps/web && pnpm e2e:run --host --project chromium tests/integrations/integrations-index-enabled-toggle.spec.ts)
+(cd apps/web && pnpm e2e:run --host --no-build --project mobile-chrome tests/settings/mobile-settings-index.spec.ts tests/settings/mobile-settings-sidebar.spec.ts)
 python3 scripts/list-docs.py validate
 python3 scripts/lint-spec-files.py --all
 git diff --check
@@ -80,6 +81,7 @@ git diff --check
   hook regressions, reusing the same external connection fixtures.
 - `apps/web/components/app-sidebar/sections/settings/use-settings-menu-branches.ts`
 - `apps/web/e2e/tests/integrations/integrations-index-enabled-toggle.spec.ts`
+- `apps/web/e2e/tests/settings/mobile-settings-index.spec.ts`
 - `apps/web/components/settings/record-badges.tsx` (badge invariant comment).
 - `docs/public/integrations.md` (saved-toggle badge behavior).
 - This work order and `plan.md`.
@@ -121,13 +123,32 @@ Completed 2026-10-05 in the primary session without delegation.
   the managed runner performed the fresh build.
 - Workspace dependency installation passed with the frozen lockfile.
 - Specification catalog/lint and diff checks passed.
-- The Settings sidebar is hidden on phones; `/settings` provides navigation
-  without these badge rows (`mobile-settings-sidebar.spec.ts`). No phone
-  screenshot applies to this surface. Rendered unit proof satisfies the
-  mobile-parity state-normalization exception.
+- The phone `/settings` index renders the same badge rows through
+  `SettingsPageNav` and `SettingsTree`. Its desktop sidebar remains hidden.
+  The initial claim that the phone lacked equivalent badges was incorrect and
+  is superseded by the phone review remediation below.
 - Node/pnpm were available after adding the installed Node directory to PATH:
   `export PATH=/home/jcfs/.nvm/versions/node/v24.18.0/bin:$PATH`.
 - PR capture: one disposable Chromium test passed (9.6s) against the fresh
   build; a synthetic desktop screenshot shows both saved toggles off and
   no Enabled badges. Temporary capture spec removed.
 - No delegation. Commit and PR delivery follow these checks.
+
+## Review remediation results
+
+Completed locally: removed the unused GitLab availability mock, corrected the
+phone surface contract in the requirement/design/plan, and added real phone
+Settings-index badge coverage with a fresh synthetic screenshot. Sentry
+already incorporates its toggle; the uniform projection filter remains
+intentional. No runtime or layout changes; the previous desktop screenshot
+still represents current behavior.
+
+- Four targeted Vitest files: 65 tests passed after mock removal.
+- Changed regression and phone E2E file ESLint: passed.
+- `pnpm run typecheck`: passed.
+- The mobile E2E command above: six tests passed against the already fresh
+  production build; no production code changed during remediation.
+- Specification catalog/lint and diff checks: passed.
+- Phone screenshot validated against visible GitHub/GitLab rows, captured with
+  synthetic E2E data, settled animations and rows clear of the floating search.
+- Current-head CI/review evidence remains externally pending after push.

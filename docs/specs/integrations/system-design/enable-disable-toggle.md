@@ -56,20 +56,21 @@ Unresolved or unavailable connection status produces no badge. Existing storage
 fallbacks and migration rules remain intact. Saving toggles introduces no backend
 write, health mutation, metric or request beyond existing connection reads.
 
-The Settings sidebar consumes this projection. On phones that sidebar is
-hidden; `/settings` is the navigation menu and has no equivalent badge row.
+The desktop Settings sidebar and phone `/settings` index consume this
+projection through the same `SettingsTree`. The phone index mounts
+`SettingsPageNav`, which presents the tree as touch rows while the desktop
+sidebar is hidden. Both surfaces remove or restore the same Enabled badge.
 Layout, hit targets, scroll ownership and route composition remain unchanged.
-The rendered change is removing or restoring the existing desktop Enabled badge.
 
 ## Validation
 
 Hook tests cover all six built-ins, connected-but-disabled status, re-enabling,
 same-tab and cross-tab events, unsaved drafts and explicit workspace isolation.
 A focused rendered badge test uses the real projection with mocked connection
-probes. The existing integrations toggle Playwright suite adds a saved GitLab
-disable/re-enable check against the Settings tree on desktop.
-This is state normalization within existing markup; the same targeted component
-proof satisfies the mobile-parity exception without a new phone interaction test.
+probes. The integrations toggle Playwright suite checks saved GitHub/GitLab
+disable/re-enable against the desktop tree. `mobile-settings-index.spec.ts`
+checks the phone tree with saved toggles on, off and on again, retaining
+reachable rows when disabled. Capture that visible phone index for PR evidence.
 
 ## Related decisions
 
