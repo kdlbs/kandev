@@ -14,16 +14,13 @@ import {
 import { Collapsible, CollapsibleTrigger, CollapsibleContent } from "@kandev/ui/collapsible";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { AgentLogo } from "@/components/agent-logo";
-import { ProfileFormFields, type ProfileFormData } from "@/components/settings/profile-form-fields";
-import type { AvailableAgent, ToolStatus } from "@/lib/types/http";
+import { AgentSetupFields } from "@/components/onboarding/agent-setup-fields";
+import type { AgentSetting, OnboardingAgentDraft } from "@/components/onboarding/agent-settings";
+import type { AvailableAgent, CapabilityStatus, ToolStatus } from "@/lib/types/http";
 import { copyToClipboard } from "@/lib/utils/copy-to-clipboard";
 import { Trans, useTranslation } from "react-i18next";
 
-export type AgentSetting = {
-  profileId: string;
-  formData: ProfileFormData;
-  dirty: boolean;
-};
+export type { AgentSetting, OnboardingAgentDraft };
 
 function CopyButton({ text }: { text: string }) {
   const [copied, setCopied] = useState(false);
@@ -122,12 +119,13 @@ function InstalledAgentRow({
   settings: AgentSetting | undefined;
   isOpen: boolean;
   onToggle: (open: boolean) => void;
-  onUpdateSetting: (agentName: string, formPatch: Partial<ProfileFormData>) => void;
+  onUpdateSetting: (agentName: string, patch: Partial<OnboardingAgentDraft>) => void;
 }) {
-  const currentModel = settings?.formData.model || agent.model_config.default_model;
+  const [profileStatus, setProfileStatus] = useState<CapabilityStatus | undefined>(undefined);
+  const currentModel = settings?.draft.model || agent.model_config.default_model;
   const modelName =
     agent.model_config.available_models.find((m) => m.id === currentModel)?.name ?? currentModel;
-  const status = agent.model_config.status ?? "ok";
+  const status = profileStatus ?? agent.model_config.status ?? "ok";
   const showModelPill = status === "ok" && !!modelName;
 
   return (
@@ -153,16 +151,11 @@ function InstalledAgentRow({
       <CollapsibleContent>
         <div className="border border-t-0 rounded-b-lg px-3 pb-3 pt-2">
           {settings && (
-            <ProfileFormFields
-              variant="compact"
-              hideNameField
-              hideCustomCLIFlags
-              profile={settings.formData}
+            <AgentSetupFields
+              agent={agent}
+              setting={settings}
               onChange={(patch) => onUpdateSetting(agent.name, patch)}
-              modelConfig={agent.model_config}
-              permissionSettings={agent.permission_settings ?? {}}
-              passthroughConfig={agent.passthrough_config ?? null}
-              agentName={agent.name}
+              onStatusChange={setProfileStatus}
             />
           )}
         </div>
@@ -256,7 +249,7 @@ export function StepAgents({
   tools: ToolStatus[];
   agentSettings: Record<string, AgentSetting>;
   loading: boolean;
-  onUpdateSetting: (agentName: string, formPatch: Partial<ProfileFormData>) => void;
+  onUpdateSetting: (agentName: string, patch: Partial<OnboardingAgentDraft>) => void;
 }) {
   const { t } = useTranslation();
   const [openAgent, setOpenAgent] = useState<string | null>(null);
@@ -276,7 +269,7 @@ export function StepAgents({
 
   return (
     <div className="space-y-3">
-      <div className="grid grid-cols-1 gap-2 max-h-[320px] overflow-y-auto">
+      <div className="grid grid-cols-1 gap-2">
         {installedAgents.map((agent) => (
           <InstalledAgentRow
             key={agent.name}

@@ -283,7 +283,7 @@
   "officeIsNotEnabledForThis": "このランタイムでは Office は有効じゃない。",
   "officeRouteNotPortedYet": "この Office ルートは SPA シェルで処理されるが、専用クライアントページはまだ移植中: <1>{{pathname}}</1>",
   "onboardingAgentsAutoApproveWarning": "<0>注意:</0> デフォルトの Agent Profiles は Auto Approve 有効で動く。YOLO モード。",
-  "onboardingAgentsHelp": "エージェント開いて、モデルと権限を設定。先に進むと変更は保存。あとで Settings > Agents でカスタム TUI agents も追加できる。",
+  "onboardingAgentsHelp": "詳細な設定は Settings > Agents で利用できます。",
   "onboardingAgentSettingsSaveError": "エージェントプロファイルの変更を保存できませんでした。もう一度お試しください。",
   "onboardingExecutorBuiltIn": "組み込み",
   "onboardingExecutorClusterSetup": "管理者によるクラスター設定が必要",

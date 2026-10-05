@@ -30,6 +30,22 @@ test.describe("First-run onboarding availability — mobile", () => {
       await testPage.evaluate(() => localStorage.getItem("kandev.onboarding.completed")),
     ).toBeNull();
 
+    const agentTrigger = testPage.getByRole("button", { name: /^Mock / });
+    await expect(agentTrigger).toBeVisible();
+    await agentTrigger.tap();
+    const agentRow = testPage.getByTestId("onboarding-agent-setup-fields");
+    await expect(agentRow).toBeVisible();
+    const refreshBtn = testPage.getByTestId("onboarding-agent-refresh-models");
+    const box = await refreshBtn.boundingBox();
+    expect(box).not.toBeNull();
+    expect(box!.width).toBeGreaterThanOrEqual(44);
+    expect(box!.height).toBeGreaterThanOrEqual(44);
+    const selector = agentRow.getByRole("button", { name: "Profile start model settings" });
+    await expect(selector).toBeEnabled({ timeout: 20_000 });
+    await selector.tap();
+    await testPage.getByRole("option", { name: "Mock Smart", exact: true }).tap();
+    await expect(selector).toContainText("Mock Smart");
+
     await testPage.setViewportSize({ width: 393, height: 851 });
     await expect(dialog).toHaveCount(0);
     expect(
@@ -38,5 +54,11 @@ test.describe("First-run onboarding availability — mobile", () => {
 
     await testPage.setViewportSize({ width: 768, height: 851 });
     await expect(dialog).toBeVisible();
+    await expect(agentTrigger).toContainText("Mock Smart");
+    await agentTrigger.tap();
+    await expect(selector).toContainText("Mock Smart");
+    expect(
+      await testPage.evaluate(() => localStorage.getItem("kandev.onboarding.completed")),
+    ).toBeNull();
   });
 });

@@ -36,14 +36,31 @@ test.describe("Mobile profile capability discovery", () => {
         { timeout: 20_000 },
       );
 
+      const refresh = testPage.getByTestId("profile-refresh-capabilities");
+      await expect(refresh).toHaveCount(1);
+      const refreshBounds = await refresh.boundingBox();
+      const modelBounds = await selector.boundingBox();
+      const modeBounds = await testPage
+        .getByTestId("profile-mode-field")
+        .getByRole("combobox")
+        .boundingBox();
+      expect(refreshBounds).not.toBeNull();
+      expect(modelBounds).not.toBeNull();
+      expect(modeBounds).not.toBeNull();
+      expect(refreshBounds!.width).toBeGreaterThanOrEqual(44);
+      expect(refreshBounds!.height).toBeGreaterThanOrEqual(44);
+      expect(refreshBounds!.y + refreshBounds!.height).toBeCloseTo(
+        modelBounds!.y + modelBounds!.height,
+        0,
+      );
+      expect(modeBounds!.y).toBeGreaterThanOrEqual(modelBounds!.y + modelBounds!.height);
       await testPage.getByTestId("env-var-row-0").locator("input").nth(1).fill("mobile-draft");
       await expect(testPage.getByTestId("profile-capability-status")).toHaveAttribute(
         "data-status",
         "stale",
       );
-      const refresh = testPage.getByTestId("profile-refresh-capabilities");
-      const refreshBounds = await refresh.boundingBox();
-      expect(refreshBounds?.height).toBeGreaterThanOrEqual(44);
+      await expect(testPage.getByTestId("profile-mode-field")).toHaveCount(0);
+      await expect(refresh).toHaveCount(1);
       await expect(
         testPage.getByRole("button", { name: /^Save( changes)?$/i }).first(),
       ).toBeEnabled();

@@ -3,6 +3,7 @@ package agents
 import (
 	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"slices"
@@ -43,7 +44,7 @@ func TestOpenCodeACPBuildCommandPrefersNativeBinary(t *testing.T) {
 		t.Fatalf("NativeBinaryName() = %q, want %q", name, "opencode")
 	}
 
-	wantNative := []string{"opencode", "acp", "--print-logs", "--log-level", "ERROR"}
+	wantNative := []string{"opencode", "acp", "--print-logs"}
 	if got := a.BuildCommand(CommandOptions{PreferNativeBinary: true}).Args(); !slices.Equal(got, wantNative) {
 		t.Fatalf("BuildCommand(PreferNativeBinary) = %#v, want %#v", got, wantNative)
 	}
@@ -54,6 +55,48 @@ func TestOpenCodeACPBuildCommandPrefersNativeBinary(t *testing.T) {
 	}
 }
 
+// TestOpenCodeACPCommandsAcceptBothLogLevelDialects proves that OpenCode ACP commands
+// omit optional log-level arguments and are accepted by both modern (lowercase/error-rejecting)
+// and legacy OpenCode binary CLI parsers.
+func TestOpenCodeACPCommandsAcceptBothLogLevelDialects(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is not executable on Windows")
+	}
+
+	a := NewOpenCodeACP()
+	cmd := a.BuildCommand(CommandOptions{PreferNativeBinary: true})
+	args := cmd.Args()
+	if !slices.Equal(args, []string{"opencode", "acp", "--print-logs"}) {
+		t.Fatalf("native command = %v, want [opencode acp --print-logs]", args)
+	}
+
+	managedArgs := a.ManagedNPMRuntime().CachedACPCommand().Args()
+	if slices.Contains(managedArgs, "--log-level") {
+		t.Fatalf("managed command %v contains optional --log-level", managedArgs)
+	}
+
+	strictModernBody := `for arg in "$@"; do
+    if [ "$arg" = "ERROR" ]; then
+        echo "Invalid value for flag --log-level: ERROR" >&2
+        exit 1
+    fi
+done
+exit 0`
+	writeOpenCodeTestBinary(t, strictModernBody)
+
+	execCmd := exec.CommandContext(context.Background(), args[0], args[1:]...)
+	if out, err := execCmd.CombinedOutput(); err != nil {
+		t.Fatalf("strict modern dialect rejected command %v: %v (output: %s)", args, err, string(out))
+	}
+
+	legacyBody := `exit 0`
+	writeOpenCodeTestBinary(t, legacyBody)
+	execCmdLegacy := exec.CommandContext(context.Background(), args[0], args[1:]...)
+	if out, err := execCmdLegacy.CombinedOutput(); err != nil {
+		t.Fatalf("legacy dialect rejected command %v: %v (output: %s)", args, err, string(out))
+	}
+}
+
 // TestOpenCodeACPInferenceConfigPrefersNativeBinaryOnPath pins the host-utility
 // bootstrap to the standalone binary when it is installed, so the ACP probe
 // never depends on npm cache state.
@@ -61,7 +104,7 @@ func TestOpenCodeACPInferenceConfigPrefersNativeBinaryOnPath(t *testing.T) {
 	writeOpenCodeTestBinary(t, "exit 0")
 
 	a := NewOpenCodeACP()
-	want := []string{"opencode", "acp", "--print-logs", "--log-level", "ERROR"}
+	want := []string{"opencode", "acp", "--print-logs"}
 	if got := a.HostUtilityInferenceConfig().Command.Args(); !slices.Equal(got, want) {
 		t.Fatalf("HostUtilityInferenceConfig().Command = %#v, want %#v", got, want)
 	}

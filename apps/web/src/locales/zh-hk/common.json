@@ -278,7 +278,7 @@
   "officeIsNotEnabledForThis": "此執行時未啓用辦公室。",
   "officeRouteNotPortedYet": "此辦公室路由由 SPA 外殼處理，但其專用用戶端頁面仍在遷移中：<1>{{pathname}}</1>",
   "onboardingAgentsAutoApproveWarning": "<0>注意：</0>預設代理程式設定檔啓用了自動批准（YOLO 模式）。",
-  "onboardingAgentsHelp": "展開代理程式以設定其模型與權限。繼續時會儲存更改。之後也可在「設定 > 代理程式」中新增自訂 TUI 代理程式。",
+  "onboardingAgentsHelp": "更多設定可在「設定 > 代理程式」中設定。",
   "onboardingAgentSettingsSaveError": "無法儲存代理設定更改，請重試。",
   "onboardingExecutorBuiltIn": "內置",
   "onboardingExecutorClusterSetup": "需要管理員設定集羣",

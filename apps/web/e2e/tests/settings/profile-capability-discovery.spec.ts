@@ -42,6 +42,27 @@ test.describe("Profile capability discovery", () => {
         "ready",
         { timeout: 20_000 },
       );
+      const refresh = testPage.getByTestId("profile-refresh-capabilities");
+      await expect(refresh).toHaveCount(1);
+      const refreshBounds = await refresh.boundingBox();
+      const modelBounds = await selector.boundingBox();
+      const modeBounds = await testPage
+        .getByTestId("profile-mode-field")
+        .getByRole("combobox")
+        .boundingBox();
+      expect(refreshBounds).not.toBeNull();
+      expect(modelBounds).not.toBeNull();
+      expect(modeBounds).not.toBeNull();
+      expect(refreshBounds!.width).toBeCloseTo(28, 0);
+      expect(refreshBounds!.height).toBeCloseTo(28, 0);
+      expect(refreshBounds!.y + refreshBounds!.height).toBeCloseTo(
+        modelBounds!.y + modelBounds!.height,
+        0,
+      );
+      expect(refreshBounds!.y + refreshBounds!.height).toBeCloseTo(
+        modeBounds!.y + modeBounds!.height,
+        0,
+      );
       await selector.click();
       await expect(testPage.getByRole("option", { name: "Profile env alpha" })).toBeVisible();
       await expect(testPage.getByRole("option", { name: "Profile CLI alpha" })).toBeVisible();

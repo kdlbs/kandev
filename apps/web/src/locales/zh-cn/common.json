@@ -278,7 +278,7 @@
   "officeIsNotEnabledForThis": "此运行时未启用办公室。",
   "officeRouteNotPortedYet": "此办公室路由由 SPA 外壳处理，但其专用客户端页面仍在迁移中：<1>{{pathname}}</1>",
   "onboardingAgentsAutoApproveWarning": "<0>注意：</0>默认智能体配置启用了自动批准（YOLO 模式）。",
-  "onboardingAgentsHelp": "展开智能体以配置其模型与权限。继续时会保存更改。之后也可在“设置 > 智能体”中添加自定义 TUI 智能体。",
+  "onboardingAgentsHelp": "更多设置可在“设置 > 智能体”中配置。",
   "onboardingAgentSettingsSaveError": "无法保存代理配置更改，请重试。",
   "onboardingExecutorBuiltIn": "内置",
   "onboardingExecutorClusterSetup": "需要管理员配置集群",
