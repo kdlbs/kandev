@@ -457,6 +457,9 @@ func (m *Manager) admitClaimedRecovery(
 			return fail(err)
 		}
 	}
+	if err := m.preflightPermissionOnlyBlockedRetries(claimCtx, req, indices); err != nil {
+		return fail(err)
+	}
 	if err := m.recoverClaimedRecoverySlots(claimCtx, req, indices, claim, outcome); err != nil {
 		return fail(err)
 	}
@@ -1048,12 +1051,13 @@ func recoveryOperationIDFromSlots(req *RecoveryAdmissionRequest, indices []int) 
 
 func recoveryOperationIDsForSlot(req RecoveryAdmissionRequest, slot RecoverySlot) ([]string, error) {
 	ids := make([]string, 0, 3)
-	relocationID, err := pendingManagedCloneRelocationOperationID(slot.Worktree.Path + ".kandev-clone-relocation.json")
-	if err != nil {
+	relocation, relocationErr := readManagedCloneRelocationRecord(slot.Worktree.Path + ".kandev-clone-relocation.json")
+	if relocationErr != nil && !errors.Is(relocationErr, os.ErrNotExist) {
 		return nil, recoveryAdmissionError(req, "managed-clone relocation record is unreadable")
 	}
-	if relocationID != "" {
-		ids = append(ids, relocationID)
+	if relocationErr == nil &&
+		(relocation.State == managedCloneRelocationStatePrepared || relocation.State == managedCloneRelocationStateMaterialized) {
+		ids = append(ids, relocation.OperationID)
 	}
 	if missing := slot.missingCheckout; missing != nil && missing.record != nil && missing.record.State == missingCheckoutRecordInProgress {
 		ids = append(ids, missing.record.OperationID)
@@ -1064,6 +1068,15 @@ func recoveryOperationIDsForSlot(req RecoveryAdmissionRequest, slot RecoverySlot
 	}
 	if err != nil {
 		return nil, recoveryAdmissionError(req, fmt.Sprintf("read recovery record for %q: %v", slot.Worktree.Path, err))
+	}
+	if record.State == RecoveryStateBlocked {
+		if relocationErr != nil {
+			return nil, recoveryAdmissionError(req, "blocked recovery has no matching materialized relocation")
+		}
+		if err := blockedPermissionRetryCandidate(req, slot, record, relocation); err != nil {
+			return nil, err
+		}
+		return append(ids, record.OperationID), nil
 	}
 	if record.State != RecoveryStateSnapshotting && record.State != RecoveryStateRematerializing {
 		return nil, recoveryAdmissionError(req, fmt.Sprintf("recovery record for %q is already %s", slot.Worktree.Path, record.State))
@@ -1114,20 +1127,6 @@ func (m *Manager) recoveryOperationIDFromClaim(
 		return claim.OperationID, nil
 	}
 	return "", nil
-}
-
-func pendingManagedCloneRelocationOperationID(path string) (string, error) {
-	record, err := readManagedCloneRelocationRecord(path)
-	if errors.Is(err, os.ErrNotExist) {
-		return "", nil
-	}
-	if err != nil {
-		return "", err
-	}
-	if record.State != managedCloneRelocationStatePrepared && record.State != managedCloneRelocationStateMaterialized {
-		return "", nil
-	}
-	return record.OperationID, nil
 }
 
 func (m *Manager) releaseRecoveryClaim(ctx context.Context, claim *models.TaskEnvironmentRecoveryClaim) error {

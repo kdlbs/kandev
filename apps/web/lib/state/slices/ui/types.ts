@@ -17,6 +17,7 @@ import type {
   ThreadViewSliceState,
   ThreadView,
 } from "./thread-view-types";
+import type { RuntimeUpdateSummaryMember } from "@/lib/types/backend";
 
 export type PreviewStage = "closed" | "logs" | "preview";
 export type PreviewViewMode = "preview" | "output";
@@ -233,12 +234,14 @@ export type TaskDeletedNotification = {
 };
 
 export type UpdateAvailableNotification = {
+  notification_kind?: "agent_runtime_summary";
+  runtime_updates?: RuntimeUpdateSummaryMember[];
   agent_name?: string;
   runtime_id?: string;
   display_name?: string;
   previous_version?: string;
   runtime_update_status?: "available" | "succeeded" | "failed" | "interrupted";
-  version: string;
+  version?: string;
   url?: string;
   title: string;
   body: string;

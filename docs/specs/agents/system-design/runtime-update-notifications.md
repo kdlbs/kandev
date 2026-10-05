@@ -48,6 +48,9 @@ Jobs carry the original runtime identity, automatic origin and previous version,
 
 ## Notifications and recovery
 
+The [availability summary design](runtime-update-summary.md) defines fixed-window grouping and per-runtime delivery claims.
+Its [delivery package](../../../plans/agent-runtime-update-summary/plan.md) records the implementation and targeted regression checks.
+
 Reuse notification service semantic delivery, update subscriptions (system.update_available), per-user provider ownership, and persistent delivery claims. Runtime payload identifies agent, display name, runtime source, previous/target versions, and outcome. Occurrence identity combines those identities with available/success/failure and target or job identity; Kandev release occurrence IDs remain independent. Local delivery preserves structured runtime payload so the frontend resolves copy at render time; native/external providers receive concrete agent/runtime copy.
 
 Available updates and terminal outcomes are retried for disconnected local subscribers using persisted status/policy, while delivery claims suppress repeats. Source failures produce no notification. Failed automatic updates retain the old version and expose the existing version dialog for retry, rollback, or return-to-default. No automatic rollback after a later launch failure is introduced.

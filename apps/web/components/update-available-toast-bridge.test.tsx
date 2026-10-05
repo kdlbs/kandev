@@ -94,6 +94,37 @@ describe("UpdateAvailableToastBridge", () => {
     expect(container.childElementCount).toBe(0);
   });
 
+  it("refreshes runtime discovery for a grouped availability notice", () => {
+    const { rerender, container } = render(<UpdateAvailableToastBridge />);
+    mocks.state.updateAvailableNotification = {
+      occurrence_id: "summary-1",
+      notification_kind: "agent_runtime_summary",
+      runtime_updates: [
+        {
+          occurrence_id: "gemini-2",
+          agent_name: "gemini",
+          runtime_id: "npm:@google/gemini-cli",
+          display_name: "Gemini",
+          previous_version: "1.0.0",
+          version: "2.0.0",
+        },
+        {
+          occurrence_id: "codex-3",
+          agent_name: "codex-app-server",
+          runtime_id: "npm:@openai/codex",
+          display_name: "Codex",
+          previous_version: "1.0.0",
+          version: "3.0.0",
+        },
+      ],
+      title: "2 agent runtime updates available",
+      body: "Review runtime versions in Settings > Agents.",
+    };
+    rerender(<UpdateAvailableToastBridge />);
+    expect(mocks.refresh).toHaveBeenCalledTimes(1);
+    expect(container.childElementCount).toBe(0);
+  });
+
   it("does not refresh runtime discovery for an application release notice", () => {
     mocks.state.updateAvailableNotification = {
       occurrence_id: "release-1",

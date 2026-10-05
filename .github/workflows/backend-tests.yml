@@ -866,6 +866,10 @@ jobs:
         if: matrix.suite == 'native'
         run: go test -race -v -json -timeout 25m ./internal/agent/runtime/agentctl/launcher/... ./internal/common/ptyexec/... ./internal/backendapp/ownershiplock/... ./internal/system/storage/workspaces/...
 
+      - name: Test Windows recovery mode preservation
+        if: matrix.suite == 'native'
+        run: go test -tags fts5 -race -v -json -timeout 25m -run '^TestRecoverySnapshotPreservesWindowsReadOnlyMode$' ./internal/worktree
+
       # Keep this targeted: these packages have broader tests, while these
       # native tests verify hidden consoles retain handles for descendants.
       - name: Test Windows helper console behavior

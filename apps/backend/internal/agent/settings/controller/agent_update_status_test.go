@@ -13,12 +13,21 @@ import (
 )
 
 type statusSelectionStore struct {
+	mu        sync.RWMutex
 	selection map[string]managedruntime.Selection
 }
 
 func (s *statusSelectionStore) Get(_ context.Context, agentName, packageName string) (managedruntime.Selection, bool, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	selection, ok := s.selection[agentName+"\x00"+packageName]
 	return selection, ok, nil
+}
+
+func (s *statusSelectionStore) set(key string, selection managedruntime.Selection) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.selection[key] = selection
 }
 
 func (s *statusSelectionStore) Save(context.Context, string, string, string) error {

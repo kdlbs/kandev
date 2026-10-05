@@ -236,16 +236,27 @@ export type DiffUpdatePayload = {
 };
 
 export type UpdateAvailablePayload = {
+  notification_kind?: "agent_runtime_summary";
+  runtime_updates?: RuntimeUpdateSummaryMember[];
   agent_name?: string;
   runtime_id?: string;
   display_name?: string;
   previous_version?: string;
   runtime_update_status?: "available" | "succeeded" | "failed" | "interrupted";
-  version: string;
+  version?: string;
   url?: string;
   title: string;
   body: string;
   occurrence_id: string;
+};
+
+export type RuntimeUpdateSummaryMember = {
+  occurrence_id: string;
+  agent_name: string;
+  runtime_id: string;
+  display_name: string;
+  previous_version: string;
+  version: string;
 };
 
 export type WorkspacePayload = {

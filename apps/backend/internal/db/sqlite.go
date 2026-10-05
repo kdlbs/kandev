@@ -35,8 +35,9 @@ func OpenSQLite(dbPath string) (*sql.DB, error) {
 	// - journal_mode=WAL: better read concurrency with a single writer.
 	// - synchronous=NORMAL: reasonable durability/perf tradeoff for app workloads.
 	// - cache=shared: allow multiple connections to share a page cache.
+	// - txlock=immediate: acquire the writer before transaction predicate reads.
 	dsn := fmt.Sprintf(
-		"file:%s?_foreign_keys=on&_mode=rwc&_busy_timeout=%d&_journal_mode=WAL&_synchronous=NORMAL&_cache=shared",
+		"file:%s?_foreign_keys=on&_mode=rwc&_busy_timeout=%d&_journal_mode=WAL&_synchronous=NORMAL&_cache=shared&_txlock=immediate",
 		normalizedPath,
 		int(defaultBusyTimeout/time.Millisecond),
 	)
@@ -45,7 +46,7 @@ func OpenSQLite(dbPath string) (*sql.DB, error) {
 		return nil, fmt.Errorf("failed to open database: %w", err)
 	}
 
-	// Single writer connection: serializes writes and avoids SQLITE_BUSY.
+	// One connection serializes this pool's writers; independent pools may contend.
 	db.SetMaxOpenConns(1)
 	db.SetMaxIdleConns(1)
 

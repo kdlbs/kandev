@@ -136,6 +136,25 @@ If a worktree contains local changes, Resume or **Restore workspace** stops befo
 
 If an older task still shows a generic recovery error, use Resume or **Restore workspace** once to check the current workspace and reveal the relocation action. A busy inspection leaves every checkout unchanged. Wait for it to finish, then retry manually.
 
+After upgrading, select **Move files and resume** to retry an older blocked
+snapshot caused only by lost file permissions. Kandev checks the original
+checkout and retained snapshot again. It then creates a new snapshot and
+resumes the existing provider conversation. The retry keeps the failed snapshot
+and original checkout for inspection. Git's index and staging choices do not
+transfer; stage files again before committing.
+
+Kandev refuses this retry if content, entry names, symbolic-link targets, the
+required set-ID identity changes during verification, or the new snapshot or
+replacement cannot preserve that identity. A retained set-ID bit in the old
+snapshot must also have the same required identity as the original. When an old
+snapshot lost the bit, its copied owner does not determine the original
+identity. Kandev reads the required UID or GID from the verified original and
+checks it for changes before preserving it on the new snapshot and replacement.
+The host must support preserving each required UID or GID.
+
+Keep both copies and inspect them manually when verification refuses the retry.
+An upgrade does not retry a blocked snapshot automatically.
+
 For a new task branch, the repository default template is:
 
 ```text

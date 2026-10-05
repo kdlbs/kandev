@@ -286,11 +286,15 @@ catalog completeness or account access to every model.
 
 Kandev checks enabled, available agent runtimes in the background, including
 native CLIs with a verified release source. Open **Settings > Agents** to review
-runtime versions and update policies. Notifications name the affected runtime
-and link directly to its row in
-**Settings > Agents > Agent runtime updates**. The existing update-available
-notification preferences apply; repeated notices for the same runtime and version
-are suppressed across reloads.
+runtime versions and update policies. A notice for one runtime names it and links
+directly to its row in **Settings > Agents > Agent runtime updates**. The existing
+update-available notification preferences apply; repeated notices for the same
+runtime and version are suppressed across reloads.
+
+At startup or after reconnect, available runtime updates discovered within the
+same 30-second window appear in one summary. **Review updates** opens the expanded
+runtime section. A notice for one runtime keeps its name and direct link. Update
+success, failure, and interruption notices remain individual and immediate.
 
 The **Agent runtime updates** section is at the bottom of **Settings > Agents**,
 after your installed agents, and starts collapsed. Expand it to manage runtime

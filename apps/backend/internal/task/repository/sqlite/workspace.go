@@ -278,6 +278,9 @@ func (r *Repository) deleteWorkspaceCascade(
 	}
 	sort.Strings(lockIDs)
 	for _, taskID := range lockIDs {
+		if err := r.managedDeletionBarrierTx(ctx, tx, taskID); err != nil {
+			return nil, nil, err
+		}
 		if err := r.lockTaskRowInTx(ctx, tx, taskID); err != nil {
 			return nil, nil, fmt.Errorf("guard cascade task row %s: %w", taskID, err)
 		}

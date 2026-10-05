@@ -29,16 +29,17 @@ const (
 )
 
 type recoveryRecord struct {
-	OperationID string        `json:"operation_id"`
-	TaskID      string        `json:"task_id"`
-	WorktreeID  string        `json:"worktree_id"`
-	Original    string        `json:"original"`
-	Snapshot    string        `json:"snapshot"`
-	Replacement string        `json:"replacement,omitempty"`
-	Manifest    string        `json:"manifest"`
-	State       RecoveryState `json:"state"`
-	UpdatedAt   time.Time     `json:"updated_at"`
-	Error       string        `json:"error,omitempty"`
+	OperationID string             `json:"operation_id"`
+	TaskID      string             `json:"task_id"`
+	WorktreeID  string             `json:"worktree_id"`
+	Original    string             `json:"original"`
+	Snapshot    string             `json:"snapshot"`
+	Replacement string             `json:"replacement,omitempty"`
+	Manifest    string             `json:"manifest"`
+	State       RecoveryState      `json:"state"`
+	UpdatedAt   time.Time          `json:"updated_at"`
+	Error       string             `json:"error,omitempty"`
+	ModeRetry   *recoveryModeRetry `json:"mode_retry,omitempty"`
 }
 
 // CompareAndSwapWorktree replaces one exact durable worktree identity. The
@@ -127,7 +128,7 @@ func (m *Manager) RecoverWorktree(ctx context.Context, wt *Worktree, req CreateR
 	if err := m.ensureRecoveryReplacementWorktree(ctx, req.RepositoryPath, replacementBranch, replacementPath, branch); err != nil {
 		return nil, blockRecovery(jobPath, record, err)
 	}
-	if err := restoreSnapshot(snapshotPath, replacementPath, manifest); err != nil {
+	if err := restoreSnapshot(wt.Path, snapshotPath, replacementPath, manifest); err != nil {
 		return nil, blockRecovery(jobPath, record, err)
 	}
 	replacement := *wt
@@ -139,6 +140,9 @@ func (m *Manager) RecoverWorktree(ctx context.Context, wt *Worktree, req CreateR
 		cas, ok := m.store.(CompareAndSwapWorktreeWithRecoveryClaimStore)
 		if !ok {
 			return nil, blockRecovery(jobPath, record, fmt.Errorf("durable recovery claim publication is unavailable"))
+		}
+		if err := verifyRecoveryRequiredIdentityTrees(wt.Path, snapshotPath, replacementPath); err != nil {
+			return nil, blockRecovery(jobPath, record, err)
 		}
 		swapped, casErr := cas.CompareAndSwapWorktreeWithRecoveryClaim(ctx, wt, &replacement, req.RecoveryClaim)
 		if casErr != nil {
@@ -155,6 +159,9 @@ func (m *Manager) RecoverWorktree(ctx context.Context, wt *Worktree, req CreateR
 			return m.completeRecovery(jobPath, record, wt, persisted)
 		}
 	} else if cas, ok := m.store.(CompareAndSwapWorktreeStore); ok {
+		if err := verifyRecoveryRequiredIdentityTrees(wt.Path, snapshotPath, replacementPath); err != nil {
+			return nil, blockRecovery(jobPath, record, err)
+		}
 		swapped, casErr := cas.CompareAndSwapWorktree(ctx, wt, &replacement)
 		if casErr != nil {
 			return nil, fmt.Errorf("%w: recovery compare-and-swap failed: %w", ErrWorktreeCorrupted, casErr)
@@ -169,8 +176,13 @@ func (m *Manager) RecoverWorktree(ctx context.Context, wt *Worktree, req CreateR
 			}
 			return m.completeRecovery(jobPath, record, wt, persisted)
 		}
-	} else if err := m.store.UpdateWorktree(ctx, &replacement); err != nil {
-		return nil, blockRecovery(jobPath, record, err)
+	} else {
+		if err := verifyRecoveryRequiredIdentityTrees(wt.Path, snapshotPath, replacementPath); err != nil {
+			return nil, blockRecovery(jobPath, record, err)
+		}
+		if err := m.store.UpdateWorktree(ctx, &replacement); err != nil {
+			return nil, blockRecovery(jobPath, record, err)
+		}
 	}
 	return m.completeRecovery(jobPath, record, wt, &replacement)
 }
@@ -224,6 +236,9 @@ func (m *Manager) persistedRecoveryReplacement(ctx context.Context, expected, re
 }
 
 func (m *Manager) completeRecovery(jobPath string, record recoveryRecord, expected, replacement *Worktree) (*Worktree, error) {
+	if err := verifyRecoveryRequiredIdentityTrees(record.Original, record.Snapshot, replacement.Path); err != nil {
+		return nil, err
+	}
 	m.refreshRecoveredWorktreeCache(expected, replacement)
 	record.Replacement, record.State, record.UpdatedAt = replacement.Path, RecoveryStateComplete, time.Now().UTC()
 	if err := writeRecoveryRecord(jobPath, record); err != nil {
@@ -369,6 +384,9 @@ func recoveryAlreadyClaimedError(wt *Worktree, reason string) error {
 }
 
 func prepareRecoverySnapshot(source, snapshot, recordPath string, record recoveryRecord) (string, error) {
+	if record.ModeRetry != nil && !validRecoveryModeRetry(record, source) {
+		return "", blockRecovery(recordPath, record, fmt.Errorf("recovery permission retry record is invalid"))
+	}
 	switch record.State {
 	case RecoveryStateSnapshotting:
 		return rebuildRecoverySnapshot(source, snapshot, recordPath, record)
@@ -383,6 +401,9 @@ func prepareRecoverySnapshot(source, snapshot, recordPath string, record recover
 		if record.Manifest == "" || manifest != record.Manifest {
 			return "", blockRecovery(recordPath, record, fmt.Errorf("recovery snapshot does not match completed snapshot record"))
 		}
+		if err := verifyRecoveryRequiredIdentityTrees(source, snapshot, ""); err != nil {
+			return "", blockRecovery(recordPath, record, err)
+		}
 		return manifest, nil
 	default:
 		return "", blockRecovery(recordPath, record, fmt.Errorf("recovery record has invalid snapshot state %q", record.State))
@@ -392,6 +413,14 @@ func prepareRecoverySnapshot(source, snapshot, recordPath string, record recover
 // rebuildRecoverySnapshot discards a snapshot only while its record has not
 // committed a manifest. A crash in snapshotting can leave a partial copy.
 func rebuildRecoverySnapshot(source, snapshot, recordPath string, record recoveryRecord) (string, error) {
+	return rebuildRecoverySnapshotWithCopier(source, snapshot, recordPath, record, snapshotCheckout)
+}
+
+func rebuildRecoverySnapshotWithCopier(
+	source, snapshot, recordPath string,
+	record recoveryRecord,
+	copySnapshot func(string, string) error,
+) (string, error) {
 	if err := validateRecoverySnapshotPath(source, snapshot); err != nil {
 		return "", blockRecovery(recordPath, record, err)
 	}
@@ -402,10 +431,21 @@ func rebuildRecoverySnapshot(source, snapshot, recordPath string, record recover
 	if err != nil {
 		return "", blockRecovery(recordPath, record, err)
 	}
-	if err := snapshotCheckout(source, snapshot); err != nil {
+	sourceIdentityBefore, err := recoveryRequiredIdentityManifest(source)
+	if err != nil {
+		return "", blockRecovery(recordPath, record, err)
+	}
+	if retry := record.ModeRetry; retry != nil &&
+		(sourceBefore != retry.SourceManifest || sourceIdentityBefore != retry.SourceIdentityManifest) {
+		return "", blockRecovery(recordPath, record, fmt.Errorf("original checkout changed since permission retry proof"))
+	}
+	if err := copySnapshot(source, snapshot); err != nil {
 		record.State, record.Error, record.UpdatedAt = RecoveryStateBlocked, err.Error(), time.Now().UTC()
 		_ = writeRecoveryRecord(recordPath, record)
 		return "", err
+	}
+	if err := verifyRecoverySnapshotIdentityAfterCopy(source, snapshot, sourceIdentityBefore); err != nil {
+		return "", blockRecovery(recordPath, record, err)
 	}
 	sourceAfter, err := checkoutManifest(source)
 	if err != nil || sourceBefore != sourceAfter {
@@ -422,6 +462,24 @@ func rebuildRecoverySnapshot(source, snapshot, recordPath string, record recover
 		return "", blockRecovery(recordPath, record, fmt.Errorf("recovery snapshot does not match original checkout"))
 	}
 	return manifest, nil
+}
+
+func verifyRecoverySnapshotIdentityAfterCopy(source, snapshot, sourceIdentityBefore string) error {
+	sourceIdentityAfter, err := recoveryRequiredIdentityManifest(source)
+	if err != nil {
+		return err
+	}
+	if sourceIdentityBefore != sourceIdentityAfter {
+		return fmt.Errorf("original checkout set-ID identity changed during snapshot")
+	}
+	snapshotIdentity, err := recoveryRequiredIdentityManifest(snapshot)
+	if err != nil {
+		return err
+	}
+	if sourceIdentityAfter != snapshotIdentity {
+		return fmt.Errorf("recovery snapshot set-ID identity does not match original checkout")
+	}
+	return nil
 }
 
 func validateRecoverySnapshotPath(source, snapshot string) error {

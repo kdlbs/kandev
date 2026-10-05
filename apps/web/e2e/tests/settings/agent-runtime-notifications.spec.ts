@@ -1,6 +1,16 @@
 import { test } from "../../fixtures/test-base";
 import { managedFallbackAwareness } from "./agent-runtime-fallback-helpers";
+import { backendRuntimeUpdateSummary } from "./agent-runtime-summary-backend-helpers";
 import { runtimeAwareness } from "./agent-runtime-notifications-helpers";
+
+test("backend startup and reconnect deliver one delayed runtime summary", async ({
+  testPage,
+  backend,
+  apiClient,
+}) => {
+  test.setTimeout(120_000);
+  await backendRuntimeUpdateSummary(testPage, backend, apiClient, false);
+});
 
 test("runtime notices, saved consent and native guidance work outside Settings", async ({
   testPage,
