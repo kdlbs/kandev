@@ -11,12 +11,16 @@ requirements:
 
 ## Boundary and evidence
 
+The 2026-10-05 update restores desktop action placement after feedback on PR #4063.
+Source HEAD is `48adb0ce739`; the earlier controls are in `dd7dfa81634^`.
+The [placement plan](../../../plans/sidebar-action-placement/plan.md) owns this revision.
+The original delivery remains historical evidence for task-panel and phone behavior.
+
 This revises navigation presentation without changing route, task, integration,
-or settings ownership. Investigation used source HEAD
+or settings ownership. The original investigation used source HEAD
 `75a37f34eb6bd0e0a46e9a35a46491bb9f52f7ef` and the supplied annotated references.
-The latest written feedback takes precedence over the saturated sample action
-and spacious card variant: use a restrained neutral creation surface, minor
-Chat/Terminal actions, and compact task rows.
+That delivery used a neutral creation surface, secondary Chat/Terminal actions,
+and compact task rows. The current draft changes desktop control placement only.
 
 At the investigated baseline, Home preceded an ordinary New Task item,
 integration links lacked indentation, filter cues represented drafts only, and
@@ -59,29 +63,25 @@ label, vertically centered within the existing header. Scope the smaller type
 to this trigger; phone workspace selection and dropdown options retain their
 existing readable typography and touch targets.
 Preserve the 320px default expanded width, resize behavior, 56px rail, and
-settings takeover. `AppSidebarNewTaskItem` uses the shared `NewTaskButton` with
-the existing task creation callback. Use the outline primitive, a border from
-`border-border/70`, and a faint `bg-muted/50` surface in both themes. Use normal
-foreground text and a neutral plus icon. Center the plus icon and label together
-within the full button without displaying a shortcut hint. The
-hover surface strengthens to `bg-muted`; keyboard focus retains the native ring.
-The expanded primary action is 44px high with a 14px label and full available width, an explicit
-user-requested exception to ordinary 28px controls after reviewing the first preview.
-Preserve the configured New Task keyboard binding. Reuse the
-existing request subscription and workspace-specific dialogs.
+settings takeover. `AppSidebarNewTaskItem` restores `AppSidebarNavItem` with
+`IconSquarePlus` and the existing creation callback.
+Use its left-aligned 13px label, neutral hover treatment, and 36px navigation-row height.
+Keep the configured keyboard binding and omit a visible shortcut hint.
+Reuse the request subscription, workspace-specific dialogs, and collapsed rail control.
+`NewTaskButton` remains the phone creation primitive with its existing touch sizing.
 
-Place Quick Chat and Terminal in a compact `ButtonGroup` below New Task, aligned
-to its full width. Use one quiet shared border and an inset `ButtonGroupSeparator`
-to anchor the two equal-width ghost actions. Keep their base fill transparent,
-with 12px normal-weight secondary labels and 14px icons on desktop. They retain
-ordinary 28px desktop height and 44px touch targets. The inline phone quick-action
-row uses the same grouping with its existing mobile typography and placement.
-Keep activity indicators and accessible activity labels; place plugin workspace
-actions after the built-in row so they cannot squeeze its labels. Preserve
-launchers, focus rings, phone menu dismissal, and focus return. Labelled quick
-actions have no duplicate hover or focus tooltip; collapsed icon-only controls
-retain their accessible tooltips.
-Retain the collapsed-rail entry points without adding new dialog hosts.
+Place Quick terminal then Quick Chat to the right of New Task in the same row.
+Remove the desktop utility `ButtonGroup`, separator, and visible quick-action text.
+Use `SurfaceAction` from `components/actions/surface-action.tsx` for compact 24px desktop
+icon controls and 44px coarse-pointer targets.
+Keep Quick Chat activity indicators and localized activity names.
+Reuse the earlier desktop tooltip interaction without invoking actions on focus.
+Keep the icon controls separate from the creation button.
+Workspace plugin controls follow them with the same slot props and error boundaries.
+Use a wrapping plugin container so excessive registrations cannot overlap or
+squeeze the built-in actions. Keep the built-in row together.
+The phone `MobileQuickActions` retains its labelled utility bar and existing handoff.
+No new dialog host, launcher, or saved-layout projection is introduced.
 
 Add a navigation presentation to `AppSidebarSection` or a small composed header
 using its existing collapse state. Apply it only to built-in Automations,
@@ -90,14 +90,30 @@ and indented children without vertical guide lines. Tasks and Office headings
 keep their distinct section treatment. Disclosure and any separate action controls remain siblings, never
 nested buttons. Do not impose changes on `ShortcutSection`'s agreed icon header.
 
+For `NavigationSectionHeader`, use a flexible labelled toggle, a sibling header-action
+slot, then a separate rightmost chevron toggle.
+The label owns `headerRef`, `aria-expanded`, and `aria-controls`.
+The redundant chevron stays outside keyboard order and the accessibility tree,
+and performs the same toggle when clicked. Its coarse-pointer hit area is 44px.
+This restores the `headerAction` ordering already used by `SectionHeader`.
+The Canvases settings shortcut remains visible in both disclosure states.
+The shortcut keeps its current workspace route and never calls the toggle.
+Automations and custom section children retain their current presentation.
+
 Place Open automations after the expanded group's rows, using the same labelled
 child treatment as Integration settings. The header only toggles the disclosure.
 The phone wrapper owns the body and its final destination so saved-layout rows,
 empty states, loading, and errors all retain that link. It uses the existing
 `/automations` route and dismisses the phone menu on navigation.
 
-Remove the built-in integration header's unlabelled icon strip. Keep named
-children under the disclosure and offer the existing
+Restore `IntegrationHeaderShortcuts` using eligible first-party entries from the
+already resolved `visibleDestinations`. Place them in `headerAction` before the chevron.
+Keep the old four-shortcut desktop capacity, manifest order, accessible labels,
+and tooltips. On coarse pointers, show at most two shortcuts with 44px hit areas.
+Use `useResponsiveBreakpoint().isFinePointer` for this capacity choice.
+Remaining providers retain their named child links.
+Plugin entries retain saved-layout ownership and cannot displace built-in header shortcuts.
+Keep named children under the disclosure and offer the existing
 `workspaceSettingsHref(workspaceId, "integrations")` setup path even with no
 eligible providers. Derive active link state semantically (`aria-current`) and
 visually. Home's current state covers `/`, `/tasks`, and `/threads` in regular
@@ -107,13 +123,20 @@ workspaces while its href still respects startup/workspace settings.
 
 `AppSidebarFooter` retains settings route/takeover coordination and unsaved-draft
 guards. Its expanded footer is a single nonwrapping row: authenticated account
-avatar when present, a growing labelled Settings action, theme toggle, and More
+avatar when present, a growing labelled Settings action, Stats, theme toggle, and More
 Actions. The account menu displays the actual identity and existing logout action;
 no account is fabricated in no-auth installs. A connection warning remains visible
 when the status bar is disabled.
 
+Resolve Stats from `useStaticDestinations("sidebar", "insights")` by its built-in
+`stats` identity. Render its icon, resolved label, and href through `FooterIconButton`
+immediately before `ThemeToggle`, with `sidebar-stats-button` as its test identity.
+Exclude only that destination from `SidebarFooterMenu`.
+Plugin IDs remain namespaced, so a plugin's local `stats` ID cannot be excluded.
+The expanded footer and collapsed rail both expose the direct Stats control.
+
 Reuse the existing dropdown primitives for one labelled utilities menu containing
-Stats, eligible plugin insight destinations, Improve Kandev, and release notes
+eligible plugin insight destinations, Improve Kandev, and release notes
 when available. The More Actions trigger retains the unseen-release indicator.
 All insight destinations keep their registered order, labels, test identities,
 and navigation handlers. No plugin count changes the footer's geometry. Menu items have 44px hit targets
@@ -122,7 +145,7 @@ layouts still own their projected plugin entries, preventing duplicates. The old
 three-inline-plugin partition and its constant are removed. This supersedes the
 inline budget and icon-row presentation in the plugin footer design while keeping
 its registration, availability, identity, ordering, and phone parity contracts.
-The rail uses the same menu with square triggers. Phone utilities remain labelled
+The rail uses the remaining menu with square triggers. Phone utilities remain labelled
 rows in the existing drawer; no desktop overflow menu is projected onto phones.
 
 ## Task panel

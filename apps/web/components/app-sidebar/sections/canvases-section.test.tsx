@@ -65,6 +65,7 @@ beforeEach(() => {
   mocks.enabled = true;
   mocks.pathname = "/";
   state.appSidebar.sectionExpanded.canvases = true;
+  state.toggleAppSidebarSection.mockClear();
   mocks.listWorkspaceCanvases.mockReset();
   mocks.listWorkspaceCanvases.mockResolvedValue({
     canvases: [
@@ -197,6 +198,27 @@ describe("CanvasesSection", () => {
 
     await waitFor(() => expect(screen.getByText(CANVASES_LABEL)).toBeTruthy());
     expect(screen.queryByTestId(ACTIVE_CANVAS_TEST_ID)).toBeNull();
+  });
+});
+
+describe("CanvasesSection settings shortcut", () => {
+  it("keeps workspace settings available while closed without toggling Canvases", async () => {
+    state.appSidebar.sectionExpanded.canvases = false;
+    render(
+      <TooltipProvider>
+        <CanvasesSection collapsed={false} />
+      </TooltipProvider>,
+    );
+
+    const heading = screen.getByRole("button", { name: CANVASES_LABEL });
+    const settings = await screen.findByTestId("sidebar-canvases-settings");
+    expect(heading.getAttribute("aria-expanded")).toBe("false");
+    expect(settings.getAttribute("href")).toBe("/settings/workspaces/workspace-1/canvases");
+
+    settings.click();
+
+    expect(state.toggleAppSidebarSection).not.toHaveBeenCalled();
+    expect(heading.getAttribute("aria-expanded")).toBe("false");
   });
 });
 

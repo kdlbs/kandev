@@ -146,11 +146,14 @@ Group headings have a leading collapse control, label, and count. Tasks sit
 indented below each heading, with space between groups; subtasks remain nested one
 level deeper. Grouping by state also shows the group's status icon. Plain task rows keep your
 selected metadata and trailing details, with highlights for hover, selection, and keyboard focus.
-Settings and the signed-in account, when available, stay in the
-single-row desktop sidebar footer, alongside theme switching. Use **Show more actions**
-(the three-dot button) for Stats, plugin utilities, Improve Kandev, and release notes.
-**New Task** uses a neutral button, with **Quick Chat** and **Terminal** as smaller
-labelled actions in a shared utility bar beneath it.
+On desktop, **New Task**, **Terminal**, and **Quick Chat** share one compact row.
+The icon actions stay labelled for assistive technology and show their names on hover.
+The Canvases header has a settings shortcut. Eligible first-party integrations also
+show header shortcuts; their named links remain available in the expanded section.
+
+Settings, direct **Stats** access, theme switching, and the three-dot menu share the
+single-row desktop footer, in that order. The three-dot menu contains plugin utilities,
+Improve Kandev, and release notes.
 
 Expand **Automations** and choose **Open automations** below its entries to see the
 full list. This labelled link sits inside the group on desktop and phones, like

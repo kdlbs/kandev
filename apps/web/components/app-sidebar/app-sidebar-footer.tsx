@@ -323,8 +323,11 @@ export function AppSidebarFooter({
   const settingsMode = useAppStore((s) => s.appSidebar.settingsMode);
   const toggleSettings = useSettingsGearToggle(settingsMode, activeWorkspace, onToggleSettingsMode);
   const appStatusBarEnabled = useAppStore((s) => s.userSettings.appStatusBarEnabled);
-  const insightDestinations = useStaticDestinations("sidebar", "insights").filter(
-    (destination) => !layoutManaged || destination.source !== "plugin",
+  const allInsightDestinations = useStaticDestinations("sidebar", "insights");
+  const statsDestination = allInsightDestinations.find((destination) => destination.id === "stats");
+  const insightDestinations = allInsightDestinations.filter(
+    (destination) =>
+      destination.id !== "stats" && (!layoutManaged || destination.source !== "plugin"),
   );
   const releaseNotes = useReleaseNotes();
   const improveOpen = useAppStore((s) => s.appSidebar.improveDialogOpen);
@@ -351,6 +354,15 @@ export function AppSidebarFooter({
         active={settingsMode}
         testId="sidebar-settings-gear"
       />
+      {statsDestination && (
+        <FooterIconButton
+          icon={statsDestination.icon}
+          label={statsDestination.label}
+          collapsed={collapsed}
+          onClick={() => router.push(statsDestination.href)}
+          testId="sidebar-stats-button"
+        />
+      )}
       <ThemeToggle className="size-7 [@media(pointer:coarse)]:size-11" />
       <SidebarFooterMenu
         destinations={insightDestinations}

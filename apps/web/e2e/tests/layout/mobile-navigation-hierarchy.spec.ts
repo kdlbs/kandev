@@ -1,6 +1,15 @@
 import { test, expect } from "../../fixtures/test-base";
 import { expectTouchControl } from "../../helpers/control-sizing";
 import { MobileGitHubPage } from "../../pages/mobile-github-page";
+import { closeQuickTerminalTab } from "../terminal/terminal-test-helpers";
+
+function rightEdge(box: { x: number; width: number }): number {
+  return box.x + box.width;
+}
+
+function bottomEdge(box: { y: number; height: number }): number {
+  return box.y + box.height;
+}
 
 test("Open automations is a child destination that dismisses the phone menu", async ({
   testPage,
@@ -117,4 +126,87 @@ test("creation stays open across the phone boundary with its draft", async ({ te
     await expect(dialog).toHaveCount(1);
     await expect(title).toHaveValue("Preserve this navigation draft");
   }
+});
+
+test("phone drawer actions keep touch targets, focus handoff, and direct Stats access", async ({
+  testPage,
+}) => {
+  test.setTimeout(120_000);
+  await testPage.goto("/tasks");
+  const trigger = testPage.getByTestId("app-nav-trigger");
+
+  for (const width of [360, 393, 767]) {
+    await testPage.setViewportSize({ width, height: 851 });
+    await trigger.tap();
+    const menu = testPage.getByTestId("app-nav-sheet");
+    await expect(menu).toBeVisible();
+    const menuBox = (await menu.boundingBox())!;
+    for (const id of [
+      "mobile-new-task-button",
+      "mobile-quick-chat-button",
+      "mobile-quick-terminal-button",
+    ]) {
+      const action = menu.getByTestId(id);
+      await expectTouchControl(action);
+      const box = (await action.boundingBox())!;
+      expect(box.x).toBeGreaterThanOrEqual(menuBox.x);
+      expect(rightEdge(box)).toBeLessThanOrEqual(rightEdge(menuBox));
+      expect(box.y).toBeGreaterThanOrEqual(menuBox.y);
+      expect(bottomEdge(box)).toBeLessThanOrEqual(bottomEdge(menuBox));
+    }
+    expect(await testPage.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(
+      true,
+    );
+    await menu.getByRole("button", { name: "Close", exact: true }).tap();
+    await expect(menu).toBeHidden();
+    await expect(trigger).toBeFocused();
+  }
+
+  await testPage.setViewportSize({ width: 393, height: 851 });
+  await trigger.tap();
+  const menu = testPage.getByTestId("app-nav-sheet");
+  await menu.getByTestId("mobile-new-task-button").tap();
+  const createDialog = testPage.getByTestId("create-task-dialog");
+  await expect(menu).toBeHidden();
+  await expect(createDialog).toBeVisible();
+  await createDialog.getByRole("button", { name: "Cancel", exact: true }).tap();
+  await expect(createDialog).toBeHidden();
+
+  await trigger.tap();
+  await menu.getByTestId("mobile-quick-chat-button").tap();
+  const quickChat = testPage.getByRole("dialog", { name: "Quick Chat", exact: true });
+  await expect(menu).toBeHidden();
+  await expect(quickChat.getByTestId("quick-chat-setup")).toBeVisible();
+  await quickChat.getByTestId("quick-chat-close").tap();
+  await expect(quickChat).toBeHidden();
+  await expect(trigger).toBeFocused();
+
+  await trigger.tap();
+  await menu.getByTestId("mobile-quick-terminal-button").tap();
+  const quickTerminal = testPage.getByRole("dialog", { name: "Quick Chat", exact: true });
+  await expect(menu).toBeHidden();
+  const terminalTabs = quickTerminal.getByTestId("quick-terminal-tab");
+  await expect(terminalTabs).toHaveCount(1);
+  await expect(quickTerminal.getByTestId("quick-terminal-terminal")).toBeVisible();
+  await closeQuickTerminalTab(testPage, terminalTabs.first());
+  await expect(terminalTabs).toHaveCount(0);
+  await expect(quickTerminal).toBeHidden();
+  await expect(trigger).toBeFocused();
+
+  await trigger.tap();
+  const utilities = menu.getByText("Utilities", { exact: true });
+  const stats = menu.getByRole("link", { name: "Stats", exact: true });
+  await expect(utilities).toBeVisible();
+  await stats.scrollIntoViewIfNeeded();
+  await expectTouchControl(stats);
+  const menuBox = (await menu.boundingBox())!;
+  const statsBox = (await stats.boundingBox())!;
+  expect(statsBox.x).toBeGreaterThanOrEqual(menuBox.x);
+  expect(rightEdge(statsBox)).toBeLessThanOrEqual(rightEdge(menuBox));
+  await stats.tap();
+  await expect(menu).toBeHidden();
+  await expect(testPage).toHaveURL(/\/stats$/);
+  expect(await testPage.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(
+    true,
+  );
 });

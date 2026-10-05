@@ -60,10 +60,10 @@ without reducing touch usability.
 
 The dimensions use CSS pixels at a 16px root font and scale with that root font.
 Existing documented compact mobile chrome, such as MobilePillButton, retains
-its explicit exception. The expanded sidebar New Task action also has an explicit
-44px exception under [navigation hierarchy](navigation-hierarchy.md), requested
-after visual review. Its adjacent Quick Chat and Terminal controls remain 28px on
-fine-pointer desktop. Neither exception changes ordinary action sizing.
+its explicit exception. The sidebar New Task row follows the
+[navigation hierarchy](navigation-hierarchy.md) contract.
+Its compact Quick Chat and Terminal icon controls use 24px on fine-pointer desktop.
+Phone and coarse-pointer controls retain the 44px minimum.
 
 The settings typography contract remains authoritative for text roles.
 This requirement adds the shared height contract for its controls.

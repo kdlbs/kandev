@@ -20,6 +20,10 @@ system_design:
 
 # Task 01: Desktop actions and navigation groups
 
+The [placement revision](../sidebar-action-placement/task-01-restore-sidebar-actions.md)
+supersedes this completed work order's desktop creation-row, header-shortcut, and Stats-menu targets.
+The previews and results below describe the original delivery.
+
 ## Summary
 
 Make New Task primary and built-in navigation groups recognizably expandable.

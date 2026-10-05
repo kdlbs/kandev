@@ -65,11 +65,11 @@ test.describe("quick terminal tabs", () => {
       const utilities = testPage.getByTestId("sidebar-quick-actions");
       await expect(utilities.getByRole("button").first()).toHaveAttribute(
         "data-testid",
-        "sidebar-quick-chat-shortcut",
+        "sidebar-quick-terminal-shortcut",
       );
       await expect(utilities.getByRole("button").last()).toHaveAttribute(
         "data-testid",
-        "sidebar-quick-terminal-shortcut",
+        "sidebar-quick-chat-shortcut",
       );
 
       await terminalButton.click();

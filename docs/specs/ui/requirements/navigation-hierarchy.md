@@ -19,6 +19,10 @@ UI owns this reusable cross-page presentation contract. Task state, workflow
 definitions, integration availability, workspace access, and account identity
 retain their existing owners.
 
+The 2026-10-05 update revises desktop action placement after feedback on PR #4063.
+It restores the compact creation row, header shortcuts, and direct Stats control.
+The task-panel and phone contracts retain their existing behavior.
+
 ## Relationship to current contracts
 
 This implemented revision updates phone ordering and creation placement,
@@ -38,14 +42,12 @@ The change does not replace task-row field preferences or task grouping rules.
 
 - **AC-UI-NAV-HIERARCHY-001.1:** In the default expanded desktop sidebar,
   workspace selection shall remain in the fixed header. New Task shall appear
-  before Home as a full-width creation action with a subtle neutral surface,
-  a quiet border, 44px height, and a 14px label at the standard root font. Its
-  background shall not use a saturated accent color. This
-  dedicated creation action is an explicit exception to ordinary desktop control
-  density, as requested after reviewing the first preview. It shall open the
-  existing creation flow for the active
+  before Home as a compact, left-aligned navigation-style button. Its leading
+  creation icon and label shall share one row with independent actions on the right.
+  The button shall match ordinary navigation-row density and neutral styling.
+  It shall open the existing creation flow for the active
   workspace, with a disabled state when no eligible workspace is available.
-  Its plus icon and label shall be centered without a visible shortcut hint.
+  It shall have no visible shortcut hint.
   The effective configured keyboard shortcut shall remain available.
 - **AC-UI-NAV-HIERARCHY-001.2:** Home and eligible direct destinations shall
   be links. Home shall indicate the current destination across the regular
@@ -59,30 +61,47 @@ The change does not replace task-row field preferences or task grouping rules.
   and plugin destinations and an integration-settings path when no provider
   is configured. Availability shall follow the active workspace. A collapsed
   built-in disclosure shall not depend on an unlabelled icon strip for access.
+  The expanded desktop sidebar shall also show eligible first-party provider
+  shortcut icons on the right of the Integrations label, before its chevron.
+  These shortcuts shall remain visible when the disclosure is closed.
+  Each shortcut shall have a localized accessible name and navigate independently.
+  The header shall show no provider shortcuts when none are eligible.
+  Providers beyond the header capacity and plugin destinations shall remain in the children.
   Explicit user-created shortcut groups shall retain their direct icon actions.
 - **AC-UI-NAV-HIERARCHY-001.4:** Quick Chat, Quick terminal, workspace actions,
   required inboxes, canvases, and eligible plugin navigation shall remain
-  reachable. Secondary quick actions shall be visually separate from New Task.
-  Quick Chat and Terminal shall retain visible labels and activity cues while
-  using secondary text contrast and no persistent button fill. The pair shall
-  form one compact utility bar with a quiet shared boundary, an inset divider,
-  and equal-width targets. Desktop actions shall remain 28px high; phone and
-  coarse-pointer actions shall retain 44px touch targets.
-  Eligible workspace plugin actions shall follow the desktop quick actions. Opening navigation shall not invoke any of these actions.
+  reachable. Desktop Quick terminal and Quick Chat shall be independent icon
+  buttons on the right of New Task, in that order, without a second utility row.
+  They shall retain accessible names, desktop tooltips, and Quick Chat activity cues.
+  Desktop quick-action icons shall use the compact 24px size.
+  Eligible workspace plugin actions shall follow these quick actions.
+  Excess plugin actions shall wrap without displacing or overlapping the built-in controls.
+  Phone quick actions shall retain their labelled utility bar and launch behavior.
+  Phone and coarse-pointer actions shall retain 44px touch targets.
+  Opening navigation shall not invoke any of these actions.
 - **AC-UI-NAV-HIERARCHY-001.5:** The expanded desktop footer shall keep a
   labelled Settings destination and, only for an authenticated user, the actual
   account avatar with identity and the existing action in its menu. The footer
-  shall occupy one row, with Settings, theme switching, and a More Actions menu.
-  Stats, plugin footer destinations, Improve Kandev, and available release notes
+  shall occupy one row, with Settings, a direct Stats icon button, theme switching,
+  and a More Actions menu, in that order. Stats shall sit immediately left of the
+  theme button, with a localized accessible name and tooltip.
+  Stats shall not appear in the More Actions menu.
+  Plugin footer destinations, Improve Kandev, and available release notes
   shall remain reachable as labelled menu items. Unseen release notes shall keep
   an indicator on the menu trigger. Plugin count shall not add footer rows. The collapsed rail shall retain named launchers,
   workspace switching, and its current expand/hover behavior.
 - **AC-UI-NAV-HIERARCHY-001.6:** Saved desktop layout order and visibility
   shall survive the revision, reload, and workspace switches. Visible New Task
-  shall receive primary styling at its saved position; the new default order
+  shall receive the compact action row at its saved position; the default order
   applies only to uncustomized/reset layouts. All changed controls shall have
   keyboard operation, visible focus, truthful current/expanded states, and
   localized accessible names in every shipped locale.
+- **AC-UI-NAV-HIERARCHY-001.7:** In the expanded desktop sidebar, the Canvases
+  settings shortcut shall appear after its label and before its rightmost chevron.
+  It shall remain available while the disclosure is closed.
+  Activating the shortcut shall open the active workspace's canvas settings without toggling the disclosure.
+  Activating the label or chevron shall only toggle the disclosure.
+  Header actions shall remain separate controls without nested buttons or links.
 
 ### REQ-UI-NAV-HIERARCHY-002: Compact contextual task panel
 
@@ -182,3 +201,4 @@ The change does not replace task-row field preferences or task grouping rules.
 ## Delivery
 
 - [Implementation plan and comparison work order](../../../plans/navigation-hierarchy/plan.md)
+- [Desktop action-placement revision](../../../plans/sidebar-action-placement/plan.md)

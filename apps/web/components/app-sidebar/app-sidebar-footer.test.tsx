@@ -80,9 +80,13 @@ type FooterDestination = {
   pluginItemId?: string;
 };
 
+const STATS_LABEL = "Stats";
+const STATS_BUTTON_TEST_ID = "sidebar-stats-button";
+const ARIA_LABEL_ATTRIBUTE = "aria-label";
+
 const STATS_DESTINATION: FooterDestination = {
   id: "stats",
-  label: "Stats",
+  label: STATS_LABEL,
   icon: IconChartBar,
   section: "insights",
   href: "/stats",
@@ -144,7 +148,7 @@ vi.mock("@kandev/ui/tooltip", () => ({
 // state, matching this repo's existing dropdown-menu mock convention) so
 // capacity tests can scope `within()` to it and prove an item is actually
 // inside the overflow menu rather than merely present somewhere in the
-// document — the same testid an inline `FooterIconButton` would also use.
+// document.
 vi.mock("@kandev/ui/dropdown-menu", () => ({
   DropdownMenuLabel: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
   DropdownMenuSeparator: () => <hr />,
@@ -217,20 +221,36 @@ describe("AppSidebarFooter", () => {
 
   afterEach(() => cleanup());
 
-  it("renders navigation icons as buttons so hover does not expose link URLs", () => {
+  it("renders Stats as a direct footer button outside the utilities menu", () => {
     renderFooter();
 
-    const statsButton = screen.getByRole("button", { name: "Stats" });
+    const footer = screen.getByTestId("sidebar-footer");
+    const statsButton = within(footer).getByTestId(STATS_BUTTON_TEST_ID);
 
     expect(statsButton).toBeTruthy();
     expect(statsButton.getAttribute("href")).toBeNull();
-    expect(screen.queryByRole("link", { name: "Stats" })).toBeNull();
+    expect(statsButton.getAttribute(ARIA_LABEL_ATTRIBUTE)).toBe(STATS_LABEL);
+    expect(screen.queryByRole("link", { name: STATS_LABEL })).toBeNull();
+    expect(within(overflowMenuContent()).queryByTestId(STATS_BUTTON_TEST_ID)).toBeNull();
+
+    const orderedControls = [
+      within(footer).getByTestId("sidebar-settings-gear"),
+      statsButton,
+      screen.getByRole("button", { name: "Theme" }),
+      within(footer).getByTestId(OVERFLOW_TRIGGER_TEST_ID),
+    ];
+    for (let index = 0; index < orderedControls.length - 1; index++) {
+      expect(
+        orderedControls[index].compareDocumentPosition(orderedControls[index + 1]) &
+          Node.DOCUMENT_POSITION_FOLLOWING,
+      ).toBeTruthy();
+    }
   });
 
   it("navigates from the Stats footer button", () => {
     renderFooter();
 
-    fireEvent.click(screen.getByRole("button", { name: "Stats" }));
+    fireEvent.click(screen.getByTestId(STATS_BUTTON_TEST_ID));
 
     expect(mocks.routerPush).toHaveBeenCalledWith("/stats");
   });
@@ -250,7 +270,7 @@ describe("AppSidebarFooter", () => {
 
     renderFooter(false, true);
 
-    expect(screen.getByRole("button", { name: "Stats" })).not.toBeNull();
+    expect(screen.getByTestId(STATS_BUTTON_TEST_ID)).not.toBeNull();
     expect(screen.queryByTestId("sidebar-plugin:acme:board-button")).toBeNull();
   });
 
@@ -358,7 +378,9 @@ describe("AppSidebarFooter connection fallback", () => {
     renderFooter();
 
     const warning = screen.getByTestId("sidebar-connection-warning");
-    expect(warning.getAttribute("aria-label")).toBe("Connection unstable. Reconnecting to Kandev.");
+    expect(warning.getAttribute(ARIA_LABEL_ATTRIBUTE)).toBe(
+      "Connection unstable. Reconnecting to Kandev.",
+    );
     expect(warning.getAttribute("data-connection-severity")).toBe("unstable");
     expect(warning.closest('[data-testid="sidebar-footer"]')).not.toBeNull();
   });
@@ -407,7 +429,7 @@ describe("AppSidebarFooter current-user chip", () => {
     renderFooter();
 
     const chip = screen.getByTestId("current-user-chip");
-    expect(chip.getAttribute("aria-label")).toBe("Jane Doe");
+    expect(chip.getAttribute(ARIA_LABEL_ATTRIBUTE)).toBe("Jane Doe");
 
     fireEvent.click(screen.getByTestId("current-user-logout"));
 
@@ -441,14 +463,14 @@ describe("AppSidebarFooter utilities menu", () => {
   beforeEach(resetFooterState);
   afterEach(cleanup);
 
-  it("keeps Stats and Improve Kandev in a labelled menu even without plugins", () => {
+  it("keeps Improve Kandev in the menu while Stats stays in the footer", () => {
     renderFooter();
-    expect(screen.getByTestId(OVERFLOW_TRIGGER_TEST_ID).getAttribute("aria-label")).toBe(
+    expect(screen.getByTestId(OVERFLOW_TRIGGER_TEST_ID).getAttribute(ARIA_LABEL_ATTRIBUTE)).toBe(
       t("common:showMoreActions"),
     );
     const menu = within(overflowMenuContent());
-    fireEvent.click(menu.getByTestId("sidebar-stats-button"));
-    expect(mocks.routerPush).toHaveBeenCalledWith("/stats");
+    expect(menu.queryByTestId(STATS_BUTTON_TEST_ID)).toBeNull();
+    expect(screen.getByTestId(STATS_BUTTON_TEST_ID)).toBeTruthy();
     fireEvent.click(menu.getByTestId("sidebar-improve-kandev-button"));
     expect(mocks.setImproveDialogOpen).toHaveBeenCalledWith(true);
   });
@@ -483,7 +505,8 @@ describe("AppSidebarFooter utilities menu", () => {
       insightDestinations = [STATS_DESTINATION, ...pluginDestinations(8)];
       renderFooter(collapsed);
       const menu = overflowMenuContent();
-      expect(within(menu).getByTestId("sidebar-stats-button")).toBeTruthy();
+      expect(within(menu).queryByTestId(STATS_BUTTON_TEST_ID)).toBeNull();
+      expect(screen.getByTestId(STATS_BUTTON_TEST_ID)).toBeTruthy();
       const plugins = menu.querySelectorAll('[data-testid^="sidebar-plugin:"]');
       expect(Array.from(plugins, (item) => item.textContent)).toEqual(
         Array.from({ length: 8 }, (_, i) => `Acme Board ${i}`),

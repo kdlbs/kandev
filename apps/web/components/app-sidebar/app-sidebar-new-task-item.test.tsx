@@ -54,8 +54,11 @@ const state = {
   setImproveDialogOpen: mocks.setImproveDialogOpen,
 };
 const CREATE_TASK_TEST_ID = "create-task-button";
+const QUICK_ACTIONS_GROUP_TEST_ID = "sidebar-quick-actions";
 const QUICK_TERMINAL_TEST_ID = "sidebar-quick-terminal-shortcut";
 const QUICK_CHAT_TEST_ID = "sidebar-quick-chat-shortcut";
+const UTILITIES_LABEL = "Utilities";
+const ARIA_LABEL_ATTRIBUTE = "aria-label";
 let officeEnabled = false;
 let pathname = "/";
 let workspaceMode: "office" | "kanban" | "unknown" = "kanban";
@@ -267,36 +270,40 @@ describe("AppSidebarNewTaskItem dialog routing", () => {
 });
 
 describe("AppSidebarNewTaskItem row actions", () => {
-  it("opens quick terminal from its labelled action beside Quick Chat", () => {
+  it("keeps icon-only Terminal and Quick Chat actions beside New Task", () => {
     renderItem(false);
 
+    const create = screen.getByTestId(CREATE_TASK_TEST_ID);
+    const actions = screen.getByTestId(QUICK_ACTIONS_GROUP_TEST_ID);
     const terminal = screen.getByTestId(QUICK_TERMINAL_TEST_ID);
     const quickChat = screen.getByTestId(QUICK_CHAT_TEST_ID);
-    expect(quickChat.textContent).toBe("Quick Chat");
-    expect(terminal.textContent).toBe("Terminal");
-    expect(quickChat.closest('[role="group"]')).toBe(
-      screen.getByRole("group", { name: "Utilities" }),
-    );
-    expect(Array.from(quickChat.parentElement!.querySelectorAll("button"))).toEqual([
-      quickChat,
-      terminal,
-    ]);
+    expect(create.parentElement).toBe(actions.parentElement);
+    expect(actions.parentElement?.firstElementChild).toBe(create);
+    expect(actions.getAttribute(ARIA_LABEL_ATTRIBUTE)).toBe(UTILITIES_LABEL);
+    expect(Array.from(actions.querySelectorAll("button"))).toEqual([terminal, quickChat]);
+    expect(terminal.getAttribute(ARIA_LABEL_ATTRIBUTE)).toBe("Quick terminal");
+    expect(quickChat.getAttribute(ARIA_LABEL_ATTRIBUTE)).toBe("Quick Chat");
+    expect(terminal.textContent).toBe("");
+    expect(quickChat.textContent).toBe("");
 
     terminal.click();
     expect(mocks.openQuickTerminal).toHaveBeenCalledOnce();
   });
 
   it.each([QUICK_CHAT_TEST_ID, QUICK_TERMINAL_TEST_ID])(
-    "%s does not repeat its visible label in a hover or focus tooltip",
+    "%s exposes its name on hover without opening a tooltip on focus",
     (testId) => {
       renderItem(false);
 
       const action = screen.getByTestId(testId);
-      fireEvent.pointerEnter(action);
+      fireEvent.focus(action);
       expect(screen.queryByRole("tooltip")).toBeNull();
 
+      fireEvent.pointerEnter(action);
+      expect(screen.getByRole("tooltip").textContent).toBe(
+        action.getAttribute(ARIA_LABEL_ATTRIBUTE),
+      );
       fireEvent.pointerLeave(action);
-      fireEvent.focus(action);
       expect(screen.queryByRole("tooltip")).toBeNull();
     },
   );
@@ -382,11 +389,10 @@ describe("AppSidebarNewTaskItem sidebar-workspace-actions plugin slot", () => {
     const plugin = screen.getByTestId(PLUGIN_TEST_ID);
     const pluginSlot = plugin.parentElement;
     expect(pluginSlot?.getAttribute("data-plugin-slot")).toBe("sidebar-workspace-actions");
-    expect(Array.from(quickChat.parentElement!.querySelectorAll("button"))).toEqual([
-      quickChat,
-      terminal,
-    ]);
-    expect(quickChat.parentElement?.nextElementSibling).toBe(pluginSlot);
+    expect(
+      Array.from(screen.getByTestId(QUICK_ACTIONS_GROUP_TEST_ID).querySelectorAll("button")),
+    ).toEqual([terminal, quickChat]);
+    expect(screen.getByTestId(QUICK_ACTIONS_GROUP_TEST_ID).nextElementSibling).toBe(pluginSlot);
   });
 
   it("A2: forwards the active workspace id and label as slotProps", () => {
@@ -411,12 +417,13 @@ describe("AppSidebarNewTaskItem sidebar-workspace-actions plugin slot", () => {
     ]);
     renderItem(false);
 
-    const quickChat = screen.getByTestId(QUICK_CHAT_TEST_ID);
     const firstPlugin = screen.getByTestId(`${PLUGIN_TEST_ID}-one`);
     const secondPlugin = screen.getByTestId(`${PLUGIN_TEST_ID}-two`);
     const pluginSlot = firstPlugin.parentElement;
     expect(pluginSlot).toBe(secondPlugin.parentElement);
-    expect(quickChat.parentElement?.nextElementSibling).toBe(pluginSlot);
+    expect(screen.getByTestId(QUICK_ACTIONS_GROUP_TEST_ID).nextElementSibling).toBe(pluginSlot);
+    expect(pluginSlot?.className).toContain("flex-wrap");
+    expect(pluginSlot?.className).toContain("max-w-full");
     expect(firstPlugin.nextElementSibling).toBe(secondPlugin);
   });
 
