@@ -5,6 +5,7 @@ description: Use when the user runs /retro or explicitly requests a session retr
 
 # Retro
 
+Run this workflow only when the user explicitly requests a retrospective. A natural-language request is sufficient.
 Review the current session for lessons that improve future agent sessions.
 By default, propose edits in the reply and stop. Do not edit files during the retrospective.
 If the user explicitly requests edits as part of the retro, apply the qualifying changes within that authorization.
@@ -70,7 +71,7 @@ If the fix belongs to an uneditable tool or hosted service, report it separately
 Do not propose a brittle harness workaround for an upstream defect.
 
 Resolve symlinks before choosing an edit path. Use `.agents/skills/` and `AGENTS.md` as this repository's shared sources.
-Do not edit `CLAUDE.md` separately when it links to `AGENTS.md`.
+Edit `AGENTS.md` directly. Preserve the `CLAUDE.md` symlink to it.
 Do not copy skill changes into platform mirrors or create new platform trees.
 If a real platform file needs a distinct change, read the corresponding harness-improvement platform reference first.
 Measure target line, word, and byte counts. Stay within the limits in its [validation reference](../harness-improvement/references/validation.md).
