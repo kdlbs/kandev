@@ -213,3 +213,9 @@ PR review follow-up passed on 2026-10-05:
 - Quick-action labels remain available on keyboard focus; a desktop E2E assertion verifies the integration shortcut's visible keyboard focus indicator.
 - A focused phone-test comment records that Quick Terminal uses the shared Quick Chat dialog host.
 - Focused component tests: 62 tests passed across three suites; managed Chromium E2E: 3 tests passed.
+
+PR CI fixup on 2026-10-05:
+
+- Fixed the phone drawer geometry E2E to wait for finite drawer animations before comparing parent and child bounds.
+- Reproduced the original CI failure twice in four constrained CI-image runs; the corrected test passed four of four constrained runs.
+- The complete `mobile-navigation-hierarchy.spec.ts` passed all four tests in the constrained CI image with retries disabled.

@@ -208,6 +208,12 @@ PR review follow-up on 2026-10-05:
 - Quick-action labels remain available on keyboard focus; the shortcut focus indicator and active-route cues have rendered E2E coverage.
 - Focused component tests: 62 tests passed across three suites; managed Chromium E2E: 3 tests passed.
 
+PR CI fixup on 2026-10-05:
+
+- Fixed the phone drawer geometry E2E to wait for finite drawer animations before comparing parent and child bounds.
+- Reproduced the original CI failure twice in four constrained CI-image runs; the corrected test passed four of four constrained runs.
+- The complete `mobile-navigation-hierarchy.spec.ts` passed all four tests in the constrained CI image with retries disabled.
+
 ## Risks
 
 - Many workspace plugin actions can squeeze a compact row. Wrapping must preserve the built-in controls.

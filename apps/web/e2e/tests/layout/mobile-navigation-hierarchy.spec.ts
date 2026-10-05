@@ -140,6 +140,14 @@ test("phone drawer actions keep touch targets, focus handoff, and direct Stats a
     await trigger.tap();
     const menu = testPage.getByTestId("app-nav-sheet");
     await expect(menu).toBeVisible();
+    await menu.evaluate(async (element) => {
+      await Promise.all(
+        element
+          .getAnimations({ subtree: true })
+          .filter((animation) => Number.isFinite(animation.effect?.getComputedTiming().iterations))
+          .map((animation) => animation.finished.catch(() => undefined)),
+      );
+    });
     const menuBox = (await menu.boundingBox())!;
     for (const id of [
       "mobile-new-task-button",
