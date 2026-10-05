@@ -41,14 +41,14 @@ func TestProfileProbeEnvironmentDefinitionsUseSecretProfileOverride(t *testing.T
 }
 
 func TestProfileProbeEnvironmentDefinitionsIgnoreEmptyProfileOverrides(t *testing.T) {
-	baseAgent := agents.NewClaudeACP()
+	baseAgent := agents.NewCodexACP()
 	inference := profileDiscoveryRuntimeAgent{
 		Agent:          baseAgent,
 		InferenceAgent: baseAgent,
-		env:            map[string]string{"PROFILE_EMPTY": "managed-default"},
+		env:            map[string]string{"CODEX_PATH": "/configured/codex"},
 	}
 	definitions := profileProbeEnvironmentDefinitions(inference, []dto.ProfileEnvVarDTO{{
-		Key: "PROFILE_EMPTY",
+		Key: "CODEX_PATH",
 	}})
 	resolved, _, err := runtimeenv.Resolve(context.Background(), definitions, func(context.Context, runtimeenv.Definition) (string, error) {
 		return "", nil
@@ -56,7 +56,7 @@ func TestProfileProbeEnvironmentDefinitionsIgnoreEmptyProfileOverrides(t *testin
 	if err != nil {
 		t.Fatalf("resolve profile environment: %v", err)
 	}
-	if got := resolved["PROFILE_EMPTY"]; got != "managed-default" {
-		t.Fatalf("resolved empty profile override = %q, want managed-default", got)
+	if got := resolved["CODEX_PATH"]; got != "/configured/codex" {
+		t.Fatalf("resolved empty profile CODEX_PATH = %q, want configured agent value", got)
 	}
 }

@@ -2,6 +2,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-libra
 import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { TooltipProvider } from "@kandev/ui/tooltip";
+import { StateProvider } from "@/components/state-provider";
 import { ProfileFormFields, type ProfileFormData } from "./profile-form-fields";
 import type {
   AgentModelConfigResponse,
@@ -121,9 +122,11 @@ function renderStatefulProfile() {
   }
 
   render(
-    <TooltipProvider>
-      <StatefulProfile />
-    </TooltipProvider>,
+    <StateProvider>
+      <TooltipProvider>
+        <StatefulProfile />
+      </TooltipProvider>
+    </StateProvider>,
   );
 }
 

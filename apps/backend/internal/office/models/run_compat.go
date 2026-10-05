@@ -2,7 +2,7 @@ package models
 
 import runsmodels "github.com/kandev/kandev/internal/runs/models"
 
-// Run preserves the Office package name for consumers during the migration.
+// Run is a compatibility alias for the shared run record type.
 
 // Deprecated: Use internal/runs/models.Run.
 type Run = runsmodels.Run
@@ -63,26 +63,11 @@ const RunEventLevelWarn = runsmodels.RunEventLevelWarn
 // Deprecated: Use internal/runs/models.RunEventLevelError.
 const RunEventLevelError = runsmodels.RunEventLevelError
 
-// Deprecated: Use internal/runs/models.RunEventTypeInit.
-const RunEventTypeInit = runsmodels.RunEventTypeInit
-
-// Deprecated: Use internal/runs/models.RunEventTypeAdapterInvoke.
-const RunEventTypeAdapterInvoke = runsmodels.RunEventTypeAdapterInvoke
-
 // Deprecated: Use internal/runs/models.RunEventTypeStep.
 const RunEventTypeStep = runsmodels.RunEventTypeStep
 
-// Deprecated: Use internal/runs/models.RunEventTypeComplete.
-const RunEventTypeComplete = runsmodels.RunEventTypeComplete
-
-// Deprecated: Use internal/runs/models.RunEventTypeError.
-const RunEventTypeError = runsmodels.RunEventTypeError
-
 // Deprecated: Use internal/runs/models.RunEventTypeRuntimeDenied.
 const RunEventTypeRuntimeDenied = runsmodels.RunEventTypeRuntimeDenied
-
-// Deprecated: Use internal/runs/models.RunEventTypeRuntimeAction.
-const RunEventTypeRuntimeAction = runsmodels.RunEventTypeRuntimeAction
 
 // Deprecated: Use internal/runs/models.ActorKindUser.
 const ActorKindUser = runsmodels.ActorKindUser

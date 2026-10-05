@@ -1,6 +1,6 @@
 ---
 title: "Agents and Profiles"
-description: "Install agent CLIs and create profiles for models, modes, flags, secrets, permissions, passthrough, and MCP."
+description: "Install agent CLIs, create profiles, manage runtime updates, and configure models, modes, flags, secrets, permissions, passthrough, and MCP."
 ---
 
 # Agents and Profiles
@@ -164,10 +164,37 @@ ACP runtime selection does not replace the passthrough command.
 
 The status shown on this page is authoritative for the current host. A CLI that works in your interactive shell can still be absent from Kandev when the service has a different `PATH`, home directory, or operating-system user.
 
+### Update Oh My Pi on the Kandev host
+
+On an installed `omp` card, select the update icon under **Settings > Agents**.
+Review the installed version, the **Stable latest (reference)** version, and
+the `omp update` command, then choose **Update runtime** or **Repair runtime**.
+Kandev runs OMP's own updater as the Kandev service user on the host, streams
+its output, and refreshes ACP capabilities only after a successful probe.
+Active sessions are not restarted.
+
+OMP detects whether its installation is managed by Homebrew, mise, Bun, npm,
+or a standalone binary and updates through that method. A Nix-managed
+installation cannot be updated by this action. OMP follows its already
+configured stable or canary channel; Kandev does not choose a channel or pass
+a version to `omp update`. The stable latest shown in Settings is a
+comparison reference, **not a promised install target**: the installed
+version reported by OMP after updating may differ. There is no version
+picker, Kandev pin, or rollback for OMP.
+
+The update affects only the host installation, not task containers or remote
+executors. If OMP's updater or the follow-up ACP probe fails, Settings reports
+the error and retains the previous capability catalogue; Kandev cannot
+restore an executable that OMP already changed. When metadata is unavailable,
+the update icon remains available, but a preview must resolve the stable
+reference before the update can start.
+
 ### Update a managed agent runtime
 
 The update icon is available on managed Claude, Codex, OpenCode, Copilot,
-Gemini, Pi, and Muse agent cards when Kandev owns their managed runtime. It prepares the runtime on the Kandev host.
+Gemini, Pi, and Muse agent cards when Kandev owns their managed runtime. It
+prepares their pinned npm runtime on the Kandev host. OMP uses the separate
+self-update flow above.
 
 Each managed runtime has a reviewed Kandev default. If you have not selected a
 version, Kandev uses that exact default for probes, sessions, standalone
@@ -269,15 +296,32 @@ unrelated npm data and does not target the stale execution tree. If the
 specialized retry cannot resolve the runtime, check that the Kandev service
 uses the expected npm installation and configured registry. Run `npm config get registry` as the Kandev service user to inspect the registry used by that process. Then use the runtime update controls to select and prepare another trusted stable version.
 
+### Refresh profile models after a runtime update
+
+Manage runtime versions in **Settings > Agents > Agent runtime updates**.
+Profile pages focus on model selection and launch settings.
+
+After a managed runtime update succeeds, an open profile refreshes its model
+catalog with the current draft settings. The selected model stays unchanged.
+Unsaved launch settings remain unsaved. A failed update keeps the previous catalog.
+
+After you edit launch settings, choose **Refresh models** to check the current draft.
+The provider returns the model catalog. Discovery success does not confirm
+catalog completeness or account access to every model.
+
 ### Runtime notifications and automatic updates
 
 Kandev checks enabled, available agent runtimes in the background, including
 native CLIs with a verified release source. Open **Settings > Agents** to review
-runtime versions and update policies. Notifications name the affected runtime
-and link directly to its row in
-**Settings > Agents > Agent runtime updates**. The existing update-available
-notification preferences apply; repeated notices for the same runtime and version
-are suppressed across reloads.
+runtime versions and update policies. A notice for one runtime names it and links
+directly to its row in **Settings > Agents > Agent runtime updates**. The existing
+update-available notification preferences apply; repeated notices for the same
+runtime and version are suppressed across reloads.
+
+At startup or after reconnect, available runtime updates discovered within the
+same 30-second window appear in one summary. **Review updates** opens the expanded
+runtime section. A notice for one runtime keeps its name and direct link. Update
+success, failure, and interruption notices remain individual and immediate.
 
 The **Agent runtime updates** section is at the bottom of **Settings > Agents**,
 after your installed agents, and starts collapsed. Expand it to manage runtime
@@ -334,24 +378,24 @@ An **ACP** agent is driven over the Agent Client Protocol instead, so it does ge
 
 Select an agent, create a profile, then open **Settings > Agents > _Agent_ > _Profile_**. The page shows the resolved command preview and only the settings supported by that agent.
 
-| Setting                      | Runtime behavior                                                                                                                                                 |
-| ---------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Name                         | Label shown in workflow, session, and automation selectors.                                                                                                      |
-| Model                        | Requested through ACP when the agent supports model selection. Leaving it unset uses the agent's default where the form allows that.                             |
-| Require exact model          | Per-profile opt-in. When enabled, Kandev stops before inference unless the executor advertises and accepts the saved model. It disables fallback controls without erasing their saved values. |
-| Fallback settings            | Compatible profiles can use an advertised explicit fallback or automatic provider-default continuation. If the saved model is absent and exactly one bracketed variation is advertised, Kandev can use that variation with a warning. |
-| Mode                         | Requested through the installed agent's advertised ACP session control before the first prompt. Kandev prefers its mode config option and supports legacy `session/set_mode`. An explicit mode must be confirmed by the agent or startup holds the prompt. Applying a mode does not write Claude settings or redirect its configuration directory. |
-| Configuration options        | Dynamic ACP values requested with `session/set_config_option`.                                                                                                   |
-| CLI flags                    | Enabled entries are tokenized and appended to the ACP launch command.                                                                                            |
-| Command prefix               | Optional ACP-only launcher argv prepended to the command, for example `greywall --`.                                                                             |
-| Environment                  | Literal values or references to Kandev secrets, resolved when the process starts.                                                                                |
-| Provider                     | Native uses the agent default. OpenAI-compatible sends ACP requests to the configured HTTP(S) router and can use a Kandev global API-key secret.                 |
-| CLI passthrough              | Uses the CLI's native terminal interface instead of a structured ACP conversation.                                                                               |
-| Enabled                      | Keeps the profile available to existing sessions and settings while hiding it from new task, session, handoff, and Quick Chat selectors.                         |
-| Auto-approve all permissions | Answers automatically: the first `allow_once`/`allow_always` option, otherwise the first option supplied by the agent; no options cancels. It is off by default. |
-| MCP servers                  | Adds profile-specific external MCP servers when the agent supports MCP.                                                                                          |
-| Share local Cursor MCP credentials | Enabled by default for Cursor ACP and Cursor-strategy terminal profiles. It applies only to local executions that share the backend home directory. |
-| Import local Cursor plugin MCP servers | Enabled by default for Cursor ACP and Cursor-strategy terminal profiles. Imports supported local plugin and user MCP definitions into task worktrees. On supported macOS installations, enabled marketplace plugins are discovered from Cursor’s account service and matched to their exact cached revision. |
+| Setting                                | Runtime behavior                                                                                                                                                                                                                                                                                                                                   |
+| -------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Name                                   | Label shown in workflow, session, and automation selectors.                                                                                                                                                                                                                                                                                        |
+| Model                                  | Requested through ACP when the agent supports model selection. Leaving it unset uses the agent's default where the form allows that.                                                                                                                                                                                                               |
+| Require exact model                    | Per-profile opt-in. When enabled, Kandev stops before inference unless the executor advertises and accepts the saved model. It disables fallback controls without erasing their saved values.                                                                                                                                                      |
+| Fallback settings                      | Compatible profiles can use an advertised explicit fallback or automatic provider-default continuation. If the saved model is absent and exactly one bracketed variation is advertised, Kandev can use that variation with a warning.                                                                                                              |
+| Mode                                   | Requested through the installed agent's advertised ACP session control before the first prompt. Kandev prefers its mode config option and supports legacy `session/set_mode`. An explicit mode must be confirmed by the agent or startup holds the prompt. Applying a mode does not write Claude settings or redirect its configuration directory. |
+| Configuration options                  | Dynamic ACP values requested with `session/set_config_option`.                                                                                                                                                                                                                                                                                     |
+| CLI flags                              | Enabled entries are tokenized and appended to the ACP launch command.                                                                                                                                                                                                                                                                              |
+| Command prefix                         | Optional ACP-only launcher argv prepended to the command, for example `greywall --`.                                                                                                                                                                                                                                                               |
+| Environment                            | Literal values or references to Kandev secrets, resolved when the process starts.                                                                                                                                                                                                                                                                  |
+| Provider                               | Native uses the agent default. OpenAI-compatible sends ACP requests to the configured HTTP(S) router and can use a Kandev global API-key secret.                                                                                                                                                                                                   |
+| CLI passthrough                        | Uses the CLI's native terminal interface instead of a structured ACP conversation.                                                                                                                                                                                                                                                                 |
+| Enabled                                | Keeps the profile available to existing sessions and settings while hiding it from new task, session, handoff, and Quick Chat selectors.                                                                                                                                                                                                           |
+| Auto-approve all permissions           | Answers automatically: the first `allow_once`/`allow_always` option, otherwise the first option supplied by the agent; no options cancels. It is off by default.                                                                                                                                                                                   |
+| MCP servers                            | Adds profile-specific external MCP servers when the agent supports MCP.                                                                                                                                                                                                                                                                            |
+| Share local Cursor MCP credentials     | Enabled by default for Cursor ACP and Cursor-strategy terminal profiles. It applies only to local executions that share the backend home directory.                                                                                                                                                                                                |
+| Import local Cursor plugin MCP servers | Enabled by default for Cursor ACP and Cursor-strategy terminal profiles. Imports supported local plugin and user MCP definitions into task worktrees. On supported macOS installations, enabled marketplace plugins are discovered from Cursor’s account service and matched to their exact cached revision.                                       |
 
 Agents can inspect and update declared profile settings through the compact
 `search_settings_kandev`, `describe_setting_kandev`, `get_settings_kandev`,

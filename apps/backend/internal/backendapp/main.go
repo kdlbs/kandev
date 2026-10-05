@@ -1246,13 +1246,17 @@ func startGatewayAndServe(
 	// ============================================
 	// HTTP SERVER (Router & MCP Route Registration)
 	// ============================================
+	e2eRuntimeUpdateHooks := newE2ERuntimeUpdateHooks()
+	if e2eRuntimeUpdateHooks != nil {
+		agentSettingsController.SetRuntimeUpdateStatusResolver(e2eRuntimeUpdateHooks.resolveLatestVersion)
+	}
 	// Build the real router and register all handlers, which wires the real
 	// dispatcher into lifecycleMgr.SetMCPHandler and installs MCP scope handlers
 	// BEFORE lifecycleMgr.Start recovers sessions.
 	builtServer, err := buildHTTPServer(cfg, log, gateway, repos, services, agentSettingsController,
-		lifecycleMgr, eventBus, orchestratorSvc, notificationCtrl, msgCreator, agentRegistry, hostUtilityMgr,
+		lifecycleMgr, eventBus, orchestratorSvc, notificationCtrl, notificationSvc, msgCreator, agentRegistry, hostUtilityMgr,
 		addCleanup, repoCloner, systemSvc, storageComposition.workspaceRestorer,
-		storageComposition.tempArtifacts, dbPool, agentRuntimeAvailability, sshReachabilityPoller, startup.FromContext(ctx), persistenceHealth)
+		storageComposition.tempArtifacts, dbPool, agentRuntimeAvailability, e2eRuntimeUpdateHooks, sshReachabilityPoller, startup.FromContext(ctx), persistenceHealth)
 	if err != nil {
 		log.Error("Failed to build HTTP server", zap.Error(err))
 		closeBoundListeners(server, listeners, log)
@@ -1464,7 +1468,11 @@ func startGatewayAndServe(
 		})
 	}
 	agentSettingsController.SetRuntimeUpdateNotifier(notificationSvc)
-	stopRuntimeUpdates := agentSettingsController.StartRuntimeUpdateBackground(ctx, hostUtilityReady)
+	var runtimeUpdateReadiness <-chan struct{} = hostUtilityReady
+	if e2eRuntimeUpdateHooks != nil {
+		runtimeUpdateReadiness = e2eRuntimeUpdateHooks.startupReadiness(ctx, hostUtilityReady)
+	}
+	stopRuntimeUpdates := agentSettingsController.StartRuntimeUpdateBackground(ctx, runtimeUpdateReadiness)
 	stopRuntimeUpdatesCleanup := func() error { stopRuntimeUpdates(); return nil }
 	addCleanup(stopRuntimeUpdatesCleanup)
 	restoreCleanups = append(restoreCleanups, stopRuntimeUpdatesCleanup)
@@ -2834,6 +2842,7 @@ func buildHTTPServer(
 	eventBus bus.EventBus,
 	orchestratorSvc *orchestrator.Service,
 	notificationCtrl *notificationcontroller.Controller,
+	runtimeUpdateNotifier e2eRuntimeUpdateNotifier,
 	msgCreator *messageCreatorAdapter,
 	agentRegistry *registry.Registry,
 	hostUtilityMgr *hostutility.Manager,
@@ -2844,6 +2853,7 @@ func buildHTTPServer(
 	temporaryArtifacts *tempartifacts.Registry,
 	dbPool *db.Pool,
 	agentRuntimeAvailability *agentctlclient.Availability,
+	e2eRuntimeUpdateHooks *e2eRuntimeUpdateHooks,
 	sshReachabilityPoller *reachabilitypkg.Poller,
 	progress *startup.Reporter,
 	persistenceHealth ...*requiredstores.Health,
@@ -2950,6 +2960,8 @@ func buildHTTPServer(
 		dbPool:                        dbPool,
 		persistenceHealth:             requiredHealth,
 		agentSettingsController:       agentSettingsController,
+		runtimeUpdateNotifier:         runtimeUpdateNotifier,
+		e2eRuntimeUpdateHooks:         e2eRuntimeUpdateHooks,
 		agentSettingsRepo:             repos.AgentSettings,
 		agentList:                     agentRegistry,
 		agentRegistry:                 agentRegistry,
