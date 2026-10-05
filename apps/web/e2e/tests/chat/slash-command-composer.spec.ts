@@ -1,7 +1,15 @@
 import { type Locator, type Page } from "@playwright/test";
 import { test, expect } from "../../fixtures/test-base";
-import { seedAvailableCommands } from "../../helpers/session-store";
-import { attachAvailableCommandsCapture } from "../../helpers/ws-capture";
+import {
+  getSessionAgentExecutionId,
+  seedAvailableCommands,
+  seedConfirmedConfigOptions,
+} from "../../helpers/session-store";
+import {
+  attachAvailableCommandsCapture,
+  attachMessageAddCapture,
+  routeGatewayNotifications,
+} from "../../helpers/ws-capture";
 import { SessionPage } from "../../pages/session-page";
 import type { ApiClient } from "../../helpers/api-client";
 import type { SeedData } from "../../fixtures/test-base";
@@ -13,6 +21,47 @@ const SLOW_COMMAND = {
   description: "Run a slow response",
   input_hint: "duration",
 };
+
+const RETRO_SKILL = {
+  name: "$retro",
+  kind: "skill",
+  description:
+    "Use this skill to run a retrospective, gather useful evidence, and record focused improvements for future work.",
+};
+
+const LEGACY_RETRO_COMMAND = {
+  name: "retro",
+  description: "Legacy command with the same visible name",
+};
+
+const PLAN_COMMAND = {
+  name: "plan",
+  description: "Set plan mode",
+  action: {
+    kind: "set_config_option",
+    config_id: "collaboration_mode",
+    value: "plan",
+    reset_value: "default",
+  },
+};
+
+const GOAL_COMMAND = {
+  name: "goal",
+  description: "Set a goal to keep pursuing",
+  input_hint: "<objective>|clear|pause|resume",
+};
+
+const COLLABORATION_MODE_ID = "collaboration_mode";
+
+function collaborationModeOption(value: string) {
+  return {
+    type: "select",
+    id: COLLABORATION_MODE_ID,
+    name: "Collaboration Mode",
+    current_value: value,
+    options: [],
+  };
+}
 
 async function createReadyTask(
   apiClient: ApiClient,
@@ -44,12 +93,13 @@ async function selectSlowCommandWithEnter(
   page: Page,
   editor: Locator,
   initialText = "",
+  key: "Enter" | "Tab" = "Enter",
 ): Promise<void> {
   await editor.click();
   await editor.fill(initialText);
   await editor.pressSequentially("/s");
   await expect(page.getByText("/slow", { exact: true })).toBeVisible({ timeout: 5_000 });
-  await editor.press("Enter");
+  await editor.press(key);
   await expect(editor).toHaveText(/slow/, { timeout: 5_000 });
   await expect(editor.getByTestId("slash-command-chip")).toHaveText("slow", { timeout: 5_000 });
   await editor.getByTestId("slash-command-chip").hover();
@@ -88,6 +138,254 @@ async function openQuickChatWithAgent(page: Page): Promise<Locator> {
 }
 
 test.describe("Slash command composer", () => {
+  test("keeps an open plan menu current through live provider configuration updates", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const notifications = await routeGatewayNotifications(testPage);
+    const task = await createReadyTask(apiClient, seedData, "Live Plan Mode Updates");
+    if (!task.session_id) throw new Error("createTaskWithAgent did not return a session_id");
+
+    const session = await openTaskChat(testPage, task.id);
+    await seedAvailableCommands(testPage, task.session_id, [PLAN_COMMAND]);
+    const executionId = await getSessionAgentExecutionId(testPage, task.session_id);
+    if (!executionId) throw new Error("The live session has no agent execution ID");
+    const sendModels = (
+      value: string,
+      executionId: string,
+      configOptionsSettled?: boolean,
+      source?: "provider_update",
+    ) => {
+      notifications.send("session.models_updated", {
+        task_id: task.id,
+        session_id: task.session_id,
+        agent_id: seedData.agentProfileId,
+        agent_execution_id: executionId,
+        current_model_id: "gpt-5.6-sol",
+        models: [],
+        config_options: [collaborationModeOption(value)],
+        ...(configOptionsSettled === undefined
+          ? {}
+          : { config_options_settled: configOptionsSettled }),
+        ...(source ? { config_options_source: source } : {}),
+        timestamp: new Date().toISOString(),
+      });
+    };
+    sendModels("default", executionId, true);
+
+    const editor = chatEditor(testPage);
+    await editor.click();
+    await editor.fill("");
+    await editor.pressSequentially("/");
+    const plan = testPage.getByRole("option", { name: /\/plan/ });
+    await expect(plan).toBeVisible();
+
+    await plan.click();
+    await expect(editor.getByTestId("slash-command-chip")).toHaveText("plan");
+    notifications.acknowledgeMessageAdds();
+    await session.submitButton().click();
+    await expect
+      .poll(() =>
+        notifications.messageAdds.some(
+          (frame) => frame.taskId === task.id && frame.content.trim() === "/plan",
+        ),
+      )
+      .toBe(true);
+
+    await editor.fill("");
+    await editor.pressSequentially("/");
+    await expect(plan).toBeVisible();
+    sendModels("plan", executionId, undefined, "provider_update");
+    await expect(plan).toContainText("Active");
+    await expect(plan).toContainText("Turn plan mode off");
+
+    sendModels("default", executionId, undefined, "provider_update");
+    await expect(plan).not.toContainText("Active");
+    await expect(plan).toContainText("Turn plan mode on");
+  });
+
+  test("invalidates a previous execution's mode state at startup and restores a fresh snapshot", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const notifications = await routeGatewayNotifications(testPage);
+    const task = await createReadyTask(apiClient, seedData, "Startup Plan Mode Snapshot");
+    if (!task.session_id) throw new Error("createTaskWithAgent did not return a session_id");
+
+    const session = await openTaskChat(testPage, task.id);
+    await seedAvailableCommands(testPage, task.session_id, [PLAN_COMMAND]);
+    const previousExecutionId = await getSessionAgentExecutionId(testPage, task.session_id);
+    if (!previousExecutionId) throw new Error("The live session has no agent execution ID");
+    const planSnapshot = (executionId: string) => ({
+      task_id: task.id,
+      session_id: task.session_id,
+      agent_id: seedData.agentProfileId,
+      agent_execution_id: executionId,
+      current_model_id: "gpt-5.6-sol",
+      models: [],
+      config_options: [collaborationModeOption("plan")],
+      config_options_settled: true,
+      timestamp: new Date().toISOString(),
+    });
+    notifications.send("session.models_updated", planSnapshot(previousExecutionId));
+
+    const editor = chatEditor(testPage);
+    await editor.click();
+    await editor.fill("");
+    await editor.pressSequentially("/");
+    const plan = testPage.getByRole("option", { name: /\/plan/ });
+    await expect(plan).toBeVisible();
+
+    notifications.send("session.state_changed", {
+      task_id: task.id,
+      session_id: task.session_id,
+      old_state: "WAITING_FOR_INPUT",
+      new_state: "STARTING",
+      updated_at: new Date(Date.now() + 60_000).toISOString(),
+    });
+    await expect(plan).not.toContainText("Active");
+    await expect(plan).toContainText("Toggle plan mode");
+
+    notifications.send("session.agentctl_starting", {
+      task_id: task.id,
+      session_id: task.session_id,
+      agent_execution_id: "execution-new",
+    });
+    await expect(plan).not.toContainText("Active");
+    notifications.send("session.models_updated", planSnapshot("execution-new"));
+    await expect(plan).toContainText("Active");
+    await expect(plan).toContainText("Turn plan mode off");
+    await session.chat.screenshot({
+      path: test.info().outputPath("startup-confirmed-plan-menu.png"),
+    });
+  });
+
+  test("shows provider metadata and preserves the raw skill command through send and recall", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const messages = attachMessageAddCapture(testPage);
+    const task = await createReadyTask(apiClient, seedData, "Codex Skill Command Draft");
+    if (!task.session_id) throw new Error("createTaskWithAgent did not return a session_id");
+
+    const session = await openTaskChat(testPage, task.id);
+    await seedAvailableCommands(testPage, task.session_id, [
+      RETRO_SKILL,
+      LEGACY_RETRO_COMMAND,
+      PLAN_COMMAND,
+      GOAL_COMMAND,
+    ]);
+    await seedConfirmedConfigOptions(testPage, task.session_id, { collaboration_mode: "plan" });
+
+    const editor = chatEditor(testPage);
+    const originalMessageCount = messages.frames.filter((frame) => frame.taskId === task.id).length;
+    await editor.click();
+    await editor.fill("");
+    await editor.pressSequentially("/");
+
+    const plan = testPage.getByRole("option", {
+      name: /\/plan.*Mode.*Active.*Turn plan mode off/,
+    });
+    const goal = testPage.getByRole("option", {
+      name: /\/goal.*Set a goal to keep pursuing.*Arguments: <objective>/,
+    });
+    await expect(plan).toBeVisible();
+    await expect(goal).toBeVisible();
+    await expect(goal).not.toContainText("Skill");
+    await expect(goal).not.toContainText("Mode");
+    await testPage.screenshot({ path: test.info().outputPath("desktop-skill-command-menu.png") });
+
+    const confirmedBeforeSelection = await testPage.evaluate((sessionId) => {
+      return (
+        (
+          window as unknown as {
+            __KANDEV_E2E_STORE__?: {
+              getState: () => {
+                sessionModels: {
+                  bySessionId: Record<string, { confirmedConfigOptions?: Record<string, string> }>;
+                };
+              };
+            };
+          }
+        ).__KANDEV_E2E_STORE__?.getState().sessionModels.bySessionId[sessionId]
+          ?.confirmedConfigOptions?.collaboration_mode ?? null
+      );
+    }, task.session_id);
+    await plan.click();
+    await expect(editor.getByTestId("slash-command-chip")).toHaveText("plan");
+    await expect
+      .poll(async () =>
+        testPage.evaluate((sessionId) => {
+          return (
+            (
+              window as unknown as {
+                __KANDEV_E2E_STORE__?: {
+                  getState: () => {
+                    sessionModels: {
+                      bySessionId: Record<
+                        string,
+                        { confirmedConfigOptions?: Record<string, string> }
+                      >;
+                    };
+                  };
+                };
+              }
+            ).__KANDEV_E2E_STORE__?.getState().sessionModels.bySessionId[sessionId]
+              ?.confirmedConfigOptions?.collaboration_mode ?? null
+          );
+        }, task.session_id),
+      )
+      .toBe(confirmedBeforeSelection);
+    await expect
+      .poll(() => messages.frames.filter((frame) => frame.taskId === task.id).length)
+      .toBe(originalMessageCount);
+
+    await editor.fill("");
+    await editor.pressSequentially("/retro");
+    const skill = testPage.getByRole("option", { name: /\/retro.*Skill/ });
+    const legacy = testPage.getByRole("option", { name: /\/retro.*Legacy command/ });
+    await expect(skill).toBeVisible();
+    await expect(legacy).toBeVisible();
+    await expect(testPage.getByRole("option")).toHaveCount(2);
+    await editor.press("Enter");
+
+    const chip = editor.getByTestId("slash-command-chip");
+    await expect(chip).toHaveText("retro");
+    await editor.pressSequentially("with context");
+    await expect(editor).toHaveText(/retro with context/);
+    await expect
+      .poll(() => messages.frames.filter((frame) => frame.taskId === task.id).length)
+      .toBe(originalMessageCount);
+    await expect(
+      session.chat.locator(".chat-message-list:visible").getByText("/$retro with context", {
+        exact: false,
+      }),
+    ).not.toBeVisible();
+
+    await session.submitButton().click();
+    await expect
+      .poll(() =>
+        messages.frames.some(
+          (frame) =>
+            frame.taskId === task.id &&
+            frame.sessionId === task.session_id &&
+            frame.content === "/$retro with context",
+        ),
+      )
+      .toBe(true);
+
+    const chatList = session.chat.locator(".chat-message-list:visible");
+    await expect(chatList.getByText("/$retro with context", { exact: false })).toBeVisible({
+      timeout: 15_000,
+    });
+    await editor.click();
+    await editor.press("ArrowUp");
+    await expect(editor.getByTestId("slash-command-chip")).toHaveText("retro");
+  });
+
   test("selecting a slash command keeps it as an editable draft until explicit send", async ({
     testPage,
     apiClient,
@@ -146,7 +444,7 @@ test.describe("Slash command composer", () => {
     await seedAvailableCommands(testPage, task.session_id, [SLOW_COMMAND]);
 
     const editor = chatEditor(testPage);
-    await selectSlowCommandWithEnter(testPage, editor, "please run ");
+    await selectSlowCommandWithEnter(testPage, editor, "please run ", "Tab");
 
     await expect(editor).toHaveText(/please run slow/, { timeout: 5_000 });
     await expect(editor.getByTestId("slash-command-chip")).toHaveText("slow", { timeout: 5_000 });
@@ -192,12 +490,28 @@ test.describe("Slash command composer", () => {
       .toBe(true);
 
     const editor = chatEditor(dialog);
+    const sessionId = await testPage.evaluate(() => {
+      return (
+        window as unknown as {
+          __KANDEV_E2E_STORE__?: {
+            getState: () => { quickChat: { activeSessionId: string | null } };
+          };
+        }
+      ).__KANDEV_E2E_STORE__?.getState().quickChat.activeSessionId;
+    });
+    if (!sessionId) throw new Error("Quick Chat did not set an active session");
+    await seedAvailableCommands(testPage, sessionId, [RETRO_SKILL, LEGACY_RETRO_COMMAND]);
 
-    await selectSlowCommandWithEnter(testPage, editor);
+    await editor.click();
+    await editor.fill("");
+    await editor.pressSequentially("/retro");
+    const skill = testPage.getByRole("option", { name: /\/retro.*Skill/ });
+    await expect(skill).toBeVisible({ timeout: 5_000 });
+    await editor.press("Enter");
 
-    await expect(editor).toHaveText(/slow/, { timeout: 5_000 });
+    await expect(editor.getByTestId("slash-command-chip")).toHaveText("retro", { timeout: 5_000 });
     await expect(
-      dialog.locator(".chat-message-list:visible").getByText("/slow", { exact: false }),
+      dialog.locator(".chat-message-list:visible").getByText("/$retro", { exact: false }),
     ).not.toBeVisible({
       timeout: 1_000,
     });

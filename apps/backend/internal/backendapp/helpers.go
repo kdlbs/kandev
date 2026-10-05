@@ -886,7 +886,20 @@ func appendAvailableCommandsMessage(sessionID string, session *models.TaskSessio
 	if lifecycleMgr == nil {
 		return result
 	}
-	commands := lifecycleMgr.GetAvailableCommandsForSession(sessionID)
+	return appendAvailableCommandsMessageForCommands(
+		sessionID,
+		session,
+		lifecycleMgr.GetAvailableCommandsForSession(sessionID),
+		result,
+	)
+}
+
+func appendAvailableCommandsMessageForCommands(
+	sessionID string,
+	session *models.TaskSession,
+	commands []streams.AvailableCommand,
+	result []*ws.Message,
+) []*ws.Message {
 	if len(commands) == 0 {
 		return result
 	}
@@ -983,6 +996,7 @@ func appendSessionModelsMessageFromState(sessionID string, session *models.TaskS
 	notification, err := ws.NewNotification(ws.ActionSessionModelsUpdated, lifecycle.SessionModelsEventPayload{
 		TaskID:                session.TaskID,
 		SessionID:             sessionID,
+		AgentExecutionID:      snapshot.SettingsSourceExecutionID,
 		CurrentModelID:        replayState.CurrentModelID,
 		SessionSettingsPolicy: sessionSettingsProjectionPolicyFromSnapshot(snapshot, hasSnapshot),
 		Models:                replayState.Models,

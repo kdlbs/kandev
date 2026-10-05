@@ -294,6 +294,148 @@ function resolvedConfigOptionsSettled(
   return payload.config_options_settled ?? existing?.configOptionsSettled;
 }
 
+function providerConfigOptionValues(
+  options: SessionModelsPayload["config_options"],
+): Record<string, string> {
+  return Object.fromEntries(
+    (options ?? [])
+      .filter((option) => !!option.id && typeof option.current_value === "string")
+      .map((option) => [option.id, option.current_value]),
+  );
+}
+
+type ConfirmedConfigProjection = Pick<
+  SessionModelsState["bySessionId"][string],
+  "confirmedConfigOptions" | "confirmedConfigOptionsExecutionId" | "pendingConfirmedConfigOptions"
+>;
+
+function confirmedConfigProjection(
+  values?: Record<string, string>,
+  executionId?: string,
+  pending?: ConfirmedConfigProjection["pendingConfirmedConfigOptions"],
+): ConfirmedConfigProjection {
+  return {
+    confirmedConfigOptions: values,
+    confirmedConfigOptionsExecutionId: executionId,
+    pendingConfirmedConfigOptions: pending,
+  };
+}
+
+function existingConfirmedConfigProjection(
+  existing: SessionModelsState["bySessionId"][string] | undefined,
+): ConfirmedConfigProjection {
+  return confirmedConfigProjection(
+    existing?.confirmedConfigOptions,
+    existing?.confirmedConfigOptionsExecutionId,
+    existing?.pendingConfirmedConfigOptions,
+  );
+}
+
+function pendingConfirmedConfigForPayload(
+  existing: SessionModelsState["bySessionId"][string] | undefined,
+  payloadExecutionId: string | undefined,
+): ConfirmedConfigProjection["pendingConfirmedConfigOptions"] {
+  const pending = existing?.pendingConfirmedConfigOptions;
+  if (!pending || (payloadExecutionId && pending.executionId !== payloadExecutionId)) {
+    return undefined;
+  }
+  return pending;
+}
+
+function staleExecutionConfigProjection(
+  payloadExecutionId: string | undefined,
+  currentExecutionId: string | undefined,
+  existing: SessionModelsState["bySessionId"][string] | undefined,
+  pending: ConfirmedConfigProjection["pendingConfirmedConfigOptions"],
+): ConfirmedConfigProjection | undefined {
+  if (!payloadExecutionId || !currentExecutionId || payloadExecutionId === currentExecutionId) {
+    return undefined;
+  }
+  if (existing?.confirmedConfigOptionsExecutionId === currentExecutionId) {
+    return existingConfirmedConfigProjection(existing);
+  }
+  return confirmedConfigProjection(undefined, undefined, pending);
+}
+
+function isStartupUnsettledConfigUpdate(
+  payload: SessionModelsPayload,
+  startupUnsettled: boolean,
+  agentctlStatus: string | undefined,
+): boolean {
+  return (
+    payload.config_options_settled === false ||
+    startupUnsettled ||
+    (agentctlStatus === "starting" && payload.config_options_settled !== true)
+  );
+}
+
+function isAuthoritativeConfigUpdate(payload: SessionModelsPayload): boolean {
+  return (
+    payload.config_options_source === "provider_update" ||
+    payload.config_options_source === "provider_response"
+  );
+}
+
+function providerUpdateMatchesConfirmedExecution(
+  providerExecutionId: string | undefined,
+  agentctlExecutionId: string | undefined,
+  agentctlStatus: string | undefined,
+  confirmedExecutionId: string | undefined,
+): boolean {
+  if (!providerExecutionId || agentctlStatus === "starting") return false;
+  return (
+    providerExecutionId === confirmedExecutionId || providerExecutionId === agentctlExecutionId
+  );
+}
+
+function confirmedConfigOptionsForUpdate(
+  state: AppState,
+  sessionId: string,
+  payload: SessionModelsPayload,
+  startupUnsettled: boolean,
+  existing: SessionModelsState["bySessionId"][string] | undefined,
+): ConfirmedConfigProjection {
+  const agentctl = state.sessionAgentctl?.itemsBySessionId?.[sessionId];
+  const payloadExecutionId = payload.agent_execution_id;
+  const pending = pendingConfirmedConfigForPayload(existing, payloadExecutionId);
+  const stale = staleExecutionConfigProjection(
+    payloadExecutionId,
+    agentctl?.agentExecutionId,
+    existing,
+    pending,
+  );
+  if (stale) return stale;
+  if (isStartupUnsettledConfigUpdate(payload, startupUnsettled, agentctl?.status)) {
+    return confirmedConfigProjection(undefined, undefined, pending);
+  }
+
+  const executionId = payloadExecutionId ?? agentctl?.agentExecutionId;
+  if (payload.config_options_settled === true) {
+    return confirmedConfigProjection(
+      providerConfigOptionValues(payload.config_options),
+      executionId,
+    );
+  }
+  if (isAuthoritativeConfigUpdate(payload)) {
+    if (
+      providerUpdateMatchesConfirmedExecution(
+        executionId,
+        agentctl?.agentExecutionId,
+        agentctl?.status,
+        existing?.confirmedConfigOptionsExecutionId,
+      )
+    ) {
+      return confirmedConfigProjection(
+        providerConfigOptionValues(payload.config_options),
+        executionId,
+      );
+    }
+    return confirmedConfigProjection();
+  }
+
+  return existingConfirmedConfigProjection(existing);
+}
+
 // resolveModelsUpdatedState computes the convergence target for a
 // models_updated event: which model becomes current, whether the update is
 // an empty relaunch echo, and whether the previously settled config options
@@ -402,6 +544,9 @@ function handleModelFallback(store: StoreApi<AppState>, payload: unknown): void 
     currentModelId: fallbackPayload.fallback_model,
     models: existing?.models ?? [],
     configOptions: existing?.configOptions ?? [],
+    confirmedConfigOptions: existing?.confirmedConfigOptions,
+    confirmedConfigOptionsExecutionId: existing?.confirmedConfigOptionsExecutionId,
+    pendingConfirmedConfigOptions: existing?.pendingConfirmedConfigOptions,
     ...(existing?.configOptionsSettled === undefined
       ? {}
       : { configOptionsSettled: existing.configOptionsSettled }),
@@ -410,17 +555,37 @@ function handleModelFallback(store: StoreApi<AppState>, payload: unknown): void 
   });
 }
 
-function handleSessionModelsUpdated(
-  store: StoreApi<AppState>,
-  payload: SessionModelsPayload | undefined,
+function updateSkippedModelsEntry(
+  state: AppState,
+  sessionId: string,
+  payload: SessionModelsPayload,
+  startupUnsettled: boolean,
+  resolved: ReturnType<typeof resolveModelsUpdateRuntime>["resolved"],
 ) {
-  if (!payload?.session_id) return;
-  const sessionId = payload.session_id;
-  const state = store.getState();
-  const { providerRestored, strictProjection, persisted, pendingRuntime, resolved } =
-    resolveModelsUpdateRuntime(store, state, sessionId, payload);
-  debugModelsUpdate(state, sessionId, payload, resolved);
-  if (shouldSkipModelsUpdate(resolved) && !providerRestored) return;
+  const existing = resolved.existingEntry;
+  const providerUpdate =
+    payload.config_options_source === "provider_update" ||
+    payload.config_options_source === "provider_response";
+  if (
+    !existing ||
+    (payload.config_options_settled === undefined && !startupUnsettled && !providerUpdate)
+  ) {
+    return;
+  }
+  state.setSessionModels(sessionId, {
+    ...existing,
+    ...confirmedConfigOptionsForUpdate(state, sessionId, payload, startupUnsettled, existing),
+  });
+}
+
+function applyResolvedModelsUpdate(
+  state: AppState,
+  sessionId: string,
+  payload: SessionModelsPayload,
+  startupUnsettled: boolean,
+  runtime: ReturnType<typeof resolveModelsUpdateRuntime>,
+) {
+  const { providerRestored, strictProjection, persisted, pendingRuntime, resolved } = runtime;
   clearStaleContextWindow(state, sessionId, resolved.currentModelId);
   const configOptions = resolveConfigOptions(
     resolved.preserveConfigOptions,
@@ -432,6 +597,13 @@ function handleSessionModelsUpdated(
   const configOptionsSettled = providerRestored
     ? payload.config_options_settled === true
     : resolvedConfigOptionsSettled(payload, resolved.existingEntry);
+  const confirmedConfigOptions = confirmedConfigOptionsForUpdate(
+    state,
+    sessionId,
+    payload,
+    startupUnsettled,
+    resolved.existingEntry,
+  );
   state.setSessionModels(sessionId, {
     currentModelId: resolved.currentModelId,
     fallbackModel: resolved.existingFallback,
@@ -441,6 +613,7 @@ function handleSessionModelsUpdated(
       payload.models ?? [],
     ),
     configOptions,
+    ...confirmedConfigOptions,
     settingsPolicy: settingsPolicyForProjection(
       providerRestored,
       strictProjection,
@@ -453,6 +626,23 @@ function handleSessionModelsUpdated(
       state.sessionModels.bySessionId[sessionId]?.configBaseline,
   });
   if (providerRestored) state.clearActiveModel(sessionId);
+}
+
+function handleSessionModelsUpdated(
+  store: StoreApi<AppState>,
+  payload: SessionModelsPayload | undefined,
+) {
+  if (!payload?.session_id) return;
+  const sessionId = payload.session_id;
+  const state = store.getState();
+  const runtime = resolveModelsUpdateRuntime(store, state, sessionId, payload);
+  debugModelsUpdate(state, sessionId, payload, runtime.resolved);
+  const startupUnsettled = isUnsettledStartupModelsPayload(state, sessionId, payload);
+  if (shouldSkipModelsUpdate(runtime.resolved) && !runtime.providerRestored) {
+    updateSkippedModelsEntry(state, sessionId, payload, startupUnsettled, runtime.resolved);
+    return;
+  }
+  applyResolvedModelsUpdate(state, sessionId, payload, startupUnsettled, runtime);
 }
 
 export function registerSessionModelsHandlers(store: StoreApi<AppState>): WsHandlers {

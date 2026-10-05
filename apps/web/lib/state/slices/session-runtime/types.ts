@@ -236,6 +236,13 @@ export type AvailableCommand = {
   name: string;
   description?: string;
   input_hint?: string;
+  kind?: string;
+  action?: {
+    kind: string;
+    config_id: string;
+    value: string;
+    reset_value: string;
+  };
 };
 
 export type AvailableCommandsState = {
@@ -318,6 +325,13 @@ export type SessionModelsState = {
       models: SessionModelEntry[];
       configOptions: ConfigOptionEntry[];
       configOptionsSettled?: boolean;
+      /** Provider-reported config values from the last settled snapshot. */
+      confirmedConfigOptions?: Record<string, string>;
+      confirmedConfigOptionsExecutionId?: string;
+      pendingConfirmedConfigOptions?: {
+        executionId: string;
+        values: Record<string, string>;
+      };
       configBaseline?: Record<string, string>;
       /** Marks the effective selector snapshot restored after explicit recovery. */
       settingsPolicy?: "provider_restored";
@@ -600,6 +614,14 @@ export type SessionRuntimeSliceActions = {
       currentModelId: string;
       models: SessionModelEntry[];
       configOptions: ConfigOptionEntry[];
+      configOptionsSettled?: boolean;
+      /** Provider-reported config values from the last settled snapshot. */
+      confirmedConfigOptions?: Record<string, string>;
+      confirmedConfigOptionsExecutionId?: string;
+      pendingConfirmedConfigOptions?: {
+        executionId: string;
+        values: Record<string, string>;
+      };
       configBaseline?: Record<string, string>;
       settingsPolicy?: "provider_restored";
       /** Set when the session started on the profile's fallback model
@@ -607,6 +629,8 @@ export type SessionRuntimeSliceActions = {
       fallbackModel?: string;
     },
   ) => void;
+  /** Hide a previous execution's provider configuration while startup identity settles. */
+  invalidateConfirmedConfigOptions: (sessionId: string, executionId?: string) => void;
   setSessionMCPStatus: (sessionId: string, history: MCPAttachmentHistory) => void;
   // Prompt usage actions
   setPromptUsage: (sessionId: string, usage: PromptUsageEntry) => void;

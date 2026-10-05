@@ -3,6 +3,14 @@ import type { EditorView } from "@tiptap/pm/view";
 import { getMarkdownText, handleEditorPaste, textToEditorContent } from "./tiptap-helpers";
 import * as tiptapHelpers from "./tiptap-helpers";
 
+const slowCommand = {
+  id: "agent-slow",
+  label: "/slow",
+  description: "Run a slow response",
+  action: "agent" as const,
+  agentCommandName: "slow",
+};
+
 describe("entity reference trigger", () => {
   it("provides a trigger-context guard for # suggestions", () => {
     expect(typeof (tiptapHelpers as Record<string, unknown>).isEntityReferenceTriggerAllowed).toBe(
@@ -155,14 +163,6 @@ describe("getMarkdownText", () => {
 });
 
 describe("textToEditorContent", () => {
-  const slowCommand = {
-    id: "agent-slow",
-    label: "/slow",
-    description: "Run a slow response",
-    action: "agent" as const,
-    agentCommandName: "slow",
-  };
-
   it("restores known slash commands as slash command nodes", () => {
     const content = textToEditorContent("/slow 1s", [slowCommand]);
 
@@ -244,6 +244,34 @@ describe("textToEditorContent", () => {
         type: "text",
         text: "See [#ENG-123](https://jira.example.test/browse/ENG-123)",
       },
+    ]);
+  });
+});
+
+describe("raw skill invocation restoration", () => {
+  it("restores a clean chip without changing surrounding text", () => {
+    const skill = {
+      id: "agent-$retro",
+      label: "/retro",
+      description: "Run the retrospective skill",
+      action: "agent" as const,
+      agentCommandName: "$retro",
+      kind: "skill" as const,
+    };
+    const content = textToEditorContent("Before /$retro context", [skill]);
+
+    expect(content.content?.[0]?.content).toEqual([
+      { type: "text", text: "Before " },
+      {
+        type: "slashCommand",
+        attrs: {
+          id: "agent-$retro",
+          label: "/retro",
+          commandName: "$retro",
+          description: "Run the retrospective skill",
+        },
+      },
+      { type: "text", text: " context" },
     ]);
   });
 });

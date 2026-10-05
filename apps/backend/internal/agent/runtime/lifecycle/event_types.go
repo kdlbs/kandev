@@ -668,10 +668,12 @@ type SessionModelsEventPayload struct {
 	TaskID                string                        `json:"task_id"`
 	SessionID             string                        `json:"session_id"`
 	AgentID               string                        `json:"agent_id"`
+	AgentExecutionID      string                        `json:"agent_execution_id,omitempty"`
 	CurrentModelID        string                        `json:"current_model_id"`
 	SessionSettingsPolicy streams.SessionSettingsPolicy `json:"session_settings_policy,omitempty"`
 	Models                []streams.SessionModelInfo    `json:"models"`
 	ConfigOptions         []streams.ConfigOption        `json:"config_options,omitempty"`
+	ConfigOptionsSource   string                        `json:"config_options_source,omitempty"`
 	// ConfigOptionsSettled distinguishes a complete empty provider snapshot
 	// from the transient empty state sent before startup settles.
 	ConfigOptionsSettled bool `json:"config_options_settled,omitempty"`

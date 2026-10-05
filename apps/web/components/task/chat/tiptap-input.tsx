@@ -41,7 +41,7 @@ import {
   type ClarificationEscapePredicate,
 } from "@/hooks/use-clarification-escape-guard";
 import type { MentionItem } from "@/hooks/use-inline-mention";
-import type { SlashCommand } from "./slash-command-types";
+import { mapAvailableCommandToSlashCommand, type SlashCommand } from "./slash-command-types";
 import type { ContextFile } from "@/lib/state/context-files-store";
 import { useEntityReferenceComposer } from "./use-entity-reference-composer";
 import { EntityReferenceSuggestionPluginKey } from "./tiptap-entity-reference-suggestion";
@@ -214,18 +214,21 @@ function useSuggestionConfigs({
   const agentCommands = useAppStore((state) =>
     sessionId ? state.availableCommands.bySessionId[sessionId] : undefined,
   );
+  const confirmedConfigOptions = useAppStore((state) =>
+    sessionId ? state.sessionModels.bySessionId[sessionId]?.confirmedConfigOptions : undefined,
+  );
   const slashCommands = useMemo((): SlashCommand[] => {
     if (!agentCommands || agentCommands.length === 0) return [];
     return agentCommands
       .filter((cmd) => !(cmd.description || "").includes("(bundled)"))
-      .map((cmd) => ({
-        id: `agent-${cmd.name}`,
-        label: `/${cmd.name}`,
-        description: cmd.description || t("task:runCommand", { name: cmd.name }),
-        action: "agent" as const,
-        agentCommandName: cmd.name,
-      }));
-  }, [agentCommands]);
+      .map((cmd) =>
+        mapAvailableCommandToSlashCommand(
+          cmd,
+          confirmedConfigOptions,
+          cmd.description || t("task:runCommand", { name: cmd.name }),
+        ),
+      );
+  }, [agentCommands, confirmedConfigOptions, t]);
 
   const workspaceIdRef = useRef(workspaceId);
   useLayoutEffect(() => {
@@ -465,6 +468,7 @@ export const TipTapInput = forwardRef<TipTapInputHandle, TipTapInputProps>(funct
     <>
       <TipTapPopups
         menu={menu}
+        slashCommands={slashCommands}
         entityReferences={entityReferences}
         overlay={overlay}
         history={history}
@@ -486,6 +490,7 @@ export const TipTapInput = forwardRef<TipTapInputHandle, TipTapInputProps>(funct
 
 type TipTapPopupsProps = {
   menu: ReturnType<typeof useMenuHandlers>;
+  slashCommands: SlashCommand[];
   entityReferences: ReturnType<typeof useEntityReferenceComposer>;
   overlay: Omit<ReturnType<typeof useReverseSearchOverlay>, "editorWrapperRef" | "editorRef">;
   history: readonly MessageHistoryEntry[];
@@ -496,6 +501,7 @@ type TipTapPopupsProps = {
 
 function TipTapPopups({
   menu,
+  slashCommands,
   entityReferences,
   overlay,
   history,
@@ -503,6 +509,8 @@ function TipTapPopups({
   onReverseSearchSelect,
   onEntityReferenceClose,
 }: TipTapPopupsProps) {
+  const byId = new Map(slashCommands.map((command) => [command.id, command]));
+  const currentSlashCommands = menu.slashMenu.items.map((item) => byId.get(item.id) ?? item);
   return (
     <>
       <MentionMenu
@@ -532,7 +540,7 @@ function TipTapPopups({
       <SlashCommandMenu
         isOpen={menu.slashMenu.isOpen}
         clientRect={menu.slashMenu.clientRect}
-        commands={menu.slashMenu.items}
+        commands={currentSlashCommands}
         selectedIndex={menu.slashSelectedIndex}
         onSelect={menu.handleSlashSelect}
         onClose={menu.handleSlashClose}

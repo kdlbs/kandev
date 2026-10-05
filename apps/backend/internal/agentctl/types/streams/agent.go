@@ -514,11 +514,25 @@ type AvailableCommand struct {
 	// Name is the command name (e.g., "draftpr", "commit").
 	Name string `json:"name"`
 
+	// Kind identifies a command only when the provider contract supplies a known classification.
+	Kind string `json:"kind,omitempty"`
+
+	// Action carries a recognized provider action without exposing raw provider metadata.
+	Action *AvailableCommandAction `json:"action,omitempty"`
+
 	// Description is a human-readable description of the command.
 	Description string `json:"description,omitempty"`
 
 	// InputHint is a hint displayed when the command expects additional input.
 	InputHint string `json:"input_hint,omitempty"`
+}
+
+// AvailableCommandAction is a validated, provider-neutral action supported by the composer.
+type AvailableCommandAction struct {
+	Kind       string `json:"kind"`
+	ConfigID   string `json:"config_id"`
+	Value      string `json:"value"`
+	ResetValue string `json:"reset_value"`
 }
 
 // ContentBlock represents a multimodal content block from the agent.

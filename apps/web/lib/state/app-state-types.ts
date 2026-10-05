@@ -595,12 +595,21 @@ export type AppState = KanbanSlice & {
       currentModelId: string;
       models: SessionModelEntry[];
       configOptions: ConfigOptionEntry[];
+      configOptionsSettled?: boolean;
+      /** Provider-reported config values from the last settled snapshot. */
+      confirmedConfigOptions?: Record<string, string>;
+      confirmedConfigOptionsExecutionId?: string;
+      pendingConfirmedConfigOptions?: {
+        executionId: string;
+        values: Record<string, string>;
+      };
       configBaseline?: Record<string, string>;
       settingsPolicy?: "provider_restored";
       /** Set when the session started on the profile's fallback model. */
       fallbackModel?: string;
     },
   ) => void;
+  invalidateConfirmedConfigOptions: (sessionId: string, executionId?: string) => void;
   // Prompt usage actions
   setPromptUsage: (sessionId: string, usage: PromptUsageEntry) => void;
   bumpSessionUsageInvalidation: (sessionId: string) => void;

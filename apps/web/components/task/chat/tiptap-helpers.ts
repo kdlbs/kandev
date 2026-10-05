@@ -146,7 +146,7 @@ function slashCommandAttrs(command: SlashCommand): Record<string, unknown> {
   const name = slashCommandName(command);
   return {
     id: command.id,
-    label: `/${name}`,
+    label: `/${normalizeSlashCommandName(command.label)}`,
     commandName: name,
     description: command.description,
   };

@@ -527,6 +527,25 @@ An interrupted task keeps a warning indicator until the agent confirms
 recovery. Opening the task or starting a recovery attempt does not clear the
 indicator; a failed attempt keeps it visible with the existing retry actions.
 
+## Use agent commands in the composer
+
+In task Chat or Quick Chat, type `/` to browse the commands advertised by the
+active agent. Select an entry with the arrow keys, Enter, Tab, a pointer, or a
+touch. Selection adds the command to your editable draft. It does not send a
+message or change the session configuration. Review the draft, add context if
+needed, then select **Send**.
+
+Kandev labels a command as a skill only when the agent identifies it as one.
+For example, Codex ACP advertises `$retro`; the menu shows `/retro` with a
+localized **Skill** chip, while the submitted command remains `/$retro`.
+Commands without classification keep their advertised names and have no
+inferred chip.
+
+Verified mode-command metadata adds a **Mode** chip. Kandev shows **Active**
+only when the session has confirmed that mode. A command can also show its
+advertised argument hint, such as `/goal`'s supported arguments. These labels
+and hints describe the command; they do not apply it until you send the draft.
+
 ## Answer clarification questions
 
 When an agent asks a clarification question, answer it from the question panel
