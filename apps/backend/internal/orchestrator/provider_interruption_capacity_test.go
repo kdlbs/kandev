@@ -3,11 +3,13 @@ package orchestrator
 import (
 	"context"
 	"errors"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	agentruntime "github.com/kandev/kandev/internal/agent/runtime"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
+	"github.com/kandev/kandev/internal/auth/authn"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/orchestrator/watcher"
 	"github.com/kandev/kandev/internal/task/models"
@@ -53,6 +55,9 @@ func capacityContinuationFailureFixture(t *testing.T) (*Service, *mockAgentManag
 	t.Helper()
 	svc, _, data := continuationFailureFixture(t)
 	mgr := installContinuationRestoreFixture(t, svc)
+	mgr.getACPSessionIDForSessionFunc = func(string) (string, bool) {
+		return "provider-session", true
+	}
 	svc.config.ProviderInterruptionContinuation = false
 	data.AgentID = "codex-acp"
 	data.AgentProfileID = "profile-1"
@@ -209,6 +214,31 @@ func TestCapacityContinuationSupersession(t *testing.T) {
 		require.False(t, owned)
 		require.ErrorIs(t, entry.retryCtx.Err(), context.Canceled)
 	})
+
+	t.Run("stop", func(t *testing.T) {
+		svc, mgr, _, _, entry := startCapacityContinuationEpisode(t)
+		require.NoError(t, svc.StopSession(context.Background(), "s1", "operator stopped", false))
+		require.ErrorIs(t, entry.retryCtx.Err(), context.Canceled)
+		require.True(t, entry.claim(), "simulate a timer wake after the stop")
+		svc.retryTransientPrompt(entry.retryCtx, "t1", "s1", "execution-1")
+		require.Zero(t, entry.started)
+		mgr.mu.Lock()
+		defer mgr.mu.Unlock()
+		require.Empty(t, mgr.capturedPrompts)
+	})
+
+	t.Run("delete", func(t *testing.T) {
+		svc, mgr, _, _, entry := startCapacityContinuationEpisode(t)
+		require.NoError(t, svc.repo.UpdateTaskSessionState(context.Background(), "s1", models.TaskSessionStateWaitingForInput, ""))
+		require.NoError(t, svc.DeleteSession(context.Background(), "s1"))
+		require.ErrorIs(t, entry.retryCtx.Err(), context.Canceled)
+		require.True(t, entry.claim(), "simulate a timer wake after deletion")
+		svc.retryTransientPrompt(entry.retryCtx, "t1", "s1", "execution-1")
+		require.Zero(t, entry.started)
+		mgr.mu.Lock()
+		defer mgr.mu.Unlock()
+		require.Empty(t, mgr.capturedPrompts)
+	})
 }
 
 func TestCapacityContinuationRuntimeLossRefusesRestore(t *testing.T) {
@@ -351,13 +381,17 @@ func TestCapacityContinuationRejectsRuntimeChangeBeforeResumePreparation(t *test
 
 func TestCapacityContinuationFencesExecutionIdentityAtFinalAdmission(t *testing.T) {
 	for _, test := range []struct {
-		name           string
-		readinessCheck int
-		automation     bool
+		name                     string
+		readinessCheck           int
+		automation               bool
+		queuedWork               bool
+		changeNativeConversation bool
 	}{
 		{name: "before final dispatch admission", readinessCheck: 5},
 		{name: "at provider admission", readinessCheck: 6},
 		{name: "automation ownership changes at provider admission", readinessCheck: 6, automation: true},
+		{name: "queued work arrives at provider admission", readinessCheck: 6, queuedWork: true},
+		{name: "native conversation resets at provider admission", readinessCheck: 6, changeNativeConversation: true},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			svc, mgr, messages, _, entry := startCapacityContinuationEpisode(t)
@@ -391,7 +425,8 @@ func TestCapacityContinuationFencesExecutionIdentityAtFinalAdmission(t *testing.
 				t.Fatal("continuation did not reach final live-execution admission")
 			}
 
-			if test.automation {
+			switch {
+			case test.automation:
 				task, err := svc.repo.GetTask(context.Background(), "t1")
 				require.NoError(t, err)
 				task.Origin = models.TaskOriginAutomationRun
@@ -399,7 +434,14 @@ func TestCapacityContinuationFencesExecutionIdentityAtFinalAdmission(t *testing.
 				updatedTask, err := svc.repo.GetTask(context.Background(), "t1")
 				require.NoError(t, err)
 				require.Equal(t, models.TaskOriginAutomationRun, updatedTask.Origin)
-			} else {
+			case test.queuedWork:
+				_, err := svc.messageQueue.QueueMessage(context.Background(), "s1", "t1", "human queued prompt", "", "user", false, nil)
+				require.NoError(t, err)
+			case test.changeNativeConversation:
+				mgr.getACPSessionIDForSessionFunc = func(string) (string, bool) {
+					return "reset-provider-session", true
+				}
+			default:
 				mgr.getExecutionIDForSessionFunc = func(context.Context, string) (string, error) {
 					return "execution-successor", nil
 				}
@@ -431,14 +473,119 @@ func TestCapacityContinuationFencesExecutionIdentityAtFinalAdmission(t *testing.
 			mgr.mu.Unlock()
 			running, err := svc.repo.GetExecutorRunningBySessionID(context.Background(), "s1")
 			require.NoError(t, err)
-			wantExecution := "execution-successor"
-			if test.automation {
-				wantExecution = "execution-1"
+			wantExecution := "execution-1"
+			if !test.automation && !test.queuedWork && !test.changeNativeConversation {
+				wantExecution = "execution-successor"
 			}
 			require.Equal(t, wantExecution, running.AgentExecutionID,
 				"refusal leaves the independently admitted execution untouched")
 		})
 	}
+}
+
+func TestCapacityContinuationRechecksInitiatingUserAtProviderAdmission(t *testing.T) {
+	svc, mgr, data := capacityContinuationFailureFixture(t)
+	caller := authn.Identity{UserID: "collaborator", Role: authn.RoleMember, OrgID: "org-1"}
+	callerCtx := authn.WithIdentity(context.Background(), caller)
+	mgr.currentPromptGeneration.Store(data.PromptGeneration - 1)
+	svc.beginInteractivePromptAttempt(callerCtx, data.SessionID, data.AgentExecutionID, false)
+	mgr.currentPromptGeneration.Store(data.PromptGeneration)
+	svc.observePromptAttempt(data.SessionID, data.AgentExecutionID, data.PromptGeneration, true, true)
+	require.NoError(t, svc.repo.UpsertExecutorRunning(context.Background(), &models.ExecutorRunning{
+		ID: "runtime-original", TaskID: "t1", SessionID: "s1", AgentExecutionID: "execution-1", Status: "ready",
+	}))
+
+	allowed := atomic.Bool{}
+	allowed.Store(true)
+	checkerCalled := atomic.Bool{}
+	checkerSawCaller := atomic.Bool{}
+	permissionErr := errors.New("session.prompt revoked")
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	svc.SetSessionPromptChecker(func(ctx context.Context, sessionID string) error {
+		checkerCalled.Store(true)
+		identity, ok := authn.IdentityFromContext(ctx)
+		if ok && sessionID == data.SessionID && identity == caller {
+			checkerSawCaller.Store(true)
+		}
+		close(entered)
+		<-release
+		if !allowed.Load() {
+			return permissionErr
+		}
+		return nil
+	})
+	require.True(t, svc.handleTransientFailure(context.Background(), data))
+	value, ok := svc.transientRetries.Load(data.SessionID)
+	require.True(t, ok)
+	entry := value.(*transientRetryEntry)
+	t.Cleanup(entry.cancel)
+	require.Equal(t, continuationPolicyCapacityLive, entry.continuationPolicy)
+	require.True(t, entry.continuation.initiatorKnown)
+	mgr.isAgentRunning = true
+	mgr.isAgentReadyFn = func(context.Context, string) bool { return true }
+
+	require.True(t, entry.claim())
+	require.Equal(t, retainedRuntimeRetryUsable,
+		svc.retainedRuntimeRetryDisposition(entry.retryCtx, data.TaskID, data.SessionID, entry))
+	done := make(chan struct{})
+	go func() {
+		svc.retryTransientPrompt(entry.retryCtx, data.TaskID, data.SessionID, data.AgentExecutionID)
+		close(done)
+	}()
+	select {
+	case <-entered:
+	case <-time.After(time.Second):
+		t.Fatal("capacity retry did not reach final provider admission")
+	}
+	allowed.Store(false)
+	close(release)
+	select {
+	case <-done:
+	case <-time.After(3 * time.Second):
+		t.Fatal("revoked retry did not retire")
+	}
+
+	require.True(t, checkerCalled.Load(), "the provider admission boundary must reauthorize session.prompt")
+	require.True(t, checkerSawCaller.Load(), "the check uses the user identity that started the turn")
+	require.Zero(t, entry.started)
+	_, owned := svc.transientRetries.Load(data.SessionID)
+	require.False(t, owned)
+	mgr.mu.Lock()
+	defer mgr.mu.Unlock()
+	require.Empty(t, mgr.capturedPrompts)
+}
+
+func TestCapacityContinuationRequiresBoundInitiatorWhenAuthorizationIsWired(t *testing.T) {
+	t.Run("capacity refuses missing initiator", func(t *testing.T) {
+		svc, _, data := capacityContinuationFailureFixture(t)
+		svc.SetSessionPromptChecker(func(context.Context, string) error { return nil })
+		require.Nil(t, svc.continuationBindingForFailure(context.Background(), data))
+	})
+	t.Run("transport restoration keeps its existing admission", func(t *testing.T) {
+		svc, _, data := continuationFailureFixture(t)
+		svc.SetSessionPromptChecker(func(context.Context, string) error { return nil })
+		require.NotNil(t, svc.continuationBindingForFailure(context.Background(), data))
+	})
+}
+
+func TestCapacityContinuationRejectedPromptDoesNotCountAsStarted(t *testing.T) {
+	svc, mgr, messages, _, entry := startCapacityContinuationEpisode(t)
+	mgr.promptErr = errors.New("agentctl rejected prompt before provider dispatch")
+	require.True(t, entry.claim())
+	svc.retryTransientPrompt(entry.retryCtx, "t1", "s1", "execution-1")
+
+	require.Zero(t, entry.started, "a rejected admission is not a started attempt")
+	_, owned := svc.transientRetries.Load("s1")
+	require.False(t, owned)
+	require.NotEmpty(t, messages.sessionMessages)
+	last := messages.sessionMessages[len(messages.sessionMessages)-1]
+	require.Equal(t, "refused", last.metadata["recovery_disposition"])
+	require.Zero(t, last.metadata["attempts_started"])
+	mgr.mu.Lock()
+	defer mgr.mu.Unlock()
+	require.Empty(t, mgr.stopAgentWithReasonArgs)
+	require.Empty(t, mgr.stopAgentArgs)
 }
 
 func TestCapacityContinuationFinalDisposition(t *testing.T) {

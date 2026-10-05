@@ -381,6 +381,8 @@ func TestAgentTurnFailedRoutesAutomationOriginsToTerminalFailureOwner(t *testing
 			agentManager.mu.Lock()
 			require.Len(t, agentManager.stopAgentWithReasonArgs, 1,
 				"automation failure must use the existing execution cleanup owner exactly once")
+			require.Empty(t, agentManager.capturedPrompts,
+				"after-effects automation failures must not dispatch an interactive capacity continuation")
 			agentManager.mu.Unlock()
 			_, retryOwned := svc.transientRetries.Load("s-auto")
 			require.False(t, retryOwned, "automation failure must not create an interactive retained retry")
@@ -416,9 +418,8 @@ func TestAutomationOwnedCapacityFailureBeforeEffectsKeepsReplayPolicy(t *testing
 	data.PromptGeneration = 9
 	data.OutputObserved = false
 	data.EffectObserved = false
-	data.PromptFailureDisposition = ""
 	data.CapacityContinuation = nil
-	svc.handleAgentFailed(ctx, data)
+	svc.handleAgentTurnFailed(ctx, data)
 
 	value, owned := svc.transientRetries.Load("s-auto")
 	require.True(t, owned, "automation's pre-result capacity retry remains eligible")

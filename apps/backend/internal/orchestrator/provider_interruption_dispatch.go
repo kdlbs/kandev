@@ -4,15 +4,16 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
-	"go.uber.org/zap"
 	"time"
 
 	agentruntime "github.com/kandev/kandev/internal/agent/runtime"
+	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
+	"github.com/kandev/kandev/internal/auth/authn"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	"github.com/kandev/kandev/internal/orchestrator/watcher"
 	"github.com/kandev/kandev/internal/task/models"
+	"go.uber.org/zap"
 )
 
 const continuationPrepareTimeout = time.Minute
@@ -167,9 +168,28 @@ func (s *Service) retryRetainedRuntimeContinuation(
 		return nil
 	}
 	onAccepted := func(string) {
+		if liveExecutionFence != nil {
+			markDispatchStarted()
+		}
 		dispatchAccepted = true
 		s.recordContinuationAcceptance(sessionID, entry)
 		s.updateContinuationPhase(context.WithoutCancel(ctx), taskID, sessionID, entry, "continuing")
+	}
+	beforeProviderAdmission := func() error {
+		if liveExecutionFence == nil {
+			return nil
+		}
+		if err := s.validateContinuationOwner(ctx, taskID, sessionID, entry); err != nil {
+			return err
+		}
+		admissionCtx := ctx
+		if entry.continuation != nil && entry.continuation.initiatorKnown {
+			admissionCtx = authn.WithIdentity(ctx, entry.continuation.initiator)
+		}
+		if err := s.authorizeSessionPrompt(admissionCtx, sessionID); err != nil {
+			return err
+		}
+		return s.validateContinuationOwner(ctx, taskID, sessionID, entry)
 	}
 	_, err := s.promptTask(ctx, taskID, sessionID, instruction, "", false, nil, true,
 		launchOriginAutomatic, promptTaskOptions{
@@ -180,7 +200,7 @@ func (s *Service) retryRetainedRuntimeContinuation(
 			reserveTurnUntilDispatch:  true,
 			liveExecutionFence:        liveExecutionFence,
 			beforeDispatch:            beforeDispatch,
-			onProviderAdmission:       markDispatchStarted,
+			beforeProviderAdmission:   beforeProviderAdmission,
 			onAccepted:                onAccepted,
 		})
 	if err == nil || dispatchAccepted {
@@ -219,7 +239,7 @@ func (s *Service) validatePromptLiveExecutionFence(
 	if err := s.validatePromptLiveExecutionOwnership(ctx, taskID, sessionID, fence); err != nil {
 		return err
 	}
-	if err := s.validatePromptLiveRuntime(ctx, sessionID); err != nil {
+	if err := s.validatePromptLiveRuntime(ctx, sessionID, fence.nativeID); err != nil {
 		return err
 	}
 	if err := s.validatePromptExecutionMap(sessionID, fence.executionID); err != nil {
@@ -290,12 +310,15 @@ func (s *Service) validatePromptManagerExecution(ctx context.Context, sessionID,
 	return nil
 }
 
-func (s *Service) validatePromptLiveRuntime(ctx context.Context, sessionID string) error {
+func (s *Service) validatePromptLiveRuntime(ctx context.Context, sessionID, nativeID string) error {
 	runningProcess, probeErr := s.probeAgentRunning(ctx, sessionID)
 	if probeErr != nil || !runningProcess {
 		return ErrResumeAttemptCancelled
 	}
 	if !s.agentManager.IsAgentReadyForPrompt(ctx, sessionID) {
+		return ErrResumeAttemptCancelled
+	}
+	if currentNativeID := s.currentACPSessionID(sessionID); currentNativeID == "" || currentNativeID != nativeID {
 		return ErrResumeAttemptCancelled
 	}
 	return nil

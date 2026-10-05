@@ -118,7 +118,10 @@ func (a *mockAgent) handleRetainedCapacity(ctx context.Context, sid acp.SessionI
 		return acp.PromptResponse{}, nil, false
 	}
 	if !continuation {
-		_ = os.Remove(retainedCapacityCounterPath(sid, scenario.name))
+		previous, exists := loadRetainedCapacityScenario(sid)
+		if !exists || previous != scenario {
+			_ = os.Remove(retainedCapacityCounterPath(sid, scenario.name))
+		}
 		saveRetainedCapacityScenario(sid, scenario)
 	}
 	attempt := nextRetainedCapacityAttempt(sid, scenario.name)

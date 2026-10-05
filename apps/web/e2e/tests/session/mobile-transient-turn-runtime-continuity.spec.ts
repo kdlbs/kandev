@@ -225,7 +225,7 @@ test("phone: capacity retry can be cancelled during backoff", async ({
     await testPage.goto(`/t/${fixture.taskId}`);
     await session.waitForLoad();
     await expect(session.transientRetryCard()).toBeVisible({ timeout: 30_000 });
-    await expect(session.transientRetryCard()).toContainText("Retrying in");
+    await expect(session.transientRetryCard()).toContainText(/attempt 1 of 5/i);
     await expect(session.recoveryCancelRetryButton()).toBeVisible();
     const bounds = await session.recoveryCancelRetryButton().boundingBox();
     expect(bounds?.height).toBeGreaterThanOrEqual(44);

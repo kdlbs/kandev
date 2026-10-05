@@ -25,7 +25,7 @@ type CapacityContinuationSnapshot struct {
 // SafeFor reports whether this exact prompt has only provider-confirmed completed work.
 func (s *CapacityContinuationSnapshot) SafeFor(generation uint64) bool {
 	if s == nil || generation == 0 || s.PromptGeneration != generation || !s.EvidenceComplete ||
-		s.PendingTools || s.FailedTools || s.UnknownOutcomes || s.PermissionPending || s.UnaccountedBackground {
+		s.CompletedTools == 0 || s.PendingTools || s.FailedTools || s.UnknownOutcomes || s.PermissionPending || s.UnaccountedBackground {
 		return false
 	}
 	switch s.Support {

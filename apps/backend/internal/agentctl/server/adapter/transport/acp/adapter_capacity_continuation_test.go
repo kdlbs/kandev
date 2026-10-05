@@ -12,6 +12,19 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+type permissionWaitObservedContext struct {
+	context.Context
+	waiting chan struct{}
+}
+
+func (c *permissionWaitObservedContext) Done() <-chan struct{} {
+	select {
+	case c.waiting <- struct{}{}:
+	default:
+	}
+	return c.Context.Done()
+}
+
 func TestCodexCapacityContinuationEvidence(t *testing.T) {
 	cases := []struct {
 		name   string
@@ -28,7 +41,14 @@ func TestCodexCapacityContinuationEvidence(t *testing.T) {
 			},
 			safe: true,
 		},
-		{name: "output only", safe: true},
+		{name: "output only"},
+		{
+			name: "failed shell exit code",
+			frames: []string{
+				`{"sessionUpdate":"tool_call","toolCallId":"shell-failed","title":"Run","kind":"execute","status":"in_progress"}`,
+				`{"sessionUpdate":"tool_call_update","toolCallId":"shell-failed","status":"completed","rawOutput":{"exit_code":1}}`,
+			},
+		},
 		{
 			name: "completed and pending",
 			frames: []string{
@@ -71,6 +91,10 @@ func TestCodexCapacityContinuationEvidence(t *testing.T) {
 			require.Equal(t, tc.safe, snapshot.SafeFor(7))
 			if tc.name == "completed read shell write and MCP tools" {
 				require.Equal(t, uint16(4), snapshot.CompletedTools)
+			}
+			if tc.name == "failed shell exit code" {
+				require.True(t, snapshot.FailedTools)
+				require.False(t, snapshot.SafeFor(7))
 			}
 		})
 	}
@@ -121,6 +145,67 @@ func TestCapacityContinuationPermissionBlocksSnapshot(t *testing.T) {
 	require.True(t, a.capacityContinuationSnapshot(turn, true).SafeFor(8))
 }
 
+func TestCapacityContinuationPermissionRaceDoesNotPoisonEvidence(t *testing.T) {
+	previousWindow := syntheticToolCallRaceWindow
+	syntheticToolCallRaceWindow = time.Second
+	t.Cleanup(func() { syntheticToolCallRaceWindow = previousWindow })
+
+	a, turn := newCapacityPromptTurn(t, 13)
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	a.permissionHandler = func(context.Context, *PermissionRequest) (*PermissionResponse, error) {
+		close(entered)
+		<-release
+		return &PermissionResponse{OptionID: "allow"}, nil
+	}
+	permissionDone := make(chan error, 1)
+	ctx := &permissionWaitObservedContext{Context: t.Context(), waiting: make(chan struct{}, 1)}
+	go func() {
+		_, err := a.handlePermissionRequest(ctx, &PermissionRequest{
+			SessionID: "capacity-session", ToolCallID: "permission-race-tool",
+		})
+		permissionDone <- err
+	}()
+
+	// The tool notification arrives while request_permission is still in its
+	// duplicate-suppression wait, before a corresponding turn-ledger entry exists.
+	select {
+	case <-ctx.waiting:
+	case <-time.After(time.Second):
+		t.Fatal("request_permission did not enter its ToolCall notification wait")
+	}
+	a.handleACPUpdate(makeNotification("capacity-session", sdk.SessionUpdate{
+		ToolCall: &sdk.SessionUpdateToolCall{
+			ToolCallId: "permission-race-tool", Kind: sdk.ToolKindExecute, Status: sdk.ToolCallStatusPending,
+		},
+	}), 13)
+	select {
+	case <-entered:
+	case <-time.After(time.Second):
+		t.Fatal("permission handler did not start after the racing ToolCall")
+	}
+
+	snapshot := a.capacityContinuationSnapshot(turn, true)
+	require.True(t, snapshot.PermissionPending)
+	require.False(t, snapshot.UnknownOutcomes, "request_permission waits for the matching ToolCall before validating evidence")
+	require.False(t, snapshot.SafeFor(13))
+	close(release)
+	select {
+	case err := <-permissionDone:
+		require.NoError(t, err)
+	case <-time.After(time.Second):
+		t.Fatal("permission handler did not finish")
+	}
+
+	completed := sdk.ToolCallStatusCompleted
+	a.handleACPUpdate(makeNotification("capacity-session", sdk.SessionUpdate{
+		ToolCallUpdate: &sdk.SessionToolCallUpdate{ToolCallId: "permission-race-tool", Status: &completed},
+	}), 13)
+	snapshot = a.capacityContinuationSnapshot(turn, true)
+	require.False(t, snapshot.UnknownOutcomes)
+	require.True(t, snapshot.SafeFor(13), "a resolved permission race leaves authoritative completed evidence")
+}
+
 func TestCapacityContinuationEvidenceIgnoresStaleAndLoadHistory(t *testing.T) {
 	a, turn := newCapacityPromptTurn(t, 7)
 	completedCall := sdk.SessionUpdateToolCall{
@@ -135,8 +220,34 @@ func TestCapacityContinuationEvidenceIgnoresStaleAndLoadHistory(t *testing.T) {
 	a.isLoadingSession = false
 	a.mu.Unlock()
 	snapshot := a.capacityContinuationSnapshot(turn, true)
-	require.True(t, snapshot.SafeFor(7))
+	require.False(t, snapshot.SafeFor(7), "stale or replayed tool frames cannot attest completed work")
 	require.Zero(t, snapshot.CompletedTools)
+}
+
+func TestCapacityContinuationRetainsDetachedShellUntilWorkEnds(t *testing.T) {
+	a, turn := newCapacityPromptTurn(t, 12)
+	shell := streams.NewShellExec("sleep 10", "", "background shell", 0, false)
+	shell.SetBackgroundWorkIdentity(streams.BackgroundWorkKindShell, "shell-work-1", true, false)
+	a.activeToolCalls["background-shell-1"] = shell
+
+	launchReturned := sdk.ToolCallStatusCompleted
+	terminalLaunch := a.convertToolCallResultUpdate("capacity-session", &sdk.SessionToolCallUpdate{
+		ToolCallId: "background-shell-1", Status: &launchReturned,
+		RawOutput: map[string]any{"output": "background process started"},
+	})
+	require.NotNil(t, terminalLaunch)
+	_, stillTracked := a.activeToolCalls["background-shell-1"]
+	require.True(t, stillTracked, "a terminal launch result does not prove the detached shell ended")
+	require.True(t, a.capacityContinuationSnapshot(turn, true).UnaccountedBackground)
+
+	shellEnded := sdk.ToolCallStatusCompleted
+	terminalWork := a.convertToolCallResultUpdate("capacity-session", &sdk.SessionToolCallUpdate{
+		ToolCallId: "background-shell-1", Status: &shellEnded,
+		RawOutput: map[string]any{"exit_code": 0},
+	})
+	require.NotNil(t, terminalWork)
+	_, stillTracked = a.activeToolCalls["background-shell-1"]
+	require.False(t, stillTracked, "the observed process exit clears retained background evidence")
 }
 
 func TestCapacityContinuationEvidenceOverflowFailsClosed(t *testing.T) {
@@ -184,6 +295,10 @@ func TestCodexCapacityContinuationFencesBackgroundWorkAcrossPrompts(t *testing.T
 	terminal := a.convertToolCallResultUpdate("capacity-session", codexCollaborationResultUpdate("spawn-1", "thread-child", "completed"))
 	require.NotNil(t, terminal)
 	_, thirdTurn := a.registerPromptTurn(context.Background(), 9)
+	completedRead := sdk.SessionUpdateToolCall{
+		ToolCallId: "later-read", Kind: sdk.ToolKindRead, Status: sdk.ToolCallStatusCompleted,
+	}
+	a.handleACPUpdate(makeNotification("capacity-session", sdk.SessionUpdate{ToolCall: &completedRead}), 9)
 	require.True(t, a.capacityContinuationSnapshot(thirdTurn, true).SafeFor(9))
 }
 
@@ -196,6 +311,44 @@ func TestCapacityContinuationFencesRetainedBackgroundShellEvidence(t *testing.T)
 	snapshot := a.capacityContinuationSnapshot(turn, true)
 	require.True(t, snapshot.UnaccountedBackground)
 	require.False(t, snapshot.SafeFor(10))
+}
+
+func TestCapacityContinuationKeepsShellFenceAfterChildCompletes(t *testing.T) {
+	a, _ := newCapacityPromptTurn(t, 20)
+	spawn := a.convertToolCallUpdate("capacity-session", codexCollaborationToolCall("spawn-shell-child", "thread-shell-child", "running"))
+	require.NotNil(t, spawn)
+	shell := streams.NewShellExec("sleep 10", "", "background shell", 0, false)
+	shell.SetBackgroundWorkIdentity(streams.BackgroundWorkKindShell, "shell-work-2", true, false)
+	a.activeToolCalls["background-shell-2"] = shell
+
+	childDone := a.convertToolCallResultUpdate("capacity-session", codexCollaborationResultUpdate("spawn-shell-child", "thread-shell-child", "completed"))
+	require.NotNil(t, childDone)
+	_, childStillTracked := a.activeToolCalls[spawn.ToolCallID]
+	require.False(t, childStillTracked)
+
+	_, laterTurn := a.registerPromptTurn(context.Background(), 21)
+	completedRead := sdk.SessionUpdateToolCall{
+		ToolCallId: "later-read-with-live-shell", Kind: sdk.ToolKindRead, Status: sdk.ToolCallStatusCompleted,
+	}
+	a.handleACPUpdate(makeNotification("capacity-session", sdk.SessionUpdate{ToolCall: &completedRead}), 21)
+	snapshot := a.capacityContinuationSnapshot(laterTurn, true)
+	require.True(t, snapshot.UnaccountedBackground, "the child completion does not prove its detached shell has exited")
+	require.False(t, snapshot.SafeFor(21))
+
+	shellDone := sdk.ToolCallStatusCompleted
+	ended := a.convertToolCallResultUpdate("capacity-session", &sdk.SessionToolCallUpdate{
+		ToolCallId: "background-shell-2", Status: &shellDone, RawOutput: map[string]any{"exit_code": 0},
+	})
+	require.NotNil(t, ended)
+	_, shellStillTracked := a.activeToolCalls["background-shell-2"]
+	require.False(t, shellStillTracked)
+
+	_, finalTurn := a.registerPromptTurn(context.Background(), 22)
+	finalRead := sdk.SessionUpdateToolCall{
+		ToolCallId: "final-read", Kind: sdk.ToolKindRead, Status: sdk.ToolCallStatusCompleted,
+	}
+	a.handleACPUpdate(makeNotification("capacity-session", sdk.SessionUpdate{ToolCall: &finalRead}), 22)
+	require.True(t, a.capacityContinuationSnapshot(finalTurn, true).SafeFor(22))
 }
 
 func TestCapacityContinuationFencesActiveMonitorWork(t *testing.T) {

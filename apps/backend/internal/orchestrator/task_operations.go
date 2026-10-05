@@ -6167,9 +6167,9 @@ type promptTaskOptions struct {
 	afterDispatch        func() error
 	// beforeDispatch runs once before the final dispatch admission boundary.
 	beforeDispatch func() error
-	// onProviderAdmission runs after the executor's final admission checks and
-	// immediately before it calls the provider with the prompt.
-	onProviderAdmission func()
+	// beforeProviderAdmission revalidates policy ownership after runtime
+	// preparation and immediately before the executor admits the prompt.
+	beforeProviderAdmission func() error
 	// afterDispatchAdmission runs once after final dispatch admission succeeds
 	// and before the first provider or model-switch I/O that can carry the
 	// prompt. Queue receipts use this boundary because admission can reject a
@@ -6642,8 +6642,13 @@ func (s *Service) preparePromptAdmissionCallback(
 				return markPromptAdmissionRejected(err)
 			}
 		}
-		if options.onProviderAdmission != nil {
-			options.onProviderAdmission()
+		if options.beforeProviderAdmission != nil {
+			if err := options.beforeProviderAdmission(); err != nil {
+				if guard != nil {
+					guard.unlock()
+				}
+				return markPromptAdmissionRejected(err)
+			}
 		}
 		return nil
 	}
@@ -7565,7 +7570,7 @@ func (s *Service) attemptModelSwitchForPromptWithAdmission(
 	releaseModelSwitchAttemptGuard func(),
 ) (result *PromptResult, handled bool, err error) {
 	if modelSwitchRequired(session, model) {
-		s.beginInitialPromptAttempt(sessionID, s.isDynamicPromptSession(session))
+		s.beginInitialPromptAttempt(ctx, sessionID, s.isDynamicPromptSession(session))
 		admissionErr := runBeforeDispatch()
 		if admissionErr == nil {
 			admissionErr = s.admitCeilingDispatch(ctx, taskID)

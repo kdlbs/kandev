@@ -296,12 +296,15 @@ func TestReplayFixtureRetainedCapacityUsesMarkedRequestError(t *testing.T) {
 			ExecutionID:      "mock-retained-capacity-execution",
 			PromptGeneration: 7,
 		},
-		Frames: []replayfixtures.Frame{{
-			Kind:    replayfixtures.FramePromptError,
-			Code:    -32603,
-			Message: "Selected model is at capacity. Please try a different model.",
-			Data:    map[string]any{"kandevMock": map[string]any{"retainedProviderCapacity": true}},
-		}},
+		Frames: []replayfixtures.Frame{
+			{Kind: replayfixtures.FrameToolCall, ToolCallID: "completed-read", Status: "completed"},
+			{
+				Kind:    replayfixtures.FramePromptError,
+				Code:    -32603,
+				Message: "Selected model is at capacity. Please try a different model.",
+				Data:    map[string]any{"kandevMock": map[string]any{"retainedProviderCapacity": true}},
+			},
+		},
 	}
 	_, observedEvents, requestErr, promptErr := replayFixtureThroughAdapter(t, fx)
 	if promptErr != nil {

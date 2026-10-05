@@ -74,6 +74,27 @@ func TestRetainedCapacityCountersAreIndependentByScenario(t *testing.T) {
 	}
 }
 
+func TestRepeatedRetainedCapacityRetryCommandsReachSuccessAndResetNewEpisodes(t *testing.T) {
+	const sid acp.SessionId = "retained-capacity-repeated-direct-retry-test"
+	clearRetainedCapacityCounters(sid)
+	t.Cleanup(func() { clearRetainedCapacityCounters(sid) })
+	a := &mockAgent{conn: &mockUpdater{}}
+
+	for attempt := 1; attempt <= 2; attempt++ {
+		_, err, handled := a.handleRetainedCapacity(context.Background(), sid, "/capacity-retry:2")
+		if !handled || err == nil {
+			t.Fatalf("direct retry %d handled=%v error=%v, want a capacity failure", attempt, handled, err)
+		}
+	}
+	if _, err, handled := a.handleRetainedCapacity(context.Background(), sid, "/capacity-retry:2"); !handled || err != nil {
+		t.Fatalf("third direct retry handled=%v error=%v, want configured success", handled, err)
+	}
+
+	if _, err, handled := a.handleRetainedCapacity(context.Background(), sid, "/capacity-retry:2"); !handled || err == nil {
+		t.Fatalf("new retry episode handled=%v error=%v, want a fresh first failure", handled, err)
+	}
+}
+
 func TestHandleRetainedCapacityAfterToolsEmitsVisibleReadBeforeFailure(t *testing.T) {
 	const sid acp.SessionId = "retained-capacity-tools-test"
 	clearRetainedCapacityCounters(sid)

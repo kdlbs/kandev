@@ -355,6 +355,11 @@ func cancelManagedBarrierPostgresRead(t *testing.T, ctx context.Context, holderD
 	workers.Wait()
 	require.ErrorIs(t, err, context.Canceled)
 	require.NotErrorIs(t, err, managed.ErrBusy)
+	deadline := time.Now().Add(time.Second)
+	for waiter.DB().Stats().InUse != 0 && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Logf("waiter in-use connections after cancellation settle: %d", waiter.DB().Stats().InUse)
 	require.Zero(t, waiter.DB().Stats().InUse)
 	var held bool
 	require.NoError(t, observer.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM pg_locks l JOIN pg_class c ON c.oid=l.relation WHERE l.pid=$1 AND l.granted AND l.mode='AccessExclusiveLock' AND c.relname='task_resource_cleanup_jobs')`, holderPID).Scan(&held))

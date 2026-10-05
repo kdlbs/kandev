@@ -7,6 +7,7 @@ import (
 
 	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
+	"github.com/kandev/kandev/internal/auth/authn"
 	"github.com/kandev/kandev/internal/orchestrator/watcher"
 	"github.com/kandev/kandev/internal/task/models"
 )
@@ -31,6 +32,8 @@ type continuationBinding struct {
 	nativeID       string
 	identity       [32]byte
 	workflowStepID string
+	initiator      authn.Identity
+	initiatorKnown bool
 }
 
 func (s *Service) continuationBindingForFailure(ctx context.Context, data watcher.AgentEventData) *continuationBinding {
@@ -67,7 +70,18 @@ func (s *Service) continuationBindingForFailure(ctx context.Context, data watche
 	if nativeID == "" || identity == ([32]byte{}) {
 		return nil
 	}
-	return &continuationBinding{policy: policy, nativeID: nativeID, identity: identity, workflowStepID: task.WorkflowStepID}
+	var initiator authn.Identity
+	initiatorKnown := false
+	if policy == continuationPolicyCapacityLive {
+		initiator, initiatorKnown = s.promptAttemptInitiator(data)
+		if !initiatorKnown && (s.sessionPromptCheck != nil || s.sessionAccessCheck != nil) {
+			return nil
+		}
+	}
+	return &continuationBinding{
+		policy: policy, nativeID: nativeID, identity: identity, workflowStepID: task.WorkflowStepID,
+		initiator: initiator, initiatorKnown: initiatorKnown,
+	}
 }
 
 func (s *Service) continuationFailureHasEvidence(data watcher.AgentEventData) bool {

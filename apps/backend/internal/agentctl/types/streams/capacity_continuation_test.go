@@ -8,12 +8,12 @@ import (
 )
 
 func TestCapacityContinuationSnapshotAgentEventWireShape(t *testing.T) {
-	const input = `{"type":"error","prompt_generation":7,"capacity_continuation":{"support":"codex_live_session_v1","prompt_generation":7,"evidence_complete":true,"pending_tools":false,"failed_tools":false,"unknown_outcomes":false,"permission_pending":false,"unaccounted_background":false,"completed_tools":2}}`
+	const input = `{"type":"error","prompt_generation":7,"capacity_continuation":{"support":"codex_live_session_v1","prompt_generation":7,"evidence_complete":true,"pending_tools":false,"failed_tools":false,"unknown_outcomes":false,"permission_pending":false,"unaccounted_background":false,"completed_tools":2},"supports_audio":false,"supports_embedded_context":false,"supports_image":false,"supports_prompt_queueing":false}`
 	var event AgentEvent
 	require.NoError(t, json.Unmarshal([]byte(input), &event))
 	raw, err := json.Marshal(event)
 	require.NoError(t, err)
-	require.Contains(t, string(raw), `"capacity_continuation"`)
+	require.JSONEq(t, input, string(raw))
 	require.Equal(t, uint64(7), event.CapacityContinuation.PromptGeneration)
 	require.True(t, event.CapacityContinuation.SafeFor(7))
 }
@@ -21,8 +21,12 @@ func TestCapacityContinuationSnapshotAgentEventWireShape(t *testing.T) {
 func TestCapacityContinuationSnapshotSafeForFailsClosed(t *testing.T) {
 	base := CapacityContinuationSnapshot{
 		Support: CapacityContinuationCodexLiveSessionV1, PromptGeneration: 7, EvidenceComplete: true,
+		CompletedTools: 1,
 	}
 	require.True(t, base.SafeFor(7))
+	noCompletedTools := base
+	noCompletedTools.CompletedTools = 0
+	require.False(t, noCompletedTools.SafeFor(7))
 
 	cases := []struct {
 		name   string

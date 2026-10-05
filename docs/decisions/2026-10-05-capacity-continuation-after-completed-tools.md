@@ -18,6 +18,7 @@ Platform owns shared recovery admission and runtime lifetime.
 ## Decision
 
 Permit a narrow capacity continuation policy on the exact same settled, usable ACP runtime.
+Automation-origin tasks retain their existing failure policy and are excluded from this after-effects continuation.
 Completed shell, write, and MCP calls do not alone prohibit this policy.
 Every observed tool must have an authoritative completed outcome.
 Unknown outcomes, pending permissions, and unaccounted background work prohibit automatic continuation.

@@ -162,9 +162,14 @@ Validation passed:
 
 Review follow-up closed three admission gaps. Capacity dispatch now bypasses lazy resume and restore, and checks the expected execution/native identity again at provider admission; transport-loss restoration keeps its prior path. ACP snapshots include unresolved session-owned background children, shells, and monitors across prompt boundaries, and authoritative completion clears that fence. Automation-owned turns cannot enter the after-effects capacity policy, while pre-result replay and transport-loss policies remain unchanged.
 
+The PR review follow-up also rechecks queued work and automation eligibility immediately before provider admission, and counts an attempt only after the provider accepts it. Permission evidence is recorded after the bounded ToolCall notification wait. Completing a child removes its child fence, while a separately retained detached shell stays fenced until an authoritative process exit. Capacity continuations retain the initiating caller identity and reauthorize `session.prompt` at final provider admission; they refuse when scoped authorization is wired but the initiating identity is unavailable. Transport-loss restore admission remains unchanged. Public guidance now says continuation requests the agent to avoid repeating completed actions without promising exactly-once execution, and the ADR records the automation exclusion.
+
 Follow-up validation passed:
 
 - Race-enabled orchestrator, ACP adapter, and runtime lifecycle capacity/continuation regressions, including barrier-controlled runtime loss/readiness and final-identity changes.
 - Race-enabled mock-agent capacity and continuation regressions.
+- Race-enabled PostgreSQL cancellation barrier regression, repeated three times after bounding the wait for the canceled SQL connection to return to the pool.
 - `make -C apps/backend build`.
 - Go formatting check and `git diff --check`.
+- Specification catalog validation and lint, plus public documentation tests and validation.
+- Desktop `chromium` continuity E2E: 4 passed; phone `mobile-chrome` continuity E2E: 4 passed.

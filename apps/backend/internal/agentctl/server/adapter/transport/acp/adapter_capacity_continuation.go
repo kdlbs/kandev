@@ -10,6 +10,7 @@ const capacityContinuationToolLimit = 256
 type capacityToolEvidence struct {
 	status acpsdk.ToolCallStatus
 	kind   acpsdk.ToolKind
+	failed bool
 }
 
 func (a *Adapter) capacityContinuationSnapshot(
@@ -52,6 +53,10 @@ func isUnresolvedBackgroundPayload(payload *streams.NormalizedPayload) bool {
 
 func addCapacityToolOutcomes(snapshot *streams.CapacityContinuationSnapshot, tools map[string]capacityToolEvidence) {
 	for _, tool := range tools {
+		if tool.failed {
+			snapshot.FailedTools = true
+			continue
+		}
 		switch tool.status {
 		case acpsdk.ToolCallStatusPending, acpsdk.ToolCallStatusInProgress:
 			snapshot.PendingTools = true
@@ -107,6 +112,7 @@ func (t *promptTurnState) observeCapacityToolCall(call *acpsdk.SessionUpdateTool
 	if !validCapacityToolStatus(call.Status) {
 		t.capacityUnknown = true
 	}
+	// Keep the ID so duplicate calls and later updates cannot become fresh evidence.
 	t.capacityTools[id] = capacityToolEvidence{status: call.Status, kind: call.Kind}
 }
 
@@ -135,7 +141,21 @@ func (t *promptTurnState) observeCapacityToolUpdate(update *acpsdk.SessionToolCa
 			tool.status = *update.Status
 		}
 	}
+	if tool.kind == acpsdk.ToolKindExecute && capacityToolHasFailedExit(update) {
+		tool.failed = true
+	}
 	t.capacityTools[id] = tool
+}
+
+func capacityToolHasFailedExit(update *acpsdk.SessionToolCallUpdate) bool {
+	if update == nil || update.Status == nil || *update.Status != acpsdk.ToolCallStatusCompleted {
+		return false
+	}
+	if code, ok := terminalExitCode(update.Meta); ok {
+		return code != 0
+	}
+	result := normalizeFinalShellResult(update.RawOutput)
+	return result.exitCode != nil && *result.exitCode != 0
 }
 
 func validCapacityToolStatus(status acpsdk.ToolCallStatus) bool {
