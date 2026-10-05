@@ -95,6 +95,43 @@ def step_run_script(block: str) -> str:
 
 
 class ReleaseWorkflowContractTest(unittest.TestCase):
+    def test_contributor_notifications_require_every_stable_publication_channel(self) -> None:
+        self.assertRegex(
+            WORKFLOW,
+            r"(?ms)      notify_contributors:\n"
+            r"        description: \"[^\"]+\"\n"
+            r"        type: boolean\n"
+            r"        default: false",
+        )
+        job = job_block("notify-contributors")
+        condition = job_condition("notify-contributors")
+        self.assertIn(
+            "needs: [prepare, publish-release, publish-npm, update-homebrew-tap, update-scoop-bucket]",
+            job,
+        )
+        for requirement in (
+            "!cancelled()",
+            "github.event_name == 'workflow_dispatch'",
+            "inputs.channel == 'stable'",
+            "inputs.notify_contributors",
+            "!inputs.dry_run",
+            "!inputs.desktop_validation_only",
+            "needs.prepare.result == 'success'",
+            "needs.publish-release.result == 'success'",
+            "needs.publish-npm.result == 'success'",
+            "needs.update-homebrew-tap.result == 'success'",
+            "needs.update-scoop-bucket.result == 'success'",
+        ):
+            with self.subTest(requirement=requirement):
+                self.assertIn(requirement, condition)
+
+        self.assertNotIn("inputs.backfill_tag", condition)
+        self.assertIn("uses: ./.github/workflows/notify-release-contributors.yml", job)
+        self.assertIn("release_tag: ${{ needs.prepare.outputs.tag }}", job)
+        self.assertIn("dry_run: false", job)
+        self.assertIn("contents: read", job)
+        self.assertIn("pull-requests: write", job)
+
     def create_downloaded_helper_artifact(self, root: Path, stable: bool) -> tuple[Path, str]:
         source_dir = root / "source-bin"
         source_dir.mkdir(parents=True)

@@ -43,6 +43,16 @@ Stable runs entirely in CI via `.github/workflows/release.yml`, triggered by a m
 6. `update-homebrew-tap` pushes updated `Formula/kandev.rb` to `kdlbs/homebrew-kandev` via SSH deploy key.
 7. `update-scoop-bucket` pushes updated `bucket/kandev.json` to `kdlbs/scoop-kandev` via its SSH deploy key.
 
+## Contributor notices
+
+The `Release` workflow has a `notify_contributors` checkbox. It defaults to false. When selected, the workflow calls the reusable notification workflow after GitHub Release, npm, Homebrew, and Scoop publication all succeed. Dry runs, desktop validation, Nightly, cancellations, and publication errors skip the call.
+
+For manual notices or recovery, run **Notify release contributors** from the `main` ref. Leave `release_tag` empty to select the latest published Stable release. Enter an exact tag to select another release. The `dry_run` checkbox previews the same PR selection and comment text without posting.
+
+The helper reads PR links from the release notes. It posts only to merged PRs from this repository that belong to the selected release tag. It excludes bots and maintainers from `cliff.toml`. The job token posts as `github-actions[bot]`.
+
+Each comment includes a hidden release ID marker. Repeat runs skip comments with that marker and the exact unmarked notice used for `v0.97.0`. After a partial run, use the separate workflow with the exact tag. It skips confirmed notices and retries only missing notices. Wait for GitHub rate limits to clear before retrying.
+
 ## Release PR ruleset bypass
 
 A normal Stable release creates its branch and pull request with `GITHUB_TOKEN`.

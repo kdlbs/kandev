@@ -107,6 +107,27 @@ Normal mode performs these stages:
 
 GHCR images are built before the GitHub Release. npm, Homebrew, and Scoop start only after the GitHub Release and may run in parallel. A late failure can therefore leave some channels complete and others missing.
 
+## Notify release contributors
+
+The **Release** workflow has a `notify_contributors` checkbox. It defaults to unchecked. If selected, it posts notices after GitHub Release, npm, Homebrew, and Scoop publication succeed. The release job passes its exact tag, including on a backfill. Nightly, dry-run, desktop-validation, cancelled, and failed publication paths skip notices.
+
+Use the separate workflow to post notices, preview them, or recover after a partial notification run:
+
+1. Open **Actions**.
+2. Select **Notify release contributors**.
+3. Select **Run workflow** to show the input form.
+4. Choose `main` as the branch.
+5. Leave **Release tag** empty to select the latest published Stable release.
+6. To select another release, enter its exact tag, such as `v1.2.3`.
+7. To preview notices, select **Preview targets and comments without posting**.
+8. To post notices, clear the preview checkbox.
+9. Select **Run workflow**.
+10. Read the run summary for the result of each PR.
+
+Notices target merged PRs from this repository that appear in the release notes. The workflow skips bot accounts and maintainers listed in `cliff.toml`. It posts as `github-actions[bot]`.
+
+If a notification run stops after publication succeeds, start a new manual run with the exact release tag. The workflow skips confirmed notices and tries the remaining PRs. It also recognizes the unmarked notices posted for `v0.97.0`. If GitHub applies a rate limit, wait for it to clear before the next run.
+
 Stable default archive names contain the standard runtime. The `-full` names contain the offline
 command-line runtime. npm Stable packages, Homebrew, Scoop, winget, Chocolatey, and Desktop use the
 standard form. Desktop has one installer and updater track. Containers and npm Nightlies retain all
