@@ -98,6 +98,10 @@ When its browser-local completion marker is unset, the first-run dialog opens on
 
 </details>
 
+If model discovery requires authentication, the tour's **Settings** link opens the
+saved agent profile without saving the tour draft or marking it complete. Use the
+profile's authentication controls, then return to the tour.
+
 ## Find a setting
 
 Open **Settings** and use **Search settings** at the top of its navigation tree. Search results are

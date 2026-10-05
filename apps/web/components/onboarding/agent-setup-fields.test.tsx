@@ -2,6 +2,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { TooltipProvider } from "@kandev/ui/tooltip";
 import { AgentSetupFields, type AgentSetupFieldsProps } from "./agent-setup-fields";
+import { StepAgents } from "./step-agents";
 import type { AgentSetting } from "./agent-settings";
 import type { AvailableAgent, DynamicModelsResponse } from "@/lib/types/http";
 
@@ -109,6 +110,7 @@ describe("AgentSetupFields", () => {
       model_config: { ...mockAgent.model_config, supports_dynamic_models: false },
     };
     renderFields({ agent, setting: mockSetting, onChange: vi.fn() });
+    expect(screen.queryByRole("button", { name: "Refresh models" })).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Profile start model settings" }));
     expect(screen.getByRole("option", { name: "GPT-3.5" })).toBeTruthy();
     expect(probeAgentProfileMock).not.toHaveBeenCalled();
@@ -162,7 +164,7 @@ describe("AgentSetupFields", () => {
       onChange,
     });
 
-    const switchEl = screen.getByTestId("onboarding-agent-passthrough-switch");
+    const switchEl = screen.getByRole("switch", { name: "CLI Passthrough" });
     fireEvent.click(switchEl);
 
     expect(onChange).toHaveBeenCalledWith({ cli_passthrough: true });
@@ -183,14 +185,14 @@ describe("AgentSetupFields", () => {
 
     // Loading state
     expect(screen.getByRole("status")).toBeTruthy();
-    expect(onStatusChange).toHaveBeenCalledWith("probing");
+    expect(onStatusChange).toHaveBeenCalledWith("probing", null);
 
     // Resolve with models
     resolveProbe(capabilityResponse([{ id: "gpt-4", name: "GPT-4" }]));
     await waitFor(() => {
       expect(screen.queryByRole("status")).toBeNull();
     });
-    expect(onStatusChange).toHaveBeenCalledWith("ok");
+    expect(onStatusChange).toHaveBeenCalledWith("ok", null);
   });
 
   it("calls refresh when refresh button is clicked", async () => {
@@ -209,4 +211,61 @@ describe("AgentSetupFields", () => {
 
     await waitFor(() => expect(probeAgentProfileMock).toHaveBeenCalledTimes(2));
   });
+});
+
+it("announces authentication failure and links to the saved profile settings", async () => {
+  probeAgentProfileMock.mockResolvedValue({
+    ...capabilityResponse([]),
+    status: "auth_required",
+  });
+  renderFields({ agent: mockAgent, setting: mockSetting, onChange: vi.fn() });
+  expect((await screen.findByRole("alert")).textContent).toContain("Authentication required");
+  expect(screen.getByRole("link", { name: "Settings" }).getAttribute("href")).toBe(
+    "/settings/agents/test-agent/profiles/profile-1",
+  );
+});
+
+it("forwards the profile error with its unsupported status and keeps the collapsed row unhealthy", async () => {
+  const error = "Saved profile discovery is unsupported";
+  probeAgentProfileMock.mockResolvedValue({
+    ...capabilityResponse([]),
+    status: "unsupported",
+    error,
+  });
+  const onStatusChange = vi.fn();
+  const fields = renderFields({
+    agent: mockAgent,
+    setting: mockSetting,
+    onChange: vi.fn(),
+    onStatusChange,
+  });
+  await waitFor(() => expect(onStatusChange).toHaveBeenCalledWith("unsupported", error));
+  expect(screen.getByRole("alert").textContent).toBe(error);
+  fields.unmount();
+  render(
+    <TooltipProvider>
+      <StepAgents
+        availableAgents={[mockAgent]}
+        tools={[]}
+        agentSettings={{ "test-agent": mockSetting }}
+        loading={false}
+        onUpdateSetting={vi.fn()}
+      />
+    </TooltipProvider>,
+  );
+  const trigger = screen.getByRole("button", { name: /Test Agent/ });
+  fireEvent.click(trigger);
+  await screen.findByText("Error");
+  fireEvent.click(trigger);
+  expect(trigger.textContent).toContain("Error");
+  expect(trigger.textContent).not.toContain("Installed");
+});
+
+it("forwards a localized fallback when a failed profile probe has no error text", async () => {
+  probeAgentProfileMock.mockResolvedValue({ ...capabilityResponse([]), status: "failed" });
+  const onStatusChange = vi.fn();
+  renderFields({ agent: mockAgent, setting: mockSetting, onChange: vi.fn(), onStatusChange });
+  await screen.findByRole("alert");
+  await waitFor(() => expect(onStatusChange).toHaveBeenCalledWith("failed", expect.any(String)));
+  expect(onStatusChange.mock.calls.at(-1)?.[1]).toBe(screen.getByRole("alert").textContent);
 });

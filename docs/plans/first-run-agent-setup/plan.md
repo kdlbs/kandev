@@ -331,8 +331,11 @@ PR integration with the newer runtime-update delivery preserved automatic
 full-profile refresh and retained observations in the extracted hook. The merged
 local verification passed 72 focused Vitest tests, 5 Chromium tests, and 9 mobile
 tests. A hydration regression prevents probing before dynamic support is known.
-Remote review remediation remains in progress; these results describe the local
-merge integration rather than a final CI verdict.
+These results describe local merge integration. Subsequent review fixes passed
+75 focused Vitest tests, 6 Chromium tests, 9 mobile tests, and the affected Go
+package tests. Authentication links, unsupported/error projection, announced
+failures, static refresh omission, and accessible touch passthrough are covered.
+Remote CI/review evidence will be refreshed after the final delivery push.
 
 ## Risks
 

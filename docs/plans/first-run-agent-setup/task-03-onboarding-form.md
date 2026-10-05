@@ -193,12 +193,27 @@ the baseline-only hook supplies the narrow form's models without hidden option w
 
 ## Results
 
+PR review remediation added an associated passthrough label and a 44px clickable
+coarse-pointer row, announced failures, and a saved-profile Settings link for
+authentication recovery. Static catalogs omit no-op refresh. Collapsed rows carry
+the matching profile error and render unsupported discovery as a failure. New
+unit regressions failed before these changes; the tablet target measured 38px
+before the fix and passed its 44px activation test afterward.
+
+Final local review verification passed 75 tests across the seven focused Vitest
+files, 6 Chromium tests, and 9 mobile-chrome tests. The authentication E2E follows
+the recovery link and verifies no profile write or completion marker. Tablet E2E
+taps the passthrough label to toggle it. Typecheck, focused ESLint, i18n validation,
+and the affected Go package tests passed. The npm config test keeps stdout parsing
+separate while restoring stderr in failure diagnostics. Remote CI/review evidence
+will be refreshed after the delivery push.
+
 Implemented the shared onboarding form for every agent, localized help, narrow
 patches, and bounded scrolling. Review regressions cover returning to a saved
 model after Next/Back, edits during saves, partial failure interlocks, unchanged
 completion, and empty dynamic catalogs without unrelated global choices.
 
-The combined frontend regression run passed all 67 tests. Typecheck, focused
+The initial combined frontend regression run passed all 67 tests. Typecheck, focused
 ESLint, all-language i18n validation, and public-document validation passed.
 Playwright coverage now selects a model without Refresh, checks the exact patch
 and stored hidden fields, returns to the original model, and retains a tablet

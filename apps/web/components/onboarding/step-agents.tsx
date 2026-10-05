@@ -70,6 +70,7 @@ function StatusPill({ status, error }: { status: string; error?: string }) {
           {t("common:notInstalled")}
         </span>
       );
+    case "unsupported":
     case "failed": {
       const pill = (
         <span className="flex items-center gap-1 text-xs text-red-600 dark:text-red-400">
@@ -108,6 +109,24 @@ function StatusPill({ status, error }: { status: string; error?: string }) {
   }
 }
 
+function useAgentProfileStatus(profileId?: string) {
+  const [profileStatus, setProfileStatus] = useState<{
+    profileId?: string;
+    status?: CapabilityStatus;
+    error: string | null;
+  } | null>(null);
+  const onStatusChange = useCallback(
+    (status: CapabilityStatus | undefined, error: string | null) => {
+      setProfileStatus({ profileId, status, error });
+    },
+    [profileId],
+  );
+  return {
+    profileStatus: profileStatus?.profileId === profileId ? profileStatus : null,
+    onStatusChange,
+  };
+}
+
 function InstalledAgentRow({
   agent,
   settings,
@@ -121,11 +140,12 @@ function InstalledAgentRow({
   onToggle: (open: boolean) => void;
   onUpdateSetting: (agentName: string, patch: Partial<OnboardingAgentDraft>) => void;
 }) {
-  const [profileStatus, setProfileStatus] = useState<CapabilityStatus | undefined>(undefined);
+  const { profileStatus, onStatusChange } = useAgentProfileStatus(settings?.profileId);
   const currentModel = settings?.draft.model || agent.model_config.default_model;
   const modelName =
     agent.model_config.available_models.find((m) => m.id === currentModel)?.name ?? currentModel;
-  const status = profileStatus ?? agent.model_config.status ?? "ok";
+  const status = profileStatus?.status ?? agent.model_config.status ?? "ok";
+  const error = profileStatus ? (profileStatus.error ?? undefined) : agent.model_config.error;
   const showModelPill = status === "ok" && !!modelName;
 
   return (
@@ -144,7 +164,7 @@ function InstalledAgentRow({
               {modelName}
             </span>
           )}
-          <StatusPill status={status} error={agent.model_config.error} />
+          <StatusPill status={status} error={error} />
           <IconChevronDown className="h-4 w-4 text-muted-foreground transition-transform group-data-[state=open]:rotate-180" />
         </button>
       </CollapsibleTrigger>
@@ -155,7 +175,7 @@ function InstalledAgentRow({
               agent={agent}
               setting={settings}
               onChange={(patch) => onUpdateSetting(agent.name, patch)}
-              onStatusChange={setProfileStatus}
+              onStatusChange={onStatusChange}
             />
           )}
         </div>

@@ -35,6 +35,14 @@ test.describe("First-run onboarding availability — mobile", () => {
     await agentTrigger.tap();
     const agentRow = testPage.getByTestId("onboarding-agent-setup-fields");
     await expect(agentRow).toBeVisible();
+    const passthroughTarget = agentRow.getByTestId("onboarding-agent-passthrough-field");
+    const targetBounds = await passthroughTarget.boundingBox();
+    expect(targetBounds).not.toBeNull();
+    expect(targetBounds!.height).toBeGreaterThanOrEqual(44);
+    const passthrough = agentRow.getByRole("switch", { name: "TUI Passthrough" });
+    await expect(passthrough).toBeVisible();
+    await passthroughTarget.tap({ position: { x: 20, y: targetBounds!.height / 2 } });
+    await expect(passthrough).toBeChecked();
     const refreshBtn = testPage.getByTestId("onboarding-agent-refresh-models");
     const box = await refreshBtn.boundingBox();
     expect(box).not.toBeNull();

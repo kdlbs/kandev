@@ -34,10 +34,13 @@ by [profile capability discovery](profile-capability-discovery.md) and
   omit permission controls, Auto Approve, mode selection, provider configuration
   options, fallback and exact-model policy, CLI flags, environment variables,
   command prefixes, and advanced settings disclosures.
-- **AC-AGENTS-FIRST-RUN-SETUP-001.3:** Refresh shall be a compact icon action
+- **AC-AGENTS-FIRST-RUN-SETUP-001.3:** Dynamic-model refresh shall be a compact icon action
   beside the selector, with a localized accessible name and visible busy state.
   At the standard font size, selector and refresh action shall measure 28px high
   on fine-pointer desktop and at least 44px on coarse-pointer surfaces.
+  Static catalogs shall omit the no-op refresh. The supported passthrough toggle
+  shall have an associated accessible label and a 44px coarse-pointer activation
+  target, which may be its clickable row rather than the visual switch.
 - **AC-AGENTS-FIRST-RUN-SETUP-001.4:** Help shall direct users to Settings > Agents
   for further configuration. The existing read-only warning about default
   Auto Approve behavior shall remain; hiding its setting shall not change
@@ -64,6 +67,8 @@ by [profile capability discovery](profile-capability-discovery.md) and
   unavailable discovery shall show a localized explanation and an explicit
   retry or Settings recovery path. It shall preserve the selected model and
   shall not substitute unrelated agent-wide choices for the profile catalog.
+  Probe failures shall be announced. Authentication recovery shall link directly
+  to the saved profile's settings without saving the tour draft.
 - **AC-AGENTS-FIRST-RUN-SETUP-002.4:** Selecting an advertised model shall update
   the draft and close the list. It shall not expose or require dependent model
   options. Refresh alone shall not select another model or mark the draft dirty.
@@ -71,6 +76,8 @@ by [profile capability discovery](profile-capability-discovery.md) and
   expanded agent, another profile, or an earlier refresh shall not overwrite
   current choices or edits. An agent-wide failed status shall not override a
   successful discovery for the expanded profile.
+  The row shall carry the matching profile error with its status; unsupported
+  discovery shall not appear as healthy when collapsed.
 - **AC-AGENTS-FIRST-RUN-SETUP-002.6:** Discovery shall not save profiles, change
   permission settings, create task sessions, send prompts, install packages, or
   activate another runtime.

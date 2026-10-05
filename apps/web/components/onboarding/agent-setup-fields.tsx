@@ -1,15 +1,12 @@
 "use client";
 
-import { useEffect, useMemo } from "react";
+import { useEffect, useId, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { IconLoader2, IconRefresh } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Switch } from "@kandev/ui/switch";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
-import {
-  SettingsFieldDescription,
-  SettingsFieldLabel,
-} from "@/components/settings/settings-typography";
+import { SettingsFieldLabel } from "@/components/settings/settings-typography";
 import { ModelConfigSelector, type ModelSelectorOption } from "@/components/model-config-selector";
 import {
   useProfileCapabilityDiscovery,
@@ -23,7 +20,7 @@ export type AgentSetupFieldsProps = {
   agent: AvailableAgent;
   setting: AgentSetting;
   onChange: (patch: Partial<OnboardingAgentDraft>) => void;
-  onStatusChange?: (status: CapabilityStatus | undefined) => void;
+  onStatusChange?: (status: CapabilityStatus | undefined, error: string | null) => void;
 };
 
 function buildModelOptions(
@@ -63,10 +60,14 @@ function ModelStatusFeedback({
   discoveryState,
   error,
   hasModels,
+  status,
+  profileSettingsHref,
 }: {
   discoveryState: ProfileDiscoveryStatus;
   error: string | null;
   hasModels: boolean;
+  status: CapabilityStatus | undefined;
+  profileSettingsHref: string;
 }) {
   const { t } = useTranslation();
 
@@ -79,9 +80,23 @@ function ModelStatusFeedback({
     );
   }
 
-  if (discoveryState === "failed") {
+  if (discoveryState === "failed" || status === "auth_required") {
     return (
-      <p className="text-xs text-destructive">{error || t("agents:failedToFetchCapabilities")}</p>
+      <div className="space-y-1">
+        <p className="text-xs text-destructive" role="alert">
+          {error ||
+            t(
+              status === "auth_required"
+                ? "agents:capabilityAuthRequired"
+                : "agents:failedToFetchCapabilities",
+            )}
+        </p>
+        {status === "auth_required" && (
+          <Button asChild variant="link" size="sm" className="px-0">
+            <a href={profileSettingsHref}>{t("common:settings")}</a>
+          </Button>
+        )}
+      </div>
     );
   }
 
@@ -102,6 +117,9 @@ function PassthroughField({
   onChange: (checked: boolean) => void;
 }) {
   const { t } = useTranslation();
+  const switchId = useId();
+  const labelId = `${switchId}-label`;
+  const descriptionId = `${switchId}-description`;
   const config = agent.passthrough_config;
   if (!config?.supported) return null;
 
@@ -113,44 +131,82 @@ function PassthroughField({
     agent.name === "minimax-acp" ? t("agents:minimaxPassthroughDescription") : config.description;
 
   return (
-    <div
-      className="flex items-center justify-between gap-2 pt-1"
+    <SettingsFieldLabel
+      htmlFor={switchId}
+      className="flex items-center justify-between gap-2 pt-1 cursor-pointer [@media(pointer:coarse)]:min-h-11"
       data-testid="onboarding-agent-passthrough-field"
     >
-      <div className="space-y-0.5">
-        <SettingsFieldLabel className="text-xs">{label}</SettingsFieldLabel>
+      <span className="space-y-0.5">
+        <span id={labelId} className="block text-xs">
+          {label}
+        </span>
         {description && (
-          <SettingsFieldDescription className="text-xs text-muted-foreground">
+          <span id={descriptionId} className="block text-xs text-muted-foreground font-normal">
             {description}
-          </SettingsFieldDescription>
+          </span>
         )}
-      </div>
+      </span>
       <Switch
+        id={switchId}
+        aria-labelledby={labelId}
+        aria-describedby={description ? descriptionId : undefined}
         size="sm"
         checked={checked}
         onCheckedChange={(val) => onChange(val === true)}
         data-testid="onboarding-agent-passthrough-switch"
       />
-    </div>
+    </SettingsFieldLabel>
   );
 }
 
 function useProfileStatusSync(
   discoveryStatus: CapabilityStatus | undefined,
   discoveryState: ProfileDiscoveryStatus,
-  onStatusChange?: (status: CapabilityStatus | undefined) => void,
+  error: string | null,
+  onStatusChange?: AgentSetupFieldsProps["onStatusChange"],
 ) {
   useEffect(() => {
     if (discoveryStatus) {
-      onStatusChange?.(discoveryStatus);
+      onStatusChange?.(discoveryStatus, error);
     } else if (discoveryState === "loading") {
-      onStatusChange?.("probing");
+      onStatusChange?.("probing", error);
     } else if (discoveryState === "failed") {
-      onStatusChange?.("failed");
+      onStatusChange?.("failed", error);
     } else if (discoveryState === "ready") {
-      onStatusChange?.("ok");
+      onStatusChange?.("ok", error);
     }
-  }, [discoveryStatus, discoveryState, onStatusChange]);
+  }, [discoveryStatus, discoveryState, error, onStatusChange]);
+}
+
+function RefreshModelsButton({
+  isBusy,
+  onRefresh,
+}: {
+  isBusy: boolean;
+  onRefresh: () => Promise<void>;
+}) {
+  const { t } = useTranslation();
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span tabIndex={isBusy ? 0 : -1} className="inline-flex">
+          <Button
+            type="button"
+            variant="outline"
+            size="icon"
+            onClick={onRefresh}
+            disabled={isBusy}
+            aria-label={t("agents:refreshCapabilities")}
+            data-testid="onboarding-agent-refresh-models"
+            className="cursor-pointer shrink-0"
+          >
+            <IconRefresh className={cn("h-4 w-4", isBusy && "animate-spin")} />
+          </Button>
+        </span>
+      </TooltipTrigger>
+      <TooltipContent>{t("agents:refreshCapabilitiesTooltip")}</TooltipContent>
+    </Tooltip>
+  );
 }
 
 export function AgentSetupFields({
@@ -167,7 +223,19 @@ export function AgentSetupFields({
     supportsDynamicModels: agent.model_config.supports_dynamic_models,
   });
 
-  useProfileStatusSync(discovery.status, discovery.discoveryState, onStatusChange);
+  const discoveryStatus = agent.model_config.supports_dynamic_models
+    ? discovery.status
+    : agent.model_config.status;
+  const discoveryError =
+    discovery.discoveryState === "failed"
+      ? discovery.error ||
+        t(
+          discoveryStatus === "auth_required"
+            ? "agents:capabilityAuthRequired"
+            : "agents:failedToFetchCapabilities",
+        )
+      : null;
+  useProfileStatusSync(discoveryStatus, discovery.discoveryState, discoveryError, onStatusChange);
 
   const models = agent.model_config.supports_dynamic_models
     ? discovery.models
@@ -202,29 +270,15 @@ export function AgentSetupFields({
               triggerClassName={modelIsGone ? "text-destructive" : undefined}
             />
           </div>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <span tabIndex={isBusy ? 0 : -1} className="inline-flex">
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="icon"
-                  onClick={discovery.refresh}
-                  disabled={isBusy}
-                  aria-label={t("agents:refreshCapabilities")}
-                  data-testid="onboarding-agent-refresh-models"
-                  className="cursor-pointer shrink-0"
-                >
-                  <IconRefresh className={cn("h-4 w-4", isBusy && "animate-spin")} />
-                </Button>
-              </span>
-            </TooltipTrigger>
-            <TooltipContent>{t("agents:refreshCapabilitiesTooltip")}</TooltipContent>
-          </Tooltip>
+          {agent.model_config.supports_dynamic_models && (
+            <RefreshModelsButton isBusy={isBusy} onRefresh={discovery.refresh} />
+          )}
         </div>
         <ModelStatusFeedback
           discoveryState={discovery.discoveryState}
-          error={discovery.error}
+          error={discoveryError}
+          status={discoveryStatus}
+          profileSettingsHref={`/settings/agents/${agent.name}/profiles/${setting.profileId}`}
           hasModels={models.length > 0}
         />
       </div>

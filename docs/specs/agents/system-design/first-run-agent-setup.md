@@ -98,6 +98,9 @@ Dynamic providers use only the accepted profile snapshot. They cannot use
 status callback may project the expanded profile's result into its row header;
 agent-wide polling must not overwrite that projection. Installation identity
 and model-discovery outcome remain distinct.
+The callback carries status and error together, scoped to the concrete profile.
+Unsupported results use the failed pill; absent error text uses a localized
+fallback consistent with the expanded form.
 
 ## Dedicated form
 
@@ -116,11 +119,14 @@ The refresh action uses `@kandev/ui/button` with its standard icon size and
 under the [profile discovery design](profile-capability-discovery.md#responsive-behavior).
 Both surfaces use the same shared icon-sizing primitive; onboarding retains its
 own inline status and narrow discovery state.
+Static catalogs omit refresh because no dynamic discovery process is available.
 Busy/error feedback is an inline localized status, not a tooltip-only error.
 
 Reuse `@kandev/ui/switch` for supported passthrough, with a visible translated
 label and accessible association. Help text explains that other settings live
-in Settings > Agents. The existing read-only Auto Approve warning stays outside
+in Settings > Agents. On coarse pointers its associated row is at least 44px
+high and activates the switch when tapped, while its desktop visual stays compact.
+The existing read-only Auto Approve warning stays outside
 the editable fields. No mode, dependent option, flags, fallback, permissions,
 or advanced-setting component is mounted in this form or its picker.
 
@@ -183,8 +189,11 @@ model-picker primitives own their bounded list scrolling and focus return.
 Loading shows one translated live status and disables unverified model choices;
 it does not require a refresh click. Failure, authentication, unavailable
 runtime, and empty catalog retain the model label and show an inline explanation.
-Retry refreshes the saved concrete profile. Help can direct authentication or
-installation recovery to Settings > Agents without adding advanced controls.
+Probe failures use an alert announcement. Retry refreshes the saved concrete
+profile. Authentication failures provide a standard-sized Settings link to that
+profile's full editor, where terminal authentication recovery remains available.
+Following that link does not save a draft or consume the tour. Installation
+recovery remains in Settings > Agents without adding advanced controls.
 An unsupported/missing concrete profile is not probed as a new empty draft.
 Next and Skip keep the existing ability to continue without changing the model.
 

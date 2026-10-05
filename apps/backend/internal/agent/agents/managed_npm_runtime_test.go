@@ -241,7 +241,11 @@ func TestManagedNPMRuntimeLaunchIgnoresWorkspaceNpmrc(t *testing.T) {
 		cmd.Env = envWithHome(os.Environ(), home)
 		output, err := cmd.Output()
 		if err != nil {
-			t.Fatalf("npm %v: %v (%s)", args, err, output)
+			var stderr []byte
+			if exitErr, ok := err.(*exec.ExitError); ok {
+				stderr = exitErr.Stderr
+			}
+			t.Fatalf("npm %v: %v (stdout: %s, stderr: %s)", args, err, output, stderr)
 		}
 		return strings.TrimSpace(string(output))
 	}

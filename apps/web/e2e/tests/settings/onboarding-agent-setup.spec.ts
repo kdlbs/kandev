@@ -1,7 +1,52 @@
 import { test, expect } from "../../fixtures/test-base";
-import { observeProfileDiscoveryRequests } from "../../helpers/profile-capability-discovery";
+import {
+  mockProfileProbeRequiresAuth,
+  observeProfileDiscoveryRequests,
+} from "../../helpers/profile-capability-discovery";
 
 test.describe("Onboarding agent setup", () => {
+  test("opens the saved profile for authentication recovery without saving a tour draft", async ({
+    testPage,
+    apiClient,
+  }) => {
+    const { agents } = await apiClient.listAgents();
+    const agent = agents.find((item) => item.name === "mock-agent");
+    const profile = agent?.profiles?.[0];
+    if (!agent || !profile)
+      throw new Error("Saved mock profile is required for authentication recovery");
+    const before = await apiClient.getAgentProfile(profile.id);
+    const writes: string[] = [];
+    testPage.on("request", (request) => {
+      if (request.method() === "PATCH" && request.url().endsWith(`/agent-profiles/${profile.id}`)) {
+        writes.push(request.url());
+      }
+    });
+    await mockProfileProbeRequiresAuth(testPage, profile.id);
+    await testPage.addInitScript(() => localStorage.removeItem("kandev.onboarding.completed"));
+    await testPage.goto("/");
+    await testPage.getByRole("button", { name: /^Mock / }).click();
+    const fields = testPage.getByTestId("onboarding-agent-setup-fields");
+    await expect(fields.getByRole("alert")).toContainText(/authentication.*required/i);
+    await expect(
+      fields.getByRole("button", { name: "Profile start model settings" }),
+    ).toBeDisabled();
+    const recovery = fields.getByRole("link", { name: "Settings" });
+    await expect(recovery).toHaveAttribute(
+      "href",
+      `/settings/agents/${agent.name}/profiles/${profile.id}`,
+    );
+    await recovery.click();
+    await expect(testPage.getByTestId("profile-no-auth-panel")).toBeVisible();
+    await expect(testPage.getByRole("dialog")).toHaveCount(0);
+    expect(writes).toEqual([]);
+    const after = await apiClient.getAgentProfile(profile.id);
+    expect(after.model).toBe(before.model);
+    expect(after.cliPassthrough).toBe(before.cliPassthrough);
+    expect(
+      await testPage.evaluate(() => localStorage.getItem("kandev.onboarding.completed")),
+    ).toBeNull();
+  });
+
   test("probes saved profile context automatically, exposes only model and passthrough, and saves exact partial patch", async ({
     testPage,
     apiClient,
