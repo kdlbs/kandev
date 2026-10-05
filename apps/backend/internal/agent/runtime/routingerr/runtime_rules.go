@@ -95,10 +95,46 @@ var runtimeEnvironmentRules = []runtimeRule{
 	},
 	{
 		// Cursor emits this control prefix as an assistant message chunk for
-		// transient provider failures. Keep the fingerprint anchored to the
+		// transient provider failures. Keep the fingerprints anchored to the
 		// control frame and bounded so user-authored prose cannot turn into an
-		// automatic retry. The custom matcher shares the adapter's byte and
+		// automatic retry. The custom matchers share the adapter's byte and
 		// Unicode-whitespace contract.
+		id:         cursorRetriableResourceExhaustedRuleID,
+		providerID: cursorRetriableProviderID,
+		match:      matchCursorRetriableResourceExhausted,
+		rawMatch:   matchCursorRetriableResourceExhausted,
+		build: func(string) *Error {
+			return &Error{
+				Code:       CodeProviderResourceExhausted,
+				Confidence: ConfHigh,
+			}
+		},
+	},
+	{
+		id:         cursorRetriableUnavailableRuleID,
+		providerID: cursorRetriableProviderID,
+		match:      matchCursorRetriableUnavailable,
+		rawMatch:   matchCursorRetriableUnavailable,
+		build: func(string) *Error {
+			return &Error{
+				Code:       CodeProviderUnavailable,
+				Confidence: ConfHigh,
+			}
+		},
+	},
+	{
+		id:         cursorRetriableConnectionStalledRuleID,
+		providerID: cursorRetriableProviderID,
+		match:      matchCursorRetriableConnectionStalled,
+		rawMatch:   matchCursorRetriableConnectionStalled,
+		build: func(string) *Error {
+			return &Error{
+				Code:       CodeNetworkUnavailable,
+				Confidence: ConfHigh,
+			}
+		},
+	},
+	{
 		id:         cursorRetriableStreamResetRuleID,
 		providerID: cursorRetriableProviderID,
 		match:      matchCursorRetriableStreamReset,
@@ -156,7 +192,12 @@ const overloadedRuleID = "anthropic.overloaded.529.v1"
 
 const gatewayServerFailureRuleID = "acp.gateway_server_failure.v1"
 
-const cursorRetriableStreamResetRuleID = "cursor.retriable_stream_reset.v1"
+const (
+	cursorRetriableResourceExhaustedRuleID = "cursor.retriable_resource_exhausted.v1"
+	cursorRetriableUnavailableRuleID       = "cursor.retriable_unavailable.v1"
+	cursorRetriableConnectionStalledRuleID = "cursor.retriable_connection_stalled.v1"
+	cursorRetriableStreamResetRuleID       = "cursor.retriable_stream_reset.v1"
+)
 
 const transportLostRuleID = "acp.transport_lost.v1"
 
@@ -177,22 +218,56 @@ const (
 	cursorRetriableProviderID         = "cursor-acp"
 )
 
+func parseCursorRetriableSuffix(text string) (string, bool) {
+	trimmed := strings.TrimSpace(text)
+	if len(trimmed) < len(cursorRetriableStreamResetPrefix) ||
+		!strings.EqualFold(trimmed[:len(cursorRetriableStreamResetPrefix)], cursorRetriableStreamResetPrefix) {
+		return "", false
+	}
+	suffix := strings.TrimSpace(trimmed[len(cursorRetriableStreamResetPrefix):])
+	if suffix == "" || len(suffix) > cursorRetriableStreamResetMaxTail || IsCursorRetriableCancellation(suffix) {
+		return "", false
+	}
+	return suffix, true
+}
+
+func matchCursorRetriableResourceExhausted(text string) bool {
+	suffix, ok := parseCursorRetriableSuffix(text)
+	if !ok {
+		return false
+	}
+	return strings.Contains(strings.ToLower(suffix), "[resource_exhausted]")
+}
+
+func matchCursorRetriableUnavailable(text string) bool {
+	suffix, ok := parseCursorRetriableSuffix(text)
+	if !ok {
+		return false
+	}
+	return strings.Contains(strings.ToLower(suffix), "[unavailable]")
+}
+
+func matchCursorRetriableConnectionStalled(text string) bool {
+	suffix, ok := parseCursorRetriableSuffix(text)
+	if !ok {
+		return false
+	}
+	return strings.Contains(strings.ToLower(suffix), "connection stalled")
+}
+
 // matchCursorRetriableStreamReset matches Cursor's complete bounded control
 // diagnostic using the same trim, prefix, byte-limit, and cancellation-veto
 // rules as the ACP adapter. The byte limit prevents the classifier from
 // accepting a diagnostic that the adapter would reject after multibyte text is
 // measured.
 func matchCursorRetriableStreamReset(text string) bool {
-	trimmed := strings.TrimSpace(text)
-	if len(trimmed) < len(cursorRetriableStreamResetPrefix) ||
-		!strings.EqualFold(trimmed[:len(cursorRetriableStreamResetPrefix)], cursorRetriableStreamResetPrefix) {
+	suffix, ok := parseCursorRetriableSuffix(text)
+	if !ok {
 		return false
 	}
-	suffix := strings.TrimSpace(trimmed[len(cursorRetriableStreamResetPrefix):])
-	if suffix == "" || len(suffix) > cursorRetriableStreamResetMaxTail || IsCursorRetriableCancellation(suffix) {
-		return false
-	}
-	return true
+	lower := strings.ToLower(suffix)
+	return strings.Contains(lower, "stream closed with error code cancel") ||
+		strings.Contains(lower, "http/2 stream closed with error code cancel")
 }
 
 // IsCursorRetriableCancellation reports whether Cursor's RetriableError
@@ -243,7 +318,7 @@ func isTransientProviderError(e *Error) bool {
 		return false
 	}
 	switch e.Code {
-	case CodeProviderOverloaded, CodeModelCapacity, CodeNetworkUnavailable, CodeProviderUnavailable, CodeAgentTransportLost:
+	case CodeProviderOverloaded, CodeModelCapacity, CodeNetworkUnavailable, CodeProviderUnavailable, CodeAgentTransportLost, CodeProviderResourceExhausted:
 		return true
 	default:
 		return false

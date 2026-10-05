@@ -17,6 +17,7 @@ func TestClassForCodeCoversProviderCatalogue(t *testing.T) {
 		{CodeModelCapacity, ClassTransient},
 		{CodeRateLimited, ClassTransient},
 		{CodeAgentTransportLost, ClassTransient},
+		{CodeProviderResourceExhausted, ClassTransient},
 		{CodeAuthRequired, ClassHard},
 		{CodeMissingCredentials, ClassHard},
 		{CodeSubscriptionRequired, ClassHard},

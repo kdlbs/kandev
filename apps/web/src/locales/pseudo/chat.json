@@ -81,6 +81,7 @@
   "transientRetryReasonProviderUnavailable": "Ƥŕōvĩďēŕ ţēḿƥōŕàŕĩĺŷ ũńàvàĩĺàƀĺē",
   "transientRetryReasonRateLimited": "Ŕàţē ĺĩḿĩţēď",
   "transientRetryReasonAgentTransportLost": "Àĝēńţ ćōńńēćţĩōń ĺōśţ",
+  "transientRetryReasonResourceExhausted": "Ƥŕōvĩďēŕ ŕēśōũŕćēś ēxĥàũśţēď",
   "transientRetryReasonGeneric": "Ƥŕōvĩďēŕ ēŕŕōŕ",
   "transientRetryIn": "Ŕēţŕŷĩńĝ ĩń {{countdown}}",
   "transientRetryNow": "Ŕēţŕŷĩńĝ ńōŵ…",

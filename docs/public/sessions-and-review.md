@@ -85,20 +85,20 @@ A later failure keeps its own recovery controls.
 ### Experimental interruption continuation
 
 **Interrupted conversation continuation** is off by default. When enabled, a
-supported Cursor ACP connection failure can continue the unfinished request in
-the same saved conversation after output or completed file reads. Kandev sends
-a continuation instruction, preserves the transcript, and allows files to be
-read again when Cursor did not save an interrupted read result. It does not
-resend the original request or create a replacement conversation automatically.
+supported transient Cursor ACP provider failure can continue the unfinished request in
+the same saved conversation after output or completed foreground tools. Kandev
+sends an internal continue instruction, preserves the transcript, and keeps
+previous results. It does not resend the original request or create a replacement
+conversation automatically.
 
 Recovery shares the existing five-attempt budget and paced backoff. One notice
 shows waiting, reconnecting, or continuing, with **Cancel** available while the
 continued turn runs. Cancellation returns control to Chat when the ACP runtime
 is still usable; normal recovery actions remain available if it is not. An
 exhaustion message reports attempts that actually started; a refused recovery
-does not claim retries ran. Writes, shell commands, pending or unknown tool
-outcomes, permissions, and background work prevent automatic continuation. If
-the runtime remains usable, send a follow-up in the same conversation. If it is
+does not claim retries ran. Pending or unknown tool outcomes, unresolved
+permissions, and active background work prevent automatic continuation. If the
+runtime remains usable, send a follow-up in the same conversation. If it is
 unavailable, use the manual recovery actions. Missing saved identity and
 unsupported agents also require manual recovery. New human work takes priority.
 Backend restart retires the old automatic notice without launching a

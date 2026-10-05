@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/json"
+	"time"
 
 	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
@@ -29,7 +30,7 @@ func (s *Service) continuationBindingForFailure(ctx context.Context, data watche
 		return nil
 	}
 	classified := classifyKanbanFailure(data)
-	if classified == nil || classified.Code != routingerr.CodeAgentTransportLost {
+	if classified == nil || routingerr.Decide(routingerr.ContextKanban, classified, time.Now().UTC()) != routingerr.DecisionShortRetry {
 		return nil
 	}
 	session, err := s.repo.GetTaskSession(ctx, data.SessionID)
@@ -64,7 +65,7 @@ func (s *Service) continuationRefusalReason(ctx context.Context, data watcher.Ag
 	if safety.Unsafe || safety.Pending {
 		return "unsafe_work"
 	}
-	if safety.Support != streams.ContinuationNativeSavedHistoryV1 || data.OwnerKind != queueStatusScopeTask || data.DynamicRouteAttempt {
+	if (safety.Support != streams.ContinuationNativeSavedHistoryV1 && safety.Support != streams.ContinuationNativeSavedHistoryV2) || data.OwnerKind != queueStatusScopeTask || data.DynamicRouteAttempt {
 		return "unsupported_restore"
 	}
 	if s.continuationBindingForFailure(ctx, data) == nil {

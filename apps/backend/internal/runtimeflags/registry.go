@@ -203,7 +203,7 @@ var registrations = []runtimeFlagRegistration{
 			EnvVar:          "KANDEV_FEATURES_PROVIDER_INTERRUPTION_CONTINUATION",
 			Kind:            KindFeature,
 			Label:           "Interrupted conversation continuation",
-			Description:     "Restores supported interrupted conversations and continues safe read-only work.",
+			Description:     "Restores supported interrupted conversations and continues after completed tools.",
 			Stability:       StabilityExperimental,
 			RiskLevel:       RiskHigh,
 			RiskDescription: "Native restoration and tool outcomes must be verified. Uncertain work requires manual recovery.",

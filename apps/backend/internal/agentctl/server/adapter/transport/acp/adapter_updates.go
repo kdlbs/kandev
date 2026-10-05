@@ -311,7 +311,12 @@ func (a *Adapter) observeCursorRetriableEvidence(promptGeneration uint64, event 
 	}
 	if event.Type == streams.EventTypeMessageChunk && event.Role != acpUserRole &&
 		isCursorRetriableStreamReset(event.Text) {
-		turn.setCursorRetriable()
+		sanitized := streams.SanitizeProviderMessage(event.Text)
+		if sanitized == "" {
+			sanitized = "Error: RetriableError: Provider error"
+		}
+		complete := streams.IsCompleteProviderDiagnostic(event.Text)
+		turn.setCursorRetriable(sanitized, complete)
 		return true
 	}
 	if cursorProviderProgress(event) {

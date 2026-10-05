@@ -412,3 +412,38 @@ func retainedTurnFailureDataForReplay() watcher.AgentEventData {
 		EvidenceKnown: true,
 	}
 }
+
+func TestRetainedRuntimeResourceRefusal(t *testing.T) {
+	svc, messageCreator := newTransientTestService(t)
+	t.Cleanup(svc.cancelAllTransientRetries)
+	mgr := configureRetainedReplayRuntime(t, svc)
+	probe := &retainedRuntimeProbeAgentManager{mockAgentManager: mgr, err: errors.New("readiness failed")}
+	svc.agentManager = probe
+	armTransientPromptEvidence(svc)
+	svc.rememberTurnPrompt("s1", "retry the request", "", false, nil)
+
+	data := watcher.AgentEventData{
+		TaskID: "t1", SessionID: "s1", AgentExecutionID: "execution-1", AgentID: "cursor-acp",
+		OwnerKind: "task", AgentProfileID: "profile-cursor", TurnID: "turn-1", PromptGeneration: 7,
+		ErrorMessage:             "Error: RetriableError: [resource_exhausted] Error",
+		PromptFailureDisposition: streams.PromptFailureDispositionRetainRuntime,
+		ProviderError: &streams.ProviderError{
+			Source: streams.ProviderErrorSourceCursorACP, ProviderID: "cursor-acp",
+			Message: "Error: RetriableError: [resource_exhausted] Error",
+		},
+		EvidenceKnown: true,
+	}
+
+	svc.handleAgentTurnFailed(context.Background(), data)
+	value, ok := svc.transientRetries.Load("s1")
+	require.True(t, ok)
+	entry := value.(*transientRetryEntry)
+	require.True(t, entry.claim())
+	svc.retryTransientPrompt(entry.retryCtx, "t1", "s1", "execution-1")
+
+	_, ok = svc.transientRetries.Load("s1")
+	require.False(t, ok, "refused retry must clear transient retry entry")
+	require.NotEmpty(t, messageCreator.sessionMessages)
+	last := messageCreator.sessionMessages[len(messageCreator.sessionMessages)-1]
+	require.Equal(t, "refused", last.metadata["recovery_disposition"])
+}

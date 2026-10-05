@@ -14,7 +14,12 @@ const cursorRetriablePingTimeout = "Error: RetriableError: [unavailable] PING ti
 
 const cursorRetriableConnectionStalled = "Error: RetriableError: Connection stalled"
 
+const realCursorRetriableResourceExhausted = "Error: RetriableError: [resource_exhausted] Error"
+
 const wantCursorRetriableStreamResetRuleID = "cursor.retriable_stream_reset.v1"
+const wantCursorRetriableResourceExhaustedRuleID = "cursor.retriable_resource_exhausted.v1"
+const wantCursorRetriableUnavailableRuleID = "cursor.retriable_unavailable.v1"
+const wantCursorRetriableConnectionStalledRuleID = "cursor.retriable_connection_stalled.v1"
 
 func matchCursorRuntimeEnvironmentRules(text string) (*Error, bool) {
 	return matchRuntimeEnvironmentRulesForProvider(cursorRetriableProviderID, text, text)
@@ -34,14 +39,22 @@ func TestMatchRuntimeEnvironmentRules_CursorRetriable(t *testing.T) {
 	if got.Confidence != ConfHigh {
 		t.Fatalf("Confidence = %q, want %q", got.Confidence, ConfHigh)
 	}
-	for _, message := range []string{cursorRetriablePingTimeout, cursorRetriableConnectionStalled} {
-		t.Run(message, func(t *testing.T) {
-			got, ok := matchCursorRuntimeEnvironmentRules(message)
+	for _, tc := range []struct {
+		message  string
+		wantCode Code
+		wantRule string
+	}{
+		{cursorRetriablePingTimeout, CodeProviderUnavailable, wantCursorRetriableUnavailableRuleID},
+		{cursorRetriableConnectionStalled, CodeNetworkUnavailable, wantCursorRetriableConnectionStalledRuleID},
+		{realCursorRetriableResourceExhausted, CodeProviderResourceExhausted, wantCursorRetriableResourceExhaustedRuleID},
+	} {
+		t.Run(tc.message, func(t *testing.T) {
+			got, ok := matchCursorRuntimeEnvironmentRules(tc.message)
 			if !ok {
-				t.Fatalf("expected Cursor RetriableError match for %q", message)
+				t.Fatalf("expected Cursor RetriableError match for %q", tc.message)
 			}
-			if got.Code != CodeAgentTransportLost || got.ClassifierRule != wantCursorRetriableStreamResetRuleID {
-				t.Fatalf("match for %q = %+v, want agent_transport_lost with rule %q", message, got, wantCursorRetriableStreamResetRuleID)
+			if got.Code != tc.wantCode || got.ClassifierRule != tc.wantRule {
+				t.Fatalf("match for %q = %+v, want code %q with rule %q", tc.message, got, tc.wantCode, tc.wantRule)
 			}
 		})
 	}
@@ -99,10 +112,10 @@ func TestMatchRuntimeEnvironmentRules_CursorRetriableUsesAdapterBounds(t *testin
 		suffix string
 		want   bool
 	}{
-		{name: "256 ASCII bytes", suffix: strings.Repeat("x", 256), want: true},
-		{name: "257 ASCII bytes", suffix: strings.Repeat("x", 257), want: false},
-		{name: "128 multibyte characters at 256 bytes", suffix: strings.Repeat("é", 128), want: true},
-		{name: "129 multibyte characters over 256 bytes", suffix: strings.Repeat("é", 129), want: false},
+		{name: "256 ASCII bytes", suffix: "[resource_exhausted] " + strings.Repeat("x", 256-len("[resource_exhausted] ")), want: true},
+		{name: "257 ASCII bytes", suffix: "[resource_exhausted] " + strings.Repeat("x", 257-len("[resource_exhausted] ")), want: false},
+		{name: "128 multibyte characters at 256 bytes", suffix: "[resource_exhausted] " + strings.Repeat("é", (256-len("[resource_exhausted] "))/2), want: true},
+		{name: "129 multibyte characters over 256 bytes", suffix: "[resource_exhausted] " + strings.Repeat("é", (256-len("[resource_exhausted] "))/2+1), want: false},
 		{name: "unicode whitespace only", suffix: "\u2003\u2003", want: false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -194,17 +207,70 @@ func TestClassifyCursorRetriableLeadingCanceled(t *testing.T) {
 }
 
 func TestClassifyCursorRetriableVariants(t *testing.T) {
-	for _, message := range []string{cursorRetriablePingTimeout, cursorRetriableConnectionStalled} {
-		t.Run(message, func(t *testing.T) {
+	for _, tc := range []struct {
+		message  string
+		wantCode Code
+		wantRule string
+	}{
+		{cursorRetriablePingTimeout, CodeProviderUnavailable, wantCursorRetriableUnavailableRuleID},
+		{cursorRetriableConnectionStalled, CodeNetworkUnavailable, wantCursorRetriableConnectionStalledRuleID},
+	} {
+		t.Run(tc.message, func(t *testing.T) {
 			resetInjection()
-			e := Classify(Input{Phase: PhasePromptSend, ProviderID: "cursor-acp", Stderr: message})
-			if e.Code != CodeAgentTransportLost || e.Class != ClassTransient || !e.AutoRetryable {
-				t.Fatalf("Classify(%q) = %+v, want transient auto-retryable transport loss", message, e)
+			e := Classify(Input{Phase: PhasePromptSend, ProviderID: "cursor-acp", Stderr: tc.message})
+			if e.Code != tc.wantCode || e.Class != ClassTransient || !e.AutoRetryable {
+				t.Fatalf("Classify(%q) = %+v, want transient auto-retryable %q", tc.message, e, tc.wantCode)
 			}
-			if e.ClassifierRule != wantCursorRetriableStreamResetRuleID {
-				t.Fatalf("ClassifierRule = %q, want %q", e.ClassifierRule, wantCursorRetriableStreamResetRuleID)
+			if e.ClassifierRule != tc.wantRule {
+				t.Fatalf("ClassifierRule = %q, want %q", e.ClassifierRule, tc.wantRule)
 			}
 		})
+	}
+}
+
+func TestClassifyCursorRetriableCategory(t *testing.T) {
+	resetInjection()
+
+	e := Classify(Input{
+		Phase:      PhasePromptSend,
+		ProviderID: "cursor-acp",
+		Stderr:     realCursorRetriableResourceExhausted,
+	})
+	if e == nil {
+		t.Fatal("expected non-nil Error")
+	}
+	if e.Code != CodeProviderResourceExhausted {
+		t.Fatalf("Code = %q, want %q", e.Code, CodeProviderResourceExhausted)
+	}
+	if e.Class != ClassTransient {
+		t.Fatalf("Class = %q, want %q", e.Class, ClassTransient)
+	}
+	if e.CatalogueVersion != CatalogueVersion {
+		t.Fatalf("CatalogueVersion = %q, want %q", e.CatalogueVersion, CatalogueVersion)
+	}
+	if e.Confidence != ConfHigh {
+		t.Fatalf("Confidence = %q, want %q", e.Confidence, ConfHigh)
+	}
+	if !e.AutoRetryable {
+		t.Fatal("AutoRetryable = false, want true")
+	}
+	if e.FallbackAllowed {
+		t.Fatal("FallbackAllowed = true, want false")
+	}
+	if e.UserAction {
+		t.Fatal("UserAction = true, want false")
+	}
+	if e.ClassifierRule != wantCursorRetriableResourceExhaustedRuleID {
+		t.Fatalf("ClassifierRule = %q, want %q", e.ClassifierRule, wantCursorRetriableResourceExhaustedRuleID)
+	}
+	if got := Decide(ContextKanban, e, time.Time{}); got != DecisionShortRetry {
+		t.Fatalf("Decide(ContextKanban, ...) = %q, want %q", got, DecisionShortRetry)
+	}
+	if got := Decide(ContextOffice, e, time.Time{}); got != DecisionShortRetry {
+		t.Fatalf("Decide(ContextOffice, ...) = %q, want %q", got, DecisionShortRetry)
+	}
+	if !IsTransientProviderErrorForProvider("cursor-acp", realCursorRetriableResourceExhausted) {
+		t.Fatal("IsTransientProviderErrorForProvider(cursor-acp, resourceExhausted) = false, want true")
 	}
 }
 
@@ -217,8 +283,16 @@ func TestClassifyCursorRetriableDoesNotCrossProviders(t *testing.T) {
 				ProviderID: providerID,
 				Stderr:     cursorRetriablePingTimeout,
 			})
-			if e.Code == CodeAgentTransportLost || e.ClassifierRule == wantCursorRetriableStreamResetRuleID {
-				t.Fatalf("Classify(%q) = %+v, want no Cursor transport-loss match", providerID, e)
+			if e.Code == CodeProviderUnavailable || e.ClassifierRule == wantCursorRetriableUnavailableRuleID {
+				t.Fatalf("Classify(%q) = %+v, want no Cursor unavailable match", providerID, e)
+			}
+			eResource := Classify(Input{
+				Phase:      PhasePromptSend,
+				ProviderID: providerID,
+				Stderr:     realCursorRetriableResourceExhausted,
+			})
+			if eResource.Code == CodeProviderResourceExhausted || eResource.ClassifierRule == wantCursorRetriableResourceExhaustedRuleID {
+				t.Fatalf("Classify(%q) = %+v, want no Cursor resource match", providerID, eResource)
 			}
 		})
 	}
@@ -284,6 +358,11 @@ func TestIsTransientProviderError_Cursor(t *testing.T) {
 		{
 			name: "connection stalled",
 			text: cursorRetriableConnectionStalled,
+			want: true,
+		},
+		{
+			name: "resource exhausted",
+			text: realCursorRetriableResourceExhausted,
 			want: true,
 		},
 		{

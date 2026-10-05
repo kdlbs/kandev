@@ -3759,7 +3759,7 @@ func (s *Service) createRecoveryStatusMessage(ctx context.Context, data watcher.
 	}
 	if meta["failure_kind"] == failureKindProviderInterrupted &&
 		(data.RecoveryDisposition == "" || data.RecoveryDisposition == recoveryDispositionManual) &&
-		(data.RecoveryMode == recoveryModeContinue || (classified.Code == routingerr.CodeAgentTransportLost &&
+		(data.RecoveryMode == recoveryModeContinue || (routingerr.Decide(routingerr.ContextKanban, classified, time.Now().UTC()) == routingerr.DecisionShortRetry &&
 			(data.OutputObserved || data.EffectObserved || !data.EvidenceKnown))) {
 		meta["recovery_reason"] = s.continuationRefusalReason(ctx, data)
 	}

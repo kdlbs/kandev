@@ -11,12 +11,12 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-const mockContinuationPrompt = "Your previous turn was interrupted by a temporary connection failure. Continue the unfinished request using this conversation's existing history and available completed tool results."
+const mockContinuationPrompt = "continue"
 
 func TestMockInterruptionContinuationRequiresFixturePrefix(t *testing.T) {
 	a := newTransportLostTestAgent()
 	a.conn = newCapturingUpdater()
-	for _, prompt := range []string{mockContinuationReadScenario, mockContinuationOutputScenario, mockContinuationWriteScenario, mockContinuationUnknownScenario} {
+	for _, prompt := range []string{mockContinuationReadScenario, mockContinuationOutputScenario, mockContinuationWriteScenario, mockContinuationUnknownScenario, "continue"} {
 		_, _, handled := a.handleMockInterruptionContinuation(t.Context(), "ordinary", prompt)
 		require.False(t, handled, "ordinary prompts cannot enter an interruption fixture")
 	}
@@ -24,7 +24,6 @@ func TestMockInterruptionContinuationRequiresFixturePrefix(t *testing.T) {
 
 func TestMockInterruptionContinuationCancelledCompletion(t *testing.T) {
 	sid := acp.SessionId(t.Name())
-	_ = os.Remove(mockContinuationPath(sid))
 	_ = os.Remove(mockContinuationPath(sid))
 	a := newTransportLostTestAgent()
 	a.conn = newCapturingUpdater()
@@ -36,6 +35,53 @@ func TestMockInterruptionContinuationCancelledCompletion(t *testing.T) {
 	require.True(t, handled)
 	require.NoError(t, err)
 	require.Equal(t, acp.StopReasonCancelled, response.StopReason)
+}
+
+func TestMockInterruptionContinuationUnknownOutcome(t *testing.T) {
+	sid := acp.SessionId(t.Name())
+	_ = os.Remove(mockContinuationPath(sid))
+	t.Cleanup(func() { _ = os.Remove(mockContinuationPath(sid)) })
+	a := newTransportLostTestAgent()
+	updates := newCapturingUpdater()
+	a.conn = updates
+	_, err, handled := a.handleMockInterruptionContinuation(t.Context(), sid, "/continuation-unknown")
+	require.True(t, handled)
+	require.Error(t, err)
+	started := make(map[acp.ToolCallId]bool)
+	unknownCompletion := false
+	for _, note := range updates.notes {
+		if call := note.Update.ToolCall; call != nil {
+			started[call.ToolCallId] = true
+		}
+		if update := note.Update.ToolCallUpdate; update != nil && update.Status != nil && *update.Status == acp.ToolCallStatusCompleted {
+			unknownCompletion = unknownCompletion || !started[update.ToolCallId]
+		}
+	}
+	require.True(t, unknownCompletion, "unknown fixture must contain an uncorrelated outcome, not a completed foreground tool")
+}
+
+func TestMockInterruptionContinuationShellOutcome(t *testing.T) {
+	sid := acp.SessionId(t.Name())
+	_ = os.Remove(mockContinuationPath(sid))
+	t.Cleanup(func() { _ = os.Remove(mockContinuationPath(sid)) })
+	a := newTransportLostTestAgent()
+	updates := newCapturingUpdater()
+	a.conn = updates
+	_, err, handled := a.handleMockInterruptionContinuation(t.Context(), sid, "/continuation-shell")
+	require.True(t, handled)
+	require.Error(t, err)
+	completedShell := false
+	shellIDs := make(map[acp.ToolCallId]bool)
+	for _, note := range updates.notes {
+		if call := note.Update.ToolCall; call != nil && call.Kind == acp.ToolKindExecute {
+			shellIDs[call.ToolCallId] = true
+			completedShell = call.Status == acp.ToolCallStatusCompleted
+		}
+		if update := note.Update.ToolCallUpdate; update != nil && update.Status != nil && *update.Status == acp.ToolCallStatusCompleted {
+			completedShell = completedShell || shellIDs[update.ToolCallId]
+		}
+	}
+	require.True(t, completedShell)
 }
 
 func TestMockInterruptionContinuationRestoresSameConversation(t *testing.T) {

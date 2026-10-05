@@ -4,6 +4,10 @@
 **Date:** 2026-10-02
 **Area:** backend, frontend, protocol
 
+The completed-tool admission boundary and continuation prompt are amended by
+[ADR-2026-10-05-hidden-completed-tool-continuation](2026-10-05-hidden-completed-tool-continuation.md).
+The original replay, native identity, ownership, and rollout constraints remain.
+
 ## Context
 
 Cursor emits a terminal transient diagnostic after a network interruption even

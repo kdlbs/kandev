@@ -19,6 +19,8 @@ const cursorRetriablePingTimeoutChunk = "Error: RetriableError: [unavailable] PI
 
 const cursorRetriableConnectionStalledChunk = "Error: RetriableError: Connection stalled"
 
+const cursorRetriableResourceExhaustedChunk = "Error: RetriableError: [resource_exhausted] Error"
+
 const cursorRetriableContextCanceledChunk = "Error: RetriableError: context canceled"
 
 const cursorRetriableDeadlineExceededChunk = "Error: RetriableError: context deadline exceeded"
@@ -258,7 +260,7 @@ func TestSendPromptCursorRetriableErrorSettlesAfterNotificationBarrier(t *testin
 	providerError := providerErrors[0]
 	if !providerError.Valid() || providerError.Source != streams.ProviderErrorSourceCursorACP ||
 		providerError.ProviderID != acpcompat.CursorAgentID ||
-		providerError.Message != cursorRetriableStreamResetChunk {
+		providerError.Message != cursorRetriablePingTimeoutChunk {
 		t.Fatalf("provider error = %+v, want valid sanitized Cursor diagnostic", providerError)
 	}
 }
@@ -374,5 +376,70 @@ func TestSendPromptCursorProgressSupersedesRetriableMarker(t *testing.T) {
 	}
 	if errors != 0 || completes != 1 {
 		t.Fatalf("events = %+v, want no error and one complete", events)
+	}
+}
+
+func TestCursorRetriableDiagnosticProjection(t *testing.T) {
+	a, fake, conn := setupHandoffFakeAgent(t)
+	a.agentID = acpcompat.CursorAgentID
+	a.normalizer = NewNormalizer(acpcompat.CursorAgentID)
+	a.dialect = newACPDialect(acpcompat.CursorAgentID)
+
+	ctx := context.Background()
+	if err := a.Initialize(ctx); err != nil {
+		t.Fatalf("initialize: %v", err)
+	}
+	if _, err := a.NewSession(ctx, nil); err != nil {
+		t.Fatalf("new session: %v", err)
+	}
+	_ = drainEvents(a)
+
+	done := make(chan error, 1)
+	go func() { done <- a.Prompt(ctx, "execute some tools", nil, 7) }()
+	select {
+	case <-fake.entered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("prompt did not reach the fake Cursor agent")
+	}
+
+	sendCapturedUpdate(t, conn, `{"sessionId":"session-handoff","update":{"sessionUpdate":"tool_call","toolCallId":"tc-1","title":"Execute 1","rawInput":{"command":"ls"}}}`)
+	sendCapturedUpdate(t, conn, `{"sessionId":"session-handoff","update":{"sessionUpdate":"tool_call_update","toolCallId":"tc-1","status":"completed"}}`)
+	sendCapturedUpdate(t, conn, `{"sessionId":"session-handoff","update":{"sessionUpdate":"tool_call","toolCallId":"tc-2","title":"Execute 2","rawInput":{"command":"git status"}}}`)
+	sendCapturedUpdate(t, conn, `{"sessionId":"session-handoff","update":{"sessionUpdate":"tool_call_update","toolCallId":"tc-2","status":"completed"}}`)
+
+	sendCapturedUpdate(t, conn, `{"sessionId":"session-handoff","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"`+cursorRetriableResourceExhaustedChunk+`"}}}`)
+	fake.releasePrompts()
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("Prompt returned error: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("prompt did not settle")
+	}
+
+	events := drainEvents(a)
+	var providerErrors []*streams.ProviderError
+	var errors, completes, messageChunks int
+	for _, event := range events {
+		switch event.Type {
+		case streams.EventTypeError:
+			errors++
+			providerErrors = append(providerErrors, event.ProviderError)
+		case streams.EventTypeComplete:
+			completes++
+		case streams.EventTypeMessageChunk:
+			messageChunks++
+		}
+	}
+	if errors != 1 || completes != 0 || messageChunks != 0 || len(providerErrors) != 1 {
+		t.Fatalf("events = %+v, want one structured error, no raw chunk, and no complete", events)
+	}
+	providerError := providerErrors[0]
+	if !providerError.Valid() || providerError.Source != streams.ProviderErrorSourceCursorACP ||
+		providerError.ProviderID != acpcompat.CursorAgentID ||
+		providerError.Message != cursorRetriableResourceExhaustedChunk {
+		t.Fatalf("provider error = %+v, want valid sanitized Cursor resource exhausted diagnostic", providerError)
 	}
 }

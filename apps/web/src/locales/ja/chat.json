@@ -81,6 +81,7 @@
   "transientRetryReasonProviderUnavailable": "プロバイダーが一時的に利用不可",
   "transientRetryReasonRateLimited": "レート制限中",
   "transientRetryReasonAgentTransportLost": "エージェント接続が切断されました",
+  "transientRetryReasonResourceExhausted": "プロバイダーのリソースが不足しています",
   "transientRetryReasonGeneric": "プロバイダーエラー",
   "transientRetryIn": "{{countdown}} 後に再試行",
   "transientRetryNow": "再試行中…",
