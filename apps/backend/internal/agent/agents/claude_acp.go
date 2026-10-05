@@ -117,6 +117,15 @@ func (a *ClaudeACP) ManagedNPMRuntime() ManagedNPMRuntimeSpec {
 	return newManagedNPMRuntimeSpec(claudeACPPackage)
 }
 
+func (a *ClaudeACP) RuntimeProviderObservation() RuntimeComponentDescriptor {
+	return RuntimeComponentDescriptor{
+		Name:    "Claude Agent SDK",
+		Package: "@anthropic-ai/claude-agent-sdk",
+		Source:  RuntimeComponentBundled,
+		Owner:   RuntimeComponentOwnerKandev,
+	}
+}
+
 func (a *ClaudeACP) Runtime() *RuntimeConfig {
 	canRecover := true
 	return &RuntimeConfig{

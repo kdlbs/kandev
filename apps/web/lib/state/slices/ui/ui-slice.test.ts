@@ -749,3 +749,41 @@ it("queues runtime notices arriving in one render and preserves their occurrence
   store.getState().setUpdateAvailableNotification(null);
   expect(store.getState().updateAvailableNotification).toBeNull();
 });
+
+// @covers AC-AGENTS-RUNTIME-NOTIFY-003.3, AC-AGENTS-RUNTIME-NOTIFY-003.5
+it("queues a grouped runtime notification as one occurrence with its typed members", () => {
+  const store = makeStore();
+  const summary = {
+    notification_kind: "agent_runtime_summary" as const,
+    runtime_updates: [
+      {
+        occurrence_id: "gemini-2",
+        agent_name: "gemini",
+        runtime_id: "npm:@google/gemini-cli",
+        display_name: "Gemini",
+        previous_version: "1.0.0",
+        version: "2.0.0",
+      },
+      {
+        occurrence_id: "codex-3",
+        agent_name: "codex-app-server",
+        runtime_id: "npm:@openai/codex",
+        display_name: "Codex",
+        previous_version: "1.0.0",
+        version: "3.0.0",
+      },
+    ],
+    title: "2 agent runtime updates available",
+    body: "Review the new versions in Settings > Agents.",
+    url: "/settings/agents#runtime-updates",
+    occurrence_id: "summary-codex-gemini",
+  };
+
+  store.getState().setUpdateAvailableNotification(summary);
+  store.getState().setUpdateAvailableNotification({ ...summary });
+
+  expect(store.getState().updateAvailableNotification).toEqual(summary);
+  expect(store.getState().updateAvailableNotificationQueue).toEqual([]);
+  store.getState().setUpdateAvailableNotification(null);
+  expect(store.getState().updateAvailableNotification).toBeNull();
+});

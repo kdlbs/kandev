@@ -131,9 +131,19 @@ func TestManagerProfileProbeAndModelResolutionUseScopedLaunchContext(t *testing.
 
 func TestProfileRefreshGenerationIsScopedToProfileContext(t *testing.T) {
 	var requests atomic.Int32
-	manager, server := newProfileProbeTestManager(t, agents.NewClaudeACP(), nil, func(w http.ResponseWriter, _ agentctlutil.ProbeRequest) {
+	manager, server := newProfileProbeTestManager(t, agents.NewClaudeACP(), nil, func(w http.ResponseWriter, req agentctlutil.ProbeRequest) {
 		requests.Add(1)
-		_, _ = w.Write([]byte(`{"success":true,"models":[{"id":"codex","name":"Codex"}]}`))
+		version := req.InferenceConfig.Env["PROFILE"]
+		data, _ := json.Marshal(agentctlutil.ProbeResponse{
+			Success: true,
+			Models:  []agentctlutil.ProbeModel{{ID: "codex", Name: "Codex"}},
+			RuntimeInfo: &agents.RuntimeInfo{
+				Scope: "host", Components: []agents.RuntimeComponent{{
+					Role: agents.RuntimeComponentBridge, Name: "Claude", ObservedVersion: version,
+				}},
+			},
+		})
+		_, _ = w.Write(data)
 	})
 	defer server.Close()
 
@@ -155,12 +165,19 @@ func TestProfileRefreshGenerationIsScopedToProfileContext(t *testing.T) {
 	if resolution.ContextRevision != firstA.ContextRevision {
 		t.Fatalf("profile B refresh changed profile A revision: got %q, want %q", resolution.ContextRevision, firstA.ContextRevision)
 	}
+	cachedA, err := manager.ProbeProfileCapabilities(context.Background(), "claude-acp", ProfileCapabilityRequest{Context: profileA})
+	if err != nil {
+		t.Fatalf("read cached profile A: %v", err)
+	}
+	if cachedA.Capabilities.RuntimeInfo == nil || cachedA.Capabilities.RuntimeInfo.Components[0].ObservedVersion != "a" {
+		t.Fatalf("profile B observation leaked into profile A: %#v", cachedA.Capabilities.RuntimeInfo)
+	}
 	if got := requests.Load(); got != 3 {
 		t.Fatalf("probe count = %d, want 3 (A baseline, B baseline, A model options)", got)
 	}
 }
 
-func TestProfileProbeDiscardsResultWhenRuntimeActivatesDuringProbe(t *testing.T) {
+func TestProfileRuntimeObservationRejectedAfterActivation(t *testing.T) {
 	probeStarted := make(chan struct{})
 	releaseProbe := make(chan struct{})
 	var releaseOnce sync.Once
@@ -168,11 +185,25 @@ func TestProfileProbeDiscardsResultWhenRuntimeActivatesDuringProbe(t *testing.T)
 	t.Cleanup(release)
 	var requests atomic.Int32
 	manager, server := newProfileProbeTestManager(t, agents.NewClaudeACP(), nil, func(w http.ResponseWriter, _ agentctlutil.ProbeRequest) {
-		if requests.Add(1) == 1 {
+		request := requests.Add(1)
+		if request == 1 {
 			close(probeStarted)
 			<-releaseProbe
 		}
-		_, _ = w.Write([]byte(`{"success":true,"models":[{"id":"codex","name":"Codex"}]}`))
+		version := "1.2.4"
+		if request == 1 {
+			version = "1.2.3"
+		}
+		data, _ := json.Marshal(agentctlutil.ProbeResponse{
+			Success: true,
+			Models:  []agentctlutil.ProbeModel{{ID: "codex", Name: "Codex"}},
+			RuntimeInfo: &agents.RuntimeInfo{
+				Scope: "host", Components: []agents.RuntimeComponent{{
+					Role: agents.RuntimeComponentBridge, Name: "Claude", ObservedVersion: version,
+				}},
+			},
+		})
+		_, _ = w.Write(data)
 	})
 	defer server.Close()
 
@@ -202,6 +233,15 @@ func TestProfileProbeDiscardsResultWhenRuntimeActivatesDuringProbe(t *testing.T)
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("profile probe did not finish after release")
+	}
+	current, err := manager.ProbeProfileCapabilities(context.Background(), "claude-acp", ProfileCapabilityRequest{
+		Context: ProfileProbeContext{Scope: "user-1:profile-a"},
+	})
+	if err != nil {
+		t.Fatalf("probe current runtime after activation: %v", err)
+	}
+	if current.Capabilities.RuntimeInfo == nil || current.Capabilities.RuntimeInfo.Components[0].ObservedVersion != "1.2.4" {
+		t.Fatalf("current profile reused pre-activation observation: %#v", current.Capabilities.RuntimeInfo)
 	}
 }
 

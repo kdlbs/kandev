@@ -16,7 +16,9 @@ export function UpdateAvailableToastBridge() {
     return () => clearInterval(timer);
   }, [refresh]);
   useEffect(() => {
-    if (notification?.agent_name) void refresh();
+    if (notification?.agent_name || notification?.notification_kind === "agent_runtime_summary") {
+      void refresh();
+    }
   }, [notification, refresh]);
   return null;
 }

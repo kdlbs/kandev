@@ -23,11 +23,8 @@ import type { SSHReachabilityRecord } from "@/lib/types/http-ssh";
 import type { UISliceActions as UIA } from "./slices/ui/types";
 import type * as SettingsSliceTypes from "./slices/settings/types";
 import type * as UISliceTypes from "./slices/ui/types";
-import type {
-  AgentUpdateJob,
-  InstallJob,
-  NotificationProvidersUpdate,
-} from "./slices/settings/types";
+import type { AgentUpdateJob } from "@/lib/api";
+import type { InstallJob, NotificationProvidersUpdate } from "./slices/settings/types";
 import {
   defaultWorkspaceState,
   defaultSettingsState,

@@ -8,6 +8,7 @@ import {
   type SetStateAction,
 } from "react";
 import { probeAgentProfile } from "@/lib/api/domains/profile-capability-api";
+import { useOptionalAppStore } from "@/components/state-provider";
 import { useProfileModelOptions } from "./use-profile-model-options";
 import type {
   CapabilityStatus,
@@ -103,6 +104,10 @@ export function useProfileModelCapabilities(
   );
   const currentLaunchKey = profileContextKey(agentName, options.profileId, launchSettings);
   const profileIdentity = `${agentName}:${options.profileId ?? "draft"}`;
+  const runtimeUpdateJob = useOptionalAppStore(
+    (state) => state.updateJobs.byAgent[agentName],
+    undefined,
+  );
   const discovery = useProfileCapabilityDiscovery({
     agentName,
     launchSettings,
@@ -132,6 +137,8 @@ export function useProfileModelCapabilities(
     configIsLoading: modelOptions.configIsLoading,
   });
 
+  useRuntimeActivationRefresh(agentName, runtimeUpdateJob, discovery.refresh);
+
   return {
     capabilities,
     discoveryState: discovery.discoveryState,
@@ -142,7 +149,39 @@ export function useProfileModelCapabilities(
     isConfigResolutionPending: modelOptions.isConfigResolutionPending,
     refreshModelConfig: modelOptions.refreshModelConfig,
     refresh: discovery.refresh,
+    runtimeInfo: discovery.runtimeInfo,
   };
+}
+
+type RuntimeUpdateJobSnapshot = {
+  job_id: string;
+  status: string;
+};
+
+function useRuntimeActivationRefresh(
+  agentName: string,
+  job: RuntimeUpdateJobSnapshot | undefined,
+  refresh: () => Promise<void>,
+) {
+  const previousJob = useRef<{ agentName: string; jobId?: string; status?: string } | null>(null);
+  const refreshedJobs = useRef(new Set<string>());
+
+  useEffect(() => {
+    const previous = previousJob.current;
+    if (!previous || previous.agentName !== agentName) {
+      previousJob.current = { agentName, jobId: job?.job_id, status: job?.status };
+      return;
+    }
+
+    const isNewSuccess =
+      job?.status === "succeeded" &&
+      (previous.jobId !== job.job_id || previous.status !== "succeeded");
+    previousJob.current = { agentName, jobId: job?.job_id, status: job?.status };
+    if (!isNewSuccess || refreshedJobs.current.has(job.job_id)) return;
+
+    refreshedJobs.current.add(job.job_id);
+    void refresh();
+  }, [agentName, job, refresh]);
 }
 
 type BuildProfileCapabilitiesInput = {
@@ -289,6 +328,11 @@ function useProfileCapabilityDiscovery({
     error: discoveryState === "failed" ? (activeCapability?.response.error ?? null) : null,
     refresh,
     markCapabilityFailed,
+    runtimeInfo:
+      activeCapability?.response.runtime_info ??
+      (profileIdentityRef.current === profileIdentity
+        ? capabilityState?.response.runtime_info
+        : undefined),
   };
 }
 
@@ -337,12 +381,15 @@ function useProfileCapabilityRefresh({
       ...(profileId ? { profile_id: profileId } : {}),
       launch_settings: launchSettings,
     };
-    setCapabilityState({
+    setCapabilityState((current) => ({
       launchKey,
       status: "loading",
-      response: emptyResponse(agentName, "probing"),
+      response:
+        current?.launchKey === launchKey && current.response.status === "ok"
+          ? current.response
+          : emptyResponse(agentName, "probing"),
       resolveContext,
-    });
+    }));
     try {
       const response = await probeAgentProfile(agentName, { ...resolveContext, refresh: true });
       if (
@@ -366,11 +413,17 @@ function useProfileCapabilityRefresh({
       )
         return;
       const error = err instanceof Error ? err.message : t("agents:failedToFetchCapabilities");
-      setCapabilityState({
-        launchKey,
-        status: "failed",
-        response: { ...emptyResponse(agentName, "failed"), error },
-        resolveContext,
+      setCapabilityState((current) => {
+        const priorResponse =
+          current?.launchKey === launchKey && current.response.status === "ok"
+            ? current.response
+            : emptyResponse(agentName, "failed");
+        return {
+          launchKey,
+          status: "failed",
+          response: { ...priorResponse, error },
+          resolveContext,
+        };
       });
     }
   }, [

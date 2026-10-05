@@ -325,7 +325,7 @@ func TestSnapshotAndRestoreWriteChildrenBeforeApplyingReadOnlyDirectoryMode(t *t
 
 func TestRestoreSnapshotPreservesManifestReadError(t *testing.T) {
 	missing := filepath.Join(t.TempDir(), "missing")
-	err := restoreSnapshot(missing, t.TempDir(), "manifest")
+	err := restoreSnapshot("", missing, t.TempDir(), "manifest")
 	if err == nil || !strings.Contains(err.Error(), "no such file or directory") {
 		t.Fatalf("restoreSnapshot() error = %v, want underlying manifest read error", err)
 	}

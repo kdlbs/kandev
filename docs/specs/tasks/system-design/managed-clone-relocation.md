@@ -6,7 +6,7 @@ requirements:
   - REQ-TASKS-MANAGED-CLONE-RELOCATION-002
   - REQ-TASKS-MANAGED-CLONE-RELOCATION-003
 created: 2026-09-27
-updated: 2026-10-02
+updated: 2026-10-04
 owners:
   - kandev
 ---
@@ -145,6 +145,81 @@ are not reconstructed. The confirmation and completion message state this
 limit. Unsupported special files, unreadable entries, conflicts, and changed
 snapshots stop before publication. Do not silently fall back to a remote or
 task base branch when the exact commit is unavailable.
+
+## Permission-only blocked snapshot continuation
+
+This extension implements AC-TASKS-MANAGED-CLONE-RELOCATION-002.5. It uses the
+[shared snapshot mode policy](worktree-metadata-recovery.md#snapshot-permission-preservation)
+and the [retry boundary decision](../../../decisions/2026-10-04-permission-only-snapshot-retry.md).
+Implementation and verification are recorded in the
+[permission fix package](../../../plans/workspace-recovery-permissions/plan.md).
+
+Ordinary resume, restore, fresh start, and automatic metadata recovery must not
+reopen a blocked snapshot. A new `relocate_and_resume` request supplies the
+existing current error stamp and authorization. No new UI control, action,
+runtime flag, session state, or database table is required.
+
+`recoveryOperationIDsForSlot` can recognize a provisional retry candidate only
+for explicit dirty relocation. The adjacent recovery record must have `blocked`
+state, an empty manifest, and the historical reason
+`recovery snapshot does not match original checkout`. Its task, worktree,
+original path, and valid operation ID must match the canonical slot and the
+managed-clone relocation record. The latter must still be `materialized`.
+The reason string is a format discriminator, never sufficient authorization.
+Read-only candidate recognition cannot change records or release claims.
+Merge operation IDs through the existing selected-inventory rule.
+Conflicting operations remain refused.
+
+After acquiring the existing durable environment claim and both filesystem
+operation locks, reread the records and current failure authorization.
+Require unchanged owner generation, session binding, complete canonical
+inventory, verified source/destination clones, recorded branch, and exact HEAD.
+Require the recorded replacement to remain a clean, unpublished worktree at
+its captured branch and commit. Refuse edits to that replacement.
+Generic `adoptRecoveryRecord` must continue to reject blocked records.
+The specialized dirty-transfer entry owns the retry proof under the same
+snapshot lock. It must not release the lock between proof and transition.
+
+Compare the original and failed snapshot through pinned no-follow directory
+handles. Exclude only the checkout root `.git`. Require identical relative
+entry sets, entry types, regular-file bytes, and symlink targets. Permit only
+special bits absent from the failed snapshot and ordinary permission bits
+removed from regular files. Directory ordinary permissions must match.
+No snapshot entry can add permissions. At least one permission difference
+must exist. Historical copied ownership does not authorize source ownership.
+Read the required set-ID identity from the current verified original.
+Repeated source checks include mode and required UID/GID to detect drift.
+Unreadable entries, special files, path substitution, cancellation, content
+changes, and unrelated reasons refuse without changing either retained copy.
+Stream comparison with bounded memory, existing I/O deadlines, and cancellation.
+Do not add an arbitrary file-count limit that rejects normal build trees.
+
+Add one optional `mode_retry` object to `recoveryRecord`. It records format
+version 1, the previous snapshot path, previous error and timestamp, and a
+new deterministic path: `<original>.kandev-recovery-<operation-id>-modes-v1`.
+The record retains its existing operation ID. Atomically replace the blocked
+record with `snapshotting` and this retry provenance only after all proofs pass.
+Keep the old snapshot untouched. Reject an occupied new path unless the durable
+retry record already owns it. A crash before the record write leaves the old
+blocked record. A crash afterward follows the existing snapshotting protocol,
+which can rebuild only the new incomplete snapshot. Never remove the old copy.
+
+`prepareRecoverySnapshot` then creates a fresh snapshot from the original.
+Keep full manifest checks, the set-ID identity checks, restoration, and the
+claim-aware inventory compare-and-swap. Resume the existing deterministic
+replacement rather than creating another branch or operation. A second blocked
+failure with `mode_retry` present does not authorize another automatic rebuild.
+Rematerializing retries retain their existing verified manifest rule.
+Completed and unrelated blocked records retain their existing treatment.
+
+Every selected slot must pass preflight before any record transition.
+Successful earlier slots remain authoritative after a later failure.
+No agent starts until the complete inventory validates. A successful relaunch
+retires only its matching error stamp and preserves the provider resume token.
+A stale or failed request leaves the current actionable error visible.
+Record reason categories through the existing sanitized failure and relocation
+outcome paths. Never log file bytes, UID/GID details, or absolute paths in public
+errors. No install-wide startup scan or claim expiry is added.
 
 ## Inspection contention and explicit preflight
 
@@ -302,6 +377,8 @@ metric labels.
 - [Worktree metadata recovery boundary](../../../decisions/2026-09-10-worktree-metadata-recovery-boundary.md)
 
 ## Implementation plans
+
+- [Snapshot permissions and blocked retry](../../../plans/workspace-recovery-permissions/plan.md)
 
 - [Original relocation package](../../../plans/managed-clone-relocation/plan.md)
 - [Unchanged legacy clone admission](../../../plans/legacy-clone-resume/plan.md)

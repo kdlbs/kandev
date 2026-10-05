@@ -11,6 +11,7 @@ import {
   updateAgent,
   updateAgentUseDefault,
   type AgentUpdateJob,
+  type AgentUpdateMode,
 } from "@/lib/api";
 import { ApiError } from "@/lib/api/client";
 // Thrown from a callback rather than rendered as a literal, so this uses the
@@ -54,12 +55,22 @@ export function useAgentRuntimeUpdates() {
   );
 
   const startUpdate = useCallback(
-    async (agentName: string, targetVersion: string, useDefault = false) => {
+    async (
+      agentName: string,
+      targetVersion: string,
+      useDefault = false,
+      updateMode: AgentUpdateMode = "pinned",
+    ) => {
       try {
         const job = useDefault
           ? await updateAgentUseDefault(agentName)
-          : await updateAgent(agentName, targetVersion);
-        store.getState().upsertAgentUpdateJob(job);
+          : await updateAgent(
+              agentName,
+              updateMode === "self_update"
+                ? { update_mode: "self_update" }
+                : { update_mode: "pinned", target_version: targetVersion },
+            );
+        if (job.job_id) store.getState().upsertAgentUpdateJob(job);
         return job;
       } catch (error) {
         const conflict = maintenanceConflict(error);

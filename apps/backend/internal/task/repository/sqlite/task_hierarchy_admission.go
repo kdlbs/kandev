@@ -77,6 +77,9 @@ func (r *Repository) ValidateTaskCreationParent(ctx context.Context, workspace, 
 	return validate(ctx, taskHierarchyReader{r, tx}, nil, parent)
 }
 func (r *Repository) validateCreationParentTx(ctx context.Context, tx *sql.Tx, task *models.Task) error {
+	if err := r.managedDeletionBarrierTx(ctx, tx, task.ParentID); err != nil {
+		return err
+	}
 	if task.ParentID == "" {
 		return nil
 	}
@@ -107,6 +110,9 @@ func (r *Repository) UpdateTaskWithParentAdmission(ctx context.Context, task *mo
 		return false, err
 	}
 	if parent != nil {
+		if err := r.managedDeletionBarrierTx(ctx, tx, *parent); err != nil {
+			return false, err
+		}
 		if err := validate(ctx, reader, current, *parent); err != nil {
 			return false, err
 		}

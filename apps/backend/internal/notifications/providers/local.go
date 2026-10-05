@@ -28,7 +28,7 @@ func (p *LocalProvider) Send(_ context.Context, message Message) error {
 	if p.hub == nil {
 		return fmt.Errorf("websocket hub not available")
 	}
-	msg, err := ws.NewNotification(message.EventType, map[string]interface{}{
+	payload := map[string]interface{}{
 		"task_id":               message.TaskID,
 		"session_id":            message.TaskSessionID,
 		"occurrence_id":         message.OccurrenceID,
@@ -41,7 +41,18 @@ func (p *LocalProvider) Send(_ context.Context, message Message) error {
 		"display_name":          message.Payload["display_name"],
 		"previous_version":      message.Payload["previous_version"],
 		"runtime_update_status": message.Payload["runtime_update_status"],
-	})
+		"notification_kind":     message.Payload["notification_kind"],
+	}
+	if payload["version"] == "" {
+		delete(payload, "version")
+	}
+	if payload["notification_kind"] == "" {
+		delete(payload, "notification_kind")
+	}
+	if len(message.RuntimeUpdates) > 0 {
+		payload["runtime_updates"] = message.RuntimeUpdates
+	}
+	msg, err := ws.NewNotification(message.EventType, payload)
 	if err != nil {
 		return err
 	}

@@ -12,6 +12,7 @@ import (
 	"github.com/kandev/kandev/internal/db/dialect"
 	"github.com/kandev/kandev/internal/task/models"
 	managed "github.com/kandev/kandev/internal/task/repository/managedconversation"
+	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 )
 
 func (r *Repository) beginManagedAdmission(ctx context.Context, identity managed.Identity) (*sqlx.Tx, *models.Task, error) {
@@ -38,6 +39,13 @@ func (r *Repository) beginManagedAdmission(ctx context.Context, identity managed
 	if !managed.Matches(task, identity) {
 		_ = tx.Rollback()
 		return nil, nil, managed.ErrNotFound
+	}
+	if err := r.managedDeletionBarrierTx(ctx, tx, task.ID); err != nil {
+		_ = tx.Rollback()
+		if errors.Is(err, repoerrors.ErrTaskCleanupInProgress) {
+			return nil, nil, fmt.Errorf("%w: %w", managed.ErrBusy, err)
+		}
+		return nil, nil, managedContextError(ctx, err)
 	}
 	return tx, task, nil
 }

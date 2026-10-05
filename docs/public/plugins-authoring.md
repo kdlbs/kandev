@@ -1412,6 +1412,26 @@ is active. `SetPaused` also checks a revision. Pause state blocks future starts;
 stopping a running generation is a separate operation. `Delete` is explicit and
 removes only the selected conversation owned by the current installation.
 
+`Delete` checks the current identity and expected revision when it admits the
+operation. If an accepted update wins first, deletion returns a conflict; if
+uninstall has detached the conversation, deletion returns not found. These
+rejected attempts preserve the task and transcript and perform no deletion
+cleanup. Once deletion is admitted, competing changes cannot be accepted until
+that operation commits or releases its reservation.
+
+An admitted deletion can fail after environment transfer or canvas cleanup has
+already taken effect. The task and transcript remain when final deletion rolls
+back, but those preparation effects are not guaranteed to be undone. The Host
+returns `CommandUnavailable` for admitted failure, uncertain outcome, or an
+unavailable acknowledgement. An incomplete receipt or missing task alone does
+not prove successful deletion. Replay the same command key to recover its
+result; a successful replay requires durable evidence of that operation's
+deletion commit and cannot delete a replacement conversation. A reservation
+with an unproven owner remains unavailable rather than being stolen by replay.
+
+Workspace deletion can fail after canvas cleanup while the workspace, task and
+retained transcript rows remain.
+
 ```go
 if exact, ok := pluginsdk.HostV2(host); ok {
     capability, err := exact.GetCapabilityContext(ctx, workspaceID)

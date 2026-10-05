@@ -35,6 +35,7 @@ import type {
 import type { AgentProfileRecentUseContext } from "@/lib/types/http-agent-profile-recent-use";
 import type { TaskColor } from "@/lib/task-colors";
 import type { SSHReachabilityRecord } from "@/lib/types/http-ssh";
+import type { AgentUpdateJob } from "@/lib/api";
 
 export type {
   AgentProfileRecentUseRecord,
@@ -346,30 +347,6 @@ export type InstallJob = {
  */
 export type InstallJobsState = {
   byAgent: Record<string, InstallJob>;
-};
-
-export type AgentUpdateJobStatus =
-  | "queued"
-  | "resolving"
-  | "updating"
-  | "refreshing"
-  | "succeeded"
-  | "failed";
-
-export type AgentUpdateJob = {
-  automatic?: boolean;
-  runtime_id?: string;
-  previous_version?: string;
-  job_id: string;
-  agent_name: string;
-  status: AgentUpdateJobStatus;
-  current_version?: string;
-  target_version?: string;
-  output?: string;
-  error?: string;
-  refresh_error?: string;
-  started_at: string;
-  finished_at?: string;
 };
 
 export type AgentUpdateJobsState = {

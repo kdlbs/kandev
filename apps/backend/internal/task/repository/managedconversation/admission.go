@@ -12,10 +12,11 @@ import (
 )
 
 var (
-	ErrNotFound    = errors.New("managed conversation not found")
-	ErrRevision    = errors.New("managed conversation revision is stale")
-	ErrBusy        = errors.New("managed conversation launch settings can change only while idle")
-	ErrUnavailable = errors.New("managed conversation admission is unavailable")
+	ErrNotFound      = errors.New("managed conversation not found")
+	ErrRevision      = errors.New("managed conversation revision is stale")
+	ErrBusy          = errors.New("managed conversation launch settings can change only while idle")
+	ErrUnavailable   = errors.New("managed conversation admission is unavailable")
+	ErrDeletionOwned = errors.New("managed deletion has another invocation owner")
 )
 
 const (

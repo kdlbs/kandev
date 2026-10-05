@@ -41,4 +41,6 @@ Model discovery, vendor credential/configuration migrations, hot-swapping sessio
 
 ## Design and implementation
 
+The [availability summary requirements](runtime-update-summary.md) extend startup and reconnect delivery under REQ-AGENTS-RUNTIME-NOTIFY-003.
+
 See [runtime update notifications design](../system-design/runtime-update-notifications.md), [original delivery plan](../../../plans/agent-runtime-notifications/plan.md), and [compact settings follow-up plan](../../../plans/agent-runtime-settings-compact/plan.md), and [floating indicator removal plan](../../../plans/remove-agent-runtime-update-indicator/plan.md).
