@@ -26,6 +26,15 @@ func (a *Adapter) handlePermissionRequest(ctx context.Context, req *PermissionRe
 	if sessionID == fallbackSessionID {
 		a.poisonContinuationSafety()
 	}
+	turn := a.currentPromptTurn()
+	var capacityPermissionTracked bool
+	if sessionID == fallbackSessionID {
+		a.capacityPermissionStarted(turn, req.ToolCallID)
+		capacityPermissionTracked = true
+	}
+	if capacityPermissionTracked {
+		defer a.capacityPermissionFinished(turn)
+	}
 
 	// Only emit a synthetic tool_call event if no ToolCall notification preceded this.
 	// waitForActiveToolCall bounds the race window between a SessionUpdate.ToolCall

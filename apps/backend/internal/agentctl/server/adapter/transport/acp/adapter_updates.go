@@ -166,6 +166,7 @@ func (a *Adapter) handleACPUpdate(
 	}
 
 	a.observeContinuationSafety(n, promptGeneration)
+	a.observeCapacityContinuation(n, promptGeneration)
 
 	// Marshal once for both debug logging and tracing.
 	rawData, _ := json.Marshal(n)

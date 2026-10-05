@@ -6167,6 +6167,9 @@ type promptTaskOptions struct {
 	afterDispatch        func() error
 	// beforeDispatch runs once before the final dispatch admission boundary.
 	beforeDispatch func() error
+	// onProviderAdmission runs after the executor's final admission checks and
+	// immediately before it calls the provider with the prompt.
+	onProviderAdmission func()
 	// afterDispatchAdmission runs once after final dispatch admission succeeds
 	// and before the first provider or model-switch I/O that can carry the
 	// prompt. Queue receipts use this boundary because admission can reject a
@@ -6176,7 +6179,11 @@ type promptTaskOptions struct {
 	preservePromptContext  bool
 	// reserveTurnUntilDispatch persists detached-resume ownership before agentctl
 	// dispatch, while delaying the visible turn.started event until acceptance.
-	reserveTurnUntilDispatch  bool
+	reserveTurnUntilDispatch bool
+	// liveExecutionFence disables lazy resume and binds dispatch to the current
+	// execution and native conversation. Capacity continuation uses it because
+	// completed effects cannot authorize a runtime restore.
+	liveExecutionFence        *promptTaskLiveExecutionFence
 	promptDispatchRecovery    *models.PromptDispatchRecovery
 	expectedCurrentTurnID     string
 	requireNonterminalSession bool
@@ -6236,6 +6243,13 @@ type promptCancellationFence struct {
 	// A completed cancellation changes the projection revision, so an unlocked
 	// model switch cannot admit a prompt captured before that cancellation.
 	revision uint64
+}
+
+type promptTaskLiveExecutionFence struct {
+	executionID    string
+	nativeID       string
+	identity       [32]byte
+	workflowStepID string
 }
 
 type promptDispatchOutcome struct {
@@ -6364,9 +6378,19 @@ func (s *Service) promptTask(ctx context.Context, taskID, sessionID string, prom
 	// After a lazy backend restart the session may be WAITING_FOR_INPUT with no agent process yet.
 	_, hadExecutionBeforeEnsure := s.executor.GetExecutionBySession(sessionID)
 	resumedForPrompt := options.resumeAttempt != nil || !hadExecutionBeforeEnsure
-	resumeAttempt, finishResumeAttempt, resumePromptCtx, err := s.resolveAndAdmitResumeAttempt(
-		ctx, taskID, sessionID, prompt, model, planMode, attachments, dispatchOnly, origin, options, session, foregroundClaim,
-	)
+	var resumeAttempt *resumeAttempt
+	var finishResumeAttempt func()
+	resumePromptCtx := ctx
+	if options.liveExecutionFence != nil {
+		if err := s.validatePromptLiveExecutionFence(ctx, taskID, sessionID, options.liveExecutionFence); err != nil {
+			s.releaseForegroundClaimOnFailure(ctx, taskID, sessionID, foregroundClaim)
+			return nil, err
+		}
+	} else {
+		resumeAttempt, finishResumeAttempt, resumePromptCtx, err = s.resolveAndAdmitResumeAttempt(
+			ctx, taskID, sessionID, prompt, model, planMode, attachments, dispatchOnly, origin, options, session, foregroundClaim,
+		)
+	}
 	if finishResumeAttempt != nil {
 		defer finishResumeAttempt()
 	}
@@ -6587,22 +6611,39 @@ func (s *Service) preparePromptAdmissionCallback(
 	resumeAttempt *resumeAttempt,
 ) func() error {
 	guard := rollback.dispatchGuard
-	if guard == nil {
+	if guard == nil && options.liveExecutionFence == nil {
 		return nil
 	}
 	// Prompt preparation may synchronously publish stream events, so it runs
 	// without the session guard. The returned callback reacquires that guard
 	// immediately before provider admission and revalidates ownership.
-	guard.unlock()
+	if guard != nil {
+		guard.unlock()
+	}
 	return func() error {
-		if err := guard.relockWithContext(ctx); err != nil {
-			return markPromptAdmissionRejected(err)
+		if guard != nil {
+			if err := guard.relockWithContext(ctx); err != nil {
+				return markPromptAdmissionRejected(err)
+			}
 		}
-		if err := s.validatePromptDispatchOwnership(
-			ctx, taskID, sessionID, session, rollback, options, resumeAttempt,
-		); err != nil {
-			guard.unlock()
-			return markPromptAdmissionRejected(err)
+		if guard != nil {
+			if err := s.validatePromptDispatchOwnership(
+				ctx, taskID, sessionID, session, rollback, options, resumeAttempt,
+			); err != nil {
+				guard.unlock()
+				return markPromptAdmissionRejected(err)
+			}
+		}
+		if options.liveExecutionFence != nil {
+			if err := s.validatePromptLiveExecutionFence(ctx, taskID, sessionID, options.liveExecutionFence); err != nil {
+				if guard != nil {
+					guard.unlock()
+				}
+				return markPromptAdmissionRejected(err)
+			}
+		}
+		if options.onProviderAdmission != nil {
+			options.onProviderAdmission()
 		}
 		return nil
 	}

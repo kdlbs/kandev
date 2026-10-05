@@ -75,6 +75,9 @@ func TestCodexCapacityKeepsACPConnectionForNextPrompt(t *testing.T) {
 	if failure.PromptFailureDisposition != streams.PromptFailureDispositionRetainRuntime {
 		t.Fatalf("failure disposition = %q, want retain_runtime", failure.PromptFailureDisposition)
 	}
+	if failure.CapacityContinuation == nil || !failure.CapacityContinuation.SafeFor(41) {
+		t.Fatalf("capacity continuation evidence = %+v, want safe generation 41", failure.CapacityContinuation)
+	}
 
 	if err := a.Prompt(ctx, "follow-up prompt", nil, 42); err != nil {
 		t.Fatalf("follow-up prompt returned error: %v", err)

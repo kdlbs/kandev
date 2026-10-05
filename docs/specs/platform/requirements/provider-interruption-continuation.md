@@ -25,6 +25,10 @@ Continuation permits output or confirmed read-only work. Writes and uncertain
 tool outcomes require manual recovery. The user requires the current Cursor ACP
 session ID; accepting recovery does not authorize repeated side effects.
 
+These restrictions govern transport-loss continuation and native restoration.
+The separate [capacity contract](transient-turn-runtime-continuity.md#req-platform-turn-continuity-003-continue-after-model-capacity-errors) permits completed effects on the same usable runtime.
+It does not authorize restoration or original-prompt replay after those effects.
+
 ## Terminology
 
 - **Replay:** Resend the original user prompt following a failed attempt.

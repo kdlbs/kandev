@@ -334,4 +334,7 @@ func TestReplayFixtureRetainedCapacityUsesMarkedRequestError(t *testing.T) {
 		terminal.ProviderError.RPCCode != -32603 {
 		t.Fatalf("terminal provider error = %+v, want the marked ACP prompt error", terminal.ProviderError)
 	}
+	if terminal.CapacityContinuation == nil || !terminal.CapacityContinuation.SafeFor(fx.Identity.PromptGeneration) {
+		t.Fatalf("capacity continuation evidence = %+v, want safe generation %d", terminal.CapacityContinuation, fx.Identity.PromptGeneration)
+	}
 }

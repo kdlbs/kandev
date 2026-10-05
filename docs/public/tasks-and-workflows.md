@@ -527,6 +527,15 @@ An interrupted task keeps a warning indicator until the agent confirms
 recovery. Opening the task or starting a recovery attempt does not clear the
 indicator; a failed attempt keeps it visible with the existing retry actions.
 
+When a supported provider reports that its model is at capacity after every
+tool call has a confirmed result, Kandev can continue the unfinished request
+in the same live conversation after the normal retry delay. Completed actions
+remain in place and are not repeated. The inline notice shows the attempt
+count and lets you cancel while Kandev waits. Kandev leaves the error for you
+to handle when a tool or permission is still pending, an outcome is uncertain,
+the provider does not support live continuation, or the runtime is no longer
+usable. The composer remains available for a new message.
+
 ## Answer clarification questions
 
 When an agent asks a clarification question, answer it from the question panel

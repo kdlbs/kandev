@@ -4,6 +4,9 @@
 **Date:** 2026-10-02
 **Area:** backend, frontend, protocol
 
+The [capacity continuation amendment](2026-10-05-capacity-continuation-after-completed-tools.md) adds a narrow exception for completed effects on the same usable runtime.
+This decision retains authority over transport-loss continuation and native restoration.
+
 ## Context
 
 Cursor emits a terminal transient diagnostic after a network interruption even

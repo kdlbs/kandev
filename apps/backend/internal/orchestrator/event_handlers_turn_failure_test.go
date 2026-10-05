@@ -317,9 +317,16 @@ func TestAgentTurnFailedRoutesAutomationOriginsToTerminalFailureOwner(t *testing
 				StartedAt: now, UpdatedAt: now,
 			}))
 			seedExecutorRunning(t, repo, "s-auto", "t-auto", "exec-auto")
+			session, err := repo.GetTaskSession(ctx, "s-auto")
+			require.NoError(t, err)
+			session.AgentProfileID = "profile-codex"
+			session.AgentProfileSnapshot = map[string]any{"model": "gpt-5-codex"}
+			session.DownstreamACPSessionID = "provider-session"
+			require.NoError(t, repo.UpdateTaskSession(ctx, session))
 
 			agentManager := &mockAgentManager{isAgentRunning: true}
 			svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentManager)
+			t.Cleanup(svc.cancelAllTransientRetries)
 			svc.executor = agentexecutor.NewExecutor(agentManager, repo, testLogger(), agentexecutor.ExecutorConfig{})
 			messageCreator := &mockMessageCreator{}
 			svc.messageCreator = messageCreator
@@ -349,6 +356,10 @@ func TestAgentTurnFailedRoutesAutomationOriginsToTerminalFailureOwner(t *testing
 			data.AgentExecutionID = "exec-auto"
 			data.PromptGeneration = 9
 			data.TurnID = "turn-auto"
+			data.CapacityContinuation = &streams.CapacityContinuationSnapshot{
+				Support: streams.CapacityContinuationCodexLiveSessionV1, PromptGeneration: 9,
+				EvidenceComplete: true, CompletedTools: 1,
+			}
 			svc.handleAgentTurnFailed(ctx, data)
 
 			switch automation := runService.(type) {
@@ -379,6 +390,42 @@ func TestAgentTurnFailedRoutesAutomationOriginsToTerminalFailureOwner(t *testing
 			}
 		})
 	}
+}
+
+func TestAutomationOwnedCapacityFailureBeforeEffectsKeepsReplayPolicy(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedAutomationTask(t, repo, "t-auto", models.TaskOriginAutomationRun, false)
+	now := time.Now().UTC()
+	require.NoError(t, repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID: "s-auto", TaskID: "t-auto", State: models.TaskSessionStateRunning,
+		StartedAt: now, UpdatedAt: now,
+	}))
+	seedExecutorRunning(t, repo, "s-auto", "t-auto", "exec-auto")
+	agentManager := &mockAgentManager{isAgentRunning: true}
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentManager)
+	t.Cleanup(svc.cancelAllTransientRetries)
+	svc.executor = agentexecutor.NewExecutor(agentManager, repo, testLogger(), agentexecutor.ExecutorConfig{})
+	svc.SetAutomationService(&mockAutomationRunService{})
+	svc.beginPromptAttempt("s-auto", "exec-auto", 9, false)
+
+	data := retainedTurnFailureData()
+	data.TaskID = "t-auto"
+	data.SessionID = "s-auto"
+	data.AgentExecutionID = "exec-auto"
+	data.PromptGeneration = 9
+	data.OutputObserved = false
+	data.EffectObserved = false
+	data.PromptFailureDisposition = ""
+	data.CapacityContinuation = nil
+	svc.handleAgentFailed(ctx, data)
+
+	value, owned := svc.transientRetries.Load("s-auto")
+	require.True(t, owned, "automation's pre-result capacity retry remains eligible")
+	entry := value.(*transientRetryEntry)
+	t.Cleanup(entry.cancel)
+	require.Equal(t, recoveryModeReplay, entry.mode)
+	require.Nil(t, entry.continuation)
 }
 
 func TestAgentTurnFailedRoutesOfficeTasksToTerminalFailureOwner(t *testing.T) {

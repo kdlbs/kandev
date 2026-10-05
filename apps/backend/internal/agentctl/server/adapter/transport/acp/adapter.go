@@ -360,24 +360,28 @@ type Adapter struct {
 
 // promptTurnState holds synchronization for one in-flight session/prompt RPC.
 type promptTurnState struct {
-	endTurn            context.CancelCauseFunc
-	rpcDone            chan struct{}
-	abortCh            chan struct{}
-	handoffCh          chan struct{}
-	providerErrorCh    chan openCodeStderrDiagnostic
-	promptGeneration   uint64
-	evidenceMu         sync.Mutex
-	codexSystemError   bool
-	codexCapacity      bool
-	codexUsageLimit    *streams.ProviderError
-	cursorRetriable    bool
-	cursorRetriableAt  time.Time
-	continuationTools  map[string]bool
-	continuationUnsafe bool
-	allowHandoff       bool
-	handedOff          bool
-	gateOwned          bool
-	finishing          bool
+	endTurn             context.CancelCauseFunc
+	rpcDone             chan struct{}
+	abortCh             chan struct{}
+	handoffCh           chan struct{}
+	providerErrorCh     chan openCodeStderrDiagnostic
+	promptGeneration    uint64
+	evidenceMu          sync.Mutex
+	codexSystemError    bool
+	codexCapacity       bool
+	codexUsageLimit     *streams.ProviderError
+	cursorRetriable     bool
+	cursorRetriableAt   time.Time
+	continuationTools   map[string]bool
+	continuationUnsafe  bool
+	capacityTools       map[string]capacityToolEvidence
+	capacityUnknown     bool
+	capacityBackground  bool
+	capacityPermissions int
+	allowHandoff        bool
+	handedOff           bool
+	gateOwned           bool
+	finishing           bool
 }
 
 func (t *promptTurnState) observeCodexEvidence(systemError, capacity bool) {
