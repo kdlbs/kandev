@@ -623,7 +623,7 @@ func (l *Launcher) waitForHealthy(ctx context.Context) error {
 func (l *Launcher) pipeOutput(name string, scanner *bufio.Scanner) {
 	for scanner.Scan() {
 		line := scanner.Text()
-		level := childLogLevel(line)
+		level, message := childLogRecord(line)
 		if level == "" {
 			// An unrecognized line means different things per stream: on stderr
 			// it is a panic or traceback that must stay visible, on stdout it is
@@ -637,13 +637,13 @@ func (l *Launcher) pipeOutput(name string, scanner *bufio.Scanner) {
 		}
 		switch level {
 		case "DEBUG":
-			l.logger.Debug(line, zap.String("stream", name))
+			l.logger.Debug(message, zap.String("stream", name))
 		case "INFO":
-			l.logger.Info(line, zap.String("stream", name))
+			l.logger.Info(message, zap.String("stream", name))
 		case "ERROR", "FATAL", "PANIC", "DPANIC":
-			l.logger.Error(line, zap.String("stream", name))
+			l.logger.Error(message, zap.String("stream", name))
 		default:
-			l.logger.Warn(line, zap.String("stream", name))
+			l.logger.Warn(message, zap.String("stream", name))
 		}
 	}
 }
@@ -652,14 +652,22 @@ func (l *Launcher) pipeOutput(name string, scanner *bufio.Scanner) {
 // structured log formats. It returns the uppercased level ("INFO"/"WARN"/…)
 // or "" when the line does not match one of those formats.
 func childLogLevel(line string) string {
-	if level := childJSONLogLevel(line); level != "" {
-		return level
-	}
+	level, _ := childLogRecord(line)
+	return level
+}
 
-	// A well-formed console record is "<ts>\t<LEVEL>\t<caller>\t<msg>", so the
-	// level token must be bounded by at least a following caller field. Requiring
-	// three segments rejects truncated lines (e.g. "<ts>\t<token>") whose second
-	// field is not actually a level, so they fall back to WARN.
+func childLogRecord(line string) (string, string) {
+	if level, sanitized, ok := childJSONLogRecord(line); ok {
+		return level, sanitized
+	}
+	return childTextLogLevel(line), line
+}
+
+// A well-formed console record is "<ts>\t<LEVEL>\t<caller>\t<msg>", so the
+// level token must be bounded by at least a following caller field. Requiring
+// three segments rejects truncated lines (e.g. "<ts>\t<token>") whose second
+// field is not actually a level, so they fall back to WARN.
+func childTextLogLevel(line string) string {
 	fields := strings.SplitN(line, "\t", 4)
 	if len(fields) >= 3 {
 		if level := recognizedChildLogLevel(stripANSI(fields[1])); level != "" {
@@ -693,22 +701,42 @@ const (
 )
 
 func childJSONLogLevel(line string) string {
+	level, _, _ := childJSONLogRecord(line)
+	return level
+}
+
+func childJSONLogRecord(line string) (string, string, bool) {
 	values, ok := childJSONLogEnvelope(line)
 	if !ok {
-		return ""
+		return "", "", false
 	}
 
-	level, levelOK := childJSONString(values[childJSONLevelField])
+	declaredLevel, levelOK := childJSONString(values[childJSONLevelField])
 	timestamp, timestampOK := childJSONString(values[childJSONTimestampField])
 	caller, callerOK := childJSONString(values[childJSONCallerField])
-	_, messageOK := childJSONString(values[childJSONMessageField])
+	message, messageOK := childJSONString(values[childJSONMessageField])
 	if !levelOK || !timestampOK || !callerOK || !messageOK || strings.TrimSpace(caller) == "" {
-		return ""
+		return "", "", false
 	}
 	if !validChildJSONLogTimestamp(timestamp) {
-		return ""
+		return "", "", false
 	}
-	return recognizedChildLogLevel(level)
+	level := recognizedChildLogLevel(declaredLevel)
+	if level == "" {
+		return "", "", false
+	}
+	encoded, err := json.Marshal(struct {
+		Level     string `json:"level"`
+		Timestamp string `json:"timestamp"`
+		Caller    string `json:"caller"`
+		Message   string `json:"msg"`
+	}{
+		Level: declaredLevel, Timestamp: timestamp, Caller: caller, Message: message,
+	})
+	if err != nil {
+		return "", "", false
+	}
+	return level, string(encoded), true
 }
 
 func childJSONLogEnvelope(line string) ([4]json.RawMessage, bool) {

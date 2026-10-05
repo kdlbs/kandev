@@ -49,7 +49,7 @@ Run this block from the repository root after the implementation result exists.
 New test names below are required planned regressions, not claims of existing coverage.
 
 ```bash
-(cd apps/backend && go test -trimpath -tags fts5 -race ./internal/persistence/requiredstores ./internal/backendapp -run 'Test(RuntimeHealth|HealthCheck|ProbeTables|RequiredPersistence|PersistenceMiddleware)' -count=1)
+(cd apps/backend && go test -trimpath -tags fts5 -race ./internal/persistence/requiredstores ./internal/backendapp -run 'Test(RuntimeHealth|StartupHealth|HealthCheck|ProbeTables|RequiredPersistence|PersistenceMiddleware)' -count=1)
 (cd apps/backend && go test -trimpath -tags fts5 ./internal/persistence/requiredstores -run '^TestPersistenceContentionFixture$' -count=1 -v)
 ```
 
@@ -90,6 +90,6 @@ Cause remains unresolved. The new disposable fixture reproduced writer and reade
 Verification passed:
 
 - `go test -trimpath -tags fts5 ./internal/persistence/requiredstores -run '^TestPersistenceContentionFixture$' -count=1 -v`
-- `go test -trimpath -tags fts5 -race ./internal/persistence/requiredstores ./internal/backendapp -run 'Test(RuntimeHealth|HealthCheck|ProbeTables|RequiredPersistence|PersistenceMiddleware)' -count=1`
+- `go test -trimpath -tags fts5 -race ./internal/persistence/requiredstores ./internal/backendapp -run 'Test(RuntimeHealth|StartupHealth|HealthCheck|ProbeTables|RequiredPersistence|PersistenceMiddleware)' -count=1`
 
 See [persistence evidence](persistence-evidence.md) for the retained diagnostic values and the next bounded experiment. No production behavior changed.

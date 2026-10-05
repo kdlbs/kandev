@@ -1617,7 +1617,7 @@ func unavailableGitStatusResult(err error) GitStatusResult {
 
 func (s *Server) logGitStatusCaptureFailure(err error) {
 	if process.IsGitStatusEvidenceChanged(err) {
-		s.logger.Warn("git status remained unstable after one corrective capture",
+		s.logger.Warn("git status capture failed due to changing repository evidence",
 			zap.String("error_class", "evidence_changed"))
 	}
 }

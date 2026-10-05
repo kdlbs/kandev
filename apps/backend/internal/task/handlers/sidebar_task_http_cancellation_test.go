@@ -2,7 +2,9 @@ package handlers
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -197,6 +199,15 @@ type sidebarCancellationActivityReader struct {
 	cancel context.CancelFunc
 }
 
+type cancelDuringSidebarBodyRead struct {
+	cancel context.CancelFunc
+}
+
+func (r cancelDuringSidebarBodyRead) Read([]byte) (int, error) {
+	r.cancel()
+	return 0, errors.New("request body read interrupted")
+}
+
 func (r *sidebarCancellationActivityReader) LoadTaskLastActivity(
 	_ context.Context,
 	taskIDs []string,
@@ -328,6 +339,51 @@ func TestSidebarQueryCancellationReturns499AndAllowsSuccessfulSuccessor(t *testi
 	require.Contains(t, second.Body.String(), `"query_key":"sidebar-key"`)
 	require.Contains(t, second.Body.String(), `"title":"Mine"`)
 	require.Equal(t, v1.TaskStateTODO, repo.page.Tasks[0].State)
+}
+
+func TestSidebarQueryBodyCancellationWinsOverMalformedBody(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	core, observed := observer.New(zapcore.DebugLevel)
+	log, err := logger.NewFromZap(zap.New(core))
+	require.NoError(t, err)
+	repo := &sidebarCancellationRepo{}
+	h := newSidebarCancellationHandlers(t, repo, nil, log)
+	router := gin.New()
+	router.POST("/api/v1/workspaces/:id/sidebar/query", h.httpQuerySidebarTasks)
+	ctx, cancel := context.WithCancel(context.Background())
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/workspaces/ws-b/sidebar/query", nil).WithContext(ctx)
+	request.Body = io.NopCloser(cancelDuringSidebarBodyRead{cancel: cancel})
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+
+	require.Equal(t, 499, response.Code)
+	require.Empty(t, response.Body.String())
+	require.Zero(t, repo.queryCalls)
+	require.Zero(t, observed.FilterLevelExact(zapcore.WarnLevel).Len())
+	require.Zero(t, observed.FilterLevelExact(zapcore.ErrorLevel).Len())
+}
+
+func TestSidebarQueryCancellationStillLogsConcurrentRepositoryFailure(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	core, observed := observer.New(zapcore.DebugLevel)
+	log, err := logger.NewFromZap(zap.New(core))
+	require.NoError(t, err)
+	repo := &sidebarCancellationRepo{}
+	h := newSidebarCancellationHandlers(t, repo, nil, log)
+	router := gin.New()
+	router.POST("/api/v1/workspaces/:id/sidebar/query", h.httpQuerySidebarTasks)
+	ctx, cancel := context.WithCancel(context.Background())
+	repo.onQuery = func(context.Context) (*models.SidebarTaskPageResult, error) {
+		cancel()
+		return nil, errors.New("database busy")
+	}
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/workspaces/ws-b/sidebar/query", strings.NewReader(`{"locale":"en"}`)).WithContext(ctx)
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+
+	require.Equal(t, 499, response.Code)
+	require.Empty(t, response.Body.String())
+	require.Equal(t, 1, observed.FilterLevelExact(zapcore.ErrorLevel).Len())
 }
 
 func TestSidebarEnrichmentCancellationStopsOptionalReads(t *testing.T) {

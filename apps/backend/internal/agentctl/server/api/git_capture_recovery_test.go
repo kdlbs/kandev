@@ -70,7 +70,7 @@ func TestGitStatusHTTPWarnsOnceAfterContinuousCaptureChanges(t *testing.T) {
 	if got := statusCalls(); got != 2 {
 		t.Fatalf("tracked status invocations = %d, want two bounded basic captures", got)
 	}
-	warnings := observed.FilterMessage("git status remained unstable after one corrective capture").FilterLevelExact(zapcore.WarnLevel)
+	warnings := observed.FilterMessage("git status capture failed due to changing repository evidence").FilterLevelExact(zapcore.WarnLevel)
 	if warnings.Len() != 1 {
 		t.Fatalf("unstable capture warnings = %d, want one", warnings.Len())
 	}
@@ -95,7 +95,13 @@ func TestGitStatusMultiRetriesOnlyTheRepositoryWithChangedEvidence(t *testing.T)
 	if err := json.Unmarshal(rec.Body.Bytes(), &result); err != nil {
 		t.Fatalf("decode multi status response: %v", err)
 	}
-	statuses := statusesByRepo(t, result, repoNames)
+	statuses := make(map[string]GitStatusResult, len(result.Repos))
+	for _, repoStatus := range result.Repos {
+		statuses[repoStatus.RepositoryName] = repoStatus.Status
+	}
+	if len(statuses) != len(repoNames) {
+		t.Fatalf("multi-repository status count = %d, want %d", len(statuses), len(repoNames))
+	}
 	for _, repoName := range repoNames {
 		status := statuses[repoName]
 		if !status.Success || status.StatusState != "ready" || status.DetailState != "ready" {

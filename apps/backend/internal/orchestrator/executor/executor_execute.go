@@ -2988,7 +2988,9 @@ func (e *Executor) captureBaseCommit(ctx context.Context, sessionID string) {
 	if status == nil {
 		return
 	}
-	if !status.Success || !status.FilesComplete || status.DetailState != "ready" {
+	legacySuccessfulStatus := status.StatusState == "" && !status.FilesComplete && status.DetailState == ""
+	completeStatus := status.StatusState == "ready" && status.FilesComplete && status.DetailState == "ready"
+	if !status.Success || (!legacySuccessfulStatus && !completeStatus) {
 		e.logger.Debug("incomplete Git status cannot establish a session base commit",
 			zap.String("session_id", sessionID),
 			zap.String("status_state", status.StatusState),

@@ -34,11 +34,14 @@ func TestWorkspaceTrackerGitStatusCaptureRecoveryRetriesOneEvidenceChange(t *tes
 	t.Cleanup(tracker.Stop)
 	var captureCount atomic.Int32
 	var classes []subproc.GitWorkClass
+	mutationErrors := make(chan error, 2)
 	tracker.gitStatusBetweenQueries = func(ctx context.Context) {
 		classes = append(classes, gitWorkClass(ctx))
 		if captureCount.Add(1) == 1 {
-			runGit(t, repoDir, "add", "capture-retry.txt")
+			mutationErrors <- runGitCaptureMutation(repoDir, "add", "capture-retry.txt")
+			return
 		}
+		mutationErrors <- nil
 	}
 
 	status, err := tracker.GetGitStatusWithDetails(context.Background(), true)
@@ -48,6 +51,7 @@ func TestWorkspaceTrackerGitStatusCaptureRecoveryRetriesOneEvidenceChange(t *tes
 	if got := captureCount.Load(); got != 2 {
 		t.Fatalf("basic captures = %d, want one failed capture and one correction", got)
 	}
+	assertGitCaptureMutationErrors(t, mutationErrors, int(captureCount.Load()))
 	if len(classes) != 2 || classes[0] != subproc.GitInteractive || classes[1] != classes[0] {
 		t.Fatalf("capture admission classes = %v, want the same interactive class", classes)
 	}
@@ -72,10 +76,14 @@ func TestWorkspaceTrackerGitStatusCaptureRecoveryBoundsContinuousEvidenceChanges
 	tracker := NewWorkspaceTracker(repoDir, newTestLogger(t))
 	t.Cleanup(tracker.Stop)
 	var captureCount atomic.Int32
+	mutationErrors := make(chan error, 2)
 	tracker.gitStatusBetweenQueries = func(context.Context) {
 		attempt := captureCount.Add(1)
-		writeFile(t, repoDir, "capture-churn.txt", fmt.Sprintf("mutation-%d\n", attempt))
-		runGit(t, repoDir, "add", "capture-churn.txt")
+		err := writeGitCaptureMutationFile(repoDir, "capture-churn.txt", fmt.Sprintf("mutation-%d\n", attempt))
+		if err == nil {
+			err = runGitCaptureMutation(repoDir, "add", "capture-churn.txt")
+		}
+		mutationErrors <- err
 	}
 
 	status, err := tracker.GetGitStatusWithDetails(context.Background(), true)
@@ -85,6 +93,7 @@ func TestWorkspaceTrackerGitStatusCaptureRecoveryBoundsContinuousEvidenceChanges
 	if got := captureCount.Load(); got != 2 {
 		t.Fatalf("basic captures = %d, want exactly two", got)
 	}
+	assertGitCaptureMutationErrors(t, mutationErrors, int(captureCount.Load()))
 	if status.StatusState == gitStatusStateReady || tracker.currentGitStatus().StatusState == gitStatusStateReady {
 		t.Fatalf("unstable capture became ready: returned=%+v current=%+v", status, tracker.currentGitStatus())
 	}
@@ -99,10 +108,13 @@ func TestWorkspaceTrackerGitStatusCaptureRecoveryUsesReplacementIdentity(t *test
 	tracker := NewWorkspaceTracker(repoDir, newTestLogger(t))
 	t.Cleanup(tracker.Stop)
 	var captureCount atomic.Int32
+	mutationErrors := make(chan error, 2)
 	tracker.gitStatusBetweenQueries = func(context.Context) {
 		if captureCount.Add(1) == 1 {
-			runGit(t, repoDir, "checkout", "-b", "capture-replacement")
+			mutationErrors <- runGitCaptureMutation(repoDir, "checkout", "-b", "capture-replacement")
+			return
 		}
+		mutationErrors <- nil
 	}
 
 	status, err := tracker.GetGitStatusWithDetails(context.Background(), true)
@@ -112,6 +124,7 @@ func TestWorkspaceTrackerGitStatusCaptureRecoveryUsesReplacementIdentity(t *test
 	if got := captureCount.Load(); got != 2 {
 		t.Fatalf("basic captures = %d, want one failed capture and one correction", got)
 	}
+	assertGitCaptureMutationErrors(t, mutationErrors, int(captureCount.Load()))
 	if status.Branch != "capture-replacement" || status.HeadCommit != initialHead {
 		t.Fatalf("recovered identity = branch %q, head %q; want replacement branch at %q", status.Branch, status.HeadCommit, initialHead)
 	}
@@ -131,12 +144,15 @@ func TestWorkspaceTrackerGitStatusCaptureRecoverySharesWaiters(t *testing.T) {
 	var captureCount atomic.Int32
 	var waiterCount atomic.Int32
 	var releaseOnce sync.Once
+	mutationErrors := make(chan error, 2)
 	tracker.gitStatusBetweenQueries = func(context.Context) {
 		if captureCount.Add(1) == 1 {
 			close(entered)
 			<-release
-			runGit(t, repoDir, "add", "shared-retry.txt")
+			mutationErrors <- runGitCaptureMutation(repoDir, "add", "shared-retry.txt")
+			return
 		}
+		mutationErrors <- nil
 	}
 	tracker.gitStatusWaiterJoined = func() {
 		if waiterCount.Add(1) == 2 {
@@ -174,6 +190,7 @@ func TestWorkspaceTrackerGitStatusCaptureRecoverySharesWaiters(t *testing.T) {
 	if got := captureCount.Load(); got != 2 {
 		t.Fatalf("basic captures = %d, want one shared correction", got)
 	}
+	assertGitCaptureMutationErrors(t, mutationErrors, int(captureCount.Load()))
 	assertNoIndexSnapshots(t, filepath.Dir(tracker.gitIndexPath))
 }
 
@@ -187,16 +204,18 @@ func TestWorkspaceTrackerGitStatusCaptureRecoveryKeepsSharedDeadline(t *testing.
 	tracker.gitStatusObserveTimeout = 2 * time.Second
 	var captureCount atomic.Int32
 	var deadlines [2]time.Time
+	mutationErrors := make(chan error, 2)
 	tracker.gitStatusBetweenQueries = func(ctx context.Context) {
 		attempt := captureCount.Add(1)
 		if deadline, ok := ctx.Deadline(); ok {
 			deadlines[attempt-1] = deadline
 		}
 		if attempt == 1 {
-			runGit(t, repoDir, "add", "deadline-retry.txt")
+			mutationErrors <- runGitCaptureMutation(repoDir, "add", "deadline-retry.txt")
 			return
 		}
 		<-ctx.Done()
+		mutationErrors <- nil
 	}
 
 	status, err := tracker.GetGitStatusWithDetails(context.Background(), true)
@@ -206,6 +225,7 @@ func TestWorkspaceTrackerGitStatusCaptureRecoveryKeepsSharedDeadline(t *testing.
 	if got := captureCount.Load(); got != 2 {
 		t.Fatalf("basic captures = %d, want the initial and one corrective capture", got)
 	}
+	assertGitCaptureMutationErrors(t, mutationErrors, int(captureCount.Load()))
 	if deadlines[0].IsZero() || !deadlines[0].Equal(deadlines[1]) {
 		t.Fatalf("capture deadlines = %v and %v, want one shared deadline", deadlines[0], deadlines[1])
 	}
@@ -226,11 +246,12 @@ func TestWorkspaceTrackerGitStatusCaptureRecoveryStopsOnShutdown(t *testing.T) {
 	release := make(chan struct{})
 	var captureCount atomic.Int32
 	var releaseOnce sync.Once
+	mutationErrors := make(chan error, 1)
 	tracker.gitStatusBetweenQueries = func(context.Context) {
 		captureCount.Add(1)
 		close(entered)
 		<-release
-		runGit(t, repoDir, "add", "shutdown-retry.txt")
+		mutationErrors <- runGitCaptureMutation(repoDir, "add", "shutdown-retry.txt")
 	}
 	defer releaseOnce.Do(func() { close(release) })
 	resultCh := make(chan error, 1)
@@ -253,10 +274,33 @@ func TestWorkspaceTrackerGitStatusCaptureRecoveryStopsOnShutdown(t *testing.T) {
 	if got := captureCount.Load(); got != 1 {
 		t.Fatalf("basic capture barriers = %d, want no corrective capture after shutdown", got)
 	}
+	assertGitCaptureMutationErrors(t, mutationErrors, int(captureCount.Load()))
 	if tracker.currentGitStatus().StatusState == gitStatusStateReady {
 		t.Fatal("shutdown capture published a ready status")
 	}
 	assertNoIndexSnapshots(t, filepath.Dir(tracker.gitIndexPath))
+}
+
+func runGitCaptureMutation(repoDir string, args ...string) error {
+	commandArgs := append([]string{"-C", repoDir}, args...)
+	output, err := exec.Command("git", commandArgs...).CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("git %s: %w: %s", strings.Join(args, " "), err, strings.TrimSpace(string(output)))
+	}
+	return nil
+}
+
+func writeGitCaptureMutationFile(repoDir, path, content string) error {
+	return os.WriteFile(filepath.Join(repoDir, path), []byte(content), 0o600)
+}
+
+func assertGitCaptureMutationErrors(t *testing.T, results <-chan error, count int) {
+	t.Helper()
+	for range count {
+		if err := <-results; err != nil {
+			t.Fatalf("test mutation failed: %v", err)
+		}
+	}
 }
 
 // @covers AC-PLATFORM-GIT-CAPTURE-RECOVERY-001.4

@@ -28,6 +28,7 @@ The existing [severity contract](expected-runtime-log-severity.md) and [logging 
   A level word inside message content shall not determine severity.
 - **AC-PLATFORM-DIAGNOSTIC-SIGNAL-001.3:** Existing console and slog records shall retain their severity.
   Forwarding shall not convert a fatal child record into parent-process termination.
+- **AC-PLATFORM-DIAGNOSTIC-SIGNAL-001.4:** A recognized agentctl JSON record shall be forwarded using only its `level`, `timestamp`, `caller`, and `msg` envelope fields. Duplicate additional fields shall not invalidate recognition, and additional child fields shall not enter parent logs.
 
 ### REQ-PLATFORM-DIAGNOSTIC-SIGNAL-002: Quiet routine diagnostics
 

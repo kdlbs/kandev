@@ -50,6 +50,9 @@ type sidebarTaskPageEntryResponse struct {
 
 func (h *TaskHandlers) httpQuerySidebarTasks(c *gin.Context) {
 	query, malformed, validationErr := decodeSidebarTaskQuery(c)
+	if abortSidebarRequestIfCanceled(c) {
+		return
+	}
 	if malformed {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid sidebar query", "error_code": "sidebar_query_invalid",
 			"details": gin.H{"reason": "malformed_query"}})
@@ -69,7 +72,7 @@ func (h *TaskHandlers) httpQuerySidebarTasks(c *gin.Context) {
 	if h.sidebarSettingsReader != nil {
 		settings, err := h.sidebarSettingsReader.GetUserSettings(c.Request.Context())
 		if err != nil {
-			if abortSidebarRequestIfCanceled(c) {
+			if h.abortSidebarRequestAfterRead(c, "failed to read sidebar task preferences", err) {
 				return
 			}
 			h.logger.Error("failed to read sidebar task preferences", zap.Error(err))
@@ -89,7 +92,7 @@ func (h *TaskHandlers) httpQuerySidebarTasks(c *gin.Context) {
 	}
 
 	page, err := h.service.QuerySidebarTaskPage(c.Request.Context(), c.Param("id"), query, prefs)
-	if abortSidebarRequestIfCanceled(c) {
+	if h.abortSidebarRequestAfterRead(c, "sidebar task query failed", err) {
 		return
 	}
 	if err != nil {
@@ -107,7 +110,7 @@ func (h *TaskHandlers) httpQuerySidebarTasks(c *gin.Context) {
 		return
 	}
 	response, err := h.sidebarTaskPageResponse(c, page)
-	if abortSidebarRequestIfCanceled(c) {
+	if h.abortSidebarRequestAfterRead(c, "failed to enrich sidebar task page", err) {
 		return
 	}
 	if err != nil {
@@ -131,6 +134,16 @@ func abortSidebarRequestIfCanceled(c *gin.Context) bool {
 		abortClientDisconnect(c)
 	}
 	return true
+}
+
+func (h *TaskHandlers) abortSidebarRequestAfterRead(c *gin.Context, message string, err error) bool {
+	if c.Request.Context().Err() != context.Canceled {
+		return false
+	}
+	if err != nil && !errors.Is(err, context.Canceled) {
+		h.logger.Error(message, zap.Error(err))
+	}
+	return abortSidebarRequestIfCanceled(c)
 }
 
 func decodeSidebarTaskQuery(c *gin.Context) (models.SidebarTaskViewQuery, bool, error) {

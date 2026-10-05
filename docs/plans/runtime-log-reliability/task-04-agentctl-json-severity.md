@@ -11,6 +11,7 @@ acceptance_criteria:
   - AC-PLATFORM-DIAGNOSTIC-SIGNAL-001.1
   - AC-PLATFORM-DIAGNOSTIC-SIGNAL-001.2
   - AC-PLATFORM-DIAGNOSTIC-SIGNAL-001.3
+  - AC-PLATFORM-DIAGNOSTIC-SIGNAL-001.4
 system_design:
   - ../../specs/platform/system-design/runtime-diagnostic-signal.md
 ---
@@ -23,7 +24,8 @@ Recognize complete agentctl JSON log records in the existing child parser. Prese
 
 ## In scope
 
-- Anchored JSON record parsing with duplicate-field and trailing-content refusal.
+- Anchored JSON record parsing with duplicate required-envelope-field and trailing-content refusal.
+- Allowlisted parent forwarding of recognized JSON envelope fields only.
 - Existing stdout/stderr forwarding and info-threshold observer tests.
 - Error-class levels map to parent Error without process termination.
 
@@ -34,7 +36,8 @@ Recognize complete agentctl JSON log records in the existing child parser. Prese
 ## Acceptance
 
 - Trusted JSON INFO/WARN/ERROR records retain severity. WARN and ERROR remain visible at an info threshold.
-- Malformed, unknown-level, payload-only, nested-level, and duplicate-field records keep the stream-specific fallback.
+- Malformed, unknown-level, payload-only, nested-level, and duplicate required-envelope-field records keep the stream-specific fallback. Duplicate additional fields do not prevent recognition.
+- Recognized JSON records forward only `level`, `timestamp`, `caller`, and `msg`; additional child fields are omitted from installation-wide parent logs.
 - Existing console/slog fixtures pass. Fatal/panic child records do not terminate or panic the parent.
 
 ## Verification
@@ -74,9 +77,9 @@ None. Follow the plan's sequential priority order.
 
 ## Results
 
-Implemented strict parsing for complete agentctl JSON records. The parser validates the canonical timestamp, nonempty caller, string message and level, unique required envelope fields (`level`, `timestamp`, `caller`, and `msg`), recognized level, and absence of trailing content. Repeated additional fields are decoded and ignored, preserving trusted Zap records whose nested `WithFields` calls append duplicate `component` keys. The original line and stream field are forwarded. FATAL, PANIC, and DPANIC remain parent Error entries, so child records cannot terminate or panic the backend. Malformed and unknown JSON keeps the existing stdout DEBUG / stderr WARN fallback.
+Implemented strict parsing for complete agentctl JSON records. The parser validates the canonical timestamp, nonempty caller, string message and level, unique required envelope fields (`level`, `timestamp`, `caller`, and `msg`), recognized level, and absence of trailing content. Repeated additional fields are decoded and ignored, preserving trusted Zap records whose nested `WithFields` calls append duplicate `component` keys. The parent forwards a reconstructed envelope containing only `level`, `timestamp`, `caller`, and `msg`, dropping arbitrary child fields from installation-wide parent logs while retaining the stream field. FATAL, PANIC, and DPANIC remain parent Error entries, so child records cannot terminate or panic the backend. Malformed and unknown JSON keeps the existing stdout DEBUG / stderr WARN fallback.
 
-Tests cover valid JSON INFO/WARN/ERROR at an info threshold, WARN and ERROR emitted by a real Zap JSON encoder with nested duplicate `component` fields, all four duplicate envelope fields remaining rejected, fatal child severity without parent termination, payload and nested level decoys, malformed timestamps and field types, repeated extra fields, trailing JSON/text, and stream fallbacks.
+Tests cover valid JSON INFO/WARN/ERROR at an info threshold, WARN and ERROR emitted by a real Zap JSON encoder with nested duplicate `component` fields, exact allowlisted output with sensitive metadata omitted, all four duplicate envelope fields remaining rejected, fatal child severity without parent termination, payload and nested level decoys, malformed timestamps and field types, repeated extra fields, trailing JSON/text, and stream fallbacks.
 
 Passed:
 

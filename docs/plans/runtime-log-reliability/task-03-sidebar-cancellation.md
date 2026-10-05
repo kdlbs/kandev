@@ -12,6 +12,7 @@ acceptance_criteria:
   - AC-TASKS-CANCELLED-SIDEBAR-READS-001.2
   - AC-TASKS-CANCELLED-SIDEBAR-READS-001.3
   - AC-TASKS-CANCELLED-SIDEBAR-READS-001.4
+  - AC-TASKS-CANCELLED-SIDEBAR-READS-001.5
 system_design:
   - ../../specs/tasks/system-design/cancelled-sidebar-reads.md
 ---
@@ -34,9 +35,10 @@ Return the existing client-cancellation status for abandoned sidebar queries. St
 
 ## Acceptance
 
-- Wrapped cancellation during query or enrichment returns 499 before response start. Cancellation generates no warning/error cascade or later optional query.
+- Cancellation during body decoding, query, or enrichment returns 499 before response start. Cancellation generates no cancellation-only warning/error cascade or later optional query.
 - Active-context database failures and deadlines retain their severity and response behavior.
 - A canceled query does not mutate task state or cancel a subsequent successful query. Successful DTOs remain equivalent.
+- An unrelated repository failure that races request cancellation retains its diagnostic entry. A summary update event follows any successful summary write even when cancellation follows the commit.
 
 ## Verification
 
@@ -86,9 +88,9 @@ None. Follow the plan's sequential priority order.
 
 ## Results
 
-Implemented request-context-aware 499 handling at sidebar query, task-list enrichment, and nested status-summary reconciliation boundaries. Summary repair now checks cancellation between activity, PR, per-task environment, Git, queued-count, completion-gate, persistence, reload, and publish operations. Cancellation-only warnings are omitted only when the request context and returned error both identify cancellation; deadlines and unrelated repository failures retain their original diagnostics. Dependency and runner projections stop remaining batched reads under cancellation and use the same narrow warning rule. The pending-count service returns the repository error unchanged and omits its error entry only when both the supplied context and repository error chain identify `context.Canceled`.
+Implemented request-context-aware 499 handling at sidebar body decoding, query, task-list enrichment, and nested status-summary reconciliation boundaries. Summary repair checks cancellation between activity, PR, per-task environment, Git, queued-count, completion-gate, persistence, and reload operations. Once a summary write commits, its matching update event is published even if the request is canceled immediately afterward. Cancellation-only warnings are omitted only when the request context and returned error both identify cancellation; deadlines and unrelated repository failures retain their original diagnostics. Dependency and runner projections stop remaining batched reads under cancellation and use the same narrow warning rule. The pending-count service returns the repository error unchanged and omits its error entry only when both the supplied context and repository error chain identify `context.Canceled`.
 
-Handler integration tests cover canceled query, pending-action enrichment, dependency projection, runner projection, nested cancellation under an active request, a deadline, and cancellation during a wired task-activity read after loading the status-summary repository. The latter verifies HTTP 499, no later launch-queue/environment/Git/queued-count read, no summary write, no cancellation warning/error, and a successful successor request. Service regressions verify wrapped request cancellation stays quiet while deadline failures and unrelated database errors that race with cancellation retain warning/error severity.
+Handler integration tests cover malformed-body cancellation, canceled query, pending-action enrichment, dependency projection, runner projection, nested cancellation under an active request, a deadline, and cancellation during a wired task-activity read after loading the status-summary repository. The activity case verifies HTTP 499, no later launch-queue/environment/Git/queued-count read, no summary write, no cancellation warning/error, and a successful successor request. A real repository error that races with a canceled query retains an error log while the response remains 499. A repository wrapper that cancels immediately after an accepted summary write verifies the committed row and its update event. Service regressions verify wrapped request cancellation stays quiet while deadline failures and unrelated database errors that race with cancellation retain warning/error severity.
 
 Passed:
 

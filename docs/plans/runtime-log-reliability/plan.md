@@ -68,7 +68,7 @@ Recheck the implementation base before execution because other packages can move
 | Git | Basic evidence validation fails during workspace changes. Enriched baseline capture sometimes aborts, including this session. | Exact mutation timing, handled by deterministic fixture barriers. |
 | Sidebar | Four canceled enrichment requests produce error entries and HTTP 500. Optional reads generate cancellation warnings. | Which client trigger abandoned each historical request. That fact is unnecessary for the backend regression. |
 | Voice | Five webhook failures have `origin: plugin_response`, including three this morning. | Plugin version, configuration eligibility, and dependency failure. |
-| Worktree | The same recorded worktree receives `competing_registration` on two cleanup attempts about twelve hours apart. | Saved versus observed branch/path identity and historical inventory cause. |
+| Worktree | One recorded cleanup request receives `competing_registration`; no second attempt was found in the retained logs. | Saved versus observed branch/path identity and whether another historical attempt occurred. |
 | Logs | Approximately 244 MB across seventeen hours. About 150,000 routine idle-reclaim refusal entries. Agentctl JSON errors appear inside outer DEBUG records. | Aggregate byte reduction after targeted changes. |
 
 Read-only evidence pointers:
@@ -151,9 +151,9 @@ Any plugin code change needs the dedicated repository's instructions and a separ
 | Work order | Acceptance mapping | Required evidence |
 | --- | --- | --- |
 | 01 | Store parity 007.1, .3, .4, .6–.8 and attribution 001.1 | Controlled reader/writer barriers, maintenance control, missing-table control, pool reuse, and real middleware rejection/recovery. |
-| 02 | Git capture recovery 001.1–.5 | New `workspace_git_status_capture_recovery_test.go`, API route integration, and `executor_base_capture_recovery_test.go`. |
-| 03 | Canceled sidebar reads 001.1–.4 | New handler cancellation integration, optional-read call counters, message-queue log observers, and successful successor query. |
-| 04 | Diagnostic signal 001.1–.3 | Parser fixtures and scanner/observer tests at info threshold. |
+| 02 | Git capture recovery 001.1–.6 | New `workspace_git_status_capture_recovery_test.go`, API route integration, and `executor_base_capture_recovery_test.go`. |
+| 03 | Canceled sidebar reads 001.1–.5 | Handler cancellation integration including body decoding, optional-read counters, message-queue log observers, committed-summary event publication, and a successful successor query. |
+| 04 | Diagnostic signal 001.1–.4 | Parser fixtures and scanner/observer tests at info threshold, including exact allowlisted output. |
 | 05 | Diagnostic signal 002.1–.4 | Health transition observers, existing reclaim decision tests, MCP transport fixtures, and synthetic log-byte comparison. |
 | 06 | Inventory repair 001.1–.3 and 002.1–.3 | Real Git/SQLite preview and refusal fixtures. No live repair. |
 | 07 | Attribution 001.2 | Generic webhook fixture preserves plugin-supplied status. Dedicated plugin investigation isolates its cause. |
@@ -176,7 +176,7 @@ If implementation adds a rendered UI outcome, amend the package with mobile-pari
 - [x] [06: Diagnose worktree ownership conflict](task-06-worktree-conflict.md)
 - [x] [07: Diagnose voice-plugin webhook failures](task-07-voice-webhook.md)
 
-Work orders 01 and 06–07 produce evidence and a concrete repair recommendation.
+Work orders 01 and 06–07 produce evidence and record whether it justifies a separate repair package.
 Work orders 02–05 produce regression-tested corrections.
 They share no hard dependency and execute sequentially in priority order.
 Shared launcher/orchestrator files make parallel implementation unsuitable without a revised ownership split.

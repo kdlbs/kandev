@@ -33,11 +33,13 @@ Recognize one complete JSON object with string fields `level`, `timestamp`, `cal
 Validate the timestamp as an agentctl timestamp and require a nonempty caller.
 Use only the root `level` field and the existing recognized level set.
 Reject trailing content, duplicate required fields, unknown levels, and mismatched field types.
+Decode and ignore additional fields, including repeated fields, so nested logger context does not block severity recognition.
 Do not recursively inspect JSON text embedded in a message.
 
-Keep the original line and stream field in the forwarded record.
+Reconstruct the forwarded record from only the four validated envelope fields.
+Drop additional child fields before writing the record to installation-wide parent logs, which may be included in diagnostic bundles.
+Preserve the stream field on the parent entry.
 The existing scanner bounds the line size.
-Do not add arbitrary child fields to the parent's structured field set.
 Do not persist raw provider stderr through a new path.
 Error-class levels map to the parent's error method, not fatal or panic methods.
 Unknown stdout remains debug, and unknown stderr remains warning.
@@ -66,7 +68,7 @@ Do not alter input capability checks or duplicate-name resolution.
 ## Verification
 
 Parser and observer tests cover JSON, console, slog, malformed input, and both streams.
-Include payload text containing fake severity words and duplicate root fields.
+Include payload text containing fake severity words, duplicate required envelope fields, duplicate additional fields, and sensitive additional fields excluded from parent output.
 Prove JSON WARN/ERROR survive an info logger threshold and produce no parent panic.
 
 Health tests cover repeated healthy results, repeated failures, recovery, and changed failing store sets.

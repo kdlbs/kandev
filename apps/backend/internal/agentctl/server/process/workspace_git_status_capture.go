@@ -23,8 +23,8 @@ var (
 	errGitStatusDetailsUnavailable = errors.New("git status details unavailable")
 )
 
-// IsGitStatusEvidenceChanged reports whether a status capture exhausted its
-// bounded retry because the repository changed during both attempts.
+// IsGitStatusEvidenceChanged reports whether repository evidence changed
+// during the status capture attempt.
 func IsGitStatusEvidenceChanged(err error) bool {
 	return errors.Is(err, errGitStatusEvidenceChanged)
 }

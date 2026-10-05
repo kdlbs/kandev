@@ -382,9 +382,6 @@ func (s *Service) rebuildMissingSummary(
 		s.logSummaryRepairFailure(ctx, task.ID, "persist", err)
 		return
 	}
-	if ctx.Err() != nil {
-		return
-	}
 	if accepted {
 		summaries[task.ID] = &next
 		s.publishReconciledSummary(ctx, task, next)
@@ -469,12 +466,12 @@ func (s *Service) reconcileExistingSummary(
 		if err != nil {
 			return nil, fmt.Errorf("persist repair: %w", err)
 		}
-		if err := ctx.Err(); err != nil {
-			return nil, err
-		}
 		if accepted {
 			s.publishReconciledSummary(ctx, task, next)
 			return &next, nil
+		}
+		if err := ctx.Err(); err != nil {
+			return nil, err
 		}
 		current, pendingAction, launchQueue, err = s.reloadSummaryReconcileState(ctx, task.ID, launchQueueObserved)
 		if err != nil {
@@ -687,17 +684,20 @@ func (s *Service) publishReconciledSummary(
 	task *models.Task,
 	summary statussummary.TaskStatusSummary,
 ) {
-	if ctx.Err() != nil || s.eventBus == nil {
+	if s.eventBus == nil {
 		return
 	}
+	// A committed summary needs its matching event even if the requesting list
+	// operation was canceled after the repository accepted the write.
+	publishCtx := context.WithoutCancel(ctx)
 	payload := statussummary.SummaryUpdated{
 		TaskID:      task.ID,
 		WorkspaceID: task.WorkspaceID,
 		Summary:     summary,
 	}
-	if err := s.eventBus.Publish(ctx, events.TaskStatusSummaryUpdated,
+	if err := s.eventBus.Publish(publishCtx, events.TaskStatusSummaryUpdated,
 		bus.NewEvent(events.TaskStatusSummaryUpdated, "task-status-summary-reconciler", payload)); err != nil {
-		s.logSummaryRepairFailure(ctx, task.ID, "publish", err)
+		s.logSummaryRepairFailure(publishCtx, task.ID, "publish", err)
 	}
 }
 

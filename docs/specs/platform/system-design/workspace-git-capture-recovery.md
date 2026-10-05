@@ -54,7 +54,7 @@ Completion, archive, and Review consumers retain their existing completion requi
 
 Expose a narrow internal error classifier from the process package only where the API needs it.
 A recovered race records debug evidence without a failed-request error.
-Exhausted evidence-change capture records one warning at the request boundary.
+An evidence-change failure records one warning at the request boundary.
 Unexpected Git failures retain their existing severity and response classification.
 The periodic tracker must use the same classification instead of treating each recoverable race as an application fault.
 No extra launch-side retry loop is introduced.
@@ -67,7 +67,8 @@ Check cleanup of every temporary index and rejection of stale publication.
 
 Route an HTTP status request through a real tracker and verify the final membership and detail state.
 Exercise launch baseline capture with the recovered enriched result and with unavailable detail.
-Only a successful complete observation can establish the session baseline.
+A successful complete enriched observation can establish the session baseline.
+For backward compatibility, a successful legacy payload with every quality field omitted remains eligible; any explicit quality metadata must describe a complete ready observation.
 
 ## Related decisions
 

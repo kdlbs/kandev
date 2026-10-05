@@ -370,9 +370,6 @@ func (wt *WorkspaceTracker) computeGitStatusObservation(
 				}
 			}
 			wt.logger.Debug("workspace Git status evidence changed; retrying basic capture")
-			if ctxErr := ctx.Err(); ctxErr != nil {
-				return types.GitStatusUpdate{}, "", nil, ctxErr
-			}
 		}
 	}
 	compute := observer

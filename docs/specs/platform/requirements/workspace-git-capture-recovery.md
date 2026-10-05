@@ -33,6 +33,7 @@ The existing [Git status contract](workspace-git-status.md) governs snapshot val
   Existing failure classification and cleanup shall remain effective.
 - **AC-PLATFORM-GIT-CAPTURE-RECOVERY-001.5:** When a stable enriched result follows a brief race, launch baseline capture shall retain the observed comparison baseline.
   Unavailable enrichment shall not authorize a saved pending value or an unrelated HEAD baseline.
+- **AC-PLATFORM-GIT-CAPTURE-RECOVERY-001.6:** For compatibility, a successful legacy status payload with all quality fields omitted may establish the baseline. If any quality field is present, the payload must describe a successful, complete, ready status.
 
 ## Out of scope
 

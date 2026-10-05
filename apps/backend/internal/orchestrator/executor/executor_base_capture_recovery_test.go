@@ -31,6 +31,24 @@ func TestExecutorBaseCaptureRecoveryPersistsEnrichedBaseline(t *testing.T) {
 	}
 }
 
+func TestExecutorBaseCaptureRecoveryAcceptsLegacySuccessfulStatus(t *testing.T) {
+	repo := newMockRepository()
+	repo.sessions["session-123"] = &models.TaskSession{ID: "session-123"}
+	manager := &recoveredGitStatusManager{
+		mockAgentManager: &mockAgentManager{},
+		status: &client.GitStatusResult{
+			Success: true, HeadCommit: "legacy-head", BaseCommit: "legacy-merge-base",
+		},
+	}
+	executor := newTestExecutor(t, manager, repo)
+
+	executor.captureBaseCommit(context.Background(), "session-123")
+
+	if got := repo.sessions["session-123"].BaseCommitSHA; got != "legacy-merge-base" {
+		t.Fatalf("saved base commit = %q, want the baseline from a legacy successful status", got)
+	}
+}
+
 // @covers AC-PLATFORM-GIT-CAPTURE-RECOVERY-001.5
 func TestExecutorBaseCaptureRecoveryRejectsUnavailableDetails(t *testing.T) {
 	repo := newMockRepository()

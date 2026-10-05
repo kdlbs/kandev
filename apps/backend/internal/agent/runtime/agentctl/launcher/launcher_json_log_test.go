@@ -3,6 +3,7 @@ package launcher
 import (
 	"bufio"
 	"bytes"
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -59,7 +60,13 @@ func TestPipeOutputPreservesSeverityWithNestedDuplicateComponentFields(t *testin
 	)
 	child := zap.New(childCore, zap.AddCaller()).
 		With(zap.String("component", "process-manager")).
-		With(zap.String("component", "workspace-tracker"))
+		With(
+			zap.String("component", "workspace-tracker"),
+			zap.String("session_id", "private-session"),
+			zap.String("workspace_path", "/private/workspace"),
+			zap.String("permission_title", "Read secret.txt"),
+			zap.String("pr_url", "https://private.test/pull/42"),
+		)
 	child.Warn("workspace tracking is delayed")
 	child.Error("workspace tracking failed")
 
@@ -81,8 +88,12 @@ func TestPipeOutputPreservesSeverityWithNestedDuplicateComponentFields(t *testin
 	require.Equal(t, []zapcore.Level{zapcore.WarnLevel, zapcore.ErrorLevel}, []zapcore.Level{
 		entries[0].Level, entries[1].Level,
 	})
-	require.Contains(t, entries[0].Message, `"msg":"workspace tracking is delayed"`)
-	require.Contains(t, entries[1].Message, `"msg":"workspace tracking failed"`)
+	for index, entry := range entries {
+		require.Equal(t, expectedChildEnvelope(t, lines[index]), entry.Message)
+		for _, sensitive := range []string{"private-session", "/private/workspace", "Read secret.txt", "https://private.test/pull/42", "process-manager", "workspace-tracker"} {
+			require.NotContains(t, entry.Message, sensitive)
+		}
+	}
 }
 
 func TestPipeOutputPreservesJSONSeverityAtInfoThreshold(t *testing.T) {
@@ -105,9 +116,23 @@ func TestPipeOutputPreservesJSONSeverityAtInfoThreshold(t *testing.T) {
 		entries[0].Level, entries[1].Level, entries[2].Level, entries[3].Level,
 	})
 	for index, entry := range entries {
-		require.Equal(t, lines[index], entry.Message, "forward original child record")
+		require.Equal(t, expectedChildEnvelope(t, lines[index]), entry.Message, "forward only the recognized child envelope")
 		require.Equal(t, "stdout", entry.ContextMap()["stream"])
 	}
+}
+
+func expectedChildEnvelope(t *testing.T, line string) string {
+	t.Helper()
+	var envelope struct {
+		Level     string `json:"level"`
+		Timestamp string `json:"timestamp"`
+		Caller    string `json:"caller"`
+		Message   string `json:"msg"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(line), &envelope))
+	encoded, err := json.Marshal(envelope)
+	require.NoError(t, err)
+	return string(encoded)
 }
 
 func TestPipeOutputKeepsMalformedJSONStreamFallback(t *testing.T) {

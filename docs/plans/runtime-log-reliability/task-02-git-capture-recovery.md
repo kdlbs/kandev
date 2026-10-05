@@ -13,6 +13,7 @@ acceptance_criteria:
   - AC-PLATFORM-GIT-CAPTURE-RECOVERY-001.3
   - AC-PLATFORM-GIT-CAPTURE-RECOVERY-001.4
   - AC-PLATFORM-GIT-CAPTURE-RECOVERY-001.5
+  - AC-PLATFORM-GIT-CAPTURE-RECOVERY-001.6
 system_design:
   - ../../specs/platform/system-design/workspace-git-capture-recovery.md
 ---
@@ -37,7 +38,7 @@ Recover a brief basic capture race inside the existing shared observation. Deliv
 
 - A deterministic first-attempt mutation recovers on the second attempt. Continuous mutation performs at most two basic captures and returns unavailable.
 - Concurrent waiters share correction. Caller cancellation, deadline, shutdown, identity replacement, and unrelated failures preserve the documented invariants.
-- A public status request and launch baseline consumer accept the recovered enriched result. Unavailable detail never establishes a false baseline.
+- A public status request and launch baseline consumer accept the recovered enriched result. Unavailable detail never establishes a false baseline; legacy successful responses with omitted quality fields remain compatible.
 
 ## Verification
 
@@ -82,7 +83,9 @@ None. Follow the plan's sequential priority order.
 
 ## Results
 
-Implemented the one-time typed evidence-change correction within the existing shared context and admission class. Failed index snapshots are disposed by the capture before retry. Continuous churn remains unavailable; unrelated command errors, missing repositories, deadlines, and tracker shutdown do not start another capture. Concurrent waiters share correction, and one canceled waiter does not cancel another. The API reports recovered enriched status and emits one bounded warning after exhausted churn. Launch baseline capture now requires a successful complete enriched status before it can use BaseCommit or the detached-HEAD fallback.
+Implemented the one-time typed evidence-change correction within the existing shared context and admission class. Failed index snapshots are disposed by the capture before retry. Continuous churn remains unavailable; unrelated command errors, missing repositories, deadlines, and tracker shutdown do not start another capture. Concurrent waiters share correction, and one canceled waiter does not cancel another. The API reports recovered enriched status and uses a general changing-evidence warning that also covers enrichment failures. Launch baseline capture accepts either a successful complete enriched status or a legacy successful payload with omitted quality fields, while explicit incomplete/unavailable statuses cannot establish a baseline.
+
+Recovery tests collect mutation errors from the singleflight worker and assert them on the test goroutine, avoiding test-fatal calls from background callbacks. The multi-repository API test uses its own response-shape mapping so it compiles on Windows, where the shared helper is excluded.
 
 Verification passed:
 
