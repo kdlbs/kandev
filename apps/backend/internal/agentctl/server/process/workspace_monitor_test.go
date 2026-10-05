@@ -20,15 +20,16 @@ func TestWorkspaceTracker_StopsWhenWorkDirDeleted(t *testing.T) {
 
 	log := newTestLogger(t)
 	wt := NewWorkspaceTracker(repoDir, log)
-	wt.gitPollInterval = 100 * time.Millisecond
+	wt.filePollInterval = time.Second
+	wt.gitPollInterval = time.Second
 	// Default mode is slow (30s) — set fast so the test exercises real polling
-	// cadence rather than sitting on a 30s timer.
+	// cadence rather than sitting on a 30s timer. A 1s interval also leaves the
+	// worktree removal outside the next poll while keeping shutdown under the
+	// test's 5s bound.
 	wt.SetPollMode(PollModeFast)
-
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	wt.Start(ctx)
+	wt.Start(context.Background())
+	t.Cleanup(wt.Stop)
+	waitForWorkspaceTrackerInitialScans(t, wt)
 
 	// Delete the work directory to simulate worktree removal
 	if err := os.RemoveAll(repoDir); err != nil {
@@ -47,6 +48,34 @@ func TestWorkspaceTracker_StopsWhenWorkDirDeleted(t *testing.T) {
 		// Both goroutines exited — success
 	case <-time.After(5 * time.Second):
 		t.Fatal("workspace tracker goroutines did not stop after workdir was deleted")
+	}
+}
+
+func waitForWorkspaceTrackerInitialScans(t *testing.T, wt *WorkspaceTracker) {
+	t.Helper()
+	deadline := time.NewTimer(5 * time.Second)
+	defer deadline.Stop()
+
+	select {
+	case <-wt.initialScanDone:
+	case <-deadline.C:
+		t.Fatal("workspace monitor did not finish its initial scan")
+	}
+
+	ticker := time.NewTicker(5 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		wt.gitStateMu.RLock()
+		gitPollInitialized := wt.cachedHeadSHA != ""
+		wt.gitStateMu.RUnlock()
+		if gitPollInitialized {
+			return
+		}
+		select {
+		case <-deadline.C:
+			t.Fatal("workspace Git poll did not finish its initial scan")
+		case <-ticker.C:
+		}
 	}
 }
 
