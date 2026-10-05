@@ -101,7 +101,7 @@ Use `mobile-chrome` only for `mobile-*.spec.ts` files. Confirm Playwright discov
 
 `e2e:run` accepts one `--project`; repeating it selects only the last value, so run desktop and mobile separately when both are required and confirm discovery for each.
 
-See [resource-safety.md](references/resource-safety.md) before any full local test run.
+Read [resource-safety.md](references/resource-safety.md) for full-run limits and compact output before managed E2E runs or full local suites.
 
 The runner solves the sharp edges hand-rolling would hit: in docker it builds the CGO backend on the **host** and runs it in the runtime image (forward-compatible when the host glibc ≤ the image's — the usual case; it smoke-tests this and only falls back to the build image if the host is newer), builds the Vite web assets on the host, runs them through the Go-served SPA, and keeps Playwright output container-local. See `apps/web/e2e/README.md` → "the managed runner".
 

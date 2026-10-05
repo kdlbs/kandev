@@ -121,6 +121,64 @@ assert_json_envelope() {
   ' <<<"$json" >/dev/null || fail "$name" "$json"
 }
 
+# --- embedded closing PR state avoids a redundant network read ------------
+d="$(make_tmp_dir)"; setup_fake "$d"
+snapshot "$d" 1 20 0 0 true aaaaaaaaaaaa \
+  '{"merge_state":{"state":"OPEN","mergeable":"MERGEABLE","mergeStateStatus":"CLEAN","reviewDecision":null,"headRefOid":"aaaaaaaaaaaa"}}'
+cat >"$d/gh" <<'UNAVAILABLEGH'
+#!/usr/bin/env bash
+printf 'called\n' >> "$FAKE_DIR/gh-calls"
+exit 1
+UNAVAILABLEGH
+chmod +x "$d/gh"
+out="$(run_await "$d" 12 --interval-sec 1 --quiet --format json 2>/dev/null)" && rc=0 || rc=$?
+[[ "$rc" -eq 0 ]] || fail "embedded closing PR state should work without a second API, got $rc" "$out"
+[[ ! -e "$d/gh-calls" ]] || fail "embedded PR state must avoid the redundant API"
+[[ "$(jq -r '.polls' <<<"$out")" == 2 ]] || fail "embedded state must retain terminal confirmation" "$out"
+pass "embedded closing PR state avoids the extra API and retains terminal confirmation"
+
+# --- embedded metadata cannot make stale failures actionable ---------------
+d="$(make_tmp_dir)"; setup_fake "$d"
+snapshot "$d" 1 10 1 5 true aaaaaaaaaaaa \
+  '{"merge_state":{"state":"OPEN","mergeable":"MERGEABLE","mergeStateStatus":"CLEAN","headRefOid":"bbbbbbbbbbbb"}}'
+snapshot "$d" 2 20 0 0 true bbbbbbbbbbbb \
+  '{"merge_state":{"state":"OPEN","mergeable":"MERGEABLE","mergeStateStatus":"CLEAN","headRefOid":"bbbbbbbbbbbb"}}'
+out="$(run_await "$d" 12 --mode first-failure --interval-sec 1 --quiet --format json 2>/dev/null)" && rc=0 || rc=$?
+[[ "$rc" -eq 0 && "$(jq -r '.summary.checks_head_sha' <<<"$out")" == bbbbbbbbbbbb ]] \
+  || fail "embedded state must discard the old head's failure" "$out"
+pass "embedded metadata discards superseded check evidence"
+
+# --- malformed embedded state uses the existing fail-closed fallback -------
+d="$(make_tmp_dir)"; setup_fake "$d"
+snapshot "$d" 1 20 0 0 true aaaaaaaaaaaa \
+  '{"merge_state":{"state":"OPEN","mergeable":"MERGEABLE","mergeStateStatus":"CLEAN","headRefOid":""}}'
+cat >"$d/gh" <<'UNAVAILABLEGH'
+#!/usr/bin/env bash
+exit 1
+UNAVAILABLEGH
+chmod +x "$d/gh"
+out="$(run_await "$d" 12 --interval-sec 1 --quiet --format json 2>/dev/null)" && rc=0 || rc=$?
+[[ "$rc" -eq 3 ]] || fail "malformed metadata and failed fallback must block" "$out"
+pass "malformed embedded metadata cannot prove the PR clean"
+
+for pr_status in CLOSED MERGED; do
+  d="$(make_tmp_dir)"; setup_fake "$d"
+  merge_extra="$(jq -nc --arg state "$pr_status" '{merge_state:{state:$state,mergeable:"UNKNOWN",mergeStateStatus:"UNKNOWN",headRefOid:"aaaaaaaaaaaa"}}')"
+  snapshot "$d" 1 10 0 2 true aaaaaaaaaaaa "$merge_extra"
+  out="$(run_await "$d" 12 --deadline-min 0 --quiet --format json 2>/dev/null)" && rc=0 || rc=$?
+  [[ "$rc" == 3 && "$(jq -r '.outcome' <<<"$out")" == blocked-pr-state ]] \
+    || fail "embedded $pr_status state must stop even with pending checks" "$out"
+done
+pass "embedded closed and merged states stop monitoring"
+
+d="$(make_tmp_dir)"; setup_fake "$d"
+snapshot "$d" 1 20 0 0 true aaaaaaaaaaaa \
+  '{"merge_state":{"state":"OPEN","mergeable":"CONFLICTING","mergeStateStatus":"DIRTY","headRefOid":"aaaaaaaaaaaa"}}'
+out="$(run_await "$d" 12 --interval-sec 1 --quiet --format json 2>/dev/null)" && rc=0 || rc=$?
+[[ "$rc" == 1 && "$(jq -r '.mergeable' <<<"$out")" == CONFLICTING ]] \
+  || fail "embedded merge conflicts must remain findings" "$out"
+pass "embedded merge conflicts cannot become clean"
+
 # --- argument validation ---------------------------------------------------
 d="$(make_tmp_dir)"; setup_fake "$d"
 run_await "$d" >/dev/null 2>&1 && fail "missing PR should exit non-zero" || pass "missing PR argument is rejected"
