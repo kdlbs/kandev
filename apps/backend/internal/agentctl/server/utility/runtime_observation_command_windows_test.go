@@ -30,7 +30,7 @@ func TestRuntimeObservationRunsWindowsCommandShimWithSpaces(t *testing.T) {
 				t.Fatalf("run command shim: %v", err)
 			}
 			if got := parseCodexVersion(output); got != "0.177.3" {
-				t.Fatalf("parsed version = %q, want 0.177.3", got)
+				t.Fatalf("parsed version = %q, want 0.177.3; output=%q", got, output)
 			}
 			if strings.Contains(string(output), filepath.Base(dir)) {
 				t.Fatalf("command output unexpectedly included its path: %q", output)
