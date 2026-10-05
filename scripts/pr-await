@@ -558,12 +558,17 @@ Honor Retry-After or X-RateLimit-Reset when present, then retry the waiter; revi
   SUMMARY_JSON="$summary_body"
   CONSECUTIVE_ERRORS=0
 
-  if jq -e '.merge_state |
-    type == "object"
-    and (.state == "OPEN" or .state == "MERGED" or .state == "CLOSED")
-    and (.mergeable == "MERGEABLE" or .mergeable == "CONFLICTING" or .mergeable == "UNKNOWN")
-    and (.mergeStateStatus | type == "string" and length > 0)
-    and (.headRefOid | type == "string" and length > 0)
+  # Pending polls reuse embedded metadata. Stopping evidence needs a fresh
+  # head observation after pr-state's trailing base and merge-base requests.
+  if jq -e --arg mode "$MODE" '
+    ((.pending_checks | length) > 0 or .checks_snapshot_complete != true)
+    and ($mode != "first-failure" or (.failed_checks | length) == 0)
+    and (.merge_state |
+      type == "object"
+      and (.state == "OPEN" or .state == "MERGED" or .state == "CLOSED")
+      and (.mergeable == "MERGEABLE" or .mergeable == "CONFLICTING" or .mergeable == "UNKNOWN")
+      and (.mergeStateStatus | type == "string" and length > 0)
+      and (.headRefOid | type == "string" and length > 0))
   ' >/dev/null 2>&1 <<<"$SUMMARY_JSON"; then
     merge_body="$(jq -c '.merge_state' <<<"$SUMMARY_JSON")"
     read_rc=0
