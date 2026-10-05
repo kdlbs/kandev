@@ -23,6 +23,7 @@ import { findTaskInSnapshots } from "@/lib/kanban/find-task";
 import { repositorySlug } from "@/lib/repository-slug";
 import {
   mapSnapshotToKanban,
+  mostRecentWorkspaceTask,
   reconcileMobileSnapshot,
   sortByUpdatedAtDesc,
 } from "./session-task-switcher-sheet-helpers";
@@ -289,17 +290,16 @@ async function switchWorkspace(newWorkspaceId: string, opts: SheetNavOptions) {
     }
     const snapshot = await fetchWorkflowSnapshot(firstWorkflow.id);
     if (!isCurrentWorkspaceContext(store.getState(), newWorkspaceId, generation)) return;
-    const kanban = reconcileMobileSnapshot(
-      store.getState(),
-      mapSnapshotToKanban(snapshot, firstWorkflow.id),
-      overviewRead,
-    );
-    if (!kanban) return;
-    const taskWorkflowCoverage = reconcileTaskWorkflowCoverage(
-      store.getState(),
-      workflowsResponse.task_workflow_coverage,
-      overviewRead,
-    );
+    const mappedSnapshot = mapSnapshotToKanban(snapshot, firstWorkflow.id);
+    const kanban = reconcileMobileSnapshot(store.getState(), mappedSnapshot, overviewRead);
+    const mostRecentTask = mostRecentWorkspaceTask(kanban, mappedSnapshot);
+    const taskWorkflowCoverage = kanban
+      ? reconcileTaskWorkflowCoverage(
+          store.getState(),
+          workflowsResponse.task_workflow_coverage,
+          overviewRead,
+        )
+      : undefined;
     if (overviewRead) store.getState().finishTaskOverviewRead(overviewRead);
     store
       .getState()
@@ -311,36 +311,37 @@ async function switchWorkspace(newWorkspaceId: string, opts: SheetNavOptions) {
         undefined,
         requestId,
       );
-    store.setState((state) => ({
-      ...state,
-      workflows: {
-        ...state.workflows,
-        items: [
-          ...state.workflows.items.filter(
-            (w: { workspaceId: string }) => w.workspaceId !== newWorkspaceId,
-          ),
-          ...newWorkspaceWorkflows.map((w) => ({
-            id: w.id,
-            workspaceId: w.workspace_id,
-            name: w.name,
-            hidden: w.hidden,
-          })),
-        ],
-        activeId: firstWorkflow.id,
-        taskWorkflowCoverage,
-      },
-      kanban,
-      kanbanMulti: {
-        ...state.kanbanMulti,
-        snapshots: {
-          ...state.kanbanMulti.snapshots,
-          [firstWorkflow.id]: { ...kanban, workflowName: firstWorkflow.name },
+    if (kanban) {
+      store.setState((state) => ({
+        ...state,
+        workflows: {
+          ...state.workflows,
+          items: [
+            ...state.workflows.items.filter(
+              (w: { workspaceId: string }) => w.workspaceId !== newWorkspaceId,
+            ),
+            ...newWorkspaceWorkflows.map((w) => ({
+              id: w.id,
+              workspaceId: w.workspace_id,
+              name: w.name,
+              hidden: w.hidden,
+            })),
+          ],
+          activeId: firstWorkflow.id,
+          taskWorkflowCoverage,
         },
-      },
-    }));
-    const mostRecentTask = sortByUpdatedAtDesc(
-      kanban.tasks.map((task) => ({ id: task.id, updated_at: task.updatedAt })),
-    )[0];
+        kanban,
+        kanbanMulti: {
+          ...state.kanbanMulti,
+          snapshots: {
+            ...state.kanbanMulti.snapshots,
+            [firstWorkflow.id]: { ...kanban, workflowName: firstWorkflow.name },
+          },
+        },
+      }));
+    } else {
+      store.setState((state) => ({ ...state, kanban: { ...state.kanban, isLoading: false } }));
+    }
     if (mostRecentTask) {
       const sessions = await loadWorkspaceTaskSessions(loadTaskSessionsForTask, mostRecentTask.id);
       if (!isCurrentWorkspaceContext(store.getState(), newWorkspaceId, generation)) return;

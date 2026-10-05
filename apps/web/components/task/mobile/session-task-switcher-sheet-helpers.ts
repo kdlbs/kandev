@@ -60,3 +60,11 @@ export function reconcileMobileSnapshot(
     taskCoverage: snapshot.taskCoverage && { ...snapshot.taskCoverage, total: members.length },
   };
 }
+
+export function mostRecentWorkspaceTask(
+  reconciled: ReturnType<typeof reconcileMobileSnapshot>,
+  fetched: ReturnType<typeof mapSnapshotToKanban>,
+) {
+  const tasks = (reconciled ?? fetched).tasks;
+  return sortByUpdatedAtDesc(tasks.map((task) => ({ id: task.id, updated_at: task.updatedAt })))[0];
+}
