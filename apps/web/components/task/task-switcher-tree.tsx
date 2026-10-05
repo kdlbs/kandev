@@ -311,7 +311,6 @@ function flattenGroupTasks(
  */
 export const GroupSection = memo(function GroupSection({
   group,
-  grouping,
   subTasksByParentId,
   getNestHierarchyTasks,
   rowProps,
@@ -379,7 +378,6 @@ export const GroupSection = memo(function GroupSection({
           controlsId={bodyId}
           label={group.label}
           groupKey={group.key}
-          grouping={grouping}
           count={totalCount}
           isCollapsed={isCollapsed}
           isContinuation={group.isContinuation}

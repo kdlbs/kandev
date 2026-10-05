@@ -1,21 +1,6 @@
 import { IconChevronDown } from "@tabler/icons-react";
 import { useTranslation } from "react-i18next";
 import { cn } from "@/lib/utils";
-import type { GroupKey } from "@/lib/state/slices/ui/sidebar-view-types";
-import type { TaskState } from "@/lib/types/http";
-import {
-  STATE_GROUP_ORDER,
-  NOT_STARTED_STATE_GROUP_KEY,
-} from "@/lib/sidebar/effective-task-tree-state";
-import { TaskStateIcon } from "./task-state-icon";
-import { getTaskStateIcon } from "@/lib/ui/state-icons";
-
-function GroupStateIcon({ state }: { state?: TaskState }) {
-  if (state === "BLOCKED" || state === "FAILED" || state === "CANCELLED") {
-    return getTaskStateIcon(state, "h-3.5 w-3.5");
-  }
-  return <TaskStateIcon state={state} isOnLastWorkflowStep={state === "COMPLETED"} />;
-}
 
 export function TaskSwitcherSkeleton() {
   return (
@@ -33,7 +18,6 @@ export function GroupHeader({
   controlsId,
   label,
   groupKey,
-  grouping,
   count,
   isCollapsed,
   isContinuation = false,
@@ -43,7 +27,6 @@ export function GroupHeader({
   controlsId?: string;
   label: string;
   groupKey: string;
-  grouping?: GroupKey;
   count: number;
   isCollapsed: boolean;
   isContinuation?: boolean;
@@ -69,13 +52,6 @@ export function GroupHeader({
           isCollapsed && "-rotate-90",
         )}
       />
-      {grouping === "state" && Object.hasOwn(STATE_GROUP_ORDER, groupKey) && (
-        <span data-testid="sidebar-group-state" aria-hidden="true" className="flex shrink-0">
-          <GroupStateIcon
-            state={groupKey === NOT_STARTED_STATE_GROUP_KEY ? undefined : (groupKey as TaskState)}
-          />
-        </span>
-      )}
       <span className="flex-1 truncate text-left text-[12px] font-semibold text-foreground/90">
         {label}
       </span>
