@@ -2,7 +2,7 @@
 status: active
 system: platform
 created: 2026-07-19
-updated: 2026-10-03
+updated: 2026-10-05
 owners:
   - kandev
 ---
@@ -84,6 +84,7 @@ A failed live source still cannot authorize an unmarked persisted fallback.
 - **AC-PLATFORM-WORKSPACE-GIT-STATUS-001.43:** When agent startup advances on the same current execution and agentctl client, an attached workspace stream shall continue forwarding accepted Git snapshots.
   Promotion from workspace-only operation shall not require another foreground refresh or stream reconnection to deliver later membership and detail updates.
   Replaced executions and clients shall retain the rejection required by criterion `.27`.
+- **AC-PLATFORM-WORKSPACE-GIT-STATUS-001.44:** When Discard receives a nonempty list of repository-relative files, each filename shall select only that literal file in the selected repository, including supported wildcard, bracket, and pathspec-magic names. Tracked selected files shall return to their committed index and working-tree content; added or untracked selected files shall be removed from the index and filesystem as applicable. Every unselected file in that repository and every file in other repositories shall retain its index content and working-tree bytes, regardless of inherited pathspec matching settings. An empty list shall be rejected, and an invalid empty filename shall remain rejected rather than authorizing a whole-repository discard. Desktop and mobile shall observe the same selected-file outcome through their existing Changes actions.
 
 ## Out of scope
 

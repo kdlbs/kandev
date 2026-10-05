@@ -1105,8 +1105,9 @@ func (g *GitOperator) Discard(ctx context.Context, paths []string) (*GitOperatio
 
 	// Get status for each file to determine how to discard it
 	for _, path := range paths {
-		statusArgs := []string{"status", "--porcelain", "--", path}
-		statusOutput, err := g.runGitCommand(ctx, statusArgs...)
+		statusArgs := []string{"status", "--porcelain", "--", literalGitPathspec(path)}
+		statusOutput, err := g.runGitCommandWithEnvironment(ctx,
+			map[string]string{gitLiteralPathspecEnv: "0", gitICasePathspecEnv: "0"}, statusArgs...)
 		if err != nil {
 			// If we can't get status, assume it's tracked and try to restore it
 			trackedFiles = append(trackedFiles, path)
@@ -1326,8 +1327,9 @@ func (g *GitOperator) Reset(ctx context.Context, commitSHA string, mode string) 
 
 func (g *GitOperator) discardUntrackedFiles(ctx context.Context, paths []string) (outputs, errors []string) {
 	for _, path := range paths {
-		resetArgs := []string{"rm", "--cached", "--force", "--", path}
-		resetOutput, resetErr := g.runGitCommand(ctx, resetArgs...)
+		resetArgs := []string{"rm", "--cached", "--force", "--", literalGitPathspec(path)}
+		resetOutput, resetErr := g.runGitCommandWithEnvironment(ctx,
+			map[string]string{gitLiteralPathspecEnv: "0", gitICasePathspecEnv: "0"}, resetArgs...)
 		if resetErr != nil && !strings.Contains(resetErr.Error(), "did not match any files") {
 			errors = append(errors, fmt.Sprintf("failed to unstage %s: %s", path, resetErr.Error()))
 		}
@@ -1346,8 +1348,12 @@ func (g *GitOperator) discardTrackedFiles(ctx context.Context, paths []string) (
 	if len(paths) == 0 {
 		return nil, nil
 	}
-	args := append([]string{"restore", "--source=HEAD", "--staged", "--worktree", "--"}, paths...)
-	output, err := g.runGitCommand(ctx, args...)
+	args := []string{"restore", "--source=HEAD", "--staged", "--worktree", "--"}
+	for _, path := range paths {
+		args = append(args, literalGitPathspec(path))
+	}
+	output, err := g.runGitCommandWithEnvironment(ctx,
+		map[string]string{gitLiteralPathspecEnv: "0", gitICasePathspecEnv: "0"}, args...)
 	if output != "" {
 		outputs = append(outputs, output)
 	}
