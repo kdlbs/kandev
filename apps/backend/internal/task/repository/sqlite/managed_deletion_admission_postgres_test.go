@@ -8,12 +8,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jmoiron/sqlx"
 	"github.com/kandev/kandev/internal/db"
 	"github.com/kandev/kandev/internal/plugins/state"
 	"github.com/kandev/kandev/internal/task/models"
 	managed "github.com/kandev/kandev/internal/task/repository/managedconversation"
 	"github.com/kandev/kandev/internal/task/repository/repoerrors"
+	tasksqlite "github.com/kandev/kandev/internal/task/repository/sqlite"
 	taskservice "github.com/kandev/kandev/internal/task/service"
 	"github.com/kandev/kandev/pkg/pluginsdk"
 	"github.com/stretchr/testify/require"
@@ -265,5 +267,114 @@ func TestManagedDeletionAdmissionPostgresRollback(t *testing.T) {
 			require.True(t, started)
 			t.Log("native rollback preserved task/primary/transcript and rejected effects; real commit marked deletion and notified once")
 		})
+	}
+}
+
+// @covers AC-PLUGINS-MANAGED-COORDINATION-013.7
+func TestManagedDeletionAdmissionPostgresSnapshotAuthority(t *testing.T) {
+	a, b, _ := newManagedAdmissionPostgresRepoPair(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	_, request, sessionID := seedNativeManagedDeletion(t, ctx, a, "pgx")
+	job := &models.TaskResourceCleanupJob{OperationID: "ordinary", TaskID: request.TaskID, Trigger: models.TaskResourceCleanupTriggerDelete, State: models.TaskResourceCleanupStatePrepared, ResourceSnapshot: "{}"}
+	require.NoError(t, a.CreateTaskResourceCleanupJob(ctx, job))
+	forged, err := managed.WithDeletionEnvelope("{}", managed.DeleteClaim{DeleteRequest: request, Version: 1, JobID: job.ID, Owner: "forged", Phase: managed.DeleteCommitted})
+	require.NoError(t, err)
+	require.ErrorIs(t, b.UpdateTaskResourceCleanupSnapshot(ctx, job.OperationID, forged), managed.ErrUnavailable)
+	stored, err := a.GetTaskResourceCleanupJob(ctx, job.ID)
+	require.NoError(t, err)
+	require.Equal(t, "{}", stored.ResourceSnapshot)
+	require.Equal(t, models.TaskResourceCleanupStatePrepared, stored.State)
+	require.NoError(t, b.UpdateTaskResourceCleanupSnapshot(ctx, job.OperationID, `{"workspace_id":"delete-ws"}`))
+	stored, err = a.GetTaskResourceCleanupJob(ctx, job.ID)
+	require.NoError(t, err)
+	require.JSONEq(t, `{"workspace_id":"delete-ws"}`, stored.ResourceSnapshot)
+	assertNativeDeletionRows(t, ctx, a, request, sessionID)
+}
+
+// @covers AC-PLUGINS-MANAGED-COORDINATION-013.5, AC-PLUGINS-MANAGED-COORDINATION-013.7
+func TestManagedConversationAdmissionPostgresBarrierErrors(t *testing.T) {
+	for _, mode := range []string{"storage", "cancel"} {
+		t.Run(mode, func(t *testing.T) {
+			a, b, observer := newManagedAdmissionPostgresRepoPair(t)
+			ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+			defer cancel()
+			_, request, sessionID := seedNativeManagedDeletion(t, ctx, a, "pgx")
+			input := managed.StateRequest{Identity: request.Identity, Kind: managed.PauseExact, Paused: true, ExpectedRevision: 1, OperationID: "pause", PayloadDigest: "pause-digest"}
+			if mode == "storage" {
+				_, err := a.DB().ExecContext(ctx, `ALTER TABLE task_resource_cleanup_jobs RENAME TO hidden_cleanup_jobs`)
+				require.NoError(t, err)
+				t.Cleanup(func() {
+					_, _ = a.DB().ExecContext(context.Background(), `ALTER TABLE IF EXISTS hidden_cleanup_jobs RENAME TO task_resource_cleanup_jobs`)
+				})
+				_, err = b.ChangeManagedConversationState(ctx, input)
+				require.NotErrorIs(t, err, managed.ErrBusy)
+				var native *pgconn.PgError
+				require.ErrorAs(t, err, &native)
+				require.Equal(t, "42P01", native.Code)
+				_, err = a.DB().ExecContext(ctx, `ALTER TABLE hidden_cleanup_jobs RENAME TO task_resource_cleanup_jobs`)
+				require.NoError(t, err)
+			} else {
+				cancelManagedBarrierPostgresRead(t, ctx, a.DB(), b, observer, input)
+			}
+			assertNativeDeletionRows(t, ctx, b, request, sessionID)
+			current, err := b.GetTask(ctx, request.TaskID)
+			require.NoError(t, err)
+			require.Equal(t, uint64(1), managed.Revision(current))
+			result, err := b.ChangeManagedConversationState(ctx, input)
+			require.NoError(t, err)
+			require.True(t, result.Changed)
+		})
+	}
+}
+
+func cancelManagedBarrierPostgresRead(t *testing.T, ctx context.Context, holderDB *sql.DB, waiter *tasksqlite.Repository, observer *sqlx.DB, input managed.StateRequest) {
+	t.Helper()
+	holderPID, waiterPID := hierarchyBackendPID(t, holderDB), hierarchyBackendPID(t, waiter.DB())
+	holder, err := holderDB.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelReadCommitted})
+	require.NoError(t, err)
+	attempt, cancel := context.WithCancel(ctx)
+	var workers sync.WaitGroup
+	t.Cleanup(func() { cancel(); _ = holder.Rollback(); workers.Wait() })
+	_, err = holder.ExecContext(ctx, `LOCK TABLE task_resource_cleanup_jobs IN ACCESS EXCLUSIVE MODE`)
+	require.NoError(t, err)
+	done := make(chan error, 1)
+	workers.Add(1)
+	go func() {
+		defer workers.Done()
+		_, err := waiter.ChangeManagedConversationState(attempt, input)
+		done <- err
+	}()
+	waitManagedBarrierPostgresTableLock(t, ctx, observer, holderPID, waiterPID)
+	cancel()
+	select {
+	case err = <-done:
+	case <-ctx.Done():
+		t.Fatal("cancelled native barrier did not settle", ctx.Err())
+	}
+	workers.Wait()
+	require.ErrorIs(t, err, context.Canceled)
+	require.NotErrorIs(t, err, managed.ErrBusy)
+	require.Zero(t, waiter.DB().Stats().InUse)
+	var held bool
+	require.NoError(t, observer.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM pg_locks l JOIN pg_class c ON c.oid=l.relation WHERE l.pid=$1 AND l.granted AND l.mode='AccessExclusiveLock' AND c.relname='task_resource_cleanup_jobs')`, holderPID).Scan(&held))
+	require.True(t, held, "cancellation settled while actual holder remains locked")
+	require.NoError(t, holder.Rollback())
+}
+
+func waitManagedBarrierPostgresTableLock(t *testing.T, ctx context.Context, observer *sqlx.DB, holderPID, waiterPID int) {
+	t.Helper()
+	for {
+		var waiting bool
+		require.NoError(t, observer.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM pg_locks l JOIN pg_class c ON c.oid=l.relation WHERE l.pid=$1 AND NOT l.granted AND c.relname='task_resource_cleanup_jobs') AND $2=ANY(pg_blocking_pids($1))`, waiterPID, holderPID).Scan(&waiting))
+		if waiting {
+			t.Logf("actual cleanup-table read wait: holder PID=%d waiter PID=%d", holderPID, waiterPID)
+			return
+		}
+		select {
+		case <-ctx.Done():
+			t.Fatal("native cleanup-table read never physically waited", ctx.Err())
+		case <-time.After(10 * time.Millisecond):
+		}
 	}
 }

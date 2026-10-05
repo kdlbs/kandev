@@ -15,10 +15,9 @@ the exact Host command used to delete it. This focused supplement extends
 [managed coordination](managed-coordination.md), especially
 `REQ-PLUGINS-MANAGED-COORDINATION-002`, without promoting the broad draft or
 claiming that atomic launch-settings admission already protects deletion.
-The paired [design](../system-design/managed-deletion-admission.md) records
-ROOT's selected exclusive admission boundary. Lifetime implementation was
-released and remains incomplete. ROOT reviewed and released the shared SQLite writer-entry extension;
-acceptance and delivery remain pending.
+The paired [design](../system-design/managed-deletion-admission.md) specifies
+exclusive admission, lifecycle preparation, physical deletion and reconciliation,
+including the accepted shared SQLite writer-entry invariant.
 
 ## Terminology
 
@@ -95,6 +94,12 @@ lifecycle cleanup and truthful command outcomes.
   uninstall deletion; uninstall shall detach their transcripts. Shared native
   paths shall exclude a foreign live managed-deletion owner where necessary;
   unrelated ordinary and legacy behavior shall retain its baseline semantics.
+  Workspace cascade shall preserve a foreign managed owner's task/session rows
+  at final native removal. Its initial listed-task reservations exclude that
+  owner before canvas preparation, but a newly created/admitted task after that
+  inventory may retain its rows after workspace canvas cleanup has already run.
+  This workspace-level partial-effects boundary preserves existing preparation
+  semantics and does not provide workspace-wide effect-free rejection.
 
 ## Out of scope
 

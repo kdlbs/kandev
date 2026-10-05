@@ -29,8 +29,9 @@ independent-service evidence and registered Host receipts. ROOT selected native
 exclusive admission with admitted partial-effects compatibility; physical
 removal is a separate commit. ROOT reviewed all four artifacts and issued the
 later explicit implementation release in this same primary. Implementation and
-local task-defined validation pass; delivery is incomplete. ROOT also reviewed the shared SQLite writer-factory extension and issued its
-later implementation release. Local acceptance checks pass; hosted review and delivery remain pending.
+local task-defined validation passed the first published head; delivery is incomplete. ROOT also reviewed the shared SQLite writer-factory extension and issued its
+later implementation release. The hosted fixture correction passes; remaining
+semantic findings, final lint and verified delivery remain pending.
 
 ## In scope
 
@@ -270,6 +271,28 @@ and registered Host selectors passed again. No native SQL or lock path changed
 after the joined SQLite/PG checks. The original full immutable-base lint passed
 after this correction. Hosted review and verified delivery remain pending.
 
+## Hosted SQLite policy-fixture correction
+
+The first published head passed the original full immutable-base lint. Hosted
+`TestGitflowAdmissionSQLite` then exposed a fixture schedule that gated policy
+SQL after BEGIN while waiting for another writer to finish before releasing it.
+Immediate writer entry makes that schedule impossible. The focused existing test
+reproduced its three failures before correction.
+
+Own the necessary correction in
+`apps/backend/internal/task/repository/sqlite/repository_branch_policy_admission_test.go`:
+establish the intended winner at actual BEGIN, observe the competing independent
+factory writer's native BEGIN worker across an independent SQLITE_BUSY probe,
+then release and join both operations. Preserve all policy rows, conflict/error
+assertions, rollback controls and context bounds; no production policy change,
+SQL predicate mock or timing-only wait. The corrected focused test passes under
+the existing race/resource caps. Original full lint acceptance on this additional
+test correction and refreshed hosted review/delivery remain pending.
+
+```bash
+(cd apps/backend && GOMAXPROCS=2 GOMEMLIMIT=512MiB timeout -k 10s 2m go test -trimpath -tags fts5 -race -p=1 ./internal/task/repository/sqlite -run '^TestGitflowAdmissionSQLite$' -count=1 -timeout=90s -v)
+```
+
 ## SQLite factory extension
 
 Reviewed and released: the shared `internal/db.OpenSQLite` writer uses
@@ -362,9 +385,95 @@ snapshots and busy-handler cancellation latency. No new page/meta/setting,
 README or screenshot update. Backend pure data/lifecycle only: no mobile/UI or
 localization change. Run public-doc validators after the focused wording change.
 
-Current result: factory, native SQLite/PG, lifecycle service, registered Host,
-affected compatibility, SQL guard and full store conformance checks pass.
+First-published-source result: factory, native SQLite/PG, lifecycle service,
+registered Host, affected compatibility, SQL guard and store conformance passed.
 Public reference and backend guidance are updated and documentation validation
-passes. Original full immutable-base lint passes; actual reviewed delivery remains pending.
+passes. Original full immutable-base lint passed the first published source;
+the hosted fixture and focused semantic corrections passed their affected
+checks and corrected-source original full lint. Current-head reviewed delivery
+remains pending.
 Keep order in progress. Exact receipts/diagnostic history are in the external
 plan, with all immutable proof archives retained read-only.
+
+
+## Focused semantic review correction scope
+
+Owned existing files: `sqlite/managed_conversation_admission.go` preserves native
+storage/cancellation errors and maps only `ErrTaskCleanupInProgress` to Busy;
+`sqlite/resource_cleanup.go` rejects incoming `managed_delete` envelopes before
+generic snapshot SQL while retaining the old-row fence. The claimed snapshot
+writer already compares old/incoming envelopes atomically; restore accepts no
+snapshot and excludes marked rows. No adjacent bypass or generic rewrite is
+introduced. `managed_deletion_admission_test.go` adds real native storage/cancel
+retry and SQL forged-marker/ordinary-snapshot controls. Host's existing admission
+test file proves registered Ensure returns Unavailable/incomplete receipt and
+retries the identical command successfully after actual driver read failure.
+Service's existing test file observes real startup prepared reconciliation via
+the subsequent successful native due query before stopping/joining the worker,
+while the original invocation remains admitted and live.
+
+`apps/backend/AGENTS.md` scopes the external-I/O prohibition to managed deletion;
+the pre-existing atomic artifact-removal callback and ADR audit remain intact.
+Pinned mattn v1.14.33 `BeginTx` forwards the selected cancellable context to
+`begin`/`SQLiteStmt.exec`. Every selected native wait has non-nil Done, so its
+C-worker child is mandatory; the Background-only synchronous branch is
+unreachable here. Do not add optional helper branches or replay the joined
+policy-fixture GREEN without a new causal change.
+
+Affected serial checks completed: native SQLite waits/conformance and new
+`TestManagedDeletionAdmissionTransientBarrier`/
+`TestManagedDeletionAdmissionSnapshotAuthority`; actual Host receipts/admitted
+failures and new `TestManagedDeletionHostTransientBarrierRetry`; service
+interleavings/failure/ownership recovery. Additional affected native/lifecycle
+controls use the existing catalog plus the exact snapshot compatibility names
+`TestPreparedCleanupSnapshotStartAndRunningReset`,
+`TestRestoreCancelledTaskResourceCleanupJobIfUnchangedFencesNewerClaim`, and
+`TestTaskResourceCleanupJobClaimAndRetry`; receipts remain external.
+
+Disposable `TestManagedDeletionWorkspaceOrderingDiagnostic` used real native
+independent services/owner reservation and real Canvas cleanup, with only a
+forwarding entry gate. All three orderings passed: foreign owner before initial
+inventory preserves canvas; generic listed-task reservation wins against managed
+admission; late-created/admitted task keeps rows/transcript/owner but loses its
+canvas before final cascade rejection. The joined diagnostic source is archived
+outside the repository and removed. No permanent cascade test or production
+policy change is included. Requirement .8/design record ROOT's accepted precise residual. The baseline already had canvas preparation before final
+cascade and postcommit handling for late inventory. A workspace-wide effect
+exclusion boundary is outside this reviewed order and requires separate design.
+
+Public-doc audit: the existing exact managed-delete Unavailable/partial-effects
+paragraph remains correct. The public reference now states that workspace deletion can fail after canvas
+cleanup while workspace/task/transcript rows remain. No UI/mobile rendering, interaction,
+locale, screenshots, build or browser checks arise from this backend data scope.
+
+ROOT-reviewed PG scope, completed: one exactly owned pinned PG16 fixture,
+tmpfs2GiB/memory3GiB/CPU2 with upfront ownership/image/all-mount/no-volume/private
+credential receipts, to prove the same incoming-snapshot SQL guard and current
+native error/owner outcomes. Extend actual independent PG tests for forged
+snapshot rejection/ordinary update and native storage/cancellation preservation;
+run only those plus existing managed settings admission wait/rollback and
+registration controls affected by the shared error-classification seam. No full conformance/factory or
+unaffected compatibility replay. Join clients before exact owned cleanup.
+
+ROOT released the accepted boundary and focused PG scope. Both PG and ONE
+corrected-source ORIGINAL full lint passed; normal hooked correction publication
+and current-head reviewed delivery remain pending actual successful results. Keep the same order in progress until verified merge and cleanup.
+
+
+Exact released PG names:
+`TestManagedDeletionAdmissionPostgresSnapshotAuthority` (new real SQL forged
+marker/current ordinary snapshot controls) and
+`TestManagedConversationAdmissionPostgresBarrierErrors` (new real private-schema
+table read failure, physical table-lock cancellation, current rows/rollback and
+same-operation native retry). Existing affected controls:
+`TestManagedConversationAdmissionPostgresWaits`,
+`TestManagedConversationAdmissionPostgresRegistrationFence`,
+`TestManagedConversationAdmissionPostgresRollback`. The native deletion admission/
+finalization primitives did not change in this correction, so their previously
+joined physical-wait/rollback evidence is retained without replay. Both new tests and the three affected existing selectors passed on one actual
+independent PG16 fixture. Physical table-lock cancellation settled while the
+holder remained locked; storage error restoration allowed identical native
+operation retry. All clients and private schemas were gone before exact owned
+container cleanup, and absence was verified. No skips or extra selectors were
+used. Corrected-source ORIGINAL full lint passed with zero issues and exit 0,
+using the immutable base and resource bounds. Reviewed delivery remains pending.

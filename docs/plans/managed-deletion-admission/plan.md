@@ -18,9 +18,13 @@ order owns existing-API RED, the selected typed lifecycle/native admission,
 participating writers, actual Host receipts, cleanup observations, and native
 SQLite/PG16 evidence. ROOT reviewed the selected four-artifact package and issued
 the later explicit implementation release in this same primary. The one order
-is in progress; local validation passes, while publication and verified merge remain outstanding.
-Current phase is implementation under ROOT's later reviewed DB-boundary release.
-Local acceptance checks pass; hosted review and verified delivery remain pending. The single order is in progress.
+is in progress; the first head is published, with a focused hosted fixture correction
+and semantic findings under review. Final source validation and verified merge remain outstanding.
+Current phase is focused PR review correction, with the accepted workspace partial-effects scope.
+Local acceptance checks passed the first published head. Focused fixture, native,
+Host and recovery corrections now pass their affected checks, including approved
+PG evidence and corrected-source original full lint. Current-head hosted review
+and verified delivery remain pending; the single order is in progress.
 
 Four owning documents comprise this package, plus the explicitly
 authorized [accepted shared-DB ADR](../../decisions/2026-10-05-sqlite-writer-transaction-admission.md).
@@ -246,3 +250,31 @@ lifecycle phase helpers preserve current validation, transaction ownership,
 attachment release and effects order after the reported complexity diagnostics.
 Publication, current-head hosted review and verified merge remain pending;
 the single order stays in progress.
+
+
+The first published head passed original full lint. Hosted SQLite policy admission
+coverage found an impossible post-BEGIN authorizer schedule after immediate writer
+entry. The same order owns the focused fixture correction and its existing-API
+RED/GREEN, preserving all policy outcomes and proving actual BEGIN waits across
+an independent BUSY probe. No production policy change is needed. Final lint for
+this added test correction and refreshed hosted review/verified delivery remain
+pending; the order remains in progress.
+
+
+## Focused review correction checkpoint
+
+The same order owns transient native error classification, rejection of incoming
+managed deletion authority in generic snapshots, actual independent startup
+recovery observation, and scoped backend guidance. Native SQLite and registered
+Host retry/receipt checks pass on corrected source; affected service checks pass.
+The original all-terminal monitor is joined. Its third failure is the aggregate
+Backend gate for the two known SQLite policy-fixture failures; the retained
+fixture RED/GREEN remains valid and is not replayed.
+
+Workspace cascade diagnosis confirms the late-created owner/canvas residual in
+the paired requirement/design. ROOT accepted that precise limitation; no workspace-wide effect barrier is
+implemented. The genuine finding is deferred to ROOT's next sequential improvement
+after this PR is merged, verified and archived. The two focused PG tests and three affected existing controls pass, with all
+clients/schemas joined and the owned fixture removed. Corrected-source original full lint passed with zero issues. Publication,
+current-head full semantic review, final merge and cleanup remain pending their
+actual successful gates.

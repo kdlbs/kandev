@@ -391,8 +391,15 @@ func TestManagedDeletionAdmissionOwnershipRecovery(t *testing.T) {
 				require.Equal(t, codes.Unavailable, status.Code(err))
 			case "independent_restart":
 				// Use a distinct production Service with a different native pool.
-				independent := NewService(Repos{Tasks: repos[1], Sessions: repos[1], ResourceCleanups: repos[1]}, NewMockEventBus(), lifecycle.logger, RepositoryDiscoveryConfig{})
+				recovery := &managedDeletionRecoveryObserver{Repository: repos[1], dueListed: make(chan struct{})}
+				independent := NewService(Repos{Tasks: repos[1], Sessions: repos[1], ResourceCleanups: recovery}, NewMockEventBus(), lifecycle.logger, RepositoryDiscoveryConfig{})
+				t.Cleanup(independent.StopTaskResourceCleanupWorker)
 				require.NoError(t, independent.StartTaskResourceCleanupWorker(ctx))
+				select {
+				case <-recovery.dueListed:
+				case <-ctx.Done():
+					t.Fatal("independent startup recovery did not finish prepared reconciliation")
+				}
 				independent.StopTaskResourceCleanupWorker()
 			}
 			currentClaim, job, err := repos[1].InspectManagedDeletion(ctx, request)
@@ -413,4 +420,19 @@ func TestManagedDeletionAdmissionOwnershipRecovery(t *testing.T) {
 			require.Error(t, err)
 		})
 	}
+}
+
+// Observe the real due query reached only after startup prepared reconciliation.
+type managedDeletionRecoveryObserver struct {
+	*sqliterepo.Repository
+	dueListed chan struct{}
+	once      sync.Once
+}
+
+func (r *managedDeletionRecoveryObserver) ListDueTaskResourceCleanupJobs(ctx context.Context, now time.Time, limit int) ([]*models.TaskResourceCleanupJob, error) {
+	jobs, err := r.Repository.ListDueTaskResourceCleanupJobs(ctx, now, limit)
+	if err == nil {
+		r.once.Do(func() { close(r.dueListed) })
+	}
+	return jobs, err
 }

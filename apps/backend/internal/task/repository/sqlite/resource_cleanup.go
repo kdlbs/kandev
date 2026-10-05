@@ -110,6 +110,9 @@ func (r *Repository) createTaskResourceCleanupJob(
 // inventory query so concurrent session/worktree creation is rejected while
 // the snapshot is being assembled.
 func (r *Repository) UpdateTaskResourceCleanupSnapshot(ctx context.Context, operationID, snapshot string) error {
+	if claim, err := managed.DeletionEnvelope(snapshot); err != nil || claim != nil {
+		return managed.ErrUnavailable
+	}
 	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
 		UPDATE task_resource_cleanup_jobs
 		SET resource_snapshot = ?, updated_at = ?

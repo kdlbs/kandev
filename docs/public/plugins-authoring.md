@@ -1429,6 +1429,9 @@ result; a successful replay requires durable evidence of that operation's
 deletion commit and cannot delete a replacement conversation. A reservation
 with an unproven owner remains unavailable rather than being stolen by replay.
 
+Workspace deletion can fail after canvas cleanup while the workspace, task and
+retained transcript rows remain.
+
 ```go
 if exact, ok := pluginsdk.HostV2(host); ok {
     capability, err := exact.GetCapabilityContext(ctx, workspaceID)

@@ -408,3 +408,71 @@ func waitManagedDeletionSQLiteSQL(t *testing.T, ctx context.Context, done <-chan
 		}
 	}
 }
+
+// @covers AC-PLUGINS-MANAGED-COORDINATION-013.5
+func TestManagedDeletionAdmissionTransientBarrier(t *testing.T) {
+	for _, mode := range []string{"storage", "cancel"} {
+		t.Run(mode, func(t *testing.T) {
+			a, b, _ := newManagedDeletionSQLitePair(t)
+			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+			defer cancel()
+			_, request, sessionID := seedNativeManagedDeletion(t, ctx, a, "sqlite3")
+			attempt, cancelAttempt := context.WithCancel(ctx)
+			defer cancelAttempt()
+			setNativeDeletionAuthorizer(t, a, func(op int, table, _, _ string) int {
+				if op == sqlite3.SQLITE_READ && table == "task_resource_cleanup_jobs" {
+					if mode == "cancel" {
+						cancelAttempt()
+					}
+					return sqlite3.SQLITE_DENY
+				}
+				return sqlite3.SQLITE_OK
+			})
+			input := managed.StateRequest{Identity: request.Identity, Kind: managed.PauseExact, Paused: true, ExpectedRevision: 1, OperationID: "pause", PayloadDigest: "pause-digest"}
+			_, err := a.ChangeManagedConversationState(attempt, input)
+			require.Error(t, err)
+			require.NotErrorIs(t, err, managed.ErrBusy)
+			if mode == "cancel" {
+				require.ErrorIs(t, err, context.Canceled)
+			}
+			setNativeDeletionAuthorizer(t, a, nil)
+			assertNativeDeletionRows(t, ctx, b, request, sessionID)
+			result, err := a.ChangeManagedConversationState(ctx, input)
+			require.NoError(t, err)
+			require.True(t, result.Changed)
+		})
+	}
+}
+
+func setNativeDeletionAuthorizer(t *testing.T, repo *tasksqlite.Repository, authorize func(int, string, string, string) int) {
+	t.Helper()
+	conn, err := repo.DB().Conn(context.Background())
+	require.NoError(t, err)
+	require.NoError(t, conn.Raw(func(raw interface{}) error {
+		raw.(*sqlite3.SQLiteConn).RegisterAuthorizer(authorize)
+		return nil
+	}))
+	require.NoError(t, conn.Close())
+}
+
+// @covers AC-PLUGINS-MANAGED-COORDINATION-013.7
+func TestManagedDeletionAdmissionSnapshotAuthority(t *testing.T) {
+	a, b, _ := newManagedDeletionSQLitePair(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	_, request, sessionID := seedNativeManagedDeletion(t, ctx, a, "sqlite3")
+	job := &models.TaskResourceCleanupJob{OperationID: "ordinary", TaskID: request.TaskID, Trigger: models.TaskResourceCleanupTriggerDelete, State: models.TaskResourceCleanupStatePrepared, ResourceSnapshot: "{}"}
+	require.NoError(t, a.CreateTaskResourceCleanupJob(ctx, job))
+	forged, err := managed.WithDeletionEnvelope("{}", managed.DeleteClaim{DeleteRequest: request, Version: 1, JobID: job.ID, Owner: "forged", Phase: managed.DeleteCommitted})
+	require.NoError(t, err)
+	require.ErrorIs(t, b.UpdateTaskResourceCleanupSnapshot(ctx, job.OperationID, forged), managed.ErrUnavailable)
+	stored, err := a.GetTaskResourceCleanupJob(ctx, job.ID)
+	require.NoError(t, err)
+	require.Equal(t, "{}", stored.ResourceSnapshot)
+	require.Equal(t, models.TaskResourceCleanupStatePrepared, stored.State)
+	require.NoError(t, b.UpdateTaskResourceCleanupSnapshot(ctx, job.OperationID, `{"workspace_id":"delete-ws"}`))
+	stored, err = a.GetTaskResourceCleanupJob(ctx, job.ID)
+	require.NoError(t, err)
+	require.JSONEq(t, `{"workspace_id":"delete-ws"}`, stored.ResourceSnapshot)
+	assertNativeDeletionRows(t, ctx, a, request, sessionID)
+}

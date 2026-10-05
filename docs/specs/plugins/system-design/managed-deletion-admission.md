@@ -17,14 +17,10 @@ Its atomic settings section explicitly excludes `DeleteManaged` preflight and
 removal. This supplement owns that gap rather than extending the earlier
 settings guarantee by implication.
 
-**Selected design under ROOT's reviewed implementation release.** ROOT reviewed
-all four selected artifacts and issued the later implementation INTERRUPT in
-this same primary. The single sequential order is in progress. The design is
-still draft until its implementation and acceptance checks pass. Existing
-[coordination ownership ADR](../../../decisions/2026-09-25-plugin-coordination-platform.md)
-continues to govern. The four owning artifacts remain; ROOT additionally
-requires one accepted shared-DB operational ADR and reconciliation of the
-existing Platform design. ROOT reviewed and released the DB extension; acceptance and delivery are pending.
+The existing [coordination ownership ADR](../../../decisions/2026-09-25-plugin-coordination-platform.md)
+continues to govern. The accepted shared SQLite writer-admission ADR and
+Platform persistence design define the DB operational boundary; the single
+linked work order owns implementation, acceptance evidence and delivery.
 
 ## Requirement mapping
 
@@ -105,7 +101,7 @@ managed delete claim by implication.
 
 ## Selected boundary and compatibility decision
 
-ROOT selected a committed exclusive authorization/exclusion boundary before
+A committed exclusive authorization/exclusion boundary precedes
 environment or canvas effects. Physical task/session removal remains a separate
 commit. A PREPARED barrier is reversible, non-runnable, and never represents a
 deleted task. Before admission commits, rejection is clean. After admission,
@@ -118,12 +114,12 @@ Keep the current environment-before-canvas-before-final-delete ordering and
 canvas-failure abort behavior. Reopening retained ownership after an admitted
 failure does not undo prior effects. A final-commit-first path, postcommit
 canvas cleanup engine, schema/protocol change, and general lifecycle rewrite
-are explicitly excluded. ROOT narrowed the promise at admission, not by
-renaming preparation or a cleanup job as irreversible physical deletion.
+are explicitly excluded. Authorization admission is distinct from irreversible
+physical deletion; preparation or a cleanup job does not establish removal.
 
 ## Required typed contracts and durable representation
 
-The following are planned internal names, not claims about existing symbols:
+The typed internal contracts are:
 
 - `managed.DeleteRequest`: `Identity`, expected revision, task creation-time
   incarnation, exact operation ID and payload digest. `DeleteManaged` retains
@@ -338,10 +334,11 @@ or arbitrary full snapshots outside an active exclusive admission.
   call from passing an early read, racing managed admission, then producing
   unowned canvas/environment effects. Shared native `DeleteTaskWithVacatedStep`
   rejects a foreign active owner and accepts only the validated owner path.
-  Existing cascade/workspace cleanup reservation also checks the owner before
-  task effects; it cannot overwrite/reuse a managed claim. Native reparent/child
-  admission respects the same task fence. These are narrow shared typed
-  primitives, not new deletion policies or cascades.
+  Workspace cleanup reserves every initially listed task before canvas
+  preparation; an existing foreign owner rejects there, and a generic prepared
+  reservation excludes later managed admission. Native final cascade separately
+  checks every current task, including late-created tasks. Native reparent/child
+  admission respects the same fence; no new cascade policy is introduced.
 - Managed-specific snapshot update/start/release/restore/inspection in
   `sqlite/resource_cleanup.go`, service outcome resolution and prepared-job
   restart dispatch in `resource_cleanup_jobs.go`, typed Service wiring in
@@ -353,6 +350,27 @@ or arbitrary full snapshots outside an active exclusive admission.
 Parent/hierarchy conflict is checked before admission effects and again at
 finalization; descendants are never implicitly cascade-deleted. For unsupported
 native adapters return Unavailable before admission, never optional fallback.
+
+## Workspace cascade scope and known limitation
+
+Workspace cleanup reserves each initially listed task before canvas preparation.
+An existing managed owner rejects there, and a generic reservation first
+excludes managed admission. Final native cascade checks current tasks again,
+preserving any foreign owner's workspace/task/primary/transcript and PREPARED
+claim without a task-deleted event.
+
+A late-created task can win managed admission after the initial inventory but
+before `CleanupWorkspaceCanvases`. Its final cascade rejection preserves rows
+and owner authority after actual canvas removal. This is a known partial-effects
+limitation. Baseline workspace cleanup already prepared canvases before final
+cascade/name/secret validation and completed late-task inventory after commit.
+Requirement .8 preserves that workspace boundary; .4's effect-free pre-admission
+rejection governs exact/ordinary retained-task deletion, not every workspace
+operation. Workspace-wide protection would need admission before inventory and
+canvas that also excludes task/managed creation until release; existing per-task
+claims cannot cover unknown future tasks. That separate improvement is deferred.
+Keep existing canvas-failure abort, avoid SQL locks over external I/O, and do not
+infer that final cascade rejection rolls back earlier canvas effects.
 
 ## Registered Host and receipt path
 
@@ -414,30 +432,25 @@ cleanup implementation is replaced. Native backend support is SQLite and PG16;
 unsupported/missing typed admission is unavailable before effects.
 
 The [single work order](../../../plans/managed-deletion-admission/task-01-guard-managed-deletion.md)
-defines exact compatibility tests, proposed new test names, independent-pool
+defines exact compatibility tests, independent-pool
 winner-ordering proof, rejected side-effect observations, actual Host receipts,
 and physical PG/SQLite waiting evidence. No local browser/E2E/build is planned.
-Pure-data mobile audit: no frontend or rendered interaction changes. Public
-docs audit: `docs/public/plugins-authoring.md`'s managed-conversation API reference
-needs a focused implementation-time paragraph: revision/detach rejection before
-exclusive admission has no deletion effects; admitted failure may retain task
-and transcript after partial environment/canvas preparation, is Unavailable,
-and does not prove physical removal; completed/proven deletion replay never
-deletes replacement identity. Uncertain owner/commit remains fail-closed and
-must not be retried with a different key as a recovery shortcut. This is reference
-wording, not a new UI or API. Root README and screenshot catalog need no changes;
-no new locale copy or mobile interaction is introduced. The design-only turn left public docs unchanged. ROOT has since released
-implementation; the focused reference wording is part of this order.
-
+Pure-data mobile audit: no frontend or rendered interaction changes. The public
+managed-conversation reference documents revision/detach rejection before
+admission, admitted partial preparation effects and Unavailable, operation-proven
+replay without replacement deletion, and the workspace canvas limitation.
+Uncertain owner/commit remains fail-closed; a different command key is not a
+recovery shortcut. Root README, screenshot catalog and localization need no
+changes. Backend-development guidance explains the writer/reader distinction
+and bounded native cancellation latency.
 
 ## SQLite writer factory boundary
 
-ROOT reviewed and released the shared `db.OpenSQLite` writer factory's
-supported `_txlock=immediate`, an explicit exception to the earlier no-global
-writer-policy scope. See the [accepted DB ADR](../../../decisions/2026-10-05-sqlite-writer-transaction-admission.md)
+The shared `db.OpenSQLite` writer factory uses supported `_txlock=immediate`
+as the accepted writer-entry boundary. See the [accepted DB ADR](../../../decisions/2026-10-05-sqlite-writer-transaction-admission.md)
 for caller/transaction audit, alternatives and cancellation ownership. The
 existing Platform persistence design links the same invariant; no duplicate
-incident requirement or second order. Its implementation follows the same in-progress order.
+incident requirement or second order.
 
 Genuine database/sql/sqlx transactions acquire the writer at BEGIN; current
 identity/revision/cleanup predicates, owner CAS and deleted marker stay in that
@@ -454,14 +467,12 @@ settle rollback and join before reuse. Tests must prove no accepted admission,
 no leaked connection, failed-entry/rollback reuse and real reader progress.
 Commit uncertainty follows the same owner/marker reconciliation, never absence.
 
-The earlier diagnostic establishes only the supported immediate-BEGIN comparison,
-not acceptance. Permanent factory RED reproduced stale reads before writer
-correction. Actual-factory acceptance now proves correlated physical BEGIN
-waiting/current-after-wait, bounded cancellation while still held, pool reuse
-and separate reader progress. Native current guard/owner conformance and
-admission/final-delete SQLite waits pass on the current correction. Current service/Host/PG/affected compatibility, SQL guard and full store
-conformance checks also pass. Full lint and reviewed delivery remain pending; exact
-receipts and debug history live in the external task plan.
+Acceptance requires permanent factory RED and actual-factory physical BEGIN
+waiting/current-after-wait, bounded cancellation while the holder remains locked,
+pool reuse and separate reader progress. Diagnostic collector success alone is
+not acceptance. Native guards, owner conformance, lifecycle/Host outcomes and
+affected compatibility retain their distinct verification boundaries; exact
+receipts and delivery results belong in the linked order and external task plan.
 
 Public-doc audit identified `docs/public/backend-development.md`'s persistence
 explanation: concise writer-BEGIN/deferred-reader and bounded cancellation

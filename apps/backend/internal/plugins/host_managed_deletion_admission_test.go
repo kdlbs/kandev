@@ -26,6 +26,7 @@ import (
 	"github.com/kandev/kandev/internal/testutil"
 	workflowrepo "github.com/kandev/kandev/internal/workflow/repository"
 	"github.com/kandev/kandev/pkg/pluginsdk"
+	"github.com/mattn/go-sqlite3"
 	"github.com/stretchr/testify/require"
 )
 
@@ -369,4 +370,49 @@ func TestManagedDeletionHostAdmittedFailures(t *testing.T) {
 			}
 		})
 	}
+}
+
+// @covers AC-PLUGINS-MANAGED-COORDINATION-013.5, AC-PLUGINS-MANAGED-COORDINATION-013.6
+func TestManagedDeletionHostTransientBarrierRetry(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	f := newManagedDeletionHostFixture(t, ctx)
+	f.lifecycle.StopTaskResourceCleanupWorker()
+	authorize := func(callback func(int, string, string, string) int) {
+		conn, err := f.database.Conn(ctx)
+		require.NoError(t, err)
+		require.NoError(t, conn.Raw(func(raw interface{}) error {
+			raw.(*sqlite3.SQLiteConn).RegisterAuthorizer(callback)
+			return nil
+		}))
+		require.NoError(t, conn.Close())
+	}
+	authorize(func(op int, table, _, _ string) int {
+		if op == sqlite3.SQLITE_READ && table == "task_resource_cleanup_jobs" {
+			return sqlite3.SQLITE_DENY
+		}
+		return sqlite3.SQLITE_OK
+	})
+	spec := f.spec
+	spec.RequestID, spec.IdempotencyKey = "update-request", "update"
+	spec.ExpectedRevision, spec.BasePrompt = f.descriptor.Revision, "retry instructions"
+	result, _, err := f.manager.Ensure(ctx, spec)
+	require.NoError(t, err)
+	require.Equal(t, pluginsdk.CommandUnavailable, result.Status)
+	require.Nil(t, result.Receipt)
+	authorize(nil)
+	var operation string
+	require.NoError(t, f.database.QueryRowContext(ctx, `SELECT operation_id FROM plugin_host_command_intents WHERE method='EnsureManagedAgentConversationExact' AND idempotency_key='update'`).Scan(&operation))
+	record, err := f.commands.Get(ctx, operation)
+	require.NoError(t, err)
+	require.Equal(t, "accepted", record.Receipt.State)
+	f.retained(t, ctx)
+	require.Zero(t, f.events.count())
+	result, descriptor, err := f.manager.Ensure(ctx, spec)
+	require.NoError(t, err)
+	require.Equal(t, pluginsdk.CommandApplied, result.Status)
+	require.Equal(t, uint64(2), descriptor.Revision)
+	record, err = f.commands.Get(ctx, operation)
+	require.NoError(t, err)
+	require.Equal(t, "completed", record.Receipt.State)
 }

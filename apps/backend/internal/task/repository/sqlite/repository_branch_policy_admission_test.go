@@ -3,6 +3,8 @@ package sqlite
 import (
 	"context"
 	"path/filepath"
+	"runtime"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -16,7 +18,7 @@ import (
 	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 )
 
-func sqliteAdmissionPair(t *testing.T) (*Repository, *Repository) {
+func sqliteAdmissionPair(t *testing.T) (*Repository, *Repository, *sqlx.DB) {
 	t.Helper()
 	filename := filepath.Join(t.TempDir(), "admission.db")
 	open := func() *sqlx.DB {
@@ -29,7 +31,13 @@ func sqliteAdmissionPair(t *testing.T) (*Repository, *Repository) {
 	primary, err := NewWithDB(primaryDB, primaryDB, nil)
 	require.NoError(t, err)
 	peerDB := open()
-	return primary, NewWithInitializedDB(peerDB, peerDB, nil)
+	var busyTimeout int
+	require.NoError(t, peerDB.QueryRow(`PRAGMA busy_timeout`).Scan(&busyTimeout))
+	require.Equal(t, 5000, busyTimeout)
+	observer := open()
+	_, err = observer.Exec(`PRAGMA busy_timeout=0`)
+	require.NoError(t, err)
+	return primary, NewWithInitializedDB(peerDB, peerDB, nil), observer
 }
 
 func gateSQLiteAdmissionWrite(t *testing.T, ctx context.Context, repo *Repository) (<-chan struct{}, func()) {
@@ -77,7 +85,7 @@ func customAdmissionPolicy(repositoryID string) *models.RepositoryBranchPolicy {
 // @covers AC-WORKSPACES-BRANCH-POLICIES-002.3, AC-WORKSPACES-BRANCH-POLICIES-002.4
 func TestGitflowAdmissionSQLite(t *testing.T) {
 	t.Run("ordinary_first", func(t *testing.T) {
-		primary, peer := sqliteAdmissionPair(t)
+		primary, peer, observer := sqliteAdmissionPair(t)
 		seedAdmissionRepository(t, primary, "sqlite-admission")
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		t.Cleanup(cancel)
@@ -87,13 +95,12 @@ func TestGitflowAdmissionSQLite(t *testing.T) {
 		_, err = holder.ExecContext(ctx, `INSERT INTO repository_branch_policies (`+repositoryBranchPolicyColumns+`)
 		 VALUES ('ordinary', 'sqlite-admission', 'Custom', '', 'release', 'custom/{title}-{suffix}', 'release', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`)
 		require.NoError(t, err)
-		ready, resume := gateSQLiteAdmissionWrite(t, ctx, peer)
 		work := startAdmissionWork(t, ctx, func(ctx context.Context) error {
 			return peer.CreateRepositoryBranchPoliciesIfEmpty(ctx, "sqlite-admission", admissionPolicies("sqlite-admission", "main", "develop"))
 		})
-		awaitAdmissionGate(t, ctx, ready)
+		t.Cleanup(func() { cancel(); _ = holder.Rollback(); <-work.done })
+		assertAdmissionSQLiteBeginWait(t, ctx, peer, observer, work)
 		require.NoError(t, holder.Commit())
-		resume()
 		joinAdmissionWork(t, ctx, work)
 		require.ErrorIs(t, work.err, repoerrors.ErrRepositoryBranchPoliciesExist)
 		rows, err := primary.ListRepositoryBranchPolicies(ctx, "sqlite-admission")
@@ -109,14 +116,14 @@ func TestGitflowAdmissionSQLite(t *testing.T) {
 		t.Run(name, func(t *testing.T) { checkSQLiteAdmissionOrder(t, ordinary) })
 	}
 	t.Run("rollback_and_errors", func(t *testing.T) {
-		primary, _ := sqliteAdmissionPair(t)
+		primary, _, _ := sqliteAdmissionPair(t)
 		checkAdmissionErrors(t, primary)
 	})
 	t.Run("misleading_constraint_message", checkAdmissionConstraintMessage)
 }
 
 func checkAdmissionConstraintMessage(t *testing.T) {
-	repo, _ := sqliteAdmissionPair(t)
+	repo, _, _ := sqliteAdmissionPair(t)
 	seedAdmissionRepository(t, repo, "constraint-message")
 	ctx := context.Background()
 	_, err := repo.db.ExecContext(ctx, `CREATE TRIGGER admission_constraint_message BEFORE INSERT ON repository_branch_policies
@@ -135,21 +142,27 @@ func checkAdmissionConstraintMessage(t *testing.T) {
 }
 
 func checkSQLiteAdmissionOrder(t *testing.T, ordinary bool) {
-	primary, peer := sqliteAdmissionPair(t)
+	primary, peer, observer := sqliteAdmissionPair(t)
 	seedAdmissionRepository(t, primary, "sqlite-order")
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	t.Cleanup(cancel)
-	ready, resume := gateSQLiteAdmissionWrite(t, ctx, peer)
+	ready, resume := gateSQLiteAdmissionWrite(t, ctx, primary)
+	winner := admissionPolicies("sqlite-order", "main", "develop")
+	first := startAdmissionWork(t, ctx, func(ctx context.Context) error {
+		return primary.CreateRepositoryBranchPoliciesIfEmpty(ctx, "sqlite-order", winner)
+	})
+	awaitAdmissionGate(t, ctx, ready)
 	work := startAdmissionWork(t, ctx, func(ctx context.Context) error {
 		if ordinary {
 			return peer.CreateRepositoryBranchPolicy(ctx, customAdmissionPolicy("sqlite-order"))
 		}
 		return peer.CreateRepositoryBranchPoliciesIfEmpty(ctx, "sqlite-order", admissionPolicies("sqlite-order", "release", "next"))
 	})
-	awaitAdmissionGate(t, ctx, ready)
-	winner := admissionPolicies("sqlite-order", "main", "develop")
-	require.NoError(t, primary.CreateRepositoryBranchPoliciesIfEmpty(ctx, "sqlite-order", winner))
+	t.Cleanup(func() { cancel(); resume(); <-first.done; <-work.done })
+	assertAdmissionSQLiteBeginWait(t, ctx, peer, observer, work)
 	resume()
+	joinAdmissionWork(t, ctx, first)
+	require.NoError(t, first.err)
 	joinAdmissionWork(t, ctx, work)
 	if ordinary {
 		require.NoError(t, work.err)
@@ -159,6 +172,49 @@ func checkSQLiteAdmissionOrder(t *testing.T, ordinary bool) {
 	rows, err := primary.ListRepositoryBranchPolicies(ctx, "sqlite-order")
 	require.NoError(t, err)
 	assertAdmissionRows(t, rows, winner, ordinary)
+}
+
+// Observe the same native BEGIN worker across an independent BUSY probe while
+// the intended winner owns SQLite's writer; SQL authorizer entry follows BEGIN.
+func assertAdmissionSQLiteBeginWait(t *testing.T, ctx context.Context, peer *Repository, observer *sqlx.DB, work *admissionWork) {
+	t.Helper()
+	var worker string
+	for worker == "" {
+		worker = admissionSQLiteBeginWorker()
+		select {
+		case <-work.done:
+			t.Fatalf("policy writer returned before physical BEGIN wait: %v", work.err)
+		case <-ctx.Done():
+			t.Fatal("policy writer BEGIN wait not observed", ctx.Err())
+		default:
+			runtime.Gosched()
+		}
+	}
+	require.Equal(t, 1, peer.db.Stats().InUse)
+	_, err := observer.ExecContext(ctx, `UPDATE tasks SET id=id WHERE 0`)
+	var busy sqlite3.Error
+	require.ErrorAs(t, err, &busy)
+	require.Equal(t, sqlite3.ErrBusy, busy.Code)
+	require.Equal(t, worker, admissionSQLiteBeginWorker(), "same physical BEGIN worker across held-writer BUSY probe")
+	t.Logf("policy writer %s waits inside driver BEGIN while independent SQL probe returns SQLITE_BUSY", worker)
+}
+
+func admissionSQLiteBeginWorker() string {
+	buffer := make([]byte, 1<<20)
+	sections := strings.Split(string(buffer[:runtime.Stack(buffer, true)]), "\n\n")
+	for _, parent := range sections {
+		policy := strings.Contains(parent, ".CreateRepositoryBranchPoliciesIfEmpty(") || strings.Contains(parent, ".CreateRepositoryBranchPolicy(")
+		if !policy || !strings.Contains(parent, "(*SQLiteConn).begin(") {
+			continue
+		}
+		owner := strings.Fields(parent)[1]
+		for _, child := range sections {
+			if strings.Contains(child, "_Cfunc__sqlite3_step_row_internal(") && strings.Contains(child, "created by github.com/mattn/go-sqlite3.(*SQLiteStmt).exec in goroutine "+owner+"\n") {
+				return owner + "/" + strings.Fields(child)[1]
+			}
+		}
+	}
+	return ""
 }
 
 func assertAdmissionRows(t *testing.T, rows, winner []*models.RepositoryBranchPolicy, ordinary bool) {
