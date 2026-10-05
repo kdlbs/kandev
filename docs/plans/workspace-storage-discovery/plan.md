@@ -169,6 +169,8 @@ Implementation verification passed on 2026-10-05:
 - The PR documentation coverage preflight passed again after lifecycle wording was synchronized: `covered`, no errors.
 - PR fixup RED evidence: with permission bits enforced as `nobody`, unreadable unclassified parents and scratch siblings both aborted analysis before the fix. The semantic-marker and recognized-root boundary regressions passed against the existing implementation.
 - PR fixup verification: desktop and mobile workspace storage E2E each passed after adding an isolated baseline; targeted ESLint passed for the helper and all three affected specs. The saved-view recovery E2E's 43.99994px measurement now rounds to hundredth-pixel precision; its focused test passed three repetitions.
+- The refreshed full normal CI shard replay completed: 248 passed, 3 skipped, 0 failed (251 tests total).
+- Against `main` tip `513ea8279b0a448f20b2aa0bc6485edf7455fb74`, synthetic merge `e80b40e42646629c9e7fac4098ee3ea71e9ef97a` was conflict-free. The workspace race suite, backend build, and targeted golangci-lint passed (0 issues). The focused Postgres cancellation test command exited zero, but its `cancel` subtest skipped because `KANDEV_TEST_POSTGRES_DSN` was unset; current `main` contains the bounded connection-release assertion.
 
 ## Risks
 

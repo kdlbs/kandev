@@ -152,3 +152,10 @@ PR fixup verification: the permission-probed regressions passed as `nobody`, the
 suite passed, and `make build` succeeded. Desktop and mobile storage E2E each passed after the
 baseline-relative byte assertions were added. The focused saved-view recovery E2E passed three
 repetitions after its 44px assertion was rounded to hundredth-pixel precision.
+
+The refreshed full normal CI shard replay completed with 248 passed, 3 skipped, and 0 failed
+(251 tests total). Against `main` tip `513ea8279b0a448f20b2aa0bc6485edf7455fb74`, synthetic
+merge `e80b40e42646629c9e7fac4098ee3ea71e9ef97a` was conflict-free. The workspace race suite,
+backend build, and targeted golangci-lint passed (0 issues). The focused Postgres cancellation
+test command exited zero, but its `cancel` subtest skipped because `KANDEV_TEST_POSTGRES_DSN` was
+unset; current `main` contains the bounded connection-release assertion.
