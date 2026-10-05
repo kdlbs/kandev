@@ -20,6 +20,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/stretchr/testify/require"
@@ -513,95 +514,97 @@ func TestAgentctlResolverPrunesOldCacheOnVerifiedHelperResolution(t *testing.T) 
 }
 
 func TestAgentctlResolverCachePruneDoesNotDelayDeadlineBoundLaunch(t *testing.T) {
-	const version = "1.4.0"
-	const commit = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-	platform := SSHRemotePlatform{GOOS: "linux", GOARCH: "amd64"}
-	payload := []byte("current cached helper")
-	bundle, home := t.TempDir(), t.TempDir()
-	writeResolverManifest(t, bundle, version, commit, "standard", platform.String(), payload)
-	manifest, _, err := ReadRemoteHelperManifest(bundle, version, commit)
-	if err != nil {
-		t.Fatal(err)
-	}
-	record, _ := remoteHelperForPlatform(manifest, platform)
-	cachePath := filepath.Join(home, "cache", remoteHelperCacheDir, version, "linux-amd64", record.SHA256, "agentctl")
-	if err := os.MkdirAll(filepath.Dir(cachePath), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(cachePath, payload, 0o755); err != nil {
-		t.Fatal(err)
-	}
+	// Virtual time tests the blocked inventory boundary independently of host load.
+	synctest.Test(t, func(t *testing.T) {
+		const version = "1.4.0"
+		const commit = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+		platform := SSHRemotePlatform{GOOS: "linux", GOARCH: "amd64"}
+		payload := []byte("current cached helper")
+		bundle, home := t.TempDir(), t.TempDir()
+		writeResolverManifest(t, bundle, version, commit, "standard", platform.String(), payload)
+		manifest, _, err := ReadRemoteHelperManifest(bundle, version, commit)
+		if err != nil {
+			t.Fatal(err)
+		}
+		record, _ := remoteHelperForPlatform(manifest, platform)
+		cachePath := filepath.Join(home, "cache", remoteHelperCacheDir, version, "linux-amd64", record.SHA256, "agentctl")
+		if err := os.MkdirAll(filepath.Dir(cachePath), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(cachePath, payload, 0o755); err != nil {
+			t.Fatal(err)
+		}
 
-	resolver := NewAgentctlResolverWithOptions(newResolverTestLogger(t), AgentctlResolverOptions{
-		Version: version, Commit: commit, BundleDir: bundle, HomeDir: home,
-	})
-	inventoryStarted := make(chan struct{})
-	inventoryFinished := make(chan struct{})
-	releaseInventory := make(chan struct{})
-	var releaseOnce sync.Once
-	unblockInventory := func() { releaseOnce.Do(func() { close(releaseInventory) }) }
-	t.Cleanup(unblockInventory)
-	deadlineSeen := make(chan bool, 1)
-	resolver.SetCacheMountInventory(func(ctx context.Context) ([]string, error) {
-		_, hasDeadline := ctx.Deadline()
-		deadlineSeen <- hasDeadline
-		close(inventoryStarted)
-		defer close(inventoryFinished)
+		resolver := NewAgentctlResolverWithOptions(newResolverTestLogger(t), AgentctlResolverOptions{
+			Version: version, Commit: commit, BundleDir: bundle, HomeDir: home,
+		})
+		inventoryStarted := make(chan struct{})
+		inventoryFinished := make(chan struct{})
+		releaseInventory := make(chan struct{})
+		var releaseOnce sync.Once
+		unblockInventory := func() { releaseOnce.Do(func() { close(releaseInventory) }) }
+		t.Cleanup(unblockInventory)
+		deadlineSeen := make(chan bool, 1)
+		resolver.SetCacheMountInventory(func(ctx context.Context) ([]string, error) {
+			_, hasDeadline := ctx.Deadline()
+			deadlineSeen <- hasDeadline
+			close(inventoryStarted)
+			defer close(inventoryFinished)
+			select {
+			case <-releaseInventory:
+				return nil, nil
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			}
+		})
+
+		ctx, cancel := context.WithTimeout(context.Background(), 250*time.Millisecond)
+		type resolution struct {
+			path string
+			err  error
+		}
+		resolved := make(chan resolution, 1)
+		go func() {
+			path, err := resolver.ResolveRemoteBinaryContext(ctx, platform, nil)
+			resolved <- resolution{path: path, err: err}
+		}()
 		select {
-		case <-releaseInventory:
-			return nil, nil
+		case got := <-resolved:
+			if got.err != nil || got.path != cachePath {
+				t.Fatalf("resolution = %q, %v; want %q", got.path, got.err, cachePath)
+			}
 		case <-ctx.Done():
-			return nil, ctx.Err()
+			t.Fatal("helper resolution waited for background cache cleanup until the launch deadline")
 		}
-	})
-
-	ctx, cancel := context.WithTimeout(context.Background(), 250*time.Millisecond)
-	type resolution struct {
-		path string
-		err  error
-	}
-	resolved := make(chan resolution, 1)
-	go func() {
-		path, err := resolver.ResolveRemoteBinaryContext(ctx, platform, nil)
-		resolved <- resolution{path: path, err: err}
-	}()
-	select {
-	case got := <-resolved:
-		if got.err != nil || got.path != cachePath {
-			t.Fatalf("resolution = %q, %v; want %q", got.path, got.err, cachePath)
+		cacheRoot := filepath.Join(home, "cache", remoteHelperCacheDir)
+		t.Cleanup(func() {
+			cancel()
+			unblockInventory()
+			waitForResolverCachePrune(t, resolver)
+			require.Eventually(t, func() bool {
+				markers, err := filepath.Glob(filepath.Join(cacheRoot, remoteHelperCacheActiveDir, "lease-*.json"))
+				return err == nil && len(markers) == 0
+			}, 5*time.Second, 10*time.Millisecond, "canceled launch must release its cache lease before temporary directory cleanup")
+		})
+		select {
+		case <-inventoryStarted:
+		case <-time.After(5 * time.Second):
+			cancel()
+			t.Fatal("cache prune did not start its mount inventory")
 		}
-	case <-ctx.Done():
-		t.Fatal("helper resolution waited for background cache cleanup until the launch deadline")
-	}
-	cacheRoot := filepath.Join(home, "cache", remoteHelperCacheDir)
-	t.Cleanup(func() {
+		if !<-deadlineSeen {
+			cancel()
+			t.Fatal("background mount inventory has no time bound")
+		}
 		cancel()
+		select {
+		case <-inventoryFinished:
+			t.Fatal("caller cancellation unexpectedly canceled the owned background sweep")
+		default:
+		}
 		unblockInventory()
 		waitForResolverCachePrune(t, resolver)
-		waitForResolverCacheLeaseRelease(t, cacheRoot, cachePath)
 	})
-	select {
-	case <-inventoryStarted:
-	case <-time.After(5 * time.Second):
-		cancel()
-		t.Fatal("cache prune did not start its mount inventory")
-	}
-	if !<-deadlineSeen {
-		cancel()
-		t.Fatal("background mount inventory has no time bound")
-	}
-	cancel()
-	select {
-	case <-inventoryFinished:
-		t.Fatal("caller cancellation unexpectedly canceled the owned background sweep")
-	default:
-	}
-	unblockInventory()
-	waitForResolverCachePrune(t, resolver)
-	require.Eventually(t, func() bool {
-		markers, err := filepath.Glob(filepath.Join(home, "cache", remoteHelperCacheDir, remoteHelperCacheActiveDir, "lease-*.json"))
-		return err == nil && len(markers) == 0
-	}, 5*time.Second, 10*time.Millisecond, "canceled launch must release its cache lease before temporary directory cleanup")
 }
 
 func waitForResolverCachePrune(t *testing.T, resolver *AgentctlResolver) {
