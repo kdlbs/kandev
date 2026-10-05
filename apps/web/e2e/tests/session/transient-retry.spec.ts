@@ -108,9 +108,8 @@ test.describe("transient provider error (529 Overloaded) retry", () => {
     // status row instead of depending on a websocket notification. The row is
     // the durable contract and remains observable when a busy gateway drops a
     // short-lived notification.
-    const firstNoticePromise = waitForRetryNotice(apiClient, sessionId, 1);
     await session.sendMessage("/overloaded:9");
-    const firstNotice = await firstNoticePromise;
+    const firstNotice = await waitForRetryNotice(apiClient, sessionId, 1);
     const firstMetadata = firstNotice.metadata as Record<string, unknown>;
     expect(firstMetadata).toMatchObject({ attempt: 1, retry_in_seconds: 5 });
     const createdAt = Date.parse(String(firstNotice.created_at));

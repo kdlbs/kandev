@@ -34,6 +34,7 @@ async function setupTask(
     repository_ids: [seedData.repositoryId],
   });
   const session = await openTaskSession(testPage, taskTitle);
+  await session.clickTab("Files");
   return session;
 }
 

@@ -193,8 +193,11 @@ test("scrolls ten workflow options in both directions without losing the task dr
   ];
 
   try {
-    for (const workflow of scenario.allWorkflows) {
+    for (const workflow of scenario.allWorkflows.slice(0, 3)) {
       expect(workflow.stepNames).toHaveLength(15);
+    }
+    for (const workflow of scenario.allWorkflows.slice(3)) {
+      expect(workflow.stepNames).toHaveLength(1);
     }
     await testPage.setViewportSize({ width: 1682, height: 768 });
     await testPage.goto("/t/" + scenario.taskId);

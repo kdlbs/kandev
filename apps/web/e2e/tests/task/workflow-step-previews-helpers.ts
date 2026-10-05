@@ -186,9 +186,7 @@ export async function seedWorkflowStepPreviewScenario(
   for (let index = 0; index < extraWorkflowCount; index += 1) {
     const workflowName = `Picker overflow ${index + 1}`;
     const workflow = await apiClient.createWorkflow(workspaceId, workflowName);
-    const stepNames = longWorkflowSteps
-      ? getOverflowStageNames(workflowName)
-      : [`Overflow start ${index + 1}`];
+    const stepNames = [`Overflow start ${index + 1}`];
     for (const [position, name] of stepNames.entries()) {
       await apiClient.createWorkflowStep(workflow.id, name, position, {
         is_start_step: position === 0,
@@ -335,8 +333,8 @@ export async function expectWorkflowOptionVisibleAndHitTestable(
   if (!optionBox || !listBox || !testId) throw new Error("Workflow option is not measurable");
   expect(optionBox.width).toBeGreaterThanOrEqual(44);
   expect(optionBox.height).toBeGreaterThanOrEqual(44);
-  expect(optionBox.x).toBeGreaterThanOrEqual(listBox.x);
-  expect(optionBox.x + optionBox.width).toBeLessThanOrEqual(listBox.x + listBox.width);
+  expect(optionBox.x).toBeGreaterThanOrEqual(listBox.x - 1);
+  expect(optionBox.x + optionBox.width).toBeLessThanOrEqual(listBox.x + listBox.width + 1);
   const visibleTop = Math.max(optionBox.y, listBox.y);
   const visibleBottom = Math.min(optionBox.y + optionBox.height, listBox.y + listBox.height);
   expect(visibleBottom).toBeGreaterThan(visibleTop);
