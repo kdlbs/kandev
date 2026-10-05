@@ -35,6 +35,7 @@ Agents owns provider command identity and classification. The shared composer co
 - **AC-AGENTS-COMMAND-AUTOCOMPLETE-001.5:** Enter, Tab, pointer, and touch selection shall prepare an editable draft. Selection shall preserve focus and shall not send or queue a message. Explicit send and Escape shall retain the existing composer behavior.
 - **AC-AGENTS-COMMAND-AUTOCOMPLETE-001.6:** Task chat and quick chat shall use the same presentation and invocation rules. Phone rows shall retain a minimum 44-pixel hit target and visible classification and state chips. Long descriptions shall not overlap the name or chips, and the menu shall remain inside the visible viewport.
 - **AC-AGENTS-COMMAND-AUTOCOMPLETE-001.7:** When classification is absent or unsupported, existing command display and invocation shall remain available. A command from another provider with a literal dollar prefix shall retain that prefix unless its provider contract identifies it as a skill.
+- **AC-AGENTS-COMMAND-AUTOCOMPLETE-001.8:** Pasted rich text shall not create a structured command chip from command-shaped HTML. Paste shall preserve the visible plain-text clipboard content, and command chips shall come from autocomplete selection or a valid restored draft.
 
 ### REQ-AGENTS-COMMAND-AUTOCOMPLETE-002: Action meaning and confirmed mode state
 
@@ -44,9 +45,10 @@ Agents owns provider command identity and classification. The shared composer co
 
 - **AC-AGENTS-COMMAND-AUTOCOMPLETE-002.1:** When verified provider metadata identifies a supported mode command, its autocomplete row shall show a localized `Mode` chip. A command name alone shall not establish mode behavior.
 - **AC-AGENTS-COMMAND-AUTOCOMPLETE-002.2:** When confirmed session configuration matches the mode command's target value, the row shall show a localized `Active` chip. For Codex `/plan`, it shall describe turning plan mode off. Confirmed default mode shall omit `Active` and describe turning plan mode on.
-- **AC-AGENTS-COMMAND-AUTOCOMPLETE-002.3:** When configuration is missing, unconfirmed, or outside the supported values, the row shall omit `Active` and use a neutral description. Draft selection and saved preferences shall not establish active mode state. Confirmed state from one session shall not affect another session's rows.
+- **AC-AGENTS-COMMAND-AUTOCOMPLETE-002.3:** When configuration is missing, unconfirmed, or outside the supported values, the row shall omit `Active` and use a neutral description. Draft selection and saved preferences shall not establish active mode state. A new execution startup shall hide the prior execution's confirmation until a fresh settled snapshot arrives. Confirmed state from one session shall not affect another session's rows.
 - **AC-AGENTS-COMMAND-AUTOCOMPLETE-002.4:** When a command advertises an argument hint, autocomplete shall show it as secondary text after its description. For `/goal`, the row shall retain its description and advertised hint without an invented category chip.
 - **AC-AGENTS-COMMAND-AUTOCOMPLETE-002.5:** Metadata-derived chips and hints shall be noninteractive parts of the selectable row. Selection shall prepare a draft without changing session configuration or invoking an action. Sending shall retain the provider's command handling. Unsupported metadata shall leave the command selectable with its existing description and hint.
+- **AC-AGENTS-COMMAND-AUTOCOMPLETE-002.6:** An authoritative partial provider configuration update shall refresh the confirmed values it contains while preserving other confirmed values for the same execution. Model-only, explicitly unsettled, and different-execution data shall not establish confirmation.
 
 ## Related contracts
 

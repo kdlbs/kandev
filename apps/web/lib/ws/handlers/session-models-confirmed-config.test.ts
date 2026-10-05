@@ -8,6 +8,7 @@ import { mapAvailableCommandToSlashCommand } from "@/components/task/chat/slash-
 import { registerSessionModelsHandlers } from "./session-models";
 
 const providerModelId = "gpt-5.6-sol";
+const executionId = "execution-1";
 const collaborationModeId = "collaboration_mode";
 const collaborationModeName = "Collaboration Mode";
 
@@ -188,7 +189,7 @@ describe("live provider updates", () => {
       makeMessage(
         makePayload(providerModelId, {
           config_options_settled: true,
-          agent_execution_id: "execution-1",
+          agent_execution_id: executionId,
           config_options: [modeOption("default")],
         }),
       ),
@@ -199,11 +200,49 @@ describe("live provider updates", () => {
       const providerUpdate = {
         ...makePayload(providerModelId, { config_options: [modeOption(value)] }),
         config_options_source: "provider_update",
-        agent_execution_id: "execution-1",
+        agent_execution_id: executionId,
       } as SessionModelsPayload;
       handler(makeMessage(providerUpdate));
       expect(menuCommand().modeState).toBe(value === "plan" ? "active" : "default");
     }
+  });
+
+  it("preserves confirmed values omitted from a partial provider update", () => {
+    const store = makeStore();
+    const handler = registerSessionModelsHandlers(store)["session.models_updated"]!;
+
+    handler(
+      makeMessage(
+        makePayload(providerModelId, {
+          config_options_settled: true,
+          agent_execution_id: executionId,
+          config_options: [modeOption("plan")],
+        }),
+      ),
+    );
+
+    handler(
+      makeMessage(
+        makePayload(providerModelId, {
+          agent_execution_id: executionId,
+          config_options_source: "provider_update",
+          config_options: [
+            {
+              type: "select",
+              id: "approval_policy",
+              name: "Approval Policy",
+              current_value: "on-request",
+              options: [],
+            },
+          ],
+        }),
+      ),
+    );
+
+    expect(store.getState().sessionModels.bySessionId["session-1"].confirmedConfigOptions).toEqual({
+      [collaborationModeId]: "plan",
+      approval_policy: "on-request",
+    });
   });
 });
 

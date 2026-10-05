@@ -388,6 +388,40 @@ function providerUpdateMatchesConfirmedExecution(
   );
 }
 
+function authoritativeConfigProjection(
+  payload: SessionModelsPayload,
+  executionId: string | undefined,
+  agentExecutionId: string | undefined,
+  agentctlStatus: string | undefined,
+  existing: SessionModelsState["bySessionId"][string] | undefined,
+): ConfirmedConfigProjection | undefined {
+  if (!isAuthoritativeConfigUpdate(payload)) return undefined;
+  if (
+    !providerUpdateMatchesConfirmedExecution(
+      executionId,
+      agentExecutionId,
+      agentctlStatus,
+      existing?.confirmedConfigOptionsExecutionId,
+    )
+  ) {
+    return confirmedConfigProjection();
+  }
+
+  const updateValues = providerConfigOptionValues(payload.config_options);
+  const confirmedValues =
+    payload.config_options_source === "provider_update"
+      ? { ...existing?.confirmedConfigOptions, ...updateValues }
+      : updateValues;
+  return confirmedConfigProjection(confirmedValues, executionId);
+}
+
+function matchesPendingStartupConfirmation(
+  pending: SessionModelsState["bySessionId"][string]["pendingConfirmedConfigOptions"],
+  payloadExecutionId: string | undefined,
+): boolean {
+  return Boolean(pending && (!payloadExecutionId || payloadExecutionId === pending.executionId));
+}
+
 function confirmedConfigOptionsForUpdate(
   state: AppState,
   sessionId: string,
@@ -396,10 +430,13 @@ function confirmedConfigOptionsForUpdate(
   existing: SessionModelsState["bySessionId"][string] | undefined,
 ): ConfirmedConfigProjection {
   const agentctl = state.sessionAgentctl?.itemsBySessionId?.[sessionId];
-  const payloadExecutionId = payload.agent_execution_id;
-  const pending = pendingConfirmedConfigForPayload(existing, payloadExecutionId);
+  const pendingStartupConfirmation = existing?.pendingConfirmedConfigOptions;
+  if (matchesPendingStartupConfirmation(pendingStartupConfirmation, payload.agent_execution_id)) {
+    return confirmedConfigProjection(undefined, undefined, pendingStartupConfirmation);
+  }
+  const pending = pendingConfirmedConfigForPayload(existing, payload.agent_execution_id);
   const stale = staleExecutionConfigProjection(
-    payloadExecutionId,
+    payload.agent_execution_id,
     agentctl?.agentExecutionId,
     existing,
     pending,
@@ -409,29 +446,21 @@ function confirmedConfigOptionsForUpdate(
     return confirmedConfigProjection(undefined, undefined, pending);
   }
 
-  const executionId = payloadExecutionId ?? agentctl?.agentExecutionId;
+  const executionId = payload.agent_execution_id ?? agentctl?.agentExecutionId;
   if (payload.config_options_settled === true) {
     return confirmedConfigProjection(
       providerConfigOptionValues(payload.config_options),
       executionId,
     );
   }
-  if (isAuthoritativeConfigUpdate(payload)) {
-    if (
-      providerUpdateMatchesConfirmedExecution(
-        executionId,
-        agentctl?.agentExecutionId,
-        agentctl?.status,
-        existing?.confirmedConfigOptionsExecutionId,
-      )
-    ) {
-      return confirmedConfigProjection(
-        providerConfigOptionValues(payload.config_options),
-        executionId,
-      );
-    }
-    return confirmedConfigProjection();
-  }
+  const authoritative = authoritativeConfigProjection(
+    payload,
+    executionId,
+    agentctl?.agentExecutionId,
+    agentctl?.status,
+    existing,
+  );
+  if (authoritative) return authoritative;
 
   return existingConfirmedConfigProjection(existing);
 }

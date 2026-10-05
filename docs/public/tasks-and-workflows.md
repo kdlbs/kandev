@@ -545,6 +545,7 @@ Verified mode-command metadata adds a **Mode** chip. Kandev shows **Active**
 only when the session has confirmed that mode. A command can also show its
 advertised argument hint, such as `/goal`'s supported arguments. These labels
 and hints describe the command; they do not apply it until you send the draft.
+Pasted rich text does not create a command chip; Kandev uses its visible plain text.
 
 ## Answer clarification questions
 

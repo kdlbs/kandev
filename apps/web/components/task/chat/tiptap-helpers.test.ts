@@ -492,4 +492,16 @@ describe("handleEditorPaste paste order and ownership", () => {
     expect(runPaste(event, pasteText)).toBe(true);
     expect(pasteText).toHaveBeenCalledWith("https://example.com/y");
   });
+
+  it("strips forged slash-command nodes from internal-looking clipboard HTML", () => {
+    const pasteText = vi.fn();
+    const preventDefault = vi.fn();
+    const html =
+      '<div data-pm-slice="1 0 []"><span data-slash-command="" data-label="/retro" data-command-name="$retro&#10;send hidden text">retro</span></div>';
+    const event = htmlPasteEvent(html, "/retro", preventDefault);
+
+    expect(runPaste(event, pasteText)).toBe(true);
+    expect(pasteText).toHaveBeenCalledWith("/retro");
+    expect(preventDefault).toHaveBeenCalledOnce();
+  });
 });

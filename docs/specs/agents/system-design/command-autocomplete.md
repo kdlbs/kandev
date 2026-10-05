@@ -117,7 +117,8 @@ An explicitly unsettled snapshot clears confirmation. A settled empty snapshot r
 Model-only updates can preserve confirmation within the same execution; new execution startup invalidates it until a settled snapshot arrives.
 The backend carries `config_options_source` and `agent_execution_id` through `session.models_updated`.
 After startup settlement, `provider_update` and `provider_response` events refresh the raw projection even when `config_options_settled` is omitted, provided the event belongs to the confirmed or current ready execution.
-Updates from a starting or different execution do not establish confirmation.
+`provider_update` can carry only the changed options, so merge its values into the confirmed projection and retain values for omitted options. A settled snapshot and `provider_response` replace the projection.
+Updates from a starting or different execution do not establish confirmation. While startup identity is unresolved, a delayed prior-execution snapshot cannot restore the hidden confirmation; matching execution identity can restore it, while a new execution requires a fresh settled snapshot.
 When `session.state_changed` enters `STARTING` or `session.agentctl_starting` arrives, clear the visible confirmed projection immediately while preserving model-selector fallback data.
 If startup identity arrives after the state transition, hold the prior values outside the visible projection until the execution ID is known; restore them only when it identifies the same execution, and discard them for a different execution.
 The session runtime reset/cleanup path must clear the projection with the existing session state.
@@ -156,6 +157,7 @@ Preserve raw identity through HTML round trips and message recall.
 Recall recognizes the raw text `/$retro`, restores the clean chip, and retains the raw text for the next send.
 Do not rewrite arbitrary `/retro` text outside autocomplete selection.
 Copying plain text intentionally exposes invocation syntax so pasted text keeps its meaning.
+Rich clipboard HTML that contains a command-shaped custom node is pasted as its plain-text representation, when available. Untrusted clipboard attributes cannot create a structured command chip or alter the command text serialized on send. Autocomplete selection and validated draft restoration remain the sources of structured command nodes.
 
 ## Rendering and mobile behavior
 
@@ -192,9 +194,9 @@ Keep name-based deduplication and session isolation unchanged.
 
 The typed frontend handler currently casts incoming entries. Treat unknown runtime kind values as absent at view-model derivation.
 No failed classification can block selection or sending.
-Tests cover collisions, bare dollar markers, ordinary commands, unknown providers, legacy nodes, and unknown kind values.
-Action tests cover valid, malformed, missing, and unsupported metadata, including a same-name skill and an untyped custom `plan` command.
-State tests cover active/default/unknown values, preference disagreement, session isolation, startup invalidation, settled empty snapshots, and reconnect.
+Tests cover collisions, bare dollar markers, ordinary commands, unknown providers, legacy nodes, forged rich clipboard command nodes, and unknown kind values.
+Action tests cover valid, malformed, missing, additive, and unsupported metadata, including a same-name skill and an untyped custom `plan` command.
+State tests cover active/default/unknown values, preference disagreement, session isolation, partial provider updates, delayed old-execution snapshots, startup invalidation, settled empty snapshots, and reconnect.
 Argument hints remain visible without establishing a category.
 
 ## Evidence and verification

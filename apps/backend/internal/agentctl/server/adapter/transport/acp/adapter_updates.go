@@ -834,7 +834,7 @@ func normalizeAvailableCommandMetadata(agentID string, cmd acp.AvailableCommand)
 		return "", nil
 	}
 	metadata, ok := cmd.Meta["commandAction"].(map[string]any)
-	if !ok || len(metadata) != 5 {
+	if !ok {
 		return "", nil
 	}
 	if !isCodexPlanCommandAction(metadata) {

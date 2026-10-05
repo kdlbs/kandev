@@ -18,11 +18,8 @@ import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import { searchWorkspaceFiles } from "@/lib/ws/workspace-files";
 import { EditorContextProvider } from "./editor-context";
-import { EntityReferenceMenu } from "./entity-reference-menu";
-import { MentionMenu } from "./mention-menu";
-import { MessageHistorySearch } from "./message-history-search";
+import { TipTapPopups } from "./tiptap-popups";
 import { useReverseSearchSelectHandler } from "./use-reverse-search-select-handler";
-import { SlashCommandMenu } from "./slash-command-menu";
 import { buildTaskMentionItems } from "./task-mention-items";
 import { createMessageHistorySelector, type MessageHistoryEntry } from "./message-history";
 import { useDrainOlderMessages } from "./use-drain-older-messages";
@@ -47,6 +44,7 @@ import { useEntityReferenceComposer } from "./use-entity-reference-composer";
 import { EntityReferenceSuggestionPluginKey } from "./tiptap-entity-reference-suggestion";
 import type { ImagePasteIssue } from "./clipboard-attachments";
 import { useTranslation } from "react-i18next";
+import { useShallow } from "zustand/react/shallow";
 import { rankMentionItems, recordChatMentionSelection } from "@/lib/chat-mention-recency";
 
 const RAW_DRAIN = { rawPagination: true } as const;
@@ -214,8 +212,10 @@ function useSuggestionConfigs({
   const agentCommands = useAppStore((state) =>
     sessionId ? state.availableCommands.bySessionId[sessionId] : undefined,
   );
-  const confirmedConfigOptions = useAppStore((state) =>
-    sessionId ? state.sessionModels.bySessionId[sessionId]?.confirmedConfigOptions : undefined,
+  const confirmedConfigOptions = useAppStore(
+    useShallow((state) =>
+      sessionId ? state.sessionModels.bySessionId[sessionId]?.confirmedConfigOptions : undefined,
+    ),
   );
   const slashCommands = useMemo((): SlashCommand[] => {
     if (!agentCommands || agentCommands.length === 0) return [];
@@ -488,78 +488,11 @@ export const TipTapInput = forwardRef<TipTapInputHandle, TipTapInputProps>(funct
   );
 });
 
-type TipTapPopupsProps = {
-  menu: ReturnType<typeof useMenuHandlers>;
-  slashCommands: SlashCommand[];
-  entityReferences: ReturnType<typeof useEntityReferenceComposer>;
-  overlay: Omit<ReturnType<typeof useReverseSearchOverlay>, "editorWrapperRef" | "editorRef">;
-  history: readonly MessageHistoryEntry[];
-  isDraining: boolean;
-  onReverseSearchSelect: (index: number) => void;
-  onEntityReferenceClose: () => void;
-};
-
-function TipTapPopups({
-  menu,
-  slashCommands,
-  entityReferences,
-  overlay,
-  history,
-  isDraining,
-  onReverseSearchSelect,
-  onEntityReferenceClose,
-}: TipTapPopupsProps) {
-  const byId = new Map(slashCommands.map((command) => [command.id, command]));
-  const currentSlashCommands = menu.slashMenu.items.map((item) => byId.get(item.id) ?? item);
-  return (
-    <>
-      <MentionMenu
-        isOpen={menu.mentionMenu.isOpen}
-        isLoading={false}
-        clientRect={menu.mentionMenu.clientRect}
-        items={menu.mentionMenu.items}
-        query={menu.mentionMenu.query}
-        selectedIndex={menu.mentionSelectedIndex}
-        onSelect={menu.handleMentionSelect}
-        onClose={menu.handleMentionClose}
-        setSelectedIndex={menu.setMentionSelectedIndex}
-      />
-      <EntityReferenceMenu
-        isOpen={entityReferences.isOpen}
-        clientRect={entityReferences.clientRect}
-        groups={entityReferences.groups}
-        query={entityReferences.query}
-        selectedIndex={entityReferences.selectedIndex}
-        isSearching={entityReferences.isSearching}
-        error={entityReferences.error}
-        onRetry={entityReferences.retry}
-        onSelect={entityReferences.selectReference}
-        onClose={onEntityReferenceClose}
-        setSelectedIndex={entityReferences.setSelectedIndex}
-      />
-      <SlashCommandMenu
-        isOpen={menu.slashMenu.isOpen}
-        clientRect={menu.slashMenu.clientRect}
-        commands={currentSlashCommands}
-        selectedIndex={menu.slashSelectedIndex}
-        onSelect={menu.handleSlashSelect}
-        onClose={menu.handleSlashClose}
-        setSelectedIndex={menu.setSlashSelectedIndex}
-      />
-      {overlay.isReverseSearchOpen && overlay.reverseSearchContainer && (
-        <MessageHistorySearch
-          history={history}
-          isLoadingOlder={isDraining}
-          anchorRect={overlay.reverseSearchAnchor}
-          container={overlay.reverseSearchContainer}
-          onClose={overlay.closeReverseSearch}
-          onEscapeDismiss={overlay.closeReverseSearchAndFocusEditor}
-          onSelect={onReverseSearchSelect}
-        />
-      )}
-    </>
-  );
-}
+export type MenuHandlers = ReturnType<typeof useMenuHandlers>;
+export type ReverseSearchOverlay = Omit<
+  ReturnType<typeof useReverseSearchOverlay>,
+  "editorWrapperRef" | "editorRef"
+>;
 
 function useMessageHistoryForSession(sessionId: string | null): MessageHistoryEntry[] {
   // The memoized selector keeps its snapshot stable while agent messages

@@ -1088,6 +1088,7 @@ func TestConvertAvailableCommands_CodexSkillsAndSupportedCommandActions(t *testi
 		"value":        "plan",
 		"resetValue":   "default",
 		"presentation": "state",
+		"label":        "Plan mode",
 	}
 	update := &acp.SessionAvailableCommandsUpdate{
 		AvailableCommands: []acp.AvailableCommand{

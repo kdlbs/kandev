@@ -16,11 +16,13 @@ acceptance_criteria:
   - AC-AGENTS-COMMAND-AUTOCOMPLETE-001.5
   - AC-AGENTS-COMMAND-AUTOCOMPLETE-001.6
   - AC-AGENTS-COMMAND-AUTOCOMPLETE-001.7
+  - AC-AGENTS-COMMAND-AUTOCOMPLETE-001.8
   - AC-AGENTS-COMMAND-AUTOCOMPLETE-002.1
   - AC-AGENTS-COMMAND-AUTOCOMPLETE-002.2
   - AC-AGENTS-COMMAND-AUTOCOMPLETE-002.3
   - AC-AGENTS-COMMAND-AUTOCOMPLETE-002.4
   - AC-AGENTS-COMMAND-AUTOCOMPLETE-002.5
+  - AC-AGENTS-COMMAND-AUTOCOMPLETE-002.6
 system_design:
   - ../../specs/agents/system-design/command-autocomplete.md
 ---
@@ -39,6 +41,7 @@ Separate clean visible names from raw command serialization before adding the lo
 - Lifecycle cache and reconnect transport checks.
 - Shared view-model derivation, clean/raw filtering, and raw-key collision handling.
 - TipTap display, selection, HTML attributes, copying, draft restoration, and recall.
+- Treat rich clipboard command-shaped HTML as plain visible text; keep structured command identity limited to autocomplete selection and valid draft restoration.
 - Menu badge slot and complete locale entries; unit and component tests.
 - Validated Codex plan action metadata, confirmed configuration projection, Mode/Active display, and argument hints.
 
@@ -51,7 +54,8 @@ Separate clean visible names from raw command serialization before adding the lo
 
 1. Codex `$retro` shows `/retro` with a Skill badge; untyped and unknown provider shapes keep their established behavior.
 2. Clean display names never replace raw invocation names through selection, transport, serialization, or recall.
-3. Confirmed mode state and argument hints appear without configuration changes on selection; focused composer and state tests pass.
+3. Confirmed mode state and argument hints appear without configuration changes on selection; partial live provider updates preserve omitted confirmed options, and startup fences delayed prior-execution snapshots.
+4. Forged rich clipboard command markup remains plain visible text and cannot alter serialized command text.
 
 ## ASCII UI preview
 
@@ -106,6 +110,7 @@ Include any additional TS/TSX files in the targeted ESLint command if implementa
 - `apps/web/lib/state/slices/session-runtime/session-runtime-view-actions.ts` and `model-hydration.ts` for confirmed projection propagation and invalidation
 - `apps/web/components/task/chat/slash-command-types.ts` and adjacent tests
 - `apps/web/components/task/chat/tiptap-input.tsx`, `tiptap-suggestion.tsx`, and adjacent tests
+- `apps/web/components/task/chat/tiptap-popups.tsx` for stable suggestion-to-menu item mapping
 - `apps/web/components/task/chat/tiptap-slash-command-utils.ts`, `tiptap-helpers.ts`, and adjacent tests
 - `apps/web/components/task/chat/tiptap-slash-command-extension.tsx` and adjacent tests
 - `apps/web/components/task/chat/slash-command-menu.tsx`, proposed `slash-command-menu.test.tsx`, and `popup-menu.tsx`
@@ -141,3 +146,5 @@ None. Read the scoped backend, agentctl, and web AGENTS.md instructions before i
 - Focused frontend tests passed: 12 files, 115 tests. Targeted ESLint, web typecheck, `i18n:check`, and `i18n:ratchet` passed.
 - Review remediation carries `config_options_source` and `agent_execution_id` through the session-model WS event. Post-startup provider updates refresh confirmed raw values without a settlement marker only for the confirmed/current execution; model-only and unsettled updates retain their defined behavior. `STARTING` immediately hides prior confirmation, while matching execution identity protects reconnect ordering. The reconnect helper also retains its typed-nil manager guard.
 - Remediation verification passed: backend reconnect and WS identity tests, `make -C apps/backend lint` (0 issues), frontend state/composer suite (11 files, 115 tests), web typecheck, and targeted ESLint. The managed E2E run rebuilt backend and web assets successfully.
+- PR-review regressions now cover delayed settled snapshots during unresolved startup identity, preservation of omitted keys in partial `provider_update` events, a typed-nil manager, forged clipboard metadata, and additive Codex action fields. The focused regression suite passed 37 tests across 3 files; ACP and reconnect Go tests passed; backend lint reported 0 issues; web typecheck and targeted ESLint passed without warnings.
+- Popup mapping memoizes the command map and current option list in `tiptap-popups.tsx`; the confirmed configuration selector uses shallow equality.

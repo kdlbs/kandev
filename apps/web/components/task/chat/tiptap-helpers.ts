@@ -4,6 +4,7 @@ import { isEntityReference } from "@/lib/entity-references/message-references";
 import { formatSlashCommandLabel, normalizeSlashCommandName } from "./tiptap-slash-command-utils";
 import type { SlashCommand } from "./slash-command-types";
 import { readClipboardAttachments, type ImagePasteIssue } from "./clipboard-attachments";
+import type { EditorView } from "@tiptap/pm/view";
 
 // ── JSON node types ─────────────────────────────────────────────────
 
@@ -334,6 +335,11 @@ function shouldStripPastedFormatting(clipboardData: DataTransfer): boolean {
   return !html.includes('data-pm-slice="');
 }
 
+function containsPastedSlashCommandNode(html: string): boolean {
+  const document = new DOMParser().parseFromString(html, "text/html");
+  return document.querySelector("span[data-slash-command]") !== null;
+}
+
 /**
  * When the clipboard payload is a single hyperlink (e.g. a link copied from a
  * browser page), return its href. Such a copy's plain text is often the link's
@@ -354,56 +360,85 @@ function singleLinkHref(html: string): string | null {
   return payloadText === linkText ? href : null;
 }
 
+function handleClipboardAttachments(
+  event: ClipboardEvent,
+  clipboardData: DataTransfer,
+  onImagePasteRef: React.RefObject<((files: File[], issue?: ImagePasteIssue) => void) | undefined>,
+): boolean {
+  const { files, issue } = readClipboardAttachments(clipboardData);
+  if (files.length > 0) {
+    event.preventDefault();
+    onImagePasteRef.current?.(files);
+    return true;
+  }
+  if (!issue) return false;
+
+  event.preventDefault();
+  onImagePasteRef.current?.([], issue);
+  return true;
+}
+
+function pasteSlashCommandAsText(
+  view: EditorView,
+  event: ClipboardEvent,
+  clipboardData: DataTransfer,
+  text: string | undefined,
+): boolean {
+  const html = clipboardData.getData("text/html");
+  if (!containsPastedSlashCommandNode(html)) return false;
+
+  event.preventDefault();
+  if (text) view.pasteText(text);
+  return true;
+}
+
+function pasteUnformattedRichText(
+  view: EditorView,
+  event: ClipboardEvent,
+  clipboardData: DataTransfer,
+  text: string | undefined,
+): boolean {
+  if (!shouldStripPastedFormatting(clipboardData)) return false;
+  const replacement = singleLinkHref(clipboardData.getData("text/html")) ?? text;
+  if (!replacement) return false;
+
+  event.preventDefault();
+  view.pasteText(replacement);
+  return true;
+}
+
+function pasteCodeFence(
+  view: EditorView,
+  event: ClipboardEvent,
+  text: string | undefined,
+): boolean {
+  if (!text?.includes("```")) return false;
+  const segments = parseCodeFences(text);
+  if (!segments.some((segment) => segment.type === "code")) return false;
+
+  event.preventDefault();
+  insertCodeFenceNodes(view, segments);
+  return true;
+}
+
 export function handleEditorPaste(
-  view: import("@tiptap/pm/view").EditorView,
+  view: EditorView,
   event: ClipboardEvent,
   onImagePasteRef: React.RefObject<((files: File[], issue?: ImagePasteIssue) => void) | undefined>,
 ): boolean {
-  // 1. File paste (images and other files)
   const clipboardData = event.clipboardData;
-  if (clipboardData) {
-    const { files, issue } = readClipboardAttachments(clipboardData);
-    if (files.length > 0) {
-      event.preventDefault();
-      onImagePasteRef.current?.(files);
-      return true;
-    }
-    if (issue) {
-      event.preventDefault();
-      onImagePasteRef.current?.([], issue);
-      return true;
-    }
+  if (clipboardData && handleClipboardAttachments(event, clipboardData, onImagePasteRef)) {
+    return true;
   }
 
   const text = clipboardData?.getData("text/plain");
-
-  // 2. Strip formatting from externally pasted rich content. This runs before
-  // the code-fence branch so external HTML is not misread as a markdown code
-  // block. A single copied hyperlink pastes its href (the plain text is often
-  // the link title, not the URL); other rich content pastes as plain text.
-  // Either keeps the URL that the default HTML parse would otherwise drop.
-  // `pasteText` fires a synthetic empty-clipboard paste, so this handler
-  // re-enters once, no-ops, and ProseMirror inserts the text with its own
-  // inline/block handling.
-  if (clipboardData && shouldStripPastedFormatting(clipboardData)) {
-    const replacement = singleLinkHref(clipboardData.getData("text/html")) ?? text;
-    if (replacement) {
-      event.preventDefault();
-      view.pasteText(replacement);
-      return true;
-    }
+  if (clipboardData && pasteSlashCommandAsText(view, event, clipboardData, text)) {
+    return true;
   }
 
-  // 3. Markdown code fence paste (plain-text or internal pastes; external rich
-  // content was handled above).
-  if (text && text.includes("```")) {
-    const segments = parseCodeFences(text);
-    if (segments.some((s) => s.type === "code")) {
-      event.preventDefault();
-      insertCodeFenceNodes(view, segments);
-      return true;
-    }
+  if (clipboardData && pasteUnformattedRichText(view, event, clipboardData, text)) {
+    return true;
   }
 
-  return false;
+  return pasteCodeFence(view, event, text);
 }

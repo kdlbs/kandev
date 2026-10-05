@@ -83,7 +83,8 @@ The row remains a single selectable target of at least 44 pixels.
 The existing popup bounds and software-keyboard positioning apply.
 Required structure: clean name, adjacent noninteractive badge, distinct raw command identity, and existing option semantics.
 Spacing and icons are illustrative. Copy is localized.
-Maps to AC-AGENTS-COMMAND-AUTOCOMPLETE-001.1, .2, .3, .6, .7, and AC-AGENTS-COMMAND-AUTOCOMPLETE-002.1 through .5.
+Maps to AC-AGENTS-COMMAND-AUTOCOMPLETE-001.1, .2, .3, .6, .7, and AC-AGENTS-COMMAND-AUTOCOMPLETE-002.1 through .6.
+Rich clipboard markup containing a command-shaped node is inserted as plain visible text, so untrusted HTML cannot create a command chip or change the sent command. This also maps to AC-AGENTS-COMMAND-AUTOCOMPLETE-001.8.
 
 ### UI-02: Selected skill draft
 
@@ -104,29 +105,29 @@ Maps to AC-AGENTS-COMMAND-AUTOCOMPLETE-001.4 and .5.
 | .1, .2, .7 | `conversion_test.go`: Codex `$retro`, bare `$`, builtin `review`, Claude `retro`, OpenCode `retro`, unknown-provider `$retro` |
 | .1, .7 | Lifecycle cached-command tests retain kind; reconnect event includes kind without altering name |
 | .1, .2, .3, .7 | `slash-command-types.test.ts` and `tiptap-suggestion.test.ts`: clean/raw matching, collisions, absent and unknown kind |
-| .4 | `tiptap-slash-command-extension.test.ts`, `tiptap-helpers.test.ts`, and editor history tests: raw serialization, copying, HTML round trip, recall, surrounding text, legacy fallback |
+| .4, .8 | `tiptap-slash-command-extension.test.ts`, `tiptap-helpers.test.ts`, and editor history tests: raw serialization, copying, HTML round trip, forged command-shaped clipboard markup, recall, surrounding text, legacy fallback |
 | .1, .5, .6 | Menu component tests: localized badge, option semantics, unchanged non-skill rows and focus behavior |
 
 For REQ-AGENTS-COMMAND-AUTOCOMPLETE-002:
 
 | Criteria | Required targeted evidence |
 | --- | --- |
-| .1, .5 | `conversion_test.go`: complete supported plan action, malformed and unknown action shapes, unknown providers, and `$plan` skill precedence |
-| .2, .3 | `session-models.test.ts`, `session-models-startup.test.ts`, and `session-models-user-selection.test.ts`: confirmed projection before saved preference overlays, invalidation, settled empty snapshot, and session isolation |
-| .1 through .5 | Composer/menu tests: Mode and Active chips, active/default/unknown descriptions, live confirmed updates, goal hints without a category, and selection without configuration mutation |
+| .1, .5 | `conversion_test.go`: complete supported plan action, additive fields, malformed and unknown action shapes, unknown providers, and `$plan` skill precedence |
+| .2, .3, .6 | `session-models.test.ts`, `session-models-startup.test.ts`, and `session-models-user-selection.test.ts`: confirmed projection before saved preference overlays, partial provider updates, delayed old-execution snapshots, invalidation, settled empty snapshot, and session isolation |
+| .1 through .6 | Composer/menu tests: Mode and Active chips, active/default/unknown descriptions, live and partial confirmed updates, goal hints without a category, and selection without configuration mutation |
 
 Test names must describe the behavior and identify applicable ACs where their ownership is unclear.
 
 ## E2E tests
 
-- `tests/chat/slash-command-composer.spec.ts`, project `chromium`: clean menu name and Skill badge, Enter/Tab selection without send, raw explicit send, recall, and quick chat. Covers .1, .3, .4, and .5.
+- `tests/chat/slash-command-composer.spec.ts`, project `chromium`: clean menu name and Skill badge, Enter/Tab selection without send, raw explicit send, recall, quick chat, forged clipboard HTML, partial provider updates in an open menu, and startup snapshot ordering. Covers .1, .3, .4, .5, .8, and .2.3/.2.6.
 - `tests/chat/mobile-slash-command-composer.spec.ts`, project `mobile-chrome`: clean skill row, touch selection without send, raw explicit send, visible badge, long descriptions, viewport containment, and measured 44-pixel row hit target. Covers .1, .4, .5, and .6.
 - Include a mixed list with `retro` and `$retro` so identical display names retain separate selectable entries. Covers .2, .3, and .7.
 - In both projects, seed the validated plan action and settled configuration. Prove Active only for confirmed `plan`, with default and unknown-state variants.
 - Capture outbound `/plan` on explicit send. Assert selection alone sends no message and changes no configuration.
 - Show `/goal` with its argument hint and no category chip. Cover phone hint wrapping, multiple badge widths, and menu containment.
 
-These mode/state/hint scenarios cover AC-AGENTS-COMMAND-AUTOCOMPLETE-002.1 through .5.
+These mode/state/hint scenarios cover AC-AGENTS-COMMAND-AUTOCOMPLETE-002.1 through .6.
 
 ## Work orders
 
@@ -149,12 +150,12 @@ Implementation and browser verification completed on 2026-10-05:
 
 Review remediation verification on 2026-10-05:
 
-- The managed E2E build rebuilt backend and Vite web assets successfully. Focused backend regressions passed for typed-nil reconnect handling and provider-update WS identity; backend lint reported 0 issues.
-- The focused frontend suite passed 115 tests across 11 files. Web typecheck and targeted ESLint passed.
-- The complete desktop composer E2E suite passed 7 tests; the mobile composer suite passed 2 tests. New desktop cases cover a live `/plan` send followed by `provider_update` default → plan → default updates, and mode invalidation/restoration across execution startup.
-- The updated system design passed catalog validation (351 decisions and 1367 specifications) and full specification lint. `git diff --check` passed.
+- Fixed all review findings: authoritative partial provider updates merge into the confirmed projection; startup hides and fences delayed prior-execution snapshots; a typed-nil lifecycle manager preserves reconnect behavior; rich clipboard command markup becomes plain visible text; additive action metadata is accepted; and popup command mapping is memoized with shallow config selection.
+- Focused Go tests passed for ACP metadata conversion and reconnect nil-manager handling; `make -C apps/backend lint` reported 0 issues.
+- The focused frontend regression suite passed 37 tests across 3 files. Web typecheck and targeted ESLint passed without warnings.
+- The latest managed desktop Chromium composer suite passed 8 tests and the phone suite passed 2 tests. Desktop tests cover partial provider updates in an open menu, delayed startup snapshots, and forged clipboard text preserving the explicit `/plan` send.
+- Public docs tests passed (62 tests), the validator checked 47 pages, catalog validation covered 351 decisions and 1367 specifications, all specifications passed lint, and the specification-linter tests passed (36). `git diff --check` passed.
 
-The design package remains uncommitted and unstaged.
 ## Risks
 
 - Stripping dollar markers from invocation can break provider handling. Preserve raw command names and test submitted text.

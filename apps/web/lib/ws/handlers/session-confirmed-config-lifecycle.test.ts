@@ -8,6 +8,8 @@ import { registerSessionModelsHandlers } from "./session-models";
 const taskId = "task-1";
 const sessionId = "session-1";
 const previousExecutionId = "execution-old";
+const nextExecutionId = "execution-new";
+const modelId = "gpt-5.6-sol";
 
 const planCommand = {
   name: "plan",
@@ -30,7 +32,7 @@ function makeStore() {
     updated_at: "2026-10-05T00:00:00.000Z",
   } as TaskSession);
   store.getState().setSessionModels(sessionId, {
-    currentModelId: "gpt-5.6-sol",
+    currentModelId: modelId,
     models: [],
     configOptions: [],
     confirmedConfigOptions: { collaboration_mode: "plan" },
@@ -82,9 +84,9 @@ it("hides the old mode at STARTING and restores it only after the new execution 
   sessionStarting(store);
   expect(confirmedMode(store)).toBeUndefined();
   expect(menuMode(store)).not.toBe("active");
-  expect(store.getState().sessionModels.bySessionId[sessionId].currentModelId).toBe("gpt-5.6-sol");
+  expect(store.getState().sessionModels.bySessionId[sessionId].currentModelId).toBe(modelId);
 
-  agentctlStarting(store, "execution-new");
+  agentctlStarting(store, nextExecutionId);
   expect(confirmedMode(store)).toBeUndefined();
   expect(menuMode(store)).not.toBe("active");
 
@@ -96,8 +98,8 @@ it("hides the old mode at STARTING and restores it only after the new execution 
       task_id: taskId,
       session_id: sessionId,
       agent_id: "agent-1",
-      agent_execution_id: "execution-new",
-      current_model_id: "gpt-5.6-sol",
+      agent_execution_id: nextExecutionId,
+      current_model_id: modelId,
       models: [],
       config_options: [
         {
@@ -116,7 +118,7 @@ it("hides the old mode at STARTING and restores it only after the new execution 
   expect(confirmedMode(store)).toEqual({ collaboration_mode: "plan" });
   expect(
     store.getState().sessionModels.bySessionId[sessionId].confirmedConfigOptionsExecutionId,
-  ).toBe("execution-new");
+  ).toBe(nextExecutionId);
   expect(menuMode(store)).toBe("active");
 });
 
@@ -137,6 +139,73 @@ it("restores a pending confirmation when STARTING arrives before its same-execut
   expect(confirmedMode(store)).toBeUndefined();
 
   agentctlStarting(store, previousExecutionId);
+
+  expect(confirmedMode(store)).toEqual({ collaboration_mode: "plan" });
+  expect(menuMode(store)).toBe("active");
+});
+
+it("ignores a delayed settled snapshot while startup identity is unresolved", () => {
+  const store = makeStore();
+  const handler = registerSessionModelsHandlers(store)["session.models_updated"]!;
+
+  sessionStarting(store);
+  expect(confirmedMode(store)).toBeUndefined();
+
+  handler({
+    id: "models-delayed-old-execution",
+    type: "notification",
+    action: "session.models_updated",
+    payload: {
+      task_id: taskId,
+      session_id: sessionId,
+      agent_id: "agent-1",
+      agent_execution_id: previousExecutionId,
+      current_model_id: modelId,
+      models: [],
+      config_options: [
+        {
+          type: "select",
+          id: "collaboration_mode",
+          name: "Collaboration Mode",
+          current_value: "plan",
+          options: [],
+        },
+      ],
+      config_options_settled: true,
+      timestamp: "2026-10-05T00:01:30.000Z",
+    },
+  } as never);
+
+  expect(confirmedMode(store)).toBeUndefined();
+  expect(menuMode(store)).not.toBe("active");
+
+  agentctlStarting(store, nextExecutionId);
+  expect(confirmedMode(store)).toBeUndefined();
+
+  handler({
+    id: "models-settled-new-execution",
+    type: "notification",
+    action: "session.models_updated",
+    payload: {
+      task_id: taskId,
+      session_id: sessionId,
+      agent_id: "agent-1",
+      agent_execution_id: nextExecutionId,
+      current_model_id: modelId,
+      models: [],
+      config_options: [
+        {
+          type: "select",
+          id: "collaboration_mode",
+          name: "Collaboration Mode",
+          current_value: "plan",
+          options: [],
+        },
+      ],
+      config_options_settled: true,
+      timestamp: "2026-10-05T00:02:00.000Z",
+    },
+  } as never);
 
   expect(confirmedMode(store)).toEqual({ collaboration_mode: "plan" });
   expect(menuMode(store)).toBe("active");
