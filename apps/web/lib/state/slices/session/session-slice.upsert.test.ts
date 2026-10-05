@@ -243,6 +243,34 @@ describe("cancellation revision ordering", () => {
   });
 });
 
+describe("dynamic route snapshot ordering", () => {
+  it("preserves a newer same-generation route event when an older session list arrives", () => {
+    const store = makeStore();
+    const staleSnapshot = makeSession({
+      route_generation: 1,
+      route_state: "starting",
+      updated_at: TS,
+    });
+    store.getState().setTaskSessionsForTask(TASK_ID, [staleSnapshot], {});
+
+    store.getState().upsertTaskSessionFromEvent(
+      TASK_ID,
+      makeSession({
+        route_generation: 1,
+        route_state: "action_required",
+        updated_at: LATER_TS,
+      }),
+    );
+    store.getState().setTaskSessionsForTask(TASK_ID, [staleSnapshot], {});
+
+    expect(store.getState().taskSessions.items[SESSION_ID]).toMatchObject({
+      route_generation: 1,
+      route_state: "action_required",
+      updated_at: LATER_TS,
+    });
+  });
+});
+
 describe("parked-on-background-work revision ordering", () => {
   it("rejects a stale snapshot with a lower revision in the same epoch", () => {
     const store = makeStore();
