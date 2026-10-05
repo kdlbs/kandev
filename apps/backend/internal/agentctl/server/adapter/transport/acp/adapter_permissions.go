@@ -23,6 +23,9 @@ func (a *Adapter) handlePermissionRequest(ctx context.Context, req *PermissionRe
 	if sessionID == "" {
 		sessionID = fallbackSessionID
 	}
+	if sessionID == fallbackSessionID {
+		a.poisonContinuationSafety()
+	}
 
 	// Only emit a synthetic tool_call event if no ToolCall notification preceded this.
 	// waitForActiveToolCall bounds the race window between a SessionUpdate.ToolCall

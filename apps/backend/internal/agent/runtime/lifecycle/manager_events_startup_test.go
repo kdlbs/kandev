@@ -41,7 +41,7 @@ func TestHandleCompleteEventMarkState_DefersUninitializedStartupFailure(t *testi
 		t.Fatalf("add execution: %v", err)
 	}
 
-	mgr.handleCompleteEventMarkState(execution, &agentctl.AgentEvent{
+	callCompletionStateWithStartupLease(t, mgr, execution, &agentctl.AgentEvent{
 		Type:  streams.EventTypeComplete,
 		Error: "Agent process exited with code 1",
 		Data:  map[string]any{"is_error": true},

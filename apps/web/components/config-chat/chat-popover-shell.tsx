@@ -13,6 +13,7 @@ type ChatPopoverShellProps = {
   title: string;
   closeLabel: string;
   headerActions?: ReactNode;
+  header?: ReactNode;
   beforeBody?: ReactNode;
   testId: string;
   children: ReactNode;
@@ -37,6 +38,7 @@ export function ChatPopoverShell({
   title,
   closeLabel,
   headerActions,
+  header,
   beforeBody,
   testId,
   children,
@@ -56,24 +58,26 @@ export function ChatPopoverShell({
       >
         {beforeBody}
         <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-[inherit]">
-          <header className="flex h-12 shrink-0 items-center justify-between border-b bg-muted/30 pl-3">
-            <div className="flex min-w-0 items-center gap-2">
-              {icon}
-              <span className="truncate text-sm font-medium">{title}</span>
-            </div>
-            <div className="flex items-center">
-              {headerActions}
-              <Button
-                size="icon"
-                variant="ghost"
-                className="h-11 w-11 cursor-pointer rounded-none"
-                onClick={() => onOpenChange(false)}
-                aria-label={closeLabel}
-              >
-                <IconX className="h-4 w-4" />
-              </Button>
-            </div>
-          </header>
+          {header ?? (
+            <header className="flex h-12 shrink-0 items-center justify-between border-b bg-muted/30 pl-3">
+              <div className="flex min-w-0 items-center gap-2">
+                {icon}
+                <span className="truncate text-sm font-medium">{title}</span>
+              </div>
+              <div className="flex items-center">
+                {headerActions}
+                <Button
+                  size="icon"
+                  variant="ghost"
+                  className="h-11 w-11 cursor-pointer rounded-none"
+                  onClick={() => onOpenChange(false)}
+                  aria-label={closeLabel}
+                >
+                  <IconX className="h-4 w-4" />
+                </Button>
+              </div>
+            </header>
+          )}
           {children}
         </div>
       </PopoverContent>

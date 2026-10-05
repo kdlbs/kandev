@@ -388,6 +388,98 @@ func (s *SQLiteStore) GetWorktreeByID(ctx context.Context, id string) (*Worktree
 	return scanWorktreeRow(row)
 }
 
+// ReadRecoverySelectionSnapshot reads the selected session, environment, and
+// complete active repository inventory in one statement snapshot.
+func (s *SQLiteStore) ReadRecoverySelectionSnapshot(
+	ctx context.Context,
+	expected models.WorkspaceRecoverySelectionSnapshot,
+) (models.WorkspaceRecoverySelectionSnapshot, error) {
+	rows, err := s.ro.QueryContext(ctx, s.ro.Rebind(`
+		SELECT
+			COALESCE(s.task_id, te.task_id), COALESCE(s.id, ?),
+			CASE WHEN s.id IS NULL THEN ? ELSE COALESCE(s.task_environment_id, '') END,
+			CASE WHEN s.id IS NULL THEN 0 ELSE 1 END,
+			te.id, te.task_id, te.ownership_generation,
+			COALESCE(te.executor_type, ''), COALESCE(te.executor_id, ''),
+			COALESCE(te.executor_profile_id, ''), COALESCE(te.status, ''),
+			COALESCE(te.task_dir_name, ''), COALESCE(te.workspace_path, ''),
+			COALESCE(ter.id, ''), COALESCE(ter.repository_id, ''),
+			COALESCE(ter.branch_slug, ''), COALESCE(ter.worktree_id, ''),
+			COALESCE(ter.worktree_path, ''), COALESCE(ter.worktree_branch, ''),
+			COALESCE(ter.worktree_branch_owner, 'unknown'),
+			COALESCE(ter.worktree_integration_ref, ''),
+			COALESCE(ter.worktree_recovery_head_sha, ''),
+			COALESCE(ter.worktree_source_clone_path, ''),
+			COALESCE(ter.worktree_source_common_dir, ''),
+			COALESCE(ter.position, 0), COALESCE(ter.status, ''),
+			CASE WHEN r.id IS NULL THEN 0 ELSE 1 END,
+			CASE WHEN r.deleted_at IS NULL THEN 0 ELSE 1 END,
+			COALESCE(r.workspace_id, ''), COALESCE(r.name, ''), COALESCE(r.source_type, ''),
+			COALESCE(r.local_path, ''), COALESCE(r.provider, ''),
+			COALESCE(r.provider_repo_id, ''), COALESCE(r.provider_host, ''),
+			COALESCE(r.provider_scope, ''), COALESCE(r.provider_owner, ''),
+			COALESCE(r.provider_name, ''), COALESCE(r.remote_url, '')
+		FROM task_environments te
+		LEFT JOIN task_sessions s ON s.id = ?
+		LEFT JOIN task_environment_repos ter
+			ON ter.task_environment_id = te.id AND (COALESCE(ter.status, '') = '' OR ter.status = ?) AND ter.deleted_at IS NULL
+		LEFT JOIN repositories r ON r.id = ter.repository_id
+		WHERE te.id = ?
+		ORDER BY COALESCE(ter.id, '')
+	`), expected.SessionID, expected.SessionTaskEnvironmentID, expected.SessionID, StatusActive, expected.TaskEnvironmentID)
+	if err != nil {
+		return models.WorkspaceRecoverySelectionSnapshot{}, err
+	}
+	defer func() { _ = rows.Close() }()
+	return readRecoverySelectionSnapshotRows(rows)
+}
+
+func readRecoverySelectionSnapshotRows(rows *sql.Rows) (models.WorkspaceRecoverySelectionSnapshot, error) {
+	var snapshot models.WorkspaceRecoverySelectionSnapshot
+	var found bool
+	for rows.Next() {
+		found = true
+		var slotID string
+		var sessionPersisted, repositoryPresent, repositoryDeleted int
+		var slot models.WorkspaceRecoveryInventorySlot
+		if err := rows.Scan(
+			&snapshot.TaskID, &snapshot.SessionID, &snapshot.SessionTaskEnvironmentID,
+			&sessionPersisted,
+			&snapshot.TaskEnvironmentID, &snapshot.EnvironmentOwnerTaskID, &snapshot.OwnershipGeneration,
+			&snapshot.ExecutorType, &snapshot.ExecutorID, &snapshot.ExecutorProfileID,
+			&snapshot.EnvironmentStatus, &snapshot.TaskDirName, &snapshot.WorkspacePath,
+			&slotID, &slot.RepositoryID, &slot.BranchSlug, &slot.WorktreeID,
+			&slot.WorktreePath, &slot.WorktreeBranch, &slot.WorktreeBranchOwner,
+			&slot.WorktreeIntegrationRef, &slot.WorktreeRecoveryHeadSHA,
+			&slot.WorktreeSourceClonePath, &slot.WorktreeSourceCommonDir,
+			&slot.Position, &slot.Status, &repositoryPresent, &repositoryDeleted,
+			&slot.RepositoryWorkspaceID, &slot.RepositoryName, &slot.RepositorySourceType, &slot.RepositoryLocalPath,
+			&slot.RepositoryProvider, &slot.RepositoryProviderRepoID, &slot.RepositoryProviderHost,
+			&slot.RepositoryProviderScope, &slot.RepositoryProviderOwner,
+			&slot.RepositoryProviderName, &slot.RepositoryRemoteURL,
+		); err != nil {
+			return models.WorkspaceRecoverySelectionSnapshot{}, err
+		}
+		snapshot.SessionPersisted = sessionPersisted == 1
+		if slotID != "" {
+			slot.EnvironmentRepoID = slotID
+			if slot.Status == "" {
+				slot.Status = StatusActive
+			}
+			slot.RepositoryPresent = repositoryPresent == 1
+			slot.RepositoryDeleted = repositoryDeleted == 1
+			snapshot.Slots = append(snapshot.Slots, slot)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return models.WorkspaceRecoverySelectionSnapshot{}, err
+	}
+	if !found {
+		return models.WorkspaceRecoverySelectionSnapshot{}, fmt.Errorf("selected environment not found")
+	}
+	return snapshot.Canonical(), nil
+}
+
 // GetWorktreeBySessionID retrieves the worktree by session ID.
 func (s *SQLiteStore) GetWorktreeBySessionID(ctx context.Context, sessionID string) (*Worktree, error) {
 	row := s.ro.QueryRowContext(ctx, s.ro.Rebind(`

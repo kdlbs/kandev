@@ -161,6 +161,10 @@ PostgreSQL-specific migration and concurrency checks were not run because
 
 ## Risks
 
+The [convergence fix package](../managed-clone-recovery-convergence/plan.md)
+adds regression coverage for inspection contention and recovery error projection.
+The completed results above remain the evidence for this original package.
+
 - Local Git object transfer needs strict origin and workspace proof. A lookalike
   repository cannot become a source of code or credentials.
 - A dirty file copy cannot preserve staging choices. The original and snapshot

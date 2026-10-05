@@ -648,6 +648,7 @@ func startAgentInfrastructure(
 		inheritedRecordScope,
 		services.Task,
 		services.Task,
+		services.Task,
 		repos.Task,
 		startupRecoveryGuard,
 	)
@@ -705,6 +706,7 @@ func startAgentInfrastructure(
 	lifecycleMgr.SetSessionSettingsSnapshotWriter(repos.Task)
 	if services.Plugins != nil {
 		lifecycleMgr.SetPluginExecutorProfileLoader(services.Task)
+		lifecycleMgr.SetPluginRuntimeAPIURL(pluginRuntimeAPIURL(cfg))
 		services.Plugins.SetExecutorProviderInventoryReader(repos.Task)
 		pluginExecutor := lifecycle.NewPluginRemoteExecutor(services.Plugins, log)
 		pluginExecutor.SetRecoveryDependencies(services.Task, repos.Task)
@@ -1251,13 +1253,17 @@ func startGatewayAndServe(
 	// ============================================
 	// HTTP SERVER (Router & MCP Route Registration)
 	// ============================================
+	e2eRuntimeUpdateHooks := newE2ERuntimeUpdateHooks()
+	if e2eRuntimeUpdateHooks != nil {
+		agentSettingsController.SetRuntimeUpdateStatusResolver(e2eRuntimeUpdateHooks.resolveLatestVersion)
+	}
 	// Build the real router and register all handlers, which wires the real
 	// dispatcher into lifecycleMgr.SetMCPHandler and installs MCP scope handlers
 	// BEFORE lifecycleMgr.Start recovers sessions.
 	builtServer, err := buildHTTPServer(ctx, cfg, log, gateway, repos, services, agentSettingsController,
-		lifecycleMgr, eventBus, orchestratorSvc, notificationCtrl, msgCreator, agentRegistry, hostUtilityMgr,
+		lifecycleMgr, eventBus, orchestratorSvc, notificationCtrl, notificationSvc, msgCreator, agentRegistry, hostUtilityMgr,
 		addCleanup, repoCloner, systemSvc, storageComposition.workspaceRestorer,
-		storageComposition.tempArtifacts, dbPool, agentRuntimeAvailability, sshReachabilityPoller, startup.FromContext(ctx), persistenceHealth)
+		storageComposition.tempArtifacts, dbPool, agentRuntimeAvailability, e2eRuntimeUpdateHooks, sshReachabilityPoller, startup.FromContext(ctx), persistenceHealth)
 	if err != nil {
 		log.Error("Failed to build HTTP server", zap.Error(err))
 		closeBoundListeners(server, listeners, log)
@@ -1409,6 +1415,7 @@ func startGatewayAndServe(
 	services.Task.StartQuickChatExpirationLoop(ctx)
 
 	hostUtilityCtx, hostUtilityCancel := context.WithCancel(ctx)
+	hostUtilityReady := make(chan struct{})
 	var hostUtilityWG sync.WaitGroup
 	hostUtilityWG.Add(1)
 	go func() {
@@ -1416,6 +1423,7 @@ func startGatewayAndServe(
 		if err := hostUtilityMgr.Start(hostUtilityCtx); err != nil {
 			log.Warn("host utility manager bootstrap error", zap.Error(err))
 		}
+		close(hostUtilityReady)
 		// Reconcile profiles against fresh probe results — seeds defaults for
 		// newly probed agents, heals stale profile models/modes, cleans up
 		// orphans referencing removed agents.
@@ -1466,6 +1474,20 @@ func startGatewayAndServe(
 			}
 		})
 	}
+	agentSettingsController.SetRuntimeUpdateNotifier(notificationSvc)
+	var runtimeUpdateReadiness <-chan struct{} = hostUtilityReady
+	if e2eRuntimeUpdateHooks != nil {
+		runtimeUpdateReadiness = e2eRuntimeUpdateHooks.startupReadiness(ctx, hostUtilityReady)
+	}
+	stopRuntimeUpdates := agentSettingsController.StartRuntimeUpdateBackground(ctx, runtimeUpdateReadiness)
+	stopRuntimeUpdatesCleanup := func() error { stopRuntimeUpdates(); return nil }
+	addCleanup(stopRuntimeUpdatesCleanup)
+	restoreCleanups = append(restoreCleanups, stopRuntimeUpdatesCleanup)
+	gateway.Hub.AddUserSubscriptionListener(func(string) {
+		if err := agentSettingsController.ReplayRuntimeUpdateNotices(ctx); err != nil && ctx.Err() == nil {
+			log.Debug("runtime update replay unavailable")
+		}
+	})
 	systemSvc.StartBackground(ctx)
 	addCleanup(func() error { systemSvc.StopBackground(); return nil })
 	gateways.RegisterSystemNotifications(processRuntimeContext(ctx), eventBus, gateway.Hub, log)
@@ -2828,6 +2850,7 @@ func buildHTTPServer(
 	eventBus bus.EventBus,
 	orchestratorSvc *orchestrator.Service,
 	notificationCtrl *notificationcontroller.Controller,
+	runtimeUpdateNotifier e2eRuntimeUpdateNotifier,
 	msgCreator *messageCreatorAdapter,
 	agentRegistry *registry.Registry,
 	hostUtilityMgr *hostutility.Manager,
@@ -2838,6 +2861,7 @@ func buildHTTPServer(
 	temporaryArtifacts *tempartifacts.Registry,
 	dbPool *db.Pool,
 	agentRuntimeAvailability *agentctlclient.Availability,
+	e2eRuntimeUpdateHooks *e2eRuntimeUpdateHooks,
 	sshReachabilityPoller *reachabilitypkg.Poller,
 	progress *startup.Reporter,
 	persistenceHealth ...*requiredstores.Health,
@@ -2945,6 +2969,8 @@ func buildHTTPServer(
 		dbPool:                        dbPool,
 		persistenceHealth:             requiredHealth,
 		agentSettingsController:       agentSettingsController,
+		runtimeUpdateNotifier:         runtimeUpdateNotifier,
+		e2eRuntimeUpdateHooks:         e2eRuntimeUpdateHooks,
 		agentSettingsRepo:             repos.AgentSettings,
 		agentList:                     agentRegistry,
 		agentRegistry:                 agentRegistry,

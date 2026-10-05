@@ -561,6 +561,10 @@ const (
 	// latest successful agent boot. Recovery cards compare this timestamp with
 	// their own creation time, so the result survives transcript write failures.
 	SessionMetaKeyRecoveryResolvedAt = "recovery_resolved_at"
+	// SessionMetaKeyRecoveryResolutions stores bounded success records tied to
+	// the exact failure stamp each owned resume resolved.
+	SessionMetaKeyRecoveryResolutions = "recovery_resolutions"
+	maxSessionRecoveryResolutions     = 16
 	// SessionMetaKeyInterruptedRecoveryPending is a durable token written by
 	// session reconciliation when execution loss returns a conversation to
 	// WAITING_FOR_INPUT. It distinguishes an interrupted waiting session from
@@ -591,6 +595,72 @@ type InterruptedRecoverySettlement struct {
 	ExpectedExecutorID               string    `json:"expected_executor_id,omitempty"`
 	ExpectedExecutorAgentExecutionID string    `json:"expected_executor_agent_execution_id,omitempty"`
 	ExpectedExecutorUpdatedAt        time.Time `json:"expected_executor_updated_at,omitempty"`
+}
+
+// SessionRecoveryResolution is durable proof that one owned resume attempt
+// successfully re-established the conversation after a specific failure.
+type SessionRecoveryResolution struct {
+	ErrorStamp string    `json:"error_stamp"`
+	AttemptID  string    `json:"attempt_id"`
+	ResolvedAt time.Time `json:"resolved_at"`
+}
+
+// NormalizeSessionRecoveryResolutions bounds and deduplicates exact recovery
+// proofs before they are persisted or read by the frontend.
+func NormalizeSessionRecoveryResolutions(items []SessionRecoveryResolution) []SessionRecoveryResolution {
+	result := make([]SessionRecoveryResolution, 0, min(len(items), maxSessionRecoveryResolutions))
+	positions := make(map[string]int, len(items))
+	for _, item := range items {
+		if strings.TrimSpace(item.ErrorStamp) != item.ErrorStamp || strings.TrimSpace(item.AttemptID) != item.AttemptID {
+			continue
+		}
+		if item.ErrorStamp == "" || len(item.ErrorStamp) > maxLaunchErrorStampBytes ||
+			!validRecoveryAttemptID(item.AttemptID) || item.ResolvedAt.IsZero() ||
+			strings.IndexFunc(item.ErrorStamp, func(char rune) bool { return char < 0x20 || char == 0x7f }) >= 0 {
+			continue
+		}
+		if index, exists := positions[item.ErrorStamp]; exists {
+			result[index] = item
+			continue
+		}
+		positions[item.ErrorStamp] = len(result)
+		result = append(result, item)
+	}
+	if len(result) > maxSessionRecoveryResolutions {
+		result = result[len(result)-maxSessionRecoveryResolutions:]
+	}
+	return result
+}
+
+// LoadSessionRecoveryResolutions decodes the bounded stamp-specific success
+// records from task-session metadata.
+func LoadSessionRecoveryResolutions(metadata map[string]interface{}) []SessionRecoveryResolution {
+	if metadata == nil || metadata[SessionMetaKeyRecoveryResolutions] == nil {
+		return nil
+	}
+	payload, err := json.Marshal(metadata[SessionMetaKeyRecoveryResolutions])
+	if err != nil {
+		return nil
+	}
+	var items []SessionRecoveryResolution
+	if err := json.Unmarshal(payload, &items); err != nil {
+		return nil
+	}
+	return NormalizeSessionRecoveryResolutions(items)
+}
+
+func validRecoveryAttemptID(value string) bool {
+	if !strings.HasPrefix(value, "resume-") || len(value) > 27 {
+		return false
+	}
+	sequence := strings.TrimPrefix(value, "resume-")
+	if sequence == "" || (len(sequence) > 1 && sequence[0] == '0') {
+		return false
+	}
+	if _, err := strconv.ParseUint(sequence, 10, 64); err != nil {
+		return false
+	}
+	return true
 }
 
 // HasInterruptedRecoveryPending reports whether metadata carries a valid
@@ -1046,6 +1116,9 @@ type LastAgentError struct {
 	RemediationURL   string            `json:"remediation_url,omitempty"`
 	Code             string            `json:"code,omitempty"`
 	Details          string            `json:"details,omitempty"`
+	StartupReason    string            `json:"startup_reason,omitempty"`
+	StartupAttempts  int               `json:"startup_attempts,omitempty"`
+	StartupNPMCode   string            `json:"startup_npm_code,omitempty"`
 	RecoveryActions  []string          `json:"recovery_actions,omitempty"`
 	TaskRepositoryID string            `json:"task_repository_id,omitempty"`
 	StampValue       string            `json:"stamp,omitempty"`
@@ -1080,7 +1153,9 @@ func mapToLastAgentError(raw interface{}, out *LastAgentError) error {
 	// Optional bootstrap fields are deliberately decoded independently. A
 	// malformed optional field must not hide a valid legacy session error.
 	optional := map[string]json.RawMessage{}
-	for _, key := range []string{"execution_id", "phase", "attempt_id", "causes"} {
+	for _, key := range []string{
+		"execution_id", "phase", "attempt_id", "causes", "startup_reason", "startup_attempts", "startup_npm_code",
+	} {
 		if value, ok := fields[key]; ok {
 			optional[key] = value
 			delete(fields, key)
@@ -1112,12 +1187,70 @@ func mapToLastAgentError(raw interface{}, out *LastAgentError) error {
 		}
 	}
 	if value, ok := optional["causes"]; ok {
-		var causes []AgentErrorCause
-		if json.Unmarshal(value, &causes) == nil {
-			out.Causes = causes
+		out.Causes = decodeAgentErrorCauses(value)
+	}
+	if value, ok := optional["startup_reason"]; ok {
+		var reason string
+		if json.Unmarshal(value, &reason) == nil {
+			out.StartupReason = reason
+		}
+	}
+	if value, ok := optional["startup_attempts"]; ok {
+		var attempts int
+		if json.Unmarshal(value, &attempts) == nil && attempts >= 0 {
+			out.StartupAttempts = attempts
+		}
+	}
+	if value, ok := optional["startup_npm_code"]; ok {
+		var npmCode string
+		if json.Unmarshal(value, &npmCode) == nil {
+			out.StartupNPMCode = npmCode
 		}
 	}
 	return nil
+}
+
+func decodeAgentErrorCauses(raw json.RawMessage) []AgentErrorCause {
+	var items []json.RawMessage
+	if err := json.Unmarshal(raw, &items); err != nil {
+		return nil
+	}
+	causes := make([]AgentErrorCause, 0, min(len(items), maxAgentErrorCauses))
+	for _, item := range items {
+		var fields map[string]json.RawMessage
+		if err := json.Unmarshal(item, &fields); err != nil {
+			continue
+		}
+		var cause AgentErrorCause
+		if json.Unmarshal(fields["operation"], &cause.Operation) != nil ||
+			json.Unmarshal(fields["code"], &cause.Code) != nil {
+			continue
+		}
+		decodeOptionalErrorCauseString(fields, "detail", &cause.Detail)
+		decodeOptionalErrorCauseString(fields, "reason", &cause.Reason)
+		decodeOptionalErrorCauseString(fields, "requested_model", &cause.RequestedModel)
+		decodeOptionalErrorCauseString(fields, "effective_model", &cause.EffectiveModel)
+		decodeOptionalErrorCauseString(fields, "attempted_model", &cause.AttemptedModel)
+		decodeOptionalErrorCauseString(fields, "requested_mode", &cause.RequestedMode)
+		decodeOptionalErrorCauseString(fields, "effective_mode", &cause.EffectiveMode)
+		if value, ok := fields["prompt_not_sent"]; ok {
+			var promptNotSent bool
+			if json.Unmarshal(value, &promptNotSent) == nil {
+				cause.PromptNotSent = &promptNotSent
+			}
+		}
+		causes = append(causes, cause)
+	}
+	return causes
+}
+
+func decodeOptionalErrorCauseString(fields map[string]json.RawMessage, key string, target *string) {
+	if value, ok := fields[key]; ok {
+		var decoded string
+		if json.Unmarshal(value, &decoded) == nil {
+			*target = decoded
+		}
+	}
 }
 
 func (e LastAgentError) Stamp() string {
@@ -1335,6 +1468,12 @@ const (
 	// on popover open and archived/deleted alongside the coordinator.
 	TaskOriginCoordinator = "coordinator"
 )
+
+// IsAutomationTaskOrigin reports whether origin identifies work whose turn
+// lifecycle is owned by the automation coordinator.
+func IsAutomationTaskOrigin(origin string) bool {
+	return origin == TaskOriginAutomationRun || origin == TaskOriginAutomationTask
+}
 
 // Task represents a task in the database
 type Task struct {
@@ -2240,6 +2379,21 @@ type TaskSession struct {
 	TokensIn       int64 `json:"tokens_in"`
 	TokensCachedIn int64 `json:"tokens_cached_in"`
 	TokensOut      int64 `json:"tokens_out"`
+}
+
+// WorkspaceRecoveryErrorObservation is the session and environment identity
+// captured before selected-workspace inspection. Repository writers compare
+// every field in the same transaction that records the recovery error.
+type WorkspaceRecoveryErrorObservation struct {
+	TaskID                 string
+	SessionID              string
+	TaskEnvironmentID      string
+	EnvironmentOwnerTaskID string
+	OwnershipGeneration    int64
+	SelectionSnapshot      WorkspaceRecoverySelectionSnapshot
+	SessionState           TaskSessionState
+	AgentExecutionID       string
+	ExpectedErrorStamp     string
 }
 
 // ActiveSessionCancellationCandidate is the compare-and-set snapshot used by

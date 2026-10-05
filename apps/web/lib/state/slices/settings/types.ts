@@ -35,6 +35,7 @@ import type {
 import type { AgentProfileRecentUseContext } from "@/lib/types/http-agent-profile-recent-use";
 import type { TaskColor } from "@/lib/task-colors";
 import type { SSHReachabilityRecord } from "@/lib/types/http-ssh";
+import type { AgentUpdateJob } from "@/lib/api";
 
 export type {
   AgentProfileRecentUseRecord,
@@ -348,27 +349,6 @@ export type InstallJobsState = {
   byAgent: Record<string, InstallJob>;
 };
 
-export type AgentUpdateJobStatus =
-  | "queued"
-  | "resolving"
-  | "updating"
-  | "refreshing"
-  | "succeeded"
-  | "failed";
-
-export type AgentUpdateJob = {
-  job_id: string;
-  agent_name: string;
-  status: AgentUpdateJobStatus;
-  current_version?: string;
-  target_version?: string;
-  output?: string;
-  error?: string;
-  refresh_error?: string;
-  started_at: string;
-  finished_at?: string;
-};
-
 export type AgentUpdateJobsState = {
   byAgent: Record<string, AgentUpdateJob>;
 };
@@ -515,6 +495,11 @@ export type TaskCreateLastUsedState = {
 };
 
 export type SettingsSliceState = {
+  agentRuntimeUpdates: {
+    byAgent: Record<string, import("@/lib/api/domains/agent-update-api").AgentUpdateStatus>;
+    checkedAt: number;
+    loading: boolean;
+  };
   executors: ExecutorsState;
   settingsAgents: SettingsAgentsState;
   agentDiscovery: AgentDiscoveryState;
@@ -535,6 +520,11 @@ export type SettingsSliceState = {
 };
 
 export type SettingsSliceActions = {
+  setAgentRuntimeUpdateStatuses: (
+    statuses: import("@/lib/api/domains/agent-update-api").AgentUpdateStatus[],
+    checkedAt: number,
+  ) => void;
+  setAgentRuntimeUpdateLoading: (loading: boolean) => void;
   setExecutors: (executors: ExecutorsState["items"]) => void;
   setSettingsAgents: (agents: SettingsAgentsState["items"]) => void;
   setAgentDiscovery: (agents: AgentDiscoveryState["items"]) => void;

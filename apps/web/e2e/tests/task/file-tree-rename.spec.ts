@@ -89,7 +89,7 @@ test.describe("File tree inline rename", () => {
     git.createFile("rename-me.ts", "hello");
     git.stageAll();
     git.commit("seed rename file");
-    git.exec("git push origin main");
+    git.pushMainWithRetry();
 
     const session = await setupTask({
       testPage,
@@ -132,7 +132,7 @@ test.describe("File tree inline rename", () => {
     git.createFile("keep-name.ts", "stay");
     git.stageAll();
     git.commit("seed keep file");
-    git.exec("git push origin main");
+    git.pushMainWithRetry();
 
     const session = await setupTask({
       testPage,
@@ -170,7 +170,7 @@ test.describe("File tree inline rename", () => {
     git.createFile("other.ts", "other");
     git.stageAll();
     git.commit("seed blur file");
-    git.exec("git push origin main");
+    git.pushMainWithRetry();
 
     const session = await setupTask({
       testPage,
@@ -215,7 +215,7 @@ test.describe("File tree inline rename", () => {
     git.createFile("noop.ts", "noop");
     git.stageAll();
     git.commit("seed noop");
-    git.exec("git push origin main");
+    git.pushMainWithRetry();
 
     const session = await setupTask({
       testPage,

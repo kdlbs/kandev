@@ -24,7 +24,13 @@ import {
   listAvailableAgents,
 } from "@/lib/api";
 import { useIsAdmin } from "@/hooks/domains/auth/use-is-admin";
-import type { AgentUpdateJob, AgentUpdatePreview, AgentUpdateStatus, InstallJob } from "@/lib/api";
+import type {
+  AgentUpdateJob,
+  AgentUpdateMode,
+  AgentUpdatePreview,
+  AgentUpdateStatus,
+  InstallJob,
+} from "@/lib/api";
 import { useAgentDiscovery } from "@/hooks/domains/settings/use-agent-discovery";
 import { useAgentRuntimeUpdates } from "@/hooks/domains/settings/use-agent-runtime-updates";
 import { useAgentRuntimeUpdateStatuses } from "@/hooks/domains/settings/use-agent-runtime-update-statuses";
@@ -44,6 +50,7 @@ import {
   type DiscoveredAgent,
 } from "@/lib/settings/agent-display-order";
 import { toAgentProfileOption } from "@/lib/state/slices/settings/types";
+import { AgentRuntimePolicies } from "@/components/settings/agent-runtime-policies";
 import { HideDisabledAgentProfilesSetting } from "@/app/settings/agents/hide-disabled-agent-profiles-setting";
 import type { AgentDiscovery, Agent, AvailableAgent, RuntimeUpdate } from "@/lib/types/http";
 
@@ -72,6 +79,7 @@ type InstalledAgentsSectionProps = {
     name: string,
     targetVersion: string,
     useDefault?: boolean,
+    updateMode?: AgentUpdateMode,
   ) => Promise<AgentUpdateJob>;
   setTuiDialogOpen: (open: boolean) => void;
   handleRescan: () => Promise<void>;
@@ -300,6 +308,19 @@ function useAgentPageState() {
   const { refresh: refreshRuntimeUpdateStatuses, statusByAgent } =
     useAgentRuntimeUpdateStatuses(updateJobs);
 
+  const handleStartUpdate: InstalledAgentsSectionProps["startUpdate"] = async (
+    name,
+    targetVersion,
+    useDefault,
+    updateMode,
+  ) => {
+    const result = await startUpdate(name, targetVersion, useDefault, updateMode);
+    if (!result.job_id && result.operation === "up_to_date") {
+      void refreshRuntimeUpdateStatuses().catch(() => {});
+    }
+    return result;
+  };
+
   const installedAgents = useMemo(() => detectedAgents(discoveryAgents), [discoveryAgents]);
   const savedAgentsByName = useMemo(
     () => new Map(savedAgents.map((agent: Agent) => [agent.name, agent])),
@@ -373,7 +394,7 @@ function useAgentPageState() {
     installJobs,
     updateJobs,
     previewUpdate,
-    startUpdate,
+    startUpdate: handleStartUpdate,
   };
 }
 
@@ -444,6 +465,13 @@ export default function AgentsSettingsPage() {
         startUpdate={startUpdate}
         setTuiDialogOpen={setTuiDialogOpen}
         handleRescan={handleRescan}
+      />
+
+      <AgentRuntimePolicies
+        hasRuntimeControl={(name) =>
+          installedAgents.some((agent) => agent.name === name) &&
+          Boolean(resolveRuntimeUpdate(name)?.supported)
+        }
       />
 
       <AddTUIAgentDialog

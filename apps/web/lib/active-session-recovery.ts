@@ -1,9 +1,15 @@
 import type { TaskStatusSummaryActiveError } from "./types/task-status-summary";
 import {
   hasSessionRecoveryResolutionAfter,
+  isSelectionFailureRecoveryMetadata,
   isSuccessfulScriptExecutionMetadata,
 } from "@/hooks/processed-message-filtering";
-import { lastAgentErrorStamp, readLastAgentError } from "./session-last-agent-error";
+import {
+  lastAgentErrorStamp,
+  normalizeAgentErrorCauses,
+  readLastAgentError,
+  readLastAgentErrorIncludingDismissed,
+} from "./session-last-agent-error";
 import { legacyRecoveryMessageMatchesError } from "./session-recovery-presentation";
 import type { ActionMeta } from "@/components/task/chat/messages/action-message-details";
 
@@ -23,6 +29,7 @@ type RecoveryMessage = {
 };
 export type ActiveSessionRecovery = {
   sessionId: string;
+  messageId?: string;
   stamp?: string;
   error?: import("./session-last-agent-error").LastAgentError | null;
   kind: string;
@@ -40,13 +47,7 @@ export function selectActiveSessionRecovery(
 ): ActiveSessionRecovery | null {
   if (!session) return null;
   const error = currentSessionError(session, currentError);
-  const managedCloneRelocation = error?.code === "managed_clone_relocation_required";
-  if (
-    !["FAILED", "WAITING_FOR_INPUT", "STARTING"].includes(session.state) &&
-    !(session.state === "CANCELLED" && managedCloneRelocation)
-  )
-    return null;
-  if (error?.scope === "task") return null;
+  if (!isRecoverySessionEligible(session, error)) return null;
   const stamp = error ? lastAgentErrorStamp(error) : undefined;
   const candidates = messages.filter((message) =>
     matchesRecoveryMessage(session.id, error, message),
@@ -54,16 +55,56 @@ export function selectActiveSessionRecovery(
   const message = candidates
     .toSorted((a, b) => (a.created_at ?? "").localeCompare(b.created_at ?? ""))
     .at(-1);
-  if (isResolvedFailure(session, error, message, messages)) return null;
-  if (session.state === "STARTING" && !hasUnresolvedFailure(session, error, message, messages))
-    return null;
-  if (
-    session.state === "WAITING_FOR_INPUT" &&
-    !session.error_message &&
-    !hasUnresolvedFailure(session, error, message, messages)
-  )
-    return null;
+  if (!shouldShowRecovery(session, error, message, messages)) return null;
   return recoveryModel(session, error, stamp, message);
+}
+
+function isRecoverySessionEligible(
+  session: RecoverySession,
+  error: ReturnType<typeof readLastAgentError>,
+): boolean {
+  const ordinaryFailureState = ["FAILED", "WAITING_FOR_INPUT", "STARTING"].includes(session.state);
+  const cancelledRelocation =
+    session.state === "CANCELLED" && error?.code === "managed_clone_relocation_required";
+  return (ordinaryFailureState || cancelledRelocation) && error?.scope !== "task";
+}
+
+function shouldShowRecovery(
+  session: RecoverySession,
+  error: ReturnType<typeof readLastAgentError>,
+  message: RecoveryMessage | undefined,
+  messages: readonly RecoveryMessage[],
+): boolean {
+  if (isDismissedFailureHistory(session, message)) return false;
+  if (isResolvedFailure(session, error, message, messages)) return false;
+  const unresolved = hasUnresolvedFailure(session, error, message, messages);
+  if (session.state === "STARTING") return unresolved;
+  if (session.state === "WAITING_FOR_INPUT" && !session.error_message) return unresolved;
+  return true;
+}
+
+function recoveryMessageStamp(metadata: Record<string, unknown> | null | undefined) {
+  if (typeof metadata?.error_stamp === "string") return metadata.error_stamp;
+  if (typeof metadata?.recovery_stamp === "string") return metadata.recovery_stamp;
+  return undefined;
+}
+
+function isDismissedFailureHistory(
+  session: RecoverySession,
+  message: RecoveryMessage | undefined,
+): boolean {
+  if (!message) return false;
+  const dismissedError = readLastAgentErrorIncludingDismissed(session.metadata);
+  if (!dismissedError?.dismissedAt) return false;
+  const errorStamp = message.metadata?.error_stamp ?? message.metadata?.recovery_stamp;
+  if (typeof errorStamp === "string" && errorStamp !== "") {
+    return lastAgentErrorStamp(dismissedError) === errorStamp;
+  }
+  return legacyRecoveryMessageMatchesError(
+    message.content ?? "",
+    message.created_at,
+    dismissedError,
+  );
 }
 
 function recoveryModel(
@@ -75,13 +116,37 @@ function recoveryModel(
   const metadata = message?.metadata as ActionMeta | undefined;
   return {
     sessionId: session.id,
+    messageId: message?.id,
     stamp,
     error,
-    kind: metadata?.failure_kind ?? error?.code ?? "generic",
-    summary: error?.message ?? session.error_message ?? message?.content,
-    details: metadata?.error_output ?? error?.details ?? session.error_message ?? undefined,
+    kind: recoveryKind(metadata, error),
+    summary: recoverySummary(session, error, message),
+    details: recoveryDetails(session, error, metadata),
     metadata,
   };
+}
+
+function recoveryKind(
+  metadata: ActionMeta | undefined,
+  error: ReturnType<typeof readLastAgentError>,
+) {
+  return metadata?.failure_kind ?? error?.code ?? "generic";
+}
+
+function recoverySummary(
+  session: RecoverySession,
+  error: ReturnType<typeof readLastAgentError>,
+  message: RecoveryMessage | undefined,
+) {
+  return error?.message ?? session.error_message ?? message?.content;
+}
+
+function recoveryDetails(
+  session: RecoverySession,
+  error: ReturnType<typeof readLastAgentError>,
+  metadata: ActionMeta | undefined,
+) {
+  return metadata?.error_output ?? error?.details ?? session.error_message ?? undefined;
 }
 
 function matchesRecoveryMessage(
@@ -118,7 +183,25 @@ function isResolvedFailure(
   messages: readonly RecoveryMessage[],
 ) {
   const occurredAt = error?.occurredAt ?? message?.created_at;
-  if (hasSessionRecoveryResolutionAfter(session.metadata, occurredAt)) return true;
+  const messageMetadata = message?.metadata;
+  const errorStamp = error?.stamp ?? recoveryMessageStamp(messageMetadata);
+  const requireExactStamp =
+    isSelectionFailureRecoveryMetadata(error) ||
+    isSelectionFailureRecoveryMetadata(messageMetadata);
+  if (
+    hasSessionRecoveryResolutionAfter(
+      session.metadata,
+      occurredAt,
+      errorStamp,
+      messages,
+      requireExactStamp,
+    )
+  )
+    return true;
+  // A timestamp or an unrelated successful boot cannot prove which stamped
+  // failure an attempt recovered. Stamped errors require the authoritative
+  // per-attempt resolution above; legacy unstamped errors keep their fallback.
+  if (errorStamp) return false;
   const failedAt = Date.parse(occurredAt ?? "");
   return messages.some((candidate) => successfulBootAfter(candidate, session.id, failedAt));
 }
@@ -147,6 +230,8 @@ function currentSessionError(
     phase: current.phase,
     code: current.category,
     details: current.details,
-    causes: current.causes,
+    executionId: current.execution_id,
+    attemptId: current.attempt_id,
+    causes: normalizeAgentErrorCauses(current.causes),
   };
 }

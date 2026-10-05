@@ -6,6 +6,7 @@ vi.mock("@/lib/config", () => ({
 
 import {
   listAgentUpdateStatuses,
+  setAgentAutomaticUpdates,
   previewAgentUpdate,
   previewAgentUpdateUseDefault,
   updateAgent,
@@ -50,11 +51,19 @@ describe("managed runtime update API", () => {
   });
 
   it("sends only the exact target version in the update body", async () => {
-    await updateAgent(AGENT_NAME, TARGET_VERSION);
+    await updateAgent(AGENT_NAME, { update_mode: "pinned", target_version: TARGET_VERSION });
 
     const [, init] = fetchSpy.mock.calls[0] ?? [];
     expect(init?.method).toBe("POST");
     expect(init?.body).toBe(JSON.stringify({ target_version: TARGET_VERSION }));
+  });
+
+  it("submits a harness-owned update with an exact empty JSON body", async () => {
+    await updateAgent("omp-acp", { update_mode: "self_update" });
+    const [input, init] = fetchSpy.mock.calls[0] ?? [];
+    expect(String(input)).toBe(`${API_BASE_URL}/api/v1/agent-update/omp-acp`);
+    expect(init?.method).toBe("POST");
+    expect(init?.body).toBe("{}");
   });
 
   it("previews returning to the Kandev default with a structural query", async () => {
@@ -82,4 +91,12 @@ describe("managed runtime update API", () => {
     expect(String(input)).toBe(`${API_BASE_URL}/api/v1/agent-update/status`);
     expect(init?.cache).toBe("no-store");
   });
+});
+
+it("persists explicit runtime consent through the protected mutation client", async () => {
+  await setAgentAutomaticUpdates("gemini", true);
+  const [input, init] = fetchSpy.mock.calls[0] ?? [];
+  expect(String(input)).toBe(`${API_BASE_URL}/api/v1/agent-update/gemini/automatic`);
+  expect(init?.method).toBe("PATCH");
+  expect(init?.body).toBe(JSON.stringify({ enabled: true }));
 });

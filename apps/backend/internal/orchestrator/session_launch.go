@@ -5,22 +5,24 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-	"time"
 
 	"go.uber.org/zap"
 
+	agentruntime "github.com/kandev/kandev/internal/agent/runtime"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/task/models"
+	taskrepo "github.com/kandev/kandev/internal/task/repository"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 	"github.com/kandev/kandev/internal/worktree"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
 const (
-	recoveryActionResume          = "resume"
-	recoveryActionResumeNewBranch = models.RecoveryActionResumeNewBranch
-	recoveryActionFreshStart      = "fresh_start"
-	recoveryActionRuntimeRetry    = "runtime_retry"
+	recoveryActionRepairWorkspaceInventory = "repair_workspace_inventory"
+	recoveryActionResume                   = "resume"
+	recoveryActionResumeNewBranch          = models.RecoveryActionResumeNewBranch
+	recoveryActionFreshStart               = "fresh_start"
+	recoveryActionRuntimeRetry             = "runtime_retry"
 )
 
 // sessionTerminalErrText mirrors lifecycle.ErrSessionTerminal's message. It is
@@ -108,6 +110,9 @@ type LaunchSessionRequest struct {
 	// Start agent button launches it later. It is an internal server-side flag
 	// set from EnsureSessionOptions, kept off the wire protocol (`json:"-"`).
 	NoAgentLaunch bool `json:"-"`
+	// NoInitialPrompt starts an explicitly replaced utility session without
+	// composing configuration instructions into an otherwise empty first turn.
+	NoInitialPrompt bool `json:"-"`
 	// DeferredStart marks a prepare whose caller will follow up with an explicit
 	// IntentStartCreated that carries the prompt (the two-phase create flow:
 	// cheap sync prepare + async start). It suppresses the passthrough
@@ -133,7 +138,9 @@ type LaunchSessionRequest struct {
 	SpawnOrigin *SpawnOrigin `json:"-"`
 	// AllowBranchReplacement is set only by RecoverSession for the explicit
 	// resume_new_branch action. Clients cannot grant this permission directly.
-	AllowBranchReplacement bool `json:"-"`
+	AllowBranchReplacement           bool   `json:"-"`
+	RepairWorkspaceInventory         bool   `json:"-"`
+	WorkspaceInventoryIdempotencyKey string `json:"-"`
 	// AllowCompletedSessionResume is set only by explicit recovery or a pinned
 	// follow-up dispatcher. It is intentionally not part of the wire request:
 	// ordinary launch, ensure, and startup recovery paths must keep completed
@@ -158,16 +165,17 @@ type SpawnOrigin struct {
 
 // LaunchSessionResponse is the unified response for session.launch.
 type LaunchSessionResponse struct {
-	Success               bool    `json:"success"`
-	TaskID                string  `json:"task_id"`
-	SessionID             string  `json:"session_id,omitempty"`
-	AgentExecutionID      string  `json:"agent_execution_id,omitempty"`
-	AgentProfileID        string  `json:"agent_profile_id,omitempty"`
-	State                 string  `json:"state"`
-	WorktreePath          *string `json:"worktree_path,omitempty"`
-	WorktreeBranch        *string `json:"worktree_branch,omitempty"`
-	ActivationDisposition string  `json:"activation_disposition,omitempty"`
-	ActivationReason      string  `json:"activation_reason,omitempty"`
+	Success                           bool                                      `json:"success"`
+	TaskID                            string                                    `json:"task_id"`
+	SessionID                         string                                    `json:"session_id,omitempty"`
+	AgentExecutionID                  string                                    `json:"agent_execution_id,omitempty"`
+	AgentProfileID                    string                                    `json:"agent_profile_id,omitempty"`
+	State                             string                                    `json:"state"`
+	WorktreePath                      *string                                   `json:"worktree_path,omitempty"`
+	WorktreeBranch                    *string                                   `json:"worktree_branch,omitempty"`
+	WorkspaceInventoryRecoveryReceipt *models.WorkspaceInventoryRecoveryReceipt `json:"workspace_inventory_recovery_receipt,omitempty"`
+	ActivationDisposition             string                                    `json:"activation_disposition,omitempty"`
+	ActivationReason                  string                                    `json:"activation_reason,omitempty"`
 }
 
 // ResolveIntent infers the session intent from request fields when Intent is empty.
@@ -529,9 +537,15 @@ func (s *Service) launchStartCreated(ctx context.Context, req *LaunchSessionRequ
 	}
 	autoStart := req.AutoStart || req.ActivationSource == LaunchActivationSourceSessionOpen
 	parkingStamp := s.captureWorkflowParkingStamp(ctx, req.SessionID)
-	execution, err := s.StartCreatedSession(
+	options := startCreatedSessionOptions{}
+	if req.NoInitialPrompt {
+		options.skipTaskDescriptionFallback = true
+		options.promptAlreadyComposed = true
+		options.noInitialTurn = true
+	}
+	execution, err := s.startCreatedSession(
 		ctx, req.TaskID, req.SessionID, req.AgentProfileID,
-		req.Prompt, req.SkipMessageRecord, req.PlanMode, autoStart, req.Attachments, nil,
+		req.Prompt, req.SkipMessageRecord, req.PlanMode, autoStart, req.Attachments, nil, "", options,
 	)
 	if err != nil {
 		return nil, err
@@ -573,11 +587,13 @@ func (s *Service) launchResume(ctx context.Context, req *LaunchSessionRequest) (
 		resumeCtx = withSessionOpenRecoveryContext(ctx)
 	}
 	execution, err := s.ResumeTaskSessionWithOptions(resumeCtx, req.TaskID, req.SessionID, executor.ResumeOptions{
-		SettingsPolicy:                  req.SessionSettingsPolicy,
-		AllowBranchReplacement:          req.AllowBranchReplacement,
-		AllowCompletedSessionResume:     req.AllowCompletedSessionResume,
-		RequireIdleSuspensionProvenance: req.RequireIdleSuspensionProvenance,
-		Origin:                          string(launchOriginForActivation(req)),
+		AllowBranchReplacement:           req.AllowBranchReplacement,
+		RepairWorkspaceInventory:         req.RepairWorkspaceInventory,
+		WorkspaceInventoryIdempotencyKey: req.WorkspaceInventoryIdempotencyKey,
+		AllowCompletedSessionResume:      req.AllowCompletedSessionResume,
+		Origin:                           string(launchOriginForActivation(req)),
+		RequireIdleSuspensionProvenance:  req.RequireIdleSuspensionProvenance,
+		SettingsPolicy:                   req.SessionSettingsPolicy,
 	})
 	if err != nil {
 		var blocked *sessionOpenRecoveryBlockedError
@@ -817,6 +833,13 @@ func (s *Service) launchRestoreWorkspace(ctx context.Context, req *LaunchSession
 	}
 
 	if err := s.agentManager.EnsureWorkspaceExecutionForSession(ctx, req.TaskID, req.SessionID); err != nil {
+		var projectionErr *agentruntime.WorkspaceRecoveryProjectionError
+		if errors.As(err, &projectionErr) {
+			if projectionErr.PersistFailed {
+				return nil, errors.New("workspace recovery state could not be saved")
+			}
+			return nil, &ManagedCloneRelocationRecoveryError{Stamp: projectionErr.Stamp, Stale: projectionErr.Stale}
+		}
 		return nil, fmt.Errorf("failed to restore workspace: %w", err)
 	}
 	agentExecutionID, _ := s.agentManager.GetExecutionIDForSession(ctx, req.SessionID)
@@ -840,27 +863,44 @@ func (s *Service) launchRestoreWorkspace(ctx context.Context, req *LaunchSession
 	return resp, nil
 }
 
-// RecoverSession handles user-initiated recovery after an agent CLI failure.
-// action is "resume", "resume_new_branch", "fresh_start", or the explicit
-// stamp-fenced "relocate_and_resume" action for dirty managed-clone worktrees.
+// RecoverSessionOptions carries action-specific recovery authority.
+type RecoverSessionOptions struct {
+	IdempotencyKey string
+	SettingsPolicy executor.ResumeSettingsPolicy
+	ErrorStamp     string
+}
+
+// RecoverSession handles explicit retry, branch replacement, fresh start, and
+// stamp-fenced managed clone relocation after an agent CLI failure.
 func (s *Service) RecoverSession(ctx context.Context, taskID, sessionID, action string, errorStamps ...string) (*LaunchSessionResponse, error) {
 	return s.RecoverSessionWithSettingsPolicy(
 		ctx, taskID, sessionID, action, executor.ResumeSettingsPolicyStrict, errorStamps...,
 	)
 }
 
-// RecoverSessionWithSettingsPolicy handles an explicit recovery request whose
-// settings policy has been admitted for this one resume attempt.
+// RecoverSessionWithSettingsPolicy admits a settings policy for one recovery attempt.
 func (s *Service) RecoverSessionWithSettingsPolicy(
 	ctx context.Context,
 	taskID, sessionID, action string,
 	settingsPolicy executor.ResumeSettingsPolicy,
 	errorStamps ...string,
 ) (*LaunchSessionResponse, error) {
-	if err := validateSessionRecoverySettingsPolicyAction(action, settingsPolicy); err != nil {
+	options := RecoverSessionOptions{SettingsPolicy: settingsPolicy}
+	if len(errorStamps) > 0 {
+		options.ErrorStamp = errorStamps[0]
+	}
+	return s.RecoverSessionWithOptions(ctx, taskID, sessionID, action, options)
+}
+
+func (s *Service) RecoverSessionWithOptions(
+	ctx context.Context,
+	taskID, sessionID, action string,
+	options RecoverSessionOptions,
+) (*LaunchSessionResponse, error) {
+	if err := validateSessionRecoverySettingsPolicyAction(action, options.SettingsPolicy); err != nil {
 		return nil, err
 	}
-	session, err := s.loadSessionForRecovery(ctx, taskID, sessionID, settingsPolicy)
+	session, err := s.loadSessionForRecovery(ctx, taskID, sessionID, options.SettingsPolicy)
 	if err != nil {
 		return nil, err
 	}
@@ -868,19 +908,22 @@ func (s *Service) RecoverSessionWithSettingsPolicy(
 	if err != nil {
 		return nil, err
 	}
-	launchCtx, err := s.prepareManagedCloneRelocationRecovery(ctx, session, action, errorStamps)
+	if action == recoveryActionRepairWorkspaceInventory && strings.TrimSpace(options.IdempotencyKey) == "" {
+		return nil, models.ErrWorkspaceInventoryRecoveryInvalid
+	}
+	recoveryObservation, err := s.captureWorkspaceRecoveryErrorObservation(ctx, session)
+	if err != nil {
+		return nil, err
+	}
+	launchCtx, err := s.prepareManagedCloneRelocationRecovery(ctx, session, action, []string{options.ErrorStamp})
 	if err != nil {
 		return nil, err
 	}
 
-	// Inspect and repair the selected environment before clearing any provider
-	// resume identity or crossing the agent-start boundary.
-	recoveryAdmission, err := s.executor.PreflightSessionWorktreeRecovery(
-		launchCtx, taskID, session, action == recoveryActionResumeNewBranch,
-	)
+	recoveryAdmission, err := s.preflightSessionRecovery(launchCtx, taskID, session, action)
 	if err != nil {
 		branchError := s.branchRecoveryError(launchCtx, taskID, sessionID, err)
-		return nil, s.managedCloneRelocationPreflightError(ctx, session, action, branchError)
+		return nil, s.managedCloneRelocationPreflightError(ctx, session, action, recoveryObservation, branchError)
 	}
 	if recoveryAdmission != nil {
 		defer func() { _ = recoveryAdmission.Release(context.WithoutCancel(ctx)) }()
@@ -892,17 +935,39 @@ func (s *Service) RecoverSessionWithSettingsPolicy(
 	}
 
 	resp, err := s.LaunchSession(launchCtx, &LaunchSessionRequest{
-		TaskID:                      taskID,
-		SessionID:                   sessionID,
-		Intent:                      IntentResume,
-		SessionSettingsPolicy:       settingsPolicy,
-		AllowBranchReplacement:      action == recoveryActionResumeNewBranch,
-		AllowCompletedSessionResume: action == recoveryActionResume,
+		TaskID:                           taskID,
+		SessionID:                        sessionID,
+		Intent:                           IntentResume,
+		AllowBranchReplacement:           action == recoveryActionResumeNewBranch,
+		AllowCompletedSessionResume:      action == recoveryActionResume,
+		RepairWorkspaceInventory:         action == recoveryActionRepairWorkspaceInventory,
+		WorkspaceInventoryIdempotencyKey: strings.TrimSpace(options.IdempotencyKey),
+		SessionSettingsPolicy:            options.SettingsPolicy,
 	})
 	if err != nil {
 		return nil, normalizeRecoverSessionError(err)
 	}
 	return resp, nil
+}
+
+func (s *Service) preflightSessionRecovery(
+	ctx context.Context,
+	taskID string,
+	session *models.TaskSession,
+	action string,
+) (*worktree.RecoveryAdmission, error) {
+	// Inventory repair must attest the original checkout before any filesystem
+	// recovery can modify it. Its executor path validates inventory first.
+	if action == recoveryActionRepairWorkspaceInventory {
+		return nil, nil
+	}
+	admission, err := s.executor.PreflightSessionWorktreeRecovery(
+		ctx, taskID, session, action == recoveryActionResumeNewBranch,
+	)
+	if err != nil {
+		return nil, err
+	}
+	return admission, nil
 }
 
 func (s *Service) loadSessionForRecovery(
@@ -1065,7 +1130,8 @@ func normalizeSessionRecoveryAction(
 		}
 	}
 	if action != recoveryActionResume && action != recoveryActionResumeNewBranch &&
-		action != recoveryActionFreshStart && action != models.RecoveryActionRelocateAndResume {
+		action != recoveryActionFreshStart && action != models.RecoveryActionRelocateAndResume &&
+		action != recoveryActionRepairWorkspaceInventory {
 		return "", fmt.Errorf("invalid recovery action: %s", action)
 	}
 	return action, nil
@@ -1112,6 +1178,7 @@ func (s *Service) managedCloneRelocationPreflightError(
 	ctx context.Context,
 	session *models.TaskSession,
 	action string,
+	observation models.WorkspaceRecoveryErrorObservation,
 	preflightErr error,
 ) error {
 	if errors.Is(preflightErr, worktree.ErrManagedCloneRelocationAuthorizationStale) {
@@ -1124,9 +1191,15 @@ func (s *Service) managedCloneRelocationPreflightError(
 	if action == models.RecoveryActionRelocateAndResume {
 		return currentManagedCloneRelocationError(session)
 	}
-	stamp, err := s.persistManagedCloneRelocationRequired(ctx, session)
+	if s.workspaceRecoveryErrorReporter == nil {
+		return &ManagedCloneRelocationRecoveryError{Stale: true}
+	}
+	stamp, err := s.workspaceRecoveryErrorReporter.ReportManagedCloneRelocationRequired(ctx, observation)
 	if err != nil {
-		return err
+		return errors.New("workspace recovery state could not be saved")
+	}
+	if stamp == "" {
+		return &ManagedCloneRelocationRecoveryError{Stale: true}
 	}
 	return &ManagedCloneRelocationRecoveryError{Stamp: stamp}
 }
@@ -1149,36 +1222,96 @@ func (s *Service) applySessionRecoveryAction(ctx context.Context, sessionID, act
 	return nil
 }
 
-func (s *Service) persistManagedCloneRelocationRequired(
+func (s *Service) captureWorkspaceRecoveryErrorObservation(
 	ctx context.Context,
 	session *models.TaskSession,
-) (string, error) {
+) (models.WorkspaceRecoveryErrorObservation, error) {
 	if session == nil || session.ID == "" {
-		return "", fmt.Errorf("session identity is required for recovery state")
+		return models.WorkspaceRecoveryErrorObservation{}, nil
 	}
-	if current, ok := models.LoadLastAgentError(session.Metadata); ok && !current.IsDismissed() &&
-		current.Code == models.LaunchErrorCategoryManagedCloneRelocationRequired &&
-		len(current.RecoveryActions) == 1 && current.RecoveryActions[0] == models.RecoveryActionRelocateAndResume {
-		return current.Stamp(), nil
+	observation := models.WorkspaceRecoveryErrorObservation{
+		TaskID: session.TaskID, SessionID: session.ID, SessionState: session.State,
 	}
-	now := time.Now().UTC()
-	errorValue := models.LastAgentError{
-		Message:         "The task workspace contains local changes and needs explicit relocation.",
-		OccurredAt:      now,
-		Scope:           models.ErrorScopeSession,
-		Phase:           models.LaunchErrorPhaseBootstrap,
-		Code:            models.LaunchErrorCategoryManagedCloneRelocationRequired,
-		Details:         "Move the workspace files and resume to continue this task session.",
-		RecoveryActions: []string{models.RecoveryActionRelocateAndResume},
-		StampValue: models.StableLaunchErrorStamp(
-			session.TaskID, session.ID, models.LaunchErrorCategoryManagedCloneRelocationRequired,
-			now.Format(time.RFC3339Nano),
-		),
+	if current, ok := models.LoadLastAgentError(session.Metadata); ok {
+		observation.ExpectedErrorStamp = current.Stamp()
 	}
-	if err := s.repo.SetSessionMetadataKey(ctx, session.ID, models.SessionMetaKeyLastAgentError, errorValue); err != nil {
-		return "", fmt.Errorf("persist workspace recovery options: %w", err)
+	environment, err := s.workspaceRecoveryObservationEnvironment(ctx, session)
+	if err != nil {
+		return models.WorkspaceRecoveryErrorObservation{}, err
 	}
-	return errorValue.Stamp(), nil
+	if environment == nil {
+		return observation, nil
+	}
+	observation.TaskEnvironmentID = environment.ID
+	observation.EnvironmentOwnerTaskID = environment.TaskID
+	observation.OwnershipGeneration = environment.OwnershipGeneration
+	observation.SelectionSnapshot, err = s.workspaceRecoverySelectionSnapshot(ctx, session, environment)
+	if err != nil {
+		return models.WorkspaceRecoveryErrorObservation{}, err
+	}
+	observation.AgentExecutionID, err = s.workspaceRecoveryExecutionID(ctx, session.ID)
+	if err != nil {
+		return models.WorkspaceRecoveryErrorObservation{}, err
+	}
+	return observation, nil
+}
+
+func (s *Service) workspaceRecoveryObservationEnvironment(
+	ctx context.Context,
+	session *models.TaskSession,
+) (*models.TaskEnvironment, error) {
+	var environment *models.TaskEnvironment
+	var err error
+	if session.TaskEnvironmentID != "" {
+		environment, err = s.repo.GetTaskEnvironment(ctx, session.TaskEnvironmentID)
+	} else {
+		environment, err = s.repo.GetTaskEnvironmentByTaskID(ctx, session.TaskID)
+	}
+	if err != nil {
+		if errors.Is(err, taskrepo.ErrTaskEnvironmentNotFound) {
+			return nil, nil
+		}
+		return nil, errors.New("workspace recovery state could not be read")
+	}
+	return environment, nil
+}
+
+func (s *Service) workspaceRecoverySelectionSnapshot(
+	ctx context.Context,
+	session *models.TaskSession,
+	environment *models.TaskEnvironment,
+) (models.WorkspaceRecoverySelectionSnapshot, error) {
+	if environment.ExecutorType != string(models.ExecutorTypeWorktree) {
+		return models.WorkspaceRecoverySelectionSnapshot{}, nil
+	}
+	repositoryReader, ok := s.repo.(interface {
+		GetRepository(context.Context, string) (*models.Repository, error)
+	})
+	var readRepository func(string) (*models.Repository, error)
+	if ok {
+		readRepository = func(repositoryID string) (*models.Repository, error) {
+			return repositoryReader.GetRepository(ctx, repositoryID)
+		}
+	}
+	snapshot, err := models.CaptureWorkspaceRecoverySelectionSnapshot(session, environment, readRepository)
+	if err != nil {
+		return models.WorkspaceRecoverySelectionSnapshot{}, errors.New("workspace recovery repository inventory could not be read")
+	}
+	return snapshot, nil
+}
+
+func (s *Service) workspaceRecoveryExecutionID(ctx context.Context, sessionID string) (string, error) {
+	running, err := s.repo.GetExecutorRunningBySessionID(ctx, sessionID)
+	if errors.Is(err, models.ErrExecutorRunningNotFound) {
+		return "", nil
+	}
+	if err != nil {
+		return "", errors.New("workspace recovery state could not be read")
+	}
+	if running == nil {
+		return "", nil
+	}
+	return running.AgentExecutionID, nil
 }
 
 // normalizeRecoverSessionError maps a missing-profile resume failure to a
@@ -1210,12 +1343,13 @@ func executionToLaunchResponse(taskID string, exec *executor.TaskExecution) *Lau
 		}
 	}
 	resp := &LaunchSessionResponse{
-		Success:          true,
-		TaskID:           taskID,
-		SessionID:        exec.SessionID,
-		AgentExecutionID: exec.AgentExecutionID,
-		AgentProfileID:   exec.AgentProfileID,
-		State:            string(exec.SessionState),
+		Success:                           true,
+		TaskID:                            taskID,
+		SessionID:                         exec.SessionID,
+		AgentExecutionID:                  exec.AgentExecutionID,
+		AgentProfileID:                    exec.AgentProfileID,
+		State:                             string(exec.SessionState),
+		WorkspaceInventoryRecoveryReceipt: exec.WorkspaceInventoryRecoveryReceipt,
 	}
 	if exec.WorktreePath != "" {
 		resp.WorktreePath = &exec.WorktreePath

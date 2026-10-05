@@ -2,7 +2,7 @@
 status: active
 system: agents
 created: 2026-07-26
-updated: 2026-09-07
+updated: 2026-09-26
 owners:
   - Kandev
 ---
@@ -12,6 +12,16 @@ owners:
 
 Operators need newly released agent models without waiting for a Kandev release. They also need a UI recovery path when the newest npm release is partly published, incompatible with ACP, or otherwise cannot start. Rebuilding an npm cache is not sufficient when an unversioned command selects the same broken release again.
 
+This document owns the runtime-update contract for built-in agents in two
+flavors. A **pinned runtime** is staged and activated by Kandev from exact
+published versions. A **harness-owned updater** is a built-in agent whose own
+CLI installs updates and cannot install an arbitrary version.
+
+## Terminology
+
+- **Pinned runtime:** A built-in agent whose update contract resolves, stages, probes, and activates one exact published version.
+- **Harness-owned updater:** A built-in agent whose own CLI command installs the release it selects, detecting how the agent is installed. Kandev runs that command and re-probes the agent; it does not stage or select versions.
+
 ## Requirements
 
 ### REQ-AGENTS-RUNTIME-UPDATES-001: Managed Agent Runtime Versions and Updates
@@ -20,7 +30,7 @@ Operators need newly released agent models without waiting for a Kandev release.
 
 #### Acceptance criteria
 
-- **AC-AGENTS-RUNTIME-UPDATES-001.1:** Settings exposes version management for the built-in managed npm runtimes used by Claude, Codex, OpenCode, Copilot, and Gemini.
+- **AC-AGENTS-RUNTIME-UPDATES-001.1:** Settings exposes version management for the built-in managed npm runtimes used by Claude, Codex, OpenCode, Copilot, and Gemini when Kandev owns their runtime. External native installations use the ownership and guidance boundary in [runtime update notifications](runtime-update-notifications.md).
 - **AC-AGENTS-RUNTIME-UPDATES-001.2:** The update dialog lists stable versions published for the trusted package. The list contains the newest 50 stable versions plus the active and last observed versions when either falls outside that window. The upstream `latest` stable version is selected initially.
 - **AC-AGENTS-RUNTIME-UPDATES-001.3:** The backend classifies the selected action as `update`, `rollback`, `repair`, or `up_to_date`. The UI uses this structural state for copy and approval; it never compares translated labels or version strings itself.
 - **AC-AGENTS-RUNTIME-UPDATES-001.4:** Kandev stages the exact trusted `package@version`, ACP-probes that candidate, and activates it only after a successful probe. Candidate failure preserves the prior active version and capability catalogue.
@@ -47,7 +57,39 @@ Operators need newly released agent models without waiting for a Kandev release.
 - **AC-AGENTS-RUNTIME-UPDATES-002.6:** If Kandev cannot complete default activation, startup shall stop before readiness and retry the activation during the next start.
 - **AC-AGENTS-RUNTIME-UPDATES-002.7:** On the first release with this behavior, Kandev shall treat an unmarked legacy selection as part of an earlier default generation.
 
+### REQ-AGENTS-RUNTIME-UPDATES-003: Harness-Owned Runtime Updates
+
+**Intent:** Some built-in harnesses ship their own package-manager-independent updater. The operator needs the same Settings update surface for those harnesses without Kandev assuming an installer, staging a candidate, or pinning a version the harness cannot install.
+
+#### Acceptance criteria
+
+- **AC-AGENTS-RUNTIME-UPDATES-003.1:** When a built-in agent declares a trusted self-update command, Settings shall expose the update control, the update-state indicator, and the maintenance job that a pinned runtime exposes.
+- **AC-AGENTS-RUNTIME-UPDATES-003.2:** When the operator opens the update dialog for such an agent, the dialog shall show the running version and upstream stable latest as a reference, clearly distinguish that reference from the version the configured updater may install, and shall not offer version selection, a target-version input, or rollback.
+- **AC-AGENTS-RUNTIME-UPDATES-003.3:** When approval creates an update job, Kandev shall run the agent's trusted update command, stream its output into the job, and then probe the runtime with the agent's ACP command. If the command exits successfully but the probe reports the same version as before the update, Kandev shall fail the job and retain the command output.
+- **AC-AGENTS-RUNTIME-UPDATES-003.4:** When the post-update probe succeeds and reports a changed version, Kandev shall publish the refreshed capability catalogue and record the probe-reported version as the current version. Kandev shall not persist a version selection for that agent.
+- **AC-AGENTS-RUNTIME-UPDATES-003.5:** When the post-update probe fails or reports no version change, Kandev shall fail the job, keep the previous capability catalogue, and not report a changed version as active.
+- **AC-AGENTS-RUNTIME-UPDATES-003.6:** When the current ACP-reported version is equal to or newer than the upstream stable reference, Settings shall keep the update action available because the configured channel may have a newer release. The backend shall run the trusted updater and let it decide whether an update is available.
+- **AC-AGENTS-RUNTIME-UPDATES-003.7:** When Kandev cannot resolve the upstream stable latest version for such an agent, it shall report the status as unknown, show an unknown stable reference in preview, keep the update action usable, and not change another agent's status entry.
+- **AC-AGENTS-RUNTIME-UPDATES-003.8:** When the agent's update command fails, Kandev shall fail the job with the command's own output and shall not substitute a package-manager command or modify the installation further.
+- **AC-AGENTS-RUNTIME-UPDATES-003.9:** The update command, the package used for version metadata, and the probe command shall come only from built-in agent metadata; request input shall not supply a command, a package, or a registry location.
+- **AC-AGENTS-RUNTIME-UPDATES-003.10:** Declaring a self-update command shall not change an agent's execution command, install script, session recovery, passthrough behavior, or container command construction.
+- **AC-AGENTS-RUNTIME-UPDATES-003.11:** When resolving stable package metadata for a harness-owned updater, Settings shall query the trusted HTTPS registry directly without requiring the `npm` executable. If resolution fails, status is unknown and preview shall still allow the trusted updater to run with an unknown stable reference.
+- **AC-AGENTS-RUNTIME-UPDATES-003.12:** When the operator approves a harness-owned update, Settings shall submit an approval request without a target version or `use_default`.
+- **AC-AGENTS-RUNTIME-UPDATES-003.13:** When the backend receives an empty JSON approval body, it shall accept it only for an agent with a built-in self-update capability; for that mode, a non-empty `target_version` or `use_default: true` shall be rejected.
+- **AC-AGENTS-RUNTIME-UPDATES-003.14:** When Settings runs a self-update, Kandev shall invoke the trusted command without selecting a version or channel; the harness's existing configured channel determines the installed version, which may differ from the stable latest reference and shall be recorded from the post-update ACP probe.
+- **AC-AGENTS-RUNTIME-UPDATES-003.15:** When an update approval returns a terminal `up_to_date` result with an empty `job_id`, Settings shall display that result without registering or polling a maintenance job and shall refresh runtime-update status for each such response.
+- **AC-AGENTS-RUNTIME-UPDATES-003.16:** A failed status refresh shall preserve the last successful status, and an older response shall not replace a newer status result.
+- **AC-AGENTS-RUNTIME-UPDATES-003.17:** When an update job reaches a terminal state, Settings shall refresh the runtime status so the displayed version reflects the completed operation. Concurrent refresh requests shall not leave the displayed status stale.
+
+## Out of scope
+
+- Selecting an arbitrary published version, rolling back to an older version, or recovering a partly published release for a harness that only installs the release its own updater selects.
+- Staging a candidate into a Kandev-managed directory for such a harness. The harness's own installer is the integrity boundary.
+- Taking ownership of installations that a harness updater declines to manage, such as an installation owned by a system package manager.
+- Container and remote-executor package caches for a harness the Settings action does not prepare.
+
 ## System design
 
 The migrated technical source is split into [part 1](../system-design/runtime-updates-01.md), [part 2](../system-design/runtime-updates-02.md).
 Upgrade-time default activation is defined in [runtime default activation](../system-design/runtime-default-activation.md).
+Harness-owned updaters are defined in [harness self-update](../system-design/harness-self-update.md).

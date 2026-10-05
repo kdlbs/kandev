@@ -33,6 +33,7 @@ type Client struct {
 	executionID           string
 	sessionID             string
 	authToken             string // shared secret for Bearer auth
+	processGeneration     uint64
 
 	// Optional trace context for session-scoped spans in background goroutines.
 	// When set, stream read loops use this as parent context for tracing instead of context.Background().
@@ -140,6 +141,13 @@ func (c *Client) SetTraceContext(ctx context.Context) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.traceCtx = ctx
+}
+
+// ProcessGeneration returns the most recent child generation started by this client.
+func (c *Client) ProcessGeneration() uint64 {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.processGeneration
 }
 
 // getTraceCtx returns the trace context for background operations.
@@ -557,6 +565,9 @@ func (c *Client) StreamCanvasSource(ctx context.Context, root string) (io.ReadCl
 
 // Start starts the agent process and returns the full command that was executed.
 func (c *Client) Start(ctx context.Context) (string, error) {
+	c.mu.Lock()
+	c.processGeneration = 0
+	c.mu.Unlock()
 	ctx, span := tracing.TraceHTTPRequest(ctx, "POST", "/api/v1/start", c.executionID)
 	defer span.End()
 
@@ -586,9 +597,10 @@ func (c *Client) Start(ctx context.Context) (string, error) {
 	}
 
 	var result struct {
-		Success bool   `json:"success"`
-		Command string `json:"command,omitempty"`
-		Error   string `json:"error,omitempty"`
+		Success           bool   `json:"success"`
+		Command           string `json:"command,omitempty"`
+		ProcessGeneration uint64 `json:"process_generation,omitempty"`
+		Error             string `json:"error,omitempty"`
 	}
 	if err := json.Unmarshal(respBody, &result); err != nil {
 		tracing.TraceHTTPResponse(span, resp.StatusCode, err)
@@ -599,6 +611,9 @@ func (c *Client) Start(ctx context.Context) (string, error) {
 		tracing.TraceHTTPResponse(span, resp.StatusCode, startErr)
 		return "", startErr
 	}
+	c.mu.Lock()
+	c.processGeneration = result.ProcessGeneration
+	c.mu.Unlock()
 
 	tracing.TraceHTTPResponse(span, resp.StatusCode, nil)
 	return result.Command, nil

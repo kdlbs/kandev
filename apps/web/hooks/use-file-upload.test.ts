@@ -1,4 +1,5 @@
-import { act, renderHook, waitFor } from "@testing-library/react";
+import { createElement, StrictMode } from "react";
+import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const preflightWorkspaceUpload = vi.fn();
@@ -15,6 +16,7 @@ const A_TXT = "a.txt";
 const B_TXT = "b.txt";
 const C_TXT = "c.txt";
 const FIXTURES = "fixtures";
+const INVALID_PATH = "../invalid.txt";
 
 function file(name: string): File {
   return new File(["bytes"], name);
@@ -33,6 +35,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  cleanup();
   vi.restoreAllMocks();
 });
 
@@ -286,5 +289,250 @@ describe("useFileUpload failure isolation", () => {
 
     await expect(outcome).resolves.toMatchObject({ cancelled: true });
     expect(uploadWorkspaceFile).toHaveBeenCalledTimes(1);
+  });
+});
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (error: Error) => void;
+  const promise = new Promise<T>((yes, no) => {
+    resolve = yes;
+    reject = no;
+  });
+  return { promise, resolve, reject };
+}
+
+function skippedFile() {
+  const invalid = file("invalid.txt");
+  Object.defineProperty(invalid, "webkitRelativePath", { value: INVALID_PATH });
+  return invalid;
+}
+
+// @covers AC-UI-WORKSPACE-FILE-TRANSFER-003.7, AC-UI-WORKSPACE-FILE-TRANSFER-003.8
+// @covers AC-UI-WORKSPACE-FILE-TRANSFER-003.9, AC-UI-WORKSPACE-FILE-TRANSFER-003.10
+describe("useFileUpload owner lifetime", () => {
+  it("settles a parked batch on owner unmount without uploading any selected file", async () => {
+    preflightWorkspaceUpload.mockResolvedValue([{ path: A_TXT, is_dir: false }]);
+    const { result, unmount } = renderHook(() => useFileUpload("sess-1"));
+    let outcome: Awaited<ReturnType<typeof result.current.uploadFiles>> | undefined;
+    let caller!: ReturnType<typeof result.current.uploadFiles>;
+    act(() => {
+      caller = result.current.uploadFiles("", [file(A_TXT), file(B_TXT), skippedFile()]);
+      void caller.then((value) => (outcome = value));
+    });
+    await waitFor(() => expect(result.current.conflicts).not.toBeNull());
+    await act(async () => unmount());
+    // Cleanup must settle without a remaining dialog action or network request.
+    try {
+      expect(outcome).toEqual({
+        uploaded: [],
+        cancelled: true,
+        failed: 0,
+        skipped: [INVALID_PATH],
+      });
+      expect(uploadWorkspaceFile).not.toHaveBeenCalled();
+    } finally {
+      if (!outcome) result.current.cancelConflicts();
+      await caller;
+    }
+  });
+
+  it.each([
+    ["unmount", "clear"],
+    ["unmount", "conflict"],
+    ["unmount", "failure"],
+    ["session", "clear"],
+    ["session", "conflict"],
+    ["session", "failure"],
+  ])("retires deferred preflight after %s with %s response", async (retire, response) => {
+    const transport = deferred<Array<{ path: string; is_dir: boolean }>>();
+    preflightWorkspaceUpload.mockReturnValueOnce(transport.promise);
+    const { result, unmount, rerender } = renderHook(({ sessionId }) => useFileUpload(sessionId), {
+      initialProps: { sessionId: "sess-1" },
+    });
+    let caller!: ReturnType<typeof result.current.uploadFiles>;
+    let settled = false;
+    act(() => {
+      caller = result.current.uploadFiles("", [file(A_TXT), skippedFile()]);
+      void caller.then(() => (settled = true));
+    });
+    if (retire === "unmount") unmount();
+    else rerender({ sessionId: "sess-2" });
+    expect(settled).toBe(false);
+    await act(async () => {
+      if (response === "failure") transport.reject(new Error("late preflight failure"));
+      else transport.resolve(response === "conflict" ? [{ path: A_TXT, is_dir: false }] : []);
+      await transport.promise.catch(() => undefined);
+    });
+    try {
+      expect(settled).toBe(true);
+    } finally {
+      if (!settled) result.current.cancelConflicts();
+      await caller;
+    }
+    await expect(caller).resolves.toMatchObject({
+      cancelled: true,
+      failed: 0,
+      skipped: [INVALID_PATH],
+    });
+    expect(uploadWorkspaceFile).not.toHaveBeenCalled();
+    if (retire === "session") {
+      expect(result.current.conflicts).toBeNull();
+      expect(result.current.uploads).toEqual([]);
+    }
+  });
+});
+
+describe("useFileUpload active retirement", () => {
+  it.each([
+    ["unmount", false, false],
+    ["unmount", false, true],
+    ["unmount", true, false],
+    ["unmount", true, true],
+    ["session", false, false],
+    ["session", false, true],
+    ["session", true, false],
+    ["session", true, true],
+  ])("stops uploads after %s (conflicts %s, failure %s)", async (retire, conflicting, failure) => {
+    const transport = deferred<{ path: string; size_bytes: number }>();
+    uploadWorkspaceFile.mockReturnValueOnce(transport.promise);
+    if (conflicting) preflightWorkspaceUpload.mockResolvedValue([{ path: A_TXT, is_dir: false }]);
+    const { result, rerender, unmount } = renderHook(({ sessionId }) => useFileUpload(sessionId), {
+      initialProps: { sessionId: "sess-1" },
+    });
+    let caller!: ReturnType<typeof result.current.uploadFiles>;
+    let resolution: Promise<void> | undefined;
+    let settled = false;
+    act(() => {
+      caller = result.current.uploadFiles("", [file(A_TXT), file(B_TXT), skippedFile()]);
+      void caller.then(() => (settled = true));
+    });
+    if (conflicting) {
+      await waitFor(() => expect(result.current.conflicts).not.toBeNull());
+      act(() => {
+        resolution = result.current.resolveConflicts(new Map([[A_TXT, "keep_both"]]));
+      });
+    }
+    await waitFor(() => expect(uploadWorkspaceFile).toHaveBeenCalledTimes(1));
+    if (retire === "unmount") unmount();
+    else rerender({ sessionId: "sess-2" });
+    expect(settled).toBe(false);
+    await act(async () => {
+      if (failure) transport.reject(new Error("late upload failure"));
+      else transport.resolve({ path: "a-1.txt", size_bytes: 5 });
+      await caller;
+      await resolution;
+    });
+    await expect(caller).resolves.toEqual({
+      uploaded: failure ? [] : [{ path: "a-1.txt", size_bytes: 5 }],
+      cancelled: true,
+      failed: failure ? 2 : 1,
+      skipped: [INVALID_PATH],
+    });
+    expect(uploadWorkspaceFile).toHaveBeenCalledTimes(1);
+    if (retire === "session") expect(result.current.uploads).toEqual([]);
+  });
+});
+
+describe("useFileUpload lifetime isolation", () => {
+  it("rejects retained callbacks after returning to the same session", async () => {
+    const { result, rerender } = renderHook(({ sessionId }) => useFileUpload(sessionId), {
+      initialProps: { sessionId: "sess-1" },
+    });
+    const old = result.current;
+    rerender({ sessionId: "sess-2" });
+    rerender({ sessionId: "sess-1" });
+    preflightWorkspaceUpload.mockResolvedValue([{ path: B_TXT, is_dir: false }]);
+    let caller!: ReturnType<typeof result.current.uploadFiles>;
+    act(() => {
+      caller = result.current.uploadFiles("", [file(B_TXT)]);
+    });
+    await waitFor(() => expect(result.current.conflicts).not.toBeNull());
+    await act(async () => {
+      expect((await old.uploadFiles("", [file(A_TXT)])).cancelled).toBe(true);
+      await old.resolveConflicts(new Map([[B_TXT, "replace"]]));
+      old.cancelConflicts();
+      old.clearUploads();
+    });
+    expect(result.current.conflicts?.conflicts).toEqual([{ path: B_TXT, is_dir: false }]);
+    expect(result.current.uploads[0]?.status).toBe("blocked");
+    expect(preflightWorkspaceUpload).toHaveBeenCalledTimes(1);
+    expect(uploadWorkspaceFile).not.toHaveBeenCalled();
+    await act(async () => {
+      await result.current.resolveConflicts(new Map([[B_TXT, "keep_both"]]));
+      await caller;
+    });
+    await expect(caller).resolves.toMatchObject({ cancelled: false });
+  });
+
+  it("keeps replacement batches and independent owners live after stale failure", async () => {
+    const oldPreflight = deferred<Array<{ path: string; is_dir: boolean }>>();
+    preflightWorkspaceUpload.mockReturnValueOnce(oldPreflight.promise);
+    const owner = renderHook(({ sessionId }) => useFileUpload(sessionId), {
+      initialProps: { sessionId: "sess-1" },
+    });
+    const sibling = renderHook(() => useFileUpload("sibling"));
+    let oldCaller!: ReturnType<typeof owner.result.current.uploadFiles>;
+    act(() => {
+      oldCaller = owner.result.current.uploadFiles("", [file(A_TXT)]);
+    });
+    owner.rerender({ sessionId: "sess-2" });
+    const newTransport = deferred<{ path: string; size_bytes: number }>();
+    uploadWorkspaceFile.mockReturnValueOnce(newTransport.promise);
+    let current!: ReturnType<typeof owner.result.current.uploadFiles>;
+    act(() => {
+      current = owner.result.current.uploadFiles("", [file(B_TXT)]);
+    });
+    await waitFor(() => expect(uploadWorkspaceFile).toHaveBeenCalledTimes(1));
+    await act(async () => {
+      oldPreflight.reject(new Error("old failure"));
+      await oldCaller;
+      await sibling.result.current.uploadFiles("", [file(C_TXT)]);
+    });
+    expect(owner.result.current.uploads[0]).toMatchObject({
+      relativePath: B_TXT,
+      status: "uploading",
+    });
+    expect(sibling.result.current.uploads[0]?.status).toBe("ready");
+    await act(async () => {
+      newTransport.resolve({ path: B_TXT, size_bytes: 5 });
+      await current;
+    });
+    await expect(oldCaller).resolves.toMatchObject({ cancelled: true });
+    await expect(current).resolves.toMatchObject({ cancelled: false });
+    expect(owner.result.current.uploads[0]?.status).toBe("ready");
+  });
+});
+
+describe("useFileUpload live owner controls", () => {
+  it("uploads after StrictMode setup cleanup setup", async () => {
+    const { result } = renderHook(() => useFileUpload("sess-1"), {
+      wrapper: ({ children }) => createElement(StrictMode, null, children),
+    });
+    await act(async () => {
+      const outcome = await result.current.uploadFiles("", [file(A_TXT)]);
+      expect(outcome.cancelled).toBe(false);
+    });
+    expect(uploadWorkspaceFile).toHaveBeenCalledTimes(1);
+    expect(result.current.uploads[0]?.status).toBe("ready");
+  });
+
+  it("preserves empty and all-skipped outcomes", async () => {
+    const { result } = renderHook(() => useFileUpload("sess-1"));
+    await act(async () => {
+      expect(await result.current.uploadFiles("", [])).toEqual({
+        uploaded: [],
+        cancelled: false,
+        failed: 0,
+        skipped: [],
+      });
+      expect(await result.current.uploadFiles("", [skippedFile()])).toEqual({
+        uploaded: [],
+        cancelled: false,
+        failed: 1,
+        skipped: [INVALID_PATH],
+      });
+    });
+    expect(preflightWorkspaceUpload).not.toHaveBeenCalled();
   });
 });

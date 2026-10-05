@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, renderHook, act, fireEvent, screen } from "@testing-library/react";
+import { render, renderHook, act, screen } from "@testing-library/react";
 import { useState } from "react";
 import type { OpenFileTab } from "@/lib/types/backend";
 import type { ReviewItemSummary } from "@/lib/plugins/types";
@@ -55,22 +55,6 @@ vi.mock("../review-detail-panel", async () => {
     },
   };
 });
-
-vi.mock("../prompt-history-panel-content", () => ({
-  PromptHistoryPanelContent: ({
-    onNavigateToPrompt,
-  }: {
-    onNavigateToPrompt?: (messageId: string) => void;
-  }) => (
-    <button
-      type="button"
-      data-testid="mobile-prompt-history-content"
-      onClick={() => onNavigateToPrompt?.("prompt-1")}
-    >
-      Prompt history
-    </button>
-  ),
-}));
 
 import {
   MobilePanelArea,
@@ -411,39 +395,6 @@ describe("MobilePanelArea PR identity", () => {
   });
 });
 
-describe("MobilePanelArea Prompt history", () => {
-  it("renders the history surface and forwards prompt navigation", () => {
-    const handleNavigateToPrompt = vi.fn();
-
-    render(
-      <MobilePanelArea
-        currentMobilePanel="prompt-history"
-        activeTaskId="task-1"
-        isPassthroughMode={false}
-        effectiveSessionId="session-1"
-        selectedFile={null}
-        selectedFilePreview={false}
-        selectedDiff={null}
-        handleOpenFileFromChat={vi.fn()}
-        handleClearSelectedDiff={vi.fn()}
-        handleOpenFile={vi.fn()}
-        handlePanelChangeAndClearSheet={vi.fn()}
-        onNavigateToPrompt={handleNavigateToPrompt}
-        mobileScrollTarget={null}
-        topPadding="3.5rem"
-        bottomNavHeight="3.25rem"
-        reviews={[]}
-        selectedReview={null}
-        onSelectReview={vi.fn()}
-      />,
-    );
-
-    expect(screen.getByTestId("mobile-prompt-history-content")).toBeTruthy();
-    fireEvent.click(screen.getByTestId("mobile-prompt-history-content"));
-    expect(handleNavigateToPrompt).toHaveBeenCalledWith("prompt-1");
-  });
-});
-
 describe("MobilePanelArea Plan formatting offset", () => {
   it("passes the bottom navigation height to the Plan panel", () => {
     render(
@@ -533,14 +484,14 @@ describe("MobilePanelArea — plugin task panel (AC7)", () => {
 
 describe("terminalPaddingBottom", () => {
   it("pads by the keybar height alone when the keyboard is closed", () => {
-    expect(terminalPaddingBottom(false, 0, "3.25rem")).toBe("48px");
+    expect(terminalPaddingBottom(false, 0, "3.25rem")).toBe("58px");
     // bottomOffset is irrelevant while the keyboard is closed.
-    expect(terminalPaddingBottom(false, 300, "3.25rem")).toBe("48px");
+    expect(terminalPaddingBottom(false, 300, "3.25rem")).toBe("58px");
   });
 
   it("subtracts the bottom nav and adds the live keyboard offset when the keyboard is open", () => {
     expect(terminalPaddingBottom(true, 300, "3.25rem")).toBe(
-      "calc(348px - 3.25rem - env(safe-area-inset-bottom, 0px))",
+      "calc(358px - 3.25rem - env(safe-area-inset-bottom, 0px))",
     );
   });
 });

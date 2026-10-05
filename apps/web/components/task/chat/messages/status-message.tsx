@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, memo } from "react";
+import { useState, memo, type ReactElement } from "react";
 import {
   IconAlertTriangle,
   IconInfoCircle,
@@ -11,6 +11,7 @@ import {
 import { cn } from "@/lib/utils";
 import type { Message } from "@/lib/types/http";
 import type { StatusMetadata } from "@/components/task/chat/types";
+import { sanitizeSessionErrorDetails } from "@/lib/session-error-details";
 import { useTranslation } from "react-i18next";
 import { t } from "@/lib/i18n";
 
@@ -165,10 +166,40 @@ function getStatusMessage(
   statusLine: string | undefined,
 ): string {
   if (metadata?.variant === "resume_settings_provider_restored") {
-    return t("task:providerRestoredResumeSuccess");
+    const confirmedModelId =
+      metadata.effective_model_known === true
+        ? safeProviderModelId(metadata.effective_model_id)
+        : "";
+    const model = confirmedModelId
+      ? safeProviderModelLabel(metadata.effective_model_name) || confirmedModelId
+      : "";
+    return model
+      ? t("task:providerRestoredResumeSuccessWithModel", { model })
+      : t("task:providerRestoredResumeSuccess");
   }
   if (metadata?.kind === "model_selection_warning") return t("task:modelSelectionWarning");
   return metadata?.message || comment.content || statusLine || t("task:statusUpdate");
+}
+
+function safeProviderModelLabel(value: unknown): string {
+  if (
+    typeof value !== "string" ||
+    value === "" ||
+    value.length > 256 ||
+    value.trim() !== value ||
+    /[\u0000-\u001f\u007f]/.test(value) ||
+    sanitizeSessionErrorDetails(value, 256) !== value
+  ) {
+    return "";
+  }
+  return value;
+}
+
+function safeProviderModelId(value: unknown): string {
+  if (typeof value !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._:/+\-\x5b\x5d]{0,255}$/u.test(value)) {
+    return "";
+  }
+  return safeProviderModelLabel(value);
 }
 
 function isErrorStatus(comment: Message, metadata: ErrorMetadata | undefined): boolean {
@@ -313,6 +344,24 @@ function SimpleStatusMessage({ message }: { message: string }) {
   );
 }
 
+function ProviderRestoredResumeStatus({ message }: { message: string }) {
+  const { t } = useTranslation();
+  return (
+    <div
+      className="flex items-start gap-2 rounded border border-border/60 px-3 py-2"
+      data-testid="provider-restored-resume-success"
+    >
+      <IconInfoCircle className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
+      <div className="min-w-0 space-y-1">
+        <p className="text-xs font-medium text-foreground">{message}</p>
+        <p className="text-xs text-muted-foreground">
+          {t("task:providerRestoredResumeSuccessDetails")}
+        </p>
+      </div>
+    </div>
+  );
+}
+
 function CancelledStatusMessage({ message }: { message: string }) {
   return (
     <div className="flex items-center gap-3 w-full py-2">
@@ -324,6 +373,32 @@ function CancelledStatusMessage({ message }: { message: string }) {
       <div className="flex-1 h-px bg-amber-500/30" />
     </div>
   );
+}
+
+function renderSpecialStatusMessage({
+  metadata,
+  progress,
+  statusLine,
+  message,
+  isError,
+  isWarning,
+}: {
+  metadata: ErrorMetadata | undefined;
+  progress: number | null;
+  statusLine: string | undefined;
+  message: string;
+  isError: boolean;
+  isWarning: boolean;
+}): ReactElement | null {
+  if (metadata?.kind === "branch_recreated") return <BranchRecreatedWarning metadata={metadata} />;
+  if (metadata?.variant === "resume_settings_provider_restored") {
+    return <ProviderRestoredResumeStatus message={message} />;
+  }
+  if (!isError && !isWarning && progress === null && !statusLine && !metadata?.message) {
+    return <SimpleStatusMessage message={message} />;
+  }
+  if (metadata?.cancelled) return <CancelledStatusMessage message={message} />;
+  return null;
 }
 
 function ExpandableErrorDetails({
@@ -385,15 +460,16 @@ export const StatusMessage = memo(function StatusMessage({ comment }: { comment:
   const [isExpanded, setIsExpanded] = useState(false);
   const { metadata, progress, statusLine, message, isError, isWarning } =
     parseStatusMetadata(comment);
-  if (metadata?.kind === "branch_recreated") {
-    return <BranchRecreatedWarning metadata={metadata} />;
-  }
+  const specialStatus = renderSpecialStatusMessage({
+    metadata,
+    progress,
+    statusLine,
+    message,
+    isError,
+    isWarning,
+  });
+  if (specialStatus) return specialStatus;
   const { hasExpandableContent, errorDetails } = computeExpandableContent(isError, metadata);
-  const isSimpleStatus =
-    !isError && !isWarning && progress === null && !statusLine && !metadata?.message;
-
-  if (isSimpleStatus) return <SimpleStatusMessage message={message} />;
-  if (metadata?.cancelled) return <CancelledStatusMessage message={message} />;
 
   const { Icon, iconClass, textClass } = getStatusStyle(isError, isWarning);
 

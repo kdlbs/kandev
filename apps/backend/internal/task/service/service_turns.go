@@ -966,7 +966,8 @@ func (s *Service) GetWorkspaceInfoForSession(ctx context.Context, taskID, sessio
 	if taskEnv != nil {
 		workspaceInventory = taskEnv.Repos
 	}
-	if err := s.populateWorkspaceRepositorySpecs(ctx, taskID, workspaceInventory, info); err != nil {
+	workspaceRepositories, err := s.populateWorkspaceRepositorySpecs(ctx, taskID, workspaceInventory, info)
+	if err != nil {
 		return nil, err
 	}
 
@@ -991,6 +992,7 @@ func (s *Service) GetWorkspaceInfoForSession(ctx context.Context, taskID, sessio
 			ensureWorkspaceMetadata(info)[lifecycle.MetadataKeyContainerID] = running.ContainerID
 		}
 	}
+	s.populateWorkspaceRecoveryErrorObservation(taskID, sessionID, session, taskEnv, workspaceRepositories, info)
 	executorID := session.ExecutorID
 	recordedKubernetes := running != nil && running.Runtime == agentruntime.RuntimeKubernetes
 	if recordedKubernetes {
@@ -1083,6 +1085,49 @@ func (s *Service) applyWorkspaceExecutorRecord(
 	return nil
 }
 
+func (s *Service) populateWorkspaceRecoveryErrorObservation(
+	taskID, sessionID string,
+	session *models.TaskSession,
+	taskEnv *models.TaskEnvironment,
+	workspaceRepositories map[string]*models.Repository,
+	info *lifecycle.WorkspaceInfo,
+) {
+	if taskEnv == nil || taskEnv.ExecutorType != string(models.ExecutorTypeWorktree) ||
+		info.TaskEnvironmentID == "" || info.EnvironmentOwnerTaskID == "" || info.OwnershipGeneration <= 0 {
+		return
+	}
+	errorStamp := ""
+	if lastError, ok := models.LoadLastAgentError(session.Metadata); ok {
+		errorStamp = lastError.Stamp()
+	}
+	selectionSnapshot, snapshotErr := models.CaptureWorkspaceRecoverySelectionSnapshot(session, taskEnv, func(repositoryID string) (*models.Repository, error) {
+		repository, ok := workspaceRepositories[repositoryID]
+		if !ok {
+			return nil, fmt.Errorf("repository %q was not in the captured workspace inventory", repositoryID)
+		}
+		return repository, nil
+	})
+	switch {
+	case snapshotErr != nil:
+		s.logger.Warn("failed to capture workspace recovery inventory",
+			zap.String("task_id", taskID),
+			zap.String("session_id", sessionID),
+			zap.Error(snapshotErr))
+	case !selectionSnapshot.Complete():
+		s.logger.Warn("workspace recovery inventory is incomplete",
+			zap.String("task_id", taskID),
+			zap.String("session_id", sessionID))
+	default:
+		info.RecoveryErrorObservation = &models.WorkspaceRecoveryErrorObservation{
+			TaskID: taskID, SessionID: sessionID, TaskEnvironmentID: info.TaskEnvironmentID,
+			EnvironmentOwnerTaskID: info.EnvironmentOwnerTaskID, OwnershipGeneration: info.OwnershipGeneration,
+			SelectionSnapshot: selectionSnapshot,
+			SessionState:      session.State, AgentExecutionID: info.AgentExecutionID,
+			ExpectedErrorStamp: errorStamp,
+		}
+	}
+}
+
 type workspaceWorktreeKey struct {
 	repositoryID string
 	branchSlug   string
@@ -1094,74 +1139,111 @@ type workspaceRepositoryProjection struct {
 	repoName       string
 }
 
-func (s *Service) populateWorkspaceRepositorySpecs(ctx context.Context, taskID string, sessionWorktrees []*models.TaskEnvironmentRepo, info *lifecycle.WorkspaceInfo) error {
+func (s *Service) populateWorkspaceRepositorySpecs(ctx context.Context, taskID string, sessionWorktrees []*models.TaskEnvironmentRepo, info *lifecycle.WorkspaceInfo) (map[string]*models.Repository, error) {
 	if taskID == "" || s.taskRepos == nil || s.repoEntities == nil {
-		return nil
+		return nil, nil
 	}
-	if task, err := s.tasks.GetTask(ctx, taskID); err != nil {
+	if err := s.populateWorkspaceTaskMetadata(ctx, taskID, info); err != nil {
+		return nil, err
+	}
+	worktreesByIdentity := indexWorkspaceWorktrees(sessionWorktrees)
+	projections, err := s.workspaceRepositoryProjections(ctx, taskID)
+	if err != nil {
+		return nil, err
+	}
+	repositories := indexWorkspaceRepositoryEntities(projections)
+	branchPlans := worktree.BuildBranchIdentityPlans(workspaceBranchIdentityInputs(projections))
+	for index, projection := range projections {
+		info.WorkspaceRepositories = append(info.WorkspaceRepositories, s.workspaceRepositorySpec(projection, branchPlans[index].IdentitySlug, worktreesByIdentity))
+	}
+	return repositories, nil
+}
+
+func (s *Service) populateWorkspaceTaskMetadata(ctx context.Context, taskID string, info *lifecycle.WorkspaceInfo) error {
+	task, err := s.tasks.GetTask(ctx, taskID)
+	if err != nil {
 		return fmt.Errorf("get workspace task: %w", err)
-	} else if task != nil {
+	}
+	if task != nil {
 		info.WorkspaceID = task.WorkspaceID
 		info.TaskArchived = task.ArchivedAt != nil
 	}
+	return nil
+}
+
+func indexWorkspaceWorktrees(sessionWorktrees []*models.TaskEnvironmentRepo) map[workspaceWorktreeKey]*models.TaskEnvironmentRepo {
 	worktreesByIdentity := make(map[workspaceWorktreeKey]*models.TaskEnvironmentRepo, len(sessionWorktrees))
 	for _, worktree := range sessionWorktrees {
 		if worktree != nil && worktree.RepositoryID != "" {
 			worktreesByIdentity[workspaceWorktreeKey{repositoryID: worktree.RepositoryID, branchSlug: worktree.BranchSlug}] = worktree
 		}
 	}
-	projections, err := s.workspaceRepositoryProjections(ctx, taskID)
-	if err != nil {
-		return err
+	return worktreesByIdentity
+}
+
+func indexWorkspaceRepositoryEntities(projections []workspaceRepositoryProjection) map[string]*models.Repository {
+	repositories := make(map[string]*models.Repository, len(projections))
+	for _, projection := range projections {
+		repositories[projection.taskRepository.RepositoryID] = projection.repository
 	}
-	branchPlans := worktree.BuildBranchIdentityPlans(workspaceBranchIdentityInputs(projections))
-	for index, projection := range projections {
-		taskRepository, repository := projection.taskRepository, projection.repository
-		branchTemplate := repository.WorktreeBranchTemplate
-		if taskRepository.BranchPolicyBranchTemplate != "" {
-			branchTemplate = taskRepository.BranchPolicyBranchTemplate
-		}
-		var cloneRelocation *worktree.ManagedCloneRelocationProof
-		if paths, ok := s.repoCloneLocation.(interface {
-			ManagedCloneRelocationPaths(
-				*models.Repository,
-			) (root, providerSource, ownerNameSource, destination string, managed bool, err error)
-		}); ok {
-			root, source, ownerNameSource, destination, managed, pathErr := paths.ManagedCloneRelocationPaths(repository)
-			if pathErr == nil && managed {
-				cloneRelocation = &worktree.ManagedCloneRelocationProof{
-					ManagedRoot: root, ExpectedSourcePath: source, LegacyOwnerNameSourcePath: ownerNameSource,
-					ExpectedDestinationPath: destination,
-					Identity: worktree.ManagedRepositoryIdentity{
-						Provider: repository.Provider, Host: repository.ProviderHost,
-						Owner: repository.ProviderOwner, Name: repository.ProviderName,
-					},
-				}
-			}
-		}
-		spec := lifecycle.WorkspaceRepositorySpec{
-			RepositoryID: taskRepository.RepositoryID, RepositoryPath: repository.LocalPath, RepoName: projection.repoName,
-			CloneRelocation: cloneRelocation,
-			BaseBranch:      taskRepository.BaseBranch, DefaultBranch: repository.DefaultBranch,
-			CheckoutBranch: taskRepository.CheckoutBranch, WorktreeBranchPrefix: repository.WorktreeBranchPrefix,
-			WorktreeBranchTemplate: branchTemplate, PullBeforeWorktree: repository.PullBeforeWorktree,
-		}
-		if worktree := worktreesByIdentity[workspaceWorktreeKey{repositoryID: taskRepository.RepositoryID, branchSlug: branchPlans[index].IdentitySlug}]; worktree != nil {
-			spec.WorktreeID = worktree.WorktreeID
-			spec.WorktreePath = worktree.WorktreePath
-			spec.WorktreeBranch = worktree.WorktreeBranch
-			spec.BranchSlug = worktree.BranchSlug
-			spec.BranchIdentitySlug = worktree.BranchSlug
-			spec.WorktreeSourceClonePath = worktree.WorktreeSourceClonePath
-			spec.WorktreeSourceCommonDir = worktree.WorktreeSourceCommonDir
-			if spec.CloneRelocation != nil {
-				spec.CloneRelocation.RecordedSourcePath = worktree.WorktreeSourceClonePath
-				spec.CloneRelocation.RecordedSourceCommonDir = worktree.WorktreeSourceCommonDir
-			}
-		}
-		info.WorkspaceRepositories = append(info.WorkspaceRepositories, spec)
+	return repositories
+}
+
+func (s *Service) workspaceRepositorySpec(
+	projection workspaceRepositoryProjection,
+	branchIdentitySlug string,
+	worktreesByIdentity map[workspaceWorktreeKey]*models.TaskEnvironmentRepo,
+) lifecycle.WorkspaceRepositorySpec {
+	taskRepository, repository := projection.taskRepository, projection.repository
+	branchTemplate := repository.WorktreeBranchTemplate
+	if taskRepository.BranchPolicyBranchTemplate != "" {
+		branchTemplate = taskRepository.BranchPolicyBranchTemplate
 	}
-	return nil
+	cloneRelocation := s.managedCloneRelocationProof(repository)
+	spec := lifecycle.WorkspaceRepositorySpec{
+		RepositoryID: taskRepository.RepositoryID, RepositoryPath: repository.LocalPath, RepoName: projection.repoName,
+		CloneRelocation: cloneRelocation,
+		BaseBranch:      taskRepository.BaseBranch, DefaultBranch: repository.DefaultBranch,
+		CheckoutBranch: taskRepository.CheckoutBranch, WorktreeBranchPrefix: repository.WorktreeBranchPrefix,
+		WorktreeBranchTemplate: branchTemplate, PullBeforeWorktree: repository.PullBeforeWorktree,
+	}
+	if selected := worktreesByIdentity[workspaceWorktreeKey{repositoryID: taskRepository.RepositoryID, branchSlug: branchIdentitySlug}]; selected != nil {
+		spec.WorktreeID = selected.WorktreeID
+		spec.WorktreePath = selected.WorktreePath
+		spec.WorktreeBranch = selected.WorktreeBranch
+		spec.BranchSlug = selected.BranchSlug
+		spec.BranchIdentitySlug = selected.BranchSlug
+		spec.WorktreeSourceClonePath = selected.WorktreeSourceClonePath
+		spec.WorktreeSourceCommonDir = selected.WorktreeSourceCommonDir
+		if cloneRelocation != nil {
+			cloneRelocation.RecordedSourcePath = selected.WorktreeSourceClonePath
+			cloneRelocation.RecordedSourceCommonDir = selected.WorktreeSourceCommonDir
+		}
+	}
+	return spec
+}
+
+func (s *Service) managedCloneRelocationProof(repository *models.Repository) *worktree.ManagedCloneRelocationProof {
+	paths, ok := s.repoCloneLocation.(interface {
+		ManagedCloneRelocationPaths(
+			*models.Repository,
+		) (root, providerSource, ownerNameSource, destination string, managed bool, err error)
+	})
+	if !ok {
+		return nil
+	}
+	root, source, ownerNameSource, destination, managed, err := paths.ManagedCloneRelocationPaths(repository)
+	if err != nil || !managed {
+		return nil
+	}
+	return &worktree.ManagedCloneRelocationProof{
+		ManagedRoot: root, ExpectedSourcePath: source, LegacyOwnerNameSourcePath: ownerNameSource,
+		ExpectedDestinationPath: destination,
+		Identity: worktree.ManagedRepositoryIdentity{
+			Provider: repository.Provider, Host: repository.ProviderHost,
+			Owner: repository.ProviderOwner, Name: repository.ProviderName,
+		},
+	}
 }
 
 func (s *Service) workspaceRepositoryProjections(ctx context.Context, taskID string) ([]workspaceRepositoryProjection, error) {

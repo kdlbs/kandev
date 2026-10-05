@@ -269,6 +269,30 @@ If `intent` is omitted, the backend infers it from those fields. That inference 
 
 A successful response contains `success`, `task_id`, `state`, and usually `session_id`; it can also contain `agent_execution_id`, `worktree_path`, and `worktree_branch`. Session states use uppercase values such as `CREATED`, `STARTING`, `RUNNING`, `WAITING_FOR_INPUT`, `COMPLETED`, `FAILED`, and `CANCELLED`.
 
+### Repair preserved workspace inventory
+
+`session.recover` accepts the task-scoped `repair_workspace_inventory` action when a Worktree resume fails because the canonical environment inventory is missing or has a stale branch-slot identity. This is a preservation-only recovery action, not a general database editor. The server derives the workspace, repository, environment, row, path, and branch from the authorized task and session; clients provide only `task_id`, `session_id`, `action`, and a non-empty retry-stable `idempotency_key`. The key remains bound to the original session and derived checkout identity after repair; reusing it for another session conflicts. Active borrowers of the same environment block repair, and inherited resumes must pass the environment owner’s preservation attestation. Repositories with external Git clean/process filters require manual recovery.
+
+```json
+{
+  "id": "repair-inventory-1",
+  "type": "request",
+  "action": "session.recover",
+  "payload": {
+    "task_id": "task-uuid",
+    "session_id": "session-uuid",
+    "action": "repair_workspace_inventory",
+    "idempotency_key": "incident-2026-09-01-attempt-1"
+  }
+}
+```
+
+The action succeeds only when Kandev proves one unmatched canonical slot, one server-owned managed checkout, the exact registered Git worktree and branch, an unchanged HEAD plus dirty/untracked content, current database revisions, and no competing task session. It then inserts or corrects only that environment-repository row and appends an audit receipt in one transaction. The unchanged checkout is inspected again, and matching post-repair evidence must be durably recorded, before the resume proceeds through the normal fail-closed inventory validator.
+
+The response can include `workspace_inventory_recovery_receipt`. Its `result_code` is `repaired` for the first successful write or `deduplicated` when the same task, idempotency key, and request identity were already recorded. The receipt contains hashes and server identifiers but no host checkout path. Reusing a key for a different derived request returns a conflict.
+
+Invalid input returns a validation error. Ambiguous inventory, a path or branch mismatch, a symlinked checkout, a deleted or failed row, a user-owned local repository, a remote-only executor, revision drift, or a concurrent writer returns a conflict without rematerializing, resetting, cleaning, or deleting the workspace. Resolve those cases manually after preserving the checkout.
+
 Every task-session response includes immutable `queue_incarnation_id`. Kandev generates a new value when a session is created, including when a deleted textual session ID is reused. Queue clients must retain this value with the task and session IDs rather than looking up a replacement after starting an operation.
 
 ### Search work-item references over HTTP
@@ -432,6 +456,36 @@ task.walkthrough.get
 ```
 
 There are no ordinary dispatcher registrations for direct workflow-step update, delete, or reorder requests. Those operations are available through the workflow HTTP/configuration surfaces and relevant MCP tools.
+
+### Partial task updates
+
+`task.update` and REST `PATCH /api/v1/tasks/:id` change only supplied fields. Concurrent
+ordinary updates to different fields retain both edits, including requests handled by
+separate backend services. Omitted fields and JSON `null` retain current values; explicit
+empty strings keep the field's existing clear behavior, and `repositories: []` clears
+repository associations.
+
+A supplied `metadata` object retains the existing replacement or pending-title merge
+behavior. It does not merge arbitrary keys from competing requests. Server-owned
+lifecycle and handoff records remain protected, and an explicit title resolves pending
+agent naming.
+
+The REST `PATCH /api/v1/tasks/:id/port-forwarding` preference uses the explicit
+metadata merge path. Concurrent admitted merges preserve different ordinary top-level
+keys and omitted task fields across backend services. Supplying the same key uses the
+last committed value. This does not extend ordinary metadata replacement or later
+full-snapshot writes into per-key merges, and nested/null behavior keeps the current
+pending-title database semantics.
+
+GitHub issue linking and unlinking preserve unrelated metadata and omitted task fields,
+including concurrent port-forwarding preference changes. A link replaces the complete
+issue identity together; unlink removes its five issue keys. Legacy issue-watch metadata
+remains separate. These operations retain the ordinary task update notification path.
+
+This guarantee covers ordinary partial updates and participating field-scoped writes.
+Internal full-snapshot and exact/versioned commands retain their own contracts. Responses
+and notifications may observe a later commit; they do not establish a total event order
+or an exact mutation receipt.
 
 ### Sessions, messages, agents, and orchestration
 
@@ -763,6 +817,16 @@ mcp.write_task_document
 ```
 
 These registrations back Kandev's agent/MCP bridge. The subset registered in a process depends on its MCP handler mode and enabled capabilities. They are internal transport shims: raw `/ws` rejects every one of them before handler dispatch. Use the MCP tools exposed to the agent so tool schemas, task/session scoping, and compatibility handling remain intact. In particular, `mcp.stop_task` is the internal action behind task-mode `stop_task_kandev`; External MCP does not register that tool.
+
+The `mcp.get_task_plan` shim accepts optional `offset`, `limit`, and
+`expected_version` from the agent tool. Offset and limit count Unicode code
+points. Supplying either selects an exact bounded fragment; omitting both
+preserves the full read. Partial results include the snapshot version, whole
+plan lengths, returned lengths, `has_more`, and `next_offset`; a stale expected
+version returns a conflict without content. These fields do not change the
+browser's `task.plan.get` contract. Use
+[the MCP plan-read guide](automation-and-mcp.md#read-only-the-relevant-part-of-a-plan)
+for defaults, bounds, and examples.
 
 ## Emitted notifications and recipients
 

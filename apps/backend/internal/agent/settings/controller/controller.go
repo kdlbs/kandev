@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"golang.org/x/sync/singleflight"
 	"strings"
 	"sync"
 	"time"
@@ -91,6 +92,13 @@ type Controller struct {
 	runtimeUpdateStatusNow      func() time.Time
 	runtimeUpdateStatusResolver RuntimeUpdateStatusResolver
 	runtimeUpdateStatusLookup   chan struct{}
+	runtimeUpdateStatusFlight   singleflight.Group
+	runtimeAutoUpdateStore      *managedruntime.AutoUpdateStore
+	runtimeUpdateNotifier       RuntimeUpdateNotifier
+	runtimeBackgroundMu         sync.Mutex
+	runtimeBackground           *runtimeUpdateBackground
+	runtimeAutoUpdateMu         sync.Mutex
+	runtimeUpdatePassMu         sync.Mutex
 	dynamicAgentRoutingEnabled  bool
 }
 
@@ -451,6 +459,7 @@ func (c *Controller) initializeUpdateJobStore() {
 		c.managedRuntimeSelections,
 	)
 	c.updateJobStore.SetStatusInvalidator(c.InvalidateRuntimeUpdateStatus)
+	c.updateJobStore.onFinished = c.retainAutomaticOutcome
 }
 
 // BroadcastAvailableAgents fetches the current available-agents snapshot and

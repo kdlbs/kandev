@@ -414,6 +414,8 @@ func (h *TaskHandlers) wsDeleteTask(ctx context.Context, msg *ws.Message) (*ws.M
 	)
 	if err != nil {
 		switch {
+		case errors.Is(err, repoerrors.ErrTaskHierarchyConflict):
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeConflict, err.Error(), nil)
 		case errors.Is(err, service.ErrTaskDeleteConfirmationRequired):
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "current task deletion preview is required", nil)
 		case errors.Is(err, service.ErrTaskDeleteConfirmationIdentity):

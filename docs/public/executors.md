@@ -62,7 +62,7 @@ The plugin provisions and removes provider compute. Kandev owns agentctl, agent 
 
 Review each provider's retention and expiry before launch. `persistent` means the provider reports no fixed expiry. `bounded` includes a maximum lifetime. `ephemeral` means workspace data ends with the compute environment. `unknown` makes no retention promise. The task environment disclosure reports effective retention, known expiry, current status, and available cleanup actions.
 
-Remote environments need outbound access to the configured Kandev API URL. Providers return short-lived HTTPS connection leases for agentctl. Do not place provider credentials in endpoint URLs, task metadata, or resource state. See [Authoring plugins](plugins-authoring.md#remote-executor-providers) and the [plugin manifest reference](plugins-manifest.md#remote-executor-providers).
+Remote environments need outbound access to the Kandev API. Set `githubCredentialBroker.publicBaseUrl` (or `KANDEV_GITHUB_CREDENTIAL_BROKER_PUBLIC_BASE_URL`) to a non-local HTTPS URL of this Kandev; plugin launches fail without it. Select agent credentials on the profile page as for other remote executors: Kandev copies the selected credential files into the environment and passes selected secrets as agent environment variables. Providers return short-lived HTTPS connection leases for agentctl. Do not place provider credentials in endpoint URLs, task metadata, or resource state. See [Authoring plugins](plugins-authoring.md#remote-executor-providers) and the [plugin manifest reference](plugins-manifest.md#remote-executor-providers).
 
 ## Embedded VS Code availability
 

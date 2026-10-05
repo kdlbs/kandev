@@ -6,6 +6,7 @@ import (
 
 	agentdto "github.com/kandev/kandev/internal/agent/dto"
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/repository/managedconversation"
 	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 	"github.com/kandev/kandev/internal/task/statussummary"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
@@ -23,6 +24,7 @@ var ErrTaskCompletionCriteriaConflict = repoerrors.ErrTaskCompletionCriteriaConf
 var ErrTaskCompletionEvidenceChanged = repoerrors.ErrTaskCompletionEvidenceChanged
 var ErrTaskCompletionHumanConfirmationRequired = repoerrors.ErrTaskCompletionHumanConfirmationRequired
 var ErrNoPrimarySession = repoerrors.ErrNoPrimarySession
+var ErrTaskHierarchyConflict = repoerrors.ErrTaskHierarchyConflict
 var ErrTaskParentMismatch = repoerrors.ErrTaskParentMismatch
 var ErrTaskPlanNotFound = repoerrors.ErrTaskPlanNotFound
 var ErrTaskPlanCommentsChanged = repoerrors.ErrTaskPlanCommentsChanged
@@ -64,10 +66,22 @@ type WorkspaceRepository interface {
 // TaskRepository handles task CRUD and workflow placement.
 // Note: models.TaskRepository is a struct in internal/task/models; no Go conflict exists.
 type TaskRepository interface {
+	managedconversation.Repository
+	// UpdateTaskGitHubIssue sets a complete issue link, or removes it for nil.
+	// It preserves current unrelated metadata and returns the committed candidate.
+	UpdateTaskGitHubIssue(ctx context.Context, id string, link *models.TaskGitHubIssueLink) (*models.Task, error)
+	// MergeTaskMetadata applies ordinary supplied keys to canonical current metadata.
+	// It writes metadata and its timestamp atomically without task-row effects.
+	MergeTaskMetadata(ctx context.Context, id string, metadata map[string]interface{}) error
 	CreateTask(ctx context.Context, task *models.Task) error
 	GetTask(ctx context.Context, id string) (*models.Task, error)
 	GetTasksByIDs(ctx context.Context, ids []string) ([]*models.Task, error)
-	// UpdateTask writes the full task row, preserving whatever position is
+	// UpdateTaskFieldsWithParentAdmission applies request presence to the locked
+	// current row, admitting explicit parent intent through the existing policy.
+	UpdateTaskFieldsWithParentAdmission(ctx context.Context, id string, update models.TaskFieldUpdate, validate TaskParentValidator) (*models.TaskFieldUpdateResult, error)
+	// UpdateTask writes the full task row, preserving the current parent and
+	// normalized materialized workspace mode/group unless parent intent was
+	// admitted through TaskHierarchyAdmission. It also preserves whatever position is
 	// currently persisted regardless of what task.Position holds — a
 	// pre-transaction read is not authoritative once a concurrent reorder or
 	// arrival may have moved the row (REQ-TASKS-KANBAN-TASK-REORDERING-001.28/
@@ -82,9 +96,9 @@ type TaskRepository interface {
 	// task snapshot old enough to race the session ceiling's deferred_launch
 	// compare-and-set writers: deferred_launch in the write payload is
 	// replaced by the row's own current value at write time, so a stale
-	// snapshot can never resurrect or clobber a concurrent CAS write. Every
-	// other key keeps ordinary replace semantics, including deletion by
-	// omission.
+	// snapshot can never resurrect or clobber a concurrent CAS write. Outside
+	// hierarchy-owned workspace identity and other server provenance guards,
+	// metadata keeps ordinary replacement/deletion semantics.
 	UpdateTaskPreservingDeferredLaunch(ctx context.Context, task *models.Task) error
 	DeleteTask(ctx context.Context, id string) error
 	ListTasks(ctx context.Context, workflowID string) ([]*models.Task, error)
@@ -346,6 +360,10 @@ type PRWatchTaskActivityRepository interface {
 // TaskRepoRepository handles the task↔repository junction table (models.TaskRepository rows).
 // Named TaskRepoRepository to reduce reader confusion with the TaskRepository sub-interface above.
 type TaskRepoRepository interface {
+	// ReplaceTaskRepositories serializes before reading canonical associations. Build
+	// must be pure: it cannot perform database, provider, or filesystem operations.
+	// Only a successful commit returns rows; commit errors can be indeterminate.
+	ReplaceTaskRepositories(ctx context.Context, taskID string, build func(models.TaskRepositoryReplacementSnapshot) ([]*models.TaskRepository, error)) ([]*models.TaskRepository, error)
 	CreateTaskRepository(ctx context.Context, taskRepo *models.TaskRepository) error
 	GetTaskRepository(ctx context.Context, id string) (*models.TaskRepository, error)
 	ListTaskRepositories(ctx context.Context, taskID string) ([]*models.TaskRepository, error)
@@ -404,9 +422,9 @@ type MessageRepository interface {
 	// prompt. The durable prompt sequence remains after message deletion.
 	HasUserPromptHistory(ctx context.Context, sessionID string) (bool, error)
 	// ClaimInitialPromptFallback atomically admits the task-description fallback
-	// for a never-prompted session. It returns false when another prompt or
-	// fallback has already claimed the session's first prompt slot.
-	ClaimInitialPromptFallback(ctx context.Context, sessionID string) (bool, error)
+	// for the expected incarnation of a never-prompted session. It returns false
+	// when another prompt/fallback claimed the first slot or the session was replaced.
+	ClaimInitialPromptFallback(ctx context.Context, sessionID, incarnationID string) (bool, error)
 	// GetMessageWithPromptIndex retrieves a message by ID with its computed
 	// prompt_index (1-based ordinal among the session's user messages).
 	// Used by the idempotent WS replay/response path and user update-event
@@ -481,6 +499,17 @@ type AttachmentRepository interface {
 	TransferMessageAttachments(ctx context.Context, taskID, oldSessionID, newSessionID string, attachmentIDs []string) error
 	DeleteMessageAttachment(ctx context.Context, id, ownerID string) error
 	MarkExpiredMessageAttachments(ctx context.Context, now time.Time) ([]*models.TaskMessageAttachment, error)
+}
+
+// LaunchAttachmentRollbackRepository restores an unreferenced launch claim
+// when synchronous session admission fails before the task is accepted.
+type LaunchAttachmentRollbackRepository interface {
+	RestoreLaunchMessageAttachments(
+		ctx context.Context,
+		ids []string,
+		ownerID, taskID, sessionID string,
+		expiresAt time.Time,
+	) error
 }
 
 // PreviewFeedbackRepository stores one revisioned pending collection per task.
@@ -615,6 +644,15 @@ type SessionRepository interface {
 	UpdateSessionReviewStatus(ctx context.Context, sessionID string, status string) error
 	UpdateSessionMetadata(ctx context.Context, sessionID string, metadata map[string]interface{}) error
 	SetSessionMetadataKey(ctx context.Context, sessionID, key string, value interface{}) error
+	// CommitWorkspaceRecoveryErrorIfCurrent projects a verified workspace
+	// recovery refusal only while the captured session, execution, environment,
+	// complete selected repository inventory, ownership generation, and current
+	// error stamp still match.
+	CommitWorkspaceRecoveryErrorIfCurrent(
+		ctx context.Context,
+		observation models.WorkspaceRecoveryErrorObservation,
+		errorValue models.LastAgentError,
+	) (stored bool, activeStamp string, err error)
 	SetSessionACPSessionID(ctx context.Context, sessionID, acpSessionID string) (bool, error)
 	DismissLastAgentError(ctx context.Context, sessionID string, expected models.LastAgentError, dismissedAt time.Time) (bool, error)
 	GetLastAgentMessage(ctx context.Context, sessionID string) (string, error)
@@ -732,6 +770,9 @@ type RepositorySetRepository interface {
 	// non-nil, replaces its whole membership in the same transaction so the two
 	// cannot land apart. A nil repositoryItems leaves membership untouched.
 	UpdateRepositorySet(ctx context.Context, set *models.RepositorySet, repositoryItems *[]models.RepositorySetItem) error
+	// PatchRepositorySet writes only supplied metadata and membership fields in
+	// one transaction. Omitted fields retain their current persisted values.
+	PatchRepositorySet(ctx context.Context, id string, patch *models.RepositorySetPatch) error
 	DeleteRepositorySet(ctx context.Context, id string) (bool, error)
 }
 
@@ -744,6 +785,9 @@ type RepositoryBranchPolicyRepository interface {
 	ListRepositoryBranchPolicies(ctx context.Context, repositoryID string) ([]*models.RepositoryBranchPolicy, error)
 	ListRepositoryBranchPoliciesByWorkspace(ctx context.Context, workspaceID string) ([]*models.RepositoryBranchPolicy, error)
 	UpdateRepositoryBranchPolicy(ctx context.Context, policy *models.RepositoryBranchPolicy) error
+	PatchRepositoryBranchPolicy(ctx context.Context, id, repositoryID string, patch *models.RepositoryBranchPolicyPatch,
+		normalize func(*models.RepositoryBranchPolicy) (*models.RepositoryBranchPolicy, error),
+	) (*models.RepositoryBranchPolicy, error)
 	DeleteRepositoryBranchPolicy(ctx context.Context, id string) (bool, error)
 	CreateRepositoryBranchPoliciesIfEmpty(ctx context.Context, repositoryID string, policies []*models.RepositoryBranchPolicy) error
 }

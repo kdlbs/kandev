@@ -1,7 +1,6 @@
 package process
 
 import (
-	"fmt"
 	"strings"
 
 	"github.com/kandev/kandev/internal/agentctl/server/adapter"
@@ -100,11 +99,11 @@ func injectedKandevMCPConfigured(cfg *config.InstanceConfig) bool {
 		}
 		switch server.Type {
 		case "http":
-			if server.URL == fmt.Sprintf("http://localhost:%d/mcp", cfg.Port) {
+			if server.URL == config.MCPServerURL(cfg.MCPHost, cfg.Port, "/mcp") {
 				return true
 			}
 		case "sse":
-			if server.URL == fmt.Sprintf("http://localhost:%d/sse", cfg.Port) {
+			if server.URL == config.MCPServerURL(cfg.MCPHost, cfg.Port, "/sse") {
 				return true
 			}
 		}

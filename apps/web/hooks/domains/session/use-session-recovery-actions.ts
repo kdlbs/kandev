@@ -22,6 +22,10 @@ export type SessionRecoveryBusyAction = SessionRecoveryAction | "restore" | null
 
 export type ManualSessionRecoveryFailure = {
   operation: "resume" | "restore_workspace";
+  sessionId: string;
+  errorStamp: string | null;
+  requestKey: string;
+  operationId: number;
 };
 
 const FAILED_TO_RESUME_MESSAGE_KEY = "task:failedToResumeSession";
@@ -57,6 +61,48 @@ function guardOrFallbackError(
 }
 
 type RecoveryOperation = { requestKey: string; sessionKey: string; operationId: number };
+
+type RecoveryFailureAssociation = {
+  managedClone: ReturnType<typeof managedCloneRelocationRecoveryDetails>;
+  errorStamp: string | null;
+  requestKey: string;
+};
+
+function recoveryFailureAssociation({
+  cause,
+  operation,
+  errorStamp,
+  taskId,
+  sessionId,
+  isCurrentOperation,
+  isCurrentSession,
+  matchesLatestErrorStamp,
+}: {
+  cause: unknown;
+  operation: RecoveryOperation;
+  errorStamp?: string | null;
+  taskId: string;
+  sessionId: string;
+  isCurrentOperation: (operation: RecoveryOperation) => boolean;
+  isCurrentSession: (operation: RecoveryOperation) => boolean;
+  matchesLatestErrorStamp: (stamp: string | undefined) => boolean;
+}): RecoveryFailureAssociation | null {
+  const managedClone = managedCloneRelocationRecoveryDetails(cause);
+  const currentOperation = isCurrentOperation(operation);
+  const isSuccessorRelocation =
+    managedClone?.kind === "managed_clone_relocation_required" &&
+    isCurrentSession(operation) &&
+    matchesLatestErrorStamp(managedClone.error_stamp);
+  if (!currentOperation && !isSuccessorRelocation) return null;
+
+  const associatedStamp = isSuccessorRelocation
+    ? (managedClone.error_stamp ?? errorStamp ?? null)
+    : (errorStamp ?? null);
+  const requestKey = currentOperation
+    ? operation.requestKey
+    : `${taskId}\u0000${sessionId}\u0000${associatedStamp ?? ""}`;
+  return { managedClone, errorStamp: associatedStamp, requestKey };
+}
 
 function hasNativeACPSessionToken(session: TaskSession): boolean {
   if (
@@ -175,6 +221,7 @@ export function useSessionRecoveryActions({
   const [recoveryNotice, setRecoveryNotice] = useState<string | null>(null);
   const [manualRecoveryFailure, setManualRecoveryFailure] =
     useState<ManualSessionRecoveryFailure | null>(null);
+  const [localResultRequestKey, setLocalResultRequestKey] = useState<string | null>(null);
 
   useEffect(() => {
     setBusyAction(null);
@@ -186,20 +233,30 @@ export function useSessionRecoveryActions({
     setLastFailedAction(null);
     setRecoveryNotice(null);
     setManualRecoveryFailure(null);
+    setLocalResultRequestKey(null);
   }, [requestKey]);
 
-  const recoveryError = combineRecoveryErrors(resumeError, restoreError, t);
+  const localResultIsCurrent = localResultRequestKey === requestKey;
+  const recoveryError = localResultIsCurrent
+    ? combineRecoveryErrors(resumeError, restoreError, t)
+    : null;
 
   const handleRecoveryFailure = useCallback(
     (cause: unknown, operation: RecoveryOperation, action: SessionRecoveryAction) => {
+      const association = recoveryFailureAssociation({
+        cause,
+        operation,
+        errorStamp,
+        taskId,
+        sessionId,
+        isCurrentOperation,
+        isCurrentSession,
+        matchesLatestErrorStamp,
+      });
+      if (!association) return;
       const guard = sessionRecoveryGuardDetails(cause);
-      const managedClone = managedCloneRelocationRecoveryDetails(cause);
-      const currentOperation = isCurrentOperation(operation);
-      const currentRelocationRequirement =
-        managedClone?.kind === "managed_clone_relocation_required" &&
-        isCurrentSession(operation) &&
-        (currentOperation || matchesLatestErrorStamp(managedClone.error_stamp));
-      if (!currentOperation && !currentRelocationRequirement) return;
+      const { managedClone, errorStamp: associatedStamp, requestKey } = association;
+      setLocalResultRequestKey(requestKey);
       if (managedClone?.kind === "managed_clone_relocation_required") {
         setManagedCloneRecoveryStamp(managedClone.error_stamp ?? errorStamp ?? null);
       } else if (managedClone?.kind === "managed_clone_relocation_stale") {
@@ -211,9 +268,23 @@ export function useSessionRecoveryActions({
       setGuardDetails(guard);
       setLastFailedAction(action);
       setRecoveryNotice(null);
-      setManualRecoveryFailure({ operation: "resume" });
+      setManualRecoveryFailure({
+        operation: "resume",
+        sessionId,
+        errorStamp: associatedStamp,
+        requestKey,
+        operationId: operation.operationId,
+      });
     },
-    [errorStamp, isCurrentOperation, isCurrentSession, matchesLatestErrorStamp, t],
+    [
+      errorStamp,
+      isCurrentOperation,
+      isCurrentSession,
+      matchesLatestErrorStamp,
+      sessionId,
+      taskId,
+      t,
+    ],
   );
 
   const handleRecover = useCallback(
@@ -249,6 +320,7 @@ export function useSessionRecoveryActions({
           });
         }
         if (!isCurrentOperation(operation)) return false;
+        setLocalResultRequestKey(operation.requestKey);
         setResumeError(null);
         setRestoreError(null);
         setBranchDetails(null);
@@ -289,6 +361,7 @@ export function useSessionRecoveryActions({
     try {
       await restoreSessionWorkspace(taskId, sessionId, t("task:failedToRestoreWorkspace"));
       if (!isCurrentOperation(operation)) return;
+      setLocalResultRequestKey(operation.requestKey);
       setResumeError(null);
       setRestoreError(null);
       setBranchDetails(null);
@@ -298,17 +371,51 @@ export function useSessionRecoveryActions({
       setRecoveryNotice(t("task:resumeFailedWorkspaceReadOnly"));
       setManualRecoveryFailure(null);
     } catch (cause) {
-      if (!isCurrentOperation(operation)) return;
+      const association = recoveryFailureAssociation({
+        cause,
+        operation,
+        errorStamp,
+        taskId,
+        sessionId,
+        isCurrentOperation,
+        isCurrentSession,
+        matchesLatestErrorStamp,
+      });
+      if (!association) return;
+      const { managedClone, errorStamp: associatedStamp, requestKey } = association;
+      setLocalResultRequestKey(requestKey);
       const guard = sessionRecoveryGuardDetails(cause);
+      if (managedClone?.kind === "managed_clone_relocation_required") {
+        setManagedCloneRecoveryStamp(managedClone.error_stamp ?? null);
+      } else if (managedClone?.kind === "managed_clone_relocation_stale") {
+        setManagedCloneRecoveryStamp(null);
+      }
       setRestoreError(guardOrFallbackError(cause, guard, t, t("task:failedToRestoreWorkspace")));
       setGuardDetails(guard ?? guardDetails);
       setRecoveryNotice(null);
-      setManualRecoveryFailure({ operation: "restore_workspace" });
+      setManualRecoveryFailure({
+        operation: "restore_workspace",
+        sessionId,
+        errorStamp: associatedStamp,
+        requestKey,
+        operationId: operation.operationId,
+      });
     } finally {
       release();
       if (isCurrentOperation(operation)) setBusyAction(null);
     }
-  }, [beginOperation, guardDetails, isCurrentOperation, pendingKey, sessionId, taskId, t]);
+  }, [
+    beginOperation,
+    errorStamp,
+    guardDetails,
+    isCurrentOperation,
+    isCurrentSession,
+    matchesLatestErrorStamp,
+    pendingKey,
+    sessionId,
+    taskId,
+    t,
+  ]);
 
   const handleRetry = useCallback(() => {
     return handleRecover(lastFailedAction ?? "resume");
@@ -325,12 +432,12 @@ export function useSessionRecoveryActions({
   return {
     busyAction: sharedBusyAction ?? busyAction,
     recoveryError,
-    branchDetails,
-    guardDetails,
-    managedCloneRecoveryStamp,
-    lastFailedAction,
-    recoveryNotice,
-    manualRecoveryFailure,
+    branchDetails: localResultIsCurrent ? branchDetails : null,
+    guardDetails: localResultIsCurrent ? guardDetails : null,
+    managedCloneRecoveryStamp: localResultIsCurrent ? managedCloneRecoveryStamp : null,
+    lastFailedAction: localResultIsCurrent ? lastFailedAction : null,
+    recoveryNotice: localResultIsCurrent ? recoveryNotice : null,
+    manualRecoveryFailure: localResultIsCurrent ? manualRecoveryFailure : null,
     providerRestoredResumeEligible,
     handleRecover,
     handleRestore,

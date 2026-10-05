@@ -32,6 +32,7 @@ import (
 	"github.com/kandev/kandev/internal/settingscatalog"
 	"github.com/kandev/kandev/internal/steptelemetry"
 	"github.com/kandev/kandev/internal/sysprompt"
+	taskcontract "github.com/kandev/kandev/internal/task/contract"
 	"github.com/kandev/kandev/internal/task/dto"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/planws"
@@ -2632,9 +2633,11 @@ func (h *Handlers) handleStepComplete(ctx context.Context, msg *ws.Message) (*ws
 // actually move the task, alongside the accepted:true response
 // handleStepComplete always returns. accepted only means the signal was
 // durably recorded — a step whose AutoAdvanceRequiresSignal is false never
-// reads it, so the caller can accept a signal that changes nothing. ok is
-// false (both other return values ignored) when the current step cannot be
-// resolved: the caller must never guess this field into existence.
+// reads it, and a signal-gated step whose on_turn_complete has no move that
+// runs automatically reads it without transitioning, so the caller can accept
+// a signal that changes nothing. ok is false (both other return values
+// ignored) when the current step cannot be resolved: the caller must never
+// guess this field into existence.
 func (h *Handlers) resolveStepCompletionAdvances(ctx context.Context, workflowStepID string) (advances bool, note string, ok bool) {
 	if h.workflowCtrl == nil || workflowStepID == "" {
 		return false, "", false
@@ -2643,10 +2646,14 @@ func (h *Handlers) resolveStepCompletionAdvances(ctx context.Context, workflowSt
 	if err != nil || resp == nil || resp.Step == nil {
 		return false, "", false
 	}
-	if resp.Step.AutoAdvanceRequiresSignal {
-		return true, "", true
+	if !resp.Step.AutoAdvanceRequiresSignal {
+		return false, "this step does not advance on a completion signal", true
 	}
-	return false, "this step does not advance on a completion signal", true
+	if !resp.Step.AdvancesOnTurnComplete() {
+		return false, "this step has no on_turn_complete move that runs automatically, " +
+			"so the signal will not move the task", true
+	}
+	return true, "", true
 }
 
 func (h *Handlers) stepCompletionLaunchStep(ctx context.Context, sessionID, fallback string) (string, error) {
@@ -5169,16 +5176,26 @@ func (h *Handlers) handleGetTaskPlan(ctx context.Context, msg *ws.Message) (*ws.
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
 	}
 
-	plan, err := h.planService.GetPlanSnapshot(ctx, req.TaskID)
+	options, err := taskcontract.ParsePlanReadOptions(msg.Payload)
 	if err != nil {
 		return planws.GetError(msg, err)
 	}
-	if plan == nil {
+	result, err := h.planService.GetPlanRead(ctx, req.TaskID, options)
+	if err != nil {
+		return planws.GetError(msg, err)
+	}
+	if result == nil {
 		// Return empty object if no plan exists
 		return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{})
 	}
 
-	return ws.NewResponse(msg.ID, msg.Action, planReadPayload(plan))
+	if result.Range != nil {
+		return ws.NewResponse(msg.ID, msg.Action, struct {
+			planReadResponse
+			*service.PlanReadRange
+		}{planReadResponse{TaskPlanDTO: dto.TaskPlanFromModel(result.Plan), Version: result.Plan.WriteVersion}, result.Range})
+	}
+	return ws.NewResponse(msg.ID, msg.Action, planReadPayload(result.Plan))
 }
 
 // handleUpdateTaskPlan updates an existing task plan.

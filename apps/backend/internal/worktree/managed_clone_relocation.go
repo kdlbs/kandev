@@ -424,7 +424,7 @@ func (m *Manager) relocateDirtyManagedCloneWorktree(
 	if err := m.materializeManagedCloneRelocation(ctx, jobPath, &record); err != nil {
 		return nil, err
 	}
-	return m.transferDirtyManagedCloneFiles(ctx, wt, jobPath, &record, claim)
+	return m.transferDirtyManagedCloneFiles(ctx, wt, jobPath, &record, claim, proof)
 }
 
 func (m *Manager) transferDirtyManagedCloneFiles(
@@ -433,12 +433,15 @@ func (m *Manager) transferDirtyManagedCloneFiles(
 	jobPath string,
 	record *managedCloneRelocationRecord,
 	claim *models.TaskEnvironmentRecoveryClaim,
+	proof *ManagedCloneRelocationProof,
 ) (*Worktree, error) {
 	recoveryJobPath := wt.Path + ".kandev-recovery.json"
 	if err := validateDirtyCloneRelocationAuthorization(ctx); err != nil {
 		return nil, err
 	}
-	recovery, snapshotPath, recoveryLock, err := beginRecoveryWithOperation(wt, recoveryJobPath, claim.OperationID)
+	recovery, snapshotPath, recoveryLock, err := beginDirtyCloneRecovery(
+		ctx, m, wt, recoveryJobPath, claim, proof, *record,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -453,7 +456,7 @@ func (m *Manager) transferDirtyManagedCloneFiles(
 	if err := writeRecoveryRecord(recoveryJobPath, recovery); err != nil {
 		return nil, managedCloneRelocationError(wt.TaskID, "snapshot state could not be recorded")
 	}
-	if err := restoreSnapshot(snapshotPath, record.Replacement, manifest); err != nil {
+	if err := restoreSnapshot(wt.Path, snapshotPath, record.Replacement, manifest); err != nil {
 		return nil, blockRecovery(recoveryJobPath, recovery, err)
 	}
 	if err := verifyDirtyRelocationCheckout(ctx, m, *record, manifest); err != nil {
@@ -466,6 +469,9 @@ func (m *Manager) transferDirtyManagedCloneFiles(
 	replacement := managedCloneRelocationReplacement(wt, *record)
 	if _, ok := m.store.(CompareAndSwapWorktreeWithRecoveryClaimStore); !ok {
 		return nil, blockRecovery(recoveryJobPath, recovery, fmt.Errorf("guarded relocation publication is unavailable"))
+	}
+	if err := verifyRecoveryRequiredIdentityTrees(wt.Path, snapshotPath, record.Replacement); err != nil {
+		return nil, blockRecovery(recoveryJobPath, recovery, err)
 	}
 	published, err := m.publishManagedCloneReplacement(ctx, wt, &replacement, claim)
 	if err != nil {

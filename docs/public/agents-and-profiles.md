@@ -164,10 +164,37 @@ ACP runtime selection does not replace the passthrough command.
 
 The status shown on this page is authoritative for the current host. A CLI that works in your interactive shell can still be absent from Kandev when the service has a different `PATH`, home directory, or operating-system user.
 
+### Update Oh My Pi on the Kandev host
+
+On an installed `omp` card, select the update icon under **Settings > Agents**.
+Review the installed version, the **Stable latest (reference)** version, and
+the `omp update` command, then choose **Update runtime** or **Repair runtime**.
+Kandev runs OMP's own updater as the Kandev service user on the host, streams
+its output, and refreshes ACP capabilities only after a successful probe.
+Active sessions are not restarted.
+
+OMP detects whether its installation is managed by Homebrew, mise, Bun, npm,
+or a standalone binary and updates through that method. A Nix-managed
+installation cannot be updated by this action. OMP follows its already
+configured stable or canary channel; Kandev does not choose a channel or pass
+a version to `omp update`. The stable latest shown in Settings is a
+comparison reference, **not a promised install target**: the installed
+version reported by OMP after updating may differ. There is no version
+picker, Kandev pin, or rollback for OMP.
+
+The update affects only the host installation, not task containers or remote
+executors. If OMP's updater or the follow-up ACP probe fails, Settings reports
+the error and retains the previous capability catalogue; Kandev cannot
+restore an executable that OMP already changed. When metadata is unavailable,
+the update icon remains available, but a preview must resolve the stable
+reference before the update can start.
+
 ### Update a managed agent runtime
 
 The update icon is available on managed Claude, Codex, OpenCode, Copilot,
-Gemini, Pi, and Muse agent cards. It updates the runtime on the Kandev host.
+Gemini, Pi, and Muse agent cards when Kandev owns their managed runtime. It
+prepares their pinned npm runtime on the Kandev host. OMP uses the separate
+self-update flow above.
 
 Each managed runtime has a reviewed Kandev default. If you have not selected a
 version, Kandev uses that exact default for probes, sessions, standalone
@@ -201,14 +228,14 @@ the control has no dot but remains usable.
 2. Review the current version, active version, available stable versions, and command.
 3. Keep the latest version selected for a normal update, or select an older stable version to roll back.
 4. Select **Update runtime**, **Roll back runtime**, or **Repair runtime**.
-5. Wait for the exact version to prepare and pass its ACP capability probe.
+5. Wait for the exact version to prepare and pass its runtime capability probe.
 
-OpenCode has one additional host-runtime rule. When the `opencode` executable
-is on the Kandev host `PATH`, the update installs the selected `opencode-ai`
-package version globally and the follow-up capability probe runs that same
-executable. Containers, SSH executors, and hosts without that executable keep
-using the managed `npx` runtime. This keeps the update result aligned with the
-runtime that Kandev will use for host utility calls.
+When the `opencode` executable is on the Kandev host `PATH`, Kandev treats it
+as externally managed. The runtime update section links to OpenCode's supported
+upgrade guidance instead of changing a global installation. Hosts without that
+executable use the managed `npx` runtime. Containers and SSH executors retain
+their existing executor-safe command and selected version; updating an external
+host CLI does not update those environments.
 
 Kandev enables the action only after the backend validates the selected version
 against the trusted package catalogue. It does not accept package names, npm
@@ -227,35 +254,34 @@ configuration options, commands, and runtime version without a page reload.
 - If preparation, ACP validation, authentication, or persistence fails, Kandev keeps the previous active version and capability catalogue. Select another stable version or retry the same target.
 - Kandev may prepare the exact version again if npm removes its cache entry. Kandev does not own an offline package inventory, and global npm cache cleanup is not required.
 
-#### Recover a stale npm runtime lookup
+When a native OpenCode installation is present on the host, its vendor update guidance stays separate from **Manage fallback versions**. That control selects the managed package used by remote and container launches; it does not update the native host or a remote native installation. Update, rollback and return to the Kandev default remain available for the managed fallback. A rejected or busy manual request leaves automatic-update consent unchanged; an accepted manual selection turns it off.
 
-Host-local managed runtimes normally start with npm's offline-preferred lookup.
-If npm has stale package metadata and cannot resolve the selected
-`package@version`, the first ACP startup can fail even though the configured
-registry contains that exact version. Kandev recognizes this specific npm
-resolution error, removes only the deterministic `_npx` execution tree for the
-selected package and version, then retries the same command once with an
-online-preferred metadata lookup.
+#### Recover a managed runtime startup failure
 
-Kandev also performs this recovery while it builds the host capability
-catalogue used by agent profiles. A successful retry publishes the recovered
-models and keeps the saved model, fallback model, mode, runtime version, and
-enabled state unchanged. The profile remains selectable and does not show a
-capability warning. Kandev reports a failed capability status if it cannot
-prepare the retry or repair the cache, or if the one online retry fails.
+Managed runtime startup can retry once when npm reports a strict `ETARGET` for
+the selected exact package or a recognized temporary network or cache error.
+The `ETARGET` retry prefers an online lookup. Kandev can also retry an ordinary
+process exit before ACP initialization when complete, generation-matched
+startup evidence confirms that stderr was empty. Incomplete evidence, other
+permanent or unrecognized npm errors, cancellation, signal termination, and
+failures after ACP initialization do not trigger this automatic retry. Kandev first confirms
+that the failed process has stopped, then waits two to three seconds before the
+replacement starts.
 
-The same recovery applies to managed runtime startup on a local PC, in a local
-Docker executor, or in a remote SSH executor. Kandev sends the repair request
-to the agentctl process that owns the failed execution. That process resolves
-npm's cache with the agent environment and removes only the selected execution
-tree. It does not repair the Kandev host cache, delete sibling execution trees,
-change the registry, or clear the global npm cache.
+The retry uses the same agent, package, exact version, environment, executor,
+session, and initial prompt. It does not delete the selected npm execution tree
+or a sibling tree. While it waits, the existing session status shows the second
+attempt. If that attempt succeeds, the conversation continues without a
+recovery card. If it fails, the card reports the cause and actual attempt count
+and shows one **Retry runtime** action with collapsed technical details.
 
-The retry keeps the selected package, exact version, command prefix, model,
-permissions, and session identity. It does not change the npm registry or
-silently select another version. When the retry succeeds, no recovery card is
-shown. When it fails again, Kandev and Office show one **Retry runtime** action
-with collapsed technical details.
+This startup recovery applies to managed npm runtimes on a local PC, in a local
+Docker executor, or in a remote SSH executor. It does not establish that an npm
+race caused any particular startup failure. Host capability discovery has a
+separate, narrower recovery: an exact-package `ETARGET` result can retry once
+with an online-preferred lookup. That probe retry also preserves npm execution
+trees and keeps the saved model, fallback model, mode, runtime version, and
+enabled state unchanged.
 
 Managed `npx` runtimes use a Kandev-owned npm project directory, so an `.npmrc`
 in the task repository does not change the managed runtime's package lookup.
@@ -269,6 +295,56 @@ Do not use `npm cache clean --force` as the normal recovery step. It removes
 unrelated npm data and does not target the stale execution tree. If the
 specialized retry cannot resolve the runtime, check that the Kandev service
 uses the expected npm installation and configured registry. Run `npm config get registry` as the Kandev service user to inspect the registry used by that process. Then use the runtime update controls to select and prepare another trusted stable version.
+
+### Runtime notifications and automatic updates
+
+Kandev checks enabled, available agent runtimes in the background, including
+native CLIs with a verified release source. Open **Settings > Agents** to review
+runtime versions and update policies. A notice for one runtime names it and links
+directly to its row in **Settings > Agents > Agent runtime updates**. The existing
+update-available notification preferences apply; repeated notices for the same
+runtime and version are suppressed across reloads.
+
+At startup or after reconnect, available runtime updates discovered within the
+same 30-second window appear in one summary. **Review updates** opens the expanded
+runtime section. A notice for one runtime keeps its name and direct link. Update
+success, failure, and interruption notices remain individual and immediate.
+
+The **Agent runtime updates** section is at the bottom of **Settings > Agents**,
+after your installed agents, and starts collapsed. Expand it to manage runtime
+policies. Notification links open the section automatically and
+reveal their destination. Collapsing the section preserves unsaved policy changes.
+
+The runtime section shows the selected or observed version, latest known version,
+and who manages the installation. **Unknown** means Kandev could not verify the
+version or release source. It does not mean the runtime is up to date. Unavailable
+and disabled registrations remain listed separately, without background checks.
+Offline and source failures do not create error notifications.
+
+Automatic updates are off by default. An administrator can enable **Automatic
+updates** for each eligible managed runtime, then select the shared **Save changes**
+action. This consent applies to the Kandev installation and survives reloads.
+Kandev checks on startup and every 15 minutes; successful release lookups are
+cached for six hours and failed lookups for 15 minutes.
+
+An automatic update prepares a stable exact version and validates it before
+activating it for future launches. Running sessions keep their existing process
+and version. The retained result records the old and target versions. If
+preparation, validation, or activation fails, that attempt preserves the previous
+selection. Kandev reports the failure and does not repeatedly retry that target. An interrupted
+update has an unconfirmed result; review the current selection before retrying.
+
+Use **Manage versions** to retry manually, choose an older stable version, or
+return to the Kandev default. A manual version choice turns off automatic updates,
+so Kandev does not undo your choice. Disabling automatic updates also prevents a
+candidate still being prepared from activating. To retry automatically after a
+failure, turn the option off and save, then turn it on and save again.
+
+Externally managed npm packages and native CLIs show **Manual update guidance**
+when vendor documentation is available. Their supported vendor or package-manager
+updates remain owned by the operator. Kandev does not infer update authority from
+`PATH` or run an unverified global updater. Custom commands, virtual agents, and
+other runtimes without a supported updater explicitly show the unsupported state.
 
 <details>
 <summary>Add a custom terminal agent</summary>
@@ -467,7 +543,8 @@ to take effect before it sends the first prompt. If a failed session offers the
 explicit recovery **Resume** action, it keeps the same conversation and skips
 saved mode and model overrides for that attempt only. Saved profile and session
 settings remain unchanged, and later ordinary starts or resumes enforce them
-again.
+again. See [Manage session state](sessions-and-review.md#manage-session-state)
+for the recovery notice and resolved or dismissed history in Chat.
 
 The host model list is only an editing hint. A missing host-probe model keeps a
 profile selectable and shows an advisory warning; the executor catalog decides
@@ -679,7 +756,7 @@ Only custom TUI agents can be deleted from the agent list. Built-in definitions 
 - **Login required:** use the agent card's login terminal or sign in under Kandev's operating-system user; signing in as another user does not help the service.
 - **Model, mode, or command probe fails:** authenticate first, refresh discovery, and choose a value advertised by the installed version.
 - **Launch fails after editing flags:** inspect the command preview, remove stale arguments, and correct unmatched quotes or trailing escapes.
-- **Managed npm runtime cannot resolve its selected version:** Kandev checks the configured registry and retries the same version once after refreshing its exact `_npx` execution tree. If the retry fails, verify the service user's npm configuration and registry, then use **Settings > Agents** to prepare another trusted stable version. Do not start with `npm cache clean --force`.
+- **Managed npm runtime cannot start:** Retry is limited to strict exact-package `ETARGET`, recognized temporary npm errors, and an ordinary pre-ACP exit with complete generation-matched evidence of empty stderr. Other permanent or unclassified errors and incomplete evidence do not retry. Kandev confirms cleanup and keeps the selected package and npm trees. If startup still fails, review the card's technical details and verify the service user's npm configuration and registry. Use **Settings > Agents** to prepare another trusted stable version when needed. Do not start with `npm cache clean --force`.
 - **Environment value is absent:** confirm the secret still exists, the key is not reserved, and an executor/runtime variable is not already taking precedence.
 - **MCP server is absent:** confirm agent MCP support, valid JSON, transport mode, executor policy, and the session warning logs.
 - **MCP tools are missing from one agent session:** open **MCP servers** in that

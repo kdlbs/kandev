@@ -254,7 +254,7 @@ Trigger payloads are untrusted input. Do not let a PR body or webhook field sile
 
 Maximum concurrent runs defaults to 1 and cannot be less than 1. An admitted `triggered` run and a bound `task_created` run are both open until their exact turn is settled. A run counts as active while its task is neither deleted, archived, nor explicitly cancelled, the same definition the UI uses when it says an automation will not fire because a run is still open, so the reason shown and the cap causing it cannot disagree. `reuse_thread` requires `max_concurrent_runs = 1`. When the cap is reached, Kandev records a `skipped` run and advances the schedule's evaluation time rather than retrying every 30 seconds.
 
-Run history can report `triggered`, `task_created`, `succeeded`, `failed`, `skipped`, `archived`, or `cancelled`. `triggered` means that admission succeeded but task/session/turn binding is not complete. The last two are derived at read time, not stored: a `task_created` run whose task was deleted or whose primary session was cancelled reads as `cancelled`, and one whose task was archived reads as `archived`. That derivation is defined once and shared by every view, so two surfaces cannot disagree about the same run.
+Run history can report `triggered`, `task_created`, `succeeded`, `failed`, `skipped`, `archived`, or `cancelled`. `triggered` means that admission succeeded but task/session/turn binding is not complete. When the instance session limit delays a run's start, Kandev keeps the run `triggered` and retries the start automatically; the run holds its concurrency slot for as long as the limit stays full. Stopping the run cancels the waiting start. A delayed start does not survive a backend restart: startup marks the unbound run `failed` and the start is dropped. If the task is deleted while its start waits, Kandev marks the unbound run `failed` and releases its slot. The last two are derived at read time, not stored: a `task_created` run whose task was deleted or whose primary session was cancelled reads as `cancelled`, and one whose task was archived reads as `archived`. That derivation is defined once and shared by every view, so two surfaces cannot disagree about the same run.
 
 A run that produced a task opens its conversation. A run that never produced one (a skipped firing) is listed but inert; there is nothing to read.
 
@@ -338,6 +338,47 @@ Task tools use normal client discovery. When `step_complete_kandev` is required 
 In task mode, a session-bound Kanban child can pass `parent_id: "self"` to create a sibling under its direct parent when the one-level Kanban depth limit is reached. The result reports the requested and effective parent and explains that the common parent owns coordination while the calling session remains the creation source. An explicit child ID retains the depth error. External MCP callers cannot use the `self` shorthand, and Office task creation keeps its existing runtime and skill boundary.
 
 The additive `parent_resolution` result contains `requested_parent_id`, `resolved_parent_id`, `reason: "kanban_depth_limit"`, and an explanatory `message`. A deduplicated result describes existing work without creation or reparenting; its top-level `parent_id` remains the returned task's actual parent. The `deduplicated` and `creation_complete` indicators retain their existing meaning. See [Coordination](coordination.md#create-a-subtask-from-an-agent) for inheritance and parent controls.
+
+### Read only the relevant part of a plan
+
+For focused changes to a large plan, call `get_task_plan_kandev` with a range:
+
+```json
+{"offset": 0, "limit": 2000}
+```
+
+`offset` is a zero-based Unicode code-point position, not a byte or UTF-16
+position. `limit` is the maximum number of characters to return, from 1 through
+8,192. Supplying either argument enables partial reading: an omitted offset
+defaults to zero, and an omitted limit defaults to 4,096. Omit both for the
+existing full-plan read. Null, fractional, negative, and otherwise invalid
+range arguments are rejected instead of falling back to a full read.
+
+The result separates metadata from exact content. Partial metadata includes
+`partial`, `version`, `offset`, `limit`, `total_characters`,
+`total_content_bytes`, `returned_characters`, `content_bytes`, `has_more`, and
+`next_offset`. `content_bytes` describes the returned fragment; the total fields
+describe the whole plan. Whitespace and line endings are preserved.
+
+To continue, use the returned `next_offset` and pass the first page's `version`
+as `expected_version`. A changed or deleted plan returns `plan_version_conflict`
+without content; reconcile the current plan before continuing. Offset exactly
+at the end returns an empty final page, with `has_more=false` and
+`next_offset=null`. An offset beyond the end is rejected. A missing plan without
+an expected version keeps the existing no-plan result.
+
+Use a fragment from the read with `edit_task_plan_kandev`:
+
+```json
+{"expected_version": "<version from read>", "old_text": "- [ ] Run tests", "new_text": "- [x] Run tests"}
+```
+
+The match must be unique across the entire plan, even when it appears only once
+in the returned page. Never submit a partial read as a whole-document
+replacement. Successful writes return a compact acknowledgement and a new
+version; reuse it for another known fragment edit. Restart pagination after a
+write because previous offsets belong to the earlier version. For adding a
+section, use the append mode described below.
 
 ### Protect task plan writes
 

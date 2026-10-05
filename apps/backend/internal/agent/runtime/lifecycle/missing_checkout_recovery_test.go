@@ -30,6 +30,11 @@ func TestMissingCheckoutRecoveryLifecycleRestoresAndProjectsSelectedWorkspace(t 
 	info := &WorkspaceInfo{
 		TaskID: fixture.taskID, SessionID: fixture.sessionID, TaskEnvironmentID: fixture.environmentID,
 		EnvironmentOwnerTaskID: fixture.taskID, OwnershipGeneration: 1,
+		RecoveryErrorObservation: &models.WorkspaceRecoveryErrorObservation{
+			TaskID: fixture.taskID, SessionID: fixture.sessionID, TaskEnvironmentID: fixture.environmentID,
+			EnvironmentOwnerTaskID: fixture.taskID, OwnershipGeneration: 1,
+			SessionState: models.TaskSessionStateWaitingForInput, SelectionSnapshot: fixture.selectionSnapshot,
+		},
 		ExecutorType: string(models.ExecutorTypeWorktree), TaskDirName: fixture.taskDirName,
 		WorkspacePath: filepath.Join(fixture.tasksBasePath, fixture.taskDirName),
 		WorkspaceRepositories: []WorkspaceRepositorySpec{{
@@ -67,20 +72,21 @@ func TestMissingCheckoutRecoveryLifecycleRestoresAndProjectsSelectedWorkspace(t 
 }
 
 type lifecycleMissingCheckoutRecoveryFixture struct {
-	taskID         string
-	sessionID      string
-	environmentID  string
-	worktreeID     string
-	taskDirName    string
-	repositoryID   string
-	branchSlug     string
-	branch         string
-	repositoryPath string
-	worktreePath   string
-	branchHead     string
-	tasksBasePath  string
-	store          *worktree.SQLiteStore
-	manager        *worktree.Manager
+	taskID            string
+	sessionID         string
+	environmentID     string
+	worktreeID        string
+	taskDirName       string
+	repositoryID      string
+	branchSlug        string
+	branch            string
+	repositoryPath    string
+	worktreePath      string
+	branchHead        string
+	tasksBasePath     string
+	selectionSnapshot models.WorkspaceRecoverySelectionSnapshot
+	store             *worktree.SQLiteStore
+	manager           *worktree.Manager
 }
 
 func newLifecycleMissingCheckoutRecoveryFixture(t *testing.T) *lifecycleMissingCheckoutRecoveryFixture {
@@ -148,6 +154,12 @@ func newLifecycleMissingCheckoutRecoveryFixture(t *testing.T) *lifecycleMissingC
 		RepositoryPath: fixture.repositoryPath, Path: fixture.worktreePath, Branch: fixture.branch,
 		BaseBranch: "main", Status: worktree.StatusActive,
 	}))
+	fixture.selectionSnapshot, err = fixture.store.ReadRecoverySelectionSnapshot(ctx, models.WorkspaceRecoverySelectionSnapshot{
+		TaskID: fixture.taskID, SessionID: fixture.sessionID, SessionPersisted: true,
+		SessionTaskEnvironmentID: fixture.environmentID, TaskEnvironmentID: fixture.environmentID,
+	})
+	require.NoError(t, err)
+	require.True(t, fixture.selectionSnapshot.Complete(), "selected inventory snapshot: %+v", fixture.selectionSnapshot)
 	fixture.manager, err = worktree.NewManager(cfg, fixture.store, logger.Default())
 	require.NoError(t, err)
 	return fixture

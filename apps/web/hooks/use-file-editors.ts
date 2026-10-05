@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useDockviewStore, type FileEditorState } from "@/lib/state/dockview-store";
 import { useAppStore } from "@/components/state-provider";
 import { getWebSocketClient } from "@/lib/ws/connection";
@@ -16,7 +16,7 @@ import { getFilePreviewKind } from "@/lib/utils/file-types";
 import { normalizeWorkspaceFilePath } from "@/lib/workspace-file-path";
 import { useToast } from "@/components/toast-provider";
 import { useSessionGitStatus } from "@/hooks/domains/session/use-session-git-status";
-import { useSaveDeleteActions } from "./use-file-save-delete";
+import { useSaveDeleteActions, type PendingFileSave } from "./use-file-save-delete";
 import { buildRepoScopedItemId, PREVIEW_FILE_EDITOR_ID } from "@/lib/state/dockview-panel-actions";
 import { useOpenFileWorkspaceSync } from "./file-editors-sync";
 import { t } from "@/lib/i18n";
@@ -319,6 +319,7 @@ function useFileEditorEffects({
 
 type FileEditorActionsParams = {
   activeSessionIdRef: React.MutableRefObject<string | null>;
+  activeEditorVisitRef: React.MutableRefObject<symbol | null>;
   setFileState: (path: string, state: FileEditorState) => void;
   updateFileState: (path: string, updates: Partial<FileEditorState>) => void;
   removeFileState: (path: string) => void;
@@ -328,7 +329,7 @@ type FileEditorActionsParams = {
     opts?: { quiet?: boolean; pin?: boolean; repo?: string },
   ) => void;
   promotePreviewToPinned: (type: "file-editor") => void;
-  setSavingFiles: React.Dispatch<React.SetStateAction<Set<string>>>;
+  setSavingFiles: React.Dispatch<React.SetStateAction<Map<string, PendingFileSave>>>;
   toast: ReturnType<typeof useToast>["toast"];
 };
 
@@ -510,6 +511,7 @@ function useMarkdownPreviewAction({
 
 function useFileEditorActions({
   activeSessionIdRef,
+  activeEditorVisitRef,
   setFileState,
   updateFileState,
   removeFileState,
@@ -545,6 +547,7 @@ function useFileEditorActions({
 
   const { saveFile, deleteFileAction, applyRemoteUpdate } = useSaveDeleteActions({
     activeSessionIdRef,
+    activeEditorVisitRef,
     updateFileState,
     setSavingFiles,
     toast,
@@ -564,7 +567,7 @@ export function useFileEditors() {
   const activeSessionId = useAppStore((state) => state.tasks.activeSessionId);
   const gitStatus = useSessionGitStatus(activeSessionId);
   const { toast } = useToast();
-  const [savingFiles, setSavingFiles] = useState<Set<string>>(new Set());
+  const [pendingSaves, setSavingFiles] = useState<Map<string, PendingFileSave>>(new Map());
 
   const setFileState = useDockviewStore((s) => s.setFileState);
   const updateFileState = useDockviewStore((s) => s.updateFileState);
@@ -577,8 +580,15 @@ export function useFileEditors() {
   const gitFileSignaturesRef = useRef<Map<string, string>>(new Map());
 
   const activeSessionIdRef = useRef(activeSessionId);
-  useEffect(() => {
+  const activeEditorVisitRef = useRef<symbol | null>(null);
+  useLayoutEffect(() => {
+    const visit = Symbol();
     activeSessionIdRef.current = activeSessionId;
+    activeEditorVisitRef.current = visit;
+    setSavingFiles(new Map());
+    return () => {
+      activeEditorVisitRef.current = null;
+    };
   }, [activeSessionId]);
 
   useFileEditorEffects({
@@ -606,6 +616,7 @@ export function useFileEditors() {
     applyRemoteUpdate,
   } = useFileEditorActions({
     activeSessionIdRef,
+    activeEditorVisitRef,
     setFileState,
     updateFileState,
     removeFileState,
@@ -616,7 +627,16 @@ export function useFileEditors() {
   });
 
   return {
-    savingFiles,
+    savingFiles: new Set(
+      Array.from(pendingSaves)
+        .filter(
+          ([key, marker]) =>
+            marker.sessionId === activeSessionId &&
+            marker.api === api &&
+            marker.instanceId === openFiles.get(key)?.instanceId,
+        )
+        .map(([key]) => key),
+    ),
     openFile,
     openFileInMarkdownPreview,
     saveFile,

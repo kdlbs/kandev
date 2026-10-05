@@ -2,6 +2,8 @@
 
 import { createContext, useCallback, useContext, useMemo, useRef, useState } from "react";
 import { IconCheck, IconX, IconInfoCircle, IconLoader2 } from "@tabler/icons-react";
+import Link from "@/components/routing/app-link";
+import { Button } from "@kandev/ui/button";
 import { cn, generateUUID } from "@/lib/utils";
 import { scheduleFrontendErrorReport } from "@/lib/api/domains/frontend-error-log-api";
 
@@ -9,6 +11,7 @@ type ToastVariant = "default" | "success" | "error" | "loading";
 type ToastPlacement = "top";
 
 type Toast = {
+  action?: { href: string; label: string };
   id: string;
   title?: string;
   description?: string;
@@ -83,6 +86,7 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
         description: input.description,
         variant: input.variant ?? "default",
         placement: input.placement,
+        action: input.action,
       };
       toastsRef.current.set(id, nextToast);
       setToasts((prev) => [...prev, nextToast]);
@@ -112,6 +116,7 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
           ...(input.description !== undefined && { description: input.description }),
           ...(input.variant !== undefined && { variant: input.variant }),
           ...(input.placement !== undefined && { placement: input.placement }),
+          ...(input.action !== undefined && { action: input.action }),
         };
         toastsRef.current.set(id, next);
         setToasts((current) => current.map((item) => (item.id === id ? next : item)));
@@ -194,8 +199,18 @@ function ToastStack({ toasts, className }: { toasts: Toast[]; className: string 
             <div className={cn("mt-0.5 flex-shrink-0", styles.icon)}>
               <Icon className={cn("h-5 w-5", styles.spin && "animate-spin")} />
             </div>
-            <div className="flex-1 space-y-1">
+            <div className="min-w-0 flex-1 space-y-1">
               {t.title && <div className="text-sm font-semibold leading-tight">{t.title}</div>}
+              {t.action && (
+                <Button
+                  asChild
+                  size="sm"
+                  variant="outline"
+                  className="pointer-events-auto h-7 min-h-7 max-md:h-11 max-md:min-h-11 [@media(pointer:coarse)]:h-11 [@media(pointer:coarse)]:min-h-11"
+                >
+                  <Link href={t.action.href}>{t.action.label}</Link>
+                </Button>
+              )}
               {t.description && (
                 <div className="text-xs leading-relaxed text-muted-foreground">{t.description}</div>
               )}

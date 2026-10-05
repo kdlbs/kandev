@@ -247,6 +247,7 @@ test.describe("right-panel visibility", () => {
     await session.clickMaximize();
     await expect(toggle).toBeEnabled();
     await expect(toggle).toHaveAttribute("aria-expanded", "true");
+    await session.clickTab("Files");
     await expect(session.files).toBeVisible();
 
     await testPage.reload();
@@ -254,6 +255,7 @@ test.describe("right-panel visibility", () => {
     await session.waitForDockviewReady();
     await expect(toggle).toBeEnabled();
     await expect(toggle).toHaveAttribute("aria-expanded", "true");
+    await session.clickTab("Files");
     await expect(session.files).toBeVisible();
     await session.expectLayoutHealthy();
   });

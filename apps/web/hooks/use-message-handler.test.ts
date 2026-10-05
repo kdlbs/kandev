@@ -171,6 +171,24 @@ describe("buildTaskMentionsContext", () => {
 });
 
 describe("buildDocumentContext", () => {
+  it("guides local plan revisions through bounded reads and fragment writes", () => {
+    const out = buildDocumentContext({ type: "plan", taskId: TASK_ID }, true);
+    for (const instruction of [
+      "offset",
+      "limit",
+      "expected_version",
+      "first page's version as expected_version",
+      "edit_task_plan_kandev",
+      'mode="append"',
+    ]) {
+      expect(out).toContain(instruction);
+    }
+    expect(out).toContain("Never submit a fragment as a replacement");
+    expect(out.match(/<kandev-system>/g)).toHaveLength(1);
+    expect(out.match(/<\/kandev-system>/g)).toHaveLength(1);
+    expect(buildDocumentContext({ type: "plan", taskId: TASK_ID }, false)).toBe("");
+  });
+
   it("uses the canonical plan tools in active-plan context", () => {
     const out = buildDocumentContext({ type: "plan", taskId: TASK_ID }, true);
 

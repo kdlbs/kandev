@@ -49,9 +49,9 @@ test.describe("managed agent runtime updates on mobile", () => {
       "Updating runtime",
     );
     await body.scrollIntoViewIfNeeded();
-    await expect(
-      body.evaluate((element) => element.scrollHeight > element.clientHeight),
-    ).resolves.toBe(true);
+    await expect
+      .poll(() => body.evaluate((element) => element.scrollHeight > element.clientHeight))
+      .toBe(true);
     await expect(testPage.locator("html")).toHaveJSProperty(
       "scrollWidth",
       await testPage.locator("html").evaluate((element) => element.clientWidth),
@@ -65,6 +65,7 @@ test.describe("managed agent runtime updates on mobile", () => {
     const runtime = await installRuntimeUpdateFixture(testPage, {
       previewResponse: {
         agent_name: "claude-acp",
+        update_mode: "pinned",
         package: "@agentclientprotocol/claude-agent-acp",
         current_version: "0.64.0",
         target_version: "0.64.0",
@@ -141,6 +142,7 @@ test.describe("managed agent runtime updates on mobile", () => {
     const runtime = await installRuntimeUpdateFixture(testPage, {
       previewResponse: {
         agent_name: "claude-acp",
+        update_mode: "pinned",
         package: "@agentclientprotocol/claude-agent-acp",
         current_version: "0.62.0",
         default_version: "0.64.0",

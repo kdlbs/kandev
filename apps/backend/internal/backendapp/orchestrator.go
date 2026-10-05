@@ -87,6 +87,7 @@ func provideOrchestrator(
 	agentManagerClient := newLifecycleAdapter(lifecycleMgr, agentRegistry, log)
 
 	serviceCfg := orchestrator.DefaultServiceConfig()
+	serviceCfg.ProviderInterruptionContinuation = cfg != nil && cfg.Features.ProviderInterruptionContinuation
 	serviceCfg.ClaudeBackgroundPromptHandoff =
 		cfg != nil && cfg.Features.ClaudeBackgroundPromptHandoff
 	serviceCfg.ClaudeMidTurnSteering =
@@ -185,6 +186,7 @@ func provideOrchestrator(
 	// the manager to enforce the per-automation retention window.
 	orchestratorSvc.SetWorktreeManager(lifecycleMgr.WorktreeManager())
 	orchestratorSvc.SetTaskLaunchRecoveryService(taskSvc)
+	orchestratorSvc.SetWorkspaceRecoveryErrorReporter(taskSvc)
 
 	msgCreator := &messageCreatorAdapter{svc: taskSvc, logger: log}
 	orchestratorSvc.SetMessageCreator(msgCreator)
@@ -518,6 +520,19 @@ func (a githubExecutorCredentialPolicyAdapter) ResolveTaskGitCredentialPolicy(
 		WorkspaceMethod: policy.WorkspaceMethod,
 		WorkspaceActor:  policy.WorkspaceActor,
 	}, nil
+}
+
+// pluginRuntimeAPIURL is the Kandev API URL plugin executor environments call
+// back to. It exists only when an externally reachable base URL is configured.
+func pluginRuntimeAPIURL(cfg *config.Config) string {
+	if cfg == nil {
+		return ""
+	}
+	publicBaseURL := strings.TrimRight(strings.TrimSpace(cfg.GitHubCredentialBroker.PublicBaseURL), "/")
+	if publicBaseURL == "" {
+		return ""
+	}
+	return publicBaseURL + "/api/v1"
 }
 
 func githubCredentialBrokerEndpoint(cfg *config.Config) string {

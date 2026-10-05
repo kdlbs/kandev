@@ -1,11 +1,10 @@
 "use client";
 
-import { useState, useEffect, useMemo, memo, type ReactElement } from "react";
+import { useState, memo, type ReactElement } from "react";
 import { useSessionComposerRecovery } from "../session-recovery-context";
-import { SessionErrorDetails } from "@/components/task/session-error-details";
+import { useAppStore } from "@/components/state-provider";
 import { Trans, useTranslation } from "react-i18next";
 import { IconAlertTriangle } from "@tabler/icons-react";
-import { sanitizeSessionErrorDetails } from "@/lib/session-error-details";
 import { cn } from "@/lib/utils";
 import {
   useActionMessageSession,
@@ -15,17 +14,26 @@ import {
 import type { Message, TaskSessionState } from "@/lib/types/http";
 import type { MessageAction } from "@/components/task/chat/types";
 import { ActionMessageDetails, type ActionMeta } from "./action-message-details";
+import { ManagedRuntimeStartupRecoveryMessage } from "./managed-runtime-startup-recovery-message";
+import { ManagedRuntimeNpmRecoveryMessage } from "./managed-runtime-npm-recovery-message";
 import { formatDateTime } from "@/lib/i18n/formats";
-import { parseRetryAt, retryCountdownLabel } from "./transient-retry";
-import { hasSessionRecoveryResolutionAfter } from "@/hooks/processed-message-filtering";
+import { TransientRetryNotice } from "./transient-retry-notice";
 import { ActionButtons } from "./action-message-actions";
 import { SessionRecoveryActionButtons, sessionRecoveryAction } from "./action-message-recovery";
+import { RecoveryHistory, resolveRecoveryHistoryState } from "./action-message-recovery-history";
+import { readableFailureSummary } from "./action-message-utils";
 import {
   lastAgentErrorStamp,
   readLastAgentError,
+  readLastAgentErrorIncludingDismissed,
   type LastAgentError,
 } from "@/lib/session-last-agent-error";
 import { legacyRecoveryMessageMatchesError } from "@/lib/session-recovery-presentation";
+import {
+  interruptionRecoveryKey,
+  retainedTurnRecoveryKey,
+  retryNoticeVisible,
+} from "./interruption-recovery-feedback";
 
 function isSessionActive(state?: TaskSessionState) {
   return state === "RUNNING" || state === "STARTING" || state === "COMPLETED";
@@ -41,11 +49,15 @@ function isCurrentRecoveryMessage(
   messageRecoveryStamp: string | undefined,
   currentRecoveryError: LastAgentError | null,
   comment: Message,
+  sessionMetadata: Record<string, unknown> | null | undefined,
 ) {
   if (!isRecoveryMessage) return true;
+  if (messageRecoveryStamp) {
+    const latestError = readLastAgentErrorIncludingDismissed(sessionMetadata);
+    if (!latestError || latestError.dismissedAt) return false;
+    return lastAgentErrorStamp(latestError) === messageRecoveryStamp;
+  }
   if (!currentRecoveryError) return true;
-  const currentRecoveryStamp = lastAgentErrorStamp(currentRecoveryError);
-  if (messageRecoveryStamp) return currentRecoveryStamp === messageRecoveryStamp;
   return legacyRecoveryMessageMatchesError(
     comment.content,
     comment.created_at,
@@ -83,9 +95,25 @@ export const ActionMessage = memo(function ActionMessage({ comment }: { comment:
     comment,
     metadata?.action_visibility === "running" && comment.type === "status",
   );
+  const sessionMetadata = useAppStore((state) =>
+    comment.session_id ? state.taskSessions.items[comment.session_id]?.metadata : undefined,
+  );
   if (runningNoticeResolved) return null;
-  if (metadata?.recovery_actions && owner?.model)
-    return <RecoveryHistory message={comment.content} metadata={metadata} />;
+  const historyState = resolveRecoveryHistoryState(
+    comment,
+    metadata,
+    owner?.model?.messageId,
+    sessionMetadata,
+  );
+  if (historyState) {
+    return (
+      <RecoveryHistory
+        comment={comment}
+        metadata={metadata}
+        activeOwner={historyState.activeOwner}
+      />
+    );
+  }
   return <ActionMessageControls comment={comment} />;
 });
 
@@ -104,6 +132,7 @@ const ActionMessageControls = memo(function ActionMessageControls({
   const metadata = comment.metadata as ActionMeta | undefined;
   const message = comment.content || t("task:anErrorOccurred");
   const isRecoveryMessage = metadata?.recovery_actions === true;
+  const messageRecoveryStamp = metadata?.recovery_stamp ?? metadata?.error_stamp;
   // The recovery acknowledgment lives here, on the message row that stays
   // mounted, not on SettledFailureMessage: a successful resume drives the
   // session through STARTING/RUNNING (which unmounts the card via
@@ -115,24 +144,22 @@ const ActionMessageControls = memo(function ActionMessageControls({
   // records that the agent booted again after this failure. It survives a
   // reload or task switch and also covers auto-resume-on-open, where the card
   // would otherwise linger until the next prompt flipped the session to RUNNING.
-  const { agentRebooted, agentBootFailed } = useAgentBootOutcomeAfterMessage(
-    comment,
-    isRecoveryMessage,
-  );
-  const recoveryResolvedDurably = isRecoveryMessage
-    ? hasSessionRecoveryResolutionAfter(sessionMetadata, comment.created_at)
-    : false;
+  const {
+    agentRebooted,
+    agentBootFailed,
+    recoveryResolved: recoveryResolvedDurably,
+  } = useAgentBootOutcomeAfterMessage(comment, isRecoveryMessage, sessionMetadata);
   // The click acknowledgment only covers the wait for that outcome. A recovery
   // that came back failed — a failed boot row, or a session driven to FAILED —
   // must surface its card again, buttons included, or the retry is unreachable.
   const recoveryFailedAgain = agentBootFailed || sessionState === "FAILED";
   const currentRecoveryError = currentSessionRecoveryError(sessionMetadata ?? null);
-  const messageRecoveryStamp = metadata?.recovery_stamp ?? metadata?.error_stamp;
   const isCurrentRecovery = isCurrentRecoveryMessage(
     isRecoveryMessage,
     messageRecoveryStamp,
     currentRecoveryError,
     comment,
+    sessionMetadata,
   );
   const recoveryActionsVisible = shouldShowRecoveryActions({
     isRecoveryMessage,
@@ -194,12 +221,21 @@ function SettledActionMessage({
   recoveryActionsVisible: boolean;
   onRecoveryRequested: () => void;
 }) {
-  // A retry card is persisted against the failed turn, so hide it while the
-  // replacement turn is starting or running to avoid showing stale progress.
-  if (isSessionActive(sessionState) && metadata?.recovery_actions !== true) return null;
-
+  const isRetainedTurnFailure =
+    metadata?.variant === "error" &&
+    metadata.failure_scope === "turn" &&
+    metadata.runtime_retained === true;
   if (metadata?.retrying) {
-    return <TransientRetryNotice metadata={metadata} taskId={taskId} />;
+    return retryNoticeVisible(sessionState, metadata) ? (
+      <TransientRetryNotice metadata={metadata} taskId={taskId} />
+    ) : null;
+  }
+  if (
+    isSessionActive(sessionState) &&
+    metadata?.recovery_actions !== true &&
+    !isRetainedTurnFailure
+  ) {
+    return null;
   }
 
   return (
@@ -233,9 +269,12 @@ function SettledFailureMessage({
   onRecoveryRequested: () => void;
 }) {
   const { t } = useTranslation();
-  const safeMessage = readableFailureSummary(message);
+  const safeMessage =
+    metadata?.failure_kind === "provider_interrupted"
+      ? t(interruptionRecoveryKey(metadata), { count: metadata.attempts_started })
+      : readableFailureSummary(message);
   const needsDetails = safeMessage === null;
-  const renderedMetadata = recoveryActionsVisible ? metadata : withoutRecoveryActions(metadata);
+  const renderedMetadata = settledFailureMetadata(metadata, recoveryActionsVisible);
 
   const specialRecovery = renderSpecialRecovery({
     metadata: renderedMetadata,
@@ -261,6 +300,7 @@ function SettledFailureMessage({
           <div className={cn("text-xs wrap-anywhere", textClass)}>
             {needsDetails ? t("task:anErrorOccurred") : safeMessage}
           </div>
+          <RetainedTurnRecoveryFeedback metadata={metadata} />
           {renderSettledActionButtons({
             actions: renderedMetadata?.actions,
             taskId,
@@ -278,17 +318,34 @@ function SettledFailureMessage({
   );
 }
 
+function settledFailureMetadata(metadata: ActionMeta | undefined, recoveryActionsVisible: boolean) {
+  const isRetainedTurnFailure =
+    metadata?.variant === "error" &&
+    metadata.failure_scope === "turn" &&
+    metadata.runtime_retained === true;
+  if (isRetainedTurnFailure || !recoveryActionsVisible) {
+    return withoutRecoveryActions(metadata);
+  }
+  return metadata;
+}
+
+function RetainedTurnRecoveryFeedback({ metadata }: { metadata: ActionMeta | undefined }) {
+  const { t } = useTranslation();
+  const key = retainedTurnRecoveryKey(metadata ?? {});
+  if (!key) return null;
+  return (
+    <p className="mt-1 text-xs text-muted-foreground" data-testid="retained-turn-recovery-feedback">
+      {t(key, { count: metadata?.attempts_started })}
+    </p>
+  );
+}
+
 function failureDetailsMetadata(
   metadata: ActionMeta | undefined,
   needsDetails: boolean,
   message: string,
 ) {
   return needsDetails ? { ...metadata, error_output: metadata?.error_output || message } : metadata;
-}
-
-function readableFailureSummary(message: string): string | null {
-  const safe = sanitizeSessionErrorDetails(message);
-  return safe !== message || message.length > 240 || message.includes("\n") ? null : safe;
 }
 
 function withoutRecoveryActions(metadata: ActionMeta | undefined): ActionMeta | undefined {
@@ -333,90 +390,6 @@ function renderSettledActionButtons({
   );
 }
 
-function transientRetryReasonKey(failureCode?: string) {
-  switch (failureCode) {
-    case "model_capacity":
-      return "chat:transientRetryReasonModelCapacity";
-    case "network_unavailable":
-      return "chat:transientRetryReasonNetworkUnavailable";
-    case "provider_overloaded":
-      return "chat:transientRetryReasonProviderOverloaded";
-    case "provider_unavailable":
-      return "chat:transientRetryReasonProviderUnavailable";
-    case "rate_limited":
-      return "chat:transientRetryReasonRateLimited";
-    case "agent_transport_lost":
-      return "chat:transientRetryReasonAgentTransportLost";
-    default:
-      return "chat:transientRetryReasonGeneric";
-  }
-}
-
-function transientRetryContext(
-  t: ReturnType<typeof useTranslation>["t"],
-  provider?: string,
-  model?: string,
-) {
-  if (!provider && !model) return null;
-  if (provider && model) return t("chat:transientRetryProviderModel", { provider, model });
-  if (provider) return t("chat:transientRetryProvider", { provider });
-  return t("chat:transientRetryModel", { model });
-}
-
-function TransientRetryNotice({ metadata, taskId }: { metadata: ActionMeta; taskId?: string }) {
-  const { t } = useTranslation();
-  const retryAt = parseRetryAt(metadata.retry_at);
-  const fallbackDeadline = useMemo(
-    () => Date.now() + Math.max(0, metadata.retry_in_seconds ?? 0) * 1_000,
-    [metadata.attempt, metadata.retry_in_seconds],
-  );
-  const deadline = retryAt ?? fallbackDeadline;
-  const [now, setNow] = useState(() => Date.now());
-
-  useEffect(() => {
-    setNow(Date.now());
-    const timer = window.setInterval(() => setNow(Date.now()), 1_000);
-    return () => window.clearInterval(timer);
-  }, [retryAt, metadata.retry_in_seconds]);
-
-  const remaining = Math.max(0, deadline - now);
-  const reasonKey = transientRetryReasonKey(metadata.failure_code);
-  const provider = metadata.provider_name?.trim();
-  const model = metadata.model_id?.trim();
-  const context = transientRetryContext(t, provider, model);
-  const countdown =
-    remaining > 0
-      ? t("chat:transientRetryIn", { countdown: retryCountdownLabel(remaining) })
-      : t("chat:transientRetryNow");
-
-  return (
-    <section
-      data-testid="transient-retry-card"
-      role="status"
-      aria-live="polite"
-      className="flex w-full min-w-0 items-center gap-2 rounded-md border border-amber-500/25 bg-amber-500/[0.06] px-2 py-1.5 sm:gap-3 sm:px-3"
-    >
-      <IconAlertTriangle className="h-4 w-4 flex-shrink-0 text-amber-500" aria-hidden="true" />
-      <div className="min-w-0 flex-1 text-xs">
-        <div className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-0.5 text-amber-600 dark:text-amber-400">
-          <span>{t(reasonKey)}</span>
-          <span aria-label={t("chat:transientRetryCountdownLabel")}>{countdown}</span>
-        </div>
-        {context && <div className="mt-0.5 truncate text-muted-foreground">{context}</div>}
-        <div className="mt-0.5 text-muted-foreground">
-          {t("chat:transientRetryAttempt", {
-            attempt: metadata.attempt ?? 1,
-            maxAttempts: metadata.max_attempts ?? 1,
-          })}
-        </div>
-      </div>
-      {metadata.actions && metadata.actions.length > 0 && (
-        <ActionButtons actions={metadata.actions} taskId={taskId} compact />
-      )}
-    </section>
-  );
-}
-
 function renderSpecialRecovery({
   metadata,
   message,
@@ -454,7 +427,16 @@ function renderSpecialRecovery({
     metadata?.failure_kind === "managed_runtime_npm_policy"
   ) {
     return (
-      <ManagedRuntimeNpmRecovery
+      <ManagedRuntimeNpmRecoveryMessage
+        metadata={metadata}
+        taskId={taskId}
+        onRecoveryRequested={onRecoveryRequested}
+      />
+    );
+  }
+  if (metadata?.failure_kind === "managed_runtime_startup") {
+    return (
+      <ManagedRuntimeStartupRecoveryMessage
         metadata={metadata}
         taskId={taskId}
         onRecoveryRequested={onRecoveryRequested}
@@ -462,53 +444,6 @@ function renderSpecialRecovery({
     );
   }
   return null;
-}
-
-function ManagedRuntimeNpmRecovery({
-  metadata,
-  taskId,
-  onRecoveryRequested,
-}: {
-  metadata: ActionMeta;
-  taskId?: string;
-  onRecoveryRequested: () => void;
-}) {
-  const { t } = useTranslation();
-  const isPolicyFailure = metadata.failure_kind === "managed_runtime_npm_policy";
-  const actions = metadata.actions?.slice(0, 1) ?? [];
-  return (
-    <section
-      data-testid="managed-runtime-npm-recovery"
-      role="alert"
-      className="w-full min-w-0 rounded-md border border-amber-500/25 bg-amber-500/[0.06] p-3 sm:p-4"
-    >
-      <div className="flex min-w-0 items-start gap-3">
-        <IconAlertTriangle
-          className="mt-0.5 h-4 w-4 flex-shrink-0 text-amber-500"
-          aria-hidden="true"
-        />
-        <div className="min-w-0 flex-1">
-          <h3 className="text-sm font-medium text-foreground">
-            {t(
-              isPolicyFailure ? "chat:managedRuntimeNpmPolicyTitle" : "chat:managedRuntimeNpmTitle",
-            )}
-          </h3>
-          <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
-            {t(isPolicyFailure ? "chat:managedRuntimeNpmPolicyBody" : "chat:managedRuntimeNpmBody")}
-          </p>
-          <ActionMessageDetails metadata={metadata} />
-          {actions.length > 0 && (
-            <ActionButtons
-              actions={actions}
-              taskId={taskId}
-              onRecoveryRequested={onRecoveryRequested}
-              labelOverride={t("chat:managedRuntimeRetry")}
-            />
-          )}
-        </div>
-      </div>
-    </section>
-  );
 }
 
 function ProviderQuotaRecovery({
@@ -629,20 +564,5 @@ function MissingBranchRecovery({
         </div>
       </div>
     </section>
-  );
-}
-
-function RecoveryHistory({ message, metadata }: { message: string; metadata?: ActionMeta }) {
-  const { t } = useTranslation();
-  return (
-    <div
-      className="min-w-0 py-2 text-xs text-muted-foreground"
-      data-testid="session-recovery-history"
-    >
-      <p className="wrap-anywhere">
-        {readableFailureSummary(message) ?? t("task:anErrorOccurred")}
-      </p>
-      <SessionErrorDetails>{metadata?.error_output ?? message}</SessionErrorDetails>
-    </div>
   );
 }

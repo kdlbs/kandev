@@ -85,6 +85,7 @@ test.describe("managed agent runtime updates", () => {
     runtime.setStatusResponse([
       {
         agent_name: runtime.agentName,
+        update_mode: "pinned",
         package: "@agentclientprotocol/claude-agent-acp",
         default_version: "0.64.0",
         active_version: "0.63.0",
@@ -122,6 +123,7 @@ test.describe("managed agent runtime updates", () => {
     const runtime = await installRuntimeUpdateFixture(testPage, {
       previewResponse: {
         agent_name: "claude-acp",
+        update_mode: "pinned",
         package: "@agentclientprotocol/claude-agent-acp",
         current_version: "",
         target_version: "0.63.0",
@@ -146,6 +148,7 @@ test.describe("managed agent runtime updates", () => {
       statusResponse: [
         {
           agent_name: "claude-acp",
+          update_mode: "pinned",
           package: "@agentclientprotocol/claude-agent-acp",
           default_version: "0.64.0",
           active_version: "0.62.0",
@@ -192,6 +195,7 @@ test.describe("managed agent runtime updates", () => {
     const runtime = await installRuntimeUpdateFixture(testPage, {
       previewResponse: {
         agent_name: "claude-acp",
+        update_mode: "pinned",
         package: "@agentclientprotocol/claude-agent-acp",
         current_version: "0.64.0",
         target_version: "0.64.0",
@@ -223,6 +227,7 @@ test.describe("managed agent runtime updates", () => {
     const runtime = await installRuntimeUpdateFixture(testPage, {
       previewResponse: {
         agent_name: "claude-acp",
+        update_mode: "pinned",
         package: "@agentclientprotocol/claude-agent-acp",
         current_version: "0.64.0",
         target_version: "0.64.0",
@@ -307,6 +312,7 @@ test.describe("managed agent runtime updates", () => {
     const runtime = await installRuntimeUpdateFixture(testPage);
     runtime.setPreviewResponse({
       agent_name: "claude-acp",
+      update_mode: "pinned",
       package: "@agentclientprotocol/claude-agent-acp",
       current_version: "0.62.0",
       target_version: "0.74.0",

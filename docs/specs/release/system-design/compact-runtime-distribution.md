@@ -81,6 +81,27 @@ workflow's required-artifact retry pattern. All five `build-bundles` matrix
 entries consume these canonical bytes; Nightly packages remain full and do
 not publish or need an asset-fetch manifest.
 
+### Artifact download boundary
+
+The Actions artifact download extracts files without preserving executable
+permissions. Each consumer restores mode `0755` on the four known helper
+paths before validation or copying. Both `build-bundles` and
+`verify-release-assets` apply this rule after downloading
+`canonical-remote-helpers` into `dist/remote-helper-artifact`.
+
+The restoration changes file modes only. It does not change helper bytes,
+identity records, manifests, checksums, or compressed assets. Missing helpers
+fail the restoration step. `verifyRemoteHelperArtifact` in
+`scripts/release/remote-helper-assets.mjs` retains its checks for executable
+regular files, release identity, and Stable payload integrity. The producer
+also retains its executable checks before upload.
+
+Workflow contract tests execute each consumer's restoration script against
+temporary Stable and Nightly artifacts with helper modes set to `0644`.
+They then run the real artifact verifier and compare helper bytes.
+Missing helpers and mismatched release identities still fail. The tests
+also require restoration before verification and bundle packaging.
+
 The bundle-local `remote-helpers.json` at the archive root has a schema
 version, Stable version and full commit SHA, bundle variant (`standard` or
 `full`), and
@@ -297,3 +318,4 @@ the redirect and verifies the installed manifest digest regardless of host.
 ## Implementation plan
 
 - [Compact runtime distribution](../../../plans/compact-runtime-distribution/plan.md)
+- [Canonical helper artifact permissions](../../../plans/release-helper-permissions/plan.md)

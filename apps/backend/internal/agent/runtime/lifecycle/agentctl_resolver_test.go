@@ -743,9 +743,9 @@ func TestAgentctlResolverLaunchDeadlineBoundsDownload(t *testing.T) {
 	defer server.Close()
 	resolver := NewAgentctlResolverWithOptions(newResolverTestLogger(t), AgentctlResolverOptions{
 		Version: version, Commit: commit, BundleDir: bundle, HomeDir: t.TempDir(), ReleaseBaseURL: server.URL,
-		DownloadTimeout: 250 * time.Millisecond,
+		DownloadTimeout: 10 * time.Second,
 	})
-	ctx, cancel := context.WithTimeout(context.Background(), 40*time.Millisecond)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 	var steps []PrepareStep
 	_, err := resolver.ResolveRemoteBinaryContext(ctx, SSHRemotePlatform{GOOS: "linux", GOARCH: "amd64"}, func(step PrepareStep, _, _ int) {

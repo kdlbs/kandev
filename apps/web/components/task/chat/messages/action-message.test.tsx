@@ -6,6 +6,10 @@ import type { StoreApi } from "zustand";
 import { ActionMessage } from "./action-message";
 
 const MANAGED_RUNTIME_RETRY_TEST_ID = "managed-runtime-npm-retry-button";
+const HISTORICAL_FAILURE_STAMP = "failure-old";
+const CURRENT_FAILURE_STAMP = "failure-current";
+const NEW_FAILURE_STAMP = "failure-new";
+const RECOVERY_RESOLVED_AT = "2026-09-29T10:05:00Z";
 import {
   sessionId as toSessionId,
   taskId as toTaskId,
@@ -14,6 +18,7 @@ import {
   type TaskSessionState,
 } from "@/lib/types/http";
 import type { AppState } from "@/lib/state/store";
+import { SessionRecoveryProvider } from "../session-recovery-context";
 
 vi.mock("@/components/toast-provider", () => ({
   useToast: () => ({ toast: vi.fn() }),
@@ -36,7 +41,9 @@ afterEach(() => {
 
 const CANCEL_TEST_ID = "recovery-cancel-retry-button";
 const TECHNICAL_DETAILS = "Technical details";
+const RECOVERY_HISTORY_TEST_ID = "session-recovery-history";
 const RECOVERY_MESSAGE = "Agent encountered an error";
+const CAPACITY_ERROR = "Selected model is at capacity. Please try a different model.";
 const RESUME_LABEL = "Resume session";
 const RESUME_TEST_ID = "recovery-resume-button";
 const STALL_CANCEL_TEST_ID = "stall-cancel-turn-button";
@@ -225,6 +232,27 @@ function renderActionWithStore(
 }
 
 describe("ActionMessage — transient retry (warning variant)", () => {
+  it("announces legacy retry status politely", () => {
+    renderAction(retryMessage(), "WAITING_FOR_INPUT");
+    const notice = screen.getByTestId("transient-retry-card");
+    expect(notice.getAttribute("role")).toBe("status");
+    expect(notice.getAttribute("aria-live")).toBe("polite");
+  });
+  it.each(["FAILED", "CANCELLED", "COMPLETED"] as const)(
+    "hides an orphaned continuation notice in %s after cleanup fails",
+    (state) => {
+      const message = retryMessage();
+      message.metadata = {
+        ...message.metadata,
+        recovery_mode: "continue",
+        recovery_phase: "continuing",
+      };
+      renderAction(message, state);
+      expect(screen.queryByTestId("transient-retry-card")).toBeNull();
+      expect(screen.queryByTestId(CANCEL_TEST_ID)).toBeNull();
+    },
+  );
+
   it("renders the retrying copy in amber, not red", () => {
     renderAction(retryMessage(), "WAITING_FOR_INPUT");
     const text = screen.getByLabelText("Retry countdown");
@@ -302,7 +330,30 @@ describe("ActionMessage — transient retry (warning variant)", () => {
   });
 });
 
-describe("ActionMessage — session recovery history", () => {
+describe("ActionMessage recovery ownership", () => {
+  it("keeps a retained provider turn error visible after a later session completion", () => {
+    const error = recoveryMessage(true);
+    error.content = CAPACITY_ERROR;
+    error.type = "error";
+    error.metadata = {
+      ...(error.metadata as Record<string, unknown>),
+      variant: "error",
+      failure_scope: "turn",
+      runtime_retained: true,
+      execution_id: "execution-1",
+      prompt_generation: 7,
+      recovery_actions: false,
+    };
+
+    renderAction(error, "COMPLETED");
+
+    expect(screen.getByTestId("session-recovery-action-message").textContent).toContain(
+      "Selected model is at capacity.",
+    );
+    expect(screen.queryByTestId(RESUME_TEST_ID)).toBeNull();
+    expect(screen.queryByTestId("session-recovery-card")).toBeNull();
+  });
+
   it("keeps the recovery entry after its Resume request succeeds and removes controls", async () => {
     const errorMsg = recoveryMessage(true);
 
@@ -316,17 +367,17 @@ describe("ActionMessage — session recovery history", () => {
     const historical = recoveryMessage(true);
     historical.metadata = {
       ...(historical.metadata as Record<string, unknown>),
-      error_stamp: "failure-old",
+      error_stamp: HISTORICAL_FAILURE_STAMP,
     };
     const current = recoveryMessage(true);
     current.metadata = {
       ...(current.metadata as Record<string, unknown>),
-      error_stamp: "failure-current",
+      error_stamp: CURRENT_FAILURE_STAMP,
     };
     const { rerender } = renderAction(historical, "WAITING_FOR_INPUT", "", undefined, {
       last_agent_error: {
         message: "The newer session failure.",
-        stamp: "failure-current",
+        stamp: CURRENT_FAILURE_STAMP,
       },
     });
 
@@ -336,6 +387,24 @@ describe("ActionMessage — session recovery history", () => {
     rerender(<ActionMessage comment={current} />);
 
     expect(screen.getByTestId(RESUME_TEST_ID)).toBeTruthy();
+  });
+
+  it("does not restore controls for a stamped history row after a different failure was dismissed", () => {
+    const historical = recoveryMessage(true);
+    historical.metadata = {
+      ...(historical.metadata as Record<string, unknown>),
+      error_stamp: HISTORICAL_FAILURE_STAMP,
+    };
+
+    renderAction(historical, "WAITING_FOR_INPUT", "", undefined, {
+      last_agent_error: {
+        message: "A newer failure.",
+        stamp: NEW_FAILURE_STAMP,
+        dismissed_at: RECOVERY_RESOLVED_AT,
+      },
+    });
+
+    expect(screen.queryByTestId(RESUME_TEST_ID)).toBeNull();
   });
 
   it("keeps controls for an unstamped legacy row matching the current failure", () => {
@@ -385,6 +454,324 @@ describe("ActionMessage — session recovery history", () => {
     expect(screen.getByText(RECOVERY_MESSAGE)).toBeTruthy();
   });
 });
+
+describe("ActionMessage recovery settlement", () => {
+  it("marks only the matching history row resolved by authoritative stamp settlement", () => {
+    const oldError = recoveryHistoryMessage(HISTORICAL_FAILURE_STAMP);
+    const success = providerRestoredSuccessMessage(HISTORICAL_FAILURE_STAMP);
+    renderRecoveryHistory(oldError, [oldError, success], {
+      recovery_resolutions: [
+        {
+          error_stamp: HISTORICAL_FAILURE_STAMP,
+          attempt_id: "resume-1",
+          resolved_at: RECOVERY_RESOLVED_AT,
+        },
+      ],
+    });
+
+    expect(screen.getByTestId("session-recovery-resolved").textContent).toBe("Resolved");
+    expect(screen.queryByTestId("session-recovery-dismissed")).toBeNull();
+    expect(screen.getByTestId(RECOVERY_HISTORY_TEST_ID).querySelector("p")?.textContent).toBe(
+      "The requested model was not available to the agent.",
+    );
+  });
+
+  it("shows manual dismissal separately when no matching success notice exists", () => {
+    const oldError = recoveryHistoryMessage(HISTORICAL_FAILURE_STAMP);
+    const unrelatedSuccess = providerRestoredSuccessMessage("failure-other");
+    renderRecoveryHistory(oldError, [oldError, unrelatedSuccess]);
+
+    expect(screen.getByTestId("session-recovery-dismissed").textContent).toBe("Dismissed");
+    expect(screen.queryByTestId("session-recovery-resolved")).toBeNull();
+  });
+});
+
+describe("ActionMessage active legacy recovery ownership", () => {
+  it("keeps an active legacy recovery row compact when the owner has no stamp", () => {
+    const legacyMessage = recoveryMessage();
+    legacyMessage.id = "legacy-recovery-owner";
+    legacyMessage.metadata = {
+      variant: "error",
+      recovery_actions: true,
+      error_output: "The provider request failed.",
+      actions: [
+        {
+          type: "archive_task",
+          label: "Archive task",
+          test_id: "legacy-recovery-archive-button",
+        },
+      ],
+    };
+    const session = {
+      id: TEST_SESSION_ID,
+      task_id: TEST_TASK_ID,
+      state: "FAILED",
+      error_message: "",
+      metadata: {},
+    } as unknown as TaskSession;
+
+    render(
+      <StateProvider
+        initialState={
+          {
+            taskSessions: { items: { [TEST_SESSION_ID]: session } },
+            messages: { bySession: { [TEST_SESSION_ID]: [legacyMessage] }, metaBySession: {} },
+          } as Partial<AppState>
+        }
+      >
+        <SessionRecoveryProvider
+          session={session}
+          messages={[legacyMessage]}
+          taskId={TEST_TASK_ID}
+          enabled
+        >
+          <ActionMessage comment={legacyMessage} />
+        </SessionRecoveryProvider>
+      </StateProvider>,
+    );
+
+    expect(screen.getByTestId(RECOVERY_HISTORY_TEST_ID).textContent).toContain(
+      "This failure is explained in the recovery card above.",
+    );
+    expect(screen.queryByTestId("legacy-recovery-archive-button")).toBeNull();
+  });
+});
+
+describe("ActionMessage historical typed recovery evidence", () => {
+  it("keeps a legacy capacity failure out of the startup recovery model", () => {
+    const capacityFailure = recoveryHistoryMessage("failure-capacity");
+    capacityFailure.content = CAPACITY_ERROR;
+    capacityFailure.metadata = {
+      ...(capacityFailure.metadata as Record<string, unknown>),
+      causes: [],
+      phase: undefined,
+      attempt_id: "resume-3",
+      execution_id: "650e8400-e29b-41d4-a716-446655440000",
+    };
+
+    renderRecoveryHistory(capacityFailure, [capacityFailure]);
+
+    const history = screen.getByTestId(RECOVERY_HISTORY_TEST_ID);
+    expect(history.querySelector("p")?.textContent).toBe(capacityFailure.content);
+    expect(history.textContent).not.toContain("The agent could not start");
+    fireEvent.click(history.querySelector("summary")!);
+    expect(history.querySelector("pre")?.textContent).toContain("Attempt: resume-3");
+    expect(history.querySelector("pre")?.textContent).toContain(
+      "650e8400-e29b-41d4-a716-446655440000",
+    );
+  });
+
+  it("renders same-text historical failures from their own evidence after a successor replaces the current error", async () => {
+    const first = recoveryHistoryMessage("failure-first");
+    first.created_at = "2026-09-29T09:00:00Z";
+    first.metadata = {
+      ...(first.metadata as Record<string, unknown>),
+      phase: "bootstrap",
+      attempt_id: "resume-1",
+      execution_id: "650e8400-e29b-41d4-a716-446655440000",
+      causes: [
+        {
+          operation: "resume",
+          code: "model_unavailable",
+          reason: "requested_not_advertised",
+          requested_model: "first-model",
+          detail: "The saved model was not advertised.",
+        },
+      ],
+      error_output: "token=old-private-value",
+    };
+    const second = recoveryHistoryMessage("failure-second");
+    second.id = "recovery-second";
+    second.metadata = {
+      ...(second.metadata as Record<string, unknown>),
+      phase: "bootstrap",
+      attempt_id: "resume-2",
+      causes: [
+        {
+          operation: "resume",
+          code: "model_selection_failed",
+          reason: "application_failed",
+          requested_model: "primary-model",
+          attempted_model: "alternate-model",
+          detail: "The attempted model could not be applied.",
+        },
+      ],
+    };
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText },
+    });
+    renderRecoveryHistory([first, second], [first, second], {
+      last_agent_error: {
+        message: "A successor failure.",
+        stamp: "successor-failure",
+        occurred_at: "2026-09-29T10:06:00Z",
+      },
+      recovery_resolutions: [
+        {
+          error_stamp: "failure-first",
+          attempt_id: "resume-1",
+          resolved_at: RECOVERY_RESOLVED_AT,
+        },
+      ],
+    });
+
+    const rows = screen.getAllByTestId(RECOVERY_HISTORY_TEST_ID);
+    expect(rows).toHaveLength(2);
+    expect(screen.getByTestId("session-recovery-resolved").textContent).toBe("Resolved");
+    expect(rows[0].textContent).toContain("first-model");
+    expect(rows[1].textContent).toContain("alternate-model");
+    expect(rows[1].textContent).not.toContain("first-model");
+
+    const firstDetails = rows[0].querySelector("summary");
+    fireEvent.click(firstDetails!);
+    const displayed = rows[0].querySelector("pre")?.textContent ?? "";
+    expect(displayed).toContain("Attempt: resume-1");
+    expect(displayed).toContain("Requested model: first-model");
+    expect(displayed).toContain("Phase: bootstrap");
+    expect(displayed).not.toContain("old-private-value");
+    fireEvent.click(screen.getAllByRole("button", { name: "Copy details" })[0]);
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith(displayed));
+  });
+});
+
+describe("ActionMessage retained provider turn recovery feedback", () => {
+  it("shows provider diagnostics in the existing technical details disclosure", () => {
+    const providerError = retryMessage({
+      content: CAPACITY_ERROR,
+      metadata: {
+        variant: "error",
+        runtime_retained: true,
+        provider_error: {
+          source: "acp_prompt",
+          provider_id: "mock-agent",
+          error_kind: "server_error",
+          rpc_code: -32603,
+        },
+      },
+    });
+
+    renderAction(providerError, "WAITING_FOR_INPUT");
+
+    const summary = screen.getByText(TECHNICAL_DETAILS);
+    const details = summary.closest("details");
+    expect(details?.open).toBe(false);
+    fireEvent.click(summary);
+    expect(details?.textContent).toContain("Source: acp_prompt");
+    expect(details?.textContent).toContain("Provider: mock-agent");
+    expect(details?.textContent).toContain("Error kind: server_error");
+    expect(details?.textContent).toContain("RPC code: -32603");
+  });
+
+  it.each([
+    {
+      disposition: "refused",
+      attempts: 0,
+      copy: "Automatic retry stopped. You can send another message.",
+    },
+    {
+      disposition: "cancelled",
+      attempts: 1,
+      copy: "Automatic retry was cancelled. You can send another message.",
+    },
+    {
+      disposition: "exhausted",
+      attempts: 5,
+      copy: "Automatic retry stopped after 5 attempts. You can send another message.",
+    },
+  ])(
+    "shows $disposition without replacing the provider error",
+    ({ disposition, attempts, copy }) => {
+      const providerError = retryMessage({
+        content: CAPACITY_ERROR,
+        metadata: {
+          variant: "error",
+          runtime_retained: true,
+          recovery_disposition: disposition,
+          attempts_started: attempts,
+          recovery_actions: false,
+        },
+      });
+
+      renderAction(providerError, "WAITING_FOR_INPUT");
+
+      expect(screen.getByText(providerError.content)).toBeTruthy();
+      expect(screen.getByTestId("retained-turn-recovery-feedback").textContent).toBe(copy);
+    },
+  );
+});
+
+function recoveryHistoryMessage(stamp: string): Message {
+  const message = recoveryMessage();
+  return {
+    ...message,
+    content: RECOVERY_MESSAGE,
+    created_at: "2026-09-29T10:00:00Z",
+    metadata: {
+      ...(message.metadata as Record<string, unknown>),
+      recovery_actions: true,
+      error_stamp: stamp,
+      causes: [{ operation: "resume", code: "model_unavailable" }],
+    },
+  };
+}
+
+function providerRestoredSuccessMessage(resolvedErrorStamp: string): Message {
+  return {
+    ...recoveryMessage(),
+    id: `success-${resolvedErrorStamp}`,
+    type: "status",
+    created_at: RECOVERY_RESOLVED_AT,
+    content: "Session resumed.",
+    metadata: {
+      variant: "resume_settings_provider_restored",
+      resolved_error_stamp: resolvedErrorStamp,
+    },
+  };
+}
+
+function renderRecoveryHistory(
+  comment: Message | Message[],
+  messages: Message[],
+  metadataOverrides: Record<string, unknown> = {},
+) {
+  const comments = Array.isArray(comment) ? comment : [comment];
+  const activeComment = comments[0];
+  const session = {
+    id: TEST_SESSION_ID,
+    task_id: TEST_TASK_ID,
+    state: "WAITING_FOR_INPUT",
+    error_message: "",
+    metadata: {
+      last_agent_error: {
+        message: RECOVERY_MESSAGE,
+        stamp: (activeComment.metadata as Record<string, unknown>).error_stamp,
+        dismissed_at: "2026-09-29T10:01:00Z",
+        occurred_at: activeComment.created_at,
+        causes: [{ operation: "resume", code: "model_unavailable" }],
+      },
+      recovery_resolved_at: RECOVERY_RESOLVED_AT,
+      ...metadataOverrides,
+    },
+  } as unknown as TaskSession;
+  return render(
+    <StateProvider
+      initialState={
+        {
+          taskSessions: { items: { [TEST_SESSION_ID]: session } },
+          messages: { bySession: { [TEST_SESSION_ID]: messages }, metaBySession: {} },
+        } as Partial<AppState>
+      }
+    >
+      <SessionRecoveryProvider session={session} messages={messages} taskId={TEST_TASK_ID} enabled>
+        {comments.map((item) => (
+          <ActionMessage key={item.id} comment={item} />
+        ))}
+      </SessionRecoveryProvider>
+    </StateProvider>,
+  );
+}
 
 describe("ActionMessage — agent transport lost", () => {
   it("renders the agent-transport-lost reason for a dropped ACP connection", () => {
@@ -638,6 +1025,49 @@ describe("ActionMessage — provider quota recovery", () => {
 
     expect(screen.getByTestId("provider-quota-recovery")).toBeTruthy();
     expect(screen.getByText(/when the provider makes capacity available/i)).toBeTruthy();
+  });
+});
+
+describe("ActionMessage — managed runtime startup recovery", () => {
+  it("shows typed early-exit cause and actual attempts in the startup recovery card", () => {
+    renderAction(
+      retryMessage({
+        type: "error",
+        content: "managed runtime startup failed",
+        metadata: {
+          variant: "error",
+          recovery_actions: true,
+          failure_kind: "managed_runtime_startup",
+          startup_reason: "early_exit",
+          startup_attempts: 2,
+          error_output: "reason=early_exit attempts=2",
+          actions: [
+            {
+              type: "ws_request",
+              label: "Retry runtime",
+              test_id: MANAGED_RUNTIME_RETRY_TEST_ID,
+              params: {
+                method: SESSION_RECOVER_METHOD,
+                payload: {
+                  task_id: TEST_TASK_ID,
+                  session_id: TEST_SESSION_ID,
+                  action: "runtime_retry",
+                },
+              },
+            },
+          ],
+        },
+      } as Partial<Message>),
+      "FAILED",
+    );
+
+    const card = screen.getByTestId("managed-runtime-startup-recovery");
+    expect(card.textContent).toContain("Agent stopped during startup");
+    expect(card.textContent).toContain(
+      "The agent process exited before initialization. Startup was attempted 2 times.",
+    );
+    expect(screen.getAllByTestId(MANAGED_RUNTIME_RETRY_TEST_ID)).toHaveLength(1);
+    expect(screen.getByText(TECHNICAL_DETAILS).closest("details")?.open).toBe(false);
   });
 });
 

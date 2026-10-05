@@ -42,6 +42,9 @@ type resumeAttempt struct {
 	interruptedMarkerMu       sync.RWMutex
 	interruptedMarker         string
 	interruptedMarkerCaptured bool
+	// recoveryErrorStamp identifies the active session failure this resume was
+	// admitted to recover. A later boot callback cannot retire a newer failure.
+	recoveryErrorStamp string
 	// retained is protected by resumeAttemptRegistry.mu. A cancelled attempt
 	// can be retained when a replacement is admitted and retained again when
 	// its owner eventually returns; both paths must describe one tombstone.
@@ -80,6 +83,7 @@ const resumeAttemptIdentityPrefix = "resume-"
 type resumeAttemptTombstone struct {
 	id                        uint64
 	executionID               string
+	recoveryErrorStamp        string
 	cancelled                 bool
 	accepted                  bool
 	interruptedMarker         string
@@ -113,7 +117,9 @@ func (r *resumeAttemptRegistry) begin(parent context.Context, taskID, sessionID 
 	if parent == nil {
 		parent = context.Background()
 	}
-	parent = context.WithoutCancel(parent)
+	if owned, _ := parent.Value(continuationOwnedContextKey{}).(bool); !owned {
+		parent = context.WithoutCancel(parent)
+	}
 
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -275,6 +281,7 @@ func (r *resumeAttemptRegistry) retainLocked(attempt *resumeAttempt) {
 			}
 			if entries[index].id == attempt.id {
 				entries[index].accepted = attempt.accepted
+				entries[index].recoveryErrorStamp = attempt.recoveryErrorStamp
 				entries[index].interruptedMarker = attempt.interruptedMarkerValue()
 				entries[index].interruptedMarkerCaptured = attempt.interruptedMarkerSnapshotCaptured()
 				break
@@ -288,6 +295,7 @@ func (r *resumeAttemptRegistry) retainLocked(attempt *resumeAttempt) {
 	entries = append(entries, resumeAttemptTombstone{
 		id:                        attempt.id,
 		executionID:               executionID,
+		recoveryErrorStamp:        attempt.recoveryErrorStamp,
 		cancelled:                 attempt.ctx.Err() != nil,
 		accepted:                  attempt.accepted,
 		interruptedMarker:         attempt.interruptedMarkerValue(),
@@ -302,6 +310,32 @@ func (r *resumeAttemptRegistry) retainLocked(attempt *resumeAttempt) {
 func (r *resumeAttemptRegistry) hasRecoveryHistoryLocked(sessionID string) bool {
 	_, ok := r.recoveryHistory[sessionID]
 	return ok
+}
+
+func (r *resumeAttemptRegistry) setRecoveryErrorStamp(attempt *resumeAttempt, stamp string) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if attempt == nil || r.attempts[attempt.sessionID] != attempt || attempt.ctx.Err() != nil {
+		return false
+	}
+	attempt.recoveryErrorStamp = stamp
+	return true
+}
+
+func (r *resumeAttemptRegistry) recoveryErrorStamp(sessionID, attemptID string) string {
+	id, ok := parseResumeAttemptIdentity(attemptID)
+	if !ok {
+		return ""
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if current := r.attempts[sessionID]; current != nil && current.id == id {
+		return current.recoveryErrorStamp
+	}
+	if tombstone, found := r.tombstoneLocked(sessionID, id); found {
+		return tombstone.recoveryErrorStamp
+	}
+	return ""
 }
 
 func (r *resumeAttemptRegistry) tombstoneLocked(sessionID string, attemptID uint64) (resumeAttemptTombstone, bool) {
@@ -571,6 +605,7 @@ func (s *Service) beginResumeAttempt(
 		attemptCtx := context.WithValue(ctx, cancelInFlightGuardHeldContextKey{}, false)
 		attempt, owner := s.resumeAttemptStore().begin(attemptCtx, taskID, sessionID)
 		if owner {
+			s.captureRecoveryErrorForResumeAttempt(attemptCtx, attempt)
 			s.captureInterruptedMarkerForResumeAttempt(attemptCtx, attempt)
 		}
 		return attempt, owner, nil
@@ -581,6 +616,9 @@ func (s *Service) beginResumeAttempt(
 		operation := s.currentCancellation(sessionID)
 		if operation == nil {
 			attempt, owner := s.resumeAttemptStore().begin(ctx, taskID, sessionID)
+			if owner {
+				s.captureRecoveryErrorForResumeAttempt(ctx, attempt)
+			}
 			lock.Unlock()
 			release()
 			if owner {
@@ -597,6 +635,24 @@ func (s *Service) beginResumeAttempt(
 		if err != nil {
 			return nil, false, fmt.Errorf("wait for session cancellation before resume: %w", err)
 		}
+	}
+}
+
+func (s *Service) captureRecoveryErrorForResumeAttempt(ctx context.Context, attempt *resumeAttempt) {
+	if s == nil || s.repo == nil || attempt == nil || attempt.taskID == "" || attempt.sessionID == "" {
+		return
+	}
+	session, err := s.repo.GetTaskSession(ctx, attempt.sessionID)
+	if err != nil || session == nil || session.TaskID != attempt.taskID {
+		return
+	}
+	lastError, found := models.LoadLastAgentError(session.Metadata)
+	if !found || lastError.IsDismissed() {
+		return
+	}
+	stamp := boundedProviderSelectorID(lastError.Stamp())
+	if stamp != "" {
+		s.resumeAttemptStore().setRecoveryErrorStamp(attempt, stamp)
 	}
 }
 

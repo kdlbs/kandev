@@ -31,6 +31,15 @@ type DirectoryHandle interface {
 	WriteFile(name string, data []byte, mode os.FileMode) error
 }
 
+// PinnedDirectoryInfo returns metadata for the directory held by handle.
+// The result is read from the pinned native handle, not from its path.
+func PinnedDirectoryInfo(handle DirectoryHandle) (os.FileInfo, error) {
+	if handle == nil {
+		return nil, errors.New("directory metadata requires an open handle")
+	}
+	return pinnedDirectoryInfo(handle)
+}
+
 // WriteOwnershipMarkerNoFollow writes an ownership marker through an already
 // opened task-root handle. The caller must verify the handle still identifies
 // the expected lexical path before calling this function.

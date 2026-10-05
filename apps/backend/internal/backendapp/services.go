@@ -97,6 +97,7 @@ func provideServices(ctx context.Context, cfg *config.Config, log *logger.Logger
 	agentSettingsController.SetDynamicAgentRoutingEnabled(cfg.Features.DynamicAgentRouting)
 	agentSettingsController.SetSecretStore(userSecretStore)
 	agentSettingsController.SetManagedRuntimeSelectionStore(managedRuntimeSelections)
+	agentSettingsController.SetRuntimeAutoUpdateStore(managedruntime.NewAutoUpdateStore(repos.SystemSettings))
 
 	core, err := initCoreTaskServices(ctx, cfg, repos, dbPool, eventBus, agentRegistry, storeTracker, log)
 	if err != nil {

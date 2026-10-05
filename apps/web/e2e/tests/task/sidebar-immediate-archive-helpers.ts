@@ -98,7 +98,7 @@ export async function checkImmediateArchive(options: {
     await expect(targetRow()).toBeVisible();
     await expect(targetRow()).toHaveAttribute("aria-busy", "true");
     await expect(targetRow()).toHaveClass(/opacity-60/);
-    await expect(targetRow().getByTestId("task-state-archive-pending")).toBeVisible();
+    await expect(targetRow().getByTestId("task-state-removal-pending")).toBeVisible();
     await expect(rows().filter({ hasText: "Keep selected" })).toBeInViewport();
     await expect(page).toHaveURL(new RegExp(`/t/${nav.task_id}$`));
     await expect(progressToast()).toBeVisible();
@@ -117,7 +117,7 @@ export async function checkImmediateArchive(options: {
     }
     await expect(targetRow()).toBeVisible();
     await expect(targetRow()).not.toHaveAttribute("aria-busy");
-    await expect(targetRow().getByTestId("task-state-archive-pending")).toHaveCount(0);
+    await expect(targetRow().getByTestId("task-state-removal-pending")).toHaveCount(0);
     await expect(page).toHaveURL(new RegExp(`/t/${nav.task_id}$`));
 
     await openArchive();
@@ -127,7 +127,7 @@ export async function checkImmediateArchive(options: {
     if (mobile) await page.getByTestId("mobile-task-picker-trigger").tap();
     await expect(targetRow()).toBeVisible();
     await expect(targetRow()).toHaveAttribute("aria-busy", "true");
-    await expect(targetRow().getByTestId("task-state-archive-pending")).toBeVisible();
+    await expect(targetRow().getByTestId("task-state-removal-pending")).toBeVisible();
     await pending!.continue();
     pending = null;
     await expect(progressToast()).toHaveCount(0);

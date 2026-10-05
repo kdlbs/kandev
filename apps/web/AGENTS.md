@@ -77,7 +77,7 @@ lib/api/domains/                    # API clients
 - `tasks.activeTaskId`, `tasks.activeSessionId`, `workspaces.activeId`
 - `repositories.byWorkspace`, `repositoryBranches.byRepository`
 
-`chatMotion` owns per-device chat animation preview and persistence; `useChatMotion` applies OS reduced motion. Keep it separate from `richOutputMotion` and transcript auto-scroll. Quick Chat stores server conversations in `quickChat.sessions` and browser-local terminals in `quickChat.terminalTabs`; `activeKind` and terminal IDs track selection. `quick-terminal-actions.ts` owns lifecycle/fallback; terminal descriptors never enter conversation APIs or get lost in reconciliation.
+`chatMotion` owns per-device chat animation preview and persistence; `useChatMotion` applies OS reduced motion. Keep it separate from `richOutputMotion` and transcript auto-scroll. Quick Chat stores server conversations in `quickChat.sessions` and browser-local terminals in `quickChat.terminalTabs`; `activeKind` and terminal IDs track selection. `quick-terminal-actions.ts` owns lifecycle/fallback; terminal descriptors never enter conversation APIs or get lost in reconciliation. `quickChat.configChatRestarts` owns transient Configuration Chat retirement by workspace. Both floating and expanded views suppress session effects while replacement is pending; preserve local admission across list resync and reconcile uncertain outcomes before allowing another start. Replacement uses the existing conversation store and never replays a prompt or opens a dismissed panel.
 
 **Hydration:** Go injects `window.__KANDEV_BOOT_PAYLOAD__` into the SPA shell before React mounts. `lib/state/hydration/merge-strategies.ts` has `deepMerge()`, `mergeSessionMap()`, `mergeLoadingState()` to avoid overwriting live client state. Pass `activeSessionId` to protect active sessions. Client task navigation uses `fetchTaskNavigationData` for essential task/session hydration. Render current-workspace task projections during refresh; leave optional enrichment to domain hooks instead of repeating the full boot bundle. Read-cursor capture and automatic session creation wait for authoritative route hydration. Do not replay cached hydration snapshots over live state.
 
@@ -232,7 +232,7 @@ Silence a legitimate one with `// i18n-exempt: <reason>` (required) as a `//`
 LINE comment — the detector's pattern is line-anchored, so a marker inside a
 `/** */` block is silently ignored.
 
-**Real-locale catalogs gate.** `pt-pt`, `zh-cn`, `zh-hk`, `zh-tw`, `ja` are complete;
+**Real-locale catalogs gate.** `pt-pt`, `zh-cn`, `zh-hk`, `zh-tw`, `ja`, `ko` are complete;
 `check-i18n-keys.mjs` fails on a missing/extra key, a dropped `{{placeholder}}`
 or `<n>` tag, an empty value, or a value identical to English. Untranslatable
 values are handled in two tiers: those `looksLikeCopy` rejects as non-copy need

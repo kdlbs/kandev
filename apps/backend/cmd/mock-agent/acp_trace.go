@@ -2,11 +2,14 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"sync"
+	"time"
 )
 
 var acpTraceMu sync.Mutex
+var mockAgentConnectionID = fmt.Sprintf("%d-%d", os.Getpid(), time.Now().UnixNano())
 
 // traceACP writes mock ACP requests only when an E2E test explicitly provides
 // a trace path. The file gives browser tests evidence of the peer's observed
@@ -16,7 +19,12 @@ func traceACP(event, sessionID string, fields map[string]string) {
 	if tracePath == "" {
 		return
 	}
-	record := map[string]string{"event": event, "session_id": sessionID}
+	record := map[string]string{
+		"event":         event,
+		"session_id":    sessionID,
+		"process_id":    fmt.Sprintf("%d", os.Getpid()),
+		"connection_id": mockAgentConnectionID,
+	}
 	for key, value := range fields {
 		record[key] = value
 	}

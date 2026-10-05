@@ -315,14 +315,22 @@
         "apps/web/components/task/chat/messages/shell-output-disclosure.tsx",
         "apps/web/components/task/chat/token-usage-display.tsx",
         "apps/web/components/task/editors-menu.tsx",
-        "apps/backend/internal/agentctl/server/process/workspace_git_status.go"
+        "apps/backend/internal/agentctl/server/process/workspace_git_status.go",
+        "apps/backend/internal/task/service/workspace_recovery_projection.go",
+        "apps/web/hooks/domains/session/use-session-recovery-actions.ts"
       ],
       "tests": [
         "apps/web/e2e/tests/command-panel.spec.ts",
         "apps/web/e2e/tests/task/editors-menu-worktree-picker.spec.ts",
         "apps/web/hooks/domains/session/use-shell-command-output.test.ts",
         "apps/web/components/task/chat/token-usage-display.test.tsx",
-        "apps/backend/internal/agentctl/server/process/workspace_git_status_test.go"
+        "apps/backend/internal/agentctl/server/process/workspace_git_status_test.go",
+        "apps/backend/internal/task/repository/sqlite/workspace_recovery_error_cas_test.go",
+        "apps/backend/internal/task/service/workspace_recovery_projection_test.go",
+        "apps/backend/internal/orchestrator/handlers/workspace_recovery_projection_test.go",
+        "apps/web/hooks/domains/session/use-session-recovery-actions.test.ts",
+        "apps/web/e2e/tests/session/multi-repo-session-resume-recovery.spec.ts",
+        "apps/web/e2e/tests/session/mobile-multi-repo-session-resume-recovery.spec.ts"
       ]
     },
     {
@@ -376,7 +384,11 @@
         "apps/backend/internal/runtimeflags/registry.go",
         "apps/web/components/settings/agents/agent-profiles-section.tsx",
         "apps/web/components/task/chat/conversation-usage-display.tsx",
-        "apps/backend/internal/task/handlers/task_usage_handlers.go"
+        "apps/backend/internal/task/handlers/task_usage_handlers.go",
+        "apps/backend/internal/agent/agents/runtime_update_capability.go",
+        "apps/backend/internal/agent/settings/controller/agent_autoupdate.go",
+        "apps/web/components/settings/agent-runtime-policies.tsx",
+        "apps/web/components/update-available-toast-bridge.tsx"
       ],
       "tests": [
         "apps/backend/internal/profiles/profiles_test.go",
@@ -391,7 +403,11 @@
         "apps/backend/internal/runtimeflags/registry_test.go",
         "apps/web/components/settings/agents/agent-profiles-section.test.tsx",
         "apps/web/components/task/chat/conversation-usage-display.test.tsx",
-        "apps/web/lib/api/domains/conversation-usage-api.test.ts"
+        "apps/web/lib/api/domains/conversation-usage-api.test.ts",
+        "apps/backend/internal/agent/registry/runtime_update_coverage_test.go",
+        "apps/backend/internal/agent/settings/controller/agent_autoupdate_test.go",
+        "apps/web/e2e/tests/settings/agent-runtime-notifications.spec.ts",
+        "apps/web/e2e/tests/settings/mobile-agent-runtime-notifications.spec.ts"
       ],
       "settingsRoutes": [
         "/settings/agents",

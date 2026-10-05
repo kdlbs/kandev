@@ -31,7 +31,7 @@ export function SessionRecoveryCard({
     setRelocationConfirmationOpen(true),
   );
   const context = useTaskLaunchErrorContext();
-  const { copy, busy, busyAction, details, failure } = useRecoveryPresentation(
+  const { copy, busy, busyAction, details, detailFields, failure } = useRecoveryPresentation(
     model,
     actions,
     context,
@@ -73,7 +73,7 @@ export function SessionRecoveryCard({
         />
         <AdditionalActions model={model} taskId={context?.taskId} />
         <div className="mt-3 min-w-0 border-t border-border pt-1 [&_pre]:bg-muted">
-          <SessionErrorDetails>{details}</SessionErrorDetails>
+          <SessionErrorDetails structuredFields={detailFields}>{details}</SessionErrorDetails>
         </div>
         <ActionMessageDetails
           metadata={model.metadata ? { ...model.metadata, error_output: undefined } : undefined}
@@ -131,6 +131,7 @@ function RecoveryCardHeader({
             {summary}
           </p>
         )}
+        <RecoveryStatusNotices copy={copy} />
         {model.kind === "provider_quota_limited" && model.metadata?.model_id && (
           <p className="mt-1 text-xs text-muted-foreground">
             {t("chat:providerQuotaModel", { model: model.metadata.model_id })}
@@ -146,6 +147,42 @@ function RecoveryCardHeader({
   );
 }
 
+function RecoveryStatusNotices({
+  copy,
+}: {
+  copy: ReturnType<typeof useRecoveryPresentation>["copy"];
+}) {
+  const { t } = useTranslation();
+  return (
+    <>
+      {copy.noPromptSent ? (
+        <p
+          className="mt-1 break-words text-xs text-muted-foreground"
+          data-testid="session-bootstrap-no-prompt"
+        >
+          {t("task:sessionBootstrapNoPromptSent")}
+        </p>
+      ) : null}
+      {copy.workspaceStatus ? (
+        <p
+          className="mt-1 break-words text-xs text-muted-foreground"
+          data-testid="session-recovery-workspace-status"
+        >
+          {copy.workspaceStatus}
+        </p>
+      ) : null}
+      {copy.freshStartWarning ? (
+        <p
+          className="mt-1 break-words text-xs text-muted-foreground"
+          data-testid="session-recovery-fresh-start-warning"
+        >
+          {t("task:sessionRecoveryFreshStartWarning")}
+        </p>
+      ) : null}
+    </>
+  );
+}
+
 function recoveryHeaderCopy(
   copy: ReturnType<typeof useRecoveryPresentation>["copy"],
   actions: SessionRecoveryActions,
@@ -154,8 +191,11 @@ function recoveryHeaderCopy(
   const hasDistinctGuidance = Boolean(
     actions.recoveryError || actions.branchDetails || actions.guardDetails,
   );
+  let summary = actions.recoveryNotice ?? copy.summary;
+  if (hasDistinctGuidance) summary = failure;
+  if (copy.hasTypedSelectionCause) summary = copy.summary;
   return {
-    summary: hasDistinctGuidance ? failure : (actions.recoveryNotice ?? copy.summary),
+    summary,
     suppressSummary: !copy.showSummary && !hasDistinctGuidance,
   };
 }

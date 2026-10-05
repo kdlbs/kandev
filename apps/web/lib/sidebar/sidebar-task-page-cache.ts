@@ -33,6 +33,7 @@ export class SidebarTaskPageCache {
   private synchronizing = false;
   private expiry: ReturnType<typeof setTimeout> | undefined;
   private accessDeniedListeners = new Set<() => void>();
+  private deletedTaskListeners = new Set<(taskIds: ReadonlySet<string>) => void>();
 
   constructor(private store: PageStore) {
     store.subscribe?.((state, previous) => {
@@ -150,6 +151,20 @@ export class SidebarTaskPageCache {
     const state = this.store.getState();
     if (request.readId) state.finishTaskOverviewRead?.(request.readId);
     state.releaseTaskOverviews?.(request.owner);
+  }
+
+  subscribeDeletedTasks(listener: (taskIds: ReadonlySet<string>) => void) {
+    this.deletedTaskListeners.add(listener);
+    return () => {
+      this.deletedTaskListeners.delete(listener);
+    };
+  }
+
+  removeTasks(taskIds: ReadonlySet<string>) {
+    if (taskIds.size === 0) return;
+    this.epoch++;
+    this.clearPages();
+    for (const listener of this.deletedTaskListeners) listener(taskIds);
   }
 
   subscribeAccessDenied(listener: () => void) {

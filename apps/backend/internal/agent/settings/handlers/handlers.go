@@ -79,6 +79,7 @@ func (h *Handlers) registerHTTP(router *gin.Engine) {
 	api.POST("/agent-command-preview/:agentName", h.httpPreviewAgentCommand)
 	api.POST("/agent-install/:agentName", cfg, h.interlock, h.httpInstallAgent)
 	api.GET("/agent-update/status", h.httpListAgentUpdateStatuses)
+	api.PATCH("/agent-update/:agentName/automatic", cfg, h.interlock, h.httpSetAutomaticRuntimeUpdates)
 	api.GET("/agent-update/:agentName/preview", h.httpPreviewAgentUpdate)
 	api.GET("/agent-install/jobs", h.httpListInstallJobs)
 	api.GET("/agent-install/jobs/:id", h.httpGetInstallJob)
@@ -145,7 +146,11 @@ func (h *Handlers) httpUpdateAgentRuntime(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "target version and use_default cannot be combined"})
 		return
 	}
-	if !request.UseDefault && request.TargetVersion == "" {
+	if h.controller.IsHarnessUpdate(name) && (request.TargetVersion != "" || request.UseDefault) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "self-update does not accept a target version or use_default"})
+		return
+	}
+	if !h.controller.IsHarnessUpdate(name) && !request.UseDefault && request.TargetVersion == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "target version is required"})
 		return
 	}

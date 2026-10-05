@@ -21,12 +21,10 @@ import type { AgentRuntimeAvailability } from "@/lib/types/agent-runtime";
 import type { AgentProfileRecentUseContext } from "@/lib/types/http-agent-profile-recent-use";
 import type { SSHReachabilityRecord } from "@/lib/types/http-ssh";
 import type { UISliceActions as UIA } from "./slices/ui/types";
+import type * as SettingsSliceTypes from "./slices/settings/types";
 import type * as UISliceTypes from "./slices/ui/types";
-import type {
-  AgentUpdateJob,
-  InstallJob,
-  NotificationProvidersUpdate,
-} from "./slices/settings/types";
+import type { AgentUpdateJob } from "@/lib/api";
+import type { InstallJob, NotificationProvidersUpdate } from "./slices/settings/types";
 import {
   defaultWorkspaceState,
   defaultSettingsState,
@@ -118,6 +116,7 @@ export type AppState = KanbanSlice & {
   agentProfiles: (typeof defaultSettingsState)["agentProfiles"];
   installJobs: (typeof defaultSettingsState)["installJobs"];
   updateJobs: (typeof defaultSettingsState)["updateJobs"];
+  agentRuntimeUpdates: (typeof defaultSettingsState)["agentRuntimeUpdates"];
   editors: (typeof defaultSettingsState)["editors"];
   prompts: (typeof defaultSettingsState)["prompts"];
   secrets: (typeof defaultSettingsState)["secrets"];
@@ -131,7 +130,6 @@ export type AppState = KanbanSlice & {
 
   // Session slice
   messages: (typeof defaultSessionState)["messages"];
-  messagePrompts: (typeof defaultSessionState)["messagePrompts"];
   turns: (typeof defaultSessionState)["turns"];
   taskSessions: (typeof defaultSessionState)["taskSessions"];
   taskSessionsByTask: (typeof defaultSessionState)["taskSessionsByTask"];
@@ -262,6 +260,7 @@ export type AppState = KanbanSlice & {
   sessionFailureNotification: (typeof defaultUIState)["sessionFailureNotification"];
   taskDeletedNotification: (typeof defaultUIState)["taskDeletedNotification"];
   updateAvailableNotification: (typeof defaultUIState)["updateAvailableNotification"];
+  updateAvailableNotificationQueue: (typeof defaultUIState)["updateAvailableNotificationQueue"];
   bottomTerminal: (typeof defaultUIState)["bottomTerminal"];
   sidebarViews: (typeof defaultUIState)["sidebarViews"];
   sidebarViewsByWorkspace: (typeof defaultUIState)["sidebarViewsByWorkspace"];
@@ -295,6 +294,8 @@ export type AppState = KanbanSlice & {
   appendInstallOutput: (agentName: string, chunk: string) => void;
   clearInstallJob: (agentName: string) => void;
   setAgentUpdateJobs: (jobs: AgentUpdateJob[]) => void;
+  setAgentRuntimeUpdateStatuses: SettingsSliceTypes.SettingsSliceActions["setAgentRuntimeUpdateStatuses"];
+  setAgentRuntimeUpdateLoading: SettingsSliceTypes.SettingsSliceActions["setAgentRuntimeUpdateLoading"];
   upsertAgentUpdateJob: (job: AgentUpdateJob) => void;
   appendAgentUpdateOutput: (agentName: string, jobId: string, chunk: string) => void;
   clearAgentUpdateJob: (agentName: string) => void;
@@ -488,18 +489,6 @@ export type AppState = KanbanSlice & {
     },
   ) => void;
   setMessagesLoading: (sessionId: string, loading: boolean) => void;
-  replacePromptMessages: (
-    sessionId: string,
-    messages: Message[],
-    meta?: { hasMore?: boolean; oldestCursor?: string | null },
-  ) => void;
-  prependPromptMessages: (
-    sessionId: string,
-    messages: Message[],
-    meta?: { hasMore?: boolean; oldestCursor?: string | null },
-  ) => void;
-  setPromptMessagesLoading: (sessionId: string, loading: boolean) => void;
-  setPromptMessagesLoadingMore: (sessionId: string, loading: boolean) => void;
   setTaskSession: (
     session: TaskSession,
     hydrationEpochAtRequestStart?: TaskSessionHydrationEpoch,
@@ -706,7 +695,15 @@ export type AppState = KanbanSlice & {
   dismissAgentError: UIA["dismissAgentError"];
 } & TaskOverviewSlice &
   AppStateExtraActions &
-  Pick<UIA, "setQuickChatInitialPrompt" | "requestQuickChatOpen" | "setQuickChatSelectionIdentity">;
+  Pick<
+    UIA,
+    | "setQuickChatInitialPrompt"
+    | "requestQuickChatOpen"
+    | "setQuickChatSelectionIdentity"
+    | "setConfigChatRestart"
+    | "syncConfigChatRestart"
+    | "replaceConfigChatSession"
+  >;
 
 // Most callers hydrate a fully-shaped slice per top-level key (see
 // mergeInitialState / hydrateState), but `system` is a grab-bag of many

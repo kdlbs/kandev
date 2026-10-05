@@ -1,6 +1,7 @@
 /* eslint-disable max-lines -- repository creation regressions share this focused row fixture. */
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { render, screen, fireEvent, cleanup } from "@testing-library/react";
+import { act, render, screen, fireEvent, cleanup } from "@testing-library/react";
+import { addDesktopDiscoveryRootAction } from "@/app/actions/workspaces";
 import type { Branch, Repository, RepositoryBranchPolicy } from "@/lib/types/http";
 import type { DialogFormState, TaskRepoRow } from "./task-create-dialog-types";
 import { TooltipProvider } from "@kandev/ui/tooltip";
@@ -22,6 +23,7 @@ const mockDiscovery = vi.hoisted(() => ({
   rootStates: [],
   homeConfirmationRequired: false,
   failedRoots: [],
+  synchronizeAfterRootMutation: vi.fn().mockResolvedValue(null),
 }));
 type CreationSurfaceProps = {
   open: boolean;
@@ -92,6 +94,7 @@ afterEach(() => {
   mockBranches.value = { branches: [], isLoading: false, isLoaded: false };
   mockPolicies.value = [];
   mockDiscovery.desktopRuntime = true;
+  mockDiscovery.synchronizeAfterRootMutation.mockClear();
 });
 
 const REPO_FRONT_ID = "repo-front";
@@ -196,24 +199,44 @@ describe("RepoChipsRow", () => {
     mockDiscovery.desktopRuntime = true;
   });
 
-  it("adds home folder and opens discovery dialog when scan home folder hint is clicked", () => {
-    mockDiscovery.desktopRuntime = true;
-    renderInProvider(
-      <RepoChipsRow
-        fs={makeFs({ repositories: [row({ key: "r0" })] })}
-        repositories={[]}
-        isTaskStarted={false}
-        workspaceId="ws-1"
-        onRowRepositoryChange={NOOP}
-        onRowBranchChange={NOOP}
-      />,
-    );
+  it.each([true, false])(
+    "adds home folder and synchronizes only on success=%s",
+    async (success) => {
+      mockDiscovery.desktopRuntime = true;
+      vi.mocked(addDesktopDiscoveryRootAction).mockClear();
+      if (success)
+        vi.mocked(addDesktopDiscoveryRootAction).mockResolvedValueOnce({
+          id: "home",
+          path: "/home",
+          display_path: "~",
+          state: "connected",
+        });
+      else
+        vi.mocked(addDesktopDiscoveryRootAction).mockRejectedValueOnce(
+          new Error("mutation failed"),
+        );
+      renderInProvider(
+        <RepoChipsRow
+          fs={makeFs({ repositories: [row({ key: "r0" })] })}
+          repositories={[]}
+          isTaskStarted={false}
+          workspaceId="ws-1"
+          onRowRepositoryChange={NOOP}
+          onRowBranchChange={NOOP}
+        />,
+      );
 
-    fireEvent.click(screen.getByTestId(REPO_CHIP_TRIGGER));
-    expect(screen.getByTestId("scan-home-folder-hint-button")).toBeTruthy();
-    fireEvent.click(screen.getByTestId("scan-home-folder-hint-button"));
-    expect(screen.getByTestId(REPO_DISCOVERY_CONTROLS_TEST_ID)).toBeTruthy();
-  });
+      fireEvent.click(screen.getByTestId(REPO_CHIP_TRIGGER));
+      expect(screen.getByTestId("scan-home-folder-hint-button")).toBeTruthy();
+      await act(async () => {
+        fireEvent.click(screen.getByTestId("scan-home-folder-hint-button"));
+      });
+      expect(screen.getByTestId(REPO_DISCOVERY_CONTROLS_TEST_ID)).toBeTruthy();
+      expect(addDesktopDiscoveryRootAction).toHaveBeenCalledWith("~");
+      if (success) expect(mockDiscovery.synchronizeAfterRootMutation).toHaveBeenCalledWith("load");
+      else expect(mockDiscovery.synchronizeAfterRootMutation).not.toHaveBeenCalled();
+    },
+  );
 
   it("keeps the compact Repo, Remote, and None source-mode controls and test IDs", () => {
     const onToggleRemote = vi.fn();

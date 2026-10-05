@@ -4,7 +4,7 @@ system: system-page
 requirements:
   - REQ-SYSTEM-PAGE-STORAGE-MAINTENANCE-001
 created: 2026-07-14
-updated: 2026-08-12
+updated: 2026-10-02
 owners:
   - cfl
 ---
@@ -23,6 +23,12 @@ adds two measurements to the existing category list when implemented.
 | Requirement | Design section |
 | --- | --- |
 | `REQ-SYSTEM-PAGE-STORAGE-MAINTENANCE-001` | [Migrated source detail](#migrated-source-detail) |
+
+## Current Go-cache policy
+
+The current [Go cache reclamation design](go-cache-reclamation.md) replaces new Go-cache
+quarantine and global-idle cleanup. Historical quarantine records and other resources retain the
+rules in the source detail below.
 
 ## Migrated source detail
 
@@ -213,7 +219,7 @@ Retention override:
 
 ### Go build cache
 
-- Enabling managed Go cache changes new host-local task executions to use
+- Successful preparation of an enabled managed Go cache changes new host-local task executions to use
   `<KANDEV_HOME_DIR>/cache/go-build` through an injected absolute `GOCACHE` value. Kandev setup,
   cleanup, shell, agent, test, and build processes for that execution observe the same value.
 - Containerized and remote executors keep an executor-local cache. Kandev does not inject a host

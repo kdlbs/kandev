@@ -433,14 +433,16 @@ type StartRequest struct {
 }
 
 type StartResponse struct {
-	Success bool   `json:"success"`
-	Message string `json:"message,omitempty"`
-	Command string `json:"command,omitempty"`
-	Error   string `json:"error,omitempty"`
+	Success           bool   `json:"success"`
+	Message           string `json:"message,omitempty"`
+	Command           string `json:"command,omitempty"`
+	ProcessGeneration uint64 `json:"process_generation,omitempty"`
+	Error             string `json:"error,omitempty"`
 }
 
 func (s *Server) handleStart(c *gin.Context) {
-	if err := s.procMgr.Start(c.Request.Context()); err != nil {
+	processGeneration, err := s.procMgr.StartWithGeneration(c.Request.Context())
+	if err != nil {
 		s.logger.Error("failed to start agent", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, StartResponse{
 			Success: false,
@@ -450,9 +452,10 @@ func (s *Server) handleStart(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, StartResponse{
-		Success: true,
-		Message: "agent started",
-		Command: s.procMgr.GetFinalCommand(),
+		Success:           true,
+		Message:           "agent started",
+		Command:           s.procMgr.GetFinalCommand(),
+		ProcessGeneration: processGeneration,
 	})
 }
 

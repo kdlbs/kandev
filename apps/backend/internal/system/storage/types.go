@@ -36,9 +36,10 @@ type WorkspaceSettings struct {
 }
 
 type GoCacheSettings struct {
-	Enabled     bool   `json:"enabled"`
-	MaxBytes    int64  `json:"max_bytes"`
-	AdoptedPath string `json:"adopted_path"`
+	Enabled               bool   `json:"enabled"`
+	MaxBytes              int64  `json:"max_bytes"`
+	AdoptedPath           string `json:"adopted_path"`
+	AllowCleanupWhileBusy bool   `json:"allow_cleanup_while_busy"`
 }
 
 type DockerSettings struct {

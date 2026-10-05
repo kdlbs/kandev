@@ -6,7 +6,13 @@ import { SessionBootstrapRecoveryCard } from "./session-bootstrap-recovery-card"
 const recoveryActionState = vi.hoisted(() => ({
   busyAction: null as string | null,
   recoveryError: null as Error | null,
-  manualRecoveryFailure: null as { operation: "resume" | "restore_workspace" } | null,
+  manualRecoveryFailure: null as {
+    operation: "resume" | "restore_workspace";
+    sessionId: string;
+    errorStamp: string | null;
+    requestKey: string;
+    operationId: number;
+  } | null,
   branchDetails: null as {
     kind: "branch_unrecoverable";
     recovery_action: "resume_new_branch";
@@ -157,6 +163,96 @@ describe("SessionBootstrapRecoveryCard", () => {
     expect(screen.queryByTestId("session-bootstrap-recovery-error")).toBeNull();
   });
 
+  it("keeps a typed selection cause primary after read-only workspace recovery", () => {
+    render(
+      <SessionBootstrapRecoveryCard
+        taskId="task-1"
+        sessionId="session-1"
+        error={{
+          ...error,
+          details: "agent_bootstrap; cause=model_unavailable",
+          attempt_id: "550e8400-e29b-41d4-a716-446655440000",
+          execution_id: "650e8400-e29b-41d4-a716-446655440000",
+          causes: [
+            {
+              operation: "start",
+              code: "model_unavailable",
+              reason: "requested_not_advertised",
+              requested_model: "claude-opus-4-8",
+              prompt_not_sent: true,
+              detail: "The requested model was not advertised.",
+            },
+          ],
+        }}
+        automaticRecovery={{
+          resumptionState: "resumed",
+          error: null,
+          notice: "task:resumeFailedWorkspaceReadOnly",
+          recoveryFailure: {
+            outcome: "workspace_read_only",
+            resumeError: "request failed",
+          },
+          resumeSession: vi.fn(),
+        }}
+      />,
+    );
+
+    expect(screen.getByText("task:sessionBootstrapModelUnavailableTitle")).toBeTruthy();
+    expect(screen.getByText("task:sessionBootstrapModelUnavailableBody")).toBeTruthy();
+    expect(screen.getByTestId("session-recovery-workspace-status").textContent).toBe(
+      "task:sessionRecoveryWorkspaceReadOnly",
+    );
+    expect(screen.getByTestId("session-bootstrap-no-prompt").textContent).toBe(
+      "task:sessionBootstrapNoPromptSent",
+    );
+    expect(screen.getByTestId("session-recovery-fresh-start-warning")).toBeTruthy();
+
+    fireEvent.click(
+      screen.getByTestId("session-bootstrap-recovery-details").querySelector("summary")!,
+    );
+    const details = screen.getByTestId("session-bootstrap-cause-details").textContent ?? "";
+    expect(details).toContain("claude-opus-4-8");
+    expect(details).toContain("The requested model was not advertised.");
+    expect(details).toContain("550e8400-e29b-41d4-a716-446655440000");
+    expect(details).toContain("650e8400-e29b-41d4-a716-446655440000");
+    expect(details).not.toContain("agent_bootstrap; cause=model_unavailable");
+  });
+
+  it("names the attempted fallback model when its application fails", () => {
+    render(
+      <SessionBootstrapRecoveryCard
+        taskId="task-1"
+        sessionId="session-1"
+        error={{
+          ...error,
+          causes: [
+            {
+              operation: "start",
+              code: "model_selection_failed",
+              reason: "application_failed",
+              requested_model: "primary",
+              attempted_model: "alternate",
+              detail: "The model could not be applied.",
+            } as unknown as (typeof error.causes)[number],
+          ],
+        }}
+      />,
+    );
+
+    expect(screen.getByTestId("session-bootstrap-recovery-card").textContent).toContain(
+      "task:sessionBootstrapModelSelectionFailedBody",
+    );
+    expect(screen.getByTestId("session-bootstrap-recovery-card").textContent).not.toContain(
+      'could not apply the selected model "primary"',
+    );
+    fireEvent.click(
+      screen.getByTestId("session-bootstrap-recovery-details").querySelector("summary")!,
+    );
+    const details = screen.getByTestId("session-bootstrap-cause-details").textContent ?? "";
+    expect(details).toContain("primary");
+    expect(details).toContain("alternate");
+  });
+
   it("keeps distinct branch guidance visible in the read-only result", () => {
     recoveryActionState.branchDetails = {
       kind: "branch_unrecoverable",
@@ -220,7 +316,13 @@ describe("SessionBootstrapRecoveryCard", () => {
 
   it("uses the shared action row for repeated manual retry without raw backend output", () => {
     recoveryActionState.recoveryError = new Error("raw-backend-error".repeat(20));
-    recoveryActionState.manualRecoveryFailure = { operation: "resume" };
+    recoveryActionState.manualRecoveryFailure = {
+      operation: "resume",
+      sessionId: "session-1",
+      errorStamp: "bootstrap-1",
+      requestKey: "task-1\u0000session-1\u0000bootstrap-1",
+      operationId: 1,
+    };
     render(<SessionBootstrapRecoveryCard taskId="task-1" sessionId="session-1" error={error} />);
 
     expect(screen.queryByText(/raw-backend-error/)).toBeNull();
@@ -271,6 +373,40 @@ describe("SessionBootstrapRecoveryCard", () => {
     fireEvent.click(screen.getByTestId("managed-clone-relocate-button"));
     fireEvent.click(screen.getByTestId("managed-clone-relocation-confirm"));
     expect(recoveryActionState.handleManagedCloneRelocation).toHaveBeenCalledOnce();
+  });
+
+  it("changes a cancelled legacy restore failure to one relocation action", () => {
+    recoveryActionState.manualRecoveryFailure = {
+      operation: "restore_workspace",
+      sessionId: "session-1",
+      errorStamp: "bootstrap-1",
+      requestKey: "task-1\u0000session-1\u0000bootstrap-1",
+      operationId: 1,
+    };
+    recoveryActionState.recoveryError = new Error("workspace needs relocation");
+    const { rerender } = render(
+      <SessionBootstrapRecoveryCard taskId="task-1" sessionId="session-1" error={error} />,
+    );
+    expect(screen.getByTestId("recovery-restore-workspace-button")).toBeTruthy();
+    expect(screen.getByTestId(RESUME_BUTTON_TEST_ID)).toBeTruthy();
+
+    recoveryActionState.managedCloneRecoveryStamp = "managed-stamp-2";
+    rerender(
+      <SessionBootstrapRecoveryCard
+        taskId="task-1"
+        sessionId="session-1"
+        error={{
+          ...error,
+          stamp: "managed-stamp-2",
+          category: "managed_clone_relocation_required",
+        }}
+      />,
+    );
+
+    expect(screen.getAllByTestId("managed-clone-relocate-button")).toHaveLength(1);
+    expect(screen.queryByTestId(RESUME_BUTTON_TEST_ID)).toBeNull();
+    expect(screen.queryByTestId("recovery-fresh-button")).toBeNull();
+    expect(screen.queryByTestId("recovery-restore-workspace-button")).toBeNull();
   });
 });
 

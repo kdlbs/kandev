@@ -189,6 +189,7 @@ type WorkspaceTracker struct {
 	gitStatusEpoch                       uint64
 	gitStatusTrackerID                   string
 	gitStatusRevision                    uint64
+	gitStatusDetailSourceRevision        uint64
 	gitStatusObservationID               atomic.Uint64
 	gitStatusLatestID                    uint64
 	gitStatusFingerprint                 string

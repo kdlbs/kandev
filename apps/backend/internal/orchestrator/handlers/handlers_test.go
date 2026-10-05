@@ -8,6 +8,7 @@ import (
 
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/orchestrator"
+	"github.com/kandev/kandev/internal/worktree"
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"github.com/stretchr/testify/require"
 )
@@ -39,6 +40,16 @@ func TestWsRecoverSessionCancelRetryReportsServiceResult(t *testing.T) {
 	require.False(t, payload.Cancelled)
 }
 
+func TestWsRecoverWorkspaceInventoryRequiresIdempotencyKeyBeforeServiceAccess(t *testing.T) {
+	handlers := setupOrchestratorHandlers(t)
+	response, err := handlers.wsRecoverSession(context.Background(), createTestMessage(t, ws.ActionSessionRecover, map[string]interface{}{
+		"task_id": "t1", "session_id": "s1", "action": "repair_workspace_inventory",
+	}))
+	require.NoError(t, err)
+	payload := parseError(t, response)
+	require.Equal(t, ws.ErrorCodeValidation, payload.Code)
+}
+
 func TestWsRecoverSessionValidatesSettingsPolicyAndOriginalAction(t *testing.T) {
 	handlers := setupOrchestratorHandlers(t)
 	tests := []struct {
@@ -48,6 +59,7 @@ func TestWsRecoverSessionValidatesSettingsPolicyAndOriginalAction(t *testing.T) 
 	}{
 		{name: "unsupported policy", action: "resume", policy: "future_policy"},
 		{name: "runtime retry alias", action: "runtime_retry", policy: "provider_restored"},
+		{name: "inventory repair", action: "repair_workspace_inventory", policy: "provider_restored"},
 		{name: "branch replacement", action: "resume_new_branch", policy: "provider_restored"},
 		{name: "cancel retry", action: "cancel_retry", policy: "provider_restored"},
 	}
@@ -58,6 +70,7 @@ func TestWsRecoverSessionValidatesSettingsPolicyAndOriginalAction(t *testing.T) 
 				"session_id":      "session-1",
 				"action":          tt.action,
 				"settings_policy": tt.policy,
+				"idempotency_key": "inventory-repair",
 			}))
 			require.NoError(t, err)
 			require.Equal(t, ws.ErrorCodeValidation, parseError(t, response).Code)
@@ -102,6 +115,19 @@ func TestBranchRecoveryConflictResponsePreservesRecoveryDetails(t *testing.T) {
 	require.Equal(t, "feature/lost", payload.Details["original_branch"])
 	require.Equal(t, "main", payload.Details["base_branch"])
 	require.Equal(t, "resume_new_branch", payload.Details["recovery_action"])
+}
+
+func TestRecoveryInspectionConflictResponseIsSanitized(t *testing.T) {
+	msg := createTestMessage(t, ws.ActionSessionRecover, map[string]interface{}{})
+	err := &worktree.RecoveryInspectionContentionError{}
+
+	response, responseErr := recoveryInspectionConflictResponse(msg, err)
+	require.NoError(t, responseErr)
+	require.NotNil(t, response)
+	payload := parseError(t, response)
+	require.Equal(t, ws.ErrorCodeConflict, payload.Code)
+	require.Equal(t, "workspace recovery inspection is busy", payload.Message)
+	require.Equal(t, "recovery_inspection_busy", payload.Details["kind"])
 }
 
 func TestSessionRecoveryGuardConflictResponseMapsRetryableToConflict(t *testing.T) {
@@ -207,4 +233,15 @@ func TestWsRespondToPermissionRequiresTaskAndRequestIdentity(t *testing.T) {
 			require.Equal(t, test.want, payload.Message)
 		})
 	}
+}
+
+func TestWsRecoverRelocationRequiresErrorStampBeforeServiceAccess(t *testing.T) {
+	handlers := setupOrchestratorHandlers(t)
+	response, err := handlers.wsRecoverSession(context.Background(), createTestMessage(t, ws.ActionSessionRecover, map[string]interface{}{
+		"task_id": "t1", "session_id": "s1", "action": "relocate_and_resume",
+	}))
+	require.NoError(t, err)
+	payload := parseError(t, response)
+	require.Equal(t, ws.ErrorCodeValidation, payload.Code)
+	require.Contains(t, payload.Message, "error_stamp")
 }

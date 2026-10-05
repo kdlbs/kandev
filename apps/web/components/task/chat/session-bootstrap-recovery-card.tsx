@@ -19,6 +19,7 @@ import type { TaskStatusSummaryActiveError } from "@/lib/types/task-status-summa
 import { buildRecoveryCardModel } from "./session-bootstrap-recovery-model";
 import { RecoveryCardContent } from "./session-bootstrap-recovery-content";
 import { ManagedCloneRelocationConfirmation } from "./managed-clone-relocation-confirmation";
+import { useOptionalAppStore } from "@/components/state-provider";
 
 type SessionBootstrapRecoveryCardProps = {
   taskId: string;
@@ -47,7 +48,7 @@ type BootstrapRecoveryViewProps = {
     launchErrorNoChanges: string;
     sessionRecoveryDetails: string;
   };
-  translate: ReturnType<typeof useTranslation>["t"];
+  t: ReturnType<typeof useTranslation>["t"];
 };
 
 function BootstrapRecoveryControls({
@@ -60,6 +61,16 @@ function BootstrapRecoveryControls({
   const { t } = useTranslation();
   const [showDialog, setShowDialog] = useState(false);
   const [relocationConfirmationOpen, setRelocationConfirmationOpen] = useState(false);
+  const agentDisplayName = useOptionalAppStore((state) => {
+    const session = state.taskSessions.items[sessionId];
+    const profileId = session?.execution_profile_id || session?.agent_profile_id;
+    const profile = profileId
+      ? state.agentProfiles.items.find((candidate) => candidate.id === profileId)
+      : undefined;
+    return profile
+      ? state.availableAgents.items.find((agent) => agent.name === profile.agent_name)?.display_name
+      : undefined;
+  }, undefined);
   const recovery = useSessionRecoveryActions({ taskId, sessionId, errorStamp: error.stamp });
   const {
     busyAction,
@@ -78,14 +89,14 @@ function BootstrapRecoveryControls({
     automaticRecovery && isSessionRecoveryBusy(automaticRecovery.resumptionState),
   );
   const effectiveBusyAction = automaticBusy ? "resume" : busyAction;
-  const manualFailure = manualRecoveryFailure ?? (recoveryError ? { operation: "resume" } : null);
   const model = buildRecoveryCardModel({
     error,
     automaticRecovery,
-    manualFailure,
+    manualFailure: manualRecoveryFailure,
     manualError: recoveryError,
     recoveryNotice,
     translate: t,
+    agentDisplayName,
   });
   if (guardDetails && recoveryError) {
     model.summary = sanitizeSessionErrorDetails(recoveryError.message, 240) || model.summary;
@@ -130,7 +141,7 @@ function BootstrapRecoveryControls({
       handleResume={handleResume}
       handleFreshStart={handleFreshStart}
       copy={copy}
-      translate={t}
+      t={t}
     />
   );
 }
@@ -150,7 +161,7 @@ function BootstrapRecoveryView({
   handleResume,
   handleFreshStart,
   copy,
-  translate,
+  t,
 }: BootstrapRecoveryViewProps) {
   const { taskId, sessionId, workspaceId, error, automaticRecovery } = props;
   const { busyAction, branchDetails, guardDetails, managedCloneRecoveryStamp } = recovery;
@@ -189,7 +200,7 @@ function BootstrapRecoveryView({
         onNewBranch={() => void recovery.handleNewBranch()}
         onRelocate={() => setRelocationConfirmationOpen(true)}
         copy={copy}
-        translate={translate}
+        t={t}
       />
       <NewSessionDialog
         open={showDialog}

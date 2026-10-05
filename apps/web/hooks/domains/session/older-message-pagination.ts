@@ -30,9 +30,9 @@ const inFlightBySession = new Map<string, SessionFlights>();
 
 /**
  * Shared per-session older-message coordinator. All older-message consumers —
- * the panel sentinel, the native transcript sentinel, automatic backfill, and
- * the last-prompt/drain preloads — route through here so one (sessionId,
- * cursor) request serves every caller with the first caller's limit, no
+ * the native transcript sentinel, automatic backfill, and the last-prompt/drain
+ * preloads — route through here so one (sessionId, cursor) request serves every
+ * caller with the first caller's limit, no
  * duplicate request or merge can be issued for one cursor, and `isLoadingMore`
  * cannot be cleared mid-flight by another consumer.
  *
@@ -46,8 +46,9 @@ const inFlightBySession = new Map<string, SessionFlights>();
 /**
  * Returns the in-flight older-page request for (sessionId, cursor), or null
  * when none is pending. Callers use this BEFORE their local loading guards so
- * a concurrent caller (panel sentinel during transcript loading or automatic
- * backfill) joins the existing promise instead of skipping or duplicating.
+ * a concurrent caller (automatic backfill during transcript loading or a
+ * last-prompt preload) joins the existing promise instead of skipping or
+ * duplicating.
  */
 export function joinOlderMessages(
   sessionId: string,

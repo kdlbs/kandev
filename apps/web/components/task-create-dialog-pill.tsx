@@ -53,6 +53,7 @@ type PillProps = {
   testId?: string;
   triggerClassName?: string;
   ariaLabel?: string;
+  ariaDescribedBy?: string;
   dropdownTestId?: string;
   onOpenChange?: (open: boolean) => void;
   /** Optional refresh action rendered next to the search input. */
@@ -382,6 +383,7 @@ function renderPillTriggerButton({
   testId,
   triggerClassName,
   ariaLabel,
+  ariaDescribedBy,
   prefix,
   onPointerEnter,
   onPointerLeave,
@@ -396,6 +398,7 @@ function renderPillTriggerButton({
   | "testId"
   | "triggerClassName"
   | "ariaLabel"
+  | "ariaDescribedBy"
   | "prefix"
 > & {
   hasValue: boolean;
@@ -409,6 +412,7 @@ function renderPillTriggerButton({
       type="button"
       disabled={disabled}
       aria-label={ariaLabel}
+      aria-describedby={ariaDescribedBy}
       data-testid={testId}
       className={cn(pillTriggerClass(Boolean(disabled), Boolean(flat), hasValue), triggerClassName)}
       onPointerEnter={onPointerEnter}
@@ -523,6 +527,7 @@ export function Pill({
   flat = false,
   triggerClassName,
   ariaLabel,
+  ariaDescribedBy,
   dropdownTestId,
   onOpenChange,
   filter,
@@ -543,6 +548,7 @@ export function Pill({
     testId,
     triggerClassName,
     ariaLabel,
+    ariaDescribedBy,
     prefix,
     onPointerEnter: tooltip ? state.handlePointerEnter : undefined,
     onPointerLeave: tooltip ? state.handlePointerLeave : undefined,

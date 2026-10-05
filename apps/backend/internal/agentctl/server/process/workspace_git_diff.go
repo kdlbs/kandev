@@ -359,6 +359,10 @@ func carryForwardFileDiff(fi types.FileInfo, filePath string, update *types.GitS
 // pipe-based reads. Slot is acquired before Start; if Start fails we
 // release immediately, else release runs after Wait.
 func capDiffOutput(ctx context.Context, workDir string, args ...string) (string, bool, error) {
+	return capDiffOutputWithEnvironment(ctx, workDir, nil, args...)
+}
+
+func capDiffOutputWithEnvironment(ctx context.Context, workDir string, environment []string, args ...string) (string, bool, error) {
 	stream, runErr, execCtxErr := subproc.StartGitStreamAfterAcquire(
 		ctx,
 		gitWorkClass(ctx),
@@ -366,6 +370,7 @@ func capDiffOutput(ctx context.Context, workDir string, args ...string) (string,
 		func(execCtx context.Context) *exec.Cmd {
 			cmd := subproc.NewGitCommand(execCtx, args...)
 			cmd.Dir = workDir
+			cmd.Env = environment
 			return cmd
 		},
 	)
@@ -398,7 +403,8 @@ func (wt *WorkspaceTracker) capDiffOutput(ctx context.Context, args ...string) (
 	if wt.gitStatusDiffOutput != nil {
 		return wt.gitStatusDiffOutput(ctx, wt.workDir, args...)
 	}
-	return capDiffOutput(ctx, wt.workDir, args...)
+	environment := withEnvironmentOverrides(wt.gitCommandEnv(ctx, false), map[string]string{gitLiteralPathspecEnv: "0", gitICasePathspecEnv: "0"})
+	return capDiffOutputWithEnvironment(ctx, wt.workDir, environment, args...)
 }
 
 // resolveNumstatPath resolves a numstat path that may contain rename notation
@@ -452,7 +458,7 @@ func (wt *WorkspaceTracker) enrichWithUnstagedDiffBudget(ctx context.Context, up
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	numstatOut, err := wt.runGitOutput(ctx, "diff", "--numstat", baseRef)
+	numstatOut, err := wt.runGitOutput(ctx, "diff", "--numstat", "-z", baseRef)
 	if err != nil {
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			return ctxErr
@@ -468,15 +474,17 @@ func (wt *WorkspaceTracker) enrichWithUnstagedDiffBudget(ctx context.Context, up
 		return nil
 	}
 
-	lines := strings.Split(string(numstatOut), "\n")
-	for _, line := range lines {
+	output := string(numstatOut)
+	for output != "" {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		entry, ok := parseNumstatEntry(line)
+		entry, rest, ok := parseWorkspaceNumstatZ(output)
 		if !ok {
-			continue
+			markGitStatusDetailsUnavailable(update)
+			break
 		}
+		output = rest
 		if err := wt.enrichUnstagedFileDiff(ctx, update, baseRef, prior, budget, entry); err != nil {
 			return err
 		}
@@ -502,7 +510,7 @@ func (wt *WorkspaceTracker) enrichUnstagedFileDiff(ctx context.Context, update *
 	}
 
 	previousDiff := fileInfo.Diff
-	diffOut, truncated, diffErr := wt.capDiffOutput(ctx, "diff", baseRef, "--", entry.path)
+	diffOut, truncated, diffErr := wt.capDiffOutput(ctx, "diff", baseRef, "--", literalGitPathspec(entry.path))
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -549,7 +557,7 @@ func (wt *WorkspaceTracker) enrichMixedUnstagedDiffsBudget(
 	if !hasMixedFacet {
 		return nil
 	}
-	numstatOut, err := wt.runGitOutput(ctx, "diff", "--numstat")
+	numstatOut, err := wt.runGitOutput(ctx, "diff", "--numstat", "-z")
 	if err != nil {
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			return ctxErr
@@ -566,14 +574,17 @@ func (wt *WorkspaceTracker) enrichMixedUnstagedDiffsBudget(
 		}
 		return nil
 	}
-	for _, line := range strings.Split(string(numstatOut), "\n") {
+	output := string(numstatOut)
+	for output != "" {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		entry, ok := parseNumstatEntry(line)
+		entry, rest, ok := parseWorkspaceNumstatZ(output)
 		if !ok {
-			continue
+			markGitStatusDetailsUnavailable(update)
+			break
 		}
+		output = rest
 		if err := wt.enrichMixedUnstagedFileDiff(ctx, update, prior, budget, entry); err != nil {
 			return err
 		}
@@ -607,7 +618,7 @@ func (wt *WorkspaceTracker) enrichMixedUnstagedFileDiff(
 	}
 
 	previousDiff := change.Diff
-	diffOut, truncated, diffErr := wt.capDiffOutput(ctx, "diff", "--", entry.path)
+	diffOut, truncated, diffErr := wt.capDiffOutput(ctx, "diff", "--", literalGitPathspec(entry.path))
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -661,7 +672,7 @@ func (wt *WorkspaceTracker) enrichWithStagedDiffBudget(ctx context.Context, upda
 	// For staged files that don't have unstaged changes, we need to get the diff from the index.
 	// The first diff (git diff baseRef) shows worktree vs baseRef, but if a file is staged
 	// and has no additional unstaged changes, its diff won't appear there.
-	stagedOut, err := wt.runGitOutput(ctx, "diff", "--cached", "--numstat", baseRef)
+	stagedOut, err := wt.runGitOutput(ctx, "diff", "--cached", "--numstat", "-z", baseRef)
 	if err != nil {
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			return ctxErr
@@ -683,15 +694,17 @@ func (wt *WorkspaceTracker) enrichWithStagedDiffBudget(ctx context.Context, upda
 		return nil
 	}
 
-	lines := strings.Split(string(stagedOut), "\n")
-	for _, line := range lines {
+	output := string(stagedOut)
+	for output != "" {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		entry, ok := parseNumstatEntry(line)
+		entry, rest, ok := parseWorkspaceNumstatZ(output)
 		if !ok {
-			continue
+			markGitStatusDetailsUnavailable(update)
+			break
 		}
+		output = rest
 		if err := wt.enrichStagedFileDiff(ctx, update, baseRef, prior, budget, entry); err != nil {
 			return err
 		}
@@ -725,7 +738,7 @@ func (wt *WorkspaceTracker) enrichStagedFileDiff(ctx context.Context, update *ty
 		return nil
 	}
 
-	diffOut, truncated, diffErr := wt.capDiffOutput(ctx, "diff", "--cached", baseRef, "--", entry.path)
+	diffOut, truncated, diffErr := wt.capDiffOutput(ctx, "diff", "--cached", baseRef, "--", literalGitPathspec(entry.path))
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -771,7 +784,7 @@ func (wt *WorkspaceTracker) enrichMixedStagedFileDiff(
 	}
 
 	previousDiff := change.Diff
-	diffOut, truncated, diffErr := wt.capDiffOutput(ctx, "diff", "--cached", baseRef, "--", entry.path)
+	diffOut, truncated, diffErr := wt.capDiffOutput(ctx, "diff", "--cached", baseRef, "--", literalGitPathspec(entry.path))
 	if err := ctx.Err(); err != nil {
 		return err
 	}

@@ -183,6 +183,7 @@ func (wt *WorkspaceTracker) publishGitStatus(status types.GitStatusUpdate, ordin
 	}
 
 	wt.gitStatusRevision++
+	wt.gitStatusDetailSourceRevision = 0
 	status.SnapshotRevision = wt.gitStatusRevision
 	wt.currentStatus = cloneGitStatusUpdate(status)
 	wt.gitStatusFingerprint = fingerprint

@@ -390,14 +390,6 @@ func (s *Service) deleteWorkspace(ctx context.Context, workspace *models.Workspa
 	if err != nil {
 		return err
 	}
-	// Record canvas artifact cleanup before the workspace cascade removes its
-	// task and workspace rows. This keeps the release ownership boundary
-	// durable across a process stop between the two operations.
-	if s.canvasCleanup != nil {
-		if err := s.canvasCleanup.CleanupWorkspaceCanvases(ctx, workspace.ID); err != nil {
-			return fmt.Errorf("cleanup workspace canvases before workspace delete: %w", err)
-		}
-	}
 	cleanups := make([]workspaceDeleteTaskCleanup, 0, len(tasks)+1)
 	if workspaceAttachmentCleanup != nil {
 		cleanups = append(cleanups, workspaceDeleteTaskCleanup{cleanupJob: workspaceAttachmentCleanup})
@@ -409,6 +401,14 @@ func (s *Service) deleteWorkspace(ctx context.Context, workspace *models.Workspa
 	}
 	cleanups = append(cleanups, taskCleanups...)
 
+	// Record canvas artifact cleanup before the workspace cascade removes its
+	// task and workspace rows. This keeps the release ownership boundary
+	// durable across a process stop between the two operations.
+	if s.canvasCleanup != nil {
+		if err := s.canvasCleanup.CleanupWorkspaceCanvases(ctx, workspace.ID); err != nil {
+			return errors.Join(fmt.Errorf("cleanup workspace canvases before workspace delete: %w", err), s.cancelWorkspaceDeleteTaskCleanupJobs(ctx, cleanups))
+		}
+	}
 	var deletedWorkspaceAttachments []*models.TaskMessageAttachment
 	var deletedTasks []*models.Task
 	var deletedWorkflows []*models.Workflow
@@ -1297,10 +1297,7 @@ func (s *Service) FindOrCreateRepository(ctx context.Context, req *FindOrCreateR
 	req.ProviderName = strings.TrimSpace(req.ProviderName)
 	req.RemoteURL = strings.TrimSpace(req.RemoteURL)
 	req.ProviderHost = normalizeProviderHost(req.Provider, req.ProviderHost)
-	existing, err := s.repoEntities.GetRepositoryByProviderIdentity(ctx, models.ProviderRepositoryIdentity{
-		WorkspaceID: req.WorkspaceID, Provider: req.Provider, Scope: req.ProviderScope,
-		RepositoryID: req.ProviderRepoID, Host: req.ProviderHost, Owner: req.ProviderOwner, Name: req.ProviderName,
-	})
+	existing, err := s.findRepositoryForRemoteSelection(ctx, req)
 	if err != nil {
 		return nil, false, fmt.Errorf("lookup repository: %w", err)
 	}

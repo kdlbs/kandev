@@ -189,6 +189,15 @@ Use **New Task** in the sidebar. In an open task, the **Task** split button also
 
    On mobile, **Plan mode** and **Create only** provide the same behavior as the two non-primary actions.
 
+When you choose **Remote**, Kandev can reuse an available matching checkout.
+If a previously registered local checkout folder was deleted, it uses another
+available source or creates a managed clone. The original local registration
+and its existing task associations remain unchanged; selecting that local
+repository explicitly still requires its checkout to be available. If an
+existing local checkout's origin no longer matches the selected remote,
+Kandev reports a validation error. Correct its origin or select it explicitly
+as a local repository.
+
 ### Reduce downloads for a large remote repository
 
 In **New Task → Remote**, select a repository and open its gear (**Repository options**).
@@ -343,6 +352,8 @@ A task can include several local or remote repository rows. Multi-repository cre
 
 If Kandev cannot resolve a pasted remote URL or its branch, the repository row keeps the URL and shows the provider error. Use **Retry** after correcting the URL or when a transient provider failure has cleared.
 
+If replacing a task's repository associations fails before the database commit, Kandev keeps the complete previous association set. Other task edits, repository setup, or Git work completed earlier can remain; a fresh-branch persistence error still requires checking the repository.
+
 Changes and review are scoped by repository. State the expected deliverable, base branch, and pull-request target for every attachment. See [Coordinate work](coordination.md) for adding branches after creation and splitting multi-repository work.
 
 </details>
@@ -404,7 +415,10 @@ DELETE /api/v1/repository-sets/:id
 `base_branch`; an empty or omitted base uses task defaulting. A supplied list replaces the whole
 membership list, which is also how you reorder one. Omit the field to leave membership untouched.
 Existing clients may send ordered `repository_ids`; those members have no saved bases. Do not send both
-member fields in one request. The same five operations exist as
+member fields in one request. Omitted `name` and `description` fields are also preserved; send an empty
+description to clear it. Concurrent updates to different fields preserve both changes. Updates to the
+same field use the last committed value, and each supplied membership list replaces the entire list.
+The same five operations exist as
 `repository_set.list|create|get|update|delete` WebSocket actions, and
 `repository_set.created|updated|deleted` notifications keep every open client current. See
 [WebSocket API](websocket-api.md).
@@ -657,6 +671,7 @@ and workflow selections support up to 1,000 values per filter; the limits apply
 to each selected value, not to the combined selection.
 
 - Search matches tasks without changing their state.
+- On Kanban and Pipeline boards, selecting a repository includes tasks linked to it, including tasks whose primary repository is different.
 - The display menu groups its controls into collapsible **Filters**, **Sort**, **Preview panel**, and, in **List**, **List rows** sections. Each section shows its current values while collapsed. Filters cover **Workflow**, **Repository**, and, in Kanban, **Priority**; registered plugin filters appear there when available. In Kanban/Pipeline, each workflow lane has a **Columns** menu outside these groups to hide individual steps. Unticking a step hides its column and tasks on that board, scoped to its own workflow, until you re-tick it. The optional **Auto-hide empty columns** setting collapses unoccupied steps without changing those manual choices; auto-hidden empty steps return as move destinations while a task is being moved, while manually hidden steps remain unavailable for pointer and bulk moves. On phones, tap the listing-title dropdown to open **View options** and expand the same display groups and change columns for the focused workflow.
 - In **List**, the display menu can enable **Show task details** to include available repository, description, pull-request, session, parent, review, and archive context in each row. This option is off by default and follows the user across devices.
 - **List** can group by **Workflow step**, **Workflow**, **Repository**, or **None**. Workflow step uses configured step names and order, such as Backlog, Work, or Review. The icon on each task still shows its runtime status, which can differ from its workflow step. Old State grouping preferences and links open workflow step grouping.
@@ -764,7 +779,15 @@ Kandev retries temporary connection issues in the background.
 - **Run** stays available when the selected comment and primary session are eligible.
 - A recovered comment must finish browser-draft cleanup before you can run it.
 
-Agents use `create_task_plan_kandev`, `get_task_plan_kandev`, `update_task_plan_kandev`, and `delete_task_plan_kandev`. Human edits are therefore visible to the next agent that reads the plan. A plan records intent; verify that code and review still match it. For safe agent corrections, see [Protect task plan writes](automation-and-mcp.md#protect-task-plan-writes).
+Agents use `create_task_plan_kandev`, `get_task_plan_kandev`, `edit_task_plan_kandev`, `update_task_plan_kandev`, and `delete_task_plan_kandev`. Human edits are therefore visible to the next agent that reads the plan. A plan records intent; verify that code and review still match it. For safe agent corrections, see [Protect task plan writes](automation-and-mcp.md#protect-task-plan-writes).
+
+Large plans support bounded reads through `get_task_plan_kandev(offset, limit)`.
+Ranges count Unicode code points and return exact fragments with a version and
+continuation offset. Pass that version as `expected_version` on later pages
+to detect intervening edits. Omit both range arguments to read the whole plan;
+never use a fragment as a replacement document. See
+[Read only the relevant part of a plan](automation-and-mcp.md#read-only-the-relevant-part-of-a-plan)
+for bounds, pagination, and a fragment-edit example.
 
 ### Protect agent plan writes
 
@@ -883,6 +906,8 @@ Select an archived task to read its saved conversation in the current page. Arch
 
 If task or workspace preparation fails, select **Show details** in the error strip above the session tabs. It opens the available recovery actions. The strip stays visible when you switch sessions and disappears after recovery succeeds. Archiving during recovery stops that recovery path without starting a fallback restore. For session recovery behavior, see [Sessions and review](sessions-and-review.md).
 
+If Quick Chat setup fails after a session is created, Kandev keeps the chat in your tab strip with its preparation details and safe error details so you can inspect the failure or retry. A failure before a session exists keeps your selected agent and repository choices on the setup form with an inline error and a **Retry** action.
+
 <details>
 <summary>Worktree recovery after archive</summary>
 
@@ -894,7 +919,8 @@ Unarchiving a task cancels a pending worktree recheck. If the recheck is already
 
 **Delete**
 
-- Delete is permanent. If **Also delete _N_ subtasks** is off, direct children become root tasks. If it is on, Kandev deletes the descendants.
+- While deletion is pending, the task stays dimmed with a spinner in the sidebar and phone task picker. It disappears when deletion succeeds. If deletion fails and the task is still available, the row returns to its normal state.
+- Delete is permanent. If **Also delete _N_ subtasks** is off, direct children become root tasks. If it is on, Kandev deletes the descendants. If a new child arrives before deletion finishes, Kandev keeps the parent and reports a conflict. Refresh the deletion preview before retrying. Ephemeral and automation-created children may be excluded from the cascade preview, so refreshing alone may return the same conflict while one retains its parent relationship.
 - Executor cleanup follows the same asynchronous retry and restart-reconciliation rules as archive.
 - When a task has a `RUNNING` agent, the dialog warns that deletion discards in-progress work. Delete always shows this warning. Archive shows it only when confirmation is on.
 

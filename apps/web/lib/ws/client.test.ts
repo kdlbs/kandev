@@ -605,6 +605,39 @@ describe("connection generations", () => {
 });
 
 describe("request errors", () => {
+  it("starts response timeout after an initially queued request is sent", async () => {
+    vi.useFakeTimers();
+    const client = new WebSocketClient("ws://test", undefined, { enabled: false });
+    client.connect();
+    const socket = FakeWebSocket.latest();
+    let outcome: "pending" | "resolved" | "rejected" = "pending";
+    const request = client.request("workspace.tree.get", { session_id: "sess-1" }).then(
+      () => {
+        outcome = "resolved";
+      },
+      () => {
+        outcome = "rejected";
+      },
+    );
+
+    try {
+      await vi.advanceTimersByTimeAsync(5001);
+      expect(outcome).toBe("pending");
+
+      socket.open();
+      const sent = socket.sent.find((message) => message.action === "workspace.tree.get");
+      if (!sent) throw new Error("No queued workspace tree request was sent");
+      await vi.advanceTimersByTimeAsync(4999);
+      expect(outcome).toBe("pending");
+
+      socket.receive({ id: sent.id, type: "response", payload: { root: null } });
+      await request;
+      expect(outcome).toBe("resolved");
+    } finally {
+      client.disconnect();
+    }
+  });
+
   it("retains the backend code and details when a request fails", async () => {
     const { client, socket } = connectClient();
     const request = client.request("session.recover", { action: "resume" });

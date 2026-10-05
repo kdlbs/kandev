@@ -62,10 +62,12 @@ dashboards) render under the active workspace's chrome; they do not redirect.
   response lands under its own key instead of overwriting the current
   workspace's data. This is also the store shape a future side-by-side layout
   needs, together with per-subtree workspace scoping.
-- Entering Settings still re-resolves the active workspace from the cookie and
-  settings fallback, so a workspace activated only by visiting a URL (never
-  explicitly selected) can snap back. Unchanged from before, minus the kanban
-  bias.
+- A cold Settings boot resolves the active workspace from the cookie and
+  settings fallback. In an existing SPA tab, Settings keeps that tab's valid
+  active workspace ahead of the cookie shared by other tabs. A workspace
+  activated only by visiting a URL (never explicitly selected) can still snap
+  back after a reload, when the tab-local active workspace is no longer in
+  memory.
 - The legacy `office-active-workspace` cookie keeps its ADR-0023 role as a
   read-only fallback for the office boot paths; office selections now write
   the port-scoped name (amended 2026-08-17, see
