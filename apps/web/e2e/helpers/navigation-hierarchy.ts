@@ -37,6 +37,17 @@ export async function seedNavigationTaskPanel(apiClient: ApiClient, seed: SeedDa
   return tasks;
 }
 
+export async function expectStateGroupHeaders(panel: Locator) {
+  const headers = panel.getByTestId("sidebar-group-header");
+  await expect(headers).toHaveCount(4);
+  await expect(headers.getByTestId("sidebar-group-state")).toHaveCount(0);
+  await expect(headers.locator("svg")).toHaveCount(4);
+  await expect(headers.locator(".tabler-icon-chevron-down")).toHaveCount(4);
+  await expect(
+    panel.getByTestId("sidebar-task-item").locator('[data-testid^="task-state-"]'),
+  ).toHaveCount(4);
+}
+
 export async function seedWorkflowGroupPanel(apiClient: ApiClient, seed: SeedData) {
   const options = { workflow_id: seed.workflowId, workflow_step_id: seed.startStepId };
   const parent = await apiClient.seedTask(seed.workspaceId, "Improve empty states", options);

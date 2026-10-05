@@ -145,14 +145,15 @@ generate the Traditional Chinese pair and pseudo locale using repository scripts
 
 ## State groups and task rows
 
-Pass the resolved grouping dimension to `GroupHeader` through `TaskSwitcher` and
-`GroupSection`. Only `groupKey === "state"` maps the existing resolved group key
-to semantic state presentation. Use existing task-state styling/icon primitives;
-do not infer state from translated group labels or the first row. The effective
-task-tree state resolution, server page grouping, `matchingCount`, continuation
-labels, sorting, and descendant counts remain authoritative. Unknown/non-state
-groups use a neutral presentation. Add an accessible expanded state and a compact
-tabular count badge without changing group identity.
+`GroupHeader` renders the disclosure chevron directly before the resolved group
+label, followed by continuation text when needed and a compact tabular count.
+State headings have no separate status icon or reserved icon space; labels
+identify the state, while `TaskItem` retains the existing task-state icons on
+individual rows. Do not infer state from translated group labels or the first
+row. The effective task-tree state resolution, server page grouping,
+`matchingCount`, continuation labels, sorting, and descendant counts remain
+authoritative. Headers retain an accessible expanded state without changing
+group identity.
 
 Each named group has a leading disclosure chevron, semibold heading, count, and
 4px of separation before the next group. Disclosure headers use a 28px minimum
@@ -249,7 +250,8 @@ introduced.
 ## Verification
 
 Use behavioral component tests for creation/disclosure independence, default
-versus saved order, active versus draft filters, and semantic state-group mapping.
+versus saved order, active versus draft filters, and labelled state groups with
+row status icons and no header status icon.
 Use focused Playwright geometry and action tests for desktop, phone, and the
 768px boundary. Test phone Issues access from both listings and a workbench,
 with a long task list, empty integrations, saved layouts, and workspace switches.

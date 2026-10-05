@@ -3,6 +3,7 @@ import {
   seedNavigationTaskPanel,
   seedWorkflowGroupPanel,
   expectWorkflowGroupHierarchy,
+  expectStateGroupHeaders,
 } from "../../helpers/navigation-hierarchy";
 import { expectTouchSquareControl, expectTouchControl } from "../../helpers/control-sizing";
 
@@ -16,7 +17,7 @@ test("phone status groups and task actions remain contained in both themes", asy
   await testPage.goto("/tasks");
   await testPage.getByTestId("app-nav-trigger").tap();
   const menu = testPage.getByTestId("app-nav-sheet");
-  await expect(menu.getByTestId("sidebar-group-header")).toHaveCount(4);
+  await expectStateGroupHeaders(menu);
   for (const width of [393, 767]) {
     await testPage.setViewportSize({ width, height: 851 });
     for (const theme of ["first", "second"]) {
