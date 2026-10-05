@@ -57,7 +57,7 @@ func (f *recordingProfileDiscoveryUtility) ProbeProfileCapabilities(
 	}, nil
 }
 
-// @covers AC-AGENTS-RUNTIME-UPDATES-003.1
+// @covers AC-AGENTS-RUNTIME-UPDATES-004.1
 func TestFetchProfileDynamicModelsPreservesRuntimeInfo(t *testing.T) {
 	ctrl, _, ctx, _, _ := newProviderTestController(t)
 	utility := &recordingProfileDiscoveryUtility{

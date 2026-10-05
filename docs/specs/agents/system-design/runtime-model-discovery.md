@@ -3,7 +3,7 @@ status: current
 system: agents
 created: 2026-10-04
 requirements:
-  - REQ-AGENTS-RUNTIME-UPDATES-003
+  - REQ-AGENTS-RUNTIME-UPDATES-004
 ---
 
 # Runtime context for model discovery
@@ -21,7 +21,7 @@ It extends [runtime updates](runtime-updates-01.md) without changing version sel
 
 | Requirement | Design sections |
 | --- | --- |
-| REQ-AGENTS-RUNTIME-UPDATES-003 | Observation contract, Collection, Snapshot flow, Model settings, Failure and security |
+| REQ-AGENTS-RUNTIME-UPDATES-004 | Observation contract, Collection, Snapshot flow, Model settings, Failure and security |
 
 ## Observation contract
 

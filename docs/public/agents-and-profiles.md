@@ -164,10 +164,37 @@ ACP runtime selection does not replace the passthrough command.
 
 The status shown on this page is authoritative for the current host. A CLI that works in your interactive shell can still be absent from Kandev when the service has a different `PATH`, home directory, or operating-system user.
 
+### Update Oh My Pi on the Kandev host
+
+On an installed `omp` card, select the update icon under **Settings > Agents**.
+Review the installed version, the **Stable latest (reference)** version, and
+the `omp update` command, then choose **Update runtime** or **Repair runtime**.
+Kandev runs OMP's own updater as the Kandev service user on the host, streams
+its output, and refreshes ACP capabilities only after a successful probe.
+Active sessions are not restarted.
+
+OMP detects whether its installation is managed by Homebrew, mise, Bun, npm,
+or a standalone binary and updates through that method. A Nix-managed
+installation cannot be updated by this action. OMP follows its already
+configured stable or canary channel; Kandev does not choose a channel or pass
+a version to `omp update`. The stable latest shown in Settings is a
+comparison reference, **not a promised install target**: the installed
+version reported by OMP after updating may differ. There is no version
+picker, Kandev pin, or rollback for OMP.
+
+The update affects only the host installation, not task containers or remote
+executors. If OMP's updater or the follow-up ACP probe fails, Settings reports
+the error and retains the previous capability catalogue; Kandev cannot
+restore an executable that OMP already changed. When metadata is unavailable,
+the update icon remains available, but a preview must resolve the stable
+reference before the update can start.
+
 ### Update a managed agent runtime
 
 The update icon is available on managed Claude, Codex, OpenCode, Copilot,
-Gemini, Pi, and Muse agent cards when Kandev owns their managed runtime. It prepares the runtime on the Kandev host.
+Gemini, Pi, and Muse agent cards when Kandev owns their managed runtime. It
+prepares their pinned npm runtime on the Kandev host. OMP uses the separate
+self-update flow above.
 
 Each managed runtime has a reviewed Kandev default. If you have not selected a
 version, Kandev uses that exact default for probes, sessions, standalone

@@ -7,16 +7,16 @@ depends_on:
   - "01-runtime-observations"
 plan: "plan.md"
 requirements:
-  - REQ-AGENTS-RUNTIME-UPDATES-003
+  - REQ-AGENTS-RUNTIME-UPDATES-004
 acceptance_criteria:
-  - AC-AGENTS-RUNTIME-UPDATES-003.1
-  - AC-AGENTS-RUNTIME-UPDATES-003.2
-  - AC-AGENTS-RUNTIME-UPDATES-003.3
-  - AC-AGENTS-RUNTIME-UPDATES-003.4
-  - AC-AGENTS-RUNTIME-UPDATES-003.5
-  - AC-AGENTS-RUNTIME-UPDATES-003.6
-  - AC-AGENTS-RUNTIME-UPDATES-003.7
-  - AC-AGENTS-RUNTIME-UPDATES-003.8
+  - AC-AGENTS-RUNTIME-UPDATES-004.1
+  - AC-AGENTS-RUNTIME-UPDATES-004.2
+  - AC-AGENTS-RUNTIME-UPDATES-004.3
+  - AC-AGENTS-RUNTIME-UPDATES-004.4
+  - AC-AGENTS-RUNTIME-UPDATES-004.5
+  - AC-AGENTS-RUNTIME-UPDATES-004.6
+  - AC-AGENTS-RUNTIME-UPDATES-004.7
+  - AC-AGENTS-RUNTIME-UPDATES-004.8
 system_design:
   - ../../specs/agents/system-design/runtime-model-discovery.md
 ---
@@ -90,7 +90,7 @@ Direct navigation suits persistent runtime settings. Temporary version selection
 Do not add a nested surface or require hover for recovery.
 Phone and coarse-pointer actions have at least 44px targets. Desktop fine-pointer actions remain 28px.
 The grouping and source distinctions are required. Example copy and versions are illustrative.
-These views cover AC-AGENTS-RUNTIME-UPDATES-003.1 through 003.7.
+These views cover AC-AGENTS-RUNTIME-UPDATES-004.1 through 004.7.
 
 ## TDD and regression evidence
 
@@ -182,7 +182,7 @@ Test mocks must deliver terminal events and new profile responses rather than mu
 
 ## Inputs
 
-- [Runtime requirement](../../specs/agents/requirements/runtime-updates.md), REQ-AGENTS-RUNTIME-UPDATES-003.
+- [Runtime requirement](../../specs/agents/requirements/runtime-updates.md), REQ-AGENTS-RUNTIME-UPDATES-004.
 - [Runtime model discovery design](../../specs/agents/system-design/runtime-model-discovery.md), Snapshot flow through Failure and security.
 - Existing desktop/phone profile-discovery specs and runtime-update helpers.
 - `/mobile-parity`, `/e2e`, `/docs-maintainer`, `/simple-english`, and web `AGENTS.md` guidance.

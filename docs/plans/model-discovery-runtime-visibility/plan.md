@@ -2,7 +2,7 @@
 created: 2026-10-04
 status: complete
 requirements:
-  - REQ-AGENTS-RUNTIME-UPDATES-003
+  - REQ-AGENTS-RUNTIME-UPDATES-004
 system_design:
   - ../../specs/agents/system-design/runtime-model-discovery.md
 legacy_specs: []
@@ -60,7 +60,7 @@ These sources establish component relationships. Their current versions are not 
 
 ## Requirement conformance and settled scope
 
-`REQ-AGENTS-RUNTIME-UPDATES-003` owns runtime evidence and profile refresh after activation.
+`REQ-AGENTS-RUNTIME-UPDATES-004` owns runtime evidence and profile refresh after activation.
 Its revised acceptance criteria exclude runtime details and update actions from profile model settings.
 The [runtime model discovery design](../../specs/agents/system-design/runtime-model-discovery.md) defines the current boundary.
 No new updater, API, persistence boundary, or ownership decision is required.

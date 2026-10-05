@@ -6,12 +6,12 @@ wave: 1
 depends_on: []
 plan: "plan.md"
 requirements:
-  - REQ-AGENTS-RUNTIME-UPDATES-003
+  - REQ-AGENTS-RUNTIME-UPDATES-004
 acceptance_criteria:
-  - AC-AGENTS-RUNTIME-UPDATES-003.1
-  - AC-AGENTS-RUNTIME-UPDATES-003.2
-  - AC-AGENTS-RUNTIME-UPDATES-003.3
-  - AC-AGENTS-RUNTIME-UPDATES-003.8
+  - AC-AGENTS-RUNTIME-UPDATES-004.1
+  - AC-AGENTS-RUNTIME-UPDATES-004.2
+  - AC-AGENTS-RUNTIME-UPDATES-004.3
+  - AC-AGENTS-RUNTIME-UPDATES-004.8
 system_design:
   - ../../specs/agents/system-design/runtime-model-discovery.md
 ---
@@ -107,7 +107,7 @@ Prefix-wrapped contexts can remain unverified. A verified provider dependency is
 
 ## Inputs
 
-- [Runtime requirement](../../specs/agents/requirements/runtime-updates.md), REQ-AGENTS-RUNTIME-UPDATES-003.
+- [Runtime requirement](../../specs/agents/requirements/runtime-updates.md), REQ-AGENTS-RUNTIME-UPDATES-004.
 - [Runtime model discovery design](../../specs/agents/system-design/runtime-model-discovery.md), Observation contract through Snapshot flow.
 - Existing `profile_discovery_test.go`, `profile_probe_test.go`, and `profile_probe_context_test.go` fixtures.
 - Root, backend, and agentctl `AGENTS.md` guidance.

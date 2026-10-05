@@ -7,11 +7,11 @@ depends_on:
   - "02-model-runtime-recovery"
 plan: "plan.md"
 requirements:
-  - REQ-AGENTS-RUNTIME-UPDATES-003
+  - REQ-AGENTS-RUNTIME-UPDATES-004
 acceptance_criteria:
-  - AC-AGENTS-RUNTIME-UPDATES-003.4
-  - AC-AGENTS-RUNTIME-UPDATES-003.5
-  - AC-AGENTS-RUNTIME-UPDATES-003.7
+  - AC-AGENTS-RUNTIME-UPDATES-004.4
+  - AC-AGENTS-RUNTIME-UPDATES-004.5
+  - AC-AGENTS-RUNTIME-UPDATES-004.7
 system_design:
   - ../../specs/agents/system-design/runtime-model-discovery.md
 ---

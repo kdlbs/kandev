@@ -51,7 +51,7 @@ describe("seedNavigationTasks", () => {
         worktreeExecutorProfileId: "worktree-profile",
       } as SeedData,
       { tmpDir: "/navigation-fixture" } as BackendContext,
-      requested,
+      { executorProfileId: requested },
     );
 
     expect(tasks.map((task) => task.id)).toEqual(["task-1", "task-2"]);
