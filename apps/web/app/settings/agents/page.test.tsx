@@ -84,8 +84,8 @@ vi.mock("@/components/settings/custom-tui-mcp-card", () => ({ CustomTUIMcpCard: 
 vi.mock("@/components/settings/dynamic-agents-card", () => ({ DynamicAgentsCard: () => null }));
 vi.mock("@/components/settings/host-shell-dialog", () => ({ HostShellDialog: () => null }));
 vi.mock("@/components/settings/add-tui-agent-dialog", () => ({ AddTUIAgentDialog: () => null }));
-vi.mock("./hide-disabled-agent-profiles-setting", () => ({
-  HideDisabledAgentProfilesSetting: () => null,
+vi.mock("./agent-options-dialog", () => ({
+  AgentOptionsDialog: () => null,
 }));
 
 import AgentsSettingsPage from "./page";

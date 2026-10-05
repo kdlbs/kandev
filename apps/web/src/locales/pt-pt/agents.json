@@ -405,5 +405,8 @@
   "runtimeInterruptedBody": "Não foi possível confirmar a atualização do runtime de {{agent}} de {{previous}} para {{version}}. Reveja a seleção atual antes de tentar novamente ou voltar à predefinição do Kandev.",
   "runtimeFallbackManage": "Gerir versões alternativas",
   "runtimeFallbackExplainer": "Esta opção seleciona o pacote gerido usado nos arranques remotos e em contentores. A instalação nativa do anfitrião permanece inalterada. As instalações nativas remotas mantêm o seu responsável pelas atualizações.",
-  "runtimeFallbackReview": "Reveja o pacote alternativo gerido antes de alterar futuros arranques remotos ou em contentores."
+  "runtimeFallbackReview": "Reveja o pacote alternativo gerido antes de alterar futuros arranques remotos ou em contentores.",
+  "options": "Opções",
+  "agentOptions": "Opções do agente",
+  "changesApplyImmediately": "As alterações são aplicadas imediatamente."
 }

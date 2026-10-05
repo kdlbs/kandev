@@ -14,7 +14,7 @@ vi.mock("@/hooks/domains/settings/use-hide-disabled-agent-profiles-in-nav", () =
   }),
 }));
 
-const LABEL = "Hide disabled agent profiles from left panel navigation";
+const LABEL = "Hide disabled profiles from navigation";
 
 function ariaChecked(element: Element | null) {
   return element?.getAttribute("aria-checked");
@@ -31,11 +31,7 @@ describe("HideDisabledAgentProfilesSetting", () => {
     render(<HideDisabledAgentProfilesSetting />);
 
     expect(screen.getByText(LABEL)).toBeTruthy();
-    expect(
-      screen.getByText(
-        "When on, a disabled agent profile is removed from the left panel navigation even if it's still configured.",
-      ),
-    ).toBeTruthy();
+    expect(screen.getByText("Disabled profiles remain available on this page.")).toBeTruthy();
     const switchEl = screen.getByRole("switch", { name: LABEL });
     expect(ariaChecked(switchEl)).toBe("false");
   });
