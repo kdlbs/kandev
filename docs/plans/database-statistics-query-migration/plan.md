@@ -102,7 +102,8 @@ every other System resource owner.
 
 ## Verification results
 
-Implemented and locally verified against main at `f45fe59cf26c49dda309a88a0fbb835ed6c2185c`.
+Implemented and locally verified after refreshing onto main at
+`eb589f279dc8527101b71fdaf99ce523909a5299`.
 Focused tests passed (5 files, 56 tests); web typecheck and full lint passed.
 Managed E2E passed for desktop database (5), desktop Backups (3), and phone database (2).
 Documentation, architecture, specifications, coverage markers, harness, and diff checks passed.
@@ -116,5 +117,7 @@ Documentation, architecture, specifications, coverage markers, harness, and diff
 - The official TanStack ESLint task
   a9b7ddc9-fce5-4e47-96f9-664ba75da0a6 merged before implementation. The branch
   was refreshed after PR review to `f45fe59cf26c49dda309a88a0fbb835ed6c2185c`.
-  That base update contains release-contributor notifications only; the current
-  database-statistics Query/provider contract has no material drift.
+  Before PR handoff, main advanced to `eb589f279dc8527101b71fdaf99ce523909a5299`
+  with workspace-secret loading changes. The changed paths are disjoint, the
+  SystemInfo Query/provider contract is unchanged, and the branch was rebased
+  onto that current base before verification.

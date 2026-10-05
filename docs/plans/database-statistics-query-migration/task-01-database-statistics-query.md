@@ -135,8 +135,12 @@ head because that check requires GitHub pull-request context.
 The official TanStack ESLint PR #4012 (task
 a9b7ddc9-fce5-4e47-96f9-664ba75da0a6) merged into main at
 a1e2edadb9cd40a08d23a0f9b72665146ec3fea5. The branch was refreshed to
-3328fe887f0e9ea2ffb11a00c4c5d0a94a7b88ed before final local verification, and
-the current Query/provider contracts, database-statistics requirements/design,
+3328fe887f0e9ea2ffb11a00c4c5d0a94a7b88ed before implementation, then to
+f45fe59cf26c49dda309a88a0fbb835ed6c2185c after PR review. Main later advanced
+to `eb589f279dc8527101b71fdaf99ce523909a5299` with workspace-secret loading
+changes. Changed paths are disjoint and the Query/provider contracts remain
+unchanged; the branch was rebased onto that current main before verification.
+The current Query/provider contracts, database-statistics requirements/design,
 and scoped lint guidance were reread. No material contract or ownership drift
 was found. The reviewed package's implementation checkpoint is satisfied by
 the user's explicit request.
@@ -163,7 +167,8 @@ sequential
 
 ## Results
 
-Implemented and locally verified against main at `f45fe59cf26c49dda309a88a0fbb835ed6c2185c`.
+Implemented and locally verified after refreshing onto main at
+`eb589f279dc8527101b71fdaf99ce523909a5299`.
 Focused tests passed (5 files, 56 tests); web typecheck and full lint passed.
 Managed E2E passed for desktop database (5), desktop Backups (3), and phone database (2).
 Documentation, architecture, specifications, coverage markers, harness, and diff checks passed.
