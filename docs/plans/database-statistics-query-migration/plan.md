@@ -103,10 +103,11 @@ every other System resource owner.
 ## Verification results
 
 Implemented and locally verified after refreshing onto main at
-`dd7dfa81634236cfeb0df6fd7fac4e005d08d2f3`.
-Focused tests passed (5 files, 56 tests); web typecheck and full lint passed.
-Managed E2E passed for desktop database (5), desktop Backups (3), and phone database (2).
-Documentation, architecture, specifications, coverage markers, harness, and diff checks passed.
+`513ea8279b0a448f20b2aa0bc6485edf7455fb74`. Focused tests passed (5 files,
+56 tests); web typecheck, full lint, and i18n checks passed. Managed E2E passed
+for desktop database (5), desktop Backups (3), and phone database (2), each
+with one worker. Documentation, architecture, specifications, harness,
+coverage-marker, and diff checks passed.
 
 ## Risks
 
@@ -122,3 +123,6 @@ Documentation, architecture, specifications, coverage markers, harness, and diff
   shares `apps/web/AGENTS.md` with this branch and was reconciled; other changed
   paths are disjoint. The SystemInfo Query/provider contract is unchanged, and
   the branch was rebased onto that current base before verification.
+- Main later advanced to `513ea8279b0a448f20b2aa0bc6485edf7455fb74` with runtime
+  log and read-reliability changes. Those paths do not overlap this work, and
+  the branch was rebased onto the new base before final verification.

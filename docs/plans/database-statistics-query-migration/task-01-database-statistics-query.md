@@ -142,10 +142,12 @@ then to `dd7dfa81634236cfeb0df6fd7fac4e005d08d2f3` with sidebar-navigation
 changes. The navigation guidance shares `apps/web/AGENTS.md` with this task and
 was reconciled; other changed paths are disjoint. The Query/provider contracts
 remain unchanged, and the branch was rebased onto current main before verification.
-The current Query/provider contracts, database-statistics requirements/design,
-and scoped lint guidance were reread. No material contract or ownership drift
-was found. The reviewed package's implementation checkpoint is satisfied by
-the user's explicit request.
+Main later advanced to `513ea8279b0a448f20b2aa0bc6485edf7455fb74` with runtime
+log and read-reliability changes. Those paths do not overlap this work; the
+branch was rebased onto that base. The current Query/provider contracts,
+database-statistics requirements/design, and scoped lint guidance were reread.
+No material contract or ownership drift was found. The reviewed package's
+implementation checkpoint is satisfied by the user's explicit request.
 
 ## Risks
 
@@ -169,8 +171,16 @@ sequential
 
 ## Results
 
-Implemented and locally verified after refreshing onto main at
-`dd7dfa81634236cfeb0df6fd7fac4e005d08d2f3`.
-Focused tests passed (5 files, 56 tests); web typecheck and full lint passed.
-Managed E2E passed for desktop database (5), desktop Backups (3), and phone database (2).
-Documentation, architecture, specifications, coverage markers, harness, and diff checks passed.
+Implemented and verified after refreshing onto main at
+`513ea8279b0a448f20b2aa0bc6485edf7455fb74`:
+
+- Focused Vitest passed: 5 files, 56 tests.
+- Web typecheck, full web lint, `i18n:check`, and `i18n:ratchet` passed.
+- Managed Playwright passed with one worker: desktop database 5/5, desktop
+  Backups 3/3, and mobile database 2/2.
+- Documentation validation, decision listing, spec lint, architecture lint,
+  19 harness tests, 203 harness-file checks, and the scoped harness pre-commit
+  hook passed.
+- Coverage markers were confirmed in the relevant database and Backups E2E
+  tests. PR documentation coverage is validated by the exact-head GitHub check.
+- `git diff --check` passed.
