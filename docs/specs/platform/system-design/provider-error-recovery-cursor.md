@@ -1,5 +1,5 @@
 ---
-status: draft
+status: current
 system: platform
 created: 2026-10-05
 requirements:
@@ -23,7 +23,7 @@ Native post-output recovery follows [continuation](provider-interruption-continu
 | --- | --- |
 | `REQ-PLATFORM-PROVIDER-ERROR-RECOVERY-001` | Cursor normal-completion failure projection (`.12`-`.14`, `.30`, `.31`); Cursor retry-safety semantics (`.8`, `.15`) |
 
-#### Cursor normal-completion failure projection
+### Cursor normal-completion failure projection
 
 `cursor-agent` can report an upstream transient failure as an ordinary
 `agent_message_chunk`; the ACP transport therefore owns a Cursor-specific evidence
@@ -70,7 +70,7 @@ Use narrow catalogue rules for the actual category:
 | Bounded Cursor terminal envelope | Semantic code | Short same-provider recovery |
 | --- | --- | --- |
 | `RetriableError: [resource_exhausted] Error` | `provider_resource_exhausted` | Yes; no reset hint or inferred account quota |
-| `RetriableError: [unavailable] ...` | `provider_unavailable` | Yes |
+| `RetriableError: [unavailable] PING timed out` | `provider_unavailable` | Yes |
 | Exact observed HTTP/2 CANCEL stream reset, including leading `[canceled]` | `agent_transport_lost` | Yes |
 | Explicit observed `Connection stalled` | `network_unavailable` | Yes |
 | Unknown `RetriableError` suffix | Unclassified | Manual |
@@ -78,8 +78,10 @@ Use narrow catalogue rules for the actual category:
 
 The stream-reset rule keeps `cursor.retriable_stream_reset.v1` for actual reset
 signatures, rather than rewriting historic records. Add independent stable
-resource-exhaustion and availability fingerprints with fixtures. The resource
-code is transient, high-confidence, same-provider retryable, and grants no new
+resource-exhaustion and availability fingerprints with fixtures. Resource exhaustion matches the verified complete `[resource_exhausted] Error`
+suffix. Unavailability matches the verified `[unavailable] PING timed out`
+suffix; `Connection stalled` matches exactly. Category mentions inside unknown prose grant no retry.
+The resource code is transient, high-confidence, same-provider retryable, and grants no new
 fallback or reset permission. Include it in the shared short-retry policy and
 runtime-usability recognition. Generic resource-exhaustion text without the
 explicit Cursor retryable control envelope does not gain this policy.
@@ -93,17 +95,20 @@ The actual incident supplied resource exhaustion after completed tools; no
 upstream TCP drop was established. The delivery package contains sanitized
 fixtures, not the user's transcript or tool results.
 
-#### Cursor retry-safety semantics
+### Cursor retry-safety semantics
 
 The Cursor label `RetriableError` is evidence about the upstream transport. It
 is not permission for Kandev to repeat a turn. The following rules define the
 Cursor recovery choices. They preserve the provider-neutral safety boundary in
 [ADR-2026-08-08-provider-neutral-agent-error-recovery](../../../decisions/2026-08-08-provider-neutral-agent-error-recovery.md):
 
-1. **Safe point.** A terminal marker is automatically replayable only when its
+1. **Safe point.** A terminal marker is automatically replayable when its
    prompt-generation-correlated evidence is known and records neither assistant
-   output nor tool activity. Thoughts, message output, a pending or completed
-   tool call, and missing evidence all fail closed. The observed incident had
+   output nor tool activity, or an adapter explicitly guarantees retry in the
+   same native session and generation without duplicating completed effects.
+   The current Cursor adapter grants no such replay guarantee. Without either
+   basis, thoughts, message output, pending or completed tools, and missing
+   evidence all fail closed. The observed incident had
    thoughts and a `Read File` call in flight, so it enters manual recovery even
    though its classification is transient.
 2. **Replay mode.** Eligible retries retain the execution profile and native

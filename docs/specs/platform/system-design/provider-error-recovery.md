@@ -1,10 +1,10 @@
 ---
-status: draft
+status: current
 system: platform
 requirements:
   - REQ-PLATFORM-PROVIDER-ERROR-RECOVERY-001
 created: 2026-08-08
-updated: 2026-10-03
+updated: 2026-10-05
 owners:
   - Kandev
 ---

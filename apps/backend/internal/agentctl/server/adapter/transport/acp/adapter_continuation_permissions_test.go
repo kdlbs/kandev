@@ -157,3 +157,22 @@ func TestCursorContinuationEvidencePermissionV1AndDisabled(t *testing.T) {
 		}
 	}
 }
+
+func TestCursorContinuationEvidenceHandoffCannotOwnLatePermission(t *testing.T) {
+	a, predecessor, req := continuationPermissionFixture(t)
+	predecessor.allowHandoff, predecessor.gateOwned, predecessor.handedOff = true, true, true
+	_, successor := newPromptTurnState(t.Context(), 8, true)
+	_, transferred := a.tryTransferPromptTurn(successor, true)
+	require.True(t, transferred)
+	finish := a.beginContinuationPermission(req.SessionID, req.ToolCallID, req.Options)
+	require.NotNil(t, finish)
+	finish(&PermissionResponse{OptionID: "allow"}, nil)
+	a.handleACPUpdate(makeNotification("session-1", acpsdk.SessionUpdate{ToolCall: &acpsdk.SessionUpdateToolCall{
+		ToolCallId: "cmd-1", Title: "Execute fixture", Kind: acpsdk.ToolKindExecute, Status: acpsdk.ToolCallStatusCompleted,
+	}}), 8)
+	require.False(t, a.continuationSafetySnapshot(successor).SafeFor(8), "unattributed predecessor work cannot authorize successor continuation")
+	a.clearPromptTurn(successor)
+	_, serial := a.registerPromptTurn(t.Context(), 9)
+	t.Cleanup(func() { a.clearPromptTurn(serial) })
+	require.True(t, a.continuationSafetySnapshot(serial).SafeFor(9), "a serialized successor starts with fresh evidence")
+}

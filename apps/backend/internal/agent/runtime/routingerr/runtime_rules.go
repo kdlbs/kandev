@@ -236,7 +236,7 @@ func matchCursorRetriableResourceExhausted(text string) bool {
 	if !ok {
 		return false
 	}
-	return strings.Contains(strings.ToLower(suffix), "[resource_exhausted]")
+	return strings.EqualFold(suffix, "[resource_exhausted] Error")
 }
 
 func matchCursorRetriableUnavailable(text string) bool {
@@ -244,7 +244,7 @@ func matchCursorRetriableUnavailable(text string) bool {
 	if !ok {
 		return false
 	}
-	return strings.Contains(strings.ToLower(suffix), "[unavailable]")
+	return strings.EqualFold(suffix, "[unavailable] PING timed out")
 }
 
 func matchCursorRetriableConnectionStalled(text string) bool {
@@ -252,7 +252,7 @@ func matchCursorRetriableConnectionStalled(text string) bool {
 	if !ok {
 		return false
 	}
-	return strings.Contains(strings.ToLower(suffix), "connection stalled")
+	return strings.EqualFold(suffix, "connection stalled")
 }
 
 // matchCursorRetriableStreamReset matches Cursor's complete bounded control

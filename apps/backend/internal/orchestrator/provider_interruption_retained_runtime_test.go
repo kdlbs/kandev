@@ -70,3 +70,17 @@ func TestRetainedContinuationQueuedUserWorkWins(t *testing.T) {
 	require.Empty(t, mgr.stopAgentArgs)
 	require.Empty(t, mgr.capturedPromptCalls, "the automatic continuation must yield to queued human work")
 }
+
+func TestContinuationCancellationSettlesWithoutWorkflowCompletion(t *testing.T) {
+	svc, _, _ := continuationFailureFixture(t)
+	require.NoError(t, svc.repo.UpdateTaskSessionState(t.Context(), "s1", models.TaskSessionStateRunning, ""))
+	session, err := svc.repo.GetTaskSession(t.Context(), "s1")
+	require.NoError(t, err)
+	ctx := context.WithValue(t.Context(), continuationCancelContextKey{}, &transientRetryEntry{})
+	require.NoError(t, svc.finishCancelledAgentTurn(ctx, "s1", cancelAgentPreparation{
+		session: session, completionEligible: false,
+	}))
+	settled, err := svc.repo.GetTaskSession(t.Context(), "s1")
+	require.NoError(t, err)
+	require.Equal(t, models.TaskSessionStateWaitingForInput, settled.State, "confirmed cancellation parks the session even without workflow completion")
+}

@@ -1,5 +1,5 @@
 ---
-status: draft
+status: active
 system: platform
 created: 2026-10-02
 updated: 2026-10-05
@@ -179,7 +179,4 @@ continuing, exhausted, or deliberately unavailable.
 - [System design](../system-design/provider-interruption-continuation.md)
 - [Hidden continuation and truthful Cursor errors plan](../../../plans/cursor-hidden-continuation/plan.md)
 
-## System design and delivery
-
-- [System design](../system-design/provider-interruption-continuation.md)
-- [Implementation package](../../../plans/provider-interruption-continuation/plan.md)
+- [Original implementation package](../../../plans/provider-interruption-continuation/plan.md)

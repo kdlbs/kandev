@@ -180,6 +180,13 @@ test("desktop: accepted continuation survives reload and can be cancelled", asyn
       (message) => message.author_type === "user" && message.content === "continue",
     );
     await expect(session.activeChat().getByText("continue", { exact: true })).toBeVisible();
+    await waitForContinuationMessage(
+      apiClient,
+      fixture.sessionId,
+      (message) =>
+        message.author_type === "agent" &&
+        message.content?.includes('completed the analysis of your request: "continue"') === true,
+    );
   } catch (error) {
     console.warn(
       JSON.stringify(
@@ -276,8 +283,8 @@ test("desktop: disabled continuation preserves manual recovery without native re
         .split("\n")
         .filter(Boolean)
         .map((line) => JSON.parse(line))
-        .filter((record) => record.event === "prompt" && record.prompt === "continue"),
-    ).toHaveLength(0);
+        .filter((record) => record.event === "prompt"),
+    ).toHaveLength(1);
   } finally {
     await fixture.dispose();
   }

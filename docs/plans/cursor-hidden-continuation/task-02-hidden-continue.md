@@ -128,3 +128,14 @@ unknown/pending outcomes. Permission ownership follows the original turn;
 approved tools become eligible only after completion, regardless of notification
 ordering, while denied, cancelled, or unresolved requests remain ineligible.
 Focused race tests pass.
+
+PR review remediation narrows resource exhaustion to its verified complete
+envelope, anchors unavailable/stalled categories, rejects the Cursor subagent
+title alone, and refuses continuation after a prompt-gate handoff because late
+permission/tool frames cannot prove originating ownership. Mock episodes are
+consumed once. V1 positive admission/dispatch coverage remains; the lifecycle
+fixture asserts a valid stored diagnostic. Reload checks wait for persisted
+content, disabled-mode traces admit only the original prompt, and the seeded
+resource-exhaustion test claims presentation coverage only. Specification
+statuses and public foreground/uncertain-work boundaries are synchronized.
+Remote CI and review disposition remain pending until the final fixup snapshot.

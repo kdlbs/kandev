@@ -112,10 +112,10 @@ func TestMatchRuntimeEnvironmentRules_CursorRetriableUsesAdapterBounds(t *testin
 		suffix string
 		want   bool
 	}{
-		{name: "256 ASCII bytes", suffix: "[resource_exhausted] " + strings.Repeat("x", 256-len("[resource_exhausted] ")), want: true},
-		{name: "257 ASCII bytes", suffix: "[resource_exhausted] " + strings.Repeat("x", 257-len("[resource_exhausted] ")), want: false},
-		{name: "128 multibyte characters at 256 bytes", suffix: "[resource_exhausted] " + strings.Repeat("é", (256-len("[resource_exhausted] "))/2), want: true},
-		{name: "129 multibyte characters over 256 bytes", suffix: "[resource_exhausted] " + strings.Repeat("é", (256-len("[resource_exhausted] "))/2+1), want: false},
+		{name: "256 ASCII bytes", suffix: "HTTP/2 stream closed with error code CANCEL " + strings.Repeat("x", 256-len("HTTP/2 stream closed with error code CANCEL ")), want: true},
+		{name: "257 ASCII bytes", suffix: "HTTP/2 stream closed with error code CANCEL " + strings.Repeat("x", 257-len("HTTP/2 stream closed with error code CANCEL ")), want: false},
+		{name: "multibyte suffix below 256 bytes", suffix: "HTTP/2 stream closed with error code CANCEL " + strings.Repeat("é", (256-len("HTTP/2 stream closed with error code CANCEL "))/2), want: true},
+		{name: "multibyte suffix above 256 bytes", suffix: "HTTP/2 stream closed with error code CANCEL " + strings.Repeat("é", (256-len("HTTP/2 stream closed with error code CANCEL "))/2+1), want: false},
 		{name: "unicode whitespace only", suffix: "\u2003\u2003", want: false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -379,6 +379,30 @@ func TestIsTransientProviderError_Cursor(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			if got := IsTransientProviderErrorForProvider(cursorRetriableProviderID, tc.text); got != tc.want {
 				t.Errorf("IsTransientProviderErrorForProvider(%q, %q) = %v, want %v", cursorRetriableProviderID, tc.text, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestCursorRetriableRejectsUnknownAndHardFailureSuffixes(t *testing.T) {
+	for _, suffix := range []string{
+		"unknown failure, see [resource_exhausted] docs",
+		"unknown failure, see [unavailable] docs",
+		"unknown failure: Connection stalled while inspecting docs",
+		"[resource_exhausted] quota exceeded",
+		"[resource_exhausted] authentication required",
+		"[resource_exhausted] invalid API key",
+		"[unavailable] quota exceeded",
+		"[unavailable] authentication required",
+	} {
+		t.Run(suffix, func(t *testing.T) {
+			message := "Error: RetriableError: " + suffix
+			e := Classify(Input{Phase: PhasePromptSend, ProviderID: cursorRetriableProviderID, Stderr: message})
+			if e.AutoRetryable || Decide(ContextKanban, e, time.Time{}) != DecisionManual {
+				t.Fatalf("unknown or hard diagnostic gained automatic recovery: %+v", e)
+			}
+			if IsTransientProviderErrorForProvider(cursorRetriableProviderID, message) {
+				t.Fatal("unknown or hard diagnostic retained transient runtime policy")
 			}
 		})
 	}

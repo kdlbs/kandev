@@ -38,7 +38,7 @@ func continuationFailureFixture(t *testing.T) (*Service, *mockMessageCreator, wa
 	session.AgentProfileSnapshot = map[string]any{"model": "mock-fast", "auto_approve": false}
 	require.NoError(t, svc.repo.UpdateTaskSession(context.Background(), session))
 	return svc, mc, watcher.AgentEventData{TaskID: "t1", SessionID: "s1", OwnerKind: "task", AgentID: "cursor-acp", AgentExecutionID: "execution-1", PromptGeneration: 7, ErrorMessage: cursorRetriableConnectionStalled, EvidenceKnown: true, OutputObserved: true, EffectObserved: true,
-		ContinuationSafety: &streams.ContinuationSafetySnapshot{Support: streams.ContinuationNativeSavedHistoryV2, Known: true, PromptGeneration: 7, CompletedTools: 1}}
+		ContinuationSafety: &streams.ContinuationSafetySnapshot{Support: streams.ContinuationNativeSavedHistoryV1, Known: true, PromptGeneration: 7, CompletedReads: 1}}
 }
 
 // @covers AC-PLATFORM-INTERRUPTION-CONTINUATION-001.1

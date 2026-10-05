@@ -174,6 +174,9 @@ func TestManagedDeletionHostReceipts(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 			defer cancel()
 			f := newManagedDeletionHostFixture(t, ctx)
+			if mode == "completed_replay" {
+				f.lifecycle.StopTaskResourceCleanupWorker()
+			}
 			originalTask, taskErr := f.other.GetTask(ctx, f.descriptor.TaskID)
 			require.NoError(t, taskErr)
 			want := pluginsdk.CommandApplied
@@ -256,6 +259,14 @@ func TestManagedDeletionHostReceipts(t *testing.T) {
 				_, err = f.database.ExecContext(ctx, `DROP TRIGGER fail_delete_receipt`)
 				require.NoError(t, err)
 			}
+			if mode == "completed_replay" {
+				require.NoError(t, f.lifecycle.StartTaskResourceCleanupWorker(ctx))
+			}
+			// A replacement reuses the task ID and must wait for its cleanup barrier.
+			require.Eventually(t, func() bool {
+				cleanup, cleanupErr := f.other.GetTaskResourceCleanupJob(ctx, jobs[0].ID)
+				return cleanupErr == nil && cleanup != nil && cleanup.State == models.TaskResourceCleanupStateSucceeded
+			}, 5*time.Second, 10*time.Millisecond, "deletion cleanup must finish before creating the replacement")
 			spec := f.spec
 			spec.RequestID = "replacement-request"
 			spec.IdempotencyKey = "replacement"

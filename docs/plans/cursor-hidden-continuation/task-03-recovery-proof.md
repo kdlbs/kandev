@@ -181,3 +181,49 @@ Fresh desktop and phone captures show the localized resource-exhaustion reason,
 continuation countdown, and Cancel action. The phone target is at least 44px and
 the document has no horizontal overflow. Captures use synthetic seeded status
 data; raw diagnostic classification and admission are verified by backend tests.
+
+PR review remediation narrows resource exhaustion to its verified complete
+envelope, anchors unavailable/stalled categories, rejects the Cursor subagent
+title alone, and refuses continuation after a prompt-gate handoff because late
+permission/tool frames cannot prove originating ownership. Mock episodes are
+consumed once. V1 positive admission/dispatch coverage remains; the lifecycle
+fixture asserts a valid stored diagnostic. Reload checks wait for persisted
+content, disabled-mode traces admit only the original prompt, and the seeded
+resource-exhaustion test claims presentation coverage only. Specification
+statuses and public foreground/uncertain-work boundaries are synchronized.
+Remote CI and review disposition remain pending until the final fixup snapshot.
+
+The cancellation E2E exposed a separate settlement bug: disabling workflow
+advancement for an automatic continuation also disabled session parking.
+Confirmed continuation cancellation now requires WAITING_FOR_INPUT independently
+of workflow completion eligibility, under the existing captured-turn guard.
+The focused regression reproduced RUNNING after cancellation before the fix.
+
+Post-fixup commands and outcomes:
+
+- `go test -tags fts5 -race ./internal/orchestrator`: pass, including the new
+  cancellation-settlement regression.
+- `pnpm e2e:run --docker --shards 1 --no-build --project chromium
+  tests/session/provider-interruption-continuation.spec.ts -- --retries=0
+  -g 'accepted continuation survives reload|Cancel while waiting|queued human work'`:
+  all three affected desktop cases pass. The earlier full desktop run passed
+  15 of 16 cases and exposed the cancellation-settlement bug above.
+- `pnpm e2e:run --docker --shards 1 --no-build --project mobile-chrome
+  tests/session/mobile-provider-interruption-continuation.spec.ts
+  tests/session/mobile-provider-resource-exhaustion.spec.ts -- --retries=0`:
+  both phone cases pass.
+
+CI backend shard 1 also exposed a fixture ordering bug in
+`TestManagedDeletionHostReceipts/completed_replay`: replacement creation reused
+the task ID before asynchronous deletion cleanup had finished. Pausing the
+fixture worker reproduces the exact APPLIED-versus-CONFLICT assertion. The test
+now waits for successful cleanup before creating the replacement, preserving the
+production cleanup barrier and the deletion replay contract.
+
+The cleanup-ordering regression passes for all receipt modes across 20 race
+runs: `go test -tags fts5 -race ./internal/plugins -run
+'^TestManagedDeletionHostReceipts$' -count=20`.
+
+The full plugin package also passes CI's race/coverage settings:
+`go test -race -covermode=atomic -coverprofile=<temporary-path> ./internal/plugins`
+(68.0% statement coverage).

@@ -1,5 +1,5 @@
 ---
-status: draft
+status: current
 system: platform
 created: 2026-10-02
 updated: 2026-10-05
@@ -227,3 +227,14 @@ payload, same native identity, shared budget, cancellation, human supersession,
 reload/pagination/second viewer, and ordinary visible user `continue`. Keep the
 data-only generic ACP error projection, dynamic/Office behavior, and original
 replay fence under their existing specifications.
+
+ACP permission requests and late tool notifications do not identify their
+originating prompt generation across a handoff. A successor that inherits the
+predecessor gate therefore cannot establish exclusive foreground ownership and
+is ineligible for automatic continuation. A later serialized turn may establish
+fresh evidence. Permission resolutions that began before the handoff retain
+their captured turn owner.
+
+Confirmed continuation cancellation requires WAITING_FOR_INPUT independently
+of workflow completion eligibility, under the existing captured-turn guard.
+Disabling workflow advancement must not skip the session settlement.

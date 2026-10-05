@@ -1,6 +1,8 @@
 package acp
 
 import (
+	"strings"
+
 	acpsdk "github.com/coder/acp-go-sdk"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 )
@@ -129,7 +131,7 @@ func continuationStatusValid(status acpsdk.ToolCallStatus) bool {
 }
 
 func continuationHasUnownedWork(meta map[string]any, title string, input, output any) bool {
-	if isSubagentOrBackgroundMeta(meta) || parentToolUseID(meta) != "" || isSubagentSignal(meta, title, input) {
+	if strings.EqualFold(strings.TrimSpace(title), "Task: Subagent task") || isSubagentOrBackgroundMeta(meta) || parentToolUseID(meta) != "" || isSubagentSignal(meta, title, input) {
 		return true
 	}
 	if rawInput, ok := input.(map[string]any); ok && isBackgroundExecInput(rawInput) {

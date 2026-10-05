@@ -52,7 +52,7 @@ func (a *mockAgent) handleMockInterruptionContinuation(ctx context.Context, sid 
 	}
 	raw, err := os.ReadFile(mockContinuationPath(sid))
 	var episode mockContinuationEpisode
-	if err != nil || json.Unmarshal(raw, &episode) != nil {
+	if err != nil || json.Unmarshal(raw, &episode) != nil || episode.Continuation != 0 {
 		return acp.PromptResponse{}, nil, false
 	}
 	episode.Continuation++
@@ -108,7 +108,7 @@ func (a *mockAgent) emitMockInterruption(ctx context.Context, sid acp.SessionId,
 	if raw, err := os.ReadFile(mockContinuationPath(sid)); err == nil {
 		_ = json.Unmarshal(raw, &episode)
 	}
-	episode.Scenario, episode.Original = scenario, episode.Original+1
+	episode.Scenario, episode.Original, episode.Continuation = scenario, episode.Original+1, 0
 	if err := saveMockContinuation(sid, episode); err != nil {
 		return acp.PromptResponse{}, err, true
 	}

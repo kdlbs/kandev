@@ -290,9 +290,6 @@ func (a *Adapter) sendPrompt(
 		if occurredAt.IsZero() {
 			occurredAt = time.Now().UTC()
 		}
-		if safeMessage == "" {
-			safeMessage = "Error: RetriableError: Provider error"
-		}
 		a.logger.Info("cursor prompt ended with retriable provider-error evidence",
 			zap.String("session_id", sessionID),
 			zap.Uint64("prompt_generation", promptGeneration))

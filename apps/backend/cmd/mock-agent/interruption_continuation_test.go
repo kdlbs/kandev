@@ -178,3 +178,23 @@ func TestMockInterruptionContinuationRestoreOutcomes(t *testing.T) {
 		})
 	}
 }
+
+func TestMockInterruptionContinuationConsumesEpisode(t *testing.T) {
+	for _, scenario := range []string{mockContinuationReadScenario, mockContinuationReadHoldScenario} {
+		t.Run(scenario, func(t *testing.T) {
+			sid := acp.SessionId(t.Name())
+			_ = os.Remove(mockContinuationPath(sid))
+			t.Cleanup(func() { _ = os.Remove(mockContinuationPath(sid)) })
+			a := newTransportLostTestAgent()
+			a.conn = newCapturingUpdater()
+			_, _, handled := a.handleMockInterruptionContinuation(t.Context(), sid, "/continuation-"+scenario)
+			require.True(t, handled)
+			ctx, cancel := context.WithCancel(t.Context())
+			cancel()
+			_, _, handled = a.handleMockInterruptionContinuation(ctx, sid, "continue")
+			require.True(t, handled)
+			_, _, handled = a.handleMockInterruptionContinuation(ctx, sid, "continue")
+			require.False(t, handled, "a later human continue must use the ordinary prompt path")
+		})
+	}
+}

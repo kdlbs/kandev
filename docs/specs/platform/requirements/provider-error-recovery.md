@@ -1,5 +1,5 @@
 ---
-status: draft
+status: active
 system: platform
 created: 2026-08-08
 updated: 2026-10-05

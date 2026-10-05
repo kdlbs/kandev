@@ -96,8 +96,9 @@ shows waiting, reconnecting, or continuing, with **Cancel** available while the
 continued turn runs. Cancellation returns control to Chat when the ACP runtime
 is still usable; normal recovery actions remain available if it is not. An
 exhaustion message reports attempts that actually started; a refused recovery
-does not claim retries ran. Pending or unknown tool outcomes, unresolved
-permissions, and active background work prevent automatic continuation. If the
+does not claim retries ran. Pending, unknown, failed, cancelled, malformed, or conflicting tool outcomes
+prevent automatic continuation. So do subagents, background work, unresolved,
+denied or cancelled permissions, and overlapping work after a turn handoff. If the
 runtime remains usable, send a follow-up in the same conversation. If it is
 unavailable, use the manual recovery actions. Missing saved identity and
 unsupported agents also require manual recovery. New human work takes priority.

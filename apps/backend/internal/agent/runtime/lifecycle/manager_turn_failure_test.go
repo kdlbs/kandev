@@ -372,9 +372,13 @@ func TestCursorResourceTurnRetention(t *testing.T) {
 			Source:     streams.ProviderErrorSourceCursorACP,
 			ProviderID: "cursor-acp",
 			Message:    "Error: RetriableError: [resource_exhausted] Error",
+			OccurredAt: time.Now().UTC(),
 		},
 	})
 	require.True(t, accepted)
+	require.NotNil(t, execution.ProviderError)
+	require.True(t, execution.ProviderError.Valid())
+	require.Equal(t, "Error: RetriableError: [resource_exhausted] Error", execution.ProviderError.Message)
 	require.Equal(t, v1.AgentStatusReady, execution.Status)
 	require.Nil(t, execution.ExitCode)
 	require.Nil(t, execution.FinishedAt)

@@ -4,7 +4,7 @@ import { SessionPage } from "../pages/session-page";
 import { assertNoDocumentHorizontalOverflow } from "./layout-assertions";
 
 export function providerResourceExhaustionScenario() {
-  test("resource exhaustion keeps a specific reason and hidden continuation on reload", async ({
+  test("resource exhaustion keeps its specific reason and countdown on reload", async ({
     testPage,
     apiClient,
     seedData,
@@ -62,7 +62,6 @@ export function providerResourceExhaustionScenario() {
       const notice = session.transientRetryCard();
       await expect(notice).toContainText("Provider resources exhausted");
       await expect(notice).toContainText("Continuing in");
-      await expect(session.activeChat().getByText("continue", { exact: true })).toHaveCount(0);
       await testPage.reload();
       await session.waitForLoad();
       await expect(notice).toContainText("Provider resources exhausted");
