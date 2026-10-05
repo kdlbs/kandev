@@ -355,6 +355,10 @@ func cancelManagedBarrierPostgresRead(t *testing.T, ctx context.Context, holderD
 	workers.Wait()
 	require.ErrorIs(t, err, context.Canceled)
 	require.NotErrorIs(t, err, managed.ErrBusy)
+	// Reclaim the single-connection pool after database/sql finishes rollback.
+	connection, err := waiter.DB().Conn(ctx)
+	require.NoError(t, err)
+	require.NoError(t, connection.Close())
 	require.Zero(t, waiter.DB().Stats().InUse)
 	var held bool
 	require.NoError(t, observer.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM pg_locks l JOIN pg_class c ON c.oid=l.relation WHERE l.pid=$1 AND l.granted AND l.mode='AccessExclusiveLock' AND c.relname='task_resource_cleanup_jobs')`, holderPID).Scan(&held))
