@@ -222,6 +222,8 @@ async function handlePreviewRoute({
 
 export type RuntimeUpdateFixtureOptions = {
   mode?: UpdateMode;
+  agentName?: string;
+  broadcast?: (action: string, payload: unknown) => Promise<void>;
   retainedJobs?: UpdateJob[];
   postResponse?: UpdateJob;
   previewResponse?: UpdatePreview;
@@ -236,7 +238,7 @@ export async function installRuntimeUpdateFixture(
 ) {
   let currentModels = [{ id: "claude-sonnet-4-6", name: "Claude Sonnet 4.6" }];
   const mode = options.mode ?? "pinned";
-  const agentName = mode === "self_update" ? OMP_AGENT_NAME : AGENT_NAME;
+  const agentName = options.agentName ?? (mode === "self_update" ? OMP_AGENT_NAME : AGENT_NAME);
   let persistedRuntimeVersion = mode === "self_update" ? "18.3.1" : "0.62.0";
   let retainedJobs = options.retainedJobs ?? [];
   let postResponse: UpdateJob =
@@ -514,6 +516,7 @@ export async function installRuntimeUpdateFixture(
           ? "agent.update.finished"
           : "agent.update.started";
       await this.emit(action, job);
+      await options.broadcast?.(action, job);
     },
     async emitOutput(chunk: string) {
       await this.emit("agent.update.output", {

@@ -62,8 +62,7 @@ export function createAppStore(initialState?: HydrationState) {
         ...createGitHubSlice(set as any, get as any, api as any),
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         ...createGitLabSlice(set as any, get as any, api as any),
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        ...createAzureDevOpsSlice(set as any),
+        ...createAzureDevOpsSlice(set),
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         ...createJiraSlice(set as any, get as any, api as any),
         // eslint-disable-next-line @typescript-eslint/no-explicit-any

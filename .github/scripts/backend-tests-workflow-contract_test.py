@@ -99,6 +99,11 @@ class BackendTestsWorkflowContractTest(unittest.TestCase):
         self.assertIn("TEST_WINDOWS_RESULT: ${{ needs['test-windows'].result }}", gate)
         self.assertIn('"test-windows:${TEST_WINDOWS_RESULT}"', gate)
 
+    def test_windows_runtime_observation_shims_run_in_native_suite(self) -> None:
+        step = step_block(self.workflow, "Test Windows runtime observation command shims")
+        self.assertIn("if: matrix.suite == 'native'", step)
+        self.assertIn("TestRuntimeObservationRunsWindowsCommandShimWithSpaces", step)
+
     def test_linux_sharded_tests_use_go_default_package_timeout(self) -> None:
         test_step = step_block(self.workflow, "Run tests")
         self.assertIn("go test \\", test_step)

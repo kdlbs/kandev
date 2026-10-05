@@ -102,6 +102,7 @@ func (m *Manager) probeProfileCapabilitiesFlight(
 		return ProfileCapabilityResult{}, err
 	}
 	caps := capabilitiesFromProbe(inst.agentType, resp, time.Now())
+	stampConfiguredRuntimeVersion(&caps, ia, command)
 	if !resp.Success {
 		caps.Status = profileProbeStatus(resp)
 		caps.Error = profileProbeError(resp)

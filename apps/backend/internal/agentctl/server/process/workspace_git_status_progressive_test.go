@@ -660,26 +660,18 @@ func TestWorkspaceTrackerDetailsWaitCanCancelWithoutCancelingEnrichment(t *testi
 	case <-time.After(time.Second):
 		t.Fatal("canceled detail waiter did not return")
 	}
+	tracker.gitStatusDetailsWaitJoined = nil
 
 	close(release)
 	released = true
-	deadline := time.After(3 * time.Second)
-	for {
-		status, err := tracker.GetGitStatus(context.Background(), false)
-		if err != nil {
-			t.Fatalf("cached status error = %v", err)
-		}
-		if status.DetailState == gitStatusDetailReady {
-			if status.TrackerEpoch != initial.TrackerEpoch || status.SnapshotRevision <= initial.SnapshotRevision {
-				t.Fatalf("completed status = %+v, want same epoch and a later revision than %+v", status, initial)
-			}
-			return
-		}
-		select {
-		case <-deadline:
-			t.Fatalf("enrichment did not complete after waiter cancellation: %+v", status)
-		case <-time.After(10 * time.Millisecond):
-		}
+	completeCtx, cancelComplete := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancelComplete()
+	completed, err := tracker.GetGitStatusWithDetails(completeCtx, false)
+	if err != nil || completed.DetailState != gitStatusDetailReady {
+		t.Fatalf("enrichment did not complete after waiter cancellation: status=%+v err=%v", completed, err)
+	}
+	if completed.TrackerEpoch != initial.TrackerEpoch || completed.SnapshotRevision <= initial.SnapshotRevision {
+		t.Fatalf("completed status = %+v, want same epoch and a later revision than %+v", completed, initial)
 	}
 }
 

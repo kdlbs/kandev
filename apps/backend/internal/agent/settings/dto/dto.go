@@ -1,6 +1,7 @@
 package dto
 
 import (
+	"github.com/kandev/kandev/internal/agent/agents"
 	"github.com/kandev/kandev/internal/agent/managedruntime"
 	"time"
 
@@ -550,15 +551,16 @@ type CommandPreviewResponse struct {
 // DynamicModelsResponse is the response for the /agent-models/:agentName endpoint.
 // Data now comes from the host utility capability cache populated by ACP probes.
 type DynamicModelsResponse struct {
-	AgentName       string            `json:"agent_name"`
-	Status          string            `json:"status"` // "probing" | "ok" | "auth_required" | "not_installed" | "failed"
-	Models          []ModelEntryDTO   `json:"models"`
-	CurrentModelID  string            `json:"current_model_id,omitempty"`
-	Modes           []ModeEntryDTO    `json:"modes,omitempty"`
-	CurrentModeID   string            `json:"current_mode_id,omitempty"`
-	Commands        []CommandEntryDTO `json:"commands,omitempty"`
-	Error           *string           `json:"error"`
-	ContextRevision string            `json:"context_revision,omitempty"`
+	AgentName       string              `json:"agent_name"`
+	Status          string              `json:"status"` // "probing" | "ok" | "auth_required" | "not_installed" | "failed"
+	Models          []ModelEntryDTO     `json:"models"`
+	CurrentModelID  string              `json:"current_model_id,omitempty"`
+	Modes           []ModeEntryDTO      `json:"modes,omitempty"`
+	CurrentModeID   string              `json:"current_mode_id,omitempty"`
+	Commands        []CommandEntryDTO   `json:"commands,omitempty"`
+	Error           *string             `json:"error"`
+	ContextRevision string              `json:"context_revision,omitempty"`
+	RuntimeInfo     *agents.RuntimeInfo `json:"runtime_info,omitempty"`
 }
 
 // ProfileLaunchSettingsRequest is a complete, request-only profile snapshot.
