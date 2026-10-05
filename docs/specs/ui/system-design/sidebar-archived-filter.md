@@ -310,6 +310,10 @@ new authoritative page. Disable page navigation based on that transitional
 snapshot until a current-query response establishes bounds. A transient failure
 keeps eligible display content and uses the existing refresh-error and Retry
 presentation; Retry must request page 1. Access denial clears content immediately.
+Gate both accepted/transitional server display and complete local projection on
+the authorized workspace during render. Collection or snapshot access-denied
+state must hide rows before effect-driven request cleanup, even when workspace
+generation and query identity remain unchanged.
 Only an accepted current-key response clears transition state. Rapid disclosures
 retain the last eligible accepted display; old completions cannot replace or
 finalize the latest request. Ordinary same-context mutations retain existing

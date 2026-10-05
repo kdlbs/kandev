@@ -176,3 +176,14 @@ The first published head's architecture job was cancelled without steps because
 GitHub failed to acquire a hosted runner (run 37374049388, job 111978000886).
 This is runner evidence; the normal commit architecture hook passed. The new
 published head must receive fresh CI/review evidence before merge.
+
+The aggregate review also identified that a workspace collection/snapshot denial
+could expose an accepted page for the first render before effect-driven reset.
+Four red cases reproduced the retained response, with and without a disclosure
+transition. Server display and local projection now use the authorized workspace
+in render, preserving local paging when the server loader is intentionally
+disabled. Six denial cases cover both context sources, direct and transitional
+server display, complete local projection, disabled Retry, and late responses.
+All 83 focused tests passed; targeted ESLint and web typecheck passed.
+Fresh managed desktop and phone regressions passed, with three newly captured,
+inspected, and compressed screenshots. Catalog and specification lint passed.

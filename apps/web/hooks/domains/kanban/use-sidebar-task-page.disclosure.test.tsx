@@ -9,9 +9,15 @@ const mocks = vi.hoisted(() => ({
   state: {
     workspaces: { activeId: "ws-1" },
     workspaceContextGeneration: 1,
+    repositories: { itemsByWorkspaceId: {} },
+    workflows: { items: [] },
+    kanbanMulti: { snapshots: {} },
     collapsedSubtaskParents: [] as string[],
     language: "en",
     auth: undefined as AppState["auth"] | undefined,
+    workspaceContextRead: undefined as
+      | Pick<AppState["workspaceContextRead"], "snapshotError" | "errors">
+      | undefined,
     sidebarArchivedTasks: { revisionByWorkspaceId: {} as Record<string, number> },
   },
   view: {
@@ -89,10 +95,71 @@ beforeEach(() => {
   mocks.state.collapsedSubtaskParents = [];
   mocks.state.language = "en";
   mocks.state.auth = undefined;
+  mocks.state.workspaceContextRead = undefined;
   mocks.state.sidebarArchivedTasks.revisionByWorkspaceId = {};
 });
 
 const refreshFailure = "sidebar:queryRefreshFailed";
+
+// @covers AC-UI-SIDEBAR-ARCHIVED-FILTER-002.18, AC-UI-SIDEBAR-ARCHIVED-FILTER-002.25
+it.each([
+  ["snapshot", false, false],
+  ["snapshot", true, false],
+  ["collection", false, false],
+  ["collection", true, false],
+  ["snapshot", true, true],
+  ["collection", true, true],
+] as const)(
+  "hides rows on the first %s denial render (disclosure=%s, local=%s)",
+  async (source, disclosure, local) => {
+    const original = mocks.view;
+    const pending = deferred<SidebarTaskPageResponse>();
+    const accepted = {
+      ...response(1, false, true),
+      entries: [{ kind: "task" as const, task_id: "task-a" }],
+    };
+    vi.mocked(querySidebarTasks)
+      .mockResolvedValueOnce(accepted)
+      .mockReturnValueOnce(pending.promise);
+    const rendered: ReturnType<typeof useSidebarTaskPage>[] = [];
+    try {
+      const hook = renderHook(() => {
+        const page = useSidebarTaskPage("ws-1", !local, local ? [] : null);
+        rendered.push(page);
+        return page;
+      });
+      await waitFor(() =>
+        expect(hook.result.current.response?.entries).toEqual(local ? [] : accepted.entries),
+      );
+      if (disclosure) {
+        mocks.view = { ...original, collapsedGroups: ["repo-a"] };
+        hook.rerender();
+        expect(hook.result.current.isDisclosureTransition).toBe(!local);
+      }
+      mocks.state.workspaceContextRead = {
+        snapshotError: source === "snapshot" ? "access_denied" : null,
+        errors: {
+          workflows: source === "collection" ? "access_denied" : null,
+          repositories: null,
+          steps: null,
+        },
+      };
+      rendered.length = 0;
+      hook.rerender();
+      expect(rendered.length).toBeGreaterThan(0);
+      for (const page of rendered) {
+        expect(page.response).toBeNull();
+        expect(page.isDisclosureTransition).toBe(false);
+        expect(page.canRetry).toBe(false);
+      }
+      await act(async () => pending.resolve(accepted));
+      expect(hook.result.current.response).toBeNull();
+      if (local) expect(querySidebarTasks).not.toHaveBeenCalled();
+    } finally {
+      mocks.view = original;
+    }
+  },
+);
 
 // @covers AC-UI-SIDEBAR-ARCHIVED-FILTER-002.25
 it("keeps eligible rows while an uncached repository collapse loads", async () => {

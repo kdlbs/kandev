@@ -519,20 +519,17 @@ export function useSidebarTaskPage(
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   viewKeyRef.current = viewKey;
-  const queryWorkspaceId = enabled && !accessDenied ? workspaceId : null;
+  const authorizedWorkspaceId = accessDenied ? null : workspaceId;
+  const queryWorkspaceId = enabled ? authorizedWorkspaceId : null;
   const loader = useSidebarPageLoader(queryWorkspaceId, workspaceGeneration, store, t, viewKeyRef);
   const { loadPage } = loader;
   useSidebarDeletedTasks(store, loader);
   const cachedResponse = queryWorkspaceId ? sidebarTaskPageCache(store).get(viewKey) : null;
-  const {
-    pendingPage,
-    error: loadError,
-    viewResponse,
-    isDisclosureTransition,
-  } = sidebarResponseState(enabled, loader, cachedResponse, viewKey);
+  const display = sidebarResponseState(Boolean(queryWorkspaceId), loader, cachedResponse, viewKey);
+  const { pendingPage, error: loadError, viewResponse, isDisclosureTransition } = display;
   const error = accessDenied ? t("sidebar:workspaceContextAccessDenied") : loadError;
   const local = useLocalSidebarPage(
-    workspaceId,
+    authorizedWorkspaceId,
     localTasks,
     queryView,
     viewKey,
