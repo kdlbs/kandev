@@ -148,7 +148,9 @@ func (h *TaskHandlers) httpListTasks(c *gin.Context) {
 	}
 	taskDTOs, err := h.toTaskDTOsWithSessionInfo(c.Request.Context(), tasks)
 	if err != nil {
-		h.logger.Error("failed to enrich tasks with status summaries", zap.Error(err))
+		if !isRequestCancellation(c.Request.Context(), err) {
+			h.logger.Error("failed to enrich tasks with status summaries", zap.Error(err))
+		}
 		handleNotFound(c, h.logger, err, "tasks not found")
 		return
 	}
@@ -193,7 +195,9 @@ func (h *TaskHandlers) httpListTasksByWorkspace(c *gin.Context) {
 
 	taskDTOs, err := h.toTaskDTOsWithSessionInfo(c.Request.Context(), tasks)
 	if err != nil {
-		h.logger.Error("failed to enrich tasks with session info", zap.Error(err))
+		if !isRequestCancellation(c.Request.Context(), err) {
+			h.logger.Error("failed to enrich tasks with session info", zap.Error(err))
+		}
 		handleNotFound(c, h.logger, err, "tasks not found")
 		return
 	}
@@ -219,32 +223,62 @@ func buildTaskDTOsWithSessionInfo(
 	if len(tasks) == 0 {
 		return []dto.TaskDTO{}, nil
 	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	taskIDs := make([]string, len(tasks))
 	for i, t := range tasks {
 		taskIDs[i] = t.ID
 	}
 	sessionsByTask, err := svc.BatchGetSessionsForTasks(ctx, taskIDs)
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return nil, ctxErr
+	}
 	if err != nil {
+		return nil, err
+	}
+	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
 	primarySessionInfoMap, err := svc.GetPrimarySessionInfoForTasks(ctx, taskIDs)
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return nil, ctxErr
+	}
 	if err != nil {
 		return nil, err
 	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	pendingActionsBySession, pendingErr := pendingActionsForInputCapableSessions(ctx, svc, sessionsByTask)
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return nil, ctxErr
+	}
 	if pendingErr != nil {
 		log.Warn("failed to load pending actions for task list, using empty map", zap.Error(pendingErr))
 		pendingActionsBySession = map[string]models.TaskPendingAction{}
 	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	statusSummaries, summaryErr := svc.GetTaskStatusSummaries(ctx, taskIDs)
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return nil, ctxErr
+	}
 	if summaryErr != nil {
 		log.Warn("failed to load task status summaries, using coarse task fields", zap.Error(summaryErr))
 		statusSummaries = map[string]*statussummary.TaskStatusSummary{}
 	}
 	if summaryErr == nil && pendingErr == nil {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		reconciledSummaries, reconcileErr := svc.ReconcileTaskStatusSummaries(
 			ctx, tasks, sessionsByTask, pendingActionsBySession, statusSummaries,
 		)
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return nil, ctxErr
+		}
 		statusSummaries = reconciledSummaries
 		if reconcileErr != nil {
 			log.Warn("failed to reconcile task status summaries", zap.Error(reconcileErr))
@@ -256,17 +290,35 @@ func buildTaskDTOsWithSessionInfo(
 	// projector may not have observed every queue mutation yet). Never
 	// fabricate a summary here — a synthetic summary would make the frontend
 	// treat summary fields as authoritative and hide the coarse fallbacks.
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	queuedByTask, queuedErr := svc.CountPendingQueuedByTaskIDs(ctx, taskIDs)
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return nil, ctxErr
+	}
 	if queuedErr != nil {
 		log.Warn("failed to load queued prompt counts for task list, omitting badges", zap.Error(queuedErr))
 	}
 	// Dependency state is derived, never stored, so it is computed per read. One
 	// batched call for the whole list: a per-task query would add a round trip
 	// per card to every board load.
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	dependencyViews := svc.BuildDependencyViews(ctx, tasks)
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return nil, ctxErr
+	}
 	// Runner-mutability verdict is likewise derived, never stored, and must
 	// not fan out per task.
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	runnerViews := svc.BuildRunnerMutabilityViews(ctx, tasks)
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return nil, ctxErr
+	}
 	result := make([]dto.TaskDTO, 0, len(tasks))
 	for _, task := range tasks {
 		sessions := sessionsByTask[task.ID]
@@ -319,6 +371,9 @@ func buildTaskDTOsWithSessionInfo(
 			}
 		}
 		result = append(result, taskDTO)
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
 	}
 	return result, nil
 }

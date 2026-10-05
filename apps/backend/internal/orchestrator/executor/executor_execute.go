@@ -2988,6 +2988,13 @@ func (e *Executor) captureBaseCommit(ctx context.Context, sessionID string) {
 	if status == nil {
 		return
 	}
+	if !status.Success || !status.FilesComplete || status.DetailState != "ready" {
+		e.logger.Debug("incomplete Git status cannot establish a session base commit",
+			zap.String("session_id", sessionID),
+			zap.String("status_state", status.StatusState),
+			zap.String("detail_state", status.DetailState))
+		return
+	}
 
 	// Prefer BaseCommit (merge-base with target branch) over HeadCommit.
 	// BaseCommit gives us the common ancestor with main/origin, which is correct

@@ -201,6 +201,10 @@ func isClientDisconnect(err error) bool {
 	return err != nil && errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded)
 }
 
+func isRequestCancellation(ctx context.Context, err error) bool {
+	return errors.Is(ctx.Err(), context.Canceled) && errors.Is(err, context.Canceled)
+}
+
 func abortClientDisconnect(c *gin.Context) {
 	c.AbortWithStatus(statusClientClosedRequest)
 }

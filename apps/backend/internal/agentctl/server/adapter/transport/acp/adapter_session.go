@@ -375,14 +375,12 @@ func filterMcpServersWithDecisions(
 		switch s.Type {
 		case "sse":
 			if !caps.Sse {
-				logger.Warn("filtering out SSE MCP server (agent does not support SSE)", zap.String("name", s.Name))
 				decision.ReasonCode = mcpFilterReasonSSEUnsupported
 				decisions = append(decisions, decision)
 				continue
 			}
 		case "http", "streamable_http":
 			if !caps.Http {
-				logger.Warn("filtering out HTTP MCP server (agent does not support HTTP)", zap.String("name", s.Name), zap.String("type", s.Type))
 				decision.ReasonCode = mcpFilterReasonHTTPUnsupported
 				decisions = append(decisions, decision)
 				continue
@@ -399,6 +397,25 @@ func filterMcpServersWithDecisions(
 		filtered = append(filtered, s)
 		decision.Included = true
 		decisions = append(decisions, decision)
+	}
+	for _, decision := range decisions {
+		supportedAlternativeSurvives := seenNames[decision.Server.Name]
+		fields := []zap.Field{zap.String("name", decision.Server.Name)}
+		switch decision.ReasonCode {
+		case mcpFilterReasonSSEUnsupported:
+			if supportedAlternativeSurvives {
+				logger.Debug("filtering out SSE MCP server (agent does not support SSE)", fields...)
+			} else {
+				logger.Warn("filtering out SSE MCP server (agent does not support SSE)", fields...)
+			}
+		case mcpFilterReasonHTTPUnsupported:
+			fields = append(fields, zap.String("type", decision.Server.Type))
+			if supportedAlternativeSurvives {
+				logger.Debug("filtering out HTTP MCP server (agent does not support HTTP)", fields...)
+			} else {
+				logger.Warn("filtering out HTTP MCP server (agent does not support HTTP)", fields...)
+			}
+		}
 	}
 	return filtered, decisions
 }

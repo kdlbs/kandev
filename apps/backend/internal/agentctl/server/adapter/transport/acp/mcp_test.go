@@ -10,6 +10,9 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/common/logger"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
+	"go.uber.org/zap/zaptest/observer"
 )
 
 func TestEmitMCPAttachmentEvidenceUsesBackendOwnedAttempt(t *testing.T) {
@@ -81,6 +84,54 @@ func TestFilterMcpServersWithDecisionsMarksSupportedDuplicateAsFiltered(t *testi
 	}
 	if decisions[1].Included || decisions[1].ReasonCode != mcpFilterReasonDuplicateName {
 		t.Fatalf("duplicate decision = %+v", decisions[1])
+	}
+}
+
+func TestFilterMcpUnsupportedAlternativeUsesDebugWhenSameNameSurvives(t *testing.T) {
+	core, observed := observer.New(zapcore.DebugLevel)
+	log, err := logger.NewFromZap(zap.New(core))
+	if err != nil {
+		t.Fatalf("NewFromZap: %v", err)
+	}
+	servers := []types.McpServer{
+		{Name: "remote-tools", Type: "http", URL: "https://example.test/mcp"},
+		{Name: "remote-tools", Type: "sse", URL: "https://example.test/sse"},
+	}
+
+	selected, decisions := filterMcpServersWithDecisions(servers, acp.McpCapabilities{Sse: true}, log)
+	if len(selected) != 1 || selected[0].Type != "sse" {
+		t.Fatalf("selected = %+v, want supported SSE alternative", selected)
+	}
+	if decisions[0].Included || decisions[0].ReasonCode != mcpFilterReasonHTTPUnsupported {
+		t.Fatalf("unsupported alternative decision = %+v", decisions[0])
+	}
+	entries := observed.FilterMessage("filtering out HTTP MCP server (agent does not support HTTP)").All()
+	if len(entries) != 1 || entries[0].Level != zapcore.DebugLevel {
+		t.Fatalf("unsupported alternative logs = %+v, want one debug entry", entries)
+	}
+	if got := observed.FilterLevelExact(zapcore.WarnLevel).Len(); got != 0 {
+		t.Fatalf("alternative warnings = %d, want 0", got)
+	}
+}
+
+func TestFilterMcpUnsupportedTransportWarnsWhenNoSameNameSurvives(t *testing.T) {
+	core, observed := observer.New(zapcore.DebugLevel)
+	log, err := logger.NewFromZap(zap.New(core))
+	if err != nil {
+		t.Fatalf("NewFromZap: %v", err)
+	}
+	servers := []types.McpServer{{Name: "remote-tools", Type: "http", URL: "https://example.test/mcp"}}
+
+	selected, decisions := filterMcpServersWithDecisions(servers, acp.McpCapabilities{}, log)
+	if len(selected) != 0 {
+		t.Fatalf("selected = %+v, want total capability refusal", selected)
+	}
+	if decisions[0].Included || decisions[0].ReasonCode != mcpFilterReasonHTTPUnsupported {
+		t.Fatalf("unsupported decision = %+v", decisions[0])
+	}
+	entries := observed.FilterMessage("filtering out HTTP MCP server (agent does not support HTTP)").All()
+	if len(entries) != 1 || entries[0].Level != zapcore.WarnLevel {
+		t.Fatalf("total refusal logs = %+v, want one warning", entries)
 	}
 }
 

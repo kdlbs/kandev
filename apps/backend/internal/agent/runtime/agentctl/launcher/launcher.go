@@ -8,7 +8,9 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"net/netip"
@@ -650,6 +652,10 @@ func (l *Launcher) pipeOutput(name string, scanner *bufio.Scanner) {
 // structured log formats. It returns the uppercased level ("INFO"/"WARN"/…)
 // or "" when the line does not match one of those formats.
 func childLogLevel(line string) string {
+	if level := childJSONLogLevel(line); level != "" {
+		return level
+	}
+
 	// A well-formed console record is "<ts>\t<LEVEL>\t<caller>\t<msg>", so the
 	// level token must be bounded by at least a following caller field. Requiring
 	// three segments rejects truncated lines (e.g. "<ts>\t<token>") whose second
@@ -675,6 +681,119 @@ func childLogLevel(line string) string {
 		return ""
 	}
 	return recognizedChildLogLevel(stripANSI(defaultFields[2]))
+}
+
+const agentctlJSONTimestampLayout = "2006-01-02T15:04:05.000Z0700"
+
+const (
+	childJSONLevelField = iota
+	childJSONTimestampField
+	childJSONCallerField
+	childJSONMessageField
+)
+
+func childJSONLogLevel(line string) string {
+	values, ok := childJSONLogEnvelope(line)
+	if !ok {
+		return ""
+	}
+
+	level, levelOK := childJSONString(values[childJSONLevelField])
+	timestamp, timestampOK := childJSONString(values[childJSONTimestampField])
+	caller, callerOK := childJSONString(values[childJSONCallerField])
+	_, messageOK := childJSONString(values[childJSONMessageField])
+	if !levelOK || !timestampOK || !callerOK || !messageOK || strings.TrimSpace(caller) == "" {
+		return ""
+	}
+	if !validChildJSONLogTimestamp(timestamp) {
+		return ""
+	}
+	return recognizedChildLogLevel(level)
+}
+
+func childJSONLogEnvelope(line string) ([4]json.RawMessage, bool) {
+	var empty [4]json.RawMessage
+	decoder := json.NewDecoder(strings.NewReader(line))
+	token, err := decoder.Token()
+	if err != nil {
+		return empty, false
+	}
+	delimiter, ok := token.(json.Delim)
+	if !ok || delimiter != '{' {
+		return empty, false
+	}
+
+	values, ok := childJSONLogFields(decoder)
+	if !ok {
+		return empty, false
+	}
+	closing, err := decoder.Token()
+	if err != nil || closing != json.Delim('}') {
+		return empty, false
+	}
+	if err := decoder.Decode(&struct{}{}); err != io.EOF {
+		return empty, false
+	}
+	return values, true
+}
+
+func childJSONLogFields(decoder *json.Decoder) ([4]json.RawMessage, bool) {
+	var values [4]json.RawMessage
+	var seen uint8
+	for decoder.More() {
+		keyToken, err := decoder.Token()
+		if err != nil {
+			return values, false
+		}
+		key, ok := keyToken.(string)
+		if !ok {
+			return values, false
+		}
+		field := childJSONLogFieldIndex(key)
+		var value json.RawMessage
+		if err := decoder.Decode(&value); err != nil {
+			return values, false
+		}
+		if field < 0 {
+			continue
+		}
+		mask := uint8(1 << field)
+		if seen&mask != 0 {
+			return values, false
+		}
+		seen |= mask
+		values[field] = value
+	}
+	return values, seen == 0b1111
+}
+
+func childJSONLogFieldIndex(key string) int {
+	switch key {
+	case "level":
+		return childJSONLevelField
+	case "timestamp":
+		return childJSONTimestampField
+	case "caller":
+		return childJSONCallerField
+	case "msg":
+		return childJSONMessageField
+	default:
+		return -1
+	}
+}
+
+func validChildJSONLogTimestamp(timestamp string) bool {
+	parsedTimestamp, err := time.Parse(agentctlJSONTimestampLayout, timestamp)
+	return err == nil && parsedTimestamp.Format(agentctlJSONTimestampLayout) == timestamp
+}
+
+func childJSONString(raw json.RawMessage) (string, bool) {
+	var value any
+	if err := json.Unmarshal(raw, &value); err != nil {
+		return "", false
+	}
+	text, ok := value.(string)
+	return text, ok
 }
 
 func childSlogTextLevel(line string) string {
