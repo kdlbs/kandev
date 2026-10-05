@@ -36,7 +36,7 @@ Conversation comments provide the completion record.
 Task 02 creates a workflow with `workflow_dispatch` and `workflow_call` inputs.
 It uses the helper from the workflow revision, a shared posting lock, and the built-in job token.
 The Release workflow calls it with its exact tag after all four publication channels succeed.
-Wire helper and workflow tests into `.github/workflows/lint-action-pinning.yml`.
+Wire helper and workflow tests into `.github/workflows/lint-action-pinning.yml` and the root `make test-scripts` target.
 Update the release guide, root engineering guide, and release skill in the same implementation.
 
 ## ASCII UI preview
@@ -89,12 +89,14 @@ Each work order contains its exact commands and acceptance conditions.
 
 Both work orders are complete. Verification passed on 2026-10-05:
 
-- Notification helper: 19 tests passed; notification workflow contract: 4 passed; release workflow contract: 49 passed; action-pinning tests: 9 passed.
+- Notification helper: 23 tests passed; notification workflow contract: 4 passed; release workflow contract: 49 passed; action-pinning tests: 9 passed.
 - Action-pinning audit: all 26 workflow files passed.
+- `make test-scripts`: passed with the web and desktop preview bundles built first (`make build-web` and `pnpm --filter @kandev/desktop build:vite`).
 - Public docs validation: 47 pages passed; public docs validator tests: 62 passed.
-- Harness lint: all 201 files passed.
+- Harness tests: 19 passed; harness lint: all 201 files passed.
 - `python3 scripts/list-docs.py validate`: 348 decisions and 1343 specifications validated.
 - `python3 scripts/lint-spec-files.py --all`: all specification files passed.
+- Mutation check: the release workflow contract test rejected changing a required `&&` success gate to `||`.
 - `git diff --check`: passed.
 - `zizmor .github/workflows` exits 14 on existing repository findings. The Release workflow has 27 findings at both `HEAD` and the implementation revision, with zero route-level changes; the new notification workflow has zero findings.
 
@@ -102,5 +104,6 @@ Both work orders are complete. Verification passed on 2026-10-05:
 
 - Release notes can contain links that do not identify a PR. Selection must use PR metadata and Git ancestry.
 - GitHub can throttle comment creation. Serial writes and repeat-run detection protect recovery.
+- Cancellation during posting can leave a partial result; trusted comment identity and repeat-run detection make the manual retry safe.
 - A helper older than this feature cannot serve a backfill. Execute the helper from the workflow revision.
 - Existing API automation can produce notices without the new marker. Match the approved legacy text as well.

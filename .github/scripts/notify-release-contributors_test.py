@@ -29,6 +29,7 @@ RELEASE = {
     "draft": False,
     "prerelease": False,
 }
+DEFAULT_RELEASE = object()
 
 
 def pull_request(
@@ -51,9 +52,23 @@ def pull_request(
     }
 
 
+def github_comment(
+    comment_id: int,
+    body: str,
+    *,
+    login: str = "github-actions[bot]",
+    user_type: str = "Bot",
+) -> dict:
+    return {
+        "id": comment_id,
+        "body": body,
+        "user": {"login": login, "type": user_type},
+    }
+
+
 class FakeApi:
-    def __init__(self, *, release: dict | None = None, prs: dict | None = None) -> None:
-        self.release = release or dict(RELEASE)
+    def __init__(self, *, release: dict | None | object = DEFAULT_RELEASE, prs: dict | None = None) -> None:
+        self.release = dict(RELEASE) if release is DEFAULT_RELEASE else release
         self.prs = prs or {1: pull_request(1)}
         self.latest_calls = 0
         self.tag_calls: list[str] = []
@@ -94,6 +109,7 @@ class FakeApi:
         comment = {
             "id": len(self.posts),
             "body": body,
+            "user": {"login": "github-actions[bot]", "type": "Bot"},
             "html_url": f"https://github.com/{REPOSITORY}/pull/{number}#issuecomment-{len(self.posts)}",
         }
         if number in self.post_side_effect_before_failure:
@@ -150,6 +166,15 @@ class ReleaseContributorNotificationsTest(unittest.TestCase):
         self.assertEqual(result.release.tag, TAG)
         self.assertEqual([row.status for row in result.rows], ["planned"])
 
+    def test_missing_latest_release_fails_before_posting(self) -> None:
+        api = FakeApi(release=None)
+
+        with self.assertRaises(notify.ReleaseNotificationError):
+            run_notifier(api, dry_run=False)
+
+        self.assertEqual(api.latest_calls, 1)
+        self.assertEqual(api.posts, [])
+
     def test_normal_run_posts_a_notice(self) -> None:
         api = FakeApi()
 
@@ -202,6 +227,15 @@ class ReleaseContributorNotificationsTest(unittest.TestCase):
         self.assertEqual(result.counts["planned"], 1)
         self.assertEqual(api.posts, [])
 
+    def test_malformed_release_note_url_does_not_hide_valid_pr_references(self) -> None:
+        references, duplicates = notify._extract_references(
+            f"https://[bad https://github.com/{REPOSITORY}/pull/1",
+            REPOSITORY,
+        )
+
+        self.assertEqual(references, [(1, "pull")])
+        self.assertEqual(duplicates, 0)
+
     def test_no_eligible_prs_produces_no_comment_writes(self) -> None:
         api = FakeApi(prs={1: pull_request(1, user_type="Bot")})
 
@@ -241,7 +275,7 @@ class ReleaseContributorNotificationsTest(unittest.TestCase):
     def test_paginated_comment_adapter_reads_every_page(self) -> None:
         pages = [
             [{"id": 1, "body": "first page"}],
-            [{"id": 2, "body": "<!-- kandev-release-notice:73 -->"}],
+            [github_comment(2, "<!-- kandev-release-notice:73 -->")],
         ]
         command_calls: list[list[str]] = []
 
@@ -258,19 +292,42 @@ class ReleaseContributorNotificationsTest(unittest.TestCase):
 
         self.assertEqual([comment["id"] for comment in comments], [1, 2])
         release = notify._release_from_payload(RELEASE, REPOSITORY)
-        self.assertIsNotNone(notify._notice_exists(comments, release, REPOSITORY))
+        self.assertIsNotNone(notify._notice_exists(comments, release, REPOSITORY, set()))
         self.assertIn("--paginate", command_calls[0])
         self.assertIn("--slurp", command_calls[0])
 
-    def test_marker_and_exact_legacy_notice_both_prevent_duplicates(self) -> None:
+    def test_untrusted_comment_cannot_suppress_a_notice(self) -> None:
         for existing in (
             f"{notify.render_comment(RELEASE, REPOSITORY)}\n\n<!-- kandev-release-notice:73 -->",
             f"This PR was included in [Kandev {TAG}](https://github.com/{REPOSITORY}/releases/tag/{TAG}). Thanks for contributing!",
         ):
             with self.subTest(existing=existing):
                 api = FakeApi()
-                api.comments[1] = [{"id": 19, "body": existing}]
-                result = run_notifier(api)
+                api.comments[1] = [
+                    github_comment(19, existing, login="untrusted-user", user_type="User")
+                ]
+
+                result = run_notifier(api, dry_run=False)
+
+                self.assertEqual([row.status for row in result.rows], ["posted"])
+                self.assertEqual(len(api.posts), 1)
+
+    def test_trusted_bot_marker_and_maintainer_legacy_notice_prevent_duplicates(self) -> None:
+        marker = f"<!-- kandev-release-notice:73 -->"
+        legacy = (
+            f"This PR was included in [Kandev {TAG}]"
+            f"(https://github.com/{REPOSITORY}/releases/tag/{TAG}). Thanks for contributing!"
+        )
+        for existing, author, maintainers in (
+            (marker, github_comment(19, marker), []),
+            (legacy, github_comment(20, legacy, login="carlosflorencio", user_type="User"), ["carlosflorencio"]),
+        ):
+            with self.subTest(existing=existing):
+                api = FakeApi()
+                api.comments[1] = [author]
+
+                result = run_notifier(api, maintainers=maintainers)
+
                 self.assertEqual(result.counts["already_notified"], 1)
                 self.assertEqual(api.posts, [])
 
@@ -281,9 +338,11 @@ class ReleaseContributorNotificationsTest(unittest.TestCase):
             f"https://github.com/{REPOSITORY}/releases/tag/v0.97.0). Thanks for contributing!"
         )
         api = FakeApi(release=old_release)
-        api.comments[1] = [{"id": 50, "body": old_visible}]
+        api.comments[1] = [
+            github_comment(50, old_visible, login="carlosflorencio", user_type="User")
+        ]
 
-        result = run_notifier(api)
+        result = run_notifier(api, maintainers=["carlosflorencio"])
 
         self.assertEqual(result.counts["already_notified"], 1)
         self.assertEqual(api.posts, [])
@@ -319,7 +378,25 @@ class ReleaseContributorNotificationsTest(unittest.TestCase):
         self.assertEqual(raised.exception.status, 403)
         self.assertNotIn("very-secret", str(raised.exception))
 
+    def test_comment_body_is_passed_to_gh_as_an_untyped_string(self) -> None:
+        command_calls: list[list[str]] = []
+
+        def runner(command: list[str], **_kwargs: object) -> object:
+            command_calls.append(command)
+            return type(
+                "ProcessResult",
+                (),
+                {"returncode": 0, "stdout": json.dumps({"id": 10, "body": "true"}), "stderr": ""},
+            )()
+
+        api = notify.GitHubApi(REPOSITORY, runner=runner)
+        api.create_comment(12, "true")
+
+        self.assertIn("--raw-field", command_calls[0])
+        self.assertEqual(command_calls[0][command_calls[0].index("--raw-field") + 1], "body=true")
+
     def test_real_changelog_maintainer_declaration_is_the_authority(self) -> None:
+        # Keep this snapshot aligned with the single maintainer declaration in cliff.toml.
         self.assertEqual(
             notify.parse_maintainers(REPO_ROOT / "cliff.toml"),
             ["carlosflorencio", "jcfs", "nnobre", "zeval"],

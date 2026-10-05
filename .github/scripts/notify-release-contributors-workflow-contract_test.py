@@ -9,8 +9,10 @@ import unittest
 REPO_ROOT = Path(__file__).resolve().parents[2]
 WORKFLOW_PATH = REPO_ROOT / ".github" / "workflows" / "notify-release-contributors.yml"
 LINT_WORKFLOW_PATH = REPO_ROOT / ".github" / "workflows" / "lint-action-pinning.yml"
+MAKEFILE_PATH = REPO_ROOT / "Makefile"
 WORKFLOW = WORKFLOW_PATH.read_text() if WORKFLOW_PATH.exists() else ""
 LINT_WORKFLOW = LINT_WORKFLOW_PATH.read_text()
+MAKEFILE = MAKEFILE_PATH.read_text()
 
 
 def event_block(name: str) -> str:
@@ -44,6 +46,13 @@ class NotifyReleaseContributorsWorkflowContractTest(unittest.TestCase):
             with self.subTest(entry=entry):
                 self.assertRegex(block, r"(?m)^\s+release_tag:\n")
                 self.assertRegex(block, r"(?m)^\s+dry_run:\n")
+                for input_name in ("release_tag", "dry_run"):
+                    input_match = re.search(
+                        rf"(?ms)^      {input_name}:\n(.*?)(?=^      [^ \n]+:|\Z)",
+                        block,
+                    )
+                    self.assertIsNotNone(input_match, f"{input_name} input is missing")
+                    self.assertRegex(input_match.group(1), r"(?m)^        required: false$")
                 self.assertRegex(block, r"(?m)^\s+type: string$")
                 self.assertRegex(block, r"(?m)^\s+type: boolean$")
                 self.assertRegex(block, r'(?m)^\s+default: ""$')
@@ -83,6 +92,11 @@ class NotifyReleaseContributorsWorkflowContractTest(unittest.TestCase):
             LINT_WORKFLOW,
         )
         self.assertIn("python3 .github/scripts/release-workflow-contract_test.py", LINT_WORKFLOW)
+        self.assertIn("python3 .github/scripts/notify-release-contributors_test.py", MAKEFILE)
+        self.assertIn(
+            "python3 .github/scripts/notify-release-contributors-workflow-contract_test.py",
+            MAKEFILE,
+        )
 
 
 if __name__ == "__main__":

@@ -37,7 +37,7 @@ Add the release checkbox, success gates, CI coverage, and operator guidance.
 - Use a common non-cancelling posting lock, trusted workflow revision, and minimum job permissions.
 - Add default-false `notify_contributors` to Release and a direct reusable-workflow call with the exact prepared tag.
 - Cover every publication result and excluded mode through workflow contract tests.
-- Add script and workflow tests to the existing action-pinning CI workflow.
+- Add script and workflow tests to the action-pinning CI workflow and root `make test-scripts` target.
 - Update the public release guide, engineering guide, and release skill with manual and opt-in flows.
 - Record final outcomes and promote paired specifications only when implementation satisfies all requirements.
 
@@ -48,7 +48,7 @@ Additional release-event triggers, scheduled notifications, live comment tests, 
 ## Acceptance
 
 1. Manual runs support latest fallback, explicit tags, and preview; both entry points execute Task 01's helper with the same lock and permissions.
-2. Checked successful Stable releases and backfills pass their exact tag; every unchecked, skipped, cancelled, or failed publication path skips notices.
+2. Checked successful Stable releases and backfills pass their exact tag; unchecked, skipped, pre-start-cancelled, or failed publication paths skip notices. Cancellation after posting begins may leave partial notices for idempotent recovery.
 3. CI exercises the new contracts, and maintainer guidance describes posting, preview, repeat runs, bot identity, and recovery after notification failure.
 
 ## ASCII UI preview
@@ -124,14 +124,17 @@ Sequential.
 
 ## Results
 
-- `python3 .github/scripts/notify-release-contributors_test.py`: 19 tests passed.
+- `python3 .github/scripts/notify-release-contributors_test.py`: 23 tests passed.
 - `python3 .github/scripts/notify-release-contributors-workflow-contract_test.py`: 4 tests passed.
 - `python3 .github/scripts/release-workflow-contract_test.py`: 49 tests passed.
 - `python3 .github/scripts/lint-action-pinning_test.py`: 9 tests passed.
 - `python3 .github/scripts/lint-action-pinning.py`: all 26 workflow files passed.
 - `node scripts/validate-public-docs.mjs`: all 47 published docs pages passed. `node --test scripts/validate-public-docs.test.mjs`: 62 tests passed.
 - `python3 .github/scripts/lint-harness-files.py --all`: all 201 harness files passed.
+- `python3 scripts/lint-harness-files.test.py`: 19 tests passed; `pre-commit run harness-lint --all-files`: passed.
 - `python3 scripts/list-docs.py validate`: 348 decisions and 1343 specifications validated.
 - `python3 scripts/lint-spec-files.py --all`: all specification files passed.
+- `make test-scripts`: passed with the web and desktop preview bundles built first (`make build-web` and `pnpm --filter @kandev/desktop build:vite`).
+- Mutation check: the release workflow contract test rejected changing a required `&&` success gate to `||`.
 - `git diff --check`: passed.
 - `zizmor .github/workflows` exits 14 on existing repository findings. The Release workflow has 27 findings at both `HEAD` and the implementation revision, with zero route-level changes; the new notification workflow has zero findings.

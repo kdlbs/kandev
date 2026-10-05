@@ -77,6 +77,8 @@ This PR was included in [Kandev <tag>](<release URL>). Thanks for contributing!
 Append the hidden marker `<!-- kandev-release-notice:<release ID> -->` on its own line.
 Compare markers by exact release identity. Also recognize the exact visible comment without a marker.
 This preserves the 40 manually posted v0.97.0 notices.
+Count a marker or exact visible comment only when the API author is `github-actions[bot]` with type `Bot`, or a listed maintainer with type `User`.
+This preserves trusted v0.97.0 notices and prevents an unrelated commenter from suppressing a notice.
 Use exact comparisons rather than a broad search for the word release.
 
 Use one repository-wide notification job concurrency group with `cancel-in-progress: false` and `queue: max`.
@@ -97,6 +99,7 @@ and explicit success results for every dependency.
 It also excludes dry runs and Desktop validation.
 Pass `needs.prepare.outputs.tag` as `release_tag` and `dry_run: false`.
 The same gate permits a successful Stable backfill and excludes Nightly.
+Cancellation before this job starts skips notices. Cancellation after serial posting begins can leave a partial set, which the manual exact-tag workflow can safely complete.
 
 Use a direct reusable-workflow call instead of `release: published`.
 Releases created with `GITHUB_TOKEN` do not reliably start a separate release-event workflow.
@@ -119,6 +122,7 @@ Keep a result for each PR. Continue independent PRs after a confirmed individual
 Stop writes on global authentication failure or rate limiting, report remaining PRs as unprocessed, and fail the job.
 Successful notices are the durable record; no separate database or artifact tracks completion.
 A repeat run rereads comments and skips successful notices.
+Cancellation after posting begins can leave partial results; recovery uses the same idempotent exact-tag path.
 
 ## Observability
 

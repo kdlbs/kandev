@@ -191,7 +191,7 @@ class GitHubApi:
             command.extend(["--paginate", "--slurp"])
         command.extend(["--method", method, "--header", "Accept: application/vnd.github+json", route])
         if body is not None:
-            command.extend(["--field", f"body={body}"])
+            command.extend(["--raw-field", f"body={body}"])
         try:
             completed = self.runner(command, capture_output=True, text=True, check=False)
         except OSError as error:
@@ -322,7 +322,10 @@ def _extract_references(notes: str, repository: str) -> tuple[list[tuple[int, st
     duplicates = 0
     for raw_url in URL_RE.findall(notes):
         candidate = raw_url.rstrip(".,;:")
-        parsed = urlsplit(candidate)
+        try:
+            parsed = urlsplit(candidate)
+        except ValueError:
+            continue
         if parsed.scheme.casefold() != "https" or parsed.netloc.casefold() != "github.com":
             continue
         segments = parsed.path.strip("/").split("/")
@@ -345,10 +348,27 @@ def _extract_references(notes: str, repository: str) -> tuple[list[tuple[int, st
     return references, duplicates
 
 
-def _notice_exists(comments: list[dict], release: Release, repository: str) -> dict | None:
+def _trusted_notice_author(comment: dict, maintainers: set[str]) -> bool:
+    user = comment.get("user")
+    if not isinstance(user, dict) or not isinstance(user.get("login"), str):
+        return False
+    login = user["login"].casefold()
+    if user.get("type") == "User":
+        return login in maintainers
+    return login == "github-actions[bot]" and user.get("type") == "Bot"
+
+
+def _notice_exists(
+    comments: list[dict],
+    release: Release,
+    repository: str,
+    maintainers: set[str],
+) -> dict | None:
     marker = f"<!-- kandev-release-notice:{release.release_id} -->"
     visible = _visible_comment(release, repository)
     for comment in comments:
+        if not _trusted_notice_author(comment, maintainers):
+            continue
         body = comment.get("body")
         if not isinstance(body, str):
             continue
@@ -483,7 +503,7 @@ class ReleaseNotifier:
                 raise ReleaseNotificationError(
                     f"Could not read comments for pull request #{candidate.number}; no comments were posted."
                 ) from error
-            existing = _notice_exists(comments, release, self.repository)
+            existing = _notice_exists(comments, release, self.repository, self.maintainers)
             if existing is None:
                 planned.append(candidate)
                 rows.append(ResultRow(candidate.number, candidate.login, "planned", "Ready to notify."))
@@ -520,7 +540,7 @@ class ReleaseNotifier:
                 if stop_reason:
                     break
                 continue
-            existing = _notice_exists(comments, release, self.repository)
+            existing = _notice_exists(comments, release, self.repository, self.maintainers)
             if existing is not None:
                 row.status = "already_notified"
                 row.detail = "A notice appeared before this run could post another one."
@@ -548,7 +568,7 @@ class ReleaseNotifier:
                         comments = []
                         if isinstance(read_error, ApiError) and read_error.stops_writes:
                             stop_reason = "GitHub authorization or rate limiting stopped further writes."
-                    reconciled = _notice_exists(comments, release, self.repository)
+                    reconciled = _notice_exists(comments, release, self.repository, self.maintainers)
                     if reconciled is not None:
                         row.status = "posted (reconciled)"
                         row.detail = "GitHub stored the notice before the write response was lost."

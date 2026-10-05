@@ -43,8 +43,8 @@ The release system owns this capability because it owns publication and maintain
 - **AC-RELEASE-CONTRIBUTOR-NOTIFICATIONS-002.1:** The workflow shall select eligible PRs by external human authors. It shall exclude maintainers, bots, open PRs, and unmerged PRs.
 - **AC-RELEASE-CONTRIBUTOR-NOTIFICATIONS-002.2:** Duplicate references, unrelated references, and references to issues shall not cause extra or incorrect comments.
 - **AC-RELEASE-CONTRIBUTOR-NOTIFICATIONS-002.3:** Each notice shall identify and link the selected release and thank the contributor.
-- **AC-RELEASE-CONTRIBUTOR-NOTIFICATIONS-002.4:** A repeat or overlapping run shall not add a second notice for the same PR and release.
-- **AC-RELEASE-CONTRIBUTOR-NOTIFICATIONS-002.5:** The notices manually posted for v0.97.0 shall count as existing notices.
+- **AC-RELEASE-CONTRIBUTOR-NOTIFICATIONS-002.4:** A repeat or overlapping run shall not add a second notice for the same PR and release. Only comments from `github-actions[bot]` or a maintainer listed in `cliff.toml` shall count as prior notices.
+- **AC-RELEASE-CONTRIBUTOR-NOTIFICATIONS-002.5:** The notices manually posted for v0.97.0 shall count as existing notices when a listed maintainer posted them.
 - **AC-RELEASE-CONTRIBUTOR-NOTIFICATIONS-002.6:** When an API operation fails, the workflow shall report failure and preserve successful notices for a later repeat run.
 - **AC-RELEASE-CONTRIBUTOR-NOTIFICATIONS-002.7:** The run summary shall show the release, comment text, target PRs, and posted, skipped, and failed outcomes.
 
@@ -57,7 +57,7 @@ The release system owns this capability because it owns publication and maintain
 - **AC-RELEASE-CONTRIBUTOR-NOTIFICATIONS-003.1:** The Release workflow shall expose a notification checkbox, unchecked by default.
 - **AC-RELEASE-CONTRIBUTOR-NOTIFICATIONS-003.2:** When checked, notices shall run after GitHub, npm, Homebrew, and Scoop publication all succeed for a Stable release.
 - **AC-RELEASE-CONTRIBUTOR-NOTIFICATIONS-003.3:** The release run shall pass its exact tag to notifications, even if GitHub's latest-release identity changes.
-- **AC-RELEASE-CONTRIBUTOR-NOTIFICATIONS-003.4:** An unchecked box, Nightly, dry run, Desktop validation, cancellation, or failed publication shall produce no automatic notices.
+- **AC-RELEASE-CONTRIBUTOR-NOTIFICATIONS-003.4:** An unchecked box, Nightly, dry run, Desktop validation, cancellation before the notification job starts, or failed publication shall produce no automatic notices. Cancellation after posting starts may leave partial notices; a repeat run shall safely skip confirmed notices.
 - **AC-RELEASE-CONTRIBUTOR-NOTIFICATIONS-003.5:** A successful Stable backfill with the checkbox checked shall notify for its existing tag without duplicate notices.
 - **AC-RELEASE-CONTRIBUTOR-NOTIFICATIONS-003.6:** A notification failure shall remain visible. Recovery shall use the separate workflow without repeating successful publication jobs.
 

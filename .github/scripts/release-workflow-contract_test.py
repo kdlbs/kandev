@@ -109,6 +109,13 @@ class ReleaseWorkflowContractTest(unittest.TestCase):
             "needs: [prepare, publish-release, publish-npm, update-homebrew-tap, update-scoop-bucket]",
             job,
         )
+        success_gates = (
+            "needs.prepare.result == 'success'",
+            "needs.publish-release.result == 'success'",
+            "needs.publish-npm.result == 'success'",
+            "needs.update-homebrew-tap.result == 'success'",
+            "needs.update-scoop-bucket.result == 'success'",
+        )
         for requirement in (
             "!cancelled()",
             "github.event_name == 'workflow_dispatch'",
@@ -116,14 +123,14 @@ class ReleaseWorkflowContractTest(unittest.TestCase):
             "inputs.notify_contributors",
             "!inputs.dry_run",
             "!inputs.desktop_validation_only",
-            "needs.prepare.result == 'success'",
-            "needs.publish-release.result == 'success'",
-            "needs.publish-npm.result == 'success'",
-            "needs.update-homebrew-tap.result == 'success'",
-            "needs.update-scoop-bucket.result == 'success'",
+            *success_gates,
         ):
             with self.subTest(requirement=requirement):
                 self.assertIn(requirement, condition)
+
+        normalized_condition = re.sub(r"\s+", "", condition)
+        required_conjunction = "&&".join(gate.replace(" ", "") for gate in success_gates)
+        self.assertIn(required_conjunction, normalized_condition)
 
         self.assertNotIn("inputs.backfill_tag", condition)
         self.assertIn("uses: ./.github/workflows/notify-release-contributors.yml", job)

@@ -109,7 +109,7 @@ GHCR images are built before the GitHub Release. npm, Homebrew, and Scoop start 
 
 ## Notify release contributors
 
-The **Release** workflow has a `notify_contributors` checkbox. It defaults to unchecked. If selected, it posts notices after GitHub Release, npm, Homebrew, and Scoop publication succeed. The release job passes its exact tag, including on a backfill. Nightly, dry-run, desktop-validation, cancelled, and failed publication paths skip notices.
+The **Release** workflow has a `notify_contributors` checkbox. It defaults to unchecked. If selected, it posts notices after GitHub Release, npm, Homebrew, and Scoop publication succeed. The release job passes its exact tag, including on a backfill. Nightly, dry-run, desktop-validation, cancellations before the notification job starts, and failed publication paths skip notices. Cancelling after posting starts can leave partial results; rerun the exact tag to finish safely.
 
 Use the separate workflow to post notices, preview them, or recover after a partial notification run:
 
@@ -124,7 +124,7 @@ Use the separate workflow to post notices, preview them, or recover after a part
 9. Select **Run workflow**.
 10. Read the run summary for the result of each PR.
 
-Notices target merged PRs from this repository that appear in the release notes. The workflow skips bot accounts and maintainers listed in `cliff.toml`. It posts as `github-actions[bot]`.
+Notices target merged PRs from this repository that appear in the release notes. The workflow skips bot accounts and maintainers listed in `cliff.toml`. It posts as `github-actions[bot]`. Only notices posted by that bot or a listed maintainer count as already sent.
 
 If a notification run stops after publication succeeds, start a new manual run with the exact release tag. The workflow skips confirmed notices and tries the remaining PRs. It also recognizes the unmarked notices posted for `v0.97.0`. If GitHub applies a rate limit, wait for it to clear before the next run.
 

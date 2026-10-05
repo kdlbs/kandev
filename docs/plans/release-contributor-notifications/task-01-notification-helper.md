@@ -88,5 +88,5 @@ Sequential.
 
 ## Results
 
-- `python3 .github/scripts/notify-release-contributors_test.py`: 19 tests passed.
+- `python3 .github/scripts/notify-release-contributors_test.py`: 23 tests passed, including malformed URL handling, trusted duplicate authors, missing latest-release responses, and raw string fields.
 - `git diff --check -- .github/scripts/notify-release-contributors.py .github/scripts/notify-release-contributors_test.py`: passed.
