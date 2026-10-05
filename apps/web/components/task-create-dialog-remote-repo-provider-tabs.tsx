@@ -2,6 +2,7 @@
 
 import { IconBrandGithub, IconBrandGitlab, IconGitBranch } from "@tabler/icons-react";
 import { Tabs, TabsList, TabsTrigger } from "@kandev/ui/tabs";
+import { controlSizingClassName } from "@kandev/ui/control-sizing";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { AzureDevOpsIcon } from "@/components/icons/azure-devops-icon";
 import type { RemoteRepositoryProvider } from "@/hooks/domains/integrations/use-remote-repositories";
@@ -54,7 +55,10 @@ function ProviderTab({
       value={provider}
       aria-label={compact ? label : undefined}
       className={cn(
-        "min-h-11 sm:min-h-9 min-w-0 flex-1 cursor-pointer rounded-none after:hidden",
+        controlSizingClassName(
+          "standard",
+          "min-w-0 flex-1 cursor-pointer rounded-none after:hidden",
+        ),
         compact ? "px-2" : "gap-1.5 px-3",
       )}
     >
@@ -90,7 +94,13 @@ export function RemoteRepoProviderTabs({
     >
       <TabsList
         data-testid="remote-repo-provider-tabs"
-        className="min-h-[45px] sm:min-h-[37px] w-full justify-start gap-0 overflow-hidden rounded-none border-t bg-muted/30 p-0"
+        className={cn(
+          controlSizingClassName(
+            "standard",
+            "w-full justify-start gap-0 overflow-hidden rounded-none border-t bg-muted/30 p-0",
+          ),
+          "rounded-none",
+        )}
       >
         {providers.map((provider) => (
           <ProviderTab key={provider} provider={provider} compact={compact} />

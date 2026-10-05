@@ -1428,9 +1428,8 @@ func (s *Service) resolveRepoInput(ctx context.Context, workspaceID string, repo
 		return s.resolveRepoInputID(ctx, workspaceID, repositoryID, baseBranch)
 	}
 
-	// Only the plugin Host Tasks.Create path can set this internal marker.
-	// REST, WebSocket, and MCP callers must go through the built-in resolver;
-	// they cannot assert ownership of a plugin descriptor in request data.
+	// Only a server-side provider verifier can set this internal marker. Client
+	// transports cannot assert ownership of a provider descriptor in request data.
 	if repoInput.TrustedProviderDescriptor {
 		return s.resolveTrustedRemoteRepository(ctx, workspaceID, repoInput, baseBranch)
 	}

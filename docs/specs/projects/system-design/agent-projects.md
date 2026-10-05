@@ -66,6 +66,101 @@ ready row. Repeated create requests use a client request identity to avoid
 duplicate coordinators. Opening the project selects/ensures a session but
 does not dispatch a turn; the first user message starts it.
 
+The create dialog accepts an optional initial prompt. Keep the existing
+idempotent project-create API, then submit the prompt through the ordinary
+`message.add` path. Ensure the coordinator session through the existing session
+API and use `sendMessageRequest` with a stable `client_message_id`. Retain that
+session identity and exact prompt for transport reconciliation. Message
+admission already fingerprints and deduplicates caller IDs before turn hooks.
+This is direct user input, not an automated worker launch. No new project
+startup endpoint, launcher, or database prompt column is needed.
+
+The form controller owns each submission's request key, resolved repositories,
+created project, coordinator session, and message ID until completion or
+dismissal. Save the created project before attempting message submission. On
+prompt failure, keep the dialog and prompt, name the saved project in the error,
+and offer Retry start and Open coordinator actions. A retry uses the stored
+project and original message identity; it never repeats repository/project
+creation. If the original submission is uncertain, preserve its payload until
+reconciliation resolves it. Do not permit editing the same message ID into a
+different request. Dismissal must leave the saved project available in the
+sidebar. After successful prompt admission, open its coordinator conversation.
+Empty prompts skip session start entirely. Editing a project never resends an
+initial prompt.
+
+Use New Task's shared remote repository picker and provider identity helpers.
+Its provider tabs, search, URL paste, selected marks, wrapping chips, and removal
+actions form the repository interaction. Extract a small shared picker when
+necessary instead of embedding the entire workflow-task form. Resolve pasted
+URLs through workspace-scoped provider inspection, retain provider host/scope/repository
+identity, and create or reuse workspace repository records before project creation.
+Validate all resolved records with
+the existing project eligibility helper. Preserve resolution errors and retry
+without dropping other selections. Cache successfully resolved records for the
+submission so a partial failure does not import the same repository twice.
+Repository resolution must not clone, create project tasks, or start an agent.
+The first selected repository becomes primary; removal selects the first
+remaining repository when necessary. Project repositories use their configured
+default branches; creation adds no branch-policy control.
+
+Remote selections use two metadata-only task-service routes:
+`POST /api/v1/workspaces/:id/repositories/remote-selection/inspect` returns a
+verified descriptor without writes, and
+`POST /api/v1/workspaces/:id/repositories/remote-selection` registers or reuses
+the workspace record. Inspection requires workspace read access; registration
+requires `repository.manage`. Neither route clones, creates tasks, or starts
+agents. Keep generic repository creation unchanged: its transport does not
+accept a caller-supplied clone URL or trusted-descriptor flags.
+
+Both routes use the same server verification. Provider, host, scope, repository
+ID, owner, name, and branch fields from the client are validation hints. The
+server resolves the workspace provider connection and returns canonical
+identity, credential-free clone URL, and actual default branch. A mismatch
+fails before persistence. GitHub inspection reads the exact repository through
+the existing provider clients and intersects personal visibility, automation
+visibility, and workspace repository scope. It supports organization and
+personal owners beyond the first page of the accessible-repository catalog.
+GitLab inspection uses the workspace client and checks the configured origin,
+including self-managed hosts. Azure inspection retains the verified project
+scope, repository ID, and full organization/project clone path. Plugin
+inspection uses the existing server `InspectRepositoryProvider` contract and
+retains its exact clone URL. Never infer a default branch from `main` or
+`master`, or authorize an origin from submitted host fields.
+
+Registration re-verifies a selection and supplies the trusted descriptor only
+inside the service boundary. Reuse `FindOrCreateRepository` and its identity
+lock for concurrent and repeated imports. Keep provider host and scope distinct
+when matching existing records; legacy records may be reused only with proven
+canonical identity. Return the persisted repository for eligibility checks and
+workspace-state updates. Use bounded typed invalid/not-found/unavailable errors
+without provider payloads or credentials. The client retains other selections
+and successful registrations after a partial failure. Abort or ignore obsolete
+inspection results after dismissal, workspace changes, or a newer request.
+
+Match New Task's desktop geometry: 900px wide when the viewport permits,
+bounded to viewport width and 85vh, with one scrolling body and a persistent
+action footer. Show repository chips, project name, optional multiline initial
+prompt, then coordinator and primary-repository selectors. Advanced settings
+start closed and contain economy/frontier selectors and existing execution
+information. New-project worker selections start at Same as coordinator and
+resolve to explicit valid profile IDs at submission. Changing the coordinator
+updates only inherited selections. Existing project edits retain all explicit
+IDs. Use the existing shared controls and spacing scale. Primary actions are
+Create project for blank prompts and Create and start otherwise.
+
+Project and worker help use existing tooltip primitives on fine pointers,
+including keyboard focus. On coarse pointers, use the shared touch-help drawer
+pattern with tap triggers. The mobile form remains a full-height focused
+surface: stacked fields, wrapping chips, one content scroll, 44px targets, and
+a fixed safe-area footer. Restore focus on dismissal and avoid nesting an
+independent scrolling dialog inside the mobile form.
+
+Keep the open form and controller owned by a host that survives responsive
+navigation changes. Changing the sidebar presentation or rotating a phone must
+not dismiss the form, reset its draft, or discard an in-flight submission.
+Responsive dialog/drawer presentation can change while retaining that owner.
+No persisted draft storage or broader navigation redesign is required.
+
 The create form has no executor selector. The workspace default stores an
 executor ID. The service requires that executor to be active and host-local
 worktree, then resolves its first available profile (the task service returns
@@ -87,10 +182,15 @@ unavailable marker and launches fail until corrected.
 
 ## Context and execution layout
 
+The [context knowledge design](context-knowledge.md) owns document
+conventions and advisory format feedback. This section owns storage and
+execution boundaries.
+
 Use UUID-based roots under Kandev's configured data directory, for example:
 
 ```text
 ~/.kandev/agent-projects/<project-id>/context/
+  index.md
   notes.md
   docs/
   internal/
@@ -199,7 +299,8 @@ conversation, stop, archive, and delete without workflow transitions.
 Archiving/deleting a coordinator is a project-level action. The desktop/phone
 confirmation names the project and count of direct workers. Archive applies
 to coordinator and all workers, retains context, and removes the active
-sidebar row; an Archived Projects view can restore the project and its tasks.
+sidebar row. Restore remains available through the existing project API; the
+ordinary sidebar's archived-projects entry is hidden in this release.
 Delete applies to coordinator and all workers and offers a
 separate retain/remove-context choice. Both reject while any project task is
 running and report a partial failure with remaining resources; retries are
@@ -240,6 +341,18 @@ direct worker rows when workers exist; no coordinator child row or empty child
 placeholder is rendered. Child rows open their own task view with project
 context. Exclude project tasks from ordinary task sidebar/board lists to avoid
 duplicate rows. The section has a create action, status, and project edit menu.
+In the default ordinary layout, render Integrations immediately before Projects
+and Tasks afterward. Do not reorder the saved-layout branch or Office sections.
+Keep Projects' create action visible when its section is collapsed. Derive the
+ordinary section's unsaved default from whether active projects exist; an
+empty or not-yet-loaded list starts closed. Stored boolean preferences take
+precedence. Remove any unconditional global Projects expansion default that
+masks this fallback, while retaining an explicit default for Office Projects.
+Do not auto-close a manually expanded section when its last project is removed.
+Hide the ordinary archived-projects control and rows, and remove their eager
+sidebar loading. Archive/delete remain project-level actions. Browser lifecycle
+tests restore archived projects through the existing API instead of expecting
+the hidden navigation control.
 Desktop uses a dialog for create/edit. Phone uses
 a full-height drawer or route using the existing mobile navigation sheet and
 repository picker patterns; the body scrolls, the footer stays visible above

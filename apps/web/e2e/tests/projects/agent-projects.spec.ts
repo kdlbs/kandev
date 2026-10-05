@@ -1,15 +1,18 @@
 import { test, expect } from "../../fixtures/test-base";
-import { waitForLatestSessionDone } from "../../helpers/session";
+import { waitForLatestSessionDone, waitForSessionDone } from "../../helpers/session";
 import { SessionPage } from "../../pages/session-page";
 import {
   readAgentProject,
+  restoreArchivedAgentProject,
   setupAgentProjectFixture,
   type AgentProjectView,
 } from "./agent-projects-fixture";
 import type { ApiClient } from "../../helpers/api-client";
 import {
   assertProjectFormGeometry,
+  assertProjectRemotePickerGeometry,
   assertProjectTouchTarget,
+  assertProjectWorkerProfilesGeometry,
   settleProjectSurface,
 } from "./agent-projects-geometry";
 
@@ -20,6 +23,24 @@ async function listProjects(apiClient: ApiClient, workspaceId: string) {
   );
   if (!response.ok) throw new Error(`Agent Project list failed (${response.status})`);
   return (await response.json()) as { projects: AgentProjectView[] };
+}
+
+async function chooseConfiguredRepository(
+  form: import("@playwright/test").Locator,
+  repositoryId: string,
+  repositoryName: string,
+  touch = false,
+) {
+  const addRepository = form.getByTestId("agent-project-add-repository");
+  if (touch) await addRepository.tap();
+  else await addRepository.click();
+  const option = form
+    .page()
+    .getByTestId("agent-project-existing-repository-option")
+    .filter({ hasText: repositoryName });
+  if (touch) await option.tap();
+  else await option.click();
+  await form.getByRole("combobox", { name: "Primary repository" }).selectOption(repositoryId);
 }
 
 test("desktop users create a project, start a coordinator worker, share context, and manage the tree", async ({
@@ -35,26 +56,29 @@ test("desktop users create a project, start a coordinator worker, share context,
   let projectId = "";
   let projectName = "Agent Project desktop";
   try {
+    await testPage.setViewportSize({ width: 1280, height: 900 });
     await testPage.goto("/");
+    const projectsHeader = testPage.locator('[aria-controls="sidebar-section-projects"]');
+    await expect(projectsHeader).toHaveAttribute("aria-expanded", "false");
     const createButton = testPage.getByTestId("agent-project-create-open");
     await expect(createButton).toBeVisible();
+    const createButtonBox = await createButton.boundingBox();
+    expect(createButtonBox).not.toBeNull();
+    expect(Math.abs(createButtonBox!.width - 24)).toBeLessThanOrEqual(1);
+    expect(Math.abs(createButtonBox!.height - 24)).toBeLessThanOrEqual(1);
+    await expect(
+      testPage.locator("#sidebar-section-projects").getByText("No projects yet"),
+    ).not.toBeVisible();
     await createButton.click();
     const form = testPage.getByTestId("agent-project-form-desktop");
     await expect(form).toBeVisible();
-    await expect(form.locator("select").nth(0)).toHaveValue("");
-    await expect
-      .soft(form.locator("select").nth(0).locator("option:checked"))
-      .toHaveText("Select repository");
+    await expect(form.getByRole("combobox", { name: "Primary repository" })).toHaveValue("");
     await form.getByTestId("agent-project-name").fill(projectName);
+    await expect(form.getByText("Initial prompt (optional)", { exact: true })).toBeVisible();
+    await chooseConfiguredRepository(form, fixture.repositoryId, `fixture/${fixtureName}`);
     await form
-      .locator("label")
-      .filter({ hasText: `fixture/${fixtureName}` })
-      .locator("input")
-      .check();
-    await form.locator("select").nth(0).selectOption(fixture.repositoryId);
-    for (const profileSelect of [1, 2, 3]) {
-      await form.locator("select").nth(profileSelect).selectOption(fixture.profileId);
-    }
+      .getByRole("combobox", { name: "Coordinator profile" })
+      .selectOption(fixture.profileId);
     const submit = form.getByTestId("agent-project-submit");
     await expect(submit).toBeEnabled();
     await assertProjectFormGeometry(form, false);
@@ -66,7 +90,10 @@ test("desktop users create a project, start a coordinator worker, share context,
       .not.toBe("");
     let project = (await listProjects(apiClient, seedData.workspaceId)).projects[0]!;
     projectId = project.id;
+    expect((await apiClient.listTaskSessions(project.main_task_id)).sessions).toHaveLength(0);
     await expect(testPage.getByTestId(`agent-project-row-${projectId}`)).toBeVisible();
+    await settleProjectSurface(testPage.locator('[data-testid="app-sidebar-scroll"]:visible'));
+    await testPage.screenshot({ path: test.info().outputPath("desktop-project-sidebar.png") });
     await expect(
       testPage.locator(
         `[data-testid="sidebar-task-item"][data-task-row-id="${project.main_task_id}"]`,
@@ -137,9 +164,47 @@ test("desktop users create a project, start a coordinator worker, share context,
       "aria-selected",
       "true",
     );
-    await fileRoots.getByRole("button", { name: "notes.md", exact: true }).click();
+    await fileRoots.getByRole("button", { name: "index.md", exact: true }).click();
     const contextEditor = fileRoots.getByTestId("agent-project-context-editor");
-    await contextEditor.fill("Shared project context from the desktop E2E.\n");
+    await expect(contextEditor).toHaveValue(/okf_version: "0\.2"/);
+    await fileRoots.getByRole("button", { name: "Back to project context" }).click();
+    await fileRoots.getByRole("button", { name: "notes.md", exact: true }).click();
+    const contextDraft =
+      "---\ntitle: Desktop draft\n---\nShared project context from the desktop E2E.\n";
+    await contextEditor.fill(contextDraft);
+    const formatFeedback = fileRoots.getByTestId("agent-project-context-format");
+    await expect(formatFeedback).toContainText("Concept type is missing");
+    await expect(formatFeedback).toContainText("You can still save this draft.");
+    await expect(contextEditor).toBeFocused();
+    await expect(fileRoots.getByRole("button", { name: "Save context" })).toBeEnabled();
+    const contextSurface = fileRoots.getByTestId("agent-project-context");
+    const [backBox, saveBox, contextBounds] = await Promise.all([
+      contextSurface.getByRole("button", { name: "Back to project context" }).boundingBox(),
+      contextSurface.getByRole("button", { name: "Save context" }).boundingBox(),
+      contextSurface.evaluate((element) => {
+        const surface = element.getBoundingClientRect();
+        const editor = element
+          .querySelector("[data-testid='agent-project-context-editor']")!
+          .getBoundingClientRect();
+        return {
+          surfaceRight: surface.right,
+          editorRight: editor.right,
+          editorBottom: editor.bottom,
+          viewportWidth: window.innerWidth,
+          viewportHeight: window.innerHeight,
+        };
+      }),
+    ]);
+    expect(backBox).not.toBeNull();
+    expect(saveBox).not.toBeNull();
+    expect(Math.abs(backBox!.height - 28)).toBeLessThanOrEqual(1);
+    expect(backBox!.width).toBeGreaterThanOrEqual(28);
+    expect(backBox!.width).toBeLessThanOrEqual(32);
+    expect(Math.abs(saveBox!.height - 28)).toBeLessThanOrEqual(1);
+    expect(contextBounds.surfaceRight).toBeLessThanOrEqual(contextBounds.viewportWidth);
+    expect(contextBounds.editorRight).toBeLessThanOrEqual(contextBounds.viewportWidth);
+    expect(contextBounds.editorBottom).toBeLessThanOrEqual(contextBounds.viewportHeight);
+    await testPage.screenshot({ path: test.info().outputPath("desktop-context-advice.png") });
     await fileRoots.getByRole("button", { name: "Save context" }).click();
     await expect
       .poll(async () => {
@@ -150,7 +215,7 @@ test("desktop users create a project, start a coordinator worker, share context,
         if (!response.ok) return "";
         return ((await response.json()) as { content: string }).content;
       })
-      .toContain("Shared project context from the desktop E2E.");
+      .toBe(contextDraft);
 
     await fileRoots.getByRole("tab", { name: "Workspace" }).click();
     await expect(fileRoots.getByRole("tab", { name: "Workspace" })).toHaveAttribute(
@@ -177,9 +242,29 @@ test("desktop users create a project, start a coordinator worker, share context,
     const workerRoots = testPage.getByTestId("agent-project-file-roots");
     await workerRoots.getByRole("tab", { name: "Context" }).click();
     await workerRoots.getByRole("button", { name: "notes.md", exact: true }).click();
-    await expect(workerRoots.getByTestId("agent-project-context-editor")).toHaveValue(
-      "Shared project context from the desktop E2E.\n",
+    const workerEditor = workerRoots.getByTestId("agent-project-context-editor");
+    await expect(workerEditor).toHaveValue(contextDraft);
+    const workerDraft = "---\ntype: Decision\n---\nWorker draft that must survive a conflict.\n";
+    await workerEditor.fill(workerDraft);
+    const contextFileUrl = `/api/v1/workspaces/${seedData.workspaceId}/agent-projects/${projectId}/context/content?path=notes.md`;
+    const currentFileResponse = await apiClient.rawRequest("GET", contextFileUrl);
+    expect(currentFileResponse.ok).toBeTruthy();
+    const currentFile = (await currentFileResponse.json()) as { hash: string };
+    const archivedNotes = "---\ntype: Reference\n---\nUpdated by another project task.\n";
+    const concurrentWrite = await apiClient.rawRequest(
+      "PUT",
+      `/api/v1/workspaces/${seedData.workspaceId}/agent-projects/${projectId}/context/content`,
+      {
+        path: "notes.md",
+        content: archivedNotes,
+        expected_hash: currentFile.hash,
+      },
     );
+    expect(concurrentWrite.status).toBe(200);
+    await workerRoots.getByRole("button", { name: "Save context" }).click();
+    await expect(workerRoots.getByRole("alert")).toBeVisible();
+    await expect(workerEditor).toHaveValue(workerDraft);
+    await expect(workerRoots.getByRole("button", { name: "Save context" })).toBeEnabled();
 
     const actions = testPage
       .getByTestId(`agent-project-row-${projectId}`)
@@ -196,24 +281,19 @@ test("desktop users create a project, start a coordinator worker, share context,
       })
       .toBe(0);
     const sidebar = testPage.locator('[data-testid="app-sidebar-scroll"]:visible');
+    const sidebarProjectsHeader = sidebar.locator('[aria-controls="sidebar-section-projects"]');
+    await expect(sidebarProjectsHeader).toHaveAttribute("aria-expanded", "false");
+    await expect(sidebar.getByText("No projects yet")).not.toBeVisible();
+    await expect(sidebar.getByTestId("agent-project-archived-toggle")).toHaveCount(0);
+    await sidebarProjectsHeader.click();
+    await expect(sidebarProjectsHeader).toHaveAttribute("aria-expanded", "true");
     await expect(sidebar.getByText("No projects yet")).toBeVisible();
-    await sidebar.getByTestId("agent-project-archived-toggle").click();
-    const archivedRow = sidebar.getByTestId(`agent-project-row-${projectId}`);
-    await expect(archivedRow).toBeVisible();
-    const restoreResponsePromise = testPage.waitForResponse(
-      (response) =>
-        response.url().includes(`/agent-projects/${projectId}/restore`) &&
-        response.request().method() === "POST",
-    );
-    await archivedRow.getByRole("button", { name: `Restore ${projectName}` }).click();
-    const restoreResponse = await restoreResponsePromise;
-    expect(restoreResponse.status(), await restoreResponse.text()).toBe(200);
+    await restoreArchivedAgentProject(apiClient, seedData.workspaceId, projectId, archivedNotes);
     await expect
       .poll(async () => (await listProjects(apiClient, seedData.workspaceId)).projects.length, {
         timeout: 30_000,
       })
       .toBe(1);
-    await sidebar.getByTestId("agent-project-archived-toggle").click();
 
     const activeRow = sidebar.getByTestId(`agent-project-row-${projectId}`);
     await expect(activeRow).toBeVisible({ timeout: 30_000 });
@@ -252,6 +332,237 @@ test("desktop users create a project, start a coordinator worker, share context,
   }
 });
 
+test("a nonblank initial prompt starts exactly one coordinator session", async ({
+  testPage,
+  apiClient,
+  backend,
+  seedData,
+}) => {
+  test.setTimeout(120_000);
+  const fixtureName = `project-prompt-${Date.now()}`;
+  const fixture = await setupAgentProjectFixture(apiClient, backend, seedData, fixtureName);
+  let projectId = "";
+  try {
+    await testPage.setViewportSize({ width: 1280, height: 900 });
+    await testPage.goto("/");
+    await testPage.getByTestId("agent-project-create-open").click();
+    const form = testPage.getByTestId("agent-project-form-desktop");
+    await form.getByTestId("agent-project-name").fill("Initial prompt project");
+    await chooseConfiguredRepository(form, fixture.repositoryId, `fixture/${fixtureName}`);
+    await form
+      .getByRole("combobox", { name: "Coordinator profile" })
+      .selectOption(fixture.profileId);
+    const prompt = "Inspect the project and report the starting state.";
+    await form.getByTestId("agent-project-initial-prompt").fill(prompt);
+    await form.getByTestId("agent-project-submit").click();
+
+    await expect(form).toBeHidden();
+    await expect
+      .poll(async () => (await listProjects(apiClient, seedData.workspaceId)).projects[0]?.id ?? "")
+      .not.toBe("");
+    const project = (await listProjects(apiClient, seedData.workspaceId)).projects[0]!;
+    projectId = project.id;
+    await expect(testPage).toHaveURL(new RegExp(`/t/${project.main_task_id}$`));
+    const { sessions } = await apiClient.listTaskSessions(project.main_task_id);
+    expect(sessions).toHaveLength(1);
+    const sessionId = sessions[0]!.id;
+    await expect
+      .poll(
+        async () => {
+          const { messages } = await apiClient.listSessionMessages(sessionId);
+          return messages.filter(
+            (message) =>
+              message.author_type === "user" &&
+              message.content.endsWith(prompt) &&
+              message.content.split(prompt).length - 1 === 1,
+          ).length;
+        },
+        { timeout: 30_000 },
+      )
+      .toBeGreaterThan(0);
+    await expect
+      .poll(
+        async () => {
+          const { messages } = await apiClient.listSessionMessages(sessionId);
+          return messages.some((message) => message.author_type === "agent");
+        },
+        { timeout: 90_000 },
+      )
+      .toBe(true);
+    await waitForSessionDone(
+      apiClient,
+      project.main_task_id,
+      sessionId,
+      "Waiting for the initial coordinator prompt",
+      90_000,
+    );
+    const { messages } = await apiClient.listSessionMessages(sessions[0]!.id);
+    expect(
+      messages.filter(
+        (message) =>
+          message.author_type === "user" &&
+          message.content.endsWith(prompt) &&
+          message.content.split(prompt).length - 1 === 1,
+      ),
+    ).toHaveLength(1);
+  } finally {
+    await fixture.cleanup(projectId || undefined);
+  }
+});
+
+test("pasting an unlisted repository uses its verified default branch", async ({
+  testPage,
+  apiClient,
+  backend,
+  seedData,
+}) => {
+  const fixtureName = `project-paste-${Date.now()}`;
+  const fixture = await setupAgentProjectFixture(apiClient, backend, seedData, fixtureName);
+  let projectId = "";
+  let importedRepositoryId = "";
+  try {
+    await testPage.goto("/");
+    await testPage.getByTestId("agent-project-create-open").click();
+    const form = testPage.getByTestId("agent-project-form-desktop");
+    await form.getByTestId("agent-project-name").fill("Unlisted repository project");
+    await form.getByTestId("agent-project-add-repository").click();
+    const pickerInput = testPage.getByTestId("remote-repo-input");
+    await expect(pickerInput).toBeVisible();
+    await expect(
+      testPage.getByTestId("remote-repo-option").filter({ hasText: "fixture/unlisted-project" }),
+    ).toHaveCount(0);
+
+    await apiClient.mockGitHubAddRepos("fixture", [
+      {
+        full_name: "fixture/unlisted-project",
+        owner: "fixture",
+        name: "unlisted-project",
+        private: true,
+      },
+    ]);
+    await apiClient.mockGitHubAddRepositoryDetails([
+      {
+        full_name: "fixture/unlisted-project",
+        owner: "fixture",
+        name: "unlisted-project",
+        clone_url: "https://github.com/fixture/unlisted-project.git",
+        html_url: "https://github.com/fixture/unlisted-project",
+        default_branch: "trunk",
+      },
+    ]);
+    await pickerInput.fill("https://github.com/fixture/unlisted-project");
+    await pickerInput.press("Enter");
+    await expect(form.getByTestId("agent-project-repository-chip")).toContainText(
+      "fixture/unlisted-project",
+    );
+    await form
+      .getByRole("combobox", { name: "Primary repository" })
+      .selectOption({ label: "fixture/unlisted-project" });
+    await form
+      .getByRole("combobox", { name: "Coordinator profile" })
+      .selectOption(fixture.profileId);
+    await form.getByTestId("agent-project-submit").click();
+
+    await expect
+      .poll(async () => (await listProjects(apiClient, seedData.workspaceId)).projects[0]?.id ?? "")
+      .not.toBe("");
+    const project = (await listProjects(apiClient, seedData.workspaceId)).projects[0]!;
+    projectId = project.id;
+    const repositoriesResponse = await apiClient.rawRequest(
+      "GET",
+      `/api/v1/workspaces/${seedData.workspaceId}/repositories`,
+    );
+    expect(repositoriesResponse.ok).toBe(true);
+    const repositories = (await repositoriesResponse.json()) as {
+      repositories: Array<{ id: string; name: string; default_branch: string; remote_url: string }>;
+    };
+    const imported = repositories.repositories.find((repository) =>
+      repository.name.includes("unlisted-project"),
+    );
+    expect(imported).toMatchObject({
+      default_branch: "trunk",
+      remote_url: "https://github.com/fixture/unlisted-project.git",
+    });
+    importedRepositoryId = imported!.id;
+  } finally {
+    await fixture.cleanup(projectId || undefined);
+    if (importedRepositoryId) {
+      await apiClient
+        .rawRequest("DELETE", `/api/v1/repositories/${importedRepositoryId}`)
+        .catch(() => undefined);
+    }
+  }
+});
+
+test("worker profiles inherit the coordinator until explicitly overridden", async ({
+  testPage,
+  apiClient,
+  backend,
+  seedData,
+}) => {
+  const fixtureName = `project-profile-inheritance-${Date.now()}`;
+  const fixture = await setupAgentProjectFixture(apiClient, backend, seedData, fixtureName);
+  let projectId = "";
+  let alternateProfileId = "";
+  try {
+    await testPage.setViewportSize({ width: 1280, height: 900 });
+    const { agents } = await apiClient.listAgents();
+    const mockAgent = agents.find((agent) => agent.name === "mock-agent")!;
+    const alternate = await apiClient.createAgentProfile(
+      mockAgent.id,
+      "E2E inherited worker profile",
+      { model: "mock-fast", cli_passthrough: false },
+    );
+    alternateProfileId = alternate.id;
+    await testPage.goto("/");
+    await testPage.getByTestId("agent-project-create-open").click();
+    const form = testPage.getByTestId("agent-project-form-desktop");
+    await form.getByTestId("agent-project-name").fill("Inherited worker profile project");
+    await chooseConfiguredRepository(form, fixture.repositoryId, `fixture/${fixtureName}`);
+    const coordinator = form.getByRole("combobox", { name: "Coordinator profile" });
+    await coordinator.selectOption(fixture.profileId);
+    const advanced = form.getByTestId("agent-project-advanced");
+    await advanced.locator("summary").click();
+    await assertProjectWorkerProfilesGeometry(form, false);
+    await advanced.scrollIntoViewIfNeeded();
+    await form.getByTestId("agent-project-frontier-profile-select").scrollIntoViewIfNeeded();
+    await settleProjectSurface(form);
+    await testPage.screenshot({
+      path: test.info().outputPath("desktop-project-form-advanced.png"),
+    });
+    const economy = form.getByTestId("agent-project-economy-profile-select");
+    await expect(economy.locator("option:checked")).toHaveText("Same as coordinator");
+
+    await coordinator.selectOption(alternateProfileId);
+    await expect(economy.locator("option:checked")).toHaveText("Same as coordinator");
+    await economy.selectOption(alternateProfileId);
+    await coordinator.selectOption(fixture.profileId);
+    await expect(economy).toHaveValue(alternateProfileId);
+    await form.getByTestId("agent-project-submit").click();
+
+    await expect
+      .poll(async () => (await listProjects(apiClient, seedData.workspaceId)).projects[0]?.id ?? "")
+      .not.toBe("");
+    projectId = (await listProjects(apiClient, seedData.workspaceId)).projects[0]!.id;
+    const detailResponse = await apiClient.rawRequest(
+      "GET",
+      `/api/v1/workspaces/${seedData.workspaceId}/agent-projects/${projectId}`,
+    );
+    expect(detailResponse.ok).toBe(true);
+    const saved = (await detailResponse.json()) as {
+      coordinator_profile_id: string;
+      economy_profile_id: string;
+    };
+    expect(saved).toMatchObject({
+      coordinator_profile_id: fixture.profileId,
+      economy_profile_id: alternateProfileId,
+    });
+  } finally {
+    await fixture.cleanup(projectId || undefined);
+    if (alternateProfileId) await apiClient.deleteAgentProfile(alternateProfileId, true);
+  }
+});
+
 test("project creation preserves a failed draft and adapts to narrow viewports", async ({
   testPage,
   apiClient,
@@ -260,6 +571,14 @@ test("project creation preserves a failed draft and adapts to narrow viewports",
 }) => {
   const fixtureName = `project-draft-${Date.now()}`;
   const fixture = await setupAgentProjectFixture(apiClient, backend, seedData, fixtureName);
+  await apiClient.mockGitHubAddRepos("fixture", [
+    {
+      full_name: "fixture/geometry-picker",
+      owner: "fixture",
+      name: "geometry-picker",
+      private: true,
+    },
+  ]);
   let projectId = "";
   try {
     await testPage.goto("/");
@@ -269,10 +588,10 @@ test("project creation preserves a failed draft and adapts to narrow viewports",
     await form.getByTestId("agent-project-name").fill("   ");
     await expect(form.getByTestId("agent-project-submit")).toBeDisabled();
     await form.getByTestId("agent-project-name").fill(name);
-    await form.getByRole("checkbox", { name: `fixture/${fixtureName}` }).check();
-    for (const profileSelect of [1, 2, 3]) {
-      await form.locator("select").nth(profileSelect).selectOption(fixture.profileId);
-    }
+    await chooseConfiguredRepository(form, fixture.repositoryId, `fixture/${fixtureName}`);
+    await form
+      .getByRole("combobox", { name: "Coordinator profile" })
+      .selectOption(fixture.profileId);
     for (const width of [767, 393, 768]) {
       await testPage.setViewportSize({ width, height: 600 });
       form = testPage.getByTestId(
@@ -281,18 +600,27 @@ test("project creation preserves a failed draft and adapts to narrow viewports",
       await expect(form).toBeVisible();
       await expect(form.getByTestId("agent-project-name")).toHaveValue(name);
       await assertProjectFormGeometry(form, width < 768);
+      if (width === 393) {
+        await testPage.screenshot({ path: test.info().outputPath("narrow-fine-project-form.png") });
+      }
       const overflow = await testPage.evaluate(
         () => document.documentElement.scrollWidth - window.innerWidth,
       );
       expect(overflow).toBeLessThanOrEqual(1);
       if (width < 768) {
-        await form.locator("select").nth(3).scrollIntoViewIfNeeded();
-        await expect(form.locator("select").nth(3)).toBeInViewport();
+        const advanced = form.getByTestId("agent-project-advanced");
+        await advanced.locator("summary").scrollIntoViewIfNeeded();
+        await expect(advanced.locator("summary")).toBeInViewport();
         await expect(form.getByTestId("agent-project-submit")).toBeInViewport();
       }
     }
     await testPage.setViewportSize({ width: 1280, height: 900 });
     form = testPage.getByTestId("agent-project-form-desktop");
+    await assertProjectRemotePickerGeometry(
+      form,
+      false,
+      test.info().outputPath("desktop-project-repository-picker.png"),
+    );
     const createRoute = `**/api/v1/workspaces/${seedData.workspaceId}/agent-projects`;
     await testPage.route(createRoute, async (route) => {
       if (route.request().method() !== "POST") return route.continue();
@@ -305,7 +633,9 @@ test("project creation preserves a failed draft and adapts to narrow viewports",
     await form.getByTestId("agent-project-submit").click();
     await expect(form.getByRole("alert")).toContainText("Temporary project creation failure");
     await expect(form.getByTestId("agent-project-name")).toHaveValue(name);
-    await expect(form.locator("select").nth(3)).toHaveValue(fixture.profileId);
+    await expect(form.getByRole("combobox", { name: "Coordinator profile" })).toHaveValue(
+      fixture.profileId,
+    );
     await expect(form.getByTestId("agent-project-submit")).toBeEnabled();
     await testPage.unroute(createRoute);
     await form.getByTestId("agent-project-submit").click();
@@ -351,10 +681,29 @@ test("tablet project forms keep touch controls reachable", async ({
     await expect(form).toBeVisible();
     await settleProjectSurface(form);
     for (const control of await form
-      .locator("input:not([type=checkbox]), select, footer button, [data-slot=dialog-close]")
+      .locator(
+        "input:not([type=checkbox]), select, textarea, footer button, [data-slot=dialog-close]",
+      )
       .all()) {
+      if (!(await control.isVisible())) continue;
       await assertProjectTouchTarget(control);
     }
+    await assertProjectTouchTarget(form.getByTestId("agent-project-advanced").locator("summary"));
+    await assertProjectRemotePickerGeometry(
+      form,
+      true,
+      test.info().outputPath("tablet-project-repository-picker.png"),
+    );
+    const coordinatorHelp = form.getByTestId("agent-project-coordinator-help");
+    await coordinatorHelp.tap();
+    const coordinatorHelpDrawer = page.getByTestId("agent-project-coordinator-help-drawer");
+    await expect(coordinatorHelpDrawer).toBeVisible();
+    await settleProjectSurface(coordinatorHelpDrawer);
+    await page.screenshot({ path: test.info().outputPath("tablet-project-help.png") });
+    await page.keyboard.press("Escape");
+    await expect(coordinatorHelp).toBeFocused();
+    await expect(coordinatorHelpDrawer).toBeHidden();
+    await settleProjectSurface(page.locator("body"));
     await page.screenshot({ path: test.info().outputPath("tablet-project-form.png") });
     await form.getByRole("button", { name: "Close", exact: true }).tap();
     await expect(form).toBeHidden();
@@ -423,7 +772,10 @@ test("coordinator sessions retain their profile after later project edits", asyn
       .click();
     await testPage.getByRole("menuitem", { name: "Edit project" }).click();
     const editForm = testPage.getByTestId("agent-project-form-desktop");
-    await editForm.locator("select").nth(1).selectOption(fixture.profileId);
+    await editForm.getByTestId("agent-project-advanced").locator("summary").click();
+    await editForm
+      .getByRole("combobox", { name: "Coordinator profile" })
+      .selectOption(fixture.profileId);
     await editForm.getByTestId("agent-project-submit").click();
     await expect(editForm).toBeHidden();
     await startButton.click();

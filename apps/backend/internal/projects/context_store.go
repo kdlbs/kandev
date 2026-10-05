@@ -25,6 +25,11 @@ var (
 
 const maxContextFileBytes = 5 << 20
 
+const (
+	contextIndexStarter = "---\nokf_version: \"0.2\"\n---\n# Project context\n\n- [Project notes](notes.md): Current status, decisions, and handoffs.\n"
+	contextNotesStarter = "---\ntype: Project Notes\ntitle: Project notes\ndescription: Current status, decisions, and handoffs for this project.\n---\n# Project notes\n\n## Current status\n\n## Decisions\n\n## Handoffs\n"
+)
+
 // ContextStore owns the durable filesystem area shared by project tasks.
 type ContextStore struct {
 	root string
@@ -68,17 +73,44 @@ func (s *ContextStore) Provision(_ context.Context, projectID string) (string, e
 		return "", fmt.Errorf("open project context: %w", err)
 	}
 	defer func() { _ = contextDir.Close() }()
-	_, err = contextDir.ReadFile("notes.md")
-	if err == nil {
-		return root, nil
-	}
-	if !errors.Is(err, os.ErrNotExist) {
-		return "", fmt.Errorf("inspect initial project notes: %w", err)
-	}
-	if err := contextDir.CreateFile("notes.md", []byte("# Project notes\n"), 0o600); err != nil && !errors.Is(err, os.ErrExist) {
-		return "", fmt.Errorf("create initial project notes: %w", err)
+	for _, starter := range []struct {
+		name    string
+		content string
+	}{
+		{name: "index.md", content: contextIndexStarter},
+		{name: "notes.md", content: contextNotesStarter},
+	} {
+		if err := ensureContextStarterFile(contextDir, starter.name, []byte(starter.content)); err != nil {
+			return "", err
+		}
 	}
 	return root, nil
+}
+
+func ensureContextStarterFile(directory storageworkspaces.DirectoryHandle, name string, content []byte) error {
+	mode, err := directory.LstatEntry(name)
+	if err == nil {
+		if mode.IsRegular() {
+			return nil
+		}
+		return fmt.Errorf("%w: project context starter %q is not a regular file", ErrInvalidContextPath, name)
+	}
+	if !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("inspect initial project %s: %w", name, err)
+	}
+	if err := directory.CreateFile(name, content, 0o600); err != nil {
+		if !errors.Is(err, os.ErrExist) {
+			return fmt.Errorf("create initial project %s: %w", name, err)
+		}
+		mode, err = directory.LstatEntry(name)
+		if err != nil {
+			return fmt.Errorf("inspect concurrent project starter %s: %w", name, err)
+		}
+		if !mode.IsRegular() {
+			return fmt.Errorf("%w: project context starter %q is not a regular file", ErrInvalidContextPath, name)
+		}
+	}
+	return nil
 }
 
 func (s *ContextStore) EnsureTaskLink(taskRoot, projectID, taskID, taskDirName string) error {

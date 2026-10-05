@@ -55,6 +55,9 @@ func TestApplyAgentProjectInstructionsAddsCurrentWorkspaceAndRefreshesMetadata(t
 	require.Contains(t, req.TaskDescription, `"/tasks/project/api"`)
 	require.Contains(t, req.TaskDescription, `"/tasks/project/web"`)
 	require.Contains(t, req.TaskDescription, "create_agent_project_worker_kandev")
+	require.Contains(t, req.TaskDescription, "index.md")
+	require.Contains(t, req.TaskDescription, "If index.md is missing")
+	require.Contains(t, req.TaskDescription, "maintain index links and descriptions")
 	require.NotContains(t, req.TaskDescription, "/old/context")
 	require.Equal(t, req.TaskDescription, req.Metadata["task_description"])
 }

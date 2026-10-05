@@ -126,6 +126,25 @@ func TestPATClientProjectDiscovery(t *testing.T) {
 	}
 }
 
+func TestPATClientGetProjectByPathUsesEncodedFullNamespace(t *testing.T) {
+	host, stop := newTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got, want := r.URL.EscapedPath(), "/projects/group%2Fsubgroup%2Fproject"; got != want {
+			t.Errorf("escaped path = %q, want %q", got, want)
+		}
+		_, _ = w.Write([]byte(`{"id":42,"path_with_namespace":"group/subgroup/project","namespace":{"full_path":"group/subgroup"},"path":"project","name":"Project","web_url":"https://gitlab.example/group/subgroup/project","http_url_to_repo":"https://gitlab.example/group/subgroup/project.git","default_branch":"trunk"}`))
+	}))
+	t.Cleanup(stop)
+
+	project, err := NewPATClient(host, "tok").GetProjectByPath(t.Context(), "group/subgroup/project")
+	if err != nil {
+		t.Fatalf("GetProjectByPath() error = %v", err)
+	}
+	if project == nil || project.ID != 42 || project.PathWithNamespace != "group/subgroup/project" ||
+		project.HTTPURLToRepo != "https://gitlab.example/group/subgroup/project.git" || project.DefaultBranch != "trunk" {
+		t.Fatalf("project = %#v", project)
+	}
+}
+
 func TestPATClientMergeMRRequestAndResponse(t *testing.T) {
 	host, stop := newTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if got, want := r.Method, http.MethodPut; got != want {

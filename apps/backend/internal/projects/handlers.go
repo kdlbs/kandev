@@ -158,7 +158,7 @@ func (h *Handler) writeError(c *gin.Context, err error) {
 		status = http.StatusBadRequest
 	case errors.Is(err, ErrContextNotFound):
 		status = http.StatusNotFound
-	case errors.Is(err, ErrExecutorIncompatible), errors.Is(err, ErrDependenciesMissing):
+	case errors.Is(err, ErrExecutorIncompatible), errors.Is(err, ErrDependenciesMissing), errors.Is(err, ErrUnsupportedProjectAgentProfile):
 		status = http.StatusUnprocessableEntity
 	default:
 		if taskservice.IsForbidden(err) {

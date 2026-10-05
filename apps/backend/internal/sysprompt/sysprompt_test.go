@@ -540,6 +540,46 @@ func TestAgentProjectWorkerInstructionsDoNotGrantCoordinatorRole(t *testing.T) {
 	assert.NotContains(t, content, "create_agent_project_worker_kandev")
 }
 
+func TestAgentProjectInstructionsKnowledgeGuidance(t *testing.T) {
+	for _, tt := range []struct {
+		tier        string
+		coordinator bool
+	}{
+		{tier: "coordinator", coordinator: true},
+		{tier: "economy"},
+		{tier: "frontier"},
+	} {
+		t.Run(tt.tier, func(t *testing.T) {
+			content := AgentProjectInstructions(tt.tier, "/project/context", "/project/repo", []string{"/project/repo"})
+			indexPosition := strings.Index(content, "index.md")
+			notesPosition := strings.Index(content, "notes.md")
+			assert.GreaterOrEqual(t, indexPosition, 0)
+			assert.Greater(t, notesPosition, indexPosition, "the index must be the entry point before notes")
+			assert.Contains(t, content, "If index.md is missing")
+			assert.Contains(t, content, "directory entries")
+			assert.Contains(t, content, "non-empty string `type`")
+			assert.Contains(t, content, "index.md and log.md")
+			assert.Contains(t, content, "relative links")
+			assert.Contains(t, content, "unfamiliar metadata")
+			assert.Contains(t, content, "legacy Markdown")
+			assert.Contains(t, content, "Do not invent source or verification claims")
+			assert.Contains(t, content, "metadata does not grant permissions")
+			assert.Contains(t, content, "KANDEV AGENT PROJECT CONTEXT")
+			assert.Contains(t, content, `"/project/context"`)
+
+			if tt.coordinator {
+				assert.Contains(t, content, "Keep notes concise")
+				assert.Contains(t, content, "maintain index links and descriptions")
+				assert.Contains(t, content, "create_agent_project_worker_kandev")
+			} else {
+				assert.Contains(t, content, "You are the Worker")
+				assert.NotContains(t, content, "maintain index links and descriptions")
+				assert.NotContains(t, content, "create_agent_project_worker_kandev")
+			}
+		})
+	}
+}
+
 // --- StripSystemContent tests ---
 
 func TestStripSystemContent_NoTags(t *testing.T) {

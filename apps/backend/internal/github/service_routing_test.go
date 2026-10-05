@@ -11,9 +11,21 @@ import (
 type repositoryVisibilityClient struct {
 	Client
 	repos    map[string]GitHubRepo
+	details  map[string]*GitHubRepository
 	prs      []*PR
 	issues   []*Issue
 	paginate bool
+}
+
+func (c repositoryVisibilityClient) GetRepository(
+	_ context.Context, owner, repo string,
+) (*GitHubRepository, error) {
+	detail, ok := c.details[strings.ToLower(owner+"/"+repo)]
+	if !ok {
+		return nil, &GitHubAPIError{StatusCode: 404, Endpoint: "/repos/" + owner + "/" + repo}
+	}
+	copy := *detail
+	return &copy, nil
 }
 
 func (c repositoryVisibilityClient) SearchPRs(context.Context, string, string) ([]*PR, error) {
@@ -312,6 +324,43 @@ func TestPersonalRepositoryResolutionRequiresAutomationVisibility(t *testing.T) 
 	}
 }
 
+func TestInspectRepositoryUsesExactMetadataWithinWorkspaceVisibility(t *testing.T) {
+	const identity = "octo/outside-catalog"
+	automation := repositoryVisibilityClient{
+		Client: NewMockClient(),
+		repos:  map[string]GitHubRepo{identity: testGitHubRepo("octo", "outside-catalog")},
+	}
+	personal := repositoryVisibilityClient{
+		Client: NewMockClient(),
+		// Deliberately absent from repos, which backs repository autocomplete.
+		details: map[string]*GitHubRepository{identity: {
+			FullName: identity, Owner: "octo", Name: "outside-catalog",
+			CloneURL: "https://github.com/octo/outside-catalog.git", DefaultBranch: "stable",
+		}},
+	}
+	service := personalBoundaryTestServiceWithProviderClients(t, automation, personal)
+
+	repository, err := service.InspectRepositoryForWorkspace(
+		context.Background(), "workspace-1", "user-1", "octo", "outside-catalog",
+	)
+	if err != nil {
+		t.Fatalf("InspectRepositoryForWorkspace: %v", err)
+	}
+	if repository.FullName != identity || repository.DefaultBranch != "stable" {
+		t.Fatalf("repository metadata = %+v", repository)
+	}
+
+	denied := personalBoundaryTestServiceWithProviderClients(t, repositoryVisibilityClient{
+		Client: NewMockClient(), repos: map[string]GitHubRepo{},
+	}, personal)
+	_, err = denied.InspectRepositoryForWorkspace(
+		context.Background(), "workspace-1", "user-1", "octo", "outside-catalog",
+	)
+	if !errors.Is(err, ErrRepoNotResolvable) {
+		t.Fatalf("personal metadata outside automation visibility error = %v, want repository boundary denial", err)
+	}
+}
+
 func TestPersonalAccessibleReposIntersectAutomationVisibility(t *testing.T) {
 	service := personalBoundaryTestService(t,
 		map[string]GitHubRepo{"acme/allowed": testGitHubRepo("acme", "allowed")},
@@ -422,6 +471,16 @@ func personalBoundaryTestServiceWithClients(
 	issues []*Issue,
 	paginate bool,
 ) *Service {
+	automationClient := repositoryVisibilityClient{Client: NewMockClient(), repos: automationRepos}
+	personalClient := repositoryVisibilityClient{
+		Client: NewMockClient(), repos: personalRepos, prs: prs, issues: issues, paginate: paginate,
+	}
+	return personalBoundaryTestServiceWithProviderClients(t, automationClient, personalClient)
+}
+
+func personalBoundaryTestServiceWithProviderClients(
+	t *testing.T, automationClient, personalClient Client,
+) *Service {
 	t.Helper()
 	store := newTestStore(t)
 	seedConnectionWorkspaces(t, store, "workspace-1")
@@ -446,10 +505,6 @@ func personalBoundaryTestServiceWithClients(
 				Status: ConnectionStatusActive, CredentialGeneration: 1,
 			},
 		},
-	}
-	automationClient := repositoryVisibilityClient{Client: NewMockClient(), repos: automationRepos}
-	personalClient := repositoryVisibilityClient{
-		Client: NewMockClient(), repos: personalRepos, prs: prs, issues: issues, paginate: paginate,
 	}
 	resolver := NewCredentialResolver(connections, nil)
 	resolver.SetAutomationProvider(testAutomationCredentialProvider{client: automationClient})

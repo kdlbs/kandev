@@ -176,22 +176,23 @@ settings from the default workspace.
 
 An Agent Project keeps one coordinator conversation, its worker tasks, and shared context together. Project tasks do not use a workflow.
 
-An administrator must enable **Agent Projects** in **Settings → System → Feature Toggles**. Add a remote repository to the workspace, set a local worktree executor as its default, and select three compatible agent profiles.
+An administrator must enable **Agent Projects** in **Settings → System → Feature Toggles**. The workspace must have an active local worktree executor and compatible agent profiles. You can choose an eligible repository already in the workspace or add one from a connected provider in the project form.
 
-1. Open **Projects** in the sidebar and select **New project**.
-2. Enter a name, select one or more remote repositories, and choose the primary repository.
-3. Choose the coordinator, economy worker, and frontier worker profiles.
-4. Select **New project**. The project appears in the sidebar.
-5. Open the project row. Kandev prepares the coordinator task without starting an agent turn.
-6. Send a prompt to start the coordinator. Ask it to create an economy or frontier worker when you need separate work.
+In a standard workspace, the sidebar places **Integrations**, **Projects**, and **Tasks** in that order. An empty Projects section starts collapsed, and its plus button stays available in the header.
+
+1. Open **Projects** in the sidebar and select **Add project**.
+2. Enter a name, choose one or more repositories, and select the primary repository. You can search the connected provider list or paste a supported repository URL.
+3. Choose a coordinator profile. Economy and frontier worker profiles use the coordinator by default; open **Advanced settings** to choose separate profiles.
+4. Optionally enter an initial prompt. Select **Create and start** to save the project and send that prompt to its coordinator. Leave the prompt blank and select **Create project** to create an idle project without starting a session.
+5. Open the project row to view its coordinator. Ask it to create an economy or frontier worker when you need separate work.
 
 Expand the project row to open its worker tasks. Each worker has its own repository checkout and status. Worker completion does not start a new coordinator turn.
 
 Use **Edit project** to change the name or agent profiles. Coordinator profile changes apply to new sessions. Existing sessions and workers keep their assigned profiles.
 
-The coordinator's **Files** panel starts at **Context**. Select **Workspace** to browse repository files. A worker's Files panel starts at its workspace and also gives access to project context. Context files are shared by project tasks and do not appear in **Changes**.
+The coordinator's **Files** panel starts at **Context**. The context folder includes an `index.md` entry point and `notes.md` starter. Keep the index links current as you add documents. New knowledge concepts use Markdown with a YAML `type` field; existing text and Markdown remain editable as-is. The editor reports format issues as advice and still lets you save the draft. Select **Workspace** to browse repository files. A worker's Files panel starts at its workspace and also gives access to project context. Context files are shared by project tasks and do not appear in **Changes**.
 
-The project menu lets you archive or delete a project. Archive keeps shared context and lets you restore the project. Delete removes its coordinator and worker tasks. You can keep or remove shared context files. If a task worktree has local changes, select **Permanently discard tracked and untracked changes** to continue.
+The project menu lets you archive or delete a project. Archive keeps shared context and removes the project from the active sidebar. Archived projects are hidden from sidebar navigation in this release; the existing project API still supports restore. Delete removes its coordinator and worker tasks. You can keep or remove shared context files. If a task worktree has local changes, select **Permanently discard tracked and untracked changes** to continue.
 
 Project context lives on the Kandev host under `<home>/agent-projects/`. Database backups do not include these files. Copy this directory separately when you back up Kandev.
 

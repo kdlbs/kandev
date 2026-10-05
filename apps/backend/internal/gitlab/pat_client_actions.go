@@ -131,6 +131,24 @@ func (c *PATClient) ListUserProjects(ctx context.Context) ([]Project, error) {
 	return out, nil
 }
 
+// GetProjectByPath reads one exact namespace-qualified project. GitLab's
+// project endpoint accepts the complete path as the URL-encoded :id.
+func (c *PATClient) GetProjectByPath(ctx context.Context, projectPath string) (*Project, error) {
+	projectPath = strings.TrimSpace(projectPath)
+	if projectPath == "" {
+		return nil, fmt.Errorf("project path is required")
+	}
+	var raw rawProject
+	if err := c.get(ctx, "/projects/"+projectRef(projectPath), &raw); err != nil {
+		return nil, fmt.Errorf("get project by path: %w", err)
+	}
+	if raw.PathWithNamespace != projectPath {
+		return nil, nil
+	}
+	project := convertRawProject(&raw)
+	return &project, nil
+}
+
 // SearchProjects searches all projects matching `query`. Used by the
 // project-autocomplete and watch-creation flows.
 func (c *PATClient) SearchProjects(ctx context.Context, query string, limit int) ([]Project, error) {

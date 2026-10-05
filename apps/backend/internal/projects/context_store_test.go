@@ -18,8 +18,11 @@ func TestContextStoreProvisionAndHashCheckedWrite(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Provision: %v", err)
 	}
-	if got, err := os.ReadFile(filepath.Join(root, "notes.md")); err != nil || string(got) != "# Project notes\n" {
+	if got, err := os.ReadFile(filepath.Join(root, "notes.md")); err != nil || string(got) != starterNotesContent {
 		t.Fatalf("initial notes = %q, err = %v", got, err)
+	}
+	if got, err := os.ReadFile(filepath.Join(root, "index.md")); err != nil || string(got) != starterIndexContent {
+		t.Fatalf("initial index = %q, err = %v", got, err)
 	}
 
 	content, hash, err := store.ReadFile(projectID, "notes.md")
@@ -30,7 +33,7 @@ func TestContextStoreProvisionAndHashCheckedWrite(t *testing.T) {
 	if err != nil {
 		t.Fatalf("WriteFile: %v", err)
 	}
-	if newHash == hash || content != "# Project notes\n" {
+	if newHash == hash || content != starterNotesContent {
 		t.Fatalf("content/hash = %q/%q, previous hash %q", content, newHash, hash)
 	}
 	if _, err := store.WriteFile(projectID, "notes.md", hash, []byte("stale write\n")); !errors.Is(err, ErrContextConflict) {
@@ -127,8 +130,156 @@ func TestContextStoreListsWithoutFollowingSymlinks(t *testing.T) {
 	if err != nil {
 		t.Fatalf("List: %v", err)
 	}
-	if len(entries) != 2 || entries[0].Name != "docs" || entries[1].Name != "notes.md" {
-		t.Fatalf("List entries = %#v, want docs and notes.md", entries)
+	if len(entries) != 3 || entries[0].Name != "docs" || entries[1].Name != "index.md" || entries[2].Name != "notes.md" {
+		t.Fatalf("List entries = %#v, want docs, index.md, and notes.md", entries)
+	}
+}
+
+const (
+	starterIndexContent = "---\nokf_version: \"0.2\"\n---\n# Project context\n\n- [Project notes](notes.md): Current status, decisions, and handoffs.\n"
+	starterNotesContent = "---\ntype: Project Notes\ntitle: Project notes\ndescription: Current status, decisions, and handoffs for this project.\n---\n# Project notes\n\n## Current status\n\n## Decisions\n\n## Handoffs\n"
+)
+
+func TestContextStoreProvisionCreatesOKFStarterFiles(t *testing.T) {
+	store := NewContextStore(filepath.Join(t.TempDir(), "agent-projects"))
+	projectID := uuid.NewString()
+	root, err := store.Provision(context.Background(), projectID)
+	if err != nil {
+		t.Fatalf("Provision: %v", err)
+	}
+
+	for name, want := range map[string]string{"index.md": starterIndexContent, "notes.md": starterNotesContent} {
+		got, err := os.ReadFile(filepath.Join(root, name))
+		if err != nil {
+			t.Fatalf("read %s: %v", name, err)
+		}
+		if string(got) != want {
+			t.Errorf("%s = %q, want %q", name, got, want)
+		}
+	}
+}
+
+func TestContextStoreProvisionPreservesExistingFiles(t *testing.T) {
+	tests := []struct {
+		name    string
+		initial map[string]string
+		want    map[string]string
+	}{
+		{
+			name:    "empty notes and missing index",
+			initial: map[string]string{"notes.md": ""},
+			want:    map[string]string{"index.md": starterIndexContent, "notes.md": ""},
+		},
+		{
+			name:    "custom index and missing notes",
+			initial: map[string]string{"index.md": "custom index\r\n"},
+			want:    map[string]string{"index.md": "custom index\r\n", "notes.md": starterNotesContent},
+		},
+		{
+			name:    "custom files",
+			initial: map[string]string{"index.md": "custom index\n", "notes.md": "custom notes\n"},
+			want:    map[string]string{"index.md": "custom index\n", "notes.md": "custom notes\n"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			store := NewContextStore(filepath.Join(t.TempDir(), "agent-projects"))
+			projectID := uuid.NewString()
+			root, err := store.ContextPath(projectID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := os.MkdirAll(root, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			for name, content := range tt.initial {
+				if err := os.WriteFile(filepath.Join(root, name), []byte(content), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+
+			provisioned, err := store.Provision(context.Background(), projectID)
+			if err != nil {
+				t.Fatalf("Provision: %v", err)
+			}
+			if provisioned != root {
+				t.Fatalf("Provision root = %q, want %q", provisioned, root)
+			}
+			if _, err := store.Provision(context.Background(), projectID); err != nil {
+				t.Fatalf("repeated Provision: %v", err)
+			}
+
+			for name, want := range tt.want {
+				got, err := os.ReadFile(filepath.Join(root, name))
+				if err != nil {
+					t.Errorf("read %s: %v", name, err)
+					continue
+				}
+				if string(got) != want {
+					t.Errorf("%s = %q, want preserved %q", name, got, want)
+				}
+			}
+		})
+	}
+}
+
+func TestContextStoreProvisionConcurrentCreators(t *testing.T) {
+	store := NewContextStore(filepath.Join(t.TempDir(), "agent-projects"))
+	projectID := uuid.NewString()
+	const callers = 8
+	start := make(chan struct{})
+	errs := make(chan error, callers)
+	for range callers {
+		go func() {
+			<-start
+			_, err := store.Provision(context.Background(), projectID)
+			errs <- err
+		}()
+	}
+	close(start)
+	for range callers {
+		if err := <-errs; err != nil {
+			t.Errorf("concurrent Provision: %v", err)
+		}
+	}
+
+	root, err := store.ContextPath(projectID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, want := range map[string]string{"index.md": starterIndexContent, "notes.md": starterNotesContent} {
+		got, err := os.ReadFile(filepath.Join(root, name))
+		if err != nil || string(got) != want {
+			t.Errorf("concurrent starter %s = %q, err = %v", name, got, err)
+		}
+	}
+}
+
+func TestContextStoreProvisionRejectsUnsafeStarterEntry(t *testing.T) {
+	storageRoot := filepath.Join(t.TempDir(), "agent-projects")
+	store := NewContextStore(storageRoot)
+	projectID := uuid.NewString()
+	root, err := store.ContextPath(projectID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(root, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	external := filepath.Join(t.TempDir(), "external-index.md")
+	if err := os.WriteFile(external, []byte("external"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(external, filepath.Join(root, "index.md")); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := store.Provision(context.Background(), projectID); !errors.Is(err, ErrInvalidContextPath) {
+		t.Fatalf("Provision with linked index error = %v, want ErrInvalidContextPath", err)
+	}
+	if got, err := os.ReadFile(external); err != nil || string(got) != "external" {
+		t.Fatalf("external index = %q, err = %v", got, err)
 	}
 }
 

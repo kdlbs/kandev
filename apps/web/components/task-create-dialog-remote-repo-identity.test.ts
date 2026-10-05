@@ -12,7 +12,7 @@ function row(overrides: Partial<TaskRemoteRepoRow> = {}): TaskRemoteRepoRow {
 }
 
 describe("Remote repository identities", () => {
-  it("prefers provider-qualified IDs when metadata is complete", () => {
+  it("includes canonical provider host in picker-qualified IDs", () => {
     expect(
       selectedRemoteRepositoryIdentity(
         row({
@@ -22,7 +22,32 @@ describe("Remote repository identities", () => {
           providerRepoId: "acme/site",
         }),
       ),
-    ).toBe("github:id:acme/site");
+    ).toBe("github:id:acme/site:host:https://github.com");
+  });
+
+  it("keeps host ports and provider scopes in picker identities", () => {
+    const first = selectedRemoteRepositoryIdentity(
+      row({
+        url: "https://forge.example.test:9443/team/repo",
+        source: "picker",
+        provider: "forge",
+        providerRepoId: "42",
+        providerScope: "tenant-a",
+      }),
+    );
+    expect(first).toContain("https://forge.example.test:9443");
+    expect(first).toContain("scope:tenant-a");
+    expect(
+      selectedRemoteRepositoryIdentity(
+        row({
+          url: "https://forge.example.test:9444/team/repo",
+          source: "picker",
+          provider: "forge",
+          providerRepoId: "42",
+          providerScope: "tenant-a",
+        }),
+      ),
+    ).not.toBe(first);
   });
 
   it.each([

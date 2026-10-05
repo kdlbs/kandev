@@ -34,6 +34,7 @@ export type RemoteRepository = {
 
 export type UseRemoteRepositoriesResult = {
   repos: RemoteRepository[];
+  allRepos?: RemoteRepository[];
   availableProviders: RemoteRepositoryProvider[];
   loading: boolean;
   error: Error | null;
@@ -42,6 +43,7 @@ export type UseRemoteRepositoriesResult = {
   search: (query: string) => void;
   refresh?: () => void;
   matchesURL?: (url: string) => boolean;
+  gitLabHost?: string;
 };
 
 async function loadAzureRepositories(workspaceId: string): Promise<RemoteRepository[]> {
@@ -53,10 +55,12 @@ async function loadAzureRepositories(workspaceId: string): Promise<RemoteReposit
         repositories.map((repo) => ({
           provider: "azure_devops" as const,
           id: repo.id,
-          owner: repo.projectId,
+          owner: repo.projectName,
           name: repo.name,
           fullName: `${repo.projectName}/${repo.name}`,
           url: repo.webUrl,
+          providerHost: providerHostFromRepositoryURL(repo.webUrl),
+          providerScope: repo.projectId,
           defaultBranch: (repo.defaultBranch || "").replace(/^refs\/heads\//, ""),
           private: true,
         })),
@@ -95,6 +99,7 @@ type ProviderConnectionStatus = {
 type BuiltInRepositoryAccess = {
   eligibility: BuiltInRepositoryEligibility;
   refresh: () => void;
+  gitLabHost?: string;
 };
 
 function hasProviderConnection(status: ProviderConnectionStatus | null | undefined) {
@@ -145,7 +150,21 @@ function useBuiltInRepositoryAccess(workspaceId: string): BuiltInRepositoryAcces
     void gitlabStatus.refresh();
     azureDevOpsConnection.refresh();
   }, [azureDevOpsConnection.refresh, githubStatus.refresh, gitlabStatus.refresh]);
-  return { eligibility, refresh };
+  return { eligibility, refresh, gitLabHost: gitlabStatus.status?.host };
+}
+
+export function builtInRepositoryProviderForURL(
+  value: string,
+  gitLabHost?: string,
+): "github" | "gitlab" | "azure_devops" | undefined {
+  const scp = value.trim().match(/^git@([^:]+):/i);
+  const host = scp?.[1]?.toLowerCase() ?? parseHost(value);
+  if (host === "github.com" || host === "www.github.com") return "github";
+  if (host === "gitlab.com" || (gitLabHost !== undefined && host === parseHost(gitLabHost))) {
+    return "gitlab";
+  }
+  if (host === "dev.azure.com" || host === "ssh.dev.azure.com") return "azure_devops";
+  return undefined;
 }
 
 async function loadBuiltInRepositories(
@@ -165,6 +184,7 @@ async function loadBuiltInRepositories(
           name: repo.name,
           fullName: repo.full_name,
           url: `https://github.com/${repo.owner}/${repo.name}`,
+          providerHost: "https://github.com",
           defaultBranch: repo.default_branch,
           private: repo.private,
         })),
@@ -182,7 +202,10 @@ async function loadBuiltInRepositories(
           name: project.path,
           fullName: project.path_with_namespace,
           url: project.web_url || `https://gitlab.com/${project.path_with_namespace}.git`,
-          defaultBranch: project.default_branch || "main",
+          providerHost: providerHostFromRepositoryURL(
+            project.web_url || `https://gitlab.com/${project.path_with_namespace}.git`,
+          ),
+          defaultBranch: project.default_branch || "",
           private: project.visibility === "private",
         })),
       ),
@@ -285,6 +308,24 @@ function toRemoteRepository(provider: string, value: unknown): RemoteRepository[
 
 function readString(value: unknown): string | undefined {
   return typeof value === "string" && value ? value : undefined;
+}
+
+function providerHostFromRepositoryURL(value: string): string | undefined {
+  try {
+    const url = new URL(value);
+    return `${url.protocol}//${url.host}`;
+  } catch {
+    return undefined;
+  }
+}
+
+function parseHost(value: string): string | undefined {
+  try {
+    const candidate = /^[a-z][a-z\d+.-]*:\/\//i.test(value) ? value : `https://${value}`;
+    return new URL(candidate).host.toLowerCase();
+  } catch {
+    return undefined;
+  }
 }
 
 function toError(cause: unknown): Error {
@@ -398,7 +439,11 @@ export function useRemoteRepositories(workspaceId: string): UseRemoteRepositorie
     () => registry.getRepositoryProviders(),
     [registry, registryVersion],
   );
-  const { eligibility, refresh: refreshBuiltIns } = useBuiltInRepositoryAccess(workspaceId);
+  const {
+    eligibility,
+    refresh: refreshBuiltIns,
+    gitLabHost,
+  } = useBuiltInRepositoryAccess(workspaceId);
   const builtInSource = useBuiltInRepositorySource(workspaceId, refreshVersion, eligibility);
   const pluginSource = usePluginRepositorySource(
     workspaceId,
@@ -407,16 +452,19 @@ export function useRemoteRepositories(workspaceId: string): UseRemoteRepositorie
     refreshVersion,
   );
 
+  const allRepos = useMemo(
+    () => [...builtInSource.repos, ...pluginSource.repos],
+    [builtInSource.repos, pluginSource.repos],
+  );
   const repos = useMemo(() => {
     const needle = query.trim().toLowerCase();
-    const allRepos = [...builtInSource.repos, ...pluginSource.repos];
     if (!needle) return allRepos;
     return allRepos.filter((repo) =>
       [repo.fullName, repo.providerHost, repo.url].some((value) =>
         value?.toLowerCase().includes(needle),
       ),
     );
-  }, [builtInSource.repos, pluginSource.repos, query]);
+  }, [allRepos, query]);
   const availableProviders = useMemo(
     () => [...builtInSource.availableProviders, ...pluginSource.availableProviders],
     [builtInSource.availableProviders, pluginSource.availableProviders],
@@ -435,11 +483,13 @@ export function useRemoteRepositories(workspaceId: string): UseRemoteRepositorie
   const matchesURL = useCallback(
     (url: string) =>
       looksLikeSupportedRemoteURL(url) ||
+      Boolean(builtInRepositoryProviderForURL(url, gitLabHost)) ||
       pluginProviders.some((provider) => repositoryProviderMatchesURL(provider, url)),
-    [pluginProviders],
+    [gitLabHost, pluginProviders],
   );
   return {
     repos,
+    allRepos,
     availableProviders,
     loading,
     error,
@@ -448,6 +498,7 @@ export function useRemoteRepositories(workspaceId: string): UseRemoteRepositorie
     search,
     refresh,
     matchesURL,
+    gitLabHost,
   };
 }
 

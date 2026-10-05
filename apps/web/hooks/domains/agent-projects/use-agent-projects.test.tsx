@@ -5,7 +5,11 @@ import { StateProvider, useAppStoreApi } from "@/components/state-provider";
 import { selectAgentProjects } from "@/lib/state/slices/agent-projects/selectors";
 import type { AgentProject } from "@/lib/types/http-agent-projects";
 import { publishAgentProjectTaskEvent } from "@/lib/ws/handlers/agent-project-events";
-import { useAgentProjectMutations, useAgentProjects } from "./use-agent-projects";
+import {
+  loadAgentProjects,
+  useAgentProjectMutations,
+  useAgentProjects,
+} from "./use-agent-projects";
 
 const mocks = vi.hoisted(() => ({ list: vi.fn(), remove: vi.fn() }));
 
@@ -35,11 +39,67 @@ const project: AgentProject = {
   tasks: [],
 };
 
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((accept) => {
+    resolve = accept;
+  });
+  return { promise, resolve };
+}
+
 beforeEach(() => {
   vi.resetAllMocks();
 });
 
+async function assertQueuedRefreshSettles(workspaceId: string) {
+  const initial = deferred<{ projects: AgentProject[] }>();
+  const competing = deferred<{ projects: AgentProject[] }>();
+  const queued = deferred<{ projects: AgentProject[] }>();
+  mocks.list
+    .mockReturnValueOnce(initial.promise)
+    .mockReturnValueOnce(competing.promise)
+    .mockReturnValueOnce(queued.promise);
+
+  const { result } = renderHook(() => useAppStoreApi(), {
+    wrapper: ({ children }) => createElement(StateProvider, null, children),
+  });
+  const initialLoad = loadAgentProjects(result.current, workspaceId);
+  await waitFor(() => expect(mocks.list).toHaveBeenCalledTimes(1));
+
+  const competingLoad = initialLoad.then(() =>
+    loadAgentProjects(result.current, workspaceId, false, true),
+  );
+  const queuedLoad = loadAgentProjects(result.current, workspaceId, false, true);
+  let competingSettled = false;
+  let queuedSettled = false;
+  void competingLoad.then(() => {
+    competingSettled = true;
+  });
+  void queuedLoad.then(() => {
+    queuedSettled = true;
+  });
+
+  await act(async () => initial.resolve({ projects: [project] }));
+  await waitFor(() => expect(mocks.list).toHaveBeenCalledTimes(2));
+  expect(competingSettled).toBe(false);
+  expect(queuedSettled).toBe(false);
+
+  await act(async () => competing.resolve({ projects: [project] }));
+  await waitFor(() => expect(mocks.list).toHaveBeenCalledTimes(3));
+  expect(competingSettled).toBe(true);
+  expect(queuedSettled).toBe(false);
+
+  await act(async () => queued.resolve({ projects: [project] }));
+  await expect(competingLoad).resolves.toBeUndefined();
+  await expect(queuedLoad).resolves.toBeUndefined();
+  expect(queuedSettled).toBe(true);
+}
+
 describe("useAgentProjects live worker updates", () => {
+  it("settles a queued refresh when a competing forced refresh starts first", async () => {
+    await assertQueuedRefreshSettles(project.workspace_id);
+  });
+
   it("loads worker creation and state changes from project task events", async () => {
     const workspaceId = project.workspace_id;
     let resolveInitial!: (response: { projects: AgentProject[] }) => void;

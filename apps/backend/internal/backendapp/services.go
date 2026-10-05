@@ -118,6 +118,10 @@ func provideServices(ctx context.Context, cfg *config.Config, log *logger.Logger
 		return nil, nil, err
 	}
 	pluginsSvc := integrations.pluginsSvc
+	taskSvc.SetRepositorySelectionResolver(repositorySelectionResolver{
+		github: providers.github, gitlab: providers.gitlab,
+		azureDevOps: providers.azureDevOps, plugins: pluginsSvc,
+	})
 
 	services := assembleServices(managedRuntimeSelections, core, providers, integrations)
 	if services.Plugins != nil {
@@ -671,7 +675,6 @@ func initPluginsWiring(
 		if githubSvc != nil {
 			pluginsSvc.SetTaskPRSource(githubSvc)
 		}
-		taskSvc.SetRepositorySelectionResolver(pluginRepositorySelectionResolver{inspector: pluginsSvc})
 	}
 	return pluginsSvc, pluginsCleanup, agentConversationsSvc, nil
 }

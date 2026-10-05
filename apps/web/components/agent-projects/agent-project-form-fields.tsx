@@ -1,11 +1,25 @@
 "use client";
 
 import type { FormEvent } from "react";
-import { useAppStore } from "@/components/state-provider";
+import { useCallback } from "react";
+import { IconChevronDown } from "@tabler/icons-react";
+import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import type { AppState } from "@/lib/state/store";
 import { isRemoteBackedProjectRepository } from "@/lib/agent-projects/repositories";
+import type { RemoteRepository } from "@/hooks/domains/integrations/use-remote-repositories";
+import { registerRemoteRepositorySelectionAction } from "@/app/actions/workspaces";
+import { PENDING_PROJECT_REPOSITORY_PREFIX } from "@/lib/agent-projects/repository-resolution";
+
 import { Button } from "@kandev/ui/button";
-import { controlSizingClassName } from "@kandev/ui/control-sizing";
+import {
+  ProjectCoordinatorField,
+  ProjectExecutionField,
+  ProjectNameField,
+  ProjectPrimaryRepositoryField,
+  ProjectPromptField,
+  ProjectRepositoriesField,
+  ProjectWorkerProfileFields,
+} from "./agent-project-form-field-controls";
 import { useRepositories } from "@/hooks/domains/workspace/use-repositories";
 import { useSettingsData } from "@/hooks/domains/settings/use-settings-data";
 import { isSelectableAgentProfile } from "@/lib/state/slices/settings/types";
@@ -15,70 +29,30 @@ import { useTranslation } from "react-i18next";
 
 export type ProjectDraft = {
   name: string;
+  initialPrompt: string;
   repositoryIds: string[];
+  remoteRepositories: RemoteRepository[];
   primaryRepositoryId: string;
   coordinatorProfileId: string;
   economyProfileId: string;
+  economyProfileInherited: boolean;
   frontierProfileId: string;
+  frontierProfileInherited: boolean;
 };
 
 export function draftFor(project?: AgentProject): ProjectDraft {
   return {
     name: project?.name ?? "",
+    initialPrompt: "",
     repositoryIds: project?.repository_ids ?? [],
+    remoteRepositories: [],
     primaryRepositoryId: project?.primary_repository_id ?? "",
     coordinatorProfileId: project?.coordinator_profile_id ?? "",
     economyProfileId: project?.economy_profile_id ?? "",
+    economyProfileInherited: !project,
     frontierProfileId: project?.frontier_profile_id ?? "",
+    frontierProfileInherited: !project,
   };
-}
-
-function ProjectSelect({
-  label,
-  value,
-  options,
-  unavailableId,
-  unavailableOptionLabel,
-  placeholder,
-  mobile,
-  onChange,
-}: {
-  label: string;
-  value: string;
-  options: Array<{ id: string; label: string }>;
-  unavailableId?: string;
-  unavailableOptionLabel?: string;
-  placeholder?: string;
-  mobile: boolean;
-  onChange: (value: string) => void;
-}) {
-  const { t } = useTranslation();
-  return (
-    <label className="flex flex-col gap-1 text-sm">
-      <span className="font-medium">{label}</span>
-      <select
-        className={cn(
-          "w-full rounded-md border bg-background px-2 text-sm",
-          controlSizingClassName("standard"),
-          mobile && "min-h-11",
-        )}
-        value={value}
-        onChange={(event) => onChange(event.currentTarget.value)}
-      >
-        <option value="">{placeholder ?? t("projects:chooseProfile")}</option>
-        {unavailableId && !options.some((option) => option.id === unavailableId) && (
-          <option value={unavailableId}>
-            {unavailableOptionLabel ?? t("projects:unavailableProfile", { id: unavailableId })}
-          </option>
-        )}
-        {options.map((option) => (
-          <option key={option.id} value={option.id}>
-            {option.label}
-          </option>
-        ))}
-      </select>
-    </label>
-  );
 }
 
 function projectExecutorData(
@@ -128,8 +102,10 @@ export function useProjectFormData(
   workspaceId: string | null,
   project?: AgentProject,
 ) {
+  const { t } = useTranslation();
   useRepositories(workspaceId, open);
   useSettingsData(open);
+  const storeApi = useAppStoreApi();
   const repositories = useAppStore((state) =>
     workspaceId ? (state.repositories.itemsByWorkspaceId[workspaceId] ?? []) : [],
   );
@@ -142,6 +118,24 @@ export function useProjectFormData(
     state.workspaces.items.find((item) => item.id === workspaceId),
   );
   const executorData = projectExecutorData(project, executors, workspace);
+  const createRemoteRepository = useCallback(
+    async (remote: RemoteRepository) => {
+      if (!workspaceId) throw new Error(t("projects:workspaceUnavailable"));
+      const created = await registerRemoteRepositorySelectionAction(workspaceId, {
+        remote_url: remote.url,
+        provider: remote.provider,
+        provider_host: remote.providerHost,
+        provider_scope: remote.providerScope,
+        provider_repo_id: remote.id,
+        provider_owner: remote.owner,
+        provider_name: remote.name,
+        default_branch: remote.defaultBranch,
+      });
+      storeApi.getState().upsertRepository(workspaceId, created);
+      return created;
+    },
+    [storeApi, t, workspaceId],
+  );
   return {
     repositories: repositories.filter(isRemoteBackedProjectRepository),
     repositoriesLoaded,
@@ -149,269 +143,156 @@ export function useProjectFormData(
       (profile) =>
         (!profile.workspace_id || profile.workspace_id === workspaceId) &&
         profile.enabled !== false &&
+        profile.cli_passthrough !== true &&
         isSelectableAgentProfile(profile),
     ),
+    createRemoteRepository,
     ...executorData,
   };
 }
 
-type ProjectFormData = ReturnType<typeof useProjectFormData>;
-type RepositoryList = ProjectFormData["repositories"];
-type ProfileList = ProjectFormData["profiles"];
-
-function ProjectNameField({
-  name,
-  mobile,
-  onChange,
-}: {
-  name: string;
-  mobile: boolean;
-  onChange: (value: string) => void;
-}) {
-  const { t } = useTranslation();
-  return (
-    <label className="flex flex-col gap-1 text-sm">
-      <span className="font-medium">{t("projects:name")}</span>
-      <input
-        autoFocus={!mobile}
-        required
-        maxLength={120}
-        className={cn(
-          "w-full rounded-md border bg-background px-3 text-sm",
-          controlSizingClassName("standard"),
-          mobile && "min-h-11",
-        )}
-        value={name}
-        onChange={(event) => onChange(event.currentTarget.value)}
-        data-testid="agent-project-name"
-      />
-    </label>
-  );
-}
-
-function ProjectRepositoriesField({
-  repositories,
-  repositoriesLoaded,
-  repositoryIds,
-  unavailableRepositoryIds,
-  mobile,
-  onToggle,
-}: {
-  repositories: RepositoryList;
-  repositoriesLoaded: boolean;
-  repositoryIds: string[];
-  unavailableRepositoryIds: string[];
-  mobile: boolean;
-  onToggle: (repositoryId: string) => void;
-}) {
-  const { t } = useTranslation();
-  const empty = repositories.length === 0 && unavailableRepositoryIds.length === 0;
-  const rowHeight = mobile ? "min-h-11" : "min-h-8 [@media(pointer:coarse)]:min-h-11";
-  return (
-    <fieldset className="space-y-2">
-      <legend className="text-sm font-medium">{t("projects:repositories")}</legend>
-      {empty ? (
-        <p className="text-xs text-muted-foreground">
-          {repositoriesLoaded ? t("projects:noRemoteRepositories") : t("common:loading")}
-        </p>
-      ) : (
-        <div className="max-h-40 overflow-y-auto rounded-md border p-1">
-          {unavailableRepositoryIds.map((repositoryId) => (
-            <label
-              key={repositoryId}
-              className={cn(
-                "flex cursor-pointer items-center gap-2 px-2 text-sm text-muted-foreground",
-                rowHeight,
-              )}
-            >
-              <input type="checkbox" checked onChange={() => onToggle(repositoryId)} />
-              <span className="truncate">
-                {t("projects:unavailableRepository", { id: repositoryId })}
-              </span>
-            </label>
-          ))}
-          {repositories.map((repository) => (
-            <label
-              key={repository.id}
-              className={cn("flex cursor-pointer items-center gap-2 px-2 text-sm", rowHeight)}
-            >
-              <input
-                type="checkbox"
-                checked={repositoryIds.includes(repository.id)}
-                onChange={() => onToggle(repository.id)}
-              />
-              <span className="truncate">
-                {repository.provider_owner
-                  ? `${repository.provider_owner}/${repository.provider_name || repository.name}`
-                  : repository.name}
-              </span>
-            </label>
-          ))}
-        </div>
-      )}
-    </fieldset>
-  );
-}
-
-function ProjectPrimaryRepositoryField({
-  project,
-  repositories,
-  draft,
-  mobile,
-  onChange,
-}: {
-  project?: AgentProject;
-  repositories: RepositoryList;
-  draft: ProjectDraft;
-  mobile: boolean;
-  onChange: (value: string) => void;
-}) {
-  const { t } = useTranslation();
-  return (
-    <ProjectSelect
-      label={t("projects:primaryRepository")}
-      placeholder={t("kanban:selectRepository")}
-      value={draft.primaryRepositoryId}
-      unavailableId={project?.primary_repository_id}
-      unavailableOptionLabel={t("projects:unavailableRepository", {
-        id: project?.primary_repository_id ?? "",
-      })}
-      options={repositories
-        .filter((repository) => draft.repositoryIds.includes(repository.id))
-        .map((repository) => ({ id: repository.id, label: repository.name }))}
-      mobile={mobile}
-      onChange={onChange}
-    />
-  );
-}
-
-function ProjectExecutionField({
-  project,
-  formData,
-  applyDefaultExecutor,
-  mobile,
-  onApplyDefaultExecutorChange,
-}: {
+export type ProjectFormData = ReturnType<typeof useProjectFormData>;
+type ProjectFormFieldsProps = {
+  workspaceId: string;
   project?: AgentProject;
   formData: ProjectFormData;
-  applyDefaultExecutor: boolean;
-  mobile: boolean;
-  onApplyDefaultExecutorChange: (value: boolean) => void;
-}) {
-  const { t } = useTranslation();
-  const executionCopy = formData.executorReady
-    ? t(project ? "projects:projectExecution" : "projects:workspaceExecution", {
-        name: formData.executorName,
-      })
-    : t(project ? "projects:projectExecutorUnavailable" : "projects:missingExecutor");
-  const canApplyDefault =
-    Boolean(project) &&
-    formData.workspaceDefaultExecutorReady &&
-    formData.workspaceDefaultExecutorProfileId !== project?.executor_profile_id;
-  return (
-    <>
-      <div className="space-y-1 rounded-md border px-3 py-2 text-sm">
-        <span className="font-medium">{t("projects:execution")}</span>
-        <p className="text-muted-foreground">{executionCopy}</p>
-      </div>
-      {canApplyDefault && (
-        <label
-          className={cn(
-            "flex cursor-pointer items-center gap-2 rounded-md border px-3 text-sm",
-            mobile ? "min-h-11" : "min-h-8 [@media(pointer:coarse)]:min-h-11",
-          )}
-        >
-          <input
-            type="checkbox"
-            checked={applyDefaultExecutor}
-            onChange={(event) => onApplyDefaultExecutorChange(event.currentTarget.checked)}
-          />
-          <span>
-            {t("projects:applyWorkspaceDefaultExecutor", {
-              name: formData.workspaceDefaultExecutorName,
-            })}
-          </span>
-        </label>
-      )}
-    </>
-  );
-}
-
-function ProjectProfileFields({
-  project,
-  draft,
-  profiles,
-  mobile,
-  onChange,
-}: {
-  project?: AgentProject;
   draft: ProjectDraft;
-  profiles: ProfileList;
+  createdProject?: AgentProject;
   mobile: boolean;
-  onChange: (patch: Partial<ProjectDraft>) => void;
+  ready: boolean;
+  error: string | null;
+  saving: boolean;
+  createRetryLocked: boolean;
+  promptLocked: boolean;
+  applyDefaultExecutor: boolean;
+  onNameChange: (value: string) => void;
+  onPromptChange: (value: string) => void;
+  onToggleRepository: (repositoryId: string) => void;
+  onSelectRemoteRepository: (repository: RemoteRepository) => void;
+  onPrimaryRepositoryChange: (value: string) => void;
+  onDraftChange: (patch: Partial<ProjectDraft>) => void;
+  onApplyDefaultExecutorChange: (value: boolean) => void;
+};
+
+function ProjectRepositoryAndProfileFields({
+  formProps,
+  unavailableRepositoryIds,
+  fieldsDisabled,
+}: {
+  formProps: Pick<
+    ProjectFormFieldsProps,
+    | "workspaceId"
+    | "project"
+    | "formData"
+    | "draft"
+    | "mobile"
+    | "promptLocked"
+    | "onNameChange"
+    | "onPromptChange"
+    | "onToggleRepository"
+    | "onSelectRemoteRepository"
+    | "onPrimaryRepositoryChange"
+    | "onDraftChange"
+  >;
+  unavailableRepositoryIds: string[];
+  fieldsDisabled: boolean;
 }) {
-  const { t } = useTranslation();
-  const options = profiles.map((profile) => ({ id: profile.id, label: profile.label }));
+  const {
+    workspaceId,
+    project,
+    formData,
+    draft,
+    mobile,
+    promptLocked,
+    onNameChange,
+    onPromptChange,
+    onToggleRepository,
+    onSelectRemoteRepository,
+    onPrimaryRepositoryChange,
+    onDraftChange,
+  } = formProps;
   return (
     <>
-      <ProjectSelect
-        label={t("projects:coordinatorProfile")}
-        value={draft.coordinatorProfileId}
-        unavailableId={project?.coordinator_profile_id}
-        options={options}
+      <ProjectRepositoriesField
+        workspaceId={workspaceId}
+        repositories={formData.repositories}
+        repositoriesLoaded={formData.repositoriesLoaded}
+        repositoryIds={draft.repositoryIds}
+        remoteRepositories={draft.remoteRepositories}
+        unavailableRepositoryIds={unavailableRepositoryIds}
         mobile={mobile}
-        onChange={(coordinatorProfileId) => onChange({ coordinatorProfileId })}
+        disabled={fieldsDisabled}
+        onToggle={onToggleRepository}
+        onSelectRemote={onSelectRemoteRepository}
       />
-      <ProjectSelect
-        label={t("projects:economyProfile")}
-        value={draft.economyProfileId}
-        unavailableId={project?.economy_profile_id}
-        options={options}
+      <ProjectNameField
+        name={draft.name}
         mobile={mobile}
-        onChange={(economyProfileId) => onChange({ economyProfileId })}
+        disabled={fieldsDisabled}
+        onChange={onNameChange}
       />
-      <ProjectSelect
-        label={t("projects:frontierProfile")}
-        value={draft.frontierProfileId}
-        unavailableId={project?.frontier_profile_id}
-        options={options}
-        mobile={mobile}
-        onChange={(frontierProfileId) => onChange({ frontierProfileId })}
-      />
+      {!project && (
+        <ProjectPromptField
+          prompt={draft.initialPrompt}
+          mobile={mobile}
+          disabled={promptLocked || fieldsDisabled}
+          onChange={onPromptChange}
+        />
+      )}
+      <div className="grid gap-3 md:grid-cols-2">
+        <ProjectPrimaryRepositoryField
+          project={project}
+          repositories={formData.repositories}
+          remoteRepositories={draft.remoteRepositories}
+          draft={draft}
+          mobile={mobile}
+          disabled={fieldsDisabled}
+          onChange={onPrimaryRepositoryChange}
+        />
+        <ProjectCoordinatorField
+          project={project}
+          draft={draft}
+          profiles={formData.profiles}
+          mobile={mobile}
+          disabled={fieldsDisabled}
+          onChange={onDraftChange}
+        />
+      </div>
     </>
   );
 }
 
 function ProjectFormFields({
+  workspaceId,
   project,
   formData,
   draft,
+  createdProject,
   mobile,
   ready,
   error,
+  saving,
+  createRetryLocked,
+  promptLocked,
   applyDefaultExecutor,
   onNameChange,
+  onPromptChange,
   onToggleRepository,
+  onSelectRemoteRepository,
   onPrimaryRepositoryChange,
   onDraftChange,
   onApplyDefaultExecutorChange,
-}: {
-  project?: AgentProject;
-  formData: ProjectFormData;
-  draft: ProjectDraft;
-  mobile: boolean;
-  ready: boolean;
-  error: string | null;
-  applyDefaultExecutor: boolean;
-  onNameChange: (value: string) => void;
-  onToggleRepository: (repositoryId: string) => void;
-  onPrimaryRepositoryChange: (value: string) => void;
-  onDraftChange: (patch: Partial<ProjectDraft>) => void;
-  onApplyDefaultExecutorChange: (value: boolean) => void;
-}) {
+}: ProjectFormFieldsProps) {
   const { t } = useTranslation();
   const availableIds = new Set<string>(formData.repositories.map((repository) => repository.id));
-  const unavailableIds = draft.repositoryIds.filter((id) => !availableIds.has(id));
+  const unavailableIds = draft.repositoryIds.filter(
+    (id) => !id.startsWith(PENDING_PROJECT_REPOSITORY_PREFIX) && !availableIds.has(id),
+  );
+  const fieldsDisabled = Boolean(createdProject || saving || createRetryLocked);
+  const displayError =
+    createdProject && error
+      ? t("projects:startFailed", { project: createdProject.name, message: error })
+      : error;
   return (
     <div
       className={cn(
@@ -419,42 +300,58 @@ function ProjectFormFields({
         mobile && "px-4 pt-3",
       )}
     >
-      <ProjectNameField name={draft.name} mobile={mobile} onChange={onNameChange} />
-      <ProjectRepositoriesField
-        repositories={formData.repositories}
-        repositoriesLoaded={formData.repositoriesLoaded}
-        repositoryIds={draft.repositoryIds}
+      <ProjectRepositoryAndProfileFields
+        formProps={{
+          workspaceId,
+          project,
+          formData,
+          draft,
+          mobile,
+          promptLocked,
+          onNameChange,
+          onPromptChange,
+          onToggleRepository,
+          onSelectRemoteRepository,
+          onPrimaryRepositoryChange,
+          onDraftChange,
+        }}
         unavailableRepositoryIds={unavailableIds}
-        mobile={mobile}
-        onToggle={onToggleRepository}
+        fieldsDisabled={fieldsDisabled}
       />
-      <ProjectPrimaryRepositoryField
-        project={project}
-        repositories={formData.repositories}
-        draft={draft}
-        mobile={mobile}
-        onChange={onPrimaryRepositoryChange}
-      />
-      <ProjectExecutionField
-        project={project}
-        formData={formData}
-        applyDefaultExecutor={applyDefaultExecutor}
-        mobile={mobile}
-        onApplyDefaultExecutorChange={onApplyDefaultExecutorChange}
-      />
-      <ProjectProfileFields
-        project={project}
-        draft={draft}
-        profiles={formData.profiles}
-        mobile={mobile}
-        onChange={onDraftChange}
-      />
+      <details className="group rounded-md border px-3 py-2" data-testid="agent-project-advanced">
+        <summary className="flex min-h-7 cursor-pointer list-none items-center justify-between text-sm font-medium marker:hidden max-md:min-h-11 [@media(pointer:coarse)]:min-h-11">
+          <span>{t("projects:advancedSettings")}</span>
+          <IconChevronDown
+            className="ml-2 size-4 shrink-0 opacity-60 transition-transform group-open:rotate-180"
+            aria-hidden="true"
+          />
+        </summary>
+        <div className="space-y-4 pt-3">
+          <div className="grid gap-3 md:grid-cols-2">
+            <ProjectWorkerProfileFields
+              project={project}
+              draft={draft}
+              profiles={formData.profiles}
+              mobile={mobile}
+              disabled={fieldsDisabled}
+              onChange={onDraftChange}
+            />
+          </div>
+          <ProjectExecutionField
+            project={project}
+            formData={formData}
+            applyDefaultExecutor={applyDefaultExecutor}
+            disabled={fieldsDisabled}
+            onApplyDefaultExecutorChange={onApplyDefaultExecutorChange}
+          />
+        </div>
+      </details>
       {!ready && (
         <p className="text-xs text-muted-foreground">{t("projects:dependenciesRequired")}</p>
       )}
-      {error && (
+      {displayError && (
         <p role="alert" className="text-sm text-destructive" data-testid="agent-project-error">
-          {error}
+          {displayError}
         </p>
       )}
     </div>
@@ -466,22 +363,33 @@ function ProjectFormFooter({
   ready,
   saving,
   project,
+  createdProject,
+  hasPrompt,
   onClose,
+  onRetryStart,
+  onOpenCoordinator,
 }: {
   mobile: boolean;
   ready: boolean;
   saving: boolean;
   project?: AgentProject;
+  createdProject?: AgentProject;
+  hasPrompt: boolean;
   onClose: () => void;
+  onRetryStart: () => void;
+  onOpenCoordinator: () => void;
 }) {
   const { t } = useTranslation();
+  let submitLabel: "projects:createProject" | "common:save" | "projects:createAndStart" =
+    "projects:createProject";
+  if (project) submitLabel = "common:save";
+  else if (hasPrompt) submitLabel = "projects:createAndStart";
+  const submitText = saving ? t("projects:saving") : t(submitLabel);
   return (
     <footer
       className={cn(
         "flex shrink-0 gap-2 border-t pt-3",
-        mobile
-          ? "px-4 pb-[calc(0.75rem+env(safe-area-inset-bottom,0px))] flex-col-reverse"
-          : "justify-end",
+        mobile ? "px-4 pb-[calc(0.75rem+env(safe-area-inset-bottom,0px))] flex-col" : "justify-end",
       )}
     >
       <Button
@@ -492,19 +400,44 @@ function ProjectFormFooter({
       >
         {t("common:cancel")}
       </Button>
-      <Button
-        type="submit"
-        disabled={!ready || saving}
-        className={mobile ? "min-h-11" : undefined}
-        data-testid="agent-project-submit"
-      >
-        {saving ? t("projects:saving") : t(project ? "common:save" : "projects:createProject")}
-      </Button>
+      {createdProject ? (
+        <>
+          <Button
+            type="button"
+            variant="outline"
+            disabled={saving}
+            className={mobile ? "min-h-11" : undefined}
+            onClick={onOpenCoordinator}
+            data-testid="agent-project-open-coordinator"
+          >
+            {t("projects:openCoordinator")}
+          </Button>
+          <Button
+            type="button"
+            disabled={saving}
+            className={mobile ? "min-h-11" : undefined}
+            onClick={onRetryStart}
+            data-testid="agent-project-retry-start"
+          >
+            {saving ? t("projects:saving") : t("projects:retryStart")}
+          </Button>
+        </>
+      ) : (
+        <Button
+          type="submit"
+          disabled={!ready || saving}
+          className={mobile ? "min-h-11" : undefined}
+          data-testid="agent-project-submit"
+        >
+          {submitText}
+        </Button>
+      )}
     </footer>
   );
 }
 
 export function ProjectFormBody({
+  workspaceId,
   onSubmit,
   formData,
   draft,
@@ -513,14 +446,23 @@ export function ProjectFormBody({
   error,
   saving,
   project,
+  createdProject,
+  hasPrompt,
+  createRetryLocked,
+  promptLocked,
   applyDefaultExecutor,
   onNameChange,
+  onPromptChange,
   onToggleRepository,
+  onSelectRemoteRepository,
   onPrimaryRepositoryChange,
   onDraftChange,
   onApplyDefaultExecutorChange,
   onClose,
+  onRetryStart,
+  onOpenCoordinator,
 }: {
+  workspaceId: string;
   onSubmit: (event: FormEvent) => void;
   formData: ProjectFormData;
   draft: ProjectDraft;
@@ -529,26 +471,41 @@ export function ProjectFormBody({
   error: string | null;
   saving: boolean;
   project?: AgentProject;
+  createdProject?: AgentProject;
+  hasPrompt: boolean;
+  createRetryLocked: boolean;
+  promptLocked: boolean;
   applyDefaultExecutor: boolean;
   onNameChange: (value: string) => void;
+  onPromptChange: (value: string) => void;
   onToggleRepository: (repositoryId: string) => void;
+  onSelectRemoteRepository: (repository: RemoteRepository) => void;
   onPrimaryRepositoryChange: (value: string) => void;
   onDraftChange: (patch: Partial<ProjectDraft>) => void;
   onApplyDefaultExecutorChange: (value: boolean) => void;
   onClose: () => void;
+  onRetryStart: () => void;
+  onOpenCoordinator: () => void;
 }) {
   return (
     <form onSubmit={onSubmit} className="flex min-h-0 flex-1 flex-col">
       <ProjectFormFields
+        workspaceId={workspaceId}
         project={project}
         formData={formData}
         draft={draft}
+        createdProject={createdProject}
         mobile={mobile}
         ready={ready}
         error={error}
+        saving={saving}
+        createRetryLocked={createRetryLocked}
+        promptLocked={promptLocked}
         applyDefaultExecutor={applyDefaultExecutor}
         onNameChange={onNameChange}
+        onPromptChange={onPromptChange}
         onToggleRepository={onToggleRepository}
+        onSelectRemoteRepository={onSelectRemoteRepository}
         onPrimaryRepositoryChange={onPrimaryRepositoryChange}
         onDraftChange={onDraftChange}
         onApplyDefaultExecutorChange={onApplyDefaultExecutorChange}
@@ -558,7 +515,11 @@ export function ProjectFormBody({
         ready={ready}
         saving={saving}
         project={project}
+        createdProject={createdProject}
+        hasPrompt={hasPrompt}
         onClose={onClose}
+        onRetryStart={onRetryStart}
+        onOpenCoordinator={onOpenCoordinator}
       />
     </form>
   );

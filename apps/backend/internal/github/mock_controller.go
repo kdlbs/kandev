@@ -45,6 +45,7 @@ func (c *MockController) RegisterRoutes(router *gin.Engine) {
 	api.POST("/issues", c.addIssues)
 	api.POST("/orgs", c.addOrgs)
 	api.POST("/repos", c.addRepos)
+	api.POST("/repository-details", c.addRepositoryDetails)
 	api.POST("/reviews", c.addReviews)
 	api.POST("/comments", c.addComments)
 	api.POST("/checks", c.addCheckRuns)
@@ -440,6 +441,40 @@ func (c *MockController) addRepos(ctx *gin.Context) {
 	}
 	c.mock.AddRepos(req.Org, req.Repos)
 	ctx.JSON(http.StatusOK, gin.H{"added": len(req.Repos)})
+}
+
+func (c *MockController) addRepositoryDetails(ctx *gin.Context) {
+	var req struct {
+		Repositories []struct {
+			FullName      string `json:"full_name"`
+			Owner         string `json:"owner"`
+			Name          string `json:"name"`
+			CloneURL      string `json:"clone_url"`
+			HTMLURL       string `json:"html_url"`
+			DefaultBranch string `json:"default_branch"`
+		} `json:"repositories"`
+	}
+	if err := ctx.ShouldBindJSON(&req); err != nil || len(req.Repositories) == 0 {
+		respondInvalidPayload(ctx)
+		return
+	}
+	for _, repository := range req.Repositories {
+		if strings.TrimSpace(repository.Owner) == "" || strings.TrimSpace(repository.Name) == "" ||
+			!strings.EqualFold(strings.TrimSpace(repository.FullName), repository.Owner+"/"+repository.Name) ||
+			strings.TrimSpace(repository.CloneURL) == "" || strings.TrimSpace(repository.HTMLURL) == "" ||
+			strings.TrimSpace(repository.DefaultBranch) == "" {
+			respondInvalidPayload(ctx)
+			return
+		}
+	}
+	for _, repository := range req.Repositories {
+		c.mock.SetRepositoryDetails(GitHubRepository{
+			FullName: repository.FullName, Owner: repository.Owner, Name: repository.Name,
+			CloneURL: repository.CloneURL, HTMLURL: repository.HTMLURL,
+			DefaultBranch: repository.DefaultBranch,
+		})
+	}
+	ctx.JSON(http.StatusOK, gin.H{"added": len(req.Repositories)})
 }
 
 func (c *MockController) addReviews(ctx *gin.Context) {

@@ -159,6 +159,10 @@ func (c *NoopClient) ListUserProjects(context.Context) ([]Project, error) {
 	return nil, ErrNoClient
 }
 
+func (c *NoopClient) GetProjectByPath(context.Context, string) (*Project, error) {
+	return nil, ErrNoClient
+}
+
 func (c *NoopClient) SearchProjects(context.Context, string, int) ([]Project, error) {
 	return nil, ErrNoClient
 }

@@ -610,8 +610,21 @@ func (c *MockClient) GetProtectedBranch(context.Context, string, string) (*Prote
 // ListUserProjects returns one fake project for the mock.
 func (c *MockClient) ListUserProjects(context.Context) ([]Project, error) {
 	return []Project{
-		{ID: 1, PathWithNamespace: "kandev/sample", Namespace: "kandev", Path: "sample", Name: "sample"},
+		{ID: 1, PathWithNamespace: "kandev/sample", Namespace: "kandev", Path: "sample", Name: "sample", WebURL: strings.TrimRight(c.host, "/") + "/kandev/sample", HTTPURLToRepo: strings.TrimRight(c.host, "/") + "/kandev/sample.git", DefaultBranch: "main"},
 	}, nil
+}
+
+func (c *MockClient) GetProjectByPath(ctx context.Context, projectPath string) (*Project, error) {
+	projects, err := c.ListUserProjects(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for i := range projects {
+		if projects[i].PathWithNamespace == projectPath {
+			return &projects[i], nil
+		}
+	}
+	return nil, nil
 }
 
 // SearchProjects returns the same fake project filtered by query substring.

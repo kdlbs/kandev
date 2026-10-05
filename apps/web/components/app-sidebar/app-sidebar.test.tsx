@@ -13,6 +13,7 @@ const officeRouteMock = vi.hoisted(() => ({
 const footerMock = vi.hoisted(() => ({
   onLayout: null as (() => void) | null,
 }));
+const savedSidebarLayout = vi.hoisted(() => ({ enabled: false }));
 
 // The AppSidebar pulls in a lot of children that touch the dockview / kanban
 // data layer. For unit testing the collapse + section toggle behaviour we stub
@@ -80,6 +81,12 @@ vi.mock("./sections/office-navigation-section", () => ({
   OfficeNavigationSection: ({ section }: { section?: "all" | "work" | "office" }) => (
     <div data-testid={`office-navigation-section-${section ?? "all"}`} />
   ),
+}));
+vi.mock("./sidebar-layout-navigation", () => ({
+  SidebarLayoutNavigation: () => <div data-testid="saved-sidebar-layout" />,
+}));
+vi.mock("@/hooks/domains/sidebar/use-sidebar-layout-navigation", () => ({
+  useHasSavedSidebarLayout: () => savedSidebarLayout.enabled,
 }));
 vi.mock("./app-sidebar-footer", async () => {
   const { useLayoutEffect } = await vi.importActual<typeof import("react")>("react");
@@ -184,6 +191,9 @@ const SIDEBAR = "app-sidebar";
 const COLLAPSED_ATTRIBUTE = "data-collapsed";
 const TASKS_SECTION = "tasks-section";
 const INTEGRATIONS_SECTION = "integrations-section";
+const PROJECTS_SECTION = "projects-section";
+const AGENTS_SECTION = "agents-section";
+const SAVED_LAYOUT = "saved-sidebar-layout";
 const OFFICE_WORK_SECTION = "office-navigation-section-work";
 const OFFICE_OFFICE_SECTION = "office-navigation-section-office";
 
@@ -200,6 +210,7 @@ function resetSidebarState() {
   storeState.toggleAppSidebarSettingsMode = vi.fn();
   storeState.setAppSidebarSettingsMode = vi.fn((_settingsMode: boolean) => {});
   footerMock.onLayout = null;
+  savedSidebarLayout.enabled = false;
 }
 
 describe("AppSidebar", () => {
@@ -213,8 +224,8 @@ describe("AppSidebar", () => {
     renderSidebar();
     expect(screen.getByTestId(SIDEBAR).getAttribute(COLLAPSED_ATTRIBUTE)).toBe("false");
     expect(screen.getByTestId(TASKS_SECTION)).toBeTruthy();
-    expect(screen.getByTestId("projects-section")).toBeTruthy();
-    expect(screen.getByTestId("agents-section")).toBeTruthy();
+    expect(screen.getByTestId(PROJECTS_SECTION)).toBeTruthy();
+    expect(screen.getByTestId(AGENTS_SECTION)).toBeTruthy();
     expect(screen.queryByTestId("settings-section")).toBeNull();
     expect(screen.getByTestId("app-sidebar-content").classList).toContain("overflow-hidden");
     expect(screen.getByTestId(SIDEBAR).classList).not.toContain("overflow-hidden");
@@ -368,6 +379,46 @@ describe("AppSidebar before the workspace resolves", () => {
     expect(screen.queryByTestId(TASKS_SECTION)).toBeNull();
     expect(screen.queryByTestId(INTEGRATIONS_SECTION)).toBeNull();
     expect(screen.queryByTestId(OFFICE_WORK_SECTION)).toBeNull();
+  });
+});
+
+describe("AppSidebar project navigation order", () => {
+  beforeEach(resetSidebarState);
+
+  afterEach(cleanup);
+
+  it("orders default ordinary navigation as Integrations, Projects, then Tasks", () => {
+    renderSidebar();
+
+    const sidebar = screen.getByTestId(SIDEBAR);
+    const orderedSections = Array.from(sidebar.querySelectorAll("[data-testid]"))
+      .map((node) => node.getAttribute("data-testid"))
+      .filter((id): id is string =>
+        [INTEGRATIONS_SECTION, PROJECTS_SECTION, TASKS_SECTION].includes(id ?? ""),
+      );
+
+    expect(orderedSections).toEqual([INTEGRATIONS_SECTION, PROJECTS_SECTION, TASKS_SECTION]);
+  });
+
+  it("keeps the saved custom layout branch ahead of Projects and Tasks", () => {
+    savedSidebarLayout.enabled = true;
+
+    renderSidebar();
+
+    const sidebar = screen.getByTestId(SIDEBAR);
+    const orderedSections = Array.from(sidebar.querySelectorAll("[data-testid]"))
+      .map((node) => node.getAttribute("data-testid"))
+      .filter((id): id is string =>
+        [SAVED_LAYOUT, PROJECTS_SECTION, AGENTS_SECTION, TASKS_SECTION].includes(id ?? ""),
+      );
+
+    expect(orderedSections).toEqual([
+      SAVED_LAYOUT,
+      PROJECTS_SECTION,
+      AGENTS_SECTION,
+      TASKS_SECTION,
+    ]);
+    expect(screen.queryByTestId(INTEGRATIONS_SECTION)).toBeNull();
   });
 });
 

@@ -17,8 +17,8 @@ and a shared context store for work on a selected set of repositories.
 ## Ownership
 
 This system owns project identity and membership, coordinator/worker profile
-policy, shared context lifetime, and the Projects navigation experience. Its
-project identity is separate from Office projects.
+policy, shared context lifetime, context document conventions, and the Projects
+navigation experience. Its project identity is separate from Office projects.
 
 ## Exclusions
 

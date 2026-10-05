@@ -200,8 +200,8 @@ func TestProjectContextServiceUsesWorkspaceAuthorizationAndHashConflict(t *testi
 		t.Fatalf("Create: %v", err)
 	}
 	entries, err := svc.ListContext(ctx, project.WorkspaceID, project.ID, "")
-	if err != nil || len(entries) != 1 || entries[0].Name != "notes.md" {
-		t.Fatalf("ListContext = %#v, err %v", entries, err)
+	if err != nil || len(entries) != 2 || entries[0].Name != "index.md" || entries[1].Name != "notes.md" {
+		t.Fatalf("ListContext = %#v, err %v, want index.md and notes.md", entries, err)
 	}
 	_, hash, err := svc.ReadContextFile(ctx, project.WorkspaceID, project.ID, "notes.md")
 	if err != nil {

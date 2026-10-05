@@ -46,7 +46,10 @@ function queueForcedRefresh(
   const queuedRefresh = queued.get(key);
   if (queuedRefresh) return queuedRefresh;
   const refresh = existing
-    .then(() => loadAgentProjects(store, workspaceId, archived, true))
+    .then(() => {
+      if (queued?.get(key) === refresh) queued.delete(key);
+      return loadAgentProjects(store, workspaceId, archived, true);
+    })
     .finally(() => {
       if (queued?.get(key) === refresh) queued.delete(key);
     });

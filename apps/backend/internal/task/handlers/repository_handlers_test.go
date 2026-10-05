@@ -582,6 +582,112 @@ func newRepositoryHTTPTestRouterWithConfig(t *testing.T, discoveryConfig service
 	return router, repo, svc
 }
 
+type remoteSelectionResolverStub struct {
+	calls int
+}
+
+func (r *remoteSelectionResolverStub) ResolveRepositorySelection(
+	_ context.Context, _ string, input service.TaskRepositoryInput,
+) (service.TaskRepositoryInput, error) {
+	r.calls++
+	return service.TaskRepositoryInput{
+		RemoteURL: "https://forge.example.test/scm/team/app.git", Provider: input.Provider,
+		ProviderHost: "https://forge.example.test", ProviderScope: "workspace-a",
+		ProviderRepoID: "repo-42", ProviderOwner: "team", ProviderName: "app",
+		DefaultBranch: "trunk", TrustedProviderDescriptor: true,
+	}, nil
+}
+
+func TestHTTPRemoteRepositorySelectionInspectsAndRegistersWithoutTaskSideEffects(t *testing.T) {
+	router, repo, svc := newRepositoryHTTPTestRouterWithService(t)
+	resolver := &remoteSelectionResolverStub{}
+	svc.SetRepositorySelectionResolver(resolver)
+	before := countRepositorySelectionSideEffects(t, repo)
+	body := `{"remote_url":"https://forge.example.test/projects/team/app","provider":"forge"}`
+	request := func(path string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		response := httptest.NewRecorder()
+		router.ServeHTTP(response, req)
+		return response
+	}
+
+	inspection := request("/api/v1/workspaces/ws-1/repositories/remote-selection/inspect")
+	if inspection.Code != http.StatusOK {
+		t.Fatalf("inspect status = %d, body = %s", inspection.Code, inspection.Body.String())
+	}
+	var inspected struct {
+		RemoteURL      string `json:"remote_url"`
+		ProviderScope  string `json:"provider_scope"`
+		ProviderRepoID string `json:"provider_repo_id"`
+		DefaultBranch  string `json:"default_branch"`
+	}
+	if err := json.Unmarshal(inspection.Body.Bytes(), &inspected); err != nil {
+		t.Fatalf("decode inspect response: %v", err)
+	}
+	if inspected.RemoteURL != "https://forge.example.test/scm/team/app.git" ||
+		inspected.ProviderScope != "workspace-a" || inspected.ProviderRepoID != "repo-42" || inspected.DefaultBranch != "trunk" {
+		t.Fatalf("inspect response = %+v", inspected)
+	}
+	repositories, err := repo.ListRepositories(context.Background(), "ws-1")
+	if err != nil || len(repositories) != 0 {
+		t.Fatalf("inspection wrote repository rows=%d err=%v", len(repositories), err)
+	}
+
+	first := request("/api/v1/workspaces/ws-1/repositories/remote-selection")
+	second := request("/api/v1/workspaces/ws-1/repositories/remote-selection")
+	if first.Code != http.StatusCreated || second.Code != http.StatusCreated {
+		t.Fatalf("registration statuses = %d, %d; bodies = %s / %s", first.Code, second.Code, first.Body.String(), second.Body.String())
+	}
+	var firstRepository struct {
+		ID        string `json:"id"`
+		RemoteURL string `json:"remote_url"`
+	}
+	var secondRepository struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(first.Body.Bytes(), &firstRepository); err != nil {
+		t.Fatalf("decode first registration: %v", err)
+	}
+	if err := json.Unmarshal(second.Body.Bytes(), &secondRepository); err != nil {
+		t.Fatalf("decode retry registration: %v", err)
+	}
+	if firstRepository.ID == "" || secondRepository.ID != firstRepository.ID || firstRepository.RemoteURL != "https://forge.example.test/scm/team/app.git" {
+		t.Fatalf("first repository=%+v, retry=%+v", firstRepository, secondRepository)
+	}
+	repositories, err = repo.ListRepositories(context.Background(), "ws-1")
+	if err != nil || len(repositories) != 1 {
+		t.Fatalf("registered repository rows=%d err=%v", len(repositories), err)
+	}
+	if resolver.calls != 3 {
+		t.Fatalf("provider verification calls = %d, want inspect plus two registration verifications", resolver.calls)
+	}
+	if after := countRepositorySelectionSideEffects(t, repo); after != before {
+		t.Fatalf("task/session/start side effects changed: before=%+v after=%+v", before, after)
+	}
+}
+
+type repositorySelectionSideEffectCounts struct {
+	tasks        int
+	sessions     int
+	environments int
+}
+
+func countRepositorySelectionSideEffects(t *testing.T, repo *taskrepo.Repository) repositorySelectionSideEffectCounts {
+	t.Helper()
+	var counts repositorySelectionSideEffectCounts
+	for table, target := range map[string]*int{
+		"tasks":             &counts.tasks,
+		"task_sessions":     &counts.sessions,
+		"task_environments": &counts.environments,
+	} {
+		if err := repo.DB().QueryRow("SELECT COUNT(*) FROM " + table).Scan(target); err != nil {
+			t.Fatalf("count %s: %v", table, err)
+		}
+	}
+	return counts
+}
+
 // TestRepositoryCreateRequestJSONIncludesCopyFiles verifies that the
 // copy_files field is wired through the JSON encoding/decoding for both the
 // HTTP and WS create-repository request shapes. Failure here means the

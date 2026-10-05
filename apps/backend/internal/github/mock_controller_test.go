@@ -352,6 +352,37 @@ func TestMockControllerAddIssues(t *testing.T) {
 	}
 }
 
+func TestMockControllerSeedsRepositoryDetailsSeparatelyFromRepositoryAccess(t *testing.T) {
+	router, mock := setupMockControllerTestForAddIssues()
+	response := serveMockJSON(t, router, http.MethodPost, "/api/v1/github/mock/repository-details", `{"repositories":[{
+		"full_name":"fixture/listed","owner":"fixture","name":"listed",
+		"clone_url":"https://github.com/fixture/listed.git","html_url":"https://github.com/fixture/listed",
+		"default_branch":"stable"
+	}]}`)
+	if response.Code != http.StatusOK {
+		t.Fatalf("seed repository details: %d %s", response.Code, response.Body.String())
+	}
+	repository, err := mock.GetRepository(context.Background(), "fixture", "listed")
+	if err != nil {
+		t.Fatalf("get seeded repository: %v", err)
+	}
+	if repository.DefaultBranch != "stable" || repository.CloneURL != "https://github.com/fixture/listed.git" {
+		t.Fatalf("seeded details = %+v", repository)
+	}
+	if _, err := mock.GetRepository(context.Background(), "fixture", "unseeded"); err == nil {
+		t.Fatal("repository autocomplete/access seed must not imply provider-authoritative details")
+	}
+
+	invalid := serveMockJSON(t, router, http.MethodPost, "/api/v1/github/mock/repository-details", `{"repositories":[{
+		"full_name":"fixture/empty","owner":"fixture","name":"empty",
+		"clone_url":"https://github.com/fixture/empty.git","html_url":"https://github.com/fixture/empty",
+		"default_branch":""
+	}]}`)
+	if invalid.Code != http.StatusBadRequest {
+		t.Fatalf("empty default branch status = %d, want 400", invalid.Code)
+	}
+}
+
 func TestMockControllerAddPRsDefaultsSameRepositoryHeadIdentity(t *testing.T) {
 	router, mock := setupMockControllerTestForAddIssues()
 	response := serveMockJSON(t, router, http.MethodPost, "/api/v1/github/mock/prs", `{"prs":[

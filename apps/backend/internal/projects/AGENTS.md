@@ -15,6 +15,11 @@ shared context storage, and its workspace-scoped HTTP API. Office projects use
 - Keep context outside Git worktrees and repository Changes projections.
 - Preserve project context when a task is removed. Delete it only when the
   project delete request explicitly selects context removal.
+- Provision missing `index.md` and `notes.md` starter files independently. Use
+  exclusive creation and preserve every existing regular file, including an
+  empty file or custom index.
+- Keep the editor format check advisory. It inspects raw drafts but never
+  serializes, rewrites, or rejects context content.
 
 Requirements and system design live in `docs/specs/projects/`. Follow the
-current implementation work orders in `docs/plans/agent-projects/`.
+current implementation work orders in `docs/plans/agent-project-context-knowledge/`.

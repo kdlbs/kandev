@@ -221,6 +221,51 @@ export async function listRepositoriesAction(
   return fetchJson<ListRepositoriesResponse>(url);
 }
 
+export type RemoteRepositorySelectionInput = {
+  remote_url: string;
+  provider: string;
+  provider_host?: string;
+  provider_scope?: string;
+  provider_repo_id?: string;
+  provider_owner?: string;
+  provider_name?: string;
+  default_branch?: string;
+};
+
+export type VerifiedRemoteRepositorySelection = Required<
+  Pick<
+    RemoteRepositorySelectionInput,
+    | "remote_url"
+    | "provider"
+    | "provider_repo_id"
+    | "provider_owner"
+    | "provider_name"
+    | "default_branch"
+  >
+> &
+  Pick<RemoteRepositorySelectionInput, "provider_host" | "provider_scope">;
+
+export async function inspectRemoteRepositorySelectionAction(
+  workspaceId: string,
+  selection: RemoteRepositorySelectionInput,
+  signal?: AbortSignal,
+): Promise<VerifiedRemoteRepositorySelection> {
+  return fetchJson<VerifiedRemoteRepositorySelection>(
+    `${apiBaseUrl}/api/v1/workspaces/${workspaceId}/repositories/remote-selection/inspect`,
+    { method: "POST", body: JSON.stringify(selection), signal },
+  );
+}
+
+export async function registerRemoteRepositorySelectionAction(
+  workspaceId: string,
+  selection: RemoteRepositorySelectionInput,
+): Promise<Repository> {
+  return fetchJson<Repository>(
+    `${apiBaseUrl}/api/v1/workspaces/${workspaceId}/repositories/remote-selection`,
+    { method: "POST", body: JSON.stringify(selection) },
+  );
+}
+
 // Path-based branch listing moved to lib/api/domains/workspace-api.ts as a
 // unified `listBranches({ repositoryId | path })` after the endpoint unification.
 // Local repo status (branch + dirty files) backs the fresh-branch consent flow.
@@ -272,6 +317,7 @@ export async function createRepositoryAction(payload: {
   provider: string;
   provider_repo_id: string;
   provider_host?: string;
+  provider_scope?: string;
   provider_owner: string;
   provider_name: string;
   default_branch: string;
@@ -295,6 +341,7 @@ export async function createRepositoryAction(payload: {
         provider: payload.provider,
         provider_repo_id: payload.provider_repo_id,
         provider_host: payload.provider_host,
+        provider_scope: payload.provider_scope,
         provider_owner: payload.provider_owner,
         provider_name: payload.provider_name,
         default_branch: payload.default_branch,

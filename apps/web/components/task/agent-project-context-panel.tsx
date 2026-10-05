@@ -1,9 +1,11 @@
 "use client";
 
+import { useMemo } from "react";
 import { IconArrowLeft, IconDeviceFloppy, IconFolder, IconFile } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { useAgentProjectContext } from "@/hooks/domains/agent-projects/use-agent-project-context";
+import { inspectProjectContextFormat } from "@/lib/agent-projects/context-format";
 import { cn } from "@/lib/utils";
 import { useTranslation } from "react-i18next";
 
@@ -18,7 +20,12 @@ function AgentProjectContextFile({
 }) {
   const { t } = useTranslation();
   const file = context.file;
-  if (!file) return null;
+  const format = useMemo(
+    () => (file ? inspectProjectContextFormat(file.path, context.draft) : null),
+    [context.draft, file?.path],
+  );
+  if (!file || !format) return null;
+  const feedbackKey = format.diagnostics[0] ?? format.kind;
   return (
     <div className="flex h-full min-h-0 flex-col gap-2 p-2" data-testid="agent-project-context">
       <div className="flex shrink-0 items-center gap-2">
@@ -44,6 +51,14 @@ function AgentProjectContextFile({
           {t("projects:saveContext")}
         </Button>
       </div>
+      <p
+        role="status"
+        aria-live="polite"
+        className="min-w-0 shrink-0 whitespace-normal break-words rounded bg-muted/40 px-2 py-1 text-xs text-muted-foreground"
+        data-testid="agent-project-context-format"
+      >
+        {t(`projects:contextFormat.${feedbackKey}`)}
+      </p>
       {context.error && (
         <p role="alert" className="shrink-0 text-xs text-destructive">
           {context.error}
@@ -151,7 +166,7 @@ export function AgentProjectContextPanel({
 }) {
   const { isMobile, isFinePointer } = useResponsiveBreakpoint();
   const context = useAgentProjectContext(workspaceId, projectId);
-  const touchButton = isMobile || isFinePointer === false ? "min-h-11" : "min-h-7";
+  const touchButton = isMobile || isFinePointer === false ? "min-h-11 min-w-11" : "min-h-7 min-w-7";
   return context.file ? (
     <AgentProjectContextFile context={context} touchButton={touchButton} />
   ) : (

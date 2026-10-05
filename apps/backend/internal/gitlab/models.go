@@ -236,6 +236,7 @@ type Project struct {
 	Name              string `json:"name"`
 	Visibility        string `json:"visibility"` // private, internal, public
 	WebURL            string `json:"web_url"`
+	HTTPURLToRepo     string `json:"-"`
 	DefaultBranch     string `json:"default_branch"`
 }
 

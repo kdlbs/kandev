@@ -362,3 +362,20 @@ func TestMockClient_Reset(t *testing.T) {
 		t.Fatalf("expected 0 orgs after reset, got %d", len(orgs))
 	}
 }
+
+func TestMockClientListAccessibleReposHonorsCatalogLimit(t *testing.T) {
+	mock := NewMockClient()
+	mock.AddRepos("fixture", []GitHubRepo{
+		{FullName: "fixture/first", Owner: "fixture", Name: "first"},
+		{FullName: "fixture/second", Owner: "fixture", Name: "second"},
+		{FullName: "fixture/third", Owner: "fixture", Name: "third"},
+	})
+
+	got, err := mock.ListAccessibleRepos(context.Background(), "", 2)
+	if err != nil {
+		t.Fatalf("list repos: %v", err)
+	}
+	if len(got) != 2 || got[0].Name != "first" || got[1].Name != "second" {
+		t.Fatalf("listed repositories = %+v, want the first two of the bounded catalog", got)
+	}
+}

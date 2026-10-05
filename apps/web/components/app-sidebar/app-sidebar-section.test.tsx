@@ -193,6 +193,30 @@ describe("AppSidebarSection header action", () => {
     fireEvent.click(buttons[2]);
     expect(storeState.toggleAppSidebarSection).toHaveBeenCalledWith("tasks", false);
   });
+
+  it("keeps the create action available when an empty Projects section starts closed", () => {
+    render(
+      <TooltipProvider>
+        <AppSidebarSection
+          id="projects"
+          label="Projects"
+          icon={IconCircleDot}
+          collapsed={false}
+          headerAction={<button data-testid="project-add">Add</button>}
+          headerActionVisibility="always"
+          defaultExpanded={false}
+        >
+          <div data-testid={CHILDREN_TESTID}>projects</div>
+        </AppSidebarSection>
+      </TooltipProvider>,
+    );
+
+    expect(screen.getByRole("button", { name: "Projects" }).getAttribute("aria-expanded")).toBe(
+      "false",
+    );
+    expect(screen.getByTestId("project-add")).toBeTruthy();
+    expect(screen.queryByTestId(CHILDREN_TESTID)).toBeNull();
+  });
 });
 
 describe("AppSidebarSection collapsed summary", () => {

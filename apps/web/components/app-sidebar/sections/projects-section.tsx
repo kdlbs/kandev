@@ -5,7 +5,6 @@ import { useTranslation } from "react-i18next";
 import { useRouter } from "@/lib/routing/client-router";
 import { linkToTask } from "@/lib/links";
 import {
-  IconArchive,
   IconBoxMultiple,
   IconChevronDown,
   IconChevronRight,
@@ -29,11 +28,9 @@ import { useFeature } from "@/hooks/domains/features/use-feature";
 import { useSettingsData } from "@/hooks/domains/settings/use-settings-data";
 import {
   useAgentProjects,
-  useAgentProjectMutations,
   projectWorkers,
 } from "@/hooks/domains/agent-projects/use-agent-projects";
-import { AgentProjectFormDialog } from "@/components/agent-projects/agent-project-form-dialog";
-import { AgentProjectActionDialog } from "@/components/agent-projects/agent-project-action-dialog";
+import { useAgentProjectDialogs } from "@/components/agent-projects/agent-project-dialog-provider";
 import type { AgentProject } from "@/lib/types/http-agent-projects";
 import { cn } from "@/lib/utils";
 import { APP_SIDEBAR_SECTION_IDS } from "../app-sidebar-constants";
@@ -47,14 +44,12 @@ type ProjectsSectionProps = {
 type AgentProjectRowProps = {
   project: AgentProject;
   expanded: boolean;
-  archived?: boolean;
   mobile: boolean;
   onOpenTask: (taskId: string) => void;
   onToggle: () => void;
   onEdit: () => void;
   onArchive: () => void;
   onDelete: () => void;
-  onRestore?: () => void;
 };
 
 type Navigate = (path: string) => void;
@@ -75,7 +70,7 @@ function ProjectsHeaderAction({
         <Button
           variant="ghost"
           size="icon"
-          className={cn("h-5 w-5 cursor-pointer", mobile && "h-11 w-11")}
+          className={cn("h-6 w-6 cursor-pointer", mobile && "h-11 w-11")}
           aria-label={t("sidebar:addProject")}
           onClick={onAdd}
           data-testid={testId}
@@ -90,31 +85,12 @@ function ProjectsHeaderAction({
 
 function AgentProjectRowActions({
   project,
-  archived,
   mobile,
   onEdit,
   onArchive,
   onDelete,
-  onRestore,
-}: Pick<
-  AgentProjectRowProps,
-  "project" | "archived" | "mobile" | "onEdit" | "onArchive" | "onDelete" | "onRestore"
->) {
+}: Pick<AgentProjectRowProps, "project" | "mobile" | "onEdit" | "onArchive" | "onDelete">) {
   const { t } = useTranslation();
-  if (archived && onRestore) {
-    return (
-      <Button
-        type="button"
-        size="sm"
-        variant="ghost"
-        className={cn("shrink-0", mobile ? "min-h-11" : "h-7")}
-        onClick={onRestore}
-        aria-label={t("projects:restoreProject", { name: project.name })}
-      >
-        {t("projects:restore")}
-      </Button>
-    );
-  }
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
@@ -130,12 +106,8 @@ function AgentProjectRowActions({
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end">
-        {!archived && (
-          <>
-            <DropdownMenuItem onClick={onEdit}>{t("projects:editProject")}</DropdownMenuItem>
-            <DropdownMenuItem onClick={onArchive}>{t("projects:archive")}</DropdownMenuItem>
-          </>
-        )}
+        <DropdownMenuItem onClick={onEdit}>{t("projects:editProject")}</DropdownMenuItem>
+        <DropdownMenuItem onClick={onArchive}>{t("projects:archive")}</DropdownMenuItem>
         <DropdownMenuItem className="text-destructive" onClick={onDelete}>
           {t("projects:delete")}
         </DropdownMenuItem>
@@ -186,14 +158,12 @@ function AgentProjectWorkerRows({
 function AgentProjectRow({
   project,
   expanded,
-  archived = false,
   mobile,
   onOpenTask,
   onToggle,
   onEdit,
   onArchive,
   onDelete,
-  onRestore,
 }: AgentProjectRowProps) {
   const { t } = useTranslation();
   const workers = projectWorkers(project);
@@ -251,12 +221,10 @@ function AgentProjectRow({
         </button>
         <AgentProjectRowActions
           project={project}
-          archived={archived}
           mobile={mobile}
           onEdit={onEdit}
           onArchive={onArchive}
           onDelete={onDelete}
-          onRestore={onRestore}
         />
       </div>
       {expanded && workers.length > 0 && (
@@ -389,126 +357,15 @@ function AgentProjectRows({
   ));
 }
 
-function ArchivedAgentProjects({
-  open,
-  mobile,
-  projects,
-  onToggle,
-  onOpenTask,
-  onDelete,
-  onRestore,
-}: {
-  open: boolean;
-  mobile: boolean;
-  projects: AgentProject[];
-  onToggle: () => void;
-  onOpenTask: (taskId: string) => void;
-  onDelete: (project: AgentProject) => void;
-  onRestore: (projectId: string) => void;
-}) {
-  const { t } = useTranslation();
-  return (
-    <>
-      <button
-        type="button"
-        className={cn(
-          "flex w-full items-center gap-2 rounded-md px-2.5 text-left text-xs text-muted-foreground hover:bg-muted/60 hover:text-foreground",
-          mobile ? "min-h-11" : "min-h-8",
-        )}
-        aria-expanded={open}
-        onClick={onToggle}
-        data-testid="agent-project-archived-toggle"
-      >
-        <IconArchive className="h-3.5 w-3.5" />
-        <span>{t("projects:archivedProjects")}</span>
-        {projects.length > 0 && (
-          <Badge variant="secondary" className="ml-auto px-1.5 py-0 text-[10px] font-normal">
-            {projects.length}
-          </Badge>
-        )}
-      </button>
-      {open &&
-        projects.map((project) => (
-          <AgentProjectRow
-            key={`archived-${project.id}`}
-            project={project}
-            expanded={false}
-            archived
-            mobile={mobile}
-            onOpenTask={onOpenTask}
-            onToggle={() => undefined}
-            onEdit={() => undefined}
-            onArchive={() => undefined}
-            onDelete={() => onDelete(project)}
-            onRestore={() => onRestore(project.id)}
-          />
-        ))}
-    </>
-  );
-}
-
-function AgentProjectDialogs({
-  workspaceId,
-  createOpen,
-  setCreateOpen,
-  editingProject,
-  setEditingProject,
-  actionTarget,
-  setActionTarget,
-}: {
-  workspaceId: string;
-  createOpen: boolean;
-  setCreateOpen: (open: boolean) => void;
-  editingProject: AgentProject | null;
-  setEditingProject: (project: AgentProject | null) => void;
-  actionTarget: { project: AgentProject; action: "archive" | "delete" } | null;
-  setActionTarget: (target: { project: AgentProject; action: "archive" | "delete" } | null) => void;
-}) {
-  return (
-    <>
-      <AgentProjectFormDialog
-        open={createOpen}
-        onOpenChange={setCreateOpen}
-        workspaceId={workspaceId}
-      />
-      <AgentProjectFormDialog
-        open={Boolean(editingProject)}
-        onOpenChange={(open) => {
-          if (!open) setEditingProject(null);
-        }}
-        workspaceId={workspaceId}
-        project={editingProject ?? undefined}
-      />
-      <AgentProjectActionDialog
-        open={Boolean(actionTarget)}
-        onOpenChange={(open) => {
-          if (!open) setActionTarget(null);
-        }}
-        workspaceId={workspaceId}
-        project={actionTarget?.project ?? null}
-        action={actionTarget?.action ?? "archive"}
-      />
-    </>
-  );
-}
-
 function AgentProjectsSection({ collapsed, onNavigate }: ProjectsSectionProps) {
   const { t } = useTranslation();
   const router = useRouter();
+  const { openCreate, editProject, openAction } = useAgentProjectDialogs();
   const projectsEnabled = useFeature("agentProjects");
   const workspaceId = useAppStore((state) => state.workspaces.activeId);
-  const [createOpen, setCreateOpen] = useState(false);
-  const [editingProject, setEditingProject] = useState<AgentProject | null>(null);
-  const [actionTarget, setActionTarget] = useState<{
-    project: AgentProject;
-    action: "archive" | "delete";
-  } | null>(null);
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
-  const [archivedOpen, setArchivedOpen] = useState(false);
   const projects = useAgentProjects(workspaceId, false, projectsEnabled);
-  const archivedProjects = useAgentProjects(workspaceId, true, projectsEnabled && archivedOpen);
   useSettingsData(projectsEnabled);
-  const mutations = useAgentProjectMutations();
   const { isMobile, isFinePointer } = useResponsiveBreakpoint();
   const touch = isMobile || isFinePointer === false;
   const navigate: Navigate = (path) => {
@@ -519,14 +376,8 @@ function AgentProjectsSection({ collapsed, onNavigate }: ProjectsSectionProps) {
 
   const toggleExpanded = (projectId: string) =>
     setExpanded((current) => ({ ...current, [projectId]: !(current[projectId] ?? false) }));
-  const setProjectAction = (project: AgentProject, action: "archive" | "delete") =>
-    setActionTarget({ project, action });
   const headerAction = (
-    <ProjectsHeaderAction
-      onAdd={() => setCreateOpen(true)}
-      testId="agent-project-create-open"
-      mobile={touch}
-    />
+    <ProjectsHeaderAction onAdd={openCreate} testId="agent-project-create-open" mobile={touch} />
   );
   const openTask = (taskId: string) => navigate(linkToTask(taskId));
 
@@ -539,7 +390,7 @@ function AgentProjectsSection({ collapsed, onNavigate }: ProjectsSectionProps) {
         icon={IconBoxMultiple}
         headerAction={headerAction}
         headerActionVisibility="always"
-        defaultExpanded
+        defaultExpanded={projects.projects.length > 0}
       >
         <AgentProjectRows
           projects={projects.projects}
@@ -551,29 +402,11 @@ function AgentProjectsSection({ collapsed, onNavigate }: ProjectsSectionProps) {
           onOpenTask={openTask}
           onRefresh={() => void projects.refresh()}
           onToggle={toggleExpanded}
-          onEdit={setEditingProject}
-          onArchive={(project) => setProjectAction(project, "archive")}
-          onDelete={(project) => setProjectAction(project, "delete")}
-        />
-        <ArchivedAgentProjects
-          open={archivedOpen}
-          mobile={touch}
-          projects={archivedProjects.projects}
-          onToggle={() => setArchivedOpen((current) => !current)}
-          onOpenTask={openTask}
-          onDelete={(project) => setProjectAction(project, "delete")}
-          onRestore={(projectId) => void mutations.restore(workspaceId, projectId)}
+          onEdit={editProject}
+          onArchive={(project) => openAction(project, "archive")}
+          onDelete={(project) => openAction(project, "delete")}
         />
       </AppSidebarSection>
-      <AgentProjectDialogs
-        workspaceId={workspaceId}
-        createOpen={createOpen}
-        setCreateOpen={setCreateOpen}
-        editingProject={editingProject}
-        setEditingProject={setEditingProject}
-        actionTarget={actionTarget}
-        setActionTarget={setActionTarget}
-      />
     </>
   );
 }

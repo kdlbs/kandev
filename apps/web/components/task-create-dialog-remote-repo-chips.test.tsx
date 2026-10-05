@@ -33,8 +33,20 @@ const PICKER_URL = vi.hoisted(() => "https://github.com/acme/site");
 const REMOTE_REPO_CHIP_TEST_ID = "remote-repo-chip";
 const SELECTED_IDENTITIES_ATTRIBUTE = "data-selected-repository-identities";
 vi.mock("./task-create-dialog-remote-repo-chip", () => ({
-  selectedRemoteRepositoryIdentity: (row: TaskRemoteRepoRow) =>
-    row.provider && row.providerRepoId ? `${row.provider}:id:${row.providerRepoId}` : undefined,
+  selectedRemoteRepositoryIdentity: (row: TaskRemoteRepoRow) => {
+    if (!row.provider || !row.providerRepoId) return undefined;
+    let host = row.providerHost;
+    if (!host && row.url) {
+      try {
+        const parsed = new URL(row.url);
+        host = `${parsed.protocol}//${parsed.host}`;
+      } catch {
+        host = undefined;
+      }
+    }
+    if (!host && row.provider === "github") host = "https://github.com";
+    return `${row.provider}:id:${row.providerRepoId}${host ? `:host:${host.toLowerCase()}` : ""}${row.providerScope ? `:scope:${row.providerScope}` : ""}`;
+  },
   RemoteRepoChip: ({
     row,
     onRemove,
@@ -157,7 +169,7 @@ describe("RemoteRepoChipsRow identity tracking", () => {
       screen
         .getAllByTestId(REMOTE_REPO_CHIP_TEST_ID)[1]
         ?.getAttribute(SELECTED_IDENTITIES_ATTRIBUTE),
-    ).toBe("github:id:site-id");
+    ).toBe("github:id:site-id:host:https://github.com");
   });
 
   it("excludes the current row and clears another row's identity after it changes or is removed", () => {
@@ -195,12 +207,12 @@ describe("RemoteRepoChipsRow identity tracking", () => {
       screen
         .getAllByTestId(REMOTE_REPO_CHIP_TEST_ID)[0]
         ?.getAttribute(SELECTED_IDENTITIES_ATTRIBUTE),
-    ).toBe("github:id:docs-id");
+    ).toBe("github:id:docs-id:host:https://github.com");
     expect(
       screen
         .getAllByTestId(REMOTE_REPO_CHIP_TEST_ID)[1]
         ?.getAttribute(SELECTED_IDENTITIES_ATTRIBUTE),
-    ).toBe("github:id:site-id");
+    ).toBe("github:id:site-id:host:https://github.com");
 
     rerender(
       <TooltipProvider>
@@ -222,7 +234,7 @@ describe("RemoteRepoChipsRow identity tracking", () => {
       screen
         .getAllByTestId(REMOTE_REPO_CHIP_TEST_ID)[0]
         ?.getAttribute(SELECTED_IDENTITIES_ATTRIBUTE),
-    ).toBe("github:id:other-id");
+    ).toBe("github:id:other-id:host:https://github.com");
 
     rerender(
       <TooltipProvider>

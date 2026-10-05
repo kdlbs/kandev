@@ -1,3 +1,5 @@
+import { mkdir, writeFile } from "node:fs/promises";
+import path from "node:path";
 import { test, expect } from "../../fixtures/test-base";
 import { waitForLatestSessionDone } from "../../helpers/session";
 import { SessionPage } from "../../pages/session-page";
@@ -6,9 +8,12 @@ import {
   assertFullHeightProjectSurface,
   assertProjectFormGeometry,
   assertProjectTouchTarget,
+  assertProjectWorkerProfilesGeometry,
+  settleProjectSurface,
 } from "./agent-projects-geometry";
 import {
   readAgentProject,
+  restoreArchivedAgentProject,
   setupAgentProjectFixture,
   type AgentProjectView,
 } from "./agent-projects-fixture";
@@ -22,15 +27,58 @@ async function listProjects(apiClient: ApiClient, workspaceId: string) {
   return (await response.json()) as { projects: AgentProjectView[] };
 }
 
-async function openMobileProjects(testPage: import("@playwright/test").Page) {
+async function openMobileProjects(testPage: import("@playwright/test").Page, expand = true) {
   const trigger = testPage.getByTestId("app-nav-trigger");
   if (!(await testPage.getByTestId("app-nav-sheet").isVisible())) await trigger.tap();
   const menu = testPage.getByTestId("app-nav-sheet");
   const section = menu.getByRole("button", { name: "Projects", exact: true });
   await expect(section).toBeVisible();
-  if ((await section.getAttribute("aria-expanded")) !== "true") await section.tap();
+  if (expand && (await section.getAttribute("aria-expanded")) !== "true") await section.tap();
   return menu;
 }
+
+test("phone project drafts survive portrait and landscape resize", async ({
+  testPage,
+  apiClient,
+  backend,
+  seedData,
+}) => {
+  const fixture = await setupAgentProjectFixture(
+    apiClient,
+    backend,
+    seedData,
+    `project-rotation-${Date.now()}`,
+  );
+  try {
+    await testPage.setViewportSize({ width: 390, height: 844 });
+    await testPage.goto("/stats");
+    const menu = await openMobileProjects(testPage);
+    await menu.getByTestId("agent-project-create-open").tap();
+    let form = testPage.getByTestId("agent-project-form-mobile");
+    await form.getByTestId("agent-project-name").fill("Rotation keeps this draft");
+    await form.getByTestId("agent-project-initial-prompt").fill("Keep the exact prompt text.");
+
+    for (const viewport of [
+      { width: 844, height: 390 },
+      { width: 390, height: 844 },
+    ]) {
+      await testPage.setViewportSize(viewport);
+      form = testPage.getByTestId(
+        viewport.width < 768 ? "agent-project-form-mobile" : "agent-project-form-desktop",
+      );
+      await expect(form).toBeVisible();
+      await expect(form.getByTestId("agent-project-name")).toHaveValue("Rotation keeps this draft");
+      await expect(form.getByTestId("agent-project-initial-prompt")).toHaveValue(
+        "Keep the exact prompt text.",
+      );
+    }
+
+    await testPage.keyboard.press("Escape");
+    await expect(testPage.getByTestId("agent-project-form-mobile")).toBeHidden();
+  } finally {
+    await fixture.cleanup();
+  }
+});
 
 test("phone navigation manages Agent Projects and opens shared context in coordinator and worker", async ({
   testPage,
@@ -47,22 +95,42 @@ test("phone navigation manages Agent Projects and opens shared context in coordi
   try {
     await testPage.setViewportSize({ width: 393, height: 851 });
     await testPage.goto("/stats");
-    let menu = await openMobileProjects(testPage);
-    await menu.getByTestId("agent-project-create-open").tap();
+    let menu = await openMobileProjects(testPage, false);
+    await expect(menu.locator('[aria-controls="sidebar-section-projects"]')).toHaveAttribute(
+      "aria-expanded",
+      "false",
+    );
+    await expect(menu.getByText("No projects yet")).not.toBeVisible();
+    const createButton = menu.getByTestId("agent-project-create-open");
+    await assertProjectTouchTarget(createButton);
+    await createButton.tap();
     const form = testPage.getByTestId("agent-project-form-mobile");
     await expect(form).toBeVisible();
     await assertProjectFormGeometry(form, true);
     await testPage.screenshot({ path: test.info().outputPath("phone-project-form.png") });
+    await assertProjectWorkerProfilesGeometry(form, true);
+    await settleProjectSurface(form);
+    await testPage.screenshot({ path: test.info().outputPath("phone-project-form-advanced.png") });
+    const projectHelp = form.getByTestId("agent-project-project-help");
+    await projectHelp.tap();
+    const projectHelpDrawer = testPage.getByTestId("agent-project-project-help-drawer");
+    await expect(projectHelpDrawer).toBeVisible();
+    await settleProjectSurface(projectHelpDrawer);
+    await testPage.screenshot({ path: test.info().outputPath("phone-project-help.png") });
+    await testPage.keyboard.press("Escape");
+    await expect(projectHelp).toBeFocused();
     await form.getByTestId("agent-project-name").fill(projectName);
-    await form
-      .locator("label")
+    await form.getByTestId("agent-project-add-repository").tap();
+    await testPage
+      .getByTestId("agent-project-existing-repository-option")
       .filter({ hasText: `fixture/${fixtureName}` })
-      .locator("input")
-      .check();
-    await form.locator("select").nth(0).selectOption(fixture.repositoryId);
-    for (const profileSelect of [1, 2, 3]) {
-      await form.locator("select").nth(profileSelect).selectOption(fixture.profileId);
-    }
+      .tap();
+    await form
+      .getByRole("combobox", { name: "Primary repository" })
+      .selectOption(fixture.repositoryId);
+    await form
+      .getByRole("combobox", { name: "Coordinator profile" })
+      .selectOption(fixture.profileId);
     const formHeight = await form.evaluate((element) => element.getBoundingClientRect().height);
     expect(formHeight).toBeGreaterThan(600);
     await expect(form.getByTestId("agent-project-submit")).toBeEnabled();
@@ -73,9 +141,21 @@ test("phone navigation manages Agent Projects and opens shared context in coordi
       .not.toBe("");
     let project = (await listProjects(apiClient, seedData.workspaceId)).projects[0]!;
     projectId = project.id;
+    expect((await apiClient.listTaskSessions(project.main_task_id)).sessions).toHaveLength(0);
+    const contextRoot = path.join(
+      backend.tmpDir,
+      ".kandev",
+      "agent-projects",
+      projectId,
+      "context",
+    );
+    await mkdir(path.join(contextRoot, "docs"), { recursive: true });
+    await writeFile(path.join(contextRoot, "docs", "guide.md"), "# Guide\n", "utf8");
     menu = await openMobileProjects(testPage);
     const projectRow = menu.getByTestId(`agent-project-row-${projectId}`);
     await expect(projectRow).toBeVisible();
+    await settleProjectSurface(menu);
+    await testPage.screenshot({ path: test.info().outputPath("phone-project-sidebar.png") });
     await expect(menu.locator(`[data-task-row-id="${project.main_task_id}"]`)).toHaveCount(0);
     await assertProjectTouchTarget(menu.getByTestId(`agent-project-open-${projectId}`));
     await assertProjectTouchTarget(menu.getByRole("button", { name: "Projects", exact: true }));
@@ -83,6 +163,15 @@ test("phone navigation manages Agent Projects and opens shared context in coordi
     await testPage.getByRole("menuitem", { name: "Edit project" }).tap();
     const editForm = testPage.getByTestId("agent-project-form-mobile");
     await editForm.getByTestId("agent-project-name").fill(`${projectName} edited`);
+    await testPage.setViewportSize({ width: 844, height: 390 });
+    const landscapeEditForm = testPage.getByTestId("agent-project-form-desktop");
+    await expect(landscapeEditForm).toBeVisible();
+    await expect(landscapeEditForm.getByTestId("agent-project-name")).toHaveValue(
+      `${projectName} edited`,
+    );
+    await testPage.setViewportSize({ width: 390, height: 844 });
+    await expect(editForm).toBeVisible();
+    await expect(editForm.getByTestId("agent-project-name")).toHaveValue(`${projectName} edited`);
     await editForm.getByTestId("agent-project-submit").tap();
     projectName = `${projectName} edited`;
     await expect(menu.getByTestId(`agent-project-open-${projectId}`)).toContainText(projectName);
@@ -130,6 +219,14 @@ test("phone navigation manages Agent Projects and opens shared context in coordi
       "Waiting for the phone project worker",
       120_000,
     );
+    const workerSessions = await apiClient.listTaskSessions(worker!.id);
+    const workerSessionRecord = workerSessions.sessions[0];
+    expect(workerSessionRecord).toBeTruthy();
+    const workerMessages = await apiClient.listSessionMessages(workerSessionRecord!.id);
+    const firstAgentMessage = workerMessages.messages.find(
+      (message) => message.author_type === "agent",
+    );
+    expect(firstAgentMessage).toBeTruthy();
     const completedProject = await readAgentProject(apiClient, seedData.workspaceId, projectId);
     const completedWorker = completedProject.tasks.find((task) => task.id === worker!.id);
     expect(completedWorker).toBeTruthy();
@@ -159,10 +256,48 @@ test("phone navigation manages Agent Projects and opens shared context in coordi
       "aria-selected",
       "true",
     );
+    await fileRoots.getByRole("button", { name: "docs", exact: true }).tap();
+    const directoryBack = fileRoots.getByRole("button", {
+      name: "Go to parent context folder",
+    });
+    await assertProjectTouchTarget(directoryBack);
+    const directoryBackBox = await directoryBack.boundingBox();
+    expect(directoryBackBox).not.toBeNull();
+    expect(directoryBackBox!.width).toBeGreaterThanOrEqual(44);
+    await directoryBack.tap();
     await fileRoots.getByRole("button", { name: "notes.md", exact: true }).tap();
-    await fileRoots
-      .getByTestId("agent-project-context-editor")
-      .fill("Shared project context from the phone E2E.\n");
+    const contextEditor = fileRoots.getByTestId("agent-project-context-editor");
+    const contextDraft =
+      "---\ntitle: Phone draft\n---\nShared project context from the phone E2E.\n";
+    await contextEditor.fill(contextDraft);
+    const formatFeedback = fileRoots.getByTestId("agent-project-context-format");
+    await expect(formatFeedback).toContainText("Concept type is missing");
+    await expect(formatFeedback).toContainText("You can still save this draft.");
+    await expect(contextEditor).toBeFocused();
+    const fileBack = fileRoots.getByRole("button", { name: "Back to project context" });
+    await assertProjectTouchTarget(fileBack);
+    const fileBackBox = await fileBack.boundingBox();
+    expect(fileBackBox).not.toBeNull();
+    expect(fileBackBox!.width).toBeGreaterThanOrEqual(44);
+    await assertProjectTouchTarget(fileRoots.getByRole("button", { name: "Save context" }));
+    const mobileContextBounds = await fileRoots.evaluate((element) => {
+      const surface = element.getBoundingClientRect();
+      const editor = element
+        .querySelector("[data-testid='agent-project-context-editor']")!
+        .getBoundingClientRect();
+      return {
+        surfaceRight: surface.right,
+        editorRight: editor.right,
+        viewportWidth: window.innerWidth,
+        documentWidth: document.documentElement.scrollWidth,
+      };
+    });
+    expect(mobileContextBounds.surfaceRight).toBeLessThanOrEqual(mobileContextBounds.viewportWidth);
+    expect(mobileContextBounds.editorRight).toBeLessThanOrEqual(mobileContextBounds.viewportWidth);
+    expect(mobileContextBounds.documentWidth).toBeLessThanOrEqual(
+      mobileContextBounds.viewportWidth,
+    );
+    await testPage.screenshot({ path: test.info().outputPath("phone-context-advice.png") });
     await fileRoots.getByRole("button", { name: "Save context" }).tap();
     await expect
       .poll(async () => {
@@ -173,7 +308,7 @@ test("phone navigation manages Agent Projects and opens shared context in coordi
         if (!response.ok) return "";
         return ((await response.json()) as { content: string }).content;
       })
-      .toContain("Shared project context from the phone E2E.");
+      .toBe(contextDraft);
     await fileRoots.getByRole("tab", { name: "Workspace" }).tap();
     await expect(fileRoots.getByRole("tab", { name: "Workspace" })).toHaveAttribute(
       "aria-selected",
@@ -194,9 +329,7 @@ test("phone navigation manages Agent Projects and opens shared context in coordi
     const workerRoots = testPage.getByTestId("agent-project-file-roots");
     await workerRoots.getByRole("tab", { name: "Context" }).tap();
     await workerRoots.getByRole("button", { name: "notes.md", exact: true }).tap();
-    await expect(workerRoots.getByTestId("agent-project-context-editor")).toHaveValue(
-      "Shared project context from the phone E2E.\n",
-    );
+    await expect(workerRoots.getByTestId("agent-project-context-editor")).toHaveValue(contextDraft);
 
     await testPage.getByTestId("app-nav-trigger").tap();
     menu = await openMobileProjects(testPage);
@@ -206,7 +339,42 @@ test("phone navigation manages Agent Projects and opens shared context in coordi
     await assertFullHeightProjectSurface(
       testPage.getByTestId("agent-project-archive-confirmation"),
     );
+    const coordinatorSnapshot = await apiClient.listTaskSessions(project.main_task_id);
+    const workerSnapshot = await apiClient.listTaskSessions(worker!.id);
+    const archiveSnapshotPath = test.info().outputPath("archive-session-snapshot.json");
+    await writeFile(
+      archiveSnapshotPath,
+      JSON.stringify(
+        {
+          coordinator: coordinatorSnapshot.sessions.map(({ id, state }) => ({ id, state })),
+          worker: workerSnapshot.sessions.map(({ id, state }) => ({ id, state })),
+        },
+        null,
+        2,
+      ),
+      "utf8",
+    );
+    await test.info().attach("archive-session-snapshot", {
+      path: archiveSnapshotPath,
+      contentType: "application/json",
+    });
+    const archiveResponsePromise = testPage.waitForResponse(
+      (response) =>
+        response.url().includes(`/agent-projects/${projectId}/archive`) &&
+        response.request().method() === "POST",
+      { timeout: 30_000 },
+    );
+    const archiveStartedAt = Date.now();
     await testPage.getByTestId("agent-project-archive-confirm").tap();
+    const archiveResponse = await archiveResponsePromise;
+    expect(archiveResponse.status()).toBe(200);
+    await test.info().attach("archive-response-timing", {
+      body: JSON.stringify({
+        status: archiveResponse.status(),
+        elapsedMs: Date.now() - archiveStartedAt,
+      }),
+      contentType: "application/json",
+    });
     await expect(testPage.getByTestId("agent-project-archive-confirmation")).toBeHidden({
       timeout: 30_000,
     });
@@ -217,16 +385,13 @@ test("phone navigation manages Agent Projects and opens shared context in coordi
       .toBe(0);
     menu = await openMobileProjects(testPage);
     await expect(menu.getByText("No projects yet")).toBeVisible();
-    await menu.getByTestId("agent-project-archived-toggle").tap();
-    const archivedRow = menu.getByTestId(`agent-project-row-${projectId}`);
-    await expect(archivedRow).toBeVisible();
-    await archivedRow.getByRole("button", { name: `Restore ${projectName}` }).tap();
+    await expect(menu.getByTestId("agent-project-archived-toggle")).toHaveCount(0);
+    await restoreArchivedAgentProject(apiClient, seedData.workspaceId, projectId, contextDraft);
     await expect
       .poll(async () => (await listProjects(apiClient, seedData.workspaceId)).projects.length, {
         timeout: 30_000,
       })
       .toBe(1);
-    await menu.getByTestId("agent-project-archived-toggle").tap();
 
     const restoredRow = menu.getByTestId(`agent-project-row-${projectId}`);
     await expect(restoredRow).toBeVisible({ timeout: 30_000 });

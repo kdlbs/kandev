@@ -449,6 +449,7 @@ export type GitHubRepoInfo = {
   owner: string;
   name: string;
   private: boolean;
+  default_branch: string;
 };
 
 export type ReviewScope = "user" | "user_and_teams";

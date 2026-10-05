@@ -8,6 +8,9 @@ const mocks = vi.hoisted(() => ({
   projectsEnabled: true,
   activeProjects: [] as Array<Record<string, unknown>>,
   archivedProjects: [] as Array<Record<string, unknown>>,
+  projectListReads: [] as Array<{ archived: boolean; enabled: boolean | undefined }>,
+  projectsLoaded: true,
+  projectsLoading: false,
   officeProjects: [] as Array<Record<string, unknown>>,
 }));
 
@@ -32,13 +35,16 @@ vi.mock("@/hooks/domains/features/use-feature", () => ({
 }));
 vi.mock("@/hooks/domains/settings/use-settings-data", () => ({ useSettingsData: vi.fn() }));
 vi.mock("@/hooks/domains/agent-projects/use-agent-projects", () => ({
-  useAgentProjects: (_workspaceId: string, archived: boolean) => ({
-    projects: archived ? mocks.archivedProjects : mocks.activeProjects,
-    loaded: true,
-    loading: false,
-    error: null,
-    refresh: vi.fn(),
-  }),
+  useAgentProjects: (_workspaceId: string, archived: boolean, enabled?: boolean) => {
+    mocks.projectListReads.push({ archived, enabled });
+    return {
+      projects: archived ? mocks.archivedProjects : mocks.activeProjects,
+      loaded: mocks.projectsLoaded,
+      loading: mocks.projectsLoading,
+      error: null,
+      refresh: vi.fn(),
+    };
+  },
   useAgentProjectMutations: () => ({ restore: vi.fn() }),
   projectWorkers: (project: {
     tasks: Array<{ id: string; parent_id?: string }>;
@@ -51,6 +57,13 @@ vi.mock("@/components/agent-projects/agent-project-form-dialog", () => ({
 vi.mock("@/components/agent-projects/agent-project-action-dialog", () => ({
   AgentProjectActionDialog: () => null,
 }));
+vi.mock("@/components/agent-projects/agent-project-dialog-provider", () => ({
+  useAgentProjectDialogs: () => ({
+    openCreate: vi.fn(),
+    editProject: vi.fn(),
+    openAction: vi.fn(),
+  }),
+}));
 vi.mock("@/components/state-provider", () => ({
   useAppStore: (selector: (snapshot: typeof state) => unknown) => selector(state),
 }));
@@ -59,8 +72,19 @@ vi.mock("@/components/app-sidebar/app-sidebar-section", () => ({
     label,
     headerAction,
     children,
-  }: React.PropsWithChildren<{ label: string; headerAction?: React.ReactNode }>) => (
-    <section>
+    defaultExpanded,
+    headerActionVisibility,
+  }: React.PropsWithChildren<{
+    label: string;
+    headerAction?: React.ReactNode;
+    defaultExpanded?: boolean;
+    headerActionVisibility?: string;
+  }>) => (
+    <section
+      data-testid="projects-section"
+      data-default-expanded={String(defaultExpanded)}
+      data-header-action-visibility={headerActionVisibility}
+    >
       <h2>{label}</h2>
       {headerAction}
       {children}
@@ -99,6 +123,9 @@ describe("ProjectsSection", () => {
     mocks.projectsEnabled = true;
     mocks.activeProjects = [];
     mocks.archivedProjects = [];
+    mocks.projectListReads = [];
+    mocks.projectsLoaded = true;
+    mocks.projectsLoading = false;
     mocks.officeProjects = [];
   });
 
@@ -117,6 +144,9 @@ describe("ProjectsSection", () => {
     ];
 
     render(<ProjectsSection collapsed={false} />);
+    expect(screen.getByTestId("projects-section").getAttribute("data-default-expanded")).toBe(
+      "true",
+    );
     expect(screen.getByTestId("agent-project-expand-release").getAttribute("aria-expanded")).toBe(
       "false",
     );
@@ -137,6 +167,25 @@ describe("ProjectsSection", () => {
     expect(screen.getByTestId("agent-project-open-empty")).toBeTruthy();
   });
 
+  it("starts empty and loading Projects closed while keeping create available", () => {
+    mocks.projectsLoaded = false;
+    mocks.projectsLoading = true;
+    mocks.archivedProjects = [project("archived")];
+
+    render(<ProjectsSection collapsed={false} />);
+
+    expect(screen.getByTestId("projects-section").getAttribute("data-default-expanded")).toBe(
+      "false",
+    );
+    expect(
+      screen.getByTestId("projects-section").getAttribute("data-header-action-visibility"),
+    ).toBe("always");
+    expect(screen.getByTestId("agent-project-create-open")).toBeTruthy();
+    expect(screen.queryByTestId("agent-project-archived-toggle")).toBeNull();
+    expect(screen.queryByTestId("agent-project-row-archived")).toBeNull();
+    expect(mocks.projectListReads).toEqual([{ archived: false, enabled: true }]);
+  });
+
   it("keeps Office projects in the same section without mixing Agent Projects", () => {
     mocks.mode = "office";
     mocks.activeProjects = [project("agent-project")];
@@ -149,15 +198,9 @@ describe("ProjectsSection", () => {
 
     expect(screen.getByText("Office Project")).toBeTruthy();
     expect(screen.queryByTestId("agent-project-open-agent-project")).toBeNull();
+    expect(screen.getByRole("button", { name: "Add project" })).toBeTruthy();
     fireEvent.click(screen.getByText("Office Project"));
     expect(mocks.push).toHaveBeenCalledWith("/office/projects/office-project");
-  });
-
-  it("keeps the Office add-project action visible", () => {
-    mocks.mode = "office";
-    render(<ProjectsSection collapsed={false} />);
-
-    expect(screen.getByRole("button", { name: "Add project" })).toBeTruthy();
   });
 
   it("hides the Agent Projects section when its release flag is off", () => {
@@ -173,5 +216,13 @@ describe("ProjectsSection", () => {
     const button = screen.getByTestId("agent-project-create-open");
     expect(button.className).toContain("h-11");
     expect(button.className).toContain("w-11");
+  });
+
+  it("uses a 24px desktop project create action", () => {
+    render(<ProjectsSection collapsed={false} />);
+
+    const button = screen.getByTestId("agent-project-create-open");
+    expect(button.className).toContain("h-6");
+    expect(button.className).toContain("w-6");
   });
 });
