@@ -2,6 +2,7 @@ package workspaces
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -254,6 +255,138 @@ func TestWorkspaceDiscoveryRejectsSymlinksInRecognizedScratchContainers(t *testi
 				t.Fatalf("symlink target changed: contents=%q err=%v", contents, err)
 			}
 		})
+	}
+}
+
+// @covers AC-SYSTEM-PAGE-STORAGE-MAINTENANCE-001.11
+func TestWorkspaceDiscoveryRejectsSemanticMarkerInsideScratchContainer(t *testing.T) {
+	tasksRoot := t.TempDir()
+	workspaceID := "33333333-3333-4333-8333-333333333333"
+	childPath := createOwnedCandidate(t, tasksRoot, filepath.Join(workspaceID, "semantic-task_abc"), OwnershipMarker{
+		TaskID: "semantic-task", WorkspaceID: workspaceID,
+		TaskDirName: "semantic-task_abc", LayoutVersion: LayoutVersionSemantic,
+	})
+
+	if _, _, err := discoverTaskRoots(tasksRoot); err == nil || !strings.Contains(err.Error(), "unexpected nested semantic workspace marker: "+childPath) {
+		t.Fatalf("discoverTaskRoots error = %v, want nested semantic marker rejection for %s", err, childPath)
+	}
+}
+
+// @covers AC-SYSTEM-PAGE-STORAGE-MAINTENANCE-001.9
+func TestWorkspaceDiscoveryOmitsUnreadableUnclassifiedCheckout(t *testing.T) {
+	provider, tasksRoot, _ := newProviderFixture(t, Inventory{Complete: true}, nil)
+	workspace := createOwnedCandidate(t, tasksRoot, "recognized-task_abc", OwnershipMarker{
+		TaskID: "recognized-task", WorkspaceID: "recognized-workspace",
+		TaskDirName: "recognized-task_abc", LayoutVersion: LayoutVersionSemantic,
+	})
+	if err := os.WriteFile(filepath.Join(workspace, "source.txt"), []byte("recognized workspace"), 0o600); err != nil {
+		t.Fatalf("write workspace payload: %v", err)
+	}
+	markerInfo, err := os.Stat(filepath.Join(workspace, OwnershipMarkerFilename))
+	if err != nil {
+		t.Fatalf("stat ownership marker: %v", err)
+	}
+
+	checkout := filepath.Join(tasksRoot, "unrelated-checkout")
+	if err := os.Mkdir(checkout, 0o700); err != nil {
+		t.Fatalf("create unrelated checkout: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := os.Chmod(checkout, 0o700); err != nil {
+			t.Errorf("restore checkout permissions: %v", err)
+		}
+	})
+	if err := os.Chmod(checkout, 0o300); err != nil {
+		t.Fatalf("remove checkout read permission: %v", err)
+	}
+	if _, err := os.ReadDir(checkout); !errors.Is(err, os.ErrPermission) {
+		if err == nil {
+			t.Skip("filesystem permission bits are not enforced by this executor")
+		}
+		t.Fatalf("ReadDir unreadable checkout error = %v, want permission denied", err)
+	}
+
+	analysis, err := provider.Analyze(context.Background())
+	if err != nil {
+		t.Fatalf("Analyze with unreadable unclassified checkout: %v", err)
+	}
+	wantBytes := int64(len("recognized workspace")) + markerInfo.Size()
+	if analysis.TotalBytes != wantBytes {
+		t.Fatalf("TotalBytes = %d, want recognized workspace bytes %d", analysis.TotalBytes, wantBytes)
+	}
+	if !containsWarning(analysis.Warnings, "unclassified task directory kept: "+checkout) {
+		t.Fatalf("Warnings = %#v, want omission warning for %s", analysis.Warnings, checkout)
+	}
+}
+
+// @covers AC-SYSTEM-PAGE-STORAGE-MAINTENANCE-001.9
+func TestWorkspaceDiscoveryOmitsUnreadableUnmarkedScratchSibling(t *testing.T) {
+	provider, tasksRoot, _ := newProviderFixture(t, Inventory{Complete: true}, nil)
+	workspaceID := "33333333-3333-4333-8333-333333333333"
+	taskID := "44444444-4444-4444-8444-444444444444"
+	workspace := filepath.Join(tasksRoot, workspaceID, taskID)
+	if err := os.MkdirAll(workspace, 0o700); err != nil {
+		t.Fatalf("create recognized workspace: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(workspace, "source.txt"), []byte("recognized workspace"), 0o600); err != nil {
+		t.Fatalf("write workspace payload: %v", err)
+	}
+	unreadable := filepath.Join(tasksRoot, workspaceID, "apps")
+	if err := os.Mkdir(unreadable, 0o700); err != nil {
+		t.Fatalf("create unmarked scratch sibling: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := os.Chmod(unreadable, 0o700); err != nil {
+			t.Errorf("restore sibling permissions: %v", err)
+		}
+	})
+	if err := os.Chmod(unreadable, 0o000); err != nil {
+		t.Fatalf("remove sibling access: %v", err)
+	}
+	if _, err := os.Lstat(filepath.Join(unreadable, OwnershipMarkerFilename)); !errors.Is(err, os.ErrPermission) {
+		if err == nil || errors.Is(err, os.ErrNotExist) {
+			t.Skip("filesystem permission bits are not enforced by this executor")
+		}
+		t.Fatalf("Lstat unreadable sibling marker error = %v, want permission denied", err)
+	}
+
+	analysis, err := provider.Analyze(context.Background())
+	if err != nil {
+		t.Fatalf("Analyze with unreadable scratch sibling: %v", err)
+	}
+	wantBytes := int64(len("recognized workspace"))
+	if analysis.TotalBytes != wantBytes {
+		t.Fatalf("TotalBytes = %d, want recognized workspace bytes %d", analysis.TotalBytes, wantBytes)
+	}
+	if !containsWarning(analysis.Warnings, "unclassified task directory kept: "+unreadable) {
+		t.Fatalf("Warnings = %#v, want omission warning for %s", analysis.Warnings, unreadable)
+	}
+}
+
+// @covers AC-SYSTEM-PAGE-STORAGE-MAINTENANCE-001.9
+func TestWorkspaceDiscoveryRetainsPermissionErrorsForRecognizedRoots(t *testing.T) {
+	tasksRoot := t.TempDir()
+	workspace := filepath.Join(tasksRoot, "recognized-task_abc")
+	if err := os.Mkdir(workspace, 0o700); err != nil {
+		t.Fatalf("create recognized workspace: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := os.Chmod(workspace, 0o700); err != nil {
+			t.Errorf("restore workspace permissions: %v", err)
+		}
+	})
+	if err := os.Chmod(workspace, 0o000); err != nil {
+		t.Fatalf("remove workspace access: %v", err)
+	}
+	if _, err := os.ReadDir(workspace); !errors.Is(err, os.ErrPermission) {
+		if err == nil {
+			t.Skip("filesystem permission bits are not enforced by this executor")
+		}
+		t.Fatalf("ReadDir inaccessible workspace error = %v, want permission denied", err)
+	}
+
+	if _, _, err := discoverTaskRoots(tasksRoot); !errors.Is(err, os.ErrPermission) {
+		t.Fatalf("discoverTaskRoots error = %v, want recognized semantic-root permission error", err)
 	}
 }
 

@@ -37,6 +37,7 @@ Permanent regression tests must expect successful measurement with the link stil
 - Shared discovery for read-only analysis, orphan quarantine, and dependency cleanup.
 - Recognition based on markers and supported legacy directory shapes.
 - Existing warnings for omitted unclassified directories.
+- Permission-denied unclassified paths remain preserved and do not block recognized measurements.
 - Compatibility and no-follow regression coverage.
 - Real-backend desktop and phone proof through existing Storage controls.
 
@@ -59,7 +60,9 @@ Marker-backed scratch children remain valid with non-UUID names.
 Complete scratch-container recognition before applying child-symlink rejection.
 A UUID parent or at least one valid scratch marker identifies a container.
 An unrecognized parent's ordinary links remain opaque. Its unmarked repository folders remain unclassified.
-Invalid markers, recognized root links, unsafe ancestors, and real I/O failures retain errors.
+Invalid markers, recognized root links, unsafe ancestors, and non-permission I/O failures retain
+errors. Permission-denied reads are omitted only when the affected path has no positive task-layout
+evidence; recognized semantic and canonical UUID paths retain errors.
 Use the existing UUID dependency and extract small helpers if complexity limits require them.
 
 No inventory shape changes are necessary.
@@ -72,6 +75,7 @@ Existing scanners skip nested links. Existing inventory, age, quarantine, and de
 | Unmarked semantic | Preserve current naming rule | Existing legacy test | Other names need scratch evidence |
 | Unmarked UUID workspace/task pair | Recognize legacy scratch root | UUID compatibility regression | Noncanonical names remain untouched |
 | Unrelated checkout and ordinary children | Omit with warning | Analysis, cleanup, dependency regressions | No automatic adoption |
+| Permission-denied unclassified checkout or scratch child | Omit with warning and keep recognized bytes available | Permission-probed discovery regressions | Recognized semantic and UUID path errors remain visible |
 | Symlink under recognized scratch container | Retain rejection | Control-symlink regression | No target traversal |
 
 The ADR [records the recognition boundary](../../decisions/2026-10-05-workspace-storage-discovery.md).
@@ -79,13 +83,14 @@ The [system design](../../specs/system-page/system-design/workspace-storage-disc
 
 ## Tests
 
-The tests below are implemented regressions and evidence for the completed work order.
+The tests below are implemented regressions and evidence for the completed work order and PR fixup.
 
 | Criteria | Test file and completed tests |
 | --- | --- |
 | `001.7`, `001.9`, `001.10` | `apps/backend/internal/system/storage/workspaces/provider_discovery_test.go`: `TestAnalyzeKeepsValidWorkspacesWithUnclassifiedCheckout` |
 | `001.11` | Same file: `TestUnclassifiedDirectoriesAreNotMeasuredOrCleaned`, `TestWorkspaceDiscoveryPreservesSupportedLayoutsAndWarnsUnmarkedChildren`, `TestCleanupKeepsUnclassifiedCheckoutBesideEligibleOrphan` |
 | `001.10`, `001.11` | Same file: `TestWorkspaceDiscoveryRejectsSymlinksInRecognizedScratchContainers`, `TestWorkspaceDiscoveryRejectsDirectTaskRootSymlink`, and existing incomplete-inventory and symlink-control tests |
+| `001.9`, `001.11` | Same file: `TestWorkspaceDiscoveryRejectsSemanticMarkerInsideScratchContainer`, `TestWorkspaceDiscoveryOmitsUnreadableUnclassifiedCheckout`, `TestWorkspaceDiscoveryOmitsUnreadableUnmarkedScratchSibling`, `TestWorkspaceDiscoveryRetainsPermissionErrorsForRecognizedRoots` |
 | `001.11` | `apps/backend/internal/system/storage/workspaces/dependency_discovery_test.go`: `TestCleanupDependenciesKeepsUnclassifiedCheckout` |
 
 The primary regression must fail on the existing symlink discovery error before the production change.
@@ -103,7 +108,9 @@ The unmarked legacy test in `provider_test.go` must use canonical UUID names ins
 | Analyze real isolated storage and expand measured Task workspaces | `001.7`, `001.9`, `001.10` | `apps/web/e2e/tests/system/workspace-storage-discovery.spec.ts`, `chromium` |
 | Repeat Analyze through touch controls and inspect the same measured row | `001.7`, `001.9`, `001.10` | `apps/web/e2e/tests/system/mobile-workspace-storage-discovery.spec.ts`, `mobile-chrome` |
 
-Both tests seed a valid marked root and the unrelated checkout under `backend.tmpDir/.kandev/tasks`.
+Both tests capture a fresh baseline before adding a valid marked root and the unrelated checkout under
+`backend.tmpDir/.kandev/tasks`. They compare the new fixture's byte contribution with that baseline,
+so another recognized workspace cannot invalidate the check.
 Use a shared fixture helper in `apps/web/e2e/helpers/workspace-storage-discovery.ts`.
 The helper owns only its unique fixture paths and removes them in `finally` or `afterEach`.
 The tests must use a fresh manual Analyze result, not a cached or mocked overview.
@@ -158,8 +165,10 @@ Implementation verification passed on 2026-10-05:
 - `python3 scripts/list-docs.py validate`: 349 decisions and 1,342 specifications validated.
 - `python3 scripts/lint-spec-files.test.py`: 36 tests passed. `python3 scripts/lint-spec-files.py --all`: passed.
 - Final PR documentation coverage preflight: `covered`, no errors. Final `git diff --check`: passed.
-- After the discovery refactor, the workspace race suite and `make build` passed. `golangci-lint run ./internal/system/storage/workspaces --timeout=5m` reported 0 issues; `provider.go` and `discovery.go` are 721 and 143 effective lines, respectively.
+- After the discovery refactor and PR review fixes, the workspace race suite and `make build` passed. `golangci-lint run ./internal/system/storage/workspaces --timeout=5m` reported 0 issues; `provider.go` and `discovery.go` are 721 and 164 effective lines, respectively. The permission regressions also passed with filesystem modes enforced as `nobody`.
 - The PR documentation coverage preflight passed again after lifecycle wording was synchronized: `covered`, no errors.
+- PR fixup RED evidence: with permission bits enforced as `nobody`, unreadable unclassified parents and scratch siblings both aborted analysis before the fix. The semantic-marker and recognized-root boundary regressions passed against the existing implementation.
+- PR fixup verification: desktop and mobile workspace storage E2E each passed after adding an isolated baseline; targeted ESLint passed for the helper and all three affected specs. The saved-view recovery E2E's 43.99994px measurement now rounds to hundredth-pixel precision; its focused test passed three repetitions.
 
 ## Risks
 

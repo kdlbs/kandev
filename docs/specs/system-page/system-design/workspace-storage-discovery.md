@@ -64,6 +64,12 @@ For an unrecognized parent, ordinary symlink entries remain opaque and do not ab
 Container recognition must complete before applying this symlink rule, regardless of entry order.
 Invalid markers and unexpected nested semantic markers retain their existing errors.
 
+Permission-denied reads do not abort discovery when a directory has no positive task-layout evidence.
+Such paths remain untouched and produce the existing omission warning. A canonical UUID or semantic
+directory name is positive layout evidence; permission errors there remain errors. In a recognized
+scratch container, an unreadable child without a semantic name or UUID task name is omitted with a
+warning, while recognized child paths and invalid markers retain their existing failure behavior.
+
 ## Measurement and presentation
 
 `Analyze` submits recognized, non-overlapping roots to `filescan.Limiter` with `filescan.SkipSymlinks`.
@@ -93,8 +99,10 @@ Symlinked tasks roots, owned ancestors, recognized scratch-root paths, trash pat
 Unknown paths never enter orphan quarantine or dependency pruning.
 Recognized roots still use existing atomic quarantine and deletion primitives.
 
-Real I/O errors, unsafe control paths, invalid ownership markers, and caller cancellation retain their existing failure behavior.
-This correction does not introduce a catch-all rule that converts discovery errors into warnings.
+Real I/O errors other than permission-denied reads on unrecognized paths, unsafe control paths,
+invalid ownership markers, and caller cancellation retain their existing failure behavior. The
+permission rule applies only where no positive task-layout evidence exists; it does not introduce a
+catch-all rule that converts discovery errors into warnings.
 Missing measurement bytes never become measured zero.
 
 ## Compatibility and verification

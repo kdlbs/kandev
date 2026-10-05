@@ -29,6 +29,7 @@ Prove compatibility, cleanup safety, and desktop and phone recovery through one 
 - TDD regression `TestAnalyzeKeepsValidWorkspacesWithUnclassifiedCheckout` against `Provider.Analyze`.
 - Shared root recognition and scratch-container symlink handling from the linked design.
 - Layout, unclassified-sibling, control-symlink, orphan-cleanup, and dependency-cleanup coverage from the plan test matrix.
+- Omission warnings for permission-denied unclassified paths, with recognized-root and invalid-control failures preserved.
 - Real-backend Storage E2E in the two planned project-specific files.
 - Accurate work-order results and plan status after the listed commands pass.
 
@@ -42,7 +43,7 @@ Prove compatibility, cleanup safety, and desktop and phone recovery through one 
 
 1. The new primary regression first fails with the known discovery error, then passes with exact recognized bytes and an omission warning.
 2. All supported layouts remain recognized. Unclassified paths remain untouched across analysis, orphan quarantine, and dependency cleanup. Control-path and inventory guards pass.
-3. Fresh real-backend Analyze shows measured workspace GB on desktop and phone with the fixture symlink intact. Every listed command passes.
+3. Fresh real-backend Analyze shows measured workspace GB on desktop and phone with the fixture symlink intact. The asserted byte increase is relative to a fresh baseline that may include other recognized roots. Every listed command passes.
 
 ## Implementation sequence
 
@@ -58,7 +59,7 @@ Prove compatibility, cleanup safety, and desktop and phone recovery through one 
 10. Mark the work order `done` and the plan `implemented` only after every required result passes.
 
 The frontend production source remains unchanged. New user-facing copy is outside this work order.
-Any required scope or contract change must return to design before implementation continues.
+Record any contract clarification in the owning requirement and design before treating implementation as complete.
 
 ## Verification
 
@@ -136,9 +137,18 @@ parents remain opaque.
 - `python3 scripts/list-docs.py validate` passed: 349 decisions and 1,342 specifications.
 - `python3 scripts/lint-spec-files.test.py` passed: 36 tests. `python3 scripts/lint-spec-files.py --all` passed.
 - Documentation coverage preflight returned `covered` with no errors. Final `git diff --check` passed.
-- After review, discovery helpers and types were extracted to `discovery.go`, and scratch-child inspection was separated from candidate classification. The workspace race suite and `make build` passed again; the targeted golangci-lint run reported 0 issues. Effective production-file counts are 721 lines in `provider.go` and 143 in `discovery.go`.
+- After review, discovery helpers and types were extracted to `discovery.go`, and scratch-child inspection was separated from candidate classification. The workspace race suite and `make build` passed again; the targeted golangci-lint run reported 0 issues. Effective production-file counts are 721 lines in `provider.go` and 164 in `discovery.go`.
 - Documentation coverage preflight passed again after the lifecycle references were updated: `covered`, no errors.
 
 The real-backend tests measured exact recognized workspace bytes, confirmed the omission warning, and
 verified the checkout and external symlink target remained unchanged. The phone test used touch and
 confirmed the expanded workspace row caused no horizontal page overflow.
+
+PR fixup RED evidence: permission-probed tests executed as `nobody` showed unreadable unclassified
+directories aborting Analyze and readable recognized paths retaining their error behavior. The
+semantic-marker regression confirmed the existing nested-marker rejection branch.
+
+PR fixup verification: the permission-probed regressions passed as `nobody`, the full workspace race
+suite passed, and `make build` succeeded. Desktop and mobile storage E2E each passed after the
+baseline-relative byte assertions were added. The focused saved-view recovery E2E passed three
+repetitions after its 44px assertion was rounded to hundredth-pixel precision.

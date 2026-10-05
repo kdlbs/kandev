@@ -23,6 +23,9 @@ Marker-backed scratch roots retain non-UUID names.
 Unrecognized directories remain untouched and absent from workspace measurements and cleanup candidates.
 Discovery reports their omission through existing warnings.
 Ordinary symlinks in an unrecognized parent do not prevent discovery of other task roots.
+Permission-denied reads of paths without positive task-layout evidence are also treated as omissions
+with warnings. Semantic or canonical UUID naming remains positive evidence, so permission errors on
+those paths retain failure behavior.
 
 Recognized scratch containers retain rejection of child symlinks.
 Owned roots and control paths retain existing symlink guards.
@@ -43,7 +46,7 @@ The linked implementation package records the conformance and verification evide
 - Skip all child symlinks while preserving arbitrary scratch inference. This restores measurements but can admit unrelated repository folders to cleanup.
 - Require a marker for every root. This rejects supported unmarked legacy semantic and UUID scratch layouts.
 - Recognize only currently live database paths. This misses orphaned legacy roots after their task rows disappear.
-- Treat every discovery error as a warning. This conceals unsafe control paths and incomplete ownership evidence.
+- Treat every discovery error as a warning. This conceals unsafe control paths and incomplete ownership evidence; only permission-denied reads of paths without positive layout evidence are omissions.
 - Move or remove the unrelated checkout. This changes user files and leaves the discovery defect intact.
 
 ## References

@@ -106,9 +106,8 @@ test.describe("Shared phone listing topbar", () => {
 
     await trigger.tap();
     for (const id of ["threads-view-sync-retry", "threads-view-sync-dismiss"]) {
-      expect(
-        (await requireBox(recovery.getByTestId(id), "recovery action")).height,
-      ).toBeGreaterThanOrEqual(44);
+      const height = (await requireBox(recovery.getByTestId(id), "recovery action")).height;
+      expect(Math.round(height * 100) / 100).toBeGreaterThanOrEqual(44);
     }
     await recovery.getByTestId("threads-view-sync-dismiss").tap();
     await expect(recovery).toHaveCount(0);

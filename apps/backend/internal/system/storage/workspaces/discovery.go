@@ -57,6 +57,9 @@ func discoverTaskRoot(path string, entry os.DirEntry) ([]candidate, bool, []stri
 	}
 	owner, marked, err := readOwnershipMarker(path)
 	if err != nil {
+		if isUnrecognizedTaskRootPermission(err, entry.Name()) {
+			return nil, false, nil, nil
+		}
 		return nil, false, nil, err
 	}
 	if marked {
@@ -72,6 +75,9 @@ func discoverTaskRoot(path string, entry os.DirEntry) ([]candidate, bool, []stri
 func discoverScratchRoots(workspacePath, workspaceID string) ([]candidate, bool, []string, error) {
 	children, err := os.ReadDir(workspacePath)
 	if err != nil {
+		if errors.Is(err, os.ErrPermission) && !isCanonicalUUID(workspaceID) {
+			return nil, false, nil, nil
+		}
 		return nil, false, nil, err
 	}
 	inspection, err := inspectScratchChildren(workspacePath, workspaceID, children)
@@ -103,6 +109,12 @@ func inspectScratchChildren(workspacePath, workspaceID string, children []os.Dir
 		}
 		owner, marked, err := readOwnershipMarker(childPath)
 		if err != nil {
+			if isUnclassifiedScratchChildPermission(err, workspaceID, child.Name()) {
+				inspection.directories = append(inspection.directories, scratchChildDirectory{
+					path: childPath, name: child.Name(),
+				})
+				continue
+			}
 			return inspection, err
 		}
 		if marked && owner.LayoutVersion != LayoutVersionScratch {
@@ -142,6 +154,18 @@ func classifyScratchChildren(workspaceID string, inspection scratchInspection) (
 
 func isLegacyScratchTask(workspaceID, taskDirName string) bool {
 	return isCanonicalUUID(workspaceID) && isCanonicalUUID(taskDirName)
+}
+
+func isUnrecognizedTaskRootPermission(err error, name string) bool {
+	return errors.Is(err, os.ErrPermission) && !hasTaskLayoutName(name)
+}
+
+func isUnclassifiedScratchChildPermission(err error, workspaceID, name string) bool {
+	return errors.Is(err, os.ErrPermission) && !looksSemanticTaskDir(name) && !isLegacyScratchTask(workspaceID, name)
+}
+
+func hasTaskLayoutName(name string) bool {
+	return isCanonicalUUID(name) || looksSemanticTaskDir(name)
 }
 
 func isCanonicalUUID(value string) bool {
