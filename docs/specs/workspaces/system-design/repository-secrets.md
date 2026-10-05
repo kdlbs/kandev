@@ -8,12 +8,50 @@ owners:
   - kandev
 ---
 
-# Secret reference protection
+# Secret metadata lists and reference protection
 
 ## Scope and requirement mapping
 
-This design covers AC-WORKSPACES-REPOSITORY-SECRETS-001.9 through .13.
+This design covers AC-WORKSPACES-REPOSITORY-SECRETS-001.9 through .14.
 The existing repository-secrets requirement retains the other runtime and storage contracts during specification migration.
+
+## Metadata list lifetimes
+
+`useSecrets` in `apps/web/hooks/domains/settings/use-secrets.ts` keeps Global metadata in the
+app store's `secrets` slice and Workspace metadata in hook-local state. Separate guarded
+effects own the two lifetimes. The Global effect depends on scope, Global loaded/loading
+flags, and the existing store setters. It retains the existing shared loaded/loading gate,
+default Global list request, empty-list failure settlement, and `filterGlobalSecrets` output.
+
+The Workspace effect depends only on scope, workspace identity, `scopedKey`, and
+`initialItems`. It returns immediately for Global scope. A committed Workspace scope or
+initial-items reference change initializes the local list and flags as before; an undefined
+initial list admits the existing abortable workspace read when a workspace ID exists.
+Supplied initial items, including an empty array, need no read. An absent workspace ID
+admits no read. Cleanup cancels publication and aborts the old scoped read on a relevant
+change or unmount. `loadedScopedKey` continues to hide the prior workspace's rows before
+the new effect commits. Global loaded/loading transitions cannot reset these rows or flags,
+abort the Workspace request, or admit another Workspace request.
+
+`SecretsSettings` continues to apply `createSecret`, `updateSecret`, and `deleteSecret`
+acknowledgments through `addSecret`, `updateSecret`, and `removeSecret`. This satisfies
+AC-WORKSPACES-REPOSITORY-SECRETS-001.14 without changing the scope contracts in .1/.2
+or the Global-only profile selection in .4. The supplied-list path in
+`app/settings/workspace/[id]/secrets/page.tsx` and the unsupplied-list SPA route in
+`src/settings-routes.tsx` use the same lifetime boundary. Workspace identity and initial-items
+reference changes remain intentional replacement boundaries. Existing read failure behavior,
+same-list read/mutation ordering, and late mutation callbacks after navigation are outside
+this correction. No cross-instance Workspace cache, secret-value request, authorization,
+API, or profile-binding change is introduced.
+
+Targeted real-provider/store hook tests cover read lifetimes and Global sharing/filtering.
+Rendered `SecretsSettings` tests use its real form/save/delete acknowledgment paths with
+only transport mocked. The state/data-only mobile-parity exception applies: presentation,
+touch behavior, scrolling, navigation, and breakpoint behavior do not change.
+
+## Implementation plans
+
+- [Workspace secret list isolation](../../../plans/workspace-secret-list-isolation/plan.md).
 
 ## Deletion boundary
 
