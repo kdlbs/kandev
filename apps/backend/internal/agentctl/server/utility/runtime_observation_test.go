@@ -15,9 +15,11 @@ import (
 )
 
 func TestParseCodexVersionAcceptsOnlyTheVersionLine(t *testing.T) {
-	got := parseCodexVersion([]byte("codex-cli 0.177.3\nOPENAI_API_KEY=do-not-return\n"))
-	if got != "0.177.3" {
-		t.Fatalf("version = %q, want parsed version only", got)
+	for _, lineEnding := range []string{"\n", "\r\n"} {
+		output := []byte("codex-cli 0.177.3" + lineEnding + "OPENAI_API_KEY=do-not-return" + lineEnding)
+		if got := parseCodexVersion(output); got != "0.177.3" {
+			t.Fatalf("version from %q line endings = %q, want parsed version only", lineEnding, got)
+		}
 	}
 	for _, output := range [][]byte{
 		[]byte("Codex CLI 0.177.3\n"),

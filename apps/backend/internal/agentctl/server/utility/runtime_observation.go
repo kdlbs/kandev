@@ -30,7 +30,7 @@ const (
 
 var (
 	packageNamePattern  = regexp.MustCompile(`^(?:@[A-Za-z0-9._-]+/)?[A-Za-z0-9._-]+$`)
-	codexVersionPattern = regexp.MustCompile(`(?m)^codex-cli[ \t]+(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(\+[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?[ \t]*$`)
+	codexVersionPattern = regexp.MustCompile(`(?m)^codex-cli[ \t]+(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(\+[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?[ \t]*\r?$`)
 )
 
 type boundedObservationBuffer struct {
