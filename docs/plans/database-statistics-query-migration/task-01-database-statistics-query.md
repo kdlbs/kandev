@@ -1,7 +1,7 @@
 ---
 id: "01-database-statistics-query"
 title: "Move database statistics to the scoped Query cache"
-status: in_progress
+status: done
 wave: 1
 depends_on: []
 updated: 2026-10-05
@@ -79,8 +79,8 @@ request effects.
 ## Verification
 
 ```bash
-mkdir -p /root/tmp/kandev-query-02
-export TMPDIR=/root/tmp/kandev-query-02
+TASK_TMP_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/kandev-query-02.XXXXXX")"
+export TMPDIR="$TASK_TMP_ROOT"
 (cd apps/web && pnpm exec vitest run \
   hooks/domains/system/use-database-stats.test.ts \
   hooks/domains/system/use-system-info.test.tsx \
@@ -163,4 +163,7 @@ sequential
 
 ## Results
 
-Pending implementation.
+Implemented and locally verified against main at `f45fe59cf26c49dda309a88a0fbb835ed6c2185c`.
+Focused tests passed (5 files, 56 tests); web typecheck and full lint passed.
+Managed E2E passed for desktop database (5), desktop Backups (3), and phone database (2).
+Documentation, architecture, specifications, coverage markers, harness, and diff checks passed.

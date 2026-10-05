@@ -1,7 +1,7 @@
 ---
 created: 2026-09-27
 updated: 2026-10-05
-status: in_progress
+status: done
 requirements:
   - REQ-SYSTEM-PAGE-DATABASE-STATS-SNAPSHOT-001
   - REQ-SYSTEM-PAGE-DATABASE-STATS-SNAPSHOT-002
@@ -98,11 +98,14 @@ every other System resource owner.
 
 ## Work orders
 
-- [ ] [Task 01: Move database statistics to the scoped Query cache](task-01-database-statistics-query.md)
+- [x] [Task 01: Move database statistics to the scoped Query cache](task-01-database-statistics-query.md)
 
 ## Verification results
 
-Pending implementation.
+Implemented and locally verified against main at `f45fe59cf26c49dda309a88a0fbb835ed6c2185c`.
+Focused tests passed (5 files, 56 tests); web typecheck and full lint passed.
+Managed E2E passed for desktop database (5), desktop Backups (3), and phone database (2).
+Documentation, architecture, specifications, coverage markers, harness, and diff checks passed.
 
 ## Risks
 
@@ -112,6 +115,6 @@ Pending implementation.
   query entries, and must do so without remounting shell state.
 - The official TanStack ESLint task
   a9b7ddc9-fce5-4e47-96f9-664ba75da0a6 merged before implementation. The branch
-  was refreshed to `3328fe887f0e9ea2ffb11a00c4c5d0a94a7b88ed` before PR handoff.
-  The additional main commits include automation-list and runtime-model work;
-  the current database-statistics Query/provider contract has no material drift.
+  was refreshed after PR review to `f45fe59cf26c49dda309a88a0fbb835ed6c2185c`.
+  That base update contains release-contributor notifications only; the current
+  database-statistics Query/provider contract has no material drift.

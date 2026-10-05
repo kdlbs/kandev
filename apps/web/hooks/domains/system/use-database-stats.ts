@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useSystemInfoBootId } from "@/components/system-info-query-provider";
 import { fetchDatabaseStats, retryDatabaseStats } from "@/lib/api/domains/system-api";
@@ -44,15 +44,58 @@ export type DatabaseStatsQueryResult = {
   retry: () => Promise<void>;
 };
 
+type RetryError = {
+  identityGeneration: number;
+  dataUpdatedAt: number;
+  error: unknown;
+};
+
+type IdentityScope = { identityKey: string; generation: number };
+type IdentityScopeRef = { current: IdentityScope };
+
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function useDatabaseStatsIdentityGeneration(identityKey: string, onIdentityChange: () => void) {
+  const identityScopeRef = useRef<IdentityScope>({ identityKey, generation: 0 });
+  const [generation, setGeneration] = useState(0);
+
+  useLayoutEffect(() => {
+    if (identityScopeRef.current.identityKey === identityKey) return;
+    const nextGeneration = identityScopeRef.current.generation + 1;
+    identityScopeRef.current = { identityKey, generation: nextGeneration };
+    setGeneration(nextGeneration);
+    onIdentityChange();
+  }, [identityKey, onIdentityChange]);
+
+  return { generation, identityScopeRef };
+}
+
+function isCurrentIdentity(
+  identityScopeRef: IdentityScopeRef,
+  identityKey: string,
+  generation: number,
+): boolean {
+  return (
+    identityScopeRef.current.identityKey === identityKey &&
+    identityScopeRef.current.generation === generation
+  );
 }
 
 export function useDatabaseStats(): DatabaseStatsQueryResult {
   const bootId = useSystemInfoBootId();
   const identity = useSystemInfoQueryIdentity(bootId);
+  const queryKey = createDatabaseStatsQueryKey(identity);
+  const identityKey = JSON.stringify(queryKey.slice(2));
+  const [retryError, setRetryError] = useState<RetryError | null>(null);
+  const clearRetryError = useCallback(() => setRetryError(null), []);
+  const { generation: identityGeneration, identityScopeRef } = useDatabaseStatsIdentityGeneration(
+    identityKey,
+    clearRetryError,
+  );
   const query = useQuery({
-    queryKey: createDatabaseStatsQueryKey(identity),
+    queryKey,
     queryFn: ({ signal }) =>
       fetchDatabaseStats({
         baseUrl: identity.apiBaseUrl,
@@ -75,44 +118,56 @@ export function useDatabaseStats(): DatabaseStatsQueryResult {
     retry: false,
   });
   const retryMutation = useMutation({
+    mutationKey: [...queryKey, "refresh", identityGeneration],
     mutationFn: () => retryDatabaseStats({ baseUrl: identity.apiBaseUrl, cache: "no-store" }),
     networkMode: "always",
     retry: false,
   });
-  const [retryError, setRetryError] = useState<unknown>(null);
-  const retryErrorDataUpdatedAt = useRef<number | null>(null);
+  const dataUpdatedAtRef = useRef(query.dataUpdatedAt);
+
+  useEffect(() => {
+    dataUpdatedAtRef.current = query.dataUpdatedAt;
+  }, [query.dataUpdatedAt]);
 
   useEffect(() => {
     if (
       retryError !== null &&
-      retryErrorDataUpdatedAt.current !== null &&
-      query.dataUpdatedAt !== retryErrorDataUpdatedAt.current
+      (retryError.identityGeneration !== identityGeneration ||
+        retryError.dataUpdatedAt !== query.dataUpdatedAt)
     ) {
       setRetryError(null);
-      retryErrorDataUpdatedAt.current = null;
     }
-  }, [query.dataUpdatedAt, retryError]);
+  }, [identityGeneration, query.dataUpdatedAt, retryError]);
 
   const reload = useCallback(async () => {
     setRetryError(null);
-    retryErrorDataUpdatedAt.current = null;
     await query.refetch({ throwOnError: false });
   }, [query.refetch]);
 
   const retry = useCallback(async () => {
+    const requestIdentityGeneration = identityGeneration;
+    const requestIdentityKey = identityKey;
     setRetryError(null);
-    retryErrorDataUpdatedAt.current = null;
     try {
       await retryMutation.mutateAsync();
+      if (!isCurrentIdentity(identityScopeRef, requestIdentityKey, requestIdentityGeneration))
+        return;
       await query.refetch({ throwOnError: false });
     } catch (error) {
-      retryErrorDataUpdatedAt.current = query.dataUpdatedAt;
-      setRetryError(error);
+      if (isCurrentIdentity(identityScopeRef, requestIdentityKey, requestIdentityGeneration)) {
+        setRetryError({
+          identityGeneration: requestIdentityGeneration,
+          dataUpdatedAt: dataUpdatedAtRef.current,
+          error,
+        });
+      }
     }
-  }, [query.dataUpdatedAt, query.refetch, retryMutation.mutateAsync]);
+  }, [identityGeneration, identityKey, query.refetch, retryMutation.mutateAsync]);
 
   const isLoading = query.isFetching || retryMutation.isPending;
-  const visibleError = isLoading ? null : (retryError ?? query.error);
+  const visibleRetryError =
+    retryError?.identityGeneration === identityGeneration ? retryError.error : null;
+  const visibleError = isLoading ? null : (visibleRetryError ?? query.error);
 
   return {
     database: query.data ?? null,

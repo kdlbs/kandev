@@ -22,6 +22,9 @@ const config = vi.hoisted(() => ({ apiBaseUrl: "https://backend.example/api///" 
 const API_BASE_URL = "https://backend.example/api";
 const PAGE_BOOT_ID = "database-page-boot";
 const CURRENT_DATABASE_PATH = "/current-a.db";
+const FIRST_BACKEND_URL = "https://backend.example/one";
+const SECOND_BACKEND_URL = "https://backend.example/two";
+const DATABASE_STATS_QUERY_PREFIX = ["system", "database-stats"] as const;
 const MEASURED_AT = Date.now() - 1_000;
 
 vi.mock("@/lib/config", () => ({
@@ -138,6 +141,8 @@ function renderStatsHook({
   apiBaseUrl = API_BASE_URL,
   bootId = PAGE_BOOT_ID,
 }: { apiBaseUrl?: string; bootId?: string } = {}) {
+  let currentApiBaseUrl = apiBaseUrl;
+  let currentBootId = bootId;
   let queryClient: QueryClient | undefined;
   let store: StoreApi<AppState> | undefined;
   const onQueryClient = (client: QueryClient) => {
@@ -147,10 +152,19 @@ function renderStatsHook({
     store = nextStore;
   };
   const wrapper = ({ children }: { children: ReactNode }) =>
-    createElement(TestHarness, { apiBaseUrl, bootId, onQueryClient, onStore }, children);
+    createElement(
+      TestHarness,
+      { apiBaseUrl: currentApiBaseUrl, bootId: currentBootId, onQueryClient, onStore },
+      children,
+    );
   const hook = renderHook(() => useDatabaseStats(), { wrapper });
   return {
     ...hook,
+    rerenderIdentity({ nextApiBaseUrl = currentApiBaseUrl, nextBootId = currentBootId } = {}) {
+      currentApiBaseUrl = nextApiBaseUrl;
+      currentBootId = nextBootId;
+      hook.rerender();
+    },
     get queryClient() {
       return queryClient;
     },
@@ -194,7 +208,7 @@ describe("useDatabaseStats query identity", () => {
         .getAll()
         .map((query) => query.queryKey),
     ).toEqual([
-      ["system", "database-stats", API_BASE_URL, PAGE_BOOT_ID, "enabled", true, "user-1"],
+      [...DATABASE_STATS_QUERY_PREFIX, API_BASE_URL, PAGE_BOOT_ID, "enabled", true, "user-1"],
     ]);
     expect("database" in store!.getState().system).toBe(false);
   });
@@ -276,9 +290,109 @@ describe("useDatabaseStats request actions", () => {
     expect(result.current.error).toBe(failure.message);
     expect(api.fetchDatabaseStats).toHaveBeenCalledOnce();
   });
+
+  it("clears a prior retry error when reload is called", async () => {
+    const stale: DatabaseStats = { ...READY, logical_stats_state: "stale" };
+    const refreshFailure = new Error("refresh unavailable");
+    vi.mocked(api.fetchDatabaseStats).mockResolvedValueOnce(stale).mockResolvedValueOnce(READY);
+    vi.mocked(api.retryDatabaseStats).mockRejectedValue(refreshFailure);
+    const { result } = renderStatsHook();
+    await waitFor(() => expect(result.current.database).toEqual(stale));
+
+    await act(async () => result.current.retry());
+    expect(result.current.error).toBe(refreshFailure.message);
+
+    await act(async () => result.current.reload());
+    expect(result.current.error).toBeNull();
+    expect(result.current.database).toEqual(READY);
+  });
+});
+
+describe("useDatabaseStats identity-bound retry actions", () => {
+  it("does not carry a retry error into another identity without a successful read", async () => {
+    const oldReadFailure = new Error("old status read failed");
+    const newReadFailure = new Error("new status read failed");
+    const oldRefreshFailure = new Error("old refresh failed");
+    vi.mocked(api.fetchDatabaseStats)
+      .mockRejectedValueOnce(oldReadFailure)
+      .mockRejectedValueOnce(newReadFailure);
+    vi.mocked(api.retryDatabaseStats).mockRejectedValue(oldRefreshFailure);
+    const { result, rerenderIdentity } = renderStatsHook({ apiBaseUrl: FIRST_BACKEND_URL });
+    await waitFor(() => expect(result.current.error).toBe(oldReadFailure.message));
+
+    await act(async () => result.current.retry());
+    expect(result.current.error).toBe(oldRefreshFailure.message);
+
+    rerenderIdentity({ nextApiBaseUrl: SECOND_BACKEND_URL });
+    await waitFor(() => expect(result.current.error).toBe(newReadFailure.message));
+  });
+
+  it("ignores a pending refresh when its identity changes", async () => {
+    const oldRefresh = deferred<void>();
+    const requestedBases: string[] = [];
+    let firstBackendRefreshCount = 0;
+    vi.mocked(api.fetchDatabaseStats).mockImplementation(async (options) => ({
+      ...READY,
+      path: options?.baseUrl ?? "",
+      logical_stats_state: "stale",
+    }));
+    vi.mocked(api.retryDatabaseStats).mockImplementation((options) => {
+      const baseUrl = options?.baseUrl ?? "";
+      requestedBases.push(baseUrl);
+      if (baseUrl === FIRST_BACKEND_URL && firstBackendRefreshCount++ === 0) {
+        return oldRefresh.promise;
+      }
+      return Promise.resolve();
+    });
+    const { result, rerenderIdentity } = renderStatsHook({ apiBaseUrl: FIRST_BACKEND_URL });
+    await waitFor(() => expect(result.current.database?.path).toBe(FIRST_BACKEND_URL));
+
+    let oldRetry!: Promise<void>;
+    act(() => {
+      oldRetry = result.current.retry();
+    });
+    await waitFor(() => expect(result.current.isLoading).toBe(true));
+
+    rerenderIdentity({ nextApiBaseUrl: SECOND_BACKEND_URL });
+    await waitFor(() => expect(result.current.database?.path).toBe(SECOND_BACKEND_URL));
+    expect(result.current.isLoading).toBe(false);
+
+    await act(async () => result.current.retry());
+    expect(requestedBases).toEqual([FIRST_BACKEND_URL, SECOND_BACKEND_URL]);
+
+    rerenderIdentity({ nextApiBaseUrl: FIRST_BACKEND_URL });
+    await waitFor(() => expect(result.current.database?.path).toBe(FIRST_BACKEND_URL));
+    expect(result.current.isLoading).toBe(false);
+    await act(async () => result.current.retry());
+    expect(requestedBases).toEqual([FIRST_BACKEND_URL, SECOND_BACKEND_URL, FIRST_BACKEND_URL]);
+    const readsBeforeOldRefreshCompletes = vi.mocked(api.fetchDatabaseStats).mock.calls.length;
+
+    oldRefresh.resolve();
+    await act(async () => oldRetry);
+
+    expect(vi.mocked(api.fetchDatabaseStats).mock.calls).toHaveLength(
+      readsBeforeOldRefreshCompletes,
+    );
+    expect(result.current.database?.path).toBe(FIRST_BACKEND_URL);
+  });
 });
 
 describe("useDatabaseStats polling and freshness", () => {
+  it("keeps the retry action stable while a polling response updates", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(MEASURED_AT + 1_000);
+    vi.mocked(api.fetchDatabaseStats).mockResolvedValue(PENDING);
+    const { result } = renderStatsHook();
+
+    await act(async () => vi.advanceTimersByTimeAsync(0));
+    const retry = result.current.retry;
+    await act(async () => vi.advanceTimersByTimeAsync(2_000));
+    await act(async () => vi.advanceTimersByTimeAsync(1));
+
+    expect(api.fetchDatabaseStats).toHaveBeenCalledTimes(2);
+    expect(result.current.retry).toBe(retry);
+  });
+
   // @covers AC-SYSTEM-PAGE-DATABASE-STATS-SNAPSHOT-001.3 AC-SYSTEM-PAGE-DATABASE-STATS-SNAPSHOT-001.4
   it.each([
     ["pending", PENDING],
@@ -475,7 +589,7 @@ describe("useDatabaseStats identity changes", () => {
           createElement(StatefulShellProbe),
         ),
       );
-    const view = render(page("https://backend.example/one", "boot-a"));
+    const view = render(page(FIRST_BACKEND_URL, "boot-a"));
     await waitFor(() => expect(requests).toHaveLength(1));
     fireEvent.click(screen.getByRole("button", { name: "original" }));
 
@@ -489,11 +603,11 @@ describe("useDatabaseStats identity changes", () => {
       )) as QueryClient["cancelQueries"];
 
     try {
-      view.rerender(page("https://backend.example/two", "boot-b"));
+      view.rerender(page(SECOND_BACKEND_URL, "boot-b"));
       await waitFor(() => expect(requests).toHaveLength(2));
       expect(requests[0]?.signal?.aborted).toBe(true);
       expect(screen.getByRole("button", { name: "edited" })).toBeTruthy();
-      view.rerender(page("https://backend.example/one", "boot-a"));
+      view.rerender(page(FIRST_BACKEND_URL, "boot-a"));
       await waitFor(() => expect(requests).toHaveLength(3));
       expect(requests[1]?.signal?.aborted).toBe(true);
 
@@ -513,9 +627,8 @@ describe("useDatabaseStats identity changes", () => {
       expect(screen.getByTestId("current").textContent).not.toContain("late-");
       expect(
         client.getQueryData([
-          "system",
-          "database-stats",
-          "https://backend.example/one",
+          ...DATABASE_STATS_QUERY_PREFIX,
+          FIRST_BACKEND_URL,
           "boot-a",
           "enabled",
           true,
@@ -527,5 +640,28 @@ describe("useDatabaseStats identity changes", () => {
       releaseCancellation.resolve();
       for (const request of requests) request.pending.resolve(READY);
     }
+  });
+});
+
+describe("SystemInfo query cleanup", () => {
+  it("cleans obsolete extended query keys without removing unrelated entries", async () => {
+    const { queryClient, rerenderIdentity } = renderStatsHook();
+    const obsoleteExtendedKey = [
+      ...DATABASE_STATS_QUERY_PREFIX,
+      API_BASE_URL,
+      PAGE_BOOT_ID,
+      "enabled",
+      true,
+      "user-1",
+      "future-identity-scope",
+    ];
+    const unrelatedKey = ["system", "backups", API_BASE_URL, "future-subresource"];
+    queryClient?.setQueryData(obsoleteExtendedKey, "obsolete");
+    queryClient?.setQueryData(unrelatedKey, "keep");
+
+    rerenderIdentity({ nextApiBaseUrl: "https://backend.example/other" });
+
+    await waitFor(() => expect(queryClient?.getQueryData(obsoleteExtendedKey)).toBeUndefined());
+    expect(queryClient?.getQueryData(unrelatedKey)).toBe("keep");
   });
 });

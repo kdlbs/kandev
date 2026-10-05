@@ -40,7 +40,7 @@ Backups and disk usage follow the database result. Broad task/session migration 
 
 | Priority | Item                                  | Status      | Next action                                                                     |
 | -------- | ------------------------------------- | ----------- | ------------------------------------------------------------------------------- |
-| 1        | `QUERY-02`: database statistics       | In progress | Implement the reviewed Query owner for the database card and backup description |
+| 1        | `QUERY-02`: database statistics       | In progress | Assigned to [Carlos Florêncio][query02-assignee]; complete [#4225][query02-pr]. |
 | 2        | `DEP-01`: next typed slice            | Proposed    | Select one small slice after reading its setter/getter dependencies             |
 | 3        | `DEP-02`: Office alias consumers      | Proposed    | Group consumers and record removal evidence per alias                           |
 | 4        | `LINT-01`: library Query checks       | Proposed    | Evaluate existing plugin rules before custom scanners                           |
@@ -50,6 +50,10 @@ Backups and disk usage follow the database result. Broad task/session migration 
 These IDs identify backlog entries, not requirements or work orders.
 `Proposed` means no implementation assignment exists.
 Use `planned` only with a reviewed delivery package, `in_progress` with an assignee, and `done` with a merged PR.
+
+[query02-assignee]: https://github.com/carlosflorencio
+[query02-pr]: https://github.com/kdlbs/kandev/pull/4225
+
 Use `blocked` or `deferred` with a reason and a next review date.
 
 ## Maintenance procedure

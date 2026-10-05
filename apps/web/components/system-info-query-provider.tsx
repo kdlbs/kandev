@@ -11,6 +11,10 @@ import {
 
 const SystemInfoBootIdContext = createContext<string | undefined>(undefined);
 
+function hasQueryKeyPrefix(queryKey: readonly unknown[], prefix: readonly string[]): boolean {
+  return prefix.every((segment, index) => queryKey[index] === segment);
+}
+
 export function SystemInfoQueryProvider({
   bootId,
   children,
@@ -45,14 +49,8 @@ function ScopedQueryClient({
     const obsoleteQueries = {
       predicate: (query: { queryKey: readonly unknown[] }) => {
         const { queryKey } = query;
-        const isSystemInfo =
-          queryKey.length === 7 &&
-          queryKey[0] === SYSTEM_INFO_QUERY_KEY_PREFIX[0] &&
-          queryKey[1] === SYSTEM_INFO_QUERY_KEY_PREFIX[1];
-        const isDatabaseStats =
-          queryKey.length === 7 &&
-          queryKey[0] === DATABASE_STATS_QUERY_KEY_PREFIX[0] &&
-          queryKey[1] === DATABASE_STATS_QUERY_KEY_PREFIX[1];
+        const isSystemInfo = hasQueryKeyPrefix(queryKey, SYSTEM_INFO_QUERY_KEY_PREFIX);
+        const isDatabaseStats = hasQueryKeyPrefix(queryKey, DATABASE_STATS_QUERY_KEY_PREFIX);
 
         return (
           (isSystemInfo || isDatabaseStats) && JSON.stringify(queryKey.slice(2)) !== identityKey
