@@ -206,3 +206,10 @@ Verification passed on 2026-10-05:
 - `node --test scripts/validate-public-docs.test.mjs`: 62 tests passed; `node scripts/validate-public-docs.mjs` validated 47 published pages.
 - `python3 scripts/list-docs.py validate` validated 351 decisions and 1366 specifications; `python3 scripts/lint-spec-files.test.py` passed 36 tests; `python3 scripts/lint-spec-files.py --all` passed.
 - PR-documentation preflight returned `covered` with zero errors; `git diff --check` passed.
+
+PR review follow-up passed on 2026-10-05:
+
+- Integration shortcuts and Stats identify their current route with `aria-current` and the shared visible active treatment.
+- Quick-action labels remain available on keyboard focus; a desktop E2E assertion verifies the integration shortcut's visible keyboard focus indicator.
+- A focused phone-test comment records that Quick Terminal uses the shared Quick Chat dialog host.
+- Focused component tests: 62 tests passed across three suites; managed Chromium E2E: 3 tests passed.

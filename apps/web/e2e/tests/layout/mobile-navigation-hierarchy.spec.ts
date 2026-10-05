@@ -183,6 +183,7 @@ test("phone drawer actions keep touch targets, focus handoff, and direct Stats a
 
   await trigger.tap();
   await menu.getByTestId("mobile-quick-terminal-button").tap();
+  // Quick Terminal is a tab in the shared Quick Chat dialog host.
   const quickTerminal = testPage.getByRole("dialog", { name: "Quick Chat", exact: true });
   await expect(menu).toBeHidden();
   const terminalTabs = quickTerminal.getByTestId("quick-terminal-tab");

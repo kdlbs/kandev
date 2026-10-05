@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import dynamic from "@/lib/routing/client-dynamic";
 import { useRouter } from "@/lib/routing/client-router";
@@ -57,15 +57,8 @@ function RowActionButton({
   onClick,
   activity = null,
 }: RowActionButtonProps) {
-  const [tooltipOpen, setTooltipOpen] = useState(false);
-  const hoveredRef = useRef(false);
-  const handleTooltipOpenChange = (nextOpen: boolean) => {
-    if (nextOpen && !hoveredRef.current) return;
-    setTooltipOpen(nextOpen);
-  };
-
   return (
-    <Tooltip open={tooltipOpen} onOpenChange={handleTooltipOpenChange}>
+    <Tooltip>
       <TooltipTrigger asChild>
         <SurfaceAction
           surface="sidebar"
@@ -78,18 +71,6 @@ function RowActionButton({
             </span>
           }
           onClick={onClick}
-          onPointerEnter={() => {
-            hoveredRef.current = true;
-            setTooltipOpen(true);
-          }}
-          onPointerLeave={() => {
-            hoveredRef.current = false;
-            setTooltipOpen(false);
-          }}
-          onFocus={() => {
-            hoveredRef.current = false;
-            setTooltipOpen(false);
-          }}
           data-testid={testId}
         />
       </TooltipTrigger>

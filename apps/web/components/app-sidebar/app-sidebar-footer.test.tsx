@@ -221,21 +221,21 @@ describe("AppSidebarFooter", () => {
 
   afterEach(() => cleanup());
 
-  it("renders Stats as a direct footer button outside the utilities menu", () => {
+  it("renders Stats as a direct footer link outside the utilities menu", () => {
     renderFooter();
 
     const footer = screen.getByTestId("sidebar-footer");
-    const statsButton = within(footer).getByTestId(STATS_BUTTON_TEST_ID);
+    const statsLink = within(footer).getByTestId(STATS_BUTTON_TEST_ID);
 
-    expect(statsButton).toBeTruthy();
-    expect(statsButton.getAttribute("href")).toBeNull();
-    expect(statsButton.getAttribute(ARIA_LABEL_ATTRIBUTE)).toBe(STATS_LABEL);
-    expect(screen.queryByRole("link", { name: STATS_LABEL })).toBeNull();
+    expect(statsLink).toBeTruthy();
+    expect(statsLink.getAttribute("href")).toBe("/stats");
+    expect(statsLink.getAttribute(ARIA_LABEL_ATTRIBUTE)).toBe(STATS_LABEL);
+    expect(statsLink.getAttribute("aria-current")).toBeNull();
     expect(within(overflowMenuContent()).queryByTestId(STATS_BUTTON_TEST_ID)).toBeNull();
 
     const orderedControls = [
       within(footer).getByTestId("sidebar-settings-gear"),
-      statsButton,
+      statsLink,
       screen.getByRole("button", { name: "Theme" }),
       within(footer).getByTestId(OVERFLOW_TRIGGER_TEST_ID),
     ];
@@ -247,12 +247,19 @@ describe("AppSidebarFooter", () => {
     }
   });
 
-  it("navigates from the Stats footer button", () => {
+  it("links to Stats from the footer", () => {
     renderFooter();
 
-    fireEvent.click(screen.getByTestId(STATS_BUTTON_TEST_ID));
+    expect(screen.getByTestId(STATS_BUTTON_TEST_ID).getAttribute("href")).toBe("/stats");
+  });
 
-    expect(mocks.routerPush).toHaveBeenCalledWith("/stats");
+  it("marks Stats as the current navigation destination", () => {
+    pathname = "/stats";
+    renderFooter();
+
+    const statsLink = screen.getByRole("link", { name: STATS_LABEL });
+    expect(statsLink.getAttribute("aria-current")).toBe("page");
+    expect(statsLink.getAttribute("href")).toBe("/stats");
   });
 
   it("leaves plugin insight destinations to the saved sidebar layout", () => {

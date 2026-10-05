@@ -202,6 +202,12 @@ Implementation and rendered verification passed on 2026-10-05:
 - `python3 scripts/list-docs.py validate` validated 351 decisions and 1366 specifications; `python3 scripts/lint-spec-files.test.py` passed 36 tests; `python3 scripts/lint-spec-files.py --all` passed.
 - PR-documentation preflight returned `covered` with zero errors; `git diff --check` passed.
 
+PR review follow-up on 2026-10-05:
+
+- Integration shortcuts and Stats identify their current route with `aria-current` and the shared visible active treatment.
+- Quick-action labels remain available on keyboard focus; the shortcut focus indicator and active-route cues have rendered E2E coverage.
+- Focused component tests: 62 tests passed across three suites; managed Chromium E2E: 3 tests passed.
+
 ## Risks
 
 - Many workspace plugin actions can squeeze a compact row. Wrapping must preserve the built-in controls.

@@ -45,25 +45,29 @@ function IntegrationHeaderShortcuts({
 }) {
   return (
     <div className="flex items-center gap-0.5" data-testid="integration-header-shortcuts">
-      {links.slice(0, capacity).map(({ id, label, href, icon: Icon }) => (
-        <Tooltip key={id}>
-          <TooltipTrigger asChild>
-            <Link
-              href={href}
-              aria-label={label}
-              aria-current={
-                pathname === href || pathname.startsWith(`${href}/`) ? "page" : undefined
-              }
-              data-testid={`integration-header-shortcut-${id}`}
-              data-destination-id={id}
-              className="flex size-5 shrink-0 cursor-pointer items-center justify-center rounded text-muted-foreground/70 transition-colors hover:bg-muted/60 hover:text-foreground [@media(pointer:coarse)]:size-11"
-            >
-              <Icon className="size-3.5" aria-hidden="true" />
-            </Link>
-          </TooltipTrigger>
-          <TooltipContent side="right">{label}</TooltipContent>
-        </Tooltip>
-      ))}
+      {links.slice(0, capacity).map(({ id, label, href, icon: Icon }) => {
+        const active = pathname === href || pathname.startsWith(`${href}/`);
+        return (
+          <Tooltip key={id}>
+            <TooltipTrigger asChild>
+              <Link
+                href={href}
+                aria-label={label}
+                aria-current={active ? "page" : undefined}
+                data-testid={`integration-header-shortcut-${id}`}
+                data-destination-id={id}
+                className={cn(
+                  "flex size-5 shrink-0 cursor-pointer items-center justify-center rounded transition-colors [@media(pointer:coarse)]:size-11",
+                  active ? SIDEBAR_ITEM_ACTIVE : SIDEBAR_ITEM_INACTIVE,
+                )}
+              >
+                <Icon className="size-3.5" aria-hidden="true" />
+              </Link>
+            </TooltipTrigger>
+            <TooltipContent side="right">{label}</TooltipContent>
+          </Tooltip>
+        );
+      })}
     </div>
   );
 }

@@ -17,7 +17,7 @@ const mocks = vi.hoisted(() => ({
 
 function renderItem(collapsed: boolean) {
   return render(
-    <TooltipProvider>
+    <TooltipProvider delayDuration={0}>
       <AppSidebarNewTaskItem collapsed={collapsed} />
     </TooltipProvider>,
   );
@@ -291,13 +291,15 @@ describe("AppSidebarNewTaskItem row actions", () => {
   });
 
   it.each([QUICK_CHAT_TEST_ID, QUICK_TERMINAL_TEST_ID])(
-    "%s exposes its name on hover without opening a tooltip on focus",
+    "%s exposes its name on keyboard focus and hover",
     (testId) => {
       renderItem(false);
 
       const action = screen.getByTestId(testId);
       fireEvent.focus(action);
-      expect(screen.queryByRole("tooltip")).toBeNull();
+      expect(screen.getByRole("tooltip").textContent).toBe(
+        action.getAttribute(ARIA_LABEL_ATTRIBUTE),
+      );
 
       fireEvent.pointerEnter(action);
       expect(screen.getByRole("tooltip").textContent).toBe(

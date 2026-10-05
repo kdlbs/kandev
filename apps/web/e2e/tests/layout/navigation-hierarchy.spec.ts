@@ -104,6 +104,16 @@ test("primary action, disclosure, destination and footer have distinct behavior"
   expect(rightEdge(themeBox)).toBeLessThanOrEqual(moreBox.x);
   await stats.click();
   await expect(testPage).toHaveURL(/\/stats$/);
+  await expect(stats).toHaveAttribute("aria-current", "page");
+  const statsActiveCue = await stats.evaluate((element) => {
+    const style = getComputedStyle(element, "::before");
+    return (
+      style.content === '""' &&
+      style.width === "3px" &&
+      style.backgroundColor !== "rgba(0, 0, 0, 0)"
+    );
+  });
+  expect(statsActiveCue).toBe(true);
   await expect(testPage.getByTestId("sidebar-footer-menu")).toBeHidden();
   for (const theme of ["dark", "light"] as const) {
     const toggle = sidebar.getByRole("button", { name: /Switch to .* mode/i });
@@ -287,6 +297,52 @@ test("tablet coarse-pointer navigation has touch targets", async ({
   } finally {
     await releaseCanvases();
   }
+});
+
+// @covers AC-UI-NAV-HIERARCHY-001.2 AC-UI-NAV-HIERARCHY-001.6
+test("integration shortcut shows its current destination", async ({ testPage, apiClient }) => {
+  await apiClient.mockGitHubSetUser("compass-designer");
+  await testPage.setViewportSize({ width: 1280, height: 900 });
+  await testPage.goto("/tasks");
+  const sidebar = testPage.getByTestId("app-sidebar");
+  const shortcut = sidebar.getByTestId("integration-header-shortcut-github");
+  await shortcut.click();
+  await expect(testPage).toHaveURL(/\/github/);
+  await expect(shortcut).toHaveAttribute("aria-current", "page");
+  await testPage.mouse.move(1200, 850);
+  const activeCue = await shortcut.evaluate((element) => {
+    const style = getComputedStyle(element, "::before");
+    return (
+      style.content === '""' &&
+      style.width === "3px" &&
+      style.backgroundColor !== "rgba(0, 0, 0, 0)"
+    );
+  });
+  expect(activeCue).toBe(true);
+});
+
+// @covers AC-UI-NAV-HIERARCHY-001.6
+test("integration header shortcut has a visible keyboard focus indicator", async ({
+  testPage,
+  apiClient,
+}) => {
+  await apiClient.mockGitHubSetUser("compass-designer");
+  await testPage.setViewportSize({ width: 1280, height: 900 });
+  await testPage.goto("/tasks");
+  const sidebar = testPage.getByTestId("app-sidebar");
+  const integrations = sidebar.getByRole("button", { name: "Integrations", exact: true });
+  const shortcut = sidebar.getByTestId("integration-header-shortcut-github");
+  await integrations.focus();
+  await testPage.keyboard.press("Tab");
+  await expect(shortcut).toBeFocused();
+
+  const focusIndicatorVisible = await shortcut.evaluate((element) => {
+    const style = getComputedStyle(element);
+    return (
+      (style.outlineStyle !== "none" && style.outlineWidth !== "0px") || style.boxShadow !== "none"
+    );
+  });
+  expect(focusIndicatorVisible).toBe(true);
 });
 
 test("a narrow fine-pointer window retains the complete phone menu", async ({
