@@ -22,6 +22,8 @@ system_design:
 
 Preserve native filename identity at the inventory producer and prove it reaches cached filename search, content search and registered aggregate/selected HTTP behavior. Begin only after ROOT's later same-session implementation INTERRUPT; mark this work order in progress then. All work remains strictly sequential in the existing primary session.
 
+This work order's `done` status records completed local implementation and verification, following `/fix` Phase 4 before Phase 5 PR review. It does not complete the persistent Kandev task or delivery. The external task plan tracks the pending six required hosted gates, full semantic review, findings disposition, separately authorized actual merge and joined cleanup. These delivery barriers remain mandatory after local completion.
+
 ## In scope
 
 - Replace newline/trim/tab-guess parsing in `getFileListClass` with the design's single tagged NUL call and source-local parsing. Preserve true mode160000 exclusion, root-only marker hiding and exact path payloads.
@@ -107,15 +109,15 @@ Header detection without a tag can mistake a literal untracked path for a Gitlin
 
 ## Delivery after release
 
-Normal active hooks, commit, push, ready PR, CI/review/fixup and normal merge are standing authorized only after ROOT releases implementation. Load delivery skills then. Freeze published SHA except a real correction; never rebase for main drift or run synthetic merged tests. Actual backend PR fixup requires one full changed lint, using exact PR base:
+Normal active hooks, commit, push, ready PR, CI/review/fixup and normal merge are standing authorized only after ROOT releases implementation. Load delivery skills then. Freeze published SHA except a real correction; never rebase for main drift or run synthetic merged tests. A PR fixup that touches backend code requires one full changed lint, using exact PR base:
 
 ```bash
 (cd apps/backend && GOMAXPROCS=2 GOMEMLIMIT=1GiB timeout --kill-after=10s 6m golangci-lint run ./... --new-from-rev="$KANDEV_EXACT_PR_BASE_SHA" --concurrency=2 --allow-serial-runners --timeout=5m)
 ```
 
-Resolve and record that base before this command. One owned `scripts/pr-await` all-terminal monitor at a time; actually join before replacement, no manual `pr-state` timer polling. Require six configured required hosted gates terminal success and authenticated configured CodeRabbit App347564 substantive FULL exact-current-head/all-file coverage. Inspect completed automatic coverage before at most one necessary full request for a corrected head; ACK/skips/progress are insufficient. Disposition every finding; defer optional polish with grounded reasons. No blind/second hosted retry: save unrelated failure evidence for ROOT's bounded decision.
+Resolve and record that base before this command. A docs-only correction with unchanged backend bytes needs scoped artifact checks and normal applicable hooks; it does not require replaying Go tests or full Go lint. One owned `scripts/pr-await` all-terminal monitor at a time; actually join before replacement, no manual `pr-state` timer polling. Require six configured required hosted gates terminal success and authenticated configured CodeRabbit App347564 substantive FULL exact-current-head/all-file coverage. Inspect completed automatic coverage before at most one necessary full request for a corrected head; ACK/skips/progress are insufficient. Disposition every finding; defer optional polish with grounded reasons. No blind/second hosted retry: save unrelated failure evidence for ROOT's bounded decision.
 
-Merge only at ROOT's coordinated merge boundary, by normal expected-head squash, without admin/bypass; independently verify actual merge/tree/all owned blobs/remote and join owned cleanup. Task remains incomplete until actual merge; ROOT owns independent verification/archive and parent proof release. Incoming parent callback queue is full: never retry notifications/questions or change harness/routing. Preserve task `3aeeb034-c702-41a8-a96f-0ca91275560f`, primary session `af1fe33c-1660-4f7d-9a77-59f11c1ee4fb`, title, marker, user edits and question/final-action barriers in own-plan checkpoints. End WAITING at design, resource failure, blocker or actual completion for ROOT polling.
+Merge only after ROOT grants the separate merge lease, by normal expected-head squash, without admin/bypass; independently verify actual merge/tree/all owned blobs/remote and join owned cleanup. The persistent Kandev task remains incomplete until actual verified merge and joined cleanup; ROOT owns independent verification/archive and parent proof release. Incoming parent callback queue is full: never retry notifications/questions or change harness/routing. Preserve task `3aeeb034-c702-41a8-a96f-0ca91275560f`, primary session `af1fe33c-1660-4f7d-9a77-59f11c1ee4fb`, title, marker, user edits and question/final-action barriers in own-plan checkpoints. End WAITING at design, resource failure, blocker or actual completion for ROOT polling.
 
 ## Results
 
@@ -126,4 +128,4 @@ Implemented after ROOT's explicit same-session release on 2026-10-05. Production
 - Scoped lint: documented two-package command against `e095ca17790d3dd0e4700b473780add77ac7a230`, handle 21986 actually joined, exit 0, `0 issues`. Log `/tmp/kandev-exact-inventory-scoped-lint.log`. No broad suites/browser/build/E2E/PG were run.
 - Documentation and engineering-guide assessments remain valid for the final bounded diff: existing public search wording is restored; no guide convention/package/export change requires correction. The paired design is current and the existing requirement remains active.
 
-Publication and hosted review remain delivery work. ROOT's initial local-heavy lease covers the current tranche only; return it with zero owned live handles after publication. A separate ROOT merge lease remains required.
+Initial normal hooks, commit, push and ready PR publication completed; the initial local-heavy lease was returned with zero owned live local handles. Hosted gates, full review and findings disposition, actual merge and joined cleanup remain delivery work tracked in the external Kandev task plan. Local work-order completion does not satisfy those gates. Later publication hooks/commit/push require a new local-heavy lease; actual merge requires ROOT's separate merge lease.

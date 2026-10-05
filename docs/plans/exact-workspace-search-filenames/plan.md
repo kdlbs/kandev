@@ -73,13 +73,15 @@ Root, backend, agentctl and API engineering guides remain accurate: classified m
 
 - [x] [Task 01: Preserve exact search paths](task-01-preserve-exact-search-paths.md)
 
+The checked work order and `implemented` manifest status record completed local implementation and verification under `/fix` Phase 4. They do not complete the persistent Kandev task or its Phase 5 delivery. The external Kandev task plan tracks the pending six required hosted gates, full semantic review, findings disposition, separately authorized actual merge and joined cleanup.
+
 ## Verification results
 
 Task 01 implemented after ROOT's explicit release on 2026-10-05. Production changes only the managed `ls-files` flags and source-local record extraction in `workspace_files.go`. The two new real-Git regression files exercise the accepted inventory/cache/search and registered transport matrix, including independent same-path sentinels, read-only bytes and stage multiplicity. Scope and guide/public-doc assessments remain accurate.
 
 Faithful permanent RED handle 51865 joined with exit 1 (three new families fail, 14 controls pass); GREEN handle 6250 joined with exit 0 (17 top-level tests: 13 process, 4 API; packages 2.694s/1.991s). Scoped two-package lint handle 21986 joined with exit 0 and zero issues against the starting base. Full commands and receipts are in the [work order](task-01-preserve-exact-search-paths.md#results). A prior missing-directory fixture failure was corrected and is not reported as production RED. Supplied ROOT proof remains untouched.
 
-Design catalog, all-spec lint, 36 linter tests, projected documentation coverage and whitespace checks passed before release. Final catalog/specification lint and whitespace checks passed. Actual staged-path documentation coverage is checked before commit; committed-head coverage is checked before publication. The single pinned pnpm 9.15.9 frozen install completed successfully (handle 30915 joined, exit 0). Normal hook/commit/push/ready PR are covered by the initial local lease; hosted CI/review and a separate ROOT merge lease remain delivery gates. No local browser/build/E2E/PG or broad backend suites are scheduled.
+Design catalog, all-spec lint, 36 linter tests, projected documentation coverage and whitespace checks passed before release. Final catalog/specification lint, whitespace and staged/committed-head documentation coverage passed for initial publication. The single pinned pnpm 9.15.9 frozen install completed successfully (handle 30915 joined, exit 0). Normal hooks, commit, push and ready PR publication completed under the initial local lease, which was returned with zero live local handles. Hosted gates, full review/findings disposition, actual merge and joined cleanup remain pending delivery barriers in the external Kandev task plan. Later publication requires a new local-heavy lease; actual merge requires a separate ROOT merge lease. No local browser/build/E2E/PG or broad backend suites are scheduled.
 
 ## Risks
 
