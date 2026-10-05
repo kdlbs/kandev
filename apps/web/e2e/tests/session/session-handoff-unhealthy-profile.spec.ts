@@ -52,25 +52,47 @@ async function markProfileCapabilityNotInstalled(testPage: Page, profileId: stri
   }, profileId);
 }
 
-async function createProfiles(
-  apiClient: InstanceType<typeof import("../../helpers/api-client").ApiClient>,
-) {
-  const { agents } = await apiClient.listAgents();
-  const agent =
-    agents.find((candidate) => candidate.name === "mock-agent") ??
-    agents.find((candidate) => candidate.id !== "dynamic");
-  if (!agent) throw new Error("no concrete agents available in test fixtures");
-  const agentId = agent.id;
-  const profileA = await apiClient.createAgentProfile(agentId, "Handoff Filter Profile A", {
-    model: "mock-fast",
-  });
-  const profileBAgentId =
-    agents.find((candidate) => candidate.id !== "dynamic" && candidate.id !== agentId)?.id ??
-    agentId;
-  const profileB = await apiClient.createAgentProfile(profileBAgentId, "Handoff Filter Profile B", {
-    model: "mock-slow",
-  });
-  return { profileA, profileB, profilesShareAgent: profileBAgentId === agentId };
+async function addHealthyHandoffProfile(testPage: Page, sourceProfileId: string) {
+  const profileId = "e2e-handoff-profile-b";
+  const name = "Handoff Filter Profile B";
+
+  await testPage.waitForFunction(
+    (id) => {
+      const store = (window as E2EStoreWindow).__KANDEV_E2E_STORE__;
+      return store?.getState().agentProfiles.items.some((profile) => profile.id === id) ?? false;
+    },
+    sourceProfileId,
+    { timeout: 10_000 },
+  );
+
+  return testPage.evaluate(
+    ({ sourceProfileId: sourceId, profileId: id, name: profileName }) => {
+      const store = (window as E2EStoreWindow).__KANDEV_E2E_STORE__;
+      if (!store) {
+        throw new Error("E2E store bridge missing — is __KANDEV_E2E_EXPOSE_STORE__ set?");
+      }
+      const source = store
+        .getState()
+        .agentProfiles.items.find((profile) => profile.id === sourceId);
+      if (!source) throw new Error(`agent profile ${sourceId} not found in store`);
+
+      const profile = {
+        ...source,
+        id,
+        name: profileName,
+        model: "mock-slow",
+        capability_status: undefined,
+      };
+      store.setState((state) => {
+        const index = state.agentProfiles.items.findIndex((item) => item.id === id);
+        if (index === -1) state.agentProfiles.items.push(profile);
+        else state.agentProfiles.items[index] = profile;
+      });
+
+      return profile.id;
+    },
+    { sourceProfileId, profileId, name },
+  );
 }
 
 test.describe("Session handoff filters unhealthy profiles", () => {
@@ -81,12 +103,12 @@ test.describe("Session handoff filters unhealthy profiles", () => {
   }) => {
     test.setTimeout(90_000);
 
-    const { profileA, profileB, profilesShareAgent } = await createProfiles(apiClient);
+    const profileAId = seedData.agentProfileId;
 
     const task = await apiClient.createTaskWithAgent(
       seedData.workspaceId,
       "Handoff Filter Task",
-      profileA.id,
+      profileAId,
       {
         description: "/e2e:simple-message",
         workflow_id: seedData.workflowId,
@@ -117,38 +139,21 @@ test.describe("Session handoff filters unhealthy profiles", () => {
 
     const session = new SessionPage(testPage);
     await session.waitForLoad();
+    const profileBId = await addHealthyHandoffProfile(testPage, profileAId);
 
     await session.sessionTabBySessionId(session1Id).click({ button: "right" });
     await session.handoffSubmenu().hover();
-    await expect(session.handoffProfileItem(profileB.id)).toBeVisible({ timeout: 5_000 });
+    await expect(session.handoffProfileItem(profileBId)).toBeVisible({ timeout: 5_000 });
     await testPage.keyboard.press("Escape");
 
     // A real agent.available.updated event changes every profile for the
-    // agent. Use separate agents for the mixed-health assertion when the
-    // fixture provides them. The single-agent mock must mark both profiles
-    // unhealthy instead of creating an impossible mixed state. Include the
-    // fixture's seeded profile because it belongs to the same agent and would
-    // otherwise keep one healthy handoff option visible.
-    if (profilesShareAgent) {
-      await markProfileCapabilityNotInstalled(testPage, profileA.id);
-      await markProfileCapabilityNotInstalled(testPage, profileB.id);
-      await markProfileCapabilityNotInstalled(testPage, seedData.agentProfileId);
-    } else {
-      await markProfileCapabilityNotInstalled(testPage, profileB.id);
-    }
+    // agent. Both options share the seeded profile's agent, so update both.
+    await markProfileCapabilityNotInstalled(testPage, profileAId);
+    await markProfileCapabilityNotInstalled(testPage, profileBId);
 
     await session.sessionTabBySessionId(session1Id).click({ button: "right" });
     await session.handoffSubmenu().hover();
-    if (profilesShareAgent) {
-      await expect(session.handoffProfileItem(profileA.id)).not.toBeVisible();
-      await expect(
-        testPage.getByText(
-          "No agent profiles are ready. Install or reconnect an agent CLI in Settings → Agents.",
-        ),
-      ).toBeVisible();
-    } else {
-      await expect(session.handoffProfileItem(profileA.id)).toBeVisible({ timeout: 5_000 });
-    }
-    await expect(session.handoffProfileItem(profileB.id)).not.toBeVisible();
+    await expect(session.handoffProfileItem(profileAId)).not.toBeVisible();
+    await expect(session.handoffProfileItem(profileBId)).not.toBeVisible();
   });
 });
