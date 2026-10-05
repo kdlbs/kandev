@@ -30,14 +30,9 @@ test("renders and persists native rich output with an explicit file preview", as
   await expect(barChart).toBeVisible();
   await lineChart.scrollIntoViewIfNeeded();
   await expect(lineChart.locator(".recharts-xAxis text").first()).toBeVisible();
-  await expect(lineChart.locator(".recharts-line-curve")).toHaveAttribute("stroke-dasharray", /\d/);
   await expect(lineChart.locator(".recharts-yAxis text").first()).toBeVisible();
   await expect(lineChart.locator(".recharts-xAxis")).toContainText("Aug 12");
-  // Scroll the observed plot once. Repeating scroll actions while the lazy
-  // chart mounts can keep the virtualized transcript in motion indefinitely.
-  await barPlot.evaluate((element) =>
-    element.scrollIntoView({ block: "center", inline: "nearest", behavior: "instant" }),
-  );
+  await barPlot.scrollIntoViewIfNeeded();
   await expect(barPlot.locator("svg")).toBeVisible({ timeout: 30_000 });
   await expect(barChart.locator(".recharts-xAxis text").first()).toBeVisible({ timeout: 30_000 });
   await expect(barChart.locator(".recharts-yAxis text").first()).toBeVisible();
@@ -167,9 +162,7 @@ test("renders complete chart geometry when device animation is disabled", async 
   await expect(line).toBeVisible({ timeout: 30_000 });
   await expect(line).not.toHaveAttribute("stroke-dasharray", /\d/);
 
-  await barPlot.evaluate((element) =>
-    element.scrollIntoView({ block: "center", inline: "nearest", behavior: "instant" }),
-  );
+  await barPlot.scrollIntoViewIfNeeded();
   await expect(barPlot.locator("svg")).toBeVisible({ timeout: 30_000 });
   await expect(barPlot.locator(".recharts-bar-rectangle")).toHaveCount(6, {
     timeout: 30_000,

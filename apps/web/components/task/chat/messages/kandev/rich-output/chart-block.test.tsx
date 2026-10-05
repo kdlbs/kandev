@@ -143,6 +143,114 @@ describe("ChartBlock plot scheduling", () => {
     expect(screen.getByTestId(MOCK_LINE_CHART)).not.toBeNull();
   });
 
+  it("mounts a deferred plot when scrolling its owner brings it into range", () => {
+    const { container } = render(
+      <div
+        data-testid="scroll-owner"
+        ref={(element) => {
+          if (!element) return;
+          Object.defineProperties(element, {
+            clientHeight: { configurable: true, value: 300 },
+            scrollHeight: { configurable: true, value: 900 },
+          });
+        }}
+        style={{ overflowY: "auto" }}
+      >
+        <ChartBlock block={BLOCK} />
+      </div>,
+    );
+    const scrollOwner = container.querySelector<HTMLElement>('[data-testid="scroll-owner"]')!;
+    const plot = container.querySelector<HTMLElement>('[data-testid="rich-output-chart-plot"]')!;
+    let plotTop = 1000;
+    vi.spyOn(scrollOwner, "getBoundingClientRect").mockReturnValue({
+      x: 0,
+      y: 0,
+      top: 0,
+      right: 400,
+      bottom: 300,
+      left: 0,
+      width: 400,
+      height: 300,
+      toJSON: () => ({}),
+    });
+    vi.spyOn(plot, "getBoundingClientRect").mockImplementation(() => ({
+      x: 0,
+      y: plotTop,
+      top: plotTop,
+      right: 320,
+      bottom: plotTop + 208,
+      left: 0,
+      width: 320,
+      height: 208,
+      toJSON: () => ({}),
+    }));
+
+    expect(screen.queryByTestId(MOCK_LINE_CHART)).toBeNull();
+    plotTop = 100;
+    act(() => scrollOwner.dispatchEvent(new Event("scroll")));
+
+    expect(screen.getByTestId(MOCK_LINE_CHART)).not.toBeNull();
+  });
+});
+
+describe("ChartBlock scroll root selection", () => {
+  it("observes the nearest vertically scrollable transcript container", () => {
+    const { container } = render(
+      <div
+        ref={(element) => {
+          if (!element) return;
+          Object.defineProperties(element, {
+            clientHeight: { configurable: true, value: 100 },
+            scrollHeight: { configurable: true, value: 300 },
+          });
+        }}
+        style={{ overflowY: "auto" }}
+      >
+        <ChartBlock block={BLOCK} />
+      </div>,
+    );
+
+    expect(observerRecords[0].options?.root).toBe(container.firstElementChild);
+  });
+
+  it("ignores a horizontal-only overflow ancestor when selecting the scroll root", () => {
+    const { container } = render(
+      <div
+        data-testid="vertical-scroll-root"
+        ref={(element) => {
+          if (!element) return;
+          Object.defineProperties(element, {
+            clientHeight: { configurable: true, value: 100 },
+            scrollHeight: { configurable: true, value: 300 },
+          });
+        }}
+        style={{ overflowY: "auto" }}
+      >
+        <div
+          data-testid="horizontal-overflow"
+          ref={(element) => {
+            if (!element) return;
+            Object.defineProperties(element, {
+              clientHeight: { configurable: true, value: 100 },
+              scrollHeight: { configurable: true, value: 100 },
+              clientWidth: { configurable: true, value: 100 },
+              scrollWidth: { configurable: true, value: 500 },
+            });
+          }}
+          style={{ overflowX: "auto" }}
+        >
+          <ChartBlock block={BLOCK} />
+        </div>
+      </div>,
+    );
+
+    expect(observerRecords[0].options?.root).toBe(
+      container.querySelector('[data-testid="vertical-scroll-root"]'),
+    );
+  });
+});
+
+describe("ChartBlock plot visibility and rendering", () => {
   it("waits for a background tab to become visible after intersection", () => {
     setDocumentVisibility("hidden");
     render(<ChartBlock block={BLOCK} />);
