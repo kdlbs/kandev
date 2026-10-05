@@ -23,6 +23,7 @@ import (
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/recoveryclaim"
 	"github.com/kandev/kandev/internal/task/repository/hierarchy"
+	managed "github.com/kandev/kandev/internal/task/repository/managedconversation"
 	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 	usermodels "github.com/kandev/kandev/internal/user/models"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
@@ -1377,6 +1378,9 @@ func (r *Repository) updateTaskTx(
 	preservePosition, protectDeferredLaunch bool,
 	workflowChangeSource *models.WorkflowChangeSource,
 ) (entryID string, markerEntryID int64, err error) {
+	if err := r.managedDeletionBarrierTx(ctx, tx, task.ID); err != nil {
+		return "", 0, err
+	}
 	fromWorkflowID, fromStepID, err := r.readAndValidateTaskUpdateSourceInTx(
 		ctx, tx, task, expectedWorkflowID, preservePosition, workflowChangeSource,
 	)
@@ -3573,6 +3577,10 @@ func (r *Repository) DeleteTask(ctx context.Context, id string) error {
 // DeleteTaskWithVacatedStep deletes a task and returns the workflow step read
 // under the same task-row lock as the deletion.
 func (r *Repository) DeleteTaskWithVacatedStep(ctx context.Context, id string) (string, error) {
+	return r.deleteTaskWithVacatedStep(ctx, id, nil)
+}
+
+func (r *Repository) deleteTaskWithVacatedStep(ctx context.Context, id string, claim *managed.DeleteClaim) (string, error) {
 	tx, err := r.db.BeginTxx(ctx, r.hierarchyTxOptions())
 	if err != nil {
 		return "", err
@@ -3603,14 +3611,7 @@ func (r *Repository) DeleteTaskWithVacatedStep(ctx context.Context, id string) (
 	if !found {
 		return "", fmt.Errorf("%w: %s", ErrTaskNotFound, id)
 	}
-	var hasChildren bool
-	if err := tx.QueryRowContext(ctx, r.db.Rebind(`SELECT EXISTS (SELECT 1 FROM tasks WHERE parent_id = ?)`), id).Scan(&hasChildren); err != nil {
-		return "", err
-	}
-	if hasChildren {
-		return "", repoerrors.ErrTaskHierarchyConflict
-	}
-	if err := recoveryclaim.EnsureTaskAvailableTx(ctx, r.db, tx, id); err != nil {
+	if err := r.validateTaskDeletionTx(ctx, tx, id, claim); err != nil {
 		return "", err
 	}
 	sessions, err := r.taskQueueSessionsInTx(ctx, tx, id)
@@ -5321,6 +5322,9 @@ func (r *Repository) DeleteExpiredQuickChatTask(ctx context.Context, id string, 
 		return false, err
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err := r.managedDeletionBarrierTx(ctx, tx, id); err != nil {
+		return false, err
+	}
 	if err := r.lockTaskRowInTx(ctx, tx, id); err != nil {
 		if errors.Is(err, ErrTaskNotFound) {
 			return false, nil

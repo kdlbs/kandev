@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/google/uuid"
 	"sort"
 	"strconv"
 	"strings"
@@ -14,8 +15,10 @@ import (
 	"github.com/kandev/kandev/internal/events/bus"
 	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/recoveryclaim"
 	taskrepo "github.com/kandev/kandev/internal/task/repository"
 	managed "github.com/kandev/kandev/internal/task/repository/managedconversation"
+	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 	"github.com/kandev/kandev/pkg/api/v1"
 	"github.com/kandev/kandev/pkg/pluginsdk"
 	"google.golang.org/grpc/codes"
@@ -139,7 +142,7 @@ func managedAdmissionError(err error) error {
 	switch {
 	case errors.Is(err, managed.ErrRevision):
 		return status.Error(codes.Aborted, err.Error())
-	case errors.Is(err, managed.ErrBusy):
+	case errors.Is(err, managed.ErrBusy), errors.Is(err, repoerrors.ErrTaskCleanupInProgress), errors.Is(err, repoerrors.ErrTaskHierarchyConflict), errors.Is(err, recoveryclaim.ErrBusy):
 		return status.Error(codes.FailedPrecondition, err.Error())
 	case errors.Is(err, managed.ErrNotFound):
 		return status.Error(codes.NotFound, err.Error())
@@ -242,30 +245,38 @@ func managedTaskIdentity(task *models.Task) managed.Identity {
 // DeleteManaged removes one retained conversation only at the expected
 // revision. Host lifecycle cleanup deliberately does not call this method.
 func (s *AgentConversationService) DeleteManaged(
-	ctx context.Context, installationID, workspaceID, instanceKey string, expectedRevision uint64, _, _ string,
+	ctx context.Context, installationID, workspaceID, instanceKey string, expectedRevision uint64, operationID, payloadDigest string,
 ) error {
 	unlock := s.lockEnsureKey(managedConversationIdentity(installationID, workspaceID, instanceKey))
 	defer unlock()
+	deleter, ok := s.getTaskDeleter().(interface {
+		DeleteManagedConversationTask(context.Context, managed.DeleteRequest) error
+	})
+	native, nativeOK := s.tasks.(managed.DeletionRepository)
+	if !ok || !nativeOK {
+		return managedAdmissionError(managed.ErrUnavailable)
+	}
+	if operationID == "" || payloadDigest == "" {
+		operationID, payloadDigest = uuid.NewString(), uuid.NewString()
+	}
+	request := managed.DeleteRequest{Identity: managed.Identity{InstallationID: installationID, WorkspaceID: workspaceID, InstanceKey: instanceKey}, ExpectedRevision: expectedRevision, OperationID: operationID, PayloadDigest: payloadDigest}
+	previous, job, err := native.InspectManagedDeletion(ctx, request)
+	if err != nil {
+		return &ManagedDeletionError{Outcome: "outcome_uncertain", Cause: err}
+	}
+	if previous != nil && (previous.Phase == managed.DeleteCommitted || job.State != models.TaskResourceCleanupStateCancelled) {
+		return deleter.DeleteManagedConversationTask(ctx, previous.DeleteRequest)
+	}
 	task, err := s.findRetainedManagedConversation(ctx, installationID, workspaceID, instanceKey)
 	if err != nil {
-		return err
+		return managedHistoryError(previous, err)
 	}
-	if task == nil {
-		return status.Error(codes.NotFound, "managed conversation not found")
+	if task == nil || managedConversationDetached(task) {
+		return managedHistoryError(previous, managedAdmissionError(managed.ErrNotFound))
 	}
-	if managedConversationDetached(task) {
-		return status.Error(codes.NotFound, "managed conversation not found")
-	}
-	if managedConversationRevision(task) != expectedRevision {
-		return status.Error(codes.Aborted, "managed conversation revision is stale")
-	}
-	if err := s.deleteManagedConversationTask(ctx, s.getTaskDeleter(), task.ID); err != nil {
-		if errors.Is(err, taskrepo.ErrTaskNotFound) {
-			return nil
-		}
-		return fmt.Errorf("failed to delete managed conversation: %w", err)
-	}
-	return nil
+	request.Identity = managedTaskIdentity(task)
+	request.TaskCreatedAt = task.CreatedAt
+	return deleter.DeleteManagedConversationTask(ctx, request)
 }
 
 // PauseManagedForInstallation blocks new turns and stops any current execution

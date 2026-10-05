@@ -147,13 +147,21 @@ lists, follow `page_info.next_cursor` to load every page. Do not set
 
 For recorded workflow movement, the browser can GET
 `./_kandev/v1/data/tasks/{task_id}/step-transitions` with
-`api_read:tasks`. A workspace canvas can GET
+`api_read:tasks`. With `data_scope_kind: task`, a canvas can read only its own
+task's history. With `data_scope_kind: workspace`, it can read any task's
+history in the current workspace, even with `scope_kind: task`.
+
+With `data_scope_kind: workspace`, a canvas can GET
 `./_kandev/v1/data/workflows/{workflow_id}/transition-groups` with both
-`api_read:tasks` and `api_read:workflows`. The latter is denied to a task
-canvas until the user promotes it. Both return bounded `{items,page_info}`
-pages; use the opaque `next_cursor` to continue. The equivalent optional
-backend Host extension is `pluginsdk.TransitionHistory(host)`. It exposes
-`ListTask` and `ListWorkflowGroups` with the same fields and grants.
+`api_read:tasks` and `api_read:workflows`. This route requires workspace data
+access, regardless of canvas placement. Both routes return bounded
+`{items,page_info}` pages with an opaque `page_info.next_cursor` for the next
+page.
+
+Backend plugins can use the optional Host SDK extension
+`pluginsdk.TransitionHistory(host)`. Its `ListTask` and `ListWorkflowGroups`
+readers use the same fields and declared read grants. They do not enforce a
+canvas's data scope or workspace boundary.
 
 Kandev injects a reserved startup bootstrap into the packaged entry document.
 It runs before authored scripts, reports an initial document error when one is
@@ -1403,6 +1411,23 @@ call. The Host rejects stale revisions and launch-setting changes while a turn
 is active. `SetPaused` also checks a revision. Pause state blocks future starts;
 stopping a running generation is a separate operation. `Delete` is explicit and
 removes only the selected conversation owned by the current installation.
+
+`Delete` checks the current identity and expected revision when it admits the
+operation. If an accepted update wins first, deletion returns a conflict; if
+uninstall has detached the conversation, deletion returns not found. These
+rejected attempts preserve the task and transcript and perform no deletion
+cleanup. Once deletion is admitted, competing changes cannot be accepted until
+that operation commits or releases its reservation.
+
+An admitted deletion can fail after environment transfer or canvas cleanup has
+already taken effect. The task and transcript remain when final deletion rolls
+back, but those preparation effects are not guaranteed to be undone. The Host
+returns `CommandUnavailable` for admitted failure, uncertain outcome, or an
+unavailable acknowledgement. An incomplete receipt or missing task alone does
+not prove successful deletion. Replay the same command key to recover its
+result; a successful replay requires durable evidence of that operation's
+deletion commit and cannot delete a replacement conversation. A reservation
+with an unproven owner remains unavailable rather than being stolen by replay.
 
 ```go
 if exact, ok := pluginsdk.HostV2(host); ok {

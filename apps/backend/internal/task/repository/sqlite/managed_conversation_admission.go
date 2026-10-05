@@ -39,6 +39,10 @@ func (r *Repository) beginManagedAdmission(ctx context.Context, identity managed
 		_ = tx.Rollback()
 		return nil, nil, managed.ErrNotFound
 	}
+	if err := r.managedDeletionBarrierTx(ctx, tx, task.ID); err != nil {
+		_ = tx.Rollback()
+		return nil, nil, fmt.Errorf("%w: %v", managed.ErrBusy, err)
+	}
 	return tx, task, nil
 }
 
