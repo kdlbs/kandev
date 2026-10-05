@@ -121,8 +121,11 @@ test.describe("Quick Chat", () => {
   test("returns focus without a visible indicator", async ({ testPage }) => {
     await testPage.goto("/");
     await testPage.waitForLoadState("networkidle");
-    const dialog = await openQuickChatSetup(testPage, false);
     const launcher = testPage.getByTestId("sidebar-quick-chat-shortcut");
+    const restingBorder = await launcher.evaluate(
+      (element) => getComputedStyle(element).borderColor,
+    );
+    const dialog = await openQuickChatSetup(testPage, false);
 
     await testPage.keyboard.press("Escape");
 
@@ -140,12 +143,11 @@ test.describe("Quick Chat", () => {
     });
     expect(silentStyles.outlineStyle).toBe("none");
     expect(silentStyles.boxShadow).toBe("none");
-    expect(silentStyles.borderColor).toBe("rgba(0, 0, 0, 0)");
+    await expect(launcher).toHaveCSS("border-color", restingBorder);
 
     await testPage.getByTestId("create-task-button").focus();
     await expect(launcher).not.toHaveAttribute("data-quick-chat-silent-focus");
 
-    await testPage.keyboard.press("Tab");
     await testPage.keyboard.press("Tab");
     await expect(launcher).toBeFocused();
 

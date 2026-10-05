@@ -2,6 +2,7 @@
 
 import type { RefObject } from "react";
 import { Button } from "@kandev/ui/button";
+import { ButtonGroup, ButtonGroupSeparator } from "@kandev/ui/button-group";
 import { IconMessageCircle, IconSearch, IconTerminal2 } from "@tabler/icons-react";
 import { useTranslation } from "react-i18next";
 import { QuickChatActivityIndicator } from "@/components/quick-chat/quick-chat-activity-indicator";
@@ -106,15 +107,26 @@ export function MobileQuickActions({
   const { activity, label } = useQuickChatActivity(workspaceId);
   const openQuickChat = useQuickChatLauncher(workspaceId, "chat", { returnFocusRef });
   const openQuickTerminal = useQuickTerminalLauncher(workspaceId, { returnFocusRef });
+  const actionClassName = cn(
+    "min-h-11 h-auto min-w-0 w-full cursor-pointer justify-start gap-2 whitespace-normal px-3 py-2 text-left text-sm",
+    inline && "flex-1 justify-center border-0 font-normal text-foreground/75 hover:text-foreground",
+  );
+  const ActionGroup = inline ? ButtonGroup : "div";
   function launch(action: () => void) {
     closeMenu(false);
     requestAnimationFrame(action);
   }
   return (
-    <div className={inline ? "grid grid-cols-2 gap-2" : "flex flex-col gap-3"}>
+    <ActionGroup
+      aria-label={inline ? t("common:utilities") : undefined}
+      data-testid="mobile-quick-actions"
+      className={
+        inline ? "w-full min-w-0 rounded-md border border-border/60" : "flex flex-col gap-3"
+      }
+    >
       <Button
-        variant="outline"
-        className="min-h-11 h-auto min-w-0 w-full cursor-pointer justify-start gap-2 whitespace-normal px-3 py-2 text-left text-sm"
+        variant={inline ? "ghost" : "outline"}
+        className={actionClassName}
         aria-label={label}
         data-testid="mobile-quick-chat-button"
         data-legacy-testid="threads-menu-quick-chat"
@@ -126,16 +138,20 @@ export function MobileQuickActions({
         </span>
         {t("sidebar:quickChat")}
       </Button>
+      {inline && (
+        <ButtonGroupSeparator className="bg-border/60 data-[orientation=vertical]:my-2.5" />
+      )}
       <Button
-        variant="outline"
-        className="min-h-11 h-auto min-w-0 w-full cursor-pointer justify-start gap-2 whitespace-normal px-3 py-2 text-left text-sm"
+        variant={inline ? "ghost" : "outline"}
+        className={actionClassName}
+        aria-label={t("sidebar:quickTerminal")}
         data-testid="mobile-quick-terminal-button"
         data-legacy-testid="threads-menu-quick-terminal"
         onClick={() => launch(openQuickTerminal)}
       >
         <IconTerminal2 className="h-4 w-4" />
-        {t("sidebar:quickTerminal")}
+        {t(inline ? "common:terminal" : "sidebar:quickTerminal")}
       </Button>
-    </div>
+    </ActionGroup>
   );
 }

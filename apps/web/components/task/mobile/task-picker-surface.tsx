@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { IconChevronDown, IconChevronRight, IconPlus } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
@@ -9,10 +9,12 @@ export function InlineTaskHeader({
   expanded,
   onExpandedChange,
   onNewTask,
+  showNewTask = true,
 }: {
   expanded: boolean;
   onExpandedChange: (expanded: boolean) => void;
   onNewTask: () => void;
+  showNewTask?: boolean;
 }) {
   const { t } = useTranslation();
   return (
@@ -32,14 +34,16 @@ export function InlineTaskHeader({
           <IconChevronRight className="size-3.5 text-muted-foreground" />
         )}
       </Button>
-      <Button
-        variant="ghost"
-        className="cursor-pointer size-11 shrink-0 text-muted-foreground hover:text-foreground"
-        onClick={onNewTask}
-        aria-label={t("task:newTask")}
-      >
-        <IconPlus className="size-4" />
-      </Button>
+      {showNewTask && (
+        <Button
+          variant="ghost"
+          className="cursor-pointer size-11 shrink-0 text-muted-foreground hover:text-foreground"
+          onClick={onNewTask}
+          aria-label={t("task:newTask")}
+        >
+          <IconPlus className="size-4" />
+        </Button>
+      )}
     </div>
   );
 }
@@ -91,4 +95,18 @@ export function TaskPickerSurface({
       </SheetContent>
     </Sheet>
   );
+}
+
+export function useTaskSheetOpener(open: boolean) {
+  const [opener, setOpener] = useState({ open: false, current: null as HTMLElement | null });
+  if (opener.open !== open) {
+    setOpener({
+      open,
+      current:
+        open && document.activeElement instanceof HTMLElement
+          ? document.activeElement
+          : opener.current,
+    });
+  }
+  return opener;
 }

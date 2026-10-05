@@ -246,6 +246,10 @@
     border-color: transparent !important;
   }
 
+  [data-quick-chat-silent-focus="true"][data-variant="outline"]:focus-visible {
+    border-color: var(--border) !important;
+  }
+
   [data-workflow-replay-cycle="true"] {
     @apply ring-1 ring-warning/20;
     border-color: color-mix(in oklab, var(--warning) 65%, var(--border)) !important;
@@ -379,10 +383,8 @@ html[data-rendering-engine="webkit"] [data-webkit-safe-motion="true"][data-state
   }
 }
 
-/* Radix menus are poppers: their inline transform lives on a generated wrapper,
-   not the menu surface. On mobile viewports, pin that wrapper to the
-   viewport and let the menu scroll internally like a compact bottom sheet. */
-@media (max-width: 639px) {
+/* Task actions remain visible throughout the phone layout and on touch devices. */
+@media (max-width: 767px), (pointer: coarse) {
   .mobile-task-actions {
     display: flex !important;
     opacity: 1 !important;
@@ -400,12 +402,20 @@ html[data-rendering-engine="webkit"] [data-webkit-safe-motion="true"][data-state
 
   .mobile-task-actions-slot {
     position: static;
+    width: auto;
+    min-width: 44px;
+    overflow: visible;
   }
 
   .mobile-task-diff-stats {
     opacity: 1 !important;
   }
+}
 
+/* Radix menus are poppers: their inline transform lives on a generated wrapper,
+   not the menu surface. On mobile viewports, pin that wrapper to the
+   viewport and let the menu scroll internally like a compact bottom sheet. */
+@media (max-width: 639px) {
   [data-radix-popper-content-wrapper]:has(
     > :is(
       [data-slot="context-menu-content"],

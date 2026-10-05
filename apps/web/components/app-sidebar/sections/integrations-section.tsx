@@ -3,10 +3,11 @@
 import Link from "@/components/routing/app-link";
 import { useTranslation } from "react-i18next";
 import { usePathname } from "@/lib/routing/client-router";
-import { IconPlugConnected } from "@tabler/icons-react";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
+import { IconPlugConnected, IconSettings } from "@tabler/icons-react";
+import { useAppStore } from "@/components/state-provider";
+import { workspaceSettingsHref } from "@/lib/settings/workspace-settings-tabs";
 import { useAppDestinations } from "@/hooks/use-app-destinations";
-import type { DestinationIcon, ResolvedDestination } from "@/lib/navigation/types";
+import type { DestinationIcon } from "@/lib/navigation/types";
 import { cn } from "@/lib/utils";
 import {
   APP_SIDEBAR_SECTION_IDS,
@@ -19,30 +20,6 @@ type IntegrationsSectionProps = {
   collapsed: boolean;
   includePluginItems?: boolean;
 };
-
-const MAX_HEADER_SHORTCUTS = 4;
-
-function IntegrationHeaderShortcuts({ links }: { links: ResolvedDestination[] }) {
-  return (
-    <div className="flex items-center gap-0.5">
-      {links.slice(0, MAX_HEADER_SHORTCUTS).map(({ id, label, href, icon: Icon }) => (
-        <Tooltip key={id}>
-          <TooltipTrigger asChild>
-            <Link
-              href={href}
-              aria-label={label}
-              data-testid="integration-header-shortcut"
-              className="flex h-5 w-5 items-center justify-center rounded text-muted-foreground/70 hover:bg-muted/60 hover:text-foreground cursor-pointer transition-colors"
-            >
-              <Icon className="h-3.5 w-3.5" />
-            </Link>
-          </TooltipTrigger>
-          <TooltipContent side="right">{label}</TooltipContent>
-        </Tooltip>
-      ))}
-    </div>
-  );
-}
 
 type IntegrationRowProps = {
   href: string;
@@ -57,8 +34,9 @@ function IntegrationRow({ href, label, icon: Icon, active, testId }: Integration
     <Link
       href={href}
       data-testid={testId}
+      aria-current={active ? "page" : undefined}
       className={cn(
-        "flex items-center gap-2.5 px-2.5 py-1.5 text-[13px] font-medium rounded-md cursor-pointer",
+        "flex min-h-8 items-center gap-2.5 px-2.5 py-1.5 [@media(pointer:coarse)]:min-h-11 text-[13px] font-medium rounded-md cursor-pointer",
         active ? SIDEBAR_ITEM_ACTIVE : SIDEBAR_ITEM_INACTIVE,
       )}
     >
@@ -74,20 +52,15 @@ export function IntegrationsSection({
 }: IntegrationsSectionProps) {
   const { t } = useTranslation();
   const pathname = usePathname();
+  const workspaceId = useAppStore((state) => state.workspaces.activeId);
   // First-party integration links and plugin-registered nav items that target
   // this section (`registerNavItem({ section: "integrations" })`) both come from
   // the navigation manifest, already in render order.
   const destinations = useAppDestinations("sidebar", "integrations");
-  // Header shortcuts stay first-party: they are a fixed-width strip, and a
-  // plugin should not push a configured integration out of it.
   const visibleDestinations = includePluginItems
     ? destinations
     : destinations.filter((destination) => destination.source !== "plugin");
-  const firstPartyLinks = visibleDestinations.filter(
-    (destination) => destination.source !== "plugin",
-  );
-
-  if (visibleDestinations.length === 0) return null;
+  if (!workspaceId && visibleDestinations.length === 0) return null;
 
   return (
     <AppSidebarSection
@@ -95,12 +68,7 @@ export function IntegrationsSection({
       label={t("common:integrations")}
       collapsed={collapsed}
       icon={IconPlugConnected}
-      headerAction={
-        firstPartyLinks.length > 0 ? (
-          <IntegrationHeaderShortcuts links={firstPartyLinks} />
-        ) : undefined
-      }
-      headerActionVisibility="always"
+      presentation="navigation"
     >
       {visibleDestinations.map((destination) => (
         <IntegrationRow
@@ -114,6 +82,14 @@ export function IntegrationsSection({
             : {})}
         />
       ))}
+      {workspaceId && (
+        <IntegrationRow
+          href={workspaceSettingsHref(workspaceId, "integrations")}
+          label={t("common:integrationSettings")}
+          icon={IconSettings}
+          active={pathname === workspaceSettingsHref(workspaceId, "integrations")}
+        />
+      )}
     </AppSidebarSection>
   );
 }

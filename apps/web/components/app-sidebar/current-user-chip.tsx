@@ -7,6 +7,8 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@kandev/ui/dropdown-menu";
 import { logout } from "@/lib/api/domains/auth-api";
@@ -46,24 +48,31 @@ export function CurrentUserChip({
       <DropdownMenuTrigger asChild>
         <button
           type="button"
+          aria-label={label}
+          title={label}
           data-testid="current-user-chip"
           className={cn(
-            "flex items-center gap-1.5 rounded-md cursor-pointer overflow-hidden border border-transparent transition-colors hover:border-border hover:bg-muted/50",
-            collapsed ? "justify-center p-1" : "px-1.5 py-1 max-w-[140px]",
+            "flex size-7 shrink-0 items-center justify-center rounded-md cursor-pointer border border-transparent transition-colors hover:border-border hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring [@media(pointer:coarse)]:size-11",
             className,
           )}
         >
           <Avatar size="sm">
             <AvatarFallback className="text-[10px]">{initialsFor(label)}</AvatarFallback>
           </Avatar>
-          {!collapsed && <span className="truncate text-xs">{label}</span>}
         </button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align={collapsed ? "center" : "start"} side="top">
+        <DropdownMenuLabel className="max-w-60">
+          <div className="truncate">{label}</div>
+          {user.display_name && (
+            <div className="truncate text-xs font-normal text-muted-foreground">{user.email}</div>
+          )}
+        </DropdownMenuLabel>
+        <DropdownMenuSeparator />
         <DropdownMenuItem
           data-testid="current-user-logout"
           onClick={() => void handleLogout()}
-          className="cursor-pointer"
+          className="cursor-pointer [@media(pointer:coarse)]:min-h-11"
         >
           <IconLogout className="h-4 w-4" />
           {t("sidebar:logOut")}

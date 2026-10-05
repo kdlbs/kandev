@@ -1,8 +1,8 @@
 "use client";
 
-import { useMemo } from "react";
+import { useId, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { IconLayoutGrid, IconListDetails } from "@tabler/icons-react";
+import { IconChevronRight, IconLayoutGrid, IconListDetails } from "@tabler/icons-react";
 import Link from "@/components/routing/app-link";
 import { PluginSlot } from "@/components/plugins/plugin-slot";
 import { useAppStore } from "@/components/state-provider";
@@ -67,11 +67,15 @@ export function AppSidebarWorkspaceActions(props: {
 export function MobileWorkspaceActionsSection({
   workspaceId: providedWorkspaceId,
   includePluginActions = true,
+  collapseCanvases = false,
 }: {
   workspaceId?: string;
   includePluginActions?: boolean;
+  collapseCanvases?: boolean;
 }) {
   const { t } = useTranslation();
+  const [canvasesExpanded, setCanvasesExpanded] = useState(false);
+  const canvasesContentId = useId();
   const activeWorkspaceId = useAppStore((state) => state.workspaces?.activeId ?? null);
   const canvasesEnabled = useFeature("canvases");
   const hasSavedSidebarLayout = useHasSavedSidebarLayout();
@@ -97,41 +101,83 @@ export function MobileWorkspaceActionsSection({
     >
       {showCanvases && (
         <div className="flex flex-col gap-1" data-testid="mobile-workspace-canvases">
-          <div className="flex items-center gap-2 px-1 text-xs font-semibold text-muted-foreground">
-            <IconLayoutGrid className="h-4 w-4" aria-hidden="true" />
-            <span>{t("canvases:canvases")}</span>
-          </div>
-          {activeCanvases.length > 0 ? (
-            activeCanvases.map((canvas) => (
+          <WorkspaceCanvasHeading
+            controlsId={canvasesContentId}
+            collapsible={collapseCanvases}
+            expanded={canvasesExpanded}
+            onToggle={() => setCanvasesExpanded(!canvasesExpanded)}
+          />
+          <div id={canvasesContentId} hidden={collapseCanvases && !canvasesExpanded}>
+            {activeCanvases.length > 0 ? (
+              activeCanvases.map((canvas) => (
+                <Link
+                  key={canvas.id}
+                  href={canvasHref(canvas.id)}
+                  aria-current={pathname === canvasHref(canvas.id) ? "page" : undefined}
+                  className="flex min-h-11 items-center gap-3 rounded-md px-3 py-2 text-sm cursor-pointer hover:bg-muted/60"
+                  data-testid={`mobile-workspace-canvas-${canvas.id}`}
+                >
+                  <IconLayoutGrid
+                    className="h-4 w-4 shrink-0 text-muted-foreground"
+                    aria-hidden="true"
+                  />
+                  <span className="min-w-0 flex-1 truncate">{canvas.title}</span>
+                </Link>
+              ))
+            ) : (
               <Link
-                key={canvas.id}
-                href={canvasHref(canvas.id)}
-                aria-current={pathname === canvasHref(canvas.id) ? "page" : undefined}
-                className="flex min-h-11 items-center gap-3 rounded-md px-3 py-2 text-sm cursor-pointer hover:bg-muted/60"
-                data-testid={`mobile-workspace-canvas-${canvas.id}`}
+                href={workspaceCanvasSettingsHref(workspaceId)}
+                className="flex min-h-11 items-center gap-3 rounded-md px-3 py-2 text-sm text-muted-foreground cursor-pointer hover:bg-muted/60"
+                data-testid="mobile-workspace-canvases-settings"
               >
-                <IconLayoutGrid
-                  className="h-4 w-4 shrink-0 text-muted-foreground"
-                  aria-hidden="true"
-                />
-                <span className="min-w-0 flex-1 truncate">{canvas.title}</span>
+                <IconListDetails className="h-4 w-4 shrink-0" aria-hidden="true" />
+                <span>{t("canvases:openWorkspaceSettings")}</span>
               </Link>
-            ))
-          ) : (
-            <Link
-              href={workspaceCanvasSettingsHref(workspaceId)}
-              className="flex min-h-11 items-center gap-3 rounded-md px-3 py-2 text-sm text-muted-foreground cursor-pointer hover:bg-muted/60"
-              data-testid="mobile-workspace-canvases-settings"
-            >
-              <IconListDetails className="h-4 w-4 shrink-0" aria-hidden="true" />
-              <span>{t("canvases:openWorkspaceSettings")}</span>
-            </Link>
-          )}
+            )}
+          </div>
         </div>
       )}
       {hasPluginActions && (
         <AppSidebarWorkspaceActions workspaceId={workspaceId} presentation="mobile" />
       )}
     </div>
+  );
+}
+
+function WorkspaceCanvasHeading({
+  controlsId,
+  collapsible,
+  expanded,
+  onToggle,
+}: {
+  controlsId: string;
+  collapsible: boolean;
+  expanded: boolean;
+  onToggle: () => void;
+}) {
+  const { t } = useTranslation();
+  const label = (
+    <>
+      <IconLayoutGrid className="size-4" aria-hidden="true" />
+      <span className="flex-1">{t("canvases:canvases")}</span>
+    </>
+  );
+  if (!collapsible)
+    return (
+      <div className="flex items-center gap-2 px-1 text-xs font-semibold text-muted-foreground">
+        {label}
+      </div>
+    );
+  return (
+    <button
+      type="button"
+      aria-expanded={expanded}
+      aria-controls={controlsId}
+      onClick={onToggle}
+      className="flex min-h-11 w-full cursor-pointer items-center gap-2 text-left text-sm font-medium"
+    >
+      {label}
+      <IconChevronRight className={cn("size-3.5", expanded && "rotate-90")} aria-hidden="true" />
+    </button>
   );
 }

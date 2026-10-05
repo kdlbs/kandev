@@ -66,11 +66,15 @@ export function AppNavSheet(props: AppNavSheetProps) {
         }}
         trigger={<AppNavTrigger ref={opener} aria-expanded={open} />}
       >
+        {isMobile && (
+          <div className="shrink-0 px-4 pb-3">
+            <NavigationWorkspacePicker close={close} />
+          </div>
+        )}
         <nav
           className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto overscroll-contain p-4 pb-[max(1rem,env(safe-area-inset-bottom,0px))] md:gap-6"
           onClick={(event) => closeMenuOnLinkClick(event, close)}
         >
-          {isMobile && <NavigationWorkspacePicker close={close} />}
           {!isMobile && renderedPageNav}
           <AppNavSections
             onNavigate={close}
@@ -87,7 +91,7 @@ export function AppNavSheet(props: AppNavSheetProps) {
                 }}
               />
             }
-            afterPrimary={
+            taskNavigation={
               isMobile ? (
                 <MobileNavigationExtras
                   localNav={renderedPageNav}
@@ -99,13 +103,16 @@ export function AppNavSheet(props: AppNavSheetProps) {
             }
             workspaceActions={
               <>
-                <MobileWorkspaceActionsSection includePluginActions={!isMobile} />
                 <NavigationAutomations
                   isMobile={isMobile}
                   open={open}
                   inOffice={inOffice}
                   workspaceId={workspace?.id}
                   close={close}
+                />
+                <MobileWorkspaceActionsSection
+                  includePluginActions={!isMobile}
+                  collapseCanvases={isMobile}
                 />
               </>
             }
