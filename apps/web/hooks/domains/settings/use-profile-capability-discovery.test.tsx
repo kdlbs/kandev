@@ -181,6 +181,27 @@ it("handles empty models response while maintaining ready state", async () => {
   expect(result.current.error).toBeNull();
 });
 
+it("waits for advertised dynamic support before automatically probing", async () => {
+  probeAgentProfileMock.mockResolvedValue(
+    capabilityResponse([{ id: "model-a", name: "Model A" }], "rev-a"),
+  );
+  const { result, rerender } = renderHook(
+    ({ supportsDynamicModels }: { supportsDynamicModels: boolean | undefined }) =>
+      useProfileCapabilityDiscovery(MOCK_AGENT_NAME, savedProfile, {
+        profileId: PROFILE_ID_A,
+        savedLaunchSettings,
+        supportsDynamicModels,
+      }),
+    { initialProps: { supportsDynamicModels: undefined as boolean | undefined } },
+  );
+  expect(probeAgentProfileMock).not.toHaveBeenCalled();
+  expect(result.current.discoveryState).toBe("ready");
+  rerender({ supportsDynamicModels: true });
+  await waitFor(() => expect(result.current.discoveryState).toBe("ready"));
+  expect(probeAgentProfileMock).toHaveBeenCalledTimes(1);
+  expect(result.current.models).toEqual([{ id: "model-a", name: "Model A" }]);
+});
+
 it("clears prior state and re-probes on profileId change", async () => {
   probeAgentProfileMock.mockResolvedValueOnce(
     capabilityResponse([{ id: "model-a", name: "Model A" }], "rev-a"),

@@ -1,4 +1,5 @@
-import { useMemo } from "react";
+import { useEffect, useMemo, useRef } from "react";
+import { useOptionalAppStore } from "@/components/state-provider";
 import { useProfileModelOptions } from "./use-profile-model-options";
 import {
   canonicalLaunchSettings,
@@ -44,6 +45,10 @@ export function useProfileModelCapabilities(
   );
   const currentLaunchKey = profileContextKey(agentName, options.profileId, launchSettings);
   const profileIdentity = `${agentName}:${options.profileId ?? "draft"}`;
+  const runtimeUpdateJob = useOptionalAppStore(
+    (state) => state.updateJobs.byAgent[agentName],
+    undefined,
+  );
   const discovery = useProfileCapabilityDiscovery(agentName, profile, {
     ...options,
     supportsDynamicModels: modelConfig.supports_dynamic_models,
@@ -70,6 +75,8 @@ export function useProfileModelCapabilities(
     configIsLoading: modelOptions.configIsLoading,
   });
 
+  useRuntimeActivationRefresh(agentName, runtimeUpdateJob, discovery.refresh);
+
   return {
     capabilities,
     discoveryState: discovery.discoveryState,
@@ -80,7 +87,39 @@ export function useProfileModelCapabilities(
     isConfigResolutionPending: modelOptions.isConfigResolutionPending,
     refreshModelConfig: modelOptions.refreshModelConfig,
     refresh: discovery.refresh,
+    runtimeInfo: discovery.runtimeInfo,
   };
+}
+
+type RuntimeUpdateJobSnapshot = {
+  job_id: string;
+  status: string;
+};
+
+function useRuntimeActivationRefresh(
+  agentName: string,
+  job: RuntimeUpdateJobSnapshot | undefined,
+  refresh: () => Promise<void>,
+) {
+  const previousJob = useRef<{ agentName: string; jobId?: string; status?: string } | null>(null);
+  const refreshedJobs = useRef(new Set<string>());
+
+  useEffect(() => {
+    const previous = previousJob.current;
+    if (!previous || previous.agentName !== agentName) {
+      previousJob.current = { agentName, jobId: job?.job_id, status: job?.status };
+      return;
+    }
+
+    const isNewSuccess =
+      job?.status === "succeeded" &&
+      (previous.jobId !== job.job_id || previous.status !== "succeeded");
+    previousJob.current = { agentName, jobId: job?.job_id, status: job?.status };
+    if (!isNewSuccess || refreshedJobs.current.has(job.job_id)) return;
+
+    refreshedJobs.current.add(job.job_id);
+    void refresh();
+  }, [agentName, job, refresh]);
 }
 
 type BuildProfileCapabilitiesInput = {

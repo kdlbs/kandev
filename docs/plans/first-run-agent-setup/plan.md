@@ -327,6 +327,13 @@ Implementation and review remediation on 2026-10-05:
 All four work orders are complete. PR publication and subsequent remote CI/review
 handling are delivery work and do not change these local verification results.
 
+PR integration with the newer runtime-update delivery preserved automatic
+full-profile refresh and retained observations in the extracted hook. The merged
+local verification passed 72 focused Vitest tests, 5 Chromium tests, and 9 mobile
+tests. A hydration regression prevents probing before dynamic support is known.
+Remote review remediation remains in progress; these results describe the local
+merge integration rather than a final CI verdict.
+
 ## Risks
 
 - Dropping an explicit log level can increase stderr volume. Keep printing,

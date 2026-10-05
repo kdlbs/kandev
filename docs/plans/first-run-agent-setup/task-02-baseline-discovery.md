@@ -108,6 +108,16 @@ Do not promote an agent-wide snapshot into a profile context during extraction.
 
 ## Results
 
+PR integration preserved the landed runtime-update contract: the full editor
+refreshes its current draft after a matching successful update, retains matching
+catalog/runtime information during refresh or failure, and keeps runtime details
+out of model settings. The extracted baseline waits for advertised dynamic
+support; a red/green hydration regression covers omitted support metadata.
+The merged seven-file Vitest run passed 72 tests. Managed browser verification
+passed 5 Chromium and 9 mobile-chrome tests, including second-tab runtime updates.
+The failed-update E2E compares probes with its pre-update hydration baseline,
+proving the failed update adds no discovery request and preserves its catalog.
+
 Extracted saved-profile baseline discovery without introducing model-option calls
 into onboarding. Automatic probing, context isolation, refresh, and late-response
 guards pass in the focused discovery and full-profile hook tests. The combined

@@ -226,12 +226,15 @@ function useProfileCapabilityRefresh({
       ...(profileId ? { profile_id: profileId } : {}),
       launch_settings: launchSettings,
     };
-    setCapabilityState({
+    setCapabilityState((current) => ({
       launchKey,
       status: "loading",
-      response: emptyResponse(agentName, "probing"),
+      response:
+        current?.launchKey === launchKey && current.response.status === "ok"
+          ? current.response
+          : emptyResponse(agentName, "probing"),
       resolveContext,
-    });
+    }));
     try {
       const response = await probeAgentProfile(agentName, { ...resolveContext, refresh: true });
       if (
@@ -255,11 +258,17 @@ function useProfileCapabilityRefresh({
       )
         return;
       const error = err instanceof Error ? err.message : t("agents:failedToFetchCapabilities");
-      setCapabilityState({
-        launchKey,
-        status: "failed",
-        response: { ...emptyResponse(agentName, "failed"), error },
-        resolveContext,
+      setCapabilityState((current) => {
+        const priorResponse =
+          current?.launchKey === launchKey && current.response.status === "ok"
+            ? current.response
+            : emptyResponse(agentName, "failed");
+        return {
+          launchKey,
+          status: "failed",
+          response: { ...priorResponse, error },
+          resolveContext,
+        };
       });
     }
   }, [
@@ -280,7 +289,7 @@ export function useProfileCapabilityDiscovery(
   profile: Pick<ProfileModelSelection, "env_vars" | "cli_flags" | "command_prefix">,
   options: ProfileCapabilityDiscoveryOptions = {},
 ) {
-  const isStaticContext = options.skipCapabilityProbe || options.supportsDynamicModels === false;
+  const isStaticContext = options.skipCapabilityProbe || !options.supportsDynamicModels;
   const launchSettings = useMemo(
     () => canonicalLaunchSettings(profile),
     [profile.env_vars, profile.cli_flags, profile.command_prefix],
@@ -365,7 +374,23 @@ export function useProfileCapabilityDiscovery(
     currentModeId: activeCapability?.response.current_mode_id,
     status: activeCapability?.response.status,
     launchKey,
+    runtimeInfo: retainedRuntimeInfo(
+      activeCapability,
+      capabilityState,
+      profileIdentityRef.current === profileIdentity,
+    ),
   };
+}
+
+function retainedRuntimeInfo(
+  activeCapability: ProfileCapabilityState | null,
+  capabilityState: ProfileCapabilityState | null,
+  isSameProfile: boolean,
+) {
+  return (
+    activeCapability?.response.runtime_info ??
+    (isSameProfile ? capabilityState?.response.runtime_info : undefined)
+  );
 }
 
 export function getDiscoveryState(

@@ -879,6 +879,10 @@ jobs:
           -run '^(TestWindowsPrepareGitLifecycleCommandHidesConsoleWindow|TestWindowsDetachedParentKeepsConsoleHiddenForDescendants|TestPrepareNativeMCPProcessHidesConsoleWindow|TestWindowsACPCommandProcAttrHidesConsoleWindow|TestConfigureProcessTreeHidesConsoleWindow)$'
           ./internal/common/subproc ./internal/agent/mcpconfig ./internal/agentctl/server/utility ./internal/agent/acpdbg ./internal/agent/codexdbg
 
+      - name: Test Windows runtime observation command shims
+        if: matrix.suite == 'native'
+        run: go test -race -v ./internal/agentctl/server/utility -run '^TestRuntimeObservationRunsWindowsCommandShimWithSpaces$'
+
       - name: Test Windows managed runtime cache repair
         if: matrix.suite == 'native'
         run: go test -race -v ./internal/agent/managedruntime -run TestRemoveNpxExecutionTreeTreatsMissingWindowsChildAsAbsent
