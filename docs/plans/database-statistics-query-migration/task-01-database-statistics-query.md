@@ -137,9 +137,11 @@ a9b7ddc9-fce5-4e47-96f9-664ba75da0a6) merged into main at
 a1e2edadb9cd40a08d23a0f9b72665146ec3fea5. The branch was refreshed to
 3328fe887f0e9ea2ffb11a00c4c5d0a94a7b88ed before implementation, then to
 f45fe59cf26c49dda309a88a0fbb835ed6c2185c after PR review. Main later advanced
-to `eb589f279dc8527101b71fdaf99ce523909a5299` with workspace-secret loading
-changes. Changed paths are disjoint and the Query/provider contracts remain
-unchanged; the branch was rebased onto that current main before verification.
+to `eb589f279dc8527101b71fdaf99ce523909a5299` with workspace-secret loading,
+then to `dd7dfa81634236cfeb0df6fd7fac4e005d08d2f3` with sidebar-navigation
+changes. The navigation guidance shares `apps/web/AGENTS.md` with this task and
+was reconciled; other changed paths are disjoint. The Query/provider contracts
+remain unchanged, and the branch was rebased onto current main before verification.
 The current Query/provider contracts, database-statistics requirements/design,
 and scoped lint guidance were reread. No material contract or ownership drift
 was found. The reviewed package's implementation checkpoint is satisfied by
@@ -168,7 +170,7 @@ sequential
 ## Results
 
 Implemented and locally verified after refreshing onto main at
-`eb589f279dc8527101b71fdaf99ce523909a5299`.
+`dd7dfa81634236cfeb0df6fd7fac4e005d08d2f3`.
 Focused tests passed (5 files, 56 tests); web typecheck and full lint passed.
 Managed E2E passed for desktop database (5), desktop Backups (3), and phone database (2).
 Documentation, architecture, specifications, coverage markers, harness, and diff checks passed.
