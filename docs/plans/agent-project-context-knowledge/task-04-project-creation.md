@@ -158,6 +158,15 @@ Passed checks:
   restore. It also confirmed the coordinator's worker-creation reply and an
   agent-authored worker message before archiving.
 
+CI correction QA-36 also passes. Closed forms now return a stable empty
+repository snapshot before loading or without a workspace. Three real-store
+regressions fail before the repair and pass afterward. Focused lint, typecheck,
+and formatting pass. Sequential fresh production browser gates pass ten desktop
+and three phone cases, including ordinary Settings with Projects disabled.
+No flag, UI, or API contract changed. Corrective logs and captures are retained
+in `/tmp/projects-3920-startup-loop-fix/` and
+`/tmp/projects-3920-startup-loop-e2e/`.
+
 Desktop evidence is preserved at
 `/tmp/kandev-projects-refinements-evidence/task04-desktop-post-refresh-fix/`
 and phone evidence at

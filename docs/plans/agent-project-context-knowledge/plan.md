@@ -362,6 +362,11 @@ Final local verification on 2026-10-05:
 - The production Vite build passes. All 40 changed TS/TSX paths pass lint;
   48 source/locale files pass formatting. Typecheck, complete translations,
   translation ratchet, and E2E wait guard pass.
+- CI exposed a closed-form repository snapshot loop (QA-36). Three real-store
+  regressions are Red then Green after the stable empty-array repair. The
+  corrective production build, focused lint/typecheck/formatting, desktop ten
+  cases, and phone three cases pass. These include ordinary Settings with
+  Projects disabled and the full seven/two Projects flows, without retries.
 - Public documentation passes 62 tests and validation of 47 pages. Catalog/spec,
   architecture, changed harness, local links, and whitespace checks pass.
   Offline PR documentation coverage covers all five refinement work orders.

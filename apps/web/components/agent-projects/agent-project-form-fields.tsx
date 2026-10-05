@@ -23,9 +23,12 @@ import {
 import { useRepositories } from "@/hooks/domains/workspace/use-repositories";
 import { useSettingsData } from "@/hooks/domains/settings/use-settings-data";
 import { isSelectableAgentProfile } from "@/lib/state/slices/settings/types";
+import type { Repository } from "@/lib/types/http";
 import type { AgentProject } from "@/lib/types/http-agent-projects";
 import { cn } from "@/lib/utils";
 import { useTranslation } from "react-i18next";
+
+const EMPTY_PROJECT_REPOSITORIES: Repository[] = [];
 
 export type ProjectDraft = {
   name: string;
@@ -107,7 +110,9 @@ export function useProjectFormData(
   useSettingsData(open);
   const storeApi = useAppStoreApi();
   const repositories = useAppStore((state) =>
-    workspaceId ? (state.repositories.itemsByWorkspaceId[workspaceId] ?? []) : [],
+    workspaceId
+      ? (state.repositories.itemsByWorkspaceId[workspaceId] ?? EMPTY_PROJECT_REPOSITORIES)
+      : EMPTY_PROJECT_REPOSITORIES,
   );
   const repositoriesLoaded = useAppStore((state) =>
     workspaceId ? (state.repositories.loadedByWorkspaceId[workspaceId] ?? false) : false,
