@@ -35,6 +35,7 @@ test.describe.serial("Mobile Quick Chat cancellation", () => {
 
   test("cancels an active Quick Chat turn through the visible touch composer control", async ({
     testPage,
+    apiClient,
   }) => {
     test.setTimeout(120_000);
     await testPage.goto("/");
@@ -42,10 +43,12 @@ test.describe.serial("Mobile Quick Chat cancellation", () => {
     await testPage.getByTestId("mobile-quick-chat-button").tap();
 
     const quickChat = testPage.getByRole("dialog", { name: "Quick Chat" });
-    await startQuickChatFromSetup(quickChat, testPage);
+    const started = await startQuickChatFromSetup(quickChat, testPage);
+    await waitForSessionSettledBaseline(apiClient, started.task_id, started.session_id);
     await sendQuickChatMessage(quickChat, testPage, "/slow 30s");
 
     const quickSessionId = await waitForActiveQuickChatSupportsSteering(testPage);
+    expect(quickSessionId).toBe(started.session_id);
     await waitForActiveQuickChatForegroundActivity(testPage, "generating");
     const editor = quickChat.locator('.tiptap.ProseMirror[contenteditable="true"]:visible');
     await expect(editor).toHaveText("");
