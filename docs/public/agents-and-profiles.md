@@ -1,6 +1,6 @@
 ---
 title: "Agents and Profiles"
-description: "Install agent CLIs, create profiles, inspect host runtime versions, and manage models, modes, flags, secrets, permissions, passthrough, and MCP."
+description: "Install agent CLIs, create profiles, manage runtime updates, and configure models, modes, flags, secrets, permissions, passthrough, and MCP."
 ---
 
 # Agents and Profiles
@@ -269,35 +269,18 @@ unrelated npm data and does not target the stale execution tree. If the
 specialized retry cannot resolve the runtime, check that the Kandev service
 uses the expected npm installation and configured registry. Run `npm config get registry` as the Kandev service user to inspect the registry used by that process. Then use the runtime update controls to select and prepare another trusted stable version.
 
-### Inspect profile runtime details
+### Refresh profile models after a runtime update
 
-Open **Settings > Agents**, then open a profile. The model settings show
-**Host runtime** after profile discovery returns runtime details for a profile
-that supports dynamic model discovery. It is hidden for OpenAI-compatible
-profiles and profiles without dynamic model discovery. These details describe
-the host where the Kandev backend runs.
+Manage runtime versions in **Settings > Agents > Agent runtime updates**.
+Profile pages focus on model selection and launch settings.
 
-Each component can show its observed version, configured version, source, and
-owner. The observed version comes from the running bridge or provider. The
-configured version names the exact package selected for managed launches. The
-values can differ while an existing process keeps running.
+After a managed runtime update succeeds, an open profile refreshes its model
+catalog with the current draft settings. The selected model stays unchanged.
+Unsaved launch settings remain unsaved. A failed update keeps the previous catalog.
 
-**Bundled** means the provider package belongs to the managed bridge tree.
-**External** means the provider uses a separate installation. Choose **Manage
-bridge version** to open the existing managed update control. This action does
-not update an external provider executable. Use **Provider guidance** for a
-verified provider's supported installation instructions.
-
-Runtime details use the same host launch settings as the displayed model list.
-After you edit launch settings, refresh discovery to check the current draft.
-After a managed update succeeds, an open profile refreshes discovery with its
-current draft and keeps the selected model. A failed update keeps the previous
-catalog and runtime observation.
-
-The model catalog comes from the selected profile and its provider. It does not
-confirm that your account can access every model. **Unknown** means Kandev could
-not verify a version or source. An unavailable release check does not mean that
-the runtime is up to date.
+After you edit launch settings, choose **Refresh models** to check the current draft.
+The provider returns the model catalog. Discovery success does not confirm
+catalog completeness or account access to every model.
 
 ### Runtime notifications and automatic updates
 

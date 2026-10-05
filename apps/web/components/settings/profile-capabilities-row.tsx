@@ -14,7 +14,6 @@ import {
 } from "@/components/settings/profile-capability-helpers";
 import { ModelPicker, ModePicker } from "@/components/settings/profile-model-fields";
 import type { ProfileDiscoveryStatus } from "@/hooks/domains/settings/use-profile-model-capabilities";
-import { ProfileRuntimeInfo } from "@/components/settings/profile-runtime-info";
 import type { CommandEntry, ModelConfig, ModeEntry, ModelEntry } from "@/lib/types/http";
 import {
   SettingsFieldDescription,
@@ -187,38 +186,29 @@ export function ProfileCapabilitiesSection({
     discoveryState,
   } = result;
   return (
-    <div className="space-y-3">
-      <CapabilitiesRow
-        profile={profile}
-        models={capabilities.models}
-        modes={capabilities.modes}
-        commands={capabilities.commands}
-        currentModelId={capabilities.currentModelId}
-        currentModeId={capabilities.currentModeId}
-        status={capabilities.status}
-        discoveryState={discoveryState}
-        disableUnverifiedModels={discoveryState !== "ready"}
-        agentName={agentName}
-        onChange={onChange}
-        isCompact={isCompact}
-        isLoading={capabilities.isLoading}
-        onRefresh={refresh}
-        error={capabilities.error}
-        modelConfig={modelConfig}
-        configOptions={configOptions}
-        configStatus={configStatus}
-        configError={configError}
-        configIsLoading={configIsLoading}
-        onRetryConfig={refreshModelConfig}
-        baselineProfile={baselineProfile}
-      />
-      {modelConfig.supports_dynamic_models && profile.provider_kind !== "openai_compatible" && (
-        <ProfileRuntimeInfo
-          agentName={agentName}
-          discoveryState={discoveryState}
-          runtimeInfo={result.runtimeInfo}
-        />
-      )}
-    </div>
+    <CapabilitiesRow
+      profile={profile}
+      models={capabilities.models}
+      modes={capabilities.modes}
+      commands={capabilities.commands}
+      currentModelId={capabilities.currentModelId}
+      currentModeId={capabilities.currentModeId}
+      status={capabilities.status}
+      discoveryState={discoveryState}
+      disableUnverifiedModels={discoveryState !== "ready"}
+      agentName={agentName}
+      onChange={onChange}
+      isCompact={isCompact}
+      isLoading={capabilities.isLoading}
+      onRefresh={refresh}
+      error={capabilities.error}
+      modelConfig={modelConfig}
+      configOptions={configOptions}
+      configStatus={configStatus}
+      configError={configError}
+      configIsLoading={configIsLoading}
+      onRetryConfig={refreshModelConfig}
+      baselineProfile={baselineProfile}
+    />
   );
 }

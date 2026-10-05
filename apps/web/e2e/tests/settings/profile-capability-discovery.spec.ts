@@ -8,7 +8,7 @@ import {
 } from "../../helpers/profile-capability-discovery";
 
 test.describe("Profile capability discovery", () => {
-  test("shows host runtime context and refreshes the open draft after an update in another tab", async ({
+  test("refreshes the open draft after an update without showing runtime details", async ({
     testPage,
     apiClient,
     backend,
@@ -38,22 +38,7 @@ test.describe("Profile capability discovery", () => {
         "ready",
         { timeout: 20_000 },
       );
-      await expect(testPage.getByTestId("profile-runtime-component-bridge")).toContainText(
-        "Observed: 1.11.0",
-      );
-      await expect(testPage.getByTestId("profile-runtime-component-bridge")).toContainText(
-        "Configured: 1.10.0",
-      );
-      await expect(testPage.getByTestId("profile-runtime-update-status")).toHaveText(
-        "A managed runtime update is available.",
-      );
-      await expect(testPage.getByTestId("profile-runtime-component-provider")).toContainText(
-        "External",
-      );
-      await expect(testPage.getByRole("link", { name: "Provider guidance" })).toHaveAttribute(
-        "href",
-        "https://github.com/openai/codex",
-      );
+      await expect(testPage.getByTestId("profile-runtime-info")).toHaveCount(0);
 
       const selectedBefore = await selector.textContent();
       await testPage.getByTestId("env-var-row-0").locator("input").nth(1).fill("runtime-draft");
@@ -62,14 +47,6 @@ test.describe("Profile capability discovery", () => {
         "stale",
       );
 
-      await testPage.getByRole("link", { name: "Manage bridge version" }).click();
-      const navigationGuard = testPage.getByRole("alertdialog", {
-        name: "Save changes before leaving?",
-      });
-      await expect(navigationGuard).toBeVisible();
-      await navigationGuard.getByRole("button", { name: "Continue editing" }).click();
-      await expect(testPage).toHaveURL(`/settings/agents/${agent.name}/profiles/${profile.id}`);
-
       const updateTab = await approveRuntimeUpdateInOtherTab(testPage, profileRuntime);
       updatePage = updateTab.page;
       await expect(testPage.getByTestId("profile-capability-status")).toHaveAttribute(
@@ -77,13 +54,7 @@ test.describe("Profile capability discovery", () => {
         "ready",
         { timeout: 20_000 },
       );
-      await expect(testPage.getByTestId("profile-runtime-component-bridge")).toContainText(
-        "Observed: 0.63.0",
-      );
-      await expect(testPage.getByTestId("profile-runtime-update-status")).toHaveText(
-        "The managed runtime is up to date.",
-        { timeout: 20_000 },
-      );
+      await expect(testPage.getByTestId("profile-runtime-info")).toHaveCount(0);
       await expect(selector).toHaveText(selectedBefore ?? "");
       const savedProfile = await apiClient.getAgentProfile(profile.id);
       expect(savedProfile.model).toBe("mock-fast");
@@ -112,7 +83,7 @@ test.describe("Profile capability discovery", () => {
     }
   });
 
-  test("keeps the profile catalog and observation after a failed update in another tab", async ({
+  test("keeps the profile catalog after a failed update in another tab", async ({
     testPage,
     apiClient,
     backend,
@@ -156,9 +127,7 @@ test.describe("Profile capability discovery", () => {
         "data-status",
         "ready",
       );
-      await expect(testPage.getByTestId("profile-runtime-component-bridge")).toContainText(
-        "Observed: 1.11.0",
-      );
+      await expect(testPage.getByTestId("profile-runtime-info")).toHaveCount(0);
       await expect(selector).toHaveText(selectedBefore ?? "");
       await selector.click();
       await expect(

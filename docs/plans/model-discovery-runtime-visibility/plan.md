@@ -8,13 +8,18 @@ system_design:
 legacy_specs: []
 ---
 
-# Implementation plan: Model discovery runtime visibility
+# Implementation plan: Model discovery after runtime activation
 
 ## Overview
 
-Address [issue #4205](https://github.com/kdlbs/kandev/issues/4205) by showing the runtime behind a profile model list.
-Deliver the bounded backend observation first. Then show its source and versions beside model controls and connect explicit recovery.
-Task 01 and Task 02 are complete. Their results record the implementation and verification for this package.
+Keep runtime evidence tied to profile discovery for [issue #4205](https://github.com/kdlbs/kandev/issues/4205).
+Refresh an open profile after successful runtime activation, using its current complete draft.
+Runtime versions and management remain in Settings > Agents > Agent runtime updates.
+Profile pages contain model controls and discovery feedback without a runtime panel.
+
+The user removed the profile runtime presentation requirement on 2026-10-05.
+Task 03 completes that revision. Tasks 01 and 02 record the original delivery.
+The current requirement and system design take precedence over the historical Task 02 presentation scope.
 
 ## Evidence and root cause
 
@@ -55,38 +60,28 @@ These sources establish component relationships. Their current versions are not 
 
 ## Requirement conformance and settled scope
 
-Existing runtime and profile requirements define activation, launch parity, and cache invalidation.
-They do not require version attribution beside the model picker.
-`REQ-AGENTS-RUNTIME-UPDATES-003` adds that missing observable contract in the owning runtime requirement document.
-The [runtime model discovery design](../../specs/agents/system-design/runtime-model-discovery.md) defines its observation and recovery flow.
-
-The issue explicitly requests visible runtime versions and ownership, accessible manual updates, and refresh after updating.
-No material product question blocks planning.
-Keep successful provider catalogs valid even when version inspection fails.
-An unknown version is a supported fallback, not evidence of account unavailability or a complete catalog.
-Existing ownership decisions settle managed and external update authority. No additional ADR is needed.
+`REQ-AGENTS-RUNTIME-UPDATES-003` owns runtime evidence and profile refresh after activation.
+Its revised acceptance criteria exclude runtime details and update actions from profile model settings.
+The [runtime model discovery design](../../specs/agents/system-design/runtime-model-discovery.md) defines the current boundary.
+No new updater, API, persistence boundary, or ownership decision is required.
 
 ## Scope
 
 ### In scope
 
-- Configured and observed bridge versions attached to profile discovery.
-- Verified bundled Codex and Claude SDK dependency versions, with accurate component labels.
-- Effective external `CODEX_PATH` source and bounded version inspection.
-- Explicit unknown values for unsupported, ambiguous, missing, or wrapped contexts.
-- Model-setting links to existing managed recovery or trusted external guidance.
-- Refresh of an open profile after a new successful managed activation.
-- Trusted manual guidance for a verified external primary runtime, without managed-only release status.
-- Refresh the shared release-status cache when the profile's update job reaches a terminal state, retaining deduplication and failed-update behavior.
-- Localized desktop and phone composition, tests, and public recovery guidance.
+- Preserve bounded, read-only runtime evidence in profile discovery responses.
+- Preserve accurate managed, bundled, external, and unknown component attribution.
+- Refresh an open profile once after a new successful managed activation.
+- Preserve selected models, unsaved draft settings, and stale-response guards.
+- Remove the profile runtime panel, its unused component tests, and its locale strings.
+- Retain runtime information and update controls in existing Agents runtime settings.
+- Update desktop and phone regressions and public guidance.
 
 ### Out of scope
 
-- Guaranteeing access to any named model or claiming all available models were returned.
-- Automatically updating runtimes or changing existing automatic consent.
-- Updating external CLIs, rewriting bridge dependencies, or changing managed defaults.
-- Remote executor inspection, live session changes, broad registry redesign, or new notifications.
-- Reproducing obsolete real providers using personal credentials or global installations.
+- Replacement disclosures, tooltips, or update actions in the profile model region.
+- New runtime settings, automatic consent, model-access guarantees, or remote inspection.
+- Changes to backend runtime collection or installation behavior.
 
 ## Technical approach
 
@@ -106,119 +101,65 @@ Add optional DTO fields without changing legacy response meanings.
 
 ### Editor and recovery boundary
 
-Expose response metadata through `useProfileModelCapabilities` and `profile-capability-helpers.tsx`.
-Add `ProfileRuntimeInfo` beneath the existing model controls, sharing source and version semantics across viewports.
-Read shared update status through `useAgentRuntimeUpdateStatuses`.
-Link to the existing runtime settings target. Let Settings coordination handle dirty navigation, without silent draft discard.
+`ProfileCapabilitiesSection` renders the existing model controls and discovery feedback.
+It does not render runtime metadata or subscribe a runtime panel to release status.
+Remove `ProfileRuntimeInfo`, its component tests, and unused `profileRuntime*` locale keys.
+Backend metadata and the hook's correlated snapshot remain compatible.
 
 Observe the matching agent's terminal update job in the profile hook.
-On a newly succeeded job, invalidate old local requests and refresh the current full draft once.
-Keep failed and unrelated jobs inert. On mount, baseline already-completed jobs to avoid duplicate refresh.
-Keep model-option resolution tied to the new matching snapshot.
-
-### Compatibility matrix
-
-| Provider or context | Evidence and shape | Intended behavior | Verification | Unsupported fallback |
-| --- | --- | --- | --- | --- |
-| Codex ACP, default | Exact bridge, installed `@openai/codex` | Managed bridge plus bundled provider | Temp nested/hoisted manifest fixtures | Bundled source with unknown version |
-| Codex ACP, effective `CODEX_PATH` | Authorized child env, fixed version command | Managed bridge plus external provider | Fake executable, inherited/profile precedence, Windows path | External source with unknown version, no bundled retry |
-| Claude ACP | Bridge handshake and installed SDK manifest | Managed bridge plus accurately named SDK | Temp bridge/SDK fixtures and controller projection | Unknown SDK version, no native `claude` substitution |
-| Other managed ACP | Handshake and exact primary package | Show verified primary runtime and managed action | Descriptor-absent and primary-version tests | Unknown underlying provider |
-| Native or custom agent | Existing probe evidence | Manual guidance only when registered | External/custom fixture | Unknown/unsupported, no guessed installer |
-| Prefix-wrapped profile | Wrapper cannot attest child environment | Show configured bridge separately | Prefix fixture with contradictory host binary | Unknown provider observation |
-| Gateway/static/dynamic profile | Existing discovery bypass | Preserve existing behavior | Existing hook/editor suite | No manufactured native runtime claim |
-| Remote executor | Host-only observation | Label host scope | UI and documentation assertions | No remote version claim |
+On a newly succeeded job, invalidate old requests and refresh the current complete draft once.
+Failed, historical, duplicate, and unrelated jobs remain inert.
+Resolve dependent options from the matching refreshed snapshot.
 
 ## ASCII UI preview
 
-### UI-01: Profile model settings, successful discovery
-
-Current source renders model controls, Refresh, and readiness text without runtime attribution.
-The proposed desktop region is:
+Desktop model region:
 
 ```text
-Start model [Selected model v]  Mode [v]  [Refresh]
-Discovery succeeded. Choices depend on runtime and account.
-Host runtime
-  ACP bridge   1.11.0 observed / 1.11.0 configured   Managed
-  Codex        0.153.4                             Bundled
-  [Manage bridge version]  [Provider guidance]
+Start model [Selected model v]  Mode [v]  [Refresh models]
+Models match the current launch settings.
 ```
 
-Phone composition uses the same data and the page's existing scroll owner:
+Phone model region, using the existing page scroller:
 
 ```text
 Start model [Selected model v]
 Mode [v]
-[            Refresh             ]
-Host runtime
-ACP bridge: 1.11.0 observed
-Configured: 1.11.0. Managed
-Codex: 0.153.4. Bundled
-[     Manage bridge version      ]
-[       Provider guidance        ]
+[           Refresh models           ]
+Models match the current launch settings.
 ```
 
-### UI-02: External or uncertain provider
-
-```text
-ACP bridge: 1.11.0 observed. Managed
-Codex: 0.160.0. External
-Bridge updates do not update this external Codex.
-[Manage bridge version] [Provider guidance]
-
-Unverified variant: Codex: Version unknown. Source unknown
-Offline variant: Bridge release status unknown
-```
-
-Unknown external version retains the External source label when that source is verified.
-Stale and loading states mark the complete runtime/model snapshot accordingly.
-Failed post-update discovery exposes Retry while keeping the update outcome separate.
-Neither successful discovery nor a newer bridge produces a claim about a missing model's account eligibility.
-
-The grouping, source distinctions, visible recovery, and phone action reachability are structural requirements.
-Versions and copy illustrate layout only. All rendered copy uses locale catalogs.
-Phone actions have at least 44px targets. Fine-pointer desktop actions use 28px controls.
-The destination uses the existing desktop dialog and phone version drawer, with their existing scroll and safe-area behavior.
-These previews map to AC-AGENTS-RUNTIME-UPDATES-003.1 through 003.7 and Task 02's rendered checks.
+These previews preserve the current model controls without runtime rows or actions.
+The existing phone refresh control retains its 44px touch target.
+Runtime selection stays in Settings > Agents with its existing desktop dialog and phone drawer.
 
 ## Tests
 
-| Acceptance criteria | Permanent evidence to add |
-| --- | --- |
-| 003.1, 003.3 | `profile_discovery_test.go`: `TestFetchProfileDynamicModelsPreservesRuntimeInfo` |
-| 003.2, 003.8 | `runtime_observation_test.go`: bundled, external, missing, prefix, timeout, sanitized output, nested and hoisted fixtures |
-| 003.3, 003.8 | `profile_probe_test.go`: `TestProfileRuntimeObservationRejectedAfterActivation`, context isolation, fresh same-path version |
-| 003.4, 003.6, 003.7 | `profile-runtime-info.test.tsx`: known/unknown versions, source labels, offline status, trusted recovery links |
-| 003.3, 003.5 | `use-profile-model-capabilities.test.tsx`: `refreshes current draft once after matching successful update`, late response, mount baseline, failed/other-agent jobs |
-
-Backend fixtures must use owned temporary directories and fake executables. They must not download old providers or modify global installations.
-Where a collection has both verified and missing components, preserve each component's own state.
-One missing component must not mark every component unknown. One verified component must not make every component verified.
+Retain backend observation, host-context isolation, and activation-generation coverage from Task 01.
+Retain hook coverage for successful activation, current drafts, duplicate completion, historical jobs, failures, and late responses.
+Keep existing profile form and model-option coverage.
+Remove tests whose subject is the deleted runtime panel.
 
 ## E2E tests
 
-Extend existing profile-discovery specs with managed bridge observations, distinct provider sources, and direct runtime-target navigation.
-Use existing runtime-update mocks for the version preview and job flow, sharing helpers rather than copying mock servers.
-Keep a profile open in one browser tab while updating through existing Settings in another.
-Observe the terminal job and resulting profile probe causally. Assert changed model choices and unchanged draft selection.
-Assert release status transitions from `update_available` to `up_to_date`; verify that external OpenCode shows trusted manual guidance without a managed bridge action or release-status message.
-Cover a failed candidate, explicit unknown observations, an external Codex limitation, and no package mutation on Refresh.
-
-Extend `tests/settings/profile-capability-discovery.spec.ts` in `chromium` and `mobile-profile-capability-discovery.spec.ts` in `mobile-chrome`.
-Run the existing desktop and phone runtime-update specs alongside them.
-Assert phone action dimensions, wrapping, no horizontal overflow, runtime target disclosure, and drawer containment.
-Include a narrow fine-pointer viewport below 768px. Do not rely only on device pointer classification.
-These flows cover AC-AGENTS-RUNTIME-UPDATES-003.3 through 003.8.
+Update the existing desktop and phone profile-discovery specs.
+Return runtime metadata from the fixture and assert that no runtime panel appears after discovery or activation.
+Cover managed, external, and unknown metadata without rendering runtime details.
+Keep a profile open while another tab uses the existing update surface.
+Assert a refresh with current draft values, new model choices, unchanged selection, and unchanged saved data.
+A failed candidate preserves the prior catalog.
+Retain phone refresh dimensions, narrow fine-pointer coverage, and document overflow checks.
+Existing runtime settings and their update surfaces remain unchanged.
 
 ## Work orders
 
 - [x] [Task 01: Preserve and collect runtime observations](task-01-runtime-observations.md)
-- [x] [Task 02: Show runtime context and connect recovery](task-02-model-runtime-recovery.md)
+- [x] [Task 02: Original runtime presentation and refresh](task-02-model-runtime-recovery.md)
+- [x] [Task 03: Remove runtime details from profile settings](task-03-remove-profile-runtime-panel.md)
 
-Task 01 was completed before Task 02 in the primary session. Both work orders record their exact verification results.
+Tasks 01 and 02 record the original implementation and verification. Task 03 records the user-directed UX revision.
 
-## Verification results
+## Original delivery verification results
 
 - The focused Go runtime-observation packages, the six-package regression set, and hostutility race tests passed. The managed E2E runner built the backend.
 - Windows-native test execution was unavailable on Linux. Windows-targeted tests compiled for `agentctl/server/utility` and `agent/hostutility`.
@@ -228,13 +169,26 @@ Task 01 was completed before Task 02 in the primary session. Both work orders re
 - Public documentation validation and tests, specification catalog validation, spec lint, and `git diff --check` passed.
 - The web E2E production build passed. Vite reported existing advisory chunk-size and ineffective-dynamic-import warnings.
 
-## Follow-up code-review results
+## Original delivery code-review results
 
 - Native OpenCode is classified from the captured launch command. The exact native command is external, the exact managed npm fallback is Kandev-managed, and custom wrappers remain unknown. Native OpenCode receives its trusted CLI guidance URL and no managed bridge action or managed release-status wording.
 - Relative PATH entries and executable paths resolve against the captured probe work directory. Empty PATH entries continue to resolve to that directory.
 - Backend runtime-source, command-prefix ambiguity, and relative-path regressions pass, including the full six-package test set, hostutility race tests, backend command builds, and Windows-targeted test compilation for hostutility and agentctl utility.
 - The focused profile/status hook suite passed 11 tests; web typecheck, targeted ESLint, locale checks, and the new-code i18n ratchet passed. Desktop E2E passed 18 tests and mobile E2E passed 9 tests, including second-tab status transitions and the external-runtime touch action.
 - Public documentation tests and validation, specification catalog validation, spec lint, and final `git diff --check` passed.
+
+## User-directed UX revision results (2026-10-05)
+
+Task 03 removes runtime presentation from profile pages while preserving activation refresh and backend observation metadata.
+Runtime management remains in the existing Agents runtime settings.
+
+- Desktop RED found the old runtime panel before removal.
+- Focused hook, form, and model-option coverage passed 36 tests after the final code change.
+- Desktop profile-discovery E2E passed 3 tests. Phone profile-discovery E2E passed 5 tests.
+- Phone checks cover managed, native, and unknown metadata without runtime presentation, current-draft activation refresh, and authentication recovery.
+- A narrow fine-pointer regression found the existing Refresh control shrinking to 36px at 767px. Its touch target now remains at least 44px below 768px and on coarse pointers.
+- Typecheck, targeted ESLint, locale completeness checks, and the new-code i18n ratchet passed.
+- Public documentation tests passed 62 tests. Public documentation, specification catalog, and spec lint validation passed.
 
 ## Risks
 

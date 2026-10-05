@@ -62,7 +62,7 @@ export function RefreshCapabilitiesButton({
             size="sm"
             onClick={onRefresh}
             disabled={isLoading}
-            className="min-h-11 w-full cursor-pointer px-3 sm:min-h-9 sm:w-auto"
+            className="min-h-9 w-full cursor-pointer px-3 max-md:min-h-11 [@media(pointer:coarse)]:min-h-11 sm:w-auto"
             data-testid="profile-refresh-capabilities"
           >
             <IconRefresh className={`h-4 w-4 ${isLoading ? "animate-spin" : ""}`} />

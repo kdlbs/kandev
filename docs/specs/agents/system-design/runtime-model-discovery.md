@@ -11,7 +11,8 @@ requirements:
 ## Purpose and boundaries
 
 Agents owns runtime identity, profile discovery, and runtime management.
-This design attaches an observation to the model snapshot and connects model settings to existing explicit update controls.
+This design attaches an observation to the model snapshot and refreshes open profiles after runtime activation.
+Runtime management remains in the existing Agents runtime settings.
 It extends [runtime updates](runtime-updates-01.md) without changing version selection, candidate validation, or installation ownership.
 [Profile discovery](profile-capability-discovery.md) continues to own launch validation, authorization, cache identity, and draft reconciliation.
 [Runtime notifications](runtime-update-notifications.md) continues to own shared release status and automatic consent.
@@ -32,12 +33,12 @@ The observation contains `scope: host`, `observed_at`, and a bounded `components
 Each component has a `role` (`bridge` or `provider`), a trusted display name, and an optional trusted package identity.
 It also has `source` (`managed`, `bundled`, `external`, or `unknown`) and `owner` (`kandev`, `external`, or `unknown`).
 Optional `effective_version` names configured managed selection. Optional `observed_version` names verified runtime evidence.
-An absent version renders as unknown. Versions never contain raw command output.
+An absent version represents unknown evidence. Versions never contain raw command output.
 The enclosing `context_revision` binds the observation to the same models, options, and launch context.
 
 The bridge's ACP `agentInfo.version` is bridge evidence. It cannot identify an underlying Codex executable or Claude SDK version.
 Do not substitute a latest release, dependency range, global CLI version, or saved selection for an observed version.
-When the configured version and observation differ, show both without claiming the configuration was observed.
+Keep the configured version and observation distinct. Configuration does not prove an observed version.
 
 Runtime update status remains separate and install-wide. It describes the managed package, not a profile-specific external dependency.
 Keep strict comparison and unknown release states in `ListAgentUpdateStatuses`.
@@ -112,29 +113,25 @@ Never publish the default-context candidate catalog directly into a configured p
 
 ## Model settings and responsive composition
 
-Add a compact `ProfileRuntimeInfo` section beneath the model and mode controls in `ProfileCapabilitiesSection`.
-Keep runtime identity, source, versions, and host scope visible. Do not put this information behind a tooltip.
-Show neutral copy that runtime version and account availability can both affect advertised choices.
-A missing model does not cause a guessed update warning.
+Profile model settings contain model and mode controls, discovery status, refresh, and model-specific options.
+Do not show runtime identity, versions, ownership, release status, or update actions in this region.
+Do not add a tooltip or collapsed runtime panel as a replacement.
+Runtime evidence remains optional discovery metadata and does not create a presentation requirement.
 
-Use the shared runtime-status hook for the managed bridge's known release status.
-Provide a visible link to `/settings/agents#runtime-update-<agentName>` for existing managed selection or manual guidance.
-The destination's target registry opens its collapsed runtime section.
-Use existing `AgentRuntimeUpdateControl` and `AgentRuntimeUpdateSurface` there.
-Do not create an embedded second updater or a new automatic-update switch.
-Preserve the profile draft through the existing Settings save and navigation coordination.
-Offer external provider guidance from trusted descriptors, independently of the managed bridge action.
-Bridge update copy states that an external `CODEX_PATH` executable remains externally maintained.
+Runtime information and manual or managed update controls remain in Settings > Agents > Agent runtime updates.
+Reuse its existing policy rows, administrator restrictions, desktop dialog, and phone drawer.
+Provider ownership and update authority retain their existing contracts.
 
-The phone entry is Settings > Agents > the concrete profile, matching desktop.
-Persistent observation uses inline rows in the existing page scroller.
-On phones, stack the bridge and provider rows, wrap package names, and use full-width actions.
-The nearest local exemplars are profile capability controls, compact runtime policy rows, and `AgentRuntimeUpdateSurface`.
-The curated mobile pattern is direct navigation for persistent settings, with the existing drawer for temporary version selection.
-The destination drawer retains internal scrolling, safe-area clearance, dismissal, and focus return.
-Desktop actions use the existing 28px sizing helper. Phone and coarse-pointer actions have at least 44px targets.
-No new scroll region, fixed footer, hover-only action, or persisted mobile preference is introduced.
-All added copy uses locale keys in all seven shipped languages.
+The profile hook observes successful runtime activation independently of runtime presentation.
+It refreshes the current complete draft and preserves selected models and unsaved launch settings.
+Failures retain the prior catalog and use the existing discovery error and retry states.
+
+Desktop and phone use the same profile discovery state and existing page scroller.
+The nearest mobile exemplar is the existing profile capability controls.
+Phone and coarse-pointer refresh controls retain at least 44px touch targets.
+No new panel, scroll region, disclosure, or action is introduced.
+Desktop and phone E2E must prove that runtime metadata does not produce a profile runtime panel.
+They must also prove that a successful update in another tab refreshes the current draft without changing its selection.
 
 ## Failure and security
 

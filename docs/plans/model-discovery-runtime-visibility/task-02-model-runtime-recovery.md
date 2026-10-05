@@ -23,6 +23,13 @@ system_design:
 
 # Task 02: Show runtime context and connect recovery
 
+## Delivery scope revision
+
+This completed work order records the original runtime panel delivery.
+On 2026-10-05, the user removed runtime presentation from profile pages.
+[Task 03](task-03-remove-profile-runtime-panel.md) supersedes the panel, its actions, locale copy, and presentation checks.
+The activation refresh behavior remains current. Read the revised requirement and system design for the current contract.
+
 ## Summary
 
 Show the matching host-runtime observation beneath profile model controls and expose existing explicit recovery.
