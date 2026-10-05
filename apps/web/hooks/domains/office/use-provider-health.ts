@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useAppStore } from "@/components/state-provider";
 import { getProviderHealth } from "@/lib/api/domains/office-extended-api";
 import type { ProviderHealth } from "@/lib/state/slices/office/types";
@@ -24,27 +24,40 @@ export function useProviderHealth(workspaceName: string | null): UseProviderHeal
   const setProviderHealth = useAppStore((s) => s.setProviderHealth);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [fetched, setFetched] = useState(false);
+  const activeRefresh = useRef<(() => Promise<void>) | null>(null);
+  const requestVersion = useRef(0);
 
-  const refresh = useCallback(async () => {
-    if (!workspaceName) return;
+  const refresh = useCallback(async (): Promise<void> => {
+    if (!workspaceName || activeRefresh.current !== refresh) return;
+    const version = ++requestVersion.current;
+    const isCurrent = () => activeRefresh.current === refresh && requestVersion.current === version;
     setIsLoading(true);
     setError(null);
     try {
       const res = await getProviderHealth(workspaceName);
+      if (!isCurrent()) return;
       setProviderHealth(workspaceName, res.health ?? []);
-      setFetched(true);
     } catch (e) {
+      if (!isCurrent()) return;
       setError(e instanceof Error ? e.message : t("office:failedToLoadProviderHealth"));
     } finally {
-      setIsLoading(false);
+      if (isCurrent()) setIsLoading(false);
     }
   }, [workspaceName, setProviderHealth]);
 
+  useLayoutEffect(() => {
+    activeRefresh.current = refresh;
+    setIsLoading(false);
+    setError(null);
+    return () => {
+      activeRefresh.current = null;
+      requestVersion.current++;
+    };
+  }, [refresh]);
+
   useEffect(() => {
-    if (!workspaceName || fetched) return;
     void refresh();
-  }, [workspaceName, fetched, refresh]);
+  }, [refresh]);
 
   return { health, isLoading, error, refresh };
 }

@@ -3,7 +3,9 @@ status: draft
 system: office
 requirements:
   - REQ-OFFICE-LIVE-UPDATES-001
+  - REQ-OFFICE-LIVE-UPDATES-002
 created: 2026-05-02
+updated: 2026-10-06
 owners:
   - cfl
 ---
@@ -11,13 +13,111 @@ owners:
 
 ## Purpose and boundaries
 
-This design preserves the technical source detail for `REQ-OFFICE-LIVE-UPDATES-001` during migration.
+This design preserves the technical source detail for `REQ-OFFICE-LIVE-UPDATES-001` during migration and defines the mounted diagnostic read lifecycle for `REQ-OFFICE-LIVE-UPDATES-002`.
 
 ## Requirement mapping
 
 | Requirement | Design section |
 | --- | --- |
 | `REQ-OFFICE-LIVE-UPDATES-001` | [Migrated source detail](#migrated-source-detail) |
+| `REQ-OFFICE-LIVE-UPDATES-002` | [Current-workspace diagnostic reads](#current-workspace-diagnostic-reads) |
+
+## Current-workspace diagnostic reads
+
+Office owns the workspace-specific diagnostic projection and its mounted read
+lifecycle. [Dynamic routing ownership](../../../decisions/2026-08-13-dynamic-agent-profile-routing.md)
+remains authoritative for execution policy. The archived [Office routing
+requirements](../requirements/routing.md) are not an input to this correction.
+The remaining diagnostic hooks and consumers use the following bounded
+contract while those surfaces exist; this design does not extend their life
+or restore Office-owned routing policy.
+
+### Components and data ownership
+
+- `apps/web/hooks/domains/office/use-routing-preview.ts::useRoutingPreview`
+  reads via `getRoutingPreview(workspaceId)` and selects
+  `office.routing.preview.byWorkspace[workspaceId]`.
+- `apps/web/hooks/domains/office/use-provider-health.ts::useProviderHealth`
+  reads via `getProviderHealth(workspaceId)` and selects
+  `office.providerHealth.byWorkspace[workspaceId]`.
+- `StateProvider` owns the real `createAppStore` context; nested providers
+  reuse the parent store. The existing `setRoutingPreview` and
+  `setProviderHealth` actions publish only into the captured store/workspace.
+  Data stays in these existing entries. Loading, error, selection lifetime,
+  and request sequence stay inside each hook instance.
+- `src/office-routes.tsx` registers `/office/workspace/routing` (both hooks),
+  `/office/agents` (`AgentsPageClient`, preview), and `/office`
+  (`OfficePageClient` containing `ProviderHealthCard`, health). Each passes
+  `workspaces.activeId`. `AgentCard` selects its workspace's preview by agent
+  ID. Diagnostic displays depend on existing routing-config visibility gates.
+
+API clients remain the `office-extended-api` re-exports of
+`office-routing-api`. The existing GET endpoints are
+`/api/v1/office/workspaces/:wsId/routing/preview` and `/routing/health`.
+Their response shapes, backend authorization, and store schema do not change.
+Stable empty selector arrays remain shared constants.
+
+### Selection and request lifetime
+
+Remove the instance-wide successful-fetch latch. A selection-driven effect
+initiates one automatic read for each committed non-empty selection lifetime,
+including re-entry to a previously selected workspace. Its dependencies are
+the selected workspace and stable scoped refresh callback, not response data,
+success, error, or loading state. A failure therefore does not create a retry
+loop, and another store write does not create another automatic read.
+
+Within each hook, use instance-local ownership and monotonically increasing
+request identity. Ownership includes the selected workspace, owning store,
+and committed selection lifetime. Invalidate earlier requests at the committed
+selection/unmount boundary before promise settlements can publish; a layout
+effect with cleanup is suitable. Reset current error/loading at that boundary
+and keep the no-workspace result neutral. Do not mutate ownership refs during
+render. A workspace string comparison alone cannot fence A-to-B-to-A races.
+
+Automatic and manual reads use the same admission and settlement path. A
+refresh bound to a departed selection must not change the current selection's
+request state. Capture workspace/store and a fresh request identity before
+transport; set current loading and clear its error. After awaiting transport,
+check both ownership and newest request identity before every data, error, or
+loading-completion publication, including `catch` and `finally`. Publish a
+valid success to its captured workspace key, with the existing `?? []`
+normalization. A valid failure uses the existing localized error fallback and
+retains data. Obsolete settlements are no-ops, including cache writes to the
+departed workspace. Unmount invalidates only that instance's requests.
+
+Each instance may issue its own read even when another instance shares its
+store/workspace. No module-wide fetched marker, shared generation map,
+deduplication, or new coordinator is introduced. Latest-request ordering is
+within an instance. Separate instances retain ordinary existing store-write
+semantics; cross-instance same-key ordering is outside this contract.
+
+### Existing live updates and mobile
+
+`lib/ws/handlers/office.ts` independently upserts current-workspace provider
+health on `office.provider.health_changed`. Routing-settings events invalidate
+the existing configuration entry. `useOfficeWorkspaceData` loads agents,
+projects, inbox, and meta, not these diagnostic snapshots. Dashboard refetch
+and live events can mitigate visible symptoms; missing hook reads do not mean
+every dashboard remains stale. HTTP-versus-event freshness arbitration is
+outside this bounded correction.
+
+This is state-only frontend work. Existing desktop sidebar and phone
+`OfficePageNav` workspace pickers both drive the same store selection and
+diagnostic hooks. No viewport branch, touch action, scroll owner, navigation,
+markup, or copy changes. Real-hook/real-store tests satisfy the narrow
+state-only exception in mobile parity; no new mobile E2E or visual preview is
+needed for this correction.
+
+### Verification boundary
+
+Exercise both production hooks under the real `StateProvider` and
+`createAppStore`, mocking only their transport functions. Select workspaces
+through the actual store and observe both hook state and workspace-keyed
+entries. Use distinct response payloads and deferred promises to test
+selection, overlap, invalidation, empty results, current failures, manual
+recovery, independent instances/stores, and unmount. Do not replace the store,
+mock publication actions, or test only a helper predicate. There are no new
+metrics or persistence writes beyond the existing diagnostic entries.
 
 ## Migrated source detail
 
