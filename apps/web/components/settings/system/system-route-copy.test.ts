@@ -6,22 +6,64 @@ import { DataLogsSettings } from "./data-logs-settings";
 import { BACKUP_SQL_COMMAND } from "./system-route-shell";
 
 const databaseState = vi.hoisted(() => ({ value: null as unknown }));
+const databaseStatsState = vi.hoisted(() => ({
+  result: {
+    database: null as { backup_directory?: string } | null,
+    isLoading: false,
+    error: null as string | null,
+    reload: () => Promise.resolve(),
+    retry: () => Promise.resolve(),
+  } as unknown,
+  calls: 0,
+  cardResult: undefined as unknown,
+}));
 
 vi.mock("@/components/state-provider", () => ({
   useAppStore: (selector: (state: { system: { database: unknown } }) => unknown) =>
     selector({ system: { database: databaseState.value } }),
 }));
+vi.mock("@/hooks/domains/system/use-database-stats", () => ({
+  useDatabaseStats: () => {
+    databaseStatsState.calls += 1;
+    return databaseStatsState.result;
+  },
+}));
 vi.mock("@/components/settings/settings-target", () => ({
   SettingsTarget: ({ children }: { children?: ReactNode }) => children ?? null,
 }));
 vi.mock("./backups-table", () => ({ BackupsTable: () => null }));
-vi.mock("./database-stats-card", () => ({ DatabaseStatsCard: () => null }));
+vi.mock("./database-stats-card", async () => {
+  const React = await vi.importActual<typeof import("react")>("react");
+  return {
+    DatabaseStatsCard: ({
+      stats,
+    }: {
+      stats?: { database?: { backup_directory?: string } | null };
+    }) => {
+      databaseStatsState.cardResult = stats;
+      return React.createElement(
+        "output",
+        { "data-testid": "database-card-backup-directory" },
+        stats?.database?.backup_directory ?? "",
+      );
+    },
+  };
+});
 vi.mock("./log-viewer", () => ({ LogViewer: () => null }));
 vi.mock("./retention-settings-card", () => ({ RetentionSettingsCard: () => null }));
 vi.mock("./tool-payload-retention-card", () => ({ ToolPayloadRetentionCard: () => null }));
 afterEach(() => {
   cleanup();
   databaseState.value = null;
+  databaseStatsState.result = {
+    database: null,
+    isLoading: false,
+    error: null,
+    reload: () => Promise.resolve(),
+    retry: () => Promise.resolve(),
+  };
+  databaseStatsState.calls = 0;
+  databaseStatsState.cardResult = undefined;
 });
 
 /**
@@ -120,23 +162,47 @@ describe("System route headers keep their pre-migration English", () => {
 });
 
 describe("Data & Logs backup location copy", () => {
+  // @covers AC-SYSTEM-PAGE-DATABASE-STATS-SNAPSHOT-001.5
   it("renders the resolved SQLite backup directory", () => {
     const path = "/var/lib/kandev/backups";
-    databaseState.value = { backup_directory: path };
+    const queryResult = {
+      database: { backup_directory: path },
+      isLoading: false,
+      error: null,
+      reload: vi.fn(),
+      retry: vi.fn(),
+    };
+    databaseStatsState.result = queryResult;
 
     render(createElement(DataLogsSettings));
 
     expect(screen.getByText(`VACUUM INTO snapshots stored under ${path}.`)).toBeTruthy();
+    expect(screen.getByTestId("database-card-backup-directory").textContent).toBe(path);
+    expect(databaseStatsState.calls).toBe(1);
+    expect(databaseStatsState.cardResult).toBe(queryResult);
   });
 
   it("omits the location when database information is unavailable", () => {
+    databaseStatsState.result = {
+      database: null,
+      isLoading: false,
+      error: null,
+      reload: vi.fn(),
+      retry: vi.fn(),
+    };
     render(createElement(DataLogsSettings));
 
     expect(screen.queryByText(/VACUUM INTO snapshots stored under/)).toBeNull();
   });
 
   it("omits the location when the backend has no backup directory", () => {
-    databaseState.value = { backup_directory: "" };
+    databaseStatsState.result = {
+      database: { backup_directory: "" },
+      isLoading: false,
+      error: null,
+      reload: vi.fn(),
+      retry: vi.fn(),
+    };
 
     render(createElement(DataLogsSettings));
 

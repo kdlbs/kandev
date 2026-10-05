@@ -4,7 +4,6 @@ import type { SystemSlice, SystemSliceState } from "./types";
 export const defaultSystemState: SystemSliceState = {
   system: {
     diskUsage: null,
-    database: null,
     retention: null,
     backups: { items: [], loaded: false },
     updates: null,
@@ -36,10 +35,6 @@ export const createSystemSlice: StateCreator<
   setSystemDiskUsage: (usage) =>
     set((draft) => {
       draft.system.diskUsage = usage;
-    }),
-  setSystemDatabase: (stats) =>
-    set((draft) => {
-      draft.system.database = stats;
     }),
   setSystemRetention: (status) =>
     set((draft) => {

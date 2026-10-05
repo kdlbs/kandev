@@ -6,6 +6,7 @@ import {
 } from "../../helpers/database-stats";
 
 test.describe("System Database page", () => {
+  // @covers AC-SYSTEM-PAGE-DATABASE-STATS-SNAPSHOT-001.5
   test("renders database stats and exposes maintenance buttons", async ({ testPage }) => {
     test.setTimeout(60_000);
 
@@ -70,6 +71,7 @@ test.describe("System Database page", () => {
     await expect(testPage.getByTestId("system-factory-reset-dialog")).toBeVisible();
   });
 
+  // @covers AC-SYSTEM-PAGE-DATABASE-STATS-SNAPSHOT-001.3 AC-SYSTEM-PAGE-DATABASE-STATS-SNAPSHOT-002.3
   test("keeps metadata through reloads and recovers a stale logical snapshot", async ({
     testPage,
   }) => {

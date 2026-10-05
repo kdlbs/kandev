@@ -14,7 +14,7 @@ import {
   IconTrash,
 } from "@tabler/icons-react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
-import { useDatabaseStats } from "@/hooks/domains/system/use-database-stats";
+import type { DatabaseStatsQueryResult } from "@/hooks/domains/system/use-database-stats";
 import { optimizeDatabase, vacuumDatabase } from "@/lib/api/domains/system-api";
 import type { DatabaseStats } from "@/lib/types/system";
 import { formatDateTime } from "@/lib/i18n/formats";
@@ -336,9 +336,9 @@ function MaintenanceButtons({
   return <SQLiteMaintenanceButtons {...props} />;
 }
 
-export function DatabaseStatsCard() {
+export function DatabaseStatsCard({ stats }: { stats: DatabaseStatsQueryResult }) {
   const { t } = useTranslation();
-  const { database, isLoading, error, reload, retry } = useDatabaseStats();
+  const { database, isLoading, error, reload, retry } = stats;
   const vacuum = useActionFeedback();
   const optimize = useActionFeedback();
   const [resetOpen, setResetOpen] = useState(false);

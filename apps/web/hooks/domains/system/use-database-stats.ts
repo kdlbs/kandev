@@ -1,22 +1,24 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
-import { useAppStore } from "@/components/state-provider";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { useMutation, useQuery } from "@tanstack/react-query";
+import { useSystemInfoBootId } from "@/components/system-info-query-provider";
 import { fetchDatabaseStats, retryDatabaseStats } from "@/lib/api/domains/system-api";
 import type { DatabaseStats } from "@/lib/types/system";
+import { createDatabaseStatsQueryKey, useSystemInfoQueryIdentity } from "./system-info-query";
 
 const DATABASE_STATS_TTL_MS = 15 * 60 * 1_000;
 const DATABASE_STATS_POLL_INTERVAL_MS = 2 * 1_000;
 const DATABASE_STATS_RETRY_INTERVAL_MS = 30 * 1_000;
 
 function nextRefreshDelay(
-  database: DatabaseStats | null,
-  isLoading: boolean,
-  error: string | null,
-) {
-  if (isLoading) return null;
+  database: DatabaseStats | undefined,
+  isFetching: boolean,
+  error: unknown,
+): number | false {
+  if (isFetching) return false;
   if (error) return DATABASE_STATS_RETRY_INTERVAL_MS;
-  if (!database) return null;
+  if (!database) return DATABASE_STATS_RETRY_INTERVAL_MS;
 
   switch (database.logical_stats_state) {
     case "pending":
@@ -34,41 +36,89 @@ function nextRefreshDelay(
   }
 }
 
-export function useDatabaseStats() {
-  const database = useAppStore((s) => s.system.database);
-  const setSystemDatabase = useAppStore((s) => s.setSystemDatabase);
-  const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+export type DatabaseStatsQueryResult = {
+  database: DatabaseStats | null;
+  isLoading: boolean;
+  error: string | null;
+  reload: () => Promise<void>;
+  retry: () => Promise<void>;
+};
 
-  const load = useCallback(
-    async (retry: boolean) => {
-      setIsLoading(true);
-      setError(null);
-      try {
-        if (retry) await retryDatabaseStats({ cache: "no-store" });
-        const res = await fetchDatabaseStats({ cache: "no-store" });
-        setSystemDatabase(res);
-      } catch (e) {
-        setError(e instanceof Error ? e.message : String(e));
-      } finally {
-        setIsLoading(false);
-      }
-    },
-    [setSystemDatabase],
-  );
-  const reload = useCallback(() => load(false), [load]);
-  const retry = useCallback(() => load(true), [load]);
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+export function useDatabaseStats(): DatabaseStatsQueryResult {
+  const bootId = useSystemInfoBootId();
+  const identity = useSystemInfoQueryIdentity(bootId);
+  const query = useQuery({
+    queryKey: createDatabaseStatsQueryKey(identity),
+    queryFn: ({ signal }) =>
+      fetchDatabaseStats({
+        baseUrl: identity.apiBaseUrl,
+        cache: "no-store",
+        init: { signal },
+      }),
+    staleTime: 0,
+    gcTime: Infinity,
+    refetchOnMount: "always",
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
+    refetchIntervalInBackground: true,
+    refetchInterval: (currentQuery) =>
+      nextRefreshDelay(
+        currentQuery.state.data,
+        currentQuery.state.fetchStatus === "fetching",
+        currentQuery.state.error,
+      ),
+    networkMode: "always",
+    retry: false,
+  });
+  const retryMutation = useMutation({
+    mutationFn: () => retryDatabaseStats({ baseUrl: identity.apiBaseUrl, cache: "no-store" }),
+    networkMode: "always",
+    retry: false,
+  });
+  const [retryError, setRetryError] = useState<unknown>(null);
+  const retryErrorDataUpdatedAt = useRef<number | null>(null);
 
   useEffect(() => {
-    void reload();
-  }, [reload]);
+    if (
+      retryError !== null &&
+      retryErrorDataUpdatedAt.current !== null &&
+      query.dataUpdatedAt !== retryErrorDataUpdatedAt.current
+    ) {
+      setRetryError(null);
+      retryErrorDataUpdatedAt.current = null;
+    }
+  }, [query.dataUpdatedAt, retryError]);
 
-  useEffect(() => {
-    const delay = nextRefreshDelay(database, isLoading, error);
-    if (delay === null) return;
-    const timer = setTimeout(() => void reload(), delay);
-    return () => clearTimeout(timer);
-  }, [database, error, isLoading, reload]);
+  const reload = useCallback(async () => {
+    setRetryError(null);
+    retryErrorDataUpdatedAt.current = null;
+    await query.refetch({ throwOnError: false });
+  }, [query.refetch]);
 
-  return { database, isLoading, error, reload, retry };
+  const retry = useCallback(async () => {
+    setRetryError(null);
+    retryErrorDataUpdatedAt.current = null;
+    try {
+      await retryMutation.mutateAsync();
+      await query.refetch({ throwOnError: false });
+    } catch (error) {
+      retryErrorDataUpdatedAt.current = query.dataUpdatedAt;
+      setRetryError(error);
+    }
+  }, [query.dataUpdatedAt, query.refetch, retryMutation.mutateAsync]);
+
+  const isLoading = query.isFetching || retryMutation.isPending;
+  const visibleError = isLoading ? null : (retryError ?? query.error);
+
+  return {
+    database: query.data ?? null,
+    isLoading,
+    error: visibleError === null ? null : errorMessage(visibleError),
+    reload,
+    retry,
+  };
 }
