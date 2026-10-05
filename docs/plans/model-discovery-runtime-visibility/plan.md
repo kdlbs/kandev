@@ -198,3 +198,8 @@ Runtime management remains in the existing Agents runtime settings.
 - Windows shims and paths with spaces need fixture coverage and a native Windows run before claiming platform execution proof.
 - A successful candidate can still have different models under a profile override. Reprobe the current profile after activation.
 - Extra version inspection has a two-second total budget and must never break a successful catalog.
+
+## PR CI remediation results (2026-10-05)
+
+- The backend PostgreSQL cancellation test exposed a pool-release timing race: its immediate `InUse == 0` assertion failed 4 of 10 race-enabled repetitions. It now waits up to one second for the canceled query to release its connection. The focused race-enabled test passed 10 repetitions.
+- The Windows process test's three-second polling loop expired while Git enrichment was still completing. It now uses the existing details-wait API with a ten-second context, preserving the assertion that canceling one wait does not cancel enrichment. The focused regression passed 10 consecutive local repetitions; the refreshed Windows CI job is the platform verification.
