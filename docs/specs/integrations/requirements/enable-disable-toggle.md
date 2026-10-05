@@ -51,7 +51,9 @@ corrected here, and the requirements below now describe the per-workspace toggle
 - **AC-INTEGRATIONS-ENABLE-DISABLE-TOGGLE-001.5:** The enabled state for Azure DevOps, GitHub and GitLab is purely a presentation/navigation-visibility switch: it MUST NOT change whether their existing PR/work-item/board/MR features function. This mirrors that those three integrations have no existing UI surface gated on an "available" concept beyond navigation and their own settings page banner.
 - **AC-INTEGRATIONS-ENABLE-DISABLE-TOGGLE-001.6:** The integrations index page SHALL gain one new setting, **"Hide disabled integrations from left panel navigation"**, disabled (off) by default.
 - **AC-INTEGRATIONS-ENABLE-DISABLE-TOGGLE-001.7:** When that setting is **off** (default), a disabled-but-configured integration MUST still appear in the left panel navigation (the sidebar's Integrations section, its mobile-menu equivalent, and, whenever a tree menu mode renders it, the Settings left panel's per-workspace Integrations list under Settings → Workspaces → <workspace>) exactly as it does today for an enabled integration — only credential/health status controls nav visibility. Accordion tree is the default and shows these rows when opened.
-- **AC-INTEGRATIONS-ENABLE-DISABLE-TOGGLE-001.8:** When that setting is **on**, a disabled integration MUST be hidden from all of those left-panel surfaces regardless of its credential/health status. An enabled, healthy integration is unaffected. Only integrations whose enable/disable toggle is off are hidden — an enabled-but-unconfigured integration stays listed (the Settings tree keeps its own configured-status badge convention).
+- **AC-INTEGRATIONS-ENABLE-DISABLE-TOGGLE-001.8:** When that setting is **on**, a disabled integration MUST be hidden from all of those left-panel surfaces regardless of its credential/health status. An enabled, healthy integration is unaffected. Only integrations whose enable/disable toggle is off are hidden — an enabled-but-unconfigured integration stays listed (the Settings tree badges only connected, enabled integrations).
+
+- **AC-INTEGRATIONS-ENABLE-DISABLE-TOGGLE-001.9:** A built-in integration row in the Settings navigation SHALL show the Enabled badge only when that row's workspace has a connected integration and its saved toggle is on. Saving a disable or re-enable, or receiving a cross-tab storage update, SHALL update the badge without a reload. Unsaved drafts SHALL preserve the saved badge state. This applies on desktop and phone, independently of the hide-disabled preference.
 
 ## Migrated source detail
 
@@ -95,8 +97,7 @@ corrected here, and the requirements below now describe the per-workspace toggle
   of those left-panel surfaces regardless of its credential/health status. An
   enabled, healthy integration is unaffected. Only integrations whose
   enable/disable toggle is off are hidden — an enabled-but-unconfigured
-  integration stays listed (the Settings tree keeps its own configured-status
-  badge convention).
+  integration stays listed without an Enabled badge.
 - The new setting SHALL NOT change any other behavior gated on an
   integration's existing "available" signal (e.g. Jira/Linear import
   popovers, Kanban external-link buttons, task-top-bar issue buttons) — those
@@ -289,14 +290,7 @@ is not synced across devices/browsers.
   visibility, not functional gating (unlike Jira/Linear/Sentry's
   existing toggle, which already gates other surfaces and is unchanged by
   this feature).
-- No change to the Settings-page navigation tree's status-badge convention
-  (`components/app-sidebar/sections/settings/workspaces-group.tsx`): its
-  per-workspace Integrations list keeps the configured-status badge
-  ("Enabled" = credentials/health present), which is unrelated to the
-  enable/disable toggle. The "hide disabled" setting DOES filter that list
-  (a disabled integration is hidden from it when the setting is on), since
-  users reach it through left-panel navigation; the badge convention itself
-  is unchanged.
+- Plugin-owned integration badges continue using their registered enabled state.
 - Sentry has no main-sidebar nav destination today (see
   `lib/navigation/core-destinations.ts` — only Azure DevOps, GitHub, GitLab,
   Jira and Linear are nav-gated), so the setting has no effect for Sentry in
