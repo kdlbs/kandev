@@ -53,8 +53,8 @@ with the pinned 1.18.32 upstream parser. See the design for evidence limits.
 
 - Shared OpenCode ACP argument compatibility across native and managed commands.
 - Saved-context automatic baseline discovery with existing request guards.
-- Dedicated model-only picker, compact accessible refresh, and supported passthrough.
-- Hidden-setting preservation through two-field drafts and partial updates.
+- Dedicated shared model/options picker, compact accessible refresh, and supported passthrough.
+- Hidden-setting preservation through model/options/passthrough drafts and partial updates.
 - Loading, failure, empty list, missing model, recovery, and profile-status continuity.
 - Desktop/short-viewport and coarse-pointer sizing; existing phone suppression.
 - Compact full-profile refresh aligned with model/mode selectors, with phone
@@ -94,15 +94,15 @@ canonical launch-context identity, statuses, and existing refresh behavior.
 ### Tour composition and writes
 
 Replace `ProfileFormFields` in `InstalledAgentRow` with the proposed
-`agent-setup-fields.tsx`. Use `ModelConfigSelector` with a model list and no
-dependent options. Use a standard icon Button, existing Switch, and localized
+`agent-setup-fields.tsx`. Use the same `ModelConfigSelector` and profile-context
+model-option resolution as full profiles, with options inside the picker. Use a standard icon Button, existing Switch, and localized
 inline status. Expanded profile status must supersede stale agent-wide probe
 status without changing installation identity.
 
 Define the narrow shared onboarding types in the proposed
 `components/onboarding/agent-settings.ts`, and use them from
 `onboarding-dialog.tsx`, `step-agents.tsx`, and `use-onboarding-actions.ts`.
-Read saved launch fields, including env entries, for discovery; draft only model
+Read saved launch fields and mode for discovery; draft only model, model options,
 and passthrough. Compare each field against its saved baseline before sending
 a patch. Keep hidden fields out of writes and preserve current navigation/error
 interlocks. Share the executor step's viewport-bounded scroll-body arrangement
@@ -113,7 +113,7 @@ generated zh-tw/zh-hk via `pnpm run i18n:zh-hant`; update pseudo-locale handling
 as required by the existing generator/check. Reuse existing model, refresh,
 passthrough, and status keys wherever accurate. Keep the warning's key/value.
 Update the onboarding paragraph in `docs/public/use-kandev.md` with the shipped
-two-field behavior. The page remains a getting-started tutorial with a
+model/options/passthrough behavior. The page remains a getting-started tutorial with a
 disclosed reference section; no new public page or screenshot is required.
 
 ### Full profile refresh
@@ -337,6 +337,13 @@ package tests. Authentication links, unsupported/error projection, announced
 failures, static refresh omission, and accessible touch passthrough are covered.
 Remote CI/review evidence will be refreshed after the final delivery push.
 
+CI also identified three stale expectations for the removed OpenCode log-level
+argument. Focused local reproductions failed in native launch, version-selected
+remote preflight, and host-utility inference. Task 01 includes these command seams
+and the managed runtime guide. Focused lifecycle race verification passed; full
+affected-package race verification passed in the Linux CI image. Native focused
+command regressions and full host-utility race tests also passed.
+
 ## Risks
 
 - Dropping an explicit log level can increase stderr volume. Keep printing,
@@ -346,8 +353,26 @@ Remote CI/review evidence will be refreshed after the final delivery push.
 - Using agent-wide choices, dropping saved environment input, or saving hidden
   defaults would recreate the reported defects. Exact-context and patch tests
   are required.
-- Model-only setup preserves hidden provider options. Existing runtime validation
-  and full settings remain authoritative for incompatible saved options.
+- Model option discovery does not normalize saved values on opening. Explicit
+  model changes use the existing option reconciliation; saving waits for it.
 - Native parser success is not proof of authentication or a complete model
   handshake. Deterministic ACP/model evidence is required during implementation;
   live credentialed discovery remains optional and must not mutate user instances.
+
+### User refinements during PR fixup
+
+The dialog is capped at 720px and dynamic viewport minus 32px, with one body
+scroller and fixed header/navigation. Onboarding uses the same model selector
+and profile-context option resolver as settings, including reasoning controls
+inside the picker. Only edited model/options/passthrough values are saved.
+Startup agent-wide discovery is separate from authorized profile discovery;
+automatic profile requests reuse matching backend cache entries and never force
+refresh. No new frontend cache bypasses runtime or credential invalidation.
+
+The refinements passed 79 focused Vitest tests, 9 Chromium and 9 mobile-chrome
+checks, typecheck, focused ESLint with zero warnings, localization, and public
+document/specification validation. Nine fresh isolated CLI screenshots were
+inspected and compressed, including the tall 21-agent catalog and model-option
+picker. Backend command assertions passed red/green reproductions and both full
+affected packages passed the race detector in the Linux CI image. Remote
+verification remains pending until the remediation is pushed and checks finish.

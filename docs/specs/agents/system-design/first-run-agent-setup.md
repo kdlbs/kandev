@@ -14,7 +14,8 @@ requirements:
 
 Replace the tour's use of `ProfileFormFields` with a small dedicated form. Reuse
 the existing authorized profile-discovery boundary without mounting the full
-profile configuration or dependent-option resolver.
+profile configuration. Compose the same profile-context model-option resolver
+used by the profile page for options inside the shared selector.
 
 The [profile discovery design](profile-capability-discovery.md) remains
 authoritative for launch context, authorization, cache identity, generations,
@@ -80,16 +81,24 @@ refresh operation to both consumers.
 
 `useProfileModelCapabilities` composes that hook with the existing
 `useProfileModelOptions`; full settings keep their current behavior. The
-onboarding consumer uses baseline discovery alone, so initial opening and model
-selection do not invoke `resolveAgentModelConfig` or reconcile hidden
-`config_options`.
+onboarding consumer now composes `useProfileModelCapabilities`, using the same
+option discovery and model-change reconciliation as profiles. Opening an agent
+reads saved options without normalizing or saving them. Model and option changes
+resolve dependent choices through the existing profile context.
 
 Onboarding supplies the concrete saved `profileId` and its complete saved
 launch context, including `envVars`, `cliFlags`, and `commandPrefix` from the
 canonical `AgentProfile`. These fields are read-only inputs, not onboarding
 draft fields. Automatic discovery calls the existing
 `POST /api/v1/agent-models/:agentName/probe` with `{ profile_id }`. Explicit
-refresh uses that same saved context with `refresh: true`; it must not send an
+refresh uses that same saved context with `refresh: true`; automatic reads do not force refresh and reuse the
+backend cache for matching authorized launch context and runtime generations.
+Collapsing an opened provider keeps its discovery hook mounted in hidden
+collapsible content until the step is left, preserving accepted choices and
+pending option work without a new frontend cache. Providers mount lazily on their
+first expansion. Startup agent-wide discovery has a different cache identity and cannot substitute
+for the profile. No frontend cache bypasses secret or runtime invalidation.
+Refresh must not send an
 empty environment snapshot that clears saved overrides.
 
 Static providers retain their declared catalog without a dynamic process.
@@ -106,10 +115,12 @@ fallback consistent with the expanded form.
 
 Add `components/onboarding/agent-setup-fields.tsx` rather than expanding the
 shared full-form component's hide flags. Its inputs are the saved discovery
-context, two-field draft, provider metadata, and narrow change callbacks.
+context, model/options/passthrough draft, provider metadata, and narrow change callbacks.
 
-Reuse `ModelConfigSelector` with model entries and no non-model config options.
-The model-only view closes on selection. Retain a saved but unadvertised model
+Reuse `ModelConfigSelector`, including its shared model-option controls, loading
+state, trigger label, and mobile disclosure behavior. Map the options supplied by
+`useProfileModelCapabilities` with the existing profile helpers. The model-only
+view closes on selection; providers with options retain the shared picker behavior. Retain a saved but unadvertised model
 label; mark it unavailable only after a successful matching catalog proves it
 absent. A loading catalog must not paint a valid saved model as unavailable.
 
@@ -127,14 +138,14 @@ label and accessible association. Help text explains that other settings live
 in Settings > Agents. On coarse pointers its associated row is at least 44px
 high and activates the switch when tapped, while its desktop visual stays compact.
 The existing read-only Auto Approve warning stays outside
-the editable fields. No mode, dependent option, flags, fallback, permissions,
-or advanced-setting component is mounted in this form or its picker.
+the editable fields. No mode, flags, fallback, permissions, or advanced-setting component is mounted
+in this form. Model options remain within the shared picker.
 
 ## Draft and mutation boundary
 
 Replace onboarding's dependency on `ProfileFormData` with an onboarding-owned
-type containing only `model` and `cli_passthrough`. `AgentSetting` also retains
-profile identity, a saved two-field baseline, the saved launch context, and dirty
+type containing `model`, `config_options`, and `cli_passthrough`. `AgentSetting` also retains
+profile identity, a saved editable-field baseline, the saved launch context and mode, and dirty
 state. No hidden execution or permission values are mutable draft inputs.
 
 `buildAgentSettings` uses the existing selected saved profile and captures its
@@ -142,7 +153,7 @@ actual stored model without converting an empty stored value into a user edit.
 Provider current/default model can supply a display hint separately. Reloads
 preserve a dirty draft only for the same profile identity, as today.
 
-`useOnboardingActions` derives a partial patch by comparing the two editable
+`useOnboardingActions` derives a partial patch by comparing the editable
 fields with their saved baseline. An untouched field is omitted. The existing
 `updateAgentProfileAction` and backend partial-update semantics retain all
 other values. Remove `permissionsToProfilePatch`, `cli_flags`, and
@@ -152,6 +163,8 @@ save concurrency, settings-reload interlock, and failure handling.
 Each successful write advances only its saved fields in the matching profile's
 baseline. Recompute dirty state against the latest draft so edits made during a
 save remain pending and returning to an earlier model produces a new patch.
+Next and completion wait for dependent-option resolution/reconciliation; Skip
+remains available and never saves. Collapse preserves pending resolution.
 Wait for every profile write before releasing the save interlock. On partial
 failure, preserve successful baselines and retry only remaining dirty profiles.
 
@@ -167,7 +180,8 @@ remains the primary navigation action. Reuse the executor step's bounded
 `DialogContent` and internal scroll-body composition for the agents step.
 Remove the nested `max-h-[320px]` agent-list scroller so the step body is the
 single vertical scroll owner. Header, step dots, and navigation remain outside
-that scroller. Use dynamic viewport bounds and the existing dialog primitives.
+that scroller. Cap dialog height at 720px, with a dynamic viewport limit of 100dvh minus 32px,
+using the existing dialog primitives. A long catalog must not fill a tall window.
 
 The nearest shipped availability exemplar is
 `e2e/tests/office/mobile-onboarding-dialog.spec.ts`: below 768px the normal Home

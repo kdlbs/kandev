@@ -25,6 +25,7 @@ test.describe("First-run onboarding availability — mobile", () => {
 
     await testPage.setViewportSize({ width: 768, height: 851 });
     await expect(dialog).toBeVisible();
+    expect((await dialog.boundingBox())!.height).toBeLessThanOrEqual(720);
     await expect(testPage.getByRole("heading", { name: "AI Agents" })).toBeVisible();
     expect(
       await testPage.evaluate(() => localStorage.getItem("kandev.onboarding.completed")),
@@ -53,6 +54,13 @@ test.describe("First-run onboarding availability — mobile", () => {
     await selector.tap();
     await testPage.getByRole("option", { name: "Mock Smart", exact: true }).tap();
     await expect(selector).toContainText("Mock Smart");
+    await expect(testPage.getByTestId("model-config-resolution-loading")).toBeHidden();
+    if ((await selector.getAttribute("aria-expanded")) !== "true") await selector.tap();
+    await testPage.getByTestId("config-option-trigger-effort").tap();
+    await testPage.getByRole("button", { name: "Max", exact: true }).tap();
+    await expect(selector).toContainText("Max");
+    await expect(testPage.getByTestId("model-config-resolution-loading")).toBeHidden();
+    await selector.tap();
 
     await testPage.setViewportSize({ width: 393, height: 851 });
     await expect(dialog).toHaveCount(0);
@@ -65,6 +73,7 @@ test.describe("First-run onboarding availability — mobile", () => {
     await expect(agentTrigger).toContainText("Mock Smart");
     await agentTrigger.tap();
     await expect(selector).toContainText("Mock Smart");
+    await expect(selector).toContainText("Max");
     expect(
       await testPage.evaluate(() => localStorage.getItem("kandev.onboarding.completed")),
     ).toBeNull();

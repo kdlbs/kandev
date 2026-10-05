@@ -31,8 +31,8 @@ by [profile capability discovery](profile-capability-discovery.md) and
   model-list selector and a CLI passthrough toggle when the agent supports
   passthrough. Unsupported passthrough shall not appear as an editable setting.
 - **AC-AGENTS-FIRST-RUN-SETUP-001.2:** The expanded row and its model picker shall
-  omit permission controls, Auto Approve, mode selection, provider configuration
-  options, fallback and exact-model policy, CLI flags, environment variables,
+  omit permission controls, Auto Approve, mode selection, standalone provider
+  configuration sections, fallback and exact-model policy, CLI flags, environment variables,
   command prefixes, and advanced settings disclosures.
 - **AC-AGENTS-FIRST-RUN-SETUP-001.3:** Dynamic-model refresh shall be a compact icon action
   beside the selector, with a localized accessible name and visible busy state.
@@ -46,8 +46,9 @@ by [profile capability discovery](profile-capability-discovery.md) and
   Auto Approve behavior shall remain; hiding its setting shall not change
   permission defaults.
 - **AC-AGENTS-FIRST-RUN-SETUP-001.5:** The agent list shall scroll within a
-  viewport-contained tour while navigation actions remain reachable, including
-  when an agent is expanded on a short desktop viewport.
+  tour capped at 720px tall and bounded by the dynamic viewport minus 32px.
+  Navigation actions shall remain outside its single scrolling body and reachable
+  on tall and short desktop windows and coarse-pointer tablets.
 
 ### REQ-AGENTS-FIRST-RUN-SETUP-002: Immediately usable model discovery
 
@@ -57,7 +58,9 @@ by [profile capability discovery](profile-capability-discovery.md) and
 
 - **AC-AGENTS-FIRST-RUN-SETUP-002.1:** Opening a saved dynamic-model agent in the
   tour shall automatically discover choices for that profile's saved launch
-  context. The selector shall become usable after discovery succeeds without
+  context through the existing cache-aware request, without forcing a refresh.
+  Startup agent-wide choices shall not substitute for a matching profile context.
+  The selector shall become usable after discovery succeeds without
   requiring Refresh. Discovery shall retain the saved model label while loading.
 - **AC-AGENTS-FIRST-RUN-SETUP-002.2:** For supported OpenCode installations that
   can provide ACP capabilities, model discovery shall return advertised choices
@@ -70,8 +73,10 @@ by [profile capability discovery](profile-capability-discovery.md) and
   Probe failures shall be announced. Authentication recovery shall link directly
   to the saved profile's settings without saving the tour draft.
 - **AC-AGENTS-FIRST-RUN-SETUP-002.4:** Selecting an advertised model shall update
-  the draft and close the list. It shall not expose or require dependent model
-  options. Refresh alone shall not select another model or mark the draft dirty.
+  the draft through the shared selector used by profiles and chat. Supported
+  model options, including reasoning, shall appear inside that selector using
+  the existing profile-context resolver. Opening the selector shall not edit
+  saved options. Refresh alone shall not select another model or mark the draft dirty.
 - **AC-AGENTS-FIRST-RUN-SETUP-002.5:** Late discovery responses from a previously
   expanded agent, another profile, or an earlier refresh shall not overwrite
   current choices or edits. An agent-wide failed status shall not override a
@@ -89,8 +94,8 @@ by [profile capability discovery](profile-capability-discovery.md) and
 #### Acceptance criteria
 
 - **AC-AGENTS-FIRST-RUN-SETUP-003.1:** Next and completion shall save only changed
-  model and CLI passthrough values. Hidden profile settings, including permissions,
-  CLI flags, environment, prefix, modes, provider options, and fallback policy,
+  model, model-option, and CLI passthrough values. Hidden profile settings,
+  including permissions, CLI flags, environment, prefix, modes, and fallback policy,
   shall retain their stored values.
 - **AC-AGENTS-FIRST-RUN-SETUP-003.2:** Skip shall discard unsaved tour edits and
   retain the existing browser-local completion behavior. Discovery and opening

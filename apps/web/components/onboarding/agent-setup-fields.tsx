@@ -7,11 +7,17 @@ import { Button } from "@kandev/ui/button";
 import { Switch } from "@kandev/ui/switch";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { SettingsFieldLabel } from "@/components/settings/settings-typography";
-import { ModelConfigSelector, type ModelSelectorOption } from "@/components/model-config-selector";
 import {
-  useProfileCapabilityDiscovery,
+  ModelConfigSelector,
+  isModelConfigOption,
+  type ModelSelectorOption,
+} from "@/components/model-config-selector";
+import { modelConfigOptions } from "@/components/settings/profile-model-config";
+import { ModelConfigResolutionStatus } from "@/components/settings/model-config-resolution-status";
+import {
+  useProfileModelCapabilities,
   type ProfileDiscoveryStatus,
-} from "@/hooks/domains/settings/use-profile-capability-discovery";
+} from "@/hooks/domains/settings/use-profile-model-capabilities";
 import type { AgentSetting, OnboardingAgentDraft } from "@/components/onboarding/agent-settings";
 import type { AvailableAgent, CapabilityStatus, ModelEntry } from "@/lib/types/http";
 import { cn } from "@/lib/utils";
@@ -20,6 +26,7 @@ export type AgentSetupFieldsProps = {
   agent: AvailableAgent;
   setting: AgentSetting;
   onChange: (patch: Partial<OnboardingAgentDraft>) => void;
+  onModelResolutionChange?: (profileId: string, pending: boolean) => void;
   onStatusChange?: (status: CapabilityStatus | undefined, error: string | null) => void;
 };
 
@@ -209,26 +216,71 @@ function RefreshModelsButton({
   );
 }
 
+function useAgentSetupCapabilities(
+  agent: AvailableAgent,
+  setting: AgentSetting,
+  onChange: AgentSetupFieldsProps["onChange"],
+  onModelResolutionChange: AgentSetupFieldsProps["onModelResolutionChange"],
+) {
+  const profile = useMemo(
+    () => ({
+      ...setting.savedLaunchSettings,
+      model: setting.draft.model,
+      mode: setting.savedMode ?? "",
+      config_options: setting.draft.config_options,
+    }),
+    [
+      setting.savedLaunchSettings,
+      setting.draft.model,
+      setting.savedMode,
+      setting.draft.config_options,
+    ],
+  );
+  const discovery = useProfileModelCapabilities(agent.name, profile, agent.model_config, onChange, {
+    profileId: setting.profileId,
+    savedLaunchSettings: setting.savedLaunchSettings,
+  });
+  const configOptions = modelConfigOptions({
+    ...agent.model_config,
+    config_options: discovery.configOptions,
+  }).map((option) => ({
+    ...option,
+    currentValue: isModelConfigOption(option)
+      ? setting.draft.model || option.currentValue
+      : setting.draft.config_options?.[option.id] || option.currentValue,
+  }));
+
+  const pending = discovery.configIsLoading || discovery.isConfigResolutionPending;
+  useEffect(() => {
+    onModelResolutionChange?.(setting.profileId, pending);
+    return () => onModelResolutionChange?.(setting.profileId, false);
+  }, [onModelResolutionChange, setting.profileId, pending]);
+  return { discovery, configOptions };
+}
+
 export function AgentSetupFields({
   agent,
   setting,
   onChange,
   onStatusChange,
+  onModelResolutionChange,
 }: AgentSetupFieldsProps) {
   const { t } = useTranslation();
 
-  const discovery = useProfileCapabilityDiscovery(agent.name, setting.savedLaunchSettings, {
-    profileId: setting.profileId,
-    savedLaunchSettings: setting.savedLaunchSettings,
-    supportsDynamicModels: agent.model_config.supports_dynamic_models,
-  });
+  const { discovery, configOptions } = useAgentSetupCapabilities(
+    agent,
+    setting,
+    onChange,
+    onModelResolutionChange,
+  );
+  const capabilities = discovery.capabilities;
 
   const discoveryStatus = agent.model_config.supports_dynamic_models
-    ? discovery.status
+    ? capabilities.status
     : agent.model_config.status;
   const discoveryError =
     discovery.discoveryState === "failed"
-      ? discovery.error ||
+      ? capabilities.error ||
         t(
           discoveryStatus === "auth_required"
             ? "agents:capabilityAuthRequired"
@@ -238,11 +290,11 @@ export function AgentSetupFields({
   useProfileStatusSync(discoveryStatus, discovery.discoveryState, discoveryError, onStatusChange);
 
   const models = agent.model_config.supports_dynamic_models
-    ? discovery.models
+    ? capabilities.models
     : (agent.model_config.available_models ?? []);
 
   const currentModel =
-    setting.draft.model || discovery.currentModelId || agent.model_config.default_model || "";
+    setting.draft.model || capabilities.currentModelId || agent.model_config.default_model || "";
 
   const unavailableLabel = t("settings:startModelUnavailable");
   const { modelOptions, modelIsGone } = useMemo(
@@ -262,6 +314,15 @@ export function AgentSetupFields({
             <ModelConfigSelector
               modelOptions={modelOptions}
               currentModel={currentModel}
+              configOptions={configOptions}
+              configOptionsLoading={
+                discovery.configIsLoading || discovery.isConfigResolutionPending
+              }
+              onConfigChange={(id, value) =>
+                onChange({
+                  config_options: { ...(setting.draft.config_options ?? {}), [id]: value },
+                })
+              }
               onModelChange={(model) => onChange({ model })}
               placeholder={t("settings:selectAModel")}
               ariaLabel={t("settings:startModelAria")}
@@ -274,6 +335,12 @@ export function AgentSetupFields({
             <RefreshModelsButton isBusy={isBusy} onRefresh={discovery.refresh} />
           )}
         </div>
+        <ModelConfigResolutionStatus
+          status={discovery.configStatus}
+          error={discovery.configError}
+          isLoading={discovery.configIsLoading}
+          onRetry={discovery.refreshModelConfig}
+        />
         <ModelStatusFeedback
           discoveryState={discovery.discoveryState}
           error={discoveryError}

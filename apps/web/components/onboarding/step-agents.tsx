@@ -133,13 +133,16 @@ function InstalledAgentRow({
   isOpen,
   onToggle,
   onUpdateSetting,
+  onModelResolutionChange,
 }: {
   agent: AvailableAgent;
   settings: AgentSetting | undefined;
   isOpen: boolean;
   onToggle: (open: boolean) => void;
   onUpdateSetting: (agentName: string, patch: Partial<OnboardingAgentDraft>) => void;
+  onModelResolutionChange?: (profileId: string, pending: boolean) => void;
 }) {
+  const [hasOpened, setHasOpened] = useState(isOpen);
   const { profileStatus, onStatusChange } = useAgentProfileStatus(settings?.profileId);
   const currentModel = settings?.draft.model || agent.model_config.default_model;
   const modelName =
@@ -149,7 +152,13 @@ function InstalledAgentRow({
   const showModelPill = status === "ok" && !!modelName;
 
   return (
-    <Collapsible open={isOpen} onOpenChange={onToggle}>
+    <Collapsible
+      open={isOpen}
+      onOpenChange={(open) => {
+        if (open) setHasOpened(true);
+        onToggle(open);
+      }}
+    >
       <CollapsibleTrigger asChild>
         <button
           type="button"
@@ -168,18 +177,21 @@ function InstalledAgentRow({
           <IconChevronDown className="h-4 w-4 text-muted-foreground transition-transform group-data-[state=open]:rotate-180" />
         </button>
       </CollapsibleTrigger>
-      <CollapsibleContent>
-        <div className="border border-t-0 rounded-b-lg px-3 pb-3 pt-2">
-          {settings && (
-            <AgentSetupFields
-              agent={agent}
-              setting={settings}
-              onChange={(patch) => onUpdateSetting(agent.name, patch)}
-              onStatusChange={onStatusChange}
-            />
-          )}
-        </div>
-      </CollapsibleContent>
+      {hasOpened && (
+        <CollapsibleContent forceMount hidden={!isOpen}>
+          <div className="border border-t-0 rounded-b-lg px-3 pb-3 pt-2">
+            {settings && (
+              <AgentSetupFields
+                agent={agent}
+                setting={settings}
+                onChange={(patch) => onUpdateSetting(agent.name, patch)}
+                onStatusChange={onStatusChange}
+                onModelResolutionChange={onModelResolutionChange}
+              />
+            )}
+          </div>
+        </CollapsibleContent>
+      )}
     </Collapsible>
   );
 }
@@ -264,12 +276,14 @@ export function StepAgents({
   agentSettings,
   loading,
   onUpdateSetting,
+  onModelResolutionChange,
 }: {
   availableAgents: AvailableAgent[];
   tools: ToolStatus[];
   agentSettings: Record<string, AgentSetting>;
   loading: boolean;
   onUpdateSetting: (agentName: string, patch: Partial<OnboardingAgentDraft>) => void;
+  onModelResolutionChange?: (profileId: string, pending: boolean) => void;
 }) {
   const { t } = useTranslation();
   const [openAgent, setOpenAgent] = useState<string | null>(null);
@@ -298,6 +312,7 @@ export function StepAgents({
             isOpen={openAgent === agent.name}
             onToggle={(isOpen) => setOpenAgent(isOpen ? agent.name : null)}
             onUpdateSetting={onUpdateSetting}
+            onModelResolutionChange={onModelResolutionChange}
           />
         ))}
         <NotInstalledItems

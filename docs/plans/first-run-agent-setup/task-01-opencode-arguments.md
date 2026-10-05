@@ -30,7 +30,9 @@ version, cleanup, and inference behavior.
 - Preserve the common `acp --print-logs` argument set for native and managed
   runtime commands, normal execution, and host utility discovery.
 - Update existing OpenCode command expectations, including the built-in agent
-  row of `TestManagedNPMRuntimeContracts`; retain unrelated synthetic test fixtures.
+  row of `TestManagedNPMRuntimeContracts`, native lifecycle launch, and remote
+  preflight, and host-utility inference; retain unrelated synthetic test fixtures.
+- Keep the managed runtime command guide aligned with the shared argument set.
 - Record the existing isolated parser reproduction as supplemental evidence.
 
 ## Out of scope
@@ -54,6 +56,8 @@ Run from the repository root:
 ```bash
 (cd apps/backend && go test ./internal/agent/agents -run 'Test(OpenCodeACP|ManagedNPMRuntime)' -count=1)
 (cd apps/backend && go test ./internal/agentctl/server/utility -run 'Test(ProfileProbeForwards|ProbeACPSession)' -count=1)
+(cd apps/backend && go test -trimpath -race ./internal/agent/runtime/lifecycle -run '^(TestRemotePreflightUsesResolvedManagedRuntimeVersion|TestBuildAgentCommand_UsesManagedNPMRuntimes)$' -count=1)
+(cd apps/backend && go test -trimpath -race ./internal/agent/hostutility ./internal/agent/runtime/lifecycle -count=1)
 git diff --check
 ```
 
@@ -62,6 +66,10 @@ git diff --check
 - `apps/backend/internal/agent/agents/opencode_acp.go`
 - `apps/backend/internal/agent/agents/opencode_acp_test.go`
 - `apps/backend/internal/agent/agents/managed_npm_runtime_test.go`
+- `apps/backend/internal/agent/runtime/lifecycle/managed_runtime_command_test.go`
+- `apps/backend/internal/agent/runtime/lifecycle/manager_launch_test.go`
+- `apps/backend/internal/agent/hostutility/manager_test.go`
+- `apps/backend/internal/agent/agents/ACP_BRIDGE_VERSIONS.md`
 
 ## Dependencies
 
@@ -89,3 +97,13 @@ reviewed managed default; do not use it as a universal command default.
 Implemented the shared OpenCode ACP arguments without the optional log-level flag.
 Native, managed-runtime, and host-utility command regressions pass.
 `GOCACHE=/private/tmp/kandev-review-go-cache go test ./internal/agent/agents ./internal/agentctl/server/utility -count=1` passed on 2026-10-05.
+
+CI exposed three command assertions that still expected the removed optional
+argument. They failed in focused local reproductions. Exact native launch,
+version-selected remote preflight, and host-utility inference expectations now
+retain `--print-logs` without the parser-specific log level. Focused lifecycle race
+verification passed. Both full affected packages (`hostutility` and `lifecycle`)
+passed with `-trimpath -race` in the Linux CI build image using a disposable
+normal checkout. Full backend new-code lint passed. The native macOS checkout
+restoration test also fails on the pre-remediation head with `/dev/fd/3` access
+denied; Linux verification covers that existing platform-dependent case.

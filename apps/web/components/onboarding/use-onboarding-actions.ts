@@ -1,7 +1,12 @@
 "use client";
 
 import { type Dispatch, type SetStateAction, useCallback, useRef, useState } from "react";
-import type { AgentSetting, OnboardingAgentDraft } from "@/components/onboarding/agent-settings";
+import {
+  modelOptionsEqual,
+  onboardingDraftIsDirty,
+  type AgentSetting,
+  type OnboardingAgentDraft,
+} from "@/components/onboarding/agent-settings";
 import { updateAgentProfileAction } from "@/app/actions/agents";
 import { isHandledApiError } from "@/lib/api/client";
 import { useToast } from "@/components/toast-provider";
@@ -10,6 +15,7 @@ import { useTranslation } from "react-i18next";
 export const TOTAL_ONBOARDING_STEPS = 4;
 
 type OnboardingActionsProps = {
+  isModelConfigPending?: boolean;
   step: number;
   setStep: Dispatch<SetStateAction<number>>;
   onComplete: () => void;
@@ -31,14 +37,13 @@ function updateSavedSetting(
     [agentName]: {
       ...current,
       baseline,
-      dirty:
-        current.draft.model !== baseline.model ||
-        current.draft.cli_passthrough !== baseline.cli_passthrough,
+      dirty: onboardingDraftIsDirty(current.draft, baseline),
     },
   };
 }
 
 export function useOnboardingActions({
+  isModelConfigPending = false,
   step,
   setStep,
   onComplete,
@@ -55,12 +60,15 @@ export function useOnboardingActions({
       const dirtySettings = Object.values(agentSettings).filter((setting) => setting.dirty);
       const saves = await Promise.allSettled(
         dirtySettings.map(async (setting) => {
-          const patch: { model?: string; cli_passthrough?: boolean } = {};
+          const patch: Partial<OnboardingAgentDraft> = {};
           if (setting.draft.model !== setting.baseline.model) {
             patch.model = setting.draft.model;
           }
           if (setting.draft.cli_passthrough !== setting.baseline.cli_passthrough) {
             patch.cli_passthrough = setting.draft.cli_passthrough;
+          }
+          if (!modelOptionsEqual(setting.draft.config_options, setting.baseline.config_options)) {
+            patch.config_options = setting.draft.config_options ?? {};
           }
           if (Object.keys(patch).length > 0) {
             await updateAgentProfileAction(setting.profileId, patch);
@@ -100,7 +108,7 @@ export function useOnboardingActions({
     setStep(0);
   };
   const handleNext = async () => {
-    if (saveInProgressRef.current) return;
+    if (saveInProgressRef.current || (step === 0 && isModelConfigPending)) return;
     if (step === 0 && !(await saveAgentSettingsOnce())) return;
     if (step < TOTAL_ONBOARDING_STEPS - 1) setStep(step + 1);
   };
@@ -109,7 +117,8 @@ export function useOnboardingActions({
     if (step > 0) setStep(step - 1);
   };
   const handleGetStarted = async () => {
-    if (saveInProgressRef.current || !(await saveAgentSettingsOnce())) return;
+    if (saveInProgressRef.current || isModelConfigPending || !(await saveAgentSettingsOnce()))
+      return;
     onComplete();
     setStep(0);
   };
@@ -119,9 +128,7 @@ export function useOnboardingActions({
         const current = previous[agentName];
         if (!current) return previous;
         const nextDraft = { ...current.draft, ...patch };
-        const isDirty =
-          nextDraft.model !== current.baseline.model ||
-          nextDraft.cli_passthrough !== current.baseline.cli_passthrough;
+        const isDirty = onboardingDraftIsDirty(nextDraft, current.baseline);
         return {
           ...previous,
           [agentName]: {

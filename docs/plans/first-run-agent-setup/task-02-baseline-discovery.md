@@ -118,7 +118,8 @@ passed 5 Chromium and 9 mobile-chrome tests, including second-tab runtime update
 The failed-update E2E compares probes with its pre-update hydration baseline,
 proving the failed update adds no discovery request and preserves its catalog.
 
-Extracted saved-profile baseline discovery without introducing model-option calls
-into onboarding. Automatic probing, context isolation, refresh, and late-response
+The initial extraction supplied saved-profile baseline discovery without model-
+option calls in onboarding. Subsequent user feedback now composes the same
+profile capability/option hooks as settings inside the shared selector. Automatic probing, context isolation, refresh, and late-response
 guards pass in the focused discovery and full-profile hook tests. The combined
 frontend regression run passed all 67 tests on 2026-10-05.

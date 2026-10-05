@@ -35,9 +35,9 @@ system_design:
 
 ## Summary
 
-Give each expanded tour agent a model-only picker, adjacent refresh icon, and
+Give each expanded tour agent a shared model/options picker, adjacent refresh icon, and
 supported passthrough toggle. Automatically discover its saved profile context,
-save only the two edited fields, and prove the desktop/touch/phone-resize flow.
+save only edited model, model-option, and passthrough fields, and prove the desktop/touch/phone-resize flow.
 
 ## In scope
 
@@ -47,15 +47,17 @@ save only the two edited fields, and prove the desktop/touch/phone-resize flow.
 - Add proposed `agent-setup-fields.tsx` and narrow `agent-settings.ts` types.
   Replace the tour's full form without adding hide flags to full settings.
 - Thread the saved profile ID and complete saved launch settings into Task 02's
-  baseline-only hook. Preserve saved selection labels and update row status from
+  shared profile capability and option hooks. Preserve saved selection labels and update row status from
   matching profile discovery, not stale global metadata.
-- Model-only list selection closes the picker. No mode, dependent options,
+- Model-only list selection closes the picker; supported model options remain
+  inside the shared selector used by profiles and chat. No standalone mode,
   permissions, flags, fallback policy, or advanced disclosures are mounted.
-- Derive exact model/passthrough partial patches from their saved baseline.
+- Derive exact model/options/passthrough partial patches from their saved baseline.
   Preserve hidden stored fields, skips, navigation, errors, concurrency guards,
   settings-reload interlocks, and drafts across responsive visibility changes.
 - Use the executor step's bounded dialog-body scroller for the agents step and
-  remove its nested list scroller. Keep navigation reachable on short screens.
+  remove its nested list scroller. Cap overall height at 720px and dynamic
+  viewport minus 32px; prove a 21-agent catalog on tall and short windows.
 - Localize help and any necessary inline empty/recovery copy in all supported
   catalogs. Keep the read-only Auto Approve warning. Update only the shipped
   tour paragraph in `docs/public/use-kandev.md` (tutorial/reference disclosure).
@@ -165,7 +167,7 @@ against 28px within 1px, not only a minimum.
 ## Dependencies
 
 Tasks 01 and 02. The corrected OpenCode command supplies working discovery;
-the baseline-only hook supplies the narrow form's models without hidden option work.
+shared hooks supply matching models and options without mounting full settings.
 
 ## Risks
 
@@ -200,7 +202,7 @@ the matching profile error and render unsupported discovery as a failure. New
 unit regressions failed before these changes; the tablet target measured 38px
 before the fix and passed its 44px activation test afterward.
 
-Final local review verification passed 75 tests across the seven focused Vitest
+Earlier local review verification passed 75 tests across the seven focused Vitest
 files, 6 Chromium tests, and 9 mobile-chrome tests. The authentication E2E follows
 the recovery link and verifies no profile write or completion marker. Tablet E2E
 taps the passthrough label to toggle it. Typecheck, focused ESLint, i18n validation,
@@ -229,3 +231,16 @@ managed runner first and requires evidence from that authorized workflow before
 reporting a capture blocker. Harness tests, full harness/spec lint, and targeted
 pre-commit validation passed. The user requested including this skill update in
 the onboarding PR.
+
+User-requested refinements during PR fixup cap the dialog height on tall windows
+and include supported reasoning/model options within the shared selector.
+Startup discovery is agent-wide; profile requests are cache-aware and do not
+force refresh. Saved launch settings and mode remain read-only inputs. New
+regressions protect tall/short containment, option discovery without initial
+mutation, and option-only saves with edits retained during an in-flight save.
+Validation passed 79 focused Vitest tests, 9 Chromium tests and 9 mobile-chrome
+tests, typecheck, focused ESLint with zero warnings, localization and public
+document/specification checks. Nine fresh screenshots include the capped tall
+catalog and supported model options. A delayed option response proves Next waits
+for reconciliation while Skip remains available; tablet reasoning edits survive
+phone suppression. Collapsing/reopening retains discovery without another probe.

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
 import {
   Dialog,
   DialogContent,
@@ -108,6 +108,7 @@ type OnboardingFooterProps = {
   onNext: () => void;
   onGetStarted: () => void;
   isBusy: boolean;
+  isModelConfigPending?: boolean;
 };
 
 function OnboardingStepDots({ step }: { step: number }) {
@@ -224,6 +225,7 @@ function OnboardingFooter({
   onNext,
   onGetStarted,
   isBusy,
+  isModelConfigPending,
 }: OnboardingFooterProps) {
   const { t } = useTranslation();
   return (
@@ -247,12 +249,20 @@ function OnboardingFooter({
             </Button>
           )}
           {step < TOTAL_STEPS - 1 ? (
-            <Button onClick={onNext} disabled={isBusy} className="cursor-pointer">
+            <Button
+              onClick={onNext}
+              disabled={isBusy || isModelConfigPending}
+              className="cursor-pointer"
+            >
               {t("common:next")}
               <IconArrowRight className="ml-1.5 h-4 w-4" />
             </Button>
           ) : (
-            <Button onClick={onGetStarted} disabled={isBusy} className="cursor-pointer">
+            <Button
+              onClick={onGetStarted}
+              disabled={isBusy || isModelConfigPending}
+              className="cursor-pointer"
+            >
               <IconCheck className="mr-1.5 h-4 w-4" />
               {t("common:getStarted")}
             </Button>
@@ -271,6 +281,14 @@ export function OnboardingDialog({ open, onComplete }: OnboardingDialogProps) {
     backendReloadCoordinator.getSnapshot,
   ).reloadRequired;
   const [step, setStep] = useState(0);
+  const [pendingProfiles, setPendingProfiles] = useState<Record<string, boolean>>({});
+  const onModelResolutionChange = useCallback((profileId: string, pending: boolean) => {
+    setPendingProfiles((current) =>
+      current[profileId] === pending ? current : { ...current, [profileId]: pending },
+    );
+  }, []);
+  const isModelConfigPending = Object.values(pendingProfiles).some(Boolean);
+
   const {
     availableAgents,
     tools,
@@ -281,14 +299,21 @@ export function OnboardingDialog({ open, onComplete }: OnboardingDialogProps) {
     loadingTemplates,
   } = useOnboardingResources(open);
   const { handleSkip, handleNext, handleBack, handleGetStarted, updateSetting, isSaving } =
-    useOnboardingActions({ step, setStep, onComplete, agentSettings, setAgentSettings });
+    useOnboardingActions({
+      step,
+      setStep,
+      onComplete,
+      agentSettings,
+      setAgentSettings,
+      isModelConfigPending,
+    });
 
   return (
     <Dialog open={open && !reloadRequired} onOpenChange={() => {}}>
       <DialogContent
         className={
           step === 0 || step === 1
-            ? "flex max-h-[calc(100dvh_-_2rem)] flex-col overflow-hidden sm:max-w-3xl"
+            ? "flex max-h-[min(720px,calc(100dvh_-_2rem))] flex-col overflow-hidden sm:max-w-3xl"
             : "sm:max-w-3xl"
         }
         showCloseButton={false}
@@ -312,6 +337,7 @@ export function OnboardingDialog({ open, onComplete }: OnboardingDialogProps) {
               agentSettings={agentSettings}
               loading={loadingAgents}
               onUpdateSetting={updateSetting}
+              onModelResolutionChange={onModelResolutionChange}
             />
           )}
           {step === 1 && <StepEnvironments />}
@@ -326,6 +352,7 @@ export function OnboardingDialog({ open, onComplete }: OnboardingDialogProps) {
           onNext={handleNext}
           onGetStarted={handleGetStarted}
           isBusy={isSaving}
+          isModelConfigPending={isModelConfigPending}
         />
       </DialogContent>
     </Dialog>

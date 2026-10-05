@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { TooltipProvider } from "@kandev/ui/tooltip";
@@ -5,6 +6,9 @@ import { AgentSetupFields, type AgentSetupFieldsProps } from "./agent-setup-fiel
 import { StepAgents } from "./step-agents";
 import type { AgentSetting } from "./agent-settings";
 import type { AvailableAgent, DynamicModelsResponse } from "@/lib/types/http";
+
+const TEST_AGENT_NAME = "test-agent";
+const MODEL_SELECTOR_LABEL = "Profile start model settings";
 
 function renderFields(props: AgentSetupFieldsProps) {
   return render(
@@ -26,7 +30,7 @@ vi.mock("@/lib/api/domains/settings-api", () => ({
 }));
 
 const mockAgent: AvailableAgent = {
-  name: "test-agent",
+  name: TEST_AGENT_NAME,
   display_name: "Test Agent",
   available: true,
   supports_mcp: false,
@@ -75,7 +79,7 @@ const mockSetting: AgentSetting = {
 
 function capabilityResponse(models: { id: string; name: string }[]): DynamicModelsResponse {
   return {
-    agent_name: "test-agent",
+    agent_name: TEST_AGENT_NAME,
     status: "ok",
     models,
     modes: [{ id: "default", name: "Default" }],
@@ -90,6 +94,14 @@ function capabilityResponse(models: { id: string; name: string }[]): DynamicMode
 beforeEach(() => {
   vi.resetAllMocks();
   probeAgentProfileMock.mockResolvedValue(capabilityResponse([]));
+  resolveAgentModelConfigMock.mockResolvedValue({
+    agent_name: TEST_AGENT_NAME,
+    model: "gpt-4",
+    status: "ok",
+    config_options: [],
+    error: null,
+    context_revision: "rev-1",
+  });
 });
 
 afterEach(cleanup);
@@ -98,7 +110,7 @@ describe("AgentSetupFields", () => {
   it("keeps an empty profile catalog empty instead of offering global models", async () => {
     renderFields({ agent: mockAgent, setting: mockSetting, onChange: vi.fn() });
     await screen.findByText("No models found.");
-    const selector = screen.getByRole("button", { name: "Profile start model settings" });
+    const selector = screen.getByRole("button", { name: MODEL_SELECTOR_LABEL });
     expect(selector.textContent).toContain("gpt-4");
     fireEvent.click(selector);
     expect(screen.queryByRole("option", { name: "GPT-3.5" })).toBeNull();
@@ -111,7 +123,7 @@ describe("AgentSetupFields", () => {
     };
     renderFields({ agent, setting: mockSetting, onChange: vi.fn() });
     expect(screen.queryByRole("button", { name: "Refresh models" })).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "Profile start model settings" }));
+    fireEvent.click(screen.getByRole("button", { name: MODEL_SELECTOR_LABEL }));
     expect(screen.getByRole("option", { name: "GPT-3.5" })).toBeTruthy();
     expect(probeAgentProfileMock).not.toHaveBeenCalled();
   });
@@ -247,7 +259,7 @@ it("forwards the profile error with its unsupported status and keeps the collaps
       <StepAgents
         availableAgents={[mockAgent]}
         tools={[]}
-        agentSettings={{ "test-agent": mockSetting }}
+        agentSettings={{ [TEST_AGENT_NAME]: mockSetting }}
         loading={false}
         onUpdateSetting={vi.fn()}
       />
@@ -268,4 +280,86 @@ it("forwards a localized fallback when a failed profile probe has no error text"
   await screen.findByRole("alert");
   await waitFor(() => expect(onStatusChange).toHaveBeenCalledWith("failed", expect.any(String)));
   expect(onStatusChange.mock.calls.at(-1)?.[1]).toBe(screen.getByRole("alert").textContent);
+});
+
+// @covers AC-AGENTS-FIRST-RUN-SETUP-002.4
+it("uses the shared selector for profile-context reasoning options without editing them on open", async () => {
+  probeAgentProfileMock.mockResolvedValue(capabilityResponse([{ id: "gpt-4", name: "GPT-4" }]));
+  resolveAgentModelConfigMock.mockResolvedValue({
+    agent_name: TEST_AGENT_NAME,
+    model: "gpt-4",
+    status: "ok",
+    error: null,
+    context_revision: "rev-1",
+    config_options: [
+      {
+        id: "reasoning",
+        name: "Reasoning",
+        type: "select",
+        category: "thought_level",
+        current_value: "low",
+        options: [
+          { value: "low", name: "Low" },
+          { value: "high", name: "High" },
+        ],
+      },
+    ],
+  });
+  const onChange = vi.fn();
+  function Form() {
+    const [setting, setSetting] = useState(mockSetting);
+    return (
+      <AgentSetupFields
+        agent={mockAgent}
+        setting={setting}
+        onChange={(patch) => {
+          onChange(patch);
+          setSetting((current) => ({ ...current, draft: { ...current.draft, ...patch } }));
+        }}
+      />
+    );
+  }
+  render(
+    <TooltipProvider>
+      <Form />
+    </TooltipProvider>,
+  );
+  await waitFor(() =>
+    expect(resolveAgentModelConfigMock).toHaveBeenCalledWith(
+      TEST_AGENT_NAME,
+      expect.objectContaining({ profile_id: "profile-1", model: "gpt-4" }),
+    ),
+  );
+  expect(onChange).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole("button", { name: MODEL_SELECTOR_LABEL }));
+  fireEvent.click(await screen.findByRole("button", { name: /Reasoning/ }));
+  fireEvent.click(await screen.findByRole("button", { name: /^High$/ }));
+  expect(onChange).toHaveBeenCalledWith({ config_options: { reasoning: "high" } });
+});
+
+it("keeps discovery and options when a provider is collapsed and reopened", async () => {
+  probeAgentProfileMock.mockResolvedValue(capabilityResponse([{ id: "gpt-4", name: "GPT-4" }]));
+  render(
+    <TooltipProvider>
+      <StepAgents
+        availableAgents={[mockAgent]}
+        tools={[]}
+        agentSettings={{ [TEST_AGENT_NAME]: mockSetting }}
+        loading={false}
+        onUpdateSetting={vi.fn()}
+      />
+    </TooltipProvider>,
+  );
+  const trigger = screen.getByRole("button", { name: /Test Agent/ });
+  fireEvent.click(trigger);
+  await waitFor(() => expect(resolveAgentModelConfigMock).toHaveBeenCalledTimes(1));
+  fireEvent.click(trigger);
+  fireEvent.click(trigger);
+  await waitFor(() =>
+    expect(
+      (screen.getByRole("button", { name: MODEL_SELECTOR_LABEL }) as HTMLButtonElement).disabled,
+    ).toBe(false),
+  );
+  expect(probeAgentProfileMock).toHaveBeenCalledTimes(1);
+  expect(resolveAgentModelConfigMock).toHaveBeenCalledTimes(1);
 });

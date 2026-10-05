@@ -258,3 +258,69 @@ it("updates setting and marks dirty correctly", () => {
 
   expect(settings[TEST_AGENT_NAME].dirty).toBe(false);
 });
+
+// @covers AC-AGENTS-FIRST-RUN-SETUP-003.1
+it("saves only changed model options and retains their latest edit during a save", async () => {
+  let finishSave!: () => void;
+  actionMocks.updateAgentProfileAction.mockImplementationOnce(
+    () =>
+      new Promise<void>((resolve) => {
+        finishSave = resolve;
+      }),
+  );
+  const { result } = renderActions();
+  act(() =>
+    result.current.updateSetting(TEST_AGENT_NAME, { config_options: { reasoning: "high" } }),
+  );
+  let save!: Promise<void>;
+  act(() => {
+    save = result.current.handleNext();
+  });
+  expect(actionMocks.updateAgentProfileAction).toHaveBeenCalledWith("profile-1", {
+    config_options: { reasoning: "high" },
+  });
+  act(() =>
+    result.current.updateSetting(TEST_AGENT_NAME, { config_options: { reasoning: "low" } }),
+  );
+  await act(async () => {
+    finishSave();
+    await save;
+  });
+  await act(async () => result.current.handleGetStarted());
+  expect(actionMocks.updateAgentProfileAction).toHaveBeenLastCalledWith("profile-1", {
+    config_options: { reasoning: "low" },
+  });
+});
+
+it("waits for model-option reconciliation before saving a changed model", async () => {
+  const dirty = {
+    ...initialSettings,
+    [TEST_AGENT_NAME]: {
+      ...initialSettings[TEST_AGENT_NAME],
+      draft: { model: UPDATED_MODEL, cli_passthrough: false },
+      dirty: true,
+    },
+  };
+  const setStep = vi.fn();
+  const { result, rerender } = renderHook(
+    ({ pending }) =>
+      useOnboardingActions({
+        step: 0,
+        setStep,
+        onComplete: vi.fn(),
+        agentSettings: dirty,
+        setAgentSettings: vi.fn(),
+        isModelConfigPending: pending,
+      }),
+    { initialProps: { pending: true } },
+  );
+  await act(async () => result.current.handleNext());
+  expect(actionMocks.updateAgentProfileAction).not.toHaveBeenCalled();
+  expect(setStep).not.toHaveBeenCalled();
+  rerender({ pending: false });
+  await act(async () => result.current.handleNext());
+  expect(actionMocks.updateAgentProfileAction).toHaveBeenCalledWith("profile-1", {
+    model: UPDATED_MODEL,
+  });
+  expect(setStep).toHaveBeenCalledWith(1);
+});
