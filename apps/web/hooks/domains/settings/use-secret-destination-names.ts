@@ -47,7 +47,8 @@ export function useSecretDestinationNames(
     if (key === cacheKeyRef.current) {
       return;
     }
-    cacheKeyRef.current = key;
+    // A pending or abandoned read is not a reusable cache entry.
+    cacheKeyRef.current = "";
     if (!workspaceId) {
       setWorkspaceNames([]);
       setWorkspaceLoaded(true);
@@ -68,6 +69,7 @@ export function useSecretDestinationNames(
       })
       .finally(() => {
         if (!cancelled) {
+          cacheKeyRef.current = key;
           setWorkspaceLoaded(true);
         }
       });

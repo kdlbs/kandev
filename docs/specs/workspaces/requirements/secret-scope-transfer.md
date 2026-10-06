@@ -28,6 +28,14 @@ Moving a credential between a workspace and the user's Global set (or between wo
 - **AC-WORKSPACES-SECRET-SCOPE-TRANSFER-001.7:** **Move** copies the secret to the destination and then removes the source, as one atomic operation. The dialog states that the original will be removed from its current scope.
 - **AC-WORKSPACES-SECRET-SCOPE-TRANSFER-001.8:** Workspace-to-workspace copy/move is supported through the destination picker.
 
+- **AC-WORKSPACES-SECRET-SCOPE-TRANSFER-001.9:** When a user leaves a workspace destination before its name lookup finishes, then returns to the same destination in the mounted Copy/Move dialog, the destination pre-check shall obtain current names. A result abandoned on the earlier visit shall not supply the current pre-check. Once the current lookup returns a matching trimmed target name, the existing inline conflict message and invalid name field shall appear, and Copy or Move shall be unavailable until the name is changed.
+- **AC-WORKSPACES-SECRET-SCOPE-TRANSFER-001.10:** A completed destination-name pre-check shall remain reusable on return to that workspace within the same transfer session while its single cached entry has not been invalidated by a different workspace read or explicit refresh. A new transfer session shall refresh destination names; switching workspaces shall not publish names from an abandoned lookup for another workspace. Global names shall continue to reflect the Global secret collection.
+- **AC-WORKSPACES-SECRET-SCOPE-TRANSFER-001.11:** If the current destination-name lookup fails, the pre-check shall remain best-effort: it shall not invent a name conflict or prevent an otherwise valid submission solely because the lookup failed. The backend shall remain authoritative for atomic duplicate-name rejection, and the existing name-field conflict and generic transfer-failure handling shall remain available on desktop and phone.
+
+## Exclusions
+
+This recovery does not change transfer payloads, authorization, atomic copy/move behavior, secret values, destination selection rules, or dialog presentation. It does not introduce a new loading restriction on submission or a background polling/retry policy.
+
 ## System design
 
 The migrated technical source is split into [part 1](../system-design/secret-scope-transfer.md).
