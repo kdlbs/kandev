@@ -6,7 +6,7 @@ system: coordinator
 owners:
   - kandev
 created: 2026-09-28
-last_updated: 2026-09-28
+last_updated: 2026-10-06
 requirements:
   - REQ-COORDINATOR-COPILOT-004
   - REQ-COORDINATOR-COPILOT-005
@@ -27,7 +27,7 @@ starts are designed in [copilot](copilot.md).
 
 | Requirement | Design section |
 | --- | --- |
-| `REQ-COORDINATOR-COPILOT-004` | [Panel](#panel) |
+| `REQ-COORDINATOR-COPILOT-004` | [Panel](#panel), [Path reset boundary](#path-reset-boundary) |
 | `REQ-COORDINATOR-COPILOT-005` | [Ask about this](#ask-about-this) |
 | `REQ-COORDINATOR-COPILOT-006` | [Activity display](#activity-display) |
 
@@ -99,10 +99,10 @@ below describe the copilot after task 11.
   draft}`, one shape used by this section and [Ask about this](#ask-about-this).
   It is an in-memory client store, not a component state, so it survives the
   page swap between Needs you and Queue (separate routes in
-  `spa-routes.tsx`). The copilot controller that both screens render keeps it
-  while the path stays under `/workspaces/:id/coordinator/:coordinatorId` with
-  the same id, and resets it to closed, no chip and no draft on any other path
-  or coordinator id. Closing the panel changes only `open`, so reopening it on
+  `spa-routes.tsx`). `CoordinatorCopilotResetBridge`, mounted in `app-shell.tsx`,
+  keeps it only for the same coordinator's recognized Needs you or Queue path
+  and resets it on other paths through the [path reset boundary](#path-reset-boundary).
+  Closing the panel changes only `open`, so reopening it on
   the same coordinator's screens shows the same chip and draft. It is not
   persisted, so a reload starts closed with no chip and no draft
   (`AC-COORDINATOR-COPILOT-004.12`).
@@ -123,6 +123,48 @@ below describe the copilot after task 11.
 - A Playwright check at a 1440px viewport with the sidebar expanded and the
   default width asserts the panel is inline and overlaps no item action; a
   second check at a narrower viewport asserts it floats with a backdrop.
+
+## Path reset boundary
+
+`AC-COORDINATOR-COPILOT-004.12` is enforced by the bridge's pathname effect,
+`coordinatorIdFromPath` in `hooks/domains/coordinator/coordinator-path.ts`,
+and `useCopilotStore.keepOnlyFor`. The helper returns a coordinator identity
+only for `/workspaces/:workspaceId/coordinator/:coordinatorId`, optionally
+followed by `/queue`, with an optional final slash on either view. The generic
+coordinator page, missing components, other suffixes and unrelated pages
+return `null`.
+
+Capture both raw path components and apply the existing
+`lib/routing/path.ts::safeDecodePathSegment` once to each through its existing
+`matchDouble` helper. Both must decode
+successfully before returning the coordinator identity. An invalid escape or
+invalid UTF-8 sequence in either component returns `null`, never an exception.
+Do not decode the whole pathname or split a decoded component: encoded slashes
+are opaque identity content, and a valid decoded percent must not be decoded
+again. The helper's return type and coordinator-only slot ownership stay intact;
+validating the workspace does not add a workspace key or membership lookup.
+
+`src/spa-routes.tsx::resolveCoordinatorRoute` already safely decodes both
+components and declines invalid routes. This local recognition uses the same
+decoder without importing the SPA graph, changing its fallback, or introducing
+a shared router policy. `lib/routing/client-router.ts::useParams` has a separate
+decoder and is outside this boundary; this design makes no universal
+malformed-route or full-SPA safety claim.
+
+The bridge continues to read the real `usePathname` subscription and pass the
+helper result to `keepOnlyFor`. A different coordinator or `null` resets the
+single in-memory slot, including `draftsSwept`; the same coordinator preserves
+the complete entry. Close/reopen uses `setOpen` and preserves chip/draft.
+No store, controller, transport, conversation or persistence change is needed.
+
+Regression evidence belongs at two levels: direct helper input/output tests
+and a mounted bridge with the actual native pathname subscription, history and
+popstate events, real Zustand store, and a React error boundary with a mounted
+marker. Assert complete slot preservation/reset and marker survival, rather
+than a copied parser or mocked pathname. This is viewport-independent state
+normalization inside the existing bridge. It changes no layout, touch, scroll,
+navigation or copy contract; targeted helper/component evidence satisfies the
+mobile-parity pure-state exception without a new browser/E2E scenario.
 
 ## Activity display
 

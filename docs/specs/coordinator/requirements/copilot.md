@@ -6,7 +6,7 @@ system: coordinator
 owners:
   - kandev
 created: 2026-09-26
-last_updated: 2026-09-29
+last_updated: 2026-10-06
 ---
 
 # Coordinator copilot and tool surface Requirements
@@ -266,6 +266,12 @@ Mockup:
   chip and the draft. Closing the panel (Close, Escape or the backdrop) and
   opening it again on the same coordinator's screens shall keep the chip and
   the draft. A reload shall leave the panel closed with no chip and no draft.
+  An undecodable workspace or coordinator path component shall count as
+  leaving those screens: it shall clear the slot without a copilot reset
+  error. Valid encoded identities shall retain their exact once-decoded
+  value, including a literal percent or encoded slash. Only Needs you and
+  its optional Queue suffix, each with an optional trailing slash, retain
+  the slot; the generic coordinator page and unsupported suffixes clear it.
 - **AC-COORDINATOR-COPILOT-004.13:** The board's task preview panel shall
   behave as before: the same layout rule, resize bounds, persisted width,
   Escape and backdrop close, and maximize action.
