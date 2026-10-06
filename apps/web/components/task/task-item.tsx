@@ -32,6 +32,7 @@ import {
 } from "./task-row-presentation";
 import { TaskItemTrailing, type DiffStats } from "./task-item-trailing";
 import { TaskStateIcon } from "./task-state-icon";
+import { useIsTitleTruncated } from "@/hooks/use-is-title-truncated";
 
 type TaskItemProps = {
   title: string;
@@ -199,7 +200,12 @@ function pendingRemovalRowProps(isPendingRemoval?: boolean) {
 }
 
 function TaskItemTitle({ title }: { title: string }) {
-  return <ScrollOnOverflow className="min-w-0">{title}</ScrollOnOverflow>;
+  const { ref, isTruncated } = useIsTitleTruncated<HTMLSpanElement>(title);
+  return (
+    <ScrollOnOverflow ref={ref} className="sidebar-task-title min-w-0" data-truncated={isTruncated}>
+      {title}
+    </ScrollOnOverflow>
+  );
 }
 
 type TaskItemContentProps = {

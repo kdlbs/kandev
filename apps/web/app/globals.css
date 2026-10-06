@@ -657,6 +657,18 @@ html[data-rendering-engine="webkit"] [data-webkit-safe-motion="true"][data-state
   background: var(--scrollbar-thumb-hover);
 }
 
+.sidebar-task-title[data-truncated="true"] {
+  mask-image: linear-gradient(to right, #000 calc(100% - 16px), transparent 100%);
+  -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 16px), transparent 100%);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .sidebar-task-title[data-truncated="true"]:hover {
+    mask-image: none;
+    -webkit-mask-image: none;
+  }
+}
+
 @media (hover: hover) and (pointer: fine) {
   .task-sidebar-scroll-root [data-slot="scroll-area-scrollbar"] {
     opacity: 0;
