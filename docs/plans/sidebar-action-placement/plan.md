@@ -214,6 +214,11 @@ PR CI fixup on 2026-10-05:
 - Reproduced the original CI failure twice in four constrained CI-image runs; the corrected test passed four of four constrained runs.
 - The complete `mobile-navigation-hierarchy.spec.ts` passed all four tests in the constrained CI image with retries disabled.
 
+PR CI fixup on 2026-10-06:
+
+- Updated the plugin action UX E2E to expect the 24px native sidebar action and plugin controls inline when they fit, wrapping below when needed.
+- The complete `plugin-action-ux.spec.ts` passed all three tests in the constrained CI image with retries disabled.
+
 ## Risks
 
 - Many workspace plugin actions can squeeze a compact row. Wrapping must preserve the built-in controls.

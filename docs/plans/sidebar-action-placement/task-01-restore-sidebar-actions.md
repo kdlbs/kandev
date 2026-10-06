@@ -219,3 +219,8 @@ PR CI fixup on 2026-10-05:
 - Fixed the phone drawer geometry E2E to wait for finite drawer animations before comparing parent and child bounds.
 - Reproduced the original CI failure twice in four constrained CI-image runs; the corrected test passed four of four constrained runs.
 - The complete `mobile-navigation-hierarchy.spec.ts` passed all four tests in the constrained CI image with retries disabled.
+
+PR CI fixup on 2026-10-06:
+
+- Replaced stale plugin-action geometry assumptions with the 24px native action size and inline-or-wrapped plugin placement contract.
+- The complete `plugin-action-ux.spec.ts` passed all three tests in the constrained CI image with retries disabled.
