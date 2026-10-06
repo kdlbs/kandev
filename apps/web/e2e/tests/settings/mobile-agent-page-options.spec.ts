@@ -15,6 +15,7 @@ test.describe("Mobile agent page options", () => {
     );
     if (!agent) throw new Error("The seeded profile owner was not available");
     const profile = await apiClient.createAgentProfile(agent.id, `Mobile options ${Date.now()}`, {
+
       model: "mock-fast",
     });
     try {
