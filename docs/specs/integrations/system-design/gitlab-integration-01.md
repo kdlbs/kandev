@@ -4,7 +4,7 @@ system: integrations
 requirements:
   - REQ-INTEGRATIONS-GITLAB-INTEGRATION-001
 created: 2026-05-04
-updated: 2026-08-05
+updated: 2026-10-06
 owners:
   - tbd
 ---
@@ -19,6 +19,76 @@ This design preserves the technical source detail for `REQ-INTEGRATIONS-GITLAB-I
 | Requirement | Design section |
 | --- | --- |
 | `REQ-INTEGRATIONS-GITLAB-INTEGRATION-001` | [Migrated source detail](#migrated-source-detail) |
+| `AC-INTEGRATIONS-GITLAB-INTEGRATION-001.5`, `.8`, `.9` | [Workspace browse pagination](#workspace-browse-pagination) |
+
+## Workspace browse pagination
+
+This pagination extension is delivered by the
+[workspace-pagination plan](../../../plans/gitlab-workspace-pagination/plan.md).
+Integrations owns it because search uses a workspace's GitLab connection and
+provider-specific browse state. The existing requirement and this split design
+have room for the extension; no independent UI specification or new ADR is
+needed.
+
+### Components and state
+
+- `apps/web/app/gitlab/use-gitlab-page-state.ts` calls `useGitLabSearch` with
+  the requested workspace, selected MR/issue kind, effective preset, committed
+  query/milestone, project filter, and connection gate. Its selection and
+  milestone event handlers already own their explicit page resets.
+- `apps/web/components/gitlab/my-gitlab/use-gitlab-search.ts` owns local page
+  state, page size 25, transport dispatch, refresh, and the existing monotonic
+  `requestSeq` response guard. The reset effect includes `workspaceId` in its
+  dependencies beside `preset`, `customQuery`, and `kind`. Preserve all other
+  dependencies, data paths, and exposed return values.
+- `apps/web/app/gitlab/gitlab-page-client.tsx` passes search items/loading/error
+  to its existing `MRList` or `IssueList`, and search page/pageSize/total/setPage
+  to `ResultsPagination`. The latter renders no navigation for a single-page
+  result set and clamps display values without fetching another page. Fix page
+  ownership in the hook; consumer markup is unchanged.
+
+### Transition and response handling
+
+A workspace change schedules page 1 regardless of the prior page or result
+kind. Remaining in the same workspace with equal reset inputs preserves the
+page. Returning A -> B -> A begins A at page 1 rather than restoring A's old
+page. A disabled or missing-workspace search still admits no transport call;
+when enabled with a workspace it uses the resulting page and existing inputs.
+
+React effect ordering can admit a new-workspace request with the old page
+before admitting page 1. There is no request-count or duplicate-suppression
+contract for this transition. The existing `requestSeq` guard rejects success
+and failure from superseded requests, including the preceding workspace or
+the new workspace's superseded later-page request. State's workspace stamp
+continues to mask old-workspace items while the replacement loads. Preserve
+the current loading, error, total, timestamp, refresh, and latest-page behavior;
+do not introduce a coordinator, generation layer, cancellation, or cache.
+
+Milestone changes retain the hook's existing refetch-without-reset behavior;
+page-state milestone commits retain their explicit event reset. Project
+filtering remains client-side narrowing of the fetched page with server total
+retained for pagination. Transport shapes and workspace authorization are
+unchanged: MR uses `searchUserMRs`, issue uses `searchUserIssues` with milestone.
+
+### Verification boundary
+
+Permanent regressions exercise both transport routes through the real hook.
+A component harness uses real `StateProvider`/store, tooltips, English locales,
+`MRList`, shared rows/native links, and `ResultsPagination`; partially mock
+only the search transport functions with independent paged workspace datasets
+and deferred responses. Prove navigation to A page 3, switching to a one-result
+B, B's native first-page link, and the actual presence/absence of pagination.
+Include initial-small-workspace and same-workspace positive controls. Late
+success/failure must not replace the accepted page-1 result or its settled
+state. The [work order](../../../plans/gitlab-workspace-pagination/task-01-reset-workspace-page.md)
+maps these outcomes to exact suites and commands.
+
+This is shared state normalization only. Desktop and phone use the same
+search outcome; layout, navigation, scrolling, touch targets, labels, and
+breakpoints do not change. Targeted real-consumer tests satisfy the
+mobile-parity pure-state exception; no browser/build/Playwright change is
+required. No persistence, backend, permissions, instrumentation, or other
+provider policy changes are introduced.
 
 ## Migrated source detail
 

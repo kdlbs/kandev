@@ -2,7 +2,7 @@
 status: active
 system: integrations
 created: 2026-05-04
-updated: 2026-08-05
+updated: 2026-10-06
 owners:
   - tbd
 ---
@@ -28,6 +28,12 @@ Teams whose code lives on GitLab cannot complete the same task, review, and auto
 - **AC-INTEGRATIONS-GITLAB-INTEGRATION-001.6:** Task creation is the narrow unauthenticated exception: branch discovery for an explicitly entered public `gitlab.com` repository URL works without a saved workspace connection. It does not expose private projects, browse results, merge requests, issues, or write actions.
 - **AC-INTEGRATIONS-GITLAB-INTEGRATION-001.7:** GitLab repository matching uses provider, normalized provider host, and full subgroup project path. Repositories with unknown or mismatched provider hosts are not eligible for GitLab linking or merge-request actions. Decision: ADR-2026-07-20-repository-provider-origin-identity.
 - **AC-INTEGRATIONS-GITLAB-INTEGRATION-001.8:** Users can browse and search merge requests and issues, then launch a task from either row with the same configurable action presets used by GitHub.
+- **AC-INTEGRATIONS-GITLAB-INTEGRATION-001.9:** When the selected workspace changes during merge-request or issue browsing, the result page shall reset to page 1 of the new workspace. A populated first page shall remain reachable even when the new workspace has fewer pages than the previous workspace. Ordinary page navigation and unchanged search inputs within the same workspace shall preserve the selected page. Existing preset, custom-query, and result-kind changes shall continue to reset the page; workspace switching shall retain current-workspace result visibility, latest-request response handling, and the existing disabled, refresh, empty, and failure behavior.
+
+Criterion .9 is the pagination clarification delivered by the
+[workspace-pagination package](../../../plans/gitlab-workspace-pagination/plan.md).
+Its local implementation and behavioral verification are complete; hosted
+review, CI, and merge remain pending. Unrelated criteria retain their lifecycle.
 
 ## System design
 
