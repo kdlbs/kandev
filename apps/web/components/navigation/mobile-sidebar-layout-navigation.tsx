@@ -332,7 +332,7 @@ function MobileBuiltinNodeContent(props: MobileLayoutNodeProps) {
     ) : null;
   }
   if (node.destinationId === "new_task")
-    return omitDestinations.includes("new_task") ? null : (
+    return omitSections.has("primary") || omitDestinations.includes("new_task") ? null : (
       <MobileNewTaskRow onNavigate={onNavigate} />
     );
   if (node.destinationId === "integrations" && omitSections.has("integrations")) return null;
