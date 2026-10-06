@@ -337,3 +337,54 @@ controls at widths 390/1024. Root/scoped AGENTS and provider/authorization owner
 need no edit. Protected ROOT candidates/receipts remain read-only and untouched.
 Ready PR publication and hosted evidence follow the delivery barriers above;
 merge requires a separate ROOT serial lease and interrupt.
+
+
+## Reviewed corrective checkpoint
+
+ROOT accepted one current-head regression at `2fb6aad5`: successful removal
+dismisses a dialog whose target changed while DELETE was pending. Task01 is
+reopened only for causal real-consumer coverage and the smallest success guard
+that distinguishes a genuine target change from removal's own config/reset.
+The first hosted observer joined at its deadline with no verdict; its process
+groups are gone. Acceptance receipt:
+`/tmp/kandev-root-child59-observer-deadline-finding-acceptance-20261006.json`.
+
+Exclusive local-heavy lease granted; merge lease absent. Run only affected dialog
+and real-section regressions, changed lint/format, project typecheck/i18n,
+documentation and actual coverage checks, then normal hooks and corrective push.
+Resolve both accepted review threads individually. After clean aligned
+heavyRETURN, ROOT authorizes exactly one new-head 90-minute all-terminal observer
+under GNU 91-minute timeout/10-second kill, retained and joined before any
+successor. No verdict on deadline or lost results; serial merge remains a
+separate ROOT interrupt.
+
+
+Corrective result: four independently authored real-section/dialog cases failed
+causally at the committed review head, after admitted DELETE and genuine form
+or background-GET target changes, on phone and desktop. Receipts
+`correction-target-red` and `correction-read-red` each show two causal failures.
+The minimal private pre-reset read callback snapshots the confirmation generation
+without changing the removal boolean, transport, refresh or reset semantics.
+Only success dismissal gains the missing genuine target check; failure retry
+and open/controller retirement retain their existing guards.
+
+`correction-dialog-green`: 28/28 in the two affected dialog suites, including
+current reset/dismissal, removal retry, first-save/provider-switch and retired
+closed/reopened controls. `correction-lint`, `correction-format-write`,
+`correction-typecheck` and `correction-i18n` pass. All these originals joined
+and their PID/groups are gone. No unchanged hook or adjacent suite was replayed;
+no reinstall, backend or E2E check was run. Public guide, copy, API, layout and
+mobile data-only audit remain unchanged. The four cases use real hook, providers,
+section/dialog and API; only fetch transport and actual reload boundary are
+mocked. Their matching existing control preserves current successful removal
+and its own reset. Detailed original receipts remain private under
+`/tmp/kandev-child59-correction-*.json` and `.log`.
+
+
+Corrective documentation checks: `correction-docs-validate` validates 357
+decisions/1,411 specs; `correction-docs-lint` passes all specs;
+`correction-docs-links` checks 14 links, eight ACs and the one order;
+`correction-docs-coverage` reports actual changed paths covered with `errors: []`;
+`correction-whitespace`, `correction-format-check` and `correction-ratchet` pass.
+The unchanged 36-test spec-linter suite was not replayed. Final normal hooks and
+publication receipts are maintained in the live task plan.

@@ -148,8 +148,15 @@ Do not reuse removal's `targetKey` generation blindly for save. A successful
 save itself updates config and can change `workflowSyncConfirmationTarget`,
 especially the first save or a provider change; that must still close the
 current dialog. Successful removal's own config/reset must likewise keep its
-current dismissal admitted. Preserve target-sensitive confirmation retry guards
-separately; a changed target suppresses an old failure's retry publication. Bind dialog completion to the hook's local owner identity
+current dismissal admitted. Preserve target-sensitive confirmation success and
+failure guards separately from the open/controller lifetime. Compare the
+confirmation generation captured before dispatch with its value immediately
+before successful removal publishes its own config/reset. A genuine target
+change during the request suppresses delayed dismissal; the removal's own reset
+does not. A failed removal compares the generation before publishing retry state.
+The controller may accept a private read-only callback at this pre-reset boundary;
+the admitted removal's boolean outcome and server mutation remain truthful.
+Bind dialog completion to the hook's local owner identity
 using the smallest controller-only addition if necessary; no API/outcome shape
 change is required. Updating `onOpenChange` within the same dialog must not
 allow an old closure to publish through a superseded callback. The current

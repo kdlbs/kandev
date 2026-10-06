@@ -360,27 +360,31 @@ function useWorkflowSyncActions({
     }
   }, [workspaceId, form, toast, reset, lifetime]);
 
-  const handleDelete = useCallback(async () => {
-    if (!lifetime.active) return false;
-    try {
-      await deleteWorkflowSyncConfig({ workspaceId });
-      if (!lifetime.active) return true;
-      setConfig(null);
-      reset(null);
-      toast({ description: t("workflows:syncRemoved") });
-      // Released workflows lose their read-only state server-side; reload the
-      // page data so the cards unlock without a manual refresh.
-      router.refresh();
-      return true;
-    } catch (err) {
+  const handleDelete = useCallback(
+    async (beforeReset?: () => void) => {
       if (!lifetime.active) return false;
-      toast({
-        description: t("workflows:syncRemoveFailed", { error: String(err) }),
-        variant: "error",
-      });
-      return false;
-    }
-  }, [workspaceId, toast, reset, router, lifetime]);
+      try {
+        await deleteWorkflowSyncConfig({ workspaceId });
+        if (!lifetime.active) return true;
+        beforeReset?.();
+        setConfig(null);
+        reset(null);
+        toast({ description: t("workflows:syncRemoved") });
+        // Released workflows lose their read-only state server-side; reload the
+        // page data so the cards unlock without a manual refresh.
+        router.refresh();
+        return true;
+      } catch (err) {
+        if (!lifetime.active) return false;
+        toast({
+          description: t("workflows:syncRemoveFailed", { error: String(err) }),
+          variant: "error",
+        });
+        return false;
+      }
+    },
+    [workspaceId, toast, reset, router, lifetime],
+  );
 
   const handleSyncNow = useCallback(async () => {
     if (!lifetime.active) return;

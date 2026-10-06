@@ -65,9 +65,11 @@ owned by the [workspace authorization contract](../../tasks/requirements/workflo
 - **AC-INTEGRATIONS-GITLAB-WORKFLOW-SYNC-002.7:** An admitted dialog save or
   removal shall dismiss only its still-current open dialog. Closing, reopening,
   replacing, or unmounting the dialog shall retire its delayed dismissal.
-  A configuration returned by that same current save shall not by itself
-  prevent successful dismissal. Current failures shall retain the existing
-  error and retry behavior.
+  A configuration returned by that same current save, or removal's own
+  config/form reset, shall not by itself prevent successful dismissal.
+  A genuine removal target change while the request is pending shall suppress
+  that confirmation's delayed dismissal or failure retry publication. Current
+  failures shall retain the existing error and retry behavior.
 - **AC-INTEGRATIONS-GITLAB-WORKFLOW-SYNC-002.8:** Desktop and phone shall share
   these lifetime rules through the existing controls. Current form parsing,
   provider selection, save/reset behavior, status-only background reads,

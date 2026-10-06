@@ -423,9 +423,14 @@ export function WorkflowSyncDialog({ open, onOpenChange, sync }: WorkflowSyncDia
   const handleRemove = async () => {
     if (!completion.active) return;
     const requestGeneration = generation.current;
-    const removed = await sync.handleDelete();
+    let successGeneration = requestGeneration;
+    const removed = await sync.handleDelete(() => {
+      // Read the target before removal's own config/reset changes it.
+      successGeneration = generation.current;
+    });
     if (!completion.active) return;
     if (removed) {
+      if (successGeneration !== requestGeneration) return;
       committedOpenChange.current(false);
       return;
     }

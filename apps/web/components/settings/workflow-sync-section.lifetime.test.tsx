@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { INTEGRATION_STATUS_REFRESH_MS } from "@/hooks/domains/integrations/use-integration-availability";
 import { WorkflowSyncSection } from "./workflow-sync-section";
 import {
   config,
@@ -29,6 +30,7 @@ afterEach(async () => {
   cleanup();
   await act(async () => wire.drain());
   vi.restoreAllMocks();
+  vi.useRealTimers();
 });
 
 function Harness({
@@ -134,6 +136,64 @@ describe("real workflow-sync section/dialog transport integration", () => {
     expect(screen.getByTestId(DIALOG_TEST_ID)).toBeTruthy();
     expect(window.location.reload).toHaveBeenCalledTimes(1);
   });
+});
+
+describe("removal target changes", () => {
+  it.each([390, 1024])(
+    "genuine target read at %s keeps the dialog open after successful removal",
+    async (width) => {
+      phone(width);
+      vi.useFakeTimers();
+      const changed = vi.fn();
+      await act(async () => render(<Harness changed={changed} />));
+      expect((screen.getByTestId(SAVE_TEST_ID) as HTMLButtonElement).disabled).toBe(false);
+      const removed = wire.hold("DELETE");
+      await act(async () => {
+        fireEvent.click(screen.getByTestId(REMOVE_TEST_ID));
+      });
+      await act(async () => {
+        fireEvent.click(screen.getByTestId(CONFIRM_TEST_ID));
+      });
+      expect(wire.requests.filter((r) => r.method === "DELETE")).toHaveLength(1);
+      const read = wire.hold("GET");
+      await act(async () => vi.advanceTimersByTime(INTEGRATION_STATUS_REFRESH_MS));
+      expect(wire.requests.filter((r) => r.method === "GET")).toHaveLength(2);
+      await act(async () => read.resolve(config("A", { repo_name: "replacement" })));
+      expect(screen.queryByTestId(CONFIRM_TEST_ID)).toBeNull();
+      expect(changed).not.toHaveBeenCalled();
+      expect(window.location.reload).not.toHaveBeenCalled();
+      await act(async () => removed.resolve({ deleted: true }));
+      expect(changed).not.toHaveBeenCalled();
+      expect(screen.getByTestId(DIALOG_TEST_ID)).toBeTruthy();
+      expect(window.location.reload).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it.each([390, 1024])(
+    "genuine target edit at %s keeps the dialog open after successful removal",
+    async (width) => {
+      phone(width);
+      const changed = vi.fn();
+      render(<Harness changed={changed} />);
+      await ready();
+      const removed = wire.hold("DELETE");
+      fireEvent.click(screen.getByTestId(REMOVE_TEST_ID));
+      fireEvent.click(screen.getByTestId(CONFIRM_TEST_ID));
+      await waitFor(() =>
+        expect(wire.requests.filter((r) => r.method === "DELETE")).toHaveLength(1),
+      );
+      fireEvent.change(screen.getByTestId(URL_TEST_ID), {
+        target: { value: "https://github.com/team/replacement" },
+      });
+      expect((screen.getByTestId(URL_TEST_ID) as HTMLInputElement).value).toContain("replacement");
+      expect(changed).not.toHaveBeenCalled();
+      await act(async () => removed.resolve({ deleted: true }));
+      expect(changed).not.toHaveBeenCalled();
+      expect(screen.getByTestId(DIALOG_TEST_ID)).toBeTruthy();
+      expect(window.location.reload).toHaveBeenCalledTimes(1);
+      expect(wire.requests.find((r) => r.method === "DELETE")?.workspace).toBe("A");
+    },
+  );
 });
 
 describe("replacement section/dialog settlement", () => {

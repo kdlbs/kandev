@@ -23,7 +23,8 @@ workspace-authorization package is an independent contract and remains unchanged
 
 The four-artifact design handoff was reviewed by ROOT, which released Task 01
 in this same primary session, profile and executor and granted the exclusive
-global local-heavy lease. Implementation and local checks are complete; merge is not released.
+global local-heavy lease. Initial implementation and the reviewed removal-success target-change
+correction are complete; delivery checks continue and merge is not released.
 No delegation, task/session/tab or model change. The three-fix program does not
 authorize parallel child work.
 
@@ -200,3 +201,13 @@ merge commit/tree, owned contracts and remote inclusion, and join only-owned
 cleanup. Task completion requires verified merge and all owned closure. ROOT
 owns archiving, proof release and refill; preserve managed worktrees,
 dependencies, protected proofs and foreign resources.
+
+
+The reviewed corrective release accepted duplicate Greptile/Claude findings at
+`2fb6aad5`: a genuine pending-removal target change bypassed success dismissal
+admission. Task01 records causal RED for four actual consumer cases and GREEN
+for 28 affected dialog tests. A private generation snapshot before removal's own
+reset preserves the successful current dismissal and truthful admitted outcome.
+The initial hosted observer joined at deadline without a verdict; ROOT's
+acceptance receipt permits exactly one new-head observer after corrective
+commit/push and clean aligned heavyRETURN. Merge remains a separate ROOT lease.
