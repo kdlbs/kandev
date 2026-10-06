@@ -1,6 +1,10 @@
 import { useEffect, useMemo } from "react";
 import { useAppStore } from "@/components/state-provider";
-import { useSessionGitStatus, useSessionGitStatusByRepo } from "./use-session-git-status";
+import {
+  useSessionGitStatusSnapshots,
+  useSessionGitStatus,
+  useSessionGitStatusByRepo,
+} from "./use-session-git-status";
 import { useCumulativeDiff } from "./use-cumulative-diff";
 import {
   findReviewPRByKey,
@@ -39,6 +43,7 @@ type UncommittedFile = {
   deletions?: number;
   staged?: boolean;
   is_submodule?: boolean;
+  display_stale?: boolean;
   staged_change?: UncommittedChangeFacet;
   unstaged_change?: UncommittedChangeFacet;
 };
@@ -51,6 +56,7 @@ type UncommittedChangeFacet = {
   old_path?: string;
   additions?: number;
   deletions?: number;
+  display_stale?: boolean;
 };
 
 type CumulativeFile = {
@@ -71,12 +77,19 @@ type CumulativeFile = {
   is_submodule?: boolean;
 };
 
+type UncommittedFileContext = {
+  repositoryName?: string;
+  isSubmodule?: boolean;
+  defaultDiffState?: ReviewFile["diff_state"];
+  displayScopeKey?: string;
+};
+
 function addUncommittedFiles(
   fileMap: Map<string, ReviewFile>,
   files: Record<string, UncommittedFile>,
-  repositoryName?: string,
-  isSubmodule?: boolean,
+  context: UncommittedFileContext,
 ) {
+  const { repositoryName, isSubmodule, defaultDiffState, displayScopeKey } = context;
   for (const [path, file] of Object.entries(files)) {
     const diff = file.diff ? normalizeDiffContent(file.diff) : "";
     const skipReason = file.diff_skip_reason;
@@ -84,7 +97,7 @@ function addUncommittedFiles(
     fileMap.set(key, {
       path,
       diff,
-      diff_state: file.diff_state,
+      diff_state: file.diff_state ?? defaultDiffState,
       status: normalizeFileChangeStatus(file.status),
       additions: file.additions ?? 0,
       deletions: file.deletions ?? 0,
@@ -92,8 +105,16 @@ function addUncommittedFiles(
       source: "uncommitted",
       old_path: file.old_path,
       diff_skip_reason: skipReason,
-      staged_change: normalizeUncommittedFacet(file.staged_change),
-      unstaged_change: normalizeUncommittedFacet(file.unstaged_change),
+      display_stale: file.display_stale,
+      ...(displayScopeKey ? { display_scope_key: displayScopeKey } : {}),
+      staged_change: normalizeUncommittedFacet(
+        file.staged_change,
+        file.diff_state ?? defaultDiffState,
+      ),
+      unstaged_change: normalizeUncommittedFacet(
+        file.unstaged_change,
+        file.diff_state ?? defaultDiffState,
+      ),
       repository_name: repositoryName,
       is_submodule: file.is_submodule ?? isSubmodule,
     });
@@ -102,26 +123,34 @@ function addUncommittedFiles(
 
 function normalizeUncommittedFacet(
   facet: UncommittedChangeFacet | undefined,
+  defaultDiffState?: ReviewFile["diff_state"],
 ): ReviewChangeFacet | undefined {
   if (!facet) return undefined;
   return {
     diff: facet.diff ? normalizeDiffContent(facet.diff) : "",
-    diff_state: facet.diff_state,
+    diff_state: facet.diff_state ?? defaultDiffState,
     status: normalizeFileChangeStatus(facet.status),
     additions: facet.additions ?? 0,
     deletions: facet.deletions ?? 0,
     old_path: facet.old_path,
     diff_skip_reason: facet.diff_skip_reason,
+    display_stale: facet.display_stale,
   };
 }
+
+type CumulativeFileContext = {
+  uncommittedPaths: Set<string>;
+  useRepositoryKeys: boolean;
+  defaultBaseRef?: string;
+  sourceScopeKey?: string;
+};
 
 function addCumulativeFiles(
   fileMap: Map<string, ReviewFile>,
   files: Record<string, CumulativeFile>,
-  uncommittedPaths: Set<string>,
-  useRepositoryKeys: boolean,
-  defaultBaseRef?: string,
+  context: CumulativeFileContext,
 ) {
+  const { uncommittedPaths, useRepositoryKeys, defaultBaseRef, sourceScopeKey } = context;
   for (const [mapKey, file] of Object.entries(files)) {
     // Multi-repo cumulative payloads use a NUL-composite `<repo>\x00<path>`
     // map key and stamp the clean repo-relative path on `file.path`.
@@ -149,6 +178,7 @@ function addCumulativeFiles(
       diff_skip_reason: file.diff_skip_reason,
       repository_name: repositoryName,
       base_ref: file.base_ref ?? defaultBaseRef,
+      ...(sourceScopeKey ? { display_scope_key: sourceScopeKey } : {}),
       is_submodule: file.is_submodule,
     });
   }
@@ -159,6 +189,7 @@ function addPRFiles(
   files: PRDiffFile[],
   uncommittedPaths: Set<string>,
   repoName?: string,
+  sourceScopeKey?: string,
 ) {
   for (const file of files) {
     const key = reviewFileKey({ path: file.filename, repository_name: repoName });
@@ -173,10 +204,24 @@ function addPRFiles(
       staged: false,
       source: "pr",
       old_path: file.old_path,
+      ...(sourceScopeKey ? { display_scope_key: sourceScopeKey } : {}),
       repository_name: repoName,
       is_submodule: file.is_submodule,
     });
   }
+}
+
+function useRawPRFiles(
+  prDiffFiles: PRDiffFile[],
+  prRepoName: string | undefined,
+  pr: TaskPR | null,
+) {
+  return useMemo(() => {
+    if (!prDiffFiles.length) return [] as ReviewFile[];
+    const fileMap = new Map<string, ReviewFile>();
+    addPRFiles(fileMap, prDiffFiles, new Set(), prRepoName, pr ? `pr:${prTaskKey(pr)}` : undefined);
+    return Array.from(fileMap.values());
+  }, [prDiffFiles, prRepoName, pr]);
 }
 
 function collectPathsFromFiles(
@@ -219,15 +264,26 @@ function collectUncommittedPaths(
 }
 
 export type BuildReviewSourcesInput = {
-  gitStatus: { files?: Record<string, UncommittedFile>; is_submodule?: boolean } | undefined;
+  gitStatus:
+    | {
+        files?: Record<string, UncommittedFile>;
+        is_submodule?: boolean;
+        detail_state?: ReviewFile["diff_state"];
+      }
+    | undefined;
   statusByRepo:
     | Array<{
         repository_name: string;
-        status: { files?: Record<string, UncommittedFile>; is_submodule?: boolean };
+        status: {
+          files?: Record<string, UncommittedFile>;
+          is_submodule?: boolean;
+          detail_state?: ReviewFile["diff_state"];
+        };
       }>
     | undefined;
   cumulativeDiff: {
     base_commit?: string;
+    head_commit?: string;
     files?: Record<string, CumulativeFile>;
   } | null;
   prDiffFiles: PRDiffFile[] | undefined;
@@ -237,6 +293,9 @@ export type BuildReviewSourcesInput = {
   /** Whether review identities include repository_name. False keeps every
    * source bare during legacy/single-repository status hydration. */
   useRepositoryKeys?: boolean;
+  displayScopeByRepo?: Record<string, string>;
+  defaultDisplayScopeKey?: string;
+  prScopeKey?: string;
 };
 
 export type BuildReviewSourcesResult = {
@@ -287,32 +346,40 @@ export function normalizeReviewStatusSources(input: NormalizeReviewStatusSources
   };
 }
 
+type UncommittedSourceContext = {
+  statusByRepo: BuildReviewSourcesInput["statusByRepo"];
+  gitStatus: BuildReviewSourcesInput["gitStatus"];
+  useRepositoryKeys: boolean;
+  displayScopeByRepo: Record<string, string> | undefined;
+  defaultDisplayScopeKey: string | undefined;
+};
+
 function addUncommittedSources(
   fileMap: Map<string, ReviewFile>,
-  statusByRepo: BuildReviewSourcesInput["statusByRepo"],
-  gitStatus: BuildReviewSourcesInput["gitStatus"],
-  useRepositoryKeys: boolean,
+  context: UncommittedSourceContext,
 ) {
+  const { statusByRepo, gitStatus, useRepositoryKeys, displayScopeByRepo, defaultDisplayScopeKey } =
+    context;
   if (statusByRepo && statusByRepo.length > 0) {
     for (const { repository_name, status } of statusByRepo) {
       if (status?.files) {
-        addUncommittedFiles(
-          fileMap,
-          status.files as Record<string, UncommittedFile>,
-          useRepositoryKeys ? repository_name : undefined,
-          status.is_submodule,
-        );
+        addUncommittedFiles(fileMap, status.files as Record<string, UncommittedFile>, {
+          repositoryName: useRepositoryKeys ? repository_name : undefined,
+          isSubmodule: status.is_submodule,
+          defaultDiffState: status.detail_state,
+          displayScopeKey: displayScopeByRepo?.[repository_name] ?? defaultDisplayScopeKey,
+        });
       }
     }
     return;
   }
   if (gitStatus?.files) {
-    addUncommittedFiles(
-      fileMap,
-      gitStatus.files as Record<string, UncommittedFile>,
-      useRepositoryKeys ? "" : undefined,
-      gitStatus.is_submodule,
-    );
+    addUncommittedFiles(fileMap, gitStatus.files as Record<string, UncommittedFile>, {
+      repositoryName: useRepositoryKeys ? "" : undefined,
+      isSubmodule: gitStatus.is_submodule,
+      defaultDiffState: gitStatus.detail_state,
+      displayScopeKey: displayScopeByRepo?.[""] ?? defaultDisplayScopeKey,
+    });
   }
 }
 
@@ -323,16 +390,23 @@ function addCommittedAndPRSources(
 ) {
   const { cumulativeDiff, prDiffFiles, prRepoName, useRepositoryKeys = true } = input;
   if (cumulativeDiff?.files) {
-    addCumulativeFiles(
-      fileMap,
-      cumulativeDiff.files,
+    addCumulativeFiles(fileMap, cumulativeDiff.files, {
       uncommittedPaths,
       useRepositoryKeys,
-      cumulativeDiff.base_commit,
-    );
+      defaultBaseRef: cumulativeDiff.base_commit,
+      sourceScopeKey: cumulativeDiff.head_commit
+        ? `committed:${cumulativeDiff.base_commit ?? ""}:${cumulativeDiff.head_commit}`
+        : undefined,
+    });
   }
   if (prDiffFiles && prDiffFiles.length > 0) {
-    addPRFiles(fileMap, prDiffFiles, uncommittedPaths, useRepositoryKeys ? prRepoName : undefined);
+    addPRFiles(
+      fileMap,
+      prDiffFiles,
+      uncommittedPaths,
+      useRepositoryKeys ? prRepoName : undefined,
+      input.prScopeKey,
+    );
   }
 }
 
@@ -366,7 +440,13 @@ export function buildReviewSources(input: BuildReviewSourcesInput): BuildReviewS
   const useRepositoryKeys = input.useRepositoryKeys ?? true;
 
   const uncommittedPaths = collectUncommittedPaths(statusByRepo, gitStatus, useRepositoryKeys);
-  addUncommittedSources(fileMap, statusByRepo, gitStatus, useRepositoryKeys);
+  addUncommittedSources(fileMap, {
+    statusByRepo,
+    gitStatus,
+    useRepositoryKeys,
+    displayScopeByRepo: input.displayScopeByRepo,
+    defaultDisplayScopeKey: input.defaultDisplayScopeKey,
+  });
   addCommittedAndPRSources(fileMap, input, uncommittedPaths);
   const allFiles = suppressAvailableGitlinkFiles(sortReviewFiles(fileMap));
   return { allFiles, sourceCounts: countReviewSources(allFiles) };
@@ -438,14 +518,21 @@ export function useReviewSources(
   sessionId: string | null | undefined,
   explicitPRKey?: string,
 ): UseReviewSourcesResult {
-  const gitStatus = useSessionGitStatus(sessionId ?? null);
-  const statusByRepo = useSessionGitStatusByRepo(sessionId ?? null);
+  const { gitStatus, statusByRepo, displayGitStatus, displayStatusByRepo, displayScopeByRepo } =
+    useSessionGitStatusSnapshots(sessionId ?? null);
   const { diff: cumulativeDiff, loading: cumulativeLoading } = useCumulativeDiff(sessionId ?? null);
   const activeTaskId = useAppStore((state) => state.tasks.activeTaskId);
   const { prs, selectedPR, selectedKey, selectPR } = useReviewPRSelection(activeTaskId);
   const pr = explicitPRKey ? findReviewPRByKey(prs, explicitPRKey) : selectedPR;
+  const prScopeKey = pr ? `pr:${prTaskKey(pr)}` : undefined;
   const { normalizedGitStatus, normalizedStatusByRepo, prRepoName, useRepositoryKeys } =
-    useReviewRepositoryContext(sessionId, pr, gitStatus, statusByRepo, cumulativeDiff);
+    useReviewRepositoryContext(
+      sessionId,
+      pr,
+      displayGitStatus,
+      displayStatusByRepo,
+      cumulativeDiff,
+    );
   const {
     files: prDiffFiles,
     loading: prDiffLoading,
@@ -462,6 +549,11 @@ export function useReviewSources(
         prDiffFiles: prDiffFiles.length > 0 ? prDiffFiles : undefined,
         prRepoName,
         useRepositoryKeys,
+        displayScopeByRepo,
+        defaultDisplayScopeKey:
+          displayScopeByRepo[displayGitStatus?.repository_name ?? ""] ??
+          Object.values(displayScopeByRepo)[0],
+        prScopeKey,
       }),
     [
       normalizedGitStatus,
@@ -470,15 +562,12 @@ export function useReviewSources(
       prDiffFiles,
       prRepoName,
       useRepositoryKeys,
+      displayScopeByRepo,
+      prScopeKey,
     ],
   );
 
-  const rawPRFiles = useMemo(() => {
-    if (!prDiffFiles || prDiffFiles.length === 0) return [] as ReviewFile[];
-    const fileMap = new Map<string, ReviewFile>();
-    addPRFiles(fileMap, prDiffFiles, new Set(), prRepoName);
-    return Array.from(fileMap.values());
-  }, [prDiffFiles, prRepoName]);
+  const rawPRFiles = useRawPRFiles(prDiffFiles, prRepoName, pr);
 
   // Keep `hasPR` keyed on the existence of a TaskPR row, not on whether the
   // PR diff files have loaded yet — avoids the tab bar reflowing the moment

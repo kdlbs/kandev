@@ -312,8 +312,9 @@ function useDiffViewerCommentHandlers(opts: CommentHandlerOpts) {
   } = opts;
   const handleLineSelectionEnd = useCallback(
     (range: SelectedLineRange | null) => {
+      if (!enableComments) return;
       setSelectedLines(range);
-      if (range && enableComments) setShowCommentForm(true);
+      if (range) setShowCommentForm(true);
     },
     [enableComments, setSelectedLines, setShowCommentForm],
   );
@@ -336,7 +337,7 @@ function useDiffViewerCommentHandlers(opts: CommentHandlerOpts) {
 
   const submitComment = useCallback(
     (content: string, runAfter?: (c: DiffComment) => void) => {
-      if (!selectedLines) return;
+      if (!enableComments || !selectedLines) return;
       if (onCommentAdd && externalComments !== undefined) {
         const comment = createCommentFromSelection(content);
         if (comment) {
@@ -352,6 +353,7 @@ function useDiffViewerCommentHandlers(opts: CommentHandlerOpts) {
     },
     [
       selectedLines,
+      enableComments,
       onCommentAdd,
       externalComments,
       sessionId,

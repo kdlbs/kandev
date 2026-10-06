@@ -25,6 +25,7 @@ export type ChangedFile = {
   repositoryName?: string;
   changeLayer?: ChangeLayer;
   diffState?: FileInfo["diff_state"];
+  displayStale?: boolean;
 };
 
 /**
@@ -67,6 +68,7 @@ export function mapToChangedFiles(files: FileInfo[]): ChangedFile[] {
     repositoryName: file.repository_name,
     changeLayer: file.change_layer,
     diffState: file.diff_state,
+    displayStale: file.display_stale,
     isSymlink: file.is_symlink,
   }));
 }
@@ -120,7 +122,7 @@ export function selectPRFilesForReviewProgress(
 }
 
 function addReviewSource(
-  winningDiffs: Map<string, string | undefined>,
+  winningDiffs: Map<string, { diff: string | undefined; reviewable: boolean }>,
   paths: Set<string>,
   source: {
     key: string;
@@ -128,15 +130,21 @@ function addReviewSource(
     repositoryName?: string;
     diff?: string;
     diff_state?: FileInfo["diff_state"];
+    display_stale?: boolean;
   },
 ): void {
-  if (source.diff_state === "pending" || source.diff_state === "unavailable") return;
+  const currentDetailUnavailable =
+    source.diff_state === "pending" || source.diff_state === "unavailable";
+  if (currentDetailUnavailable && !source.display_stale) return;
   const isScoped = source.repositoryName !== undefined;
   const collidesWithHigherPriority = isScoped
     ? source.repositoryName !== "" && winningDiffs.has(source.path)
     : paths.has(source.path);
   if (winningDiffs.has(source.key) || collidesWithHigherPriority) return;
-  winningDiffs.set(source.key, source.diff);
+  winningDiffs.set(source.key, {
+    diff: source.diff,
+    reviewable: !currentDetailUnavailable && !source.display_stale,
+  });
   if (!isScoped) paths.add(source.path);
 }
 
@@ -145,8 +153,8 @@ function buildReviewProgressIndex(
   cumulativeDiffFiles: CumulativeDiffFiles | undefined,
   prFiles?: ReviewProgressPRFile[],
   useRepositoryKeys = true,
-): Map<string, string | undefined> {
-  const winningDiffs = new Map<string, string | undefined>();
+): Map<string, { diff: string | undefined; reviewable: boolean }> {
+  const winningDiffs = new Map<string, { diff: string | undefined; reviewable: boolean }>();
   const paths = new Set<string>();
   for (const file of uncommittedFiles) {
     const repositoryName = useRepositoryKeys ? file.repository_name : undefined;
@@ -157,6 +165,7 @@ function buildReviewProgressIndex(
       repositoryName,
       diff: file.diff,
       diff_state: file.diff_state,
+      display_stale: file.display_stale,
     });
   }
   if (cumulativeDiffFiles) {
@@ -202,10 +211,11 @@ export function computeReviewProgress(
     useRepositoryKeys,
   );
   let reviewed = 0;
-  for (const [key, diff] of winningDiffs) {
+  for (const [key, source] of winningDiffs) {
+    if (!source.reviewable) continue;
     const state = reviews.get(key);
     if (!state?.reviewed) continue;
-    const diffContent = normalizeDiffContent(diff ?? "");
+    const diffContent = normalizeDiffContent(source.diff ?? "");
     if (diffContent && state.diffHash && state.diffHash !== hashDiff(diffContent)) continue;
     reviewed++;
   }

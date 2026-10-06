@@ -109,7 +109,7 @@ Add localized warning copy to English and all six supported locales.
 Give the Review eye button its own hover/focus tooltip through `t(REVIEW_LABEL_KEY)`.
 Preserve its action and accessible name on desktop and phone.
 
-Remove `GitStatusNotice`, omit pending file statistics, and remove loading commit descriptors.
+Remove `GitStatusNotice`, omit unknown file statistics without a prior display value, and remove loading commit descriptors.
 Update `beforeLayoutKey` for the remaining geometry-changing states.
 Keep existing source identity, request retirement, retry, and virtualizer contracts.
 
@@ -131,6 +131,8 @@ Update Platform criteria `.28` and `.29`, and add `.36` through `.38`, for the n
 The original [Git refresh package](../changes-panel-git-refresh/plan.md) remains an implemented historical record.
 This follow-up supersedes its manual summary-panel Retry and body-notice presentation.
 Its source authority, deadlines, data preservation, and diff-viewer recovery guarantees remain required.
+The [refresh continuity follow-up](../git-refresh-continuity/plan.md) supersedes pending count suppression when prior displayed values exist.
+It also owns preservation of populated diff viewers; this package still owns compact toolbar feedback and spacing.
 Update the existing Platform and Tasks design summaries to reference the delayed recovery policy.
 Reconcile the publication ADR's presentation consequence without changing tracker publication ownership.
 

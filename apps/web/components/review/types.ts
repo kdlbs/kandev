@@ -11,6 +11,7 @@ export type ReviewChangeFacet = {
   deletions: number;
   old_path?: string;
   diff_skip_reason?: "too_large" | "binary" | "truncated" | "budget_exceeded";
+  display_stale?: boolean;
 };
 
 export type ReviewFile = {
@@ -24,6 +25,10 @@ export type ReviewFile = {
   source: "uncommitted" | "committed" | "pr";
   old_path?: string;
   diff_skip_reason?: "too_large" | "binary" | "truncated" | "budget_exceeded";
+  /** The rendered patch or counts come from the previous accepted snapshot. */
+  display_stale?: boolean;
+  /** Source target identity used to retire renderer state across replacement. */
+  display_scope_key?: string;
   staged_change?: ReviewChangeFacet;
   unstaged_change?: ReviewChangeFacet;
   /** Frontend-only layer selected from a mixed uncommitted file. */

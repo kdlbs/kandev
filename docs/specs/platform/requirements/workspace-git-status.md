@@ -28,7 +28,7 @@ A failed live source still cannot authorize an unmarked persisted fallback.
 
 ### REQ-PLATFORM-WORKSPACE-GIT-STATUS-001: Workspace Git Status
 
-**Intent:** Users opening Changes and Review need current workspace status without excessive Git or filesystem work. Repeated requests share useful work. Slow refreshes have bounded recovery, and file visibility does not wait for diff content.
+**Intent:** Keep workspace status current with bounded recovery and shared computation. Show files independently of diff latency.
 
 #### Acceptance criteria
 
@@ -90,6 +90,10 @@ A failed live source still cannot authorize an unmarked persisted fallback.
 
 - **AC-PLATFORM-WORKSPACE-GIT-STATUS-001.46:** Successful workspace patch enrichment shall return bounded built-in Git patches for flattened, staged, and unstaged representations independently of a repository-configured external diff command or an external diff command in the instance's captured environment, including when both are present. Workspace detail reads shall not execute those external commands or publish their output as ready patches. Ordinary patches, exact supported filename identity, layer-specific hunks and line totals, file membership, status, facets, readiness, cache ownership, cancellation, and existing resource limits shall remain correct. Reads shall preserve captured and process environments, Git configuration, refs, index content, and working-tree bytes. Desktop and mobile shall receive the same patch data through existing transports.
 
+- **AC-PLATFORM-WORKSPACE-GIT-STATUS-001.47:** During pending or failed refresh, Changes and open diff views shall retain previously displayed counts and patches for surviving files and layers in the same checkout and comparison. Freshness shall remain identifiable. Without previous content, the view shall show its loading or unavailable state. Retained content shall not authorize patch mutations or new line-based review actions.
+- **AC-PLATFORM-WORKSPACE-GIT-STATUS-001.48:** When completed refresh returns identical displayed content, the view shall retain its scroll position, selection, folding, and expanded context. Pending refresh shall not reset those states or replace readable content with a placeholder. Desktop and phone shall expose the same continuity.
+- **AC-PLATFORM-WORKSPACE-GIT-STATUS-001.49:** When completed refresh changes displayed content, the view shall update it and preserve the visible file and surviving line at its viewport offset. If that line disappears, it shall use the nearest surviving line, then clamp the previous scroll offset. Confirmed removal or checkout, environment, repository, layer, or comparison replacement shall not reuse unrelated content.
+
 ## Out of scope
 
 - Suppressing generated directories other than `node_modules`. They continue to follow repository and global Git ignore rules.
@@ -113,3 +117,5 @@ Plain patch production follows the [path-details design](../system-design/worksp
 and [repair package](../../../plans/workspace-tracker-plain-patches/plan.md).
 External-command independence follows the same path-details design and the
 [built-in patch repair package](../../../plans/workspace-tracker-built-in-patches/plan.md).
+Display continuity follows the [refresh continuity design](../system-design/git-refresh-continuity.md)
+and [repair plan](../../../plans/git-refresh-continuity/plan.md).

@@ -1,5 +1,6 @@
 import type { FileChangeFacet, FileInfo, GitStatusEntry, SessionRuntimeSliceState } from "./types";
 import { createDebugLogger, isDebug } from "@/lib/debug/log";
+import { reconcileGitStatusDisplay } from "./git-status-display-state";
 
 const debugGit = createDebugLogger("git-status:store");
 
@@ -359,6 +360,15 @@ export function applyGitStatus(
   }
 
   const acceptedStatus = gitStatus;
+
+  const displayState = (state.gitStatusDisplay ??= { byEnvironmentRepo: {} });
+  const displayByEnvironment = (displayState.byEnvironmentRepo[envKey] ??= {});
+  const checkoutGeneration = state.gitCheckoutGeneration?.byEnvironmentId[envKey]?.[repoName] ?? 0;
+  displayByEnvironment[repoName] = reconcileGitStatusDisplay(
+    displayByEnvironment[repoName],
+    acceptedStatus,
+    checkoutGeneration,
+  );
 
   const timestampAdvanced = existingRepo
     ? advancesGitStatusTimestamp(existingRepo, acceptedStatus)

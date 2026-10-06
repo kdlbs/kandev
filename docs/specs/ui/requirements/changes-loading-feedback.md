@@ -35,7 +35,7 @@ Git data and request lifecycles remain with their existing owners.
   A warning tooltip shall explain that available changes can be stale and that recovery is automatic.
   Phone users shall see the status without a hover interaction.
 - **AC-UI-CHANGES-LOADING-001.3:** Passive loading shall not add a status card or a padded commit-file placeholder to the content.
-  File rows shall omit repeated loading text and unknown line counts.
+  File rows shall omit repeated loading text and unknown line counts without an eligible prior display value.
   Existing files and commits shall remain visible during refresh.
 - **AC-UI-CHANGES-LOADING-001.4:** The indicator shall remain while passive requests are pending or a Git refresh failure remains unresolved.
   Settling one request shall not hide another request's loading or failure state.
@@ -54,7 +54,7 @@ Git data and request lifecycles remain with their existing owners.
 ## Exclusions
 
 Git mutations retain their action feedback and disabled behavior.
-Diff viewers retain their own loading and failure states.
+Diff content continuity belongs to the linked Platform contract.
 Cache limits, repository identity, and workspace recovery remain unchanged.
 Automatic Git refresh recovery belongs to the linked Platform contract.
 

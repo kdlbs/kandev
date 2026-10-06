@@ -211,6 +211,7 @@ function useDiffViewerWiring(args: WiringArgs) {
     onButtonLeave,
     handleCommentSubmit: state.handleCommentSubmit,
     handleCommentSubmitAndRun: state.handleCommentSubmitAndRun,
+    submitDisabled: !args.enableComments,
     handleCommentUpdate: state.handleCommentUpdate,
     handleCommentDelete: state.handleCommentDelete,
     handleCommentRun: onCommentRun,

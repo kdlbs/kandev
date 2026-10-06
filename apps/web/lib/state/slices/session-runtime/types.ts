@@ -57,6 +57,8 @@ export type FileChangeFacet = {
   diff?: string;
   diff_skip_reason?: "too_large" | "binary" | "truncated" | "budget_exceeded";
   diff_state?: "pending" | "ready" | "unavailable";
+  /** True only on display projections that borrow details from a prior snapshot. */
+  display_stale?: boolean;
 };
 
 export type FileInfo = {
@@ -70,6 +72,8 @@ export type FileInfo = {
   diff?: string;
   diff_skip_reason?: "too_large" | "binary" | "truncated" | "budget_exceeded";
   diff_state?: "pending" | "ready" | "unavailable";
+  /** True only on display projections that borrow details from a prior snapshot. */
+  display_stale?: boolean;
   staged_change?: FileChangeFacet;
   unstaged_change?: FileChangeFacet;
   /** Frontend-only projection used when one raw path appears in both change sections. */
@@ -141,6 +145,31 @@ export type GitStatusState = {
   refreshByEnvironmentId?: Record<string, GitStatusRefreshState>;
   /** Foreground status recovery keyed by environment and repository scope. */
   refreshByEnvironmentRepo?: Record<string, Record<string, GitStatusRefreshState>>;
+};
+
+export type GitStatusDisplayRepresentation = Pick<
+  FileInfo,
+  "is_symlink" | "additions" | "deletions" | "old_path" | "diff" | "diff_skip_reason"
+>;
+
+export type GitStatusDisplayFile = {
+  flat?: GitStatusDisplayRepresentation;
+  flatLayer?: "faceted" | "staged" | "unstaged";
+  staged?: GitStatusDisplayRepresentation;
+  unstaged?: GitStatusDisplayRepresentation;
+};
+
+export type GitStatusDisplayEntry = {
+  checkoutGeneration: number;
+  branch: string | null;
+  headCommit: string | null;
+  baseCommit: string | null;
+  comparisonTarget: string | null;
+  files: Record<string, GitStatusDisplayFile>;
+};
+
+export type GitStatusDisplayState = {
+  byEnvironmentRepo: Record<string, Record<string, GitStatusDisplayEntry>>;
 };
 
 export type GitStatusRefreshState = {
@@ -526,6 +555,8 @@ export type SessionRuntimeSliceState = {
   shell: ShellState;
   processes: ProcessState;
   gitStatus: GitStatusState;
+  /** One runtime-only ready display companion per live environment/repository. */
+  gitStatusDisplay: GitStatusDisplayState;
   /** Maps sessionId → environmentId for workspace state sharing. */
   environmentIdBySessionId: Record<string, string>;
   sessionCommits: SessionCommitsState;

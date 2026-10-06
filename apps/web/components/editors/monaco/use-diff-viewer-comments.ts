@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { editor as monacoEditor } from "monaco-editor";
 import type { DiffOnMount } from "@monaco-editor/react";
 import type { DiffComment, DiffCommentUpdate } from "@/lib/diff/types";
@@ -31,6 +31,8 @@ interface UseDiffViewerCommentsOpts {
   sessionId?: string;
   repositoryName?: string;
   compact: boolean;
+  /** False while the displayed diff is only a retained, stale patch. */
+  enableComments?: boolean;
   onCommentAdd?: (comment: DiffComment) => void;
   onCommentDelete?: (commentId: string) => void;
   onCommentUpdate?: (commentId: string, updates: DiffCommentUpdate) => void;
@@ -46,6 +48,7 @@ export function useDiffViewerComments(opts: UseDiffViewerCommentsOpts) {
     sessionId,
     repositoryName,
     compact,
+    enableComments,
     onCommentAdd,
     onCommentDelete,
     onCommentUpdate,
@@ -64,6 +67,11 @@ export function useDiffViewerComments(opts: UseDiffViewerCommentsOpts) {
     end: number;
     side: string;
   } | null>(null);
+  const commentingEnabled = enableComments !== false && !!sessionId && !compact;
+  const commentingEnabledRef = useRef(commentingEnabled);
+  useLayoutEffect(() => {
+    commentingEnabledRef.current = commentingEnabled;
+  }, [commentingEnabled]);
 
   const {
     comments: internalComments,
@@ -84,7 +92,7 @@ export function useDiffViewerComments(opts: UseDiffViewerCommentsOpts) {
   const comments = externalComments || internalComments;
 
   // Gutter comment interactions
-  const gutterEnabled = !!sessionId && !compact;
+  const gutterEnabled = commentingEnabled;
   const commentedLines = useCommentedLines(comments);
 
   const handleGutterSelect = useCallback(
@@ -94,6 +102,7 @@ export function useDiffViewerComments(opts: UseDiffViewerCommentsOpts) {
         code: string;
         position: { x: number; y: number };
       }) => {
+        if (!commentingEnabledRef.current) return;
         setSelectedLineRange({ start: params.range.start, end: params.range.end, side });
         setShowCommentForm(true);
       },
@@ -165,7 +174,7 @@ export function useDiffViewerComments(opts: UseDiffViewerCommentsOpts) {
   // Comment submission
   const handleCommentSubmit = useCallback(
     (content: string) => {
-      if (!selectedLineRange) return;
+      if (!commentingEnabledRef.current || !selectedLineRange) return;
       if (onCommentAdd && externalComments !== undefined) {
         onCommentAdd(
           buildDiffComment({
@@ -208,7 +217,7 @@ export function useDiffViewerComments(opts: UseDiffViewerCommentsOpts) {
 
   const handleCommentSubmitAndRun = useCallback(
     (content: string) => {
-      if (!selectedLineRange || !onCommentRun) return;
+      if (!commentingEnabledRef.current || !selectedLineRange || !onCommentRun) return;
       const comment = buildDiffComment({
         filePath: data.filePath,
         repositoryName,
@@ -294,6 +303,7 @@ export function useDiffViewerComments(opts: UseDiffViewerCommentsOpts) {
     handleCommentDeleteRef,
     handleCommentUpdateRef,
     handleCommentRunRef,
+    submitDisabled: !commentingEnabled,
     clearModifiedGutter,
     clearOriginalGutter,
     setShowCommentForm,

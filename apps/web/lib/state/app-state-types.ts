@@ -148,6 +148,7 @@ export type AppState = KanbanSlice & {
   shell: (typeof defaultSessionRuntimeState)["shell"];
   processes: (typeof defaultSessionRuntimeState)["processes"];
   gitStatus: (typeof defaultSessionRuntimeState)["gitStatus"];
+  gitStatusDisplay: (typeof defaultSessionRuntimeState)["gitStatusDisplay"];
   environmentIdBySessionId: (typeof defaultSessionRuntimeState)["environmentIdBySessionId"];
   sessionCommits: (typeof defaultSessionRuntimeState)["sessionCommits"];
   gitCheckoutGeneration: (typeof defaultSessionRuntimeState)["gitCheckoutGeneration"];
@@ -722,7 +723,10 @@ export type AppState = KanbanSlice & {
 // only have one piece of it (e.g. update notification settings from the
 // settings boot payload) must be able to pass a partial `system` object
 // without fabricating placeholder values for the rest.
-export type HydrationState = Omit<Partial<AppState>, "system" | "quickChat"> & {
+export type HydrationState = Omit<
+  Partial<AppState>,
+  "system" | "quickChat" | "gitStatusDisplay"
+> & {
   quickChat?: Partial<AppState["quickChat"]>;
   system?: Partial<AppState["system"]>;
   // The Needs-you Inbox boot-hydration producer's raw wire shape, carried
