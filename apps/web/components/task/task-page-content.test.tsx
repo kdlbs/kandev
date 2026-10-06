@@ -6,6 +6,7 @@ import * as api from "@/lib/api";
 import { ApiError } from "@/lib/api/client";
 import { taskId, workflowId, workspaceId, type Task } from "@/lib/types/http";
 import { TaskLoadErrorState, useTaskDetails } from "./task-page-content";
+import { TaskNavigationReadFeedback } from "./task-navigation-read-feedback";
 import { TaskRouteSessionHydrationProvider } from "./task-route-session-hydration";
 import { TaskRemovalBoundary } from "./task-removal-boundary";
 
@@ -63,6 +64,30 @@ describe("TaskLoadErrorState", () => {
     expect(screen.getByTestId("task-read-retry").textContent).toBe("Retry");
     screen.getByTestId("task-read-retry").click();
     expect(onRetry).toHaveBeenCalledOnce();
+  });
+
+  it("keeps the Retry name stable and announces initial-read progress", () => {
+    render(
+      <StateProvider>
+        <TaskLoadErrorState temporaryError retrying onRetry={vi.fn()} />
+      </StateProvider>,
+    );
+
+    const retry = screen.getByRole("button", { name: "Retry" });
+    expect(retry.hasAttribute("disabled")).toBe(true);
+    expect(screen.getByRole("status").textContent).toContain("Retrying...");
+  });
+
+  it("keeps the Retry name stable and announces refresh progress", () => {
+    render(
+      <TaskNavigationReadFeedback
+        recovery={{ temporaryError: true, retrying: true, onRetry: vi.fn() }}
+      />,
+    );
+
+    const retry = screen.getByRole("button", { name: "Retry" });
+    expect(retry.hasAttribute("disabled")).toBe(true);
+    expect(screen.getByRole("status").textContent).toContain("Retrying...");
   });
 });
 

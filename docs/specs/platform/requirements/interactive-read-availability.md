@@ -69,7 +69,7 @@ Task and workspace systems retain authority over their records and permissions.
 #### Acceptance criteria
 
 - **AC-PLATFORM-INTERACTIVE-READS-005.1:** Temporary task-read failures shall show localized availability copy and Retry. They shall not imply deletion or lost access.
-- **AC-PLATFORM-INTERACTIVE-READS-005.2:** A recovery cycle shall perform at most two automatic retries. Exhausted recovery shall retain manual Retry and the task-overview link.
+- **AC-PLATFORM-INTERACTIVE-READS-005.2:** Each task-navigation read attempt shall finish within ten seconds. A timeout shall be classified as temporary and use the same retry budget. A recovery cycle shall perform at most two automatic retries; exhausted recovery shall retain manual Retry and the task-overview link.
 - **AC-PLATFORM-INTERACTIVE-READS-005.3:** Concurrent recovery triggers shall share one read. Navigation, authentication changes, and unmount shall invalidate obsolete recovery work.
 - **AC-PLATFORM-INTERACTIVE-READS-005.4:** Successful recovery shall open the selected task and retain its valid selected session. It shall not select a task from an earlier request.
 - **AC-PLATFORM-INTERACTIVE-READS-005.5:** Missing or inaccessible tasks shall retain the existing generic unavailable state. Authorization errors shall not receive automatic retries.

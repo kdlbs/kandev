@@ -31,6 +31,14 @@ test.describe("Task transient read recovery", () => {
     const allFailuresReturned = new Promise<void>((resolve) => {
       markFailuresReturned = resolve;
     });
+    let markRecoveryStarted: () => void = () => {};
+    const recoveryStarted = new Promise<void>((resolve) => {
+      markRecoveryStarted = resolve;
+    });
+    let releaseRecovery: () => void = () => {};
+    const recoveryGate = new Promise<void>((resolve) => {
+      releaseRecovery = resolve;
+    });
     await testPage.route(taskPath, async (route: Route) => {
       if (route.request().method() !== "GET") return route.continue();
       if (failedReads < 3) {
@@ -43,6 +51,8 @@ test.describe("Task transient read recovery", () => {
         if (failedReads === 3) markFailuresReturned();
         return;
       }
+      markRecoveryStarted();
+      await recoveryGate;
       await route.fulfill({
         status: 200,
         contentType: "application/json",
@@ -70,8 +80,17 @@ test.describe("Task transient read recovery", () => {
       contentType: "image/png",
     });
 
+    const retry = testPage.getByTestId("task-read-retry");
     const recoveredTaskRead = waitForHttp(testPage, "GET", taskPath);
-    await testPage.getByTestId("task-read-retry").click();
+    await retry.click();
+    try {
+      await recoveryStarted;
+      await expect(retry).toBeDisabled();
+      await expect(retry).toHaveAccessibleName("Retry");
+      await expect(testPage.getByText("Retrying...", { exact: true })).toBeVisible();
+    } finally {
+      releaseRecovery();
+    }
     expect((await recoveredTaskRead).ok()).toBe(true);
     await expect(errorState).toHaveCount(0);
   });

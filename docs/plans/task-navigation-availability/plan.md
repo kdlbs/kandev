@@ -91,9 +91,11 @@ cannot shorten them. Workspace and identity changes abort obsolete work.
 
 Task recovery belongs to the navigation read owner, shared by route hydration and
 the task page. Two scheduled retries follow temporary failures, after 2 and 5
-seconds. Manual Retry starts another bounded cycle. Respect Retry-After, hidden
-tabs, and navigation generations. Retain loaded authorized content on refresh
-failure and show an in-flow notice.
+seconds. Each task/session identity attempt has a ten-second deadline. A timeout
+aborts its sibling requests and uses the same temporary-failure retry budget.
+Manual Retry starts another bounded cycle. Respect Retry-After, hidden tabs, and
+navigation generations. Retain loaded authorized content on refresh failure and
+show an in-flow notice.
 
 | Boundary | Behavior | Evidence |
 | --- | --- | --- |
@@ -185,8 +187,6 @@ Design validation on 2026-10-06:
 - `python3 scripts/lint-spec-files.test.py`: passed (36 tests).
 - Local `.github/scripts/pr-docs.cjs` `validateCoverage` preflight: covered all three work orders.
 - `git diff --check -- docs/specs docs/plans/task-navigation-availability`: passed.
-- Requirements, designs, plans, and work orders remain unstaged and uncommitted.
-
 Task 03 implementation checks passed:
 
 - Focused navigation and task-page Vitest: 50 tests across 4 files, including
@@ -197,6 +197,20 @@ Task 03 implementation checks passed:
 - Chromium recovery/loading E2E: 6 passed; mobile Chrome recovery/loading E2E:
   5 passed. Both device suites cover an initial temporary failure and recovery;
   the mobile suite also verifies touch sizing and viewport containment.
+
+PR review fixup on 2026-10-06:
+
+- Task/session identity attempts now have a ten-second deadline. Timeout aborts
+  sibling requests and consumes the existing temporary retry budget.
+- Record pruning preserves active reads, retained consumers, and subscribers.
+- Retry buttons keep the accessible name `Retry`; the status region announces
+  `Retrying...`. The shared Button primitive continues to provide 44px touch
+  sizing and the ordinary 28px fine-pointer size.
+- Focused Vitest passed (128 tests across seven files); desktop and mobile task
+  recovery E2E each passed (two tests).
+- Web typecheck, i18n checks, targeted ESLint, `make build-web`, E2E sleep
+  ratchet, documentation catalog validation, specification lint, and whitespace
+  checks passed.
 
 The temporary task-specific PostgreSQL test container was stopped after testing.
 

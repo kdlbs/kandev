@@ -34,7 +34,9 @@ shared bounded retry owner, preserving the current task and session selection.
 - Add cancellation and shared recovery state to the navigation identity owner.
   Route hydration and `useTaskDetails` consume that owner; neither starts its own loop.
 - Allow two automatic retries after 2 and 5 seconds, respecting Retry-After.
-  Manual Retry starts a new bounded cycle; foreground recovery coalesces.
+  Bound each attempt to ten seconds; timeouts abort both requests and use that
+  same retry budget. Manual Retry starts a new bounded cycle; foreground recovery
+  coalesces.
 - Suspend hidden-tab retries and invalidate work on navigation, identity change,
   and unmount. Preserve successful task details and session-list fallback semantics.
 - Add localized temporary failure and refresh notices, Retry, and status announcements.
@@ -48,8 +50,9 @@ agent launch, new task records, or separate desktop/mobile recovery state.
 
 ## Acceptance
 
-1. Structured 503 produces temporary copy, two bounded automatic attempts, and
-   working manual recovery. A 404 retains the existing view with no automatic retry.
+1. Structured 503 and timed-out reads produce temporary copy, at most two
+   automatic retries, and working manual recovery. A 404 retains the existing
+   view with no automatic retry.
 2. Mixed recovery triggers share one read. Task/identity switches fence pending
    retries and late responses. Successful recovery retains the valid selected session.
 3. Loaded details survive failed refresh with a visible notice. Desktop and phone
@@ -136,18 +139,22 @@ Implemented shared task-navigation reads and a single bounded retry cycle for
 route hydration and task-detail refreshes. Network failures, 429/502/503/504,
 and the structured `persistence_unavailable` code retry twice after 2 and 5
 seconds, respecting `Retry-After`; 404, auth, parsing, and abort failures do not
-retry. An exhausted temporary cycle can start one new bounded cycle per
-foreground episode; ordinary refreshes reuse the failure. Each attempt owns a
-child abort signal, so a task failure cancels its pending session-list sibling
-before the next attempt. Pending work is cancelled on navigation, identity
-change, and final consumer release. Hidden tabs suspend the retry timer, and
-failed optional session-list reads retain the existing empty-session fallback
-without hiding task identity failures.
+retry. Each attempt times out after ten seconds, aborting its task and session
+requests so a never-settling read reaches the bounded retry limit. An exhausted
+temporary cycle can start one new bounded cycle per foreground episode; ordinary
+refreshes reuse the failure. Each attempt owns a child abort signal, so a task
+failure cancels its pending session-list sibling before the next attempt.
+Pending work is cancelled on navigation, identity change, and final consumer
+release. Hidden tabs suspend the retry timer, and failed optional session-list
+reads retain the existing empty-session fallback without hiding task identity
+failures.
 
 Temporary initial failures keep the permanent missing-task route semantics and
 show localized Retry and workspace-aware overview actions. Failed refreshes
 preserve loaded task and selected-session content with an in-flow notice. Retry
-status is announced, and desktop/phone recovery controls are covered by rendered
+status is announced in a stable status region while Retry keeps its accessible
+name. The shared Button sizing keeps phone targets at least 44px and fine-pointer
+desktop controls at 28px. Desktop/phone recovery controls are covered by rendered
 regressions. Foreground refreshes of an already loaded route remain lightweight;
 manual recovery of an initially failed route still hydrates and enriches it.
 The route captures the owned selected session for the navigation generation so
@@ -164,3 +171,16 @@ Verification passed:
   and secondary-session retention after refresh recovery.
 - Mobile Chrome: 5 recovery/loading tests passed, including initial failure
   recovery, 44px Retry controls, viewport containment, and no horizontal overflow.
+
+PR review fixup on 2026-10-06:
+
+- Added a ten-second deadline to each task/session identity attempt. A timed-out
+  request aborts its sibling and uses the same temporary retry budget, so a
+  request that never settles reaches the manual-retry state.
+- Record pruning skips active reads, retained consumers, and subscribed records.
+- Retry retains a stable accessible name. The status area visibly announces
+  `Retrying...`; the shared Button primitive supplies the desktop and touch sizes.
+- Focused Vitest passed (128 tests across seven files). Web typecheck, i18n
+  checks, targeted ESLint, E2E sleep ratchet, and `make build-web` passed.
+- Desktop and mobile task recovery E2E each passed (two tests), including a
+  held retry response that checks the stable name and visible progress state.

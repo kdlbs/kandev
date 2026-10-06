@@ -14,6 +14,8 @@ const apiMocks = vi.hoisted(() => ({
   fetchTask: vi.fn(),
   listTaskSessions: vi.fn(),
 }));
+const ACTIVE_TASK_ID = "task-active";
+const RETAINED_TASK_ID = "task-retained";
 
 vi.mock("@/lib/api", () => apiMocks);
 
@@ -127,6 +129,44 @@ describe("task navigation read sharing", () => {
   });
 });
 
+describe("task navigation read retention", () => {
+  // @covers AC-PLATFORM-INTERACTIVE-READS-005.3
+  it("keeps active and retained reads when older records are pruned", async () => {
+    const activeResponse = deferred<TaskNavigationIdentity>();
+    let activeSignal: AbortSignal | undefined;
+    const load = vi.fn((taskId: string, signal: AbortSignal) => {
+      if (taskId === ACTIVE_TASK_ID) {
+        activeSignal = signal;
+        return activeResponse.promise;
+      }
+      return Promise.resolve(identity(taskId));
+    });
+    const reads = createTaskNavigationReads(load);
+    const generation = reads.beginNavigation({}, `/t/${ACTIVE_TASK_ID}`);
+    const activeRead = reads.read(ACTIVE_TASK_ID, generation);
+    const activeOutcome = activeRead.then(
+      () => "resolved",
+      () => "rejected",
+    );
+    const releaseRetained = reads.retain(RETAINED_TASK_ID, generation);
+    try {
+      await reads.read(RETAINED_TASK_ID, generation);
+      for (let id = 2; id <= 8; id++) {
+        await reads.read(`task-${id}`, generation);
+      }
+
+      expect(activeSignal?.aborted).toBe(false);
+      expect(reads.getSnapshot(ACTIVE_TASK_ID, generation).phase).toBe("loading");
+      expect(reads.getSnapshot(RETAINED_TASK_ID, generation).phase).toBe("succeeded");
+    } finally {
+      activeResponse.resolve(identity(ACTIVE_TASK_ID));
+      releaseRetained();
+    }
+
+    await expect(activeOutcome).resolves.toBe("resolved");
+  });
+});
+
 describe("task navigation retry timing", () => {
   it("shares two bounded automatic retries at two and five seconds", async () => {
     vi.useFakeTimers();
@@ -221,6 +261,48 @@ describe("task navigation retry timing", () => {
   });
 });
 
+describe("task navigation attempt deadline", () => {
+  // @covers AC-PLATFORM-INTERACTIVE-READS-005.2
+  it("turns a request that never settles into a bounded temporary failure", async () => {
+    vi.useFakeTimers();
+    const requestSignals: AbortSignal[] = [];
+    const load = vi.fn((_taskId: string, signal: AbortSignal) => {
+      requestSignals.push(signal);
+      return new Promise<TaskNavigationIdentity>((_resolve, reject) => {
+        signal.addEventListener(
+          "abort",
+          () => reject(Object.assign(new Error("request aborted"), { name: "AbortError" })),
+          { once: true },
+        );
+      });
+    });
+    const reads = createTaskNavigationReads(load);
+    const generation = reads.beginNavigation({}, "/t/task-1");
+    const result = reads.read("task-1", generation);
+    const outcome = result.catch((error: unknown) => error);
+
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(requestSignals[0]?.aborted).toBe(true);
+    expect(reads.getSnapshot("task-1", generation).phase).toBe("retrying");
+
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(load).toHaveBeenCalledTimes(2);
+    await vi.advanceTimersByTimeAsync(10_000);
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(load).toHaveBeenCalledTimes(3);
+    await vi.advanceTimersByTimeAsync(10_000);
+
+    expect(await outcome).toBeInstanceOf(TypeError);
+    expect(requestSignals.every((signal) => signal.aborted)).toBe(true);
+    expect(reads.getSnapshot("task-1", generation)).toMatchObject({
+      phase: "failed",
+      temporary: true,
+      attempt: 2,
+    });
+  });
+});
+
 describe("task navigation retry policy", () => {
   it("does not retry permanent, parse, authentication, or abort failures", async () => {
     expect(isTemporaryTaskNavigationError(new TypeError("offline"))).toBe(true);
@@ -257,31 +339,34 @@ describe("task navigation retry policy", () => {
   it("suspends a scheduled retry while the document is hidden", async () => {
     vi.useFakeTimers();
     const visibility = Object.getOwnPropertyDescriptor(document, "visibilityState");
-    Object.defineProperty(document, "visibilityState", { configurable: true, value: "visible" });
-    const load = vi
-      .fn<(taskId: string) => Promise<TaskNavigationIdentity>>()
-      .mockRejectedValueOnce(new TypeError("offline"))
-      .mockResolvedValueOnce(identity("task-1"));
-    const reads = createTaskNavigationReads(load);
-    const generation = reads.beginNavigation({}, "/t/task-1");
-    const result = reads.read("task-1", generation);
-    await vi.advanceTimersByTimeAsync(0);
-    await vi.advanceTimersByTimeAsync(1_000);
-    Object.defineProperty(document, "visibilityState", { configurable: true, value: "hidden" });
-    document.dispatchEvent(new Event("visibilitychange"));
-    await vi.advanceTimersByTimeAsync(5_000);
-    expect(load).toHaveBeenCalledTimes(1);
-    Object.defineProperty(document, "visibilityState", { configurable: true, value: "visible" });
-    document.dispatchEvent(new Event("visibilitychange"));
-    await vi.advanceTimersByTimeAsync(999);
-    expect(load).toHaveBeenCalledTimes(1);
-    await vi.advanceTimersByTimeAsync(1);
-    await expect(result).resolves.toMatchObject({ task: { id: "task-1" } });
-    Object.defineProperty(
-      document,
-      "visibilityState",
-      visibility ?? { configurable: true, value: "visible" },
-    );
+    try {
+      Object.defineProperty(document, "visibilityState", { configurable: true, value: "visible" });
+      const load = vi
+        .fn<(taskId: string) => Promise<TaskNavigationIdentity>>()
+        .mockRejectedValueOnce(new TypeError("offline"))
+        .mockResolvedValueOnce(identity("task-1"));
+      const reads = createTaskNavigationReads(load);
+      const generation = reads.beginNavigation({}, "/t/task-1");
+      const result = reads.read("task-1", generation);
+      await vi.advanceTimersByTimeAsync(0);
+      await vi.advanceTimersByTimeAsync(1_000);
+      Object.defineProperty(document, "visibilityState", { configurable: true, value: "hidden" });
+      document.dispatchEvent(new Event("visibilitychange"));
+      await vi.advanceTimersByTimeAsync(5_000);
+      expect(load).toHaveBeenCalledTimes(1);
+      Object.defineProperty(document, "visibilityState", { configurable: true, value: "visible" });
+      document.dispatchEvent(new Event("visibilitychange"));
+      await vi.advanceTimersByTimeAsync(999);
+      expect(load).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(1);
+      await expect(result).resolves.toMatchObject({ task: { id: "task-1" } });
+    } finally {
+      Object.defineProperty(
+        document,
+        "visibilityState",
+        visibility ?? { configurable: true, value: "visible" },
+      );
+    }
   });
 });
 

@@ -194,6 +194,9 @@ export function TaskLoadErrorState({
             )}
           </div>
         </div>
+        {temporaryError && retrying ? (
+          <div className="text-muted-foreground">{t("task:retrying")}</div>
+        ) : null}
         {temporaryError && onRetry ? (
           <Button
             size="default"
@@ -202,7 +205,7 @@ export function TaskLoadErrorState({
             onClick={onRetry}
             data-testid="task-read-retry"
           >
-            {t(retrying ? "task:retrying" : "task:retry")}
+            {t("task:retry")}
           </Button>
         ) : null}
         <Button

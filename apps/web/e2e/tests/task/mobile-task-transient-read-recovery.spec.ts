@@ -30,6 +30,14 @@ test.describe("Mobile task transient read recovery", () => {
     const allFailuresReturned = new Promise<void>((resolve) => {
       markFailuresReturned = resolve;
     });
+    let markRecoveryStarted: () => void = () => {};
+    const recoveryStarted = new Promise<void>((resolve) => {
+      markRecoveryStarted = resolve;
+    });
+    let releaseRecovery: () => void = () => {};
+    const recoveryGate = new Promise<void>((resolve) => {
+      releaseRecovery = resolve;
+    });
     await testPage.route(taskPath, async (route: Route) => {
       if (route.request().method() !== "GET") return route.continue();
       if (failedReads < 3) {
@@ -42,6 +50,8 @@ test.describe("Mobile task transient read recovery", () => {
         if (failedReads === 3) markFailuresReturned();
         return;
       }
+      markRecoveryStarted();
+      await recoveryGate;
       await route.fulfill({
         status: 200,
         contentType: "application/json",
@@ -91,6 +101,14 @@ test.describe("Mobile task transient read recovery", () => {
 
     const recoveredTaskRead = waitForHttp(testPage, "GET", taskPath);
     await retry.tap();
+    try {
+      await recoveryStarted;
+      await expect(retry).toBeDisabled();
+      await expect(retry).toHaveAccessibleName("Retry");
+      await expect(testPage.getByText("Retrying...", { exact: true })).toBeVisible();
+    } finally {
+      releaseRecovery();
+    }
     expect((await recoveredTaskRead).ok()).toBe(true);
     await expect(errorState).toHaveCount(0);
     expect(

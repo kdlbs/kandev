@@ -240,11 +240,14 @@ Classify network failures and HTTP 429/502/503/504 as temporary. Recognize the
 existing persistence code through `ApiError.body.code`; `ApiError.errorCode`
 currently exposes only `error_code`. Do not change server envelopes or retry
 parse errors, aborts, authorization errors, or 404. A recovery cycle permits two
-scheduled retries after 2 and 5 seconds, honoring a larger Retry-After.
-Hidden tabs suspend scheduled retry work. Manual Retry starts a new bounded
-cycle. Foreground recovery coalesces with active recovery and starts at most one
-cycle per foreground episode. Ordinary rerenders and WS notifications cannot
-restart an exhausted cycle.
+scheduled retries after 2 and 5 seconds, honoring a larger Retry-After. Each read
+attempt has a ten-second deadline; expiry aborts its task and session requests
+and is classified as a temporary failure within that retry budget. Navigation
+cancellation remains an abort and does not retry. Hidden tabs suspend scheduled
+retry work. Manual Retry starts a new bounded cycle. Foreground recovery
+coalesces with active recovery and starts at most one cycle per foreground
+episode. Ordinary rerenders and WS notifications cannot restart an exhausted
+cycle.
 
 When no task details exist, render a temporary read-error surface with Retry and
 the existing task-overview link. Keep permanent failures in `TaskLoadErrorState`.

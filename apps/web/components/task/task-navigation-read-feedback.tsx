@@ -34,7 +34,7 @@ export function TaskNavigationReadFeedback({
         onClick={recovery.onRetry}
         data-testid="task-read-retry"
       >
-        {t(recovery.retrying ? "task:retrying" : "task:retry")}
+        {t("task:retry")}
       </Button>
     </div>
   );

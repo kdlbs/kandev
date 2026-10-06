@@ -43,6 +43,7 @@ type TaskNavigationReadRecord = {
 };
 
 const MAX_RETAINED_READS = 8;
+const TASK_NAVIGATION_ATTEMPT_TIMEOUT_MS = 10_000;
 const RETRY_DELAYS_MS = [2_000, 5_000] as const;
 const IDLE_SNAPSHOT: TaskNavigationReadSnapshot = Object.freeze({
   phase: "idle",
@@ -94,14 +95,25 @@ async function loadNavigationAttempt(
 ): Promise<TaskNavigationIdentity> {
   const attemptController = new AbortController();
   const abortAttempt = () => attemptController.abort();
+  let timedOut = false;
   if (cycleSignal.aborted) attemptController.abort();
   else cycleSignal.addEventListener("abort", abortAttempt, { once: true });
+  const timeout = setTimeout(() => {
+    timedOut = true;
+    attemptController.abort();
+  }, TASK_NAVIGATION_ATTEMPT_TIMEOUT_MS);
   try {
     return await raceAbort(
       loadIdentity(taskId, attemptController.signal),
       attemptController.signal,
     );
+  } catch (error) {
+    if (timedOut && !cycleSignal.aborted) {
+      throw new TypeError("Task navigation read timed out");
+    }
+    throw error;
   } finally {
+    clearTimeout(timeout);
     cycleSignal.removeEventListener("abort", abortAttempt);
     attemptController.abort();
   }
@@ -238,10 +250,13 @@ export class TaskNavigationReads {
     const record: TaskNavigationReadRecord = { taskId, generation, snapshot: IDLE_SNAPSHOT };
     this.records.set(key, record);
     while (this.records.size > MAX_RETAINED_READS) {
-      const oldest = this.records.keys().next().value;
-      if (!oldest) break;
-      this.cancel(oldest);
-      this.records.delete(oldest);
+      const oldestEligible = [...this.records.keys()].find((candidateKey) => {
+        if (candidateKey === key || this.retained.has(candidateKey)) return false;
+        const candidate = this.records.get(candidateKey);
+        return !candidate?.promise && !this.listeners.get(candidateKey)?.size;
+      });
+      if (!oldestEligible) break;
+      this.records.delete(oldestEligible);
     }
     return record;
   }
