@@ -322,7 +322,7 @@ func (s *Service) resolveFilePath(worktreePath, filePath string) (string, error)
 	if err != nil {
 		return "", ErrEditorConfigInvalid
 	}
-	if strings.HasPrefix(rel, "..") {
+	if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
 		return "", ErrEditorConfigInvalid
 	}
 	return abs, nil
