@@ -66,18 +66,13 @@ test.describe("mobile session entry recovery", () => {
         { timeout: 30_000, message: "Opening turn did not finish before history recovery" },
       )
       .toBe(true);
-    // Exhaust both bounded startup reads before manual Retry. A still-active
-    // rejection rule could otherwise remove the notice while touch waits for it.
-    proxy.dropNextResponses("message.list", 2, { sessionId });
+    // Keep startup refreshes unavailable until the actual touch Retry gesture.
+    proxy.rejectResponsesUntilReleased("message.list", "History temporarily unavailable", {
+      sessionId,
+    });
     const session = await openTaskSession(testPage, task.id);
     const chat = session.activeChat();
     const historyNotice = chat.getByTestId("session-history-unavailable");
-    await expect
-      .poll(() => proxy.droppedResponseCount("message.list"), {
-        timeout: 45_000,
-        message: "Waiting for both scoped history reads to be dropped",
-      })
-      .toBe(2);
     await expect(historyNotice).toBeVisible({ timeout: 45_000 });
 
     const retry = historyNotice.getByTestId("session-history-retry");
@@ -88,9 +83,19 @@ test.describe("mobile session entry recovery", () => {
     expect(detailsBox?.height).toBeGreaterThanOrEqual(44);
     await assertNoDocumentHorizontalOverflow(testPage, "mobile session history recovery");
 
+    const rejectedBeforeRefresh = proxy.rejectedResponseCount("message.list");
+    expect(rejectedBeforeRefresh).toBeGreaterThan(0);
+    // A foreground refresh must not recover the injected outage before Retry.
+    await testPage.evaluate(() => window.dispatchEvent(new Event("focus")));
+    await expect
+      .poll(() => proxy.rejectedResponseCount("message.list"))
+      .toBeGreaterThan(rejectedBeforeRefresh);
+    await expect(historyNotice).toBeVisible();
+    const readsBeforeRetry = proxy.requestCount("message.list");
+    await proxy.releaseRejectedResponsesOnClick("message.list", "session-history-retry");
     await retry.tap();
     await expect(historyNotice).toHaveCount(0);
     await expect(chat).toContainText("simple mock response", { timeout: 30_000 });
-    expect(proxy.droppedResponseCount("message.list")).toBe(2);
+    expect(proxy.requestCount("message.list")).toBeGreaterThan(readsBeforeRetry);
   });
 });

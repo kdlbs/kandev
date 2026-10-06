@@ -42,7 +42,11 @@ test("navigation branch setup leaves a dirty shared checkout untouched", async (
   };
   const repositoryPath = path.join(fixtureBackend.tmpDir, "repos", "e2e-repo");
   mkdirSync(path.dirname(repositoryPath), { recursive: true });
-  execFileSync("git", ["clone", seedData.repositoryRemoteURL, repositoryPath], {
+  const fixtureRemote = path.join(fixtureBackend.tmpDir, "isolated-remote.git");
+  execFileSync("git", ["clone", "--bare", seedData.repositoryRemoteURL, fixtureRemote], {
+    env: makeGitEnv(fixtureBackend.tmpDir),
+  });
+  execFileSync("git", ["clone", fixtureRemote, repositoryPath], {
     env: makeGitEnv(fixtureBackend.tmpDir),
   });
   const git = new GitHelper(repositoryPath, makeGitEnv(fixtureBackend.tmpDir));
@@ -54,6 +58,11 @@ test("navigation branch setup leaves a dirty shared checkout untouched", async (
   git.modifyFile("walkthrough_base.txt", committedBranchFile);
   git.stageFile("walkthrough_base.txt");
   git.commit("seed divergent navigation checkout");
+  const remoteNoise = "A-archive-noise-navigation.kt";
+  git.createFile(remoteNoise, "noise from an earlier test\n");
+  git.stageFile(remoteNoise);
+  git.commit("seed unrelated remote main files");
+  git.exec(`git push origin ${dirtyBranch}:main`);
   git.modifyFile(
     "walkthrough_base.txt",
     `${committedBranchFile}navigation fixture dirty-checkout sentinel\n`,
@@ -67,6 +76,7 @@ test("navigation branch setup leaves a dirty shared checkout untouched", async (
       "navigation fixture dirty-checkout sentinel",
     );
     expect(git.exec(`git ls-remote --heads origin ${seededBranch}`)).toContain(seededBranch);
+    expect(git.exec(`git ls-tree -r --name-only ${seededBranch}`)).not.toContain(remoteNoise);
     expect({
       branch: sharedGit.exec("git branch --show-current"),
       status: sharedGit.exec("git status --porcelain"),
