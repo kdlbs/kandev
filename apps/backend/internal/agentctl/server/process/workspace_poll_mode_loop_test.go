@@ -65,6 +65,29 @@ func waitForFileChangeNotification(sub types.WorkspaceStreamSubscriber, timeout 
 	}
 }
 
+// drainMonitorTicks clears a previously completed scan before a test writes its change.
+func drainMonitorTicks(wt *WorkspaceTracker) {
+	select {
+	case <-wt.tickDone:
+	default:
+	}
+}
+
+func waitForTwoMonitorTicks(t *testing.T, wt *WorkspaceTracker) {
+	t.Helper()
+	// Wait for two consecutive tick completions. The first might be a tick
+	// that started before WriteFile returned; the second is guaranteed to
+	// have run getWorkspaceState after the file landed. 10s per tick is
+	// generous — actual tick work is bounded by one `git diff-files` call.
+	for i := 0; i < 2; i++ {
+		select {
+		case <-wt.tickDone:
+		case <-time.After(10 * time.Second):
+			t.Fatalf("tick %d did not complete within 10s", i+1)
+		}
+	}
+}
+
 // TestMonitorLoop_PausedSuppressesNotifications verifies that no file-change
 // notifications are emitted when the tracker is in PollModePaused, even when
 // real changes happen in the workspace.
@@ -208,28 +231,13 @@ func TestMonitorLoop_FastPolls(t *testing.T) {
 	// Wait for monitorLoop's initial state capture before writing.
 	<-wt.initialScanDone
 	drainStream(sub)
-	// Clear any tick signal that was buffered between initialScanDone and now
-	// so the next tickDone read corresponds to a tick after our drain.
-	select {
-	case <-wt.tickDone:
-	default:
-	}
+	drainMonitorTicks(wt)
 
 	if err := os.WriteFile(filepath.Join(repoDir, "tick.txt"), []byte("x"), 0o644); err != nil {
 		t.Fatalf("failed to write file: %v", err)
 	}
 
-	// Wait for two consecutive tick completions. The first might be a tick
-	// that started before WriteFile returned; the second is guaranteed to
-	// have run getWorkspaceState after the file landed. 10s per tick is
-	// generous — actual tick work is bounded by one `git diff-files` call.
-	for i := 0; i < 2; i++ {
-		select {
-		case <-wt.tickDone:
-		case <-time.After(10 * time.Second):
-			t.Fatalf("tick %d did not complete within 10s", i+1)
-		}
-	}
+	waitForTwoMonitorTicks(t, wt)
 
 	if got := waitForFileChangeNotification(sub, 2*time.Second); !got {
 		t.Error("expected file-change notification after two complete poll cycles in fast mode")
@@ -257,15 +265,14 @@ func TestMonitorLoop_FastToPausedStopsPolling(t *testing.T) {
 	// Wait for monitorLoop's initial state capture.
 	<-wt.initialScanDone
 	drainStream(sub)
+	drainMonitorTicks(wt)
 
 	// Confirm fast mode works first.
 	if err := os.WriteFile(filepath.Join(repoDir, "before_pause.txt"), []byte("x"), 0o644); err != nil {
 		t.Fatalf("failed to write: %v", err)
 	}
-	// 3s rather than 1s to absorb GitHub Actions windows-latest slowness
-	// under `-race`. The neighbouring test at line ~142 uses 2s for the same
-	// kind of check; this one needs a touch more because it runs after a
-	// PollMode change that has its own settle time.
+	// Observe completed scans before checking their notification, as in FastPolls.
+	waitForTwoMonitorTicks(t, wt)
 	if !waitForFileChangeNotification(sub, 3*time.Second) {
 		t.Fatal("setup: expected fast mode to emit notification before pausing")
 	}
