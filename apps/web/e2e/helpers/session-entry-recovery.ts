@@ -270,6 +270,15 @@ function forwardServerMessage(
   }
 }
 
+function rejectionForRequest(
+  context: RequestContext,
+  rules: Map<string, RejectRule>,
+): string | undefined {
+  const rule = rules.get(context.action);
+  if (!rule || (rule.sessionId && rule.sessionId !== context.sessionId)) return undefined;
+  return rule.message;
+}
+
 async function releaseRejectionAfterClick(
   page: Page,
   action: string,
@@ -345,17 +354,17 @@ export async function routeSessionEntryRecovery(page: Page): Promise<SessionEntr
                   ? frame.payload.session_id
                   : undefined,
             };
-            await releaseRejectionAfterClick(page, context.action, { releaseOnClick, rejectRules });
-            const rejectRule = rejectRules.get(context.action);
-            // Keep fault injection stable for requests that are already in flight.
-            if (
-              !rejectRule ||
-              (rejectRule.sessionId && rejectRule.sessionId !== context.sessionId)
-            ) {
-              requestContexts.set(frame.id, context);
-            } else {
-              requestContexts.set(frame.id, { ...context, rejectionMessage: rejectRule.message });
+            if (releaseOnClick.has(context.action)) {
+              await releaseRejectionAfterClick(page, context.action, {
+                releaseOnClick,
+                rejectRules,
+              });
             }
+            // Capture the fault before forwarding, including responses received after release.
+            requestContexts.set(frame.id, {
+              ...context,
+              rejectionMessage: rejectionForRequest(context, rejectRules),
+            });
             requestCounts.set(frame.action, (requestCounts.get(frame.action) ?? 0) + 1);
           }
         }
