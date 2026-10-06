@@ -155,6 +155,7 @@ Review remediation verification on 2026-10-05:
 - The focused frontend regression suite passed 37 tests across 3 files. Web typecheck and targeted ESLint passed without warnings.
 - The latest managed desktop Chromium composer suite passed 8 tests and the phone suite passed 2 tests. Desktop tests cover partial provider updates in an open menu, delayed startup snapshots, and forged clipboard text preserving the explicit `/plan` send.
 - Public docs tests passed (62 tests), the validator checked 47 pages, catalog validation covered 351 decisions and 1367 specifications, all specifications passed lint, and the specification-linter tests passed (36). `git diff --check` passed.
+- CI follow-up added the missing `invalidateConfirmedConfigOptions` action to the `agent-session.test.ts` store fixture. The focused browser-locales handler/config suite passed 78 tests; web typecheck and targeted ESLint passed.
 
 ## Risks
 
