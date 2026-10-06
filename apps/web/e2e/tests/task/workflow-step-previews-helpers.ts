@@ -475,8 +475,17 @@ export async function touchWorkflowOptionListToBoundary(
     direction === "down" ? initialState.bottom - initialState.top : initialState.top,
   ).toBeGreaterThan(1);
 
+  const box = await optionList.boundingBox();
+  if (!box || box.height < 48)
+    throw new Error("Workflow option list is too small for a touch swipe");
+  // Budget for the finger travel itself, allowing for touch-recognition slop.
+  // Long lists must remain reachable even when the gesture produces no fling.
+  const minimumTravel = Math.max(1, Math.floor(box.height * 0.56) - 32);
+  const remaining =
+    direction === "down" ? initialState.bottom - initialState.top : initialState.top;
+  const gestureBudget = Math.ceil(remaining / minimumTravel) + 1;
   let gestureCount = 0;
-  for (let attempt = 0; attempt < 40; attempt += 1) {
+  for (let attempt = 0; attempt < gestureBudget; attempt += 1) {
     const state = await optionList.evaluate((element) => ({
       top: element.scrollTop,
       bottom: element.scrollHeight - element.clientHeight,
