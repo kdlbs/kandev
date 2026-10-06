@@ -159,8 +159,10 @@ three-package race suite passed in the task-owned Go 1.26 Linux container with
 - `(cd apps/backend && go test -race -tags fts5 ./internal/agent/runtime/lifecycle ./internal/orchestrator ./internal/agentctl/server/adapter/transport/acp -count=1)`: passed; lifecycle 219.463s, orchestrator 105.202s, ACP transport 21.881s.
 
 This is the initial implementation receipt before PR review remediation. The
-final post-review race and CI package results are recorded in the plan's
-[review remediation](plan.md#pr-review-remediation) section.
+stream-reset review receipts are recorded in the plan's
+[earlier review remediation](plan.md#earlier-stream-reset-pr-review-remediation-at-head-542ab1d).
+The later cancelled-startup CI correction is recorded in the plan's
+[cancelled-startup teardown remediation](plan.md#cancelled-startup-teardown-remediation-after-head-542ab1d).
 
 The earlier macOS and first Linux runner failures and their resolved setup
 causes are documented in the [plan verification results](plan.md#verification-results).

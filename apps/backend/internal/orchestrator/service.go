@@ -1331,6 +1331,9 @@ type Service struct {
 	// execution. Claims expire with the same bounded grace period used for
 	// completed-execution stream markers.
 	executionTeardownClaims sync.Map
+	// cancelledResumeTeardowns fences a new startup attempt until the exact
+	// cancelled startup cleanup that claimed its execution has returned.
+	cancelledResumeTeardowns sync.Map
 	// parkedProfileSwitchStops remembers exact executions whose deliberate
 	// parked-switch lifecycle event was already consumed. It is a short-lived
 	// duplicate-delivery optimization; the durable consumed tombstone lives in
@@ -1869,6 +1872,7 @@ func NewService(
 	})
 	exec.SetOnLaunchFailed(s.handleLaunchFailed)
 	exec.SetOnExecutionCleanupClaim(s.claimForcedExecutionCleanup)
+	exec.SetOnCancelledResumeExecutionCleanup(s.cleanupCancelledResumeExecution)
 	exec.SetOnExecutionStopOwnerRegistration(s.RegisterExecutionStopOwner)
 	exec.SetOnTaskReviewStateReconcile(func(ctx context.Context, taskID, completedSessionID string) {
 		s.writeTaskReviewState(ctx, taskID, completedSessionID)

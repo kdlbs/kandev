@@ -12,6 +12,7 @@ import (
 	"github.com/google/uuid"
 	"go.uber.org/zap"
 
+	agentruntime "github.com/kandev/kandev/internal/agent/runtime"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/task/models"
 )
@@ -74,6 +75,39 @@ type resumeAttemptRegistry struct {
 	tombstones      map[string][]resumeAttemptTombstone
 	recoveryHistory map[string]struct{}
 	latestExecution map[string]map[string]uint64
+}
+
+type cancelledResumeTeardown struct {
+	done chan struct{}
+}
+
+func (s *Service) cancelledResumeTeardownForSession(sessionID string) *cancelledResumeTeardown {
+	if s == nil || sessionID == "" {
+		return nil
+	}
+	value, ok := s.cancelledResumeTeardowns.Load(sessionID)
+	if !ok {
+		return nil
+	}
+	teardown, _ := value.(*cancelledResumeTeardown)
+	return teardown
+}
+
+func waitForCancelledResumeTeardown(ctx context.Context, teardown *cancelledResumeTeardown) error {
+	if teardown == nil {
+		return nil
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	waitCtx, cancel := context.WithTimeout(ctx, cancellationOperationTTL)
+	defer cancel()
+	select {
+	case <-teardown.done:
+		return nil
+	case <-waitCtx.Done():
+		return waitCtx.Err()
+	}
 }
 
 const maxResumeAttemptTombstones = 16
@@ -373,6 +407,29 @@ func (r *resumeAttemptRegistry) canCleanupIdentity(sessionID, executionID, origi
 	return r.latestExecution[sessionID][executionID] <= id
 }
 
+func (r *resumeAttemptRegistry) canCleanupIdentityOrCurrent(sessionID, executionID, originID string) bool {
+	if sessionID == "" || executionID == "" {
+		return false
+	}
+	id, ok := parseResumeAttemptIdentity(originID)
+	if !ok {
+		return false
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if current := r.attempts[sessionID]; current != nil {
+		if current.id != id || current.ctx.Err() == nil || current.accepted || current.execution() != executionID {
+			return false
+		}
+		return r.latestExecution[sessionID][executionID] <= id
+	}
+	tombstone, found := r.tombstoneLocked(sessionID, id)
+	if !found || !tombstone.cancelled || tombstone.accepted || tombstone.executionID != executionID {
+		return false
+	}
+	return r.latestExecution[sessionID][executionID] <= id
+}
+
 // accept transfers startup authority to the provider turn while retaining the
 // attempt identity for later execution events. The registry lock orders this
 // transition with explicit cancellation, so an invalidated attempt cannot be
@@ -600,6 +657,9 @@ func (s *Service) beginResumeAttempt(
 		if s.currentCancellation(sessionID) != nil {
 			return nil, false, ErrResumeAttemptCancelled
 		}
+		if s.cancelledResumeTeardownForSession(sessionID) != nil {
+			return nil, false, fmt.Errorf("%w: cancelled startup teardown is still in progress", ErrResumeAttemptCancelled)
+		}
 		// The guard marker is only valid for this registration call. Do not
 		// carry it into lifecycle work that can outlive the guard owner.
 		attemptCtx := context.WithValue(ctx, cancelInFlightGuardHeldContextKey{}, false)
@@ -615,6 +675,14 @@ func (s *Service) beginResumeAttempt(
 		lock.Lock()
 		operation := s.currentCancellation(sessionID)
 		if operation == nil {
+			if teardown := s.cancelledResumeTeardownForSession(sessionID); teardown != nil {
+				lock.Unlock()
+				release()
+				if err := waitForCancelledResumeTeardown(ctx, teardown); err != nil {
+					return nil, false, fmt.Errorf("wait for cancelled startup teardown before resume: %w", err)
+				}
+				continue
+			}
 			attempt, owner := s.resumeAttemptStore().begin(ctx, taskID, sessionID)
 			if owner {
 				s.captureRecoveryErrorForResumeAttempt(ctx, attempt)
@@ -902,22 +970,66 @@ func (s *Service) cleanupCancelledResumeAttempt(attempt *resumeAttempt) {
 		return
 	}
 	executionID := attempt.execution()
-	if executionID == "" || !s.resumeAttemptStore().canCleanup(attempt) ||
-		!s.claimForcedExecutionCleanup(attempt.sessionID, executionID) {
+	if executionID == "" || !s.resumeAttemptStore().canCleanup(attempt) {
 		return
 	}
-	cleanupCtx, cancel := context.WithTimeout(context.Background(), cancellationOperationTTL)
+	s.cleanupCancelledResumeExecution(
+		context.Background(), attempt.taskID, attempt.sessionID, executionID, attempt.identity(),
+	)
+}
+
+func (s *Service) cleanupCancelledResumeExecution(
+	ctx context.Context,
+	taskID, sessionID, executionID, attemptID string,
+) {
+	if s == nil || s.executor == nil {
+		return
+	}
+	registry := s.resumeAttemptStore()
+	pending := &cancelledResumeTeardown{done: make(chan struct{})}
+	validate := func() bool {
+		return s.cancelledResumeTeardownForSession(sessionID) == nil &&
+			registry.canCleanupIdentityOrCurrent(sessionID, executionID, attemptID)
+	}
+	claim, claimed := s.claimForcedExecutionCleanupWithValidationAndClaimed(
+		sessionID,
+		executionID,
+		validate,
+		func() { s.cancelledResumeTeardowns.Store(sessionID, pending) },
+	)
+	if !claimed {
+		return
+	}
+	defer s.finishCancelledResumeTeardown(sessionID, pending)
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), cancellationOperationTTL)
 	defer cancel()
 	if s.lspLeases != nil {
 		s.lspLeases.StopLSPLeasesForExecution(executionID)
 	}
-	if err := s.executor.StopExecution(cleanupCtx, executionID, "cancelled resume startup", true); err != nil && s.logger != nil {
+	if err := s.executor.StopExecution(cleanupCtx, executionID, "cancelled resume startup", true); err != nil && !agentruntime.IsNotFound(err) {
+		s.executionTeardownClaims.CompareAndDelete(terminalExecutionKey(sessionID, executionID), claim)
+		if s.logger == nil {
+			return
+		}
 		s.logger.Debug("failed to clean up cancelled resume execution",
-			zap.String("task_id", attempt.taskID),
-			zap.String("session_id", attempt.sessionID),
+			zap.String("task_id", taskID),
+			zap.String("session_id", sessionID),
 			zap.String("agent_execution_id", executionID),
 			zap.Error(err))
+		return
 	}
+	s.completeExecutionTeardownClaim(sessionID, executionID, claim)
+}
+
+func (s *Service) finishCancelledResumeTeardown(sessionID string, pending *cancelledResumeTeardown) {
+	if s == nil || sessionID == "" || pending == nil {
+		return
+	}
+	s.cancelledResumeTeardowns.CompareAndDelete(sessionID, pending)
+	close(pending.done)
 }
 
 // cleanupStaleResumeExecution tears down an exact execution named by a late

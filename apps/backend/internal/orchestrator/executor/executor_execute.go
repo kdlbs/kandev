@@ -361,7 +361,7 @@ func (e *Executor) runAgentProcessAsyncWithObservation(
 				// release any launch-side claim without publishing FAILED.
 				cleanupCtx := context.WithoutCancel(ctx)
 				attemptOwned := e.stopFailedStartExecutionIfCurrentAttempt(
-					cleanupCtx, sessionID, agentExecutionID, startAttemptID, "cancelled resume startup",
+					cleanupCtx, taskID, sessionID, agentExecutionID, startAttemptID, "cancelled resume startup",
 				)
 				if attemptOwned && e.onAgentProcessStartFailed != nil {
 					e.onAgentProcessStartFailed(cleanupCtx, taskID, sessionID, agentExecutionID, err)
@@ -396,7 +396,7 @@ func (e *Executor) runAgentProcessAsyncWithObservation(
 			// not run the resume success callback or restore task/session state.
 			// Teardown is exact-execution scoped so a retry cannot be stopped.
 			attemptOwned := e.stopFailedStartExecutionIfCurrentAttempt(
-				context.WithoutCancel(ctx), sessionID, agentExecutionID, startAttemptID, "cancelled resume startup",
+				context.WithoutCancel(ctx), taskID, sessionID, agentExecutionID, startAttemptID, "cancelled resume startup",
 			)
 			if attemptOwned && e.onAgentProcessStartFailed != nil {
 				e.onAgentProcessStartFailed(context.WithoutCancel(ctx), taskID, sessionID, agentExecutionID, context.Canceled)
@@ -559,7 +559,7 @@ func (e *Executor) stopFailedStartExecution(ctx context.Context, agentExecutionI
 
 func (e *Executor) stopFailedStartExecutionIfCurrentAttempt(
 	ctx context.Context,
-	sessionID, agentExecutionID string,
+	taskID, sessionID, agentExecutionID string,
 	expectedStartAttemptID string,
 	phase string,
 ) bool {
@@ -576,7 +576,11 @@ func (e *Executor) stopFailedStartExecutionIfCurrentAttempt(
 		return false
 	}
 	if owned || cleanupSafe {
-		e.stopFailedStartExecution(ctx, agentExecutionID, phase)
+		if e.onCancelledResumeExecutionCleanup != nil {
+			e.onCancelledResumeExecutionCleanup(ctx, taskID, sessionID, agentExecutionID, expectedStartAttemptID)
+		} else {
+			e.stopFailedStartExecution(ctx, agentExecutionID, phase)
+		}
 	}
 	return owned
 }

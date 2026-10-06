@@ -234,7 +234,7 @@ Design-package validation on 2026-10-06:
   changed Go files; `git diff --check` passed; focused Prettier and ESLint
   checks passed for all three new E2E files.
 
-## PR review remediation
+## Earlier stream-reset PR review remediation at head 542ab1d
 
 The exact-head review found that raw provider-stream events synchronously
 performed route-state reads and writes to clear the dynamic unclassified
@@ -270,13 +270,68 @@ warming that cache. A standalone warm build with the exact helper flags and
 task-owned environment passed; the final unfiltered three-package rerun then
 passed without changing test timeouts or excluding tests.
 
-Final PR-fixup verification after these changes:
+Stream-reset PR-fixup verification at head 542ab1d:
 
 - In the retained Go 1.26 Linux container, `go test -json -race -trimpath -tags fts5 ./internal/agent/runtime/lifecycle ./internal/orchestrator ./internal/agentctl/server/adapter/transport/acp -count=1` passed: lifecycle 228.145s, orchestrator 109.508s, ACP transport 22.028s. JSON receipt: `/private/tmp/kpd-provider-diagnostic-backend-final2.jsonl`. The one cold-helper attempt is retained separately at `/private/tmp/kpd-provider-diagnostic-backend-cold-helper.jsonl`.
 - With `GOCACHE=/tmp/kpd-api-cache`, `TMPDIR=/tmp`, and task-owned `GIT_CONFIG_GLOBAL`, `go test -json -race -coverprofile=/tmp/kpd-api-package-count1.out -covermode=atomic -timeout=20m -count=1 ./internal/agentctl/server/api` passed in 736.225s with 77.7% coverage. Its JSON and coverage are retained at `/private/tmp/kpd-api-package-count1.jsonl` and `/private/tmp/kpd-api-package-count1.out`.
 - `go test -race -trimpath -run '^(TestSessionDeletionRetiresPendingStreakResetOnlyAfterDeleteSucceeds|TestPendingStreakResetSurvivesPromptReplacementBeforeNoOutputFailure|TestStalePendingStreakResetDoesNotWriteSuccessorRoute|TestUncapturedResetCannotCrossReusedExecutionPromptOrRoute|TestUncapturedResetReadFailureRetainsManualRecoveryFence|TestOwnedSuccessfulCompletionClearsUncapturedPriorReset|TestCompletedGenerationOwnsStreakResetAfterStreamEvidenceRetires|TestCompletionResetPersistenceFailureRetainsPendingIntent|TestRawOutputChunksDeferUnclassifiedStreakResetAndKeepTranscriptIdentity)$' -count=1 ./internal/orchestrator`: passed in 4.093s.
 - `golangci-lint run ./... --new-from-rev=d62824ad2895616e1b97f876c9546786565f61d1 --timeout=5m`: passed with 0 issues using task-owned cache `/private/tmp/kandev-provider-diagnostic-golangci-cache`. Delivery-checkout lint against the captured live main tip `95c040e84951773dc8ed6f684fff0425d7b63f96` at that run also passed with 0 issues; receipt `/private/tmp/kpd-delivery-golangci.log`.
 - `python3 scripts/list-docs.py validate`, `python3 scripts/lint-spec-files.py --all`, `git diff --check`, and `gofmt -l` on changed Go files: passed after the final receipt update. Focused Prettier and ESLint passed for all three E2E files.
+
+## Cancelled-startup teardown remediation after head 542ab1d
+
+The next backend CI attempt failed
+`TestDynamicRelaunchCreatedSessionCarriesRecoveryAttemptIdentity`: service
+cancellation and a late successful `StartAgentProcess` result each stopped the
+same execution. The test now forces that order with a startup barrier and joins
+the executor's completion signal before asserting exactly one stop. Both
+cancellation and late-startup cleanup use the same exact-execution teardown
+claim. A failed stop releases only its captured claim for retry; successful
+cleanup completes the claim. The attempt identity is rechecked while holding
+the session guard, preventing a queued stale cleanup from stopping a successor
+that reused the execution ID.
+
+The initial behavior RED passed through both cleanup paths and produced two
+stops. A separate RED proved a failed stop left a claim that blocked retry:
+`/private/tmp/kpd-dynamic-attempt-red.json` and
+`/private/tmp/kpd-cleanup-retry-red.json`. A queued cleanup also reproduced a
+same-execution replacement race after waiting on the session guard
+(`/private/tmp/kpd-cleanup-toctou-red.json`). Another RED showed that a resume
+could replace the cancelled owner while its claimed `StopExecution` was still
+blocked (`/private/tmp/kpd-cleanup-admission-red.json`). The fix revalidates
+attempt ownership under the guard, registers a per-session in-flight fence with
+the exact teardown claim, releases the guard during runtime stop, and makes
+normal resume admission wait outside the guard before revalidating. Failed
+stops release only their exact claim and fence, allowing retry. The fence adds
+no UI cancellation projection and never grants an old cleanup authority over a
+successor.
+
+Focused cleanup regressions passed in the retained Linux container with
+`-race -trimpath -tags fts5 -covermode=atomic -count=1`, covering duplicate
+startup cleanup, failed-stop retry, same-ID replacement, stale callback
+revalidation after guard wait, admission during blocked teardown, exact cleanup
+delegation, and Office terminal-failure ownership. JSON receipt:
+`/private/tmp/kpd-cleanup-focused-current.json`
+(SHA-256 `f07a3d04c09e4c1293dac9959dcf3fadf7e12d31ff33f74e36b9839409298d11`).
+The complete orchestrator and executor packages then passed the current-tree
+race/coverage run with no excluded tests. Orchestrator passed in 112.020s at
+77.4% statement coverage; executor passed in 85.141s. Command:
+`go test -race -trimpath -tags fts5 -coverprofile=/tmp/kpd-cleanup-full-current.cover -covermode=atomic -json -count=1 ./internal/orchestrator ./internal/orchestrator/executor`.
+JSON receipt: `/private/tmp/kpd-cleanup-full-current.json` (SHA-256
+`17d0e02b30685ae54536a0d5d969d68e7095b6258882067d33d7da86a4a2b49e`); coverage
+receipt: `/private/tmp/kpd-cleanup-full-current.cover` (SHA-256
+`2df11d672a58c1241668491f4d3263faa0e66d9accdd6ab22a730cddce18f08d`).
+
+An earlier full-package run exposed an asynchronous Office cleanup assertion
+that inspected stop calls before joining the successor worker. The regression
+now joins that owned worker before asserting the terminal owner and no-fallback
+contract; the current complete suite passed. Captured-base lint against
+`05c41b11e830a9861534200949c3bbac473b57f7` passed with 0 issues. Final docs,
+format, and whitespace checks passed: `python3 scripts/list-docs.py validate`
+(355 decisions and 1394 specifications), `python3 scripts/lint-spec-files.py
+--all`, `git diff --check`, and `gofmt -l` on changed Go files. The previous
+section's API, lifecycle and browser receipts describe only the stream-reset
+fix at head `542ab1d`; the cleanup receipts here are subsequent CI fixup work.
 
 ## Risks
 
