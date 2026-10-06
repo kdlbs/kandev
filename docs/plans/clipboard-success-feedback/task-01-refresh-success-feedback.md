@@ -27,7 +27,9 @@ Replace the existing hook-owned expiration on each acknowledged success and
 release its currently scheduled timer on unmount. Prove the timing through
 meaningful direct controls and the real localized workflow export dialog.
 ROOT admitted implementation after the actual design END and verified the four
-reviewed SHA256 values. Status is now in progress in the same primary/profile.
+reviewed SHA256 values. Implementation and targeted local checks are complete.
+Hosted verification, review dispositions, merge and cleanup remain pending in
+the versioned task plan.
 
 ## In scope
 
@@ -46,7 +48,7 @@ reviewed SHA256 values. Status is now in progress in the same primary/profile.
 - Consumer production changes, copy labels, layout, browser/build/E2E checks
   absent causal need, generated/unrelated fixture repair, broad local review.
 - Any installation, production/permanent test edits, product checks, hooks,
-  commit, PR, or merge during the current design-only turn.
+  commit, PR, or merge during the completed design-only turn.
 
 ## Acceptance
 
