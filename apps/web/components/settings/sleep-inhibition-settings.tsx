@@ -62,12 +62,14 @@ function useSleepInhibitionState(): SleepInhibitionState {
   const isAdmin = role === undefined || role === "admin";
   const saved = snapshot?.settings.enabled;
   const lastSaved = useRef<boolean | undefined>(undefined);
+  const saving = useRef(false);
 
   useEffect(() => {
     if (saved === undefined) return;
-    setDraftState((current) =>
-      current === null || current === lastSaved.current ? saved : current,
-    );
+    const previousSaved = lastSaved.current;
+    if (!saving.current) {
+      setDraftState((current) => (current === null || current === previousSaved ? saved : current));
+    }
     lastSaved.current = saved;
   }, [saved]);
 
@@ -87,12 +89,16 @@ function useSleepInhibitionState(): SleepInhibitionState {
       if (!canEdit) throw new Error(t("settings:sleepInhibitionAdminOnly"));
       const submitted = draft ?? saved ?? false;
       setSaveFailed(false);
+      saving.current = true;
       try {
         const response = await remote.save({ enabled: submitted });
+        lastSaved.current = response.settings.enabled;
         setDraftState((current) => (current === submitted ? response.settings.enabled : current));
       } catch (error) {
         setSaveFailed(true);
         throw error;
+      } finally {
+        saving.current = false;
       }
     },
     discard: () => {
@@ -112,7 +118,7 @@ function useSleepInhibitionState(): SleepInhibitionState {
     isAdmin,
     canEdit,
     saved,
-    reload: remote.refresh,
+    reload: () => remote.refresh(),
   };
 }
 
