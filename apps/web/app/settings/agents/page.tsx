@@ -51,7 +51,7 @@ import {
 } from "@/lib/settings/agent-display-order";
 import { toAgentProfileOption } from "@/lib/state/slices/settings/types";
 import { AgentRuntimePolicies } from "@/components/settings/agent-runtime-policies";
-import { HideDisabledAgentProfilesSetting } from "@/app/settings/agents/hide-disabled-agent-profiles-setting";
+import { AgentOptionsDialog } from "@/app/settings/agents/agent-options-dialog";
 import type { AgentDiscovery, Agent, AvailableAgent, RuntimeUpdate } from "@/lib/types/http";
 
 const installedAgentsActionClassName = settingsActionClassName("cursor-pointer");
@@ -103,6 +103,7 @@ function InstalledAgentsHeader({
   const { t } = useTranslation();
   return (
     <div className="flex w-full flex-wrap gap-2 md:w-auto" data-testid="installed-agents-actions">
+      <AgentOptionsDialog />
       <Button
         variant="outline"
         onClick={onOpenShell}
@@ -227,7 +228,6 @@ function InstalledAgentsSection({
       }
       contentClassName="space-y-4 divide-y-0"
     >
-      <HideDisabledAgentProfilesSetting />
       <HostShellDialog
         open={shellOpen}
         onOpenChange={setShellOpen}
