@@ -212,8 +212,12 @@ test.describe("Review file status", () => {
       caption: "Review keeps tree and diff order aligned without auto-reviewing a file jump",
     });
 
-    await reviewScroll.evaluate((element) => {
+    await reviewScroll.evaluate(async (element) => {
       element.scrollTop = 0;
+      // Let intersection observers see the reset before the manual wheel crosses a file header.
+      await new Promise<void>((resolve) => {
+        requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+      });
     });
     await expect.poll(() => reviewScroll.evaluate((element) => element.scrollTop)).toBe(0);
     await reviewScroll.hover();

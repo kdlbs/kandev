@@ -141,6 +141,8 @@ test.describe("Session recovery", () => {
         fixture.identity.sessionId,
         90_000,
       );
+      // Delay only the cancelled process; the new process uses the normal resume path.
+      await apiClient.updateAgentProfile(fixture.delayedProfileId, { env_vars: [] });
       await fixture.session.composerReady();
       await fixture.session.sendMessage("/e2e:simple-message");
       await fixture.session.expectChatResponseVisible("simple mock response", 1, {

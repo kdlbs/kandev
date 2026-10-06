@@ -5,12 +5,11 @@ import { KanbanPage } from "../../pages/kanban-page";
 import { SessionPage } from "../../pages/session-page";
 import path from "node:path";
 
-async function scrollChangesPanelToBottom(session: SessionPage): Promise<void> {
-  // Earlier shard tests add local commits to the shared checkout. The timeline
-  // virtualizes rows, so PR commits can sit below its initial rendered window.
-  await session.changes.getByTestId("changes-panel-scroll-owner").evaluate((element) => {
-    element.scrollTop = element.scrollHeight;
-  });
+async function scrollChangesPanel(session: SessionPage, position: "top" | "bottom"): Promise<void> {
+  // PR files precede commits in the virtualized timeline.
+  await session.changes.getByTestId("changes-panel-scroll-owner").evaluate((element, edge) => {
+    element.scrollTop = edge === "top" ? 0 : element.scrollHeight;
+  }, position);
 }
 
 test.describe("PR switcher changes panel", () => {
@@ -61,6 +60,11 @@ test.describe("PR switcher changes panel", () => {
       path.join(backend.tmpDir, "repos", "e2e-repo"),
       makeGitEnv(backend.tmpDir),
     );
+    for (let index = 0; index < 20; index += 1) {
+      git.createFile("pr-switcher-prefix.txt", `prefix ${index}\n`);
+      git.stageFile("pr-switcher-prefix.txt");
+      git.commit(`PR switcher preceding commit ${index}`);
+    }
     git.createFile("auth-fix-task.txt", "auth fix task commit");
     git.stageFile("auth-fix-task.txt");
     const authCommitSHA = git.commit("fix auth token expiry");
@@ -217,10 +221,11 @@ test.describe("PR switcher changes panel", () => {
     await expect(session.prFilesSection()).toBeVisible({ timeout: 15_000 });
     await session.expandPRChangesSection();
     await session.expandCommitsSection();
-    await scrollChangesPanelToBottom(session);
+    await scrollChangesPanel(session, "top");
     await expect(session.prFilesSection().getByText("auth.go")).toBeVisible();
     await expect(session.prFilesSection().getByText("auth_test.go")).toBeVisible();
 
+    await scrollChangesPanel(session, "bottom");
     await expect(session.commitsSection()).toBeVisible();
     await expect(session.commitsSection().getByText("fix auth token expiry")).toBeVisible();
     const authCommitRow = session
@@ -244,7 +249,7 @@ test.describe("PR switcher changes panel", () => {
     await expect(session.prFilesSection()).toBeVisible({ timeout: 15_000 });
     await session.expandPRChangesSection();
     await session.expandCommitsSection();
-    await scrollChangesPanelToBottom(session);
+    await scrollChangesPanel(session, "top");
     await expect(session.prFilesSection().getByText("dashboard.tsx")).toBeVisible();
     await expect(session.prFilesSection().getByText("api.ts")).toBeVisible();
     await expect(session.prFilesSection().getByText("styles.css")).toBeVisible();
@@ -252,6 +257,7 @@ test.describe("PR switcher changes panel", () => {
     // Verify Task A files are NOT visible
     await expect(session.prFilesSection().getByText("auth.go")).not.toBeVisible();
 
+    await scrollChangesPanel(session, "bottom");
     await expect(session.commitsSection()).toBeVisible();
     await expect(session.commitsSection().getByText("add dashboard component")).toBeVisible();
     await expect(session.commitsSection().getByText("add api client")).toBeVisible();
@@ -297,9 +303,10 @@ test.describe("PR switcher changes panel", () => {
     await expect(session.prFilesSection()).toBeVisible({ timeout: 15_000 });
     await session.expandPRChangesSection();
     await session.expandCommitsSection();
-    await scrollChangesPanelToBottom(session);
+    await scrollChangesPanel(session, "top");
     await expect(session.prFilesSection().getByText("auth.go")).toBeVisible();
     await expect(session.prFilesSection().getByText("auth_test.go")).toBeVisible();
+    await scrollChangesPanel(session, "bottom");
     await expect(session.commitsSection().getByText("fix auth token expiry")).toBeVisible();
     await expect(authCommitRow.getByTestId("commit-provenance")).toHaveAttribute(
       "data-commit-provenance",

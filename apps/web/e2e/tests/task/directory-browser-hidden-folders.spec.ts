@@ -1,4 +1,5 @@
 import { expect, test } from "../../fixtures/test-base";
+import { waitForSessionDone } from "../../helpers/session";
 import { controlHeight } from "../../helpers/control-sizing";
 import { mockFolderAvailability } from "../../helpers/open-task-folder";
 import type { Locator, Page } from "@playwright/test";
@@ -292,6 +293,9 @@ test.describe("Directory browser hidden folders", () => {
         timeout: 30_000,
       })
       .toBeTruthy();
+
+    if (!task.session_id) throw new Error("directory browser task has no session_id");
+    await waitForSessionDone(apiClient, task.id, task.session_id, 45_000);
 
     const drawer = await openNarrowFolderSourceDrawer(testPage, task.id);
     await drawer.getByTestId("folder-picker-trigger").last().click();
