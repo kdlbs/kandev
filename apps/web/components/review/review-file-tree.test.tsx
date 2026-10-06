@@ -217,6 +217,16 @@ describe("ReviewFileTree", () => {
   });
 });
 
+describe("ReviewFileTree readiness", () => {
+  it.each(["pending", "unavailable"] as const)(
+    "disables review for a file whose current detail is %s",
+    (diff_state) => {
+      renderTree([file({ path: APP_PATH, diff_state })]);
+      expect(screen.getByRole("checkbox").hasAttribute("disabled")).toBe(true);
+    },
+  );
+});
+
 describe("ReviewFileTree late updates", () => {
   it("expands directories introduced by a later review-source update", () => {
     const initialFiles = [

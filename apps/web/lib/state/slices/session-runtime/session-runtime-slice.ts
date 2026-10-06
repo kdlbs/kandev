@@ -9,6 +9,7 @@ import {
   failWorkspaceRestoration,
 } from "./workspace-restoration";
 import { buildSessionViewActions } from "./session-runtime-view-actions";
+import { buildSessionGitCheckoutActions } from "./session-runtime-git-checkout-actions";
 
 const maxProcessOutputBytes = 2 * 1024 * 1024;
 // Shell + terminal streams are unbounded over a session's lifetime; cap them at
@@ -276,14 +277,6 @@ function buildSessionCommitActions(set: ImmerSet) {
         const envKey = draft.environmentIdBySessionId[sessionId] ?? sessionId;
         const prev = draft.sessionCommits.refetchTrigger[envKey] ?? 0;
         draft.sessionCommits.refetchTrigger[envKey] = prev + 1;
-      }),
-    bumpSessionGitCheckoutGeneration: (sessionId: string, repositoryName?: string) =>
-      set((draft) => {
-        const envKey = draft.environmentIdBySessionId[sessionId] ?? sessionId;
-        const byRepository = (draft.gitCheckoutGeneration.byEnvironmentId[envKey] ??= {});
-        const scope = repositoryName ?? "";
-        byRepository[scope] = (byRepository[scope] ?? 0) + 1;
-        delete draft.gitStatusDisplay.byEnvironmentRepo[envKey]?.[scope];
       }),
   };
 }
@@ -631,6 +624,7 @@ export const createSessionRuntimeSlice: StateCreator<
   ...buildWorkspaceRestorationActions(set),
   ...buildContextWindowActions(set),
   ...buildSessionCommitActions(set),
+  ...buildSessionGitCheckoutActions(set),
   setAvailableCommands: (sessionId, commands) =>
     set((draft) => {
       draft.availableCommands.bySessionId[sessionId] = commands;

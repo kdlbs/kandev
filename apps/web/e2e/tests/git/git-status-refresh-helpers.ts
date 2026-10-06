@@ -373,9 +373,6 @@ export async function routeGitStatusRefresh(
     pendingNotificationCount() {
       return state.pendingNotifications.length;
     },
-    pendingNotificationCount() {
-      return state.pendingNotifications.length;
-    },
     readyNotificationCount() {
       return state.readyNotifications.length;
     },

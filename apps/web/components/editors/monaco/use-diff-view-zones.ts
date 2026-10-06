@@ -278,6 +278,7 @@ export function useViewZones({
         /* editors may be disposed */
       }
     };
+    // Submit readiness is updated in place below so open comment drafts survive refreshes.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     modifiedEditor,

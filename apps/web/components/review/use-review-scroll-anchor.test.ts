@@ -243,9 +243,12 @@ describe("review scroll anchor input cancellation", () => {
     const root = view.getByTestId("root");
     act(() => view.rerender(createElement(Probe, { patch: "new" })));
     expect(frames.size).toBe(1);
+    act(() => view.rerender(createElement(Probe, { patch: "latest" })));
+    expect(frames.size).toBe(1);
 
     fireEvent.wheel(root);
     expect(frames.size).toBe(0);
+    expect(suppression.current).toBe(false);
     act(() => {
       for (const [id, callback] of frames) {
         callback(0);

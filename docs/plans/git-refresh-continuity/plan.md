@@ -135,6 +135,7 @@ Phone checks include the actual full-height drawer, narrow fine-pointer entry, t
 ## Verification results
 
 Implementation is complete. The focused Vitest suite passed 21 files / 175 tests, and the final Monaco view-state regression rerun passed 4 tests. TypeScript typecheck and the production Vite build passed. i18n checks, documentation validation, full specification lint, and `git diff --check` passed. Strict ESLint passed with zero warnings across all touched frontend files. The desktop Chromium and mobile Chrome continuity suites each passed 2 tests with capture enabled. All 16 captured PNGs for both renderers and surfaces are listed in `apps/web/.pr-assets/manifest.json`.
+The PR fixup regression suite passed 5 files / 55 tests, including the raw checkout-status invalidation boundary, stale review controls on desktop and phone layouts, and scroll-restoration cancellation.
 
 Package validation passed: specification catalog, full specification lint, 36 specification-linter tests, and diff whitespace checks.
 The repository documentation-coverage validator accepted the work order references using the planned renderer change as its coverage trigger.

@@ -162,3 +162,56 @@ describe("session-runtime gitStatus multi-repo routing", () => {
     ]);
   });
 });
+
+describe("session-runtime checkout generation invalidation", () => {
+  let useStore: ReturnType<typeof makeStore>;
+
+  beforeEach(() => {
+    useStore = makeStore();
+  });
+
+  it("invalidates raw status only for the repository whose checkout changed", () => {
+    setStatus(useStore, entry({ modified: [FRONTEND_FILE], repository_name: REPO_FRONTEND }));
+    setStatus(useStore, entry({ modified: [BACKEND_FILE], repository_name: REPO_BACKEND }));
+    const display = {
+      checkoutGeneration: 0,
+      branch: "main",
+      headCommit: null,
+      baseCommit: null,
+      comparisonTarget: null,
+      files: {},
+    };
+    useStore.setState((state) => ({
+      gitStatusDisplay: {
+        byEnvironmentRepo: {
+          ...state.gitStatusDisplay.byEnvironmentRepo,
+          [SESSION]: { [REPO_FRONTEND]: display, [REPO_BACKEND]: display },
+        },
+      },
+    }));
+
+    useStore.getState().bumpSessionGitCheckoutGeneration(SESSION, REPO_FRONTEND);
+
+    const state = useStore.getState();
+    expect(state.gitStatus.byEnvironmentRepo[SESSION][REPO_FRONTEND]).toBeUndefined();
+    expect(state.gitStatus.byEnvironmentRepo[SESSION][REPO_BACKEND].modified).toEqual([
+      BACKEND_FILE,
+    ]);
+    expect(state.gitStatus.byEnvironmentId[SESSION]?.repository_name).toBe(REPO_BACKEND);
+    expect(state.gitStatusDisplay.byEnvironmentRepo[SESSION][REPO_FRONTEND]).toBeUndefined();
+    expect(state.gitStatusDisplay.byEnvironmentRepo[SESSION][REPO_BACKEND]).toBe(display);
+
+    useStore.getState().bumpSessionGitCheckoutGeneration(SESSION, REPO_BACKEND);
+    expect(useStore.getState().gitStatus.byEnvironmentRepo[SESSION]).toBeUndefined();
+    expect(useStore.getState().gitStatus.byEnvironmentId[SESSION]).toBeUndefined();
+  });
+
+  it("invalidates the legacy status snapshot when checkout scope is omitted", () => {
+    setStatus(useStore, entry({ modified: [FRONTEND_FILE] }));
+    useStore.getState().bumpSessionGitCheckoutGeneration(SESSION);
+
+    const state = useStore.getState();
+    expect(state.gitStatus.byEnvironmentRepo[SESSION]).toBeUndefined();
+    expect(state.gitStatus.byEnvironmentId[SESSION]).toBeUndefined();
+  });
+});

@@ -47,6 +47,12 @@ export type ReviewFile = {
   is_submodule?: boolean;
 };
 
+export function isReviewFileDetailReady(
+  file: Pick<ReviewFile, "diff_state" | "display_stale">,
+): boolean {
+  return !file.display_stale && file.diff_state !== "pending" && file.diff_state !== "unavailable";
+}
+
 /**
  * Composite per-file key used by the review dialog's in-memory state
  * (reviewed set, stale set, file refs, selected file, comment counts) and

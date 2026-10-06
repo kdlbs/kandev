@@ -5,7 +5,7 @@ import { Checkbox } from "@kandev/ui/checkbox";
 import { CollapsibleFileHeader } from "@/components/diff/collapsible-file-header";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { cn } from "@/lib/utils";
-import type { ReviewFile } from "./types";
+import { isReviewFileDetailReady, type ReviewFile } from "./types";
 import { FileDiffToolbar } from "./review-diff-toolbar";
 import { useTranslation } from "react-i18next";
 
@@ -205,14 +205,14 @@ export function ReviewDiffHeader(props: ReviewDiffHeaderProps) {
           <MobileReviewCheckbox
             checked={isReviewed}
             onCheckedChange={onCheckboxChange}
-            disabled={file.display_stale}
+            disabled={!isReviewFileDetailReady(file)}
           />
         }
         desktopLeading={
           <Checkbox
             checked={isReviewed}
             onCheckedChange={onCheckboxChange}
-            disabled={file.display_stale}
+            disabled={!isReviewFileDetailReady(file)}
             className="size-4 cursor-pointer"
           />
         }

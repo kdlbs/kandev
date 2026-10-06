@@ -220,17 +220,25 @@ export function useReviewScrollAnchor({
 }) {
   const anchorRef = useRef<ReviewScrollAnchor | null>(null);
   const frameRef = useRef<number | null>(null);
+  const savedSuppressionRef = useRef<boolean | null>(null);
   const targetRef = useRef("");
   const contentRef = useRef("");
   const userInputRef = useRef(0);
   const currentContent = contentSignature(files);
   const currentTarget = `${sessionId}\u0000${sourceKey ?? ""}\u0000${scopeSignature(files)}`;
 
+  const restoreSuppression = useCallback(() => {
+    if (savedSuppressionRef.current === null) return;
+    suppressAutoMark.current = savedSuppressionRef.current;
+    savedSuppressionRef.current = null;
+  }, [suppressAutoMark]);
+
   const cancelRestore = useCallback(() => {
     userInputRef.current += 1;
     if (frameRef.current !== null) cancelAnimationFrame(frameRef.current);
     frameRef.current = null;
-  }, []);
+    restoreSuppression();
+  }, [restoreSuppression]);
 
   const captureOnScroll = useCallback(() => {
     if (frameRef.current !== null || contentRef.current !== currentContent) return;
@@ -257,30 +265,28 @@ export function useReviewScrollAnchor({
 
     if (contentRef.current !== currentContent) {
       const anchor = anchorRef.current ?? captureReviewScrollAnchor(root);
-      const savedSuppression = suppressAutoMark.current;
+      const savedSuppression = savedSuppressionRef.current ?? suppressAutoMark.current;
       const userInputVersion = userInputRef.current;
       contentRef.current = currentContent;
       if (anchor) {
+        if (frameRef.current !== null) cancelAnimationFrame(frameRef.current);
+        savedSuppressionRef.current = savedSuppression;
         suppressAutoMark.current = true;
         frameRef.current = requestAnimationFrame(() => {
           frameRef.current = null;
-          if (userInputRef.current !== userInputVersion) return;
-          restoreReviewScrollAnchor(root, anchor);
-          if (userInputRef.current === userInputVersion) {
-            suppressAutoMark.current = savedSuppression;
+          if (userInputRef.current !== userInputVersion) {
+            restoreSuppression();
+            return;
           }
+          restoreReviewScrollAnchor(root, anchor);
+          restoreSuppression();
           anchorRef.current = captureReviewScrollAnchor(root) ?? anchor;
         });
       }
     }
-  }, [cancelRestore, currentContent, currentTarget, rootRef, suppressAutoMark]);
+  }, [cancelRestore, currentContent, currentTarget, restoreSuppression, rootRef, suppressAutoMark]);
 
-  useLayoutEffect(
-    () => () => {
-      if (frameRef.current !== null) cancelAnimationFrame(frameRef.current);
-    },
-    [],
-  );
+  useLayoutEffect(() => cancelRestore, [cancelRestore]);
 
   return { captureOnScroll, handleUserInput };
 }
