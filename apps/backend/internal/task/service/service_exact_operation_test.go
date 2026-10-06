@@ -223,6 +223,51 @@ func TestExactTaskMoveRecoversWorkflowAdmissionOperation(t *testing.T) {
 	}
 }
 
+func TestExactTaskMoveSameStepRecoversOperation(t *testing.T) {
+	ctx := context.Background()
+	svc, _, repo := createTestService(t)
+	seedMoveWorkflows(t, ctx, repo)
+	seedMoveSteps(svc)
+	createMoveTask(t, ctx, repo, "task-exact-same-step", "wf-source", "step-source", nil)
+	current, err := repo.GetTask(ctx, "task-exact-same-step")
+	if err != nil {
+		t.Fatalf("GetTask: %v", err)
+	}
+	operation := &ExactTaskMoveOperation{
+		WorkspaceID:             current.WorkspaceID,
+		ExpectedResourceVersion: current.UpdatedAt.UTC().Format(time.RFC3339Nano),
+		OperationID:             "operation-exact-same-step", PayloadDigest: "sha256:same-step-v1",
+	}
+
+	first, err := svc.MoveTaskWithOptions(ctx, current.ID, "wf-source", "step-source", 0,
+		MoveTaskOptions{ExactOperation: operation})
+	if err != nil {
+		t.Fatalf("first same-step exact move: %v", err)
+	}
+	if first.AlreadyApplied || first.Task.WorkflowStepID != "step-source" {
+		t.Fatalf("first same-step exact result = %+v, want a newly applied no-transition move", first)
+	}
+
+	second, err := svc.MoveTaskWithOptions(ctx, current.ID, "wf-source", "step-source", 0,
+		MoveTaskOptions{ExactOperation: operation})
+	if err != nil {
+		t.Fatalf("replayed same-step exact move: %v", err)
+	}
+	if !second.AlreadyApplied || second.Task.WorkflowStepID != "step-source" {
+		t.Fatalf("replayed same-step exact result = %+v, want an already-applied no-transition move", second)
+	}
+	if !second.Task.UpdatedAt.Equal(first.Task.UpdatedAt) {
+		t.Fatalf("replay changed task resource version from %s to %s", first.Task.UpdatedAt, second.Task.UpdatedAt)
+	}
+	var operationCount int
+	if err := repo.DB().QueryRowContext(ctx, `SELECT COUNT(*) FROM exact_task_command_operations WHERE operation_id = ?`, operation.OperationID).Scan(&operationCount); err != nil {
+		t.Fatalf("count exact same-step operation: %v", err)
+	}
+	if operationCount != 1 {
+		t.Fatalf("exact same-step operation count = %d, want one", operationCount)
+	}
+}
+
 func TestExactTaskArchiveRecoversAfterCommit(t *testing.T) {
 	ctx := context.Background()
 	svc, _, repo := createTestService(t)

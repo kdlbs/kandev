@@ -74,3 +74,7 @@ var ErrOfficeSessionRaceConflict = errors.New("office task session race conflict
 // workflow id no longer matches the row's persisted workflow_id, checked
 // atomically inside the write transaction. See repoerrors.ErrWorkflowResolutionConflict.
 var ErrWorkflowResolutionConflict = repoerrors.ErrWorkflowResolutionConflict
+
+// ErrWorkflowStepChanged is returned by source-step guarded route writes when
+// the task changed steps after the caller captured its route generation.
+var ErrWorkflowStepChanged = repoerrors.ErrWorkflowStepChanged
