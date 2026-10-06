@@ -63,15 +63,15 @@ function useSplitDrag(height: number, maximum: number, commit: (height: number) 
   const onPointerMove = (event: PointerEvent<HTMLDivElement>) => {
     const current = drag.current;
     if (current)
-      setPreview(Math.max(64, Math.min(maximum, current.height + event.clientY - current.y)));
+      setPreview(Math.max(0, Math.min(maximum, current.height + event.clientY - current.y)));
   };
   const onPointerUp = (event: PointerEvent<HTMLDivElement>) => {
     if (!drag.current) return;
     const next = Math.max(
-      64,
+      0,
       Math.min(maximum, drag.current.height + event.clientY - drag.current.y),
     );
-    const start = Math.max(64, Math.min(maximum, drag.current.height));
+    const start = Math.max(0, Math.min(maximum, drag.current.height));
     restore();
     event.currentTarget.releasePointerCapture(event.pointerId);
     if (Math.round(next) !== Math.round(start)) commit(next);
@@ -84,9 +84,9 @@ function useSplitDrag(height: number, maximum: number, commit: (height: number) 
     if (!["ArrowUp", "ArrowDown", "Home", "End"].includes(event.key)) return;
     event.preventDefault();
     let next = height + (event.key === "ArrowUp" ? -16 : 16);
-    if (event.key === "Home") next = 64;
+    if (event.key === "Home") next = 0;
     if (event.key === "End") next = maximum;
-    commit(Math.max(64, Math.min(maximum, next)));
+    commit(Math.max(0, Math.min(maximum, next)));
   };
   return {
     preview,
@@ -132,7 +132,7 @@ export function SidebarNavigationSplit({
       navigationHeight: savedNavigationHeight(height),
       navigationExpanded: false,
     }));
-  const { preview, handlers } = useSplitDrag(geometry.height, Math.max(64, maximum), commit);
+  const { preview, handlers } = useSplitDrag(geometry.height, Math.max(0, maximum), commit);
   const rendered =
     preview === undefined
       ? geometry
@@ -175,7 +175,7 @@ export function SidebarNavigationSplit({
         role="separator"
         aria-orientation="horizontal"
         aria-label={t("settings:sidebarResizeNavigation")}
-        aria-valuemin={Math.min(64, maximum, size.content)}
+        aria-valuemin={Math.min(0, maximum, size.content)}
         aria-valuemax={maximum}
         aria-valuenow={Math.round(rendered.height)}
         tabIndex={0}

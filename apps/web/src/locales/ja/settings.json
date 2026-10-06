@@ -901,6 +901,7 @@
   "sidebarNewTaskStyle": "新しいタスクボタンのスタイル",
   "sidebarStyleSimple": "シンプルな新しいタスクボタン",
   "sidebarStyleCompact": "コンパクトな新しいタスク行",
+  "sidebarSettingsTitle": "サイドバー設定",
   "sidebarCustomize": "サイドバーをカスタマイズ",
   "sidebarLayoutSettings": "サイドバーのレイアウト設定",
   "sidebarLayoutConflict": "サイドバーが別の場所で変更されました。最新の設定を読み込みました。もう一度お試しください。",

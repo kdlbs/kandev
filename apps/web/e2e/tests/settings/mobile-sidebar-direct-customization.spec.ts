@@ -17,7 +17,7 @@ test("customizes the saved sidebar from an inset phone drawer", async ({
       layout: {
         version: 1,
         revision: 0,
-        navigation_height: 90,
+        navigation_height: 0,
         navigation_expanded: false,
         nodes: [
           { id: "home", kind: "builtin", destination_id: "home", visible: true },
@@ -57,7 +57,7 @@ test("customizes the saved sidebar from an inset phone drawer", async ({
   const layout = (await apiClient.getUserSettings()).settings.sidebar_layouts_by_workspace?.[
     seedData.workspaceId
   ];
-  expect(layout?.navigation_height).toBe(90);
+  expect(layout?.navigation_height).toBe(0);
   expect(layout?.navigation_expanded).toBeFalsy();
   const bounds = (await drawer.boundingBox())!;
   expect(bounds.y).toBeGreaterThan(0);

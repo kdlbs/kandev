@@ -901,6 +901,7 @@
   "sidebarNewTaskStyle": "新建任務按鈕樣式",
   "sidebarStyleSimple": "簡潔的新建任務按鈕",
   "sidebarStyleCompact": "緊湊的新建任務行",
+  "sidebarSettingsTitle": "側邊欄設定",
   "sidebarCustomize": "自訂側邊欄",
   "sidebarLayoutSettings": "側邊欄佈局設定",
   "sidebarLayoutConflict": "側邊欄已在其他位置更改。已載入最新設定，請重試。",

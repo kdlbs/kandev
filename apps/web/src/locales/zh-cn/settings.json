@@ -901,6 +901,7 @@
   "sidebarNewTaskStyle": "新建任务按钮样式",
   "sidebarStyleSimple": "简洁的新建任务按钮",
   "sidebarStyleCompact": "紧凑的新建任务行",
+  "sidebarSettingsTitle": "侧边栏设置",
   "sidebarCustomize": "自定义侧边栏",
   "sidebarLayoutSettings": "侧边栏布局设置",
   "sidebarLayoutConflict": "侧边栏已在其他位置更改。已加载最新设置，请重试。",

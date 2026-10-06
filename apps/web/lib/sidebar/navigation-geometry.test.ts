@@ -16,7 +16,9 @@ describe("sidebar navigation split", () => {
     expect(navigationGeometry(80, 500, 90, true).height).toBe(0);
   });
   it("rounds and bounds only deliberate saved resize values", () => {
-    expect(savedNavigationHeight(63)).toBe(64);
+    expect(savedNavigationHeight(0)).toBe(0);
+    expect(savedNavigationHeight(-50)).toBe(0);
+    expect(savedNavigationHeight(63)).toBe(63);
     expect(savedNavigationHeight(1800)).toBe(1600);
     expect(savedNavigationHeight(100.4)).toBe(100);
   });

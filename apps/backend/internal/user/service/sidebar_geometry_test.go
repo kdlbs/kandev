@@ -10,7 +10,7 @@ func TestSidebarNavigationGeometry(t *testing.T) {
 	for _, tc := range []struct {
 		height int
 		valid  bool
-	}{{64, true}, {1600, true}, {0, false}, {63, false}, {1601, false}} {
+	}{{0, true}, {63, true}, {64, true}, {1600, true}, {-1, false}, {1601, false}} {
 		var layout models.SidebarLayout
 		raw, _ := json.Marshal(map[string]any{"version": 1, "nodes": []any{}, "navigation_height": tc.height, "navigation_expanded": true})
 		if err := json.Unmarshal(raw, &layout); err != nil {

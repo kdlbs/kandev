@@ -10,6 +10,7 @@ import {
   ContextMenuContent,
   ContextMenuCheckboxItem,
   ContextMenuSeparator,
+  ContextMenuLabel,
   ContextMenuItem,
   ContextMenuRadioGroup,
   ContextMenuRadioItem,
@@ -70,6 +71,8 @@ export function SidebarCustomizeMenu({
         className="w-64 max-h-[80dvh] overflow-y-auto"
         data-testid="sidebar-customize-menu"
       >
+        <ContextMenuLabel>{t("settings:sidebarSettingsTitle")}</ContextMenuLabel>
+        <ContextMenuSeparator />
         {nodes.map((node) => (
           <ContextMenuCheckboxItem
             key={node.id}

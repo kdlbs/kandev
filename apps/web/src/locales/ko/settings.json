@@ -901,6 +901,7 @@
   "sidebarNewTaskStyle": "새 작업 버튼 스타일",
   "sidebarStyleSimple": "간단한 새 작업 버튼",
   "sidebarStyleCompact": "작은 새 작업 행",
+  "sidebarSettingsTitle": "사이드바 설정",
   "sidebarCustomize": "사이드바 사용자 지정",
   "sidebarLayoutSettings": "사이드바 레이아웃 설정",
   "sidebarLayoutConflict": "다른 곳에서 사이드바가 변경되었습니다. 최신 설정을 불러왔습니다. 다시 시도하세요.",

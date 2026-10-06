@@ -487,3 +487,20 @@ contract: Prettier compacted its enum array, but the Go generator checks exact
 bytes. The two generated settings snapshots now use their generator formatting
 and are excluded from Prettier. The generator freshness tests and normal commit
 hooks validate this correction before delivery to PR #4239.
+
+
+## Approved follow-up: full collapse and menu heading
+
+The user authorized implementing [Task 04](task-04-zero-height-and-menu-title.md).
+Allow saved navigation height 0 through 1600, retaining the small chevron at zero.
+Add a localized Sidebar settings heading above context-menu choices. Phone keeps
+its existing inset customization drawer and must preserve a zero desktop height.
+
+- [x] Complete Task 04 and its focused backend, unit, desktop/phone browser,
+  localization, lint, type, and documentation checks.
+
+Task 04 is complete. Backend service tests and 10 frontend regressions passed.
+All six desktop browser cases and the phone case passed with retries disabled.
+Fresh managed builds, typecheck, focused lint, localization, docs/spec validators,
+and diff checks passed. Existing geometry assertions were corrected to use a
+measured drag target and wait for viewport resize before capturing their baseline.

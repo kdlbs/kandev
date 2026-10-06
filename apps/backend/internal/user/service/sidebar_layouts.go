@@ -57,8 +57,8 @@ func (s *Service) validateSidebarLayoutPatch(
 }
 
 func validateSidebarLayout(layout models.SidebarLayout) error {
-	if layout.NavigationHeight != nil && (*layout.NavigationHeight < 64 || *layout.NavigationHeight > 1600) {
-		return fmt.Errorf("sidebar navigation height must be between 64 and 1600 pixels")
+	if layout.NavigationHeight != nil && (*layout.NavigationHeight < 0 || *layout.NavigationHeight > 1600) {
+		return fmt.Errorf("sidebar navigation height must be between 0 and 1600 pixels")
 	}
 	if layout.Version != models.SidebarLayoutVersion {
 		return fmt.Errorf("sidebar layout version %d is unsupported", layout.Version)

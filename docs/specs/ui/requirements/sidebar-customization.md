@@ -70,7 +70,8 @@ A shortcut is a reference to an existing destination or supported host action.
 
 - **AC-UI-SIDEBAR-CUSTOMIZATION-006.1:** Right-clicking a desktop navigation
   entry or the navigation region's empty space shall open the same customization
-  menu without activating its destination or disclosure. It shall list eligible
+  menu titled **Sidebar settings** without activating its destination or disclosure.
+  It shall list eligible
   built-in entries, Inbox entries, plugin destinations, and custom groups as
   checked visibility choices. Hidden entries shall remain listed unchecked for
   restoration, including when all optional entries are hidden.
@@ -114,7 +115,9 @@ A shortcut is a reference to an existing destination or supported host action.
 - **AC-UI-SIDEBAR-CUSTOMIZATION-007.1:** In expanded regular desktop navigation,
   users shall drag the navigation/Tasks divider vertically without reordering
   entries. The allocated navigation height and expanded state shall persist in
-  the same user/workspace database layout across requests and reloads.
+  the same user/workspace database layout across requests and reloads. Users shall
+  be able to reduce navigation to zero height, hiding all entries while retaining
+  the expansion chevron.
 - **AC-UI-SIDEBAR-CUSTOMIZATION-007.2:** Clipped navigation shall retain normal
   button dimensions, show a bottom fading gradient, and expose a small bottom
   chevron. Its visible strip shall use no more than 12px of vertical space on

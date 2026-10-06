@@ -1,5 +1,5 @@
 export function savedNavigationHeight(height: number): number {
-  return Math.max(64, Math.min(1600, Math.round(height)));
+  return Math.max(0, Math.min(1600, Math.round(height)));
 }
 export function navigationGeometry(
   available: number,

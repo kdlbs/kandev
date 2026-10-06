@@ -156,12 +156,13 @@ With fast icons enabled, Terminal and Quick Chat sit beside New Task. Canvas set
 integration shortcuts sit before their section chevrons. Named settings and provider links remain
 available when fast icons are hidden.
 
-Right-click a navigation entry or empty navigation space to show or hide entries, change the button
-style, or open Sidebar layout settings. Drag entries directly to reorder them. No drag handles appear.
+Right-click a navigation entry or empty navigation space to open **Sidebar settings**.
+Use this menu to show or hide entries, change the button style, or open Sidebar layout settings. Drag entries directly to reorder them. No drag handles appear.
 You can also focus an entry and press **Alt + Up** or **Alt + Down**. These sidebar edits save immediately.
 The settings editor keeps its shared Save and Discard controls.
 
-Drag the divider above Tasks upwards to reduce navigation space. Hidden entries fade at the bottom.
+Drag the divider above Tasks upwards to reduce navigation space. You can hide all navigation
+buttons and leave only the small expansion chevron. Partially hidden entries fade at the bottom.
 Click the small chevron to expand navigation; click it again to restore the compressed height.
 Both the height and expansion state follow your saved workspace layout across reloads and clients.
 On phones, use the Customize drawer's move buttons; it preserves the desktop divider position.

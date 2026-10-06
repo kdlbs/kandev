@@ -2,6 +2,7 @@ import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { defaultSidebarLayout } from "@/lib/sidebar/layout-types";
 
+const DIVIDER_TEST_ID = "sidebar-navigation-divider";
 const mocks = vi.hoisted(() => ({ mutate: vi.fn() }));
 let saved = { navigation_height: 90, navigation_expanded: false };
 vi.mock("@/components/state-provider", () => ({
@@ -67,20 +68,18 @@ describe("sidebar split persistence", () => {
   it("commits keyboard resizing but never persists measurements", () => {
     renderSplit();
     expect(mocks.mutate).not.toHaveBeenCalled();
-    fireEvent.keyDown(screen.getByTestId("sidebar-navigation-divider"), { key: "ArrowDown" });
+    fireEvent.keyDown(screen.getByTestId(DIVIDER_TEST_ID), { key: "ArrowDown" });
     expect(mocks.mutate.mock.calls[0][0](defaultSidebarLayout())).toMatchObject({
       navigationHeight: 106,
       navigationExpanded: false,
     });
-    expect(screen.getByTestId("sidebar-navigation-divider").getAttribute("aria-orientation")).toBe(
-      "horizontal",
-    );
+    expect(screen.getByTestId(DIVIDER_TEST_ID).getAttribute("aria-orientation")).toBe("horizontal");
   });
 });
 
 it("does not save a divider drag that returns to its starting height", () => {
   renderSplit();
-  const divider = screen.getByTestId("sidebar-navigation-divider");
+  const divider = screen.getByTestId(DIVIDER_TEST_ID);
   divider.setPointerCapture = vi.fn();
   divider.releasePointerCapture = vi.fn();
   fireEvent.pointerDown(divider, { button: 0, isPrimary: true, pointerId: 1, clientY: 100 });
@@ -90,4 +89,43 @@ it("does not save a divider drag that returns to its starting height", () => {
   expect(mocks.mutate).not.toHaveBeenCalled();
   expect(divider.releasePointerCapture).toHaveBeenCalledOnce();
   expect(document.documentElement.style.cursor).not.toBe("row-resize");
+});
+
+// @covers AC-UI-SIDEBAR-CUSTOMIZATION-007.1 AC-UI-SIDEBAR-CUSTOMIZATION-007.3
+it("collapses to zero using the keyboard and preserves it across expansion", () => {
+  const view = renderSplit();
+  const divider = screen.getByTestId(DIVIDER_TEST_ID);
+  fireEvent.keyDown(divider, { key: "Home" });
+  expect(mocks.mutate.mock.calls[0][0](defaultSidebarLayout())).toMatchObject({
+    navigationHeight: 0,
+    navigationExpanded: false,
+  });
+  saved = { navigation_height: 0, navigation_expanded: false };
+  view.rerender(
+    <SidebarNavigationSplit navigation={<div>Navigation</div>} tasks={<div>Tasks</div>} />,
+  );
+  expect(divider.getAttribute("aria-valuenow")).toBe("0");
+  expect(divider.getAttribute("aria-valuemin")).toBe("0");
+  fireEvent.click(screen.getByTestId("sidebar-navigation-expand"));
+  expect(
+    mocks.mutate.mock.calls[1][0]({ ...defaultSidebarLayout(), navigationHeight: 0 }),
+  ).toMatchObject({
+    navigationHeight: 0,
+    navigationExpanded: true,
+  });
+});
+
+it("clamps pointer resizing to zero and persists the fully collapsed height", () => {
+  renderSplit();
+  const divider = screen.getByTestId(DIVIDER_TEST_ID);
+  divider.setPointerCapture = vi.fn();
+  divider.releasePointerCapture = vi.fn();
+  fireEvent.pointerDown(divider, { button: 0, isPrimary: true, pointerId: 1, clientY: 200 });
+  fireEvent.pointerMove(divider, { pointerId: 1, clientY: 0 });
+  expect(divider.getAttribute("aria-valuenow")).toBe("0");
+  fireEvent.pointerUp(divider, { pointerId: 1, clientY: 0 });
+  expect(mocks.mutate.mock.calls[0][0](defaultSidebarLayout())).toMatchObject({
+    navigationHeight: 0,
+    navigationExpanded: false,
+  });
 });

@@ -370,10 +370,13 @@ tradeoffs fit this document; no additional ADR is required.
 - [Plan and work orders](../../../plans/sidebar-customization/plan.md)
 - [Mobile saved navigation repair](../../../plans/mobile-saved-navigation/plan.md)
 
+The direct context menu uses a localized **Sidebar settings** label before its
+visibility choices.
+
 ## Navigation split
 
 Extend `SidebarLayout` with optional `navigation_height` (integer CSS pixels,
-64 through 1600) and `navigation_expanded` (boolean, false by default). Missing
+0 through 1600) and `navigation_expanded` (boolean, false by default). Missing
 height preserves current fit-content geometry. Keep version 1 and use the existing
 workspace layout CAS patch. All clone, API conversion, editor save, reset,
 projection, and event paths preserve these values; reset clears the override.
@@ -383,7 +386,9 @@ region. Observe container and content size, deriving effective bounds while
 reserving 112px for Tasks where space permits. Persist the user-selected height
 only on completed resize, and preserve it while expanded. The chevron persists
 expanded state independently using the same serialized layout mutation controller.
-No resize/update request is sent for measurement or viewport changes.
+No resize/update request is sent for measurement or viewport changes. Zero is an
+explicit saved height, not a missing override; the divider and chevron remain
+accessible when all navigation content is clipped.
 
 Clip overflow in compressed state, add a pointer-events-none bottom gradient,
 and retain a 12px chevron strip with a larger hit target overlapping the region.

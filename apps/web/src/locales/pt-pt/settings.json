@@ -901,6 +901,7 @@
   "sidebarNewTaskStyle": "Estilo do botão Nova tarefa",
   "sidebarStyleSimple": "Botão Nova tarefa simples",
   "sidebarStyleCompact": "Linha Nova tarefa compacta",
+  "sidebarSettingsTitle": "Definições da barra lateral",
   "sidebarCustomize": "Personalizar barra lateral",
   "sidebarLayoutSettings": "Definições do esquema da barra lateral",
   "sidebarLayoutConflict": "A barra lateral foi alterada noutro local. As definições mais recentes foram carregadas. Tente novamente.",

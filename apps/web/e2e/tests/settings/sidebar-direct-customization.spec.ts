@@ -27,6 +27,7 @@ test("customizes visibility and presentation from the menu and settings", async 
   await expect(sidebar.getByTestId("sidebar-labelled-utilities")).toBeVisible();
   await sidebar.getByRole("link", { name: "Home", exact: true }).click({ button: "right" });
   const menu = page.getByTestId("sidebar-customize-menu");
+  await expect(menu.getByText("Sidebar settings", { exact: true })).toBeVisible();
   await menu.getByTestId("sidebar-visibility-home").click();
   await expect(sidebar.getByRole("link", { name: "Home", exact: true })).toHaveCount(0);
   await page.reload();
@@ -127,7 +128,8 @@ test("saves the split and expanded state, showing a small chevron and fade", asy
   const box = (await divider.boundingBox())!;
   await page.mouse.move(box.x + 5, box.y + 5);
   await page.mouse.down();
-  await page.mouse.move(box.x + 5, box.y - 110, { steps: 10 });
+  const navigation = (await page.locator("#sidebar-navigation-content").boundingBox())!;
+  await page.mouse.move(box.x + 5, navigation.y + 95, { steps: 10 });
   await page.mouse.up();
   await expect
     .poll(
@@ -136,7 +138,7 @@ test("saves the split and expanded state, showing a small chevron and fade", asy
           seedData.workspaceId
         ]?.navigation_height,
     )
-    .toBeLessThan(130);
+    .toBe(90);
   await expect(page.getByTestId("sidebar-navigation-fade")).toBeVisible();
   expect((await divider.boundingBox())!.height).toBe(12);
   const chevron = page.getByTestId("sidebar-navigation-expand");
@@ -192,7 +194,9 @@ test("cancels resizing and clamps a short viewport without rewriting the saved h
   const stored = (await apiClient.getUserSettings()).settings.sidebar_layouts_by_workspace?.[
     seedData.workspaceId
   ];
+  const tallY = (await divider.boundingBox())!.y;
   await page.setViewportSize({ width: 1280, height: 400 });
+  await expect.poll(async () => (await divider.boundingBox())!.y).toBeLessThan(tallY);
   const shortY = (await divider.boundingBox())!.y;
   await expect(page.getByTestId("sidebar-navigation-fade")).toBeVisible();
   expect(
@@ -233,4 +237,45 @@ test("keeps the blank customization region reachable when every entry is hidden"
   await expect(
     page.getByTestId("app-sidebar").getByRole("link", { name: "Home", exact: true }),
   ).toBeVisible();
+});
+
+// @covers AC-UI-SIDEBAR-CUSTOMIZATION-007.1 AC-UI-SIDEBAR-CUSTOMIZATION-007.3
+test("collapses every navigation entry and restores zero after expansion and reload", async ({
+  testPage: page,
+  apiClient,
+  seedData,
+}) => {
+  await page.goto("/tasks");
+  const divider = page.getByTestId("sidebar-navigation-divider");
+  await expect(divider).toBeVisible();
+  const box = (await divider.boundingBox())!;
+  await page.mouse.move(box.x + 5, box.y + 5);
+  await page.mouse.down();
+  await page.mouse.move(box.x + 5, 0, { steps: 10 });
+  await page.mouse.up();
+  const height = async () =>
+    (await apiClient.getUserSettings()).settings.sidebar_layouts_by_workspace?.[
+      seedData.workspaceId
+    ]?.navigation_height;
+  await expect.poll(height).toBe(0);
+  await expect(divider).toHaveAttribute("aria-valuenow", "0");
+  await expect(page.locator("#sidebar-navigation-content")).toHaveCSS("height", "0px");
+  await expect(page.getByTestId("sidebar-node-home")).toHaveAttribute("inert", "");
+  await page.reload();
+  await expect(divider).toHaveAttribute("aria-valuenow", "0");
+  const chevron = page.getByTestId("sidebar-navigation-expand");
+  await chevron.click();
+  await expect(chevron).toHaveAttribute("aria-expanded", "true");
+  await expect(page.getByTestId("sidebar-node-home")).toBeVisible();
+  await expect.poll(height).toBe(0);
+  await chevron.click();
+  await expect(divider).toHaveAttribute("aria-valuenow", "0");
+  await page.reload();
+  await expect(divider).toHaveAttribute("aria-valuenow", "0");
+  await chevron.click();
+  await expect(chevron).toHaveAttribute("aria-expanded", "true");
+  await divider.focus();
+  await page.keyboard.press("Home");
+  await expect(divider).toHaveAttribute("aria-valuenow", "0");
+  await expect.poll(height).toBe(0);
 });
