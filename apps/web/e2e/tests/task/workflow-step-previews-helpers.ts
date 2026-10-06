@@ -26,10 +26,10 @@ export async function expectStepsInOrder(page: Page, workflowId: string, stepNam
   await expect(group).toBeVisible();
   await expect
     .poll(async () => {
-      const text = (await group.textContent()) ?? "";
+      const renderedTexts = await group.getByText(/./).allTextContents();
       let previousPosition = -1;
       for (const name of stepNames) {
-        const position = text.indexOf(name);
+        const position = renderedTexts.indexOf(name);
         if (position <= previousPosition) return false;
         previousPosition = position;
       }

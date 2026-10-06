@@ -5,6 +5,7 @@ import type { ApiClient } from "../helpers/api-client";
 import { SessionPage } from "../pages/session-page";
 import { GitHelper, makeGitEnv } from "../helpers/git-helper";
 import { waitForFiniteAnimations } from "../helpers/animations";
+import { waitForSessionDone } from "../helpers/session";
 import {
   openHistoryRegression,
   seedHistoryRelation,
@@ -30,6 +31,14 @@ async function createToolbarTask(
       workflow_step_id: seedData.startStepId,
       repository_ids: [seedData.repositoryId],
     },
+  );
+  if (!task.session_id) throw new Error("Toolbar task has no session");
+  await waitForSessionDone(
+    apiClient,
+    task.id,
+    task.session_id,
+    "Waiting for the toolbar task's initial turn",
+    45_000,
   );
   await page.goto(`/t/${task.id}`);
   const session = new SessionPage(page);
