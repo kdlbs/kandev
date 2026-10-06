@@ -12,6 +12,7 @@ import (
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/recoveryoperation"
+	"github.com/kandev/kandev/internal/task/repository"
 	"github.com/kandev/kandev/internal/worktree"
 )
 
@@ -110,8 +111,8 @@ func (s *Service) BeginWorkspaceRecovery(
 }
 
 // settleUnregisteredSameProcessRecoveryAttempt closes a runner row only after
-// the exact attempt has lost its in-memory liveness proof and an authorized
-// retry presents the same durable owner, session, and operation claim.
+// this process has lost its liveness proof and the retry holds current durable
+// authority for the environment.
 func (s *Service) settleUnregisteredSameProcessRecoveryAttempt(
 	ctx context.Context,
 	start worktree.RecoveryProgressStart,
@@ -120,10 +121,15 @@ func (s *Service) settleUnregisteredSameProcessRecoveryAttempt(
 	if err != nil || previous == nil || previous.State != recoveryoperation.StateRunning {
 		return nil, err
 	}
-	if previous.RunnerInstanceID != s.recoveryOperationRunnerID ||
-		previous.OwnerTaskID != start.OwnerTaskID || previous.OwnershipGeneration != start.OwnershipGeneration ||
-		previous.SessionID != start.SessionID || previous.OperationID != start.OperationID ||
-		previous.ErrorStamp != start.ErrorStamp || previous.Kind != start.Kind {
+	if previous.RunnerInstanceID != s.recoveryOperationRunnerID {
+		return nil, recoveryoperation.ErrInProgress
+	}
+	claimReaderAvailable, claimMatches, claimErr := s.recoveryStartHasCurrentClaim(ctx, start)
+	if claimErr != nil {
+		return nil, claimErr
+	}
+	if (claimReaderAvailable && !claimMatches) ||
+		(!claimReaderAvailable && !recoveryOperationMatchesStartIdentity(previous, start)) {
 		return nil, recoveryoperation.ErrInProgress
 	}
 	endedAt := time.Now().UTC()
@@ -141,6 +147,33 @@ func (s *Service) settleUnregisteredSameProcessRecoveryAttempt(
 		return nil, err
 	}
 	return interrupted, nil
+}
+
+func recoveryOperationMatchesStartIdentity(
+	previous *models.TaskEnvironmentRecoveryOperation,
+	start worktree.RecoveryProgressStart,
+) bool {
+	return previous.OwnerTaskID == start.OwnerTaskID && previous.OwnershipGeneration == start.OwnershipGeneration &&
+		previous.SessionID == start.SessionID && previous.OperationID == start.OperationID &&
+		previous.ErrorStamp == start.ErrorStamp && previous.Kind == start.Kind
+}
+
+func (s *Service) recoveryStartHasCurrentClaim(
+	ctx context.Context,
+	start worktree.RecoveryProgressStart,
+) (bool, bool, error) {
+	reader, ok := s.taskEnvironments.(repository.TaskEnvironmentRecoveryClaimReader)
+	if !ok {
+		return false, false, nil
+	}
+	claim, err := reader.GetTaskEnvironmentRecoveryClaim(ctx, start.TaskEnvironmentID)
+	if err != nil || claim == nil {
+		return true, false, err
+	}
+	matches := claim.TaskEnvironmentID == start.TaskEnvironmentID && claim.OwnerTaskID == start.OwnerTaskID &&
+		claim.OwnershipGeneration == start.OwnershipGeneration && claim.SessionID == start.SessionID &&
+		claim.OperationID == start.OperationID
+	return true, matches, nil
 }
 
 func (s *Service) UpdateWorkspaceRecovery(

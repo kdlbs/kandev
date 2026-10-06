@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -595,11 +596,13 @@ func (m *Manager) admitClaimedRecovery(
 	var heartbeatDone <-chan struct{}
 	if inspection.needsRelocation && m.recoveryProgressReporter != nil &&
 		managedCloneRelocationErrorStampFromContext(claimCtx) != "" {
-		progress, err = m.beginWorkspaceRecoveryProgress(claimCtx, req, indices, claim)
+		var start RecoveryProgressStart
+		progress, start, err = m.beginWorkspaceRecoveryProgress(claimCtx, req, indices, claim)
 		if err != nil {
-			// Acquire is idempotent for an exact existing claim. A duplicate must
-			// never release the authority retained by the active runner.
-			return m.failClaimedRecovery(ctx, req, claim, nil, nil, nil, nil, true, err, releaseLocks, operationLocks)
+			cleanupCtx, cancelCleanup := recoveryProgressCleanupContext(claimCtx)
+			keepClaim := m.retainClaimForUnsettledProgressBegin(cleanupCtx, start)
+			cancelCleanup()
+			return m.failClaimedRecovery(ctx, req, claim, nil, nil, nil, nil, keepClaim, err, releaseLocks, operationLocks)
 		}
 		operationCtx, operationCancel = acceptedRecoveryContext(claimCtx)
 		claimCtx = withRecoveryProgress(recoveryclaim.WithClaim(operationCtx, claim), progress)
@@ -639,7 +642,7 @@ func (m *Manager) beginWorkspaceRecoveryProgress(
 	req *RecoveryAdmissionRequest,
 	indices []int,
 	claim *models.TaskEnvironmentRecoveryClaim,
-) (*recoveryProgressTracker, error) {
+) (*recoveryProgressTracker, RecoveryProgressStart, error) {
 	ordered := append([]int(nil), indices...)
 	sort.Slice(ordered, func(i, j int) bool {
 		return recoverySlotKey(req.Slots[ordered[i]]) < recoverySlotKey(req.Slots[ordered[j]])
@@ -651,19 +654,20 @@ func (m *Manager) beginWorkspaceRecoveryProgress(
 			repositoryID = req.Slots[index].Worktree.RepositoryID
 		}
 		if repositoryID == "" {
-			return nil, recoveryAdmissionError(*req, "selected recovery repository identity is incomplete")
+			return nil, RecoveryProgressStart{}, recoveryAdmissionError(*req, "selected recovery repository identity is incomplete")
 		}
 		selected = append(selected, repositoryID)
 	}
 	stamp := managedCloneRelocationErrorStampFromContext(ctx)
-	binding, err := m.recoveryProgressReporter.BeginWorkspaceRecovery(ctx, RecoveryProgressStart{
+	start := RecoveryProgressStart{
 		TaskID: req.TaskID, SessionID: claim.SessionID, TaskEnvironmentID: claim.TaskEnvironmentID,
 		OwnerTaskID: claim.OwnerTaskID, OwnershipGeneration: claim.OwnershipGeneration,
 		OperationID: claim.OperationID, ErrorStamp: stamp, Kind: recoveryoperation.KindManagedCloneRelocation,
 		SelectedRepositoryIDs: selected, RepositoryTotal: len(selected),
-	})
+	}
+	binding, err := m.recoveryProgressReporter.BeginWorkspaceRecovery(ctx, start)
 	if err != nil {
-		return nil, err
+		return nil, start, err
 	}
 	return &recoveryProgressTracker{
 		reporter: m.recoveryProgressReporter,
@@ -672,7 +676,39 @@ func (m *Manager) beginWorkspaceRecoveryProgress(
 			State: recoveryoperation.StateRunning, Phase: recoveryoperation.PhaseChecking,
 			RepositoryTotal: len(selected),
 		},
-	}, nil
+	}, start, nil
+}
+
+func (m *Manager) retainClaimForUnsettledProgressBegin(
+	ctx context.Context,
+	start RecoveryProgressStart,
+) bool {
+	reader, ok := m.recoveryProgressReporter.(RecoveryProgressProjectionReader)
+	if !ok {
+		return true
+	}
+	operation, _, err := reader.WorkspaceRecoveryProjection(ctx, start.TaskEnvironmentID)
+	if err != nil {
+		return true
+	}
+	if operation == nil || operation.State != recoveryoperation.StateRunning ||
+		!recoveryProgressOperationMatchesStart(operation, start) {
+		return false
+	}
+	// A running projection keeps its exact claim until a same-claim retry settles it.
+	return true
+}
+
+func recoveryProgressOperationMatchesStart(
+	operation *models.TaskEnvironmentRecoveryOperation,
+	start RecoveryProgressStart,
+) bool {
+	return operation != nil && operation.TaskEnvironmentID == start.TaskEnvironmentID &&
+		operation.OwnerTaskID == start.OwnerTaskID && operation.OwnershipGeneration == start.OwnershipGeneration &&
+		operation.SessionID == start.SessionID && operation.OperationID == start.OperationID &&
+		operation.ErrorStamp == start.ErrorStamp && operation.Kind == start.Kind &&
+		operation.RepositoryTotal == start.RepositoryTotal &&
+		slices.Equal(operation.SelectedRepositoryIDs, start.SelectedRepositoryIDs)
 }
 
 func startRecoveryHeartbeat(ctx context.Context, tracker *recoveryProgressTracker) <-chan struct{} {
@@ -1517,6 +1553,9 @@ func (m *Manager) recoveryOperationIDFromClaim(
 		if !missingCheckoutClaimMatchesRequest(claim, *req) {
 			return "", recoveryAdmissionError(*req, "interrupted missing-checkout claim does not match the selected environment")
 		}
+		return claim.OperationID, nil
+	}
+	if recoveryClaimMatchesRequest(claim, *req) {
 		return claim.OperationID, nil
 	}
 	return "", nil

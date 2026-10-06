@@ -956,34 +956,25 @@ func (s *Service) RecoverSessionWithOptions(
 	if action == recoveryActionRepairWorkspaceInventory && strings.TrimSpace(options.IdempotencyKey) == "" {
 		return nil, models.ErrWorkspaceInventoryRecoveryInvalid
 	}
-	if session.TaskEnvironmentID != "" && s.workspaceRecoveryStatusReader != nil {
-		operation, runnerLive, readErr := s.workspaceRecoveryStatusReader.WorkspaceRecoveryProjection(ctx, session.TaskEnvironmentID)
-		if readErr != nil {
-			return nil, readErr
-		}
-		if runnerLive {
-			return workspaceRecoveryInProgressResponse(taskID, sessionID, operation), nil
-		}
+	if response, statusErr := s.liveWorkspaceRecoveryResponse(ctx, taskID, sessionID, session); statusErr != nil {
+		return nil, statusErr
+	} else if response != nil {
+		return response, nil
 	}
-	recoveryObservation, err := s.captureWorkspaceRecoveryErrorObservation(ctx, session)
+	recoveryObservation, launchCtx, err := s.prepareSessionRecoveryLaunchContext(ctx, session, action, options.ErrorStamp)
 	if err != nil {
 		return nil, err
 	}
-	launchCtx, err := s.prepareManagedCloneRelocationRecovery(ctx, session, action, []string{options.ErrorStamp})
-	if err != nil {
-		return nil, err
-	}
-	launchCtx = worktree.WithRecoveryLifecycleContext(launchCtx, s.recoveryLifecycleContext())
 
 	recoveryAdmission, err := s.preflightSessionRecovery(launchCtx, taskID, session, action)
 	if err != nil {
-		if errors.Is(err, recoveryoperation.ErrInProgress) && s.workspaceRecoveryStatusReader != nil && session.TaskEnvironmentID != "" {
-			operation, runnerLive, readErr := s.workspaceRecoveryStatusReader.WorkspaceRecoveryProjection(ctx, session.TaskEnvironmentID)
-			if readErr == nil && runnerLive {
-				return workspaceRecoveryInProgressResponse(taskID, sessionID, operation), nil
+		if errors.Is(err, recoveryoperation.ErrInProgress) {
+			response, statusErr := s.liveWorkspaceRecoveryResponse(ctx, taskID, sessionID, session)
+			if statusErr != nil {
+				return nil, statusErr
 			}
-			if readErr != nil {
-				return nil, readErr
+			if response != nil {
+				return response, nil
 			}
 		}
 		branchError := s.branchRecoveryError(launchCtx, taskID, sessionID, err)
@@ -1001,12 +992,7 @@ func (s *Service) RecoverSessionWithOptions(
 		}
 	}
 
-	if err := s.applySessionRecoveryAction(launchCtx, sessionID, action); err != nil {
-		if recoveryAdmission != nil {
-			if persistErr := recoveryAdmission.CompleteRecoveryResume(launchCtx, false, "resume_action_failed"); persistErr != nil {
-				return nil, persistErr
-			}
-		}
+	if err := s.applyRecoveryActionWithSettlement(launchCtx, recoveryAdmission, sessionID, action); err != nil {
 		return nil, err
 	}
 
@@ -1030,17 +1016,76 @@ func (s *Service) RecoverSessionWithOptions(
 		}
 		return nil, resumeErr
 	}
-	if recoveryAdmission != nil {
-		ready := resp != nil && resp.Success && resp.State != ""
-		reason := "resume_not_ready"
-		if ready {
-			reason = ""
-		}
-		if err := recoveryAdmission.CompleteRecoveryResume(launchCtx, ready, reason); err != nil {
-			return nil, err
-		}
+	if err := completeRecoveryResumeAfterLaunch(launchCtx, recoveryAdmission, resp); err != nil {
+		return nil, err
 	}
 	return resp, nil
+}
+
+func (s *Service) prepareSessionRecoveryLaunchContext(
+	ctx context.Context,
+	session *models.TaskSession,
+	action, errorStamp string,
+) (models.WorkspaceRecoveryErrorObservation, context.Context, error) {
+	observation, err := s.captureWorkspaceRecoveryErrorObservation(ctx, session)
+	if err != nil {
+		return models.WorkspaceRecoveryErrorObservation{}, nil, err
+	}
+	launchCtx, err := s.prepareManagedCloneRelocationRecovery(ctx, session, action, []string{errorStamp})
+	if err != nil {
+		return models.WorkspaceRecoveryErrorObservation{}, nil, err
+	}
+	return observation, worktree.WithRecoveryLifecycleContext(launchCtx, s.recoveryLifecycleContext()), nil
+}
+
+func (s *Service) liveWorkspaceRecoveryResponse(
+	ctx context.Context,
+	taskID, sessionID string,
+	session *models.TaskSession,
+) (*LaunchSessionResponse, error) {
+	if session == nil || session.TaskEnvironmentID == "" || s.workspaceRecoveryStatusReader == nil {
+		return nil, nil
+	}
+	operation, runnerLive, err := s.workspaceRecoveryStatusReader.WorkspaceRecoveryProjection(ctx, session.TaskEnvironmentID)
+	if err != nil {
+		return nil, err
+	}
+	if !runnerLive {
+		return nil, nil
+	}
+	return workspaceRecoveryInProgressResponse(taskID, sessionID, operation), nil
+}
+
+func completeRecoveryResumeAfterLaunch(
+	ctx context.Context,
+	admission *worktree.RecoveryAdmission,
+	response *LaunchSessionResponse,
+) error {
+	if admission == nil {
+		return nil
+	}
+	ready := response != nil && response.Success && response.State != ""
+	reason := "resume_not_ready"
+	if ready {
+		reason = ""
+	}
+	return admission.CompleteRecoveryResume(ctx, ready, reason)
+}
+
+func (s *Service) applyRecoveryActionWithSettlement(
+	ctx context.Context,
+	admission *worktree.RecoveryAdmission,
+	sessionID, action string,
+) error {
+	if err := s.applySessionRecoveryAction(ctx, sessionID, action); err != nil {
+		if admission != nil {
+			if persistErr := admission.CompleteRecoveryResume(ctx, false, "resume_action_failed"); persistErr != nil {
+				return persistErr
+			}
+		}
+		return err
+	}
+	return nil
 }
 
 func workspaceRecoveryInProgressResponse(

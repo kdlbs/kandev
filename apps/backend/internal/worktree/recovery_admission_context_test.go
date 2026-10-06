@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/recoveryoperation"
 )
 
 func TestAdmitRecoveryReturnsBorrowedAdmissionFromContext(t *testing.T) {
@@ -67,6 +68,115 @@ func TestAdmitRecoveryReturnsBorrowedAdmissionFromContext(t *testing.T) {
 	if releaseCalls != 1 {
 		t.Fatalf("release calls after outer release = %d, want 1", releaseCalls)
 	}
+}
+
+func TestRecoveryOperationIDReusesMatchingRetainedClaimWithoutArtifacts(t *testing.T) {
+	claim := &models.TaskEnvironmentRecoveryClaim{
+		TaskEnvironmentID:   "environment-retained-claim",
+		OwnerTaskID:         "task-retained-claim",
+		OwnershipGeneration: 3,
+		SessionID:           "session-retained-claim",
+		OperationID:         "operation-retained-claim",
+		ExecutorType:        string(models.ExecutorTypeWorktree),
+	}
+	store := &managedCloneRelocationStore{claim: claim}
+	manager := &Manager{store: store}
+	request := RecoveryAdmissionRequest{
+		TaskID: "task-retained-claim", OwnerTaskID: claim.OwnerTaskID,
+		TaskEnvironmentID: claim.TaskEnvironmentID, OwnershipGeneration: claim.OwnershipGeneration,
+		SessionID: claim.SessionID, ExecutorType: claim.ExecutorType,
+		Slots: []RecoverySlot{{WorktreeID: "worktree-retained-claim"}},
+	}
+
+	operationID, err := manager.recoveryOperationID(context.Background(), &request, []int{0})
+	if err != nil {
+		t.Fatalf("read retained recovery claim: %v", err)
+	}
+	if operationID != claim.OperationID {
+		t.Fatalf("recovered operation ID = %q, want retained claim ID %q", operationID, claim.OperationID)
+	}
+}
+
+func TestRecoveryOperationIDDoesNotReuseForeignRetainedClaim(t *testing.T) {
+	claim := &models.TaskEnvironmentRecoveryClaim{
+		TaskEnvironmentID:   "environment-retained-claim",
+		OwnerTaskID:         "task-retained-claim",
+		OwnershipGeneration: 3,
+		SessionID:           "another-session",
+		OperationID:         "operation-retained-claim",
+		ExecutorType:        string(models.ExecutorTypeWorktree),
+	}
+	manager := &Manager{store: &managedCloneRelocationStore{claim: claim}}
+	request := RecoveryAdmissionRequest{
+		TaskID: "task-retained-claim", OwnerTaskID: claim.OwnerTaskID,
+		TaskEnvironmentID: claim.TaskEnvironmentID, OwnershipGeneration: claim.OwnershipGeneration,
+		SessionID: "session-retained-claim", ExecutorType: claim.ExecutorType,
+		Slots: []RecoverySlot{{WorktreeID: "worktree-retained-claim"}},
+	}
+
+	operationID, err := manager.recoveryOperationIDFromClaim(context.Background(), &request, []int{0})
+	if err != nil {
+		t.Fatalf("read foreign recovery claim: %v", err)
+	}
+	if operationID != "" {
+		t.Fatalf("recovered operation ID = %q, want no ID from a foreign claim", operationID)
+	}
+}
+
+func TestFailedProgressBeginRetainsOnlyMatchingRunningProjection(t *testing.T) {
+	start := RecoveryProgressStart{
+		TaskEnvironmentID: "environment-progress-begin", OwnerTaskID: "task-progress-begin",
+		OwnershipGeneration: 4, SessionID: "session-progress-begin", OperationID: "operation-progress-begin",
+		ErrorStamp: "error-progress-begin", Kind: recoveryoperation.KindManagedCloneRelocation,
+	}
+	matching := &models.TaskEnvironmentRecoveryOperation{
+		TaskEnvironmentID: start.TaskEnvironmentID, OwnerTaskID: start.OwnerTaskID,
+		OwnershipGeneration: start.OwnershipGeneration, SessionID: start.SessionID,
+		OperationID: start.OperationID, ErrorStamp: start.ErrorStamp, Kind: start.Kind,
+		State: recoveryoperation.StateRunning,
+	}
+	other := *matching
+	other.OperationID = "another-operation"
+
+	tests := []struct {
+		name      string
+		operation *models.TaskEnvironmentRecoveryOperation
+		readErr   error
+		want      bool
+	}{
+		{name: "matching live attempt", operation: matching, want: true},
+		{name: "matching dead attempt awaiting reconciliation", operation: matching, want: true},
+		{name: "different running operation", operation: &other, want: false},
+		{name: "no persisted operation", want: false},
+		{name: "projection unavailable", readErr: errors.New("read failed"), want: true},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			reporter := &projectedRecoveryProgressReporter{
+				operation: test.operation,
+				live:      test.name == "matching live attempt",
+				err:       test.readErr,
+			}
+			manager := &Manager{recoveryProgressReporter: reporter}
+			if got := manager.retainClaimForUnsettledProgressBegin(context.Background(), start); got != test.want {
+				t.Fatalf("retain claim = %t, want %t", got, test.want)
+			}
+		})
+	}
+}
+
+type projectedRecoveryProgressReporter struct {
+	recordingRecoveryProgressReporter
+	operation *models.TaskEnvironmentRecoveryOperation
+	live      bool
+	err       error
+}
+
+func (r *projectedRecoveryProgressReporter) WorkspaceRecoveryProjection(
+	context.Context,
+	string,
+) (*models.TaskEnvironmentRecoveryOperation, bool, error) {
+	return r.operation, r.live, r.err
 }
 
 func TestFailClaimedRecoverySettlesAfterRequestDisconnect(t *testing.T) {

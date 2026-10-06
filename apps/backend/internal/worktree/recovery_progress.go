@@ -6,6 +6,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/kandev/kandev/internal/task/models"
 )
 
 // RecoveryProgressStart contains only durable authority and the selected
@@ -62,6 +64,12 @@ type RecoveryProgressReporter interface {
 // workspace reconstruction while an admitted repair still owns its runner.
 type RecoveryProgressLiveReader interface {
 	WorkspaceRecoveryIsLive(context.Context, string) (bool, error)
+}
+
+// RecoveryProgressProjectionReader exposes the persisted operation and its
+// exact in-process runner proof when a progress begin may have committed.
+type RecoveryProgressProjectionReader interface {
+	WorkspaceRecoveryProjection(context.Context, string) (*models.TaskEnvironmentRecoveryOperation, bool, error)
 }
 
 type recoveryProgressContextKey struct{}

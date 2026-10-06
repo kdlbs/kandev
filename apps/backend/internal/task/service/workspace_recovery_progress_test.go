@@ -59,7 +59,11 @@ func TestWorkspaceRecoveryProjectionFencesCallbacksAndNotifiesEnvironmentSession
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer func() { _ = repo.ReleaseTaskEnvironmentRecoveryClaim(ctx, claim) }()
+	defer func() {
+		if claim != nil {
+			_ = repo.ReleaseTaskEnvironmentRecoveryClaim(ctx, claim)
+		}
+	}()
 
 	binding, err := svc.BeginWorkspaceRecovery(ctx, worktree.RecoveryProgressStart{
 		TaskID: "task-recovery-progress", SessionID: claim.SessionID,
@@ -253,6 +257,27 @@ func TestBeginWorkspaceRecoverySettlesDeadSameProcessAttemptBeforeRetry(t *testi
 		t.Fatal("dead same-process attempt was not published as interrupted before retry")
 	}
 	svc.EndWorkspaceRecoveryRunner(ctx, secondBinding)
+	if err := repo.ReleaseTaskEnvironmentRecoveryClaim(ctx, claim); err != nil {
+		t.Fatal(err)
+	}
+	claim = nil
+	claim, err = repo.AcquireTaskEnvironmentRecoveryClaim(ctx, models.TaskEnvironmentRecoveryClaimRequest{
+		TaskEnvironmentID: "environment-recovery-retry", OwnerTaskID: "task-recovery-retry",
+		OwnershipGeneration: 5, SessionID: "session-recovery-retry", OperationID: "operation-recovery-retry-next",
+		ExecutorType: string(models.ExecutorTypeWorktree),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	start.OperationID = claim.OperationID
+	nextBinding, err := svc.BeginWorkspaceRecovery(ctx, start)
+	if err != nil {
+		t.Fatalf("new operation after dead same-process attempt: %v", err)
+	}
+	if nextBinding.OperationID != "operation-recovery-retry-next" {
+		t.Fatalf("new operation binding = %+v", nextBinding)
+	}
+	svc.EndWorkspaceRecoveryRunner(ctx, nextBinding)
 }
 
 type failOnceRecoveryOperationUpdateRepository struct {
