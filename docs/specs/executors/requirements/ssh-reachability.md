@@ -99,6 +99,8 @@ the user configures that executor.
 - **AC-EXECUTORS-SSH-REACHABILITY-002.13:** When a reachability view changes executor or application state context, closes, or is replaced, its previous requests and retained actions shall not change the current view's load error, pending probe control, or displayed result, nor publish obsolete responses into application state. Returning to the same executor shall not revive the previous visit's requests or actions. Independently accepted records for any executor shall remain available.
 - **AC-EXECUTORS-SSH-REACHABILITY-002.14:** A current view's immediate-probe action shall be disabled only while that view's own probe requests remain pending. A pending probe from a previous view shall not prevent probing the current executor, and an earlier request's completion shall not release a later pending probe. Current load and probe failures shall retain the not-known behavior of criterion .10; current success shall clear the local failure and present the accepted record. Superseded refresh failures shall not replace the current refresh's outcome. Independent views shall retain independent controls.
 
+- **AC-EXECUTORS-SSH-REACHABILITY-002.15:** Settings surfaces shall validate completion/success timestamps as strict RFC3339 before use. Malformed completion times shall produce no stale clock or badge; malformed completion/success times shall use existing missing-time age fallbacks. Valid offsets/fractions shall preserve the millisecond stale boundary.
+
 ### REQ-EXECUTORS-SSH-REACHABILITY-003: Probe informs launches without gating them
 
 **Intent:** A probe result is evidence, not permission. A host can recover

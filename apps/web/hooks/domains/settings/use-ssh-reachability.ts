@@ -6,6 +6,7 @@ import {
   probeSSHExecutorReachability,
 } from "@/lib/api/domains/ssh-api";
 import type { SSHReachabilityRecord } from "@/lib/types/http-ssh";
+import { parseTurnTimestamp } from "@/lib/state/slices/session/turn-actions";
 
 type ReachabilityScope = { executorId: string; storeApi: ReturnType<typeof useAppStoreApi> };
 type ReachabilityLifetime = { scope: ReachabilityScope; generation: number; pendingProbes: number };
@@ -100,8 +101,8 @@ function useReachabilityClock(
       return;
     }
     const lifetime = lifetimeRef.current;
-    const checkedAt = Date.parse(record.checked_at);
-    if (Number.isNaN(checkedAt)) return;
+    const checkedAt = reachabilityTimestampMilliseconds(record.checked_at);
+    if (checkedAt === null) return;
     const staleAt = checkedAt + record.probe_interval_seconds * 1000 * 3;
     const delay = Math.max(0, staleAt - Date.now() + 1);
     const timer = window.setTimeout(() => {
@@ -110,4 +111,15 @@ function useReachabilityClock(
     return () => window.clearTimeout(timer);
   }, [record, scope, lifetimeRef]);
   return now;
+}
+
+/** Returns a validated reachability wire timestamp in whole epoch milliseconds. */
+export function reachabilityTimestampMilliseconds(value: string | null): number | null {
+  const timestamp = parseTurnTimestamp(value ?? undefined);
+  if (timestamp === null) return null;
+  const milliseconds =
+    timestamp >= BigInt(0)
+      ? timestamp / BigInt(1_000_000)
+      : (timestamp - BigInt(999_999)) / BigInt(1_000_000);
+  return Number(milliseconds);
 }

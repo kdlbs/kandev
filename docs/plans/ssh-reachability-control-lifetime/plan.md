@@ -67,6 +67,8 @@ does not claim a new reproduction run.
 - Current-visit errors and pending controls, preserving keyed store evidence.
 - Meaningful deferred-response tests through real hooks/provider/card/API,
   including cleanup before passive effects and same-executor positive controls.
+- Strict RFC3339 completion/success timestamps in the hook clock and immediate
+  card, with existing missing-time fallbacks (later ROOT review correction, .15).
 - Exact focused checks, coverage mapping, normal hooks and gated delivery.
 
 ### Out of scope
@@ -137,7 +139,10 @@ Write new tests independently; do not copy the ROOT proof. Prefer one new
 containing a small real-hook reader, real provider/store capture and rendered
 card flows. Partial-mock only `@/lib/api/client::fetchJson` using `importOriginal`;
 real SSH GET/POST functions must run and request paths/methods must be asserted.
-Existing card, store and API suites stay in the focused run.
+Existing card, store and API suites stayed in the initial focused run. Later
+review corrections run only affected lifetime/timestamp/card suites; independent
+store/API results remain historical. Timestamp cases use the same real boundary
+in `use-ssh-reachability.timestamps.test.tsx` to respect the test-file line limit.
 
 | Criteria | Proposed named regression groups and assertions |
 | --- | --- |
@@ -148,6 +153,7 @@ Existing card, store and API suites stay in the focused run.
 | .13, .14 | `independent owners keep independent controls`: same/different executors within one store and separate real providers; retiring one cannot mute another's success or pending state. |
 | .3, .13 | `accepted keyed evidence survives retirement`: seed or push newer A/B records through real store action, settle obsolete HTTP, and assert records remain; current older success cannot overwrite newer record/reset but clears its own error. |
 | .10, .14 | `current load/probe failures and success remain visible`: initial and refresh failure without a record shows not-known, cached record remains on failure, own success clears error and renders fields; newest same-executor refresh supersedes older failure/success. Overlapping current probe finalizers keep action disabled until own admissions settle. |
+| .15 | `SSH reachability wire timestamps` and `independent reachability timestamp fields`: malformed shape/calendar dates cannot arm a stale timer or claim ages; valid UTC/offset/fractional/pre-epoch times retain the exact millisecond boundary; valid sibling age/state/store evidence remains. |
 | .4, .11, .12 | Existing card cadence/staleness, translated record/state and shared viewport controls stay unchanged; record concrete passing test names in Results. |
 
 Use deferred promises, React `act`, scoped rendered assertions and captured
@@ -209,6 +215,15 @@ correction. Independent store/API results above are preserved historical
 evidence; those suites were not replayed. Task 01 records exact causal findings,
 coverage and private receipt locations. The same original hosted observer
 follows the corrective heads; hosted completion and merge remain pending.
+
+The bounded timestamp correction adds eight transport/provider/card cases:
+four malformed-wire cases causally fail against the published code and four
+valid timestamp controls pass. Final GREEN passes all 51 affected lifetime,
+timestamp and card cases. Changed ESLint, project typecheck and i18n pass;
+`BigInt(...)` preserves the project's existing target compatibility. The same
+owning pair adds .15 and records independent existing age fallbacks. Catalog,
+specification lint, formatting and normal delivery receipts are recorded in
+Task 01. No unrelated store/API or backend/E2E replay is required.
 
 ## Risks
 

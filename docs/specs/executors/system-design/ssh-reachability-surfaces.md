@@ -232,6 +232,18 @@ admitted transport or alter the backend's coalescing, completion, persistence,
 deadline, or shutdown ownership in criterion .6. Cadence and stale timers retain
 their existing timing; callbacks cannot update a retired local lifetime.
 
+For criterion .15, the hook clock and immediate card use the shared
+`parseTurnTimestamp` parser through the hook-local reachability timestamp
+adapter. Reject non-RFC3339 and impossible calendar values before scheduling,
+comparing or formatting probe timestamps. Convert nanoseconds to whole epoch
+milliseconds with floor division, including negative instants, so valid offsets
+and fractional timestamps keep the existing three-interval boundary. Invalid
+completion time arms no stale clock or badge. Each invalid completion/success
+age uses that field's existing missing-time localized fallback independently;
+valid sibling ages and accepted store evidence remain available. The parser,
+global formatter, backend wire shape and store timestamp arbitration do not
+change. This is the same data-only mobile exception described below.
+
 Desktop and phone use the same hook and rendered card. The existing
 `SettingsCardHeader` stacks its action below the heading on phones and places
 it alongside on desktop. This correction changes state/data ownership only:

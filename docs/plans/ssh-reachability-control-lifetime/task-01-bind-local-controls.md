@@ -17,6 +17,7 @@ acceptance_criteria:
   - AC-EXECUTORS-SSH-REACHABILITY-002.12
   - AC-EXECUTORS-SSH-REACHABILITY-002.13
   - AC-EXECUTORS-SSH-REACHABILITY-002.14
+  - AC-EXECUTORS-SSH-REACHABILITY-002.15
 system_design:
   - ../../specs/executors/system-design/ssh-reachability-surfaces.md
 ---
@@ -52,6 +53,9 @@ joined cleanup; ROOT owns independent verification/archive/refill.
 - `useSSHReachability` committed admission/publication/error/finally ownership,
   local control reset, current probe pending admissions and stale callbacks.
 - Independently authored lifetime tests; preserve ROOT proof files untouched.
+- ROOT's bounded timestamp extension: strict shared-parser consumption in the
+  hook clock and immediate card, existing missing-age fallbacks, valid
+  millisecond cadence and transport-boundary malformed-wire controls (.15).
 - Focused existing card/store/API compatibility tests, acceptance coverage,
   changed-file lint/format, project typecheck, i18n/docs checks and normal hooks.
 - Update delivery results/statuses only from actual joined command outcomes.
@@ -62,7 +66,8 @@ joined cleanup; ROOT owns independent verification/archive/refill.
 - Store reconciliation/cache/API/WS shape, staleness timing, launch behavior,
   security/defaults, global error/retry policy or generic lifecycle utilities.
 - New UI/copy/layout/navigation/breakpoints/touch geometry or unrelated producer
-  rewrites. Existing consumer production files are read-only inputs.
+  rewrites. The immediate card's timestamp consumers are included only by the
+  later ROOT timestamp release; other consumer production files stay read-only.
 - Main-only rebase, synthetic checks, weakened gates, blind retries/cache wipes,
   foreign kills, managed-worktree/dependency deletion or proof replay/import.
 
@@ -204,7 +209,11 @@ commands before running; do not silently broaden suite scope.
   independent transport-boundary regressions and real rendered-card cases).
 - The existing requirement/design pair and this manifest/order (status/results).
 
-Read-only consumers/patterns: `components/settings/ssh-reachability-card.tsx`,
+The later bounded timestamp correction also owns
+`components/settings/ssh-reachability-card.tsx` and the focused new
+`hooks/domains/settings/use-ssh-reachability.timestamps.test.tsx`.
+
+Read-only consumers/patterns:
 `components/state-provider.tsx`, `lib/state/store.ts`, settings slice,
 `lib/api/domains/ssh-api.ts`, existing card/store/API tests,
 `hooks/domains/office/use-routing-preview.ts`, and
@@ -253,7 +262,7 @@ functions and unrelated exports so tests exercise immediate consumers.
 
 ## Results
 
-Completed 2026-10-06. Production change is limited to the existing hook;
+Initial implementation completed 2026-10-06. Production change was limited to the existing hook;
 27 independently authored lifetime cases plus 36 existing card/store/API
 cases pass (63 total). ROOT's proof was never read, replayed, copied, imported,
 mutated or deleted. Approved design hashes were verified before execution.
@@ -269,6 +278,35 @@ lifetime cases passed 63/63. Final run after fixture lint/format edits passed
 63/63. No setup, timeout or out-of-scope failure occurred.
 
 Acceptance coverage:
+
+Grouped App347564 review 5434412750 identified permissive timestamp parsing.
+The independently authored focused timestamp fixture against the published
+hook/card produced four causal failures and four passing valid controls.
+Both `0` and normalized February 30 falsely armed a zero-delay stale clock,
+rendered a stale badge and claimed ages; mixed-field cases also failed their
+existing fallback assertions. After using the shared strict parser through a
+local whole-epoch-millisecond adapter, all eight timestamp cases and all 51
+current affected lifetime/timestamp/card cases pass. Valid UTC, nanosecond
+fractions, explicit offsets and the pre-epoch negative fractional boundary
+retain the exact three-interval boundary. Invalid completion/success fields
+fall back independently, preserving valid sibling presentation and untouched
+keyed store records. The initial expanded lifetime file exceeded the 600-line
+lint limit; moving timestamp cases into a focused transport-boundary file
+preserved assertions and repeated causal RED before final GREEN.
+
+Changed test/source lint, project typecheck and i18n check/ratchet pass.
+Typecheck identified unsupported BigInt literal syntax in the first adapter;
+the project-compatible `BigInt(...)` spelling passed typecheck and all 51
+cases again. Documentation catalog/spec lint and formatting checks pass; the final diff
+check and normal corrective hooks are delivery gates. Exact current test command:
+`pnpm exec vitest run --project=browser-locales --maxWorkers=1 --no-file-parallelism hooks/domains/settings/use-ssh-reachability.lifetime.test.tsx hooks/domains/settings/use-ssh-reachability.timestamps.test.tsx components/settings/ssh-reachability-card.test.tsx`, with Node4GiB, outer120s/kill10.
+
+No shared parser, formatter, store, HTTP/WS schema, backend or cadence changed.
+Existing localized missing-time strings are reused; no public documentation,
+new copy, geometry or mobile interaction changes are needed. The same data-only
+mobile exception applies. Actual .15 coverage is annotated in the focused
+new test file. Raw original receipts/logs are the `timestamp-*` operations in
+`/tmp/kandev-child58`; the same original hosted observer remains retained.
 
 Grouped CodeRabbit review 5434280005 exposed admission across same-scope
 StrictMode replay. The independently authored `retained first-setup action
