@@ -1,48 +1,56 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import type { RefObject } from "react";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import {
   getSSHExecutorReachability,
   probeSSHExecutorReachability,
 } from "@/lib/api/domains/ssh-api";
+import type { SSHReachabilityRecord } from "@/lib/types/http-ssh";
+
+type ReachabilityScope = { executorId: string; storeApi: ReturnType<typeof useAppStoreApi> };
+type ReachabilityLifetime = { scope: ReachabilityScope; pendingProbes: number };
 
 /**
- * Owns the settings-domain fetch, refresh, and immediate-probe lifecycle for
- * one SSH executor. The store remains the source of truth for the record, so
- * WebSocket updates and HTTP responses use the same reconciliation path.
+ * Owns local request controls for the committed SSH executor visit. Accepted
+ * records still reconcile with WebSocket evidence in the store.
  */
 export function useSSHReachability(executorId: string) {
   const record = useAppStore((state) => state.sshReachability.byExecutorId[executorId]);
   const storeApi = useAppStoreApi();
+  const scope = useMemo(() => ({ executorId, storeApi }), [executorId, storeApi]);
+  const lifetimeRef = useRef<ReachabilityLifetime | null>(null);
   const [loadError, setLoadError] = useState(false);
   const [probing, setProbing] = useState(false);
-  const [now, setNow] = useState(() => Date.now());
   const seqRef = useRef(0);
 
+  useLayoutEffect(() => {
+    const lifetime = { scope, pendingProbes: 0 };
+    lifetimeRef.current = lifetime;
+    setLoadError(false);
+    setProbing(false);
+    return () => {
+      lifetimeRef.current = null;
+    };
+  }, [scope]);
+
   const load = useCallback(async () => {
+    const lifetime = lifetimeRef.current;
+    if (!lifetime || lifetime.scope !== scope) return;
     const seq = ++seqRef.current;
+    const isCurrent = () => lifetimeRef.current === lifetime && seq === seqRef.current;
     try {
       const response = await getSSHExecutorReachability(executorId);
-      if (seq !== seqRef.current) return;
+      if (!isCurrent()) return;
       setLoadError(false);
       storeApi.getState().setSSHReachability(response);
     } catch {
-      if (seq !== seqRef.current) return;
-      setLoadError(true);
+      if (isCurrent()) setLoadError(true);
     }
-  }, [executorId, storeApi]);
+  }, [executorId, scope, storeApi]);
 
   useEffect(() => {
-    seqRef.current = 0;
-    setLoadError(false);
-    setNow(Date.now());
     void load();
-    return () => {
-      seqRef.current = -1;
-    };
-    // The executor identity is the lifecycle boundary. `load` is stable for
-    // that identity and must not restart the request on every store update.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [executorId]);
+  }, [load]);
 
   useEffect(() => {
     if (!record || !record.probing_enabled || record.probe_interval_seconds <= 0) return;
@@ -50,33 +58,53 @@ export function useSSHReachability(executorId: string) {
     return () => window.clearInterval(interval);
   }, [record, load]);
 
-  // A failed refresh can leave the record object unchanged. Keep the stale
-  // badge live in that case instead of waiting for a successful fetch to
-  // trigger another render.
+  const probeNow = useCallback(async () => {
+    const lifetime = lifetimeRef.current;
+    if (!lifetime || lifetime.scope !== scope) return;
+    const isCurrent = () => lifetimeRef.current === lifetime;
+    lifetime.pendingProbes++;
+    setProbing(true);
+    try {
+      const response = await probeSSHExecutorReachability(executorId);
+      if (!isCurrent()) return;
+      setLoadError(false);
+      storeApi.getState().setSSHReachability(response);
+    } catch {
+      if (isCurrent()) setLoadError(true);
+    } finally {
+      if (isCurrent()) {
+        lifetime.pendingProbes--;
+        setProbing(lifetime.pendingProbes > 0);
+      }
+    }
+  }, [executorId, scope, storeApi]);
+
+  const now = useReachabilityClock(record, scope, lifetimeRef);
+  return { record, loadError, probing, probeNow, now };
+}
+
+function useReachabilityClock(
+  record: SSHReachabilityRecord | undefined,
+  scope: ReachabilityScope,
+  lifetimeRef: RefObject<ReachabilityLifetime | null>,
+) {
+  const [now, setNow] = useState(() => Date.now());
+  useLayoutEffect(() => setNow(Date.now()), [scope]);
+
+  // Keep the stale badge live even when a failed refresh leaves the record unchanged.
   useEffect(() => {
     if (!record?.probing_enabled || !record.checked_at || record.probe_interval_seconds <= 0) {
       return;
     }
+    const lifetime = lifetimeRef.current;
     const checkedAt = Date.parse(record.checked_at);
     if (Number.isNaN(checkedAt)) return;
     const staleAt = checkedAt + record.probe_interval_seconds * 1000 * 3;
     const delay = Math.max(0, staleAt - Date.now() + 1);
-    const timer = window.setTimeout(() => setNow(Date.now()), delay);
+    const timer = window.setTimeout(() => {
+      if (lifetime && lifetimeRef.current === lifetime) setNow(Date.now());
+    }, delay);
     return () => window.clearTimeout(timer);
-  }, [record]);
-
-  const probeNow = useCallback(async () => {
-    setProbing(true);
-    try {
-      const response = await probeSSHExecutorReachability(executorId);
-      setLoadError(false);
-      storeApi.getState().setSSHReachability(response);
-    } catch {
-      setLoadError(true);
-    } finally {
-      setProbing(false);
-    }
-  }, [executorId, storeApi]);
-
-  return { record, loadError, probing, probeNow, now };
+  }, [record, scope, lifetimeRef]);
+  return now;
 }
