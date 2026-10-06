@@ -2621,5 +2621,8 @@
   "gitDiffUnavailable": "差异不可用",
   "gitStatusAutomaticRetry": "更改未能刷新。正在自动重试。",
   "gitStatusShowingLastAvailable": "正在显示最近一次可用的更改。",
-  "gitStatusRetry": "重试"
+  "gitStatusRetry": "重试",
+  "forwardedPorts": "已转发端口",
+  "otherPorts": "其他端口",
+  "forwarding": "转发中"
 }

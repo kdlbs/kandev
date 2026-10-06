@@ -2621,5 +2621,8 @@
   "gitDiffUnavailable": "Diff is unavailable",
   "gitStatusAutomaticRetry": "Changes did not refresh. Retrying automatically.",
   "gitStatusShowingLastAvailable": "Showing the last available changes.",
-  "gitStatusRetry": "Retry"
+  "gitStatusRetry": "Retry",
+  "forwardedPorts": "Forwarded ports",
+  "otherPorts": "Other ports",
+  "forwarding": "Forwarding"
 }

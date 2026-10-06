@@ -2621,5 +2621,8 @@
   "gitDiffUnavailable": "A diferença não está disponível",
   "gitStatusAutomaticRetry": "As alterações não foram atualizadas. A tentar novamente automaticamente.",
   "gitStatusShowingLastAvailable": "A mostrar as últimas alterações disponíveis.",
-  "gitStatusRetry": "Tentar novamente"
+  "gitStatusRetry": "Tentar novamente",
+  "forwardedPorts": "Portas encaminhadas",
+  "otherPorts": "Outras portas",
+  "forwarding": "A encaminhar"
 }
