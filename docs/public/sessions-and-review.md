@@ -293,6 +293,15 @@ direct shortcut.
 
 Open **Settings > Preferences > Keyboard Shortcuts** to customize these bindings.
 
+In the **Integrations** group, click **Unbound** beside an integration, press a
+key combination, then select **Save changes**. The shortcut opens its Kandev
+dashboard from any app page; Sentry opens its connection settings. Active
+plugin links in the Integrations navigation group also appear here. These
+personal shortcuts start unassigned and follow your user settings across devices.
+Use the row's **Reset** action and save to remove a binding. Conflict indicators
+identify combinations shared with other actions; existing Kandev shortcuts take
+precedence. On a phone, recording a combination requires an attached keyboard.
+
 ![Settings > Preferences > Keyboard Shortcuts showing chat input and command panel bindings.](../screenshots/settings-keyboard-shortcuts.png)
 
 Open **Settings > Preferences > Layouts** to configure reusable desktop workbench profiles. Select a tab in a built-in layout to reveal its nearby edit controls, arrange or remove tabs and splits, then use the floating **Save changes** control. Kandev keeps the built-in row visible, marks it **Customized**, and stores your override without requiring a duplicate. Choose **Reset** beside a customized built-in to restore its original definition.

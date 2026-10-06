@@ -894,5 +894,7 @@
   "queueAutoMergeShort": "互換性のある連続メッセージを自動的にまとめます。",
   "sleepShort": "タスクの実行中、Kandev が動作するコンピューターのスリープを防ぎます。",
   "promptAllowAgentEdits": "エージェントによる編集を許可",
-  "promptAgentEditsDescription": "エージェントがこのプロンプトを変更すると、使用されているすべての箇所に反映されます。"
+  "promptAgentEditsDescription": "エージェントがこのプロンプトを変更すると、使用されているすべての箇所に反映されます。",
+  "integrationShortcuts": "連携",
+  "shortcutOpenIntegration": "{{integration}} を開く"
 }

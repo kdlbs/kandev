@@ -894,5 +894,7 @@
   "queueAutoMergeShort": "Ḿēŕĝē ćōḿƥàţĩƀĺē ćōńśēćũţĩvē ḿēśśàĝēś àũţōḿàţĩćàĺĺŷ.",
   "sleepShort": "Ƥŕēvēńţ ţĥē ćōḿƥũţēŕ ŕũńńĩńĝ Ķàńďēv ƒŕōḿ śĺēēƥĩńĝ ďũŕĩńĝ ţàśķś.",
   "promptAllowAgentEdits": "Àĺĺōŵ àĝēńţ ēďĩţś",
-  "promptAgentEditsDescription": "Àĝēńţś ćàń ćĥàńĝē ţĥĩś ƥŕōḿƥţ ŵĥēŕēvēŕ ĩţ ĩś ũśēď."
+  "promptAgentEditsDescription": "Àĝēńţś ćàń ćĥàńĝē ţĥĩś ƥŕōḿƥţ ŵĥēŕēvēŕ ĩţ ĩś ũśēď.",
+  "integrationShortcuts": "Ĩńţēĝŕàţĩōńś",
+  "shortcutOpenIntegration": "Ōƥēń {{integration}}"
 }

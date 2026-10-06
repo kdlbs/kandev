@@ -894,5 +894,7 @@
   "queueAutoMergeShort": "Merge compatible consecutive messages automatically.",
   "sleepShort": "Prevent the computer running Kandev from sleeping during tasks.",
   "promptAllowAgentEdits": "Allow agent edits",
-  "promptAgentEditsDescription": "Agents can change this prompt wherever it is used."
+  "promptAgentEditsDescription": "Agents can change this prompt wherever it is used.",
+  "integrationShortcuts": "Integrations",
+  "shortcutOpenIntegration": "Open {{integration}}"
 }

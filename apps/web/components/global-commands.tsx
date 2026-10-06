@@ -14,6 +14,7 @@ import { searchKeywords } from "@/lib/commands/search-keywords";
 import { useKeyboardShortcut } from "@/hooks/use-keyboard-shortcut";
 import { useAppShortcuts } from "@/hooks/use-app-shortcuts";
 import { usePluginShortcuts } from "@/hooks/use-plugin-shortcuts";
+import { useIntegrationShortcuts } from "@/hooks/use-integration-shortcuts";
 import { useAppStore } from "@/components/state-provider";
 import { useQuickChatLauncher } from "@/hooks/use-quick-chat-launcher";
 import { getShortcut } from "@/lib/keyboard/shortcut-overrides";
@@ -182,6 +183,7 @@ export function GlobalCommands() {
     capture: true,
     stopPropagation: true,
   });
+  useIntegrationShortcuts();
   usePluginShortcuts();
 
   return <SettingsDiscoveryCommands />;

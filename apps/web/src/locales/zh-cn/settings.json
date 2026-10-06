@@ -894,5 +894,7 @@
   "queueAutoMergeShort": "自动合并兼容的连续消息。",
   "sleepShort": "任务运行期间防止运行 Kandev 的计算机休眠。",
   "promptAllowAgentEdits": "允许智能体编辑",
-  "promptAgentEditsDescription": "智能体可以修改此提示词，影响所有使用它的位置。"
+  "promptAgentEditsDescription": "智能体可以修改此提示词，影响所有使用它的位置。",
+  "integrationShortcuts": "集成",
+  "shortcutOpenIntegration": "打开 {{integration}}"
 }

@@ -24,6 +24,15 @@ vi.mock("@/hooks/domains/plugins/use-plugins", () => ({
 }));
 
 import { usePluginShortcuts } from "./use-plugin-shortcuts";
+import { useIntegrationShortcuts } from "./use-integration-shortcuts";
+const mockNavigate = vi.fn();
+vi.mock("@/lib/routing/client-router", () => ({
+  useRouter: () => ({ push: mockNavigate }),
+  usePathname: () => "/",
+}));
+vi.mock("@/hooks/use-app-destinations", () => ({
+  useNavContext: () => ({ workspaceId: "workspace-1", inOffice: false }),
+}));
 import { useAppShortcuts } from "./use-app-shortcuts";
 import { useKeyboardShortcut } from "./use-keyboard-shortcut";
 import type { KeyboardShortcut } from "@/lib/keyboard/constants";
@@ -508,5 +517,28 @@ describe("core shortcut combo shadowing (robust, non-registry-aware core shortcu
 
     pluginRegistry.unregisterPlugin("plugin-old-combo");
     pluginRegistry.unregisterPlugin("plugin-new-combo");
+  });
+});
+
+describe("host integration precedence over registered plugin actions", () => {
+  afterEach(() => {
+    cleanup();
+    pluginRegistry.unregisterPlugin(PLUGIN_ID);
+    mockNavigate.mockReset();
+  });
+  it("invokes only navigation for a conflicting effective chord", () => {
+    mockOverrides = {
+      "integration:github": { key: "e", modifiers: { ctrlOrCmd: true, shift: true } },
+    };
+    mockItems = [withToggleKeybinding()];
+    const action = vi.fn();
+    pluginRegistry.forPlugin(PLUGIN_ID).registerKeybinding("toggle", action);
+    renderHook(() => {
+      useIntegrationShortcuts();
+      usePluginShortcuts();
+    });
+    pressKey("e", { ctrlKey: true, shiftKey: true });
+    expect(mockNavigate).toHaveBeenCalledExactlyOnceWith("/github");
+    expect(action).not.toHaveBeenCalled();
   });
 });

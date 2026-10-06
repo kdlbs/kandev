@@ -17,7 +17,8 @@ import {
   useShortcutConflictLabels,
 } from "@/components/settings/keyboard-shortcuts-card";
 import { SettingsCard } from "../settings-card";
-import { usePluginShortcutDraft } from "./use-plugin-shortcut-draft";
+import { useShortcutDraft } from "../use-shortcut-draft";
+import { useIntegrationShortcutEntries } from "@/hooks/use-integration-shortcut-entries";
 
 type PluginShortcutEntry = Extract<ShortcutEntry, { source: "plugin" }>;
 
@@ -31,6 +32,7 @@ export function PluginShortcutsCard({
   const { t } = useTranslation();
   const { isMobile, isFinePointer } = useResponsiveBreakpoint();
   const pluginEntries = useMemo(() => buildPluginShortcutEntries(plugins), [plugins]);
+  const integrationEntries = useIntegrationShortcutEntries(plugins);
   const selectedEntries = useMemo(
     () =>
       pluginEntries.filter(
@@ -39,11 +41,9 @@ export function PluginShortcutsCard({
       ),
     [plugin.id, pluginEntries],
   );
-  const { saved, draft, setDraft, isDirty } = usePluginShortcutDraft(
-    `plugin-shortcuts:${plugin.id}`,
-  );
+  const { saved, draft, setDraft, isDirty } = useShortcutDraft(`plugin-shortcuts:${plugin.id}`);
 
-  const conflictLabels = useShortcutConflictLabels(pluginEntries, draft, t);
+  const conflictLabels = useShortcutConflictLabels(pluginEntries, draft, t, integrationEntries);
   if (selectedEntries.length === 0) return null;
 
   const touchSized = isMobile || !isFinePointer;

@@ -47,6 +47,7 @@ vi.mock("@/hooks/use-keyboard-shortcut", () => ({
   useKeyboardShortcut: (...args: unknown[]) => mocks.keyboardShortcutCalls.push(args),
 }));
 vi.mock("@/hooks/use-plugin-shortcuts", () => ({ usePluginShortcuts: vi.fn() }));
+vi.mock("@/hooks/use-integration-shortcuts", () => ({ useIntegrationShortcuts: vi.fn() }));
 vi.mock("@/hooks/use-quick-chat-launcher", () => ({
   useQuickChatLauncher: (...args: unknown[]) => {
     mocks.quickChatLauncherCalls.push(args);

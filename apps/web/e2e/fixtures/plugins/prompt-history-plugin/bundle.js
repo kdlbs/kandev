@@ -1482,6 +1482,12 @@
         path: FIXTURE_HELLO_PATH,
         section: FIXTURE_SIDEBAR_SECTION,
       });
+      registry.registerNavItem({
+        id: "e2e-integration",
+        label: "E2E Integration",
+        path: FIXTURE_HELLO_PATH,
+        section: "integrations",
+      });
       registry.registerRoute(FIXTURE_HELLO_PATH, PluginPage);
       registry.registerRoute(FIXTURE_MANAGED_CHAT_PATH, ManagedChatPage);
       registry.registerComponent("task-sidebar", SidebarSlot);

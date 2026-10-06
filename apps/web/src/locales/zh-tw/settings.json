@@ -894,5 +894,7 @@
   "queueAutoMergeShort": "自動合併相容的連續訊息。",
   "sleepShort": "任務執行期間防止執行 Kandev 的計算機休眠。",
   "promptAllowAgentEdits": "允許代理程式編輯",
-  "promptAgentEditsDescription": "代理程式可以修改此提示詞，影響所有使用它的位置。"
+  "promptAgentEditsDescription": "代理程式可以修改此提示詞，影響所有使用它的位置。",
+  "integrationShortcuts": "整合",
+  "shortcutOpenIntegration": "開啟 {{integration}}"
 }

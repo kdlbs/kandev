@@ -28,6 +28,11 @@ import {
 import { SettingsCard } from "./settings-card";
 import { GENERAL_SETTINGS_TARGETS } from "@/lib/settings-discovery/catalog/preferences";
 import { useTranslation } from "react-i18next";
+import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
+import {
+  buildIntegrationShortcutEntries,
+  type IntegrationShortcutEntry,
+} from "@/lib/keyboard/integration-shortcuts";
 
 type ShortcutRecorderProps = {
   shortcutId: string;
@@ -113,6 +118,8 @@ export function ShortcutRecorder({
       <div className="flex min-w-0 flex-wrap items-center gap-2">
         <button
           data-testid={`shortcut-recorder-${shortcutId}`}
+          data-shortcut-recording={recording}
+          aria-label={label}
           data-settings-dirty={isDirty}
           onClick={() => setRecording(!recording)}
           className={`${controlSizingClassName("standard", "min-w-0 px-3 rounded-md border text-sm")}
@@ -151,6 +158,8 @@ function ShortcutRecorderLabel({
       {conflictsWith && conflictsWith.length > 0 && (
         <span
           className="inline-flex items-center gap-1 text-xs text-amber-600 dark:text-amber-500"
+          role="img"
+          aria-label={t("settings:sameShortcutAs", { shortcuts: conflictsWith.join(", ") })}
           title={t("settings:sameShortcutAs", { shortcuts: conflictsWith.join(", ") })}
         >
           <IconAlertTriangle className="size-3.5" />
@@ -245,15 +254,20 @@ export function useShortcutConflictLabels(
   pluginEntries: ShortcutEntry[],
   overrides: StoredShortcutOverrides,
   translate: NonNullable<Parameters<typeof coreShortcutEntries>[0]>,
+  integrationEntries: IntegrationShortcutEntry[] = buildIntegrationShortcutEntries(
+    [],
+    [],
+    translate,
+  ),
 ) {
   return useMemo(() => {
-    const allEntries = [...coreShortcutEntries(translate), ...pluginEntries];
+    const allEntries = [...coreShortcutEntries(translate), ...integrationEntries, ...pluginEntries];
     const resolved = allEntries.map((entry) => ({
       entry,
       shortcut: resolveShortcutEntry(entry, overrides),
     }));
     return buildConflictLabels(findShortcutConflicts(resolved, isMac()));
-  }, [pluginEntries, overrides, translate]);
+  }, [pluginEntries, integrationEntries, overrides, translate]);
 }
 
 export function KeyboardShortcutsCard({
@@ -261,18 +275,22 @@ export function KeyboardShortcutsCard({
   baselineOverrides = {},
   onChange,
   pluginEntries = [],
+  integrationEntries,
 }: {
   overrides: StoredShortcutOverrides;
   baselineOverrides?: StoredShortcutOverrides;
   onChange: (overrides: StoredShortcutOverrides) => void;
   /** Dynamic plugin-declared shortcuts (see `lib/keyboard/plugin-shortcuts.ts`). */
   pluginEntries?: ShortcutEntry[];
+  integrationEntries?: IntegrationShortcutEntry[];
 }) {
   const { t } = useTranslation();
+  const { isMobile, isFinePointer } = useResponsiveBreakpoint();
+  const integrations = integrationEntries ?? buildIntegrationShortcutEntries([], [], t);
   const shortcuts = resolveAllShortcuts(overrides);
   const baselineShortcuts = resolveAllShortcuts(baselineOverrides);
 
-  const conflictLabels = useShortcutConflictLabels(pluginEntries, overrides, t);
+  const conflictLabels = useShortcutConflictLabels(pluginEntries, overrides, t, integrations);
 
   const handleChange = useCallback(
     (id: string, shortcut: KeyboardShortcut) => {
@@ -322,10 +340,67 @@ export function KeyboardShortcutsCard({
             />
           ))}
         </div>
+        <IntegrationShortcutRows
+          entries={integrations}
+          overrides={overrides}
+          baselineOverrides={baselineOverrides}
+          conflictLabels={conflictLabels}
+          touchSized={isMobile || !isFinePointer}
+          onChange={handleChange}
+          onReset={handleReset}
+        />
         <p className="text-xs text-muted-foreground mt-3">
           {t("settings:clickAShortcutToRecordA")}
         </p>
       </CardContent>
     </SettingsCard>
+  );
+}
+
+function IntegrationShortcutRows({
+  entries,
+  overrides,
+  baselineOverrides,
+  conflictLabels,
+  touchSized,
+  onChange,
+  onReset,
+}: {
+  entries: IntegrationShortcutEntry[];
+  overrides: StoredShortcutOverrides;
+  baselineOverrides: StoredShortcutOverrides;
+  conflictLabels: Map<string, string[]>;
+  touchSized: boolean;
+  onChange: ShortcutRecorderProps["onChange"];
+  onReset: ShortcutRecorderProps["onReset"];
+}) {
+  const { t } = useTranslation();
+  return (
+    <section
+      className="mt-4 min-w-0"
+      data-testid="integration-shortcuts-group"
+      aria-label={t("settings:integrationShortcuts")}
+    >
+      <h3 className="text-sm font-medium mb-1">{t("settings:integrationShortcuts")}</h3>
+      <div className="min-w-0 divide-y divide-border">
+        {entries.map((entry) => (
+          <ShortcutRecorder
+            key={entry.id}
+            shortcutId={entry.id}
+            label={entry.label}
+            defaultShortcut={entry.default}
+            current={resolveShortcutEntry(entry, overrides)}
+            onChange={onChange}
+            onReset={onReset}
+            touchSized={touchSized}
+            isDirty={
+              JSON.stringify(resolveShortcutEntry(entry, overrides)) !==
+              JSON.stringify(resolveShortcutEntry(entry, baselineOverrides))
+            }
+            conflictsWith={conflictLabels.get(entry.id)}
+          />
+        ))}
+      </div>
+    </section>
   );
 }
