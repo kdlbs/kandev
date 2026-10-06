@@ -474,6 +474,12 @@ or accept a plugin-supplied issue URL. A timeout with an unknown provider
 outcome returns an `UNCERTAIN` receipt, which the Host never resends
 automatically.
 
+`task_relations` grants `Host.TaskRelations().Get(ctx, workspaceID, taskID)`.
+It returns only compact task identity and state plus parent, child, sibling,
+blocker, and blocked-task groups. The target and every returned relation must
+belong to `workspaceID`; descriptions, documents, metadata, and repository
+details are unavailable through this reader.
+
 `messages` reads historical **conversation content** (`Messages().List`):
 one user/agent message per row (`id`, `session_id`, `task_id`, `turn_id`,
 `author_type`, `content`, `type`, `created_at`), filterable by session ids,
