@@ -20,13 +20,9 @@ test.describe("mobile: Send during session resume", () => {
   }) => {
     test.setTimeout(120_000);
 
-    const fixture = await seedDelayedResumeFixture(
-      testPage,
-      apiClient,
-      seedData,
-      backend,
-      "Mobile resume prompt queue",
-    );
+    const fixture = await seedDelayedResumeFixture(testPage, apiClient, seedData, backend, {
+      title: "Mobile resume prompt queue",
+    });
     const marker = "mobile resume queue marker";
 
     try {

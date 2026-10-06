@@ -64,13 +64,9 @@ test.describe("mobile: delayed resume cancellation", () => {
   }) => {
     test.setTimeout(180_000);
 
-    const fixture = await seedDelayedResumeFixture(
-      testPage,
-      apiClient,
-      seedData,
-      backend,
-      "Mobile session cancel and retry recovery",
-    );
+    const fixture = await seedDelayedResumeFixture(testPage, apiClient, seedData, backend, {
+      title: "Mobile session cancel and retry recovery",
+    });
 
     try {
       await expect(fixture.session.cancelAgentButton()).toBeVisible({ timeout: 15_000 });

@@ -127,13 +127,13 @@ export async function seedDelayedResumeFixture(
   apiClient: ApiClient,
   seedData: SeedData,
   backend: BackendContext,
-  title: string,
+  options: { title: string; resumeDelay?: string },
 ): Promise<DelayedResumeFixture> {
-  const delayedProfileId = await createDelayedResumeProfile(apiClient);
+  const delayedProfileId = await createDelayedResumeProfile(apiClient, options.resumeDelay);
   try {
     const task = await apiClient.createTaskWithAgent(
       seedData.workspaceId,
-      title,
+      options.title,
       delayedProfileId,
       {
         description: "/e2e:simple-message",

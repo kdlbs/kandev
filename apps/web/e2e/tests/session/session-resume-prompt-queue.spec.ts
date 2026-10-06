@@ -20,13 +20,9 @@ test.describe("Send during session resume", () => {
   }) => {
     test.setTimeout(120_000);
 
-    const fixture = await seedDelayedResumeFixture(
-      testPage,
-      apiClient,
-      seedData,
-      backend,
-      "Resume prompt queue Auto-run test",
-    );
+    const fixture = await seedDelayedResumeFixture(testPage, apiClient, seedData, backend, {
+      title: "Resume prompt queue Auto-run test",
+    });
     const marker = "resume queue paused marker";
 
     try {
@@ -128,13 +124,9 @@ test.describe("Send during session resume", () => {
     backend,
   }) => {
     test.setTimeout(120_000);
-    const fixture = await seedDelayedResumeFixture(
-      testPage,
-      apiClient,
-      seedData,
-      backend,
-      "Resume prompt queue layout test",
-    );
+    const fixture = await seedDelayedResumeFixture(testPage, apiClient, seedData, backend, {
+      title: "Resume prompt queue layout test",
+    });
 
     try {
       await assertNoDocumentHorizontalOverflow(testPage, "desktop resume prompt queue");
