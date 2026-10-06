@@ -7,10 +7,6 @@ function rightEdge(box: { x: number; width: number }): number {
   return box.x + box.width;
 }
 
-function bottomEdge(box: { y: number; height: number }): number {
-  return box.y + box.height;
-}
-
 test("Open automations is a child destination that dismisses the phone menu", async ({
   testPage,
   apiClient,
@@ -140,27 +136,34 @@ test("phone drawer actions keep touch targets, focus handoff, and direct Stats a
     await trigger.tap();
     const menu = testPage.getByTestId("app-nav-sheet");
     await expect(menu).toBeVisible();
-    await menu.evaluate(async (element) => {
-      await Promise.all(
-        element
-          .getAnimations({ subtree: true })
-          .filter((animation) => Number.isFinite(animation.effect?.getComputedTiming().iterations))
-          .map((animation) => animation.finished.catch(() => undefined)),
-      );
-    });
-    const menuBox = (await menu.boundingBox())!;
-    for (const id of [
+    const actionIds = [
       "mobile-new-task-button",
       "mobile-quick-chat-button",
       "mobile-quick-terminal-button",
-    ]) {
+    ];
+    for (const id of actionIds) {
       const action = menu.getByTestId(id);
       await expectTouchControl(action);
-      const box = (await action.boundingBox())!;
+    }
+    const { menuBox, actionBoxes } = await menu.evaluate((element, ids) => {
+      const box = (node: Element) => {
+        const { x, y, right, bottom } = node.getBoundingClientRect();
+        return { x, y, right, bottom };
+      };
+      return {
+        menuBox: box(element),
+        actionBoxes: ids.map((id) => {
+          const action = element.querySelector(`[data-testid="${id}"]`);
+          if (!action) throw new Error(`Missing menu action: ${id}`);
+          return box(action);
+        }),
+      };
+    }, actionIds);
+    for (const box of actionBoxes) {
       expect(box.x).toBeGreaterThanOrEqual(menuBox.x);
-      expect(rightEdge(box)).toBeLessThanOrEqual(rightEdge(menuBox));
+      expect(box.right).toBeLessThanOrEqual(menuBox.right);
       expect(box.y).toBeGreaterThanOrEqual(menuBox.y);
-      expect(bottomEdge(box)).toBeLessThanOrEqual(bottomEdge(menuBox));
+      expect(box.bottom).toBeLessThanOrEqual(menuBox.bottom);
     }
     expect(await testPage.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(
       true,

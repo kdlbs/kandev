@@ -210,14 +210,16 @@ PR review follow-up on 2026-10-05:
 
 PR CI fixup on 2026-10-05:
 
-- Fixed the phone drawer geometry E2E to wait for finite drawer animations before comparing parent and child bounds.
-- Reproduced the original CI failure twice in four constrained CI-image runs; the corrected test passed four of four constrained runs.
-- The complete `mobile-navigation-hierarchy.spec.ts` passed all four tests in the constrained CI image with retries disabled.
+- The first phone drawer geometry fix waited for finite animations before comparing parent and child bounds; a later CI run showed separate bounding-box reads could still straddle an animation frame.
 
 PR CI fixup on 2026-10-06:
 
 - Updated the plugin action UX E2E to expect the 24px native sidebar action and plugin controls inline when they fit, wrapping below when needed.
 - The complete `plugin-action-ux.spec.ts` passed all three tests in the constrained CI image with retries disabled.
+- The phone drawer geometry assertion now reads the menu and action bounds in one browser task; its target test passed four repeated runs and the full mobile navigation hierarchy passed all four tests with retries disabled.
+- Scoped the disabled-integration navigation assertion to the integration section, excluding its separate always-visible header shortcut; the integration navigation spec passed with retries disabled.
+- Updated the Quick Chat focus test for the New Task, Quick Terminal, Quick Chat tab order and asserted the terminal tooltip on keyboard focus; both previously failing tests passed with retries disabled.
+- ESLint and Prettier passed for the four affected E2E files, and the production Vite build passed.
 
 ## Risks
 

@@ -145,9 +145,12 @@ test.describe("Quick Chat", () => {
     expect(silentStyles.boxShadow).toBe("none");
     await expect(launcher).toHaveCSS("border-color", restingBorder);
 
+    const terminalLauncher = testPage.getByTestId("sidebar-quick-terminal-shortcut");
     await testPage.getByTestId("create-task-button").focus();
     await expect(launcher).not.toHaveAttribute("data-quick-chat-silent-focus");
 
+    await testPage.keyboard.press("Tab");
+    await expect(terminalLauncher).toBeFocused();
     await testPage.keyboard.press("Tab");
     await expect(launcher).toBeFocused();
 

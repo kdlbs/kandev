@@ -114,7 +114,7 @@ test.describe("quick terminal tabs", () => {
       await testPage.keyboard.press("Escape");
       await expect(dialog).toBeHidden();
       await expect(terminalButton).toBeFocused();
-      await expect(testPage.getByRole("tooltip", { name: "Quick terminal" })).toHaveCount(0);
+      await expect(testPage.getByRole("tooltip", { name: "Quick terminal" })).toBeVisible();
 
       await terminalButton.click();
       await expect(dialog).toBeVisible();
