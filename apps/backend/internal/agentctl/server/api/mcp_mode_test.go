@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/kandev/kandev/internal/agentctl/server/config"
@@ -24,12 +25,14 @@ import (
 // task-mode catalog and the test stayed green. This map lets that test also
 // assert the live server's resolved surface.
 var modeSurfaces = map[string]mcpprofile.Surface{
-	mcpmode.Task:             mcpprofile.SurfaceKanbanTask,
-	mcpmode.TaskTitlePending: mcpprofile.SurfaceKanbanTask,
-	mcpmode.Config:           mcpprofile.SurfaceConfiguration,
-	mcpmode.Office:           mcpprofile.SurfaceOfficeTask,
-	mcpmode.Automation:       mcpprofile.SurfaceAutomation,
-	mcpmode.Coordinator:      mcpprofile.SurfaceCoordinator,
+	mcpmode.Task:               mcpprofile.SurfaceKanbanTask,
+	mcpmode.TaskTitlePending:   mcpprofile.SurfaceKanbanTask,
+	mcpmode.Config:             mcpprofile.SurfaceConfiguration,
+	mcpmode.Office:             mcpprofile.SurfaceOfficeTask,
+	mcpmode.Automation:         mcpprofile.SurfaceAutomation,
+	mcpmode.Coordinator:        mcpprofile.SurfaceCoordinator,
+	mcpmode.ProjectCoordinator: mcpprofile.SurfaceProjectCoordinator,
+	mcpmode.ProjectWorker:      mcpprofile.SurfaceProjectWorker,
 }
 
 func newTestServerWithMCP(t *testing.T) *Server {
@@ -77,7 +80,12 @@ func TestHandleSetMcpMode_AcceptsSupportedModes(t *testing.T) {
 
 	for _, mode := range mcpmode.InstanceModes() {
 		t.Run(mode, func(t *testing.T) {
-			rec := setMcpMode(t, s, mode)
+			testServer := s
+			if mode == mcpmode.ProjectCoordinator || mode == mcpmode.ProjectWorker {
+				testServer = newTestServerWithMCP(t)
+			}
+
+			rec := setMcpMode(t, testServer, mode)
 			if rec.Code != http.StatusOK {
 				t.Fatalf("status = %d, want %d; body=%s", rec.Code, http.StatusOK, rec.Body.String())
 			}
@@ -96,7 +104,7 @@ func TestHandleSetMcpMode_AcceptsSupportedModes(t *testing.T) {
 			if !ok {
 				t.Fatalf("no expected surface registered for mode %q", mode)
 			}
-			if gotSurface := s.mcpServer.Profile().Surface; gotSurface != wantSurface {
+			if gotSurface := testServer.mcpServer.Profile().Surface; gotSurface != wantSurface {
 				t.Fatalf("resolved surface = %q, want %q", gotSurface, wantSurface)
 			}
 		})
@@ -134,6 +142,11 @@ func TestHandleSetMcpMode_RejectsUnsupportedMode(t *testing.T) {
 	rec := setMcpMode(t, s, mcpserver.ModeExternal)
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want %d; body=%s", rec.Code, http.StatusBadRequest, rec.Body.String())
+	}
+	for _, supportedMode := range []string{mcpmode.ProjectCoordinator, mcpmode.ProjectWorker} {
+		if !strings.Contains(rec.Body.String(), supportedMode) {
+			t.Fatalf("unsupported-mode error does not list supported mode %q: %s", supportedMode, rec.Body.String())
+		}
 	}
 }
 
