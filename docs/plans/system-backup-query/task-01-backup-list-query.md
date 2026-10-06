@@ -303,12 +303,16 @@ Implementation is complete locally against the merged QUERY-02 contract.
 
 - Dependency: PR #4225 merged at
   `059260b30fc68bbcbead629f7fa7e80f1ee0a5e8`. Initial implementation base:
-  `95c040e84951773dc8ed6f684fff0425d7b63f96`. Current remote main is
-  `05c41b11e830a9861534200949c3bbac473b57f7` via unrelated PR #4262.
+  `95c040e84951773dc8ed6f684fff0425d7b63f96`. Initial exact-current-main
+  validation used `05c41b11e830a9861534200949c3bbac473b57f7` after unrelated
+  PR #4262. Remote main later advanced through unrelated PR #4266 to
+  `c373ba436c3451f046acd921d5de9a081977a2a7`.
   Exact-current-main merge-tree validation passed for implementation commit
   `4fe499fe4e68a9eb51fe87b12aaf61d9dc1d7b99`, producing tree
   `e45391aa7811b5a84be83bfc49e27aa561ef1a5f`; it will be rerun on the final
-  pushed head.
+  pushed head. The code-fixup commit `c37fac05b6bdb40d1843bd74b1fe31730b7f5138`
+  also merged cleanly with the later main tip, producing tree
+  `48b767f74120fe256732c7cc7ef0c04939c9a710`.
 - Focused PR: [#4271](https://github.com/kdlbs/kandev/pull/4271),
   `refactor: move backup list to Query`, targeting `main`. The PR is open and
   linked to Kandev task `24c8f330-1bbd-4cb7-84af-1d86c9b335ca`. The exact
