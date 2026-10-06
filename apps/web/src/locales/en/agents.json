@@ -405,5 +405,8 @@
   "runtimeInterruptedBody": "{{agent}} runtime update from {{previous}} to {{version}} could not be confirmed. Review the current selection before retrying or returning to the Kandev default.",
   "runtimeFallbackManage": "Manage fallback versions",
   "runtimeFallbackExplainer": "This selects the managed package used by remote and container launches. The native host installation stays unchanged. Remote native installations keep their own update owner.",
-  "runtimeFallbackReview": "Review the managed fallback package before changing future remote or container launches."
+  "runtimeFallbackReview": "Review the managed fallback package before changing future remote or container launches.",
+  "options": "Options",
+  "agentOptions": "Agent options",
+  "changesApplyImmediately": "Changes apply immediately."
 }
