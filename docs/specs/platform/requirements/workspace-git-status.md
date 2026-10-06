@@ -88,6 +88,8 @@ A failed live source still cannot authorize an unmarked persisted fallback.
 
 - **AC-PLATFORM-WORKSPACE-GIT-STATUS-001.45:** Successful workspace patch enrichment shall return plain Git patch syntax independently of forced Git diff or UI color settings, for flattened, staged, and unstaged representations. Git presentation color shall not enter ready patch data. Literal ANSI bytes in file content and supported filenames shall retain their identity and content. Reads shall preserve Git configuration, refs, index content, and worktree bytes; file membership, status, line totals, facets, readiness, and existing resource limits remain correct. Desktop and mobile shall receive the same patch data through existing transports.
 
+- **AC-PLATFORM-WORKSPACE-GIT-STATUS-001.46:** Successful workspace patch enrichment shall return bounded built-in Git patches for flattened, staged, and unstaged representations independently of a repository-configured external diff command or an external diff command in the instance's captured environment, including when both are present. Workspace detail reads shall not execute those external commands or publish their output as ready patches. Ordinary patches, exact supported filename identity, layer-specific hunks and line totals, file membership, status, facets, readiness, cache ownership, cancellation, and existing resource limits shall remain correct. Reads shall preserve captured and process environments, Git configuration, refs, index content, and working-tree bytes. Desktop and mobile shall receive the same patch data through existing transports.
+
 ## Out of scope
 
 - Suppressing generated directories other than `node_modules`. They continue to follow repository and global Git ignore rules.
@@ -109,3 +111,5 @@ The [workspace stream continuity design](../system-design/workspace-stream-conti
 defines the callback lifetime required by criterion `.43`.
 Plain patch production follows the [path-details design](../system-design/workspace-git-path-details.md)
 and [repair package](../../../plans/workspace-tracker-plain-patches/plan.md).
+External-command independence follows the same path-details design and the
+[built-in patch repair package](../../../plans/workspace-tracker-built-in-patches/plan.md).
