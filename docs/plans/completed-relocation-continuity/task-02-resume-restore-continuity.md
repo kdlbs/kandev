@@ -194,3 +194,22 @@ Review follow-up verification:
 - `(cd apps/backend && go test ./internal/orchestrator -count=1)`: passed after
   updating the admission-count assertion.
 - `git diff --check`: passed.
+
+Post-PR recovery-ordering follow-up:
+
+- A repeated manual-recovery E2E run exposed that a recognized provider
+  continuation transport failure could overtake already queued ACP output and
+  tool events, allowing an unsafe retry before the lifecycle had observed the
+  turn activity. The adapter now emits that terminal failure after prior
+  replay-sensitive activity on the same ordered stream. Failures before output
+  keep the synchronous error path, and native continuation metadata remains
+  gated by its existing feature and safety checks.
+- `(cd apps/backend && go test ./internal/agentctl/server/adapter/transport/acp -count=1)`:
+  passed.
+- `(cd apps/backend && go test ./internal/agent/runtime/lifecycle ./internal/orchestrator/executor ./internal/orchestrator ./internal/worktree -count=1)`:
+  passed.
+- The grouped agentctl-process check hit one temporary-directory removal race
+  in `TestWorkspaceTracker_StopsWhenWorkDirDeleted`; that test passed when run
+  alone.
+- The disabled-continuation manual-recovery E2E passed all ten iterations.
+- `make -C apps/backend build`: passed.

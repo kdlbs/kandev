@@ -213,19 +213,26 @@ func (a *Adapter) sendPrompt(
 		return nil
 	}
 	if err != nil {
-		// The SDK guarantees that notifications received before this prompt RPC
-		// settles reached enqueueACPUpdate, but our worker processes them
-		// asynchronously. Drain it before returning the error so a diagnostic
-		// agent_message_chunk cannot be overtaken by the terminal failure event.
+		// Terminal failure follows any message or tool event received before the
+		// prompt RPC settles.
 		notificationsDrained := a.syncNotifQueue()
 		if a.dialect.continuationError != nil && a.dialect.continuationError(err) {
-			if snapshot := a.continuationSafetySnapshot(turn); snapshot != nil {
+			snapshot := a.continuationSafetySnapshot(turn)
+			if snapshot != nil || (notificationsDrained && turn.outputOrEffectObserved()) {
 				a.cancelAsyncTurnComplete(sessionID)
-				a.sendUpdate(AgentEvent{Type: streams.EventTypeError, SessionID: sessionID,
-					PromptGeneration: promptGeneration, Error: "peer disconnected before response", ContinuationSafety: snapshot,
-					PromptFailureDisposition: a.promptFailureDisposition(
+				failureDisposition := streams.PromptFailureDisposition("")
+				if snapshot != nil {
+					failureDisposition = a.promptFailureDisposition(
 						conn, sessionID, turn, promptGeneration, notificationsDrained,
-					),
+					)
+				}
+				a.sendUpdate(AgentEvent{
+					Type:                     streams.EventTypeError,
+					SessionID:                sessionID,
+					PromptGeneration:         promptGeneration,
+					Error:                    "peer disconnected before response",
+					ContinuationSafety:       snapshot,
+					PromptFailureDisposition: failureDisposition,
 				})
 				return nil
 			}

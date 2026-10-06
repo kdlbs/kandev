@@ -242,6 +242,7 @@ func (a *Adapter) handleACPUpdate(
 			}
 		}
 	}
+	a.observePromptOutputOrEffect(promptGeneration, leadingEvent, event)
 	a.stampSessionSettingsReports(sessionID, leadingEvent, event)
 	if leadingEvent != nil {
 		shared.LogNormalizedEvent(shared.ProtocolACP, a.agentID, sessionID, leadingEvent)
@@ -275,6 +276,28 @@ func (a *Adapter) handleACPUpdate(
 		if supplemental := a.emitDialectContextWindow(sessionID, n.Meta); supplemental != nil {
 			shared.LogNormalizedEvent(shared.ProtocolACP, a.agentID, sessionID, supplemental)
 		}
+	}
+}
+
+func (a *Adapter) observePromptOutputOrEffect(promptGeneration uint64, events ...*AgentEvent) {
+	if promptGeneration == 0 {
+		return
+	}
+	for _, event := range events {
+		if event == nil {
+			continue
+		}
+		switch event.Type {
+		case streams.EventTypeMessageChunk, streams.EventTypeReasoning, streams.EventTypeToolCall,
+			streams.EventTypeToolUpdate, streams.EventTypePlan, streams.EventTypePermissionRequest:
+		default:
+			continue
+		}
+		turn := a.currentPromptTurn()
+		if turn != nil && turn.promptGeneration == promptGeneration {
+			turn.observeOutputOrEffect()
+		}
+		return
 	}
 }
 
