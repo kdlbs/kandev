@@ -2,9 +2,8 @@ package executor
 
 import (
 	"context"
-	"errors"
+	"github.com/kandev/kandev/internal/common/offlinebudget"
 	"maps"
-	"strconv"
 	"strings"
 	"time"
 
@@ -14,34 +13,14 @@ import (
 	"go.uber.org/zap"
 )
 
-const (
-	// defaultOfflineBudgetMinutes is used when a profile's
-	// offline_budget_minutes is absent or empty (system design part 2
-	// "Budget configuration").
-	defaultOfflineBudgetMinutes = 15
-	minOfflineBudgetMinutes     = 1
-	maxOfflineBudgetMinutes     = 1440
-)
-
-// ErrInvalidOfflineBudget is returned when an executor profile's
-// offline_budget_minutes value is present but is not a base-10 integer from
-// 1 to 1440 (system design part 2 "Budget configuration").
-var ErrInvalidOfflineBudget = errors.New("offline_budget_minutes must be a base-10 integer from 1 to 1440")
+// ErrInvalidOfflineBudget is returned for an invalid offline_budget_minutes
+// value.
+var ErrInvalidOfflineBudget = offlinebudget.ErrInvalid
 
 // ResolveOfflineBudgetMinutes resolves an executor profile's
-// offline_budget_minutes config value. An empty value (absent or blank)
-// resolves to the default of 15 minutes; any other value must be a base-10
-// integer from 1 to 1440, else ErrInvalidOfflineBudget.
+// offline_budget_minutes config value (see offlinebudget.Resolve).
 func ResolveOfflineBudgetMinutes(raw string) (int, error) {
-	trimmed := strings.TrimSpace(raw)
-	if trimmed == "" {
-		return defaultOfflineBudgetMinutes, nil
-	}
-	minutes, err := strconv.Atoi(trimmed)
-	if err != nil || minutes < minOfflineBudgetMinutes || minutes > maxOfflineBudgetMinutes {
-		return 0, ErrInvalidOfflineBudget
-	}
-	return minutes, nil
+	return offlinebudget.Resolve(raw)
 }
 
 // validateOfflineBudgetMetadata rejects an invalid offline_budget_minutes

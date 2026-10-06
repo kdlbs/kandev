@@ -19,9 +19,9 @@ import (
 	"github.com/kandev/kandev/internal/agentruntime"
 	"github.com/kandev/kandev/internal/auth/authn"
 	"github.com/kandev/kandev/internal/authz"
+	"github.com/kandev/kandev/internal/common/offlinebudget"
 	"github.com/kandev/kandev/internal/common/securityutil"
 	"github.com/kandev/kandev/internal/events"
-	orchestratorexecutor "github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/secrets"
 	"github.com/kandev/kandev/internal/task/models"
 	taskrepo "github.com/kandev/kandev/internal/task/repository"
@@ -1946,7 +1946,7 @@ func validateKubernetesProfileConfig(config map[string]string) error {
 // offline_budget_minutes value at save time, mirroring the launch-time check
 // in orchestrator/executor (system design part 2 "Budget configuration").
 func validateOfflineBudgetProfileConfig(config map[string]string) error {
-	if _, err := orchestratorexecutor.ResolveOfflineBudgetMinutes(config["offline_budget_minutes"]); err != nil {
+	if _, err := offlinebudget.Resolve(config["offline_budget_minutes"]); err != nil {
 		return fmt.Errorf("%w: %w", ErrInvalidExecutorConfig, err)
 	}
 	return nil

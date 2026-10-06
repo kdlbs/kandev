@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/kandev/kandev/internal/common/offlinebudget"
 	"github.com/kandev/kandev/internal/events"
-	orchestratorexecutor "github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
@@ -484,7 +484,7 @@ func TestCreateExecutorProfileRejectsInvalidOfflineBudget(t *testing.T) {
 	} {
 		if _, err := svc.CreateExecutorProfile(ctx, &CreateExecutorProfileRequest{
 			ExecutorID: executor.ID, Name: "p", Config: map[string]string{"offline_budget_minutes": value},
-		}); !errors.Is(err, ErrInvalidExecutorConfig) || !errors.Is(err, orchestratorexecutor.ErrInvalidOfflineBudget) {
+		}); !errors.Is(err, ErrInvalidExecutorConfig) || !errors.Is(err, offlinebudget.ErrInvalid) {
 			t.Fatalf("%s: error = %v, want ErrInvalidExecutorConfig wrapping ErrInvalidOfflineBudget", name, err)
 		}
 	}
@@ -515,7 +515,7 @@ func TestUpdateExecutorProfileRejectsInvalidOfflineBudget(t *testing.T) {
 
 	if _, err := svc.UpdateExecutorProfile(ctx, profile.ID, &UpdateExecutorProfileRequest{
 		Config: map[string]string{"offline_budget_minutes": "1441"},
-	}); !errors.Is(err, ErrInvalidExecutorConfig) || !errors.Is(err, orchestratorexecutor.ErrInvalidOfflineBudget) {
+	}); !errors.Is(err, ErrInvalidExecutorConfig) || !errors.Is(err, offlinebudget.ErrInvalid) {
 		t.Fatalf("overflow update error = %v, want ErrInvalidExecutorConfig wrapping ErrInvalidOfflineBudget", err)
 	}
 	if published := bus.GetPublishedEvents(); len(published) != 0 {
