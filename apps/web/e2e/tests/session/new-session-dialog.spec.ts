@@ -531,9 +531,9 @@ test.describe("New session dialog", () => {
       )
       .toBe(true);
 
-    // 3. Navigate to the task
+    // 3. Navigate to the task's workflow, independent of saved board selection.
     const kanban = new KanbanPage(testPage);
-    await kanban.goto();
+    await kanban.goto(seedData.workflowId);
 
     const card = kanban.taskCardByTitle("Session List Task");
     await expect(card).toBeVisible({ timeout: 10_000 });

@@ -15,8 +15,8 @@ import {
   openQuickChatSetup,
   sendQuickChatMessage,
   startQuickChatFromSetup,
-  waitForQuickChatDirectInput,
   waitForSessionSettledBaseline,
+  waitForQuickChatDirectInput,
 } from "./quick-chat-helpers";
 import { SessionPage } from "../../pages/session-page";
 
@@ -119,35 +119,45 @@ test.describe("queue admission reliability", () => {
       const drops = await routeMainWebSocketWithQueueAdmissionDrops(testPage);
       const dialog = await openQuickChatSetup(testPage);
       const started = await startQuickChatFromSetup(dialog, testPage);
-      const identity = await apiClient.getQueueSessionIdentity(started.task_id, started.session_id);
+      // Setup submits its own initial turn. A transient direct-input state is
+      // not proof that it finished, so observe its reply and durable settle.
+      await expect(dialog.getByText(/I've completed the analysis of your request:/)).toBeVisible();
       await waitForSessionSettledBaseline(apiClient, started.task_id, started.session_id);
       await waitForQuickChatDirectInput(dialog);
-      await sendQuickChatMessage(dialog, testPage, "/sleep 30");
-      await expect(
-        testPage.getByRole("status", { name: /Agent is (starting|running)/ }),
-      ).toBeVisible({ timeout: 15_000 });
-      await waitForComposerQueueMode(dialog);
+      const identity = await apiClient.getQueueSessionIdentity(started.task_id, started.session_id);
+      // Hold the provider until cleanup so reconciliation cannot race the turn ending.
+      try {
+        await sendQuickChatMessage(dialog, testPage, "/e2e:cancel-hold queue-admission-busy");
+        await expect(
+          testPage.getByRole("status", { name: /Agent is (starting|running)/ }),
+        ).toBeVisible({ timeout: 15_000 });
+        await expect(dialog.getByText("queue-admission-busy", { exact: true })).toBeVisible();
+        await waitForComposerQueueMode(dialog);
 
-      const editor = dialog.locator(".tiptap.ProseMirror:visible");
-      const prompt = "recover the accepted Quick Chat admission";
-      drops.dropNextQueueAddResponse();
-      await typeWhileBusy(testPage, editor, prompt);
-      await dialog.getByTestId("submit-message-button").click();
+        const editor = dialog.locator(".tiptap.ProseMirror:visible");
+        const prompt = "recover the accepted Quick Chat admission";
+        drops.dropNextQueueAddResponse();
+        await typeWhileBusy(testPage, editor, prompt);
+        await dialog.getByTestId("submit-message-button").click();
 
-      await expect(editor).toHaveText("", { timeout: 30_000 });
-      await expect(dialog.getByTestId("queue-chip")).toBeVisible({ timeout: 15_000 });
-      await expect.poll(() => drops.droppedResponseCount()).toBe(1);
-      await expect
-        .poll(async () => (await apiClient.getQueueStatus(identity)).count, { timeout: 15_000 })
-        .toBe(1);
+        await expect(editor).toHaveText("", { timeout: 30_000 });
+        await expect(dialog.getByTestId("queue-chip")).toBeVisible({ timeout: 15_000 });
+        await expect.poll(() => drops.droppedResponseCount()).toBe(1);
+        await expect
+          .poll(async () => (await apiClient.getQueueStatus(identity)).count, { timeout: 15_000 })
+          .toBe(1);
 
-      const queueSnapshotCount = (await apiClient.getQueueStatus(identity)).count;
-      const diagnostic = JSON.stringify({
-        queueAddRequests: drops.queueAddRequests(),
-        browserQueueSnapshots: drops.queueSnapshots(),
-        queueSnapshotCount,
-      });
-      expect(drops.queueAddRequestCount(), diagnostic).toBe(1);
+        const queueSnapshotCount = (await apiClient.getQueueStatus(identity)).count;
+        const diagnostic = JSON.stringify({
+          queueAddRequests: drops.queueAddRequests(),
+          browserQueueSnapshots: drops.queueSnapshots(),
+          queueSnapshotCount,
+        });
+        expect(drops.queueAddRequestCount(), diagnostic).toBe(1);
+      } finally {
+        await apiClient.clearQueue(identity);
+        await apiClient.wsRequest("agent.cancel", { session_id: started.session_id });
+      }
     });
   });
 
