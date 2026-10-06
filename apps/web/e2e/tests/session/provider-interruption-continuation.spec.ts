@@ -259,10 +259,16 @@ test("desktop: disabled continuation preserves manual recovery without native re
   apiClient,
   seedData,
 }) => {
+  const { settings } = await apiClient.getUserSettings();
+  const previousPreventAutoStart =
+    typeof settings.prevent_auto_start_agent_on_open === "boolean"
+      ? settings.prevent_auto_start_agent_on_open
+      : false;
   const fixture = await createContinuationFixture(backend, apiClient, seedData, "read", {
     enabled: false,
   });
   try {
+    await apiClient.saveUserSettings({ prevent_auto_start_agent_on_open: true });
     const recovery = await waitForContinuationMessage(
       apiClient,
       fixture.sessionId,
@@ -291,20 +297,22 @@ test("desktop: disabled continuation preserves manual recovery without native re
       });
     await testPage.goto(`/t/${fixture.taskId}`);
     const session = new SessionPage(testPage);
-    await session.waitForLoad();
     expect(recovery.metadata?.recovery_actions).toBe(true);
     expect(recovery.metadata?.runtime_retained).not.toBe(true);
     expect(recovery.metadata?.attempts_started ?? 0).toBe(0);
     assertNativeNoContinuationTrace(fixture.tracePath, "read");
 
-    await testPage.goto(`/t/${fixture.taskId}`);
-    const session = new SessionPage(testPage);
-    await session.waitForLoad();
     await expect(session.recoveryResumeButton()).toBeVisible();
     await expect(session.transientRetryCard()).toBeHidden();
     assertNativeNoContinuationTrace(fixture.tracePath, "read");
   } finally {
-    await fixture.dispose();
+    try {
+      await fixture.dispose();
+    } finally {
+      await apiClient.saveUserSettings({
+        prevent_auto_start_agent_on_open: previousPreventAutoStart,
+      });
+    }
   }
 });
 

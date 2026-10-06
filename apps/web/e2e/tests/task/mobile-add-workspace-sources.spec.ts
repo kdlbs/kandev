@@ -267,18 +267,19 @@ test("mobile Files drawer attaches sources with fixed controls and persisted wor
   await expect(entryPoint).toBeFocused();
 
   const files = testPage;
-  await expect(
-    files.getByTestId("file-tree-node").filter({ hasText: "mobile-local-repository-main" }),
-  ).toBeVisible({ timeout: 30_000 });
+  const repositoryNode = files.locator(
+    '[data-testid="file-tree-node"][data-path="mobile-local-repository-main"]',
+  );
+  await expect(repositoryNode).toBeVisible({ timeout: 30_000 });
+  await expect(repositoryNode).toContainText("mobile-local-repository");
   await expect(
     files.getByTestId("file-tree-node").filter({ hasText: "mobile-local-folder" }),
   ).toBeVisible();
   await testPage.reload();
   await session.waitForLoad();
   await testPage.getByRole("button", { name: "Files", exact: true }).tap();
-  await expect(
-    files.getByTestId("file-tree-node").filter({ hasText: "mobile-local-repository-main" }),
-  ).toBeVisible({ timeout: 30_000 });
+  await expect(repositoryNode).toBeVisible({ timeout: 30_000 });
+  await expect(repositoryNode).toContainText("mobile-local-repository");
   await expect(
     files.getByTestId("file-tree-node").filter({ hasText: "mobile-local-folder" }),
   ).toBeVisible();
