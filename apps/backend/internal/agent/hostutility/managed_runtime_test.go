@@ -89,7 +89,7 @@ func TestResolveInferenceCommandUsesSelectedOpenCodeFamily(t *testing.T) {
 		t.Fatalf("resolveInferenceCommand: %v", err)
 	}
 	want := []string{"npx", "--yes", "--prefer-offline", "--prefix", managedruntime.NPMProjectPrefix,
-		"@opencode/cli@2.0.18", "acp", "--print-logs", "--log-level", "error"}
+		"@opencode/cli@2.0.18", "acp", "--print-logs"}
 	if !equalStrings(command.Args(), want) {
 		t.Fatalf("command = %#v, want %#v", command.Args(), want)
 	}

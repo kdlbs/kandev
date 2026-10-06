@@ -99,7 +99,7 @@ func TestOnlineManagedRuntimeArgsRejectsUnversionedPackage(t *testing.T) {
 func TestManagedRuntimeSpecForArgsAcceptsOpenCodeV2(t *testing.T) {
 	agent := agents.NewOpenCodeACP()
 	args := []string{"npx", "--yes", "--prefer-offline", "--prefix", managedruntime.NPMProjectPrefix,
-		"@opencode/cli@2.0.18", "acp", "--print-logs", "--log-level", "error"}
+		"@opencode/cli@2.0.18", "acp", "--print-logs"}
 	spec, found := managedRuntimeSpecForArgs(agent, args)
 	if !found || spec.Package != "@opencode/cli" {
 		t.Fatalf("managedRuntimeSpecForArgs = (%+v, %v), want v2 managed package", spec, found)

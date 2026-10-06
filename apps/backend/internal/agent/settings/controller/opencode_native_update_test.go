@@ -103,7 +103,7 @@ func TestNativeOpenCodeUpdateJobsKeepTheNativeSelectionValid(t *testing.T) {
 			if got, want := updater.prepare, []string{"npm install -g " + spec.PackageSpec(target)}; !reflect.DeepEqual(got, want) {
 				t.Fatalf("native install argv = %#v, want %#v", got, want)
 			}
-			if got, want := updater.probe, []string{"opencode acp --print-logs --log-level ERROR"}; !reflect.DeepEqual(got, want) {
+			if got, want := updater.probe, []string{"opencode acp --print-logs"}; !reflect.DeepEqual(got, want) {
 				t.Fatalf("native probe commands = %#v, want %#v", got, want)
 			}
 		})

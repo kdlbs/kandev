@@ -227,7 +227,7 @@ func TestResolveProviderCommandUsesSelectedOpenCodeFamily(t *testing.T) {
 		t.Fatal("resolveProviderCommand returned !ok")
 	}
 	want := []string{"npx", "--yes", "--prefer-offline", "--prefix", managedruntime.NPMProjectPrefix,
-		"@opencode/cli@2.0.18", "acp", "--print-logs", "--log-level", "error"}
+		"@opencode/cli@2.0.18", "acp", "--print-logs"}
 	if len(args) != len(want) {
 		t.Fatalf("command args = %#v, want %#v", args, want)
 	}

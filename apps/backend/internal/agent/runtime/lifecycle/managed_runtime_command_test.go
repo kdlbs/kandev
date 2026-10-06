@@ -111,7 +111,7 @@ func TestBuildAgentCommandUsesSelectedOpenCodeFamilyAcrossExecutors(t *testing.T
 		if err != nil {
 			t.Fatalf("build %s command: %v", executorType, err)
 		}
-		if !strings.Contains(cmds.initial, "@opencode/cli@2.0.18") || !strings.Contains(cmds.initial, "--log-level error") {
+		if !strings.Contains(cmds.initial, "@opencode/cli@2.0.18") || !strings.Contains(cmds.initial, "acp --print-logs") || strings.Contains(cmds.initial, "--log-level") {
 			t.Fatalf("%s command = %q, want selected v2 package, version, and flags", executorType, cmds.initial)
 		}
 	}
@@ -212,7 +212,7 @@ func TestRemotePreflightUsesResolvedOpenCodeFamily(t *testing.T) {
 		ManagedRuntimeSource:  managedruntime.OpenCodeSourceManaged,
 	}
 	got := buildRemotePreflightAgentCommand(req).Args()
-	want := []string{"npx", "--yes", "--prefer-offline", "--prefix", "~/.kandev/managed-npm-runtime", "@opencode/cli@2.0.18", "acp", "--print-logs", "--log-level", "error"}
+	want := []string{"npx", "--yes", "--prefer-offline", "--prefix", "~/.kandev/managed-npm-runtime", "@opencode/cli@2.0.18", "acp", "--print-logs"}
 	if strings.Join(got, " ") != strings.Join(want, " ") {
 		t.Fatalf("remote preflight command = %#v, want %#v", got, want)
 	}
