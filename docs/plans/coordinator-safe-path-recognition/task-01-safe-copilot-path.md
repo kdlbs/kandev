@@ -19,9 +19,10 @@ system_design:
 
 Reject undecodable workspace/coordinator components at the existing copilot
 reset boundary without throwing, preserving exact once-decoded valid identity
-and slot semantics. Add causal permanent helper and real mounted bridge tests,
-then apply the local helper correction. This task remains pending until a
-later explicit same-primary implementation interrupt and LOCAL-HEAVY grant.
+and slot semantics. Causal permanent helper and real mounted bridge tests,
+the local helper correction and affected verification are complete after
+ROOT's explicit same-primary implementation release and LOCAL-HEAVY grant.
+Hosted delivery and verified merge/task completion remain separate gates.
 
 ## In scope
 
@@ -41,7 +42,8 @@ Global router/policy/fallback, `useParams`, generic malformed-URI audit,
 store model or shared decoder changes without causal evidence, backend,
 transport, workflows, cache, conversation or persistence changes. No new
 layout, copy, navigation, mobile geometry, browser/build/E2E or full SPA setup
-repair. No delegation, sessions/tabs/model switch, install or heavy check now.
+repair. No delegation or sessions/tabs/model switch. The original design
+checkpoint excluded installation and heavy checks until ROOT's later grant.
 Publication and merge follow the later ROOT gates in the live Kandev plan;
 this work order provides no merge authorization.
 
@@ -63,6 +65,9 @@ this work order provides no merge authorization.
    routes, real store and viewport-independent behavior retain their contracts.
 
 ## Implementation order
+
+The following sequence governed the completed local implementation; results
+below record the actual commands and authorized setup recovery.
 
 1. Read the governing instructions and package again. Compare current helper,
    bridge/router/store/decoder/SPA resolver with the recorded baseline without
@@ -115,7 +120,9 @@ spies. No production module mocks or full SPA import.
 
 ## Verification
 
-Commands below are future checks, not authorized during design. Run from repo
+Commands below specify bounded verification. Results below distinguish checks
+performed during design or implementation from preserved setup failures;
+listing commands does not authorize replay. Run from repo
 root; each package command roots its own working directory. Preserve one
 original active process per check with a receipt and retained log. The targeted
 Vitest selection is fixed; no all-worker override, broad suite or duplicate run.
@@ -183,8 +190,8 @@ Read-only dependencies/controls: `apps/web/lib/routing/path.ts`,
 
 ## Dependencies
 
-None. One sequential vertical correction; no install or product validation
-until the later explicit same-primary/exclusive-heavy admission.
+None. One sequential vertical correction. Installation and product validation
+followed ROOT's later explicit same-primary/exclusive-heavy admission.
 
 ## Mobile and documentation scope
 

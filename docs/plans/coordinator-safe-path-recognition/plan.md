@@ -16,8 +16,10 @@ Keep the copilot reset effect safe when a workspace or coordinator component
 cannot be decoded, while retaining the exact identity and state behavior of
 valid Needs you and Queue paths. One sequential work order adds causal helper
 and mounted bridge regressions, applies the local recognition correction,
-and verifies only the affected boundary. This package is design only; its
-existence does not authorize implementation, heavy checks or merge.
+and verifies only the affected boundary. The package ended its design-only
+checkpoint before ROOT's later implementation release. Local implementation
+is complete; hosted delivery and verified merge/task completion remain pending.
+The package itself provides no heavy-check or merge authorization.
 
 Coordinator owns the copilot slot lifecycle. Reuse
 [AC-COORDINATOR-COPILOT-004.12](../../specs/coordinator/requirements/copilot.md#req-coordinator-copilot-004-copilot-panel)
@@ -71,8 +73,9 @@ Accepted ROOT proof at `670847f0a48cf36c14bdbd929a2fb96a3a565eea`:
 - Backend, transport, coordinator workflow, conversations, caches, flags,
   persistence, membership validation, or a workspace-keyed store model.
 - Layout, markup, copy, mobile interaction, screenshots, browser/build/E2E,
-  full-SPA imports, generated setup repair, installs or product tests now.
-- Delegation, new sessions/tabs, model switches, commit/PR/hooks or merge now.
+  full-SPA imports or unrelated generated setup repair.
+- Delegation, new sessions/tabs or model switches. Installation, product checks,
+  hooks and publication required ROOT's later grants; merge remains separate.
 
 ## Technical approach
 
@@ -100,8 +103,8 @@ and removes gone coordinators independently. These consumers stay intact.
 
 ## Tests
 
-All rows serve `AC-COORDINATOR-COPILOT-004.12`. Planned tests are pending,
-not coverage claims:
+All rows serve `AC-COORDINATOR-COPILOT-004.12`. The following planned matrix
+was implemented and verified by the RED/GREEN results below:
 
 | File | Planned tests and assertion value |
 | --- | --- |
@@ -134,13 +137,14 @@ complete that larger implementation record.
 
 ## Verification strategy
 
-Design checks are limited to the catalog, specification linter's actual
+At the original design checkpoint, checks were limited to the catalog,
+specification linter's actual
 36-test script, all-spec lint, exact references/documentation-coverage preflight,
-whitespace and four-file inventory. Each gets a 60-second absolute cutoff,
+whitespace and four-file inventory. Each had a 60-second absolute cutoff,
 owned PID/group, original native receipt and log, actual join and gone proof.
-No package installation or product check is authorized in this turn.
+No package installation or product check was authorized at that checkpoint.
 
-Later work requires ROOT's explicit same-primary implementation interrupt and
+Local implementation followed ROOT's explicit same-primary interrupt and
 exclusive LOCAL-HEAVY grant. The exact targeted Vitest selection and affected
 eslint/typecheck/i18n/docs/coverage commands are in
 [Task 01](task-01-safe-copilot-path.md#verification). Only the approved original
@@ -180,7 +184,8 @@ also preserved. Actual implementation coverage is covered with no errors;
 this is separate from the design-only exemption and later hosted exact-head gate.
 
 The design catalog/spec lint and all 36 linter-script tests passed previously.
-The accepted ROOT proof was never replayed or modified. Every original command
+The accepted ROOT proof was never replayed or modified. Every original local
+command
 has an upfront PID/group/start/cutoff/argv/log receipt and actual join/gone proof
 in `/tmp/kandev-copilot-implementation-5573589e-7i_1pojv/`. No broad tests,
 full-SPA fixture, browser/build/E2E or global malformed-route claim was added.
