@@ -1,20 +1,12 @@
 "use client";
 
-import { Fragment, useState } from "react";
+import { useState } from "react";
 import { IconChevronDown } from "@tabler/icons-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@kandev/ui/popover";
-import {
-  Command,
-  CommandEmpty,
-  CommandGroup,
-  CommandInput,
-  CommandItem,
-  CommandList,
-  CommandSeparator,
-} from "@kandev/ui/command";
+import { Command, CommandEmpty, CommandInput, CommandList } from "@kandev/ui/command";
 import { controlSizingClassName } from "@kandev/ui/control-sizing";
 import { cn } from "@/lib/utils";
-import { buildOptionGroups, hasGroupedOptions } from "./filter-option-groups";
+import { FilterMultiSelectOptions } from "./filter-multi-select-options";
 import { useTranslation } from "react-i18next";
 
 export type MultiSelectOption = { value: string; label: string; color?: string; group?: string };
@@ -40,6 +32,7 @@ export function FilterMultiSelect({
   const resolvedPlaceholder = placeholder ?? t("task:selectValues");
   const resolvedSearchPlaceholder = searchPlaceholder ?? t("task:searchEllipsis");
   const [open, setOpen] = useState(false);
+  const [search, setSearch] = useState("");
   const selectedSet = new Set(selected);
   const labelByValue = new Map(options.map((o) => [o.value, o.label]));
   const colorByValue = new Map(options.map((o) => [o.value, o.color]));
@@ -52,7 +45,13 @@ export function FilterMultiSelect({
   }
 
   return (
-    <Popover open={open} onOpenChange={setOpen}>
+    <Popover
+      open={open}
+      onOpenChange={(nextOpen) => {
+        setOpen(nextOpen);
+        if (!nextOpen) setSearch("");
+      }}
+    >
       <PopoverTrigger asChild>
         <button
           type="button"
@@ -77,89 +76,23 @@ export function FilterMultiSelect({
         data-testid="filter-value-multi-popover"
       >
         <Command>
-          <CommandInput placeholder={resolvedSearchPlaceholder} />
+          <CommandInput
+            placeholder={resolvedSearchPlaceholder}
+            value={search}
+            onValueChange={setSearch}
+          />
           <CommandList>
             <CommandEmpty>{t("task:noOptions2")}</CommandEmpty>
-            <GroupedOptions options={options} selectedSet={selectedSet} onToggle={toggle} />
+            <FilterMultiSelectOptions
+              options={options}
+              selectedSet={selectedSet}
+              search={search}
+              onToggle={toggle}
+            />
           </CommandList>
         </Command>
       </PopoverContent>
     </Popover>
-  );
-}
-
-function GroupedOptions({
-  options,
-  selectedSet,
-  onToggle,
-}: {
-  options: MultiSelectOption[];
-  selectedSet: Set<string>;
-  onToggle: (value: string) => void;
-}) {
-  if (!hasGroupedOptions(options)) {
-    return (
-      <>
-        {options.map((opt) => (
-          <OptionRow
-            key={opt.value}
-            option={opt}
-            checked={selectedSet.has(opt.value)}
-            onSelect={() => onToggle(opt.value)}
-          />
-        ))}
-      </>
-    );
-  }
-
-  const groups = buildOptionGroups(options);
-
-  return (
-    <>
-      {groups.map((g, idx) => (
-        <Fragment key={g.heading || `__ungrouped__${idx}`}>
-          {idx > 0 && <CommandSeparator />}
-          <CommandGroup heading={g.heading || undefined}>
-            {g.items.map((opt) => (
-              <OptionRow
-                key={opt.value}
-                option={opt}
-                checked={selectedSet.has(opt.value)}
-                onSelect={() => onToggle(opt.value)}
-              />
-            ))}
-          </CommandGroup>
-        </Fragment>
-      ))}
-    </>
-  );
-}
-
-function OptionRow({
-  option,
-  checked,
-  onSelect,
-}: {
-  option: MultiSelectOption;
-  checked: boolean;
-  onSelect: () => void;
-}) {
-  return (
-    <CommandItem
-      // cmdk identifies and filters items by `value`; include `option.value`
-      // so same-titled steps under one workflow don't collide.
-      value={[option.group, option.label, option.value].filter(Boolean).join(" ")}
-      onSelect={onSelect}
-      data-checked={checked}
-      data-testid="filter-value-multi-option"
-      data-value={option.value}
-      data-active={checked}
-    >
-      {option.color && (
-        <span className={cn("mr-1 block h-2 w-2 shrink-0 rounded-full", option.color)} />
-      )}
-      <span className="truncate">{option.label}</span>
-    </CommandItem>
   );
 }
 
