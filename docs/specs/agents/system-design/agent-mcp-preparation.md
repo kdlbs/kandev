@@ -220,3 +220,28 @@ smoke uses an isolated HOME/workspace, existing Cursor account only in memory,
 a local authenticated fixture and no personal provider credentials. The test
 must invoke Kandev preparation and then call the fixture without an out-of-band
 manual enable/login. Test both ACP and terminal and preserve tool permissions.
+
+## Warning presentation amendment (2026-10-02, draft)
+
+For AC-AGENTS-MCP-PREP-002.6/002.7 and AC-AGENTS-MCP-PREP-003.5,
+separate connection readiness from presentation severity. Keep the existing
+persisted failed verification status and `authentication_required` reason code:
+verification did not succeed. Do not mark unavailable tools ready to obtain an
+amber icon. Add a shared frontend severity predicate constrained to the agent
+MCP verification kind and exact reason code. Use it for the preparation row,
+aggregate failed/warning counts, and `AgentMcpPrepareActions` message tone.
+An overall failed preparation remains failed; any other failed row takes
+precedence over warning-only completion. Other MCP failure codes retain their
+current error presentation. No wire schema or data migration is needed.
+
+`prepare-progress.tsx` must count these rows as warnings, render the amber
+triangle, and retain visible explanation and recovery controls. The existing
+`completed_with_warnings` summary is reused. `agent-mcp-prepare-actions.tsx`
+continues to accept the failed readiness row and invoke the existing guarded
+login/retry actions. Typed classification also works on older hydrated rows.
+Current-attempt reconciliation and recovery fences remain authoritative.
+
+Use the existing responsive preparation surface: actions wrap on narrow screens,
+retain at least 44px touch targets, and require no hover. Cover warning-only,
+mixed warning/error, fatal overall failure, hydrated legacy rows, and successful
+retry through the same classifier. See [delivery package](../../../plans/setup-recovery-ux/plan.md).

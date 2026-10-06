@@ -82,6 +82,13 @@ func (s *Service) handleAgentStreamEvent(ctx context.Context, payload *lifecycle
 	}
 	taskID := payload.TaskID
 	sessionID := payload.SessionID
+	if eventType == agentEventComplete &&
+		payload.Data.PromptFailureDisposition == streams.PromptFailureDispositionRetainRuntime {
+		// The following AgentTurnFailed event owns this failed turn's durable
+		// settlement. A complete stream frame must not park the session or clear
+		// its prompt evidence before that synchronous owner callback can run.
+		return
+	}
 	terminalCompleteStream := false
 	var observedOutput, observedEffect bool
 
@@ -1679,16 +1686,19 @@ func (s *Service) persistBootstrapFailureMessage(
 	// Bootstrap failures occur before any turn started, so there is no failed
 	// turn to attach to — resolve the turn lazily via the empty turn ID.
 	return s.createRecoveryStatusMessage(ctx, watcher.AgentEventData{
-		TaskID:           taskID,
-		SessionID:        sessionID,
-		AgentExecutionID: agentExecutionID,
-		ErrorMessage:     errorValue.Message,
-		FailureCode:      errorValue.Code,
-		FailureDetails:   errorValue.Details,
-		Phase:            errorValue.Phase,
-		AttemptID:        errorValue.AttemptID,
-		ErrorStamp:       errorValue.Stamp(),
-		Causes:           errorValue.Causes,
+		TaskID:                 taskID,
+		SessionID:              sessionID,
+		AgentExecutionID:       agentExecutionID,
+		ErrorMessage:           errorValue.Message,
+		FailureCode:            errorValue.Code,
+		FailureDetails:         errorValue.Details,
+		StartupFailureReason:   errorValue.StartupReason,
+		StartupFailureAttempts: errorValue.StartupAttempts,
+		StartupFailureNPMCode:  errorValue.StartupNPMCode,
+		Phase:                  errorValue.Phase,
+		AttemptID:              errorValue.AttemptID,
+		ErrorStamp:             errorValue.Stamp(),
+		Causes:                 errorValue.Causes,
 	}, "")
 }
 

@@ -9,6 +9,7 @@ import (
 	"go.uber.org/zap"
 
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
+	"github.com/kandev/kandev/internal/agentctl/acpcompat"
 	"github.com/kandev/kandev/internal/agentctl/tracing"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/events"
@@ -151,12 +152,13 @@ func isUninitializedStartupExecution(execution *AgentExecution) bool {
 	return execution.Status == v1.AgentStatusStarting || execution.Status == v1.AgentStatusRunning
 }
 
-// handleCompleteEventMarkState marks the execution state after a complete event:
-// failed+removed on error, ready on success.
 func isUninitializedStartupFailure(execution *AgentExecution, event *agentctl.AgentEvent) bool {
 	return event != nil && event.PromptGeneration == 0 && isUninitializedStartupExecution(execution)
 }
 
+// handleCompleteEventMarkState marks the execution state after a complete event.
+// Its success path runs under the event's startup callback lease and must keep
+// using lease-free helpers through readiness publication.
 func (m *Manager) handleCompleteEventMarkState(
 	execution *AgentExecution,
 	event *agentctl.AgentEvent,
@@ -222,7 +224,9 @@ func (m *Manager) handleCompleteEventMarkState(
 		}
 		m.eventPublisher.PublishAgentEvent(context.Background(), events.AgentRunning, execution)
 	}
-	if err := m.MarkReady(execution.ID); err != nil {
+	if err := m.markReadyEventForExecution(
+		context.Background(), execution, events.AgentReady, false, event.AttemptID,
+	); err != nil {
 		m.logger.Error("failed to mark execution as ready after complete",
 			zap.String("execution_id", execution.ID),
 			zap.Error(err))
@@ -243,10 +247,11 @@ func handleCompleteEventSignalLeased(execution *AgentExecution, event *agentctl.
 	execution.signalPromptCompletionForStartupGenerationLeased(
 		execution.startupAttemptSnapshot(),
 		PromptCompletionSignal{
-			StopReason:       stopReason,
-			IsError:          isError,
-			Error:            errorMsg,
-			PromptGeneration: event.PromptGeneration,
+			StopReason:               stopReason,
+			IsError:                  isError,
+			Error:                    errorMsg,
+			PromptFailureDisposition: event.PromptFailureDisposition,
+			PromptGeneration:         event.PromptGeneration,
 		},
 	)
 }
@@ -341,7 +346,80 @@ func (m *Manager) finishPromptCompletion(
 	claim promptCompletionClaim,
 	failureEvidence *PromptAttemptEvidence,
 ) {
+	if claim.locked && event.PromptGeneration != 0 && isError {
+		setProviderError(execution, event.ProviderError)
+		if payload, retained := m.retainPromptFailureRuntime(execution, event, failureEvidence); retained {
+			// Keep the prompt generation fenced through durable owner settlement,
+			// but do not hold the lifecycle lock across publication: explicit
+			// cancellation reads this generation while it owns the session guard.
+			m.persistExecutorRunning(context.Background(), execution)
+			execution.promptLifecycleMu.Unlock()
+			publishErr := m.eventPublisher.publishAgentEventPayload(context.Background(), events.AgentTurnFailed, payload)
+			execution.promptLifecycleMu.Lock()
+			ownsSettlement := execution.promptSettlementGeneration == event.PromptGeneration &&
+				execution.promptGeneration == event.PromptGeneration
+			var terminalPublication *promptErrorCompletionPublication
+			if publishErr != nil {
+				// A failed publication has no durable owner. Fall back to the
+				// established terminal path so the caller does not mistake an
+				// unsettled turn for a retained, acknowledged failure.
+				event.PromptFailureDisposition = ""
+				if ownsSettlement {
+					var terminalErr error
+					terminalPublication, terminalErr = m.preparePromptErrorCompletion(execution, event, failureEvidence)
+					if terminalErr != nil {
+						m.logger.Error("failed to apply terminal fallback after turn-failure publication error",
+							zap.String("execution_id", execution.ID), zap.Error(terminalErr))
+					} else if terminalPublication != nil {
+						execution.promptSettlementGeneration = 0
+						execution.promptSettlementAcknowledgedGeneration = 0
+						execution.promptSettlementWaiterReleasedGeneration = 0
+					}
+				}
+			}
+			handleCompleteEventSignalLeased(execution, event, isError)
+			if ownsSettlement {
+				if terminalPublication == nil {
+					execution.promptSettlementWaiterReleasedGeneration = event.PromptGeneration
+					if execution.promptSettlementAcknowledgedGeneration == event.PromptGeneration {
+						execution.promptSettlementGeneration = 0
+						execution.promptSettlementAcknowledgedGeneration = 0
+						execution.promptSettlementWaiterReleasedGeneration = 0
+					}
+				}
+				execution.dispatchedPromptPending.Store(false)
+			}
+			execution.promptLifecycleMu.Unlock()
+			if terminalPublication != nil {
+				m.finishPromptErrorCompletion(terminalPublication)
+			}
+			return
+		}
+		publication, err := m.preparePromptErrorCompletion(execution, event, failureEvidence)
+		if err != nil {
+			m.logger.Error("failed to mark execution as failed after error completion",
+				zap.String("execution_id", execution.ID),
+				zap.Error(err))
+		}
+
+		// Publish the terminal state before waking a waiter or releasing the
+		// dispatch barrier. Admission must observe FAILED/STOPPED after this
+		// generation's completion signal.
+		handleCompleteEventSignalLeased(execution, event, isError)
+		execution.dispatchedPromptPending.Store(false)
+		execution.promptLifecycleMu.Unlock()
+		if publication != nil {
+			m.finishPromptErrorCompletion(publication)
+		}
+		return
+	}
+
 	handleCompleteEventSignalLeased(execution, event, isError)
+	if claim.locked && event.PromptGeneration != 0 {
+		// Finalization and signal delivery are complete, so a later prompt can
+		// pass the dispatch barrier after this lifecycle lease ends.
+		execution.dispatchedPromptPending.Store(false)
+	}
 	if event.PromptGeneration == 0 || isError {
 		if isError {
 			setProviderError(execution, event.ProviderError)
@@ -359,6 +437,102 @@ func (m *Manager) finishPromptCompletion(
 		m.eventPublisher.publishAgentEventPayload(context.Background(), events.AgentRunning, claim.runningPayload)
 	}
 	m.eventPublisher.publishAgentEventPayload(context.Background(), events.AgentReady, claim.readyPayload)
+}
+
+const claudeACPAgentID = "claude-acp"
+const codexACPAgentID = "codex-acp"
+
+func (m *Manager) retainPromptFailureRuntime(
+	execution *AgentExecution,
+	event *agentctl.AgentEvent,
+	failureEvidence *PromptAttemptEvidence,
+) (AgentEventPayload, bool) {
+	if !validRetainedPromptFailureEvent(event) || m.IsShuttingDown() ||
+		!retainedPromptFailureExecutionEligible(execution) {
+		return AgentEventPayload{}, false
+	}
+
+	var payload AgentEventPayload
+	retained := false
+	err := m.executionStore.WithLock(execution.ID, func(current *AgentExecution) {
+		if !retainedPromptFailureExecutionMatches(current, execution, event.PromptGeneration) {
+			return
+		}
+
+		current.Status = v1.AgentStatusReady
+		current.ErrorMessage = ""
+		current.promptSettlementGeneration = event.PromptGeneration
+		payload = newAgentEventPayloadWithTurnIDAndEvidence(current, event.TurnID, failureEvidence)
+		payload.ErrorMessage = extractErrorMessage(event)
+		payload.PromptFailureDisposition = event.PromptFailureDisposition
+		if event.AttemptID != "" {
+			payload.AttemptID = event.AttemptID
+		}
+		retained = true
+	})
+	if err != nil || !retained {
+		return AgentEventPayload{}, false
+	}
+	return payload, true
+}
+
+func validRetainedPromptFailureEvent(event *agentctl.AgentEvent) bool {
+	return event != nil && event.PromptGeneration != 0 &&
+		event.PromptFailureDisposition == streams.PromptFailureDispositionRetainRuntime &&
+		event.PromptFailureDisposition.Valid()
+}
+
+func retainedPromptFailureExecutionEligible(execution *AgentExecution) bool {
+	if execution == nil {
+		return false
+	}
+	client, release := execution.AcquireAgentCtlClient()
+	if client == nil {
+		return false
+	}
+	defer release()
+	return execution.isSessionInitialized() && client.HasAgentStream() &&
+		execution.TaskScope == TaskLaunchScopeTask &&
+		!execution.IsPassthrough && execution.TaskID != "" && execution.SessionID != "" &&
+		execution.AgentProfileID != "" && retainedTurnTaskOwnerMatches(execution) &&
+		isRetainableACPAgent(execution.AgentID)
+}
+
+func retainedPromptFailureExecutionMatches(
+	current, expected *AgentExecution,
+	promptGeneration uint64,
+) bool {
+	if current == nil || current != expected || current.Status != v1.AgentStatusRunning ||
+		current.promptGeneration != promptGeneration || current.promptCompletionGeneration != promptGeneration {
+		return false
+	}
+	return retainedPromptFailureOwnerMatches(current, expected)
+}
+
+func retainedPromptFailureOwnerMatches(current, expected *AgentExecution) bool {
+	return current != nil && expected != nil && retainedTurnTaskOwnerMatches(current) &&
+		current.TaskScope == TaskLaunchScopeTask && current.TaskID == expected.TaskID &&
+		current.SessionID == expected.SessionID && current.AgentProfileID != "" &&
+		!current.IsPassthrough && current.ExitCode == nil && current.FinishedAt == nil
+}
+
+func retainedTurnTaskOwnerMatches(execution *AgentExecution) bool {
+	if execution == nil || executionOwnerKind(execution) != ExecutionOwnerTask ||
+		execution.Owner.Kind == ExecutionOwnerRun ||
+		(execution.Owner.Kind != "" && execution.Owner.Kind != ExecutionOwnerTask) {
+		return false
+	}
+	return (execution.Owner.TaskID == "" || execution.Owner.TaskID == execution.TaskID) &&
+		(execution.Owner.SessionID == "" || execution.Owner.SessionID == execution.SessionID)
+}
+
+func isRetainableACPAgent(agentID string) bool {
+	switch agentID {
+	case claudeACPAgentID, codexACPAgentID, acpcompat.CursorAgentID, "mock-agent":
+		return true
+	default:
+		return false
+	}
 }
 
 func setProviderError(execution *AgentExecution, providerError *streams.ProviderError) {
@@ -409,6 +583,10 @@ func (m *Manager) handleCompleteEventLeased(execution *AgentExecution, event *ag
 	var failureEvidence *PromptAttemptEvidence
 	if isError {
 		evidence := execution.promptAttemptEvidenceSnapshot()
+		if event.ContinuationSafety != nil && event.ContinuationSafety.PromptGeneration == event.PromptGeneration {
+			snapshot := *event.ContinuationSafety
+			evidence.ContinuationSafety = &snapshot
+		}
 		failureEvidence = &evidence
 	}
 	m.finishExecutionWorkspaceActivity(execution, "turn_complete")

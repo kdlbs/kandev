@@ -43,7 +43,9 @@ export async function seedProfile(api: ApiClient, seed: SeedData, backend: Backe
       workflow_id: seed.workflowId,
       workflow_step_id: seed.startStepId,
     });
-  return seedNavigationTasks(api, seed, backend, seed.worktreeExecutorProfileId);
+  return seedNavigationTasks(api, seed, backend, {
+    executorProfileId: seed.worktreeExecutorProfileId,
+  });
 }
 
 export async function prepareProfileTask(

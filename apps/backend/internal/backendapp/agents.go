@@ -39,6 +39,7 @@ func provideLifecycleManager(
 	recoveryDeadlineStart time.Time,
 	inheritedRecordScope lifecycle.InheritedRecordScope,
 	workspaceInfoProvider lifecycle.WorkspaceInfoProvider,
+	workspaceRecoveryErrorReporter lifecycle.WorkspaceRecoveryErrorReporter,
 	passthroughSessionProvider lifecycle.PassthroughSessionProvider,
 	runningWriter lifecycle.ExecutorRunningWriter,
 	startupRecoveryGuard *lifecycle.RecoveryGuard,
@@ -216,6 +217,9 @@ func provideLifecycleManager(
 	// instead of staying empty until something else happens to resolve it.
 	if workspaceInfoProvider != nil {
 		lifecycleMgr.SetWorkspaceInfoProvider(workspaceInfoProvider)
+	}
+	if workspaceRecoveryErrorReporter != nil {
+		lifecycleMgr.SetWorkspaceRecoveryErrorReporter(workspaceRecoveryErrorReporter)
 	}
 	// AC-EXECUTORS-SURVIVAL-005.3: wire the durable passthrough-mode lookup
 	// before Start so the startup recovery guard can exclude a confirmed

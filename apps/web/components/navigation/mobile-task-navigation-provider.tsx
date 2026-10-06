@@ -8,6 +8,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
+import { hasVisibleNewTask } from "@/lib/sidebar/mobile-layout";
 import { createPortal } from "react-dom";
 import { Drawer } from "@kandev/ui/drawer";
 import {
@@ -41,6 +42,10 @@ export const useMobileTaskNavigationOutlet = () => useContext(Context);
 /** Task action dialogs outlive the menu portal and responsive page headers. */
 export function MobileTaskNavigationProvider({ children }: { children: ReactNode }) {
   const workspaceId = useAppStore((s) => s.workspaces.activeId);
+  const showInlineNewTask = useAppStore((state) => {
+    const id = state.workspaces.activeId;
+    return !hasVisibleNewTask(id ? state.userSettings.sidebarLayoutsByWorkspace?.[id] : undefined);
+  });
   const workflowId = useAppStore((s) => s.workflows.activeId);
   const [outlet, setOutlet] = useState<Outlet | null>(null);
   const configuration = useRef<Outlet | null>(null);
@@ -74,6 +79,7 @@ export function MobileTaskNavigationProvider({ children }: { children: ReactNode
                 navigate={configuration.current?.navigate}
                 selection={configuration.current?.selection ?? undefined}
                 presentation="drawer"
+                showInlineNewTask={showInlineNewTask}
                 renderInline={(body) =>
                   outlet
                     ? createPortal(

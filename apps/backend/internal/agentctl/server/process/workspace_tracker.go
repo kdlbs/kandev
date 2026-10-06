@@ -189,6 +189,7 @@ type WorkspaceTracker struct {
 	gitStatusEpoch                       uint64
 	gitStatusTrackerID                   string
 	gitStatusRevision                    uint64
+	gitStatusDetailSourceRevision        uint64
 	gitStatusObservationID               atomic.Uint64
 	gitStatusLatestID                    uint64
 	gitStatusFingerprint                 string
@@ -206,7 +207,7 @@ type WorkspaceTracker struct {
 	gitStatusDetailsWaitJoined           func()                // Optional test synchronization hook; nil in production.
 	// gitStatusBetweenQueries is an optional test hook invoked between the
 	// tracked and untracked queries. It is nil in production.
-	gitStatusBetweenQueries func()
+	gitStatusBetweenQueries func(context.Context)
 
 	// Control
 	stopCh          chan struct{}

@@ -50,7 +50,7 @@ Test naming follows the same concern-based grouping the existing `docker/*.spec.
 | `ssh/connection-form.spec.ts` | A1–A7: form rendering, field gating, identity-source toggle, default port |
 | `ssh/test-result.spec.ts` | B1–B7: successful + failed Test Connection paths, step badges, fingerprint surfacing, "cached / will upload" |
 | `ssh/trust-gate.spec.ts` | C1–C7: Save disabled until trust ticked; edits to host/port/user/identity reset result + trust; fingerprint-change amber warning |
-| `ssh/executor-crud.spec.ts` | D1–D7: SSH executor CRUD, listing with right icon/label, profile `workdir_root` round-trip, edit-with-live-sessions modal, delete-with-live-sessions warning |
+| `ssh/executor-crud.spec.ts` | Group D and R4 (API type): executor config persistence, listing returns the SSH executor type, profile `workdir_root` round-trip, live-session preservation and metadata snapshots, profile deletion |
 | `ssh/sessions-card.spec.ts` | E1–E6: empty state, row rendering, manual refresh, status badges, truncation, polling pickup |
 | `ssh/test-endpoint.spec.ts` | F1–F6: HTTP contract for `POST /api/v1/ssh/test` + WS parity |
 | `ssh/sessions-endpoint.spec.ts` | G1–G5: HTTP contract for `GET /api/v1/ssh/executors/:id/sessions` + WS parity |
@@ -63,10 +63,19 @@ Test naming follows the same concern-based grouping the existing `docker/*.spec.
 | `ssh/proxy-jump.spec.ts` | N1–N3: direct connect, single bastion ProxyJump (2-container network), chained ProxyJump explicit failure |
 | `ssh/workdir-per-profile.spec.ts` | P1–P4: different profiles → different remote workdirs; default workdir; profile switch does not move existing task dirs |
 | `ssh/error-surfacing.spec.ts` | Q1–Q5: TCP refused, auth failed, permission denied (mkdir), ProxyJump unreachable, backend 5xx |
-| `ssh/persistence.spec.ts` | R1–R4: fingerprint persists across reload, incomplete test does not leak state, mobile project responsive, executor icon/label correct in lists |
+| `ssh/persistence.spec.ts` | R1–R2: trusted fingerprint and saved edits survive reload, new forms start clean, incomplete forms show no test result |
 
-80 cases across 17 SSH spec files (see `apps/web/e2e/tests/ssh/`).
-The full suite runs in ~2.4 min on the containers project.
+The retained R4 listing check lives in `ssh/executor-crud.spec.ts` and protects
+the executor API type. Rendered list icons/labels and R3 mobile responsiveness
+require separate browser coverage.
+
+Discover the current inventory from `apps/web`:
+
+```bash
+KANDEV_E2E_CONTAINERS=1 pnpm e2e:raw --project=containers tests/ssh --list
+```
+
+Execution time depends on the CI shard manifests and runner resources.
 
 ## Helpers exposed to specs
 

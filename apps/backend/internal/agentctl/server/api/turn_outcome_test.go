@@ -81,8 +81,9 @@ func TestGetTurnOutcomeRoundTripsARetainedOutcomeRepeatedly(t *testing.T) {
 	mgr, client, instanceID := newTurnOutcomeTestServer(t)
 
 	turnID, ok := mgr.RetainTurnOutcome(instanceID, streams.AgentEvent{
-		Type:      streams.EventTypeComplete,
-		SessionID: "sess-xyz",
+		Type:                     streams.EventTypeError,
+		SessionID:                "sess-xyz",
+		PromptFailureDisposition: streams.PromptFailureDispositionRetainRuntime,
 	})
 	if !ok {
 		t.Fatal("RetainTurnOutcome() ok = false, want true")
@@ -101,6 +102,9 @@ func TestGetTurnOutcomeRoundTripsARetainedOutcomeRepeatedly(t *testing.T) {
 		}
 		if outcome.Event.SessionID != "sess-xyz" {
 			t.Fatalf("iteration %d: Event.SessionID = %q, want %q", i, outcome.Event.SessionID, "sess-xyz")
+		}
+		if outcome.Event.PromptFailureDisposition != streams.PromptFailureDispositionRetainRuntime {
+			t.Fatalf("iteration %d: disposition = %q, want retain_runtime", i, outcome.Event.PromptFailureDisposition)
 		}
 	}
 }

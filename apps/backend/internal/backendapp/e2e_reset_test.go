@@ -61,6 +61,55 @@ func TestDeleteTaskForE2EResetDiscardsWorktreeChanges(t *testing.T) {
 	}
 }
 
+func TestOrderE2ETasksForDeletionPlacesChildrenFirst(t *testing.T) {
+	tasks := []*taskmodels.Task{
+		{ID: "root"},
+		{ID: "sibling"},
+		{ID: "child", ParentID: "root"},
+		{ID: "grandchild", ParentID: "child"},
+		{ID: "sibling-child", ParentID: "sibling"},
+	}
+
+	ordered, err := orderE2ETasksForDeletion(tasks)
+	if err != nil {
+		t.Fatalf("orderE2ETasksForDeletion(): %v", err)
+	}
+	if len(ordered) != len(tasks) {
+		t.Fatalf("ordered task count = %d, want %d", len(ordered), len(tasks))
+	}
+
+	positions := make(map[string]int, len(ordered))
+	for index, task := range ordered {
+		positions[task.ID] = index
+	}
+	for _, task := range tasks {
+		if task.ParentID == "" {
+			continue
+		}
+		parentPosition, parentInList := positions[task.ParentID]
+		if parentInList && positions[task.ID] >= parentPosition {
+			t.Errorf(
+				"task %q at %d must precede parent %q at %d",
+				task.ID,
+				positions[task.ID],
+				task.ParentID,
+				parentPosition,
+			)
+		}
+	}
+}
+
+func TestOrderE2ETasksForDeletionRejectsParentCycles(t *testing.T) {
+	tasks := []*taskmodels.Task{
+		{ID: "first", ParentID: "second"},
+		{ID: "second", ParentID: "first"},
+	}
+
+	if _, err := orderE2ETasksForDeletion(tasks); err == nil {
+		t.Fatal("orderE2ETasksForDeletion() error = nil, want a hierarchy cycle error")
+	}
+}
+
 func TestE2EAttachGitHubContributionRejectsUnauthorizedTask(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	authorizer := &e2eAttachTaskAuthorizerStub{err: errors.New("task is not visible")}

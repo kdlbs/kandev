@@ -224,11 +224,14 @@ func (r *Repository) deleteWorkspaceCascade(
 	expectedName *string,
 	cleanup func(context.Context, *sqlx.Tx) error,
 ) ([]*models.Task, []*models.Workflow, error) {
-	tx, err := r.db.BeginTxx(ctx, nil)
+	tx, err := r.db.BeginTxx(ctx, r.hierarchyTxOptions())
 	if err != nil {
 		return nil, nil, err
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err := r.lockTaskHierarchy(ctx, tx, []string{id}, nil); err != nil {
+		return nil, nil, err
+	}
 
 	// Lock the workspace row BEFORE inventorying its tasks: task creation
 	// takes the same lock, so a task created after this point either commits
@@ -275,6 +278,9 @@ func (r *Repository) deleteWorkspaceCascade(
 	}
 	sort.Strings(lockIDs)
 	for _, taskID := range lockIDs {
+		if err := r.managedDeletionBarrierTx(ctx, tx, taskID); err != nil {
+			return nil, nil, err
+		}
 		if err := r.lockTaskRowInTx(ctx, tx, taskID); err != nil {
 			return nil, nil, fmt.Errorf("guard cascade task row %s: %w", taskID, err)
 		}

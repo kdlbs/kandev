@@ -19,9 +19,11 @@ Operators need to discover updates while working and optionally authorize Kandev
 - **AC-AGENTS-RUNTIME-NOTIFY-001.1:** Every registered agent shall expose runtime ownership, release source when known, known current/effective and latest versions, and managed, manual, or unsupported actions. Disabled, unavailable, custom, and virtual agents shall remain explicit. Unknown versions or failed checks shall never be presented as current.
 - **AC-AGENTS-RUNTIME-NOTIFY-001.2:** Available enabled agents shall be checked without opening Settings. Checks shall be bounded, shared by release source, cached for six hours on success and fifteen minutes on failure, and cancelled during shutdown. Offline or failed sources shall not create user-facing failure notifications.
 - **AC-AGENTS-RUNTIME-NOTIFY-001.3:** A newer known runtime version shall generate an app notification naming the agent, runtime, and new version, linking to that runtime's settings or verified vendor guidance. Delivery shall respect the existing update-notification preference and persist deduplication by recipient, agent, runtime source, and version across reloads and backend restarts.
-- **AC-AGENTS-RUNTIME-NOTIFY-001.4:** The application shall retain an update indicator after a toast disappears. Desktop and phone users shall reach the same version management, ownership information, and manual guidance without hover.
+- **AC-AGENTS-RUNTIME-NOTIFY-001.4:** Retired by AC-AGENTS-RUNTIME-NOTIFY-001.7. The former persistent app-wide update indicator is removed from the intended contract.
 - **AC-AGENTS-RUNTIME-NOTIFY-001.5:** On an ordinary visit to Settings > Agents, runtime update settings shall appear after the installed-agent content as a collapsed section. Expanding it shall show compact runtime rows with named ownership/source, current and latest versions or explicit unknown values, supported actions, and automatic update controls. Shared explanatory copy shall appear once rather than under every runtime; retained outcomes and unavailable-runtime limitations shall remain accessible.
-- **AC-AGENTS-RUNTIME-NOTIFY-001.6:** Opening a runtime notification or update indicator shall expand the runtime section and reveal its destination, including a disabled or unavailable runtime inside the additional registrations disclosure. Desktop and phone users shall be able to collapse and reopen the section without losing policy drafts. Phone controls shall have at least 44px touch targets and content shall not cause horizontal page overflow.
+- **AC-AGENTS-RUNTIME-NOTIFY-001.6:** Opening a runtime notification shall expand the runtime section and reveal its destination, including a disabled or unavailable runtime inside the additional registrations disclosure. Desktop and phone users shall be able to collapse and reopen the section without losing policy drafts. Phone controls shall have at least 44px touch targets and content shall not cause horizontal page overflow.
+
+- **AC-AGENTS-RUNTIME-NOTIFY-001.7:** Desktop and phone application views shall show no persistent floating agent runtime update button or count, including while newer runtimes are available. Runtime version management, ownership information, and manual guidance shall remain reachable through Settings > Agents and runtime notification links without hover.
 
 ### REQ-AGENTS-RUNTIME-NOTIFY-002: Opt-in verified automatic updates
 
@@ -39,4 +41,6 @@ Model discovery, vendor credential/configuration migrations, hot-swapping sessio
 
 ## Design and implementation
 
-See [runtime update notifications design](../system-design/runtime-update-notifications.md), [original delivery plan](../../../plans/agent-runtime-notifications/plan.md), and [compact settings follow-up plan](../../../plans/agent-runtime-settings-compact/plan.md).
+The [availability summary requirements](runtime-update-summary.md) extend startup and reconnect delivery under REQ-AGENTS-RUNTIME-NOTIFY-003.
+
+See [runtime update notifications design](../system-design/runtime-update-notifications.md), [original delivery plan](../../../plans/agent-runtime-notifications/plan.md), and [compact settings follow-up plan](../../../plans/agent-runtime-settings-compact/plan.md), and [floating indicator removal plan](../../../plans/remove-agent-runtime-update-indicator/plan.md).

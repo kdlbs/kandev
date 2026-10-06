@@ -8,7 +8,11 @@
 // real workspace or task session.
 package hostutility
 
-import "time"
+import (
+	"time"
+
+	"github.com/kandev/kandev/internal/agent/agents"
+)
 
 // Status reports the state of a host utility instance for a given agent type.
 type Status string
@@ -25,9 +29,10 @@ const (
 
 // AgentCapabilities is the cached result of probing an agent type.
 type AgentCapabilities struct {
-	AgentType    string `json:"agent_type"`
-	AgentName    string `json:"agent_name,omitempty"`
-	AgentVersion string `json:"agent_version,omitempty"`
+	AgentType    string              `json:"agent_type"`
+	AgentName    string              `json:"agent_name,omitempty"`
+	AgentVersion string              `json:"agent_version,omitempty"`
+	RuntimeInfo  *agents.RuntimeInfo `json:"runtime_info,omitempty"`
 
 	Status Status `json:"status"`
 	Error  string `json:"error,omitempty"`

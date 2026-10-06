@@ -152,6 +152,24 @@ feature cannot write outside the workspace, exhaust memory, or corrupt a file an
 - **AC-UI-WORKSPACE-FILE-TRANSFER-003.6:** A completed upload emits the same workspace change
   notification as the other file mutations, so the file tree and Git status converge without a
   manual refresh.
+- **AC-UI-WORKSPACE-FILE-TRANSFER-003.7:** When the upload-owning Files surface is disposed or
+  changes its active session, every unfinished selection owned by the previous surface/session
+  shall be retired. A retired selection shall start no further preflight or upload requests and
+  shall publish no conflict dialog, per-file state, or success/failure confirmation to that surface
+  or its replacement. This applies equally to desktop and phone entry points.
+- **AC-UI-WORKSPACE-FILE-TRANSFER-003.8:** Retirement shall settle the selection's caller with a
+  cancelled outcome. A selection waiting only for conflict choices shall settle during cleanup
+  without requiring a dialog action. A selection awaiting an already dispatched preflight or file
+  upload shall settle when that request completes or fails, without requiring any further request
+  or user action. Resolving conflicts shall retain this settlement guarantee during file uploads.
+- **AC-UI-WORKSPACE-FILE-TRANSFER-003.9:** Retirement shall preserve confirmed successful writes
+  and failures, including the result of an upload already in flight, in the caller's cancelled
+  outcome. It shall preserve skipped-selection evidence. Retirement does not abort or roll back an
+  in-flight workspace mutation, remove a successfully written file, or emit a stale confirmation.
+- **AC-UI-WORKSPACE-FILE-TRANSFER-003.10:** Retirement of one upload owner or session shall not
+  cancel another owner's selection or prevent a live replacement session from uploading. Late
+  responses and retained callbacks from a retired lifetime shall not affect the current selection.
+  Development lifecycle cleanup followed by setup shall leave the live owner able to upload.
 
 ## Out of scope
 

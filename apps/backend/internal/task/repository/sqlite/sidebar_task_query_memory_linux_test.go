@@ -65,6 +65,9 @@ func TestSidebarQueryPoolMemoryPlateau(t *testing.T) {
 		})
 		return
 	}
+	if got := runtime.GOMAXPROCS(0); got != 4 {
+		t.Fatalf("pooled memory measurement must run with GOMAXPROCS=4, got %d", got)
+	}
 	repo, _ := sidebarMemoryFixture(t)
 	queries := sidebarMemoryQueries()
 	if selected := os.Getenv(sidebarMemoryCase); selected != "" {
@@ -145,12 +148,27 @@ func runSidebarMemoryChild(t *testing.T, testName string, count int) {
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Minute)
 	defer cancel()
 	command := exec.CommandContext(ctx, executable, "-test.run=^"+testName+"$", "-test.v")
-	command.Env = append(os.Environ(), sidebarMemoryChild+"="+strconv.Itoa(count))
+	command.Env = sidebarMemoryChildEnvironment(testName, count)
 	output, err := command.CombinedOutput()
 	t.Log(string(output))
 	if err != nil {
 		t.Fatalf("isolated SQLite memory regression: %v", err)
 	}
+}
+
+func sidebarMemoryChildEnvironment(testName string, count int) []string {
+	environment := os.Environ()
+	if testName == "TestSidebarQueryPoolMemoryPlateau" {
+		bounded := environment[:0]
+		for _, entry := range environment {
+			if !strings.HasPrefix(entry, "GOMAXPROCS=") {
+				bounded = append(bounded, entry)
+			}
+		}
+		environment = bounded
+		environment = append(environment, "GOMAXPROCS=4")
+	}
+	return append(environment, sidebarMemoryChild+"="+strconv.Itoa(count))
 }
 
 func sidebarMemoryFixture(t *testing.T) (*Repository, int) {
@@ -178,7 +196,7 @@ func sidebarMemoryFixture(t *testing.T) (*Repository, int) {
 		}
 		connections = append(connections, conn)
 	}
-	t.Logf("go=%s os=%s arch=%s sqlite=%s pid=%d tasks_per_workspace=%d", runtime.Version(), runtime.GOOS, runtime.GOARCH, sqlitememory.Version(), os.Getpid(), count)
+	t.Logf("go=%s os=%s arch=%s sqlite=%s pid=%d gomaxprocs=%d tasks_per_workspace=%d", runtime.Version(), runtime.GOOS, runtime.GOARCH, sqlitememory.Version(), os.Getpid(), runtime.GOMAXPROCS(0), count)
 	return repo, count
 }
 

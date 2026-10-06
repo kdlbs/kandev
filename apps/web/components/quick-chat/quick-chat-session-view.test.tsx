@@ -17,6 +17,9 @@ const quickChatSessions = vi.hoisted(
   () => [] as Array<{ sessionId: string; taskId?: string; agentProfileId?: string }>,
 );
 const useEnsureTaskSession = vi.hoisted(() => vi.fn());
+const configChatRestarts = vi.hoisted(
+  () => ({}) as Record<string, { sessionId: string; status: string; source: string }>,
+);
 const useTask = vi.hoisted(() => vi.fn());
 const useSessionResumption = vi.hoisted(() =>
   vi.fn(() => ({
@@ -44,7 +47,7 @@ vi.mock("@/components/state-provider", () => ({
   useAppStore: (selector: (state: unknown) => unknown) =>
     selector({
       taskSessions: { items: sessionRows },
-      quickChat: { sessions: quickChatSessions },
+      quickChat: { sessions: quickChatSessions, configChatRestarts },
       agentProfiles: { items: [] },
     }),
 }));
@@ -86,11 +89,25 @@ afterEach(() => {
   cleanup();
   delete sessionRows[session.sessionId];
   quickChatSessions.length = 0;
+  delete configChatRestarts[WORKSPACE_ID];
   vi.clearAllMocks();
   useTask.mockReset();
   useTask.mockReturnValue(null);
   useTaskStatusSummary.mockReset();
   useTaskStatusSummary.mockReturnValue(undefined);
+});
+
+it("unmounts retired configuration content before hydration or automatic resumption can run", () => {
+  configChatRestarts[WORKSPACE_ID] = {
+    sessionId: session.sessionId,
+    status: "restarting",
+    source: "local",
+  };
+  render(<QuickChatSessionView session={{ ...session, kind: "config" }} />);
+  expect(useEnsureTaskSession).not.toHaveBeenCalled();
+  expect(useSessionResumption).not.toHaveBeenCalled();
+  expect(screen.queryByTestId(TEST_IDS.quickChatContent)).toBeNull();
+  expect(screen.getByRole("status").textContent).toBe("configChat:restartingSession");
 });
 
 // @covers AC-TASKS-QUICK-CHAT-EXPIRATION-001.2
@@ -103,6 +120,7 @@ describe("QuickChatSessionView session resumption", () => {
 
     expect(useSessionResumption).toHaveBeenCalledWith(DESCRIPTOR_TASK_ID, session.sessionId, null, {
       skipAutomaticRecovery: false,
+      preventAutoResume: false,
     });
   });
 
@@ -113,6 +131,7 @@ describe("QuickChatSessionView session resumption", () => {
 
     expect(useSessionResumption).toHaveBeenLastCalledWith(null, session.sessionId, null, {
       skipAutomaticRecovery: false,
+      preventAutoResume: false,
     });
 
     sessionRows[session.sessionId] = { task_id: HYDRATED_TASK_ID };
@@ -122,7 +141,7 @@ describe("QuickChatSessionView session resumption", () => {
       DESCRIPTOR_TASK_ID,
       session.sessionId,
       null,
-      { skipAutomaticRecovery: false },
+      { skipAutomaticRecovery: false, preventAutoResume: false },
     );
   });
 
@@ -133,6 +152,7 @@ describe("QuickChatSessionView session resumption", () => {
 
     expect(useSessionResumption).toHaveBeenCalledWith(HYDRATED_TASK_ID, session.sessionId, null, {
       skipAutomaticRecovery: false,
+      preventAutoResume: false,
     });
   });
 
@@ -144,6 +164,7 @@ describe("QuickChatSessionView session resumption", () => {
 
     expect(useSessionResumption).toHaveBeenCalledWith(HYDRATED_TASK_ID, session.sessionId, true, {
       skipAutomaticRecovery: false,
+      preventAutoResume: false,
     });
   });
 
@@ -152,6 +173,7 @@ describe("QuickChatSessionView session resumption", () => {
 
     expect(useSessionResumption).toHaveBeenLastCalledWith(null, session.sessionId, null, {
       skipAutomaticRecovery: false,
+      preventAutoResume: false,
     });
 
     quickChatSessions.push({ sessionId: session.sessionId, taskId: HYDRATED_TASK_ID });
@@ -161,7 +183,7 @@ describe("QuickChatSessionView session resumption", () => {
       HYDRATED_TASK_ID,
       session.sessionId,
       false,
-      { skipAutomaticRecovery: false },
+      { skipAutomaticRecovery: false, preventAutoResume: true },
     );
   });
 
@@ -170,6 +192,7 @@ describe("QuickChatSessionView session resumption", () => {
 
     expect(useSessionResumption).toHaveBeenLastCalledWith(null, session.sessionId, null, {
       skipAutomaticRecovery: false,
+      preventAutoResume: false,
     });
 
     sessionRows[session.sessionId] = { task_id: "task-after-hydration" };
@@ -179,7 +202,77 @@ describe("QuickChatSessionView session resumption", () => {
       "task-after-hydration",
       session.sessionId,
       null,
-      { skipAutomaticRecovery: false },
+      { skipAutomaticRecovery: false, preventAutoResume: false },
+    );
+  });
+
+  it("does not treat a dismissed historical error as active", () => {
+    sessionRows[session.sessionId] = {
+      task_id: HYDRATED_TASK_ID,
+      metadata: {
+        last_agent_error: { message: "old failure", dismissed_at: BOOTSTRAP_OCCURRED_AT },
+      },
+    };
+    useTask.mockReturnValue({ isArchived: false, workspaceId: WORKSPACE_ID });
+    render(<QuickChatSessionView session={session} />);
+    expect(useSessionResumption).toHaveBeenLastCalledWith(
+      HYDRATED_TASK_ID,
+      session.sessionId,
+      false,
+      { skipAutomaticRecovery: false, preventAutoResume: false },
+    );
+  });
+
+  it("waits for the persisted session error before checking a WS-created tab", () => {
+    quickChatSessions.push({ sessionId: session.sessionId, taskId: HYDRATED_TASK_ID });
+    render(<QuickChatSessionView session={session} />);
+    expect(useSessionResumption).toHaveBeenLastCalledWith(
+      HYDRATED_TASK_ID,
+      session.sessionId,
+      false,
+      { skipAutomaticRecovery: false, preventAutoResume: true },
+    );
+  });
+
+  it("prevents automatic resumption when an active launch error is present", () => {
+    sessionRows[session.sessionId] = {
+      task_id: HYDRATED_TASK_ID,
+      metadata: { last_agent_error: { stamp: "err-1", message: "launch failed" } },
+    };
+    useTask.mockReturnValue({ isArchived: false, workspaceId: WORKSPACE_ID });
+    useTaskStatusSummary.mockReturnValue({
+      active_error: {
+        session_id: session.sessionId,
+        stamp: "err-1",
+        preview: "launch failed",
+      },
+    });
+
+    render(<QuickChatSessionView session={session} />);
+
+    expect(useSessionResumption).toHaveBeenCalledWith(HYDRATED_TASK_ID, session.sessionId, false, {
+      skipAutomaticRecovery: false,
+      preventAutoResume: true,
+    });
+  });
+
+  it("does not block resumption for another session's active error", () => {
+    sessionRows[session.sessionId] = { task_id: HYDRATED_TASK_ID };
+    useTask.mockReturnValue({ isArchived: false, workspaceId: WORKSPACE_ID });
+    useTaskStatusSummary.mockReturnValue({
+      active_error: {
+        scope: "session",
+        session_id: "other-session",
+        stamp: "other",
+        preview: "failed",
+      },
+    });
+    render(<QuickChatSessionView session={session} />);
+    expect(useSessionResumption).toHaveBeenLastCalledWith(
+      HYDRATED_TASK_ID,
+      session.sessionId,
+      false,
+      { skipAutomaticRecovery: false, preventAutoResume: false },
     );
   });
 
@@ -318,6 +411,7 @@ describe("QuickChatSessionView new props", () => {
 
     expect(useSessionResumption).toHaveBeenCalledWith(HYDRATED_TASK_ID, session.sessionId, null, {
       skipAutomaticRecovery: true,
+      preventAutoResume: false,
     });
   });
 
@@ -328,6 +422,7 @@ describe("QuickChatSessionView new props", () => {
 
     expect(useSessionResumption).toHaveBeenCalledWith(HYDRATED_TASK_ID, session.sessionId, null, {
       skipAutomaticRecovery: false,
+      preventAutoResume: false,
     });
   });
 
@@ -339,6 +434,7 @@ describe("QuickChatSessionView new props", () => {
 
     expect(useSessionResumption).toHaveBeenCalledWith(HYDRATED_TASK_ID, session.sessionId, null, {
       skipAutomaticRecovery: false,
+      preventAutoResume: false,
     });
   });
 

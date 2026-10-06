@@ -38,8 +38,23 @@ export type QueueAdmissionDropController = {
   dropNextQueueAddResponse: (count?: number) => void;
   dropQueueAdmissionReconciliation: () => void;
   queueAddRequestCount: () => number;
+  queueAddRequests: () => QueueAddRequestDiagnostic[];
+  queueSnapshots: () => QueueSnapshotDiagnostic[];
   droppedRequestCount: () => number;
   droppedResponseCount: () => number;
+};
+
+export type QueueAddRequestDiagnostic = {
+  sequence: number;
+  requestId: string;
+  clientQueueId?: string;
+  contentPreview?: string;
+};
+
+export type QueueSnapshotDiagnostic = {
+  sequence: number;
+  requestId: string;
+  entryIds: string[];
 };
 
 function asRecord(value: unknown): Record<string, unknown> | null {
@@ -359,6 +374,12 @@ type QueueAdmissionProxyState = {
   dropResponseCount: { value: number };
   dropReconciliation: { value: boolean };
   queueAddRequests: { value: number };
+  queueAddRequestBaseline: { value: number };
+  queueAddRequestDiagnostics: QueueAddRequestDiagnostic[];
+  captureQueueSnapshots: { value: boolean };
+  queueSnapshotRequestSequences: Map<string, number>;
+  queueSnapshotDiagnostics: QueueSnapshotDiagnostic[];
+  diagnosticSequence: number;
   droppedRequests: { value: number };
   droppedResponses: { value: number };
 };
@@ -385,12 +406,75 @@ function filterQueueAdmissionFrames(
     .join("\n");
 }
 
+function trackQueueSnapshotRequest(
+  frame: Record<string, unknown>,
+  state: QueueAdmissionProxyState,
+) {
+  if (
+    !state.captureQueueSnapshots.value ||
+    frame.type !== "request" ||
+    frame.action !== "message.queue.get" ||
+    typeof frame.id !== "string"
+  ) {
+    return;
+  }
+  state.diagnosticSequence += 1;
+  state.queueSnapshotRequestSequences.set(frame.id, state.diagnosticSequence);
+  if (state.queueSnapshotRequestSequences.size > 16) {
+    const oldestRequestID = state.queueSnapshotRequestSequences.keys().next().value;
+    if (oldestRequestID) state.queueSnapshotRequestSequences.delete(oldestRequestID);
+  }
+}
+
+function recordQueueSnapshotResponse(
+  frame: Record<string, unknown>,
+  state: QueueAdmissionProxyState,
+) {
+  if (
+    state.dropReconciliation.value ||
+    !state.captureQueueSnapshots.value ||
+    frame.type !== "response" ||
+    frame.action !== "message.queue.get" ||
+    typeof frame.id !== "string"
+  ) {
+    return;
+  }
+  const sequence = state.queueSnapshotRequestSequences.get(frame.id);
+  if (sequence === undefined) return;
+
+  state.queueSnapshotRequestSequences.delete(frame.id);
+  const payload = asRecord(frame.payload);
+  const entries = Array.isArray(payload?.entries) ? payload.entries : [];
+  const entryIds = entries
+    .slice(0, 20)
+    .map((entry) => asRecord(entry)?.id)
+    .filter((id): id is string => typeof id === "string");
+  state.queueSnapshotDiagnostics.push({ requestId: frame.id, sequence, entryIds });
+  if (state.queueSnapshotDiagnostics.length > 8) state.queueSnapshotDiagnostics.shift();
+}
+
 function inspectQueueAdmissionRequest(
   frame: Record<string, unknown>,
   state: QueueAdmissionProxyState,
 ): boolean {
+  trackQueueSnapshotRequest(frame, state);
   if (frame.type !== "request" || frame.action !== "message.queue.add") return false;
   state.queueAddRequests.value += 1;
+  if (state.captureQueueSnapshots.value && typeof frame.id === "string") {
+    const payload = asRecord(frame.payload);
+    state.diagnosticSequence += 1;
+    state.queueAddRequestDiagnostics.push({
+      sequence: state.diagnosticSequence,
+      requestId: frame.id,
+      ...(typeof payload?.client_queue_id === "string"
+        ? { clientQueueId: payload.client_queue_id }
+        : {}),
+      ...(typeof payload?.content === "string"
+        ? { contentPreview: payload.content.slice(0, 80) }
+        : {}),
+    });
+    if (state.queueAddRequestDiagnostics.length > 8) state.queueAddRequestDiagnostics.shift();
+  }
   if (state.dropRequest.value) {
     state.dropRequest.value = false;
     state.droppedRequests.value += 1;
@@ -406,6 +490,7 @@ function inspectQueueAdmissionResponse(
   frame: Record<string, unknown>,
   state: QueueAdmissionProxyState,
 ): boolean {
+  recordQueueSnapshotResponse(frame, state);
   const isReconciliationResponse =
     state.dropReconciliation.value &&
     frame.type === "response" &&
@@ -435,6 +520,12 @@ export async function routeMainWebSocketWithQueueAdmissionDrops(
     dropResponseCount: { value: 0 },
     dropReconciliation: { value: false },
     queueAddRequests: { value: 0 },
+    queueAddRequestBaseline: { value: 0 },
+    queueAddRequestDiagnostics: [],
+    captureQueueSnapshots: { value: false },
+    queueSnapshotRequestSequences: new Map<string, number>(),
+    queueSnapshotDiagnostics: [],
+    diagnosticSequence: 0,
     droppedRequests: { value: 0 },
     droppedResponses: { value: 0 },
   };
@@ -472,11 +563,24 @@ export async function routeMainWebSocketWithQueueAdmissionDrops(
       state.dropResponseCount.value = Math.max(1, count);
       state.dropReconciliation.value = false;
       state.droppedResponses.value = 0;
+      state.captureQueueSnapshots.value = true;
+      state.queueAddRequestBaseline.value = state.queueAddRequests.value;
+      state.queueAddRequestDiagnostics.length = 0;
+      state.queueSnapshotRequestSequences.clear();
+      state.queueSnapshotDiagnostics.length = 0;
+      state.diagnosticSequence = 0;
     },
     dropQueueAdmissionReconciliation: () => {
       state.dropReconciliation.value = true;
     },
-    queueAddRequestCount: () => state.queueAddRequests.value,
+    queueAddRequestCount: () => state.queueAddRequests.value - state.queueAddRequestBaseline.value,
+    queueAddRequests: () => state.queueAddRequestDiagnostics.map((request) => ({ ...request })),
+    queueSnapshots: () =>
+      state.queueSnapshotDiagnostics.map((snapshot) => ({
+        sequence: snapshot.sequence,
+        requestId: snapshot.requestId,
+        entryIds: [...snapshot.entryIds],
+      })),
     droppedRequestCount: () => state.droppedRequests.value,
     droppedResponseCount: () => state.droppedResponses.value,
   };

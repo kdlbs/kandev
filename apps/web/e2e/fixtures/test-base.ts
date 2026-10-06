@@ -367,6 +367,7 @@ export const test = backendFixture.extend<
         workspace_id: seedData.workspaceId,
         workflow_filter_id: seedData.workflowId,
         keyboard_shortcuts: {},
+        message_time_display: "relative",
         enable_preview_on_click: false,
         confirm_task_archive: true,
         agent_generated_task_titles: false,
@@ -628,6 +629,7 @@ test.beforeEach(async ({ apiClient, backend, seedData }) => {
     await apiClient.saveUserSettings({
       workspace_id: seedData.workspaceId,
       workflow_filter_id: seedData.workflowId,
+      message_time_display: "relative",
       keyboard_shortcuts: {},
       enable_preview_on_click: false,
       confirm_task_archive: true,

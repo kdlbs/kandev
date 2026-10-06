@@ -62,11 +62,15 @@ test.describe("quick terminal tabs", () => {
       const quickChatButton = testPage.getByTestId("sidebar-quick-chat-shortcut");
       await expect(terminalButton).toBeVisible();
       await expect(quickChatButton).toBeVisible();
-      expect(
-        await terminalButton.evaluate((element) =>
-          element.nextElementSibling?.getAttribute("data-testid"),
-        ),
-      ).toBe("sidebar-quick-chat-shortcut");
+      const utilities = testPage.getByTestId("sidebar-quick-actions");
+      await expect(utilities.getByRole("button").first()).toHaveAttribute(
+        "data-testid",
+        "sidebar-quick-chat-shortcut",
+      );
+      await expect(utilities.getByRole("button").last()).toHaveAttribute(
+        "data-testid",
+        "sidebar-quick-terminal-shortcut",
+      );
 
       await terminalButton.click();
       const dialog = testPage.getByRole("dialog", { name: QUICK_CHAT_TITLE });
@@ -81,6 +85,19 @@ test.describe("quick terminal tabs", () => {
         "QUICK_TERMINAL_ONE",
       );
       await expect(dialog.locator('[data-testid="quick-terminal-tab"]')).toHaveCount(1);
+
+      // Phone layout is width-driven even with a fine pointer. Resizing must
+      // retain the same host shell while toggling the shortcut presentation.
+      const desktopViewport = testPage.viewportSize()!;
+      await expect(dialog.getByTestId("mobile-terminal-keybar")).toHaveCount(0);
+      await testPage.setViewportSize({ width: 767, height: desktopViewport.height });
+      const ctrl = dialog.getByTestId("keybar-key-ctrl");
+      await expect(ctrl).toBeVisible();
+      expect((await ctrl.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+      await testPage.setViewportSize({ width: 768, height: desktopViewport.height });
+      await expect(dialog.getByTestId("mobile-terminal-keybar")).toHaveCount(0);
+      await testPage.setViewportSize(desktopViewport);
+      await runCommandAndWaitForOutput(testPage, "echo $KANDEV_QT_ONE", "QUICK_TERMINAL_ONE");
 
       // The descriptor and detached PTY survive a full page reload. The
       // launcher must reattach the existing shell instead of creating a

@@ -482,6 +482,7 @@
       "lsp_server_configs",
       "lsp_status_location",
       "mcp_task_agent_profile_default",
+      "message_time_display",
       "preferred_shell",
       "prevent_auto_start_agent_on_open",
       "quick_chat_tab_order_by_workspace",

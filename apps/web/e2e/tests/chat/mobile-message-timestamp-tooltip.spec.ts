@@ -1,14 +1,14 @@
-// Mobile companion to message-timestamp-tooltip.spec.ts. Native title
-// tooltips never fire on touch (no hover event), so coarse pointers get a
-// tap-to-open Drawer that surfaces the same absolute time instead (see
-// MessageTimestamp in message-actions.tsx).
+// Mobile companion: tap the timestamp to open a drawer with its counterpart.
 import { test, expect } from "../../fixtures/test-base";
 import { SessionPage } from "../../pages/session-page";
+const CREATED_AT = new Date(Date.now() - 60_000).toISOString();
+
+test.use({ locale: "en-US", timezoneId: "UTC" });
 
 const SEEDED_MESSAGE = "Tooltip regression fixture message";
 
 test.describe("Chat message timestamp tooltip (mobile)", () => {
-  test("tapping the relative timestamp opens a drawer with the full absolute time", async ({
+  test("tapping the relative timestamp opens a drawer with the absolute short time", async ({
     testPage,
     apiClient,
     seedData,
@@ -25,6 +25,7 @@ test.describe("Chat message timestamp tooltip (mobile)", () => {
     await apiClient.seedSessionMessage(sessionId, {
       type: "message",
       content: SEEDED_MESSAGE,
+      createdAt: CREATED_AT,
     });
 
     await testPage.goto(`/t/${task.id}`);
@@ -45,10 +46,11 @@ test.describe("Chat message timestamp tooltip (mobile)", () => {
     await expect(timestamp).toBeVisible();
     const dateTimeAttr = await timestamp.getAttribute("datetime");
 
-    // Compute the expected absolute time in the browser's own context so the
-    // comparison isn't sensitive to the test runner's locale/timezone.
     const expectedAbsoluteTime = await testPage.evaluate(
-      (iso) => new Date(iso as string).toLocaleString(),
+      (iso) =>
+        new Intl.DateTimeFormat("en-US", { dateStyle: "short", timeStyle: "short" }).format(
+          new Date(iso as string),
+        ),
       dateTimeAttr,
     );
 

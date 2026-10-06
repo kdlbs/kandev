@@ -105,7 +105,7 @@ function OpenCanvasSettingsShortcut({ workspaceId }: { workspaceId: string }) {
           href={workspaceCanvasSettingsHref(workspaceId)}
           aria-label={t("canvases:openWorkspaceSettings")}
           data-testid="sidebar-canvases-settings"
-          className="flex h-5 w-5 items-center justify-center rounded text-muted-foreground/70 transition-colors hover:bg-muted/60 hover:text-foreground cursor-pointer"
+          className="flex h-7 w-7 [@media(pointer:coarse)]:size-11 items-center justify-center rounded text-muted-foreground/70 transition-colors hover:bg-muted/60 hover:text-foreground cursor-pointer"
         >
           <IconListDetails className="h-3.5 w-3.5" />
         </Link>
@@ -173,6 +173,7 @@ export function CanvasesSection({ collapsed }: { collapsed: boolean }) {
     >
       {({ onOpen, triggerRef }) => (
         <AppSidebarSection
+          presentation="navigation"
           id={APP_SIDEBAR_SECTION_IDS.canvases}
           label={t("canvases:canvases")}
           collapsed={collapsed}

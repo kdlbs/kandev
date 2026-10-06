@@ -163,6 +163,8 @@ export {
 export { applyLayoutFixups } from "./dockview-layout-builders";
 
 export type FileEditorState = {
+  /** Transient buffer lifetime, preserved by edits and never persisted. */
+  instanceId?: symbol;
   path: string;
   /**
    * Multi-repo subpath (the repository_name, e.g. "enrichment-commons") this

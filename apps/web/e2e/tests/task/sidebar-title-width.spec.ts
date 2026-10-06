@@ -68,17 +68,26 @@ async function expectTouchSizedTimeSlot(
   const relativeTime = row.getByTestId("sidebar-task-trailing-time");
   const timeSlot = relativeTime.locator("xpath=..");
   const visualTime = relativeTime.locator('[aria-hidden="true"]');
-  const [slotBox, visualTimeBox] = await Promise.all([
+  const action = row.locator("button.mobile-task-actions-button");
+  const [slotBox, timeBox, visualTimeBox, actionBox] = await Promise.all([
     timeSlot.boundingBox(),
+    relativeTime.boundingBox(),
     visualTime.boundingBox(),
+    action.boundingBox(),
   ]);
 
   expect(slotBox).not.toBeNull();
+  expect(timeBox).not.toBeNull();
   expect(visualTimeBox).not.toBeNull();
-  expect(slotBox!.width).toBeGreaterThanOrEqual(minimumWidth);
-  expect(slotBox!.width).toBeGreaterThanOrEqual(visualTimeBox!.width - 1);
+  expect(actionBox).not.toBeNull();
+  expect(timeBox!.width).toBeGreaterThanOrEqual(minimumWidth);
+  expect(timeBox!.width).toBeGreaterThanOrEqual(visualTimeBox!.width - 1);
+  expect(actionBox!.width).toBeGreaterThanOrEqual(minimumWidth);
+  expect(actionBox!.height).toBeGreaterThanOrEqual(minimumWidth);
+  expect(actionBox!.x).toBeGreaterThanOrEqual(timeBox!.x + timeBox!.width - 1);
+  expect(actionBox!.x + actionBox!.width).toBeLessThanOrEqual(slotBox!.x + slotBox!.width + 1);
   expect(
-    Math.abs(visualTimeBox!.x + visualTimeBox!.width - (slotBox!.x + slotBox!.width)),
+    Math.abs(visualTimeBox!.x + visualTimeBox!.width - (timeBox!.x + timeBox!.width)),
   ).toBeLessThanOrEqual(1);
 }
 
@@ -336,11 +345,11 @@ test("localized time slots respect the fine-pointer width breakpoint", async ({
     await expectContentSizedTimeSlot(row);
   }
 
-  for (const width of [768, 640, 639]) {
+  for (const width of [768, 767, 639]) {
     await testPage.setViewportSize({ width, height: 900 });
     expect(await testPage.evaluate(() => matchMedia("(pointer: fine)").matches)).toBe(true);
 
-    if (width === 640) {
+    if (width === 767) {
       await testPage.getByTestId("mobile-task-picker-trigger").click();
     }
 
@@ -350,7 +359,7 @@ test("localized time slots respect the fine-pointer width breakpoint", async ({
     await expect(row).toHaveCount(1);
     await expect(row.getByTestId("sidebar-task-trailing-time")).toBeVisible();
 
-    if (width === 639) {
+    if (width < 768) {
       const relativeTime = row.getByTestId("sidebar-task-trailing-time");
       const action = row.locator("button.mobile-task-actions-button");
       const [rowBox, timeBox, actionBox] = await Promise.all([

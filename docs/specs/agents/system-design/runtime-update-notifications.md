@@ -36,7 +36,7 @@ See the complete [coverage matrix](../../../plans/agent-runtime-notifications/co
 
 The controller's existing status cache keeps the six-hour success and fifteen-minute failure TTLs. Cache identity includes source type and locator. A shared single-flight lookup per source owns one slot of the five-slot concurrency semaphore for its entire bounded lookup. Each source uses a ten-second context independent of any one subscriber; canceled callers return promptly without canceling shared work or caching a synthetic failure. Status remains read-only.
 
-One controller-owned scheduler waits for the initial host utility probes, then runs a batch at startup and every fifteen minutes, after runtime and notification wiring, with Start/Stop and drained cancellation. Subscriber reconnect replays notices read-only and cannot restart automatic mutation after shutdown or restore quiesce. It reuses ListAgentUpdateStatuses and never creates a loop per agent. UI refreshes one shared status snapshot periodically for app-wide indicators and after terminal jobs; simultaneous consumers share the request and reject stale completions.
+One controller-owned scheduler waits for the initial host utility probes, then runs a batch at startup and every fifteen minutes, after runtime and notification wiring, with Start/Stop and drained cancellation. Subscriber reconnect replays notices read-only and cannot restart automatic mutation after shutdown or restore quiesce. It reuses ListAgentUpdateStatuses and never creates a loop per agent. UI refreshes one shared status snapshot periodically and after terminal jobs; simultaneous consumers share the request and reject stale completions.
 
 ## Policy persistence and admission
 
@@ -48,17 +48,20 @@ Jobs carry the original runtime identity, automatic origin and previous version,
 
 ## Notifications and recovery
 
+The [availability summary design](runtime-update-summary.md) defines fixed-window grouping and per-runtime delivery claims.
+Its [delivery package](../../../plans/agent-runtime-update-summary/plan.md) records the implementation and targeted regression checks.
+
 Reuse notification service semantic delivery, update subscriptions (system.update_available), per-user provider ownership, and persistent delivery claims. Runtime payload identifies agent, display name, runtime source, previous/target versions, and outcome. Occurrence identity combines those identities with available/success/failure and target or job identity; Kandev release occurrence IDs remain independent. Local delivery preserves structured runtime payload so the frontend resolves copy at render time; native/external providers receive concrete agent/runtime copy.
 
 Available updates and terminal outcomes are retried for disconnected local subscribers using persisted status/policy, while delivery claims suppress repeats. Source failures produce no notification. Failed automatic updates retain the old version and expose the existing version dialog for retry, rollback, or return-to-default. No automatic rollback after a later launch failure is introduced.
 
 ## Responsive UI
 
-An app-wide indicator persists while a known newer runtime is available and links directly to Settings > Agents for the affected runtime. The existing toast bridge handles structured runtime notifications and links to the same destination. Notification preferences govern toasts, not the informational status indicator.
+`UpdateAvailableToastBridge` remains mounted in the app shell to consume structured runtime notifications and refresh the shared status snapshot. It renders no DOM: remove the fixed count/button and its route, translation and icon dependencies. Retain the existing refresh interval, notification-triggered refresh, terminal-job status integration, and timer cleanup. This satisfies AC-AGENTS-RUNTIME-NOTIFY-001.7 without removing background awareness. Settings > Agents and notification links provide runtime management entry points; no replacement floating badge or control is introduced.
 
 The Agents page exposes a runtime update section, showing named package/runtime, ownership, current/latest or unknown state, supported control or vendor guidance, and per-runtime automatic switch for eligible installed runtimes. Use Settings save coordination with contributor identities bound to both agent and runtime for policy drafts; discard and failed save retain authoritative baseline. Direct links focus the requested runtime. The managed version link is shown only when the separate installed-card metadata exposes its supported control; vendor guidance remains reachable when those snapshots disagree. Managed update dialogs/drawers retain their existing version selection and recovery.
 
-Phone entry uses a visible 44px control and direct settings route. Settings rows use one column, wrapping copy, full-width touch actions, and page-owned scrolling. The nearest exemplars are InstalledAgentCard, SettingsPageTemplate, and AgentRuntimeUpdateSurface's existing phone drawer. Temporary version selection stays in that drawer; persistent policy belongs on Settings, avoiding a second nested overlay. Desktop keeps 28px actions. All copy uses locale catalogs.
+Phone entry uses the existing Settings navigation or runtime notification link and direct settings route. Settings rows use one column, wrapping copy, full-width touch actions, and page-owned scrolling. The nearest exemplars are InstalledAgentCard, SettingsPageTemplate, and AgentRuntimeUpdateSurface's existing phone drawer. Temporary version selection stays in that drawer; persistent policy belongs on Settings, avoiding a second nested overlay. Desktop keeps 28px actions. All copy uses locale catalogs.
 
 ### Compact settings presentation
 
@@ -72,7 +75,7 @@ For direct links, preserve `runtime-updates`, `runtime-update-<agent>`, and inst
 
 Phone entry remains Settings > Agents or its runtime notification link. The curated direct-navigation precedent is `kanban-with-preview.tsx`; existing `InstalledAgentCard`, `SettingsGroup`, and the managed version drawer supply local geometry and controls. Persistent infrequently edited policy uses an inline disclosure within the existing page scroller. On phones, stack versions and source/ownership below the runtime name, use a labelled inline policy row and full-width actions, and retain touch sizing through `settingsActionClassName` and `SettingsRow`. Use at least 44px for disclosure, switches and actions below 768px or with a coarse pointer; ordinary desktop actions remain 28px. Long sources wrap, page scrolling remains the only section scroll owner, and existing Settings safe-area/save controls remain authoritative. No new viewport-bound overlay is needed.
 
-Notifications, app indicator, backend checks, permission rules and persisted policy semantics retain their existing contracts. Tests cover ordinary collapsed entry and section order, keyboard/touch expansion, initial and same-route fragment navigation, delayed target registration, inactive targets, dirty draft retention, saved consent/reload, explicit unknown versions, fallback guidance, and retained failure recovery. Run the existing desktop/phone notification and runtime-update suites together with the new compact-entry assertions.
+Notifications, backend checks, permission rules and persisted policy semantics retain their existing contracts. The floating indicator removal is tracked in the [removal plan](../../../plans/remove-agent-runtime-update-indicator/plan.md). Its desktop and phone regressions assert absence with available updates and continue through Settings and notification links. Earlier indicator previews and assertions in companion plans record historical delivery only. Tests cover ordinary collapsed entry and section order, keyboard/touch expansion, initial and same-route fragment navigation, delayed target registration, inactive targets, dirty draft retention, saved consent/reload, explicit unknown versions, fallback guidance, and retained failure recovery. Run the existing desktop/phone notification and runtime-update suites together with the new compact-entry assertions.
 
 ## Validation and operational limits
 

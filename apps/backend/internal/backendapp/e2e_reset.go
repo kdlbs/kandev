@@ -383,6 +383,12 @@ func handleE2EReset(
 			})
 			return
 		}
+		tasks, err = orderE2ETasksForDeletion(tasks)
+		if err != nil {
+			log.Error("e2e reset: failed to order tasks for deletion", zap.Error(err))
+			c.JSON(http.StatusInternalServerError, gin.H{errKey: err.Error()})
+			return
+		}
 		var deletedTasks int64
 		deletedTaskIDs := append([]string(nil), taskIDsForCleanup...)
 		deletedTaskIDSet := make(map[string]struct{}, len(deletedTaskIDs))
@@ -437,6 +443,58 @@ func handleE2EReset(
 
 type e2eResetTaskDeleter interface {
 	DeleteTaskWithOptions(context.Context, string, taskservice.DeleteTaskOptions) error
+}
+
+func orderE2ETasksForDeletion(tasks []*taskmodels.Task) ([]*taskmodels.Task, error) {
+	tasksByID := make(map[string]*taskmodels.Task, len(tasks))
+	remainingChildren := make(map[string]int, len(tasks))
+	parentByID := make(map[string]string, len(tasks))
+	for _, task := range tasks {
+		if task == nil || task.ID == "" {
+			return nil, fmt.Errorf("task deletion order requires nonempty task IDs")
+		}
+		if _, exists := tasksByID[task.ID]; exists {
+			return nil, fmt.Errorf("duplicate task ID %q in deletion order", task.ID)
+		}
+		tasksByID[task.ID] = task
+		remainingChildren[task.ID] = 0
+		parentByID[task.ID] = task.ParentID
+	}
+	for _, task := range tasks {
+		parentID := task.ParentID
+		if parentID == "" {
+			continue
+		}
+		if _, exists := tasksByID[parentID]; exists {
+			remainingChildren[parentID]++
+		}
+	}
+
+	ready := make([]*taskmodels.Task, 0, len(tasks))
+	for _, task := range tasks {
+		if remainingChildren[task.ID] == 0 {
+			ready = append(ready, task)
+		}
+	}
+
+	ordered := make([]*taskmodels.Task, 0, len(tasks))
+	for next := 0; next < len(ready); next++ {
+		task := ready[next]
+		ordered = append(ordered, task)
+		parentID := parentByID[task.ID]
+		parent, exists := tasksByID[parentID]
+		if parentID == "" || !exists {
+			continue
+		}
+		remainingChildren[parentID]--
+		if remainingChildren[parentID] == 0 {
+			ready = append(ready, parent)
+		}
+	}
+	if len(ordered) != len(tasks) {
+		return nil, fmt.Errorf("task deletion order contains a parent cycle")
+	}
+	return ordered, nil
 }
 
 func deleteTaskForE2EReset(

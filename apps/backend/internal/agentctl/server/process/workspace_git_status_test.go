@@ -353,7 +353,7 @@ func TestGetGitStatus_UsesConsistentIndexSnapshotAcrossTransitions(t *testing.T)
 			wt := NewWorkspaceTracker(repoDir, newTestLogger(t))
 			t.Cleanup(wt.Stop)
 			tt.setup(t, repoDir, tt.path)
-			wt.gitStatusBetweenQueries = func() {
+			wt.gitStatusBetweenQueries = func(context.Context) {
 				tt.betweenQueries(t, repoDir, tt.path)
 			}
 

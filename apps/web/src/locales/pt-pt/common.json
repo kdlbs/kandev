@@ -176,6 +176,7 @@
   "files": "Ficheiros",
   "folderName": "Nome da pasta",
   "folders": "Pastas",
+  "hiddenFolders": "Pastas ocultas",
   "forwardStdinStdoutStraightToThe": "Encaminha o stdin/stdout diretamente para o subprocesso da CLI. Desativa o ACP.",
   "getStarted": "Começar",
   "githubCliNotAuthenticated": "A CLI do GitHub não está autenticada",

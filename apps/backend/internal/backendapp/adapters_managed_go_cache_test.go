@@ -70,7 +70,7 @@ func TestManagedGoCacheRecoveryFlows(t *testing.T) {
 	manager.SetWorkspaceInfoProvider(harness.taskSvc)
 	cacheHome := t.TempDir()
 	trashRoot := filepath.Join(cacheHome, "trash")
-	settings, quarantineStore := newStorageMaintenanceStores(t)
+	settings, _ := newStorageMaintenanceStores(t)
 	managedPath := filepath.Join(cacheHome, "adopted-cache")
 	require.NoError(t, os.MkdirAll(managedPath, 0o700))
 	_, err = settings.AdoptGoCachePath(ctx, managedPath)
@@ -88,7 +88,7 @@ func TestManagedGoCacheRecoveryFlows(t *testing.T) {
 		t.Skipf("symlinks unavailable: %v", err)
 	}
 	cacheProvider := gocache.New(gocache.Config{
-		HomeDir: cacheHome, TrashDir: trashRoot, Settings: settings, Store: quarantineStore,
+		HomeDir: cacheHome, TrashDir: trashRoot, Settings: settings,
 	})
 	manager.SetManagedGoCacheEnvironmentProvider(cacheProvider)
 	t.Cleanup(func() {

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/jmoiron/sqlx"
+	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 	"go.uber.org/zap/zaptest/observer"
@@ -64,6 +65,22 @@ type cancelingRejectStatusSummaryRepository struct {
 	summary      *statussummary.TaskStatusSummary
 	cancel       context.CancelFunc
 	compareCalls int
+}
+
+type cancelAfterSummaryWriteRepository struct {
+	repository.TaskStatusSummaryRepository
+	cancel context.CancelFunc
+}
+
+func (r cancelAfterSummaryWriteRepository) CompareAndUpdateTaskStatusSummary(
+	ctx context.Context,
+	stored *statussummary.StoredTaskStatusSummary,
+) (bool, error) {
+	accepted, err := r.TaskStatusSummaryRepository.CompareAndUpdateTaskStatusSummary(ctx, stored)
+	if accepted && err == nil {
+		r.cancel()
+	}
+	return accepted, err
 }
 
 type exhaustingStatusSummaryRepository struct {
@@ -324,6 +341,32 @@ func TestReconcileTaskStatusSummariesRepairsMissingTaskOnce(t *testing.T) {
 	if published = eventBus.GetPublishedEvents(); len(published) != 1 {
 		t.Fatalf("events after no-op reconcile = %+v, want no duplicate", published)
 	}
+}
+
+func TestReconcileTaskStatusSummaryPublishesCommittedWriteAfterCancellation(t *testing.T) {
+	svc, eventBus, repo := createTestService(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	createTaskWithoutRepositories(t, context.Background(), repo)
+	svc.statusSummaries = cancelAfterSummaryWriteRepository{TaskStatusSummaryRepository: repo, cancel: cancel}
+	task := &models.Task{ID: "task-1", WorkspaceID: "ws-1"}
+
+	summaries, err := svc.ReconcileTaskStatusSummaries(
+		ctx,
+		[]*models.Task{task},
+		map[string][]*models.TaskSession{},
+		map[string]models.TaskPendingAction{},
+		map[string]*statussummary.TaskStatusSummary{},
+	)
+
+	require.ErrorIs(t, err, context.Canceled)
+	require.NotNil(t, summaries[task.ID], "the committed summary remains reflected in the result map")
+	persisted, loadErr := repo.LoadTaskStatusSummaries(context.Background(), []string{task.ID})
+	require.NoError(t, loadErr)
+	require.NotNil(t, persisted[task.ID], "the summary write completed before the request was canceled")
+	published := eventBus.GetPublishedEvents()
+	require.Len(t, published, 1)
+	require.Equal(t, events.TaskStatusSummaryUpdated, published[0].Type)
 }
 
 func TestReconcileTaskStatusSummariesRebuildsCompletionGate(t *testing.T) {

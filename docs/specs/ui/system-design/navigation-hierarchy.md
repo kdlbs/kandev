@@ -1,0 +1,278 @@
+---
+status: current
+system: ui
+requirements:
+  - REQ-UI-NAV-HIERARCHY-001
+  - REQ-UI-NAV-HIERARCHY-002
+  - REQ-UI-NAV-HIERARCHY-003
+---
+
+# Navigation hierarchy design
+
+## Boundary and evidence
+
+This revises navigation presentation without changing route, task, integration,
+or settings ownership. Investigation used source HEAD
+`75a37f34eb6bd0e0a46e9a35a46491bb9f52f7ef` and the supplied annotated references.
+The latest written feedback takes precedence over the saturated sample action
+and spacious card variant: use a restrained neutral creation surface, minor
+Chat/Terminal actions, and compact task rows.
+
+At the investigated baseline, Home preceded an ordinary New Task item,
+integration links lacked indentation, filter cues represented drafts only, and
+task rows were flat. Both default and saved phone composition placed tools after
+the embedded task list. This implementation revises that presentation and order.
+
+## Requirement mapping
+
+| Requirement | Design sections |
+| --- | --- |
+| REQ-UI-NAV-HIERARCHY-001 | Desktop composition; Existing authority; Footer |
+| REQ-UI-NAV-HIERARCHY-002 | Task panel; State groups and task rows |
+| REQ-UI-NAV-HIERARCHY-003 | Phone composition; Handoff and recovery; Verification |
+
+## Existing authority
+
+Continue resolving destinations through `core-destinations.ts`,
+`useStaticDestinations`, `useAppDestinations`, and the existing sidebar layout
+projection. Do not introduce a parallel provider list or infer availability from
+the screenshot. Built-in integration sections exclude separately projected plugin
+nodes in saved layouts; custom shortcut groups keep their header actions.
+
+`models.DefaultSidebarLayout` in
+`apps/backend/internal/user/models/sidebar_layouts.go` remains the canonical
+uncustomized layout. Move its New Task node before Home and align the unsaved
+`AppSidebarPrimaryNav` fallback. No schema/version change or migration is needed.
+Do not rewrite saved nodes or revisions. `SidebarLayoutNavigation` must place
+required inbox entries without displacing New Task from the top of the default
+layout; user-defined desktop order continues to win.
+
+Retain `SidebarView`, `SidebarViewDraft`, `useEffectiveSidebarView`,
+`selectSidebarViews`, and workspace-specific synchronization. No grouping default
+or saved view is migrated. The demo explicitly selects state grouping.
+
+## Desktop composition
+
+Keep `AppSidebarHeader`'s compact brand, workspace picker, and collapse row.
+The expanded header uses an 18px bold Kandev brand and a 12px workspace trigger
+label, vertically centered within the existing header. Scope the smaller type
+to this trigger; phone workspace selection and dropdown options retain their
+existing readable typography and touch targets.
+Preserve the 320px default expanded width, resize behavior, 56px rail, and
+settings takeover. `AppSidebarNewTaskItem` uses the shared `NewTaskButton` with
+the existing task creation callback. Use the outline primitive, a border from
+`border-border/70`, and a faint `bg-muted/50` surface in both themes. Use normal
+foreground text and a neutral plus icon. Center the plus icon and label together
+within the full button without displaying a shortcut hint. The
+hover surface strengthens to `bg-muted`; keyboard focus retains the native ring.
+The expanded primary action is 44px high with a 14px label and full available width, an explicit
+user-requested exception to ordinary 28px controls after reviewing the first preview.
+Preserve the configured New Task keyboard binding. Reuse the
+existing request subscription and workspace-specific dialogs.
+
+Place Quick Chat and Terminal in a compact `ButtonGroup` below New Task, aligned
+to its full width. Use one quiet shared border and an inset `ButtonGroupSeparator`
+to anchor the two equal-width ghost actions. Keep their base fill transparent,
+with 12px normal-weight secondary labels and 14px icons on desktop. They retain
+ordinary 28px desktop height and 44px touch targets. The inline phone quick-action
+row uses the same grouping with its existing mobile typography and placement.
+Keep activity indicators and accessible activity labels; place plugin workspace
+actions after the built-in row so they cannot squeeze its labels. Preserve
+launchers, focus rings, phone menu dismissal, and focus return. Labelled quick
+actions have no duplicate hover or focus tooltip; collapsed icon-only controls
+retain their accessible tooltips.
+Retain the collapsed-rail entry points without adding new dialog hosts.
+
+Add a navigation presentation to `AppSidebarSection` or a small composed header
+using its existing collapse state. Apply it only to built-in Automations,
+Canvases, and Integrations: sentence-case label, leading icon, trailing chevron,
+and indented children without vertical guide lines. Tasks and Office headings
+keep their distinct section treatment. Disclosure and any separate action controls remain siblings, never
+nested buttons. Do not impose changes on `ShortcutSection`'s agreed icon header.
+
+Place Open automations after the expanded group's rows, using the same labelled
+child treatment as Integration settings. The header only toggles the disclosure.
+The phone wrapper owns the body and its final destination so saved-layout rows,
+empty states, loading, and errors all retain that link. It uses the existing
+`/automations` route and dismisses the phone menu on navigation.
+
+Remove the built-in integration header's unlabelled icon strip. Keep named
+children under the disclosure and offer the existing
+`workspaceSettingsHref(workspaceId, "integrations")` setup path even with no
+eligible providers. Derive active link state semantically (`aria-current`) and
+visually. Home's current state covers `/`, `/tasks`, and `/threads` in regular
+workspaces while its href still respects startup/workspace settings.
+
+## Footer
+
+`AppSidebarFooter` retains settings route/takeover coordination and unsaved-draft
+guards. Its expanded footer is a single nonwrapping row: authenticated account
+avatar when present, a growing labelled Settings action, theme toggle, and More
+Actions. The account menu displays the actual identity and existing logout action;
+no account is fabricated in no-auth installs. A connection warning remains visible
+when the status bar is disabled.
+
+Reuse the existing dropdown primitives for one labelled utilities menu containing
+Stats, eligible plugin insight destinations, Improve Kandev, and release notes
+when available. The More Actions trigger retains the unseen-release indicator.
+All insight destinations keep their registered order, labels, test identities,
+and navigation handlers. No plugin count changes the footer's geometry. Menu items have 44px hit targets
+on coarse pointers. Saved
+layouts still own their projected plugin entries, preventing duplicates. The old
+three-inline-plugin partition and its constant are removed. This supersedes the
+inline budget and icon-row presentation in the plugin footer design while keeping
+its registration, availability, identity, ordering, and phone parity contracts.
+The rail uses the same menu with square triggers. Phone utilities remain labelled
+rows in the existing drawer; no desktop overflow menu is projected onto phones.
+
+## Task panel
+
+`TasksSection` stays outside optional navigation layout nodes. Add a restrained
+separator before its heading and keep its flex-grow task scroller.
+`TasksViewPicker` and `SidebarFilterBar` use the same effective view when deriving
+filter state. Applied filters means a nonempty effective `filters` array; the
+implicit archive visibility rule does not count as an explicit filter.
+A saved filtered view still displays the primary-color filter cue. A draft gets
+the existing unsaved cue with separate accessible copy; both facts can coexist.
+Do not confuse sort/group/task-row changes with filtering or change persistence.
+Reuse `SidebarFilterPopover` and its desktop/touch editor presentation.
+
+Keep the view selector and filter action available at the contextual heading.
+Use ordinary 28px desktop controls, allowing 24px only where the surrounding
+inline-control convention requires it. Phone controls meet the 44px minimum.
+New labels belong in the existing locale namespaces and all six shipped locales;
+generate the Traditional Chinese pair and pseudo locale using repository scripts.
+
+## State groups and task rows
+
+`GroupHeader` renders the disclosure chevron directly before the resolved group
+label, followed by continuation text when needed and a compact tabular count.
+State headings have no separate status icon or reserved icon space; labels
+identify the state, while `TaskItem` retains the existing task-state icons on
+individual rows. Do not infer state from translated group labels or the first
+row. The effective task-tree state resolution, server page grouping,
+`matchingCount`, continuation labels, sorting, and descendant counts remain
+authoritative. Headers retain an accessible expanded state without changing
+group identity.
+
+Each named group has a leading disclosure chevron, semibold heading, count, and
+4px of separation before the next group. Disclosure headers use a 28px minimum
+on desktop and retain 44px on phones and coarse pointers. The task body is inset
+beneath the header without a vertical guide; whitespace carries the hierarchy.
+Use per-instance IDs to connect
+the disclosure to its labelled group body, including repeated/continued groups.
+Workflow-step headings remain neutral; task state is not inferred from their
+names. Preserve nested row indentation and strengthen its decorative connector.
+The ungrouped body has no extra inset. This shared inline hierarchy also
+appears in the phone drawer with the existing scroll owner and touch targets.
+
+Keep `TaskItem`, `TaskItemStatsRow`, and `TaskItemTrailing` as the row anatomy.
+Use a transparent, borderless base surface for parent tasks and subtasks. Quiet
+token-based hover and active-selection fills, a keyboard-focus ring, and the
+existing multiselection ring distinguish interactive states without a permanent
+card around every row. Small corner radii apply to these state treatments. Keep
+existing vertical padding and at most a small inter-row gap. Avoid additional
+wrappers that interfere with drag/drop, row keyboard handlers, context menus,
+nested-tree indentation, or scroll anchoring.
+
+The title shrinks/truncates before status/actions. Detail fields and trailing
+slots continue to follow `SidebarTaskRowPresentation`, including details-hidden,
+time, PR/MR status, missing data, repository-group deduplication, plugin metadata,
+and queued-state cues. No duplicate status or timestamp is introduced.
+The phone overflow button and group headers measure at least 44px throughout
+the below-768px layout, including narrow fine-pointer windows. Coarse-pointer
+controls keep that minimum above the breakpoint. The overflow button stays visible and must not
+overlap the row's primary tap target or trailing values. State presentation must
+not collapse review/completion, clarification, failures, or background work into
+the four illustrative screenshot groups.
+
+Command selection retains its brief row cue and keeps that row inside the list
+while the viewport or hydrated group content changes height. Observe those
+changes only for the cue's lifetime; cancel, replacement, and expiry disconnect
+the observer, and a different selected row is never recentered by the old cue.
+
+## Phone composition
+
+Nearest shipped exemplars: `AppNavSurface` for the inset `Drawer`, fixed header,
+dynamic viewport and focus return; `SessionTaskSwitcherSheet` and
+`InlineTaskHeader` for the contextual task body; `MobileIntegrationsSection` and
+`MobileAutomationsSection` for touch disclosures. This is a temporary navigation
+choice, so retain the drawer rather than adding a route or bottom navigation.
+
+Use `useResponsiveBreakpoint`'s below-768px phone branch. Keep the menu heading
+and workspace picker outside the one `nav` content scroller. The default phone
+body becomes:
+
+1. Neutral New Task, Home and required inbox links, Quick Chat/Quick terminal.
+   Reuse `MobileQuickActions` and its native launch/focus handoff. Within app
+   navigation, use secondary ghost actions with 44px touch targets in an
+   equal-width utility bar with a shared boundary; translations can wrap.
+   Show the shorter Terminal label while keeping
+   its full accessible name. Other listing-menu consumers retain their treatment.
+2. Eligible Automations, Canvases, Integrations, and plugin/custom tools.
+3. Existing labelled page-local navigation, then contextual Tasks.
+4. Optional fallback metrics and existing utilities/account actions.
+
+Put tools before the task outlet for both `AppNavSections` and
+`MobileSidebarLayoutNavigation`. Saved optional tools retain their relative order
+and visibility; extract the visible Home/New Task built-ins for the phone primary
+region without writing a new layout. Quick actions remain available when Home
+is hidden. Office keeps its own task/local navigation and does not get regular
+task views. Preserve plugin toolbar selection and separately customized links.
+
+The labelled New Task control uses the existing `requestNewTaskCreation` path
+after the menu closes. Retain one durable dialog host. Suppress only the inline
+regular Tasks-header plus when that top action is visible; keep it when the
+built-in is hidden. Do not remove the title-picker's own creation action or
+explicit custom shortcuts. `MobileTaskNavigationProvider` continues to host
+task controllers/dialogs above responsive headers.
+
+Provider issue browsing reuses the actual GitHub page and
+`MobileGitHubPage.mobileMenuButton`/Issues selection. Moving Integrations above
+the task list removes the task-volume-dependent path. Do not create a second
+provider submenu or issue query implementation in app navigation.
+
+## Handoff and recovery
+
+Keep close-before-dialog focus handoff, task-title switching, push versus replace
+history, workspace-keyed task controllers, and existing delayed-response guards.
+No navigation disclosure starts a task, automation, terminal, or provider call
+beyond its normal availability/list subscription. Preserve automation polling
+lifetime gates; do not duplicate readers to restyle headings.
+
+Loading/denied/failed task reads remain inside Tasks so integration navigation
+works independently. Integration setup is not evidence of a connection. Sidebar
+actions in unresolved workspace state remain disabled and show no previous
+workspace labels. Unknown groups/metadata fall back to neutral or omitted
+presentation. No new API, telemetry, permission, or persisted collapse state is
+introduced.
+
+## Verification
+
+Use behavioral component tests for creation/disclosure independence, default
+versus saved order, active versus draft filters, and labelled state groups with
+row status icons and no header status icon.
+Use focused Playwright geometry and action tests for desktop, phone, and the
+768px boundary. Test phone Issues access from both listings and a workbench,
+with a long task list, empty integrations, saved layouts, and workspace switches.
+Include 360/393/767px, narrow fine-pointer input, coarse-pointer tablet targets,
+dark/light, Portuguese labels, focus return, and creation-draft rotation.
+
+The [work orders](../../../plans/navigation-hierarchy/plan.md) own exact test
+commands and the isolated seeded comparison. The comparison serves the changed
+branch, not unrelated current-main marketing content. Record its baseline SHA,
+implementation diff hash, URLs, process ownership, seed manifest, mock proof, and
+teardown command. Keep it running for the user's comparison until stopped.
+
+## Related contracts and decisions
+
+- [Sidebar customization](sidebar-customization.md)
+- [Unified mobile navigation](unified-mobile-navigation.md)
+- [Task-row presentation](sidebar-task-row-presentation.md)
+- [Workspace sidebar views](workspace-sidebar-task-views.md)
+- [Control sizing](control-sizing.md)
+- [Navigation manifest boundaries](../../../decisions/2026-08-04-navigation-manifest-boundaries.md)
+- [Phone entry-point ownership](../../../decisions/2026-09-15-phone-navigation-entry-points.md)
+
+The existing boundaries remain sufficient; this local composition revision does
+not require a new ADR.

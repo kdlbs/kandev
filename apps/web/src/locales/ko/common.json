@@ -178,6 +178,7 @@
   "files": "파일",
   "folderName": "폴더 이름",
   "folders": "폴더",
+  "hiddenFolders": "숨김 폴더",
   "forwardStdinStdoutStraightToThe": "stdin/stdout을 CLI 하위 프로세스로 직접 전달합니다. ACP를 비활성화합니다.",
   "getStarted": "시작하기",
   "githubCliNotAuthenticated": "GitHub CLI가 인증되지 않음",

@@ -29,6 +29,7 @@ Do not replace the virtualizer or increase mounted-row counts to conceal delays.
 | `AC-UI-TASK-NAVIGATION-RESPONSIVENESS-001.5` | Scope and stale-response protection |
 | `AC-UI-TASK-NAVIGATION-RESPONSIVENESS-001.6` | Responsive presentation |
 | `AC-UI-TASK-NAVIGATION-RESPONSIVENESS-001.7` | Task route presentation and essential hydration |
+| `AC-UI-TASK-NAVIGATION-RESPONSIVENESS-001.8` through `.11` | Mounted task-session fallback ownership |
 
 ## Components and responsibilities
 
@@ -320,3 +321,95 @@ Firefox/Chromium measurements for the aggregate effect. Animation-frame DOM
 readiness is a navigation proxy, not proof of compositor paint. Retaining complete
 chat views was considered but rejected: its modest measured benefit did not
 justify changing message refresh, composer and hidden-view lifecycles.
+
+
+## Mounted task-session fallback ownership
+
+This section extends the existing client-navigation isolation contract. Task
+session membership and canonical selection remain task-system responsibilities;
+this resolver only projects current task data. It is separate from the shared
+shell/commit/diff coordinator described above and does not use that coordinator.
+
+### Local resolver contract
+
+`apps/web/hooks/use-task-session.ts::useTaskSession` returns `sessionId`,
+`hasSession`, and `isLoading`. Its current-task subscription reads
+`taskSessionsByTask.itemsByTaskId[taskId]`. Keep the marked-primary-or-first
+store selection and its priority over fetched data. Keep `task.session.list`,
+`{ task_id: taskId }`, the 10,000 ms transport timeout, and first returned ID
+fallback. Do not infer primary status or validate membership from the minimal
+fallback response, which contains only session IDs.
+
+Keep one task-keyed fallback/request snapshot inside each hook instance, with
+an owner task ID, nullable session ID, and loading status. At render time,
+project fetched fields only when their owner matches the current non-null task.
+A mismatched retained snapshot cannot supply either a session or loading state.
+This guards the first new-task render before effects run; an effect-only reset
+would leave that render exposed. The current store result always wins and
+suppresses fallback loading. Preserve existing null-task falsy loading behavior
+and return field types rather than introducing an interface change.
+
+The existing effect owns each request lifetime. Its cleanup deactivates obsolete
+callbacks on task change, store takeover, or unmount. Preserve that guard for
+both success and failure, including loading settlement: a superseded request
+cannot clear the new request's loading state. Starting and settling a request
+write a coherent snapshot for its captured task. With no client, settle that
+task's snapshot empty and idle. A successful empty response and a failure do
+the same. No retry, global cache, new store action, API change, or shared owner
+framework is introduced. Same-task retained data freshness is not redefined.
+
+### Audited consumers and reachability
+
+At source audit on 2026-10-06, `components/kanban-with-preview.tsx` is the sole
+production caller of this singular hook. The plural `useTaskSessions` is a
+separate hook and is outside this correction. `KanbanWithPreview` stays mounted
+as `useKanbanPreview` changes task or closes to a null selection.
+
+`usePreviewSessionFocus` prefers a matching workflow-focus request, then a
+user-selected session, then `selectedTask.primarySessionId`, then this hook's
+result. `useSessionSelectionReset` resets explicit selection on task changes.
+Thus the hook leak reaches the fallback branch only when those higher-priority
+sources are absent. `useSyncSelectedTaskActivity` forwards that result to
+`setActiveSession` or `setActiveSessionAuto`; these existing kanban-slice actions
+do not validate membership. `useUrlSync` also writes the result as `sessionId`
+for the selected task. Those are reachable incorrect task/session projections.
+No change to those consumers or store actions is required.
+
+`TaskPreviewPanel` forwards the ID to `PreviewSessionTabs`, whose
+`pickActiveSessionId` checks the ID against its own current session list and
+falls back to that list's primary-or-first, or null when empty. Its loading
+branch also withholds chat content until a list is available. This mitigates
+visible conversation selection. The hook proof does not establish that every
+preview displays another task's conversation, or that a backend action accepts
+an invalid pair. Keep those claims outside the repair.
+
+### Responsive and verification boundaries
+
+The shipped mobile exemplar is `KanbanWithPreview`'s direct-navigation branch:
+phones render `KanbanBoard` without the preview pane. The hook and focus effects
+are still called before that return, so their task ownership remains shared.
+There is no changed composition, touch behavior, scroll owner, navigation,
+copy, or breakpoint rule. The mobile-parity state/data exception applies:
+real-hook and actual-consumer component evidence plus this note replace new
+browser/mobile E2E. Existing preview/layout mounting is preserved.
+
+Use the real hook, `StateProvider` (which creates `createAppStore`), and real
+store actions. Mock only WS transport for new ownership tests, with one ROOT-reviewed
+Happy DOM viewport exception for the actual consumer fixture: override
+`offsetHeight` to 600 and `offsetWidth` to 320 only for real elements matching
+`data-testid="kanban-column-scroll"`. Preserve original getters for all other
+elements and restore them after every test. The real virtualizer and cards
+remain active; no global geometry or component/framework mocks are introduced. Deferred promises
+prove settled Alpha to uncached Beta, null close to different-task reopen, and
+obsolete success/failure without timers. A real `KanbanWithPreview` integration
+must prove the reachable active-store/URL boundary while Beta's reads are held,
+and the primary-metadata mitigation; it must not mock the hook, provider,
+selection logic, or affected store actions. Current success, empty, failure,
+no-client, loading, primary-or-first priority, store takeover, and independent
+instances preserve compatibility. Predicate-only or source-string tests cannot
+provide this evidence. No browser, build, E2E, full-suite, or backend tests are
+needed for this state-only correction.
+
+### Implementation plans
+
+- [Task session fallback ownership](../../../plans/task-session-fallback-ownership/plan.md)

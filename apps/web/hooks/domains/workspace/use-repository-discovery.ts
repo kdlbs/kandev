@@ -10,6 +10,8 @@ import type { RepositoryDiscoveryResponse } from "@/lib/types/http";
 
 export const REPOSITORY_DISCOVERY_REFRESH_AGE_MS = 30 * 60 * 1000;
 
+export type RepositoryDiscoveryReadKind = "load" | "refresh";
+
 export type RepositoryDiscoveryState = {
   response: RepositoryDiscoveryResponse | null;
   isLoading: boolean;
@@ -37,6 +39,13 @@ type CoordinatorEntry = {
   leases: number;
   snapshotPromise: Promise<void> | null;
   refreshPromise: Promise<void> | null;
+  responseOwner: symbol | null;
+};
+
+type DiscoveryOperation = {
+  owner: symbol;
+  kind: "snapshotPromise" | "refreshPromise";
+  promise: Promise<void>;
 };
 
 const EMPTY_STATE: RepositoryDiscoveryState = {
@@ -159,13 +168,28 @@ export class RepositoryDiscoveryCoordinator {
   ): Promise<RepositoryDiscoveryResponse | null> {
     const entry = this.entry(workspaceId);
     await this.startRefresh(workspaceId, entry, trigger);
-    return entry.state.response;
+    return this.entries.get(workspaceId)?.state.response ?? null;
   }
 
   async load(workspaceId: string): Promise<RepositoryDiscoveryResponse | null> {
     const entry = this.entry(workspaceId);
     await this.startSnapshot(workspaceId, entry);
-    return entry.state.response;
+    return this.entries.get(workspaceId)?.state.response ?? null;
+  }
+
+  async synchronizeAfterRootMutation(
+    workspaceId: string,
+    kind: RepositoryDiscoveryReadKind,
+  ): Promise<RepositoryDiscoveryResponse | null> {
+    const entry = this.entry(workspaceId);
+    // Both read kinds reflect the roots that existed when their transport started.
+    entry.responseOwner = null;
+    entry.snapshotPromise = null;
+    entry.refreshPromise = null;
+    await (kind === "load"
+      ? this.startSnapshot(workspaceId, entry)
+      : this.startRefresh(workspaceId, entry, "manual_refresh"));
+    return this.entries.get(workspaceId)?.state.response ?? null;
   }
 
   dispose(): void {
@@ -192,6 +216,7 @@ export class RepositoryDiscoveryCoordinator {
       leases: 0,
       snapshotPromise: null,
       refreshPromise: null,
+      responseOwner: null,
     };
     this.entries.set(workspaceId, created);
     return created;
@@ -218,7 +243,13 @@ export class RepositoryDiscoveryCoordinator {
   }
 
   private setState(entry: CoordinatorEntry, patch: Partial<RepositoryDiscoveryState>): void {
-    entry.state = { ...entry.state, ...patch };
+    const response = patch.response ?? entry.state.response;
+    entry.state = {
+      ...entry.state,
+      ...patch,
+      isLoading: entry.snapshotPromise !== null,
+      isRefreshing: entry.refreshPromise !== null || response?.refreshing === true,
+    };
     this.notify(entry);
   }
 
@@ -238,62 +269,80 @@ export class RepositoryDiscoveryCoordinator {
     }
   }
 
-  private async startSnapshot(workspaceId: string, entry: CoordinatorEntry): Promise<void> {
-    if (entry.snapshotPromise) return entry.snapshotPromise;
-    this.setState(entry, { isLoading: true, error: null });
-    entry.snapshotPromise = this.client
-      .getSnapshot(workspaceId)
-      .then((response) => {
-        this.setState(entry, {
-          response: normalizedResponse(response),
-          isLoading: false,
-          error: null,
-        });
-      })
-      .catch((error: unknown) => {
-        this.setState(entry, { isLoading: false, error: asError(error) });
-      })
-      .finally(() => {
-        entry.snapshotPromise = null;
-        if (
-          entry.leases > 0 &&
-          this.isVisible() &&
-          (entry.state.response?.refreshing === true ||
-            isStale(entry.state.response, this.now, this.refreshAge))
-        ) {
-          void this.startRefresh(workspaceId, entry, "stale_refresh");
-        }
-      });
-    return entry.snapshotPromise;
+  private startSnapshot(workspaceId: string, entry: CoordinatorEntry): Promise<void> {
+    return this.startRequest(workspaceId, entry, "snapshotPromise", () =>
+      this.client.getSnapshot(workspaceId),
+    );
   }
 
-  private async startRefresh(
+  private startRefresh(
     workspaceId: string,
     entry: CoordinatorEntry,
     trigger: RepositoryDiscoveryRefreshTrigger,
   ): Promise<void> {
-    if (entry.refreshPromise) return entry.refreshPromise;
-    this.setState(entry, {
-      isRefreshing: true,
-      error: null,
+    return this.startRequest(workspaceId, entry, "refreshPromise", () =>
+      this.client.refresh(workspaceId, trigger),
+    );
+  }
+
+  private startRequest(
+    workspaceId: string,
+    entry: CoordinatorEntry,
+    kind: DiscoveryOperation["kind"],
+    read: () => Promise<RepositoryDiscoveryResponse>,
+  ): Promise<void> {
+    if (entry[kind]) return entry[kind];
+    let begin!: () => void;
+    const result = new Promise<RepositoryDiscoveryResponse>((resolve, reject) => {
+      begin = () => {
+        try {
+          resolve(read());
+        } catch (error) {
+          reject(error);
+        }
+      };
     });
-    entry.refreshPromise = this.client
-      .refresh(workspaceId, trigger)
-      .then((response) => {
-        const normalized = normalizedResponse(response);
-        this.setState(entry, {
-          response: normalized,
-          isRefreshing: normalized.refreshing === true,
-          error: null,
-        });
-      })
-      .catch((error: unknown) => {
-        this.setState(entry, { isRefreshing: false, error: asError(error) });
-      })
-      .finally(() => {
-        entry.refreshPromise = null;
-      });
-    return entry.refreshPromise;
+    const operation: DiscoveryOperation = {
+      owner: Symbol(),
+      kind,
+      promise: result.then(
+        (response) =>
+          this.finishRequest(workspaceId, entry, operation, {
+            response: normalizedResponse(response),
+            error: null,
+          }),
+        (error: unknown) =>
+          this.finishRequest(workspaceId, entry, operation, { error: asError(error) }),
+      ),
+    };
+    // Subscribers can synchronously join or start another operation.
+    entry[kind] = operation.promise;
+    entry.responseOwner = operation.owner;
+    this.setState(entry, { error: null });
+    begin();
+    return operation.promise;
+  }
+
+  private finishRequest(
+    workspaceId: string,
+    entry: CoordinatorEntry,
+    operation: DiscoveryOperation,
+    patch: Partial<RepositoryDiscoveryState>,
+  ): void {
+    if (this.entries.get(workspaceId) !== entry) return;
+    const ownsPending = entry[operation.kind] === operation.promise;
+    const ownsResponse = entry.responseOwner === operation.owner;
+    if (!ownsPending && !ownsResponse) return;
+    if (ownsPending) entry[operation.kind] = null;
+    this.setState(entry, ownsResponse ? patch : {});
+    if (
+      operation.kind === "snapshotPromise" &&
+      patch.response &&
+      entry.responseOwner === operation.owner &&
+      this.entries.get(workspaceId) === entry
+    ) {
+      this.loadAndRefreshIfNeeded(workspaceId);
+    }
   }
 }
 
@@ -303,6 +352,9 @@ function discoveryView(
   state: RepositoryDiscoveryState,
   refresh: () => Promise<RepositoryDiscoveryResponse | null>,
   load: () => Promise<RepositoryDiscoveryResponse | null>,
+  synchronizeAfterRootMutation: (
+    kind: RepositoryDiscoveryReadKind,
+  ) => Promise<RepositoryDiscoveryResponse | null>,
 ) {
   const response = state.response;
   return {
@@ -320,6 +372,7 @@ function discoveryView(
     desktopRuntime: response?.desktop_runtime === true,
     refresh,
     load,
+    synchronizeAfterRootMutation,
   };
 }
 
@@ -351,6 +404,13 @@ export function useRepositoryDiscovery(workspaceId: string | null, enabled = tru
     if (!activeWorkspaceId) return null;
     return repositoryDiscoveryCoordinator.load(activeWorkspaceId);
   }, [activeWorkspaceId]);
+  const synchronizeAfterRootMutation = useCallback(
+    async (kind: RepositoryDiscoveryReadKind) => {
+      if (!activeWorkspaceId) return null;
+      return repositoryDiscoveryCoordinator.synchronizeAfterRootMutation(activeWorkspaceId, kind);
+    },
+    [activeWorkspaceId],
+  );
 
-  return discoveryView(state, refresh, load);
+  return discoveryView(state, refresh, load, synchronizeAfterRootMutation);
 }

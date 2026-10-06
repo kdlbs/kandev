@@ -2,6 +2,7 @@
 
 import { IconHome, IconInbox, IconMessageCircle } from "@tabler/icons-react";
 import { useTranslation } from "react-i18next";
+import { usePathname } from "@/lib/routing/client-router";
 import { useAppStore } from "@/components/state-provider";
 import { selectOfficeInboxCount } from "@/lib/state/slices/office/selectors";
 import {
@@ -28,6 +29,7 @@ export function AppSidebarHomeItem({ collapsed }: { collapsed: boolean }) {
   const workspaceId = useAppStore((s) => s.workspaces.activeId);
   const startupPage = useAppStore((s) => s.userSettings.startupPage);
   const mode = useOfficeModeState();
+  const pathname = usePathname();
   const inOffice = mode === "office";
   const homeHref =
     mode === "unknown" ? undefined : homeDestinationHref({ workspaceId, inOffice, startupPage });
@@ -42,6 +44,7 @@ export function AppSidebarHomeItem({ collapsed }: { collapsed: boolean }) {
       disabled={mode === "unknown"}
       collapsed={collapsed}
       exactMatch
+      isActive={mode === "kanban" ? ["/", "/tasks", "/threads"].includes(pathname) : undefined}
     />
   );
 }
@@ -103,10 +106,10 @@ export function AppSidebarPrimaryNav({
   showNewTask = true,
 }: AppSidebarPrimaryNavProps) {
   return (
-    <div className="flex flex-col gap-0.5">
+    <div className="flex flex-col gap-1">
+      {showNewTask && <AppSidebarNewTaskItem collapsed={collapsed} />}
       {showHome && <AppSidebarHomeItem collapsed={collapsed} />}
       <AppSidebarFixedNav collapsed={collapsed} />
-      {showNewTask && <AppSidebarNewTaskItem collapsed={collapsed} />}
     </div>
   );
 }

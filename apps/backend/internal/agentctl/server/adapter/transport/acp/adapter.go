@@ -279,9 +279,9 @@ type Adapter struct {
 	// modeObserved closes on each mode report so a waiter can settle.
 	modeObserved chan struct{}
 	// A timed-out set_mode can report after the next request starts. ACP mode
-	// reports have no request ID, so that next request cannot claim the report.
+	// reports have no request ID, so an uncorrelated report cannot resolve an
+	// earlier uncertain result, even if it arrives while the adapter is idle.
 	modeOutcomeUncertain bool
-	modeChangeActive     bool
 
 	// Available config options from the most recent session creation/load.
 	// Used by emitSetModelEvent to include cached options in the convergence
@@ -360,22 +360,24 @@ type Adapter struct {
 
 // promptTurnState holds synchronization for one in-flight session/prompt RPC.
 type promptTurnState struct {
-	endTurn           context.CancelCauseFunc
-	rpcDone           chan struct{}
-	abortCh           chan struct{}
-	handoffCh         chan struct{}
-	providerErrorCh   chan openCodeStderrDiagnostic
-	promptGeneration  uint64
-	evidenceMu        sync.Mutex
-	codexSystemError  bool
-	codexCapacity     bool
-	codexUsageLimit   *streams.ProviderError
-	cursorRetriable   bool
-	cursorRetriableAt time.Time
-	allowHandoff      bool
-	handedOff         bool
-	gateOwned         bool
-	finishing         bool
+	endTurn            context.CancelCauseFunc
+	rpcDone            chan struct{}
+	abortCh            chan struct{}
+	handoffCh          chan struct{}
+	providerErrorCh    chan openCodeStderrDiagnostic
+	promptGeneration   uint64
+	evidenceMu         sync.Mutex
+	codexSystemError   bool
+	codexCapacity      bool
+	codexUsageLimit    *streams.ProviderError
+	cursorRetriable    bool
+	cursorRetriableAt  time.Time
+	continuationTools  map[string]bool
+	continuationUnsafe bool
+	allowHandoff       bool
+	handedOff          bool
+	gateOwned          bool
+	finishing          bool
 }
 
 func (t *promptTurnState) observeCodexEvidence(systemError, capacity bool) {

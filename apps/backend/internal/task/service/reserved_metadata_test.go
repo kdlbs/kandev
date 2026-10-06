@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"testing"
+
+	"github.com/kandev/kandev/internal/task/models"
 )
 
 const testBindingKey = ReservedMetadataKeyPrefixCoordinator + "tool_policy"
@@ -90,7 +92,7 @@ func TestUpdateTaskReservedMetadata(t *testing.T) {
 
 func TestRestoreReservedMetadataIgnoresOrdinaryKeys(t *testing.T) {
 	updated := map[string]interface{}{"a": 1}
-	restoreReservedMetadata(updated, map[string]interface{}{"b": 2, testBindingKey: "x"})
+	updated = models.ProtectedTaskMetadataUpdate(map[string]interface{}{"b": 2, testBindingKey: "x"}, updated)
 	if _, ok := updated["b"]; ok {
 		t.Fatal("ordinary key must not be restored")
 	}

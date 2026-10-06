@@ -484,10 +484,11 @@ func startCursorNativeSmokeACPWithoutSession(t *testing.T, binary, workspace str
 		command: command, cancel: cancel, stdin: stdin, client: client, workspace: workspace,
 	}
 	t.Cleanup(process.stop)
-	client.request(t, 1, "initialize", map[string]any{
+	initializeResult := client.request(t, 1, "initialize", map[string]any{
 		"protocolVersion": 1, "clientCapabilities": map[string]any{},
 		"clientInfo": map[string]string{"name": "isolated-cursor-mcp-smoke", "version": "1"},
 	})
+	client.initializeResult = initializeResult
 	return process
 }
 
@@ -545,118 +546,6 @@ func (p *cursorNativeSmokeACPProcess) stop() {
 	if p.cancel != nil {
 		p.cancel()
 	}
-}
-
-type cursorNativeSmokeACPClient struct {
-	input                    io.WriteCloser
-	decoder                  *json.Decoder
-	output                   strings.Builder
-	fixturePermissionAllowed bool
-}
-
-type cursorNativeSmokeACPFrame struct {
-	ID     json.RawMessage `json:"id"`
-	Method string          `json:"method"`
-	Params json.RawMessage `json:"params"`
-	Result json.RawMessage `json:"result"`
-	Error  json.RawMessage `json:"error"`
-}
-
-func (c *cursorNativeSmokeACPClient) request(t *testing.T, id int, method string, params any) json.RawMessage {
-	t.Helper()
-	c.send(t, map[string]any{"jsonrpc": "2.0", "id": id, "method": method, "params": params})
-	for {
-		var frame cursorNativeSmokeACPFrame
-		err := c.decoder.Decode(&frame)
-		require.NoError(t, err, "Cursor ACP closed before replying to %s", method)
-		if frame.Method != "" {
-			c.captureAgentMessageChunk(frame)
-			c.handleServerRequest(t, frame)
-			continue
-		}
-		if !cursorNativeSmokeJSONIDMatches(frame.ID, id) {
-			continue
-		}
-		require.Empty(t, frame.Error, "Cursor ACP returned an error for %s", method)
-		return frame.Result
-	}
-}
-
-func (c *cursorNativeSmokeACPClient) captureAgentMessageChunk(frame cursorNativeSmokeACPFrame) {
-	if frame.Method != "session/update" {
-		return
-	}
-	var params struct {
-		Update struct {
-			SessionUpdate string `json:"sessionUpdate"`
-			Content       struct {
-				Type string `json:"type"`
-				Text string `json:"text"`
-			} `json:"content"`
-		} `json:"update"`
-	}
-	if json.Unmarshal(frame.Params, &params) != nil || params.Update.SessionUpdate != "agent_message_chunk" {
-		return
-	}
-	if params.Update.Content.Type == "text" {
-		c.output.WriteString(params.Update.Content.Text)
-	}
-}
-
-func (c *cursorNativeSmokeACPClient) send(t *testing.T, frame any) {
-	t.Helper()
-	data, err := json.Marshal(frame)
-	require.NoError(t, err)
-	_, err = c.input.Write(append(data, '\n'))
-	require.NoError(t, err)
-}
-
-func (c *cursorNativeSmokeACPClient) handleServerRequest(t *testing.T, frame cursorNativeSmokeACPFrame) {
-	t.Helper()
-	if len(frame.ID) == 0 {
-		return
-	}
-	if frame.Method != "session/request_permission" {
-		c.send(t, map[string]any{"jsonrpc": "2.0", "id": frame.ID,
-			"error": map[string]any{"code": -32601, "message": "Unsupported fixture request"}})
-		return
-	}
-	var request struct {
-		ToolCall struct {
-			Title    string `json:"title"`
-			RawInput struct {
-				ProviderIdentifier string `json:"providerIdentifier"`
-				ToolName           string `json:"toolName"`
-			} `json:"rawInput"`
-		} `json:"toolCall"`
-		Options []struct {
-			OptionID string `json:"optionId"`
-			Kind     string `json:"kind"`
-		} `json:"options"`
-	}
-	require.NoError(t, json.Unmarshal(frame.Params, &request))
-	fixtureTool := request.ToolCall.RawInput.ProviderIdentifier == cursorNativeSmokeID &&
-		request.ToolCall.RawInput.ToolName == "fixture_ping"
-	fixtureTool = fixtureTool || strings.Contains(request.ToolCall.Title, cursorNativeSmokeID+"-fixture_ping")
-	var outcome map[string]any
-	if fixtureTool {
-		for _, option := range request.Options {
-			if option.Kind == "allow_once" && option.OptionID != "" {
-				c.fixturePermissionAllowed = true
-				outcome = map[string]any{"outcome": "selected", "optionId": option.OptionID}
-				break
-			}
-		}
-	}
-	if outcome == nil {
-		outcome = map[string]any{"outcome": "cancelled"}
-	}
-	c.send(t, map[string]any{"jsonrpc": "2.0", "id": frame.ID, "result": map[string]any{"outcome": outcome}})
-}
-
-func cursorNativeSmokeJSONIDMatches(raw json.RawMessage, want int) bool {
-	var got int
-	return json.Unmarshal(raw, &got) == nil && got == want
 }
 
 func cursorNativeSmokeEnvList(overrides map[string]string) []string {

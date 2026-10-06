@@ -30,7 +30,8 @@ const AgentCtlPort = ports.AgentCtl
 
 // AgentExecution represents a running agent execution
 type AgentExecution struct {
-	ID string
+	RequiredNativeConversationID string
+	ID                           string
 	// ResumeAttemptID identifies the immutable recovery attempt that created or
 	// started this execution. It is copied onto every lifecycle callback so a
 	// delayed callback cannot be accepted by a replacement attempt.
@@ -85,9 +86,15 @@ type AgentExecution struct {
 	// FailureCode and FailureDetails carry a bounded, structured startup
 	// diagnostic to the orchestrator. They remain separate from the generic
 	// error message so user-facing recovery can choose a stable presentation.
-	FailureCode    string
-	FailureDetails string
-	ProviderError  *streams.ProviderError
+	FailureCode            string
+	FailureDetails         string
+	StartupFailureReason   string
+	StartupFailureAttempts int
+	StartupFailureNPMCode  string
+	startupFailureMu       sync.RWMutex
+	ProviderError          *streams.ProviderError
+	bootMessageMu          sync.Mutex
+	bootMessageFinalized   bool
 	// metadata is unexported on purpose: it is touched from the launch, prompt
 	// and stop paths concurrently, so all access must go through the metadataMu
 	// helpers in execution_metadata.go.
@@ -103,6 +110,12 @@ type AgentExecution struct {
 	// promptCompletionGeneration prevents duplicate terminal events for the
 	// same prompt from replacing the first terminal outcome or provider error.
 	promptCompletionGeneration uint64
+	// promptSettlementGeneration fences successor admission until the durable
+	// turn owner acknowledges this generation and its waiter has been released.
+	// These fields are protected by promptLifecycleMu.
+	promptSettlementGeneration               uint64
+	promptSettlementAcknowledgedGeneration   uint64
+	promptSettlementWaiterReleasedGeneration uint64
 	// dispatchedPromptGeneration is the generation of the prompt that has been
 	// accepted by agentctl and is still in flight. It is set only after the
 	// ordinary prompt's triggerPrompt succeeds and reset by beginExecutionPrompt.
@@ -380,13 +393,16 @@ const (
 )
 
 // TaskLaunchScope records the canonical owner of a task session at launch.
-// Unknown is retained for legacy callers and never opts into task-only policy.
+// Automation task failure and concurrency remain owned by the coordinator, so
+// automation launches do not opt into interactive retained-turn settlement.
+// Unknown is retained for legacy callers and opts into no scope-specific policy.
 type TaskLaunchScope string
 
 const (
-	TaskLaunchScopeUnknown TaskLaunchScope = ""
-	TaskLaunchScopeTask    TaskLaunchScope = "task"
-	TaskLaunchScopeOffice  TaskLaunchScope = "office"
+	TaskLaunchScopeUnknown    TaskLaunchScope = ""
+	TaskLaunchScopeTask       TaskLaunchScope = "task"
+	TaskLaunchScopeOffice     TaskLaunchScope = "office"
+	TaskLaunchScopeAutomation TaskLaunchScope = "automation"
 )
 
 // OwnerSnapshot returns the immutable durable owner carried by this
@@ -544,11 +560,31 @@ func (e *AgentExecution) officeProfileID() string {
 
 // PromptCompletionSignal carries the result from a complete event or disconnect.
 type PromptCompletionSignal struct {
-	StopReason        string
-	IsError           bool
-	Error             string
-	PromptGeneration  uint64
-	StartupGeneration uint64
+	StopReason               string
+	IsError                  bool
+	Error                    string
+	PromptFailureDisposition streams.PromptFailureDisposition
+	PromptGeneration         uint64
+	StartupGeneration        uint64
+}
+
+// RetainedPromptFailureError marks a failed prompt whose lifecycle event owns
+// the durable turn settlement. Callers must not settle the session a second
+// time while that event is being processed.
+type RetainedPromptFailureError struct {
+	Message     string
+	Disposition streams.PromptFailureDisposition
+}
+
+func (e *RetainedPromptFailureError) Error() string {
+	if e == nil || e.Message == "" {
+		return ErrAgentReported.Error()
+	}
+	return e.Message
+}
+
+func (e *RetainedPromptFailureError) Unwrap() error {
+	return ErrAgentReported
 }
 
 func (e *AgentExecution) promptGenerationSnapshot() uint64 {
@@ -1352,12 +1388,13 @@ type RouteOverride struct {
 
 // LaunchRequest contains parameters for launching an agent
 type LaunchRequest struct {
-	TaskID                string
-	TaskScope             TaskLaunchScope
-	SessionSettingsPolicy SessionSettingsPolicy
-	WorkspaceID           string // Kandev workspace ID — used to build the scratch dir for repo-less tasks
-	SessionID             string
-	TaskEnvironmentID     string // Env this session belongs to (shared across sessions in same task)
+	RequiredNativeConversationID string
+	TaskID                       string
+	TaskScope                    TaskLaunchScope
+	SessionSettingsPolicy        SessionSettingsPolicy
+	WorkspaceID                  string // Kandev workspace ID — used to build the scratch dir for repo-less tasks
+	SessionID                    string
+	TaskEnvironmentID            string // Env this session belongs to (shared across sessions in same task)
 	// WorkspaceReuseRequired selects attach-only environment preparation.
 	WorkspaceReuseRequired bool
 	// AllowBranchReplacement is an explicit user-selected recovery permission.
@@ -1618,6 +1655,9 @@ type WorkspaceInfo struct {
 	TaskID            string
 	SessionID         string // Task session ID (from task_sessions table)
 	TaskEnvironmentID string // Env this session belongs to (shared across sessions in same task)
+	// RecoveryErrorObservation captures session and owner identity before
+	// selected-workspace inspection so a refusal can be conditionally recorded.
+	RecoveryErrorObservation *models.WorkspaceRecoveryErrorObservation
 	// EnvironmentOwnerTaskID and OwnershipGeneration are the durable identity
 	// used to guard host worktree recovery across inherited environments.
 	EnvironmentOwnerTaskID string

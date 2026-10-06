@@ -13,11 +13,13 @@ import { WebSocketRequestError } from "@/lib/ws/client";
 // create call; non-empty prompt → call with that prompt in the payload.
 
 let autoFocusNewTasks = true;
+const ensureFreshBranchConsentMock = vi.hoisted(() => vi.fn(async () => [] as string[] | null));
 const pushMock = vi.fn();
 const TASK_ID = "task-1";
 const RENAMED_TITLE = "Renamed task";
 const ORIGINAL_PROMPT = "Original prompt";
 const UPDATED_PROMPT = "Updated prompt";
+const CREATE_TASK_PROMPT = "create this task";
 const ORIGINAL_TITLE = "Original title";
 const RAW_REPOSITORY_PROVIDER_FAILURE = "raw repository provider failure";
 const MAIN_BRANCH = "main";
@@ -120,7 +122,7 @@ vi.mock("@/components/task-create-dialog-fresh-branch-consent", () => ({
     createTask?: (payload: unknown) => Promise<{ id: string; session_id?: string }>;
   }) => ({
     pendingDiscard: null,
-    ensureFreshBranchConsent: vi.fn(async () => []),
+    ensureFreshBranchConsent: ensureFreshBranchConsentMock,
     createTaskWithFreshBranchRetry: (...args: unknown[]) => {
       const buildPayload = args[0] as (consented: string[]) => unknown;
       return options.createTask
@@ -212,6 +214,8 @@ beforeEach(() => {
   buildRepositoriesPayloadMock.mockReset();
   buildRepositoriesPayloadMock.mockReturnValue([]);
   validateCreateInputsMock.mockClear();
+  ensureFreshBranchConsentMock.mockReset();
+  ensureFreshBranchConsentMock.mockResolvedValue([]);
   createTaskRetryMock.mockClear();
   updateTaskMock.mockReset();
   updateTaskMock.mockResolvedValue({ id: TASK_ID, title: RENAMED_TITLE });
@@ -802,6 +806,46 @@ describe("useTaskSubmitHandlers — repository selection edit failures", () => {
 
 // eslint-disable-next-line max-lines-per-function -- create-mode parity cases share transport setup.
 describe("useTaskSubmitHandlers — handleCreateSubmit (CLI-mode parity)", () => {
+  it("does not call the success handler when task creation fails", async () => {
+    const onSuccess = vi.fn();
+    const createTask = vi.fn().mockRejectedValue(new Error("request failed"));
+    const deps = makeDeps({
+      createTask,
+      onSuccess,
+      descriptionInputRef: makeRef(CREATE_TASK_PROMPT),
+    });
+    const { result } = renderHook(() => useTaskSubmitHandlers(deps));
+
+    await act(async () => {
+      await result.current.handleSubmit({ preventDefault: () => {} } as never);
+    });
+
+    expect(createTask).toHaveBeenCalledOnce();
+    expect(onSuccess).not.toHaveBeenCalled();
+  });
+
+  it("does not call the success handler when fresh-branch consent is canceled", async () => {
+    const onSuccess = vi.fn();
+    const createTask = vi.fn().mockResolvedValue({ id: TASK_ID });
+    ensureFreshBranchConsentMock.mockResolvedValueOnce(null);
+    const deps = makeDeps({
+      createTask,
+      onSuccess,
+      freshBranchEnabled: true,
+      isLocalExecutor: true,
+      repositoryLocalPath: "/repo",
+      descriptionInputRef: makeRef(CREATE_TASK_PROMPT),
+    });
+    const { result } = renderHook(() => useTaskSubmitHandlers(deps));
+
+    await act(async () => {
+      await result.current.handleSubmit({ preventDefault: () => {} } as never);
+    });
+
+    expect(createTask).not.toHaveBeenCalled();
+    expect(onSuccess).not.toHaveBeenCalled();
+  });
+
   it("refreshes stale policy options and keeps the dialog open", async () => {
     const refreshBranchPolicies = vi.fn(async () => undefined);
     const onOpenChange = vi.fn();
@@ -984,7 +1028,7 @@ describe("useTaskSubmitHandlers — workflow override submit guard", () => {
       createTask,
       executorId: "remote-executor",
       workflowAgentOverridesBlockedReason: "replacement profile is unavailable",
-      descriptionInputRef: makeRef("create this task"),
+      descriptionInputRef: makeRef(CREATE_TASK_PROMPT),
     });
     const { result } = renderHook(() => useTaskSubmitHandlers(deps));
 
@@ -1001,7 +1045,7 @@ describe("useTaskSubmitHandlers — workflow override submit guard", () => {
     const deps = makeDeps({
       createTask,
       workflowAgentOverridesBlockedReason: "workflow agents could not be loaded",
-      descriptionInputRef: makeRef("create this task"),
+      descriptionInputRef: makeRef(CREATE_TASK_PROMPT),
     });
     const { result } = renderHook(() => useTaskSubmitHandlers(deps));
 

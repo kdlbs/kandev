@@ -147,13 +147,21 @@ lists, follow `page_info.next_cursor` to load every page. Do not set
 
 For recorded workflow movement, the browser can GET
 `./_kandev/v1/data/tasks/{task_id}/step-transitions` with
-`api_read:tasks`. A workspace canvas can GET
+`api_read:tasks`. With `data_scope_kind: task`, a canvas can read only its own
+task's history. With `data_scope_kind: workspace`, it can read any task's
+history in the current workspace, even with `scope_kind: task`.
+
+With `data_scope_kind: workspace`, a canvas can GET
 `./_kandev/v1/data/workflows/{workflow_id}/transition-groups` with both
-`api_read:tasks` and `api_read:workflows`. The latter is denied to a task
-canvas until the user promotes it. Both return bounded `{items,page_info}`
-pages; use the opaque `next_cursor` to continue. The equivalent optional
-backend Host extension is `pluginsdk.TransitionHistory(host)`. It exposes
-`ListTask` and `ListWorkflowGroups` with the same fields and grants.
+`api_read:tasks` and `api_read:workflows`. This route requires workspace data
+access, regardless of canvas placement. Both routes return bounded
+`{items,page_info}` pages with an opaque `page_info.next_cursor` for the next
+page.
+
+Backend plugins can use the optional Host SDK extension
+`pluginsdk.TransitionHistory(host)`. Its `ListTask` and `ListWorkflowGroups`
+readers use the same fields and declared read grants. They do not enforce a
+canvas's data scope or workspace boundary.
 
 Kandev injects a reserved startup bootstrap into the packaged entry document.
 It runs before authored scripts, reports an initial document error when one is
@@ -534,7 +542,7 @@ before submitting the request.
 | Surface                         | Location and input                                                                                                                                                                                                                                                                                     | Manifest requirement                                                   | Cleanup/lifecycle                                                                                                                                                                                               | Small example                                                                                                       |
 | ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
 | registerRoute                   | registry.registerRoute(path, Component, options?); exact SPA path; options.topbar defaults to host chrome or false for full-bleed                                                                                                                                                                      | Active ui.bundle                                                       | Route is removed on disable/uninstall; use destroy for subscriptions                                                                                                                                            | registry.registerRoute("/acme", Page, { topbar: { title: "Acme" } })                                                |
-| registerNavItem                 | { id, label, path, icon?, section? }; section is main, integrations, sidebar-footer (sidebar footer icon row, subject to an inline budget past which the item moves to the footer's overflow menu; and phone menu Utilities group, uncapped), or accepted-but-not-rendered settings                    | Active ui.bundle                                                       | Nav item is revoked and removed from desktop/phone navigation                                                                                                                                                   | registry.registerNavItem({ id: "home", label: "Acme", path: "/acme", icon: "chart" })                               |
+| registerNavItem                 | { id, label, path, icon?, section? }; section is main, integrations, sidebar-footer (desktop footer utilities menu and phone menu Utilities group, both uncapped), or accepted-but-not-rendered settings                    | Active ui.bundle                                                       | Nav item is revoked and removed from desktop/phone navigation                                                                                                                                                   | registry.registerNavItem({ id: "home", label: "Acme", path: "/acme", icon: "chart" })                               |
 | registerSettingsRoute           | registerSettingsRoute(fullPath, Component) with an exact path under /settings/plugins/<id>/...; settings shell supplies chrome                                                                                                                                                                         | Active ui.bundle                                                       | Route is removed on disable/uninstall                                                                                                                                                                           | registry.registerSettingsRoute("/settings/plugins/acme/health", HealthPage)                                         |
 | registerComponent               | registerComponent(slot, Component); component receives { slotProps?: unknown }                                                                                                                                                                                                                         | Active ui.bundle                                                       | Every registration is owner-tracked, error-isolated, and bulk-revoked                                                                                                                                           | registry.registerComponent("task-sidebar", Panel)                                                                   |
 | registerWsHandler               | registerWsHandler(action, handler(payload)); receives actions bridged from lib/ws                                                                                                                                                                                                                      | Active ui.bundle                                                       | Handler is removed on disable/uninstall; tolerate duplicate/replayed actions                                                                                                                                    | registry.registerWsHandler("acme.updated", renderUpdate)                                                            |
@@ -876,11 +884,21 @@ sidebar cluster and `presentation: "mobile"` for the phone navigation sheet.
 Mobile actions must keep their own buttons or links at least 44px in the active
 dimension and provide an accessible name.
 
-`PluginComposerSlotProps` is `{ surface, presentation, taskId, taskTitle?,
-activeSessionId, sessionIds, disabled, submittable, disabledReason?, composer }`.
-The `composer` capability provides `insertText`, `focus`, and asynchronous
-`submit`; submit returns `submitted` only when the native composer accepts the
-operation, otherwise `blocked` or `unavailable`.
+`PluginComposerSlotProps` is exported by `@kandev/plugin-sdk` as `{ surface,
+presentation, taskId, taskTitle?, activeSessionId, sessionIds, disabled,
+submittable, disabledReason?, composer, registerTaskCreatedHandler? }`. The
+optional `registerTaskCreatedHandler` is supplied only to create-mode
+`task-create-input-actions`. Register a callback that receives a readonly
+`{ id, workspace_id }` identity after that dialog successfully creates its task;
+the registration returns a cleanup function for slot unmount. Each registration
+belongs to one open create cycle. Closing, reopening, or changing the dialog
+mode revokes that cycle, so a delayed result cannot notify a later contribution.
+Failed or canceled creation does not notify handlers. Callbacks may return a
+promise. The host logs each synchronous throw or rejected promise and continues
+dispatching without affecting task creation.
+The generic `PluginRegistry.registerComponent` signature lets the contribution
+declare `slotProps?: PluginComposerSlotProps` directly, without narrowing an
+`unknown` slot prop.
 
 ## Backend contract
 
@@ -1393,6 +1411,26 @@ call. The Host rejects stale revisions and launch-setting changes while a turn
 is active. `SetPaused` also checks a revision. Pause state blocks future starts;
 stopping a running generation is a separate operation. `Delete` is explicit and
 removes only the selected conversation owned by the current installation.
+
+`Delete` checks the current identity and expected revision when it admits the
+operation. If an accepted update wins first, deletion returns a conflict; if
+uninstall has detached the conversation, deletion returns not found. These
+rejected attempts preserve the task and transcript and perform no deletion
+cleanup. Once deletion is admitted, competing changes cannot be accepted until
+that operation commits or releases its reservation.
+
+An admitted deletion can fail after environment transfer or canvas cleanup has
+already taken effect. The task and transcript remain when final deletion rolls
+back, but those preparation effects are not guaranteed to be undone. The Host
+returns `CommandUnavailable` for admitted failure, uncertain outcome, or an
+unavailable acknowledgement. An incomplete receipt or missing task alone does
+not prove successful deletion. Replay the same command key to recover its
+result; a successful replay requires durable evidence of that operation's
+deletion commit and cannot delete a replacement conversation. A reservation
+with an unproven owner remains unavailable rather than being stolen by replay.
+
+Workspace deletion can fail after canvas cleanup while the workspace, task and
+retained transcript rows remain.
 
 ```go
 if exact, ok := pluginsdk.HostV2(host); ok {

@@ -308,6 +308,7 @@ type lifecycleAdapter struct {
 var _ interface {
 	OwnsPromptGeneration(sessionID, executionID string, generation uint64) bool
 	GetPromptGenerationForSession(ctx context.Context, sessionID string) (uint64, error)
+	AcknowledgeRetainedPromptFailure(executionID string, generation uint64) bool
 	GetACPSessionIDForSession(sessionID string) (string, bool)
 	OwnsPromptActivity(sessionID, executionID string, generation, activityEpoch uint64) bool
 	GetPromptActivityForSession(ctx context.Context, sessionID string) (executionID string, generation, activityEpoch uint64, lastActivityAt time.Time, err error)
@@ -443,6 +444,7 @@ func buildLifecycleLaunchRequest(
 		TaskID:                        req.TaskID,
 		TaskScope:                     req.TaskScope,
 		SessionSettingsPolicy:         lifecycleSessionSettingsPolicy(req.SessionSettingsPolicy),
+		RequiredNativeConversationID:  req.RequiredNativeConversationID,
 		WorkspaceID:                   req.WorkspaceID,
 		SessionID:                     req.SessionID,
 		TaskEnvironmentID:             req.TaskEnvironmentID,
@@ -760,6 +762,10 @@ func (a *lifecycleAdapter) OwnsPromptGeneration(sessionID, executionID string, g
 
 func (a *lifecycleAdapter) GetPromptGenerationForSession(ctx context.Context, sessionID string) (uint64, error) {
 	return a.mgr.GetPromptGenerationForSession(ctx, sessionID)
+}
+
+func (a *lifecycleAdapter) AcknowledgeRetainedPromptFailure(executionID string, generation uint64) bool {
+	return a.mgr.AcknowledgeRetainedPromptFailure(executionID, generation)
 }
 
 func (a *lifecycleAdapter) OwnsPromptActivity(sessionID, executionID string, generation, activityEpoch uint64) bool {
@@ -1308,8 +1314,8 @@ func (a githubTaskIssueStoreAdapter) GetRepository(ctx context.Context, reposito
 	return a.svc.GetRepository(ctx, repositoryID)
 }
 
-func (a githubTaskIssueStoreAdapter) UpdateTaskMetadata(ctx context.Context, taskID string, metadata map[string]interface{}) (*models.Task, error) {
-	task, err := a.svc.UpdateTask(ctx, taskID, &taskservice.UpdateTaskRequest{Metadata: metadata})
+func (a githubTaskIssueStoreAdapter) UpdateTaskGitHubIssue(ctx context.Context, taskID string, link *models.TaskGitHubIssueLink) (*models.Task, error) {
+	task, err := a.svc.UpdateTaskGitHubIssue(ctx, taskID, link)
 	if err != nil {
 		return nil, wrapGitHubTaskIssueStoreError(err)
 	}

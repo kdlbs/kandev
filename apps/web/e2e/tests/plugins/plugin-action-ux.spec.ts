@@ -132,8 +132,13 @@ test.describe("Plugin action UX, composer", () => {
     ]);
     expect(nativeSidebarBox).not.toBeNull();
     expect(pluginSidebarBox).not.toBeNull();
-    expect(pluginSidebarBox!.width).toBeCloseTo(nativeSidebarBox!.width, 0);
-    expect(pluginSidebarBox!.height).toBeCloseTo(nativeSidebarBox!.height, 0);
+    // Labelled launchers occupy their own row; plugin chrome stays compact.
+    expect(nativeSidebarBox!.height).toBeCloseTo(28, 0);
+    expect(pluginSidebarBox!.width).toBeCloseTo(24, 0);
+    expect(pluginSidebarBox!.height).toBeCloseTo(24, 0);
+    expect(pluginSidebarBox!.y).toBeGreaterThanOrEqual(
+      nativeSidebarBox!.y + nativeSidebarBox!.height,
+    );
     const [nativeSidebarGlyph, pluginSidebarGlyph, sidebarGroupGap] = await Promise.all([
       sidebarNative.locator("svg").boundingBox(),
       sidebarAction.locator('[data-slot="surface-action-icon"]').boundingBox(),

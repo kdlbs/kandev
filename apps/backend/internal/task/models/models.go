@@ -1116,6 +1116,9 @@ type LastAgentError struct {
 	RemediationURL   string            `json:"remediation_url,omitempty"`
 	Code             string            `json:"code,omitempty"`
 	Details          string            `json:"details,omitempty"`
+	StartupReason    string            `json:"startup_reason,omitempty"`
+	StartupAttempts  int               `json:"startup_attempts,omitempty"`
+	StartupNPMCode   string            `json:"startup_npm_code,omitempty"`
 	RecoveryActions  []string          `json:"recovery_actions,omitempty"`
 	TaskRepositoryID string            `json:"task_repository_id,omitempty"`
 	StampValue       string            `json:"stamp,omitempty"`
@@ -1150,7 +1153,9 @@ func mapToLastAgentError(raw interface{}, out *LastAgentError) error {
 	// Optional bootstrap fields are deliberately decoded independently. A
 	// malformed optional field must not hide a valid legacy session error.
 	optional := map[string]json.RawMessage{}
-	for _, key := range []string{"execution_id", "phase", "attempt_id", "causes"} {
+	for _, key := range []string{
+		"execution_id", "phase", "attempt_id", "causes", "startup_reason", "startup_attempts", "startup_npm_code",
+	} {
 		if value, ok := fields[key]; ok {
 			optional[key] = value
 			delete(fields, key)
@@ -1183,6 +1188,24 @@ func mapToLastAgentError(raw interface{}, out *LastAgentError) error {
 	}
 	if value, ok := optional["causes"]; ok {
 		out.Causes = decodeAgentErrorCauses(value)
+	}
+	if value, ok := optional["startup_reason"]; ok {
+		var reason string
+		if json.Unmarshal(value, &reason) == nil {
+			out.StartupReason = reason
+		}
+	}
+	if value, ok := optional["startup_attempts"]; ok {
+		var attempts int
+		if json.Unmarshal(value, &attempts) == nil && attempts >= 0 {
+			out.StartupAttempts = attempts
+		}
+	}
+	if value, ok := optional["startup_npm_code"]; ok {
+		var npmCode string
+		if json.Unmarshal(value, &npmCode) == nil {
+			out.StartupNPMCode = npmCode
+		}
 	}
 	return nil
 }
@@ -1445,6 +1468,12 @@ const (
 	// on popover open and archived/deleted alongside the coordinator.
 	TaskOriginCoordinator = "coordinator"
 )
+
+// IsAutomationTaskOrigin reports whether origin identifies work whose turn
+// lifecycle is owned by the automation coordinator.
+func IsAutomationTaskOrigin(origin string) bool {
+	return origin == TaskOriginAutomationRun || origin == TaskOriginAutomationTask
+}
 
 // Task represents a task in the database
 type Task struct {
@@ -2350,6 +2379,21 @@ type TaskSession struct {
 	TokensIn       int64 `json:"tokens_in"`
 	TokensCachedIn int64 `json:"tokens_cached_in"`
 	TokensOut      int64 `json:"tokens_out"`
+}
+
+// WorkspaceRecoveryErrorObservation is the session and environment identity
+// captured before selected-workspace inspection. Repository writers compare
+// every field in the same transaction that records the recovery error.
+type WorkspaceRecoveryErrorObservation struct {
+	TaskID                 string
+	SessionID              string
+	TaskEnvironmentID      string
+	EnvironmentOwnerTaskID string
+	OwnershipGeneration    int64
+	SelectionSnapshot      WorkspaceRecoverySelectionSnapshot
+	SessionState           TaskSessionState
+	AgentExecutionID       string
+	ExpectedErrorStamp     string
 }
 
 // ActiveSessionCancellationCandidate is the compare-and-set snapshot used by

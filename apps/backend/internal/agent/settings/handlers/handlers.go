@@ -146,7 +146,11 @@ func (h *Handlers) httpUpdateAgentRuntime(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "target version and use_default cannot be combined"})
 		return
 	}
-	if !request.UseDefault && request.TargetVersion == "" {
+	if h.controller.IsHarnessUpdate(name) && (request.TargetVersion != "" || request.UseDefault) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "self-update does not accept a target version or use_default"})
+		return
+	}
+	if !h.controller.IsHarnessUpdate(name) && !request.UseDefault && request.TargetVersion == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "target version is required"})
 		return
 	}

@@ -1977,8 +1977,11 @@ func (s *Server) registerPlanTools() {
 	)
 	s.mcpServer.AddTool(
 		mcp.NewTool("get_task_plan_kandev",
-			mcp.WithDescription("Get the current plan for a task, including any user edits. task_id selects the task: pass your own task ID for your current task, or another task's ID to read that task's plan (allowed only within your reach — same workspace / task tree; a task outside it is rejected, never silently redirected to your own)."),
+			mcp.WithDescription("Get the current plan for a task, including user edits and its version. task_id selects your current task by default or another task within your reach (same workspace / task tree); an outside task is rejected, never silently redirected to your own. Omit offset and limit to read the whole plan; supply either for a bounded exact fragment. Ranges count Unicode code points, not bytes. Partial reads return total length, has_more, and next_offset; continue with that offset and expected_version to avoid mixing versions. A fragment is not a replacement document: use edit_task_plan_kandev for local changes or update_task_plan_kandev with mode=\"append\" for additions."),
 			mcp.WithString("task_id", mcp.Description("The task ID to get the plan for. Defaults to your current task when omitted; pass another task's ID to read it directly.")),
+			mcp.WithInteger("offset", mcp.Min(0), mcp.Max(float64(taskcontract.MaxPlanReadOffset)), mcp.Description("Optional zero-based Unicode character offset. Supplying offset or limit enables partial reading. Defaults to 0 only in partial mode.")),
+			mcp.WithInteger("limit", mcp.Min(1), mcp.Max(taskcontract.MaxPlanReadCharacters), mcp.Description("Optional maximum characters to return: 1 through 8192. Defaults to 4096 only when a range argument is supplied; omit both range arguments for a full read.")),
+			mcp.WithString("expected_version", mcp.Description("Optional non-empty version from an earlier read or successful write. A changed or deleted plan returns a conflict without content. Use the first page's version for subsequent pages and reconcile on conflict.")),
 		),
 		s.wrapHandler("get_task_plan_kandev", s.getTaskPlanHandler()),
 	)

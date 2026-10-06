@@ -7,10 +7,13 @@ import (
 	"github.com/kandev/kandev/internal/agent/managedruntime"
 )
 
-// onlineManagedRuntimeArgs returns a copy of a trusted managed-npm launch
-// command with only npm's metadata preference changed. The package spec is
-// returned separately so cache invalidation can target the exact execution
-// tree used by the failed launch.
+const (
+	managedRuntimePreferOfflineArg = "--prefer-offline"
+	managedRuntimePreferOnlineArg  = "--prefer-online"
+)
+
+// onlineManagedRuntimeArgs validates a trusted managed-npm launch command and
+// returns an online-preferred copy plus its exact package spec.
 func onlineManagedRuntimeArgs(args []string, spec agents.ManagedNPMRuntimeSpec) ([]string, string, bool) {
 	packageName := strings.TrimSpace(spec.Package)
 	if packageName == "" || len(args) < 4 {
@@ -21,7 +24,8 @@ func onlineManagedRuntimeArgs(args []string, spec agents.ManagedNPMRuntimeSpec) 
 		if arg != "npx" || npxIndex+5 >= len(args) {
 			continue
 		}
-		if args[npxIndex+1] != "--yes" || args[npxIndex+2] != "--prefer-offline" ||
+		if args[npxIndex+1] != "--yes" ||
+			(args[npxIndex+2] != managedRuntimePreferOfflineArg && args[npxIndex+2] != managedRuntimePreferOnlineArg) ||
 			args[npxIndex+3] != "--prefix" || args[npxIndex+4] != managedruntime.NPMProjectPrefix || npxIndex+5 >= len(args) {
 			continue
 		}
@@ -36,7 +40,7 @@ func onlineManagedRuntimeArgs(args []string, spec agents.ManagedNPMRuntimeSpec) 
 		}
 
 		recovered := append([]string(nil), args...)
-		recovered[npxIndex+2] = "--prefer-online"
+		recovered[npxIndex+2] = managedRuntimePreferOnlineArg
 		return recovered, packageSpec, true
 	}
 

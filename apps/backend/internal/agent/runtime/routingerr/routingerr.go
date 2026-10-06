@@ -51,6 +51,7 @@ const (
 	CodeNpxCacheCorrupted           Code = "npx_cache_corrupted"
 	CodeManagedRuntimeNpmResolution Code = "managed_runtime_npm_resolution"
 	CodeManagedRuntimeNpmPolicy     Code = "managed_runtime_npm_policy"
+	CodeManagedRuntimeStartup       Code = "managed_runtime_startup"
 	CodeResumeCorrupted             Code = "resume_corrupted"
 	CodeAgentTransportLost          Code = "agent_transport_lost"
 )
@@ -370,7 +371,7 @@ func applyInvariants(e *Error) *Error {
 	case CodeNpxCacheCorrupted:
 		e.AutoRetryable = true
 		e.FallbackAllowed = true
-	case CodeManagedRuntimeNpmResolution, CodeManagedRuntimeNpmPolicy:
+	case CodeManagedRuntimeNpmResolution, CodeManagedRuntimeNpmPolicy, CodeManagedRuntimeStartup:
 		e.UserAction = true
 		e.AutoRetryable = false
 		e.FallbackAllowed = false

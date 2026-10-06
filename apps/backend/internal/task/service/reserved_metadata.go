@@ -4,11 +4,13 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+
+	"github.com/kandev/kandev/internal/task/models"
 )
 
 // ReservedMetadataKeyPrefixCoordinator prefixes task metadata keys only the
 // coordinator service may write, such as the conversation's tool binding.
-const ReservedMetadataKeyPrefixCoordinator = "kandev.coordinator_"
+const ReservedMetadataKeyPrefixCoordinator = models.ReservedMetadataKeyPrefixCoordinator
 
 // ErrReservedMetadata reports a create or update request whose metadata names a
 // reserved key without AllowReservedMetadata.
@@ -26,17 +28,4 @@ func refuseReservedMetadata(metadata map[string]interface{}, allowed bool) error
 		}
 	}
 	return nil
-}
-
-// restoreReservedMetadata copies every reserved key of existing that the
-// updated map omits, so an update that does not name the binding keeps it.
-func restoreReservedMetadata(updated, existing map[string]interface{}) {
-	for key, value := range existing {
-		if !strings.HasPrefix(key, ReservedMetadataKeyPrefixCoordinator) {
-			continue
-		}
-		if _, present := updated[key]; !present {
-			updated[key] = value
-		}
-	}
 }

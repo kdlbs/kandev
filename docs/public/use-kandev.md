@@ -131,12 +131,30 @@ icons show running, idle, or paused activity. Tasks and required inbox entries r
 their fixed navigation area, and hiding a shortcut does not disable the underlying feature.
 
 On a phone, open the menu and choose **Sidebar** to edit the same layout. Use the move controls to
-reorder entries or move a shortcut to another section. Home and quick actions stay above Tasks;
-customized workspace tools and shortcut sections follow the task list. Expand **Integrations** to
+reorder entries or move a shortcut to another section. The workspace picker stays at the top.
+**New Task**, Home, quick actions, workspace tools, and shortcut sections appear before the task
+list. If you hide New Task, the Tasks heading keeps its create button. Expand **Integrations** to
 see named provider links and integration settings, including when no provider is configured.
+Choose **GitHub**, then **Issues** in its view menu to browse issues.
 **Restore defaults** resets the draft for the
 active workspace; the shared **Save changes** action persists it. If another client saves first, the
 editor keeps your draft and reports the conflict so you can reconcile it.
+
+Tasks is a contextual panel with its own view picker and filters. A primary-color dot marks an
+applied filter, including filters saved in a view. An amber dot marks unsaved view changes.
+Group headings have a leading collapse control, label, and count. Tasks sit
+indented below each heading, with space between groups; subtasks remain nested one
+level deeper. Grouping by state also shows the group's status icon. Plain task rows keep your
+selected metadata and trailing details, with highlights for hover, selection, and keyboard focus.
+Settings and the signed-in account, when available, stay in the
+single-row desktop sidebar footer, alongside theme switching. Use **Show more actions**
+(the three-dot button) for Stats, plugin utilities, Improve Kandev, and release notes.
+**New Task** uses a neutral button, with **Quick Chat** and **Terminal** as smaller
+labelled actions in a shared utility bar beneath it.
+
+Expand **Automations** and choose **Open automations** below its entries to see the
+full list. This labelled link sits inside the group on desktop and phones, like
+**Integration settings** inside Integrations.
 
 ## Switch workspace
 

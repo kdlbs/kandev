@@ -178,6 +178,7 @@
   "files": "ファイル",
   "folderName": "フォルダ名",
   "folders": "フォルダ",
+  "hiddenFolders": "隠しフォルダ",
   "forwardStdinStdoutStraightToThe": "stdin/stdout を CLI 子プロセスへそのまま転送。ACP 無効化。",
   "getStarted": "始める",
   "githubCliNotAuthenticated": "GitHub CLI 未認証",

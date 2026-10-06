@@ -28,16 +28,16 @@ describe("sidebar layout projection", () => {
     });
 
     expect(projected.nodes.map((node) => node.id)).toEqual([
-      "home",
       "new-task",
+      "home",
       "automations",
       "canvases",
       "integrations",
       SLACK_ID,
     ]);
     expect(projected.nodes.map((node) => node.label)).toEqual([
-      "Home",
       "New Task",
+      "Home",
       "Automations",
       "Canvases",
       "Integrations",

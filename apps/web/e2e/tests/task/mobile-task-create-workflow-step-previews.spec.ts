@@ -175,7 +175,12 @@ test("keeps long workflow previews contained and touch-usable on a phone", async
     );
     await expectStepsInOrder(testPage, scenario.review.id, scenario.review.stepNames);
 
-    await description.tap();
+    const closePicker = popover.getByTestId("workflow-selector-close");
+    const closePickerBox = await closePicker.boundingBox();
+    if (!closePickerBox) throw new Error("Workflow selector close control is not measurable");
+    expect(closePickerBox.width).toBeGreaterThanOrEqual(44);
+    expect(closePickerBox.height).toBeGreaterThanOrEqual(44);
+    await closePicker.tap();
     await expect(popover).toHaveCount(0);
     const featureRefresh = workflowStepsResponse(testPage, scenario.feature.id);
     await workflowSelector.tap();

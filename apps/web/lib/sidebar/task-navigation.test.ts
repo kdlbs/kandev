@@ -80,6 +80,7 @@ function setReducedMotion(reducedMotion: boolean) {
 }
 
 afterEach(() => {
+  cancelSidebarTaskReveal();
   document.body.innerHTML = "";
   mockReleasePortalScrollRestoration.mockReset();
   vi.restoreAllMocks();
@@ -93,7 +94,59 @@ describe("taskRowSelector", () => {
   });
 });
 
+it("updates an unfinished scroll when its content grows before the row enters view", async () => {
+  const viewport = mountViewport();
+  Object.defineProperty(viewport, "scrollHeight", { value: 200, configurable: true });
+  const row = mountRow(viewport, TEST_TASK_ID, { x: 0, y: 140, width: 320, height: 24 });
+  row.scrollIntoView = vi.fn();
+  const frames: (() => void)[] = [];
+  const revealed = revealSidebarTask(TEST_TASK_ID, (callback) => frames.push(callback));
+  frames.shift()!();
+  expect(row.scrollIntoView).toHaveBeenCalledOnce();
+  Object.defineProperty(viewport, "scrollHeight", { value: 250 });
+  frames.shift()!();
+  expect(row.scrollIntoView).toHaveBeenCalledTimes(2);
+  setRect(row, { x: 0, y: 60, width: 320, height: 24 });
+  while (frames.length) frames.shift()!();
+  await expect(revealed).resolves.toBe(true);
+});
+
 describe("revealSidebarTask", () => {
+  it.each(["viewport", "content"])(
+    "keeps the selected row visible when navigation changes the %s height",
+    async (changed) => {
+      let resized!: ResizeObserverCallback;
+      const disconnect = vi.fn();
+      vi.stubGlobal(
+        "ResizeObserver",
+        class {
+          constructor(callback: ResizeObserverCallback) {
+            resized = callback;
+          }
+          observe = vi.fn();
+          disconnect = disconnect;
+        },
+      );
+      const viewport = mountViewport();
+      const row = mountRow(viewport, TEST_TASK_ID, { x: 0, y: 70, width: 320, height: 24 });
+      await revealSidebarTask(TEST_TASK_ID, (callback) => callback());
+      expect(row.scrollIntoView).not.toHaveBeenCalled();
+
+      if (changed === "viewport") {
+        setRect(viewport, { x: 0, y: 0, width: 320, height: 60 });
+      } else {
+        Object.defineProperty(viewport, "scrollHeight", { value: 200 });
+        setRect(row, { x: 0, y: 140, width: 320, height: 24 });
+      }
+      resized([], {} as ResizeObserver);
+      expect(row.scrollIntoView).toHaveBeenCalledOnce();
+      cancelSidebarTaskReveal();
+      expect(disconnect).toHaveBeenCalledOnce();
+      resized([], {} as ResizeObserver);
+      expect(row.scrollIntoView).toHaveBeenCalledOnce();
+    },
+  );
+
   it("smoothly scrolls and cues an off-screen rendered row", async () => {
     setReducedMotion(false);
     const viewport = mountViewport();

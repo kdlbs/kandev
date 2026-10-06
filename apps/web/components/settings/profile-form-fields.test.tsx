@@ -104,19 +104,21 @@ function renderForm(
   cursorMcpAuthSupported = false,
 ) {
   return render(
-    <TooltipProvider>
-      <ProfileFormFields
-        profile={profile}
-        baselineProfile={profile}
-        onChange={onChange}
-        modelConfig={config}
-        permissionSettings={{}}
-        passthroughConfig={null}
-        agentName={mockAgentName}
-        capabilityProfileId="test-profile"
-        cursorMcpAuthSupported={cursorMcpAuthSupported}
-      />
-    </TooltipProvider>,
+    <StateProvider>
+      <TooltipProvider>
+        <ProfileFormFields
+          profile={profile}
+          baselineProfile={profile}
+          onChange={onChange}
+          modelConfig={config}
+          permissionSettings={{}}
+          passthroughConfig={null}
+          agentName={mockAgentName}
+          capabilityProfileId="test-profile"
+          cursorMcpAuthSupported={cursorMcpAuthSupported}
+        />
+      </TooltipProvider>
+    </StateProvider>,
   );
 }
 
@@ -147,9 +149,11 @@ function renderStatefulForm(
   }
 
   return render(
-    <TooltipProvider>
-      <StatefulForm />
-    </TooltipProvider>,
+    <StateProvider>
+      <TooltipProvider>
+        <StatefulForm />
+      </TooltipProvider>
+    </StateProvider>,
   );
 }
 

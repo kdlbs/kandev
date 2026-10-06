@@ -23,7 +23,13 @@ import { AgentLoginDialog } from "@/components/settings/agent-login-dialog";
 import { AgentRuntimeUpdateControl } from "@/components/settings/agent-runtime-update-control";
 import { settingsActionClassName } from "@/components/settings/settings-control";
 import { HostShellDialog } from "@/components/settings/host-shell-dialog";
-import type { AgentUpdateJob, AgentUpdatePreview, AgentUpdateStatus, InstallJob } from "@/lib/api";
+import type {
+  AgentUpdateJob,
+  AgentUpdateMode,
+  AgentUpdatePreview,
+  AgentUpdateStatus,
+  InstallJob,
+} from "@/lib/api";
 import type { Agent, AgentDiscovery, RuntimeUpdate } from "@/lib/types/http";
 
 type Props = {
@@ -46,6 +52,7 @@ type Props = {
     agentName: string,
     targetVersion: string,
     useDefault?: boolean,
+    updateMode?: AgentUpdateMode,
   ) => Promise<AgentUpdateJob>;
   /**
    * Called when the auth/shell dialog closes so the page can refresh

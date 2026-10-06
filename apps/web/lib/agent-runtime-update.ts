@@ -63,7 +63,7 @@ export function resolveRuntimeOperation(
   preview: AgentUpdatePreview | null,
   job?: AgentUpdateJob,
 ): AgentUpdateOperation | undefined {
-  return job?.operation ?? preview?.operation;
+  return job?.operation || preview?.operation;
 }
 
 export function runtimeOperationLabelKey(operation: AgentUpdateOperation | undefined): string {
@@ -104,11 +104,18 @@ export function canApproveAgentRuntimeUpdate({
     job,
   );
   const operation = resolveRuntimeOperation(preview, job);
-  const operationAllowsApproval = operation
+  let operationAllowsApproval = operation
     ? operation !== "up_to_date"
     : hasCurrentVersion && !versionsMatch;
+  if (preview?.update_mode === "self_update") {
+    operationAllowsApproval = operation === "update" || operation === "repair";
+  }
   return (
-    Boolean(preview && targetVersion && operationAllowsApproval) &&
+    Boolean(
+      preview &&
+      (preview.update_mode === "self_update" || targetVersion) &&
+      operationAllowsApproval,
+    ) &&
     !previewError &&
     !loading &&
     !updateInFlight &&

@@ -2,6 +2,7 @@
 status: active
 system: tasks
 created: 2026-09-27
+updated: 2026-10-04
 owners:
   - kandev
 ---
@@ -92,6 +93,15 @@ otherwise ineligible checkout.
   checkout and current error visible. It shall not start an agent in a partial
   replacement or retry the explicit action without a new user request.
 
+- **AC-TASKS-MANAGED-CLONE-RELOCATION-002.5:** After a failed relocation snapshot,
+  a new explicit repair request shall permit continuation when permissions are
+  the only proven difference from the unchanged original content. All selected
+  slots shall pass identity and exclusive-authority checks. Recovery shall retain
+  the original checkout, the failed snapshot, and the same operation identity.
+  Content differences, uncertain ownership, active consumers, and later-stage
+  failures shall remain refusals. An upgrade or ordinary resume shall not grant
+  this retry authority.
+
 ### REQ-TASKS-MANAGED-CLONE-RELOCATION-003: Recovery presentation
 
 **Intent:** Make the failure understandable and the safe action reachable on
@@ -121,3 +131,14 @@ desktop and phone.
 - [Worktree metadata recovery](worktree-metadata-recovery.md)
 - [Task launch failure recovery](task-launch-failure-recovery.md)
 - [System design](../system-design/managed-clone-relocation.md)
+
+## Implementation plans
+
+- [Snapshot permissions and blocked retry](../../../plans/workspace-recovery-permissions/plan.md)
+
+- [Original relocation package](../../../plans/managed-clone-relocation/plan.md)
+- [Unchanged legacy clone admission](../../../plans/legacy-clone-resume/plan.md)
+- [Resume and workspace recovery convergence](../../../plans/managed-clone-recovery-convergence/plan.md)
+
+The convergence package repairs violations of the existing acceptance criteria.
+It does not authorize automatic relocation of dirty worktrees.

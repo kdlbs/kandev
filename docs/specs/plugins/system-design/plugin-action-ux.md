@@ -148,6 +148,10 @@ All dimensions assume a 16px root font and scale with it.
 | Status bar | 24px bar-fit inline action, transparent base, compact padding and native focus style | `lsp-status-item.tsx` | Existing compact tablet bar exception |
 | Status drawer | Native full-width row with leading icon and text | `app-status-drawer.tsx` | At least 44px row height |
 
+The navigation hierarchy refinement places labelled Quick Chat and Terminal in
+their own 28px desktop row. Plugin workspace actions keep the compact 24px row
+below them, with unchanged slot context and standard action styling.
+
 Compare controls with the same role, not a status chip against a submit button.
 Ordinary toolbar icon boxes are 16px. Compact sidebar glyphs retain 14px.
 Status glyphs match the native status role. Custom artwork scales within its box.

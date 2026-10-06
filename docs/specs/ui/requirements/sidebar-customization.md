@@ -8,6 +8,12 @@ owners:
 
 # Sidebar Customization
 
+## Navigation hierarchy revision
+
+[Navigation hierarchy](navigation-hierarchy.md) updates the default New Task/Home
+order and puts tools before Tasks on phones. Saved desktop order, visibility,
+custom shortcut groups, and settings persistence remain unchanged.
+
 ## Overview
 
 Users can hide navigation entries and organize mixed shortcuts into named,
@@ -24,7 +30,7 @@ A shortcut is a reference to an existing destination or supported host action.
 
 - **AC-UI-SIDEBAR-CUSTOMIZATION-001.1:** Users shall hide, show, and reorder Home, New Task, Automations, Canvases, Integrations, and available plugin navigation entries. Hiding an entry shall not disable its underlying capability.
 - **AC-UI-SIDEBAR-CUSTOMIZATION-001.2:** Each user's workspace shall retain its own saved layout across reloads and signed-in clients. Changes shall not affect other users or workspaces.
-- **AC-UI-SIDEBAR-CUSTOMIZATION-001.3:** A workspace without a saved layout shall retain current navigation defaults. Restore defaults shall reset only that workspace's layout after Save changes.
+- **AC-UI-SIDEBAR-CUSTOMIZATION-001.3:** A workspace without a saved layout shall place primary New Task before Home, followed by eligible tools. Restore defaults shall reset only that workspace's layout after Save changes.
 - **AC-UI-SIDEBAR-CUSTOMIZATION-001.4:** Settings, workspace switching, Tasks, and required inbox navigation shall remain reachable. Hiding Home shall not change the startup destination or brand-link destination.
 - **AC-UI-SIDEBAR-CUSTOMIZATION-001.5:** Layout preferences shall affect the sidebar and corresponding phone navigation, without removing commands from search or changing settings navigation.
 
@@ -58,7 +64,7 @@ A shortcut is a reference to an existing destination or supported host action.
 - **AC-UI-SIDEBAR-CUSTOMIZATION-005.2:** All editing and navigation operations shall work without dragging, hovering, or long pressing. Touch targets shall measure at least 44 pixels.
 - **AC-UI-SIDEBAR-CUSTOMIZATION-005.3:** Phone surfaces shall fit the viewport, contain long-content scrolling, and clear safe areas. Desktop and phone shall share layout data without persisting responsive overflow choices.
 - **AC-UI-SIDEBAR-CUSTOMIZATION-005.4:** Controls shall have accessible names, keyboard operation, visible focus, and predictable focus return. New interface copy shall support every shipped locale.
-- **AC-UI-SIDEBAR-CUSTOMIZATION-005.5:** Saving or resetting a layout shall preserve the phone menu hierarchy: visible Home and quick actions, required task/local navigation, then customizable workspace tools and shortcut groups. Workspace tools retain their saved relative order and visibility. Built-in Automations, Canvases, and Integrations shall use labelled disclosures with visible expansion cues and labelled destinations; integration and automation setup remain reachable when empty. The Tasks heading retains the create-task action in regular workspaces, without a duplicate built-in New Task row. Office keeps its existing creation entry. Phone composition shall not rewrite the saved desktop order.
+- **AC-UI-SIDEBAR-CUSTOMIZATION-005.5:** Saving or resetting a layout shall preserve the phone menu hierarchy: visible New Task, Home and quick actions, customizable workspace tools and shortcut groups, then required task/local navigation. Workspace tools retain their saved relative order and visibility. Built-in Automations, Canvases, and Integrations shall use labelled disclosures with visible expansion cues and labelled destinations; integration and automation setup remain reachable when empty. The Tasks heading retains its create-task action only when the built-in New Task row is hidden in regular workspaces. Office keeps its existing creation entry. Phone composition shall not rewrite the saved desktop order.
 
 ## Scope boundaries
 
@@ -69,7 +75,7 @@ shared team layouts, and task-list filtering changes are excluded.
 Office-only sections keep their existing composition in this version. Common
 Home, New Task, plugin links, and shortcut groups remain customizable in Office.
 Required inbox entries and the Tasks region remain fixed. Desktop shortcut groups
-belong above that region; phone groups follow task navigation. The editor identifies
+belong above that region; phone groups precede task navigation. The editor identifies
 these fixed entries. Phone composition follows the
 [unified mobile navigation contract](unified-mobile-navigation.md).
 

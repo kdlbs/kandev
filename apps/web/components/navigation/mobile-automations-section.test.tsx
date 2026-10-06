@@ -4,6 +4,7 @@ import { MobileAutomationsSection } from "./mobile-automations-section";
 const api = vi.hoisted(() => ({ listAutomations: vi.fn(), listAutomationSummaries: vi.fn() }));
 vi.mock("@/lib/api/domains/automation-api", () => api);
 vi.mock("@/lib/routing/client-router", () => ({ useRouter: () => ({ push: vi.fn() }) }));
+const OPEN_AUTOMATIONS = "Open automations";
 const automation = {
   id: "a",
   workspace_id: "one",
@@ -21,12 +22,36 @@ function open() {
   fireEvent.click(screen.getByRole("button", { name: "Automations" }));
 }
 it("defers reads until opened and exposes the existing detail route", async () => {
-  render(<MobileAutomationsSection workspaceId="one" onNavigate={() => {}} />);
+  const onNavigate = vi.fn();
+  render(<MobileAutomationsSection workspaceId="one" onNavigate={onNavigate} />);
   expect(api.listAutomations).not.toHaveBeenCalled();
+  expect(screen.queryByRole("link", { name: OPEN_AUTOMATIONS })).toBeNull();
   open();
   expect((await screen.findByRole("link", { name: /Daily check/ })).getAttribute("href")).toBe(
     "/automations/a",
   );
+  const all = screen.getByRole("link", { name: OPEN_AUTOMATIONS });
+  expect(all.textContent).toBe(OPEN_AUTOMATIONS);
+  expect(all.getAttribute("href")).toBe("/automations");
+  expect(all.closest("#mobile-automations-body")).not.toBeNull();
+  fireEvent.click(all);
+  expect(onNavigate).toHaveBeenCalledOnce();
+});
+it("keeps the list destination inside the disclosure with saved-layout children", () => {
+  render(
+    <MobileAutomationsSection workspaceId="one" onNavigate={() => {}}>
+      <a href="/automations/saved">Saved automation</a>
+    </MobileAutomationsSection>,
+  );
+  expect(screen.queryByRole("link", { name: OPEN_AUTOMATIONS })).toBeNull();
+  open();
+  const saved = screen.getByRole("link", { name: "Saved automation" });
+  const all = screen.getByRole("link", { name: OPEN_AUTOMATIONS });
+  expect(all.closest("#mobile-automations-body")).not.toBeNull();
+  expect(saved.compareDocumentPosition(all) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(api.listAutomations).not.toHaveBeenCalled();
+  open();
+  expect(screen.queryByRole("link", { name: OPEN_AUTOMATIONS })).toBeNull();
 });
 it("reports a failed list and recovers without calling it empty", async () => {
   api.listAutomations.mockRejectedValueOnce(new Error("private detail"));

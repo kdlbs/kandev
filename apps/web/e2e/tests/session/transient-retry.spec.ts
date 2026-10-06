@@ -82,6 +82,12 @@ test.describe("transient provider error (529 Overloaded) retry", () => {
     await expect(session.recoveryResumeButton()).toBeVisible({ timeout: 30_000 });
     await expect(session.recoveryFreshButton()).toBeVisible();
     await expect(session.transientRetryCard()).toBeHidden();
+    await expect(testPage.getByTestId("session-recovery-card")).toContainText(
+      "Automatic recovery was cancelled. Resume or start fresh to continue.",
+    );
+    await expect(testPage.getByTestId("session-recovery-card")).not.toContainText(
+      "after several retries",
+    );
   });
 
   test("retries are paced — the attempt counter advances across the backoff", async ({

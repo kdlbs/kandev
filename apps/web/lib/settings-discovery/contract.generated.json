@@ -5392,6 +5392,21 @@
           "settings_href": "/settings/preferences"
         },
         {
+          "key": "user_settings.message_time_display",
+          "field_path": "message_time_display",
+          "label": "message time display",
+          "description": "Portable preference owned by the current user.",
+          "json_type": "string",
+          "support": "supported",
+          "classification": "writable",
+          "owner": "user-settings",
+          "writable": true,
+          "validator": "user-settings",
+          "authority": "user.self",
+          "change_timing": "future_views",
+          "settings_href": "/settings/preferences"
+        },
+        {
           "key": "user_settings.agent_tab_close_behavior",
           "field_path": "agent_tab_close_behavior",
           "label": "agent tab close behavior",
@@ -6401,6 +6416,7 @@
       "lsp_server_configs",
       "lsp_status_location",
       "mcp_task_agent_profile_default",
+      "message_time_display",
       "preferred_shell",
       "prevent_auto_start_agent_on_open",
       "quick_chat_tab_order_by_workspace",

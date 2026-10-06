@@ -2,7 +2,7 @@
 status: current
 system: tasks
 created: 2026-09-10
-updated: 2026-09-29
+updated: 2026-10-04
 requirements:
   - REQ-TASKS-WORKTREE-METADATA-RECOVERY-001
   - REQ-TASKS-WORKTREE-METADATA-RECOVERY-002
@@ -136,6 +136,46 @@ Symbolic links are copied as links. Unsupported special files stop recovery.
 The new branch retains the existing `<branch>-recovered-<operation-prefix>` form.
 The original directory and snapshot remain available. Recovery does not restore
 the old index or unavailable commits.
+
+### Snapshot permission preservation
+
+This correction implements AC-TASKS-WORKTREE-METADATA-RECOVERY-002.2 and .002.3.
+The delivery record is the
+[permission fix package](../../../plans/workspace-recovery-permissions/plan.md).
+
+`recovery_files.go` must preserve `os.ModePerm`, `os.ModeSetuid`,
+`os.ModeSetgid`, and `os.ModeSticky` wherever the host filesystem supports them.
+`FileMode.Perm()` alone discards the three special bits. File creation also
+applies the process umask. These differences conflict with the full mode that
+`checkoutManifest` records.
+
+Create regular destinations privately, copy their bytes, and apply the final
+mode after writing. Apply directory modes after their children, in reverse
+order. Use the same mode policy in `snapshotCheckout`, `copySnapshotEntries`,
+`copySnapshotFile`, and `applyRecoveryDirectoryModes`. Keep the snapshot root
+private. Preserve symlink targets without following them. Unsupported entries
+and permission failures stop publication. Do not weaken the manifest comparison.
+
+Set-ID modes also require their source identity. Before applying setuid,
+retain the source UID. Before applying setgid, retain the source GID.
+Use descriptor-based ownership and mode operations on the new entry.
+If the destination identity differs, change only the identity required by the
+source bit, before applying the final mode. If the host denies that change,
+refuse recovery. Never turn a source-owned executable into a backend-owned
+setuid executable. Verify the required identity and mode after copying and
+before publication. A changing source identity stops recovery.
+This does not promise general UID/GID, ACL, xattr, hard-link, or timestamp
+preservation. It adds no capability to execute snapshot files.
+
+Do not change the existing manifest format or invalidate retained complete
+snapshots. Verify required set-ID identity separately on source, snapshot, and
+replacement. Ordinary permissions remain portable. Special-mode checks use
+host-specific helpers and refuse unsupported preservation. Unix tests use a
+child process for umask changes. They must not change the shared test process.
+
+Generic metadata recovery still refuses blocked records. Only explicit clone
+relocation has the narrow compatibility retry defined in
+[managed clone relocation](managed-clone-relocation.md).
 
 ### Main-repository checkout compatibility
 

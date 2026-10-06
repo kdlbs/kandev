@@ -60,6 +60,25 @@ func NormalizeLastSeenDisplay(value string) string {
 }
 
 const (
+	// MessageTimeDisplayRelative selects the compact relative transcript label.
+	MessageTimeDisplayRelative = "relative"
+	// MessageTimeDisplayAbsoluteShort selects the regional short date and time.
+	MessageTimeDisplayAbsoluteShort = "absolute_short"
+	// MessageTimeDisplayAbsoluteLong selects the regional long date with seconds.
+	MessageTimeDisplayAbsoluteLong = "absolute_long"
+)
+
+// NormalizeMessageTimeDisplay returns a supported transcript timestamp mode.
+func NormalizeMessageTimeDisplay(value string) string {
+	switch value {
+	case MessageTimeDisplayAbsoluteShort, MessageTimeDisplayAbsoluteLong:
+		return value
+	default:
+		return MessageTimeDisplayRelative
+	}
+}
+
+const (
 	AgentTabCloseBehaviorDeleteSession = "delete_session"
 	AgentTabCloseBehaviorHidePanel     = "hide_panel"
 )
@@ -186,6 +205,7 @@ type UserSettings struct {
 	TerminalFontSize                  int                               `json:"terminal_font_size"`
 	ChangesPanelLayout                string                            `json:"changes_panel_layout"` // "flat" | "tree"
 	LastSeenDisplay                   string                            `json:"last_seen_display"`    // "absolute" | "relative"
+	MessageTimeDisplay                string                            `json:"message_time_display"`
 	AgentTabCloseBehavior             string                            `json:"agent_tab_close_behavior"`
 	SystemMetricsDisplay              SystemMetricsDisplaySettings      `json:"system_metrics_display"`
 	AppStatusBarEnabled               bool                              `json:"app_status_bar_enabled"`

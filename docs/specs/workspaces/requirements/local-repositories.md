@@ -2,7 +2,7 @@
 status: active
 system: workspaces
 created: 2026-07-20
-updated: 2026-09-25
+updated: 2026-10-06
 owners:
   - kandev
 ---
@@ -10,16 +10,15 @@ owners:
 
 ## Overview
 
-Users need to connect repositories already present on the machine running Kandev.
-Server launches can discover repositories from operator-configured roots or the
-server user's home. Desktop launches need explicit user-selected discovery roots
-so macOS does not receive unexpected protected-folder access.
+Users connect repositories on the Kandev host. Server discovery uses configured
+roots or Home; Desktop requires selected roots to avoid unexpected macOS access.
 
 ## Requirements
 
 ### REQ-WORKSPACES-LOCAL-REPOSITORIES-001: Local Workspace Repositories
 
-**Intent:** Users need to connect repositories already present on the machine running Kandev, including native Windows repositories outside the user's home directory. Explicitly adding one repository should work without widening automatic filesystem scans or editing packaged runtime configuration.
+**Intent:** Connect accessible repositories, including Windows paths outside Home,
+without widening scans or editing packaged configuration.
 
 #### Acceptance criteria
 
@@ -33,6 +32,9 @@ so macOS does not receive unexpected protected-folder access.
 - **AC-WORKSPACES-LOCAL-REPOSITORIES-001.6:** A saved repository without an `origin` remote supports Merge and Rebase when the selected base branch exists locally.
 - **AC-WORKSPACES-LOCAL-REPOSITORIES-001.7:** A repository with an `origin` remote refreshes and uses `origin/<base>` for Merge and Rebase.
 - **AC-WORKSPACES-LOCAL-REPOSITORIES-001.8:** A missing local base branch causes a clear error before Merge or Rebase changes repository history.
+- **AC-WORKSPACES-LOCAL-REPOSITORIES-001.9:** In workspace settings, manual validation shall belong to the current dialog visit, workspace, and trimmed input. Editing to another path, selecting a discovered repository, closing, changing workspace, or leaving the page shall retire that validation. Returning to the same path or workspace, or reopening the dialog, shall not restore retired success, error, or busy state. The input shall remain editable during validation.
+- **AC-WORKSPACES-LOCAL-REPOSITORIES-001.10:** If validations overlap for unchanged input, only the newest started attempt shall publish success, invalid-path feedback, rejection feedback, or busy state. Retired work shall still settle for its initiating caller and shall not clear a current pending attempt. A current unchanged-input result shall retain normal success or failure feedback; whitespace-only spelling changes shall preserve its validity.
+- **AC-WORKSPACES-LOCAL-REPOSITORIES-001.11:** Use Repository shall create an unsaved card only from a current discovered selection or the current successful manual validation. Manual confirmation shall use the returned canonical path even when its spelling differs from the input. Empty input, no workspace, pending or failed validation, and an action retained from a retired context shall not admit a manual draft. Confirmation alone shall not persist a repository.
 
 ### REQ-WORKSPACES-LOCAL-REPOSITORIES-002: Runtime-aware repository discovery
 
@@ -140,6 +142,22 @@ can display a permission dialog after the user leaves the application.
 - **AC-WORKSPACES-LOCAL-REPOSITORIES-003.12:** A missing clone directory shall
   not prevent results from other roots from appearing on initial or later scans.
   Discovery shall not create the directory to recover from this condition.
+- **AC-WORKSPACES-LOCAL-REPOSITORIES-003.13:** When cached reads and refreshes
+  overlap for one workspace, only the latest started distinct request shall replace
+  shared choices, root/freshness metadata, or errors, including empty results.
+  Its failure shall preserve accepted choices. Older successes or failures
+  shall not reverse that outcome or trigger automatic refresh. Joining pending
+  unchanged-root work shall retain its order. Browser and phone consumers shall
+  share accepted state. Busy indicators shall clear after pending work finishes
+  unless accepted metadata reports a scan.
+- **AC-WORKSPACES-LOCAL-REPOSITORIES-003.14:** After successful Add, Home
+  confirmation, Reconnect, or Remove, the initiating workspace in that tab shall
+  synchronize through a new read. Every consumer sharing its discovery state
+  shall observe the accepted changed-root result, including empty collections.
+  Pre-mutation reads shall not publish data, metadata, errors, busy state, or
+  automatic follow-up afterward. Failed mutations shall not invalidate reads.
+  Unchanged-root reads shall still share work. Immediate synchronization of
+  other workspaces or tabs is outside this guarantee.
 
 ### REQ-WORKSPACES-LOCAL-REPOSITORIES-004: Filesystem access diagnostics
 
@@ -164,29 +182,8 @@ behind a macOS access failure.
 
 ## Migrated source detail
 
-## Why
-
-Users need to connect repositories already present on the machine running Kandev, including native
-Windows repositories outside the user's home directory. Explicitly adding one repository should
-work without widening automatic filesystem scans or editing packaged runtime configuration.
-
 ## What
 
-- A user can add a local Git repository by entering or selecting an absolute path that the Kandev
-  process can access.
-- Manual selection is valid independently of `repositoryDiscovery.roots`; those roots govern only
-  automatic discovery scans.
-- Kandev validates and canonicalizes a non-empty local repository path before saving it. A saved
-  repository records the exact canonical path the user selected.
-- Trusting one repository does not trust its parent directory, filesystem volume, or sibling
-  repositories.
-- Saved repositories remain usable for branch listing, current status, refresh, task creation, and
-  fresh-branch workflows after restart.
-- A saved repository without an `origin` remote supports Merge and Rebase when the selected base
-  branch exists locally.
-- A repository with an `origin` remote refreshes and uses `origin/<base>` for Merge and Rebase.
-- A missing local base branch causes a clear error before Merge or Rebase changes repository
-  history.
 - A saved repository must continue resolving to its recorded canonical location. Git metadata
   outside that location is accepted only for a verifiable linked worktree or initialized submodule
   with reciprocal canonical `core.worktree` metadata.
@@ -270,32 +267,13 @@ The canonical `repositories.local_path` survives backend and launcher restarts t
 repository store. No in-memory root mutation or packaged `config.yaml` edit is required. Deleting
 the repository record removes that exact durable grant from the workspace.
 
-## Scenarios
+## Examples
 
-- **GIVEN** automatic discovery is rooted at the user's home directory, **WHEN** a Windows user
-  manually validates and saves `D:\Projects\app`, **THEN** Kandev accepts the repository and persists
-  its canonical native path.
-- **GIVEN** a manually saved repository outside every discovery root, **WHEN** the user lists or
-  refreshes its branches after a restart, **THEN** Kandev resolves the saved repository ID and the
-  operation succeeds.
-- **GIVEN** a task worktree has no `origin` remote and has a local `main` branch, **WHEN** the user
-  merges or rebases from `main`, **THEN** Kandev uses the local branch and the operation succeeds.
-- **GIVEN** a repository has an `origin` remote, **WHEN** the user merges or rebases from `main`,
-  **THEN** Kandev fetches and uses `origin/main`.
-- **GIVEN** a task worktree has no `origin` remote and the selected `main` base branch is missing
-  locally, **WHEN** the user starts Merge or Rebase, **THEN** Kandev reports
-  `base branch "main" does not exist locally` and leaves repository history unchanged.
-- **GIVEN** a manually saved repository outside every discovery root, **WHEN** the user confirms a
-  fresh-branch operation for it, **THEN** Kandev resolves the saved repository ID before changing
-  the working tree.
-- **GIVEN** `D:\Projects\app` was explicitly saved, **WHEN** automatic discovery runs, **THEN** it does
-  not scan `D:\Projects` unless that directory is separately configured as a discovery root.
-- **GIVEN** a missing directory, ordinary directory, or inaccessible path, **WHEN** a user tries to
-  save it as a local repository, **THEN** the backend rejects the request even if the frontend did
-  not validate first.
-- **GIVEN** path spelling differs only by Windows drive-letter casing or trailing separators,
-  **WHEN** Kandev canonicalizes and compares the path, **THEN** it treats the spellings according to
-  Windows filesystem semantics.
+- Saving `D:\Projects\app` with Home discovery records its canonical native path
+  without scanning `D:\Projects` unless separately configured. Casing and trailing
+  separators follow Windows filesystem semantics.
+- Merge/Rebase without `origin`, when local `main` is missing, reports
+  `base branch "main" does not exist locally` without changing history.
 
 ## Out of Scope
 
@@ -310,6 +288,9 @@ the repository record removes that exact durable grant from the workspace.
 
 ## Implementation Plans
 
+- [Manual Repository Validation Ownership](../../../plans/manual-repository-validation-ownership/plan.md)
+- [Repository Discovery Root Mutations](../../../plans/repository-discovery-root-mutations/plan.md)
+- [Repository Discovery Ordering](../../../plans/repository-discovery-ordering/plan.md)
 - [Repository Discovery Failure Recovery](../../../plans/repository-discovery-failure-recovery/plan.md)
 
 - [Explicit Local Repository Trust](../../../plans/explicit-local-repository-trust/plan.md)

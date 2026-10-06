@@ -3,11 +3,12 @@
 import { useTheme } from "@/components/theme/app-theme";
 import { getThemeToggleLabelKey, getThemeToggleTarget } from "@/components/theme/theme-toggle";
 import { IconMoon, IconSun } from "@tabler/icons-react";
+import { cn } from "@/lib/utils";
 import { Button } from "@kandev/ui/button";
 import { useSyncExternalStore } from "react";
 import { useTranslation } from "react-i18next";
 
-export function ThemeToggle() {
+export function ThemeToggle({ className }: { className?: string } = {}) {
   const { t } = useTranslation();
   const { resolvedTheme, setTheme } = useTheme();
   const targetTheme = getThemeToggleTarget(resolvedTheme);
@@ -27,7 +28,7 @@ export function ThemeToggle() {
       variant="ghost"
       size="sm"
       onClick={() => setTheme(targetTheme)}
-      className="h-9 w-9 p-0"
+      className={cn("h-9 w-9 p-0", className)}
       aria-label={t(labelKey)}
       aria-pressed={resolvedTheme === "dark"}
     >

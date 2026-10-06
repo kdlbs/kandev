@@ -466,9 +466,7 @@ describe("AppNavSections", () => {
 
   // The phone Utilities group is deliberately uncapped (spec.md#Capacity-and-
   // overflow: "the phone surface is uncapped"), unlike the desktop footer's
-  // MAX_INLINE_PLUGIN_FOOTER_ITEMS budget — well over that budget (8, per
-  // spec.md's own "well over the budget" scenario) must still render every
-  // item as a row, with no overflow menu of its own.
+  // desktop utilities menu; every entry stays directly visible on phones.
   it("renders every plugin sidebar-footer item as a row, uncapped, with no overflow menu", () => {
     navRegistrations = Array.from({ length: 8 }, (_, i) => ({
       pluginId: "acme",
@@ -483,7 +481,7 @@ describe("AppNavSections", () => {
     for (let i = 0; i < 8; i++) {
       expect(screen.getByRole("link", { name: `Acme Board ${i}` })).not.toBeNull();
     }
-    expect(screen.queryByTestId("sidebar-plugin-overflow-button")).toBeNull();
+    expect(screen.queryByTestId("sidebar-footer-more-button")).toBeNull();
   });
 });
 
