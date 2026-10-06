@@ -1,5 +1,5 @@
 import type { TaskSwitcherItem } from "@/components/task/task-switcher-types";
-import type { SortSpec } from "@/lib/state/slices/ui/sidebar-view-types";
+import type { SortRule, SortSpec } from "@/lib/state/slices/ui/sidebar-view-types";
 import { parseStrictRfc3339Timestamp } from "@/lib/utils/strict-timestamp";
 import {
   getStateBucket,
@@ -7,6 +7,8 @@ import {
   type EffectiveTaskTreeState,
 } from "./effective-task-tree-state";
 import { sqliteLower } from "./sidebar-local-filter";
+import { sidebarSortRules } from "./sidebar-sort-chain";
+import { sidebarColorMatches } from "./sidebar-color-rank";
 
 /** UTF-8 BINARY order, including astral code points that differ from UTF-16 order. */
 export function sqliteBinary(left: string, right: string): number {
@@ -50,39 +52,96 @@ export function idOrder(ids: string[]): (id: string) => number {
   return (id) => positions.get(id) ?? ids.length;
 }
 
-export function localTaskComparator(
-  sort: SortSpec,
-  orderedIds: string[],
-  states: ReadonlyMap<string, EffectiveTaskTreeState>,
-  activities: ReadonlyMap<string, string>,
+export type LocalTaskComparatorOptions = {
+  sort: SortSpec;
+  orderedIds: string[];
+  states: ReadonlyMap<string, EffectiveTaskTreeState>;
+  activities: ReadonlyMap<string, string>;
+  running: ReadonlyMap<string, boolean>;
+  colors: ReadonlyMap<string, string | null>;
+};
+
+type LocalSortValues = Omit<LocalTaskComparatorOptions, "sort" | "orderedIds"> & {
+  order: (id: string) => number;
+};
+
+function compareLocalState(
+  a: TaskSwitcherItem,
+  b: TaskSwitcherItem,
+  values: LocalSortValues,
+): number {
+  const left = values.states.get(a.id)?.bucket ?? getStateBucket(a);
+  const right = values.states.get(b.id)?.bucket ?? getStateBucket(b);
+  return STATE_BUCKET_ORDER[left] - STATE_BUCKET_ORDER[right];
+}
+
+function compareLocalColor(
+  color: string | undefined,
+  a: TaskSwitcherItem,
+  b: TaskSwitcherItem,
+  values: LocalSortValues,
+): number {
+  const left = sidebarColorMatches(values.colors.get(a.id), color ?? "");
+  const right = sidebarColorMatches(values.colors.get(b.id), color ?? "");
+  return Number(left) - Number(right);
+}
+
+function compareLocalCustom(
+  a: TaskSwitcherItem,
+  b: TaskSwitcherItem,
+  order: LocalSortValues["order"],
+): number {
+  return (
+    order(a.id) - order(b.id) ||
+    sqliteBinary(sqliteTaskTime(b.createdAt), sqliteTaskTime(a.createdAt))
+  );
+}
+
+function compareLocalRule(
+  rule: SortRule,
+  a: TaskSwitcherItem,
+  b: TaskSwitcherItem,
+  values: LocalSortValues,
 ) {
-  const order = idOrder(orderedIds);
-  const compare = (a: TaskSwitcherItem, b: TaskSwitcherItem) => {
-    switch (sort.key) {
-      case "state":
-        return (
-          STATE_BUCKET_ORDER[states.get(a.id)?.bucket ?? getStateBucket(a)] -
-          STATE_BUCKET_ORDER[states.get(b.id)?.bucket ?? getStateBucket(b)]
-        );
-      case "title":
-        return sqliteNoCase(a.title, b.title);
-      case "createdAt":
-        return sqliteBinary(sqliteTaskTime(a.createdAt), sqliteTaskTime(b.createdAt));
-      case "updatedAt":
-        return sqliteBinary(sqliteTaskTime(a.updatedAt), sqliteTaskTime(b.updatedAt));
-      case "lastActivityAt":
-        return sqliteBinary(activities.get(a.id) ?? "", activities.get(b.id) ?? "");
-      case "custom":
-        return (
-          order(a.id) - order(b.id) ||
-          sqliteBinary(sqliteTaskTime(b.createdAt), sqliteTaskTime(a.createdAt))
-        );
-    }
-  };
-  const direction = sort.key !== "custom" && sort.direction === "desc" ? -1 : 1;
-  return (a: TaskSwitcherItem, b: TaskSwitcherItem) =>
-    compare(a, b) * direction ||
+  switch (rule.key) {
+    case "state":
+      return compareLocalState(a, b, values);
+    case "title":
+      return sqliteNoCase(a.title, b.title);
+    case "createdAt":
+      return sqliteBinary(sqliteTaskTime(a.createdAt), sqliteTaskTime(b.createdAt));
+    case "updatedAt":
+      return sqliteBinary(sqliteTaskTime(a.updatedAt), sqliteTaskTime(b.updatedAt));
+    case "lastActivityAt":
+      return sqliteBinary(values.activities.get(a.id) ?? "", values.activities.get(b.id) ?? "");
+    case "running":
+      return Number(values.running.get(a.id) === true) - Number(values.running.get(b.id) === true);
+    case "color":
+      return compareLocalColor(rule.color, a, b, values);
+    case "custom":
+      return compareLocalCustom(a, b, values.order);
+  }
+}
+
+function compareLocalCanonical(a: TaskSwitcherItem, b: TaskSwitcherItem): number {
+  return (
     sqliteBinary(sqliteTaskTime(b.updatedAt), sqliteTaskTime(a.updatedAt)) ||
     sqliteNoCase(a.title, b.title) ||
-    sqliteBinary(a.id, b.id);
+    sqliteBinary(a.id, b.id)
+  );
+}
+
+export function localTaskComparator(options: LocalTaskComparatorOptions) {
+  const { sort, orderedIds, ...values } = options;
+  const order = idOrder(orderedIds);
+  const localValues = { ...values, order };
+  const rules = sidebarSortRules(sort);
+  return (a: TaskSwitcherItem, b: TaskSwitcherItem) => {
+    for (const rule of rules) {
+      const direction = rule.key !== "custom" && rule.direction === "desc" ? -1 : 1;
+      const result = compareLocalRule(rule, a, b, localValues) * direction;
+      if (result !== 0) return result;
+    }
+    return compareLocalCanonical(a, b);
+  };
 }

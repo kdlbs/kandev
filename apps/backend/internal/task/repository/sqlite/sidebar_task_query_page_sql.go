@@ -140,13 +140,13 @@ func sidebarPageTreeCTEs(page sidebarPageBuildContext) string {
 		), cycle_roots(root_key) AS (
 			SELECT DISTINCT min_key FROM cycle_probe WHERE closed_by_key = start_key
 		)`
-	return cycleCTEs + sidebarRootMembershipCTEs() + page.repositoryCTEs + page.ancestorCTEs + page.stateCTEs + page.activityCTEs + `, ranked_ordered AS (
+	return cycleCTEs + sidebarRootMembershipCTEs() + page.repositoryCTEs + page.ancestorCTEs + page.stateCTEs + page.activityCTEs + page.runningCTEs + `, ranked_ordered AS (
 		SELECT v.id, v.workflow_id, v.workflow_step_id, CAST(NULL AS TEXT) AS display_parent_id,
 			` + page.groupKey + ` AS task_group_key, ` + page.groupLabel + ` AS task_group_label,
 			ROW_NUMBER() OVER (ORDER BY ` + page.rootOrder + `) AS global_root_sort_order,
 			` + page.rootPinExpr + ` AS root_pin_order
 		FROM display_roots v
-		` + page.activityJoin + page.stateJoin + page.repositoryJoin + `
+		` + page.activityJoin + page.runningJoin + page.stateJoin + page.repositoryJoin + `
 	), ranked AS (
 		SELECT ranked_ordered.*, global_root_sort_order AS sibling_order,
 			global_root_sort_order AS root_sort_order FROM ranked_ordered
@@ -159,6 +159,7 @@ type sidebarPageBuildContext struct {
 	cycleProbeGuard                                          string
 	wipAdmittedFalse, order, rootOrder, groupKey, groupLabel string
 	stateJoin, stateCTEs                                     string
+	runningJoin, runningCTEs                                 string
 	ancestorCTEs, activityCTEs, activityJoin                 string
 	repositoryCTEs, repositoryJoin                           string
 	args, childArgs                                          []any
@@ -166,7 +167,14 @@ type sidebarPageBuildContext struct {
 
 func sidebarPageBuildContextFor(driver string, query models.SidebarTaskViewQuery, prefs models.SidebarTaskViewPreferences) sidebarPageBuildContext {
 
-	sortExpr, sortArgs := sidebarSortExpression(driver, query.Sort.Key, query.Sort.Direction, prefs.OrderedTaskIDs)
+	sortExpressions := make([]string, 0, len(query.Sort.Criteria()))
+	var sortArgs []any
+	for _, criterion := range query.Sort.Criteria() {
+		expression, args := sidebarSortExpression(driver, criterion, prefs.OrderedTaskIDs)
+		sortExpressions = append(sortExpressions, expression)
+		sortArgs = append(sortArgs, args...)
+	}
+	sortExpr := strings.Join(sortExpressions, ", ")
 	groupOrder := sidebarGroupOrderExpression(query.Group)
 	pinExpr, pinArgs := sidebarIDOrder(driver, prefs.PinnedTaskIDs)
 	subtaskExpr, subtaskArgs := sidebarSubtaskOrder(driver, prefs.SubtaskOrderByParentID)
@@ -208,26 +216,29 @@ func sidebarPageBuildContextFor(driver string, query models.SidebarTaskViewQuery
 		groupKey = `COALESCE(effective_state.effective_group_key, '__not_started__')`
 		groupLabel = groupKey
 	}
-	if query.Group == sidebarStateKey || query.Sort.Key == sidebarStateKey {
+	if query.Group == sidebarStateKey || sidebarQueryHasSort(query, sidebarStateKey) {
 		stateJoin = ` LEFT JOIN effective_tree_state effective_state ON effective_state.task_id = v.id`
 	}
 	stateCTEs := sidebarStateCTEs(query)
 	activityCTEs, activityJoin := sidebarActivityCTEs(query)
+	runningCTEs, runningJoin := sidebarRunningCTEs(query)
 	return sidebarPageBuildContext{
 		groupOrder: groupOrder, rootPathPart: rootPathPart, childPathPart: childPathPart,
 		rootPinExpr:      rootPinExpr,
 		cycleProbeGuard:  cycleProbeGuard,
 		wipAdmittedFalse: wipAdmittedFalse, order: order, rootOrder: rootOrder, groupKey: groupKey, groupLabel: groupLabel,
 		stateJoin: stateJoin, stateCTEs: stateCTEs,
+		runningJoin: runningJoin, runningCTEs: runningCTEs,
 		repositoryCTEs: repositoryCTEs, repositoryJoin: repositoryJoin,
 		ancestorCTEs: sidebarAncestorCTE(driver, query), activityCTEs: activityCTEs, activityJoin: activityJoin, args: args, childArgs: childArgs,
 	}
 }
 
 func sidebarAncestorCTE(driver string, query models.SidebarTaskViewQuery) string {
-	state := query.Sort.Key == sidebarStateKey
-	activity := query.Sort.Key == sidebarActivitySortField
-	if !state && !activity {
+	state := sidebarQueryHasSort(query, sidebarStateKey)
+	activity := sidebarQueryHasSort(query, sidebarActivitySortField)
+	running := sidebarQueryHasSort(query, sidebarRunningSortField)
+	if !state && !activity && !running {
 		return ""
 	}
 	activityValue, stateValue, bucketValue, primaryValue := sidebarSQLNull, sidebarSQLNull, sidebarSQLNull, sidebarSQLNull
@@ -235,12 +246,15 @@ func sidebarAncestorCTE(driver string, query models.SidebarTaskViewQuery) string
 		activityValue = "source.activity_at"
 	}
 	if state {
-		stateValue, bucketValue, primaryValue = "source.state", "source.state_bucket", "source.primary_session_state"
+		stateValue, bucketValue = "source.state", "source.state_bucket"
+	}
+	if state || running {
+		primaryValue = "source.primary_session_state"
 	}
 	//nolint:dupword // A state projection includes the source itself before its ancestors.
 	anchorIdentity := `source.id, source.id, source.parent_id, '/' || source.id || '/'`
 	anchorSource := `filtered source`
-	if !state {
+	if !state && !running {
 		// Activity aggregation only needs proper descendants; each row keeps its own value.
 		anchorIdentity = `source.id, parent.id, parent.parent_id, '/' || source.id || '/' || parent.id || '/'`
 		anchorSource += ` JOIN filtered parent ON parent.id = source.parent_id AND parent.id <> source.id`
@@ -261,13 +275,13 @@ func sidebarAncestorCTE(driver string, query models.SidebarTaskViewQuery) string
 }
 
 func sidebarStateCTEs(query models.SidebarTaskViewQuery) string {
-	if query.Group != sidebarStateKey && query.Sort.Key != sidebarStateKey {
+	if query.Group != sidebarStateKey && !sidebarQueryHasSort(query, sidebarStateKey) {
 		return ""
 	}
 	members := `, state_members AS NOT MATERIALIZED (
 		SELECT source_key, ancestor_key, state, state_bucket, primary_session_state FROM ancestor_walk
 	)`
-	if query.Sort.Key != sidebarStateKey {
+	if !sidebarQueryHasSort(query, sidebarStateKey) {
 		// Group identity uses the same complete root memberships as page counts.
 		members = `, state_members AS MATERIALIZED (
 			SELECT source.id AS source_key, member.root_id AS ancestor_key,
@@ -316,7 +330,7 @@ func sidebarStateCTEs(query models.SidebarTaskViewQuery) string {
 }
 
 func sidebarActivityCTEs(query models.SidebarTaskViewQuery) (string, string) {
-	if query.Sort.Key != sidebarActivitySortField {
+	if !sidebarQueryHasSort(query, sidebarActivitySortField) {
 		return "", ""
 	}
 	return `, tree_activity AS (
@@ -324,6 +338,18 @@ func sidebarActivityCTEs(query models.SidebarTaskViewQuery) (string, string) {
 		FROM ancestor_walk WHERE source_key <> ancestor_key
 		GROUP BY ancestor_key
 	)`, ` LEFT JOIN tree_activity activity ON activity.ancestor_id = v.id`
+}
+
+func sidebarRunningCTEs(query models.SidebarTaskViewQuery) (string, string) {
+	if !sidebarQueryHasSort(query, sidebarRunningSortField) {
+		return "", ""
+	}
+	return `, running_aggregate AS (
+		SELECT ancestor_key AS task_id,
+			MAX(CASE WHEN primary_session_state = 'RUNNING' THEN 1 ELSE 0 END) AS has_running
+		FROM ancestor_walk
+		GROUP BY ancestor_key
+	)`, ` LEFT JOIN running_aggregate running ON running.task_id = v.id`
 }
 
 func sidebarGroupOrderExpression(group string) string {
@@ -382,15 +408,23 @@ func sidebarSubtaskOrder(driver string, orders map[string][]string) (string, []a
 	return "CASE v.parent_id " + strings.Join(branches, " ") + " ELSE NULL END", args
 }
 
-func sidebarSortExpression(driver, key, direction string, orderIDs []string) (string, []any) {
-	order := strings.ToUpper(direction)
-	switch key {
+func sidebarSortExpression(
+	driver string,
+	criterion models.SidebarTaskViewSortCriterion,
+	orderIDs []string,
+) (string, []any) {
+	order := strings.ToUpper(criterion.Direction)
+	switch criterion.Key {
 	case sidebarStateKey:
 		return `CASE effective_state.effective_bucket WHEN 'review' THEN 0 WHEN 'in_progress' THEN 1 ELSE 2 END ` + order, nil
 	case "updatedAt":
 		return "v.updated_at " + order, nil
 	case sidebarActivitySortField:
 		return "CASE WHEN v.activity_at IS NULL OR activity.tree_activity_at > v.activity_at THEN activity.tree_activity_at ELSE v.activity_at END " + order, nil
+	case sidebarRunningSortField:
+		return `COALESCE(running.has_running, 0) ` + order, nil
+	case "color":
+		return "CASE WHEN v.effective_color = ? THEN 1 ELSE 0 END " + order, []any{criterion.Color}
 	case "createdAt":
 		return "v.created_at " + order, nil
 	case "title":

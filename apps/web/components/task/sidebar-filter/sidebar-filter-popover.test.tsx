@@ -19,6 +19,7 @@ const VIEW: SidebarView = {
   filters: [],
   sort: { key: "state", direction: "asc" },
   group: "repository",
+  groupIndent: true,
   collapsedGroups: [],
   taskRow: {
     detailsEnabled: true,
@@ -157,16 +158,22 @@ describe("SidebarFilterPopover task-row editor", () => {
     expect(screen.queryByTestId("task-row-details-toggle")).toBeNull();
     expect(screen.queryByTestId("sort-key-select")).toBeNull();
     expect(screen.queryByTestId("group-key-select")).toBeNull();
-    expect(screen.getByText("Status, Sort direction asc", { exact: true })).toBeTruthy();
+    expect(screen.getByText("Status: Ascending", { exact: true })).toBeTruthy();
 
     fireEvent.click(screen.getByTestId("sidebar-sort-settings-toggle"));
     expect(screen.getByTestId("sort-key-select")).toBeTruthy();
     fireEvent.click(screen.getByTestId("sidebar-group-settings-toggle"));
     expect(screen.getByTestId("group-key-select")).toBeTruthy();
+    const indentToggle = screen.getByRole("switch", { name: "Indent grouped tasks" });
+    expect(indentToggle.getAttribute("aria-checked")).toBe("true");
+    fireEvent.click(indentToggle);
+    expect(state.updateSidebarDraft).toHaveBeenCalledWith({ groupIndent: false });
+    fireEvent.click(screen.getByTestId("sidebar-group-settings-toggle"));
+    expect(screen.queryByRole("switch", { name: "Indent grouped tasks" })).toBeNull();
 
     fireEvent.click(screen.getByTestId("task-row-settings-toggle"));
     expect(screen.getByTestId("task-row-details-toggle")).toBeTruthy();
-    expect(state.updateSidebarDraft).not.toHaveBeenCalled();
+    expect(state.updateSidebarDraft).toHaveBeenCalledTimes(1);
   });
 
   it("gives each collapsed view setting the same bottom separator", () => {

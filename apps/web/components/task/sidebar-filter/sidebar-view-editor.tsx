@@ -3,6 +3,7 @@
 import type { ComponentProps } from "react";
 import { IconPlus } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
+import { Switch } from "@kandev/ui/switch";
 import { useTranslation } from "react-i18next";
 import type {
   FilterClause,
@@ -15,16 +16,20 @@ import { cloneSidebarTaskRowPresentation } from "@/lib/state/slices/ui/sidebar-t
 import { DIMENSION_METAS } from "./filter-dimension-registry";
 import { FilterClauseEditor } from "./filter-clause-editor";
 import { GroupPicker } from "./group-picker";
-import { SortPicker, sortKeyLabelKey } from "./sort-picker";
+import { sortKeyLabelKey } from "./sort-picker";
+import { SortChainEditor, sortRuleDirectionLabelKey } from "./sort-chain-editor";
 import { TaskRowSettings } from "./task-row-settings";
 import { SidebarSettingsDisclosure } from "./sidebar-settings-disclosure";
 import { AutomaticColorSettings } from "./automatic-color-settings";
 import { ViewHeaderRow } from "./view-manager";
+import { sidebarSortRules } from "@/lib/sidebar/sidebar-sort-chain";
 
 export type SidebarViewEditorCurrent = {
   filters: FilterClause[];
   sort: SortSpec;
+  sortWarningCount?: number;
   group: GroupKey;
+  groupIndent: boolean;
   taskRow: NonNullable<SidebarViewDraft["taskRow"]>;
 };
 
@@ -48,13 +53,21 @@ export function SidebarViewEditor({
   onRemoveClause,
 }: Props) {
   const { t } = useTranslation();
-  const sortSummary =
-    current.sort.key === "custom"
-      ? t(sortKeyLabelKey(current.sort.key))
-      : t("task:sortSummary", {
-          sort: t(sortKeyLabelKey(current.sort.key)),
-          direction: t("task:sortDirection", { direction: current.sort.direction }),
+  const sortSummary = t("task:sortChainSummary", {
+    rules: sidebarSortRules(current.sort)
+      .map((rule) => {
+        if (rule.key === "custom") return t(sortKeyLabelKey(rule.key));
+        const field =
+          rule.key === "color"
+            ? `${t(sortKeyLabelKey(rule.key))}: ${t(`task:color${(rule.color ?? "red")[0].toUpperCase()}${(rule.color ?? "red").slice(1)}`)}`
+            : t(sortKeyLabelKey(rule.key));
+        return t("task:sortRuleSummary", {
+          field,
+          order: t(sortRuleDirectionLabelKey(rule.key, rule.direction)),
         });
+      })
+      .join(" · "),
+  });
   return (
     <>
       <div className="border-b p-2">
@@ -74,7 +87,12 @@ export function SidebarViewEditor({
         className="border-b"
         contentClassName="pt-1"
       >
-        <SortPicker value={current.sort} onChange={(sort) => onUpdate({ sort })} />
+        <SortChainEditor
+          value={current.sort}
+          onChange={(sort) => onUpdate({ sort })}
+          isDrawerLayout={isDrawerLayout}
+          warningCount={current.sortWarningCount ?? 0}
+        />
       </SidebarSettingsDisclosure>
       <SidebarSettingsDisclosure
         title={t("task:groupBy")}
@@ -84,6 +102,19 @@ export function SidebarViewEditor({
         contentClassName="pt-1"
       >
         <GroupPicker value={current.group} onChange={(group) => onUpdate({ group })} />
+        <label
+          htmlFor="sidebar-group-indent"
+          className="flex min-h-11 cursor-pointer items-center justify-between gap-3 px-1 text-xs"
+        >
+          <span>{t("task:indentGroupedTasks")}</span>
+          <Switch
+            id="sidebar-group-indent"
+            size="sm"
+            checked={current.groupIndent}
+            onCheckedChange={(groupIndent) => onUpdate({ groupIndent })}
+            aria-label={t("task:indentGroupedTasks")}
+          />
+        </label>
       </SidebarSettingsDisclosure>
       <TaskRowSettings
         value={current.taskRow}
@@ -164,7 +195,11 @@ export function createSidebarViewEditorCurrent(
   return {
     filters: source?.filters ?? [],
     sort: source?.sort ?? { key: "state", direction: "asc" },
+    ...(source?.sortWarningCount !== undefined
+      ? { sortWarningCount: source.sortWarningCount }
+      : {}),
     group: source?.group ?? "none",
+    groupIndent: source?.groupIndent !== false,
     taskRow: cloneSidebarTaskRowPresentation(source?.taskRow),
   };
 }

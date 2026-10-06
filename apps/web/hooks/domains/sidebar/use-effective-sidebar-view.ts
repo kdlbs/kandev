@@ -21,6 +21,7 @@ export function useEffectiveSidebarView(workspaceId?: string | null) {
       filters: d.filters,
       sort: d.sort,
       group: d.group,
+      groupIndent: d.groupIndent,
       taskRow: cloneSidebarTaskRowPresentation(d.taskRow ?? active.taskRow),
     };
   }, [sidebarSlice.views, sidebarSlice.activeViewId, sidebarSlice.draft]);

@@ -3,6 +3,7 @@ import type { SidebarTaskPageResponse, SidebarTaskQuery } from "@/lib/types/http
 import type { AppState } from "@/lib/state/store";
 import { generateUUID } from "@/lib/utils";
 import { reconcileSidebarPage, sidebarPageMembership } from "./sidebar-page-overviews";
+import { repositoryIdentityForSavedRepository } from "./repository-rule-identity";
 
 const MAX_PAGES = 5;
 const MAX_BYTES = 2 * 1024 * 1024;
@@ -27,6 +28,7 @@ export class SidebarTaskPageCache {
   private pages = new Map<string, PageSnapshot>();
   private requests = new Map<string, Request>();
   private scope = "";
+  private rankingKey = "";
   private revision = 0;
   private summaries: AppState["sidebarStatusSummaryByWorkspaceId"][string] | undefined;
   private epoch = 0;
@@ -43,7 +45,12 @@ export class SidebarTaskPageCache {
         state.workspaces === previous.workspaces &&
         state.workspaceContextGeneration === previous.workspaceContextGeneration &&
         state.sidebarArchivedTasks === previous.sidebarArchivedTasks &&
-        state.sidebarStatusSummaryByWorkspaceId === previous.sidebarStatusSummaryByWorkspaceId
+        state.sidebarStatusSummaryByWorkspaceId === previous.sidebarStatusSummaryByWorkspaceId &&
+        state.userSettings.sidebarTaskColors === previous.userSettings.sidebarTaskColors &&
+        state.userSettings.sidebarTaskColorAutomation ===
+          previous.userSettings.sidebarTaskColorAutomation &&
+        state.repositories.itemsByWorkspaceId === previous.repositories.itemsByWorkspaceId &&
+        state.kanbanMulti.snapshots === previous.kanbanMulti.snapshots
       )
         return;
       this.synchronize();
@@ -57,16 +64,23 @@ export class SidebarTaskPageCache {
       const state = this.store.getState();
       const workspaceId = state.workspaces.activeId ?? "";
       const scope = sidebarTaskPageScope(state);
+      const rankingKey = sidebarTaskPageRankingKey(state);
       const revision = state.sidebarArchivedTasks?.revisionByWorkspaceId?.[workspaceId] ?? 0;
       const summaries = state.sidebarStatusSummaryByWorkspaceId?.[workspaceId];
       const oldScope = this.scope,
+        oldRankingKey = this.rankingKey,
         oldRevision = this.revision,
         oldSummaries = this.summaries;
       this.scope = scope;
+      this.rankingKey = rankingKey;
       this.revision = revision;
       this.summaries = summaries;
       if (scope !== oldScope) this.clear();
-      else if (revision !== oldRevision) {
+      else if (rankingKey !== oldRankingKey) {
+        this.clearPages();
+        this.cancelRequests();
+        this.epoch++;
+      } else if (revision !== oldRevision) {
         this.clearPages();
         this.epoch++;
       } else if (summaries !== oldSummaries) {
@@ -139,6 +153,10 @@ export class SidebarTaskPageCache {
   clear() {
     this.epoch++;
     this.clearPages();
+    this.cancelRequests();
+  }
+
+  private cancelRequests() {
     const requests = [...this.requests.values()];
     this.requests.clear();
     for (const request of requests) {
@@ -187,6 +205,7 @@ export class SidebarTaskPageCache {
     if (
       !entry ||
       sidebarTaskPageScope(state) !== this.scope ||
+      sidebarTaskPageRankingKey(state) !== this.rankingKey ||
       (state.sidebarArchivedTasks?.revisionByWorkspaceId?.[workspaceId] ?? 0) !== this.revision ||
       Date.now() - entry.fetchedAt >= MAX_AGE_MS
     )
@@ -304,4 +323,57 @@ export function sidebarTaskPageScope(state: AppState): string {
     state.auth?.user?.id,
     state.taskOverview?.generation,
   ]);
+}
+
+/** Semantic rank inputs stay outside saved-view identity and are reduced to a bounded key. */
+export function sidebarTaskPageRankingKey(state: AppState): string {
+  const colors = Object.entries(state.userSettings.sidebarTaskColors ?? {})
+    .filter(([, color]) => typeof color === "string")
+    .sort(([a], [b]) => compareText(a, b));
+  const automation = state.userSettings.sidebarTaskColorAutomation;
+  const rules = automation.rules.map((rule) => ({
+    enabled: rule.enabled,
+    dimension: rule.condition.dimension,
+    value: stableSidebarValue(rule.condition.value),
+    output: stableSidebarValue(rule.output),
+  }));
+  const repositories = (
+    state.repositories.itemsByWorkspaceId[state.workspaces.activeId ?? ""] ?? []
+  )
+    .map((repository) => repositoryIdentityForSavedRepository(repository))
+    .map(stableSidebarValue)
+    .sort((a, b) => compareText(JSON.stringify(a), JSON.stringify(b)));
+  const stepColors = Object.values(state.kanbanMulti.snapshots ?? {})
+    .flatMap((snapshot) => snapshot.steps.map((step) => [step.id, step.color]))
+    .sort((a, b) => compareText(JSON.stringify(a), JSON.stringify(b)));
+  return digestSidebarRanking(
+    JSON.stringify([colors, automation.enabled, rules, repositories, stepColors]),
+  );
+}
+
+function stableSidebarValue(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(stableSidebarValue);
+  if (!value || typeof value !== "object") return value;
+  return Object.fromEntries(
+    Object.entries(value)
+      .sort(([a], [b]) => compareText(a, b))
+      .map(([key, entry]) => [key, stableSidebarValue(entry)]),
+  );
+}
+
+function compareText(a: string, b: string): number {
+  if (a < b) return -1;
+  if (a > b) return 1;
+  return 0;
+}
+
+function digestSidebarRanking(value: string): string {
+  let first = 2166136261;
+  let second = 2246822519;
+  for (let index = 0; index < value.length; index++) {
+    const code = value.charCodeAt(index);
+    first = Math.imul(first ^ code, 16777619);
+    second = Math.imul(second ^ code, 3266489917);
+  }
+  return `${(first >>> 0).toString(16).padStart(8, "0")}${(second >>> 0).toString(16).padStart(8, "0")}`;
 }

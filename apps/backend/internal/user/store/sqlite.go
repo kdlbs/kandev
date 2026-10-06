@@ -785,12 +785,14 @@ func defaultUserSettings(userID string) *models.UserSettings {
 
 // DefaultSidebarViews returns the default single "All tasks" sidebar view.
 func DefaultSidebarViews() []models.SidebarView {
+	groupIndent := true
 	return []models.SidebarView{{
 		ID:              DefaultSidebarViewID,
 		Name:            "All tasks",
 		Filters:         []models.SidebarViewClause{},
 		Sort:            models.SidebarViewSort{Key: "state", Direction: "asc"},
 		Group:           "repository",
+		GroupIndent:     &groupIndent,
 		CollapsedGroups: []string{},
 		TaskRow:         models.DefaultSidebarTaskRowPresentation(),
 	}}

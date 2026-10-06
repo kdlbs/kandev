@@ -8,6 +8,8 @@ import type { SidebarView } from "@/lib/state/slices/ui/sidebar-view-types";
 import { applyGroup, type SidebarGroup, type SidebarTaskPrefs } from "./apply-view";
 import { resolveEffectiveStateMap, STATE_GROUP_ORDER } from "./effective-task-tree-state";
 import { resolveTaskTreeActivity } from "./task-tree-activity";
+import { resolveTaskTreeRunning } from "./task-tree-running";
+import { sidebarSortFromWire, sidebarSortHasKey } from "./sidebar-sort-chain";
 import {
   idOrder,
   localTaskComparator,
@@ -23,6 +25,7 @@ import {
   sidebarDescendantCounts,
 } from "./sidebar-local-tree";
 import { localSidebarQueues } from "./sidebar-local-wip";
+import { effectiveSidebarColorToken, type SidebarColorRankingSettings } from "./sidebar-color-rank";
 
 function repositoryRank(key: string): number {
   if (key === "__multi__") return 0;
@@ -57,6 +60,7 @@ function orderedLocalTree(
   tasks: LocalSidebarTask[],
   query: SidebarTaskQuery,
   prefs: SidebarTaskPrefs,
+  colorSettings?: SidebarColorRankingSettings,
 ) {
   const children = sidebarChildren(tasks);
   const states = resolveEffectiveStateMap(tasks, children);
@@ -69,12 +73,22 @@ function orderedLocalTree(
     sidebarChildren(activityTasks),
     sqliteBinary,
   );
-  const compare = localTaskComparator(
-    query.sort as SidebarView["sort"],
-    prefs.orderedTaskIds,
+  const sort = sidebarSortFromWire(query.sort);
+  const running = sidebarSortHasKey(sort, "running")
+    ? resolveTaskTreeRunning(tasks, children)
+    : new Map(tasks.map((task) => [task.id, task.sessionState === "RUNNING"]));
+  const colors =
+    sidebarSortHasKey(sort, "color") && colorSettings
+      ? new Map(tasks.map((task) => [task.id, effectiveSidebarColorToken(task, colorSettings)]))
+      : new Map<string, string | null>();
+  const compare = localTaskComparator({
+    sort,
+    orderedIds: prefs.orderedTaskIds,
     states,
     activities,
-  );
+    running,
+    colors,
+  });
   const sorted = breakSidebarCycles(tasks).sort(compare);
   const rootOrder = new Map(sorted.map((task, index) => [task.id, index]));
   const grouped = applyGroup(sorted, query.group as SidebarView["group"], children, states);
@@ -175,9 +189,10 @@ export function localSidebarPage(
   tasks: LocalSidebarTask[],
   query: SidebarTaskQuery,
   prefs: SidebarTaskPrefs,
+  colorSettings?: SidebarColorRankingSettings,
 ): SidebarTaskPageResponse {
   const filtered = tasks.filter((task) => matchesLocalSidebarTask(task, query.filters));
-  const tree = orderedLocalTree(filtered, query, prefs);
+  const tree = orderedLocalTree(filtered, query, prefs, colorSettings);
   const { rows, counts } = flattenTree(tree, query);
   const size = Math.min(100, Math.max(1, query.page_size));
   const pageCount = Math.max(1, Math.ceil(rows.length / size));

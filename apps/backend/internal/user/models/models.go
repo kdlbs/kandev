@@ -251,6 +251,7 @@ type SidebarView struct {
 	Filters         []SidebarViewClause         `json:"filters"`
 	Sort            SidebarViewSort             `json:"sort"`
 	Group           string                      `json:"group"`
+	GroupIndent     *bool                       `json:"group_indent,omitempty"`
 	CollapsedGroups []string                    `json:"collapsed_groups"`
 	TaskRow         *SidebarTaskRowPresentation `json:"task_row,omitempty"`
 }
@@ -263,16 +264,25 @@ type SidebarViewClause struct {
 }
 
 type SidebarViewSort struct {
+	Key       string                     `json:"key"`
+	Direction string                     `json:"direction"`
+	Color     string                     `json:"color,omitempty"`
+	ThenBy    []SidebarViewSortCriterion `json:"then_by,omitempty"`
+}
+
+type SidebarViewSortCriterion struct {
 	Key       string `json:"key"`
 	Direction string `json:"direction"`
+	Color     string `json:"color,omitempty"`
 }
 
 type SidebarViewDraft struct {
-	BaseViewID string                      `json:"base_view_id"`
-	Filters    []SidebarViewClause         `json:"filters"`
-	Sort       SidebarViewSort             `json:"sort"`
-	Group      string                      `json:"group"`
-	TaskRow    *SidebarTaskRowPresentation `json:"task_row,omitempty"`
+	BaseViewID  string                      `json:"base_view_id"`
+	Filters     []SidebarViewClause         `json:"filters"`
+	Sort        SidebarViewSort             `json:"sort"`
+	Group       string                      `json:"group"`
+	GroupIndent *bool                       `json:"group_indent,omitempty"`
+	TaskRow     *SidebarTaskRowPresentation `json:"task_row,omitempty"`
 }
 
 // SidebarTaskRowPresentation controls the optional metadata and trailing

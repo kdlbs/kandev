@@ -11,8 +11,8 @@ import { resolveTaskRepositorySlugs } from "@/lib/sidebar/sidebar-task-repositor
 import { effectiveTaskPendingAction } from "../task-select-helpers";
 import { taskPRInfoFromSummary } from "../task-pr-info";
 import type { SidebarTaskColorAutomation } from "@/lib/task-color-automation-settings";
-import { taskColorFacts } from "@/lib/sidebar/task-color-projection";
-import { resolveAutomaticTaskColor } from "@/lib/sidebar/task-color-rules";
+import { sidebarTaskColorDisplay } from "@/lib/sidebar/task-color-projection";
+import type { TaskColor } from "@/lib/task-colors";
 
 export type SheetItemCtx = {
   repositoryPathsById: Map<string, string | undefined>;
@@ -25,6 +25,7 @@ export type SheetItemCtx = {
   repositoriesById?: ReadonlyMap<string, Repository>;
   stepColorById?: ReadonlyMap<string, string>;
   automaticColorSettings?: SidebarTaskColorAutomation;
+  manualColors?: Record<string, TaskColor | null>;
   pendingRemovalTaskIds?: ReadonlySet<string>;
 };
 
@@ -95,14 +96,13 @@ export function toSheetItem(
   ctx: SheetItemCtx,
 ) {
   const status = sheetStatus(task, ctx);
-  const facts = taskColorFacts(task, {
+  const color = sidebarTaskColorDisplay(task, {
     workspaceId: ctx.workspaceId,
     repositoriesById: ctx.repositoriesById ?? EMPTY_REPOSITORIES_BY_ID,
     stepColorById: ctx.stepColorById ?? EMPTY_STEP_COLORS,
+    settings: ctx.automaticColorSettings,
+    manualColor: ctx.manualColors?.[task.id],
   });
-  const automaticColor = ctx.automaticColorSettings
-    ? resolveAutomaticTaskColor(ctx.automaticColorSettings, facts)
-    : null;
   return {
     id: task.id,
     title: task.title,
@@ -120,10 +120,10 @@ export function toSheetItem(
     workflowName: ctx.workflowNameById.get(task._workflowId),
     workflowStepId: task.workflowStepId,
     workflowStepTitle: ctx.stepTitleById.get(task.workflowStepId),
-    workspaceId: facts.workspaceId,
+    workspaceId: color.facts.workspaceId,
     origin: task.origin,
     primaryExecutorProfileId: task.primaryExecutorProfileId ?? undefined,
-    workflowStepColor: facts.workflowStepColor,
+    workflowStepColor: color.facts.workflowStepColor,
     isArchived: task.isArchived === true,
     isPendingRemoval: ctx.pendingRemovalTaskIds?.has(task.id) === true,
     isFromOffice: task.isFromOffice,
@@ -132,9 +132,10 @@ export function toSheetItem(
     remoteExecutorType: task.primaryExecutorType ?? undefined,
     remoteExecutorName: task.primaryExecutorName ?? undefined,
     repositoryLinks: task.repositories,
-    repositoryRuleIdentities: facts.repositories,
-    automaticColor: automaticColor?.color,
-    automaticColorSource: automaticColor?.source,
+    repositoryRuleIdentities: color.facts.repositories,
+    automaticColor: color.automaticColor?.color,
+    automaticColorSource: color.automaticColor?.source,
+    effectiveColorToken: color.effectiveColorToken,
     queuedCount: task.statusSummary?.queued_prompt_count,
     launchQueue: sheetLaunchQueue(task),
     wipQueue: ctx.wipQueueByTaskId?.get(task.id),

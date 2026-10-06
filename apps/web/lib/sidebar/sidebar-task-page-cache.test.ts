@@ -1,10 +1,18 @@
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { createAppStore } from "@/lib/state/store";
 import { querySidebarTasks } from "@/lib/api/domains/kanban-api";
+import { updateUserSettings } from "@/lib/api/domains/settings-api";
 import type { SidebarTaskPageResponse, SidebarTaskQuery } from "@/lib/types/http";
-import { SidebarTaskPageCache } from "./sidebar-task-page-cache";
+import type { BackendMessageMap } from "@/lib/types/backend";
+import { registerUsersHandlers } from "@/lib/ws/handlers/users";
+import { toApiSidebarDraft, toApiSidebarView } from "@/lib/state/slices/ui/sidebar-view-wire";
+import { SidebarTaskPageCache, sidebarTaskPageScope } from "./sidebar-task-page-cache";
 
 vi.mock("@/lib/api/domains/kanban-api", () => ({ querySidebarTasks: vi.fn() }));
+vi.mock("@/lib/api/domains/settings-api", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/api/domains/settings-api")>();
+  return { ...actual, updateUserSettings: vi.fn() };
+});
 const query: SidebarTaskQuery = {
   filters: [],
   collapsed_group_keys: [],
@@ -37,8 +45,20 @@ async function load(cache: SidebarTaskPageCache, key: string, result = page(key)
   await request.promise;
   request.release();
 }
+function settingsMessage(
+  payload: Partial<BackendMessageMap["user.settings.updated"]["payload"]>,
+): BackendMessageMap["user.settings.updated"] {
+  return {
+    type: "notification",
+    action: "user.settings.updated",
+    payload: { user_id: "user", workspace_id: "ws", repository_ids: [], ...payload },
+  };
+}
 beforeEach(() => {
   vi.resetAllMocks();
+  vi.mocked(updateUserSettings).mockResolvedValue({ settings: { revision: 1 } } as Awaited<
+    ReturnType<typeof updateUserSettings>
+  >);
   vi.useFakeTimers();
 });
 afterEach(() => vi.useRealTimers());
@@ -125,6 +145,71 @@ it("clears retained rows on logout even when the workspace generation stays the 
   await load(cache, "a");
   store.getState().clearAuthenticated();
   expect(cache.get("a")).toBeNull();
+});
+
+it("keeps view identity stable while invalidating a page after a color change", async () => {
+  const { store, cache } = setup();
+  await load(cache, "before-color-change");
+  const before = sidebarTaskPageScope(store.getState());
+  store.setState((state) => {
+    state.userSettings.sidebarTaskColors = { "task-red": "red" };
+  });
+  expect(sidebarTaskPageScope(store.getState())).toBe(before);
+  expect(cache.get("before-color-change")).toBeNull();
+});
+
+it("keeps cached pages after a semantically equal full settings event", async () => {
+  const { store, cache } = setup();
+  await load(cache, "equal-settings");
+  const before = sidebarTaskPageScope(store.getState());
+  const settings = store.getState().userSettings;
+  registerUsersHandlers(store)["user.settings.updated"]?.(
+    settingsMessage({
+      revision: 1,
+      sidebar_task_colors: structuredClone(settings.sidebarTaskColors),
+      sidebar_task_color_automation: structuredClone(settings.sidebarTaskColorAutomation),
+    }),
+  );
+  expect(sidebarTaskPageScope(store.getState())).toBe(before);
+  expect(cache.get("equal-settings")).not.toBeNull();
+});
+
+it("keeps the current page after a group-indent write and its full settings acknowledgement", async () => {
+  const { store, cache } = setup();
+  await load(cache, "group-indent");
+  const before = sidebarTaskPageScope(store.getState());
+  store.getState().updateSidebarDraft({ groupIndent: false });
+  const local = store.getState().sidebarViewsByWorkspace.ws;
+  expect(local.draft?.groupIndent).toBe(false);
+  expect(updateUserSettings).toHaveBeenCalledWith(
+    expect.objectContaining({
+      sidebar_view_state: expect.objectContaining({
+        workspace_id: "ws",
+        draft: expect.objectContaining({ group_indent: false }),
+      }),
+    }),
+  );
+
+  const userSettings = store.getState().userSettings;
+  registerUsersHandlers(store)["user.settings.updated"]?.(
+    settingsMessage({
+      revision: 2,
+      sidebar_views_by_workspace: {
+        ws: {
+          views: local.views.map(toApiSidebarView),
+          active_view_id: local.activeViewId,
+          draft: local.draft ? toApiSidebarDraft(local.draft) : null,
+        },
+      },
+      sidebar_task_colors: structuredClone(userSettings.sidebarTaskColors),
+      sidebar_task_color_automation: structuredClone(userSettings.sidebarTaskColorAutomation),
+    }),
+  );
+  await Promise.resolve();
+  await Promise.resolve();
+  expect(store.getState().sidebarViewsByWorkspace.ws.draft?.groupIndent).toBe(false);
+  expect(sidebarTaskPageScope(store.getState())).toBe(before);
+  expect(cache.get("group-indent")).not.toBeNull();
 });
 
 it("evicts by aggregate serialized bytes before the entry-count limit", async () => {

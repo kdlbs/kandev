@@ -26,8 +26,9 @@ import { buildSidebarViewActions } from "./sidebar-view-actions";
 import { buildThreadViewActions } from "./thread-view-actions";
 import { DEFAULT_VIEW } from "./sidebar-view-builtins";
 import { DEFAULT_THREAD_VIEW, DEFAULT_THREAD_VIEW_ID } from "./thread-view-builtins";
-import type { SidebarView, SidebarViewDraft, SortSpec } from "./sidebar-view-types";
+import type { SidebarView, SidebarViewDraft } from "./sidebar-view-types";
 import { cloneSidebarTaskRowPresentation } from "./sidebar-task-row-presentation";
+import { normalizeSidebarSort } from "@/lib/sidebar/sidebar-sort-chain";
 import type { SystemHealthResponse } from "@/lib/types/health";
 import type { ActiveDocument, UISlice, UISliceState } from "./types";
 import { buildQuickChatActions } from "./quick-chat-actions";
@@ -76,6 +77,8 @@ export const KNOWN_SORT_KEYS = new Set<string>([
   "lastActivityAt",
   "createdAt",
   "title",
+  "running",
+  "color",
   "custom",
 ]);
 
@@ -85,26 +88,28 @@ export const KNOWN_SORT_KEYS = new Set<string>([
  * when rendering stored views.
  */
 export function migrateView(view: SidebarView): SidebarView {
-  const sort: SortSpec = KNOWN_SORT_KEYS.has(view.sort.key)
-    ? view.sort
-    : { key: "state", direction: view.sort.direction };
+  const normalized = normalizeSidebarSort(view.sort);
+  const sortWarningCount = Math.max(view.sortWarningCount ?? 0, normalized.droppedRuleCount);
   return {
     ...view,
     filters: view.filters.filter((c) => KNOWN_DIMENSIONS.has(c.dimension)),
-    sort,
+    sort: normalized.sort,
+    ...(sortWarningCount > 0 ? { sortWarningCount } : {}),
+    groupIndent: typeof view.groupIndent === "boolean" ? view.groupIndent : true,
     taskRow: cloneSidebarTaskRowPresentation(view.taskRow),
   };
 }
 
 /** Drops removed filter dimensions from an in-flight saved-view draft. */
 export function migrateSidebarViewDraft(draft: SidebarViewDraft): SidebarViewDraft {
-  const sort: SortSpec = KNOWN_SORT_KEYS.has(draft.sort.key)
-    ? draft.sort
-    : { key: "state", direction: draft.sort.direction };
+  const normalized = normalizeSidebarSort(draft.sort);
+  const sortWarningCount = Math.max(draft.sortWarningCount ?? 0, normalized.droppedRuleCount);
   return {
     ...draft,
     filters: draft.filters.filter((c) => KNOWN_DIMENSIONS.has(c.dimension)),
-    sort,
+    sort: normalized.sort,
+    ...(sortWarningCount > 0 ? { sortWarningCount } : {}),
+    groupIndent: typeof draft.groupIndent === "boolean" ? draft.groupIndent : true,
     taskRow: cloneSidebarTaskRowPresentation(draft.taskRow),
   };
 }

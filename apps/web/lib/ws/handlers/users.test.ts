@@ -593,6 +593,7 @@ describe("user settings websocket sidebar sync", () => {
             filters: [],
             sort: { key: "state", direction: "asc" },
             group: "state",
+            groupIndent: true,
             collapsedGroups: ["state:todo"],
           },
         ],
@@ -633,6 +634,7 @@ describe("user settings websocket sidebar sync", () => {
           filters: [],
           sort: { key: "state", direction: "asc" },
           group: "state",
+          groupIndent: true,
         },
       },
     }));
@@ -758,6 +760,7 @@ describe("user settings websocket sidebar settings", () => {
       filters: [],
       sort: { key: "state" as const, direction: "asc" as const },
       group: "state" as const,
+      groupIndent: true,
       collapsedGroups: [],
     };
     store.setState((state) => ({
@@ -771,6 +774,7 @@ describe("user settings websocket sidebar settings", () => {
           filters: [],
           sort: { key: "state", direction: "asc" },
           group: "state",
+          groupIndent: true,
         },
         sidebarTaskPrefs: {
           pinnedTaskIds: ["task-1"],

@@ -45,6 +45,7 @@ function makeView(id: string, name: string): SidebarView {
     filters: [],
     sort: { key: "state", direction: "asc" },
     group: "none",
+    groupIndent: true,
     collapsedGroups: [],
   };
 }
@@ -101,6 +102,7 @@ describe("createSidebarView semantics", () => {
       filters: [],
       sort: { key: "state", direction: "asc" },
       group: "repository",
+      groupIndent: true,
       collapsedGroups: [],
       taskRow: {
         detailsEnabled: true,
@@ -136,6 +138,7 @@ describe("createSidebarView semantics", () => {
       filters: [],
       sort: { key: "title", direction: "asc" },
       group: "workflow",
+      groupIndent: true,
     };
     seedSidebar(store, [makeView("all", "All tasks")], draft);
 
@@ -156,6 +159,31 @@ describe("createSidebarView semantics", () => {
     expect(store.getState().sidebarViewsByWorkspace.ws.views).toHaveLength(50);
     expect(store.getState().sidebarViewsByWorkspace.ws.activeViewId).toBe(views[0].id);
     expect(updateUserSettings).not.toHaveBeenCalled();
+  });
+});
+
+describe("sidebar group indentation preference", () => {
+  it("persists explicit false in drafts, saves, and duplicate views", async () => {
+    const store = makeStore();
+    const source = makeView("all", "All tasks");
+    source.groupIndent = false;
+    seedSidebar(store, [source]);
+
+    store.getState().updateSidebarDraft({ groupIndent: false });
+    expect(store.getState().sidebarViewsByWorkspace.ws.draft?.groupIndent).toBe(false);
+    await waitFor(() => expect(updateUserSettings).toHaveBeenCalledOnce());
+    expect(updateUserSettings).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sidebar_view_state: expect.objectContaining({
+          draft: expect.objectContaining({ group_indent: false }),
+        }),
+      }),
+    );
+
+    store.getState().saveSidebarDraftOverwrite();
+    expect(store.getState().sidebarViewsByWorkspace.ws.views[0].groupIndent).toBe(false);
+    store.getState().duplicateSidebarView("all", "Copy");
+    expect(store.getState().sidebarViewsByWorkspace.ws.views[1].groupIndent).toBe(false);
   });
 });
 
@@ -292,10 +320,10 @@ describe("sidebar draft write failure isolation", () => {
     });
 
     expect(store.getState().sidebarViewsByWorkspace.ws.draft).not.toBeNull();
-    await waitFor(() =>
-      expect(store.getState().sidebarViewsByWorkspace.ws.syncError).toBe(DRAFT_WRITE_FAILED),
-    );
-    expect(store.getState().sidebarViewsByWorkspace.ws.draft).toBeNull();
+    await waitFor(() => {
+      expect(store.getState().sidebarViewsByWorkspace.ws.syncError).toBe(DRAFT_WRITE_FAILED);
+      expect(store.getState().sidebarViewsByWorkspace.ws.draft).toBeNull();
+    });
   });
 });
 

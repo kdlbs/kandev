@@ -24,6 +24,12 @@ export function useLocalSidebarPage(
       kanbanMulti: state.kanbanMulti,
     })),
   );
+  const colorSettings = useAppStore(
+    useShallow((state) => ({
+      automation: state.userSettings.sidebarTaskColorAutomation,
+      manualColors: state.userSettings.sidebarTaskColors,
+    })),
+  );
   const page = selection.key === key ? selection.page : previousPage;
   const projected = useMemo(
     () => (tasks && workspaceId ? projectLocalSidebarTasks(tasks, metadata, workspaceId) : null),
@@ -41,9 +47,10 @@ export function useLocalSidebarPage(
               orderedTaskIds,
               subtaskOrderByParentId,
             },
+            colorSettings,
           )
         : null,
-    [projected, query, page, pinnedTaskIds, orderedTaskIds, subtaskOrderByParentId],
+    [projected, query, page, pinnedTaskIds, orderedTaskIds, subtaskOrderByParentId, colorSettings],
   );
   const lastLocalPage = useRef<{ key: string; page: number } | null>(null);
   if (response) lastLocalPage.current = { key, page: response.page };

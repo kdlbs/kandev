@@ -18,8 +18,14 @@ export type SidebarViewApi = {
   id: string;
   name: string;
   filters: Array<{ id: string; dimension: string; op: string; value: unknown }>;
-  sort: { key: string; direction: string };
+  sort: {
+    key: string;
+    direction: string;
+    color?: string;
+    then_by?: Array<{ key: string; direction: string; color?: string }>;
+  };
   group: string;
+  group_indent?: boolean;
   collapsed_groups: string[];
   task_row?: SidebarTaskRowPresentationApi | null;
 };
@@ -27,8 +33,14 @@ export type SidebarViewApi = {
 export type SidebarViewDraftApi = {
   base_view_id: string;
   filters: Array<{ id: string; dimension: string; op: string; value: unknown }>;
-  sort: { key: string; direction: string };
+  sort: {
+    key: string;
+    direction: string;
+    color?: string;
+    then_by?: Array<{ key: string; direction: string; color?: string }>;
+  };
   group: string;
+  group_indent?: boolean;
   task_row?: SidebarTaskRowPresentationApi | null;
 };
 

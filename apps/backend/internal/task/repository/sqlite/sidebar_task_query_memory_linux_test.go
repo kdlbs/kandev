@@ -202,7 +202,7 @@ func sidebarMemoryFixture(t *testing.T) (*Repository, int) {
 
 func sidebarMemoryQueries() []models.SidebarTaskViewQuery {
 	queries := make([]models.SidebarTaskViewQuery, 0, 72)
-	for _, key := range []string{"lastActivityAt", "state", "updatedAt", "createdAt", "title", "custom"} {
+	for _, key := range []string{"lastActivityAt", "runningFirstActivity", "state", "updatedAt", "createdAt", "title", "custom"} {
 		for _, group := range []string{"state", "none", "workflow", "workflowStep", "repository", "executorType"} {
 			for _, direction := range []string{"asc", "desc"} {
 				query := sidebarTaskQuery(1)

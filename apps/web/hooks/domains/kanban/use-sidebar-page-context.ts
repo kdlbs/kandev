@@ -3,9 +3,13 @@ import { useTranslation } from "react-i18next";
 import { useEffectiveSidebarView } from "@/hooks/domains/sidebar/use-effective-sidebar-view";
 import { useSidebarTaskPrefs } from "@/hooks/domains/sidebar/use-sidebar-task-prefs";
 import { useAppStore } from "@/components/state-provider";
-import { sidebarTaskPageScope } from "@/lib/sidebar/sidebar-task-page-cache";
+import {
+  sidebarTaskPageRankingKey,
+  sidebarTaskPageScope,
+} from "@/lib/sidebar/sidebar-task-page-cache";
 import { normalizeLocale } from "@/lib/i18n";
 import type { SidebarTaskQuery } from "@/lib/types/http";
+import { sidebarSortToWire } from "@/lib/sidebar/sidebar-sort-chain";
 
 const PAGE_SIZE = 100;
 function buildSidebarQuery(
@@ -16,7 +20,7 @@ function buildSidebarQuery(
 ): SidebarTaskQuery {
   return {
     filters: view.filters.map(({ dimension, op, value }) => ({ dimension, op, value })),
-    sort: view.sort,
+    sort: sidebarSortToWire(view.sort),
     group: view.group,
     collapsed_group_keys: view.collapsedGroups,
     collapsed_task_ids: collapsedTaskIDs,
@@ -75,9 +79,11 @@ export function useSidebarPageContext(workspaceId: string | null) {
   const contextScope = useAppStore(sidebarTaskPageScope);
   const collapsedTaskIDs = useAppStore((state) => state.collapsedSubtaskParents);
   const workspaceGeneration = useAppStore((state) => state.workspaceContextGeneration);
-  const revision = useAppStore(
+  const queryRevision = useAppStore(
     (state) => state.sidebarArchivedTasks?.revisionByWorkspaceId?.[workspaceId ?? ""] ?? 0,
   );
+  const rankingKey = useAppStore(sidebarTaskPageRankingKey);
+  const revision = `${queryRevision}:${rankingKey}`;
   const accessDenied = useAppStore(
     (state) =>
       state.workspaceContextRead?.snapshotError === "access_denied" ||

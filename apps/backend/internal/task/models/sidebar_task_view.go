@@ -12,6 +12,7 @@ const (
 	MaxSidebarViewListValues    = 1000
 	MaxSidebarViewValueBytes    = 256
 	MaxSidebarViewPreferenceIDs = 10000
+	MaxSidebarViewSortRules     = 10
 )
 
 // SidebarTaskViewQuery is the complete, untrusted view description sent by a
@@ -29,8 +30,30 @@ type SidebarTaskViewQuery struct {
 }
 
 type SidebarTaskViewSort struct {
+	Key       string                         `json:"key"`
+	Direction string                         `json:"direction"`
+	Color     string                         `json:"color,omitempty"`
+	ThenBy    []SidebarTaskViewSortCriterion `json:"then_by,omitempty"`
+}
+
+type SidebarTaskViewSortCriterion struct {
 	Key       string `json:"key"`
 	Direction string `json:"direction"`
+	Color     string `json:"color,omitempty"`
+}
+
+// Criteria expands the compatibility composite into its current flat chain.
+func (sort SidebarTaskViewSort) Criteria() []SidebarTaskViewSortCriterion {
+	if sort.Key == "runningFirstActivity" && len(sort.ThenBy) == 0 {
+		return []SidebarTaskViewSortCriterion{
+			{Key: "running", Direction: "desc"},
+			{Key: "lastActivityAt", Direction: "desc"},
+		}
+	}
+	criteria := make([]SidebarTaskViewSortCriterion, 0, 1+len(sort.ThenBy))
+	criteria = append(criteria, SidebarTaskViewSortCriterion{Key: sort.Key, Direction: sort.Direction, Color: sort.Color})
+	criteria = append(criteria, sort.ThenBy...)
+	return criteria
 }
 
 type SidebarTaskViewClause struct {
@@ -42,9 +65,17 @@ type SidebarTaskViewClause struct {
 // SidebarTaskViewPreferences are authenticated user settings. They are
 // supplied by the settings service, not accepted from the query body.
 type SidebarTaskViewPreferences struct {
-	PinnedTaskIDs          []string            `json:"pinned_task_ids"`
-	OrderedTaskIDs         []string            `json:"ordered_task_ids"`
-	SubtaskOrderByParentID map[string][]string `json:"subtask_order_by_parent_id"`
+	PinnedTaskIDs          []string                  `json:"pinned_task_ids"`
+	OrderedTaskIDs         []string                  `json:"ordered_task_ids"`
+	SubtaskOrderByParentID map[string][]string       `json:"subtask_order_by_parent_id"`
+	ColorSettings          *SidebarTaskColorSettings `json:"-"`
+}
+
+// SidebarTaskColorSettings is a read-only projection of authenticated user
+// settings used to rank rows. It is never accepted from the query body.
+type SidebarTaskColorSettings struct {
+	ManualColors map[string]*string `json:"manual_colors"`
+	Automation   json.RawMessage    `json:"automation"`
 }
 
 type SidebarTaskPageEntry struct {
@@ -82,6 +113,7 @@ type SidebarTaskPageResult struct {
 type SidebarQueryValidationError struct {
 	Reason      string `json:"reason"`
 	FilterIndex *int   `json:"filter_index,omitempty"`
+	SortIndex   *int   `json:"sort_index,omitempty"`
 	Limit       int    `json:"limit,omitempty"`
 	message     string
 }
@@ -89,6 +121,9 @@ type SidebarQueryValidationError struct {
 func (e *SidebarQueryValidationError) Error() string {
 	if e.FilterIndex != nil {
 		return fmt.Sprintf("filter %d: %s", *e.FilterIndex, e.message)
+	}
+	if e.SortIndex != nil {
+		return fmt.Sprintf("sort rule %d: %s", *e.SortIndex, e.message)
 	}
 	return e.message
 }
@@ -104,11 +139,8 @@ func (q SidebarTaskViewQuery) Validate() error {
 	if q.PageSize < 1 || q.PageSize > MaxSidebarTaskPageSize {
 		return sidebarValidationError("page_bounds", "unsupported page size", MaxSidebarTaskPageSize)
 	}
-	if !oneOf(q.Sort.Key, "state", "updatedAt", "lastActivityAt", "createdAt", "title", "custom") {
-		return sidebarValidationError("sorting", "unsupported sort key", 0)
-	}
-	if !oneOf(q.Sort.Direction, "asc", "desc") {
-		return sidebarValidationError("sorting", "unsupported sort direction", 0)
+	if err := validateSidebarSort(q.Sort); err != nil {
+		return err
 	}
 	if !oneOf(q.Group, "none", "repository", "workflow", "workflowStep", "executorType", "state") {
 		return sidebarValidationError("grouping", "unsupported group", 0)
@@ -129,6 +161,67 @@ func (q SidebarTaskViewQuery) Validate() error {
 		return sidebarValidationError("locale", "unsupported locale", 0)
 	}
 	return nil
+}
+
+func validateSidebarSort(sort SidebarTaskViewSort) *SidebarQueryValidationError {
+	criteria := sort.Criteria()
+	if len(criteria) < 1 || len(criteria) > MaxSidebarViewSortRules {
+		return sidebarValidationError("sort_count", "unsupported number of sort rules", MaxSidebarViewSortRules)
+	}
+	if sort.Key == "runningFirstActivity" && len(sort.ThenBy) > 0 {
+		index := 0
+		err := sidebarValidationError("sorting", "legacy composite sort cannot have secondary rules", 0)
+		err.SortIndex = &index
+		return err
+	}
+	seenKeys := make(map[string]struct{}, len(criteria))
+	seenColors := make(map[string]struct{}, len(criteria))
+	for index, criterion := range criteria {
+		if err := validateSidebarSortCriterion(criterion, index, len(criteria), seenKeys, seenColors); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateSidebarSortCriterion(
+	criterion SidebarTaskViewSortCriterion,
+	index, criteriaCount int,
+	seenKeys, seenColors map[string]struct{},
+) *SidebarQueryValidationError {
+	if !oneOf(criterion.Key, "state", "updatedAt", "lastActivityAt", "createdAt", "title", "running", "color", "custom") {
+		return sidebarSortValidationError("unsupported sort key", index)
+	}
+	if criterion.Key == "custom" && criteriaCount != 1 {
+		return sidebarSortValidationError("custom sort must stand alone", index)
+	}
+	if !oneOf(criterion.Direction, "asc", "desc") {
+		return sidebarSortValidationError("unsupported sort direction", index)
+	}
+	if criterion.Key == "color" {
+		if !oneOf(criterion.Color, "gray", "red", "orange", "yellow", "green", "cyan", "blue", "indigo", "purple", "pink") {
+			return sidebarSortValidationError("unsupported preferred color", index)
+		}
+		if _, duplicate := seenColors[criterion.Color]; duplicate {
+			return sidebarSortValidationError("duplicate preferred color", index)
+		}
+		seenColors[criterion.Color] = struct{}{}
+	} else if criterion.Color != "" {
+		return sidebarSortValidationError("color is only valid for color sort rules", index)
+	}
+	if criterion.Key != "color" {
+		if _, duplicate := seenKeys[criterion.Key]; duplicate {
+			return sidebarSortValidationError("duplicate sort field", index)
+		}
+		seenKeys[criterion.Key] = struct{}{}
+	}
+	return nil
+}
+
+func sidebarSortValidationError(message string, index int) *SidebarQueryValidationError {
+	err := sidebarValidationError("sorting", message, 0)
+	err.SortIndex = &index
+	return err
 }
 
 func validateSidebarTaskViewClause(clause SidebarTaskViewClause) *SidebarQueryValidationError {

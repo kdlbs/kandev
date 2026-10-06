@@ -9,6 +9,7 @@ const NEW_VIEW: SidebarView = {
   filters: [],
   sort: { key: "state", direction: "asc" },
   group: "repository",
+  groupIndent: true,
   collapsedGroups: [],
 };
 const RENAME_INPUT_TEST_ID = "view-rename-input";

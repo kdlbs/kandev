@@ -679,14 +679,19 @@ By default, on desktop, hover over the collapsed sidebar for half a second to re
 
 In **Settings → Preferences → Appearance → Sidebar**, turn **Show sidebar on hover** on or off and set **Hover delay (ms)** from 0 to 5000 (default 500). Zero reveals immediately. Choose **Save changes** to apply the settings across your browsers. Turning hover off retains the delay and leaves explicit expansion available. You can edit these preferences on a phone, but hover activation requires a mouse or trackpad.
 
-The **TASKS** list in the left sidebar has two time-based sort choices. These choices are separate from the sort choices in the task **List** view.
+The **TASKS** list in the left sidebar can combine up to ten sort rules. Each later rule breaks ties from the rules above it. This is separate from sorting in the task **List** view. For example, **Running first → Red first → Last activity newest first** puts running red tasks first, running tasks with other colors next, non-running red tasks next, then the remaining non-running tasks. Newest activity orders tasks within each set. Move a rule to change its priority or remove it to stop using it.
 
-| Sort choice       | Meaning                                                                                                                 |
-| ----------------- | ----------------------------------------------------------------------------------------------------------------------- |
-| **Updated**       | The last task summary refresh. Background events, such as pull-request status changes, can change this time.            |
-| **Last activity** | The last real user or agent action. Opening or focusing a task and background provider polling do not change this time. |
+| Sort rule         | Meaning                                                                                                                                                                                                                  |
+| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **Running**       | Tasks with a running primary session rank first or last. A running included subtask also promotes its parent. Workflow placement alone does not mean that an agent is running.                                           |
+| **Color**         | A chosen named color ranks first or last by the marker shown on each task. An automatic color rule takes precedence over a manual color. The marker is personal and does not change shared task priority.                  |
+| **Updated**       | The last task summary refresh. Background events, such as pull-request status changes, can change this time.                                                                                                              |
+| **Last activity** | The last real user or agent action. Opening or focusing a task and background provider polling do not change this time. When a view includes this rule, each row shows its own activity time, while included subtasks help order parents. |
+| **Created, Title, Status** | These fields can also order tasks in either direction. Manual order remains available as a standalone choice.                                                                                                    |
 
-Choose **Last activity** when you want to review tasks by the least recent user or agent interaction.
+On desktop, open **Sort** from the sidebar filter button. On a phone, open **Tasks**, tap **Sidebar filters**, then expand **Sort**. Each field can be set to its first or last order. The saved view keeps the rule sequence. With no later rule, the sidebar's usual tie order applies.
+
+When tasks are grouped, expand **Group by** and use **Indent grouped tasks** to align the rows with the normal sidebar inset. It is enabled by default. Turning it off removes only the group inset; headings, counts, collapse controls, and subtask nesting remain.
 
 Each sidebar view shows up to 100 task rows at a time. Views with more than 100 matching rows show **Previous** and **Next** controls. Filters, grouping, and collapsed groups are applied before paging, so headings do not use task slots. Paging keeps the open task and conversation in place. This applies to active and archived tasks in built-in, saved, and draft views.
 

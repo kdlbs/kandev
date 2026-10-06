@@ -1,0 +1,247 @@
+{
+  "cases": [
+    {
+      "name": "workflow step condition",
+      "workspace_id": "sidebar-color-workflow-step",
+      "task": { "workflow_id": "flow", "workflow_step_id": "target-step", "state": "TODO" },
+      "steps": [{ "id": "target-step", "workflow_id": "flow", "color": "red" }],
+      "automation": { "enabled": true, "rules": [{ "id": "step", "enabled": true, "condition": { "dimension": "workflow_step", "value": { "workspace_id": "sidebar-color-workflow-step", "step_id": "target-step" }, "label": "Step" }, "output": { "kind": "fixed", "color": "red" } }] },
+      "preferred_color": "red",
+      "expected_token": "red",
+      "expected_match": true
+    },
+    {
+      "name": "workflow condition",
+      "workspace_id": "sidebar-color-workflow",
+      "task": { "workflow_id": "target-flow", "workflow_step_id": "target-step", "state": "TODO" },
+      "steps": [{ "id": "target-step", "workflow_id": "target-flow", "color": "gray" }],
+      "automation": { "enabled": true, "rules": [{ "id": "workflow", "enabled": true, "condition": { "dimension": "workflow", "value": { "workspace_id": "sidebar-color-workflow", "workflow_id": "target-flow" }, "label": "Workflow" }, "output": { "kind": "fixed", "color": "orange" } }] },
+      "preferred_color": "orange",
+      "expected_token": "orange",
+      "expected_match": true
+    },
+    {
+      "name": "repository condition",
+      "workspace_id": "sidebar-color-repository",
+      "task": { "state": "TODO", "repository_link": true },
+      "repository": { "id": "target-repo", "local_path": "\\fixture\\target\\" },
+      "automation": { "enabled": true, "rules": [{ "id": "repository", "enabled": true, "condition": { "dimension": "repository", "value": { "kind": "local", "path": "//fixture/target/" }, "label": "Repository" }, "output": { "kind": "fixed", "color": "blue" } }] },
+      "preferred_color": "blue",
+      "expected_token": "blue",
+      "expected_match": true
+    },
+    {
+      "name": "provider identity uses the default provider host",
+      "workspace_id": "sidebar-color-provider-default-host",
+      "task": { "state": "TODO", "repository_link": true },
+      "repository": { "id": "target-repo", "provider": "github", "provider_repo_id": "42", "provider_host": "/", "provider_scope": "org" },
+      "automation": { "enabled": true, "rules": [{ "id": "provider", "enabled": true, "condition": { "dimension": "repository", "value": { "kind": "provider", "provider_id": "github", "host": "github.com", "scope": "org", "provider_repository_id": "42" }, "label": "Repository" }, "output": { "kind": "fixed", "color": "red" } }] },
+      "preferred_color": "red",
+      "expected_token": "red",
+      "expected_match": true
+    },
+    {
+      "name": "provider identity uses the remote URL host and owner fallback",
+      "workspace_id": "sidebar-color-provider-remote-host",
+      "task": { "state": "TODO", "repository_link": true },
+      "repository": { "id": "target-repo", "provider": "gitlab", "provider_repo_id": "99", "provider_owner": "team", "remote_url": "https://GITLAB.EXAMPLE/group/project.git" },
+      "automation": { "enabled": true, "rules": [{ "id": "provider", "enabled": true, "condition": { "dimension": "repository", "value": { "kind": "provider", "provider_id": "gitlab", "host": "gitlab.example", "scope": "team", "provider_repository_id": "99" }, "label": "Repository" }, "output": { "kind": "fixed", "color": "red" } }] },
+      "preferred_color": "red",
+      "expected_token": "red",
+      "expected_match": true
+    },
+    {
+      "name": "provider identity normalizes an explicit hosted provider base",
+      "workspace_id": "sidebar-color-provider-explicit-host",
+      "task": { "state": "TODO", "repository_link": true },
+      "repository": { "id": "target-repo", "provider": "gitlab", "provider_repo_id": "42", "provider_host": "HTTPS://GITLAB.EXAMPLE/group/", "provider_scope": "team" },
+      "automation": { "enabled": true, "rules": [{ "id": "provider", "enabled": true, "condition": { "dimension": "repository", "value": { "kind": "provider", "provider_id": "gitlab", "host": "gitlab.example/group", "scope": "team", "provider_repository_id": "42" }, "label": "Repository" }, "output": { "kind": "fixed", "color": "red" } }] },
+      "preferred_color": "red",
+      "expected_token": "red",
+      "expected_match": true
+    },
+    {
+      "name": "provider identity takes precedence over local checkout path",
+      "workspace_id": "sidebar-color-provider-before-local",
+      "task": { "state": "TODO", "repository_link": true },
+      "repository": { "id": "target-repo", "provider": "github", "provider_repo_id": "42", "provider_host": "HTTPS://GITHUB.COM/", "provider_scope": "org", "local_path": "/fixture/target" },
+      "automation": { "enabled": true, "rules": [{ "id": "local", "enabled": true, "condition": { "dimension": "repository", "value": { "kind": "local", "path": "/fixture/target" }, "label": "Repository" }, "output": { "kind": "fixed", "color": "red" } }] },
+      "preferred_color": "red",
+      "expected_token": null,
+      "expected_match": false
+    },
+    {
+      "name": "workspace identity matches repositories without a narrower identity",
+      "workspace_id": "sidebar-color-workspace-identity",
+      "task": { "state": "TODO", "repository_link": true },
+      "repository": { "id": "target-repo" },
+      "automation": { "enabled": true, "rules": [{ "id": "workspace", "enabled": true, "condition": { "dimension": "repository", "value": { "kind": "workspace", "workspace_id": "sidebar-color-workspace-identity", "repository_id": "target-repo" }, "label": "Repository" }, "output": { "kind": "fixed", "color": "red" } }] },
+      "preferred_color": "red",
+      "expected_token": "red",
+      "expected_match": true
+    },
+    {
+      "name": "workspace identity is ineligible when a local identity exists",
+      "workspace_id": "sidebar-color-workspace-local-gating",
+      "task": { "state": "TODO", "repository_link": true },
+      "repository": { "id": "target-repo", "local_path": "/fixture/target" },
+      "automation": { "enabled": true, "rules": [{ "id": "workspace", "enabled": true, "condition": { "dimension": "repository", "value": { "kind": "workspace", "workspace_id": "sidebar-color-workspace-local-gating", "repository_id": "target-repo" }, "label": "Repository" }, "output": { "kind": "fixed", "color": "red" } }] },
+      "preferred_color": "red",
+      "expected_token": null,
+      "expected_match": false
+    },
+    {
+      "name": "executor profile condition",
+      "workspace_id": "sidebar-color-executor",
+      "task": { "state": "TODO", "metadata": { "executor_profile_id": "profile-a" } },
+      "automation": { "enabled": true, "rules": [{ "id": "executor", "enabled": true, "condition": { "dimension": "executor_profile", "value": "profile-a", "label": "Profile A" }, "output": { "kind": "fixed", "color": "green" } }] },
+      "preferred_color": "green",
+      "expected_token": "green",
+      "expected_match": true
+    },
+    {
+      "name": "primary session profile overrides task metadata",
+      "workspace_id": "sidebar-color-primary-profile-overrides",
+      "task": { "state": "TODO", "metadata": { "executor_profile_id": "profile-b" }, "primary_session_profile_id": "profile-a" },
+      "automation": { "enabled": true, "rules": [{ "id": "executor", "enabled": true, "condition": { "dimension": "executor_profile", "value": "profile-a", "label": "Profile A" }, "output": { "kind": "fixed", "color": "green" } }] },
+      "preferred_color": "green",
+      "expected_token": "green",
+      "expected_match": true
+    },
+    {
+      "name": "primary session profile supplies missing metadata",
+      "workspace_id": "sidebar-color-primary-profile-only",
+      "task": { "state": "TODO", "primary_session_profile_id": "profile-a" },
+      "automation": { "enabled": true, "rules": [{ "id": "executor", "enabled": true, "condition": { "dimension": "executor_profile", "value": "profile-a", "label": "Profile A" }, "output": { "kind": "fixed", "color": "green" } }] },
+      "preferred_color": "green",
+      "expected_token": "green",
+      "expected_match": true
+    },
+    {
+      "name": "metadata profile is used without a primary session",
+      "workspace_id": "sidebar-color-metadata-profile",
+      "task": { "state": "TODO", "metadata": { "executor_profile_id": "profile-a" } },
+      "automation": { "enabled": true, "rules": [{ "id": "executor", "enabled": true, "condition": { "dimension": "executor_profile", "value": "profile-a", "label": "Profile A" }, "output": { "kind": "fixed", "color": "green" } }] },
+      "preferred_color": "green",
+      "expected_token": "green",
+      "expected_match": true
+    },
+    {
+      "name": "non-primary session profile does not override metadata",
+      "workspace_id": "sidebar-color-non-primary-profile",
+      "task": { "state": "TODO", "metadata": { "executor_profile_id": "profile-b" }, "non_primary_session_profile_id": "profile-a" },
+      "automation": { "enabled": true, "rules": [{ "id": "executor", "enabled": true, "condition": { "dimension": "executor_profile", "value": "profile-a", "label": "Profile A" }, "output": { "kind": "fixed", "color": "green" } }] },
+      "preferred_color": "green",
+      "expected_token": null,
+      "expected_match": false
+    },
+    {
+      "name": "task state condition",
+      "workspace_id": "sidebar-color-state",
+      "task": { "state": "FAILED" },
+      "automation": { "enabled": true, "rules": [{ "id": "state", "enabled": true, "condition": { "dimension": "task_state", "value": "FAILED", "label": "Failed" }, "output": { "kind": "fixed", "color": "purple" } }] },
+      "preferred_color": "purple",
+      "expected_token": "purple",
+      "expected_match": true
+    },
+    {
+      "name": "priority condition",
+      "workspace_id": "sidebar-color-priority",
+      "task": { "state": "TODO", "priority": "high" },
+      "automation": { "enabled": true, "rules": [{ "id": "priority", "enabled": true, "condition": { "dimension": "priority", "value": "high", "label": "High" }, "output": { "kind": "fixed", "color": "pink" } }] },
+      "preferred_color": "pink",
+      "expected_token": "pink",
+      "expected_match": true
+    },
+    {
+      "name": "origin condition",
+      "workspace_id": "sidebar-color-origin",
+      "task": { "state": "TODO", "origin": "github" },
+      "automation": { "enabled": true, "rules": [{ "id": "origin", "enabled": true, "condition": { "dimension": "origin", "value": "github", "label": "GitHub" }, "output": { "kind": "fixed", "color": "cyan" } }] },
+      "preferred_color": "cyan",
+      "expected_token": "cyan",
+      "expected_match": true
+    },
+    {
+      "name": "first matching automation rule wins",
+      "workspace_id": "sidebar-color-rule-order",
+      "task": { "state": "FAILED", "priority": "high" },
+      "automation": { "enabled": true, "rules": [
+        { "id": "state-first", "enabled": true, "condition": { "dimension": "task_state", "value": "FAILED", "label": "Failed" }, "output": { "kind": "fixed", "color": "red" } },
+        { "id": "priority-second", "enabled": true, "condition": { "dimension": "priority", "value": "high", "label": "High" }, "output": { "kind": "fixed", "color": "blue" } }
+      ] },
+      "preferred_color": "red",
+      "expected_token": "red",
+      "expected_match": true
+    },
+    {
+      "name": "automatic color overrides manual color",
+      "workspace_id": "sidebar-color-override",
+      "task": { "state": "FAILED" },
+      "manual_color": "red",
+      "automation": { "enabled": true, "rules": [{ "id": "override", "enabled": true, "condition": { "dimension": "task_state", "value": "FAILED", "label": "Failed" }, "output": { "kind": "fixed", "color": "blue" } }] },
+      "preferred_color": "red",
+      "expected_token": "blue",
+      "expected_match": false
+    },
+    {
+      "name": "disabled incomplete rule keeps manual fallback",
+      "workspace_id": "sidebar-color-incomplete",
+      "task": { "state": "TODO" },
+      "manual_color": "red",
+      "automation": { "enabled": true, "rules": [{ "id": "incomplete", "enabled": false, "condition": { "dimension": "task_state", "value": null, "label": "" }, "output": { "kind": "fixed", "color": "blue" } }] },
+      "preferred_color": "red",
+      "expected_token": "red",
+      "expected_match": true
+    },
+    {
+      "name": "missing facts do not match",
+      "workspace_id": "sidebar-color-missing-facts",
+      "task": { "state": "TODO" },
+      "automation": { "enabled": true, "rules": [{ "id": "missing", "enabled": true, "condition": { "dimension": "task_state", "value": "FAILED", "label": "Failed" }, "output": { "kind": "fixed", "color": "red" } }] },
+      "preferred_color": "red",
+      "expected_token": null,
+      "expected_match": false
+    },
+    {
+      "name": "manual clear tombstone has no visible color",
+      "workspace_id": "sidebar-color-tombstone",
+      "task": { "state": "TODO" },
+      "manual_color": null,
+      "automation": { "enabled": false, "rules": [] },
+      "preferred_color": "red",
+      "expected_token": null,
+      "expected_match": false
+    },
+    {
+      "name": "workflow class alias maps to yellow",
+      "workspace_id": "sidebar-color-workflow-alias",
+      "task": { "workflow_id": "flow", "workflow_step_id": "target-step", "state": "TODO" },
+      "steps": [{ "id": "target-step", "workflow_id": "flow", "color": "bg-amber-500" }],
+      "automation": { "enabled": true, "rules": [{ "id": "workflow-color", "enabled": true, "condition": { "dimension": "workflow_step", "value": { "workspace_id": "sidebar-color-workflow-alias", "step_id": "target-step" }, "label": "Step" }, "output": { "kind": "workflow_step" } }] },
+      "preferred_color": "yellow",
+      "expected_token": "yellow",
+      "expected_match": true
+    },
+    {
+      "name": "custom workflow hex is not a named match",
+      "workspace_id": "sidebar-color-workflow-custom",
+      "task": { "workflow_id": "flow", "workflow_step_id": "target-step", "state": "TODO" },
+      "steps": [{ "id": "target-step", "workflow_id": "flow", "color": "#f0a" }],
+      "automation": { "enabled": true, "rules": [{ "id": "workflow-custom", "enabled": true, "condition": { "dimension": "workflow_step", "value": { "workspace_id": "sidebar-color-workflow-custom", "step_id": "target-step" }, "label": "Step" }, "output": { "kind": "workflow_step" } }] },
+      "preferred_color": "red",
+      "expected_token": "custom",
+      "expected_match": false
+    },
+    {
+      "name": "unsupported workflow color falls back to gray",
+      "workspace_id": "sidebar-color-workflow-unknown",
+      "task": { "workflow_id": "flow", "workflow_step_id": "target-step", "state": "TODO" },
+      "steps": [{ "id": "target-step", "workflow_id": "flow", "color": "unsupported" }],
+      "automation": { "enabled": true, "rules": [{ "id": "workflow-unknown", "enabled": true, "condition": { "dimension": "workflow_step", "value": { "workspace_id": "sidebar-color-workflow-unknown", "step_id": "target-step" }, "label": "Step" }, "output": { "kind": "workflow_step" } }] },
+      "preferred_color": "gray",
+      "expected_token": "gray",
+      "expected_match": true
+    }
+  ]
+}

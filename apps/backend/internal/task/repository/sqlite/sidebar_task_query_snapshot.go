@@ -38,16 +38,25 @@ func beginSidebarQuerySnapshot(ctx context.Context, reader *sqlx.DB) (*sidebarQu
 }
 
 func (s *sidebarQuerySnapshot) prepare(
-	ctx context.Context, driverName, workspaceID string, query models.SidebarTaskViewQuery,
+	ctx context.Context, driverName, workspaceID string,
+	query models.SidebarTaskViewQuery,
+	preferences ...models.SidebarTaskViewPreferences,
 ) (string, []any, error) {
+	prefs := models.SidebarTaskViewPreferences{}
+	if len(preferences) > 0 {
+		prefs = preferences[0]
+	}
 	if !s.sqlite {
 		// Interactive reads cannot amortize compilation of each recursive query shape.
 		if _, err := s.tx.ExecContext(ctx, "SET LOCAL jit = off"); err != nil {
 			return "", nil, fmt.Errorf("configure sidebar query execution: %w", err)
 		}
-		return sidebarTaskBaseSQL(driverName, workspaceID, query)
+		return sidebarTaskBaseSQL(driverName, workspaceID, query, prefs)
 	}
-	candidateSQL, candidateArgs, err := sidebarTaskCandidateSQL(driverName, workspaceID, query)
+	if err := s.prepareColorPreferences(ctx, query, prefs); err != nil {
+		return "", nil, err
+	}
+	candidateSQL, candidateArgs, err := sidebarTaskCandidateSQL(driverName, workspaceID, query, prefs)
 	if err != nil {
 		return "", nil, err
 	}
@@ -78,7 +87,7 @@ func (s *sidebarQuerySnapshot) prepare(
 
 func (s *sidebarQuerySnapshot) commit(ctx context.Context) error {
 	if s.sqlite {
-		if _, err := s.tx.ExecContext(ctx, "DROP TABLE "+sidebarScratchTable+"; DROP TABLE IF EXISTS "+sidebarPreferenceTable); err != nil {
+		if _, err := s.tx.ExecContext(ctx, "DROP TABLE "+sidebarScratchTable+"; DROP TABLE IF EXISTS "+sidebarPreferenceTable+"; DROP TABLE IF EXISTS "+sidebarTaskColorScratchTable); err != nil {
 			return fmt.Errorf("release sidebar candidates: %w", err)
 		}
 	}
@@ -110,7 +119,7 @@ func (s *sidebarQuerySnapshot) release(cleanupCtx context.Context) {
 	err := s.tx.Rollback()
 	clean := !s.commitFailed && cleanupCtx.Err() == nil && (err == nil || errors.Is(err, sql.ErrTxDone))
 	if s.sqlite && clean {
-		_, err = s.conn.ExecContext(cleanupCtx, "DROP TABLE IF EXISTS "+sidebarScratchTable+"; DROP TABLE IF EXISTS "+sidebarPreferenceTable)
+		_, err = s.conn.ExecContext(cleanupCtx, "DROP TABLE IF EXISTS "+sidebarScratchTable+"; DROP TABLE IF EXISTS "+sidebarPreferenceTable+"; DROP TABLE IF EXISTS "+sidebarTaskColorScratchTable)
 		clean = err == nil && cleanupCtx.Err() == nil
 	}
 	if !clean {

@@ -31,6 +31,7 @@ import {
   type SidebarTaskRowTrailing,
 } from "@/lib/state/slices/ui/sidebar-task-row-presentation";
 import { SidebarSettingsDisclosure } from "./sidebar-settings-disclosure";
+import { sidebarSortHasKey } from "@/lib/sidebar/sidebar-sort-chain";
 
 const DETAIL_LABEL_KEYS: Record<SidebarTaskRowDetail, string> = {
   relative_time: "task:taskRowRelativeTime",
@@ -169,10 +170,9 @@ function TaskRowDetailsSection({
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
   );
   const detailOrder = useMemo(() => [...value.detailOrder], [value.detailOrder]);
-  const relativeTimeDescriptionKey =
-    sort.key === "lastActivityAt"
-      ? "task:taskRowRelativeTimeLastActivity"
-      : "task:taskRowRelativeTimeLastUpdate";
+  const relativeTimeDescriptionKey = sidebarSortHasKey(sort, "lastActivityAt")
+    ? "task:taskRowRelativeTimeLastActivity"
+    : "task:taskRowRelativeTimeLastUpdate";
 
   function update(next: Partial<SidebarTaskRowPresentation>) {
     onChange({ ...value, ...next });

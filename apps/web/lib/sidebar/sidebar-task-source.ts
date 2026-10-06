@@ -3,17 +3,29 @@ import {
   type SidebarInventory,
 } from "@/lib/state/slices/task-overview-coverage";
 import type { SidebarView } from "@/lib/state/slices/ui/sidebar-view-types";
+import { sidebarSortRules } from "./sidebar-sort-chain";
 
 export function sidebarTaskSource(
   state: SidebarInventory,
   workspaceId: string | null,
   view: SidebarView,
 ) {
+  const rules = sidebarSortRules(view.sort);
   if (
-    !["state", "updatedAt", "lastActivityAt", "createdAt", "title", "custom"].includes(
-      view.sort.key,
+    rules.some(
+      (rule) =>
+        ![
+          "state",
+          "updatedAt",
+          "lastActivityAt",
+          "createdAt",
+          "title",
+          "running",
+          "color",
+          "custom",
+        ].includes(rule.key),
     ) ||
-    !["asc", "desc"].includes(view.sort.direction) ||
+    rules.some((rule) => !["asc", "desc"].includes(rule.direction)) ||
     !["none", "repository", "workflow", "workflowStep", "executorType", "state"].includes(
       view.group,
     )

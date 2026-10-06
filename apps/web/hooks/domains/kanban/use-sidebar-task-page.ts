@@ -9,6 +9,7 @@ import {
 import { useTranslation } from "react-i18next";
 import { useAppStoreApi } from "@/components/state-provider";
 import {
+  sidebarTaskPageRankingKey,
   sidebarTaskPageCache,
   sidebarTaskPageScope,
   type SidebarTaskPageCache,
@@ -129,13 +130,21 @@ function queryRevision(store: SidebarPageStore, workspaceId: string) {
 function currentSidebarRequest(
   store: SidebarPageStore,
   workspaceId: string,
-  validity: { request: boolean; view: boolean; workspaceGeneration: number; scope: string },
+  validity: {
+    request: boolean;
+    view: boolean;
+    workspaceGeneration: number;
+    scope: string;
+    rankingKey: string;
+  },
 ) {
+  const state = store.getState();
   return (
     validity.request &&
     validity.view &&
-    isCurrentWorkspaceContext(store.getState(), workspaceId, validity.workspaceGeneration) &&
-    sidebarTaskPageScope(store.getState()) === validity.scope
+    isCurrentWorkspaceContext(state, workspaceId, validity.workspaceGeneration) &&
+    sidebarTaskPageScope(state) === validity.scope &&
+    sidebarTaskPageRankingKey(state) === validity.rankingKey
   );
 }
 
@@ -173,13 +182,16 @@ function useSidebarPageLoader(
       activeRequestRef.current = null;
       const startingWorkspaceGeneration = workspaceGeneration;
       const startingRevision = queryRevision(store, workspaceId);
-      const startingScope = sidebarTaskPageScope(store.getState());
+      const startingState = store.getState();
+      const startingScope = sidebarTaskPageScope(startingState);
+      const startingRankingKey = sidebarTaskPageRankingKey(startingState);
       const isCurrent = () =>
         currentSidebarRequest(store, workspaceId, {
           request: requestGeneration.current === generation,
           view: viewKeyRef.current === key,
           workspaceGeneration: startingWorkspaceGeneration,
           scope: startingScope,
+          rankingKey: startingRankingKey,
         });
       const cached = requestedPage === 1 ? sidebarTaskPageCache(store).get(key) : null;
       if (cached && responseViewKeyRef.current !== key) {
@@ -235,11 +247,11 @@ function useSidebarPageLoader(
 
 function useSidebarRevisionRefresh(
   workspaceId: string | null,
-  queryRevision: number,
+  queryRevision: string,
   refresh: () => void,
   refreshTimerRef: { current: ReturnType<typeof setTimeout> | null },
 ) {
-  const seenQueryRevisionRef = useRef<{ workspaceId: string; revision: number } | null>(null);
+  const seenQueryRevisionRef = useRef<{ workspaceId: string; revision: string } | null>(null);
   const refreshBurstStartedRef = useRef<number | null>(null);
 
   useEffect(() => {
@@ -301,7 +313,7 @@ function useProvisionalSidebarRefresh(
 
 function useSidebarLiveRefresh(
   workspaceId: string | null,
-  revision: number,
+  revision: string,
   page: {
     response: SidebarTaskPageResponse | null;
     pending: number | null;

@@ -1,7 +1,13 @@
 import { test, expect } from "../../fixtures/test-base";
 import { MobileKanbanPage } from "../../pages/mobile-kanban-page";
+import {
+  expectDefaultWorkspaceViewSortAndIndent,
+  expectWorkspaceViewSortAndIndent,
+  setWorkspaceViewSortAndIndent,
+} from "./sidebar-workspace-view-sort-helpers";
 
 // @covers AC-UI-WORKSPACE-SIDEBAR-VIEWS-001.1, .2, .4, .6
+// @covers AC-UI-SIDEBAR-RUNNING-ACTIVITY-001.5 AC-UI-SIDEBAR-GROUP-INDENT-001.4
 test("phone task views restore their workspace collection", async ({
   testPage,
   apiClient,
@@ -24,6 +30,7 @@ test("phone task views restore their workspace collection", async ({
       ].views.some((view) => view.name === "Phone A view"),
     )
     .toBe(true);
+  await setWorkspaceViewSortAndIndent(apiClient, seedData.workspaceId, "Phone A view");
   await testPage.keyboard.press("Escape");
   await expect(editor).toBeHidden();
   await testPage.keyboard.press("Escape");
@@ -56,6 +63,11 @@ test("phone task views restore their workspace collection", async ({
   await expect(
     drawer.getByTestId("sidebar-view-chip").filter({ hasText: "Phone B view" }),
   ).toHaveCount(0);
+  const { settings } = await apiClient.getUserSettings();
+  const viewsA = settings.sidebar_views_by_workspace[seedData.workspaceId].views;
+  const viewsB = settings.sidebar_views_by_workspace[other.id].views;
+  expectWorkspaceViewSortAndIndent(viewsA.find((view) => view.name === "Phone A view"));
+  expectDefaultWorkspaceViewSortAndIndent(viewsB.find((view) => view.name === "Phone B view"));
   expect(
     await testPage.evaluate(
       () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,

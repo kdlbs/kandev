@@ -50,6 +50,7 @@ function makeSidebarView(id: string, name: string): SidebarView {
     filters: [],
     sort: { key: "state" as const, direction: "asc" as const },
     group: "none" as const,
+    groupIndent: true,
     collapsedGroups: [],
   };
 }
@@ -634,6 +635,7 @@ describe("reorderSidebarViews", () => {
       filters: [{ id: "c1", dimension: "titleMatch", op: "matches", value: "bug" }],
       sort: { key: "title", direction: "asc" },
       group: "workflow",
+      groupIndent: true,
     };
     const store = makeStore();
     setSidebarViews(store, {
@@ -696,6 +698,7 @@ describe("sidebar view backend state", () => {
         filters: [],
         sort: { key: "state", direction: "asc" },
         group: "state",
+        groupIndent: true,
       },
     });
 
@@ -745,6 +748,7 @@ describe("sidebar view backend state", () => {
       filters: [],
       sort: { key: "updatedAt", direction: "desc" },
       group: "state",
+      groupIndent: true,
     };
     const store = makeStore();
     setSidebarViews(store, {

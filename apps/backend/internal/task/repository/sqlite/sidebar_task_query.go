@@ -17,17 +17,19 @@ import (
 
 const maxSidebarPreferenceIDs = 10000
 const (
-	sidebarGroupNone         = "none"
-	sidebarStateKey          = "state"
-	sidebarActivitySortField = "lastActivityAt"
-	sidebarRepositoryKey     = "repository"
-	sidebarWorkflowKey       = "workflow"
-	sidebarWorkflowStepKey   = "workflowStep"
-	sidebarArchivedKey       = "archived"
-	sidebarNotMatchesOp      = "not_matches"
-	sidebarNotInOp           = "not_in"
-	sidebarCustomSortKey     = "custom"
-	sidebarSQLNull           = "NULL"
+	sidebarGroupNone                = "none"
+	sidebarStateKey                 = "state"
+	sidebarActivitySortField        = "lastActivityAt"
+	sidebarRunningSortField         = "running"
+	sidebarRunningActivitySortField = "runningFirstActivity"
+	sidebarRepositoryKey            = "repository"
+	sidebarWorkflowKey              = "workflow"
+	sidebarWorkflowStepKey          = "workflowStep"
+	sidebarArchivedKey              = "archived"
+	sidebarNotMatchesOp             = "not_matches"
+	sidebarNotInOp                  = "not_in"
+	sidebarCustomSortKey            = "custom"
+	sidebarSQLNull                  = "NULL"
 )
 
 type sidebarPageRow struct {
@@ -80,7 +82,7 @@ func (r *Repository) QuerySidebarTaskPage(
 	}
 	defer snapshot.close()
 	snapshot.afterStage = r.sidebarQueryStage
-	baseSQL, baseArgs, err := snapshot.prepare(ctx, r.ro.DriverName(), workspaceID, query)
+	baseSQL, baseArgs, err := snapshot.prepare(ctx, r.ro.DriverName(), workspaceID, query, prefs)
 	if err != nil {
 		return nil, err
 	}
@@ -151,8 +153,12 @@ func (r *Repository) readSidebarTaskPage(
 	return result, nil
 }
 
-func sidebarTaskBaseSQL(driver, workspaceID string, query models.SidebarTaskViewQuery) (string, []any, error) {
-	baseSQL, baseArgs, err := sidebarTaskCandidateSQL(driver, workspaceID, query)
+func sidebarTaskBaseSQL(
+	driver, workspaceID string,
+	query models.SidebarTaskViewQuery,
+	preferences ...models.SidebarTaskViewPreferences,
+) (string, []any, error) {
+	baseSQL, baseArgs, err := sidebarTaskCandidateSQL(driver, workspaceID, query, preferences...)
 	if err != nil {
 		return "", nil, err
 	}
@@ -160,7 +166,24 @@ func sidebarTaskBaseSQL(driver, workspaceID string, query models.SidebarTaskView
 	return baseSQL + visibleSQL, append(baseArgs, visibleArgs...), nil
 }
 
-func sidebarTaskCandidateSQL(driver, workspaceID string, query models.SidebarTaskViewQuery) (string, []any, error) {
+func sidebarQueryHasSort(query models.SidebarTaskViewQuery, key string) bool {
+	for _, criterion := range query.Sort.Criteria() {
+		if criterion.Key == key {
+			return true
+		}
+	}
+	return false
+}
+
+func sidebarTaskCandidateSQL(
+	driver, workspaceID string,
+	query models.SidebarTaskViewQuery,
+	preferences ...models.SidebarTaskViewPreferences,
+) (string, []any, error) {
+	prefs := models.SidebarTaskViewPreferences{}
+	if len(preferences) > 0 {
+		prefs = preferences[0]
+	}
 	groupExpr, groupLabelExpr := sidebarGroupExpressions(query.Group)
 	scopeFilters, projectionFilters := sidebarPartitionFilters(query.Filters)
 	scopeSQL, scopeArgs, err := sidebarFilterSQL(driver, scopeFilters, true)
@@ -171,8 +194,23 @@ func sidebarTaskCandidateSQL(driver, workspaceID string, query models.SidebarTas
 	if err != nil {
 		return "", nil, err
 	}
-	baseSQL := sidebarBaseCTE(driver, groupExpr, groupLabelExpr, scopeSQL, query)
-	baseArgs := append([]any{workspaceID}, scopeArgs...)
+	needsColor := sidebarQueryHasSort(query, "color")
+	colorProjection, colorArgs := "", []any(nil)
+	if needsColor {
+		colorProjection, colorArgs, err = sidebarEffectiveColorProjection(driver, prefs)
+		if err != nil {
+			return "", nil, err
+		}
+	}
+	colorSettingsCTE, colorSettingsArgs, err := sidebarColorManualCTE(driver, prefs, needsColor)
+	if err != nil {
+		return "", nil, err
+	}
+	baseSQL := sidebarBaseCTE(driver, groupExpr, groupLabelExpr, scopeSQL, query, colorProjection, colorSettingsCTE)
+	baseArgs := append([]any(nil), colorSettingsArgs...)
+	baseArgs = append(baseArgs, workspaceID)
+	baseArgs = append(baseArgs, scopeArgs...)
+	baseArgs = append(baseArgs, colorArgs...)
 	materialization := "MATERIALIZED"
 	if dialect.IsPostgres(driver) {
 		materialization = "NOT MATERIALIZED"
@@ -189,6 +227,9 @@ func validateSidebarTaskPreferences(prefs models.SidebarTaskViewPreferences) err
 	}
 	if count > maxSidebarPreferenceIDs {
 		return errors.New("sidebar task preferences exceed the query limit")
+	}
+	if err := validateSidebarColorSettings(prefs); err != nil {
+		return err
 	}
 	return nil
 }
@@ -380,11 +421,26 @@ func sidebarTaskQueryKey(workspaceID string, query models.SidebarTaskViewQuery, 
 	query.CollapsedTaskIDs = append([]string(nil), query.CollapsedTaskIDs...)
 	sort.Strings(query.CollapsedGroupKeys)
 	sort.Strings(query.CollapsedTaskIDs)
+	type queryPreferences struct {
+		PinnedTaskIDs          []string            `json:"pinned_task_ids"`
+		OrderedTaskIDs         []string            `json:"ordered_task_ids"`
+		SubtaskOrderByParentID map[string][]string `json:"subtask_order_by_parent_id"`
+		ColorSettingsDigest    string              `json:"color_settings_digest,omitempty"`
+	}
+	preferences := queryPreferences{
+		PinnedTaskIDs: prefs.PinnedTaskIDs, OrderedTaskIDs: prefs.OrderedTaskIDs,
+		SubtaskOrderByParentID: prefs.SubtaskOrderByParentID,
+	}
+	if sidebarQueryHasSort(query, "color") {
+		encoded, _ := json.Marshal(sidebarColorSettings(prefs))
+		digest := sha256.Sum256(encoded)
+		preferences.ColorSettingsDigest = hex.EncodeToString(digest[:])
+	}
 	payload, _ := json.Marshal(struct {
 		WorkspaceID string
 		Query       models.SidebarTaskViewQuery
-		Preferences models.SidebarTaskViewPreferences
-	}{workspaceID, query, prefs})
+		Preferences queryPreferences
+	}{workspaceID, query, preferences})
 	sum := sha256.Sum256(payload)
 	return hex.EncodeToString(sum[:])
 }

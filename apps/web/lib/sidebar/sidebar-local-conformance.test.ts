@@ -105,3 +105,83 @@ for (const scenario of fixtures.scenarios) {
     },
   );
 }
+
+it("does not infer running when the summary omits primary_session", () => {
+  const baselineTime = "2026-10-01T00:00:00Z";
+  const tasks = projectScenario([
+    {
+      id: "parent",
+      title: "parent",
+      workspace_id: "conformance",
+      workflow_id: "wf-a",
+      workflow_step_id: "step-a",
+      state: "TODO",
+      updated_at: baselineTime,
+      created_at: baselineTime,
+      summary: {
+        revision: 1,
+        updated_at: baselineTime,
+        last_activity_at: baselineTime,
+      },
+    },
+    {
+      id: "running-child",
+      title: "running child",
+      parent_id: "parent",
+      workspace_id: "conformance",
+      workflow_id: "wf-a",
+      workflow_step_id: "step-a",
+      state: "TODO",
+      primary_session_state: "RUNNING",
+      updated_at: "2026-10-04T00:00:00Z",
+      created_at: baselineTime,
+      summary: {
+        revision: 1,
+        updated_at: "2026-10-04T00:00:00Z",
+        last_activity_at: "2026-10-04T00:00:00Z",
+      },
+    },
+    {
+      id: "running-root",
+      title: "running root",
+      workspace_id: "conformance",
+      workflow_id: "wf-a",
+      workflow_step_id: "step-a",
+      state: "TODO",
+      primary_session_state: "RUNNING",
+      updated_at: "2026-10-03T00:00:00Z",
+      created_at: baselineTime,
+      summary: {
+        revision: 1,
+        updated_at: "2026-10-03T00:00:00Z",
+        last_activity_at: "2026-10-03T00:00:00Z",
+        primary_session: { id: "running-root-session", state: "RUNNING" },
+      },
+    },
+  ]);
+
+  const page = localSidebarPage(
+    tasks,
+    {
+      filters: [],
+      sort: {
+        key: "running",
+        direction: "desc",
+        then_by: [{ key: "lastActivityAt", direction: "desc" }],
+      },
+      group: "none",
+      collapsed_group_keys: [],
+      collapsed_task_ids: [],
+      page: 1,
+      page_size: 100,
+      locale: "en",
+    },
+    { pinnedTaskIds: [], orderedTaskIds: [], subtaskOrderByParentId: {} },
+  );
+
+  expect(page.entries.flatMap((entry) => (entry.task_id ? [entry.task_id] : []))).toEqual([
+    "running-root",
+    "parent",
+    "running-child",
+  ]);
+});

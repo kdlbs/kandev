@@ -11,6 +11,7 @@ export function createDefaultSidebarView(id: string, name: string): SidebarView 
     filters: [],
     sort: { key: "state", direction: "asc" },
     group: "repository",
+    groupIndent: true,
     collapsedGroups: [],
     taskRow: cloneSidebarTaskRowPresentation(undefined),
   };

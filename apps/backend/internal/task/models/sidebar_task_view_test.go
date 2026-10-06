@@ -2,6 +2,7 @@ package models
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -20,6 +21,13 @@ func TestSidebarTaskViewQueryValidation(t *testing.T) {
 	korean.Locale = "ko"
 	if err := korean.Validate(); err != nil {
 		t.Fatalf("korean query rejected: %v", err)
+	}
+	for _, direction := range []string{"asc", "desc"} {
+		runningFirst := valid
+		runningFirst.Sort = SidebarTaskViewSort{Key: "runningFirstActivity", Direction: direction}
+		if err := runningFirst.Validate(); err != nil {
+			t.Errorf("running-first query with %s direction rejected: %v", direction, err)
+		}
 	}
 
 	tests := []struct {
@@ -71,6 +79,42 @@ func TestSidebarTaskViewQueryValidation(t *testing.T) {
 				t.Fatal("invalid query accepted")
 			}
 		})
+	}
+}
+
+func TestSidebarTaskViewSortChainValidation(t *testing.T) {
+	base := SidebarTaskViewQuery{
+		Sort: SidebarTaskViewSort{
+			Key: "running", Direction: "desc",
+			ThenBy: []SidebarTaskViewSortCriterion{
+				{Key: "color", Color: "red", Direction: "desc"},
+				{Key: "lastActivityAt", Direction: "desc"},
+			},
+		},
+		Group: "none", Page: 1, PageSize: 100, Locale: "en",
+	}
+	if err := base.Validate(); err != nil {
+		t.Fatalf("valid chain rejected: %v", err)
+	}
+
+	invalid := base
+	invalid.Sort.ThenBy = append(invalid.Sort.ThenBy, SidebarTaskViewSortCriterion{Key: "running", Direction: "asc"})
+	err := invalid.Validate()
+	var validation *SidebarQueryValidationError
+	if !errors.As(err, &validation) || validation.SortIndex == nil || *validation.SortIndex != 3 {
+		t.Fatalf("expected safe zero-based rule index 3, got %#v (%v)", validation, err)
+	}
+
+	invalid = base
+	invalid.Sort.ThenBy = make([]SidebarTaskViewSortCriterion, MaxSidebarViewSortRules)
+	if err := invalid.Validate(); err == nil {
+		t.Fatal("accepted more than ten sort rules")
+	}
+
+	legacy := base
+	legacy.Sort = SidebarTaskViewSort{Key: "runningFirstActivity", Direction: "asc"}
+	if got := legacy.Sort.Criteria(); len(got) != 2 || got[0].Key != "running" || got[1].Key != "lastActivityAt" {
+		t.Fatalf("legacy preset was not expanded: %+v", got)
 	}
 }
 

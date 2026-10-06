@@ -479,6 +479,7 @@ export type UISliceActions = {
       filters: FilterClause[];
       sort: SortSpec;
       group: GroupKey;
+      groupIndent: boolean;
       taskRow: SidebarTaskRowPresentation;
     }>,
   ) => void;

@@ -215,6 +215,7 @@ export type GroupSectionProps = {
   collapsedSubtaskParentIds?: string[];
   onToggleSubtasks?: (parentTaskId: string) => void;
   showHeader: boolean;
+  groupIndent?: boolean;
   onReorderGroup?: (groupTaskIds: string[]) => void;
   onReorderSubtasks?: (parentTaskId: string, orderedSubtaskIds: string[]) => void;
   onNestTask?: (taskId: string, parentTaskId: string) => void;
@@ -251,23 +252,7 @@ function sameTaskSubtree(
 }
 
 function groupSectionEqual(previous: GroupSectionProps, next: GroupSectionProps): boolean {
-  if (
-    previous.grouping !== next.grouping ||
-    previous.group !== next.group ||
-    previous.rowProps !== next.rowProps ||
-    previous.getNestHierarchyTasks !== next.getNestHierarchyTasks ||
-    previous.pinnedSet !== next.pinnedSet ||
-    previous.isCollapsed !== next.isCollapsed ||
-    previous.onToggleGroup !== next.onToggleGroup ||
-    previous.collapsedSubtaskParentIds !== next.collapsedSubtaskParentIds ||
-    previous.onToggleSubtasks !== next.onToggleSubtasks ||
-    previous.showHeader !== next.showHeader ||
-    previous.onReorderGroup !== next.onReorderGroup ||
-    previous.onReorderSubtasks !== next.onReorderSubtasks ||
-    previous.onNestTask !== next.onNestTask
-  ) {
-    return false;
-  }
+  if (!groupSectionOptionsEqual(previous, next)) return false;
   return (
     previous.subTasksByParentId === next.subTasksByParentId ||
     sameTaskSubtree(
@@ -276,6 +261,25 @@ function groupSectionEqual(previous: GroupSectionProps, next: GroupSectionProps)
       previous.subTasksByParentId,
       next.subTasksByParentId,
     )
+  );
+}
+
+function groupSectionOptionsEqual(previous: GroupSectionProps, next: GroupSectionProps): boolean {
+  return (
+    previous.grouping === next.grouping &&
+    previous.group === next.group &&
+    previous.rowProps === next.rowProps &&
+    previous.getNestHierarchyTasks === next.getNestHierarchyTasks &&
+    previous.pinnedSet === next.pinnedSet &&
+    previous.isCollapsed === next.isCollapsed &&
+    previous.onToggleGroup === next.onToggleGroup &&
+    previous.collapsedSubtaskParentIds === next.collapsedSubtaskParentIds &&
+    previous.onToggleSubtasks === next.onToggleSubtasks &&
+    previous.showHeader === next.showHeader &&
+    previous.groupIndent === next.groupIndent &&
+    previous.onReorderGroup === next.onReorderGroup &&
+    previous.onReorderSubtasks === next.onReorderSubtasks &&
+    previous.onNestTask === next.onNestTask
   );
 }
 
@@ -320,6 +324,7 @@ export const GroupSection = memo(function GroupSection({
   collapsedSubtaskParentIds,
   onToggleSubtasks,
   showHeader,
+  groupIndent = true,
   onReorderGroup,
   onReorderSubtasks,
   onNestTask,
@@ -359,7 +364,7 @@ export const GroupSection = memo(function GroupSection({
         id={bodyId}
         role={showHeader ? "group" : undefined}
         aria-labelledby={showHeader ? headerId : undefined}
-        className={showHeader ? "ml-5" : undefined}
+        className={showHeader && groupIndent ? "ml-5" : undefined}
       >
         <TaskTreeLevel parentTaskId={null} tasks={group.tasks} depth={0} ctx={ctx} />
       </div>

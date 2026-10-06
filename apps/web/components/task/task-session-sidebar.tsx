@@ -65,6 +65,7 @@ function buildSidebarTaskItems(params: {
   acknowledgedAgentErrors: Record<string, string>;
   dismissedAgentErrors: Record<string, string>;
   automaticColorSettings: SidebarItemContext["automaticColorSettings"];
+  manualColors: SidebarItemContext["manualColors"];
   pendingRemovalTaskIds: ReadonlySet<string>;
 }): ReturnType<typeof buildSidebarItem>[] {
   const {
@@ -78,6 +79,7 @@ function buildSidebarTaskItems(params: {
     acknowledgedAgentErrors,
     dismissedAgentErrors,
     automaticColorSettings,
+    manualColors,
     pendingRemovalTaskIds,
   } = params;
   const repositories = workspaceId ? (repositoriesByWorkspace[workspaceId] ?? []) : [];
@@ -109,6 +111,7 @@ function buildSidebarTaskItems(params: {
     repositoriesById,
     stepColorById,
     automaticColorSettings,
+    manualColors,
     pendingRemovalTaskIds,
   };
   return allTasks.map((task) => buildSidebarItem(task, context));
@@ -124,6 +127,7 @@ export function useSidebarData(workspaceId: string | null, activeTaskOnly = fals
   const automaticColorSettings = useAppStore(
     (state) => state.userSettings.sidebarTaskColorAutomation,
   );
+  const manualColors = useAppStore((state) => state.userSettings.sidebarTaskColors);
 
   const selectedTaskId = useMemo(() => {
     if (activeSessionId) return sessionsById[activeSessionId]?.task_id ?? activeTaskId;
@@ -161,6 +165,7 @@ export function useSidebarData(workspaceId: string | null, activeTaskOnly = fals
         acknowledgedAgentErrors,
         dismissedAgentErrors,
         automaticColorSettings,
+        manualColors,
         pendingRemovalTaskIds,
       }),
     [
@@ -174,6 +179,7 @@ export function useSidebarData(workspaceId: string | null, activeTaskOnly = fals
       acknowledgedAgentErrors,
       dismissedAgentErrors,
       automaticColorSettings,
+      manualColors,
       pendingRemovalTaskIds,
     ],
   );

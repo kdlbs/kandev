@@ -39,6 +39,7 @@ function lastActivityView(
     filters,
     sort: { key: "lastActivityAt", direction },
     group: "none",
+    groupIndent: true,
     collapsedGroups: [],
   };
 }

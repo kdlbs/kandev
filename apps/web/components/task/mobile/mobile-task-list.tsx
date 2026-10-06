@@ -12,6 +12,7 @@ import { buildMobileTaskSwitcherProps } from "./session-task-switcher-sheet-prop
 import { SidebarTaskQueryStatus } from "../sidebar-task-query-status";
 import { SidebarTaskPagination } from "../sidebar-task-pagination";
 import { groupSidebarTaskPage } from "../task-session-sidebar-grouped-view";
+import { sidebarSortHasKey } from "@/lib/sidebar/sidebar-sort-chain";
 import type { SidebarTaskPageEntry, SidebarTaskPageResponse } from "@/lib/types/http";
 function useSidebarGroupToggle(viewId: string) {
   const toggleSidebarGroupCollapsed = useAppStore((s) => s.toggleSidebarGroupCollapsed);
@@ -114,7 +115,8 @@ export function MobileTaskList(props: MobileTaskListProps) {
     onReorderGroup: handleReorderGroup,
     onReorderSubtasks: handleReorderSubtasks,
     pinnedTaskIds,
-    showActivityTime: view.sort.key === "lastActivityAt",
+    showActivityTime: sidebarSortHasKey(view.sort, "lastActivityAt"),
+    groupIndent: view.groupIndent,
     taskRowPresentation: view.taskRow,
   });
   return (

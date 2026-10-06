@@ -79,7 +79,7 @@ func sidebarSelectedTreeCTEs(query models.SidebarTaskViewQuery, page sidebarPage
 		FROM filtered v JOIN selected_members member ON member.id = v.id
 		JOIN filtered parent ON parent.id = v.parent_id
 		LEFT JOIN cycle_roots cycle_root ON cycle_root.root_key = v.id
-		` + page.activityJoin + page.stateJoin + `
+		` + page.activityJoin + page.runningJoin + page.stateJoin + `
 		WHERE cycle_root.root_key IS NULL
 	), tree AS (
 		SELECT root.id, root.root_id, root.root_group_key, root.root_group_label, root.group_order,

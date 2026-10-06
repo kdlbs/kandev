@@ -12,6 +12,7 @@ import (
 
 type sidebarBaseNeeds struct {
 	state, activity, executor                  bool
+	running, color                             bool
 	repositoryGroup, repositoryFilter          bool
 	diff, pullRequest, reviewWatch, issueWatch bool
 	workflowNames, summary                     bool
@@ -19,8 +20,10 @@ type sidebarBaseNeeds struct {
 
 func sidebarBaseNeedsFor(query models.SidebarTaskViewQuery) sidebarBaseNeeds {
 	needs := sidebarBaseNeeds{
-		state:            query.Group == sidebarStateKey || query.Sort.Key == sidebarStateKey || sidebarQueryHasFilter(query, sidebarStateKey),
-		activity:         query.Sort.Key == sidebarActivitySortField,
+		state:            query.Group == sidebarStateKey || sidebarQueryHasSort(query, sidebarStateKey) || sidebarQueryHasFilter(query, sidebarStateKey),
+		activity:         sidebarQueryHasSort(query, sidebarActivitySortField),
+		running:          sidebarQueryHasSort(query, "running"),
+		color:            sidebarQueryHasSort(query, "color"),
 		repositoryGroup:  query.Group == sidebarRepositoryKey,
 		repositoryFilter: sidebarQueryHasFilter(query, sidebarRepositoryKey),
 		executor:         query.Group == "executorType" || sidebarQueryHasFilter(query, "executorType"),
@@ -30,11 +33,15 @@ func sidebarBaseNeedsFor(query models.SidebarTaskViewQuery) sidebarBaseNeeds {
 		issueWatch:       sidebarQueryHasFilter(query, "isIssueWatch"),
 		workflowNames:    query.Group == sidebarWorkflowKey || query.Group == sidebarWorkflowStepKey,
 	}
-	needs.summary = needs.state || needs.activity || needs.diff || needs.pullRequest
+	needs.summary = needs.state || needs.activity || needs.running || needs.diff || needs.pullRequest
 	return needs
 }
 
-func sidebarBaseCTE(driver, groupExpr, groupLabelExpr, scopeSQL string, query models.SidebarTaskViewQuery) string {
+func sidebarBaseCTE(
+	driver, groupExpr, groupLabelExpr, scopeSQL string,
+	query models.SidebarTaskViewQuery,
+	effectiveColor, colorSettingsCTE string,
+) string {
 	needs := sidebarBaseNeedsFor(query)
 	if needs.repositoryGroup {
 		// Repository group identity is only needed after filtering identifies display roots.
@@ -43,6 +50,9 @@ func sidebarBaseCTE(driver, groupExpr, groupLabelExpr, scopeSQL string, query mo
 	}
 	summaryJoin, workflowJoins := sidebarBaseJoins(needs)
 	candidateFields := sidebarBaseCandidateFields(driver, needs)
+	if needs.color {
+		candidateFields = append(candidateFields, effectiveColor+" AS effective_color")
+	}
 	projectionFields := []string{"candidate_raw.*", groupExpr + " AS group_key", groupLabelExpr + " AS group_label"}
 	if needs.activity {
 		projectionFields = append(projectionFields, sidebarActivitySortKey(driver, "activity_source")+" AS activity_at")
@@ -58,7 +68,7 @@ func sidebarBaseCTE(driver, groupExpr, groupLabelExpr, scopeSQL string, query mo
 			JOIN tasks identity ON identity.id = candidate_projection.projection_id
 		)`
 	}
-	return `WITH RECURSIVE scoped_tasks AS NOT MATERIALIZED (
+	return `WITH RECURSIVE ` + colorSettingsCTE + `scoped_tasks AS NOT MATERIALIZED (
 		SELECT t.* FROM tasks t
 		WHERE t.workspace_id = ? AND (t.is_ephemeral = 0 OR t.is_ephemeral IS NULL)
 			AND COALESCE(t.origin, '') <> 'automation_run'
@@ -81,6 +91,8 @@ func sidebarBaseJoins(needs sidebarBaseNeeds) (string, string) {
 	}
 	if needs.workflowNames {
 		workflowJoins = ` LEFT JOIN workflows w ON w.id = t.workflow_id LEFT JOIN workflow_steps ws ON ws.id = t.workflow_step_id`
+	} else if needs.color {
+		workflowJoins = ` LEFT JOIN workflow_steps ws ON ws.id = t.workflow_step_id`
 	}
 	return summaryJoin, workflowJoins
 }
@@ -103,10 +115,20 @@ func sidebarBaseCandidateFields(driver string, needs sidebarBaseNeeds) []string 
 }
 
 func sidebarStateFields(driver string, needs sidebarBaseNeeds) []string {
-	if !needs.state {
+	if !needs.state && !needs.running {
 		return nil
 	}
 	primary := `COALESCE(NULLIF(` + dialect.JSONExtractPath(driver, "summary.summary", "primary_session", sidebarStateKey) + `, ''), '')`
+	fields := []string{}
+	if needs.state {
+		fields = append(fields, "t.state")
+	}
+	if needs.state || needs.running {
+		fields = append(fields, primary+" AS primary_session_state")
+	}
+	if !needs.state {
+		return fields
+	}
 	bucket := `CASE
 		WHEN COALESCE(` + primary + `, '') IN ('WAITING_FOR_INPUT', 'COMPLETED', 'FAILED', 'CANCELLED') THEN 'review'
 		WHEN COALESCE(` + primary + `, '') = 'RUNNING' THEN 'in_progress'
@@ -117,7 +139,7 @@ func sidebarStateFields(driver string, needs sidebarBaseNeeds) []string {
 		WHEN t.state IN ('REVIEW', 'COMPLETED') THEN 'review'
 		WHEN t.state IN ('IN_PROGRESS', 'SCHEDULING') THEN 'in_progress'
 		ELSE 'backlog' END`
-	return []string{"t.state", primary + " AS primary_session_state", bucket + " AS state_bucket"}
+	return append(fields, bucket+" AS state_bucket")
 }
 
 func sidebarActivityFields(driver string, needs sidebarBaseNeeds) []string {

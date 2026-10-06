@@ -15,6 +15,7 @@ export function buildMobileTaskSwitcherProps(
     onReorderSubtasks: (parentTaskId: string, orderedSubtaskIds: string[]) => void;
     pinnedTaskIds: string[];
     showActivityTime: boolean;
+    groupIndent: boolean;
     taskRowPresentation: TaskSwitcherProps["taskRowPresentation"];
   },
 ): TaskSwitcherProps {
@@ -30,6 +31,7 @@ export function buildMobileTaskSwitcherProps(
     onBeforeMoveOptionsOpen: props.onBeforeMoveOptionsOpen,
     collapsedGroupKeys: helpers.collapsedGroupKeys,
     showActivityTime: helpers.showActivityTime,
+    groupIndent: helpers.groupIndent,
     taskRowPresentation: helpers.taskRowPresentation,
     onToggleGroup: helpers.onToggleGroup,
     collapsedSubtaskParentIds: helpers.collapsedSubtaskParentIds,
