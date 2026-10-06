@@ -4,9 +4,14 @@ import { querySidebarTasks } from "@/lib/api/domains/kanban-api";
 import { updateUserSettings } from "@/lib/api/domains/settings-api";
 import type { SidebarTaskPageResponse, SidebarTaskQuery } from "@/lib/types/http";
 import type { BackendMessageMap } from "@/lib/types/backend";
+import type { AppState } from "@/lib/state/store";
 import { registerUsersHandlers } from "@/lib/ws/handlers/users";
 import { toApiSidebarDraft, toApiSidebarView } from "@/lib/state/slices/ui/sidebar-view-wire";
-import { SidebarTaskPageCache, sidebarTaskPageScope } from "./sidebar-task-page-cache";
+import {
+  SidebarTaskPageCache,
+  sidebarTaskPageRankingKey,
+  sidebarTaskPageScope,
+} from "./sidebar-task-page-cache";
 
 vi.mock("@/lib/api/domains/kanban-api", () => ({ querySidebarTasks: vi.fn() }));
 vi.mock("@/lib/api/domains/settings-api", async (importOriginal) => {
@@ -156,6 +161,32 @@ it("keeps view identity stable while invalidating a page after a color change", 
   });
   expect(sidebarTaskPageScope(store.getState())).toBe(before);
   expect(cache.get("before-color-change")).toBeNull();
+});
+
+it("reuses the ranking key when unrelated state updates keep ranking inputs stable", () => {
+  const { store } = setup();
+  const state = store.getState();
+  let snapshotEnumerations = 0;
+  const snapshots = new Proxy(state.kanbanMulti.snapshots, {
+    ownKeys(target) {
+      snapshotEnumerations++;
+      return Reflect.ownKeys(target);
+    },
+  });
+  const rankingState = {
+    ...state,
+    kanbanMulti: { ...state.kanbanMulti, snapshots },
+  } as AppState;
+
+  const firstKey = sidebarTaskPageRankingKey(rankingState);
+  const countAfterFirstCalculation = snapshotEnumerations;
+  const secondKey = sidebarTaskPageRankingKey({
+    ...rankingState,
+    workspaceContextGeneration: rankingState.workspaceContextGeneration + 1,
+  });
+
+  expect(secondKey).toBe(firstKey);
+  expect(snapshotEnumerations).toBe(countAfterFirstCalculation);
 });
 
 it("keeps cached pages after a semantically equal full settings event", async () => {

@@ -116,6 +116,13 @@ test("desktop sorts a complete paged tree by running, color, and activity", asyn
     const { filters, popover } = await openSidebarSortEditor(testPage, false);
     await filters.openSortSettings();
     await addColorAfterActivity(testPage, popover);
+    const colorRule = popover.getByTestId("sort-rule-color-1");
+    await colorRule.click();
+    await testPage.getByRole("option", { name: "Blue", exact: true }).click();
+    await expect(colorRule).toBeFocused();
+    await colorRule.click();
+    await testPage.getByRole("option", { name: "Red", exact: true }).click();
+    await expect(colorRule).toBeFocused();
     if (prCapture.capturing) {
       await expect(popover.getByTestId("sort-rule-card-2")).toBeVisible();
       await waitForFiniteAnimations(popover);

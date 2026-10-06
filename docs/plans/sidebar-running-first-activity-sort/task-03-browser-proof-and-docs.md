@@ -172,3 +172,6 @@ After review remediation, the desktop sort-chain, phone sort-chain, desktop
 workspace-view, and phone workspace-view managed E2E specs were rerun against
 fresh backend and Vite builds; each passed (one test per spec). The public guide
 continues to describe the configurable sort chain and default-on group indentation.
+The desktop and phone sort-chain specs also verify that changing a preferred
+color retains focus on its control while the rule's stable editor identity moves
+with it during reordering.

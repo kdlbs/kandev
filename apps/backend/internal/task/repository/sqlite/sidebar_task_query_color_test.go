@@ -112,6 +112,22 @@ func TestSidebarColorQueryKeyTracksOnlyColorSortSettings(t *testing.T) {
 	require.Equal(t, sidebarTaskQueryKey("workspace", nonColorQuery, one), sidebarTaskQueryKey("workspace", nonColorQuery, two))
 }
 
+func TestSidebarColorSettingsAreValidatedOnlyForColorSort(t *testing.T) {
+	repo := newRepoForSidebarConformance(t, "sqlite")
+	const workspace = "sidebar-color-validation"
+	seedWorkspace(t, repo, workspace)
+	prefs := sidebarColorPreferencesForTest()
+	prefs.ColorSettings.Automation = json.RawMessage(`{"enabled":`)
+
+	_, err := repo.QuerySidebarTaskPage(t.Context(), workspace, sidebarTaskQuery(1), prefs)
+	require.NoError(t, err, "non-color views do not parse settings they cannot use")
+
+	query := sidebarTaskQuery(1)
+	query.Sort = models.SidebarTaskViewSort{Key: "color", Color: "red", Direction: "desc"}
+	_, err = repo.QuerySidebarTaskPage(t.Context(), workspace, query, prefs)
+	require.ErrorContains(t, err, "invalid sidebar task color automation")
+}
+
 func TestSidebarColorRuleConditionsCompileEveryDimension(t *testing.T) {
 	conditions := []usermodels.SidebarTaskColorCondition{
 		{Dimension: "workflow_step", Value: map[string]any{"workspace_id": "ws", "step_id": "step"}},

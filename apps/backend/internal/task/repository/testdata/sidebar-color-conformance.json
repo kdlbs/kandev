@@ -61,6 +61,48 @@
       "expected_match": true
     },
     {
+      "name": "provider identity removes an HTTPS default port",
+      "workspace_id": "sidebar-color-provider-default-port",
+      "task": {
+        "state": "TODO",
+        "repository_link": true
+      },
+      "repository": {
+        "id": "target-repo",
+        "provider": "github",
+        "provider_repo_id": "43",
+        "provider_host": "https://github.com:443",
+        "provider_scope": "org"
+      },
+      "automation": {
+        "enabled": true,
+        "rules": [
+          {
+            "id": "provider-default-port",
+            "enabled": true,
+            "condition": {
+              "dimension": "repository",
+              "value": {
+                "kind": "provider",
+                "provider_id": "github",
+                "host": "github.com",
+                "scope": "org",
+                "provider_repository_id": "43"
+              },
+              "label": "Repository"
+            },
+            "output": {
+              "kind": "fixed",
+              "color": "red"
+            }
+          }
+        ]
+      },
+      "preferred_color": "red",
+      "expected_token": "red",
+      "expected_match": true
+    },
+    {
       "name": "provider identity takes precedence over local checkout path",
       "workspace_id": "sidebar-color-provider-before-local",
       "task": { "state": "TODO", "repository_link": true },

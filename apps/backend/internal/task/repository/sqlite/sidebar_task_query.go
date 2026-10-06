@@ -73,7 +73,7 @@ func (r *Repository) QuerySidebarTaskPage(
 	if err := query.Validate(); err != nil {
 		return nil, err
 	}
-	if err := validateSidebarTaskPreferences(prefs); err != nil {
+	if err := validateSidebarTaskPreferences(query, prefs); err != nil {
 		return nil, err
 	}
 	snapshot, err := beginSidebarQuerySnapshot(ctx, r.ro)
@@ -220,7 +220,7 @@ func sidebarTaskCandidateSQL(
 	return baseSQL, baseArgs, nil
 }
 
-func validateSidebarTaskPreferences(prefs models.SidebarTaskViewPreferences) error {
+func validateSidebarTaskPreferences(query models.SidebarTaskViewQuery, prefs models.SidebarTaskViewPreferences) error {
 	count := len(prefs.PinnedTaskIDs) + len(prefs.OrderedTaskIDs)
 	for _, ids := range prefs.SubtaskOrderByParentID {
 		count += len(ids)
@@ -228,8 +228,10 @@ func validateSidebarTaskPreferences(prefs models.SidebarTaskViewPreferences) err
 	if count > maxSidebarPreferenceIDs {
 		return errors.New("sidebar task preferences exceed the query limit")
 	}
-	if err := validateSidebarColorSettings(prefs); err != nil {
-		return err
+	if sidebarQueryHasSort(query, "color") {
+		if err := validateSidebarColorSettings(prefs); err != nil {
+			return err
+		}
 	}
 	return nil
 }

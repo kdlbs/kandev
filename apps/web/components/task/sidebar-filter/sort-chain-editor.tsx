@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { IconPlus } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { useTranslation } from "react-i18next";
@@ -15,6 +16,12 @@ import type {
 } from "@/lib/state/slices/ui/sidebar-view-types";
 import { MAX_SIDEBAR_SORT_RULES, sidebarSortRules } from "@/lib/sidebar/sidebar-sort-chain";
 import { SortChainRuleCard } from "./sort-chain-rule-card";
+import {
+  changeIdentifiedSortRule,
+  moveIdentifiedSortRule,
+  removeIdentifiedSortRule,
+  type IdentifiedSortRule,
+} from "./sort-chain-editor-model";
 export { sortRuleDirectionLabelKey } from "./sort-chain-rule-card";
 
 const EDITABLE_KEYS: SortKey[] = [
@@ -121,30 +128,57 @@ export function SortChainEditor({
   warningCount?: number;
 }) {
   const { t } = useTranslation();
-  const rules = sidebarSortRules(value);
+  const editorId = useId();
+  const identitySequence = useRef(0);
+  const createEntries = (rules: SortRule[]): IdentifiedSortRule[] =>
+    rules.map((rule) => ({ id: `${editorId}${identitySequence.current++}`, rule }));
+  const inputRules = useMemo(() => sidebarSortRules(value), [value]);
+  const inputSignature = JSON.stringify(inputRules);
+  const [entries, setEntries] = useState(() => createEntries(inputRules));
+  const observedSignature = useRef(inputSignature);
+  const pendingSignature = useRef<{ previous: string; next: string } | null>(null);
+
+  useEffect(() => {
+    const pending = pendingSignature.current;
+    if (pending?.next === inputSignature) {
+      pendingSignature.current = null;
+      observedSignature.current = inputSignature;
+      return;
+    }
+    if (pending?.previous === inputSignature) return;
+    if (observedSignature.current === inputSignature) return;
+    pendingSignature.current = null;
+    observedSignature.current = inputSignature;
+    setEntries(createEntries(inputRules));
+  }, [inputRules, inputSignature]);
+
+  const rules = entries.map((entry) => entry.rule);
   const canAdd = rules.length < MAX_SIDEBAR_SORT_RULES && value.key !== "custom";
+  const commitEntries = (updated: IdentifiedSortRule[]) => {
+    const nextSort = withRules(updated.map((entry) => entry.rule));
+    pendingSignature.current = {
+      previous: observedSignature.current,
+      next: JSON.stringify(sidebarSortRules(nextSort)),
+    };
+    setEntries(updated);
+    onChange(nextSort);
+  };
   const changeRule = (index: number, rule: SortRule) => {
-    const updated = [...rules];
-    updated[index] = rule;
-    onChange(withRules(updated));
+    commitEntries(changeIdentifiedSortRule(entries, index, rule));
   };
   const moveRule = (index: number, offset: number) => {
-    const destination = index + offset;
-    if (destination < 0 || destination >= rules.length) return;
-    const updated = [...rules];
-    [updated[index], updated[destination]] = [updated[destination], updated[index]];
-    onChange(withRules(updated));
+    commitEntries(moveIdentifiedSortRule(entries, index, offset));
   };
   const addRule = () => {
     const rule = newRule(rules);
-    if (rule) onChange(withRules([...rules, rule]));
+    if (rule) commitEntries([...entries, ...createEntries([rule])]);
   };
 
   return (
     <div className="space-y-1.5" data-testid="sidebar-sort-chain-editor">
-      {rules.map((rule, index) => (
+      {entries.map(({ id, rule }, index) => (
         <SortChainRuleCard
-          key={`${rule.key}-${rule.key === "color" ? rule.color : ""}`}
+          key={id}
           rule={rule}
           position={index + 1}
           ruleCount={rules.length}
@@ -159,7 +193,7 @@ export function SortChainEditor({
             rule.key !== "custom" && changeRule(index, { ...rule, direction })
           }
           onMove={(offset) => moveRule(index, offset)}
-          onRemove={() => onChange(withRules(rules.filter((_, current) => current !== index)))}
+          onRemove={() => commitEntries(removeIdentifiedSortRule(entries, index))}
         />
       ))}
       <Button

@@ -8,6 +8,17 @@ import { repositoryIdentityForSavedRepository } from "./repository-rule-identity
 const MAX_PAGES = 5;
 const MAX_BYTES = 2 * 1024 * 1024;
 const MAX_AGE_MS = 5 * 60 * 1000;
+const EMPTY_REPOSITORIES: NonNullable<AppState["repositories"]["itemsByWorkspaceId"][string]> = [];
+
+type SidebarRankingInputs = {
+  workspaceId: string;
+  colors: AppState["userSettings"]["sidebarTaskColors"];
+  automation: AppState["userSettings"]["sidebarTaskColorAutomation"];
+  repositories: NonNullable<AppState["repositories"]["itemsByWorkspaceId"][string]>;
+  snapshots: AppState["kanbanMulti"]["snapshots"];
+};
+
+let cachedRanking: { inputs: SidebarRankingInputs; key: string } | undefined;
 
 type PageSnapshot = { page: SidebarTaskPageResponse; owner: string; fetchedAt: number };
 type Request = {
@@ -327,28 +338,46 @@ export function sidebarTaskPageScope(state: AppState): string {
 
 /** Semantic rank inputs stay outside saved-view identity and are reduced to a bounded key. */
 export function sidebarTaskPageRankingKey(state: AppState): string {
-  const colors = Object.entries(state.userSettings.sidebarTaskColors ?? {})
+  const workspaceId = state.workspaces.activeId ?? "";
+  const inputs: SidebarRankingInputs = {
+    workspaceId,
+    colors: state.userSettings.sidebarTaskColors,
+    automation: state.userSettings.sidebarTaskColorAutomation,
+    repositories: state.repositories.itemsByWorkspaceId[workspaceId] ?? EMPTY_REPOSITORIES,
+    snapshots: state.kanbanMulti.snapshots,
+  };
+  if (
+    cachedRanking &&
+    cachedRanking.inputs.workspaceId === inputs.workspaceId &&
+    cachedRanking.inputs.colors === inputs.colors &&
+    cachedRanking.inputs.automation === inputs.automation &&
+    cachedRanking.inputs.repositories === inputs.repositories &&
+    cachedRanking.inputs.snapshots === inputs.snapshots
+  )
+    return cachedRanking.key;
+
+  const colors = Object.entries(inputs.colors ?? {})
     .filter(([, color]) => typeof color === "string")
     .sort(([a], [b]) => compareText(a, b));
-  const automation = state.userSettings.sidebarTaskColorAutomation;
+  const automation = inputs.automation;
   const rules = automation.rules.map((rule) => ({
     enabled: rule.enabled,
     dimension: rule.condition.dimension,
     value: stableSidebarValue(rule.condition.value),
     output: stableSidebarValue(rule.output),
   }));
-  const repositories = (
-    state.repositories.itemsByWorkspaceId[state.workspaces.activeId ?? ""] ?? []
-  )
+  const repositories = inputs.repositories
     .map((repository) => repositoryIdentityForSavedRepository(repository))
     .map(stableSidebarValue)
     .sort((a, b) => compareText(JSON.stringify(a), JSON.stringify(b)));
-  const stepColors = Object.values(state.kanbanMulti.snapshots ?? {})
+  const stepColors = Object.values(inputs.snapshots ?? {})
     .flatMap((snapshot) => snapshot.steps.map((step) => [step.id, step.color]))
     .sort((a, b) => compareText(JSON.stringify(a), JSON.stringify(b)));
-  return digestSidebarRanking(
+  const key = digestSidebarRanking(
     JSON.stringify([colors, automation.enabled, rules, repositories, stepColors]),
   );
+  cachedRanking = { inputs, key };
+  return key;
 }
 
 function stableSidebarValue(value: unknown): unknown {

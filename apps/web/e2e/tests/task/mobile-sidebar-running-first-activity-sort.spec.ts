@@ -146,6 +146,13 @@ test("phone drawer edits and saves a touch-reachable sort chain and group inset"
     await readdedColor.scrollIntoViewIfNeeded();
     await readdedColor.tap();
     await testPage.getByRole("option", { name: "Red", exact: true }).tap();
+    await expect(readdedColor).toBeFocused();
+    await readdedColor.tap();
+    await testPage.getByRole("option", { name: "Blue", exact: true }).tap();
+    await expect(readdedColor).toBeFocused();
+    await readdedColor.tap();
+    await testPage.getByRole("option", { name: "Red", exact: true }).tap();
+    await expect(readdedColor).toBeFocused();
     await savedPopover.getByTestId("sort-rule-up-2").tap();
     await expectSidebarRootOrder(sheet, scenario.rootIds, [
       scenario.parent.id,

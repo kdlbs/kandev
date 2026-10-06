@@ -256,6 +256,9 @@ func sidebarNormalizeProviderHost(driver, value string, requireScheme, includePa
 	authority := "SUBSTR(" + tail + ", 1, " + authorityEnd + " - 1)"
 	userinfoPosition := sidebarSQLPosition(driver, authority, "@")
 	host := "LOWER(CASE WHEN " + userinfoPosition + " > 0 THEN SUBSTR(" + authority + ", " + userinfoPosition + " + 1) ELSE " + authority + " END)"
+	scheme := "CASE WHEN " + schemePosition + " > 0 THEN LOWER(SUBSTR(" + trimmed + ", 1, " + schemePosition + " - 1)) ELSE '' END"
+	defaultPort := "CASE WHEN " + scheme + " = 'http' THEN '80' WHEN " + scheme + " IN ('', 'https') THEN '443' ELSE '' END"
+	host = sidebarStripDefaultProviderPort(host, defaultPort)
 	if !includePath {
 		return "CASE WHEN " + host + " = '' THEN '' ELSE " + host + " END"
 	}
@@ -263,6 +266,14 @@ func sidebarNormalizeProviderHost(driver, value string, requireScheme, includePa
 	pathEnd := sidebarFirstURLDelimiterEnd(driver, tail, []string{"?", "#"})
 	path := "CASE WHEN " + pathPosition + " > 0 THEN RTRIM(SUBSTR(" + tail + ", " + pathPosition + ", " + pathEnd + " - " + pathPosition + "), '/') ELSE '' END"
 	return "CASE WHEN " + host + " = '' THEN '' ELSE " + host + " || " + path + " END"
+}
+
+func sidebarStripDefaultProviderPort(host, port string) string {
+	suffix := "':' || (" + port + ")"
+	portSuffix := "SUBSTR(" + host + ", LENGTH(" + host + ") - LENGTH(" + port + "))"
+	hostWithoutPort := "SUBSTR(" + host + ", 1, LENGTH(" + host + ") - LENGTH(" + port + ") - 1)"
+	return "CASE WHEN (" + port + ") <> '' AND " + portSuffix + " = " + suffix +
+		" THEN " + hostWithoutPort + " ELSE " + host + " END"
 }
 
 func sidebarFirstURLDelimiterEnd(driver, value string, delimiters []string) string {
