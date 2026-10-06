@@ -22,6 +22,7 @@ const (
 	OperationRepair     Operation = "repair"
 	OperationUpToDate   Operation = "up_to_date"
 	OperationUseDefault Operation = "use_default"
+	OperationMigrate    Operation = "migrate"
 )
 
 // VersionOption is one selectable version in the bounded catalogue.
@@ -41,6 +42,11 @@ type Catalogue struct {
 var stableVersionPattern = regexp.MustCompile(
 	`^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(\+[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$`,
 )
+
+var openCodePackageMajors = map[string]uint64{
+	OpenCodeV1Package: 1,
+	OpenCodeV2Package: 2,
+}
 
 // ParseStableVersion accepts only strict, prerelease-free SemVer values.
 func ParseStableVersion(value string) (*semver.Version, error) {
@@ -113,6 +119,45 @@ func BuildCatalogue(published []string, latest string, extras ...string) (Catalo
 		options = append(options, VersionOption{Version: value, Latest: value == latest})
 	}
 	return Catalogue{Versions: options, Latest: latest, all: seen}, nil
+}
+
+// ExpectedMajorForPackage returns the reviewed OpenCode major associated with
+// a trusted distribution package. Other managed packages have no family major
+// restriction.
+func ExpectedMajorForPackage(packageName string) (uint64, bool) {
+	major, ok := openCodePackageMajors[packageName]
+	return major, ok
+}
+
+// BuildCatalogueForPackage keeps family-specific distributions within their
+// reviewed major while preserving the generic catalogue behavior elsewhere.
+func BuildCatalogueForPackage(
+	packageName string,
+	published []string,
+	latest string,
+	extras ...string,
+) (Catalogue, error) {
+	expectedMajor, restricted := ExpectedMajorForPackage(packageName)
+	if !restricted {
+		return BuildCatalogue(published, latest, extras...)
+	}
+	filtered := filterVersionsByMajor(published, expectedMajor)
+	filteredExtras := filterVersionsByMajor(extras, expectedMajor)
+	if parsed, err := ParseStableVersion(latest); err != nil || parsed.Major() != expectedMajor {
+		latest = ""
+	}
+	return BuildCatalogue(filtered, latest, filteredExtras...)
+}
+
+func filterVersionsByMajor(values []string, major uint64) []string {
+	filtered := make([]string, 0, len(values))
+	for _, value := range values {
+		parsed, err := ParseStableVersion(value)
+		if err == nil && parsed.Major() == major {
+			filtered = append(filtered, value)
+		}
+	}
+	return filtered
 }
 
 func filterStableVersions(values []string) ([]string, map[string]struct{}) {

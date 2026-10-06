@@ -11,6 +11,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/agents"
 	"github.com/kandev/kandev/internal/agent/executor"
 	agentkubernetes "github.com/kandev/kandev/internal/agent/kubernetes"
+	"github.com/kandev/kandev/internal/agent/managedruntime"
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/agentctl/server/process"
 	"github.com/kandev/kandev/internal/agentruntime"
@@ -662,6 +663,9 @@ type ExecutorCreateRequest struct {
 	// launch. Remote executors use it during preflight before agentctl receives
 	// the final command.
 	ManagedRuntimeVersion string
+	ManagedRuntimeFamily  managedruntime.OpenCodeFamily
+	ManagedRuntimeSource  managedruntime.OpenCodeSource
+	NativeRuntimeVersion  string
 	PreviousExecutionID   string   // Non-empty when reconnecting to a previous execution
 	McpMode               string   // MCP tool mode: "task" (default), "task-title-pending", "config", "office", or "automation"
 	McpProviders          []string // Normalized provider capabilities attached to the task

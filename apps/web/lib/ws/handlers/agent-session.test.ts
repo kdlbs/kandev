@@ -32,6 +32,7 @@ function makeStore(overrides: Record<string, unknown> = {}) {
     setActiveSession: vi.fn(),
     setActiveSessionAuto: vi.fn(),
     setSessionAgentctlStatus: vi.fn(),
+    invalidateConfirmedConfigOptions: vi.fn(),
     setResumeSkipped: vi.fn(),
     clearLaunchWarning: vi.fn(),
     setSessionFailureNotification: vi.fn(),

@@ -3,7 +3,10 @@
 import { useAppStore } from "@/components/state-provider";
 import { useEnsureTaskSession } from "@/hooks/use-ensure-task-session";
 import { useTask } from "@/hooks/use-task";
-import { useSessionResumption } from "@/hooks/domains/session/use-session-resumption";
+import {
+  useSessionResumption,
+  type TaskArchiveState,
+} from "@/hooks/domains/session/use-session-resumption";
 import { useTaskStatusSummary } from "@/hooks/domains/task/use-task-status-summary";
 import { PassthroughTerminal } from "@/components/task/passthrough-terminal";
 import { SessionRecoveryFeedback } from "@/components/task/ensure-session-error";
@@ -32,6 +35,29 @@ function useIsQuickChatPassthrough(sessionId: string) {
 type QuickChatSessionViewProps = {
   session: QuickChatSession;
   onInitialPromptAttempted?: () => void;
+  /** Default `true`. `false` maps to `useSessionResumption`'s
+   *  `skipAutomaticRecovery`, so the check-and-resume and remote-status
+   *  retry effects do nothing; resume/retry/restore stay manual actions. */
+  automaticRecovery?: boolean;
+  /** Renders `QuickChatContent` with `minimalToolbar` (Submit and Stop, no
+   *  mode or model selector) in addition to kind `config`'s own minimal
+   *  toolbar. */
+  hideSessionSelectors?: boolean;
+  /** Any value other than `undefined`, `null` included, overrides
+   *  `resolveTaskArchiveState`. */
+  taskArchiveState?: TaskArchiveState;
+  /** Inserted once through the composer's `chatInputRef.insertText`, not
+   *  sent. See {@link useQuickChatInitialDraft}. */
+  initialDraft?: string;
+  /** Applied to the composer message once per submit, before
+   *  `buildSubmitMessage`. See {@link useSubmitHandler}. */
+  transformOutgoing?: (message: string) => string;
+  /** Hides the "Environment prepared" and "Started agent" rows once the agent
+   *  booted. See {@link hideSuccessfulStartupRows}. */
+  hideStartupRows?: boolean;
+  /** Coordinator copilot: status line while running, one chip of tool calls
+   *  after. See {@link QuickChatContent}. */
+  activityDisplay?: boolean;
 };
 
 function resolveTaskArchiveState(
@@ -44,6 +70,28 @@ function resolveTaskArchiveState(
   // Ephemeral Quick Chat tasks are intentionally absent from the kanban task
   // cache. Their hydrated tab is the authoritative live-task source.
   return quickChatTaskId === taskId ? false : null;
+}
+
+/** `hideSessionSelectors` widens kind `config`'s own minimal toolbar to every
+ *  kind, rather than replacing it. */
+function resolveMinimalToolbar(
+  hideSessionSelectors: boolean | undefined,
+  kind: QuickChatSession["kind"],
+): boolean {
+  if (hideSessionSelectors) return true;
+  return kind === "config";
+}
+
+/** Any value other than `undefined`, `null` included, overrides
+ *  {@link resolveTaskArchiveState}. */
+function resolveEffectiveTaskArchiveState(
+  explicit: TaskArchiveState | undefined,
+  taskId: string | null,
+  task: { isArchived?: boolean } | null,
+  quickChatTaskId: string | null,
+): TaskArchiveState {
+  if (explicit !== undefined) return explicit;
+  return resolveTaskArchiveState(taskId, task, quickChatTaskId);
 }
 
 function preventQuickChatAutoResume(
@@ -61,25 +109,25 @@ function preventQuickChatAutoResume(
   );
 }
 
-export function QuickChatSessionView({
-  session,
-  onInitialPromptAttempted,
-}: QuickChatSessionViewProps) {
+export function QuickChatSessionView(props: QuickChatSessionViewProps) {
+  const { session } = props;
   const restart = useAppStore((state) => state.quickChat.configChatRestarts?.[session.workspaceId]);
   if (session.kind === "config" && restart) {
     return <ConfigChatRestartStatus workspaceId={session.workspaceId} />;
   }
-  return (
-    <ActiveQuickChatSessionView
-      session={session}
-      onInitialPromptAttempted={onInitialPromptAttempted}
-    />
-  );
+  return <ActiveQuickChatSessionView {...props} />;
 }
 
 function ActiveQuickChatSessionView({
   session,
   onInitialPromptAttempted,
+  automaticRecovery = true,
+  hideSessionSelectors,
+  taskArchiveState: taskArchiveStateProp,
+  initialDraft,
+  transformOutgoing,
+  hideStartupRows,
+  activityDisplay,
 }: QuickChatSessionViewProps) {
   const { t } = useTranslation();
   // A tab can arrive from a task event, which carries no session payload.
@@ -93,8 +141,14 @@ function ActiveQuickChatSessionView({
   const taskId = taskSession ? (session.taskId ?? taskSession.task_id ?? null) : quickChatTaskId;
   const task = useTask(taskId);
   const statusSummary = useTaskStatusSummary(taskId, task?.statusSummary);
-  const taskArchiveState = resolveTaskArchiveState(taskId, task, quickChatTaskId);
+  const taskArchiveState = resolveEffectiveTaskArchiveState(
+    taskArchiveStateProp,
+    taskId,
+    task,
+    quickChatTaskId,
+  );
   const resumption = useSessionResumption(taskId, session.sessionId, taskArchiveState, {
+    skipAutomaticRecovery: !automaticRecovery,
     preventAutoResume: preventQuickChatAutoResume(
       session.sessionId,
       taskId,
@@ -126,28 +180,30 @@ function ActiveQuickChatSessionView({
       <div className="flex min-h-0 flex-1 flex-col">
         <QuickChatContent
           sessionId={session.sessionId}
-          minimalToolbar={session.kind === "config"}
+          minimalToolbar={resolveMinimalToolbar(hideSessionSelectors, session.kind)}
           placeholderOverride={
             session.kind === "config" ? t("chat:configChatPlaceholder") : undefined
           }
           initialPrompt={session.initialPrompt}
           onInitialPromptAttempted={onInitialPromptAttempted}
+          initialDraft={initialDraft}
+          transformOutgoing={transformOutgoing}
+          hideStartupRows={hideStartupRows}
+          activityDisplay={activityDisplay}
         />
       </div>
     </div>
   );
 
   if (!taskId) return sessionContent;
-
+  const launchErrorValue = {
+    taskId,
+    workspaceId: task?.workspaceId ?? "",
+    statusSummary,
+    automaticRecovery: resumption,
+  };
   return (
-    <TaskLaunchErrorProvider
-      value={{
-        taskId,
-        workspaceId: task?.workspaceId ?? "",
-        statusSummary,
-        automaticRecovery: resumption,
-      }}
-    >
+    <TaskLaunchErrorProvider value={launchErrorValue}>
       <div className="flex min-h-0 flex-1 flex-col">
         <TaskSharedError />
         {sessionContent}

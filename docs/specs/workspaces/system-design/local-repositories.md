@@ -2,7 +2,7 @@
 status: current
 system: workspaces
 created: 2026-08-27
-updated: 2026-10-03
+updated: 2026-10-06
 owners:
   - kandev
 requirements:
@@ -27,7 +27,7 @@ discovered repository into a saved repository grant.
 
 | Requirement | Design sections |
 | --- | --- |
-| REQ-WORKSPACES-LOCAL-REPOSITORIES-001 | API Surface, Permissions, Failure Modes, Persistence Guarantees |
+| REQ-WORKSPACES-LOCAL-REPOSITORIES-001 | Explicit local repository validation, Settings manual validation ownership; existing API, permissions and persistence contract |
 | REQ-WORKSPACES-LOCAL-REPOSITORIES-002 | Runtime policy, Desktop folder selection, Home scan exclusions, Persistence and state, Upgrade behavior |
 | REQ-WORKSPACES-LOCAL-REPOSITORIES-003 | Discovery flow, User interface, Persistence and state |
 | REQ-WORKSPACES-LOCAL-REPOSITORIES-004 | Workspace polling, Diagnostics, Failure handling |
@@ -490,6 +490,71 @@ When neither validator succeeds, their errors are joined to retain diagnostics.
 The explicit repository validation contract is recorded in [Explicit submodule
 repository trust](../../../decisions/2026-08-28-explicit-submodule-repository-trust.md).
 
+### Settings manual validation ownership
+
+AC-WORKSPACES-LOCAL-REPOSITORIES-001.9 through 001.11 extend the local
+settings draft boundary. `WorkspaceRepositoriesRoute` loads the workspace and
+repositories, then renders `WorkspaceRepositoriesClient`. Its exported
+`useWorkspaceRepositoriesPage` owns drafts and the nested `useDiscoverDialog`.
+`AddLocalRepositoryDialog` forwards that state to the real `DiscoverRepoDialog`:
+editable manual input, Validate, discovered selection, Cancel/dismiss and Use
+Repository. Desktop root controls retain their existing discovery hooks.
+
+Keep authority local to `useDiscoverDialog`: one mounted lifetime, a dialog
+visit/context generation, current workspace ID and trimmed input, and a distinct
+attempt token for each admitted validation. Store the requested identity separately
+from the response's canonical `path`. A result is usable only for the current
+open context and newest attempt. String equality alone cannot recognize a visit
+or an A-to-B-to-A transition. Whitespace-only edits preserve the same trimmed
+identity; selecting a discovered repository retires manual work.
+
+Open/close, path/selection and confirmation handlers revoke authority synchronously
+before publishing React state. Workspace replacement and unmount retire the
+committed context before another callback can act; use lifecycle cleanup and
+committed latest-context references, with render projection also checking the
+current workspace/input/open identity. A passive reset effect alone is insufficient.
+An old render must never expose success, error or loading as current while a
+reset awaits an effect. StrictMode cleanup/setup must leave a usable new lifetime.
+
+Bind callbacks to their originating context and compare it with current authority
+at invocation. A retained validation callback cannot request an old path/workspace
+after its context retires. Repeated calls within one unchanged context are allowed:
+reserve a new attempt before invoking transport, so synchronous reentry admits
+the newest attempt. A retained confirmation must also match its accepted selection
+or successful attempt; it cannot admit a retired draft or borrow a newer result.
+
+Use the existing `validateRepositoryPathAction` and `isValidManualRepository`
+contract (`exists && is_git`). `useRequest` currently exposes completion-ordered
+loading and has no dialog identity. Remove only this hook's reliance on its
+unqualified state; call the same action locally and derive `isValidating` from
+the owned pending attempt. Do not change the generic hook. Guard success, invalid
+response, rejection and finalization with the same context/attempt authority.
+Retired transport still settles; preserve the async handler's caught-error/void
+settlement for callers. It cannot clear a replacement attempt, revive busy state,
+or publish feedback. No cancellation, cache, store or discovery-owner change is
+needed.
+
+Project `manualValidation`, `isValidating` and `canSave` from accepted current
+state. Confirmation in `useWorkspaceRepositoriesPage` must consult the same local
+authority at invocation, rather than trust a button's disabled flag or captured
+`manualValidation`. Build a draft only from an actual current discovered row or
+accepted canonical manual path in the current workspace. Keep `buildDraftRepo`
+defaults and selected repository name/branch behavior. Never substitute raw input
+for a stale or missing validated result. Close through the same retirement path.
+
+Confirmation prepends a `temp-repo-*` item only. `handleSaveRepository` later calls
+`saveNewRepository` and `createRepositoryAction`; server validation and persistence
+remain authoritative. This design changes neither save transport nor draft-store
+shape and makes no claim that the observed race already persisted a wrong path.
+
+The same form and state path serve phone and desktop. This is state/data handling
+only: no layout, touch, scrolling, navigation, copy or breakpoint changes. Targeted
+real form/hook tests satisfy the narrow mobile-parity exception; no new browser,
+build or E2E work is required. Verify with the actual exported page hook,
+`StateProvider`/`createAppStore`, router, actions, discovery and dialog/root controls,
+mocking only fetch transport. Cover identity transitions, retained callbacks,
+newest-attempt reentry and ordinary canonical/discovered selection controls.
+
 ## Verification strategy
 
 - Go tests cover runtime policy, canonical roots, cache freshness, single-flight
@@ -517,6 +582,7 @@ repository trust](../../../decisions/2026-08-28-explicit-submodule-repository-tr
 
 ## Implementation plans
 
+- [Manual Repository Validation Ownership](../../../plans/manual-repository-validation-ownership/plan.md)
 - [Repository Discovery Root Mutations](../../../plans/repository-discovery-root-mutations/plan.md)
 - [Repository Discovery Ordering](../../../plans/repository-discovery-ordering/plan.md)
 - [Repository Discovery Failure Recovery](../../../plans/repository-discovery-failure-recovery/plan.md)

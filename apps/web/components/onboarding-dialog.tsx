@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
 import {
   Dialog,
   DialogContent,
@@ -24,16 +24,16 @@ import {
   IconArrowDown,
 } from "@tabler/icons-react";
 import { Kbd } from "@kandev/ui/kbd";
-import { profilePermissionValues } from "@/lib/agent-permissions";
 import { listAvailableAgents, listWorkflowTemplates } from "@/lib/api";
 import { listAgentsAction } from "@/app/actions/agents";
 import { backendReloadCoordinator } from "@/lib/platform/backend-reload-coordinator";
-import { StepAgents, type AgentSetting } from "@/components/onboarding/step-agents";
+import { StepAgents } from "@/components/onboarding/step-agents";
+import { buildAgentSettings, type AgentSetting } from "@/components/onboarding/agent-settings";
 import {
   TOTAL_ONBOARDING_STEPS,
   useOnboardingActions,
 } from "@/components/onboarding/use-onboarding-actions";
-import type { AvailableAgent, ToolStatus, WorkflowTemplate, AgentProfile } from "@/lib/types/http";
+import type { AvailableAgent, ToolStatus, WorkflowTemplate } from "@/lib/types/http";
 import { Trans, useTranslation } from "react-i18next";
 import { getExecutorIcon, getExecutorLabel } from "@/lib/executor-icons";
 
@@ -93,41 +93,12 @@ const STEP_DESCRIPTION_KEYS = [
   "common:onboardingStepCommandPanelDescription",
 ];
 
-function buildAgentSettings(
-  avail: AvailableAgent[],
-  saved: {
-    name: string;
-    profiles?: AgentProfile[];
-  }[],
-): Record<string, AgentSetting> {
-  const settings: Record<string, AgentSetting> = {};
-  for (const aa of avail) {
-    const dbAgent = saved.find((a) => a.name === aa.name);
-    const profile = dbAgent?.profiles?.[0];
-    if (profile) {
-      const perms = profilePermissionValues(
-        {
-          allowIndexing: profile.allowIndexing,
-          autoApprove: profile.autoApprove,
-        },
-        aa.permission_settings ?? {},
-      );
-      settings[aa.name] = {
-        profileId: profile.id,
-        formData: {
-          name: profile.name,
-          model: profile.model || aa.model_config.default_model,
-          mode: profile.mode ?? aa.model_config.current_mode_id ?? "",
-          cli_passthrough: profile.cliPassthrough ?? false,
-          cli_flags: profile.cliFlags ?? [],
-          command_prefix: profile.commandPrefix ?? "",
-          ...perms,
-        },
-        dirty: false,
-      };
-    }
-  }
-  return settings;
+export { buildAgentSettings };
+
+function stepBodyTestId(step: number): string | undefined {
+  if (step === 0) return "onboarding-agent-body";
+  if (step === 1) return "onboarding-executor-body";
+  return undefined;
 }
 
 type OnboardingFooterProps = {
@@ -137,6 +108,7 @@ type OnboardingFooterProps = {
   onNext: () => void;
   onGetStarted: () => void;
   isBusy: boolean;
+  isModelConfigPending?: boolean;
 };
 
 function OnboardingStepDots({ step }: { step: number }) {
@@ -253,6 +225,7 @@ function OnboardingFooter({
   onNext,
   onGetStarted,
   isBusy,
+  isModelConfigPending,
 }: OnboardingFooterProps) {
   const { t } = useTranslation();
   return (
@@ -276,12 +249,20 @@ function OnboardingFooter({
             </Button>
           )}
           {step < TOTAL_STEPS - 1 ? (
-            <Button onClick={onNext} disabled={isBusy} className="cursor-pointer">
+            <Button
+              onClick={onNext}
+              disabled={isBusy || isModelConfigPending}
+              className="cursor-pointer"
+            >
               {t("common:next")}
               <IconArrowRight className="ml-1.5 h-4 w-4" />
             </Button>
           ) : (
-            <Button onClick={onGetStarted} disabled={isBusy} className="cursor-pointer">
+            <Button
+              onClick={onGetStarted}
+              disabled={isBusy || isModelConfigPending}
+              className="cursor-pointer"
+            >
               <IconCheck className="mr-1.5 h-4 w-4" />
               {t("common:getStarted")}
             </Button>
@@ -300,6 +281,14 @@ export function OnboardingDialog({ open, onComplete }: OnboardingDialogProps) {
     backendReloadCoordinator.getSnapshot,
   ).reloadRequired;
   const [step, setStep] = useState(0);
+  const [pendingProfiles, setPendingProfiles] = useState<Record<string, boolean>>({});
+  const onModelResolutionChange = useCallback((profileId: string, pending: boolean) => {
+    setPendingProfiles((current) =>
+      current[profileId] === pending ? current : { ...current, [profileId]: pending },
+    );
+  }, []);
+  const isModelConfigPending = Object.values(pendingProfiles).some(Boolean);
+
   const {
     availableAgents,
     tools,
@@ -310,14 +299,21 @@ export function OnboardingDialog({ open, onComplete }: OnboardingDialogProps) {
     loadingTemplates,
   } = useOnboardingResources(open);
   const { handleSkip, handleNext, handleBack, handleGetStarted, updateSetting, isSaving } =
-    useOnboardingActions({ step, setStep, onComplete, agentSettings, setAgentSettings });
+    useOnboardingActions({
+      step,
+      setStep,
+      onComplete,
+      agentSettings,
+      setAgentSettings,
+      isModelConfigPending,
+    });
 
   return (
     <Dialog open={open && !reloadRequired} onOpenChange={() => {}}>
       <DialogContent
         className={
-          step === 1
-            ? "flex max-h-[calc(100dvh_-_2rem)] flex-col overflow-hidden sm:max-w-3xl"
+          step === 0 || step === 1
+            ? "flex max-h-[min(720px,calc(100dvh_-_2rem))] flex-col overflow-hidden sm:max-w-3xl"
             : "sm:max-w-3xl"
         }
         showCloseButton={false}
@@ -329,8 +325,10 @@ export function OnboardingDialog({ open, onComplete }: OnboardingDialogProps) {
           </DialogDescription>
         </DialogHeader>
         <div
-          data-testid={step === 1 ? "onboarding-executor-body" : undefined}
-          className={step === 1 ? "min-h-0 flex-1 overflow-y-auto py-4" : "py-4 min-h-[220px]"}
+          data-testid={stepBodyTestId(step)}
+          className={
+            step === 0 || step === 1 ? "min-h-0 flex-1 overflow-y-auto py-4" : "py-4 min-h-[220px]"
+          }
         >
           {step === 0 && (
             <StepAgents
@@ -339,6 +337,7 @@ export function OnboardingDialog({ open, onComplete }: OnboardingDialogProps) {
               agentSettings={agentSettings}
               loading={loadingAgents}
               onUpdateSetting={updateSetting}
+              onModelResolutionChange={onModelResolutionChange}
             />
           )}
           {step === 1 && <StepEnvironments />}
@@ -353,6 +352,7 @@ export function OnboardingDialog({ open, onComplete }: OnboardingDialogProps) {
           onNext={handleNext}
           onGetStarted={handleGetStarted}
           isBusy={isSaving}
+          isModelConfigPending={isModelConfigPending}
         />
       </DialogContent>
     </Dialog>

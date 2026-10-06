@@ -167,6 +167,24 @@ func (f *managedDeletionHostFixture) retained(t *testing.T, ctx context.Context)
 	require.Equal(t, "host retained transcript", messages[0].Content)
 }
 
+func (f *managedDeletionHostFixture) waitForCleanupCompletion(t *testing.T, ctx context.Context) {
+	t.Helper()
+	var lastState models.TaskResourceCleanupState
+	var lastErr error
+	require.Eventually(t, func() bool {
+		jobs, err := f.other.ListTaskResourceCleanupJobs(ctx, f.descriptor.TaskID)
+		if err != nil {
+			lastErr = err
+			return false
+		}
+		if len(jobs) != 1 {
+			return false
+		}
+		lastState = jobs[0].State
+		return lastState == models.TaskResourceCleanupStateSucceeded
+	}, 10*time.Second, 10*time.Millisecond, "managed task cleanup did not complete: state=%q error=%v", lastState, lastErr)
+}
+
 // @covers AC-PLUGINS-MANAGED-COORDINATION-013.1, AC-PLUGINS-MANAGED-COORDINATION-013.2, AC-PLUGINS-MANAGED-COORDINATION-013.5, AC-PLUGINS-MANAGED-COORDINATION-013.6
 func TestManagedDeletionHostReceipts(t *testing.T) {
 	for _, mode := range []string{"stale", "detached", "missing", "current", "completed_replay", "ack_failure", "unavailable", "payload_mismatch"} {
@@ -174,6 +192,9 @@ func TestManagedDeletionHostReceipts(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 			defer cancel()
 			f := newManagedDeletionHostFixture(t, ctx)
+			if mode == "completed_replay" {
+				f.lifecycle.StopTaskResourceCleanupWorker()
+			}
 			originalTask, taskErr := f.other.GetTask(ctx, f.descriptor.TaskID)
 			require.NoError(t, taskErr)
 			want := pluginsdk.CommandApplied
@@ -256,6 +277,10 @@ func TestManagedDeletionHostReceipts(t *testing.T) {
 				_, err = f.database.ExecContext(ctx, `DROP TRIGGER fail_delete_receipt`)
 				require.NoError(t, err)
 			}
+			if mode == "completed_replay" {
+				require.NoError(t, f.lifecycle.StartTaskResourceCleanupWorker(ctx))
+			}
+			f.waitForCleanupCompletion(t, ctx)
 			spec := f.spec
 			spec.RequestID = "replacement-request"
 			spec.IdempotencyKey = "replacement"

@@ -31,7 +31,7 @@ func (c *Controller) setAgentAutomaticUpdatesLocked(ctx context.Context, name st
 	if !found {
 		return ErrAgentNotFound
 	}
-	capability := agents.RuntimeUpdateCapabilities(ag)
+	capability := c.runtimeUpdateCapabilities(ag)
 	if enabled && (!ag.Enabled() || !c.automaticUpdateSupported(capability)) {
 		return ErrRuntimeUpdateUnsupported
 	}
@@ -128,7 +128,7 @@ func (c *Controller) automaticRuntimeCapability(name, runtimeID string) (agents.
 	if !found || !ag.Enabled() {
 		return agents.RuntimeUpdateCapability{}, ErrAgentNotFound
 	}
-	cap := agents.RuntimeUpdateCapabilities(ag)
+	cap := c.runtimeUpdateCapabilities(ag)
 	if !c.automaticUpdateSupported(cap) || cap.RuntimeID != runtimeID {
 		return agents.RuntimeUpdateCapability{}, ErrRuntimeUpdateUnsupported
 	}
@@ -148,7 +148,7 @@ func (c *Controller) automaticActivationGuard(name, runtimeID string, spec agent
 		c.runtimeAutoUpdateMu.Lock()
 		defer c.runtimeAutoUpdateMu.Unlock()
 		ag, found := c.agentRegistry.Get(name)
-		if !found || !ag.Enabled() || agents.RuntimeUpdateCapabilities(ag).RuntimeID != runtimeID {
+		if !found || !ag.Enabled() || c.runtimeUpdateCapabilities(ag).RuntimeID != runtimeID {
 			return ErrRuntimeUpdateUnsupported
 		}
 		policy, err := c.runtimeAutoUpdateStore.Get(ctx, name, runtimeID)

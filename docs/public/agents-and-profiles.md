@@ -18,6 +18,14 @@ Agent authentication is separate from repository and integration credentials.
 3. Create a profile and verify model, mode, permissions, environment, and executor compatibility.
 4. Use the advanced sections only when you need passthrough, MCP, or custom launch behavior.
 
+## Agent page options
+
+On **Settings > Agents**, select **Options** beside **Terminal** to open Agent
+options. Turn on **Hide disabled profiles from navigation** to remove disabled
+profiles from the Settings navigation tree. Disabled profiles remain available
+on the Agents page, and the preference applies immediately in this browser
+profile.
+
 ## Install or detect an agent
 
 Open **Settings > Agents** (`/settings/agents`). Kandev scans the host on which its backend runs, not the browser computer.
@@ -230,12 +238,41 @@ the control has no dot but remains usable.
 4. Select **Update runtime**, **Roll back runtime**, or **Repair runtime**.
 5. Wait for the exact version to prepare and pass its runtime capability probe.
 
-When the `opencode` executable is on the Kandev host `PATH`, Kandev treats it
-as externally managed. The runtime update section links to OpenCode's supported
-upgrade guidance instead of changing a global installation. Hosts without that
-executable use the managed `npx` runtime. Containers and SSH executors retain
-their existing executor-safe command and selected version; updating an external
-host CLI does not update those environments.
+OpenCode has two runtime families. Fresh Kandev installations use the managed
+v2 package `@opencode/cli`. Kandev keeps an existing v1 selection on
+`opencode-ai` until you choose the v2 migration action.
+
+#### Move OpenCode from v1 to v2
+
+Use this action only after you review the shared-data boundary. OpenCode v1 and
+v2 use the same configuration and session data paths.
+
+1. Stop standalone OpenCode v1 processes that use the same session data.
+2. Open the OpenCode update control in **Settings > Agents**.
+3. Select **Upgrade to managed OpenCode v2** and review the package, version, and scope.
+4. Select **Upgrade to managed OpenCode v2** again to start the upgrade.
+5. Keep Kandev open while it installs the package and checks ACP startup.
+
+The selection applies to future OpenCode launches across every OpenCode
+profile in this Kandev installation. This includes local, container, and SSH
+executors. The action installs the managed v2 package; it leaves a standalone
+`opencode` installation unchanged.
+
+Kandev saves v2 as the active runtime only after the exact package passes an
+isolated ACP probe. Kandev-owned active OpenCode work blocks activation. The
+upgrade does not stop that work. If the probe or database write fails, v1
+remains selected. If capability discovery fails after activation, v2 remains
+selected and Kandev reports the discovery error.
+
+Kandev keeps saved OpenCode session IDs when it restores a conversation. If
+OpenCode cannot restore a saved conversation, Kandev reports the error in that
+session. It does not create a replacement conversation. Kandev cannot reverse
+changes that OpenCode v2 makes to shared session data, so selecting v1 later
+does not guarantee a rollback.
+
+When an existing native OpenCode v1 installation remains selected, same-family
+updates can still update that native executable. A v2 migration always uses
+the managed `@opencode/cli` package and does not run a global npm install.
 
 Kandev enables the action only after the backend validates the selected version
 against the trusted package catalogue. It does not accept package names, npm

@@ -4,7 +4,7 @@ system: platform
 requirements:
   - REQ-PLATFORM-GIT-DIFF-FILE-METADATA-001
 created: 2026-10-02
-updated: 2026-10-03
+updated: 2026-10-05
 owners:
   - kandev
 ---
@@ -35,6 +35,7 @@ literal selection, and porcelain-owned workspace classification.
 | AC-PLATFORM-GIT-DIFF-FILE-METADATA-001.4, .5 | Preserved contracts |
 | AC-PLATFORM-GIT-DIFF-FILE-METADATA-001.6, .7 | Plain comparison output; Callers and transport |
 | AC-PLATFORM-GIT-DIFF-FILE-METADATA-001.8, .9 | Built-in cumulative patches; Callers and transport |
+| AC-PLATFORM-GIT-DIFF-FILE-METADATA-001.10, .11 | Actual-byte comparison patches; Callers and transport |
 
 ## Plain comparison output
 
@@ -75,13 +76,41 @@ without column-zero `diff --git ` sections reaches the existing parser as a
 successful empty comparison. Select built-in output at the producer rather
 than teaching the parser arbitrary helper formats. `ShowCommit`'s existing
 `git show` uses built-in output by default and remains a positive control;
-this defect does not justify adding a flag there.
+this external-helper defect does not justify adding an external-diff flag there.
 
 Keep `--no-color`, fixed prefixes, base-to-worktree semantics and captured
 environment handling. Do not clear helper variables, rewrite configuration,
 add subprocesses, or change shared execution policy. Other Git producers,
-text conversion, rename detection and comparison-base selection retain their
-existing contracts.
+rename detection and comparison-base selection retain their existing contracts.
+Text conversion in these two comparison producers is handled separately below.
+
+## Actual-byte comparison patches
+
+The exact safe-flag dependency is part of this repair: add only `--no-textconv`
+to `securityutil.IsKnownSafeGitFlag`'s exact argument list in
+`apps/backend/internal/common/securityutil/git.go`.
+Reject abbreviated, value, suffixed and whitespace variants; no prefix widening
+or validation bypass is needed.
+
+Pass that exact flag after the subcommand and before the ref in the two existing
+patch-producing argument lists in `git_log.go`: `ShowCommit`'s
+`show --first-parent --no-color --format= --stat --numstat -p` and
+`GetCumulativeDiff`'s `diff --no-color --no-ext-diff`. The separate no-patch
+metadata query remains unchanged. Retain fixed prefixes and every existing
+comparison argument. Keep `runGitCommand`, its captured operator environment,
+admission, cancellation and managed process lifetime unchanged.
+
+`--no-ext-diff` does not disable a text converter selected through attributes
+and `diff.<driver>.textconv`. Both patch producers otherwise use conversion.
+Equal converted outputs can erase a real change's patch section while commit
+stat/numstat still advertise the change. The parser then reports a successful
+empty file map and derives zero commit totals. Other converters can replace
+actual file content with a different patch. Disable conversion at these two
+producers so their existing parser receives built-in patches from actual bytes.
+
+This per-invocation selection neither edits driver configuration/attributes nor
+forbids converters globally. No parser, count, budget, ref, shared command
+framework, environment or other Git reader/write changes belong to the repair.
 
 ## Raw extended-header classification
 
@@ -134,7 +163,7 @@ application instance, browser, database, or external service is needed.
 
 ## Preserved contracts
 
-Apart from the plain-output flags and cumulative external-diff suppression, keep Git argv/environments, first-parent and root behavior, genuinely empty
+Apart from the plain-output flags, cumulative external-diff suppression and these two producers' text-conversion suppression, keep Git argv/environments, first-parent and root behavior, genuinely empty
 results, fixed prefixes, exact paths and patch bytes, line counts and aggregates,
 per-file/total/file-count limits, skip reasons, and all response shapes.
 Workspace mutation and history-provider code are outside this helper's boundary.
@@ -210,3 +239,30 @@ The mobile and public-docs assessment remains data-only: the existing Git
 operations guide's comparison metadata and read-only guidance is accurate;
 there is no UI, copy, schema, user setting or workflow change. Delivery is in the
 [built-in cumulative package](../../../plans/git-cumulative-built-in-patch/plan.md).
+
+Text-converter regressions use actual Git through both public operator methods
+and registered selected/aggregate HTTP routes. A guarded native test-binary
+helper follows the portable pattern in `git_log_external_diff_test.go`, without
+rewriting shared fixtures or requiring a Windows shell script. No-driver
+controls assert positive membership and old/new bytes. Configured helper modes
+alter output or emit identical constant text, and deliberate raw Git controls
+prove both modes execute before clearing only their owned sentinels. Production
+reads must return actual bytes and leave the sentinels absent. Raw patch oracles
+and snapshot diffs explicitly disable textconv, external diff and color; they
+never use the production parser as their oracle.
+
+Keep the matrix targeted: committed and dirty text changes, selected converted
+binary content, an empty-file change and genuinely empty comparison. Preserve
+first-parent/root semantics with the existing focused controls and cumulative
+budgets with existing limit controls. Independent HTTP repositories share a
+path but contain distinct old/new bytes, bases and driver settings. Assert
+selected isolation, aggregate NUL-qualified keys, `repository_name`, `base_ref`
+and ordinary-repository `is_submodule` omission, plus commit metadata and totals.
+Snapshot config/attribute bytes, HEAD, refs, index entries and dirty content
+after fixture setup and around reads. Install any helper environment guard
+before operator/manager capture. Only the necessary caller seam uses HTTP;
+there is no browser, database, application launch or new transport contract.
+
+The source-data-only mobile exception applies. The existing Git operations
+how-to/reference guidance remains accurate; no public guide edit is required.
+Delivery is in the [one-work-order text-converter package](../../../plans/git-comparison-textconv/plan.md).

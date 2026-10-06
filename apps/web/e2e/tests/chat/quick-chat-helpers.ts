@@ -131,6 +131,10 @@ export async function waitForQuickChatComposerReady(dialog: Locator): Promise<Lo
  * so checking editability alone can submit a message too early.
  */
 export async function waitForQuickChatDirectInput(dialog: Locator): Promise<void> {
+  await expect(dialog.getByTestId("chat-input-area")).toHaveAttribute("data-input-mode", "direct", {
+    timeout: 15_000,
+  });
+  await expect(dialog.getByTestId("submit-message-button")).toBeEnabled({ timeout: 15_000 });
   const idlePlaceholder = dialog
     .locator(
       '[data-placeholder="Continue working on the task..."]:visible, [data-placeholder="Continue working on the plan..."]:visible, [data-placeholder="Continue working on the file..."]:visible',

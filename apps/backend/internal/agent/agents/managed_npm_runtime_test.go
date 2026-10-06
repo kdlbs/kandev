@@ -22,7 +22,7 @@ func TestManagedNPMRuntimeContracts(t *testing.T) {
 	}{
 		{"claude", NewClaudeACP(), "@agentclientprotocol/claude-agent-acp", nil},
 		{"codex", NewCodexACP(), "@agentclientprotocol/codex-acp", nil},
-		{"opencode", NewOpenCodeACP(), "opencode-ai", []string{"acp", "--print-logs", "--log-level", "ERROR"}},
+		{"opencode", NewOpenCodeACP(), "opencode-ai", []string{"acp", "--print-logs"}},
 		{"copilot", NewCopilotACP(), "@github/copilot", []string{"--acp"}},
 		{"gemini", NewGemini(), "@google/gemini-cli", []string{"--acp"}},
 		{"pi", NewPiACP(), "pi-acp", nil},
@@ -239,9 +239,13 @@ func TestManagedNPMRuntimeLaunchIgnoresWorkspaceNpmrc(t *testing.T) {
 		cmd := exec.Command(npmPath, args...)
 		cmd.Dir = workspace
 		cmd.Env = envWithHome(os.Environ(), home)
-		output, err := cmd.CombinedOutput()
+		output, err := cmd.Output()
 		if err != nil {
-			t.Fatalf("npm %v: %v (%s)", args, err, output)
+			var stderr []byte
+			if exitErr, ok := err.(*exec.ExitError); ok {
+				stderr = exitErr.Stderr
+			}
+			t.Fatalf("npm %v: %v (stdout: %s, stderr: %s)", args, err, output, stderr)
 		}
 		return strings.TrimSpace(string(output))
 	}

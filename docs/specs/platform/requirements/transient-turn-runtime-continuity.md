@@ -17,6 +17,8 @@ Platform owns this contract because runtime lifetime and shared recovery admissi
 This capability extends [provider error recovery](provider-error-recovery.md).
 It separates runtime preservation from permission to repeat work.
 Automatic continuation retains the separate [interruption contract](provider-interruption-continuation.md).
+Requirement `003` adds capacity continuation on the same usable runtime.
+It permits completed tool effects under the confirmed policy described below.
 
 ## Terminology
 
@@ -74,15 +76,50 @@ Automatic continuation retains the separate [interruption contract](provider-int
   Phone content shall wrap within Chat, retain its existing scroll owner, and expose required controls through touch interaction.
   New product copy shall be localized.
 
+### REQ-PLATFORM-TURN-CONTINUITY-003: Continue after model capacity errors
+
+**Intent:** A temporary capacity error after completed work shall use automatic recovery without repeating the original request.
+
+#### Acceptance criteria
+
+- **AC-PLATFORM-TURN-CONTINUITY-003.1:** A supported capacity failure on a settled, usable runtime shall permit continuation after assistant output or completed tools.
+  Completed shell, write, and MCP actions shall not alone prevent this continuation.
+  Pending permissions, pending tools, failed tools, unknown outcomes, conflicting evidence, and unaccounted background work shall prevent automatic continuation.
+  Missing or stale evidence shall never authorize recovery.
+- **AC-PLATFORM-TURN-CONTINUITY-003.2:** Recovery shall send a new instruction in the same provider conversation to continue unfinished work.
+  The instruction shall prohibit repetition of completed actions and require user input for uncertain outcomes.
+  Recovery shall preserve the transcript, completed tool results, execution, process, connection, native conversation, workspace, selected model, and permissions.
+  It shall not resend the original prompt or its attachments.
+  Loss of runtime continuity shall stop this recovery instead of creating or restoring a conversation automatically.
+- **AC-PLATFORM-TURN-CONTINUITY-003.3:** Recovery shall share the existing transient episode owner and at most five additional automatic attempts.
+  Nominal delays shall be 5, 10, 20, 40, and 60 seconds.
+  Valid short provider reset hints shall retain the existing timing policy.
+  Output or completed tools shall not replenish the budget.
+  Success shall end the episode. A later independent capacity failure shall receive a new budget.
+- **AC-PLATFORM-TURN-CONTINUITY-003.4:** Cancel, stop, archive, deletion, reset, a new user prompt, queued user work, and configuration changes shall supersede automatic recovery.
+  Duplicate callbacks, reload, and additional viewers shall not create another dispatch.
+  An ambiguous dispatch outcome shall require manual continuation.
+  Failure settlement shall not report success or advance the workflow.
+- **AC-PLATFORM-TURN-CONTINUITY-003.5:** Desktop and phone Chat shall reuse one current retry notice with its reason, attempt, countdown, and Cancel action.
+  Success, refusal, cancellation, and exhaustion shall retire the actionable notice.
+  Refusal shall report zero started attempts when no dispatch occurred.
+  Exhaustion shall report actual started attempts.
+  A retained usable runtime shall leave the normal composer available.
+- **AC-PLATFORM-TURN-CONTINUITY-003.6:** Initial support shall cover tested Codex ACP capacity evidence in concrete-profile interactive task sessions.
+  The capacity path shall operate independently of the experimental transport-loss continuation toggle.
+  Original-prompt replay, other error classes, unsupported providers, older components, Office, dynamic routing, automation, and passthrough shall retain their existing policies.
+
 ## Compatibility and exclusions
 
 This changes the lifetime of supported interactive ACP runtimes after transient errors.
 It does not make interrupted work successful or permit replay after writes.
 It does not change models automatically, add a scheduler, change retry limits, or promote the experimental continuation toggle.
-Preservation does not promise that a provider retains an interrupted model invocation.
+Capacity continuation does not guarantee exactly-once agent actions or preservation of an interrupted model invocation.
+Completed effects remain in history, and the agent must decide the next unfinished action from that history.
 Older remote components without the new evidence retain conservative existing recovery.
 
 ## System design and delivery
 
 - [System design](../system-design/transient-turn-runtime-continuity.md)
 - [Implementation plan](../../../plans/transient-turn-runtime-continuity/plan.md)
+- [Capacity continuation amendment](../../../plans/model-capacity-continuation/plan.md)

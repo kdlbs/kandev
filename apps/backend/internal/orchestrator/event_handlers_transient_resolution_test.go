@@ -586,7 +586,7 @@ func TestHandleTransientFailure_RetiredFenceWaitsForNewPromptIdentity(t *testing
 	// A new initial prompt has a generation before its replacement execution is
 	// known. It must not open the retired lifecycle during that interval.
 	svc.rememberTurnPrompt("s1", "new prompt", "", false, nil)
-	svc.beginInitialPromptAttempt("s1", false)
+	svc.beginInitialPromptAttempt(context.Background(), "s1", false)
 	require.True(t, svc.handleTransientFailure(context.Background(), watcher.AgentEventData{
 		TaskID:           "t1",
 		SessionID:        "s1",

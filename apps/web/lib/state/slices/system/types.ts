@@ -1,6 +1,5 @@
 import type {
   DiskUsageResponse,
-  DatabaseStats,
   SnapshotInfo,
   UpdatesResponse,
   SystemJob,
@@ -23,7 +22,6 @@ export type SystemJobsMap = Record<string, SystemJob>;
 export type SystemSliceState = {
   system: {
     diskUsage: DiskUsageResponse | null;
-    database: DatabaseStats | null;
     retention: RetentionStatus | null;
     backups: SystemBackupsState;
     updates: UpdatesResponse | null;
@@ -43,7 +41,6 @@ export type SystemSliceState = {
 
 export type SystemSliceActions = {
   setSystemDiskUsage: (usage: DiskUsageResponse) => void;
-  setSystemDatabase: (stats: DatabaseStats) => void;
   setSystemRetention: (status: RetentionStatus) => void;
   setSystemBackups: (items: SnapshotInfo[]) => void;
   setSystemUpdates: (updates: UpdatesResponse) => void;

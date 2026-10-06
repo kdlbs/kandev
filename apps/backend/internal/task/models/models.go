@@ -134,6 +134,10 @@ const (
 	MetaKeyAutomationTaskMode       = "automation_task_mode"
 	MetaKeyAutomationRepositoryMode = "automation_repository_mode"
 	MetaKeyDeferredLaunch           = "deferred_launch"
+	// MetaKeyCoordinatorID records the coordinator that owns a conversation
+	// task, set at creation and read by the startup cleanup pass that
+	// archives/deletes conversation tasks whose coordinator no longer exists.
+	MetaKeyCoordinatorID = "coordinator_id"
 	// MetaKeyWorkflowInitialSession is a write-once task-local snapshot of
 	// the first session identity used by workflow session targeting.
 	MetaKeyWorkflowInitialSession = "workflow_initial_session"
@@ -1460,6 +1464,9 @@ const (
 	// TaskOriginAutomationTask is a normal, user-visible task created by an
 	// automation. Unlike automation_run, it remains in Kanban/sidebar flows.
 	TaskOriginAutomationTask = "automation_task"
+	// TaskOriginCoordinator marks a coordinator's conversation task, created
+	// on popover open and archived/deleted alongside the coordinator.
+	TaskOriginCoordinator = "coordinator"
 )
 
 // IsAutomationTaskOrigin reports whether origin identifies work whose turn

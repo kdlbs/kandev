@@ -4943,6 +4943,41 @@ func TestHandleSessionModelsEventPublishesPersistedConfigBaselineAfterRestart(t 
 	}, payload["config_baseline"])
 }
 
+func TestHandleSessionModelsEventPublishesProviderUpdateIdentity(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+	require.NoError(t, repo.UpdateTaskSessionState(ctx, "s1", models.TaskSessionStateRunning, ""))
+	eventBus := &recordingEventBus{}
+	svc := &Service{logger: testLogger(), repo: repo, eventBus: eventBus}
+
+	svc.handleSessionModelsEvent(ctx, &lifecycle.AgentStreamEventPayload{
+		TaskID:      "t1",
+		SessionID:   "s1",
+		AgentID:     "a1",
+		ExecutionID: "execution-live",
+		Data: &lifecycle.AgentStreamEventData{
+			CurrentModelID: "gpt-5.6-sol",
+			SessionModels:  []streams.SessionModelInfo{{ModelID: "gpt-5.6-sol", Name: "GPT-5.6 Sol"}},
+			ConfigOptions: []streams.ConfigOption{{
+				ID: "collaboration_mode", CurrentValue: "plan",
+			}},
+			Data: map[string]any{"config_options_source": "provider_update"},
+		},
+	})
+
+	require.Len(t, eventBus.events, 1)
+	serialized, err := json.Marshal(eventBus.events[0].event.Data)
+	require.NoError(t, err)
+	var payload map[string]any
+	require.NoError(t, json.Unmarshal(serialized, &payload))
+	require.Equal(t, "provider_update", payload["config_options_source"])
+	require.Equal(t, "execution-live", payload["agent_execution_id"])
+	if _, present := payload["config_options_settled"]; present {
+		t.Fatal("provider update should retain the post-startup wire shape without config_options_settled")
+	}
+}
+
 func TestHandleSessionModelsEventCapturesSettledConfigBaselineOnce(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)

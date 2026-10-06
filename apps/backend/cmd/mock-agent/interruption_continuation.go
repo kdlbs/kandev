@@ -16,6 +16,7 @@ const (
 	mockContinuationOutputScenario               = "output"
 	mockContinuationReadScenario                 = "read"
 	mockContinuationWriteScenario                = "write"
+	mockContinuationShellScenario                = "shell"
 	mockContinuationPendingScenario              = "pending"
 	mockContinuationUnknownScenario              = "unknown"
 	mockContinuationReadHoldScenario             = "read-hold"
@@ -40,18 +41,18 @@ func (a *mockAgent) handleMockInterruptionContinuation(ctx context.Context, sid 
 	scenario := strings.TrimPrefix(prompt, "/continuation-")
 	if strings.HasPrefix(prompt, "/continuation-") {
 		switch scenario {
-		case mockContinuationOutputScenario, mockContinuationReadScenario, mockContinuationWriteScenario,
+		case mockContinuationOutputScenario, mockContinuationReadScenario, mockContinuationWriteScenario, mockContinuationShellScenario,
 			mockContinuationPendingScenario, mockContinuationUnknownScenario, mockContinuationReadHoldScenario,
 			mockContinuationReadRestoreTransientScenario, mockContinuationReadRestoreHardScenario, mockContinuationReadAmbiguousScenario:
 			return a.emitMockInterruption(ctx, sid, scenario)
 		}
 	}
-	if !strings.HasPrefix(prompt, "Your previous turn was interrupted by a temporary connection failure. Continue the unfinished request") {
+	if prompt != "continue" {
 		return acp.PromptResponse{}, nil, false
 	}
 	raw, err := os.ReadFile(mockContinuationPath(sid))
 	var episode mockContinuationEpisode
-	if err != nil || json.Unmarshal(raw, &episode) != nil {
+	if err != nil || json.Unmarshal(raw, &episode) != nil || episode.Continuation != 0 {
 		return acp.PromptResponse{}, nil, false
 	}
 	episode.Continuation++
@@ -107,7 +108,7 @@ func (a *mockAgent) emitMockInterruption(ctx context.Context, sid acp.SessionId,
 	if raw, err := os.ReadFile(mockContinuationPath(sid)); err == nil {
 		_ = json.Unmarshal(raw, &episode)
 	}
-	episode.Scenario, episode.Original = scenario, episode.Original+1
+	episode.Scenario, episode.Original, episode.Continuation = scenario, episode.Original+1, 0
 	if err := saveMockContinuation(sid, episode); err != nil {
 		return acp.PromptResponse{}, err, true
 	}
@@ -121,9 +122,20 @@ func (a *mockAgent) emitMockInterruption(ctx context.Context, sid acp.SessionId,
 		if scenario == mockContinuationUnknownScenario {
 			kind = acp.ToolKindOther
 		}
+		if scenario == mockContinuationShellScenario {
+			kind = acp.ToolKindExecute
+		}
+		if scenario == mockContinuationPendingScenario {
+			e.startTool("completed-tool", "Completed fixture inspection", acp.ToolKindExecute, map[string]any{"command": "printf fixture"})
+			e.completeTool("completed-tool", "fixture")
+		}
 		e.startTool("interrupted-tool", "Fixture inspection", kind, map[string]any{"path": "fixture.txt"})
 		if scenario != mockContinuationPendingScenario {
-			e.completeTool("interrupted-tool", "fixture read result")
+			completedID := acp.ToolCallId("interrupted-tool")
+			if scenario == mockContinuationUnknownScenario {
+				completedID = "unobserved-tool"
+			}
+			e.completeTool(completedID, "fixture read result")
 		}
 	}
 	return acp.PromptResponse{}, &acp.RequestError{Code: -32603, Message: "peer disconnected before response", Data: map[string]any{"kandevMock": map[string]any{"continuationInterruption": true}}}, true

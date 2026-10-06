@@ -31,6 +31,7 @@ import (
 	canvasservice "github.com/kandev/kandev/internal/canvas"
 	"github.com/kandev/kandev/internal/common/config"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/coordinator"
 	"github.com/kandev/kandev/internal/db"
 	editorservice "github.com/kandev/kandev/internal/editors/service"
 	"github.com/kandev/kandev/internal/events/bus"
@@ -175,6 +176,7 @@ func assembleServices(
 		Canvas:                   integrations.canvasSvc,
 		CanvasDistribution:       integrations.canvasDistributionSvc,
 		GitCredentials:           integrations.gitCredentialBroker,
+		Coordinator:              integrations.coordinatorSvc,
 		// Office is constructed later in initOfficeServices once all
 		// of its dependencies (config loader, task integrations, etc.) are available.
 		Office: nil,
@@ -319,6 +321,10 @@ func initManagedRuntimeAndDiscovery(
 		return nil, nil, fmt.Errorf("initialize managed runtime settings: required store is unavailable")
 	}
 	managedRuntimeSelections := managedruntime.NewStore(managedRuntimeSettings)
+	if err := bootstrapOpenCodeSelection(ctx, managedRuntimeSelections, repos, agentRegistry, log); err != nil {
+		return nil, nil, fmt.Errorf("OpenCode runtime selection bootstrap: %w", err)
+	}
+	agentRegistry.SetManagedRuntimeSelectionStore(managedRuntimeSelections)
 	if err := reconcileManagedRuntimeDefaults(ctx, managedRuntimeSelections, agentRegistry, log); err != nil {
 		return nil, nil, fmt.Errorf("reconcile managed runtime defaults: %w", err)
 	}
@@ -413,6 +419,7 @@ type integrationWiring struct {
 	gitCredentialBroker   *gitcredentials.Broker
 	shareHTTP             *share.HTTPHandlers
 	automationComponents  *automation.Components
+	coordinatorSvc        *coordinator.Service
 }
 
 func initIntegrationWiring(
@@ -460,11 +467,16 @@ func initIntegrationWiring(
 		automationComponents.Service.SetManagedConversationAutomationDelivery(managedConversationAutomationDeliveryAdapter{plugins: pluginsSvc})
 		pluginsSvc.SetManagedConversationSchedules(managedConversationScheduleAdapter{service: automationComponents.Service})
 	}
+	coordinatorSvc, err := initCoordinatorWiring(ctx, dbPool, storeTracker, taskSvc, workflowSvc, repos.AgentSettings, cfg.Features.Coordinator, log)
+	if err != nil {
+		return nil, err
+	}
 	wiring := &integrationWiring{
 		pluginsSvc: pluginsSvc, pluginsCleanup: pluginsCleanup, agentConversationsSvc: agentConversationsSvc,
 		canvasSvc: canvasSvc, canvasDistributionSvc: canvasDistributionSvc,
 		gitCredentialBroker: gitCredentialBroker, shareHTTP: shareHTTP,
 		automationComponents: automationComponents,
+		coordinatorSvc:       coordinatorSvc,
 	}
 	cleanupTransferred = true
 	return wiring, nil

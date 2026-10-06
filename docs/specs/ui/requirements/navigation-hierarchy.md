@@ -169,10 +169,11 @@ The change does not replace task-row field preferences or task grouping rules.
   Sorting, grouping, or row-presentation edits alone shall not claim that task
   filters are active. Clearing all clauses shall remove the applied-filter cue.
 - **AC-UI-NAV-HIERARCHY-002.3:** When grouping by task state, each group shall
-  show a semantic status indicator, label, count badge, and expansion control.
-  The indicator shall match the existing task-state meaning, including distinct
-  waiting, blocked, failed, cancelled, and completed states. Other grouping
-  modes shall retain their actual labels/counts without misleading status colors.
+  show an expansion chevron directly followed by the state label and count badge,
+  without a separate status icon or reserved icon space. Labels shall distinguish
+  waiting, blocked, failed, cancelled, and completed states. Individual task rows
+  shall retain their semantic status icons. Other grouping modes shall retain
+  their actual labels/counts without misleading status colors.
   Every named group, including workflow steps, shall use a leading disclosure
   chevron and a stronger heading above indented tasks. Spacing shall distinguish
   groups without vertical guide lines. Nested task content shall retain its

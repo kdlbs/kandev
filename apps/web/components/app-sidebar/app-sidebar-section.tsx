@@ -224,7 +224,7 @@ export function AppSidebarSection({
       <div
         className={cn(
           !collapsed && "border-t border-border/60 pt-2",
-          !collapsed && expanded && "flex-1 min-h-0 flex flex-col",
+          !collapsed && expanded && "flex-1 basis-1/2 shrink-0 min-h-0 flex flex-col",
         )}
       >
         {collapsed ? railButton : header}

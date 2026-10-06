@@ -46,10 +46,11 @@ type AgentEventPayload struct {
 	// captured by lifecycle before the terminal event is published so consumers
 	// do not have to infer output or effects from independently subscribed
 	// stream events.
-	EvidenceKnown      bool                                `json:"evidence_known,omitempty"`
-	OutputObserved     bool                                `json:"output_observed,omitempty"`
-	EffectObserved     bool                                `json:"effect_observed,omitempty"`
-	ContinuationSafety *streams.ContinuationSafetySnapshot `json:"continuation_safety,omitempty"`
+	EvidenceKnown        bool                                  `json:"evidence_known,omitempty"`
+	OutputObserved       bool                                  `json:"output_observed,omitempty"`
+	EffectObserved       bool                                  `json:"effect_observed,omitempty"`
+	ContinuationSafety   *streams.ContinuationSafetySnapshot   `json:"continuation_safety,omitempty"`
+	CapacityContinuation *streams.CapacityContinuationSnapshot `json:"capacity_continuation,omitempty"`
 	// ProviderDiagnosticCandidate carries the bounded text marker captured from
 	// a marked diagnostic stream event. It lets a terminal failure consumer
 	// correlate the diagnostic even when the stream subscription is delayed.
@@ -62,6 +63,7 @@ type AgentEventPayload struct {
 // content as both output and effect evidence, which fails replay closed.
 type PromptAttemptEvidence struct {
 	ContinuationSafety          *streams.ContinuationSafetySnapshot
+	CapacityContinuation        *streams.CapacityContinuationSnapshot
 	EvidenceKnown               bool
 	OutputObserved              bool
 	EffectObserved              bool
@@ -668,10 +670,12 @@ type SessionModelsEventPayload struct {
 	TaskID                string                        `json:"task_id"`
 	SessionID             string                        `json:"session_id"`
 	AgentID               string                        `json:"agent_id"`
+	AgentExecutionID      string                        `json:"agent_execution_id,omitempty"`
 	CurrentModelID        string                        `json:"current_model_id"`
 	SessionSettingsPolicy streams.SessionSettingsPolicy `json:"session_settings_policy,omitempty"`
 	Models                []streams.SessionModelInfo    `json:"models"`
 	ConfigOptions         []streams.ConfigOption        `json:"config_options,omitempty"`
+	ConfigOptionsSource   string                        `json:"config_options_source,omitempty"`
 	// ConfigOptionsSettled distinguishes a complete empty provider snapshot
 	// from the transient empty state sent before startup settles.
 	ConfigOptionsSettled bool `json:"config_options_settled,omitempty"`

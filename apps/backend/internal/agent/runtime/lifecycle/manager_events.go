@@ -587,6 +587,11 @@ func (m *Manager) handleCompleteEventLeased(execution *AgentExecution, event *ag
 			snapshot := *event.ContinuationSafety
 			evidence.ContinuationSafety = &snapshot
 		}
+		if event.PromptGeneration != 0 && event.CapacityContinuation != nil &&
+			event.CapacityContinuation.PromptGeneration == event.PromptGeneration {
+			snapshot := *event.CapacityContinuation
+			evidence.CapacityContinuation = &snapshot
+		}
 		failureEvidence = &evidence
 	}
 	m.finishExecutionWorkspaceActivity(execution, "turn_complete")

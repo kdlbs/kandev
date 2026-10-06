@@ -39,6 +39,7 @@ function resolveTitle(
 const EMPTY_PROJECTS: string[] = [];
 
 export type UseProjectOptionsArgs = {
+  workspaceId: string;
   selection: SidebarSelection;
   committedQuery: string;
   milestone: string;
@@ -52,8 +53,10 @@ export function buildProjectOptionsResetKey(
   selection: SidebarSelection,
   committedQuery: string,
   milestone: string,
+  workspaceId: string,
 ): string {
   return JSON.stringify([
+    workspaceId,
     selection.kind,
     selection.source,
     selection.id,
@@ -63,6 +66,7 @@ export function buildProjectOptionsResetKey(
 }
 
 export function useProjectOptions({
+  workspaceId,
   selection,
   committedQuery,
   milestone,
@@ -70,7 +74,7 @@ export function useProjectOptions({
   loading,
   projectFilter,
 }: UseProjectOptionsArgs): string[] {
-  const resetKey = buildProjectOptionsResetKey(selection, committedQuery, milestone);
+  const resetKey = buildProjectOptionsResetKey(selection, committedQuery, milestone, workspaceId);
 
   // `useKnownProjects`'s accumulator clears the instant `resetKey` changes and
   // immediately refills with whatever project list it is handed in that same
@@ -310,6 +314,7 @@ function useSearchAndProjects({
     enabled: searchEnabled && Boolean(workspaceId),
   });
   const projectOptions = useProjectOptions({
+    workspaceId: workspaceId ?? "",
     selection,
     committedQuery,
     milestone: committedMilestone,

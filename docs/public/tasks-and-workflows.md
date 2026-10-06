@@ -177,6 +177,12 @@ Use **New Task** in the sidebar. In an open task, the **Task** split button also
    | **Remote** | A remote repository                               | Search GitHub, GitLab, or Azure DevOps, or paste a supported URL. Public GitHub reads and public `gitlab.com` branch discovery work without credentials. Private access and authenticated browse/write actions require provider credentials. |
    | **None**   | Planning, research, or work outside Git           | Use a scratch workspace or an optional folder on the Kandev host. Git worktree and repository-aware Changes, branch, and pull-request features are unavailable.                                                                              |
 
+   In-app directory browsers list directories on the Kandev host. By default,
+   they hide names that start with a dot, such as `.config` or `.local`. Select
+   **Hidden folders** beside the path to show them. The switch is off by default,
+   and Kandev remembers your choice across in-app browsers. The desktop app's
+   native folder picker uses the operating system's control for hidden entries.
+
 4. **Choose an executor and agent profile.** Both profiles must be compatible. A workflow default agent profile locks the task-level selector.
 5. **Add a description when needed.** Use the eye button beside **Enhance prompt with AI** to preview a step's prompt template. The preview does not resolve task IDs or saved-prompt references until the task exists.
 6. **Choose how to start:**
@@ -527,6 +533,37 @@ An interrupted task keeps a warning indicator until the agent confirms
 recovery. Opening the task or starting a recovery attempt does not clear the
 indicator; a failed attempt keeps it visible with the existing retry actions.
 
+## Use agent commands in the composer
+
+In task Chat or Quick Chat, type `/` to browse the commands advertised by the
+active agent. Select an entry with the arrow keys, Enter, Tab, a pointer, or a
+touch. Selection adds the command to your editable draft. It does not send a
+message or change the session configuration. Review the draft, add context if
+needed, then select **Send**.
+
+Kandev labels a command as a skill only when the agent identifies it as one.
+For example, Codex ACP advertises `$retro`; the menu shows `/retro` with a
+localized **Skill** chip, while the submitted command remains `/$retro`.
+Commands without classification keep their advertised names and have no
+inferred chip.
+
+Verified mode-command metadata adds a **Mode** chip. Kandev shows **Active**
+only when the session has confirmed that mode. A command can also show its
+advertised argument hint, such as `/goal`'s supported arguments. These labels
+and hints describe the command; they do not apply it until you send the draft.
+Pasted rich text does not create a command chip; Kandev uses its visible plain text.
+
+For a supported interactive task, Kandev can continue an unfinished request
+in the same live conversation after the normal retry delay when the model is
+at capacity and at least one tool has a confirmed result. Kandev keeps those
+actions in the conversation and asks the agent to continue without repeating
+them. This does not guarantee exactly-once execution. The inline notice shows
+the attempt count and lets you cancel while Kandev waits. Kandev leaves the
+error for you to handle when a tool or permission is still pending, an outcome
+is uncertain, background work is unaccounted for, the provider does not
+support live continuation, or the runtime is no longer usable. The composer
+remains available for a new message.
+
 ## Answer clarification questions
 
 When an agent asks a clarification question, answer it from the question panel
@@ -663,6 +700,11 @@ banner shifts the rows. These pages are kept only in the current browser session
 for up to five minutes. Task changes, workspace changes, and signing out invalidate
 the relevant pages. Switching views leaves your open conversation in place,
 including in the phone **Tasks** drawer.
+
+Collapsing a repository group or a task's subtasks keeps the other rows visible
+while its page refreshes. Expanding shows already available rows immediately;
+any additional rows appear when the refresh finishes. This also applies in the
+phone **Tasks** drawer and navigation menu.
 
 If loading fails, the sidebar shows one message. **Retry** reloads a recoverable
 failure; rows already shown remain visible during a failed refresh. If a filter

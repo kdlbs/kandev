@@ -369,6 +369,9 @@ function useSessionData(
   const turns = useAppStore((state) =>
     resolvedSessionId ? state.turns.bySession[resolvedSessionId] : undefined,
   );
+  const activeTurnId = useAppStore((state) =>
+    resolvedSessionId ? (state.turns.activeBySession[resolvedSessionId] ?? null) : null,
+  );
   const currentTurnId = useMemo(
     () => clarificationTurnIdForSession(session?.state, turns),
     [session?.state, turns],
@@ -404,6 +407,7 @@ function useSessionData(
   } = useQueue(resolvedSessionId);
   return {
     messages,
+    activeTurnId,
     messagesLoading,
     isInitialMessagesLoading,
     historyRefreshPending,

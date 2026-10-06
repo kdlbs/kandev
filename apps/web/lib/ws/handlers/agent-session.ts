@@ -912,6 +912,15 @@ export function registerTaskSessionHandlers(store: StoreApi<AppState>): WsHandle
       syncKanbanPrimarySessionState(store, taskId, sessionId, newState);
       extractContextWindow(store, sessionId, payload);
       maybePromoteAgentctlReady(store, sessionId, newState, message.timestamp);
+      if (newState === "STARTING") {
+        const agentctl = store.getState().sessionAgentctl?.itemsBySessionId?.[sessionId];
+        store
+          .getState()
+          .invalidateConfirmedConfigOptions(
+            sessionId,
+            agentctl?.status === "starting" ? agentctl.agentExecutionId : undefined,
+          );
+      }
 
       // A confirmed RUNNING transition clears the resume-skipped marker
       // (prevent-auto-start-on-open). STARTING deliberately does NOT clear
@@ -947,6 +956,9 @@ export function registerTaskSessionHandlers(store: StoreApi<AppState>): WsHandle
     "session.agentctl_starting": (message) => {
       const payload = message.payload;
       if (!payload?.session_id) return;
+      store
+        .getState()
+        .invalidateConfirmedConfigOptions(payload.session_id, payload.agent_execution_id);
       store.getState().setSessionAgentctlStatus(payload.session_id, {
         status: "starting",
         agentExecutionId: payload.agent_execution_id,

@@ -103,6 +103,7 @@ var catalog = []Descriptor{
 	{ID: "workflow-sync", OwnerPackage: "internal/workflowsync", RequiredTables: []string{"workflow_sync_configs"}, DependsOn: []string{storeIDWorkflow}, Capabilities: []Capability{CapabilityBoolean, CapabilityTimestamp, CapabilityConflict}, Sweep: startup.StepStoresServices},
 	{ID: "office-config-sync", OwnerPackage: "internal/office/configsync", RequiredTables: []string{"office_config_sync_configs"}, DependsOn: []string{"office"}, Capabilities: []Capability{CapabilityBoolean, CapabilityTimestamp, CapabilityConflict}, Sweep: startup.StepStoresServices},
 	{ID: "automation", OwnerPackage: "internal/automation", RequiredTables: []string{"automations", "automation_runs"}, DependsOn: []string{storeIDTask, storeIDUser}, Capabilities: []Capability{CapabilityBoolean, CapabilityTimestamp, CapabilityConflict, CapabilityTransaction}, Sweep: startup.StepStoresServices},
+	{ID: "coordinator", OwnerPackage: "internal/coordinator", RequiredTables: []string{"coordinators", "coordinator_proposals", "coordinator_stalls"}, DependsOn: []string{storeIDTask, storeIDAgentSettings}, Capabilities: []Capability{CapabilityTimestamp, CapabilityConflict, CapabilityTransaction}, Sweep: startup.StepStoresServices},
 }
 
 // Catalog returns a deep copy of the authoritative store catalog.

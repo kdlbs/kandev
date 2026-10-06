@@ -4,9 +4,11 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/json"
+	"time"
 
 	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
+	"github.com/kandev/kandev/internal/auth/authn"
 	"github.com/kandev/kandev/internal/orchestrator/watcher"
 	"github.com/kandev/kandev/internal/task/models"
 )
@@ -16,28 +18,51 @@ const recoveryModeReplay = "replay"
 const recoveryDispositionManual = "manual"
 const recoveryDispositionExhausted = "exhausted"
 const failureKindProviderInterrupted = "provider_interrupted"
+const continuationRefusalMissingEvidence = "missing_evidence"
+
+type continuationPolicy string
+
+const (
+	continuationPolicySavedHistoryRestore continuationPolicy = "saved_history_restore"
+	continuationPolicyCapacityLive        continuationPolicy = "capacity_live"
+)
 
 // continuationBinding is an immutable admission snapshot, retained only in process.
 type continuationBinding struct {
+	policy         continuationPolicy
 	nativeID       string
 	identity       [32]byte
 	workflowStepID string
+	initiator      authn.Identity
+	initiatorKnown bool
 }
 
 func (s *Service) continuationBindingForFailure(ctx context.Context, data watcher.AgentEventData) *continuationBinding {
-	if !s.continuationFailureHasEvidence(data) {
+	classified := classifyKanbanFailure(data)
+	if classified == nil {
 		return nil
 	}
-	classified := classifyKanbanFailure(data)
-	if classified == nil || classified.Code != routingerr.CodeAgentTransportLost {
-		return nil
+	policy := continuationPolicy("")
+	switch classified.Code {
+	case routingerr.CodeModelCapacity:
+		if !s.capacityContinuationFailureHasEvidence(data) {
+			return nil
+		}
+		policy = continuationPolicyCapacityLive
+	default:
+		if routingerr.Decide(routingerr.ContextKanban, classified, time.Now().UTC()) != routingerr.DecisionShortRetry ||
+			!s.continuationFailureHasEvidence(data) {
+			return nil
+		}
+		policy = continuationPolicySavedHistoryRestore
 	}
 	session, err := s.repo.GetTaskSession(ctx, data.SessionID)
 	if err != nil || session == nil || session.TaskID != data.TaskID || session.IsPassthrough || session.AgentProfileID == "" {
 		return nil
 	}
 	task, err := s.repo.GetTask(ctx, data.TaskID)
-	if err != nil || task == nil || task.IsFromOffice || task.ArchivedAt != nil {
+	if err != nil || task == nil || task.IsFromOffice || task.ArchivedAt != nil ||
+		(policy == continuationPolicyCapacityLive && models.IsAutomationTaskOrigin(task.Origin)) {
 		return nil
 	}
 	nativeID := continuationNativeID(session)
@@ -45,7 +70,18 @@ func (s *Service) continuationBindingForFailure(ctx context.Context, data watche
 	if nativeID == "" || identity == ([32]byte{}) {
 		return nil
 	}
-	return &continuationBinding{nativeID: nativeID, identity: identity, workflowStepID: task.WorkflowStepID}
+	var initiator authn.Identity
+	initiatorKnown := false
+	if policy == continuationPolicyCapacityLive {
+		initiator, initiatorKnown = s.promptAttemptInitiator(data)
+		if !initiatorKnown && (s.sessionPromptCheck != nil || s.sessionAccessCheck != nil) {
+			return nil
+		}
+	}
+	return &continuationBinding{
+		policy: policy, nativeID: nativeID, identity: identity, workflowStepID: task.WorkflowStepID,
+		initiator: initiator, initiatorKnown: initiatorKnown,
+	}
 }
 
 func (s *Service) continuationFailureHasEvidence(data watcher.AgentEventData) bool {
@@ -53,24 +89,85 @@ func (s *Service) continuationFailureHasEvidence(data watcher.AgentEventData) bo
 		data.ContinuationSafety.SafeFor(data.PromptGeneration) && data.EvidenceKnown && s.continuationPromptIdentityMatches(data)
 }
 
+func (s *Service) capacityContinuationFailureHasEvidence(data watcher.AgentEventData) bool {
+	classified := classifyKanbanFailure(data)
+	return classified != nil && classified.Code == routingerr.CodeModelCapacity &&
+		data.PromptFailureDisposition == streams.PromptFailureDispositionRetainRuntime &&
+		data.PromptFailureDisposition.Valid() && data.OwnerKind == queueStatusScopeTask &&
+		!data.DynamicRouteAttempt && data.CapacityContinuation.SafeFor(data.PromptGeneration) &&
+		data.EvidenceKnown && s.continuationPromptIdentityMatches(data)
+}
+
 func (s *Service) continuationRefusalReason(ctx context.Context, data watcher.AgentEventData) string {
+	classified := classifyKanbanFailure(data)
+	if classified != nil && classified.Code == routingerr.CodeModelCapacity {
+		return s.capacityContinuationRefusalReason(ctx, data)
+	}
 	if !s.config.ProviderInterruptionContinuation {
 		return "disabled"
 	}
 	safety := data.ContinuationSafety
 	if safety == nil || !safety.Known || !data.EvidenceKnown || !s.continuationPromptIdentityMatches(data) {
-		return "missing_evidence"
+		return continuationRefusalMissingEvidence
 	}
 	if safety.Unsafe || safety.Pending {
 		return "unsafe_work"
 	}
-	if safety.Support != streams.ContinuationNativeSavedHistoryV1 || data.OwnerKind != queueStatusScopeTask || data.DynamicRouteAttempt {
+	if (safety.Support != streams.ContinuationNativeSavedHistoryV1 && safety.Support != streams.ContinuationNativeSavedHistoryV2) || data.OwnerKind != queueStatusScopeTask || data.DynamicRouteAttempt {
 		return "unsupported_restore"
 	}
 	if s.continuationBindingForFailure(ctx, data) == nil {
-		return "missing_evidence"
+		return continuationRefusalMissingEvidence
 	}
 	return ""
+}
+
+func (s *Service) capacityContinuationRefusalReason(ctx context.Context, data watcher.AgentEventData) string {
+	snapshot := data.CapacityContinuation
+	if !capacityContinuationEvidenceBound(s, snapshot, data) {
+		return continuationRefusalMissingEvidence
+	}
+	if capacityContinuationHasUnsafeWork(snapshot) {
+		return "unsafe_work"
+	}
+	if !supportsCapacityContinuation(snapshot.Support) {
+		return "unsupported_restore"
+	}
+	if !capacityContinuationAdmissionMatches(snapshot, data) {
+		return continuationRefusalMissingEvidence
+	}
+	if s.continuationBindingForFailure(ctx, data) == nil {
+		return continuationRefusalMissingEvidence
+	}
+	return ""
+}
+
+func capacityContinuationEvidenceBound(
+	s *Service,
+	snapshot *streams.CapacityContinuationSnapshot,
+	data watcher.AgentEventData,
+) bool {
+	return snapshot != nil && data.EvidenceKnown && s.continuationPromptIdentityMatches(data) &&
+		snapshot.PromptGeneration == data.PromptGeneration
+}
+
+func capacityContinuationHasUnsafeWork(snapshot *streams.CapacityContinuationSnapshot) bool {
+	return snapshot.PendingTools || snapshot.FailedTools || snapshot.UnknownOutcomes ||
+		snapshot.PermissionPending || snapshot.UnaccountedBackground
+}
+
+func supportsCapacityContinuation(support streams.CapacityContinuationSupport) bool {
+	return support == streams.CapacityContinuationCodexLiveSessionV1 ||
+		support == streams.CapacityContinuationMockLiveSessionV1
+}
+
+func capacityContinuationAdmissionMatches(
+	snapshot *streams.CapacityContinuationSnapshot,
+	data watcher.AgentEventData,
+) bool {
+	return snapshot.SafeFor(data.PromptGeneration) &&
+		data.PromptFailureDisposition == streams.PromptFailureDispositionRetainRuntime &&
+		data.OwnerKind == queueStatusScopeTask && !data.DynamicRouteAttempt
 }
 
 func (s *Service) continuationPromptIdentityMatches(data watcher.AgentEventData) bool {

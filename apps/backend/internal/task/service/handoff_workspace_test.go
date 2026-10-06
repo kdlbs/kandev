@@ -759,6 +759,10 @@ func (r *phase4TaskRepo) DeleteExpiredQuickChatTask(context.Context, string, tim
 	r.panicNotUsed("DeleteExpiredQuickChatTask")
 	return false, nil
 }
+func (r *phase4TaskRepo) ListCoordinatorOriginTasks(context.Context, string) ([]*models.Task, error) {
+	r.panicNotUsed("ListCoordinatorOriginTasks")
+	return nil, nil
+}
 func (r *phase4TaskRepo) CountOpenWatcherCreatedTasks(context.Context, string, string) (int, error) {
 	r.panicNotUsed("CountOpenWatcherCreatedTasks")
 	return 0, nil

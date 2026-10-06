@@ -7,6 +7,7 @@ import { AppSidebarNavItem } from "./app-sidebar-nav-item";
 import { AppSidebarFixedNav, AppSidebarHomeItem } from "./app-sidebar-primary-nav";
 import { AppSidebarNewTaskItem } from "./app-sidebar-new-task-item";
 import { AutomationsSection } from "./sections/automations-section";
+import { CoordinatorsSection } from "./sections/coordinators-section";
 import { CanvasesSection } from "./sections/canvases-section";
 import { IntegrationsSection } from "./sections/integrations-section";
 import { ShortcutSection } from "./shortcut-section";
@@ -58,7 +59,12 @@ function builtinNode(node: ProjectedSidebarNode, collapsed: boolean): React.Reac
     case "new_task":
       return <AppSidebarNewTaskItem collapsed={collapsed} />;
     case "automations":
-      return <AutomationsSection collapsed={collapsed} />;
+      return (
+        <>
+          <CoordinatorsSection collapsed={collapsed} />
+          <AutomationsSection collapsed={collapsed} />
+        </>
+      );
     case "canvases":
       return <CanvasesSection collapsed={collapsed} />;
     case "integrations":
@@ -99,6 +105,9 @@ export function SidebarLayoutNavigation({ collapsed, inOffice }: SidebarLayoutNa
     (node) => node.visible && (!inOffice || !isKanbanOnlyNode(node)),
   );
   const hasVisibleNewTask = visibleNodes.some((node) => node.destinationId === "new_task");
+  const coordinatorsWithAutomations = visibleNodes.some(
+    (node) => node.kind === "builtin" && node.destinationId === "automations",
+  );
   const items: { id: string; content: React.ReactNode }[] = [];
 
   for (const node of visibleNodes) {
@@ -139,6 +148,7 @@ export function SidebarLayoutNavigation({ collapsed, inOffice }: SidebarLayoutNa
       <SidebarCustomizeMenu nodes={projection.nodes} catalog={catalog.catalog}>
         <SidebarDraggableNavigation rows={items} catalog={catalog.catalog} disabled={collapsed} />
       </SidebarCustomizeMenu>
+      {!coordinatorsWithAutomations && <CoordinatorsSection collapsed={collapsed} />}
       {collapsed && (
         <AppSidebarFixedNav collapsed showOfficeInbox={false} showNeedsYouInbox={false} />
       )}

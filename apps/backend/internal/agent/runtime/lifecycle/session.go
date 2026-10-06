@@ -276,6 +276,15 @@ func (sm *SessionManager) createOrLoadSession(
 				zap.String("reason", err.Error()))
 			return "", err
 		}
+		if agentConfig.ID() == agents.OpenCodeACPAgentID {
+			// OpenCode can migrate its on-disk conversation data between runtime
+			// families. A load failure does not prove that the saved conversation
+			// is disposable, so never replace its native session ID implicitly.
+			sm.logger.Warn("OpenCode session/load failed, preserving saved conversation identity",
+				zap.String("existing_session_id", existingSessionID),
+				zap.String("reason", err.Error()))
+			return "", err
+		}
 		// The agent does not support loading or no longer recognizes the stored
 		// token (expired / version drift / agent-side GC). In those confirmed
 		// cases start a fresh ACP session. The kandev-side row identity remains

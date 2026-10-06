@@ -6,6 +6,7 @@ import {
 } from "../../helpers/database-stats";
 
 test.describe("Mobile System Database page", () => {
+  // @covers AC-SYSTEM-PAGE-DATABASE-STATS-SNAPSHOT-001.5 AC-SYSTEM-PAGE-DATABASE-STATS-SNAPSHOT-002.4
   test("renders database stats and maintenance controls", async ({ testPage }) => {
     await testPage.goto("/settings/system/data-storage?tab=database");
 
@@ -25,6 +26,7 @@ test.describe("Mobile System Database page", () => {
     }
   });
 
+  // @covers AC-SYSTEM-PAGE-DATABASE-STATS-SNAPSHOT-002.3 AC-SYSTEM-PAGE-DATABASE-STATS-SNAPSHOT-002.4
   test("shows stale measurements, keeps maintenance reachable, and retries after reload on a phone", async ({
     testPage: page,
   }) => {

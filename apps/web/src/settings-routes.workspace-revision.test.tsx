@@ -31,7 +31,7 @@ vi.mock("@/lib/api/domains/settings-api", async (importOriginal) => ({
 }));
 
 import { ACTIVE_WORKSPACE_COOKIE, scopedCookieName } from "@/lib/routing/route-bootstrap";
-import { SettingsRouteBootstrap } from "./settings-routes";
+import { SettingsRouteBootstrap } from "./settings-routes.bootstrap";
 
 const SETTINGS_WORKSPACE_ID = "ws-settings-1";
 const SETTINGS_WORKSPACES_RESPONSE = {

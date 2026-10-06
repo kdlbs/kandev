@@ -252,6 +252,13 @@ export type AvailableCommandPayload = {
   name: string;
   description?: string;
   input_hint?: string;
+  kind?: string;
+  action?: {
+    kind: string;
+    config_id: string;
+    value: string;
+    reset_value: string;
+  };
 };
 
 export type SessionBackendMessageMap = {

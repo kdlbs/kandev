@@ -66,6 +66,27 @@ func TestBuildCatalogueFiltersBoundsAndRetainsExtras(t *testing.T) {
 	}
 }
 
+func TestBuildCatalogueForPackageKeepsTheTrustedOpenCodeMajor(t *testing.T) {
+	catalogue, err := BuildCatalogueForPackage(
+		"@opencode/cli",
+		[]string{"1.18.32", "2.0.18", "2.1.0", "3.0.0-beta.1"},
+		"3.0.0",
+		"1.18.32",
+	)
+	if err != nil {
+		t.Fatalf("BuildCatalogueForPackage: %v", err)
+	}
+	if catalogue.Latest != "2.1.0" {
+		t.Fatalf("latest = %q, want newest supported v2", catalogue.Latest)
+	}
+	if catalogue.Has("1.18.32") || catalogue.Has("3.0.0") {
+		t.Fatalf("catalogue accepted versions outside package family: %#v", catalogue.Versions)
+	}
+	if !catalogue.Has("2.0.18") || !catalogue.Has("2.1.0") {
+		t.Fatalf("catalogue omitted supported v2 versions: %#v", catalogue.Versions)
+	}
+}
+
 func TestClassifyOperation(t *testing.T) {
 	tests := []struct {
 		name                    string

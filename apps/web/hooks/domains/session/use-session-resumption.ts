@@ -505,6 +505,7 @@ type ResetAndCheckParams = {
   preventAutoStart: boolean;
   preventAutoResume?: boolean;
   taskArchiveState: TaskArchiveState;
+  skipAutomaticRecovery: boolean;
 };
 
 const getSessionRequestKey = (
@@ -524,6 +525,7 @@ function useSessionResetAndCheck({
   preventAutoStart,
   preventAutoResume,
   taskArchiveState,
+  skipAutomaticRecovery,
 }: ResetAndCheckParams): SessionResetAndCheckResult {
   const requestKey = getSessionRequestKey(taskId, sessionId, taskArchiveState);
   const [sessionStatusState, setSessionStatus] = useState<{
@@ -571,6 +573,7 @@ function useSessionResetAndCheck({
   // Check session status and auto-resume if needed
   useEffect(() => {
     if (
+      skipAutomaticRecovery ||
       !taskId ||
       !sessionId ||
       connectionStatus !== "connected" ||
@@ -613,6 +616,7 @@ function useSessionResetAndCheck({
     preventAutoStart,
     preventAutoResume,
     taskArchiveState,
+    skipAutomaticRecovery,
   ]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
@@ -702,7 +706,13 @@ function useSessionResetAndCheck({
   // Freshly created remote sessions may return status before runtime metadata is available.
   // Retry a few times so topbar/tooltips can show remote details without manual refresh.
   useEffect(() => {
-    if (!taskId || !sessionId || connectionStatus !== "connected" || taskArchiveState !== false)
+    if (
+      skipAutomaticRecovery ||
+      !taskId ||
+      !sessionId ||
+      connectionStatus !== "connected" ||
+      taskArchiveState !== false
+    )
       return;
     if (!sessionStatus?.is_remote_executor) return;
     if (sessionStatus.remote_checked_at || sessionStatus.remote_status_error) return;
@@ -732,7 +742,7 @@ function useSessionResetAndCheck({
     }, 1500);
 
     return () => window.clearTimeout(timer);
-  }, [taskId, sessionId, connectionStatus, sessionStatus, taskArchiveState]);
+  }, [taskId, sessionId, connectionStatus, sessionStatus, taskArchiveState, skipAutomaticRecovery]);
 
   const retryStatus = useCallback(async () => {
     if (!taskId || !sessionId || connectionStatus !== "connected" || taskArchiveState !== false) {
@@ -912,6 +922,7 @@ function useManualResumeSession({
 
 export type SessionResumptionOptions = {
   onTaskArchiveConflict?: () => void;
+  skipAutomaticRecovery?: boolean;
   preventAutoResume?: boolean;
 };
 
@@ -982,6 +993,7 @@ export function useSessionResumption(
       preventAutoStart: preventAutoStartAgentOnOpen,
       preventAutoResume: options.preventAutoResume,
       taskArchiveState,
+      skipAutomaticRecovery: options.skipAutomaticRecovery ?? false,
     });
 
   const resumeSession = useManualResumeSession({

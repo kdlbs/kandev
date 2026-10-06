@@ -34,6 +34,7 @@ import { MobileSidebarCustomization } from "./mobile-sidebar-customization";
 import { MobileNewTaskRow } from "./mobile-new-task-row";
 import { DestinationRows } from "./destination-rows";
 import { MobileAutomationsSection } from "./mobile-automations-section";
+import { MobileCoordinatorsSection } from "./mobile-coordinators-section";
 import { MobileCanvasesSection } from "./mobile-canvases-section";
 import { MobileIntegrationsSection } from "@/components/integrations/integrations-menu";
 
@@ -137,13 +138,17 @@ function MobileRequiredRows({
   omitSections,
   omitDestinations,
   inboxKind = "none",
+  coordinatorsWithAutomations = false,
 }: {
   onNavigate: () => void;
   omitSections: Set<string>;
   omitDestinations: string[];
   inboxKind?: "office" | "needs-you" | "none";
+  coordinatorsWithAutomations?: boolean;
 }) {
   const primary = useStaticDestinations("mobileMenu", "primary");
+  const workspaceId = useAppStore((state) => state.workspaces.activeId);
+  const coordinatorEnabled = useFeature("coordinator") && !coordinatorsWithAutomations;
   if (omitSections.has("primary")) return null;
   if (inboxKind !== "none") return <MobileInboxRow kind={inboxKind} onNavigate={onNavigate} />;
   const fixedDestinations = primary.filter(
@@ -151,14 +156,17 @@ function MobileRequiredRows({
       (destination.id === "tasks" || destination.id === "threads") &&
       !omitDestinations.includes(destination.id),
   );
-  if (!fixedDestinations.length) return null;
+  if (!fixedDestinations.length && !(coordinatorEnabled && workspaceId)) return null;
   return (
     <div className="flex flex-col gap-3" data-testid="mobile-sidebar-fixed-navigation">
-      <DestinationRows
-        destinations={fixedDestinations}
-        onNavigate={onNavigate}
-        className="h-11 gap-3 px-3 text-sm aria-[current=page]:bg-primary/10"
-      />
+      {fixedDestinations.length > 0 && (
+        <DestinationRows
+          destinations={fixedDestinations}
+          onNavigate={onNavigate}
+          className="h-11 gap-3 px-3 text-sm aria-[current=page]:bg-primary/10"
+        />
+      )}
+      {coordinatorEnabled && workspaceId && <MobileCoordinatorsSection onNavigate={onNavigate} />}
     </div>
   );
 }
@@ -287,7 +295,7 @@ function MobilePhoneResource(props: MobileLayoutNodeProps) {
   }
 }
 
-function MobileBuiltinNode(props: MobileLayoutNodeProps) {
+function MobileBuiltinNodeContent(props: MobileLayoutNodeProps) {
   const {
     node,
     homeCoversListings,
@@ -347,6 +355,16 @@ function MobileBuiltinNode(props: MobileLayoutNodeProps) {
       onActivateShortcut={onActivateShortcut}
       onNavigate={onNavigate}
     />
+  );
+}
+
+function MobileBuiltinNode(props: MobileLayoutNodeProps) {
+  if (props.node.destinationId !== "automations") return <MobileBuiltinNodeContent {...props} />;
+  return (
+    <>
+      <MobileCoordinatorsSection onNavigate={props.onNavigate} />
+      <MobileBuiltinNodeContent {...props} />
+    </>
   );
 }
 
@@ -427,6 +445,9 @@ export function MobileSidebarLayoutNavigation({
       ]
     : visibleNodes;
   const toolNodes = phoneMain ? visibleNodes.filter((node) => !isPrimary(node)) : [];
+  const coordinatorsWithAutomations = visibleNodes.some(
+    (node) => node.destinationId === "automations",
+  );
   const renderNode = (node: ProjectedSidebarNode) => (
     <MobileLayoutNode
       key={node.id}
@@ -459,6 +480,7 @@ export function MobileSidebarLayoutNavigation({
           onNavigate={onNavigate}
           omitSections={omitSections}
           omitDestinations={omitDestinations}
+          coordinatorsWithAutomations={coordinatorsWithAutomations}
         />
       </div>
       <MobileSidebarCustomization

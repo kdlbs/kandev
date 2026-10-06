@@ -118,6 +118,47 @@ func decodePayload(t *testing.T, raw json.RawMessage) map[string]interface{} {
 	return payload
 }
 
+func TestAppendAvailableCommandsMessagePreservesProviderMetadata(t *testing.T) {
+	action := &streams.AvailableCommandAction{
+		Kind: "set_config_option", ConfigID: "collaboration_mode", Value: "plan", ResetValue: "default",
+	}
+	commands := []streams.AvailableCommand{{
+		Name: "$retro", Kind: "skill", Description: "Run the skill", InputHint: "context", Action: action,
+	}}
+	result := appendAvailableCommandsMessageForCommands("session-1", &models.TaskSession{TaskID: "task-1"}, commands, nil)
+	if len(result) != 1 {
+		t.Fatalf("notifications = %d, want 1", len(result))
+	}
+	if result[0].Action != ws.ActionSessionAvailableCommands {
+		t.Fatalf("action = %q", result[0].Action)
+	}
+	var payload struct {
+		AvailableCommands []streams.AvailableCommand `json:"available_commands"`
+	}
+	if err := json.Unmarshal(result[0].Payload, &payload); err != nil {
+		t.Fatalf("decode reconnect payload: %v", err)
+	}
+	if len(payload.AvailableCommands) != 1 || payload.AvailableCommands[0].Name != "$retro" || payload.AvailableCommands[0].Kind != "skill" || payload.AvailableCommands[0].InputHint != "context" || payload.AvailableCommands[0].Action == nil || *payload.AvailableCommands[0].Action != *action {
+		t.Fatalf("reconnect commands = %#v", payload.AvailableCommands)
+	}
+}
+
+func TestAppendAvailableCommandsMessageNilLifecycleManagerPreservesResult(t *testing.T) {
+	var lifecycleMgr *lifecycle.Manager
+	existing := &ws.Message{Action: "existing"}
+	result := []*ws.Message{existing}
+
+	got := appendAvailableCommandsMessage(
+		"session-1",
+		&models.TaskSession{TaskID: "task-1"},
+		lifecycleMgr,
+		result,
+	)
+	if len(got) != 1 || got[0] != existing {
+		t.Fatalf("messages = %#v, want the original result unchanged", got)
+	}
+}
+
 func TestBuildGitStatusNotificationHidesUnknownAncestryEvidenceWhileDetailsArePending(t *testing.T) {
 	msg := buildGitStatusNotification("session-1", "env-1", "web", client.GitStatusResult{
 		Branch:           "feature/rewrite",

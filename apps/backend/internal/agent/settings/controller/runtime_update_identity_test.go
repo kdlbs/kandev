@@ -21,7 +21,7 @@ func TestAutomaticOutcomeRetainsOriginalRuntimeIdentityAfterHostChanges(t *testi
 	ag := agents.NewOpenCodeACP()
 	spec := ag.ManagedNPMRuntime()
 	previous := spec.DefaultVersionOrPinned()
-	updater := &blockedAutoUpdater{recoveryRuntimeUpdater: &recoveryRuntimeUpdater{metadata: RuntimeVersionMetadata{Latest: "9.0.0", Versions: []string{"9.0.0", previous}}, probeCaps: hostutility.AgentCapabilities{Status: hostutility.StatusOK, AgentVersion: "9.0.0"}}, probed: make(chan struct{}), release: make(chan struct{})}
+	updater := &blockedAutoUpdater{recoveryRuntimeUpdater: &recoveryRuntimeUpdater{metadata: RuntimeVersionMetadata{Latest: "1.19.0", Versions: []string{"1.19.0", previous}}, probeCaps: hostutility.AgentCapabilities{Status: hostutility.StatusOK, AgentVersion: "1.19.0"}}, probed: make(chan struct{}), release: make(chan struct{})}
 	c := newTestController(map[string]agents.Agent{ag.ID(): ag})
 	c.SetRuntimeUpdater(updater)
 	c.SetManagedRuntimeSelectionStore(newRecoverySelectionStore())

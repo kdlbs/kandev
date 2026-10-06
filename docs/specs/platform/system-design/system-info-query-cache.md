@@ -18,10 +18,12 @@ no independent product requirement. The [backend restart page recovery
 design](backend-restart-page-recovery.md) owns process-generation detection and
 the reload-required behavior.
 
-The pilot covers only `GET /api/v1/system/info` and the About view. Zustand
-continues to own database, jobs, storage, metrics, backups, and other System
-state. The [ownership decision](../../../decisions/2026-09-26-system-info-query-cache-ownership.md)
-records rationale and alternatives.
+The pilot covers only `GET /api/v1/system/info` and the About view. The
+database-statistics resource has a separate Query ownership contract for the
+Data & Logs database card and Backups description. Other System resources
+remain in Zustand. The [ownership decision](../../../decisions/2026-09-26-system-info-query-cache-ownership.md)
+records rationale and alternatives; the [database-statistics design](../../system-page/system-design/database-statistics-snapshot.md)
+defines that resource's mutable freshness and shared consumers.
 
 ## Components and responsibilities
 
@@ -45,11 +47,14 @@ stable `bootId`, auth mode, authenticated state, and user ID. SystemInfo is not
 scoped to a workspace. The provider keeps one QueryClient for the authenticated
 app branch instead of keying the provider subtree by identity, so an identity
 change does not remount unrelated shell state. When identity changes, the
-provider targets only obsolete SystemInfo keys, calls `cancelQueries`, then
-immediately calls `removeQueries` with the same filter in that effect. It does
-not defer removal to the cancellation promise, so a delayed cleanup cannot
-remove a query after that identity becomes current again. The hook moves to the
-new identity key, so old data cannot be rendered as the new identity's result.
+provider targets obsolete keys for each explicitly migrated resource, calls
+`cancelQueries`, then immediately calls `removeQueries` with the same filter in
+that effect. The filter targets only obsolete SystemInfo and database-statistics
+identity keys. The separate [database-statistics design](../../system-page/system-design/database-statistics-snapshot.md)
+defines that resource's key and mutable freshness. Cleanup does not defer
+removal to the cancellation promise, so a delayed cleanup cannot remove a query
+after that identity becomes current again. Each hook moves to its new identity
+key, so old data cannot be rendered as the new identity's result.
 Auth-gated navigation unmounts the provider when the app shell is left. TanStack
 also cancels a pending query when its last observer leaves because the query
 function consumes the observer signal. No custom request controller or

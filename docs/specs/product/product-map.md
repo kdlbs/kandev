@@ -56,6 +56,7 @@ turns and sessions, but the user remains able to inspect and redirect it.
 | [Plugins](../plugins/README.md) | Owns package, marketplace, host API, contribution, and plugin security contracts. | Extends the host without owning core product state. |
 | [System page](../system-page/README.md) | Owns operator diagnostics, storage, backups, logs, and maintenance surfaces. | Exposes operational state and recovery actions. |
 | [Release](../release/README.md) | Owns version channels, packaging, publication, and artifact verification. | Delivers the runtime consumed by CLI and desktop. |
+| [Coordinator](../coordinator/README.md) | Owns feature-flagged workspace coordinators: the Needs you and Queue projection, the copilot conversation, and task proposals a person decides. | Reads tasks and sessions and proposes tasks; never moves, archives, merges, or stops them. Not Office. |
 | [Office](../office/README.md) | Owns feature-flagged autonomy, coordination, routines, dashboards, and Office live state. | Builds on tasks, agents, costs, and integrations; not yet part of the supported production path. |
 
 ## Authority boundaries

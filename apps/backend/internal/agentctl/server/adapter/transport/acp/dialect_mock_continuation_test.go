@@ -53,7 +53,7 @@ func TestMockInterruptionContinuationWireError(t *testing.T) {
 				if event.Type == streams.EventTypeError {
 					failures++
 					require.True(t, event.ContinuationSafety.SafeFor(7))
-					require.Equal(t, uint16(1), event.ContinuationSafety.CompletedReads)
+					require.Equal(t, uint16(1), event.ContinuationSafety.CompletedTools)
 					require.Equal(t, streams.PromptFailureDispositionRetainRuntime, event.PromptFailureDisposition)
 				}
 				require.NotEqual(t, streams.EventTypeComplete, event.Type)

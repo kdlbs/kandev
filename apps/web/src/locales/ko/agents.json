@@ -405,5 +405,16 @@
   "runtimeInterruptedBody": "{{agent}} 런타임을 {{previous}}에서 {{version}}로 업데이트한 결과를 확인할 수 없습니다. 다시 시도하거나 Kandev 기본값으로 돌아가기 전에 현재 선택을 확인하세요.",
   "runtimeFallbackManage": "대체 버전 관리",
   "runtimeFallbackExplainer": "원격 및 컨테이너 실행에 사용할 관리 패키지를 선택합니다. 호스트의 네이티브 설치는 변경되지 않습니다. 원격 네이티브 설치의 업데이트는 기존 관리 주체가 계속 담당합니다.",
-  "runtimeFallbackReview": "향후 원격 또는 컨테이너 실행을 변경하기 전에 관리되는 대체 패키지를 검토하세요."
+  "runtimeFallbackReview": "향후 원격 또는 컨테이너 실행을 변경하기 전에 관리되는 대체 패키지를 검토하세요.",
+  "options": "옵션",
+  "agentOptions": "에이전트 옵션",
+  "changesApplyImmediately": "변경 사항이 즉시 적용됩니다.",
+  "openCodeMigrationExternalProcesses": "업그레이드하기 전에 같은 세션 데이터를 사용하는 독립 실행형 OpenCode v1 프로세스를 중지하세요.",
+  "openCodeMigrationScope": "이 Kandev 설치의 모든 OpenCode 프로필에서 이후 실행에 관리형 OpenCode v2를 사용하도록 설정합니다. 독립 실행형 CLI는 변경되지 않습니다.",
+  "openCodeMigrationSuccess": "이후 Kandev 실행에 관리형 OpenCode v2를 사용하도록 설정했습니다.",
+  "openCodeRuntimeChoice": "OpenCode 런타임 버전",
+  "updateOpenCodeV1": "OpenCode v1 업데이트",
+  "updatePhaseProbing": "런타임 확인 중",
+  "updatePhaseSaving": "선택 항목 저장 중",
+  "upgradeOpenCodeV2": "관리형 OpenCode v2로 업그레이드"
 }

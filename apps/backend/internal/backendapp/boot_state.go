@@ -288,15 +288,8 @@ func (b bootStateBuilder) addHomeKanbanRouteState(ctx context.Context, req *http
 		b.logBootError("list home workspaces", err)
 		return
 	}
-	workspaceItems := make([]map[string]any, 0, len(workspaces))
-	workspaceIDs := make(map[string]bool, len(workspaces))
-	for _, workspace := range workspaces {
-		if workspace == nil {
-			continue
-		}
-		workspaceIDs[workspace.ID] = true
-		workspaceItems = append(workspaceItems, mapWorkspaceItemState(taskdto.FromWorkspace(workspace)))
-	}
+	workspaceItems := b.workspaceItemStates(ctx, workspaces)
+	workspaceIDs := workspaceIDSet(workspaces)
 
 	settings, hasSettings := b.userSettings(ctx)
 	settingsWorkspaceID := ""

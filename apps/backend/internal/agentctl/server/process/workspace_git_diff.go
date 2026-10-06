@@ -510,7 +510,7 @@ func (wt *WorkspaceTracker) enrichUnstagedFileDiff(ctx context.Context, update *
 	}
 
 	previousDiff := fileInfo.Diff
-	diffOut, truncated, diffErr := wt.capDiffOutput(ctx, "diff", baseRef, "--", literalGitPathspec(entry.path))
+	diffOut, truncated, diffErr := wt.capDiffOutput(ctx, "diff", "--no-color", "--no-ext-diff", baseRef, "--", literalGitPathspec(entry.path))
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -618,7 +618,7 @@ func (wt *WorkspaceTracker) enrichMixedUnstagedFileDiff(
 	}
 
 	previousDiff := change.Diff
-	diffOut, truncated, diffErr := wt.capDiffOutput(ctx, "diff", "--", literalGitPathspec(entry.path))
+	diffOut, truncated, diffErr := wt.capDiffOutput(ctx, "diff", "--no-color", "--no-ext-diff", "--", literalGitPathspec(entry.path))
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -738,7 +738,7 @@ func (wt *WorkspaceTracker) enrichStagedFileDiff(ctx context.Context, update *ty
 		return nil
 	}
 
-	diffOut, truncated, diffErr := wt.capDiffOutput(ctx, "diff", "--cached", baseRef, "--", literalGitPathspec(entry.path))
+	diffOut, truncated, diffErr := wt.capDiffOutput(ctx, "diff", "--no-color", "--no-ext-diff", "--cached", baseRef, "--", literalGitPathspec(entry.path))
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -784,7 +784,7 @@ func (wt *WorkspaceTracker) enrichMixedStagedFileDiff(
 	}
 
 	previousDiff := change.Diff
-	diffOut, truncated, diffErr := wt.capDiffOutput(ctx, "diff", "--cached", baseRef, "--", literalGitPathspec(entry.path))
+	diffOut, truncated, diffErr := wt.capDiffOutput(ctx, "diff", "--no-color", "--no-ext-diff", "--cached", baseRef, "--", literalGitPathspec(entry.path))
 	if err := ctx.Err(); err != nil {
 		return err
 	}

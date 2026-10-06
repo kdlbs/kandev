@@ -255,6 +255,9 @@ func (s *Service) CreateTask(ctx context.Context, req *CreateTaskRequest) (Creat
 	if err != nil {
 		return CreateTaskResult{}, err
 	}
+	if err := refuseReservedExternalIDPrefix(externalID, req.AllowReservedExternalID); err != nil {
+		return CreateTaskResult{}, err
+	}
 	req.ExternalID = externalID
 
 	if found, result, err := s.findTaskByExternalIDIfPresent(ctx, req.WorkspaceID, externalID); found {

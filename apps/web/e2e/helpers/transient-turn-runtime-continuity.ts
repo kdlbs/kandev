@@ -15,6 +15,8 @@ export type MockACPTrace = {
   connection_id: string;
   prompt?: string;
   value?: string;
+  scenario?: string;
+  effect?: string;
 };
 
 export async function createRetainedCapacityFixture(
@@ -112,6 +114,16 @@ export function assertRetainedACPTrace(tracePath: string, expectedPrompts: numbe
   expect(records.filter((record) => record.event === "session_load")).toHaveLength(0);
   expect(records.filter((record) => record.event === "resume")).toHaveLength(0);
   expect(records.filter((record) => record.event === "prompt")).toHaveLength(expectedPrompts);
+}
+
+export function assertCompletedCapacityACPTrace(tracePath: string, originalCommand: string) {
+  const records = readMockACPTrace(tracePath);
+  const prompts = records.filter((record) => record.event === "prompt");
+  assertRetainedACPTrace(tracePath, 2);
+  expect(prompts.filter((record) => record.prompt?.includes(originalCommand))).toHaveLength(1);
+  const effects = records.filter((record) => record.event === "completed_side_effect");
+  expect(effects).toHaveLength(1);
+  expect(effects[0]).toMatchObject({ scenario: "completed-tools", effect: "fixture.txt" });
 }
 
 export function assertRetainedFailureMessage(message: SessionMessage) {
