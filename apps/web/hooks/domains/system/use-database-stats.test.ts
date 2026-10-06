@@ -655,7 +655,7 @@ describe("SystemInfo query cleanup", () => {
       "user-1",
       "future-identity-scope",
     ];
-    const unrelatedKey = ["system", "backups", API_BASE_URL, "future-subresource"];
+    const unrelatedKey = ["system", "maintenance", API_BASE_URL, "future-subresource"];
     queryClient?.setQueryData(obsoleteExtendedKey, "obsolete");
     queryClient?.setQueryData(unrelatedKey, "keep");
 

@@ -1,36 +1,56 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
-import { useAppStore } from "@/components/state-provider";
-import { fetchBackups } from "@/lib/api/domains/system-api";
-import type { SnapshotInfo } from "@/lib/types/system";
+import { useCallback } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  createBackupListQueryOptions,
+  invalidateBackupList,
+  reloadBackupList,
+  reloadBackupListAfterWrite,
+  useBackupListScope,
+} from "./backup-list-query";
+
+function getErrorMessage(error: unknown): string | null {
+  if (error == null) return null;
+  if (error instanceof Error) return error.message;
+  return String(error);
+}
 
 export function useBackups() {
-  const backups = useAppStore((s) => s.system.backups);
-  const setSystemBackups = useAppStore((s) => s.setSystemBackups);
-  const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const queryClient = useQueryClient();
+  const scope = useBackupListScope();
+  const query = useQuery(createBackupListQueryOptions(scope.identity));
+  const capturedScope = scope.captureScope();
+  const reload = useCallback(
+    () => reloadBackupList(queryClient, capturedScope, scope.isCurrentScope),
+    [capturedScope, queryClient, scope.isCurrentScope],
+  );
+  const reloadAfterWrite = useCallback(
+    (writerScope = capturedScope) =>
+      reloadBackupListAfterWrite(queryClient, writerScope, scope.isCurrentScope),
+    [capturedScope, queryClient, scope.isCurrentScope],
+  );
+  const invalidate = useCallback(
+    (writerScope = capturedScope) => {
+      if (!scope.isCurrentScope(writerScope)) return Promise.resolve();
+      return invalidateBackupList(queryClient, writerScope.identity, () =>
+        scope.isCurrentScope(writerScope),
+      );
+    },
+    [capturedScope, queryClient, scope.isCurrentScope],
+  );
 
-  const reload = useCallback(async (): Promise<SnapshotInfo[]> => {
-    setIsLoading(true);
-    setError(null);
-    try {
-      const items = await fetchBackups({ cache: "no-store" });
-      const nextItems = items ?? [];
-      setSystemBackups(nextItems);
-      return nextItems;
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-      throw e;
-    } finally {
-      setIsLoading(false);
-    }
-  }, [setSystemBackups]);
-
-  useEffect(() => {
-    if (backups.loaded) return;
-    void reload().catch(() => undefined);
-  }, [backups.loaded, reload]);
-
-  return { backups: backups.items, loaded: backups.loaded, isLoading, error, reload };
+  return {
+    backups: query.data ?? [],
+    loaded: query.data !== undefined,
+    isLoading: query.isFetching,
+    error: getErrorMessage(query.error),
+    reload,
+    reloadAfterWrite,
+    invalidate,
+    captureScope: scope.captureScope,
+    isCurrentScope: scope.isCurrentScope,
+    scopeIdentityKey: scope.identityKey,
+    scopeGeneration: scope.generation,
+  };
 }

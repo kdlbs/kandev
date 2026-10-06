@@ -1,11 +1,18 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { QueryClient, useQueryClient } from "@tanstack/react-query";
+import { createElement, Fragment, type ReactNode } from "react";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import { StateProvider, useAppStoreApi } from "@/components/state-provider";
+import { SystemInfoQueryProvider } from "@/components/system-info-query-provider";
+import type { StoreApi } from "zustand";
+import type { AppState } from "@/lib/state/store";
 import { activateLocale } from "@/lib/i18n";
+import { useBackups } from "@/hooks/domains/system/use-backups";
 import { FactoryResetDialog } from "./factory-reset-dialog";
 import { RestoreDialog } from "./restore-dialog";
 
 const restoreDialogTestState = vi.hoisted(() => ({
-  job: null as { state: string; message?: string } | null,
+  job: null as { id?: string; state: string; message?: string } | null,
   restart: {
     phase: "idle" as const,
     errorMessage: null as string | null,
@@ -13,6 +20,15 @@ const restoreDialogTestState = vi.hoisted(() => ({
     start: vi.fn(),
     dismiss: vi.fn(),
   },
+}));
+const systemApiMocks = vi.hoisted(() => ({
+  resetDatabase: vi.fn(),
+  fetchBackups: vi.fn(),
+}));
+
+vi.mock("@/lib/api/domains/system-api", () => ({
+  resetDatabase: systemApiMocks.resetDatabase,
+  fetchBackups: systemApiMocks.fetchBackups,
 }));
 
 vi.mock("@/hooks/domains/system/use-system-jobs", () => ({
@@ -24,11 +40,89 @@ vi.mock("@/hooks/domains/system/use-kandev-restart", () => ({
   useKandevRestart: () => restoreDialogTestState.restart,
 }));
 
+const AUTH = {
+  mode: "enabled" as const,
+  authenticated: true,
+  user: {
+    id: "user-1",
+    email: "user@example.com",
+    display_name: "User",
+    role: "admin" as const,
+    status: "active" as const,
+  },
+};
+const FACTORY_RESET_INPUT_TEST_ID = "system-factory-reset-input";
+const FACTORY_RESET_CONFIRM_TEST_ID = "system-factory-reset-confirm";
+let currentQueryClient: QueryClient | undefined;
+let currentStore: StoreApi<AppState> | undefined;
+let observeBackups = false;
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((resolvePromise) => {
+    resolve = resolvePromise;
+  });
+  return { promise, resolve };
+}
+
+function StoreCapture() {
+  currentStore = useAppStoreApi();
+  return null;
+}
+
+function QueryCapture() {
+  currentQueryClient = useQueryClient();
+  return null;
+}
+
+function BackupObserver() {
+  useBackups();
+  return null;
+}
+
+function FactoryResetHarness({ children }: { children: ReactNode }) {
+  return createElement(StateProvider, {
+    initialState: { auth: AUTH },
+    children: createElement(
+      Fragment,
+      null,
+      createElement(StoreCapture),
+      createElement(SystemInfoQueryProvider, {
+        bootId: "reset-test-boot",
+        children: createElement(
+          Fragment,
+          null,
+          createElement(QueryCapture),
+          observeBackups ? createElement(BackupObserver) : null,
+          children,
+        ),
+      }),
+    ),
+  });
+}
+
+function renderFactoryReset(open = true) {
+  return render(
+    createElement(
+      FactoryResetHarness,
+      null,
+      createElement(FactoryResetDialog, { open, onOpenChange: vi.fn() }),
+    ),
+  );
+}
+
 afterEach(() => {
   cleanup();
+  currentQueryClient?.clear();
+  currentQueryClient = undefined;
+  currentStore = undefined;
+  observeBackups = false;
   restoreDialogTestState.job = null;
   restoreDialogTestState.restart.start.mockReset();
   restoreDialogTestState.restart.dismiss.mockReset();
+  systemApiMocks.resetDatabase.mockReset();
+  systemApiMocks.fetchBackups.mockReset();
+  systemApiMocks.fetchBackups.mockResolvedValue([]);
 });
 
 /**
@@ -39,7 +133,7 @@ afterEach(() => {
  */
 describe("system type-to-confirm dialogs", () => {
   it("keeps the factory-reset token verbatim and gates the confirm button on it", () => {
-    render(<FactoryResetDialog open onOpenChange={vi.fn()} />);
+    renderFactoryReset();
 
     // The whole reconstructed <Trans> sentence: a tag index drifting off its
     // <code> child reassembles the copy into fragments without failing
@@ -49,8 +143,8 @@ describe("system type-to-confirm dialogs", () => {
         "quit and relaunch Kandev - the backend does not auto-restart.",
     );
 
-    const input = screen.getByTestId("system-factory-reset-input");
-    const confirm = screen.getByTestId("system-factory-reset-confirm") as HTMLButtonElement;
+    const input = screen.getByTestId(FACTORY_RESET_INPUT_TEST_ID);
+    const confirm = screen.getByTestId(FACTORY_RESET_CONFIRM_TEST_ID) as HTMLButtonElement;
     expect(input.getAttribute("placeholder")).toBe("Type RESET to confirm");
     expect(confirm.disabled).toBe(true);
 
@@ -89,6 +183,129 @@ describe("system type-to-confirm dialogs", () => {
 
     fireEvent.click(screen.getByTestId("system-restore-restart"));
     expect(restoreDialogTestState.restart.start).toHaveBeenCalledOnce();
+  });
+});
+
+describe("factory reset backup-list refresh", () => {
+  it.each(["succeeded", "failed"] as const)(
+    "refreshes the backup list once when reset reaches %s, even after a possible snapshot publication",
+    async (state) => {
+      observeBackups = true;
+      systemApiMocks.fetchBackups.mockResolvedValue([]);
+      systemApiMocks.resetDatabase.mockResolvedValue({ job_id: "reset-job" });
+      const view = renderFactoryReset();
+      const backupQuery = () =>
+        currentQueryClient
+          ?.getQueryCache()
+          .getAll()
+          .find((query) => query.queryKey[0] === "system" && query.queryKey[1] === "backups");
+      await waitFor(() => expect(backupQuery()?.state.data).toEqual([]));
+      systemApiMocks.fetchBackups.mockClear();
+
+      fireEvent.change(screen.getByTestId(FACTORY_RESET_INPUT_TEST_ID), {
+        target: { value: "RESET" },
+      });
+      fireEvent.click(screen.getByTestId(FACTORY_RESET_CONFIRM_TEST_ID));
+      await waitFor(() => expect(systemApiMocks.resetDatabase).toHaveBeenCalledOnce());
+      await waitFor(() => expect(screen.getByTestId("system-factory-reset-pending")).toBeTruthy());
+
+      restoreDialogTestState.job = { id: "reset-job", state };
+      view.rerender(
+        createElement(
+          FactoryResetHarness,
+          null,
+          createElement(FactoryResetDialog, { open: true, onOpenChange: vi.fn() }),
+        ),
+      );
+      await waitFor(() => expect(systemApiMocks.fetchBackups).toHaveBeenCalledOnce());
+
+      restoreDialogTestState.job = { id: "reset-job", state };
+      view.rerender(
+        createElement(
+          FactoryResetHarness,
+          null,
+          createElement(FactoryResetDialog, { open: true, onOpenChange: vi.fn() }),
+        ),
+      );
+      expect(systemApiMocks.fetchBackups).toHaveBeenCalledOnce();
+      if (state === "succeeded")
+        expect(screen.getByTestId("system-factory-reset-close")).toBeTruthy();
+      else expect(screen.getByTestId("system-factory-reset-error")).toBeTruthy();
+    },
+  );
+
+  it("does not refresh after reset acceptance fails", async () => {
+    observeBackups = true;
+    systemApiMocks.fetchBackups.mockResolvedValue([]);
+    systemApiMocks.resetDatabase.mockRejectedValue(new Error("request failed"));
+    renderFactoryReset();
+    await waitFor(() => expect(systemApiMocks.fetchBackups).toHaveBeenCalledOnce());
+    systemApiMocks.fetchBackups.mockClear();
+    fireEvent.change(screen.getByTestId(FACTORY_RESET_INPUT_TEST_ID), {
+      target: { value: "RESET" },
+    });
+    fireEvent.click(screen.getByTestId(FACTORY_RESET_CONFIRM_TEST_ID));
+    await waitFor(() =>
+      expect(screen.getByTestId("system-factory-reset-error").textContent).toBe("request failed"),
+    );
+    expect(systemApiMocks.fetchBackups).not.toHaveBeenCalled();
+  });
+});
+
+describe("factory reset identity fencing", () => {
+  it("ignores a deferred reset acceptance after auth identity changes", async () => {
+    observeBackups = true;
+    systemApiMocks.fetchBackups.mockResolvedValue([]);
+    const acceptance = deferred<{ job_id: string }>();
+    systemApiMocks.resetDatabase.mockReturnValueOnce(acceptance.promise);
+    renderFactoryReset();
+    await waitFor(() => expect(systemApiMocks.fetchBackups).toHaveBeenCalledOnce());
+
+    fireEvent.change(screen.getByTestId(FACTORY_RESET_INPUT_TEST_ID), {
+      target: { value: "RESET" },
+    });
+    fireEvent.click(screen.getByTestId(FACTORY_RESET_CONFIRM_TEST_ID));
+    await waitFor(() => expect(systemApiMocks.resetDatabase).toHaveBeenCalledOnce());
+
+    act(() =>
+      currentStore?.getState().setAuthState({ ...AUTH, user: { ...AUTH.user, id: "user-2" } }),
+    );
+    await waitFor(() => expect(systemApiMocks.fetchBackups).toHaveBeenCalledTimes(2));
+    await act(async () => {
+      acceptance.resolve({ job_id: "obsolete-reset-job" });
+    });
+
+    expect(systemApiMocks.fetchBackups).toHaveBeenCalledTimes(2);
+    expect(screen.queryByTestId("system-factory-reset-pending")).toBeNull();
+    expect(screen.queryByTestId("system-factory-reset-error")).toBeNull();
+  });
+
+  it("does not let an old reset job invalidate the backup list after auth changes", async () => {
+    observeBackups = true;
+    systemApiMocks.fetchBackups.mockResolvedValue([]);
+    systemApiMocks.resetDatabase.mockResolvedValue({ job_id: "old-reset-job" });
+    const view = renderFactoryReset();
+    await waitFor(() => expect(systemApiMocks.fetchBackups).toHaveBeenCalledOnce());
+    systemApiMocks.fetchBackups.mockClear();
+    fireEvent.change(screen.getByTestId(FACTORY_RESET_INPUT_TEST_ID), {
+      target: { value: "RESET" },
+    });
+    fireEvent.click(screen.getByTestId(FACTORY_RESET_CONFIRM_TEST_ID));
+    await waitFor(() => expect(screen.getByTestId("system-factory-reset-pending")).toBeTruthy());
+
+    act(() =>
+      currentStore?.getState().setAuthState({ ...AUTH, user: { ...AUTH.user, id: "user-2" } }),
+    );
+    await waitFor(() => expect(systemApiMocks.fetchBackups).toHaveBeenCalledOnce());
+    restoreDialogTestState.job = { id: "old-reset-job", state: "failed" };
+    view.rerender(
+      createElement(
+        FactoryResetHarness,
+        null,
+        createElement(FactoryResetDialog, { open: true, onOpenChange: vi.fn() }),
+      ),
+    );
+    expect(systemApiMocks.fetchBackups).toHaveBeenCalledOnce();
   });
 });
 
@@ -149,11 +366,11 @@ describe("system type-to-confirm dialogs under the pseudo-locale", () => {
   const UI_PACKAGE_CLOSE = "Close";
 
   it("leaves only the RESET token unaccented in the factory-reset dialog", () => {
-    render(<FactoryResetDialog open onOpenChange={vi.fn()} />);
+    renderFactoryReset();
     // `<data-dir>/backups/` is a path placeholder and stays a value.
     expect(unlocalizedText().sort()).toEqual(["<data-dir>/backups/", UI_PACKAGE_CLOSE, "RESET"]);
     // Still typeable, and still announced, under a non-English locale.
-    expect(screen.getByTestId("system-factory-reset-input").getAttribute("aria-label")).toContain(
+    expect(screen.getByTestId(FACTORY_RESET_INPUT_TEST_ID).getAttribute("aria-label")).toContain(
       "RESET",
     );
   });

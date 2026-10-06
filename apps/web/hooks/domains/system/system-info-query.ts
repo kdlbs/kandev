@@ -12,6 +12,7 @@ export type SystemInfoQueryIdentity = {
 
 export const SYSTEM_INFO_QUERY_KEY_PREFIX = ["system", "info"] as const;
 export const DATABASE_STATS_QUERY_KEY_PREFIX = ["system", "database-stats"] as const;
+export const BACKUP_LIST_QUERY_KEY_PREFIX = ["system", "backups"] as const;
 
 export function normalizeSystemInfoApiBaseUrl(apiBaseUrl: string): string {
   const url = new URL(apiBaseUrl);
