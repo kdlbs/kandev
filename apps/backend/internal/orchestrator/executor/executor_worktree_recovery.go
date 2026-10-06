@@ -34,18 +34,10 @@ func (e *Executor) admitSelectedWorktreeRecovery(
 		return nil, fmt.Errorf("worktree recovery admission: selected environment identity is incomplete")
 	}
 
-	selectedRepositories := make(map[string]*models.Repository, len(env.Repos))
-	selectionSnapshot, err := models.CaptureWorkspaceRecoverySelectionSnapshot(session, env, func(repositoryID string) (*models.Repository, error) {
-		repository, err := e.repo.GetRepository(ctx, repositoryID)
-		if repository != nil {
-			selectedRepositories[repositoryID] = repository
-		}
-		return repository, err
-	})
+	selectionSnapshot, selectedRepositories, err := e.captureSelectedWorkspaceRecoverySnapshot(ctx, session, env, sessionPersisted)
 	if err != nil {
 		return nil, err
 	}
-	selectionSnapshot.SessionPersisted = sessionPersisted
 	activeRows := models.SelectedWorkspaceRecoveryRows(env)
 	slots := make([]worktree.RecoverySlot, 0, len(activeRows))
 	for _, row := range activeRows {
@@ -123,6 +115,40 @@ func (e *Executor) admitSelectedWorktreeRecovery(
 		}
 	}
 	return admission, nil
+}
+
+func (e *Executor) captureSelectedWorkspaceRecoverySnapshot(
+	ctx context.Context,
+	session *models.TaskSession,
+	env *models.TaskEnvironment,
+	sessionPersisted bool,
+) (models.WorkspaceRecoverySelectionSnapshot, map[string]*models.Repository, error) {
+	if session == nil || env == nil {
+		return models.WorkspaceRecoverySelectionSnapshot{}, nil, nil
+	}
+	selectedRepositories := make(map[string]*models.Repository, len(env.Repos))
+	selectionSnapshot, err := models.CaptureWorkspaceRecoverySelectionSnapshot(session, env, func(repositoryID string) (*models.Repository, error) {
+		repository, err := e.repo.GetRepository(ctx, repositoryID)
+		if repository != nil {
+			selectedRepositories[repositoryID] = repository
+		}
+		return repository, err
+	})
+	if err != nil {
+		return models.WorkspaceRecoverySelectionSnapshot{}, nil, err
+	}
+	selectionSnapshot.SessionPersisted = sessionPersisted
+	return selectionSnapshot, selectedRepositories, nil
+}
+
+func (e *Executor) selectedWorkspaceRecoverySnapshot(
+	ctx context.Context,
+	session *models.TaskSession,
+	env *models.TaskEnvironment,
+	sessionPersisted bool,
+) (models.WorkspaceRecoverySelectionSnapshot, error) {
+	snapshot, _, err := e.captureSelectedWorkspaceRecoverySnapshot(ctx, session, env, sessionPersisted)
+	return snapshot, err
 }
 
 // PreflightSessionWorktreeRecovery performs selected-environment recovery
