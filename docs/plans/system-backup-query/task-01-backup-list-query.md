@@ -1,7 +1,7 @@
 ---
 id: "01-backup-list-query"
 title: "Move backup-list ownership to Query"
-status: in_progress
+status: done
 updated: 2026-10-06
 wave: 1
 depends_on: []
@@ -299,7 +299,7 @@ sequential
 
 ## Results
 
-Implementation is complete locally against the merged QUERY-02 contract.
+Implementation and PR delivery are complete against the merged QUERY-02 contract.
 
 - Dependency: PR #4225 merged at
   `059260b30fc68bbcbead629f7fa7e80f1ee0a5e8`. Initial implementation base:
@@ -307,17 +307,19 @@ Implementation is complete locally against the merged QUERY-02 contract.
   validation used `05c41b11e830a9861534200949c3bbac473b57f7` after unrelated
   PR #4262. Remote main later advanced through unrelated PR #4266 to
   `c373ba436c3451f046acd921d5de9a081977a2a7`.
-  Exact-current-main merge-tree validation passed for implementation commit
-  `4fe499fe4e68a9eb51fe87b12aaf61d9dc1d7b99`, producing tree
-  `e45391aa7811b5a84be83bfc49e27aa561ef1a5f`; it will be rerun on the final
-  pushed head. The code-fixup commit `c37fac05b6bdb40d1843bd74b1fe31730b7f5138`
-  also merged cleanly with the later main tip, producing tree
-  `48b767f74120fe256732c7cc7ef0c04939c9a710`.
+  The latest live main at final source-and-test verification was
+  `cbeea5897b0a669dafafb532b0818d88fac10e8e`. A synthetic merge with source-and-test
+  head `f8c5a5f4ee92e35339aec87fa6219d88d3554d5f` passed without conflicts and
+  produced tree `1e0ddac9dabd9c748cf441d14cdd9c2a33a85962`. No rebase was needed.
 - Focused PR: [#4271](https://github.com/kdlbs/kandev/pull/4271),
   `refactor: move backup list to Query`, targeting `main`. The PR is open and
-  linked to Kandev task `24c8f330-1bbd-4cb7-84af-1d86c9b335ca`. The exact
-  final PR head and exact-head CI/review disposition will be recorded in the
-  task handoff after `/pr-fixup` completes.
+  linked to Kandev task `24c8f330-1bbd-4cb7-84af-1d86c9b335ca`. The last
+  source-and-test head passed exact-head CI: 50 passed, 18 skipped, 0 neutral,
+  0 failed, and 0 pending. Five prior review threads are resolved; the current
+  review snapshot has no unresolved or hidden threads and no active
+  changes-requested review. This documentation-only delivery-record commit
+  requires a final PR-head CI refresh, which will be recorded in the Kandev
+  task handoff.
 - `pnpm --filter @kandev/web exec vitest run ...` with all 14 listed suites:
   passed, 161 tests. Coverage includes shared consumers, reload/error
   contracts, freshness, identity cleanup, retention attempt correlation,
@@ -339,8 +341,9 @@ Implementation is complete locally against the merged QUERY-02 contract.
   `python3 scripts/list-docs.py validate`, and
   `python3 scripts/lint-spec-files.py --all`: passed, along with the harness
   lint, harness tests, targeted `harness-lint` hook, web typecheck and web lint.
-- `git diff --check`: passed for the current fixup changes; it will run again
-  before commit and against the final pushed head.
+- `git diff --check`: passed for the published source-and-test head. This final
+  delivery-record update is documentation-only; the exact post-update head and
+  its CI status are recorded in the Kandev task handoff.
 - Documentation-coverage preflight: covered by this work order, no errors.
 - PR capture: one disposable mobile-project spec captured and validated four
   synthetic desktop/phone Backups and reset-confirmation assets. The spec was
@@ -353,8 +356,7 @@ Implementation is complete locally against the merged QUERY-02 contract.
   and links its decision and system design; no obsolete Zustand ownership
   guidance remains in the scoped web guide.
 
-Before completion, record the final `git diff --check`, PR URL, exact base SHA,
-final head SHA, exact-head CI/review status, residual risks, and dependency
-order in the delivery record and task handoff. Mark this work order done only
-after implementation, checks, and delivery are complete. Keep QUERY-03's
-tracker status in progress until its PR actually merges.
+The final PR URL, exact post-record-commit base and head SHAs, exact-head
+CI/review status, residual risks, and dependency order are recorded in the
+Kandev task handoff. Keep QUERY-03's architecture tracker status in progress
+until its PR actually merges.

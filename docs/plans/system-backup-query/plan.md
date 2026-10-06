@@ -1,7 +1,7 @@
 ---
 created: 2026-10-05
 updated: 2026-10-06
-status: in_progress
+status: done
 requirements:
   - REQ-SYSTEM-PAGE-BACKUP-GUIDANCE-001
   - REQ-SYSTEM-PAGE-DATABASE-STATS-SNAPSHOT-001
@@ -256,14 +256,25 @@ exact-head CI and review status, and residual risks. Report the PR URL without m
 
 Local focused verification is complete, including the create-poll identity fixup.
 Coverage is documented in Task 01. PR [#4271](https://github.com/kdlbs/kandev/pull/4271)
-is open; exact-head CI and review disposition remain pending PR fixup.
+is open and has not been merged. The source-and-test head
+`f8c5a5f4ee92e35339aec87fa6219d88d3554d5f` passed exact-head CI with 50 passed,
+18 skipped, 0 neutral, 0 failed, and 0 pending checks. All five prior review
+threads are resolved; the current snapshot has no unresolved or hidden threads
+and no active changes-requested review.
+
+The latest live main at this verification was
+`cbeea5897b0a669dafafb532b0818d88fac10e8e`. A synthetic merge of that commit
+with the source-and-test head completed without conflicts and produced tree
+`1e0ddac9dabd9c748cf441d14cdd9c2a33a85962`. The branch remains unre-based; repeat
+this check only if main advances or a conflict or contract change requires it.
+The final PR head and its post-delivery-record CI status are recorded in the
+Kandev task handoff.
 
 ## Risks
 
-- Current main has moved beyond the refreshed implementation base by an
-  unrelated GitLab-search fix. Exact-current-main merge validation is required
-  before reporting the PR ready; rebase only for a real conflict or contract
-  change.
+- Current main may advance independently. At the latest verification it merged
+  cleanly with the source-and-test head; validate again only if main advances
+  before handoff. Rebase only for a real conflict or contract change.
 - Tool Payload Retention has no stable backup-attempt ID and replaces its
   Operation on success. Correlation must use the locally observed save,
   policy revision, preparation transitions, and captured query identity.
