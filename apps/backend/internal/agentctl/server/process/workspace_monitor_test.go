@@ -29,10 +29,18 @@ func TestWorkspaceTracker_StopsWhenWorkDirDeleted(t *testing.T) {
 	defer cancel()
 
 	wt.Start(ctx)
+	defer wt.Stop()
 
-	// Delete the work directory to simulate worktree removal
-	if err := os.RemoveAll(repoDir); err != nil {
-		t.Fatalf("failed to remove workdir: %v", err)
+	// Remove the watched pathname atomically. Recursive deletion can race an
+	// in-flight Git command creating index.lock and fail with ENOTEMPTY before
+	// the tracker ever observes the missing work directory.
+	removedDir := repoDir + "-removed"
+	t.Cleanup(func() { _ = os.RemoveAll(removedDir) })
+	if err := os.Rename(repoDir, removedDir); err != nil {
+		t.Fatalf("failed to remove watched workdir path: %v", err)
+	}
+	if _, err := os.Stat(repoDir); !os.IsNotExist(err) {
+		t.Fatalf("watched workdir path still exists: %v", err)
 	}
 
 	// Both monitorLoop and pollGitChanges should exit within a few poll cycles
