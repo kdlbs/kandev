@@ -2,7 +2,7 @@
 status: active
 system: integrations
 created: 2026-05-04
-updated: 2026-08-05
+updated: 2026-10-06
 owners:
   - tbd
 ---
@@ -28,6 +28,7 @@ Teams whose code lives on GitLab cannot complete the same task, review, and auto
 - **AC-INTEGRATIONS-GITLAB-INTEGRATION-001.6:** Task creation is the narrow unauthenticated exception: branch discovery for an explicitly entered public `gitlab.com` repository URL works without a saved workspace connection. It does not expose private projects, browse results, merge requests, issues, or write actions.
 - **AC-INTEGRATIONS-GITLAB-INTEGRATION-001.7:** GitLab repository matching uses provider, normalized provider host, and full subgroup project path. Repositories with unknown or mismatched provider hosts are not eligible for GitLab linking or merge-request actions. Decision: ADR-2026-07-20-repository-provider-origin-identity.
 - **AC-INTEGRATIONS-GITLAB-INTEGRATION-001.8:** Users can browse and search merge requests and issues, then launch a task from either row with the same configurable action presets used by GitHub.
+- **AC-INTEGRATIONS-GITLAB-INTEGRATION-001.10:** Merge-request and issue project choices shall accumulate across pages within the same workspace and browse context. Changing workspace shall discard projects accumulated in the previous workspace, including when the new workspace returns no results. An explicitly selected project filter remains represented without being reset; it does not authorize retaining other projects from the previous workspace.
 
 ## System design
 
