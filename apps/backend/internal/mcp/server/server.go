@@ -763,8 +763,6 @@ func (s *Server) SetMode(mode string) {
 
 	normalizedMode := normalizeMode(mode)
 	switch s.profile.Surface {
-	case mcpprofile.SurfaceCoordinator:
-		normalizedMode = ModeCoordinator
 	case mcpprofile.SurfaceProjectCoordinator:
 		normalizedMode = ModeProjectCoordinator
 	case mcpprofile.SurfaceProjectWorker:
@@ -865,12 +863,13 @@ func (s *Server) SetProfile(profileContext mcpprofile.Context) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	if s.profile.Surface == mcpprofile.SurfaceProjectCoordinator || s.profile.Surface == mcpprofile.SurfaceProjectWorker {
+	switch s.profile.Surface {
+	case mcpprofile.SurfaceProjectCoordinator, mcpprofile.SurfaceProjectWorker:
 		profileContext.Surface = s.profile.Surface
 		if s.profile.Surface == mcpprofile.SurfaceProjectWorker && s.profile.HasCapability(mcpprofile.CapabilityParentQuestion) {
 			profileContext = profileContext.WithCapability(mcpprofile.CapabilityParentQuestion)
 		}
-	} else if s.profile.Surface == mcpprofile.SurfaceCoordinator {
+	case mcpprofile.SurfaceCoordinator:
 		profileContext.Surface = mcpprofile.SurfaceCoordinator
 		profileContext.Capabilities = nil
 	}
