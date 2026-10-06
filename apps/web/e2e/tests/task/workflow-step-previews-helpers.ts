@@ -28,27 +28,9 @@ export async function expectStepsInOrder(page: Page, workflowId: string, stepNam
   const group = page.getByTestId("workflow-option-steps-" + workflowId);
   await expect(group).toBeVisible();
   if (stepNames.length === 0) throw new Error(`Workflow ${workflowId} should have at least one step`);
-  await expect(group.getByTestId("workflow-option-step-name").first()).toHaveText(stepNames[0]!);
-  await expect
-    .poll(
-      async () => {
-        const renderedStepNames = await group
-          .getByTestId("workflow-option-step-name")
-          .allTextContents();
-        let nextPosition = 0;
-        for (const name of stepNames) {
-          const position = renderedStepNames.indexOf(name, nextPosition);
-          if (position < 0) return false;
-          nextPosition = position + 1;
-        }
-        return true;
-      },
-      {
-        timeout: 15_000,
-        message: `workflow ${workflowId} should render its steps in order`,
-      },
-    )
-    .toBe(true);
+  const names = stepNames.map((name) => name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|");
+  const labels = group.getByText(new RegExp(`^(?:${names})$`));
+  await expect(labels).toHaveText(stepNames, { timeout: 15_000 });
 }
 
 export async function expectUnbrokenStepToFitGroup(
