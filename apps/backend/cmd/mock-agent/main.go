@@ -6,6 +6,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -118,6 +119,9 @@ func main() {
 // the same way a real bridge does or E2E would prove nothing about the gate.
 func (a *mockAgent) Initialize(_ context.Context, _ acp.InitializeRequest) (acp.InitializeResponse, error) {
 	traceACP("initialize", "", nil)
+	if strings.EqualFold(strings.TrimSpace(os.Getenv("E2E_MOCK_AGENT_FAIL_INITIALIZE")), "true") {
+		return acp.InitializeResponse{}, errors.New("mock ACP initialization failed by E2E fixture")
+	}
 	var meta map[string]any
 	if mockPromptQueueingEnabled() {
 		meta = map[string]any{
@@ -127,7 +131,10 @@ func (a *mockAgent) Initialize(_ context.Context, _ acp.InitializeRequest) (acp.
 	return acp.InitializeResponse{
 		ProtocolVersion: acp.ProtocolVersionNumber,
 		AgentCapabilities: acp.AgentCapabilities{
-			LoadSession:     true,
+			LoadSession: true,
+			PromptCapabilities: acp.PromptCapabilities{
+				Image: true,
+			},
 			McpCapabilities: acp.McpCapabilities{Sse: true},
 			SessionCapabilities: acp.SessionCapabilities{
 				Close: &acp.SessionCloseCapabilities{},
@@ -422,7 +429,11 @@ func (a *mockAgent) LoadSession(ctx context.Context, req acp.LoadSessionRequest)
 func (a *mockAgent) Prompt(ctx context.Context, req acp.PromptRequest) (acp.PromptResponse, error) {
 	promptCtx, cancelPrompt := context.WithCancel(ctx)
 	prompt := extractPromptText(req.Prompt)
-	traceACP("prompt", string(req.SessionId), map[string]string{"prompt": prompt})
+	promptBlocks, _ := json.Marshal(summarizeACPPromptBlocks(req.Prompt))
+	traceACP("prompt", string(req.SessionId), map[string]string{
+		"prompt":        prompt,
+		"prompt_blocks": string(promptBlocks),
+	})
 	acceptanceMarker, cancelHoldPrompt := cancelHoldAcceptanceMarker(prompt)
 	var cancelHold chan struct{}
 	if cancelHoldPrompt {

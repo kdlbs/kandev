@@ -633,6 +633,17 @@ func (s *Service) handleAgentBootReady(ctx context.Context, data watcher.AgentEv
 	if s.isQueuedDispatchInFlight(data.SessionID) {
 		s.markQueuedDispatchDrainPending(data.SessionID)
 	}
+	if s.resumeAttemptStore().holdsInitialPrompt(data.SessionID, data.AttemptID) {
+		// The owned fresh-start replay has not reached provider acceptance.
+		// Leave orphaned queue entries behind it so they cannot become the first
+		// turn in the replacement conversation.
+		s.logger.Debug("deferring queued-message drain until initial recovery prompt is accepted",
+			zap.String("session_id", data.SessionID),
+			zap.String("attempt_id", data.AttemptID))
+		lock.Unlock()
+		guardLocked = false
+		return
+	}
 	lock.Unlock()
 	guardLocked = false
 	s.drainQueuedMessageForPromptableSession(ctx, data.SessionID)

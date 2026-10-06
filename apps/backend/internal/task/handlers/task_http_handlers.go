@@ -1078,6 +1078,10 @@ func (h *TaskHandlers) httpCreateTask(c *gin.Context) {
 
 	title := strings.TrimSpace(body.Title)
 	description := strings.TrimSpace(body.Description)
+	if body.StartAgent && len(description) > models.MaxInitialPromptSubmissionBytes {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "initial task prompt exceeds the maximum size"})
+		return
+	}
 	// Trimmed once here so the value ValidateAssigneeAgentProfile looks up
 	// and the value the runner seat is written under are identical — a
 	// padded ID that passed validation must not be stored un-trimmed, where
@@ -1653,14 +1657,22 @@ func (h *TaskHandlers) prepareStartAgentSession(
 	body httpCreateTaskRequest,
 	resolvedStepID string,
 ) *startAgentDispatch {
+	submission, err := models.NewInitialPromptSubmission(
+		strings.TrimSpace(body.Description), body.PlanMode, body.Attachments,
+	)
+	if err != nil {
+		h.logger.Error("failed to capture initial task submission", zap.Error(err), zap.String("task_id", taskID))
+		return nil
+	}
 	prepResp, err := h.orchestrator.LaunchSession(ctx, &orchestrator.LaunchSessionRequest{
-		InitialPromptPreview: models.NewInitialPromptPreview(strings.TrimSpace(body.Description), body.Attachments),
-		TaskID:               taskID,
-		Intent:               orchestrator.IntentPrepare,
-		AgentProfileID:       body.AgentProfileID,
-		ExecutorID:           body.ExecutorID,
-		ExecutorProfileID:    body.ExecutorProfileID,
-		WorkflowStepID:       resolvedStepID,
+		InitialPromptPreview:    models.NewInitialPromptPreview(strings.TrimSpace(body.Description), body.Attachments),
+		InitialPromptSubmission: submission,
+		TaskID:                  taskID,
+		Intent:                  orchestrator.IntentPrepare,
+		AgentProfileID:          body.AgentProfileID,
+		ExecutorID:              body.ExecutorID,
+		ExecutorProfileID:       body.ExecutorProfileID,
+		WorkflowStepID:          resolvedStepID,
 		// The async IntentStartCreated dispatch below carries the prompt. Mark
 		// this as a deferred start so a passthrough profile is not eagerly
 		// launched here with an empty prompt (which would pre-empt that

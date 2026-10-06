@@ -508,6 +508,30 @@ func (s *Service) persistInitialPromptPreviewFromContext(ctx context.Context, ta
 	return nil
 }
 
+type initialPromptSubmissionContextKey struct{}
+
+func withInitialPromptSubmission(ctx context.Context, submission *models.InitialPromptSubmission) context.Context {
+	if submission == nil {
+		return ctx
+	}
+	return context.WithValue(ctx, initialPromptSubmissionContextKey{}, submission)
+}
+
+func (s *Service) persistInitialPromptSubmissionFromContext(ctx context.Context, taskID, sessionID string) error {
+	submission, ok := ctx.Value(initialPromptSubmissionContextKey{}).(*models.InitialPromptSubmission)
+	if !ok || submission == nil {
+		return nil
+	}
+	if err := submission.Validate(); err != nil {
+		return s.handleSessionLaunchFailure(ctx, taskID, sessionID, err)
+	}
+	if err := s.repo.SetSessionMetadataKey(ctx, sessionID, models.SessionMetaKeyInitialPromptSubmission, submission); err != nil {
+		return s.handleSessionLaunchFailure(ctx, taskID, sessionID,
+			fmt.Errorf("persist initial prompt submission: %w", err))
+	}
+	return nil
+}
+
 func isInheritParentWorkspace(task *v1.Task) bool {
 	if task == nil {
 		return false
@@ -643,6 +667,7 @@ type startCreatedSessionOptions struct {
 	refuseIfAgentRunning        bool
 	initialCreatePrompt         bool
 	beforeInitialPromptDispatch func() error
+	beforeProviderAdmission     func(executionID string) error
 	onExecutionAdmitted         func(executionID string)
 	onInitialPromptAccepted     func(executionID string)
 	onInitialPromptFailed       func()
@@ -1049,6 +1074,7 @@ func (s *Service) configureInitialPromptDispatch(
 	}
 	launchOptions.OnInitialPromptAccepted = options.onInitialPromptAccepted
 	launchOptions.OnInitialPromptFailed = options.onInitialPromptFailed
+	launchOptions.BeforeInitialPromptDispatch = options.beforeProviderAdmission
 	return nil
 }
 
@@ -2162,6 +2188,9 @@ func (s *Service) prepareSessionForStartWithWorkflowRoute(
 	}
 	if created {
 		if err := s.persistInitialPromptPreviewFromContext(ctx, task.ID, sessionID); err != nil {
+			return sessionID, created, err
+		}
+		if err := s.persistInitialPromptSubmissionFromContext(ctx, task.ID, sessionID); err != nil {
 			return sessionID, created, err
 		}
 	}
@@ -3281,6 +3310,18 @@ func (s *Service) resumeTaskSessionWithContinuation(
 		return nil, ErrResumeAttemptCancelled
 	}
 	defer attempt.finish(s.resumeAttemptStore())
+	initialPromptHeld := false
+	if options.HoldForInitialPrompt {
+		if !s.resumeAttemptStore().holdForInitialPrompt(attempt) {
+			return nil, ErrResumeAttemptCancelled
+		}
+		initialPromptHeld = true
+		defer func() {
+			if initialPromptHeld {
+				s.resumeAttemptStore().abortInitialPromptHold(attempt)
+			}
+		}()
+	}
 	if options.SettingsPolicy == executor.ResumeSettingsPolicyProviderRestored {
 		currentSession, loadErr := s.repo.GetTaskSession(ctx, sessionID)
 		if loadErr != nil {
@@ -3482,7 +3523,11 @@ func (s *Service) resumeTaskSessionWithContinuation(
 			zap.String("task_id", taskID),
 			zap.Error(taskErr))
 	} else if task != nil {
-		s.backfillInitialUserMessageIfMissing(resumeCtx, taskID, sessionID, task.Description)
+		if options.InitialPromptSubmission != nil {
+			s.backfillInitialSubmissionIfMissing(resumeCtx, taskID, sessionID, options.InitialPromptSubmission)
+		} else {
+			s.backfillInitialUserMessageIfMissing(resumeCtx, taskID, sessionID, task.Description)
+		}
 	}
 
 	s.logger.Debug("task session resumed and ready for input",
@@ -3491,7 +3536,12 @@ func (s *Service) resumeTaskSessionWithContinuation(
 
 	go s.ensureSessionPRWatch(context.Background(), taskID, execution.SessionID, execution.WorktreeBranch)
 	if continuation != nil {
-		return execution, decorateResumeFailure(continuation(resumeCtx, attempt, execution))
+		continuationErr := continuation(resumeCtx, attempt, execution)
+		if initialPromptHeld {
+			s.resumeAttemptStore().releaseInitialPromptHold(attempt)
+			initialPromptHeld = false
+		}
+		return execution, decorateResumeFailure(continuationErr)
 	}
 
 	return execution, nil
@@ -6213,6 +6263,13 @@ type promptTaskOptions struct {
 	// configModeOverride preserves the launch-time mode for a deferred
 	// workflow prompt whose raw queue content is intentionally empty.
 	configModeOverride *bool
+	// firstLaunchPromptContext rebuilds the trusted first-conversation Kandev
+	// instructions around the effective prompt after session config/plan rules.
+	firstLaunchPromptContext bool
+	// preserveInitialSubmissionReplay identifies the owner dispatch that is
+	// allowed to advance the pending receipt instead of retiring it as later work.
+	preserveInitialSubmissionReplay bool
+	retireInitialSubmissionReplay   bool
 	// promptAlreadyComposed and fallbackRetryPrompt mirror the composed-prompt
 	// seam autoStartStepPrompt's own ErrExecutionNotFound branch uses (see
 	// fallbackFreshLaunchOnMissingExecution). When promptAlreadyComposed is
@@ -6420,6 +6477,24 @@ func (s *Service) promptTask(ctx context.Context, taskID, sessionID string, prom
 	if options.internalContinuation {
 		effectivePrompt = prompt
 	}
+	if !options.preserveInitialSubmissionReplay {
+		submission, found, loadErr := models.LoadInitialPromptSubmission(session.Metadata)
+		if loadErr != nil {
+			s.rollbackForegroundDispatchOnFailure(resumePromptCtx, taskID, sessionID, foregroundDispatch)
+			return nil, fmt.Errorf("load initial submission provenance before prompt dispatch: %w", loadErr)
+		}
+		options.retireInitialSubmissionReplay = found &&
+			submission.State == models.InitialPromptSubmissionPending
+	}
+	if options.firstLaunchPromptContext {
+		effectivePrompt, err = s.wrapInitialSubmissionReplayPrompt(
+			resumePromptCtx, taskID, sessionID, effectivePrompt, attachments, session,
+		)
+		if err != nil {
+			s.rollbackForegroundDispatchOnFailure(resumePromptCtx, taskID, sessionID, foregroundDispatch)
+			return nil, err
+		}
+	}
 	if options.fallbackUsesEffectivePrompt {
 		options.fallbackLaunchPrompt = effectivePrompt
 		options.fallbackRetryPrompt = effectivePrompt
@@ -6621,7 +6696,8 @@ func (s *Service) preparePromptAdmissionCallback(
 	resumeAttempt *resumeAttempt,
 ) func() error {
 	guard := rollback.dispatchGuard
-	if guard == nil && options.liveExecutionFence == nil {
+	if guard == nil && options.liveExecutionFence == nil && options.beforeProviderAdmission == nil &&
+		!options.retireInitialSubmissionReplay {
 		return nil
 	}
 	// Prompt preparation may synchronously publish stream events, so it runs
@@ -6646,6 +6722,20 @@ func (s *Service) preparePromptAdmissionCallback(
 		}
 		if options.liveExecutionFence != nil {
 			if err := s.validatePromptLiveExecutionFence(ctx, taskID, sessionID, options.liveExecutionFence); err != nil {
+				if guard != nil {
+					guard.unlock()
+				}
+				return markPromptAdmissionRejected(err)
+			}
+		}
+		if options.retireInitialSubmissionReplay {
+			executionID := session.AgentExecutionID
+			if resumeAttempt != nil && resumeAttempt.execution() != "" {
+				executionID = resumeAttempt.execution()
+			}
+			if err := s.blockInitialSubmissionReplayForOtherPrompt(
+				ctx, sessionID, executionID, rollback.turnID,
+			); err != nil {
 				if guard != nil {
 					guard.unlock()
 				}
@@ -9480,6 +9570,9 @@ func (s *Service) drainQueuedMessageForPromptableSessionForIdentity(
 
 func (s *Service) drainQueuedMessageForPromptableSessionLockedForIdentity(ctx context.Context, identity messagequeue.QueueSessionIdentity) (bool, error) {
 	if s.isCancelInFlight(identity.SessionID) || s.isQueuedDispatchInFlight(identity.SessionID) || s.isSteerInFlight(identity.SessionID) {
+		return false, nil
+	}
+	if s.resumeAttemptStore().holdsInitialPromptForSession(identity.SessionID) {
 		return false, nil
 	}
 	queuedMsg, ok, autoRun, err := s.messageQueue.ReserveQueuedWithAutoRunForSession(ctx, identity)

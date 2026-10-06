@@ -430,6 +430,24 @@ func (r *resumeAttemptRegistry) releaseInitialPromptHold(attempt *resumeAttempt)
 	r.mu.Unlock()
 }
 
+func (r *resumeAttemptRegistry) holdsInitialPrompt(sessionID, attemptID string) bool {
+	id, ok := parseResumeAttemptIdentity(attemptID)
+	if !ok {
+		return false
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	current := r.attempts[sessionID]
+	return current != nil && current.id == id && current.awaitingInitialPrompt && current.ctx.Err() == nil
+}
+
+func (r *resumeAttemptRegistry) holdsInitialPromptForSession(sessionID string) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	current := r.attempts[sessionID]
+	return current != nil && current.awaitingInitialPrompt && current.ctx.Err() == nil
+}
+
 // abortInitialPromptHold closes a model-switch attempt when lifecycle reports
 // a delivery failure before provider acceptance. There is no later owner that
 // can safely finish the attempt after the asynchronous failure callback.

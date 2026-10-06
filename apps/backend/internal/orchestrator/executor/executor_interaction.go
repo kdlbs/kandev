@@ -1372,6 +1372,18 @@ func (e *Executor) registerInitialPromptDispatchCallbacks(
 	return nil
 }
 
+func (e *Executor) registerInitialPromptCallbacks(
+	executionID string,
+	beforeAdmission func(executionID string) error,
+	onDispatched func(executionID string),
+	onFailure func(),
+) error {
+	if beforeAdmission != nil {
+		return e.registerInitialPromptAdmissionCallbacks(executionID, beforeAdmission, onDispatched, onFailure)
+	}
+	return e.registerInitialPromptDispatchCallbacks(executionID, onDispatched, onFailure)
+}
+
 // buildSwitchModelRequest constructs a LaunchAgentRequest for a model switch, applying
 // repository and worktree config from the existing session.
 func (e *Executor) buildSwitchModelRequest(ctx context.Context, task *models.Task, session *models.TaskSession, sessionID, newModel, prompt, acpSessionID string, execConfig executorConfig, running *models.ExecutorRunning) (*LaunchAgentRequest, error) {

@@ -2,7 +2,7 @@
 status: active
 system: tasks
 created: 2026-08-04
-updated: 2026-09-27
+updated: 2026-10-06
 owners:
   - Kandev team
 ---
@@ -64,6 +64,24 @@ This document is the migrated task-system source for the capability. The source 
 - **AC-TASKS-PROMPT-ATTACHMENTS-001.15:** Desktop and phone users shall have reachable file selection, preview, retry, and removal controls. Unreadable image clipboard content shall show feedback without changing ordinary text paste. Read-only transcript views shall remain read-only.
 - **AC-TASKS-PROMPT-ATTACHMENTS-001.16:** A restored draft attachment without an upload descriptor shall not be sent as inline data. If its bytes can be recovered, the composer shall upload it before use. If they cannot be recovered, the attachment shall remain blocked until the user removes it.
 - **AC-TASKS-PROMPT-ATTACHMENTS-001.17:** While any composer attachment lacks a ready upload descriptor, the plan implementation controls shall be disabled and their handlers shall not dispatch an implementation message or advance the workflow. They shall become available when all attachments are ready or removed.
+
+### REQ-TASKS-PROMPT-ATTACHMENTS-002: Initial submission recovery
+
+**Intent:** Preserve the original submission when failed startup requires a fresh agent conversation.
+
+Amendment, 2026-10-06. Delivery: [Fresh-start recovery](../../../plans/fresh-start-recovery/plan.md).
+Existing criteria under requirement 001 remain active.
+
+#### Acceptance criteria
+
+- **AC-TASKS-PROMPT-ATTACHMENTS-002.1:** When initial startup fails before submission acceptance, explicit fresh recovery shall deliver the submitted text and every original attachment.
+- **AC-TASKS-PROMPT-ATTACHMENTS-002.2:** Recovery shall preserve attachment order, name, kind, and delivery mode without another upload. Attachment-only submissions shall remain valid.
+- **AC-TASKS-PROMPT-ATTACHMENTS-002.3:** Reload and backend restart shall preserve recoverable submission data. Recovery shall use the same task, session, and workspace with fresh provider context.
+- **AC-TASKS-PROMPT-ATTACHMENTS-002.4:** A missing, invalid, unavailable, or unauthorized original attachment shall block submission delivery. Recovery shall show a safe actionable error and preserve valid siblings.
+- **AC-TASKS-PROMPT-ATTACHMENTS-002.5:** Concurrent recovery requests shall deliver one submission per owned attempt. Cancelled or superseded attempts shall not deliver into a successor conversation.
+- **AC-TASKS-PROMPT-ATTACHMENTS-002.6:** The recovered transcript shall retain one original submission with its attachments and the original failure history. A preview shall not imply successful delivery.
+- **AC-TASKS-PROMPT-ATTACHMENTS-002.7:** Ordinary resume and workspace-only restoration shall not replay the original submission. Recovery shall not collect attachments from later messages or sibling sessions.
+- **AC-TASKS-PROMPT-ATTACHMENTS-002.8:** Desktop and phone shall provide the same recovery outcome through their existing controls. Phone users shall retain reachable attachment controls without horizontal overflow.
 
 ## Migrated source detail
 

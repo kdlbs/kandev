@@ -712,12 +712,13 @@ type LaunchOptions struct {
 	// OnInitialPromptAccepted transfers startup ownership after lifecycle reports
 	// that the initial prompt was accepted by the provider. OnInitialPromptFailed
 	// closes that ownership when delivery fails before acceptance.
-	OnInitialPromptAccepted func(executionID string)
-	OnInitialPromptFailed   func()
-	Prompt                  string
-	PriorACPSession         string // ACP session ID to resume for the same concrete profile
-	WorkflowStepID          string
-	StartAgent              bool
+	OnInitialPromptAccepted     func(executionID string)
+	OnInitialPromptFailed       func()
+	BeforeInitialPromptDispatch func(executionID string) error
+	Prompt                      string
+	PriorACPSession             string // ACP session ID to resume for the same concrete profile
+	WorkflowStepID              string
+	StartAgent                  bool
 	// RefuseIfAgentRunning makes peer-message admission fail closed when the
 	// selected session already has an active agent. Other internal launch paths
 	// retain their existing workspace reuse behavior.
