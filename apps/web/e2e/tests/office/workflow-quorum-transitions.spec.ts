@@ -1,6 +1,23 @@
-import { test, expect } from "../../fixtures/office-fixture";
+import { test as baseTest, expect } from "../../fixtures/office-fixture";
 import { dwell } from "../../helpers/causal-waits";
 import type { ApiClient } from "../../helpers/api-client";
+
+const test = baseTest.extend<{ automaticReviewerId: string }>({
+  automaticReviewerId: async ({ officeApi, officeSeed }, use) => {
+    // Worker deciders cannot receive automatic seats. Supply an eligible
+    // specialist so this claim test does not depend on the shared CEO's status.
+    const candidate = await officeApi.createAgent(officeSeed.workspaceId, {
+      name: "Automatic quorum reviewer",
+      role: "specialist",
+    });
+    const candidateId = candidate.id as string;
+    try {
+      await use(candidateId);
+    } finally {
+      await officeApi.deleteAgent(candidateId);
+    }
+  },
+});
 
 /**
  * E2E coverage for the workflow engine's guarded `move_to_step` transitions
@@ -145,6 +162,7 @@ test.describe("Office workflow quorum-guarded transitions", () => {
     officeApi,
     officeSeed,
     seedData,
+    automaticReviewerId: _automaticReviewerId,
   }) => {
     const reviewer = (await officeApi.createAgent(officeSeed.workspaceId, {
       name: "Quorum Reviewer",
