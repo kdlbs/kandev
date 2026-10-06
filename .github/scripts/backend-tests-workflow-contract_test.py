@@ -56,7 +56,7 @@ class BackendTestsWorkflowContractTest(unittest.TestCase):
     def test_windows_job_has_headroom_for_hosted_runner_variance(self) -> None:
         _, marker, windows_job = self.workflow.partition("  test-windows:\n")
         self.assertTrue(marker)
-        self.assertIn("timeout-minutes: 40", windows_job)
+        self.assertIn("timeout-minutes: 60", windows_job)
         self.assertIn("-timeout 25m", windows_job)
 
     def test_windows_suites_run_independently_without_fail_fast(self) -> None:
