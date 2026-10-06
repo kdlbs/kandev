@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { StateProvider } from "@/components/state-provider";
 import type { AppState } from "@/lib/state/store";
-import type { TaskSession } from "@/lib/types/http";
+import type { TaskSession, WorkspaceRecoveryProjection } from "@/lib/types/http";
 import type { SessionRecoveryActions } from "@/hooks/domains/session/use-session-recovery-actions";
 import { SessionRecoveryProvider, useSessionComposerRecovery } from "./session-recovery-context";
 import { SessionRecoveryCard } from "./session-recovery-card";
@@ -14,6 +14,7 @@ const RESUME_BUTTON = "recovery-resume-button";
 const FRESH_BUTTON = "recovery-fresh-button";
 const RESTORE_WORKSPACE_BUTTON = "recovery-restore-workspace-button";
 const RECOVERY_CARD = "session-recovery-card";
+const RELOCATE_BUTTON = "managed-clone-relocate-button";
 const relocate = vi.fn().mockResolvedValue(true);
 const actions = {
   busyAction: null,
@@ -32,6 +33,27 @@ const session = {
   agent_profile_id: "profile",
   error_message: "Connection lost",
 } as unknown as TaskSession;
+const activeWorkspaceRecovery = {
+  task_id: "task",
+  environment_id: "environment",
+  session_id: "session",
+  operation_id: "operation",
+  attempt_id: "attempt",
+  ownership_generation: "generation-1",
+  revision: "2",
+  kind: "managed_clone_relocation",
+  error_stamp: "relocation-error-stamp",
+  state: "running",
+  phase: "publishing",
+  repository_position: 2,
+  repository_total: 2,
+  completed_slots: 1,
+  workspace_complete: false,
+  agent_ready: false,
+  runner_live: true,
+  started_at: "2026-10-05T12:00:00Z",
+  updated_at: "2026-10-05T12:01:00Z",
+} satisfies WorkspaceRecoveryProjection;
 
 function Owner() {
   const context = useSessionComposerRecovery("session");
@@ -58,6 +80,36 @@ function ownerView(current: TaskSession) {
 }
 
 describe("composer workspace recovery projection", () => {
+  it("restores an active relocation from the durable projection after reload", () => {
+    render(
+      <StateProvider
+        initialState={
+          {
+            taskSessions: { items: { session } },
+            agentProfiles: { items: [{ id: "profile" }] },
+          } as unknown as Partial<AppState>
+        }
+      >
+        <SessionRecoveryCard
+          model={{
+            sessionId: "session",
+            stamp: "relocation-error-stamp",
+            kind: "generic",
+            error: { message: "The previous agent launch failed.", phase: "bootstrap" },
+          }}
+          actions={{ ...actions, workspaceRecovery: activeWorkspaceRecovery }}
+          onNewSession={vi.fn()}
+        />
+      </StateProvider>,
+    );
+
+    expect(
+      screen.getByTestId("workspace-recovery-progress").getAttribute("data-recovery-phase"),
+    ).toBe("publishing");
+    expect(screen.getByText("Workspace needs repair")).toBeTruthy();
+    expect(screen.getByTestId(RELOCATE_BUTTON)).toBeTruthy();
+  });
+
   it("replaces a cancelled legacy error with one relocation action after projection", () => {
     const cancelled = {
       ...session,
@@ -89,10 +141,94 @@ describe("composer workspace recovery projection", () => {
     } as unknown as TaskSession;
     rerender(ownerView(projected));
 
-    expect(screen.getAllByTestId("managed-clone-relocate-button")).toHaveLength(1);
+    expect(screen.getAllByTestId(RELOCATE_BUTTON)).toHaveLength(1);
     expect(screen.queryByTestId(RESUME_BUTTON)).toBeNull();
     expect(screen.queryByTestId(FRESH_BUTTON)).toBeNull();
     expect(screen.queryByTestId(RESTORE_WORKSPACE_BUTTON)).toBeNull();
+  });
+});
+
+describe("session recovery card attempt correlation", () => {
+  it("keeps a new failure actionable when the environment only has an older completed relocation", () => {
+    const completedRelocation = {
+      ...activeWorkspaceRecovery,
+      error_stamp: "old-relocation-stamp",
+      state: "complete",
+      phase: "complete",
+      agent_ready: true,
+      runner_live: false,
+    } satisfies WorkspaceRecoveryProjection;
+    render(
+      <StateProvider
+        initialState={
+          {
+            taskSessions: { items: { session } },
+            agentProfiles: { items: [{ id: "profile" }] },
+          } as unknown as Partial<AppState>
+        }
+      >
+        <SessionRecoveryCard
+          model={{
+            sessionId: "session",
+            stamp: "new-provider-error-stamp",
+            kind: "generic",
+            error: { message: "Provider could not start.", phase: "bootstrap" },
+          }}
+          actions={{ ...actions, workspaceRecovery: completedRelocation }}
+          onNewSession={vi.fn()}
+        />
+      </StateProvider>,
+    );
+
+    expect(screen.getByTestId(RECOVERY_CARD)).toBeTruthy();
+    expect(screen.getByTestId(RESUME_BUTTON)).toBeTruthy();
+    expect(screen.getByTestId(FRESH_BUTTON)).toBeTruthy();
+    expect(screen.queryByTestId(RELOCATE_BUTTON)).toBeNull();
+  });
+
+  it("hides the matching repair card once the original relocation reports agent readiness", () => {
+    const completedRelocation = {
+      ...activeWorkspaceRecovery,
+      error_stamp: "original-relocation-stamp",
+      state: "complete",
+      phase: "complete",
+      agent_ready: true,
+      runner_live: false,
+    } satisfies WorkspaceRecoveryProjection;
+    const originalRepair = {
+      ...session,
+      metadata: {
+        last_agent_error: {
+          message: "Workspace needs repair",
+          stamp: "original-relocation-stamp",
+          scope: "session",
+          code: "managed_clone_relocation_required",
+          recovery_actions: ["relocate_and_resume"],
+        },
+      },
+    } as unknown as TaskSession;
+    render(
+      <StateProvider
+        initialState={
+          {
+            taskSessions: { items: { session: originalRepair } },
+            agentProfiles: { items: [{ id: "profile" }] },
+          } as unknown as Partial<AppState>
+        }
+      >
+        <SessionRecoveryCard
+          model={{
+            sessionId: "session",
+            stamp: "original-relocation-stamp",
+            kind: "managed_clone_relocation_required",
+          }}
+          actions={{ ...actions, workspaceRecovery: completedRelocation }}
+          onNewSession={vi.fn()}
+        />
+      </StateProvider>,
+    );
+
+    expect(screen.queryByTestId(RECOVERY_CARD)).toBeNull();
   });
 });
 
@@ -332,11 +468,11 @@ it("shows only the confirmed managed clone relocation action", () => {
     </StateProvider>,
   );
 
-  expect(screen.getByTestId("managed-clone-relocate-button")).toBeTruthy();
+  expect(screen.getByTestId(RELOCATE_BUTTON)).toBeTruthy();
   expect(screen.queryByTestId(RESUME_BUTTON)).toBeNull();
   expect(screen.queryByTestId(FRESH_BUTTON)).toBeNull();
   expect(screen.queryByTestId(RESTORE_WORKSPACE_BUTTON)).toBeNull();
-  fireEvent.click(screen.getByTestId("managed-clone-relocate-button"));
+  fireEvent.click(screen.getByTestId(RELOCATE_BUTTON));
   expect(screen.getByTestId("managed-clone-relocation-confirm")).toBeTruthy();
   expect(document.body.textContent).toContain("Git staging choices do not transfer");
   fireEvent.click(screen.getByTestId("managed-clone-relocation-confirm"));

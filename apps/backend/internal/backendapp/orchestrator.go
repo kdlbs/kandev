@@ -187,6 +187,7 @@ func provideOrchestrator(
 	orchestratorSvc.SetWorktreeManager(lifecycleMgr.WorktreeManager())
 	orchestratorSvc.SetTaskLaunchRecoveryService(taskSvc)
 	orchestratorSvc.SetWorkspaceRecoveryErrorReporter(taskSvc)
+	orchestratorSvc.SetWorkspaceRecoveryStatusReader(taskSvc)
 
 	msgCreator := &messageCreatorAdapter{svc: taskSvc, logger: log}
 	orchestratorSvc.SetMessageCreator(msgCreator)

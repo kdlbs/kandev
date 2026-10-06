@@ -39,7 +39,7 @@ func TestAdmitRecoveryReconcilesPublishedRelocationClaimAfterRestart(t *testing.
 
 	config := newTestConfig(t)
 	original := filepath.Join(config.TasksBasePath, "task-restart", "widget")
-	replacement := original + ".relocated-12345678"
+	replacement := original + ".relocated-123e4567"
 	if err := os.MkdirAll(filepath.Dir(original), 0o755); err != nil {
 		t.Fatal(err)
 	}

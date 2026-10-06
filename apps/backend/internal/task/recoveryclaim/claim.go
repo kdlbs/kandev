@@ -233,6 +233,20 @@ func Get(ctx context.Context, db *sqlx.DB, environmentID string) (*models.TaskEn
 	return claim, nil
 }
 
+// GetTx reads the current claim inside a caller-owned transaction. Registry
+// updates use it while holding the owner-task lock so the proof cannot be
+// released or rebound between validation and publication.
+func GetTx(ctx context.Context, db *sqlx.DB, tx *sqlx.Tx, environmentID string) (*models.TaskEnvironmentRecoveryClaim, error) {
+	if db == nil || tx == nil || environmentID == "" {
+		return nil, errors.New("task environment recovery claim: database, transaction, and environment are required")
+	}
+	claim, err := loadClaim(ctx, db, tx, environmentID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	return claim, err
+}
+
 // EnsureAvailableTx rejects mutations that would overlap recovery. A caller
 // carrying the exact claim may continue its own guarded operation.
 func EnsureAvailableTx(ctx context.Context, db *sqlx.DB, tx *sqlx.Tx, environmentID string) error {

@@ -3040,6 +3040,56 @@ type TaskEnvironmentRecoveryClaim struct {
 	UpdatedAt           time.Time `json:"updated_at"`
 }
 
+// TaskEnvironmentRecoveryOperation is the latest path-free managed recovery
+// projection for one environment. Runner identity and selected repository
+// inventory stay internal and are never sent to clients.
+type TaskEnvironmentRecoveryOperation struct {
+	TaskEnvironmentID     string     `json:"task_environment_id" db:"task_environment_id"`
+	OwnerTaskID           string     `json:"owner_task_id" db:"owner_task_id"`
+	OwnershipGeneration   int64      `json:"ownership_generation" db:"ownership_generation"`
+	SessionID             string     `json:"session_id" db:"session_id"`
+	OperationID           string     `json:"operation_id" db:"operation_id"`
+	AttemptID             string     `json:"attempt_id" db:"attempt_id"`
+	ErrorStamp            string     `json:"-" db:"error_stamp"`
+	Kind                  string     `json:"kind" db:"kind"`
+	Revision              int64      `json:"revision" db:"revision"`
+	RunnerInstanceID      string     `json:"-" db:"runner_instance_id"`
+	State                 string     `json:"state" db:"state"`
+	Phase                 string     `json:"phase" db:"phase"`
+	RepositoryID          string     `json:"repository_id,omitempty" db:"repository_id"`
+	RepositoryPosition    int        `json:"repository_position" db:"repository_position"`
+	RepositoryTotal       int        `json:"repository_total" db:"repository_total"`
+	CompletedSlots        int        `json:"completed_slots" db:"completed_slots"`
+	WorkspaceComplete     bool       `json:"workspace_complete" db:"workspace_complete"`
+	AgentReady            bool       `json:"agent_ready" db:"agent_ready"`
+	StartedAt             time.Time  `json:"started_at" db:"started_at"`
+	UpdatedAt             time.Time  `json:"updated_at" db:"updated_at"`
+	EndedAt               *time.Time `json:"ended_at,omitempty" db:"ended_at"`
+	ReasonCode            string     `json:"reason_code,omitempty" db:"reason_code"`
+	SelectedRepositoryIDs []string   `json:"-" db:"-"`
+}
+
+// TaskEnvironmentRecoveryOperationUpdate is a revision-fenced full projection
+// update for the current operation attempt.
+type TaskEnvironmentRecoveryOperationUpdate struct {
+	TaskEnvironmentID   string
+	OperationID         string
+	AttemptID           string
+	OwnershipGeneration int64
+	RunnerInstanceID    string
+	ExpectedRevision    int64
+	State               string
+	Phase               string
+	RepositoryID        string
+	RepositoryPosition  int
+	RepositoryTotal     int
+	CompletedSlots      int
+	WorkspaceComplete   bool
+	AgentReady          bool
+	EndedAt             *time.Time
+	ReasonCode          string
+}
+
 // ToAPI converts internal TaskEnvironment to API map.
 func (te *TaskEnvironment) ToAPI() map[string]interface{} {
 	result := map[string]interface{}{

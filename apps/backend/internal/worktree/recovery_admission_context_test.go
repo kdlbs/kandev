@@ -10,7 +10,7 @@ import (
 	"github.com/kandev/kandev/internal/task/models"
 )
 
-func TestAdmitRecoveryReusesOwningAdmissionFromContext(t *testing.T) {
+func TestAdmitRecoveryReturnsBorrowedAdmissionFromContext(t *testing.T) {
 	claim := &models.TaskEnvironmentRecoveryClaim{
 		TaskEnvironmentID:   "environment-admission-context",
 		OwnerTaskID:         "task-admission-context",
@@ -49,8 +49,8 @@ func TestAdmitRecoveryReusesOwningAdmissionFromContext(t *testing.T) {
 	if err != nil {
 		t.Fatalf("nested admission: %v", err)
 	}
-	if forwarded != owner {
-		t.Fatal("nested admission did not preserve the owning release handle")
+	if forwarded == owner {
+		t.Fatal("nested admission reused the outer owning release handle")
 	}
 	if got := request.Slots[0].Worktree; got == nil || got.Path != "/worktrees/relocated" {
 		t.Fatalf("nested admission worktree = %#v, want the current relocated record", got)
@@ -58,14 +58,208 @@ func TestAdmitRecoveryReusesOwningAdmissionFromContext(t *testing.T) {
 	if err := forwarded.Release(context.Background()); err != nil {
 		t.Fatalf("release nested admission: %v", err)
 	}
-	if releaseCalls != 1 {
-		t.Fatalf("release calls after nested release = %d, want 1", releaseCalls)
+	if releaseCalls != 0 {
+		t.Fatalf("release calls after nested release = %d, want 0", releaseCalls)
 	}
 	if err := owner.Release(context.Background()); err != nil {
 		t.Fatalf("release outer admission: %v", err)
 	}
 	if releaseCalls != 1 {
 		t.Fatalf("release calls after outer release = %d, want 1", releaseCalls)
+	}
+}
+
+func TestFailClaimedRecoverySettlesAfterRequestDisconnect(t *testing.T) {
+	requestCtx, cancelRequest := context.WithCancel(context.Background())
+	operationCtx, cancelOperation := acceptedRecoveryContext(requestCtx)
+	defer cancelOperation()
+
+	reporter := &requestContextRecoveryProgressReporter{}
+	binding, err := reporter.BeginWorkspaceRecovery(operationCtx, RecoveryProgressStart{
+		TaskEnvironmentID: "environment-disconnected-recovery", OwnerTaskID: "task-disconnected-recovery",
+		OwnershipGeneration: 1, SessionID: "session-disconnected-recovery", OperationID: "operation-disconnected-recovery",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	progress := &recoveryProgressTracker{
+		reporter: reporter, binding: binding,
+		update: RecoveryProgressUpdate{State: "running", Phase: "snapshotting"},
+	}
+	claim := &models.TaskEnvironmentRecoveryClaim{
+		TaskEnvironmentID: binding.TaskEnvironmentID, OwnerTaskID: binding.OwnerTaskID,
+		OwnershipGeneration: binding.OwnershipGeneration, SessionID: binding.SessionID,
+		OperationID: binding.OperationID,
+	}
+	cancelRequest()
+
+	_, err = (&Manager{}).failClaimedRecovery(
+		requestCtx, &RecoveryAdmissionRequest{}, claim, progress, operationCtx, cancelOperation,
+		nil, true, errors.New("recovery failed after disconnect"), nil, nil,
+	)
+	if err == nil {
+		t.Fatal("failClaimedRecovery returned no operation error")
+	}
+	if reporter.updateContextErr != nil || reporter.endContextErr != nil {
+		t.Fatalf("backend settlement inherited request cancellation: update=%v end=%v", reporter.updateContextErr, reporter.endContextErr)
+	}
+	if !progress.terminal() {
+		t.Fatal("recovery did not store a terminal outcome after request disconnect")
+	}
+}
+
+type requestContextRecoveryProgressReporter struct {
+	recordingRecoveryProgressReporter
+	updateContextErr error
+	endContextErr    error
+}
+
+func (r *requestContextRecoveryProgressReporter) UpdateWorkspaceRecovery(
+	ctx context.Context,
+	binding RecoveryProgressBinding,
+	update RecoveryProgressUpdate,
+) (RecoveryProgressBinding, error) {
+	r.updateContextErr = ctx.Err()
+	if err := ctx.Err(); err != nil {
+		return RecoveryProgressBinding{}, err
+	}
+	return r.recordingRecoveryProgressReporter.UpdateWorkspaceRecovery(ctx, binding, update)
+}
+
+func (r *requestContextRecoveryProgressReporter) EndWorkspaceRecoveryRunner(ctx context.Context, binding RecoveryProgressBinding) {
+	r.endContextErr = ctx.Err()
+	r.recordingRecoveryProgressReporter.EndWorkspaceRecoveryRunner(ctx, binding)
+}
+
+func TestNestedRecoveryReleaseDoesNotFinishOuterProgress(t *testing.T) {
+	claim := &models.TaskEnvironmentRecoveryClaim{
+		TaskEnvironmentID:   "environment-progress-borrow",
+		OwnerTaskID:         "task-progress-borrow",
+		OwnershipGeneration: 1,
+		SessionID:           "session-progress-borrow",
+		OperationID:         "operation-progress-borrow",
+		ExecutorType:        string(models.ExecutorTypeWorktree),
+	}
+	reporter := &recordingRecoveryProgressReporter{}
+	binding, err := reporter.BeginWorkspaceRecovery(context.Background(), RecoveryProgressStart{
+		TaskEnvironmentID: claim.TaskEnvironmentID, OwnerTaskID: claim.OwnerTaskID,
+		OwnershipGeneration: claim.OwnershipGeneration, SessionID: claim.SessionID,
+		OperationID: claim.OperationID,
+	})
+	if err != nil {
+		t.Fatalf("begin progress: %v", err)
+	}
+	progress := &recoveryProgressTracker{
+		reporter: reporter,
+		binding:  binding,
+		update: RecoveryProgressUpdate{
+			State: "running", Phase: "resuming", WorkspaceComplete: true,
+		},
+	}
+	operationCtx, cancelOperation := context.WithCancel(context.Background())
+	releaseCalls := 0
+	owner := &RecoveryAdmission{
+		claim: claim, progress: progress, operationCtx: operationCtx,
+		operationCancel: cancelOperation,
+		releaseFunc: func(context.Context) error {
+			releaseCalls++
+			return nil
+		},
+	}
+	request := &RecoveryAdmissionRequest{
+		TaskID: claim.OwnerTaskID, SessionID: claim.SessionID,
+		TaskEnvironmentID: claim.TaskEnvironmentID, OwnerTaskID: claim.OwnerTaskID,
+		OwnershipGeneration: claim.OwnershipGeneration, ExecutorType: claim.ExecutorType,
+		OperationID: claim.OperationID,
+	}
+	borrowed, handled, err := (&Manager{}).admitWithContextAuthority(
+		WithRecoveryAdmission(context.Background(), owner), request,
+	)
+	if err != nil || !handled || borrowed == nil {
+		t.Fatalf("nested admission = (%v, %t, %v), want borrowed admission", borrowed, handled, err)
+	}
+	if err := borrowed.Release(context.Background()); err != nil {
+		t.Fatalf("release nested admission: %v", err)
+	}
+	if progress.terminal() {
+		t.Fatal("nested release finished the outer recovery progress")
+	}
+	if operationCtx.Err() != nil {
+		t.Fatalf("nested release canceled the outer operation: %v", operationCtx.Err())
+	}
+	if releaseCalls != 0 {
+		t.Fatalf("nested release calls = %d, want 0", releaseCalls)
+	}
+	if err := owner.CompleteRecoveryResume(context.Background(), true, ""); err != nil {
+		t.Fatalf("complete outer resume: %v", err)
+	}
+	if err := owner.Release(context.Background()); err != nil {
+		t.Fatalf("release outer admission: %v", err)
+	}
+	if releaseCalls != 1 {
+		t.Fatalf("outer release calls = %d, want 1", releaseCalls)
+	}
+	if !errors.Is(operationCtx.Err(), context.Canceled) {
+		t.Fatalf("outer release did not cancel its operation context: %v", operationCtx.Err())
+	}
+	final := reporter.updates[len(reporter.updates)-1]
+	if final.State != "completed" || !final.AgentReady {
+		t.Fatalf("outer recovery result = %+v, want completed and agent ready", final)
+	}
+}
+
+func TestWithRecoveryAdmissionPreservesNestedLaunchContextValues(t *testing.T) {
+	type resumeAttemptContextKey struct{}
+
+	operationCtx, cancelOperation := context.WithCancel(context.Background())
+	defer cancelOperation()
+	owner := &RecoveryAdmission{
+		claim:        &models.TaskEnvironmentRecoveryClaim{OperationID: "operation-context-values"},
+		operationCtx: operationCtx,
+	}
+	launchCtx := context.WithValue(context.Background(), resumeAttemptContextKey{}, "resume-attempt-1")
+	admittedCtx := WithRecoveryAdmission(launchCtx, owner)
+
+	if got := admittedCtx.Value(resumeAttemptContextKey{}); got != "resume-attempt-1" {
+		t.Fatalf("resume attempt context value = %v, want preserved value", got)
+	}
+	if recoveryAdmissionFromContext(admittedCtx) != owner {
+		t.Fatal("recovery admission context did not carry the owner")
+	}
+	if err := admittedCtx.Err(); err != nil {
+		t.Fatalf("admitted context unexpectedly canceled: %v", err)
+	}
+	cancelOperation()
+	select {
+	case <-admittedCtx.Done():
+	case <-time.After(time.Second):
+		t.Fatal("admitted context did not follow operation cancellation")
+	}
+	if !errors.Is(admittedCtx.Err(), context.Canceled) {
+		t.Fatalf("admitted context error = %v, want context.Canceled", admittedCtx.Err())
+	}
+}
+
+func TestWithBorrowedRecoveryAdmissionPreservesResumeCancellation(t *testing.T) {
+	operationCtx, cancelOperation := context.WithCancel(context.Background())
+	defer cancelOperation()
+	resumeCtx, cancelResume := context.WithCancel(context.Background())
+	defer cancelResume()
+	borrowed := &RecoveryAdmission{
+		claim:        &models.TaskEnvironmentRecoveryClaim{OperationID: "operation-resume-cancel"},
+		operationCtx: operationCtx,
+		borrowed:     true,
+	}
+	launchCtx := WithRecoveryAdmission(resumeCtx, borrowed)
+
+	cancelResume()
+	select {
+	case <-launchCtx.Done():
+	case <-time.After(time.Second):
+		t.Fatal("borrowed admission dropped resume cancellation")
+	}
+	if !errors.Is(launchCtx.Err(), context.Canceled) {
+		t.Fatalf("launch context error = %v, want context.Canceled", launchCtx.Err())
 	}
 }
 

@@ -16,6 +16,7 @@ import type {
   SidebarTaskColorPatchApi,
   WorkflowAgentOverrides,
   Repository,
+  WorkspaceRecoveryProjection,
 } from "../../lib/types/http";
 import type { Agent, AgentProfile, AvailableAgent } from "../../lib/types/http-agents";
 import type {
@@ -2889,6 +2890,9 @@ export class ApiClient {
       agent_profile_id?: string;
       agent_profile_snapshot?: Record<string, unknown> | null;
       state: string;
+      task_environment_id?: string;
+      workspace_recovery?: WorkspaceRecoveryProjection | null;
+      error_message?: string;
     };
   }> {
     return this.request("GET", `/api/v1/task-sessions/${sessionId}`);

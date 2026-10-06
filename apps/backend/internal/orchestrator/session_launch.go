@@ -11,7 +11,9 @@ import (
 
 	agentruntime "github.com/kandev/kandev/internal/agent/runtime"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
+	taskdto "github.com/kandev/kandev/internal/task/dto"
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/recoveryoperation"
 	taskrepo "github.com/kandev/kandev/internal/task/repository"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 	"github.com/kandev/kandev/internal/worktree"
@@ -170,6 +172,7 @@ type SpawnOrigin struct {
 // LaunchSessionResponse is the unified response for session.launch.
 type LaunchSessionResponse struct {
 	Success                           bool                                      `json:"success"`
+	InProgress                        bool                                      `json:"in_progress,omitempty"`
 	TaskID                            string                                    `json:"task_id"`
 	SessionID                         string                                    `json:"session_id,omitempty"`
 	AgentExecutionID                  string                                    `json:"agent_execution_id,omitempty"`
@@ -178,6 +181,7 @@ type LaunchSessionResponse struct {
 	WorktreePath                      *string                                   `json:"worktree_path,omitempty"`
 	WorktreeBranch                    *string                                   `json:"worktree_branch,omitempty"`
 	WorkspaceInventoryRecoveryReceipt *models.WorkspaceInventoryRecoveryReceipt `json:"workspace_inventory_recovery_receipt,omitempty"`
+	WorkspaceRecovery                 *taskdto.WorkspaceRecoveryDTO             `json:"workspace_recovery,omitempty"`
 	ActivationDisposition             string                                    `json:"activation_disposition,omitempty"`
 	ActivationReason                  string                                    `json:"activation_reason,omitempty"`
 }
@@ -234,6 +238,7 @@ func (s *Service) LaunchSession(ctx context.Context, req *LaunchSessionRequest) 
 	if req == nil {
 		return nil, errors.New("launch request is required")
 	}
+	ctx = worktree.WithRecoveryLifecycleContext(ctx, s.recoveryLifecycleContext())
 	req.Prompt = strings.TrimSpace(req.Prompt)
 	if err := validateLaunchActivationSource(req.ActivationSource); err != nil {
 		return nil, err
@@ -951,6 +956,15 @@ func (s *Service) RecoverSessionWithOptions(
 	if action == recoveryActionRepairWorkspaceInventory && strings.TrimSpace(options.IdempotencyKey) == "" {
 		return nil, models.ErrWorkspaceInventoryRecoveryInvalid
 	}
+	if session.TaskEnvironmentID != "" && s.workspaceRecoveryStatusReader != nil {
+		operation, runnerLive, readErr := s.workspaceRecoveryStatusReader.WorkspaceRecoveryProjection(ctx, session.TaskEnvironmentID)
+		if readErr != nil {
+			return nil, readErr
+		}
+		if runnerLive {
+			return workspaceRecoveryInProgressResponse(taskID, sessionID, operation), nil
+		}
+	}
 	recoveryObservation, err := s.captureWorkspaceRecoveryErrorObservation(ctx, session)
 	if err != nil {
 		return nil, err
@@ -959,9 +973,19 @@ func (s *Service) RecoverSessionWithOptions(
 	if err != nil {
 		return nil, err
 	}
+	launchCtx = worktree.WithRecoveryLifecycleContext(launchCtx, s.recoveryLifecycleContext())
 
 	recoveryAdmission, err := s.preflightSessionRecovery(launchCtx, taskID, session, action)
 	if err != nil {
+		if errors.Is(err, recoveryoperation.ErrInProgress) && s.workspaceRecoveryStatusReader != nil && session.TaskEnvironmentID != "" {
+			operation, runnerLive, readErr := s.workspaceRecoveryStatusReader.WorkspaceRecoveryProjection(ctx, session.TaskEnvironmentID)
+			if readErr == nil && runnerLive {
+				return workspaceRecoveryInProgressResponse(taskID, sessionID, operation), nil
+			}
+			if readErr != nil {
+				return nil, readErr
+			}
+		}
 		branchError := s.branchRecoveryError(launchCtx, taskID, sessionID, err)
 		return nil, s.managedCloneRelocationPreflightError(ctx, session, action, recoveryObservation, branchError)
 	}
@@ -977,7 +1001,12 @@ func (s *Service) RecoverSessionWithOptions(
 		}
 	}
 
-	if err := s.applySessionRecoveryAction(ctx, sessionID, action); err != nil {
+	if err := s.applySessionRecoveryAction(launchCtx, sessionID, action); err != nil {
+		if recoveryAdmission != nil {
+			if persistErr := recoveryAdmission.CompleteRecoveryResume(launchCtx, false, "resume_action_failed"); persistErr != nil {
+				return nil, persistErr
+			}
+		}
 		return nil, err
 	}
 
@@ -993,9 +1022,36 @@ func (s *Service) RecoverSessionWithOptions(
 		InitialPromptSubmission:          initialSubmission,
 	})
 	if err != nil {
-		return nil, normalizeRecoverSessionError(err)
+		resumeErr := normalizeRecoverSessionError(err)
+		if recoveryAdmission != nil {
+			if persistErr := recoveryAdmission.CompleteRecoveryResume(launchCtx, false, "resume_failed"); persistErr != nil {
+				return nil, fmt.Errorf("%w (workspace recovery outcome could not be saved: %v)", resumeErr, persistErr)
+			}
+		}
+		return nil, resumeErr
+	}
+	if recoveryAdmission != nil {
+		ready := resp != nil && resp.Success && resp.State != ""
+		reason := "resume_not_ready"
+		if ready {
+			reason = ""
+		}
+		if err := recoveryAdmission.CompleteRecoveryResume(launchCtx, ready, reason); err != nil {
+			return nil, err
+		}
 	}
 	return resp, nil
+}
+
+func workspaceRecoveryInProgressResponse(
+	taskID, sessionID string,
+	operation *models.TaskEnvironmentRecoveryOperation,
+) *LaunchSessionResponse {
+	return &LaunchSessionResponse{
+		Success: true, InProgress: true, TaskID: taskID, SessionID: sessionID,
+		State:             "recovering",
+		WorkspaceRecovery: taskdto.WorkspaceRecoveryFromOperation(operation, true),
+	}
 }
 
 func (s *Service) preflightSessionRecovery(
@@ -1201,6 +1257,7 @@ func (s *Service) prepareManagedCloneRelocationRecovery(
 	if !isManagedCloneRelocationAuthorized(session, session.TaskID, stamp) {
 		return nil, &ManagedCloneRelocationRecoveryError{Stale: true}
 	}
+	ctx = worktree.WithManagedCloneRelocationErrorStamp(ctx, stamp)
 	ctx = worktree.WithDirtyCloneRelocation(ctx)
 	return worktree.WithManagedCloneRelocationAuthorization(ctx, func(checkCtx context.Context) error {
 		current, err := s.repo.GetTaskSession(checkCtx, session.ID)

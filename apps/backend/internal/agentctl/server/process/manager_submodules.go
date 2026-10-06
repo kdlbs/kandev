@@ -83,6 +83,7 @@ func (m *Manager) configureTracker(tracker *WorkspaceTracker, repositoryName str
 	}
 	tracker.SetGitEnvironment(m.trackerGitEnvironment())
 	tracker.SetAllowedSourceRoots(roots)
+	tracker.SetRecoveryArtifactExclusions(m.currentWorkspaceFileExclusions())
 	if !tracker.IsSubmodule() {
 		tracker.SetBaseBranch(lookupBaseBranch(m.getBaseBranches(), repositoryName))
 	}

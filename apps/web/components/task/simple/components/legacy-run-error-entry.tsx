@@ -13,6 +13,8 @@ import type {
 } from "@/lib/services/session-recovery-service";
 import { SessionErrorDetails } from "@/components/task/session-error-details";
 import type { RunError } from "@/app/office/tasks/[id]/types";
+import type { WorkspaceRecoveryProjection } from "@/lib/types/http";
+import type { WorkspaceRecoveryStatusCheck } from "@/hooks/domains/session/use-session-recovery-actions";
 import { useTranslation } from "react-i18next";
 
 type LegacyRunErrorProps = {
@@ -30,6 +32,10 @@ type LegacyRunErrorProps = {
   blocked: boolean;
   canRestore: boolean;
   failureLabel: string;
+  workspaceRecovery: WorkspaceRecoveryProjection | null;
+  workspaceRecoveryRepositoryName?: string | null;
+  workspaceRecoveryStatusCheck: WorkspaceRecoveryStatusCheck;
+  onCheckWorkspaceRecoveryStatus: () => void;
 };
 
 export function LegacyRunErrorEntry({
@@ -47,6 +53,10 @@ export function LegacyRunErrorEntry({
   blocked,
   canRestore,
   failureLabel,
+  workspaceRecovery,
+  workspaceRecoveryRepositoryName,
+  workspaceRecoveryStatusCheck,
+  onCheckWorkspaceRecoveryStatus,
 }: LegacyRunErrorProps) {
   const { t } = useTranslation();
   const actions: RecoveryChoice[] = [
@@ -114,6 +124,10 @@ export function LegacyRunErrorEntry({
             busy={busyAction !== null}
             busyAction={busyAction}
             blocked={blocked}
+            workspaceRecovery={workspaceRecovery}
+            workspaceRecoveryRepositoryName={workspaceRecoveryRepositoryName}
+            workspaceRecoveryStatusCheck={workspaceRecoveryStatusCheck}
+            onCheckWorkspaceRecoveryStatus={onCheckWorkspaceRecoveryStatus}
           />
         )}
         {error.rawPayload && (

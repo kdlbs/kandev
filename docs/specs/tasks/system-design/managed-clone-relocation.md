@@ -6,7 +6,7 @@ requirements:
   - REQ-TASKS-MANAGED-CLONE-RELOCATION-002
   - REQ-TASKS-MANAGED-CLONE-RELOCATION-003
 created: 2026-09-27
-updated: 2026-10-04
+updated: 2026-10-05
 owners:
   - kandev
 ---
@@ -373,13 +373,25 @@ metric labels.
 
 ## Related decisions
 
+- [Proposed recovery operation storage](../../../decisions/2026-10-05-managed-clone-recovery-operation-storage.md)
 - [Managed clone relocation boundary](../../../decisions/2026-09-27-managed-clone-relocation-boundary.md)
 - [Worktree metadata recovery boundary](../../../decisions/2026-09-10-worktree-metadata-recovery-boundary.md)
 
 ## Implementation plans
 
+- [Recovery progress and workspace presentation](../../../plans/managed-clone-recovery-experience/plan.md) (draft)
 - [Snapshot permissions and blocked retry](../../../plans/workspace-recovery-permissions/plan.md)
 
 - [Original relocation package](../../../plans/managed-clone-relocation/plan.md)
 - [Unchanged legacy clone admission](../../../plans/legacy-clone-resume/plan.md)
 - [Resume and workspace recovery convergence](../../../plans/managed-clone-recovery-convergence/plan.md)
+
+## Proposed operation storage and presentation extension
+
+The [draft extension](managed-clone-relocation-experience.md) defines private
+artifact placement, durable progress, and repository labels for this same
+capability. When accepted and implemented, it changes adjacent artifact placement
+for new clone-relocation operations only. Existing adjacent records remain
+readable, including permission-only retry provenance. The extension adds progress
+storage; earlier statements about no new schema describe the existing error and
+permission fixes. This proposal does not weaken admission or preservation.
