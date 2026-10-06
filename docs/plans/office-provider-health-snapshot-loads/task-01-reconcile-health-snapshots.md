@@ -36,6 +36,8 @@ selection/request guards, using one immediate existing setter publication.
 - One fetch-only, real-hook/store/API/registered-WS-handler regression suite
   implementing the [manifest matrix](plan.md#tests).
 - Existing predecessor lifecycle suite as scoped compatibility evidence.
+- Existing page hydration fixture's owning-store API compatibility, keeping
+  all three dashboard assertions.
 - Actual verification results here and in the manifest after implementation.
 
 ## Out of scope
@@ -163,6 +165,7 @@ MERGE lease remain external gates documented in the task plan and manifest.
 - `apps/web/hooks/domains/office/use-provider-health.ts`
 - `apps/web/hooks/domains/office/use-provider-health-snapshot-loads.test.tsx` (new)
 - `apps/web/hooks/domains/office/office-diagnostic-workspace-reads.test.tsx` (health-specific sibling expectation only)
+- `apps/web/app/office/page-client.test.tsx` (stable store API adapter in its existing mock only)
 - This work order and `plan.md` for actual results.
 
 Read-only integration inputs: `components/state-provider.tsx`, `lib/state/store.ts`,
@@ -241,3 +244,25 @@ there is no browser/build/E2E or UI/copy/backend/API/action/schema expansion.
 All owned handles must be terminal and PIDs gone before the heavy lease is
 returned after normal hooks/ready publication. Hosted CI/full semantic review
 and a separate ROOT serial merge grant remain pending delivery gates.
+
+Hosted Frontend Tests attempt 1 exposed a fixture contract regression in all
+three existing `OfficePageClient boot hydration` tests: their StateProvider
+mock omitted `useAppStoreApi`, now read by the real health hook through the
+mounted health card. The stack reached the new hook dependency before the
+dashboard assertions; this is causal own-scope evidence, not a transient
+inference. The frontend leaf and its dependent aggregate failed, while the
+27 new health cases and 46 lifecycle cases passed in the same run. No failed
+test artifacts were uploaded. Actual logs, run/job IDs, source blobs and
+terminal joins are preserved in the task plan and terminal-cause receipt.
+
+ROOT granted a test-only correction: the existing mock now exports
+`useAppStoreApi` backed by one stable `getState()` adapter over its original
+fixture state. Production and real hook/store/transport tests are unchanged.
+The three affected cases passed in one exact anchored run (3/3, 2.88s, exit 0)
+with Node 4 GiB, one worker, no file parallelism and the original 120s bound.
+Changed-file ESLint exited 0. No new TypeScript types required a typecheck;
+no install, passing 73-case replay, browser/build/E2E or CI retry occurred.
+Cheap actual-path documentation coverage and normal active hooks precede the
+new corrective commit/push; fresh exact-head hosted gates remain mandatory.
+Catalog/spec lint and whitespace passed; all eight actual changed paths
+returned documentation coverage `covered`, `ok: true`, with no errors.

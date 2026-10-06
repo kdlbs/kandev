@@ -87,6 +87,8 @@ no speculative ADR is needed.
   actual current-versus-start row identity/presence.
 - Immediate one-setter publication and all prior selection/request fences.
 - One real-hook/store/API/registered-handler suite with fetch-only replacement.
+- Existing Office dashboard hydration fixture compatibility with the hook's
+  owning-store API, preserving its three dashboard assertions.
 - Minimal amendment of the existing [requirement](../../specs/office/requirements/live-updates.md)
   and [design](../../specs/office/system-design/live-updates-02.md#provider-health-snapshot-publication).
 
@@ -220,6 +222,28 @@ All command handles and exact outcomes are retained in the durable task plan.
 The broader migrated requirement/design remain draft; no unrelated legacy
 criterion is claimed complete. No browser/build/E2E, store/action/API/schema/
 backend, routing-preview production or dependency/lockfile change occurred.
+
+The first published candidate's Frontend Tests run failed all three existing
+`OfficePageClient boot hydration` cases before their assertions: its
+StateProvider module mock exported only `useAppStore`, while the real mounted
+health card reached the hook's new `useAppStoreApi` dependency. The actual
+stack and fixture establish an own-scope fixture contract regression; the
+run's 27 health-publication and 46 lifecycle cases passed. The dependent
+`Frontend Tests Passed` gate correctly failed too. There were no uploaded
+failure artifacts; exact leaf logs and source comparisons are retained in the
+durable task plan.
+
+ROOT authorized the smallest test-only correction: one stable `getState()`
+adapter over the existing page fixture state and its `useAppStoreApi` export.
+All three dashboard assertions, production code and real transport regression
+tests remain intact. CI provides meaningful RED; the exact anchored three
+affected page tests passed after correction, and changed-file ESLint passed.
+No install, typecheck, broad passing replay or CI rerun was used for this
+correction. Normal hooks and new-head hosted gates remain delivery evidence,
+tracked in the durable task plan.
+Catalog/spec lint and whitespace passed after the correction. Documentation
+coverage checked all eight actual changed paths and returned `covered`,
+`ok: true`, with no errors.
 
 ## Risks and delivery gates
 
