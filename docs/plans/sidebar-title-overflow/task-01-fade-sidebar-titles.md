@@ -120,11 +120,11 @@ Implemented on 2026-10-06. `TaskItemTitle` now observes clipped width and applie
 Verification passed:
 
 - `pnpm exec vitest run components/task/task-item-title-fade.test.tsx hooks/use-is-title-truncated.test.tsx` (2 files, 8 tests).
-- Scoped ESLint for `task-item.tsx` and the three new component/browser test files.
+- Scoped ESLint for `task-item.tsx`, the component test, both overflow E2E specs, and `sidebar-title-width.spec.ts`.
 - `pnpm run typecheck`.
-- Managed Chromium title-overflow and title-width specs (3 tests).
+- Managed Chromium title-overflow and title-width specs (5 tests), including the forced-colors and narrow-width regressions.
 - Managed Pixel 5 mobile title-overflow spec (1 test).
-- `python3 scripts/list-docs.py validate`, `python3 scripts/lint-spec-files.py --all`, and `git diff --check`.
+- `python3 scripts/list-docs.py validate`, `python3 scripts/lint-spec-files.py --all`, Prettier checks, and `git diff --check`.
 
 Captured screenshots in `apps/web/.pr-assets/`:
 
@@ -133,3 +133,5 @@ Captured screenshots in `apps/web/.pr-assets/`:
 - `sidebar-title-overflow--sidebar-title-dark-rows.png`
 - `sidebar-title-overflow--sidebar-title-dark-hover.png`
 - `mobile-sidebar-title-overflow--mobile-sidebar-title-overflow-picker.png`
+
+Review-fixup checks: the forced-colors and narrow-width browser assertions failed on the original PR head for the expected mask values, then passed after the CSS changes. The six screenshots above were recaptured after fixup commit `f3afb57e`.

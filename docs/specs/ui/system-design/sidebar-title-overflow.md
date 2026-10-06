@@ -15,8 +15,8 @@ This design keeps that primitive unchanged and scopes the new presentation to si
 
 ## Requirement mapping
 
-| Requirement | Design sections |
-| --- | --- |
+| Requirement                         | Design sections                                                                                                                               |
+| ----------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
 | `REQ-UI-SIDEBAR-TITLE-OVERFLOW-001` | [Overflow detection](#overflow-detection), [Text mask](#text-mask), [Responsive and accessible behavior](#responsive-and-accessible-behavior) |
 
 ## Overflow detection

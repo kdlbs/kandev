@@ -90,13 +90,14 @@ Design checks passed on 2026-10-06:
 - `validateCoverage` from `.github/scripts/pr-docs.cjs`: planned runtime coverage passed with all four artifact references.
 - Catalog discovery found both new specifications. Diff checks passed and status confirmed the untracked design package.
 
-Implementation and rendered desktop/phone checks passed on 2026-10-06:
+Implementation and review-fixup checks passed on 2026-10-06:
 
 - Focused component and hook tests: 2 files and 8 tests passed.
-- Scoped ESLint and `pnpm run typecheck` passed.
-- Managed Chromium run for the new overflow spec and existing title-width spec: 3 tests passed.
+- Scoped ESLint, `pnpm run typecheck`, and Prettier checks passed.
+- Managed Chromium run for the overflow and title-width specs: 5 tests passed, including forced-colors and narrow-width regressions.
 - Managed Pixel 5 run for the mobile picker spec: 1 test passed.
-- Captured and inspected light/dark default and hover states, plus the phone picker, under `apps/web/.pr-assets/`.
+- `python3 scripts/list-docs.py validate` and `python3 scripts/lint-spec-files.py --all` passed.
+- Six light/dark desktop, hover, title-width, and phone screenshots were recaptured after fixup commit `f3afb57e` and inspected under `apps/web/.pr-assets/`.
 
 ## Documentation impact
 
