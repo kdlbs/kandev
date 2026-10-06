@@ -5,11 +5,17 @@ import type { BackendMessageMap } from "@/lib/types/backend";
 import { registerWsHandlers } from "@/lib/ws/router";
 import { registerSessionWorkspaceRecoveryHandlers } from "./session-workspace-recovery";
 
+const TASK_ID = "task-1";
 const ENVIRONMENT_ID = "environment-1";
+const SESSION_IDS = ["session-1", "session-2"];
 
-function makeStore(setWorkspaceRecoveryProjection = vi.fn()): StoreApi<AppState> {
+function makeStore(
+  setWorkspaceRecoveryProjection = vi.fn(),
+  bumpWorkspaceFilesRefresh = vi.fn(),
+): StoreApi<AppState> {
   return {
-    getState: () => ({ setWorkspaceRecoveryProjection }) as unknown as AppState,
+    getState: () =>
+      ({ setWorkspaceRecoveryProjection, bumpWorkspaceFilesRefresh }) as unknown as AppState,
     setState: vi.fn(),
     subscribe: vi.fn(),
     destroy: vi.fn(),
@@ -17,8 +23,44 @@ function makeStore(setWorkspaceRecoveryProjection = vi.fn()): StoreApi<AppState>
   } as unknown as StoreApi<AppState>;
 }
 
+function recoveryMessage(
+  state: "running" | "completed" = "running",
+): BackendMessageMap["session.workspace_recovery.changed"] {
+  const completed = state === "completed";
+  return {
+    type: "notification",
+    action: "session.workspace_recovery.changed",
+    payload: {
+      task_id: TASK_ID,
+      environment_id: ENVIRONMENT_ID,
+      session_id: SESSION_IDS[0],
+      session_ids: [...SESSION_IDS],
+      workspace_recovery: {
+        task_id: TASK_ID,
+        environment_id: ENVIRONMENT_ID,
+        session_id: SESSION_IDS[0],
+        operation_id: "operation-1",
+        attempt_id: "attempt-1",
+        ownership_generation: "9",
+        revision: completed ? "22" : "21",
+        kind: "managed_clone_relocation",
+        state,
+        phase: completed ? "complete" : "restoring",
+        repository_position: completed ? 2 : 1,
+        repository_total: 2,
+        completed_slots: completed ? 2 : 0,
+        workspace_complete: completed,
+        agent_ready: completed,
+        runner_live: !completed,
+        started_at: "2026-10-05T12:00:00Z",
+        updated_at: completed ? "2026-10-05T12:00:20Z" : "2026-10-05T12:00:10Z",
+      },
+    },
+  };
+}
+
 describe("session.workspace_recovery.changed handler", () => {
-  it("is registered and forwards the environment projection to the session store", () => {
+  it("is registered and forwards the environment projection to its session recipients", () => {
     const registered = registerWsHandlers(makeStore()).handlers as Record<string, unknown>;
     expect(registered["session.workspace_recovery.changed"]).toEqual(expect.any(Function));
 
@@ -26,43 +68,11 @@ describe("session.workspace_recovery.changed handler", () => {
     const handler = registerSessionWorkspaceRecoveryHandlers(makeStore(setProjection))[
       "session.workspace_recovery.changed"
     ]!;
-    const message: BackendMessageMap["session.workspace_recovery.changed"] = {
-      type: "notification",
-      action: "session.workspace_recovery.changed",
-      payload: {
-        task_id: "task-1",
-        environment_id: ENVIRONMENT_ID,
-        session_id: "session-1",
-        session_ids: ["session-1", "session-2"],
-        workspace_recovery: {
-          task_id: "task-1",
-          environment_id: ENVIRONMENT_ID,
-          session_id: "session-1",
-          operation_id: "operation-1",
-          attempt_id: "attempt-1",
-          ownership_generation: "9",
-          revision: "21",
-          kind: "managed_clone_relocation",
-          state: "running",
-          phase: "restoring",
-          repository_position: 1,
-          repository_total: 2,
-          completed_slots: 0,
-          workspace_complete: false,
-          agent_ready: false,
-          runner_live: true,
-          started_at: "2026-10-05T12:00:00Z",
-          updated_at: "2026-10-05T12:00:10Z",
-        },
-      },
-    };
+    const message = recoveryMessage();
 
     handler(message);
 
-    expect(setProjection).toHaveBeenCalledWith(
-      ["session-1", "session-2"],
-      message.payload.workspace_recovery,
-    );
+    expect(setProjection).toHaveBeenCalledWith(SESSION_IDS, message.payload.workspace_recovery);
   });
 
   it("falls back to the initiating session when older publishers omit session_ids", () => {
@@ -70,35 +80,33 @@ describe("session.workspace_recovery.changed handler", () => {
     const handler = registerSessionWorkspaceRecoveryHandlers(makeStore(setProjection))[
       "session.workspace_recovery.changed"
     ]!;
-    handler({
-      type: "notification",
-      action: "session.workspace_recovery.changed",
-      payload: {
-        task_id: "task-1",
-        environment_id: ENVIRONMENT_ID,
-        session_id: "session-1",
-        workspace_recovery: {
-          task_id: "task-1",
-          environment_id: ENVIRONMENT_ID,
-          session_id: "session-1",
-          operation_id: "operation-1",
-          attempt_id: "attempt-1",
-          ownership_generation: "9",
-          revision: "21",
-          kind: "managed_clone_relocation",
-          state: "running",
-          phase: "checking",
-          repository_position: 0,
-          repository_total: 1,
-          completed_slots: 0,
-          workspace_complete: false,
-          agent_ready: false,
-          runner_live: true,
-          started_at: "2026-10-05T12:00:00Z",
-          updated_at: "2026-10-05T12:00:00Z",
-        },
-      },
-    });
-    expect(setProjection).toHaveBeenCalledWith(["session-1"], expect.any(Object));
+    const message = recoveryMessage();
+    delete message.payload.session_ids;
+
+    handler(message);
+
+    expect(setProjection).toHaveBeenCalledWith([SESSION_IDS[0]], expect.any(Object));
+  });
+
+  it("refreshes every recipient's Files tree when the shared recovery settles", () => {
+    const bumpWorkspaceFilesRefresh = vi.fn();
+    const handler = registerSessionWorkspaceRecoveryHandlers(
+      makeStore(vi.fn(), bumpWorkspaceFilesRefresh),
+    )["session.workspace_recovery.changed"]!;
+
+    handler(recoveryMessage("completed"));
+
+    expect(bumpWorkspaceFilesRefresh.mock.calls).toEqual(SESSION_IDS.map((id) => [id]));
+  });
+
+  it("keeps the Files tree stable while workspace recovery is still running", () => {
+    const bumpWorkspaceFilesRefresh = vi.fn();
+    const handler = registerSessionWorkspaceRecoveryHandlers(
+      makeStore(vi.fn(), bumpWorkspaceFilesRefresh),
+    )["session.workspace_recovery.changed"]!;
+
+    handler(recoveryMessage());
+
+    expect(bumpWorkspaceFilesRefresh).not.toHaveBeenCalled();
   });
 });

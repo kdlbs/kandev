@@ -14,9 +14,14 @@ export function registerSessionWorkspaceRecoveryHandlers(store: StoreApi<AppStat
     "session.workspace_recovery.changed": (message) => {
       const payload = message.payload as SessionWorkspaceRecoveryChangedPayload | undefined;
       if (!payload?.environment_id || !payload.workspace_recovery) return;
-      store
-        .getState()
-        .setWorkspaceRecoveryProjection(targetSessionIds(payload), payload.workspace_recovery);
+      const sessionIds = targetSessionIds(payload);
+      const state = store.getState();
+      state.setWorkspaceRecoveryProjection(sessionIds, payload.workspace_recovery);
+      if (payload.workspace_recovery.state !== "running") {
+        for (const sessionId of new Set(sessionIds)) {
+          state.bumpWorkspaceFilesRefresh(sessionId);
+        }
+      }
     },
   };
 }
