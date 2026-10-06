@@ -1,7 +1,7 @@
 ---
 id: "01-plain-selected-patches"
 title: "Produce plain selected workspace patches"
-status: in_progress
+status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
@@ -261,7 +261,11 @@ Reviewed commands above were run sequentially after the exclusive ROOT lease:
   full spec lint, seven-file reference coverage (`covered`, no errors) and whitespace
   passed. All test/lint handles actually joined before their successors.
 
-The authorized single pinned frozen apps install, normal active hooks, publication,
-hosted evidence and later ROOT merge remain delivery gates. Actual log paths,
-handle IDs/terminal exits, leases, hook and external receipts are maintained in the
-existing durable child Kandev plan. Task completion is not claimed here.
+The authorized single pinned frozen apps install passed (pnpm 9.15.9, 933 packages
+reused, zero downloads, unchanged lockfile). The implementation commit's normal
+active pre-commit and commit-msg hooks passed with no bypass, including scoped Go
+lint, architecture/catalog/specification checks, gofmt and commitlint. Implementation
+is complete. Publication, hosted evidence and the later ROOT merge remain delivery
+gates. Actual log paths, handle IDs/terminal exits, leases, full hook and external
+receipts are maintained in the existing durable child Kandev plan. Task completion
+is not claimed here.

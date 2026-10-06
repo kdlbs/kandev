@@ -1,6 +1,6 @@
 ---
 created: 2026-10-06
-status: in_progress
+status: completed
 requirements:
   - REQ-PLATFORM-WORKSPACE-GIT-STATUS-001
 system_design:
@@ -129,7 +129,7 @@ Internal docs only; no public edits or public validator run is needed here.
 
 ## Work orders
 
-- [ ] [Task 01: Produce plain selected workspace patches](task-01-plain-selected-patches.md)
+- [x] [Task 01: Produce plain selected workspace patches](task-01-plain-selected-patches.md)
 
 ## Verification results
 
@@ -170,9 +170,11 @@ Implementation checks on 2026-10-06 after ROOT release:
   whitespace passed. Every test/lint handle was actually joined before the next
   heavy command. Exact commands are in Task 01; logs/handles in the Kandev plan.
 
-One pinned frozen apps install and normal hook/publication receipts remain in the
-durable Kandev plan. Delivery is pending actual hosted checks/review and the later
-ROOT merge lease; this record does not imply a merge.
+The single pinned frozen apps install passed (pnpm 9.15.9, 933 packages reused,
+zero downloads, unchanged lockfile). Normal active pre-commit and commit-msg hooks
+passed without bypass for the implementation commit. Full hook and publication
+receipts remain in the durable Kandev plan. Implementation is complete; delivery
+is pending hosted checks/review and the later ROOT merge lease. This is not a merge.
 
 ## Risks
 
