@@ -202,7 +202,12 @@ function pendingRemovalRowProps(isPendingRemoval?: boolean) {
 function TaskItemTitle({ title }: { title: string }) {
   const { ref, isTruncated } = useIsTitleTruncated<HTMLSpanElement>(title);
   return (
-    <ScrollOnOverflow ref={ref} className="sidebar-task-title min-w-0" data-truncated={isTruncated}>
+    <ScrollOnOverflow
+      ref={ref}
+      className="sidebar-task-title min-w-0"
+      data-testid="task-item-title"
+      data-truncated={isTruncated}
+    >
       {title}
     </ScrollOnOverflow>
   );

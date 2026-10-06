@@ -47,10 +47,7 @@ function renderTaskItem(title: string) {
 }
 
 function titleElement(): HTMLSpanElement {
-  const row = screen.getByTestId("sidebar-task-item");
-  const title = row.querySelector<HTMLSpanElement>("span.overflow-hidden");
-  if (!title) throw new Error("Task title element was not rendered");
-  return title;
+  return screen.getByTestId("task-item-title");
 }
 
 beforeEach(() => {

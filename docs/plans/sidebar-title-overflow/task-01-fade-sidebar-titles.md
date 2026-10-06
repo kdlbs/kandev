@@ -14,6 +14,7 @@ acceptance_criteria:
   - AC-UI-SIDEBAR-TITLE-OVERFLOW-001.4
   - AC-UI-SIDEBAR-TITLE-OVERFLOW-001.5
   - AC-UI-SIDEBAR-TITLE-OVERFLOW-001.6
+  - AC-UI-SIDEBAR-TITLE-OVERFLOW-001.7
 system_design:
   - ../../specs/ui/system-design/sidebar-title-overflow.md
 ---
@@ -28,6 +29,7 @@ Deliver desktop and phone evidence in the same work order.
 ## In scope
 
 - `TaskItemTitle` hook/ref integration and scoped mask CSS.
+- Proportional fade sizing, hybrid fine-pointer hover, and forced-colors mask removal.
 - Focused component tests and desktop/mobile browser checks.
 - Screenshot inspection of light/dark default, selected, and hovered rows.
 
@@ -40,6 +42,7 @@ Deliver desktop and phone evidence in the same work order.
 
 - The real title span fades only during idle overflow and updates after resizing or title changes (.1/.2/.6).
 - Existing hover scrolling reveals the ending, and full DOM text and adjacent metadata remain intact (.3/.4/.5).
+- Forced-colors mode removes the mask; narrow title widths retain more than two-thirds of their width before fading (.1/.7).
 - Phone task navigation and visible actions remain usable and contained (.5).
 
 ## ASCII UI preview
@@ -56,7 +59,7 @@ UI-02 Phone task picker, inset drawer
 
 Use the [full preview](plan.md#ascii-ui-preview) for annotations and before/hover states.
 Only the title fades. The phone retains its current picker and visible touch actions.
-Criteria: AC-UI-SIDEBAR-TITLE-OVERFLOW-001.1 through .6.
+Criteria: AC-UI-SIDEBAR-TITLE-OVERFLOW-001.1 through .7.
 
 ## Verification
 
@@ -67,7 +70,7 @@ Run the following commands from the repository root:
 ```bash
 (cd apps && pnpm install --frozen-lockfile)
 (cd apps/web && pnpm exec vitest run components/task/task-item-title-fade.test.tsx hooks/use-is-title-truncated.test.tsx)
-(cd apps/web && pnpm exec eslint components/task/task-item.tsx components/task/task-item-title-fade.test.tsx e2e/tests/task/sidebar-title-overflow.spec.ts e2e/tests/task/mobile-sidebar-title-overflow.spec.ts)
+(cd apps/web && pnpm exec eslint components/task/task-item.tsx components/task/task-item-title-fade.test.tsx e2e/tests/task/sidebar-title-overflow.spec.ts e2e/tests/task/mobile-sidebar-title-overflow.spec.ts e2e/tests/task/sidebar-title-width.spec.ts)
 (cd apps/web && pnpm run typecheck)
 (cd apps/web && pnpm e2e:run --project chromium tests/task/sidebar-title-overflow.spec.ts tests/task/sidebar-title-width.spec.ts)
 (cd apps/web && pnpm e2e:run --project mobile-chrome tests/task/mobile-sidebar-title-overflow.spec.ts)
@@ -86,6 +89,7 @@ Keep desktop and phone runs sequential. Record screenshot paths and actual resul
 - `apps/web/components/task/task-item-title-fade.test.tsx` (new)
 - `apps/web/e2e/tests/task/sidebar-title-overflow.spec.ts` (new)
 - `apps/web/e2e/tests/task/mobile-sidebar-title-overflow.spec.ts` (new)
+- `apps/web/e2e/tests/task/sidebar-title-width.spec.ts`
 - This work order, its plan, and paired specification lifecycle fields.
 
 ## Dependencies

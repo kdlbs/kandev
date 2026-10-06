@@ -58,7 +58,7 @@ UI-02 Phone task picker, existing inset drawer
 Required structure: only title text fades, short titles stay opaque, and badges remain outside the mask.
 Phone composition retains the existing picker, safe-area handling, list scroll owner, and visible touch actions.
 Spacing and text are illustrative. No new localized copy is required.
-Both views map to AC-UI-SIDEBAR-TITLE-OVERFLOW-001.1 through .6.
+Both views map to AC-UI-SIDEBAR-TITLE-OVERFLOW-001.1 through .7.
 
 ## Tests
 
@@ -70,6 +70,7 @@ Do not substitute class-string assertions for browser mask and geometry checks.
 ## E2E tests
 
 - Add `e2e/tests/task/sidebar-title-overflow.spec.ts` in `chromium`: long and short titles, nested rows, resize, hover scrolling and reset, light/dark selected/default rows (.1-.6).
+- Verify forced-colors mask removal (.7) and the proportional fade at narrow title widths (.1).
 - Add `e2e/tests/task/mobile-sidebar-title-overflow.spec.ts` in `mobile-chrome`: open the task picker, inspect masks, verify visible 44px actions and containment, then tap a long-title row and verify navigation (.1-.3/.5/.6).
 - Cover 767px and 768px fine-pointer widths in the desktop spec to verify the phone/desktop entry-point boundary.
 - Run existing `sidebar-title-width.spec.ts` to guard adjacent badge and trailing-column geometry (.3).

@@ -9,7 +9,7 @@ function taskRow(sidebar: Locator, taskId: string) {
 }
 
 function titleElement(row: Locator) {
-  return row.locator("span.overflow-hidden").first();
+  return row.getByTestId("task-item-title");
 }
 
 async function maskImage(title: Locator) {
@@ -145,4 +145,60 @@ test("sidebar title fades overflow and preserves hover disclosure across row sta
   await expect(session.sidebar).toBeVisible();
   await expect(activeTitle).toHaveAttribute("data-truncated", "true");
   await expect.poll(() => maskImage(activeTitle)).toContain("linear-gradient");
+});
+
+test("disables the task title fade in forced colors", async ({ testPage, apiClient, seedData }) => {
+  // @covers AC-UI-SIDEBAR-TITLE-OVERFLOW-001.7
+  const task = await apiClient.createTask(seedData.workspaceId, LONG_TITLE, {
+    workflow_id: seedData.workflowId,
+    workflow_step_id: seedData.startStepId,
+  });
+
+  await testPage.setViewportSize({ width: 1280, height: 900 });
+  await testPage.goto(`/t/${task.id}`);
+  const session = new SessionPage(testPage);
+  await session.waitForLoad();
+  const title = titleElement(taskRow(session.sidebar, task.id));
+  await expect(title).toHaveAttribute("data-truncated", "true");
+  await expect.poll(() => maskImage(title)).toContain("linear-gradient");
+
+  await testPage.emulateMedia({ forcedColors: "active" });
+  await expect
+    .poll(() => testPage.evaluate(() => matchMedia("(forced-colors: active)").matches))
+    .toBe(true);
+  await expect.poll(() => maskImage(title)).toBe("none");
+});
+
+test("keeps the title fade narrow when little title width is available", async ({
+  testPage,
+  apiClient,
+  seedData,
+}) => {
+  // @covers AC-UI-SIDEBAR-TITLE-OVERFLOW-001.1
+  const task = await apiClient.createTask(seedData.workspaceId, LONG_TITLE, {
+    workflow_id: seedData.workflowId,
+    workflow_step_id: seedData.startStepId,
+  });
+
+  await testPage.setViewportSize({ width: 767, height: 900 });
+  await testPage.goto(`/t/${task.id}`);
+  const session = new SessionPage(testPage);
+  await session.waitForLoad();
+  const mobilePickerTrigger = testPage.getByTestId("mobile-task-picker-trigger");
+  await expect(mobilePickerTrigger).toBeVisible();
+  await mobilePickerTrigger.click();
+  const picker = testPage.getByRole("dialog", { name: "Tasks" });
+  const title = titleElement(taskRow(picker, task.id));
+  await expect(title).toBeVisible();
+  await title.evaluate((element) => {
+    (element as HTMLElement).style.width = "24px";
+  });
+  await expect(title).toHaveAttribute("data-truncated", "true");
+  const dimensions = await title.evaluate((element) => ({
+    clientWidth: element.clientWidth,
+    scrollWidth: element.scrollWidth,
+  }));
+  expect(dimensions.clientWidth).toBe(24);
+  expect(dimensions.scrollWidth).toBeGreaterThan(dimensions.clientWidth);
+  await expect.poll(() => maskImage(title)).toContain("min(16px, 33%)");
 });

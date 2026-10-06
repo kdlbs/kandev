@@ -9,7 +9,7 @@ function taskRow(surface: Locator, taskId: string) {
 }
 
 function titleElement(row: Locator) {
-  return row.locator("span.overflow-hidden").first();
+  return row.getByTestId("task-item-title");
 }
 
 async function maskImage(title: Locator) {

@@ -33,14 +33,16 @@ Keep the intrinsic title width and `min-w-0` behavior so short titles retain adj
 ## Text mask
 
 In `apps/web/app/globals.css`, apply `mask-image` and `-webkit-mask-image` only when that title span is clipped.
-Use a horizontal alpha gradient from opaque to transparent across approximately the final 16 CSS pixels.
+Use a horizontal alpha gradient from opaque to transparent across at most the final 16 CSS pixels or one-third of the title width, whichever is smaller.
 Use the title's full width for the mask and do not mask its containing row.
-The fade width is a starting visual value, subject to desktop and phone screenshot inspection.
+This keeps a narrow title from losing most of its visible characters.
 
-Remove the mask while a fine pointer hovers directly over the title.
+Remove the mask while a fine pointer hovers directly over the title, including when that pointer is secondary on a hybrid device.
 The existing scroll animation then reveals the ending without masking its final characters.
 On pointer leave, the primitive resets its transform and the idle mask returns.
-Coarse-pointer interaction retains the idle fade and existing tap navigation.
+Coarse-only interaction retains the idle fade and existing tap navigation.
+
+In forced-colors mode, remove both mask properties after the hover rules so title text remains visible even while hovered.
 
 An alpha mask follows the actual row background in every theme and selection state.
 If masks are unsupported, the existing hard clipping remains functional.
@@ -58,9 +60,9 @@ The complete string remains in the DOM. No text replacement or accessibility hid
 
 Component tests cover clipped and fitting titles, resize changes, text changes, and complete DOM text.
 Existing hook tests remain the evidence for observer lifecycle and content recomputation.
-Desktop browser checks prove real overflow, title-only masking, hover disclosure, and stable badge geometry.
+Desktop browser checks prove real overflow, title-only masking, forced-colors behavior, hover disclosure, and stable badge geometry.
 Phone checks prove the same fade in the task picker, visible touch actions, task navigation, and viewport containment.
-Capture light and dark rows in default, selected, and hovered states.
+Capture light and dark rows in default, selected, and hovered states. Check the capped fade at a narrow available title width.
 
 ## Related designs
 
