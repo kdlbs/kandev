@@ -87,6 +87,7 @@ func provideOrchestrator(
 	agentManagerClient := newLifecycleAdapter(lifecycleMgr, agentRegistry, log)
 
 	serviceCfg := orchestrator.DefaultServiceConfig()
+	serviceCfg.ProviderInterruptionContinuation = cfg != nil && cfg.Features.ProviderInterruptionContinuation
 	serviceCfg.ClaudeBackgroundPromptHandoff =
 		cfg != nil && cfg.Features.ClaudeBackgroundPromptHandoff
 	serviceCfg.ClaudeMidTurnSteering =
@@ -185,6 +186,7 @@ func provideOrchestrator(
 	// the manager to enforce the per-automation retention window.
 	orchestratorSvc.SetWorktreeManager(lifecycleMgr.WorktreeManager())
 	orchestratorSvc.SetTaskLaunchRecoveryService(taskSvc)
+	orchestratorSvc.SetWorkspaceRecoveryErrorReporter(taskSvc)
 
 	msgCreator := &messageCreatorAdapter{svc: taskSvc, logger: log}
 	orchestratorSvc.SetMessageCreator(msgCreator)

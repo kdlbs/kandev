@@ -2,6 +2,7 @@
 status: active
 system: agents
 created: 2026-09-29
+updated: 2026-10-05
 owners:
   - kandev
 ---
@@ -61,6 +62,14 @@ This capability extends the launch context of discovery.
 - **AC-AGENTS-PROFILE-DISCOVERY-003.2:** Refresh shall show progress and then either matching choices or a retryable error. Stale choices shall not appear authoritative. When discovery reports that provider authentication is required or the provider is not installed, the profile editor shall retain its existing login and host-terminal recovery actions alongside refresh.
 - **AC-AGENTS-PROFILE-DISCOVERY-003.3:** Refresh, failure, and a missing selected model shall preserve draft and saved selections. Existing save and model-option reconciliation rules shall remain effective.
 - **AC-AGENTS-PROFILE-DISCOVERY-003.4:** Desktop and phone editors shall offer the same refresh, selection, and retry outcomes through localized, keyboard-accessible and touch-accessible controls.
+- **AC-AGENTS-PROFILE-DISCOVERY-003.5:** The profile editor's model-list refresh
+  shall use a compact icon action aligned with its selectors, with a localized
+  accessible name and busy feedback. At the standard font size it shall measure
+  28px square on fine-pointer desktop and at least 44px square on phone or
+  coarse-pointer surfaces, following the shared
+  [control-sizing contract](../../ui/requirements/control-sizing.md). Error,
+  retry, and authentication recovery shall remain available without enlarging
+  the desktop refresh action.
 
 ## Out of scope
 
@@ -75,3 +84,4 @@ Host discovery remains an editing aid. Executor startup retains its existing mod
 ## Implementation plans
 
 - [Profile capability discovery](../../../plans/profile-capability-discovery/plan.md)
+- [First-run agent setup and compact profile refresh](../../../plans/first-run-agent-setup/plan.md)

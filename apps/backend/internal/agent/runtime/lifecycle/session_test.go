@@ -969,6 +969,7 @@ func TestAuggieTaskStartRequiresSelectedModel(t *testing.T) {
 		wantError     string
 	}{
 		{name: "task Auggie rejects profile fallback", agentID: "auggie", taskScope: TaskLaunchScopeTask, profileModel: "missing-model", wantStartFail: true, wantError: "requested_not_advertised"},
+		{name: "automation Auggie rejects profile fallback", agentID: "auggie", taskScope: TaskLaunchScopeAutomation, profileModel: "missing-model", wantStartFail: true, wantError: "requested_not_advertised"},
 		{name: "task Auggie rejects missing runtime override", agentID: "auggie", taskScope: TaskLaunchScopeTask, profileModel: "gpt-5", runtimeModel: "missing-model", wantStartFail: true, wantError: "requested_not_advertised"},
 		{name: "task Auggie rejects selected model refusal", agentID: "auggie", taskScope: TaskLaunchScopeTask, profileModel: "gpt-5", rejectModel: true, wantStartFail: true, wantError: "failed to set start model"},
 		{name: "native resumed task Auggie preserves stored conversation when runtime model is missing", agentID: "auggie", taskScope: TaskLaunchScopeTask, profileModel: "gpt-5", runtimeModel: "missing-model", nativeResume: true, wantStartFail: true, wantError: "requested_not_advertised"},

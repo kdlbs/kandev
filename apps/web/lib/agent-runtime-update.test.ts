@@ -23,6 +23,7 @@ describe("latestRuntimeVersions", () => {
 });
 
 const preview = (overrides: Partial<AgentUpdatePreview> = {}): AgentUpdatePreview => ({
+  update_mode: "pinned",
   agent_name: "claude-acp",
   package: "@agentclientprotocol/claude-agent-acp",
   current_version: "0.62.0",
@@ -33,6 +34,7 @@ const preview = (overrides: Partial<AgentUpdatePreview> = {}): AgentUpdatePrevie
 });
 
 const job = (overrides: Partial<AgentUpdateJob> = {}): AgentUpdateJob => ({
+  update_mode: "pinned",
   job_id: "runtime-update-job-1",
   agent_name: "claude-acp",
   status: "failed",
@@ -147,6 +149,23 @@ describe("canApproveAgentRuntimeUpdate", () => {
         preview: preview({ current_version: "", operation: "repair" }),
       }),
     ).toBe(true);
+  });
+
+  it.each([
+    ["update", true],
+    ["repair", true],
+    ["up_to_date", false],
+  ] as const)("allows targetless self-update %s = %s", (operation, expected) => {
+    expect(
+      canApproveAgentRuntimeUpdate({
+        ...ready,
+        preview: {
+          ...preview({ target_version: "", current_version: "" }),
+          update_mode: "self_update",
+          operation,
+        } as AgentUpdatePreview,
+      }),
+    ).toBe(expected);
   });
 
   it("uses operation state instead of translated labels", () => {

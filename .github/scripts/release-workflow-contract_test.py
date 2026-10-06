@@ -20,6 +20,7 @@ RUNTIME_SIZE_REPORT_SCRIPT_PATH = REPO_ROOT / "scripts" / "release" / "write-run
 PUBLIC_KEY_PATH = REPO_ROOT / ".github" / "release-signing-key.asc"
 RELEASE_PROCESS_PATH = REPO_ROOT / "docs" / "public" / "release-process.md"
 LINT_WORKFLOW_PATH = REPO_ROOT / ".github" / "workflows" / "lint-action-pinning.yml"
+REMOTE_HELPER_ASSETS_PATH = REPO_ROOT / "scripts" / "release" / "remote-helper-assets.mjs"
 WORKFLOW = WORKFLOW_PATH.read_text()
 DIAGNOSTICS = DIAGNOSTICS_PATH.read_text()
 PUBLISH_NPM = PUBLISH_NPM_PATH.read_text()
@@ -31,6 +32,14 @@ NORMAL_RELEASE_IF = (
     "if: ${{ !inputs.dry_run && !inputs.desktop_validation_only "
     "&& inputs.backfill_tag == '' }}"
 )
+CANONICAL_HELPERS = (
+    "agentctl-linux-amd64",
+    "agentctl-linux-arm64",
+    "agentctl-darwin-amd64",
+    "agentctl-darwin-arm64",
+)
+HELPER_VERSION = "v1.2.3"
+HELPER_COMMIT = "a" * 40
 
 
 def step_block(name: str) -> str:
@@ -60,7 +69,207 @@ def job_condition(name: str) -> str:
     return " ".join(match.group().split())
 
 
+def job_step_block(job_name: str, name: str) -> str:
+    job = job_block(job_name)
+    marker = f"      - name: {name}"
+    start = job.find(marker)
+    if start == -1:
+        raise AssertionError(f"step not found in {job_name}: {name}")
+    next_step = re.search(r"\n      - (?:name|uses): ", job[start + 1 :])
+    end = len(job) if next_step is None else start + 1 + next_step.start()
+    return job[start:end]
+
+
+def step_run_script(block: str) -> str:
+    lines = block.splitlines()
+    for index, line in enumerate(lines):
+        if line != "        run: |":
+            continue
+        script_lines = []
+        for script_line in lines[index + 1 :]:
+            if script_line and not script_line.startswith("          "):
+                break
+            script_lines.append(script_line[10:] if script_line else "")
+        return "\n".join(script_lines).rstrip() + "\n"
+    raise AssertionError("step has no multiline run script")
+
+
 class ReleaseWorkflowContractTest(unittest.TestCase):
+    def test_contributor_notifications_require_every_stable_publication_channel(self) -> None:
+        self.assertRegex(
+            WORKFLOW,
+            r"(?ms)      notify_contributors:\n"
+            r"        description: \"[^\"]+\"\n"
+            r"        type: boolean\n"
+            r"        default: false",
+        )
+        job = job_block("notify-contributors")
+        condition = job_condition("notify-contributors")
+        self.assertIn(
+            "needs: [prepare, publish-release, publish-npm, update-homebrew-tap, update-scoop-bucket]",
+            job,
+        )
+        success_gates = (
+            "needs.prepare.result == 'success'",
+            "needs.publish-release.result == 'success'",
+            "needs.publish-npm.result == 'success'",
+            "needs.update-homebrew-tap.result == 'success'",
+            "needs.update-scoop-bucket.result == 'success'",
+        )
+        for requirement in (
+            "!cancelled()",
+            "github.event_name == 'workflow_dispatch'",
+            "inputs.channel == 'stable'",
+            "inputs.notify_contributors",
+            "!inputs.dry_run",
+            "!inputs.desktop_validation_only",
+            *success_gates,
+        ):
+            with self.subTest(requirement=requirement):
+                self.assertIn(requirement, condition)
+
+        normalized_condition = re.sub(r"\s+", "", condition)
+        required_conjunction = "&&".join(gate.replace(" ", "") for gate in success_gates)
+        self.assertIn(required_conjunction, normalized_condition)
+
+        self.assertNotIn("inputs.backfill_tag", condition)
+        self.assertIn("uses: ./.github/workflows/notify-release-contributors.yml", job)
+        self.assertIn("release_tag: ${{ needs.prepare.outputs.tag }}", job)
+        self.assertIn("dry_run: false", job)
+        self.assertIn("contents: read", job)
+        self.assertIn("pull-requests: write", job)
+
+    def create_downloaded_helper_artifact(self, root: Path, stable: bool) -> tuple[Path, str]:
+        source_dir = root / "source-bin"
+        source_dir.mkdir(parents=True)
+        version = HELPER_VERSION if stable else "v1.3.0-nightly.sha123456789abc"
+        artifact_dir = root / "dist" / "remote-helper-artifact"
+        for index, helper in enumerate(CANONICAL_HELPERS):
+            source = source_dir / helper
+            source.write_bytes(f"canonical helper {index}\n".encode())
+            source.chmod(0o755)
+
+        result = subprocess.run(
+            [
+                "node",
+                str(REMOTE_HELPER_ASSETS_PATH),
+                "build",
+                "--bin-dir",
+                str(source_dir),
+                "--output-dir",
+                str(artifact_dir),
+                "--version",
+                version,
+                "--commit",
+                HELPER_COMMIT,
+                "--stable",
+                str(stable).lower(),
+            ],
+            cwd=REPO_ROOT,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        for helper in CANONICAL_HELPERS:
+            (artifact_dir / "bin" / helper).chmod(0o644)
+        return artifact_dir, version
+
+    def run_helper_verifier(
+        self, artifact_dir: Path, version: str, stable: bool, commit: str = HELPER_COMMIT
+    ) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            [
+                "node",
+                str(REMOTE_HELPER_ASSETS_PATH),
+                "verify-artifact",
+                "--artifact-dir",
+                str(artifact_dir),
+                "--version",
+                version,
+                "--commit",
+                commit,
+                "--stable",
+                str(stable).lower(),
+            ],
+            cwd=REPO_ROOT,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+    def run_helper_restoration(self, job_name: str, root: Path) -> subprocess.CompletedProcess[str]:
+        restore = step_run_script(
+            job_step_block(job_name, "Restore canonical helper executable modes")
+        )
+        return subprocess.run(
+            ["bash", "-euo", "pipefail", "-c", restore],
+            cwd=root,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+    def test_downloaded_canonical_helpers_restore_executable_modes(self) -> None:
+        consumers = (("build-bundles", (True, False)), ("verify-release-assets", (True,)))
+        for job_name, variants in consumers:
+            for stable in variants:
+                with self.subTest(job=job_name, stable=stable), tempfile.TemporaryDirectory() as temp:
+                    root = Path(temp)
+                    artifact_dir, version = self.create_downloaded_helper_artifact(root, stable)
+                    helper_bytes = {
+                        helper: (artifact_dir / "bin" / helper).read_bytes()
+                        for helper in CANONICAL_HELPERS
+                    }
+
+                    result = self.run_helper_restoration(job_name, root)
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    for helper in CANONICAL_HELPERS:
+                        path = artifact_dir / "bin" / helper
+                        self.assertEqual(path.stat().st_mode & 0o777, 0o755)
+                        self.assertEqual(path.read_bytes(), helper_bytes[helper])
+
+                    verification = self.run_helper_verifier(artifact_dir, version, stable)
+                    self.assertEqual(verification.returncode, 0, verification.stderr)
+
+    def test_missing_downloaded_canonical_helper_blocks_restoration(self) -> None:
+        for job_name in ("build-bundles", "verify-release-assets"):
+            with self.subTest(job=job_name), tempfile.TemporaryDirectory() as temp:
+                root = Path(temp)
+                artifact_dir, _ = self.create_downloaded_helper_artifact(root, stable=True)
+                (artifact_dir / "bin" / CANONICAL_HELPERS[0]).unlink()
+
+                result = self.run_helper_restoration(job_name, root)
+                self.assertNotEqual(result.returncode, 0)
+
+    def test_helper_restoration_preserves_artifact_identity_validation(self) -> None:
+        for job_name in ("build-bundles", "verify-release-assets"):
+            with self.subTest(job=job_name), tempfile.TemporaryDirectory() as temp:
+                root = Path(temp)
+                artifact_dir, version = self.create_downloaded_helper_artifact(root, stable=True)
+
+                restoration = self.run_helper_restoration(job_name, root)
+                self.assertEqual(restoration.returncode, 0, restoration.stderr)
+                verification = self.run_helper_verifier(
+                    artifact_dir, version, stable=True, commit="b" * 40
+                )
+                self.assertNotEqual(verification.returncode, 0)
+                self.assertIn("identity does not match", verification.stderr)
+
+    def test_helper_restoration_follows_download_and_precedes_helper_use(self) -> None:
+        for job_name in ("build-bundles", "verify-release-assets"):
+            with self.subTest(job=job_name):
+                job = job_block(job_name)
+                download = job_step_block(job_name, "Download canonical remote helpers")
+                restore = job_step_block(job_name, "Restore canonical helper executable modes")
+                self.assertLess(job.index(download), job.index(restore))
+                restore_index = job.index(restore)
+                verify_index = job.index("node scripts/release/remote-helper-assets.mjs verify-artifact")
+                self.assertLess(restore_index, verify_index)
+                if job_name == "build-bundles":
+                    package = job_step_block(job_name, "Package bundle")
+                    self.assertLess(restore_index, job.index(package))
+
     def test_agentctl_dependency_guard_covers_release_target_build_modes(self) -> None:
         guard = (REPO_ROOT / "scripts" / "check-agentctl-deps.sh").read_text()
         for target in (

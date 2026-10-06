@@ -249,6 +249,44 @@ describe("last seen display websocket sync", () => {
   });
 });
 
+describe("message time display websocket sync", () => {
+  it("maps valid and unknown values while preserving omitted values", () => {
+    const store = makeStore();
+    expect(store.getState().userSettings.messageTimeDisplay).toBe("relative");
+    const handler = registerUsersHandlers(store)["user.settings.updated"];
+    handler?.(userSettingsMessage({ message_time_display: "absolute_long" }));
+    expect(store.getState().userSettings.messageTimeDisplay).toBe("absolute_long");
+    handler?.(
+      userSettingsMessage({
+        message_time_display: "unexpected",
+      } as unknown as Partial<BackendMessageMap["user.settings.updated"]["payload"]>),
+    );
+    expect(store.getState().userSettings.messageTimeDisplay).toBe("relative");
+    store.setState((state) => ({
+      ...state,
+      userSettings: { ...state.userSettings, messageTimeDisplay: "absolute_short", revision: 4 },
+    }));
+    handler?.(userSettingsMessage({ revision: 5 }));
+    expect(store.getState().userSettings.messageTimeDisplay).toBe("absolute_short");
+  });
+
+  it("ignores a stale revision carrying an older display value", () => {
+    const store = makeStore();
+    store.setState((state) => ({
+      ...state,
+      userSettings: {
+        ...state.userSettings,
+        messageTimeDisplay: "absolute_short",
+        revision: 4,
+      },
+    }));
+    registerUsersHandlers(store)["user.settings.updated"]?.(
+      userSettingsMessage({ message_time_display: "relative", revision: 3 }),
+    );
+    expect(store.getState().userSettings.messageTimeDisplay).toBe("absolute_short");
+  });
+});
+
 // eslint-disable-next-line max-lines-per-function -- The handler contract cases share one store fixture and revision setup.
 describe("user settings websocket handler", () => {
   it("hydrates Threads views independently from sidebar views", () => {

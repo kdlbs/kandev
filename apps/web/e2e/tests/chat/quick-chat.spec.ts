@@ -121,8 +121,11 @@ test.describe("Quick Chat", () => {
   test("returns focus without a visible indicator", async ({ testPage }) => {
     await testPage.goto("/");
     await testPage.waitForLoadState("networkidle");
-    const dialog = await openQuickChatSetup(testPage, false);
     const launcher = testPage.getByTestId("sidebar-quick-chat-shortcut");
+    const restingBorder = await launcher.evaluate(
+      (element) => getComputedStyle(element).borderColor,
+    );
+    const dialog = await openQuickChatSetup(testPage, false);
 
     await testPage.keyboard.press("Escape");
 
@@ -140,12 +143,11 @@ test.describe("Quick Chat", () => {
     });
     expect(silentStyles.outlineStyle).toBe("none");
     expect(silentStyles.boxShadow).toBe("none");
-    expect(silentStyles.borderColor).toBe("rgba(0, 0, 0, 0)");
+    await expect(launcher).toHaveCSS("border-color", restingBorder);
 
     await testPage.getByTestId("create-task-button").focus();
     await expect(launcher).not.toHaveAttribute("data-quick-chat-silent-focus");
 
-    await testPage.keyboard.press("Tab");
     await testPage.keyboard.press("Tab");
     await expect(launcher).toBeFocused();
 
@@ -207,7 +209,10 @@ test.describe("Quick Chat", () => {
       });
 
       const dialog = await openQuickChatSetup(testPage);
-      await dialog.getByTestId("quick-chat-start").click();
+      await dialog
+        .getByTestId("task-description-input")
+        .fill("Check the terminal after Quick Chat starts.");
+      await dialog.getByTestId("quick-chat-send").click();
 
       const terminal = dialog.getByTestId("passthrough-terminal");
       await expect(terminal).toBeVisible({ timeout: 15_000 });
@@ -482,7 +487,7 @@ test.describe("Quick Chat", () => {
     await expect(editor).toHaveText("fallback draft");
   });
 
-  test("offers configuration chat in setup and hides it once one exists", async ({
+  test("offers configuration mode on the opening composer and hides it once one exists", async ({
     testPage,
     apiClient,
     seedData,
@@ -493,17 +498,12 @@ test.describe("Quick Chat", () => {
     const dialog = await openQuickChatSetup(testPage);
     const setup = dialog.getByTestId("quick-chat-setup");
 
-    await expect(setup.getByText(/quick chats stay outside your task board/i)).toBeVisible();
-    await setup.getByRole("switch", { name: "Configuration chat" }).click();
-
-    const configSetup = dialog.getByTestId("config-chat-setup");
-    await expect(configSetup).toBeVisible();
-    await expect(configSetup.getByRole("switch", { name: "Configuration chat" })).toBeChecked();
-    await configSetup
-      .getByPlaceholder("Ask anything about your configuration...")
-      .fill("/e2e:simple-message");
-    await configSetup.getByRole("button", { name: "Start configuration chat" }).click();
-    await expect(configSetup).not.toBeVisible({ timeout: 15_000 });
+    const modeSwitch = setup.getByRole("switch", { name: "Configuration chat" });
+    await modeSwitch.click();
+    await expect(modeSwitch).toBeChecked();
+    await setup.getByTestId("task-description-input").fill("/e2e:simple-message");
+    await setup.getByTestId("quick-chat-send").click();
+    await expect(setup).not.toBeVisible({ timeout: 15_000 });
 
     await testPage.keyboard.press("Escape");
     await expect(dialog).not.toBeVisible();
@@ -595,7 +595,7 @@ test.describe("Quick Chat", () => {
       };
     });
     expect(setupSurfaces.setup).toBe(setupSurfaces.dialog);
-    expect(setupSurfaces.footer).toBe(setupSurfaces.setup);
+    expect(setupSurfaces.footer).toBeNull();
 
     await startQuickChatFromSetup(dialog, testPage);
     const surfaces = await dialog.evaluate((element) => {
@@ -642,24 +642,19 @@ test.describe("Quick Chat", () => {
       await expect(dialog.getByTestId("quick-chat-introduction")).toContainText(
         "Chat with an agent about an idea, question, or codebase.",
       );
-      await expect(dialog.getByTestId("quick-chat-introduction")).toContainText(
-        "Quick chats stay outside your task board.",
-      );
-      await expect(
-        dialog.getByText("Add repository context to focus on specific code and branches."),
-      ).toBeVisible();
+      await expect(dialog.getByTestId("add-repository")).toBeVisible();
       await selectAgentIfNeeded(dialog, testPage);
 
       await dialog.getByTestId("add-repository").click();
-      await dialog.getByTestId("repo-chip-trigger").click();
-      await testPage.getByRole("option").first().click();
+      await testPage.locator(`[role="option"][data-value="${seedData.repositoryId}"]`).click();
       await dialog.getByTestId("branch-chip-trigger").click();
       await testPage.locator(`[role="option"][data-value="${contextBranch}"]`).click();
 
       const startRequest = testPage.waitForRequest(
         (request) => request.url().includes("/quick-chat") && request.method() === "POST",
       );
-      await dialog.getByTestId("quick-chat-start").click();
+      await dialog.getByTestId("task-description-input").fill("Review the selected branch.");
+      await dialog.getByTestId("quick-chat-send").click();
       const payload = (await startRequest).postDataJSON() as {
         repositories?: Array<{ repository_id: string; base_branch: string }>;
       };

@@ -135,9 +135,8 @@ func (s *DashboardService) UpdateTaskParentID(ctx context.Context, taskID, paren
 		}
 		return nil
 	}
-	// Preflight existence so a concurrent parent deletion (or a direct hit on
-	// the endpoint) cannot write a dangling parent_id — mirroring the
-	// canonical resolveParentID guard.
+	// Fail fast on a missing parent. The repository rechecks existence under
+	// shared hierarchy admission before the scalar write.
 	parent, err := s.repo.GetTaskByID(ctx, parentID)
 	if err != nil {
 		return fmt.Errorf("resolve parent task: %w", err)

@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -49,6 +50,9 @@ type sidebarTaskPageEntryResponse struct {
 
 func (h *TaskHandlers) httpQuerySidebarTasks(c *gin.Context) {
 	query, malformed, validationErr := decodeSidebarTaskQuery(c)
+	if abortSidebarRequestIfCanceled(c) {
+		return
+	}
 	if malformed {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid sidebar query", "error_code": "sidebar_query_invalid",
 			"details": gin.H{"reason": "malformed_query"}})
@@ -60,13 +64,22 @@ func (h *TaskHandlers) httpQuerySidebarTasks(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": validationErr.Error(), "error_code": "sidebar_query_invalid", "details": details})
 		return
 	}
+	if abortSidebarRequestIfCanceled(c) {
+		return
+	}
 
 	var prefs models.SidebarTaskViewPreferences
 	if h.sidebarSettingsReader != nil {
 		settings, err := h.sidebarSettingsReader.GetUserSettings(c.Request.Context())
 		if err != nil {
+			if h.abortSidebarRequestAfterRead(c, "failed to read sidebar task preferences", err) {
+				return
+			}
 			h.logger.Error("failed to read sidebar task preferences", zap.Error(err))
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "request failed"})
+			return
+		}
+		if abortSidebarRequestIfCanceled(c) {
 			return
 		}
 		if settings != nil {
@@ -79,9 +92,17 @@ func (h *TaskHandlers) httpQuerySidebarTasks(c *gin.Context) {
 	}
 
 	page, err := h.service.QuerySidebarTaskPage(c.Request.Context(), c.Param("id"), query, prefs)
+	if h.abortSidebarRequestAfterRead(c, "sidebar task query failed", err) {
+		return
+	}
 	if err != nil {
 		if errors.Is(err, service.ErrSidebarTaskViewUnavailable) {
 			h.logger.Error("sidebar task query repository unavailable", zap.Error(err))
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "request failed"})
+			return
+		}
+		if errors.Is(err, context.Canceled) {
+			h.logger.Error("sidebar task query failed", zap.Error(err))
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "request failed"})
 			return
 		}
@@ -89,12 +110,40 @@ func (h *TaskHandlers) httpQuerySidebarTasks(c *gin.Context) {
 		return
 	}
 	response, err := h.sidebarTaskPageResponse(c, page)
+	if h.abortSidebarRequestAfterRead(c, "failed to enrich sidebar task page", err) {
+		return
+	}
 	if err != nil {
 		h.logger.Error("failed to enrich sidebar task page", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "request failed"})
 		return
 	}
+	if abortSidebarRequestIfCanceled(c) {
+		return
+	}
 	c.JSON(http.StatusOK, response)
+}
+
+func abortSidebarRequestIfCanceled(c *gin.Context) bool {
+	if c.Request.Context().Err() != context.Canceled {
+		return false
+	}
+	if c.Writer.Written() {
+		c.Abort()
+	} else {
+		abortClientDisconnect(c)
+	}
+	return true
+}
+
+func (h *TaskHandlers) abortSidebarRequestAfterRead(c *gin.Context, message string, err error) bool {
+	if c.Request.Context().Err() != context.Canceled {
+		return false
+	}
+	if err != nil && !errors.Is(err, context.Canceled) {
+		h.logger.Error(message, zap.Error(err))
+	}
+	return abortSidebarRequestIfCanceled(c)
 }
 
 func decodeSidebarTaskQuery(c *gin.Context) (models.SidebarTaskViewQuery, bool, error) {

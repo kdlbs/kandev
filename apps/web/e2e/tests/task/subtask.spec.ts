@@ -895,6 +895,10 @@ test.describe("Subtask dialog feature parity", () => {
     const gitEnv = makeGitEnv(backend.tmpDir);
     execSync("git init -b main", { cwd: repoDir, env: gitEnv });
     execSync('git commit --allow-empty -m "init"', { cwd: repoDir, env: gitEnv });
+    execSync("git remote add origin https://github.com/subtask-owner/subtask-repo.git", {
+      cwd: repoDir,
+      env: gitEnv,
+    });
     const ghRepo = await apiClient.createRepository(seedData.workspaceId, repoDir, "main", {
       name: "subtask-owner/subtask-repo",
       provider: "github",

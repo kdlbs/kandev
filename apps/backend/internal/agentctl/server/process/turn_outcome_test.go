@@ -85,6 +85,39 @@ func TestRecordTerminalOutcomeRetainsCompleteAndErrorEvents(t *testing.T) {
 	}
 }
 
+func TestRecordTerminalOutcomePreservesRetainedPromptFailureDisposition(t *testing.T) {
+	recorder := &fakeTurnOutcomeRecorder{}
+	m := &Manager{}
+	m.SetTurnOutcomeRecorder("instance-1", recorder)
+	event := adapter.AgentEvent{
+		Type:                     adapter.EventTypeError,
+		PromptFailureDisposition: streams.PromptFailureDispositionRetainRuntime,
+	}
+	m.recordTerminalOutcome(&event)
+	if len(recorder.calls) != 1 {
+		t.Fatalf("recorder calls = %d, want 1", len(recorder.calls))
+	}
+	if got := recorder.calls[0].event.PromptFailureDisposition; got != streams.PromptFailureDispositionRetainRuntime {
+		t.Fatalf("retained disposition = %q, want retain_runtime", got)
+	}
+}
+
+func TestRecordTerminalOutcomeCopiesCapacityContinuationSnapshot(t *testing.T) {
+	recorder := &fakeTurnOutcomeRecorder{}
+	m := &Manager{}
+	m.SetTurnOutcomeRecorder("instance-1", recorder)
+	snapshot := &streams.CapacityContinuationSnapshot{
+		Support: streams.CapacityContinuationCodexLiveSessionV1, PromptGeneration: 7,
+		EvidenceComplete: true, CompletedTools: 2,
+	}
+	event := adapter.AgentEvent{Type: adapter.EventTypeError, CapacityContinuation: snapshot}
+	m.recordTerminalOutcome(&event)
+	snapshot.CompletedTools = 99
+	if got := recorder.calls[0].event.CapacityContinuation.CompletedTools; got != 2 {
+		t.Fatalf("retained completed tool count = %d, want immutable value 2", got)
+	}
+}
+
 // TestRecordTerminalOutcomeIgnoresNonTerminalEvents pins that every other
 // event type -- including the two excluded MCP-attachment sites' type and
 // the permission lifecycle types -- must never reach the recorder. AC-004 is

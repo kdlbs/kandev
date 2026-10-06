@@ -16,6 +16,7 @@ function makeStore() {
 
 function updateJob(overrides: Record<string, unknown> = {}) {
   return {
+    update_mode: "pinned",
     job_id: "update-1",
     agent_name: AGENT_NAME,
     status: "updating",

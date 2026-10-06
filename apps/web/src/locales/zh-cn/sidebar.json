@@ -137,5 +137,6 @@
   "filterListLimit": "筛选条件 {{filter}} 的选项过多。最多可选择 {{limit}} 项。",
   "filterValueLimit": "筛选条件 {{filter}} 中的值过长。请限制在 {{limit}} 字节以内。",
   "filterInvalid": "筛选条件 {{filter}} 无效。请检查其值和运算符。",
-  "filterCountLimit": "此视图的筛选条件过多。最多可使用 {{limit}} 个。"
+  "filterCountLimit": "此视图的筛选条件过多。最多可使用 {{limit}} 个。",
+  "filtersActive": "筛选已启用"
 }

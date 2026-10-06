@@ -101,8 +101,8 @@ func TestManagedConversationLifetime(t *testing.T) {
 		t.Fatalf("Delete with lost response = %+v, err=%v; want pending unavailable", firstDelete, err)
 	}
 	replayedDelete, err := manager.Delete(context.Background(), deleteRequest)
-	if err != nil || replayedDelete.Status != pluginsdk.CommandAlreadyApplied {
-		t.Fatalf("Delete retry after committed mutation = %+v, err=%v; want ALREADY_APPLIED", replayedDelete, err)
+	if err != nil || replayedDelete.Status != pluginsdk.CommandNotFound {
+		t.Fatalf("Delete retry after committed mutation = %+v, err=%v; want NOT_FOUND without durable deletion evidence", replayedDelete, err)
 	}
 	if _, err := svc.approvalRevoke(record.InstallationID, "workspace-one", "human", "revoke", "approval-revoke"); err != nil {
 		t.Fatalf("revoke managed conversation access: %v", err)

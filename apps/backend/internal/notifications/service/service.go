@@ -411,13 +411,14 @@ func (s *Service) dispatchGenericNotification(ctx context.Context, userID string
 }
 
 type notificationPayload struct {
-	TaskID        string
-	TaskSessionID string
-	OccurrenceID  string
-	EventType     string
-	Title         string
-	Body          string
-	Payload       map[string]string
+	TaskID         string
+	TaskSessionID  string
+	OccurrenceID   string
+	EventType      string
+	Title          string
+	Body           string
+	Payload        map[string]string
+	RuntimeUpdates []models.RuntimeUpdateMember
 }
 
 // dispatchProvider hands the message to the adapter. Message.UserID is the
@@ -429,15 +430,16 @@ func (s *Service) dispatchProvider(ctx context.Context, userID string, provider 
 		return fmt.Errorf("unknown provider type: %s", provider.Type)
 	}
 	return adapter.Send(ctx, providers.Message{
-		EventType:     payload.EventType,
-		Title:         payload.Title,
-		Body:          payload.Body,
-		Payload:       payload.Payload,
-		TaskID:        payload.TaskID,
-		TaskSessionID: payload.TaskSessionID,
-		OccurrenceID:  payload.OccurrenceID,
-		UserID:        userID,
-		Config:        provider.Config,
+		EventType:      payload.EventType,
+		Title:          payload.Title,
+		Body:           payload.Body,
+		Payload:        payload.Payload,
+		TaskID:         payload.TaskID,
+		TaskSessionID:  payload.TaskSessionID,
+		OccurrenceID:   payload.OccurrenceID,
+		UserID:         userID,
+		Config:         provider.Config,
+		RuntimeUpdates: payload.RuntimeUpdates,
 	})
 }
 

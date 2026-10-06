@@ -16,6 +16,7 @@ import (
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/recoveryclaim"
 	taskrepo "github.com/kandev/kandev/internal/task/repository"
+	managed "github.com/kandev/kandev/internal/task/repository/managedconversation"
 	"github.com/kandev/kandev/internal/worktree"
 )
 
@@ -106,6 +107,7 @@ type persistedWorktreeBranchMetadata struct {
 }
 
 type taskResourceCleanupSnapshot struct {
+	ManagedDelete *managed.DeleteClaim `json:"managed_delete,omitempty"`
 	// InventoryRepair retains the successor's provenance through progress saves.
 	InventoryRepair        json.RawMessage                            `json:"inventory_repair,omitempty"`
 	Sessions               []*models.TaskSession                      `json:"sessions,omitempty"`
@@ -177,7 +179,28 @@ func (s *Service) persistTaskResourceCleanup(
 	collectSSH bool,
 	workspaceID string,
 ) (*models.TaskResourceCleanupJob, error) {
+	return s.persistTaskResourceCleanupWithManagedClaim(ctx, taskID, trigger, operationID, sessions, worktrees, stopTargets, attachments, envCleanup, prepared, collectSSH, workspaceID, nil)
+}
+
+func (s *Service) persistTaskResourceCleanupWithManagedClaim(
+	ctx context.Context,
+	taskID string,
+	trigger models.TaskResourceCleanupTrigger,
+	operationID string,
+	sessions []*models.TaskSession,
+	worktrees []*worktree.Worktree,
+	stopTargets []taskStopTarget,
+	attachments []*models.TaskMessageAttachment,
+	envCleanup taskEnvironmentCleanup,
+	prepared bool,
+	collectSSH bool,
+	workspaceID string,
+	claim *managed.DeleteClaim,
+) (*models.TaskResourceCleanupJob, error) {
 	if s.resourceCleanups == nil {
+		if claim != nil {
+			return nil, managed.ErrUnavailable
+		}
 		return nil, nil
 	}
 	if operationID == "" {
@@ -188,15 +211,7 @@ func (s *Service) persistTaskResourceCleanup(
 	if err != nil {
 		return nil, err
 	}
-	persistedAttachments := make([]persistedTaskAttachment, 0, len(attachments))
-	for _, attachment := range attachments {
-		if attachment == nil {
-			continue
-		}
-		persistedAttachments = append(persistedAttachments, persistedTaskAttachment{
-			ID: attachment.ID, OwnerID: attachment.OwnerID, StorageKey: attachment.StorageKey,
-		})
-	}
+	persistedAttachments := persistCleanupAttachments(attachments)
 	worktreeTaskDirNames := captureWorktreeTaskDirNames(worktrees)
 	worktreeBranchMetadata := captureWorktreeBranchMetadata(worktrees)
 	snapshot := taskResourceCleanupSnapshot{
@@ -224,6 +239,13 @@ func (s *Service) persistTaskResourceCleanup(
 	if err != nil {
 		return nil, fmt.Errorf("encode task resource cleanup snapshot: %w", err)
 	}
+	if claim != nil {
+		native, ok := s.tasks.(managed.DeletionRepository)
+		if !ok {
+			return nil, managed.ErrUnavailable
+		}
+		return native.PrepareManagedDeletion(ctx, *claim, string(encoded))
+	}
 	state := models.TaskResourceCleanupStatePending
 	if prepared {
 		state = models.TaskResourceCleanupStatePrepared
@@ -238,6 +260,18 @@ func (s *Service) persistTaskResourceCleanup(
 	return s.resourceCleanups.GetTaskResourceCleanupJobByOperationID(ctx, operationID)
 }
 
+func persistCleanupAttachments(attachments []*models.TaskMessageAttachment) []persistedTaskAttachment {
+	persisted := make([]persistedTaskAttachment, 0, len(attachments))
+	for _, attachment := range attachments {
+		if attachment == nil {
+			continue
+		}
+		persisted = append(persisted, persistedTaskAttachment{
+			ID: attachment.ID, OwnerID: attachment.OwnerID, StorageKey: attachment.StorageKey,
+		})
+	}
+	return persisted
+}
 func (s *Service) captureWorktreeCleanupHeadOIDs(
 	ctx context.Context, worktrees []*worktree.Worktree,
 ) (map[string]string, error) {
@@ -664,6 +698,14 @@ func (s *Service) reconcilePreparedTaskResourceCleanupJobs(
 	}
 	var errs []error
 	for _, job := range jobs {
+		claim, decodeErr := managed.DeletionEnvelope(job.ResourceSnapshot)
+		if decodeErr != nil {
+			errs = append(errs, decodeErr)
+			continue
+		}
+		if claim != nil && claim.Phase != managed.DeleteCommitted {
+			continue
+		}
 		committed, commitErr := s.preparedTaskCleanupMutationCommitted(ctx, job)
 		if commitErr != nil {
 			errs = append(errs, fmt.Errorf("verify prepared cleanup %s: %w", job.ID, commitErr))
@@ -709,6 +751,21 @@ func (s *Service) preparedTaskCleanupMutationCommitted(
 ) (bool, error) {
 	if job == nil {
 		return false, errors.New("cleanup job is unavailable")
+	}
+	claim, decodeErr := managed.DeletionEnvelope(job.ResourceSnapshot)
+	if decodeErr != nil {
+		return false, decodeErr
+	}
+	if claim != nil {
+		native, ok := s.tasks.(managed.DeletionRepository)
+		if !ok {
+			return false, managed.ErrUnavailable
+		}
+		current, _, inspectErr := native.InspectManagedDeletion(ctx, claim.DeleteRequest)
+		if inspectErr != nil {
+			return false, inspectErr
+		}
+		return current != nil && current.JobID == job.ID && current.Phase == managed.DeleteCommitted, nil
 	}
 	if job.Trigger == models.TaskResourceCleanupTriggerWorkspaceDelete && job.TaskID == "" {
 		if s.workspaces == nil {

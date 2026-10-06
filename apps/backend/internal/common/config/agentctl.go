@@ -35,7 +35,8 @@ type AgentctlStartupConfig struct {
 	// managed launch always sets Configured=true, so false is a meaningful
 	// "disabled for this launch" answer agentctl must not second-guess with
 	// its own default.
-	AgentSurvivalEnabled bool `json:"agentSurvivalEnabled"`
+	AgentSurvivalEnabled             bool `json:"agentSurvivalEnabled"`
+	ProviderInterruptionContinuation bool `json:"providerInterruptionContinuation"`
 	// PromptCancelJoinTimeout is the managed ACP cancellation acknowledgement bound.
 	// Zero preserves agentctl's built-in default for non-E2E launches.
 	PromptCancelJoinTimeout time.Duration `json:"promptCancelJoinTimeout"`
@@ -48,15 +49,16 @@ func (c *Config) ManagedAgentctlStartupConfig() AgentctlStartupConfig {
 		return AgentctlStartupConfig{}
 	}
 	return AgentctlStartupConfig{
-		Configured:                true,
-		IdleTimeout:               c.Agentctl.IdleTimeout,
-		IdleReaperInterval:        c.Agentctl.IdleReaperInterval,
-		NotificationQueueCapacity: c.Agentctl.NotificationQueueCapacity,
-		OTLPEndpoint:              c.Observability.OTLPEndpoint,
-		UnownedPeriod:             c.Agentctl.UnownedPeriod,
-		DetachedEventLimit:        c.Agentctl.DetachedEventLimit,
-		AgentSurvivalEnabled:      c.Features.AgentSurvival,
-		PromptCancelJoinTimeout:   e2ePromptCancelJoinTimeout(),
+		Configured:                       true,
+		IdleTimeout:                      c.Agentctl.IdleTimeout,
+		IdleReaperInterval:               c.Agentctl.IdleReaperInterval,
+		NotificationQueueCapacity:        c.Agentctl.NotificationQueueCapacity,
+		OTLPEndpoint:                     c.Observability.OTLPEndpoint,
+		UnownedPeriod:                    c.Agentctl.UnownedPeriod,
+		DetachedEventLimit:               c.Agentctl.DetachedEventLimit,
+		AgentSurvivalEnabled:             c.Features.AgentSurvival,
+		ProviderInterruptionContinuation: c.Features.ProviderInterruptionContinuation,
+		PromptCancelJoinTimeout:          e2ePromptCancelJoinTimeout(),
 	}
 }
 

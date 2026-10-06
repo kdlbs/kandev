@@ -1,9 +1,11 @@
 import { useEffect, useRef } from "react";
 import type { ChatInputContainerHandle } from "@/components/task/chat/chat-input-container";
 
+import type { QuickChatInitialPrompt } from "@/lib/state/slices/ui/types";
+
 type InitialDraftDelivery = {
   draft?: string;
-  initialPrompt?: string;
+  initialPrompt?: QuickChatInitialPrompt;
   chatInputRef: React.RefObject<ChatInputContainerHandle | null>;
 };
 

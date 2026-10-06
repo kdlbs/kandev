@@ -34,6 +34,7 @@ type runtimeUpdateStatusCacheEntry struct {
 
 type runtimeUpdateStatusTarget struct {
 	agentName        string
+	updateMode       dto.AgentUpdateMode
 	packageName      string
 	defaultVersion   string
 	activeVersion    string
@@ -76,7 +77,12 @@ func (c *Controller) InvalidateRuntimeUpdateStatus(packageName string) {
 	}
 	c.runtimeUpdateStatusMu.Lock()
 	defer c.runtimeUpdateStatusMu.Unlock()
-	delete(c.runtimeUpdateStatusCache, packageName)
+	delete(c.runtimeUpdateStatusCache, runtimeUpdateStatusCacheKey(packageName, dto.AgentUpdateModePinned))
+	delete(c.runtimeUpdateStatusCache, runtimeUpdateStatusCacheKey(packageName, dto.AgentUpdateModeSelfUpdate))
+}
+
+func runtimeUpdateStatusCacheKey(packageName string, mode dto.AgentUpdateMode) string {
+	return string(mode) + "\x00" + packageName
 }
 
 // ListAgentUpdateStatuses returns one non-mutating status item for each
@@ -90,36 +96,41 @@ func (c *Controller) ListAgentUpdateStatuses(ctx context.Context) (*dto.ListAgen
 
 	now := c.runtimeUpdateStatusTime()
 	entries := make(map[string]runtimeUpdateStatusCacheEntry, len(targets))
-	uniquePackages := make(map[string]struct{}, len(targets))
+	uniquePackages := make(map[string]struct {
+		packageName string
+		mode        dto.AgentUpdateMode
+	}, len(targets))
 	for _, target := range targets {
 		if target.packageName == "" || !target.available || !target.enabled {
 			continue
 		}
-		if _, exists := uniquePackages[target.packageName]; exists {
-			continue
-		}
-		uniquePackages[target.packageName] = struct{}{}
+		key := runtimeUpdateStatusCacheKey(target.packageName, target.updateMode)
+		uniquePackages[key] = struct {
+			packageName string
+			mode        dto.AgentUpdateMode
+		}{packageName: target.packageName, mode: target.updateMode}
 	}
 	type result struct {
-		packageName string
-		entry       runtimeUpdateStatusCacheEntry
+		key   string
+		entry runtimeUpdateStatusCacheEntry
 	}
 	results := make(chan result, len(uniquePackages))
-	for packageName := range uniquePackages {
-		go func(packageName string) {
-			entry := c.runtimeUpdateStatusEntry(ctx, packageName, now)
-			results <- result{packageName: packageName, entry: entry}
-		}(packageName)
+	for key, target := range uniquePackages {
+		go func(key, packageName string, mode dto.AgentUpdateMode) {
+			entry := c.runtimeUpdateStatusEntry(ctx, packageName, mode, now)
+			results <- result{key: key, entry: entry}
+		}(key, target.packageName, target.mode)
 	}
 	for range uniquePackages {
 		item := <-results
-		entries[item.packageName] = item.entry
+		entries[item.key] = item.entry
 	}
 
 	statuses := make([]dto.AgentUpdateStatusDTO, 0, len(targets))
 	for _, target := range targets {
-		entry := entries[target.packageName]
+		entry := entries[runtimeUpdateStatusCacheKey(target.packageName, target.updateMode)]
 		status := dto.AgentUpdateStatusDTO{
+			UpdateMode:          target.updateMode,
 			ManagedFallback:     target.capability.ManagedFallback != nil && c.verifiedManagedActivation(),
 			AgentName:           target.agentName,
 			DisplayName:         target.displayName,
@@ -147,7 +158,11 @@ func (c *Controller) ListAgentUpdateStatuses(ctx context.Context) (*dto.ListAgen
 			status.LatestVersion = entry.latest
 		}
 		if target.selectionErr == nil && entry.ok {
-			status.CheckState = compareRuntimeUpdateStatus(entry.latest, status.EffectiveVersion)
+			if target.updateMode == dto.AgentUpdateModeSelfUpdate {
+				status.CheckState = compareHarnessUpdateStatus(entry.latest, status.EffectiveVersion)
+			} else {
+				status.CheckState = compareRuntimeUpdateStatus(entry.latest, status.EffectiveVersion)
+			}
 		}
 		if c.runtimeAutoUpdateStore != nil {
 			c.runtimeAutoUpdateMu.Lock()
@@ -163,7 +178,7 @@ func (c *Controller) ListAgentUpdateStatuses(ctx context.Context) (*dto.ListAgen
 }
 
 func comparableRuntimeVersion(target runtimeUpdateStatusTarget, entry runtimeUpdateStatusCacheEntry) string {
-	if target.capability.Managed != nil || target.capability.Source.NPM == "" {
+	if target.updateMode == dto.AgentUpdateModeSelfUpdate || target.capability.Managed != nil || target.capability.Source.NPM == "" {
 		return target.effectiveVersion
 	}
 	current, err := managedruntime.ParseStableVersion(target.effectiveVersion)
@@ -212,7 +227,18 @@ func (c *Controller) runtimeUpdateStatusTargets(ctx context.Context) ([]runtimeU
 			}
 		}
 		target.effectiveVersion = target.currentVersion
+		if harness, ok := ag.(agents.HarnessUpdateAgent); ok {
+			spec := harness.HarnessUpdate()
+			if spec.Package == "" || spec.UpdateCommand.IsEmpty() {
+				continue
+			}
+			target.packageName = spec.Package
+			target.updateMode = dto.AgentUpdateModeSelfUpdate
+			targets = append(targets, target)
+			continue
+		}
 		if capability.Managed != nil {
+			target.updateMode = dto.AgentUpdateModePinned
 			target.activeVersion, target.effectiveVersion, target.defaultVersion, target.selectionErr = c.runtimeVersions(ctx, ag.ID(), *capability.Managed)
 		}
 		targets = append(targets, target)
@@ -223,13 +249,15 @@ func (c *Controller) runtimeUpdateStatusTargets(ctx context.Context) ([]runtimeU
 func (c *Controller) runtimeUpdateStatusEntry(
 	ctx context.Context,
 	packageName string,
+	mode dto.AgentUpdateMode,
 	now time.Time,
 ) runtimeUpdateStatusCacheEntry {
 	if ctx.Err() != nil {
 		return runtimeUpdateStatusCacheEntry{}
 	}
 	c.runtimeUpdateStatusMu.Lock()
-	if entry, ok := c.runtimeUpdateStatusCache[packageName]; ok && now.Before(entry.expiresAt) {
+	key := runtimeUpdateStatusCacheKey(packageName, mode)
+	if entry, ok := c.runtimeUpdateStatusCache[key]; ok && now.Before(entry.expiresAt) {
 		c.runtimeUpdateStatusMu.Unlock()
 		return entry
 	}
@@ -240,7 +268,7 @@ func (c *Controller) runtimeUpdateStatusEntry(
 	}
 	c.runtimeUpdateStatusMu.Unlock()
 
-	result := c.runtimeUpdateStatusFlight.DoChan(packageName, func() (interface{}, error) {
+	result := c.runtimeUpdateStatusFlight.DoChan(key, func() (interface{}, error) {
 		lookupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), runtimeUpdateStatusLookupTimeout)
 		defer cancel()
 		select {
@@ -250,12 +278,12 @@ func (c *Controller) runtimeUpdateStatusEntry(
 		}
 		defer func() { <-lookup }()
 		c.runtimeUpdateStatusMu.Lock()
-		cached, found := c.runtimeUpdateStatusCache[packageName]
+		cached, found := c.runtimeUpdateStatusCache[key]
 		c.runtimeUpdateStatusMu.Unlock()
 		if found && now.Before(cached.expiresAt) {
 			return cached, nil
 		}
-		latest, metadata, err := c.resolveRuntimeUpdateLatest(lookupCtx, packageName)
+		latest, metadata, err := c.resolveRuntimeUpdateLatest(lookupCtx, packageName, mode)
 		entry := runtimeUpdateStatusCacheEntry{expiresAt: now.Add(runtimeUpdateStatusFailureTTL)}
 		if err == nil {
 			entry.latest, entry.ok, entry.checkedAt, entry.expiresAt = latest, true, now, now.Add(runtimeUpdateStatusSuccessTTL)
@@ -265,7 +293,7 @@ func (c *Controller) runtimeUpdateStatusEntry(
 		if c.runtimeUpdateStatusCache == nil {
 			c.runtimeUpdateStatusCache = make(map[string]runtimeUpdateStatusCacheEntry)
 		}
-		c.runtimeUpdateStatusCache[packageName] = entry
+		c.runtimeUpdateStatusCache[key] = entry
 		c.runtimeUpdateStatusMu.Unlock()
 		return entry, nil
 	})
@@ -277,12 +305,16 @@ func (c *Controller) runtimeUpdateStatusEntry(
 	}
 }
 
-func (c *Controller) resolveRuntimeUpdateLatest(ctx context.Context, packageName string) (string, *RuntimeVersionMetadata, error) {
+func (c *Controller) resolveRuntimeUpdateLatest(ctx context.Context, packageName string, mode dto.AgentUpdateMode) (string, *RuntimeVersionMetadata, error) {
 	c.runtimeUpdateStatusMu.Lock()
 	resolver := c.runtimeUpdateStatusResolver
 	c.runtimeUpdateStatusMu.Unlock()
 	if resolver != nil {
 		latest, err := validateRuntimeUpdateLatest(resolver(ctx, packageName))
+		return latest, nil, err
+	}
+	if mode == dto.AgentUpdateModeSelfUpdate {
+		latest, err := c.resolveHarnessLatest(ctx, packageName)
 		return latest, nil, err
 	}
 	if strings.HasPrefix(packageName, "github:") {
@@ -308,7 +340,7 @@ func (c *Controller) resolveRuntimeUpdateLatest(ctx context.Context, packageName
 func (c *Controller) validateAutomaticRuntimeTarget(ctx context.Context, spec agents.ManagedNPMRuntimeSpec, target string) error {
 	now := c.runtimeUpdateStatusTime()
 	c.runtimeUpdateStatusMu.Lock()
-	entry := c.runtimeUpdateStatusCache[spec.Package]
+	entry := c.runtimeUpdateStatusCache[runtimeUpdateStatusCacheKey(spec.Package, dto.AgentUpdateModePinned)]
 	c.runtimeUpdateStatusMu.Unlock()
 	if entry.ok && now.Before(entry.expiresAt) && entry.latest == target && entry.metadata != nil {
 		return validateRuntimeCatalogueTarget(*entry.metadata, target)
@@ -339,6 +371,19 @@ func compareRuntimeUpdateStatus(latest, effective string) dto.AgentUpdateCheckSt
 		return dto.AgentUpdateCheckStateUpdateAvailable
 	}
 	return dto.AgentUpdateCheckStateUpToDate
+}
+
+func compareHarnessUpdateStatus(stableLatest, effective string) dto.AgentUpdateCheckState {
+	latest, latestErr := managedruntime.ParseStableVersion(stableLatest)
+	installed, installedErr := managedruntime.ParseStableVersion(effective)
+	if latestErr != nil || installedErr != nil {
+		return dto.AgentUpdateCheckStateUnknown
+	}
+	if latest.GreaterThan(installed) {
+		return dto.AgentUpdateCheckStateUpdateAvailable
+	}
+	// The stable tag cannot establish that a configured canary channel is current.
+	return dto.AgentUpdateCheckStateUnknown
 }
 
 func (c *Controller) runtimeUpdateStatusTime() time.Time {

@@ -146,6 +146,146 @@ func TestRunNowForceRunsBesideCurrentTaskActivity(t *testing.T) {
 	waitForJobState(t, tracker, jobID, jobs.StateSucceeded)
 }
 
+func TestRunNowAllowsExplicitGoCleanupWithSavedBusyPolicy(t *testing.T) {
+	connection := newSQLite(t)
+	pool := db.NewPool(connection, connection)
+	rawSettings, err := systemsettings.NewStore(pool)
+	if err != nil {
+		t.Fatalf("new settings store: %v", err)
+	}
+	settings := NewSettingsStore(rawSettings)
+	policy := DefaultSettings()
+	policy.GoCache.AllowCleanupWhileBusy = true
+	if _, err := settings.SaveSettings(context.Background(), policy); err != nil {
+		t.Fatalf("SaveSettings: %v", err)
+	}
+	coordinator := activity.NewCoordinator(activity.Options{})
+	task, err := coordinator.AcquireTask(context.Background(), activity.KindTestCommand)
+	if err != nil {
+		t.Fatalf("AcquireTask: %v", err)
+	}
+	defer task.Release()
+	provider := &explicitGoCacheCleanupProvider{called: make(chan struct{})}
+	tracker := jobs.NewTracker(nil, newOperationsTestLogger(t))
+	operations := NewOperations(OperationsConfig{
+		Settings: settings, Store: newStorageStore(t, pool), Jobs: tracker,
+		Activity: coordinator, Providers: []CleanupProvider{provider},
+	})
+
+	jobID, err := operations.RunNow(context.Background(), []string{"go_cache"}, false)
+	if err != nil || jobID == "" {
+		t.Fatalf("RunNow = (%q, %v), want queued job without force", jobID, err)
+	}
+	select {
+	case <-provider.called:
+	case <-time.After(time.Second):
+		t.Fatal("explicit Go cleanup did not run beside active task")
+	}
+	waitForJobState(t, tracker, jobID, jobs.StateSucceeded)
+}
+
+func TestRunNowGoBusyPolicyStillRejectsExistingMaintenance(t *testing.T) {
+	connection := newSQLite(t)
+	pool := db.NewPool(connection, connection)
+	rawSettings, err := systemsettings.NewStore(pool)
+	if err != nil {
+		t.Fatalf("new settings store: %v", err)
+	}
+	settings := NewSettingsStore(rawSettings)
+	policy := DefaultSettings()
+	policy.GoCache.AllowCleanupWhileBusy = true
+	if _, err := settings.SaveSettings(context.Background(), policy); err != nil {
+		t.Fatalf("SaveSettings: %v", err)
+	}
+	coordinator := activity.NewCoordinator(activity.Options{})
+	held, _, err := coordinator.TryAcquireMaintenance(context.Background(), 0)
+	if err != nil {
+		t.Fatalf("TryAcquireMaintenance: %v", err)
+	}
+	defer held.Release()
+	provider := &explicitGoCacheCleanupProvider{called: make(chan struct{})}
+	operations := NewOperations(OperationsConfig{
+		Settings: settings, Store: newStorageStore(t, pool),
+		Jobs: jobs.NewTracker(nil, newOperationsTestLogger(t)), Activity: coordinator,
+		Providers: []CleanupProvider{provider},
+	})
+
+	jobID, err := operations.RunNow(context.Background(), []string{"go_cache"}, false)
+	var busyErr *BusyError
+	if !errors.As(err, &busyErr) || jobID != "" {
+		t.Fatalf("RunNow = (%q, %v), want non-overridable maintenance busy error", jobID, err)
+	}
+	if len(busyErr.Resources) != 1 || busyErr.Resources[0].Kind != activity.KindMaintenanceRunning {
+		t.Fatalf("busy resources = %#v, want maintenance-running", busyErr.Resources)
+	}
+	select {
+	case <-provider.called:
+		t.Fatal("Go-cache cleanup ran alongside another maintenance run")
+	default:
+	}
+}
+
+func TestRunNowDoesNotBypassForDisabledUnselectedGoCache(t *testing.T) {
+	connection := newSQLite(t)
+	pool := db.NewPool(connection, connection)
+	rawSettings, err := systemsettings.NewStore(pool)
+	if err != nil {
+		t.Fatalf("new settings store: %v", err)
+	}
+	settings := NewSettingsStore(rawSettings)
+	policy := DefaultSettings()
+	policy.GoCache.AllowCleanupWhileBusy = true
+	if _, err := settings.SaveSettings(context.Background(), policy); err != nil {
+		t.Fatalf("SaveSettings: %v", err)
+	}
+	coordinator := activity.NewCoordinator(activity.Options{})
+	task, err := coordinator.AcquireTask(context.Background(), activity.KindTestCommand)
+	if err != nil {
+		t.Fatalf("AcquireTask: %v", err)
+	}
+	defer task.Release()
+	provider := &explicitGoCacheCleanupProvider{called: make(chan struct{})}
+	operations := NewOperations(OperationsConfig{
+		Settings: settings, Store: newStorageStore(t, pool),
+		Jobs: jobs.NewTracker(nil, newOperationsTestLogger(t)), Activity: coordinator,
+		Providers: []CleanupProvider{provider},
+	})
+
+	jobID, err := operations.RunNow(context.Background(), nil, false)
+	var busyErr *BusyError
+	if !errors.As(err, &busyErr) || jobID != "" {
+		t.Fatalf("RunNow = (%q, %v), want busy error without a job", jobID, err)
+	}
+	select {
+	case <-provider.called:
+		t.Fatal("unselected disabled Go cache unexpectedly ran")
+	default:
+	}
+}
+
+func TestAdoptGoCacheHonorsMutationCancellation(t *testing.T) {
+	connection := newSQLite(t)
+	pool := db.NewPool(connection, connection)
+	rawSettings, err := systemsettings.NewStore(pool)
+	if err != nil {
+		t.Fatalf("new settings store: %v", err)
+	}
+	adopter := &countingGoCacheAdopter{}
+	operations := NewOperations(OperationsConfig{
+		Settings: NewSettingsStore(rawSettings), GoCache: adopter,
+		GoCacheMutations: NewMutationGate(),
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	if _, _, err := operations.AdoptGoCache(ctx, t.TempDir(), "ADOPT"); !errors.Is(err, context.Canceled) {
+		t.Fatalf("AdoptGoCache error = %v, want cancellation", err)
+	}
+	if adopter.calls != 0 {
+		t.Fatalf("adoption validation calls = %d, want none after cancellation", adopter.calls)
+	}
+}
+
 func TestRunNowForceBlockedByExistingMaintenanceIsNotForceAvailable(t *testing.T) {
 	connection := newSQLite(t)
 	pool := db.NewPool(connection, connection)
@@ -425,6 +565,28 @@ type recordingQuarantineController struct {
 type recordingGoCacheAdopter struct{}
 
 func (recordingGoCacheAdopter) ValidateAdoption(context.Context, string, string) error {
+	return nil
+}
+
+type explicitGoCacheCleanupProvider struct {
+	called chan struct{}
+}
+
+func (*explicitGoCacheCleanupProvider) Name() string { return "go_cache" }
+func (*explicitGoCacheCleanupProvider) Cleanup(context.Context) (map[string]any, error) {
+	return nil, errors.New("explicit selection used ordinary cleanup")
+}
+func (p *explicitGoCacheCleanupProvider) CleanupExplicit(context.Context) (map[string]any, error) {
+	close(p.called)
+	return map[string]any{"cleaned": true}, nil
+}
+
+type countingGoCacheAdopter struct {
+	calls int
+}
+
+func (a *countingGoCacheAdopter) ValidateAdoption(context.Context, string, string) error {
+	a.calls++
 	return nil
 }
 

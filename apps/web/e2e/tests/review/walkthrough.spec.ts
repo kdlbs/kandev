@@ -87,7 +87,7 @@ async function expectContainedInPanel(panel: Locator, action: Locator): Promise<
   const actionCenterHitsButton = await action.evaluate((element) => {
     const rect = element.getBoundingClientRect();
     const hit = document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2);
-    return hit === element || !!hit?.closest('[data-testid="changes-request-walkthrough"]');
+    return element.contains(hit);
   });
   expect(actionCenterHitsButton).toBe(true);
 }
@@ -95,7 +95,7 @@ async function expectContainedInPanel(panel: Locator, action: Locator): Promise<
 test.describe("Code walkthrough", () => {
   test.describe.configure({ retries: 2, timeout: 120_000 });
 
-  test("adapts the Changes walkthrough label to panel width", async ({
+  test("moves the Changes walkthrough into overflow in narrow panels", async ({
     testPage,
     apiClient,
     seedData,
@@ -107,6 +107,11 @@ test.describe("Code walkthrough", () => {
 
     const request = session.changesRequestWalkthroughButton();
     const label = request.getByText("Walkthrough", { exact: true });
+    const overflow = session.changes.getByTestId("panel-header-overflow");
+    const menuRequest = testPage.getByRole("menuitem", {
+      name: "Walk me through these changes",
+      exact: true,
+    });
     await expect(request).toBeEnabled({ timeout: 30_000 });
 
     const narrowWidth = await resizeColumnViaSplitview(testPage, "right", 349);
@@ -115,8 +120,12 @@ test.describe("Code walkthrough", () => {
       .poll(async () => Math.round((await session.changes.boundingBox())?.width ?? 0))
       .toBe(349);
     await expect(label).toBeHidden();
-    await expect(request).toBeVisible();
-    await expectContainedInPanel(session.changes, request);
+    await expect(request).toBeHidden();
+    await expectContainedInPanel(session.changes, overflow);
+    await overflow.click();
+    await expect(menuRequest).toBeVisible();
+    await expect(menuRequest).toBeEnabled();
+    await testPage.keyboard.press("Escape");
 
     const labeledWidth = await resizeColumnViaSplitview(testPage, "right", 350);
     expect(labeledWidth).toBe(350);
@@ -124,6 +133,7 @@ test.describe("Code walkthrough", () => {
       .poll(async () => Math.round((await session.changes.boundingBox())?.width ?? 0))
       .toBe(350);
     await expect(label).toBeVisible();
+    await expect(overflow).toHaveCount(0);
     await expectContainedInPanel(session.changes, request);
     await prCapture.screenshot("desktop-changes-walkthrough", {
       caption: "Walkthrough stays fully visible in the Changes toolbar",
@@ -135,11 +145,14 @@ test.describe("Code walkthrough", () => {
       .poll(async () => Math.round((await session.changes.boundingBox())?.width ?? 0))
       .toBe(180);
     await expect(label).toBeHidden();
-    await expect(request).toBeVisible();
-    await expectContainedInPanel(session.changes, request);
+    await expect(request).toBeHidden();
+    await expectContainedInPanel(session.changes, overflow);
+    await overflow.click();
+    await expect(menuRequest).toBeVisible();
+    await expect(menuRequest).toBeEnabled();
   });
 
-  test("Changes-panel request asks the agent to walk through current changes", async ({
+  test("narrow Changes-panel request asks the agent to walk through current changes", async ({
     testPage,
     apiClient,
     seedData,
@@ -149,9 +162,14 @@ test.describe("Code walkthrough", () => {
     try {
       await expect(session.walkthroughLauncher()).toHaveCount(0);
       await session.clickTab("Changes");
-      const request = session.changesRequestWalkthroughButton();
+      await resizeColumnViaSplitview(testPage, "right", 349);
+      await expect(session.changesRequestWalkthroughButton()).toBeHidden();
+      await session.changes.getByTestId("panel-header-overflow").click();
+      const request = testPage.getByRole("menuitem", {
+        name: "Walk me through these changes",
+        exact: true,
+      });
       await expect(request).toBeVisible({ timeout: 15_000 });
-      await expect(request).toContainText("Walkthrough");
       await expect(request).toBeEnabled({ timeout: 30_000 });
 
       await request.click();

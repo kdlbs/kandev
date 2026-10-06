@@ -12,9 +12,13 @@ import { PassthroughTerminal } from "@/components/task/passthrough-terminal";
 import { SessionRecoveryFeedback } from "@/components/task/ensure-session-error";
 import { TaskLaunchErrorProvider } from "@/components/task/task-launch-error-context";
 import { TaskSharedError } from "@/components/task/task-shared-error";
+import type { TaskSession } from "@/lib/types/http";
+import type { TaskStatusSummary } from "@/lib/types/task-status-summary";
 import type { QuickChatSession } from "@/lib/state/slices/ui/types";
 import { QuickChatContent } from "./quick-chat-content";
+import { readLastAgentError } from "@/lib/session-last-agent-error";
 import { useTranslation } from "react-i18next";
+import { ConfigChatRestartStatus } from "@/components/config-chat/config-chat-restart-status";
 
 function useIsQuickChatPassthrough(sessionId: string) {
   return useAppStore((state) => {
@@ -90,7 +94,31 @@ function resolveEffectiveTaskArchiveState(
   return resolveTaskArchiveState(taskId, task, quickChatTaskId);
 }
 
-export function QuickChatSessionView({
+function preventQuickChatAutoResume(
+  sessionId: string,
+  taskId: string | null,
+  taskSession: TaskSession | null,
+  summary: TaskStatusSummary | null | undefined,
+): boolean {
+  return Boolean(
+    (taskId && !taskSession) ||
+    (summary?.active_error &&
+      (summary.active_error.scope === "task" || summary.active_error.session_id === sessionId)) ||
+    summary?.task_error ||
+    readLastAgentError(taskSession?.metadata),
+  );
+}
+
+export function QuickChatSessionView(props: QuickChatSessionViewProps) {
+  const { session } = props;
+  const restart = useAppStore((state) => state.quickChat.configChatRestarts?.[session.workspaceId]);
+  if (session.kind === "config" && restart) {
+    return <ConfigChatRestartStatus workspaceId={session.workspaceId} />;
+  }
+  return <ActiveQuickChatSessionView {...props} />;
+}
+
+function ActiveQuickChatSessionView({
   session,
   onInitialPromptAttempted,
   automaticRecovery = true,
@@ -112,6 +140,7 @@ export function QuickChatSessionView({
   );
   const taskId = taskSession ? (session.taskId ?? taskSession.task_id ?? null) : quickChatTaskId;
   const task = useTask(taskId);
+  const statusSummary = useTaskStatusSummary(taskId, task?.statusSummary);
   const taskArchiveState = resolveEffectiveTaskArchiveState(
     taskArchiveStateProp,
     taskId,
@@ -120,9 +149,14 @@ export function QuickChatSessionView({
   );
   const resumption = useSessionResumption(taskId, session.sessionId, taskArchiveState, {
     skipAutomaticRecovery: !automaticRecovery,
+    preventAutoResume: preventQuickChatAutoResume(
+      session.sessionId,
+      taskId,
+      taskSession,
+      statusSummary,
+    ),
   });
   const isPassthrough = useIsQuickChatPassthrough(session.sessionId);
-  const statusSummary = useTaskStatusSummary(taskId, task?.statusSummary);
   const recoveryFeedback = (
     <SessionRecoveryFeedback
       error={resumption.error}
@@ -168,16 +202,6 @@ export function QuickChatSessionView({
     statusSummary,
     automaticRecovery: resumption,
   };
-  if (isPassthrough) {
-    return (
-      <TaskLaunchErrorProvider value={launchErrorValue}>
-        <div className="flex min-h-0 flex-1 flex-col">
-          <TaskSharedError />
-          {sessionContent}
-        </div>
-      </TaskLaunchErrorProvider>
-    );
-  }
   return (
     <TaskLaunchErrorProvider value={launchErrorValue}>
       <div className="flex min-h-0 flex-1 flex-col">

@@ -112,6 +112,27 @@ const (
 	EventTypeBackgroundWorkOutput = "background_work_output"
 )
 
+// PromptFailureDisposition identifies a host-validated outcome for a failed
+// prompt. Unknown values are invalid and must retain conservative terminal
+// failure behavior.
+type PromptFailureDisposition string
+
+const (
+	// PromptFailureDispositionRetainRuntime means the prompt failed after a
+	// tested provider error while the initialized ACP runtime remained usable.
+	PromptFailureDispositionRetainRuntime PromptFailureDisposition = "retain_runtime"
+)
+
+// Valid reports whether the optional disposition is omitted or recognized.
+func (d PromptFailureDisposition) Valid() bool {
+	switch d {
+	case "", PromptFailureDispositionRetainRuntime:
+		return true
+	default:
+		return false
+	}
+}
+
 // AgentEventDataPromptHandoff marks a generation-bearing foreground-idle event
 // whose provider and transport have attested that the next human prompt may
 // take ownership before the held session/prompt RPC returns.
@@ -131,6 +152,9 @@ const (
 //
 // Stream endpoint: ws://.../api/v1/agent/events
 type AgentEvent struct {
+	ContinuationSafety   *ContinuationSafetySnapshot   `json:"continuation_safety,omitempty"`
+	CapacityContinuation *CapacityContinuationSnapshot `json:"capacity_continuation,omitempty"`
+
 	// Type identifies the event type. Use the EventType* constants for supported
 	// values.
 	Type string `json:"type"`
@@ -239,6 +263,11 @@ type AgentEvent struct {
 	PlanContent string `json:"plan_content,omitempty"`
 
 	// --- Error fields (for "error" type) ---
+
+	// PromptFailureDisposition is host-generated evidence that distinguishes a
+	// failed turn from a terminal execution failure. Provider payloads cannot
+	// set this field directly.
+	PromptFailureDisposition PromptFailureDisposition `json:"prompt_failure_disposition,omitempty"`
 
 	// Error contains error message when Type is "error".
 	Error string `json:"error,omitempty"`

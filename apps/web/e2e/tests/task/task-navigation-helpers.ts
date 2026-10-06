@@ -18,6 +18,11 @@ export const AVAILABLE = "navigation-available";
 export const HELD = "navigation-held";
 export const ROOT_FILE = "navigation-root.ts";
 
+type NavigationTaskOptions = {
+  executorProfileId?: string;
+  withRepository?: boolean;
+};
+
 async function waitForTreeResponse(
   gate: NavigationResponseGate,
   requestOffset: number,
@@ -68,23 +73,29 @@ export async function seedNavigationTasks(
   api: ApiClient,
   seed: SeedData,
   backend: BackendContext,
-  executorProfileId?: string,
+  { executorProfileId, withRepository = true }: NavigationTaskOptions = {},
 ) {
-  const branch = seedNavigationBranch(backend);
+  const branch = withRepository ? seedNavigationBranch(backend) : undefined;
   const profile = await createStandardProfile(api, "navigation-responsiveness");
   const tasks = [];
+  // Each turn can check out this repository, so let it finish before starting the next one.
   for (const suffix of ["A", "B"]) {
-    tasks.push(
-      await api.createTaskWithAgent(seed.workspaceId, `Navigation ${suffix}`, profile.id, {
+    const task = await api.createTaskWithAgent(
+      seed.workspaceId,
+      `Navigation ${suffix}`,
+      profile.id,
+      {
         description: "/e2e:simple-message",
         workflow_id: seed.workflowId,
         workflow_step_id: seed.startStepId,
-        repositories: [{ repository_id: seed.repositoryId, base_branch: branch }],
-        executor_profile_id: executorProfileId,
-      }),
+        ...(branch
+          ? { repositories: [{ repository_id: seed.repositoryId, base_branch: branch }] }
+          : {}),
+        executor_profile_id: executorProfileId ?? seed.worktreeExecutorProfileId,
+      },
     );
-  }
-  for (const task of tasks) {
+    tasks.push(task);
+    // Local executor sessions share the checkout's Git index.
     await waitForSessionDone(
       api,
       task.id,

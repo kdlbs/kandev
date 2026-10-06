@@ -1,6 +1,7 @@
 import { buildChatMotionActions, loadChatMotionState } from "./chat-motion-actions";
 import type { StateCreator } from "zustand";
 import {
+  getLocalStorage,
   getStoredCollapsedSubtaskParents,
   setLocalStorage,
   setStoredCollapsedSubtaskParents,
@@ -31,6 +32,11 @@ import type { SystemHealthResponse } from "@/lib/types/health";
 import type { ActiveDocument, UISlice, UISliceState } from "./types";
 import { buildQuickChatActions } from "./quick-chat-actions";
 import { buildQuickTerminalActions } from "./quick-terminal-actions";
+
+/** Key for the stored directory-browser hidden-entry preference. Namespaced
+ * like the other UI preferences so a reload restores the same reveal state.
+ * Declared before the initial state, which reads it at module load. */
+const DIRECTORY_BROWSER_SHOW_HIDDEN_KEY = "kandev.directoryBrowser.showHidden";
 
 /** Default sidebar view state: the single built-in "All tasks" view, active, no draft. */
 function createDefaultSidebarState(): UISliceState["sidebarViews"] {
@@ -146,6 +152,7 @@ export const defaultUIState: UISliceState = {
     lastSettledAtBySession: {},
     sessionOwnership: {},
     syncRevisionByWorkspace: {},
+    configChatRestarts: {},
     tombstonedSessions: {},
     tabOrderByWorkspace: {},
     tabOrderSyncErrorByWorkspace: {},
@@ -162,6 +169,7 @@ export const defaultUIState: UISliceState = {
   updateAvailableNotification: null,
   updateAvailableNotificationQueue: [],
   bottomTerminal: { isOpen: false, pendingCommand: null },
+  directoryBrowserShowHidden: loadDirectoryBrowserShowHidden(),
   sidebarViews: createDefaultSidebarState(),
   sidebarViewsByWorkspace: {},
   threadViews: createDefaultThreadViewState(),
@@ -285,6 +293,25 @@ function buildMobileActions(set: ImmerSet) {
   };
 }
 
+/** Reads the stored reveal preference. An unreadable or corrupt value falls
+ * back to the current default listing rather than blocking the browser. */
+function loadDirectoryBrowserShowHidden(): boolean {
+  return getLocalStorage<boolean>(DIRECTORY_BROWSER_SHOW_HIDDEN_KEY, false) === true;
+}
+
+/** Builds the reveal action for every directory browser. The preference is
+ * written so the choice survives a reload, and lives in one place so the three
+ * directory browsers cannot disagree. */
+function buildDirectoryBrowserActions(set: ImmerSet) {
+  return {
+    setDirectoryBrowserShowHidden: (showHidden: boolean) =>
+      set((draft) => {
+        draft.directoryBrowserShowHidden = showHidden;
+        setLocalStorage(DIRECTORY_BROWSER_SHOW_HIDDEN_KEY, showHidden);
+      }),
+  };
+}
+
 /** Builds the bottom terminal's open/toggle and pending-command actions, persisting open state to localStorage. */
 function buildBottomTerminalActions(set: ImmerSet) {
   return {
@@ -402,6 +429,7 @@ export const createUISlice: StateCreator<UISlice, [["zustand/immer", never]], []
   ...buildPreviewActions(set),
   ...buildMobileActions(set),
   ...buildBottomTerminalActions(set),
+  ...buildDirectoryBrowserActions(set),
   ...buildSidebarViewActions(set, get),
   ...buildThreadViewActions(set, get),
   ...buildSidebarTaskPrefsActions(set, get),

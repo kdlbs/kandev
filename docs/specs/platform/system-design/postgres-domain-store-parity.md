@@ -106,6 +106,20 @@ One probe error makes aggregate persistence unhealthy. A later successful probe 
 
 Initialization errors remain fatal and cannot recover inside the same process. The process exits through the existing startup error path.
 
+### SQLite writer transaction admission
+
+The [accepted writer-admission ADR](../../../decisions/2026-10-05-sqlite-writer-transaction-admission.md)
+selects supported immediate transaction entry in the existing SQLite writer
+factory. Database/sql and sqlx retain genuine transaction ownership; native
+current predicates and owner CAS remain inside the transaction. Dedicated
+read-only pools stay deferred for concurrent WAL snapshots, and PostgreSQL
+retains existing isolation/lock contracts. Read-only transactions on the writer
+also acquire the writer; aliased test pools do not prove reader concurrency.
+ROOT reviewed and released this boundary; actual factory wait,
+cancellation/rollback/reuse, snapshot progress and store/startup compatibility
+gates remain in the [single lifetime work order](../../../plans/managed-deletion-admission/task-01-guard-managed-deletion.md#sqlite-factory-extension).
+No additional product requirement or schema/provider framework is introduced.
+
 ### SQLite maintenance coordination
 
 Periodic SQLite checks use `maintenance.ForPool(pool).TryAcquire()` before

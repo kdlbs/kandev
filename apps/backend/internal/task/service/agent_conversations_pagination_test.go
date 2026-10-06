@@ -16,6 +16,7 @@ import (
 // real SQLite repository does, so the managed-conversation lookup is exercised
 // against a workspace holding more ephemeral tasks than one page.
 type acPagingTaskRepo struct {
+	unsupportedTaskFieldUpdater
 	mu    sync.Mutex
 	tasks []*models.Task
 }

@@ -95,6 +95,9 @@ func (e *Executor) resolveTaskLaunchScope(ctx context.Context, taskID string) (l
 	if task == nil {
 		return lifecycle.TaskLaunchScopeUnknown, nil
 	}
+	if models.IsAutomationTaskOrigin(task.Origin) {
+		return lifecycle.TaskLaunchScopeAutomation, nil
+	}
 	if task.IsFromOffice {
 		return lifecycle.TaskLaunchScopeOffice, nil
 	}
@@ -325,13 +328,16 @@ func (e *Executor) runAgentProcessAsyncWithObservation(
 	onSuccess func(context.Context),
 	escalateTaskOnFailure, fromResume bool,
 	expectedStartAttemptID ...string,
-) {
+) <-chan error {
+	result := make(chan error, 1)
 	e.auditCeilingBypass(ctx, "runAgentProcessAsync", sessionID, true, zap.String("agent_execution_id", agentExecutionID))
 	var startAttemptID string
 	if len(expectedStartAttemptID) > 0 {
 		startAttemptID = expectedStartAttemptID[0]
 	}
 	go func() {
+		var startupErr error
+		defer func() { result <- startupErr; close(result) }()
 		startParent := context.WithoutCancel(ctx)
 		updateCtx := startParent
 		if isCancellableResumeContext(ctx) {
@@ -346,6 +352,13 @@ func (e *Executor) runAgentProcessAsyncWithObservation(
 		}
 
 		if err := e.agentManager.StartAgentProcess(startCtx, agentExecutionID); err != nil {
+			startupErr = err
+			if isNativeRestoreStartupContext(ctx) {
+				// Native restore has a caller waiting for this result. That owner
+				// classifies the actual error and tears down this exact execution.
+				e.logger.Warn("native conversation restore failed", zap.String("agent_execution_id", agentExecutionID), zap.Error(routingerr.SanitizeError(err)))
+				return
+			}
 			if isCancellableResumeContext(ctx) && ctx.Err() != nil {
 				// A cancelled resume owns no failure projection. Use the exact
 				// execution ID for bounded cleanup, then let the orchestrator
@@ -375,9 +388,14 @@ func (e *Executor) runAgentProcessAsyncWithObservation(
 			"terminal post-start race",
 			startAttemptID,
 		); terminal {
+			startupErr = lifecycle.ErrSessionTerminal
 			return
 		}
 		if isCancellableResumeContext(ctx) && ctx.Err() != nil {
+			startupErr = ctx.Err()
+			if isNativeRestoreStartupContext(ctx) {
+				return
+			}
 			// The provider ignored cancellation and reported success late. Do
 			// not run the resume success callback or restore task/session state.
 			// Teardown is exact-execution scoped so a retry cannot be stopped.
@@ -395,6 +413,7 @@ func (e *Executor) runAgentProcessAsyncWithObservation(
 			e.onAgentProcessStarted(updateCtx, taskID, sessionID, agentExecutionID)
 		}
 	}()
+	return result
 }
 
 func (e *Executor) handleAgentProcessStartFailure(
@@ -1507,7 +1526,10 @@ func (e *Executor) prepareSessionAttempt(ctx context.Context, task *v1.Task, age
 		if envErr != nil {
 			return "", envErr
 		}
-		recoveryAdmission, envErr = e.admitSelectedWorktreeRecovery(ctx, task.ID, session, selectedEnv, execConfig.ExecutorType, false)
+		if bindWorkspace && selectedEnv != nil && selectedEnv.ID != "" && session.TaskEnvironmentID == "" {
+			session.TaskEnvironmentID = selectedEnv.ID
+		}
+		recoveryAdmission, envErr = e.admitSelectedWorktreeRecovery(ctx, task.ID, session, selectedEnv, execConfig.ExecutorType, false, 0, false)
 		if envErr != nil {
 			return "", envErr
 		}
@@ -1857,6 +1879,23 @@ func (e *Executor) LaunchPreparedSession(ctx context.Context, task *v1.Task, ses
 	if err != nil {
 		return nil, err
 	}
+	assignLaunchTaskEnvironmentID(session, existingEnv)
+
+	// A sibling can be prepared while the elected materializer is still
+	// creating the environment (for example, an inherit_parent autopilot child
+	// starts immediately after its parent). Wait for that durable owner to
+	// publish READY before either the prepared-workspace fast path or a full
+	// launch can attach.
+	if existingEnv != nil && existingEnv.Status == models.TaskEnvironmentStatusCreating && existingEnv.MaterializationSessionID != session.ID {
+		readyEnv, waitErr := e.waitForTaskEnvironmentReady(ctx, existingEnv.ID)
+		if waitErr != nil {
+			return nil, waitErr
+		}
+		existingEnv = readyEnv
+	}
+	if existingEnv != nil && existingEnv.Status == models.TaskEnvironmentStatusFailed {
+		return nil, fmt.Errorf("%w: existing task environment is not attachable", models.ErrWorkspaceReuseUnsafe)
+	}
 
 	// Primary = first by Position. For repo-less tasks (e.g. quick chat), allRepos
 	// is empty and primary is a zero-value placeholder; downstream code already
@@ -1868,24 +1907,7 @@ func (e *Executor) LaunchPreparedSession(ctx context.Context, task *v1.Task, ses
 		primaryRepo = &repoInfo{}
 	}
 
-	assignLaunchTaskEnvironmentID(session, existingEnv)
-
-	// A sibling can be prepared while the elected materializer is still
-	// creating the environment (for example, an inherit_parent autopilot child
-	// starts immediately after its parent). Wait for that durable owner to
-	// publish READY instead of turning a recoverable race into a terminal
-	// session failure.
-	if existingEnv != nil && existingEnv.Status == models.TaskEnvironmentStatusCreating && existingEnv.MaterializationSessionID != session.ID {
-		readyEnv, waitErr := e.waitForTaskEnvironmentReady(ctx, existingEnv.ID)
-		if waitErr != nil {
-			return nil, waitErr
-		}
-		existingEnv = readyEnv
-	}
 	workspaceReuseRequired := existingEnv != nil && existingEnv.MaterializationSessionID != session.ID
-	if existingEnv != nil && existingEnv.Status == models.TaskEnvironmentStatusFailed {
-		return nil, fmt.Errorf("%w: existing task environment is not attachable", models.ErrWorkspaceReuseUnsafe)
-	}
 	req, execCfg, err := e.buildLaunchAgentRequest(ctx, task, session, agentProfileID, executorID, prompt, primaryRepo, allRepos, workspaceReuseRequired, existingEnv)
 	if err != nil {
 		return nil, err
@@ -1980,7 +2002,7 @@ func (e *Executor) LaunchPreparedSession(ctx context.Context, task *v1.Task, ses
 				zap.String("acp_session_id", token))
 		}
 	}
-	if err := e.validateReuseEnvironmentInventory(ctx, req, existingEnv); err != nil {
+	if err := e.admitLaunchWorkspaceInventory(ctx, task, session, req, existingEnv, allRepos); err != nil {
 		return nil, err
 	}
 
@@ -1990,7 +2012,7 @@ func (e *Executor) LaunchPreparedSession(ctx context.Context, task *v1.Task, ses
 	}
 
 	var recoveryAdmission *worktree.RecoveryAdmission
-	recoveryAdmission, err = e.admitSelectedWorktreeRecovery(ctx, task.ID, session, existingEnv, req.ExecutorType, false)
+	recoveryAdmission, err = e.admitSelectedWorktreeRecovery(ctx, task.ID, session, existingEnv, req.ExecutorType, false, 0, true)
 	if err != nil {
 		return nil, err
 	}
@@ -2030,6 +2052,9 @@ func (e *Executor) LaunchPreparedSession(ctx context.Context, task *v1.Task, ses
 		if !errors.Is(existingErr, ErrStaleExecution) && !errors.Is(existingErr, ErrAgentCommandMissing) {
 			if releaseErr := releaseSelectedWorktreeRecovery(ctx, &recoveryAdmission); releaseErr != nil {
 				return nil, errors.Join(existingErr, fmt.Errorf("release worktree recovery admission: %w", releaseErr))
+			}
+			if result != nil {
+				result.WorkspaceInventoryRecoveryReceipt = req.WorkspaceInventoryRecoveryReceipt
 			}
 			return result, existingErr
 		}
@@ -2086,7 +2111,7 @@ func (e *Executor) LaunchPreparedSession(ctx context.Context, task *v1.Task, ses
 		e.captureBaseCommit(captureCtx, sid)
 	}(sessionID)
 
-	execution, finalizeErr := e.finalizeLaunch(launchCtx, task, session, agentProfileID, sessionID, primaryRepo, resp, startAgent, execCfg)
+	execution, finalizeErr := e.finalizeLaunch(launchCtx, task, session, agentProfileID, sessionID, primaryRepo, resp, startAgent, execCfg, req.WorkspaceInventoryRecoveryReceipt)
 	if releaseErr := releaseSelectedWorktreeRecovery(ctx, &recoveryAdmission); releaseErr != nil {
 		if finalizeErr == nil {
 			finalizeErr = fmt.Errorf("release worktree recovery admission: %w", releaseErr)
@@ -2318,7 +2343,7 @@ func (e *Executor) transitionLaunchFailure(
 }
 
 // finalizeLaunch persists launch state and returns the resulting TaskExecution.
-func (e *Executor) finalizeLaunch(ctx context.Context, task *v1.Task, session *models.TaskSession, agentProfileID, sessionID string, repoInfo *repoInfo, resp *LaunchAgentResponse, startAgent bool, execCfg executorConfig) (*TaskExecution, error) {
+func (e *Executor) finalizeLaunch(ctx context.Context, task *v1.Task, session *models.TaskSession, agentProfileID, sessionID string, repoInfo *repoInfo, resp *LaunchAgentResponse, startAgent bool, execCfg executorConfig, workspaceInventoryRecoveryReceipt *models.WorkspaceInventoryRecoveryReceipt) (*TaskExecution, error) {
 	now := time.Now().UTC()
 	if err := e.persistLaunchState(ctx, task.ID, sessionID, session, resp, startAgent, now); err != nil {
 		e.cleanupUnstartedExecutionAfterPersistError(ctx, sessionID, resp.AgentExecutionID, err)
@@ -2330,16 +2355,17 @@ func (e *Executor) finalizeLaunch(ctx context.Context, task *v1.Task, session *m
 		sessionState = v1.TaskSessionStateStarting
 	}
 	execution := &TaskExecution{
-		TaskID:           task.ID,
-		AgentExecutionID: resp.AgentExecutionID,
-		AgentProfileID:   agentProfileID,
-		StartedAt:        session.StartedAt,
-		SessionState:     sessionState,
-		LastUpdate:       now,
-		SessionID:        sessionID,
-		WorktreePath:     resp.WorktreePath,
-		WorktreeBranch:   resp.WorktreeBranch,
-		PrepareResult:    resp.PrepareResult,
+		TaskID:                            task.ID,
+		AgentExecutionID:                  resp.AgentExecutionID,
+		AgentProfileID:                    agentProfileID,
+		StartedAt:                         session.StartedAt,
+		SessionState:                      sessionState,
+		LastUpdate:                        now,
+		SessionID:                         sessionID,
+		WorktreePath:                      resp.WorktreePath,
+		WorktreeBranch:                    resp.WorktreeBranch,
+		PrepareResult:                     resp.PrepareResult,
+		WorkspaceInventoryRecoveryReceipt: workspaceInventoryRecoveryReceipt,
 	}
 
 	if startAgent {
@@ -2373,6 +2399,35 @@ func (e *Executor) finalizeLaunch(ctx context.Context, task *v1.Task, session *m
 		zap.String("agent_execution_id", resp.AgentExecutionID))
 
 	return execution, nil
+}
+
+func (e *Executor) preparedWorkspaceInventoryRequest(
+	ctx context.Context,
+	task *v1.Task,
+	session *models.TaskSession,
+	executorID string,
+	repositories []*repoInfo,
+	env *models.TaskEnvironment,
+) *LaunchAgentRequest {
+	metadata := cloneMetadata(task.Metadata)
+	if session.ExecutorProfileID != "" {
+		if metadata == nil {
+			metadata = make(map[string]interface{})
+		}
+		metadata["executor_profile_id"] = session.ExecutorProfileID
+	}
+	execConfig := e.resolveExecutorConfig(ctx, executorID, task.WorkspaceID, metadata)
+	// This request is constructed only after finding an existing runtime row.
+	// That row may outlive a failed materialization by this same session, so it
+	// must never bypass preserved-workspace inventory admission.
+	reuseRequired := env != nil
+	reuseRequired = workspaceReuseAllowed(env, execConfig.ExecutorType, reuseRequired, e.taskIsRepoBacked(ctx, task.ID))
+	return &LaunchAgentRequest{
+		TaskID: task.ID, WorkspaceID: task.WorkspaceID, SessionID: session.ID,
+		TaskEnvironmentID: session.TaskEnvironmentID, ExecutorType: execConfig.ExecutorType,
+		UseWorktree: shouldUseWorktree(execConfig.ExecutorType), WorkspaceReuseRequired: reuseRequired,
+		Repositories: buildRepoSpecs(repositories),
+	}
 }
 
 func bindSessionToTaskEnvironment(session *models.TaskSession, env *models.TaskEnvironment) {
@@ -2513,7 +2568,14 @@ func workspaceReuseAllowed(existingEnv *models.TaskEnvironment, requestedExecuto
 		return false
 	}
 	if repoBacked && len(existingEnv.Repos) == 0 {
-		return false
+		if existingEnv.Status != models.TaskEnvironmentStatusReady && existingEnv.Status != models.TaskEnvironmentStatusStopped {
+			return false
+		}
+		// A Worktree environment can recover a missing canonical row from its
+		// reciprocal worktree/runtime records. Keep it on the attach-only path so
+		// the inventory validator either proves that repair or fails closed; false
+		// here would authorize a fresh materialization over preserved state.
+		return requestedExecutorType == string(models.ExecutorTypeWorktree)
 	}
 	if requestedExecutorType == string(models.ExecutorTypeWorktree) {
 		return hasLiveWorktreeRepo(existingEnv)
@@ -3024,6 +3086,15 @@ func (e *Executor) captureBaseCommit(ctx context.Context, sessionID string) {
 	// has been torn down (e.g. the task was deleted between LaunchAgent and
 	// this async capture). Skip silently — there's nothing to record.
 	if status == nil {
+		return
+	}
+	legacySuccessfulStatus := status.StatusState == "" && !status.FilesComplete && status.DetailState == ""
+	completeStatus := status.StatusState == "ready" && status.FilesComplete && status.DetailState == "ready"
+	if !status.Success || (!legacySuccessfulStatus && !completeStatus) {
+		e.logger.Debug("incomplete Git status cannot establish a session base commit",
+			zap.String("session_id", sessionID),
+			zap.String("status_state", status.StatusState),
+			zap.String("detail_state", status.DetailState))
 		return
 	}
 

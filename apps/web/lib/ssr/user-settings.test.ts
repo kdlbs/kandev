@@ -8,6 +8,7 @@ import {
   mapUserSettingsResponse,
   parseChangesPanelLayout,
   parseLastSeenDisplay,
+  parseMessageTimeDisplay,
   parseLspStatusLocation,
   parseStartupPage,
   parseSystemMetricsDisplay,
@@ -761,6 +762,26 @@ describe("last seen display hydration", () => {
     const current = { ...createDefaultUserSettings(), lastSeenDisplay: "relative" as const };
     const mapped = mapUserSettingsData({}, current);
     expect(mapped.lastSeenDisplay).toBe("relative");
+  });
+});
+
+describe("message time display hydration", () => {
+  it("defaults to relative and normalizes unknown values", () => {
+    expect(createDefaultUserSettings().messageTimeDisplay).toBe("relative");
+    expect(parseMessageTimeDisplay("absolute_short")).toBe("absolute_short");
+    expect(parseMessageTimeDisplay("absolute_long")).toBe("absolute_long");
+    expect(parseMessageTimeDisplay("future")).toBe("relative");
+  });
+
+  it("maps saved values and preserves the current value when omitted", () => {
+    const current = {
+      ...createDefaultUserSettings(),
+      messageTimeDisplay: "absolute_long" as const,
+    };
+    expect(
+      mapUserSettingsData({ message_time_display: "absolute_short" }, current).messageTimeDisplay,
+    ).toBe("absolute_short");
+    expect(mapUserSettingsData({}, current).messageTimeDisplay).toBe("absolute_long");
   });
 });
 

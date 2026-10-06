@@ -41,3 +41,9 @@ Registration `icon` fields accept a curated host icon name or a plugin-owned
 component. Build custom brand glyphs with `host.jsx`; Kandev renders that component
 through its React runtime on navigation, repository, task-link, settings, and review
 surfaces. This keeps provider assets in the provider repository.
+
+Composer slot consumers can import `PluginComposerSlotProps` and the
+`PluginTaskCreatedHandler` types. `registerTaskCreatedHandler` is available only
+on create-mode `task-create-input-actions`; its returned disposer unregisters
+the callback. Task-created callbacks may return a promise and receive a readonly
+`{ id, workspace_id }` identity.

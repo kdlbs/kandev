@@ -48,5 +48,12 @@ test.describe("mobile: transient provider error retry", () => {
       .toBe(0);
     await expect(session.recoveryResumeButton()).toBeVisible({ timeout: 30_000 });
     await expect(session.transientRetryCard()).toBeHidden();
+    await expect(testPage.getByTestId("session-recovery-card")).toContainText(
+      "Automatic recovery was cancelled. Resume or start fresh to continue.",
+    );
+    await expect(testPage.getByTestId("session-recovery-card")).not.toContainText(
+      "after several retries",
+    );
+    await assertNoDocumentHorizontalOverflow(testPage);
   });
 });

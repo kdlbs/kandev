@@ -558,39 +558,55 @@ Honor Retry-After or X-RateLimit-Reset when present, then retry the waiter; revi
   SUMMARY_JSON="$summary_body"
   CONSECUTIVE_ERRORS=0
 
-  budget="$(remaining_budget)"
-  if [[ "$budget" -le 0 ]]; then
-    if [[ -n "$MERGE_JSON" ]]; then
-      OUTCOME='deadline'
+  # Pending polls reuse embedded metadata. Stopping evidence needs a fresh
+  # head observation after pr-state's trailing base and merge-base requests.
+  if jq -e --arg mode "$MODE" '
+    ((.pending_checks | length) > 0 or .checks_snapshot_complete != true)
+    and ($mode != "first-failure" or (.failed_checks | length) == 0)
+    and (.merge_state |
+      type == "object"
+      and (.state == "OPEN" or .state == "MERGED" or .state == "CLOSED")
+      and (.mergeable == "MERGEABLE" or .mergeable == "CONFLICTING" or .mergeable == "UNKNOWN")
+      and (.mergeStateStatus | type == "string" and length > 0)
+      and (.headRefOid | type == "string" and length > 0))
+  ' >/dev/null 2>&1 <<<"$SUMMARY_JSON"; then
+    merge_body="$(jq -c '.merge_state' <<<"$SUMMARY_JSON")"
+    read_rc=0
+  else
+    budget="$(remaining_budget)"
+    if [[ "$budget" -le 0 ]]; then
+      if [[ -n "$MERGE_JSON" ]]; then
+        OUTCOME='deadline'
+        break
+      fi
+      if [[ -n "$floor_start" ]]; then
+        # Whatever the first read left of this iteration's single floor.
+        budget=$((READ_FLOOR - (SECONDS - floor_start)))
+        [[ "$budget" -gt 0 ]] || budget=1
+      else
+        floor_start=$SECONDS
+        budget="$READ_FLOOR"
+      fi
+    fi
+    [[ "$budget" -le "$READ_CAP" ]] || budget="$READ_CAP"
+
+    read_rc=0
+    run_bounded_capture "$budget" "$READ_TMP" \
+      "$GH" pr view "$PR" --json state,mergeable,mergeStateStatus,reviewDecision,headRefOid || read_rc=$?
+    if [[ "$read_rc" -eq 124 ]]; then
+      progress "poll ${POLLS}: gh pr view exceeded its ${budget}s bound"
+      OUTCOME='blocked-merge-state'
+      MERGE_TIMED_OUT=1
       break
     fi
-    if [[ -n "$floor_start" ]]; then
-      # Whatever the first read left of this iteration's single floor.
-      budget=$((READ_FLOOR - (SECONDS - floor_start)))
-      [[ "$budget" -gt 0 ]] || budget=1
-    else
-      floor_start=$SECONDS
-      budget="$READ_FLOOR"
-    fi
-  fi
-  [[ "$budget" -le "$READ_CAP" ]] || budget="$READ_CAP"
-
-  read_rc=0
-  run_bounded_capture "$budget" "$READ_TMP" \
-    "$GH" pr view "$PR" --json state,mergeable,mergeStateStatus,reviewDecision,headRefOid || read_rc=$?
-  if [[ "$read_rc" -eq 124 ]]; then
-    progress "poll ${POLLS}: gh pr view exceeded its ${budget}s bound"
-    OUTCOME='blocked-merge-state'
-    MERGE_TIMED_OUT=1
-    break
-  fi
-  merge_body="$(cat "$READ_TMP")"
-  if rate_detail="$(rate_limit_detail_from_text "$(cat "$READ_ERR")")"; then
-    RATE_LIMIT_MESSAGE="BLOCKED: GitHub rate limit while reading merge state. ${rate_detail}
+    merge_body="$(cat "$READ_TMP")"
+    if rate_detail="$(rate_limit_detail_from_text "$(cat "$READ_ERR")")"; then
+      RATE_LIMIT_MESSAGE="BLOCKED: GitHub rate limit while reading merge state. ${rate_detail}
 Honor Retry-After or X-RateLimit-Reset when present, then retry the waiter; mergeability is unknown."
-    progress "poll ${POLLS}: GitHub rate limit detected while reading merge state"
-    OUTCOME='blocked-rate-limit'
-    break
+      progress "poll ${POLLS}: GitHub rate limit detected while reading merge state"
+      OUTCOME='blocked-rate-limit'
+      break
+    fi
   fi
   # Staged in a local first, same reason as the pr-state read above: a failed
   # read must not overwrite the last good MERGE_JSON with unusable text.

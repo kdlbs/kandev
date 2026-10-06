@@ -61,10 +61,11 @@ Right-click an agent tab on desktop to manage it. Available actions depend on it
 
 Stopping a session is not deletion. Resume needs the executor's session record. A removed worktree, expired remote environment, restarted executor, removed profile, or missing runtime record can require a fresh session.
 
-When startup or resume fails:
+When a turn, startup, or resume fails:
 
-- Kandev adds one recovery entry to the selected session's chat.
-- The current unresolved failure replaces the blocked message composer with one recovery card. Automatic resume and workspace-restore failures appear in that card, with separate causes in Technical details, rather than a second session banner. Older entries keep their message and technical details without stale controls.
+- For a supported ACP provider's classified temporary capacity, overload, or rate-limit error in an interactive task session with a concrete agent profile, Kandev records a failed turn and keeps the same runtime available when it can confirm that runtime is still usable. It retries only when it can establish that the prompt produced no assistant output or tool activity; otherwise, it does not replay the prompt. You can send another message or choose a supported model in the same session, and retry feedback reports only attempts that started. Office and automation tasks, dynamic routes, utility sessions, and passthrough sessions keep their existing failure handling.
+- When startup or resume fails, or Kandev detects an unusable runtime, it adds one recovery entry to the selected session's chat. Select **Resume** to restore the saved conversation, or expand **Technical details** to inspect the failure.
+- For failures that require manual startup or runtime recovery, the current unresolved failure replaces the blocked message composer with one recovery card. Automatic resume and workspace-restore failures appear in that card, with separate causes in Technical details, rather than a second session banner. Older entries keep their message and technical details without stale controls.
 - In Kanban preview, selecting Plan keeps the recovery card below the Plan content, in the composer area.
 - Repeated delivery of the same failure does not add another entry.
 - History loading and new messages keep the normal chat scroll behavior.
@@ -80,6 +81,38 @@ with a **Resolved** label. A manually dismissed failure is labeled **Dismissed**
 and does not report a successful recovery. The matching failure remains
 **Resolved** even when a separate success notice is missing from the loaded chat.
 A later failure keeps its own recovery controls.
+
+### Experimental interruption continuation
+
+**Interrupted conversation continuation** is off by default. When enabled, a
+supported Cursor ACP connection failure can continue the unfinished request in
+the same saved conversation after output or completed file reads. Kandev sends
+a continuation instruction, preserves the transcript, and allows files to be
+read again when Cursor did not save an interrupted read result. It does not
+resend the original request or create a replacement conversation automatically.
+
+Recovery shares the existing five-attempt budget and paced backoff. One notice
+shows waiting, reconnecting, or continuing, with **Cancel** available while the
+continued turn runs. Cancellation returns control to Chat when the ACP runtime
+is still usable; normal recovery actions remain available if it is not. An
+exhaustion message reports attempts that actually started; a refused recovery
+does not claim retries ran. Writes, shell commands, pending or unknown tool
+outcomes, permissions, and background work prevent automatic continuation. If
+the runtime remains usable, send a follow-up in the same conversation. If it is
+unavailable, use the manual recovery actions. Missing saved identity and
+unsupported agents also require manual recovery. New human work takes priority.
+Backend restart retires the old automatic notice without launching a
+continuation or interrupting adopted live work.
+
+To try this on a selected installation, enable
+**Interrupted conversation continuation** (`features.providerInterruptionContinuation`)
+under **Settings > System > Feature Toggles**, then restart Kandev. Alternatively set
+`KANDEV_FEATURES_PROVIDER_INTERRUPTION_CONTINUATION=true` before startup. An
+explicit environment value takes precedence over the persisted toggle, which
+takes precedence over the shipped profile. To roll back, disable the toggle or
+set that environment variable to `false`, then restart. The flag is experimental,
+high risk, and off in production, development, and E2E profiles. No exactly-once
+execution guarantee is implied.
 
 **Restore read-only workspace** makes the existing files available for inspection without claiming that the agent resumed. The session entry remains visible until the session resumes successfully. Kandev uses stacked touch-sized actions on phones. A failure in another session remains in that session's history.
 

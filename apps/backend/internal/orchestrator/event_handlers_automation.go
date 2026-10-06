@@ -165,7 +165,7 @@ func (s *Service) loadAutomationCoordinatorSession(ctx context.Context, taskID, 
 }
 
 func isAutomationTaskOrigin(origin string) bool {
-	return origin == models.TaskOriginAutomationRun || origin == models.TaskOriginAutomationTask
+	return models.IsAutomationTaskOrigin(origin)
 }
 
 func (s *Service) coordinatorActiveTurn(ctx context.Context, sessionID string) (*models.Turn, error) {

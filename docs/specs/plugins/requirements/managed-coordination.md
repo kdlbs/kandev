@@ -36,6 +36,11 @@ stages delivery through public contracts and independent plugin consumers.
 - **AC-PLUGINS-MANAGED-COORDINATION-002.1:** The system shall ensure one managed conversation for an installation, workspace, and plugin-selected instance key; profile, executor, and instruction updates shall use revision checks and an explicit idle boundary.
 - **AC-PLUGINS-MANAGED-COORDINATION-002.2:** A managed conversation shall retain its identity and transcript across disable, crash, upgrade, and host restart; disable shall stop new admission and preserve pending work without executing it.
 - **AC-PLUGINS-MANAGED-COORDINATION-002.3:** Uninstall shall revoke authority and detach retained transcripts from execution; reinstall shall not acquire old authority or conversations without an explicit human transfer. Legacy conversation APIs shall retain their documented lifecycle.
+- **AC-PLUGINS-MANAGED-COORDINATION-002.4:** When a primary-session launch or active execution has been accepted before a changed configuration reaches admission, the system shall reject the configuration at its admission boundary and preserve the accepted runtime state, execution identity, and previous configuration.
+- **AC-PLUGINS-MANAGED-COORDINATION-002.5:** When independent callers submit different configurations at the same expected revision, only one changed configuration shall be accepted; the other shall conflict and shall preserve the winner's revision and settings. Pause, detach, and policy invalidation shall not overwrite an independently accepted configuration or resurrect invalidated ownership.
+- **AC-PLUGINS-MANAGED-COORDINATION-002.6:** An unsuccessful configuration admission shall leave no partial task or session configuration from that attempt. A successful admission shall preserve unrelated task fields, metadata, session state, and execution data, and report the committed identity, settings, revision, and outcome.
+- **AC-PLUGINS-MANAGED-COORDINATION-002.7:** An identical accepted operation replay shall retain its existing identity and revision, including repair of an absent primary session. An unchanged configuration at the current revision shall remain usable while busy without reconfiguring the active turn or incrementing the revision. Empty settings shall retain their existing value semantics. Creation and repair shall preserve the installation, workspace, instance, and transcript boundaries.
+- **AC-PLUGINS-MANAGED-COORDINATION-002.8:** A rejected admission shall not publish a creation or update event, wake input, stop execution, or report an applied side effect. Cancellation before commit shall leave no configuration from that attempt; an acknowledgement failure after commit shall remain distinguishable from an effect-free rejection and recoverable through the existing operation receipt.
 
 ### REQ-PLUGINS-MANAGED-COORDINATION-003: Durable ordered conversation input
 
@@ -141,3 +146,4 @@ stages delivery through public contracts and independent plugin consumers.
 
 - [System design](../system-design/managed-coordination.md)
 - [Delivery plan](../../../plans/plugin-coordinator-platform/plan.md)
+- [Atomic managed settings correction](../../../plans/managed-conversation-admission/plan.md)

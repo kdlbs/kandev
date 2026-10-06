@@ -72,17 +72,20 @@ func TestMissingCheckoutRecoveryFreshStartPreflightPreservesProviderState(t *tes
 		require.Equal(t, sessionID, req.SessionID)
 		require.Equal(t, environmentID, req.TaskEnvironmentID)
 		require.Equal(t, string(models.ExecutorTypeWorktree), req.ExecutorType)
+		require.True(t, req.SelectionSnapshot.Valid())
+		require.Len(t, req.SelectionSnapshot.Slots, 1)
 		require.Len(t, req.Slots, 1)
 		return nil, &worktree.WorktreeRecoveryError{
-			TaskID: taskID, Checkout: worktreePath, State: "missing_checkout",
-			Reason: "the selected checkout cannot be restored safely",
+			TaskID: taskID, Checkout: worktreePath, State: "admission",
+			Reason: "selected worktree inventory changed while waiting for inspection",
 		}
 	})
 
 	_, err = svc.RecoverSession(ctx, taskID, sessionID, "fresh_start")
 	var recoveryErr *worktree.WorktreeRecoveryError
 	require.ErrorAs(t, err, &recoveryErr)
-	require.Equal(t, "missing_checkout", recoveryErr.State)
+	require.Equal(t, "admission", recoveryErr.State)
+	require.Contains(t, recoveryErr.Reason, "inventory changed")
 	require.Equal(t, 1, preflightCalls)
 	require.Zero(t, launchCalls, "recovery refusal must stop before agent startup")
 

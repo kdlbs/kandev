@@ -24,6 +24,12 @@ adds two measurements to the existing category list when implemented.
 | --- | --- |
 | `REQ-SYSTEM-PAGE-STORAGE-MAINTENANCE-001` | [Migrated source detail](#migrated-source-detail) |
 
+## Current Go-cache policy
+
+The current [Go cache reclamation design](go-cache-reclamation.md) replaces new Go-cache
+quarantine and global-idle cleanup. Historical quarantine records and other resources retain the
+rules in the source detail below.
+
 ## Migrated source detail
 
 ## Why

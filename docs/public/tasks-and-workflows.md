@@ -177,6 +177,12 @@ Use **New Task** in the sidebar. In an open task, the **Task** split button also
    | **Remote** | A remote repository                               | Search GitHub, GitLab, or Azure DevOps, or paste a supported URL. Public GitHub reads and public `gitlab.com` branch discovery work without credentials. Private access and authenticated browse/write actions require provider credentials. |
    | **None**   | Planning, research, or work outside Git           | Use a scratch workspace or an optional folder on the Kandev host. Git worktree and repository-aware Changes, branch, and pull-request features are unavailable.                                                                              |
 
+   In-app directory browsers list directories on the Kandev host. By default,
+   they hide names that start with a dot, such as `.config` or `.local`. Select
+   **Hidden folders** beside the path to show them. The switch is off by default,
+   and Kandev remembers your choice across in-app browsers. The desktop app's
+   native folder picker uses the operating system's control for hidden entries.
+
 4. **Choose an executor and agent profile.** Both profiles must be compatible. A workflow default agent profile locks the task-level selector.
 5. **Add a description when needed.** Use the eye button beside **Enhance prompt with AI** to preview a step's prompt template. The preview does not resolve task IDs or saved-prompt references until the task exists.
 6. **Choose how to start:**
@@ -188,6 +194,15 @@ Use **New Task** in the sidebar. In an open task, the **Task** split button also
    | **Create without starting agent** | Requires a description and uses **Start step**, or the first positional step if none is set. A structured ACP profile prepares the session; passthrough/TUI starts immediately to create its PTY. |
 
    On mobile, **Plan mode** and **Create only** provide the same behavior as the two non-primary actions.
+
+When you choose **Remote**, Kandev can reuse an available matching checkout.
+If a previously registered local checkout folder was deleted, it uses another
+available source or creates a managed clone. The original local registration
+and its existing task associations remain unchanged; selecting that local
+repository explicitly still requires its checkout to be available. If an
+existing local checkout's origin no longer matches the selected remote,
+Kandev reports a validation error. Correct its origin or select it explicitly
+as a local repository.
 
 ### Reduce downloads for a large remote repository
 
@@ -343,6 +358,8 @@ A task can include several local or remote repository rows. Multi-repository cre
 
 If Kandev cannot resolve a pasted remote URL or its branch, the repository row keeps the URL and shows the provider error. Use **Retry** after correcting the URL or when a transient provider failure has cleared.
 
+If replacing a task's repository associations fails before the database commit, Kandev keeps the complete previous association set. Other task edits, repository setup, or Git work completed earlier can remain; a fresh-branch persistence error still requires checking the repository.
+
 Changes and review are scoped by repository. State the expected deliverable, base branch, and pull-request target for every attachment. See [Coordinate work](coordination.md) for adding branches after creation and splitting multi-repository work.
 
 </details>
@@ -404,7 +421,10 @@ DELETE /api/v1/repository-sets/:id
 `base_branch`; an empty or omitted base uses task defaulting. A supplied list replaces the whole
 membership list, which is also how you reorder one. Omit the field to leave membership untouched.
 Existing clients may send ordered `repository_ids`; those members have no saved bases. Do not send both
-member fields in one request. The same five operations exist as
+member fields in one request. Omitted `name` and `description` fields are also preserved; send an empty
+description to clear it. Concurrent updates to different fields preserve both changes. Updates to the
+same field use the last committed value, and each supplied membership list replaces the entire list.
+The same five operations exist as
 `repository_set.list|create|get|update|delete` WebSocket actions, and
 `repository_set.created|updated|deleted` notifications keep every open client current. See
 [WebSocket API](websocket-api.md).
@@ -512,6 +532,17 @@ interrupted session still shows its recovery actions.
 An interrupted task keeps a warning indicator until the agent confirms
 recovery. Opening the task or starting a recovery attempt does not clear the
 indicator; a failed attempt keeps it visible with the existing retry actions.
+
+For a supported interactive task, Kandev can continue an unfinished request
+in the same live conversation after the normal retry delay when the model is
+at capacity and at least one tool has a confirmed result. Kandev keeps those
+actions in the conversation and asks the agent to continue without repeating
+them. This does not guarantee exactly-once execution. The inline notice shows
+the attempt count and lets you cancel while Kandev waits. Kandev leaves the
+error for you to handle when a tool or permission is still pending, an outcome
+is uncertain, background work is unaccounted for, the provider does not
+support live continuation, or the runtime is no longer usable. The composer
+remains available for a new message.
 
 ## Answer clarification questions
 
@@ -650,6 +681,11 @@ for up to five minutes. Task changes, workspace changes, and signing out invalid
 the relevant pages. Switching views leaves your open conversation in place,
 including in the phone **Tasks** drawer.
 
+Collapsing a repository group or a task's subtasks keeps the other rows visible
+while its page refreshes. Expanding shows already available rows immediately;
+any additional rows appear when the refresh finishes. This also applies in the
+phone **Tasks** drawer and navigation menu.
+
 If loading fails, the sidebar shows one message. **Retry** reloads a recoverable
 failure; rows already shown remain visible during a failed refresh. If a filter
 is invalid, use **Filters** to correct the indicated selection instead. Repository
@@ -765,7 +801,15 @@ Kandev retries temporary connection issues in the background.
 - **Run** stays available when the selected comment and primary session are eligible.
 - A recovered comment must finish browser-draft cleanup before you can run it.
 
-Agents use `create_task_plan_kandev`, `get_task_plan_kandev`, `update_task_plan_kandev`, and `delete_task_plan_kandev`. Human edits are therefore visible to the next agent that reads the plan. A plan records intent; verify that code and review still match it. For safe agent corrections, see [Protect task plan writes](automation-and-mcp.md#protect-task-plan-writes).
+Agents use `create_task_plan_kandev`, `get_task_plan_kandev`, `edit_task_plan_kandev`, `update_task_plan_kandev`, and `delete_task_plan_kandev`. Human edits are therefore visible to the next agent that reads the plan. A plan records intent; verify that code and review still match it. For safe agent corrections, see [Protect task plan writes](automation-and-mcp.md#protect-task-plan-writes).
+
+Large plans support bounded reads through `get_task_plan_kandev(offset, limit)`.
+Ranges count Unicode code points and return exact fragments with a version and
+continuation offset. Pass that version as `expected_version` on later pages
+to detect intervening edits. Omit both range arguments to read the whole plan;
+never use a fragment as a replacement document. See
+[Read only the relevant part of a plan](automation-and-mcp.md#read-only-the-relevant-part-of-a-plan)
+for bounds, pagination, and a fragment-edit example.
 
 ### Protect agent plan writes
 
@@ -884,6 +928,8 @@ Select an archived task to read its saved conversation in the current page. Arch
 
 If task or workspace preparation fails, select **Show details** in the error strip above the session tabs. It opens the available recovery actions. The strip stays visible when you switch sessions and disappears after recovery succeeds. Archiving during recovery stops that recovery path without starting a fallback restore. For session recovery behavior, see [Sessions and review](sessions-and-review.md).
 
+If Quick Chat setup fails after a session is created, Kandev keeps the chat in your tab strip with its preparation details and safe error details so you can inspect the failure or retry. A failure before a session exists keeps your selected agent and repository choices on the setup form with an inline error and a **Retry** action.
+
 <details>
 <summary>Worktree recovery after archive</summary>
 
@@ -896,7 +942,7 @@ Unarchiving a task cancels a pending worktree recheck. If the recheck is already
 **Delete**
 
 - While deletion is pending, the task stays dimmed with a spinner in the sidebar and phone task picker. It disappears when deletion succeeds. If deletion fails and the task is still available, the row returns to its normal state.
-- Delete is permanent. If **Also delete _N_ subtasks** is off, direct children become root tasks. If it is on, Kandev deletes the descendants.
+- Delete is permanent. If **Also delete _N_ subtasks** is off, direct children become root tasks. If it is on, Kandev deletes the descendants. If a new child arrives before deletion finishes, Kandev keeps the parent and reports a conflict. Refresh the deletion preview before retrying. Ephemeral and automation-created children may be excluded from the cascade preview, so refreshing alone may return the same conflict while one retains its parent relationship.
 - Executor cleanup follows the same asynchronous retry and restart-reconciliation rules as archive.
 - When a task has a `RUNNING` agent, the dialog warns that deletion discards in-progress work. Delete always shows this warning. Archive shows it only when confirmation is on.
 

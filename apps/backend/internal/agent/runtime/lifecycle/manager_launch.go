@@ -1854,6 +1854,7 @@ func (m *Manager) promoteWorkspaceExecution(ctx context.Context, execution *Agen
 		}
 		execution.TaskScope = req.TaskScope
 		execution.setSessionSettingsStartupPolicy(req.SessionSettingsPolicy)
+		execution.RequiredNativeConversationID = req.RequiredNativeConversationID
 		if !req.IsPassthrough {
 			executorType := req.ExecutorType
 			if executorType == "" {
@@ -2202,6 +2203,7 @@ func (m *Manager) buildExecutionFromInstance(
 	execution.SessionID = req.SessionID
 	execution.TaskScope = req.TaskScope
 	execution.setSessionSettingsStartupPolicy(req.SessionSettingsPolicy)
+	execution.RequiredNativeConversationID = req.RequiredNativeConversationID
 	execution.ResumeAttemptID = ResumeAttemptIDFromContext(ctx)
 	execution.RuntimeName = rt.Name()
 	execution.WorkspaceID = req.WorkspaceID
@@ -2883,7 +2885,7 @@ func (m *Manager) initializeAgentSession(ctx context.Context, execution *AgentEx
 
 	attachments := getAttachmentsFromMetadata(execution)
 	if err := m.initializeACPSession(ctx, execution, agentConfig, taskDescription, attachments, mcpServers); err != nil {
-		attempted, retryErr := m.retryManagedRuntimeStartup(
+		attempted, retryErr := m.retryManagedRuntimeStartupWithProgress(
 			ctx,
 			execution,
 			err,
@@ -2891,6 +2893,7 @@ func (m *Manager) initializeAgentSession(ctx context.Context, execution *AgentEx
 			taskDescription,
 			attachments,
 			mcpServers,
+			func() { m.updateBootMessageStartupRetryProgress(execution, bootMsg) },
 		)
 		if attempted {
 			if retryErr == nil {

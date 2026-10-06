@@ -23,11 +23,8 @@ import type { SSHReachabilityRecord } from "@/lib/types/http-ssh";
 import type { UISliceActions as UIA } from "./slices/ui/types";
 import type * as SettingsSliceTypes from "./slices/settings/types";
 import type * as UISliceTypes from "./slices/ui/types";
-import type {
-  AgentUpdateJob,
-  InstallJob,
-  NotificationProvidersUpdate,
-} from "./slices/settings/types";
+import type { AgentUpdateJob } from "@/lib/api";
+import type { InstallJob, NotificationProvidersUpdate } from "./slices/settings/types";
 import {
   defaultWorkspaceState,
   defaultSettingsState,
@@ -265,6 +262,7 @@ export type AppState = KanbanSlice & {
   updateAvailableNotification: (typeof defaultUIState)["updateAvailableNotification"];
   updateAvailableNotificationQueue: (typeof defaultUIState)["updateAvailableNotificationQueue"];
   bottomTerminal: (typeof defaultUIState)["bottomTerminal"];
+  directoryBrowserShowHidden: (typeof defaultUIState)["directoryBrowserShowHidden"];
   sidebarViews: (typeof defaultUIState)["sidebarViews"];
   sidebarViewsByWorkspace: (typeof defaultUIState)["sidebarViewsByWorkspace"];
   threadViews: (typeof defaultUIState)["threadViews"];
@@ -397,6 +395,7 @@ export type AppState = KanbanSlice & {
   setPlanMode: (sessionId: string, enabled: boolean) => void;
   setCancelTurnPending: UIA["setCancelTurnPending"];
   setTranscriptAutoScrollEnabled: UIA["setTranscriptAutoScrollEnabled"];
+  setDirectoryBrowserShowHidden: UIA["setDirectoryBrowserShowHidden"];
   setTranscriptScrollTop: UIA["setTranscriptScrollTop"];
   setReviewPRSelection: UIA["setReviewPRSelection"];
   setActiveDocument: (sessionId: string, doc: UISliceTypes.ActiveDocument | null) => void;
@@ -698,7 +697,15 @@ export type AppState = KanbanSlice & {
   dismissAgentError: UIA["dismissAgentError"];
 } & TaskOverviewSlice &
   AppStateExtraActions &
-  Pick<UIA, "setQuickChatInitialPrompt" | "requestQuickChatOpen" | "setQuickChatSelectionIdentity">;
+  Pick<
+    UIA,
+    | "setQuickChatInitialPrompt"
+    | "requestQuickChatOpen"
+    | "setQuickChatSelectionIdentity"
+    | "setConfigChatRestart"
+    | "syncConfigChatRestart"
+    | "replaceConfigChatSession"
+  >;
 
 // Most callers hydrate a fully-shaped slice per top-level key (see
 // mergeInitialState / hydrateState), but `system` is a grab-bag of many

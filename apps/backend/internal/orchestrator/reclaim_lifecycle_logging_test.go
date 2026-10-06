@@ -13,7 +13,7 @@ import (
 	"github.com/kandev/kandev/internal/task/models"
 )
 
-func TestReclaimIdleSessionSkipLogIncludesRowDiagnostics(t *testing.T) {
+func TestReclaimIdleSessionRoutineRefusalDoesNotLogPerSession(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
 	now := time.Now().UTC()
@@ -41,18 +41,113 @@ func TestReclaimIdleSessionSkipLogIncludesRowDiagnostics(t *testing.T) {
 	if err := svc.reclaimIdleSession(ctx, "session-reclaim-log"); err != nil {
 		t.Fatalf("reclaimIdleSession: %v", err)
 	}
-	entries := observed.FilterMessage("idle reclaim skipped").All()
-	if len(entries) != 1 {
-		t.Fatalf("skip log entries = %d, want 1", len(entries))
+	if entries := observed.All(); len(entries) != 0 {
+		t.Fatalf("routine refusal emitted logs: %+v", entries)
 	}
-	fields := entries[0].ContextMap()
-	if got, ok := fields["has_resume_token"].(bool); !ok || got {
-		t.Errorf("has_resume_token = %v, want false", fields["has_resume_token"])
+}
+
+func TestReclaimIdleSessionActiveLSPRefusalDoesNotLogPerSession(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	now := time.Now().UTC()
+	seedTaskAndSession(t, repo, "task-reclaim-lsp-log", "session-reclaim-lsp-log", models.TaskSessionStateWaitingForInput)
+	if err := repo.UpsertExecutorRunning(ctx, &models.ExecutorRunning{
+		ID: "session-reclaim-lsp-log", SessionID: "session-reclaim-lsp-log",
+		TaskID: "task-reclaim-lsp-log", AgentExecutionID: "exec-reclaim-lsp-log",
+		Runtime: agentruntime.RuntimeStandalone, Status: models.ExecutorRunningStatusRunning,
+		ResumeToken: "resume-token", CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatalf("upsert executor row: %v", err)
 	}
-	if got := fields["row_status"]; got != models.ExecutorRunningStatusPrepared {
-		t.Errorf("row_status = %v, want %q", got, models.ExecutorRunningStatusPrepared)
+	core, observed := observer.New(zap.DebugLevel)
+	log, err := commonlogger.NewFromZap(zap.New(core))
+	if err != nil {
+		t.Fatalf("create observer logger: %v", err)
 	}
-	if _, ok := fields["resume_token"]; ok {
-		t.Error("skip log must not include the resume token")
+	manager := newReclaimTrackingAgentManager(&mockAgentManager{isAgentRunning: false})
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), manager)
+	svc.logger = log
+	svc.turnService = &inactiveTurnService{}
+	svc.SetLSPLeaseLifecycle(&activeLSPLeaseForTest{sessionID: "session-reclaim-lsp-log"})
+
+	if err := svc.reclaimIdleSession(ctx, "session-reclaim-lsp-log"); err != nil {
+		t.Fatalf("reclaimIdleSession: %v", err)
 	}
+	if entries := observed.All(); len(entries) != 0 {
+		t.Fatalf("active-lease refusal emitted logs: %+v", entries)
+	}
+	if manager.callCount() != 0 {
+		t.Fatalf("cleanup calls = %v, want none with active LSP lease", manager.callsSnapshot())
+	}
+}
+
+func TestReclaimIdleSessionKeepsProbeWarningAndSuccessInfo(t *testing.T) {
+	t.Run("probe failure warning remains", func(t *testing.T) {
+		ctx := context.Background()
+		repo := setupTestRepo(t)
+		now := time.Now().UTC()
+		seedTaskAndSession(t, repo, "task-reclaim-probe-log", "session-reclaim-probe-log", models.TaskSessionStateWaitingForInput)
+		if err := repo.UpsertExecutorRunning(ctx, &models.ExecutorRunning{
+			ID: "session-reclaim-probe-log", SessionID: "session-reclaim-probe-log",
+			TaskID: "task-reclaim-probe-log", AgentExecutionID: "exec-reclaim-probe-log",
+			Runtime: agentruntime.RuntimeStandalone, Status: models.ExecutorRunningStatusRunning,
+			ResumeToken: "resume-token", CreatedAt: now, UpdatedAt: now,
+		}); err != nil {
+			t.Fatalf("upsert executor row: %v", err)
+		}
+		core, observed := observer.New(zap.DebugLevel)
+		log, err := commonlogger.NewFromZap(zap.New(core))
+		if err != nil {
+			t.Fatalf("create observer logger: %v", err)
+		}
+		base := &mockAgentManager{isAgentRunning: false}
+		svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), &failingAgentLivenessProbe{mockAgentManager: base})
+		svc.logger = log
+		svc.turnService = &inactiveTurnService{}
+
+		if err := svc.reclaimIdleSession(ctx, "session-reclaim-probe-log"); err != nil {
+			t.Fatalf("reclaimIdleSession: %v", err)
+		}
+		entries := observed.FilterMessage("idle reclaim skipped; agent liveness probe failed").All()
+		if len(entries) != 1 || entries[0].Level != zap.WarnLevel {
+			t.Fatalf("probe failure logs = %+v, want one warning", entries)
+		}
+	})
+
+	t.Run("successful reclaim info remains", func(t *testing.T) {
+		ctx := context.Background()
+		repo := setupTestRepo(t)
+		now := time.Now().UTC()
+		seedTaskAndSession(t, repo, "task-reclaim-success-log", "session-reclaim-success-log", models.TaskSessionStateWaitingForInput)
+		if err := repo.UpsertExecutorRunning(ctx, &models.ExecutorRunning{
+			ID: "session-reclaim-success-log", SessionID: "session-reclaim-success-log",
+			TaskID: "task-reclaim-success-log", AgentExecutionID: "exec-reclaim-success-log",
+			Runtime: agentruntime.RuntimeStandalone, Status: models.ExecutorRunningStatusRunning,
+			ResumeToken: "resume-token", CreatedAt: now, UpdatedAt: now,
+		}); err != nil {
+			t.Fatalf("upsert executor row: %v", err)
+		}
+		core, observed := observer.New(zap.DebugLevel)
+		log, err := commonlogger.NewFromZap(zap.New(core))
+		if err != nil {
+			t.Fatalf("create observer logger: %v", err)
+		}
+		manager := &mockAgentManager{
+			isAgentRunning: false,
+			rowLivenessFn: func(*models.ExecutorRunning) models.ProcessLiveness {
+				return models.ProcessLivenessDead
+			},
+		}
+		svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), manager)
+		svc.logger = log
+		svc.turnService = &inactiveTurnService{}
+
+		if err := svc.reclaimIdleSession(ctx, "session-reclaim-success-log"); err != nil {
+			t.Fatalf("reclaimIdleSession: %v", err)
+		}
+		entries := observed.FilterMessage("idle reclaim: provider runtime released; row preserved for resume").All()
+		if len(entries) != 1 || entries[0].Level != zap.InfoLevel {
+			t.Fatalf("successful reclaim logs = %+v, want one info entry", entries)
+		}
+	})
 }

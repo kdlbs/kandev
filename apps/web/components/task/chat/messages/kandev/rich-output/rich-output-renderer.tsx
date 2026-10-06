@@ -22,7 +22,14 @@ function RichOutputBlockView({
 }) {
   if (block.type === "metrics") return <MetricsBlock block={block} />;
   if (block.type === "chart") return <ChartBlock block={block} />;
-  return <FilePreviewBlock block={block} sessionId={sessionId} onOpenFile={onOpenFile} />;
+  return (
+    <FilePreviewBlock
+      key={JSON.stringify([sessionId, block.repo, block.path])}
+      block={block}
+      sessionId={sessionId}
+      onOpenFile={onOpenFile}
+    />
+  );
 }
 
 export const RichOutputRenderer: KandevRenderer = ({

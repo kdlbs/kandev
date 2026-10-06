@@ -22,8 +22,11 @@ const state = {
   setDashboard: setDashboardMock,
 };
 
+const store = { getState: () => state };
+
 vi.mock("@/components/state-provider", () => ({
   useAppStore: (selector: (s: typeof state) => unknown) => selector(state),
+  useAppStoreApi: () => store,
 }));
 
 vi.mock("@/hooks/use-office-refetch", () => ({

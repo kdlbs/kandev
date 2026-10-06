@@ -21,6 +21,7 @@ import { parseSidebarTaskColors } from "@/lib/task-colors";
 import type {
   LspStatusLocation,
   LastSeenDisplay,
+  MessageTimeDisplay,
   MCPTaskAgentProfileDefault,
   StartupPage,
 } from "@/lib/types/http-user-settings";
@@ -100,6 +101,7 @@ export function createDefaultUserSettings(): UserSettingsState {
     terminalFontSize: null,
     changesPanelLayout: "tree",
     lastSeenDisplay: "absolute",
+    messageTimeDisplay: "relative",
     systemMetricsDisplay: { showInTopbar: false, simplified: false },
     appStatusBarEnabled: false,
     sidebarHoverEnabled: true,
@@ -128,6 +130,11 @@ export function parseChangesPanelLayout(value: string | undefined): "flat" | "tr
 /** Parses the last-seen display format, defaulting to "absolute". */
 export function parseLastSeenDisplay(value: string | undefined): LastSeenDisplay {
   return value === "relative" ? "relative" : "absolute";
+}
+
+/** Parses the transcript message-time display, defaulting to relative. */
+export function parseMessageTimeDisplay(value: string | undefined): MessageTimeDisplay {
+  return value === "absolute_short" || value === "absolute_long" ? value : "relative";
 }
 
 export function parseAgentTabCloseBehavior(
@@ -317,6 +324,11 @@ function buildAppearanceFields(s: UserSettingsData, current: UserSettingsState) 
       current.releaseNotesLastSeenVersion,
     ),
     lastSeenDisplay: mapDefined(s.last_seen_display, current.lastSeenDisplay, parseLastSeenDisplay),
+    messageTimeDisplay: mapDefined(
+      s.message_time_display,
+      current.messageTimeDisplay,
+      parseMessageTimeDisplay,
+    ),
   };
 }
 

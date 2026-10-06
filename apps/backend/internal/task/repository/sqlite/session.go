@@ -1770,6 +1770,17 @@ func (r *Repository) UpdateTaskSessionResumeStateIfCurrentAttempt(
 		snapshotJSON = string(payload)
 	}
 
+	guardState := models.TaskSessionStateCreated
+	if updateState {
+		guardState = next
+	}
+	writer, runtimeTx, guardErr := r.managedSessionStateWriter(ctx, sessionID, guardState)
+	if guardErr != nil {
+		return false, time.Time{}, guardErr
+	}
+	if runtimeTx != nil {
+		defer func() { _ = runtimeTx.Rollback() }()
+	}
 	now := r.nowUTC()
 	updates := make([]string, 0, 5)
 	args := make([]interface{}, 0, 10)
@@ -1788,13 +1799,18 @@ func (r *Repository) UpdateTaskSessionResumeStateIfCurrentAttempt(
 	args = append(args, now, sessionID, taskID, string(expected), attemptID)
 	query := `UPDATE task_sessions SET ` + strings.Join(updates, `, `) +
 		` WHERE id = ? AND task_id = ? AND state = ? AND ` + startAttemptIDPredicate(r.db.DriverName())
-	result, err := r.db.ExecContext(ctx, r.db.Rebind(query), args...)
+	result, err := writer.ExecContext(ctx, r.db.Rebind(query), args...)
 	if err != nil {
 		return false, time.Time{}, err
 	}
 	rows, err := result.RowsAffected()
 	if err != nil {
 		return false, time.Time{}, err
+	}
+	if runtimeTx != nil {
+		if err := runtimeTx.Commit(); err != nil {
+			return false, time.Time{}, err
+		}
 	}
 	return rows == 1, now, nil
 }
@@ -2136,6 +2152,9 @@ func (r *Repository) ensureTaskSessionEnvironmentAvailableTx(
 	tx *sqlx.Tx,
 	sessionID, nextEnvironmentID string,
 ) error {
+	if err := r.managedSessionDeletionBarrierTx(ctx, tx, sessionID); err != nil {
+		return err
+	}
 	var current sql.NullString
 	if err := tx.QueryRowContext(ctx, r.db.Rebind(`
 		SELECT task_environment_id FROM task_sessions WHERE id = ?
@@ -2204,10 +2223,17 @@ func (r *Repository) UpdateTaskSessionAgentProfileSnapshot(
 
 // UpdateTaskSessionState updates just the state and error message of an agent session
 func (r *Repository) UpdateTaskSessionState(ctx context.Context, id string, status models.TaskSessionState, errorMessage string) error {
+	writer, runtimeTx, guardErr := r.managedSessionStateWriter(ctx, id, status)
+	if guardErr != nil {
+		return guardErr
+	}
+	if runtimeTx != nil {
+		defer func() { _ = runtimeTx.Rollback() }()
+	}
 	now := time.Now().UTC()
 	completedAt := completedAtForTaskSessionState(status, now)
 
-	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
+	result, err := writer.ExecContext(ctx, r.db.Rebind(`
 		UPDATE task_sessions SET state = ?, error_message = ?, completed_at = ?, updated_at = ? WHERE id = ?
 	`), string(status), errorMessage, completedAt, now, id)
 	if err != nil {
@@ -2217,6 +2243,9 @@ func (r *Repository) UpdateTaskSessionState(ctx context.Context, id string, stat
 	rows, _ := result.RowsAffected()
 	if rows == 0 {
 		return fmt.Errorf("%w: agent session not found: %s", models.ErrTaskSessionNotFound, id)
+	}
+	if runtimeTx != nil {
+		return runtimeTx.Commit()
 	}
 	return nil
 }
@@ -2230,9 +2259,16 @@ func (r *Repository) UpdateTaskSessionStateIfCurrent(
 	expected, status models.TaskSessionState,
 	errorMessage string,
 ) (bool, time.Time, error) {
+	writer, runtimeTx, guardErr := r.managedSessionStateWriter(ctx, id, status)
+	if guardErr != nil {
+		return false, time.Time{}, guardErr
+	}
+	if runtimeTx != nil {
+		defer func() { _ = runtimeTx.Rollback() }()
+	}
 	now := time.Now().UTC()
 	completedAt := completedAtForTaskSessionState(status, now)
-	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
+	result, err := writer.ExecContext(ctx, r.db.Rebind(`
 		UPDATE task_sessions
 		SET state = ?, error_message = ?, completed_at = ?, updated_at = ?
 		WHERE id = ? AND state = ?
@@ -2244,6 +2280,11 @@ func (r *Repository) UpdateTaskSessionStateIfCurrent(
 	if err != nil {
 		return false, time.Time{}, err
 	}
+	if runtimeTx != nil {
+		if err := runtimeTx.Commit(); err != nil {
+			return false, time.Time{}, err
+		}
+	}
 	return rows > 0, now, nil
 }
 
@@ -2253,9 +2294,16 @@ func (r *Repository) UpdateTaskSessionStateIfCurrentIdentity(
 	expected, status models.TaskSessionState,
 	errorMessage string,
 ) (bool, time.Time, error) {
+	writer, runtimeTx, guardErr := r.managedSessionStateWriter(ctx, id, status)
+	if guardErr != nil {
+		return false, time.Time{}, guardErr
+	}
+	if runtimeTx != nil {
+		defer func() { _ = runtimeTx.Rollback() }()
+	}
 	now := time.Now().UTC()
 	completedAt := completedAtForTaskSessionState(status, now)
-	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
+	result, err := writer.ExecContext(ctx, r.db.Rebind(`
 		UPDATE task_sessions
 		SET state = ?, error_message = ?, completed_at = ?, updated_at = ?
 		WHERE id = ? AND task_id = ? AND queue_incarnation_id = ? AND state = ?
@@ -2267,6 +2315,11 @@ func (r *Repository) UpdateTaskSessionStateIfCurrentIdentity(
 	rows, err := result.RowsAffected()
 	if err != nil {
 		return false, time.Time{}, err
+	}
+	if runtimeTx != nil {
+		if err := runtimeTx.Commit(); err != nil {
+			return false, time.Time{}, err
+		}
 	}
 	return rows > 0, now, nil
 }
@@ -3970,6 +4023,9 @@ func (r *Repository) DeleteEphemeralTasksByAgentProfile(ctx context.Context, age
 	}
 	candidates := make([]candidate, 0, len(taskIDs))
 	for _, taskID := range taskIDs {
+		if err := r.managedDeletionBarrierTx(ctx, tx, taskID); err != nil {
+			return 0, err
+		}
 		if err := r.lockTaskRowInTx(ctx, tx, taskID); err != nil {
 			if errors.Is(err, ErrTaskNotFound) {
 				continue
@@ -4738,6 +4794,9 @@ func (r *Repository) setSessionPrimary(
 		return false, err
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err := r.managedSessionDeletionBarrierTx(ctx, tx, sessionID); err != nil {
+		return false, err
+	}
 
 	// First, get the task_id for this session. Do not lock the target row here:
 	// every primary promotion must take the owning task lock first so concurrent

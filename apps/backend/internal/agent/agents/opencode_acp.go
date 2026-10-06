@@ -110,7 +110,7 @@ func (a *OpenCodeACP) ManagedNPMRuntime() ManagedNPMRuntimeSpec {
 	return ManagedNPMRuntimeSpec{
 		Package:        opencodeACPPackage,
 		DefaultVersion: MustDefaultManagedNPMRuntimeVersion(opencodeACPPackage),
-		ACPArgs:        []string{"acp", "--print-logs", "--log-level", "ERROR"},
+		ACPArgs:        []string{"acp", "--print-logs"},
 		NativeBinary:   opencodeNativeBinary,
 	}
 }

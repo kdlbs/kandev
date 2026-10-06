@@ -341,7 +341,6 @@ func (s *Service) reclaimIdleSession(ctx context.Context, sessionID string) erro
 	releaseLifecycleLock := s.acquireSessionLifecycleLock(sessionID)
 	defer releaseLifecycleLock()
 	if s.lspLeases != nil && s.lspLeases.HasActiveLSPLease(sessionID) {
-		s.logger.Debug("idle reclaim skipped; language-server lease is active", zap.String("session_id", sessionID))
 		return nil
 	}
 	session, err := s.repo.GetTaskSession(ctx, sessionID)
@@ -369,14 +368,6 @@ func (s *Service) reclaimIdleSession(ctx context.Context, sessionID string) erro
 	hasActiveTurn := s.sessionHasActiveTurn(ctx, sessionID)
 	decision := classifyIdleReclaim(session.State, agentRunning, hasActiveTurn, running.ResumeToken != "", running.Status)
 	if decision != idleReclaimDispositionReclaimed {
-		s.logger.Debug("idle reclaim skipped",
-			zap.String("session_id", sessionID),
-			zap.String("disposition", string(decision)),
-			zap.String("session_state", string(session.State)),
-			zap.Bool("has_resume_token", running.ResumeToken != ""),
-			zap.String("row_status", running.Status),
-			zap.Bool("agent_running", agentRunning),
-			zap.Bool("has_active_turn", hasActiveTurn))
 		return nil
 	}
 	var cleanupErr error

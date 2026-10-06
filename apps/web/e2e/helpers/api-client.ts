@@ -15,6 +15,7 @@ import type {
   TaskPriority,
   SidebarTaskColorPatchApi,
   WorkflowAgentOverrides,
+  Repository,
 } from "../../lib/types/http";
 import type { Agent, AgentProfile, AvailableAgent } from "../../lib/types/http-agents";
 import type {
@@ -1217,6 +1218,19 @@ export class ApiClient {
     await this.request("PATCH", `/api/v1/repositories/${repositoryId}`, updates);
   }
 
+  async getRepository(repositoryId: string): Promise<Repository> {
+    return this.request("GET", `/api/v1/repositories/${repositoryId}`);
+  }
+
+  async deleteRepository(repositoryId: string): Promise<void> {
+    const response = await this.rawRequest("DELETE", `/api/v1/repositories/${repositoryId}`);
+    if (!response.ok) {
+      throw new Error(
+        `API DELETE /api/v1/repositories/${repositoryId} failed (${response.status}): ${await response.text()}`,
+      );
+    }
+  }
+
   async createRepositoryScript(
     repositoryId: string,
     name: string,
@@ -1392,6 +1406,7 @@ export class ApiClient {
     auto_focus_new_tasks?: boolean;
     unread_divider?: boolean;
     agent_generated_task_titles?: boolean;
+    message_time_display?: "relative" | "absolute_short" | "absolute_long";
     agent_tab_close_behavior?: "delete_session" | "hide_panel";
     mcp_task_agent_profile_default?: MCPTaskAgentProfileDefault;
     show_anchored_prompt_bar?: boolean;
@@ -2770,7 +2785,12 @@ export class ApiClient {
   }
 
   async listSessionTurns(sessionId: string): Promise<{
-    turns: Array<{ id: string; completed_at?: string | null }>;
+    turns: Array<{
+      id: string;
+      started_at?: string;
+      completed_at?: string | null;
+      metadata?: Record<string, unknown>;
+    }>;
   }> {
     return this.request("GET", `/api/v1/task-sessions/${sessionId}/turns`);
   }
@@ -2780,7 +2800,7 @@ export class ApiClient {
       from_step_id?: string | null;
       to_step_id: string;
       trigger: string;
-    }>;
+    }> | null;
   }> {
     return this.request("GET", `/api/v1/sessions/${sessionId}/workflow/history`);
   }

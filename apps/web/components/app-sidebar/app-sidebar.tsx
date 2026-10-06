@@ -79,7 +79,7 @@ function AppSidebarModeNav({ collapsed, inOffice }: { collapsed: boolean; inOffi
       <div
         className={cn(
           "flex flex-col gap-1 overflow-y-auto",
-          inOffice ? "flex-1 min-h-0 pb-8 scroll-pb-8" : "shrink-0",
+          inOffice ? "flex-1 min-h-0 pb-8 scroll-pb-8" : "min-h-0 shrink",
         )}
         data-testid="app-sidebar-scroll"
       >

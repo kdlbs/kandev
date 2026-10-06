@@ -1,6 +1,7 @@
 package dto
 
 import (
+	"github.com/kandev/kandev/internal/agent/agents"
 	"github.com/kandev/kandev/internal/agent/managedruntime"
 	"time"
 
@@ -333,16 +334,25 @@ type AvailableAgentDTO struct {
 	UpdatedAt          time.Time                       `json:"updated_at"`
 }
 
+// AgentUpdateMode selects the built-in runtime update contract.
+type AgentUpdateMode string
+
+const (
+	AgentUpdateModePinned     AgentUpdateMode = "pinned"
+	AgentUpdateModeSelfUpdate AgentUpdateMode = "self_update"
+)
+
 // RuntimeUpdateDTO describes a Kandev-managed npm runtime. Package is
 // informational; update requests select only the built-in agent name.
 type RuntimeUpdateDTO struct {
-	ManagedFallback  bool   `json:"managed_fallback,omitempty"`
-	Supported        bool   `json:"supported"`
-	Package          string `json:"package"`
-	CurrentVersion   string `json:"current_version,omitempty"`
-	DefaultVersion   string `json:"default_version"`
-	ActiveVersion    string `json:"active_version,omitempty"`
-	EffectiveVersion string `json:"effective_version"`
+	ManagedFallback  bool            `json:"managed_fallback,omitempty"`
+	Supported        bool            `json:"supported"`
+	UpdateMode       AgentUpdateMode `json:"update_mode"`
+	Package          string          `json:"package"`
+	CurrentVersion   string          `json:"current_version,omitempty"`
+	DefaultVersion   string          `json:"default_version"`
+	ActiveVersion    string          `json:"active_version,omitempty"`
+	EffectiveVersion string          `json:"effective_version"`
 }
 
 // AgentUpdateCheckState describes the result of the cached npm latest-version
@@ -360,6 +370,7 @@ const (
 // runtime. ActiveVersion is the optional persisted operator selection; the
 // default is never persisted and remains the fallback effective version.
 type AgentUpdateStatusDTO struct {
+	UpdateMode          AgentUpdateMode               `json:"update_mode,omitempty"`
 	ManagedFallback     bool                          `json:"managed_fallback,omitempty"`
 	AutoUpdate          bool                          `json:"auto_update"`
 	LastOutcome         *managedruntime.UpdateOutcome `json:"last_outcome,omitempty"`
@@ -374,15 +385,14 @@ type AgentUpdateStatusDTO struct {
 	Available           bool                          `json:"available"`
 	Enabled             bool                          `json:"enabled"`
 	AutoUpdateSupported bool                          `json:"auto_update_supported"`
-
-	AgentName        string                `json:"agent_name"`
-	Package          string                `json:"package"`
-	DefaultVersion   string                `json:"default_version"`
-	ActiveVersion    string                `json:"active_version,omitempty"`
-	EffectiveVersion string                `json:"effective_version"`
-	LatestVersion    string                `json:"latest_version,omitempty"`
-	CheckedAt        *time.Time            `json:"checked_at,omitempty"`
-	CheckState       AgentUpdateCheckState `json:"check_state"`
+	AgentName           string                        `json:"agent_name"`
+	Package             string                        `json:"package"`
+	DefaultVersion      string                        `json:"default_version"`
+	ActiveVersion       string                        `json:"active_version,omitempty"`
+	EffectiveVersion    string                        `json:"effective_version"`
+	LatestVersion       string                        `json:"latest_version,omitempty"`
+	CheckedAt           *time.Time                    `json:"checked_at,omitempty"`
+	CheckState          AgentUpdateCheckState         `json:"check_state"`
 }
 
 type ListAgentUpdateStatusResponse struct {
@@ -444,6 +454,7 @@ const (
 
 // AgentUpdateJobDTO is the retained HTTP and WebSocket update snapshot.
 type AgentUpdateJobDTO struct {
+	UpdateMode       AgentUpdateMode      `json:"update_mode,omitempty"`
 	RuntimeID        string               `json:"runtime_id,omitempty"`
 	Automatic        bool                 `json:"automatic"`
 	PreviousVersion  string               `json:"previous_version,omitempty"`
@@ -466,18 +477,20 @@ type AgentUpdateJobDTO struct {
 // AgentUpdatePreviewDTO is a read-only representation of the next managed
 // runtime update. The command is derived from trusted built-in agent metadata.
 type AgentUpdatePreviewDTO struct {
-	ManagedFallback   bool                    `json:"managed_fallback,omitempty"`
-	AgentName         string                  `json:"agent_name"`
-	Package           string                  `json:"package"`
-	CurrentVersion    string                  `json:"current_version,omitempty"`
-	DefaultVersion    string                  `json:"default_version"`
-	ActiveVersion     string                  `json:"active_version,omitempty"`
-	EffectiveVersion  string                  `json:"effective_version"`
-	TargetVersion     string                  `json:"target_version"`
-	Operation         string                  `json:"operation"`
-	AvailableVersions []AgentUpdateVersionDTO `json:"available_versions"`
-	Command           []string                `json:"command"`
-	CommandString     string                  `json:"command_string"`
+	UpdateMode          AgentUpdateMode         `json:"update_mode"`
+	ManagedFallback     bool                    `json:"managed_fallback,omitempty"`
+	AgentName           string                  `json:"agent_name"`
+	Package             string                  `json:"package"`
+	CurrentVersion      string                  `json:"current_version,omitempty"`
+	DefaultVersion      string                  `json:"default_version"`
+	ActiveVersion       string                  `json:"active_version,omitempty"`
+	EffectiveVersion    string                  `json:"effective_version"`
+	TargetVersion       string                  `json:"target_version"`
+	StableLatestVersion string                  `json:"stable_latest_version,omitempty"`
+	Operation           string                  `json:"operation"`
+	AvailableVersions   []AgentUpdateVersionDTO `json:"available_versions"`
+	Command             []string                `json:"command"`
+	CommandString       string                  `json:"command_string"`
 }
 
 // AgentUpdateVersionDTO is one stable, selectable package version.
@@ -538,15 +551,16 @@ type CommandPreviewResponse struct {
 // DynamicModelsResponse is the response for the /agent-models/:agentName endpoint.
 // Data now comes from the host utility capability cache populated by ACP probes.
 type DynamicModelsResponse struct {
-	AgentName       string            `json:"agent_name"`
-	Status          string            `json:"status"` // "probing" | "ok" | "auth_required" | "not_installed" | "failed"
-	Models          []ModelEntryDTO   `json:"models"`
-	CurrentModelID  string            `json:"current_model_id,omitempty"`
-	Modes           []ModeEntryDTO    `json:"modes,omitempty"`
-	CurrentModeID   string            `json:"current_mode_id,omitempty"`
-	Commands        []CommandEntryDTO `json:"commands,omitempty"`
-	Error           *string           `json:"error"`
-	ContextRevision string            `json:"context_revision,omitempty"`
+	AgentName       string              `json:"agent_name"`
+	Status          string              `json:"status"` // "probing" | "ok" | "auth_required" | "not_installed" | "failed"
+	Models          []ModelEntryDTO     `json:"models"`
+	CurrentModelID  string              `json:"current_model_id,omitempty"`
+	Modes           []ModeEntryDTO      `json:"modes,omitempty"`
+	CurrentModeID   string              `json:"current_mode_id,omitempty"`
+	Commands        []CommandEntryDTO   `json:"commands,omitempty"`
+	Error           *string             `json:"error"`
+	ContextRevision string              `json:"context_revision,omitempty"`
+	RuntimeInfo     *agents.RuntimeInfo `json:"runtime_info,omitempty"`
 }
 
 // ProfileLaunchSettingsRequest is a complete, request-only profile snapshot.

@@ -80,6 +80,7 @@ type executorStore interface {
 	GetExecutor(ctx context.Context, id string) (*models.Executor, error)
 	GetExecutorProfile(ctx context.Context, id string) (*models.ExecutorProfile, error)
 	GetExecutorRunningBySessionID(ctx context.Context, sessionID string) (*models.ExecutorRunning, error)
+	ListExecutorsRunningByTaskID(ctx context.Context, taskID string) ([]*models.ExecutorRunning, error)
 	UpsertExecutorRunning(ctx context.Context, running *models.ExecutorRunning) error
 	HasExecutorRunningRow(ctx context.Context, sessionID string) (bool, error)
 	DeleteExecutorRunningBySessionID(ctx context.Context, sessionID string) error
@@ -502,21 +503,25 @@ type AgentProfileInfo struct {
 
 // LaunchAgentRequest contains parameters for launching an agent
 type LaunchAgentRequest struct {
-	TaskID                string
-	TaskScope             lifecycle.TaskLaunchScope
-	SessionSettingsPolicy ResumeSettingsPolicy
-	WorkspaceID           string // Kandev workspace ID — used to build scratch dir for repo-less tasks
-	SessionID             string
-	TaskEnvironmentID     string // Env owning this session (shared across sessions in the same task)
+	RequiredNativeConversationID string
+	TaskID                       string
+	TaskScope                    lifecycle.TaskLaunchScope
+	SessionSettingsPolicy        ResumeSettingsPolicy
+	WorkspaceID                  string // Kandev workspace ID — used to build scratch dir for repo-less tasks
+	SessionID                    string
+	TaskEnvironmentID            string // Env owning this session (shared across sessions in the same task)
 	// WorkspaceReuseRequired selects attach-only preparation of an already-ready
 	// task environment. It must never be inferred from a sibling execution ID.
 	WorkspaceReuseRequired bool
 	// AllowBranchReplacement is granted only by the explicit new-branch recovery
 	// action. It permits lifecycle to replace a confirmed missing worktree branch.
 	AllowBranchReplacement bool
-	TaskTitle              string // Human-readable task title for semantic worktree naming
-	AgentProfileID         string
-	TurnID                 string // Durable Kandev turn for the initial prompt, when present
+	// WorkspaceInventoryRecoveryReceipt is an output populated only after the
+	// guarded, server-authorized preservation repair succeeds.
+	WorkspaceInventoryRecoveryReceipt *models.WorkspaceInventoryRecoveryReceipt
+	TaskTitle                         string // Human-readable task title for semantic worktree naming
+	AgentProfileID                    string
+	TurnID                            string // Durable Kandev turn for the initial prompt, when present
 	// OfficeAgentProfileID is the stable Office identity. AgentProfileID stays
 	// the concrete execution profile inside the executor for compatibility.
 	OfficeAgentProfileID string
@@ -814,7 +819,8 @@ type TaskExecution struct {
 	WorktreePath   string
 	WorktreeBranch string
 	// PrepareResult carries the env preparation result for deferred persistence
-	PrepareResult *lifecycle.EnvPrepareResult
+	PrepareResult                     *lifecycle.EnvPrepareResult
+	WorkspaceInventoryRecoveryReceipt *models.WorkspaceInventoryRecoveryReceipt
 }
 
 // FromTaskSession converts a models.TaskSession to TaskExecution

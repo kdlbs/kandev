@@ -485,13 +485,26 @@ func (s *Service) onTurnStartTaskAdmission(ctx context.Context, taskID string) (
 // If triggerOnEnter is true, on_enter actions (like auto_start_agent) are processed.
 // If false, only the step change is applied (used for on_turn_start where the user is about to send a message).
 func (s *Service) executeStepTransition(ctx context.Context, taskID, sessionID string, fromStep *wfmodels.WorkflowStep, toStepID string, triggerOnEnter bool) {
+	settleFailedTransitionSession := func(transitionErr error) {
+		if triggerOnEnter {
+			s.setSessionWaitingForInput(ctx, taskID, sessionID)
+			return
+		}
+		recordWorkflowTransitionError(ctx, transitionErr)
+		s.reportWorkflowTurnStartPreparationError(
+			ctx,
+			taskID,
+			sessionID,
+			s.prepareWorkflowTurnStartSessionState(ctx, taskID, sessionID),
+		)
+	}
 	// Get the target step
 	targetStep, err := s.workflowStepGetter.GetStep(ctx, toStepID)
 	if err != nil {
 		s.logger.Warn("failed to get target workflow step",
 			zap.String("target_step_id", toStepID),
 			zap.Error(err))
-		s.setSessionWaitingForInput(ctx, taskID, sessionID)
+		settleFailedTransitionSession(err)
 		return
 	}
 
@@ -501,7 +514,7 @@ func (s *Service) executeStepTransition(ctx context.Context, taskID, sessionID s
 		s.logger.Warn("failed to get task for workflow transition",
 			zap.String("task_id", taskID),
 			zap.Error(err))
-		s.setSessionWaitingForInput(ctx, taskID, sessionID)
+		settleFailedTransitionSession(err)
 		return
 	}
 	// Atomically admit the target step before exit side effects. A full target
@@ -541,7 +554,7 @@ func (s *Service) executeStepTransition(ctx context.Context, taskID, sessionID s
 			zap.String("from_step", fromStep.Name),
 			zap.String("to_step", targetStep.Name),
 			zap.Error(err))
-		s.setSessionWaitingForInput(ctx, taskID, sessionID)
+		settleFailedTransitionSession(err)
 		return
 	}
 	queued := task.QueuedForStepID != ""
@@ -592,8 +605,15 @@ func (s *Service) executeStepTransition(ctx context.Context, taskID, sessionID s
 	if queued {
 		if triggerOnEnter {
 			s.clearPendingStepSignalByID(ctx, sessionID)
+			s.setSessionWaitingForInput(ctx, taskID, sessionID)
+		} else {
+			s.reportWorkflowTurnStartPreparationError(
+				ctx,
+				taskID,
+				sessionID,
+				s.prepareWorkflowTurnStartSessionState(ctx, taskID, sessionID),
+			)
 		}
-		s.setSessionWaitingForInput(ctx, taskID, sessionID)
 		return
 	}
 
@@ -628,18 +648,45 @@ func (s *Service) executeStepTransition(ctx context.Context, taskID, sessionID s
 		// a different one — the user's prompt should go to the correct agent.
 		currentSession, err := s.repo.GetTaskSession(ctx, sessionID)
 		if err != nil {
-			s.logger.Warn("failed to load session for profile switch",
-				zap.String("session_id", sessionID), zap.Error(err))
-			s.setSessionWaitingForInput(ctx, taskID, sessionID)
+			s.reportWorkflowTurnStartPreparationError(
+				ctx,
+				taskID,
+				sessionID,
+				fmt.Errorf("load session for workflow profile switch: %w", err),
+			)
 			return
 		}
-		effectiveSession, ok := s.maybySwitchSessionForProfile(ctx, taskID, currentSession, targetStep, fromStep)
-		if !ok {
+		if currentSession == nil {
+			s.reportWorkflowTurnStartPreparationError(
+				ctx,
+				taskID,
+				sessionID,
+				fmt.Errorf("load session for workflow profile switch: session %q is nil", sessionID),
+			)
 			return
 		}
-		// The legacy engine-less path settles before dispatch. The engine-backed
-		// path preserves an admitted turn's RUNNING state in its transition hook.
-		s.setSessionWaitingForInput(ctx, taskID, effectiveSession.ID)
+		effectiveSession, _, prepareErr := s.prepareWorkflowStepSession(
+			ctx, taskID, currentSession, targetStep, fromStep,
+		)
+		if prepareErr != nil {
+			s.reportWorkflowTurnStartPreparationError(ctx, taskID, currentSession.ID, prepareErr)
+			return
+		}
+		if effectiveSession == nil || effectiveSession.ID == "" {
+			s.reportWorkflowTurnStartPreparationError(
+				ctx,
+				taskID,
+				sessionID,
+				fmt.Errorf("workflow profile preparation returned no turn-start recipient"),
+			)
+			return
+		}
+		s.reportWorkflowTurnStartPreparationError(
+			ctx,
+			taskID,
+			effectiveSession.ID,
+			s.prepareWorkflowTurnStartSessionState(ctx, taskID, effectiveSession.ID),
+		)
 	}
 }
 
@@ -7875,6 +7922,21 @@ func (s *Service) applyEngineTransitionWithCommitMode(
 ) bool {
 	ctx = withWorkflowMetaCache(ctx)
 	sessionLifecycle := mode != transitionLifecycleGuardedDecision
+	settleFailedTransitionSession := func() {
+		if !sessionLifecycle {
+			return
+		}
+		if trigger == engine.TriggerOnTurnStart {
+			s.reportWorkflowTurnStartPreparationError(
+				ctx,
+				taskID,
+				session.ID,
+				s.prepareWorkflowTurnStartSessionState(ctx, taskID, session.ID),
+			)
+			return
+		}
+		s.setSessionWaitingForInput(ctx, taskID, session.ID, session)
+	}
 	// Validate the target step exists BEFORE persisting the transition.
 	// This prevents the task from being moved to an invalid step_id
 	// (e.g., a template-level alias like "review" that doesn't resolve to a real UUID).
@@ -7884,9 +7946,7 @@ func (s *Service) applyEngineTransitionWithCommitMode(
 		s.logger.Warn("target step not found, skipping transition",
 			zap.String("step_id", result.ToStepID),
 			zap.Error(err))
-		if sessionLifecycle {
-			s.setSessionWaitingForInput(ctx, taskID, session.ID, session)
-		}
+		settleFailedTransitionSession()
 		return false
 	}
 	if sessionLifecycle {
@@ -7911,9 +7971,7 @@ func (s *Service) applyEngineTransitionWithCommitMode(
 		s.logger.Warn("failed to load from-step for on_exit",
 			zap.String("step_id", result.FromStepID),
 			zap.Error(err))
-		if sessionLifecycle {
-			s.setSessionWaitingForInput(ctx, taskID, session.ID, session)
-		}
+		settleFailedTransitionSession()
 		return false
 	}
 	if sessionLifecycle {
@@ -7937,9 +7995,7 @@ func (s *Service) applyEngineTransitionWithCommitMode(
 			zap.String("task_id", taskID),
 			zap.String("session_id", session.ID),
 			zap.Error(err))
-		if sessionLifecycle {
-			s.setSessionWaitingForInput(ctx, taskID, session.ID, session)
-		}
+		settleFailedTransitionSession()
 		return false
 	}
 	if !applied {
@@ -7988,7 +8044,14 @@ func (s *Service) applyEngineTransitionWithCommitMode(
 		// The source transition is committed, but destination state and
 		// on_enter behavior wait for the queue promotion event.
 		if sessionLifecycle {
-			s.setSessionWaitingForInput(ctx, taskID, session.ID, session)
+			if mode == transitionLifecycleOnTurnStart {
+				if err := s.prepareWorkflowTurnStartSessionState(ctx, taskID, session.ID); err != nil {
+					s.reportWorkflowTurnStartPreparationError(ctx, taskID, session.ID, err)
+					return false
+				}
+			} else {
+				s.setSessionWaitingForInput(ctx, taskID, session.ID, session)
+			}
 		}
 		return true
 	}
@@ -8005,15 +8068,21 @@ func (s *Service) applyEngineTransitionWithCommitMode(
 		// on_enter needed. We still need to switch the agent profile if the
 		// target step requires a different one — the next prompt should go
 		// to the correct agent.
-		effectiveSession, ok := s.maybySwitchSessionForProfile(ctx, taskID, session, targetStep, fromStep)
-		if !ok {
-			recordWorkflowTransitionError(ctx, errors.New("workflow on_turn_start session preparation failed"))
+		effectiveSession, _, prepareErr := s.prepareWorkflowStepSession(
+			ctx, taskID, session, targetStep, fromStep,
+		)
+		if prepareErr != nil {
+			s.reportWorkflowTurnStartPreparationError(ctx, taskID, session.ID, prepareErr)
 			return false
 		}
-		// A queued prompt has already claimed RUNNING before its turn-start
-		// hook. Preserve that claim when profile preparation keeps the session.
-		if effectiveSession.ID != session.ID || session.State != models.TaskSessionStateRunning {
-			s.setSessionWaitingForInput(ctx, taskID, effectiveSession.ID)
+		if effectiveSession == nil || effectiveSession.ID == "" {
+			err := errors.New("workflow on_turn_start session preparation returned no recipient")
+			s.reportWorkflowTurnStartPreparationError(ctx, taskID, session.ID, err)
+			return false
+		}
+		if err := s.prepareWorkflowTurnStartSessionState(ctx, taskID, effectiveSession.ID); err != nil {
+			s.reportWorkflowTurnStartPreparationError(ctx, taskID, effectiveSession.ID, err)
+			return false
 		}
 		return true
 	}
@@ -8103,7 +8172,13 @@ func (s *Service) processOnTurnStartViaEngineResult(
 	}
 
 	if s.workflowEngine == nil {
-		return s.processOnTurnStart(ctx, task, session), nil
+		transitionCapture := &workflowTransitionErrorCapture{}
+		transitionCtx := withWorkflowTransitionErrorCapture(ctx, transitionCapture)
+		transitioned := s.processOnTurnStart(transitionCtx, task, session)
+		if transitionCapture.err != nil {
+			return false, transitionCapture.err
+		}
+		return transitioned, nil
 	}
 
 	if session.ID == "" || s.workflowStepGetter == nil {

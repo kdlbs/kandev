@@ -315,14 +315,22 @@
         "apps/web/components/task/chat/messages/shell-output-disclosure.tsx",
         "apps/web/components/task/chat/token-usage-display.tsx",
         "apps/web/components/task/editors-menu.tsx",
-        "apps/backend/internal/agentctl/server/process/workspace_git_status.go"
+        "apps/backend/internal/agentctl/server/process/workspace_git_status.go",
+        "apps/backend/internal/task/service/workspace_recovery_projection.go",
+        "apps/web/hooks/domains/session/use-session-recovery-actions.ts"
       ],
       "tests": [
         "apps/web/e2e/tests/command-panel.spec.ts",
         "apps/web/e2e/tests/task/editors-menu-worktree-picker.spec.ts",
         "apps/web/hooks/domains/session/use-shell-command-output.test.ts",
         "apps/web/components/task/chat/token-usage-display.test.tsx",
-        "apps/backend/internal/agentctl/server/process/workspace_git_status_test.go"
+        "apps/backend/internal/agentctl/server/process/workspace_git_status_test.go",
+        "apps/backend/internal/task/repository/sqlite/workspace_recovery_error_cas_test.go",
+        "apps/backend/internal/task/service/workspace_recovery_projection_test.go",
+        "apps/backend/internal/orchestrator/handlers/workspace_recovery_projection_test.go",
+        "apps/web/hooks/domains/session/use-session-recovery-actions.test.ts",
+        "apps/web/e2e/tests/session/multi-repo-session-resume-recovery.spec.ts",
+        "apps/web/e2e/tests/session/mobile-multi-repo-session-resume-recovery.spec.ts"
       ]
     },
     {

@@ -39,6 +39,13 @@ type MockEventBus struct {
 	publishErrors map[string]error
 }
 
+// These read/cascade fakes reject a field mutation outside their test scope.
+type unsupportedTaskFieldUpdater struct{}
+
+func (unsupportedTaskFieldUpdater) UpdateTaskFieldsWithParentAdmission(context.Context, string, models.TaskFieldUpdate, repository.TaskParentValidator) (*models.TaskFieldUpdateResult, error) {
+	return nil, errors.New("field updates are not supported by this test repository")
+}
+
 type recordingTaskClarificationCanceller struct {
 	sessions    []string
 	hasDeadline []bool
@@ -205,13 +212,24 @@ func createTestServiceWithSessionsRepo(
 	wrapSessions func(*sqliterepo.Repository) repository.SessionRepository,
 ) (*Service, *MockEventBus, *sqliterepo.Repository) {
 	t.Helper()
+	return createTestServiceWithTaskAndSessionRepos(t, func(repo *sqliterepo.Repository) repository.TaskRepository {
+		return repo
+	}, wrapSessions)
+}
+
+func createTestServiceWithTaskAndSessionRepos(
+	t *testing.T,
+	wrapTasks func(*sqliterepo.Repository) repository.TaskRepository,
+	wrapSessions func(*sqliterepo.Repository) repository.SessionRepository,
+) (*Service, *MockEventBus, *sqliterepo.Repository) {
+	t.Helper()
 	sqlxDB, _ := serviceTestSQLiteTemplate.Open(t)
 	repo := sqliterepo.NewWithInitializedDB(sqlxDB, sqlxDB, nil)
 	eventBus := NewMockEventBus()
 	log, _ := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "json", OutputPath: "stdout"})
 	svc := NewService(Repos{
 		Workspaces:        repo,
-		Tasks:             repo,
+		Tasks:             wrapTasks(repo),
 		TaskRepos:         repo,
 		Workflows:         repo,
 		Messages:          repo,

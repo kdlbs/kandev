@@ -2762,8 +2762,12 @@ func (s *Service) handleAgentFailedLocked(ctx context.Context, data watcher.Agen
 	// reap its ephemeral worktree out from under the in-flight retry.
 	// handleTransientFailure returns false (falling through) for non-transient
 	// errors, office tasks, or an exhausted budget.
+	continuation, _ := s.transientRetries.Load(data.SessionID)
 	if data.SessionID != "" && s.handleTransientFailure(ctx, data) {
 		return nil
+	}
+	if entry, ok := continuation.(*transientRetryEntry); ok && entry.mode == recoveryModeContinue {
+		return s.settleContinuationFailureLocked(ctx, data, entry)
 	}
 	s.retireInitialCreatePromptPassthroughForEvent(ctx, data)
 	if data.SessionID != "" {
@@ -3240,6 +3244,9 @@ func (s *Service) persistLastAgentError(ctx context.Context, data watcher.AgentE
 		RemediationURL:   providerRemediationURL(data),
 		Code:             data.FailureCode,
 		Details:          details,
+		StartupReason:    data.StartupFailureReason,
+		StartupAttempts:  data.StartupFailureAttempts,
+		StartupNPMCode:   data.StartupFailureNPMCode,
 		StampValue:       agentFailureStamp(data),
 	}
 	if err := s.repo.SetSessionMetadataKey(ctx, data.SessionID, models.SessionMetaKeyLastAgentError, lastErr); err != nil {
@@ -3709,9 +3716,8 @@ func (s *Service) createRecoveryStatusMessage(ctx context.Context, data watcher.
 	if resumeCorrupted {
 		statusMsg = "This agent session can't be resumed — its saved reasoning state is corrupted. Start a fresh session to continue."
 	} else if routingerr.Decide(routingerr.ContextKanban, classified, time.Now().UTC()) == routingerr.DecisionShortRetry {
-		// Reached after the transient retry budget is exhausted — show friendly
-		// provider-neutral copy instead of dumping raw adapter evidence.
-		statusMsg = transientFailureExhaustedMessage(classified)
+		// Classification alone does not establish that any retry was started.
+		statusMsg = transientFailureManualMessage(classified)
 	}
 	hasResumeToken := s.wasResumeAttempt(ctx, data.SessionID)
 	meta := map[string]interface{}{
@@ -3737,9 +3743,37 @@ func (s *Service) createRecoveryStatusMessage(ctx context.Context, data watcher.
 	if data.Phase != "" {
 		meta["phase"] = data.Phase
 	}
-	managedRuntimeNpmFailure := isManagedRuntimeNpmFailureCode(data.FailureCode)
-	if managedRuntimeNpmFailure {
+	managedRuntimeStartupFailure := isManagedRuntimeStartupFailureCode(data.FailureCode)
+	if data.RecoveryDisposition != "" {
+		meta["failure_kind"] = failureKindProviderInterrupted
+		meta["recovery_disposition"] = data.RecoveryDisposition
+	}
+	if data.RecoveryMode == recoveryModeContinue {
+		meta["failure_kind"] = failureKindProviderInterrupted
+		meta["recovery_mode"] = data.RecoveryMode
+		meta["attempts_started"] = data.RecoveryAttemptsStarted
+		meta["recovery_disposition"] = data.RecoveryDisposition
+	}
+	if !resumeCorrupted && routingerr.Decide(routingerr.ContextKanban, classified, time.Now().UTC()) == routingerr.DecisionShortRetry {
+		meta["failure_kind"] = failureKindProviderInterrupted
+	}
+	if meta["failure_kind"] == failureKindProviderInterrupted &&
+		(data.RecoveryDisposition == "" || data.RecoveryDisposition == recoveryDispositionManual) &&
+		(data.RecoveryMode == recoveryModeContinue || (classified.Code == routingerr.CodeAgentTransportLost &&
+			(data.OutputObserved || data.EffectObserved || !data.EvidenceKnown))) {
+		meta["recovery_reason"] = s.continuationRefusalReason(ctx, data)
+	}
+	if managedRuntimeStartupFailure {
 		meta["failure_kind"] = data.FailureCode
+		if data.StartupFailureNPMCode != "" {
+			meta["startup_npm_code"] = data.StartupFailureNPMCode
+		}
+	}
+	if data.StartupFailureReason != "" {
+		meta["startup_reason"] = data.StartupFailureReason
+	}
+	if data.StartupFailureAttempts > 0 {
+		meta["startup_attempts"] = data.StartupFailureAttempts
 	}
 	// The validated remediation URL is carried independently of quota
 	// classification so the generic recoverable card can still show the link.
@@ -3748,7 +3782,7 @@ func (s *Service) createRecoveryStatusMessage(ctx context.Context, data watcher.
 	}
 	applyProviderQuotaMetadata(meta, data)
 	// Quota classification sets error_output from its own provider diagnostic;
-	// every other class (bootstrap, managed-runtime-npm, and generic post-start
+	// every other class (bootstrap, managed-runtime, and generic post-start
 	// recoverable failures) surfaces its sanitized failure detail in the same
 	// collapsed disclosure.
 	applyRecoverableFailureDetail(meta, data)
@@ -3760,7 +3794,7 @@ func (s *Service) createRecoveryStatusMessage(ctx context.Context, data watcher.
 		}
 	}
 
-	if managedRuntimeNpmFailure {
+	if managedRuntimeStartupFailure {
 		meta["actions"] = []map[string]interface{}{
 			wsRecoveryAction(
 				data.TaskID,
@@ -3789,7 +3823,7 @@ func (s *Service) persistRecoveryStatusMessage(
 	// A captured failed-turn ID keeps the recovery entry on the turn that
 	// failed; when none was captured (e.g. a bootstrap failure with no active
 	// turn) fall back to the lazy active-turn resolution.
-	if turnID == "" {
+	if turnID == "" && data.RecoveryMode != recoveryModeContinue {
 		turnID = s.getActiveTurnID(data.SessionID)
 	}
 	messageID := uuid.NewSHA1(
@@ -3915,10 +3949,32 @@ func (s *Service) handleAgentStartFailed(ctx context.Context, taskID, sessionID,
 			failureData.Causes = models.NormalizeAgentErrorCauses([]models.AgentErrorCause{cause})
 		}
 	}
-	if classified := classifyManagedRuntimeNpmStartFailure(err); classified != nil {
-		failureData.ErrorMessage = "managed npm runtime failed to prepare"
+	var structuredStartupFailure *routingerr.ManagedRuntimeStartupError
+	if errors.As(err, &structuredStartupFailure) && structuredStartupFailure != nil {
+		failureData.StartupFailureReason = structuredStartupFailure.Reason
+		failureData.StartupFailureAttempts = structuredStartupFailure.Attempts
+		failureData.StartupFailureNPMCode = structuredStartupFailure.NPMCode
+		failureData.FailureDetails = structuredStartupFailure.Details
+	}
+	if classified := classifyManagedRuntimeStartupFailure(err); classified != nil {
+		failureData.ErrorMessage = managedRuntimeStartupFailureMessage(classified)
 		failureData.FailureCode = string(classified.Code)
 		failureData.FailureDetails = classified.RawExcerpt
+	}
+	authFailure := isAuthError(err.Error())
+	if structuredStartupFailure != nil && structuredStartupFailure.Cause != nil && isAuthError(structuredStartupFailure.Cause.Error()) {
+		authFailure = true
+	}
+	if bootstrapFailure != nil && bootstrapFailure.SafeCode() == models.AgentErrorCauseCodeAuthenticationRequired {
+		authFailure = true
+	}
+	if authFailure && structuredStartupFailure != nil {
+		failureData.FailureCode = string(routingerr.CodeAuthRequired)
+		if structuredStartupFailure.Cause != nil {
+			failureData.ErrorMessage = routingerr.Sanitize(extractReadableAuthError(structuredStartupFailure.Cause.Error()))
+		} else if structuredStartupFailure.Details != "" {
+			failureData.ErrorMessage = routingerr.Sanitize(extractReadableAuthError(structuredStartupFailure.Details))
+		}
 	}
 	var unlockGuard func()
 	var releaseGuard func()
@@ -3973,8 +4029,8 @@ func (s *Service) handleAgentStartFailed(ctx context.Context, taskID, sessionID,
 		}
 		s.preserveWorkflowStartPromptAfterFailure(ctx, taskID, sessionID, agentExecutionID)
 	}
-	if isManagedRuntimeNpmFailureCode(failureData.FailureCode) {
-		s.logger.Info("managed npm runtime startup failure is recoverable",
+	if isManagedRuntimeStartupFailureCode(failureData.FailureCode) && !authFailure {
+		s.logger.Info("managed runtime startup failure is recoverable",
 			zap.String("task_id", taskID),
 			zap.String("session_id", sessionID),
 			zap.String("agent_execution_id", agentExecutionID))
@@ -3985,10 +4041,6 @@ func (s *Service) handleAgentStartFailed(ctx context.Context, taskID, sessionID,
 		return true
 	}
 
-	authFailure := isAuthError(err.Error())
-	if bootstrapFailure != nil && bootstrapFailure.SafeCode() == models.AgentErrorCauseCodeAuthenticationRequired {
-		authFailure = true
-	}
 	if !authFailure {
 		if fromResume {
 			s.logger.Info("suppressing toast for resume bootstrap failure",
@@ -4083,14 +4135,15 @@ func classifyTrustedAgentStartupFailure(startup *routingerr.AgentStartupFailure)
 	return classified
 }
 
-func classifyManagedRuntimeNpmStartFailure(err error) *routingerr.Error {
+func classifyManagedRuntimeStartupFailure(err error) *routingerr.Error {
 	if err == nil {
 		return nil
 	}
 	var structured *routingerr.ManagedRuntimeStartupError
 	if errors.As(err, &structured) {
 		if structured.Code != routingerr.CodeManagedRuntimeNpmResolution &&
-			structured.Code != routingerr.CodeManagedRuntimeNpmPolicy {
+			structured.Code != routingerr.CodeManagedRuntimeNpmPolicy &&
+			structured.Code != routingerr.CodeManagedRuntimeStartup {
 			return nil
 		}
 		return &routingerr.Error{
@@ -4103,9 +4156,20 @@ func classifyManagedRuntimeNpmStartFailure(err error) *routingerr.Error {
 	return nil
 }
 
-func isManagedRuntimeNpmFailureCode(code string) bool {
+func isManagedRuntimeStartupFailureCode(code string) bool {
 	return code == string(routingerr.CodeManagedRuntimeNpmResolution) ||
-		code == string(routingerr.CodeManagedRuntimeNpmPolicy)
+		code == string(routingerr.CodeManagedRuntimeNpmPolicy) ||
+		code == string(routingerr.CodeManagedRuntimeStartup)
+}
+
+func managedRuntimeStartupFailureMessage(classified *routingerr.Error) string {
+	if classified == nil || classified.Code != routingerr.CodeManagedRuntimeStartup {
+		return "managed npm runtime failed to prepare"
+	}
+	if strings.Contains(classified.RawExcerpt, "reason=cleanup_failed") {
+		return "managed runtime process could not be stopped"
+	}
+	return "managed runtime startup failed"
 }
 
 // actionMetaKey* are the shared keys of the frontend ActionMessage button

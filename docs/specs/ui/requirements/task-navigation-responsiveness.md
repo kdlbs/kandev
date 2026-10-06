@@ -63,6 +63,26 @@ without redundant reads or data from another navigation context.
   task/session ownership SHALL resolve before displaying a conversation;
   stale responses SHALL NOT replace the selected task or newer session state.
 
+- **AC-UI-TASK-NAVIGATION-RESPONSIVENESS-001.8:** When a mounted task-session
+  resolver switches from a task with a settled fallback to a different uncached
+  task, including closing and reopening on that different task, it SHALL expose
+  no fallback session from the previous task while the current read is pending.
+  Obsolete successes and failures SHALL NOT change the current result or its
+  loading state.
+- **AC-UI-TASK-NAVIGATION-RESPONSIVENESS-001.9:** The current task's available
+  session collection SHALL take precedence over a fetched fallback: its marked
+  primary session, or its first session if no primary is marked, SHALL remain
+  selected. An uncached task's successful fallback SHALL retain the first
+  returned session behavior.
+- **AC-UI-TASK-NAVIGATION-RESPONSIVENESS-001.10:** With no selected task, the
+  resolver SHALL expose no session and no active loading indication. A current
+  pending fallback read SHALL indicate loading; successful empty reads, failed
+  reads, and unavailable transport SHALL settle without a fallback session or
+  loading indication. These cases SHALL retain the existing result interface.
+- **AC-UI-TASK-NAVIGATION-RESPONSIVENESS-001.11:** Independently mounted
+  task-session resolvers SHALL retain independent fallback and request state.
+  Switching or settling one SHALL NOT alter another's result.
+
 ## Compatibility
 
 These criteria supplement existing [column visibility](board-step-visibility-filter.md),
@@ -81,3 +101,4 @@ Comparable isolated measurements assess actual navigation improvement.
 ## Implementation plans
 
 - [Task navigation responsiveness](../../../plans/task-navigation-responsiveness/plan.md)
+- [Task session fallback ownership](../../../plans/task-session-fallback-ownership/plan.md)

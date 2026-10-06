@@ -2,6 +2,7 @@ package worktree
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"testing"
 	"time"
@@ -117,6 +118,10 @@ func TestLockRecoverySlotsFailsWhenAnotherAdmissionOwnsWorktree(t *testing.T) {
 		if err == nil {
 			t.Fatal("competing admission acquired a worktree lock already held by another admission")
 		}
+		var contention *RecoveryInspectionContentionError
+		if !errors.As(err, &contention) {
+			t.Fatalf("competing admission error = %v, want typed inspection contention", err)
+		}
 	case <-time.After(100 * time.Millisecond):
 		for i := len(first) - 1; i >= 0; i-- {
 			first[i].Unlock()
@@ -133,7 +138,7 @@ func TestLockRecoverySlotsFailsWhenAnotherAdmissionOwnsWorktree(t *testing.T) {
 	}
 }
 
-func TestLockRecoverySlotsAllowsExplicitRecoveryToWaitForInspection(t *testing.T) {
+func TestLockRecoverySlotsAllowsWaitPolicyWithoutDirtyAuthorization(t *testing.T) {
 	manager := &Manager{}
 	request := RecoveryAdmissionRequest{Slots: []RecoverySlot{{WorktreeID: "worktree-explicit"}}}
 	owner, err := manager.lockRecoverySlots(context.Background(), &request, []int{0})
@@ -142,7 +147,10 @@ func TestLockRecoverySlotsAllowsExplicitRecoveryToWaitForInspection(t *testing.T
 	}
 
 	explicit := request
-	explicit.RelocateDirty = true
+	explicit.InspectionWait = 250 * time.Millisecond
+	if explicit.RelocateDirty {
+		t.Fatal("inspection wait policy unexpectedly authorizes dirty relocation")
+	}
 	started := make(chan struct{})
 	type result struct {
 		locks []*sync.Mutex
@@ -184,6 +192,34 @@ func TestLockRecoverySlotsAllowsExplicitRecoveryToWaitForInspection(t *testing.T
 		}
 	case <-time.After(time.Second):
 		t.Fatal("explicit recovery did not acquire the slot after inspection released it")
+	}
+}
+
+func TestLockRecoverySlotsDoesNotUseDirtyAuthorizationAsWaitPolicy(t *testing.T) {
+	manager := &Manager{}
+	request := RecoveryAdmissionRequest{Slots: []RecoverySlot{{WorktreeID: "worktree-dirty-no-wait"}}}
+	owner, err := manager.lockRecoverySlots(context.Background(), &request, []int{0})
+	if err != nil {
+		t.Fatalf("inspection lock: %v", err)
+	}
+	t.Cleanup(func() {
+		for i := len(owner) - 1; i >= 0; i-- {
+			owner[i].Unlock()
+		}
+	})
+
+	dirty := request
+	dirty.RelocateDirty = true
+	locks, err := manager.lockRecoverySlots(context.Background(), &dirty, []int{0})
+	if err == nil {
+		for i := len(locks) - 1; i >= 0; i-- {
+			locks[i].Unlock()
+		}
+		t.Fatal("dirty relocation authorization alone allowed waiting for the inspection lock")
+	}
+	var contention *RecoveryInspectionContentionError
+	if !errors.As(err, &contention) {
+		t.Fatalf("lock error = %v, want typed inspection contention", err)
 	}
 }
 

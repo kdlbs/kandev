@@ -16,6 +16,13 @@ legacy_specs: []
 
 # Unified mobile navigation implementation plan
 
+## Successor
+
+[Navigation hierarchy](../navigation-hierarchy/plan.md) proposes a later revision
+to phone tool order and primary task creation. This package's completed work and
+verification results remain historical evidence. The successor owns changed
+order assertions and reruns retained navigation/creation regressions.
+
 ## Current revision: quick actions and collapsible integrations
 
 [Task 05](task-05-action-first-menu.md) is implemented and verified after Task 04. The user

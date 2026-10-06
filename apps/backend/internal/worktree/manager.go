@@ -11,6 +11,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/task/models"
 )
 
 const (
@@ -107,6 +108,15 @@ type Store interface {
 	// CountActiveWorktreeReferences counts non-deleted session associations
 	// for a physical worktree, excluding associations owned by the caller.
 	CountActiveWorktreeReferences(ctx context.Context, worktreeID string, excludeSessionIDs []string) (int, error)
+}
+
+// RecoverySelectionSnapshotReader reads the complete selected environment
+// identity and active repository inventory used to reject stale preflight.
+type RecoverySelectionSnapshotReader interface {
+	ReadRecoverySelectionSnapshot(
+		ctx context.Context,
+		expected models.WorkspaceRecoverySelectionSnapshot,
+	) (models.WorkspaceRecoverySelectionSnapshot, error)
 }
 
 // MultiRepoStore is an optional capability some stores implement to support

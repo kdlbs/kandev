@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback } from "react";
+import { useCallback, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { SessionRecoveryNotice } from "@/components/task/ensure-session-error";
 import { useSessionRecoveryActions } from "@/hooks/domains/session/use-session-recovery-actions";
@@ -9,6 +9,7 @@ import type { MessageAction } from "@/components/task/chat/types";
 import { RecoveryActions, type RecoveryChoice } from "@/components/task/recovery-actions";
 import { sanitizeSessionErrorDetails } from "@/lib/session-error-details";
 import { SessionErrorDetails } from "@/components/task/session-error-details";
+import { ManagedCloneRelocationConfirmation } from "@/components/task/chat/managed-clone-relocation-confirmation";
 import { ActionButton } from "./action-message-actions";
 
 export function sessionRecoveryAction(action: MessageAction): SessionRecoveryAction | null {
@@ -53,6 +54,77 @@ function recoveryActionTooltip(action: MessageAction, t: ReturnType<typeof useTr
   }
 }
 
+function buildRecoveryChoices({
+  actions,
+  t,
+  managedCloneRecoveryStamp,
+  providerRestoredResumeEligible,
+  recoveryError,
+  branchDetails,
+  onRecoveryAction,
+  onRestore,
+  onNewBranch,
+  onRelocationConfirm,
+}: {
+  actions: MessageAction[];
+  t: ReturnType<typeof useTranslation>["t"];
+  managedCloneRecoveryStamp: string | null;
+  providerRestoredResumeEligible: boolean;
+  recoveryError: Error | null;
+  branchDetails: unknown;
+  onRecoveryAction: (action: SessionRecoveryAction) => void;
+  onRestore: () => void;
+  onNewBranch: () => void;
+  onRelocationConfirm: () => void;
+}): RecoveryChoice[] {
+  const choices: RecoveryChoice[] = managedCloneRecoveryStamp
+    ? [
+        {
+          kind: "relocate_and_resume",
+          label: t("task:managedCloneRelocateResume"),
+          testId: "managed-clone-relocate-button",
+          onClick: onRelocationConfirm,
+        },
+      ]
+    : actions.flatMap((action) => {
+        const kind = sessionRecoveryAction(action);
+        return kind
+          ? [
+              {
+                kind,
+                label: recoveryActionLabel(kind, t),
+                disclosure:
+                  kind === "resume" && providerRestoredResumeEligible
+                    ? t("task:providerRestoredResumeDisclosure")
+                    : undefined,
+                testId: action.test_id,
+                tooltip: recoveryActionTooltip(action, t),
+                onClick: () => onRecoveryAction(kind),
+              },
+            ]
+          : [];
+      });
+  if (recoveryError && !managedCloneRecoveryStamp)
+    choices.push({
+      kind: "restore",
+      label: t("task:restoreReadOnlyWorkspace"),
+      testId: "recovery-restore-workspace-button",
+      onClick: onRestore,
+    });
+  if (
+    !managedCloneRecoveryStamp &&
+    branchDetails &&
+    !choices.some((choice) => choice.kind === "resume_new_branch")
+  )
+    choices.push({
+      kind: "resume_new_branch",
+      label: t("task:continueOnNewBranch"),
+      testId: "recovery-new-branch-button",
+      onClick: onNewBranch,
+    });
+  return choices;
+}
+
 export function SessionRecoveryActionButtons({
   actions,
   taskId,
@@ -73,11 +145,14 @@ export function SessionRecoveryActionButtons({
     branchDetails,
     guardDetails,
     recoveryNotice,
+    managedCloneRecoveryStamp,
     providerRestoredResumeEligible,
     handleRecover,
     handleRestore,
     handleNewBranch,
+    handleManagedCloneRelocation,
   } = useSessionRecoveryActions({ taskId, sessionId, errorStamp });
+  const [relocationConfirmationOpen, setRelocationConfirmationOpen] = useState(false);
 
   const onRecoveryAction = useCallback(
     async (action: SessionRecoveryAction) => {
@@ -85,41 +160,21 @@ export function SessionRecoveryActionButtons({
     },
     [handleRecover, onRecoveryRequested],
   );
-  const choices: RecoveryChoice[] = actions.flatMap((action) => {
-    const kind = sessionRecoveryAction(action);
-    return kind
-      ? [
-          {
-            kind,
-            label: recoveryActionLabel(kind, t),
-            disclosure:
-              kind === "resume" && providerRestoredResumeEligible
-                ? t("task:providerRestoredResumeDisclosure")
-                : undefined,
-            testId: action.test_id,
-            tooltip: recoveryActionTooltip(action, t),
-            onClick: () => void onRecoveryAction(kind),
-          },
-        ]
-      : [];
+  const choices = buildRecoveryChoices({
+    actions,
+    t,
+    managedCloneRecoveryStamp,
+    providerRestoredResumeEligible,
+    recoveryError,
+    branchDetails,
+    onRecoveryAction: (action) => void onRecoveryAction(action),
+    onRestore: () => void handleRestore(),
+    onNewBranch: () =>
+      void handleNewBranch().then((success) => {
+        if (success) onRecoveryRequested();
+      }),
+    onRelocationConfirm: () => setRelocationConfirmationOpen(true),
   });
-  if (recoveryError)
-    choices.push({
-      kind: "restore",
-      label: t("task:restoreReadOnlyWorkspace"),
-      testId: "recovery-restore-workspace-button",
-      onClick: () => void handleRestore(),
-    });
-  if (branchDetails && !choices.some((choice) => choice.kind === "resume_new_branch"))
-    choices.push({
-      kind: "resume_new_branch",
-      label: t("task:continueOnNewBranch"),
-      testId: "recovery-new-branch-button",
-      onClick: () =>
-        void handleNewBranch().then((success) => {
-          if (success) onRecoveryRequested();
-        }),
-    });
   return (
     <>
       {recoveryError && (
@@ -135,7 +190,11 @@ export function SessionRecoveryActionButtons({
       {recoveryNotice && <SessionRecoveryNotice message={recoveryNotice} />}
       <RecoveryActions
         actions={choices}
-        preferred={actions.map(sessionRecoveryAction).find((kind) => kind !== null)}
+        preferred={
+          managedCloneRecoveryStamp
+            ? "relocate_and_resume"
+            : actions.map(sessionRecoveryAction).find((kind) => kind !== null)
+        }
         busy={busyAction !== null}
         busyAction={busyAction}
         blocked={Boolean(guardDetails && !guardDetails.retryable)}
@@ -145,6 +204,17 @@ export function SessionRecoveryActionButtons({
         .map((action, index) => (
           <ActionButton key={action.test_id ?? index} action={action} messageTaskId={taskId} />
         ))}
+      <ManagedCloneRelocationConfirmation
+        open={relocationConfirmationOpen}
+        targetKey={`${sessionId}:${managedCloneRecoveryStamp ?? ""}`}
+        onOpenChange={setRelocationConfirmationOpen}
+        onConfirm={() =>
+          void handleManagedCloneRelocation().then((success) => {
+            if (success) onRecoveryRequested();
+          })
+        }
+        disabled={busyAction !== null}
+      />
     </>
   );
 }

@@ -13,6 +13,8 @@ This design defines how Agents preserve native rich-output tool identity and
 arguments across ACP dialects so a completed `show_rich_output_kandev` call
 replays as one standalone presentation. It covers Cursor and Grok provider
 envelopes, provider-neutral persistence, and historic title compatibility.
+It also defines the local lifetime of workspace file previews in the shared
+rich-output renderer.
 
 The
 [UI MCP tool-results design](../../ui/system-design/kandev-mcp-tool-results.md)
@@ -23,7 +25,7 @@ not change the version 1 rich-output schema, chart rendering, or settings.
 
 | Requirement | Design sections |
 | --- | --- |
-| `REQ-AGENTS-AGENT-RICH-OUTPUT-001` | [ACP identity normalization](#acp-identity-normalization), [Historic replay](#historic-replay), [Failure behavior](#failure-behavior) |
+| `REQ-AGENTS-AGENT-RICH-OUTPUT-001` | [ACP identity normalization](#acp-identity-normalization), [Historic replay](#historic-replay), [Failure behavior](#failure-behavior), [File-preview lifetime](#file-preview-lifetime) |
 
 ## ACP identity normalization
 
@@ -64,3 +66,43 @@ call the tool again.
   `mcp__github__...` keep the generic path.
 - Malformed rich-output arguments keep the existing unavailable presentation
   fallback after identity matching succeeds.
+
+## File-preview lifetime
+
+`RichOutputRenderer` validates arguments with `parseRichOutput` and retains its
+existing outer block identity by type and position. In its `RichOutputBlockView`
+file branch, the actual `FilePreviewBlock` instance has a key derived from the
+ordered tuple of `sessionId`, `block.repo`, and `block.path`. Serialize the tuple
+without delimiter ambiguity; presentation metadata is not target identity.
+This boundary implements AC-AGENTS-AGENT-RICH-OUTPUT-001.9 through .12.
+
+Replacing any tuple member unmounts the previous file instance and creates an
+idle, collapsed instance. `FilePreviewBlock` owns disclosure and delegates
+content state to `useWorkspaceFilePreview`. Only its existing expansion handler
+calls `load`; neither mounting nor replacing a descriptor reads a file.
+The hook's existing generation cleanup invalidates pending settlements on
+unmount. Old success or failure cannot populate the new instance. No transport
+cancellation or shared cache is required.
+
+An unchanged tuple retains the instance through reparsing, new argument objects,
+title/caption updates, and unrelated rerenders. Successful previews remain
+cached locally; failed previews retain the existing explicit retry flow.
+Different outer block positions own separate instances even for identical
+tuples. Chart and metric identities, parsed-payload memoization, workspace
+authorization, file-open callbacks, and persistence keep their current paths.
+
+The shared file card keeps its existing responsive header and controls; the
+correction changes state lifetime only. Its current `min-[420px]` composition,
+preview scroll region, localized labels, and desktop/mobile file-viewer routing
+remain the rendering boundary. The narrow state/data exception in
+[`mobile-parity` line 118](../../../../.agents/skills/mobile-parity/SKILL.md#mobile-e2e-expectations)
+is satisfied by rendered component tests at the full consumer boundary.
+
+Regression coverage renders the real `RichOutputRenderer`, parser, file card,
+and hook with only WebSocket client acquisition and file-content transport
+mocked. It replaces descriptors at the same block position, checks disclosure
+and read arguments, settles deferred old promises, and exercises same-target
+and separate-card controls. The original renderer memoization test remains
+separate because it mocks parsing for its own contract.
+
+Implementation record: [File-preview target reset](../../../plans/rich-file-preview-targets/plan.md).

@@ -60,9 +60,10 @@ const maxStartupTransferReconcileAttempts = 30
 
 // ServiceConfig holds orchestrator service configuration
 type ServiceConfig struct {
-	Scheduler  scheduler.SchedulerConfig
-	QueueSize  int
-	QueueGroup string
+	ProviderInterruptionContinuation bool
+	Scheduler                        scheduler.SchedulerConfig
+	QueueSize                        int
+	QueueGroup                       string
 	// CodexAppServerEnabled controls native-only lifecycle actions such as
 	// conversation forks. It is restart-required, matching agentctl transport
 	// composition and the feature's runtime flag.
@@ -391,7 +392,6 @@ type repoStore interface {
 	ListTaskWorkspaceFolders(ctx context.Context, taskID string) ([]*models.TaskWorkspaceFolder, error)
 	CreateTaskSession(ctx context.Context, session *models.TaskSession) error
 	UpdateTaskSession(ctx context.Context, session *models.TaskSession) error
-	ListActiveTaskSessions(ctx context.Context) ([]*models.TaskSession, error)
 	ListActiveTaskSessionsByTaskID(ctx context.Context, taskID string) ([]*models.TaskSession, error)
 	ListTaskSessionWorktrees(ctx context.Context, sessionID string) ([]*models.TaskEnvironmentRepo, error)
 	ListSessionsWithBranches(ctx context.Context) ([]models.SessionBranchInfo, error)
@@ -412,6 +412,7 @@ type repoStore interface {
 
 // sessionExecutorStore is the minimal repository interface needed by the orchestrator service.
 type sessionExecutorStore interface {
+	ListActiveTaskSessions(ctx context.Context) ([]*models.TaskSession, error)
 	// Session
 	GetTaskSession(ctx context.Context, id string) (*models.TaskSession, error)
 	// HasUserPromptHistory reads the durable prompt sequence without scanning
@@ -454,6 +455,7 @@ type sessionExecutorStore interface {
 	ListExecutorsRunning(ctx context.Context) ([]*models.ExecutorRunning, error)
 	UpsertExecutorRunning(ctx context.Context, running *models.ExecutorRunning) error
 	GetExecutorRunningBySessionID(ctx context.Context, sessionID string) (*models.ExecutorRunning, error)
+	ListExecutorsRunningByTaskID(ctx context.Context, taskID string) ([]*models.ExecutorRunning, error)
 	DeleteExecutorRunningBySessionID(ctx context.Context, sessionID string) error
 	HasExecutorRunningRow(ctx context.Context, sessionID string) (bool, error)
 	UpdateResumeToken(ctx context.Context, sessionID, expectedExecID, resumeToken, lastMessageUUID string) error
@@ -901,7 +903,8 @@ type Service struct {
 	// raw state write. Nil-safe: when unset, terminal completion for an
 	// Office task is skipped rather than falling back to the raw write,
 	// which would bypass the gate.
-	officeTaskStatusUpdater OfficeTaskStatusUpdater
+	officeTaskStatusUpdater        OfficeTaskStatusUpdater
+	workspaceRecoveryErrorReporter workspaceRecoveryErrorReporter
 
 	// Resolves the agent family names written in configure_session rules onto
 	// canonical agent IDs. Nil-safe: when unset, rule matching falls back to an
@@ -1884,6 +1887,7 @@ func NewService(
 		OnAgentReady:           s.handleAgentReady,
 		OnAgentCompleted:       s.handleAgentCompleted,
 		OnAgentFailed:          s.handleAgentFailed,
+		OnAgentTurnFailed:      s.handleAgentTurnFailed,
 		OnAgentStalled:         s.handleAgentStalled,
 		OnAgentStopped:         s.handleAgentStopped,
 		OnAgentStreamEvent:     s.handleAgentStreamEvent,
@@ -3574,6 +3578,7 @@ func (s *Service) reconcileDurablePlanCommentDeliveriesOnStartup(ctx context.Con
 }
 
 func (s *Service) reconcileExecutorSessionsOnStartup(ctx context.Context) {
+	s.retireInterruptedNoticesOnStartup(ctx)
 	runningExecutors, err := s.repo.ListExecutorsRunning(ctx)
 	if err != nil {
 		s.logger.Warn("failed to list executors running on startup", zap.Error(err))

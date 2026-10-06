@@ -85,7 +85,7 @@ func TestPrepareResumeRepositorySettings_RejectsInheritedExecutorMismatch(t *tes
 		ExecutorType: string(models.ExecutorTypeLocalDocker),
 	}
 
-	_, _, _, err := exec.prepareResumeRepositorySettings(context.Background(), task, session, req)
+	_, _, _, err := exec.prepareResumeRepositorySettings(context.Background(), task, session, req, ResumeOptions{})
 	if !errors.Is(err, models.ErrWorkspaceReuseUnsafe) {
 		t.Fatalf("prepareResumeRepositorySettings() error = %v, want ErrWorkspaceReuseUnsafe", err)
 	}

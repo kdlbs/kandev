@@ -55,6 +55,11 @@ make -C apps/backend e2e-plugin-ui
 make -C apps/backend e2e-plugin-package
 ```
 
+The E2E web build sets `KANDEV_VERSION=e2e` so release-note generation falls back
+to the latest entry in `CHANGELOG.md` even in a checkout without Git tags. This
+keeps release-note browser scenarios independent of the runner's tag cache.
+Production builds retain normal version resolution.
+
 `e2e-plugin-ui` deletes generated UI and rebuilds it from
 `apps/web/e2e/fixtures/plugins/prompt-history-plugin/`. Packaging depends on
 that phony target, then writes the archive and

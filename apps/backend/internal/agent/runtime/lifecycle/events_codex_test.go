@@ -15,3 +15,14 @@ func TestBuildAgentStreamEventDataCarriesProviderOperationID(t *testing.T) {
 		t.Fatalf("operation id = %q, want provider-turn-1", data.OperationID)
 	}
 }
+
+func TestBuildAgentStreamEventDataCarriesRetainedFailureDisposition(t *testing.T) {
+	data := buildAgentStreamEventData(streams.AgentEvent{
+		Type:                     "complete",
+		PromptFailureDisposition: streams.PromptFailureDispositionRetainRuntime,
+	})
+	if data.PromptFailureDisposition != streams.PromptFailureDispositionRetainRuntime {
+		t.Fatalf("prompt failure disposition = %q, want %q",
+			data.PromptFailureDisposition, streams.PromptFailureDispositionRetainRuntime)
+	}
+}

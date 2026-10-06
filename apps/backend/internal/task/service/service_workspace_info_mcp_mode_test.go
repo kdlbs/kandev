@@ -10,6 +10,7 @@ import (
 	"github.com/kandev/kandev/internal/common/mcpmode"
 	"github.com/kandev/kandev/internal/task/models"
 	taskrepo "github.com/kandev/kandev/internal/task/repository"
+	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	"github.com/stretchr/testify/require"
 )
 
@@ -27,48 +28,43 @@ func (r *fakeMcpModeTaskRepo) GetTask(context.Context, string) (*models.Task, er
 }
 
 func TestResolveWorkspaceInfoMcpMode_EmptyTaskID(t *testing.T) {
-	svc, _, _ := createTestService(t)
+	svc := &Service{}
 	mode, err := svc.resolveWorkspaceInfoMcpMode(context.Background(), "")
 	require.NoError(t, err)
 	require.Empty(t, mode)
 }
 
 func TestResolveWorkspaceInfoMcpMode_NilTaskIsEmptyWithNoError(t *testing.T) {
-	svc, _, _ := createTestService(t)
-	svc.tasks = &fakeMcpModeTaskRepo{task: nil, err: nil}
+	svc := &Service{tasks: &fakeMcpModeTaskRepo{}}
 	mode, err := svc.resolveWorkspaceInfoMcpMode(context.Background(), "task-missing")
 	require.NoError(t, err)
 	require.Empty(t, mode)
 }
 
 func TestResolveWorkspaceInfoMcpMode_NotFoundIsEmptyWithNoError(t *testing.T) {
-	svc, _, _ := createTestService(t)
-	svc.tasks = &fakeMcpModeTaskRepo{err: fmt.Errorf("get task: %w", taskrepo.ErrTaskNotFound)}
+	svc := &Service{tasks: &fakeMcpModeTaskRepo{err: fmt.Errorf("get task: %w", taskrepo.ErrTaskNotFound)}}
 	mode, err := svc.resolveWorkspaceInfoMcpMode(context.Background(), "task-missing")
 	require.NoError(t, err)
 	require.Empty(t, mode)
 }
 
 func TestResolveWorkspaceInfoMcpMode_OtherReadErrorFails(t *testing.T) {
-	svc, _, _ := createTestService(t)
 	readErr := errors.New("boom")
-	svc.tasks = &fakeMcpModeTaskRepo{err: readErr}
+	svc := &Service{tasks: &fakeMcpModeTaskRepo{err: readErr}}
 	_, err := svc.resolveWorkspaceInfoMcpMode(context.Background(), "task-123")
 	require.Error(t, err)
 	require.ErrorIs(t, err, readErr)
 }
 
 func TestResolveWorkspaceInfoMcpMode_CoordinatorOriginTask(t *testing.T) {
-	svc, _, _ := createTestService(t)
-	svc.tasks = &fakeMcpModeTaskRepo{task: &models.Task{ID: "task-coordinator", Origin: models.TaskOriginCoordinator}}
+	svc := &Service{tasks: &fakeMcpModeTaskRepo{task: &models.Task{ID: "task-coordinator", Origin: models.TaskOriginCoordinator}}}
 	mode, err := svc.resolveWorkspaceInfoMcpMode(context.Background(), "task-coordinator")
 	require.NoError(t, err)
 	require.Equal(t, mcpmode.Coordinator, mode)
 }
 
 func TestResolveWorkspaceInfoMcpMode_KanbanOriginIsEmpty(t *testing.T) {
-	svc, _, _ := createTestService(t)
-	svc.tasks = &fakeMcpModeTaskRepo{task: &models.Task{ID: "task-kanban"}}
+	svc := &Service{tasks: &fakeMcpModeTaskRepo{task: &models.Task{ID: "task-kanban"}}}
 	mode, err := svc.resolveWorkspaceInfoMcpMode(context.Background(), "task-kanban")
 	require.NoError(t, err)
 	require.Empty(t, mode)
@@ -124,7 +120,15 @@ func TestGetWorkspaceInfoForSession_KanbanTaskLeavesMcpModeEmpty(t *testing.T) {
 // itself is swapped to observe a not-found read, mirroring a benign
 // delete/lookup race rather than a schema violation.
 func TestGetWorkspaceInfoForSession_ConfiguredServiceStillFailsOnMissingTask(t *testing.T) {
-	svc, _, repo := createTestService(t)
+	svc, _, repo := createTestServiceWithTaskAndSessionRepos(t,
+		func(repo *sqliterepo.Repository) taskrepo.TaskRepository {
+			return &fakeMcpModeTaskRepo{
+				TaskRepository: repo,
+				err:            fmt.Errorf("get task: %w", taskrepo.ErrTaskNotFound),
+			}
+		},
+		func(repo *sqliterepo.Repository) taskrepo.SessionRepository { return repo },
+	)
 	ctx := context.Background()
 	setupTestTask(t, repo)
 	now := time.Now().UTC()
@@ -132,8 +136,6 @@ func TestGetWorkspaceInfoForSession_ConfiguredServiceStillFailsOnMissingTask(t *
 		ID: "session-orphan-task", TaskID: "task-123", AgentProfileID: "profile-1",
 		State: models.TaskSessionStateCompleted, StartedAt: now, UpdatedAt: now,
 	}))
-	svc.tasks = &fakeMcpModeTaskRepo{err: fmt.Errorf("get task: %w", taskrepo.ErrTaskNotFound)}
-
 	_, err := svc.GetWorkspaceInfoForSession(ctx, "task-123", "session-orphan-task")
 	require.Error(t, err)
 	require.ErrorIs(t, err, taskrepo.ErrTaskNotFound)

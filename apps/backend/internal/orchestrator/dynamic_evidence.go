@@ -9,6 +9,7 @@ import (
 	dynamicruntime "github.com/kandev/kandev/internal/agent/runtime/dynamic"
 	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
+	"github.com/kandev/kandev/internal/auth/authn"
 	"github.com/kandev/kandev/internal/orchestrator/watcher"
 	"github.com/kandev/kandev/internal/task/models"
 	"go.uber.org/zap"
@@ -37,6 +38,8 @@ type promptAttemptEvidence struct {
 	dynamic                bool
 	streakResetInProgress  bool
 	streakResetComplete    bool
+	initiator              authn.Identity
+	initiatorKnown         bool
 }
 
 // normalizeDiagnosticText applies streams.SanitizeProviderMessage so a raw
@@ -87,15 +90,62 @@ func (s *Service) beginInteractivePromptAttempt(
 	sessionID, executionID string,
 	dynamic bool,
 ) {
-	s.beginPromptAttempt(sessionID, executionID, s.nextPromptGeneration(ctx, sessionID), dynamic)
+	generation := s.nextPromptGeneration(ctx, sessionID)
+	s.beginPromptAttempt(sessionID, executionID, generation, dynamic)
+	s.capturePromptAttemptInitiator(ctx, sessionID, executionID, generation)
 }
 
-func (s *Service) beginInitialPromptAttempt(sessionID string, dynamic bool) {
+func (s *Service) beginInitialPromptAttempt(ctx context.Context, sessionID string, dynamic bool) {
 	s.beginPromptAttempt(sessionID, "", 1, dynamic)
+	s.capturePromptAttemptInitiator(ctx, sessionID, "", 1)
 }
 
 func (s *Service) bindPromptAttemptToExecution(ctx context.Context, sessionID, executionID string) {
-	s.bindPromptAttempt(sessionID, executionID, s.promptGenerationForSession(ctx, sessionID))
+	generation := s.promptGenerationForSession(ctx, sessionID)
+	s.bindPromptAttempt(sessionID, executionID, generation)
+	s.capturePromptAttemptInitiator(ctx, sessionID, executionID, generation)
+}
+
+func (s *Service) capturePromptAttemptInitiator(
+	ctx context.Context,
+	sessionID, executionID string,
+	promptGeneration uint64,
+) {
+	initiator, ok := authn.IdentityFromContext(ctx)
+	if !ok || sessionID == "" {
+		return
+	}
+	evidence, ok := s.promptAttemptForSession(sessionID)
+	if !ok {
+		return
+	}
+	evidence.mu.Lock()
+	defer evidence.mu.Unlock()
+	if !evidence.evidenceKnown || evidence.dynamic ||
+		(executionID != "" && evidence.executionID != "" && evidence.executionID != executionID) ||
+		(promptGeneration != 0 && evidence.promptGeneration != 0 && evidence.promptGeneration != promptGeneration) {
+		return
+	}
+	if evidence.initiatorKnown && evidence.initiator != initiator {
+		evidence.evidenceKnown = false
+		return
+	}
+	evidence.initiator = initiator
+	evidence.initiatorKnown = true
+}
+
+func (s *Service) promptAttemptInitiator(data watcher.AgentEventData) (authn.Identity, bool) {
+	evidence, ok := s.promptAttemptForSession(data.SessionID)
+	if !ok {
+		return authn.Identity{}, false
+	}
+	evidence.mu.Lock()
+	defer evidence.mu.Unlock()
+	if !evidence.evidenceKnown || evidence.dynamic || !evidence.initiatorKnown ||
+		evidence.executionID != data.AgentExecutionID || evidence.promptGeneration != data.PromptGeneration {
+		return authn.Identity{}, false
+	}
+	return evidence.initiator, true
 }
 
 func (s *Service) nextPromptGeneration(ctx context.Context, sessionID string) uint64 {

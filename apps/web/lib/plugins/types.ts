@@ -23,11 +23,18 @@ export type {
   IntegrationSettingsActionProps,
   IntegrationSettingsActionSurface,
   ChatTopBarSlotProps,
+  PluginComposerCapability,
+  PluginComposerSlotProps,
+  PluginComposerSubmitResult,
+  PluginComposerSurface,
   PluginContextApi,
   PluginHostRepository,
   MainTopBarSlotProps,
   PluginNavSection,
+  PluginTaskCreatedHandler,
+  PluginTaskCreatedIdentity,
   PluginUIApi,
+  RegisterPluginTaskCreatedHandler,
 } from "@kandev/plugin-sdk";
 export type { PluginIcon } from "@kandev/plugin-sdk";
 
@@ -51,10 +58,8 @@ export interface NavItem {
   /**
    * Where the item renders: "main" (default) as a top-level sidebar entry,
    * "integrations" inside the sidebar's Integrations section alongside the
-   * first-party integration links, "sidebar-footer" as an icon button in the
-   * sidebar footer's icon row and as a labelled row in the phone menu's
-   * Utilities group (subject to the footer's inline budget — an over-budget
-   * item is reached through the footer's overflow menu instead), "settings"
+   * first-party integration links, "sidebar-footer" as a labelled item in the
+   * desktop footer's utilities menu and the phone menu's Utilities group, "settings"
    * accepted but rendered on no surface.
    */
   section?: PluginSDK.PluginNavSection;
@@ -327,32 +332,6 @@ export type ChatSubmitDecorationSlotProps = {
   /** True when plan mode is on (the button sends a plan request). */
   planModeEnabled: boolean;
 };
-
-export type PluginComposerSurface = "task-chat" | "quick-chat" | "task-create" | "new-session";
-
-export type PluginComposerSubmitResult =
-  | { status: "submitted" }
-  | { status: "blocked"; reason?: string }
-  | { status: "unavailable" };
-
-export interface PluginComposerCapability {
-  insertText(text: string): { status: "inserted" | "ignored" | "unavailable" };
-  focus(): { status: "focused" | "unavailable" };
-  submit(): Promise<PluginComposerSubmitResult>;
-}
-
-export interface PluginComposerSlotProps {
-  surface: PluginComposerSurface;
-  presentation: PluginPresentation;
-  taskId: string | null;
-  taskTitle?: string;
-  activeSessionId: string | null;
-  sessionIds: string[];
-  disabled: boolean;
-  submittable: boolean;
-  disabledReason?: string;
-  composer: PluginComposerCapability;
-}
 
 /** Props passed to a `TaskPanelRegistration.Component`. */
 export type PluginTaskPanelProps = PluginSDK.PluginTaskPanelProps;

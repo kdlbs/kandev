@@ -17,6 +17,7 @@ const collapsibleMock = vi.hoisted(() => ({
 const destinationsMock = vi.hoisted(() => vi.fn());
 
 const storeState = {
+  workspaces: { activeId: "ws-1" as string | null },
   appSidebar: {
     sectionExpanded: {
       integrations: false,
@@ -104,44 +105,31 @@ describe("IntegrationsSection", () => {
 
   afterEach(() => cleanup());
 
-  it("keeps integration shortcuts visible while the section accordion is closed", () => {
-    destinationsMock.mockReturnValue([AZURE, GITHUB, GITLAB, JIRA, LINEAR]);
-
+  it("keeps destinations behind a disclosure while collapsed", () => {
     renderSection();
-
-    const shortcuts = screen.getAllByTestId("integration-header-shortcut");
-    expect(shortcuts.map((shortcut) => shortcut.getAttribute("aria-label"))).toEqual([
-      "Azure DevOps",
-      "GitHub",
-      "GitLab",
-      "Jira",
-    ]);
-    expect(shortcuts.map((shortcut) => shortcut.getAttribute("href"))).toEqual([
-      "/azure-devops",
-      "/github",
-      "/gitlab",
-      "/jira",
-    ]);
-    expect(screen.queryByRole("link", { name: "Linear" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Integrations" }).getAttribute("aria-expanded")).toBe(
+      "false",
+    );
+    expect(screen.queryByRole("link", { name: "GitHub" })).toBeNull();
+    screen.getByRole("button", { name: "Integrations" }).click();
+    expect(storeState.toggleAppSidebarSection).toHaveBeenCalledWith("integrations", false);
   });
 
-  it("limits shortcuts to four integrations and leaves the full list in the expanded section", () => {
+  it("shows every resolved integration once when expanded", () => {
     storeState.appSidebar.sectionExpanded.integrations = true;
     destinationsMock.mockReturnValue([AZURE, GITHUB, GITLAB, JIRA, LINEAR]);
-
     renderSection();
-
-    expect(screen.getAllByTestId("integration-header-shortcut")).toHaveLength(4);
-    expect(screen.getByRole("link", { name: "Linear" })).toBeTruthy();
+    for (const destination of [AZURE, GITHUB, GITLAB, JIRA, LINEAR]) {
+      expect(screen.getAllByRole("link", { name: destination.label })).toHaveLength(1);
+    }
+    expect(screen.getAllByTestId("azure-devops-icon")).toHaveLength(1);
   });
 
-  it("uses the Azure DevOps product mark for Azure links", () => {
+  it("marks the active integration destination on nested routes", () => {
+    navigationMock.pathname = "/github/issues";
     storeState.appSidebar.sectionExpanded.integrations = true;
-    destinationsMock.mockReturnValue([AZURE]);
-
     renderSection();
-
-    expect(screen.getAllByTestId("azure-devops-icon")).toHaveLength(2);
+    expect(screen.getByRole("link", { name: "GitHub" }).getAttribute("aria-current")).toBe("page");
   });
 
   it("renders plugin nav items after the first-party links, with their own test id", () => {
@@ -176,12 +164,13 @@ describe("IntegrationsSection", () => {
     expect(screen.getByTestId(PLUGIN_TEST_ID)).toBeTruthy();
   });
 
-  it("hides the section entirely when the manifest resolves no destinations", () => {
+  it("offers integration settings even with no configured providers", () => {
     storeState.appSidebar.sectionExpanded.integrations = true;
     destinationsMock.mockReturnValue([]);
-
-    const { container } = renderSection();
-
-    expect(container.textContent).toBe("");
+    renderSection();
+    expect(screen.getByRole("link", { name: "Integration settings" }).getAttribute("href")).toBe(
+      "/settings/workspaces/ws-1/integrations",
+    );
+    expect(screen.queryByRole("link", { name: "GitHub" })).toBeNull();
   });
 });
