@@ -187,3 +187,16 @@ server display, complete local projection, disabled Retry, and late responses.
 All 83 focused tests passed; targeted ESLint and web typecheck passed.
 Fresh managed desktop and phone regressions passed, with three newly captured,
 inspected, and compressed screenshots. Catalog and specification lint passed.
+
+The final-head CI shard reported an existing Quick Chat lost-admission-response
+assertion. Its exact test passed three times without retries on the identical
+CI merge tree, and also passed after its original preceding shard tests.
+The full manifest-selected reproduction passed 248 tests, skipped three, and
+exposed a different command-palette fixture race: the first query could capture
+a partial submodule inventory and remain unchanged while the inventory completed.
+Three focused runs reproduced the missing outer group. A diagnostic query after
+the failed assertion returned all three groups, confirming readiness as the cause.
+The test now polls the backend for root and both nested submodule inventories
+before searching in the UI, which uses its default assertion timeout. Three
+consecutive runs without retries, targeted ESLint, and web typecheck passed.
+This test-only remediation requires fresh published-head CI before merge.
