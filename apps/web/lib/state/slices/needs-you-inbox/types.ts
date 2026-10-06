@@ -44,6 +44,7 @@ export type NeedsYouInboxSliceState = {
     // per-workspace -- every trigger re-reads whichever workspace is active
     // when it fires, never the one the event happened to name.
     refreshTick: number;
+    manualRetryTick: number;
   };
 };
 
@@ -73,6 +74,8 @@ export type NeedsYouInboxSliceActions = {
   ) => void;
   /** Bumps the WS-action refresh trigger tick (design-02#Control-flow). */
   bumpNeedsYouInboxRefreshTick: () => void;
+  /** Requests an explicit retry even after automatic refreshes are suspended. */
+  requestNeedsYouInboxRetry: () => void;
 };
 
 export type NeedsYouInboxSlice = NeedsYouInboxSliceState & NeedsYouInboxSliceActions;

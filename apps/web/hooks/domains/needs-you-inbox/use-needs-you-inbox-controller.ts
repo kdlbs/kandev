@@ -6,6 +6,7 @@ import { getWebSocketClient } from "@/lib/ws/connection";
 import { listClarificationInbox } from "@/lib/api/domains/clarification-inbox-api";
 import { selectNeedsYouInboxNextSnoozeExpiry } from "@/lib/state/slices/needs-you-inbox/selectors";
 import { readBootPayload } from "@/src/boot-payload";
+import { NeedsYouInboxRefreshCoordinator } from "./needs-you-inbox-refresh-coordinator";
 
 // "At most once every 60 seconds" (design-02#Control-flow): the residual
 // catch-all for exits none of the other four triggers observes.
@@ -19,6 +20,8 @@ const MIN_SNOOZE_RESCHEDULE_MS = 5_000;
 // and an unchanged effect dependency never rearms the timeout. Firing a
 // second late instead guarantees the read crosses the real boundary.
 const SNOOZE_RESCHEDULE_BUFFER_MS = 1_000;
+
+type NeedsYouInboxRefresh = (targetWorkspaceId: string, manual?: boolean) => Promise<void>;
 
 // Applies the boot-hydration producer (needs-you-inbox
 // design-01#Data-and-contracts) via seedNeedsYouInboxBoot, so the badge
@@ -55,9 +58,9 @@ function useNeedsYouInboxBootSeed(
 function useNeedsYouInboxWsRefresh(
   enabled: boolean,
   workspaceId: string | null,
-  connectionStatus: string,
   refresh: (targetWorkspaceId: string) => Promise<void>,
   storeApi: ReturnType<typeof useAppStoreApi>,
+  scope: { connectionStatus: string; key: string },
 ) {
   const wasConnectedRef = useRef(false);
   // session.state_changed is broadcast workspace-wide, so a burst of
@@ -74,11 +77,12 @@ function useNeedsYouInboxWsRefresh(
   // cleanup only tears down the WS listeners it just registered -- clearing a
   // still-pending trailing bump there would drop it silently on a re-run,
   // exactly the "dropped, not deferred" bug this coalescing exists to avoid.
-  // Only a true unmount (below) clears it.
+  // Scope changes and unmount clear it, while reconnect-only effect cleanups
+  // leave the trailing signal intact.
   const trailingBumpTimeoutRef = useRef<number | undefined>(undefined);
   useEffect(() => {
     if (!enabled) return;
-    const isConnected = connectionStatus === "connected";
+    const isConnected = scope.connectionStatus === "connected";
     if (isConnected && !wasConnectedRef.current && workspaceId) {
       void refresh(workspaceId);
     }
@@ -115,16 +119,39 @@ function useNeedsYouInboxWsRefresh(
       offPending();
       offStateChanged();
     };
-  }, [enabled, connectionStatus, workspaceId, refresh, storeApi]);
+  }, [enabled, scope.connectionStatus, workspaceId, refresh, storeApi]);
 
   useEffect(() => {
+    lastWsBumpAtRef.current = -Infinity;
     return () => {
       if (trailingBumpTimeoutRef.current !== undefined) {
         window.clearTimeout(trailingBumpTimeoutRef.current);
         trailingBumpTimeoutRef.current = undefined;
       }
     };
-  }, []);
+  }, [scope.key]);
+}
+
+function useNeedsYouInboxTickRefresh(
+  refreshTick: number,
+  manualRetryTick: number,
+  enabled: boolean,
+  workspaceId: string | null,
+  refresh: NeedsYouInboxRefresh,
+) {
+  const lastTickRef = useRef(refreshTick);
+  useEffect(() => {
+    if (lastTickRef.current === refreshTick) return;
+    lastTickRef.current = refreshTick;
+    if (enabled && workspaceId) void refresh(workspaceId);
+  }, [refreshTick, enabled, workspaceId, refresh]);
+
+  const lastManualRetryTickRef = useRef(manualRetryTick);
+  useEffect(() => {
+    if (lastManualRetryTickRef.current === manualRetryTick) return;
+    lastManualRetryTickRef.current = manualRetryTick;
+    if (enabled && workspaceId) void refresh(workspaceId, true);
+  }, [manualRetryTick, enabled, workspaceId, refresh]);
 }
 
 /**
@@ -138,32 +165,63 @@ function useNeedsYouInboxWsRefresh(
 export function useNeedsYouInboxController() {
   const enabled = useFeature("needsYouInbox");
   const workspaceId = useAppStore((s) => s.workspaces.activeId);
+  const authUserId = useAppStore((s) => s.auth.user?.id ?? null);
+  const authenticated = useAppStore((s) => s.auth.authenticated);
+  const authMode = useAppStore((s) => s.auth.mode);
   const connectionStatus = useAppStore((s) => s.connection.status);
   const nextSnoozeExpiry = useAppStore(selectNeedsYouInboxNextSnoozeExpiry);
   const refreshTick = useAppStore((s) => s.needsYouInbox.refreshTick);
+  const manualRetryTick = useAppStore((s) => s.needsYouInbox.manualRetryTick);
   const storeApi = useAppStoreApi();
+  const scopeKey = `${enabled ? 1 : 0}|${workspaceId ?? ""}|${authenticated ? 1 : 0}|${authMode}|${authUserId ?? ""}`;
+  const coordinatorRef = useRef<NeedsYouInboxRefreshCoordinator | null>(null);
 
   useNeedsYouInboxBootSeed(enabled, workspaceId, storeApi);
 
-  const refresh = useCallback(
-    async (targetWorkspaceId: string) => {
-      const { beginNeedsYouInboxRead, setNeedsYouInboxPage, setNeedsYouInboxError } =
-        storeApi.getState();
-      const generation = beginNeedsYouInboxRead(targetWorkspaceId);
-      try {
-        const page = await listClarificationInbox(targetWorkspaceId);
-        setNeedsYouInboxPage(targetWorkspaceId, generation, {
+  useEffect(() => {
+    if (!enabled || !workspaceId) {
+      coordinatorRef.current?.dispose();
+      coordinatorRef.current = null;
+      return;
+    }
+
+    let readGeneration = 0;
+    const coordinator: NeedsYouInboxRefreshCoordinator = new NeedsYouInboxRefreshCoordinator(
+      scopeKey,
+      async (signal) => {
+        const { beginNeedsYouInboxRead, setNeedsYouInboxPage } = storeApi.getState();
+        const generation = beginNeedsYouInboxRead(workspaceId);
+        readGeneration = generation;
+        const page = await listClarificationInbox(workspaceId, { init: { signal } });
+        if (signal.aborted || coordinatorRef.current !== coordinator) return;
+        setNeedsYouInboxPage(workspaceId, generation, {
           bundles: page.bundles,
           count: page.count,
           hiddenCount: page.hidden_count,
           nextSnoozeExpiry: page.next_snooze_expiry,
           hasMore: page.next_cursor !== undefined,
         });
-      } catch {
-        setNeedsYouInboxError(targetWorkspaceId, generation);
-      }
+      },
+      () => {
+        if (coordinatorRef.current !== coordinator) return;
+        storeApi.getState().setNeedsYouInboxError(workspaceId, readGeneration);
+      },
+    );
+    coordinatorRef.current = coordinator;
+    return () => {
+      coordinator.dispose();
+      if (coordinatorRef.current === coordinator) coordinatorRef.current = null;
+    };
+  }, [enabled, workspaceId, scopeKey, storeApi]);
+
+  const refresh = useCallback(
+    (targetWorkspaceId: string, manual = false) => {
+      if (!enabled || !workspaceId || targetWorkspaceId !== workspaceId) return Promise.resolve();
+      const coordinator = coordinatorRef.current;
+      if (!coordinator || coordinator.scopeKey !== scopeKey) return Promise.resolve();
+      return coordinator.refresh(manual);
     },
-    [storeApi],
+    [enabled, workspaceId, scopeKey],
   );
 
   // Trigger: route mount / workspace change is handled by whichever component
@@ -174,23 +232,22 @@ export function useNeedsYouInboxController() {
     void refresh(workspaceId);
   }, [enabled, workspaceId, refresh]);
 
-  useNeedsYouInboxWsRefresh(enabled, workspaceId, connectionStatus, refresh, storeApi);
+  useNeedsYouInboxWsRefresh(enabled, workspaceId, refresh, storeApi, {
+    connectionStatus,
+    key: scopeKey,
+  });
 
-  // Applies the WS-triggered refresh tick bumped above.
-  const lastTickRef = useRef(refreshTick);
-  useEffect(() => {
-    if (lastTickRef.current === refreshTick) return;
-    lastTickRef.current = refreshTick;
-    if (enabled && workspaceId) void refresh(workspaceId);
-  }, [refreshTick, enabled, workspaceId, refresh]);
+  // Applies WS-triggered and explicit retry ticks bumped above.
+  useNeedsYouInboxTickRefresh(refreshTick, manualRetryTick, enabled, workspaceId, refresh);
 
   // Trigger: tab visibility regained (coalesced with focus/pageshow/online).
   useForegroundRefresh(
     () => {
-      if (workspaceId) void refresh(workspaceId);
+      if (workspaceId) return refresh(workspaceId);
+      return Promise.resolve();
     },
     enabled && !!workspaceId,
-    workspaceId,
+    scopeKey,
   );
 
   // Trigger: bounded periodic re-read, only while the tab is visible.
@@ -200,7 +257,7 @@ export function useNeedsYouInboxController() {
       if (document.visibilityState === "visible") void refresh(workspaceId);
     }, PERIODIC_REFRESH_MS);
     return () => window.clearInterval(interval);
-  }, [enabled, workspaceId, refresh]);
+  }, [enabled, workspaceId, refresh, scopeKey]);
 
   // Snooze-expiry timer: cancelled and re-armed whenever the workspace or the
   // carried expiry changes, so it never fires for a workspace the operator
@@ -213,7 +270,7 @@ export function useNeedsYouInboxController() {
     );
     const timeout = window.setTimeout(() => void refresh(workspaceId), delay);
     return () => window.clearTimeout(timeout);
-  }, [enabled, workspaceId, nextSnoozeExpiry, refresh]);
+  }, [enabled, workspaceId, nextSnoozeExpiry, refresh, scopeKey]);
 
   return refresh;
 }

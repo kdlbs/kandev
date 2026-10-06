@@ -312,9 +312,11 @@ export function buildArchivedValue(task: Task | null, repository: Repository | n
 export function resolveTaskContentState(params: {
   isMounted: boolean;
   hasTask: boolean;
+  hasTaskDetails: boolean;
   hasTaskLoadError: boolean;
 }) {
   if (!params.isMounted) return "loading";
+  if (params.hasTaskDetails) return "ready";
   if (params.hasTaskLoadError) return "error";
   if (params.hasTask) return "ready";
   return "loading";

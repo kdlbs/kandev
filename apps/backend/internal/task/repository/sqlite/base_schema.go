@@ -315,6 +315,16 @@ func (r *Repository) ensureMessageMetadataIndexes() error {
 	if _, err := r.db.ExecContext(r.migrationContext(), lookupIndex); err != nil {
 		return err
 	}
+	// Keep inbox scans proportional to clarification history, not every message.
+	clarificationBundlesIndex := fmt.Sprintf(
+		`CREATE INDEX IF NOT EXISTS idx_messages_clarification_bundle
+		ON task_session_messages((%s), task_session_id)
+		WHERE type = 'clarification_request'`,
+		dialect.JSONExtract(driver, "metadata", "pending_id"),
+	)
+	if _, err := r.db.ExecContext(r.migrationContext(), clarificationBundlesIndex); err != nil {
+		return err
+	}
 	return nil
 }
 

@@ -17,13 +17,17 @@ import { useTaskRouteSessionHydrated } from "@/components/task/task-route-sessio
 import { useEnsureTaskSession } from "@/hooks/domains/session/use-ensure-task-session";
 import { useExternalVcsFileLinkHydration } from "@/hooks/domains/workspace/use-external-vcs-file-link";
 import { linkToTaskOverview } from "@/lib/links";
-import { readTaskNavigationIdentity } from "@/lib/state/task-navigation-reads";
+import {
+  isTemporaryTaskNavigationError,
+  readTaskNavigationIdentity,
+  useTaskNavigationReadState,
+} from "@/lib/state/task-navigation-reads";
 import { useWorkflowSnapshotById } from "@/hooks/domains/kanban/use-all-workflow-snapshots";
 import { useWorkflowStepsById } from "@/hooks/domains/kanban/use-workflow-steps-by-id";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { useFeature } from "@/hooks/domains/features/use-feature";
 import { useTaskCanvasesStateForTask } from "@/hooks/domains/task/use-task-canvases";
-import { useForegroundRefresh } from "@/hooks/use-foreground-refresh";
+import { FOREGROUND_EVENT_COALESCE_MS, useForegroundRefresh } from "@/hooks/use-foreground-refresh";
 import type { Layout } from "react-resizable-panels";
 import {
   deriveIsAgentWorking,
@@ -154,7 +158,15 @@ function TaskLoadingState() {
   );
 }
 
-export function TaskLoadErrorState() {
+export function TaskLoadErrorState({
+  temporaryError = false,
+  retrying = false,
+  onRetry,
+}: {
+  temporaryError?: boolean;
+  retrying?: boolean;
+  onRetry?: () => void;
+}) {
   const { t } = useTranslation();
   const activeWorkspaceId = useAppStore((state) => state.workspaces.activeId);
 
@@ -163,16 +175,40 @@ export function TaskLoadErrorState() {
       className="flex h-full min-h-0 w-full items-center justify-center bg-background px-4"
       data-testid="task-load-error-state"
     >
-      <div className="flex min-h-24 max-w-sm min-w-0 flex-col items-center justify-center gap-3 text-center text-sm text-muted-foreground">
+      <div
+        className="flex min-h-24 max-w-sm min-w-0 flex-col items-center justify-center gap-3 text-center text-sm text-muted-foreground"
+        role={temporaryError ? "status" : undefined}
+        aria-live={temporaryError ? "polite" : undefined}
+        aria-busy={retrying}
+      >
         <IconAlertTriangle className="h-5 w-5 text-destructive" aria-hidden="true" />
         <div className="space-y-1">
-          <div className="font-medium text-foreground">{t("common:taskUnavailable")}</div>
-          <div>{t("common:taskUnavailableDescription")}</div>
+          <div className="font-medium text-foreground">
+            {t(temporaryError ? "common:taskReadTemporarilyUnavailable" : "common:taskUnavailable")}
+          </div>
+          <div>
+            {t(
+              temporaryError
+                ? "common:taskReadTemporarilyUnavailableDescription"
+                : "common:taskUnavailableDescription",
+            )}
+          </div>
         </div>
+        {temporaryError && onRetry ? (
+          <Button
+            size="default"
+            className="w-full max-w-xs"
+            disabled={retrying}
+            onClick={onRetry}
+            data-testid="task-read-retry"
+          >
+            {t(retrying ? "task:retrying" : "task:retry")}
+          </Button>
+        ) : null}
         <Button
           asChild
-          size="lg"
-          className="min-h-11 px-4 sm:min-h-9"
+          size="default"
+          className="w-full max-w-xs px-3"
           data-testid="task-unavailable-overview-link"
         >
           <Link href={linkToTaskOverview({ workspaceId: activeWorkspaceId ?? undefined })}>
@@ -184,18 +220,62 @@ export function TaskLoadErrorState() {
   );
 }
 
+function isTaskNavigationReadPending(readState: ReturnType<typeof useTaskNavigationReadState>) {
+  return readState.phase === "loading" || readState.phase === "retrying";
+}
+
+type LoadTaskDetails = (
+  refresh?: boolean,
+  taskId?: string | null,
+  manualRetry?: boolean,
+  supersede?: boolean,
+  foregroundRecoveryEpisode?: object,
+) => Promise<void>;
+
+function useForegroundTaskDetailsRefresh(taskId: string | null, loadTaskDetails: LoadTaskDetails) {
+  const episodeRef = useRef<{ startedAt: number; token: object } | null>(null);
+  return useCallback(() => {
+    const now = Date.now();
+    let episode = episodeRef.current;
+    if (!episode || now - episode.startedAt >= FOREGROUND_EVENT_COALESCE_MS) {
+      episode = { startedAt: now, token: {} };
+      episodeRef.current = episode;
+    }
+    return loadTaskDetails(true, taskId, false, false, episode.token);
+  }, [loadTaskDetails, taskId]);
+}
+
+function useTaskDetailsReconnectRefresh(
+  connectionStatus: string,
+  routeDataReady: boolean,
+  refreshFromForeground: () => Promise<void>,
+) {
+  const previousStatus = useRef(connectionStatus);
+  const refreshPending = useRef(false);
+  useEffect(() => {
+    const reconnected = previousStatus.current !== "connected" && connectionStatus === "connected";
+    previousStatus.current = connectionStatus;
+    if (reconnected) refreshPending.current = true;
+    if (connectionStatus === "connected" && routeDataReady && refreshPending.current) {
+      refreshPending.current = false;
+      void refreshFromForeground();
+    }
+  }, [connectionStatus, routeDataReady, refreshFromForeground]);
+}
+
 export function useTaskDetails(activeTaskId: string | null, initialTask: Task | null) {
   const store = useAppStoreApi();
   const routeDataReady = useTaskRouteSessionHydrated();
+  const effectiveTaskId = initialTask?.id ?? activeTaskId ?? null;
+  const navigationReadState = useTaskNavigationReadState(store, effectiveTaskId);
   const [taskDetails, setTaskDetails] = useState<Task | null>(null);
   const [taskLoadError, setTaskLoadError] = useState<unknown | null>(null);
   const connectionStatus = useAppStore((state) => state.connection.status);
-  const previousConnectionStatus = useRef(connectionStatus);
-  const reconnectRefreshPending = useRef(false);
-  const effectiveTaskId = initialTask?.id ?? activeTaskId ?? null;
   const effectiveTaskIdRef = useRef(effectiveTaskId);
   const taskDetailsRequestIdRef = useRef(0);
   effectiveTaskIdRef.current = effectiveTaskId;
+  const isCurrentTaskDetailsRequest = (requestId: number, taskId: string) =>
+    requestId === taskDetailsRequestIdRef.current && effectiveTaskIdRef.current === taskId;
   const kanbanTask = useAppStore((state) =>
     resolveLatestTaskProjection(effectiveTaskId, state.kanban.tasks, state.kanbanMulti.snapshots),
   );
@@ -209,33 +289,35 @@ export function useTaskDetails(activeTaskId: string | null, initialTask: Task | 
     initialTaskId: initialTask?.id ?? null,
   });
   const loadTaskDetails = useCallback(
-    async (refresh = true, taskId = effectiveTaskId) => {
+    async (
+      refresh = true,
+      taskId = effectiveTaskId,
+      manualRetry = false,
+      supersede = false,
+      foregroundRecoveryEpisode?: object,
+    ) => {
       if (!taskId || effectiveTaskIdRef.current !== taskId) return;
       const requestedTaskId = taskId;
       const requestId = ++taskDetailsRequestIdRef.current;
       try {
-        const response = await readTaskNavigationIdentity(store, requestedTaskId, { refresh });
-        if (
-          requestId !== taskDetailsRequestIdRef.current ||
-          effectiveTaskIdRef.current !== requestedTaskId
-        ) {
-          return;
-        }
+        const response = await readTaskNavigationIdentity(store, requestedTaskId, {
+          refresh,
+          manualRetry,
+          supersede,
+          foregroundRecoveryEpisode,
+        });
+        if (!isCurrentTaskDetailsRequest(requestId, requestedTaskId)) return;
         setTaskDetails(response.task);
         setTaskLoadError(null);
       } catch (error) {
-        if (
-          requestId !== taskDetailsRequestIdRef.current ||
-          effectiveTaskIdRef.current !== requestedTaskId
-        ) {
-          return;
-        }
+        if (!isCurrentTaskDetailsRequest(requestId, requestedTaskId)) return;
         console.error("[TaskPageContent] Failed to load task details:", error);
         setTaskLoadError(error);
       }
     },
     [effectiveTaskId, store],
   );
+  const refreshFromForeground = useForegroundTaskDetailsRefresh(effectiveTaskId, loadTaskDetails);
 
   useEffect(() => {
     if (
@@ -251,19 +333,10 @@ export function useTaskDetails(activeTaskId: string | null, initialTask: Task | 
     void loadTaskDetails(false, effectiveTaskId);
   }, [routeDataReady, effectiveTaskId, taskDetails?.id, initialTask?.id, loadTaskDetails]);
 
-  useEffect(() => {
-    const reconnected =
-      previousConnectionStatus.current !== "connected" && connectionStatus === "connected";
-    previousConnectionStatus.current = connectionStatus;
-    if (reconnected) reconnectRefreshPending.current = true;
-    if (connectionStatus === "connected" && routeDataReady && reconnectRefreshPending.current) {
-      reconnectRefreshPending.current = false;
-      void loadTaskDetails(true);
-    }
-  }, [connectionStatus, routeDataReady, loadTaskDetails]);
+  useTaskDetailsReconnectRefresh(connectionStatus, routeDataReady, refreshFromForeground);
 
   useForegroundRefresh(
-    loadTaskDetails,
+    refreshFromForeground,
     routeDataReady && Boolean(effectiveTaskId),
     effectiveTaskId,
   );
@@ -271,7 +344,7 @@ export function useTaskDetails(activeTaskId: string | null, initialTask: Task | 
   const onTaskUnarchived = useCallback(
     (taskId: string) => {
       if (effectiveTaskId !== taskId) return;
-      void loadTaskDetails(true, taskId);
+      void loadTaskDetails(true, taskId, false, true);
     },
     [effectiveTaskId, loadTaskDetails],
   );
@@ -279,9 +352,15 @@ export function useTaskDetails(activeTaskId: string | null, initialTask: Task | 
   return {
     task,
     kanbanTask,
-    taskLoadError: hasTaskDetails ? null : taskLoadError,
+    taskLoadError,
+    hasTaskDetails,
+    navigationReadState,
     onTaskUnarchived,
     refreshTask: loadTaskDetails,
+    retryTaskRead: () => loadTaskDetails(true, effectiveTaskId, true),
+    isTemporaryTaskReadError:
+      isTemporaryTaskNavigationError(taskLoadError) ||
+      (navigationReadState.phase === "failed" && navigationReadState.temporary),
   };
 }
 
@@ -310,10 +389,16 @@ function useTaskPageData(
     return session?.task_id === activeTaskId ? sid : null;
   });
 
-  const { task, taskLoadError, onTaskUnarchived, refreshTask } = useTaskDetails(
-    activeTaskId,
-    initialTask,
-  );
+  const {
+    task,
+    taskLoadError,
+    hasTaskDetails,
+    navigationReadState,
+    onTaskUnarchived,
+    refreshTask,
+    retryTaskRead,
+    isTemporaryTaskReadError,
+  } = useTaskDetails(fallbackTaskId ?? activeTaskId, initialTask);
 
   const agent = useSessionAgent(task);
   const ensureSession = useEnsureTaskSession({
@@ -352,6 +437,10 @@ function useTaskPageData(
   return {
     task,
     taskLoadError,
+    hasTaskDetails,
+    navigationReadState,
+    retryTaskRead,
+    isTemporaryTaskReadError,
     agent,
     effectiveSessionId,
     repository,
@@ -382,6 +471,10 @@ function TaskPageContentLive({
   const {
     task,
     taskLoadError,
+    hasTaskDetails,
+    navigationReadState,
+    retryTaskRead,
+    isTemporaryTaskReadError,
     agent,
     effectiveSessionId,
     repository,
@@ -416,11 +509,20 @@ function TaskPageContentLive({
   const contentState = resolveTaskContentState({
     isMounted,
     hasTask: Boolean(task),
+    hasTaskDetails,
     hasTaskLoadError: Boolean(taskLoadError),
   });
 
   if (contentState === "loading") return <TaskLoadingState />;
-  if (contentState === "error") return <TaskLoadErrorState />;
+  if (contentState === "error") {
+    return (
+      <TaskLoadErrorState
+        temporaryError={isTemporaryTaskReadError}
+        retrying={isTaskNavigationReadPending(navigationReadState)}
+        onRetry={retryTaskRead}
+      />
+    );
+  }
   if (!task) return <TaskLoadErrorState />;
 
   return (
@@ -447,6 +549,11 @@ function TaskPageContentLive({
       onTaskUnarchived={onTaskUnarchived}
       taskCanvases={taskCanvasesState.canvases}
       taskCanvasesStatus={taskCanvasesState.status}
+      taskReadRecovery={{
+        temporaryError: isTemporaryTaskReadError,
+        retrying: isTaskNavigationReadPending(navigationReadState),
+        onRetry: retryTaskRead,
+      }}
     />
   );
 }

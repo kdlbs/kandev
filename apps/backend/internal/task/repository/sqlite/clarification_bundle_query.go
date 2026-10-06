@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/kandev/kandev/internal/db/dialect"
 	"github.com/kandev/kandev/internal/task/models"
@@ -16,9 +17,26 @@ import (
 // predicate is applied inside this single query — never as a post-query
 // filter over an already-limited page (L1a) — so opts.Limit counts bundles
 // actually returned.
-func (r *Repository) ListUnresolvedClarificationBundles(ctx context.Context, opts models.ListClarificationBundlesOptions) (*models.ClarificationBundlePage, error) {
+func (r *Repository) ListUnresolvedClarificationBundles(
+	ctx context.Context,
+	opts models.ListClarificationBundlesOptions,
+) (page *models.ClarificationBundlePage, err error) {
 	if opts.Limit < 1 {
 		return nil, fmt.Errorf("ListUnresolvedClarificationBundles: limit must be >= 1, got %d", opts.Limit)
+	}
+	operationCtx, release, wait, err := r.beginClarificationRead(ctx)
+	if err != nil {
+		r.logClarificationRead("list_unresolved_bundles", wait, 0, err)
+		return nil, err
+	}
+	started := time.Now()
+	defer func() {
+		err = normalizeClarificationReadError(ctx, operationCtx, err)
+		release()
+		r.logClarificationRead("list_unresolved_bundles", wait, time.Since(started), err)
+	}()
+	if err := operationCtx.Err(); err != nil {
+		return nil, err
 	}
 
 	drv := r.ro.DriverName()
@@ -28,7 +46,7 @@ func (r *Repository) ListUnresolvedClarificationBundles(ctx context.Context, opt
 	query := clarificationBundleQuery(drv, joinExtra, whereExtra)
 	args = append(args, opts.Limit+1)
 
-	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(query), args...)
+	rows, err := r.ro.QueryContext(operationCtx, r.ro.Rebind(query), args...)
 	if err != nil {
 		return nil, err
 	}
@@ -39,7 +57,7 @@ func (r *Repository) ListUnresolvedClarificationBundles(ctx context.Context, opt
 		return nil, err
 	}
 
-	page := &models.ClarificationBundlePage{Bundles: bundles}
+	page = &models.ClarificationBundlePage{Bundles: bundles}
 	if len(bundles) > opts.Limit {
 		page.Bundles = bundles[:opts.Limit]
 		page.HasMore = true

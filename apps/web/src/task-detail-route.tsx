@@ -28,14 +28,15 @@ import type { TaskSessionHydrationEpoch } from "@/lib/state/slices/session/types
 import {
   beginTaskNavigation,
   isTaskNavigationCurrent,
+  retainTaskNavigationRead,
   readTaskNavigationIdentity,
+  useTaskNavigationReadState,
 } from "@/lib/state/task-navigation-reads";
-import type {
-  TaskNavigationContext,
-  TaskNavigationIdentity,
-} from "@/lib/state/task-navigation-reads";
-import type { Task } from "@/lib/types/http";
+import type { TaskNavigationContext } from "@/lib/state/task-navigation-reads";
 import { getOwnedTaskSessionId, useTaskRouteProjection } from "./task-route-projection";
+import { useTaskDetailRouteRecovery } from "./task-detail-route-recovery";
+import { deriveTaskDetailRouteView } from "./task-detail-route-view";
+import type { TaskDetailRouteState } from "./task-detail-route-state";
 
 type TaskDetailRouteProps = {
   taskId: string;
@@ -45,19 +46,6 @@ type TaskDetailRouteProps = {
   mode?: string;
   initialData?: FetchedSessionData;
 };
-
-type TaskDetailRouteState =
-  | { routeKey: string; status: "loading"; data: null }
-  | {
-      routeKey: string;
-      status: "loaded";
-      data: FetchedSessionData;
-      forceMergeSession: boolean;
-      navigationContext?: TaskNavigationContext;
-      hydrationEpochsAtRequestStart?: Readonly<Record<string, TaskSessionHydrationEpoch>>;
-      enrichmentIdentity?: TaskNavigationIdentity;
-    }
-  | { routeKey: string; status: "error"; data: null };
 
 function taskRouteKey(taskId: string, sessionId?: string): string {
   return `${taskId}\u0000${sessionId ?? ""}`;
@@ -117,7 +105,7 @@ export function TaskDetailRoute({
       (route.initialState === null || hydratedState === route.initialState));
 
   if (route.showInitialLoading) {
-    return <TaskRouteLoading />;
+    return <TaskRouteLoading retrying={route.readState.phase === "retrying"} />;
   }
 
   return (
@@ -132,7 +120,9 @@ export function TaskDetailRoute({
   );
 }
 
-type TaskDetailRouteView = ReturnType<typeof deriveTaskDetailRouteView>;
+type TaskDetailRouteView = ReturnType<typeof deriveTaskDetailRouteView> & {
+  readState: ReturnType<typeof useTaskNavigationReadState>;
+};
 
 function TaskDetailRouteBody({
   route,
@@ -186,7 +176,9 @@ function TaskDetailRouteBody({
       ) : (
         <TaskRouteLoading />
       )}
-      {route.isLoadingOverPreviousRoute ? <TaskRouteLoading overlay /> : null}
+      {route.isLoadingOverPreviousRoute ? (
+        <TaskRouteLoading overlay retrying={route.readState.phase === "retrying"} />
+      ) : null}
     </div>
   );
 }
@@ -209,6 +201,27 @@ function useTaskDetailRouteData({
   const routeKey = taskRouteKey(taskId, sessionId);
   const navigationOwnerRef = useRef<object>({});
   const navigationContext = beginTaskNavigation(store, navigationOwnerRef.current, routeKey);
+  const selectedSessionForNavigationRef = useRef<{
+    navigationContext: TaskNavigationContext;
+    sessionId?: string;
+  } | null>(null);
+  if (selectedSessionForNavigationRef.current?.navigationContext !== navigationContext) {
+    const state = store.getState();
+    selectedSessionForNavigationRef.current = {
+      navigationContext,
+      sessionId:
+        sessionId ?? getOwnedTaskSessionId(state, taskId, state.tasks.activeSessionId) ?? undefined,
+    };
+  }
+  const selectedSessionForNavigation = selectedSessionForNavigationRef.current.sessionId;
+  const readState = useTaskNavigationReadState(store, taskId, navigationContext);
+  const appliedRecoveryCycleRef = useRef({ generation: navigationContext.generation, cycle: 0 });
+  if (appliedRecoveryCycleRef.current.generation !== navigationContext.generation) {
+    appliedRecoveryCycleRef.current = { generation: navigationContext.generation, cycle: 0 };
+  }
+  const hydrationEpochsAtRequestStartRef = useRef<
+    Readonly<Record<string, TaskSessionHydrationEpoch>> | undefined
+  >(undefined);
   const bootRouteKeyRef = useRef(routeKey);
   const bootDataConsumedRef = useRef(false);
   if (routeKey !== bootRouteKeyRef.current) bootDataConsumedRef.current = true;
@@ -229,20 +242,40 @@ function useTaskDetailRouteData({
   useTaskDetailRouteFetch({
     taskId,
     sessionId,
+    selectedSessionId: selectedSessionForNavigation,
     routeKey,
     routeInitialData,
     setRouteState,
     previousLoadedRouteRef,
     store,
     navigationContext,
+    hydrationEpochsAtRequestStartRef,
   });
-  const view = deriveTaskDetailRouteView(
-    currentRouteState,
-    previousLoadedRouteRef.current,
-    taskId,
-    sessionId,
-    projection,
+  useEffect(
+    () => retainTaskNavigationRead(store, taskId, navigationContext),
+    [navigationContext, store, taskId],
   );
+  useTaskDetailRouteRecovery({
+    taskId,
+    selectedSessionId: selectedSessionForNavigation,
+    routeKey,
+    readState,
+    setRouteState,
+    previousLoadedRouteRef,
+    store,
+    navigationContext,
+    hydrationEpochsAtRequestStartRef,
+    appliedRecoveryCycleRef,
+  });
+  const view = deriveTaskDetailRouteView({
+    currentRouteState,
+    previousLoadedRoute: previousLoadedRouteRef.current,
+    routeKey,
+    taskId,
+    routeSessionId: sessionId,
+    selectedSessionId: selectedSessionForNavigation,
+    projection,
+  });
   useTaskDetailRouteEnrichment({
     view,
     hydratedState,
@@ -250,7 +283,7 @@ function useTaskDetailRouteData({
     setRouteState,
     previousLoadedRouteRef,
   });
-  return view;
+  return { ...view, readState };
 }
 
 function useTaskDetailRouteEnrichment(args: {
@@ -356,22 +389,28 @@ function resolveCurrentRouteState(
 function useTaskDetailRouteFetch(args: {
   taskId: string;
   sessionId?: string;
+  selectedSessionId?: string;
   routeKey: string;
   routeInitialData: FetchedSessionData | undefined;
   setRouteState: Dispatch<SetStateAction<TaskDetailRouteState>>;
   previousLoadedRouteRef: MutableRefObject<TaskDetailRouteState | null>;
   store: ReturnType<typeof useAppStoreApi>;
   navigationContext: TaskNavigationContext;
+  hydrationEpochsAtRequestStartRef: MutableRefObject<
+    Readonly<Record<string, TaskSessionHydrationEpoch>> | undefined
+  >;
 }) {
   const {
     taskId,
     sessionId,
+    selectedSessionId,
     routeKey,
     routeInitialData,
     setRouteState,
     previousLoadedRouteRef,
     store,
     navigationContext,
+    hydrationEpochsAtRequestStartRef,
   } = args;
   useEffect(() => {
     const previous = previousLoadedRouteRef.current;
@@ -397,15 +436,10 @@ function useTaskDetailRouteFetch(args: {
     }
     let cancelled = false;
     setRouteState({ routeKey, status: "loading", data: null });
-    const hydrationEpochsAtRequestStart = captureTaskSessionHydrationEpochs(
+    hydrationEpochsAtRequestStartRef.current = captureTaskSessionHydrationEpochs(
       store.getState(),
       taskId,
     );
-    const requestState = store.getState();
-    const selectedSessionId =
-      sessionId ??
-      getOwnedTaskSessionId(requestState, taskId, requestState.tasks.activeSessionId) ??
-      undefined;
     readTaskNavigationIdentity(store, taskId, { context: navigationContext })
       .then((identity) => {
         if (cancelled || !isTaskNavigationCurrent(store, navigationContext)) return;
@@ -415,7 +449,7 @@ function useTaskDetailRouteFetch(args: {
           data: buildTaskNavigationShellData(identity, selectedSessionId),
           forceMergeSession: false,
           navigationContext,
-          hydrationEpochsAtRequestStart,
+          hydrationEpochsAtRequestStart: hydrationEpochsAtRequestStartRef.current,
           enrichmentIdentity: identity,
         };
         previousLoadedRouteRef.current = shellState;
@@ -425,11 +459,13 @@ function useTaskDetailRouteFetch(args: {
       })
       .catch((error) => {
         if (!cancelled && isTaskNavigationCurrent(store, navigationContext)) {
-          console.warn(
-            "Could not load /t/:taskId route data; task page will fall back to client fetches:",
-            error instanceof Error ? error.message : String(error),
-          );
-          setRouteState({ routeKey, status: "error", data: null });
+          if (!(error instanceof Error && error.name === "AbortError")) {
+            console.warn(
+              "Could not load /t/:taskId route data; task page will fall back to client fetches:",
+              error instanceof Error ? error.message : String(error),
+            );
+            setRouteState({ routeKey, status: "error", data: null });
+          }
         }
       });
     return () => {
@@ -439,6 +475,7 @@ function useTaskDetailRouteFetch(args: {
     routeInitialData,
     routeKey,
     sessionId,
+    selectedSessionId,
     taskId,
     previousLoadedRouteRef,
     setRouteState,
@@ -447,130 +484,13 @@ function useTaskDetailRouteFetch(args: {
   ]);
 }
 
-function deriveTaskDetailRouteView(
-  currentRouteState: TaskDetailRouteState,
-  previousLoadedRoute: TaskDetailRouteState | null,
-  taskId: string,
-  sessionId?: string,
-  projection?: ReturnType<typeof useTaskRouteProjection>,
-) {
-  const view = deriveFallbackTaskDetailRouteView(
-    currentRouteState,
-    previousLoadedRoute,
-    taskId,
-    sessionId,
-  );
-  if (currentRouteState.status !== "loading" || !projection) return view;
-  return {
-    ...view,
-    displayedRouteKey: null,
-    data: null,
-    task: projection.task,
-    initialState: null,
-    activeSessionId: projection.sessionId,
-    forceMergeSession: false,
-    hydrationEpochsAtRequestStart: undefined,
-    shellTaskId: taskId,
-    isLoadingOverPreviousRoute: false,
-    showShell: true,
-    showInitialLoading: false,
-  };
-}
-
-function deriveFallbackTaskDetailRouteView(
-  currentRouteState: TaskDetailRouteState,
-  previousLoadedRoute: TaskDetailRouteState | null,
-  taskId: string,
-  sessionId?: string,
-) {
-  const displayedRouteState = resolveDisplayedRouteState(currentRouteState, previousLoadedRoute);
-  const isLoadingOverPreviousRoute = isLoadingWithDisplayedRoute(
-    currentRouteState,
-    displayedRouteState,
-  );
-  const data = routeDataFromState(displayedRouteState);
-  const activeSessionId = routeSessionFromState(displayedRouteState, sessionId);
-  const forceMergeSession = shouldForceMergeRouteState(displayedRouteState);
-  const initialState = data?.initialState ?? null;
-  const task = data?.task ?? null;
-  const shellTaskId = resolveShellTaskId(isLoadingOverPreviousRoute, task, taskId);
-  const routeMetadata = loadedRouteMetadata(displayedRouteState);
-
-  return {
-    routeKey: taskRouteKey(taskId, sessionId),
-    currentRouteStatus: currentRouteState.status,
-    displayedRouteKey: displayedRouteState?.routeKey ?? null,
-    data,
-    task,
-    initialState,
-    activeSessionId,
-    forceMergeSession,
-    ...routeMetadata,
-    shellTaskId,
-    isLoadingOverPreviousRoute,
-    showShell: displayedRouteState !== null || currentRouteState.status !== "loading",
-    showInitialLoading: currentRouteState.status === "loading" && displayedRouteState === null,
-  };
-}
-
-function isLoadingWithDisplayedRoute(
-  currentRouteState: TaskDetailRouteState,
-  displayedRouteState: TaskDetailRouteState | null,
-): boolean {
-  return currentRouteState.status === "loading" && displayedRouteState !== null;
-}
-
-function resolveShellTaskId(
-  isLoadingOverPreviousRoute: boolean,
-  task: Task | null,
-  taskId: string,
-): string {
-  if (!isLoadingOverPreviousRoute) return taskId;
-  return task?.id ?? taskId;
-}
-
-function loadedRouteMetadata(state: TaskDetailRouteState | null) {
-  if (state?.status !== "loaded") {
-    return {
-      navigationContext: undefined,
-      enrichmentIdentity: undefined,
-      hydrationEpochsAtRequestStart: undefined,
-    };
-  }
-  return {
-    navigationContext: state.navigationContext,
-    enrichmentIdentity: state.enrichmentIdentity,
-    hydrationEpochsAtRequestStart: state.hydrationEpochsAtRequestStart,
-  };
-}
-
-function resolveDisplayedRouteState(
-  currentRouteState: TaskDetailRouteState,
-  previousLoadedRoute: TaskDetailRouteState | null,
-): TaskDetailRouteState | null {
-  if (currentRouteState.status === "loaded") return currentRouteState;
-  if (currentRouteState.status === "loading") return previousLoadedRoute;
-  return null;
-}
-
-function routeDataFromState(state: TaskDetailRouteState | null): FetchedSessionData | null {
-  if (state?.status === "loaded") return state.data;
-  return null;
-}
-
-function routeSessionFromState(
-  state: TaskDetailRouteState | null,
-  fallbackSessionId?: string,
-): string | null {
-  if (state?.status === "loaded") return state.data.sessionId ?? null;
-  return fallbackSessionId ?? null;
-}
-
-function shouldForceMergeRouteState(state: TaskDetailRouteState | null): boolean {
-  return state?.status === "loaded" && state.forceMergeSession;
-}
-
-function TaskRouteLoading({ overlay = false }: { overlay?: boolean }) {
+function TaskRouteLoading({
+  overlay = false,
+  retrying = false,
+}: {
+  overlay?: boolean;
+  retrying?: boolean;
+}) {
   const { t } = useTranslation();
   const className = overlay
     ? "absolute inset-0 z-50 flex items-center justify-center bg-background"
@@ -578,7 +498,7 @@ function TaskRouteLoading({ overlay = false }: { overlay?: boolean }) {
   return (
     <div className={className}>
       <p role="status" aria-live="polite" className="text-sm text-muted-foreground">
-        {t("common:loadingTask")}
+        {t(retrying ? "task:retrying" : "common:loadingTask")}
       </p>
     </div>
   );

@@ -29,6 +29,12 @@ func TestPostgresPendingIDIndexFreshReplayAndPlanner(t *testing.T) {
 		t.Fatalf("pending-ID index definition = %q, want partial-index predicate", definition)
 	}
 	assertPostgresIndexExists(t, repo, "idx_messages_metadata_pending_id")
+	clarificationBundleDefinition := assertPostgresIndexExists(t, repo, "idx_messages_clarification_bundle")
+	if !strings.Contains(clarificationBundleDefinition, "pending_id") ||
+		!strings.Contains(clarificationBundleDefinition, "task_session_id") ||
+		!strings.Contains(clarificationBundleDefinition, "clarification_request") {
+		t.Fatalf("clarification bundle index definition = %q, want pending_id, task_session_id, and clarification_request predicate", clarificationBundleDefinition)
+	}
 
 	seedPendingActionSession(t, repo, "task-pending-index-pg", "session-pending-index-pg")
 	base := time.Date(2026, 9, 5, 22, 0, 0, 0, time.UTC)
@@ -119,6 +125,9 @@ func TestPostgresPendingIDIndexFreshReplayAndPlanner(t *testing.T) {
 	if _, err := repo.db.Exec("DROP INDEX IF EXISTS " + pendingIDLookupIndexName); err != nil {
 		t.Fatalf("drop postgres lookup index to simulate legacy database: %v", err)
 	}
+	if _, err := repo.db.Exec("DROP INDEX IF EXISTS idx_messages_clarification_bundle"); err != nil {
+		t.Fatalf("drop postgres clarification index to simulate legacy database: %v", err)
+	}
 	if err := repo.ensureMessageMetadataIndexes(); err != nil {
 		t.Fatalf("upgrade postgres legacy database: %v", err)
 	}
@@ -126,6 +135,7 @@ func TestPostgresPendingIDIndexFreshReplayAndPlanner(t *testing.T) {
 		t.Fatalf("replay postgres lookup index creation: %v", err)
 	}
 	assertPostgresIndexExists(t, repo, pendingIDLookupIndexName)
+	assertPostgresIndexExists(t, repo, "idx_messages_clarification_bundle")
 	var after int
 	if err := repo.db.Get(&after, `SELECT COUNT(*) FROM task_session_messages`); err != nil {
 		t.Fatalf("count postgres messages after upgrade replay: %v", err)

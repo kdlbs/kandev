@@ -111,6 +111,14 @@ vi.mock("@/lib/state/task-navigation-reads", () => ({
   beginTaskNavigation: mocks.beginTaskNavigation,
   isTaskNavigationCurrent: mocks.isTaskNavigationCurrent,
   readTaskNavigationIdentity: mocks.readTaskNavigationIdentity,
+  retainTaskNavigationRead: vi.fn(() => () => {}),
+  useTaskNavigationReadState: vi.fn(() => ({
+    phase: "idle",
+    attempt: 0,
+    temporary: false,
+    revision: 0,
+    cycle: 0,
+  })),
 }));
 
 function deferred<T>() {

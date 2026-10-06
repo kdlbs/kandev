@@ -11,11 +11,9 @@ import { TooltipProvider } from "@kandev/ui/tooltip";
 import { useAppStore } from "@/components/state-provider";
 import type { UseEnsureTaskSessionResult } from "@/hooks/domains/session/use-ensure-task-session";
 import {
-  EnsureSessionErrorBanner,
   getSessionRecoveryRetry,
   SessionRecoveryFeedback,
 } from "@/components/task/ensure-session-error";
-import { TaskMoveErrorBanner } from "@/components/task/task-move-error-banner";
 import type { Layout } from "react-resizable-panels";
 import { TaskArchivedProvider } from "./task-archived-context";
 import { TaskCommands } from "@/components/task-commands";
@@ -48,6 +46,11 @@ import { useTranslation } from "react-i18next";
 import type { Canvas } from "@/lib/api/domains/canvas-api";
 import type { TaskCanvasesLoadStatus } from "@/hooks/domains/task/use-task-canvases";
 import { useTaskStatusSummary } from "@/hooks/domains/task/use-task-status-summary";
+import {
+  TaskNavigationReadFeedback,
+  type TaskNavigationReadRecovery,
+} from "@/components/task/task-navigation-read-feedback";
+import { TaskPageEntryFeedback } from "@/components/task/task-page-entry-feedback";
 
 import { useAutomaticRecoveryChatOwner } from "@/hooks/domains/session/use-automatic-recovery-chat-owner";
 
@@ -78,6 +81,7 @@ export type TaskPageInnerProps = {
   onTaskUnarchived: (taskId: string) => void;
   taskCanvases?: Canvas[];
   taskCanvasesStatus?: TaskCanvasesLoadStatus;
+  taskReadRecovery?: TaskNavigationReadRecovery;
 };
 
 type RemoteExecutorStatus = {
@@ -292,29 +296,6 @@ function TaskPageRecoveryFeedback({
       }
       workspaceId={workspaceId}
     />
-  );
-}
-
-function TaskPageEntryFeedback({
-  taskMoveError,
-  ensureSession,
-  workspaceId,
-}: {
-  taskMoveError: unknown;
-  ensureSession: UseEnsureTaskSessionResult;
-  workspaceId: string | null;
-}) {
-  return (
-    <>
-      {taskMoveError !== null && <TaskMoveErrorBanner error={taskMoveError} />}
-      {ensureSession.status === "error" && (
-        <EnsureSessionErrorBanner
-          error={ensureSession.error}
-          onRetry={ensureSession.retry}
-          workspaceId={workspaceId}
-        />
-      )}
-    </>
   );
 }
 
@@ -591,6 +572,7 @@ export function TaskPageInner(props: TaskPageInnerProps) {
               ensureSession={ensureSession}
               workspaceId={task.workspace_id ?? null}
             />
+            <TaskNavigationReadFeedback recovery={props.taskReadRecovery} />
             <TaskArchivedProvider value={archivedValue}>
               <TaskCommands task={task} />
               <TaskLaunchErrorProvider
