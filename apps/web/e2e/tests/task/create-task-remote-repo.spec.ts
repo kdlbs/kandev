@@ -610,6 +610,7 @@ test.describe("Task creation from Remote tab (chip picker)", () => {
     testPage,
     apiClient,
     seedData,
+    prCapture,
   }) => {
     await seedAccessibleRepos(apiClient);
     await apiClient.configureGitLab(seedData.workspaceId);
@@ -641,6 +642,21 @@ test.describe("Task creation from Remote tab (chip picker)", () => {
     await expect(tabs.getByRole("tab", { name: "GitHub" })).toBeVisible();
     await expect(tabs.getByRole("tab", { name: "GitLab" })).toBeVisible();
     await expect(tabs.getByRole("tab", { name: "Azure DevOps" })).toBeVisible();
+    await testPage.getByTestId("remote-repo-popover-content").evaluate(async (element) => {
+      await Promise.all(
+        element.getAnimations().map((animation) => animation.finished.catch(() => undefined)),
+      );
+    });
+    const [tabsBox, gitLabBox, azureBox] = await Promise.all([
+      tabs.boundingBox(),
+      tabs.getByRole("tab", { name: "GitLab" }).boundingBox(),
+      tabs.getByRole("tab", { name: "Azure DevOps" }).boundingBox(),
+    ]);
+    expect(tabsBox).not.toBeNull();
+    expect(gitLabBox).not.toBeNull();
+    expect(azureBox).not.toBeNull();
+    expect(gitLabBox!.height).toBe(28);
+    expect(azureBox!.height).toBe(28);
     const tabOverflow = await tabs.evaluate((element) => ({
       overflowY: getComputedStyle(element).overflowY,
       scrollHeight: element.scrollHeight,
@@ -648,6 +664,20 @@ test.describe("Task creation from Remote tab (chip picker)", () => {
     }));
     expect(tabOverflow.overflowY).toBe("hidden");
     expect(tabOverflow.scrollHeight).toBeLessThanOrEqual(tabOverflow.clientHeight);
+    const viewport = testPage.viewportSize();
+    expect(viewport).not.toBeNull();
+    const geometry = {
+      viewport,
+      providerTabs: tabsBox,
+      gitLabTab: gitLabBox,
+      azureTab: azureBox,
+      overflowY: tabOverflow.overflowY,
+      scrollHeight: tabOverflow.scrollHeight,
+      clientHeight: tabOverflow.clientHeight,
+    };
+    await prCapture.screenshot("desktop-unified-provider-tabs", {
+      caption: `Desktop provider-tab geometry ${JSON.stringify(geometry)}`,
+    });
     await expect(
       testPage.getByTestId("remote-repo-option").filter({ hasText: "mock-user/alpha" }),
     ).toBeVisible();

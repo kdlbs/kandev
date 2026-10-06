@@ -97,7 +97,7 @@ export function RemoteRepoProviderTabs({
         className={cn(
           controlSizingClassName(
             "standard",
-            "w-full justify-start gap-0 overflow-hidden rounded-none border-t bg-muted/30 p-0",
+            "relative w-full justify-start gap-0 overflow-hidden rounded-none bg-muted/30 p-0 before:pointer-events-none before:absolute before:inset-x-0 before:top-0 before:h-px before:bg-border",
           ),
           "rounded-none",
         )}

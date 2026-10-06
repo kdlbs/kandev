@@ -367,6 +367,12 @@ Final local verification on 2026-10-05:
   corrective production build, focused lint/typecheck/formatting, desktop ten
   cases, and phone three cases pass. These include ordinary Settings with
   Projects disabled and the full seven/two Projects flows, without retries.
+- CI exposed 1px clipping in shared mobile repository provider tabs (QA-37).
+  The divider repair preserves 44px phone targets and compact 28px desktop
+  controls. The exact mobile case is Red then Green; the focused mobile file
+  passes seven cases, and desktop provider switching passes one. Five provider
+  utility tests, lint/typecheck/formatting, and the managed production build
+  pass. Both settled captures and measured containment are reviewed.
 - Public documentation passes 62 tests and validation of 47 pages. Catalog/spec,
   architecture, changed harness, local links, and whitespace checks pass.
   Offline PR documentation coverage covers all five refinement work orders.

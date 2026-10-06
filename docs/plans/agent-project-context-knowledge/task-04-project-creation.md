@@ -167,6 +167,15 @@ No flag, UI, or API contract changed. Corrective logs and captures are retained
 in `/tmp/projects-3920-startup-loop-fix/` and
 `/tmp/projects-3920-startup-loop-e2e/`.
 
+CI correction QA-37 also passes. The shared mobile repository provider tabs
+retain 44px targets and use a non-layout divider to prevent 1px clipping.
+The final mobile GitLab case passes 1/1 and the focused picker file passes 7/7.
+Desktop provider switching passes 1/1 with 28px controls in its existing 32px
+strip. Both device checks retain containment assertions and capture geometry.
+Five provider utility tests, lint, typecheck, formatting, and the fresh managed
+production build pass. The coordinator reviewed the diff and both settled
+screenshots. Final evidence is in `/tmp/projects-3920-mobile-picker-fix/`.
+
 Desktop evidence is preserved at
 `/tmp/kandev-projects-refinements-evidence/task04-desktop-post-refresh-fix/`
 and phone evidence at
