@@ -107,20 +107,26 @@ function handleMenuKeyDown<T>(
 
 // ── Mention items fetcher hook ───────────────────────────────────────
 
+type FileSearchOwner = {
+  sessionId: string | null;
+  lookup: number;
+  completed: { sessionId: string; query: string; results: string[] } | null;
+};
+
 async function fetchFileResults(
   sessionId: string,
   query: string,
-  cache: { query: string; results: string[] },
+  owner: FileSearchOwner,
+  isCurrent: () => boolean,
 ): Promise<string[]> {
   const client = getWebSocketClient();
   if (!client) return [];
-  const cacheKey = query || "__empty__";
-  if (cache.query === cacheKey) return cache.results;
+  const cached = owner.completed;
+  if (cached?.sessionId === sessionId && cached.query === query) return cached.results;
   const response = await searchWorkspaceFiles(client, sessionId, query || "", 20);
-  const results = response.files || [];
-  cache.query = cacheKey;
-  cache.results = results;
-  return results;
+  if (!isCurrent()) return [];
+  owner.completed = { sessionId, query, results: response.files || [] };
+  return owner.completed.results;
 }
 
 function useMentionItems(
@@ -132,24 +138,25 @@ function useMentionItems(
   const { prompts } = useCustomPrompts();
   const storeApi = useAppStoreApi();
   const promptsRef = useRef(prompts);
-  const sessionIdRef = useRef(sessionId);
   const taskIdRef = useRef(taskId);
   const workspaceIdRef = useRef(workspaceId);
-  const lastFileSearchRef = useRef<{ query: string; results: string[] }>({
-    query: "",
-    results: [],
-  });
+  const lastFileSearchRef = useRef<FileSearchOwner | null>(null);
+  useLayoutEffect(() => {
+    lastFileSearchRef.current = { sessionId, lookup: 0, completed: null };
+    return () => {
+      lastFileSearchRef.current = null;
+    };
+  }, [sessionId]);
   useLayoutEffect(() => {
     promptsRef.current = prompts;
-    sessionIdRef.current = sessionId;
     taskIdRef.current = taskId;
     workspaceIdRef.current = workspaceId;
   });
 
   return useCallback(
     async (query: string): Promise<MentionItem[]> => {
-      const allItems: MentionItem[] = [];
-      allItems.push(...buildTaskMentionItems(storeApi.getState(), taskIdRef.current));
+      const workspace = workspaceIdRef.current;
+      const allItems = buildTaskMentionItems(storeApi.getState(), taskIdRef.current);
       allItems.push({
         id: "__plan__",
         kind: "plan",
@@ -166,10 +173,13 @@ function useMentionItems(
           onSelect: () => {},
         });
       }
-      const sid = sessionIdRef.current;
-      if (sid) {
+      const owner = lastFileSearchRef.current;
+      if (owner?.sessionId) {
+        const lookup = ++owner.lookup;
+        const isCurrent = () => lastFileSearchRef.current === owner && owner.lookup === lookup;
         try {
-          const files = await fetchFileResults(sid, query, lastFileSearchRef.current);
+          const files = await fetchFileResults(owner.sessionId, query, owner, isCurrent);
+          if (!isCurrent()) return rankMentionItems(allItems, query, workspace);
           for (const filePath of files) {
             allItems.push({
               id: filePath,
@@ -179,11 +189,9 @@ function useMentionItems(
               onSelect: () => {},
             });
           }
-        } catch {
-          // ignore
-        }
+        } catch {}
       }
-      return rankMentionItems(allItems, query, workspaceIdRef.current);
+      return rankMentionItems(allItems, query, workspace);
     },
     [storeApi],
   );
