@@ -404,7 +404,7 @@ func (wt *WorkspaceTracker) SetRecoveryArtifactExclusions(paths []string) {
 			continue
 		}
 		rel, err := filepath.Rel(root, path)
-		if err != nil || rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
 			continue
 		}
 		if _, ok := seen[rel]; ok {
@@ -442,7 +442,7 @@ func filterFileList(update types.FileListUpdate, exclusions []string) types.File
 		clean := filepath.Clean(filepath.FromSlash(file.Path))
 		excluded := false
 		for _, path := range exclusions {
-			if clean == path || strings.HasPrefix(clean, path+string(filepath.Separator)) {
+			if path == "." || clean == path || strings.HasPrefix(clean, path+string(filepath.Separator)) {
 				excluded = true
 				break
 			}
@@ -466,7 +466,7 @@ func (wt *WorkspaceTracker) workspacePathExcludedLocked(path string) bool {
 		return false
 	}
 	for _, excluded := range wt.recoveryArtifactExclusions {
-		if clean == excluded || strings.HasPrefix(clean, excluded+string(filepath.Separator)) {
+		if excluded == "." || clean == excluded || strings.HasPrefix(clean, excluded+string(filepath.Separator)) {
 			return true
 		}
 	}

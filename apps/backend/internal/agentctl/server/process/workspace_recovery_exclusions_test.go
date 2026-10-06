@@ -2,6 +2,7 @@ package process
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -77,6 +78,31 @@ func TestWorkspaceSearchRecoveryExclusions(t *testing.T) {
 	}
 	if !paths[".kandev-recovery-user-note.json"] || !paths["visible.txt"] {
 		t.Fatalf("content search hid user files: %v", paths)
+	}
+}
+
+func TestWorkspaceRecoveryExclusionCanHideWholeTracker(t *testing.T) {
+	repo, cleanup := setupTestRepo(t)
+	t.Cleanup(cleanup)
+	if err := os.WriteFile(filepath.Join(repo, "recovery-content.txt"), []byte("whole-tracker-secret"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	wt := NewWorkspaceTracker(repo, newTestLogger(t))
+	wt.SetRecoveryArtifactExclusions([]string{repo})
+	wt.updateFiles(context.Background())
+
+	if _, err := wt.GetFileTree("", 3); !errors.Is(err, ErrFileNotFound) {
+		t.Fatalf("whole-tracker tree error = %v, want ErrFileNotFound", err)
+	}
+	if got := wt.SearchFiles("recovery-content", 10); len(got) != 0 {
+		t.Fatalf("whole-tracker filename search = %v, want no matches", got)
+	}
+	results, err := wt.SearchContent(context.Background(), "whole-tracker-secret", 10)
+	if err != nil {
+		t.Fatalf("SearchContent: %v", err)
+	}
+	if len(results) != 0 {
+		t.Fatalf("whole-tracker content search = %+v, want no matches", results)
 	}
 }
 

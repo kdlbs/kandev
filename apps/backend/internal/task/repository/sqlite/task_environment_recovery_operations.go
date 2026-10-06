@@ -133,8 +133,9 @@ func validateRecoveryOperationReplacement(
 	if previous.State == recoveryoperation.StateRunning {
 		return recoveryoperation.ErrInProgress
 	}
-	if previous.OwnerTaskID != operation.OwnerTaskID ||
-		previous.OwnershipGeneration > operation.OwnershipGeneration ||
+	// A new owner may replace recovery history only after the environment generation advances.
+	if previous.OwnershipGeneration > operation.OwnershipGeneration ||
+		(previous.OwnerTaskID != operation.OwnerTaskID && previous.OwnershipGeneration == operation.OwnershipGeneration) ||
 		(previous.OperationID == operation.OperationID &&
 			(previous.SessionID != operation.SessionID || previous.ErrorStamp != operation.ErrorStamp || previous.Kind != operation.Kind)) {
 		return recoveryoperation.ErrIdentity

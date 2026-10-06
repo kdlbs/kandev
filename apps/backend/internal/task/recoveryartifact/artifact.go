@@ -27,7 +27,6 @@ const (
 	ProvenanceV2Operation       = "v2_operation"
 	ProvenanceLegacyAdmission   = "legacy_admission"
 	ProvenanceLegacyPublished   = "legacy_published"
-	managedCloneRelocationKind  = "managed_clone_relocation"
 	maximumArtifactPathCount    = 32
 	maximumArtifactPathByteSize = 16 * 1024
 )
@@ -96,14 +95,14 @@ func prepareArtifactProofs(
 	if err != nil {
 		return nil, nil, err
 	}
-	if err := addRequestedArtifactIdentities(paths, merged, identities, req); err != nil {
+	if err := addRequestedArtifactIdentities(merged, identities, req); err != nil {
 		return nil, nil, err
 	}
 	return merged, identities, nil
 }
 
 func addRequestedArtifactIdentities(
-	existingPaths, mergedPaths []string,
+	mergedPaths []string,
 	identities map[string]string,
 	req Registration,
 ) error {
@@ -118,7 +117,7 @@ func addRequestedArtifactIdentities(
 			identities[path] = requestedIdentity
 			continue
 		}
-		if containsPath(existingPaths, path) {
+		if identities[path] != "" {
 			continue
 		}
 		if identity, ok := FilesystemIdentity(path); ok {

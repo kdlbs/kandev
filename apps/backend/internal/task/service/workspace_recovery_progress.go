@@ -78,7 +78,8 @@ func (s *Service) BeginWorkspaceRecovery(
 		s.recoveryOperationMu.Unlock()
 		return worktree.RecoveryProgressBinding{}, recoveryoperation.ErrInProgress
 	}
-	if err := s.settleUnregisteredSameProcessRecoveryAttempt(ctx, start); err != nil {
+	interrupted, err := s.settleUnregisteredSameProcessRecoveryAttempt(ctx, start)
+	if err != nil {
 		s.recoveryOperationMu.Unlock()
 		return worktree.RecoveryProgressBinding{}, err
 	}
@@ -100,8 +101,11 @@ func (s *Service) BeginWorkspaceRecovery(
 	s.recoveryOperationRunners[start.TaskEnvironmentID] = &workspaceRecoveryRunner{
 		binding: binding, operation: operation,
 	}
-	s.publishWorkspaceRecoveryChanged(ctx, operation, true)
 	s.recoveryOperationMu.Unlock()
+	if interrupted != nil {
+		s.publishWorkspaceRecoveryChanged(ctx, interrupted, false)
+	}
+	s.publishWorkspaceRecoveryChanged(ctx, operation, true)
 	return binding, nil
 }
 
@@ -111,16 +115,16 @@ func (s *Service) BeginWorkspaceRecovery(
 func (s *Service) settleUnregisteredSameProcessRecoveryAttempt(
 	ctx context.Context,
 	start worktree.RecoveryProgressStart,
-) error {
+) (*models.TaskEnvironmentRecoveryOperation, error) {
 	previous, err := s.recoveryOperations.GetTaskEnvironmentRecoveryOperation(ctx, start.TaskEnvironmentID)
 	if err != nil || previous == nil || previous.State != recoveryoperation.StateRunning {
-		return err
+		return nil, err
 	}
 	if previous.RunnerInstanceID != s.recoveryOperationRunnerID ||
 		previous.OwnerTaskID != start.OwnerTaskID || previous.OwnershipGeneration != start.OwnershipGeneration ||
 		previous.SessionID != start.SessionID || previous.OperationID != start.OperationID ||
 		previous.ErrorStamp != start.ErrorStamp || previous.Kind != start.Kind {
-		return recoveryoperation.ErrInProgress
+		return nil, recoveryoperation.ErrInProgress
 	}
 	endedAt := time.Now().UTC()
 	interrupted, err := s.recoveryOperations.UpdateTaskEnvironmentRecoveryOperation(ctx, models.TaskEnvironmentRecoveryOperationUpdate{
@@ -134,10 +138,9 @@ func (s *Service) settleUnregisteredSameProcessRecoveryAttempt(
 		EndedAt: &endedAt, ReasonCode: "runner_ended_unsettled",
 	})
 	if err != nil {
-		return err
+		return nil, err
 	}
-	s.publishWorkspaceRecoveryChanged(ctx, interrupted, false)
-	return nil
+	return interrupted, nil
 }
 
 func (s *Service) UpdateWorkspaceRecovery(
@@ -174,8 +177,8 @@ func (s *Service) UpdateWorkspaceRecovery(
 		runner.binding = next
 		runner.operation = operation
 	}
-	s.publishWorkspaceRecoveryChanged(ctx, operation, operation.State == recoveryoperation.StateRunning)
 	s.recoveryOperationMu.Unlock()
+	s.publishWorkspaceRecoveryChanged(ctx, operation, operation.State == recoveryoperation.StateRunning)
 	return next, nil
 }
 
@@ -209,8 +212,8 @@ func (s *Service) HeartbeatWorkspaceRecovery(
 	next := recoveryBindingFromOperation(operation)
 	runner.binding = next
 	runner.operation = operation
-	s.publishWorkspaceRecoveryChanged(ctx, operation, true)
 	s.recoveryOperationMu.Unlock()
+	s.publishWorkspaceRecoveryChanged(ctx, operation, true)
 	return next, nil
 }
 
@@ -222,13 +225,15 @@ func (s *Service) EndWorkspaceRecoveryRunner(ctx context.Context, binding worktr
 	}
 	s.recoveryOperationMu.Lock()
 	runner := s.recoveryOperationRunners[binding.TaskEnvironmentID]
+	var operation *models.TaskEnvironmentRecoveryOperation
 	if runner != nil && sameRecoveryBinding(runner.binding, binding) {
 		delete(s.recoveryOperationRunners, binding.TaskEnvironmentID)
 		if runner.operation.State == recoveryoperation.StateRunning {
-			s.publishWorkspaceRecoveryChanged(ctx, runner.operation, false)
+			operation = runner.operation
 		}
 	}
 	s.recoveryOperationMu.Unlock()
+	s.publishWorkspaceRecoveryChanged(ctx, operation, false)
 }
 
 func (s *Service) publishWorkspaceRecoveryChanged(

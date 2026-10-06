@@ -54,6 +54,12 @@ func (s *managedCloneRelocationStore) RegisterTaskEnvironmentRecoveryArtifacts(
 			return recoveryartifact.ErrIdentityMismatch
 		}
 	}
+	registration.ArtifactIdentities = make(map[string]string, len(registration.ArtifactPaths))
+	for _, path := range registration.ArtifactPaths {
+		if identity, ok := recoveryartifact.FilesystemIdentity(path); ok {
+			registration.ArtifactIdentities[path] = identity
+		}
+	}
 	item.Registration = registration
 	paths := append(append([]string(nil), item.ArtifactPaths...), registration.ArtifactPaths...)
 	item.ArtifactPaths = uniqueSortedPaths(paths)

@@ -478,13 +478,18 @@ func (m *Manager) reconcilePublishedManagedCloneRelocation(
 	if claim != nil && !publishedRelocationClaimMatches(claim, req, record) {
 		return false, recoveryAdmissionError(*req, "published relocation is held by another recovery operation")
 	}
+	if err := finishPublishedManagedCloneRelocation(ctx, m, req, recordPath, &record); err != nil {
+		return false, err
+	}
 	if !found && claim != nil && record.LayoutVersion == 1 {
 		if err := m.registerVerifiedLegacyRelocation(ctx, req, wt, claim, record); err != nil {
 			return false, recoveryAdmissionError(*req, "legacy relocation artifact ownership could not be registered")
 		}
 	}
-	if err := finishPublishedManagedCloneRelocation(ctx, m, req, recordPath, &record, claim); err != nil {
-		return false, err
+	if claim != nil {
+		if err := m.releaseRecoveryClaim(ctx, claim); err != nil {
+			return false, recoveryAdmissionError(*req, "published relocation claim could not be released")
+		}
 	}
 	return true, nil
 }
@@ -799,7 +804,6 @@ func finishPublishedManagedCloneRelocation(
 	req *RecoveryAdmissionRequest,
 	recordPath string,
 	record *managedCloneRelocationRecord,
-	claim *models.TaskEnvironmentRecoveryClaim,
 ) error {
 	archivePath, err := m.retainManagedCloneOriginal(ctx, record)
 	if err != nil {
@@ -815,11 +819,6 @@ func finishPublishedManagedCloneRelocation(
 	}
 	if err := reconcilePublishedDirtyRecovery(recoveryPath, *record); err != nil {
 		return recoveryAdmissionError(*req, "published relocation recovery journal could not be reconciled")
-	}
-	if claim != nil {
-		if err := m.releaseRecoveryClaim(ctx, claim); err != nil {
-			return recoveryAdmissionError(*req, "published relocation claim could not be released")
-		}
 	}
 	return nil
 }

@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/recoveryartifact"
 )
 
 func TestAdmitRecoveryReconcilesPublishedRelocationClaimAfterRestart(t *testing.T) {
@@ -64,6 +65,13 @@ func TestAdmitRecoveryReconcilesPublishedRelocationClaimAfterRestart(t *testing.
 	if err := writeManagedCloneRelocationRecord(replacement+".kandev-clone-relocation.json", record, true); err != nil {
 		t.Fatal(err)
 	}
+	if err := writeRecoveryRecord(original+".kandev-recovery.json", recoveryRecord{
+		LayoutVersion: 1, OperationID: operationID, TaskID: record.TaskID,
+		WorktreeID: record.WorktreeID, Original: original, Replacement: replacement,
+		Manifest: strings.Repeat("a", 64), State: RecoveryStateRematerializing,
+	}); err != nil {
+		t.Fatal(err)
+	}
 	wt := &Worktree{
 		ID: record.ReplacementID, TaskID: record.TaskID, TaskEnvironmentID: record.EnvironmentID,
 		RepositoryID: "repo-restart", Path: replacement, RepositoryPath: destination,
@@ -105,6 +113,20 @@ func TestAdmitRecoveryReconcilesPublishedRelocationClaimAfterRestart(t *testing.
 	}
 	if completed.Original == original {
 		t.Fatal("restart did not move the retained original outside the task root")
+	}
+	registered, err := store.ListTaskEnvironmentRecoveryArtifacts(context.Background(), claim.TaskEnvironmentID)
+	if err != nil {
+		t.Fatalf("list registered artifacts: %v", err)
+	}
+	verified := recoveryartifact.VerifiedLegacyArtifactPaths(registered)
+	for _, expected := range []string{replacement + ".kandev-clone-relocation.json", original + ".kandev-recovery.json"} {
+		found := false
+		for _, path := range verified {
+			found = found || path == expected
+		}
+		if !found {
+			t.Errorf("finalized journal %q is not verified for exclusion: %v", expected, verified)
+		}
 	}
 }
 
