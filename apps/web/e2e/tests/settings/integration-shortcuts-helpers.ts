@@ -1,5 +1,6 @@
 import type { Page } from "@playwright/test";
 import { expect } from "../../fixtures/test-base";
+import { waitForHttp } from "../../helpers/causal-waits";
 
 export const INTEGRATION_SHORTCUTS_SETTINGS_PATH = "/settings/preferences/keyboard-shortcuts";
 export const INTEGRATION_CHORD = "Control+Alt+g";
@@ -17,7 +18,12 @@ export async function recordIntegrationShortcut(page: Page, slug: string, touch 
 
 export async function saveIntegrationShortcuts(page: Page, touch = false) {
   const save = page.getByTestId("settings-floating-save");
-  if (touch) await save.getByRole("button", { name: "Save changes" }).tap();
-  else await save.getByRole("button", { name: "Save changes" }).click();
-  await expect(save).not.toBeVisible({ timeout: 15_000 });
+  const saved = waitForHttp(page, "PATCH", /\/api\/v1\/user\/settings$/, {
+    predicate: (response) => response.request().postDataJSON()?.keyboard_shortcuts !== undefined,
+  });
+  const button = save.getByRole("button", { name: /^(Save changes|Retry save)$/ });
+  if (touch) await button.tap();
+  else await button.click();
+  expect((await saved).status()).toBe(200);
+  await expect(save).not.toBeVisible();
 }

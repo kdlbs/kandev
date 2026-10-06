@@ -10,6 +10,7 @@ import {
 test("configures integration hotkeys through phone settings and keeps controls contained", async ({
   testPage,
   apiClient,
+  prCapture,
 }, testInfo) => {
   const baseline =
     ((await apiClient.getUserSettings()).settings.keyboard_shortcuts as Record<string, unknown>) ??
@@ -54,6 +55,10 @@ test("configures integration hotkeys through phone settings and keeps controls c
       ),
     ).toBe(false);
     await testPage.screenshot({ path: testInfo.outputPath("integration-shortcuts-phone.png") });
+    await expect(recorder).toHaveAccessibleDescription("Ctrl+Alt+G");
+    await prCapture.screenshot("integration-keybindings", {
+      caption: "Integration hotkeys on a phone with touch controls and Save",
+    });
     await saveIntegrationShortcuts(testPage, true);
     await testPage.reload();
     await expect(recorder).toContainText("G");

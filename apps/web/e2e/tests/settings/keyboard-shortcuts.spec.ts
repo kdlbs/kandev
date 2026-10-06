@@ -184,6 +184,7 @@ test.describe("Integration navigation hotkeys", () => {
 
   test("keeps a draft through phone and desktop boundaries with usable controls", async ({
     testPage,
+    prCapture,
   }, testInfo) => {
     await testPage.goto(KEYBOARD_SETTINGS_PATH);
     const recorder = await recordIntegrationShortcut(testPage, "github");
@@ -210,9 +211,46 @@ test.describe("Integration navigation hotkeys", () => {
       ).toBe(false);
     }
     await testPage.screenshot({ path: testInfo.outputPath("integration-shortcuts-desktop.png") });
+    await expect(recorder).toHaveAccessibleDescription("Ctrl+Alt+G");
+    await prCapture.screenshot("integration-keybindings", {
+      caption: "Integration hotkeys in Keyboard Shortcuts settings",
+    });
     await saveIntegrationShortcuts(testPage);
     await testPage.reload();
     await expect(recorder).toContainText("G");
+  });
+
+  test("preserves the command panel and keyboard focus for conflicting saved bindings", async ({
+    testPage,
+    apiClient,
+  }) => {
+    await apiClient.saveUserSettings({
+      keyboard_shortcuts: {
+        "integration:github": { key: "p", modifiers: { ctrlOrCmd: true, shift: true } },
+      },
+    });
+    await testPage.goto(KEYBOARD_SETTINGS_PATH);
+    const recorder = testPage.getByTestId("shortcut-recorder-integration:github");
+    await expect(recorder).toBeVisible();
+    await testPage.keyboard.press("Control+Shift+p");
+    await expect(testPage.getByRole("dialog")).toBeVisible();
+    await expect(testPage).toHaveURL(new RegExp(`${KEYBOARD_SETTINGS_PATH}$`));
+    await testPage.keyboard.press("Escape");
+    await apiClient.saveUserSettings({
+      keyboard_shortcuts: { "integration:github": { key: "Tab" } },
+    });
+    await testPage.reload();
+    await expect(recorder).toContainText("Tab");
+    await recorder.focus();
+    await testPage.keyboard.press("Tab");
+    await expect(recorder).not.toBeFocused();
+    await expect(testPage).toHaveURL(new RegExp(`${KEYBOARD_SETTINGS_PATH}$`));
+    await recorder.click();
+    await expect(recorder).toHaveAccessibleDescription("Press a key combo...");
+    await testPage.keyboard.press("Tab");
+    await expect(recorder).toHaveAttribute("data-shortcut-recording", "false");
+    await expect(recorder).not.toBeFocused();
+    await expect(recorder).toHaveAccessibleDescription("Tab");
   });
 
   test("records, saves, reloads, opens and resets every integration page", async ({
@@ -290,8 +328,7 @@ test.describe("Integration navigation hotkeys", () => {
     await expect(testPage.getByRole("button", { name: "Retry save" })).toBeVisible();
     await expect(recorder).toHaveAttribute("data-settings-dirty", "true");
     await testPage.unroute("**/api/v1/user/settings");
-    await testPage.getByRole("button", { name: "Retry save" }).click();
-    await expect(testPage.getByTestId("settings-floating-save")).not.toBeVisible();
+    await saveIntegrationShortcuts(testPage);
     await testPage.reload();
     await expect(recorder).toContainText("G");
   });

@@ -4,6 +4,8 @@ import type { StoredShortcutOverrides } from "@/lib/keyboard/shortcut-overrides"
 import { pluginRegistry } from "@/lib/plugins/registry";
 import * as navigation from "@/lib/navigation/resolve-destinations";
 import { useIntegrationShortcuts } from "./use-integration-shortcuts";
+import { useKeyboardShortcut } from "./use-keyboard-shortcut";
+import { SHORTCUTS } from "@/lib/keyboard/constants";
 
 const mocks = vi.hoisted(() => ({
   push: vi.fn(),
@@ -127,8 +129,15 @@ describe("integration shortcut event guards", () => {
     expect(mocks.push).not.toHaveBeenCalled();
   });
 
-  it.each([{}, { key: "" }, { key: 7 }, { key: "g", modifiers: { alt: "yes" } }])(
-    "ignores unbound and malformed overrides: %j",
+  it("ignores a saved unbound override", () => {
+    mocks.overrides = { "integration:github": { key: "" } };
+    renderHook(() => useIntegrationShortcuts());
+    expect(press().defaultPrevented).toBe(false);
+    expect(mocks.push).not.toHaveBeenCalled();
+  });
+
+  it.each([{}, { key: 7 }, { key: "g", modifiers: { alt: "yes" } }])(
+    "ignores malformed overrides: %j",
     (override) => {
       mocks.overrides = { "integration:github": override } as unknown as StoredShortcutOverrides;
       renderHook(() => useIntegrationShortcuts());
@@ -136,6 +145,35 @@ describe("integration shortcut event guards", () => {
       expect(mocks.push).not.toHaveBeenCalled();
     },
   );
+});
+
+describe("integration shortcuts preserve global keyboard controls", () => {
+  it.each([
+    { ctrlKey: true, metaKey: false },
+    { ctrlKey: false, metaKey: true },
+  ])("leaves the shifted command-panel shortcut to its existing handler: %j", (modifier) => {
+    mocks.overrides["integration:github"] = SHORTCUTS.COMMAND_PANEL_SHIFT;
+    const openCommands = vi.fn();
+    renderHook(() => {
+      useIntegrationShortcuts();
+      useKeyboardShortcut(SHORTCUTS.COMMAND_PANEL_SHIFT, openCommands);
+    });
+    press({ key: "p", altKey: false, shiftKey: true, ...modifier });
+    expect(mocks.push).not.toHaveBeenCalled();
+    expect(openCommands).toHaveBeenCalledOnce();
+  });
+
+  it.each([false, true])("does not consume focus traversal with Shift=%s", (shiftKey) => {
+    mocks.overrides = {
+      "integration:github": { key: "Tab", modifiers: { shift: shiftKey } },
+      TOGGLE_PLAN_MODE: { key: "" },
+    };
+    renderHook(() => useIntegrationShortcuts());
+    expect(press({ key: "Tab", ctrlKey: false, altKey: false, shiftKey }).defaultPrevented).toBe(
+      false,
+    );
+    expect(mocks.push).not.toHaveBeenCalled();
+  });
 });
 
 describe("integration shortcut precedence and lifecycle", () => {

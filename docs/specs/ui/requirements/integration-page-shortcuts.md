@@ -34,7 +34,9 @@ tab, rather than the external service's website.
 - **AC-UI-INTEGRATION-PAGE-SHORTCUTS-001.2:** Each active plugin navigation
   destination offered in the Integrations group shall have a distinct host-owned
   page-opening shortcut in the same settings group. Plugin-authored action
-  shortcuts shall remain on the plugin detail page.
+  shortcuts shall remain on the plugin detail page. Repeated registrations with
+  the same plugin-owned navigation ID shall produce one shortcut, using the first
+  eligible integration registration.
 - **AC-UI-INTEGRATION-PAGE-SHORTCUTS-001.3:** Recording or resetting a shortcut
   shall modify only a draft until Save changes succeeds. A saved binding shall
   survive reload and portable user-settings synchronization. Reset shall restore
@@ -50,13 +52,16 @@ tab, rather than the external service's website.
   shall not run during text entry, shortcut recording, an already handled event,
   or a held-key repeat. Unbound or no-longer-registered destinations shall not
   navigate or consume keyboard input. Removing or disabling a plugin shall leave
-  its saved navigation binding inert without deleting it.
+  its saved navigation binding inert without deleting it. Integration recording
+  and dispatch shall leave Tab and Shift+Tab without Control, Command, or Alt
+  available for existing focus and keyboard behavior, including saved legacy bindings.
 - **AC-UI-INTEGRATION-PAGE-SHORTCUTS-001.6:** Conflict warnings shall compare
   integration navigation bindings with other integration bindings, Kandev's
   configurable shortcuts, and installed plugin action shortcuts. Existing
   Kandev shortcuts shall take precedence over integration navigation; integration
   navigation shall take precedence over plugin actions. Two integration bindings
   sharing a combination shall navigate once to the first displayed destination.
+  The fixed Ctrl/Cmd+Shift+P command-panel combination shall remain reserved.
 - **AC-UI-INTEGRATION-PAGE-SHORTCUTS-001.7:** On phones, the same group shall
   remain reachable from the settings index, with labels above wrapping controls,
   visible reset actions, touch targets of at least 44px, one vertical settings
@@ -66,7 +71,9 @@ tab, rather than the external service's website.
 - **AC-UI-INTEGRATION-PAGE-SHORTCUTS-001.8:** Action labels, grouping, recorder
   feedback, and conflict information shall be localized and accessible. Plugin
   navigation labels shall identify the owning plugin where needed to disambiguate
-  destinations; product names shall remain unchanged.
+  destinations; product names shall remain unchanged. A recorder shall expose its
+  current binding or unbound state as an accessible description and announce
+  recording and binding changes through a localized live status.
 
 ## Out of scope
 

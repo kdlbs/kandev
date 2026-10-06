@@ -203,3 +203,34 @@ complete; the user subsequently requested a PR, authorizing commit and publicati
 PR preparation fixed test-only hook lint findings by splitting dispatcher test
 groups and naming a repeated shortcut identity. The affected dispatcher and
 settings suites were rerun, and the commit retains all normal hooks.
+
+
+## PR review remediation
+
+The user requested remediation of PR #4274. Seven findings receive code or
+coverage changes; the optional runtime display-name suggestion is documented:
+settings supply installed display names, while dispatch consumes stable IDs and
+hrefs without an additional plugin fetch.
+
+- AC .2: repeated plugin integration identities retain the first eligible
+  registration and matching label/path.
+- AC .5/.6: legacy Tab and Shift+Tab bindings preserve focus; integration
+  recording ends without capturing them. Ctrl/Cmd+Shift+P remains reserved for
+  the command panel in both integration and plugin dispatch.
+- AC .8: recorder descriptions expose the current localized binding and a
+  polite, atomic live status announces changes.
+- Unbound values are rejected by validation, with direct validator tests and
+  distinct unbound/malformed dispatcher cases. Save tests arm the causal
+  shortcut PATCH before clicking and use the default UI assertion timeout.
+
+Behavioral RED reproduced the missing keyboard guards, duplicate identities
+and recorder accessibility before the production fixes. Focused Vitest passes 132 tests across 12 files;
+typecheck, targeted ESLint, formatting and localization checks pass. Public-doc
+validation (62 tests and 47 pages), delivery-package coverage, specification
+catalog/lint and whitespace checks pass. Managed desktop E2E passes all 11 tests
+(log `/tmp/kandev-run.e2e.rj5NVUrf.log`); mobile E2E passes both tests
+(log `/tmp/kandev-run.e2e.aPm9QrAk.log`). The desktop run rebuilt production
+assets; the sequential mobile run reused those unchanged assets with
+`--no-build`. Existing rotation, touch sizing, Save clearance and responsive
+boundary assertions remain covered. Exact-head remote CI/review and current-base
+merge-result verification are externally pending until the remediation push.

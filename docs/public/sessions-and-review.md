@@ -301,6 +301,9 @@ personal shortcuts start unassigned and follow your user settings across devices
 Use the row's **Reset** action and save to remove a binding. Conflict indicators
 identify combinations shared with other actions; existing Kandev shortcuts take
 precedence. On a phone, recording a combination requires an attached keyboard.
+Tab and Shift+Tab remain available for moving keyboard focus, including while
+recording an integration shortcut. Ctrl/Cmd+Shift+P remains reserved for the
+command panel.
 
 ![Settings > Preferences > Keyboard Shortcuts showing chat input and command panel bindings.](../screenshots/settings-keyboard-shortcuts.png)
 

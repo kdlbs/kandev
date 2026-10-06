@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { WORKSPACE_INTEGRATIONS } from "@/lib/settings-discovery/catalog/integrations";
-import { buildIntegrationShortcutEntries } from "./integration-shortcuts";
+import {
+  buildIntegrationShortcutEntries,
+  isValidIntegrationShortcut,
+} from "./integration-shortcuts";
 import type { PluginNavRegistration } from "@/lib/plugins/registry";
 
 describe("integration navigation shortcuts", () => {
@@ -52,4 +55,45 @@ describe("integration navigation shortcuts", () => {
     expect(entries).toHaveLength(WORKSPACE_INTEGRATIONS.length + 2);
     expect(entries[1].label).toBe("Open GitHub");
   });
+});
+
+describe("integration shortcut eligibility", () => {
+  it("keeps only the first integration registration for each plugin-owned ID", () => {
+    const first: PluginNavRegistration = {
+      pluginId: "test-plugin",
+      id: "reviews",
+      label: "First reviews",
+      path: "/first",
+      section: "integrations",
+    };
+    const entries = buildIntegrationShortcutEntries([
+      first,
+      { ...first, label: "Second reviews", path: "/second" },
+      { ...first, label: "Main link", section: "main", path: "/main" },
+      { ...first, pluginId: "other-plugin", path: "/other" },
+    ]).slice(WORKSPACE_INTEGRATIONS.length);
+    expect(entries).toMatchObject([
+      {
+        id: "integration:plugin:test-plugin:reviews",
+        label: "test-plugin: First reviews",
+        href: "/first",
+      },
+      { id: "integration:plugin:other-plugin:reviews", href: "/other" },
+    ]);
+    expect(entries).toHaveLength(2);
+  });
+
+  it.each([{}, { key: "" }, { key: 7 }, { key: "g", modifiers: { alt: "yes" } }])(
+    "rejects unbound or malformed bindings: %j",
+    (value) => {
+      expect(isValidIntegrationShortcut(value)).toBe(false);
+    },
+  );
+
+  it.each([{ key: "g" }, { key: "g", modifiers: { ctrlOrCmd: true, alt: true } }])(
+    "accepts a bound shortcut: %j",
+    (value) => {
+      expect(isValidIntegrationShortcut(value)).toBe(true);
+    },
+  );
 });

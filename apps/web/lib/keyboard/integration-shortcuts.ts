@@ -36,31 +36,37 @@ export function buildIntegrationShortcutEntries(
     };
   });
   const pluginNames = new Map(plugins.map((plugin) => [plugin.id, plugin.display_name]));
+  const seen = new Set<string>();
+  const integrationItems = items.filter((item) => {
+    const id = pluginDestinationId(item.pluginId, item.id);
+    if (item.section !== "integrations" || seen.has(id)) return false;
+    seen.add(id);
+    return true;
+  });
   const labels = new Map(
-    items.map((item) => [
+    integrationItems.map((item) => [
       pluginDestinationId(item.pluginId, item.id),
       `${pluginNames.get(item.pluginId) ?? item.pluginId}: ${item.label}`,
     ]),
   );
-  const dynamic = pluginDestinations(items)
-    .filter((entry) => entry.section === "integrations")
-    .map(
-      (entry): IntegrationShortcutEntry => ({
-        source: "integration",
-        id: `integration:${entry.id}`,
-        label: translate("settings:shortcutOpenIntegration", {
-          integration: labels.get(entry.id) ?? entry.id,
-        }),
-        default: UNBOUND_SHORTCUT,
-        href: entry.href,
+  const dynamic = pluginDestinations(integrationItems).map(
+    (entry): IntegrationShortcutEntry => ({
+      source: "integration",
+      id: `integration:${entry.id}`,
+      label: translate("settings:shortcutOpenIntegration", {
+        integration: labels.get(entry.id) ?? entry.id,
       }),
-    );
+      default: UNBOUND_SHORTCUT,
+      href: entry.href,
+    }),
+  );
   return [...builtIn, ...dynamic];
 }
 
 export function isValidIntegrationShortcut(value: unknown): value is KeyboardShortcut {
   if (!value || typeof value !== "object" || !("key" in value) || typeof value.key !== "string")
     return false;
+  if (!value.key) return false;
   if (!("modifiers" in value) || value.modifiers === undefined) return true;
   const modifiers = value.modifiers;
   return Boolean(
@@ -72,4 +78,8 @@ export function isValidIntegrationShortcut(value: unknown): value is KeyboardSho
         ["ctrl", "cmd", "ctrlOrCmd", "alt", "shift"].includes(name) && typeof enabled === "boolean",
     ),
   );
+}
+
+export function isFocusTraversalKey(event: KeyboardEvent): boolean {
+  return event.key === "Tab" && !event.ctrlKey && !event.metaKey && !event.altKey;
 }

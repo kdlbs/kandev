@@ -57,7 +57,10 @@ to `section === "integrations"`. Use the existing owner-qualified, percent-encod
 This identity cannot overlap the plugin action namespace
 `plugin:{pluginId}:{keybindingId}`. Multiple links from one plugin remain distinct.
 Preserve built-in catalog order followed by registry order for both rendering
-and conflict tie-breaking. Resolve hrefs with the current `NavContext` via
+and conflict tie-breaking. Before building labels and destinations, keep only
+the first integration registration for each owner-qualified navigation ID.
+Registrations in other sections never replace an integration label or path.
+Resolve hrefs with the current `NavContext` via
 `resolveHref`; never cache a workspace-dependent destination from recording time.
 
 Extend `ShortcutEntry` in `lib/keyboard/plugin-shortcuts.ts` with an explicit
@@ -105,6 +108,9 @@ after `useAppShortcuts` and before `usePluginShortcuts`. Its capture listener
 reads saved overrides fresh for each event and subscribes to registry changes.
 Use the existing router adapter's `push` and current navigation context.
 
+Before matching, yield for Tab/Shift+Tab without Control, Command, or Alt,
+including legacy saved overrides. The shared recorder ends integration capture
+for those keys without preventing browser focus movement or saving a binding.
 Before matching, yield for `defaultPrevented`, editable targets, repeats, or a
 recording shortcut control. Expose the shared `ShortcutRecorder` recording state
 through an explicit DOM marker and check it in the navigation dispatcher. The
@@ -114,8 +120,8 @@ Only prevent default and stop propagation after selecting an eligible target.
 Return after one navigation.
 
 To preserve existing Kandev shortcuts, yield when the combination matches any
-effective configurable core entry or the existing reserved `SAVE` /
-`FIND_IN_PANEL` combinations. Share the existing reserved-combination logic
+effective configurable core entry or the reserved `SAVE`, `FIND_IN_PANEL`,
+and `COMMAND_PANEL_SHIFT` combinations. Share the existing reserved-combination logic
 with `usePluginShortcuts` rather than create divergent lists. Plugin page
 navigation is a host action: an eligible navigation match runs before plugin
 action dispatch, whose existing `defaultPrevented` guard prevents a second action.
@@ -127,7 +133,9 @@ card, and plugin-detail conflict calculation. Use one resolved comparison union:
 configurable core actions, navigation entries, and installed plugin action
 declarations. Render only host navigation in the new group and only plugin
 actions on plugin detail pages. Warnings remain advisory like existing warnings.
-The union must contain each identity once.
+The union must contain each identity once. Navigation dispatch uses only IDs
+and hrefs; the settings editors supply loaded plugin display names for visible
+labels and conflict warnings, without another plugin fetch in the dispatcher.
 
 ## Settings and responsive composition
 
@@ -136,6 +144,10 @@ Add an Integrations subgroup after the existing core rows on
 dirty markers, warnings, recording feedback, and reset behavior. Use localized
 `Open {{integration}}` labels; qualify plugin labels using installed plugin
 display names and navigation labels. Keep plugin-supplied data as data.
+Associate the recorder's localized state with the action button through
+`aria-describedby` and a stable `useId` status element. A polite, atomic live
+region announces recording and binding changes while the action name remains
+stable. No separate hardcoded status copy is needed.
 New host copy must ship in all seven real languages, generating Traditional
 Chinese through the existing conversion command and regenerating pseudo copy.
 

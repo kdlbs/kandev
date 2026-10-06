@@ -6,7 +6,10 @@ import { useNavContext } from "@/hooks/use-app-destinations";
 import { useRouter } from "@/lib/routing/client-router";
 import { resolveHref } from "@/lib/navigation/resolve-destinations";
 import { coreShortcutEntries, resolveShortcutEntry } from "@/lib/keyboard/plugin-shortcuts";
-import { isValidIntegrationShortcut } from "@/lib/keyboard/integration-shortcuts";
+import {
+  isFocusTraversalKey,
+  isValidIntegrationShortcut,
+} from "@/lib/keyboard/integration-shortcuts";
 import { NON_CONFIGURABLE_CORE_SHORTCUT_IDS } from "@/lib/keyboard/core-shortcuts";
 import { SHORTCUTS } from "@/lib/keyboard/constants";
 import { isEditableKeydownTarget, matchesShortcut } from "@/lib/keyboard/utils";
@@ -23,6 +26,7 @@ export function useIntegrationShortcuts(): void {
   useEffect(() => {
     const handler = (event: KeyboardEvent) => {
       if (event.defaultPrevented || event.repeat || isEditableKeydownTarget(event)) return;
+      if (isFocusTraversalKey(event)) return;
       if (document.querySelector('[data-shortcut-recording="true"]')) return;
       const overrides = store.getState().userSettings.keyboardShortcuts;
       const core = coreShortcutEntries().map((entry) => resolveShortcutEntry(entry, overrides));
