@@ -83,6 +83,26 @@ without redundant reads or data from another navigation context.
   task-session resolvers SHALL retain independent fallback and request state.
   Switching or settling one SHALL NOT alter another's result.
 
+- **AC-UI-TASK-NAVIGATION-RESPONSIVENESS-001.12:** When a mounted file-review
+  reader changes session, its returned review map SHALL belong only to the
+  selected session, including before deferred initialization settles. A late
+  response for the previous session SHALL NOT change the current session's
+  reviewed or stale classification, even for identical file identities and
+  diff hashes. Returning to a session SHALL permit reuse of its own shared
+  cache without reviving retired local publishers.
+- **AC-UI-TASK-NAVIGATION-RESPONSIVENESS-001.13:** A file-review reader with no
+  session SHALL return an empty map and no loading indication. Retirement on
+  session change or unmount SHALL prevent obsolete deferred loading, cache-hit
+  work, notifications, responses, and finalization from changing that reader.
+  A current reader's newly initiated read SHALL retain loading until its own
+  settlement; unavailable transport and settled cache reuse SHALL be idle.
+- **AC-UI-TASK-NAVIGATION-RESPONSIVENESS-001.14:** Same-session file-review
+  readers SHALL retain shared cache notifications, fetched-session reuse and
+  request coalescing. Current-session success, empty and failed reads, and
+  optimistic mark, unmark and reset behavior SHALL retain their existing
+  semantics. Desktop and phone SHALL receive the same session-owned review
+  state through their existing surfaces and result interface.
+
 ## Compatibility
 
 These criteria supplement existing [column visibility](board-step-visibility-filter.md),
@@ -102,3 +122,4 @@ Comparable isolated measurements assess actual navigation improvement.
 
 - [Task navigation responsiveness](../../../plans/task-navigation-responsiveness/plan.md)
 - [Task session fallback ownership](../../../plans/task-session-fallback-ownership/plan.md)
+- [Session file-review reader ownership](../../../plans/session-file-review-reader-ownership/plan.md)

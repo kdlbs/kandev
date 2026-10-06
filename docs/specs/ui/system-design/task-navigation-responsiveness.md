@@ -30,6 +30,7 @@ Do not replace the virtualizer or increase mounted-row counts to conceal delays.
 | `AC-UI-TASK-NAVIGATION-RESPONSIVENESS-001.6` | Responsive presentation |
 | `AC-UI-TASK-NAVIGATION-RESPONSIVENESS-001.7` | Task route presentation and essential hydration |
 | `AC-UI-TASK-NAVIGATION-RESPONSIVENESS-001.8` through `.11` | Mounted task-session fallback ownership |
+| `AC-UI-TASK-NAVIGATION-RESPONSIVENESS-001.12` through `.14` | Mounted file-review reader ownership |
 
 ## Components and responsibilities
 
@@ -413,3 +414,113 @@ needed for this state-only correction.
 ### Implementation plans
 
 - [Task session fallback ownership](../../../plans/task-session-fallback-ownership/plan.md)
+
+## Mounted file-review reader ownership
+
+This extension of client-navigation isolation covers
+`apps/web/hooks/use-session-file-reviews.ts`. Task storage remains authoritative
+for `session_file_reviews`; the existing get/update/reset actions and row fields
+remain unchanged. Native review findings, Git collection, repository/file keys,
+and diff-hash classification retain their current owners. This hook stays outside
+the shell/commit/diff coordinator above: its existing module cache and
+`fetchedSessions` coalescing are preserved. No ADR or framework migration is needed
+for a local enforcement of this existing publication boundary.
+
+### Local snapshot and committed lifetime
+
+Keep review data and loading in a session-tagged local snapshot. At render,
+expose that snapshot only for the matching, still-active reader lifetime;
+otherwise project the selected session's cache or an empty map with idle loading.
+Null always projects empty and idle. Render must remain pure: it cannot retire
+owners, change refs, start requests, or mutate any shared cache/framework.
+
+Use a commit-phase lifetime effect (`useLayoutEffect`) for the session's local
+owner and notification listener. Setup creates a distinct active token; cleanup
+retires it and removes its listener on session change, StrictMode replay, or
+unmount. This closes the post-commit interval before passive effects run. Deferred
+initialization then publishes the selected cache/empty snapshot through the
+token. Register the listener before starting the ordinary fetch. Preserve
+deferred state writes where needed by the existing lint rules.
+
+Every queued loading/cache-hit callback, event handler, direct read success,
+and `finally` settlement must check the captured token immediately before local
+publication. Checking only a session ID is insufficient for A-to-B-to-A or
+StrictMode. Use one guarded local publication path and preserve coherent
+session/data/loading fields when updating a snapshot. A retired callback cannot
+enqueue a local update that later appears owned by the replacement token.
+
+The existing shared fetch may still build and publish its captured session's
+cache and dispatch `file-reviews-change` after the initiating reader retires.
+The current listener always selects its own captured session's cache. Thus a
+new A reader can legitimately observe an old A transport result through the
+shared notification, while the old A reader's direct setters remain retired.
+Never reject that cache write merely because one reader left, and never publish
+the event's other-session map into the current reader. Align `versionRef` with
+the selected cache when initializing and retain same-session notifications.
+
+### Loading, reuse, and optimistic controls
+
+Only a newly initiated local read owns its pending loading state. Preserve the
+existing fetched-session rule: a second reader or a replay/return joining an
+already fetched session starts no request. If its cache is not yet populated,
+it remains empty/idle until that session's shared notification arrives; no new
+shared in-flight/loading registry is introduced. A completed cache hit is idle.
+Switching from a pending read to a hit, unfetched session, or null cannot retain
+the old loading flag. Current failure settles loading without changing the
+existing noncritical error handling or retry policy; no-client stays idle and
+does not mark the session fetched.
+
+Optimistic mark/unmark/reset still update their captured session cache and notify
+all readers. Route direct local setters, including the existing mark rollback,
+through a captured active reader publisher as well. This changes only local
+publication ownership; it does not change which mutations are admitted, their
+wire arguments, cache ordering, or rollback policy. A retired mutation's cache
+effects may remain observable to a current same-session reader through existing
+notifications. Read-versus-mutation and overlapping-mutation ordering are outside
+this repair, as are cache eviction, authorization generations, transport abort,
+and a public revision protocol.
+
+### Consumer lifetime and verification
+
+The audited callers are `components/task/changes-panel-data.tsx:399`,
+`task-changes-panel.tsx:116` (classification) and `:287` (actions), and
+`components/review/review-dialog.tsx:399`. The Changes data path computes review
+progress; the task panel uses the actual `computeChangesReviewSets` and `hashDiff`.
+`TaskCenterPanel`'s Changes branch renders the task panel without a session key.
+Its tablet ancestor uses a stable layout key, permitting a retained reader when
+that composition and tab remain mounted. Dockview can dispose panels during
+reconciliation; this audit does not establish every panel survives a switch.
+
+`TaskReviewDialogMount` renders `ReviewDialog` without a session key for non-null
+sessions; null unmounts the dialog. The dialog hook is above the keyed inner diff
+row, so that row's remount does not retire the reader. A mounted real dialog with
+identical ready file data can prove the checkbox/progress outcome on an A-to-B
+prop switch. Actual runtime reachability still depends on retaining its ancestor
+and having reviewable data; do not claim every consumer leaks or null always
+retains a dialog. No consumer production change is required by this audit.
+
+Use one `hooks/use-session-file-reviews.test.tsx` suite with the real hook,
+`WebSocketClient`, connection singleton, real `StateProvider` and other required
+providers for a mounted `ReviewDialog`. Substitute only deferred wire transport;
+reply by request ID/action with actual protocol envelopes. Keep real
+`computeChangesReviewSets`, `hashDiff`, file keys, and dialog classification.
+Disable auto-mark through real settings data so scrolling cannot contaminate the
+read regression. Scope checkbox assertions to `review-file-row` and its path;
+also prove mount continuity. No hook/provider/classifier/component mocks,
+missing-method errors, source-text tests, or copied predicates count as RED.
+
+Cover the accepted late-A-after-B and committed-null failures first. Add current
+success/empty/error/no-client/loading, A-to-B-to-A, pending-to-hit, queued loading
+and cache-hit retirement, StrictMode/unmount, different-session event isolation,
+multiple same-session readers, fetched reuse, and current optimistic controls.
+Use unique session IDs without production cache-reset exports; settle every
+recorded request, disconnect the client, restore the previous singleton and
+globals, and join test-owned timers in teardown. Do not replay the ROOT archive.
+
+Phone Changes reuses `useChangesPanelData` through `MobileChangesPanel`, and
+phone Review uses `SessionMobileReviewDialog`/`TaskReviewDialogMount`. This is pure
+state/data work with no layout, copy, touch, scroll, navigation or breakpoint
+change. The mobile-parity exception permits targeted hook/component tests and
+this note; browser/build/E2E/full-suite work is unnecessary for this boundary.
+
+- [Reader ownership delivery plan](../../../plans/session-file-review-reader-ownership/plan.md)

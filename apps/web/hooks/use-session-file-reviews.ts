@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useEffect, useRef } from "react";
+import { useState, useCallback, useLayoutEffect, useRef } from "react";
 import { getWebSocketClient } from "@/lib/ws/connection";
 
 export type FileReviewState = {
@@ -87,39 +87,97 @@ function fetchSessionReviews(
     });
 }
 
-export function useSessionFileReviews(sessionId: string | null): UseSessionFileReviewsReturn {
-  const [reviews, setReviews] = useState<Map<string, FileReviewState>>(() =>
-    sessionId ? (reviewsCache[sessionId] ?? new Map()) : new Map(),
-  );
-  const [loading, setLoading] = useState(false);
+type ReaderOwner = { sessionId: string | null; active: boolean };
+type ReaderSnapshot = {
+  owner: ReaderOwner | null;
+  reviews: Map<string, FileReviewState>;
+  loading: boolean;
+};
+const emptyReviews = new Map<string, FileReviewState>();
+
+function readerPublisher(
+  owner: ReaderOwner | null,
+  setSnapshot: React.Dispatch<React.SetStateAction<ReaderSnapshot>>,
+) {
+  const publish = (patch: Partial<Pick<ReaderSnapshot, "reviews" | "loading">>) => {
+    if (!owner?.active) return;
+    setSnapshot((previous) => {
+      if (!owner.active) return previous;
+      const current =
+        previous.owner === owner
+          ? previous
+          : {
+              owner,
+              reviews: owner.sessionId
+                ? (reviewsCache[owner.sessionId] ?? emptyReviews)
+                : emptyReviews,
+              loading: false,
+            };
+      return { ...current, ...patch };
+    });
+  };
+  return {
+    setReviews: (reviews: Map<string, FileReviewState>) => publish({ reviews }),
+    setLoading: (loading: boolean) => publish({ loading }),
+  };
+}
+
+function useReviewReader(sessionId: string | null) {
+  const [snapshot, setSnapshot] = useState<ReaderSnapshot>({
+    owner: null,
+    reviews: emptyReviews,
+    loading: false,
+  });
+  const ownerRef = useRef<ReaderOwner | null>(null);
   const versionRef = useRef(cacheVersion);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
+    const owner: ReaderOwner = { sessionId, active: true };
+    ownerRef.current = owner;
+    const publisher = readerPublisher(owner, setSnapshot);
+    versionRef.current = cacheVersion;
+    queueMicrotask(() => {
+      publisher.setReviews(sessionId ? (reviewsCache[sessionId] ?? emptyReviews) : emptyReviews);
+      publisher.setLoading(false);
+    });
     const handler = () => {
-      if (!sessionId) return;
+      if (!sessionId || !owner.active) return;
       const cached = reviewsCache[sessionId];
       if (cached && cacheVersion !== versionRef.current) {
         versionRef.current = cacheVersion;
-        setReviews(cached);
+        publisher.setReviews(cached);
       }
     };
     window.addEventListener("file-reviews-change", handler);
-    return () => window.removeEventListener("file-reviews-change", handler);
+    if (sessionId && !fetchedSessions.has(sessionId)) {
+      fetchSessionReviews(sessionId, publisher.setReviews, publisher.setLoading);
+    }
+    return () => {
+      owner.active = false;
+      window.removeEventListener("file-reviews-change", handler);
+    };
   }, [sessionId]);
 
-  useEffect(() => {
-    if (!sessionId || fetchedSessions.has(sessionId)) {
-      if (sessionId && reviewsCache[sessionId]) {
-        queueMicrotask(() => setReviews(reviewsCache[sessionId]));
-      }
-      return;
-    }
-    fetchSessionReviews(sessionId, setReviews, setLoading);
+  const capturePublisher = useCallback(() => {
+    const owner = ownerRef.current;
+    return readerPublisher(owner?.sessionId === sessionId ? owner : null, setSnapshot);
   }, [sessionId]);
+  const current = snapshot.owner?.active && snapshot.owner.sessionId === sessionId;
+  const fallbackReviews = sessionId ? (reviewsCache[sessionId] ?? emptyReviews) : emptyReviews;
+  return {
+    reviews: current ? snapshot.reviews : fallbackReviews,
+    loading: current ? snapshot.loading : false,
+    capturePublisher,
+  };
+}
+
+export function useSessionFileReviews(sessionId: string | null): UseSessionFileReviewsReturn {
+  const { reviews, loading, capturePublisher } = useReviewReader(sessionId);
 
   const markReviewed = useCallback(
     (filePath: string, diffHash: string) => {
       if (!sessionId) return;
+      const { setReviews } = capturePublisher();
       optimisticUpdate(
         sessionId,
         (next) => {
@@ -146,12 +204,13 @@ export function useSessionFileReviews(sessionId: string | null): UseSessionFileR
           );
         });
     },
-    [sessionId],
+    [sessionId, capturePublisher],
   );
 
   const markUnreviewed = useCallback(
     (filePath: string) => {
       if (!sessionId) return;
+      const { setReviews } = capturePublisher();
       optimisticUpdate(
         sessionId,
         (next) => {
@@ -172,11 +231,12 @@ export function useSessionFileReviews(sessionId: string | null): UseSessionFileR
           /* Ignore failures for unmark */
         });
     },
-    [sessionId],
+    [sessionId, capturePublisher],
   );
 
   const resetReviews = useCallback(() => {
     if (!sessionId) return;
+    const { setReviews } = capturePublisher();
     reviewsCache[sessionId] = new Map();
     setReviews(new Map());
     notifyChange();
@@ -185,7 +245,7 @@ export function useSessionFileReviews(sessionId: string | null): UseSessionFileR
     client.request("session.file_review.reset", { session_id: sessionId }).catch(() => {
       /* Ignore */
     });
-  }, [sessionId]);
+  }, [sessionId, capturePublisher]);
 
   return { reviews, markReviewed, markUnreviewed, resetReviews, loading };
 }
