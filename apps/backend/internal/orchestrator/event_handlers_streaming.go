@@ -158,10 +158,14 @@ func (s *Service) handleAgentStreamEvent(ctx context.Context, payload *lifecycle
 		)
 	}
 	if observedOutput || observedEffect {
-		s.clearDynamicUnclassifiedStreakForEvent(ctx, watcher.AgentEventData{
+		resetEvent := watcher.AgentEventData{
 			TaskID: taskID, SessionID: sessionID, OwnerKind: string(payload.OwnerKind),
 			AgentExecutionID: eventExecutionID, PromptGeneration: payload.Data.PromptGeneration,
-		}, true)
+		}
+		s.markDynamicStreakResetPending(resetEvent)
+		if eventType == agentEventToolCall {
+			s.flushPendingDynamicStreakReset(ctx, sessionID, &resetEvent)
+		}
 	}
 	if observedOutput && s.markForegroundGenerating(sessionID, eventExecutionID) {
 		s.publishForegroundActivityChanged(ctx, taskID, sessionID)

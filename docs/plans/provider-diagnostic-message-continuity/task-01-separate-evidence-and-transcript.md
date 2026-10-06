@@ -141,12 +141,28 @@ projections continue to persist and broadcast without re-observing or clearing
 genuine diagnostic evidence. Focused regressions cover ordinary progress,
 candidate non-progress, diagnostic correlation, and matching-terminal safety.
 
-The named regression passed on the host with task-owned `GOCACHE`. The exact
+The PR review follow-up moves dynamic streak persistence out of the raw stream
+callback. Original output, reasoning and effect events update in-memory safety
+evidence and coalesce one per-session reset intent; persistence retries only at
+semantic boundaries. Failed resets remain pending and prevent automatic
+fallback until safely cleared. Permanent deletion retires the intent only
+after the session row is deleted. Focused regressions prove blocked persistence
+cannot block transcript delivery, joined transcript content stays intact,
+retries survive prompt changes, stale identities do not write successor state,
+and failed deletion retains the intent.
+
+The named regression passed on the host with task-owned `GOCACHE`. The initial
 three-package race suite passed in the task-owned Go 1.26 Linux container with
 `TMPDIR=/tmp`, private `GIT_CONFIG_GLOBAL`, and all requested tests enabled:
 
 - `(cd apps/backend && go test -tags fts5 ./internal/agent/runtime/lifecycle -run '^TestHandleMessageChunkEvent_DiagnosticMarkerKeepsMessageIdentity$' -count=1 -v)` with `GOCACHE=/private/tmp/kandev-provider-diagnostic-go-cache`: passed.
 - `(cd apps/backend && go test -race -tags fts5 ./internal/agent/runtime/lifecycle ./internal/orchestrator ./internal/agentctl/server/adapter/transport/acp -count=1)`: passed; lifecycle 219.463s, orchestrator 105.202s, ACP transport 21.881s.
 
+This is the initial implementation receipt before PR review remediation. The
+final post-review race and CI package results are recorded in the plan's
+[review remediation](plan.md#pr-review-remediation) section.
+
 The earlier macOS and first Linux runner failures and their resolved setup
 causes are documented in the [plan verification results](plan.md#verification-results).
+Final PR-fixup race, API package and lint receipts are recorded in the plan's
+review-remediation results.

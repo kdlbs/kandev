@@ -5383,6 +5383,7 @@ func (s *Service) deleteSessionAndCleanAttachments(ctx context.Context, session 
 	if remover, ok := s.attachmentReader.(attachmentBytesRemover); ok {
 		remover.RemoveBytes(deletedAttachments)
 	}
+	s.deletePendingDynamicStreakReset(session.ID)
 	return nil
 }
 

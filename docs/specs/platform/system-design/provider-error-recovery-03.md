@@ -161,6 +161,16 @@ terminal-ordering reconciliation. Test delayed/asynchronous consumption as
 well as the synchronous tracking bus; no recovery decision may depend on the
 transcript flush being the evidence producer.
 
+**Dynamic streak side effects.** Original ordinary output, reasoning and tool
+events still update the current attempt's in-memory safety evidence
+synchronously. They may mark a dynamic-route streak clear as pending, but the
+raw stream callback does not perform route-state database work. The
+orchestrator coalesces the intent and persists it at semantic boundaries; a
+failed or unproven reset keeps automatic fallback closed. Transcript
+projections neither repeat evidence nor trigger another reset. Identity
+fencing, persistence retries and completion ownership are specified in the
+[dynamic unclassified fallback design](../../agents/system-design/dynamic-unclassified-fallback.md#streak-lifecycle).
+
 **Absent marker.** An event that arrives without the field is ordinary output.
 This is a deliberate behaviour change for a version-skewed remote executor
 running an older agentctl: it loses automatic recovery for this specific

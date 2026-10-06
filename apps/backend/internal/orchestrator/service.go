@@ -1478,6 +1478,11 @@ type Service struct {
 	// from a predecessor. Automatic recovery requires an explicit no-output,
 	// no-effect result from this map.
 	dynamicAttemptEvidence sync.Map
+	// pendingDynamicStreakResets coalesces ordinary output/effect observations
+	// until a semantic boundary can persist the reset outside the raw stream
+	// callback. Each entry retains the prompt and route identity that authorized
+	// the reset across prompt-evidence replacement.
+	pendingDynamicStreakResets sync.Map
 
 	// resumeAttempts owns process-local startup identity. It is separate from
 	// dynamicAttemptEvidence because a provider execution may be reused by

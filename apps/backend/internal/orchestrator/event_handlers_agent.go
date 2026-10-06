@@ -2577,7 +2577,7 @@ func (s *Service) finishAgentCompleted(
 	guard *lockedCancelInFlightGuard,
 ) {
 	completionFollowUp := models.IsCompletionFollowUpSession(session.Metadata)
-	s.clearDynamicUnclassifiedStreakForEvent(ctx, data, false)
+	s.clearDynamicUnclassifiedStreakForCompletion(ctx, data)
 	// A successful, still-live completion clears retry state and scheduler
 	// ownership only after the guarded terminal/rotation checks above.
 	s.resetTransientRetry(data.SessionID)
