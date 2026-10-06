@@ -28,6 +28,8 @@ let store: StoreApi<AppState>;
 const A = "executor/a";
 const B = "executor/b";
 const NOT_KNOWN = "ssh-reachability-not-known";
+const STALE = "ssh-reachability-stale";
+const HOST = "ssh-reachability-host";
 const NOW = new Date("2026-10-06T20:00:00.000Z");
 
 function record(id: string, changes: Partial<SSHReachabilityRecord> = {}): SSHReachabilityRecord {
@@ -152,7 +154,7 @@ describe("committed reachability visit", () => {
     await settle(a, A, "failure");
     expect(screen.queryByTestId(NOT_KNOWN)).toBeNull();
     await settle(requests[1], B);
-    expect(screen.getByTestId("ssh-reachability-host").textContent).toContain(`${B}-host`);
+    expect(screen.getByTestId(HOST).textContent).toContain(`${B}-host`);
   });
 
   it("B can probe while A is pending", async () => {
@@ -173,7 +175,7 @@ describe("committed reachability visit", () => {
     expect(store.getState().sshReachability.byExecutorId[A]).toEqual(record(A));
     await settle(bProbe, B);
     expect(probeButton().disabled).toBe(false);
-    expect(screen.getByTestId("ssh-reachability-host").textContent).toContain(`${B}-host`);
+    expect(screen.getByTestId(HOST).textContent).toContain(`${B}-host`);
     await settle(requests[2], B);
   });
 
@@ -260,6 +262,54 @@ function LayoutAttempt({ action }: { action: () => void }) {
   useLayoutEffect(() => action(), [action]);
   return null;
 }
+
+// @covers AC-EXECUTORS-SSH-REACHABILITY-002.4
+// @covers AC-EXECUTORS-SSH-REACHABILITY-002.13
+describe("reachability clock lifetime", () => {
+  it("current fresh card becomes stale only after its deadline despite failed refreshes", async () => {
+    mountCard();
+    await settle(requests[0], A);
+    const accepted = store.getState().sshReachability.byExecutorId[A];
+    expect(screen.queryByTestId(STALE)).toBeNull();
+
+    await act(async () => vi.advanceTimersByTime(180_000));
+    await act(async () => {
+      for (const request of requests.slice(1)) request.reject(new Error("refresh failed"));
+    });
+    expect(requests).toHaveLength(4);
+    expect(store.getState().sshReachability.byExecutorId[A]).toBe(accepted);
+    expect(screen.queryByTestId(STALE)).toBeNull();
+
+    await act(async () => vi.advanceTimersByTime(1));
+    expect(screen.getByTestId(STALE)).toBeTruthy();
+    expect(store.getState().sshReachability.byExecutorId[A]).toBe(accepted);
+  });
+
+  it("retired clock callback leaves B fresh until B's own clock callback runs", async () => {
+    const timerSpy = vi.spyOn(window, "setTimeout");
+    const view = mountCard();
+    await settle(requests[0], A);
+    const oldClock = timerSpy.mock.calls.find(([, delay]) => delay === 180_001)?.[0] as () => void;
+    expect(oldClock).toBeTypeOf("function");
+
+    timerSpy.mockClear();
+    view.select(B);
+    await settle(requests[1], B);
+    const ownClock = timerSpy.mock.calls.find(([, delay]) => delay === 180_001)?.[0] as () => void;
+    expect(ownClock).toBeTypeOf("function");
+    const accepted = store.getState().sshReachability.byExecutorId[B];
+    vi.setSystemTime(new Date(NOW.getTime() + 180_001));
+
+    await act(async () => oldClock());
+    expect(screen.queryByTestId(STALE)).toBeNull();
+    expect(screen.getByTestId(HOST).textContent).toContain(`${B}-host`);
+    expect(store.getState().sshReachability.byExecutorId[B]).toBe(accepted);
+
+    await act(async () => ownClock());
+    expect(screen.getByTestId(STALE)).toBeTruthy();
+    expect(store.getState().sshReachability.byExecutorId[B]).toBe(accepted);
+  });
+});
 
 // @covers AC-EXECUTORS-SSH-REACHABILITY-002.13
 // @covers AC-EXECUTORS-SSH-REACHABILITY-002.14
@@ -438,7 +488,7 @@ describe("current visit controls", () => {
     fireEvent.click(probeButton());
     await settle(requests[2], A, "failure");
     expect(screen.queryByTestId(NOT_KNOWN)).toBeNull();
-    expect(screen.getByTestId("ssh-reachability-host").textContent).toContain(`${A}-host`);
+    expect(screen.getByTestId(HOST).textContent).toContain(`${A}-host`);
     expect(probeButton().disabled).toBe(false);
   });
 });

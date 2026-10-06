@@ -270,6 +270,18 @@ lifetime cases passed 63/63. Final run after fixture lint/format edits passed
 
 Acceptance coverage:
 
+Review correction for PR #4272, Greptile comment 4200044167: two additional
+transport-boundary clock cases pass in the anchored `reachability clock
+lifetime` group (2 passed, 27 unselected). `current fresh card becomes stale
+only after its deadline despite failed refreshes` preserves the accepted store
+record through failed periodic GETs, checks the exact three-interval boundary,
+and renders the stale badge one millisecond later. `retired clock callback
+leaves B fresh until B's own clock callback runs` invokes a captured A callback
+after the B visit commits, observes unchanged B presentation/evidence, then
+invokes B's current callback as the positive control. Deferred requests and
+fake clocks use the existing cleanup. Production source and cadence are
+unchanged; the earlier 63-case run remains historical validation, not a replay.
+
 - .13/.10: retired initial load and A-B-A success/failure; obsolete cadence
   refreshes; retained load/probe callbacks invoked during replacement layout
   commit and again after it; pending GET/probe success/failure after unmount.
