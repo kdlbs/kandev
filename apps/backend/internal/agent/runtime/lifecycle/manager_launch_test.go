@@ -179,7 +179,7 @@ func TestBuildAgentCommand_UsesManagedNPMRuntimes(t *testing.T) {
 	t.Run("opencode-native", func(t *testing.T) {
 		cmds, err := mgr.buildAgentCommandWithContext(context.Background(), &LaunchRequest{}, nil, agents.NewOpenCodeACP(), true)
 		require.NoError(t, err)
-		require.Equal(t, "opencode acp --print-logs --log-level ERROR", cmds.initial)
+		require.Equal(t, "opencode acp --print-logs", cmds.initial)
 	})
 	t.Run("opencode-npx-fallback", func(t *testing.T) {
 		cmds, err := mgr.buildAgentCommandWithContext(context.Background(), &LaunchRequest{}, nil, agents.NewOpenCodeACP(), false)

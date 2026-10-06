@@ -673,6 +673,7 @@ func marshalUserSettingsPayload(settings *models.UserSettings) ([]byte, error) {
 		"terminal_font_size":                       settings.TerminalFontSize,
 		"changes_panel_layout":                     settings.ChangesPanelLayout,
 		"last_seen_display":                        models.NormalizeLastSeenDisplay(settings.LastSeenDisplay),
+		"message_time_display":                     models.NormalizeMessageTimeDisplay(settings.MessageTimeDisplay),
 		"agent_tab_close_behavior":                 models.NormalizeAgentTabCloseBehavior(settings.AgentTabCloseBehavior),
 		"system_metrics_display":                   settings.SystemMetricsDisplay,
 		"app_status_bar_enabled":                   settings.AppStatusBarEnabled,
@@ -760,6 +761,7 @@ func defaultUserSettings(userID string) *models.UserSettings {
 		TerminalLinkBehavior:              "new_tab",
 		ChangesPanelLayout:                defaultChangesPanelLayout,
 		LastSeenDisplay:                   models.LastSeenDisplayAbsolute,
+		MessageTimeDisplay:                models.MessageTimeDisplayRelative,
 		AgentTabCloseBehavior:             models.AgentTabCloseBehaviorDeleteSession,
 		SidebarViews:                      DefaultSidebarViews(),
 		SidebarActiveViewID:               DefaultSidebarViewID,
@@ -868,6 +870,7 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 		TerminalFontSize                  int                                     `json:"terminal_font_size"`
 		ChangesPanelLayout                string                                  `json:"changes_panel_layout"`
 		LastSeenDisplay                   json.RawMessage                         `json:"last_seen_display"`
+		MessageTimeDisplay                json.RawMessage                         `json:"message_time_display"`
 		AgentTabCloseBehavior             json.RawMessage                         `json:"agent_tab_close_behavior"`
 		SystemMetricsDisplay              models.SystemMetricsDisplaySettings     `json:"system_metrics_display"`
 		AppStatusBarEnabled               *bool                                   `json:"app_status_bar_enabled"`
@@ -1067,6 +1070,7 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 		settings.ChangesPanelLayout = defaultChangesPanelLayout
 	}
 	settings.LastSeenDisplay = normalizeLastSeenDisplayStored(payload.LastSeenDisplay)
+	settings.MessageTimeDisplay = normalizeMessageTimeDisplayStored(payload.MessageTimeDisplay)
 	settings.AgentTabCloseBehavior = normalizeAgentTabCloseBehaviorStored(payload.AgentTabCloseBehavior)
 	settings.KanbanHiddenStepIDs = decodeKanbanHiddenStepIDs(payload.KanbanHiddenStepIDs)
 	settings.WorkflowIDsWithAutoHideEmptySteps = decodeStringIDs(payload.WorkflowIDsWithAutoHideEmptySteps)
@@ -1119,6 +1123,16 @@ func normalizeLastSeenDisplayStored(raw json.RawMessage) string {
 		return models.LastSeenDisplayAbsolute
 	}
 	return models.NormalizeLastSeenDisplay(value)
+}
+func normalizeMessageTimeDisplayStored(raw json.RawMessage) string {
+	if len(raw) == 0 {
+		return models.MessageTimeDisplayRelative
+	}
+	var value string
+	if err := json.Unmarshal(raw, &value); err != nil {
+		return models.MessageTimeDisplayRelative
+	}
+	return models.NormalizeMessageTimeDisplay(value)
 }
 
 func normalizeAgentTabCloseBehaviorStored(raw json.RawMessage) string {

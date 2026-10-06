@@ -53,6 +53,10 @@ func (s *Service) SetTaskStatusSummaryLaunchQueueReader(reader TaskStatusSummary
 	}
 }
 
+func isRequestCancellationError(ctx context.Context, err error) bool {
+	return errors.Is(ctx.Err(), context.Canceled) && errors.Is(err, context.Canceled)
+}
+
 // ReconcileTaskStatusSummaries repairs stale pending state in existing rows and
 // builds absent rows. All durable inputs are batch-loaded by the caller or by
 // optional batch readers, so startup does not scan every historical task. A
@@ -71,11 +75,23 @@ func (s *Service) ReconcileTaskStatusSummaries(
 	if s == nil || s.statusSummaries == nil || len(tasks) == 0 {
 		return summaries, nil
 	}
+	if err := ctx.Err(); err != nil {
+		return summaries, err
+	}
 	activityByTask, activityObserved := s.loadSummaryActivity(ctx, taskIDs(tasks))
+	if err := ctx.Err(); err != nil {
+		return summaries, err
+	}
 	launchQueueByTask := s.launchQueueSummaries(ctx, tasks)
+	if err := ctx.Err(); err != nil {
+		return summaries, err
+	}
 	failedTaskIDs, reconcileErr := s.reconcileExistingSummaries(
 		ctx, tasks, sessionsByTask, pendingBySession, summaries, activityByTask, activityObserved, launchQueueByTask,
 	)
+	if err := ctx.Err(); err != nil {
+		return summaries, err
+	}
 	rebuildTasks := tasks
 	if len(failedTaskIDs) > 0 {
 		rebuildTasks = make([]*models.Task, 0, len(tasks)-len(failedTaskIDs))
@@ -91,6 +107,9 @@ func (s *Service) ReconcileTaskStatusSummaries(
 	summaries = s.rebuildMissingSummaries(
 		ctx, rebuildTasks, sessionsByTask, pendingBySession, summaries, activityByTask, activityObserved, launchQueueByTask,
 	)
+	if err := ctx.Err(); err != nil {
+		return summaries, err
+	}
 	return summaries, reconcileErr
 }
 
@@ -107,6 +126,9 @@ func (s *Service) reconcileExistingSummaries(
 	var reconcileErr error
 	failedTaskIDs := make(map[string]struct{})
 	for _, task := range tasks {
+		if ctx.Err() != nil {
+			return failedTaskIDs, reconcileErr
+		}
 		if task == nil || task.ID == "" || summaries[task.ID] == nil {
 			continue
 		}
@@ -131,11 +153,14 @@ func (s *Service) reconcileExistingSummaries(
 				summaries[task.ID] = nil
 			}
 			failedTaskIDs[task.ID] = struct{}{}
-			s.logSummaryRepairFailure(task.ID, "reconcile", err)
+			s.logSummaryRepairFailure(ctx, task.ID, "reconcile", err)
 			reconcileErr = errors.Join(
 				reconcileErr,
 				fmt.Errorf("reconcile task %s status summary: %w", task.ID, err),
 			)
+			if ctx.Err() != nil {
+				return failedTaskIDs, reconcileErr
+			}
 			continue
 		}
 		if reconciled == nil {
@@ -157,22 +182,46 @@ func (s *Service) rebuildMissingSummaries(
 	activityObserved bool,
 	launchQueueByTask map[string]*statussummary.LaunchQueueSummary,
 ) map[string]*statussummary.TaskStatusSummary {
+	if ctx.Err() != nil {
+		return summaries
+	}
 	missing := missingSummaryTasks(tasks, summaries)
 	if len(missing) == 0 {
 		return summaries
 	}
 	prByTask, prObserved := s.loadSummaryPRs(ctx, taskIDs(missing))
+	if ctx.Err() != nil {
+		return summaries
+	}
 	environmentIDsByTask, environmentIDs := s.taskEnvironmentIDsForTasks(ctx, missing, sessionsByTask)
+	if ctx.Err() != nil {
+		return summaries
+	}
 	gitByEnvironment, gitObserved := s.loadSummaryGit(ctx, environmentIDs)
+	if ctx.Err() != nil {
+		return summaries
+	}
 	queuedByTask := s.loadQueuedSummaryCounts(ctx, taskIDs(missing))
+	if ctx.Err() != nil {
+		return summaries
+	}
 	activityAtByTask := activityByTask
 	now := time.Now().UTC()
 	for _, task := range missing {
+		if ctx.Err() != nil {
+			return summaries
+		}
 		activityAt := activityAtByTask[task.ID]
 		completionGate, completionGateObserved, gateErr := s.completionGateSummary(ctx, task.ID)
 		if gateErr != nil {
-			s.logSummaryRepairFailure(task.ID, "completion gate", gateErr)
+			s.logSummaryRepairFailure(ctx, task.ID, "completion gate", gateErr)
+			if ctx.Err() != nil {
+				return summaries
+			}
 			continue
+		}
+		if ctx.Err() != nil {
+			return summaries
 		}
 		s.rebuildMissingSummary(ctx, task, summaries, s.rebuildInput(
 			taskLaunchErrorSummary(task),
@@ -196,25 +245,34 @@ func (s *Service) rebuildMissingSummaries(
 }
 
 func (s *Service) loadQueuedSummaryCounts(ctx context.Context, taskIDs []string) map[string]int {
+	if ctx.Err() != nil {
+		return nil
+	}
 	queuedByTask, err := s.CountPendingQueuedByTaskIDs(ctx, taskIDs)
 	if err == nil {
+		if ctx.Err() != nil {
+			return nil
+		}
 		return queuedByTask
 	}
-	if s.logger != nil {
+	if s.logger != nil && !isRequestCancellationError(ctx, err) {
 		s.logger.Warn("failed to load queued prompt counts for status summary repair", zap.Error(err))
 	}
 	return map[string]int{}
 }
 
 func (s *Service) loadSummaryActivity(ctx context.Context, taskIDs []string) (map[string]time.Time, bool) {
-	if s.taskActivity == nil || len(taskIDs) == 0 {
+	if ctx.Err() != nil || s.taskActivity == nil || len(taskIDs) == 0 {
 		return nil, false
 	}
 	activityByTask, err := s.taskActivity.LoadTaskLastActivity(ctx, taskIDs)
 	if err != nil {
-		if s.logger != nil {
+		if s.logger != nil && !isRequestCancellationError(ctx, err) {
 			s.logger.Warn("failed to load task activity for status summary repair", zap.Error(err))
 		}
+		return nil, false
+	}
+	if ctx.Err() != nil {
 		return nil, false
 	}
 	return activityByTask, true
@@ -224,6 +282,9 @@ func (s *Service) launchQueueSummaries(
 	ctx context.Context,
 	tasks []*models.Task,
 ) map[string]*statussummary.LaunchQueueSummary {
+	if ctx.Err() != nil {
+		return nil
+	}
 	if s.statusSummaryLaunchQueue != nil {
 		if queues := s.statusSummaryLaunchQueue(ctx, tasks); queues != nil {
 			return queues
@@ -273,6 +334,9 @@ func (s *Service) completionGateSummary(
 	ctx context.Context,
 	taskID string,
 ) (*statussummary.CompletionGateSummary, bool, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, false, err
+	}
 	reader, ok := s.tasks.(repository.TaskCompletionGateRepository)
 	if !ok {
 		return nil, false, nil
@@ -284,6 +348,9 @@ func (s *Service) completionGateSummary(
 		}
 		return nil, true, err
 	}
+	if err := ctx.Err(); err != nil {
+		return nil, false, err
+	}
 	return statussummary.CompletionGateSummaryFromSnapshot(snapshot), true, nil
 }
 
@@ -293,14 +360,17 @@ func (s *Service) rebuildMissingSummary(
 	summaries map[string]*statussummary.TaskStatusSummary,
 	input statussummary.RebuildInput,
 ) {
-	if task == nil || task.ID == "" {
+	if ctx.Err() != nil || task == nil || task.ID == "" {
 		return
 	}
 	next := statussummary.BuildFromAuthoritative(input)
 	next.Revision = 1
 	next.UpdatedAt = input.Now
 	if err := next.Validate(); err != nil {
-		s.logSummaryRepairFailure(task.ID, "validate", err)
+		s.logSummaryRepairFailure(ctx, task.ID, "validate", err)
+		return
+	}
+	if ctx.Err() != nil {
 		return
 	}
 	accepted, err := s.statusSummaries.CompareAndUpdateTaskStatusSummary(ctx, &statussummary.StoredTaskStatusSummary{
@@ -309,7 +379,7 @@ func (s *Service) rebuildMissingSummary(
 		Summary:     next,
 	})
 	if err != nil {
-		s.logSummaryRepairFailure(task.ID, "persist", err)
+		s.logSummaryRepairFailure(ctx, task.ID, "persist", err)
 		return
 	}
 	if accepted {
@@ -317,11 +387,17 @@ func (s *Service) rebuildMissingSummary(
 		s.publishReconciledSummary(ctx, task, next)
 		return
 	}
+	if ctx.Err() != nil {
+		return
+	}
 	// A projector event may have won the race while this repair was running.
 	// Return that authoritative row instead of exposing a stale repair.
 	rows, err := s.statusSummaries.LoadTaskStatusSummaries(ctx, []string{task.ID})
 	if err != nil {
-		s.logSummaryRepairFailure(task.ID, "reload", err)
+		s.logSummaryRepairFailure(ctx, task.ID, "reload", err)
+		return
+	}
+	if ctx.Err() != nil {
 		return
 	}
 	if stored := rows[task.ID]; stored != nil {
@@ -340,9 +416,15 @@ func (s *Service) reconcileExistingSummary(
 	activityObserved bool,
 	launchQueueValues ...*statussummary.LaunchQueueSummary,
 ) (*statussummary.TaskStatusSummary, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	completionGate, completionGateObserved, err := s.completionGateSummary(ctx, task.ID)
 	if err != nil {
 		return nil, fmt.Errorf("load completion gate: %w", err)
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
 	}
 	var launchQueue *statussummary.LaunchQueueSummary
 	// Older repair tests and partial task snapshots can omit Metadata entirely.
@@ -353,6 +435,9 @@ func (s *Service) reconcileExistingSummary(
 		launchQueue = launchQueueValues[0]
 	}
 	for attempt := 0; attempt < maxSummaryReconcileAttempts && current != nil; attempt++ {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		if !summaryNeedsReconcile(current, pendingAction, authoritativeActivity, activityObserved, launchQueue, launchQueueObserved, completionGate, completionGateObserved) {
 			return overlayLaunchQueueObservation(current, launchQueue, launchQueueObserved), nil
 		}
@@ -385,6 +470,9 @@ func (s *Service) reconcileExistingSummary(
 			s.publishReconciledSummary(ctx, task, next)
 			return &next, nil
 		}
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		current, pendingAction, launchQueue, err = s.reloadSummaryReconcileState(ctx, task.ID, launchQueueObserved)
 		if err != nil {
 			return nil, err
@@ -396,6 +484,12 @@ func (s *Service) reconcileExistingSummary(
 		if err != nil {
 			return nil, fmt.Errorf("reload completion gate: %w", err)
 		}
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
 	}
 	if !summaryNeedsReconcile(current, pendingAction, authoritativeActivity, activityObserved, launchQueue, launchQueueObserved, completionGate, completionGateObserved) {
 		return overlayLaunchQueueObservation(current, launchQueue, launchQueueObserved), nil
@@ -472,9 +566,15 @@ func (s *Service) reloadSummaryReconcileState(
 	taskID string,
 	loadLaunchQueue bool,
 ) (*statussummary.TaskStatusSummary, string, *statussummary.LaunchQueueSummary, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, "", nil, err
+	}
 	rows, err := s.statusSummaries.LoadTaskStatusSummaries(ctx, []string{taskID})
 	if err != nil {
 		return nil, "", nil, fmt.Errorf("reload after compare-and-set rejection: %w", err)
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, "", nil, err
 	}
 	current := rows[taskID]
 	if current == nil {
@@ -487,9 +587,15 @@ func (s *Service) reloadSummaryReconcileState(
 	if err != nil {
 		return nil, "", nil, fmt.Errorf("reload sessions: %w", err)
 	}
+	if err := ctx.Err(); err != nil {
+		return nil, "", nil, err
+	}
 	pendingBySession, err := s.GetPendingActionsForSessions(ctx, taskSessionIDs(refreshedSessions))
 	if err != nil {
 		return nil, "", nil, fmt.Errorf("reload pending actions: %w", err)
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, "", nil, err
 	}
 	if !loadLaunchQueue {
 		return current, pendingActionForTask(refreshedSessions, pendingBySession), nil, nil
@@ -498,7 +604,13 @@ func (s *Service) reloadSummaryReconcileState(
 	if err != nil {
 		return nil, "", nil, fmt.Errorf("reload task for launch queue: %w", err)
 	}
+	if err := ctx.Err(); err != nil {
+		return nil, "", nil, err
+	}
 	queues := s.launchQueueSummaries(ctx, []*models.Task{task})
+	if err := ctx.Err(); err != nil {
+		return nil, "", nil, err
+	}
 	return current, pendingActionForTask(refreshedSessions, pendingBySession), queues[taskID], nil
 }
 
@@ -575,14 +687,17 @@ func (s *Service) publishReconciledSummary(
 	if s.eventBus == nil {
 		return
 	}
+	// A committed summary needs its matching event even if the requesting list
+	// operation was canceled after the repository accepted the write.
+	publishCtx := context.WithoutCancel(ctx)
 	payload := statussummary.SummaryUpdated{
 		TaskID:      task.ID,
 		WorkspaceID: task.WorkspaceID,
 		Summary:     summary,
 	}
-	if err := s.eventBus.Publish(ctx, events.TaskStatusSummaryUpdated,
+	if err := s.eventBus.Publish(publishCtx, events.TaskStatusSummaryUpdated,
 		bus.NewEvent(events.TaskStatusSummaryUpdated, "task-status-summary-reconciler", payload)); err != nil {
-		s.logSummaryRepairFailure(task.ID, "publish", err)
+		s.logSummaryRepairFailure(publishCtx, task.ID, "publish", err)
 	}
 }
 
@@ -609,8 +724,8 @@ func pendingActionForTask(
 	return ""
 }
 
-func (s *Service) logSummaryRepairFailure(taskID, stage string, err error) {
-	if s.logger != nil {
+func (s *Service) logSummaryRepairFailure(ctx context.Context, taskID, stage string, err error) {
+	if s.logger != nil && !isRequestCancellationError(ctx, err) {
 		s.logger.Warn("failed to repair task status summary; continuing task list hydration",
 			zap.String("task_id", taskID), zap.String("stage", stage), zap.Error(err))
 	}
@@ -666,21 +781,32 @@ func (s *Service) taskEnvironmentIDsForTasks(
 		ids = append(ids, environmentID)
 	}
 	for _, task := range tasks {
+		if ctx.Err() != nil {
+			return idsByTask, ids
+		}
 		if task == nil {
 			continue
 		}
 		if s != nil && s.taskEnvironments != nil {
 			environment, err := s.taskEnvironments.GetTaskEnvironmentByTaskID(ctx, task.ID)
 			if err != nil {
-				if s.logger != nil {
+				if s.logger != nil && !isRequestCancellationError(ctx, err) {
 					s.logger.Warn("failed to load task environment for status summary repair",
 						zap.String("task_id", task.ID), zap.Error(err))
 				}
+				if ctx.Err() != nil {
+					return idsByTask, ids
+				}
+			} else if ctx.Err() != nil {
+				return idsByTask, ids
 			} else if environment != nil {
 				add(task.ID, environment.ID)
 			}
 		}
 		for _, session := range sessionsByTask[task.ID] {
+			if ctx.Err() != nil {
+				return idsByTask, ids
+			}
 			if session == nil || session.TaskEnvironmentID == "" {
 				continue
 			}
@@ -694,14 +820,17 @@ func (s *Service) loadSummaryPRs(
 	ctx context.Context,
 	taskIDs []string,
 ) (map[string][]statussummary.PullRequestInput, bool) {
-	if s.statusSummaryPRs == nil || len(taskIDs) == 0 {
+	if ctx.Err() != nil || s.statusSummaryPRs == nil || len(taskIDs) == 0 {
 		return nil, false
 	}
 	prs, err := s.statusSummaryPRs.ListTaskStatusSummaryPullRequests(ctx, taskIDs)
 	if err != nil {
-		if s.logger != nil {
+		if s.logger != nil && !isRequestCancellationError(ctx, err) {
 			s.logger.Warn("failed to load task PR state for status summary repair", zap.Error(err))
 		}
+		return nil, false
+	}
+	if ctx.Err() != nil {
 		return nil, false
 	}
 	return prs, true
@@ -711,18 +840,24 @@ func (s *Service) loadSummaryGit(
 	ctx context.Context,
 	taskEnvironmentIDs []string,
 ) (map[string][]*models.GitSnapshot, bool) {
-	if s.gitSnapshots == nil || len(taskEnvironmentIDs) == 0 {
+	if ctx.Err() != nil || s.gitSnapshots == nil || len(taskEnvironmentIDs) == 0 {
 		return nil, false
 	}
 	snapshots, err := s.gitSnapshots.GetLatestGitStatusSnapshotsByTaskEnvironmentIDs(ctx, taskEnvironmentIDs)
 	if err != nil {
-		if s.logger != nil {
+		if s.logger != nil && !isRequestCancellationError(ctx, err) {
 			s.logger.Warn("failed to load Git state for status summary repair", zap.Error(err))
 		}
 		return nil, false
 	}
+	if ctx.Err() != nil {
+		return nil, false
+	}
 	byEnvironment := make(map[string][]*models.GitSnapshot, len(taskEnvironmentIDs))
 	for _, snapshot := range snapshots {
+		if ctx.Err() != nil {
+			return nil, false
+		}
 		if snapshot == nil || snapshot.TaskEnvironmentID == "" {
 			continue
 		}

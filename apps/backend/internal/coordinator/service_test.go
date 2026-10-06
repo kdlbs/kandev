@@ -1,0 +1,818 @@
+package coordinator
+
+import (
+	"context"
+	"errors"
+	"testing"
+
+	settingsmodels "github.com/kandev/kandev/internal/agent/settings/models"
+	"github.com/kandev/kandev/internal/authz"
+	"github.com/kandev/kandev/internal/common/logger"
+	taskmodels "github.com/kandev/kandev/internal/task/models"
+	"go.uber.org/zap"
+)
+
+// fakeWorkspaceAuthorizer is a test double for WorkspaceAuthorizer: err, when
+// set, simulates AuthorizeWorkspaceScope failing (e.g.
+// repoerrors.ErrWorkspaceNotFound or service.ErrForbidden). It also records
+// every scope it was called with, so tests can assert a read route never
+// authorizes with the manage scope (or vice versa).
+type fakeWorkspaceAuthorizer struct {
+	err    error
+	scopes []authz.Scope
+}
+
+func (f *fakeWorkspaceAuthorizer) AuthorizeWorkspaceScope(_ context.Context, _ string, scope authz.Scope) error {
+	f.scopes = append(f.scopes, scope)
+	return f.err
+}
+
+func newTestLogger(t *testing.T) *logger.Logger {
+	t.Helper()
+	log, err := logger.NewFromZap(zap.NewNop())
+	if err != nil {
+		t.Fatalf("new logger: %v", err)
+	}
+	return log
+}
+
+func newServiceForTest(
+	t *testing.T,
+	agents map[string]*settingsmodels.AgentProfile,
+	executors map[string]*taskmodels.ExecutorProfile,
+	authzErr error,
+) *Service {
+	t.Helper()
+	store := newTestStore(t)
+	validator := newValidatorForTest(agents, executors)
+	return NewService(store, validator, &fakeWorkspaceAuthorizer{err: authzErr}, newTestLogger(t))
+}
+
+func assertFieldError(t *testing.T, err error, field string) {
+	t.Helper()
+	var fieldErr *FieldError
+	if !errors.As(err, &fieldErr) {
+		t.Fatalf("error type = %T (%v), want *FieldError", err, err)
+	}
+	if fieldErr.Field != field {
+		t.Errorf("FieldError.Field = %q, want %q", fieldErr.Field, field)
+	}
+}
+
+// assertLastScope fails unless svc's fakeWorkspaceAuthorizer was last called
+// with want, catching a read/write scope swap on a coordinator route
+// (RV-005: previously only the return value was asserted, never which
+// authz.Scope constant was requested).
+func assertLastScope(t *testing.T, svc *Service, want authz.Scope) {
+	t.Helper()
+	fake, ok := svc.authz.(*fakeWorkspaceAuthorizer)
+	if !ok {
+		t.Fatalf("svc.authz is %T, want *fakeWorkspaceAuthorizer", svc.authz)
+	}
+	if len(fake.scopes) == 0 {
+		t.Fatal("AuthorizeWorkspaceScope was not called")
+	}
+	if got := fake.scopes[len(fake.scopes)-1]; got != want {
+		t.Errorf("AuthorizeWorkspaceScope scope = %v, want %v", got, want)
+	}
+}
+
+func TestServiceCreateCoordinator(t *testing.T) {
+	const workspaceID = "ws-1"
+	agents := map[string]*settingsmodels.AgentProfile{"ap-1": {ID: "ap-1", WorkspaceID: workspaceID}}
+	executors := map[string]*taskmodels.ExecutorProfile{"ep-1": {ID: "ep-1"}}
+
+	t.Run("creates a trimmed coordinator", func(t *testing.T) {
+		svc := newServiceForTest(t, agents, executors, nil)
+		created, err := svc.CreateCoordinator(context.Background(), workspaceID, CreateCoordinatorRequest{
+			Name: "  Release Coordinator  ", AgentProfileID: "ap-1", ExecutorProfileID: "ep-1", Context: "  standing context  ",
+		})
+		if err != nil {
+			t.Fatalf("CreateCoordinator() unexpected error: %v", err)
+		}
+		if created.ID == "" {
+			t.Error("CreateCoordinator() did not assign an id")
+		}
+		if created.Name != "Release Coordinator" {
+			t.Errorf("CreateCoordinator() name = %q, want trimmed", created.Name)
+		}
+		if created.Context != "standing context" {
+			t.Errorf("CreateCoordinator() context = %q, want trimmed", created.Context)
+		}
+		if created.WorkspaceID != workspaceID {
+			t.Errorf("CreateCoordinator() workspace_id = %q, want %q", created.WorkspaceID, workspaceID)
+		}
+	})
+
+	t.Run("invalid name is a FieldError naming name", func(t *testing.T) {
+		svc := newServiceForTest(t, agents, executors, nil)
+		_, err := svc.CreateCoordinator(context.Background(), workspaceID, CreateCoordinatorRequest{
+			Name: "   ", AgentProfileID: "ap-1", ExecutorProfileID: "ep-1",
+		})
+		assertFieldError(t, err, "name")
+	})
+
+	t.Run("context over the limit is a FieldError naming context", func(t *testing.T) {
+		svc := newServiceForTest(t, agents, executors, nil)
+		over := make([]byte, 4001)
+		for i := range over {
+			over[i] = 'a'
+		}
+		_, err := svc.CreateCoordinator(context.Background(), workspaceID, CreateCoordinatorRequest{
+			Name: "Coordinator", AgentProfileID: "ap-1", ExecutorProfileID: "ep-1", Context: string(over),
+		})
+		assertFieldError(t, err, "context")
+	})
+
+	t.Run("missing agent profile is a FieldError naming agent_profile_id", func(t *testing.T) {
+		svc := newServiceForTest(t, agents, executors, nil)
+		_, err := svc.CreateCoordinator(context.Background(), workspaceID, CreateCoordinatorRequest{
+			Name: "Coordinator", AgentProfileID: "does-not-exist", ExecutorProfileID: "ep-1",
+		})
+		assertFieldError(t, err, "agent_profile_id")
+	})
+
+	t.Run("missing executor profile is a FieldError naming executor_profile_id", func(t *testing.T) {
+		svc := newServiceForTest(t, agents, executors, nil)
+		_, err := svc.CreateCoordinator(context.Background(), workspaceID, CreateCoordinatorRequest{
+			Name: "Coordinator", AgentProfileID: "ap-1", ExecutorProfileID: "does-not-exist",
+		})
+		assertFieldError(t, err, "executor_profile_id")
+	})
+
+	t.Run("propagates a workspace authorization failure", func(t *testing.T) {
+		wantErr := errors.New("boom")
+		svc := newServiceForTest(t, agents, executors, wantErr)
+		_, err := svc.CreateCoordinator(context.Background(), workspaceID, CreateCoordinatorRequest{
+			Name: "Coordinator", AgentProfileID: "ap-1", ExecutorProfileID: "ep-1",
+		})
+		if !errors.Is(err, wantErr) {
+			t.Fatalf("CreateCoordinator() error = %v, want %v", err, wantErr)
+		}
+		assertLastScope(t, svc, authz.ScopeWorkspaceManage)
+	})
+}
+
+func TestServiceGetCoordinator(t *testing.T) {
+	const workspaceID = "ws-1"
+	agents := map[string]*settingsmodels.AgentProfile{"ap-1": {ID: "ap-1", WorkspaceID: workspaceID}}
+	executors := map[string]*taskmodels.ExecutorProfile{"ep-1": {ID: "ep-1"}}
+
+	t.Run("returns the coordinator and ok/ok statuses", func(t *testing.T) {
+		svc := newServiceForTest(t, agents, executors, nil)
+		created, err := svc.CreateCoordinator(context.Background(), workspaceID, CreateCoordinatorRequest{
+			Name: "Coordinator", AgentProfileID: "ap-1", ExecutorProfileID: "ep-1",
+		})
+		if err != nil {
+			t.Fatalf("CreateCoordinator() unexpected error: %v", err)
+		}
+		found, agentStatus, executorStatus, err := svc.GetCoordinator(context.Background(), workspaceID, created.ID)
+		if err != nil {
+			t.Fatalf("GetCoordinator() unexpected error: %v", err)
+		}
+		if found.ID != created.ID {
+			t.Errorf("GetCoordinator() id = %q, want %q", found.ID, created.ID)
+		}
+		if agentStatus != ProfileStatusOK || executorStatus != ProfileStatusOK {
+			t.Errorf("GetCoordinator() statuses = (%q, %q), want (ok, ok)", agentStatus, executorStatus)
+		}
+	})
+
+	t.Run("reports a missing agent profile without failing", func(t *testing.T) {
+		svc := newServiceForTest(t, agents, executors, nil)
+		created, err := svc.CreateCoordinator(context.Background(), workspaceID, CreateCoordinatorRequest{
+			Name: "Coordinator", AgentProfileID: "ap-1", ExecutorProfileID: "ep-1",
+		})
+		if err != nil {
+			t.Fatalf("CreateCoordinator() unexpected error: %v", err)
+		}
+		// Simulate the agent profile being removed after save.
+		svc.validator = newValidatorForTest(nil, executors)
+		_, agentStatus, executorStatus, err := svc.GetCoordinator(context.Background(), workspaceID, created.ID)
+		if err != nil {
+			t.Fatalf("GetCoordinator() unexpected error: %v", err)
+		}
+		if agentStatus != ProfileStatusMissing {
+			t.Errorf("agentStatus = %q, want %q", agentStatus, ProfileStatusMissing)
+		}
+		if executorStatus != ProfileStatusOK {
+			t.Errorf("executorStatus = %q, want %q", executorStatus, ProfileStatusOK)
+		}
+	})
+
+	t.Run("not found is ErrNotFound", func(t *testing.T) {
+		svc := newServiceForTest(t, agents, executors, nil)
+		_, _, _, err := svc.GetCoordinator(context.Background(), workspaceID, "does-not-exist")
+		if !errors.Is(err, ErrNotFound) {
+			t.Fatalf("GetCoordinator() error = %v, want ErrNotFound", err)
+		}
+	})
+
+	t.Run("propagates a workspace authorization failure", func(t *testing.T) {
+		wantErr := errors.New("boom")
+		svc := newServiceForTest(t, agents, executors, wantErr)
+		_, _, _, err := svc.GetCoordinator(context.Background(), workspaceID, "any")
+		if !errors.Is(err, wantErr) {
+			t.Fatalf("GetCoordinator() error = %v, want %v", err, wantErr)
+		}
+		assertLastScope(t, svc, authz.ScopeWorkspaceRead)
+	})
+}
+
+func TestServiceListCoordinators(t *testing.T) {
+	const workspaceID = "ws-1"
+	agents := map[string]*settingsmodels.AgentProfile{"ap-1": {ID: "ap-1", WorkspaceID: workspaceID}}
+	executors := map[string]*taskmodels.ExecutorProfile{"ep-1": {ID: "ep-1"}}
+
+	t.Run("never nil, and pairs each coordinator with its open proposal count", func(t *testing.T) {
+		svc := newServiceForTest(t, agents, executors, nil)
+		ctx := context.Background()
+
+		empty, err := svc.ListCoordinators(ctx, workspaceID)
+		if err != nil {
+			t.Fatalf("ListCoordinators() unexpected error: %v", err)
+		}
+		if empty == nil || len(empty) != 0 {
+			t.Fatalf("ListCoordinators() = %#v, want empty non-nil slice", empty)
+		}
+
+		created, err := svc.CreateCoordinator(ctx, workspaceID, CreateCoordinatorRequest{
+			Name: "Coordinator", AgentProfileID: "ap-1", ExecutorProfileID: "ep-1",
+		})
+		if err != nil {
+			t.Fatalf("CreateCoordinator() unexpected error: %v", err)
+		}
+		if err := svc.store.InsertProposal(ctx, &Proposal{
+			CoordinatorID: created.ID, WorkspaceID: workspaceID,
+			Spec: ProposalSpec{Title: "t", WorkflowID: "wf", StepID: "step", RepositoryID: "repo"},
+		}); err != nil {
+			t.Fatalf("InsertProposal() unexpected error: %v", err)
+		}
+
+		items, err := svc.ListCoordinators(ctx, workspaceID)
+		if err != nil {
+			t.Fatalf("ListCoordinators() unexpected error: %v", err)
+		}
+		if len(items) != 1 {
+			t.Fatalf("ListCoordinators() len = %d, want 1", len(items))
+		}
+		if items[0].Coordinator.ID != created.ID {
+			t.Errorf("ListCoordinators()[0].Coordinator.ID = %q, want %q", items[0].Coordinator.ID, created.ID)
+		}
+		if items[0].OpenProposals != 1 {
+			t.Errorf("ListCoordinators()[0].OpenProposals = %d, want 1", items[0].OpenProposals)
+		}
+	})
+
+	t.Run("propagates a workspace authorization failure", func(t *testing.T) {
+		wantErr := errors.New("boom")
+		svc := newServiceForTest(t, agents, executors, wantErr)
+		_, err := svc.ListCoordinators(context.Background(), workspaceID)
+		if !errors.Is(err, wantErr) {
+			t.Fatalf("ListCoordinators() error = %v, want %v", err, wantErr)
+		}
+		assertLastScope(t, svc, authz.ScopeWorkspaceRead)
+	})
+
+	t.Run("pairs each of several coordinators with its own count, not another's", func(t *testing.T) {
+		svc := newServiceForTest(t, agents, executors, nil)
+		ctx := context.Background()
+
+		busy, err := svc.CreateCoordinator(ctx, workspaceID, CreateCoordinatorRequest{
+			Name: "Busy", AgentProfileID: "ap-1", ExecutorProfileID: "ep-1",
+		})
+		if err != nil {
+			t.Fatalf("CreateCoordinator() unexpected error: %v", err)
+		}
+		idle, err := svc.CreateCoordinator(ctx, workspaceID, CreateCoordinatorRequest{
+			Name: "Idle", AgentProfileID: "ap-1", ExecutorProfileID: "ep-1",
+		})
+		if err != nil {
+			t.Fatalf("CreateCoordinator() unexpected error: %v", err)
+		}
+		for i := 0; i < 3; i++ {
+			if err := svc.store.InsertProposal(ctx, &Proposal{
+				CoordinatorID: busy.ID, WorkspaceID: workspaceID,
+				Spec: ProposalSpec{Title: "t", WorkflowID: "wf", StepID: "step", RepositoryID: "repo"},
+			}); err != nil {
+				t.Fatalf("InsertProposal() unexpected error: %v", err)
+			}
+		}
+
+		items, err := svc.ListCoordinators(ctx, workspaceID)
+		if err != nil {
+			t.Fatalf("ListCoordinators() unexpected error: %v", err)
+		}
+		if len(items) != 2 {
+			t.Fatalf("ListCoordinators() len = %d, want 2", len(items))
+		}
+		byID := make(map[string]int, len(items))
+		for _, item := range items {
+			byID[item.Coordinator.ID] = item.OpenProposals
+		}
+		if byID[busy.ID] != 3 {
+			t.Errorf("busy coordinator's OpenProposals = %d, want 3", byID[busy.ID])
+		}
+		if byID[idle.ID] != 0 {
+			t.Errorf("idle coordinator's OpenProposals = %d, want 0", byID[idle.ID])
+		}
+	})
+}
+
+func TestServicePatchCoordinator(t *testing.T) {
+	const workspaceID = "ws-1"
+	agents := map[string]*settingsmodels.AgentProfile{
+		"ap-1": {ID: "ap-1", WorkspaceID: workspaceID},
+		"ap-2": {ID: "ap-2", WorkspaceID: workspaceID},
+	}
+	executors := map[string]*taskmodels.ExecutorProfile{
+		"ep-1": {ID: "ep-1"},
+		"ep-2": {ID: "ep-2"},
+	}
+
+	newCoordinator := func(t *testing.T, svc *Service) *Coordinator {
+		t.Helper()
+		created, err := svc.CreateCoordinator(context.Background(), workspaceID, CreateCoordinatorRequest{
+			Name: "Coordinator", AgentProfileID: "ap-1", ExecutorProfileID: "ep-1", Context: "context",
+		})
+		if err != nil {
+			t.Fatalf("CreateCoordinator() unexpected error: %v", err)
+		}
+		return created
+	}
+
+	t.Run("updates only the sent fields", func(t *testing.T) {
+		svc := newServiceForTest(t, agents, executors, nil)
+		created := newCoordinator(t, svc)
+		updated, err := svc.PatchCoordinator(context.Background(), workspaceID, created.ID, PatchCoordinatorRequest{
+			"name": []byte(`"New name"`),
+		})
+		if err != nil {
+			t.Fatalf("PatchCoordinator() unexpected error: %v", err)
+		}
+		if updated.Name != "New name" {
+			t.Errorf("PatchCoordinator() name = %q, want %q", updated.Name, "New name")
+		}
+		if updated.Context != "context" {
+			t.Errorf("PatchCoordinator() context = %q, want unchanged %q", updated.Context, "context")
+		}
+		if updated.AgentProfileID != "ap-1" {
+			t.Errorf("PatchCoordinator() agent_profile_id = %q, want unchanged %q", updated.AgentProfileID, "ap-1")
+		}
+	})
+
+	t.Run("a context change clears conversation_task_id and calls the hook", func(t *testing.T) {
+		svc := newServiceForTest(t, agents, executors, nil)
+		conversationTaskID := "task-1"
+		seed := &Coordinator{
+			WorkspaceID: workspaceID, Name: "Coordinator", AgentProfileID: "ap-1", ExecutorProfileID: "ep-1",
+			Context: "context", ConversationTaskID: &conversationTaskID,
+		}
+		if err := svc.store.CreateCoordinator(context.Background(), seed); err != nil {
+			t.Fatalf("seed CreateCoordinator() unexpected error: %v", err)
+		}
+
+		var clearedCoordinatorID, clearedTaskID string
+		var hookCalls int
+		svc.SetConversationHooks(func(_ context.Context, coordinatorID, oldConversationTaskID string) {
+			hookCalls++
+			clearedCoordinatorID = coordinatorID
+			clearedTaskID = oldConversationTaskID
+		}, nil)
+
+		updated, err := svc.PatchCoordinator(context.Background(), workspaceID, seed.ID, PatchCoordinatorRequest{
+			"context": []byte(`"new context"`),
+		})
+		if err != nil {
+			t.Fatalf("PatchCoordinator() unexpected error: %v", err)
+		}
+		if updated.ConversationTaskID != nil {
+			t.Errorf("PatchCoordinator() conversation_task_id = %v, want nil", *updated.ConversationTaskID)
+		}
+		if hookCalls != 1 {
+			t.Fatalf("hook calls = %d, want 1", hookCalls)
+		}
+		if clearedCoordinatorID != seed.ID || clearedTaskID != conversationTaskID {
+			t.Errorf("hook called with (%q, %q), want (%q, %q)", clearedCoordinatorID, clearedTaskID, seed.ID, conversationTaskID)
+		}
+	})
+
+	t.Run("a null field is a FieldError naming the field", func(t *testing.T) {
+		svc := newServiceForTest(t, agents, executors, nil)
+		created := newCoordinator(t, svc)
+		_, err := svc.PatchCoordinator(context.Background(), workspaceID, created.ID, PatchCoordinatorRequest{
+			"name": []byte("null"),
+		})
+		assertFieldError(t, err, "name")
+	})
+
+	t.Run("unknown fields are ignored", func(t *testing.T) {
+		svc := newServiceForTest(t, agents, executors, nil)
+		created := newCoordinator(t, svc)
+		updated, err := svc.PatchCoordinator(context.Background(), workspaceID, created.ID, PatchCoordinatorRequest{
+			"unknown_field": []byte(`"value"`),
+		})
+		if err != nil {
+			t.Fatalf("PatchCoordinator() unexpected error: %v", err)
+		}
+		if updated.Name != "Coordinator" {
+			t.Errorf("PatchCoordinator() name = %q, want unchanged %q", updated.Name, "Coordinator")
+		}
+	})
+
+	t.Run("an invalid agent profile is a FieldError naming agent_profile_id", func(t *testing.T) {
+		svc := newServiceForTest(t, agents, executors, nil)
+		created := newCoordinator(t, svc)
+		_, err := svc.PatchCoordinator(context.Background(), workspaceID, created.ID, PatchCoordinatorRequest{
+			"agent_profile_id": []byte(`"does-not-exist"`),
+		})
+		assertFieldError(t, err, "agent_profile_id")
+	})
+
+	t.Run("not found is ErrNotFound", func(t *testing.T) {
+		svc := newServiceForTest(t, agents, executors, nil)
+		_, err := svc.PatchCoordinator(context.Background(), workspaceID, "does-not-exist", PatchCoordinatorRequest{
+			"name": []byte(`"New name"`),
+		})
+		if !errors.Is(err, ErrNotFound) {
+			t.Fatalf("PatchCoordinator() error = %v, want ErrNotFound", err)
+		}
+	})
+
+	t.Run("propagates a workspace authorization failure", func(t *testing.T) {
+		wantErr := errors.New("boom")
+		svc := newServiceForTest(t, agents, executors, wantErr)
+		_, err := svc.PatchCoordinator(context.Background(), workspaceID, "any", PatchCoordinatorRequest{
+			"name": []byte(`"New name"`),
+		})
+		if !errors.Is(err, wantErr) {
+			t.Fatalf("PatchCoordinator() error = %v, want %v", err, wantErr)
+		}
+		assertLastScope(t, svc, authz.ScopeWorkspaceManage)
+	})
+}
+
+func TestServiceDeleteCoordinator(t *testing.T) {
+	const workspaceID = "ws-1"
+	agents := map[string]*settingsmodels.AgentProfile{"ap-1": {ID: "ap-1", WorkspaceID: workspaceID}}
+	executors := map[string]*taskmodels.ExecutorProfile{"ep-1": {ID: "ep-1"}}
+
+	t.Run("deletes the coordinator and calls the hook", func(t *testing.T) {
+		svc := newServiceForTest(t, agents, executors, nil)
+		created, err := svc.CreateCoordinator(context.Background(), workspaceID, CreateCoordinatorRequest{
+			Name: "Coordinator", AgentProfileID: "ap-1", ExecutorProfileID: "ep-1",
+		})
+		if err != nil {
+			t.Fatalf("CreateCoordinator() unexpected error: %v", err)
+		}
+		var deletedID, deletedWorkspaceID string
+		svc.SetConversationHooks(nil, func(_ context.Context, gotWorkspaceID, coordinatorID string) {
+			deletedWorkspaceID = gotWorkspaceID
+			deletedID = coordinatorID
+		})
+
+		if err := svc.DeleteCoordinator(context.Background(), workspaceID, created.ID); err != nil {
+			t.Fatalf("DeleteCoordinator() unexpected error: %v", err)
+		}
+		if deletedID != created.ID {
+			t.Errorf("delete hook called with %q, want %q", deletedID, created.ID)
+		}
+		if deletedWorkspaceID != workspaceID {
+			t.Errorf("delete hook called with workspace %q, want %q", deletedWorkspaceID, workspaceID)
+		}
+		_, _, _, err = svc.GetCoordinator(context.Background(), workspaceID, created.ID)
+		if !errors.Is(err, ErrNotFound) {
+			t.Fatalf("GetCoordinator() after delete error = %v, want ErrNotFound", err)
+		}
+	})
+
+	t.Run("not found is ErrNotFound", func(t *testing.T) {
+		svc := newServiceForTest(t, agents, executors, nil)
+		err := svc.DeleteCoordinator(context.Background(), workspaceID, "does-not-exist")
+		if !errors.Is(err, ErrNotFound) {
+			t.Fatalf("DeleteCoordinator() error = %v, want ErrNotFound", err)
+		}
+	})
+
+	t.Run("propagates a workspace authorization failure", func(t *testing.T) {
+		wantErr := errors.New("boom")
+		svc := newServiceForTest(t, agents, executors, wantErr)
+		err := svc.DeleteCoordinator(context.Background(), workspaceID, "any")
+		if !errors.Is(err, wantErr) {
+			t.Fatalf("DeleteCoordinator() error = %v, want %v", err, wantErr)
+		}
+		assertLastScope(t, svc, authz.ScopeWorkspaceManage)
+	})
+}
+
+func TestServiceProposalReads(t *testing.T) {
+	const workspaceID = "ws-1"
+	agents := map[string]*settingsmodels.AgentProfile{"ap-1": {ID: "ap-1", WorkspaceID: workspaceID}}
+	executors := map[string]*taskmodels.ExecutorProfile{"ep-1": {ID: "ep-1"}}
+
+	t.Run("lists and gets proposals scoped to the coordinator", func(t *testing.T) {
+		svc := newServiceForTest(t, agents, executors, nil)
+		ctx := context.Background()
+		created, err := svc.CreateCoordinator(ctx, workspaceID, CreateCoordinatorRequest{
+			Name: "Coordinator", AgentProfileID: "ap-1", ExecutorProfileID: "ep-1",
+		})
+		if err != nil {
+			t.Fatalf("CreateCoordinator() unexpected error: %v", err)
+		}
+		proposal := &Proposal{
+			CoordinatorID: created.ID, WorkspaceID: workspaceID,
+			Spec: ProposalSpec{Title: "t", WorkflowID: "wf", StepID: "step", RepositoryID: "repo"},
+		}
+		if err := svc.store.InsertProposal(ctx, proposal); err != nil {
+			t.Fatalf("InsertProposal() unexpected error: %v", err)
+		}
+
+		pending, err := svc.ListProposals(ctx, workspaceID, created.ID, ListProposalsPending)
+		if err != nil {
+			t.Fatalf("ListProposals() unexpected error: %v", err)
+		}
+		if len(pending) != 1 || pending[0].ID != proposal.ID {
+			t.Fatalf("ListProposals(pending) = %#v, want [proposal]", pending)
+		}
+
+		found, err := svc.GetProposal(ctx, workspaceID, created.ID, proposal.ID)
+		if err != nil {
+			t.Fatalf("GetProposal() unexpected error: %v", err)
+		}
+		if found.ID != proposal.ID {
+			t.Errorf("GetProposal() id = %q, want %q", found.ID, proposal.ID)
+		}
+	})
+
+	t.Run("a proposal of another coordinator is not found", func(t *testing.T) {
+		svc := newServiceForTest(t, agents, executors, nil)
+		ctx := context.Background()
+		a, err := svc.CreateCoordinator(ctx, workspaceID, CreateCoordinatorRequest{
+			Name: "A", AgentProfileID: "ap-1", ExecutorProfileID: "ep-1",
+		})
+		if err != nil {
+			t.Fatalf("CreateCoordinator() unexpected error: %v", err)
+		}
+		b, err := svc.CreateCoordinator(ctx, workspaceID, CreateCoordinatorRequest{
+			Name: "B", AgentProfileID: "ap-1", ExecutorProfileID: "ep-1",
+		})
+		if err != nil {
+			t.Fatalf("CreateCoordinator() unexpected error: %v", err)
+		}
+		proposal := &Proposal{
+			CoordinatorID: a.ID, WorkspaceID: workspaceID,
+			Spec: ProposalSpec{Title: "t", WorkflowID: "wf", StepID: "step", RepositoryID: "repo"},
+		}
+		if err := svc.store.InsertProposal(ctx, proposal); err != nil {
+			t.Fatalf("InsertProposal() unexpected error: %v", err)
+		}
+		_, err = svc.GetProposal(ctx, workspaceID, b.ID, proposal.ID)
+		if !errors.Is(err, ErrNotFound) {
+			t.Fatalf("GetProposal() error = %v, want ErrNotFound", err)
+		}
+	})
+
+	t.Run("propagates a workspace authorization failure", func(t *testing.T) {
+		wantErr := errors.New("boom")
+		svc := newServiceForTest(t, agents, executors, wantErr)
+		if _, err := svc.ListProposals(context.Background(), workspaceID, "cid", ListProposalsPending); !errors.Is(err, wantErr) {
+			t.Fatalf("ListProposals() error = %v, want %v", err, wantErr)
+		}
+		assertLastScope(t, svc, authz.ScopeWorkspaceRead)
+		if _, err := svc.GetProposal(context.Background(), workspaceID, "cid", "pid"); !errors.Is(err, wantErr) {
+			t.Fatalf("GetProposal() error = %v, want %v", err, wantErr)
+		}
+		assertLastScope(t, svc, authz.ScopeWorkspaceRead)
+	})
+}
+
+func TestServiceListStalls(t *testing.T) {
+	const workspaceID = "ws-1"
+
+	t.Run("never nil", func(t *testing.T) {
+		svc := newServiceForTest(t, nil, nil, nil)
+		stalls, err := svc.ListStalls(context.Background(), workspaceID)
+		if err != nil {
+			t.Fatalf("ListStalls() unexpected error: %v", err)
+		}
+		if stalls == nil || len(stalls) != 0 {
+			t.Fatalf("ListStalls() = %#v, want empty non-nil slice", stalls)
+		}
+	})
+
+	t.Run("returns upserted stalls ordered by task_id", func(t *testing.T) {
+		svc := newServiceForTest(t, nil, nil, nil)
+		ctx := context.Background()
+		now := svc.store.now()
+		for _, taskID := range []string{"task-b", "task-a"} {
+			if _, err := svc.store.UpsertStall(ctx, &Stall{
+				TaskID: taskID, WorkspaceID: workspaceID, StalledForMs: 1000, LastEventAt: now, DetectedAt: now,
+			}); err != nil {
+				t.Fatalf("UpsertStall() unexpected error: %v", err)
+			}
+		}
+		stalls, err := svc.ListStalls(ctx, workspaceID)
+		if err != nil {
+			t.Fatalf("ListStalls() unexpected error: %v", err)
+		}
+		if len(stalls) != 2 || stalls[0].TaskID != "task-a" || stalls[1].TaskID != "task-b" {
+			t.Fatalf("ListStalls() = %#v, want [task-a, task-b]", stalls)
+		}
+	})
+
+	t.Run("propagates a workspace authorization failure", func(t *testing.T) {
+		wantErr := errors.New("boom")
+		svc := newServiceForTest(t, nil, nil, wantErr)
+		_, err := svc.ListStalls(context.Background(), workspaceID)
+		if !errors.Is(err, wantErr) {
+			t.Fatalf("ListStalls() error = %v, want %v", err, wantErr)
+		}
+		assertLastScope(t, svc, authz.ScopeWorkspaceRead)
+	})
+}
+
+func TestServiceGetStall(t *testing.T) {
+	const workspaceID = "ws-1"
+
+	t.Run("returns the one stall row for the task", func(t *testing.T) {
+		svc := newServiceForTest(t, nil, nil, nil)
+		ctx := context.Background()
+		now := svc.store.now()
+		if _, err := svc.store.UpsertStall(ctx, &Stall{
+			TaskID: "task-a", WorkspaceID: workspaceID, StalledForMs: 1000, LastEventAt: now, DetectedAt: now,
+		}); err != nil {
+			t.Fatalf("UpsertStall() unexpected error: %v", err)
+		}
+		stall, err := svc.GetStall(ctx, workspaceID, "task-a")
+		if err != nil {
+			t.Fatalf("GetStall() unexpected error: %v", err)
+		}
+		if stall.TaskID != "task-a" || stall.WorkspaceID != workspaceID {
+			t.Fatalf("GetStall() = %#v", stall)
+		}
+	})
+
+	t.Run("not found when the task never stalled", func(t *testing.T) {
+		svc := newServiceForTest(t, nil, nil, nil)
+		_, err := svc.GetStall(context.Background(), workspaceID, "missing")
+		if !errors.Is(err, ErrNotFound) {
+			t.Fatalf("GetStall() error = %v, want ErrNotFound", err)
+		}
+	})
+
+	t.Run("propagates a workspace authorization failure", func(t *testing.T) {
+		wantErr := errors.New("boom")
+		svc := newServiceForTest(t, nil, nil, wantErr)
+		_, err := svc.GetStall(context.Background(), workspaceID, "task-a")
+		if !errors.Is(err, wantErr) {
+			t.Fatalf("GetStall() error = %v, want %v", err, wantErr)
+		}
+		assertLastScope(t, svc, authz.ScopeWorkspaceRead)
+	})
+}
+
+// TestService_CoordinatorForConversationTask exercises the lookup the
+// mcp/scope resolver and the executor's fail-closed checks use
+// (copilot.md#principal-and-mode): no workspace scope of its own, since the
+// caller (an authenticated session's own task/mode resolution) is trusted
+// server-side, not a user-scoped request.
+func TestService_CoordinatorForConversationTask(t *testing.T) {
+	svc := newServiceForTest(t, nil, nil, nil)
+	ctx := context.Background()
+
+	taskID := "conversation-task-1"
+	created := &Coordinator{WorkspaceID: "ws-1", Name: "Ops", AgentProfileID: "a", ExecutorProfileID: "e", ConversationTaskID: &taskID}
+	if err := svc.store.CreateCoordinator(ctx, created); err != nil {
+		t.Fatalf("CreateCoordinator: %v", err)
+	}
+
+	id, ok, err := svc.CoordinatorForConversationTask(ctx, taskID)
+	if err != nil {
+		t.Fatalf("CoordinatorForConversationTask() unexpected error: %v", err)
+	}
+	if !ok || id != created.ID {
+		t.Fatalf("CoordinatorForConversationTask() = (%q, %v), want (%q, true)", id, ok, created.ID)
+	}
+
+	if _, ok, err := svc.CoordinatorForConversationTask(ctx, "orphaned-task"); err != nil || ok {
+		t.Fatalf("CoordinatorForConversationTask(orphaned) = (_, %v, %v), want (_, false, nil)", ok, err)
+	}
+}
+
+// TestService_CoordinatorProfilesReady covers the fail-closed profile check
+// (copilot.md#fail-closed): ready only when both profiles resolve ok.
+func TestService_CoordinatorProfilesReady(t *testing.T) {
+	agents := map[string]*settingsmodels.AgentProfile{
+		"agent-ok":          {ID: "agent-ok", WorkspaceID: "ws-1"},
+		"agent-passthrough": {ID: "agent-passthrough", WorkspaceID: "ws-1", CLIPassthrough: true},
+	}
+	executors := map[string]*taskmodels.ExecutorProfile{
+		"executor-ok": {ID: "executor-ok"},
+	}
+
+	t.Run("both profiles ok", func(t *testing.T) {
+		svc := newServiceForTest(t, agents, executors, nil)
+		ctx := context.Background()
+		c := &Coordinator{WorkspaceID: "ws-1", Name: "Ops", AgentProfileID: "agent-ok", ExecutorProfileID: "executor-ok"}
+		if err := svc.store.CreateCoordinator(ctx, c); err != nil {
+			t.Fatalf("CreateCoordinator: %v", err)
+		}
+		ready, err := svc.CoordinatorProfilesReady(ctx, c.ID)
+		if err != nil {
+			t.Fatalf("CoordinatorProfilesReady() unexpected error: %v", err)
+		}
+		if !ready {
+			t.Fatal("CoordinatorProfilesReady() = false, want true")
+		}
+	})
+
+	t.Run("passthrough agent profile is not ready", func(t *testing.T) {
+		svc := newServiceForTest(t, agents, executors, nil)
+		ctx := context.Background()
+		c := &Coordinator{WorkspaceID: "ws-1", Name: "Ops", AgentProfileID: "agent-passthrough", ExecutorProfileID: "executor-ok"}
+		if err := svc.store.CreateCoordinator(ctx, c); err != nil {
+			t.Fatalf("CreateCoordinator: %v", err)
+		}
+		ready, err := svc.CoordinatorProfilesReady(ctx, c.ID)
+		if err != nil {
+			t.Fatalf("CoordinatorProfilesReady() unexpected error: %v", err)
+		}
+		if ready {
+			t.Fatal("CoordinatorProfilesReady() = true, want false")
+		}
+	})
+
+	t.Run("missing executor profile is not ready", func(t *testing.T) {
+		svc := newServiceForTest(t, agents, executors, nil)
+		ctx := context.Background()
+		c := &Coordinator{WorkspaceID: "ws-1", Name: "Ops", AgentProfileID: "agent-ok", ExecutorProfileID: "missing-executor"}
+		if err := svc.store.CreateCoordinator(ctx, c); err != nil {
+			t.Fatalf("CreateCoordinator: %v", err)
+		}
+		ready, err := svc.CoordinatorProfilesReady(ctx, c.ID)
+		if err != nil {
+			t.Fatalf("CoordinatorProfilesReady() unexpected error: %v", err)
+		}
+		if ready {
+			t.Fatal("CoordinatorProfilesReady() = true, want false")
+		}
+	})
+
+	t.Run("unknown coordinator id errors", func(t *testing.T) {
+		svc := newServiceForTest(t, agents, executors, nil)
+		if _, err := svc.CoordinatorProfilesReady(context.Background(), "missing"); !errors.Is(err, ErrNotFound) {
+			t.Fatalf("CoordinatorProfilesReady(missing) error = %v, want ErrNotFound", err)
+		}
+	})
+}
+
+// TestService_CoordinatorStandingInstructionsData covers the read the
+// Standing Instructions system-prompt block uses
+// (copilot.md#standing-instructions): no workspace scope of its own, since
+// the caller is server-side prompt construction for an already-permitted
+// session, not a user-scoped request.
+func TestService_CoordinatorStandingInstructionsData(t *testing.T) {
+	svc := newServiceForTest(t, nil, nil, nil)
+	ctx := context.Background()
+
+	created := &Coordinator{
+		WorkspaceID: "ws-1", Name: "Ops", AgentProfileID: "a", ExecutorProfileID: "e",
+		Context: "watch the release queue",
+	}
+	if err := svc.store.CreateCoordinator(ctx, created); err != nil {
+		t.Fatalf("CreateCoordinator: %v", err)
+	}
+
+	name, coordinatorContext, err := svc.CoordinatorStandingInstructionsData(ctx, created.ID)
+	if err != nil {
+		t.Fatalf("CoordinatorStandingInstructionsData() unexpected error: %v", err)
+	}
+	if name != "Ops" || coordinatorContext != "watch the release queue" {
+		t.Fatalf("CoordinatorStandingInstructionsData() = (%q, %q), want (%q, %q)",
+			name, coordinatorContext, "Ops", "watch the release queue")
+	}
+
+	if _, _, err := svc.CoordinatorStandingInstructionsData(ctx, "missing"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("CoordinatorStandingInstructionsData(missing) error = %v, want ErrNotFound", err)
+	}
+}
+
+func TestService_DeleteWorkspaceState_DeletesCoordinatorsProposalsAndStalls(t *testing.T) {
+	svc := newServiceForTest(t, nil, nil, nil)
+	seedWorkspaceCoordinatorState(t, svc.store, "ws-1")
+	seedWorkspaceCoordinatorState(t, svc.store, "ws-2")
+
+	if err := svc.DeleteWorkspaceState(context.Background(), "ws-1"); err != nil {
+		t.Fatalf("DeleteWorkspaceState() unexpected error: %v", err)
+	}
+
+	coordinators, proposals, stalls := countWorkspaceCoordinatorState(t, svc.store, "ws-1")
+	if coordinators != 0 || proposals != 0 || stalls != 0 {
+		t.Fatalf("ws-1 after delete: coordinators=%d proposals=%d stalls=%d, want all 0", coordinators, proposals, stalls)
+	}
+
+	coordinators, proposals, stalls = countWorkspaceCoordinatorState(t, svc.store, "ws-2")
+	if coordinators != 1 || proposals != 5 || stalls != 1 {
+		t.Fatalf("ws-2 after ws-1 delete: coordinators=%d proposals=%d stalls=%d, want 1/5/1 (untouched)", coordinators, proposals, stalls)
+	}
+}

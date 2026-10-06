@@ -233,12 +233,14 @@ async function submitChatPayload({
   onSend,
   storeApi,
   handleSendMessage,
+  transformOutgoing,
 }: {
   payload: ChatSubmitPayload;
   panelState: ChatPanelState;
   onSend?: (payload: ChatSubmitPayload) => ChatSubmitResult;
   storeApi: ReturnType<typeof useAppStoreApi>;
   handleSendMessage: (payload: ChatSubmitPayload) => Promise<void | boolean>;
+  transformOutgoing?: (message: string) => string;
 }) {
   const {
     planComments,
@@ -248,8 +250,9 @@ async function submitChatPayload({
     messageComments,
     pendingClarification,
   } = panelState;
+  const message = transformOutgoing ? transformOutgoing(payload.message) : payload.message;
   const finalMessage = buildSubmitMessage({
-    message: payload.message,
+    message,
     reviewComments: payload.reviewComments,
     pendingPRFeedback,
     planComments,
@@ -277,16 +280,26 @@ async function submitChatPayload({
   return completeChatSubmission(payload, panelState);
 }
 
+export type SubmitHandlerOptions = {
+  /** Applied to the composer message once per submit, before
+   *  {@link buildSubmitMessage}, on both the `onSend` and direct send paths.
+   *  Never changes the composer text; if it throws, the existing catch shows
+   *  the send-error toast and nothing is sent. */
+  transformOutgoing?: (message: string) => string;
+};
+
 /** Builds the composer's submit handler, tracking in-flight sends and
  *  routing errors to a toast. */
 export function useSubmitHandler(
   panelState: ChatPanelState,
   onSend?: (payload: ChatSubmitPayload) => ChatSubmitResult,
+  options: SubmitHandlerOptions = {},
 ) {
   const [isSending, setIsSending] = useState(false);
   const storeApi = useAppStoreApi();
   const { toast } = useToast();
   const { handleSendMessage } = usePanelMessageHandler(panelState);
+  const { transformOutgoing } = options;
 
   const handleSubmit = useCallback(
     // eslint-disable-next-line complexity -- submission owns the shared cleanup and failure-preservation branches.
@@ -310,6 +323,7 @@ export function useSubmitHandler(
           onSend,
           storeApi,
           handleSendMessage,
+          transformOutgoing,
         });
       } catch (error) {
         showMessageSendToast(error, toast);
@@ -326,6 +340,7 @@ export function useSubmitHandler(
       toast,
       panelState,
       panelState.planCommentMigration,
+      transformOutgoing,
     ],
   );
 

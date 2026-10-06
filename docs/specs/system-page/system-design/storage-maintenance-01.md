@@ -4,7 +4,7 @@ system: system-page
 requirements:
   - REQ-SYSTEM-PAGE-STORAGE-MAINTENANCE-001
 created: 2026-07-14
-updated: 2026-10-02
+updated: 2026-10-05
 owners:
   - cfl
 ---
@@ -183,8 +183,11 @@ Retention override:
   live workspace references. See the
   [task-owned reclamation decision](../../../decisions/2026-09-24-archived-worktree-reclamation.md).
 - New task roots contain a Kandev ownership marker with the task ID, workspace ID, task directory
-  name, layout version, and creation time. Legacy unmarked directories remain eligible only when
-  the authoritative inventory and grace-period checks positively classify them as unreferenced.
+  name, layout version, and creation time. The current
+  [workspace discovery design](workspace-storage-discovery.md) defines the implemented recognition
+  boundary for marked, legacy, and unclassified directories, including permission-denied paths with
+  no positive layout evidence. Recognized legacy roots still require authoritative inventory and
+  grace-period checks before quarantine.
 - Candidate task directories are atomically moved, on the same filesystem, to
   `~/.kandev/trash/tasks/`; they are not immediately deleted. Quarantine entries record their
   original path, size, task/workspace identity when known, and permanent-deletion deadline.

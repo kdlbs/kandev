@@ -40,6 +40,15 @@ describe("AppSidebarSection", () => {
     cleanup();
   });
 
+  it.each([false, true])("links its disclosure to the content with grow=%s", (grow) => {
+    renderSection({ collapsed: false, grow });
+    const controls = screen.getByRole("button", { name: "Tasks" }).getAttribute("aria-controls");
+    expect(controls).toBeTruthy();
+    expect(document.getElementById(controls!)?.contains(screen.getByTestId(CHILDREN_TESTID))).toBe(
+      true,
+    );
+  });
+
   it("unmounts children of a non-grow section when the sidebar collapses", () => {
     renderSection({ collapsed: true });
     expect(screen.queryByTestId(CHILDREN_TESTID)).toBeNull();

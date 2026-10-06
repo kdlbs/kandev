@@ -120,6 +120,8 @@ test.describe("Profile capability discovery", () => {
       ).toBeVisible();
       await testPage.keyboard.press("Escape");
 
+      const probesBeforeUpdate = requests.filter((request) => request.url.endsWith("/probe"));
+      expect(probesBeforeUpdate.length).toBeGreaterThan(0);
       const updateTab = await approveRuntimeUpdateInOtherTab(testPage, profileRuntime, "failed");
       updatePage = updateTab.page;
 
@@ -137,7 +139,9 @@ test.describe("Profile capability discovery", () => {
         0,
       );
       await testPage.keyboard.press("Escape");
-      expect(requests.filter((request) => request.url.endsWith("/probe"))).toHaveLength(1);
+      expect(requests.filter((request) => request.url.endsWith("/probe"))).toEqual(
+        probesBeforeUpdate,
+      );
       expect(updateTab.runtime.postCount()).toBe(1);
 
       const savedProfile = await apiClient.getAgentProfile(profile.id);
@@ -186,6 +190,27 @@ test.describe("Profile capability discovery", () => {
         "data-status",
         "ready",
         { timeout: 20_000 },
+      );
+      const refresh = testPage.getByTestId("profile-refresh-capabilities");
+      await expect(refresh).toHaveCount(1);
+      const refreshBounds = await refresh.boundingBox();
+      const modelBounds = await selector.boundingBox();
+      const modeBounds = await testPage
+        .getByTestId("profile-mode-field")
+        .getByRole("combobox")
+        .boundingBox();
+      expect(refreshBounds).not.toBeNull();
+      expect(modelBounds).not.toBeNull();
+      expect(modeBounds).not.toBeNull();
+      expect(refreshBounds!.width).toBeCloseTo(28, 0);
+      expect(refreshBounds!.height).toBeCloseTo(28, 0);
+      expect(refreshBounds!.y + refreshBounds!.height).toBeCloseTo(
+        modelBounds!.y + modelBounds!.height,
+        0,
+      );
+      expect(refreshBounds!.y + refreshBounds!.height).toBeCloseTo(
+        modeBounds!.y + modeBounds!.height,
+        0,
       );
       await selector.click();
       await expect(testPage.getByRole("option", { name: "Profile env alpha" })).toBeVisible();

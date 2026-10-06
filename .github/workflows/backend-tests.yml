@@ -643,6 +643,7 @@ jobs:
             ./internal/automation
             ./internal/azuredevops
             ./internal/backendapp
+            ./internal/coordinator
             ./internal/db
             ./internal/delivery
             ./internal/github

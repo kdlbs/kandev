@@ -5,7 +5,7 @@ import { DEFAULT_LOCALE, i18n, t } from "./index";
  * i18next instance. `pseudo` is a QA locale with no real CLDR data, so
  * Intl-based formatters map it to `en`.
  */
-function intlLocale(): string {
+export function intlLocale(): string {
   const locale = i18n.language || DEFAULT_LOCALE;
   return locale === "pseudo" ? DEFAULT_LOCALE : locale;
 }

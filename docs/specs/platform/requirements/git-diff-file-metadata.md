@@ -2,7 +2,7 @@
 status: active
 system: platform
 created: 2026-10-02
-updated: 2026-10-03
+updated: 2026-10-05
 owners:
   - kandev
 ---
@@ -24,6 +24,8 @@ Comparison data must also remain usable when the user's Git configuration
 forces terminal display color. Display decoration is not patch content.
 Cumulative comparisons must retain built-in patch data when a user's Git setup
 selects an external diff helper.
+Commit and cumulative comparisons must also retain actual file bytes when
+repository attributes select a text converter, even if its output hides changes.
 The [workspace status contract](workspace-git-status.md) separately owns live
 porcelain membership, staged/unstaged facets, and detail enrichment.
 
@@ -45,6 +47,8 @@ of arbitrary path and content bytes.
 - **AC-PLATFORM-GIT-DIFF-FILE-METADATA-001.7:** Suppressing display color shall preserve literal escape bytes in source content and filenames and shall not change repository configuration, HEAD, refs, index, or worktree state. Repository-selected and aggregate comparisons shall retain their existing routing and repository identities.
 - **AC-PLATFORM-GIT-DIFF-FILE-METADATA-001.8:** With `diff.external`, `GIT_EXTERNAL_DIFF`, or both selecting external diff helpers, every cumulative comparison shall return the same built-in patch data, exact file membership, paths, statuses, counts, and metadata as a comparison without those helpers. This applies to committed and dirty tracked changes, genuinely empty comparisons, and repository-selected and aggregate reads; nonempty comparisons shall not become successful empty results because of helper output. Existing byte and file budgets, truncation counts, and skip reasons shall retain their behavior.
 - **AC-PLATFORM-GIT-DIFF-FILE-METADATA-001.9:** Cumulative comparison reads shall not execute configured or environment-selected external diff helpers and shall not change repository configuration, HEAD, refs, index, worktree state, or the caller's helper environment settings.
+- **AC-PLATFORM-GIT-DIFF-FILE-METADATA-001.10:** With repository attributes selecting a configured text converter, every commit and cumulative comparison shall return the same built-in patch data from actual file bytes, exact file membership, paths, statuses, line counts, and metadata as a comparison without that converter. This applies when converter output changes or suppresses the patch, to committed and dirty tracked changes, binary and empty-file changes, genuinely empty comparisons, and repository-selected and aggregate reads. Existing comparison bases, byte and file limits, truncation counts, and skip reasons shall retain their behavior.
+- **AC-PLATFORM-GIT-DIFF-FILE-METADATA-001.11:** Commit and cumulative comparison reads shall not execute selected text converters and shall not change repository configuration or attributes, HEAD, refs, index, or worktree content/state. Configured converters remain available to other Git operations under their existing contracts.
 
 ## Cross-surface outcome
 
@@ -54,7 +58,7 @@ required. Provider-only history remains governed by its existing source contract
 
 ## Out of scope
 
-- Git invocation or flag-validation changes beyond per-comparison display-color suppression and built-in cumulative patch selection; shared environment policy, history-provider, rename-detection, text conversion, or comparison-base changes.
+- Git invocation or flag-validation changes beyond per-comparison display-color suppression, built-in cumulative patch selection, and text-conversion suppression for commit and cumulative patches; shared environment policy, history-provider, rename-detection, other readers' text conversion, or comparison-base changes.
 - Live workspace porcelain parsing, NUL numstat parsing, literal path selection, and worktree mutations.
 - Frontend layout, file-navigation changes, new status enums, or transport schemas.
 
@@ -64,3 +68,4 @@ required. Provider-only history remains governed by its existing source contract
 - [Metadata status repair package](../../../plans/git-diff-status-metadata/plan.md)
 - [Plain comparison output repair package](../../../plans/git-comparison-plain-output/plan.md)
 - [Built-in cumulative patch repair package](../../../plans/git-cumulative-built-in-patch/plan.md)
+- [Actual-byte comparison patch repair package](../../../plans/git-comparison-textconv/plan.md)

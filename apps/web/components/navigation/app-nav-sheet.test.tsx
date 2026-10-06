@@ -138,6 +138,10 @@ vi.mock("@/components/integrations/integrations-menu", () => ({
   MobileIntegrationsSection: () => <div data-testid="mobile-integrations-section" />,
 }));
 
+vi.mock("./mobile-coordinators-section", () => ({
+  MobileCoordinatorsSection: () => <section data-testid="mobile-coordinators-section" />,
+}));
+
 vi.mock("@/components/theme/app-theme", () => ({
   useTheme: () => ({ resolvedTheme, setTheme: mocks.setTheme }),
 }));
@@ -309,6 +313,22 @@ describe("AppNavSheet", () => {
   });
 });
 
+describe("AppNavSheet coordinators", () => {
+  afterEach(() => cleanup());
+
+  // @covers AC-COORDINATOR-NEEDS-YOU-006.1
+  it("offers the Coordinators section above Automations on the default phone layout", () => {
+    render(<AppNavSheet />);
+    fireEvent.click(screen.getByTestId(NAV_TRIGGER));
+
+    const coordinators = screen.getByTestId("mobile-coordinators-section");
+    const automations = screen.getByTestId("mobile-automations-section");
+    expect(
+      Boolean(coordinators.compareDocumentPosition(automations) & Node.DOCUMENT_POSITION_FOLLOWING),
+    ).toBe(true);
+  });
+});
+
 describe("AppNavSheet metrics", () => {
   beforeEach(resetAppNavMocks);
   afterEach(cleanup);
@@ -446,9 +466,7 @@ describe("AppNavSections", () => {
 
   // The phone Utilities group is deliberately uncapped (spec.md#Capacity-and-
   // overflow: "the phone surface is uncapped"), unlike the desktop footer's
-  // MAX_INLINE_PLUGIN_FOOTER_ITEMS budget — well over that budget (8, per
-  // spec.md's own "well over the budget" scenario) must still render every
-  // item as a row, with no overflow menu of its own.
+  // desktop utilities menu; every entry stays directly visible on phones.
   it("renders every plugin sidebar-footer item as a row, uncapped, with no overflow menu", () => {
     navRegistrations = Array.from({ length: 8 }, (_, i) => ({
       pluginId: "acme",
@@ -463,7 +481,7 @@ describe("AppNavSections", () => {
     for (let i = 0; i < 8; i++) {
       expect(screen.getByRole("link", { name: `Acme Board ${i}` })).not.toBeNull();
     }
-    expect(screen.queryByTestId("sidebar-plugin-overflow-button")).toBeNull();
+    expect(screen.queryByTestId("sidebar-footer-more-button")).toBeNull();
   });
 });
 

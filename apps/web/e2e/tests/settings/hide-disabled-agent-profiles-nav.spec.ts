@@ -2,7 +2,7 @@ import { test, expect } from "../../fixtures/test-base";
 import { getMockAgent } from "../../helpers/agent-fixtures";
 
 // Covers docs/specs/agents/requirements/hide-disabled-profiles-nav.md's nav-visibility
-// scenarios: with "Hide disabled agent profiles from left panel navigation"
+// scenarios: with "Hide disabled profiles from navigation"
 // off (the default), a disabled profile still shows in the Settings left
 // panel's Agents tree; turning the setting on hides it; re-enabling the
 // profile reveals it again — all without a reload.
@@ -10,21 +10,21 @@ test.describe("hide disabled agent profiles from left panel navigation", () => {
   test("off by default keeps a disabled profile visible; on hides it; re-enabling reveals it", async ({
     testPage,
     apiClient,
-    seedData,
   }) => {
     test.setTimeout(120_000);
 
     const { agents } = await apiClient.listAgents();
     const agent = getMockAgent(agents);
-    const profile = agent.profiles.find((candidate) => candidate.id === seedData.agentProfileId);
-    if (!profile) throw new Error("Seeded mock profile unavailable");
+    const profile = await apiClient.createAgentProfile(agent.id, "Navigation visibility profile", {
+      model: "mock-fast",
+    });
     // The Settings tree's profile leaf is labelled with the profile name and
     // appends the "Disabled" badge while the profile is disabled — an
     // unanchored regex matches both states.
     const profileLink = new RegExp(escapeRegExp(profile.name));
 
     try {
-      // Disable the seeded profile via the API. The profile editor toggle
+      // Disable this test's profile via the API. The profile editor toggle
       // itself is covered by agent-profile-disable.spec.ts.
       await apiClient.updateAgentProfile(profile.id, { enabled: false });
 
@@ -46,7 +46,8 @@ test.describe("hide disabled agent profiles from left panel navigation", () => {
       const disabledLink = settingsTree.getByRole("link", { name: profileLink });
       await expect(disabledLink).toBeVisible({ timeout: 15_000 });
 
-      // The setting is off by default.
+      // The setting lives inside the Agent options surface and is off by default.
+      await testPage.getByRole("button", { name: "Options", exact: true }).click();
       const hideDisabledSwitch = testPage.locator("#hide-disabled-agent-profiles-in-nav");
       await expect(hideDisabledSwitch).toHaveAttribute("aria-checked", "false");
 
@@ -54,6 +55,7 @@ test.describe("hide disabled agent profiles from left panel navigation", () => {
       // while the Agents row stays.
       await hideDisabledSwitch.click();
       await expect(hideDisabledSwitch).toHaveAttribute("aria-checked", "true");
+      await testPage.getByRole("button", { name: "Done", exact: true }).click();
       await expect(disabledLink).not.toBeVisible();
       await expect(settingsTree.getByRole("link", { name: /^Agents/ })).toBeVisible();
 
@@ -75,8 +77,7 @@ test.describe("hide disabled agent profiles from left panel navigation", () => {
       await settingsTree.getByRole("button", { name: "Expand Mock" }).click();
       await expect(disabledLink).toBeVisible({ timeout: 15_000 });
     } finally {
-      // Always restore so worker-scoped seedData stays valid for later tests.
-      await apiClient.updateAgentProfile(profile.id, { enabled: true }).catch(() => {});
+      await apiClient.deleteAgentProfile(profile.id);
     }
   });
 });

@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   toggleSettingsMode: vi.fn(),
   logout: vi.fn().mockResolvedValue(undefined),
   setImproveDialogOpen: vi.fn(),
+  openReleaseNotes: vi.fn(),
 }));
 
 // Shared with the `@kandev/ui/dropdown-menu` mock below so both the mock and
@@ -88,6 +89,9 @@ const STATS_DESTINATION: FooterDestination = {
 };
 
 let insightDestinations: FooterDestination[] = [STATS_DESTINATION];
+let releaseNotesAvailable = false;
+let releaseNotesUnseen = true;
+let releaseNotificationsEnabled = true;
 
 vi.mock("@/hooks/use-app-destinations", () => ({
   useStaticDestinations: () => insightDestinations,
@@ -97,12 +101,12 @@ vi.mock("@/hooks/use-release-notes", () => ({
   useReleaseNotes: () => ({
     unseenEntries: [],
     latestVersion: "0.0.0",
-    hasUnseen: false,
+    hasUnseen: releaseNotesAvailable && releaseNotesUnseen,
     dialogOpen: false,
-    openDialog: vi.fn(),
+    openDialog: mocks.openReleaseNotes,
     closeDialog: vi.fn(),
-    hasNotes: false,
-    showTopbarButton: false,
+    hasNotes: releaseNotesAvailable,
+    showTopbarButton: releaseNotesAvailable && releaseNotesUnseen && releaseNotificationsEnabled,
   }),
 }));
 
@@ -142,6 +146,8 @@ vi.mock("@kandev/ui/tooltip", () => ({
 // inside the overflow menu rather than merely present somewhere in the
 // document — the same testid an inline `FooterIconButton` would also use.
 vi.mock("@kandev/ui/dropdown-menu", () => ({
+  DropdownMenuLabel: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+  DropdownMenuSeparator: () => <hr />,
   DropdownMenu: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
   DropdownMenuTrigger: ({ children }: { children: React.ReactNode }) => <>{children}</>,
   DropdownMenuContent: ({ children }: { children: React.ReactNode }) => (
@@ -162,7 +168,7 @@ vi.mock("@kandev/ui/dropdown-menu", () => ({
   ),
 }));
 
-import { AppSidebarFooter, MAX_INLINE_PLUGIN_FOOTER_ITEMS } from "./app-sidebar-footer";
+import { AppSidebarFooter } from "./app-sidebar-footer";
 
 function renderFooter(collapsed = false, layoutManaged = false) {
   return render(
@@ -178,6 +184,11 @@ function renderFooter(collapsed = false, layoutManaged = false) {
 
 function resetFooterState() {
   blockNavigation = false;
+  releaseNotesAvailable = false;
+  releaseNotesUnseen = true;
+  releaseNotificationsEnabled = true;
+  mocks.openReleaseNotes.mockClear();
+  mocks.setImproveDialogOpen.mockClear();
   pathname = DEFAULT_PATHNAME;
   state.workspaces.activeId = "kanban-1";
   state.workspaces.items = [
@@ -340,7 +351,7 @@ describe("AppSidebarFooter connection fallback", () => {
 
   afterEach(cleanup);
 
-  it("shows the connection fallback immediately after the theme control during an outage", () => {
+  it("keeps the connection fallback visible during an outage", () => {
     state.userSettings.appStatusBarEnabled = false;
     state.connection.issueSeverity = "unstable";
 
@@ -349,7 +360,7 @@ describe("AppSidebarFooter connection fallback", () => {
     const warning = screen.getByTestId("sidebar-connection-warning");
     expect(warning.getAttribute("aria-label")).toBe("Connection unstable. Reconnecting to Kandev.");
     expect(warning.getAttribute("data-connection-severity")).toBe("unstable");
-    expect(screen.getByRole("button", { name: "Theme" }).nextElementSibling).toBe(warning);
+    expect(warning.closest('[data-testid="sidebar-footer"]')).not.toBeNull();
   });
 
   it("does not duplicate the warning fallback when the app status bar is enabled", () => {
@@ -396,7 +407,7 @@ describe("AppSidebarFooter current-user chip", () => {
     renderFooter();
 
     const chip = screen.getByTestId("current-user-chip");
-    expect(chip.textContent).toContain("Jane Doe");
+    expect(chip.getAttribute("aria-label")).toBe("Jane Doe");
 
     fireEvent.click(screen.getByTestId("current-user-logout"));
 
@@ -420,248 +431,75 @@ function pluginDestinations(count: number): FooterDestination[] {
   return Array.from({ length: count }, (_, i) => pluginDestination(i));
 }
 
-function eightPluginDestinations(): FooterDestination[] {
-  return [STATS_DESTINATION, ...pluginDestinations(8)];
-}
+const OVERFLOW_TRIGGER_TEST_ID = "sidebar-footer-more-button";
 
-const OVERFLOW_TRIGGER_TEST_ID = "sidebar-plugin-overflow-button";
-
-/**
- * Scopes a testid lookup to the overflow menu's own content, distinguishing
- * an item genuinely placed in the overflow menu from one merely present
- * somewhere in the document — an inline `FooterIconButton` and an overflow
- * `DropdownMenuItem` share the identical testid derivation (see
- * spec.md#Rendered-identity), so an unscoped `getByTestId` cannot tell them
- * apart and would still pass if the partition boundary were wrong.
- */
 function overflowMenuContent() {
   return screen.getByTestId(overflowMenuTestIds.content);
 }
 
-describe("AppSidebarFooter plugin insights items", () => {
+describe("AppSidebarFooter utilities menu", () => {
   beforeEach(resetFooterState);
+  afterEach(cleanup);
 
-  afterEach(() => cleanup());
-
-  it("renders a plugin insights destination as an icon button with the owner-namespaced testid, and navigates on click", () => {
-    insightDestinations = [
-      STATS_DESTINATION,
-      {
-        id: "plugin:acme:board",
-        label: "Acme Board",
-        icon: IconChartBar,
-        section: "insights",
-        href: "/plugins/acme",
-        source: "plugin",
-        pluginItemId: "board",
-      },
-    ];
-
+  it("keeps Stats and Improve Kandev in a labelled menu even without plugins", () => {
     renderFooter();
-
-    const button = screen.getByTestId("sidebar-plugin:acme:board-button");
-    expect(button).not.toBeNull();
-    expect(button.getAttribute("aria-label")).toBe("Acme Board");
-
-    fireEvent.click(button);
-
-    expect(mocks.routerPush).toHaveBeenCalledWith("/plugins/acme");
+    expect(screen.getByTestId(OVERFLOW_TRIGGER_TEST_ID).getAttribute("aria-label")).toBe(
+      t("common:showMoreActions"),
+    );
+    const menu = within(overflowMenuContent());
+    fireEvent.click(menu.getByTestId("sidebar-stats-button"));
+    expect(mocks.routerPush).toHaveBeenCalledWith("/stats");
+    fireEvent.click(menu.getByTestId("sidebar-improve-kandev-button"));
+    expect(mocks.setImproveDialogOpen).toHaveBeenCalledWith(true);
   });
-});
 
-describe("AppSidebarFooter plugin footer capacity and overflow", () => {
-  beforeEach(resetFooterState);
-
-  afterEach(() => cleanup());
-
-  it("renders no overflow trigger when no plugin registers a sidebar-footer item (P = 0)", () => {
-    insightDestinations = [STATS_DESTINATION];
-
+  it("opens available release notes from the utilities menu", () => {
+    releaseNotesAvailable = true;
     renderFooter();
-
-    // The manifest button set is exactly stats (spec.md:789's first clause) —
-    // without this, a component rendering nothing at all would still pass
-    // the two absence checks below.
-    expect(screen.getByRole("button", { name: "Stats" })).not.toBeNull();
-    // Soleness, not just presence: no plugin button exists either, so Stats
-    // is the *only* manifest button (spec.md:789's middle clause) — without
-    // this, a component that rendered Stats alongside a stray plugin button
-    // would still pass the Stats-presence check above.
-    expect(document.querySelectorAll('[data-testid^="sidebar-plugin:"]')).toHaveLength(0);
-    expect(screen.queryByTestId(OVERFLOW_TRIGGER_TEST_ID)).toBeNull();
-    expect(screen.queryByTestId(overflowMenuTestIds.content)).toBeNull();
+    fireEvent.click(within(overflowMenuContent()).getByTestId("sidebar-release-notes-button"));
+    expect(mocks.openReleaseNotes).toHaveBeenCalledOnce();
   });
 
-  it("renders all plugin buttons inline with no trigger when P is at the budget", () => {
-    insightDestinations = [
-      STATS_DESTINATION,
-      ...pluginDestinations(MAX_INLINE_PLUGIN_FOOTER_ITEMS),
-    ];
-
+  it("omits release notes when unavailable", () => {
     renderFooter();
-
-    for (let i = 0; i < MAX_INLINE_PLUGIN_FOOTER_ITEMS; i++) {
-      expect(screen.getByTestId(`sidebar-plugin:acme-${i}:board-button`)).not.toBeNull();
-    }
-    expect(screen.queryByTestId(OVERFLOW_TRIGGER_TEST_ID)).toBeNull();
-    // No overflow menu is rendered at all at the budget boundary, so there is
-    // no menu container for any item to have wrongly landed in.
-    expect(screen.queryByTestId(overflowMenuTestIds.content)).toBeNull();
+    expect(screen.queryByTestId("sidebar-release-notes-button")).toBeNull();
   });
 
-  it("partitions the first over-budget item into the overflow trigger's menu", () => {
-    insightDestinations = [
-      STATS_DESTINATION,
-      ...pluginDestinations(MAX_INLINE_PLUGIN_FOOTER_ITEMS + 1),
-    ];
+  it.each(["seen", "notifications disabled"])(
+    "keeps available release notes reachable when %s",
+    (state) => {
+      releaseNotesAvailable = true;
+      releaseNotesUnseen = state !== "seen";
+      releaseNotificationsEnabled = state !== "notifications disabled";
+      renderFooter();
+      fireEvent.click(within(overflowMenuContent()).getByTestId("sidebar-release-notes-button"));
+      expect(mocks.openReleaseNotes).toHaveBeenCalledOnce();
+    },
+  );
 
+  it.each([false, true])(
+    "keeps every plugin reachable in registration order, collapsed=%s",
+    (collapsed) => {
+      insightDestinations = [STATS_DESTINATION, ...pluginDestinations(8)];
+      renderFooter(collapsed);
+      const menu = overflowMenuContent();
+      expect(within(menu).getByTestId("sidebar-stats-button")).toBeTruthy();
+      const plugins = menu.querySelectorAll('[data-testid^="sidebar-plugin:"]');
+      expect(Array.from(plugins, (item) => item.textContent)).toEqual(
+        Array.from({ length: 8 }, (_, i) => `Acme Board ${i}`),
+      );
+      fireEvent.click(within(menu).getByTestId("sidebar-plugin:acme-7:board-button"));
+      expect(mocks.routerPush).toHaveBeenCalledWith("/plugins/acme-7");
+    },
+  );
+
+  it("reflects changed registration order without dropping or duplicating entries", () => {
+    insightDestinations = [STATS_DESTINATION, pluginDestination(2), pluginDestination(1)];
     renderFooter();
-
-    const menu = overflowMenuContent();
-    for (let i = 0; i < MAX_INLINE_PLUGIN_FOOTER_ITEMS; i++) {
-      // Present as an inline button, and specifically NOT inside the overflow
-      // menu's own content — proves these are the inline run, not merely
-      // present somewhere in the document.
-      expect(screen.getByTestId(`sidebar-plugin:acme-${i}:board-button`)).not.toBeNull();
-      expect(within(menu).queryByTestId(`sidebar-plugin:acme-${i}:board-button`)).toBeNull();
-    }
-    const trigger = screen.getByTestId(OVERFLOW_TRIGGER_TEST_ID);
-    expect(trigger).not.toBeNull();
-
-    // The over-budget item's menu item shares its testid with what an inline
-    // button would use (see spec.md#Rendered-identity), so the click below
-    // mirrors the real interaction. Note this file's `DropdownMenuContent`
-    // mock (top of file) renders its content unconditionally regardless of
-    // open/closed state, so this click does not itself prove the real Radix
-    // menu opens on click or hides its content while closed — that guarantee
-    // (spec.md#The-guarantee) is covered by
-    // e2e/tests/plugins/plugins.spec.ts's over-budget overflow test, which
-    // exercises the real component.
-    const overIndex = MAX_INLINE_PLUGIN_FOOTER_ITEMS;
-    fireEvent.click(trigger);
-    // Scoped to the menu's own content, not just present anywhere in the
-    // document — a partition boundary shifted by one would move this
-    // assertion's target into the inline run instead, and this would then
-    // correctly fail rather than still finding the testid elsewhere.
-    const menuItem = within(menu).getByTestId(`sidebar-plugin:acme-${overIndex}:board-button`);
-    expect(menuItem.textContent).toContain(`Acme Board ${overIndex}`);
-
-    fireEvent.click(menuItem);
-    expect(mocks.routerPush).toHaveBeenCalledWith(`/plugins/acme-${overIndex}`);
-  });
-
-  it("labels the overflow trigger's accessible name and tooltip from the sidebar:morePluginItems key", () => {
-    insightDestinations = [
-      STATS_DESTINATION,
-      ...pluginDestinations(MAX_INLINE_PLUGIN_FOOTER_ITEMS + 1),
-    ];
-
-    renderFooter();
-
-    // Derived from the key, not hard-coded, so a legitimate copy edit to
-    // `sidebar:morePluginItems` moves this assertion with it rather than
-    // false-failing the suite (spec.md#Capacity-and-overflow).
-    const label = t("sidebar:morePluginItems");
-    const trigger = screen.getByTestId(OVERFLOW_TRIGGER_TEST_ID);
-    expect(trigger.getAttribute("aria-label")).toBe(label);
-    expect(screen.getByText(label)).not.toBeNull();
-  });
-});
-
-// Split from the describe block above (own file's max-lines-per-function
-// limit) rather than a semantic distinction: these scenarios are the same
-// budget/overflow contract at a larger plugin count and under registration
-// reordering.
-describe("AppSidebarFooter plugin footer capacity at scale", () => {
-  beforeEach(resetFooterState);
-
-  afterEach(() => cleanup());
-
-  it("keeps the budget at 3 inline plus one trigger for 8 plugins, expanded, dropping none", () => {
-    insightDestinations = eightPluginDestinations();
-
-    renderFooter(false);
-
-    const menu = overflowMenuContent();
-    for (let i = 0; i < MAX_INLINE_PLUGIN_FOOTER_ITEMS; i++) {
-      expect(screen.getByTestId(`sidebar-plugin:acme-${i}:board-button`)).not.toBeNull();
-      expect(within(menu).queryByTestId(`sidebar-plugin:acme-${i}:board-button`)).toBeNull();
-    }
-    const trigger = screen.getByTestId(OVERFLOW_TRIGGER_TEST_ID);
-    fireEvent.click(trigger);
-    for (let i = MAX_INLINE_PLUGIN_FOOTER_ITEMS; i < 8; i++) {
-      expect(within(menu).getByTestId(`sidebar-plugin:acme-${i}:board-button`)).not.toBeNull();
-    }
-    const container = screen.getByTestId("sidebar-settings-gear").parentElement;
-    expect(container?.className).toContain("flex-wrap");
-  });
-
-  it("keeps the same budget and trigger for 8 plugins when collapsed, in a non-wrapping column", () => {
-    insightDestinations = eightPluginDestinations();
-
-    renderFooter(true);
-
-    const menu = overflowMenuContent();
-    for (let i = 0; i < MAX_INLINE_PLUGIN_FOOTER_ITEMS; i++) {
-      expect(screen.getByTestId(`sidebar-plugin:acme-${i}:board-button`)).not.toBeNull();
-      expect(within(menu).queryByTestId(`sidebar-plugin:acme-${i}:board-button`)).toBeNull();
-    }
-    expect(screen.getByTestId(OVERFLOW_TRIGGER_TEST_ID)).not.toBeNull();
-    for (let i = MAX_INLINE_PLUGIN_FOOTER_ITEMS; i < 8; i++) {
-      expect(within(menu).getByTestId(`sidebar-plugin:acme-${i}:board-button`)).not.toBeNull();
-    }
-    const container = screen.getByTestId("sidebar-settings-gear").parentElement;
-    expect(container?.className).toContain("flex-col");
-  });
-
-  it("always renders stats inline, applying the budget to plugin entries alone", () => {
-    insightDestinations = eightPluginDestinations();
-
-    renderFooter();
-
-    const menu = overflowMenuContent();
-    const statsButton = screen.getByRole("button", { name: "Stats" });
-    expect(statsButton).not.toBeNull();
-    expect(within(menu).queryByRole("button", { name: "Stats" })).toBeNull();
-    for (let i = 0; i < MAX_INLINE_PLUGIN_FOOTER_ITEMS; i++) {
-      expect(screen.getByTestId(`sidebar-plugin:acme-${i}:board-button`)).not.toBeNull();
-      expect(within(menu).queryByTestId(`sidebar-plugin:acme-${i}:board-button`)).toBeNull();
-    }
-  });
-
-  it("partitions by current registration order, so a re-enabled plugin moves from inline to the overflow menu", () => {
-    // Simulates the post-re-enable order: p1 moved to the end of the plugin
-    // run (spec's Ordering + Capacity re-enable scenario). The footer only
-    // partitions whatever order it is given; this test asserts that
-    // partition, not that the registry actually reorders on re-enable —
-    // `registry.test.ts` covers re-enable ordering for slot components, not
-    // nav items, so that mechanism itself has no direct nav-item test.
-    insightDestinations = [
-      STATS_DESTINATION,
-      { ...pluginDestination(2), id: "plugin:p2:board", label: "P2" },
-      { ...pluginDestination(3), id: "plugin:p3:board", label: "P3" },
-      { ...pluginDestination(4), id: "plugin:p4:board", label: "P4" },
-      { ...pluginDestination(1), id: "plugin:p1:board", label: "P1" },
-    ];
-
-    renderFooter();
-
-    const menu = overflowMenuContent();
-    expect(screen.getByTestId("sidebar-plugin:p2:board-button")).not.toBeNull();
-    expect(screen.getByTestId("sidebar-plugin:p3:board-button")).not.toBeNull();
-    expect(screen.getByTestId("sidebar-plugin:p4:board-button")).not.toBeNull();
-    // Scoped absence: p2-p4 must not be the ones that landed in the overflow
-    // menu — otherwise a boundary bug that kept p1 inline and overflowed one
-    // of these instead would still satisfy the presence checks above.
-    expect(within(menu).queryByTestId("sidebar-plugin:p2:board-button")).toBeNull();
-    expect(within(menu).queryByTestId("sidebar-plugin:p3:board-button")).toBeNull();
-    expect(within(menu).queryByTestId("sidebar-plugin:p4:board-button")).toBeNull();
-
-    // p1's menu item shares its testid with what an inline button would use
-    // (spec.md#Rendered-identity); this click mirrors the real interaction,
-    // but — as noted above — the `DropdownMenuContent` mock does not model
-    // open/closed state, so it does not itself prove the real menu opens.
-    fireEvent.click(screen.getByTestId(OVERFLOW_TRIGGER_TEST_ID));
-    expect(within(menu).getByTestId("sidebar-plugin:p1:board-button")).not.toBeNull();
+    const plugins = overflowMenuContent().querySelectorAll('[data-testid^="sidebar-plugin:"]');
+    expect(Array.from(plugins, (item) => item.textContent)).toEqual([
+      "Acme Board 2",
+      "Acme Board 1",
+    ]);
   });
 });

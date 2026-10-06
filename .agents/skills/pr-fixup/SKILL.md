@@ -42,7 +42,7 @@ Create a visible checklist:
 Before the first GitHub call, obtain any network approval required by the
 runtime. If the runtime denies access, stop until the user authorizes access.
 
-Run `scripts/pr-state --summary <PR>` and `scripts/pr-resolve list <PR>`.
+Run `scripts/pr-state --compact <PR>` and `scripts/pr-resolve list <PR>`.
 Load [review-evidence.md](references/review-evidence.md) for snapshot fields,
 review classification, hidden threads, and access fallbacks.
 Capture each helper's stdout, stderr, and exit code once per evidence round,
@@ -298,7 +298,8 @@ After every push, run fresh `gh pr view <PR> --json baseRefName,headRefOid,merge
 (or equivalent) at the pushed head; if GitHub briefly returns an older head, retry
 the query and exact-head `pr-state` with short bounded backoff before triaging or reporting.
 Require local `HEAD`, `headRefOid`, and `checks_head_sha` to match; confirm
-`mergeable` is not `CONFLICTING` and `mergeStateStatus` is not `DIRTY`; `scripts/pr-state --summary` does not include mergeability.
+`mergeable` is not `CONFLICTING` and `mergeStateStatus` is not `DIRTY`.
+Verify the closing `merge_state.headRefOid` before using snapshot mergeability.
 
 If a remediation changes rendered UI, invalidate screenshots captured before
 fixup and recapture and re-publish every affected viewport after the final

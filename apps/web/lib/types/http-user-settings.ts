@@ -4,6 +4,7 @@ export type MCPTaskAgentProfileDefault = "current_task" | "workspace_default";
 export type StartupPage = "task_overview" | "last_task" | "threads";
 export type LspStatusLocation = "toolbar" | "status_bar";
 export type LastSeenDisplay = "absolute" | "relative";
+export type MessageTimeDisplay = "relative" | "absolute_short" | "absolute_long";
 
 export type SavedLayout = {
   id: string;
@@ -242,6 +243,7 @@ export type UserSettings = {
   terminal_font_size?: number;
   changes_panel_layout?: "flat" | "tree";
   last_seen_display?: LastSeenDisplay;
+  message_time_display?: MessageTimeDisplay;
   system_metrics_display?: { show_in_topbar?: boolean; simplified?: boolean };
   app_status_bar_enabled?: boolean;
   sidebar_hover_enabled?: boolean;
@@ -333,6 +335,7 @@ export type UserSettingsUpdatePayload = {
   terminal_font_size?: number;
   changes_panel_layout?: "flat" | "tree";
   last_seen_display?: LastSeenDisplay;
+  message_time_display?: MessageTimeDisplay;
   system_metrics_display?: { show_in_topbar?: boolean; simplified?: boolean };
   app_status_bar_enabled?: boolean;
   sidebar_hover_enabled?: boolean;

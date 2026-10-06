@@ -108,8 +108,8 @@ and result labels. Lifecycle events carry IDs; metrics never label task data.
 **Orchestrator** coordinates task execution:
 - Receives task start/stop/resume requests via WebSocket
 - Delegates to lifecycle manager for agent operations
-- Handles event-driven state transitions via workflow engine
-- Located in `internal/orchestrator/`
+- Handles event-driven transitions via workflow engine; capacity evidence is versioned, prompt-scoped, and separate from transport-loss restore
+- Located in `internal/orchestrator/`; capacity continuation needs explicit provider evidence on the retained runtime and never restores after effects
 
 **Cancellation progress projection:** `orchestrator.Service.CancellationPending(sessionID)` is a runtime-only, session-scoped view of accepted cancellation work. Serialization that carries the boolean with ordering identity uses the atomic `CancellationPendingSnapshot(sessionID)` provider, whose process-local revision increments on first-begin and last-end transitions.
 The task DTO package exposes both the compatibility boolean provider and snapshot seam; boot state, task-session HTTP/WS lists and detail responses, and the session-scoped WebSocket notification must project explicit `true`/`false` values plus the revision.

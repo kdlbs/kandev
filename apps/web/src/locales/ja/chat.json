@@ -33,6 +33,7 @@
   "configurationChat": "設定チャット",
   "configurationChatDescription": "エージェントに Kandev の設定、ワークフロー、エージェントプロファイル、MCP 設定を更新させます。",
   "configurationChatTab": "設定チャット",
+  "coordinatorAboutTag": "{{id}} について",
   "delete": "削除",
   "deleteQuickChat": "クイックチャットを削除しますか？",
   "deleteQuickChatIntro": "このクイックチャットセッションを完全に削除します。削除対象：",

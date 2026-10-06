@@ -287,6 +287,23 @@ var registrations = []runtimeFlagRegistration{
 	},
 	{
 		definition: RuntimeFlagDefinition{
+			Key:         "features.coordinator",
+			EnvVar:      "KANDEV_FEATURES_COORDINATOR",
+			Kind:        KindFeature,
+			Label:       "Workspace coordinators",
+			Description: "Enables per-workspace coordinators: a copilot conversation that proposes ordinary, unstarted tasks for a human to approve.",
+			Stability:   StabilityExperimental,
+			RiskLevel:   RiskLow,
+			RiskDescription: "Coordinators can only propose tasks; approval always requires an explicit human decision and no proposal can " +
+				"ever auto-start an agent. Still evolving and should be reviewed before relying on it.",
+			RestartRequired: true,
+			Mutable:         true,
+		},
+		read:  func(cfg *config.Config) bool { return cfg.Features.Coordinator },
+		apply: func(cfg *config.Config, value bool) { cfg.Features.Coordinator = value },
+	},
+	{
+		definition: RuntimeFlagDefinition{
 			Key:         "debug.devMode",
 			EnvVar:      "KANDEV_DEBUG_DEV_MODE",
 			Kind:        KindDebug,

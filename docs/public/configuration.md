@@ -28,6 +28,8 @@ This page is the startup-configuration reference. Executor-specific fields are c
 
 Startup sources are read once and later sources override earlier ones. Web settings are stored separately and do not join the YAML and environment-variable precedence chain.
 
+Persistent web preferences are stored separately from startup configuration. **Settings > Preferences > Task behavior > Conversation > Message time** controls whether transcript timestamps use relative, absolute short, or absolute long labels. The other form remains available on hover or by tapping the timestamp. This is a per-user preference stored in the database, not a `config.yaml` key or environment variable.
+
 ## Load order and lifecycle
 
 At backend startup, later sources override earlier ones:

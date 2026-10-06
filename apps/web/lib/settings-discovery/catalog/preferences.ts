@@ -49,6 +49,7 @@ export const GENERAL_SETTINGS_TARGETS = {
   sessionCapacity: "setting-session-capacity",
   spritesConnection: "setting-sprites-connection",
   spritesInstances: "setting-sprites-instances",
+  messageTimeDisplay: "setting-message-time-display",
 } as const;
 
 export const PREFERENCES_DISCOVERY_DEFINITIONS: SettingsDiscoveryDefinition[] = [
@@ -442,6 +443,16 @@ export const PREFERENCES_DISCOVERY_DEFINITIONS: SettingsDiscoveryDefinition[] = 
     href: TASK_BEHAVIOR_SETTINGS_HREF,
     targetId: GENERAL_SETTINGS_TARGETS.transcriptNavigation,
     order: 65,
+  },
+  {
+    id: "task-actions-message-time-display",
+    kind: "control",
+    labelKey: "settings:messageTimeDisplay",
+    parentId: TASK_BEHAVIOR_ID,
+    groupId: "preferences",
+    href: TASK_BEHAVIOR_SETTINGS_HREF,
+    targetId: GENERAL_SETTINGS_TARGETS.messageTimeDisplay,
+    order: 65.5,
   },
   {
     id: "task-behavior-message-queue",

@@ -558,7 +558,7 @@ func (s *Service) launchConcretePreparedSession(
 	}
 	defer releaseDispatchCommit()
 	if options.StartAgent && (options.Prompt != "" || len(options.Attachments) > 0) {
-		s.beginInitialPromptAttempt(sessionID, false)
+		s.beginInitialPromptAttempt(ctx, sessionID, false)
 	}
 	execution, err := s.executor.LaunchPreparedSession(dispatchCtx, task, sessionID, options)
 	if execution != nil {

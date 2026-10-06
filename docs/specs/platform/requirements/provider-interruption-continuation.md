@@ -28,6 +28,10 @@ manual recovery. The same Cursor conversation receives the internal prompt
 `continue`; that prompt does not appear in Kandev chat history. Continuation does
 not authorize original-prompt replay or promise exactly-once agent actions.
 
+These restrictions govern transport-loss continuation and native restoration.
+The separate [capacity contract](transient-turn-runtime-continuity.md#req-platform-turn-continuity-003-continue-after-model-capacity-errors) permits completed effects on the same usable runtime.
+It does not authorize restoration or original-prompt replay after those effects.
+
 ## Terminology
 
 - **Replay:** Resend the original user prompt following a failed attempt.

@@ -94,9 +94,13 @@ Kandev creates these records when no prior workspace or executor configuration e
 - A Local Docker executor configured with the platform's default Docker host. The record is created even when no usable Docker daemon is available; task launch still requires one.
 - A disabled Sprites executor entry.
 
-When its browser-local completion marker is unset, the first-run dialog opens on screens 768 CSS pixels wide or larger. A phone visit opens the normal page and leaves the marker untouched, so the tour can appear on a later larger-screen visit. The dialog scans supported agent CLIs, lets you inspect detected profiles, and introduces executors, workflows, and the command panel. Its Executors step presents informational cards for Local, Worktree, Local Docker, Sprites.dev, SSH, and Kubernetes. It recommends Worktree for existing Git repositories and summarizes each option's setup needs. Configure profiles in **Settings > Executors**, then choose one when starting a task. See [Executors](executors.md) for setup and trust-boundary details. **Skip** stores only a browser-local onboarding marker. Advancing/completing also saves any dirty agent-profile edits made in the dialog. Neither path creates another workspace. The dialog warns that default agent profiles can have **Auto Approve** enabled. Inspect every profile before assigning trusted code or credentials.
+When its browser-local completion marker is unset, the first-run dialog opens on screens 768 CSS pixels wide or larger. A phone visit opens the normal page and leaves the marker untouched, so the tour can appear on a later larger-screen visit. The dialog scans supported agent CLIs, lets you choose a starting model, its supported options inside the shared picker, and optional CLI passthrough for detected profiles, and introduces executors, workflows, and the command panel. Its Executors step presents informational cards for Local, Worktree, Local Docker, Sprites.dev, SSH, and Kubernetes. It recommends Worktree for existing Git repositories and summarizes each option's setup needs. Configure full profiles in **Settings > Agents** and **Settings > Executors**, then choose one when starting a task. See [Executors](executors.md) for setup and trust-boundary details. **Skip** stores only a browser-local onboarding marker. Advancing/completing saves only edited model, model-option, and passthrough choices made in the dialog. Neither path creates another workspace. The dialog warns that default agent profiles can have **Auto Approve** enabled. Inspect every profile before assigning trusted code or credentials.
 
 </details>
+
+If model discovery requires authentication, the tour's **Settings** link opens the
+saved agent profile without saving the tour draft or marking it complete. Use the
+profile's authentication controls, then return to the tour.
 
 ## Find a setting
 
@@ -131,12 +135,30 @@ icons show running, idle, or paused activity. Tasks and required inbox entries r
 their fixed navigation area, and hiding a shortcut does not disable the underlying feature.
 
 On a phone, open the menu and choose **Sidebar** to edit the same layout. Use the move controls to
-reorder entries or move a shortcut to another section. Home and quick actions stay above Tasks;
-customized workspace tools and shortcut sections follow the task list. Expand **Integrations** to
+reorder entries or move a shortcut to another section. The workspace picker stays at the top.
+**New Task**, Home, quick actions, workspace tools, and shortcut sections appear before the task
+list. If you hide New Task, the Tasks heading keeps its create button. Expand **Integrations** to
 see named provider links and integration settings, including when no provider is configured.
+Choose **GitHub**, then **Issues** in its view menu to browse issues.
 **Restore defaults** resets the draft for the
 active workspace; the shared **Save changes** action persists it. If another client saves first, the
 editor keeps your draft and reports the conflict so you can reconcile it.
+
+Tasks is a contextual panel with its own view picker and filters. A primary-color dot marks an
+applied filter, including filters saved in a view. An amber dot marks unsaved view changes.
+Group headings have a leading collapse control, label, and count. Tasks sit
+indented below each heading, with space between groups; subtasks remain nested one
+level deeper. Grouping by state also shows the group's status icon. Plain task rows keep your
+selected metadata and trailing details, with highlights for hover, selection, and keyboard focus.
+Settings and the signed-in account, when available, stay in the
+single-row desktop sidebar footer, alongside theme switching. Use **Show more actions**
+(the three-dot button) for Stats, plugin utilities, Improve Kandev, and release notes.
+**New Task** uses a neutral button, with **Quick Chat** and **Terminal** as smaller
+labelled actions in a shared utility bar beneath it.
+
+Expand **Automations** and choose **Open automations** below its entries to see the
+full list. This labelled link sits inside the group on desktop and phones, like
+**Integration settings** inside Integrations.
 
 ## Switch workspace
 

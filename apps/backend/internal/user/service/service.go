@@ -106,6 +106,7 @@ type UpdateUserSettingsRequest struct {
 	TerminalFontSize                  *int
 	ChangesPanelLayout                *string
 	LastSeenDisplay                   *string
+	MessageTimeDisplay                *string
 	AgentTabCloseBehavior             *string
 	SystemMetricsDisplay              *SystemMetricsDisplaySettingsPatch
 	AppStatusBarEnabled               *bool
@@ -426,6 +427,9 @@ func applyBasicSettings(settings *models.UserSettings, req *UpdateUserSettingsRe
 		return err
 	}
 	if err := applyLastSeenDisplay(settings, req.LastSeenDisplay); err != nil {
+		return err
+	}
+	if err := applyMessageTimeDisplay(settings, req.MessageTimeDisplay); err != nil {
 		return err
 	}
 	if err := applyAgentTabCloseBehavior(settings, req.AgentTabCloseBehavior); err != nil {
@@ -912,6 +916,17 @@ func applyLastSeenDisplay(settings *models.UserSettings, value *string) error {
 	settings.LastSeenDisplay = v
 	return nil
 }
+func applyMessageTimeDisplay(settings *models.UserSettings, value *string) error {
+	if value == nil {
+		return nil
+	}
+	v := strings.TrimSpace(*value)
+	if v != models.MessageTimeDisplayRelative && v != models.MessageTimeDisplayAbsoluteShort && v != models.MessageTimeDisplayAbsoluteLong {
+		return errors.New("message_time_display must be 'relative', 'absolute_short', or 'absolute_long'")
+	}
+	settings.MessageTimeDisplay = v
+	return nil
+}
 
 func applyAgentTabCloseBehavior(settings *models.UserSettings, value *string) error {
 	if value == nil {
@@ -1224,6 +1239,7 @@ func (s *Service) publishUserSettingsEvent(ctx context.Context, settings *models
 		"terminal_font_size":                       settings.TerminalFontSize,
 		"changes_panel_layout":                     settings.ChangesPanelLayout,
 		"last_seen_display":                        models.NormalizeLastSeenDisplay(settings.LastSeenDisplay),
+		"message_time_display":                     models.NormalizeMessageTimeDisplay(settings.MessageTimeDisplay),
 		"system_metrics_display":                   settings.SystemMetricsDisplay,
 		"app_status_bar_enabled":                   settings.AppStatusBarEnabled,
 		"sidebar_hover_enabled":                    settings.SidebarHoverEnabled,

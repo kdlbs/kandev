@@ -20,6 +20,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/runtime/activity"
 	"github.com/kandev/kandev/internal/agent/settings/cliflags"
 	"github.com/kandev/kandev/internal/agentruntime"
+	"github.com/kandev/kandev/internal/common/mcpmode"
 	"github.com/kandev/kandev/internal/common/subproc"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/gitconfigenv"
@@ -1268,6 +1269,13 @@ func (m *Manager) launchBuildExecutorRequest(ctx context.Context, executionID st
 	var autoApproveOverride *bool
 	if profileInfo != nil {
 		autoApproveOverride = boolPtr(profileInfo.AutoApprove)
+	}
+	// A coordinator session ignores the profile's auto-approve flag and the
+	// agentctl auto-approve environment variable: only the exact six
+	// coordinator tool names are auto-approved, decided by agentctl's own
+	// mode check (docs/specs/coordinator/system-design/copilot.md#permission-policy).
+	if reqWithWorktree.McpMode == mcpmode.Coordinator {
+		autoApproveOverride = boolPtr(false)
 	}
 
 	providerGatewayAuth, providerKeyEnvVar, providerKey, err := m.resolveProviderGatewayAuth(

@@ -4,7 +4,7 @@ system: platform
 requirements:
   - REQ-PLATFORM-WORKSPACE-GIT-STATUS-001
 created: 2026-10-02
-updated: 2026-10-02
+updated: 2026-10-06
 owners:
   - kandev
 ---
@@ -20,8 +20,9 @@ Platform owns workspace observation and detail identity. Tasks retains environme
 | --- | --- |
 | AC-PLATFORM-WORKSPACE-GIT-STATUS-001.36 | NUL-framed path records; Literal selected paths |
 | AC-PLATFORM-WORKSPACE-GIT-STATUS-001.9 | Enrichment integration |
-| AC-PLATFORM-WORKSPACE-GIT-STATUS-001.10, .11, .37, .38 | Literal selected paths |
+| AC-PLATFORM-WORKSPACE-GIT-STATUS-001.10, .11, .37, .38, .44 | Literal selected paths |
 | AC-PLATFORM-WORKSPACE-GIT-STATUS-001.7, .31, .33 | Preserved execution and quality contracts |
+| AC-PLATFORM-WORKSPACE-GIT-STATUS-001.45 | Plain selected patches |
 
 ## NUL-framed path records
 
@@ -101,8 +102,63 @@ the selected file's diff budget or attach another file's patch.
 and response shapes. Read transport serializes the already-correct patch and exact file key;
 it never decodes the internal pathspec representation into a product filename.
 No intentional wildcard query outside these selected-file commands changes.
-Discard retains its current implementation; the tracked and added-file controls established
-no Discard defect in this repair.
+`GitOperator.Discard` uses `literalGitPathspec` for its selected `status --porcelain --`
+query, `discardUntrackedFiles`'s `rm --cached --force --` selection, and
+`discardTrackedFiles`'s `restore --source=HEAD --staged --worktree --` selections.
+Each uses `runGitCommandWithEnvironment` with the existing selected-command overrides
+for literal-marker parsing and exact case matching. Environment capture, filtering,
+validation, admission and deadlines remain owned by that command runner.
+Classification observes the selected literal file rather than a wildcard-matching sibling.
+Filesystem deletion continues to use the original filename with `os.Remove`, never the
+internal pathspec. Preserve empty-list rejection, empty-entry Git rejection, status-error
+fallback, existing classification, per-file error aggregation, locking and `triggerRefresh`.
+No directory deletion, rename parsing, rollback, global environment policy, or Stage/Unstage
+change is introduced.
+
+The registered `POST /api/v1/git/discard` route binds `GitDiscardRequest`, rejects an empty
+list, resolves `req.Repo` through `gitOpForRepo` / `Manager.GitOperatorFor`, then calls
+`Discard` on that repository operator. Request/result shapes and existing invalid-repository
+handling remain unchanged. Real registered-route tests independently verify repository
+identity and selected/unselected index and working-tree bytes.
+
+Desktop and phone consume the same operation result and existing repository refresh.
+This correction changes data selection only, without rendered layout, navigation, touch,
+copy, or responsive behavior; real operator and HTTP tests cover the shared outcome.
+The earlier Stage/Unstage package's tracked bracket and added Discard controls remain
+passing controls. The distinct magic-name and mixed untracked/tracked cases are covered
+by the [Discard selection package](../../../plans/git-discard-literal-selections/plan.md).
+
+## Plain selected patches
+
+Each of the four selected `WorkspaceTracker.capDiffOutput` call sites in
+`workspace_git_diff.go` passes `--no-color` as a separate diff option before refs
+and `--`: `enrichUnstagedFileDiff` (flattened captured HEAD to worktree),
+`enrichMixedUnstagedFileDiff` (retained index to worktree), `enrichStagedFileDiff`
+(single-layer cached fallback), and `enrichMixedStagedFileDiff` (captured HEAD to index).
+The exact option is already admitted by `securityutil`. No validator change is needed.
+Generic capped output and numstat commands keep their existing policy.
+
+Disable presentation at production, before capping and publication. Do not strip
+escape bytes afterward: they can be real source content or filename bytes.
+Keep literal pathspecs, selected environment overrides, captured instance environment,
+observed HEAD and retained index, admission, deadlines, budgets, cancellation,
+carry-forward, and ready/unavailable propagation with their current owners.
+This correction introduces no external-diff/textconv policy, Git configuration writes,
+parser change, new process, wire field, or standalone comparison change.
+
+`handleGitStatus` and `collectStatusForRepo` join `GetGitStatusWithDetails` when
+`details=wait` is requested. The registered selected `/api/v1/git/status` and
+aggregate `/api/v1/git/status/multi` routes serialize the same accepted file/facet
+patches through `gitStatusResult`; repository resolution remains manager-owned.
+Real registered HTTP tests prove decoded bytes and repository identity, alongside
+public tracker tests. The cached-fallback test enters the existing staged-enrichment
+boundary with empty flattened data and executes real Git, without inventing a new
+production route to that branch.
+
+Desktop and phone use the same patch data. This is a pure-data mobile exception:
+no frontend, layout, navigation, touch, copy, or responsive contract changes.
+Tracker and HTTP evidence cover the changed boundary; no browser/build/E2E is needed.
+See the [plain-patch repair package](../../../plans/workspace-tracker-plain-patches/plan.md).
 
 ## Preserved execution and quality contracts
 

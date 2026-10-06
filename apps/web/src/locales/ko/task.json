@@ -1,4 +1,5 @@
 {
+  "kandevProposeTask": "Kandev: 작업 제안",
   "repositorySetsSaveDuplicateRows_one": "{{count}}개의 추가 행이 포함되지 않습니다. 각 리포지토리의 첫 행만 기본 선택과 함께 저장됩니다.",
   "repositorySetsSaveDuplicateRows_other": "{{count}}개의 추가 행이 포함되지 않습니다. 각 리포지토리의 첫 행만 기본 선택과 함께 저장됩니다.",
   "agentCliNotInstalled": "에이전트 CLI가 설치되지 않음",
@@ -1728,7 +1729,7 @@
   "showErrorDetails": "오류 세부 정보 표시: {{displayLabel}}",
   "showFormatted": "서식 표시",
   "showFormattedMessage": "서식 있는 메시지 표시",
-  "showFullTimestamp": "전체 타임스탬프 표시: {{absoluteTime}}",
+  "messageTimestampAriaLabel": "메시지 시간: {{label}}, {{counterpart}}",
   "showMcpConnectionStatus": "MCP 연결 상태 표시",
   "showMessageMetadata": "메시지 메타데이터 표시",
   "showOlderSessions_one": "이전 세션 {{count}}개 표시",

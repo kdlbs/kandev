@@ -4,19 +4,21 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
-	"go.uber.org/zap"
 	"time"
 
 	agentruntime "github.com/kandev/kandev/internal/agent/runtime"
+	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
+	"github.com/kandev/kandev/internal/auth/authn"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	"github.com/kandev/kandev/internal/orchestrator/watcher"
 	"github.com/kandev/kandev/internal/task/models"
+	"go.uber.org/zap"
 )
 
 const continuationPrepareTimeout = time.Minute
 const continuationInstruction = "continue"
+const capacityContinuationInstruction = "Your previous turn stopped because the selected model was at capacity. Continue the unfinished request using this conversation's existing history. Preserve all completed actions and do not repeat completed work. If any earlier outcome is uncertain, stop and ask the user before acting."
 
 func (s *Service) retryInterruptedContinuation(ctx context.Context, taskID, sessionID, execID string, entry *transientRetryEntry) {
 	if err := s.validateContinuationOwner(ctx, taskID, sessionID, entry); err != nil {
@@ -27,10 +29,24 @@ func (s *Service) retryInterruptedContinuation(ctx context.Context, taskID, sess
 		s.finishContinuationManual(ctx, taskID, sessionID, execID, entry)
 		return
 	}
+	if entry.continuationPolicy == continuationPolicyCapacityLive {
+		if entry.retainedRuntime == nil {
+			s.finishContinuationManual(ctx, taskID, sessionID, execID, entry)
+			return
+		}
+		if s.retainedRuntimeRetryDisposition(ctx, taskID, sessionID, entry) != retainedRuntimeRetryUsable {
+			s.finishRetainedRetryWithoutDispatch(ctx, taskID, sessionID, entry, "refused")
+			return
+		}
+		if !s.retryRetainedRuntimeContinuation(ctx, taskID, sessionID, entry, capacityContinuationInstruction) {
+			s.finishRetainedRetryWithoutDispatch(ctx, taskID, sessionID, entry, "refused")
+		}
+		return
+	}
 	if entry.retainedRuntime != nil {
 		switch s.retainedRuntimeRetryDisposition(ctx, taskID, sessionID, entry) {
 		case retainedRuntimeRetryUsable:
-			if s.retryRetainedRuntimeContinuation(ctx, taskID, sessionID, entry) {
+			if s.retryRetainedRuntimeContinuation(ctx, taskID, sessionID, entry, continuationInstruction) {
 				return
 			}
 		case retainedRuntimeRetryBlocked:
@@ -106,12 +122,34 @@ func (s *Service) retryRetainedRuntimeContinuation(
 	ctx context.Context,
 	taskID, sessionID string,
 	entry *transientRetryEntry,
+	instruction string,
 ) bool {
 	if s.retainedRuntimeRetryDisposition(ctx, taskID, sessionID, entry) != retainedRuntimeRetryUsable {
 		return false
 	}
+	var liveExecutionFence *promptTaskLiveExecutionFence
+	if entry.continuationPolicy == continuationPolicyCapacityLive {
+		if entry.retainedRuntime == nil || entry.continuation == nil {
+			return false
+		}
+		liveExecutionFence = &promptTaskLiveExecutionFence{
+			executionID:    entry.retainedRuntime.executionID,
+			nativeID:       entry.continuation.nativeID,
+			identity:       entry.continuation.identity,
+			workflowStepID: entry.continuation.workflowStepID,
+		}
+	}
 	dispatchStarted := false
 	dispatchAccepted := false
+	markDispatchStarted := func() {
+		if dispatchStarted {
+			return
+		}
+		entry.mu.Lock()
+		entry.started++
+		entry.mu.Unlock()
+		dispatchStarted = true
+	}
 	beforeDispatch := func() error {
 		if err := s.validateContinuationOwner(ctx, taskID, sessionID, entry); err != nil {
 			return err
@@ -119,27 +157,50 @@ func (s *Service) retryRetainedRuntimeContinuation(
 		if s.retainedRuntimeRetryDisposition(ctx, taskID, sessionID, entry) != retainedRuntimeRetryUsable {
 			return ErrResumeAttemptCancelled
 		}
-		if !dispatchStarted {
-			entry.mu.Lock()
-			entry.started++
-			entry.mu.Unlock()
-			dispatchStarted = true
+		if liveExecutionFence != nil {
+			if err := s.validatePromptLiveExecutionFence(ctx, taskID, sessionID, liveExecutionFence); err != nil {
+				return err
+			}
+		}
+		if liveExecutionFence == nil {
+			markDispatchStarted()
 		}
 		return nil
 	}
 	onAccepted := func(string) {
+		if liveExecutionFence != nil {
+			markDispatchStarted()
+		}
 		dispatchAccepted = true
 		s.recordContinuationAcceptance(sessionID, entry)
 		s.updateContinuationPhase(context.WithoutCancel(ctx), taskID, sessionID, entry, "continuing")
 	}
-	_, err := s.promptTask(ctx, taskID, sessionID, continuationInstruction, "", false, nil, true,
+	beforeProviderAdmission := func() error {
+		if liveExecutionFence == nil {
+			return nil
+		}
+		if err := s.validateContinuationOwner(ctx, taskID, sessionID, entry); err != nil {
+			return err
+		}
+		admissionCtx := ctx
+		if entry.continuation != nil && entry.continuation.initiatorKnown {
+			admissionCtx = authn.WithIdentity(ctx, entry.continuation.initiator)
+		}
+		if err := s.authorizeSessionPrompt(admissionCtx, sessionID); err != nil {
+			return err
+		}
+		return s.validateContinuationOwner(ctx, taskID, sessionID, entry)
+	}
+	_, err := s.promptTask(ctx, taskID, sessionID, instruction, "", false, nil, true,
 		launchOriginAutomatic, promptTaskOptions{
 			internalContinuation:      true,
 			preservePromptContext:     true,
 			disableDispatchRetry:      true,
 			requireNonterminalSession: true,
 			reserveTurnUntilDispatch:  true,
+			liveExecutionFence:        liveExecutionFence,
 			beforeDispatch:            beforeDispatch,
+			beforeProviderAdmission:   beforeProviderAdmission,
 			onAccepted:                onAccepted,
 		})
 	if err == nil || dispatchAccepted {
@@ -164,12 +225,128 @@ func (s *Service) retryRetainedRuntimeContinuation(
 	return true
 }
 
+func (s *Service) validatePromptLiveExecutionFence(
+	ctx context.Context,
+	taskID, sessionID string,
+	fence *promptTaskLiveExecutionFence,
+) error {
+	if !validPromptLiveExecutionFence(s, fence) {
+		return ErrResumeAttemptCancelled
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if err := s.validatePromptLiveExecutionOwnership(ctx, taskID, sessionID, fence); err != nil {
+		return err
+	}
+	if err := s.validatePromptLiveRuntime(ctx, sessionID, fence.nativeID); err != nil {
+		return err
+	}
+	if err := s.validatePromptExecutionMap(sessionID, fence.executionID); err != nil {
+		return err
+	}
+	// Revalidate ownership after runtime probes before admitting the provider call.
+	return s.validatePromptLiveExecutionOwnership(ctx, taskID, sessionID, fence)
+}
+
+func validPromptLiveExecutionFence(s *Service, fence *promptTaskLiveExecutionFence) bool {
+	return s != nil && fence != nil && fence.executionID != "" && fence.nativeID != "" &&
+		fence.identity != ([32]byte{}) && s.agentManager != nil && s.executor != nil
+}
+
+func (s *Service) validatePromptLiveExecutionOwnership(
+	ctx context.Context,
+	taskID, sessionID string,
+	fence *promptTaskLiveExecutionFence,
+) error {
+	if err := s.validatePromptLiveSession(ctx, taskID, sessionID, fence); err != nil {
+		return err
+	}
+	if err := s.validatePromptLiveTask(ctx, taskID, fence); err != nil {
+		return err
+	}
+	if err := s.validatePromptStoredExecution(ctx, sessionID, fence.executionID); err != nil {
+		return err
+	}
+	return s.validatePromptManagerExecution(ctx, sessionID, fence.executionID)
+}
+
+func (s *Service) validatePromptLiveSession(
+	ctx context.Context,
+	taskID, sessionID string,
+	fence *promptTaskLiveExecutionFence,
+) error {
+	session, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil || !continuationSessionMatches(taskID, session, &continuationBinding{
+		nativeID: fence.nativeID, identity: fence.identity,
+	}) {
+		return executor.ErrExecutionNotFound
+	}
+	return nil
+}
+
+func (s *Service) validatePromptLiveTask(ctx context.Context, taskID string, fence *promptTaskLiveExecutionFence) error {
+	task, err := s.repo.GetTask(ctx, taskID)
+	if err != nil || task == nil || task.ArchivedAt != nil || task.IsFromOffice ||
+		task.WorkflowStepID != fence.workflowStepID || models.IsAutomationTaskOrigin(task.Origin) {
+		return ErrResumeAttemptCancelled
+	}
+	return nil
+}
+
+func (s *Service) validatePromptStoredExecution(ctx context.Context, sessionID, executionID string) error {
+	running, err := s.repo.GetExecutorRunningBySessionID(ctx, sessionID)
+	if err != nil || running == nil || running.AgentExecutionID != executionID {
+		return executor.ErrExecutionNotFound
+	}
+	return nil
+}
+
+func (s *Service) validatePromptManagerExecution(ctx context.Context, sessionID, executionID string) error {
+	currentExecutionID, err := s.agentManager.GetExecutionIDForSession(ctx, sessionID)
+	if err != nil || currentExecutionID != executionID {
+		return executor.ErrExecutionNotFound
+	}
+	return nil
+}
+
+func (s *Service) validatePromptLiveRuntime(ctx context.Context, sessionID, nativeID string) error {
+	runningProcess, probeErr := s.probeAgentRunning(ctx, sessionID)
+	if probeErr != nil || !runningProcess {
+		return ErrResumeAttemptCancelled
+	}
+	if !s.agentManager.IsAgentReadyForPrompt(ctx, sessionID) {
+		return ErrResumeAttemptCancelled
+	}
+	if currentNativeID := s.currentACPSessionID(sessionID); currentNativeID == "" || currentNativeID != nativeID {
+		return ErrResumeAttemptCancelled
+	}
+	return nil
+}
+
+func (s *Service) validatePromptExecutionMap(sessionID, executionID string) error {
+	execution, ok := s.executor.GetExecutionBySession(sessionID)
+	if !ok || execution == nil || execution.AgentExecutionID != executionID {
+		return executor.ErrExecutionNotFound
+	}
+	return nil
+}
+
 func (s *Service) validateContinuationOwner(ctx context.Context, taskID, sessionID string, entry *transientRetryEntry) error {
 	if ctx.Err() != nil {
 		return ctx.Err()
 	}
 	current, ok := s.transientRetries.Load(sessionID)
-	if !ok || current != entry || !s.config.ProviderInterruptionContinuation || entry.continuation == nil {
+	if !ok || current != entry || entry.continuation == nil || entry.continuationPolicy != entry.continuation.policy {
+		return ErrResumeAttemptCancelled
+	}
+	switch entry.continuationPolicy {
+	case continuationPolicySavedHistoryRestore:
+		if !s.config.ProviderInterruptionContinuation {
+			return ErrResumeAttemptCancelled
+		}
+	case continuationPolicyCapacityLive:
+	default:
 		return ErrResumeAttemptCancelled
 	}
 	session, err := s.repo.GetTaskSession(ctx, sessionID)
@@ -204,7 +381,8 @@ func continuationSessionMatches(taskID string, session *models.TaskSession, bind
 }
 
 func continuationTaskMatches(task *models.Task, binding *continuationBinding) bool {
-	return task != nil && task.ArchivedAt == nil && !task.IsFromOffice && task.WorkflowStepID == binding.workflowStepID
+	return task != nil && task.ArchivedAt == nil && !task.IsFromOffice && task.WorkflowStepID == binding.workflowStepID &&
+		(binding.policy != continuationPolicyCapacityLive || !models.IsAutomationTaskOrigin(task.Origin))
 }
 
 func (s *Service) stopContinuationPredecessor(ctx context.Context, taskID, sessionID, executionID string) error {

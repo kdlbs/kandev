@@ -38,8 +38,8 @@ export type SidebarLayout = {
 };
 
 export const DEFAULT_SIDEBAR_NODE_IDS = [
-  "home",
   "new-task",
+  "home",
   "automations",
   "canvases",
   "integrations",
@@ -53,16 +53,16 @@ export function defaultSidebarLayout(): SidebarLayout {
     revision: 0,
     nodes: [
       {
-        id: "home",
-        kind: "builtin",
-        visible: true,
-        destinationId: "home",
-      },
-      {
         id: "new-task",
         kind: "builtin",
         visible: true,
         destinationId: "new_task",
+      },
+      {
+        id: "home",
+        kind: "builtin",
+        visible: true,
+        destinationId: "home",
       },
       {
         id: "automations",

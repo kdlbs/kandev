@@ -27,6 +27,9 @@ prompt replay. The [runtime continuity contract](transient-turn-runtime-continui
 preserves proven usable ACP runtimes. [Provider error recovery](provider-error-recovery.md)
 owns truthful diagnostic projection and deterministic error categorization.
 
+The [capacity amendment](transient-turn-runtime-continuity.md#capacity-recovery-admission) uses a separate policy for completed effects on a retained runtime.
+Its live-runtime support does not satisfy this document's native restoration capability or read-only safety predicate.
+
 ## Requirement mapping
 
 | Requirement | Design sections |

@@ -5,6 +5,7 @@ import { AppSidebarNavItem } from "./app-sidebar-nav-item";
 import { AppSidebarFixedNav, AppSidebarHomeItem } from "./app-sidebar-primary-nav";
 import { AppSidebarNewTaskItem } from "./app-sidebar-new-task-item";
 import { AutomationsSection } from "./sections/automations-section";
+import { CoordinatorsSection } from "./sections/coordinators-section";
 import { CanvasesSection } from "./sections/canvases-section";
 import { IntegrationsSection } from "./sections/integrations-section";
 import { ShortcutSection } from "./shortcut-section";
@@ -48,7 +49,12 @@ function builtinNode(node: ProjectedSidebarNode, collapsed: boolean): React.Reac
     case "new_task":
       return <AppSidebarNewTaskItem collapsed={collapsed} />;
     case "automations":
-      return <AutomationsSection collapsed={collapsed} />;
+      return (
+        <>
+          <CoordinatorsSection collapsed={collapsed} />
+          <AutomationsSection collapsed={collapsed} />
+        </>
+      );
     case "canvases":
       return <CanvasesSection collapsed={collapsed} />;
     case "integrations":
@@ -90,10 +96,13 @@ export function SidebarLayoutNavigation({ collapsed, inOffice }: SidebarLayoutNa
   );
   const hasVisibleNewTask = visibleNodes.some((node) => node.destinationId === "new_task");
   let fixedRendered = false;
+  const coordinatorsWithAutomations = visibleNodes.some(
+    (node) => node.kind === "builtin" && node.destinationId === "automations",
+  );
   const items: React.ReactNode[] = [];
 
   for (const node of visibleNodes) {
-    if (!fixedRendered && node.destinationId !== "home") {
+    if (!fixedRendered && node.destinationId !== "home" && node.destinationId !== "new_task") {
       items.push(<AppSidebarFixedNav key="sidebar-fixed-navigation" collapsed={collapsed} />);
       fixedRendered = true;
     }
@@ -125,6 +134,9 @@ export function SidebarLayoutNavigation({ collapsed, inOffice }: SidebarLayoutNa
 
   if (!fixedRendered) {
     items.push(<AppSidebarFixedNav key="sidebar-fixed-navigation" collapsed={collapsed} />);
+  }
+  if (!coordinatorsWithAutomations) {
+    items.push(<CoordinatorsSection key="sidebar-coordinators" collapsed={collapsed} />);
   }
   if (!hasVisibleNewTask) {
     items.push(

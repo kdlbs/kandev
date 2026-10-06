@@ -2,7 +2,7 @@
 status: active
 system: platform
 created: 2026-07-19
-updated: 2026-10-03
+updated: 2026-10-06
 owners:
   - kandev
 ---
@@ -84,6 +84,9 @@ A failed live source still cannot authorize an unmarked persisted fallback.
 - **AC-PLATFORM-WORKSPACE-GIT-STATUS-001.43:** When agent startup advances on the same current execution and agentctl client, an attached workspace stream shall continue forwarding accepted Git snapshots.
   Promotion from workspace-only operation shall not require another foreground refresh or stream reconnection to deliver later membership and detail updates.
   Replaced executions and clients shall retain the rejection required by criterion `.27`.
+- **AC-PLATFORM-WORKSPACE-GIT-STATUS-001.44:** When Discard receives a nonempty list of repository-relative files, each filename shall select only that literal file in the selected repository, including supported wildcard, bracket, and pathspec-magic names. Tracked selected files shall return to their committed index and working-tree content; added or untracked selected files shall be removed from the index and filesystem as applicable. Every unselected file in that repository and every file in other repositories shall retain its index content and working-tree bytes, regardless of inherited pathspec matching settings. An empty list shall be rejected, and an invalid empty filename shall remain rejected rather than authorizing a whole-repository discard. Desktop and mobile shall observe the same selected-file outcome through their existing Changes actions.
+
+- **AC-PLATFORM-WORKSPACE-GIT-STATUS-001.45:** Successful workspace patch enrichment shall return plain Git patch syntax independently of forced Git diff or UI color settings, for flattened, staged, and unstaged representations. Git presentation color shall not enter ready patch data. Literal ANSI bytes in file content and supported filenames shall retain their identity and content. Reads shall preserve Git configuration, refs, index content, and worktree bytes; file membership, status, line totals, facets, readiness, and existing resource limits remain correct. Desktop and mobile shall receive the same patch data through existing transports.
 
 ## Out of scope
 
@@ -104,3 +107,5 @@ The [dirty-path monitor design](../system-design/workspace-dirty-path-monitor.md
 [repair package](../../../plans/workspace-dirty-path-monitor/plan.md) own exact-path polling refresh.
 The [workspace stream continuity design](../system-design/workspace-stream-continuity.md)
 defines the callback lifetime required by criterion `.43`.
+Plain patch production follows the [path-details design](../system-design/workspace-git-path-details.md)
+and [repair package](../../../plans/workspace-tracker-plain-patches/plan.md).

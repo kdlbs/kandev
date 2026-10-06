@@ -33,6 +33,7 @@
   "configurationChat": "Configuration chat",
   "configurationChatDescription": "Let the agent update Kandev settings, workflows, agent profiles, and MCP configuration.",
   "configurationChatTab": "Configuration Chat",
+  "coordinatorAboutTag": "about {{id}}",
   "delete": "Delete",
   "deleteQuickChat": "Delete Quick Chat?",
   "deleteQuickChatIntro": "This will permanently delete this quick chat session, including:",

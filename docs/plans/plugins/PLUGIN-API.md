@@ -971,9 +971,8 @@ store or writes conversation history.
 // section: "main" (default) renders as a top-level sidebar entry;
 // "integrations" renders inside the sidebar's Integrations section alongside
 // the first-party integration links (GitHub, Jira, ...); "sidebar-footer"
-// renders as an icon button in the sidebar footer's icon row and as a
-// labelled row in the phone menu's Utilities group, subject to the footer's
-// inline budget — an over-budget item is reached through the footer's
+// renders as a labelled item in the desktop footer's utilities menu and as a
+// labelled row in the phone menu's Utilities group. All desktop items use the
 // overflow menu instead of an inline button; "settings" is accepted but
 // renders on no surface. Hosts predating a section value, or seeing an
 // unrecognised one, simply degrade to "main"'s placement — nothing is ever

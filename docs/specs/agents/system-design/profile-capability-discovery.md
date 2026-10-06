@@ -2,6 +2,7 @@
 status: current
 system: agents
 created: 2026-09-29
+updated: 2026-10-05
 requirements:
   - REQ-AGENTS-PROFILE-DISCOVERY-001
   - REQ-AGENTS-PROFILE-DISCOVERY-002
@@ -170,6 +171,23 @@ Touch actions keep at least 44px targets; fine-pointer controls retain their exi
 The existing picker owns its internal scrolling, dismissal, and focus return.
 This change does not introduce a new overlay, navigation path, or fixed action region.
 
+For AC-AGENTS-PROFILE-DISCOVERY-003.5, replace the oversized labelled
+`RefreshCapabilitiesButton` with an icon Button using the shared standard icon
+sizing. Remove its `min-h-11`, `sm:min-h-9`, full-width and padding overrides;
+the primitive owns 28px desktop and 44px phone/coarse-pointer dimensions. Retain
+`profile-refresh-capabilities`, the translated `agents:refreshCapabilities`
+accessible name, tooltip, busy spinner, disabled state, and refresh callback.
+Error/status content must not stretch the action or move it above the selector's
+baseline. Preserve the existing recovery behavior.
+
+`CapabilitiesRow` keeps model, optional mode, and refresh aligned on desktop.
+On phones, place model and refresh together, with the optional mode below;
+the existing profile page owns scrolling. Cover both mode-present and
+mode-absent rows, stale/loading/error states, keyboard activation, touch targets,
+and containment. Full profile configuration and model-option behavior remain
+available. The sizing correction is delivered by
+[Task 04](../../../plans/first-run-agent-setup/task-04-profile-refresh.md).
+
 ## Failure and observability
 
 Validation failures identify fields without echoing values.
@@ -198,6 +216,7 @@ A host-only path such as `CODEX_PATH` can still be invalid on a remote executor.
 - [Explicit model strictness](../../../decisions/2026-09-15-explicit-profile-model-strictness.md)
 - [Profile requirements](../requirements/profile-capability-discovery.md)
 - [Implementation plan](../../../plans/profile-capability-discovery/plan.md)
+- [Compact profile refresh delivery](../../../plans/first-run-agent-setup/plan.md)
 
 A global `CODEX_PATH` workaround cannot describe two differently configured profiles.
 Overwriting the agent-wide cache would leak one profile's catalog into another profile.

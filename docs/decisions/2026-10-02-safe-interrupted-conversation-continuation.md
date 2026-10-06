@@ -6,7 +6,11 @@
 
 The completed-tool admission boundary and continuation prompt are amended by
 [ADR-2026-10-05-hidden-completed-tool-continuation](2026-10-05-hidden-completed-tool-continuation.md).
-The original replay, native identity, ownership, and rollout constraints remain.
+The [capacity continuation amendment](2026-10-05-capacity-continuation-after-completed-tools.md)
+adds a narrow exception for completed effects on the same usable runtime. This
+decision retains authority over transport-loss continuation and native
+restoration. The original replay, native identity, ownership, and rollout
+constraints remain.
 
 ## Context
 

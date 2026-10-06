@@ -1,4 +1,5 @@
 {
+  "coordinatorAboutTag": "{{id}} 관련",
   "aboutRepositoryContext": "리포지토리 컨텍스트 정보",
   "addedToChatContext": "{{name}}을 채팅 컨텍스트에 추가했습니다",
   "addRepository": "리포지토리 추가",

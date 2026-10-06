@@ -48,6 +48,7 @@ export type {
   ThreadViewDraftApi,
   LspStatusLocation,
   LastSeenDisplay,
+  MessageTimeDisplay,
   MCPTaskAgentProfileDefault,
   StartupPage,
   UserSettings,
@@ -441,6 +442,8 @@ export type Task = ActiveSubagentCountFields & {
   workflow_agent_overrides?: WorkflowAgentOverrides;
   position: number;
   title: string;
+  /** Card identifier (e.g. "KAN-42"); shown in place of the title where the UI calls for it. */
+  identifier?: string;
   description: string;
   /** True when the task was created in autopilot mode. Immutable after creation. */
   autopilot?: boolean;

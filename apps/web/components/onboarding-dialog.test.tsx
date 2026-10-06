@@ -16,8 +16,11 @@ const actionMocks = vi.hoisted(() => ({
 const toastMock = vi.hoisted(() => vi.fn());
 
 const staleSave = vi.hoisted(() => new Error("stale settings save"));
+const TEST_AGENT_NAME = "test-agent";
 const CHANGED_PROFILE_MODEL = "changed-model";
+const NEXT_PROFILE_MODEL = "next-model";
 const DIRTY_BUTTON_NAME = "Make agent dirty";
+const EDIT_AGAIN_BUTTON_NAME = "Edit agent again";
 const TEST_AGENT_MODEL_TEST_ID = "test-agent-model";
 
 const coordinatorState = vi.hoisted(() => ({
@@ -63,26 +66,33 @@ vi.mock("@/components/onboarding/step-agents", () => ({
     agentSettings,
     onUpdateSetting,
   }: {
-    agentSettings: Record<string, { formData: { model: string } }>;
-    onUpdateSetting: (agentName: string, formPatch: { model: string }) => void;
+    agentSettings: Record<string, { draft: { model: string } }>;
+    onUpdateSetting: (agentName: string, patch: { model: string }) => void;
   }) => (
     <>
       <button
         type="button"
-        disabled={!agentSettings["test-agent"]}
-        onClick={() => onUpdateSetting("test-agent", { model: CHANGED_PROFILE_MODEL })}
+        disabled={!agentSettings[TEST_AGENT_NAME]}
+        onClick={() => onUpdateSetting(TEST_AGENT_NAME, { model: CHANGED_PROFILE_MODEL })}
       >
         {DIRTY_BUTTON_NAME}
       </button>
+      <button
+        type="button"
+        disabled={!agentSettings[TEST_AGENT_NAME]}
+        onClick={() => onUpdateSetting(TEST_AGENT_NAME, { model: NEXT_PROFILE_MODEL })}
+      >
+        {EDIT_AGAIN_BUTTON_NAME}
+      </button>
       <output data-testid={TEST_AGENT_MODEL_TEST_ID}>
-        {agentSettings["test-agent"]?.formData.model}
+        {agentSettings[TEST_AGENT_NAME]?.draft.model}
       </output>
     </>
   ),
 }));
 
 const availableAgent = {
-  name: "test-agent",
+  name: TEST_AGENT_NAME,
   display_name: "Test Agent",
   model_config: {
     default_model: "default-model",
@@ -94,7 +104,7 @@ const availableAgent = {
 };
 
 const savedAgent = {
-  name: "test-agent",
+  name: TEST_AGENT_NAME,
   profiles: [
     {
       id: "profile-1",
@@ -136,6 +146,27 @@ async function openExecutorStep(onComplete = vi.fn()) {
   fireEvent.click(screen.getByRole("button", { name: "Next" }));
   await screen.findByText("Executors");
   return onComplete;
+}
+
+async function proceedWithNewerDraft(onComplete: () => void) {
+  let resolveSave!: () => void;
+  actionMocks.updateAgentProfileAction.mockImplementationOnce(
+    () => new Promise<void>((resolve) => (resolveSave = resolve)),
+  );
+  render(<OnboardingDialog open onComplete={onComplete} />);
+  const dirtyButton = (await screen.findByRole("button", {
+    name: DIRTY_BUTTON_NAME,
+  })) as HTMLButtonElement;
+  await waitFor(() => expect(dirtyButton.disabled).toBe(false));
+  fireEvent.click(dirtyButton);
+  fireEvent.click(screen.getByRole("button", { name: "Next" }));
+  fireEvent.click(screen.getByRole("button", { name: EDIT_AGAIN_BUTTON_NAME }));
+  await act(async () => resolveSave());
+  await screen.findByText("Executors");
+  fireEvent.click(screen.getByRole("button", { name: "Next" }));
+  await screen.findByText("Agentic Workflows");
+  fireEvent.click(screen.getByRole("button", { name: "Next" }));
+  await screen.findByText("Command Panel");
 }
 
 describe("OnboardingDialog executor discovery", () => {
@@ -260,18 +291,7 @@ describe("OnboardingDialog profile save actions", () => {
   // @covers AC-EXECUTORS-ONBOARDING-001.10
   it("sends only one profile save when Get Started is clicked repeatedly", async () => {
     const onComplete = vi.fn();
-    render(<OnboardingDialog open onComplete={onComplete} />);
-    const dirtyButton = (await screen.findByRole("button", {
-      name: DIRTY_BUTTON_NAME,
-    })) as HTMLButtonElement;
-    await waitFor(() => expect(dirtyButton.disabled).toBe(false));
-    fireEvent.click(dirtyButton);
-    fireEvent.click(screen.getByRole("button", { name: "Next" }));
-    await screen.findByText("Executors");
-    fireEvent.click(screen.getByRole("button", { name: "Next" }));
-    await screen.findByText("Agentic Workflows");
-    fireEvent.click(screen.getByRole("button", { name: "Next" }));
-    await screen.findByText("Command Panel");
+    await proceedWithNewerDraft(onComplete);
 
     actionMocks.updateAgentProfileAction.mockClear();
     let resolveSave!: () => void;
@@ -367,30 +387,12 @@ describe("OnboardingDialog backend restart recovery", () => {
   });
 
   it("blocks get started and yields the modal when the final save is stale", async () => {
-    let saveCount = 0;
-    actionMocks.updateAgentProfileAction.mockImplementation(async () => {
-      saveCount += 1;
-      if (saveCount === 2) {
-        signalReloadRequired();
-        throw staleSave;
-      }
-      return {};
-    });
     const onComplete = vi.fn();
-
-    render(<OnboardingDialog open onComplete={onComplete} />);
-    const dirtyButton = (await screen.findByRole("button", {
-      name: DIRTY_BUTTON_NAME,
-    })) as HTMLButtonElement;
-    await waitFor(() => expect(dirtyButton.disabled).toBe(false));
-    fireEvent.click(dirtyButton);
-    fireEvent.click(screen.getByRole("button", { name: "Next" }));
-    await waitFor(() => expect(screen.getByText("Executors")).toBeTruthy());
-
-    fireEvent.click(screen.getByRole("button", { name: "Next" }));
-    await waitFor(() => expect(screen.getByText("Agentic Workflows")).toBeTruthy());
-    fireEvent.click(screen.getByRole("button", { name: "Next" }));
-    await waitFor(() => expect(screen.getByText("Command Panel")).toBeTruthy());
+    await proceedWithNewerDraft(onComplete);
+    actionMocks.updateAgentProfileAction.mockImplementationOnce(async () => {
+      signalReloadRequired();
+      throw staleSave;
+    });
 
     fireEvent.click(screen.getByRole("button", { name: "Get Started" }));
 

@@ -35,6 +35,8 @@ import { cn } from "@/lib/utils";
 import { useTaskViewNavigation } from "./use-task-view-navigation";
 import { MobileSidebarLayoutNavigation } from "./mobile-sidebar-layout-navigation";
 import { useHasSavedSidebarLayout } from "@/hooks/domains/sidebar/use-sidebar-layout-navigation";
+import { useInOffice } from "@/hooks/use-in-office";
+import { MobileNewTaskRow } from "./mobile-new-task-row";
 import { SIDEBAR_LAYOUT_TAB_HREF } from "@/lib/settings-discovery/catalog/preferences";
 
 /**
@@ -131,7 +133,7 @@ type AppNavSectionsProps = {
   pluginActions?: ReactNode;
   pluginWorkspaceContext?: MobilePluginWorkspaceContext;
   resources?: ReactNode;
-  afterPrimary?: ReactNode;
+  taskNavigation?: ReactNode;
   quickActions?: ReactNode;
   phoneNavigation?: boolean;
   controls: AppNavDialogControls;
@@ -151,7 +153,7 @@ export function AppNavSections({
   pluginActions,
   pluginWorkspaceContext,
   resources,
-  afterPrimary,
+  taskNavigation,
   quickActions,
   phoneNavigation = false,
   controls,
@@ -168,7 +170,6 @@ export function AppNavSections({
           omitDestinations={omitDestinations}
           quickActions={quickActions}
           homeCoversListings={phoneNavigation}
-          afterPrimary={afterPrimary}
         />
       ) : (
         !omit.has("primary") && (
@@ -190,7 +191,6 @@ export function AppNavSections({
           {t("sidebar:taskViews")}
         </Button>
       )}
-      {!hasSavedSidebarLayout && afterPrimary}
       {workspaceActions}
       {!omit.has("plugins") && (
         <MobilePluginNavSection
@@ -207,6 +207,7 @@ export function AppNavSections({
           collapsible={phoneNavigation}
         />
       )}
+      {taskNavigation}
       {resources}
       <UtilityNavSection
         onNavigate={onNavigate}
@@ -228,6 +229,7 @@ function PrimaryNavSection({
   phoneNavigation: boolean;
   quickActions?: ReactNode;
 }) {
+  const inOffice = useInOffice();
   const all = useStaticDestinations("mobileMenu", "primary");
   const destinations = all.filter((destination) => !omitDestinations.includes(destination.id));
   if (destinations.length === 0) return null;
@@ -236,6 +238,9 @@ function PrimaryNavSection({
       className={cn("flex flex-col", phoneNavigation ? "gap-2" : "gap-3")}
       data-testid="app-nav-primary"
     >
+      {phoneNavigation && !inOffice && !omitDestinations.includes("new_task") && (
+        <MobileNewTaskRow onNavigate={onNavigate} />
+      )}
       <DestinationRows
         destinations={destinations}
         onNavigate={onNavigate}

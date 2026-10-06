@@ -1457,12 +1457,9 @@
         section: FIXTURE_SIDEBAR_SECTION,
       });
       // Three more sidebar-footer items so this one plugin install alone
-      // produces P = 4 (budget MAX_INLINE_PLUGIN_FOOTER_ITEMS = 3, plus one
-      // over-budget item) — enough to drive the desktop footer's overflow
-      // trigger and menu with the real Radix DropdownMenu in a browser (see
-      // plugins.spec.ts's overflow test). The budget counts destinations,
-      // not distinct plugins, so one plugin registering 4 items exercises
-      // the same partition as 4 plugins registering 1 each. Labeled
+      // provides four ordered entries for the desktop utilities menu.
+      // The browser test verifies that every destination remains reachable.
+      // These entries are labeled
       // "E2E Overflow Item N" rather than a numbered suffix of the first
       // item's own label ("E2E Insights Tools") so Playwright's default
       // substring name matching can't accidentally match more than one of

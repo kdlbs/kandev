@@ -18,6 +18,12 @@ import type {
   Repository,
 } from "../../lib/types/http";
 import type { Agent, AgentProfile, AvailableAgent } from "../../lib/types/http-agents";
+import type {
+  Coordinator,
+  CoordinatorListResponse,
+  CreateCoordinatorRequest,
+  Proposal,
+} from "../../lib/api/domains/coordinator-api";
 import type { SidebarTaskColorAutomation } from "../../lib/task-color-automation-settings";
 import { normalizeAgentProfile } from "../../lib/api/domains/agent-profile-normalize";
 import type {
@@ -554,6 +560,31 @@ export class ApiClient {
 
   async listWorkspaces(): Promise<{ workspaces: Workspace[]; total: number }> {
     return this.request("GET", "/api/v1/workspaces");
+  }
+
+  // --- Coordinator (docs/specs/coordinator/) ---
+
+  async createCoordinator(
+    workspaceId: string,
+    req: CreateCoordinatorRequest,
+  ): Promise<Coordinator> {
+    return this.request("POST", `/api/v1/workspaces/${workspaceId}/coordinators`, req);
+  }
+
+  async listCoordinators(workspaceId: string): Promise<CoordinatorListResponse> {
+    return this.request("GET", `/api/v1/workspaces/${workspaceId}/coordinators`);
+  }
+
+  /** GET .../coordinators/:cid/proposals/:pid, for polling proposal state (e.g. status, task_id) from the backend directly. */
+  async getProposal(
+    workspaceId: string,
+    coordinatorId: string,
+    proposalId: string,
+  ): Promise<Proposal> {
+    return this.request(
+      "GET",
+      `/api/v1/workspaces/${workspaceId}/coordinators/${coordinatorId}/proposals/${proposalId}`,
+    );
   }
 
   async createWorkflow(workspaceId: string, name: string, templateId?: string): Promise<Workflow> {
@@ -1375,6 +1406,7 @@ export class ApiClient {
     auto_focus_new_tasks?: boolean;
     unread_divider?: boolean;
     agent_generated_task_titles?: boolean;
+    message_time_display?: "relative" | "absolute_short" | "absolute_long";
     agent_tab_close_behavior?: "delete_session" | "hide_panel";
     mcp_task_agent_profile_default?: MCPTaskAgentProfileDefault;
     show_anchored_prompt_bar?: boolean;

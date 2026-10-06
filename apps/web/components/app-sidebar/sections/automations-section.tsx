@@ -3,7 +3,6 @@
 import { useTranslation } from "react-i18next";
 import { IconBolt, IconListDetails, IconLoader2 } from "@tabler/icons-react";
 import Link from "@/components/routing/app-link";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { useAppStore } from "@/components/state-provider";
 import {
   STATE_DOT_CLASS,
@@ -28,27 +27,21 @@ import { AppSidebarSection } from "../app-sidebar-section";
 
 const NEW_AUTOMATION_HREF = "/settings/automations";
 
-/**
- * The full list, reachable from the section header. These rows carry a name and
- * a dot; the list page adds the next firing and what each one last said, which
- * is more than a sidebar row should try to hold.
- */
-function OpenListShortcut() {
+function OpenAutomationsLink({ active }: { active: boolean }) {
   const { t } = useTranslation();
   return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <Link
-          href={AUTOMATIONS_HREF}
-          aria-label={t("automations:openAutomations")}
-          data-testid="automations-all-runs"
-          className="flex h-5 w-5 items-center justify-center rounded text-muted-foreground/70 hover:bg-muted/60 hover:text-foreground cursor-pointer transition-colors"
-        >
-          <IconListDetails className="h-3.5 w-3.5" />
-        </Link>
-      </TooltipTrigger>
-      <TooltipContent side="right">{t("automations:openAutomations")}</TooltipContent>
-    </Tooltip>
+    <Link
+      href={AUTOMATIONS_HREF}
+      aria-current={active ? "page" : undefined}
+      data-testid="automations-all-runs"
+      className={cn(
+        "flex min-h-8 items-center gap-2.5 px-2.5 py-1.5 [@media(pointer:coarse)]:min-h-11 text-[13px] font-medium rounded-md cursor-pointer",
+        active ? SIDEBAR_ITEM_ACTIVE : SIDEBAR_ITEM_INACTIVE,
+      )}
+    >
+      <IconListDetails className="h-4 w-4 shrink-0" aria-hidden="true" />
+      <span className="flex-1 truncate">{t("automations:openAutomations")}</span>
+    </Link>
   );
 }
 
@@ -151,12 +144,11 @@ export function AutomationsSection({ collapsed }: { collapsed: boolean }) {
 
   return (
     <AppSidebarSection
+      presentation="navigation"
       id={APP_SIDEBAR_SECTION_IDS.automations}
       label={t("automations:automations")}
       collapsed={collapsed}
       icon={IconBolt}
-      headerAction={<OpenListShortcut />}
-      headerActionVisibility="always"
       defaultExpanded={false}
       collapsedSummary={rows.length > 0 ? rows.length : undefined}
     >
@@ -171,6 +163,7 @@ export function AutomationsSection({ collapsed }: { collapsed: boolean }) {
           />
         ))
       )}
+      <OpenAutomationsLink active={pathname === AUTOMATIONS_HREF} />
     </AppSidebarSection>
   );
 }

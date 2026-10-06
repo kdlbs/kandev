@@ -18,6 +18,14 @@ Agent authentication is separate from repository and integration credentials.
 3. Create a profile and verify model, mode, permissions, environment, and executor compatibility.
 4. Use the advanced sections only when you need passthrough, MCP, or custom launch behavior.
 
+## Agent page options
+
+On **Settings > Agents**, select **Options** beside **Terminal** to open Agent
+options. Turn on **Hide disabled profiles from navigation** to remove disabled
+profiles from the Settings navigation tree. Disabled profiles remain available
+on the Agents page, and the preference applies immediately in this browser
+profile.
+
 ## Install or detect an agent
 
 Open **Settings > Agents** (`/settings/agents`). Kandev scans the host on which its backend runs, not the browser computer.

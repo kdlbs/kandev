@@ -377,6 +377,10 @@ type promptTurnState struct {
 	continuationPermissions     uint16
 	continuationPermissionTools map[string]struct{}
 	continuationUnsafe          bool
+	capacityTools               map[string]capacityToolEvidence
+	capacityUnknown             bool
+	capacityBackground          bool
+	capacityPermissions         int
 	allowHandoff                bool
 	handedOff                   bool
 	gateOwned                   bool
