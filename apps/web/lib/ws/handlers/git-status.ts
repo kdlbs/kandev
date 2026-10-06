@@ -186,7 +186,13 @@ function applyAcceptedGitStatus(
     repositoryName,
     refreshForAcceptedStatus(event, ordering),
   );
-  if (repositoryName === "") {
+  const foregroundRefresh = state.gitStatus.refreshByEnvironmentId?.[environmentId];
+  // Notifications can update the data while a foreground request is in flight.
+  // Its coordinator must retain ownership until the correlated response arrives.
+  if (
+    repositoryName === "" &&
+    !(foregroundRefresh?.state === "pending" && foregroundRefresh.request_id)
+  ) {
     state.setGitStatusRefresh(environmentId, undefined, null);
   }
   return changed;
