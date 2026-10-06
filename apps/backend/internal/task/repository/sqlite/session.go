@@ -3873,6 +3873,21 @@ func (r *Repository) HasActiveTaskSessionsByAgentProfile(ctx context.Context, ag
 	return err == nil, err
 }
 
+// HasTaskSessionsByAgentProfile reports whether a profile has any persisted
+// session, including completed sessions used as evidence of prior agent use.
+func (r *Repository) HasTaskSessionsByAgentProfile(ctx context.Context, agentProfileID string) (bool, error) {
+	var exists int
+	err := r.ro.QueryRowContext(ctx, r.ro.Rebind(`
+		SELECT 1 FROM task_sessions
+		WHERE agent_profile_id = ? OR execution_profile_id = ?
+		LIMIT 1
+	`), agentProfileID, agentProfileID).Scan(&exists)
+	if err == sql.ErrNoRows {
+		return false, nil
+	}
+	return err == nil, err
+}
+
 func (r *Repository) GetActiveTaskInfoByAgentProfile(ctx context.Context, agentProfileID string) ([]agentdto.ActiveTaskInfo, error) {
 	// This list is "what is blocking this deletion", and automation runs sit on
 	// both sides of that question.

@@ -4,11 +4,16 @@ import { createContext, useContext, useEffect, useState, type ReactNode } from "
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
   createSystemInfoQueryKey,
+  DATABASE_STATS_QUERY_KEY_PREFIX,
   SYSTEM_INFO_QUERY_KEY_PREFIX,
   useSystemInfoQueryIdentity,
 } from "@/hooks/domains/system/system-info-query";
 
 const SystemInfoBootIdContext = createContext<string | undefined>(undefined);
+
+function hasQueryKeyPrefix(queryKey: readonly unknown[], prefix: readonly string[]): boolean {
+  return prefix.every((segment, index) => queryKey[index] === segment);
+}
 
 export function SystemInfoQueryProvider({
   bootId,
@@ -18,7 +23,7 @@ export function SystemInfoQueryProvider({
   children: ReactNode;
 }) {
   const identity = useSystemInfoQueryIdentity(bootId);
-  const identityKey = JSON.stringify(createSystemInfoQueryKey(identity));
+  const identityKey = JSON.stringify(createSystemInfoQueryKey(identity).slice(2));
 
   return (
     <SystemInfoBootIdContext.Provider value={bootId}>
@@ -42,9 +47,15 @@ function ScopedQueryClient({
 
   useEffect(() => {
     const obsoleteQueries = {
-      queryKey: SYSTEM_INFO_QUERY_KEY_PREFIX,
-      predicate: (query: { queryKey: readonly unknown[] }) =>
-        JSON.stringify(query.queryKey) !== identityKey,
+      predicate: (query: { queryKey: readonly unknown[] }) => {
+        const { queryKey } = query;
+        const isSystemInfo = hasQueryKeyPrefix(queryKey, SYSTEM_INFO_QUERY_KEY_PREFIX);
+        const isDatabaseStats = hasQueryKeyPrefix(queryKey, DATABASE_STATS_QUERY_KEY_PREFIX);
+
+        return (
+          (isSystemInfo || isDatabaseStats) && JSON.stringify(queryKey.slice(2)) !== identityKey
+        );
+      },
     };
     void queryClient.cancelQueries(obsoleteQueries);
     queryClient.removeQueries(obsoleteQueries);

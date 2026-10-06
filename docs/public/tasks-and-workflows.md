@@ -36,6 +36,7 @@ The task carries the outcome through the workflow. The repository and session pr
 - [Find and organize tasks](#find-and-organize-tasks)
 - [Use the task plan](#use-the-task-plan)
 - [Arrange task panels](#arrange-task-panels)
+- [Manage forwarded ports](#manage-forwarded-ports)
 - [Archive, unarchive, and delete](#archive-unarchive-and-delete)
 
 **Configure workflows**
@@ -45,6 +46,21 @@ The task carries the outcome through the workflow. The repository and session pr
 - [Troubleshooting](#troubleshooting)
 
 </details>
+
+## Manage forwarded ports
+
+Enable **Port forwarding** from the task's `+` menu on desktop or the active-task
+drawer on a phone, then open the network control in the task top bar.
+
+**Forwarded ports** appears first with the number of active tunnels. Each row
+shows **Forwarding**, its dedicated tunnel URL, and controls to open, copy, or
+stop that tunnel. **Other ports** lists detected and manually added ports that
+you can start forwarding. Each group sorts by target port number.
+
+A proxy URL is also available for each listed port. A proxy link alone does not
+mean a dedicated tunnel is active. Starting a tunnel moves the port to the top
+group; stopping it keeps the port available to restart during that dialog visit.
+Closing the dialog leaves active tunnels running.
 
 ## Keep your view when creating tasks
 

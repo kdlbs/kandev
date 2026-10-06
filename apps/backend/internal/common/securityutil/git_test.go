@@ -2,6 +2,20 @@ package securityutil
 
 import "testing"
 
+// @covers AC-PLATFORM-WORKSPACE-GIT-STATUS-001.47
+func TestIsKnownSafeGitFlagDiscardStatus(t *testing.T) {
+	for _, flag := range []string{"-z", "--untracked-files=no"} {
+		if !IsKnownSafeGitFlag(flag) {
+			t.Errorf("required Discard status flag %q rejected", flag)
+		}
+	}
+	for _, flag := range []string{"-zz", "--untracked-files=all", "--untracked-files=no-extra"} {
+		if IsKnownSafeGitFlag(flag) {
+			t.Errorf("unsupported Discard status variant %q admitted", flag)
+		}
+	}
+}
+
 // @covers AC-PLATFORM-GIT-DIFF-FILE-METADATA-001.10
 func TestIsKnownSafeGitFlagAllowsNoTextconv(t *testing.T) {
 	if !IsKnownSafeGitFlag("--no-textconv") {

@@ -25,6 +25,7 @@ test.describe("System Backups page", () => {
     await deleteAllManualBackups(apiClient);
   });
 
+  // @covers AC-SYSTEM-PAGE-DATABASE-STATS-SNAPSHOT-001.5
   test("shows the resolved backup directory from database stats", async ({
     testPage,
     apiClient,

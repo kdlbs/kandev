@@ -5,7 +5,6 @@ import { createSystemSlice, defaultSystemState } from "./system-slice";
 import type { SystemSlice } from "./types";
 import type {
   DiskUsageResponse,
-  DatabaseStats,
   SnapshotInfo,
   UpdatesResponse,
   SystemJob,
@@ -13,6 +12,7 @@ import type {
 } from "@/lib/types/system";
 
 const TS = "2026-05-18T00:00:00Z";
+const SNAPSHOT_AT = "2026-05-17T00:00:00Z";
 
 function makeStore() {
   return create<SystemSlice>()(
@@ -38,30 +38,10 @@ const DISK_USAGE: DiskUsageResponse = {
   home_dir: "/data/kandev",
 };
 
-const DB_STATS_AT = "2026-05-17T00:00:00Z";
-
-const DB_STATS: DatabaseStats = {
-  driver: "sqlite",
-  path: "/data/kandev.db",
-  backup_directory: "/data/backups",
-  size_bytes: 12345,
-  wal_size_bytes: 678,
-  message_content_bytes: 100,
-  message_metadata_bytes: 200,
-  message_payload_bytes: 300,
-  git_snapshot_bytes: 400,
-  logical_stats_state: "ready",
-  logical_stats_measured_at: DB_STATS_AT,
-  metadata_stale: false,
-  metadata_measured_at: DB_STATS_AT,
-  schema_version: "1.0.0",
-  last_backup_at: DB_STATS_AT,
-};
-
 const SNAPSHOT: SnapshotInfo = {
   name: "manual-1.db",
   size_bytes: 1024,
-  mtime: DB_STATS_AT,
+  mtime: SNAPSHOT_AT,
   kind: "manual",
 };
 
@@ -175,7 +155,7 @@ describe("system slice", () => {
     const s = store.getState();
     expect(s.system).toEqual(defaultSystemState.system);
     expect(s.system.diskUsage).toBeNull();
-    expect(s.system.database).toBeNull();
+    expect("database" in s.system).toBe(false);
     expect(s.system.backups).toEqual({ items: [], loaded: false });
     expect(s.system.updates).toBeNull();
     expect(s.system.jobs).toEqual({});
@@ -189,12 +169,6 @@ describe("system slice", () => {
     const computing: DiskUsageResponse = { data: null, computing: true, home_dir: "/data/kandev" };
     store.getState().setSystemDiskUsage(computing);
     expect(store.getState().system.diskUsage).toEqual(computing);
-  });
-
-  it("setSystemDatabase stores the stats", () => {
-    const store = makeStore();
-    store.getState().setSystemDatabase(DB_STATS);
-    expect(store.getState().system.database).toEqual(DB_STATS);
   });
 
   it("setSystemRetention stores the status", () => {

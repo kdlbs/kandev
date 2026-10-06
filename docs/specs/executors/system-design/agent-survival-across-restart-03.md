@@ -161,6 +161,14 @@ Two rows are worth their own paragraph:
 
 ### Turn outcome across the detached gap
 
+The process manager protects retained-outcome recorder and instance-ID wiring
+with a dedicated zero-value mutex. Set, clear and publication capture this pair
+under that mutex and release it before invoking recorder callbacks. Terminal
+publication never acquires the lifecycle mutex: Stop holds that mutex while
+joining the exit and forwarding goroutines that publish terminal outcomes.
+Retained event copies and delivered control-turn stamping remain unchanged.
+
+
 Two distinct losses have to be closed, and they need different mechanisms.
 
 The first is the completion waiter. The in-memory channel a prompt waits on is

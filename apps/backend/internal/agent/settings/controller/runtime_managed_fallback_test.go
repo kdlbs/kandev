@@ -21,7 +21,7 @@ func TestNativeHostPreservesManagedFallbackSelectionAndRecovery(t *testing.T) {
 	t.Setenv("PATH", dir)
 	ag := agents.NewOpenCodeACP()
 	spec := ag.ManagedNPMRuntime()
-	updater := &recoveryRuntimeUpdater{metadata: RuntimeVersionMetadata{Latest: "9.0.0", Versions: []string{"9.0.0", "8.0.0", spec.DefaultVersionOrPinned()}}, currentFound: true, current: hostutility.AgentCapabilities{Status: hostutility.StatusOK, AgentVersion: "1.0.0"}, probeCaps: hostutility.AgentCapabilities{Status: hostutility.StatusOK, AgentVersion: "9.0.0"}}
+	updater := &recoveryRuntimeUpdater{metadata: RuntimeVersionMetadata{Latest: "1.19.0", Versions: []string{"1.19.0", "1.18.32", spec.DefaultVersionOrPinned()}}, currentFound: true, current: hostutility.AgentCapabilities{Status: hostutility.StatusOK, AgentVersion: "1.0.0"}, probeCaps: hostutility.AgentCapabilities{Status: hostutility.StatusOK, AgentVersion: "1.19.0"}}
 	c := newTestController(map[string]agents.Agent{ag.ID(): ag})
 	c.SetRuntimeUpdater(updater)
 	selection := newRecoverySelectionStore()
@@ -30,17 +30,17 @@ func TestNativeHostPreservesManagedFallbackSelectionAndRecovery(t *testing.T) {
 	c.SetJobBroadcaster(hub)
 	c.updateJobStore.onRefresh = nil
 	ctx := context.Background()
-	if err := selection.Save(ctx, ag.ID(), spec.Package, "8.0.0"); err != nil {
+	if err := selection.Save(ctx, ag.ID(), spec.Package, "1.18.32"); err != nil {
 		t.Fatal(err)
 	}
-	if item := c.buildRuntimeUpdateDTO(ctx, ag, true); item == nil || item.CurrentVersion != "" || item.EffectiveVersion != "8.0.0" {
+	if item := c.buildRuntimeUpdateDTO(ctx, ag, true); item == nil || item.CurrentVersion != "" || item.EffectiveVersion != "1.18.32" {
 		t.Fatalf("native host hid or misidentified managed fallback: %+v", item)
 	}
-	preview, err := c.PreviewAgentUpdate(ctx, ag.ID(), "9.0.0")
-	if err != nil || preview.CurrentVersion != "" || !strings.Contains(preview.CommandString, "--package=opencode-ai@9.0.0") {
+	preview, err := c.PreviewAgentUpdate(ctx, ag.ID(), "1.19.0")
+	if err != nil || preview.CurrentVersion != "" || !strings.Contains(preview.CommandString, "--package=opencode-ai@1.19.0") {
 		t.Fatalf("fallback preview: %+v,%v", preview, err)
 	}
-	for _, target := range []string{"9.0.0", "8.0.0", ""} {
+	for _, target := range []string{"1.19.0", "1.18.32", ""} {
 		var job *dto.AgentUpdateJobDTO
 		if target == "" {
 			job, err = c.EnqueueAgentUpdateUseDefault(ctx, ag.ID())

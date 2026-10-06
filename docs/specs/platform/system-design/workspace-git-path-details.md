@@ -4,7 +4,7 @@ system: platform
 requirements:
   - REQ-PLATFORM-WORKSPACE-GIT-STATUS-001
 created: 2026-10-02
-updated: 2026-10-06
+updated: 2026-10-07
 owners:
   - kandev
 ---
@@ -23,6 +23,8 @@ Platform owns workspace observation and detail identity. Tasks retains environme
 | AC-PLATFORM-WORKSPACE-GIT-STATUS-001.10, .11, .37, .38, .44 | Literal selected paths |
 | AC-PLATFORM-WORKSPACE-GIT-STATUS-001.7, .31, .33 | Preserved execution and quality contracts |
 | AC-PLATFORM-WORKSPACE-GIT-STATUS-001.45 | Plain selected patches |
+| AC-PLATFORM-WORKSPACE-GIT-STATUS-001.46 | Built-in selected patches |
+| AC-PLATFORM-WORKSPACE-GIT-STATUS-001.44, .47 | Selected staged renames |
 
 ## NUL-framed path records
 
@@ -110,10 +112,11 @@ for literal-marker parsing and exact case matching. Environment capture, filteri
 validation, admission and deadlines remain owned by that command runner.
 Classification observes the selected literal file rather than a wildcard-matching sibling.
 Filesystem deletion continues to use the original filename with `os.Remove`, never the
-internal pathspec. Preserve empty-list rejection, empty-entry Git rejection, status-error
-fallback, existing classification, per-file error aggregation, locking and `triggerRefresh`.
-No directory deletion, rename parsing, rollback, global environment policy, or Stage/Unstage
-change is introduced.
+internal pathspec. Preserve empty-list and empty-entry rejection, ordinary classification,
+per-file error aggregation, locking and `triggerRefresh`. The selected staged-rename
+extension below preflights pairing before mutation and supersedes status-error fallback
+when pairing cannot be established. It adds no directory deletion, rollback, global
+environment policy, or Stage/Unstage change.
 
 The registered `POST /api/v1/git/discard` route binds `GitDiscardRequest`, rejects an empty
 list, resolves `req.Repo` through `gitOpForRepo` / `Manager.GitOperatorFor`, then calls
@@ -127,6 +130,84 @@ copy, or responsive behavior; real operator and HTTP tests cover the shared outc
 The earlier Stage/Unstage package's tracked bracket and added Discard controls remain
 passing controls. The distinct magic-name and mixed untracked/tracked cases are covered
 by the [Discard selection package](../../../plans/git-discard-literal-selections/plan.md).
+
+## Selected staged renames
+
+This extends the literal Discard contract owned by the [workspace status requirement](../requirements/workspace-git-status.md).
+The main workspace design is near its size limit; this existing path-details supplement
+remains the technical owner for selected mutations. It does not change tracker publication.
+
+`task-changes-panel.tsx`'s `handleDiscard` and `changes-panel-hooks.ts`'s
+`getDiscardOperations` send destination filenames grouped by repository through
+`useSessionGit`. The registered discard route resolves `GitDiscardRequest.Repo`
+before invoking `GitOperator.Discard`. Do not add source-path request fields or trust
+cached UI origins as mutation authority.
+
+Under the existing operator lock, reject empty lists and empty entries, then obtain one
+fresh unfiltered tracked observation with `status --porcelain -z --untracked-files=no`.
+Reuse `runGitCommandWithEnvironment`, the captured repository environment and existing
+deadlines/admission. This must not enumerate untracked dependency trees. Preserve current
+Git rename configuration; do not force copy detection or invent pairs from similar blobs.
+The operator's validator needs only exact `-z` and `--untracked-files=no` additions to
+`securityutil.IsKnownSafeGitFlag`; variants remain rejected.
+
+Use a small Discard-local parser. Porcelain v1 NUL records are `XY SP destination NUL`;
+rename/copy records additionally carry `source NUL`, in that order. Preserve bytes without
+trimming, newline splitting, C-unquoting or arrow interpretation. Consume both paths for
+R/C records, but authorize source restoration only for index-status R; a selected worktree-only
+rename is unsupported. Count both endpoints of every R/C record when checking overlap, so
+a copy sharing a selected rename endpoint refuses the request. Copy-only endpoints do not
+trigger rename alias discovery or authorize source restoration. Detect malformed
+framing, empty endpoints and duplicate/conflicting endpoint associations rather than
+falling through to an added-file removal. The existing runner combines stdout/stderr;
+unexpected diagnostic bytes must fail framing, not become filenames or a successful pair.
+Do not migrate `WorkspaceTracker.applyPorcelainLine` or its text format in this repair.
+
+Only an explicitly selected destination can expand to its unique staged-rename source.
+Git accepts relative spellings such as `./destination`; comparison and endpoint exclusion
+must identify that same file. A platform-cleaned spelling is only a candidate, never admission
+authority. When it names a recognized rename endpoint but differs from the raw argument,
+read literal NUL status for the original argument through the existing runner and require
+exactly that canonical path. This preserves Git/process rejection of raw arguments (including
+NUL bytes) rather than cleaning away rejected components. Do not trim filename bytes or
+translate literal POSIX backslashes. Deduplicate verified destination aliases, and exclude
+all verified spellings of both selected endpoints from ordinary classification. Source-only
+and other ordinary selections retain their raw arguments and existing behavior. No shared
+path validator, broader path admission or ordinary-selection normalization is introduced.
+Preflight all selected pairs before any removal or restore. A source/destination chain,
+shared endpoint or conflict is unsupported. A literal HEAD tree read (`ls-tree -z HEAD --`
+with the existing literal path arguments and environment overrides) must prove a committed
+file source and no committed destination; gitlinks are unsupported. Tree records preserve
+`mode SP type SP oid TAB path NUL` framing, with no path trimming. `os.Lstat` must report
+the source absent. A recreated file, directory or dangling symlink counts as occupation;
+other stat errors refuse the request. Refuse even when an occupied source was separately
+selected: the conservative contract protects recreated content rather than inferring intent.
+At the rename mutation boundary recheck source absence. No new all-writer lock, transaction,
+snapshot framework or universal race guarantee is introduced.
+
+Build a deduplicated restore selection containing both eligible endpoints, and keep rename
+destinations out of `discardUntrackedFiles`. Use the existing
+`restore --source=HEAD --staged --worktree --` command with literal endpoints and selected
+environment overrides. Git restores the missing source and removes the indexed destination
+absent from HEAD in that command; do not unstage/remove the destination first. Ordinary
+selected files retain the existing tracked/added/untracked handling. Selecting a rename
+source alone remains literal. Multiple eligible pairs plus ordinary selections operate
+once per path. Copies and independent A/D rows never authorize an unselected origin.
+
+Failed pair reads, parsing or preflight return `Success=false` and a bounded explanatory
+`Error` in the existing result before request mutation. Do not claim that a destination
+was discarded while leaving its paired staged deletion. Execution failures remain truthful
+errors with existing aggregation and refresh; no whole-request rollback is promised after
+mutation starts. Pair capture and HEAD inspection do not write config, refs or content;
+Git may perform its ordinary index-stat refresh, so preservation means index membership,
+mode and blob content rather than byte-identical index-file bookkeeping.
+
+Desktop and phone retain their existing Changes actions, confirmation, success/error feedback
+and repository refresh. This is the mobile pure-data exception: no layout, navigation,
+touch, copy or responsive changes. Independent real operator and registered selected-repository
+HTTP tests include actual status-visible rename metadata, then assert source/destination
+membership and bytes, unrelated staged/worktree content and other repositories.
+See the [single-work-order rename package](../../../plans/git-discard-staged-renames/plan.md).
 
 ## Plain selected patches
 
@@ -143,7 +224,7 @@ escape bytes afterward: they can be real source content or filename bytes.
 Keep literal pathspecs, selected environment overrides, captured instance environment,
 observed HEAD and retained index, admission, deadlines, budgets, cancellation,
 carry-forward, and ready/unavailable propagation with their current owners.
-This correction introduces no external-diff/textconv policy, Git configuration writes,
+The color correction introduces no external-diff/textconv policy, Git configuration writes,
 parser change, new process, wire field, or standalone comparison change.
 
 `handleGitStatus` and `collectStatusForRepo` join `GetGitStatusWithDetails` when
@@ -160,11 +241,47 @@ no frontend, layout, navigation, touch, copy, or responsive contract changes.
 Tracker and HTTP evidence cover the changed boundary; no browser/build/E2E is needed.
 See the [plain-patch repair package](../../../plans/workspace-tracker-plain-patches/plan.md).
 
+## Built-in selected patches
+
+The four selected patch producers named above also pass the exact `--no-ext-diff`
+option before refs and `--`. This keeps bounded workspace patch representations
+on Git's built-in patch path even when repository `diff.external`, captured
+`GIT_EXTERNAL_DIFF`, or both would otherwise replace patch output and run a helper.
+`securityutil.IsKnownSafeGitFlag` already admits this exact option and rejects
+unsupported variants. Keep its policy and the existing `--no-color` options.
+
+The flag belongs to these four tracker producers, not to generic capped output,
+numstat, standalone comparisons, diff drivers or textconv. No shared helper policy,
+global configuration or environment filtering change is needed. Retain literal
+pathspec arguments, selected-command environment overrides, captured environment
+and index, observed HEAD, admission, stream lifetime, deadlines and all detail
+publication/budget/cancellation semantics. Do not parse or sanitize helper output
+after it runs. API and frontend projections continue to carry accepted file/facet
+data through the same contracts.
+
+Real tracker and registered selected/aggregate HTTP regressions use disposable
+independent repositories and the existing native test-binary external-helper
+patterns. Prove configured and environment helpers executable through actual Git
+positive controls, remove only their owned sentinels, then require built-in hunks
+and absent helper execution for ordinary/configured/environment/both modes.
+Exercise the real cached staged-enrichment boundary separately with no flattened
+patch, because a normal staged-only read can bypass that site. Check captured/live
+environment and repository read-only evidence around reads, along with exact
+status/count/facet/readiness and dirty/cache results. Retain native Windows cases;
+scope only filenames that its filesystem demonstrably cannot represent.
+
+This remains the pure-data mobile exception described above. No layout, touch,
+navigation, copy, responsive behavior or public API changes are introduced.
+The [built-in patch repair package](../../../plans/workspace-tracker-built-in-patches/plan.md)
+defines the targeted regression and compatibility evidence.
+
 ## Preserved execution and quality contracts
 
 Keep `runGitOutput` and `capDiffOutput`, admission classes, deadlines, cancellation,
 shared byte budgets, truncation, carry-forward, and ready/unavailable propagation unchanged.
-No extra Git processes, worker queues, configuration, metrics, or API fields are introduced.
+Patch enrichment introduces no extra Git processes. Selected rename preflight uses bounded
+reads through the existing operator runner. No worker queues, configuration, metrics or
+API fields are introduced.
 
 The branch aggregate command and `branchDiffTotals` retain their existing text protocol;
 they do not associate statistics with individual paths.
