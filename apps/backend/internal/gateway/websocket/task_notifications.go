@@ -205,6 +205,16 @@ func (b *TaskEventBroadcaster) broadcastEvent(ctx context.Context, event *bus.Ev
 		b.logger.Error("failed to build websocket notification", zap.String("action", action), zap.Error(err))
 		return nil
 	}
+	// Readiness can arrive through independently scheduled subscriptions, or
+	// race a session-subscription snapshot. Preserve observation time so clients
+	// can reject an older status even when it is delivered later.
+	switch action {
+	case ws.ActionSessionAgentctlStarting, ws.ActionSessionAgentctlReady, ws.ActionSessionAgentctlError:
+		if !event.Timestamp.IsZero() {
+			msg.Timestamp = event.Timestamp
+		}
+	}
+
 	sessionID := extractSessionID(event.Data)
 	b.logSessionStateMetadata(action, sessionID, event.Data)
 	if data, ok := event.Data.(map[string]interface{}); ok {

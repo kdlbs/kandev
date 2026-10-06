@@ -1214,9 +1214,14 @@ export const createSessionSlice: StateCreator<
           session?.agent_execution_id,
           status.agentExecutionId,
         );
-      draft.sessionAgentctl.itemsBySessionId[sessionId] = sameLiveExecution
+      const nextStatus = sameLiveExecution
         ? { ...status, status: "ready", startingExecutionId: status.agentExecutionId }
         : status;
+      const previous = draft.sessionAgentctl.itemsBySessionId[sessionId];
+      // Recovery may confirm the same status without execution or timestamp
+      // metadata. Keep the observation used to reject delayed snapshots.
+      draft.sessionAgentctl.itemsBySessionId[sessionId] =
+        previous?.status === nextStatus.status ? { ...previous, ...nextStatus } : nextStatus;
     }),
   setWorktree: (worktree) =>
     set((draft) => {

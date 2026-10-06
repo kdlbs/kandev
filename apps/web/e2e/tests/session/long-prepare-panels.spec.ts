@@ -65,6 +65,8 @@ test.describe("Long prepare (slow git fetch)", () => {
       await testPage.goto(`/t/${task.id}`);
       const session = new SessionPage(testPage);
       await session.waitForLoad();
+      // Persisted layouts can leave Changes active; mount Files before observing its loader.
+      await session.clickTab("Files");
 
       await expect
         .poll(() => fs.existsSync(startedFile), {
