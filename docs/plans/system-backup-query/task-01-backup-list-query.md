@@ -299,9 +299,17 @@ Implementation is complete locally against the merged QUERY-02 contract.
 
 - Dependency: PR #4225 merged at
   `059260b30fc68bbcbead629f7fa7e80f1ee0a5e8`. Initial implementation base:
-  `95c040e84951773dc8ed6f684fff0425d7b63f96`. During delivery the remote main
-  advanced to `05c41b11e830a9861534200949c3bbac473b57f7` via unrelated PR #4262;
-  final exact-current-main merge validation remains part of PR fixup.
+  `95c040e84951773dc8ed6f684fff0425d7b63f96`. Current remote main is
+  `05c41b11e830a9861534200949c3bbac473b57f7` via unrelated PR #4262.
+  Exact-current-main merge-tree validation passed for implementation commit
+  `4fe499fe4e68a9eb51fe87b12aaf61d9dc1d7b99`, producing tree
+  `e45391aa7811b5a84be83bfc49e27aa561ef1a5f`; it will be rerun on the final
+  pushed head.
+- Focused PR: [#4271](https://github.com/kdlbs/kandev/pull/4271),
+  `refactor: move backup list to Query`, targeting `main`. The PR is open and
+  linked to Kandev task `24c8f330-1bbd-4cb7-84af-1d86c9b335ca`. The exact
+  final PR head and exact-head CI/review disposition will be recorded in the
+  task handoff after `/pr-fixup` completes.
 - `pnpm --filter @kandev/web exec vitest run ...` with all 14 listed suites:
   passed, 159 tests. Coverage includes shared consumers, reload/error
   contracts, freshness, identity cleanup, retention attempt correlation,
@@ -313,6 +321,8 @@ Implementation is complete locally against the merged QUERY-02 contract.
 - `python3 scripts/lint-architecture.py --all`,
   `python3 scripts/list-docs.py validate`, and
   `python3 scripts/lint-spec-files.py --all`: passed.
+- `git diff --check`: passed before the implementation commit. The final
+  delivery-document commit and pushed head receive the same check.
 - Documentation-coverage preflight: covered by this work order, no errors.
 - PR capture: one disposable mobile-project spec captured and validated four
   synthetic desktop/phone Backups and reset-confirmation assets. The spec was
@@ -322,7 +332,8 @@ Implementation is complete locally against the merged QUERY-02 contract.
   cache ownership and retains the existing API, copy, permissions, and operator
   procedure; desktop and phone E2E preserve the user-facing behavior.
 
-Before completion, record `git diff --check`, PR URL, exact head/base SHAs,
-exact-head CI/review status, residual risks, and dependency order. Mark this
-work order done only after implementation, checks, and delivery are complete.
-Keep QUERY-03's tracker status pending merge until its PR actually merges.
+Before completion, record the final `git diff --check`, PR URL, exact base SHA,
+final head SHA, exact-head CI/review status, residual risks, and dependency
+order in the delivery record and task handoff. Mark this work order done only
+after implementation, checks, and delivery are complete. Keep QUERY-03's
+tracker status in progress until its PR actually merges.
