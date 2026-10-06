@@ -1,9 +1,16 @@
 import { describe, expect, it, vi } from "vitest";
 import type { StoreApi } from "zustand";
+import { fetchTaskSession } from "@/lib/api/domains/session-api";
 import type { AppState } from "@/lib/state/store";
 import type { BackendMessageMap } from "@/lib/types/backend";
+import type { TaskSession } from "@/lib/types/http";
 import { registerWsHandlers } from "@/lib/ws/router";
 import { registerSessionWorkspaceRecoveryHandlers } from "./session-workspace-recovery";
+
+vi.mock("@/lib/api/domains/session-api", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/api/domains/session-api")>()),
+  fetchTaskSession: vi.fn(),
+}));
 
 const TASK_ID = "task-1";
 const ENVIRONMENT_ID = "environment-1";
@@ -15,7 +22,11 @@ function makeStore(
 ): StoreApi<AppState> {
   return {
     getState: () =>
-      ({ setWorkspaceRecoveryProjection, bumpWorkspaceFilesRefresh }) as unknown as AppState,
+      ({
+        setWorkspaceRecoveryProjection,
+        bumpWorkspaceFilesRefresh,
+        taskSessions: { items: {} },
+      }) as unknown as AppState,
     setState: vi.fn(),
     subscribe: vi.fn(),
     destroy: vi.fn(),
@@ -97,6 +108,51 @@ describe("session.workspace_recovery.changed handler", () => {
     handler(recoveryMessage("completed"));
 
     expect(bumpWorkspaceFilesRefresh.mock.calls).toEqual(SESSION_IDS.map((id) => [id]));
+  });
+
+  it("refreshes recipient session inventory after the recovery settles", async () => {
+    const currentSession = {
+      id: SESSION_IDS[0],
+      task_id: TASK_ID,
+      task_environment_id: ENVIRONMENT_ID,
+      state: "WAITING_FOR_INPUT",
+      workspace_recovery: recoveryMessage("completed").payload.workspace_recovery,
+      worktrees: [{ repository_id: "repo-1", worktree_path: "/old/repo" }],
+    } as TaskSession;
+    const latestSession = {
+      ...currentSession,
+      worktrees: [{ repository_id: "repo-1", worktree_path: "/new/repo" }],
+    } as TaskSession;
+    const setTaskSession = vi.fn();
+    const setWorkspaceRecoveryProjection = vi.fn();
+    const bumpWorkspaceFilesRefresh = vi.fn();
+    const state = {
+      taskSessions: {
+        items: { [SESSION_IDS[0]]: currentSession },
+        workspaceRecoveryEpochBySession: {},
+      },
+      setTaskSession,
+      setWorkspaceRecoveryProjection,
+      bumpWorkspaceFilesRefresh,
+    } as unknown as AppState;
+    vi.mocked(fetchTaskSession).mockResolvedValue({ session: latestSession });
+    const handler = registerSessionWorkspaceRecoveryHandlers({
+      getState: () => state,
+      setState: vi.fn(),
+      subscribe: vi.fn(),
+      destroy: vi.fn(),
+      getInitialState: vi.fn(),
+    } as unknown as StoreApi<AppState>)["session.workspace_recovery.changed"]!;
+
+    handler(recoveryMessage("completed"));
+
+    await vi.waitFor(() => {
+      expect(setTaskSession).toHaveBeenCalledWith(
+        expect.objectContaining({ worktrees: latestSession.worktrees }),
+        expect.any(Object),
+      );
+    });
+    expect(fetchTaskSession).toHaveBeenCalledWith(SESSION_IDS[0]);
   });
 
   it("keeps the Files tree stable while workspace recovery is still running", () => {
