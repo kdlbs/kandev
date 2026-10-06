@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"testing"
+
+	"github.com/kandev/kandev/internal/task/models"
 )
 
 const testBindingKey = ReservedMetadataKeyPrefixCoordinator + "tool_policy"
@@ -89,7 +91,7 @@ func TestUpdateTaskReservedMetadata(t *testing.T) {
 }
 
 func TestProtectedTaskMetadataUpdatePreservesOnlyReservedKeys(t *testing.T) {
-	updated := protectedTaskMetadataUpdate(
+	updated := models.ProtectedTaskMetadataUpdate(
 		map[string]interface{}{"b": 2, testBindingKey: "x"},
 		map[string]interface{}{"a": 1},
 	)

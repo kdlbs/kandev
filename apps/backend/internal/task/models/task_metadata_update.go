@@ -5,11 +5,14 @@ import (
 	"strings"
 )
 
-// ReservedMetadataKeyPrefixCoordinator identifies coordinator-owned task metadata.
+// ReservedMetadataKeyPrefixCoordinator prefixes task metadata keys only the
+// coordinator service may write, such as the conversation's tool binding. An
+// update that omits one keeps it.
 const ReservedMetadataKeyPrefixCoordinator = "kandev.coordinator_"
 
 // ProtectedTaskMetadataUpdate replaces caller-owned metadata while retaining
-// the current server-owned lifecycle, handoff and causation records.
+// the current server-owned lifecycle, handoff, causation and coordinator
+// reserved records.
 func ProtectedTaskMetadataUpdate(existing, requested map[string]interface{}) map[string]interface{} {
 	updated := maps.Clone(requested)
 	if updated == nil {
@@ -25,10 +28,11 @@ func ProtectedTaskMetadataUpdate(existing, requested map[string]interface{}) map
 		}
 	}
 	for key, value := range existing {
-		if strings.HasPrefix(key, ReservedMetadataKeyPrefixCoordinator) {
-			if _, present := updated[key]; !present {
-				updated[key] = value
-			}
+		if !strings.HasPrefix(key, ReservedMetadataKeyPrefixCoordinator) {
+			continue
+		}
+		if _, present := updated[key]; !present {
+			updated[key] = value
 		}
 	}
 	return updated
