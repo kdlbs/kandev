@@ -5,6 +5,35 @@ import { registerTaskSessionHandlers } from "./agent-session";
 const RESTART_TIME = "2026-10-06T02:37:40Z";
 const ORIGINAL_TIME = "2026-10-06T02:37:39Z";
 
+function expectNewRestartToRejectOldReadiness(): void {
+  const store = createAppStore();
+  const handlers = registerTaskSessionHandlers(store);
+  store.getState().setSessionAgentctlStatus("session-1", {
+    status: "ready",
+    agentExecutionId: "old",
+    updatedAt: ORIGINAL_TIME,
+  });
+  const invalidate = vi.fn(store.getState().invalidateConfirmedConfigOptions);
+  store.setState({ invalidateConfirmedConfigOptions: invalidate });
+  handlers["session.agentctl_starting"]!({
+    type: "notification",
+    action: "session.agentctl_starting",
+    timestamp: RESTART_TIME,
+    payload: { session_id: "session-1", agent_execution_id: "new" },
+  } as never);
+  expect(invalidate).toHaveBeenCalledExactlyOnceWith("session-1", "new");
+  handlers["session.agentctl_ready"]!({
+    type: "notification",
+    action: "session.agentctl_ready",
+    timestamp: "2026-10-06T02:37:39.5Z",
+    payload: { session_id: "session-1", agent_execution_id: "old" },
+  } as never);
+  expect(store.getState().sessionAgentctl.itemsBySessionId["session-1"]).toMatchObject({
+    status: "starting",
+    agentExecutionId: "new",
+  });
+}
+
 describe("agentctl observation ordering", () => {
   it.each([
     ["ready", "starting"],
@@ -22,6 +51,8 @@ describe("agentctl observation ordering", () => {
     // Session-status recovery can confirm readiness without observation metadata.
     store.getState().setSessionAgentctlStatus("session-1", { status: current });
     const upsert = vi.spyOn(store.getState(), "upsertTaskSessionFromEvent");
+    const invalidate = vi.fn(store.getState().invalidateConfirmedConfigOptions);
+    store.setState({ invalidateConfirmedConfigOptions: invalidate });
     handlers[`session.agentctl_${delayed}`]!({
       type: "notification",
       action: `session.agentctl_${delayed}`,
@@ -35,6 +66,7 @@ describe("agentctl observation ordering", () => {
       },
     } as never);
     expect(upsert).not.toHaveBeenCalled();
+    expect(invalidate).not.toHaveBeenCalled();
     expect(store.getState().sessionAgentctl.itemsBySessionId["session-1"]).toMatchObject({
       status: current,
       agentExecutionId: "execution-1",
@@ -42,31 +74,10 @@ describe("agentctl observation ordering", () => {
     });
   });
 
-  it("accepts a newer restart and rejects readiness from the previous execution", () => {
-    const store = createAppStore();
-    const handlers = registerTaskSessionHandlers(store);
-    store.getState().setSessionAgentctlStatus("session-1", {
-      status: "ready",
-      agentExecutionId: "old",
-      updatedAt: ORIGINAL_TIME,
-    });
-    handlers["session.agentctl_starting"]!({
-      type: "notification",
-      action: "session.agentctl_starting",
-      timestamp: RESTART_TIME,
-      payload: { session_id: "session-1", agent_execution_id: "new" },
-    } as never);
-    handlers["session.agentctl_ready"]!({
-      type: "notification",
-      action: "session.agentctl_ready",
-      timestamp: "2026-10-06T02:37:39.5Z",
-      payload: { session_id: "session-1", agent_execution_id: "old" },
-    } as never);
-    expect(store.getState().sessionAgentctl.itemsBySessionId["session-1"]).toMatchObject({
-      status: "starting",
-      agentExecutionId: "new",
-    });
-  });
+  it(
+    "accepts a newer restart and rejects readiness from the previous execution",
+    expectNewRestartToRejectOldReadiness,
+  );
 
   it("does not promote a restarted execution from an older live-state snapshot", () => {
     const store = createAppStore();
