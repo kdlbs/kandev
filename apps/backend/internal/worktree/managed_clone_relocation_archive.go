@@ -135,6 +135,8 @@ func (m *Manager) reconcilePublishedManagedCloneRelocation(
 		}
 		return true, nil
 	}
+	// A completed record without Original cannot result from successful
+	// retention, so treat it as persisted journal corruption.
 	if !managedCloneRelocationProofComplete(wt, slot.CloneRelocation) || strings.TrimSpace(record.OperationID) == "" || record.Original == "" {
 		return false, recoveryAdmissionError(*req, "completed relocation identity is incomplete")
 	}
@@ -240,7 +242,10 @@ func verifyCompletedManagedCloneDestination(
 		return "", managedCloneRelocationError(wt.TaskID, "completed replacement does not match the selected managed clone")
 	}
 	common, err := gitCommonDir(ctx, m, wt.Path)
-	if err != nil || !sameDirectoryIdentity(common, filepath.Join(destination, ".git")) ||
+	if err != nil {
+		return "", completedRelocationInspectionFailure(ctx, wt.TaskID, "published replacement clone could not be verified", err)
+	}
+	if !sameDirectoryIdentity(common, filepath.Join(destination, ".git")) ||
 		filepath.Clean(record.DestCommon) != filepath.Clean(filepath.Join(destination, ".git")) {
 		return "", managedCloneRelocationError(wt.TaskID, "published replacement clone could not be verified")
 	}
@@ -259,21 +264,37 @@ func verifyCompletedManagedCloneBranch(ctx context.Context, m *Manager, wt *Work
 		return managedCloneRelocationError(wt.TaskID, "published replacement branch identity is incomplete")
 	}
 	if _, err := m.runBoundedGitInspect(ctx, destination, "check-ref-format", "--branch", branch); err != nil {
-		return managedCloneRelocationError(wt.TaskID, "published replacement branch name is invalid")
+		return completedRelocationInspectionFailure(ctx, wt.TaskID, "published replacement branch name is invalid", err)
 	}
 	head, err := m.runBoundedGitInspect(ctx, wt.Path, "rev-parse", "--verify", "HEAD^{commit}")
-	if err != nil || !relocationCommitPattern.MatchString(strings.TrimSpace(head)) {
+	if err != nil {
+		return completedRelocationInspectionFailure(ctx, wt.TaskID, "published replacement commit could not be verified", err)
+	}
+	if !relocationCommitPattern.MatchString(strings.TrimSpace(head)) {
 		return managedCloneRelocationError(wt.TaskID, "published replacement commit could not be verified")
 	}
 	registeredHead, registered, err := registeredWorktreeHead(ctx, m, destination, wt.Path, branch)
-	if err != nil || !registered || strings.TrimSpace(registeredHead) != strings.TrimSpace(head) {
+	if err != nil {
+		return completedRelocationInspectionFailure(ctx, wt.TaskID, "published replacement worktree registration could not be verified", err)
+	}
+	if !registered || strings.TrimSpace(registeredHead) != strings.TrimSpace(head) {
 		return managedCloneRelocationError(wt.TaskID, "published replacement worktree registration could not be verified")
 	}
 	branchHead, err := m.runBoundedGitInspect(ctx, destination, "rev-parse", "--verify", "refs/heads/"+branch+"^{commit}")
-	if err != nil || strings.TrimSpace(branchHead) != strings.TrimSpace(head) {
+	if err != nil {
+		return completedRelocationInspectionFailure(ctx, wt.TaskID, "published replacement branch no longer identifies its checkout", err)
+	}
+	if strings.TrimSpace(branchHead) != strings.TrimSpace(head) {
 		return managedCloneRelocationError(wt.TaskID, "published replacement branch no longer identifies its checkout")
 	}
 	return nil
+}
+
+func completedRelocationInspectionFailure(ctx context.Context, taskID, reason string, err error) error {
+	if operationalErr := checkoutInspectionOperationalError(ctx, err); operationalErr != nil {
+		return operationalErr
+	}
+	return managedCloneRelocationError(taskID, reason)
 }
 
 func publishedRelocationClaimMatches(

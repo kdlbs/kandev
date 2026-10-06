@@ -113,6 +113,100 @@ func TestResumeSession_BlocksWorktreeRecoveryBeforeStateChangeOrLaunch(t *testin
 	}
 }
 
+func TestResumeSessionRechecksWorktreeAfterRequestBuild(t *testing.T) {
+	repo := newMockRepository()
+	setupLiveResumeTestFixture(repo)
+	env := seedSelectedWorktreeResumeEnvironment(repo, models.ExecutorIDWorktree, string(models.ExecutorTypeWorktree))
+	repo.sessions["sess-1"].TaskEnvironmentID = env.ID
+	repo.sessions["sess-1"].ExecutorID = models.ExecutorIDWorktree
+	agentManager := &mockAgentManager{}
+	exec := newTestExecutor(t, agentManager, repo)
+	var initialSnapshot models.WorkspaceRecoverySelectionSnapshot
+	var admissions int
+	exec.SetSelectedWorktreeRecoveryAdmission(func(_ context.Context, req worktree.RecoveryAdmissionRequest) (*worktree.RecoveryAdmission, error) {
+		admissions++
+		if admissions == 1 {
+			initialSnapshot = req.SelectionSnapshot
+			return nil, nil
+		}
+		if !initialSnapshot.Equal(req.SelectionSnapshot) {
+			t.Fatal("database selection changed between resume admissions")
+		}
+		return nil, &worktree.WorktreeRecoveryError{
+			TaskID: "task-1", Checkout: env.Repos[0].WorktreePath,
+			State: "missing_checkout", Reason: "checkout changed after preflight",
+		}
+	})
+
+	_, err := exec.ResumeSession(context.Background(), repo.sessions["sess-1"], true)
+	if !errors.Is(err, worktree.ErrWorktreeCorrupted) {
+		t.Fatalf("ResumeSession error = %v, want final checkout inspection error", err)
+	}
+	if admissions != 2 {
+		t.Fatalf("worktree admissions = %d, want preflight and pre-launch inspections", admissions)
+	}
+	if agentManager.launchAgentCallCount != 0 {
+		t.Fatalf("LaunchAgent calls = %d, want 0 after final checkout inspection failure", agentManager.launchAgentCallCount)
+	}
+}
+
+func TestResumeSessionSkipsOldWorktreeRecoveryAfterExecutorSwitch(t *testing.T) {
+	repo := newMockRepository()
+	setupLiveResumeTestFixture(repo)
+	session := repo.sessions["sess-1"]
+	session.ExecutorID = "executor-local-docker"
+	env := seedSelectedWorktreeResumeEnvironment(repo, models.ExecutorIDWorktree, string(models.ExecutorTypeWorktree))
+	session.TaskEnvironmentID = env.ID
+	repo.executors[session.ExecutorID] = &models.Executor{
+		ID: session.ExecutorID, Type: models.ExecutorTypeLocalDocker,
+	}
+	// The abandoned worktree checkout is deliberately missing. A resume that
+	// switches executor must not inspect or recover this old host checkout.
+	env.Repos[0].WorktreePath = "/missing/old-worktree"
+	agentManager := &mockAgentManager{}
+	exec := newTestExecutor(t, agentManager, repo)
+	var admissions int
+	exec.SetSelectedWorktreeRecoveryAdmission(func(context.Context, worktree.RecoveryAdmissionRequest) (*worktree.RecoveryAdmission, error) {
+		admissions++
+		return nil, &worktree.WorktreeRecoveryError{TaskID: "task-1", State: "missing_checkout", Reason: "old checkout must be skipped"}
+	})
+
+	if _, err := exec.ResumeSession(context.Background(), session, true); err != nil {
+		t.Fatalf("ResumeSession after executor switch: %v", err)
+	}
+	if admissions != 0 {
+		t.Fatalf("old worktree recovery admissions = %d, want 0", admissions)
+	}
+	if agentManager.launchAgentCallCount != 1 {
+		t.Fatalf("LaunchAgent calls = %d, want 1", agentManager.launchAgentCallCount)
+	}
+}
+
+func seedSelectedWorktreeResumeEnvironment(
+	repo *mockRepository,
+	executorID string,
+	executorType string,
+) *models.TaskEnvironment {
+	repo.executors[executorID] = &models.Executor{ID: executorID, Type: models.ExecutorType(executorType)}
+	env := &models.TaskEnvironment{
+		ID: "env-selected-worktree", TaskID: "task-1", ExecutorID: executorID,
+		ExecutorType: executorType, Status: models.TaskEnvironmentStatusReady,
+		TaskDirName: "task-root", WorkspacePath: "/tasks/task-1", OwnershipGeneration: 1,
+		Repos: []*models.TaskEnvironmentRepo{{
+			ID: "env-repo-selected-worktree", TaskEnvironmentID: "env-selected-worktree",
+			RepositoryID: "repo-selected-worktree", BranchSlug: "main", WorktreeID: "wt-selected-worktree",
+			WorktreePath: "/tasks/task-1/repository/main", WorktreeBranch: "feature/resume",
+			Status: "active", Position: 0,
+		}},
+	}
+	repo.taskEnvironments[env.ID] = env
+	repo.repositories["repo-selected-worktree"] = &models.Repository{
+		ID: "repo-selected-worktree", WorkspaceID: "workspace-1", Name: "repository",
+		SourceType: "local", LocalPath: "/repositories/selected",
+	}
+	return env
+}
+
 // setupLiveResumeTestFixture seeds a repo + task + session + executor-running
 // record suitable for exercising the ResumeSession launch path.
 func setupLiveResumeTestFixture(repo *mockRepository) {

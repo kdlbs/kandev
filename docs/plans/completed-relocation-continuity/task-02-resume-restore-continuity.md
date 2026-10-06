@@ -132,8 +132,11 @@ restore. Provider startup remains unused for restore and invalid inventory.
 The invalid-sibling test also exposed a caller defect: resume request setup could
 reconcile a shared Git origin before selected worktree admission, hiding the
 invalid sibling. Resume now admits the selected inventory before request setup
-and skips duplicate final admission only when the full selection snapshot stays
-unchanged. Changed selections still use the final admission check.
+for a selected Worktree executor and repeats selected admission immediately
+before provider launch. The second inspection catches checkout changes that
+occur during request setup, even when the database snapshot stays unchanged.
+Executor changes skip recovery of the abandoned Worktree, and inventory repair
+performs its admission after the repair request completes.
 
 Review follow-up fixed two resume-preflight regressions. Environment selection
 now resolves on a copy of the session, so the early snapshot retains the
@@ -166,4 +169,28 @@ Verification:
 - `python3 scripts/lint-spec-files.py --all`: all specification files passed.
 - Final-path PR documentation coverage preflight: passed with no errors.
 - `(cd apps/backend && go build -trimpath ./...)`: passed.
+- `git diff --check`: passed.
+
+Review follow-up verification:
+
+- `(cd apps/backend && go test ./internal/orchestrator/executor -run
+  '^(TestResumeSession_PropagatesTaskEnvironmentID|TestResumeSessionWorkspaceBindingReadFailureDoesNotRollBackSuccessorAttempt|TestResumeSessionWorkspaceBindingWriteErrorDoesNotRollBackSuccessorAttempt|TestResumeSessionChangedEnvironmentPreventsWorkspaceBindingWrite|TestResumeSessionRechecksWorktreeAfterRequestBuild|TestResumeSessionSkipsOldWorktreeRecoveryAfterExecutorSwitch)$' -count=1)`:
+  passed.
+- `(cd apps/backend && go test ./internal/orchestrator/executor -run
+  '^TestTerminalResumeCleansStaleExecutionBeforeRecoveryAdmission$' -count=1)`:
+  passed.
+- `(cd apps/backend && go test ./internal/orchestrator -run
+  '^TestCompletedRelocationLegacyEmptyEnvironmentBindingResumes$' -count=1)`:
+  passed.
+- `make -C apps/backend build`: passed.
+- `(cd apps/backend && go test ./internal/orchestrator/executor ./internal/orchestrator ./internal/worktree -count=1)`:
+  executor and worktree passed; the orchestrator package had one failure in
+  `TestResumeTurnStartGenuineFailureRetainsRecovery` during the combined run.
+- `(cd apps/backend && go test ./internal/orchestrator -run '^TestResumeTurnStartGenuineFailureRetainsRecovery$' -count=1)`: passed in isolation.
+- The next full orchestrator run exposed a stale count assertion in
+  `TestRecoverSessionPermissionRetryRetiresMatchingError`; the added final
+  pre-launch inspection makes the expected admission count four. The focused
+  test passed after updating the assertion.
+- `(cd apps/backend && go test ./internal/orchestrator -count=1)`: passed after
+  updating the admission-count assertion.
 - `git diff --check`: passed.

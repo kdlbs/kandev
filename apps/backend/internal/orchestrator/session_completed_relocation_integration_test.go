@@ -337,9 +337,9 @@ func newCompletedRelocationServiceFixture(t *testing.T, repositoryCount int) *co
 			require.NoError(t, os.MkdirAll(filepath.Dir(clone), 0o755))
 			sessionRecoveryGitRaw(t, filepath.Dir(clone), "clone", "--no-hardlinks", seed, clone)
 			sessionRecoveryGit(t, clone, "remote", "set-url", "origin", fmt.Sprintf("https://github.com/acme/%s.git", name))
+			sessionRecoveryGit(t, clone, "config", "user.email", "relocation@example.test")
+			sessionRecoveryGit(t, clone, "config", "user.name", "Relocation Test")
 		}
-		sessionRecoveryGit(t, slot.sourceClone, "config", "user.email", "relocation@example.test")
-		sessionRecoveryGit(t, slot.sourceClone, "config", "user.name", "Relocation Test")
 		sessionRecoveryGit(t, slot.sourceClone, "checkout", "-b", slot.branch)
 		tracked := fmt.Sprintf("branch-%d.txt", index+1)
 		require.NoError(t, os.WriteFile(filepath.Join(slot.sourceClone, tracked), []byte("branch work\n"), 0o644))

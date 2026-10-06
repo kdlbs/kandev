@@ -307,9 +307,9 @@ func (f *executorPermissionRecoveryFixture) createManagedClones(t *testing.T) {
 		}
 		runExecutorRecoveryGit(t, filepath.Dir(clone), "clone", "--no-hardlinks", seed, clone)
 		runExecutorRecoveryGit(t, clone, "remote", "set-url", "origin", "https://github.com/acme/widget.git")
+		runExecutorRecoveryGit(t, clone, "config", "user.email", "recovery@example.test")
+		runExecutorRecoveryGit(t, clone, "config", "user.name", "Recovery Test")
 	}
-	runExecutorRecoveryGit(t, f.sourceClone, "config", "user.email", "recovery@example.test")
-	runExecutorRecoveryGit(t, f.sourceClone, "config", "user.name", "Recovery Test")
 	runExecutorRecoveryGit(t, f.sourceClone, "checkout", "-b", f.branch)
 	if err := os.WriteFile(filepath.Join(f.sourceClone, "branch.txt"), []byte("unpublished commit\n"), 0o644); err != nil {
 		t.Fatalf("write managed branch content: %v", err)

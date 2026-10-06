@@ -141,16 +141,6 @@ func (e *Executor) captureSelectedWorkspaceRecoverySnapshot(
 	return selectionSnapshot, selectedRepositories, nil
 }
 
-func (e *Executor) selectedWorkspaceRecoverySnapshot(
-	ctx context.Context,
-	session *models.TaskSession,
-	env *models.TaskEnvironment,
-	sessionPersisted bool,
-) (models.WorkspaceRecoverySelectionSnapshot, error) {
-	snapshot, _, err := e.captureSelectedWorkspaceRecoverySnapshot(ctx, session, env, sessionPersisted)
-	return snapshot, err
-}
-
 // PreflightSessionWorktreeRecovery performs selected-environment recovery
 // before a recovery action mutates provider state such as its resume token.
 // The returned admission must remain held through LaunchSession.

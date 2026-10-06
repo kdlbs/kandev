@@ -522,7 +522,7 @@ func (m *mockRepository) UpdateTaskSession(ctx context.Context, session *models.
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.updateTaskSessionCalls = append(m.updateTaskSessionCalls, session)
-	m.sessions[session.ID] = session
+	m.sessions[session.ID] = cloneMockTaskSession(session)
 	return nil
 }
 
@@ -547,7 +547,7 @@ func (m *mockRepository) UpdateTaskSessionIfCurrentState(
 	}
 	m.updateTaskSessionSnapshots = append(m.updateTaskSessionSnapshots, cloneMockTaskSession(session))
 	m.updateTaskSessionCalls = append(m.updateTaskSessionCalls, session)
-	m.sessions[session.ID] = session
+	m.sessions[session.ID] = cloneMockTaskSession(session)
 	return true, nil
 }
 

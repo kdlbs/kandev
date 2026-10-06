@@ -1052,6 +1052,13 @@ type ResumeOptions struct {
 	Origin string
 }
 
+type resumePreflight struct {
+	persistedEnvironmentID string
+	selectedEnv            *models.TaskEnvironment
+	admission              *worktree.RecoveryAdmission
+	ctx                    context.Context
+}
+
 type cancellableResumeContextKey struct{}
 
 // WithCancellableResumeContext marks a resume whose startup context is owned
@@ -1263,47 +1270,16 @@ func (e *Executor) resumeSession(
 	if err := e.admitWorktreeRecovery(ctx, task.ID); err != nil {
 		return nil, err
 	}
-	// Validate a persisted worktree selection before repository resolution can
-	// reconcile clone configuration shared by its selected worktrees. A later
-	// request-building step may repair a clone origin, which must not hide a
-	// sibling that was already invalid when resume began.
-	// Resolution fills a legacy empty binding in memory. Keep that selected ID
-	// separate from the persisted session passed to the snapshot read so SQLite
-	// can validate the legacy empty-binding case without an unpersisted rewrite.
-	selectionSession := *session
-	selectionSession.Metadata = cloneMetadata(session.Metadata)
-	selectedEnv, err := e.resolveResumeTaskEnvironmentForTask(ctx, task, &selectionSession)
+	requestedExecutorType, err := e.requestedResumeExecutorType(ctx, task, session, startAgent, options)
 	if err != nil {
 		return nil, err
 	}
-	var preflightAdmission *worktree.RecoveryAdmission
-	var preflightSelection models.WorkspaceRecoverySelectionSnapshot
-	preflightSelectionStable := false
-	preflightCtx := ctx
+	preflight := &resumePreflight{ctx: ctx, persistedEnvironmentID: session.TaskEnvironmentID}
 	defer func() {
-		_ = releaseSelectedWorktreeRecovery(resumeOwnedCleanupContext(ctx), &preflightAdmission)
+		_ = releaseSelectedWorktreeRecovery(resumeOwnedCleanupContext(ctx), &preflight.admission)
 	}()
-	if selectedEnv != nil && selectedEnv.ExecutorType == string(models.ExecutorTypeWorktree) &&
-		e.selectedWorktreeRecoveryAdmission != nil {
-		preflightSelection, err = e.selectedWorkspaceRecoverySnapshot(ctx, session, selectedEnv, true)
-		if err != nil {
-			return nil, err
-		}
-		preflightAdmission, err = e.admitSelectedWorktreeRecovery(
-			ctx, task.ID, session, selectedEnv, selectedEnv.ExecutorType,
-			options.AllowBranchReplacement, 0, true,
-		)
-		if err != nil {
-			return nil, err
-		}
-		admittedSelection, snapshotErr := e.selectedWorkspaceRecoverySnapshot(ctx, session, selectedEnv, true)
-		if snapshotErr != nil {
-			return nil, snapshotErr
-		}
-		preflightSelectionStable = preflightSelection.Equal(admittedSelection)
-		if preflightAdmission != nil {
-			preflightCtx = worktree.WithRecoveryAdmission(ctx, preflightAdmission)
-		}
+	if err := e.prepareResumePreflight(ctx, task, session, options, requestedExecutorType, preflight); err != nil {
+		return nil, err
 	}
 	resumeStatePersisted := false
 	resumeAttemptID := ""
@@ -1313,7 +1289,10 @@ func (e *Executor) resumeSession(
 			// The rollback path must remain armed if persistence fails after the
 			// session has entered STARTING.
 			resumeStatePersisted = true
+			selectedEnvironmentID := session.TaskEnvironmentID
+			session.TaskEnvironmentID = preflight.persistedEnvironmentID
 			persistErr := e.persistResumeStateWithOptions(ctx, task.ID, session, true, options)
+			session.TaskEnvironmentID = selectedEnvironmentID
 			resumeAttemptID = models.StringFromAny(session.Metadata[models.SessionMetaKeyAgentStartAttemptID])
 			if persistErr != nil {
 				return persistErr
@@ -1326,7 +1305,7 @@ func (e *Executor) resumeSession(
 		return nil, err
 	}
 	req, _, execCfg, existingEnv, _, err := e.buildResumeRequestAtCredentialBoundaryWithOptions(
-		preflightCtx, task, session, startAgent, beforeCredentialLease, options,
+		preflight.ctx, task, session, startAgent, beforeCredentialLease, options,
 	)
 	if err != nil {
 		if resumeStatePersisted {
@@ -1341,41 +1320,31 @@ func (e *Executor) resumeSession(
 		// lease issuer has observed STARTING. Persist that metadata with the
 		// same expected-state guard before launching, so a concurrent terminal
 		// transition cannot be overwritten by a stale resume.
-		if err := e.persistSessionFullRowIfCurrentState(ctx, session, models.TaskSessionStateStarting); err != nil {
+		selectedEnvironmentID := session.TaskEnvironmentID
+		session.TaskEnvironmentID = preflight.persistedEnvironmentID
+		persistErr := e.persistSessionFullRowIfCurrentState(ctx, session, models.TaskSessionStateStarting)
+		if persistErr != nil {
+			session.TaskEnvironmentID = selectedEnvironmentID
 			if resumeStatePersisted {
-				e.rollbackResumeStateAfterFailure(ctx, task.ID, session.ID, resumeAttemptID, resumeInitialState, err, nil)
+				e.rollbackResumeStateAfterFailure(ctx, task.ID, session.ID, resumeAttemptID, resumeInitialState, persistErr, nil)
 			}
-			return nil, err
+			return nil, persistErr
 		}
 		credentialSnapshotPersisted = resumeCredentialSnapshotChanged(session, previousCredentialSnapshot)
 	}
 
-	var recoveryAdmission *worktree.RecoveryAdmission
-	samePreflightSelection := false
-	if preflightSelectionStable && preflightAdmission == nil && selectedEnv != nil && existingEnv != nil &&
-		req.ExecutorType == selectedEnv.ExecutorType {
-		currentSelection, snapshotErr := e.selectedWorkspaceRecoverySnapshot(preflightCtx, session, existingEnv, true)
-		if snapshotErr != nil {
-			if resumeStatePersisted {
-				e.rollbackResumeStateAfterFailure(ctx, task.ID, session.ID, resumeAttemptID, resumeInitialState, snapshotErr, nil)
-			}
-			return nil, snapshotErr
+	// The session snapshot passed to recovery admission must match its persisted
+	// binding. Keep legacy empty bindings untouched until the admission succeeds.
+	session.TaskEnvironmentID = preflight.persistedEnvironmentID
+	recoveryAdmission, err := e.admitResumeSelectionAfterRequest(preflight, task.ID, session, existingEnv, req)
+	if err != nil {
+		if resumeStatePersisted {
+			e.rollbackResumeStateAfterFailure(ctx, task.ID, session.ID, resumeAttemptID, resumeInitialState, err, nil)
 		}
-		samePreflightSelection = preflightSelection.Equal(currentSelection)
+		return nil, err
 	}
-	if !samePreflightSelection {
-		recoveryAdmission, err = e.admitSelectedWorktreeRecovery(
-			preflightCtx, task.ID, session, existingEnv, req.ExecutorType, req.AllowBranchReplacement, 0, true,
-		)
-		if err != nil {
-			if resumeStatePersisted {
-				e.rollbackResumeStateAfterFailure(ctx, task.ID, session.ID, resumeAttemptID, resumeInitialState, err, nil)
-			}
-			return nil, err
-		}
-	}
-	if recoveryAdmission == preflightAdmission {
-		preflightAdmission = nil
+	if existingEnv != nil {
+		session.TaskEnvironmentID = existingEnv.ID
 	}
 	launchCtx := ctx
 	if recoveryAdmission != nil {
@@ -1531,6 +1500,91 @@ func (e *Executor) resumeSession(
 		return execution, fmt.Errorf("release worktree recovery admission: %w", releaseErr)
 	}
 	return execution, nil
+}
+
+func (e *Executor) requestedResumeExecutorType(
+	ctx context.Context,
+	task *v1.Task,
+	session *models.TaskSession,
+	startAgent bool,
+	options ResumeOptions,
+) (string, error) {
+	requestSession := *session
+	requestSession.Metadata = cloneMetadata(session.Metadata)
+	req, metadata := newResumeLaunchRequest(task, &requestSession, startAgent, options)
+	running, err := e.repo.GetExecutorRunningBySessionID(ctx, session.ID)
+	if err != nil && !errors.Is(err, models.ErrExecutorRunningNotFound) {
+		return "", fmt.Errorf("load runtime inventory for session %q: %w", session.ID, err)
+	}
+	if running != nil && running.Runtime == agentruntime.RuntimeKubernetes {
+		if _, err := e.applyRecordedKubernetesExecutorConfigToResumeRequest(
+			ctx, req, &requestSession, metadata, running,
+		); err != nil {
+			return "", err
+		}
+		return req.ExecutorType, nil
+	}
+	return e.resolveExecutorConfig(ctx, requestSession.ExecutorID, task.WorkspaceID, metadata).ExecutorType, nil
+}
+
+func (e *Executor) prepareResumePreflight(
+	ctx context.Context,
+	task *v1.Task,
+	session *models.TaskSession,
+	options ResumeOptions,
+	requestedExecutorType string,
+	preflight *resumePreflight,
+) error {
+	// Resolve legacy bindings on a copy so the recovery snapshot uses the
+	// environment ID that is actually persisted on the session row.
+	selectionSession := *session
+	selectionSession.Metadata = cloneMetadata(session.Metadata)
+	selectedEnv, err := e.resolveResumeTaskEnvironmentForTask(ctx, task, &selectionSession)
+	if err != nil {
+		return err
+	}
+	preflight.selectedEnv = selectedEnv
+	if options.RepairWorkspaceInventory || requestedExecutorType != string(models.ExecutorTypeWorktree) ||
+		selectedEnv == nil || selectedEnv.ExecutorType != string(models.ExecutorTypeWorktree) ||
+		e.selectedWorktreeRecoveryAdmission == nil {
+		return nil
+	}
+
+	preflight.admission, err = e.admitSelectedWorktreeRecovery(
+		ctx, task.ID, session, selectedEnv, requestedExecutorType, options.AllowBranchReplacement, 0, true,
+	)
+	if err != nil {
+		return err
+	}
+	if preflight.admission != nil {
+		preflight.ctx = worktree.WithRecoveryAdmission(ctx, preflight.admission)
+	}
+	return nil
+}
+
+func (e *Executor) admitResumeSelectionAfterRequest(
+	preflight *resumePreflight,
+	taskID string,
+	session *models.TaskSession,
+	existingEnv *models.TaskEnvironment,
+	req *LaunchAgentRequest,
+) (*worktree.RecoveryAdmission, error) {
+	if preflight.selectedEnv != nil && (existingEnv == nil || preflight.selectedEnv.ID != existingEnv.ID) {
+		return nil, fmt.Errorf("%w: selected environment changed while resume was being prepared", models.ErrWorkspaceReuseUnsafe)
+	}
+	// Re-admit after request construction so Git checkout state is inspected
+	// immediately before launch even when the database selection is unchanged.
+	admission, err := e.admitSelectedWorktreeRecovery(
+		preflight.ctx, taskID, session, existingEnv, req.ExecutorType, req.AllowBranchReplacement, 0, true,
+	)
+	if err != nil {
+		return nil, err
+	}
+	if admission == nil && preflight.admission != nil {
+		admission = preflight.admission
+		preflight.admission = nil
+	}
+	return admission, nil
 }
 
 // restoreResumeCredentialSnapshotIfStarting restores the prior non-secret Git

@@ -100,8 +100,8 @@ func TestRecoverSessionPermissionRetryRetiresMatchingError(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("RecoverSessionWithOptions did not finish after provider boot")
 	}
-	if admissionCalls != 3 {
-		t.Fatalf("total recovery admissions = %d, want ordinary preflight plus explicit preflight and resume", admissionCalls)
+	if admissionCalls != 4 {
+		t.Fatalf("total recovery admissions = %d, want ordinary preflight, explicit preflight, and both resume inspections", admissionCalls)
 	}
 	stored, err := repo.GetTaskSession(ctx, sessionID)
 	if err != nil {

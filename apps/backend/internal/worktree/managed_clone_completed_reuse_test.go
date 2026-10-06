@@ -3,6 +3,7 @@ package worktree
 import (
 	"bytes"
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -87,6 +88,22 @@ func TestCompletedRelocationAdmitsCurrentWork(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+func TestCompletedRelocationVerificationPreservesCancellation(t *testing.T) {
+	fixture := newCompletedRelocationFixture(t, "github", "github.com")
+	record, err := readManagedCloneRelocationRecord(fixture.recordPath)
+	if err != nil {
+		t.Fatalf("read completed relocation journal: %v", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	err = verifyCompletedManagedCloneRelocation(
+		ctx, fixture.manager, fixture.replacement, fixture.request.Slots[0].CloneRelocation, record,
+	)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("completed relocation verification error = %v, want context.Canceled", err)
 	}
 }
 
