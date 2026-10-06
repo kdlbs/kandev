@@ -449,11 +449,15 @@ for (const reader of readers) {
       expect(values.get("second")).toMatchObject({ data: data(reader, "cached"), isLoading: true });
       pair.rerender(<Pair firstMounted={false} />);
       await succeed(second, reader.response("sibling"));
+      const expected =
+        reader.name === "provider health"
+          ? [...data(reader, "sibling")!, ...data(reader, "cached")!]
+          : data(reader, "sibling");
       expect(values.get("second")).toMatchObject({
-        data: data(reader, "sibling"),
+        data: expected,
         isLoading: false,
       });
-      expect(reader.stored(store.getState(), "alpha")).toEqual(data(reader, "sibling"));
+      expect(reader.stored(store.getState(), "alpha")).toEqual(expected);
     });
 
     it("unmounting an instance leaves a sibling store's pending read valid", async () => {

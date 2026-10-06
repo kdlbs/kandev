@@ -10,7 +10,7 @@ owners:
 
 ## Overview
 
-Office live updates make concurrent agent work visible through workspace-scoped events and reads. Mounted diagnostic consumers also need to read the newly selected workspace without relying on an unrelated event or a page reload. This document owns that read lifecycle; execution routing policy belongs to the agent system.
+Office live updates make concurrent agent work visible through workspace-scoped events and reads. Mounted diagnostic consumers also need to read the newly selected workspace without relying on an unrelated event or a page reload. Provider-health reads must preserve live health observed while those reads are outstanding. This document owns that read and publication lifecycle; execution routing policy belongs to the agent system.
 
 ## Requirements
 
@@ -31,7 +31,7 @@ Office live updates make concurrent agent work visible through workspace-scoped 
 
 ### REQ-OFFICE-LIVE-UPDATES-002: Current-workspace diagnostic reads
 
-**Intent:** Existing Office routing-preview and provider-health consumers read the selected workspace and expose only request state belonging to their current selection. This applies to the diagnostic surfaces that remain mounted during the routing migration; it does not reinstate the deprecated Office routing policy.
+**Intent:** Existing Office routing-preview and provider-health consumers read the selected workspace and expose only request state belonging to their current selection. Provider-health consumers also retain live updates across outstanding snapshot reads. This applies to the diagnostic surfaces that remain mounted during the routing migration; it does not reinstate the deprecated Office routing policy.
 
 #### Acceptance criteria
 
@@ -43,11 +43,13 @@ Office live updates make concurrent agent work visible through workspace-scoped 
 - **AC-OFFICE-LIVE-UPDATES-002.6:** A current read failure shall retain the selected workspace's last accepted data and settle loading with its error. Ordinary rerenders shall not retry automatically; explicit refresh shall read the current workspace and can recover. An empty successful response shall be a completed read.
 - **AC-OFFICE-LIVE-UPDATES-002.7:** Each mounted consumer shall independently initiate its required reads and own its request state. Another consumer's completion or unmount shall not suppress its reads or reset its request state. Separate application stores shall remain isolated. This criterion does not impose response ordering between separate consumers writing the same workspace entry.
 - **AC-OFFICE-LIVE-UPDATES-002.8:** Desktop and phone consumers shall use the same selection, publication, failure, and refresh semantics through their existing surfaces.
+- **AC-OFFICE-LIVE-UPDATES-002.9:** When a provider-health snapshot read is outstanding and the consumer observes a live health update for its workspace, publishing that older snapshot shall retain the currently observed update for the same provider, scope, and scope value. This shall apply to automatic and explicit reads, multiple updates to one key, newly observed keys, and updated keys omitted from the snapshot, including an empty snapshot.
+- **AC-OFFICE-LIVE-UPDATES-002.10:** Preserving an update during a provider-health read shall not prevent the same response from hydrating unrelated new or unchanged keys, or removing unchanged keys omitted from that response. A read started after an update shall remain able to replace that earlier health or complete with empty health when no later update intervenes. Ordinary successful reads, explicit refresh, and live events observed after publication shall remain usable under criteria `.1` through `.8`.
 
 ## Diagnostic exclusions
 
 - Changes to routing policy, dynamic profiles, provider health classification, launch decisions, or the deprecated Office routing contract.
-- Shared request coordination, global cache policy, cross-consumer latest-response ordering, HTTP-versus-live-event arbitration, polling, or automatic failure retries.
+- Shared request coordination, global cache policy, cross-consumer latest-response ordering, routing-preview HTTP-versus-live-event arbitration, polling, or automatic failure retries. Provider-health publication is bounded by `.9` and `.10`; it does not promise universal server chronology, missed-event replay, or permanent live-row precedence over later reads.
 - New routes, controls, layout, copy, or persistence.
 
 ## System design
@@ -55,3 +57,5 @@ Office live updates make concurrent agent work visible through workspace-scoped 
 The migrated technical source is split into [part 1](../system-design/live-updates-01.md), [part 2](../system-design/live-updates-02.md).
 
 Current-workspace diagnostic reads are defined in [part 2](../system-design/live-updates-02.md#current-workspace-diagnostic-reads).
+
+Provider-health snapshot publication is defined in [part 2](../system-design/live-updates-02.md#provider-health-snapshot-publication).

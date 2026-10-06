@@ -13,14 +13,14 @@ owners:
 
 ## Purpose and boundaries
 
-This design preserves the technical source detail for `REQ-OFFICE-LIVE-UPDATES-001` during migration and defines the mounted diagnostic read lifecycle for `REQ-OFFICE-LIVE-UPDATES-002`.
+This design preserves the technical source detail for `REQ-OFFICE-LIVE-UPDATES-001` during migration and defines the mounted diagnostic read and provider-health publication lifecycle for `REQ-OFFICE-LIVE-UPDATES-002`.
 
 ## Requirement mapping
 
 | Requirement | Design section |
 | --- | --- |
 | `REQ-OFFICE-LIVE-UPDATES-001` | [Migrated source detail](#migrated-source-detail) |
-| `REQ-OFFICE-LIVE-UPDATES-002` | [Current-workspace diagnostic reads](#current-workspace-diagnostic-reads) |
+| `REQ-OFFICE-LIVE-UPDATES-002` | [Current-workspace diagnostic reads](#current-workspace-diagnostic-reads) (`.1` through `.8`); [Provider-health snapshot publication](#provider-health-snapshot-publication) (`.9`, `.10`) |
 
 ## Current-workspace diagnostic reads
 
@@ -98,8 +98,9 @@ health on `office.provider.health_changed`. Routing-settings events invalidate
 the existing configuration entry. `useOfficeWorkspaceData` loads agents,
 projects, inbox, and meta, not these diagnostic snapshots. Dashboard refetch
 and live events can mitigate visible symptoms; missing hook reads do not mean
-every dashboard remains stale. HTTP-versus-event freshness arbitration is
-outside this bounded correction.
+every dashboard remains stale. The workspace-selection correction (`.1`
+through `.8`) excluded HTTP-versus-event arbitration. The later bounded
+provider-health publication amendment below covers `.9` and `.10` only.
 
 This is state-only frontend work. Existing desktop sidebar and phone
 `OfficePageNav` workspace pickers both drive the same store selection and
@@ -118,6 +119,114 @@ selection, overlap, invalidation, empty results, current failures, manual
 recovery, independent instances/stores, and unmount. Do not replace the store,
 mock publication actions, or test only a helper predicate. There are no new
 metrics or persistence writes beyond the existing diagnostic entries.
+
+## Provider-health snapshot publication
+
+### Boundary and existing identity
+
+This amendment applies only to `useProviderHealth`, not routing preview,
+run attempts, routing policy, or a general HTTP/WS ordering protocol. Keep
+the committed selection/unmount and newest-request guards above intact.
+The broader migrated documents remain draft; the prior workspace-selection
+package remains an implemented historical record with its original exclusions.
+
+`ProviderHealth` in `lib/state/slices/office/routing-types.ts` identifies a row
+within a workspace by `(provider_id, scope, scope_value)`. Provider, model,
+and tier scopes are distinct even for the same provider. `workspace_id` is
+optional payload metadata; the captured workspace entry is the enclosing
+identity. Do not collapse keys to provider ID or concatenate unescaped strings
+that can collide. Compare the three fields directly or encode a tuple safely.
+
+`createAppStore` uses Immer. `upsertProviderHealth` replaces the matching row
+object or appends a new one, preserving untouched row references. The
+registered `office.provider.health_changed` handler extracts a new row and
+calls that action after its active-workspace filter. Legacy events without
+`workspace_id` target the active workspace; invalid provider/scope payloads
+do not publish. There is no live row-deletion action/event on this path.
+`setProviderHealth` is an immediate synchronous whole-entry replacement;
+its signature and atomic publication remain unchanged.
+
+### Request-local reconciliation
+
+Use the hook's owning store API (`useAppStoreApi`) to capture the actual
+workspace rows immediately before each admitted GET. Read from the store,
+not the render's selected array: back-to-back live updates and manual reads
+may occur before React rerenders. Retain the immutable row references for
+that request only. Capture before transport, and fence settlement with the
+existing `isCurrent` check before reading current rows or publishing.
+
+At accepted success, read that same store/workspace's current rows. A current
+row is protected when its key was absent at request start or its object
+reference differs from the start row for that key. Preserve the entire
+current row, including error, retry, backoff, and diagnostic metadata; do not
+choose by severity or compare optional server dates. Repeated events with
+equal values still replace identity and count as observations during the read.
+
+Build one result from `res.health ?? []`: for each snapshot key, substitute
+its protected current row when present, otherwise take the snapshot row.
+Append protected current keys absent from the snapshot once. Unchanged
+current rows absent from the snapshot are omitted. An empty snapshot thus
+retains only protected rows; a fresh empty read with no intervening changes
+clears the entry. Keep returned order for snapshot keys and current order
+for appended keys. Publish once through the existing setter without an
+`await`, subscription, timer, or other scheduling boundary between the
+current read, reconciliation, and setter. A later WS event uses its normal
+upsert path immediately.
+
+Each new read captures a new baseline. An event observed before that read
+does not permanently pin its row. Unrelated workspace writes and unrelated
+store writes cannot protect this request's keys. The hook's callback depends
+on its owning store as well as workspace/action ownership, so replacement
+of the context store invalidates departed work rather than publishing into it.
+No module cache, retained event journal, new action, or schema field is needed.
+
+### Isolation and limits
+
+Each hook retains independent request/error/loading state. Separate stores
+with the same workspace string do not share baselines or results. Two pending
+consumers of one store can both preserve a live row observed since their own
+admission; one consumer's unmount does not invalidate its sibling. Reconciliation
+retains protected object identity when another consumer's response includes
+that row, allowing an earlier outstanding read to continue recognizing it.
+
+The comparison deliberately preserves any current row replaced during the
+request, including a sibling consumer's accepted snapshot. It does not infer
+the source of a change or impose latest-response order between consumers.
+A later admitted fresh read can supersede earlier live health; no event
+journal is added to resurrect a row already superseded by that accepted
+read. Removed rows have no live tombstones on the current path; this amendment
+does not add deletion arbitration. These limits retain `.7` and avoid a
+universal timestamp/revision, cross-tab, or server freshness guarantee.
+
+Valid failures retain all current data, including live upserts, and use the
+existing error/loading settlement. Obsolete success, rejection, or finally
+is still a no-op. Empty selection, A-to-B-to-A, stale refresh callbacks,
+StrictMode cleanup/setup, and unmount continue to obey `.1` through `.8`.
+There are no backend, API, persistence, classification, authorization,
+metrics, or polling changes.
+
+### Consumers and verification
+
+`ProviderHealthCard` on `/office` collapses by provider for display;
+`ProviderHealthBanner` on `/office/workspace/routing` displays non-healthy
+rows. Both consume the same keyed hook state. Their display grouping must
+not become the reconciliation key. Desktop and phone use these existing
+surfaces and shared state. This is purely state/data publication: no markup,
+copy, layout, navigation, touch, scrolling, or viewport-dependent behavior
+changes. Targeted real-context tests satisfy mobile parity's state/data
+exception; no new visual preview, browser/build, or mobile E2E is required.
+
+The regression boundary is the production hook, real `StateProvider` /
+`createAppStore`, real API client, and registered Office WS handler, replacing
+only fetch transport. Observe returned health and actual workspace entries,
+not a mocked action or a copied merge predicate. Deferred initial/manual GETs
+must fail before the correction because stale healthy rows replace already
+observed degraded health, with unaffected snapshot rows still hydrating.
+Cover full keys, metadata, live insertions/omissions, empty snapshots, events
+before/during/after reads, ordinary fresh reads, failures/overlaps, independent
+workspaces/stores/consumers, and lifecycle guards. Settle and join all deferred
+work even on assertion failure. The delivery matrix and commands belong in
+the [bounded implementation package](../../../plans/office-provider-health-snapshot-loads/plan.md).
 
 ## Migrated source detail
 
