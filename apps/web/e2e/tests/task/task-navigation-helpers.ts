@@ -48,15 +48,14 @@ async function waitForTreeResponse(
     .toBe(true);
 }
 
-export function seedNavigationBranch(backend: BackendContext) {
+export function seedNavigationBranch(backend: BackendContext, baselineOID: string) {
   const git = new GitHelper(
     path.join(backend.tmpDir, "repos", "e2e-repo"),
     makeGitEnv(backend.tmpDir),
   );
   const branch = `e2e-navigation-${randomUUID()}`;
   const worktreePath = path.join(backend.tmpDir, branch);
-  git.exec("git fetch --no-tags origin main");
-  git.exec(`git worktree add -b ${branch} "${worktreePath}" origin/main`);
+  git.exec(`git worktree add -b ${branch} "${worktreePath}" ${baselineOID}`);
   const branchGit = new GitHelper(worktreePath, makeGitEnv(backend.tmpDir));
   try {
     for (const file of [ROOT_FILE, `${AVAILABLE}/available.ts`, `${HELD}/held.ts`])
@@ -77,8 +76,9 @@ export async function seedNavigationTasks(
   backend: BackendContext,
   { executorProfileId, withRepository = true }: NavigationTaskOptions = {},
 ) {
-  if (withRepository) resetSeedRepositoryCheckout(seed, backend.tmpDir);
-  const branch = withRepository ? seedNavigationBranch(backend) : undefined;
+  const branch = withRepository
+    ? seedNavigationBranch(backend, seed.repositoryBaselineOID)
+    : undefined;
   const profile = await createStandardProfile(api, "navigation-responsiveness");
   const tasks = [];
   for (const suffix of ["A", "B"]) {

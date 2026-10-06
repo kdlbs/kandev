@@ -62,6 +62,7 @@ export type SessionEntryRecoveryProxy = {
     scope?: { sessionId?: string },
   ) => void;
   releaseRejectedResponses: (action: string) => void;
+  releaseRejectedResponsesOnClick: (action: string, testId: string) => Promise<void>;
   requestCount: (action: string) => number;
   delayedResponseCount: (action: string) => number;
   droppedResponseCount: (action: string) => number;
@@ -269,6 +270,25 @@ function forwardServerMessage(
   }
 }
 
+async function releaseRejectionAfterClick(
+  page: Page,
+  action: string,
+  rules: { releaseOnClick: Set<string>; rejectRules: Map<string, RejectRule> },
+): Promise<void> {
+  if (!rules.releaseOnClick.has(action)) return;
+  const clicked = await page.evaluate((action) => {
+    const flags = (
+      window as Window & {
+        __e2eHistoryRetryClicks?: Record<string, boolean>;
+      }
+    ).__e2eHistoryRetryClicks;
+    return flags?.[action] === true;
+  }, action);
+  if (!clicked) return;
+  rules.rejectRules.delete(action);
+  rules.releaseOnClick.delete(action);
+}
+
 /**
  * Fail, delay, drop, or hold selected gateway responses while forwarding other frames.
  * Rules correlate replies by request id, so the test never relies on
@@ -303,12 +323,13 @@ export async function routeSessionEntryRecovery(page: Page): Promise<SessionEntr
     delayRules: rules,
     delayedCounts,
   };
+  const releaseOnClick = new Set<string>();
 
   await page.routeWebSocket(/\/ws$/, (ws) => {
     sendHeldMessage = (message) => ws.send(message);
     const server = ws.connectToServer();
 
-    ws.onMessage((message) => {
+    ws.onMessage(async (message) => {
       if (typeof message === "string") {
         for (const part of message.split("\n")) {
           const frame = parseFrame(part.trim());
@@ -324,6 +345,7 @@ export async function routeSessionEntryRecovery(page: Page): Promise<SessionEntr
                   ? frame.payload.session_id
                   : undefined,
             };
+            await releaseRejectionAfterClick(page, context.action, { releaseOnClick, rejectRules });
             const rejectRule = rejectRules.get(context.action);
             // Keep fault injection stable for requests that are already in flight.
             if (
@@ -377,6 +399,31 @@ export async function routeSessionEntryRecovery(page: Page): Promise<SessionEntr
     },
     pendingRequestCount: (action) =>
       [...requestContexts.values()].filter((context) => context.action === action).length,
+    releaseRejectedResponsesOnClick: async (action, testId) => {
+      await page.evaluate(
+        ({ action, testId }) => {
+          const testWindow = window as Window & {
+            __e2eHistoryRetryClicks?: Record<string, boolean>;
+          };
+          testWindow.__e2eHistoryRetryClicks ??= {};
+          testWindow.__e2eHistoryRetryClicks[action] = false;
+          document.addEventListener(
+            "click",
+            (event) => {
+              if (
+                event.target instanceof Element &&
+                event.target.closest(`[data-testid="${testId}"]`)
+              ) {
+                testWindow.__e2eHistoryRetryClicks![action] = true;
+              }
+            },
+            { capture: true },
+          );
+        },
+        { action, testId },
+      );
+      releaseOnClick.add(action);
+    },
     requestCount: (action) => requestCounts.get(action) ?? 0,
     delayedResponseCount: (action) => delayedCounts.get(action) ?? 0,
     droppedResponseCount: (action) => droppedCounts.get(action) ?? 0,
