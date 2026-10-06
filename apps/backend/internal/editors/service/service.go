@@ -159,13 +159,12 @@ func (s *Service) dispatchEditorKind(editor *models.Editor, worktreePath, absPat
 }
 
 // buildInternalVscodeURL returns a sentinel URL that the frontend intercepts
-// to open the embedded code-server panel. Includes goto params when a specific
-// file is requested.
+// to open the embedded code-server panel. The private query carries an encoded
+// file path separately from its positive line and column coordinates.
 func buildInternalVscodeURL(worktreePath, absPath string, line, column int) string {
 	if absPath == "" || absPath == worktreePath {
 		return "internal://vscode"
 	}
-	// Build goto param: relative/path:line:col
 	relPath := absPath
 	if worktreePath != "" {
 		rel, err := filepath.Rel(worktreePath, absPath)
@@ -173,14 +172,14 @@ func buildInternalVscodeURL(worktreePath, absPath string, line, column int) stri
 			relPath = rel
 		}
 	}
-	goto_ := relPath
+	query := url.Values{"goto": {relPath}}
 	if line > 0 {
-		goto_ = fmt.Sprintf("%s:%d", goto_, line)
+		query.Set("line", strconv.Itoa(line))
 		if column > 0 {
-			goto_ = fmt.Sprintf("%s:%d", goto_, column)
+			query.Set("column", strconv.Itoa(column))
 		}
 	}
-	return fmt.Sprintf("internal://vscode?goto=%s", goto_)
+	return "internal://vscode?" + query.Encode()
 }
 
 func openRemoteSSHEditor(editor *models.Editor, absPath string, line, column int) (string, error) {
