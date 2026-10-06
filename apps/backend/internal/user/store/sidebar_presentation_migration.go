@@ -6,6 +6,7 @@ import (
 )
 
 const newSidebarPresentationJSON = `{"sidebar_fast_actions_enabled":false,"sidebar_new_task_style":"simple"}`
+const sidebarNewTaskStyleCompact = "compact"
 
 // Existing accounts receive legacy defaults; insert paths explicitly seed new defaults.
 func (r *sqliteRepository) migrateSidebarPresentation() error {
@@ -62,7 +63,7 @@ func backfillSidebarPresentation(raw string) ([]byte, bool, error) {
 		changed = true
 	}
 	if _, ok := fields["sidebar_new_task_style"]; !ok {
-		fields["sidebar_new_task_style"] = json.RawMessage(`"compact"`)
+		fields["sidebar_new_task_style"] = json.RawMessage(`"` + sidebarNewTaskStyleCompact + `"`)
 		changed = true
 	}
 	if !changed {

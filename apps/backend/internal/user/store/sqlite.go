@@ -1054,8 +1054,8 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 	if payload.SidebarFastActionsEnabled != nil {
 		settings.SidebarFastActionsEnabled = *payload.SidebarFastActionsEnabled
 	}
-	if payload.SidebarNewTaskStyle == "compact" {
-		settings.SidebarNewTaskStyle = "compact"
+	if payload.SidebarNewTaskStyle == sidebarNewTaskStyleCompact {
+		settings.SidebarNewTaskStyle = sidebarNewTaskStyleCompact
 	}
 	if payload.SidebarHoverEnabled != nil {
 		settings.SidebarHoverEnabled = *payload.SidebarHoverEnabled
