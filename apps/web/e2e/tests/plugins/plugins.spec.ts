@@ -51,6 +51,7 @@ import type { ApiClient } from "../../helpers/api-client";
 import { holdPluginInstallResponse } from "../../helpers/plugin-install";
 import { PluginMarketplaceReleaseFixture } from "../../helpers/plugin-marketplace-release";
 import { dwell, waitForHttp } from "../../helpers/causal-waits";
+import { waitForFiniteAnimations } from "../../helpers/animations";
 import {
   openInstallDialog,
   PACKAGE_PATH,
@@ -707,6 +708,9 @@ test.describe("Plugins — gRPC plugin install/load/live-update/uninstall", () =
     const trigger = testPage.getByTestId("hello-modal-tooltip-trigger");
     await expect(trigger).toBeVisible();
 
+    await trigger.scrollIntoViewIfNeeded();
+    await waitForFiniteAnimations(modal);
+    await testPage.mouse.move(0, 0);
     await trigger.hover();
     await expect(
       testPage

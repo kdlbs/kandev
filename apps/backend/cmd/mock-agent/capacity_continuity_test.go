@@ -2,11 +2,37 @@ package main
 
 import (
 	"context"
+	"errors"
 	"os"
+	"path/filepath"
 	"testing"
+	"time"
 
 	acp "github.com/coder/acp-go-sdk"
 )
+
+func TestRetainedCapacityReleaseBarrier(t *testing.T) {
+	gate := filepath.Join(t.TempDir(), "capacity.gate")
+	t.Setenv("E2E_MOCK_AGENT_CAPACITY_GATE_FILE", gate)
+	if err := os.WriteFile(gate, nil, 0600); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Millisecond)
+	defer cancel()
+	if err := waitRetainedCapacityRelease(ctx); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("closed barrier must wait and honor cancellation, got %v", err)
+	}
+	if err := os.Remove(gate); err != nil {
+		t.Fatal(err)
+	}
+	if err := waitRetainedCapacityRelease(context.Background()); err != nil {
+		t.Fatalf("released barrier must admit the provider response: %v", err)
+	}
+	t.Setenv("E2E_MOCK_AGENT_CAPACITY_GATE_FILE", "")
+	if err := waitRetainedCapacityRelease(context.Background()); err != nil {
+		t.Fatalf("ordinary mock scenarios must not need a barrier: %v", err)
+	}
+}
 
 func TestParseRetainedCapacityCmd(t *testing.T) {
 	for _, test := range []struct {

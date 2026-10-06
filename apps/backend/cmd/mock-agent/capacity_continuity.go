@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 
 	acp "github.com/coder/acp-go-sdk"
 )
@@ -125,6 +126,11 @@ func (a *mockAgent) handleRetainedCapacity(ctx context.Context, sid acp.SessionI
 		saveRetainedCapacityScenario(sid, scenario)
 	}
 	attempt := nextRetainedCapacityAttempt(sid, scenario.name)
+	if attempt == 1 {
+		if err := waitRetainedCapacityRelease(ctx); err != nil {
+			return acp.PromptResponse{}, err, true
+		}
+	}
 	e := &emitter{ctx: ctx, conn: a.conn, sid: sid}
 	if attempt <= scenario.failTimes {
 		if scenario.withTools && attempt == 1 && scenario.name == "after-tools" {
@@ -155,4 +161,27 @@ func (a *mockAgent) handleRetainedCapacity(ctx context.Context, sid acp.SessionI
 		e.text(fmt.Sprintf("Mock provider recovered after %d retained capacity error(s).", scenario.failTimes))
 	}
 	return acp.PromptResponse{StopReason: acp.StopReasonEndTurn}, nil, true
+}
+
+// An optional fixture barrier lets the browser observe the initial failure
+// before its retry clock starts. Ordinary mock scenarios remain ungated.
+func waitRetainedCapacityRelease(ctx context.Context) error {
+	filename := os.Getenv("E2E_MOCK_AGENT_CAPACITY_GATE_FILE")
+	if filename == "" {
+		return nil
+	}
+	ticker := time.NewTicker(10 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		if _, err := os.Stat(filename); os.IsNotExist(err) {
+			return nil
+		} else if err != nil {
+			return err
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-ticker.C:
+		}
+	}
 }
