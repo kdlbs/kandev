@@ -27,6 +27,7 @@ import type {
   WorkflowSyncFormState,
 } from "@/hooks/domains/settings/use-workflow-sync";
 import type { WorkflowSyncProvider } from "@/lib/types/workflow-sync";
+import { useWorkflowSyncLifetime } from "@/hooks/domains/settings/use-workflow-sync-lifetime";
 import { RemoteRepoProviderTabs } from "@/components/task-create-dialog-remote-repo-provider-tabs";
 import { InlineConfirmActions } from "@/components/confirmation/inline-confirm-actions";
 import { MobileActionConfirmation } from "@/components/confirmation/mobile-action-confirmation";
@@ -399,6 +400,11 @@ export function WorkflowSyncDialog({ open, onOpenChange, sync }: WorkflowSyncDia
     (!Number.isInteger(sync.form.interval_seconds) || sync.form.interval_seconds < 60);
   const disableSave = isSaveDisabled(sync, intervalInvalid);
   const targetKey = workflowSyncConfirmationTarget(sync);
+  const completion = useWorkflowSyncLifetime(sync.lifetime, open);
+  const committedOpenChange = useRef(onOpenChange);
+  useLayoutEffect(() => {
+    committedOpenChange.current = onOpenChange;
+  }, [onOpenChange]);
   const generation = useRef(0);
   useLayoutEffect(() => {
     generation.current += 1;
@@ -410,16 +416,20 @@ export function WorkflowSyncDialog({ open, onOpenChange, sync }: WorkflowSyncDia
   useClearWorkflowSyncRemovalConfirmation(open, sync, setRemoveConfirming);
 
   const handleSave = async () => {
-    if (await sync.handleSave()) onOpenChange(false);
+    if (!completion.active) return;
+    const saved = await sync.handleSave();
+    if (completion.active && saved) committedOpenChange.current(false);
   };
   const handleRemove = async () => {
+    if (!completion.active) return;
     const requestGeneration = generation.current;
     const removed = await sync.handleDelete();
-    if (generation.current !== requestGeneration) return;
+    if (!completion.active) return;
     if (removed) {
-      onOpenChange(false);
+      committedOpenChange.current(false);
       return;
     }
+    if (generation.current !== requestGeneration) return;
     // The confirmation owns retry state; the controller owns failure feedback.
     return Promise.reject();
   };
