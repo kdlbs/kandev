@@ -77,12 +77,14 @@ export function useBackupListScope() {
   const queryKey = useMemo(() => createBackupListQueryKey(identity), [identity]);
   const identityKey = JSON.stringify(queryKey.slice(2));
   const scopeRef = useRef<ScopeState>({ identityKey, generation: 0, mounted: false });
+  const generation =
+    scopeRef.current.identityKey === identityKey
+      ? scopeRef.current.generation
+      : scopeRef.current.generation + 1;
 
   useLayoutEffect(() => {
-    let nextGeneration = scopeRef.current.generation;
-    if (scopeRef.current.identityKey !== identityKey) nextGeneration++;
-    scopeRef.current = { identityKey, generation: nextGeneration, mounted: true };
-  }, [identityKey]);
+    scopeRef.current = { identityKey, generation, mounted: true };
+  }, [generation, identityKey]);
 
   useEffect(() => {
     scopeRef.current.mounted = true;
@@ -92,8 +94,8 @@ export function useBackupListScope() {
   }, []);
 
   const captureScope = useCallback(
-    () => ({ identity, queryKey, identityKey, generation: scopeRef.current.generation }),
-    [identity, identityKey, queryKey],
+    () => ({ identity, queryKey, identityKey, generation }),
+    [generation, identity, identityKey, queryKey],
   );
   const isCurrentScope = useCallback(
     (captured: BackupListScope) =>
@@ -107,7 +109,7 @@ export function useBackupListScope() {
     identity,
     queryKey,
     identityKey,
-    generation: scopeRef.current.generation,
+    generation,
     captureScope,
     isCurrentScope,
   };

@@ -239,8 +239,11 @@ function useBackupMutationState(query: ReturnType<typeof useBackups>, t: TFuncti
     try {
       await createBackup();
       if (!query.isCurrentScope(writerScope)) return;
-      await waitForCreatedBackup(query.reload, previousNames, t, () =>
-        query.reloadAfterWrite(writerScope),
+      await waitForCreatedBackup(
+        () => query.reloadForScope(writerScope),
+        previousNames,
+        t,
+        () => query.reloadAfterWrite(writerScope),
       );
     } catch (err) {
       if (query.isCurrentScope(writerScope) && !isObsoleteScopeError(err)) {

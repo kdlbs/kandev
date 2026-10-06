@@ -8,6 +8,7 @@ import {
   reloadBackupList,
   reloadBackupListAfterWrite,
   useBackupListScope,
+  type BackupListScope,
 } from "./backup-list-query";
 
 function getErrorMessage(error: unknown): string | null {
@@ -20,24 +21,33 @@ export function useBackups() {
   const queryClient = useQueryClient();
   const scope = useBackupListScope();
   const query = useQuery(createBackupListQueryOptions(scope.identity));
-  const capturedScope = scope.captureScope();
+  const reloadForScope = useCallback(
+    (writerScope: BackupListScope) =>
+      reloadBackupList(queryClient, writerScope, scope.isCurrentScope),
+    [queryClient, scope.isCurrentScope],
+  );
   const reload = useCallback(
-    () => reloadBackupList(queryClient, capturedScope, scope.isCurrentScope),
-    [capturedScope, queryClient, scope.isCurrentScope],
+    () => reloadForScope(scope.captureScope()),
+    [reloadForScope, scope.captureScope],
   );
   const reloadAfterWrite = useCallback(
-    (writerScope = capturedScope) =>
-      reloadBackupListAfterWrite(queryClient, writerScope, scope.isCurrentScope),
-    [capturedScope, queryClient, scope.isCurrentScope],
+    (writerScope?: BackupListScope) =>
+      reloadBackupListAfterWrite(
+        queryClient,
+        writerScope ?? scope.captureScope(),
+        scope.isCurrentScope,
+      ),
+    [queryClient, scope.captureScope, scope.isCurrentScope],
   );
   const invalidate = useCallback(
-    (writerScope = capturedScope) => {
-      if (!scope.isCurrentScope(writerScope)) return Promise.resolve();
-      return invalidateBackupList(queryClient, writerScope.identity, () =>
-        scope.isCurrentScope(writerScope),
+    (writerScope?: BackupListScope) => {
+      const scopeToInvalidate = writerScope ?? scope.captureScope();
+      if (!scope.isCurrentScope(scopeToInvalidate)) return Promise.resolve();
+      return invalidateBackupList(queryClient, scopeToInvalidate.identity, () =>
+        scope.isCurrentScope(scopeToInvalidate),
       );
     },
-    [capturedScope, queryClient, scope.isCurrentScope],
+    [queryClient, scope.captureScope, scope.isCurrentScope],
   );
 
   return {
@@ -46,6 +56,7 @@ export function useBackups() {
     isLoading: query.isFetching,
     error: getErrorMessage(query.error),
     reload,
+    reloadForScope,
     reloadAfterWrite,
     invalidate,
     captureScope: scope.captureScope,

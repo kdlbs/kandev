@@ -82,6 +82,14 @@ useBackups.reload preserves Promise<SnapshotInfo[]> behavior:
   explicit reload remain distinct. Mutation errors remain local to their
   existing callers.
 
+Capture the active scope when `reload()` is invoked, after the identity's
+layout commit has advanced its generation. Do not retain a render-time scope
+that can already be obsolete in the same committed render. A writer captures
+its full identity and caller lifetime when it starts; every create-poll read
+uses that captured scope and stops after an identity or lifetime change. This
+prevents a pending old-identity request from either aborting a new create poll
+or redirecting an old writer's poll to a different identity.
+
 ### Hook and consumer state contract
 
 Keep `backups`, `loaded`, `isLoading`, `error`, and `reload` in the hook contract.

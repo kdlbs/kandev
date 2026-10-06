@@ -11,8 +11,10 @@ import { onlineManager, QueryClient, useQueryClient } from "@tanstack/react-quer
 import { createElement, Fragment, StrictMode, useEffect, useState, type ReactNode } from "react";
 import type { StoreApi } from "zustand";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { TooltipProvider } from "@kandev/ui/tooltip";
 import { StateProvider, useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { SystemInfoQueryProvider } from "@/components/system-info-query-provider";
+import { BackupsTable } from "@/components/settings/system/backups-table";
 import type { AppState } from "@/lib/state/store";
 import type { SnapshotInfo } from "@/lib/types/system";
 import * as api from "@/lib/api/domains/system-api";
@@ -526,6 +528,53 @@ describe("useBackups identity cleanup", () => {
   });
 });
 
+describe("useBackups create polling across identity changes", () => {
+  it("captures the current reload scope after a deferred old-identity read", async () => {
+    const oldIdentityRead = deferred<SnapshotInfo[]>();
+    const newIdentityRead = deferred<SnapshotInfo[]>();
+    const created = { ...FIRST, name: "manual-20261006-000001.db" };
+    vi.mocked(api.fetchBackups)
+      .mockReturnValueOnce(oldIdentityRead.promise)
+      .mockReturnValueOnce(newIdentityRead.promise)
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([created]);
+    vi.mocked(api.createBackup).mockResolvedValue({ job_id: "create-job" });
+
+    let apiBaseUrl = FIRST_BACKEND_URL;
+    const view = render(
+      <TestHarness apiBaseUrl={apiBaseUrl}>
+        <TooltipProvider delayDuration={0}>
+          <BackupsTable />
+        </TooltipProvider>
+      </TestHarness>,
+    );
+    await waitFor(() => expect(api.fetchBackups).toHaveBeenCalledOnce());
+
+    apiBaseUrl = SECOND_BACKEND_URL;
+    view.rerender(
+      <TestHarness apiBaseUrl={apiBaseUrl}>
+        <TooltipProvider delayDuration={0}>
+          <BackupsTable />
+        </TooltipProvider>
+      </TestHarness>,
+    );
+    await waitFor(() => expect(api.fetchBackups).toHaveBeenCalledTimes(2));
+
+    fireEvent.click(screen.getByTestId("system-backups-create"));
+    await waitFor(() => expect(api.createBackup).toHaveBeenCalledOnce());
+    await waitFor(() => expect(api.fetchBackups).toHaveBeenCalledTimes(3));
+    await waitFor(() => expect(api.fetchBackups).toHaveBeenCalledTimes(4));
+    await waitFor(() =>
+      expect(screen.getByTestId("system-backups-name").textContent).toBe(created.name),
+    );
+
+    await act(async () => {
+      oldIdentityRead.resolve([]);
+      newIdentityRead.resolve([]);
+    });
+  });
+});
+
 describe("useBackups rapid identity return", () => {
   it("isolates late A responses after an A-to-B-to-A process transition", async () => {
     const requests: Array<{
@@ -550,11 +599,14 @@ describe("useBackups rapid identity return", () => {
     let bootId = "boot-a";
     const page = () => (
       <TestHarness apiBaseUrl={apiBaseUrl} bootId={bootId} onQueryClient={onQueryClient}>
+        <ReloadProbe />
         <BackupProbe id="list" />
       </TestHarness>
     );
     const view = render(page());
     await waitFor(() => expect(requests).toHaveLength(1));
+    const firstIdentityReload = currentReload;
+    if (!firstIdentityReload) throw new Error("The first identity reload should be available");
     apiBaseUrl = SECOND_BACKEND_URL;
     bootId = "boot-b";
     view.rerender(page());
@@ -565,8 +617,9 @@ describe("useBackups rapid identity return", () => {
     view.rerender(page());
     await waitFor(() => expect(requests).toHaveLength(3));
     expect(requests[1]?.signal?.aborted).toBe(true);
-
+    const staleReload = expect(firstIdentityReload()).rejects.toMatchObject({ name: "AbortError" });
     await act(async () => requests[2]?.pending.resolve([FIRST]));
+    await staleReload;
     await waitFor(() => expect(screen.getByTestId("list").textContent).toContain(FIRST.name));
     await act(async () => {
       requests[0]?.pending.resolve([EXTERNAL]);

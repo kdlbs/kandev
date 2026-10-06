@@ -92,6 +92,7 @@ beforeEach(() => {
     loaded: true,
     isLoading: false,
     reload: vi.fn(),
+    reloadForScope: vi.fn().mockResolvedValue([]),
     reloadAfterWrite: vi.fn().mockResolvedValue([]),
     captureScope: vi.fn(() => ({ identityKey: "current" })),
     isCurrentScope: vi.fn(() => true),
@@ -158,12 +159,14 @@ describe("BackupsTable mutation results", () => {
     currentMode = "enabled";
     const oldSnapshot = { ...SNAPSHOT, name: "manual-old.db" };
     const reload = vi.fn().mockResolvedValue([SNAPSHOT]);
+    const reloadForScope = vi.fn().mockResolvedValue([SNAPSHOT]);
     const reloadAfterWrite = vi.fn().mockResolvedValue([SNAPSHOT]);
     mocks.useBackups.mockReturnValue({
       backups: [oldSnapshot],
       loaded: true,
       isLoading: false,
       reload,
+      reloadForScope,
       reloadAfterWrite,
       captureScope: vi.fn(() => ({ identityKey: "current" })),
       isCurrentScope: vi.fn(() => true),
@@ -174,6 +177,7 @@ describe("BackupsTable mutation results", () => {
 
     await waitFor(() => expect(reloadAfterWrite).toHaveBeenCalledOnce());
     expect(reload).not.toHaveBeenCalled();
+    expect(reloadForScope).not.toHaveBeenCalled();
     await waitFor(() =>
       expect(screen.getByTestId(CREATE_TEST_ID).textContent).not.toContain("Creating"),
     );
@@ -210,6 +214,47 @@ describe("BackupsTable mutation results", () => {
 });
 
 describe("BackupsTable identity fencing", () => {
+  it("keeps an accepted create poll on its initiating identity", async () => {
+    currentRole = "admin";
+    currentMode = "enabled";
+    let identity = "user-1";
+    const writerScope = { identityKey: identity };
+    const reloadForScope = vi.fn(async (scope: { identityKey: string }) => {
+      if (scope.identityKey !== identity) throw new DOMException("obsolete", "AbortError");
+      return [];
+    });
+    const reloadAfterWrite = vi.fn().mockResolvedValue([]);
+    const useBackupsValue = () => ({
+      backups: [],
+      loaded: true,
+      isLoading: false,
+      reload: vi.fn().mockResolvedValue([SNAPSHOT]),
+      reloadForScope,
+      reloadAfterWrite,
+      captureScope: () => writerScope,
+      isCurrentScope: (scope: { identityKey: string }) => scope.identityKey === identity,
+      scopeIdentityKey: identity,
+      scopeGeneration: identity === "user-1" ? 0 : 1,
+    });
+    mocks.useBackups.mockImplementation(useBackupsValue);
+
+    const view = renderBackupsTable();
+    fireEvent.click(screen.getByTestId(CREATE_TEST_ID));
+    await waitFor(() => expect(reloadAfterWrite).toHaveBeenCalledOnce());
+
+    identity = "user-2";
+    view.rerender(
+      <TooltipProvider delayDuration={0}>
+        <BackupsTable />
+      </TooltipProvider>,
+    );
+    await waitFor(() => expect(reloadForScope).toHaveBeenCalledOnce());
+
+    expect(reloadForScope).toHaveBeenCalledWith(writerScope);
+    expect(mocks.useBackups.mock.results.at(-1)?.value.reload).not.toHaveBeenCalled();
+    expect(screen.queryByTestId("system-backups-error")).toBeNull();
+  });
+
   it.each(["create", "delete"] as const)(
     "does not refresh or surface an obsolete %s result after identity changes",
     async (operation) => {
@@ -222,6 +267,7 @@ describe("BackupsTable identity fencing", () => {
         loaded: true,
         isLoading: false,
         reload: vi.fn().mockResolvedValue([SNAPSHOT]),
+        reloadForScope: vi.fn().mockResolvedValue([SNAPSHOT]),
         reloadAfterWrite,
         captureScope: () => ({ identityKey: identity }),
         isCurrentScope: (scope: { identityKey: string }) => scope.identityKey === identity,

@@ -86,6 +86,10 @@ directory-description, and relaunch behavior.
   Stop old create polling on unmount, logout, or identity change. A-to-B-to-A
   transitions end the old lifetime. Late results cannot refresh another identity
   or recreate obsolete entries.
+  An explicit hook reload captures the active generation when invoked, after
+  the identity commit. Every create-poll read stays bound to the writer's
+  initiating scope, so an identity transition neither aborts a new create's
+  poll nor redirects an old writer to a new identity.
 - Correlate reset observation with its accepted job ID and initiating lifetime.
   Settle succeeded/failed once across duplicate WS/poll updates. Preserve the
   terminal reset or retention result if backup-list refresh fails.
@@ -311,18 +315,26 @@ Implementation is complete locally against the merged QUERY-02 contract.
   final PR head and exact-head CI/review disposition will be recorded in the
   task handoff after `/pr-fixup` completes.
 - `pnpm --filter @kandev/web exec vitest run ...` with all 14 listed suites:
-  passed, 159 tests. Coverage includes shared consumers, reload/error
+  passed, 161 tests. Coverage includes shared consumers, reload/error
   contracts, freshness, identity cleanup, retention attempt correlation,
   create/delete/reset boundaries, permissions, and preserved shell state.
 - `pnpm --filter @kandev/web run typecheck`: passed.
 - `pnpm --filter @kandev/web run lint`: passed with zero warnings.
+- Regression for create polling after a deferred old-identity read: passed.
+  It failed before reload used the generation assigned to the committed
+  identity, and before create polls stayed on the initiating writer scope.
+- A second A-to-B-to-A regression proves an old A reload callback cannot
+  revive after the identity returns to A.
+- A third regression proves an accepted create poll retains its initiating
+  identity and cannot redirect later reads after that identity changes.
 - Managed Chromium Backups/reset E2E: 4 passed. Desktop member-gating E2E: 2
   passed. Mobile member-gating E2E: 2 passed.
 - `python3 scripts/lint-architecture.py --all`,
   `python3 scripts/list-docs.py validate`, and
-  `python3 scripts/lint-spec-files.py --all`: passed.
-- `git diff --check`: passed before the implementation commit. The final
-  delivery-document commit and pushed head receive the same check.
+  `python3 scripts/lint-spec-files.py --all`: passed, along with the harness
+  lint, harness tests, targeted `harness-lint` hook, web typecheck and web lint.
+- `git diff --check`: passed for the current fixup changes; it will run again
+  before commit and against the final pushed head.
 - Documentation-coverage preflight: covered by this work order, no errors.
 - PR capture: one disposable mobile-project spec captured and validated four
   synthetic desktop/phone Backups and reset-confirmation assets. The spec was
@@ -331,6 +343,9 @@ Implementation is complete locally against the merged QUERY-02 contract.
 - Public docs: no public documentation change. This migration changes internal
   cache ownership and retains the existing API, copy, permissions, and operator
   procedure; desktop and phone E2E preserve the user-facing behavior.
+- `apps/web/AGENTS.md` now describes the backup list's finite Query lifecycle
+  and links its decision and system design; no obsolete Zustand ownership
+  guidance remains in the scoped web guide.
 
 Before completion, record the final `git diff --check`, PR URL, exact base SHA,
 final head SHA, exact-head CI/review status, residual risks, and dependency
