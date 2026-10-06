@@ -46,7 +46,8 @@ test.describe("mobile session refresh efficiency", () => {
       const [initial, unchanged] = await Promise.all([initialRead, unchangedRead]);
 
       expect(initial.headers()["etag"]).toMatch(/^"[a-f0-9]{64}"$/);
-      expect(unchanged.headers()["etag"]).toBe(initial.headers()["etag"]);
+      expect(unchanged.headers()["etag"]).toMatch(/^"[a-f0-9]{64}"$/);
+      expect(unchanged.headers()["etag"]).toBe(unchanged.request().headers()["if-none-match"]);
     } finally {
       await apiClient
         .stopSession({

@@ -9,8 +9,16 @@ test.describe("Mobile agent page options", () => {
     seedData,
   }) => {
     // Covers AC-AGENTS-PAGE-OPTIONS-001.3 through .8.
-    await apiClient.updateAgentProfile(seedData.agentProfileId, { enabled: false });
+    const { agents } = await apiClient.listAgents();
+    const agent = agents.find((candidate) =>
+      candidate.profiles.some((profile) => profile.id === seedData.agentProfileId),
+    );
+    if (!agent) throw new Error("The seeded profile owner was not available");
+    const profile = await apiClient.createAgentProfile(agent.id, `Mobile options ${Date.now()}`, {
+      model: "mock-fast",
+    });
     try {
+      await apiClient.updateAgentProfile(profile.id, { enabled: false });
       await testPage.goto("/settings/agents");
       const options = testPage.getByTestId("agent-options-trigger");
       await expect(options).toBeVisible({ timeout: 15_000 });
@@ -95,8 +103,9 @@ test.describe("Mobile agent page options", () => {
       await expect(drawer).toBeVisible();
 
       const rows = testPage.getByTestId("agent-profile-row");
-      const disabledProfileRow = rows.filter({ hasText: "Disabled" });
+      const disabledProfileRow = rows.filter({ hasText: profile.name });
       await expect(disabledProfileRow).toBeVisible();
+      await expect(disabledProfileRow).toContainText("Disabled");
       expect(
         await testPage.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
       ).toBe(true);
@@ -133,7 +142,7 @@ test.describe("Mobile agent page options", () => {
         "true",
       );
     } finally {
-      await apiClient.updateAgentProfile(seedData.agentProfileId, { enabled: true });
+      await apiClient.deleteAgentProfile(profile.id);
     }
   });
 });
