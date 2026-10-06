@@ -193,6 +193,7 @@ type AgentStreamEventData struct {
 	// OperationID carries a provider operation identity when the protocol
 	// emits one. Native Codex turn IDs use it at turn boundaries.
 	OperationID                 string                           `json:"operation_id,omitempty"`
+	ProtocolMessageID           string                           `json:"protocol_message_id,omitempty"`
 	Text                        string                           `json:"text,omitempty"`
 	ProviderDiagnosticCandidate bool                             `json:"provider_diagnostic_candidate,omitempty"`
 	ToolCallID                  string                           `json:"tool_call_id,omitempty"`

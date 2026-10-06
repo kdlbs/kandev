@@ -147,8 +147,15 @@ func TestIdleSuspensionReplaysBufferedAgentEventsWhenCancelled(t *testing.T) {
 	if err := mgr.CancelIdleSuspension(ctx, execution.SessionID, execution.ID); err != nil {
 		t.Fatalf("cancel idle suspension: %v", err)
 	}
-	if got := len(eventBus.getStreamEvents()); got != 1 {
-		t.Fatalf("replayed stream events = %d, want 1 after suspension cancellation", got)
+	streamed := eventBus.getStreamEvents()
+	if len(streamed) != 2 {
+		t.Fatalf("replayed stream events = %d, want original evidence and transcript projection after suspension cancellation", len(streamed))
+	}
+	if streamed[0].Data.Type != "message_chunk" || streamed[0].Data.Text != "completion that crossed the suspension boundary\n" {
+		t.Fatalf("replayed original evidence = %+v, want buffered message_chunk", streamed[0].Data)
+	}
+	if streamed[1].Data.Type != "message_streaming" {
+		t.Fatalf("replayed transcript projection = %+v, want message_streaming", streamed[1].Data)
 	}
 }
 
@@ -186,8 +193,15 @@ func TestSuspendIdleReplaysEventsWhenCandidateValidationFails(t *testing.T) {
 	if err := <-result; err == nil {
 		t.Fatal("candidate validation unexpectedly succeeded")
 	}
-	if got := len(eventBus.getStreamEvents()); got != 1 {
-		t.Fatalf("replayed stream events after rejected claim = %d, want 1", got)
+	streamed := eventBus.getStreamEvents()
+	if len(streamed) != 2 {
+		t.Fatalf("replayed stream events after rejected claim = %d, want original evidence and transcript projection", len(streamed))
+	}
+	if streamed[0].Data.Type != "message_chunk" || streamed[0].Data.Text != "completion before rejected suspension\n" {
+		t.Fatalf("replayed original evidence = %+v, want buffered message_chunk", streamed[0].Data)
+	}
+	if streamed[1].Data.Type != "message_streaming" {
+		t.Fatalf("replayed transcript projection = %+v, want message_streaming", streamed[1].Data)
 	}
 }
 

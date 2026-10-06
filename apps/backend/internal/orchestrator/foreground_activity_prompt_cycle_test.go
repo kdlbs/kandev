@@ -60,13 +60,13 @@ func TestForegroundActivitySignal_FollowUpPromptKeepsIndependentCompletionIdenti
 	svc.handleAgentStreamEvent(t.Context(), &lifecycle.AgentStreamEventPayload{
 		TaskID: taskID, SessionID: sessionID, ExecutionID: executionID,
 		Data: &lifecycle.AgentStreamEventData{
-			Type: "thinking_streaming", MessageID: "thinking-follow-up", Text: "return control",
+			Type: "reasoning", Text: "return control",
 		},
 	})
 	svc.handleAgentStreamEvent(t.Context(), &lifecycle.AgentStreamEventPayload{
 		TaskID: taskID, SessionID: sessionID, ExecutionID: executionID,
 		Data: &lifecycle.AgentStreamEventData{
-			Type: "message_streaming", MessageID: "message-follow-up", Text: "foreground done",
+			Type: "message_chunk", Text: "foreground done",
 		},
 	})
 	svc.completeTurnForTaskSession(t.Context(), taskID, sessionID)
@@ -135,7 +135,7 @@ func TestForegroundActivitySignal_PreDispatchEventsUseCurrentPromptCycle(t *test
 		svc.handleAgentStreamEvent(t.Context(), &lifecycle.AgentStreamEventPayload{
 			TaskID: taskID, SessionID: sessionID, ExecutionID: executionID,
 			Data: &lifecycle.AgentStreamEventData{
-				Type: "message_streaming", MessageID: "final-before-dispatch", Text: "foreground done",
+				Type: "message_chunk", Text: "foreground done",
 			},
 		})
 		svc.completeTurnForTaskSession(t.Context(), taskID, sessionID)
@@ -203,7 +203,7 @@ func TestForegroundActivitySignal_ClaimedPreDispatchCompletionReconcilesOnAccept
 					svc.handleAgentStreamEvent(t.Context(), &lifecycle.AgentStreamEventPayload{
 						TaskID: taskID, SessionID: sessionID, ExecutionID: executionID,
 						Data: &lifecycle.AgentStreamEventData{
-							Type: "message_streaming", MessageID: "pre-callback-final", Text: "done",
+							Type: "message_chunk", Text: "done",
 						},
 					})
 				}
