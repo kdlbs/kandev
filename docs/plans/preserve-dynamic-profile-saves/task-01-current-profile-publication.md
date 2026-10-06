@@ -350,4 +350,3 @@ and merge are pending; done here means bounded implementation/check completion,
 not merge or overall task completion. The later delivery boundaries above
 remain mandatory. Current publication/CI/merge receipts belong in the durable
 MCP plan so the published head remains frozen except actual findings.
-
