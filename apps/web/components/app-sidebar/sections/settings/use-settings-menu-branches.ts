@@ -59,6 +59,7 @@ export function useSettingsMenuBranches(mode: SettingsMenuMode): SettingsMenuBra
   const executors = useAppStore((s) => s.executors.items);
   const activeWorkspaceId = useAppStore((s) => s.workspaces.activeId);
   const canvasesEnabled = useAppStore((s) => s.features?.canvases ?? false);
+  const coordinatorEnabled = useAppStore((s) => s.features?.coordinator ?? false);
   // The Agents page groups detected agents ahead of configured-but-undetected
   // ones; the branch lists the same agents and so must land them in the same
   // order. Before the scan hydrates this is empty and the saved order stands.
@@ -100,7 +101,7 @@ export function useSettingsMenuBranches(mode: SettingsMenuMode): SettingsMenuBra
           activeWorkspaceId,
           visibleIntegrationsFor,
           integrationContributions,
-          { pluginIntegrationEnabled, canvasesEnabled },
+          { pluginIntegrationEnabled, canvasesEnabled, coordinatorEnabled },
         ),
       ),
       ...branchEntry(
@@ -114,6 +115,7 @@ export function useSettingsMenuBranches(mode: SettingsMenuMode): SettingsMenuBra
     workspaces,
     activeWorkspaceId,
     canvasesEnabled,
+    coordinatorEnabled,
     agents,
     executors,
     agentDiscovery,
@@ -132,8 +134,7 @@ export function useSettingsMenuBranches(mode: SettingsMenuMode): SettingsMenuBra
  *
  * The per-integration enable toggles gate **row visibility**, and only while
  * "Hide disabled integrations from left panel navigation" is on (off by
- * default). Whether an integration is *configured* stays a separate question
- * that gates only the row's badge (`integration-enabled.tsx`) — which makes
+ * default). The row's badge also requires a connection (`integration-enabled.tsx`), which makes
  * this deliberately looser than `useNavAvailability`'s
  * `configured && (!hideDisabled || enabled)`: the tree lists an integration you
  * have never connected, the sidebar nav does not.

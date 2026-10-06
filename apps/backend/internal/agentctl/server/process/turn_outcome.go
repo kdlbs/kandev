@@ -79,7 +79,12 @@ func (m *Manager) recordTerminalOutcome(event *adapter.AgentEvent) {
 	if recorder == nil {
 		return
 	}
-	turnID, ok := recorder.RetainTurnOutcome(instanceID, *event)
+	retained := *event
+	if event.CapacityContinuation != nil {
+		snapshot := *event.CapacityContinuation
+		retained.CapacityContinuation = &snapshot
+	}
+	turnID, ok := recorder.RetainTurnOutcome(instanceID, retained)
 	if ok {
 		event.ControlTurnID = turnID
 	}

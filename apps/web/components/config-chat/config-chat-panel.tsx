@@ -5,11 +5,12 @@ import { useTranslation } from "react-i18next";
 import { useShallow } from "zustand/react/shallow";
 import { IconSparkles } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
-import { Popover, PopoverContent, PopoverTrigger } from "@kandev/ui/popover";
+import { PopoverTrigger } from "@kandev/ui/popover";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { useAppStore } from "@/components/state-provider";
 import { QuickChatSessionView } from "@/components/quick-chat/quick-chat-session-view";
 import { isQuickChatSetupSessionId } from "@/lib/state/slices/ui/quick-chat-session";
+import { ChatPopoverShell } from "./chat-popover-shell";
 import { ConfigChatSetup } from "./config-chat-setup";
 import { useConfigChat } from "./use-config-chat";
 import { ConfigChatHeader } from "./config-chat-header";
@@ -140,58 +141,58 @@ export const ConfigChatPanel = memo(function ConfigChatPanel({
   const { t } = useTranslation();
 
   return (
-    <Popover open={panel.isOpen} onOpenChange={panel.handleOpenChange}>
-      <Tooltip open={panel.isOpen ? false : undefined}>
-        <TooltipTrigger asChild>
-          <PopoverTrigger asChild>
+    <ChatPopoverShell
+      open={panel.isOpen}
+      onOpenChange={panel.handleOpenChange}
+      testId="config-chat-popover"
+      icon={<IconSparkles className="h-4 w-4 shrink-0 text-muted-foreground" />}
+      title={t("common:configurationChat")}
+      closeLabel={t("configChat:closePanel")}
+      beforeBody={<ConfigChatFloatingActionsHost setHost={setFloatingActionsHost} />}
+      header={
+        <ConfigChatHeader
+          session={panel.session}
+          busy={panel.isStarting || panel.restartBlocked}
+          onRestart={(session) => void panel.restartSession(session)}
+          onExpand={panel.handleExpand}
+          onClose={() => panel.handleOpenChange(false)}
+        />
+      }
+      trigger={
+        <Tooltip open={panel.isOpen ? false : undefined}>
+          <TooltipTrigger asChild>
+            <PopoverTrigger asChild>
+              <Button
+                size="icon"
+                className="fixed bottom-[calc(1.5rem+var(--app-status-bar-height))] right-6 z-50 size-12 max-md:size-12 [@media(pointer:coarse)]:size-12 cursor-pointer rounded-full shadow-lg"
+                aria-label={t("common:configurationChat")}
+              >
+                <IconSparkles className="h-6 w-6" />
+              </Button>
+            </PopoverTrigger>
+          </TooltipTrigger>
+          <TooltipContent side="left">
+            <p className="font-medium">{t("common:configurationChat")}</p>
+            <p className="text-xs text-muted-foreground">{t("configChat:tagline")}</p>
+          </TooltipContent>
+        </Tooltip>
+      }
+    >
+      {panel.error && (
+        <div role="alert" className="shrink-0 border-b p-3 text-sm text-destructive">
+          {panel.error}
+          {panel.restartBlocked && !panel.isRestarting && (
             <Button
-              size="icon"
-              className="fixed bottom-[calc(1.5rem+var(--app-status-bar-height))] right-6 z-50 size-12 max-md:size-12 [@media(pointer:coarse)]:size-12 cursor-pointer rounded-full shadow-lg"
-              aria-label={t("common:configurationChat")}
+              variant="outline"
+              className="ml-2 max-md:min-h-11 [@media(pointer:coarse)]:min-h-11"
+              onClick={() => void panel.refreshRestart()}
             >
-              <IconSparkles className="h-6 w-6" />
+              {t("configChat:refreshSessionStatus")}
             </Button>
-          </PopoverTrigger>
-        </TooltipTrigger>
-        <TooltipContent side="left">
-          <p className="font-medium">{t("common:configurationChat")}</p>
-          <p className="text-xs text-muted-foreground">{t("configChat:tagline")}</p>
-        </TooltipContent>
-      </Tooltip>
-      <PopoverContent
-        side="top"
-        align="end"
-        sideOffset={8}
-        onInteractOutside={(event) => event.preventDefault()}
-        data-testid="config-chat-popover"
-        className="relative flex h-[min(550px,calc(100dvh_-_11rem_-_env(safe-area-inset-top)_-_env(safe-area-inset-bottom)))] max-h-[550px] w-[min(420px,calc(100vw_-_2rem))] flex-col gap-0 overflow-visible p-0 shadow-2xl"
-      >
-        <ConfigChatFloatingActionsHost setHost={setFloatingActionsHost} />
-        <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-[inherit]">
-          <ConfigChatHeader
-            session={panel.session}
-            busy={panel.isStarting || panel.restartBlocked}
-            onRestart={(session) => void panel.restartSession(session)}
-            onExpand={panel.handleExpand}
-            onClose={() => panel.handleOpenChange(false)}
-          />
-          {panel.error && (
-            <div role="alert" className="shrink-0 border-b p-3 text-sm text-destructive">
-              {panel.error}
-              {panel.restartBlocked && !panel.isRestarting && (
-                <Button
-                  variant="outline"
-                  className="ml-2 max-md:min-h-11 [@media(pointer:coarse)]:min-h-11"
-                  onClick={() => void panel.refreshRestart()}
-                >
-                  {t("configChat:refreshSessionStatus")}
-                </Button>
-              )}
-            </div>
           )}
-          <ConfigChatPanelBody panel={panel} />
         </div>
-      </PopoverContent>
-    </Popover>
+      )}
+      <ConfigChatPanelBody panel={panel} />
+    </ChatPopoverShell>
   );
 });

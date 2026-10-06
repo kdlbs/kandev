@@ -27,6 +27,10 @@ Agents can explain results in Markdown, but trends and workspace files often nee
 - **AC-AGENTS-AGENT-RICH-OUTPUT-001.6:** Every chart identifies its series in a legend. Multi-series legends are local keyboard- and touch-operable filters; changing them never changes the persisted presentation or sends a tool callback.
 - **AC-AGENTS-AGENT-RICH-OUTPUT-001.7:** Line and bar charts retain their native Recharts entrance animation by default. Kandev defers the expensive plot until its chart is near the viewport in a visible browser tab, then mounts and animates it once.
 - **AC-AGENTS-AGENT-RICH-OUTPUT-001.8:** Appearance settings provide a per-device option to disable rich-output chart animation. The operating system's reduced-motion preference also disables it, regardless of the saved option.
+- **AC-AGENTS-AGENT-RICH-OUTPUT-001.9:** When a file card's session, repository discriminator, or path changes, its preview shall become collapsed and discard the previous target's content, error, and loading state. Replacement shall request no file content; subsequent explicit expansion shall request only the new target.
+- **AC-AGENTS-AGENT-RICH-OUTPUT-001.10:** A pending read for a replaced file target shall never publish its eventual success or failure into the replacement card, including after that card is explicitly expanded.
+- **AC-AGENTS-AGENT-RICH-OUTPUT-001.11:** When session, repository discriminator, and path stay unchanged, unrelated rerenders and title or caption changes shall preserve the card's disclosure and preview state. Hiding and re-expanding a successful preview shall reuse its content; re-expanding a failed preview shall allow an explicit retry.
+- **AC-AGENTS-AGENT-RICH-OUTPUT-001.12:** Each file card shall own independent preview and disclosure state, including when two cards reference the same target. Replacing or toggling one card shall not reset or expand another. These state rules shall apply equally on desktop and phone within the existing inline presentation.
 
 ## Migrated source detail
 
@@ -326,3 +330,4 @@ for this feature.
 
 - [Original implementation plan](../../../plans/agent-rich-output/plan.md)
 - [Chart rendering performance repair](../../../plans/rich-output-chart-performance/plan.md)
+- [File-preview target reset](../../../plans/rich-file-preview-targets/plan.md)

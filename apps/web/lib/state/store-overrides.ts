@@ -89,6 +89,7 @@ export function buildStateOverrides(m: DefaultState) {
     sessionHostnamesEpoch: m.sessionHostnamesEpoch,
     automations: m.automations,
     automationRuns: m.automationRuns,
+    coordinators: m.coordinators,
     system: m.system,
     agentRuntime: m.agentRuntime,
     previewPanel: m.previewPanel,

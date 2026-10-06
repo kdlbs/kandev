@@ -26,11 +26,20 @@ func (a *Adapter) handlePermissionRequest(ctx context.Context, req *PermissionRe
 	if sessionID == fallbackSessionID {
 		a.poisonContinuationSafety()
 	}
+	turn := a.currentPromptTurn()
+	var capacityPermissionTracked bool
+	if sessionID == fallbackSessionID {
+		capacityPermissionTracked = true
+	}
 
 	// Only emit a synthetic tool_call event if no ToolCall notification preceded this.
 	// waitForActiveToolCall bounds the race window between a SessionUpdate.ToolCall
 	// notification and a same-id request_permission dispatched on separate goroutines.
 	alreadyTracked := a.waitForActiveToolCall(ctx, req.ToolCallID, syntheticToolCallRaceWindow)
+	if capacityPermissionTracked {
+		a.capacityPermissionStarted(turn, req.ToolCallID)
+		defer a.capacityPermissionFinished(turn)
+	}
 
 	if !alreadyTracked {
 		toolCallEvent := AgentEvent{

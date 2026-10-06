@@ -46,10 +46,8 @@ func (c *metadataBusyConnection) ExecContext(ctx context.Context, query string, 
 // @covers AC-TASKS-FIELD-UPDATES-001.11
 func TestTaskMetadataMergeSQLiteCancellation(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "metadata-cancel.db")
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-	defer cancel()
-	waiterCtx, cancelWaiter := context.WithCancel(ctx)
-	defer cancelWaiter()
+	setupCtx := context.Background()
+	var cancelWaiter context.CancelFunc
 	type contention struct {
 		query string
 		err   error
@@ -69,10 +67,14 @@ func TestTaskMetadataMergeSQLiteCancellation(t *testing.T) {
 	a, err := NewWithDB(first, first, nil)
 	require.NoError(t, err)
 	b := NewWithInitializedDB(second, second, nil)
-	require.NoError(t, a.CreateWorkspace(ctx, &models.Workspace{ID: "merge-ws", Name: "Merge"}))
-	require.NoError(t, a.CreateTask(ctx, &models.Task{ID: "subject", WorkspaceID: "merge-ws", Title: "Original", Metadata: map[string]interface{}{"keep": true}}))
-	before, err := b.GetTask(ctx, "subject")
+	require.NoError(t, a.CreateWorkspace(setupCtx, &models.Workspace{ID: "merge-ws", Name: "Merge"}))
+	require.NoError(t, a.CreateTask(setupCtx, &models.Task{ID: "subject", WorkspaceID: "merge-ws", Title: "Original", Metadata: map[string]interface{}{"keep": true}}))
+	before, err := b.GetTask(setupCtx, "subject")
 	require.NoError(t, err)
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	waiterCtx, cancelWaiter := context.WithCancel(ctx)
+	defer cancelWaiter()
 	holder, err := first.BeginTx(ctx, nil)
 	require.NoError(t, err)
 	defer func() { _ = holder.Rollback() }()

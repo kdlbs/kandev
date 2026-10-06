@@ -26,6 +26,8 @@ const (
 	SurfaceExternal            Surface = "external"
 	SurfaceAutomation          Surface = "automation"
 	SurfaceManagedConversation Surface = "managed-conversation"
+	// SurfaceCoordinator is the copilot's conversation MCP surface.
+	SurfaceCoordinator Surface = "coordinator"
 )
 
 type Capability string
@@ -194,6 +196,13 @@ func NewAutomation() Context {
 	return New(SurfaceAutomation, nil, nil)
 }
 
+// NewCoordinator returns the fixed profile used by a coordinator's
+// conversation session: no user-question, title, or canvas capability
+// (docs/specs/coordinator/system-design/copilot.md#principal-and-mode).
+func NewCoordinator() Context {
+	return New(SurfaceCoordinator, nil, nil)
+}
+
 func (c Context) HasCapability(capability Capability) bool {
 	return slices.Contains(c.Capabilities, capability)
 }
@@ -229,10 +238,12 @@ func Legacy(mode string, disableAskQuestion bool, providers []string) Context {
 		surface = SurfaceExternal
 	case mcpmode.Automation:
 		surface = SurfaceAutomation
+	case mcpmode.Coordinator:
+		surface = SurfaceCoordinator
 	case mcpmode.TaskTitlePending:
 		capabilities = append(capabilities, CapabilityTaskTitle)
 	}
-	if !disableAskQuestion && surface != SurfaceExternal && surface != SurfaceAutomation {
+	if !disableAskQuestion && surface != SurfaceExternal && surface != SurfaceAutomation && surface != SurfaceCoordinator {
 		capabilities = append(capabilities, CapabilityUserQuestion)
 	}
 	return New(surface, capabilities, providers)
@@ -240,7 +251,7 @@ func Legacy(mode string, disableAskQuestion bool, providers []string) Context {
 
 func normalizeSurface(surface Surface) Surface {
 	switch surface {
-	case SurfaceKanbanTask, SurfaceOfficeTask, SurfaceConfiguration, SurfaceExternal, SurfaceAutomation, SurfaceManagedConversation:
+	case SurfaceKanbanTask, SurfaceOfficeTask, SurfaceConfiguration, SurfaceExternal, SurfaceAutomation, SurfaceManagedConversation, SurfaceCoordinator:
 		return surface
 	default:
 		return SurfaceKanbanTask

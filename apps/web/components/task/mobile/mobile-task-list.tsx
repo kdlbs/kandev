@@ -54,6 +54,7 @@ export type MobileTaskListProps = {
   pageEntries?: SidebarTaskPageEntry[];
   page?: SidebarTaskPageResponse | null;
   pagePending?: boolean;
+  pageTransitioning?: boolean;
   pageError?: string | null;
   pageCanRetry?: boolean;
   onPageChange?: (page: number, afterSuccess: () => void) => void;
@@ -131,7 +132,7 @@ export function MobileTaskList(props: MobileTaskListProps) {
       {!(props.pageError && !props.page && !props.loadError) && <TaskSwitcher {...switcherProps} />}
       <SidebarTaskPagination
         page={props.page ?? null}
-        pending={props.pagePending ?? false}
+        pending={props.pagePending === true || props.pageTransitioning === true}
         onPageChange={(nextPage) =>
           props.onPageChange?.(nextPage, () =>
             props.scrollContainerRef?.current?.scrollTo({ top: 0 }),

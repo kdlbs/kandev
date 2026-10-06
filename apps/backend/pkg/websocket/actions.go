@@ -112,6 +112,10 @@ const (
 	ActionCanvasRestored                  = "canvas.restored"
 	ActionCanvasRemoved                   = "canvas.removed"
 
+	// ActionCoordinatorUpdated forwards events.CoordinatorUpdated to a
+	// coordinator's workspace subscribers.
+	ActionCoordinatorUpdated = "coordinator.updated"
+
 	ActionTaskSessionList   = "task.session.list"
 	ActionTaskSessionStatus = "task.session.status"
 	ActionTaskLaunchRecover = "task.launch.recover"

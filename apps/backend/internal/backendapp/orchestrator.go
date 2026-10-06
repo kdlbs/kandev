@@ -259,9 +259,12 @@ func provideOrchestrator(
 	orchestratorSvc.SetSessionPromptChecker(func(ctx context.Context, sessionID string) error {
 		return taskSvc.AuthorizeSessionScope(ctx, sessionID, authz.ScopeSessionPrompt)
 	})
-	orchestratorSvc.SetTaskPromptChecker(func(ctx context.Context, taskID string) error {
-		return taskSvc.AuthorizeTaskScope(ctx, taskID, authz.ScopeSessionPrompt)
-	})
+	// session.launch is a separate transport from message.add and must enforce
+	// the same coordinator attended-only scope upgrade
+	// (copilot.md#attended-only): AuthorizeTaskPromptScope requires
+	// workspace.manage, not session.prompt, to start a turn on a coordinator
+	// conversation task.
+	orchestratorSvc.SetTaskPromptChecker(taskSvc.AuthorizeTaskPromptScope)
 	orchestratorSvc.SetTaskAccessChecker(taskSvc.AuthorizeTaskAccess)
 
 	// Publish task.updated when the first session is marked primary so the

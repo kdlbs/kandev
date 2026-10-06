@@ -792,6 +792,7 @@
   "kandevListWorkspaces": "Kandev：列出工作區",
   "kandevMessageTask": "Kandev：向任務傳送訊息",
   "kandevMoveTask": "Kandev：移動任務",
+  "kandevProposeTask": "Kandev：提議任務",
   "kandevUpdateAvailable": "Kandev 有可用更新",
   "kandevUpdateTask": "Kandev：更新任務",
   "kandevUpdateTaskPlan": "Kandev：更新任務計劃",

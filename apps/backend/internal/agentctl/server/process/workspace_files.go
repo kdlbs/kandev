@@ -94,8 +94,9 @@ func (wt *WorkspaceTracker) getFileListClass(ctx context.Context, class subproc.
 	// --others: include untracked files
 	// --exclude-standard: respect .gitignore
 	// --stage: expose tracked file modes so submodule Gitlinks can be excluded
+	// -z: preserve literal filename bytes; -t: distinguish untracked paths from stage headers
 	out, runErr, execCtxErr := subproc.RunGitOutputAfterAcquire(ctx, class, gitCommandTimeout, func(execCtx context.Context) *exec.Cmd {
-		cmd := subproc.NewGitCommand(execCtx, "ls-files", "--cached", "--others", "--exclude-standard", "--stage")
+		cmd := subproc.NewGitCommand(execCtx, "ls-files", "--cached", "--others", "--exclude-standard", "--stage", "-z", "-t")
 		cmd.Dir = wt.workDir
 		return cmd
 	})
@@ -104,25 +105,39 @@ func (wt *WorkspaceTracker) getFileListClass(ctx context.Context, class subproc.
 		return update, err
 	}
 
-	lines := strings.Split(string(out), "\n")
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
-		if metadata, path, tracked := strings.Cut(line, "\t"); tracked {
-			if strings.HasPrefix(metadata, "160000 ") {
-				continue
-			}
-			line = strings.TrimSpace(path)
+	for _, record := range strings.Split(string(out), "\x00") {
+		if record == "" {
+			continue
 		}
-		if line == "" || isRootOwnershipMarkerPath(line) {
+		path, gitlink, parseErr := workspaceFileRecordPath(record)
+		if parseErr != nil {
+			return update, parseErr
+		}
+		if gitlink || isRootOwnershipMarkerPath(path) {
 			continue
 		}
 		update.Files = append(update.Files, types.FileEntry{
-			Path:  line,
+			Path:  path,
 			IsDir: false,
 		})
 	}
 
 	return update, nil
+}
+
+func workspaceFileRecordPath(record string) (string, bool, error) {
+	if strings.HasPrefix(record, "? ") {
+		return record[2:], false, nil
+	}
+	// Indexed entries use H (cached), S (skip-worktree), or M (unmerged).
+	if !strings.HasPrefix(record, "H ") && !strings.HasPrefix(record, "S ") && !strings.HasPrefix(record, "M ") {
+		return "", false, errors.New("unexpected workspace file inventory tag")
+	}
+	metadata, path, ok := strings.Cut(record[2:], "\t")
+	if !ok {
+		return "", false, errors.New("missing workspace file inventory stage header")
+	}
+	return path, strings.HasPrefix(metadata, "160000 "), nil
 }
 
 // GetFileTree returns the file tree for a given path and depth

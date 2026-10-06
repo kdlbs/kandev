@@ -27,6 +27,7 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/common/mcpmode"
 	"github.com/kandev/kandev/internal/common/securityutil"
 	"github.com/kandev/kandev/internal/gitconfigenv"
 	"github.com/kandev/kandev/internal/githubauth"
@@ -2887,7 +2888,16 @@ func (m *Manager) handlePermissionRequest(ctx context.Context, req *adapter.Perm
 		zap.String("tool_call_id", req.ToolCallID),
 		zap.Bool("auto_approve", m.cfg.AutoApprovePermissions))
 
-	if m.RequiresManagedToolPolicy() {
+	// A coordinator session's agentctl instance does not consult its own
+	// blanket AutoApprovePermissions flag or the generic "any kandev tool"
+	// injected-MCP approval; only the exact seven-tool coordinator allowlist
+	// decides (docs/specs/coordinator/system-design/copilot.md#permission-policy).
+	switch {
+	case m.cfg.McpMode == mcpmode.Coordinator:
+		if response, approved := m.autoApproveCoordinatorPermission(req); approved {
+			return response, nil
+		}
+	case m.RequiresManagedToolPolicy():
 		if response, approved := m.autoApproveInjectedKandevPermission(req); approved {
 			return response, nil
 		}
@@ -2901,16 +2911,12 @@ func (m *Manager) handlePermissionRequest(ctx context.Context, req *adapter.Perm
 		return &adapter.PermissionResponse{Cancelled: true}, nil
 	}
 
-	// The backend must persist the selected option before it resolves the live
-	// request. Keep the provider waiting here until that durable claim succeeds.
+	// A coordinator session never takes the blanket or injected-tool approval:
+	// only its allowlist above decides, and anything else waits for a person.
 	var autoApproveOption *adapter.PermissionOption
-	if m.cfg.AutoApprovePermissions {
-		if decision, approved := m.autoApprovePermission(req); approved {
-			autoApproveOption = &decision.option
-		}
-	}
-	if autoApproveOption == nil {
-		if response, approved := m.autoApproveInjectedKandevPermission(req); approved {
+	if m.cfg.McpMode != mcpmode.Coordinator {
+		var response *adapter.PermissionResponse
+		if autoApproveOption, response = m.nonCoordinatorAutoApproval(req); response != nil {
 			return response, nil
 		}
 	}
@@ -2995,6 +3001,23 @@ func (m *Manager) handlePermissionRequest(ctx context.Context, req *adapter.Perm
 type autoApprovalDecision struct {
 	response *adapter.PermissionResponse
 	option   adapter.PermissionOption
+}
+
+// nonCoordinatorAutoApproval returns either the option the blanket
+// auto-approve selected, or an immediate response for an injected Kandev tool.
+// The backend must persist a selected option before it resolves the live
+// request, so the caller keeps the provider waiting until that durable claim
+// succeeds.
+func (m *Manager) nonCoordinatorAutoApproval(req *adapter.PermissionRequest) (*adapter.PermissionOption, *adapter.PermissionResponse) {
+	if m.cfg.AutoApprovePermissions {
+		if decision, approved := m.autoApprovePermission(req); approved {
+			return &decision.option, nil
+		}
+	}
+	if response, approved := m.autoApproveInjectedKandevPermission(req); approved {
+		return nil, response
+	}
+	return nil, nil
 }
 
 func (m *Manager) autoApprovePermission(req *adapter.PermissionRequest) (autoApprovalDecision, bool) {

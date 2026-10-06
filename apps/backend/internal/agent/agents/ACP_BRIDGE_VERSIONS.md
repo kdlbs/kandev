@@ -11,7 +11,7 @@ package/default generation resets it during startup.
 | --- | --- | --- |
 | Claude | `@agentclientprotocol/claude-agent-acp` | none |
 | Codex | `@agentclientprotocol/codex-acp` | none |
-| OpenCode | `opencode-ai` | `acp --print-logs --log-level ERROR` |
+| OpenCode | `opencode-ai` | `acp --print-logs` |
 | Copilot | `@github/copilot` | `--acp` |
 | Gemini | `@google/gemini-cli` | `--acp` |
 | Pi | `pi-acp` | none |
@@ -26,9 +26,10 @@ stays outside the task workspace and mounted agent home. The agent process
 still runs in the task workspace, but its project `.npmrc` does not control
 managed runtime package resolution.
 The `<effective-version>` placeholder resolves at launch to the exact Kandev
-default or the exact operator selection. OpenCode's error-only log flags
-are part of its managed command so agentctl can observe terminal provider
-diagnostics without reading OpenCode's private log files. The exact top-level
+default or the exact operator selection. OpenCode's `--print-logs` flag lets
+agentctl observe terminal provider diagnostics without reading OpenCode's private
+log files. Its optional log-level argument is omitted because CLI versions accept
+different value casing. The exact top-level
 package is pinned, but npm transitive ranges, its cache, and the registry still
 affect reproducibility. Kandev records the version reported by the ACP
 initialize response instead of inferring it from source.

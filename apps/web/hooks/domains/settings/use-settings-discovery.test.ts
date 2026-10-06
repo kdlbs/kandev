@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   authEnabled: false,
+  coordinatorEnabled: false,
   state: {
     auth: {
       mode: "disabled" as "disabled" | "enabled" | "setup",
@@ -31,7 +32,8 @@ vi.mock("@/components/state-provider", () => ({
 }));
 
 vi.mock("@/hooks/domains/features/use-feature", () => ({
-  useFeature: () => mocks.authEnabled,
+  useFeature: (name: string) =>
+    name === "coordinator" ? mocks.coordinatorEnabled : mocks.authEnabled,
 }));
 
 import { useSettingsDiscovery } from "./use-settings-discovery";
@@ -39,6 +41,7 @@ import { useSettingsDiscovery } from "./use-settings-discovery";
 describe("useSettingsDiscovery hook", () => {
   beforeEach(() => {
     mocks.authEnabled = false;
+    mocks.coordinatorEnabled = false;
     mocks.state.auth.mode = "disabled";
     mocks.state.auth.user = null;
     mocks.state.workspaces.items = [];
@@ -103,6 +106,22 @@ describe("useSettingsDiscovery hook", () => {
     );
     expect(result.current.find((entry) => entry.id === "executor-profile:executor-1")?.label).toBe(
       "Local Docker",
+    );
+  });
+
+  it("adds the per-workspace Coordinators entry only when the coordinator flag is on (D1)", () => {
+    mocks.state.workspaces.items = [{ id: "workspace-1", name: "Product" }];
+    const { result, rerender } = renderHook(() => useSettingsDiscovery());
+
+    expect(result.current.some((entry) => entry.id === "workspace:workspace-1:coordinators")).toBe(
+      false,
+    );
+
+    mocks.coordinatorEnabled = true;
+    rerender();
+
+    expect(result.current.some((entry) => entry.id === "workspace:workspace-1:coordinators")).toBe(
+      true,
     );
   });
 });

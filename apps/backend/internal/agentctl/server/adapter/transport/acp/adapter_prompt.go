@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/coder/acp-go-sdk"
+	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
 	"github.com/kandev/kandev/internal/agentctl/acpcompat"
 	"github.com/kandev/kandev/internal/agentctl/server/adapter/transport/shared"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
@@ -241,6 +242,12 @@ func (a *Adapter) sendPrompt(
 			if disposition := a.promptFailureDisposition(
 				conn, sessionID, turn, promptGeneration, notificationsDrained,
 			); disposition != "" {
+				var capacityContinuation *streams.CapacityContinuationSnapshot
+				if classified := routingerr.Classify(routingerr.Input{
+					Phase: routingerr.PhasePromptSend, ProviderID: a.agentID, Stderr: providerError.Message,
+				}); classified.Code == routingerr.CodeModelCapacity {
+					capacityContinuation = a.capacityContinuationSnapshot(turn, notificationsDrained)
+				}
 				a.cancelAsyncTurnComplete(sessionID)
 				a.sendUpdate(AgentEvent{
 					Type:                     streams.EventTypeError,
@@ -248,6 +255,7 @@ func (a *Adapter) sendPrompt(
 					PromptGeneration:         promptGeneration,
 					Error:                    providerError.Message,
 					ProviderError:            providerError,
+					CapacityContinuation:     capacityContinuation,
 					PromptFailureDisposition: disposition,
 				})
 				return nil
@@ -274,6 +282,7 @@ func (a *Adapter) sendPrompt(
 	// Cancel any tool calls still in-flight (e.g. a denied permission leaves the
 	// tool_call without a terminal status update from the agent).
 	continuationSafety := a.continuationSafetySnapshot(turn)
+	capacityContinuation := a.capacityContinuationSnapshot(turn, notificationsDrained)
 	a.cancelPromptEndToolCalls(sessionID)
 
 	// Mark any tracked Monitors as ended. They live longer than a typical tool
@@ -321,10 +330,11 @@ func (a *Adapter) sendPrompt(
 			zap.Uint64("prompt_generation", promptGeneration))
 		a.cancelAsyncTurnComplete(sessionID)
 		a.sendUpdate(AgentEvent{
-			Type:             streams.EventTypeError,
-			SessionID:        sessionID,
-			PromptGeneration: promptGeneration,
-			Error:            safeMessage,
+			Type:                 streams.EventTypeError,
+			SessionID:            sessionID,
+			PromptGeneration:     promptGeneration,
+			Error:                safeMessage,
+			CapacityContinuation: capacityContinuation,
 			PromptFailureDisposition: a.promptFailureDisposition(
 				conn, sessionID, turn, promptGeneration, notificationsDrained,
 			),

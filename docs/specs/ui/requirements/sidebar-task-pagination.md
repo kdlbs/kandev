@@ -1,5 +1,5 @@
 ---
-status: draft
+status: active
 system: ui
 created: 2026-09-26
 owners:
@@ -38,7 +38,7 @@ Archive membership remains defined by [archived views](sidebar-archived-filter.m
 - **AC-UI-SIDEBAR-ARCHIVED-FILTER-002.12:** A failed page read shall retain the displayed page, scroll position, and open conversation, with Retry available.
 - **AC-UI-SIDEBAR-ARCHIVED-FILTER-002.13:** Active-task actions shall preserve their existing meaning across page boundaries. A partial page shall never be treated as the complete task inventory.
 - **AC-UI-SIDEBAR-ARCHIVED-FILTER-002.14:** Repository and workflow membership filters shall accept at least 1,000 selected values per clause within the overall query limit. An individual value's size limit shall not apply to the combined selection. Existing saved views shall load without editing when their values satisfy these limits; unsupported or excessive selections shall fail explicitly without truncation or broadening.
-- **AC-UI-SIDEBAR-ARCHIVED-FILTER-002.15:** Returning to a recently visited view with an eligible retained first page shall show that page before its refresh response arrives, on desktop and phone. The view shall refresh in the background without blanking its rows, shifting them to display refresh status, or changing the open conversation. An unvisited or expired view without complete shared task data shall show a loading state, never another view's rows.
+- **AC-UI-SIDEBAR-ARCHIVED-FILTER-002.15:** Returning to a recently visited view with an eligible retained first page shall show that page before its refresh response arrives, on desktop and phone. The view shall refresh in the background without blanking its rows, shifting them to display refresh status, or changing the open conversation. An unvisited or expired view without complete shared task data shall show a loading state, never another view's rows, except for the same-view disclosure continuity defined in 002.25.
 - **AC-UI-SIDEBAR-ARCHIVED-FILTER-002.16:** Recently visited results shall be finite, expire, and never survive an account or workspace context change. Known deleted or no-longer-matching tasks shall not reappear from retained results. Delayed responses shall not repopulate an invalidated context.
 - **AC-UI-SIDEBAR-ARCHIVED-FILTER-002.17:** Each task-list surface shall show at most one query-error announcement. A rejected filter shall identify the affected filter and the actionable limit or correction. Transport and server failures shall offer Retry without describing an active-task view as an archive failure. Errors shall remain distinct from successful empty results.
 - **AC-UI-SIDEBAR-ARCHIVED-FILTER-002.18:** A failed background refresh shall retain usable rows and identify them as not refreshed, with Retry available. Access denial shall clear the affected retained results. Loading, refreshing, and recovery controls shall remain localized, keyboard accessible, and touch reachable.
@@ -50,6 +50,8 @@ Archive membership remains defined by [archived views](sidebar-archived-filter.m
 - **AC-UI-SIDEBAR-ARCHIVED-FILTER-002.22:** When coverage is incomplete, stale, or unavailable, the sidebar shall fetch only the requested bounded view page. Archived saved views shall fetch on demand unless complete eligible archived coverage already exists. A partial collection shall never establish an authoritative empty result, total, or complete-tree order.
 - **AC-UI-SIDEBAR-ARCHIVED-FILTER-002.23:** For the same authorized view and workspace, ordinary task updates during a successful read shall not indefinitely prevent initial rows from appearing. The sidebar shall reconcile known newer changes, display safe results, and refresh in the background. Superseded views, account changes, access denial, and known deletions shall retain their stale-response safeguards.
 - **AC-UI-SIDEBAR-ARCHIVED-FILTER-002.24:** Repeated page and view navigation shall not retain every task encountered. Shared records shall remain only while an active consumer or a bounded reusable page owns them. Cached records shall not count as proof of complete view membership.
+
+- **AC-UI-SIDEBAR-ARCHIVED-FILTER-002.25:** Changing only group or subtask collapse state in the same authorized view shall apply the disclosure immediately and keep eligible already displayed rows and headings visible while the bounded replacement page loads, on desktop and phone. It shall not replace the list with task-loading placeholders. Expanding shall not invent unseen tasks or infer complete membership from a partial page. The replacement shall request page 1; page controls shall not navigate using obsolete bounds during the transition. A failed replacement shall retain eligible rows and offer Retry for page 1. Workspace, account, access, filter, sort, grouping, locale, or ordering-preference changes shall not reuse disclosure-only display continuity. Known removed tasks shall remain absent, superseded responses shall not settle a newer disclosure, and collapsing every group shall keep the headings visible without implying an empty task inventory.
 
 ## Counting and scope
 
@@ -68,3 +70,5 @@ It does not add pagination to Kanban columns, the full Tasks page, or the comman
 - [Sidebar view loading repair](../../../plans/sidebar-view-loading-repair/plan.md)
 
 - [Shared sidebar state and query memory](../../../plans/sidebar-query-memory/plan.md)
+
+- [Sidebar disclosure continuity repair](../../../plans/sidebar-collapse-continuity/plan.md)

@@ -60,6 +60,15 @@ function useSidebarViewKey(
   );
 }
 
+/** Display continuity excludes only disclosure from the full query and context identity. */
+export function sidebarContentKey(viewKey: string): string {
+  if (!viewKey) return "";
+  const identity: Record<string, unknown> = JSON.parse(viewKey);
+  delete identity.collapsed_group_keys;
+  delete identity.collapsed_task_ids;
+  return JSON.stringify(identity);
+}
+
 export function useSidebarPageContext(workspaceId: string | null) {
   const view = useEffectiveSidebarView(workspaceId);
   const { i18n } = useTranslation();

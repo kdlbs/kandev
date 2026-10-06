@@ -230,6 +230,7 @@ func TestMcpModeConstants_MatchTheAgentctlWireValues(t *testing.T) {
 	require.Equal(t, mcpmode.TaskTitlePending, McpModeTaskTitlePending)
 	require.Equal(t, mcpmode.Office, McpModeOffice)
 	require.Equal(t, mcpmode.Automation, McpModeAutomation)
+	require.Equal(t, mcpmode.Coordinator, McpModeCoordinator)
 }
 
 // Every branch of resolveTaskSessionMCPMode, asserted against the exact set
@@ -278,6 +279,12 @@ func TestResolveTaskSessionMCPMode_EmitsOnlyAgentctlAcceptedModes(t *testing.T) 
 			session:  &models.TaskSession{ID: "session", TaskID: "task"},
 			wantMode: "",
 		},
+		{
+			name:     "coordinator-origin task",
+			task:     &models.Task{ID: "task", Origin: models.TaskOriginCoordinator},
+			session:  &models.TaskSession{ID: "session", TaskID: "task"},
+			wantMode: McpModeCoordinator,
+		},
 	}
 
 	for _, tt := range tests {
@@ -286,6 +293,7 @@ func TestResolveTaskSessionMCPMode_EmitsOnlyAgentctlAcceptedModes(t *testing.T) 
 			repo.tasks[tt.task.ID] = tt.task
 			repo.sessions[tt.session.ID] = tt.session
 			exec := newTestExecutor(t, &mockAgentManager{}, repo)
+			exec.SetCoordinatorLookup(fakeCoordinatorLookup{coordinatorID: "coord-1", ok: true, profilesReady: true})
 
 			mode, err := exec.resolveTaskSessionMCPMode(context.Background(), tt.task.ID, tt.session, true)
 			require.NoError(t, err)

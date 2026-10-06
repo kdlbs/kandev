@@ -32,6 +32,9 @@ That path keeps the runtime and skips the teardown/restore steps below.
 Real runtime loss still requires native restoration. Episode ownership, effect
 safety, provider support, acceptance, and rollout defaults remain unchanged.
 
+The [capacity amendment](transient-turn-runtime-continuity.md#capacity-recovery-admission) uses a separate policy for completed effects on a retained runtime.
+Its live-runtime support does not satisfy this document's native restoration capability or read-only safety predicate.
+
 ## Requirement mapping
 
 | Requirement                                  | Design sections                                                      |

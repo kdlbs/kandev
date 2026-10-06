@@ -17,6 +17,7 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/tracing"
 	"github.com/kandev/kandev/internal/agentruntime"
 	"github.com/kandev/kandev/internal/common/appctx"
+	"github.com/kandev/kandev/internal/common/mcpmode"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/secrets"
 	"github.com/kandev/kandev/internal/task/models"
@@ -1103,6 +1104,14 @@ func (m *Manager) prepareExecutionCreateRequest(
 		autoApprove = profileInfo.AutoApprove
 		autoApproveOverride = boolPtr(profileInfo.AutoApprove)
 	}
+	// A coordinator session ignores the profile's auto-approve flag and the
+	// agentctl auto-approve environment variable: only the exact six
+	// coordinator tool names are auto-approved, decided by agentctl's own
+	// mode check (docs/specs/coordinator/system-design/copilot.md#permission-policy).
+	if info.McpMode == mcpmode.Coordinator {
+		autoApprove = false
+		autoApproveOverride = boolPtr(false)
+	}
 	authToken := m.revealRuntimeSecret(ctx, info.Metadata, MetadataKeyAuthTokenSecret)
 	if isDockerExecutorType(info.ExecutorType) {
 		controlToken, err := m.revealContainerControlAuthToken(ctx, info.Metadata, getMetadataString(info.Metadata, MetadataKeyContainerID) != "")
@@ -1132,6 +1141,7 @@ func (m *Manager) prepareExecutionCreateRequest(
 			Env:                            envPreparation.env,
 			AutoApprovePermissions:         autoApprove,
 			AutoApprovePermissionsOverride: autoApproveOverride,
+			McpMode:                        info.McpMode,
 			AgentConfig:                    agentConfig,
 			Metadata:                       metadata,
 			ApprovedSecretEnvKeys:          append([]string(nil), envPreparation.approvedSecretEnvKeys...),

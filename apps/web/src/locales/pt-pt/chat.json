@@ -33,6 +33,7 @@
   "configurationChat": "Chat de configuração",
   "configurationChatDescription": "Deixe o agente atualizar as definições, fluxos de trabalho, perfis de agente e configuração MCP do Kandev.",
   "configurationChatTab": "Chat de configuração",
+  "coordinatorAboutTag": "sobre {{id}}",
   "delete": "Eliminar",
   "deleteQuickChat": "Eliminar o chat rápido?",
   "deleteQuickChatIntro": "Isto elimina permanentemente esta sessão de chat rápido, incluindo:",

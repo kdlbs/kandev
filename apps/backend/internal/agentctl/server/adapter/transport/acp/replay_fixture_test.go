@@ -296,12 +296,15 @@ func TestReplayFixtureRetainedCapacityUsesMarkedRequestError(t *testing.T) {
 			ExecutionID:      "mock-retained-capacity-execution",
 			PromptGeneration: 7,
 		},
-		Frames: []replayfixtures.Frame{{
-			Kind:    replayfixtures.FramePromptError,
-			Code:    -32603,
-			Message: "Selected model is at capacity. Please try a different model.",
-			Data:    map[string]any{"kandevMock": map[string]any{"retainedProviderCapacity": true}},
-		}},
+		Frames: []replayfixtures.Frame{
+			{Kind: replayfixtures.FrameToolCall, ToolCallID: "completed-read", Status: "completed"},
+			{
+				Kind:    replayfixtures.FramePromptError,
+				Code:    -32603,
+				Message: "Selected model is at capacity. Please try a different model.",
+				Data:    map[string]any{"kandevMock": map[string]any{"retainedProviderCapacity": true}},
+			},
+		},
 	}
 	_, observedEvents, requestErr, promptErr := replayFixtureThroughAdapter(t, fx)
 	if promptErr != nil {
@@ -333,5 +336,8 @@ func TestReplayFixtureRetainedCapacityUsesMarkedRequestError(t *testing.T) {
 	if terminal.ProviderError == nil || terminal.ProviderError.Source != streams.ProviderErrorSourceACPPrompt ||
 		terminal.ProviderError.RPCCode != -32603 {
 		t.Fatalf("terminal provider error = %+v, want the marked ACP prompt error", terminal.ProviderError)
+	}
+	if terminal.CapacityContinuation == nil || !terminal.CapacityContinuation.SafeFor(fx.Identity.PromptGeneration) {
+		t.Fatalf("capacity continuation evidence = %+v, want safe generation %d", terminal.CapacityContinuation, fx.Identity.PromptGeneration)
 	}
 }

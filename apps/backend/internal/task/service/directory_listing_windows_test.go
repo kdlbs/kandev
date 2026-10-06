@@ -9,7 +9,7 @@ import (
 )
 
 func TestListDirectoryWindowsVirtualRootListsLogicalDrives(t *testing.T) {
-	got, err := (&Service{}).ListDirectory(context.Background(), "/")
+	got, err := (&Service{}).ListDirectory(context.Background(), "/", false)
 	if err != nil {
 		t.Fatalf("ListDirectory virtual root: %v", err)
 	}
