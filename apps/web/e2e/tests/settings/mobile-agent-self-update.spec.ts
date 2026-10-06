@@ -38,7 +38,7 @@ test.describe("OMP harness-owned updates on phones", () => {
     const approvalResponse = waitForHttp(testPage, "POST", /\/api\/v1\/agent-update\/omp-acp$/);
     await confirm.tap();
     await approvalResponse;
-    expect(runtime.postBodies()).toEqual(["{}"]);
+    expect(runtime.postBodies()).toEqual([{}]);
 
     await runtime.emitUpdate(
       updateJob({
@@ -98,7 +98,7 @@ test.describe("OMP harness-owned updates on phones", () => {
       "already up to date",
     );
     await expect.poll(() => runtime.statusRequestCount()).toBe(baselineStatusReads + 1);
-    expect(runtime.postBodies()).toEqual(["{}"]);
+    expect(runtime.postBodies()).toEqual([{}]);
     expect(runtime.jobsRequestCount()).toBe(baselineJobReads);
     statusGate.resolve();
     await failedStatusResponse;

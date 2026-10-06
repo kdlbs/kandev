@@ -1053,11 +1053,7 @@ func (m *Manager) prepareExecutionCreateRequest(
 	if !ok {
 		return nil, fmt.Errorf("agent type %q not found in registry", info.AgentID)
 	}
-	managedRuntimeVersion, err := m.resolveManagedRuntimeVersion(
-		ctx,
-		models.ExecutorType(info.ExecutorType).Runtime(),
-		agentConfig,
-	)
+	managedRuntimeOptions, err := m.resolveManagedRuntimeCommandOptions(ctx, models.ExecutorType(info.ExecutorType).Runtime(), agentConfig)
 	if err != nil {
 		return nil, err
 	}
@@ -1151,7 +1147,10 @@ func (m *Manager) prepareExecutionCreateRequest(
 			AgentctlStartupConfig:          agentctlStartupConfigForExecutor(m.agentctlStartupConfig, info.ExecutorType),
 			RemoteContributions:            remoteContributions,
 			ContributionDestinations:       contributionDestinations,
-			ManagedRuntimeVersion:          managedRuntimeVersion,
+			ManagedRuntimeVersion:          managedRuntimeOptions.ManagedRuntimeVersion,
+			ManagedRuntimeFamily:           managedRuntimeOptions.ManagedRuntimeFamily,
+			ManagedRuntimeSource:           managedRuntimeOptions.ManagedRuntimeSource,
+			NativeRuntimeVersion:           managedRuntimeOptions.NativeRuntimeVersion,
 			ComparisonTargets:              comparisonTargets,
 		},
 		profileInfo: profileInfo,

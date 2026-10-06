@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/agent/agents"
+	"github.com/kandev/kandev/internal/agent/managedruntime"
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
 	agentctltypes "github.com/kandev/kandev/internal/agentctl/types"
@@ -92,6 +93,20 @@ func TestOnlineManagedRuntimeArgsRejectsUnversionedPackage(t *testing.T) {
 
 	if _, _, ok := onlineManagedRuntimeArgs(args, spec); ok {
 		t.Fatal("unversioned managed runtime command should not be eligible")
+	}
+}
+
+func TestManagedRuntimeSpecForArgsAcceptsOpenCodeV2(t *testing.T) {
+	agent := agents.NewOpenCodeACP()
+	args := []string{"npx", "--yes", "--prefer-offline", "--prefix", managedruntime.NPMProjectPrefix,
+		"@opencode/cli@2.0.18", "acp", "--print-logs", "--log-level", "error"}
+	spec, found := managedRuntimeSpecForArgs(agent, args)
+	if !found || spec.Package != "@opencode/cli" {
+		t.Fatalf("managedRuntimeSpecForArgs = (%+v, %v), want v2 managed package", spec, found)
+	}
+	got, packageSpec, ok := onlineManagedRuntimeArgs(args, spec)
+	if !ok || packageSpec != "@opencode/cli@2.0.18" {
+		t.Fatalf("onlineManagedRuntimeArgs = (%#v, %q, %v), want exact v2 retry", got, packageSpec, ok)
 	}
 }
 

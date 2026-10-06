@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { AgentUpdateJob, AgentUpdateMode, AgentUpdatePreview } from "@/lib/api";
 import { isHandledApiError } from "@/lib/api/client";
+import { t } from "@/lib/i18n";
 
 function errorMessage(error: unknown) {
   return error instanceof Error ? error.message : String(error);
@@ -15,12 +16,14 @@ type UseAgentUpdateDialogStateOptions = {
     agentName: string,
     targetVersion?: string,
     useDefault?: boolean,
+    targetFamily?: "v2",
   ) => Promise<AgentUpdatePreview>;
   onUpdate: (
     agentName: string,
     targetVersion: string,
     useDefault?: boolean,
-    updateMode?: AgentUpdateMode,
+    targetFamily?: "v2" | AgentUpdateMode,
+    expectedRuntimeRevision?: number,
   ) => Promise<AgentUpdateJob>;
 };
 
@@ -36,6 +39,7 @@ function resetDialogState({
   setStarting,
   setSelectedTarget,
   setSelectedUseDefault,
+  setSelectedFamily,
   setActiveJobID,
   setTerminalJob,
 }: {
@@ -47,6 +51,7 @@ function resetDialogState({
   setStarting: (value: boolean) => void;
   setSelectedTarget: (value: string) => void;
   setSelectedUseDefault: (value: boolean) => void;
+  setSelectedFamily: (value: "v2" | undefined) => void;
   setActiveJobID: (value: string | null) => void;
   setTerminalJob: (value: AgentUpdateJob | null) => void;
 }) {
@@ -58,6 +63,7 @@ function resetDialogState({
   setStarting(false);
   setSelectedTarget("");
   setSelectedUseDefault(false);
+  setSelectedFamily(undefined);
   setActiveJobID(null);
   setTerminalJob(null);
 }
@@ -76,15 +82,33 @@ function handleApprovalError(
   if (requestID === previewRequestID.current) setApproveError(errorMessage(error));
 }
 
-async function startApprovedUpdate(
-  agentName: string,
-  targetVersion: string,
-  useDefault: boolean,
-  mode: AgentUpdateMode | undefined,
-  onUpdate: UseAgentUpdateDialogStateOptions["onUpdate"],
-): Promise<AgentUpdateJob> {
-  if (useDefault) return onUpdate(agentName, targetVersion, true);
-  if (mode === "self_update") return onUpdate(agentName, "", false, "self_update");
+function submitRuntimeUpdate({
+  agentName,
+  targetVersion,
+  selectedUseDefault,
+  selectedFamily,
+  preview,
+  onUpdate,
+}: {
+  agentName: string;
+  targetVersion: string;
+  selectedUseDefault: boolean;
+  selectedFamily?: "v2";
+  preview: AgentUpdatePreview | null;
+  onUpdate: UseAgentUpdateDialogStateOptions["onUpdate"];
+}): Promise<AgentUpdateJob> {
+  if (preview?.update_mode === "self_update") return onUpdate(agentName, "", false, "self_update");
+  if (selectedUseDefault) return onUpdate(agentName, targetVersion, true);
+  if (selectedFamily === "v2") {
+    if (
+      !preview ||
+      preview.target_family !== "v2" ||
+      typeof preview.runtime_revision !== "number"
+    ) {
+      throw new Error(t("agents:unableToStartUpdate"));
+    }
+    return onUpdate(agentName, targetVersion, false, selectedFamily, preview.runtime_revision);
+  }
   return onUpdate(agentName, targetVersion);
 }
 
@@ -111,6 +135,7 @@ async function approveRuntimeUpdate({
   preview,
   selectedTarget,
   selectedUseDefault,
+  selectedFamily,
   onUpdate,
   setStarting,
   setApproveError,
@@ -124,6 +149,7 @@ async function approveRuntimeUpdate({
   preview: AgentUpdatePreview | null;
   selectedTarget: string;
   selectedUseDefault: boolean;
+  selectedFamily?: "v2";
   onUpdate: UseAgentUpdateDialogStateOptions["onUpdate"];
   setStarting: (value: boolean) => void;
   setApproveError: (value: string | null) => void;
@@ -139,13 +165,14 @@ async function approveRuntimeUpdate({
   setApproveError(null);
   setTerminalJob(null);
   try {
-    const nextJob = await startApprovedUpdate(
+    const nextJob = await submitRuntimeUpdate({
       agentName,
       targetVersion,
       selectedUseDefault,
-      preview?.update_mode,
+      selectedFamily,
+      preview,
       onUpdate,
-    );
+    });
     captureApprovedJob(nextJob, requestID, previewRequestID, setActiveJobID, setTerminalJob);
   } catch (error) {
     handleApprovalError(error, requestID, previewRequestID, setApproveError, onHandledError);
@@ -163,33 +190,157 @@ function handleDialogOpenChange(
   if (!nextOpen) reset();
 }
 
-type PreviewLoader = (targetVersion?: string, useDefault?: boolean) => Promise<void>;
+type PreviewLoader = (
+  targetVersion?: string,
+  useDefault?: boolean,
+  targetFamily?: "v2",
+) => Promise<void>;
 
-function useRuntimeTargetSelectors(
-  loadPreview: PreviewLoader,
-  setActiveJobID: (value: string | null) => void,
-  setTerminalJob: (value: AgentUpdateJob | null) => void,
-  setSelectedTarget: (value: string) => void,
-  setSelectedUseDefault: (value: boolean) => void,
-) {
+type RuntimeSelectorOptions = {
+  setTerminalJob: (value: AgentUpdateJob | null) => void;
+  loadPreview: PreviewLoader;
+  setActiveJobID: (value: string | null) => void;
+  setSelectedTarget: (value: string) => void;
+  setSelectedUseDefault: (value: boolean) => void;
+  setSelectedFamily: (value: "v2" | undefined) => void;
+  selectedFamily: "v2" | undefined;
+  setPreview: (value: AgentUpdatePreview | null) => void;
+};
+
+type RuntimePreviewLoaderOptions = {
+  agentName: string;
+  onPreview: UseAgentUpdateDialogStateOptions["onPreview"];
+  previewRequestID: { current: number };
+  setPreview: (value: AgentUpdatePreview | null) => void;
+  setPreviewError: (value: string | null) => void;
+  setApproveError: (value: string | null) => void;
+  setLoading: (value: boolean) => void;
+  setSelectedTarget: (value: string) => void;
+  setSelectedUseDefault: (value: boolean) => void;
+  setSelectedFamily: (value: "v2" | undefined) => void;
+};
+
+function useRuntimePreviewLoader({
+  agentName,
+  onPreview,
+  previewRequestID,
+  setPreview,
+  setPreviewError,
+  setApproveError,
+  setLoading,
+  setSelectedTarget,
+  setSelectedUseDefault,
+  setSelectedFamily,
+}: RuntimePreviewLoaderOptions): PreviewLoader {
+  return useCallback(
+    async (targetVersion?: string, useDefault = false, targetFamily?: "v2") => {
+      const requestID = ++previewRequestID.current;
+      setLoading(true);
+      setPreviewError(null);
+      setApproveError(null);
+      if (targetFamily) setPreview(null);
+      try {
+        let nextPreview: AgentUpdatePreview;
+        if (useDefault) {
+          nextPreview = await onPreview(agentName, undefined, true);
+        } else if (targetFamily) {
+          nextPreview = await onPreview(agentName, targetVersion, false, targetFamily);
+        } else {
+          nextPreview = await onPreview(agentName, targetVersion);
+        }
+        if (requestID === previewRequestID.current) {
+          setPreview(nextPreview);
+          setSelectedTarget(useDefault ? DEFAULT_RUNTIME_TARGET : nextPreview.target_version);
+          setSelectedUseDefault(useDefault);
+          setSelectedFamily(targetFamily);
+        }
+      } catch (error) {
+        if (requestID === previewRequestID.current) {
+          setPreview(null);
+          setPreviewError(errorMessage(error));
+        }
+      } finally {
+        if (requestID === previewRequestID.current) setLoading(false);
+      }
+    },
+    [agentName, onPreview],
+  );
+}
+
+function useRuntimeSelectors({
+  setTerminalJob,
+  loadPreview,
+  setActiveJobID,
+  setSelectedTarget,
+  setSelectedUseDefault,
+  setSelectedFamily,
+  selectedFamily,
+  setPreview,
+}: RuntimeSelectorOptions) {
   const selectTarget = useCallback(
     (targetVersion: string) => {
       setActiveJobID(null);
       setTerminalJob(null);
+      if (selectedFamily) setPreview(null);
       setSelectedTarget(targetVersion);
       setSelectedUseDefault(false);
+      setSelectedFamily(undefined);
       void loadPreview(targetVersion);
     },
-    [loadPreview],
+    [
+      loadPreview,
+      selectedFamily,
+      setActiveJobID,
+      setTerminalJob,
+      setPreview,
+      setSelectedFamily,
+      setSelectedTarget,
+      setSelectedUseDefault,
+    ],
   );
   const selectDefault = useCallback(() => {
     setActiveJobID(null);
+    if (selectedFamily) setPreview(null);
     setTerminalJob(null);
     setSelectedTarget(DEFAULT_RUNTIME_TARGET);
     setSelectedUseDefault(true);
+    setSelectedFamily(undefined);
     void loadPreview(undefined, true);
-  }, [loadPreview]);
-  return { selectTarget, selectDefault };
+  }, [
+    loadPreview,
+    selectedFamily,
+    setActiveJobID,
+    setTerminalJob,
+    setPreview,
+    setSelectedFamily,
+    setSelectedTarget,
+    setSelectedUseDefault,
+  ]);
+  const selectMigration = useCallback(() => {
+    setActiveJobID(null);
+    setTerminalJob(null);
+    setPreview(null);
+    setSelectedTarget("");
+    setSelectedUseDefault(false);
+    setSelectedFamily("v2");
+    void loadPreview(undefined, false, "v2");
+  }, [
+    loadPreview,
+    setActiveJobID,
+    setTerminalJob,
+    setPreview,
+    setSelectedFamily,
+    setSelectedTarget,
+    setSelectedUseDefault,
+  ]);
+  const selectCurrentRuntime = useCallback(() => {
+    setActiveJobID(null);
+    setTerminalJob(null);
+    setPreview(null);
+    setSelectedFamily(undefined);
+    void loadPreview();
+  }, [loadPreview, setActiveJobID, setTerminalJob, setPreview, setSelectedFamily]);
+  return { selectTarget, selectDefault, selectMigration, selectCurrentRuntime };
 }
 
 export function useAgentUpdateDialogState({
@@ -206,6 +357,7 @@ export function useAgentUpdateDialogState({
   const [starting, setStarting] = useState(false);
   const [selectedTarget, setSelectedTarget] = useState("");
   const [selectedUseDefault, setSelectedUseDefault] = useState(false);
+  const [selectedFamily, setSelectedFamily] = useState<"v2">();
   const [activeJobID, setActiveJobID] = useState<string | null>(null);
   const [terminalJob, setTerminalJob] = useState<AgentUpdateJob | null>(null);
   const previewRequestID = useRef(0);
@@ -220,42 +372,36 @@ export function useAgentUpdateDialogState({
       setStarting,
       setSelectedTarget,
       setSelectedUseDefault,
+      setSelectedFamily,
       setActiveJobID,
       setTerminalJob,
     });
   }, []);
 
-  const loadPreview = useCallback(
-    async (targetVersion?: string, useDefault = false) => {
-      const requestID = ++previewRequestID.current;
-      setLoading(true);
-      setPreviewError(null);
-      setApproveError(null);
-      try {
-        const nextPreview = useDefault
-          ? await onPreview(agentName, undefined, true)
-          : await onPreview(agentName, targetVersion);
-        if (requestID === previewRequestID.current) {
-          setPreview(nextPreview);
-          setSelectedTarget(useDefault ? DEFAULT_RUNTIME_TARGET : nextPreview.target_version);
-          setSelectedUseDefault(useDefault);
-        }
-      } catch (error) {
-        if (requestID === previewRequestID.current) setPreviewError(errorMessage(error));
-      } finally {
-        if (requestID === previewRequestID.current) setLoading(false);
-      }
-    },
-    [agentName, onPreview],
-  );
-
-  const { selectTarget, selectDefault } = useRuntimeTargetSelectors(
-    loadPreview,
-    setActiveJobID,
-    setTerminalJob,
+  const loadPreview = useRuntimePreviewLoader({
+    agentName,
+    onPreview,
+    previewRequestID,
+    setPreview,
+    setPreviewError,
+    setApproveError,
+    setLoading,
     setSelectedTarget,
     setSelectedUseDefault,
-  );
+    setSelectedFamily,
+  });
+
+  const { selectTarget, selectDefault, selectMigration, selectCurrentRuntime } =
+    useRuntimeSelectors({
+      setTerminalJob,
+      loadPreview,
+      setActiveJobID,
+      setSelectedTarget,
+      setSelectedUseDefault,
+      setSelectedFamily,
+      selectedFamily,
+      setPreview,
+    });
 
   useEffect(() => {
     if (open) void loadPreview();
@@ -263,24 +409,25 @@ export function useAgentUpdateDialogState({
 
   const handleOpenChange = (nextOpen: boolean) => handleDialogOpenChange(nextOpen, setOpen, reset);
 
-  const approve = useCallback(
-    () =>
-      approveRuntimeUpdate({
-        requestID: previewRequestID.current,
-        previewRequestID,
-        agentName,
-        preview,
-        selectedTarget,
-        selectedUseDefault,
-        onUpdate,
-        setStarting,
-        setApproveError,
-        setTerminalJob,
-        setActiveJobID,
-        onHandledError: () => handleDialogOpenChange(false, setOpen, reset),
-      }),
-    [agentName, onUpdate, preview, reset, selectedTarget, selectedUseDefault],
-  );
+  const approve = () =>
+    approveRuntimeUpdate({
+      requestID: previewRequestID.current,
+      previewRequestID,
+      agentName,
+      preview,
+      selectedTarget,
+      selectedUseDefault,
+      selectedFamily,
+      onUpdate,
+      setStarting,
+      setApproveError,
+      setActiveJobID,
+      setTerminalJob,
+      onHandledError: () => {
+        setOpen(false);
+        reset();
+      },
+    });
 
   return {
     activeJob: terminalJob ?? (activeJobID === job?.job_id ? job : undefined),
@@ -296,6 +443,9 @@ export function useAgentUpdateDialogState({
     selectDefault,
     selectedTarget,
     selectedUseDefault,
+    selectedFamily,
+    selectMigration,
+    selectCurrentRuntime,
     starting,
   };
 }

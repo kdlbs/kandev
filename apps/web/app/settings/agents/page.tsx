@@ -74,12 +74,14 @@ type InstalledAgentsSectionProps = {
     name: string,
     targetVersion?: string,
     useDefault?: boolean,
+    targetFamily?: "v2",
   ) => Promise<AgentUpdatePreview>;
   startUpdate: (
     name: string,
     targetVersion: string,
     useDefault?: boolean,
-    updateMode?: AgentUpdateMode,
+    updateMode?: AgentUpdateMode | "v2",
+    expectedRuntimeRevision?: number,
   ) => Promise<AgentUpdateJob>;
   setTuiDialogOpen: (open: boolean) => void;
   handleRescan: () => Promise<void>;
@@ -308,13 +310,8 @@ function useAgentPageState() {
   const { refresh: refreshRuntimeUpdateStatuses, statusByAgent } =
     useAgentRuntimeUpdateStatuses(updateJobs);
 
-  const handleStartUpdate: InstalledAgentsSectionProps["startUpdate"] = async (
-    name,
-    targetVersion,
-    useDefault,
-    updateMode,
-  ) => {
-    const result = await startUpdate(name, targetVersion, useDefault, updateMode);
+  const handleStartUpdate: InstalledAgentsSectionProps["startUpdate"] = async (...args) => {
+    const result = await startUpdate(...args);
     if (!result.job_id && result.operation === "up_to_date") {
       void refreshRuntimeUpdateStatuses().catch(() => {});
     }
