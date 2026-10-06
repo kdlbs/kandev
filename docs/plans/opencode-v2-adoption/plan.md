@@ -273,3 +273,11 @@ The implementation and review fixes are tracked in PR #4014; public README guida
 - External v1 processes share storage outside Kandev's process guard; the UI must state the boundary.
 - Conservative legacy detection preserves v1 on older installations that have never used it.
 - Same-family default changes remain automatic under the existing reviewed-default policy.
+
+## Windows process CI follow-up (2026-10-06)
+
+The branch was rebased onto `main` at `f66293552d15d53d1ad20b114a9d0c223722c04e`. The Windows process job first exceeded its 40-minute job limit after the process package reported success, so the job limit was raised to 60 minutes and the workflow contract test was updated. On the subsequent head `00bb496e720be5aaafdf7daf09ea72abf4fbaa72`, the Windows race suite failed in `TestWorkspaceTrackerGitStatusCaptureRecoverySharesWaiters`: its 5-second result wait expired while the Git-status observation continued. The bounded test wait was raised to 30 seconds. The focused test passed 10/10 under `-race` locally, and the workflow contract test passed 13/13.
+
+After the fix was rebased and pushed as `245c132546dc7e8785fb6e197639f4d22e481a94`, exact-head PR CI completed with 63 passed, 10 skipped, one neutral, zero failed, and zero pending checks. This included the Windows process job, backend aggregate, and all E2E shards. GitHub reported MERGEABLE/CLEAN with no unresolved or hidden review threads. These counts describe that exact head; this plan update starts a fresh check run for its new commit.
+
+The full `internal/agent/agents` race package remains locally unverified after unrelated installer tests failed with shared-`/tmp` ENOSPC. Local Docker/SSH managed-runtime recovery E2E also remains unverified after a shared-`/tmp`/`runc` failure; all six container E2E shards passed in PR CI. Live Sprites installation was unavailable. The opt-in live ACP package still could not be installed because npm returned `ETARGET` for `opencode-ai@1.18.32`.
