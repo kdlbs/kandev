@@ -18,58 +18,8 @@ This design preserves the technical source detail for `REQ-INTEGRATIONS-GITLAB-I
 
 | Requirement | Design section |
 | --- | --- |
-| `REQ-INTEGRATIONS-GITLAB-INTEGRATION-001` | [Migrated source detail](#migrated-source-detail) |
 | `REQ-INTEGRATIONS-GITLAB-INTEGRATION-001` (AC .5, .8, .10) | [Browse project-option context](#browse-project-option-context) |
-
-## Browse project-option context
-
-The Integrations system owns the project choices derived from GitLab browse
-results, together with their workspace identity. This is a shared data contract
-for the existing desktop and phone toolbar, not a separate UI capability.
-
-`GitLabPageClient` passes its resolved workspace to `useGitLabPageState` and
-renders that state's `projectOptions` through `ListToolbar`. Both merge-request
-and issue results use `useSearchAndProjects`: `useGitLabSearch` owns requests,
-response sequencing, workspace provenance and client-side row narrowing;
-`useProjectOptions` owns project-choice derivation. `useKnownProjects` maintains
-one module-local accumulator for the active context, rather than a cache of
-independent workspaces or a cross-tab store.
-
-The intended reset key is a JSON tuple of workspace ID, selection kind, source,
-ID, trimmed committed query, and committed milestone. Pass the same workspace
-identity used by search through `useSearchAndProjects` into `useProjectOptions`
-and `buildProjectOptionsResetKey`. An absent workspace uses the same empty
-identity as the disabled search. JSON encoding preserves delimiter-safe context
-identity. Page number and the explicit project filter stay outside the tuple so
-ordinary pagination and narrowing retain projects already observed in that
-context. A workspace change, including A to B to A, starts a fresh accumulator;
-it does not restore pages cached under the former workspace.
-
-Retain the existing `committedKey` and loading guards: a changed context must
-not seed its accumulator from the previous context's items before the new fetch
-starts. Only the search hook's current-workspace `rawItems` feed page projects.
-The final list remains deduplicated and sorted, and includes a non-empty explicit
-`projectFilter` even if no current row contains it. Workspace changes do not
-clear that filter, change saved queries, or widen server requests. A settled
-empty response in a new workspace contributes no prior workspace projects.
-Same-context loading, empty responses, errors and refreshes keep their existing
-accumulation behavior; disabled search contributes no rows. Existing request
-sequencing and stale-response behavior remain search-hook responsibilities.
-
-Implementation ownership is the existing page-state glue in
-`apps/web/app/gitlab/use-gitlab-page-state.ts`. The accumulator, toolbar, rows,
-API and backend contracts need no production changes for this boundary. Tests
-exercise the real page-state/search/accumulator with `StateProvider`, actual
-`ListToolbar`/Radix selection and native rows, mocking only provider/settings
-transports. Cover both browse kinds, bidirectional workspace changes, empty
-replacement results, same-context pages, selected-filter inclusion and existing
-context/failure controls. This correction concerns dropdown membership; it
-does not establish a row-data leak or a permissions bypass.
-
-Mobile parity uses the pure state/data exception: the shared option derivation
-changes no composition, copy, touch targets, scrolling, navigation or breakpoint
-behavior. Targeted hook and real-consumer component tests satisfy this scope;
-no browser build, Playwright test, screenshot or UI redraw is required.
+| `REQ-INTEGRATIONS-GITLAB-INTEGRATION-001` | [Migrated source detail](#migrated-source-detail) |
 
 ## Migrated source detail
 
@@ -473,3 +423,53 @@ protocol action name for compatibility.
 - PAT mode requires GitLab `api` scope for the complete feature. Insufficient
   scope surfaces as `auth_required` or an action-specific error without
   deleting the saved config.
+
+## Browse project-option context
+
+The Integrations system owns the project choices derived from GitLab browse
+results, together with their workspace identity. This is a shared data contract
+for the existing desktop and phone toolbar, not a separate UI capability.
+
+`GitLabPageClient` passes its resolved workspace to `useGitLabPageState` and
+renders that state's `projectOptions` through `ListToolbar`. Both merge-request
+and issue results use `useSearchAndProjects`: `useGitLabSearch` owns requests,
+response sequencing, workspace provenance and client-side row narrowing;
+`useProjectOptions` owns project-choice derivation. `useKnownProjects` maintains
+one module-local accumulator for the active context, rather than a cache of
+independent workspaces or a cross-tab store.
+
+The intended reset key is a JSON tuple of workspace ID, selection kind, source,
+ID, trimmed committed query, and committed milestone. Pass the same workspace
+identity used by search through `useSearchAndProjects` into `useProjectOptions`
+and `buildProjectOptionsResetKey`. An absent workspace uses the same empty
+identity as the disabled search. JSON encoding preserves delimiter-safe context
+identity. Page number and the explicit project filter stay outside the tuple so
+ordinary pagination and narrowing retain projects already observed in that
+context. A workspace change, including A to B to A, starts a fresh accumulator;
+it does not restore pages cached under the former workspace.
+
+Retain the existing `committedKey` and loading guards: a changed context must
+not seed its accumulator from the previous context's items before the new fetch
+starts. Only the search hook's current-workspace `rawItems` feed page projects.
+The final list remains deduplicated and sorted, and includes a non-empty explicit
+`projectFilter` even if no current row contains it. Workspace changes do not
+clear that filter, change saved queries, or widen server requests. A settled
+empty response in a new workspace contributes no prior workspace projects.
+Same-context loading, empty responses, errors and refreshes keep their existing
+accumulation behavior; disabled search contributes no rows. Existing request
+sequencing and stale-response behavior remain search-hook responsibilities.
+
+Implementation ownership is the existing page-state glue in
+`apps/web/app/gitlab/use-gitlab-page-state.ts`. The accumulator, toolbar, rows,
+API and backend contracts need no production changes for this boundary. Tests
+exercise the real page-state/search/accumulator with `StateProvider`, actual
+`ListToolbar`/Radix selection and native rows, mocking only provider/settings
+transports. Cover both browse kinds, bidirectional workspace changes, empty
+replacement results, same-context pages, selected-filter inclusion and existing
+context/failure controls. This correction concerns dropdown membership; it
+does not establish a row-data leak or a permissions bypass.
+
+Mobile parity uses the pure state/data exception: the shared option derivation
+changes no composition, copy, touch targets, scrolling, navigation or breakpoint
+behavior. Targeted hook and real-consumer component tests satisfy this scope;
+no browser build, Playwright test, screenshot or UI redraw is required.
