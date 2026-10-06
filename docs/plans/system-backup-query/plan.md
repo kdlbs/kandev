@@ -212,7 +212,8 @@ Add the named focused cases before production changes through `/tdd`.
 ## E2E tests
 
 - Desktop Backups page covers the list, resolved path, create/delete flow, and
-  admin/member access in tests/system/backups-page.spec.ts and
+  an actual route-away/return that revalidates an inactive cached list in
+  tests/system/backups-page.spec.ts. Admin/member access remains covered by
   tests/auth/system-data-storage-member-gating.spec.ts.
 - Phone Data & Logs remains the same surface. The existing
   tests/auth/mobile-system-data-storage-member-gating.spec.ts covers member
@@ -221,10 +222,12 @@ Add the named focused cases before production changes through `/tdd`.
   parity evidence. Its overflow assertions currently run after navigation to
   Storage. Add an assertion while Data & Logs is visible, so the Backups surface
   itself has containment evidence. Keep its existing admin touch-target checks.
-- Add a desktop revisit case in `backups-page.spec.ts`.
-  Read the list, then use the header Logs tab to unmount Backups.
-  Create a manual snapshot through the existing API fixture. Return to Database and see it without a hard page reload. Clean up the snapshot afterward.
-  This is rendered evidence for mount revalidation without a new UI control.
+- In `backups-page.spec.ts`, read the list, navigate to System Status so the
+  Data & Logs route unmounts, and create a manual snapshot through the API
+  fixture while the list query is inactive. Return through the Data & Logs
+  navigation link and verify the new row appears after mount without a browser
+  reload. Clean up the snapshot afterward. This is rendered evidence for
+  mount revalidation without a new UI control.
 
 ## Work orders
 

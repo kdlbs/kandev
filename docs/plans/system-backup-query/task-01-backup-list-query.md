@@ -331,8 +331,10 @@ Implementation is complete locally against the merged QUERY-02 contract.
   revive after the identity returns to A.
 - A third regression proves an accepted create poll retains its initiating
   identity and cannot redirect later reads after that identity changes.
-- Managed Chromium Backups/reset E2E: 4 passed. Desktop member-gating E2E: 2
-  passed. Mobile member-gating E2E: 2 passed.
+- Managed Chromium Backups/reset E2E: 5 passed, including a client-side route
+  away from Data & Logs, an API-created snapshot while the list is inactive,
+  and a route return that verifies mount revalidation. Desktop member-gating
+  E2E: 2 passed. Mobile member-gating E2E: 2 passed.
 - `python3 scripts/lint-architecture.py --all`,
   `python3 scripts/list-docs.py validate`, and
   `python3 scripts/lint-spec-files.py --all`: passed, along with the harness
