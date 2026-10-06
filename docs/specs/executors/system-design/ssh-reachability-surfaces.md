@@ -206,7 +206,10 @@ a switch, remount, or StrictMode effect replay has a new lifetime. Reset local
 error/pending controls at that committed boundary; keep keyed records intact.
 
 Every initial load, cadence refresh, and immediate probe checks its captured
-identity at admission. After each await, success, catch and finally check the
+scope and producing committed generation at admission. Advance that generation
+in layout setup, including same-scope StrictMode replay, and publish it to the
+hook's rendered actions. A replay must replace current actions while keeping
+retained pre-replay actions inert. After each await, success, catch and finally check the
 same admitted lifetime before any local update or `setSSHReachability` call.
 Retained callbacks and queued interval work from a retired visit are inert:
 they issue no request. Keep latest-request supersession for GET refreshes;

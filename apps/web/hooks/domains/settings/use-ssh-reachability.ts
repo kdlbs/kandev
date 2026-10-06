@@ -8,7 +8,7 @@ import {
 import type { SSHReachabilityRecord } from "@/lib/types/http-ssh";
 
 type ReachabilityScope = { executorId: string; storeApi: ReturnType<typeof useAppStoreApi> };
-type ReachabilityLifetime = { scope: ReachabilityScope; pendingProbes: number };
+type ReachabilityLifetime = { scope: ReachabilityScope; generation: number; pendingProbes: number };
 
 /**
  * Owns local request controls for the committed SSH executor visit. Accepted
@@ -19,13 +19,16 @@ export function useSSHReachability(executorId: string) {
   const storeApi = useAppStoreApi();
   const scope = useMemo(() => ({ executorId, storeApi }), [executorId, storeApi]);
   const lifetimeRef = useRef<ReachabilityLifetime | null>(null);
+  const generationRef = useRef(-1);
+  const [generation, setGeneration] = useState(0);
   const [loadError, setLoadError] = useState(false);
   const [probing, setProbing] = useState(false);
   const seqRef = useRef(0);
 
   useLayoutEffect(() => {
-    const lifetime = { scope, pendingProbes: 0 };
+    const lifetime = { scope, generation: ++generationRef.current, pendingProbes: 0 };
     lifetimeRef.current = lifetime;
+    setGeneration(lifetime.generation);
     setLoadError(false);
     setProbing(false);
     return () => {
@@ -35,7 +38,7 @@ export function useSSHReachability(executorId: string) {
 
   const load = useCallback(async () => {
     const lifetime = lifetimeRef.current;
-    if (!lifetime || lifetime.scope !== scope) return;
+    if (!lifetime || lifetime.scope !== scope || lifetime.generation !== generation) return;
     const seq = ++seqRef.current;
     const isCurrent = () => lifetimeRef.current === lifetime && seq === seqRef.current;
     try {
@@ -46,7 +49,7 @@ export function useSSHReachability(executorId: string) {
     } catch {
       if (isCurrent()) setLoadError(true);
     }
-  }, [executorId, scope, storeApi]);
+  }, [executorId, generation, scope, storeApi]);
 
   useEffect(() => {
     void load();
@@ -60,7 +63,7 @@ export function useSSHReachability(executorId: string) {
 
   const probeNow = useCallback(async () => {
     const lifetime = lifetimeRef.current;
-    if (!lifetime || lifetime.scope !== scope) return;
+    if (!lifetime || lifetime.scope !== scope || lifetime.generation !== generation) return;
     const isCurrent = () => lifetimeRef.current === lifetime;
     lifetime.pendingProbes++;
     setProbing(true);
@@ -77,7 +80,7 @@ export function useSSHReachability(executorId: string) {
         setProbing(lifetime.pendingProbes > 0);
       }
     }
-  }, [executorId, scope, storeApi]);
+  }, [executorId, generation, scope, storeApi]);
 
   const now = useReachabilityClock(record, scope, lifetimeRef);
   return { record, loadError, probing, probeNow, now };

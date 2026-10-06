@@ -270,6 +270,29 @@ lifetime cases passed 63/63. Final run after fixture lint/format edits passed
 
 Acceptance coverage:
 
+Grouped CodeRabbit review 5434280005 exposed admission across same-scope
+StrictMode replay. The independently authored `retained first-setup action
+cannot admit work after same-scope replay` case first admits an encoded POST
+from the first layout setup, then invokes that retained action after replay.
+It causally failed with an extra fourth request while the independent `live
+action after same-scope replay still probes and presents success` control
+passed. An earlier fixture run stopped at an incorrectly expected probe URL;
+that run was not accepted as causal RED. After binding admission to the
+producing committed generation, both cases pass. The current action still
+disables during its probe and accepts its successful record; retired work
+remains unable to publish. All 43 affected lifetime/card cases pass, including
+the two clock cases. Independent store/API suites retain historical evidence
+and were not replayed for this correction. The generation advances only in
+layout setup and replaces rendered actions after replay; remote requests and
+store arbitration are unchanged.
+
+The replay correction also passed changed ESLint, project typecheck, i18n
+check/ratchet, documentation catalog validation and specification lint.
+No install, backend, build, E2E, independent store/API replay or public-doc
+validator replay was needed. Detailed original receipts are the `replay-*`
+files under `/tmp/kandev-child58`; the original hosted observer is preserved
+across corrective publication.
+
 Review correction for PR #4272, Greptile comment 4200044167: two additional
 transport-boundary clock cases pass in the anchored `reachability clock
 lifetime` group (2 passed, 27 unselected). `current fresh card becomes stale

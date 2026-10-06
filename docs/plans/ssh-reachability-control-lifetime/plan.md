@@ -143,6 +143,7 @@ Existing card, store and API suites stay in the focused run.
 | --- | --- |
 | .13, .10 | `retired initial load cannot mark B not-known`, `retired refresh cannot publish after A-B-A`: defer A and B, settle obsolete success/reject in both orders; inspect local error, rendered host/state and each keyed store record. |
 | .13 | `retained load/probe actions are inert after commit cleanup`: invoke captured callbacks from layout cleanup/commit before passive effects; assert zero extra GET/POST and no state writes. Include pending settlement after unmount and same-executor remount/StrictMode replay. |
+| .13, .14 | `StrictMode action admission`: a first-setup action demonstrably admits a POST, then cannot admit again after same-scope replay; the live replay action independently probes, disables and presents success. |
 | .14, .5 | `B can probe while A is pending`: actual B card button is enabled, click it, assert POST targets B, B disables during its own probe, A finally cannot release B, then B settles and re-enables. Include obsolete probe success/reject. |
 | .13, .14 | `independent owners keep independent controls`: same/different executors within one store and separate real providers; retiring one cannot mute another's success or pending state. |
 | .3, .13 | `accepted keyed evidence survives retirement`: seed or push newer A/B records through real store action, settle obsolete HTTP, and assert records remain; current older success cannot overwrite newer record/reset but clears its own error. |
@@ -198,6 +199,16 @@ catalog and spec lint, 36 spec-linter tests, 62 public-doc validator tests,
 ACTUALLYJOINED with owned groups gone; receipts/logs remain privately under
 `/tmp/kandev-child58`. Normal commit/push/ready PR and hosted gates follow in
 this primary session; merge requires ROOT's later serial interrupt.
+
+PR #4272 review corrections add real fresh-to-stale and retired-clock coverage,
+then bind callback admission to its producing committed generation after a
+faithful same-scope StrictMode replay RED. The live current-action positive
+control passed independently. All 43 affected lifetime/card cases and changed
+lint, project typecheck, i18n and documentation checks pass after the generation
+correction. Independent store/API results above are preserved historical
+evidence; those suites were not replayed. Task 01 records exact causal findings,
+coverage and private receipt locations. The same original hosted observer
+follows the corrective heads; hosted completion and merge remain pending.
 
 ## Risks
 

@@ -263,6 +263,57 @@ function LayoutAttempt({ action }: { action: () => void }) {
   return null;
 }
 
+// @covers AC-EXECUTORS-SSH-REACHABILITY-002.13
+// @covers AC-EXECUTORS-SSH-REACHABILITY-002.14
+describe("StrictMode action admission", () => {
+  it("retained first-setup action cannot admit work after same-scope replay", async () => {
+    let retained: Reachability["probeNow"] | undefined;
+    const capture = () => {
+      if (retained) return;
+      retained = current().probeNow;
+      void retained();
+    };
+    render(
+      <StrictMode>
+        <Providers>
+          <Reader executorId={A} />
+          <LayoutAttempt action={capture} />
+        </Providers>
+      </StrictMode>,
+    );
+    const admitted = requests.filter((request) => request.options?.init?.method === "POST");
+    expect(admitted).toHaveLength(1);
+    expect(admitted[0].path).toBe("/api/v1/ssh/executors/executor%2Fa/reachability/probe");
+    expect(current().probing).toBe(false);
+    const count = requests.length;
+
+    await act(async () => void retained!());
+    expect(requests).toHaveLength(count);
+    expect(current().probing).toBe(false);
+    await settle(admitted[0], A);
+    expect(current().record).toBeUndefined();
+    expect(current().loadError).toBe(false);
+  });
+
+  it("live action after same-scope replay still probes and presents success", async () => {
+    render(
+      <StrictMode>
+        <Providers>
+          <Reader executorId={A} />
+        </Providers>
+      </StrictMode>,
+    );
+    expect(requests).toHaveLength(2);
+    const probe = await startProbe();
+    expect(probe.options?.init?.method).toBe("POST");
+    expect(current().probing).toBe(true);
+    await settle(probe, A);
+    expect(current().probing).toBe(false);
+    expect(current().loadError).toBe(false);
+    expect(current().record?.host).toBe(`${A}-host`);
+  });
+});
+
 // @covers AC-EXECUTORS-SSH-REACHABILITY-002.4
 // @covers AC-EXECUTORS-SSH-REACHABILITY-002.13
 describe("reachability clock lifetime", () => {
