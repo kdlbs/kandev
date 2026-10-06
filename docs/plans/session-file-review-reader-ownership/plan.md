@@ -188,3 +188,60 @@ checkpoints; no claim of task completion before verified merge and cleanup.
 - Remounting a fixture instead of preserving the real reader hides the defect.
 - Source drift, timeout/resource/transport/setup or unknown failures require a
   ROOT checkpoint. Repair only routine owned fixture/CLI/oracle mistakes.
+
+## Startup review correction checkpoint
+
+All preceding local results are historical for published READY PR4252 head
+`004b075fc42f1f0523c2968689174d090665074e`. CodeRabbit App347564 authenticated
+organization-configured automatic full review completed all six files with
+substantive semantics/no actionable code finding. Its generic docstring warning
+is advisory, without a repo TSDoc coverage gate. No further review requested.
+Receipts: `/tmp/kandev-child47-review-{read-data,checkpoint}.json`.
+
+Greptile thread `PRRT_kwDOQ2-eWs6pbmOr` / comment4194458667 is a valid scoped
+startup-order candidate accepted by ROOT. A layout-phase read can precede the
+real connector's passive singleton installation; no-client returns without a
+same-session retry. `src/app-shell.tsx:84` places the connector before route
+children; loaded boot data permits initial readers. Original reads were passive.
+Runtime RED is still required. Keep commit-time owner invalidation and restore
+ordered passive notification/read initialization without producer, provider,
+API, socket, consumer production, cache, retry or framework changes.
+
+ROOT granted exclusive LOCAL-HEAVY after child48 yielded/joined/gone. Continue
+this same work order with real WebSocketConnector/StateProvider/reader startup
+RED, connected GREEN and all17 existing controls, then the original affected
+checks/caps/hooks. No reinstall. Sole old collector32291 retains original
+11:42:22UTC cutoff; only stop/join when checked new-head publication is imminent,
+or join its natural terminal result. Interrupted collector has NO VERDICT;
+old-head review/CI stay historical. No hosted cancellation/rerun. Publish normal
+corrective commit to existing PR, preserve bot body additions, freeze/verify,
+return lease, then one new-head original45m collector. MERGE NONE.
+
+Claude reset/fetched-marker and unmark-failure suggestions preserve unchanged
+baseline policies outside this repair. Reset disposition posted/resolved; unmark
+disposition pending. Greptile stays unresolved until published RED/fix/checks.
+
+### Startup correction local results
+
+The permanent real-connector startup regression failed causally on the published
+hook: connector connected/user.subscribe sent, zero session.file_review.get
+(expected one). Native11013 actually joined exit1/7.217s, group/children gone;
+no setup/missing-method/timeout failure. The reader-only correction separates
+layout lifetime invalidation from passive guarded notification/read setup.
+
+All18 affected tests passed, including the ordinary-startup proper-session RPC
+and actual returned hash/classifier plus the17 prior controls. Affected ESLint,
+normal package typecheck, i18n check/ratchet passed. Receipts/logs:
+`/tmp/kandev-child47-startup-{red,green,lint,typecheck,i18n-check,i18n-ratchet}.{json,log}`.
+Every invocation is bounded, serial and actually joined with owned groups and
+observed children gone. The complete real connector/provider/client/router are
+unmocked; only deferred wire substitutes transport. No consumer production or
+protocol/cache/mutation policy change. Final catalog/spec lint and actual five-path fixup coverage passed (`covered`,
+`ok: true`, `errors: []`, accepted unchanged owning requirement/design). Receipts:
+`/tmp/kandev-child47-startup-docs-{catalog,spec-lint,coverage}.{json,log}`.
+Publication/new-head hosted gates remain pending. The old collector was stopped
+only after all candidate checks passed and publication became imminent: native
+32291 actually joined143/2198.118s, wrapper/group/all observed descendants gone,
+original timing preserved, INTERRUPTED NO VERDICT. Receipt:
+`/tmp/kandev-child47-old-collector-retirement.json`. Old-head checks/reviews are
+historical after the corrective push.

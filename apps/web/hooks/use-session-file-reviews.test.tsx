@@ -5,6 +5,7 @@ import { TooltipProvider } from "@kandev/ui/tooltip";
 import { StateProvider } from "@/components/state-provider";
 import { ToastProvider } from "@/components/toast-provider";
 import { VcsDialogsProvider } from "@/components/vcs/vcs-dialogs";
+import { WebSocketConnector } from "@/components/ws-connector";
 import { ReviewDialog } from "@/components/review/review-dialog";
 import { hashDiff, reviewFileKey, type ReviewFile } from "@/components/review/types";
 import { computeChangesReviewSets } from "@/components/task/task-changes-panel-state";
@@ -58,7 +59,7 @@ const file: ReviewFile = {
   source: "uncommitted",
 };
 const key = reviewFileKey(file);
-let client: WebSocketClient;
+let client: WebSocketClient | null;
 let previousClient: WebSocketClient | null;
 let sequence = 0;
 const session = () => `file-review-reader-${++sequence}`;
@@ -81,12 +82,16 @@ beforeEach(() => {
   vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "queueMicrotask"] });
   previousClient = getWebSocketClient();
   vi.stubGlobal("WebSocket", DeferredSocket);
+  client = null;
+});
+
+function establishConnection() {
   client = new WebSocketClient("ws://file-review-reader-test", undefined, { enabled: false });
   client.connect();
   DeferredSocket.current.readyState = DeferredSocket.OPEN;
   DeferredSocket.current.onopen?.();
   setWebSocketClient(client);
-});
+}
 
 afterEach(async () => {
   cleanup();
@@ -97,7 +102,7 @@ afterEach(async () => {
     }
     vi.runAllTicks();
   });
-  client.disconnect();
+  client?.disconnect();
   setWebSocketClient(previousClient);
   vi.clearAllTimers();
   vi.useRealTimers();
@@ -415,9 +420,35 @@ function registerConsumerTest() {
 }
 
 describe("session file review reader ownership", () => {
-  registerSessionChangeTests();
-  registerDeferredTests();
-  registerCacheAndSharingTests();
-  registerCurrentControls();
-  registerConsumerTest();
+  it("loads saved reviews on ordinary WebSocketConnector startup", async () => {
+    expect(getWebSocketClient()).toBeNull();
+    const alpha = session();
+    const { result } = renderHook(() => useSessionFileReviews(alpha), {
+      wrapper: ({ children }) => (
+        <Providers>
+          <WebSocketConnector />
+          {children}
+        </Providers>
+      ),
+    });
+    client = getWebSocketClient();
+    expect(client).not.toBeNull();
+    DeferredSocket.current.readyState = DeferredSocket.OPEN;
+    await act(async () => DeferredSocket.current.onopen?.());
+    await flush();
+    requestFor(alpha);
+    expect(result.current.loading).toBe(true);
+    await reply(alpha, true);
+    expect(result.current.loading).toBe(false);
+    expect(reviewed(result.current.reviews)).toEqual(new Set([key]));
+  });
+
+  describe("with an established connection", () => {
+    beforeEach(establishConnection);
+    registerSessionChangeTests();
+    registerDeferredTests();
+    registerCacheAndSharingTests();
+    registerCurrentControls();
+    registerConsumerTest();
+  });
 });

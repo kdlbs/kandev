@@ -434,13 +434,12 @@ otherwise project the selected session's cache or an empty map with idle loading
 Null always projects empty and idle. Render must remain pure: it cannot retire
 owners, change refs, start requests, or mutate any shared cache/framework.
 
-Use a commit-phase lifetime effect (`useLayoutEffect`) for the session's local
-owner and notification listener. Setup creates a distinct active token; cleanup
-retires it and removes its listener on session change, StrictMode replay, or
-unmount. This closes the post-commit interval before passive effects run. Deferred
-initialization then publishes the selected cache/empty snapshot through the
-token. Register the listener before starting the ordinary fetch. Preserve
-deferred state writes where needed by the existing lint rules.
+Create the local owner token in `useLayoutEffect`; cleanup retires it on session
+change, StrictMode replay or unmount before passive effects run. In `useEffect`,
+capture that owner, register its guarded listener, initialize cache/empty state,
+and start the coalesced fetch. This preserves WebSocketConnector's passive
+client setup order. Passive cleanup removes the listener; retired callbacks
+stay inert in the gap. Keep deferred writes required by lint; no new retry policy.
 
 Every queued loading/cache-hit callback, event handler, direct read success,
 and `finally` settlement must check the captured token immediately before local

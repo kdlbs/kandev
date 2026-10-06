@@ -81,6 +81,36 @@ export, broad component mocks, network replay, wall-clock waits or setup-error
 RED. Current mark failure keeps its existing rollback semantics; no adversarial
 mutation ordering inference is authorized by the read proof.
 
+## Scoped startup correction
+
+Continue this ONE order under ROOT's fresh exclusive LOCAL-HEAVY grant.
+Published17-test results are historical; meaningful new RED is required.
+
+Mount real `WebSocketConnector` before the actual reader under `StateProvider`,
+as the SPA does. Global setup substitutes only deferred wire. Move established
+client setup into the ordinary-control group; the startup case must not manually
+preseed/null the singleton or fabricate connector effects. Let the real connector
+create/install its actual client and open the deferred wire. Assert one proper-
+session get and actual hash/classifier outcome. Setup/missing-method errors or
+copied predicates do not count as RED. Join/disconnect/restore all owned resources.
+
+Keep token creation/retirement in layout phase. In passive phase capture that
+committed token, register the guarded listener before initialization/read and
+preserve active-token fencing for every deferred/event/direct local setter.
+Keep null/unmount/StrictMode/ABA, shared proper-session cache/notifications,
+fetched reuse and current optimistic failure/cache ordering. No producer,
+provider/socket/readiness framework/retry timer/API/consumer production changes.
+
+After causal RED, run all17 existing controls plus startup using the original
+anchored selector/one worker/4GiB, affected ESLint, typecheck, i18n check/ratchet,
+docs and actual-coverage commands below with original serial caps/actual joins.
+No reinstall. Once candidate checks pass and publication is imminent, stop/join
+only exact owned old collector32291 if still live, retaining timing and NO
+VERDICT; natural terminal evidence is historical. Normal new hooked conventional
+commit/push existing READYPR4252, preserved live body and finding disposition,
+exact publication/freeze/all joins, return lease, then ONE new-head original45m
+collector/GNU46mkill10. No hosted rerun, collector replacement or self-merge.
+
 ## Admission and bounded processes
 
 DESIGN ONLY until ROOT releases this package and grants heavy work. Re-read
@@ -212,3 +242,15 @@ passes. Final catalog/spec lint and actual six-path documentation coverage passe
 (`covered`, `ok: true`, `errors: []`), with accepted owning requirement/design and
 direct work-order reference validation. Delivery and ROOT merge gates remain
 external. Accepted ROOT proof remains read-only.
+
+
+### Startup correction results
+
+Real WebSocketConnector/StateProvider startup RED produced zero proper-session
+get after real connecting/connected/user.subscribe (expected one), exit1/7.217s.
+No fixture/setup timeout. Small hook-only phase separation passed all18 tests,
+affected lint, normal typecheck, i18n check/ratchet; bounded receipts and actual
+joins/groups/children gone are in the manifest. and catalog/spec lint plus actual five-path coverage passed (`covered`, no
+errors, accepted owning references). Old collector32291 authorized stop/join143,
+all owned descendants gone, INTERRUPTED NO VERDICT with original timing kept.
+Normal hooked corrective publication and new-head hosted gates remain pending.

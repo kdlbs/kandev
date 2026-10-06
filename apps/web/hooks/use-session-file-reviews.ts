@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useLayoutEffect, useRef } from "react";
+import { useState, useCallback, useEffect, useLayoutEffect, useRef } from "react";
 import { getWebSocketClient } from "@/lib/ws/connection";
 
 export type FileReviewState = {
@@ -134,6 +134,14 @@ function useReviewReader(sessionId: string | null) {
   useLayoutEffect(() => {
     const owner: ReaderOwner = { sessionId, active: true };
     ownerRef.current = owner;
+    return () => {
+      owner.active = false;
+    };
+  }, [sessionId]);
+
+  useEffect(() => {
+    const owner = ownerRef.current;
+    if (!owner?.active || owner.sessionId !== sessionId) return;
     const publisher = readerPublisher(owner, setSnapshot);
     versionRef.current = cacheVersion;
     queueMicrotask(() => {
@@ -153,7 +161,6 @@ function useReviewReader(sessionId: string | null) {
       fetchSessionReviews(sessionId, publisher.setReviews, publisher.setLoading);
     }
     return () => {
-      owner.active = false;
       window.removeEventListener("file-reviews-change", handler);
     };
   }, [sessionId]);
