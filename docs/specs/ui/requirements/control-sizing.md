@@ -63,6 +63,8 @@ Existing documented compact mobile chrome, such as MobilePillButton, retains
 its explicit exception. The sidebar New Task row follows the
 [navigation hierarchy](navigation-hierarchy.md) contract.
 Its compact Quick Chat and Terminal icon controls use 24px on fine-pointer desktop.
+The simple New Task style and its labelled quick-action bar use ordinary 28px
+controls. The old compact creation style retains its 36px navigation-row geometry.
 Phone and coarse-pointer controls retain the 44px minimum.
 
 The settings typography contract remains authoritative for text roles.

@@ -4,7 +4,7 @@ import "testing"
 
 func TestDefaultSidebarLayoutPrimaryActionOrder(t *testing.T) {
 	layout := DefaultSidebarLayout()
-	want := []string{"new_task", "home", "automations", "canvases", "integrations"}
+	want := []string{"new_task", "home", "inbox", "needs_you_inbox", "automations", "canvases", "integrations"}
 	if len(layout.Nodes) != len(want) {
 		t.Fatalf("got %d nodes, want %d", len(layout.Nodes), len(want))
 	}

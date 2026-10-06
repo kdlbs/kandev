@@ -173,6 +173,8 @@ export type SidebarLayoutNodeApi = {
 };
 
 export type SidebarLayoutApi = {
+  navigation_height?: number;
+  navigation_expanded?: boolean;
   version: number;
   revision: number;
   nodes: SidebarLayoutNodeApi[];
@@ -246,6 +248,8 @@ export type UserSettings = {
   message_time_display?: MessageTimeDisplay;
   system_metrics_display?: { show_in_topbar?: boolean; simplified?: boolean };
   app_status_bar_enabled?: boolean;
+  sidebar_fast_actions_enabled?: boolean;
+  sidebar_new_task_style?: "simple" | "compact";
   sidebar_hover_enabled?: boolean;
   sidebar_hover_delay_ms?: number;
   resolve_session_hostnames?: boolean;
@@ -338,6 +342,8 @@ export type UserSettingsUpdatePayload = {
   message_time_display?: MessageTimeDisplay;
   system_metrics_display?: { show_in_topbar?: boolean; simplified?: boolean };
   app_status_bar_enabled?: boolean;
+  sidebar_fast_actions_enabled?: boolean;
+  sidebar_new_task_style?: "simple" | "compact";
   sidebar_hover_enabled?: boolean;
   sidebar_hover_delay_ms?: number;
   resolve_session_hostnames?: boolean;

@@ -30,6 +30,7 @@ import {
 } from "@/lib/state/slices/needs-you-inbox/selectors";
 import { selectOfficeInboxCount } from "@/lib/state/slices/office/selectors";
 import { NEEDS_YOU_INBOX_HREF } from "@/lib/navigation/needs-you-inbox-destination";
+import { MobileSidebarCustomization } from "./mobile-sidebar-customization";
 import { MobileNewTaskRow } from "./mobile-new-task-row";
 import { DestinationRows } from "./destination-rows";
 import { MobileAutomationsSection } from "./mobile-automations-section";
@@ -135,65 +136,65 @@ function MobileRequiredRows({
   onNavigate,
   omitSections,
   omitDestinations,
+  inboxKind = "none",
 }: {
   onNavigate: () => void;
   omitSections: Set<string>;
   omitDestinations: string[];
+  inboxKind?: "office" | "needs-you" | "none";
 }) {
-  const { t } = useTranslation();
   const primary = useStaticDestinations("mobileMenu", "primary");
-  const workspaceId = useAppStore((state) => state.workspaces.activeId);
-  const mode = useOfficeModeState();
-  const needsYouEnabled = useFeature("needsYouInbox");
-  const needsYouCount = useAppStore(selectNeedsYouInboxCount);
-  const needsYouHasMore = useAppStore(selectNeedsYouInboxHasMore);
-  const officeInboxCount = useAppStore(selectOfficeInboxCount);
   if (omitSections.has("primary")) return null;
+  if (inboxKind !== "none") return <MobileInboxRow kind={inboxKind} onNavigate={onNavigate} />;
   const fixedDestinations = primary.filter(
     (destination) =>
       (destination.id === "tasks" || destination.id === "threads") &&
       !omitDestinations.includes(destination.id),
   );
-  if (fixedDestinations.length === 0 && mode !== "office" && !(needsYouEnabled && workspaceId))
-    return null;
+  if (!fixedDestinations.length) return null;
   return (
     <div className="flex flex-col gap-3" data-testid="mobile-sidebar-fixed-navigation">
-      {fixedDestinations.length > 0 && (
-        <DestinationRows
-          destinations={fixedDestinations}
-          onNavigate={onNavigate}
-          className="h-11 gap-3 px-3 text-sm aria-[current=page]:bg-primary/10"
-        />
-      )}
-      {mode === "office" && (
-        <Button
-          asChild
-          variant="outline"
-          className="h-11 w-full cursor-pointer justify-start gap-3 px-3"
-        >
-          <Link href="/office/inbox" onClick={onNavigate}>
-            <IconInbox className="h-4 w-4 shrink-0" />
-            <span className="flex-1 text-left">{t("sidebar:inbox")}</span>
-            {officeInboxCount > 0 && <Badge>{officeInboxCount}</Badge>}
-          </Link>
-        </Button>
-      )}
-      {needsYouEnabled && workspaceId && (
-        <Button
-          asChild
-          variant="outline"
-          className="h-11 w-full cursor-pointer justify-start gap-3 px-3"
-        >
-          <Link href={NEEDS_YOU_INBOX_HREF} onClick={onNavigate}>
-            <IconInbox className="h-4 w-4 shrink-0" />
-            <span className="flex-1 text-left">
-              {mode === "office" ? t("sidebar:needsYouInbox") : t("sidebar:inbox")}
-            </span>
-            {needsYouCount > 0 && <Badge>{`${needsYouCount}${needsYouHasMore ? "+" : ""}`}</Badge>}
-          </Link>
-        </Button>
-      )}
+      <DestinationRows
+        destinations={fixedDestinations}
+        onNavigate={onNavigate}
+        className="h-11 gap-3 px-3 text-sm aria-[current=page]:bg-primary/10"
+      />
     </div>
+  );
+}
+
+function MobileInboxRow({
+  kind,
+  onNavigate,
+}: {
+  kind: "office" | "needs-you";
+  onNavigate: () => void;
+}) {
+  const { t } = useTranslation();
+  const workspaceId = useAppStore((state) => state.workspaces.activeId);
+  const mode = useOfficeModeState();
+  const enabled = useFeature("needsYouInbox");
+  const count = useAppStore(selectNeedsYouInboxCount);
+  const hasMore = useAppStore(selectNeedsYouInboxHasMore);
+  const officeCount = useAppStore(selectOfficeInboxCount);
+  const office = kind === "office";
+  if (office && mode !== "office") return null;
+  if (!office && (!enabled || !workspaceId)) return null;
+  const label = !office && mode === "office" ? t("sidebar:needsYouInbox") : t("sidebar:inbox");
+  const badge = office ? officeCount : count;
+  const suffix = !office && hasMore ? "+" : "";
+  return (
+    <Button
+      asChild
+      variant="outline"
+      className="h-11 w-full cursor-pointer justify-start gap-3 px-3"
+    >
+      <Link href={office ? "/office/inbox" : NEEDS_YOU_INBOX_HREF} onClick={onNavigate}>
+        <IconInbox className="h-4 w-4 shrink-0" />
+        <span className="flex-1 text-left">{label}</span>
+        {badge > 0 && <Badge>{`${badge}${suffix}`}</Badge>}
+      </Link>
+    </Button>
   );
 }
 
@@ -299,6 +300,15 @@ function MobileBuiltinNode(props: MobileLayoutNodeProps) {
     onActivateShortcut,
     onNavigate,
   } = props;
+  if (node.destinationId === "inbox" || node.destinationId === "needs_you_inbox")
+    return (
+      <MobileRequiredRows
+        inboxKind={node.destinationId === "inbox" ? "office" : "needs-you"}
+        onNavigate={onNavigate}
+        omitSections={omitSections}
+        omitDestinations={omitDestinations}
+      />
+    );
   if (node.destinationId === "home") {
     if (omitSections.has("primary") || omitDestinations.includes("home")) return null;
     return homeDestination ? (
@@ -451,6 +461,11 @@ export function MobileSidebarLayoutNavigation({
           omitDestinations={omitDestinations}
         />
       </div>
+      <MobileSidebarCustomization
+        nodes={projection.nodes}
+        catalog={catalog.catalog}
+        onNavigate={onNavigate}
+      />
       {toolNodes.length > 0 && (
         <div className="flex min-w-0 flex-col gap-3">{toolNodes.map(renderNode)}</div>
       )}

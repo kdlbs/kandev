@@ -894,5 +894,19 @@
   "queueAutoMergeShort": "自動合併相容的連續訊息。",
   "sleepShort": "任務執行期間防止執行 Kandev 的計算機休眠。",
   "promptAllowAgentEdits": "允許代理程式編輯",
-  "promptAgentEditsDescription": "代理程式可以修改此提示詞，影響所有使用它的位置。"
+  "promptAgentEditsDescription": "代理程式可以修改此提示詞，影響所有使用它的位置。",
+  "sidebarPresentation": "側邊欄外觀",
+  "sidebarFastActions": "顯示快捷操作圖示",
+  "sidebarFastActionsDescription": "在相應按鈕旁顯示終端、快速聊天、畫布設定和整合快捷方式。",
+  "sidebarNewTaskStyle": "新建任務按鈕樣式",
+  "sidebarStyleSimple": "簡潔的新建任務按鈕",
+  "sidebarStyleCompact": "緊湊的新建任務行",
+  "sidebarCustomize": "自訂側邊欄",
+  "sidebarLayoutSettings": "側邊欄佈局設定",
+  "sidebarLayoutConflict": "側邊欄已在其他位置更改。已載入最新設定，請重試。",
+  "sidebarMoveUpEntry": "上移{{name}}",
+  "sidebarMoveDownEntry": "下移{{name}}",
+  "sidebarResizeNavigation": "調整側邊欄導覽高度",
+  "sidebarExpandNavigation": "展開側邊欄導覽",
+  "sidebarCollapseNavigation": "恢復收起的導覽"
 }

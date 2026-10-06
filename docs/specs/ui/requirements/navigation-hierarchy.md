@@ -23,6 +23,11 @@ The 2026-10-05 update revises desktop action placement after feedback on PR #406
 It restores the compact creation row, header shortcuts, and direct Stats control.
 The task-panel and phone contracts retain their existing behavior.
 
+The 2026-10-06 revision makes desktop action placement configurable. New users
+receive the simple creation design with reduced control heights. Existing users
+retain the compact creation row and section shortcuts. See
+REQ-UI-NAV-HIERARCHY-004 for defaults and persistence.
+
 ## Relationship to current contracts
 
 This implemented revision updates phone ordering and creation placement,
@@ -42,9 +47,10 @@ The change does not replace task-row field preferences or task grouping rules.
 
 - **AC-UI-NAV-HIERARCHY-001.1:** In the default expanded desktop sidebar,
   workspace selection shall remain in the fixed header. New Task shall appear
-  before Home as a compact, left-aligned navigation-style button. Its leading
-  creation icon and label shall share one row with independent actions on the right.
-  The button shall match ordinary navigation-row density and neutral styling.
+  before Home using the selected creation style. The compact style shall retain
+  a left-aligned navigation row. The simple style shall use a neutral creation
+  button with reduced height. Right-side actions shall follow the fast-actions
+  preference defined by REQ-UI-NAV-HIERARCHY-004.
   It shall open the existing creation flow for the active
   workspace, with a disabled state when no eligible workspace is available.
   It shall have no visible shortcut hint.
@@ -61,7 +67,7 @@ The change does not replace task-row field preferences or task grouping rules.
   and plugin destinations and an integration-settings path when no provider
   is configured. Availability shall follow the active workspace. A collapsed
   built-in disclosure shall not depend on an unlabelled icon strip for access.
-  The expanded desktop sidebar shall also show eligible first-party provider
+  When fast action icons are enabled, the expanded desktop sidebar shall show eligible first-party provider
   shortcut icons on the right of the Integrations label, before its chevron.
   These shortcuts shall remain visible when the disclosure is closed.
   Each shortcut shall have a localized accessible name and navigate independently.
@@ -70,7 +76,7 @@ The change does not replace task-row field preferences or task grouping rules.
   Explicit user-created shortcut groups shall retain their direct icon actions.
 - **AC-UI-NAV-HIERARCHY-001.4:** Quick Chat, Quick terminal, workspace actions,
   required inboxes, canvases, and eligible plugin navigation shall remain
-  reachable. Desktop Quick terminal and Quick Chat shall be independent icon
+  reachable. When fast action icons are enabled, desktop Quick terminal and Quick Chat shall be independent icon
   buttons on the right of New Task, in that order, without a second utility row.
   They shall retain accessible names, desktop tooltips, and Quick Chat activity cues.
   Desktop quick-action icons shall use the compact 24px size.
@@ -79,6 +85,9 @@ The change does not replace task-row field preferences or task grouping rules.
   Phone quick actions shall retain their labelled utility bar and launch behavior.
   Phone and coarse-pointer actions shall retain 44px touch targets.
   Opening navigation shall not invoke any of these actions.
+  When fast action icons are disabled, desktop shall instead expose labelled
+  Quick Chat and Terminal controls below New Task. They shall retain the same
+  launch behavior and activity cues, without duplicate right-side controls.
 - **AC-UI-NAV-HIERARCHY-001.5:** The expanded desktop footer shall keep a
   labelled Settings destination and, only for an authenticated user, the actual
   account avatar with identity and the existing action in its menu. The footer
@@ -92,16 +101,58 @@ The change does not replace task-row field preferences or task grouping rules.
   workspace switching, and its current expand/hover behavior.
 - **AC-UI-NAV-HIERARCHY-001.6:** Saved desktop layout order and visibility
   shall survive the revision, reload, and workspace switches. Visible New Task
-  shall receive the compact action row at its saved position; the default order
+  shall receive the selected creation style at its saved position; the default order
   applies only to uncustomized/reset layouts. All changed controls shall have
   keyboard operation, visible focus, truthful current/expanded states, and
   localized accessible names in every shipped locale.
-- **AC-UI-NAV-HIERARCHY-001.7:** In the expanded desktop sidebar, the Canvases
+- **AC-UI-NAV-HIERARCHY-001.7:** When fast action icons are enabled in the expanded desktop sidebar, the Canvases
   settings shortcut shall appear after its label and before its rightmost chevron.
   It shall remain available while the disclosure is closed.
   Activating the shortcut shall open the active workspace's canvas settings without toggling the disclosure.
   Activating the label or chevron shall only toggle the disclosure.
   Header actions shall remain separate controls without nested buttons or links.
+  With fast action icons disabled, the header shortcut shall be absent and the
+  existing labelled canvas destinations and settings path shall remain reachable.
+
+### REQ-UI-NAV-HIERARCHY-004: Saved sidebar presentation preferences
+
+**Intent:** New users receive simple navigation. Existing users keep their familiar layout.
+
+- **AC-UI-NAV-HIERARCHY-004.1:** Settings > Layout > Sidebar shall offer
+  independent saved preferences for Show fast action icons and New Task button
+  style. The style choices shall be New design and Old compact design. These
+  preferences shall apply to the current user across workspaces, without changing
+  saved navigation order, visibility, custom shortcuts, or plugin registrations.
+- **AC-UI-NAV-HIERARCHY-004.2:** A new installation's initial user shall start
+  with fast action icons disabled and the new simple creation style selected.
+  Users added after the upgrade shall receive these same defaults. Restarting
+  the application shall not convert their defaults into the legacy layout.
+- **AC-UI-NAV-HIERARCHY-004.3:** On upgrade, existing users shall retain
+  enabled fast action icons and the old compact creation style when these
+  preferences have not previously been saved. Explicit saved choices shall win
+  independently. Repeated upgrades shall preserve them and all unrelated settings.
+- **AC-UI-NAV-HIERARCHY-004.4:** Enabling fast action icons shall place
+  Terminal then Quick Chat beside New Task and enable eligible section-header
+  shortcuts before their chevrons. Disabling them shall remove those optional
+  section shortcuts and put labelled Quick Chat then Terminal below New Task.
+  Both creation styles shall support both fast-action states. Built-in actions
+  shall appear once, remain independently operable, and retain activity cues.
+- **AC-UI-NAV-HIERARCHY-004.5:** At the standard root font on fine-pointer
+  desktop, the simple New Task button and labelled quick-action bar shall be
+  28px high. The old compact New Task row shall retain its 36px navigation
+  geometry, and its inline quick-action icons shall remain 24px. Phone and
+  coarse-pointer controls shall retain active targets of at least 44px. Disabled
+  states and long localized labels shall not restore the oversized desktop height.
+- **AC-UI-NAV-HIERARCHY-004.6:** The preferences shall use the existing shared
+  Settings Save and Discard controls. Failed saves shall preserve the draft and
+  show a localized error. Successful saves, reloads, and live settings updates
+  shall restore authoritative values without losing edits made during a save.
+  Omitted fields in unrelated updates shall not reset either preference.
+- **AC-UI-NAV-HIERARCHY-004.7:** The collapsed desktop rail shall retain its
+  named launchers. The phone drawer shall retain labelled creation, quick
+  actions, and destinations regardless of desktop preferences. Changing viewport
+  shall not overwrite saved values or destroy an open creation draft. Stats
+  shall remain directly left of the desktop theme toggle in all preference states.
 
 ### REQ-UI-NAV-HIERARCHY-002: Compact contextual task panel
 
@@ -202,3 +253,4 @@ The change does not replace task-row field preferences or task grouping rules.
 
 - [Implementation plan and comparison work order](../../../plans/navigation-hierarchy/plan.md)
 - [Desktop action-placement revision](../../../plans/sidebar-action-placement/plan.md)
+- [Configurable sidebar presentation](../../../plans/sidebar-presentation-preferences/plan.md)

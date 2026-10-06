@@ -209,6 +209,8 @@ type UserSettings struct {
 	AgentTabCloseBehavior             string                            `json:"agent_tab_close_behavior"`
 	SystemMetricsDisplay              SystemMetricsDisplaySettings      `json:"system_metrics_display"`
 	AppStatusBarEnabled               bool                              `json:"app_status_bar_enabled"`
+	SidebarFastActionsEnabled         bool                              `json:"sidebar_fast_actions_enabled"`
+	SidebarNewTaskStyle               string                            `json:"sidebar_new_task_style"`
 	SidebarHoverEnabled               bool                              `json:"sidebar_hover_enabled"`
 	SidebarHoverDelayMs               int                               `json:"sidebar_hover_delay_ms"`
 	ResolveSessionHostnames           bool                              `json:"resolve_session_hostnames"`

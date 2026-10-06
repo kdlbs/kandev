@@ -77,7 +77,11 @@ export function MobileCanvasesSection({
           variant="outline"
           className="h-11 w-full cursor-pointer justify-start gap-3 px-3"
         >
-          <Link href={workspaceCanvasSettingsHref(workspaceId)} onClick={onNavigate}>
+          <Link
+            data-testid="mobile-workspace-canvases-settings"
+            href={workspaceCanvasSettingsHref(workspaceId)}
+            onClick={onNavigate}
+          >
             <IconLayoutGrid className="size-4 shrink-0" />
             {t("canvases:openWorkspaceSettings")}
           </Link>

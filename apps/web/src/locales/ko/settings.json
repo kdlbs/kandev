@@ -894,5 +894,19 @@
   "queueAutoMergeShort": "호환되는 연속 메시지를 자동으로 병합합니다.",
   "sleepShort": "작업 중 Kandev를 실행하는 컴퓨터의 절전을 방지합니다.",
   "promptAllowAgentEdits": "에이전트 편집 허용",
-  "promptAgentEditsDescription": "이 프롬프트가 사용되는 모든 곳에서 에이전트가 이를 변경할 수 있습니다."
+  "promptAgentEditsDescription": "이 프롬프트가 사용되는 모든 곳에서 에이전트가 이를 변경할 수 있습니다.",
+  "sidebarPresentation": "사이드바 모양",
+  "sidebarFastActions": "빠른 작업 아이콘 표시",
+  "sidebarFastActionsDescription": "각 버튼 옆에 터미널, 빠른 채팅, 캔버스 설정 및 통합 바로가기를 표시합니다.",
+  "sidebarNewTaskStyle": "새 작업 버튼 스타일",
+  "sidebarStyleSimple": "간단한 새 작업 버튼",
+  "sidebarStyleCompact": "작은 새 작업 행",
+  "sidebarCustomize": "사이드바 사용자 지정",
+  "sidebarLayoutSettings": "사이드바 레이아웃 설정",
+  "sidebarLayoutConflict": "다른 곳에서 사이드바가 변경되었습니다. 최신 설정을 불러왔습니다. 다시 시도하세요.",
+  "sidebarMoveUpEntry": "{{name}} 위로 이동",
+  "sidebarMoveDownEntry": "{{name}} 아래로 이동",
+  "sidebarResizeNavigation": "사이드바 탐색 높이 조절",
+  "sidebarExpandNavigation": "사이드바 탐색 펼치기",
+  "sidebarCollapseNavigation": "축소된 탐색 복원"
 }

@@ -894,5 +894,19 @@
   "queueAutoMergeShort": "Merge compatible consecutive messages automatically.",
   "sleepShort": "Prevent the computer running Kandev from sleeping during tasks.",
   "promptAllowAgentEdits": "Allow agent edits",
-  "promptAgentEditsDescription": "Agents can change this prompt wherever it is used."
+  "promptAgentEditsDescription": "Agents can change this prompt wherever it is used.",
+  "sidebarPresentation": "Sidebar appearance",
+  "sidebarFastActions": "Show fast action icons",
+  "sidebarFastActionsDescription": "Show Terminal, Quick Chat, Canvas settings, and integration shortcuts beside their buttons.",
+  "sidebarNewTaskStyle": "New Task button style",
+  "sidebarStyleSimple": "Simple New Task button",
+  "sidebarStyleCompact": "Compact New Task row",
+  "sidebarCustomize": "Customize sidebar",
+  "sidebarLayoutSettings": "Sidebar layout settings",
+  "sidebarLayoutConflict": "The sidebar changed elsewhere. Latest settings were loaded. Try again.",
+  "sidebarMoveUpEntry": "Move {{name}} up",
+  "sidebarMoveDownEntry": "Move {{name}} down",
+  "sidebarResizeNavigation": "Resize sidebar navigation",
+  "sidebarExpandNavigation": "Expand sidebar navigation",
+  "sidebarCollapseNavigation": "Restore compressed navigation"
 }

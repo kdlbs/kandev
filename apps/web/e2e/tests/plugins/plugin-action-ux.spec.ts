@@ -84,6 +84,10 @@ test.describe("Plugin action UX, composer", () => {
   }) => {
     test.setTimeout(120_000);
     await installFixturePlugin(testPage);
+    await apiClient.saveUserSettings({
+      sidebar_fast_actions_enabled: true,
+      sidebar_new_task_style: "compact",
+    });
     await testPage.goto("/tasks");
 
     const mainAction = testPage.getByTestId("e2e-main-topbar-action");

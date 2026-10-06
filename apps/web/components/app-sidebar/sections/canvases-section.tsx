@@ -156,6 +156,7 @@ export function CanvasesSection({ collapsed }: { collapsed: boolean }) {
   const { t } = useTranslation();
   const pathname = usePathname();
   const enabled = useFeature("canvases");
+  const fastActions = useAppStore((state) => state.userSettings.sidebarFastActionsEnabled);
   const activeWorkspaceId = useAppStore((state) => state.workspaces.activeId);
   const { isMobile } = useResponsiveBreakpoint();
   const workspaceId = enabled && !isMobile ? activeWorkspaceId : null;
@@ -178,12 +179,24 @@ export function CanvasesSection({ collapsed }: { collapsed: boolean }) {
           label={t("canvases:canvases")}
           collapsed={collapsed}
           icon={IconLayoutGrid}
-          headerAction={<OpenCanvasSettingsShortcut workspaceId={activeWorkspaceId} />}
+          headerAction={
+            fastActions ? <OpenCanvasSettingsShortcut workspaceId={activeWorkspaceId} /> : undefined
+          }
           headerActionVisibility="always"
           collapsedSummary={activeCanvases.length > 0 ? activeCanvases.length : undefined}
           defaultExpanded={false}
           headerRef={sectionHeaderRef}
         >
+          {!fastActions && (
+            <Link
+              href={workspaceCanvasSettingsHref(activeWorkspaceId)}
+              data-testid="sidebar-canvases-settings"
+              className="flex min-h-8 items-center gap-2 rounded px-2.5 text-[13px] text-muted-foreground hover:bg-muted [@media(pointer:coarse)]:min-h-11"
+            >
+              <IconListDetails className="size-3.5" />
+              {t("canvases:openWorkspaceSettings")}
+            </Link>
+          )}
           {ready && activeCanvases.length === 0 ? (
             <EmptyCanvasRow onOpen={onOpen} triggerRef={triggerRef} />
           ) : (

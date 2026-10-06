@@ -49,7 +49,17 @@ export function AppSidebarHomeItem({ collapsed }: { collapsed: boolean }) {
   );
 }
 
-export function AppSidebarFixedNav({ collapsed }: { collapsed: boolean }) {
+export function AppSidebarFixedNav({
+  collapsed,
+  showOfficeInbox = true,
+  showNeedsYouInbox = true,
+  showQuickChat = true,
+}: {
+  collapsed: boolean;
+  showOfficeInbox?: boolean;
+  showNeedsYouInbox?: boolean;
+  showQuickChat?: boolean;
+}) {
   const { t } = useTranslation();
   const workspaceId = useAppStore((s) => s.workspaces.activeId);
   const inboxCount = useAppStore(selectOfficeInboxCount);
@@ -63,7 +73,7 @@ export function AppSidebarFixedNav({ collapsed }: { collapsed: boolean }) {
 
   return (
     <>
-      {inOffice && (
+      {inOffice && showOfficeInbox && (
         <AppSidebarNavItem
           icon={IconInbox}
           label={t("sidebar:inbox")}
@@ -76,7 +86,7 @@ export function AppSidebarFixedNav({ collapsed }: { collapsed: boolean }) {
           bucket it renders, not the place, and is used only in Office mode,
           where AC .3 keeps this entry present alongside Office's own Inbox row
           and two identically named rows would be indistinguishable. */}
-      {needsYouInboxEnabled && (
+      {needsYouInboxEnabled && showNeedsYouInbox && (
         <AppSidebarNavItem
           icon={IconInbox}
           label={inOffice ? t("sidebar:needsYouInbox") : t("sidebar:inbox")}
@@ -87,7 +97,7 @@ export function AppSidebarFixedNav({ collapsed }: { collapsed: boolean }) {
           testId="sidebar-needs-you-inbox"
         />
       )}
-      {workspaceId && collapsed && (
+      {workspaceId && collapsed && showQuickChat && (
         <AppSidebarNavItem
           icon={IconMessageCircle}
           label={quickChatLabel}

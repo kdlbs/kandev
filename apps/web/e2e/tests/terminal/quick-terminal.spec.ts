@@ -55,7 +55,12 @@ async function closeSurvivingQuickTerminals(page: Page, launcherTestId: string) 
 test.describe("quick terminal tabs", () => {
   test("creates, detaches, reuses, switches, and closes independent terminals", async ({
     testPage,
+    apiClient,
   }) => {
+    await apiClient.saveUserSettings({
+      sidebar_fast_actions_enabled: true,
+      sidebar_new_task_style: "compact",
+    });
     await testPage.goto("/");
     try {
       const terminalButton = testPage.getByTestId("sidebar-quick-terminal-shortcut");

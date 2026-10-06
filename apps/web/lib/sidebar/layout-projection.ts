@@ -1,5 +1,6 @@
 import {
   IconBolt,
+  IconInbox,
   IconLayoutGrid,
   IconList,
   IconPlus,
@@ -43,6 +44,8 @@ type ProjectionOptions = {
 
 const BUILTIN_ICONS: Record<string, DestinationIcon> = {
   home: IconList,
+  inbox: IconInbox,
+  needs_you_inbox: IconInbox,
   new_task: IconPlus,
   automations: IconBolt,
   canvases: IconLayoutGrid,
@@ -178,7 +181,7 @@ export function projectSidebarLayout(
   );
   return {
     nodes,
-    protectedNodeIds: ["tasks", "inbox", "needs-you-inbox"],
+    protectedNodeIds: ["tasks"],
   };
 }
 

@@ -21,6 +21,7 @@ import { useQuickChatActivity } from "@/components/quick-chat/use-quick-chat-act
 import { SurfaceAction } from "@/components/actions/surface-action";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { AppSidebarWorkspaceActions } from "./app-sidebar-workspace-actions";
+import { NewTaskPresentation, LabelledUtility } from "./new-task-presentation";
 import { AppSidebarNavItem } from "./app-sidebar-nav-item";
 
 // The Office "New issue" dialog only renders on `/office` routes, but this item
@@ -145,7 +146,6 @@ function RoutedNewTaskDialog({
  * global navigation item focused on creating top-level tasks and quick chats.
  */
 export function AppSidebarNewTaskItem({ collapsed }: AppSidebarNewTaskItemProps) {
-  const { t } = useTranslation();
   const router = useRouter();
   const workspaceId = useAppStore((s) => s.workspaces.activeId);
   const activeWorkspace = useAppStore((s) =>
@@ -172,7 +172,6 @@ export function AppSidebarNewTaskItem({ collapsed }: AppSidebarNewTaskItemProps)
   }, [isImproveWorkspace, setImproveDialogOpen]);
   useNewTaskCreationRequest(workspaceId, handleOpenNewTask);
 
-  const canOpenRowActions = !collapsed && !!workspaceId;
   const handleRegularTaskCreated = useCallback(
     (
       task: Task,
@@ -194,46 +193,16 @@ export function AppSidebarNewTaskItem({ collapsed }: AppSidebarNewTaskItemProps)
 
   return (
     <>
-      <div className="flex min-w-0 flex-wrap items-center gap-1">
-        <AppSidebarNavItem
-          icon={IconSquarePlus}
-          label={t("sidebar:newTask")}
-          onClick={handleOpenNewTask}
-          collapsed={collapsed}
-          disabled={!workspaceId}
-          testId="create-task-button"
-          className={!collapsed ? "min-w-[6.5rem] flex-1" : undefined}
-        />
-        {canOpenRowActions && (
-          <>
-            <div
-              aria-label={t("common:utilities")}
-              role="group"
-              data-testid="sidebar-quick-actions"
-              className="flex shrink-0 items-center gap-0.5 sidebar-fade-in"
-            >
-              <RowActionButton
-                icon={IconTerminal2}
-                label={t("sidebar:quickTerminal")}
-                testId="sidebar-quick-terminal-shortcut"
-                onClick={handleOpenQuickTerminal}
-              />
-              <RowActionButton
-                icon={IconMessageCircle}
-                label={quickChatLabel}
-                testId="sidebar-quick-chat-shortcut"
-                onClick={handleOpenQuickChat}
-                activity={quickChatActivity}
-              />
-            </div>
-            <AppSidebarWorkspaceActions
-              workspaceId={workspaceId}
-              workspaceLabel={activeWorkspace?.name}
-              presentation="desktop"
-            />
-          </>
-        )}
-      </div>
+      <NewTaskButtons
+        collapsed={collapsed}
+        workspaceId={workspaceId}
+        workspaceName={activeWorkspace?.name}
+        handleOpenNewTask={handleOpenNewTask}
+        handleOpenQuickTerminal={handleOpenQuickTerminal}
+        handleOpenQuickChat={handleOpenQuickChat}
+        quickChatActivity={quickChatActivity}
+        quickChatLabel={quickChatLabel}
+      />
       <RoutedNewTaskDialog
         workspaceId={workspaceId}
         inOffice={inOffice}
@@ -245,5 +214,159 @@ export function AppSidebarNewTaskItem({ collapsed }: AppSidebarNewTaskItemProps)
         onRegularTaskCreated={handleRegularTaskCreated}
       />
     </>
+  );
+}
+
+function NewTaskButtons({
+  collapsed,
+  workspaceId,
+  workspaceName,
+  handleOpenNewTask,
+  handleOpenQuickTerminal,
+  handleOpenQuickChat,
+  quickChatActivity,
+  quickChatLabel,
+}: {
+  collapsed: boolean;
+  workspaceId: string | null;
+  workspaceName?: string;
+  handleOpenNewTask: () => void;
+  handleOpenQuickTerminal: () => void;
+  handleOpenQuickChat: () => void;
+  quickChatActivity: QuickChatActivityState;
+  quickChatLabel: string;
+}) {
+  const { t } = useTranslation();
+  const canOpenRowActions = !collapsed && !!workspaceId;
+  return (
+    <>
+      {collapsed ? (
+        <CompactNewTaskTrigger
+          collapsed={collapsed}
+          workspaceId={workspaceId}
+          onClick={handleOpenNewTask}
+        />
+      ) : (
+        <NewTaskPresentation
+          disabled={!workspaceId}
+          onClick={handleOpenNewTask}
+          compact={
+            <CompactNewTaskTrigger
+              collapsed={collapsed}
+              workspaceId={workspaceId}
+              onClick={handleOpenNewTask}
+            />
+          }
+          actions={
+            canOpenRowActions ? (
+              <div
+                aria-label={t("common:utilities")}
+                role="group"
+                data-testid="sidebar-quick-actions"
+                data-sidebar-drag-exclude
+                className="flex shrink-0 items-center gap-0.5 sidebar-fade-in"
+              >
+                <RowActionButton
+                  icon={IconTerminal2}
+                  label={t("sidebar:quickTerminal")}
+                  testId="sidebar-quick-terminal-shortcut"
+                  onClick={handleOpenQuickTerminal}
+                />
+                <RowActionButton
+                  icon={IconMessageCircle}
+                  label={quickChatLabel}
+                  testId="sidebar-quick-chat-shortcut"
+                  onClick={handleOpenQuickChat}
+                  activity={quickChatActivity}
+                />
+              </div>
+            ) : null
+          }
+          workspaceActions={
+            canOpenRowActions ? (
+              <AppSidebarWorkspaceActions
+                workspaceId={workspaceId}
+                workspaceLabel={workspaceName}
+                presentation="desktop"
+              />
+            ) : null
+          }
+          utilities={
+            canOpenRowActions ? (
+              <NewTaskUtilityActions
+                handleOpenQuickChat={handleOpenQuickChat}
+                handleOpenQuickTerminal={handleOpenQuickTerminal}
+                quickChatLabel={quickChatLabel}
+                quickChatActivity={quickChatActivity}
+              />
+            ) : null
+          }
+        />
+      )}
+    </>
+  );
+}
+
+function CompactNewTaskTrigger({
+  collapsed,
+  workspaceId,
+  onClick,
+}: {
+  collapsed: boolean;
+  workspaceId: string | null;
+  onClick: () => void;
+}) {
+  const { t } = useTranslation();
+  return (
+    <AppSidebarNavItem
+      icon={IconSquarePlus}
+      label={t("sidebar:newTask")}
+      onClick={onClick}
+      collapsed={collapsed}
+      disabled={!workspaceId}
+      testId="create-task-button"
+      className={!collapsed ? "min-w-[6.5rem] flex-1" : undefined}
+    />
+  );
+}
+
+function NewTaskUtilityActions({
+  handleOpenQuickChat,
+  handleOpenQuickTerminal,
+  quickChatLabel,
+  quickChatActivity,
+}: {
+  handleOpenQuickChat: () => void;
+  handleOpenQuickTerminal: () => void;
+  quickChatLabel: string;
+  quickChatActivity: QuickChatActivityState;
+}) {
+  const { t } = useTranslation();
+  return (
+    <div
+      role="group"
+      aria-label={t("common:utilities")}
+      data-testid="sidebar-labelled-utilities"
+      className="flex items-center rounded-md border border-border/70"
+    >
+      <LabelledUtility
+        icon={
+          <span className="relative">
+            <IconMessageCircle className="size-4" />
+            <QuickChatActivityIndicator activity={quickChatActivity} />
+          </span>
+        }
+        label={quickChatLabel}
+        onClick={handleOpenQuickChat}
+        testId="sidebar-quick-chat-shortcut"
+      />
+      <span aria-hidden="true" className="h-4 border-l" />
+      <LabelledUtility
+        icon={<IconTerminal2 className="size-4" />}
+        label={t("sidebar:quickTerminal")}
+        onClick={handleOpenQuickTerminal}
+        testId="sidebar-quick-terminal-shortcut"
+      />
+    </div>
   );
 }

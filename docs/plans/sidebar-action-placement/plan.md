@@ -22,6 +22,10 @@ Sources: [requirements](../../specs/ui/requirements/navigation-hierarchy.md),
 `48adb0ce739`, and earlier controls in `dd7dfa81634^`.
 The [original package](../navigation-hierarchy/plan.md) retains its completed delivery evidence.
 
+The 2026-10-06 [presentation preferences package](../sidebar-presentation-preferences/plan.md)
+revises unconditional action placement into saved preferences. This completed
+package records the earlier implementation and results, not the new defaults.
+
 ## Scope
 
 In scope: desktop New Task row, quick-action icons, Canvases shortcut order,

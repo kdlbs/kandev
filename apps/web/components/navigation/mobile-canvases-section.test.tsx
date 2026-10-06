@@ -17,6 +17,9 @@ it("keeps the disclosure target present and hidden until expanded", () => {
       onNavigate={() => {}}
     />,
   );
+  expect(screen.getByTestId("mobile-workspace-canvases-settings").getAttribute("href")).toBe(
+    "/settings/workspaces/workspace/canvases",
+  );
   const toggle = screen.getByRole("button", { name: "Canvases" });
   const panelId = toggle.getAttribute("aria-controls");
   expect(panelId).toBeTruthy();

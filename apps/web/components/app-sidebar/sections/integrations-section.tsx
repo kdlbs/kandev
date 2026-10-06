@@ -95,6 +95,7 @@ export function IntegrationsSection({
 }: IntegrationsSectionProps) {
   const { t } = useTranslation();
   const pathname = usePathname();
+  const fastActions = useAppStore((state) => state.userSettings.sidebarFastActionsEnabled);
   const workspaceId = useAppStore((state) => state.workspaces.activeId);
   // First-party integration links and plugin-registered nav items that target
   // this section (`registerNavItem({ section: "integrations" })`) both come from
@@ -119,7 +120,7 @@ export function IntegrationsSection({
       collapsed={collapsed}
       icon={IconPlugConnected}
       headerAction={
-        firstPartyDestinations.length > 0 ? (
+        fastActions && firstPartyDestinations.length > 0 ? (
           <IntegrationHeaderShortcuts
             links={firstPartyDestinations}
             pathname={pathname}

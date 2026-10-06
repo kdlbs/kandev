@@ -27,7 +27,11 @@ const WORKSPACE_ID = "ws-1";
 const WORKSPACE_NAME = "Default Workspace";
 
 const state = {
-  userSettings: { keyboardShortcuts: {} as Record<string, { key: string }> },
+  userSettings: {
+    sidebarFastActionsEnabled: true,
+    sidebarNewTaskStyle: "compact" as "simple" | "compact",
+    keyboardShortcuts: {} as Record<string, { key: string }>,
+  },
   workspaces: {
     activeId: WORKSPACE_ID as string | null,
     items: [{ id: WORKSPACE_ID, name: WORKSPACE_NAME }],
@@ -146,6 +150,8 @@ function setImproveWorkspaceActive() {
 }
 
 function resetTestState() {
+  state.userSettings.sidebarFastActionsEnabled = true;
+  state.userSettings.sidebarNewTaskStyle = "compact";
   workspaceMode = "kanban";
   state.workspaces.activeId = WORKSPACE_ID;
   state.workspaces.items = [{ id: WORKSPACE_ID, name: WORKSPACE_NAME }];
@@ -504,4 +510,21 @@ it("retains the current task after background sidebar creation", () => {
   expect(mocks.setActiveTask).not.toHaveBeenCalled();
   expect(mocks.setActiveSession).not.toHaveBeenCalled();
   expect(mocks.routerPush).not.toHaveBeenCalled();
+});
+
+it.each([
+  { fast: false, style: "simple" as const },
+  { fast: true, style: "simple" as const },
+  { fast: false, style: "compact" as const },
+  { fast: true, style: "compact" as const },
+])("keeps launch actions available for $style with fast actions $fast", ({ fast, style }) => {
+  state.userSettings.sidebarFastActionsEnabled = fast;
+  state.userSettings.sidebarNewTaskStyle = style;
+  renderItem(false);
+  expect(Boolean(screen.queryByTestId(QUICK_ACTIONS_GROUP_TEST_ID))).toBe(fast);
+  expect(Boolean(screen.queryByTestId("sidebar-labelled-utilities"))).toBe(!fast);
+  fireEvent.click(screen.getByTestId(QUICK_CHAT_TEST_ID));
+  fireEvent.click(screen.getByTestId(QUICK_TERMINAL_TEST_ID));
+  expect(mocks.openQuickChat).toHaveBeenCalledOnce();
+  expect(mocks.openQuickTerminal).toHaveBeenCalledOnce();
 });

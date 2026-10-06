@@ -1,5 +1,5 @@
 ---
-status: draft
+status: active
 system: ui
 created: 2026-09-12
 owners:
@@ -56,16 +56,15 @@ so that a blocked agent is never invisible and I can unblock it in place.
 
 **Destination and gating**
 
-- **AC-UI-NEEDS-YOU-INBOX-001.1:** Where the Needs-you Inbox feature flag is
-  enabled, the workspace sidebar shall present a Needs-you entry that navigates
-  to the Inbox destination for the active workspace.
+- **AC-UI-NEEDS-YOU-INBOX-001.1:** With the feature enabled, the sidebar shall
+  show the workspace Inbox entry unless hidden in its saved layout. Hiding the
+  entry shall not disable the destination or its existing commands.
 - **AC-UI-NEEDS-YOU-INBOX-001.2:** Where the feature flag is disabled, the
   sidebar shall present no Needs-you entry and the Inbox destination shall not
   render Inbox content.
-- **AC-UI-NEEDS-YOU-INBOX-001.3:** The Needs-you entry's presence shall not
-  depend on Office mode. When Office mode is off and the feature flag is on,
-  the entry shall be present; enabling or disabling Office mode alone shall not
-  change whether the entry is present.
+- **AC-UI-NEEDS-YOU-INBOX-001.3:** Office mode alone shall not change Inbox
+  visibility. With the feature enabled, its saved layout shall control presence
+  and order as specified by AC-UI-SIDEBAR-CUSTOMIZATION-006.8.
 - **AC-UI-NEEDS-YOU-INBOX-001.4:** The feature flag shall default to disabled
   in the production profile and enabled in the development and end-to-end
   profiles.

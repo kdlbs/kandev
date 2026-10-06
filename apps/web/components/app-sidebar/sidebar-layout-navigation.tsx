@@ -1,6 +1,8 @@
 "use client";
 
-import { Fragment, useCallback, useMemo } from "react";
+import { useCallback, useMemo } from "react";
+import { SidebarCustomizeMenu } from "./sidebar-customize-menu";
+import { SidebarDraggableNavigation } from "./sidebar-draggable-navigation";
 import { AppSidebarNavItem } from "./app-sidebar-nav-item";
 import { AppSidebarFixedNav, AppSidebarHomeItem } from "./app-sidebar-primary-nav";
 import { AppSidebarNewTaskItem } from "./app-sidebar-new-task-item";
@@ -43,6 +45,14 @@ function LayoutPluginItem({
 
 function builtinNode(node: ProjectedSidebarNode, collapsed: boolean): React.ReactNode {
   switch (node.destinationId) {
+    case "inbox":
+      return (
+        <AppSidebarFixedNav collapsed={collapsed} showNeedsYouInbox={false} showQuickChat={false} />
+      );
+    case "needs_you_inbox":
+      return (
+        <AppSidebarFixedNav collapsed={collapsed} showOfficeInbox={false} showQuickChat={false} />
+      );
     case "home":
       return <AppSidebarHomeItem collapsed={collapsed} />;
     case "new_task":
@@ -89,52 +99,56 @@ export function SidebarLayoutNavigation({ collapsed, inOffice }: SidebarLayoutNa
     (node) => node.visible && (!inOffice || !isKanbanOnlyNode(node)),
   );
   const hasVisibleNewTask = visibleNodes.some((node) => node.destinationId === "new_task");
-  let fixedRendered = false;
-  const items: React.ReactNode[] = [];
+  const items: { id: string; content: React.ReactNode }[] = [];
 
   for (const node of visibleNodes) {
-    if (!fixedRendered && node.destinationId !== "home" && node.destinationId !== "new_task") {
-      items.push(<AppSidebarFixedNav key="sidebar-fixed-navigation" collapsed={collapsed} />);
-      fixedRendered = true;
-    }
     if (node.kind === "builtin") {
-      items.push(<Fragment key={node.id}>{builtinNode(node, collapsed)}</Fragment>);
+      items.push({ id: node.id, content: builtinNode(node, collapsed) });
       continue;
     }
     if (node.kind === "plugin") {
-      items.push(
-        <LayoutPluginItem
-          key={node.id}
-          node={node}
-          href={node.destinationId ? destinationHrefs.get(node.destinationId) : undefined}
-          collapsed={collapsed}
-        />,
-      );
+      items.push({
+        id: node.id,
+        content: (
+          <LayoutPluginItem
+            key={node.id}
+            node={node}
+            href={node.destinationId ? destinationHrefs.get(node.destinationId) : undefined}
+            collapsed={collapsed}
+          />
+        ),
+      });
       continue;
     }
-    items.push(
-      <ShortcutSection
-        key={node.id}
-        node={node}
-        collapsed={collapsed}
-        getActivity={activity.getActivity}
-        onActivateShortcut={activateShortcut}
-      />,
-    );
+    items.push({
+      id: node.id,
+      content: (
+        <ShortcutSection
+          key={node.id}
+          node={node}
+          collapsed={collapsed}
+          getActivity={activity.getActivity}
+          onActivateShortcut={activateShortcut}
+        />
+      ),
+    });
   }
 
-  if (!fixedRendered) {
-    items.push(<AppSidebarFixedNav key="sidebar-fixed-navigation" collapsed={collapsed} />);
-  }
-  if (!hasVisibleNewTask) {
-    items.push(
-      <div key="sidebar-hidden-new-task-host" className="hidden" aria-hidden="true">
-        <AppSidebarNewTaskItem collapsed={collapsed} />
-      </div>,
-    );
-  }
-
-  return <div className="flex flex-col gap-1">{items}</div>;
+  return (
+    <>
+      <SidebarCustomizeMenu nodes={projection.nodes} catalog={catalog.catalog}>
+        <SidebarDraggableNavigation rows={items} catalog={catalog.catalog} disabled={collapsed} />
+      </SidebarCustomizeMenu>
+      {collapsed && (
+        <AppSidebarFixedNav collapsed showOfficeInbox={false} showNeedsYouInbox={false} />
+      )}
+      {!hasVisibleNewTask && (
+        <div className="hidden" aria-hidden="true">
+          <AppSidebarNewTaskItem collapsed={collapsed} />
+        </div>
+      )}
+    </>
+  );
 }
 
 function isKanbanOnlyNode(node: ProjectedSidebarNode): boolean {

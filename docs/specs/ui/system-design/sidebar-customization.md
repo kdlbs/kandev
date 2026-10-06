@@ -7,6 +7,8 @@ requirements:
   - REQ-UI-SIDEBAR-CUSTOMIZATION-003
   - REQ-UI-SIDEBAR-CUSTOMIZATION-004
   - REQ-UI-SIDEBAR-CUSTOMIZATION-005
+  - REQ-UI-SIDEBAR-CUSTOMIZATION-006
+  - REQ-UI-SIDEBAR-CUSTOMIZATION-007
 ---
 
 # Sidebar Customization Design
@@ -44,6 +46,8 @@ catalog order to implement a personal layout.
 | REQ-UI-SIDEBAR-CUSTOMIZATION-003 | Activity |
 | REQ-UI-SIDEBAR-CUSTOMIZATION-004 | Persistence; Editor; Recovery |
 | REQ-UI-SIDEBAR-CUSTOMIZATION-005 | Phone; Verification |
+| REQ-UI-SIDEBAR-CUSTOMIZATION-007 | Navigation split |
+| REQ-UI-SIDEBAR-CUSTOMIZATION-006 | Direct sidebar editing; Inbox layout entries; Recovery |
 
 ## Persistence
 
@@ -134,8 +138,85 @@ Unknown future node kinds must not be written back by an older editor.
 
 On desktop, render optional nodes above the fixed Tasks region in regular workspaces.
 Keep Office-only regions in their existing order; apply common customizable
-nodes before them. Required Inbox/Needs you entries retain their existing mode
-and feature gates and cannot be hidden in this editor.
+nodes before them. Inbox/Needs you entries retain their existing mode and feature
+gates but now participate in saved visibility and order through the extension below.
+
+## Inbox layout entries
+
+Promote the existing fixed Inbox presentations to optional built-in nodes:
+`inbox` for Office Inbox and `needs_you_inbox` for the workspace Inbox, with
+stable node IDs `inbox` and `needs-you-inbox`. Keep their current route, label,
+badge, activity subscriptions, and mode/feature eligibility. Office continues
+to distinguish Inbox from Needs you. Hiding navigation does not disable Inbox
+reads, notifications, existing direct routes, or command-palette access.
+
+Extend `models.DefaultSidebarLayout`, client defaults, projection/catalog labels,
+backend destination validation, and Settings preview/visibility controls together.
+Remove only Inbox entries from the protected set; Tasks and fixed settings/header
+chrome remain protected. Materialize missing Inbox nodes after Home (or the
+normal primary region when Home is absent) without reordering existing nodes.
+Existing explicit visibility/order always wins. Persist materialized nodes on
+the next legitimate save through the existing layout revision contract. Do not
+silently rewrite the database during rendering or duplicate fixed Inbox rows.
+The `version: 1` node shape is unchanged; extend supported built-in identities.
+Preserve unsupported-version and unavailable-node behavior in older layouts.
+
+Apply saved Inbox visibility/order to both regular and Office desktop projection
+and phone projection. Phone keeps the existing primary/tools/Tasks hierarchy;
+only relative order inside its projected region is used. Retain the saved desktop
+order, including hidden and temporarily ineligible nodes, when editing from phone.
+
+## Direct sidebar editing
+
+The [preferences package](../../../plans/sidebar-presentation-preferences/plan.md)
+adds this entry point after the presentation-preference work order. Use one
+controller above the optional navigation region, shared by default and saved
+desktop layouts. Do not make first customization depend on an already saved
+layout. Use current resolved layout/catalog data for names and eligibility.
+
+Use `@kandev/ui/context-menu` for row and empty-region context triggers. Preserve
+normal click, modified-click, disclosure, and independent action controls. Keep
+the menu independent of task-row context menus and fixed footer/header actions.
+List eligible layout nodes, including hidden ones, using checkbox items; apply
+`toggleNodeVisibility` to stable node IDs. Include the preference toggle/style
+choices from the navigation design and finish with Open sidebar layout settings.
+Resolve the existing Layout settings route and its URL-persisted `sidebar` tab;
+use guarded router navigation rather than creating another editor route.
+
+Use the installed `@dnd-kit` primitives and existing `moveSection` operation for
+top-level row order. Apply sortable listeners to the row's own interactive label
+region, never a rendered drag handle. Set an activation distance so normal clicks
+remain clicks. Exclude embedded quick actions, provider icons, chevrons with
+independent behavior, and nested destination lists as drag initiation points.
+Keep resting cursors unchanged; use `grabbing` only while the drag is active.
+Restore cursor state on drop, cancellation, unmount, or workspace switch.
+Show a drop insertion marker without new persistent row padding or grip icons.
+Suppress the click produced by a completed drag. Esc/no-op/invalid drops do not write.
+
+Reuse `sidebar_layout_state` with the captured workspace ID and latest expected
+layout revision. Direct edits save immediately; Settings remains a draft editor
+with shared Save/Discard. Serialize direct mutations per workspace and derive
+each queued operation from the newest authoritative layout, so rapid toggles or
+successive drops do not overwrite each other. Keep hidden/ineligible nodes in
+the full replacement. Prefer acknowledged rendering or isolated optimistic state
+with rollback; never expose an unacknowledged layout as saved global state.
+Apply only authoritative revision-aware responses and retain WS stale filtering.
+Preference changes use the same settings PATCH keys as the Settings controls,
+with no `sidebar_layout_state` mutation for a pure style/icon preference change.
+
+A conflict or failed mutation refreshes authoritative state and reports a
+localized error. Offer an explicit retry/reconciliation path; do not resend a
+stale full layout automatically. Capture the workspace for each request and
+cancel active gestures on scope changes. Existing editor dirty-draft protections
+must survive external changes; clean editors rebase, dirty editors reconcile.
+
+For keyboard users, support Shift+F10/the context-menu key and Move up/down
+choices for the focused row before the final settings link. For coarse-pointer
+phone navigation, a visible Customize action opens the existing inset Drawer
+pattern with checkbox/style controls and Move up/down choices. Use 44px targets,
+one internal scroller, dynamic viewport bounds, and safe-area clearance. Desktop
+pointer drag is an additional convenience; touch scrolling never requires a
+long-press or drag gesture. Do not add a phone drag handle.
 
 Create proposed `ShortcutSection` with sibling disclosure and action controls.
 Do not nest links/buttons inside the disclosure button. Name and chevron toggle
@@ -288,3 +369,31 @@ tradeoffs fit this document; no additional ADR is required.
 
 - [Plan and work orders](../../../plans/sidebar-customization/plan.md)
 - [Mobile saved navigation repair](../../../plans/mobile-saved-navigation/plan.md)
+
+## Navigation split
+
+Extend `SidebarLayout` with optional `navigation_height` (integer CSS pixels,
+64 through 1600) and `navigation_expanded` (boolean, false by default). Missing
+height preserves current fit-content geometry. Keep version 1 and use the existing
+workspace layout CAS patch. All clone, API conversion, editor save, reset,
+projection, and event paths preserve these values; reset clears the override.
+
+Wrap only regular expanded desktop navigation above `TasksSection` in a bounded
+region. Observe container and content size, deriving effective bounds while
+reserving 112px for Tasks where space permits. Persist the user-selected height
+only on completed resize, and preserve it while expanded. The chevron persists
+expanded state independently using the same serialized layout mutation controller.
+No resize/update request is sent for measurement or viewport changes.
+
+Clip overflow in compressed state, add a pointer-events-none bottom gradient,
+and retain a 12px chevron strip with a larger hit target overlapping the region.
+On coarse pointers provide a 44px active target. Prevent keyboard focus on fully
+clipped rows; focus movement to a partially clipped region must expand it before
+leaving a user interacting with hidden content. Expanded overflow owns an internal
+scroller; Tasks retains its own scroller. Do not set button heights to compress.
+
+A semantic horizontal separator supports pointer resize and ArrowUp/ArrowDown,
+Home, and End. Use local preview geometry until drop. Escape, lost pointer capture,
+unmount, and workspace changes cancel previews and restore cursor state without
+saving. Scroll/expanded state follows authoritative updates. Do not activate the
+split in Office, the collapsed rail, phone navigation, or Settings takeover.

@@ -738,6 +738,8 @@ func mapUserSettingsState(response userdto.UserSettingsResponse, workspaceID str
 			"simplified":   settings.SystemMetricsDisplay.Simplified,
 		},
 		"appStatusBarEnabled":               settings.AppStatusBarEnabled,
+		"sidebarFastActionsEnabled":         settings.SidebarFastActionsEnabled,
+		"sidebarNewTaskStyle":               settings.SidebarNewTaskStyle,
 		"sidebarHoverEnabled":               settings.SidebarHoverEnabled,
 		"sidebarHoverDelayMs":               settings.SidebarHoverDelayMs,
 		"resolveSessionHostnames":           settings.ResolveSessionHostnames,

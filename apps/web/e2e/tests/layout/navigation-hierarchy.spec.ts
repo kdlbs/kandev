@@ -18,6 +18,14 @@ function centerY(box: { y: number; height: number }): number {
 }
 
 // @covers AC-UI-NAV-HIERARCHY-001.1 AC-UI-NAV-HIERARCHY-001.2 AC-UI-NAV-HIERARCHY-001.3 AC-UI-NAV-HIERARCHY-001.4 AC-UI-NAV-HIERARCHY-001.5 AC-UI-NAV-HIERARCHY-001.6
+test.beforeEach(async ({ testPage, apiClient }) => {
+  void testPage;
+  await apiClient.saveUserSettings({
+    sidebar_fast_actions_enabled: true,
+    sidebar_new_task_style: "compact",
+  });
+});
+
 test("primary action, disclosure, destination and footer have distinct behavior", async ({
   testPage,
   apiClient,

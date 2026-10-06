@@ -32,6 +32,8 @@ const BUILTIN_LABEL_KEYS: Record<string, string> = {
   automations: "common:automations",
   canvases: "canvases:canvases",
   integrations: "common:integrations",
+  inbox: "sidebar:inbox",
+  needs_you_inbox: "sidebar:needsYouInbox",
 };
 
 type EditorSurfaceProps = {

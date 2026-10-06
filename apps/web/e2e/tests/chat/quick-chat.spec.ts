@@ -118,7 +118,11 @@ test.describe("Quick Chat", () => {
     await expect(overlay).not.toBeVisible();
   });
 
-  test("returns focus without a visible indicator", async ({ testPage }) => {
+  test("returns focus without a visible indicator", async ({ testPage, apiClient }) => {
+    await apiClient.saveUserSettings({
+      sidebar_fast_actions_enabled: true,
+      sidebar_new_task_style: "compact",
+    });
     await testPage.goto("/");
     await testPage.waitForLoadState("networkidle");
     const launcher = testPage.getByTestId("sidebar-quick-chat-shortcut");

@@ -18,6 +18,7 @@ const collapsibleMock = vi.hoisted(() => ({
 const destinationsMock = vi.hoisted(() => vi.fn());
 
 const storeState = {
+  userSettings: { sidebarFastActionsEnabled: true },
   workspaces: { activeId: "ws-1" as string | null },
   appSidebar: {
     sectionExpanded: {
@@ -103,6 +104,7 @@ function renderSection() {
 }
 
 function resetIntegrationState() {
+  storeState.userSettings.sidebarFastActionsEnabled = true;
   navigationMock.pathname = "/";
   navigationMock.isFinePointer = true;
   storeState.appSidebar.sectionExpanded.integrations = false;
@@ -110,6 +112,8 @@ function resetIntegrationState() {
   storeState.setAppSidebarCollapsed.mockClear();
   destinationsMock.mockReturnValue([GITHUB, JIRA]);
 }
+
+const INTEGRATIONS_BODY_TEST_ID = "sidebar-section-integrations";
 
 describe("IntegrationsSection", () => {
   beforeEach(resetIntegrationState);
@@ -122,7 +126,7 @@ describe("IntegrationsSection", () => {
       "false",
     );
     expect(screen.getByTestId("integration-header-shortcut-github")).toBeTruthy();
-    expect(screen.queryByTestId("sidebar-section-integrations")).toBeNull();
+    expect(screen.queryByTestId(INTEGRATIONS_BODY_TEST_ID)).toBeNull();
     screen.getByRole("button", { name: "Integrations" }).click();
     expect(storeState.toggleAppSidebarSection).toHaveBeenCalledWith("integrations", false);
   });
@@ -131,7 +135,7 @@ describe("IntegrationsSection", () => {
     storeState.appSidebar.sectionExpanded.integrations = true;
     destinationsMock.mockReturnValue([AZURE, GITHUB, GITLAB, JIRA, LINEAR]);
     renderSection();
-    const body = document.getElementById("sidebar-section-integrations")!;
+    const body = document.getElementById(INTEGRATIONS_BODY_TEST_ID)!;
     for (const destination of [AZURE, GITHUB, GITLAB, JIRA, LINEAR]) {
       expect(within(body).getAllByRole("link", { name: destination.label })).toHaveLength(1);
     }
@@ -185,6 +189,17 @@ describe("IntegrationsSection header shortcuts", () => {
   beforeEach(resetIntegrationState);
   afterEach(() => cleanup());
 
+  it("hides optional header icons while retaining integration destinations", () => {
+    storeState.userSettings.sidebarFastActionsEnabled = false;
+    storeState.appSidebar.sectionExpanded.integrations = true;
+    renderSection();
+    expect(screen.queryByTestId("integration-header-shortcut-github")).toBeNull();
+    const body = document.getElementById(INTEGRATIONS_BODY_TEST_ID)!;
+    expect(within(body).getByRole("link", { name: "GitHub" }).getAttribute("href")).toBe(
+      GITHUB.href,
+    );
+  });
+
   it("shows first-party shortcuts in manifest order while closed and keeps the action independent", () => {
     destinationsMock.mockReturnValue([GITHUB, PLUGIN_PAGE, JIRA, GITLAB]);
     renderSection();
@@ -227,7 +242,7 @@ describe("IntegrationsSection header shortcuts", () => {
         document.querySelectorAll<HTMLElement>('[data-testid^="integration-header-shortcut-"]'),
       );
       expect(shortcuts.map((shortcut) => shortcut.dataset.destinationId)).toEqual(expectedIds);
-      const body = document.getElementById("sidebar-section-integrations")!;
+      const body = document.getElementById(INTEGRATIONS_BODY_TEST_ID)!;
       expect(within(body).getByRole("link", { name: "Linear" })).toBeTruthy();
       expect(within(body).getByTestId(PLUGIN_TEST_ID)).toBeTruthy();
       if (!finePointer) {

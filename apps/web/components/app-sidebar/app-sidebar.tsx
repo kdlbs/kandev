@@ -28,6 +28,7 @@ import { IntegrationsSection } from "./sections/integrations-section";
 import { OfficeNavigationSection } from "./sections/office-navigation-section";
 import { ProjectsSection } from "./sections/projects-section";
 import { TasksSection } from "./sections/tasks-section";
+import { SidebarNavigationSplit } from "./sidebar-navigation-split";
 import { SidebarLayoutNavigation } from "./sidebar-layout-navigation";
 import { useHasSavedSidebarLayout } from "@/hooks/domains/sidebar/use-sidebar-layout-navigation";
 
@@ -72,34 +73,46 @@ function AppSidebarUnresolvedNav({ collapsed }: { collapsed: boolean }) {
 
 function AppSidebarModeNav({ collapsed, inOffice }: { collapsed: boolean; inOffice: boolean }) {
   const hasSavedSidebarLayout = useHasSavedSidebarLayout();
-  return (
-    <>
-      <div
-        className={cn(
-          "flex flex-col gap-1 overflow-y-auto",
-          inOffice ? "flex-1 min-h-0 pb-8 scroll-pb-8" : "shrink-0",
-        )}
-        data-testid="app-sidebar-scroll"
-      >
-        {hasSavedSidebarLayout ? (
-          <SidebarLayoutNavigation collapsed={collapsed} inOffice={inOffice} />
-        ) : (
-          <>
-            <AppSidebarPrimaryNav collapsed={collapsed} />
-            {/* Directly under New Task: an automation is a thing you keep, the
+  const workspaceId = useAppStore((s) => s.workspaces.activeId);
+  const navigation = (
+    <div
+      className={cn(
+        "flex flex-col gap-1 overflow-y-auto",
+        inOffice ? "flex-1 min-h-0 pb-8 scroll-pb-8" : "shrink-0",
+      )}
+      data-testid="app-sidebar-scroll"
+    >
+      {hasSavedSidebarLayout ? (
+        <SidebarLayoutNavigation key={workspaceId} collapsed={collapsed} inOffice={inOffice} />
+      ) : (
+        <>
+          <AppSidebarPrimaryNav collapsed={collapsed} />
+          {/* Directly under New Task: an automation is a thing you keep, the
                 same weight as a project, and the list IS the nav — picking one
                 opens its history rather than a settings form. */}
-            {!inOffice && <AutomationsSection collapsed={collapsed} />}
-            {!inOffice && <CanvasesSection collapsed={collapsed} />}
-            <PluginNavItems collapsed={collapsed} />
-          </>
-        )}
-        {inOffice && <OfficeNavigationSection collapsed={collapsed} section="work" />}
-        <ProjectsSection collapsed={collapsed} />
-        <AgentsSection collapsed={collapsed} />
-        {inOffice && <OfficeNavigationSection collapsed={collapsed} section="office" />}
-        {!inOffice && !hasSavedSidebarLayout && <IntegrationsSection collapsed={collapsed} />}
-      </div>
+          {!inOffice && <AutomationsSection collapsed={collapsed} />}
+          {!inOffice && <CanvasesSection collapsed={collapsed} />}
+          <PluginNavItems collapsed={collapsed} />
+        </>
+      )}
+      {inOffice && <OfficeNavigationSection collapsed={collapsed} section="work" />}
+      <ProjectsSection collapsed={collapsed} />
+      <AgentsSection collapsed={collapsed} />
+      {inOffice && <OfficeNavigationSection collapsed={collapsed} section="office" />}
+      {!inOffice && !hasSavedSidebarLayout && <IntegrationsSection collapsed={collapsed} />}
+    </div>
+  );
+  if (!inOffice && !collapsed)
+    return (
+      <SidebarNavigationSplit
+        key={workspaceId}
+        navigation={navigation}
+        tasks={<TasksSection collapsed={collapsed} />}
+      />
+    );
+  return (
+    <>
+      {navigation}
       {/* In regular kanban mode, Tasks is the flex-grow middle section so
           it absorbs remaining vertical space and scrolls internally.
           Office has a dedicated /office/tasks page, so the sidebar only

@@ -149,6 +149,8 @@ func (c *Controller) UpdateUserSettings(ctx context.Context, req dto.UpdateUserS
 		AgentTabCloseBehavior:             req.AgentTabCloseBehavior,
 		SystemMetricsDisplay:              systemMetricsDisplayPatch(req.SystemMetricsDisplay),
 		AppStatusBarEnabled:               req.AppStatusBarEnabled,
+		SidebarFastActionsEnabled:         req.SidebarFastActionsEnabled,
+		SidebarNewTaskStyle:               req.SidebarNewTaskStyle,
 		SidebarHoverEnabled:               req.SidebarHoverEnabled,
 		SidebarHoverDelayMs:               req.SidebarHoverDelayMs,
 		ResolveSessionHostnames:           req.ResolveSessionHostnames,

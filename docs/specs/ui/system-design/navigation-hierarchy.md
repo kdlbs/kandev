@@ -5,6 +5,7 @@ requirements:
   - REQ-UI-NAV-HIERARCHY-001
   - REQ-UI-NAV-HIERARCHY-002
   - REQ-UI-NAV-HIERARCHY-003
+  - REQ-UI-NAV-HIERARCHY-004
 ---
 
 # Navigation hierarchy design
@@ -13,14 +14,20 @@ requirements:
 
 The 2026-10-05 update restores desktop action placement after feedback on PR #4063.
 Source HEAD is `48adb0ce739`; the earlier controls are in `dd7dfa81634^`.
-The [placement plan](../../../plans/sidebar-action-placement/plan.md) owns this revision.
+The [placement plan](../../../plans/sidebar-action-placement/plan.md) records that delivery.
 The original delivery remains historical evidence for task-panel and phone behavior.
+
+The 2026-10-06 [preferences plan](../../../plans/sidebar-presentation-preferences/plan.md)
+extends that delivery with saved presentation choices. Its source baseline is
+`40dcfeacb2c98cf650132c7c787340114c1b91ad` (PR #4239). UI owns these reusable
+presentation preferences; the existing user-settings service owns storage and updates.
 
 This revises navigation presentation without changing route, task, integration,
 or settings ownership. The original investigation used source HEAD
 `75a37f34eb6bd0e0a46e9a35a46491bb9f52f7ef` and the supplied annotated references.
 That delivery used a neutral creation surface, secondary Chat/Terminal actions,
-and compact task rows. The current draft changes desktop control placement only.
+and compact task rows. This draft changes desktop presentation preferences and
+their upgrade defaults, retaining task-panel and phone composition.
 
 At the investigated baseline, Home preceded an ordinary New Task item,
 integration links lacked indentation, filter cues represented drafts only, and
@@ -34,6 +41,7 @@ the embedded task list. This implementation revises that presentation and order.
 | REQ-UI-NAV-HIERARCHY-001 | Desktop composition; Existing authority; Footer |
 | REQ-UI-NAV-HIERARCHY-002 | Task panel; State groups and task rows |
 | REQ-UI-NAV-HIERARCHY-003 | Phone composition; Handoff and recovery; Verification |
+| REQ-UI-NAV-HIERARCHY-004 | Saved sidebar preferences; Desktop composition; Phone composition |
 
 ## Existing authority
 
@@ -45,15 +53,76 @@ nodes in saved layouts; custom shortcut groups keep their header actions.
 
 `models.DefaultSidebarLayout` in
 `apps/backend/internal/user/models/sidebar_layouts.go` remains the canonical
-uncustomized layout. Move its New Task node before Home and align the unsaved
-`AppSidebarPrimaryNav` fallback. No schema/version change or migration is needed.
-Do not rewrite saved nodes or revisions. `SidebarLayoutNavigation` must place
-required inbox entries without displacing New Task from the top of the default
+uncustomized layout. Keep its New Task node before Home and align the unsaved
+`AppSidebarPrimaryNav` fallback. No layout-node schema/version change is needed.
+Do not reorder saved nodes. `SidebarLayoutNavigation` must project
+eligible visible Inbox entries without displacing New Task from the top of the default
 layout; user-defined desktop order continues to win.
 
 Retain `SidebarView`, `SidebarViewDraft`, `useEffectiveSidebarView`,
 `selectSidebarViews`, and workspace-specific synchronization. No grouping default
 or saved view is migrated. The demo explicitly selects state grouping.
+
+## Saved sidebar preferences
+
+Add two fields to the existing user settings contract:
+
+| Stored/API key | Client state | Values and new-user default |
+| --- | --- | --- |
+| `sidebar_fast_actions_enabled` | `sidebarFastActionsEnabled` | Boolean, `false` |
+| `sidebar_new_task_style` | `sidebarNewTaskStyle` | `simple` or `compact`, `simple` |
+
+These are account presentation preferences, independent of workspace-keyed
+`SidebarLayout` nodes and revisions. They are not runtime feature flags.
+Use pointer fields for PATCH input so omission differs from explicit false.
+Reject null, wrong types, and unsupported style values before saving any changes.
+Extend `models.UserSettings`, `dto.UserSettingsResponse`, the update DTO,
+service patch application, store marshal/scan helpers, settings-event payload,
+Go SPA boot-state mapping, and the user-preferences settings catalog. Regenerate
+both settings-contract snapshots so mutable field inventory stays complete.
+Follow the existing revision/CAS behavior. Omitted fields in unrelated patches
+must preserve the saved values. No new endpoint or event is required.
+
+### Upgrade and new-user initialization
+
+`sqliteRepository.initSchema` applies `runMigrations` before `ensureDefaultUser`.
+Use that ordering to backfill existing rows in the `users.settings` JSON blob.
+For each absent preference, add the legacy value independently: enabled fast
+actions and `compact`. Preserve explicit values, unknown JSON keys, saved layouts,
+and task views. Do not decode into a partial settings struct and rewrite the blob.
+Keep the backfill transactional and compatible with SQLite and PostgreSQL through
+the existing dialect-neutral repository. Increment `settings_revision` only for
+changed rows and honor concurrent-write detection. A malformed settings blob or
+write failure must roll back the migration and fail initialization with context.
+
+Seed `false` and `simple` explicitly in both `ensureDefaultUser` and `CreateUser`
+when inserting a user. Fresh schema initialization has no existing user rows to
+backfill. New accounts in upgraded databases also receive explicit new defaults.
+Reopening either database must preserve seeded values. Missing individual fields
+in a legacy blob get only that field's backfill. No database-age heuristic,
+browser-storage flag, or reset on normal settings reads is needed.
+
+`defaultUserSettings` supplies new defaults after migration. Extend
+`UserSettingsState`, HTTP types, `default-state.ts`, and
+`mapUserSettingsData`/`mapUserSettingsResponse` in `lib/ssr/user-settings.ts`.
+WebSocket updates already reuse `mapUserSettingsData`; retain stale-revision
+filtering and partial-update preservation. Boot hydration must use the server's
+saved values before projecting the sidebar.
+
+### Settings editing
+
+Place a Sidebar appearance group in `LayoutSettings`' existing Sidebar tab,
+beside the embedded `SidebarLayoutEditor`. Use `SettingsRow` and existing
+Switch/Select primitives with localized labels and help. Add a focused settings
+save contributor for the two preferences using `useSettingsSaveContributor`.
+This group is user-scoped and remains usable without an active workspace.
+The workspace layout editor keeps its own draft and save contributor.
+
+Follow the existing appearance-settings draft/patch/rebase pattern. Save only
+changed fields, apply the authoritative response, preserve newer local edits,
+and keep drafts on failure. Discard restores the latest saved values. A settings
+event may update clean draft fields but must not erase dirty ones. Do not add
+local Save buttons, immediate persistence, or a layout-reset side effect.
 
 ## Desktop composition
 
@@ -63,20 +132,29 @@ label, vertically centered within the existing header. Scope the smaller type
 to this trigger; phone workspace selection and dropdown options retain their
 existing readable typography and touch targets.
 Preserve the 320px default expanded width, resize behavior, 56px rail, and
-settings takeover. `AppSidebarNewTaskItem` restores `AppSidebarNavItem` with
-`IconSquarePlus` and the existing creation callback.
-Use its left-aligned 13px label, neutral hover treatment, and 36px navigation-row height.
+settings takeover. `AppSidebarNewTaskItem` reads both presentation preferences.
+The `compact` style uses the current `AppSidebarNavItem`, `IconSquarePlus`,
+left-aligned 13px label, neutral hover treatment, and 36px navigation-row height.
+The `simple` style uses an ordinary neutral Button with a centered creation
+icon and label at 28px on fine-pointer desktop. Remove oversized min-height and
+padding overrides from this design. Coarse pointers retain at least 44px.
 Keep the configured keyboard binding and omit a visible shortcut hint.
 Reuse the request subscription, workspace-specific dialogs, and collapsed rail control.
 `NewTaskButton` remains the phone creation primitive with its existing touch sizing.
 
-Place Quick terminal then Quick Chat to the right of New Task in the same row.
-Remove the desktop utility `ButtonGroup`, separator, and visible quick-action text.
+When fast actions are enabled, place Quick terminal then Quick Chat to the
+right of New Task in the same row for either style. Omit the labelled utility bar.
 Use `SurfaceAction` from `components/actions/surface-action.tsx` for compact 24px desktop
 icon controls and 44px coarse-pointer targets.
 Keep Quick Chat activity indicators and localized activity names.
-Reuse the earlier desktop tooltip interaction without invoking actions on focus.
+Keep keyboard and hover tooltips without invoking actions on focus.
 Keep the icon controls separate from the creation button.
+When fast actions are disabled, use a shared-boundary equal-width utility bar
+below New Task with labelled Quick Chat then Terminal. Its fine-pointer desktop
+height is 28px, and its coarse-pointer active targets are at least 44px.
+Use existing localized labels and launch callbacks. Never render both utility
+presentations together. The collapsed rail retains its current creation launcher
+and does not gain the expanded-only utility bar.
 Workspace plugin controls follow them with the same slot props and error boundaries.
 Use a wrapping plugin container so excessive registrations cannot overlap or
 squeeze the built-in actions. Keep the built-in row together.
@@ -96,7 +174,12 @@ The label owns `headerRef`, `aria-expanded`, and `aria-controls`.
 The redundant chevron stays outside keyboard order and the accessibility tree,
 and performs the same toggle when clicked. Its coarse-pointer hit area is 44px.
 This restores the `headerAction` ordering already used by `SectionHeader`.
-The Canvases settings shortcut remains visible in both disclosure states.
+When fast actions are enabled, the Canvases settings shortcut remains visible
+in both disclosure states. Otherwise omit the shortcut. Add a labelled canvas
+settings child link when shortcuts are disabled so management remains reachable
+even when the canvas list is populated or cannot load. Preserve the existing
+empty-state creation action. Gate only the optional shortcut, not the section,
+canvas list, subscription, or task-create launcher.
 The shortcut keeps its current workspace route and never calls the toggle.
 Automations and custom section children retain their current presentation.
 
@@ -106,7 +189,7 @@ The phone wrapper owns the body and its final destination so saved-layout rows,
 empty states, loading, and errors all retain that link. It uses the existing
 `/automations` route and dismisses the phone menu on navigation.
 
-Restore `IntegrationHeaderShortcuts` using eligible first-party entries from the
+When fast actions are enabled, render `IntegrationHeaderShortcuts` using eligible first-party entries from the
 already resolved `visibleDestinations`. Place them in `headerAction` before the chevron.
 Keep the old four-shortcut desktop capacity, manifest order, accessible labels,
 and tooltips. On coarse pointers, show at most two shortcuts with 44px hit areas.
@@ -225,7 +308,7 @@ Use `useResponsiveBreakpoint`'s below-768px phone branch. Keep the menu heading
 and workspace picker outside the one `nav` content scroller. The default phone
 body becomes:
 
-1. Neutral New Task, Home and required inbox links, Quick Chat/Quick terminal.
+1. Neutral New Task, Home and eligible visible Inbox links, Quick Chat/Quick terminal.
    Reuse `MobileQuickActions` and its native launch/focus handoff. Within app
    navigation, use secondary ghost actions with 44px touch targets in an
    equal-width utility bar with a shared boundary; translations can wrap.

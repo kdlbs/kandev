@@ -195,6 +195,11 @@ The phone creation primitive must retain its existing size and dialog lifetime.
 
 ## Results
 
+Historical delivery: the subsequent
+[presentation preferences work order](../sidebar-presentation-preferences/task-01-sidebar-preferences.md)
+adds configurable placement and new-user defaults. Results below describe this
+completed placement work only.
+
 Delivered the compact desktop creation row, independent section-header actions, first-party integration shortcuts, and direct Stats footer control. The labelled phone drawer and existing launchers remain intact. Updated the scoped guide and public sidebar navigation explanation.
 
 Verification passed on 2026-10-05:
