@@ -91,6 +91,37 @@ async function seedLocalSession(
 }
 
 test.describe("Port Forward Dialog", () => {
+  test("empty discovery shows no orphaned port group headings", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const ports = await routePortForwarding(testPage, { empty: true });
+    const { session, sessionId } = await seedLocalSession(
+      testPage,
+      apiClient,
+      seedData,
+      "Empty ports",
+    );
+    ports.setSession(sessionId);
+    await session.enablePortForwarding();
+    await session.portForwardButton.click();
+    await expect(
+      session.portForwardDialog.getByText("No listening ports detected.", { exact: true }),
+    ).toBeVisible();
+    await expect(
+      session.portForwardDialog.getByRole("heading", { name: "Other ports", exact: true }),
+    ).toHaveCount(0);
+    await expect(session.portForwardDialog.getByTestId("port-forward-active-heading")).toHaveCount(
+      0,
+    );
+    await session.portForwardInput.fill("9500");
+    await session.portForwardAddButton.click();
+    await expect(
+      session.portForwardDialog.getByRole("heading", { name: "Other ports", exact: true }),
+    ).toHaveCount(1);
+  });
+
   // @covers AC-UI-PORT-FORWARDING-ACTIVE-FIRST-001.2, .4
   test("merges late tunnel hydration with a newly started forward", async ({
     testPage,
@@ -98,7 +129,6 @@ test.describe("Port Forward Dialog", () => {
     seedData,
   }) => {
     const ports = await routePortForwarding(testPage);
-    ports.holdNext("port.tunnel.list");
     const { session, sessionId } = await seedLocalSession(
       testPage,
       apiClient,
@@ -106,6 +136,8 @@ test.describe("Port Forward Dialog", () => {
       "Late tunnel snapshot",
     );
     ports.setSession(sessionId);
+    // Hydration belongs to the session control and survives closing its dialog.
+    ports.holdNext("port.tunnel.list");
     await session.enablePortForwarding();
     await expect.poll(ports.held).toBe(true);
     await session.portForwardButton.click();
@@ -114,6 +146,10 @@ test.describe("Port Forward Dialog", () => {
     await session.portForwardTunnelToggle(9500).click();
     await session.portForwardTunnelStart(9500).click();
     await expect(session.portForwardRow(9500)).toHaveAttribute("data-forwarded", "true");
+    await expect(session.portForwardDialog.getByTestId("port-forward-active-heading")).toHaveText(
+      "Forwarded ports1",
+    );
+    expect(ports.held()).toBe(true);
     ports.release();
     await expect(session.portForwardDialog.getByTestId("port-forward-active-heading")).toHaveText(
       "Forwarded ports2",

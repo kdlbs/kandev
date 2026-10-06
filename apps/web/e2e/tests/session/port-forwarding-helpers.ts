@@ -8,9 +8,9 @@ type Request = {
   payload: { session_id: string; port: number };
 };
 
-export async function routePortForwarding(page: Page) {
+export async function routePortForwarding(page: Page, options: { empty?: boolean } = {}) {
   let sessionId = "";
-  const tunnels = new Map([[9000, 49152]]);
+  const tunnels = new Map(options.empty ? [] : [[9000, 49152]]);
   let failure: PortAction | undefined;
   let hold: PortAction | undefined;
   let release: (() => void) | undefined;
@@ -41,7 +41,7 @@ export async function routePortForwarding(page: Page) {
           );
           continue;
         }
-        const payload = portResponse(frame, tunnels);
+        const payload = portResponse(frame, tunnels, options.empty);
         const respond = () =>
           socket.send(
             JSON.stringify({ type: "response", id: frame.id, action: frame.action, payload }),
@@ -72,18 +72,20 @@ export async function routePortForwarding(page: Page) {
   };
 }
 
-function portResponse(frame: Request, tunnels: Map<number, number>) {
+function portResponse(frame: Request, tunnels: Map<number, number>, empty = false) {
   switch (frame.action) {
     case "port.list":
       return {
-        ports: [
-          {
-            port: 3000,
-            address: "*",
-            process: "a-very-long-service-process-name-for-narrow-layouts",
-          },
-          { port: 9000, address: "127.0.0.1", process: "node" },
-        ],
+        ports: empty
+          ? []
+          : [
+              {
+                port: 3000,
+                address: "*",
+                process: "a-very-long-service-process-name-for-narrow-layouts",
+              },
+              { port: 9000, address: "127.0.0.1", process: "node" },
+            ],
       };
     case "port.tunnel.list":
       return { tunnels: [...tunnels].map(([port, tunnel_port]) => ({ port, tunnel_port })) };

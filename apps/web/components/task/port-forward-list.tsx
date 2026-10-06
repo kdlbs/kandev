@@ -410,11 +410,5 @@ function PortRows({
       <PortRow key={row.port} {...row} {...actions} tunnelPending={pendingTunnels.has(row.port)} />,
     );
   }
-  if (rows.length === 0)
-    children.push(
-      <h3 key="other" className="text-sm font-medium">
-        {t("task:otherPorts")}
-      </h3>,
-    );
   return <div className="space-y-2">{children}</div>;
 }

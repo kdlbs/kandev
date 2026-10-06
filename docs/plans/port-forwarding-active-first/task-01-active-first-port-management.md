@@ -187,3 +187,20 @@ was needed.
 
 At the implementation handoff, no runtime/API changes, delegation, commit, push,
 or PR had been made. Delivery proceeds separately when authorized.
+
+
+## PR review remediation
+
+PR #4265 removes the orphaned Other ports heading when the row union is empty.
+A deterministic empty WS fixture drives the desktop regression (RED: one
+unexpected heading; GREEN: no empty groups, manual addition restores Other
+ports) and the existing phone flow. The hydration case now verifies one active
+forward while the session-owned snapshot is still held, then two after release;
+closing the dialog does not remount the session control or start another list.
+
+Focused desktop coverage passed 3/3 and phone coverage passed 2/2. Targeted
+ESLint, typecheck, and the fresh Vite production build passed. The managed
+runner's unrelated Linux ARM64 Go linker crashed during its blanket rebuild;
+the checks used the fresh web bundle and existing host binaries with normal
+freshness/resource guards enabled. This remediation adds one desktop case,
+bringing the feature's desktop suite to 17 cases.

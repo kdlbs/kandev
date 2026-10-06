@@ -77,12 +77,17 @@ test.describe("Port forwarding on mobile", () => {
     apiClient,
     seedData,
   }) => {
+    const ports = await routePortForwarding(testPage, { empty: true });
     const session = await seedIdleSession(
       testPage,
       apiClient,
       seedData,
       "Mobile Port Forwarding Test",
     );
+    const taskId = new URL(testPage.url()).pathname.split("/").pop()!;
+    const { sessions } = await apiClient.listTaskSessions(taskId);
+    expect(sessions).toHaveLength(1);
+    ports.setSession(sessions[0].id);
 
     await expect(session.portForwardButton).not.toBeVisible();
     await session.mobileSessionMenu.tap();
@@ -97,6 +102,12 @@ test.describe("Port forwarding on mobile", () => {
     await assertLocatorWithinViewportX(session.portForwardDialog, "port forwarding dialog");
     await assertNoDocumentHorizontalOverflow(testPage, "mobile port forwarding");
 
+    await expect(
+      session.portForwardDialog.getByText("No listening ports detected.", { exact: true }),
+    ).toBeVisible();
+    await expect(
+      session.portForwardDialog.getByRole("heading", { name: "Other ports", exact: true }),
+    ).toHaveCount(0);
     await session.portForwardInput.fill("3000");
     await session.portForwardAddButton.tap();
     const row = session.portForwardRow(3000);
