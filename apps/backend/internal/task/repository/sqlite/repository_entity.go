@@ -158,15 +158,9 @@ func (r *Repository) UpdateRepositoryDefaultBranch(ctx context.Context, reposito
 func (r *Repository) updateRepository(ctx context.Context, exec sqlx.ExtContext, repository *models.Repository, expected *time.Time) error {
 	repository.UpdatedAt = time.Now().UTC()
 
-	query := `
-		UPDATE repositories SET
-			name = ?, source_type = ?, local_path = ?, provider = ?, provider_repo_id = ?, provider_host = ?, provider_scope = ?, provider_owner = ?,
-			provider_name = ?, remote_url = ?, default_branch = ?, worktree_branch_prefix = ?, worktree_branch_template = ?, pull_before_worktree = ?, setup_script = ?, cleanup_script = ?, dev_script = ?, copy_files = ?, updated_at = ?
-		WHERE id = ? AND deleted_at IS NULL
-	`
-	args := []interface{}{repository.Name, repository.SourceType, repository.LocalPath, repository.Provider, repository.ProviderRepoID,
-		repository.ProviderHost, repository.ProviderScope, repository.ProviderOwner, repository.ProviderName, repository.RemoteURL, repository.DefaultBranch, repository.WorktreeBranchPrefix, repository.WorktreeBranchTemplate, dialect.BoolToInt(repository.PullBeforeWorktree),
-		repository.SetupScript, repository.CleanupScript, repository.DevScript, repository.CopyFiles, repository.UpdatedAt, repository.ID}
+	query, args := repositoryUpdateQuery(repository, models.RepositoryCheckoutIntent{
+		DefaultBranch: &repository.DefaultBranch, PullBeforeWorktree: &repository.PullBeforeWorktree,
+	})
 	if expected != nil {
 		query += optimisticUpdatedAtPredicate
 		args = append(args, *expected)
