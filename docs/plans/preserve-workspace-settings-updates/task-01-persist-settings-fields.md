@@ -189,7 +189,8 @@ than a skip-only successful command. Never log the DSN.
 If local PostgreSQL is not released, record that absence without counting it
 as PASS; require the actual hosted repository cases in the existing configured
 PostgreSQL job. Add a narrow step under the existing Windows native matrix
-condition (`matrix.suite == 'native'`), with `timeout-minutes: 6`, scoped
+condition (`matrix.suite == 'native'`), after the existing native SQLite
+database-path checks, with `timeout-minutes: 30` for cold compilation, scoped
 GOMAXPROCS=2/GOMEMLIMIT=512MiB, and this command. Windows uses the workflow/Go
 timeouts; GNU timeout is the Linux local wrapper, not a Windows executable.
 
@@ -361,3 +362,33 @@ HOSTED and MERGE remain separately unreleased; no hosted/native-Windows or
 complete-delivery success is claimed. Protected ROOT proof remains read-only
 and was not replayed. All receipts and complete logs are under
 `/tmp/kandev-child70-local-c4e67ceb-20261007/`.
+
+
+### Hosted Windows compilation correction
+
+At published head `e5f7d44b76c6253f2343d17639cbcae713e1ada6`, Backend
+(windows, native), run `37609831297`, job `112754592876`, failed only added
+step 5, `Test Windows workspace settings persistence`, at its six-minute step
+limit. The complete raw job log contains dependency downloads followed by the
+step timeout, before any test JSON. No new Windows test RUN/PASS or assertion
+failure is claimed. This is an owned CI placement/resource failure.
+
+ROOT released a minimal workflow-only correction: move this added step after
+the existing native SQLite database-path checks and allow 30 minutes for cold
+compilation. Its exact seven-case selector, trimpath/fts5/race/p1/count1/json,
+GOMAXPROCS=2/GOMEMLIMIT=512MiB and Go assertion timeout `-timeout=5m` remain
+unchanged, as do the existing steps and their order and the 90-minute job limit.
+No product implementation, fixture or assertion changes are required. Passing
+Go/PostgreSQL/SQL-guard/conformance/lint checks are not replayed for this
+workflow/documentation-only correction. Cheap workflow contracts, YAML parsing,
+reference coverage, documentation and whitespace checks plus normal applicable
+commit hooks validate the correction.
+
+The original hosted observer `37995` was deliberately interrupted only after
+ROOT's correction release. Native terminal chunk `bb2f55` actually joined with
+exit 143 and no all-terminal verdict; wrapper group `2166032` and child group
+`2166033` were freshly empty. Hosted workflows were not manually cancelled.
+Raw failure evidence and the interrupted observer receipts remain under the
+same task-owned receipt directory. Historical completed old-head reviews stay
+historical. Corrected-head HOSTED and MERGE require separate ROOT releases;
+the work order stays in_progress pending actual new-head hosted RUN/PASS.
