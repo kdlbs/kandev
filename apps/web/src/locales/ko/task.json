@@ -24,7 +24,7 @@
   "agentMcpDiagnosticStageOutput": "명령 출력 읽기",
   "agentMcpDiagnosticExitStatus": "종료 상태",
   "agentMcpDiagnosticExitStatusValue": "종료 상태: {{code}}",
-  "agentMcpDiagnosticCleanupError": "정리 오류",
+  "agentMcpDiagnosticCleanupError": "정리 오류:",
   "agentMcpServerStep": "{{stage}}: {{server}}",
   "agentMcpAuthenticationRequired": "인증이 필요합니다.",
   "agentMcpSessionBusy": "에이전트가 이 세션을 사용 중입니다. 현재 턴이 끝날 때까지 기다린 후 다시 시도하세요.",

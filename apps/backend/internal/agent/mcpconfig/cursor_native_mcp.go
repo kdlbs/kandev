@@ -80,13 +80,16 @@ func (r ExecNativeMCPCommandRunner) Run(ctx context.Context, executable string, 
 	stderr := &limitedOutput{limit: limit}
 	cmd.Stdout = stdout
 	cmd.Stderr = stderr
-	exitCode, runErr := runNativeMCPCommand(cmd)
+	exitCode, diagnostic, runErr := runNativeMCPCommand(cmd)
 	result := NativeMCPCommandResult{
 		Stdout:           stdout.Bytes(),
 		Stderr:           stderr.Bytes(),
 		ExitCode:         exitCode,
 		ExitCodeObserved: exitCode >= 0,
 		Truncated:        stdout.Truncated() || stderr.Truncated(),
+	}
+	if diagnostic != nil {
+		result.Diagnostic = sanitizeNativeMCPDiagnostic(diagnostic, nativeMCPOperation(args))
 	}
 	var commandErr *nativeMCPCommandError
 	if errors.As(runErr, &commandErr) {
@@ -113,9 +116,9 @@ func (r ExecNativeMCPCommandRunner) Run(ctx context.Context, executable string, 
 	return result, runErr
 }
 
-func runNativeMCPCommand(cmd *exec.Cmd) (int, error) {
+func runNativeMCPCommand(cmd *exec.Cmd) (int, *NativeMCPDiagnostic, error) {
 	if err := prepareNativeMCPCommand(cmd); err != nil {
-		return -1, nativeMCPWrapCommandError(nativeMCPDiagnosticStart, nativeMCPDiagnosticStartFailed, err, nil, nil)
+		return -1, nil, nativeMCPWrapCommandError(nativeMCPDiagnosticStart, nativeMCPDiagnosticStartFailed, err, nil, nil)
 	}
 	var guardMu sync.Mutex
 	var guard *nativeMCPProcessGuard
@@ -139,14 +142,14 @@ func runNativeMCPCommand(cmd *exec.Cmd) (int, error) {
 		return os.ErrProcessDone
 	}
 	if err := cmd.Start(); err != nil {
-		return -1, nativeMCPWrapCommandError(nativeMCPDiagnosticStart, nativeMCPDiagnosticStartFailed, err, nil, nil)
+		return -1, nil, nativeMCPWrapCommandError(nativeMCPDiagnosticStart, nativeMCPDiagnosticStartFailed, err, nil, nil)
 	}
 	processGuard, err := attachNativeMCPCommand(cmd)
 	if err != nil {
 		killErr := cmd.Process.Kill()
 		waitErr := cmd.Wait()
 		cleanupErr := errors.Join(killErr, waitErr)
-		return nativeMCPProcessExitCode(cmd), nativeMCPWrapCommandError(nativeMCPDiagnosticStart, nativeMCPDiagnosticStartFailed, err, cleanupErr, nativeMCPProcessExitCodePointer(cmd))
+		return nativeMCPProcessExitCode(cmd), nil, nativeMCPWrapCommandError(nativeMCPDiagnosticStart, nativeMCPDiagnosticStartFailed, err, cleanupErr, nativeMCPProcessExitCodePointer(cmd))
 	}
 	guardMu.Lock()
 	guard = &processGuard
@@ -160,24 +163,25 @@ func runNativeMCPCommand(cmd *exec.Cmd) (int, error) {
 	return nativeMCPCommandResult(runErr, cleanupErr, exitCode, exitCodePointer)
 }
 
-func nativeMCPCommandResult(runErr, cleanupErr error, exitCode int, exitCodePointer *int) (int, error) {
+func nativeMCPCommandResult(runErr, cleanupErr error, exitCode int, exitCodePointer *int) (int, *NativeMCPDiagnostic, error) {
 	if runErr == nil {
 		if cleanupErr != nil {
-			return exitCode, nativeMCPWrapCommandError(nativeMCPDiagnosticCleanup, nativeMCPDiagnosticCleanupFailed, cleanupErr, nil, exitCodePointer)
+			return exitCode, nil, nativeMCPWrapCommandError(nativeMCPDiagnosticCleanup, nativeMCPDiagnosticCleanupFailed, cleanupErr, nil, exitCodePointer)
 		}
-		return exitCode, nil
+		return exitCode, nil, nil
 	}
 	if errors.Is(runErr, exec.ErrWaitDelay) {
-		return exitCode, nativeMCPWrapCommandError(nativeMCPDiagnosticWait, nativeMCPDiagnosticOutputWaitTimeout, runErr, cleanupErr, exitCodePointer)
+		return exitCode, nil, nativeMCPWrapCommandError(nativeMCPDiagnosticWait, nativeMCPDiagnosticOutputWaitTimeout, runErr, cleanupErr, exitCodePointer)
 	}
 	var exitErr *exec.ExitError
 	if errors.As(runErr, &exitErr) && exitErr.ExitCode() != 0 {
 		if cleanupErr != nil {
-			return exitCode, nativeMCPWrapCommandError(nativeMCPDiagnosticWait, nativeMCPDiagnosticExitStatus, runErr, cleanupErr, exitCodePointer)
+			observedExitCode := exitErr.ExitCode()
+			return observedExitCode, nativeMCPDiagnosticForError("", nativeMCPDiagnosticWait, nativeMCPDiagnosticExitStatus, runErr, cleanupErr, &observedExitCode), nil
 		}
-		return exitErr.ExitCode(), nil
+		return exitErr.ExitCode(), nil, nil
 	}
-	return exitCode, nativeMCPWrapCommandError(nativeMCPDiagnosticWait, nativeMCPDiagnosticWaitFailed, runErr, cleanupErr, exitCodePointer)
+	return exitCode, nil, nativeMCPWrapCommandError(nativeMCPDiagnosticWait, nativeMCPDiagnosticWaitFailed, runErr, cleanupErr, exitCodePointer)
 }
 
 // CursorNativeMCPAdapter prepares one exact native server identity and verifies

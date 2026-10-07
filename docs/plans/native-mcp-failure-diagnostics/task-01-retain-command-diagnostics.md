@@ -118,3 +118,19 @@ Validation passed on 2026-10-07:
 - `(cd apps/backend && go test -trimpath -race ./internal/agent/runtime/lifecycle -run 'Test.*(Cursor.*MCP|Cursor.*Mcp|MCPDiagnostic|NativeMCP|SerializePrepareResult|Prepare)' -count=1)`
 - `(cd apps/backend && go test -trimpath -race ./internal/task/handlers -run 'Test.*CursorMCP' -count=1)`
 - `git diff --check`
+
+Review follow-up on 2026-10-07:
+
+- If a preparation context ends while a native command is returning, its
+  sanitized diagnostic is retained on the failed approval or verification step
+  and in retry responses. Diagnostics from stale generations remain suppressed.
+- A nonzero native exit with a cleanup error keeps the exit status and cleanup
+  detail while allowing authentication and approval output to be classified.
+- Lifecycle tests cover cancellation during initial approval, initial
+  verification, retry approval and retry verification. A focused regression
+  also checks deadline-ended contexts; the existing stale-generation test
+  confirms that stale command details stay hidden.
+- The Unix command-result test covers authentication and approval classification
+  with cleanup errors and verifies that the cleanup message is sanitized.
+- Focused race tests passed for `internal/agent/mcpconfig`,
+  `internal/agent/runtime/lifecycle`, and `internal/task/handlers`.

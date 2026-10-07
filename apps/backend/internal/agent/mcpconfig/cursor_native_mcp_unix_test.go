@@ -45,6 +45,53 @@ func TestExecNativeMCPCommandRunnerRetainsWaitDelayExitStatus(t *testing.T) {
 	waitForNativeMCPProcessGone(t, pid)
 }
 
+func TestNativeMCPCommandNonzeroExitKeepsOutputClassificationWithCleanupFailure(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		operation string
+		stderr    string
+		want      NativeMCPStatus
+	}{
+		{name: "authentication", operation: "list-tools", stderr: "Failed to list tools: Authentication required", want: NativeMCPStatusAuthenticationRequired},
+		{name: "approval", operation: "enable", want: NativeMCPStatusApprovalFailed},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cmd := exec.Command("sh", "-c", "exit 7")
+			err := cmd.Run()
+			if err == nil {
+				t.Fatal("fixture command unexpectedly succeeded")
+			}
+			exitCode := cmd.ProcessState.ExitCode()
+			code, diagnostic, resultErr := nativeMCPCommandResult(err, errors.New("cleanup token=private"), exitCode, &exitCode)
+			if resultErr != nil {
+				t.Fatalf("nativeMCPCommandResult error = %v, want output classification to continue", resultErr)
+			}
+			if code != 7 || diagnostic == nil {
+				t.Fatalf("command result = code %d, diagnostic %#v; want exit 7 and cleanup detail", code, diagnostic)
+			}
+			if diagnostic.ExitCode == nil || *diagnostic.ExitCode != 7 {
+				t.Fatalf("diagnostic exit code = %v, want observed 7", diagnostic.ExitCode)
+			}
+			result := NativeMCPCommandResult{
+				ExitCode: code, ExitCodeObserved: true, Stderr: []byte(tc.stderr), Diagnostic: diagnostic,
+			}
+			adapter := CursorNativeMCPAdapter{Executable: "cursor-agent", Runner: oneShotNativeMCPRunner{result: result}}
+			var readiness NativeMCPReadiness
+			if tc.operation == "enable" {
+				readiness = adapter.Enable(context.Background(), "/workspace", nil, "server")
+			} else {
+				readiness = adapter.Verify(context.Background(), "/workspace", nil, "server")
+			}
+			if readiness.Status != tc.want {
+				t.Fatalf("readiness status = %q, want %q", readiness.Status, tc.want)
+			}
+			if readiness.Diagnostic == nil || readiness.Diagnostic.CleanupMessage == "" || strings.Contains(readiness.Diagnostic.CleanupMessage, "private") {
+				t.Fatalf("readiness diagnostic = %#v, want sanitized cleanup detail", readiness.Diagnostic)
+			}
+		})
+	}
+}
+
 func TestExecNativeMCPCommandRunnerBoundsInheritedPipeAfterCancellation(t *testing.T) {
 	root := t.TempDir()
 	started := filepath.Join(root, "started")

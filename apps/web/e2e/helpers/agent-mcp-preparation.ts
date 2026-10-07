@@ -4,6 +4,8 @@ import type { SeedData } from "../fixtures/test-base";
 
 export const E2E_MCP_SERVER_ID = "plugin-atlassian-jira";
 export const E2E_MCP_SECOND_SERVER_ID = "plugin-atlassian-confluence";
+export const E2E_MCP_LEGACY_ERROR = "Raw error must stay hidden";
+export const E2E_MCP_LEGACY_OUTPUT = "Raw output must stay hidden";
 export const E2E_MCP_LONG_DIAGNOSTIC = `Native MCP command failed: ${"x".repeat(930)}`;
 
 export async function createMcpRecoveryFixture(
@@ -135,14 +137,15 @@ export async function seedMcpDiagnosticPreparation(
             mcp_server_id: E2E_MCP_SERVER_ID,
             failure_code: "connection_failed",
             status: "failed",
-            error: "Raw error must stay hidden",
-            output: "Raw output must stay hidden",
+            error: E2E_MCP_LEGACY_ERROR,
+            output: E2E_MCP_LEGACY_OUTPUT,
             mcp_diagnostic: {
               operation: "enable",
               stage: "wait",
               kind: "output_wait_timeout",
               message: primaryMessage,
               exit_code: 0,
+              cleanup_message: "process cleanup failed",
             },
           },
           {
@@ -152,6 +155,8 @@ export async function seedMcpDiagnosticPreparation(
             mcp_server_id: E2E_MCP_SECOND_SERVER_ID,
             failure_code: "connection_failed",
             status: "failed",
+            error: E2E_MCP_LEGACY_ERROR,
+            output: E2E_MCP_LEGACY_OUTPUT,
             mcp_diagnostic: {
               operation: "list_tools",
               stage: "wait",

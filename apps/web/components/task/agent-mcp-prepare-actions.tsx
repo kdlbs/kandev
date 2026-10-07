@@ -138,9 +138,7 @@ function NativeMcpDiagnosticDetails({ diagnostic }: { diagnostic: NativeMCPDiagn
       </p>
       {diagnostic.cleanupMessage && (
         <p className="min-w-0 max-w-full whitespace-pre-wrap break-words select-text">
-          <span className="text-muted-foreground">
-            {t("task:agentMcpDiagnosticCleanupError")}:{" "}
-          </span>
+          <span className="text-muted-foreground">{t("task:agentMcpDiagnosticCleanupError")} </span>
           {diagnostic.cleanupMessage}
         </p>
       )}

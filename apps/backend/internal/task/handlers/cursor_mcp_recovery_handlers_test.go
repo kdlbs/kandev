@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"reflect"
 	"strconv"
 	"strings"
 	"sync"
@@ -337,13 +336,11 @@ func TestCursorMCPRecoveryValidatesExactServerIDAndMapsTypedErrors(t *testing.T)
 }
 
 func TestCursorMCPRetryReturnsRetainedDiagnostic(t *testing.T) {
-	result := runtime.CursorMCPRetryResult{ProviderID: "cursor", ServerID: "server-exact", Status: "connection_failed", ReasonCode: "connection_failed"}
 	diagnostic := &mcpconfig.NativeMCPDiagnostic{Operation: "enable", Stage: "wait", Kind: "wait_failed", Message: "native helper failed"}
-	field := reflect.ValueOf(&result).Elem().FieldByName("Diagnostic")
-	if !field.IsValid() {
-		t.Fatal("retry result has no retained diagnostic field")
+	result := runtime.CursorMCPRetryResult{
+		ProviderID: "cursor", ServerID: "server-exact", Status: "connection_failed",
+		ReasonCode: "connection_failed", Diagnostic: diagnostic,
 	}
-	field.Set(reflect.ValueOf(diagnostic))
 	manager := &fakeCursorMCPRecoveryManager{retryResult: result}
 	router := newCursorMCPRecoveryRouter(t, manager, &fakeCursorMCPRecoveryTerminals{})
 	rec := performMCPRecoveryRequest(router, http.MethodPost, "/api/v1/task-sessions/session-1/mcp/retry", `{"server_id":"server-exact"}`)

@@ -192,3 +192,12 @@ Review follow-up on 2026-10-07:
 - `(cd apps/web && pnpm exec vitest run components/task/agent-mcp-prepare-actions.test.tsx lib/api/domains/session-mcp-actions.test.ts)` passed (13 tests).
 - Updated public guidance to distinguish an early busy check from a prompt
   that starts while native commands are already running.
+- Cleanup-error separators now belong to the translated label in all supported
+  locales. The component test verifies the rendered label and message spacing.
+- Desktop E2E assertions verify the legacy raw error/output sentinels remain
+  hidden for both MCP rows before and after reload. The phone E2E renders the
+  cleanup detail and checks that the label remains readable in the existing
+  mobile preparation surface.
+- The focused Vitest run passed (14 tests), `i18n:check` passed, and targeted
+  ESLint passed. The fresh Vite build and focused desktop and phone E2E runs
+  passed (2 tests each).

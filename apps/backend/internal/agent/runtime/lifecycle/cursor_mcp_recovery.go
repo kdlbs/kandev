@@ -318,9 +318,11 @@ func (m *Manager) retryCursorMCPImport(
 		cursorNativeMCPApprovalTarget{serverID: target.serverID, fingerprint: target.fingerprint},
 		filepath.Dir(target.cursorHome), target.sourceRepo, true,
 	); failure != "" {
-		updateCursorMCPProgress(recorder, approvalIndex, target.serverID, PrepareStepKindAgentMCPApproval, PrepareStepFailed, failure, approvalStarted, approvalEnded)
+		diagnostic := cursorMCPFenceDiagnostic(ctx, approval.Diagnostic)
+		m.logCursorMCPDiagnostic(target.execution, recorder, target.serverID, diagnostic)
+		updateCursorMCPProgress(recorder, approvalIndex, target.serverID, PrepareStepKindAgentMCPApproval, PrepareStepFailed, failure, approvalStarted, approvalEnded, diagnostic)
 		appendCursorMCPProgress(recorder, target.serverID, PrepareStepKindAgentMCPVerification, PrepareStepSkipped, failure, &approvalEnded, &approvalEnded)
-		return cursorMCPRetryReadiness(target.serverID, cursorMCPUnavailableReadiness()), nil
+		return cursorMCPRetryReadiness(target.serverID, cursorMCPFenceReadiness(ctx, approval.Diagnostic)), nil
 	}
 	if !approval.ApprovalSucceeded {
 		failure := nativeMCPReasonCode(approval)
@@ -342,8 +344,10 @@ func (m *Manager) retryCursorMCPImport(
 		cursorNativeMCPApprovalTarget{serverID: target.serverID, fingerprint: target.fingerprint},
 		filepath.Dir(target.cursorHome), target.sourceRepo, true,
 	); failure != "" {
-		updateCursorMCPProgress(recorder, verificationIndex, target.serverID, PrepareStepKindAgentMCPVerification, PrepareStepFailed, failure, verificationStarted, time.Now().UTC())
-		return cursorMCPRetryReadiness(target.serverID, cursorMCPUnavailableReadiness()), nil
+		diagnostic := cursorMCPFenceDiagnostic(ctx, readiness.Diagnostic)
+		m.logCursorMCPDiagnostic(target.execution, recorder, target.serverID, diagnostic)
+		updateCursorMCPProgress(recorder, verificationIndex, target.serverID, PrepareStepKindAgentMCPVerification, PrepareStepFailed, failure, verificationStarted, time.Now().UTC(), diagnostic)
+		return cursorMCPRetryReadiness(target.serverID, cursorMCPFenceReadiness(ctx, readiness.Diagnostic)), nil
 	}
 	if readiness.Status != mcpconfig.NativeMCPStatusReady {
 		m.logCursorMCPDiagnostic(target.execution, recorder, target.serverID, readiness.Diagnostic)

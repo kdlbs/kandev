@@ -23,7 +23,7 @@
   "agentMcpDiagnosticStageOutput": "Ler a saída do comando",
   "agentMcpDiagnosticExitStatus": "Estado de saída",
   "agentMcpDiagnosticExitStatusValue": "Estado de saída: {{code}}",
-  "agentMcpDiagnosticCleanupError": "Erro de limpeza",
+  "agentMcpDiagnosticCleanupError": "Erro de limpeza:",
   "agentMcpServerStep": "{{stage}}: {{server}}",
   "agentMcpAuthenticationRequired": "É necessária autenticação.",
   "agentMcpSessionBusy": "O agente está a usar esta sessão. Aguarde que termine o turno atual e tente novamente.",

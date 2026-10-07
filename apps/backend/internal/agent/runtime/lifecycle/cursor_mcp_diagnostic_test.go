@@ -3,12 +3,16 @@ package lifecycle
 import (
 	"context"
 	"encoding/json"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/kandev/kandev/internal/agent/agents"
+	"github.com/kandev/kandev/internal/agent/executor"
 	"github.com/kandev/kandev/internal/agent/mcpconfig"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/stretchr/testify/require"
@@ -54,6 +58,24 @@ func TestCursorMCPDiagnosticSurvivesPreparation(t *testing.T) {
 	encoded, err := json.Marshal(retry)
 	require.NoError(t, err)
 	require.Contains(t, string(encoded), `"mcp_diagnostic"`)
+}
+
+func TestCursorMCPFenceDiagnosticRetainsOnlyEndedContextCauses(t *testing.T) {
+	diagnostic := &mcpconfig.NativeMCPDiagnostic{
+		Operation: "enable", Stage: "wait", Kind: "output_wait_timeout", Message: "command wait expired",
+	}
+	activeContext, cancelActive := context.WithCancel(context.Background())
+	defer cancelActive()
+	require.Nil(t, cursorMCPFenceDiagnostic(activeContext, diagnostic))
+
+	canceledContext, cancel := context.WithCancel(context.Background())
+	cancel()
+	require.Equal(t, diagnostic, cursorMCPFenceDiagnostic(canceledContext, diagnostic))
+
+	deadlineContext, cancelDeadline := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+	defer cancelDeadline()
+	require.ErrorIs(t, deadlineContext.Err(), context.DeadlineExceeded)
+	require.Equal(t, diagnostic, cursorMCPFenceDiagnostic(deadlineContext, diagnostic))
 }
 
 func TestCursorMCPRecoveryClearsOnlyRecoveredDiagnostic(t *testing.T) {
@@ -120,6 +142,69 @@ func TestRetryCursorMCPDiagnosticStaysOnFailedApprovalStep(t *testing.T) {
 	require.Equal(t, execution.SessionID, fields["session_id"])
 	require.NotEmpty(t, fields["preparation_id"])
 	require.Equal(t, "plugin-harness-figma", fields["server_id"])
+}
+
+func TestCursorMCPPreparationFencesRetainContextEndedDiagnostic(t *testing.T) {
+	for _, operation := range []string{"enable", "list-tools"} {
+		t.Run(operation, func(t *testing.T) {
+			manager, execution, profile := newCursorMCPRecoveryFixture(t)
+			writeCursorMCPRecoveryPlugin(t, filepath.Join(os.Getenv("HOME"), ".cursor"))
+			manager.cursorInventoryLoader = func(context.Context) (mcpconfig.CursorNativeInventory, error) {
+				return mcpconfig.CursorNativeInventory{}, nil
+			}
+
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			diagnosticOperation := mcpconfig.NativeMCPDiagnosticOperation("enable")
+			if operation == "list-tools" {
+				diagnosticOperation = "list_tools"
+			}
+			diagnostic := &mcpconfig.NativeMCPDiagnostic{
+				Operation: diagnosticOperation, Stage: "wait", Kind: "output_wait_timeout",
+				Message: "exec: WaitDelay expired",
+			}
+			manager.SetCursorNativeMCPCommandRunner(&cursorMCPContextCancelDiagnosticRunner{
+				cancelOperation: operation, cancel: cancel, diagnostic: diagnostic,
+			})
+			recorder := manager.newPreparationAttemptRecorder(execution.TaskID, execution.SessionID)
+
+			err := manager.reconcileAndMaterializeCursorProjectMCPWithPreparation(
+				ctx, execution, agents.NewCursorACP(), profile, string(executor.NameLocal),
+				agents.NewCursorACP().Runtime().ProjectMCPStrategy, recorder,
+			)
+
+			require.NoError(t, err)
+			steps := recorder.Steps()
+			var approval, verification *PrepareStep
+			for index := range steps {
+				step := &steps[index]
+				if step.MCPServerID != "plugin-harness-figma" {
+					continue
+				}
+				switch step.Kind {
+				case PrepareStepKindAgentMCPApproval:
+					approval = step
+				case PrepareStepKindAgentMCPVerification:
+					verification = step
+				}
+			}
+			require.NotNil(t, approval)
+			require.NotNil(t, verification)
+			if operation == "enable" {
+				require.Equal(t, PrepareStepFailed, approval.Status)
+				require.Equal(t, "canceled", approval.FailureCode)
+				require.Equal(t, PrepareStepSkipped, verification.Status)
+				require.Equal(t, diagnostic, approval.Diagnostic)
+				require.Nil(t, verification.Diagnostic)
+			} else {
+				require.Equal(t, PrepareStepCompleted, approval.Status)
+				require.Equal(t, PrepareStepFailed, verification.Status)
+				require.Equal(t, "canceled", verification.FailureCode)
+				require.Nil(t, approval.Diagnostic)
+				require.Equal(t, diagnostic, verification.Diagnostic)
+			}
+		})
+	}
 }
 
 func TestCursorMCPDiagnosticLogIsStructuredAndRedacted(t *testing.T) {
@@ -215,6 +300,80 @@ func TestRetryCursorMCPConnectionDoesNotPublishStaleCommandDiagnostic(t *testing
 			}
 		})
 	}
+}
+
+func TestRetryCursorMCPConnectionRetainsContextEndedDiagnostic(t *testing.T) {
+	for _, operation := range []string{"enable", "list-tools"} {
+		t.Run(operation, func(t *testing.T) {
+			manager, execution, profile := newCursorMCPRecoveryFixture(t)
+			prepareCursorMCPRecoveryWorkspace(t, manager, execution, profile)
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			diagnosticOperation := mcpconfig.NativeMCPDiagnosticOperation("enable")
+			if operation == "list-tools" {
+				diagnosticOperation = "list_tools"
+			}
+			diagnostic := &mcpconfig.NativeMCPDiagnostic{
+				Operation: diagnosticOperation, Stage: "wait", Kind: "output_wait_timeout",
+				Message: "exec: WaitDelay expired",
+			}
+			manager.SetCursorNativeMCPCommandRunner(&cursorMCPContextCancelDiagnosticRunner{
+				cancelOperation: operation, cancel: cancel, diagnostic: diagnostic,
+			})
+
+			result, err := manager.RetryCursorMCPConnection(ctx, execution.SessionID, "plugin-harness-figma")
+
+			require.NoError(t, err)
+			require.Equal(t, string(mcpconfig.NativeMCPStatusUnavailable), result.Status)
+			require.Equal(t, pluginExecutorStateUnavailable, result.ReasonCode)
+			require.Equal(t, diagnostic, result.Diagnostic)
+			var approval, verification *PrepareStep
+			for index := range execution.PrepareResult.Steps {
+				step := &execution.PrepareResult.Steps[index]
+				if step.MCPServerID != "plugin-harness-figma" {
+					continue
+				}
+				switch step.Kind {
+				case PrepareStepKindAgentMCPApproval:
+					approval = step
+				case PrepareStepKindAgentMCPVerification:
+					verification = step
+				}
+			}
+			require.NotNil(t, approval)
+			require.NotNil(t, verification)
+			if operation == "enable" {
+				require.Equal(t, diagnostic, approval.Diagnostic)
+				require.Equal(t, PrepareStepSkipped, verification.Status)
+			} else {
+				require.Equal(t, PrepareStepCompleted, approval.Status)
+				require.Equal(t, PrepareStepFailed, verification.Status)
+				require.Equal(t, diagnostic, verification.Diagnostic)
+			}
+		})
+	}
+}
+
+type cursorMCPContextCancelDiagnosticRunner struct {
+	cancelOperation string
+	cancel          context.CancelFunc
+	diagnostic      *mcpconfig.NativeMCPDiagnostic
+}
+
+func (r *cursorMCPContextCancelDiagnosticRunner) Run(_ context.Context, _ string, args []string, _ string, _ map[string]string) (mcpconfig.NativeMCPCommandResult, error) {
+	if args[1] == r.cancelOperation {
+		r.cancel()
+		return mcpconfig.NativeMCPCommandResult{
+			ExitCode: 0, ExitCodeObserved: true, Diagnostic: r.diagnostic,
+		}, exec.ErrWaitDelay
+	}
+	if args[1] == "enable" {
+		return mcpconfig.NativeMCPCommandResult{ExitCode: 0, ExitCodeObserved: true}, nil
+	}
+	return mcpconfig.NativeMCPCommandResult{
+		ExitCode: 0, ExitCodeObserved: true,
+		Stdout: []byte("Tools for " + args[2] + " (1):\n- fixture_tool ()\n"),
+	}, nil
 }
 
 type cursorMCPDiagnosticBarrierRunner struct {

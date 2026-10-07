@@ -138,6 +138,29 @@ describe("agent MCP diagnostic details", () => {
     expect(message.className).toContain("select-text");
   });
 
+  it("renders the translated cleanup-error label with its separator", () => {
+    const step: PrepareStepInfo = {
+      name: "",
+      kind: "agent_mcp_approval",
+      mcpServerId: TEST_SERVER_ID,
+      failureCode: "connection_failed",
+      status: "failed",
+      mcpDiagnostic: {
+        operation: "enable",
+        stage: "wait",
+        kind: "wait_failed",
+        message: "approval command failed",
+        cleanupMessage: "process cleanup failed",
+      },
+    };
+
+    render(<AgentMcpPrepareActions step={step} sessionId="session-1" taskId="task-1" />);
+
+    expect(screen.getByTestId("agent-mcp-diagnostic").textContent).toContain(
+      "Cleanup error: process cleanup failed",
+    );
+  });
+
   it("keeps the diagnostic after a busy rejection and clears it when retry succeeds", async () => {
     const step: PrepareStepInfo = {
       name: "",

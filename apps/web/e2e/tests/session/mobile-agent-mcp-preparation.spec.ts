@@ -113,6 +113,7 @@ test("phone wraps retained MCP command details and keeps recovery actions reacha
       `[data-testid="agent-mcp-recovery-actions"][data-mcp-server-id="${E2E_MCP_SERVER_ID}"]`,
     );
     await expect(primaryRow).toContainText(E2E_MCP_LONG_DIAGNOSTIC);
+    await expect(primaryRow).toContainText("Cleanup error: process cleanup failed");
     const details = primaryRow.getByTestId("agent-mcp-diagnostic-message");
     await expect(details).toBeVisible();
     expect(await details.evaluate((element) => getComputedStyle(element).whiteSpace)).toBe(

@@ -1,6 +1,8 @@
 package lifecycle
 
 import (
+	"context"
+
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/agent/mcpconfig"
@@ -39,4 +41,17 @@ func normalizeCursorMCPDiagnostic(diagnostic *mcpconfig.NativeMCPDiagnostic) *mc
 		return nil
 	}
 	return mcpconfig.NormalizeNativeMCPDiagnostic(diagnostic, diagnostic.Operation)
+}
+
+func cursorMCPFenceDiagnostic(ctx context.Context, diagnostic *mcpconfig.NativeMCPDiagnostic) *mcpconfig.NativeMCPDiagnostic {
+	if ctx == nil || ctx.Err() == nil {
+		return nil
+	}
+	return normalizeCursorMCPDiagnostic(diagnostic)
+}
+
+func cursorMCPFenceReadiness(ctx context.Context, diagnostic *mcpconfig.NativeMCPDiagnostic) mcpconfig.NativeMCPReadiness {
+	readiness := cursorMCPUnavailableReadiness()
+	readiness.Diagnostic = cursorMCPFenceDiagnostic(ctx, diagnostic)
+	return readiness
 }

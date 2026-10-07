@@ -6,6 +6,8 @@ import {
   destroyMcpRecoveryTerminals,
   E2E_MCP_SERVER_ID,
   E2E_MCP_SECOND_SERVER_ID,
+  E2E_MCP_LEGACY_ERROR,
+  E2E_MCP_LEGACY_OUTPUT,
   installAgentMcpRecoveryRoutes,
   seedMcpDiagnosticPreparation,
 } from "../../helpers/agent-mcp-preparation";
@@ -156,7 +158,12 @@ test.describe("Agent MCP preparation recovery", () => {
       await expect(primaryRow).toContainText("Native command failed during server approval.");
       await expect(primaryRow).toContainText("exec: WaitDelay expired before I/O complete");
       await expect(primaryRow).toContainText("Exit status: 0");
+      await expect(primaryRow).toContainText("Cleanup error: process cleanup failed");
       await expect(otherRow).toContainText("Native MCP connection verification command failed");
+      for (const row of [primaryRow, otherRow]) {
+        await expect(row).not.toContainText(E2E_MCP_LEGACY_ERROR);
+        await expect(row).not.toContainText(E2E_MCP_LEGACY_OUTPUT);
+      }
       await testPage.screenshot({ path: testInfo.outputPath("agent-mcp-diagnostic-desktop.png") });
 
       await testPage.reload();
@@ -165,7 +172,12 @@ test.describe("Agent MCP preparation recovery", () => {
       await expect(preparation).toHaveAttribute("data-status", "failed");
       await testPage.getByRole("button", { name: "Show preparation details" }).click();
       await expect(primaryRow).toContainText("exec: WaitDelay expired before I/O complete");
+      await expect(primaryRow).toContainText("Cleanup error: process cleanup failed");
       await expect(otherRow).toContainText("Native MCP connection verification command failed");
+      for (const row of [primaryRow, otherRow]) {
+        await expect(row).not.toContainText(E2E_MCP_LEGACY_ERROR);
+        await expect(row).not.toContainText(E2E_MCP_LEGACY_OUTPUT);
+      }
 
       await testPage.setViewportSize({ width: 420, height: 900 });
       const narrowPreparation = testPage.locator('[data-testid="prepare-progress-panel"]:visible');

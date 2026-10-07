@@ -186,6 +186,20 @@ Implementation checks on 2026-10-07:
 - `python3 scripts/list-docs.py validate`,
   `python3 scripts/lint-spec-files.py --all`, and `git diff --check` passed.
 
+PR review follow-up on 2026-10-07:
+
+- Context-ended lifecycle fences now retain the safe native command diagnostic
+  while stale-generation fences continue to discard it. Cleanup errors no
+  longer prevent command exit/output classification, and their safe detail is
+  retained. Targeted race tests pass for MCP config, lifecycle and handlers.
+- The cleanup-error separator is localized, with component and phone rendered
+  coverage. Desktop E2E checks that legacy raw error/output fields stay hidden
+  before and after reload.
+- The first PR CI run's three failed jobs were not started because their hosted
+  runners repeatedly failed acquisition after five attempts. Other jobs were
+  still pending at inspection time, so that run does not count as successful
+  validation. A fresh PR run is required after this fixup.
+
 ## Risks
 
 - Sanitizing too late leaks a cause into logs or metadata. Bound and redact it

@@ -23,7 +23,7 @@
   "agentMcpDiagnosticStageOutput": "Read command output",
   "agentMcpDiagnosticExitStatus": "Exit status",
   "agentMcpDiagnosticExitStatusValue": "Exit status: {{code}}",
-  "agentMcpDiagnosticCleanupError": "Cleanup error",
+  "agentMcpDiagnosticCleanupError": "Cleanup error:",
   "agentMcpServerStep": "{{stage}}: {{server}}",
   "agentMcpAuthenticationRequired": "Authentication is required.",
   "agentMcpSessionBusy": "The agent is using this session. Wait for its current turn to finish, then retry.",

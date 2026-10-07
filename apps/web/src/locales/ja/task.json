@@ -23,7 +23,7 @@
   "agentMcpDiagnosticStageOutput": "コマンド出力の読み取り",
   "agentMcpDiagnosticExitStatus": "終了ステータス",
   "agentMcpDiagnosticExitStatusValue": "終了ステータス: {{code}}",
-  "agentMcpDiagnosticCleanupError": "クリーンアップエラー",
+  "agentMcpDiagnosticCleanupError": "クリーンアップエラー：",
   "agentMcpServerStep": "{{stage}}: {{server}}",
   "agentMcpAuthenticationRequired": "認証が必要です。",
   "agentMcpSessionBusy": "エージェントはこのセッションを使用中です。現在のターンが完了するまで待ってから、もう一度お試しください。",

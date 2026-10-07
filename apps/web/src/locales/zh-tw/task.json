@@ -23,7 +23,7 @@
   "agentMcpDiagnosticStageOutput": "讀取命令輸出",
   "agentMcpDiagnosticExitStatus": "退出狀態",
   "agentMcpDiagnosticExitStatusValue": "退出狀態：{{code}}",
-  "agentMcpDiagnosticCleanupError": "清理錯誤",
+  "agentMcpDiagnosticCleanupError": "清理錯誤：",
   "agentMcpServerStep": "{{stage}}：{{server}}",
   "agentMcpAuthenticationRequired": "需要身分驗證。",
   "agentMcpSessionBusy": "代理正在使用此工作階段。請等待目前輪次完成後重試。",

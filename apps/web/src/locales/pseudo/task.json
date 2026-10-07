@@ -23,7 +23,7 @@
   "agentMcpDiagnosticStageOutput": "Ŕēàď ćōḿḿàńď ōũţƥũţ",
   "agentMcpDiagnosticExitStatus": "Ēxĩţ śţàţũś",
   "agentMcpDiagnosticExitStatusValue": "Ēxĩţ śţàţũś: {{code}}",
-  "agentMcpDiagnosticCleanupError": "Ćĺēàńũƥ ēŕŕōŕ",
+  "agentMcpDiagnosticCleanupError": "Ćĺēàńũƥ ēŕŕōŕ:",
   "agentMcpServerStep": "{{stage}}: {{server}}",
   "agentMcpAuthenticationRequired": "Àũţĥēńţĩćàţĩōń ĩś ŕēqũĩŕēď.",
   "agentMcpSessionBusy": "Ţĥē àĝēńţ ĩś ũśĩńĝ ţĥĩś śēśśĩōń. Ŵàĩţ ƒōŕ ĩţś ćũŕŕēńţ ţũŕń ţō ƒĩńĩśĥ, ţĥēń ŕēţŕŷ.",

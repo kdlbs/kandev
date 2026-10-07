@@ -245,7 +245,9 @@ func (m *Manager) approveCursorProjectMCPImport(
 	approval := adapter.Enable(ctx, execution.WorkspacePath, execution.RuntimeEnvironment(), target.serverID)
 	ended := time.Now().UTC()
 	if failure := cursorMCPPreparationFence(ctx, m, execution, workspaceKey, generation, target, home, sourceRepository, sourceAvailable); failure != "" {
-		updateCursorMCPProgress(progress, index, target.serverID, PrepareStepKindAgentMCPApproval, PrepareStepFailed, failure, started, ended)
+		diagnostic := cursorMCPFenceDiagnostic(ctx, approval.Diagnostic)
+		m.logCursorMCPDiagnostic(execution, progress, target.serverID, diagnostic)
+		updateCursorMCPProgress(progress, index, target.serverID, PrepareStepKindAgentMCPApproval, PrepareStepFailed, failure, started, ended, diagnostic)
 		appendCursorMCPProgress(progress, target.serverID, PrepareStepKindAgentMCPVerification, PrepareStepSkipped, failure, &ended, &ended)
 		return
 	}
@@ -311,7 +313,9 @@ func (m *Manager) verifyCursorProjectMCPImport(
 	ended := time.Now().UTC()
 	failure := cursorMCPPreparationFence(ctx, m, execution, workspaceKey, generation, target, home, sourceRepository, sourceAvailable)
 	if failure != "" {
-		updateCursorMCPProgress(progress, index, target.serverID, PrepareStepKindAgentMCPVerification, PrepareStepFailed, failure, started, ended)
+		diagnostic := cursorMCPFenceDiagnostic(ctx, readiness.Diagnostic)
+		m.logCursorMCPDiagnostic(execution, progress, target.serverID, diagnostic)
+		updateCursorMCPProgress(progress, index, target.serverID, PrepareStepKindAgentMCPVerification, PrepareStepFailed, failure, started, ended, diagnostic)
 		return
 	}
 	status := PrepareStepFailed
