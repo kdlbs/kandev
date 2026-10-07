@@ -34,6 +34,8 @@ const SIZE_CLASSES: Record<NonNullable<PluginModalOptions["size"]>, string> = {
 
 const DIALOG_CONTAINMENT_CLASSES =
   "max-h-[calc(100dvh-2rem)] max-w-[calc(100vw-2rem)] grid-rows-[auto_minmax(0,1fr)] overflow-hidden";
+const OPEN_FOCUS_SURFACE_SELECTOR =
+  '[role="dialog"][data-state="open"], [role="menu"][data-state="open"]';
 
 function preventWhenNotDismissible(dismissible: boolean) {
   return (event: Event) => {
@@ -45,13 +47,13 @@ function pluginDialogLabel(): string {
   return t("plugins:pluginDialog");
 }
 
-function isElementUnavailable(element: HTMLElement): boolean {
+function isElementUnavailable(element: HTMLElement, checkAriaDisabled = true): boolean {
   if (
     element.hidden ||
     element.inert ||
     element.hasAttribute("inert") ||
     element.getAttribute("aria-hidden") === "true" ||
-    element.getAttribute("aria-disabled") === "true" ||
+    (checkAriaDisabled && element.getAttribute("aria-disabled") === "true") ||
     element.matches(":disabled")
   ) {
     return true;
@@ -75,7 +77,7 @@ function isAvailableFocusTarget(element: HTMLElement | null | undefined): elemen
   }
 
   for (let ancestor: HTMLElement | null = element; ancestor; ancestor = ancestor.parentElement) {
-    if (isElementUnavailable(ancestor)) return false;
+    if (isElementUnavailable(ancestor, ancestor === element)) return false;
   }
 
   return true;
@@ -98,8 +100,8 @@ function findActiveModalSurface(closingInstanceId: string): HTMLElement | undefi
   const pluginSurfaces = Array.from(livePluginModalIds)
     .map(findRenderedPluginModalSurface)
     .filter((surface): surface is HTMLElement => Boolean(surface));
-  const dialogSurfaces = Array.from(
-    document.querySelectorAll<HTMLElement>('[role="dialog"][data-state="open"]'),
+  const openSurfaces = Array.from(
+    document.querySelectorAll<HTMLElement>(OPEN_FOCUS_SURFACE_SELECTOR),
   ).filter((surface) => {
     const instanceId = surface.dataset.pluginModalInstance;
     return (
@@ -108,11 +110,11 @@ function findActiveModalSurface(closingInstanceId: string): HTMLElement | undefi
       isAvailableFocusTarget(surface)
     );
   });
-  const activeSurfaces = Array.from(new Set([...pluginSurfaces, ...dialogSurfaces]));
+  const activeSurfaces = Array.from(new Set([...pluginSurfaces, ...openSurfaces]));
   const activeElement = document.activeElement;
   const focusedSurface =
     activeElement instanceof HTMLElement
-      ? activeElement.closest<HTMLElement>('[role="dialog"][data-state="open"]')
+      ? activeElement.closest<HTMLElement>(OPEN_FOCUS_SURFACE_SELECTOR)
       : null;
   if (focusedSurface && activeSurfaces.includes(focusedSurface)) return focusedSurface;
 

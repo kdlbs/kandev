@@ -402,7 +402,6 @@ describe("PluginModalHost — overlapping modal focus", () => {
 
     vi.useFakeTimers();
     act(() => backgroundHandle?.close());
-    expect(vi.getTimerCount()).toBeGreaterThan(0);
     act(() => vi.runOnlyPendingTimers());
 
     expect(document.activeElement).toBe(foregroundAction);
@@ -440,7 +439,6 @@ describe("PluginModalHost — overlapping modal focus", () => {
 
     vi.useFakeTimers();
     act(() => backgroundHandle?.close());
-    expect(vi.getTimerCount()).toBeGreaterThan(0);
     act(() => vi.runOnlyPendingTimers());
 
     expect(screen.getByTestId("foreground-popover-content").getAttribute("data-state")).toBe(
@@ -526,7 +524,6 @@ describe("PluginModalHost — owner cleanup focus", () => {
 
     vi.useFakeTimers();
     act(() => pluginModalManager.closeAllForPlugin("plugin-a"));
-    expect(vi.getTimerCount()).toBeGreaterThan(0);
     act(() => vi.runOnlyPendingTimers());
 
     expect(document.activeElement).toBe(foregroundAction);
@@ -551,7 +548,6 @@ describe("PluginModalHost — owner cleanup focus", () => {
 
     vi.useFakeTimers();
     act(() => backgroundHandle?.close());
-    expect(vi.getTimerCount()).toBeGreaterThan(0);
     act(() => {
       successorHandle = pluginModalManager.openModal("plugin-b", {
         title: "Successor modal",

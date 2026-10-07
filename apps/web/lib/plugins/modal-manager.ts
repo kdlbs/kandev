@@ -68,6 +68,7 @@ class PluginModalManager {
     layout?: OpenPluginModal["layout"],
   ): PluginModalHandle {
     const instanceId = `plugin-modal-${(nextInstanceId += 1)}`;
+    // Snapshot focus before subscribers render the newly opened modal.
     const openerElement = captureOpenerElement();
     this.modals = [...this.modals, { instanceId, pluginId, options, openerElement, layout }];
     this.notify();
