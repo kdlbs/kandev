@@ -1,3 +1,4 @@
+import { routeCommitSpacingSource } from "./commit-spacing-source";
 import { test, expect } from "../../fixtures/test-base";
 import {
   createStandardProfile,
@@ -53,6 +54,7 @@ test.describe("Mobile large Changes virtualization", () => {
         repository_ids: [seedData.repositoryId],
       },
     );
+    const history = await routeCommitSpacingSource(testPage);
     await testPage.goto(`/t/${task.id}`);
     const session = new SessionPage(testPage);
     await session.waitForLoad();
@@ -60,7 +62,7 @@ test.describe("Mobile large Changes virtualization", () => {
     const changes = testPage.getByRole("navigation").getByRole("button", { name: /Changes$/ });
     await changes.tap();
     await expect(testPage.getByTestId("mobile-changes-panel")).toBeVisible();
-    await seedCommitSpacingHistory(testPage);
+    await seedCommitSpacingHistory(testPage, history);
     await refreshSpacingAndExpectAnchor(testPage);
     await expectTouchControl(
       testPage.getByTestId("commit-row-0000000").getByTestId("commit-toggle"),
