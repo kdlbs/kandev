@@ -200,3 +200,9 @@ and six mobile PR-only commit-detail repetitions passed. Browser retries were di
 The frontend build, strict ESLint, and TypeScript checks passed.
 [Task 02](task-02-checkout-relation-and-action-semantics.md#ci-correction-connection-readiness) records the exact validation commands.
 The full hosted CI run and browser artifact audit remain pending for delivery.
+
+## CI correction: Git subscription readiness
+
+The Git-status subscription also waits for the registered client. A late client
+now starts the subscription without another connection-status transition.
+[Task 02](task-02-checkout-relation-and-action-semantics.md#ci-correction-git-subscription-readiness) records this regression and its validation.

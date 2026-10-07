@@ -19,6 +19,13 @@ owns row geometry independently of the comparison result.
 
 The classifier implements this evidence gate for both desktop and phone.
 
+## Git subscription readiness
+
+`useSessionGitStatus` reacts to both connection status and client registration.
+A connected status without a registered client does not finish subscription setup.
+After the client registers, the hook subscribes to the selected session.
+Repository status then supplies the branch evidence for PR selection.
+
 ## Evidence and classification
 
 `useRemoteContributionRelation` selects repository/branch-scoped provider

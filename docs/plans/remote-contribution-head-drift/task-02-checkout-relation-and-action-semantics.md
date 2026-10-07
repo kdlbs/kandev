@@ -136,3 +136,16 @@ pnpm typecheck
 ```
 
 The full hosted CI run and browser artifact audit remain pending for delivery.
+
+## CI correction: Git subscription readiness
+
+A connected status can arrive before the WebSocket client registers.
+The Git-status hook now subscribes after client registration, even when the
+connection status does not change again. This provides the repository status
+that branch-scoped PR selection needs after a page reload.
+
+The late-client subscription regression failed before the correction.
+Thirty-three focused unit tests and the production build passed.
+Ten mobile PR-only browser repetitions passed with retries disabled.
+Strict lint, typecheck, specification lint, and trusted delivery coverage passed.
+Hosted validation remains pending for the next delivery.
