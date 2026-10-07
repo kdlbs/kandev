@@ -218,3 +218,25 @@ cutoffs/actual joins/fresh gone proofs are retained at
 `/tmp/kandev-child69-upload-permissions-20261007T092136Z/` and in the task's durable MCP plan.
 Normal hooks/ready publication and separate ROOT hosted review/native Windows evidence/merge
 remain delivery gates. No native Windows registered-route or full browser/E2E/build claim.
+
+
+ROOT authorized a bounded CI fixture dependency correction after exact hosted merge b87854d4
+(at upload head9aa5bc76/base b3f207b2, attempt1) failed Playwright listing: duplicate `session`
+declarations in the desktop disabled-continuation test. The upload head's fixture matched its
+original baseline; the parser regression came from the base fixture. Only this existing fixture
+is added to ownership. Incorporate its base-side test block and rename the second binding and
+associated references, preserving both navigations, all waits/assertions/native trace semantics.
+Actual hosted parser failure is RED. Validate only this file's chromium Playwright `--list` and
+applicable scoped lint. No browser/backend/build/full E2E or passing Go replay. TS-only correction
+does not trigger changed-backend lint. Normal hooks/new fixup commit/push and physical LOCAL
+return precede a separate ROOT HOSTED release; no observer restart or merge is authorized.
+
+
+The bounded fixture correction lists all15 tests in one file under the existing chromium config:
+native22452 (8dede5 to825bb9) actually joined exit0; this is collection-only evidence, with no
+browser/backend/build. Scoped fixture ESLint native32034 (d35ec8 to46aa1c) actually joined exit0.
+Original hosted observer62265 was stopped only after ROOT declared it obsolete, then actually
+joined143 with no passing/all-terminal verdict; fresh process groups are gone. Original fixed
+receipts, causal upload RED/GREEN and parser failures remain retained. Normal fixup hooks/push,
+physical local return and later hosted/current-head semantic/native Windows evidence remain
+separate gates.

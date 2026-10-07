@@ -173,8 +173,32 @@ native78424 each compiled and actually joined exit1 with successful bytes/path/c
 executable/restricted permissions and direct native launch permission denied. Production was
 unchanged before both. The minimal upload-only correction retains final-check regular-file
 Perm(), including0000, through descriptor Chmod/Sync/Close and rooted rename. Scoped writer
-GREEN native89140 and route GREEN native71531 actually joined exit0 under the work-order flags.
+GREEN native89140 and route GREEN native71531 were the initial passing runs. After the final
+publication-cleanup guard, writer native8542, route native24575 and scoped lint native56169
+actually joined exit0 and are authoritative. The guard prevents successful publication cleanup
+from deleting a subsequently reused staging name. Normal hooks, ready PR4290 publication and
+physical LOCAL return then passed; their receipts remain in the durable task plan.
 Retained logs, UTC/argv/cwd/cutoffs/PIDs/groups and fresh gone proofs live at
-`/tmp/kandev-child69-upload-permissions-20261007T092136Z/`. A final publication-cleanup guard is
-being tightened during self-review; affected final checks and publication remain pending.
-Native Windows execution, hosted CI/review, merge and ROOT closure are not yet released or claimed.
+`/tmp/kandev-child69-upload-permissions-20261007T092136Z/`.
+Native Windows execution, hosted CI/review, merge and ROOT closure remain separate delivery gates.
+
+ROOT authorized one bounded test-only CI dependency correction after the hosted Build's
+Playwright listing failed on the base fixture's duplicate `session` declaration. The tested merge
+b87854d4 and base b3f207b2 contained the same fixture; frozen upload head9aa5bc76 retained the
+older fixture. Incorporate only that fixture's base-side disabled-continuation test changes and
+rename its second SessionPage binding to `recoverySession`, preserving both navigations, waits,
+assertions and native trace semantics. This adds the existing
+`apps/web/e2e/tests/session/provider-interruption-continuation.spec.ts` to this order's bounded
+ownership. No product/provider/runtime/geometry change, rebase or backend check replay.
+Validation is one-file Playwright `--list` for project chromium and applicable scoped fixture lint,
+followed by normal hooks, a new fixup commit and push. ROOT retains later HOSTED/MERGE gates.
+
+
+The bounded fixture correction lists all15 tests in one file under the existing chromium config:
+native22452 (8dede5 to825bb9) actually joined exit0; this is collection-only evidence, with no
+browser/backend/build. Scoped fixture ESLint native32034 (d35ec8 to46aa1c) actually joined exit0.
+Original hosted observer62265 was stopped only after ROOT declared it obsolete, then actually
+joined143 with no passing/all-terminal verdict; fresh process groups are gone. Original fixed
+receipts, causal upload RED/GREEN and parser failures remain retained. Normal fixup hooks/push,
+physical local return and later hosted/current-head semantic/native Windows evidence remain
+separate gates.
