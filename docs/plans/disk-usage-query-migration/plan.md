@@ -163,6 +163,12 @@ Dependencies and implementation evidence:
   function. With `NODE_ENV=production`, the full file passed 8/8; targeted
   ESLint and full web typecheck passed. This is test-fixture maintenance and
   does not change product behavior.
+- The required E2E run exposed a 30-second response assertion in the existing
+  managed-clone recovery test, before the session reached `WAITING_FOR_INPUT`.
+  The test now waits up to 120 seconds for the established resumed-session
+  state before checking the successful response. The focused scenario passed
+  5/5 on a synthetic current-main merge under the CI runtime image capped at
+  2 CPUs and 4 GiB. This fixup changes no product behavior.
 - Architecture lint, docs catalog validation, specification lint and its 36
   tests, PR documentation coverage (`covered`, no errors), and `git diff
   --check` passed.

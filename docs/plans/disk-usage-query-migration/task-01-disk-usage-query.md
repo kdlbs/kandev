@@ -192,6 +192,9 @@ not prove implementation coverage.
 - `apps/web/lib/state/slices/system/system-slice.test.ts`
 - `apps/web/e2e/tests/system/disk-usage.spec.ts`
 - `apps/web/e2e/tests/system/mobile-disk-usage.spec.ts`
+- `apps/web/e2e/tests/session/session-resume-recovery.spec.ts` (CI fixup:
+  wait for session recovery to reach its ready state before checking the
+  relocation response)
 - `docs/specs/system-page/system-design/system-page-01.md`
 - `docs/specs/system-page/system-design/disk-usage-query-cache.md`
 - `docs/decisions/2026-10-05-disk-usage-query-invalidation.md`
@@ -263,6 +266,10 @@ No rebase or shared-contract expansion was needed.
   Both verified POST then GET and the refreshed card data; mobile also verified
   no horizontal overflow. Card layout and viewport-dependent behavior remain
   unchanged.
+- The CI recovery-test fixup waits for `WAITING_FOR_INPUT` before asserting the
+  relocation response. The focused scenario passed 5/5 on a synthetic
+  current-main merge in the CI runtime image with 2 CPUs and 4 GiB; no product
+  code changed.
 - Architecture lint, docs catalog validation (360 decisions, 1424 specs),
   spec lint and its 36 tests, PR documentation coverage (`covered`, no errors),
   and `git diff --check` passed.
