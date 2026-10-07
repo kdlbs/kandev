@@ -1,5 +1,5 @@
 ---
-status: draft
+status: active
 system: ui
 created: 2026-09-01
 owners:
@@ -72,8 +72,9 @@ folder, so that I can supply fixtures, exports, and assets without a terminal or
 - **AC-UI-WORKSPACE-FILE-TRANSFER-001.5:** While an upload runs, the panel shows that it is in
   progress. On success, each uploaded file appears in the file tree at its destination without a
   manual refresh, and the confirmation names the path it was written to.
-- **AC-UI-WORKSPACE-FILE-TRANSFER-001.6:** A failed upload leaves no partial or truncated file in
-  the workspace, removes any optimistic tree entry, and reports why it failed.
+- **AC-UI-WORKSPACE-FILE-TRANSFER-001.6:** An upload that fails before publication leaves no partial
+  or truncated destination file, removes any optimistic tree entry, and reports why it failed.
+  A later transport failure does not imply that a completed workspace write was rolled back.
 - **AC-UI-WORKSPACE-FILE-TRANSFER-001.7:** Upload is offered only when the panel has an active task
   session. Without one, the actions are absent rather than present and failing.
 
@@ -101,6 +102,21 @@ what to do, so that I never silently replace work or discover a surprise rename 
 - **AC-UI-WORKSPACE-FILE-TRANSFER-004.6:** A resolution is honored per file. Uploading without a
   resolution for a conflicting path is refused rather than defaulting to overwrite, including when a
   conflicting path is created between the preflight and the upload.
+- **AC-UI-WORKSPACE-FILE-TRANSFER-004.7:** When **Replace** succeeds against an existing regular
+  file, the complete incoming bytes shall retain the destination's supported ordinary permissions
+  observed at the final publication check, rather than its earlier preflight state. On POSIX this
+  includes read, write, and execute bits: an executable script shall remain directly runnable, and
+  a restricted file shall not gain broader access. Windows coverage is limited to the supported
+  writable/read-only attribute and native replacement restrictions, without POSIX mode equivalence.
+- **AC-UI-WORKSPACE-FILE-TRANSFER-004.8:** A newly created destination, including **Replace** when
+  the destination no longer exists and the new copy from **Keep both**, shall use ordinary upload
+  creation defaults subject to the caller's umask where supported. It shall not inherit the old
+  file's permissions or widen a restrictive umask. **Keep both** shall preserve the original file's
+  bytes and permissions.
+- **AC-UI-WORKSPACE-FILE-TRANSFER-004.9:** When replacement fails before publication, the existing
+  destination's bytes and permissions shall remain unchanged, the staged upload shall be cleaned
+  up, and no successful workspace-change notification shall be emitted. This does not promise
+  rollback of a write already published before a later transport failure.
 
 ### REQ-UI-WORKSPACE-FILE-TRANSFER-002: Download reachable from every file surface
 
@@ -182,6 +198,10 @@ feature cannot write outside the workspace, exhaust memory, or corrupt a file an
   indefinitely.
 - Uploading into anything other than the active task session's workspace.
 - Version history, restore, or any retention policy for replaced files.
+- Transferring source-file permissions from the browser or preserving destination ownership,
+  ACLs, extended attributes, or special privilege bits (setuid, setgid, sticky). Permission
+  preservation applies to regular-file replacement and only to bits supported by the native OS;
+  it does not introduce a cross-platform metadata contract.
 
 ## Related work
 
