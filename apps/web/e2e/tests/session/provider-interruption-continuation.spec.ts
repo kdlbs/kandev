@@ -298,7 +298,6 @@ test("desktop: disabled continuation preserves manual recovery without native re
     assertNativeNoContinuationTrace(fixture.tracePath, "read");
 
     await testPage.goto(`/t/${fixture.taskId}`);
-    const session = new SessionPage(testPage);
     await session.waitForLoad();
     await expect(session.recoveryResumeButton()).toBeVisible();
     await expect(session.transientRetryCard()).toBeHidden();
