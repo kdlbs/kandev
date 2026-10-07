@@ -83,7 +83,7 @@ test.describe("mobile queue admission reliability", () => {
       test.setTimeout(120_000);
       const drops = await routeMainWebSocketWithQueueAdmissionDrops(testPage);
       const dialog = await openQuickChatWithAgent(testPage);
-      await sendQuickChatMessage(dialog, testPage, "/sleep 30");
+      await sendQuickChatMessage(dialog, testPage, "/sleep 60");
       await expect(
         testPage.getByRole("status", { name: /Agent is (starting|running)/ }),
       ).toBeVisible({ timeout: 15_000 });

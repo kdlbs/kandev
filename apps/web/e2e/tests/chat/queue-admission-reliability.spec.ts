@@ -114,7 +114,7 @@ test.describe("queue admission reliability", () => {
       const identity = await apiClient.getQueueSessionIdentity(started.task_id, started.session_id);
       await waitForSessionSettledBaseline(apiClient, started.task_id, started.session_id);
       await waitForQuickChatDirectInput(dialog);
-      await sendQuickChatMessage(dialog, testPage, "/sleep 30");
+      await sendQuickChatMessage(dialog, testPage, "/sleep 60");
       await expect(
         testPage.getByRole("status", { name: /Agent is (starting|running)/ }),
       ).toBeVisible({ timeout: 15_000 });

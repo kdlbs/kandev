@@ -239,6 +239,9 @@ func TestWorkspaceFieldUpdatesPresenceAndDefaults(t *testing.T) {
 	row, err = f[0].gate.Repository.GetWorkspace(ctx, row.ID)
 	require.NoError(t, err)
 	before := *row
+	before.UpdatedAt = time.Date(2000, time.January, 1, 0, 0, 0, 0, time.UTC)
+	_, err = f[0].gate.DB().ExecContext(ctx, `UPDATE workspaces SET updated_at=? WHERE id=?`, before.UpdatedAt, before.ID)
+	require.NoError(t, err)
 	row, err = f[0].service.UpdateWorkspace(ctx, "settings-row", &UpdateWorkspaceRequest{})
 	require.NoError(t, err)
 	require.True(t, row.UpdatedAt.After(before.UpdatedAt))

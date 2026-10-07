@@ -10,10 +10,6 @@ import { isDebugUI } from "@/lib/config";
 import { TooltipProvider } from "@kandev/ui/tooltip";
 import { useAppStore } from "@/components/state-provider";
 import type { UseEnsureTaskSessionResult } from "@/hooks/domains/session/use-ensure-task-session";
-import {
-  getSessionRecoveryRetry,
-  SessionRecoveryFeedback,
-} from "@/components/task/ensure-session-error";
 import type { Layout } from "react-resizable-panels";
 import { TaskArchivedProvider } from "./task-archived-context";
 import { TaskCommands } from "@/components/task-commands";
@@ -45,7 +41,7 @@ import { useTranslation } from "react-i18next";
 import type { Canvas } from "@/lib/api/domains/canvas-api";
 import type { TaskCanvasesLoadStatus } from "@/hooks/domains/task/use-task-canvases";
 import { AgentProjectTaskProvider } from "./agent-project-task-context";
-import { TaskPageEntryFeedback, TaskPageRecoveryFeedback } from "./task-page-feedback";
+import { TaskPageRecoveryFeedback } from "./task-page-feedback";
 import { useTaskStatusSummary } from "@/hooks/domains/task/use-task-status-summary";
 import {
   TaskNavigationReadFeedback,
@@ -258,51 +254,6 @@ function TaskDebugOverlay({ entries }: { entries: ReturnType<typeof maybeBuildDe
   return <DebugOverlay title={t("task:taskDebug")} entries={entries} />;
 }
 
-function TaskPageRecoveryFeedback({
-  ownedByChat,
-  taskId,
-  sessionId,
-  resumption,
-  bootstrapRecoveryError,
-  workspaceId,
-  isPassthrough,
-}: {
-  taskId: string;
-  sessionId: string | null;
-  resumption: TaskPageInnerProps["resumption"];
-  ownedByChat: boolean;
-  bootstrapRecoveryError: ReturnType<typeof resolveTaskPageBootstrapRecoveryError>;
-  workspaceId: string | null;
-  isPassthrough: boolean;
-}) {
-  if (bootstrapRecoveryError && sessionId && isPassthrough) {
-    return (
-      <SessionBootstrapRecoveryCard
-        taskId={taskId}
-        sessionId={sessionId}
-        workspaceId={workspaceId}
-        error={bootstrapRecoveryError}
-        automaticRecovery={resumption}
-      />
-    );
-  }
-  if (bootstrapRecoveryError) {
-    return null;
-  }
-  return (
-    <SessionRecoveryFeedback
-      ownedByChat={ownedByChat}
-      error={resumption.error}
-      notice={resumption.notice}
-      recoveryFailure={resumption.recoveryFailure}
-      onRetry={getSessionRecoveryRetry(resumption)}
-      retryDisabled={
-        resumption.resumptionState === "checking" || resumption.resumptionState === "resuming"
-      }
-      workspaceId={workspaceId}
-    />
-  );
-}
 function TaskPageLayoutFeedback({
   layoutProps,
   isMobile,

@@ -1,11 +1,8 @@
 import {
-  EnsureSessionErrorBanner,
   getSessionRecoveryRetry,
   SessionRecoveryFeedback,
 } from "@/components/task/ensure-session-error";
-import { TaskMoveErrorBanner } from "@/components/task/task-move-error-banner";
 import { SessionBootstrapRecoveryCard } from "@/components/task/chat/session-bootstrap-recovery-card";
-import type { UseEnsureTaskSessionResult } from "@/hooks/domains/session/use-ensure-task-session";
 import type { useSessionResumption } from "@/hooks/domains/session/use-session-resumption";
 import type { TaskStatusSummaryActiveError } from "@/lib/types/task-status-summary";
 
@@ -52,28 +49,5 @@ export function TaskPageRecoveryFeedback({
       }
       workspaceId={workspaceId}
     />
-  );
-}
-
-export function TaskPageEntryFeedback({
-  taskMoveError,
-  ensureSession,
-  workspaceId,
-}: {
-  taskMoveError: unknown;
-  ensureSession: UseEnsureTaskSessionResult;
-  workspaceId: string | null;
-}) {
-  return (
-    <>
-      {taskMoveError !== null && <TaskMoveErrorBanner error={taskMoveError} />}
-      {ensureSession.status === "error" && (
-        <EnsureSessionErrorBanner
-          error={ensureSession.error}
-          onRetry={ensureSession.retry}
-          workspaceId={workspaceId}
-        />
-      )}
-    </>
   );
 }
