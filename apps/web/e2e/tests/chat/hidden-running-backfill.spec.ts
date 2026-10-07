@@ -74,9 +74,17 @@ test.describe("running message backfill visibility", () => {
     await setDocumentVisibility(testPage, "visible");
     await expect
       .poll(() => sentMessageListCount(capture.frames, sessionId), {
+        timeout: 5_000,
+        message: "foreground refresh did not run after the document became visible",
+      })
+      .toBeGreaterThan(hiddenBaseline);
+    const foregroundBaseline = sentMessageListCount(capture.frames, sessionId);
+    await expect
+      .poll(() => sentMessageListCount(capture.frames, sessionId), {
         timeout: 15_000,
         message: "running refresh did not resume after the document became visible",
       })
-      .toBeGreaterThan(hiddenBaseline);
+      .toBeGreaterThan(foregroundBaseline);
+    expect((await apiClient.listTaskSessions(task.id)).sessions[0]?.state).toBe("RUNNING");
   });
 });
