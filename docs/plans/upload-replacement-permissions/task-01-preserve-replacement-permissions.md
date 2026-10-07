@@ -257,3 +257,33 @@ b9b242) actually joined exit0. Scoped fixture lint native41074 actually
 joined exit0. These are collection/lint evidence only, with no browser/backend/build or
 passing Go replay. Normal hooked merge commit/push and physical conflict-free return remain
 pending, followed by separate ROOT hosted and serial merge releases.
+
+
+ROOT accepted the prior hooked main incorporation and physical return at published head
+`c2f9b72b`. Its configured full review covered ten files, and the native Windows writable/read-only
+cases actually ran and passed without skips. Those are historical head-specific results. Original
+observer73592 joined exit2 at its unchanged 90-minute deadline with pending E2E work and no passing
+verdict. ROOT later declared replacement76533 obsolete; it was stopped and joined143, with fresh
+owned groups gone and no hosted workflow cancellation.
+
+ROOT independently proved a second actual conflict against immutable main `330e02a4` and released
+one normal merge solely for that fixture. Resolve the shared fixture to exact incoming blob
+`1140158f5d5920aac805c3432d7c788316318757`: upstream now owns the prevention-setting restoration
+and cleanup fix, superseding our rename-only correction. Preserve all other incoming main blobs.
+Relative to this main, the upload package has nine paths: five Go files, the owning specification
+pair and these two evidence documents. The seven code/test/specification blobs stay exact `c2f9b72b`;
+only these two records receive the authorized incorporation evidence updates. Bounded static
+inspection found the immediate writer and registered API caller unchanged by incoming main.
+
+Validate only the affected file's chromium collection (file argument first), scoped fixture lint,
+actual nine-path documentation coverage and normal merge hooks. No browser/build/full E2E or
+passing Go/PG replay. Publish the new normal merge and return physical resources before any later
+ROOT release of new-head hosted review/CI or serial merge. Old-head approval is not current approval.
+
+
+Current incorporation validation: file-first chromium collection native90220 (5f433f to cac615)
+actually joined exit0 and listed all15 tests in one file. Scoped ESLint native52648 (ae829d to
+6dc452) actually joined exit0. Actual nine-path documentation coverage (b37acf, synchronous
+joined0) is covered with no errors and one bounded work order. These are collection/lint/coverage
+results, not browser, backend-build or full E2E execution. Normal hooks, corrected push, physical
+return and later new-head hosted/serial merge gates remain separate.

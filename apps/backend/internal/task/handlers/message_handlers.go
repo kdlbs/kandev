@@ -1131,6 +1131,7 @@ func (h *MessageHandlers) resolveSessionAfterTurnStart(
 		sessionDTO := dto.FromTaskSession(reloaded)
 		dto.EnrichCancellationPending(&sessionDTO, h.cancellationPending)
 		dto.EnrichParkedProjection(&sessionDTO, h.parkedProjection)
+		h.enrichWorkspaceRecovery(ctx, reloaded, &sessionDTO)
 		return &dto.GetTaskSessionResponse{Session: sessionDTO}, nil
 	}
 	primary, err := h.service.GetPrimarySession(ctx, taskID)
@@ -1149,7 +1150,25 @@ func (h *MessageHandlers) resolveSessionAfterTurnStart(
 	sessionDTO := dto.FromTaskSession(primary)
 	dto.EnrichCancellationPending(&sessionDTO, h.cancellationPending)
 	dto.EnrichParkedProjection(&sessionDTO, h.parkedProjection)
+	h.enrichWorkspaceRecovery(ctx, primary, &sessionDTO)
 	return &dto.GetTaskSessionResponse{Session: sessionDTO}, nil
+}
+
+func (h *MessageHandlers) enrichWorkspaceRecovery(
+	ctx context.Context,
+	session *models.TaskSession,
+	projection *dto.TaskSessionDTO,
+) {
+	if h == nil || h.service == nil || session == nil || session.TaskEnvironmentID == "" {
+		return
+	}
+	operation, runnerLive, err := h.service.WorkspaceRecoveryProjection(ctx, session.TaskEnvironmentID)
+	if err != nil {
+		h.logger.Warn("get task session workspace recovery projection failed",
+			zap.String("session_id", session.ID), zap.Error(err))
+		return
+	}
+	dto.EnrichWorkspaceRecovery(projection, operation, runnerLive)
 }
 
 func (h *MessageHandlers) errorForBlockedMessageSession(msg *ws.Message, sessionID string, state models.TaskSessionState) *ws.Message {
@@ -1308,6 +1327,7 @@ func (h *MessageHandlers) checkSessionStateForMessage(ctx context.Context, msg *
 	sessionDTO := dto.FromTaskSession(session)
 	dto.EnrichCancellationPending(&sessionDTO, h.cancellationPending)
 	dto.EnrichParkedProjection(&sessionDTO, h.parkedProjection)
+	h.enrichWorkspaceRecovery(ctx, session, &sessionDTO)
 	resp := &dto.GetTaskSessionResponse{Session: sessionDTO}
 	// A steer-eligible generating RUNNING session must pass this first guard:
 	// otherwise the busy error is returned here, before the steer branch in

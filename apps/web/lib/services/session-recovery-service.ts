@@ -2,6 +2,7 @@ import { buildRestoreWorkspaceRequest } from "./session-launch-helpers";
 import { launchSession, type LaunchSessionResponse } from "./session-launch-service";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import { WebSocketRequestError, type WebSocketRequestErrorDetails } from "@/lib/ws/client";
+import type { WorkspaceRecoveryProjection } from "@/lib/types/http";
 
 export type SessionRecoveryAction =
   | "resume"
@@ -45,6 +46,9 @@ export type SessionRecoveryGuardDetails = WebSocketRequestErrorDetails & {
 };
 
 type RecoveryResponse = { success?: boolean; error?: string };
+type WorkspaceRecoveryStatusResponse = {
+  workspace_recovery?: WorkspaceRecoveryProjection | null;
+};
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
@@ -149,6 +153,22 @@ export async function requestSessionRecover(options: SessionRecoveryRequest): Pr
   );
   const failure = responseFailure(response, failureMessage);
   if (failure) throw failure;
+}
+
+/** Read current recovery state without reconstructing or inspecting the workspace. */
+export async function getWorkspaceRecoveryStatus(
+  taskId: string,
+  sessionId: string,
+  failureMessage: string,
+): Promise<WorkspaceRecoveryProjection | null> {
+  const client = getWebSocketClient();
+  if (!client) throw new Error(failureMessage);
+  const response = await client.request<WorkspaceRecoveryStatusResponse>(
+    "session.workspace_recovery.get",
+    { task_id: taskId, session_id: sessionId },
+    10_000,
+  );
+  return response.workspace_recovery ?? null;
 }
 
 /** Restore the existing task workspace without starting the provider. */

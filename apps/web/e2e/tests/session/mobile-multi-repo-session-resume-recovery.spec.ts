@@ -13,16 +13,22 @@ import {
 } from "../../helpers/session-resume-recovery";
 import {
   assertRelocatedSlot,
-  assertSnapshotContent,
+  assertPrivateRecoveryArtifactContent,
   capturedSessionLaunchResponses,
   captureSessionLaunchMessages,
   cleanupMultiRepoManagedCloneRelocationFixture,
+  cleanupManagedCloneRecoveryGitOperationGate,
+  installManagedCloneRecoveryGitOperationGate,
+  readWorkspaceRecoveryOperation,
+  readWorkspaceRecoveryProjectionFromStore,
   readSessionErrorStamp,
+  releaseManagedCloneRecoveryGitOperationGate,
   seedMultiRepoManagedCloneRelocationFixture,
   stopAndSeedLegacySessionFailure,
+  waitForMultiRepoRecoveryReady,
+  type ManagedCloneRecoveryGitOperationGate,
   type MultiRepoRelocationFixture,
 } from "../../helpers/multi-repo-managed-clone-recovery";
-import { waitForSessionState } from "../../helpers/session";
 
 type MultiRepoFixture = MultiRepoRelocationFixture;
 type BackendRuntime = { tmpDir: string };
@@ -135,34 +141,21 @@ async function assertPhoneRelocationCancelLeavesSourcesUntouched(
   await assertNoDocumentHorizontalOverflow(page, "multi-repository relocation confirmation");
 }
 
-async function confirmPhoneRelocation(
-  page: Page,
-  fixture: MultiRepoFixture,
-  recovery: SessionRecoveryCapture,
-) {
+async function confirmPhoneRelocation(page: Page, recovery: SessionRecoveryCapture) {
   await page.getByTestId("managed-clone-relocate-button").tap();
   const confirm = page.getByTestId("managed-clone-relocation-confirm");
   await expect(confirm).toBeInViewport();
   expect((await confirm.boundingBox())!.height).toBeGreaterThanOrEqual(44);
   await confirm.tap();
   await expect.poll(() => recovery.requestCounts.relocate_and_resume ?? 0).toBe(1);
-  await expect
-    .poll(
-      () =>
-        capturedSessionRecoveryResponseType(
-          recovery.requestIds,
-          recovery.responses,
-          "relocate_and_resume",
-        ),
-      { timeout: 30_000, message: "Waiting for both phone repository relocations to finish" },
-    )
-    .toBeTruthy();
-  expect(recovery.requestCounts.resume ?? 0).toBe(0);
-  return capturedSessionRecoveryResponse(
-    recovery.requestIds,
-    recovery.responses,
-    "relocate_and_resume",
+  await expect(page.getByTestId("workspace-recovery-agent-pending")).toBeVisible({
+    timeout: 60_000,
+  });
+  await expect(page.getByTestId("workspace-recovery-progress")).toHaveAttribute(
+    "data-recovery-phase",
+    "resuming",
   );
+  expect(recovery.requestCounts.resume ?? 0).toBe(0);
 }
 
 async function assertPhoneRelocatedSlots(
@@ -197,7 +190,7 @@ async function assertPhoneRelocatedSlots(
     expect(relocated?.worktree_path).not.toBe(slot.originalPath);
     expect(relocated?.worktree_id).not.toBe(slot.originalWorktreeId);
     expect(relocated?.worktree_branch).toBe(slot.originalBranch);
-    assertSnapshotContent(slot);
+    assertPrivateRecoveryArtifactContent(slot, backend.tmpDir, fixture.environment.id);
     expect(fs.existsSync(slot.originalPath)).toBe(false);
     assertRelocatedSlot(slot, relocated!.worktree_path!, backend.tmpDir);
   }
@@ -209,12 +202,17 @@ async function assertPhoneRelocatedSlots(
 
 test.describe("mobile: multi-repository managed clone recovery", () => {
   let fixture: MultiRepoRelocationFixture | null = null;
+  let phaseGate: ManagedCloneRecoveryGitOperationGate | null = null;
 
   test.describe.configure({ retries: 0, timeout: 360_000 });
   test.afterEach(async ({ apiClient, seedData }) => {
-    if (!fixture) return;
-    await cleanupMultiRepoManagedCloneRelocationFixture(apiClient, seedData, fixture);
-    fixture = null;
+    if (phaseGate) releaseManagedCloneRecoveryGitOperationGate(phaseGate);
+    if (fixture) {
+      await cleanupMultiRepoManagedCloneRelocationFixture(apiClient, seedData, fixture);
+      fixture = null;
+    }
+    if (phaseGate) cleanupManagedCloneRecoveryGitOperationGate(phaseGate);
+    phaseGate = null;
   });
 
   test("recovers a legacy multi-repository workspace through Restore first", async ({
@@ -264,16 +262,31 @@ test.describe("mobile: multi-repository managed clone recovery", () => {
       activeFixture,
       recovery,
     );
-    const relocationResponse = await confirmPhoneRelocation(testPage, activeFixture, recovery);
-    await assertPhoneRelocatedSlots(apiClient, activeFixture, backend, relocationResponse);
-
-    await waitForSessionState(apiClient, {
-      taskId: activeFixture.task.id,
+    await confirmPhoneRelocation(testPage, recovery);
+    await waitForMultiRepoRecoveryReady(
+      apiClient,
+      backend.tmpDir,
+      activeFixture.task.id,
       sessionId,
-      expectedState: "WAITING_FOR_INPUT",
-      message: "Waiting for the same phone session to resume",
-      timeout: 30_000,
-    });
+      activeFixture.environment.id,
+    );
+    await expect
+      .poll(
+        () =>
+          capturedSessionRecoveryResponseType(
+            recovery.requestIds,
+            recovery.responses,
+            "relocate_and_resume",
+          ),
+        { timeout: 120_000, message: "Waiting for the resumed phone session response" },
+      )
+      .toBeTruthy();
+    const relocationResponse = capturedSessionRecoveryResponse(
+      recovery.requestIds,
+      recovery.responses,
+      "relocate_and_resume",
+    );
+    await assertPhoneRelocatedSlots(apiClient, activeFixture, backend, relocationResponse);
     const responseCount = await countSimpleMockResponses(apiClient, sessionId);
     await activeFixture.session.sendMessageViaButton("/e2e:simple-message");
     await expect
@@ -286,5 +299,165 @@ test.describe("mobile: multi-repository managed clone recovery", () => {
       testPage,
       "mobile multi-repository managed clone recovery",
     );
+  });
+
+  test("keeps an active migration visible after reconnect and labels Files paths", async ({
+    testPage,
+    apiClient,
+    seedData,
+    backend,
+  }, testInfo) => {
+    test.setTimeout(360_000);
+    const launch = captureSessionLaunchMessages(testPage);
+    const recovery = captureSessionRecoveryMessages(testPage);
+    fixture = await seedMultiRepoManagedCloneRelocationFixture(
+      testPage,
+      apiClient,
+      seedData,
+      backend,
+      `Mobile reconnect multi-repository recovery ${Date.now()}`,
+    );
+    const sessionId = fixture.task.session_id!;
+    const beforeEnvironment = fixture.environment;
+    await stopAndSeedLegacySessionFailure(
+      apiClient,
+      backend.tmpDir,
+      fixture,
+      "mobile e2e reconnect multi-repository recovery",
+    );
+    await testPage.reload();
+    await fixture.session.waitForLoad();
+    await restoreWorkspaceAndReadRelocationStamp(testPage, fixture, backend, launch, recovery);
+
+    phaseGate = installManagedCloneRecoveryGitOperationGate(backend.tmpDir);
+    await testPage.getByTestId("managed-clone-relocate-button").tap();
+    const confirmation = testPage.getByTestId("managed-clone-relocation-confirmation");
+    await expect(confirmation).toBeVisible();
+    await expectConfirmationWithinPhoneViewport(testPage, confirmation);
+    const confirm = testPage.getByTestId("managed-clone-relocation-confirm");
+    expect((await confirm.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+    await confirm.tap();
+    await expect
+      .poll(() => fs.existsSync(phaseGate!.startedFile), {
+        timeout: 30_000,
+        message: "Waiting for mobile original-checkout retention",
+      })
+      .toBe(true);
+    await expect(testPage.getByTestId("workspace-recovery-progress")).toHaveAttribute(
+      "data-recovery-phase",
+      "publishing",
+    );
+    expect(readWorkspaceRecoveryOperation(backend.tmpDir, beforeEnvironment.id)).toMatchObject({
+      state: "running",
+      phase: "publishing",
+      workspace_complete: false,
+      agent_ready: false,
+    });
+    await testInfo.attach("phone-workspace-recovery-progress", {
+      body: await testPage.screenshot(),
+      contentType: "image/png",
+    });
+    await assertNoDocumentHorizontalOverflow(testPage, "mobile recovery progress");
+
+    await testPage.reload();
+    await fixture.session.waitForLoad();
+    expect(await readWorkspaceRecoveryProjectionFromStore(testPage, sessionId)).toMatchObject({
+      id: sessionId,
+      task_id: fixture.task.id,
+      task_environment_id: beforeEnvironment.id,
+      workspace_recovery: {
+        state: "running",
+        phase: "publishing",
+        workspace_complete: false,
+        agent_ready: false,
+        runner_live: true,
+      },
+    });
+    const { session: resumedSession } = await apiClient.getTaskSession(sessionId);
+    expect(resumedSession.workspace_recovery).toMatchObject({
+      state: "running",
+      phase: "publishing",
+      workspace_complete: false,
+      agent_ready: false,
+      runner_live: true,
+    });
+    const progress = testPage.getByTestId("workspace-recovery-progress");
+    await expect(progress).toBeVisible({ timeout: 30_000 });
+    await expect(progress).toHaveAttribute("data-recovery-phase", "publishing");
+    await expect(testPage.getByTestId("managed-clone-relocate-button")).toBeHidden();
+    expect(recovery.requestCounts.relocate_and_resume).toBe(1);
+    await assertNoDocumentHorizontalOverflow(testPage, "reconnected mobile recovery");
+
+    releaseManagedCloneRecoveryGitOperationGate(phaseGate);
+    await waitForMultiRepoRecoveryReady(
+      apiClient,
+      backend.tmpDir,
+      fixture.task.id,
+      sessionId,
+      beforeEnvironment.id,
+    );
+    let afterEnvironment: Awaited<ReturnType<ApiClient["getTaskEnvironment"]>> = null;
+    await expect
+      .poll(
+        async () => {
+          afterEnvironment = await apiClient.getTaskEnvironment(fixture!.task.id);
+          return afterEnvironment?.repos?.filter((repository) =>
+            fixture!.slots.some(
+              (slot) =>
+                slot.repositoryId === repository.repository_id &&
+                repository.worktree_path !== slot.originalPath,
+            ),
+          ).length;
+        },
+        { timeout: 60_000, message: "Waiting for all phone recovery repository moves" },
+      )
+      .toBe(2);
+    expect(afterEnvironment?.id).toBe(beforeEnvironment.id);
+    for (const slot of fixture.slots) {
+      const relocated = afterEnvironment?.repos?.find(
+        (repository) => repository.repository_id === slot.repositoryId,
+      );
+      expect(relocated?.worktree_path).toBeTruthy();
+      expect(relocated?.worktree_path).not.toBe(slot.originalPath);
+      expect(
+        assertPrivateRecoveryArtifactContent(slot, backend.tmpDir, beforeEnvironment.id),
+      ).toBeTruthy();
+      assertRelocatedSlot(slot, relocated!.worktree_path!, backend.tmpDir);
+    }
+    expect(recovery.requestCounts.relocate_and_resume).toBe(1);
+    await expect(progress).toHaveCount(0, { timeout: 30_000 });
+
+    await testPage.getByRole("button", { name: "Files", exact: true }).tap();
+    const repositoryNames = await Promise.all(
+      fixture.slots.map(
+        async (slot) => (await apiClient.getRepository(slot.repositoryId))?.name ?? "",
+      ),
+    );
+    await expect
+      .poll(async () => {
+        const labels = await testPage.getByTestId("file-tree-node").allTextContents();
+        return repositoryNames.every(
+          (name) => name && labels.some((label) => label.includes(name)),
+        );
+      })
+      .toBe(true);
+
+    const slot = fixture.slots[0];
+    const repositoryName = repositoryNames[0];
+    await testPage.getByRole("button", { name: "Search files", exact: true }).tap();
+    await testPage.getByPlaceholder("Search files...").fill(slot.dirtyFileName);
+    const searchResult = testPage
+      .getByTestId("file-search-result")
+      .filter({ hasText: repositoryName })
+      .first();
+    await expect(searchResult).toBeVisible({ timeout: 15_000 });
+    const canonicalPath = (await searchResult.getAttribute("data-path"))!;
+    const contextAction = fixture.session.fileTreeNodeActions(canonicalPath);
+    expect((await contextAction.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+    await contextAction.tap();
+    await fixture.session.fileTreeTouchAddToChatContextItem().tap();
+    await testPage.getByRole("button", { name: "Chat", exact: true }).tap();
+    await expect(fixture.session.chatContextFile(canonicalPath)).toContainText(repositoryName);
+    await assertNoDocumentHorizontalOverflow(testPage, "mobile repository-labelled Files search");
   });
 });

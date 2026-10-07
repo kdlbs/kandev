@@ -146,6 +146,10 @@ export function SessionRecoveryActionButtons({
     guardDetails,
     recoveryNotice,
     managedCloneRecoveryStamp,
+    workspaceRecovery,
+    workspaceRecoveryRepositoryName,
+    workspaceRecoveryStatusCheck,
+    checkWorkspaceRecoveryStatus,
     providerRestoredResumeEligible,
     handleRecover,
     handleRestore,
@@ -198,6 +202,10 @@ export function SessionRecoveryActionButtons({
         busy={busyAction !== null}
         busyAction={busyAction}
         blocked={Boolean(guardDetails && !guardDetails.retryable)}
+        workspaceRecovery={workspaceRecovery}
+        workspaceRecoveryRepositoryName={workspaceRecoveryRepositoryName}
+        workspaceRecoveryStatusCheck={workspaceRecoveryStatusCheck}
+        onCheckWorkspaceRecoveryStatus={() => void checkWorkspaceRecoveryStatus()}
       />
       {actions
         .filter((action) => !sessionRecoveryAction(action))
