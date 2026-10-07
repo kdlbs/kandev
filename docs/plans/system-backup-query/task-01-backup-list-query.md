@@ -313,17 +313,25 @@ Implementation and PR delivery are complete against the merged QUERY-02 contract
   produced tree `1e0ddac9dabd9c748cf441d14cdd9c2a33a85962`. No rebase was needed.
 - Focused PR: [#4271](https://github.com/kdlbs/kandev/pull/4271),
   `refactor: move backup list to Query`, targeting `main`. The PR is open and
-  linked to Kandev task `24c8f330-1bbd-4cb7-84af-1d86c9b335ca`. The last
+  linked to Kandev task `24c8f330-1bbd-4cb7-84af-1d86c9b335ca`. The previous
   source-and-test head passed exact-head CI: 50 passed, 18 skipped, 0 neutral,
   0 failed, and 0 pending. Five prior review threads are resolved; the current
   review snapshot has no unresolved or hidden threads and no active
-  changes-requested review. This documentation-only delivery-record commit
-  requires a final PR-head CI refresh, which will be recorded in the Kandev
-  task handoff.
+  changes-requested review. That head and CI snapshot are historical and
+  superseded by the reset-failure review fixup. Record current-head CI and review
+  evidence in the Kandev task handoff after the fixup push.
 - `pnpm --filter @kandev/web exec vitest run ...` with all 14 listed suites:
-  passed, 161 tests. Coverage includes shared consumers, reload/error
+  passed, 162 tests after the reset-failure review fixup. Coverage includes
+  shared consumers, reload/error
   contracts, freshness, identity cleanup, retention attempt correlation,
   create/delete/reset boundaries, permissions, and preserved shell state.
+- The reset-acceptance rejection regression failed before the fix because the
+  pending indicator stayed visible. After the fix, the dialog releases pending
+  state, enables retry controls, and starts a successful retry. A deferred
+  rejection from an obsolete identity cannot clear a newer reset's pending
+  state or display its error.
+- Post-fixup `pnpm --filter @kandev/web run typecheck`,
+  `pnpm --filter @kandev/web run lint`, and `git diff --check`: passed.
 - `pnpm --filter @kandev/web run typecheck`: passed.
 - `pnpm --filter @kandev/web run lint`: passed with zero warnings.
 - Regression for create polling after a deferred old-identity read: passed.

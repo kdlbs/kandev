@@ -237,12 +237,12 @@ export function FactoryResetDialog({ open, onOpenChange }: Props) {
       setJobId(res.job_id);
     } catch (err) {
       if (resetAttempt.current === attempt && backupScope.isCurrentScope(attempt.scope)) {
-        resetAttempt.current = null;
         setRequestError(err instanceof Error ? err.message : t("system:factoryResetRequestFailed"));
       }
     } finally {
       if (resetAttempt.current === attempt && backupScope.isCurrentScope(attempt.scope)) {
         setRequestPending(false);
+        if (attempt.jobId === null) resetAttempt.current = null;
       }
     }
   };

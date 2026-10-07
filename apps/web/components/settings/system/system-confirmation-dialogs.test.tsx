@@ -53,6 +53,9 @@ const AUTH = {
 };
 const FACTORY_RESET_INPUT_TEST_ID = "system-factory-reset-input";
 const FACTORY_RESET_CONFIRM_TEST_ID = "system-factory-reset-confirm";
+const FACTORY_RESET_PENDING_TEST_ID = "system-factory-reset-pending";
+const FACTORY_RESET_ERROR_TEST_ID = "system-factory-reset-error";
+const FACTORY_RESET_TOKEN = "RESET";
 let currentQueryClient: QueryClient | undefined;
 let currentStore: StoreApi<AppState> | undefined;
 let observeBackups = false;
@@ -151,7 +154,7 @@ describe("system type-to-confirm dialogs", () => {
     fireEvent.change(input, { target: { value: "reset" } });
     expect(confirm.disabled).toBe(true);
 
-    fireEvent.change(input, { target: { value: "RESET" } });
+    fireEvent.change(input, { target: { value: FACTORY_RESET_TOKEN } });
     expect(confirm.disabled).toBe(false);
   });
 
@@ -203,11 +206,11 @@ describe("factory reset backup-list refresh", () => {
       systemApiMocks.fetchBackups.mockClear();
 
       fireEvent.change(screen.getByTestId(FACTORY_RESET_INPUT_TEST_ID), {
-        target: { value: "RESET" },
+        target: { value: FACTORY_RESET_TOKEN },
       });
       fireEvent.click(screen.getByTestId(FACTORY_RESET_CONFIRM_TEST_ID));
       await waitFor(() => expect(systemApiMocks.resetDatabase).toHaveBeenCalledOnce());
-      await waitFor(() => expect(screen.getByTestId("system-factory-reset-pending")).toBeTruthy());
+      await waitFor(() => expect(screen.getByTestId(FACTORY_RESET_PENDING_TEST_ID)).toBeTruthy());
 
       restoreDialogTestState.job = { id: "reset-job", state };
       view.rerender(
@@ -230,25 +233,102 @@ describe("factory reset backup-list refresh", () => {
       expect(systemApiMocks.fetchBackups).toHaveBeenCalledOnce();
       if (state === "succeeded")
         expect(screen.getByTestId("system-factory-reset-close")).toBeTruthy();
-      else expect(screen.getByTestId("system-factory-reset-error")).toBeTruthy();
+      else expect(screen.getByTestId(FACTORY_RESET_ERROR_TEST_ID)).toBeTruthy();
     },
   );
 
-  it("does not refresh after reset acceptance fails", async () => {
+  it("clears pending and allows retry after reset acceptance fails", async () => {
     observeBackups = true;
     systemApiMocks.fetchBackups.mockResolvedValue([]);
-    systemApiMocks.resetDatabase.mockRejectedValue(new Error("request failed"));
+    systemApiMocks.resetDatabase
+      .mockRejectedValueOnce(new Error("request failed"))
+      .mockResolvedValueOnce({ job_id: "retry-reset-job" });
     renderFactoryReset();
     await waitFor(() => expect(systemApiMocks.fetchBackups).toHaveBeenCalledOnce());
     systemApiMocks.fetchBackups.mockClear();
+    const input = screen.getByTestId(FACTORY_RESET_INPUT_TEST_ID) as HTMLInputElement;
+    const confirm = screen.getByTestId(FACTORY_RESET_CONFIRM_TEST_ID) as HTMLButtonElement;
+    const cancel = screen.getByTestId("system-factory-reset-cancel") as HTMLButtonElement;
+    fireEvent.change(input, {
+      target: { value: FACTORY_RESET_TOKEN },
+    });
+    fireEvent.click(confirm);
+    await waitFor(() =>
+      expect(screen.getByTestId(FACTORY_RESET_ERROR_TEST_ID).textContent).toBe("request failed"),
+    );
+    expect(screen.queryByTestId(FACTORY_RESET_PENDING_TEST_ID)).toBeNull();
+    expect(input.disabled).toBe(false);
+    expect(confirm.disabled).toBe(false);
+    expect(cancel.disabled).toBe(false);
+
+    fireEvent.click(confirm);
+    await waitFor(() => expect(systemApiMocks.resetDatabase).toHaveBeenCalledTimes(2));
+    expect(systemApiMocks.resetDatabase).toHaveBeenNthCalledWith(2, FACTORY_RESET_TOKEN);
+    expect(systemApiMocks.fetchBackups).not.toHaveBeenCalled();
+  });
+});
+
+describe("factory reset rejection fencing", () => {
+  it("keeps a newer reset pending when an older identity's acceptance rejects", async () => {
+    observeBackups = true;
+    systemApiMocks.fetchBackups.mockResolvedValue([]);
+    let rejectOldAcceptance!: (reason?: unknown) => void;
+    const oldAcceptance = new Promise<{ job_id: string }>((_, reject) => {
+      rejectOldAcceptance = reject;
+    });
+    const newAcceptance = deferred<{ job_id: string }>();
+    systemApiMocks.resetDatabase
+      .mockReturnValueOnce(oldAcceptance)
+      .mockReturnValueOnce(newAcceptance.promise);
+    const view = renderFactoryReset();
+    await waitFor(() => expect(systemApiMocks.fetchBackups).toHaveBeenCalledOnce());
+
     fireEvent.change(screen.getByTestId(FACTORY_RESET_INPUT_TEST_ID), {
-      target: { value: "RESET" },
+      target: { value: FACTORY_RESET_TOKEN },
     });
     fireEvent.click(screen.getByTestId(FACTORY_RESET_CONFIRM_TEST_ID));
-    await waitFor(() =>
-      expect(screen.getByTestId("system-factory-reset-error").textContent).toBe("request failed"),
+    await waitFor(() => expect(systemApiMocks.resetDatabase).toHaveBeenCalledOnce());
+
+    act(() =>
+      currentStore?.getState().setAuthState({ ...AUTH, user: { ...AUTH.user, id: "user-2" } }),
     );
-    expect(systemApiMocks.fetchBackups).not.toHaveBeenCalled();
+    await waitFor(() => expect(systemApiMocks.fetchBackups).toHaveBeenCalledTimes(2));
+
+    fireEvent.change(screen.getByTestId(FACTORY_RESET_INPUT_TEST_ID), {
+      target: { value: FACTORY_RESET_TOKEN },
+    });
+    fireEvent.click(screen.getByTestId(FACTORY_RESET_CONFIRM_TEST_ID));
+    await waitFor(() => expect(systemApiMocks.resetDatabase).toHaveBeenCalledTimes(2));
+    expect(screen.getByTestId(FACTORY_RESET_PENDING_TEST_ID)).toBeTruthy();
+
+    await act(async () => {
+      rejectOldAcceptance(new Error("obsolete reset request failed"));
+    });
+
+    expect(screen.getByTestId(FACTORY_RESET_PENDING_TEST_ID)).toBeTruthy();
+    expect(screen.queryByTestId(FACTORY_RESET_ERROR_TEST_ID)).toBeNull();
+    expect((screen.getByTestId(FACTORY_RESET_INPUT_TEST_ID) as HTMLInputElement).disabled).toBe(
+      true,
+    );
+    expect((screen.getByTestId(FACTORY_RESET_CONFIRM_TEST_ID) as HTMLButtonElement).disabled).toBe(
+      true,
+    );
+    expect((screen.getByTestId("system-factory-reset-cancel") as HTMLButtonElement).disabled).toBe(
+      true,
+    );
+
+    await act(async () => {
+      newAcceptance.resolve({ job_id: "new-reset-job" });
+    });
+    restoreDialogTestState.job = { id: "new-reset-job", state: "succeeded" };
+    view.rerender(
+      createElement(
+        FactoryResetHarness,
+        null,
+        createElement(FactoryResetDialog, { open: true, onOpenChange: vi.fn() }),
+      ),
+    );
+    await waitFor(() => expect(screen.getByTestId("system-factory-reset-close")).toBeTruthy());
   });
 });
 
@@ -262,7 +342,7 @@ describe("factory reset identity fencing", () => {
     await waitFor(() => expect(systemApiMocks.fetchBackups).toHaveBeenCalledOnce());
 
     fireEvent.change(screen.getByTestId(FACTORY_RESET_INPUT_TEST_ID), {
-      target: { value: "RESET" },
+      target: { value: FACTORY_RESET_TOKEN },
     });
     fireEvent.click(screen.getByTestId(FACTORY_RESET_CONFIRM_TEST_ID));
     await waitFor(() => expect(systemApiMocks.resetDatabase).toHaveBeenCalledOnce());
@@ -276,8 +356,8 @@ describe("factory reset identity fencing", () => {
     });
 
     expect(systemApiMocks.fetchBackups).toHaveBeenCalledTimes(2);
-    expect(screen.queryByTestId("system-factory-reset-pending")).toBeNull();
-    expect(screen.queryByTestId("system-factory-reset-error")).toBeNull();
+    expect(screen.queryByTestId(FACTORY_RESET_PENDING_TEST_ID)).toBeNull();
+    expect(screen.queryByTestId(FACTORY_RESET_ERROR_TEST_ID)).toBeNull();
   });
 
   it("does not let an old reset job invalidate the backup list after auth changes", async () => {
@@ -288,10 +368,10 @@ describe("factory reset identity fencing", () => {
     await waitFor(() => expect(systemApiMocks.fetchBackups).toHaveBeenCalledOnce());
     systemApiMocks.fetchBackups.mockClear();
     fireEvent.change(screen.getByTestId(FACTORY_RESET_INPUT_TEST_ID), {
-      target: { value: "RESET" },
+      target: { value: FACTORY_RESET_TOKEN },
     });
     fireEvent.click(screen.getByTestId(FACTORY_RESET_CONFIRM_TEST_ID));
-    await waitFor(() => expect(screen.getByTestId("system-factory-reset-pending")).toBeTruthy());
+    await waitFor(() => expect(screen.getByTestId(FACTORY_RESET_PENDING_TEST_ID)).toBeTruthy());
 
     act(() =>
       currentStore?.getState().setAuthState({ ...AUTH, user: { ...AUTH.user, id: "user-2" } }),
@@ -368,10 +448,14 @@ describe("system type-to-confirm dialogs under the pseudo-locale", () => {
   it("leaves only the RESET token unaccented in the factory-reset dialog", () => {
     renderFactoryReset();
     // `<data-dir>/backups/` is a path placeholder and stays a value.
-    expect(unlocalizedText().sort()).toEqual(["<data-dir>/backups/", UI_PACKAGE_CLOSE, "RESET"]);
+    expect(unlocalizedText().sort()).toEqual([
+      "<data-dir>/backups/",
+      UI_PACKAGE_CLOSE,
+      FACTORY_RESET_TOKEN,
+    ]);
     // Still typeable, and still announced, under a non-English locale.
     expect(screen.getByTestId(FACTORY_RESET_INPUT_TEST_ID).getAttribute("aria-label")).toContain(
-      "RESET",
+      FACTORY_RESET_TOKEN,
     );
   });
 
