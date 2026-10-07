@@ -1,23 +1,17 @@
 ---
 id: coordinator-list-publication-design
-title: Coordinator settings list read publication
+title: Coordinator settings list read publication design
 status: draft
 system: coordinator
 owners:
   - kandev
 created: 2026-10-06
-last_updated: 2026-10-07
+last_updated: 2026-10-06
 requirements:
   - REQ-COORDINATOR-COORDINATORS-004
 ---
 
-# Coordinator settings list read publication
-
-## Requirement mapping
-
-| Requirement | Design section |
-| --- | --- |
-| `REQ-COORDINATOR-COORDINATORS-004` | [Settings list read publication](#settings-list-read-publication) |
+# Coordinator settings list read publication System Design
 
 ## Settings list read publication
 
@@ -76,4 +70,3 @@ navigation or touch behavior changes. Targeted hook/component tests satisfy
 the mobile-parity state-only exception; browser/build/E2E expansion requires
 ROOT's causal-scope decision. Delivery is tracked by the
 [list publication plan](../../../plans/coordinator-list-publication/plan.md).
-

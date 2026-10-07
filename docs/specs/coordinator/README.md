@@ -111,6 +111,3 @@ The system is new and has no legacy sources.
 - [Workspace coordinator implementation plan](../../plans/workspace-coordinator/plan.md)
 - [Coordinator phase 2, a person approves everything](../../decisions/2026-09-29-coordinator-phase-2-control.md)
 - [Coordinator phase 2 implementation plan](../../plans/workspace-coordinator-p2/plan.md)
-
-The [settings list publication design](system-design/list-publication.md) defines
-the request ownership and publication rules for coordinator settings reads.
