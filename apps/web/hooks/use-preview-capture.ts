@@ -62,6 +62,15 @@ type InspectorEventOptions = {
   captureScreenshot: (region: PreviewScreenshotRegion) => void;
 };
 
+function applyCaptureModeAcknowledgement(
+  mode: PreviewCaptureMode | null,
+  options: InspectorEventOptions,
+) {
+  if (mode !== null && !options.enabled) return;
+  options.setMode(mode);
+  if (mode === null) options.setCandidateLabel(null);
+}
+
 function usePreviewInspectorEvents(options: InspectorEventOptions) {
   useEffect(() => {
     function handleMessage(event: MessageEvent) {
@@ -81,6 +90,9 @@ function usePreviewInspectorEvents(options: InspectorEventOptions) {
           break;
         case "candidate-changed":
           options.setCandidateLabel(message.payload.label);
+          break;
+        case "capture-mode-changed":
+          applyCaptureModeAcknowledgement(message.payload.mode, options);
           break;
         case "capture-completed":
           if (!options.enabled) return;
@@ -356,6 +368,69 @@ function useSavePreviewDraft({
   );
 }
 
+function requestPreviewCaptureMode(
+  iframe: HTMLIFrameElement,
+  mode: PreviewCaptureMode,
+  clearDraft: () => void,
+  setMode: React.Dispatch<React.SetStateAction<PreviewCaptureMode | null>>,
+  setCandidateLabel: React.Dispatch<React.SetStateAction<string | null>>,
+) {
+  clearDraft();
+  setMode(null);
+  setCandidateLabel(null);
+  sendSetPreviewCaptureMode(iframe, mode);
+}
+
+type PreviewCaptureLifecycleOptions = {
+  taskId: string | null | undefined;
+  source: PreviewCaptureSource;
+  iframeRef: React.RefObject<HTMLIFrameElement | null>;
+  enabled: boolean;
+  draftState: ReturnType<typeof usePreviewDraftState>;
+  projectMarkers: () => void;
+  setMode: React.Dispatch<React.SetStateAction<PreviewCaptureMode | null>>;
+  setCandidateLabel: React.Dispatch<React.SetStateAction<string | null>>;
+};
+
+function usePreviewCaptureLifecycle({
+  taskId,
+  source,
+  iframeRef,
+  enabled,
+  draftState,
+  projectMarkers,
+  setMode,
+  setCandidateLabel,
+}: PreviewCaptureLifecycleOptions) {
+  useEffect(projectMarkers, [projectMarkers]);
+
+  useEffect(() => {
+    if (enabled) return;
+    draftState.clearForCapture();
+    setMode(null);
+    setCandidateLabel(null);
+    setPreviewCaptureMode(iframeRef, null);
+  }, [draftState.clearForCapture, enabled, iframeRef, setCandidateLabel, setMode]);
+
+  useEffect(() => {
+    draftState.clearForCapture();
+  }, [
+    draftState.clearForCapture,
+    taskId,
+    source.kind,
+    source.label,
+    source.path,
+    source.sessionId,
+  ]);
+}
+
+function setPreviewCaptureMode(
+  iframeRef: React.RefObject<HTMLIFrameElement | null>,
+  mode: PreviewCaptureMode | null,
+) {
+  if (iframeRef.current) sendSetPreviewCaptureMode(iframeRef.current, mode);
+}
+
 /** Connects one preview iframe to the task-owned pending feedback collection. */
 export function usePreviewCapture({
   taskId,
@@ -380,28 +455,16 @@ export function usePreviewCapture({
     if (iframeRef.current) sendProjectPreviewMarkers(iframeRef.current, markers);
   }, [iframeRef, markers]);
 
-  useEffect(() => {
-    projectMarkers();
-  }, [projectMarkers]);
-
-  useEffect(() => {
-    if (enabled) return;
-    draftState.clearForCapture();
-    setMode(null);
-    setCandidateLabel(null);
-    if (iframeRef.current) sendSetPreviewCaptureMode(iframeRef.current, null);
-  }, [draftState.clearForCapture, enabled, iframeRef]);
-
-  useEffect(() => {
-    draftState.clearForCapture();
-  }, [
-    draftState.clearForCapture,
+  usePreviewCaptureLifecycle({
     taskId,
-    source.kind,
-    source.label,
-    source.path,
-    source.sessionId,
-  ]);
+    source,
+    iframeRef,
+    enabled,
+    draftState,
+    projectMarkers,
+    setMode,
+    setCandidateLabel,
+  });
 
   usePreviewInspectorEvents({
     iframeRef,
@@ -421,9 +484,13 @@ export function usePreviewCapture({
   const startCapture = useCallback(
     (nextMode: PreviewCaptureMode) => {
       if (!enabled || !iframeRef.current) return;
-      draftState.clearForCapture();
-      setMode(nextMode);
-      sendSetPreviewCaptureMode(iframeRef.current, nextMode);
+      requestPreviewCaptureMode(
+        iframeRef.current,
+        nextMode,
+        draftState.clearForCapture,
+        setMode,
+        setCandidateLabel,
+      );
     },
     [draftState, enabled, iframeRef],
   );

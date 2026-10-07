@@ -171,14 +171,29 @@ test.describe("HTML preview", () => {
     await expect(frame.locator("#value")).toHaveText("1");
 
     const firstSrc = await previewIframe.getAttribute("src");
+    const refreshResponse = testPage.waitForResponse(
+      (response) =>
+        response.request().method() === "POST" &&
+        new URL(response.url()).pathname.endsWith("/html-previews"),
+      { timeout: 15_000 },
+    );
     await preview.getByRole("button", { name: "Refresh HTML preview" }).click();
+    const response = await refreshResponse;
+    expect(response.ok()).toBe(true);
+    const refreshed = (await response.json()) as { version: number };
+    expect(refreshed.version).toBe(2);
+    await expect(previewIframe).toHaveAttribute(
+      "src",
+      new RegExp(`[?&]v=${refreshed.version}(?:&|$)`),
+      { timeout: 15_000 },
+    );
     await expect(frame.locator("#native-status")).toHaveText(
       "api:available | image:loaded | path:entry",
       { timeout: 15_000 },
     );
     const refreshedSrc = await previewIframe.getAttribute("src");
     expect(refreshedSrc).not.toBe(firstSrc);
-    expect(refreshedSrc).toContain("v=2");
+    expect(refreshedSrc).toContain(`v=${refreshed.version}`);
 
     const secondHtml = nativePreviewHtml(assetDirectory, fileName, "Republished native preview");
     await preview.getByRole("button", { name: "Show code" }).click();

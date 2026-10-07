@@ -132,6 +132,24 @@ beforeEach(() => {
 });
 
 describe("usePreviewCapture text", () => {
+  it("reports capture mode only after the preview inspector confirms it", () => {
+    const { iframe, result } = setup();
+
+    act(() => result.current.startCapture("text"));
+    expect(result.current.mode).toBeNull();
+    expect(bridge.sendSetPreviewCaptureMode).toHaveBeenCalledWith(iframe, "text");
+
+    act(() =>
+      dispatch(iframe.contentWindow, {
+        source: INSPECTOR_SOURCE,
+        version: INSPECTOR_PROTOCOL_VERSION,
+        type: "capture-mode-changed",
+        payload: { mode: "text" },
+      }),
+    );
+    expect(result.current.mode).toBe("text");
+  });
+
   it("keeps exact generated text evidence in a recoverable draft and persists it with a comment", async () => {
     const { iframe, result } = setup();
 

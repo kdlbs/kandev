@@ -94,6 +94,13 @@ export async function openBrowserPreview(
 }
 
 export async function chooseCapture(page: Page, name: string): Promise<void> {
+  const captureMode = {
+    "Select text": "text",
+    "Select element": "element",
+    "Select screenshot region": "screenshot",
+  }[name as "Select text" | "Select element" | "Select screenshot region"];
+  if (!captureMode) throw new Error(`unsupported preview capture choice: ${name}`);
+
   const popover = page.getByTestId("preview-feedback-popover");
   if (!(await popover.isVisible())) {
     await page.getByTestId("preview-feedback-trigger").click();
@@ -107,6 +114,10 @@ export async function chooseCapture(page: Page, name: string): Promise<void> {
     throw new Error(`capture choice is outside viewport: ${JSON.stringify({ box, viewport })}`);
   }
   await choice.click();
+  await expect(page.getByTestId("preview-feedback-trigger")).toHaveAttribute(
+    "data-capture-mode",
+    captureMode,
+  );
 }
 
 /** Wait until the iframe has applied screenshot mode before dispatching a drag. */

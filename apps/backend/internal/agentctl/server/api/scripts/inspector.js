@@ -461,7 +461,10 @@
       ? 'crosshair'
       : originalCursor;
     document.documentElement.style.touchAction = mode === 'screenshot' ? 'none' : originalTouchAction;
-    if (!mode) return;
+    if (!mode) {
+      send('capture-mode-changed', { mode: null });
+      return;
+    }
     document.addEventListener('keydown', onCaptureKeyDown, true);
     switch (mode) {
       case 'element':
@@ -484,6 +487,7 @@
       default:
         break;
     }
+    send('capture-mode-changed', { mode: mode });
   }
 
   function clearMarkerNodes() {
