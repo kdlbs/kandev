@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useRouter } from "@/lib/routing/client-router";
 import { linkToTask } from "@/lib/links";
@@ -91,16 +91,32 @@ function AgentProjectRowActions({
   onDelete,
 }: Pick<AgentProjectRowProps, "project" | "mobile" | "onEdit" | "onArchive" | "onDelete">) {
   const { t } = useTranslation();
+  const [open, setOpen] = useState(false);
+  const touchPending = useRef(false);
   return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
+    <DropdownMenu open={open} onOpenChange={setOpen} modal={!mobile}>
+      <DropdownMenuTrigger
+        asChild
+        onPointerDown={(event) => {
+          touchPending.current = event.pointerType === "touch";
+          if (touchPending.current) event.preventDefault();
+        }}
+        onPointerCancel={() => {
+          touchPending.current = false;
+        }}
+        onClick={(event) => {
+          event.stopPropagation();
+          if (!touchPending.current) return;
+          touchPending.current = false;
+          setOpen((value) => !value);
+        }}
+      >
         <Button
           type="button"
           variant="ghost"
           size="icon"
           className={cn("shrink-0", mobile ? "h-11 w-11" : "h-7 w-7")}
           aria-label={t("projects:projectActions", { name: project.name })}
-          onClick={(event) => event.stopPropagation()}
         >
           <IconDots className="h-4 w-4" />
         </Button>

@@ -160,7 +160,9 @@ test("phone navigation manages Agent Projects and opens shared context in coordi
     await assertProjectTouchTarget(menu.getByTestId(`agent-project-open-${projectId}`));
     await assertProjectTouchTarget(menu.getByRole("button", { name: "Projects", exact: true }));
     await projectRow.getByRole("button", { name: `Actions for ${projectName}` }).tap();
-    await testPage.getByRole("menuitem", { name: "Edit project" }).tap();
+    const editProjectMenuItem = testPage.getByRole("menuitem", { name: "Edit project" });
+    await expect(editProjectMenuItem).toBeVisible();
+    await editProjectMenuItem.tap();
     const editForm = testPage.getByTestId("agent-project-form-mobile");
     await editForm.getByTestId("agent-project-name").fill(`${projectName} edited`);
     await testPage.setViewportSize({ width: 844, height: 390 });
