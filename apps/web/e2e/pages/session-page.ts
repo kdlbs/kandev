@@ -1634,7 +1634,12 @@ export class SessionPage {
   /** Open a blank built-in Browser panel from the dockview + menu. */
   async addBrowserPanel(): Promise<void> {
     await this.addPanelButton().click();
-    await this.page.getByRole("menuitem", { name: "Browser", exact: true }).click();
+    const item = this.page.getByRole("menuitem", { name: "Browser", exact: true });
+    await item.click();
+    // Wait for the menu's close autofocus before editing the new panel's URL.
+    // Otherwise that late focus return can send Enter back to the + trigger.
+    await expect(item).toHaveCount(0);
+    await expect(this.addPanelButton()).toBeFocused();
   }
 
   /** "New Session" menu item in the dockview + dropdown. */
