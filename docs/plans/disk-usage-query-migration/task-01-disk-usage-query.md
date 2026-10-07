@@ -177,6 +177,8 @@ not prove implementation coverage.
 - `apps/web/AGENTS.md` (System Query ownership)
 - `apps/web/components/system-disk-usage-query-bridge.tsx`
 - `apps/web/components/system-disk-usage-query-bridge.test.tsx`
+- `apps/web/src/app-error-boundary.test.tsx` (complete the Zustand mock for the
+  disk bridge introduced by this task)
 - `apps/web/hooks/domains/system/system-info-query.ts`
 - `apps/web/hooks/domains/system/disk-usage-query.ts`
 - `apps/web/hooks/domains/system/disk-usage-query.test.ts`

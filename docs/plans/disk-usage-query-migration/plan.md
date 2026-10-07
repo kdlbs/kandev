@@ -156,6 +156,13 @@ Dependencies and implementation evidence:
   ESLint passed after review fixes. Desktop disk-usage E2E passed 5/5; mobile
   Status-card E2E passed 1/1 at 390×844. Both verify refresh POST then GET and
   visible data; mobile arms the initial GET wait before navigation.
+- The PR frontend check exposed an incomplete Zustand store mock in
+  `app-error-boundary.test.tsx`: the disk bridge reads `system.jobs` and
+  subscribes to job changes. The original test failed on the resulting root
+  error screen. The mock now supplies an empty jobs map and unsubscribe
+  function. With `NODE_ENV=production`, the full file passed 8/8; targeted
+  ESLint and full web typecheck passed. This is test-fixture maintenance and
+  does not change product behavior.
 - Architecture lint, docs catalog validation, specification lint and its 36
   tests, PR documentation coverage (`covered`, no errors), and `git diff
   --check` passed.
@@ -172,7 +179,8 @@ PR [#4291](https://github.com/kdlbs/kandev/pull/4291) is open against
 projection. A synthetic merge at that base was conflict-free; 145 focused tests
 and `pnpm run typecheck` passed on the merged tree, so no rebase was needed.
 Required checks and AI reviews continue on the pushed fixup. Keep this task in
-progress and do not merge. Hand off final head/base SHAs, owned files, command
+progress until exact-head checks are terminal and all review threads are
+dispositioned. Do not merge. Hand off final head/base SHAs, owned files, command
 results, request counts, exact-head CI/review status, residual risks, and
 merge-order notes to the parent.
 
