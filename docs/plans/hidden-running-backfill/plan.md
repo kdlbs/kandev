@@ -28,6 +28,7 @@ Context: [kdlbs/kandev#4100](https://github.com/kdlbs/kandev/issues/4100).
 
 ## Verification
 
-`pnpm --filter @kandev/web exec vitest run hooks/domains/session/` from `apps/`.
-No browser test is added: the change has no rendered output, and the hook
-tests drive the real timers with fake time.
+`pnpm --filter @kandev/web exec vitest run hooks/domains/session/` from `apps/`,
+and the `tests/chat/hidden-running-backfill.spec.ts` Playwright spec, which
+counts `message.list` frames for a running session while the page is visible,
+hidden, and visible again.
