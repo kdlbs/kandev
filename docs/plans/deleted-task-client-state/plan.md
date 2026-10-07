@@ -28,4 +28,5 @@ Context: [kdlbs/kandev#4100](https://github.com/kdlbs/kandev/issues/4100).
 ## Verification
 
 `pnpm --filter @kandev/web exec vitest run lib/ws/handlers/
-lib/state/slices/session/remove-task-session.test.ts` from `apps/`.
+lib/state/slices/session/remove-task-session.test.ts` from `apps/`, and the
+`tests/task/deleted-task-client-state.spec.ts` Playwright spec.

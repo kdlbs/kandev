@@ -26,6 +26,7 @@ handler.
 
 - `apps/web/lib/ws/handlers/tasks.ts`
 - `apps/web/lib/ws/handlers/tasks.deleted.test.ts` and its shared helper.
+- `apps/web/e2e/tests/task/deleted-task-client-state.spec.ts`.
 
 ## Out of scope
 
@@ -36,6 +37,8 @@ handler.
 - A handler test with sessions found through all three collection paths shows
   each one removed, and a session of another task untouched.
 - The existing `task.deleted` and session removal suites pass unchanged.
+- In a browser, deleting an opened task removes its session and messages from
+  the store while another opened task keeps its own.
 
 ## Verification
 
@@ -44,9 +47,11 @@ From `apps/`:
 ```bash
 pnpm --filter @kandev/web exec vitest run lib/ws/handlers/ lib/state/slices/session/remove-task-session.test.ts
 pnpm --filter @kandev/web typecheck
+pnpm --dir web e2e:run --host --shards 1 --project chromium tests/task/deleted-task-client-state.spec.ts
 ```
 
 ## Results
 
 The new test failed before the handler change and passes after it. 66 test
-files and 601 tests pass in the affected directories; typecheck passes.
+files and 601 tests pass in the affected directories; typecheck passes. The
+Playwright spec failed with the handler change reverted and passes with it.
