@@ -82,7 +82,7 @@ func startFileSave(ctx context.Context, tracker *WorkspaceTracker, save fileSave
 	requests.Add(1)
 	go func() {
 		defer requests.Done()
-		hash, resolution, err := tracker.ApplyFileDiff(ctx, save.path, save.patch,
+		hash, resolution, err := tracker.ApplyFileDiff(ctx, save.path, save.path, save.patch,
 			fmt.Sprintf("%x", sha256.Sum256([]byte(save.original))), &save.desired)
 		result <- fileSaveResult{hash, resolution, err}
 	}()
@@ -157,7 +157,7 @@ func TestApplyFileDiff_SequentialDistinctFiles(t *testing.T) {
 	dir, tracker := newFileSaveFixture(t)
 	for _, save := range distinctFileSaves() {
 		t.Run(save.path, func(t *testing.T) {
-			hash, resolution, err := tracker.ApplyFileDiff(t.Context(), save.path, save.patch,
+			hash, resolution, err := tracker.ApplyFileDiff(t.Context(), save.path, save.path, save.patch,
 				fmt.Sprintf("%x", sha256.Sum256([]byte(save.original))), &save.desired)
 			assertSavedFile(t, dir, save, fileSaveResult{hash, resolution, err})
 		})
@@ -196,7 +196,7 @@ func TestApplyFileDiff_PatchCleanup(t *testing.T) {
 			case "rejected":
 				patch, desired, wantContent, wantResolution = invalidPatch, nil, save.original, ""
 			}
-			hash, resolution, err := tracker.ApplyFileDiff(t.Context(), save.path, patch,
+			hash, resolution, err := tracker.ApplyFileDiff(t.Context(), save.path, save.path, patch,
 				fmt.Sprintf("%x", sha256.Sum256([]byte(save.original))), desired)
 			if name == "rejected" {
 				if err == nil || hash != "" || resolution != "" {

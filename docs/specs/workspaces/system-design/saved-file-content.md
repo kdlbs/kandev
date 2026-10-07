@@ -11,9 +11,10 @@ requirements:
 
 Workspaces owns saved filesystem content. The repair is bounded to
 `WorkspaceTracker.ApplyFileDiff` in
-`apps/backend/internal/agentctl/server/process/workspace_files.go`.
-No compatible saved-content pair exists in the current Workspaces catalog;
-editor-file-containment covers lexical editor admission, while
+`apps/backend/internal/agentctl/server/process/workspace_files.go`, with immediate
+file-update handler wiring. The existing requirement already covers repository
+selection through the requested-target and no-neighbor criterion (.2); no new
+requirement or path authority is introduced. Editor-file-containment covers lexical editor admission, while
 symlink-identification covers metadata. The
 [UI mutation design](../../ui/system-design/file-editor-mutation-ownership.md)
 continues to own editor reply publication independently.
@@ -27,7 +28,7 @@ framework, API field, persistence model, or runtime flag.
 | Criteria | Design section |
 | --- | --- |
 | `AC-WORKSPACES-SAVED-FILE-CONTENT-001.1` | Request-owned patch, Verification |
-| `AC-WORKSPACES-SAVED-FILE-CONTENT-001.2` | Caller contract, Request-owned patch, Verification |
+| `AC-WORKSPACES-SAVED-FILE-CONTENT-001.2` | Caller contract, Repository save target, Request-owned patch, Verification |
 | `AC-WORKSPACES-SAVED-FILE-CONTENT-001.3` | Compatibility and failure handling |
 | `AC-WORKSPACES-SAVED-FILE-CONTENT-001.4` | Compatibility and failure handling, Verification |
 
@@ -35,7 +36,9 @@ framework, API field, persistence model, or runtime flag.
 
 The registered `POST /api/v1/workspace/file/content` handler
 `Server.handleFileUpdate` forwards `FileUpdateRequest` through `JoinRepoPath`
-to `ApplyFileDiff`, including `original_hash` and `desired_content`. On success
+to `ApplyFileDiff`, including `original_hash` and `desired_content`. The
+repository-target correction also carries the submitted repository-relative
+path separately from that admitted workspace-relative path. On success
 it returns HTTP 200 with `success`, `new_hash`, `resolution`, and the requested
 `path`; errors retain HTTP 400 and the existing failure response.
 
@@ -46,6 +49,54 @@ clears dirtiness when no later typing occurred. These callers need no change.
 The accepted real-Git proof establishes a disk/result defect, and source
 inspection establishes its editor implication. Neither proves a browser flow
 or backend database persistence.
+
+## Repository save target
+
+The admitted path and patch headers currently use different coordinates:
+`JoinRepoPath("beta", "one.txt")` selects `beta/one.txt`, while the patch still
+names `one.txt` and Git executes at the workspace root. A matching root file can
+therefore receive the edit, followed by a success hash read from unchanged beta.
+The merged request-owned patch helper fixes temporary-file isolation only.
+
+Carry an explicit `diffPath` into the internal `WorkspaceTracker.ApplyFileDiff`
+call alongside `reqPath`: the API passes `reqPath=scopedPath` and
+`diffPath=req.Path`.
+Direct tracker consumers with workspace-relative headers pass the same path for
+both. After existing target admission and hash-conflict handling, translate only
+matching submitted file headers from `diffPath` to `filepath.ToSlash(reqPath)`.
+Then run existing symlink resolution, which translates the admitted path to its
+resolved target. All content reads, fallback writes and notifications continue
+using the admitted request identity. Keep Git's working directory and argv.
+
+Reuse the local header-rewrite boundary in `workspace_files.go`. Separate the
+header filename from a tab-delimited suffix, preserving that suffix. Restrict
+translation to file headers, preserving hunk bytes even when deleted/added text
+resembles a header. Retain the existing prefixed symlink-header forms and
+unchanged behavior for unmatched paths. This is coordinate translation for the
+existing single-file operation, not new multi-file patch authorization.
+
+Source inspection of locked `diff` 8.0.3 confirms the editor's real shape:
+`Index:` and separator preamble, unprefixed `--- path\t` / `+++ path\t` headers
+because `generateUnifiedDiff` supplies empty header strings, and three lines of
+context. Both `performSaveFile` and tablet `handleFileSave` send desired content;
+Review's `revertBlock` uses the same formatter and omits desired content. All
+flow through `updateFileContent`, `wsUpdateFileContent`, the agentctl HTTP client
+and the registered handler. Canvas scaffold calls use workspace-relative paths
+and an empty repository. These transport consumers need no contract changes.
+
+The correction and its verification are recorded in the
+[repository-target work order](../../../plans/repository-save-target/task-01-correct-save-target.md).
+Use independently authored real-file process and registered-route tests with
+the genuine formatter shape plus ordinary no-tab headers. Seed the same relative
+filename under root, alpha and beta with matching edited/context lines and
+different distant sentinels. Cover a plain task root and separately initialized
+alpha/beta Git repositories, selecting each repository on fresh fixtures and
+including a root positive control. Assert actual selected and nonselected
+bytes, independent SHA256, applied resolution, HTTP request/response path and
+immediate root-tracker write-event identity. A fallback result cannot prove
+successful patch targeting; include a nil-desired-content consumer control.
+Nested paths, header-like hunk text and scoped symlinks exercise the translation
+itself. Preserve existing cancellation, conflict and private-patch checks.
 
 ## Request-owned patch
 
@@ -84,9 +135,9 @@ Preparation failures return errors after owned cleanup. Git cancellation or
 deadline errors still bypass fallback. Other Git errors retain fallback when
 provided. Post-apply read failure remains failure; this repair adds no rollback.
 
-Same-file races, aliases of one physical target, changes to patch-header target
-authorization, and the separate repository-scoped header-target candidate are
-outside this design. Request isolation does not introduce those guarantees.
+Same-file races, aliases of one physical target and changes to patch-header
+target authorization remain outside this design. Coordinate translation does
+not introduce those guarantees.
 
 ## Verification
 
@@ -138,8 +189,10 @@ Exact selectors, actual results and serial bounds live in the
 
 No frontend, rendered composition, touch, focus, copy, or viewport behavior
 changes; mobile-parity adds no UI preview or browser check to this backend-only
-repair. Existing public docs describe file opening/saving without a temporary
-patch contract. Restoring that behavior changes no documented workflow, option,
+repair. This is not reliance on a frontend state/data exception. Public
+`developer-tools.md`, `sessions-and-review.md`, the root README and screenshot
+catalog describe repository-aware editing and existing saving behavior without
+a patch-coordinate or temporary-file contract. Restoring that behavior changes no documented workflow, option,
 API shape, or terminology. Internal requirements/design/delivery records suffice.
 
 ## Retained-outcome dependency during delivery
