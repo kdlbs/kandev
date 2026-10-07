@@ -392,3 +392,61 @@ Raw failure evidence and the interrupted observer receipts remain under the
 same task-owned receipt directory. Historical completed old-head reviews stay
 historical. Corrected-head HOSTED and MERGE require separate ROOT releases;
 the work order stays in_progress pending actual new-head hosted RUN/PASS.
+
+
+### Shared E2E collection dependency
+
+ROOT proved that the published workspace-settings branch retained the exact
+main1204 fixture blob `69892d488cdb021cb69304d906d3e3b1f65b5e68` for
+`apps/web/e2e/tests/session/provider-interruption-continuation.spec.ts`. Existing
+actual E2E Build run `37601580900`, job `112727237749`, failed manifest
+collection on these identical bytes: duplicate `const session` bindings at
+lines 293/301 in the desktop disabled-continuation try block. Accepted raw
+parser evidence is the causal RED; reproducing that failure would be redundant.
+
+ROOT released only the second binding and its three immediate references to
+`recoverySession`, with resulting blob exactly
+`d9737fa2caaf3733390b822d81ebe5f4b0fca235`. Both navigations, waits, assertions
+and traces remain intact. This repairs a shared validation dependency without
+changing workspace-settings product code or continuation behavior. No sibling
+worktree is read or changed. Validate exactly one affected pinned Playwright
+Chromium `--list` collection (all 15 tests), fixture ESLint max-warnings zero,
+affected documentation/actual 19-path coverage/whitespace and normal applicable
+hooks. No browser, backend build/runtime, full E2E, broad typecheck, install or
+passing Go/PostgreSQL/lint replay is authorized for this lexical correction.
+
+Original corrected-head observer `67235` was deliberately interrupted after
+this release and actually joined terminal chunk `ac00e8`, exit 143/no verdict;
+wrapper group `2225126` and child group `2225130` were freshly empty. The one
+full-review request `6036753119` remains historical to `da6dfe4` until actual
+new-head coverage is inspected; it must not be repeated blindly. Hosted
+workflows were not manually cancelled. The exact external walkthrough model
+failure remains FAILED/verification not_run and was separately accepted by
+ROOT as NONREQUIRED: it is excluded from the six required contexts. This sole
+named exception permits no other failed-check bypass. All required contexts,
+actual Backend/Frontend/E2E parent success, current full review and new native/
+PostgreSQL RUN/PASS still gate delivery. New-head HOSTED and MERGE require
+separate releases after normal publication and fresh physical return.
+
+
+Dependency validation: initial command preparation `b775f9` used a nonexistent
+pnpm `bin/` suffix and stopped before any check started; the existing pinned
+9.15.9 executable was located without installation. Collection original
+`36307` (`916ef4` / `9bd034`) actually exited 1 and joined: variadic
+`--project chromium` consumed the following spec path as another project,
+before discovery. This remains FAILED and is not causal product RED. ROOT
+explicitly released one corrected invocation using the file first,
+`--project=chromium`, GNU6m/kill10 and NODE_OPTIONS max-old-space-size4096.
+Corrected original `63222` (`76c6b4` / `868433`) actually exited 0 and joined;
+all 15 Chromium tests were listed in one file. This proves collection only,
+not browser/runtime assertion execution. No third collection attempt occurred.
+
+Fixture ESLint original `77481` (`4064bc` / `a6c39b`) exited 0 and joined.
+Cheap original `56457` (`cde4bb` / `7772d7`) exited 0 and joined: exact approved
+fixture blob, the other 17 original PR blobs unchanged, catalog/specification
+validation, actual 19-path delivery coverage and whitespace passed. Original
+wrapper and child groups were freshly empty before the corrected collection.
+The accepted identical-byte hosted parser failure remains defect evidence;
+no pre-fix parser replay, browser/backend/build/typecheck/installation or
+passing product validation replay occurred. Normal applicable commit hooks
+and publication/physical-return receipts follow in the primary task plan.
