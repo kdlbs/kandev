@@ -167,14 +167,11 @@ test.describe("File tree inline rename", () => {
     const git = new GitHelper(repoDir, makeGitEnv(backend.tmpDir));
     git.exec("git checkout main");
     git.createFile("blur-original.ts", "blur");
-    git.createFile("blur-other.ts", "other");
-    for (let index = 0; index < 60; index++) {
-      git.createFile(`middle-${String(index).padStart(3, "0")}.ts`, "filler");
-    }
     git.stageAll();
     git.commit("seed blur file");
     git.pushMainWithRetry();
 
+    const gateway = watchWs(testPage);
     const session = await setupTask({
       testPage,
       apiClient,
@@ -189,12 +186,17 @@ test.describe("File tree inline rename", () => {
     const input = await startRenameViaContextMenu(testPage, node);
     await input.press("ControlOrMeta+A");
     await input.fill("blur-final.ts");
-    // Click another file to blur the input. The other node also belongs to
-    // the tree, so we don't lose tree-container focus state.
-    await expect(input).toBeFocused();
-    const companion = session.fileTreeNode("blur-other.ts");
-    await expect(companion).toBeVisible();
-    await companion.click();
+    await dwell(
+      testPage,
+      500,
+      "product-timer",
+      "the product gates blur-commit on a ~400ms timer after isRenaming flips; that timer publishes nothing to observe, so the wait has to outlast it",
+    );
+    // Blur through the mounted Files tab. Scrolling to another virtualized
+    // row can unmount the editor before it receives the blur event.
+    const renamed = gateway.waitForResponse("workspace.file.rename");
+    await session.clickTab("Files");
+    await renamed;
 
     await session.fileTree.waitForFileTreeNode("blur-final.ts");
     await expect(session.fileTreeNode("blur-original.ts")).toHaveCount(0);

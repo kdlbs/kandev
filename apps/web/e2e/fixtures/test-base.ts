@@ -599,6 +599,7 @@ export function pointSeedRepositoryAtFailingOrigin(seedData: SeedData, tmpDir: s
 // also calls saveUserSettings, so tests that do use testPage are unaffected.
 test.beforeEach(async ({ apiClient, backend, seedData }) => {
   await runWithBackendRecovery(backend, async () => {
+    const { settings } = await apiClient.getUserSettings();
     await apiClient.updateWorkspace(seedData.workspaceId, { default_agent_profile_id: "" });
     await apiClient.saveUserSettings({
       workspace_id: seedData.workspaceId,
@@ -614,6 +615,14 @@ test.beforeEach(async ({ apiClient, backend, seedData }) => {
         views: [DEFAULT_SIDEBAR_VIEW],
         active_view_id: DEFAULT_SIDEBAR_VIEW.id,
         draft: null,
+      },
+      // Sidebar customization persists across tests in this worker, including
+      // a zero-height navigation area that clips the next test's New Task action.
+      sidebar_layout_state: {
+        workspace_id: seedData.workspaceId,
+        expected_revision:
+          settings.sidebar_layouts_by_workspace?.[seedData.workspaceId]?.revision ?? 0,
+        layout: null,
       },
       thread_views: [DEFAULT_THREAD_VIEW],
       thread_active_view_id: DEFAULT_THREAD_VIEW.id,
