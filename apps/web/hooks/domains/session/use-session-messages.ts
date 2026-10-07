@@ -618,7 +618,7 @@ function useRunningMessageBackfill(
     const generation = sessionFetchGenerationRef.current;
     let inFlight = false;
     const sync = () => {
-      if (inFlight) return;
+      if (inFlight || document.visibilityState === "hidden") return;
       inFlight = true;
       debug("running backfill", { sessionId: taskSessionId });
       fetchAndStoreMessages(

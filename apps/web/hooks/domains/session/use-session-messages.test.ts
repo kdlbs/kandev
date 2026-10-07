@@ -1033,3 +1033,57 @@ describe("deduplicated message request baselines", () => {
     second.unmount();
   });
 });
+
+describe("running message backfill visibility", () => {
+  function messageListCalls() {
+    return mockWebSocketClient.request.mock.calls.filter(([action]) => action === "message.list")
+      .length;
+  }
+
+  async function renderRunningSession() {
+    vi.useFakeTimers();
+    mockState.turns.activeBySession["sess-1"] = "turn-1" as never;
+    mockWebSocketClient.getSessionSubscriptionReadiness.mockReturnValue(Promise.resolve());
+    mockWebSocketClient.subscribeSessionWithReady.mockReturnValue({
+      ready: Promise.resolve(),
+      unsubscribe: vi.fn(),
+    });
+    const hook = renderHook(() => useSessionMessages("sess-1"));
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    return hook;
+  }
+
+  function setVisibility(state: DocumentVisibilityState) {
+    vi.spyOn(document, "visibilityState", "get").mockReturnValue(state);
+  }
+
+  it("refreshes a running session while the document is visible", async () => {
+    setVisibility("visible");
+    const { unmount } = await renderRunningSession();
+    const before = messageListCalls();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(11_200);
+    });
+
+    expect(messageListCalls() - before).toBe(3);
+    unmount();
+  });
+
+  it("skips the running refresh while the document is hidden", async () => {
+    setVisibility("hidden");
+    const { unmount } = await renderRunningSession();
+    const before = messageListCalls();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(11_200);
+    });
+
+    expect(messageListCalls() - before).toBe(0);
+    unmount();
+  });
+});
