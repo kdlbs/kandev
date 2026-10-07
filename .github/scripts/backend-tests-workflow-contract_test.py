@@ -64,16 +64,20 @@ class BackendTestsWorkflowContractTest(unittest.TestCase):
 
     def test_windows_suites_run_independently_without_fail_fast(self) -> None:
         windows_job = self.workflow.partition("  test-windows:\n")[2]
-        self.assertIn("suite: [process, native]", windows_job)
+        self.assertIn("- suite: process\n            process_shard: 1", windows_job)
+        self.assertIn("- suite: process\n            process_shard: 2", windows_job)
+        self.assertEqual(windows_job.count("- suite: process"), 2)
+        self.assertEqual(windows_job.count("- suite: native"), 1)
         self.assertIn("fail-fast: false", windows_job)
-        self.assertIn("name: Backend (windows, ${{ matrix.suite }})", windows_job)
+        self.assertIn("name: Backend (windows, ${{ matrix.suite }}", windows_job)
         self.assertNotIn("continue-on-error", windows_job)
-        process = step_block(windows_job, "Test Windows process package")
+        process = step_block(windows_job, "Test Windows process package (shard ${{ matrix.process_shard }}/2)")
         self.assertIn("if: matrix.suite == 'process'", process)
         self.assertIn("go run ./cmd/windows-process-tests", process)
         helper = step_block(windows_job, "Test Windows process cohort runner")
         self.assertIn("if: matrix.suite == 'process'", helper)
         self.assertIn("go test -race -timeout 25m ./cmd/windows-process-tests", helper)
+        self.assertIn("python ../../scripts/ci-go-test-shard.py --shard ${{ matrix.process_shard }} --shards 2 ./internal/agentctl/server/process/...", process)
         native = step_block(windows_job, "Test windows-sensitive packages")
         self.assertNotIn("./internal/agentctl/server/process/", native)
         for package in (

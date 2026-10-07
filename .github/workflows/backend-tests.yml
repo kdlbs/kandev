@@ -798,7 +798,7 @@ jobs:
           done
 
   test-windows:
-    name: Backend (windows, ${{ matrix.suite }})
+    name: Backend (windows, ${{ matrix.suite }}${{ matrix.process_shard && format(' {0}/2', matrix.process_shard) || '' }})
     needs: changes
     if: needs.changes.outputs.run == 'true'
     runs-on: windows-latest
@@ -808,7 +808,12 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        suite: [process, native]
+        include:
+          - suite: process
+            process_shard: 1
+          - suite: process
+            process_shard: 2
+          - suite: native
     # Least-privilege: this job only reads source and runs tests, no PR/issue
     # writes or release operations. Flagged by CodeQL workflow audit + matching
     # CodeRabbit nitpick.
@@ -860,6 +865,16 @@ jobs:
       - name: Test Windows process package
         if: matrix.suite == 'process'
         run: go run ./cmd/windows-process-tests
+
+      - name: Set up Python for process test discovery
+        if: matrix.suite == 'process'
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.13'
+
+      - name: Test Windows process package (shard ${{ matrix.process_shard }}/2)
+        if: matrix.suite == 'process'
+        run: python ../../scripts/ci-go-test-shard.py --shard ${{ matrix.process_shard }} --shards 2 ./internal/agentctl/server/process/...
 
       # Scope to packages with non-trivial Windows-specific code paths.
       # Tests that genuinely cannot run on Windows (Unix sockets, POSIX
