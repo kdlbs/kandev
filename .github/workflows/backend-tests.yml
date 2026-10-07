@@ -927,6 +927,16 @@ jobs:
           -run '^Test(WorkspaceFieldUpdates(ConcurrentSQLite|PresenceAndDefaults|ExactFenceSQLite|AdmissionAndFailures|Storage)|RegisteredWorkspaceFieldUpdates(HTTP|WS))$'
           ./internal/task/service ./internal/task/repository/sqlite ./internal/task/handlers
 
+      - name: Test Windows workflow start selection
+        if: matrix.suite == 'native'
+        timeout-minutes: 6
+        env:
+          GOMAXPROCS: '2'
+          GOMEMLIMIT: 512MiB
+        run: |
+          go test -trimpath -tags fts5 -race -p=1 -count=1 -json -timeout=4m -run '^TestWorkflowStartSelection(ControllerOmission|ControllerControls|SQLiteIndependentStores|RepositoryRollback|LegacyAndExact|RegisteredREST|AccessFailures|RegisteredMCP)$' ./internal/workflow/controller ./internal/workflow/repository ./internal/workflow/handlers ./internal/mcp/handlers
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
       - name: Test Cursor project slug path normalization
         if: matrix.suite == 'native'
         run: go test -race -v ./internal/agent/mcpconfig -run '^TestDeriveCursorProjectSlug$'
