@@ -187,16 +187,21 @@ export async function touchDragSortRule(
   source: Locator,
   target: Locator,
 ): Promise<void> {
-  await source.scrollIntoViewIfNeeded();
   await target.scrollIntoViewIfNeeded();
+  await source.scrollIntoViewIfNeeded();
   const sourceBox = await source.boundingBox();
   const targetBox = await target.boundingBox();
+  const listTop = await target.evaluate(
+    (element) =>
+      element.closest<HTMLElement>("[data-sidebar-reorder-list]")?.getBoundingClientRect().top,
+  );
   expect(sourceBox).not.toBeNull();
   expect(targetBox).not.toBeNull();
+  expect(listTop).not.toBeNull();
   await touchDragBetween(
     page,
     { x: sourceBox!.x + sourceBox!.width / 2, y: sourceBox!.y + sourceBox!.height / 2 },
-    { x: targetBox!.x + targetBox!.width / 2, y: targetBox!.y + 2 },
+    { x: targetBox!.x + targetBox!.width / 2, y: Math.max(targetBox!.y + 2, listTop! + 40) },
   );
 }
 

@@ -205,8 +205,8 @@ test("desktop sorts a complete paged tree by running, color, and activity", asyn
 
     const dragHandle = reloadPopover.getByTestId("sort-rule-handle-2");
     const firstCard = reloadPopover.getByTestId("sort-rule-card-0");
-    await dragHandle.scrollIntoViewIfNeeded();
     await firstCard.scrollIntoViewIfNeeded();
+    await dragHandle.scrollIntoViewIfNeeded();
     const dragHandleBox = await dragHandle.boundingBox();
     const firstCardBox = await firstCard.boundingBox();
     expect(dragHandleBox).not.toBeNull();
@@ -217,9 +217,11 @@ test("desktop sorts a complete paged tree by running, color, and activity", asyn
     await testPage.mouse.down();
     await testPage.mouse.move(dragStartX, dragStartY + 12, { steps: 4 });
     await expect(testPage.locator('[data-dragging="true"]')).toHaveCount(1);
-    await testPage.mouse.move(firstCardBox!.x + firstCardBox!.width / 2, firstCardBox!.y + 2, {
-      steps: 16,
-    });
+    await testPage.mouse.move(
+      firstCardBox!.x + firstCardBox!.width / 2,
+      firstCardBox!.y + firstCardBox!.height / 2,
+      { steps: 16 },
+    );
     await testPage.mouse.up();
     await expect(reloadPopover.getByTestId("sort-key-select")).toContainText("Last activity");
     await expect(reloadPopover.getByTestId("sort-rule-key-1")).toContainText("Running");

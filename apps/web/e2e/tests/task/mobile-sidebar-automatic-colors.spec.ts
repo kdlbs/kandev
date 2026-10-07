@@ -2,7 +2,7 @@ import { test, expect } from "../../fixtures/test-base";
 import { waitForFiniteAnimations } from "../../helpers/animations";
 import { SessionPage } from "../../pages/session-page";
 import type { SidebarTaskColorAutomation } from "../../../lib/task-color-automation-settings";
-import { scrollListTopIntoView, touchDragToPoint } from "../../helpers/touch-drag";
+import { scrollSidebarFilterListTopIntoView, touchDragToPoint } from "../../helpers/touch-drag";
 
 const MOBILE_REPOSITORY_RULE_ID = "mobile-repository-rule";
 let previousAutomaticColors: SidebarTaskColorAutomation = { enabled: false, rules: [] };
@@ -206,7 +206,7 @@ test.describe("Mobile sidebar automatic task colors", () => {
 
     const ruleList = settings.getByTestId("automatic-color-rule-list");
     if (prCapture.capturing) {
-      await scrollListTopIntoView(ruleList);
+      await scrollSidebarFilterListTopIntoView(ruleList);
       await waitForFiniteAnimations(settings);
       await prCapture.screenshot("mobile-automatic-color-rule-order", {
         caption: "Phone automatic color rules with touch-sized reorder handles and move menus",
@@ -224,7 +224,7 @@ test.describe("Mobile sidebar automatic task colors", () => {
     });
     const settingsBeforeOutsideDrop = (await apiClient.getUserSettings()).settings
       .sidebar_task_color_automation;
-    await scrollListTopIntoView(ruleList);
+    await scrollSidebarFilterListTopIntoView(ruleList);
     const readRuleOrder = () =>
       ruleList
         .locator(":scope > [data-testid^='automatic-color-rule-']")
@@ -250,7 +250,7 @@ test.describe("Mobile sidebar automatic task colors", () => {
     );
 
     const drawer = testPage.getByTestId("sidebar-filter-drawer");
-    await scrollListTopIntoView(ruleList);
+    await scrollSidebarFilterListTopIntoView(ruleList);
     await waitForFiniteAnimations(drawer);
     const drawerBeforeDownwardDrag = await drawer.boundingBox();
     await expect(firstHandle).toHaveAttribute("data-vaul-no-drag", "");

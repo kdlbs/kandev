@@ -1690,7 +1690,7 @@
   "sidebarFilters": "側邊欄篩選",
   "sidebarReorderCancelled": "已取消移動 {{label}}。",
   "sidebarReorderDropped": "{{label}} 已放到第 {{position}} 位。",
-  "sidebarReorderInstructions": "要重新排序，請按空格鍵或 Enter 鍵拾取專案，使用方向鍵移動，再按空格鍵或 Enter 鍵放下；按 Escape 鍵取消。",
+  "sidebarReorderInstructions": "要重新排序，請按空格鍵或 Enter 鍵拾取項目，使用方向鍵移動，再按空格鍵或 Enter 鍵放下；按 Escape 鍵取消。",
   "sidebarReorderMore": "{{label}} 的更多排序選項",
   "sidebarReorderMoveDown": "下移",
   "sidebarReorderMoveUp": "上移",

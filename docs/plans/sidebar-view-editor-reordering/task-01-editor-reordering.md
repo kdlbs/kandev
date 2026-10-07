@@ -133,11 +133,13 @@ Implemented stable-ID Sort dragging and shared More menus for Sort, automatic co
 - Chromium E2E: 26/26 passed. Mobile Chrome E2E: 15/15 passed, including 390px fine-pointer and 900px coarse-pointer geometry, containment, and overflow checks.
 - Desktop and phone captures were reviewed against UI-01/UI-02; task-row action geometry and ordering were verified by E2E.
 - Public-doc tests: 62 passed; 47 pages validated. Specification catalog validation covered 359 decisions and 1,425 specifications; 36 spec-linter tests and the full spec lint passed.
-- `git diff --check` passed. Changes remain unstaged and uncommitted.
+- `git diff --check` passed. The implementation is tracked in PR #4295; the results below include its review follow-up.
 
 ### Code-review remediation
 
-- Guarded each pointer/touch reorder with the visible list and scroll-region bounds. The detector keeps nearest-center movement for gaps and keyboard sorting, captures initial list bounds to remain stable during autoscroll, and returns no collision for outside drops.
+- Guarded each pointer/touch reorder with the visible list and scroll-region bounds. The detector keeps nearest-center movement for gaps and keyboard sorting and preserves initial bounds during autoscroll. At drop, each editor validates the latest pointer position against the current visible list bounds, maps rejected drops to cancellation, and announces cancellation.
 - Marked each phone drag grip `data-vaul-no-drag`, preventing Vaul from handling the same downward gesture while retaining drawer scrolling and dismissal elsewhere.
-- Added collision unit tests and mobile E2E regressions for outside drops on Sort, automatic colors, and task-row details. The color case asserts no PATCH and unchanged saved settings. Each section also tests a downward touch reorder with a stationary, open drawer.
+- Added a collision-unit regression for a list that moves during a drag, plus mobile E2E coverage for releasing in the stale starting bounds. Existing mobile checks cover outside drops on Sort, automatic colors, and task-row details. The color case asserts no PATCH and unchanged saved settings. Each section also tests a downward touch reorder with a stationary, open drawer.
+- Renamed the sidebar-specific scroll helper, corrected the Traditional Chinese translation for “item”, and guaranteed cleanup in the clipped-scroll unit test.
 - Final verification: 32 focused component tests passed; typecheck, scoped ESLint, and `build:e2e` passed. Chromium E2E passed 26/26 and mobile Chrome E2E passed 15/15. `git diff --check` passed.
+- Review-follow-up verification: 38 focused component tests passed; typecheck, scoped ESLint, `i18n:check`, `i18n:ratchet`, and `git diff --check` passed. Managed Chromium E2E passed 26/26 and managed mobile Chrome E2E passed 15/15, including the stale-bounds regression.

@@ -13,7 +13,7 @@ import { test, expect, type SeedData } from "../../fixtures/test-base";
 import type { Page, Locator } from "@playwright/test";
 import type { ApiClient } from "../../helpers/api-client";
 import {
-  scrollListTopIntoView,
+  scrollSidebarFilterListTopIntoView,
   touchDragBetween,
   touchDragToPoint,
 } from "../../helpers/touch-drag";
@@ -697,7 +697,7 @@ test.describe("Mobile sidebar — view system", () => {
           rows.map((row) => row.getAttribute("data-testid")?.replace("task-row-detail-", "")),
         );
     await expect(relativeTimeHandle).toHaveAttribute("data-vaul-no-drag", "");
-    await scrollListTopIntoView(detailList);
+    await scrollSidebarFilterListTopIntoView(detailList);
     const detailListBox = await detailList.boundingBox();
     const editorBox = await popover.boundingBox();
     expect(detailListBox).not.toBeNull();
@@ -712,7 +712,7 @@ test.describe("Mobile sidebar — view system", () => {
       .poll(readDetailOrder)
       .toEqual(["relative_time", "repository", "pull_request_number"]);
 
-    await scrollListTopIntoView(detailList);
+    await scrollSidebarFilterListTopIntoView(detailList);
     await waitForFiniteAnimations(settings);
     const drawerBeforeDownwardDrag = await drawer.boundingBox();
     const repositoryBox = await settings.getByTestId("task-row-detail-repository").boundingBox();
@@ -737,7 +737,7 @@ test.describe("Mobile sidebar — view system", () => {
     await expect
       .poll(readDetailOrder)
       .toEqual(["relative_time", "repository", "pull_request_number"]);
-    await scrollListTopIntoView(detailList);
+    await scrollSidebarFilterListTopIntoView(detailList);
     await waitForFiniteAnimations(settings);
 
     await touchDrag(testPage, pullRequestHandle, relativeTimeHandle);

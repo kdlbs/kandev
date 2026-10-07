@@ -71,21 +71,28 @@ async function dragRuleByHandle(
   source: import("@playwright/test").Locator,
   target: import("@playwright/test").Locator,
 ) {
-  await source.scrollIntoViewIfNeeded();
   await target.scrollIntoViewIfNeeded();
+  await source.scrollIntoViewIfNeeded();
   const sourceBox = await source.boundingBox();
   const targetBox = await target.boundingBox();
+  const listTop = await target.evaluate(
+    (element) =>
+      element.closest<HTMLElement>("[data-sidebar-reorder-list]")?.getBoundingClientRect().top,
+  );
   expect(sourceBox).not.toBeNull();
   expect(targetBox).not.toBeNull();
+  expect(listTop).not.toBeNull();
   const sourceX = sourceBox!.x + sourceBox!.width / 2;
   const sourceY = sourceBox!.y + sourceBox!.height / 2;
   await testPage.mouse.move(sourceX, sourceY);
   await testPage.mouse.down();
   await testPage.mouse.move(sourceX, sourceY + 12, { steps: 4 });
   await expect(testPage.locator('[data-dragging="true"]')).toHaveCount(1);
-  await testPage.mouse.move(targetBox!.x + targetBox!.width / 2, targetBox!.y + 2, {
-    steps: 16,
-  });
+  await testPage.mouse.move(
+    targetBox!.x + targetBox!.width / 2,
+    Math.max(targetBox!.y + 2, listTop! + 8),
+    { steps: 16 },
+  );
   await testPage.mouse.up();
 }
 

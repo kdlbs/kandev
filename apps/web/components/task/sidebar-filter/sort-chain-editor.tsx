@@ -255,8 +255,9 @@ function SortChainDndContext({
       collisionDetection={collision.detect}
       onDragStart={collision.reset}
       onDragEnd={(event) => {
-        onDragEnd(event);
-        collision.reset();
+        const accepted = collision.isDropWithinCurrentVisibleBounds();
+        const dropEvent = accepted ? event : { ...event, over: null };
+        onDragEnd(dropEvent);
       }}
       onDragCancel={collision.reset}
       accessibility={{
@@ -279,7 +280,7 @@ function SortChainDndContext({
             });
           },
           onDragEnd: ({ active, over }) => {
-            if (!over) {
+            if (!over || !collision.isDropWithinCurrentVisibleBounds()) {
               return t("task:sidebarReorderCancelled", { label: labelFor(String(active.id)) });
             }
             return t("task:sidebarReorderDropped", {

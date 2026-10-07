@@ -58,8 +58,11 @@ describe("sidebarListCollisionDetection", () => {
     scrollRegion.append(list);
     document.body.append(scrollRegion);
 
-    expect(collision.detect(args)).toEqual([]);
-    scrollRegion.remove();
+    try {
+      expect(collision.detect(args)).toEqual([]);
+    } finally {
+      scrollRegion.remove();
+    }
   });
 
   it("keeps keyboard sortable movement on the nearest rule", () => {
@@ -90,5 +93,24 @@ describe("sidebarListCollisionDetection", () => {
 
     collision.reset();
     expect(collision.detect(args)).toEqual([]);
+  });
+
+  it("rejects a drop in starting bounds after the visible list moves down", () => {
+    const { args, list } = createCollisionArgs({ x: 60, y: 8 });
+    const collision = createSidebarListCollisionDetection();
+    document.body.append(list);
+    try {
+      expect(collision.detect(args)).toHaveLength(1);
+
+      setRect(list, new DOMRect(0, 28, 120, 120));
+      expect(collision.detect(args)).toHaveLength(1);
+      expect(collision.isDropWithinCurrentVisibleBounds()).toBe(false);
+
+      args.pointerCoordinates = { x: 60, y: 32 };
+      collision.detect(args);
+      expect(collision.isDropWithinCurrentVisibleBounds()).toBe(true);
+    } finally {
+      list.remove();
+    }
   });
 });

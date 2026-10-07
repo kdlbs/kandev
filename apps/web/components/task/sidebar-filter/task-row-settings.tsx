@@ -233,8 +233,10 @@ function TaskRowDetailList({
         collisionDetection={collision.detect}
         onDragStart={collision.reset}
         onDragEnd={(event) => {
-          onDragEnd(event);
-          collision.reset();
+          const dropEvent = collision.isDropWithinCurrentVisibleBounds()
+            ? event
+            : { ...event, over: null };
+          onDragEnd(dropEvent);
         }}
         onDragCancel={collision.reset}
         accessibility={{
@@ -257,7 +259,7 @@ function TaskRowDetailList({
               });
             },
             onDragEnd: ({ active, over }) => {
-              if (!over) {
+              if (!over || !collision.isDropWithinCurrentVisibleBounds()) {
                 return t("task:sidebarReorderCancelled", {
                   label: detailLabel(String(active.id)),
                 });

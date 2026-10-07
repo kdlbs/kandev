@@ -122,8 +122,9 @@ function AutomaticColorRuleDndContext({
         onDragStart();
       }}
       onDragEnd={(event) => {
-        onDragEnd(event);
-        collision.reset();
+        const accepted = collision.isDropWithinCurrentVisibleBounds();
+        const dropEvent = accepted ? event : { ...event, over: null };
+        onDragEnd(dropEvent);
       }}
       onDragCancel={collision.reset}
       accessibility={{
@@ -146,7 +147,7 @@ function AutomaticColorRuleDndContext({
             });
           },
           onDragEnd: ({ active, over }) => {
-            if (!over) {
+            if (!over || !collision.isDropWithinCurrentVisibleBounds()) {
               return t("task:sidebarReorderCancelled", {
                 label: labelForAutomaticColorRule(rules, String(active.id), t),
               });

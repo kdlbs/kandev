@@ -1,6 +1,6 @@
 import { test, expect } from "../../fixtures/test-base";
 import { waitForFiniteAnimations } from "../../helpers/animations";
-import { scrollListTopIntoView, touchDragToPoint } from "../../helpers/touch-drag";
+import { scrollSidebarFilterListTopIntoView, touchDragToPoint } from "../../helpers/touch-drag";
 import { SessionPage } from "../../pages/session-page";
 import {
   addColorAfterActivity,
@@ -145,20 +145,35 @@ test("phone drawer edits and saves a touch-reachable sort chain and group inset"
     await moveSortRuleWithMenu(testPage, savedPopover, 2, "up");
     await expect.poll(readSortKeys).toEqual(["Running", "Color", "Last activity"]);
     const ruleList = savedPopover.locator("[data-sidebar-reorder-list]");
-    await scrollListTopIntoView(ruleList);
+    await scrollSidebarFilterListTopIntoView(ruleList);
     await waitForFiniteAnimations(drawer);
 
     const lastHandle = savedPopover.getByTestId("sort-rule-handle-2");
+    const scrollTop = await savedPopover.evaluate((element) => element.scrollTop);
+    await savedPopover.evaluate((element) => {
+      element.scrollTop += 24;
+    });
+    await waitForFiniteAnimations(drawer);
     const ruleListBox = await ruleList.boundingBox();
     const editorBox = await savedPopover.boundingBox();
     expect(ruleListBox).not.toBeNull();
     expect(editorBox).not.toBeNull();
-    const outsideY = ruleListBox!.y - 8;
-    expect(outsideY).toBeGreaterThan(editorBox!.y);
-    await touchDragToPoint(testPage, lastHandle, {
-      x: ruleListBox!.x + ruleListBox!.width / 2,
-      y: outsideY,
-    });
+    const outsideY = editorBox!.y + 4;
+    expect(outsideY).toBeGreaterThan(ruleListBox!.y);
+    expect(outsideY).toBeLessThan(editorBox!.y + 12);
+    await touchDragToPoint(
+      testPage,
+      lastHandle,
+      {
+        x: ruleListBox!.x + ruleListBox!.width / 2,
+        y: outsideY,
+      },
+      async () => {
+        await savedPopover.evaluate((element, previousScrollTop) => {
+          element.scrollTop = previousScrollTop;
+        }, scrollTop);
+      },
+    );
     await expect.poll(readSortKeys).toEqual(["Running", "Color", "Last activity"]);
 
     await touchDragSortRule(

@@ -46,13 +46,18 @@ function unionBounds(first: DOMRect, current: DOMRect) {
 export function createSidebarListCollisionDetection(): {
   detect: CollisionDetection;
   reset: () => void;
+  isDropWithinCurrentVisibleBounds: () => boolean;
 } {
   let activeId: string | number | null = null;
+  let activeList: HTMLElement | null = null;
   let initialListBounds: DOMRect | null = null;
+  let lastPoint: { x: number; y: number } | null = null;
 
   const reset = () => {
     activeId = null;
+    activeList = null;
     initialListBounds = null;
+    lastPoint = null;
   };
 
   const detect: CollisionDetection = (args) => {
@@ -65,6 +70,7 @@ export function createSidebarListCollisionDetection(): {
       activeId = args.active.id;
       initialListBounds = list.getBoundingClientRect();
     }
+    activeList = list;
 
     const bounds = unionBounds(
       initialListBounds ?? list.getBoundingClientRect(),
@@ -74,10 +80,20 @@ export function createSidebarListCollisionDetection(): {
       x: (args.collisionRect.left + args.collisionRect.right) / 2,
       y: (args.collisionRect.top + args.collisionRect.bottom) / 2,
     };
+    lastPoint = point;
     if (!isPointWithinVisibleBounds(list, point, bounds)) return [];
 
     return closestCenter(args);
   };
 
-  return { detect, reset };
+  const isDropWithinCurrentVisibleBounds = () => {
+    return (
+      activeList !== null &&
+      activeList.isConnected &&
+      lastPoint !== null &&
+      isPointWithinVisibleBounds(activeList, lastPoint)
+    );
+  };
+
+  return { detect, reset, isDropWithinCurrentVisibleBounds };
 }
