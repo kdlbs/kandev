@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/agentctl/types"
+	"github.com/kandev/kandev/internal/common/subproc"
 )
 
 // waitForMonitorIdle waits for the current monitorTick to complete by reading
@@ -132,6 +133,9 @@ func TestMonitorLoop_TransitionToFastTriggersImmediateScan(t *testing.T) {
 	repoDir, cleanup := setupTestRepo(t)
 	defer cleanup()
 
+	restoreCap := subproc.Git().SetCapForTest(1)
+	t.Cleanup(restoreCap)
+
 	wt := NewWorkspaceTracker(repoDir, newTestLogger(t))
 	// Make the timer interval irrelevant by using a long fast interval — we're
 	// proving the immediate-scan-on-mode-change path, not the timer.
@@ -153,10 +157,15 @@ func TestMonitorLoop_TransitionToFastTriggersImmediateScan(t *testing.T) {
 	<-wt.initialScanDone
 	drainStream(sub)
 	baseline, _ := wt.MonitorTickStats()
-	select {
-	case <-wt.tickDone:
-	default:
+	drainMonitorTicks(wt)
+
+	acquireCtx, cancelAcquire := context.WithTimeout(context.Background(), 5*time.Second)
+	hold, err := subproc.AcquireGit(acquireCtx, subproc.GitInteractive)
+	cancelAcquire()
+	if err != nil {
+		t.Fatalf("hold Git admission for mode-change scan: %v", err)
 	}
+	defer hold()
 
 	// Create a change so the immediate scan finds something to notify about.
 	if err := os.WriteFile(filepath.Join(repoDir, "trigger.txt"), []byte("x"), 0o644); err != nil {
@@ -184,6 +193,11 @@ func TestMonitorLoop_TransitionToFastTriggersImmediateScan(t *testing.T) {
 			t.Fatal("expected immediate monitor scan admission after transitioning to fast mode")
 		}
 	}
+
+	// A scan can start immediately yet spend longer than two seconds queued
+	// for Git. Keep this controlled delay below the 30-second polling interval.
+	releaseTimer := time.AfterFunc(2500*time.Millisecond, hold)
+	defer releaseTimer.Stop()
 
 	// Join that scan before asserting delivery. Its work includes two quick
 	// Git commands, a bounded status observation and one file-list command.
