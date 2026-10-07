@@ -1,5 +1,10 @@
 ---
-spec: docs/specs/tasks/system-design/remote-contribution-tasks.md
+requirements:
+  - REQ-TASKS-REMOTE-CONTRIBUTION-TASKS-001
+system_design:
+  - ../../specs/tasks/system-design/remote-contribution-relation.md
+legacy_specs:
+  - ../../specs/tasks/system-design/remote-contribution-tasks.md
 created: 2026-08-10
 status: approved
 ---
