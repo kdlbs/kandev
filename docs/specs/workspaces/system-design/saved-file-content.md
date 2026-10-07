@@ -31,6 +31,7 @@ framework, API field, persistence model, or runtime flag.
 | `AC-WORKSPACES-SAVED-FILE-CONTENT-001.2` | Caller contract, Repository save target, Request-owned patch, Verification |
 | `AC-WORKSPACES-SAVED-FILE-CONTENT-001.3` | Compatibility and failure handling |
 | `AC-WORKSPACES-SAVED-FILE-CONTENT-001.4` | Compatibility and failure handling, Verification |
+| `AC-WORKSPACES-SAVED-FILE-CONTENT-001.5` | Request-owned patch, Save and staging verification |
 
 ## Caller contract
 
@@ -100,30 +101,45 @@ itself. Preserve existing cancellation, conflict and private-patch checks.
 
 ## Request-owned patch
 
-Previously a request wrote `.kandev-patch.tmp` before waiting for Git admission.
-Another request could replace those bytes, so the first applied the second patch
-and returned an applied result with its own unchanged target's hash.
+The reviewed baseline gives each request a unique `.kandev-patch-*` file
+through `writeFileDiffPatch`. This prevents one save consuming another save's
+patch, but creates the file in the workspace before Git admission. A queued
+`GitOperator.Stage(ctx, nil)` can execute `git add -A` while that private patch
+exists, leaving it in the real index after save cleanup removes the file.
 
-`writeFileDiffPatch` replaces that fixed-name staging block with `os.CreateTemp`
-in the existing workspace directory, using an absolute directory path and a private
-`.kandev-patch-*` pattern. The nearby `workspace_git_index.go` uses the established
-create-temp/owned-cleanup pattern. Keep the created patch's default private
-permissions. Write the rewritten diff through its returned descriptor and check
-both write and close errors. Close the descriptor before invoking Git so Windows
-can read and later remove it.
+The correction sends the already rewritten request string directly to
+Git. Inside the existing post-admission command builder, set
+`cmd.Stdin = strings.NewReader(unifiedDiff)` and use direct argv
+`apply -p0 --unidiff-zero --whitespace=nowarn -`.
+[Git's documented `-` input](https://git-scm.com/docs/git-apply) consumes stdin.
+Remove the sole patch-file helper and its caller's removal defer. No patch file
+is created, opened, recreated or swept anywhere. The existing immutable request
+string remains private to that invocation, including across independent trackers.
 
-Cleanup is registered immediately after creation. Every exit closes any remaining
-descriptor and best-effort removes only the path returned for that invocation.
-Do not remove/recreate the file between creation and application, reuse the old
-fixed filename, sweep sibling patches, or remove another request's patch.
+`NewGitCommand`, `RunGitCombinedAfterAcquire`, `PrepareGitCommand` and managed
+Start/Wait retain supplied stdin. The managed lifecycle sets output wiring,
+environment policy, process ownership and pipe wait bounds; it does not replace
+the reader. `exec.Cmd` owns copying the finite reader and joining its pipe work
+when waiting. No manual stdin pipe, writer goroutine, shell, new admission
+layer or subprocess wrapper is required. Cancellation continues through the
+existing managed process lifecycle on Unix and Windows.
 
-Pass the absolute patch filename through the unchanged direct argv
-`apply -p0 --unidiff-zero --whitespace=nowarn`. Retain `NewGitCommand`,
+Keep `GitOperator.Stage` and registered stage/save caller contracts unchanged.
+Do not filter dotfiles, alter ignores, serialize all writers or mutate the
+index to undo a leaked artifact. Relocating to the native default temp directory
+would still permit a caller's `TMPDIR`, `TMP` or `TEMP` to place private patches
+inside a checkout. Stdin needs no such filesystem boundary and avoids Windows
+open-file/delete sharing concerns. The Git index snapshot helper stores its
+own read snapshots next to the index in Git metadata; it has a different
+consumer and remains outside this correction.
+
+Retain `NewGitCommand`,
 `RunGitCombinedAfterAcquire`, `GitInteractive`, the existing working directory,
 and `gitCommandTimeout`. Queue wait stays outside the execution timeout under
 [the shared admission decision](../../../decisions/2026-08-02-class-aware-git-subprocess-admission.md).
-Unique patch ownership also works across independent trackers; a tracker-local
-mutex would not provide that property.
+This is a local patch-input correction. The requirement and this design retain
+its scope and rationale; it does not require a separate ADR or global writer
+framework.
 
 ## Compatibility and failure handling
 
@@ -131,7 +147,8 @@ Keep path validation, pre-save content/hash reads, symlink-header rewriting,
 post-apply target read/hash, resolution values, and existing notification and
 logging logic. Preserve the original-hash conflict and failed-Git
 desired-content fallback branches, including nil versus empty content.
-Preparation failures return errors after owned cleanup. Git cancellation or
+There is no disk patch-preparation failure or artifact cleanup after the
+correction. Existing user-owned patch-like files must remain untouched. Git cancellation or
 deadline errors still bypass fallback. Other Git errors retain fallback when
 provided. Post-apply read failure remains failure; this repair adds no rollback.
 
@@ -184,6 +201,70 @@ fresh native Windows success at its own published head.
 
 Exact selectors, actual results and serial bounds live in the
 [single work order](../../../plans/prevent-overlapping-file-saves/task-01-isolate-save-patches.md).
+
+## Save and staging verification
+
+Current-source inspection at `905fa03c5b8ae90c661dc9fec2e324d355e269aa`
+confirms workspace patch creation before admission and Stage All's `add -A`.
+It includes merged repository-target dependency
+`9b4af97250f491d69d14629b549b3f33ddc66c12`; its producer blob is unchanged
+between that dependency and this head. These are static findings.
+
+ROOT's archived diagnostic at baseline
+`62b39941214ffe63ce72d307b6e599a7bd2a7b63` used the fixed
+`.kandev-patch.tmp` helper. Stage All was queued first under held capacity one,
+then a valid save second. Both operations succeeded with correct final file
+bytes and save hash, but the real index included the private patch. A fresh
+sequential save then Stage All control passed. Native session `68425`, initial
+chunk `b5a4f6`, terminal chunk `08b5ef` and the protected source SHA256
+`0f928ca22d6f51e72ddd4cd35ad02e55258c7e1a129cb281b3f21a153f7e5111`
+identify that evidence. It was read only, never replayed or imported here.
+It is not executed proof of today's random helper, HTTP, browser or commit flow.
+
+After a later implementation release, independently author permanent real-Git
+process and registered-route regressions. Hold capacity one, queue Stage All,
+observe one waiter, start the actual current save producer with matching hash
+and valid patch, observe the second waiter, then release. Register cancellation,
+release and joining before failure paths; restore admission only after all
+requests settle. Assert the exact real index path set and indexed blob contents,
+both operation results, final requested bytes and independently computed hash,
+and untouched neighbors. The earlier stage must retain the original file blob;
+the later save can remain unstaged. This is the queue's FIFO behavior, not an
+atomic save/stage promise. Include legitimate untracked patch-like dotfiles,
+ordinary additions and a tracked deletion so filtering or losing Stage All
+semantics cannot pass. No prefix-only artifact assertion is sufficient.
+
+Use fresh sequential controls to prove saved content is staged, plus a finite
+patch larger than a pipe buffer with non-ASCII content and no desired-content
+fallback to prove stdin application, rather than silent overwrite. Test native
+temp environment values pointing inside the fixture checkout. Preserve existing
+distinct-file, fallback, cancellation, scoped repository and symlink regressions.
+The registered route test proves save ACK/path/hash and Stage All against actual
+disk and index; a scoped save must preserve same-named nonselected files. No
+browser, commit or native Windows execution is claimed until it actually runs.
+
+The [private-save-patch work order](../../../plans/private-save-patches/task-01-private-patch-input.md)
+owns exact commands and later results. Native hosted Windows execution of its
+portable process/route cases remains a delivery gate; cross-compilation alone
+does not prove native behavior.
+
+After ROOT's later implementation release, independently authored permanent
+regressions reproduced the actual random-helper leak at the reviewed baseline:
+four overlap cases failed solely on extra real-index entries while both save
+and stage succeeded with correct saved bytes/hash/ACK. Fresh process and
+registered-route sequential controls passed. This independent RED is distinct
+from ROOT's fixed-name archive and never imports it.
+
+The stdin correction then passed all 13 selected process tests (60 cases) and
+six registered API tests (47 cases) under race-enabled Linux Go 1.26.0, without
+skips. The new cases assert exact index paths/blobs, working-tree bytes and
+truthful ACKs, genuine user patch-like dotfiles/additions/deletions, selected
+repository bytes, and a large non-ASCII patch without overwrite fallback while
+all native temp variables point into the checkout. Existing fallback, queued
+cancellation, distinct-file and symlink controls passed. This establishes real
+Git and registered-router outcomes, without claiming browser, commit-flow or
+native Windows execution. Retained identities and exact commands live in the
+work order; hosted native-platform evidence remains pending its separate release.
 
 ## Presentation and documentation
 

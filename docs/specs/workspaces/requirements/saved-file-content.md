@@ -12,7 +12,8 @@ owners:
 
 A successful file save must leave the submitted edit on disk. Overlapping saves
 to different files must not consume one another's edits or acknowledge content
-that was never saved.
+that was never saved. Private save preparation must not enter the user's Git
+index when staging overlaps a pending save.
 
 Workspaces owns filesystem mutation authority and the resulting file contents.
 The [UI editor contract](../../ui/requirements/file-editor-mutation-ownership.md)
@@ -56,6 +57,16 @@ incorrect file contents behind a successful response.
   while a save waits to execute its patch shall report failure without writing
   its desired-content fallback. Other distinct-file saves shall remain able to
   complete independently.
+- **AC-WORKSPACES-SAVED-FILE-CONTENT-001.5:** When Stage All overlaps an eligible
+  pending save, no private transient save content shall become a file in the
+  user's working tree or an entry in the real Git index. Successful save results
+  shall still satisfy `.2`. This isolation shall also hold for sequential saves,
+  failed saves, overwrite fallback and queued cancellation. Staging shall retain
+  its existing selection behavior, including genuine user dotfiles, additions
+  and deletions, as defined by
+  [the staging contract](../../platform/requirements/workspace-git-status.md).
+  Overlap does not promise that Stage All includes an edit that has not executed
+  yet, or that the two operations form one atomic transaction.
 
 ## Exclusions
 
@@ -70,3 +81,4 @@ incorrect file contents behind a successful response.
 - [Saved file content design](../system-design/saved-file-content.md)
 - [Prevent overlapping file saves](../../../plans/prevent-overlapping-file-saves/plan.md)
 - [Correct repository save targets](../../../plans/repository-save-target/plan.md)
+- [Keep private save patches out of Git](../../../plans/private-save-patches/plan.md)
