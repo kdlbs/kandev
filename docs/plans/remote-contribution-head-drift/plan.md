@@ -183,3 +183,15 @@ installation, executor, or API contract changes, so `docs/public/**` does not re
 
 None. A guided “reconcile checkout” action is intentionally out of scope; it requires a separate
 product decision about reset, backup, rebase, and conflict handling.
+
+## CI correction: provider history readiness
+
+The provider-history hook now waits for a connected WebSocket client before it starts a request.
+This preserves the provider retry budget during startup. Unresolved history loads again after reconnection.
+The selected source and successful cached history keep their existing identities.
+
+The new startup regression failed before the correction. After the correction, 59 focused tests
+and six mobile PR-only commit-detail repetitions passed. Browser retries were disabled.
+The frontend build, strict ESLint, and TypeScript checks passed.
+[Task 02](task-02-checkout-relation-and-action-semantics.md#ci-correction-connection-readiness) records the exact validation commands.
+The full hosted CI run and browser artifact audit remain pending for delivery.

@@ -27,6 +27,12 @@ current provider head, complete authoritative provider commits, local head,
 upstream head, and upstream-relative counts. Display-only retained provider
 commits remain excluded from authorization.
 
+The provider-history hook waits for a registered WebSocket client and a connected
+transport before it starts a request. Connection startup does not consume the
+provider retry budget. After reconnection, the hook loads unresolved history for
+the selected source. Successful cached history keeps its existing source identity.
+
+
 The provider API and local remote-tracking ref are independent snapshots.
 Counts against one upstream head cannot establish ancestry against a different
 provider head. Base-relative counts never resolve that mismatch.

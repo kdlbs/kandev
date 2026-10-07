@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useSyncExternalStore } from "react";
 import { useAppStore } from "@/components/state-provider";
+import { useWebSocketClient } from "@/lib/ws/connection";
 import { prCommitsResource, type PRCommitsState } from "./pr-commits-resource";
 
 export type KeyedPRCommitsState = PRCommitsState & { sourceKey: string };
@@ -41,6 +42,9 @@ export function usePRCommits(
   refreshKey?: string | null,
 ) {
   const workspaceId = useAppStore((s) => s.workspaces.activeId);
+  const connectionStatus = useAppStore((s) => s.connection.status);
+  const client = useWebSocketClient();
+  const connected = client !== null && connectionStatus === "connected";
   const hasParams = !!workspaceId && !!owner && !!repo && !!prNumber;
   const sourceKey = hasParams
     ? `${workspaceId}/${owner}/${repo}/${prNumber}/${refreshKey ?? ""}`
@@ -67,16 +71,21 @@ export function usePRCommits(
   const paramsKeyRef = useRef<string>("");
 
   const refresh = useCallback(async () => {
-    if (!request) return null;
+    if (!request || !connected) return null;
     return prCommitsResource.load(request, true);
-  }, [request]);
+  }, [request, connected]);
 
   useEffect(() => {
+    // Connection startup is not a provider failure and must not consume its retry.
+    if (!connected) {
+      paramsKeyRef.current = "";
+      return;
+    }
     if (sourceKey === paramsKeyRef.current) return;
     paramsKeyRef.current = sourceKey;
     if (!request) return;
     void prCommitsResource.load(request);
-  }, [request, sourceKey]);
+  }, [request, sourceKey, connected]);
 
   return { ...resolvePRCommitsView({ sourceKey, ...snapshot }, sourceKey), refresh };
 }
