@@ -802,9 +802,9 @@ jobs:
     needs: changes
     if: needs.changes.outputs.run == 'true'
     runs-on: windows-latest
-    # Isolate the large process suite from build/vet and targeted native checks
-    # so each cold runner has time for its tests and cache upload.
-    timeout-minutes: 40
+    # Isolate the large process suite from build/vet and targeted native checks.
+    # A cold Windows race build and test can exceed 60 minutes before cleanup.
+    timeout-minutes: 90
     strategy:
       fail-fast: false
       matrix:

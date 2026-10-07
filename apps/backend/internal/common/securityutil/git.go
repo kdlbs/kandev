@@ -116,6 +116,8 @@ func IsKnownSafeGitFlag(arg string) bool {
 		"--no-color",
 		"--no-ext-diff",
 		"--no-textconv",
+		"-z",
+		"--untracked-files=no",
 	}
 	for _, safe := range exactFlags {
 		if arg == safe {

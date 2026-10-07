@@ -3,13 +3,22 @@ package controller
 import (
 	"context"
 	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/jmoiron/sqlx"
 	"github.com/kandev/kandev/internal/agent/agents"
+	"github.com/kandev/kandev/internal/agent/discovery"
+	"github.com/kandev/kandev/internal/agent/managedruntime"
 	"github.com/kandev/kandev/internal/agent/settings/dto"
+	"github.com/kandev/kandev/internal/db"
+	systemsettings "github.com/kandev/kandev/internal/system/settings"
 	ws "github.com/kandev/kandev/pkg/websocket"
 )
 
@@ -227,6 +236,178 @@ func TestEnqueueInstall_EmptyScript(t *testing.T) {
 	if !errors.Is(err, ErrInstallScriptEmpty) {
 		t.Fatalf("err = %v, want ErrInstallScriptEmpty", err)
 	}
+}
+
+func TestOpenCodeInstallPreparesSelectedManagedRuntime(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("install fixture uses a POSIX shell")
+	}
+	for _, tc := range []struct {
+		family managedruntime.OpenCodeFamily
+		source managedruntime.OpenCodeSource
+	}{
+		{family: managedruntime.OpenCodeFamilyV2, source: managedruntime.OpenCodeSourceManaged},
+		{family: managedruntime.OpenCodeFamilyV1, source: managedruntime.OpenCodeSourceManaged},
+		{family: managedruntime.OpenCodeFamilyV1, source: managedruntime.OpenCodeSourceNative},
+	} {
+		t.Run(string(tc.family)+"-"+string(tc.source), func(t *testing.T) {
+			settings, closeSettings := openInstallSettingsStore(t)
+			t.Cleanup(closeSettings)
+			selectionStore := managedruntime.NewStore(settings)
+			agent := agents.NewOpenCodeACP()
+			agent.SetOpenCodeSelectionReader(selectionStore)
+			defaultsV1, err := agent.ManagedNPMRuntimeForFamily(managedruntime.OpenCodeFamilyV1)
+			if err != nil {
+				t.Fatalf("resolve v1 runtime spec: %v", err)
+			}
+			defaultsV2, err := agent.ManagedNPMRuntimeForFamily(managedruntime.OpenCodeFamilyV2)
+			if err != nil {
+				t.Fatalf("resolve v2 runtime spec: %v", err)
+			}
+			defaults := managedruntime.OpenCodeRuntimeDefaults{
+				V1Package: defaultsV1.Package, V1Version: defaultsV1.DefaultVersionOrPinned(),
+				V2Package: defaultsV2.Package, V2Version: defaultsV2.DefaultVersionOrPinned(),
+			}
+			selection, err := selectionStore.BootstrapOpenCode(context.Background(), defaults, managedruntime.OpenCodeBootstrapEvidence{})
+			if err != nil {
+				t.Fatalf("bootstrap fresh selection: %v", err)
+			}
+			if tc.family == managedruntime.OpenCodeFamilyV1 {
+				selection.Family = managedruntime.OpenCodeFamilyV1
+				selection.Source = tc.source
+				selection.Package = defaults.V1Package
+				if tc.source == managedruntime.OpenCodeSourceManaged {
+					selection.SelectedVersion = defaults.V1Version
+				} else {
+					selection.SelectedVersion = ""
+				}
+				selection.AppliedDefaultVersion = defaults.V1Version
+				selection.Revision++
+				if err := selectionStore.SaveOpenCodeSelection(context.Background(), 1, selection); err != nil {
+					t.Fatalf("select v1 runtime: %v", err)
+				}
+			}
+			spec, err := agent.ManagedNPMRuntimeForFamily(tc.family)
+			if err != nil {
+				t.Fatalf("resolve selected runtime spec: %v", err)
+			}
+			version := spec.DefaultVersionOrPinned()
+			packageSpec := spec.PackageSpec(version)
+			cacheRoot := t.TempDir()
+			binDir := t.TempDir()
+			homeDir := t.TempDir()
+			managedTempRoot := t.TempDir()
+			argsPath := filepath.Join(t.TempDir(), "npm-args")
+			if _, err := os.Lstat(filepath.Join(homeDir, ".kandev")); !errors.Is(err, os.ErrNotExist) {
+				t.Fatalf("HOME/.kandev exists before install, lstat error = %v", err)
+			}
+			fakeNPM := fmt.Sprintf("#!/bin/sh\n" +
+				"printf '%%s\\n' \"$@\" >> \"$NPM_ARGS_FILE\"\n" +
+				"if [ \"$1\" = \"--prefix\" ] && [ \"$3\" = exec ] && [ ! -d \"$2\" ]; then echo \"npm prefix does not exist: $2\" >&2; exit 17; fi\n" +
+				"if [ \"$1\" = config ]; then printf '%%s\\n' \"$NPM_CACHE_ROOT\"; exit 0; fi\n" +
+				"for arg do if [ \"$arg\" = \"--package=$EXPECTED_PACKAGE_SPEC\" ]; then /bin/mkdir -p \"$NPM_CACHE_ROOT/_npx/$EXPECTED_CACHE_KEY\"; exit 0; fi; done\n" +
+				"exit 0\n")
+			if err := os.WriteFile(filepath.Join(binDir, "npm"), []byte(fakeNPM), 0o755); err != nil {
+				t.Fatalf("write npm fixture: %v", err)
+			}
+			if tc.source == managedruntime.OpenCodeSourceNative {
+				if err := os.WriteFile(filepath.Join(binDir, "opencode"), []byte("#!/bin/sh\nprintf '1.18.5\\n'\n"), 0o755); err != nil {
+					t.Fatalf("write native OpenCode fixture: %v", err)
+				}
+			}
+			t.Setenv("PATH", binDir+string(os.PathListSeparator)+"/bin")
+			t.Setenv("HOME", homeDir)
+			t.Setenv("TMPDIR", managedTempRoot)
+			t.Setenv("NPM_CACHE_ROOT", cacheRoot)
+			t.Setenv("NPM_ARGS_FILE", argsPath)
+			t.Setenv("EXPECTED_PACKAGE_SPEC", packageSpec)
+			t.Setenv("EXPECTED_CACHE_KEY", managedruntime.NpxExecutionCacheKey(packageSpec))
+
+			controller, _ := newInstallController(t, agent)
+			controller.SetManagedRuntimeSelectionStore(selectionStore)
+			displayedScript, err := controller.installScriptForSettings(context.Background(), agent)
+			if err != nil {
+				t.Fatalf("resolve displayed install command: %v", err)
+			}
+			displayedAgent := controller.buildAvailableAgentDTO(context.Background(), agent, discovery.Availability{}, time.Now())
+			if displayedAgent.InstallScript != displayedScript {
+				t.Fatalf("agent DTO install command = %q, want selected command %q", displayedAgent.InstallScript, displayedScript)
+			}
+			var enqueuedScript string
+			withStubStreamingRunner(t, func(ctx context.Context, script string, onChunk func(string)) error {
+				enqueuedScript = script
+				return defaultStreamingInstallRunner(ctx, script, onChunk)
+			})
+			job, err := controller.EnqueueInstall(agent.ID())
+			if err != nil {
+				t.Fatalf("EnqueueInstall: %v", err)
+			}
+			final := waitForStatus(t, controller, job.JobID, dto.InstallJobStatusSucceeded, dto.InstallJobStatusFailed)
+			if final.Status != dto.InstallJobStatusSucceeded {
+				t.Fatalf("install job failed: %s (output: %s)", final.Error, final.Output)
+			}
+			if tc.source == managedruntime.OpenCodeSourceManaged {
+				if !strings.Contains(displayedScript, managedruntime.NPMProjectPrefix) {
+					t.Fatalf("displayed install command %q omits the managed prefix marker", displayedScript)
+				}
+				if strings.Contains(enqueuedScript, managedruntime.NPMProjectPrefix) {
+					t.Fatalf("queued install command %q retains the unprepared managed prefix", enqueuedScript)
+				}
+			} else if enqueuedScript != displayedScript {
+				t.Fatalf("displayed install command %q differs from queued command %q", displayedScript, enqueuedScript)
+			}
+			installed, err := agent.IsInstalled(context.Background())
+			if err != nil || !installed.Available {
+				t.Fatalf("selected %s/%s install available = %v, err=%v", tc.family, tc.source, installed, err)
+			}
+			args, err := os.ReadFile(argsPath)
+			if err != nil {
+				t.Fatalf("read npm argv: %v", err)
+			}
+			switch tc.source {
+			case managedruntime.OpenCodeSourceNative:
+				if !strings.Contains(string(args), "install\n-g\n"+packageSpec) {
+					t.Fatalf("native install npm arguments = %q, want exact global package", args)
+				}
+			case managedruntime.OpenCodeSourceManaged:
+				if !strings.Contains(string(args), "--package="+packageSpec) || strings.Contains(string(args), "\n-g\n") {
+					t.Fatalf("managed install npm arguments = %q, want exact managed package without global install", args)
+				}
+				installArgs := strings.SplitN(string(args), "\n", 4)
+				if len(installArgs) < 3 || installArgs[0] != "--prefix" || installArgs[2] != "exec" {
+					t.Fatalf("managed install npm arguments = %q, want an isolated prefix before exec", args)
+				}
+				if !filepath.IsAbs(installArgs[1]) || installArgs[1] == managedruntime.NPMProjectPrefix {
+					t.Fatalf("managed npm prefix = %q, want the prepared absolute directory", installArgs[1])
+				}
+				if info, err := os.Stat(installArgs[1]); err != nil || !info.IsDir() {
+					t.Fatalf("prepared managed npm prefix %q is not a directory: %v", installArgs[1], err)
+				}
+				managedTempPrefix := filepath.Clean(managedTempRoot) + string(filepath.Separator)
+				if !strings.HasPrefix(filepath.Clean(installArgs[1])+string(filepath.Separator), managedTempPrefix) {
+					t.Fatalf("executed npm prefix %q is outside managed temp root %q", installArgs[1], managedTempRoot)
+				}
+				if _, err := os.Lstat(filepath.Join(homeDir, ".kandev")); !errors.Is(err, os.ErrNotExist) {
+					t.Fatalf("managed install touched HOME/.kandev, lstat error = %v", err)
+				}
+			}
+		})
+	}
+}
+
+func openInstallSettingsStore(t *testing.T) (*systemsettings.Store, func()) {
+	t.Helper()
+	database, err := db.OpenSQLite(filepath.Join(t.TempDir(), "settings.db"))
+	if err != nil {
+		t.Fatalf("open settings database: %v", err)
+	}
+	dbHandle := sqlx.NewDb(database, "sqlite3")
+	settings, err := systemsettings.NewStore(db.NewPool(dbHandle, dbHandle))
+	if err != nil {
+		_ = dbHandle.Close()
+		t.Fatalf("create settings store: %v", err)
+	}
+	return settings, func() { _ = dbHandle.Close() }
 }
 
 func TestEnqueueInstall_NoJobStore(t *testing.T) {

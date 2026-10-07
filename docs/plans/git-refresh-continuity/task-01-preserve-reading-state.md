@@ -7,6 +7,7 @@ depends_on: []
 plan: "plan.md"
 requirements:
   - REQ-PLATFORM-WORKSPACE-GIT-STATUS-001
+  - REQ-PLATFORM-GIT-REFRESH-CONTINUITY-001
 acceptance_criteria:
   - AC-PLATFORM-WORKSPACE-GIT-STATUS-001.10
   - AC-PLATFORM-WORKSPACE-GIT-STATUS-001.11
@@ -15,9 +16,9 @@ acceptance_criteria:
   - AC-PLATFORM-WORKSPACE-GIT-STATUS-001.25
   - AC-PLATFORM-WORKSPACE-GIT-STATUS-001.27
   - AC-PLATFORM-WORKSPACE-GIT-STATUS-001.29
-  - AC-PLATFORM-WORKSPACE-GIT-STATUS-001.47
-  - AC-PLATFORM-WORKSPACE-GIT-STATUS-001.48
-  - AC-PLATFORM-WORKSPACE-GIT-STATUS-001.49
+  - AC-PLATFORM-GIT-REFRESH-CONTINUITY-001.1
+  - AC-PLATFORM-GIT-REFRESH-CONTINUITY-001.2
+  - AC-PLATFORM-GIT-REFRESH-CONTINUITY-001.3
 system_design:
   - ../../specs/platform/system-design/git-refresh-continuity.md
 ---
@@ -49,7 +50,7 @@ Backend publication, polling/retry redesign, new dependencies, persistent cachin
 
 ## ASCII UI preview
 
-UI-01 and UI-02 excerpts from the [full preview](plan.md#ascii-ui-preview), covering `.47` through `.49`:
+UI-01 and UI-02 excerpts from the [full preview](plan.md#ascii-ui-preview), covering the three Git refresh continuity criteria:
 
 ```text
 DESKTOP
@@ -120,7 +121,8 @@ See the plan. Retention eligibility, stale patch actions, renderer layout timing
 
 ## Inputs
 
-- [Requirement](../../specs/platform/requirements/workspace-git-status.md), especially `.21`, `.25`, `.27`, and `.47` through `.49`.
+- [Workspace status requirement](../../specs/platform/requirements/workspace-git-status.md), especially `.21`, `.25`, and `.27`.
+- [Git refresh continuity requirement](../../specs/platform/requirements/git-refresh-continuity.md).
 - [Design](../../specs/platform/system-design/git-refresh-continuity.md) and its linked decision.
 - Existing raw-store, layer-selection, auto-mark, and enrichment-gate tests.
 - `apps/web/AGENTS.md`, `/tdd`, `/mobile-parity`, and `/e2e` guidance.

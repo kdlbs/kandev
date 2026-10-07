@@ -1042,6 +1042,15 @@ type ResumeOptions struct {
 	// workspace idle policy. It protects focus recovery from reviving a manual
 	// stop, cancellation, archive, or workflow-owned session.
 	RequireIdleSuspensionProvenance bool
+	// NoInitialPrompt keeps the task description out of a fresh recovery boot;
+	// the owning continuation delivers the captured submission after readiness.
+	NoInitialPrompt bool
+	// HoldForInitialPrompt keeps boot-ready queue draining behind an explicit
+	// fresh-start submission until its provider admission resolves.
+	HoldForInitialPrompt bool
+	// InitialPromptSubmission supplies the exact user input used for the one
+	// original-message backfill associated with fresh-start replay.
+	InitialPromptSubmission *models.InitialPromptSubmission
 	// Origin carries the session ceiling's explicit automatic/manual launch
 	// classification ("automatic" or "manual") from the caller into
 	// ResumeTaskSessionWithOptions's admission gate. A plain string rather
@@ -1833,6 +1842,9 @@ func newResumeLaunchRequest(
 		IsPassthrough:                session.IsPassthrough,
 		TaskEnvironmentID:            session.TaskEnvironmentID,
 		AllowBranchReplacement:       options.AllowBranchReplacement,
+	}
+	if options.NoInitialPrompt {
+		req.TaskDescription = ""
 	}
 
 	metadata := map[string]interface{}{}

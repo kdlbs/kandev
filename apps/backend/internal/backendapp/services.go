@@ -321,6 +321,10 @@ func initManagedRuntimeAndDiscovery(
 		return nil, nil, fmt.Errorf("initialize managed runtime settings: required store is unavailable")
 	}
 	managedRuntimeSelections := managedruntime.NewStore(managedRuntimeSettings)
+	if err := bootstrapOpenCodeSelection(ctx, managedRuntimeSelections, repos, agentRegistry, log); err != nil {
+		return nil, nil, fmt.Errorf("OpenCode runtime selection bootstrap: %w", err)
+	}
+	agentRegistry.SetManagedRuntimeSelectionStore(managedRuntimeSelections)
 	if err := reconcileManagedRuntimeDefaults(ctx, managedRuntimeSelections, agentRegistry, log); err != nil {
 		return nil, nil, fmt.Errorf("reconcile managed runtime defaults: %w", err)
 	}

@@ -3563,6 +3563,308 @@
           ]
         }
       ]
+    },
+    {
+      "name": "running-first-activity",
+      "tasks": [
+        {
+          "workspace_id": "conformance",
+          "workflow_id": "wf-a",
+          "workflow_step_id": "step-a",
+          "state": "TODO",
+          "position": 0,
+          "created_at": "2026-09-29T12:00:00Z",
+          "updated_at": "2026-09-29T12:00:00Z",
+          "metadata": {},
+          "origin": "",
+          "id": "root-old",
+          "title": "Older root",
+          "summary": { "last_activity_at": "2026-09-29T12:00:00Z" }
+        },
+        {
+          "workspace_id": "conformance",
+          "workflow_id": "wf-a",
+          "workflow_step_id": "step-a",
+          "parent_id": "root-old",
+          "state": "COMPLETED",
+          "position": 0,
+          "created_at": "2026-09-29T12:00:00Z",
+          "updated_at": "2026-09-29T12:07:00Z",
+          "metadata": {},
+          "origin": "",
+          "id": "running-child",
+          "title": "Running child",
+          "summary": {
+            "last_activity_at": "2026-09-29T12:07:00Z",
+            "primary_session": { "state": "RUNNING" }
+          }
+        },
+        {
+          "workspace_id": "conformance",
+          "workflow_id": "wf-a",
+          "workflow_step_id": "step-a",
+          "parent_id": "root-old",
+          "state": "TODO",
+          "position": 0,
+          "created_at": "2026-09-29T12:00:00Z",
+          "updated_at": "2026-09-29T12:06:00Z",
+          "metadata": {},
+          "origin": "",
+          "id": "manual-idle-child",
+          "title": "Manual idle child",
+          "summary": { "last_activity_at": "2026-09-29T12:06:00Z" }
+        },
+        {
+          "workspace_id": "conformance",
+          "workflow_id": "wf-b",
+          "workflow_step_id": "step-b",
+          "state": "TODO",
+          "position": 0,
+          "created_at": "2026-09-29T12:00:00Z",
+          "updated_at": "2026-09-29T12:05:00Z",
+          "metadata": {},
+          "origin": "",
+          "id": "running-peer",
+          "title": "Running peer",
+          "summary": {
+            "last_activity_at": "2026-09-29T12:05:00Z",
+            "primary_session": { "state": "RUNNING" }
+          }
+        },
+        {
+          "workspace_id": "conformance",
+          "workflow_id": "wf-a",
+          "workflow_step_id": "step-a",
+          "state": "COMPLETED",
+          "position": 0,
+          "created_at": "2026-09-29T12:00:00Z",
+          "updated_at": "2026-09-29T12:04:00Z",
+          "metadata": {},
+          "origin": "",
+          "id": "waiting-new",
+          "title": "Newest waiting",
+          "summary": {
+            "last_activity_at": "2026-09-29T12:04:00Z",
+            "primary_session": { "state": "WAITING_FOR_INPUT" }
+          }
+        },
+        {
+          "workspace_id": "conformance",
+          "workflow_id": "wf-a",
+          "workflow_step_id": "step-a",
+          "state": "IN_PROGRESS",
+          "position": 0,
+          "created_at": "2026-09-29T12:00:00Z",
+          "updated_at": "2026-09-29T12:03:00Z",
+          "metadata": {},
+          "origin": "",
+          "id": "workflow-active",
+          "title": "Workflow active without session",
+          "summary": { "last_activity_at": "2026-09-29T12:03:00Z" }
+        },
+        {
+          "workspace_id": "conformance",
+          "workflow_id": "wf-a",
+          "workflow_step_id": "step-a",
+          "state": "TODO",
+          "position": 0,
+          "created_at": "2026-09-29T12:00:00Z",
+          "updated_at": "2026-09-29T12:02:00Z",
+          "metadata": {},
+          "origin": "",
+          "id": "idle-old",
+          "title": "Old idle",
+          "summary": { "last_activity_at": "2026-09-29T12:02:00Z" }
+        }
+      ],
+      "cases": [
+        {
+          "name": "fixed-running-first-descending",
+          "query": {
+            "filters": [],
+            "sort": { "key": "runningFirstActivity", "direction": "desc" },
+            "group": "none",
+            "collapsed_group_keys": [],
+            "collapsed_task_ids": [],
+            "page": 1,
+            "page_size": 100,
+            "locale": "en"
+          },
+          "expected_task_ids": [
+            "root-old", "running-child", "manual-idle-child", "running-peer",
+            "waiting-new", "workflow-active", "idle-old"
+          ]
+        },
+        {
+          "name": "fixed-running-first-ascending",
+          "query": {
+            "filters": [],
+            "sort": { "key": "runningFirstActivity", "direction": "asc" },
+            "group": "none",
+            "collapsed_group_keys": [],
+            "collapsed_task_ids": [],
+            "page": 1,
+            "page_size": 100,
+            "locale": "en"
+          },
+          "expected_task_ids": [
+            "root-old", "running-child", "manual-idle-child", "running-peer",
+            "waiting-new", "workflow-active", "idle-old"
+          ]
+        },
+        {
+          "name": "filtered-running-child-does-not-promote-root",
+          "query": {
+            "filters": [
+              { "dimension": "titleMatch", "op": "in", "value": ["Older root", "Newest waiting"] }
+            ],
+            "sort": { "key": "runningFirstActivity", "direction": "desc" },
+            "group": "none",
+            "collapsed_group_keys": [],
+            "collapsed_task_ids": [],
+            "page": 1,
+            "page_size": 100,
+            "locale": "en"
+          },
+          "expected_task_ids": ["waiting-new", "root-old"]
+        },
+        {
+          "name": "collapsed-root-keeps-running-rank",
+          "query": {
+            "filters": [],
+            "sort": { "key": "runningFirstActivity", "direction": "desc" },
+            "group": "none",
+            "collapsed_group_keys": [],
+            "collapsed_task_ids": ["root-old"],
+            "page": 1,
+            "page_size": 100,
+            "locale": "en"
+          },
+          "expected_task_ids": ["root-old", "running-peer", "waiting-new", "workflow-active", "idle-old"]
+        },
+        {
+          "name": "pinned-root-keeps-precedence",
+          "query": {
+            "filters": [],
+            "sort": { "key": "runningFirstActivity", "direction": "desc" },
+            "group": "none",
+            "collapsed_group_keys": [],
+            "collapsed_task_ids": [],
+            "page": 1,
+            "page_size": 100,
+            "locale": "en"
+          },
+          "preferences": { "pinned_task_ids": ["waiting-new"] },
+          "expected_task_ids": [
+            "waiting-new", "root-old", "running-child", "manual-idle-child",
+            "running-peer", "workflow-active", "idle-old"
+          ]
+        },
+        {
+          "name": "manual-child-order-keeps-precedence",
+          "query": {
+            "filters": [],
+            "sort": { "key": "runningFirstActivity", "direction": "desc" },
+            "group": "none",
+            "collapsed_group_keys": [],
+            "collapsed_task_ids": [],
+            "page": 1,
+            "page_size": 100,
+            "locale": "en"
+          },
+          "preferences": { "subtask_order_by_parent_id": { "root-old": ["manual-idle-child", "running-child"] } },
+          "expected_task_ids": [
+            "root-old", "manual-idle-child", "running-child", "running-peer",
+            "waiting-new", "workflow-active", "idle-old"
+          ]
+        },
+        {
+          "name": "group-heading-order-is-preserved",
+          "query": {
+            "filters": [],
+            "sort": { "key": "runningFirstActivity", "direction": "desc" },
+            "group": "workflow",
+            "collapsed_group_keys": [],
+            "collapsed_task_ids": [],
+            "page": 1,
+            "page_size": 100,
+            "locale": "en"
+          },
+          "expected_task_ids": [
+            "root-old", "running-child", "manual-idle-child", "waiting-new",
+            "workflow-active", "idle-old", "running-peer"
+          ],
+          "expected_group_keys": ["wf-a", "wf-b"]
+        }
+      ]
+    },
+    {
+      "name": "running-sort-missing-primary-summary",
+      "tasks": [
+        {
+          "workspace_id": "conformance",
+          "workflow_id": "wf-a",
+          "workflow_step_id": "step-a",
+          "state": "TODO",
+          "position": 0,
+          "created_at": "2026-09-29T12:00:00Z",
+          "updated_at": "2026-09-29T12:02:00Z",
+          "metadata": {},
+          "origin": "",
+          "id": "raw-state-running",
+          "title": "Raw state only",
+          "executor_type": "local",
+          "primary_session_state": "RUNNING",
+          "summary": { "last_activity_at": "2026-09-29T12:02:00Z" }
+        },
+        {
+          "workspace_id": "conformance",
+          "workflow_id": "wf-a",
+          "workflow_step_id": "step-a",
+          "state": "TODO",
+          "position": 0,
+          "created_at": "2026-09-29T12:00:00Z",
+          "updated_at": "2026-09-29T12:01:00Z",
+          "metadata": {},
+          "origin": "",
+          "id": "summary-running",
+          "title": "Summary running",
+          "summary": {
+            "last_activity_at": "2026-09-29T12:01:00Z",
+            "primary_session": { "state": "RUNNING" }
+          }
+        },
+        {
+          "workspace_id": "conformance",
+          "workflow_id": "wf-a",
+          "workflow_step_id": "step-a",
+          "state": "TODO",
+          "position": 0,
+          "created_at": "2026-09-29T12:00:00Z",
+          "updated_at": "2026-09-29T12:03:00Z",
+          "metadata": {},
+          "origin": "",
+          "id": "recent-idle",
+          "title": "Recent idle",
+          "summary": { "last_activity_at": "2026-09-29T12:03:00Z" }
+        }
+      ],
+      "cases": [
+        {
+          "name": "missing-primary-summary-does-not-use-task-session-state",
+          "query": {
+            "filters": [],
+            "sort": { "key": "runningFirstActivity", "direction": "desc" },
+            "group": "none",
+            "collapsed_group_keys": [],
+            "collapsed_task_ids": [],
+            "page": 1,
+            "page_size": 100,
+            "locale": "en"
+          },
+          "expected_task_ids": ["summary-running", "recent-idle", "raw-state-running"]
+        }
+      ]
     }
   ]
 }

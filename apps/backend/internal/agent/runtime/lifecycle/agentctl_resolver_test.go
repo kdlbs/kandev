@@ -22,6 +22,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/common/logger"
@@ -591,6 +592,10 @@ func TestAgentctlResolverCachePruneDoesNotDelayDeadlineBoundLaunch(t *testing.T)
 	}
 	unblockInventory()
 	waitForResolverCachePrune(t, resolver)
+	require.Eventually(t, func() bool {
+		markers, err := filepath.Glob(filepath.Join(home, "cache", remoteHelperCacheDir, remoteHelperCacheActiveDir, "lease-*.json"))
+		return err == nil && len(markers) == 0
+	}, 5*time.Second, 10*time.Millisecond, "canceled launch must release its cache lease before temporary directory cleanup")
 }
 
 func waitForResolverCachePrune(t *testing.T, resolver *AgentctlResolver) {

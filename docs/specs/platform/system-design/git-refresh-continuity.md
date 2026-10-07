@@ -3,6 +3,7 @@ status: draft
 system: platform
 requirements:
   - REQ-PLATFORM-WORKSPACE-GIT-STATUS-001
+  - REQ-PLATFORM-GIT-REFRESH-CONTINUITY-001
 created: 2026-10-06
 owners:
   - kandev
@@ -14,13 +15,13 @@ owners:
 
 Platform owns the Git observation and freshness contract, including its visible continuity.
 Tasks supplies environment bindings. UI supplies the existing desktop panels and phone drawer.
-This design extends [workspace status](workspace-git-status.md) without changing backend publication or wire formats.
+This design extends [workspace status](workspace-git-status.md) and specifies [Git refresh continuity](../requirements/git-refresh-continuity.md) without changing backend publication or wire formats.
 
 | Criteria | Design section |
 | --- | --- |
-| 001.21, 001.25, 001.27, 001.47 | Display projection and scope |
-| 001.24, 001.29, 001.48 | Mounted viewer and freshness |
-| 001.49 | Scroll continuity |
+| 001.21, 001.25, 001.27; AC-PLATFORM-GIT-REFRESH-CONTINUITY-001.1 | Display projection and scope |
+| 001.24, 001.29; AC-PLATFORM-GIT-REFRESH-CONTINUITY-001.1 | Mounted viewer and freshness |
+| AC-PLATFORM-GIT-REFRESH-CONTINUITY-001.2, 001.3 | Scroll continuity |
 | 001.10, 001.11, 001.33 | Scope and readiness |
 
 ## Source evidence

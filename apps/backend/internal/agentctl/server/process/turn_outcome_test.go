@@ -302,3 +302,57 @@ func TestForwardUpdatesStampsControlTurnIDOnDeliveredCopy(t *testing.T) {
 		t.Fatal("timed out waiting for the complete event to be forwarded")
 	}
 }
+
+// Terminal publication must finish while shutdown owns the lifecycle lock.
+// @covers AC-EXECUTORS-SURVIVAL-001.10, AC-EXECUTORS-SURVIVAL-004.1, AC-EXECUTORS-SURVIVAL-004.4
+func TestSendUpdateBlockingDoesNotWaitForLifecycleLock(t *testing.T) {
+	for _, name := range []string{"no_recorder", "with_recorder"} {
+		t.Run(name, func(t *testing.T) {
+			m := &Manager{updatesCh: make(chan adapter.AgentEvent, 1)}
+			recorder := &fakeTurnOutcomeRecorder{}
+			var wantTurnID int64
+			if name == "with_recorder" {
+				m.SetTurnOutcomeRecorder("instance-1", recorder)
+				wantTurnID = 1
+			}
+
+			m.mu.Lock()
+			done := make(chan struct{})
+			var sent bool
+			m.wg.Add(1)
+			t.Cleanup(func() {
+				m.mu.Unlock()
+				select {
+				case <-done:
+				case <-time.After(5 * time.Second):
+					t.Error("terminal publisher did not join after lifecycle lock release")
+				}
+			})
+			go func() {
+				defer close(done)
+				defer m.wg.Done()
+				sent = m.sendUpdateBlocking(adapter.AgentEvent{
+					Type: adapter.EventTypeError, Error: "Agent process exited with code 1",
+				})
+			}()
+
+			select {
+			case <-done:
+			case <-time.After(5 * time.Second):
+				t.Fatal("terminal publication blocked behind lifecycle lock")
+			}
+			if !sent {
+				t.Fatal("terminal publication did not deliver its event")
+			}
+			delivered := <-m.updatesCh
+			if delivered.Type != adapter.EventTypeError || delivered.Error != "Agent process exited with code 1" || delivered.ControlTurnID != wantTurnID {
+				t.Fatalf("delivered event = %+v, want exit error and turn ID %d", delivered, wantTurnID)
+			}
+			if wantTurnID != 0 {
+				if len(recorder.calls) != 1 || recorder.calls[0].instanceID != "instance-1" || recorder.calls[0].event.ControlTurnID != 0 {
+					t.Fatalf("retained calls = %+v, want instance-1 with an unstamped event", recorder.calls)
+				}
+			}
+		})
+	}
+}

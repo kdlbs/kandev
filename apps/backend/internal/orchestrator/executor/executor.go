@@ -712,12 +712,13 @@ type LaunchOptions struct {
 	// OnInitialPromptAccepted transfers startup ownership after lifecycle reports
 	// that the initial prompt was accepted by the provider. OnInitialPromptFailed
 	// closes that ownership when delivery fails before acceptance.
-	OnInitialPromptAccepted func(executionID string)
-	OnInitialPromptFailed   func()
-	Prompt                  string
-	PriorACPSession         string // ACP session ID to resume for the same concrete profile
-	WorkflowStepID          string
-	StartAgent              bool
+	OnInitialPromptAccepted     func(executionID string)
+	OnInitialPromptFailed       func()
+	BeforeInitialPromptDispatch func(executionID string) error
+	Prompt                      string
+	PriorACPSession             string // ACP session ID to resume for the same concrete profile
+	WorkflowStepID              string
+	StartAgent                  bool
 	// RefuseIfAgentRunning makes peer-message admission fail closed when the
 	// selected session already has an active agent. Other internal launch paths
 	// retain their existing workspace reuse behavior.
@@ -950,6 +951,13 @@ type SessionStartingWithOptionsFunc func(
 // when another teardown path already owns that execution.
 type ExecutionCleanupClaimFunc func(sessionID, agentExecutionID string) bool
 
+// CancelledResumeExecutionCleanupFunc delegates exact startup teardown to the
+// orchestrator so service cancellation and late process startup share ownership.
+type CancelledResumeExecutionCleanupFunc func(
+	ctx context.Context,
+	taskID, sessionID, agentExecutionID, resumeAttemptID string,
+)
+
 // ExecutionStopOwnerRegistrationFunc records that an explicit teardown path
 // owns one exact session execution. Registration is advisory: the explicit
 // stop still runs, while orphan cleanup uses the record to avoid duplicating it.
@@ -1115,6 +1123,9 @@ type Executor struct {
 	// orchestrator so coordinator graceful stop and launch cleanup cannot both
 	// tear down the same execution.
 	onExecutionCleanupClaim ExecutionCleanupClaimFunc
+	// Callback for cancelled resume startup cleanup, which must share the
+	// orchestrator's retryable exact-execution teardown claim.
+	onCancelledResumeExecutionCleanup CancelledResumeExecutionCleanupFunc
 
 	// Callback for registering explicit exact-execution teardown ownership before
 	// a legacy stop persists CANCELLED. The requested stop always runs.
@@ -1512,6 +1523,12 @@ func (e *Executor) SetOnSessionStartingWithOptions(fn SessionStartingWithOptions
 // SetOnExecutionCleanupClaim sets the exact-execution forced cleanup arbiter.
 func (e *Executor) SetOnExecutionCleanupClaim(fn ExecutionCleanupClaimFunc) {
 	e.onExecutionCleanupClaim = fn
+}
+
+// SetOnCancelledResumeExecutionCleanup delegates cancelled startup teardown to
+// the orchestrator's shared exact-execution cleanup owner.
+func (e *Executor) SetOnCancelledResumeExecutionCleanup(fn CancelledResumeExecutionCleanupFunc) {
+	e.onCancelledResumeExecutionCleanup = fn
 }
 
 // SetOnExecutionStopOwnerRegistration sets the explicit-stop ownership registrar.

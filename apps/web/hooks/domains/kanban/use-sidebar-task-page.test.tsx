@@ -3,10 +3,12 @@ import { StrictMode, type ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "@/lib/api/client";
 import { querySidebarTasks } from "@/lib/api/domains/kanban-api";
+import { createStore } from "zustand/vanilla";
 import type { SidebarTaskPageResponse, SidebarTaskQuery } from "@/lib/types/http";
 import { useSidebarTaskPage } from "./use-sidebar-task-page";
 import { sidebarTaskPageCache } from "@/lib/sidebar/sidebar-task-page-cache";
 import type { AppState } from "@/lib/state/store";
+import { registerTasksHandlers } from "@/lib/ws/handlers/tasks";
 
 const mocks = vi.hoisted(() => ({
   state: {
@@ -14,6 +16,12 @@ const mocks = vi.hoisted(() => ({
     workspaceContextGeneration: 1,
     collapsedSubtaskParents: [] as string[],
     sidebarArchivedTasks: { revisionByWorkspaceId: {} as Record<string, number> },
+    userSettings: {
+      sidebarTaskColors: {} as Record<string, string | null>,
+      sidebarTaskColorAutomation: { enabled: false, rules: [] },
+    },
+    repositories: { itemsByWorkspaceId: {} as Record<string, never[]> },
+    kanbanMulti: { snapshots: {} as Record<string, never> },
   },
   view: {
     id: "view-1",
@@ -76,6 +84,67 @@ function deferred<T>() {
   return { promise, resolve };
 }
 
+function statusSummaryMessage(summary: Record<string, unknown>) {
+  return {
+    id: "status-summary-message",
+    type: "notification" as const,
+    action: "task.status_summary.updated" as const,
+    payload: { task_id: "task-activity", workspace_id: "ws-1", status_summary: summary },
+  } as Parameters<
+    NonNullable<ReturnType<typeof registerTasksHandlers>["task.status_summary.updated"]>
+  >[0];
+}
+
+function seedActivitySummaryEventState() {
+  const summary = {
+    revision: 1,
+    updated_at: "2026-10-01T12:00:00Z",
+    last_activity_at: "2026-10-01T12:00:00Z",
+  };
+  const task = {
+    id: "task-activity",
+    workspaceId: "ws-1",
+    workflowStepId: "step-1",
+    title: "Activity task",
+    statusSummary: summary,
+  };
+  Object.assign(mocks.state, {
+    kanban: { workflowId: "flow-1", steps: [], tasks: [task] },
+    kanbanMulti: {
+      isLoading: false,
+      snapshots: {
+        "flow-1": {
+          workflowId: "flow-1",
+          workflowName: "Flow",
+          steps: [],
+          tasks: [task],
+        },
+      },
+    },
+    sidebarArchivedTasks: {
+      itemsByWorkspaceId: {},
+      loadedByWorkspaceId: {},
+      loadingByWorkspaceId: {},
+      errorByWorkspaceId: {},
+      revisionByWorkspaceId: { "ws-1": 0 },
+    },
+    sidebarStatusSummaryByWorkspaceId: {},
+  });
+}
+
+function publishActivitySummaryEvent() {
+  const eventStore = createStore<AppState>(() => ({ ...mocks.state }) as unknown as AppState);
+  registerTasksHandlers(eventStore)["task.status_summary.updated"]!(
+    statusSummaryMessage({
+      revision: 2,
+      updated_at: "2026-10-01T12:01:00Z",
+      last_activity_at: "2026-10-01T12:02:00Z",
+      primary_session: { id: "session-1", state: "RUNNING" },
+    }),
+  );
+  Object.assign(mocks.state, eventStore.getState());
+}
+
 afterEach(() => {
   cleanup();
   vi.useRealTimers();
@@ -92,6 +161,39 @@ beforeEach(() => {
 });
 
 describe("useSidebarTaskPage", () => {
+  it("keeps page 2 when a task status-summary event changes ranking data", async () => {
+    seedActivitySummaryEventState();
+    const requests: Array<{
+      query: SidebarTaskQuery;
+      deferred: ReturnType<typeof deferred<SidebarTaskPageResponse>>;
+    }> = [];
+    vi.mocked(querySidebarTasks).mockImplementation((_workspaceId, query) => {
+      const request = deferred<SidebarTaskPageResponse>();
+      requests.push({ query, deferred: request });
+      return request.promise;
+    });
+    const { result, rerender } = renderHook(() => useSidebarTaskPage("ws-1"));
+    await waitFor(() => expect(requests).toHaveLength(1));
+    await act(async () => requests[0]?.deferred.resolve(response(1, false, true)));
+    await waitFor(() => expect(result.current.page).toBe(1));
+
+    act(() => result.current.goToPage(2));
+    await waitFor(() => expect(requests).toHaveLength(2));
+    await act(async () => requests[1]?.deferred.resolve(response(2, true, true)));
+    await waitFor(() => expect(result.current.page).toBe(2));
+
+    vi.useFakeTimers();
+    publishActivitySummaryEvent();
+    act(() => rerender());
+    expect(result.current.page).toBe(2);
+
+    await act(async () => vi.advanceTimersByTimeAsync(250));
+    expect(requests).toHaveLength(3);
+    expect(requests[2]?.query.page).toBe(2);
+    await act(async () => requests[2]?.deferred.resolve(response(2, true, false)));
+    expect(result.current.page).toBe(2);
+  });
+
   it("releases pending reads and drops the duplicate page when shared state takes over", async () => {
     const pending = deferred<SidebarTaskPageResponse>();
     vi.mocked(querySidebarTasks).mockResolvedValueOnce(response(1, false, false));

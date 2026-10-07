@@ -90,6 +90,8 @@ JSON-RPC 2.0 over stdin/stdout between agentctl and agent process. Requests: `in
 
 The adapter prefers advertised `session/resume` for any agent to restore the saved conversation without replaying its history. Both resume and load responses preserve typed configuration and legacy model state. If an agent advertises resume but returns method-not-found, the adapter uses `session/load` only when advertised and the context is still active. Other errors preserve the saved identity. Restore traces contain separate `session.resume` and `session.load` spans for the actual requests.
 
+OpenCode v1 and v2 share the `opencode-acp` identity and can access the same session database. For OpenCode only, a failed restore never falls back to `session/new`, including a recognized missing-session response. Preserve the native session ID and return the load error to the existing Kandev session.
+
 ### ACP permission identity and injected MCP approval
 
 The ACP client preserves `ToolCall.Name` and `ToolCall.Meta` on the internal

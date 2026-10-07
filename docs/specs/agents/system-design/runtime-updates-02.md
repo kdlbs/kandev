@@ -14,6 +14,14 @@ owners:
 
 This design preserves the technical source detail for `REQ-AGENTS-RUNTIME-UPDATES-001` during migration.
 
+## OpenCode adoption amendment
+
+[OpenCode v2 adoption](opencode-v2-adoption.md) defines the proposed exception for trusted package families,
+managed source priority, isolated migration probes, and OpenCode interactive CLI selection.
+Its rules take precedence over the single-package and native-preference descriptions below once implemented.
+Other providers retain their existing behavior. Delivery is tracked in the
+[OpenCode package](../../../plans/opencode-v2-adoption/plan.md).
+
 ## Requirement mapping
 
 | Requirement | Design section |

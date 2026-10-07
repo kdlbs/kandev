@@ -32,6 +32,24 @@ type providerSelectionReader struct {
 	err       error
 }
 
+type providerOpenCodeSelectionStore struct {
+	selection managedruntime.OpenCodeSelection
+	err       error
+}
+
+func (s providerOpenCodeSelectionStore) Get(context.Context, string, string) (managedruntime.Selection, bool, error) {
+	return managedruntime.Selection{}, false, nil
+}
+
+func (s providerOpenCodeSelectionStore) Save(context.Context, string, string, string) error {
+	return nil
+}
+func (s providerOpenCodeSelectionStore) Delete(context.Context, string, string) error { return nil }
+
+func (s providerOpenCodeSelectionStore) GetOpenCodeSelection(context.Context) (managedruntime.OpenCodeSelection, bool, error) {
+	return s.selection, s.err == nil, s.err
+}
+
 func (s providerSelectionReader) Get(
 	context.Context,
 	string,
@@ -190,6 +208,33 @@ func TestResolveProviderCommandFailsClosedOnSelectionReadError(t *testing.T) {
 	args, _, ok := reg.resolveProviderCommand(context.Background(), agent.ID())
 	if ok || args != nil {
 		t.Fatalf("resolveProviderCommand = (%v, ..., %v), want fail closed", args, ok)
+	}
+}
+
+func TestResolveProviderCommandUsesSelectedOpenCodeFamily(t *testing.T) {
+	reg := NewRegistry(newTestLogger())
+	openCode := agents.NewOpenCodeACP()
+	if err := reg.Register(openCode); err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+	reg.SetManagedRuntimeSelectionStore(providerOpenCodeSelectionStore{selection: managedruntime.OpenCodeSelection{
+		SchemaVersion: 1, Family: managedruntime.OpenCodeFamilyV2, Source: managedruntime.OpenCodeSourceManaged,
+		Package: "@opencode/cli", SelectedVersion: "2.0.18", AppliedDefaultVersion: "2.0.18", Revision: 1,
+	}})
+
+	args, _, ok := reg.resolveProviderCommand(context.Background(), openCode.ID())
+	if !ok {
+		t.Fatal("resolveProviderCommand returned !ok")
+	}
+	want := []string{"npx", "--yes", "--prefer-offline", "--prefix", managedruntime.NPMProjectPrefix,
+		"@opencode/cli@2.0.18", "acp", "--print-logs"}
+	if len(args) != len(want) {
+		t.Fatalf("command args = %#v, want %#v", args, want)
+	}
+	for i := range want {
+		if args[i] != want[i] {
+			t.Fatalf("command args = %#v, want %#v", args, want)
+		}
 	}
 }
 

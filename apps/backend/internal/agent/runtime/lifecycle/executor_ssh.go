@@ -14,6 +14,7 @@ import (
 
 	"github.com/kandev/kandev/internal/agent/agents"
 	"github.com/kandev/kandev/internal/agent/executor"
+	"github.com/kandev/kandev/internal/agent/managedruntime"
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/agentctl/server/process"
 	"github.com/kandev/kandev/internal/agentruntime"
@@ -1407,6 +1408,9 @@ func buildRemotePreflightAgentCommand(req *ExecutorCreateRequest) agents.Command
 	return req.AgentConfig.BuildCommand(agents.CommandOptions{
 		Runtime:               agentruntime.RuntimeSSH,
 		ManagedRuntimeVersion: req.ManagedRuntimeVersion,
+		ManagedRuntimeFamily:  req.ManagedRuntimeFamily,
+		ManagedRuntimeSource:  req.ManagedRuntimeSource,
+		NativeRuntimeVersion:  req.NativeRuntimeVersion,
 	})
 }
 
@@ -1419,6 +1423,13 @@ func buildRemotePreflightAgentCommand(req *ExecutorCreateRequest) agents.Command
 // The caller falls through to the required default-command probe, which reports
 // transport failures with proper context.
 func (r *SSHExecutor) probeNativeBinary(ctx context.Context, client *ssh.Client, shell string, req *ExecutorCreateRequest, stepName string) bool {
+	if req == nil || req.AgentConfig == nil {
+		return false
+	}
+	if req.AgentConfig.ID() == agents.OpenCodeACPAgentID &&
+		req.ManagedRuntimeSource == managedruntime.OpenCodeSourceManaged {
+		return false
+	}
 	nb, ok := req.AgentConfig.(agents.NativeBinaryAgent)
 	if !ok {
 		return false

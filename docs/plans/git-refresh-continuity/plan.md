@@ -3,6 +3,7 @@ created: 2026-10-06
 status: completed
 requirements:
   - REQ-PLATFORM-WORKSPACE-GIT-STATUS-001
+  - REQ-PLATFORM-GIT-REFRESH-CONTINUITY-001
 system_design:
   - ../../specs/platform/system-design/git-refresh-continuity.md
 legacy_specs: []
@@ -40,7 +41,7 @@ That run passed one diagnostic test and eight existing store/Review tests. Tempo
 These checks prove renderer replacement, not physical browser scroll behavior. Playwright supplies that remaining evidence during implementation.
 
 Existing Platform criteria `.25` and `.29` already require prior-data preservation.
-Criteria `.47` through `.49` make count/patch continuity and reading-position outcomes explicit.
+Criteria `AC-PLATFORM-GIT-REFRESH-CONTINUITY-001.1` through `.3` make count/patch continuity and reading-position outcomes explicit.
 The companion [loading package](../changes-loading-feedback/plan.md) retains toolbar ownership.
 The [progressive publication package](../changes-panel-git-refresh/plan.md) remains the historical backend delivery record.
 Neither package's execution results change here.
@@ -96,19 +97,19 @@ Phone entry, hierarchy, Back/dismiss, and safe areas follow `MobileDiffSheet`.
 Initial loading without previous content retains its existing placeholder.
 Failed refresh keeps readable content and displays unavailable freshness.
 Changed ready content replaces lines while preserving their anchor; identical content leaves the viewer alone.
-These structures are required by `.47` through `.49`; ASCII spacing and shown text are illustrative.
+These structures are required by `AC-PLATFORM-GIT-REFRESH-CONTINUITY-001.1` through `.3`; ASCII spacing and shown text are illustrative.
 
 ## Tests
 
 | Criteria | Required regression evidence |
 | --- | --- |
-| .21, .25, .27, .47 | New `git-status-display-state.test.ts`: accepted-only retention, independent layers/repos, cleanup, ready empty data, failed detail |
-| .10, .11, .47 | Existing facet and Changes tests: separate staged/unstaged values and consumed-layer removal |
-| .24, .29, .47, .48 | New `review-file-diff-content.test.tsx`: same mounted viewer through pending/failure and identical completion; initial placeholder and action guards |
-| .48, .49 | New `use-review-scroll-anchor.test.ts`: stable anchor, removal fallback, changed upper sections, target replacement, user-scroll cancellation |
-| .48, .49 | New `monaco-diff-viewer.test.tsx`: unchanged model/view state and changed-result restoration |
-| .47, .48 | Pierre and Monaco comment-provider tests: ready to stale/unavailable to ready, no stale gutter selection or draft submission, and draft reuse after readiness returns |
-| .47, .48 | Existing `changes-panel-file-row.test.tsx`, review progress and layer tests: retained desktop/phone counts and no false review certification |
+| Workspace Status .21/.25/.27; Git Refresh Continuity .1 | New `git-status-display-state.test.ts`: accepted-only retention, independent layers/repos, cleanup, ready empty data, failed detail |
+| Workspace Status .10/.11; Git Refresh Continuity .1 | Existing facet and Changes tests: separate staged/unstaged values and consumed-layer removal |
+| Workspace Status .24/.29; Git Refresh Continuity .1/.2 | New `review-file-diff-content.test.tsx`: same mounted viewer through pending/failure and identical completion; initial placeholder and action guards |
+| Git Refresh Continuity .2/.3 | New `use-review-scroll-anchor.test.ts`: stable anchor, removal fallback, changed upper sections, target replacement, user-scroll cancellation |
+| Git Refresh Continuity .2/.3 | New `monaco-diff-viewer.test.tsx`: unchanged model/view state and changed-result restoration |
+| Git Refresh Continuity .1/.2 | Pierre and Monaco comment-provider tests: ready to stale/unavailable to ready, no stale gutter selection or draft submission, and draft reuse after readiness returns |
+| Git Refresh Continuity .1 | Existing `changes-panel-file-row.test.tsx`, review progress and layer tests: retained desktop/phone counts and no false review certification |
 
 The regression named `keeps ready diff mounted through pending and identical ready refresh` must fail before the correction.
 The counts regression must also fail on the current desktop pending gate.

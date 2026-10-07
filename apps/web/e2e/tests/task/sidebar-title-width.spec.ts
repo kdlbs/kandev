@@ -7,7 +7,7 @@ function taskRow(sidebar: import("@playwright/test").Locator, taskId: string) {
 }
 
 async function readRowLayout(row: import("@playwright/test").Locator, taskId: string) {
-  const title = row.locator("span.overflow-hidden").first();
+  const title = row.getByTestId("task-item-title");
   const prIcon = row.getByTestId(`pr-task-icon-${taskId}`);
   const relativeTime = row.getByTestId("sidebar-task-trailing-time");
   const timeSlot = relativeTime.locator("xpath=..");
@@ -206,7 +206,7 @@ test("sidebar title width follows compact time without hover movement", async ({
     const shortLayout = await readRowLayout(shortRow, shortTask.id);
     expect(shortLayout.pr.x - (shortLayout.title.x + shortLayout.title.width)).toBeCloseTo(4, 1);
 
-    const noPRTitle = noPRRow.locator("span.overflow-hidden").first();
+    const noPRTitle = noPRRow.getByTestId("task-item-title");
     const noPRTime = noPRRow.getByTestId("sidebar-task-trailing-time");
     const noPRSlot = noPRTime.locator("xpath=..");
     const noPRAction = noPRRow.locator('button[aria-label="Task actions"]');

@@ -1,7 +1,6 @@
 package launcher
 
 import (
-	"bufio"
 	"bytes"
 	"encoding/json"
 	"strings"
@@ -81,7 +80,7 @@ func TestPipeOutputPreservesSeverityWithNestedDuplicateComponentFields(t *testin
 	parentCore, observed := observer.New(zapcore.InfoLevel)
 	parentLog, err := logger.NewFromZap(zap.New(parentCore))
 	require.NoError(t, err)
-	(&Launcher{logger: parentLog}).pipeOutput("stdout", bufio.NewScanner(strings.NewReader(strings.Join(lines, "\n"))))
+	(&Launcher{logger: parentLog}).pipeOutput("stdout", strings.NewReader(strings.Join(lines, "\n")))
 
 	entries := observed.All()
 	require.Len(t, entries, 2)
@@ -108,7 +107,7 @@ func TestPipeOutputPreservesJSONSeverityAtInfoThreshold(t *testing.T) {
 	log, err := logger.NewFromZap(zap.New(core))
 	require.NoError(t, err)
 	launcher := &Launcher{logger: log}
-	launcher.pipeOutput("stdout", bufio.NewScanner(strings.NewReader(strings.Join(lines, "\n"))))
+	launcher.pipeOutput("stdout", strings.NewReader(strings.Join(lines, "\n")))
 
 	entries := observed.All()
 	require.Len(t, entries, 4)
@@ -148,7 +147,7 @@ func TestPipeOutputKeepsMalformedJSONStreamFallback(t *testing.T) {
 			core, observed := observer.New(zapcore.DebugLevel)
 			log, err := logger.NewFromZap(zap.New(core))
 			require.NoError(t, err)
-			(&Launcher{logger: log}).pipeOutput(tt.stream, bufio.NewScanner(strings.NewReader(line)))
+			(&Launcher{logger: log}).pipeOutput(tt.stream, strings.NewReader(line))
 
 			entries := observed.All()
 			require.Len(t, entries, 1)

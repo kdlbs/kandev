@@ -1,7 +1,6 @@
 package launcher
 
 import (
-	"bufio"
 	"strings"
 	"testing"
 
@@ -58,7 +57,7 @@ func TestPipeOutputPreservesChildLevelOnStdout(t *testing.T) {
 			}
 			l := &Launcher{logger: log}
 
-			l.pipeOutput("stdout", bufio.NewScanner(strings.NewReader(test.line)))
+			l.pipeOutput("stdout", strings.NewReader(test.line))
 
 			entries := logs.All()
 			if len(entries) != 1 {

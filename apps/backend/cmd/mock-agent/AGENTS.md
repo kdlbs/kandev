@@ -46,6 +46,17 @@ Scenarios in `scenarioRegistry` can only emit `SessionUpdate` notifications — 
 
 When `E2E_MOCK_AGENT_ACP_TRACE_FILE` is set, ACP trace rows include `process_id` and `connection_id` alongside the native `session_id`. Initialize, load, resume, and model-selection requests are recorded so E2E tests can distinguish a retained runtime from a restored one; the trace is opt-in and is not written during ordinary runs.
 
+Prompt trace rows also include `prompt_blocks`, a JSON summary of the blocks
+the mock agent received. It records byte lengths and SHA-256 digests for text,
+image, audio, and embedded resource payloads, plus names and URIs for resource
+links. It never stores raw image or audio bytes. Browser tests can use this
+opt-in evidence to distinguish a visible attachment preview from payload that
+reached the ACP agent.
+
+`E2E_MOCK_AGENT_FAIL_INITIALIZE=true` makes Initialize fail before ACP creates a
+native session. Use it when a recovery fixture must avoid the automatic
+session-open resume path; remove the variable before the recovery attempt.
+
 `/transport-lost[:N]` (`handler.go: handleTransportLost`) follows the same shape for the ACP wire-level transport-death signature (`peer disconnected before response` — the acp-go-sdk's own `ErrPeerDisconnected` payload shape), carried only in the error's `Data` the same way the SDK itself constructs it. The generic prompt-error projection classifies on `Message` alone, so `routingerr`'s `acp.transport_lost.v1` rule never sees it here: the failure presents as terminal and exposes manual recovery on the first occurrence, not the short-retry ladder. `N` still controls how many consecutive prompts fail before the mock recovers, but no automatic retry drives through them on this command.
 
 ## Emitter helpers worth knowing

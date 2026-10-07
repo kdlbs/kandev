@@ -24,6 +24,8 @@ type gitCaptureResult struct {
 	err    error
 }
 
+const gitCaptureTestWaitTimeout = 30 * time.Second
+
 // @covers AC-PLATFORM-GIT-CAPTURE-RECOVERY-001.1, AC-PLATFORM-GIT-CAPTURE-RECOVERY-001.4
 func TestWorkspaceTrackerGitStatusCaptureRecoveryRetriesOneEvidenceChange(t *testing.T) {
 	repoDir, cleanup := setupTestRepo(t)
@@ -404,7 +406,7 @@ func waitForGitCaptureSignal(t *testing.T, signal <-chan struct{}, message strin
 	t.Helper()
 	select {
 	case <-signal:
-	case <-time.After(5 * time.Second):
+	case <-time.After(gitCaptureTestWaitTimeout):
 		t.Fatal(message)
 	}
 }
@@ -414,7 +416,7 @@ func waitForGitCaptureResult(t *testing.T, resultCh <-chan gitCaptureResult) git
 	select {
 	case result := <-resultCh:
 		return result
-	case <-time.After(5 * time.Second):
+	case <-time.After(gitCaptureTestWaitTimeout):
 		t.Fatal("Git status observation did not complete")
 		return gitCaptureResult{}
 	}
@@ -425,7 +427,7 @@ func waitForGitCaptureError(t *testing.T, resultCh <-chan error) error {
 	select {
 	case err := <-resultCh:
 		return err
-	case <-time.After(5 * time.Second):
+	case <-time.After(gitCaptureTestWaitTimeout):
 		t.Fatal("Git status observation did not complete")
 		return nil
 	}

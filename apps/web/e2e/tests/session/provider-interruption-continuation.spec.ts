@@ -263,28 +263,46 @@ test("desktop: disabled continuation preserves manual recovery without native re
     enabled: false,
   });
   try {
-    await testPage.goto(`/t/${fixture.taskId}`);
-    const session = new SessionPage(testPage);
-    await session.waitForLoad();
     const recovery = await waitForContinuationMessage(
       apiClient,
       fixture.sessionId,
       (message) => message.metadata?.recovery_reason === "disabled",
     );
+    await expect
+      .poll(async () => {
+        const status = await apiClient.wsRequest<{
+          state: string;
+          is_agent_running: boolean;
+          needs_resume: boolean;
+          resume_reason?: string;
+        }>("task.session.status", { task_id: fixture.taskId, session_id: fixture.sessionId });
+        return {
+          state: status.state,
+          running: status.is_agent_running,
+          needsResume: status.needs_resume,
+          reason: status.resume_reason,
+        };
+      })
+      .toEqual({
+        state: "WAITING_FOR_INPUT",
+        running: false,
+        needsResume: false,
+        reason: "error_recovery",
+      });
+    await testPage.goto(`/t/${fixture.taskId}`);
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
     expect(recovery.metadata?.recovery_actions).toBe(true);
     expect(recovery.metadata?.runtime_retained).not.toBe(true);
     expect(recovery.metadata?.attempts_started ?? 0).toBe(0);
+    assertNativeNoContinuationTrace(fixture.tracePath, "read");
+
+    await testPage.goto(`/t/${fixture.taskId}`);
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
     await expect(session.recoveryResumeButton()).toBeVisible();
     await expect(session.transientRetryCard()).toBeHidden();
-    const trace = fs.readFileSync(fixture.tracePath, "utf8");
-    expect(trace.match(/"event":"session_new"/g)).toHaveLength(1);
-    expect(
-      trace
-        .split("\n")
-        .filter(Boolean)
-        .map((line) => JSON.parse(line))
-        .filter((record) => record.event === "prompt"),
-    ).toHaveLength(1);
+    assertNativeNoContinuationTrace(fixture.tracePath, "read");
   } finally {
     await fixture.dispose();
   }

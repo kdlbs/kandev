@@ -1331,6 +1331,9 @@ type Service struct {
 	// execution. Claims expire with the same bounded grace period used for
 	// completed-execution stream markers.
 	executionTeardownClaims sync.Map
+	// cancelledResumeTeardowns fences a new startup attempt until the exact
+	// cancelled startup cleanup that claimed its execution has returned.
+	cancelledResumeTeardowns sync.Map
 	// parkedProfileSwitchStops remembers exact executions whose deliberate
 	// parked-switch lifecycle event was already consumed. It is a short-lived
 	// duplicate-delivery optimization; the durable consumed tombstone lives in
@@ -1478,6 +1481,11 @@ type Service struct {
 	// from a predecessor. Automatic recovery requires an explicit no-output,
 	// no-effect result from this map.
 	dynamicAttemptEvidence sync.Map
+	// pendingDynamicStreakResets coalesces ordinary output/effect observations
+	// until a semantic boundary can persist the reset outside the raw stream
+	// callback. Each entry retains the prompt and route identity that authorized
+	// the reset across prompt-evidence replacement.
+	pendingDynamicStreakResets sync.Map
 
 	// resumeAttempts owns process-local startup identity. It is separate from
 	// dynamicAttemptEvidence because a provider execution may be reused by
@@ -1864,6 +1872,7 @@ func NewService(
 	})
 	exec.SetOnLaunchFailed(s.handleLaunchFailed)
 	exec.SetOnExecutionCleanupClaim(s.claimForcedExecutionCleanup)
+	exec.SetOnCancelledResumeExecutionCleanup(s.cleanupCancelledResumeExecution)
 	exec.SetOnExecutionStopOwnerRegistration(s.RegisterExecutionStopOwner)
 	exec.SetOnTaskReviewStateReconcile(func(ctx context.Context, taskID, completedSessionID string) {
 		s.writeTaskReviewState(ctx, taskID, completedSessionID)
