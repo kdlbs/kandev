@@ -66,7 +66,6 @@ func (m *Manager) streamCoalescer(execution *AgentExecution) *streamCoalescer {
 				chunk.messageID,
 				chunk.content,
 				chunk.isAppend,
-				chunk.diagnostic,
 				chunk.promptGeneration,
 				chunk.attemptID,
 			)
@@ -109,7 +108,6 @@ func (m *Manager) enqueueStreamingContent(
 	messageID string,
 	content string,
 	isAppend bool,
-	diagnostic bool,
 	promptGeneration uint64,
 	attemptID string,
 ) {
@@ -122,14 +120,12 @@ func (m *Manager) enqueueStreamingContent(
 		attemptID:        attemptID,
 		content:          content,
 		isAppend:         isAppend,
-		diagnostic:       diagnostic,
 		promptGeneration: promptGeneration,
 	})
 }
 
 func (e *AgentExecution) resetStreamingStateLocked() {
 	e.messageBuffer.Reset()
-	e.messageBufferDiagnostic = false
 	e.thinkingBuffer.Reset()
 	e.assistantHistoryBuffer.Reset()
 	e.currentMessageID = ""
@@ -154,7 +150,6 @@ func (m *Manager) publishProtocolMessage(
 	execution *AgentExecution,
 	protocolMessageID string,
 	content string,
-	diagnostic bool,
 	promptGeneration uint64,
 	attemptID string,
 ) {
@@ -165,7 +160,7 @@ func (m *Manager) publishProtocolMessage(
 	}
 	execution.messageMu.Unlock()
 
-	m.publishStreamingContent(execution, "message_streaming", messageID, content, isAppend, diagnostic, promptGeneration, attemptID)
+	m.publishStreamingContent(execution, "message_streaming", messageID, content, isAppend, promptGeneration, attemptID)
 }
 
 func (m *Manager) appendAssistantHistoryChunk(execution *AgentExecution, content string) {
@@ -265,9 +260,7 @@ func persistAssistantHistory(
 func (m *Manager) flushPendingLegacyMessage(execution *AgentExecution, promptGeneration uint64, attemptID string) {
 	execution.messageMu.Lock()
 	content := execution.messageBuffer.String()
-	diagnostic := execution.messageBufferDiagnostic
 	execution.messageBuffer.Reset()
-	execution.messageBufferDiagnostic = false
 	messageID := execution.currentMessageID
 	execution.currentMessageID = ""
 	execution.messageMu.Unlock()
@@ -280,10 +273,10 @@ func (m *Manager) flushPendingLegacyMessage(execution *AgentExecution, promptGen
 		// The final direct append must follow any coalesced legacy chunk that
 		// was already emitted for this record.
 		m.flushStreamCoalescer(execution)
-		m.publishStreamingMessageFinal(execution, messageID, trimmed, diagnostic, promptGeneration, attemptID)
+		m.publishStreamingMessageFinal(execution, messageID, trimmed, promptGeneration, attemptID)
 		return
 	}
-	m.publishStreamingMessage(execution, trimmed, diagnostic, promptGeneration, attemptID)
+	m.publishStreamingMessage(execution, trimmed, promptGeneration, attemptID)
 	execution.messageMu.Lock()
 	execution.currentMessageID = ""
 	execution.messageMu.Unlock()
@@ -330,7 +323,7 @@ func (m *Manager) publishProtocolThinking(
 	}
 	execution.messageMu.Unlock()
 
-	m.enqueueStreamingContent(execution, thinkingStreamingEventType, messageID, content, isAppend, false, promptGeneration, attemptID)
+	m.enqueueStreamingContent(execution, thinkingStreamingEventType, messageID, content, isAppend, promptGeneration, attemptID)
 }
 
 func (m *Manager) publishStreamingContent(
@@ -339,11 +332,10 @@ func (m *Manager) publishStreamingContent(
 	messageID string,
 	content string,
 	isAppend bool,
-	diagnostic bool,
 	promptGeneration uint64,
 	attemptID string,
 ) {
-	m.enqueueStreamingContent(execution, eventType, messageID, content, isAppend, diagnostic, promptGeneration, attemptID)
+	m.enqueueStreamingContent(execution, eventType, messageID, content, isAppend, promptGeneration, attemptID)
 }
 
 func (m *Manager) publishStreamingContentNow(
@@ -352,7 +344,6 @@ func (m *Manager) publishStreamingContentNow(
 	messageID string,
 	content string,
 	isAppend bool,
-	diagnostic bool,
 	promptGeneration uint64,
 	attemptID string,
 ) {
@@ -360,12 +351,11 @@ func (m *Manager) publishStreamingContentNow(
 		attemptID = execution.currentStartupAttemptID()
 	}
 	event := AgentStreamEventData{
-		Type:                        eventType,
-		Text:                        content,
-		MessageID:                   messageID,
-		IsAppend:                    isAppend,
-		ProviderDiagnosticCandidate: diagnostic,
-		PromptGeneration:            promptGeneration,
+		Type:             eventType,
+		Text:             content,
+		MessageID:        messageID,
+		IsAppend:         isAppend,
+		PromptGeneration: promptGeneration,
 	}
 	if eventType == thinkingStreamingEventType {
 		event.MessageType = "thinking"
@@ -394,7 +384,7 @@ func (m *Manager) publishStreamingContentNow(
 // publishStreamingMessage publishes a streaming message event for real-time text updates.
 // It creates a new message on first call (currentMessageID empty) or appends to existing.
 // The message ID is generated and set synchronously to avoid race conditions.
-func (m *Manager) publishStreamingMessage(execution *AgentExecution, content string, diagnostic bool, promptGeneration uint64, attemptID string) {
+func (m *Manager) publishStreamingMessage(execution *AgentExecution, content string, promptGeneration uint64, attemptID string) {
 	execution.messageMu.Lock()
 	isAppend := execution.currentMessageID != ""
 	messageID := execution.currentMessageID
@@ -413,7 +403,7 @@ func (m *Manager) publishStreamingMessage(execution *AgentExecution, content str
 		zap.Bool("is_append", isAppend),
 		zap.Int("content_length", len(content)))
 
-	m.enqueueStreamingContent(execution, "message_streaming", messageID, content, isAppend, diagnostic, promptGeneration, attemptID)
+	m.enqueueStreamingContent(execution, "message_streaming", messageID, content, isAppend, promptGeneration, attemptID)
 }
 
 // flushMessageBuffer extracts any accumulated message from the buffer and returns it.
@@ -429,10 +419,8 @@ func (m *Manager) flushMessageBuffer(execution *AgentExecution, promptGeneration
 	m.flushStreamCoalescer(execution)
 	execution.messageMu.Lock()
 	agentMessage := execution.messageBuffer.String()
-	messageDiagnostic := execution.messageBufferDiagnostic
 	thinkingContent := execution.thinkingBuffer.String()
 	execution.messageBuffer.Reset()
-	execution.messageBufferDiagnostic = false
 	execution.thinkingBuffer.Reset()
 	// Clear the streaming message IDs so next segment starts fresh
 	currentMsgID := execution.currentMessageID
@@ -464,11 +452,11 @@ func (m *Manager) flushMessageBuffer(execution *AgentExecution, promptGeneration
 	if trimmedMessage != "" {
 		if currentMsgID != "" {
 			// Publish final append to the streaming message
-			m.publishStreamingMessageFinal(execution, currentMsgID, trimmedMessage, messageDiagnostic, promptGeneration, attemptID)
+			m.publishStreamingMessageFinal(execution, currentMsgID, trimmedMessage, promptGeneration, attemptID)
 		} else {
 			// No streaming message exists yet - create one with all the content
 			// This happens when message content has no newlines (never triggered streaming)
-			m.publishStreamingMessage(execution, trimmedMessage, messageDiagnostic, promptGeneration, attemptID)
+			m.publishStreamingMessage(execution, trimmedMessage, promptGeneration, attemptID)
 		}
 		// Clear the message ID that publishStreamingMessage may have set as a side effect.
 		// After a flush (tool call or complete), the next text segment must start a new message.
@@ -487,7 +475,6 @@ func (m *Manager) flushMessageBuffer(execution *AgentExecution, promptGeneration
 func (m *Manager) publishStreamingMessageFinal(
 	execution *AgentExecution,
 	messageID, content string,
-	diagnostic bool,
 	promptGeneration uint64,
 	attemptID string,
 ) {
@@ -496,7 +483,7 @@ func (m *Manager) publishStreamingMessageFinal(
 		zap.String("message_id", messageID),
 		zap.Int("content_length", len(content)))
 
-	m.publishStreamingContentNow(execution, "message_streaming", messageID, content, true, diagnostic, promptGeneration, attemptID)
+	m.publishStreamingContentNow(execution, "message_streaming", messageID, content, true, promptGeneration, attemptID)
 }
 
 // publishStreamingThinking publishes a streaming thinking event for real-time thinking updates.
@@ -515,9 +502,9 @@ func (m *Manager) publishStreamingThinking(execution *AgentExecution, content st
 	}
 	execution.messageMu.Unlock()
 
-	// Reasoning chunks never carry the provider-diagnostic marker: only an
-	// assistant message_chunk can classify as a diagnostic candidate.
-	m.enqueueStreamingContent(execution, thinkingStreamingEventType, thinkingID, content, isAppend, false, promptGeneration, attemptID)
+	// Reasoning text is transcript output and does not participate in provider
+	// diagnostic classification.
+	m.enqueueStreamingContent(execution, thinkingStreamingEventType, thinkingID, content, isAppend, promptGeneration, attemptID)
 }
 
 // publishStreamingThinkingFinal publishes the final chunk of a streaming thinking message.
@@ -528,7 +515,7 @@ func (m *Manager) publishStreamingThinkingFinal(execution *AgentExecution, think
 		zap.String("thinking_id", thinkingID),
 		zap.Int("content_length", len(content)))
 
-	m.publishStreamingContentNow(execution, thinkingStreamingEventType, thinkingID, content, true, false, promptGeneration, attemptID)
+	m.publishStreamingContentNow(execution, thinkingStreamingEventType, thinkingID, content, true, promptGeneration, attemptID)
 }
 
 // updateExecutionError updates an execution with an error

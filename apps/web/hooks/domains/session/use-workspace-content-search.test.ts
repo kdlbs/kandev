@@ -306,6 +306,45 @@ describe("useWorkspaceContentSearch stale responses", () => {
     expect(result.current.results).toEqual(secondResults);
     expect(result.current.isSearching).toBe(false);
   });
+
+  it("ignores results from a replaced workspace repository inventory", async () => {
+    const stale = {
+      repository_name: "old-checkout",
+      path: "src/stale.ts",
+      line: 1,
+      column: 1,
+      preview: "stale inventory",
+      match_ranges: [],
+    };
+    const current = { ...stale, repository_name: "current-checkout", path: "src/current.ts" };
+    let resolveStale: ((value: { results: (typeof stale)[] }) => void) | undefined;
+    mockSearchWorkspaceContent
+      .mockImplementationOnce(
+        () =>
+          new Promise<{ results: (typeof stale)[] }>((resolve) => {
+            resolveStale = resolve;
+          }),
+      )
+      .mockResolvedValueOnce({ results: [current] });
+    const { result, rerender } = renderHook(
+      ({ inventoryRevision }) =>
+        useWorkspaceContentSearch({
+          enabled: true,
+          query: "needle",
+          sessionId: "session-1",
+          inventoryRevision,
+        }),
+      { initialProps: { inventoryRevision: "before" } },
+    );
+    await act(async () => vi.advanceTimersByTimeAsync(250));
+
+    rerender({ inventoryRevision: "after" });
+    await act(async () => vi.advanceTimersByTimeAsync(250));
+    expect(result.current.results).toEqual([current]);
+    await act(async () => resolveStale?.({ results: [stale] }));
+
+    expect(result.current.results).toEqual([current]);
+  });
 });
 
 describe("useWorkspaceContentSearch incremental publishing", () => {

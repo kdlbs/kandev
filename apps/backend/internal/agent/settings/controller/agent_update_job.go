@@ -329,22 +329,27 @@ func (s *AgentUpdateJobStore) run(
 		s.runOpenCodeMigration(ctx, job, spec, target, ref)
 		return
 	}
-	currentVersion := ""
-	if caps, ok := s.updater.CurrentCapabilities(job.AgentName); ok && !job.ManagedFallback {
-		currentVersion = caps.AgentVersion
-		s.mu.Lock()
-		job.CurrentVersion = currentVersion
-		s.mu.Unlock()
-	}
 	activeVersion, nativeRuntime, selectionErr := s.activeRuntimeSelection(ctx, job, spec)
-	if selectionErr != nil {
-		s.finishFailed(job, ctx, selectionErr, ref)
-		return
-	}
 	defaultVersion := spec.DefaultVersionOrPinned()
 	effectiveVersion := defaultVersion
 	if activeVersion != "" {
 		effectiveVersion = activeVersion
+	}
+	// A fallback observation depends on the effective version, which is unknown
+	// when the selection cannot be read; a host observation does not.
+	currentVersion := ""
+	if selectionErr == nil || !job.ManagedFallback {
+		currentVersion = managedCurrentVersion(ctx, s.updater, s.selectionStore, managedVersionState{
+			agentName: job.AgentName, packageName: spec.Package, fallback: job.ManagedFallback,
+			active: activeVersion, effective: effectiveVersion,
+		})
+	}
+	s.mu.Lock()
+	job.CurrentVersion = currentVersion
+	s.mu.Unlock()
+	if selectionErr != nil {
+		s.finishFailed(job, ctx, selectionErr, ref)
+		return
 	}
 	operation, err := managedruntime.ClassifyEffectiveOperation(
 		job.UseDefault, activeVersion, effectiveVersion, currentVersion, target, defaultVersion,
@@ -814,7 +819,27 @@ func (s *AgentUpdateJobStore) runExactCandidate(
 		job.EffectiveVersion = target
 	}
 	s.mu.Unlock()
+	if job.ManagedFallback {
+		s.recordValidatedFallback(ctx, job.AgentName, spec.Package, target)
+	}
 	s.finishActivated(job, target, ref)
+}
+
+// recordValidatedFallback persists the version a fallback activation probed.
+// It records the exact target because that is the effective version after
+// activation, which managedCurrentVersion compares the record against. The
+// activation has already committed, so a failed write leaves the version
+// unknown rather than failing the job.
+func (s *AgentUpdateJobStore) recordValidatedFallback(ctx context.Context, agentName, packageName, version string) {
+	records, ok := s.selectionStore.(managedruntime.ValidatedVersionStore)
+	if !ok {
+		return
+	}
+	if err := records.SaveValidated(ctx, agentName, packageName, version); err != nil {
+		s.log.Warn("record validated managed fallback version",
+			zap.String("agent", agentName), zap.String("package", packageName),
+			zap.String("version", version), zap.Error(err))
+	}
 }
 
 func (s *AgentUpdateJobStore) useNativeRuntime(

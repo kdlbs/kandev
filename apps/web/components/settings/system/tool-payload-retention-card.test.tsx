@@ -1,4 +1,6 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { StateProvider } from "@/components/state-provider";
+import { SystemInfoQueryProvider } from "@/components/system-info-query-provider";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type { SettingsSaveContributor } from "@/components/settings/settings-save-provider";
 import type {
@@ -16,6 +18,26 @@ vi.mock("@/components/settings/settings-save-provider", () => ({
     contributor = value;
   },
 }));
+const AUTH = {
+  mode: "enabled" as const,
+  authenticated: true,
+  user: {
+    id: "user-1",
+    email: "user@example.com",
+    display_name: "User",
+    role: "admin" as const,
+    status: "active" as const,
+  },
+};
+function renderRetentionCard() {
+  return render(
+    <StateProvider initialState={{ auth: AUTH }}>
+      <SystemInfoQueryProvider bootId="retention-card-test-boot">
+        <ToolPayloadRetentionCard />
+      </SystemInfoQueryProvider>
+    </StateProvider>,
+  );
+}
 const ENABLED_TEST_ID = "tool-payload-enabled";
 const AGE_TEST_ID = "tool-payload-age";
 const ERROR_TEST_ID = "tool-payload-error";
@@ -36,7 +58,7 @@ beforeEach(() => {
 });
 afterEach(cleanup);
 async function open() {
-  render(<ToolPayloadRetentionCard />);
+  renderRetentionCard();
   await screen.findByTestId(ENABLED_TEST_ID);
 }
 
@@ -63,7 +85,7 @@ it("clears a recovered status polling error without manual refresh", async () =>
       .mockResolvedValueOnce({ ...baseline, last_analysis: lastAnalysis })
       .mockRejectedValueOnce(readError)
       .mockResolvedValueOnce({ ...baseline, last_analysis: lastAnalysis });
-    render(<ToolPayloadRetentionCard />);
+    renderRetentionCard();
     await act(async () => {
       await Promise.resolve();
       await Promise.resolve();
@@ -113,7 +135,7 @@ it("preserves an action failure after status recovery", async () => {
       .mockResolvedValueOnce(baseline)
       .mockResolvedValueOnce({ ...baseline, last_run: failedRun });
     vi.mocked(api.analyzeToolPayloadRetention).mockRejectedValueOnce(actionError);
-    render(<ToolPayloadRetentionCard />);
+    renderRetentionCard();
     await act(async () => {
       await Promise.resolve();
       await Promise.resolve();

@@ -20,6 +20,7 @@ type WorkspaceContentSearchOptions = {
   enabled: boolean;
   query: string;
   sessionId: string | null;
+  inventoryRevision?: string;
 };
 
 function contentSearchResultKey(result: WorkspaceContentSearchResult): string {
@@ -67,6 +68,7 @@ export function useWorkspaceContentSearch({
   enabled,
   query,
   sessionId,
+  inventoryRevision = "",
 }: WorkspaceContentSearchOptions) {
   const [results, setResults] = useState<WorkspaceContentSearchResult[]>([]);
   const [isSearching, setIsSearching] = useState(false);
@@ -134,7 +136,7 @@ export function useWorkspaceContentSearch({
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [enabled, query, sessionId]);
+  }, [enabled, inventoryRevision, query, sessionId]);
 
   return { results, isSearching, error };
 }

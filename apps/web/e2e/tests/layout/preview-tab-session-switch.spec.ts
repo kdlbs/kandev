@@ -233,10 +233,12 @@ test.describe("Preview tab survives session switch", () => {
     const taskA = await seedFinishedTask(apiClient, seedData, "Promote Round-Trip A");
     const taskB = await seedFinishedTask(apiClient, seedData, "Promote Round-Trip B");
 
-    const kanban = new KanbanPage(testPage);
-    await kanban.goto();
-    await kanban.taskCardByTitle("Promote Round-Trip A").click();
-    await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
+    // The board card can be hidden by the user's saved filters, while the task
+    // route remains stable and is the only setup this tab-restoration test needs.
+    await testPage.goto(`/t/${taskA.id}`);
+    await expect(testPage).toHaveURL((url) => url.pathname.includes(taskA.id), {
+      timeout: 15_000,
+    });
     const session = new SessionPage(testPage);
     await session.waitForLoad();
     await session.waitForChatIdle({ timeout: 30_000 });

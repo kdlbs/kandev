@@ -6,7 +6,7 @@ owners:
   - kandev
 ---
 
-# Task field update requirements
+# Task and workflow field update requirements
 
 ## Overview
 
@@ -21,6 +21,8 @@ incident specification.
 
 Criteria .8 through .12 define the explicit metadata-merge path.
 Criteria .1 through .7 remain the previously active ordinary-field contract.
+REQ-TASKS-FIELD-UPDATES-002 extends this contract to ordinary workflow updates.
+Existing task criteria and lifecycle remain unchanged.
 
 ## Terms and boundary
 
@@ -114,6 +116,46 @@ an earlier observation of the task.
   postcommit observation, which may include a later commit. A failed postcommit read shall
   retain the existing error and suppressed-publication behavior despite a committed mutation.
   No total event order or exact mutation receipt is introduced.
+
+## Workflow amendment
+
+### REQ-TASKS-FIELD-UPDATES-002: Preserve ordinary workflow partial edits
+
+**Intent:** A successful workflow edit shall not restore omitted fields from an earlier
+observation. Tasks owns persisted workflow definitions and request presence, independently
+of their editor or transport. The existing task contract remains active.
+
+An ordinary workflow update supplies any subset of name, description, prompt and default
+profile. Omission and the existing nullable-pointer null input leave that field alone.
+Explicit empty strings retain their existing empty/clear meanings. Full editor drafts
+intentionally supply all four editable fields and therefore replace all four.
+
+#### Acceptance criteria
+
+- **AC-TASKS-FIELD-UPDATES-002.1:** Successful disjoint ordinary workflow updates shall retain
+  both edits in either write order, including independent services and database connections.
+  This includes name versus prompt and ordinary edits versus participating visibility or
+  provenance writes outside their supplied fields.
+- **AC-TASKS-FIELD-UPDATES-002.2:** Omitted fields shall retain current values; explicit empty,
+  mixed supplied fields, profile normalization and empty-request timestamp behavior shall
+  retain their meanings. Same-field competing ordinary edits shall leave the later successful
+  value. Unrelated workflow identity, template, style, visibility and provenance stay unchanged.
+- **AC-TASKS-FIELD-UPDATES-002.3:** Version-fenced workflow commands shall retain conflict checks
+  and fail closed when fencing is unavailable. Conflicting, missing, deterministically cancelled
+  before write admission or statement-rejected mutations shall leave no partial fields/timestamp
+  change and no successful update evidence. This does not reverse an already committed mutation
+  or infer its commit outcome from a transport failure. Existing authorization and read-only
+  workflow rules remain in force.
+- **AC-TASKS-FIELD-UPDATES-002.4:** Registered REST/WS requests shall retain supplied presence,
+  DTO/error/event shapes. Successful response and event shall use the operation's persisted
+  workflow observation, without total event order or a promise to include concurrent/later
+  commits. Desktop and phone clients receive it through unchanged interfaces.
+- **AC-TASKS-FIELD-UPDATES-002.5:** Full editor, sync and import updates shall retain all supplied
+  replacement behavior, including empty values. There is no promise to merge stale full drafts
+  or later intentional snapshots in fields they supply. Ordering, steps and lifecycle operations
+  retain their existing contracts.
+
+Delivery: [preserve disjoint workflow edits](../../../plans/disjoint-workflow-edits/plan.md).
 
 ## Adjacent contracts
 

@@ -67,11 +67,14 @@ function Preparation({
             data-testid="tool-payload-retry"
             onClick={() =>
               act(
-                remote.save({
-                  ...status.policy,
-                  enabled: true,
-                  backup_choice: status.preparation.choice || undefined,
-                }),
+                remote.save(
+                  {
+                    ...status.policy,
+                    enabled: true,
+                    backup_choice: status.preparation.choice || undefined,
+                  },
+                  { backupChoiceAttempt: status.preparation.choice === "backup" },
+                ),
               )
             }
           >

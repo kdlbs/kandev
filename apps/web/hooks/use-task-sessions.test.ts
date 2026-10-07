@@ -135,8 +135,8 @@ describe("useTaskSessions initial load", () => {
       }),
     );
     expect(mockState.setTaskSessionsForTask).toHaveBeenCalledWith(TASK_ID, liveSessions, {
-      existing: { activity: 0, readCursor: 0 },
-      "live-upsert": { activity: 0, readCursor: 0 },
+      existing: { activity: 0, readCursor: 0, workspaceRecovery: 0 },
+      "live-upsert": { activity: 0, readCursor: 0, workspaceRecovery: 0 },
     });
     expect(mockState.setTaskSessionsError).toHaveBeenCalledWith(TASK_ID, SERVICE_UNAVAILABLE);
     expect(consoleError).toHaveBeenCalledWith("Failed to load task sessions:", error);
@@ -236,7 +236,7 @@ describe("useTaskSessions live reconciliation", () => {
         TASK_ID,
         [existing, livePartial],
         {
-          [existing.id]: { activity: 0, readCursor: 0 },
+          [existing.id]: { activity: 0, readCursor: 0, workspaceRecovery: 0 },
         },
       ),
     );
@@ -247,8 +247,8 @@ describe("useTaskSessions live reconciliation", () => {
       TASK_ID,
       [existing, liveHydrated],
       {
-        [existing.id]: { activity: 0, readCursor: 0 },
-        [liveHydrated.id]: { activity: 0, readCursor: 0 },
+        [existing.id]: { activity: 0, readCursor: 0, workspaceRecovery: 0 },
+        [liveHydrated.id]: { activity: 0, readCursor: 0, workspaceRecovery: 0 },
       },
     );
   });
@@ -296,7 +296,7 @@ describe("useTaskSessions refreshes", () => {
     expect(mockState.setTaskSessionsForTask).toHaveBeenCalledWith(
       TASK_ID,
       [session("old", "COMPLETED")],
-      { old: { activity: 0, readCursor: 0 } },
+      { old: { activity: 0, readCursor: 0, workspaceRecovery: 0 } },
     );
   });
 
@@ -317,7 +317,7 @@ describe("useTaskSessions refreshes", () => {
 
     await waitFor(() =>
       expect(mockState.setTaskSessionsForTask).toHaveBeenCalledWith(TASK_ID, [existing], {
-        [existing.id]: { activity: 4, readCursor: 7 },
+        [existing.id]: { activity: 4, readCursor: 7, workspaceRecovery: 0 },
       }),
     );
   });
@@ -385,7 +385,7 @@ describe("useTaskSessions queued reconnect refreshes", () => {
     expect(mockState.setTaskSessionsForTask).toHaveBeenCalledWith(
       TASK_ID,
       [session("old", "COMPLETED")],
-      { old: { activity: 0, readCursor: 0 } },
+      { old: { activity: 0, readCursor: 0, workspaceRecovery: 0 } },
     );
   });
 
@@ -450,7 +450,7 @@ describe("useTaskSessions foreground refresh", () => {
     expect(mockState.setTaskSessionsForTask).toHaveBeenCalledWith(
       TASK_ID,
       [session("old", "COMPLETED")],
-      { old: { activity: 0, readCursor: 0 } },
+      { old: { activity: 0, readCursor: 0, workspaceRecovery: 0 } },
     );
   });
 });
@@ -498,7 +498,7 @@ describe("useTaskSessions queued refreshes", () => {
     expect(mockState.setTaskSessionsForTask).toHaveBeenLastCalledWith(
       TASK_ID,
       [session("old", "COMPLETED")],
-      { old: { activity: 0, readCursor: 0 } },
+      { old: { activity: 0, readCursor: 0, workspaceRecovery: 0 } },
     );
   });
 
@@ -560,7 +560,7 @@ describe("useTaskSessions foreground refreshes", () => {
     expect(mockState.setTaskSessionsForTask).toHaveBeenCalledWith(
       TASK_ID,
       [session("old", "COMPLETED")],
-      { old: { activity: 0, readCursor: 0 } },
+      { old: { activity: 0, readCursor: 0, workspaceRecovery: 0 } },
     );
   });
 
@@ -589,7 +589,7 @@ describe("useTaskSessions foreground refreshes", () => {
     expect(mockState.setTaskSessionsForTask).toHaveBeenCalledWith(
       TASK_ID,
       [session("old", "COMPLETED")],
-      { old: { activity: 0, readCursor: 0 } },
+      { old: { activity: 0, readCursor: 0, workspaceRecovery: 0 } },
     );
   });
 
@@ -639,7 +639,7 @@ describe("useTaskSessions foreground refreshes", () => {
     expect(mockState.setTaskSessionsForTask).toHaveBeenCalledWith(
       TASK_ID,
       [session("old", "COMPLETED")],
-      { old: { activity: 0, readCursor: 0 } },
+      { old: { activity: 0, readCursor: 0, workspaceRecovery: 0 } },
     );
   });
 });

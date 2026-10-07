@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   branchRecoveryDetails,
+  getWorkspaceRecoveryStatus,
   managedCloneRelocationRecoveryDetails,
   requestSessionRecover,
   sessionRecoveryGuardDetails,
@@ -86,6 +87,39 @@ it("sends the current stamp with an explicit managed clone relocation", async ()
       error_stamp: "stamp-1",
     },
     30 * 60 * 1000,
+  );
+});
+
+it("reads durable workspace recovery status without launching the session", async () => {
+  const projection = {
+    task_id: "task-1",
+    environment_id: "environment-1",
+    session_id: "session-1",
+    operation_id: "operation-1",
+    attempt_id: "attempt-1",
+    ownership_generation: "generation-1",
+    revision: "3",
+    kind: "managed_clone_relocation",
+    state: "running",
+    phase: "restoring",
+    repository_position: 2,
+    repository_total: 2,
+    completed_slots: 1,
+    workspace_complete: false,
+    agent_ready: false,
+    runner_live: true,
+    started_at: "2026-10-05T12:00:00Z",
+    updated_at: "2026-10-05T12:01:00Z",
+  };
+  mocks.request.mockResolvedValueOnce({ workspace_recovery: projection });
+
+  await expect(getWorkspaceRecoveryStatus("task-1", "session-1", "unavailable")).resolves.toEqual(
+    projection,
+  );
+  expect(mocks.request).toHaveBeenCalledWith(
+    "session.workspace_recovery.get",
+    { task_id: "task-1", session_id: "session-1" },
+    10_000,
   );
 });
 

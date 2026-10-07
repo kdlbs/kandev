@@ -61,6 +61,10 @@ type WorkspaceTracker struct {
 	// attached to this workspace. They are deliberately separate from workDir:
 	// a link may point outside the workspace, but only to one of these roots.
 	allowedSourceRoots []string
+	// recoveryArtifactExclusions contains exact, backend-authenticated paths
+	// hidden from workspace discovery. It never changes file access rules.
+	recoveryArtifactExclusions []string
+	recoveryExclusionRevision  uint64
 	// repositoryName identifies the repository this tracker covers when the
 	// agent's workspace is a multi-repo task root. Stamped onto every emitted
 	// GitStatusUpdate / FileListUpdate so the frontend can key per-repo state.
@@ -98,6 +102,7 @@ type WorkspaceTracker struct {
 	// Current state
 	currentStatus types.GitStatusUpdate
 	currentFiles  types.FileListUpdate
+	allFiles      types.FileListUpdate
 	mu            sync.RWMutex
 
 	// Cached git state for detecting manual operations
