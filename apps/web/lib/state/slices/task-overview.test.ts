@@ -107,6 +107,53 @@ it("merges partial fields, explicit clears and task/summary freshness independen
   expect(accepted.updatedAt).toBe("2026-09-29T14:00:00Z");
 });
 
+it("keeps a newer task-wide running event over a stale in-flight HTTP row", () => {
+  const store = sharedStore();
+  const initial = task("one", {
+    statusSummary: {
+      revision: 1,
+      updated_at: "2026-09-29T12:00:00Z",
+      has_running_session: false,
+    },
+  });
+  store.getState().retainTaskOverviews(DISPLAY_OWNER, [initial]);
+  const read = store.getState().beginTaskOverviewRead();
+  const handler = registerTasksHandlers(store)["task.status_summary.updated"]!;
+
+  handler({
+    id: "summary-update",
+    type: "notification",
+    action: "task.status_summary.updated",
+    payload: {
+      task_id: "one",
+      workspace_id: "workspace",
+      status_summary: {
+        revision: 2,
+        updated_at: "2026-09-29T12:01:00Z",
+        has_running_session: true,
+      },
+    },
+  });
+  store.getState().retainTaskOverviews(
+    DISPLAY_OWNER,
+    [
+      task("one", {
+        statusSummary: {
+          revision: 1,
+          updated_at: "2026-09-29T12:00:00Z",
+          has_running_session: false,
+        },
+      }),
+    ],
+    read,
+  );
+
+  expect(store.getState().taskOverview.byId.one.statusSummary).toMatchObject({
+    revision: 2,
+    has_running_session: true,
+  });
+});
+
 it("releases replaced pages while preserving board and active-detail ownership", () => {
   const store = sharedStore();
   store

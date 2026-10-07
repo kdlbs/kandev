@@ -3596,7 +3596,8 @@
           "title": "Running child",
           "summary": {
             "last_activity_at": "2026-09-29T12:07:00Z",
-            "primary_session": { "state": "RUNNING" }
+            "primary_session": { "state": "RUNNING" },
+            "has_running_session": true
           }
         },
         {
@@ -3628,7 +3629,8 @@
           "title": "Running peer",
           "summary": {
             "last_activity_at": "2026-09-29T12:05:00Z",
-            "primary_session": { "state": "RUNNING" }
+            "primary_session": { "state": "RUNNING" },
+            "has_running_session": true
           }
         },
         {
@@ -3799,6 +3801,107 @@
       ]
     },
     {
+      "name": "running-sort-task-wide-summary",
+      "tasks": [
+        {
+          "workspace_id": "conformance",
+          "workflow_id": "wf-a",
+          "workflow_step_id": "step-a",
+          "state": "TODO",
+          "position": 0,
+          "created_at": "2026-09-29T12:00:00Z",
+          "updated_at": "2026-10-01T12:01:00Z",
+          "metadata": {},
+          "origin": "",
+          "id": "secondary-running-no-primary",
+          "title": "Secondary running without primary",
+          "summary": {
+            "last_activity_at": "2026-10-01T12:01:00Z",
+            "has_running_session": true
+          }
+        },
+        {
+          "workspace_id": "conformance",
+          "workflow_id": "wf-a",
+          "workflow_step_id": "step-a",
+          "state": "TODO",
+          "position": 0,
+          "created_at": "2026-09-29T12:00:00Z",
+          "updated_at": "2026-10-01T12:02:00Z",
+          "metadata": {},
+          "origin": "",
+          "id": "waiting-primary-running-secondary",
+          "title": "Waiting primary with running secondary",
+          "summary": {
+            "last_activity_at": "2026-10-01T12:02:00Z",
+            "primary_session": { "id": "waiting-primary", "state": "WAITING_FOR_INPUT" },
+            "has_running_session": true
+          }
+        },
+        {
+          "workspace_id": "conformance",
+          "workflow_id": "wf-a",
+          "workflow_step_id": "step-a",
+          "state": "TODO",
+          "position": 0,
+          "created_at": "2026-09-29T12:00:00Z",
+          "updated_at": "2026-10-01T12:04:00Z",
+          "metadata": {},
+          "origin": "",
+          "id": "explicit-not-running",
+          "title": "Explicit not running",
+          "summary": {
+            "last_activity_at": "2026-10-01T12:04:00Z",
+            "primary_session": { "id": "stale-primary", "state": "RUNNING" },
+            "has_running_session": false
+          }
+        },
+        {
+          "workspace_id": "conformance",
+          "workflow_id": "wf-a",
+          "workflow_step_id": "step-a",
+          "state": "TODO",
+          "position": 0,
+          "created_at": "2026-09-29T12:00:00Z",
+          "updated_at": "2026-10-01T12:05:00Z",
+          "metadata": {},
+          "origin": "",
+          "id": "explicit-idle",
+          "title": "Explicit idle",
+          "summary": {
+            "last_activity_at": "2026-10-01T12:05:00Z",
+            "primary_session": { "id": "waiting", "state": "WAITING_FOR_INPUT" },
+            "has_running_session": false
+          }
+        }
+      ],
+      "cases": [
+        {
+          "name": "task-wide-running-overrides-primary-state",
+          "query": {
+            "filters": [],
+            "sort": {
+              "key": "running",
+              "direction": "desc",
+              "then_by": [{ "key": "lastActivityAt", "direction": "desc" }]
+            },
+            "group": "none",
+            "collapsed_group_keys": [],
+            "collapsed_task_ids": [],
+            "page": 1,
+            "page_size": 100,
+            "locale": "en"
+          },
+          "expected_task_ids": [
+            "waiting-primary-running-secondary",
+            "secondary-running-no-primary",
+            "explicit-idle",
+            "explicit-not-running"
+          ]
+        }
+      ]
+    },
+    {
       "name": "running-sort-missing-primary-summary",
       "tasks": [
         {
@@ -3815,7 +3918,10 @@
           "title": "Raw state only",
           "executor_type": "local",
           "primary_session_state": "RUNNING",
-          "summary": { "last_activity_at": "2026-09-29T12:02:00Z" }
+          "summary": {
+            "last_activity_at": "2026-09-29T12:02:00Z",
+            "has_running_session": false
+          }
         },
         {
           "workspace_id": "conformance",
@@ -3829,6 +3935,8 @@
           "origin": "",
           "id": "summary-running",
           "title": "Summary running",
+          "executor_type": "local",
+          "primary_session_state": "RUNNING",
           "summary": {
             "last_activity_at": "2026-09-29T12:01:00Z",
             "primary_session": { "state": "RUNNING" }

@@ -22,6 +22,7 @@ func isPendingSensitiveEvent(eventType string, data map[string]interface{}) bool
 	switch eventType {
 	case events.TaskUpdated,
 		events.TaskSessionStateChanged,
+		events.SessionRemoved,
 		events.MessageAdded,
 		events.ClarificationAnswered,
 		events.ClarificationPrimaryAnswered,

@@ -75,9 +75,10 @@ A primary comparator must not apply an implicit timestamp tiebreak before later
 criteria. Preserve the old full comparator for a legacy one-rule view where
 that consumer has a historical tiebreak contract.
 
-Running uses strict `primary_session.state === RUNNING`, aggregated with OR over
-included subtree members. Do not use `state_aggregate.has_active`, which also
-accepts workflow `IN_PROGRESS`. Activity uses the existing maximum over the
+Running uses the task-owned `has_running_session` summary field, aggregated with
+OR over included subtree members. Its source is strict session state `RUNNING`
+across all sessions of that task. Do not use `state_aggregate.has_active`, which
+also accepts workflow `IN_PROGRESS`. Activity uses the existing maximum over the
 included subtree. Color uses the compared row's own marker token, without
 subtree aggregation. This avoids giving a purple parent an invisible red rank.
 
@@ -159,6 +160,107 @@ running/activity maps and effective own-row colors. Extend generic `applySort`
 with the same lexicographic behavior. Do not multiply the whole result by the
 primary direction; each criterion applies its own direction independently.
 
+## Task-wide running projection
+
+This amendment satisfies AC .14-.16 and extends the existing ranking contract.
+UI owns the saved sort preference. Tasks continues to own session state and its
+bounded summary publication. The amendment does not change session ownership.
+
+### Summary and lifecycle
+
+Add optional `has_running_session` to `TaskStatusSummary` and its semantic JSON.
+Use `*bool` in Go and `boolean | undefined` in TypeScript. An explicit false
+means a complete session observation found no `RUNNING` session. Absence means
+the new projection is unavailable or the persisted row predates this contract.
+The payload contains one scalar, never a session list or selected-session state.
+
+`BuildFromAuthoritative` computes the value from its complete session input.
+An empty authoritative session collection produces false. Live projection uses
+the complete observation map restored by `restoreSessionObservations`.
+Creation, state transitions, and removal recompute the existential predicate.
+One waiting or failed sibling cannot overwrite a running sibling's contribution.
+The final running session's removal or settlement clears the flag.
+
+Extend `Projector.Start` to consume the existing `events.SessionRemoved` source.
+`DeleteSessionAndPublishRemoval` emits it after the repository transaction commits.
+Remove that session's observation before aggregation. A duplicate removal is
+idempotent. Reload complete session observations when completeness is unknown.
+Do not rely only on primary changes or foreground activity to notice removal.
+
+Observation completeness is independent of `activityObserved`. A session in
+`RUNNING` counts even without foreground activity, or while permission/input
+affordances override its spinner. `STARTING` alone does not count. A settled
+session with a background process does not count unless its state is `RUNNING`.
+Primary selection and designation do not affect the predicate.
+
+An unrelated Git or PR event after restart must not derive false from a partial
+map. Restore complete durable observations before publishing a cleared flag.
+When a complete loader is unavailable, preserve the stored known value or leave
+the field absent. A load error follows the existing projection retry path.
+Do not publish a speculative false or promote workflow state into runtime state.
+
+Extend `ReconcileTaskStatusSummaries` to repair legacy or inconsistent flags from
+the complete `sessionsByTask` input for requested tasks. Retain conditional
+revision writes and reload the winner after a lost CAS. A completed batch load
+can establish an empty collection even when its map has no key for that task.
+A nil or partial batch without that completeness guarantee cannot establish false.
+Summary repair does not advance
+`last_activity_at` merely because the new scalar changes.
+
+### Ranking, initial reads, and compatibility
+
+SQLite and PostgreSQL extract a valid boolean from the accepted summary before
+ancestor traversal. Keep primary state for existing Status sorting. The running
+aggregate joins filtered candidates back through the existing `ancestor_walk`
+source keys, so the recursive CTE does not need another member. The running
+aggregate applies OR before page selection.
+
+For a missing, null, or invalid legacy field, use an indexed, task-scoped
+`EXISTS` over `task_sessions` with strict state `RUNNING` in the same read snapshot.
+This fallback fixes first-page membership before page enrichment can repair old
+summaries. An explicit summary false remains false. A storage read error retains
+the existing query error. No startup scan or per-candidate Go hydration is needed.
+Use dialect helpers for boolean extraction and retain the current scratch
+relation, ancestor-cycle guards, query limits, and PostgreSQL execution path.
+
+Map the field to optional `TaskSwitcherItem.hasRunningSession` in local,
+desktop, and phone item projections. Preserve explicit false and keep the
+existing primary `sessionState` for row presentation and other sort dimensions.
+`resolveTaskTreeRunning` uses the new flag for each included task. Its legacy
+generic-item fallback can retain a known primary `RUNNING` state as positive
+evidence. It cannot infer a secondary from workflow or foreground activity.
+
+For covered local evaluation, every candidate must carry a valid boolean when
+any criterion uses Running. An absent member inside an otherwise present
+summary is incomplete coverage. Fall back to the server instead of treating it
+as authoritative false. Views without Running retain their existing eligibility.
+Both directions and secondary Running criteria share this predicate.
+
+### Live delivery and surfaces
+
+Publish the scalar through existing task DTOs, boot/snapshot reads, and
+`task.status_summary.updated`. Include it in semantic equality so a secondary
+start or final stop advances the summary revision even when primary state is
+unchanged. Retain complete replacement semantics and stale-response rejection.
+Use existing workspace summary invalidation to refresh displayed and reusable
+pages, including changes to tasks outside the visible page.
+
+Desktop uses the existing sidebar. Phone uses the existing task picker and
+`MobileTaskList`; both consume the same running projection. The existing
+picker drawer remains the mobile exemplar. This change affects row order only.
+It does not introduce a surface, control, scroll owner, or breakpoint.
+Row icons retain pending-input, preparing, and background-work precedence.
+Those icons do not supply the sorting predicate.
+
+### Regression boundaries
+
+Use projector, rebuild, service-reconciliation, query, and shared local/SQL
+fixtures for mixed sessions and absent primary. Cover initial legacy rows,
+false-to-true and true-to-false revisions, restart, deletion, stale HTTP/WS,
+filtered/collapsed descendants, both directions, secondary criteria, and paging.
+Desktop and mobile rendered tests prove the secondary-running task moves ahead
+of an idle preferred-color task without changing the open conversation.
+
 ## Editor
 
 Replace the single sidebar `SortPicker` presentation with an ordered rule editor.
@@ -234,13 +336,18 @@ existing primary-key fallback remains; full multi-sort downgrade behavior is
 not guaranteed.
 
 No database schema migration, new endpoint, feature flag, activity event, or
-session subscription is required. Settings writes use existing revision/CAS and
+browser session subscription is required. The projector adds the existing
+session-removal source to its backend subscription list.
+Existing JSON summary rows support the additive
+running flag. Legacy rows use the scoped query fallback and requested-task repair.
+Settings writes use existing revision/CAS and
 rollback paths. Reading settings can fail; keep the existing query-error behavior
 rather than ranking from an unauthorized or incomplete color snapshot.
 
 ## Related decisions and contracts
 
 - [Composable sidebar sort decision](../../../decisions/2026-10-06-composable-sidebar-sort-rules.md)
+- [Task-wide running rank decision](../../../decisions/2026-10-07-task-wide-running-sidebar-rank.md)
 - [Activity source decision](../../../decisions/2026-08-17-separate-task-activity-from-summary-freshness.md)
 - [Effective task colors](sidebar-automatic-task-colors.md)
 - [Task tree activity](sidebar-task-tree-activity-sort.md)
@@ -251,3 +358,4 @@ rather than ranking from an unauthorized or incomplete color snapshot.
 ## Delivery
 
 - [Plan and work orders](../../../plans/sidebar-running-first-activity-sort/plan.md)
+- [Task-wide running rank fix](../../../plans/sidebar-task-wide-running-rank/plan.md)

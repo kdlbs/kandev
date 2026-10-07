@@ -83,6 +83,7 @@ function sidebarSessionStatus(
     sessionState: (hasSummary ? primarySession?.state : task.primarySessionState) as
       | TaskSessionState
       | undefined,
+    hasRunningSession: summary?.has_running_session,
     // The task-level MOST-ACTIVE-WINS activity aggregate (ADR-0049) is
     // authoritative for the sidebar row: when no status summary is available,
     // fall back to the task record's own aggregate so multi-session and

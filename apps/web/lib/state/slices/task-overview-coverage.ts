@@ -140,12 +140,14 @@ function coveredTask(
   workspaceId: string,
   workflowId: string,
   fields: Array<keyof TaskOverview>,
+  needsRunningSummary: boolean,
 ) {
   return (
     task.workflowId === workflowId &&
     (!task.workspaceId || task.workspaceId === workspaceId) &&
     !task.isArchived &&
     fields.every((field) => Object.hasOwn(task, field)) &&
+    (!needsRunningSummary || typeof task.statusSummary?.has_running_session === "boolean") &&
     typeof task.createdAt === "string" &&
     typeof task.updatedAt === "string"
   );
@@ -203,6 +205,7 @@ export function coveredTaskOverviews(
   const workflows = workflowScope(state, workspaceId!, view);
   if (!workflows) return null;
   const fields = requiredFields(view, state);
+  const needsRunningSummary = sidebarSortHasKey(view.sort, "running");
   const needsRepositories =
     view.group === "repository" || view.filters.some((filter) => filter.dimension === "repository");
   if (needsRepositories && !Object.hasOwn(state.repositories.itemsByWorkspaceId, workspaceId!))
@@ -212,7 +215,7 @@ export function coveredTaskOverviews(
     const snapshot = state.kanbanMulti.snapshots[id];
     if (!completeSnapshot(snapshot, workspaceId!, id)) return null;
     for (const task of snapshot.tasks) {
-      if (!coveredTask(task, workspaceId!, id, fields)) return null;
+      if (!coveredTask(task, workspaceId!, id, fields, needsRunningSummary)) return null;
       tasks.push(task);
     }
   }

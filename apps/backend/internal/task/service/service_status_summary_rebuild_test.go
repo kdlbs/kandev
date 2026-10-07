@@ -667,8 +667,11 @@ func TestStatusSummaryActivityRebuildBackfillsAndPreservesNewerStoredValue(t *te
 		t.Fatalf("reconcile newer status summary: %v", err)
 	}
 	preserved := got["task-1"]
-	if preserved == nil || preserved.Revision != stored.Revision || preserved.LastActivityAt == nil || !preserved.LastActivityAt.Equal(newer) {
-		t.Fatalf("newer stored activity = %+v, want revision %d at %v", preserved, stored.Revision, newer)
+	if preserved == nil || preserved.Revision != stored.Revision+1 || preserved.LastActivityAt == nil || !preserved.LastActivityAt.Equal(newer) {
+		t.Fatalf("repaired newer summary = %+v, want revision %d preserving activity at %v", preserved, stored.Revision+1, newer)
+	}
+	if preserved.HasRunningSession == nil || *preserved.HasRunningSession {
+		t.Fatalf("repaired running flag = %v, want explicit false", preserved.HasRunningSession)
 	}
 }
 
@@ -765,6 +768,7 @@ func TestReconcileTaskStatusSummariesReReadsPendingAfterCASRejection(t *testing.
 			WorkspaceID: "ws-1",
 			Summary: statussummary.TaskStatusSummary{
 				Revision:          5,
+				HasRunningSession: summaryBoolPtr(false),
 				PendingAction:     string(models.TaskPendingActionClarification),
 				QueuedPromptCount: 9,
 			},
@@ -812,6 +816,8 @@ func TestReconcileTaskStatusSummariesReReadsPendingAfterCASRejection(t *testing.
 	}
 }
 
+func summaryBoolPtr(value bool) *bool { return &value }
+
 func TestReconcileExistingSummaryStopsBeforeRetryWhenContextIsCanceled(t *testing.T) {
 	svc, _, repo := createTestService(t)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -843,6 +849,7 @@ func TestReconcileExistingSummaryStopsBeforeRetryWhenContextIsCanceled(t *testin
 		"",
 		time.Time{},
 		false,
+		runningSessionObservation{},
 	)
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("reconcileExistingSummary error = %v, want context canceled", err)

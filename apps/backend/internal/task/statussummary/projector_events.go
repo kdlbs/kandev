@@ -23,6 +23,8 @@ func (p *Projector) applySourceEventLocked(state *projectionState, eventType str
 		sourceChanged = p.applyTaskUpdatedEventLocked(state, data)
 	case events.TaskSessionStateChanged:
 		sourceChanged = p.applySessionEventLocked(state, data)
+	case events.SessionRemoved:
+		sourceChanged = p.removeSessionEventLocked(state, data)
 	case events.TaskSessionActivityChanged:
 		sourceChanged = p.applyActivityEventLocked(state, data)
 	case events.TaskSessionErrorChanged:
@@ -392,6 +394,7 @@ func (p *Projector) rebaseProjectionStateFromCurrent(
 	current := state.current
 	previousLastActivityAt := cloneTimePtr(state.lastActivityAt)
 	state.sessions = make(map[string]sessionObservation)
+	state.sessionsObserved = false
 	state.activityObserved = false
 	state.lastActivityAt = previousLastActivityAt
 	state.pending = make(map[string]string)
@@ -501,12 +504,25 @@ func (p *Projector) restoreSessionObservations(
 		errorsBySession[sessionID] = activeError
 	}
 	state.sessions = sessions
+	state.sessionsObserved = true
 	state.activityObserved = snapshot.ActivityObserved
 	if snapshot.ErrorsObserved {
 		state.errors = errorsBySession
 		state.errorsObserved = true
 	}
 	return nil
+}
+
+func (p *Projector) removeSessionEventLocked(state *projectionState, data map[string]interface{}) bool {
+	sessionID := strings.TrimSpace(firstString(data, "session_id", "id"))
+	if sessionID == "" {
+		return false
+	}
+	delete(state.sessions, sessionID)
+	delete(state.errors, sessionID)
+	delete(state.clearedErrorStamps, sessionID)
+	p.clearPendingLocked(state, sessionID)
+	return true
 }
 
 func (p *Projector) restoreTaskLaunchError(
