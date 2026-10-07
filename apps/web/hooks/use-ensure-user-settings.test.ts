@@ -116,6 +116,8 @@ function makeUnloadedSettings(): UserSettingsState {
     lastSeenDisplay: "absolute",
     messageTimeDisplay: "relative",
     systemMetricsDisplay: { showInTopbar: false, simplified: false },
+    sidebarFastActionsEnabled: false,
+    sidebarNewTaskStyle: "simple",
     sidebarHoverEnabled: true,
     sidebarHoverDelayMs: 500,
     appStatusBarEnabled: false,

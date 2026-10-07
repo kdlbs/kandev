@@ -397,6 +397,7 @@ type WorkflowRepository interface {
 	CreateWorkflow(ctx context.Context, workflow *models.Workflow) error
 	GetWorkflow(ctx context.Context, id string) (*models.Workflow, error)
 	UpdateWorkflow(ctx context.Context, workflow *models.Workflow) error
+	UpdateWorkflowFields(ctx context.Context, id string, update models.WorkflowFieldUpdate) (*models.Workflow, error)
 	DeleteWorkflow(ctx context.Context, id string) error
 	ListWorkflows(ctx context.Context, workspaceID string, includeHidden bool) ([]*models.Workflow, error)
 	ReorderWorkflows(ctx context.Context, workspaceID string, workflowIDs []string) error

@@ -12,6 +12,10 @@ const mocks = vi.hoisted(() => ({
     repositories: { itemsByWorkspaceId: {} },
     workflows: { items: [] },
     kanbanMulti: { snapshots: {} },
+    userSettings: {
+      sidebarTaskColors: {},
+      sidebarTaskColorAutomation: { enabled: false, rules: [] },
+    },
     collapsedSubtaskParents: [] as string[],
     language: "en",
     auth: undefined as AppState["auth"] | undefined,

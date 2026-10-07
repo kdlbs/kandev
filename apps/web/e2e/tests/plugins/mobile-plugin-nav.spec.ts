@@ -118,13 +118,12 @@ test.describe("Mobile plugin navigation", () => {
     await expect(navItem).toHaveText(/Hello E2E/);
     expect((await navItem.boundingBox())?.height).toBeGreaterThanOrEqual(44);
 
-    // The sheet slides up on open and the section sits below the fold, so
-    // settle both before shooting or the asset captures an empty mid-animation
-    // drawer instead of the change under test.
-    await testPage.getByTestId("mobile-plugin-nav-section").scrollIntoViewIfNeeded();
+    // Saved layouts own plugin destinations, so scroll the projected row into
+    // view instead of the legacy plugin section that no longer renders it.
+    await navItem.scrollIntoViewIfNeeded();
     await expect(navItem).toBeInViewport();
     await capture.screenshot("mobile-plugin-nav-section", {
-      caption: "Phone menu sheet: the plugin's page now has an entry point",
+      caption: "Phone menu sheet: saved navigation includes the plugin page",
     });
 
     await navItem.click();
@@ -288,9 +287,7 @@ test.describe("Mobile plugin navigation", () => {
     }
   });
 
-  test("shows the sidebar-footer item in the Utilities group, not the Plugins group", async ({
-    testPage,
-  }) => {
+  test("shows the sidebar-footer item once in phone layout navigation", async ({ testPage }) => {
     test.setTimeout(60_000);
 
     await testPage.goto("/settings/plugins");
@@ -304,18 +301,25 @@ test.describe("Mobile plugin navigation", () => {
     await testPage.reload();
     await testPage.getByTestId("app-nav-trigger").click();
 
-    // Utilities rows carry no data-testid (see spec's Rendered identity
-    // section) — select by the visible label instead.
-    const utilitiesRow = testPage.getByRole("link", { name: "E2E Insights Tools" });
-    await expect(utilitiesRow).toBeVisible();
+    const menu = testPage.getByTestId("app-nav-sheet");
+    const layout = menu.getByTestId("mobile-sidebar-layout-navigation");
+    const sidebarFooterRow = menu.getByRole("link", {
+      name: "E2E Insights Tools",
+      exact: true,
+    });
+    await expect(layout.getByRole("link", { name: "E2E Insights Tools", exact: true })).toHaveCount(
+      1,
+    );
+    await expect(sidebarFooterRow).toHaveCount(1);
+    await expect(sidebarFooterRow).toBeVisible();
 
-    // Moves, does not add: the same item never also renders in the Plugins
-    // group.
+    // Layout navigation owns sidebar-footer destinations, so they do not also
+    // render in the Plugins group or the Utilities manifest rows.
     const pluginsGroup = testPage.getByTestId("mobile-plugin-nav-section");
     await expect(pluginsGroup.getByText("E2E Insights Tools")).toHaveCount(0);
 
     // Complete the user path, not just the render: the row navigates.
-    await utilitiesRow.click();
+    await sidebarFooterRow.tap();
     await expect(testPage).toHaveURL(/\/plugins\/e2e-hello$/);
   });
 });

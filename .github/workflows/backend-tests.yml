@@ -803,9 +803,8 @@ jobs:
     if: needs.changes.outputs.run == 'true'
     runs-on: windows-latest
     # Isolate the large process suite from build/vet and targeted native checks.
-    # Leave time for race instrumentation, cold recompilation, and Windows
-    # process cleanup when the dependency cache is invalidated.
-    timeout-minutes: 60
+    # A cold Windows race build and test can exceed 60 minutes before cleanup.
+    timeout-minutes: 90
     strategy:
       fail-fast: false
       matrix:

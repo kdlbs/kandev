@@ -17,6 +17,7 @@ import {
   type SettingsTabOption,
 } from "@/components/settings/settings-tabs";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
+import { SidebarPresentationSettings } from "../sidebar-presentation-settings";
 import { useSettingsTab } from "@/hooks/domains/settings/use-settings-tab";
 import { LayoutEditor } from "./layout-editor";
 import { LayoutProfileList } from "./layout-profile-list";
@@ -239,6 +240,11 @@ export function LayoutSettings() {
   const { value, selectTab } = useSettingsTab({
     tabs: tabs.map((tab) => tab.id),
     defaultTab: "profiles",
+    targetToTab: {
+      [GENERAL_SETTINGS_TARGETS.layoutProfiles]: "profiles",
+      [GENERAL_SETTINGS_TARGETS.sidebarFastActions]: "sidebar",
+      [GENERAL_SETTINGS_TARGETS.sidebarNewTaskStyle]: "sidebar",
+    },
   });
 
   useEffect(() => {
@@ -282,6 +288,7 @@ export function LayoutSettings() {
           </SettingsGroup>
         </SettingsTabsPanel>
         <SettingsTabsPanel value="sidebar" testId="settings-layouts-sidebar">
+          <SidebarPresentationSettings />
           <SettingsGroup
             title={t("settings:sidebar")}
             description={t("settings:sidebarDescription")}

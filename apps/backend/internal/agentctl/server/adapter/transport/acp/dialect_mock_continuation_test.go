@@ -11,11 +11,11 @@ import (
 
 func TestMockInterruptionContinuationWireError(t *testing.T) {
 	for _, tc := range []struct {
-		name, agentID     string
-		enabled, attested bool
+		name, agentID          string
+		enabled, terminalEvent bool
 	}{
 		{"enabled mock", mockAgentID, true, true},
-		{"disabled mock", mockAgentID, false, false},
+		{"disabled mock", mockAgentID, false, true},
 		{"untrusted provider marker", "other-acp", true, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -39,25 +39,37 @@ func TestMockInterruptionContinuationWireError(t *testing.T) {
 			fake.releasePrompts()
 			select {
 			case err := <-done:
-				if !tc.attested {
+				if !tc.terminalEvent {
 					require.Error(t, err)
 					return
 				}
-				require.NoError(t, err, "attested error is delivered once through the terminal event")
+				require.NoError(t, err, "recognized interruption is delivered once through the terminal event")
 			case <-time.After(2 * time.Second):
 				t.Fatal("prompt did not settle")
 			}
 			events := drainEvents(a)
+			require.NotEmpty(t, events)
+			require.Equal(t, streams.EventTypeError, events[len(events)-1].Type)
 			failures := 0
+			toolCalls := 0
 			for _, event := range events {
+				if event.Type == streams.EventTypeToolCall {
+					toolCalls++
+				}
 				if event.Type == streams.EventTypeError {
 					failures++
-					require.True(t, event.ContinuationSafety.SafeFor(7))
-					require.Equal(t, uint16(1), event.ContinuationSafety.CompletedTools)
-					require.Equal(t, streams.PromptFailureDispositionRetainRuntime, event.PromptFailureDisposition)
+					if tc.enabled {
+						require.True(t, event.ContinuationSafety.SafeFor(7))
+						require.Equal(t, uint16(1), event.ContinuationSafety.CompletedTools)
+						require.Equal(t, streams.PromptFailureDispositionRetainRuntime, event.PromptFailureDisposition)
+					} else {
+						require.Nil(t, event.ContinuationSafety)
+						require.Empty(t, event.PromptFailureDisposition)
+					}
 				}
 				require.NotEqual(t, streams.EventTypeComplete, event.Type)
 			}
+			require.Equal(t, 1, toolCalls)
 			require.Equal(t, 1, failures)
 		})
 	}

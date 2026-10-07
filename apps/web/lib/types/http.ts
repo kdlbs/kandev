@@ -843,7 +843,12 @@ export type SidebarTaskQuery = {
     op: string;
     value: string | string[] | boolean;
   }>;
-  sort: { key: string; direction: string };
+  sort: {
+    key: string;
+    direction: string;
+    color?: string;
+    then_by?: Array<{ key: string; direction: string; color?: string }>;
+  };
   group: string;
   collapsed_group_keys: string[];
   collapsed_task_ids: string[];

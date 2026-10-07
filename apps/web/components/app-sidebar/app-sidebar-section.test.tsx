@@ -29,6 +29,28 @@ function renderSection(props: { collapsed: boolean; grow?: boolean }) {
   );
 }
 
+function renderNavigationSection() {
+  return render(
+    <TooltipProvider>
+      <AppSidebarSection
+        id="tasks"
+        presentation="navigation"
+        label="Tasks"
+        icon={IconCircleDot}
+        collapsed={false}
+        headerAction={
+          <button type="button" data-testid="section-header-action">
+            Settings
+          </button>
+        }
+        headerActionVisibility="always"
+      >
+        <div data-testid={CHILDREN_TESTID}>children</div>
+      </AppSidebarSection>
+    </TooltipProvider>,
+  );
+}
+
 describe("AppSidebarSection", () => {
   beforeEach(() => {
     storeState.appSidebar.sectionExpanded = { tasks: true };
@@ -135,6 +157,41 @@ describe("AppSidebarSection", () => {
     fireEvent.click(screen.getByRole("button", { name: "Work" }));
 
     expect(storeState.toggleAppSidebarSection).toHaveBeenCalledWith("office-work", true);
+  });
+});
+
+describe("AppSidebarSection header action", () => {
+  beforeEach(() => {
+    storeState.appSidebar.sectionExpanded = { tasks: true };
+    storeState.toggleAppSidebarSection = vi.fn();
+    storeState.setAppSidebarCollapsed = vi.fn();
+  });
+
+  afterEach(cleanup);
+
+  it("keeps the header action between independent label and chevron toggles", () => {
+    renderNavigationSection();
+
+    const labelToggle = screen.getByRole("button", { name: "Tasks" });
+    const action = screen.getByTestId("section-header-action");
+    const header = labelToggle.parentElement!;
+    const buttons = Array.from(header.querySelectorAll("button"));
+    expect(buttons).toHaveLength(3);
+    expect(buttons[0]).toBe(labelToggle);
+    expect(buttons[1]).toBe(action);
+    expect(buttons[2].getAttribute("data-testid")).toBe("sidebar-section-chevron-tasks");
+    expect(labelToggle.getAttribute("aria-expanded")).toBe("true");
+    expect(labelToggle.getAttribute("aria-controls")).toBeTruthy();
+
+    fireEvent.click(action);
+    expect(storeState.toggleAppSidebarSection).not.toHaveBeenCalled();
+
+    fireEvent.click(labelToggle);
+    expect(storeState.toggleAppSidebarSection).toHaveBeenCalledWith("tasks", false);
+    storeState.toggleAppSidebarSection.mockClear();
+
+    fireEvent.click(buttons[2]);
+    expect(storeState.toggleAppSidebarSection).toHaveBeenCalledWith("tasks", false);
   });
 });
 

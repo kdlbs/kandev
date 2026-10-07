@@ -597,22 +597,15 @@ func (wt *WorkspaceTracker) ApplyFileDiff(ctx context.Context, reqPath, diffPath
 	// git apply cannot patch through symlinks — it needs the real file path.
 	applyPath, unifiedDiff := wt.resolveSymlinkForDiff(reqPath, safePath, cleanWorkDir, unifiedDiff)
 
-	patchFile, err := writeFileDiffPatch(wt.workDir, unifiedDiff)
-	if err != nil {
-		return "", "", err
-	}
-	defer func() {
-		_ = os.Remove(patchFile) // Best effort cleanup
-	}()
-
 	// Use git apply to apply the patch directly to the file
 	output, runErr, execCtxErr := subproc.RunGitCombinedAfterAcquire(
 		ctx,
 		subproc.GitInteractive,
 		gitCommandTimeout,
 		func(execCtx context.Context) *exec.Cmd {
-			cmd := subproc.NewGitCommand(execCtx, "apply", "-p0", "--unidiff-zero", "--whitespace=nowarn", patchFile)
+			cmd := subproc.NewGitCommand(execCtx, "apply", "-p0", "--unidiff-zero", "--whitespace=nowarn", "-")
 			cmd.Dir = wt.workDir
+			cmd.Stdin = strings.NewReader(unifiedDiff)
 			return cmd
 		},
 	)
@@ -651,32 +644,6 @@ func (wt *WorkspaceTracker) ApplyFileDiff(ctx context.Context, reqPath, diffPath
 	)
 
 	return newHash, ResolutionApplied, nil
-}
-
-func writeFileDiffPatch(workDir, unifiedDiff string) (string, error) {
-	patchDir, err := filepath.Abs(workDir)
-	if err != nil {
-		return "", fmt.Errorf("failed to resolve patch directory: %w", err)
-	}
-	patch, err := os.CreateTemp(patchDir, ".kandev-patch-*")
-	if err != nil {
-		return "", fmt.Errorf("failed to create patch file: %w", err)
-	}
-	keep := false
-	defer func() {
-		_ = patch.Close()
-		if !keep {
-			_ = os.Remove(patch.Name())
-		}
-	}()
-	if _, err := patch.WriteString(unifiedDiff); err != nil {
-		return "", fmt.Errorf("failed to write patch file: %w", err)
-	}
-	if err := patch.Close(); err != nil {
-		return "", fmt.Errorf("failed to close patch file: %w", err)
-	}
-	keep = true
-	return patch.Name(), nil
 }
 
 // resolveSymlinkForDiff checks if reqPath is a symlink and, if so, rewrites the diff

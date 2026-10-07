@@ -240,3 +240,20 @@ joined143 with no passing/all-terminal verdict; fresh process groups are gone. O
 receipts, causal upload RED/GREEN and parser failures remain retained. Normal fixup hooks/push,
 physical local return and later hosted/current-head semantic/native Windows evidence remain
 separate gates.
+
+
+ROOT physical-return audit4427f2 actually joined exit1 solely because immutable main1204f0e and
+fixup b3619d0d have a concrete conflict in the corrected fixture. Prior local resource/blob checks
+passed but no ROOT acceptance PASS or HOSTED release was claimed. ROOT authorized one normal
+merge of immutable1204f0e, solely to resolve this conflict. The single conflicting fixture resolves
+to exact current-main bytes with only the second SessionPage binding and its three references
+renamed `recoverySession`; every other incoming main blob stays intact. Owned upload code/tests
+and specifications stay unchanged. This concrete-conflict exception permits no rebase, amend,
+force push, browser/build/full E2E, passing Go replay or additional source decisions.
+
+
+The newly resolved fixture lists all15 chromium tests in one file: native82924 (78118b to
+b9b242) actually joined exit0. Scoped fixture lint native41074 actually
+joined exit0. These are collection/lint evidence only, with no browser/backend/build or
+passing Go replay. Normal hooked merge commit/push and physical conflict-free return remain
+pending, followed by separate ROOT hosted and serial merge releases.

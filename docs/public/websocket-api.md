@@ -457,6 +457,18 @@ task.walkthrough.get
 
 There are no ordinary dispatcher registrations for direct workflow-step update, delete, or reorder requests. Those operations are available through the workflow HTTP/configuration surfaces and relevant MCP tools.
 
+### Partial workflow updates
+
+`workflow.update` and REST `PATCH /api/v1/workflows/:id` change only supplied
+`name`, `description`, `prompt`, and `agent_profile_id` fields. Omitted fields
+and JSON `null` retain stored values; explicit empty strings clear them. Concurrent
+updates to different fields retain both edits across backend services. Supplying
+all four fields, as the workflow editor does, replaces all four values.
+
+Responses and `workflow.updated` events describe the row observed by each write.
+Concurrent events may arrive in a different order from writes. Reconcile with
+`workflow.get` after a gap or an uncertain request outcome.
+
 ### Partial task updates
 
 `task.update` and REST `PATCH /api/v1/tasks/:id` change only supplied fields. Concurrent

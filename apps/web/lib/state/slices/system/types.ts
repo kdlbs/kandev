@@ -1,6 +1,5 @@
 import type {
   DiskUsageResponse,
-  SnapshotInfo,
   UpdatesResponse,
   SystemJob,
   SystemMetricsSnapshot,
@@ -12,18 +11,12 @@ import type {
   RetentionStatus,
 } from "@/lib/types/system";
 
-export type SystemBackupsState = {
-  items: SnapshotInfo[];
-  loaded: boolean;
-};
-
 export type SystemJobsMap = Record<string, SystemJob>;
 
 export type SystemSliceState = {
   system: {
     diskUsage: DiskUsageResponse | null;
     retention: RetentionStatus | null;
-    backups: SystemBackupsState;
     updates: UpdatesResponse | null;
     jobs: SystemJobsMap;
     metrics: SystemMetricsSnapshot | null;
@@ -42,7 +35,6 @@ export type SystemSliceState = {
 export type SystemSliceActions = {
   setSystemDiskUsage: (usage: DiskUsageResponse) => void;
   setSystemRetention: (status: RetentionStatus) => void;
-  setSystemBackups: (items: SnapshotInfo[]) => void;
   setSystemUpdates: (updates: UpdatesResponse) => void;
   upsertSystemJob: (job: SystemJob) => void;
   clearSystemJob: (jobId: string) => void;

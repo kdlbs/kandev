@@ -849,7 +849,9 @@ func (s *Service) UpdateWorkflow(ctx context.Context, id string, req *UpdateWork
 		}
 		updateErr = updater.UpdateWorkflowIfUnchanged(ctx, workflow, *req.ExpectedUpdatedAt)
 	} else {
-		updateErr = s.workflows.UpdateWorkflow(ctx, workflow)
+		workflow, updateErr = s.workflows.UpdateWorkflowFields(ctx, id, models.WorkflowFieldUpdate{
+			Name: req.Name, Description: req.Description, Prompt: req.Prompt, AgentProfileID: normalizedWorkflowProfile(req.AgentProfileID),
+		})
 	}
 	if updateErr != nil {
 		s.logger.Error("failed to update workflow", zap.String("workflow_id", id), zap.Error(updateErr))
@@ -859,6 +861,14 @@ func (s *Service) UpdateWorkflow(ctx context.Context, id string, req *UpdateWork
 	s.publishWorkflowEvent(ctx, events.WorkflowUpdated, workflow)
 	s.logger.Info("workflow updated", zap.String("workflow_id", workflow.ID))
 	return workflow, nil
+}
+
+func normalizedWorkflowProfile(value *string) *string {
+	if value == nil {
+		return nil
+	}
+	trimmed := strings.TrimSpace(*value)
+	return &trimmed
 }
 
 // SetWorkflowHidden flips the hidden flag on a workflow. Used by system
@@ -872,9 +882,8 @@ func (s *Service) SetWorkflowHidden(ctx context.Context, id string, hidden bool)
 	if workflow.Hidden == hidden {
 		return nil
 	}
-	workflow.Hidden = hidden
-	workflow.UpdatedAt = time.Now().UTC()
-	if err := s.workflows.UpdateWorkflow(ctx, workflow); err != nil {
+	workflow, err = s.workflows.UpdateWorkflowFields(ctx, id, models.WorkflowFieldUpdate{Hidden: &hidden})
+	if err != nil {
 		s.logger.Error("failed to update workflow hidden flag", zap.String("workflow_id", id), zap.Error(err))
 		return err
 	}
@@ -893,10 +902,8 @@ func (s *Service) SetWorkflowSource(ctx context.Context, id, source, sourcePath 
 	if workflow.Source == source && workflow.SourcePath == sourcePath {
 		return nil
 	}
-	workflow.Source = source
-	workflow.SourcePath = sourcePath
-	workflow.UpdatedAt = time.Now().UTC()
-	if err := s.workflows.UpdateWorkflow(ctx, workflow); err != nil {
+	workflow, err = s.workflows.UpdateWorkflowFields(ctx, id, models.WorkflowFieldUpdate{Source: &source, SourcePath: &sourcePath})
+	if err != nil {
 		s.logger.Error("failed to update workflow source", zap.String("workflow_id", id), zap.Error(err))
 		return err
 	}

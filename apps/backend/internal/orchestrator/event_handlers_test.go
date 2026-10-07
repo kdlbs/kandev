@@ -305,6 +305,8 @@ type mockAgentManager struct {
 	initialPromptDispatchCallback   func()
 	initialPromptFailureCallback    func()
 	initialPromptAdmissionCallback  func() error
+	promptAdmissionEntered          chan struct{}
+	promptAdmissionRelease          chan struct{}
 	startAgentProcessCalls          []string
 	startAgentProcessErr            error
 	startAgentProcessFunc           func(context.Context, string) error
@@ -562,6 +564,19 @@ func (m *mockAgentManager) PromptAgentWithAdmissionCallback(
 	beforeAdmission func() error,
 	onDispatched func(),
 ) (*executor.PromptResult, error) {
+	m.mu.Lock()
+	entered := m.promptAdmissionEntered
+	release := m.promptAdmissionRelease
+	m.mu.Unlock()
+	if entered != nil {
+		select {
+		case entered <- struct{}{}:
+		default:
+		}
+	}
+	if release != nil {
+		<-release
+	}
 	if beforeAdmission != nil {
 		if err := beforeAdmission(); err != nil {
 			return nil, err
