@@ -2473,6 +2473,9 @@ test.describe("Git Changes Panel", () => {
     await session.waitForChatIdle({ timeout: 45_000 });
     git.exec(`git checkout -B ${providerBranch} ${localHead}`);
     git.exec(`git branch --set-upstream-to=origin/${providerBranch} ${providerBranch}`);
+    await testPage.reload();
+    await session.waitForLoad();
+    await session.waitForChatIdle({ timeout: 45_000 });
     await session.clickTab("Changes");
 
     const changes = testPage.getByTestId("changes-panel");
