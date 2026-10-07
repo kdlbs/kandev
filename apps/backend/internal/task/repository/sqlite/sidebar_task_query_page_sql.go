@@ -349,9 +349,9 @@ func sidebarActivityCTEs(driver string, query models.SidebarTaskViewQuery) (stri
 		return `, tree_activity AS (
 			SELECT ancestor_key AS ancestor_id,
 				MAX(walk.activity_at) AS tree_activity_at,
-				MAX(` + sidebarRunningFlagExpression(driver, "running_summary", "walk.source_key") + `) AS tree_has_running
+				MAX(` + sidebarRunningFlagExpression(driver, "running_summary_walk", "walk.source_key") + `) AS tree_has_running
 			FROM ancestor_walk walk
-			LEFT JOIN task_status_summaries running_summary ON running_summary.task_id = walk.source_key
+			LEFT JOIN task_status_summaries running_summary_walk ON running_summary_walk.task_id = walk.source_key
 			WHERE walk.source_key <> walk.ancestor_key
 			GROUP BY walk.ancestor_key
 		)`, ` LEFT JOIN tree_activity activity ON activity.ancestor_id = v.id`

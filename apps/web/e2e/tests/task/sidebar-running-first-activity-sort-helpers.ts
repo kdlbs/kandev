@@ -3,7 +3,10 @@ import type { SeedData } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
 import type { WsFrame, WsWatcher } from "../../helpers/causal-waits";
 import { SidebarFilterPopoverPage } from "../../pages/sidebar-filter-popover";
-import type { SidebarTaskColorPatchApi } from "../../../lib/types/http-user-settings";
+import type {
+  SidebarTaskColorPatchApi,
+  SidebarTaskColorsApi,
+} from "../../../lib/types/http-user-settings";
 
 type SidebarSortScenario = {
   parent: { id: string; title: string };
@@ -62,8 +65,8 @@ export async function readPreviousSidebarColorPatch(
   api: ApiClient,
 ): Promise<SidebarColorPatchSnapshot | undefined> {
   const { settings } = await api.getUserSettings();
-  const patch = settings.sidebar_task_color_patch as SidebarTaskColorPatchApi | undefined;
-  return patch ? { colors: { ...patch.colors }, if_missing: patch.if_missing } : undefined;
+  const colors = settings.sidebar_task_colors as SidebarTaskColorsApi | undefined;
+  return colors ? { colors: { ...colors }, if_missing: false } : undefined;
 }
 
 export async function restoreSidebarSortColors(
