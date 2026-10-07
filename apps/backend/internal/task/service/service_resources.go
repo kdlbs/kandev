@@ -108,10 +108,6 @@ type workspaceAttachmentLister interface {
 	ListMessageAttachmentsByWorkspace(ctx context.Context, workspaceID string) ([]*models.TaskMessageAttachment, error)
 }
 
-type exactWorkspaceVersionUpdater interface {
-	UpdateWorkspaceIfUnchanged(context.Context, *models.Workspace, time.Time) error
-}
-
 type exactWorkflowCreator interface {
 	CreateWorkflowIfWorkspaceUnchanged(context.Context, *models.Workflow, time.Time) error
 }
@@ -233,50 +229,20 @@ func (s *Service) UpdateWorkspace(ctx context.Context, id string, req *UpdateWor
 		return nil, repoerrors.ErrTaskVersionConflict
 	}
 
+	update := workspaceFieldUpdate(req)
 	if req.UnitID != nil {
+		previousUnitID := workspace.UnitID
 		if err := s.moveWorkspaceToUnit(ctx, workspace, *req.UnitID); err != nil {
 			return nil, err
 		}
-	}
-	if req.Name != nil {
-		workspace.Name = *req.Name
-	}
-	if req.Description != nil {
-		workspace.Description = *req.Description
-	}
-	if req.DefaultExecutorID != nil {
-		workspace.DefaultExecutorID = normalizeOptionalID(req.DefaultExecutorID)
-	}
-	if req.DefaultEnvironmentID != nil {
-		workspace.DefaultEnvironmentID = normalizeOptionalID(req.DefaultEnvironmentID)
-	}
-	if req.DefaultAgentProfileID != nil {
-		workspace.DefaultAgentProfileID = normalizeOptionalID(req.DefaultAgentProfileID)
-	}
-	if req.DefaultConfigAgentProfileID != nil {
-		workspace.DefaultConfigAgentProfileID = normalizeOptionalID(req.DefaultConfigAgentProfileID)
-	}
-	if req.ACPIdleSuspensionEnabled != nil {
-		workspace.ACPIdleSuspensionEnabled = *req.ACPIdleSuspensionEnabled
-	}
-	if req.ACPIdleTimeoutMinutes != nil {
-		workspace.ACPIdleTimeoutMinutes = *req.ACPIdleTimeoutMinutes
-	}
-	workspace.UpdatedAt = time.Now().UTC()
-
-	var updateErr error
-	if req.ExpectedUpdatedAt != nil {
-		updater, ok := s.workspaces.(exactWorkspaceVersionUpdater)
-		if !ok {
-			return nil, errors.New("workspace version fencing is unavailable")
+		if workspace.UnitID != previousUnitID {
+			update.UnitID = &workspace.UnitID
 		}
-		updateErr = updater.UpdateWorkspaceIfUnchanged(ctx, workspace, *req.ExpectedUpdatedAt)
-	} else {
-		updateErr = s.workspaces.UpdateWorkspace(ctx, workspace)
 	}
-	if updateErr != nil {
-		s.logger.Error("failed to update workspace", zap.String("workspace_id", id), zap.Error(updateErr))
-		return nil, updateErr
+	workspace, err = s.workspaces.UpdateWorkspaceFields(ctx, id, update, req.ExpectedUpdatedAt)
+	if err != nil {
+		s.logger.Error("failed to update workspace", zap.String("workspace_id", id), zap.Error(err))
+		return nil, err
 	}
 
 	s.publishWorkspaceEvent(ctx, events.WorkspaceUpdated, workspace)

@@ -836,6 +836,17 @@ jobs:
           go-version-file: apps/backend/go.mod
           cache-dependency-path: apps/backend/go.sum
 
+      - name: Test Windows workspace settings persistence
+        if: matrix.suite == 'native'
+        timeout-minutes: 6
+        env:
+          GOMAXPROCS: '2'
+          GOMEMLIMIT: 512MiB
+        run: >-
+          go test -trimpath -tags fts5 -race -p=1 -count=1 -json -timeout=5m
+          -run '^Test(WorkspaceFieldUpdates(ConcurrentSQLite|PresenceAndDefaults|ExactFenceSQLite|AdmissionAndFailures|Storage)|RegisteredWorkspaceFieldUpdates(HTTP|WS))$'
+          ./internal/task/service ./internal/task/repository/sqlite ./internal/task/handlers
+
       - name: Test Windows copy-file glob tokenization
         if: matrix.suite == 'native'
         run: >-
