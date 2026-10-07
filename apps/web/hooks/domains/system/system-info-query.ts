@@ -11,6 +11,7 @@ export type SystemInfoQueryIdentity = {
 };
 
 export const SYSTEM_INFO_QUERY_KEY_PREFIX = ["system", "info"] as const;
+export const DISK_USAGE_QUERY_KEY_PREFIX = ["system", "disk-usage"] as const;
 export const DATABASE_STATS_QUERY_KEY_PREFIX = ["system", "database-stats"] as const;
 export const BACKUP_LIST_QUERY_KEY_PREFIX = ["system", "backups"] as const;
 
@@ -23,6 +24,17 @@ export function normalizeSystemInfoApiBaseUrl(apiBaseUrl: string): string {
 export function createSystemInfoQueryKey(identity: SystemInfoQueryIdentity) {
   return [
     ...SYSTEM_INFO_QUERY_KEY_PREFIX,
+    normalizeSystemInfoApiBaseUrl(identity.apiBaseUrl),
+    identity.bootId ?? null,
+    identity.authMode,
+    identity.authenticated,
+    identity.userId,
+  ] as const;
+}
+
+export function createDiskUsageQueryKey(identity: SystemInfoQueryIdentity) {
+  return [
+    ...DISK_USAGE_QUERY_KEY_PREFIX,
     normalizeSystemInfoApiBaseUrl(identity.apiBaseUrl),
     identity.bootId ?? null,
     identity.authMode,
