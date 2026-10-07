@@ -121,10 +121,10 @@ export async function seedSidebarRunningRankScenario(
   await api.setPrimarySession(primarySessionId);
 
   // Newer idle peers deliberately win the color and activity tie-breakers.
-  await api.updateTaskTitle(runningNoPrimary.id, `${prefix} running without primary older`);
-  await api.updateTaskTitle(secondaryTask.id, `${prefix} waiting primary secondary newer`);
-  await api.updateTaskTitle(idleRed.id, `${prefix} idle red newer`);
-  await api.updateTaskTitle(idleOrange.id, `${prefix} idle orange newest`);
+  await api.updateTaskTitle(runningNoPrimary.id, `${prefix} running no primary`);
+  await api.updateTaskTitle(secondaryTask.id, `${prefix} waiting primary, secondary running`);
+  await api.updateTaskTitle(idleRed.id, `${prefix} idle red`);
+  await api.updateTaskTitle(idleOrange.id, `${prefix} idle orange`);
 
   return {
     runningNoPrimary,

@@ -273,7 +273,7 @@ test("desktop keeps task-wide running rank through secondary session changes", a
   prCapture,
 }) => {
   test.setTimeout(120_000);
-  const token = prCapture.capturing ? "Sidebar running rank preview" : `desktop-run-${Date.now()}`;
+  const token = prCapture.capturing ? "RankQ" : `desktop-run-${Date.now()}`;
   const previousViews = await readPreviousSidebarViewState(apiClient, seedData.workspaceId);
   const previousColors = await readPreviousSidebarColorPatch(apiClient);
   const scenario = await seedSidebarRunningRankScenario(apiClient, seedData, token);
@@ -361,12 +361,6 @@ test("desktop keeps task-wide running rank through secondary session changes", a
     ];
     await expectConversationStable();
     await expectSidebarRootOrder(session.sidebar, scenario.rootIds, initialOrder);
-    if (prCapture.capturing) {
-      await waitForFiniteAnimations(session.sidebar);
-      await prCapture.screenshot("sidebar-running-first-rank-desktop", {
-        caption: "Desktop sidebar with a running secondary session ranked before idle tasks",
-      });
-    }
     await expect
       .poll(
         async () =>
@@ -431,6 +425,12 @@ test("desktop keeps task-wide running rank through secondary session changes", a
       scenario.idleOrange.id,
     ]);
     await expectConversationStable();
+    if (prCapture.capturing) {
+      await waitForFiniteAnimations(session.sidebar);
+      await prCapture.screenshot("sidebar-running-first-rank-desktop", {
+        caption: "Desktop sidebar with the running secondary session ranked first",
+      });
+    }
 
     const runningSummary = await readTaskRunningSummary(
       apiClient,

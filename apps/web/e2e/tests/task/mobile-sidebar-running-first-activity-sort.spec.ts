@@ -267,7 +267,7 @@ test("phone task picker keeps task-wide running rank through secondary session c
   prCapture,
 }) => {
   test.setTimeout(120_000);
-  const token = prCapture.capturing ? "Phone rank" : `phone-run-${Date.now()}`;
+  const token = prCapture.capturing ? "PhoneQ" : `phone-run-${Date.now()}`;
   const previousViews = await readPreviousSidebarViewState(apiClient, seedData.workspaceId);
   const previousColors = await readPreviousSidebarColorPatch(apiClient);
   const scenario = await seedSidebarRunningRankScenario(apiClient, seedData, token);
@@ -359,12 +359,6 @@ test("phone task picker keeps task-wide running rank through secondary session c
     await picker.tap();
     await expect(sheet).toBeVisible();
     await expectSidebarRootOrder(sheet, scenario.rootIds, initialOrder);
-    if (prCapture.capturing) {
-      await waitForFiniteAnimations(sheet);
-      await prCapture.screenshot("sidebar-running-first-rank-phone", {
-        caption: "Phone Tasks drawer with a running secondary session ranked before idle tasks",
-      });
-    }
     await expect
       .poll(
         async () =>
@@ -431,6 +425,12 @@ test("phone task picker keeps task-wide running rank through secondary session c
       scenario.idleOrange.id,
     ]);
     await expectConversationStable();
+    if (prCapture.capturing) {
+      await waitForFiniteAnimations(sheet);
+      await prCapture.screenshot("sidebar-running-first-rank-phone", {
+        caption: "Phone Tasks drawer with the running secondary session ranked first",
+      });
+    }
 
     const runningSummary = await readTaskRunningSummary(
       apiClient,
