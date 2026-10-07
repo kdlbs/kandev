@@ -45,13 +45,125 @@ function pluginDialogLabel(): string {
   return t("plugins:pluginDialog");
 }
 
+function isElementUnavailable(element: HTMLElement): boolean {
+  if (
+    element.hidden ||
+    element.inert ||
+    element.hasAttribute("inert") ||
+    element.getAttribute("aria-hidden") === "true" ||
+    element.getAttribute("aria-disabled") === "true" ||
+    element.matches(":disabled")
+  ) {
+    return true;
+  }
+
+  const computedStyle = element.ownerDocument.defaultView?.getComputedStyle(element);
+  return (
+    computedStyle?.display === "none" ||
+    computedStyle?.visibility === "hidden" ||
+    computedStyle?.visibility === "collapse"
+  );
+}
+
+function isAvailableFocusTarget(element: HTMLElement | null | undefined): element is HTMLElement {
+  if (
+    !element?.isConnected ||
+    element === element.ownerDocument.body ||
+    element === element.ownerDocument.documentElement
+  ) {
+    return false;
+  }
+
+  for (let ancestor: HTMLElement | null = element; ancestor; ancestor = ancestor.parentElement) {
+    if (isElementUnavailable(ancestor)) return false;
+  }
+
+  return true;
+}
+
+function findRenderedPluginModalSurface(instanceId: string): HTMLElement | undefined {
+  const surface = document.querySelector<HTMLElement>(
+    `[data-plugin-modal-instance="${instanceId}"][data-state="open"]`,
+  );
+  return isAvailableFocusTarget(surface) ? surface : undefined;
+}
+
+function findActiveModalSurface(closingInstanceId: string): HTMLElement | undefined {
+  const modals = pluginModalManager.getSnapshot();
+  const livePluginModalIds = new Set(
+    modals
+      .filter((modal) => modal.instanceId !== closingInstanceId)
+      .map((modal) => modal.instanceId),
+  );
+  const pluginSurfaces = Array.from(livePluginModalIds)
+    .map(findRenderedPluginModalSurface)
+    .filter((surface): surface is HTMLElement => Boolean(surface));
+  const dialogSurfaces = Array.from(
+    document.querySelectorAll<HTMLElement>('[role="dialog"][data-state="open"]'),
+  ).filter((surface) => {
+    const instanceId = surface.dataset.pluginModalInstance;
+    return (
+      (!instanceId || livePluginModalIds.has(instanceId)) &&
+      instanceId !== closingInstanceId &&
+      isAvailableFocusTarget(surface)
+    );
+  });
+  const activeSurfaces = Array.from(new Set([...pluginSurfaces, ...dialogSurfaces]));
+  const activeElement = document.activeElement;
+  const focusedSurface =
+    activeElement instanceof HTMLElement
+      ? activeElement.closest<HTMLElement>('[role="dialog"][data-state="open"]')
+      : null;
+  if (focusedSurface && activeSurfaces.includes(focusedSurface)) return focusedSurface;
+
+  return activeSurfaces
+    .sort((left, right) => {
+      const relation = left.compareDocumentPosition(right);
+      if (relation & Node.DOCUMENT_POSITION_FOLLOWING) return -1;
+      if (relation & Node.DOCUMENT_POSITION_PRECEDING) return 1;
+      return 0;
+    })
+    .at(-1);
+}
+
+function restoreModalFocus(modal: OpenPluginModal): void {
+  if (typeof document === "undefined") return;
+
+  const activeSurface = findActiveModalSurface(modal.instanceId);
+  if (activeSurface) {
+    const activeElement = document.activeElement;
+    if (
+      activeElement instanceof HTMLElement &&
+      activeSurface.contains(activeElement) &&
+      isAvailableFocusTarget(activeElement)
+    ) {
+      return;
+    }
+
+    if (modal.openerElement && activeSurface.contains(modal.openerElement)) {
+      if (isAvailableFocusTarget(modal.openerElement)) {
+        modal.openerElement.focus({ preventScroll: true });
+        return;
+      }
+    }
+
+    activeSurface.focus({ preventScroll: true });
+    return;
+  }
+
+  if (isAvailableFocusTarget(modal.openerElement)) {
+    modal.openerElement.focus({ preventScroll: true });
+  }
+}
+
 type ModalSurfaceProps = {
   modal: OpenPluginModal;
   dismissible: boolean;
   onOpenChange(open: boolean): void;
+  onCloseAutoFocus(event: Event): void;
 };
 
-function PluginDrawer({ modal, dismissible, onOpenChange }: ModalSurfaceProps) {
+function PluginDrawer({ modal, dismissible, onOpenChange, onCloseAutoFocus }: ModalSurfaceProps) {
   const { instanceId, pluginId, options } = modal;
   const Content = options.content;
   const noDescriptionProps = options.description ? {} : { "aria-describedby": undefined };
@@ -59,7 +171,9 @@ function PluginDrawer({ modal, dismissible, onOpenChange }: ModalSurfaceProps) {
     <Drawer open dismissible={dismissible} onOpenChange={onOpenChange}>
       <DrawerContent
         {...noDescriptionProps}
+        data-plugin-modal-instance={instanceId}
         className="max-h-[90dvh] pb-[max(1rem,env(safe-area-inset-bottom))]"
+        onCloseAutoFocus={onCloseAutoFocus}
       >
         {(options.title || options.description) && (
           <DrawerHeader>
@@ -84,7 +198,7 @@ function PluginDrawer({ modal, dismissible, onOpenChange }: ModalSurfaceProps) {
   );
 }
 
-function PluginDialog({ modal, dismissible, onOpenChange }: ModalSurfaceProps) {
+function PluginDialog({ modal, dismissible, onOpenChange, onCloseAutoFocus }: ModalSurfaceProps) {
   const { instanceId, pluginId, options } = modal;
   const Content = options.content;
   const guardClose = preventWhenNotDismissible(dismissible);
@@ -93,6 +207,7 @@ function PluginDialog({ modal, dismissible, onOpenChange }: ModalSurfaceProps) {
     <Dialog open onOpenChange={onOpenChange}>
       <DialogContent
         {...noDescriptionProps}
+        data-plugin-modal-instance={instanceId}
         data-testid={`plugin-modal-dialog-${instanceId}`}
         data-layout="contained"
         className={
@@ -101,6 +216,7 @@ function PluginDialog({ modal, dismissible, onOpenChange }: ModalSurfaceProps) {
             : `${DIALOG_CONTAINMENT_CLASSES} ${SIZE_CLASSES[options.size ?? "md"]}`
         }
         showCloseButton={dismissible}
+        onCloseAutoFocus={onCloseAutoFocus}
         onEscapeKeyDown={guardClose}
         onInteractOutside={guardClose}
       >
@@ -137,7 +253,16 @@ function PluginModalInstance({ modal }: { modal: OpenPluginModal }) {
     if (open || !dismissible) return;
     pluginModalManager.close(modal.instanceId);
   };
-  const props = { modal, dismissible, onOpenChange: handleOpenChange };
+  const handleCloseAutoFocus = (event: Event) => {
+    event.preventDefault();
+    restoreModalFocus(modal);
+  };
+  const props = {
+    modal,
+    dismissible,
+    onOpenChange: handleOpenChange,
+    onCloseAutoFocus: handleCloseAutoFocus,
+  };
   return modal.options.presentation === "drawer" ? (
     <PluginDrawer {...props} />
   ) : (

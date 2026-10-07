@@ -205,6 +205,65 @@ test.describe("Plugin action UX, composer", () => {
     await assertGlyphSize(taskAction, 16);
   });
 
+  test("returns keyboard focus after workspace, task, and status Actions close modals", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(120_000);
+    statusBarBaseline = await captureAppStatusBarSettings(apiClient);
+    await installFixturePlugin(testPage);
+    await setAppStatusBarEnabled(apiClient, true);
+
+    async function verifyReturnFocus(action: Locator, title: string, tabKey = "Tab") {
+      await action.focus();
+      await expect(action).toBeFocused();
+      await testPage.keyboard.press("Enter");
+
+      const dialog = testPage.getByRole("dialog", { name: title });
+      await expect(dialog).toBeVisible();
+      await expect(testPage.getByTestId("e2e-plugin-focus-modal-content")).toBeFocused();
+      await testPage.keyboard.press("Escape");
+
+      await expect(dialog).toHaveCount(0);
+      await expect(action).toBeFocused();
+      await testPage.keyboard.press(tabKey);
+      await expect(action).not.toBeFocused();
+      await expect
+        .poll(() => testPage.evaluate(() => document.activeElement !== document.body))
+        .toBe(true);
+    }
+
+    await testPage.goto("/tasks");
+    await verifyReturnFocus(
+      testPage.getByTestId("e2e-main-topbar-focus-action"),
+      "Fixture workspace modal",
+    );
+
+    const task = await apiClient.createTaskWithAgent(
+      seedData.workspaceId,
+      "Plugin modal focus return",
+      seedData.agentProfileId,
+      {
+        description: "/e2e:simple-message",
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+        repository_ids: [seedData.repositoryId],
+      },
+    );
+    await openTaskSession(testPage, task.id);
+    await verifyReturnFocus(
+      testPage.getByTestId("e2e-chat-top-bar-focus-action"),
+      "Fixture task modal",
+    );
+
+    await verifyReturnFocus(
+      testPage.getByTestId("e2e-status-right-focus-action"),
+      "Fixture status modal",
+      "Shift+Tab",
+    );
+  });
+
   test("status: inline Actions fit the 24px bar and keep their ordering identity", async ({
     testPage,
     apiClient,

@@ -2792,6 +2792,10 @@ declarative `host.ui.Dialog`; reach for `host.ui.Dialog` when a dialog is
 embedded in a slot's own render tree, and `host.openModal` when you need to
 pop one open imperatively from anywhere in your plugin's code.
 
+When a focused control opens a host modal, closing that modal returns focus to
+the same control while it remains available. If the control is removed or
+disabled, focus stays in a surviving modal surface.
+
 ```js
 const handle = host.openModal({
   title: "Acme settings",
