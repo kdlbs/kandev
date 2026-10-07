@@ -31,6 +31,10 @@ Identify the editor and publication owners behind the measured switch stalls, th
 ## Out of scope
 
 No backend API, deployment, dependency replacement, or general cache migration.
+Accepted-send draft ownership is delivered by the separate
+[composer draft settlement work order](../composer-draft-settlement-ownership/task-01-admit-draft-clearing-by-visit.md).
+Its correctness evidence does not complete this order's profiling objective or
+replace the required matched production trace.
 
 ## Acceptance
 

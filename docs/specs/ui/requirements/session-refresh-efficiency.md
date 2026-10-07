@@ -81,6 +81,25 @@ status without issuing duplicate reads for the same task.
 - **AC-UI-SESSION-REFRESH-EFFICIENCY-004.1:** Unchanged task rows and contributions shall retain render identity during unrelated session publications. A mounted editor shall not be recreated for an unchanged owner and configuration.
 - **AC-UI-SESSION-REFRESH-EFFICIENCY-004.2:** Closed dialogs and inactive surfaces shall not initialize expensive editors solely because another task was selected. Opening a surface shall preserve its content, focus, keyboard, and touch behavior.
 - **AC-UI-SESSION-REFRESH-EFFICIENCY-004.3:** Repeated switches shall release obsolete editor instances, listeners, subscriptions, and timers. Draft restoration and subsequent typing shall remain correct on desktop and phone.
+- **AC-UI-SESSION-REFRESH-EFFICIENCY-004.4:** When a send is accepted after
+  its composer visit has ended, its completion shall preserve the currently
+  displayed draft and the saved text, rich content, and attachments of both
+  sessions. This applies even when the drafts have identical text, when the
+  operator returns to the original session, and when a replacement composer
+  mounts for the same session. A retained submit or accepted-payload callback
+  from an ended visit shall not send or clear a successor draft. Preservation
+  shall remain observable after remount on desktop, tablet, and phone.
+- **AC-UI-SESSION-REFRESH-EFFICIENCY-004.5:** During an unchanged composer
+  visit, an accepted send shall continue to clear its matching text and rich
+  content. Newer text shall survive. If the attachment snapshot changed while
+  that send was pending, the matching submitted text shall clear while the
+  current attachments remain. A failed or rejected send shall preserve the
+  draft. Owner checks shall not change outgoing content or submission readiness.
+- **AC-UI-SESSION-REFRESH-EFFICIENCY-004.6:** Sending from one composer
+  shall not clear an independent composer's draft for a different session,
+  including a composer mounted under another application store. Retiring a
+  composer shall not cancel or replay an already submitted message; it shall
+  only remove that visit's authority to clear drafts.
 
 ### REQ-UI-SESSION-REFRESH-EFFICIENCY-005: Shared pull-request feedback reads
 
@@ -125,3 +144,5 @@ status without issuing duplicate reads for the same task.
 ## Implementation plan
 
 - [Session refresh efficiency](../../../plans/session-refresh-efficiency/plan.md)
+- [Composer draft settlement ownership](../../../plans/composer-draft-settlement-ownership/plan.md)
+  implements the draft-preservation clarification in `004.4`–`004.6`.
