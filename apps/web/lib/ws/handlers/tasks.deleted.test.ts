@@ -105,6 +105,40 @@ describe("task.deleted cleanup", () => {
   });
 });
 
+describe("task.deleted session eviction", () => {
+  it("removes every session of the deleted task from the store", () => {
+    const store = makeStore({
+      kanban: {
+        workflowId: "wf1",
+        steps: [],
+        tasks: [{ id: "t1", primarySessionId: SESS_PINNED, workflowId: "wf1" }],
+      } as unknown as AppState["kanban"],
+      taskSessionsByTask: {
+        itemsByTaskId: { t1: [{ id: SESS_OTHER }] },
+        loadedByTaskId: {},
+        loadingByTaskId: {},
+      },
+      taskSessions: {
+        items: {
+          "sess-normalized": { id: "sess-normalized", task_id: "t1" },
+          "sess-t2": { id: "sess-t2", task_id: "t2" },
+        },
+      },
+    } as unknown as Partial<AppState>);
+
+    registerTasksHandlers(store)["task.deleted"]!(
+      makeDeletedMessage({ task_id: "t1", workflow_id: "wf1" }),
+    );
+
+    const removeTaskSession = vi.mocked(store.getState().removeTaskSession);
+    expect(removeTaskSession.mock.calls.map(([, sid]) => sid).sort()).toEqual(
+      [SESS_OTHER, SESS_PINNED, "sess-normalized"].sort(),
+    );
+    expect(removeTaskSession).toHaveBeenCalledWith("t1", SESS_PINNED);
+    expect(removeTaskSession).not.toHaveBeenCalledWith(expect.anything(), "sess-t2");
+  });
+});
+
 describe("task.deleted live notification + redirect", () => {
   it("sets a task-deleted notification (with title + reason) when the focused task is deleted", () => {
     const store = makeActiveStore();
