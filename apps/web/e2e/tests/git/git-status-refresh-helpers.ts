@@ -307,12 +307,22 @@ export async function routeGitStatusRefresh(page: Page) {
     holdFreshGitRefreshRequests() {
       state.holdFreshGitRefreshRequests = true;
     },
-    async waitForHeldFreshGitRefreshRequests(count: number) {
+    async waitForHeldFreshGitRefreshRequests(count: number, sessionId?: string) {
       await expect
-        .poll(() => state.heldFreshGitRefreshRequests.length, {
-          timeout: 30_000,
-          message: "the expected fresh Git refresh request should be held",
-        })
+        .poll(
+          () =>
+            state.heldFreshGitRefreshRequests.filter(({ frame }) => {
+              if (!sessionId) return true;
+              const payload = recordValue(parseFrame(frame)?.payload);
+              return payload?.session_id === sessionId;
+            }).length,
+          {
+            timeout: 30_000,
+            message: sessionId
+              ? `a fresh Git refresh request for session ${sessionId} should be held`
+              : "the expected fresh Git refresh request should be held",
+          },
+        )
         .toBeGreaterThanOrEqual(count);
     },
     releaseFreshGitRefreshRequests() {

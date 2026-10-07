@@ -463,7 +463,7 @@ export async function touchWorkflowOptionListToBoundary(
   ).toBeGreaterThan(1);
 
   let gestureCount = 0;
-  for (let attempt = 0; attempt < 20; attempt += 1) {
+  for (let attempt = 0; attempt < 40; attempt += 1) {
     const state = await optionList.evaluate((element) => ({
       top: element.scrollTop,
       bottom: element.scrollHeight - element.clientHeight,

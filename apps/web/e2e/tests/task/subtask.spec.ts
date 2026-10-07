@@ -3,6 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import type { Locator } from "@playwright/test";
 import { expect, resetSeedRepositoryCheckout, test } from "../../fixtures/test-base";
+import { waitForHttp } from "../../helpers/causal-waits";
 import { makeGitEnv } from "../../helpers/git-helper";
 import { useRegularMode } from "../../helpers/regular-mode";
 import { KanbanPage } from "../../pages/kanban-page";
@@ -386,8 +387,32 @@ test.describe("Subtask basics", () => {
 });
 
 test.describe("MCP subtask creation", () => {
-  test("agent creates subtask via MCP create_task with parent_id", async ({ testPage }) => {
+  test("agent creates subtask via MCP create_task with parent_id", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
     const subtaskTitle = "MCP-subtask-e2e-verify";
+    const settingsBefore = await apiClient.getUserSettings();
+    const baselineLayout =
+      settingsBefore.settings.sidebar_layouts_by_workspace?.[seedData.workspaceId];
+    await apiClient.saveUserSettings({
+      sidebar_layout_state: {
+        workspace_id: seedData.workspaceId,
+        expected_revision: baselineLayout?.revision ?? 0,
+        layout: {
+          version: 1,
+          revision: 0,
+          navigation_height: 0,
+          navigation_expanded: false,
+          nodes: [
+            { id: "home", kind: "builtin", destination_id: "home", visible: true },
+            { id: "new-task", kind: "builtin", destination_id: "new_task", visible: true },
+            { id: "integrations", kind: "builtin", destination_id: "integrations", visible: true },
+          ],
+        },
+      },
+    });
 
     const script = [
       'e2e:thinking("Planning subtasks...")',
@@ -397,36 +422,56 @@ test.describe("MCP subtask creation", () => {
       'e2e:message("Done.")',
     ].join("\n");
 
-    // 1. Create parent task via UI dialog
     const kanban = new KanbanPage(testPage);
-    await kanban.goto();
+    try {
+      await kanban.goto();
 
-    await kanban.createTaskButton.first().click();
-    const dialog = testPage.getByTestId("create-task-dialog");
-    await expect(dialog).toBeVisible();
+      await expect(testPage.getByTestId("sidebar-navigation-split")).toBeVisible();
+      const navigationExpand = testPage.getByTestId("sidebar-navigation-expand");
+      await expect(navigationExpand).toHaveAttribute("aria-expanded", "false");
+      const layoutSaved = waitForHttp(testPage, "PATCH", /\/api\/v1\/user\/settings$/);
+      await navigationExpand.click();
+      expect((await layoutSaved).ok()).toBeTruthy();
+      await expect(navigationExpand).toHaveAttribute("aria-expanded", "true");
 
-    await testPage.getByTestId("task-title-input").fill("MCP Subtask Parent");
-    await testPage.getByTestId("task-description-input").fill(script);
+      // 1. Create parent task via UI dialog
+      await kanban.createTaskButton.first().click();
+      const dialog = testPage.getByTestId("create-task-dialog");
+      await expect(dialog).toBeVisible();
 
-    const startBtn = testPage.getByTestId(START_AGENT_TEST_ID);
-    await expect(startBtn).toBeEnabled({ timeout: START_ENABLED_TIMEOUT });
-    await startBtn.click();
-    await expect(dialog).not.toBeVisible({ timeout: 10_000 });
+      await testPage.getByTestId("task-title-input").fill("MCP Subtask Parent");
+      await testPage.getByTestId("task-description-input").fill(script);
 
-    // 2. Sidebar task creation navigates directly to the parent session.
-    await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
+      const startBtn = testPage.getByTestId(START_AGENT_TEST_ID);
+      await expect(startBtn).toBeEnabled({ timeout: START_ENABLED_TIMEOUT });
+      await startBtn.click();
+      await expect(dialog).not.toBeVisible({ timeout: 10_000 });
 
-    // 3. Wait for the agent to complete — the MCP create_task call happens during execution
-    const session = new SessionPage(testPage);
-    await session.waitForLoad();
-    await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
+      // 2. Sidebar task creation navigates directly to the parent session.
+      await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
 
-    // 4. Go back to kanban — subtask card should be visible with parent badge
-    await kanban.goto();
+      // 3. Wait for the agent to complete — the MCP create_task call happens during execution
+      const session = new SessionPage(testPage);
+      await session.waitForLoad();
+      await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
 
-    const subtaskCard = kanban.taskCardByTitle(subtaskTitle);
-    await expect(subtaskCard).toBeVisible({ timeout: 10_000 });
-    await expect(subtaskCard.getByText("MCP Subtask Parent")).toBeVisible();
+      // 4. Go back to kanban — subtask card should be visible with parent badge
+      await kanban.goto();
+
+      const subtaskCard = kanban.taskCardByTitle(subtaskTitle);
+      await expect(subtaskCard).toBeVisible({ timeout: 10_000 });
+      await expect(subtaskCard.getByText("MCP Subtask Parent")).toBeVisible();
+    } finally {
+      const currentLayout = (await apiClient.getUserSettings()).settings
+        .sidebar_layouts_by_workspace?.[seedData.workspaceId];
+      await apiClient.saveUserSettings({
+        sidebar_layout_state: {
+          workspace_id: seedData.workspaceId,
+          expected_revision: currentLayout?.revision ?? 0,
+          layout: baselineLayout ?? null,
+        },
+      });
+    }
   });
 
   test("MCP-created subtask inherits parent task repositories", async ({
