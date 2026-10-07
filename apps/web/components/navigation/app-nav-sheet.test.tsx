@@ -29,6 +29,16 @@ const state = {
   },
   userSettings: { ...defaultState.userSettings },
 };
+const appStoreApi = {
+  getState: () => ({
+    ...state,
+    setUserSettings: (userSettings: typeof state.userSettings) => {
+      state.userSettings = userSettings;
+    },
+  }),
+  setState: vi.fn(),
+  subscribe: vi.fn(() => () => {}),
+};
 
 beforeEach(() => {
   pathname = "/settings";
@@ -56,6 +66,7 @@ vi.mock("@/lib/routing/client-router", () => ({
 
 vi.mock("@/components/state-provider", () => ({
   useAppStore: (selector: (s: typeof state) => unknown) => selector(state),
+  useAppStoreApi: () => appStoreApi,
 }));
 
 vi.mock("@/hooks/use-select-workspace", () => ({ useSelectWorkspace: () => vi.fn() }));
@@ -67,6 +78,7 @@ vi.mock("@/components/quick-chat/use-quick-chat-activity", () => ({
 
 vi.mock("@/hooks/use-in-office", () => ({
   useInOffice: () => inOffice,
+  useOfficeModeState: () => (inOffice ? "office" : "kanban"),
 }));
 
 type NavRegistration = {
@@ -226,10 +238,10 @@ describe("AppNavSheet", () => {
     for (const label of ["Home", "Stats", "Settings"]) {
       expect(screen.getByRole("link", { name: label })).not.toBeNull();
     }
-    // Global destinations have a stable position before local navigation.
+    // Global layout destinations have a stable position before local navigation.
     expect(
       screen
-        .getByTestId("app-nav-primary")
+        .getByTestId("mobile-sidebar-layout-navigation")
         .compareDocumentPosition(screen.getByTestId("page-nav")) & Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
   });
@@ -385,7 +397,7 @@ describe("AppNavSections", () => {
 
     expect(screen.queryByRole("link", { name: "Tasks" })).toBeNull();
     expect(screen.getByRole("link", { name: "Home" })).not.toBeNull();
-    expect(screen.getByTestId("app-nav-primary")).not.toBeNull();
+    expect(screen.getByTestId("mobile-sidebar-layout-navigation")).not.toBeNull();
   });
 
   it.each([
@@ -412,20 +424,23 @@ describe("AppNavSections", () => {
     expect(status.textContent).toContain("Status");
   });
 
-  it("drops the primary section when the caller omits it", () => {
+  it("drops primary layout entries when the caller omits the primary section", () => {
     render(<SectionsHost omitSections={["primary"]} />);
 
-    expect(screen.queryByTestId("app-nav-primary")).toBeNull();
+    expect(screen.queryByRole("link", { name: "Home" })).toBeNull();
+    expect(screen.queryByTestId("mobile-new-task-button")).toBeNull();
     // The utility tail stays.
     expect(screen.getByTestId("mobile-improve-kandev-button")).not.toBeNull();
   });
 
-  it("keeps the legacy integrations destination for an untouched Office workspace", () => {
+  it("omits regular-workspace integrations from an Office layout", () => {
+    inOffice = true;
     state.workspaces.items[0].office_workflow_id = "office-workflow";
 
     render(<SectionsHost />);
 
-    expect(screen.getByTestId("mobile-integrations-section")).not.toBeNull();
+    expect(screen.queryByTestId("mobile-integrations-section")).toBeNull();
+    expect(screen.queryByRole("link", { name: "Integrations" })).toBeNull();
   });
 
   it("hides the health row while the system is healthy", () => {
@@ -441,7 +456,7 @@ describe("AppNavSections", () => {
     expect(screen.getByTestId("app-nav-health-button")).not.toBeNull();
   });
 
-  it("orders the Utilities group's manifest rows as Stats, Settings, then a plugin sidebar-footer item", () => {
+  it("renders sidebar-footer plugin destinations in the layout before Utilities", () => {
     navRegistrations = [
       {
         pluginId: "acme",
@@ -459,14 +474,18 @@ describe("AppNavSections", () => {
     const settings = links.indexOf("Settings");
     const plugin = links.indexOf("Acme Board");
 
-    expect(stats).toBeGreaterThanOrEqual(0);
+    expect(plugin).toBeGreaterThanOrEqual(0);
+    expect(stats).toBeGreaterThan(plugin);
     expect(settings).toBeGreaterThan(stats);
-    expect(plugin).toBeGreaterThan(settings);
+    const pluginRows = screen.getAllByRole("link", { name: /^Acme Board$/ });
+    expect(pluginRows).toHaveLength(1);
+    expect(
+      pluginRows[0].closest('[data-testid="mobile-sidebar-layout-navigation"]'),
+    ).not.toBeNull();
   });
 
-  // The phone Utilities group is deliberately uncapped (spec.md#Capacity-and-
-  // overflow: "the phone surface is uncapped"), unlike the desktop footer's
-  // desktop utilities menu; every entry stays directly visible on phones.
+  // Sidebar-footer plugin destinations stay direct rows on phones, unlike the
+  // desktop footer's Utilities menu; every entry stays visible without overflow.
   it("renders every plugin sidebar-footer item as a row, uncapped, with no overflow menu", () => {
     navRegistrations = Array.from({ length: 8 }, (_, i) => ({
       pluginId: "acme",
@@ -479,7 +498,13 @@ describe("AppNavSections", () => {
     render(<SectionsHost />);
 
     for (let i = 0; i < 8; i++) {
-      expect(screen.getByRole("link", { name: `Acme Board ${i}` })).not.toBeNull();
+      const pluginRows = screen.getAllByRole("link", {
+        name: new RegExp(`^Acme Board ${i}$`),
+      });
+      expect(pluginRows).toHaveLength(1);
+      expect(
+        pluginRows[0].closest('[data-testid="mobile-sidebar-layout-navigation"]'),
+      ).not.toBeNull();
     }
     expect(screen.queryByTestId("sidebar-footer-more-button")).toBeNull();
   });

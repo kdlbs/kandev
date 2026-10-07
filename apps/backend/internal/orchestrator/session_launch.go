@@ -5,12 +5,15 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"go.uber.org/zap"
 
 	agentruntime "github.com/kandev/kandev/internal/agent/runtime"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
+	taskdto "github.com/kandev/kandev/internal/task/dto"
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/recoveryoperation"
 	taskrepo "github.com/kandev/kandev/internal/task/repository"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 	"github.com/kandev/kandev/internal/worktree"
@@ -128,7 +131,10 @@ type LaunchSessionRequest struct {
 	InitialCreatePrompt bool `json:"-"`
 	// InitialPromptPreview is supplied only by task creation after attachment claim.
 	InitialPromptPreview *models.InitialPromptPreview `json:"-"`
-	Attachments          []v1.MessageAttachment       `json:"attachments,omitempty"`
+	// InitialPromptSubmission is persisted during task-session preparation and
+	// is only set by the server for the explicit fresh-start replay path.
+	InitialPromptSubmission *models.InitialPromptSubmission `json:"-"`
+	Attachments             []v1.MessageAttachment          `json:"attachments,omitempty"`
 	// SpawnOrigin identifies the agent session that requested this launch via
 	// spawn_session_kandev, so the new session's first turn can carry spawner
 	// attribution and reply instructions. Like DeferredStart it is kept off the
@@ -166,6 +172,7 @@ type SpawnOrigin struct {
 // LaunchSessionResponse is the unified response for session.launch.
 type LaunchSessionResponse struct {
 	Success                           bool                                      `json:"success"`
+	InProgress                        bool                                      `json:"in_progress,omitempty"`
 	TaskID                            string                                    `json:"task_id"`
 	SessionID                         string                                    `json:"session_id,omitempty"`
 	AgentExecutionID                  string                                    `json:"agent_execution_id,omitempty"`
@@ -174,6 +181,7 @@ type LaunchSessionResponse struct {
 	WorktreePath                      *string                                   `json:"worktree_path,omitempty"`
 	WorktreeBranch                    *string                                   `json:"worktree_branch,omitempty"`
 	WorkspaceInventoryRecoveryReceipt *models.WorkspaceInventoryRecoveryReceipt `json:"workspace_inventory_recovery_receipt,omitempty"`
+	WorkspaceRecovery                 *taskdto.WorkspaceRecoveryDTO             `json:"workspace_recovery,omitempty"`
 	ActivationDisposition             string                                    `json:"activation_disposition,omitempty"`
 	ActivationReason                  string                                    `json:"activation_reason,omitempty"`
 }
@@ -230,6 +238,7 @@ func (s *Service) LaunchSession(ctx context.Context, req *LaunchSessionRequest) 
 	if req == nil {
 		return nil, errors.New("launch request is required")
 	}
+	ctx = worktree.WithRecoveryLifecycleContext(ctx, s.recoveryLifecycleContext())
 	req.Prompt = strings.TrimSpace(req.Prompt)
 	if err := validateLaunchActivationSource(req.ActivationSource); err != nil {
 		return nil, err
@@ -403,6 +412,7 @@ func (s *Service) claimLaunchAttachments(ctx context.Context, req *LaunchSession
 // later start would be rejected against the now-running session.
 func (s *Service) launchPrepare(ctx context.Context, req *LaunchSessionRequest) (*LaunchSessionResponse, error) {
 	prepareCtx := withInitialPromptPreview(ctx, req.InitialPromptPreview)
+	prepareCtx = withInitialPromptSubmission(prepareCtx, req.InitialPromptSubmission)
 	if s.shouldUpgradePassthroughPrepare(ctx, req) {
 		return s.launchStart(prepareCtx, req)
 	}
@@ -538,6 +548,16 @@ func (s *Service) launchStartCreated(ctx context.Context, req *LaunchSessionRequ
 	autoStart := req.AutoStart || req.ActivationSource == LaunchActivationSourceSessionOpen
 	parkingStamp := s.captureWorkflowParkingStamp(ctx, req.SessionID)
 	options := startCreatedSessionOptions{}
+	if !req.NoInitialPrompt {
+		beforeAdmission, accepted, callbackErr := s.initialSubmissionDispatchCallbacks(
+			ctx, req.TaskID, req.SessionID, req.Prompt, req.PlanMode, req.Attachments,
+		)
+		if callbackErr != nil {
+			return nil, callbackErr
+		}
+		options.beforeProviderAdmission = beforeAdmission
+		options.onInitialPromptAccepted = accepted
+	}
 	if req.NoInitialPrompt {
 		options.skipTaskDescriptionFallback = true
 		options.promptAlreadyComposed = true
@@ -586,7 +606,7 @@ func (s *Service) launchResume(ctx context.Context, req *LaunchSessionRequest) (
 	if req.ActivationSource == LaunchActivationSourceSessionOpen {
 		resumeCtx = withSessionOpenRecoveryContext(ctx)
 	}
-	execution, err := s.ResumeTaskSessionWithOptions(resumeCtx, req.TaskID, req.SessionID, executor.ResumeOptions{
+	resumeOptions := executor.ResumeOptions{
 		AllowBranchReplacement:           req.AllowBranchReplacement,
 		RepairWorkspaceInventory:         req.RepairWorkspaceInventory,
 		WorkspaceInventoryIdempotencyKey: req.WorkspaceInventoryIdempotencyKey,
@@ -594,8 +614,33 @@ func (s *Service) launchResume(ctx context.Context, req *LaunchSessionRequest) (
 		Origin:                           string(launchOriginForActivation(req)),
 		RequireIdleSuspensionProvenance:  req.RequireIdleSuspensionProvenance,
 		SettingsPolicy:                   req.SessionSettingsPolicy,
-	})
+	}
+	var execution *executor.TaskExecution
+	var err error
+	if req.InitialPromptSubmission != nil {
+		resumeOptions.NoInitialPrompt = true
+		resumeOptions.HoldForInitialPrompt = true
+		resumeOptions.InitialPromptSubmission = req.InitialPromptSubmission
+		execution, err = s.resumeTaskSessionWithContinuation(
+			resumeCtx, req.TaskID, req.SessionID, resumeOptions,
+			func(promptCtx context.Context, attempt *resumeAttempt, _ *executor.TaskExecution) error {
+				return s.replayInitialPromptSubmission(
+					promptCtx, req.TaskID, req.SessionID, req.InitialPromptSubmission, attempt,
+				)
+			},
+		)
+	} else {
+		execution, err = s.ResumeTaskSessionWithOptions(resumeCtx, req.TaskID, req.SessionID, resumeOptions)
+	}
 	if err != nil {
+		if req.InitialPromptSubmission != nil {
+			// The owned continuation has released its lifecycle lock and initial
+			// prompt hold. Give queued work a fresh admission attempt after replay
+			// reaches a terminal failure.
+			drainCtx, cancelDrain := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+			s.drainQueuedMessageForPromptableSession(drainCtx, req.SessionID)
+			cancelDrain()
+		}
 		var blocked *sessionOpenRecoveryBlockedError
 		if errors.As(err, &blocked) {
 			return s.sessionOpenRecoveryWaitingResponse(ctx, req, blocked.reason), nil
@@ -911,17 +956,27 @@ func (s *Service) RecoverSessionWithOptions(
 	if action == recoveryActionRepairWorkspaceInventory && strings.TrimSpace(options.IdempotencyKey) == "" {
 		return nil, models.ErrWorkspaceInventoryRecoveryInvalid
 	}
-	recoveryObservation, err := s.captureWorkspaceRecoveryErrorObservation(ctx, session)
-	if err != nil {
-		return nil, err
+	if response, statusErr := s.liveWorkspaceRecoveryResponse(ctx, taskID, sessionID, session); statusErr != nil {
+		return nil, statusErr
+	} else if response != nil {
+		return response, nil
 	}
-	launchCtx, err := s.prepareManagedCloneRelocationRecovery(ctx, session, action, []string{options.ErrorStamp})
+	recoveryObservation, launchCtx, err := s.prepareSessionRecoveryLaunchContext(ctx, session, action, options.ErrorStamp)
 	if err != nil {
 		return nil, err
 	}
 
 	recoveryAdmission, err := s.preflightSessionRecovery(launchCtx, taskID, session, action)
 	if err != nil {
+		if errors.Is(err, recoveryoperation.ErrInProgress) {
+			response, statusErr := s.liveWorkspaceRecoveryResponse(ctx, taskID, sessionID, session)
+			if statusErr != nil {
+				return nil, statusErr
+			}
+			if response != nil {
+				return response, nil
+			}
+		}
 		branchError := s.branchRecoveryError(launchCtx, taskID, sessionID, err)
 		return nil, s.managedCloneRelocationPreflightError(ctx, session, action, recoveryObservation, branchError)
 	}
@@ -929,8 +984,15 @@ func (s *Service) RecoverSessionWithOptions(
 		defer func() { _ = recoveryAdmission.Release(context.WithoutCancel(ctx)) }()
 		launchCtx = worktree.WithRecoveryAdmission(launchCtx, recoveryAdmission)
 	}
+	var initialSubmission *models.InitialPromptSubmission
+	if action == recoveryActionFreshStart {
+		initialSubmission, err = s.initialSubmissionForFreshStart(launchCtx, taskID, session)
+		if err != nil {
+			return nil, err
+		}
+	}
 
-	if err := s.applySessionRecoveryAction(ctx, sessionID, action); err != nil {
+	if err := s.applyRecoveryActionWithSettlement(launchCtx, recoveryAdmission, sessionID, action); err != nil {
 		return nil, err
 	}
 
@@ -943,11 +1005,98 @@ func (s *Service) RecoverSessionWithOptions(
 		RepairWorkspaceInventory:         action == recoveryActionRepairWorkspaceInventory,
 		WorkspaceInventoryIdempotencyKey: strings.TrimSpace(options.IdempotencyKey),
 		SessionSettingsPolicy:            options.SettingsPolicy,
+		InitialPromptSubmission:          initialSubmission,
 	})
 	if err != nil {
-		return nil, normalizeRecoverSessionError(err)
+		resumeErr := normalizeRecoverSessionError(err)
+		if recoveryAdmission != nil {
+			if persistErr := recoveryAdmission.CompleteRecoveryResume(launchCtx, false, "resume_failed"); persistErr != nil {
+				return nil, fmt.Errorf("%w (workspace recovery outcome could not be saved: %v)", resumeErr, persistErr)
+			}
+		}
+		return nil, resumeErr
+	}
+	if err := completeRecoveryResumeAfterLaunch(launchCtx, recoveryAdmission, resp); err != nil {
+		return nil, err
 	}
 	return resp, nil
+}
+
+func (s *Service) prepareSessionRecoveryLaunchContext(
+	ctx context.Context,
+	session *models.TaskSession,
+	action, errorStamp string,
+) (models.WorkspaceRecoveryErrorObservation, context.Context, error) {
+	observation, err := s.captureWorkspaceRecoveryErrorObservation(ctx, session)
+	if err != nil {
+		return models.WorkspaceRecoveryErrorObservation{}, nil, err
+	}
+	launchCtx, err := s.prepareManagedCloneRelocationRecovery(ctx, session, action, []string{errorStamp})
+	if err != nil {
+		return models.WorkspaceRecoveryErrorObservation{}, nil, err
+	}
+	return observation, worktree.WithRecoveryLifecycleContext(launchCtx, s.recoveryLifecycleContext()), nil
+}
+
+func (s *Service) liveWorkspaceRecoveryResponse(
+	ctx context.Context,
+	taskID, sessionID string,
+	session *models.TaskSession,
+) (*LaunchSessionResponse, error) {
+	if session == nil || session.TaskEnvironmentID == "" || s.workspaceRecoveryStatusReader == nil {
+		return nil, nil
+	}
+	operation, runnerLive, err := s.workspaceRecoveryStatusReader.WorkspaceRecoveryProjection(ctx, session.TaskEnvironmentID)
+	if err != nil {
+		return nil, err
+	}
+	if !runnerLive {
+		return nil, nil
+	}
+	return workspaceRecoveryInProgressResponse(taskID, sessionID, operation), nil
+}
+
+func completeRecoveryResumeAfterLaunch(
+	ctx context.Context,
+	admission *worktree.RecoveryAdmission,
+	response *LaunchSessionResponse,
+) error {
+	if admission == nil {
+		return nil
+	}
+	ready := response != nil && response.Success && response.State != ""
+	reason := "resume_not_ready"
+	if ready {
+		reason = ""
+	}
+	return admission.CompleteRecoveryResume(ctx, ready, reason)
+}
+
+func (s *Service) applyRecoveryActionWithSettlement(
+	ctx context.Context,
+	admission *worktree.RecoveryAdmission,
+	sessionID, action string,
+) error {
+	if err := s.applySessionRecoveryAction(ctx, sessionID, action); err != nil {
+		if admission != nil {
+			if persistErr := admission.CompleteRecoveryResume(ctx, false, "resume_action_failed"); persistErr != nil {
+				return persistErr
+			}
+		}
+		return err
+	}
+	return nil
+}
+
+func workspaceRecoveryInProgressResponse(
+	taskID, sessionID string,
+	operation *models.TaskEnvironmentRecoveryOperation,
+) *LaunchSessionResponse {
+	return &LaunchSessionResponse{
+		Success: true, InProgress: true, TaskID: taskID, SessionID: sessionID,
+		State:             "recovering",
+		WorkspaceRecovery: taskdto.WorkspaceRecoveryFromOperation(operation, true),
+	}
 }
 
 func (s *Service) preflightSessionRecovery(
@@ -1153,6 +1302,7 @@ func (s *Service) prepareManagedCloneRelocationRecovery(
 	if !isManagedCloneRelocationAuthorized(session, session.TaskID, stamp) {
 		return nil, &ManagedCloneRelocationRecoveryError{Stale: true}
 	}
+	ctx = worktree.WithManagedCloneRelocationErrorStamp(ctx, stamp)
 	ctx = worktree.WithDirtyCloneRelocation(ctx)
 	return worktree.WithManagedCloneRelocationAuthorization(ctx, func(checkCtx context.Context) error {
 		current, err := s.repo.GetTaskSession(checkCtx, session.ID)

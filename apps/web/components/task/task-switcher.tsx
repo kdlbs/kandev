@@ -174,6 +174,7 @@ function buildGroupSectionProps(
     collapsedSubtaskParentIds: props.collapsedSubtaskParentIds,
     onToggleSubtasks: props.onToggleSubtasks,
     showHeader,
+    groupIndent: props.groupIndent,
     onReorderGroup: props.onReorderGroup,
     onReorderSubtasks: props.onReorderSubtasks,
     onNestTask: props.onNestTask,

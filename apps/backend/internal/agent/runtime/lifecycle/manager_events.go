@@ -38,16 +38,18 @@ func (m *Manager) handleMessageChunkEvent(execution *AgentExecution, event agent
 	if event.Role == "user" || event.Text == "" {
 		return
 	}
+	if event.PromptGeneration == 0 {
+		event.PromptGeneration = execution.promptGenerationSnapshot()
+	}
+	m.eventPublisher.PublishAgentStreamEvent(execution, event)
 	m.appendAssistantHistoryChunk(execution, event.Text)
 	if event.ProtocolMessageID != "" {
 		m.flushPendingLegacyMessage(execution, execution.promptGenerationSnapshot(), event.AttemptID)
-		m.publishProtocolMessage(execution, event.ProtocolMessageID, event.Text, event.ProviderDiagnosticCandidate, execution.promptGenerationSnapshot(), event.AttemptID)
+		m.publishProtocolMessage(execution, event.ProtocolMessageID, event.Text, execution.promptGenerationSnapshot(), event.AttemptID)
 		return
 	}
-	m.flushMessageBufferOnDiagnosticChange(execution, event.ProviderDiagnosticCandidate, execution.promptGenerationSnapshot(), event.AttemptID)
 
 	execution.messageMu.Lock()
-	execution.messageBufferDiagnostic = event.ProviderDiagnosticCandidate
 	execution.messageBuffer.WriteString(event.Text)
 	bufferLenAfterWrite := execution.messageBuffer.Len()
 	m.logger.Debug("message_chunk written to buffer",
@@ -66,37 +68,10 @@ func (m *Manager) handleMessageChunkEvent(execution *AgentExecution, event agent
 	remainder := bufContent[lastNewline+1:]
 	execution.messageBuffer.Reset()
 	execution.messageBuffer.WriteString(remainder)
-	diagnostic := execution.messageBufferDiagnostic
 	execution.messageMu.Unlock()
 
 	if strings.TrimSpace(toFlush) != "" {
-		m.publishStreamingMessage(execution, toFlush, diagnostic, execution.promptGenerationSnapshot(), event.AttemptID)
-	}
-}
-
-// flushMessageBufferOnDiagnosticChange publishes any buffered ID-less
-// message content ahead of a chunk whose ProviderDiagnosticCandidate marker
-// differs from what is already buffered. Without this, a diagnostic chunk
-// concatenated with adjacent ordinary text (or vice versa) would publish one
-// merged segment carrying only one of the two markers.
-func (m *Manager) flushMessageBufferOnDiagnosticChange(execution *AgentExecution, diagnostic bool, promptGeneration uint64, attemptID string) {
-	execution.messageMu.Lock()
-	if execution.messageBuffer.Len() == 0 || execution.messageBufferDiagnostic == diagnostic {
-		execution.messageMu.Unlock()
-		return
-	}
-	pending := execution.messageBuffer.String()
-	pendingDiagnostic := execution.messageBufferDiagnostic
-	execution.messageBuffer.Reset()
-	execution.messageBufferDiagnostic = false
-	execution.currentMessageID = ""
-	execution.messageMu.Unlock()
-
-	if strings.TrimSpace(pending) != "" {
-		m.publishStreamingMessage(execution, pending, pendingDiagnostic, promptGeneration, attemptID)
-		execution.messageMu.Lock()
-		execution.currentMessageID = ""
-		execution.messageMu.Unlock()
+		m.publishStreamingMessage(execution, toFlush, execution.promptGenerationSnapshot(), event.AttemptID)
 	}
 }
 
@@ -108,6 +83,11 @@ func (m *Manager) handleReasoningEvent(execution *AgentExecution, event agentctl
 	if event.ReasoningText == "" {
 		return
 	}
+	if event.PromptGeneration == 0 {
+		event.PromptGeneration = execution.promptGenerationSnapshot()
+	}
+	event.Text = event.ReasoningText
+	m.eventPublisher.PublishAgentStreamEvent(execution, event)
 	if event.ProtocolMessageID != "" {
 		m.flushPendingLegacyThinking(execution, execution.promptGenerationSnapshot(), event.AttemptID)
 		m.publishProtocolThinking(execution, event.ProtocolMessageID, event.ReasoningText, execution.promptGenerationSnapshot(), event.AttemptID)

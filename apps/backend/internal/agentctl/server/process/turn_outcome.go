@@ -27,8 +27,8 @@ type turnOutcomeClearer interface {
 // (most existing tests, and the e2e harness) simply never retains --
 // retention is additive, not required for correct event delivery.
 func (m *Manager) SetTurnOutcomeRecorder(instanceID string, recorder TurnOutcomeRecorder) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
+	m.turnOutcomeMu.Lock()
+	defer m.turnOutcomeMu.Unlock()
 	m.turnOutcomeInstanceID = instanceID
 	m.turnOutcomeRecorder = recorder
 }
@@ -37,10 +37,10 @@ func (m *Manager) SetTurnOutcomeRecorder(instanceID string, recorder TurnOutcome
 // is dispatched. The generation floor also rejects a late delivery of an
 // older terminal event that races this clear operation.
 func (m *Manager) ClearTurnOutcome(promptGeneration uint64) {
-	m.mu.RLock()
+	m.turnOutcomeMu.RLock()
 	recorder := m.turnOutcomeRecorder
 	instanceID := m.turnOutcomeInstanceID
-	m.mu.RUnlock()
+	m.turnOutcomeMu.RUnlock()
 	clearer, ok := recorder.(turnOutcomeClearer)
 	if !ok {
 		return
@@ -72,10 +72,10 @@ func (m *Manager) recordTerminalOutcome(event *adapter.AgentEvent) {
 	if event.Type != adapter.EventTypeComplete && event.Type != adapter.EventTypeError {
 		return
 	}
-	m.mu.RLock()
+	m.turnOutcomeMu.RLock()
 	recorder := m.turnOutcomeRecorder
 	instanceID := m.turnOutcomeInstanceID
-	m.mu.RUnlock()
+	m.turnOutcomeMu.RUnlock()
 	if recorder == nil {
 		return
 	}

@@ -5,14 +5,12 @@ import { createSystemSlice, defaultSystemState } from "./system-slice";
 import type { SystemSlice } from "./types";
 import type {
   DiskUsageResponse,
-  SnapshotInfo,
   UpdatesResponse,
   SystemJob,
   StorageOverviewResponse,
 } from "@/lib/types/system";
 
 const TS = "2026-05-18T00:00:00Z";
-const SNAPSHOT_AT = "2026-05-17T00:00:00Z";
 
 function makeStore() {
   return create<SystemSlice>()(
@@ -36,13 +34,6 @@ const DISK_USAGE: DiskUsageResponse = {
   },
   computing: false,
   home_dir: "/data/kandev",
-};
-
-const SNAPSHOT: SnapshotInfo = {
-  name: "manual-1.db",
-  size_bytes: 1024,
-  mtime: SNAPSHOT_AT,
-  kind: "manual",
 };
 
 const UPDATES: UpdatesResponse = {
@@ -156,7 +147,7 @@ describe("system slice", () => {
     expect(s.system).toEqual(defaultSystemState.system);
     expect(s.system.diskUsage).toBeNull();
     expect("database" in s.system).toBe(false);
-    expect(s.system.backups).toEqual({ items: [], loaded: false });
+    expect("backups" in s.system).toBe(false);
     expect(s.system.updates).toBeNull();
     expect(s.system.jobs).toEqual({});
   });
@@ -193,16 +184,6 @@ describe("system slice", () => {
     };
     store.getState().setSystemRetention(status);
     expect(store.getState().system.retention).toEqual(status);
-  });
-
-  it("setSystemBackups marks the list as loaded", () => {
-    const store = makeStore();
-    store.getState().setSystemBackups([SNAPSHOT]);
-    expect(store.getState().system.backups).toEqual({ items: [SNAPSHOT], loaded: true });
-
-    // Empty list also flips loaded to true.
-    store.getState().setSystemBackups([]);
-    expect(store.getState().system.backups).toEqual({ items: [], loaded: true });
   });
 
   it("setSystemUpdates stores the response", () => {

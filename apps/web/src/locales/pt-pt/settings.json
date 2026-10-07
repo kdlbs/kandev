@@ -894,5 +894,20 @@
   "queueAutoMergeShort": "Combina automaticamente mensagens consecutivas compatíveis.",
   "sleepShort": "Impede que o computador onde o Kandev está a correr entre em suspensão durante as tarefas.",
   "promptAllowAgentEdits": "Permitir edições por agentes",
-  "promptAgentEditsDescription": "Os agentes podem alterar este prompt em todos os locais onde é utilizado."
+  "promptAgentEditsDescription": "Os agentes podem alterar este prompt em todos os locais onde é utilizado.",
+  "sidebarPresentation": "Aspeto da barra lateral",
+  "sidebarFastActions": "Mostrar ícones de ações rápidas",
+  "sidebarFastActionsDescription": "Mostrar atalhos do Terminal, Conversa rápida, definições de telas e integrações junto aos respetivos botões.",
+  "sidebarNewTaskStyle": "Estilo do botão Nova tarefa",
+  "sidebarStyleSimple": "Botão Nova tarefa simples",
+  "sidebarStyleCompact": "Linha Nova tarefa compacta",
+  "sidebarSettingsTitle": "Definições da barra lateral",
+  "sidebarCustomize": "Personalizar barra lateral",
+  "sidebarLayoutSettings": "Definições do esquema da barra lateral",
+  "sidebarLayoutConflict": "A barra lateral foi alterada noutro local. As definições mais recentes foram carregadas. Tente novamente.",
+  "sidebarMoveUpEntry": "Mover {{name}} para cima",
+  "sidebarMoveDownEntry": "Mover {{name}} para baixo",
+  "sidebarResizeNavigation": "Redimensionar navegação da barra lateral",
+  "sidebarExpandNavigation": "Expandir navegação da barra lateral",
+  "sidebarCollapseNavigation": "Restaurar navegação reduzida"
 }

@@ -115,6 +115,7 @@ func (d *dynamicTaskDownstream) Launch(
 			return dynamicruntime.DownstreamExecution{}, err
 		}
 	}
+	d.service.flushPendingDynamicStreakReset(ctx, d.sessionID, nil)
 	d.service.beginDynamicAttempt(d.sessionID)
 	taskID := ""
 	if d.task != nil {
@@ -815,7 +816,7 @@ func (s *Service) routeDynamicAgentFailureWithEvidence(
 	guardHeld bool,
 ) dynamicFailureRouteResult {
 	unclassified := classified != nil && routingerr.ClassForCode(classified.Code) == routingerr.ClassUnclassified
-	if unclassified && !guardHeld && data.SessionID != "" {
+	if !guardHeld && data.SessionID != "" {
 		lock, release := s.acquireCancelInFlightGuard(data.SessionID)
 		lock.Lock()
 		defer func() {
@@ -827,6 +828,11 @@ func (s *Service) routeDynamicAgentFailureWithEvidence(
 		}
 	}
 	data = s.withDynamicAttemptEvidence(data)
+	if !s.flushPendingDynamicStreakReset(ctx, data.SessionID, &data) {
+		if _, pending := s.pendingDynamicStreakResets.Load(data.SessionID); pending {
+			return dynamicFailureRouteResult{}
+		}
+	}
 	session, ok := s.dynamicFailureSession(ctx, data)
 	if !ok {
 		return dynamicFailureRouteResult{}

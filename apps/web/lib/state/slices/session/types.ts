@@ -3,6 +3,7 @@ import type {
   TaskPendingAction,
   TaskPendingActionRevision,
   TaskSession,
+  WorkspaceRecoveryProjection,
   Turn,
   TaskPlan,
   TaskPlanCommentSnapshot,
@@ -63,11 +64,16 @@ export type TaskSessionsState = {
   activityEpochBySession?: Record<string, number>;
   /** Monotonic cursor generation used to keep older REST snapshots from regressing read state. */
   readCursorEpochBySession?: Record<string, number>;
+  /** Per-session generation used to keep recovery notifications ahead of stale hydration. */
+  workspaceRecoveryEpochBySession?: Record<string, number>;
+  /** Latest event projection for sessions that have not hydrated yet. */
+  workspaceRecoveryByEnvironment?: Record<string, WorkspaceRecoveryProjection>;
 };
 
 export type TaskSessionHydrationEpoch = {
   activity: number;
   readCursor: number;
+  workspaceRecovery?: number;
 };
 
 export type TaskSessionsByTaskState = {
@@ -381,6 +387,10 @@ export type SessionSliceActions = {
     pendingAction: TaskPendingAction | null,
     revision?: TaskPendingActionRevision,
     taskId?: string,
+  ) => void;
+  setWorkspaceRecoveryProjection: (
+    sessionIds: string[],
+    projection: WorkspaceRecoveryProjection,
   ) => void;
   removeTaskSession: (taskId: string, sessionId: string) => void;
   setTaskSessionsForTask: (

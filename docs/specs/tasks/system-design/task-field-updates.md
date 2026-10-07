@@ -3,9 +3,10 @@ status: current
 system: tasks
 requirements:
   - REQ-TASKS-FIELD-UPDATES-001
+  - REQ-TASKS-FIELD-UPDATES-002
 ---
 
-# Task field updates system design
+# Task and workflow field updates system design
 
 The explicit metadata-merge boundary below covers criteria .8 through
 .12. The preceding ordinary-field implementation and criteria .1 through .7 remain current.
@@ -18,25 +19,15 @@ field updates without converting internal full snapshots into patches. It reuses
 [association replacement](attach-workspace-source-replacement.md),
 [human assignment](human-assignee.md), and [completion gating](task-completion.md).
 
-Existing interfaces and dependencies, before implementation:
-
-| Boundary | Current source and responsibility |
-| --- | --- |
-| Ordinary request | `service/service_requests.go`: `UpdateTaskRequest` pointers plus nullable metadata map and repository slice |
-| Application | `service/service_tasks.go`: `UpdateTask`, `validateTaskUpdateReferences`, `isPriorityOnlyTaskUpdate`, `tryUpdateTaskPriorityOnly`, `reloadTaskAfterMutation`; authorization, value checks, preflight, preparation, publication |
-| Metadata ownership | `service/service_task_metadata.go`: `protectedTaskMetadataUpdate`; `models` metadata constants, `StripOfficeCarrierMetadata`, `RestoreOfficeCarrierMetadata` |
-| Assignee reach | `service/service_members.go`: `resolveTaskAssignee`, current assignable-user/workspace reach checks and dangling-workspace fallback |
-| Required repository | `repository/interface.go`: `TaskRepository`; optional `TaskPriorityRepository` scalar fast path |
-| Hierarchy | `repository/hierarchy/hierarchy.go`: `TaskHierarchyAdmission`, `TaskParentValidator`, `TaskHierarchyReader`; repository aliases in `repository/hierarchy.go` |
-| Concrete storage | `repository/sqlite/task_hierarchy_admission.go`: hierarchy reader, `lockTaskHierarchy`, `lockTaskUpdateSteps`, existing parent writer and normalization helpers |
-| Existing full write | `repository/sqlite/task.go`: `updateTaskTx`, source/position/completion guards, title and metadata SQL expressions, ledger/entry allocation, runner projection, postcommit dispatch |
-| Cross-dialect locking | `internal/db/taskhierarchy.go`: SQLite writer reservation; PostgreSQL READ COMMITTED workspace reservation before steps and task-row locks |
-| Associations | `preparedRepositoryReplacement`, `prepareRepositoryReplacement`, `ReplaceTaskRepositories` and `finalize`; separate task-serialized complete-set transaction |
-| Transport | `handlers/task_http_handlers.go`: `httpUpdateTask`; `task_ws_handlers.go`: `wsUpdateTask`; `task_handlers.go`: registered PATCH/WS dispatch and `convertUpdateRepositories`; DTO and ordinary event projections |
-
-Paths above are relative to `apps/backend/internal/task/` except the shared DB helper.
-Neither ordinary REST nor WS currently exposes `WorkflowStepID`; it exists on the service
-request only. Do not add a transport mapping as part of this repair.
+Existing boundaries are `service/service_requests.go` (pointers), `service/service_tasks.go`
+(UpdateTask/reference/priority/preparation/reload/publication), `service_task_metadata.go` and
+models (protection/carriers), `service_members.go` (assignee reach/orphan fallback),
+`repository/interface.go` (required/optional methods), `repository/hierarchy/hierarchy.go`
+(admission/validator/reader and repository aliases), `sqlite/task_hierarchy_admission.go`
+(locks/normalization), `sqlite/task.go` (updateTaskTx/guards/ledger/entries/runner/dispatch),
+shared `internal/db/taskhierarchy.go` (dialect locking), and registered task HTTP/WS handlers
+(mapping/DTO/events). Repository preparation/replacement/finalize remains separately atomic.
+WorkflowStepID is service-only; no new transport field. Paths are task-relative except shared DB.
 
 ## Request-presence inventory
 
@@ -130,34 +121,32 @@ Do not import service into repository, duplicate its rules, or change other meta
 
 ## Writer inventory and guarantee limits
 
-Every category below was inventoried before selecting the patch boundary. Participation is
-directional where a method remains a full snapshot: a patch preserves that method's *already
-committed* data, but does not promise that its later stale snapshot preserves the patch.
+Full-snapshot participation is directional: patches preserve preceding commits; later stale
+snapshots retain their own overwrite rules. Audit included these writer families and recovery/initialization touches. Audit new SQL;
+no assumed global coverage or silent migration.
 
-| Writer family | Relationship to this repair |
-| --- | --- |
-| Ordinary `Service.UpdateTask`, including MCP/plugin/Office delegates | Uses the required typed method, except genuine scalar priority-only path. Symmetric disjoint-field guarantee between these requests. |
-| `TaskPriorityRepository.UpdateTaskPriority` and Office scalar `UpdateTaskPriority`/`UpdateTaskProjectID` | Field-scoped SQL participates through native task-row serialization. Omitted priority/project survives a prior commit; later scalar writes change only their field. Office policy and publication remain owned by Office. |
-| `ClaimTaskTitleSession`, `SetTaskTitleIfPending` | Native atomic owner/title writes serialize on the row; preserve current omitted title/metadata and explicit human-title precedence. Keep CAS predicates; no replacement with an early service predicate. |
-| `SetTaskMetadataKey*`, `RemoveTaskMetadataKey*`, `TakeTaskMetadataKeyIfDestinationStep`, `ClearManualMoveLifecycleMarkersIfCompleted`; deferred-launch CAS and prompt writers | Field-scoped metadata SQL retains its current predicates. Omitted metadata sees their current values; explicit metadata retains existing replacement/protection rules. Do not promise every arbitrary key survives explicit replacement. |
-| Provenance writers (`task_handoffs`, carry/causation owners), workspace orphan/recovery/launch-error metadata CAS, management-claim and completion metadata | Current-row patch plus existing SQL/provenance protection; preserve protections already defined by their owners, without introducing a global per-key merge. Owner predicates and receipts unchanged. |
-| `UpdateTaskState*`, Office state/step-conditioned state and `tree_holds` writes | Field-scoped state or small owned bundles; omitted state survives a prior commit. Current-state completion guard and ordinary event bookkeeping remain coherent. No new state priority against a later intentional writer. |
-| `task_reorder.go` position updates | Prior omitted position survives; explicit position remains literal. Existing arrival/reorder locking and slot semantics unchanged. |
-| Parent writes: old hierarchy method, `DetachTask`, bulk reparent, conditional restore, Office scalar parent | Prior workspace/task serialization and normalization remain mandatory. New patch reuses validator and preservation; no stricter Office cycle/depth rules or new parent authority. |
-| Four legacy full-row variants: `UpdateTask`, `UpdateTaskPreservingDeferredLaunch`, `UpdateTaskIfWorkflowMatches`, `UpdateTaskWithExplicitPosition` | Intentionally full snapshots. Do not reinterpret their arguments or globally promise preservation of arbitrary fields; current parent/workspace/position/title/provenance protections remain. |
-| Exact/update operations and workflow admission wrappers, `MarkDeferredMoveAppliedForSession`, two full-row capacity/promotion paths | Existing full-snapshot, version/CAS, receipt, WIP, queue, and runner contracts; excluded from symmetric arbitrary-field guarantee. Patch uses their committed current row when it follows them. |
-| `Service.UpdateTaskMetadata` | Explicit merge intent uses the metadata-only canonical boundary below; it is not an ordinary replacement patch. |
-| Runtime/workflow callers of full-row methods | Retain intentional snapshot behavior and legitimate step-handoff writes. No silent migration. |
-| Office agent assignment/checkout/generation fields; workflow participant and step deletion writes | Small independent bundles/projections: current task read supplies the latest projection, but no Office scheduling, ownership or runner redesign. |
-| Creation/import/migrations/reset; archive/unarchive/delete, workspace cascades; sequence/default repairs | Existing initialization/lifecycle authority. Native row/workspace barriers and prior hierarchy checks remain. No live partial-edit guarantee for intentional rebuilds or deleted tasks. |
-| Association/folder/set writers, document/plan/comment/attachment/canvas/issue-watcher/queue writers | Separate owned tables or narrow task touches. Retain their guards and transactions; no cross-table global transaction or lifetime snapshot guarantee. |
-
-SQL inventory included task storage (`task.go`, reorder, step transitions, management claims,
-orphan guard, completion gates, workspace folders and association replacement), Office
-`tasks.go`/`tree_holds.go`/exact blockers, workflow repository writes, shared hierarchy and
-recovery claims, and the task-touching plan/message/queue/integration/initialization paths.
-Do not expand this guarantee to unlisted raw SQL; record newly found material writers rather
-than assuming coverage or silently redesigning them.
+- Ordinary Service.UpdateTask delegates use typed patches except genuine scalar priority.
+  TaskPriorityRepository.UpdateTaskPriority, Office priority/project and task_reorder.go retain
+  native row serialization, arrival/position locks and Office policy/publication.
+- ClaimTaskTitleSession/SetTaskTitleIfPending retain title/owner CAS and human precedence.
+  SetTaskMetadataKey*, RemoveTaskMetadataKey*, TakeTaskMetadataKeyIfDestinationStep,
+  ClearManualMoveLifecycleMarkersIfCompleted, deferred CAS/prompt, handoff/carry/causation,
+  orphan/recovery/launch-error and management/completion metadata keep predicates/receipts.
+  Omission sees current records; explicit replacement retains protection and ordinary-key
+  removal, without arbitrary key preservation.
+- UpdateTaskState*, Office conditioned state/step/tree_holds keep owned bundles. Parent admission,
+  DetachTask, bulk reparent, conditional restore and Office scalar parent retain serialization/
+  normalization; no stricter Office policy or new state priority.
+- UpdateTask, UpdateTaskPreservingDeferredLaunch, UpdateTaskIfWorkflowMatches,
+  UpdateTaskWithExplicitPosition, exact/admission wrappers, MarkDeferredMoveAppliedForSession,
+  full-row capacity/promotion and runtime/workflow snapshots remain full writes. Keep parent/
+  workspace/position/title/provenance, receipt/WIP/queue/runner and legitimate handoff guards.
+- Service.UpdateTaskMetadata uses explicit merge below. Office assignment/checkout/generation,
+  participants and step-deletion retain independent bundles/projections. Creation/import/
+  migration/reset/archive/unarchive/delete/cascades/sequence/default repair retain lifecycle
+  authority/barriers, without guarantees across rebuild/delete. Association/folder/set/document/
+  plan/comment/attachment/canvas/issue-watcher/queue writers retain separate transactions or
+  narrow touches, without global cross-table atomicity.
 
 ## Failure, validation, and observations
 
@@ -353,3 +342,71 @@ DTOs, layout, touch, navigation, copy and frontend behavior. The reference clari
 explicitly retaining ordinary metadata replacement and full-snapshot exclusions. No new public
 page or UI wire field. The operation uses an existing persistence boundary; the named contract,
 compatibility matrix and work order preserve rationale sufficiently, so `/record` adds no ADR.
+
+## Workflow field boundary
+
+Prior task/metadata sections remain current.
+Delivery: [one sequential work order](../../../plans/disjoint-workflow-edits/task-01-preserve-workflow-patches.md).
+
+### Audited writers and consumers
+
+At the diagnostic baseline, UpdateWorkflow in `service/service_resources.go` overlays four pointers
+onto an early workflow and calls full-row UpdateWorkflow. SetWorkflowHidden/SetWorkflowSource share
+that footprint. All three now use field patches, retaining no-ops and the source/path bundle. Shared SQLite/PG
+`repository/sqlite/workflow.go` rewrites mutable columns; UpdateWorkflowIfUnchanged atomically
+checks timestamp. Direct snapshots, creation/deletion/reorder/steps retain separate contracts.
+
+Registered `handlers/workflow_handlers.go` PATCH `/api/v1/workflows/:id` and WS `workflow.update`,
+MCP config_workflow_handlers and backendapp settings domain operations retain partial presence.
+Exact plugins supply ExpectedUpdatedAt. backendapp.workflowProviderAdapter and
+web `components/settings/workflow-card-actions.ts` intentionally supply all four fields for
+sync/import/profile/editor updates. Retain all supplied replacements; no stale full-draft merge.
+
+### Local patch seam and failure behavior
+
+models.WorkflowFieldUpdate carries pointers Name/Description/Prompt/AgentProfileID/Hidden/Source/
+SourcePath. Required WorkflowRepository.UpdateWorkflowFields(context.Context, string,
+models.WorkflowFieldUpdate) (*models.Workflow, error) returns the row; embedded interfaces forward it and only
+necessary standalone fakes adapt. Ordinary/domain writers have no full-row fallback.
+
+In `repository/sqlite/workflow_field_updates.go`, build one fixed-allowlist UPDATE assigning
+only present columns plus updated_at, bind via Rebind, RETURNING workflowSelectColumns through
+scanWorkflowRow. Empty/false are presence. Keep profile trimming, source normalization and
+Boolean binding; omit identity/template/style/created_at. Empty ordinary requests still touch
+timestamp. One atomic statement serializes through the native row, without storage RMW,
+advisory/hierarchy locks, mutex or generic transaction. No PG RMW advisory rule applies. Missing rows use wrapped ErrWorkflowNotFound; scan/context/storage failures retain causes
+and existing mappings. Prove rollback by pre-write cancellation or statement rejection;
+never reverse a committed mutation or infer commit outcome from transport failure.
+
+Keep authorization/initial existence observations; payloads derive only from request presence.
+Return/publish the persisted row. Hidden/source no-ops remain unchanged, otherwise patch only
+the owned field/bundle. A stale equal-value no-op promises no new same-field enforcement.
+ExpectedUpdatedAt keeps initial equality check, fail-closed exactWorkflowVersionUpdater assertion
+and UpdateWorkflowIfUnchanged SQL CAS. Never refresh/retry/downgrade a conflict. Ordinary patches
+advance timestamp, invalidating stale exact commands. Full-row snapshot APIs remain intact.
+
+Responses/events use the persisted observation; later commits/publication may interleave.
+No global latest snapshot/order/receipt. Keep DTO/log/event/publication-failure behavior;
+no schema/API/revision/metric/flag/UI.
+
+### Evidence and scope mapping
+
+002.1: independent bare real-store services, actual SQL-read barrier, both name/prompt and
+hidden/source directions with physical connection proof. 002.2/002.5: omission/null/empty/false/
+mixed/profile/same-field/no-field/full-draft controls and unrelated columns. 002.3: real aborting
+UPDATE trigger/pre-write cancel/missing/auth/read-only failures, row/timestamp rollback, no success event,
+stale/successful CAS and unavailable fencing. 002.4: registered router/WS dispatcher through
+actual service/store/response/event recorder. Independently author tests; never import ROOT proof.
+
+Shared dialect-sensitive RETURNING/binding requires scoped PG evidence: distinct backend PIDs,
+native workflow-row blocker, observed lock wait, committed disjoint change before release,
+joined patch and final row; also presence/normalization/hidden/source/CAS/statement rollback.
+Use a bounded proven-owned private fixture only after ROOT heavy grant. SKIP/schema replay/
+mocked predicates/elapsed time are not evidence. Every API/process is released and joined.
+
+Mobile-parity: no rendered/touch/layout/navigation/copy/client-state change; existing desktop/
+phone interfaces carry corrected values. Registered request-to-DB/response/event evidence is
+causal; browser/E2E/build replay is unnecessary. Docs-maintainer updates the existing
+public WebSocket API partial-workflow reference. Under /record this local seam needs no separate
+ADR: the pair/work order retain rationale, early reads/mutexes cannot cover independent
+connections, and exact fencing stays fail closed. No global writer/hierarchy project.

@@ -3,6 +3,7 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
+  BACKUP_LIST_QUERY_KEY_PREFIX,
   createSystemInfoQueryKey,
   DATABASE_STATS_QUERY_KEY_PREFIX,
   SYSTEM_INFO_QUERY_KEY_PREFIX,
@@ -51,9 +52,11 @@ function ScopedQueryClient({
         const { queryKey } = query;
         const isSystemInfo = hasQueryKeyPrefix(queryKey, SYSTEM_INFO_QUERY_KEY_PREFIX);
         const isDatabaseStats = hasQueryKeyPrefix(queryKey, DATABASE_STATS_QUERY_KEY_PREFIX);
+        const isBackupList = hasQueryKeyPrefix(queryKey, BACKUP_LIST_QUERY_KEY_PREFIX);
 
         return (
-          (isSystemInfo || isDatabaseStats) && JSON.stringify(queryKey.slice(2)) !== identityKey
+          (isSystemInfo || isDatabaseStats || isBackupList) &&
+          JSON.stringify(queryKey.slice(2)) !== identityKey
         );
       },
     };

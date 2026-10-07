@@ -1703,7 +1703,7 @@ func TestClarificationWatchdogRecoveryCancelsOnSameExecutionMessageActivity(t *t
 		SessionID:   sessionID,
 		ExecutionID: execution,
 		Data: &lifecycle.AgentStreamEventData{
-			Type:             "message_streaming",
+			Type:             "message_chunk",
 			PromptGeneration: 1,
 		},
 	})

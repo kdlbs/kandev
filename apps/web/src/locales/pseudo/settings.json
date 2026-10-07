@@ -894,5 +894,20 @@
   "queueAutoMergeShort": "Ḿēŕĝē ćōḿƥàţĩƀĺē ćōńśēćũţĩvē ḿēśśàĝēś àũţōḿàţĩćàĺĺŷ.",
   "sleepShort": "Ƥŕēvēńţ ţĥē ćōḿƥũţēŕ ŕũńńĩńĝ Ķàńďēv ƒŕōḿ śĺēēƥĩńĝ ďũŕĩńĝ ţàśķś.",
   "promptAllowAgentEdits": "Àĺĺōŵ àĝēńţ ēďĩţś",
-  "promptAgentEditsDescription": "Àĝēńţś ćàń ćĥàńĝē ţĥĩś ƥŕōḿƥţ ŵĥēŕēvēŕ ĩţ ĩś ũśēď."
+  "promptAgentEditsDescription": "Àĝēńţś ćàń ćĥàńĝē ţĥĩś ƥŕōḿƥţ ŵĥēŕēvēŕ ĩţ ĩś ũśēď.",
+  "sidebarPresentation": "Śĩďēƀàŕ àƥƥēàŕàńćē",
+  "sidebarFastActions": "Śĥōŵ ƒàśţ àćţĩōń ĩćōńś",
+  "sidebarFastActionsDescription": "Śĥōŵ Ţēŕḿĩńàĺ, Qũĩćķ Ćĥàţ, Ćàńvàś śēţţĩńĝś, àńď ĩńţēĝŕàţĩōń śĥōŕţćũţś ƀēśĩďē ţĥēĩŕ ƀũţţōńś.",
+  "sidebarNewTaskStyle": "Ńēŵ Ţàśķ ƀũţţōń śţŷĺē",
+  "sidebarStyleSimple": "Śĩḿƥĺē Ńēŵ Ţàśķ ƀũţţōń",
+  "sidebarStyleCompact": "Ćōḿƥàćţ Ńēŵ Ţàśķ ŕōŵ",
+  "sidebarSettingsTitle": "Śĩďēƀàŕ śēţţĩńĝś",
+  "sidebarCustomize": "Ćũśţōḿĩźē śĩďēƀàŕ",
+  "sidebarLayoutSettings": "Śĩďēƀàŕ ĺàŷōũţ śēţţĩńĝś",
+  "sidebarLayoutConflict": "Ţĥē śĩďēƀàŕ ćĥàńĝēď ēĺśēŵĥēŕē. Ĺàţēśţ śēţţĩńĝś ŵēŕē ĺōàďēď. Ţŕŷ àĝàĩń.",
+  "sidebarMoveUpEntry": "Ḿōvē {{name}} ũƥ",
+  "sidebarMoveDownEntry": "Ḿōvē {{name}} ďōŵń",
+  "sidebarResizeNavigation": "Ŕēśĩźē śĩďēƀàŕ ńàvĩĝàţĩōń",
+  "sidebarExpandNavigation": "Ēxƥàńď śĩďēƀàŕ ńàvĩĝàţĩōń",
+  "sidebarCollapseNavigation": "Ŕēśţōŕē ćōḿƥŕēśśēď ńàvĩĝàţĩōń"
 }
