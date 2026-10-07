@@ -3,11 +3,10 @@ import fs from "node:fs";
 import path from "node:path";
 import { expect, test } from "../../fixtures/test-base";
 import { makeGitEnv } from "../../helpers/git-helper";
+import { openCreateTaskDialog } from "../../helpers/create-task-dialog";
+import { waitForFiniteAnimations } from "../../helpers/animations";
 import { useRegularMode } from "../../helpers/regular-mode";
-import {
-  openBranchPolicyDialog,
-  expectPolicyOptionUsesOneLine,
-} from "./create-task-branch-policy-helpers";
+import { expectPolicyOptionUsesOneLine } from "./create-task-branch-policy-helpers";
 
 useRegularMode();
 
@@ -76,9 +75,10 @@ test.describe("Task creation with branch policies", () => {
       await divider.press("Home");
       const expand = testPage.getByTestId("sidebar-navigation-expand");
       await expect(expand).toHaveAttribute("aria-expanded", "false");
-      await openBranchPolicyDialog(testPage);
+      await openCreateTaskDialog(testPage);
       const dialog = testPage.getByTestId("create-task-dialog");
       await expect(dialog).toBeVisible();
+      await waitForFiniteAnimations(dialog);
       await dialog.getByTestId("executor-profile-selector").click();
       await testPage.getByRole("option", { name: new RegExp(localProfile.name) }).click();
       await expect(dialog.getByTestId("executor-profile-selector")).toContainText(
@@ -87,6 +87,8 @@ test.describe("Task creation with branch policies", () => {
       await dialog.getByTestId("branch-chip-trigger").click();
       const option = testPage.getByRole("option", { name: new RegExp(policy.name) });
       await expect(option).toContainText("Policy");
+      const picker = testPage.locator('[data-slot="popover-content"]').filter({ has: option });
+      await waitForFiniteAnimations(picker);
       await expectPolicyOptionUsesOneLine(option, policy.name);
       const policyInfo = testPage.getByTestId(`branch-policy-option-info-${policy.id}`);
       await policyInfo.hover();
@@ -209,7 +211,7 @@ test.describe("Task creation with branch policies", () => {
         `E2E Multi-repo Branch Policy Local ${Date.now()}`,
       );
       await testPage.goto("/");
-      await openBranchPolicyDialog(testPage);
+      await openCreateTaskDialog(testPage);
       const dialog = testPage.getByTestId("create-task-dialog");
       await expect(dialog).toBeVisible();
       await dialog.getByTestId("executor-profile-selector").click();

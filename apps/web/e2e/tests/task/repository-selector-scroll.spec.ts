@@ -5,6 +5,7 @@ import path from "node:path";
 import { test, expect } from "../../fixtures/test-base";
 import type { Page } from "@playwright/test";
 import { useRegularMode } from "../../helpers/regular-mode";
+import { openCreateTaskDialog } from "../../helpers/create-task-dialog";
 import { KanbanPage } from "../../pages/kanban-page";
 
 // Regression: task creation selectors portal out of the clipped
@@ -93,10 +94,22 @@ test.describe("create task selector scroll", () => {
       });
     }
 
+    // A previous sidebar customization can leave navigation fully clipped.
+    // Keep that state explicit so opening the dialog cannot rely on test order.
+    const { settings } = await apiClient.getUserSettings();
+    const layout = settings.sidebar_layouts_by_workspace![seedData.workspaceId];
+    await apiClient.saveUserSettings({
+      sidebar_layout_state: {
+        workspace_id: seedData.workspaceId,
+        expected_revision: layout.revision,
+        layout: { ...layout, navigation_height: 0, navigation_expanded: false },
+      },
+    });
+
     const kanban = new KanbanPage(testPage);
     await kanban.goto();
 
-    await kanban.createTaskButton.first().click();
+    await openCreateTaskDialog(testPage);
     const dialog = testPage.getByTestId("create-task-dialog");
     await expect(dialog).toBeVisible();
 
@@ -127,7 +140,7 @@ test.describe("create task selector scroll", () => {
     const kanban = new KanbanPage(testPage);
     await kanban.goto();
 
-    await kanban.createTaskButton.first().click();
+    await openCreateTaskDialog(testPage);
     await expect(testPage.getByTestId("create-task-dialog")).toBeVisible();
 
     await testPage.getByTestId("repo-chip-trigger").first().click();
@@ -161,7 +174,7 @@ test.describe("create task selector scroll", () => {
     const kanban = new KanbanPage(testPage);
     await kanban.goto();
 
-    await kanban.createTaskButton.first().click();
+    await openCreateTaskDialog(testPage);
     await expect(testPage.getByTestId("create-task-dialog")).toBeVisible();
 
     await testPage.getByTestId("agent-profile-selector").click();
