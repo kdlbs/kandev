@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"time"
 
+	"github.com/kandev/kandev/internal/agent/mcpconfig"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 )
 
@@ -137,28 +138,29 @@ type ACPSessionCreatedPayload struct {
 
 // PrepareProgressEventPayload is the payload for environment preparation progress events.
 type PrepareProgressEventPayload struct {
-	TaskID               string     `json:"task_id"`
-	SessionID            string     `json:"session_id"`
-	ExecutionID          string     `json:"execution_id"`
-	PreparationID        string     `json:"preparation_id,omitempty"`
-	PreparationStartedAt string     `json:"preparation_started_at,omitempty"`
-	StepName             string     `json:"step_name"`
-	StepKind             string     `json:"step_kind,omitempty"`
-	MCPProvider          string     `json:"mcp_provider,omitempty"`
-	MCPServerID          string     `json:"mcp_server_id,omitempty"`
-	RemotePlatform       string     `json:"remote_platform,omitempty"`
-	FailureCode          string     `json:"failure_code,omitempty"`
-	StepCommand          string     `json:"step_command,omitempty"`
-	StepIndex            int        `json:"step_index"`
-	TotalSteps           int        `json:"total_steps"`
-	Status               string     `json:"status"`
-	Output               string     `json:"output,omitempty"`
-	Error                string     `json:"error,omitempty"`
-	Warning              string     `json:"warning,omitempty"`
-	WarningDetail        string     `json:"warning_detail,omitempty"`
-	StartedAt            *time.Time `json:"started_at,omitempty"`
-	EndedAt              *time.Time `json:"ended_at,omitempty"`
-	Timestamp            string     `json:"timestamp"`
+	TaskID               string                         `json:"task_id"`
+	SessionID            string                         `json:"session_id"`
+	ExecutionID          string                         `json:"execution_id"`
+	PreparationID        string                         `json:"preparation_id,omitempty"`
+	PreparationStartedAt string                         `json:"preparation_started_at,omitempty"`
+	StepName             string                         `json:"step_name"`
+	StepKind             string                         `json:"step_kind,omitempty"`
+	MCPProvider          string                         `json:"mcp_provider,omitempty"`
+	MCPServerID          string                         `json:"mcp_server_id,omitempty"`
+	Diagnostic           *mcpconfig.NativeMCPDiagnostic `json:"mcp_diagnostic,omitempty"`
+	RemotePlatform       string                         `json:"remote_platform,omitempty"`
+	FailureCode          string                         `json:"failure_code,omitempty"`
+	StepCommand          string                         `json:"step_command,omitempty"`
+	StepIndex            int                            `json:"step_index"`
+	TotalSteps           int                            `json:"total_steps"`
+	Status               string                         `json:"status"`
+	Output               string                         `json:"output,omitempty"`
+	Error                string                         `json:"error,omitempty"`
+	Warning              string                         `json:"warning,omitempty"`
+	WarningDetail        string                         `json:"warning_detail,omitempty"`
+	StartedAt            *time.Time                     `json:"started_at,omitempty"`
+	EndedAt              *time.Time                     `json:"ended_at,omitempty"`
+	Timestamp            string                         `json:"timestamp"`
 }
 
 // GetSessionID returns the session ID for this event (used by event routing).

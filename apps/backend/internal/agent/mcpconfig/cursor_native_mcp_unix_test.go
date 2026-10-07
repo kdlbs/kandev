@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strconv"
@@ -16,6 +17,33 @@ import (
 	"testing"
 	"time"
 )
+
+func TestExecNativeMCPCommandRunnerRetainsWaitDelayExitStatus(t *testing.T) {
+	root := t.TempDir()
+	pidPath := filepath.Join(root, "child.pid")
+	command := filepath.Join(root, "native-fixture")
+	script := "#!/bin/sh\n(sleep 30) &\nprintf '%s\\n' \"$!\" > \"" + pidPath + "\"\nprintf complete\nexit 0\n"
+	if err := os.WriteFile(command, []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := (ExecNativeMCPCommandRunner{}).Run(context.Background(), command, []string{"mcp"}, root, nil)
+	if !errors.Is(err, exec.ErrWaitDelay) {
+		t.Fatalf("runner error = %v, want exec.ErrWaitDelay", err)
+	}
+	if result.ExitCode != 0 {
+		t.Fatalf("runner exit code = %d, want observed zero exit code", result.ExitCode)
+	}
+	pidData, err := os.ReadFile(pidPath)
+	if err != nil {
+		t.Fatalf("read child PID: %v", err)
+	}
+	pid, err := strconv.Atoi(strings.TrimSpace(string(pidData)))
+	if err != nil {
+		t.Fatalf("parse child PID: %v", err)
+	}
+	waitForNativeMCPProcessGone(t, pid)
+}
 
 func TestExecNativeMCPCommandRunnerBoundsInheritedPipeAfterCancellation(t *testing.T) {
 	root := t.TempDir()

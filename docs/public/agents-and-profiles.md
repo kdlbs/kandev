@@ -748,6 +748,15 @@ turns, and automatic server approval does not bypass tool-call permissions.
 The login-terminal action currently requires a POSIX host shell; native Windows
 login recovery is unavailable.
 
+If native approval or verification fails, expand the preparation details to
+review the operation, failure stage, optional exit status and sanitized cause.
+These details do not include raw command output or credential values. If retry
+reports that the agent is using the session, wait for its current turn to finish
+before trying again. An early busy check runs no native command. A prompt can
+also start after retry begins, after approval or verification commands have run.
+In that case Kandev keeps the existing preparation details and rejects the
+session reload without stopping, reloading or replaying the active prompt.
+
 ### Share local Cursor MCP credentials
 
 The **Share local Cursor MCP credentials** profile option is enabled by default for Cursor ACP and custom terminal profiles that use Cursor's MCP strategy. It applies only to local and worktree executions that use the same home directory as the Kandev backend. Remote and container executors, and profiles that set a different `HOME`, do not share the backend user's credentials.
