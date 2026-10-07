@@ -55,13 +55,18 @@ package before promotion; do not reinterpret its UI scope or results.
 - Real physical PG row-wait behavior, mutation-scoped conformance and Windows CI.
 - Only causally required public/convention clarification and ordinary delivery
   after checks, subject to the manifest's resource/observer/merge gates.
+- ROOT-authorized hosted prerequisite: test-only deterministic older persisted
+  timestamps in the existing workspace presence/storage fixtures that failed on
+  Windows. Reread the persisted row before the mutation; retain timestamp-order,
+  matched/stale CAS, stored equality and field assertions. No production clock or
+  workspace behavior changes. This belongs to this sole work order.
 
 ## Out of scope
 
 Everything excluded by the manifest: particularly other field omissions, exact
 CAS/legacy/plugin redesign, runtime execution, running resources, frontend/E2E,
 credential semantics, timestamp changes, migrations, generic writer frameworks,
-unrelated mocks/tests, and sibling worktrees.
+unrelated mocks/tests beyond the authorized hosted fixture prerequisite, and sibling worktrees.
 
 ## Acceptance
 
@@ -393,3 +398,32 @@ in `/tmp/kandev-child75-executor-scripts-20261007/` and the live task plan.
 Normal commit hooks/publication,
 hosted native Windows/PG evidence and the sole terminal observer remain pending.
 No UI/browser/E2E/build work was required. Merge authority remains NONE.
+
+Hosted prerequisite diagnosis on frozen `97f5f009d`: job113051537292,
+run37696518985, failed only the later existing Windows workspace stage.
+`TestWorkspaceFieldUpdatesPresenceAndDefaults` line240 and storage helper line105
+require strict timestamp advancement between immediate writes. Exact baseline
+fixture and producer bytes match admitted `bef6699b`; the producer uses ordinary
+`time.Now().UTC()`. Actual timestamps were not printed, so the failure proves the
+strict-order assertion failed, without proving equal versus backward clock values.
+The new Windows executor-script stage and all11 named cases actually RUN/PASS,
+no SKIP, before that failure. ROOT permits only older persisted fixture versions
+and rereads in the two existing test files, two affected anchored tests and one
+full changed-code lint against immutable published PR base `c40f6d96`.
+Original native91568 was lost during machine interruption; identity-checked
+obsolete observer424436 may be terminated under ROOT's explicit direction, with
+termination/group-absence evidence and no fabricated exit/join. Its original log
+is retained. After real corrective publication, original-head semantic/native
+proofs become historical; new-head gates must run again.
+
+Fixture correction verification: only anchored
+`^(TestWorkspaceFieldUpdatesPresenceAndDefaults|TestWorkspaceFieldUpdatesStorage)$`
+ran in service/storage under the admitted race/resource flags. Native31030
+actually joined exit0, group651796 gone (128.078s including compilation), both
+names RUN/PASS. Format/diff/spec/catalog/actual one-work-order coverage passed.
+The mandatory full changed-code lint original10791 actually joined exit124,
+group671825 gone after360.237s; empty diagnostics do not establish a clean scan.
+ROOT authorized exactly one identical warm recovery, original25906/group716355,
+against immutable published PR base `c40f6d96` with the same limits and retained
+caches. Recovery25906 actually joined terminald56bd6 exit0, group716355 gone,
+230.324s and actual0issues. No initial passing script/route/PG suite replay.
