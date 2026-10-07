@@ -263,8 +263,8 @@ func sidebarAncestorCTE(driver string, query models.SidebarTaskViewQuery) string
 	if dialect.IsPostgres(driver) {
 		guard = `POSITION('/' || parent.id || '/' IN walk.visited) = 0`
 	}
-	// Each source carries its projections through one shared ancestor traversal.
-	return `, ancestor_walk(source_key, ancestor_key, parent_key, visited, activity_at, state, state_bucket, primary_session_state) AS (
+	// Sort projections share this traversal, so materialize it once.
+	return `, ancestor_walk(source_key, ancestor_key, parent_key, visited, activity_at, state, state_bucket, primary_session_state) AS MATERIALIZED (
 		SELECT ` + anchorIdentity + `, ` + activityValue + `, ` + stateValue + `, ` + bucketValue + `, ` + primaryValue + ` FROM ` + anchorSource + `
 		UNION ALL
 		SELECT walk.source_key, parent.id, parent.parent_id, walk.visited || parent.id || '/',

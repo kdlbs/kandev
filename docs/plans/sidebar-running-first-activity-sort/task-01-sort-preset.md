@@ -170,3 +170,9 @@ authoritative missing-primary-summary behavior shared by local and SQL ranking.
 i18n completeness, and changed-line ratchet checks passed. Group indentation
 defaults, expanded-only editing, persistence, and shared rendering are covered by
 state, component, and desktop/phone browser tests.
+Follow-up PR verification (2026-10-07) used an isolated PostgreSQL 16 database;
+the focused sidebar and user-settings Go command passed with PostgreSQL enabled.
+The shared provider-color conformance fixture passed on PostgreSQL and SQLite.
+CI exposed excess RSS in the legacy running/activity sort with state grouping;
+materializing the shared recursive ancestor projection makes the targeted memory
+reproducer and focused sidebar suite pass within the configured budget.
