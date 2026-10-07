@@ -1589,11 +1589,28 @@ func (e *Executor) admitResumeSelectionAfterRequest(
 	if err != nil {
 		return nil, err
 	}
-	if admission == nil && preflight.admission != nil {
+	if preflight.admission != nil {
+		if admission != nil && !sameResumeRecoveryClaim(preflight.admission.Claim(), admission.Claim()) {
+			releaseErr := admission.Release(preflight.ctx)
+			return nil, errors.Join(
+				fmt.Errorf("%w: selected recovery authority changed while resume was being prepared", models.ErrWorkspaceReuseUnsafe),
+				releaseErr,
+			)
+		}
+		// The second inspection borrows the authority in preflight.ctx. Keep the
+		// owning handle through launch so release failures remain part of the
+		// resume result.
 		admission = preflight.admission
 		preflight.admission = nil
 	}
 	return admission, nil
+}
+
+func sameResumeRecoveryClaim(left, right *models.TaskEnvironmentRecoveryClaim) bool {
+	return left != nil && right != nil && left.TaskEnvironmentID == right.TaskEnvironmentID &&
+		left.OwnerTaskID == right.OwnerTaskID && left.OwnershipGeneration == right.OwnershipGeneration &&
+		left.SessionID == right.SessionID && left.OperationID == right.OperationID &&
+		left.ExecutorType == right.ExecutorType
 }
 
 // restoreResumeCredentialSnapshotIfStarting restores the prior non-secret Git

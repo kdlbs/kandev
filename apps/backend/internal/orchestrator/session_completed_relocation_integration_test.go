@@ -179,7 +179,9 @@ func TestCompletedRelocationSessionRejectsInvalidSibling(t *testing.T) {
 	firstWorktreeID := secondEnvironment.Repos[0].WorktreeID
 	secondPath := secondEnvironment.Repos[1].WorktreePath
 	secondWorktreeID := secondEnvironment.Repos[1].WorktreeID
-	secondJournalPath := secondPath + ".kandev-clone-relocation.json"
+	secondJournalPath := registeredSessionRelocationRecordPath(
+		t, ctx, fixture.store, fixture.environmentID, secondWorktreeID, secondPath,
+	)
 	secondJournalBefore, err := os.ReadFile(secondJournalPath)
 	require.NoError(t, err)
 	var secondJournal struct {
@@ -466,7 +468,9 @@ func continueCompletedRelocationWork(t *testing.T, fixture *completedRelocationS
 		require.NoError(t, os.RemoveAll(slot.sourceClone))
 	}
 	currentPath := environment.Repos[0].WorktreePath
-	journalPath := currentPath + ".kandev-clone-relocation.json"
+	journalPath := registeredSessionRelocationRecordPath(
+		t, ctx, fixture.store, fixture.environmentID, environment.Repos[0].WorktreeID, currentPath,
+	)
 	journalBefore, err := os.ReadFile(journalPath)
 	require.NoError(t, err)
 	headBefore := sessionRecoveryGit(t, currentPath, "rev-parse", "HEAD")
@@ -476,6 +480,29 @@ func continueCompletedRelocationWork(t *testing.T, fixture *completedRelocationS
 	fixture.manager = manager
 	fixture.rebuildService(make(chan completedRelocationProviderStart, 2), nil)
 	return currentPath, journalPath, journalBefore, headBefore, statusBefore
+}
+
+func registeredSessionRelocationRecordPath(
+	t *testing.T,
+	ctx context.Context,
+	store *worktree.SQLiteStore,
+	environmentID, replacementID, replacementPath string,
+) string {
+	t.Helper()
+	artifacts, err := store.ListTaskEnvironmentRecoveryArtifacts(ctx, environmentID)
+	require.NoError(t, err)
+	for _, artifact := range artifacts {
+		if artifact.LayoutVersion != 2 || artifact.ReplacementID != replacementID || artifact.ReplacementPath != replacementPath {
+			continue
+		}
+		for _, path := range artifact.ArtifactPaths {
+			if filepath.Base(path) == "relocation.json" && filepath.Base(filepath.Dir(path)) == "records" {
+				return path
+			}
+		}
+	}
+	require.FailNow(t, "private relocation record is missing from the recovery artifact registry")
+	return ""
 }
 
 func resumeCompletedRelocationSession(t *testing.T, fixture *completedRelocationServiceFixture,

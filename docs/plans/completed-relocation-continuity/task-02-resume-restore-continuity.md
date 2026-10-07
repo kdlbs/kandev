@@ -213,3 +213,21 @@ Post-PR recovery-ordering follow-up:
   alone.
 - The disabled-continuation manual-recovery E2E passed all ten iterations.
 - `make -C apps/backend build`: passed.
+
+PR merge and CI follow-up:
+
+- After merging the current `main`, relocation integration tests now resolve
+  private v2 relocation records through the SQLite recovery-artifact registry
+  instead of assuming the journal is adjacent to the checkout.
+- A failed-start regression showed that the final resume inspection returns a
+  borrowed admission when preflight already owns the recovery claim. Resume
+  now verifies the claim identity and transfers the owning admission through
+  launch, preserving release failures in the returned error.
+- `(cd apps/backend && go test -race -trimpath ./internal/orchestrator/executor -run
+  '^(TestContinuationNativeStartupFailureRetainsAdmissionReleaseFailure|TestCompletedRelocationExecutorContinuity|TestEditedMaterializedRelocationRefusesExecutorStartup)$' -count=1)`: passed.
+- `(cd apps/backend && go test -race -trimpath ./internal/orchestrator -run
+  '^TestCompletedRelocation' -count=1)`: passed.
+- `(cd apps/backend && go test -race -trimpath ./internal/orchestrator/executor -count=1)`: passed.
+- `(cd apps/backend && go test -race -trimpath ./internal/orchestrator -count=1)`: passed.
+- `make -C apps/backend build`: passed.
+- `(cd apps/backend && golangci-lint run ./... --new-from-rev=330e02a47808c11ca315ae30456fcce7f4806db5 --timeout=5m)`: passed with 0 issues.

@@ -41,7 +41,9 @@ func TestCompletedRelocationExecutorContinuity(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, environment.Repos, 1)
 	replacementPath, replacementID := environment.Repos[0].WorktreePath, environment.Repos[0].WorktreeID
-	recordPath := replacementPath + ".kandev-clone-relocation.json"
+	recordPath := registeredRelocationRecordPath(
+		t, ctx, fixture.store, fixture.environmentID, replacementID, replacementPath,
+	)
 	recordBefore, err := os.ReadFile(recordPath)
 	require.NoError(t, err)
 	require.Contains(t, string(recordBefore), `"state":"complete"`)
@@ -107,7 +109,9 @@ func TestEditedMaterializedRelocationRefusesExecutorStartup(t *testing.T) {
 	environment, err := fixture.taskRepo.GetTaskEnvironment(ctx, fixture.environmentID)
 	require.NoError(t, err)
 	replacement := environment.Repos[0].WorktreePath
-	recordPath := replacement + ".kandev-clone-relocation.json"
+	recordPath := registeredRelocationRecordPath(
+		t, ctx, fixture.store, fixture.environmentID, environment.Repos[0].WorktreeID, replacement,
+	)
 	data, err := os.ReadFile(recordPath)
 	require.NoError(t, err)
 	require.Contains(t, string(data), `"state":"complete"`)
@@ -181,4 +185,27 @@ func prepareCompletedRelocationExecutorFixture(t *testing.T) *executorPermission
 		t.Fatalf("seed retained provider conversation: %v", err)
 	}
 	return fixture
+}
+
+func registeredRelocationRecordPath(
+	t *testing.T,
+	ctx context.Context,
+	store *worktree.SQLiteStore,
+	environmentID, replacementID, replacementPath string,
+) string {
+	t.Helper()
+	artifacts, err := store.ListTaskEnvironmentRecoveryArtifacts(ctx, environmentID)
+	require.NoError(t, err)
+	for _, artifact := range artifacts {
+		if artifact.LayoutVersion != 2 || artifact.ReplacementID != replacementID || artifact.ReplacementPath != replacementPath {
+			continue
+		}
+		for _, path := range artifact.ArtifactPaths {
+			if filepath.Base(path) == "relocation.json" && filepath.Base(filepath.Dir(path)) == "records" {
+				return path
+			}
+		}
+	}
+	require.FailNow(t, "private relocation record is missing from the recovery artifact registry")
+	return ""
 }
