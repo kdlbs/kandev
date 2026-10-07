@@ -226,3 +226,39 @@ remain pending; publication does not complete the persistent task.
   rechecked at mutation; execution failures are reported without a rollback promise.
 - Full tracked status adds one bounded admitted read per Discard; untracked tree enumeration
   is excluded. No resource envelope or deadline increase is authorized.
+
+## Grounded review correction
+
+The published initial implementation still treated accepted relative spellings such as
+`./new.txt` differently in rename lookup and ordinary endpoint exclusion. Greptile finding
+4202800563 prompted a ROOT-authorized correction in the same order. Additional independent
+operator and registered HTTP RED tests reproduced missing source/residual staged deletion,
+duplicate endpoint failure and occupied-source mutation of ordinary neighbors. Raw-NUL
+rejection controls passed before correction. Initial local results above remain historical
+for changed inputs; corrected-head verification and delivery are pending.
+
+The bounded correction uses a cleaned spelling only to find a candidate recognized endpoint,
+then issues literal NUL status for the original argument to prove Git accepts that spelling
+and identifies exactly that path. Only verified endpoint aliases share selection/dedup/
+exclusion. Ordinary selections retain their raw arguments; source-only selection stays
+literal, and rejected raw arguments cannot become valid by cleaning. No global validator,
+tracker, API, frontend, ordinary policy or public-guide expansion is required.
+
+The same work order records exact affected selectors, one scoped changed lint and the single
+mandatory full CHANGED backend lint against the exact API PR base. Original observer/cutoffs,
+normal hooks and separate ROOT merge authorization remain in force.
+
+The first full CHANGED lint timed out after six minutes (exit 124, empty log, cause unknown),
+without a lint verdict. Its native original was joined and physical wrapper/group closure
+verified before ROOT authorized one identical bounded recovery against the same exact API
+base. No cache-population cause is claimed. Failed and recovery originals are both retained;
+recovery failure requires another ROOT checkpoint rather than a third invocation.
+
+The identical ROOT-authorized recovery passed with 0 issues in 252.938 seconds. Both lint
+originals were actually joined and their wrapper/PID/process groups verified gone. Affected
+operator race coverage passed (7.669s), the added source-only/native-separator inputs passed
+their narrow rerun (2.200s), and registered HTTP race coverage passed (9.798s). Scoped changed
+lint passed with 0 issues. These checks preserve ordinary controls, rejected raw paths,
+occupied-source refusal and selected-repository isolation. The raw-spelling correction is
+ready for normal active hooks and corrected-head publication; hosted review/merge gates
+remain separate.

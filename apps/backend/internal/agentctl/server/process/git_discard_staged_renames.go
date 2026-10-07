@@ -19,41 +19,72 @@ type discardRenameStatus struct {
 	uses    map[string]int
 }
 
-func (g *GitOperator) prepareDiscardRenames(ctx context.Context, paths []string) ([]discardRename, error) {
+func (g *GitOperator) prepareDiscardRenames(ctx context.Context, paths []string) ([]discardRename, map[string]string, error) {
 	for _, path := range paths {
 		if path == "" {
-			return nil, fmt.Errorf("empty filename specified to discard")
+			return nil, nil, fmt.Errorf("empty filename specified to discard")
 		}
 	}
 	output, err := g.runGitCommandWithEnvironment(ctx, discardSelectionEnvironment(),
 		"status", "--porcelain", "-z", "--untracked-files=no")
 	if err != nil {
-		return nil, fmt.Errorf("failed to read Discard rename evidence: %w", err)
+		return nil, nil, fmt.Errorf("failed to read Discard rename evidence: %w", err)
 	}
 	status, err := parseDiscardRenameStatus(output)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
+	}
+	identities, err := g.discardRenamePathIdentities(ctx, paths, status)
+	if err != nil {
+		return nil, nil, err
 	}
 	selected := make([]discardRename, 0)
 	seen := make(map[string]bool)
-	for _, path := range paths {
+	for _, rawPath := range paths {
+		path := identities[rawPath]
 		pair, renamed := status.renamed[path]
 		if !renamed || seen[path] {
 			continue
 		}
 		seen[path] = true
 		if !pair.staged || status.uses[path] != 1 || status.uses[pair.source] != 1 || status.paths[pair.source] {
-			return nil, fmt.Errorf("unsupported or ambiguous staged rename for %q", path)
+			return nil, nil, fmt.Errorf("unsupported or ambiguous staged rename for %q", path)
 		}
 		if err := g.checkDiscardRenameTree(ctx, pair); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		selected = append(selected, pair)
 	}
 	if err := g.checkDiscardRenameSources(selected); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	return selected, nil
+	return selected, identities, nil
+}
+
+func (g *GitOperator) discardRenamePathIdentities(ctx context.Context, paths []string, status discardRenameStatus) (map[string]string, error) {
+	identities := make(map[string]string, len(paths))
+	for _, rawPath := range paths {
+		identity := filepath.ToSlash(filepath.Clean(rawPath))
+		if identity == rawPath || status.uses[identity] == 0 {
+			identities[rawPath] = rawPath
+			continue
+		}
+		// Cleaning only identifies a candidate; Git must accept the original argument.
+		output, err := g.runGitCommandWithEnvironment(ctx, discardSelectionEnvironment(),
+			"status", "--porcelain", "-z", "--untracked-files=no", "--", literalGitPathspec(rawPath))
+		if err != nil {
+			return nil, fmt.Errorf("failed to read Discard filename %q: %w", rawPath, err)
+		}
+		evidence, err := parseDiscardRenameStatus(output)
+		if err != nil {
+			return nil, err
+		}
+		if len(evidence.paths) != 1 || !evidence.paths[identity] {
+			return nil, fmt.Errorf("unsupported Discard rename filename %q", rawPath)
+		}
+		identities[rawPath] = identity
+	}
+	return identities, nil
 }
 
 func parseDiscardRenameStatus(output string) (discardRenameStatus, error) {
@@ -134,12 +165,17 @@ func (g *GitOperator) checkDiscardRenameSources(pairs []discardRename) error {
 	return nil
 }
 
-func discardRenameRestorePaths(pairs []discardRename) ([]string, map[string]bool) {
+func discardRenameRestorePaths(pairs []discardRename, identities map[string]string) ([]string, map[string]bool) {
 	paths := make([]string, 0, len(pairs)*2)
 	selected := make(map[string]bool)
 	for _, pair := range pairs {
 		paths = append(paths, pair.source, pair.destination)
 		selected[pair.source], selected[pair.destination] = true, true
+	}
+	for rawPath, identity := range identities {
+		if selected[identity] {
+			selected[rawPath] = true
+		}
 	}
 	return paths, selected
 }

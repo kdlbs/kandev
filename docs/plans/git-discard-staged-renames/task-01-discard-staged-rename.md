@@ -182,6 +182,54 @@ synthetic merged tree or automatic retry:
 (cd apps/backend && GOMAXPROCS=2 GOMEMLIMIT=1GiB timeout --kill-after=10s 6m golangci-lint run ./... --new-from-rev="$PR_BASE_SHA" --timeout=5m --concurrency=2 --allow-serial-runners)
 ```
 
+### Grounded relative-spelling fixup
+
+Greptile finding 4202800563 identified a real remaining failure: `./new.txt` is accepted by
+literal Git selection but missed the exact rename map and endpoint exclusion. ROOT released
+an exclusive fixup lease for this correction in the same order. Audit raw admission first:
+the API passes raw paths, and the existing runner defers arguments after `--` to Git/process
+execution. A cleaned candidate must never replace that admission. Verify the original literal
+spelling with fresh NUL status before matching an eligible endpoint; keep ordinary raw
+arguments unchanged. Canonical and verified alias endpoints share selection/dedup/exclusion.
+Do not broaden accepted paths, trim bytes, or reinterpret literal POSIX backslashes.
+
+Independently authored additional operator and registered HTTP tests reproduce `./destination`
+on the published implementation before correction, including status-visible rename origin,
+source restoration/residual deletion, canonical plus alias duplicates and recreated-source
+refusal with ordinary selected neighbors. Raw NUL arguments rejected before cleaning must
+remain rejected. Alias source-only selection stays literal; portable alias paths and native
+separator/literal-backslash controls remain enabled where representable.
+
+Exact additional RED selectors (before correction), with the same resource envelope:
+
+```bash
+(cd apps/backend && GOMAXPROCS=2 GOMEMLIMIT=512MiB timeout --kill-after=10s 3m go test -trimpath -tags fts5 -race -p=1 -parallel=2 ./internal/agentctl/server/process -run '^TestGitOperatorDiscardStagedRenameRelativeSelections$' -count=1 -v)
+(cd apps/backend && GOMAXPROCS=2 GOMEMLIMIT=512MiB timeout --kill-after=10s 3m go test -trimpath -tags fts5 -race -p=1 -parallel=2 ./internal/agentctl/server/api -run '^TestHandleGitDiscardStagedRenameRelativeSelections$' -count=1 -v)
+```
+
+Affected GREEN selectors add each relative-selection function to its process/API command
+above. Process compatibility passed before adding source-only/native-Windows test inputs;
+rerun only the exact relative-selection function for those new inputs. No securityutil,
+public-doc validator, installation or broad initial suite replay is justified. Follow with
+scoped changed process/API lint against the published parent and exactly one mandatory full
+CHANGED lint against the API-reported PR base:
+
+```bash
+(cd apps/backend && GOMAXPROCS=2 GOMEMLIMIT=1GiB timeout --kill-after=10s 6m golangci-lint run ./internal/agentctl/server/process/... ./internal/agentctl/server/api/... --new-from-rev=35610f31eb8f51cbf418f785a8afb1a4cc00c492 --timeout=5m --concurrency=2 --allow-serial-runners)
+(cd apps/backend && GOMAXPROCS=2 GOMEMLIMIT=1GiB timeout --kill-after=10s 6m golangci-lint run ./... --new-from-rev="$PR_BASE_SHA" --timeout=5m --concurrency=2 --allow-serial-runners)
+```
+
+Retain the original observer and cutoffs through corrected-head publication. Normal active
+hooks/fixup commit/push, accurate package results and actual-finding disposition remain
+required; no optional polish, rebase, hosted retry or successor observer.
+
+The first full CHANGED invocation ended at the GNU six-minute timeout with exit 124 and an
+empty log, so it supplied no lint verdict and its cause remains unknown. Its original native
+handle was actually joined and wrapper/process groups verified gone. ROOT then explicitly
+authorized one identical bounded recovery with retained caches and the same exact API base.
+This is the only recovery exception; no third invocation, resource increase or gate
+substitution is authorized. Both original receipts/logs remain part of delivery evidence.
+
 ## Delivery gates after later release
 
 Normal active hooks and standing-authorized Conventional Commit, push and ready PR follow
@@ -284,3 +332,14 @@ cwd, logs, UTC, native chunks and PID/PGID/physical closure are in the own task 
 published-head monitoring remain delivery prerequisites. No frontend production or browser
 execution was needed under the mobile pure-data exception. No universal external-writer
 atomicity, inferred A/D restoration, full-repo mutation or ROOT proof replay is claimed.
+
+Relative-spelling fixup results: independent operator and registered HTTP RED failed for
+accepted aliases, duplicate endpoints and occupied-source mutation; raw-NUL rejection stayed
+valid. Affected operator GREEN passed in 7.669s, followed by a narrow new-input rerun in
+2.200s; registered HTTP GREEN passed in 9.798s. Scoped changed lint passed with 0 issues.
+The first mandatory full CHANGED run timed out (exit 124, empty log, cause unknown). After
+its actual join/physical closure, the one identical ROOT-authorized recovery passed with
+0 issues in 252.938s and was also joined/gone. Exact originals are retained, including the
+failed timeout. No passing initial securityutil/public-doc/install checks were replayed.
+Normal active hooks and corrected-head publication follow; current-head hosted CI, substantive
+full-file review and separate ROOT merge authorization remain pending.

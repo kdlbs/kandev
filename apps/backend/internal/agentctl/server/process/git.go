@@ -1098,12 +1098,12 @@ func (g *GitOperator) Discard(ctx context.Context, paths []string) (*GitOperatio
 		return result, nil
 	}
 
-	renames, err := g.prepareDiscardRenames(ctx, paths)
+	renames, identities, err := g.prepareDiscardRenames(ctx, paths)
 	if err != nil {
 		result.Error = err.Error()
 		return result, nil
 	}
-	trackedFiles, selected := discardRenameRestorePaths(renames)
+	trackedFiles, selected := discardRenameRestorePaths(renames, identities)
 
 	untrackedFiles, ordinaryTracked := g.discardFileCategories(ctx, paths, selected)
 	trackedFiles = append(trackedFiles, ordinaryTracked...)

@@ -95,6 +95,70 @@ func testDiscardRenameSourceOnly(t *testing.T) {
 }
 
 // @covers AC-PLATFORM-WORKSPACE-GIT-STATUS-001.44, AC-PLATFORM-WORKSPACE-GIT-STATUS-001.47
+func TestGitOperatorDiscardStagedRenameRelativeSelections(t *testing.T) {
+	selections := []string{"./new.txt", "././new.txt", ".//new.txt", "unused/../new.txt"}
+	if runtime.GOOS == "windows" {
+		selections = append(selections, ".\\new.txt")
+	}
+	for _, selection := range selections {
+		t.Run(selection, func(t *testing.T) {
+			f := newRenameDiscardFixture(t, "old.txt", "new.txt", "mixed")
+			before := renameDiscardRepositoryEvidence(t, f.dir)
+			f.paths[0] = selection
+			result, err := NewGitOperator(f.dir, newTestLogger(t), nil).Discard(context.Background(), f.paths)
+			require.NoError(t, err)
+			assert.True(t, result.Success, "result=%+v", result)
+			assertRenameDiscardState(t, f.dir, f.want)
+			assert.Equal(t, before, renameDiscardRepositoryEvidence(t, f.dir))
+		})
+	}
+	t.Run("duplicate-endpoints", func(t *testing.T) {
+		f := newRenameDiscardFixture(t, "old.txt", "new.txt", "mixed")
+		f.paths = append([]string{"./new.txt", "new.txt", "././new.txt", "./old.txt", "old.txt"}, f.paths[1:]...)
+		result, err := NewGitOperator(f.dir, newTestLogger(t), nil).Discard(context.Background(), f.paths)
+		require.NoError(t, err)
+		assert.True(t, result.Success, "result=%+v", result)
+		assertRenameDiscardState(t, f.dir, f.want)
+	})
+	t.Run("source-only", func(t *testing.T) {
+		f := newRenameDiscardFixture(t, "old.txt", "new.txt", "mixed")
+		for path := range f.want {
+			if path != f.source {
+				f.want[path] = readRenameDiscardState(t, f.dir, path)
+			}
+		}
+		result, err := NewGitOperator(f.dir, newTestLogger(t), nil).Discard(context.Background(), []string{"./old.txt"})
+		require.NoError(t, err)
+		assert.True(t, result.Success, "result=%+v", result)
+		assertRenameDiscardState(t, f.dir, f.want)
+	})
+	for _, path := range []string{"new[ab].txt", " new.txt ", "new\\literal.txt"} {
+		t.Run("native/"+path, func(t *testing.T) {
+			if runtime.GOOS == "windows" && (strings.Contains(path, "\\") || strings.HasSuffix(path, " ")) {
+				t.Skip("literal backslash and trailing-space filenames are not native Windows filenames")
+			}
+			f := newRenameDiscardFixture(t, "old.txt", path, "mixed")
+			f.paths[0] = "./" + path
+			result, err := NewGitOperator(f.dir, newTestLogger(t), nil).Discard(context.Background(), f.paths)
+			require.NoError(t, err)
+			assert.True(t, result.Success, "result=%+v", result)
+			assertRenameDiscardState(t, f.dir, f.want)
+		})
+	}
+	t.Run("occupied-source", func(t *testing.T) {
+		f := newRenameDiscardFixture(t, "old.txt", "new.txt", "mixed")
+		writeFile(t, f.dir, f.source, "preserve recreated source\n")
+		f.paths[0] = "./new.txt"
+		assertRenameDiscardRefusal(t, f, NewGitOperator(f.dir, newTestLogger(t), nil))
+	})
+	t.Run("raw-rejected-before-cleaning", func(t *testing.T) {
+		f := newRenameDiscardFixture(t, "old.txt", "new.txt", "mixed")
+		f.paths = []string{"invalid\x00/../new.txt"}
+		assertRenameDiscardRefusal(t, f, NewGitOperator(f.dir, newTestLogger(t), nil))
+	})
+}
+
+// @covers AC-PLATFORM-WORKSPACE-GIT-STATUS-001.44, AC-PLATFORM-WORKSPACE-GIT-STATUS-001.47
 func TestGitOperatorDiscardStagedRenameRefusals(t *testing.T) {
 	for _, kind := range []string{"file", "directory", "symlink", "empty-entry"} {
 		t.Run(kind, func(t *testing.T) {

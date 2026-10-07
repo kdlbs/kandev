@@ -94,6 +94,74 @@ func TestHandleGitDiscardStagedRenameRefusals(t *testing.T) {
 	}
 }
 
+// @covers AC-PLATFORM-WORKSPACE-GIT-STATUS-001.44, AC-PLATFORM-WORKSPACE-GIT-STATUS-001.47
+func TestHandleGitDiscardStagedRenameRelativeSelections(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		paths    []string
+		occupied bool
+		refused  bool
+	}{
+		{name: "relative", paths: []string{"./new.txt", "ordinary.txt", "added.txt", "untracked.txt"}},
+		{name: "duplicate-endpoints", paths: []string{"./new.txt", "new.txt", "././new.txt", "./old.txt", "old.txt", "ordinary.txt", "added.txt", "untracked.txt"}},
+		{name: "occupied-source", paths: []string{"./new.txt", "ordinary.txt", "added.txt", "untracked.txt"}, occupied: true, refused: true},
+		{name: "raw-rejected-before-cleaning", paths: []string{"invalid\x00/../new.txt"}, refused: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			isolatePlainHTTPEnvironment(t)
+			root := t.TempDir()
+			want := map[string]map[string]discardAPIState{}
+			evidence := map[string][]string{}
+			for _, repo := range []string{"selected", "other"} {
+				dir := seedRenameDiscardAPIRepo(t, root, repo, "mixed")
+				if tc.occupied {
+					writeFileAPI(t, dir, "old.txt", repo+" recreated source\n")
+				}
+				evidence[repo] = renameDiscardAPIEvidence(t, dir)
+				want[repo] = map[string]discardAPIState{}
+				for _, path := range []string{"old.txt", "new.txt", "neighbor.txt", "ordinary.txt", "added.txt", "untracked.txt"} {
+					want[repo][path] = readDiscardAPIState(t, dir, path)
+				}
+			}
+			server := newDiscardAPIServer(t, root, "1", "1")
+			beforeEnvironment, beforeAmbient := append([]string(nil), server.cfg.AgentEnv...), os.Environ()
+			before := readRenameDiscardAPIStatus(t, server)
+			require.Contains(t, before.Files, "new.txt")
+			require.NotNil(t, before.Files["new.txt"].StagedChange)
+			require.Equal(t, "renamed", before.Files["new.txt"].StagedChange.Status)
+			require.Equal(t, "old.txt", before.Files["new.txt"].StagedChange.OldPath)
+			assertDiscardAPIState(t, root, want)
+			if !tc.refused {
+				want["selected"]["old.txt"] = discardAPIState{indexed: true, exists: true,
+					index: strings.Repeat("selected committed source\n", 40), worktree: strings.Repeat("selected committed source\n", 40)}
+				want["selected"]["ordinary.txt"] = discardAPIState{indexed: true, exists: true,
+					index: "selected ordinary HEAD\n", worktree: "selected ordinary HEAD\n"}
+				for _, path := range []string{"new.txt", "added.txt", "untracked.txt"} {
+					want["selected"][path] = discardAPIState{}
+				}
+			}
+			rec := postGitAPI(t, server, "/api/v1/git/discard", GitDiscardRequest{Repo: "selected", Paths: tc.paths})
+			require.Equal(t, http.StatusOK, rec.Code)
+			result := decodeGitOperationResult(t, rec)
+			assert.Equal(t, !tc.refused, result.Success, "result=%+v", result)
+			if tc.refused {
+				assert.NotEmpty(t, result.Error)
+			} else {
+				assert.Empty(t, result.Error)
+				after := readRenameDiscardAPIStatus(t, server)
+				assert.NotContains(t, after.Files, "old.txt", "no residual staged source deletion")
+				assert.NotContains(t, after.Files, "new.txt")
+			}
+			assertDiscardAPIState(t, root, want)
+			for repo, before := range evidence {
+				assert.Equal(t, before, renameDiscardAPIEvidence(t, filepath.Join(root, repo)))
+			}
+			assert.Equal(t, beforeEnvironment, server.cfg.AgentEnv)
+			assert.Equal(t, beforeAmbient, os.Environ())
+		})
+	}
+}
+
 func seedRenameDiscardAPIRepo(t *testing.T, root, repo, edit string) string {
 	t.Helper()
 	dir := filepath.Join(root, repo)

@@ -162,6 +162,16 @@ unexpected diagnostic bytes must fail framing, not become filenames or a success
 Do not migrate `WorkspaceTracker.applyPorcelainLine` or its text format in this repair.
 
 Only an explicitly selected destination can expand to its unique staged-rename source.
+Git accepts relative spellings such as `./destination`; comparison and endpoint exclusion
+must identify that same file. A platform-cleaned spelling is only a candidate, never admission
+authority. When it names a recognized rename endpoint but differs from the raw argument,
+read literal NUL status for the original argument through the existing runner and require
+exactly that canonical path. This preserves Git/process rejection of raw arguments (including
+NUL bytes) rather than cleaning away rejected components. Do not trim filename bytes or
+translate literal POSIX backslashes. Deduplicate verified destination aliases, and exclude
+all verified spellings of both selected endpoints from ordinary classification. Source-only
+and other ordinary selections retain their raw arguments and existing behavior. No shared
+path validator, broader path admission or ordinary-selection normalization is introduced.
 Preflight all selected pairs before any removal or restore. A source/destination chain,
 shared endpoint or conflict is unsupported. A literal HEAD tree read (`ls-tree -z HEAD --`
 with the existing literal path arguments and environment overrides) must prove a committed
