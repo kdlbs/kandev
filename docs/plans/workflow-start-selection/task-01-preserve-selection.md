@@ -273,10 +273,15 @@ fixture/commit/publication work; the following results are later execution.
 - The one conditional frozen apps install completed with pnpm 9.15.9 on
   Node 24.21.0; all 935 packages reused the existing cache, with no lockfile
   change. Normal hooks are active; the targeted harness hook passed.
-- Commit/push/ready PR, actual Windows and hosted PG CI, full current-head
-  review, and separate ROOT merge authority remain externally pending.
-  Exact publication/head/observer receipts live in the task plan; this package
-  records local implementation evidence without anticipating hosted results.
+- The initial normal commit, push and ready PR publication completed with all
+  original handles joined and owned groups freshly gone. Exact head, canonical
+  automation, observer and review receipts live in the external task plan.
+- A PR finding identified stale local PostgreSQL wording in the manifest. The
+  summary now distinguishes completed local checks from pending hosted native
+  Windows and PostgreSQL CI. This correction changes documentation only; its
+  affected validation and follow-up publication remain externally pending.
+  Full current-head review disposition and separate ROOT merge authority remain
+  pending without anticipating hosted results.
 
 ### Design checkpoint
 

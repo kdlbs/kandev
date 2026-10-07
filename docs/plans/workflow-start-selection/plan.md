@@ -101,9 +101,12 @@ inventoried in the design; their APIs and layouts stay unchanged.
 
 Fresh permanent caller omission tests reproduced both causal failures before
 production edits. The narrow intent seam then passed those controller tests.
-Expanded focused verification is in progress; fixture corrections and original
-terminal results are recorded in Task 01. Native Windows and configured PG
-evidence remain pending. The design checkpoint remains historical evidence.
+Focused local regressions and exact Host controls passed; fixture corrections
+and original terminal results are recorded in Task 01. PostgreSQL 16 intent and
+row-lock cases, SQLite/PostgreSQL store conformance, sqlguard and scoped lint
+passed. Hosted native Windows and PostgreSQL CI evidence remain pending and
+are tracked in the external task plan. The design checkpoint remains historical
+evidence.
 
 ## Risks
 
