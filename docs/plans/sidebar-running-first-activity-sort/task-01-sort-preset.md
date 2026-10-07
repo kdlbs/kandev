@@ -173,6 +173,9 @@ state, component, and desktop/phone browser tests.
 Follow-up PR verification (2026-10-07) used an isolated PostgreSQL 16 database;
 the focused sidebar and user-settings Go command passed with PostgreSQL enabled.
 The shared provider-color conformance fixture passed on PostgreSQL and SQLite.
-CI exposed excess RSS in the legacy running/activity sort with state grouping;
-materializing the shared recursive ancestor projection makes the targeted memory
-reproducer and focused sidebar suite pass within the configured budget.
+CI exposed excess RSS in activity sorting with state grouping. Restricting forced
+materialization to query shapes that share the recursive ancestor projection
+brings the single-projection activity/state reproducer under the configured
+memory budget while preserving the combined running/activity cases. Targeted
+Linux pool-memory cases for activity/state, running/activity/state, and state
+sorting in both directions passed under the configured native and RSS limits.

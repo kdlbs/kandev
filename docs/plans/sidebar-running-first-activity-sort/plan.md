@@ -257,6 +257,12 @@ Implementation verification passed on 2026-10-06:
 - Final package links and `git diff --check` passed. Local Running now uses the
   authoritative status-summary primary session, matching SQL when that summary
   omits the primary-session member.
+- PR follow-up on 2026-10-07 passed the focused sidebar repository suite with
+  PostgreSQL 16 enabled, the backend build, and targeted SQLite pool-memory cases
+  for activity/state, running/activity/state, and state sorts in both directions.
+  Shared recursive ancestor rows are force-materialized only when multiple sort
+  projections consume them, keeping the single activity/state case below the
+  configured memory limits.
 
 The revised design/package checks also passed before implementation on 2026-10-06:
 
