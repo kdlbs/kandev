@@ -174,6 +174,7 @@ not prove implementation coverage.
 ## Files changed
 
 - `apps/web/components/system-info-query-provider.tsx`
+- `apps/web/AGENTS.md` (System Query ownership)
 - `apps/web/components/system-disk-usage-query-bridge.tsx`
 - `apps/web/components/system-disk-usage-query-bridge.test.tsx`
 - `apps/web/hooks/domains/system/system-info-query.ts`
@@ -250,7 +251,7 @@ required a rebase.
   unrelated state, unmount, and StrictMode cleanup. A synchronous burst of 16
   distinct terminal IDs measured 17 GETs total: one initial read plus 16
   replacements. Duplicate and out-of-order replays added zero.
-- Focused web tests: 12 suites, 144 tests passed. `pnpm run typecheck` and
+- Focused web tests: 12 suites, 145 tests passed. `pnpm run typecheck` and
   full `pnpm run lint` passed.
 - Desktop managed E2E: 5/5 passed. Mobile managed E2E: 1/1 passed at 390×844.
   Both verified POST then GET and the refreshed card data; mobile also verified
@@ -261,8 +262,11 @@ required a rebase.
   and `git diff --check` passed.
 
 PR [#4291](https://github.com/kdlbs/kandev/pull/4291) is open against
-`main`. The implementation commit is
-`7f5319f3f191c9f8310314cf2e3201fa0fbc6f48`; the observed base was
-`1204f0e5488418d0d9aa9aaaf6a31988ccdfcd8f`. Required checks and AI reviews
+`main`. The initial implementation commit is
+`7f5319f3f191c9f8310314cf2e3201fa0fbc6f48`; review-fixup commit
+`f19509441558d3354f09774b496246a694854e9a` addresses stale GET-error
+presentation during a refresh POST, updates the mobile causal wait, and corrects
+the scoped ownership guide. The observed base
+was `1204f0e5488418d0d9aa9aaaf6a31988ccdfcd8f`. Required checks and AI reviews
 were pending at PR creation. Complete authorized exact-head fixup before
 handoff; do not merge.
