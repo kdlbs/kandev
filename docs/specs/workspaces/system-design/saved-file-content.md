@@ -127,7 +127,9 @@ Windows process compilation at initial head `b96495a` failed because the new
 tests reused an admission-wait helper from a `!windows` test file. The save
 fixture now owns a portable context-bound waiter over
 `AdmissionSnapshot().Waiters`, preserving the deliberate queue interleaving.
-Native Windows success must come from the corrected head's hosted execution.
+Hosted native Windows process execution subsequently passed after this fixture
+correction. A later retained-outcome correction in the same work order requires
+fresh native Windows success at its own published head.
 
 Exact selectors, actual results and serial bounds live in the
 [single work order](../../../plans/prevent-overlapping-file-saves/task-01-isolate-save-patches.md).
@@ -139,3 +141,13 @@ changes; mobile-parity adds no UI preview or browser check to this backend-only
 repair. Existing public docs describe file opening/saving without a temporary
 patch contract. Restoring that behavior changes no documented workflow, option,
 API shape, or terminology. Internal requirements/design/delivery records suffice.
+
+## Retained-outcome dependency during delivery
+
+The file-save contract and implementation remain unchanged by the separately
+released backend shutdown correction in the same work order. Retained-outcome
+synchronization is owned by the existing
+[Executors design](../../executors/system-design/agent-survival-across-restart-03.md#turn-outcome-across-the-detached-gap),
+which isolates recorder wiring from lifecycle shutdown locking. The startup
+artifact's causal interleaving remains unproved; the order independently tests
+terminal publication while lifecycle ownership is held.

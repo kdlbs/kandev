@@ -7,6 +7,8 @@ depends_on: []
 plan: "plan.md"
 requirements:
   - REQ-WORKSPACES-SAVED-FILE-CONTENT-001
+  - REQ-EXECUTORS-SURVIVAL-001
+  - REQ-EXECUTORS-SURVIVAL-004
 acceptance_criteria:
   - AC-WORKSPACES-SAVED-FILE-CONTENT-001.1
   - AC-WORKSPACES-SAVED-FILE-CONTENT-001.2
@@ -14,6 +16,7 @@ acceptance_criteria:
   - AC-WORKSPACES-SAVED-FILE-CONTENT-001.4
 system_design:
   - ../../specs/workspaces/system-design/saved-file-content.md
+  - ../../specs/executors/system-design/agent-survival-across-restart-03.md
 ---
 
 # Task 01: Isolate Overlapping File-save Patches
@@ -243,3 +246,70 @@ must pass. Corrective catalog validation, full specification lint, whitespace
 checks and exported actual-diff coverage also passed with errors[]. Preserve the
 original hosted observer and deadline across
 the normal corrective commit/push. Merge remains separately gated by ROOT.
+
+## Retained-outcome shutdown correction
+
+ROOT separately released this same order for a concrete lifecycle lock inversion
+exposed while investigating current-head backend failure. The failed API test
+was `TestHandleWSInitializeCarriesExactProcessEvidence`: stopping its first child
+reported manager goroutines not reaped. Its artifact does not establish the
+actual interleaving. Source establishes a reachable cycle: Stop holds `m.mu`
+while waiting on `m.wg`; the exit waiter publishes evidence, then terminal
+retention takes `m.mu.RLock` before its deferred `wg.Done`.
+
+Reuse the existing [retained-outcome requirements](../../specs/executors/requirements/agent-survival-session-state.md)
+and [design](../../specs/executors/system-design/agent-survival-across-restart-03.md#turn-outcome-across-the-detached-gap).
+This correction changes synchronization only, preserving terminal filtering,
+instance identity, retained copies, callback behavior and delivered turn stamps.
+No new owner pair, shutdown framework, deadline relaxation or assertion removal.
+
+Sequential correction:
+
+1. Add `TestSendUpdateBlockingDoesNotWaitForLifecycleLock` to
+   `process/turn_outcome_test.go`. Hold the actual lifecycle mutex before launching
+   terminal publication; require publication and its wait-group completion while
+   that mutex remains held, with nil and wired recorders. Assert actual delivered
+   content and wired retention/stamp. Use channels and a five-second deadlock
+   guard, with unlock and bounded join cleanup; no sleep-derived pass or product
+   injection. RED must fail on blocked publication before production changes.
+2. Give only recorder/instance-ID wiring a private zero-value mutex; consistently
+   use it in Set, Clear and record, releasing it before recorder callbacks.
+   Leave lifecycle locking and all retention/copy/stamp semantics intact.
+3. Run the affected outcome selector and the exact failed API test with race,
+   count10 and serial resource bounds. No saved-file suite, reinstall or browser
+   replay. Run scoped lint, then exactly one full changed-code lint at the admitted
+   base. Record failures without automatic retry. Update results and normal
+   active-hook corrective delivery only after gates pass; retain the hosted
+   original and its original deadline across the push.
+
+From `apps/backend`, one command at a time:
+
+```bash
+# RED only, count1; then GREEN includes it in the affected selector below.
+env GOMAXPROCS=2 GOMEMLIMIT=512MiB timeout --kill-after=10s 5m go test -trimpath -tags fts5 -race -p=1 -parallel=1 ./internal/agentctl/server/process -run '^TestSendUpdateBlockingDoesNotWaitForLifecycleLock$' -count=1 -timeout=90s -v
+# Affected outcome behavior, including the new regression:
+env GOMAXPROCS=2 GOMEMLIMIT=512MiB timeout --kill-after=10s 5m go test -trimpath -tags fts5 -race -p=1 -parallel=1 ./internal/agentctl/server/process -run '^Test(ClearTurnOutcomeForwardsPromptGenerationToRecorder|RecordTerminalOutcome(RetainsCompleteAndErrorEvents|PreservesRetainedPromptFailureDisposition|CopiesCapacityContinuationSnapshot|IgnoresNonTerminalEvents|NoopWithoutRecorder)|SendUpdateBlocking(DoesNotWaitForLifecycleLock|RecordsTerminalOutcomeOnDelivery|StampsControlTurnIDOnDeliveredCopy)|ForwardUpdates(RecordsTerminalOutcomeForAdapterOriginatedEvents|StampsControlTurnIDOnDeliveredCopy))$' -count=10 -timeout=90s -v
+# Exact failed API test; no passing save/API suite replay:
+env GOMAXPROCS=2 GOMEMLIMIT=512MiB timeout --kill-after=10s 5m go test -trimpath -tags fts5 -race -p=1 -parallel=1 ./internal/agentctl/server/api -run '^TestHandleWSInitializeCarriesExactProcessEvidence$' -count=10 -timeout=90s -v
+# Scoped, then ONE mandatory full changed-code lint:
+env GOMAXPROCS=2 GOMEMLIMIT=512MiB timeout --kill-after=10s 6m golangci-lint run ./internal/agentctl/server/process ./internal/agentctl/server/api --new-from-rev=62b39941214ffe63ce72d307b6e599a7bd2a7b63 --concurrency=2 --allow-serial-runners --timeout=5m
+env GOMAXPROCS=2 GOMEMLIMIT=1GiB timeout --kill-after=10s 6m golangci-lint run ./... --new-from-rev=62b39941214ffe63ce72d307b6e599a7bd2a7b63 --concurrency=2 --allow-serial-runners --timeout=5m
+```
+
+Additional files:
+`apps/backend/internal/agentctl/server/process/manager.go`,
+`apps/backend/internal/agentctl/server/process/turn_outcome.go`,
+`apps/backend/internal/agentctl/server/process/turn_outcome_test.go` and the
+existing Executors design reference.
+
+Independent RED failed both nil and wired cases on terminal publication blocked
+behind the held lifecycle lock; cleanup released the lock and joined both
+publishers. After the isolated recorder mutex correction, all 11 selected outcome
+tests passed ten times with race enabled, including both regression variants.
+The exact failed API test also passed ten race-enabled runs. Scoped and mandatory
+full changed-code lint both passed with zero issues; the single full invocation
+completed in 288.276s. All originals were actually joined with process groups
+gone. These checks independently prove the removed lock dependency; they do not
+prove the original hosted artifact's unobserved interleaving. Prior Windows
+execution passed after the portable waiter correction; this additional backend
+correction still requires fresh hosted native Windows and parent workflow success.

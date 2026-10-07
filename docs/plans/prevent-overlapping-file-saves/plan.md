@@ -3,8 +3,11 @@ created: 2026-10-06
 status: implemented
 requirements:
   - REQ-WORKSPACES-SAVED-FILE-CONTENT-001
+  - REQ-EXECUTORS-SURVIVAL-001
+  - REQ-EXECUTORS-SURVIVAL-004
 system_design:
   - ../../specs/workspaces/system-design/saved-file-content.md
+  - ../../specs/executors/system-design/agent-survival-across-restart-03.md
 legacy_specs: []
 ---
 
@@ -118,3 +121,17 @@ the local [PR fixup skill](../../../.agents/skills/pr-fixup/SKILL.md). ROOT's
 task-plan release/checkpoint contract remains authoritative for heavy scheduling,
 normal hooks, exact-head review, and separately authorized serial merge. Design
 handoff alone authorizes none of those actions.
+
+## Current backend blocker correction
+
+The same sequential order now includes ROOT's separately released retained-outcome
+synchronization correction. The current-head API startup-evidence test failed
+when stopping its first child. Its actual interleaving remains unproved, but
+source exposes Stop waiting on an exit waiter while holding the mutex that the
+waiter's terminal retention needs. A private recorder-wiring mutex removes only
+that dependency; existing retained identity, copy and stamp behavior stays intact.
+The deterministic RED failed both lock-held cases. GREEN passed all 11 affected
+outcome tests and the exact failed API test, each with race and count10. Scoped
+and the single mandatory full changed-code lint passed with zero issues; originals
+are joined and gone. Corrected-head hosted gates remain pending. The original
+hosted interleaving remains unproved, and no merge authorization was granted.
