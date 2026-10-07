@@ -450,3 +450,63 @@ The accepted identical-byte hosted parser failure remains defect evidence;
 no pre-fix parser replay, browser/backend/build/typecheck/installation or
 passing product validation replay occurred. Normal applicable commit hooks
 and publication/physical-return receipts follow in the primary task plan.
+
+### Immutable-main conflict resolution (authoring checkpoint)
+
+ROOT proved a single content conflict between published head
+`88794cbd885cf4dedc2f337af91d1ea0efd7a03c` and immutable main
+`330e02a47808c11ca315ae30456fcce7f4806db5` in the shared continuation fixture.
+The current-head observer `38496` was deliberately stopped only through its
+owned child group `2330056`, then actually joined at terminal chunk `418fa2`
+with exit 143 and no all-terminal verdict. Wrapper group `2330054` and child
+group `2330056` were freshly empty. Hosted workflows were not cancelled.
+
+The normal `git merge --no-commit --no-ff` of that exact immutable main
+returned the expected conflict, synchronous chunk `afdfdf`, exit 1. Its
+original command and groups were joined and freshly absent. The fixture was
+resolved to the exact incoming blob
+`1140158f5d5920aac805c3432d7c788316318757`, which supersedes the prior lexical
+binding repair with upstream setting/cleanup behavior. There are no remaining
+unmerged index entries. HEAD remains `88794cbd`; MERGE_HEAD is `330e02a` and
+the merge remains pending, without a commit or push.
+
+The staged initiative diff against immutable main now has 18 paths: the
+fixture matches main exactly and is no longer an initiative change. Static
+inventory verified every index entry outside those 18 paths matches incoming
+main. Before this work-order record, 17 prior owned blobs were byte-identical.
+The repository interface whole-file blob changed because the automatic merge
+retained incoming recovery-artifact imports and separate optional recovery
+interfaces. Its WorkspaceRepository block is byte-identical to published
+`88794cbd`; the only interface delta against incoming main is the existing
+`UpdateWorkspaceFields` method. This is static compatibility evidence, not a
+compilation or runtime result. Protected discovery proof hash/mode is unchanged.
+
+The actual product-parent trigger gap remains separate from check success.
+GitHub documents that conflicted pull requests do not trigger `pull_request`
+workflows, while `pull_request_target` can run. This mechanism matches the
+observed dirty/conflicted PR and target-only runs; it does not independently
+prove the complete trigger cause. After a later exclusive local-heavy release,
+perform only ROOT-approved validation and normal hooks/publication, then
+inspect naturally triggered product workflows at the new frozen head. No
+manual dispatch or retry is authorized to bypass the conflict.
+
+This checkpoint authorizes source resolution and static inventory only.
+No product checks, collection, installation, hooks, commit or push ran.
+GLOBAL LOCAL-HEAVY remains owned by child69 and serial MERGE remains unreleased.
+The work order stays in_progress; prior failed checks, interrupted observers,
+review evidence and the exact nonrequired walkthrough exception stay historical.
+
+ROOT later released exclusive local-heavy70 for the bounded merge validation
+and normal publication. The one affected Chromium collection original `54077`
+(`29e51c` / `d95fb1`) actually joined exit 0 and listed all 15 tests in one
+file. Fixture ESLint original `80286` (`d4c1e9` / `a01414`) actually joined
+exit 0. Both original wrapper/child groups were freshly absent before the
+next check. Collection proves discovery only; no browser assertions ran.
+ROOT independently accepted the automatic interface integration: among the
+17 prior non-order/nonfixture owned files, only the interface whole-file blob
+changes for incoming imports/optional interfaces; the other 16 remain exact
+`88794cbd`. No owned WorkspaceRepository behavior or product logic changed.
+No Go/PostgreSQL/backend lint replay is required solely for those upstream
+bytes. Remaining bounded documentation/reference/18-path coverage/whitespace
+checks, normal active merge hooks, commit and push are recorded separately;
+new-head HOSTED and serial MERGE still require later ROOT releases.

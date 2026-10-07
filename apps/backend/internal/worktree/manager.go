@@ -39,9 +39,10 @@ type repoLockEntry struct {
 
 // Manager handles Git worktree operations for concurrent agent execution.
 type Manager struct {
-	config Config
-	logger *logger.Logger
-	store  Store
+	config                   Config
+	logger                   *logger.Logger
+	store                    Store
+	recoveryProgressReporter RecoveryProgressReporter
 	// worktrees is the in-memory cache keyed by cacheKey(sessionID, repositoryID).
 	// For legacy single-repo writes the repositoryID may be empty, in which
 	// case the cache key collapses to "{sessionID}|" — still distinct from
@@ -62,6 +63,16 @@ type Manager struct {
 	pullTimeout  time.Duration
 	// Bound for cheap git ref-inspection commands (branchExists, currentBranch).
 	inspectTimeout time.Duration
+}
+
+// SetRecoveryProgressReporter wires the durable operation projection used by
+// selected environment recovery. It remains optional for non-production
+// manager tests and legacy integrations.
+func (m *Manager) SetRecoveryProgressReporter(reporter RecoveryProgressReporter) {
+	if m == nil {
+		return
+	}
+	m.recoveryProgressReporter = reporter
 }
 
 // ScriptEnvironmentProvider supplies install-managed environment variables to

@@ -515,6 +515,15 @@ func (h *TaskHandlers) taskSessionDTOWithPendingActions(
 	result := dto.FromTaskSession(session)
 	dto.EnrichCancellationPending(&result, h.cancellationPending)
 	dto.EnrichParkedProjection(&result, h.parkedProjection)
+	if session != nil && session.TaskEnvironmentID != "" {
+		operation, runnerLive, recoveryErr := h.service.WorkspaceRecoveryProjection(ctx, session.TaskEnvironmentID)
+		if recoveryErr != nil {
+			h.logger.Warn("get task session workspace recovery projection failed",
+				zap.String("session_id", session.ID), zap.Error(recoveryErr))
+		} else {
+			dto.EnrichWorkspaceRecovery(&result, operation, runnerLive)
+		}
+	}
 	actions, revisions, err := read(
 		ctx,
 		[]string{session.ID},
@@ -2584,6 +2593,15 @@ func (h *TaskHandlers) httpListQuickChatSessions(c *gin.Context) {
 		sessionDTO := dto.FromTaskSession(item.Session)
 		dto.EnrichCancellationPending(&sessionDTO, h.cancellationPending)
 		dto.EnrichParkedProjection(&sessionDTO, h.parkedProjection)
+		if item.Session != nil && item.Session.TaskEnvironmentID != "" {
+			operation, runnerLive, recoveryErr := h.service.WorkspaceRecoveryProjection(c.Request.Context(), item.Session.TaskEnvironmentID)
+			if recoveryErr != nil {
+				h.logger.Warn("get quick chat workspace recovery projection failed",
+					zap.String("session_id", item.Session.ID), zap.Error(recoveryErr))
+			} else {
+				dto.EnrichWorkspaceRecovery(&sessionDTO, operation, runnerLive)
+			}
+		}
 		response.TaskSessions = append(response.TaskSessions, sessionDTO)
 	}
 	c.JSON(http.StatusOK, response)

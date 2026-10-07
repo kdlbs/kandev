@@ -6,6 +6,7 @@ import (
 
 	agentdto "github.com/kandev/kandev/internal/agent/dto"
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/recoveryartifact"
 	"github.com/kandev/kandev/internal/task/repository/managedconversation"
 	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 	"github.com/kandev/kandev/internal/task/statussummary"
@@ -929,6 +930,28 @@ type TaskEnvironmentRepository interface {
 type TaskEnvironmentRecoveryRepository interface {
 	AcquireTaskEnvironmentRecoveryClaim(context.Context, models.TaskEnvironmentRecoveryClaimRequest) (*models.TaskEnvironmentRecoveryClaim, error)
 	ReleaseTaskEnvironmentRecoveryClaim(context.Context, *models.TaskEnvironmentRecoveryClaim) error
+}
+
+// TaskEnvironmentRecoveryClaimReader reads the current environment authority
+// for startup reconciliation and status projection.
+type TaskEnvironmentRecoveryClaimReader interface {
+	GetTaskEnvironmentRecoveryClaim(context.Context, string) (*models.TaskEnvironmentRecoveryClaim, error)
+}
+
+// TaskEnvironmentRecoveryArtifactRepository is the optional exact-path
+// registry used by managed clone recovery and trusted workspace exclusions.
+type TaskEnvironmentRecoveryArtifactRepository interface {
+	RegisterTaskEnvironmentRecoveryArtifacts(context.Context, recoveryartifact.Registration) error
+	ListTaskEnvironmentRecoveryArtifacts(context.Context, string) ([]recoveryartifact.Registered, error)
+}
+
+// TaskEnvironmentRecoveryOperationRepository stores the latest durable recovery
+// projection independently of the exclusive environment claim.
+type TaskEnvironmentRecoveryOperationRepository interface {
+	BeginTaskEnvironmentRecoveryOperation(context.Context, models.TaskEnvironmentRecoveryOperation) (*models.TaskEnvironmentRecoveryOperation, error)
+	UpdateTaskEnvironmentRecoveryOperation(context.Context, models.TaskEnvironmentRecoveryOperationUpdate) (*models.TaskEnvironmentRecoveryOperation, error)
+	GetTaskEnvironmentRecoveryOperation(context.Context, string) (*models.TaskEnvironmentRecoveryOperation, error)
+	InterruptTaskEnvironmentRecoveryOperations(context.Context, string) (int, error)
 }
 
 // ReviewRepository handles session file review records.

@@ -38,8 +38,9 @@ const maxFileSize = 10 * 1024 * 1024 // 10MB
 
 var (
 	// ErrFileNotFound identifies a workspace file that does not exist.
-	ErrFileNotFound  = errors.New("file not found")
-	errPathTraversal = errors.New("path traversal detected")
+	ErrFileNotFound               = errors.New("file not found")
+	errPathTraversal              = errors.New("path traversal detected")
+	ErrWorkspaceExclusionsChanged = errors.New("workspace exclusions changed during the request")
 )
 
 // workspaceMutationBarrier provides a deterministic synchronization point for
@@ -73,13 +74,21 @@ func (wt *WorkspaceTracker) updateFilesClass(ctx context.Context, class subproc.
 	}
 
 	wt.mu.Lock()
-	wt.currentFiles = files
+	wt.allFiles = files
+	wt.currentFiles = filterFileList(files, wt.recoveryArtifactExclusions)
 	wt.mu.Unlock()
 }
 
 // getFileList retrieves the list of files in the workspace
 func (wt *WorkspaceTracker) getFileList(ctx context.Context) (types.FileListUpdate, error) {
-	return wt.getFileListClass(ctx, subproc.GitInteractive)
+	files, err := wt.getFileListClass(ctx, subproc.GitInteractive)
+	if err != nil {
+		return files, err
+	}
+	wt.mu.RLock()
+	filtered := filterFileList(files, wt.recoveryArtifactExclusions)
+	wt.mu.RUnlock()
+	return filtered, nil
 }
 
 func (wt *WorkspaceTracker) getFileListClass(ctx context.Context, class subproc.GitWorkClass) (types.FileListUpdate, error) {
@@ -145,6 +154,10 @@ func (wt *WorkspaceTracker) GetFileTree(reqPath string, depth int) (*types.FileT
 	if err := workspacepath.ValidateTreePath(reqPath); err != nil {
 		return nil, err
 	}
+	exclusions, revision := wt.recoveryExclusionSnapshot()
+	if relativePathExcluded(reqPath, exclusions) {
+		return nil, ErrFileNotFound
+	}
 	// Resolve the full path with path traversal protection
 	safePath := filepath.Join(wt.workDir, filepath.Clean(reqPath))
 	cleanWorkDir := filepath.Clean(wt.workDir)
@@ -163,6 +176,10 @@ func (wt *WorkspaceTracker) GetFileTree(reqPath string, depth int) (*types.FileT
 	node, err := wt.buildFileTreeNode(safePath, reqPath, info, depth, 0)
 	if err != nil {
 		return nil, err
+	}
+	_, currentRevision := wt.recoveryExclusionSnapshot()
+	if currentRevision != revision {
+		return nil, ErrWorkspaceExclusionsChanged
 	}
 
 	return node, nil
@@ -201,6 +218,12 @@ func (wt *WorkspaceTracker) buildFileTreeNode(safePath, relPath string, info os.
 		if isRootOwnershipMarkerPath(childRelPath) {
 			continue
 		}
+		wt.mu.RLock()
+		excluded := wt.workspacePathExcludedLocked(childRelPath)
+		wt.mu.RUnlock()
+		if excluded {
+			continue
+		}
 		if name == ".git" || name == "node_modules" || name == ".next" || name == "dist" || name == "build" {
 			continue
 		}
@@ -230,6 +253,16 @@ func (wt *WorkspaceTracker) buildFileTreeNode(safePath, relPath string, info os.
 	}
 
 	return node, nil
+}
+
+func relativePathExcluded(path string, exclusions []string) bool {
+	clean := filepath.Clean(filepath.FromSlash(path))
+	for _, excluded := range exclusions {
+		if clean == excluded || strings.HasPrefix(clean, excluded+string(filepath.Separator)) {
+			return true
+		}
+	}
+	return false
 }
 
 // resolvedWorkDir returns the workspace directory with symlinks resolved.
@@ -358,6 +391,86 @@ func (wt *WorkspaceTracker) SetAllowedSourceRoots(roots []string) {
 	wt.mu.Lock()
 	wt.allowedSourceRoots = canonical
 	wt.mu.Unlock()
+}
+
+// SetRecoveryArtifactExclusions replaces exact paths hidden from workspace
+// tree and search results. Paths outside this tracker's root are ignored.
+func (wt *WorkspaceTracker) SetRecoveryArtifactExclusions(paths []string) {
+	root := filepath.Clean(wt.workDir)
+	canonical := make([]string, 0, len(paths))
+	seen := make(map[string]struct{}, len(paths))
+	for _, path := range paths {
+		if !filepath.IsAbs(path) || filepath.Clean(path) != path {
+			continue
+		}
+		rel, err := filepath.Rel(root, path)
+		if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			continue
+		}
+		if _, ok := seen[rel]; ok {
+			continue
+		}
+		seen[rel] = struct{}{}
+		canonical = append(canonical, rel)
+	}
+	sort.Strings(canonical)
+	wt.mu.Lock()
+	if !sameStringSlice(wt.recoveryArtifactExclusions, canonical) {
+		wt.recoveryArtifactExclusions = canonical
+		wt.recoveryExclusionRevision++
+		wt.currentFiles = filterFileList(wt.allFiles, canonical)
+	}
+	wt.mu.Unlock()
+}
+
+func sameStringSlice(left, right []string) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for index := range left {
+		if left[index] != right[index] {
+			return false
+		}
+	}
+	return true
+}
+
+func filterFileList(update types.FileListUpdate, exclusions []string) types.FileListUpdate {
+	filtered := update
+	filtered.Files = make([]types.FileEntry, 0, len(update.Files))
+	for _, file := range update.Files {
+		clean := filepath.Clean(filepath.FromSlash(file.Path))
+		excluded := false
+		for _, path := range exclusions {
+			if path == "." || clean == path || strings.HasPrefix(clean, path+string(filepath.Separator)) {
+				excluded = true
+				break
+			}
+		}
+		if !excluded {
+			filtered.Files = append(filtered.Files, file)
+		}
+	}
+	return filtered
+}
+
+func (wt *WorkspaceTracker) recoveryExclusionSnapshot() ([]string, uint64) {
+	wt.mu.RLock()
+	defer wt.mu.RUnlock()
+	return append([]string(nil), wt.recoveryArtifactExclusions...), wt.recoveryExclusionRevision
+}
+
+func (wt *WorkspaceTracker) workspacePathExcludedLocked(path string) bool {
+	clean := filepath.Clean(filepath.FromSlash(path))
+	if clean == "." || clean == "" {
+		return false
+	}
+	for _, excluded := range wt.recoveryArtifactExclusions {
+		if excluded == "." || clean == excluded || strings.HasPrefix(clean, excluded+string(filepath.Separator)) {
+			return true
+		}
+	}
+	return false
 }
 
 // resolveNonExistentPath walks up from path until it finds an existing
@@ -1027,6 +1140,9 @@ func (wt *WorkspaceTracker) SearchFiles(query string, limit int) []string {
 	wt.mu.RLock()
 	candidates := make([]fileSearchCandidate, 0, len(wt.currentFiles.Files))
 	for _, file := range wt.currentFiles.Files {
+		if wt.workspacePathExcludedLocked(file.Path) {
+			continue
+		}
 		candidates = append(candidates, fileSearchCandidate{
 			path:      file.Path,
 			matchPath: file.Path,
@@ -1065,6 +1181,15 @@ func (m *Manager) SearchWorkspaceFileResults(query string, limit int) []types.Fi
 	return searchFileCandidates(candidates, query, limit)
 }
 
+func (m *Manager) SearchWorkspaceFileResultsWithError(query string, limit int) ([]types.FileSearchResult, error) {
+	revision := m.currentWorkspaceFileExclusionRevision()
+	results := m.SearchWorkspaceFileResults(query, limit)
+	if m.currentWorkspaceFileExclusionRevision() != revision {
+		return nil, ErrWorkspaceExclusionsChanged
+	}
+	return results, nil
+}
+
 func appendTrackerFileSearchCandidates(
 	candidates []fileSearchCandidate,
 	tracker *WorkspaceTracker,
@@ -1073,6 +1198,9 @@ func appendTrackerFileSearchCandidates(
 	defer tracker.mu.RUnlock()
 	repository := tracker.RepositoryName()
 	for _, file := range tracker.currentFiles.Files {
+		if tracker.workspacePathExcludedLocked(file.Path) {
+			continue
+		}
 		path := file.Path
 		if repository != "" {
 			path = filepath.ToSlash(filepath.Join(repository, path))

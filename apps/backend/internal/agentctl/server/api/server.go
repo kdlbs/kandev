@@ -146,6 +146,7 @@ func (s *Server) setupRoutes() {
 		// events reach the UI without a session restart.
 		api.POST("/workspace/rescan", s.handleRescanWorkspace)
 		api.POST("/workspace/reconcile", s.handleReconcileWorkspace)
+		api.POST("/workspace/recovery-exclusions", s.handleSetWorkspaceRecoveryExclusions)
 		api.POST("/workspace/rebind", s.handleRebindWorkspace)
 
 		// Per-task base-branch map update: kandev backend hits this when

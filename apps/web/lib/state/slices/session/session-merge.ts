@@ -1,4 +1,4 @@
-import type { TaskSession } from "@/lib/types/http";
+import type { TaskSession, WorkspaceRecoveryProjection } from "@/lib/types/http";
 import { mergePendingActionProjection } from "./task-session-projection-actions";
 import { getAgentGoal, isAgentGoalSnapshotNewer, mergeAgentGoalMetadata } from "@/lib/agent-goal";
 import { parseTurnTimestamp } from "./turn-actions";
@@ -221,6 +221,11 @@ export function mergeTaskSession(existing: TaskSession, incoming: TaskSession): 
   const pendingAction = mergePendingActionProjection(existing, incoming);
   const attachmentChanged = hasACPAttachmentChanged(existing, incoming);
   const merged = { ...existing, ...incoming };
+  merged.workspace_recovery = mergeWorkspaceRecoveryProjection(
+    existing.workspace_recovery,
+    incoming.workspace_recovery,
+    merged.task_environment_id,
+  );
   merged.metadata = mergeSessionMetadata(existing, incoming);
   const goalReconciliation = mergeGoalReconciliation(
     existing,
@@ -261,4 +266,73 @@ export function mergeTaskSession(existing: TaskSession, incoming: TaskSession): 
     base_branch: incoming.base_branch ?? existing.base_branch,
     task_environment_id: incoming.task_environment_id ?? existing.task_environment_id,
   };
+}
+
+function compareDecimalIdentity(left: string, right: string): number | undefined {
+  if (!/^\d+$/.test(left) || !/^\d+$/.test(right)) return undefined;
+  const normalizedLeft = left.replace(/^0+(?=\d)/, "");
+  const normalizedRight = right.replace(/^0+(?=\d)/, "");
+  if (normalizedLeft.length !== normalizedRight.length) {
+    return normalizedLeft.length < normalizedRight.length ? -1 : 1;
+  }
+  if (normalizedLeft === normalizedRight) return 0;
+  return normalizedLeft < normalizedRight ? -1 : 1;
+}
+
+function projectionForIdentityOrder(
+  existing: WorkspaceRecoveryProjection,
+  incoming: WorkspaceRecoveryProjection,
+  order: number | undefined,
+): WorkspaceRecoveryProjection | undefined {
+  if (order === undefined || order === 0) return undefined;
+  return order > 0 ? incoming : existing;
+}
+
+function sameRecoveryProjection(
+  left: WorkspaceRecoveryProjection,
+  right: WorkspaceRecoveryProjection,
+): boolean {
+  return (
+    Object.keys(left).length === Object.keys(right).length &&
+    Object.keys(left).every(
+      (key) =>
+        left[key as keyof WorkspaceRecoveryProjection] ===
+        right[key as keyof WorkspaceRecoveryProjection],
+    )
+  );
+}
+
+/** Merge an environment operation while preserving its generation and revision fences. */
+export function mergeWorkspaceRecoveryProjection(
+  existing: TaskSession["workspace_recovery"],
+  incoming: TaskSession["workspace_recovery"],
+  expectedEnvironmentId?: string,
+): TaskSession["workspace_recovery"] {
+  if (incoming === undefined) return existing;
+  if (incoming === null) return null;
+  if (expectedEnvironmentId && incoming.environment_id !== expectedEnvironmentId) {
+    return existing?.environment_id === expectedEnvironmentId ? existing : null;
+  }
+  if (!existing) return incoming;
+  if (existing.environment_id !== incoming.environment_id) return incoming;
+
+  const newerGeneration = projectionForIdentityOrder(
+    existing,
+    incoming,
+    compareDecimalIdentity(incoming.ownership_generation, existing.ownership_generation),
+  );
+  if (newerGeneration) return newerGeneration;
+  const newerRevision = projectionForIdentityOrder(
+    existing,
+    incoming,
+    compareDecimalIdentity(incoming.revision, existing.revision),
+  );
+  if (newerRevision) return newerRevision;
+  if (
+    existing.operation_id !== incoming.operation_id ||
+    existing.attempt_id !== incoming.attempt_id
+  ) {
+    return existing;
+  }
+  return sameRecoveryProjection(existing, incoming) ? existing : incoming;
 }

@@ -106,7 +106,7 @@ describe("useTaskRemoval session loading", () => {
 
     expect(store.getState().setTaskSessionsForTask).toHaveBeenCalledTimes(1);
     expect(store.getState().setTaskSessionsForTask).toHaveBeenCalledWith(TASK_ID, [newerSession], {
-      [CACHED_SESSION_ID]: { activity: 0, readCursor: 0 },
+      [CACHED_SESSION_ID]: { activity: 0, readCursor: 0, workspaceRecovery: 0 },
     });
     expect(store.getState().setTaskSessionsLoading).toHaveBeenNthCalledWith(1, TASK_ID, true);
     expect(store.getState().setTaskSessionsLoading).toHaveBeenNthCalledWith(2, TASK_ID, true);
@@ -134,7 +134,7 @@ describe("useTaskRemoval session loading", () => {
 
     await expect(load).resolves.toEqual([freshSession]);
     expect(store.getState().setTaskSessionsForTask).toHaveBeenCalledWith(TASK_ID, [freshSession], {
-      [cachedSession.id]: { activity: 4, readCursor: 7 },
+      [cachedSession.id]: { activity: 4, readCursor: 7, workspaceRecovery: 0 },
     });
   });
 });

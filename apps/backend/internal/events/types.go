@@ -110,6 +110,9 @@ const (
 	// pending-action projection for one session. It contains no transcript
 	// content and lets inactive session selectors stay current.
 	SessionPendingActionChanged = "session.pending_action_changed"
+	// SessionWorkspaceRecoveryChanged carries the path-free recovery projection
+	// to every subscribed conversation bound to the same task environment.
+	SessionWorkspaceRecoveryChanged = "session.workspace_recovery.changed"
 	// TaskSessionActivityChanged fires when a session's fine-grained activity
 	// flips — a RUNNING foreground turn moving between actively generating and
 	// idle-on-background-work, or detached background work starting/finishing
