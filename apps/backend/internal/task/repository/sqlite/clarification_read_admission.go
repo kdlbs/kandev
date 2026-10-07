@@ -13,6 +13,7 @@ const (
 	clarificationReadAdmissionLimit = 1
 	clarificationReadOperationLimit = 10 * time.Second
 	clarificationReadSlowThreshold  = time.Second
+	clarificationReadErrorClassNone = sidebarGroupNone
 )
 
 type clarificationReadAdmission struct {
@@ -76,7 +77,7 @@ func (r *Repository) logClarificationRead(
 		return
 	}
 
-	class := "none"
+	class := clarificationReadErrorClassNone
 	switch {
 	case errors.Is(err, context.DeadlineExceeded):
 		class = "deadline_exceeded"
