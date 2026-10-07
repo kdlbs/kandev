@@ -48,5 +48,3 @@ func TestListTaskSessionsForPluginFiltersAndPaginatesInSQL(t *testing.T) {
 	require.Len(t, page, 1)
 	require.Equal(t, "plugin-session-a-old", page[0].ID)
 }
-
-func ptrTime(value time.Time) *time.Time { return &value }
