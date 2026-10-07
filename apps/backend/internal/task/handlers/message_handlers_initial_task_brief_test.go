@@ -115,21 +115,27 @@ type initialTaskBriefPromptOrchestrator struct {
 
 type readySessionPromptCapture struct {
 	firstTurnCaptureOrchestrator
-	mu            sync.Mutex
-	prompts       chan readyPromptCall
-	expansions    map[string]string
-	prepareInputs []string
+	mu                          sync.Mutex
+	initialBriefAdmissionMu     sync.Mutex
+	initialBriefDispatchPending bool
+	promptHold                  <-chan struct{}
+	promptErr                   error
+	prompts                     chan readyPromptCall
+	resumeCalls                 chan readyPromptCall
+	expansions                  map[string]string
+	prepareInputs               []string
 }
 
 type readyPromptCall struct {
-	content                  string
-	model                    string
-	planMode                 bool
-	attachments              []v1.MessageAttachment
-	dispatchOnly             bool
-	promptReferenceContext   string
-	promptReferencesPrepared bool
-	references               []v1.EntityReference
+	content                       string
+	model                         string
+	planMode                      bool
+	attachments                   []v1.MessageAttachment
+	dispatchOnly                  bool
+	promptReferenceContext        string
+	promptReferencesPrepared      bool
+	references                    []v1.EntityReference
+	initialTaskBriefDispatchOwner bool
 }
 
 func (o *readySessionPromptCapture) PromptTask(
@@ -157,14 +163,102 @@ func (o *readySessionPromptCapture) PromptTaskWithPromptContext(
 	references []v1.EntityReference,
 	dispatchOnly bool,
 ) (*orchestrator.PromptResult, error) {
+	return o.promptTaskWithPromptContext(
+		prompt, model, planMode, attachments, promptReferenceContext,
+		promptReferencesPrepared, references, dispatchOnly, false,
+	)
+}
+
+func (o *readySessionPromptCapture) PromptTaskWithPromptContextAndDispatchOwnership(
+	ctx context.Context,
+	taskID, sessionID, prompt, model string,
+	planMode bool,
+	attachments []v1.MessageAttachment,
+	promptReferenceContext string,
+	promptReferencesPrepared bool,
+	references []v1.EntityReference,
+	dispatchOnly bool,
+	initialTaskBriefDispatchOwner bool,
+) (*orchestrator.PromptResult, error) {
+	return o.promptTaskWithPromptContext(
+		prompt, model, planMode, attachments, promptReferenceContext,
+		promptReferencesPrepared, references, dispatchOnly, initialTaskBriefDispatchOwner,
+	)
+}
+
+func (o *readySessionPromptCapture) promptTaskWithPromptContext(
+	prompt, model string,
+	planMode bool,
+	attachments []v1.MessageAttachment,
+	promptReferenceContext string,
+	promptReferencesPrepared bool,
+	references []v1.EntityReference,
+	dispatchOnly bool,
+	initialTaskBriefDispatchOwner bool,
+) (*orchestrator.PromptResult, error) {
 	o.prompts <- readyPromptCall{
 		content: prompt, model: model, planMode: planMode,
 		attachments: append([]v1.MessageAttachment(nil), attachments...), dispatchOnly: dispatchOnly,
-		promptReferenceContext:   promptReferenceContext,
-		promptReferencesPrepared: promptReferencesPrepared,
-		references:               append([]v1.EntityReference(nil), references...),
+		promptReferenceContext:        promptReferenceContext,
+		promptReferencesPrepared:      promptReferencesPrepared,
+		references:                    append([]v1.EntityReference(nil), references...),
+		initialTaskBriefDispatchOwner: initialTaskBriefDispatchOwner,
+	}
+	if o.promptHold != nil {
+		<-o.promptHold
+	}
+	return &orchestrator.PromptResult{}, o.promptErr
+}
+
+func (o *readySessionPromptCapture) ResumeTaskSessionAndPromptWithPromptContext(
+	_ context.Context,
+	_, _, prompt, model string,
+	planMode bool,
+	attachments []v1.MessageAttachment,
+	promptReferenceContext string,
+	promptReferencesPrepared bool,
+	references []v1.EntityReference,
+	initialTaskBriefDispatchOwner bool,
+) (*orchestrator.PromptResult, error) {
+	o.resumeCalls <- readyPromptCall{
+		content: prompt, model: model, planMode: planMode,
+		attachments:                   append([]v1.MessageAttachment(nil), attachments...),
+		promptReferenceContext:        promptReferenceContext,
+		promptReferencesPrepared:      promptReferencesPrepared,
+		references:                    append([]v1.EntityReference(nil), references...),
+		initialTaskBriefDispatchOwner: initialTaskBriefDispatchOwner,
 	}
 	return &orchestrator.PromptResult{}, nil
+}
+
+func (o *readySessionPromptCapture) WithInitialTaskBriefAdmission(
+	ctx context.Context,
+	_ string,
+	fn func(context.Context) error,
+) error {
+	o.initialBriefAdmissionMu.Lock()
+	defer o.initialBriefAdmissionMu.Unlock()
+	return fn(ctx)
+}
+
+func (o *readySessionPromptCapture) InitialTaskBriefDispatchPending(string) bool {
+	return o.initialBriefDispatchPending
+}
+
+func (o *readySessionPromptCapture) MarkInitialTaskBriefDispatchPending(string) {
+	o.initialBriefDispatchPending = true
+}
+
+func (o *readySessionPromptCapture) CompleteInitialTaskBriefDispatch(context.Context, string, string) {
+	o.initialBriefAdmissionMu.Lock()
+	o.initialBriefDispatchPending = false
+	o.initialBriefAdmissionMu.Unlock()
+}
+
+func (o *readySessionPromptCapture) initialBriefDispatchPendingSnapshot() bool {
+	o.initialBriefAdmissionMu.Lock()
+	defer o.initialBriefAdmissionMu.Unlock()
+	return o.initialBriefDispatchPending
 }
 
 func (o *readySessionPromptCapture) PrepareDirectPrompt(
@@ -263,6 +357,7 @@ func newReadyInitialTaskBriefHarness(
 	orch := &readySessionPromptCapture{
 		firstTurnCaptureOrchestrator: firstTurnCaptureOrchestrator{started: make(chan capturedFirstTurn, 2)},
 		prompts:                      make(chan readyPromptCall, 3),
+		resumeCalls:                  make(chan readyPromptCall, 3),
 		expansions:                   map[string]string{},
 	}
 	return repo, orch, NewMessageHandlers(svc, orch, log, validators...)
@@ -650,6 +745,89 @@ func TestWSAddMessage_InitialTaskBriefReadySessionKeepsAcceptedEmptyContext(t *t
 	})
 }
 
+func TestWSAddMessage_ReadyInitialBriefRecoveryRetryPreservesAcceptedContext(t *testing.T) {
+	const (
+		brief       = "Review @brief_rules"
+		instruction = "Continue in the recovered conversation."
+	)
+	reference := v1.EntityReference{
+		Version:  v1.EntityReferenceVersion,
+		Ref:      entityrefs.CanonicalRef("kandev", "task", "ws1", "retry-reference"),
+		Provider: "kandev", Kind: "task", ID: "retry-reference", Title: "Retry reference",
+		URL: "/t/retry-reference", Scope: "ws1",
+	}
+	validator := &fakeReferenceSubmissionValidator{}
+	repo, orch, handler := newReadyInitialTaskBriefHarness(t, brief, validator)
+	orch.setExpansion("brief_rules", "accepted retry rules")
+	orch.promptErr = executor.ErrExecutionNotFound
+
+	response, err := handler.wsAddMessage(context.Background(), newReadyBriefRequest(t,
+		"ready-context-retry", instruction,
+		map[string]interface{}{"entity_references": []v1.EntityReference{reference}},
+	))
+	require.NoError(t, err)
+	require.Equal(t, ws.MessageTypeResponse, response.Type)
+	stored := repo.messageContents()[0]
+	require.Contains(t, stored, brief)
+	require.Contains(t, stored, instruction)
+	require.Contains(t, stored, "accepted retry rules")
+
+	dispatched := <-orch.prompts
+	require.Equal(t, stored, dispatched.content)
+	require.Equal(t, "EXPANDED PROMPT REFERENCES:\n### @brief_rules\naccepted retry rules", dispatched.promptReferenceContext)
+	require.True(t, dispatched.promptReferencesPrepared)
+	require.Equal(t, []v1.EntityReference{reference}, dispatched.references)
+	require.True(t, dispatched.initialTaskBriefDispatchOwner)
+
+	retry := <-orch.resumeCalls
+	require.Equal(t, stored, retry.content)
+	require.Equal(t, dispatched.promptReferenceContext, retry.promptReferenceContext)
+	require.True(t, retry.promptReferencesPrepared)
+	require.Equal(t, []v1.EntityReference{reference}, retry.references)
+	require.True(t, retry.initialTaskBriefDispatchOwner)
+	require.Equal(t, []v1.EntityReference{reference}, validator.references)
+}
+
+func TestWSAddMessage_ReadyFollowupQueuesBehindInitialTaskBriefDispatch(t *testing.T) {
+	repo, orch, handler := newReadyInitialTaskBriefHarness(t, "Keep the recovered task objective.")
+	holdDispatch := make(chan struct{})
+	orch.promptHold = holdDispatch
+	released := false
+	defer func() {
+		if !released {
+			close(holdDispatch)
+		}
+	}()
+
+	response, err := handler.wsAddMessage(context.Background(), newReadyBriefRequest(
+		t, "ready-first-message", "Use the recovered conversation.", nil,
+	))
+	require.NoError(t, err)
+	require.Equal(t, ws.MessageTypeResponse, response.Type)
+	firstDispatch := <-orch.prompts
+	require.Contains(t, firstDispatch.content, "Keep the recovered task objective.")
+	require.True(t, orch.initialBriefDispatchPendingSnapshot())
+
+	response, err = handler.wsAddMessage(context.Background(), newReadyBriefRequest(
+		t, "ready-followup-message", "This is an ordinary follow-up.", nil,
+	))
+	require.NoError(t, err)
+	require.Equal(t, ws.MessageTypeResponse, response.Type)
+	require.Eventually(t, func() bool { return len(orch.queueCalls()) == 1 }, time.Second, time.Millisecond)
+	queued := orch.queueCalls()[0]
+	require.Contains(t, queued.prompt, "This is an ordinary follow-up.")
+	select {
+	case prompt := <-orch.prompts:
+		t.Fatalf("follow-up overtook the initial brief dispatch: %+v", prompt)
+	default:
+	}
+
+	close(holdDispatch)
+	released = true
+	require.Eventually(t, func() bool { return !orch.initialBriefDispatchPendingSnapshot() }, time.Second, time.Millisecond)
+	_ = repo
+}
+
 // @covers AC-TASKS-INITIAL-TASK-BRIEF-001.2, AC-TASKS-INITIAL-TASK-BRIEF-001.4, AC-TASKS-INITIAL-TASK-BRIEF-001.8
 func TestWSAddMessage_InitialTaskBriefReadySessionPreservesPromptMetadata(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
@@ -699,6 +877,7 @@ func TestWSAddMessage_InitialTaskBriefReadySessionPreservesPromptMetadata(t *tes
 		)
 		require.True(t, dispatched.promptReferencesPrepared)
 		require.Equal(t, []v1.EntityReference{reference}, dispatched.references)
+		require.True(t, dispatched.initialTaskBriefDispatchOwner)
 	})
 }
 

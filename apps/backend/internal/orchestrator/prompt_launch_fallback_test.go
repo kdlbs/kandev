@@ -139,11 +139,11 @@ func TestPromptTask_InitialTaskBriefAfterRecovery(t *testing.T) {
 	svc.executor = exec
 	svc.scheduler = scheduler.NewScheduler(queue.NewTaskQueue(100), exec, taskRepo, testLogger(), scheduler.DefaultSchedulerConfig())
 
-	if _, err := svc.PromptTaskWithPromptContext(
+	if _, err := svc.ResumeTaskSessionAndPromptWithPromptContext(
 		ctx, taskID, sessionID, combinedPrompt, "", false, nil,
-		acceptedPromptContext, true, references, false,
+		acceptedPromptContext, true, references, true,
 	); err != nil {
-		t.Fatalf("PromptTask after recovery: %v", err)
+		t.Fatalf("ResumeTaskSessionAndPrompt after recovery: %v", err)
 	}
 	if got := launchCalls.Load(); got != 2 {
 		t.Fatalf("expected resume plus missing-runtime fallback launches, got %d", got)

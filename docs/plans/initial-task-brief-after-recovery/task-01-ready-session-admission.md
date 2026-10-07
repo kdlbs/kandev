@@ -77,10 +77,9 @@ the correction and then run the complete final block. New names below are to
 be introduced by this work order.
 
 ```bash
-(cd apps/backend && go test -tags fts5 ./internal/task/handlers -run '^TestWSAddMessage_InitialTaskBriefReadySession$' -count=1 -v)
-(cd apps/backend && go test -tags fts5 ./internal/task/handlers ./internal/task/service ./internal/task/repository/sqlite ./internal/orchestrator ./internal/orchestrator/executor -run 'InitialTaskBrief|WSAddMessage|StartCreatedSession|InitialPromptFallback|SessionOpenRecoveryStatusAndLaunch|ResumeSession|HasUserPromptHistory' -count=1)
-(cd apps/backend && go test -race -tags fts5 ./internal/task/handlers ./internal/task/service ./internal/task/repository/sqlite -run 'InitialTaskBrief|ConcurrentInitialBrief|HasUserPromptHistory' -count=1)
-(cd apps/backend && go vet ./internal/task/handlers ./internal/task/service ./internal/task/repository/sqlite ./internal/orchestrator ./internal/orchestrator/executor)
+(cd apps/backend && go test -trimpath -tags fts5 ./internal/task/handlers ./internal/task/service ./internal/task/repository/sqlite ./internal/orchestrator ./internal/orchestrator/executor ./internal/backendapp -run 'InitialTaskBrief|WSAddMessage|StartCreatedSession|InitialPromptFallback|SessionOpenRecoveryStatusAndLaunch|ResumeSession|HasUserPromptHistoryDelegatesAndReturnsReadErrors|SessionScopingHasUserPromptHistory|OrchestratorWrapperExposesInitialTaskBriefRecoveryContract' -count=1)
+(cd apps/backend && go test -race -trimpath -tags fts5 ./internal/task/handlers ./internal/task/service ./internal/task/repository/sqlite -run 'InitialTaskBrief|ConcurrentInitialBrief|TestHasUserPromptHistoryDelegatesAndReturnsReadErrors|TestSessionScopingHasUserPromptHistory' -count=1)
+(cd apps/backend && go vet ./internal/task/handlers ./internal/task/service ./internal/task/repository/sqlite ./internal/orchestrator ./internal/orchestrator/executor ./internal/backendapp)
 # Configure KANDEV_TEST_POSTGRES_DSN for a disposable test database first.
 (cd apps/backend && test -n "$KANDEV_TEST_POSTGRES_DSN" && go test -tags fts5 ./internal/task/repository/sqlite -run '^TestInitialTaskBriefAdmissionPostgres$' -count=1)
 git diff --check
@@ -166,28 +165,33 @@ The fallback regression was first run against the reviewed implementation and
 failed at the real executor launch: canonicalization removed the accepted saved
 prompt expansion. The queue regression also failed before the fix: a contender
 queued after the winning turn left queue count at 1, with no drain worker.
+After the regression exercised the handler's compound resume retry, it exposed
+a lifecycle-lock re-entry at fresh launch. Recovery now carries its existing
+lock ownership into that launch, and the real fallback regression completes.
 
-The ready prompt now passes the exact acceptance-time saved-prompt context,
-prepared-state bit (including an accepted empty snapshot), and validated entity
-references into `PromptTaskWithPromptContext`. Missing-runtime recovery carries
-those values into the fresh launch, where the executor prompt retains each
-accepted block once after the definitions have changed. First-boundary commit
-and queue admission share the session admission lock. A selected prompt owns a
-dispatch marker until its delivery exits; contenders defer only while that
-owner remains active, and completion retries the real queue drain.
+The production orchestrator adapter now exposes the context-aware prompt and
+first-boundary coordination methods used by the handler. Ready delivery carries
+the exact acceptance-time saved-prompt context, prepared-state bit (including
+an accepted empty snapshot), and validated entity references. The compound
+resume retry carries the same values into fresh-runtime fallback, where the
+real executor launch retains each accepted block exactly once after the saved
+prompt definition changes. Legacy `PromptTask` callers keep their existing
+composition behavior. First-boundary message admission and enqueue coordinate
+under the session admission lock; queue and direct-prompt gates preserve the
+selected dispatch owner and completion retries the real queue drain.
 
 The concurrent handler capture now guards its preparation inputs with a mutex.
-Its test name includes `InitialTaskBrief`, and the recorded race selector also
-includes `HasUserPromptHistory` so the service read-error test is exercised.
+Its test name is `TestWSAddMessage_InitialTaskBriefConcurrentReadySessionQueuesUnselectedCandidate`,
+which is matched by the recorded selector. The race selector names both
+`TestHasUserPromptHistoryDelegatesAndReturnsReadErrors` and
+`TestSessionScopingHasUserPromptHistory` explicitly.
 
-Remediation verification passed:
+Remediation verification passed on 2026-10-07:
 
-- Focused backend tests across handlers, service, SQLite, orchestrator, and
-  executor, including `TestPromptTask_InitialTaskBriefAfterRecovery`, accepted
-  empty context, and both queue-ownership schedules.
-- Race tests across handlers, service, and SQLite using
-  `InitialTaskBrief|ConcurrentInitialBrief|HasUserPromptHistory`.
-- `go vet` for all five affected backend packages.
+- `go test -trimpath -tags fts5 ./internal/task/handlers ./internal/task/service ./internal/task/repository/sqlite ./internal/orchestrator ./internal/orchestrator/executor ./internal/backendapp -run 'InitialTaskBrief|WSAddMessage|StartCreatedSession|InitialPromptFallback|SessionOpenRecoveryStatusAndLaunch|ResumeSession|HasUserPromptHistoryDelegatesAndReturnsReadErrors|SessionScopingHasUserPromptHistory|OrchestratorWrapperExposesInitialTaskBriefRecoveryContract' -count=1` from `apps/backend`.
+- `go test -race -trimpath -tags fts5 ./internal/task/handlers ./internal/task/service ./internal/task/repository/sqlite -run 'InitialTaskBrief|ConcurrentInitialBrief|TestHasUserPromptHistoryDelegatesAndReturnsReadErrors|TestSessionScopingHasUserPromptHistory' -count=1` from `apps/backend`; this includes the renamed ready-session concurrency regression and both prompt-history tests.
+- `go vet ./internal/task/handlers ./internal/task/service ./internal/task/repository/sqlite ./internal/orchestrator ./internal/orchestrator/executor ./internal/backendapp` from `apps/backend`.
+- `golangci-lint run ./... --new-from-rev=8feffe1e17fd5ac1b079fc52469bdfff780e5ad0 --timeout=5m` from `apps/backend`; 0 issues.
 - `make -C apps/backend build` and `git diff --check`.
 
 PostgreSQL parity remains unverified because `KANDEV_TEST_POSTGRES_DSN` is

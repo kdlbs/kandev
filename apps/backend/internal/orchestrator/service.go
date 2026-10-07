@@ -4201,7 +4201,14 @@ func (s *Service) isInitialTaskBriefDispatchPending(sessionID string) bool {
 		return false
 	}
 	_, pending := s.initialTaskBriefDispatches.Load(sessionID)
-	return pending
+	return pending || s.isQueuedDispatchInFlight(sessionID)
+}
+
+// InitialTaskBriefDispatchPending reports whether the accepted first prompt
+// still owns the session's first dispatch boundary, including its reserved
+// queue dispatch while that prompt reaches provider acceptance.
+func (s *Service) InitialTaskBriefDispatchPending(sessionID string) bool {
+	return s.isInitialTaskBriefDispatchPending(sessionID)
 }
 
 // QueueUserPrompt persists a prompt that must wait for workflow WIP admission.
@@ -4247,8 +4254,7 @@ func (s *Service) QueueUserPrompt(
 		); err != nil {
 			return fmt.Errorf("queue user prompt: %w", err)
 		}
-		deferForInitialBrief, _ := queueMetadata[MetaKeyInitialTaskBriefDispatchPending].(bool)
-		deferInitialBriefDrain = deferForInitialBrief && s.isInitialTaskBriefDispatchPending(sessionID)
+		deferInitialBriefDrain = s.isInitialTaskBriefDispatchPending(sessionID)
 		return nil
 	}); err != nil {
 		return err
@@ -4291,6 +4297,9 @@ func (s *Service) MaxQueuedPromptsPerSession() int {
 // that another repository committed atomically with its user-message record.
 func (s *Service) NotifyQueuedUserPrompt(ctx context.Context, taskID, sessionID string) {
 	s.publishQueueStatusEvent(ctx, sessionID)
+	if s.isInitialTaskBriefDispatchPending(sessionID) {
+		return
+	}
 	session, err := s.repo.GetTaskSession(ctx, sessionID)
 	if err == nil && session != nil && session.State == models.TaskSessionStateCreated {
 		go func(profileID string) {
@@ -4359,6 +4368,9 @@ func (s *Service) tryQueueAdmissionReadiness(
 	identity *messagequeue.QueueSessionIdentity,
 ) {
 	if s.messageQueue == nil {
+		return
+	}
+	if s.isInitialTaskBriefDispatchPending(sessionID) {
 		return
 	}
 	if s.isCancelInFlight(sessionID) || s.isQueuedDispatchInFlight(sessionID) || s.isSteerInFlight(sessionID) {

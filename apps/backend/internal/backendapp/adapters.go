@@ -1202,6 +1202,43 @@ func (w *orchestratorWrapper) PromptTask(ctx context.Context, taskID, taskSessio
 	return w.svc.PromptTask(ctx, taskID, taskSessionID, prompt, model, planMode, attachments, dispatchOnly)
 }
 
+// PromptTaskWithPromptContext forwards an accepted direct message together
+// with its server-owned reference snapshot and validated entity references.
+func (w *orchestratorWrapper) PromptTaskWithPromptContext(
+	ctx context.Context,
+	taskID, taskSessionID, prompt, model string,
+	planMode bool,
+	attachments []v1.MessageAttachment,
+	promptReferenceContext string,
+	promptReferencesPrepared bool,
+	references []v1.EntityReference,
+	dispatchOnly bool,
+) (*orchestrator.PromptResult, error) {
+	return w.svc.PromptTaskWithPromptContext(
+		ctx, taskID, taskSessionID, prompt, model, planMode, attachments,
+		promptReferenceContext, promptReferencesPrepared, references, dispatchOnly,
+	)
+}
+
+// PromptTaskWithPromptContextAndDispatchOwnership lets the accepted first
+// prompt pass the session's in-memory first-boundary admission gate.
+func (w *orchestratorWrapper) PromptTaskWithPromptContextAndDispatchOwnership(
+	ctx context.Context,
+	taskID, taskSessionID, prompt, model string,
+	planMode bool,
+	attachments []v1.MessageAttachment,
+	promptReferenceContext string,
+	promptReferencesPrepared bool,
+	references []v1.EntityReference,
+	dispatchOnly bool,
+	initialTaskBriefDispatchOwner bool,
+) (*orchestrator.PromptResult, error) {
+	return w.svc.PromptTaskWithPromptContextAndDispatchOwnership(
+		ctx, taskID, taskSessionID, prompt, model, planMode, attachments,
+		promptReferenceContext, promptReferencesPrepared, references, dispatchOnly, initialTaskBriefDispatchOwner,
+	)
+}
+
 // ResumeTaskSession forwards to the orchestrator service, discarding the TaskExecution result.
 func (w *orchestratorWrapper) ResumeTaskSession(ctx context.Context, taskID, taskSessionID string) error {
 	_, err := w.svc.ResumeTaskSession(ctx, taskID, taskSessionID)
@@ -1218,6 +1255,44 @@ func (w *orchestratorWrapper) HasActiveSessionRecoveryForFailure(ctx context.Con
 // provider acceptance for the handler's internal retry.
 func (w *orchestratorWrapper) ResumeTaskSessionAndPrompt(ctx context.Context, taskID, taskSessionID, prompt, model string, planMode bool, attachments []v1.MessageAttachment) (*orchestrator.PromptResult, error) {
 	return w.svc.ResumeTaskSessionAndPrompt(ctx, taskID, taskSessionID, prompt, model, planMode, attachments)
+}
+
+// ResumeTaskSessionAndPromptWithPromptContext preserves the accepted direct
+// prompt context through the handler's compound recovery retry.
+func (w *orchestratorWrapper) ResumeTaskSessionAndPromptWithPromptContext(
+	ctx context.Context,
+	taskID, taskSessionID, prompt, model string,
+	planMode bool,
+	attachments []v1.MessageAttachment,
+	promptReferenceContext string,
+	promptReferencesPrepared bool,
+	references []v1.EntityReference,
+	initialTaskBriefDispatchOwner bool,
+) (*orchestrator.PromptResult, error) {
+	return w.svc.ResumeTaskSessionAndPromptWithPromptContext(
+		ctx, taskID, taskSessionID, prompt, model, planMode, attachments,
+		promptReferenceContext, promptReferencesPrepared, references, initialTaskBriefDispatchOwner,
+	)
+}
+
+func (w *orchestratorWrapper) WithInitialTaskBriefAdmission(
+	ctx context.Context,
+	sessionID string,
+	fn func(context.Context) error,
+) error {
+	return w.svc.WithInitialTaskBriefAdmission(ctx, sessionID, fn)
+}
+
+func (w *orchestratorWrapper) MarkInitialTaskBriefDispatchPending(sessionID string) {
+	w.svc.MarkInitialTaskBriefDispatchPending(sessionID)
+}
+
+func (w *orchestratorWrapper) InitialTaskBriefDispatchPending(sessionID string) bool {
+	return w.svc.InitialTaskBriefDispatchPending(sessionID)
+}
+
+func (w *orchestratorWrapper) CompleteInitialTaskBriefDispatch(ctx context.Context, taskID, sessionID string) {
+	w.svc.CompleteInitialTaskBriefDispatch(ctx, taskID, sessionID)
 }
 
 // StartCreatedSession forwards to the orchestrator service, discarding the TaskExecution result.

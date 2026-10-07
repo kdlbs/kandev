@@ -99,6 +99,7 @@ const resumeReasonTaskArchived = "task_archived"
 var ErrAgentPromptInProgress = errors.New("agent is currently processing a prompt")
 var ErrAgentNotReadyForPrompt = errors.New("agent not ready for prompt")
 var ErrSessionResetInProgress = errors.New("session reset in progress")
+var ErrInitialTaskBriefDispatchPending = errors.New("initial task brief dispatch is pending")
 
 // ErrSessionRuntimeUnavailable is returned by promptTask when
 // ensureSessionRunning fails for the single reason that is safe to treat as
@@ -653,9 +654,28 @@ func (s *Service) startCreatedSessionWithComposedPrompt(
 	references []v1.EntityReference,
 	promptReferencesPrepared bool,
 ) (*executor.TaskExecution, error) {
+	return s.startCreatedSessionWithComposedPromptAndLifecycleOwnership(
+		ctx, taskID, sessionID, agentProfileID, prompt, retryPrompt, promptReferenceContext,
+		skipMessageRecord, planMode, autoStart, initialCreatePrompt, attachments, references,
+		promptReferencesPrepared, false,
+	)
+}
+
+func (s *Service) startCreatedSessionWithComposedPromptAndLifecycleOwnership(
+	ctx context.Context,
+	taskID, sessionID, agentProfileID, prompt string,
+	retryPrompt string,
+	promptReferenceContext string,
+	skipMessageRecord, planMode, autoStart, initialCreatePrompt bool,
+	attachments []v1.MessageAttachment,
+	references []v1.EntityReference,
+	promptReferencesPrepared bool,
+	lifecycleLockHeld bool,
+) (*executor.TaskExecution, error) {
 	return s.startCreatedSession(
 		ctx, taskID, sessionID, agentProfileID, prompt,
 		skipMessageRecord, planMode, autoStart, attachments, references, promptReferenceContext, startCreatedSessionOptions{
+			lifecycleLockHeld:           lifecycleLockHeld,
 			initialCreatePrompt:         initialCreatePrompt,
 			skipTaskDescriptionFallback: true,
 			promptAlreadyComposed:       true,
@@ -3205,6 +3225,40 @@ func (s *Service) ResumeTaskSessionAndPrompt(
 	planMode bool,
 	attachments []v1.MessageAttachment,
 ) (*PromptResult, error) {
+	return s.resumeTaskSessionAndPrompt(ctx, taskID, sessionID, prompt, model, planMode, attachments, promptTaskOptions{})
+}
+
+// ResumeTaskSessionAndPromptWithPromptContext keeps an accepted direct prompt's
+// server-owned reference snapshot and validated entity references through the
+// compound recovery retry. The values are never inferred from prompt text or
+// re-expanded after admission.
+func (s *Service) ResumeTaskSessionAndPromptWithPromptContext(
+	ctx context.Context,
+	taskID, sessionID, prompt, model string,
+	planMode bool,
+	attachments []v1.MessageAttachment,
+	promptReferenceContext string,
+	promptReferencesPrepared bool,
+	references []v1.EntityReference,
+	initialTaskBriefDispatchOwner bool,
+) (*PromptResult, error) {
+	return s.resumeTaskSessionAndPrompt(ctx, taskID, sessionID, prompt, model, planMode, attachments, promptTaskOptions{
+		promptAlreadyComposed:         true,
+		fallbackUsesEffectivePrompt:   true,
+		promptReferenceContext:        promptReferenceContext,
+		promptReferencesPrepared:      promptReferencesPrepared,
+		entityReferences:              append([]v1.EntityReference(nil), references...),
+		initialTaskBriefDispatchOwner: initialTaskBriefDispatchOwner,
+	})
+}
+
+func (s *Service) resumeTaskSessionAndPrompt(
+	ctx context.Context,
+	taskID, sessionID, prompt, model string,
+	planMode bool,
+	attachments []v1.MessageAttachment,
+	promptOptions promptTaskOptions,
+) (*PromptResult, error) {
 	var result *PromptResult
 	_, err := s.resumeTaskSessionWithContinuation(
 		ctx,
@@ -3213,6 +3267,8 @@ func (s *Service) ResumeTaskSessionAndPrompt(
 		executor.ResumeOptions{Origin: string(launchOriginManual)},
 		func(resumeCtx context.Context, attempt *resumeAttempt, _ *executor.TaskExecution) error {
 			var promptErr error
+			options := promptOptions
+			options.resumeAttempt = attempt
 			result, promptErr = s.promptTask(
 				resumeCtx,
 				taskID,
@@ -3223,7 +3279,7 @@ func (s *Service) ResumeTaskSessionAndPrompt(
 				attachments,
 				false,
 				launchOriginManual,
-				promptTaskOptions{resumeAttempt: attempt},
+				options,
 			)
 			return promptErr
 		},
@@ -6241,13 +6297,7 @@ func (s *Service) persistSessionCommit(ctx context.Context, sessionID string, tr
 // If planMode is true, a plan mode prefix is prepended to the prompt.
 // Attachments (images) are passed through to the agent if provided.
 func (s *Service) PromptTask(ctx context.Context, taskID, sessionID string, prompt string, model string, planMode bool, attachments []v1.MessageAttachment, dispatchOnly bool) (*PromptResult, error) {
-	// Direct prompts already carry their accepted content. A missing-runtime
-	// fallback must keep that effective prompt instead of rebuilding the workflow
-	// template around a recovered conversation.
-	return s.promptTask(
-		ctx, taskID, sessionID, prompt, model, planMode, attachments, dispatchOnly, launchOriginManual,
-		promptTaskOptions{promptAlreadyComposed: true, fallbackUsesEffectivePrompt: true},
-	)
+	return s.promptTask(ctx, taskID, sessionID, prompt, model, planMode, attachments, dispatchOnly, launchOriginManual, promptTaskOptions{})
 }
 
 // PromptTaskWithPromptContext delivers an accepted direct message together
@@ -6264,14 +6314,51 @@ func (s *Service) PromptTaskWithPromptContext(
 	references []v1.EntityReference,
 	dispatchOnly bool,
 ) (*PromptResult, error) {
+	return s.promptTaskWithPromptContext(
+		ctx, taskID, sessionID, prompt, model, planMode, attachments,
+		promptReferenceContext, promptReferencesPrepared, references, dispatchOnly, false,
+	)
+}
+
+// PromptTaskWithPromptContextAndDispatchOwnership delivers an accepted direct
+// message and identifies the selected initial brief as its dispatch owner.
+func (s *Service) PromptTaskWithPromptContextAndDispatchOwnership(
+	ctx context.Context,
+	taskID, sessionID, prompt, model string,
+	planMode bool,
+	attachments []v1.MessageAttachment,
+	promptReferenceContext string,
+	promptReferencesPrepared bool,
+	references []v1.EntityReference,
+	dispatchOnly bool,
+	initialTaskBriefDispatchOwner bool,
+) (*PromptResult, error) {
+	return s.promptTaskWithPromptContext(
+		ctx, taskID, sessionID, prompt, model, planMode, attachments,
+		promptReferenceContext, promptReferencesPrepared, references, dispatchOnly, initialTaskBriefDispatchOwner,
+	)
+}
+
+func (s *Service) promptTaskWithPromptContext(
+	ctx context.Context,
+	taskID, sessionID, prompt, model string,
+	planMode bool,
+	attachments []v1.MessageAttachment,
+	promptReferenceContext string,
+	promptReferencesPrepared bool,
+	references []v1.EntityReference,
+	dispatchOnly bool,
+	initialTaskBriefDispatchOwner bool,
+) (*PromptResult, error) {
 	return s.promptTask(
 		ctx, taskID, sessionID, prompt, model, planMode, attachments, dispatchOnly, launchOriginManual,
 		promptTaskOptions{
-			promptAlreadyComposed:       true,
-			fallbackUsesEffectivePrompt: true,
-			promptReferenceContext:      promptReferenceContext,
-			promptReferencesPrepared:    promptReferencesPrepared,
-			entityReferences:            append([]v1.EntityReference(nil), references...),
+			promptAlreadyComposed:         true,
+			fallbackUsesEffectivePrompt:   true,
+			promptReferenceContext:        promptReferenceContext,
+			promptReferencesPrepared:      promptReferencesPrepared,
+			entityReferences:              append([]v1.EntityReference(nil), references...),
+			initialTaskBriefDispatchOwner: initialTaskBriefDispatchOwner,
 		},
 	)
 }
@@ -6351,9 +6438,10 @@ type promptTaskOptions struct {
 	fallbackRetryPrompt  string
 	// promptReferenceContext is the exact expansion returned while composing
 	// this workflow entry. Recovery uses it to preserve the trusted block.
-	promptReferenceContext   string
-	promptReferencesPrepared bool
-	entityReferences         []v1.EntityReference
+	promptReferenceContext        string
+	promptReferencesPrepared      bool
+	entityReferences              []v1.EntityReference
+	initialTaskBriefDispatchOwner bool
 	// resumeAttempt keeps a compound resume-and-prompt operation under one
 	// ownership record. The outer resume operation finishes it after provider
 	// acceptance or the retry's terminal result.
@@ -6476,6 +6564,11 @@ func (promptTaskOptions) failureContext(ctx context.Context) (context.Context, c
 // (clearQueuedDispatchInFlightIfCurrent), which is safe since none of them
 // block on an agent turn.
 func (s *Service) promptTask(ctx context.Context, taskID, sessionID string, prompt string, model string, planMode bool, attachments []v1.MessageAttachment, dispatchOnly bool, origin launchOrigin, options promptTaskOptions) (*PromptResult, error) {
+	// Direct prompts must own the boundary; already-reserved queue work keeps its claim.
+	if s.isInitialTaskBriefDispatchPending(sessionID) &&
+		!options.initialTaskBriefDispatchOwner && options.claimEntryID == "" {
+		return nil, ErrInitialTaskBriefDispatchPending
+	}
 	if options.cancellationFence == nil {
 		_, revision := s.CancellationPendingSnapshot(sessionID)
 		options.cancellationFence = &promptCancellationFence{revision: revision}
@@ -7322,6 +7415,7 @@ func (s *Service) finishPromptDispatchFailure(
 		attachments, rollback, options.lifecyclePrompt || options.internalContinuation, dispatchAccepted, promptErr,
 		options.promptAlreadyComposed, options.fallbackLaunchPrompt, options.fallbackRetryPrompt,
 		options.promptReferenceContext, options.promptReferencesPrepared, options.entityReferences,
+		options.resumeAttempt != nil,
 	)
 	return failureResult, wrapAcceptedPromptDispatchFailure(
 		dispatchAccepted,
@@ -8494,6 +8588,7 @@ func (s *Service) handlePromptDispatchFailure(
 	promptReferenceContext string,
 	promptReferencesPrepared bool,
 	references []v1.EntityReference,
+	lifecycleLockHeld bool,
 ) (*PromptResult, error) {
 	if errors.Is(promptErr, errPromptAdmissionRejected) {
 		s.rollbackPromptClaim(ctx, taskID, sessionID, rollback)
@@ -8508,9 +8603,9 @@ func (s *Service) handlePromptDispatchFailure(
 		if fallbackLaunchPrompt != "" {
 			fallbackPrompt = fallbackLaunchPrompt
 		}
-		if freshErr := s.fallbackFreshLaunchOnMissingExecution(
+		if freshErr := s.fallbackFreshLaunchOnMissingExecutionWithLifecycleOwnership(
 			ctx, taskID, sessionID, fallbackPrompt, promptAlreadyComposed, fallbackRetryPrompt, planMode,
-			promptReferenceContext, false, nil, attachments, references, promptReferencesPrepared,
+			promptReferenceContext, false, nil, attachments, references, promptReferencesPrepared, lifecycleLockHeld,
 		); freshErr == nil {
 			return &PromptResult{}, nil
 		} else {
@@ -9660,6 +9755,9 @@ func (s *Service) drainQueuedMessageForPromptableSessionForIdentity(
 
 func (s *Service) drainQueuedMessageForPromptableSessionLockedForIdentity(ctx context.Context, identity messagequeue.QueueSessionIdentity) (bool, error) {
 	if s.isCancelInFlight(identity.SessionID) || s.isQueuedDispatchInFlight(identity.SessionID) || s.isSteerInFlight(identity.SessionID) {
+		return false, nil
+	}
+	if s.isInitialTaskBriefDispatchPending(identity.SessionID) {
 		return false, nil
 	}
 	if s.resumeAttemptStore().holdsInitialPromptForSession(identity.SessionID) {
