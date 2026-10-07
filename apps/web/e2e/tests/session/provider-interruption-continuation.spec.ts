@@ -263,9 +263,6 @@ test("desktop: disabled continuation preserves manual recovery without native re
     enabled: false,
   });
   try {
-    await testPage.goto(`/t/${fixture.taskId}`);
-    const session = new SessionPage(testPage);
-    await session.waitForLoad();
     const recovery = await waitForContinuationMessage(
       apiClient,
       fixture.sessionId,
@@ -274,17 +271,14 @@ test("desktop: disabled continuation preserves manual recovery without native re
     expect(recovery.metadata?.recovery_actions).toBe(true);
     expect(recovery.metadata?.runtime_retained).not.toBe(true);
     expect(recovery.metadata?.attempts_started ?? 0).toBe(0);
+    assertNativeNoContinuationTrace(fixture.tracePath, "read");
+
+    await testPage.goto(`/t/${fixture.taskId}`);
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
     await expect(session.recoveryResumeButton()).toBeVisible();
     await expect(session.transientRetryCard()).toBeHidden();
-    const trace = fs.readFileSync(fixture.tracePath, "utf8");
-    expect(trace.match(/"event":"session_new"/g)).toHaveLength(1);
-    expect(
-      trace
-        .split("\n")
-        .filter(Boolean)
-        .map((line) => JSON.parse(line))
-        .filter((record) => record.event === "prompt"),
-    ).toHaveLength(1);
+    assertNativeNoContinuationTrace(fixture.tracePath, "read");
   } finally {
     await fixture.dispose();
   }

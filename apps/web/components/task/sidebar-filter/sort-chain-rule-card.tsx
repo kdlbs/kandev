@@ -7,7 +7,7 @@ import { useTranslation } from "react-i18next";
 import { type FixedAutomaticTaskColor } from "@/lib/task-color-automation-settings";
 import type { SortDirection, SortKey, SortRule } from "@/lib/state/slices/ui/sidebar-view-types";
 import { taskColorPresentation } from "@/lib/task-color-presentation";
-import { sortKeyLabelKey } from "./sort-picker";
+import { sortKeyDescriptionKey, sortKeyLabelKey } from "./sort-picker";
 
 export function sortRuleDirectionLabelKey(key: SortKey, direction: SortDirection): string {
   if (key === "running")
@@ -47,11 +47,19 @@ function SortRuleFieldSelect({
         <SelectValue />
       </SelectTrigger>
       <SelectContent>
-        {availableKeys.map((key) => (
-          <SelectItem key={key} value={key} className="text-xs">
-            {t(sortKeyLabelKey(key))}
-          </SelectItem>
-        ))}
+        {availableKeys.map((key) => {
+          const descriptionKey = sortKeyDescriptionKey(key);
+          return (
+            <SelectItem
+              key={key}
+              value={key}
+              className="text-xs"
+              description={descriptionKey ? t(descriptionKey) : undefined}
+            >
+              {t(sortKeyLabelKey(key))}
+            </SelectItem>
+          );
+        })}
       </SelectContent>
     </Select>
   );
@@ -115,13 +123,19 @@ function SortRuleDirectionSelect({
       <SelectTrigger
         className={`min-w-0 flex-1 text-xs ${controlHeight(isDrawerLayout)}`}
         aria-label={t("task:sortRuleOrder", { position })}
+        data-direction={rule.direction}
         data-testid={`sort-rule-direction-${position - 1}`}
       >
         <SelectValue />
       </SelectTrigger>
       <SelectContent>
         {(["asc", "desc"] as const).map((direction) => (
-          <SelectItem key={direction} value={direction} className="text-xs">
+          <SelectItem
+            key={direction}
+            value={direction}
+            className="text-xs"
+            data-testid={`sort-rule-direction-option-${position - 1}-${direction}`}
+          >
             {t(sortRuleDirectionLabelKey(rule.key, direction))}
           </SelectItem>
         ))}

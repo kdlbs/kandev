@@ -50,6 +50,10 @@ export function sortKeyLabelKey(key: SortKey): string {
   return SORT_OPTIONS.find((option) => option.key === key)?.labelKey ?? "task:sortStatus";
 }
 
+export function sortKeyDescriptionKey(key: SortKey): string | undefined {
+  return SORT_OPTIONS.find((option) => option.key === key)?.descriptionKey;
+}
+
 type Props = {
   value: SortSpec;
   onChange: (next: SortSpec) => void;
