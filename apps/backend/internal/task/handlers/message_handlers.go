@@ -88,6 +88,25 @@ type taskCanvasGuidanceResolver interface {
 	TaskSessionCanvasGuidanceEnabled(ctx context.Context, taskID, sessionID string) (bool, error)
 }
 
+type promptTaskWithPromptContext interface {
+	PromptTaskWithPromptContext(
+		ctx context.Context,
+		taskID, sessionID, prompt, model string,
+		planMode bool,
+		attachments []v1.MessageAttachment,
+		promptReferenceContext string,
+		promptReferencesPrepared bool,
+		references []v1.EntityReference,
+		dispatchOnly bool,
+	) (*orchestrator.PromptResult, error)
+}
+
+type initialTaskBriefDispatchCoordinator interface {
+	WithInitialTaskBriefAdmission(ctx context.Context, sessionID string, fn func(context.Context) error) error
+	MarkInitialTaskBriefDispatchPending(sessionID string)
+	CompleteInitialTaskBriefDispatch(ctx context.Context, taskID, sessionID string)
+}
+
 type canvasGuidanceProjection struct {
 	resolved                 bool
 	include                  bool
@@ -511,10 +530,11 @@ type wsAddMessageRequest struct {
 	RequirePrimarySession bool                            `json:"require_primary_session,omitempty"`
 	// These fields are server-owned and are carried only from message admission
 	// to the created-session dispatch. They are intentionally not JSON fields.
-	canvasGuidanceResolved   bool
-	includeCanvasGuidance    bool
-	initialTaskBriefSelected bool
-	promptReferencesPrepared bool
+	canvasGuidanceResolved          bool
+	includeCanvasGuidance           bool
+	initialTaskBriefSelected        bool
+	promptReferencesPrepared        bool
+	initialTaskBriefDispatchPending bool
 }
 
 type addMessageReplayIdentity struct {
@@ -778,6 +798,20 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 	titleOwner := false
 	hasMessageContent := req.Content != "" || len(req.Attachments) > 0 ||
 		len(req.PlanCommentRefs) > 0 || len(req.PreviewFeedbackRefs) > 0
+	initialTaskBriefEligible := eligibleForInitialTaskBrief(
+		task, sessionResp, configMode, startCreatedSession, hasMessageContent,
+	)
+	if initialTaskBriefEligible && sessionResp.Session.State == models.TaskSessionStateWaitingForInput {
+		hasPromptHistory, historyErr := h.service.HasUserPromptHistory(admissionCtx, req.TaskSessionID)
+		if historyErr != nil {
+			h.logger.Error("failed to check initial task brief prompt history",
+				zap.String("task_id", req.TaskID),
+				zap.String("session_id", req.TaskSessionID),
+				zap.Error(historyErr))
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to check session prompt history", nil)
+		}
+		initialTaskBriefEligible = !hasPromptHistory
+	}
 	task, titleOwner, wsErr = h.resolveMessageTaskAndTitleOwner(
 		ctx, msg, task, req.TaskID, req.TaskSessionID, configMode, startCreatedSession, hasMessageContent,
 	)
@@ -815,6 +849,7 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 	}
 	initialTaskBrief := h.prepareInitialTaskBriefCandidate(
 		ctx, req, sessionResp, task, configMode, startCreatedSession, titleOwner, hasMessageContent,
+		initialTaskBriefEligible,
 	)
 	req.Content = storedContent
 	if planCommentAttachmentClaim == nil {
@@ -858,7 +893,17 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Queued prompt admission is unavailable", nil)
 		}
 	}
-	createMessage := func() (*models.Message, error) {
+	var initialBriefCoordinator initialTaskBriefDispatchCoordinator
+	if h.orchestrator != nil {
+		initialBriefCoordinator, _ = h.orchestrator.(initialTaskBriefDispatchCoordinator)
+	}
+	initialBriefDispatchMarked := false
+	defer func() {
+		if initialBriefDispatchMarked && initialBriefCoordinator != nil {
+			initialBriefCoordinator.CompleteInitialTaskBriefDispatch(ctx, req.TaskID, req.TaskSessionID)
+		}
+	}()
+	createMessage := func(messageCtx context.Context) (*models.Message, error) {
 		if atomicQueuedTaskFeedback {
 			queueMetadata := make(map[string]interface{}, len(createRequest.Metadata)+1)
 			for key, value := range createRequest.Metadata {
@@ -874,21 +919,38 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 				QueuedBy: messagequeue.QueuedByUser,
 			}
 			created, createErr := h.service.CreateQueuedMessageIdempotent(
-				admissionCtx, req.ClientMessageID, createRequest, queued, queuedCoordinator.MaxQueuedPromptsPerSession(),
+				messageCtx, req.ClientMessageID, createRequest, queued, queuedCoordinator.MaxQueuedPromptsPerSession(),
 			)
 			if createErr == nil && (createRequest.InitialTaskBrief == nil ||
 				createRequest.InitialTaskBrief.Selected || (created != nil && created.PromptIndex == 1)) {
-				queuedCoordinator.NotifyQueuedUserPrompt(ctx, req.TaskID, req.TaskSessionID)
+				queuedCoordinator.NotifyQueuedUserPrompt(messageCtx, req.TaskID, req.TaskSessionID)
 			}
 			return created, createErr
 		}
 		if req.ClientMessageID != "" {
-			return h.service.CreateMessageIdempotent(admissionCtx, req.ClientMessageID, createRequest)
+			return h.service.CreateMessageIdempotent(messageCtx, req.ClientMessageID, createRequest)
 		}
-		return h.service.CreateMessage(admissionCtx, createRequest)
+		return h.service.CreateMessage(messageCtx, createRequest)
 	}
 	for refreshAttempt := 0; ; refreshAttempt++ {
-		message, err = createMessage()
+		createAndTrackInitialBrief := func(messageCtx context.Context) error {
+			message, err = createMessage(messageCtx)
+			if err == nil && initialTaskBrief != nil && message != nil &&
+				message.PromptIndex == 1 && message.Content == initialTaskBrief.Content &&
+				!turnStartResult.Queued && !atomicQueuedTaskFeedback && initialBriefCoordinator != nil {
+				initialBriefCoordinator.MarkInitialTaskBriefDispatchPending(req.TaskSessionID)
+				initialBriefDispatchMarked = true
+				req.initialTaskBriefDispatchPending = true
+			}
+			return err
+		}
+		if initialTaskBrief != nil && !atomicQueuedTaskFeedback && initialBriefCoordinator != nil {
+			err = initialBriefCoordinator.WithInitialTaskBriefAdmission(
+				admissionCtx, req.TaskSessionID, createAndTrackInitialBrief,
+			)
+		} else {
+			err = createAndTrackInitialBrief(admissionCtx)
+		}
 		if !errors.Is(err, repoerrors.ErrInitialTaskBriefStale) || initialTaskBrief == nil || refreshAttempt > 0 {
 			break
 		}
@@ -904,6 +966,7 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 		task = freshTask
 		initialTaskBrief = h.prepareInitialTaskBriefCandidate(
 			admissionCtx, req, sessionResp, task, configMode, startCreatedSession, titleOwner, hasMessageContent,
+			initialTaskBriefEligible,
 		)
 		createRequest.InitialTaskBrief = initialTaskBrief
 	}
@@ -994,6 +1057,7 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 		h.dispatchPromptAsync(
 			ctx, req, sessionResp.Session.AgentProfileID, startCreatedSession, steer, trustedPromptContext,
 		)
+		initialBriefDispatchMarked = false
 	}
 
 	return response, nil
@@ -1494,6 +1558,11 @@ func (h *MessageHandlers) dispatchPromptAsync(
 	attachments := req.Attachments
 	go func() {
 		promptCtx := context.WithoutCancel(ctx)
+		if req.initialTaskBriefDispatchPending {
+			if coordinator, ok := h.orchestrator.(initialTaskBriefDispatchCoordinator); ok {
+				defer coordinator.CompleteInitialTaskBriefDispatch(promptCtx, taskID, sessionID)
+			}
+		}
 		if steer {
 			h.forwardMessageAsSteer(promptCtx, taskID, sessionID, content, model, planMode, attachments)
 			return
@@ -1517,7 +1586,8 @@ func eligibleForInitialTaskBrief(
 	configMode, startCreatedSession, hasMessageContent bool,
 ) bool {
 	return task != nil && sessionResp != nil &&
-		startCreatedSession && hasMessageContent &&
+		(startCreatedSession ||
+			sessionResp.Session.State == models.TaskSessionStateWaitingForInput) && hasMessageContent &&
 		!task.IsEphemeral && !task.IsFromOffice && !configMode &&
 		strings.TrimSpace(task.Description) != ""
 }
@@ -1642,7 +1712,19 @@ func (h *MessageHandlers) forwardMessageAsPrompt(
 		return
 	}
 
-	_, err := h.orchestrator.PromptTask(ctx, taskID, sessionID, content, model, planMode, attachments, false)
+	var err error
+	if promptWithContext, ok := h.orchestrator.(promptTaskWithPromptContext); ok {
+		promptReferencesPrepared := false
+		if len(canvasGuidance) > 0 {
+			promptReferencesPrepared = canvasGuidance[0].promptReferencesPrepared
+		}
+		_, err = promptWithContext.PromptTaskWithPromptContext(
+			ctx, taskID, sessionID, content, model, planMode, attachments,
+			trustedPromptContext, promptReferencesPrepared, references, false,
+		)
+	} else {
+		_, err = h.orchestrator.PromptTask(ctx, taskID, sessionID, content, model, planMode, attachments, false)
+	}
 	if err != nil {
 		err = h.handlePromptWithResume(ctx, taskID, sessionID, content, model, planMode, attachments, err)
 	}

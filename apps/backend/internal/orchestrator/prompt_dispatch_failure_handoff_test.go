@@ -84,7 +84,7 @@ func TestHandlePromptDispatchFailure_ComposedPromptSurvivesInternalFallback(t *t
 		false, false,
 		executor.ErrExecutionNotFound,
 		true, sysprompt.InjectPlanMode(composedPrompt), composedPrompt,
-		"",
+		"", false, nil,
 	)
 	require.NoError(t, err)
 	require.NotNil(t, result)

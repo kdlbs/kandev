@@ -6273,7 +6273,7 @@ func (s *Service) launchCreatedAutoStartStepPrompt(state *autoStartStepPromptSta
 	execution, err := s.startCreatedSessionWithComposedPrompt(
 		launchCtx, state.taskID, state.sessionID, state.session.AgentProfileID,
 		state.recordedPrompt, state.agentPrompt, state.promptReferenceContext,
-		true, state.planMode, true, state.initialCreatePromptPassthrough, state.attachments, state.references,
+		true, state.planMode, true, state.initialCreatePromptPassthrough, state.attachments, state.references, false,
 	)
 	if execution == nil {
 		workflowAttempt.retire()
@@ -6347,7 +6347,7 @@ func (s *Service) handleAutoStartPromptAttemptError(
 		return true, s.fallbackFreshLaunchOnMissingExecution(
 			state.ctx, state.taskID, state.sessionID, state.recordedPrompt, true,
 			state.dispatchPrompt, state.planMode, state.promptReferenceContext,
-			state.initialCreatePromptPassthrough, state.takenMsg, state.attachments, state.references,
+			state.initialCreatePromptPassthrough, state.takenMsg, state.attachments, state.references, false,
 		)
 	}
 	if isAgentAlreadyRunningError(err) && state.shouldQueueIfBusy {
@@ -6404,6 +6404,7 @@ func (s *Service) fallbackFreshLaunchOnMissingExecution(
 	takenMsg *messagequeue.QueuedMessage,
 	attachments []v1.MessageAttachment,
 	references []v1.EntityReference,
+	promptReferencesPrepared bool,
 ) error {
 	requeue := func() {
 		if takenMsg != nil {
@@ -6437,6 +6438,7 @@ func (s *Service) fallbackFreshLaunchOnMissingExecution(
 			ctx, taskID, sessionID, fresh.AgentProfileID,
 			prompt, retryPrompt, promptReferenceContext,
 			true, planMode, true, initialCreatePromptPassthrough, attachments, references,
+			promptReferencesPrepared,
 		)
 	} else {
 		_, launchErr = s.startCreatedSession(
