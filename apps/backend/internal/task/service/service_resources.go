@@ -2308,7 +2308,10 @@ func (s *Service) UpdateExecutorProfile(ctx context.Context, id string, req *Upd
 	if req.ExpectedUpdatedAt != nil {
 		updateErr = s.executors.UpdateExecutorProfileIfUnmodified(ctx, profile, *req.ExpectedUpdatedAt)
 	} else {
-		updateErr = s.executors.UpdateExecutorProfile(ctx, profile)
+		updateErr = s.executors.UpdateExecutorProfileWithScriptIntent(ctx, profile, models.ExecutorProfileScriptIntent{
+			PrepareScript: req.PrepareScript,
+			CleanupScript: req.CleanupScript,
+		})
 	}
 	if updateErr != nil {
 		return nil, updateErr
