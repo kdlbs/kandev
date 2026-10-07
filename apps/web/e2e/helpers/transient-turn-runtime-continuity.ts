@@ -5,6 +5,7 @@ import type { BackendContext } from "../fixtures/backend";
 import type { SeedData } from "../fixtures/test-base";
 import type { ApiClient } from "./api-client";
 import { pollUntil } from "./poll-until";
+import type { SessionPage } from "../pages/session-page";
 
 type SessionMessage = Awaited<ReturnType<ApiClient["listSessionMessages"]>>["messages"][number];
 
@@ -124,6 +125,24 @@ export function assertCompletedCapacityACPTrace(tracePath: string, originalComma
   const effects = records.filter((record) => record.event === "completed_side_effect");
   expect(effects).toHaveLength(1);
   expect(effects[0]).toMatchObject({ scenario: "completed-tools", effect: "fixture.txt" });
+}
+
+export async function expectCompletedCapacityProgress(session: SessionPage) {
+  const retryNotice = session.transientRetryCard();
+  const completedContinuation = session
+    .activeChat()
+    .getByText("Mock provider continued the unfinished request without repeating completed work.", {
+      exact: true,
+    });
+  await expect
+    .poll(
+      async () => (await retryNotice.isVisible()) || (await completedContinuation.isVisible()),
+      {
+        timeout: 30_000,
+        message: "the chat should show the pending retry or its completed continuation",
+      },
+    )
+    .toBe(true);
 }
 
 export function assertRetainedFailureMessage(message: SessionMessage) {

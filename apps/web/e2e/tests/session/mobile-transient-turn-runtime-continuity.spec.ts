@@ -5,6 +5,7 @@ import {
   assertRetainedACPTrace,
   assertRetainedFailureMessage,
   createRetainedCapacityFixture,
+  expectCompletedCapacityProgress,
   readMockACPTrace,
   waitForRetainedTurnFailure,
 } from "../../helpers/transient-turn-runtime-continuity";
@@ -161,7 +162,7 @@ test("phone: completed tools continue on the same runtime across reload and a se
     );
     await testPage.reload();
     await session.waitForLoad();
-    await expect(session.transientRetryCard()).toBeVisible();
+    await expectCompletedCapacityProgress(session);
     await assertNoDocumentHorizontalOverflow(testPage);
 
     const viewer = await testPage.context().newPage();
@@ -169,8 +170,7 @@ test("phone: completed tools continue on the same runtime across reload and a se
       await viewer.goto(`/t/${fixture.taskId}`);
       const otherViewer = new SessionPage(viewer);
       await otherViewer.waitForLoad();
-      await expect(otherViewer.transientRetryCard()).toBeVisible();
-      await expect(otherViewer.transientRetryCard()).toContainText("Continuing");
+      await expectCompletedCapacityProgress(otherViewer);
     } finally {
       await viewer.close();
     }
