@@ -153,6 +153,63 @@ export function readManagedCloneRecoveryConsumers(
   }
 }
 
+export function readPrivateManagedCloneRecoveryArtifacts(
+  tmpDir: string,
+  environmentId: string,
+  repositoryId: string,
+): { relocationPath: string; recoveryPath: string; original: string; snapshot: string } {
+  const { DatabaseSync } = nodeRequire("node:sqlite") as {
+    DatabaseSync: new (databasePath: string) => SqliteTestDatabase;
+  };
+  const db = new DatabaseSync(path.join(tmpDir, "kandev.db"));
+  let artifactPaths: string[];
+  try {
+    const row = db
+      .prepare(
+        `SELECT artifact_paths_json AS artifactPaths
+         FROM task_environment_recovery_artifacts
+         WHERE task_environment_id = ? AND repository_id = ?
+         ORDER BY updated_at DESC LIMIT 1`,
+      )
+      .get(environmentId, repositoryId) as { artifactPaths?: unknown } | undefined;
+    if (typeof row?.artifactPaths !== "string") {
+      throw new Error(`Recovery artifacts are not registered for repository ${repositoryId}`);
+    }
+    const parsed = JSON.parse(row.artifactPaths) as unknown;
+    if (!Array.isArray(parsed) || parsed.some((value) => typeof value !== "string")) {
+      throw new Error(`Recovery artifact paths are invalid for repository ${repositoryId}`);
+    }
+    artifactPaths = parsed;
+  } finally {
+    db.close();
+  }
+
+  const relocationPath = artifactPaths.find(
+    (artifactPath) => path.basename(artifactPath) === "relocation.json",
+  );
+  const recoveryPath = artifactPaths.find(
+    (artifactPath) => path.basename(artifactPath) === "recovery.json",
+  );
+  if (!relocationPath || !recoveryPath) {
+    throw new Error(`Private relocation records are missing for repository ${repositoryId}`);
+  }
+  const relocation = JSON.parse(fs.readFileSync(relocationPath, "utf8")) as {
+    original?: unknown;
+  };
+  const recovery = JSON.parse(fs.readFileSync(recoveryPath, "utf8")) as {
+    snapshot?: unknown;
+  };
+  if (typeof relocation.original !== "string" || typeof recovery.snapshot !== "string") {
+    throw new Error(`Private recovery record is incomplete for repository ${repositoryId}`);
+  }
+  return {
+    relocationPath,
+    recoveryPath,
+    original: relocation.original,
+    snapshot: recovery.snapshot,
+  };
+}
+
 /** Read the durable state of the task's cascade archive cleanup job. */
 export function readCascadeArchiveCleanupState(tmpDir: string, taskId: string): string | null {
   const { DatabaseSync } = nodeRequire("node:sqlite") as {

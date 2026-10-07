@@ -36,20 +36,32 @@ func permissionRetrySnapshotPath(original, operationID string) string {
 
 func validRecoveryModeRetry(record recoveryRecord, original string) bool {
 	retry := record.ModeRetry
-	if retry == nil || retry.Version != 1 || retry.PreviousSnapshot == "" ||
-		retry.PreviousSnapshot == record.Snapshot || retry.PreviousError != permissionOnlyRecoveryFailure ||
-		retry.PreviousUpdatedAt.IsZero() || !validRecoveryDigest(retry.SourceManifest) ||
-		!validRecoveryDigest(retry.SourceIdentityManifest) ||
-		record.Snapshot != permissionRetrySnapshotPath(original, record.OperationID) {
+	if !validRecoveryModeRetryEvidence(retry, record.Snapshot) {
 		return false
 	}
-	if _, err := uuid.Parse(record.OperationID); err != nil {
+	if record.Snapshot != permissionRetrySnapshotPath(original, record.OperationID) || !validRecoveryOperationID(record.OperationID) {
 		return false
 	}
-	if err := validateRecoverySnapshotPath(original, retry.PreviousSnapshot); err != nil {
+	return validHistoricalRecoverySnapshot(original, retry.PreviousSnapshot)
+}
+
+func validRecoveryModeRetryEvidence(retry *recoveryModeRetry, activeSnapshot string) bool {
+	return retry != nil && retry.Version == 1 && retry.PreviousSnapshot != "" &&
+		retry.PreviousSnapshot != activeSnapshot && retry.PreviousError == permissionOnlyRecoveryFailure &&
+		!retry.PreviousUpdatedAt.IsZero() && validRecoveryDigest(retry.SourceManifest) &&
+		validRecoveryDigest(retry.SourceIdentityManifest)
+}
+
+func validRecoveryOperationID(operationID string) bool {
+	_, err := uuid.Parse(operationID)
+	return err == nil
+}
+
+func validHistoricalRecoverySnapshot(original, snapshot string) bool {
+	if err := validateRecoverySnapshotPath(original, snapshot); err != nil {
 		return false
 	}
-	info, err := os.Lstat(retry.PreviousSnapshot)
+	info, err := os.Lstat(snapshot)
 	return err == nil && info.IsDir() && info.Mode()&os.ModeSymlink == 0
 }
 
@@ -264,7 +276,17 @@ func (m *Manager) verifyPermissionRetryReplacement(ctx context.Context, record m
 }
 
 func provePermissionOnlySnapshot(ctx context.Context, original, snapshot string) (recoveryPermissionProof, error) {
-	if err := validateRecoverySnapshotPath(original, snapshot); err != nil {
+	return provePermissionOnlySnapshotWithValidation(ctx, original, snapshot, func() error {
+		return validateRecoverySnapshotPath(original, snapshot)
+	})
+}
+
+func provePermissionOnlySnapshotWithValidation(
+	ctx context.Context,
+	original, snapshot string,
+	validate func() error,
+) (recoveryPermissionProof, error) {
+	if err := validate(); err != nil {
 		return recoveryPermissionProof{}, err
 	}
 	originalRoot, err := workspaces.OpenDirectoryNoFollow(filepath.Dir(original), original)
@@ -637,6 +659,332 @@ func beginDirtyCloneRecovery(
 	return beginBlockedDirtyCloneRecovery(ctx, m, wt, jobPath, claim, proof, relocation, existing, lock)
 }
 
+func beginDirtyCloneRecoveryV1(
+	ctx context.Context,
+	m *Manager,
+	wt *Worktree,
+	paths managedCloneRecoveryArtifactPaths,
+	claim *models.TaskEnvironmentRecoveryClaim,
+	proof *ManagedCloneRelocationProof,
+	relocation managedCloneRelocationRecord,
+) (recoveryRecord, string, *recoveryLock, error) {
+	if !validLegacyDirtyRecoveryIdentity(wt, paths, claim) {
+		return recoveryRecord{}, "", nil, errors.New("legacy dirty recovery identity is incomplete")
+	}
+	lock, err := acquireRecoveryOperation(paths.RecoveryClaim)
+	if err != nil {
+		return recoveryRecord{}, "", nil, recoveryAlreadyClaimedError(wt, err.Error())
+	}
+	existing, err := readRecoveryRecord(paths.RecoveryRecord)
+	return continueLegacyDirtyCloneRecovery(ctx, m, wt, paths, claim, proof, relocation, lock, existing, err)
+}
+
+func validLegacyDirtyRecoveryIdentity(wt *Worktree, paths managedCloneRecoveryArtifactPaths, claim *models.TaskEnvironmentRecoveryClaim) bool {
+	return wt != nil && claim != nil && paths.LayoutVersion == 1 && claim.OperationID != ""
+}
+
+func continueLegacyDirtyCloneRecovery(
+	ctx context.Context,
+	m *Manager,
+	wt *Worktree,
+	paths managedCloneRecoveryArtifactPaths,
+	claim *models.TaskEnvironmentRecoveryClaim,
+	proof *ManagedCloneRelocationProof,
+	relocation managedCloneRelocationRecord,
+	lock *recoveryLock,
+	existing recoveryRecord,
+	err error,
+) (recoveryRecord, string, *recoveryLock, error) {
+	if errors.Is(err, os.ErrNotExist) {
+		return createLegacyDirtyCloneRecovery(wt, paths, claim, lock)
+	}
+	if err != nil {
+		_ = lock.Close()
+		return recoveryRecord{}, "", nil, recoveryAlreadyClaimedError(wt, "legacy recovery record is unreadable")
+	}
+	if err := validateLegacyDirtyRecoveryRecord(wt, claim, existing); err != nil {
+		_ = lock.Close()
+		return recoveryRecord{}, "", nil, err
+	}
+	if existing.State == RecoveryStateBlocked {
+		return beginBlockedDirtyCloneRecovery(ctx, m, wt, paths.RecoveryRecord, claim, proof, relocation, existing, lock)
+	}
+	if err := verifyLegacyInterruptedPermissionRetry(ctx, wt, existing); err != nil {
+		_ = lock.Close()
+		return recoveryRecord{}, "", nil, err
+	}
+	return adoptDirtyCloneRecovery(wt, claim, existing, lock)
+}
+
+func createLegacyDirtyCloneRecovery(
+	wt *Worktree,
+	paths managedCloneRecoveryArtifactPaths,
+	claim *models.TaskEnvironmentRecoveryClaim,
+	lock *recoveryLock,
+) (recoveryRecord, string, *recoveryLock, error) {
+	if _, err := os.Lstat(paths.Snapshot); err == nil || !errors.Is(err, os.ErrNotExist) {
+		_ = lock.Close()
+		return recoveryRecord{}, "", nil, recoveryAlreadyClaimedError(wt, "legacy recovery snapshot path is already occupied")
+	}
+	record := recoveryRecord{
+		LayoutVersion: 1, OperationID: claim.OperationID, TaskID: wt.TaskID,
+		WorktreeID: wt.ID, Original: wt.Path, Snapshot: paths.Snapshot,
+		State: RecoveryStateSnapshotting, UpdatedAt: time.Now().UTC(),
+	}
+	if err := createRecoveryRecord(paths.RecoveryRecord, record); err != nil {
+		_ = lock.Close()
+		return recoveryRecord{}, "", nil, err
+	}
+	return record, paths.Snapshot, lock, nil
+}
+
+func validateLegacyDirtyRecoveryRecord(
+	wt *Worktree,
+	claim *models.TaskEnvironmentRecoveryClaim,
+	record recoveryRecord,
+) error {
+	if record.LayoutVersion != 1 || record.OperationID != claim.OperationID ||
+		record.TaskID != wt.TaskID || record.WorktreeID != wt.ID || record.Original != wt.Path {
+		return recoveryAlreadyClaimedError(wt, "legacy recovery identity does not match the current claim")
+	}
+	if err := validateRecoverySnapshotPath(wt.Path, record.Snapshot); err != nil {
+		return recoveryAlreadyClaimedError(wt, "legacy recovery snapshot path is unsafe")
+	}
+	if record.ModeRetry != nil && !validRecoveryModeRetry(record, wt.Path) {
+		return recoveryAlreadyClaimedError(wt, "legacy permission retry proof is invalid")
+	}
+	return nil
+}
+
+func verifyLegacyInterruptedPermissionRetry(ctx context.Context, wt *Worktree, record recoveryRecord) error {
+	if record.ModeRetry == nil {
+		return nil
+	}
+	if err := verifyInterruptedPermissionRetry(ctx, wt.Path, record); err != nil {
+		return managedCloneRelocationError(wt.TaskID, "interrupted permission retry no longer matches original evidence")
+	}
+	return nil
+}
+
+func beginDirtyCloneRecoveryV2(
+	ctx context.Context,
+	m *Manager,
+	wt *Worktree,
+	paths managedCloneRecoveryArtifactPaths,
+	claim *models.TaskEnvironmentRecoveryClaim,
+	proof *ManagedCloneRelocationProof,
+	relocation managedCloneRelocationRecord,
+) (recoveryRecord, string, *recoveryLock, error) {
+	if !validPrivateDirtyRecoveryIdentity(wt, paths, claim) {
+		return recoveryRecord{}, "", nil, errors.New("private dirty recovery identity is incomplete")
+	}
+	lock, err := acquireRecoveryOperation(paths.RecoveryClaim)
+	if err != nil {
+		return recoveryRecord{}, "", nil, recoveryAlreadyClaimedError(wt, err.Error())
+	}
+	existing, err := readRecoveryRecord(paths.RecoveryRecord)
+	return continuePrivateDirtyCloneRecovery(ctx, m, wt, paths, claim, proof, relocation, lock, existing, err)
+}
+
+func validPrivateDirtyRecoveryIdentity(wt *Worktree, paths managedCloneRecoveryArtifactPaths, claim *models.TaskEnvironmentRecoveryClaim) bool {
+	return wt != nil && claim != nil && claim.OperationID != "" && paths.LayoutVersion == 2
+}
+
+func continuePrivateDirtyCloneRecovery(
+	ctx context.Context,
+	m *Manager,
+	wt *Worktree,
+	paths managedCloneRecoveryArtifactPaths,
+	claim *models.TaskEnvironmentRecoveryClaim,
+	proof *ManagedCloneRelocationProof,
+	relocation managedCloneRelocationRecord,
+	lock *recoveryLock,
+	existing recoveryRecord,
+	err error,
+) (recoveryRecord, string, *recoveryLock, error) {
+	if errors.Is(err, os.ErrNotExist) {
+		return createPrivateDirtyCloneRecovery(paths, wt, claim, lock)
+	}
+	if err != nil {
+		_ = lock.Close()
+		return recoveryRecord{}, "", nil, recoveryAlreadyClaimedError(wt, "private recovery record is unreadable")
+	}
+	if existing.LayoutVersion != 2 || existing.OperationID != claim.OperationID ||
+		existing.TaskID != wt.TaskID || existing.WorktreeID != wt.ID || existing.Original != wt.Path ||
+		!validPrivateRecoverySnapshotIdentity(existing, paths) {
+		_ = lock.Close()
+		return recoveryRecord{}, "", nil, recoveryAlreadyClaimedError(wt, "private recovery record identity does not match the selected operation")
+	}
+	if existing.State == RecoveryStateBlocked {
+		return beginBlockedPrivateDirtyCloneRecovery(ctx, m, wt, paths, claim, proof, relocation, existing, lock)
+	}
+	if existing.State != RecoveryStateSnapshotting && existing.State != RecoveryStateRematerializing {
+		_ = lock.Close()
+		return recoveryRecord{}, "", nil, recoveryStateError(wt, existing.State)
+	}
+	if err := verifyExistingPrivatePermissionRetry(ctx, wt, paths, existing); err != nil {
+		_ = lock.Close()
+		return recoveryRecord{}, "", nil, err
+	}
+	return existing, existing.Snapshot, lock, nil
+}
+
+func createPrivateDirtyCloneRecovery(
+	paths managedCloneRecoveryArtifactPaths,
+	wt *Worktree,
+	claim *models.TaskEnvironmentRecoveryClaim,
+	lock *recoveryLock,
+) (recoveryRecord, string, *recoveryLock, error) {
+	record := recoveryRecord{
+		LayoutVersion: 2, OperationID: claim.OperationID, TaskID: wt.TaskID,
+		WorktreeID: wt.ID, Original: wt.Path, Snapshot: paths.Snapshot,
+		State: RecoveryStateSnapshotting, UpdatedAt: time.Now().UTC(),
+	}
+	if err := createRecoveryRecord(paths.RecoveryRecord, record); err != nil {
+		_ = lock.Close()
+		return recoveryRecord{}, "", nil, err
+	}
+	return record, paths.Snapshot, lock, nil
+}
+
+func beginBlockedPrivateDirtyCloneRecovery(
+	ctx context.Context,
+	m *Manager,
+	wt *Worktree,
+	paths managedCloneRecoveryArtifactPaths,
+	claim *models.TaskEnvironmentRecoveryClaim,
+	proof *ManagedCloneRelocationProof,
+	relocation managedCloneRelocationRecord,
+	existing recoveryRecord,
+	lock *recoveryLock,
+) (recoveryRecord, string, *recoveryLock, error) {
+	if existing.ModeRetry != nil {
+		return adoptBlockedPrivatePermissionRetry(ctx, wt, paths, existing, lock)
+	}
+	if existing.Error != permissionOnlyRecoveryFailure || proof == nil {
+		_ = lock.Close()
+		return recoveryRecord{}, "", nil, recoveryStateError(wt, existing.State)
+	}
+	return retryBlockedPrivatePermissionRecovery(ctx, m, wt, paths, claim, relocation, existing, lock)
+}
+
+func adoptBlockedPrivatePermissionRetry(
+	ctx context.Context,
+	wt *Worktree,
+	paths managedCloneRecoveryArtifactPaths,
+	existing recoveryRecord,
+	lock *recoveryLock,
+) (recoveryRecord, string, *recoveryLock, error) {
+	if !validRecoveryModeRetryForRecord(existing, wt.Path, paths.RecoveryRecord) ||
+		verifyInterruptedPermissionRetryV2(ctx, wt.Path, paths, existing) != nil {
+		_ = lock.Close()
+		return recoveryRecord{}, "", nil, managedCloneRelocationError(wt.TaskID, "interrupted permission retry no longer matches original evidence")
+	}
+	return existing, existing.Snapshot, lock, nil
+}
+
+func retryBlockedPrivatePermissionRecovery(
+	ctx context.Context,
+	m *Manager,
+	wt *Worktree,
+	paths managedCloneRecoveryArtifactPaths,
+	claim *models.TaskEnvironmentRecoveryClaim,
+	relocation managedCloneRelocationRecord,
+	existing recoveryRecord,
+	lock *recoveryLock,
+) (recoveryRecord, string, *recoveryLock, error) {
+	if err := validateDirtyCloneRelocationAuthorization(ctx); err != nil {
+		_ = lock.Close()
+		return recoveryRecord{}, "", nil, err
+	}
+	sourceProof, err := provePermissionOnlySnapshotV2(ctx, wt.Path, paths.RecoveryRecord, existing)
+	if err != nil {
+		_ = lock.Close()
+		return recoveryRecord{}, "", nil, managedCloneRelocationError(wt.TaskID, "historical snapshot is not a proven permission-only failure")
+	}
+	newSnapshot := filepath.Join(paths.Bucket, "snapshots", existing.OperationID+"-modes-v1")
+	if err := rejectOccupiedPermissionRetrySnapshot(newSnapshot); err != nil {
+		_ = lock.Close()
+		return recoveryRecord{}, "", nil, recoveryAlreadyClaimedError(wt, "permission retry snapshot path is already occupied")
+	}
+	if err := m.registerManagedCloneArtifactPaths(ctx, wt, claim, relocation, []string{newSnapshot}); err != nil {
+		_ = lock.Close()
+		return recoveryRecord{}, "", nil, err
+	}
+	existing.ModeRetry = newPermissionRetry(existing, sourceProof)
+	existing.Snapshot, existing.Manifest, existing.State, existing.Error = newSnapshot, "", RecoveryStateSnapshotting, ""
+	existing.UpdatedAt = time.Now().UTC()
+	if err := writeRecoveryRecord(paths.RecoveryRecord, existing); err != nil {
+		_ = lock.Close()
+		return recoveryRecord{}, "", nil, err
+	}
+	return existing, newSnapshot, lock, nil
+}
+
+func rejectOccupiedPermissionRetrySnapshot(path string) error {
+	_, err := os.Lstat(path)
+	if err == nil || !errors.Is(err, os.ErrNotExist) {
+		return errors.New("permission retry snapshot path is already occupied")
+	}
+	return nil
+}
+
+func newPermissionRetry(existing recoveryRecord, proof recoveryPermissionProof) *recoveryModeRetry {
+	return &recoveryModeRetry{
+		Version: 1, PreviousSnapshot: existing.Snapshot, PreviousError: existing.Error,
+		PreviousUpdatedAt: existing.UpdatedAt, SourceManifest: proof.manifest,
+		SourceIdentityManifest: proof.identityManifest,
+	}
+}
+
+func verifyExistingPrivatePermissionRetry(
+	ctx context.Context,
+	wt *Worktree,
+	paths managedCloneRecoveryArtifactPaths,
+	record recoveryRecord,
+) error {
+	if record.ModeRetry == nil {
+		return nil
+	}
+	if err := verifyInterruptedPermissionRetryV2(ctx, wt.Path, paths, record); err != nil {
+		return managedCloneRelocationError(wt.TaskID, "interrupted permission retry no longer matches original evidence")
+	}
+	return nil
+}
+
+func validPrivateRecoverySnapshotIdentity(record recoveryRecord, paths managedCloneRecoveryArtifactPaths) bool {
+	if record.Snapshot == paths.Snapshot {
+		return true
+	}
+	return record.ModeRetry != nil && record.Snapshot == filepath.Join(paths.Bucket, "snapshots", record.OperationID+"-modes-v1")
+}
+
+func verifyInterruptedPermissionRetryV2(ctx context.Context, original string, paths managedCloneRecoveryArtifactPaths, record recoveryRecord) error {
+	if !validRecoveryModeRetryForRecord(record, original, paths.RecoveryRecord) {
+		return errors.New("private permission retry record is invalid")
+	}
+	if err := validateDirtyCloneRelocationAuthorization(ctx); err != nil {
+		return err
+	}
+	proof, err := provePermissionOnlySnapshotV2(ctx, original, paths.RecoveryRecord, recoveryRecord{
+		LayoutVersion: 2, Original: original, Snapshot: record.ModeRetry.PreviousSnapshot,
+	})
+	if err != nil || proof.manifest != record.ModeRetry.SourceManifest || proof.identityManifest != record.ModeRetry.SourceIdentityManifest {
+		return errors.New("original checkout changed since permission retry proof")
+	}
+	return validateDirtyCloneRelocationAuthorization(ctx)
+}
+
+func provePermissionOnlySnapshotV2(
+	ctx context.Context,
+	original, recordPath string,
+	record recoveryRecord,
+) (recoveryPermissionProof, error) {
+	return provePermissionOnlySnapshotWithValidation(ctx, original, record.Snapshot, func() error {
+		return validateRecoverySnapshotPathForRecord(original, record.Snapshot, recordPath, record)
+	})
+}
+
 func createDirtyCloneRecovery(
 	wt *Worktree,
 	jobPath, operationID string,
@@ -723,6 +1071,10 @@ func beginBlockedDirtyCloneRecovery(
 	}
 	existing.Snapshot, existing.Manifest, existing.State, existing.Error = newSnapshot, "", RecoveryStateSnapshotting, ""
 	existing.ModeRetry, existing.UpdatedAt = retry, time.Now().UTC()
+	if err := m.registerManagedCloneArtifactPaths(ctx, wt, claim, relocation, []string{newSnapshot}); err != nil {
+		_ = lock.Close()
+		return recoveryRecord{}, "", nil, err
+	}
 	if err := writeRecoveryRecord(jobPath, existing); err != nil {
 		_ = lock.Close()
 		return recoveryRecord{}, "", nil, err

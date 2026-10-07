@@ -334,6 +334,9 @@ func (s *Service) prepareTaskForCreation(ctx context.Context, req *CreateTaskReq
 	if err := s.inheritParentRepositories(ctx, req); err != nil {
 		return nil, err
 	}
+	if err := s.prepareProjectRepositorySources(ctx, req); err != nil {
+		return nil, err
+	}
 	if err := s.preflightRepositorySelections(ctx, req); err != nil {
 		return nil, err
 	}
@@ -417,7 +420,9 @@ func (s *Service) resolveTaskCreationReferences(
 	if err := s.validateBlockerReferences(ctx, req); err != nil {
 		return nil, err
 	}
-	repositories, err := s.resolveTaskRepositoryRows(ctx, req.WorkspaceID, req.Repositories)
+	repositories, err := s.resolveTaskRepositoryRowsWithResolvedIdentityDedup(
+		ctx, req.WorkspaceID, req.Repositories, req.projectRepositoryDefaults,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -1082,16 +1087,29 @@ func (s *Service) persistTaskRepositoryRows(ctx context.Context, taskID string, 
 func (s *Service) resolveTaskRepositoryRows(
 	ctx context.Context, workspaceID string, repositories []TaskRepositoryInput,
 ) ([]*models.TaskRepository, error) {
+	return s.resolveTaskRepositoryRowsWithResolvedIdentityDedup(ctx, workspaceID, repositories, false)
+}
+
+func (s *Service) resolveTaskRepositoryRowsWithResolvedIdentityDedup(
+	ctx context.Context, workspaceID string, repositories []TaskRepositoryInput, deduplicateResolvedRepositoryIDs bool,
+) ([]*models.TaskRepository, error) {
 	repoByPath, err := s.repositoriesByLocalPath(ctx, workspaceID, repositories)
 	if err != nil {
 		return nil, err
 	}
 	seen := make(map[string]bool, len(repositories))
+	seenRepositoryIDs := make(map[string]struct{}, len(repositories))
 	rows := make([]*models.TaskRepository, 0, len(repositories))
 	for i, repoInput := range repositories {
 		row, err := s.resolveTaskRepositoryRow(ctx, workspaceID, i, repoInput, repoByPath)
 		if err != nil {
 			return nil, err
+		}
+		if deduplicateResolvedRepositoryIDs {
+			if _, exists := seenRepositoryIDs[row.RepositoryID]; exists {
+				continue
+			}
+			seenRepositoryIDs[row.RepositoryID] = struct{}{}
 		}
 		if err := s.claimRepositoryBranchSlot(ctx, seen, row, repoInput); err != nil {
 			return nil, err

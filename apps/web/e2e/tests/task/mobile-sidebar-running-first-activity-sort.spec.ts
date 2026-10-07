@@ -1,4 +1,6 @@
 import { test, expect } from "../../fixtures/test-base";
+import { watchWs } from "../../helpers/causal-waits";
+import { waitForSessionState } from "../../helpers/session";
 import { waitForFiniteAnimations } from "../../helpers/animations";
 import { scrollSidebarFilterListTopIntoView, touchDragToPoint } from "../../helpers/touch-drag";
 import { SessionPage } from "../../pages/session-page";
@@ -8,9 +10,15 @@ import {
   expectSidebarRootOrder,
   openSidebarSortEditor,
   moveSortRuleWithMenu,
+  readPreviousSidebarColorPatch,
   readPreviousSidebarViewState,
+  readTaskRunningSummary,
+  restoreSidebarSortColors,
   restoreSidebarViewState,
+  saveSidebarRunningRankView,
   saveSidebarSortView,
+  seedSidebarRunningRankScenario,
+  waitForTaskRunningSummary,
   seedSidebarSortScenario,
   touchDragSortRule,
 } from "./sidebar-running-first-activity-sort-helpers";
@@ -334,5 +342,220 @@ test("phone drawer edits and saves a touch-reachable sort chain and group inset"
   } finally {
     await cleanupSidebarSortColors(apiClient, scenario.colorIds);
     await restoreSidebarViewState(apiClient, seedData.workspaceId, previousViews);
+  }
+});
+
+// @covers AC-UI-SIDEBAR-RUNNING-ACTIVITY-001.2, .6, .8, .14, .15, .16
+test("phone task picker keeps task-wide running rank through secondary session changes", async ({
+  testPage,
+  apiClient,
+  seedData,
+  prCapture,
+}) => {
+  test.setTimeout(120_000);
+  const token = prCapture.capturing ? "PhoneQ" : `phone-run-${Date.now()}`;
+  const previousViews = await readPreviousSidebarViewState(apiClient, seedData.workspaceId);
+  const previousColors = await readPreviousSidebarColorPatch(apiClient);
+  const scenario = await seedSidebarRunningRankScenario(apiClient, seedData, token);
+  const navigation = await apiClient.createTask(
+    seedData.workspaceId,
+    `Phone navigation conversation ${Date.now()}`,
+    {
+      workflow_id: seedData.workflowId,
+      workflow_step_id: seedData.startStepId,
+    },
+  );
+  const { session_id: conversationId } = await apiClient.seedTaskSession(navigation.id, {
+    state: "COMPLETED",
+    agentProfileId: seedData.agentProfileId,
+    completedAt: new Date().toISOString(),
+  });
+  await apiClient.setPrimarySession(conversationId);
+  const conversationText = "Phone task-wide sort keeps this conversation open";
+  await apiClient.seedSessionMessage(conversationId, {
+    type: "message",
+    content: conversationText,
+  });
+  await apiClient.updateTaskState(navigation.id, "COMPLETED");
+  const viewId = `phone-running-rank-${Date.now()}`;
+  const watcher = watchWs(testPage);
+
+  try {
+    await apiClient.saveUserSettings({
+      sidebar_task_color_patch: {
+        colors: {
+          [scenario.runningNoPrimary.id]: "blue",
+          [scenario.secondaryTask.id]: "blue",
+          [scenario.idleRed.id]: "red",
+          [scenario.idleOrange.id]: "orange",
+        },
+        if_missing: false,
+      },
+    });
+    await saveSidebarRunningRankView(apiClient, seedData, viewId, token);
+
+    const noPrimarySessions = await apiClient.listTaskSessions(scenario.runningNoPrimary.id);
+    expect(noPrimarySessions.sessions).toHaveLength(1);
+    expect(noPrimarySessions.sessions[0]).toMatchObject({
+      id: scenario.runningNoPrimarySessionId,
+      state: "RUNNING",
+      is_primary: false,
+    });
+    expect((await apiClient.getTask(scenario.runningNoPrimary.id)).primary_session_id ?? null).toBe(
+      null,
+    );
+    const secondarySessions = await apiClient.listTaskSessions(scenario.secondaryTask.id);
+    expect(secondarySessions.sessions).toHaveLength(2);
+    expect(
+      secondarySessions.sessions.find((session) => session.id === scenario.primarySessionId),
+    ).toMatchObject({ state: "WAITING_FOR_INPUT", is_primary: true });
+    expect(
+      secondarySessions.sessions.find((session) => session.id === scenario.secondarySessionId),
+    ).toMatchObject({ state: "WAITING_FOR_INPUT", is_primary: false });
+    const savedView = (await apiClient.getUserSettings()).settings.sidebar_views_by_workspace[
+      seedData.workspaceId
+    ].views.find((view) => view.id === viewId);
+    expect(savedView?.sort).toEqual({
+      key: "running",
+      direction: "desc",
+      then_by: [
+        { key: "color", color: "red", direction: "desc" },
+        { key: "color", color: "orange", direction: "desc" },
+        { key: "lastActivityAt", direction: "desc" },
+      ],
+    });
+
+    await testPage.goto(`/t/${navigation.id}`);
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
+    const picker = testPage.getByTestId("mobile-task-picker-trigger");
+    const sheet = testPage.getByRole("dialog", { name: "Tasks" });
+    const expectConversationStable = async () => {
+      await expect(testPage).toHaveURL(new RegExp(`/t/${navigation.id}$`));
+      await expect(session.activeChat()).toHaveAttribute("data-session-id", conversationId);
+      await expect(session.activeChat().getByText(conversationText).last()).toBeVisible();
+    };
+    const initialOrder = [
+      scenario.runningNoPrimary.id,
+      scenario.idleRed.id,
+      scenario.idleOrange.id,
+      scenario.secondaryTask.id,
+    ];
+    await expectConversationStable();
+    await picker.tap();
+    await expect(sheet).toBeVisible();
+    await expectSidebarRootOrder(sheet, scenario.rootIds, initialOrder);
+    await expect
+      .poll(
+        async () =>
+          (
+            await readTaskRunningSummary(
+              apiClient,
+              seedData.workspaceId,
+              scenario.runningNoPrimary.id,
+            )
+          )?.has_running_session,
+      )
+      .toBe(true);
+    await expect
+      .poll(
+        async () =>
+          (await readTaskRunningSummary(apiClient, seedData.workspaceId, scenario.secondaryTask.id))
+            ?.has_running_session,
+      )
+      .toBe(false);
+
+    await testPage.reload();
+    await session.waitForLoad();
+    await expectConversationStable();
+    await picker.tap();
+    await expect(sheet).toBeVisible();
+    await expectSidebarRootOrder(sheet, scenario.rootIds, initialOrder);
+
+    const waitingSummary = await readTaskRunningSummary(
+      apiClient,
+      seedData.workspaceId,
+      scenario.secondaryTask.id,
+    );
+    expect(waitingSummary?.has_running_session).toBe(false);
+    if (!waitingSummary) throw new Error("Expected a task status summary before secondary start");
+    const startedSummary = waitForTaskRunningSummary(
+      watcher,
+      scenario.secondaryTask.id,
+      true,
+      waitingSummary.revision,
+    );
+    await apiClient.seedTaskSession(scenario.secondaryTask.id, {
+      state: "RUNNING",
+      sessionId: scenario.secondarySessionId,
+    });
+    await waitForSessionState(apiClient, {
+      taskId: scenario.secondaryTask.id,
+      sessionId: scenario.secondarySessionId,
+      expectedState: "RUNNING",
+      message: "Waiting for the secondary session to start",
+    });
+    const startedEvent = await startedSummary;
+    expect(startedEvent.payload.status_summary).toMatchObject({ has_running_session: true });
+    await expect
+      .poll(
+        async () =>
+          (await readTaskRunningSummary(apiClient, seedData.workspaceId, scenario.secondaryTask.id))
+            ?.has_running_session,
+      )
+      .toBe(true);
+    await expectSidebarRootOrder(sheet, scenario.rootIds, [
+      scenario.secondaryTask.id,
+      scenario.runningNoPrimary.id,
+      scenario.idleRed.id,
+      scenario.idleOrange.id,
+    ]);
+    await expectConversationStable();
+    if (prCapture.capturing) {
+      await waitForFiniteAnimations(sheet);
+      await prCapture.screenshot("sidebar-running-first-rank-phone", {
+        caption: "Phone Tasks drawer with the running secondary session ranked first",
+      });
+    }
+
+    const runningSummary = await readTaskRunningSummary(
+      apiClient,
+      seedData.workspaceId,
+      scenario.secondaryTask.id,
+    );
+    if (!runningSummary) throw new Error("Expected a task status summary before secondary stop");
+    const stoppedSummary = waitForTaskRunningSummary(
+      watcher,
+      scenario.secondaryTask.id,
+      false,
+      runningSummary.revision,
+    );
+    await apiClient.seedTaskSession(scenario.secondaryTask.id, {
+      state: "WAITING_FOR_INPUT",
+      sessionId: scenario.secondarySessionId,
+    });
+    await waitForSessionState(apiClient, {
+      taskId: scenario.secondaryTask.id,
+      sessionId: scenario.secondarySessionId,
+      expectedState: "WAITING_FOR_INPUT",
+      message: "Waiting for the final running session to stop",
+    });
+    const stoppedEvent = await stoppedSummary;
+    expect(stoppedEvent.payload.status_summary).toMatchObject({ has_running_session: false });
+    await expect
+      .poll(
+        async () =>
+          (await readTaskRunningSummary(apiClient, seedData.workspaceId, scenario.secondaryTask.id))
+            ?.has_running_session,
+      )
+      .toBe(false);
+    await expectSidebarRootOrder(sheet, scenario.rootIds, initialOrder);
+    await expectConversationStable();
+  } finally {
+    try {
+      await restoreSidebarSortColors(apiClient, scenario.colorIds, previousColors);
+    } finally {
+      await restoreSidebarViewState(apiClient, seedData.workspaceId, previousViews);
+    }
   }
 });

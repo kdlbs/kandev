@@ -11,12 +11,13 @@ import (
 
 func TestMockInterruptionContinuationWireError(t *testing.T) {
 	for _, tc := range []struct {
-		name, agentID          string
-		enabled, terminalEvent bool
+		name, agentID                                                       string
+		enabled, attested, terminalEvent, orderedFailureAfterIO, emitOutput bool
 	}{
-		{"enabled mock", mockAgentID, true, true},
-		{"disabled mock", mockAgentID, false, true},
-		{"untrusted provider marker", "other-acp", true, false},
+		{"enabled mock", mockAgentID, true, true, true, true, true},
+		{"disabled mock after output", mockAgentID, false, false, true, true, true},
+		{"disabled mock before output", mockAgentID, false, false, true, false, false},
+		{"untrusted provider marker", "other-acp", true, false, false, false, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			a, fake, conn := setupHandoffFakeAgent(t)
@@ -35,7 +36,9 @@ func TestMockInterruptionContinuationWireError(t *testing.T) {
 			case <-time.After(2 * time.Second):
 				t.Fatal("prompt not accepted")
 			}
-			sendCapturedUpdate(t, conn, `{"sessionId":"session-handoff","update":{"sessionUpdate":"tool_call","toolCallId":"read-1","title":"Read","kind":"read","status":"completed","rawInput":{"path":"fixture.txt"}}}`)
+			if tc.emitOutput {
+				sendCapturedUpdate(t, conn, `{"sessionId":"session-handoff","update":{"sessionUpdate":"tool_call","toolCallId":"read-1","title":"Read","kind":"read","status":"completed","rawInput":{"path":"fixture.txt"}}}`)
+			}
 			fake.releasePrompts()
 			select {
 			case err := <-done:
@@ -52,13 +55,17 @@ func TestMockInterruptionContinuationWireError(t *testing.T) {
 			require.Equal(t, streams.EventTypeError, events[len(events)-1].Type)
 			failures := 0
 			toolCalls := 0
-			for _, event := range events {
+			errorIndex := -1
+			toolIndex := -1
+			for i, event := range events {
 				if event.Type == streams.EventTypeToolCall {
 					toolCalls++
+					toolIndex = i
 				}
 				if event.Type == streams.EventTypeError {
 					failures++
-					if tc.enabled {
+					errorIndex = i
+					if tc.attested {
 						require.True(t, event.ContinuationSafety.SafeFor(7))
 						require.Equal(t, uint16(1), event.ContinuationSafety.CompletedTools)
 						require.Equal(t, streams.PromptFailureDispositionRetainRuntime, event.PromptFailureDisposition)
@@ -69,8 +76,20 @@ func TestMockInterruptionContinuationWireError(t *testing.T) {
 				}
 				require.NotEqual(t, streams.EventTypeComplete, event.Type)
 			}
-			require.Equal(t, 1, toolCalls)
+			expectedToolCalls := 0
+			if tc.emitOutput {
+				expectedToolCalls = 1
+			}
+			require.Equal(t, expectedToolCalls, toolCalls)
 			require.Equal(t, 1, failures)
+			if tc.emitOutput {
+				require.NotEqual(t, -1, toolIndex, "completed tool activity must be delivered")
+			} else {
+				require.Equal(t, -1, toolIndex, "no tool activity should be delivered before output")
+			}
+			if tc.orderedFailureAfterIO {
+				require.Greater(t, errorIndex, toolIndex, "activity events must precede the terminal failure")
+			}
 		})
 	}
 }

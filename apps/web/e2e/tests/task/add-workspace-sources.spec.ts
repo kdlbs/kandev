@@ -237,11 +237,11 @@ test.describe("Attach local workspace sources", () => {
     await repositoryRow.getByRole("textbox", { name: "Base branch" }).fill("main");
     await submitWorkspaceSources(testPage, submit);
     await expect(dialog).not.toBeVisible();
-    await expect(
-      session.files
-        .getByTestId("file-tree-node")
-        .filter({ hasText: "second-local-repository-main" }),
-    ).toBeVisible({ timeout: 30_000 });
+    const secondRepositoryNode = session.files.locator(
+      '[data-testid="file-tree-node"][data-path="second-local-repository-main"]',
+    );
+    await expect(secondRepositoryNode).toBeVisible({ timeout: 30_000 });
+    await expect(secondRepositoryNode).toContainText("second-local-repository");
     if (!task.session_id) throw new Error("task creation did not return a session id");
     const turnsAfterFirstAttachment = await apiClient.listSessionTurns(task.session_id);
     expect(turnsAfterFirstAttachment.turns.filter((turn) => !turn.completed_at)).toEqual([]);
@@ -314,11 +314,8 @@ test.describe("Attach local workspace sources", () => {
       worktree_path: repoPaths[0],
     });
     await session.clickTab("Files");
-    await expect(
-      session.files
-        .getByTestId("file-tree-node")
-        .filter({ hasText: "second-local-repository-main" }),
-    ).toBeVisible({ timeout: 30_000 });
+    await expect(secondRepositoryNode).toBeVisible({ timeout: 30_000 });
+    await expect(secondRepositoryNode).toContainText("second-local-repository");
     await expect(
       session.files.getByTestId("file-tree-node").filter({ hasText: "plain-local-folder" }),
     ).toBeVisible();

@@ -597,7 +597,7 @@ func (c *Controller) UpdateProfile(ctx context.Context, req UpdateProfileRequest
 	profile.UserModified = true
 	if dynamic != nil {
 		result, handled, atomicErr := c.updateDynamicProfileAtomically(
-			ctx, profile, dynamic, req.Dynamic.Version, dynamicRoutes,
+			ctx, profile, dynamic, req.Dynamic.Version, dynamicRoutes, req.Enabled,
 		)
 		if atomicErr != nil {
 			return nil, atomicErr
@@ -611,7 +611,7 @@ func (c *Controller) UpdateProfile(ctx context.Context, req UpdateProfileRequest
 			return nil, err
 		}
 	}
-	if err := c.repo.UpdateAgentProfile(ctx, profile); err != nil {
+	if err := c.repo.UpdateAgentProfileWithEnabledIntent(ctx, profile, req.Enabled); err != nil {
 		return nil, err
 	}
 	result := toProfileDTO(profile)
@@ -681,12 +681,13 @@ func (c *Controller) updateDynamicProfileAtomically(
 	dynamic *models.DynamicAgentProfile,
 	version int64,
 	routes []models.DynamicAgentRoute,
+	enabled *bool,
 ) (*dto.AgentProfileDTO, bool, error) {
 	atomicRepo, ok := c.repo.(store.AtomicDynamicProfileRepository)
 	if !ok {
 		return nil, false, nil
 	}
-	if err := atomicRepo.UpdateAgentProfileWithDynamic(ctx, profile, dynamic, version, routes); err != nil {
+	if err := atomicRepo.UpdateAgentProfileWithDynamicEnabledIntent(ctx, profile, dynamic, version, routes, enabled); err != nil {
 		return nil, true, err
 	}
 	result := toProfileDTO(profile)

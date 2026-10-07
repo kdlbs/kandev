@@ -21,6 +21,7 @@ import (
 const sidebarMemoryChild = "KANDEV_SIDEBAR_MEMORY_CHILD"
 const sidebarMemoryCase = "KANDEV_SIDEBAR_MEMORY_CASE"
 const sidebarMiB = int64(1024 * 1024)
+const sidebarQueryPreparationPeakLimit = 64 * sidebarMiB
 
 func TestSidebarQueryPreparationMemory(t *testing.T) {
 	if os.Getenv(sidebarMemoryChild) == "" {
@@ -42,8 +43,8 @@ func TestSidebarQueryPreparationMemory(t *testing.T) {
 		peak := sqlitememory.Peak(false) - baseline
 		t.Logf("tasks=%d sort=%s direction=%s group=%s native_peak_delta_bytes=%d retained_delta_bytes=%d rss_bytes=%d elapsed=%s",
 			count, query.Sort.Key, query.Sort.Direction, query.Group, peak, sqlitememory.Used()-baseline, sidebarProcessRSS(t), time.Since(started))
-		if peak > 64*sidebarMiB {
-			t.Fatalf("native SQLite preparation peak %d bytes exceeds 64 MiB", peak)
+		if peak > sidebarQueryPreparationPeakLimit {
+			t.Fatalf("native SQLite preparation peak %d bytes exceeds %d MiB", peak, sidebarQueryPreparationPeakLimit/sidebarMiB)
 		}
 	}
 }

@@ -7,6 +7,7 @@ import type {
   GitStatusEntry,
   GitStatusRefreshState,
 } from "@/lib/state/slices/session-runtime/types";
+import { projectGitStatusForDisplay } from "@/lib/state/slices/session-runtime/git-status-display-state";
 
 const debugSub = createDebugLogger("git-status:subscribe");
 
@@ -83,6 +84,107 @@ export function useSessionGitStatusByRepo(
       .map(([name, status]) => ({ repository_name: name, status }))
       .sort((a, b) => a.repository_name.localeCompare(b.repository_name));
   }, [map]);
+}
+
+/** Returns raw snapshots and their separate, scope-checked display projection. */
+export function useSessionGitStatusSnapshots(sessionId: string | null) {
+  const gitStatus = useSessionGitStatus(sessionId);
+  const statusByRepo = useSessionGitStatusByRepo(sessionId);
+  const projection = useAppStore(
+    useShallow((state) => {
+      const environmentId = sessionId
+        ? (state.environmentIdBySessionId[sessionId] ?? sessionId)
+        : null;
+      return {
+        environmentId,
+        displayByRepo: environmentId
+          ? state.gitStatusDisplay.byEnvironmentRepo[environmentId]
+          : undefined,
+        checkoutByRepo: environmentId
+          ? state.gitCheckoutGeneration.byEnvironmentId[environmentId]
+          : undefined,
+        environmentRefresh: environmentId
+          ? state.gitStatus.refreshByEnvironmentId?.[environmentId]
+          : undefined,
+        refreshByRepo: environmentId
+          ? state.gitStatus.refreshByEnvironmentRepo?.[environmentId]
+          : undefined,
+      };
+    }),
+  );
+  const displayGitStatus = useMemo(() => {
+    if (!gitStatus) return gitStatus;
+    const repositoryName = gitStatus.repository_name ?? "";
+    return projectGitStatusForDisplay(
+      gitStatus,
+      projection.displayByRepo?.[repositoryName],
+      projection.checkoutByRepo?.[repositoryName] ?? 0,
+      displayRefreshState(
+        gitStatus,
+        projection.refreshByRepo?.[repositoryName],
+        projection.environmentRefresh,
+      ),
+    );
+  }, [gitStatus, projection]);
+  const displayScopeByRepo = useMemo(
+    () =>
+      Object.fromEntries(
+        Object.entries(projection.displayByRepo ?? {}).map(([repositoryName, display]) => [
+          repositoryName,
+          JSON.stringify([
+            projection.environmentId,
+            display.checkoutGeneration,
+            display.branch,
+            display.headCommit,
+            display.baseCommit,
+            display.comparisonTarget,
+          ]),
+        ]),
+      ),
+    [projection.displayByRepo, projection.environmentId],
+  );
+  const displayStatusByRepo = useMemo(
+    () =>
+      statusByRepo.map(({ repository_name, status }) => ({
+        repository_name,
+        status: projectGitStatusForDisplay(
+          status,
+          projection.displayByRepo?.[repository_name],
+          projection.checkoutByRepo?.[repository_name] ?? 0,
+          displayRefreshState(
+            status,
+            projection.refreshByRepo?.[repository_name],
+            projection.environmentRefresh,
+          ),
+        ),
+      })),
+    [statusByRepo, projection],
+  );
+  return { gitStatus, statusByRepo, displayGitStatus, displayStatusByRepo, displayScopeByRepo };
+}
+
+function displayRefreshState(
+  status: GitStatusEntry,
+  repositoryRefresh: GitStatusRefreshState | undefined,
+  environmentRefresh: GitStatusRefreshState | undefined,
+): "pending" | "unavailable" | undefined {
+  let refresh = repositoryRefresh ?? environmentRefresh;
+  if (repositoryRefresh?.request_id) refresh = repositoryRefresh;
+  else if (environmentRefresh?.request_id) refresh = environmentRefresh;
+  if (!refresh) return undefined;
+  if (refresh.request_id) return refresh.state;
+
+  const ordering = [
+    [refresh.tracker_id, status.tracker_id],
+    [refresh.tracker_epoch, status.tracker_epoch],
+    [refresh.snapshot_revision, status.snapshot_revision],
+    [refresh.timestamp, status.timestamp],
+  ] as const;
+  const hasOrdering = ordering.some(([incoming]) => incoming !== undefined);
+  const matchesCurrentStatus =
+    hasOrdering &&
+    ordering.every(([incoming, current]) => incoming === undefined || incoming === current);
+  return matchesCurrentStatus ? undefined : refresh.state;
 }
 
 export function useSessionGitStatusRefresh(sessionId: string | null): {

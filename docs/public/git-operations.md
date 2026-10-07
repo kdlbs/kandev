@@ -134,6 +134,10 @@ Managed worktrees can remain registered to an older repository clone after the r
 
 If a worktree contains local changes, Resume or **Restore workspace** stops before agent startup and offers **Move files and resume**. Kandev leaves the original worktree untouched until you confirm. It then preserves a recovery snapshot and copies tracked, untracked, and ignored file content, deletions, file modes, and symbolic links to the replacement worktree. Git's index and staging choices do not transfer, so stage the files again before committing. Review the changes after recovery. Kandev blocks worktrees with unsupported filters, sparse checkout, or submodules.
 
+After Kandev completes the relocation, keep using the replacement worktree. New commits, amended commits, rebases, and local edits stay there. A completed relocation record does not pin the branch to the commit from transfer. Resume, **Restore workspace**, and a backend restart use the current worktree. Kandev checks its Git and managed-clone identity before startup.
+
+If an older Kandev version shows `published replacement commit could not be verified` after you continue work, upgrade Kandev. Then select Resume or **Restore workspace**. The corrected version checks the current branch and managed-clone identity. It does not reset the branch or discard changes.
+
 If an older task still shows a generic recovery error, use Resume or **Restore workspace** once to check the current workspace and reveal the relocation action. A busy inspection leaves every checkout unchanged. Wait for it to finish, then retry manually.
 
 After upgrading, select **Move files and resume** to retry an older blocked

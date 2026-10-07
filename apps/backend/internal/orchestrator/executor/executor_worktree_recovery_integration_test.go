@@ -146,8 +146,8 @@ func TestWorktreeRecoveryResumeIntegration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ResumeSession: %v", err)
 	}
-	if admissionCalls != 1 {
-		t.Fatalf("selected recovery admission calls = %d, want 1", admissionCalls)
+	if admissionCalls != 2 {
+		t.Fatalf("selected recovery admission calls = %d, want preflight and pre-launch inspection", admissionCalls)
 	}
 	assertSelectedWorktreeRecoveryRequest(t, admissionRequest, taskID, sessionID)
 }
@@ -230,8 +230,12 @@ func TestMainCheckoutLaunchIntegration(t *testing.T) {
 			if err != nil {
 				t.Fatalf("main-checkout launch path: %v", err)
 			}
-			if admissionCalls != 1 {
-				t.Fatalf("selected recovery admission calls = %d, want 1", admissionCalls)
+			expectedAdmissionCalls := 1
+			if tc.resume {
+				expectedAdmissionCalls = 2
+			}
+			if admissionCalls != expectedAdmissionCalls {
+				t.Fatalf("selected recovery admission calls = %d, want %d", admissionCalls, expectedAdmissionCalls)
 			}
 			assertSelectedWorktreeRecoveryRequest(t, admissionRequest, taskID, sessionID)
 			if got := admissionRequest.Slots[0].RepositoryPath; got != mainPath {

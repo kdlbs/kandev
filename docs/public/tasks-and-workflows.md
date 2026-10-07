@@ -699,7 +699,7 @@ The **TASKS** list in the left sidebar can combine up to ten sort rules. Each la
 
 | Sort rule         | Meaning                                                                                                                                                                                                                  |
 | ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| **Running**       | Tasks with a running primary session rank first or last. A running included subtask also promotes its parent. Workflow placement alone does not mean that an agent is running.                                           |
+| **Running**       | Tasks with a running session, primary or secondary, rank first or last. A running included subtask also promotes its parent. Workflow placement alone does not mean that an agent is running. |
 | **Color**         | A chosen named color ranks first or last by the marker shown on each task. An automatic color rule takes precedence over a manual color. The marker is personal and does not change shared task priority.                  |
 | **Updated**       | The last task summary refresh. Background events, such as pull-request status changes, can change this time.                                                                                                              |
 | **Last activity** | The last real user or agent action. Opening or focusing a task and background provider polling do not change this time. When a view includes this rule, each row shows its own activity time, while included subtasks help order parents. |

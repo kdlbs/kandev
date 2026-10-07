@@ -171,7 +171,7 @@ func TestCreateTaskWithExternalIDLookupPrecedesIdentifierAllocation(t *testing.T
 
 	first, err := svc.CreateTask(ctx, &CreateTaskRequest{
 		WorkspaceID: wsID, Title: "Office task", ExternalID: "ext-1",
-		Origin: models.TaskOriginAgentCreated, ProjectID: "proj-1",
+		Origin: models.TaskOriginAgentCreated, ProjectID: "proj-1", Repositories: []TaskRepositoryInput{},
 	})
 	if err != nil {
 		t.Fatalf("create first office task: %v", err)

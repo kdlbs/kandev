@@ -28,7 +28,7 @@ A failed live source still cannot authorize an unmarked persisted fallback.
 
 ### REQ-PLATFORM-WORKSPACE-GIT-STATUS-001: Workspace Git Status
 
-**Intent:** Users opening Changes and Review need current workspace status without excessive Git or filesystem work. Repeated requests share useful work. Slow refreshes have bounded recovery, and file visibility does not wait for diff content.
+**Intent:** Keep workspace status current with bounded recovery and shared computation. Show files independently of diff latency.
 
 #### Acceptance criteria
 
@@ -115,5 +115,8 @@ Plain patch production follows the [path-details design](../system-design/worksp
 and [repair package](../../../plans/workspace-tracker-plain-patches/plan.md).
 External-command independence follows the same path-details design and the
 [built-in patch repair package](../../../plans/workspace-tracker-built-in-patches/plan.md).
+Display continuity has its own [requirement](git-refresh-continuity.md),
+[system design](../system-design/git-refresh-continuity.md), and
+[repair plan](../../../plans/git-refresh-continuity/plan.md).
 Staged-rename selection follows the path-details design and
 [rename Discard package](../../../plans/git-discard-staged-renames/plan.md).

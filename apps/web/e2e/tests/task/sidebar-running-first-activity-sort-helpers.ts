@@ -2,7 +2,12 @@ import { expect, type Locator, type Page } from "@playwright/test";
 import type { SeedData } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
 import { touchDragBetween } from "../../helpers/touch-drag";
+import type { WsFrame, WsWatcher } from "../../helpers/causal-waits";
 import { SidebarFilterPopoverPage } from "../../pages/sidebar-filter-popover";
+import type {
+  SidebarTaskColorPatchApi,
+  SidebarTaskColorsApi,
+} from "../../../lib/types/http-user-settings";
 
 type SidebarSortScenario = {
   parent: { id: string; title: string };
@@ -21,6 +26,21 @@ type SidebarViewState = {
   draft: unknown;
 };
 
+export type SidebarRunningRankScenario = {
+  runningNoPrimary: { id: string; title: string };
+  secondaryTask: { id: string; title: string };
+  idleRed: { id: string; title: string };
+  idleOrange: { id: string; title: string };
+  primarySessionId: string;
+  secondarySessionId: string;
+  runningNoPrimarySessionId: string;
+  rootIds: string[];
+  taskIds: string[];
+  colorIds: string[];
+};
+
+export type SidebarColorPatchSnapshot = SidebarTaskColorPatchApi;
+
 export async function readPreviousSidebarViewState(
   api: ApiClient,
   workspaceId: string,
@@ -38,6 +58,151 @@ export async function restoreSidebarViewState(
     sidebar_view_state: {
       workspace_id: workspaceId,
       ...(previous ?? { views: [], active_view_id: "", draft: null }),
+    },
+  });
+}
+
+export async function readPreviousSidebarColorPatch(
+  api: ApiClient,
+): Promise<SidebarColorPatchSnapshot | undefined> {
+  const { settings } = await api.getUserSettings();
+  const colors = settings.sidebar_task_colors as SidebarTaskColorsApi | undefined;
+  return colors ? { colors: { ...colors }, if_missing: false } : undefined;
+}
+
+export async function restoreSidebarSortColors(
+  api: ApiClient,
+  taskIds: string[],
+  previous: SidebarColorPatchSnapshot | undefined,
+): Promise<void> {
+  if (taskIds.length === 0) return;
+  await api.saveUserSettings({
+    sidebar_task_color_patch: {
+      colors: Object.fromEntries(taskIds.map((id) => [id, previous?.colors[id] ?? null])),
+      if_missing: previous?.if_missing ?? false,
+    },
+  });
+}
+
+export async function seedSidebarRunningRankScenario(
+  api: ApiClient,
+  seed: SeedData,
+  prefix: string,
+): Promise<SidebarRunningRankScenario> {
+  const taskOptions = {
+    workflow_id: seed.workflowId,
+    workflow_step_id: seed.startStepId,
+  };
+  const runningNoPrimary = await api.createTask(
+    seed.workspaceId,
+    `${prefix} running without primary`,
+    taskOptions,
+  );
+  const secondaryTask = await api.createTask(
+    seed.workspaceId,
+    `${prefix} waiting primary with secondary`,
+    taskOptions,
+  );
+  const idleRed = await api.createTask(seed.workspaceId, `${prefix} idle red`, taskOptions);
+  const idleOrange = await api.createTask(seed.workspaceId, `${prefix} idle orange`, taskOptions);
+
+  const { session_id: runningNoPrimarySessionId } = await api.seedTaskSession(runningNoPrimary.id, {
+    state: "RUNNING",
+    sessionId: `sidebar-running-no-primary-${runningNoPrimary.id}`,
+    startedAt: new Date(Date.now() - 10 * 60_000).toISOString(),
+  });
+  const { session_id: primarySessionId } = await api.seedTaskSession(secondaryTask.id, {
+    state: "WAITING_FOR_INPUT",
+    sessionId: `sidebar-running-primary-${secondaryTask.id}`,
+    agentProfileId: seed.agentProfileId,
+    startedAt: new Date(Date.now() - 9 * 60_000).toISOString(),
+  });
+  const { session_id: secondarySessionId } = await api.seedTaskSession(secondaryTask.id, {
+    state: "WAITING_FOR_INPUT",
+    sessionId: `sidebar-running-secondary-${secondaryTask.id}`,
+    startedAt: new Date(Date.now() - 8 * 60_000).toISOString(),
+  });
+  await api.setPrimarySession(primarySessionId);
+
+  // Newer idle peers deliberately win the color and activity tie-breakers.
+  await api.updateTaskTitle(runningNoPrimary.id, `${prefix} running no primary`);
+  await api.updateTaskTitle(secondaryTask.id, `${prefix} waiting primary, secondary running`);
+  await api.updateTaskTitle(idleRed.id, `${prefix} idle red`);
+  await api.updateTaskTitle(idleOrange.id, `${prefix} idle orange`);
+
+  return {
+    runningNoPrimary,
+    secondaryTask,
+    idleRed,
+    idleOrange,
+    primarySessionId,
+    secondarySessionId,
+    runningNoPrimarySessionId,
+    rootIds: [runningNoPrimary.id, secondaryTask.id, idleRed.id, idleOrange.id],
+    taskIds: [runningNoPrimary.id, secondaryTask.id, idleRed.id, idleOrange.id],
+    colorIds: [runningNoPrimary.id, secondaryTask.id, idleRed.id, idleOrange.id],
+  };
+}
+
+export async function saveSidebarRunningRankView(
+  api: ApiClient,
+  seed: SeedData,
+  viewId: string,
+  token: string,
+): Promise<void> {
+  await api.saveUserSettings({
+    sidebar_view_state: {
+      workspace_id: seed.workspaceId,
+      views: [
+        {
+          id: viewId,
+          name: `${token} view`,
+          filters: [{ id: "sort-token", dimension: "titleMatch", op: "matches", value: token }],
+          sort: {
+            key: "running",
+            direction: "desc",
+            then_by: [
+              { key: "color", color: "red", direction: "desc" },
+              { key: "color", color: "orange", direction: "desc" },
+              { key: "lastActivityAt", direction: "desc" },
+            ],
+          },
+          group: "workflowStep",
+          collapsed_groups: [],
+        },
+      ],
+      active_view_id: viewId,
+      draft: null,
+    },
+  });
+}
+
+export async function readTaskRunningSummary(
+  api: ApiClient,
+  workspaceId: string,
+  taskId: string,
+): Promise<{ has_running_session?: boolean; revision: number } | undefined> {
+  const { tasks } = await api.listTasks(workspaceId);
+  return tasks.find((task) => task.id === taskId)?.status_summary ?? undefined;
+}
+
+export function waitForTaskRunningSummary(
+  watcher: WsWatcher,
+  taskId: string,
+  expected: boolean,
+  afterRevision: number,
+): Promise<WsFrame> {
+  return watcher.waitForEvent("task.status_summary.updated", {
+    where: (payload) => {
+      const summary = payload.status_summary as
+        | { has_running_session?: unknown; revision?: unknown }
+        | undefined;
+      return (
+        payload.task_id === taskId &&
+        summary?.has_running_session === expected &&
+        typeof summary.revision === "number" &&
+        summary.revision > afterRevision
+      );
     },
   });
 }

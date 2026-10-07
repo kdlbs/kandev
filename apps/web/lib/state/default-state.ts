@@ -94,6 +94,7 @@ export const defaultState = {
   shell: defaultSessionRuntimeState.shell,
   processes: defaultSessionRuntimeState.processes,
   gitStatus: defaultSessionRuntimeState.gitStatus,
+  gitStatusDisplay: defaultSessionRuntimeState.gitStatusDisplay,
   environmentIdBySessionId: defaultSessionRuntimeState.environmentIdBySessionId,
   sessionCommits: defaultSessionRuntimeState.sessionCommits,
   gitCheckoutGeneration: defaultSessionRuntimeState.gitCheckoutGeneration,

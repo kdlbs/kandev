@@ -222,7 +222,7 @@ describe("useSession hydration generations", () => {
 
     expect(mocks.state.setTaskSession).toHaveBeenCalledWith(
       expect.objectContaining({ last_read_message_id: "message-1" }),
-      { activity: 0, readCursor: 7 },
+      { activity: 0, readCursor: 7, workspaceRecovery: 0 },
     );
     hook.unmount();
   });

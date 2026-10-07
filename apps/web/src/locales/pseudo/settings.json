@@ -768,6 +768,8 @@
   "vsCodeRemoteSsh": "VŚ Ćōďē Ŕēḿōţē ŚŚĤ",
   "whenEnabledInstallYourProjectS": "Ŵĥēń ēńàƀĺēď, ĩńśţàĺĺ ŷōũŕ ƥŕōĵēćţ'ś ďēƥēńďēńćĩēś (ē.ĝ. <2>{{command}}</2> vĩà ŕēƥōśĩţōŕŷ śēţũƥ śćŕĩƥţś) ţō àvōĩď ḿĩśśĩńĝ ţŷƥē ēŕŕōŕś.",
   "externalMcpToolListTaskSessions": "Ĺĩśţ ēvēŕŷ àĝēńţ śēśśĩōń ōń à ţàśķ, ńēŵēśţ ƒĩŕśţ, śō àńōţĥēŕ ţōōĺ ćàń àďďŕēśś ōńē ƀŷ ĨĎ.",
+  "integrationShortcuts": "Ĩńţēĝŕàţĩōńś",
+  "shortcutOpenIntegration": "Ōƥēń {{integration}}",
   "shortcutBottomTerminal": "Ţōĝĝĺē Ɓōţţōḿ Ţēŕḿĩńàĺ",
   "shortcutCommandPanel": "Ćōḿḿàńď Ƥàńēĺ",
   "shortcutCommandPanelAlt": "Ćōḿḿàńď Ƥàńēĺ (Àĺţ)",

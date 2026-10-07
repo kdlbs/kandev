@@ -6,7 +6,7 @@ requirements:
   - REQ-TASKS-MANAGED-CLONE-RELOCATION-002
   - REQ-TASKS-MANAGED-CLONE-RELOCATION-003
 created: 2026-09-27
-updated: 2026-10-04
+updated: 2026-10-06
 owners:
   - kandev
 ---
@@ -329,6 +329,69 @@ Neither a cancelled session nor a fresh agent profile bypasses the check.
 Publication also re-reads the current repository path so a second clone move
 cannot redirect an in-flight operation.
 
+## Completed relocation continuity
+
+This section implements AC-TASKS-MANAGED-CLONE-RELOCATION-001.7.
+The task environment owns continuity after replacement publication.
+The relocation journal records a completed transfer, not a permanent checkout
+commit constraint. The original relocation boundary remains unchanged.
+
+`Manager.AdmitRecovery` inspects the complete selected repository inventory
+before `reconcilePublishedManagedCloneRelocations`. Keep that ordering.
+`matchesPublishedManagedCloneRelocation` currently accepts both `materialized`
+and `complete` records. `verifyPublishedManagedCloneRelocation` then requires
+the current HEAD to equal the captured transfer commit for both states.
+That comparison wrongly rejects later work in a completed replacement.
+
+Distinguish the two states before applying transfer proofs:
+
+- A `materialized` record still needs restart reconciliation. Preserve exact
+  HEAD, destination clone, operation identity, and claim verification.
+  Changed replacement work must remain a refusal.
+- A `complete` record describes historical transfer evidence. Validate the
+  current checkout against its canonical environment slot and registered source.
+  Require a valid current commit, Git registration, branch, provider identity,
+  managed clone identity, selected owner, and generation through ordinary
+  admission. Do not require equality or ancestry with the historical HEAD.
+  An amend or rebase can replace that history legitimately.
+
+Completed admission must not reset HEAD, replay a snapshot, copy files,
+relocate again, or require the former source clone. It must not require clean
+files, an old commit object, or the original branch history solely for journal
+reconciliation. Existing branch-loss and identity checks still apply.
+Retain original worktrees, snapshots, and historical journal values.
+
+Read the durable claim before any reconciliation effect. An unrelated claim
+remains a conflict and must not be released. A completed record alone never
+authorizes claim cleanup. Existing operation, session, environment, generation,
+and exclusion checks must prove authority for a matching leftover claim.
+When all records already agree and no claim remains, ordinary reuse does not
+rewrite journals or repeat original retention.
+
+A crash can leave a complete replacement journal with an incomplete companion
+journal or an unreleased matching claim. Reconcile only that operation's
+remaining bookkeeping under existing locks and fences. Preserve the historical
+HEAD and current checkout bytes. Do not restore historical content to satisfy
+the journal. An unreadable or conflicting record remains a refusal.
+
+All selected slots must validate before agent startup or recovery success.
+A valid completed slot cannot hide an invalid or unfinished sibling.
+Keep the final lifecycle launch admission guard and executor exclusions.
+Cancellation and operational Git errors remain errors.
+
+Existing `complete` journals use the same format and need no data migration.
+The fix applies on ordinary reuse after an upgrade to the corrected binary.
+It requires no feature toggle, provider setting, startup scan, or manual edit.
+Successful resume retires only the matching current failure through existing
+session recovery behavior. Read-only restore starts no agent and preserves
+provider resume identity.
+
+Real-Git tests cover later commits, amended or rebased history, local edits,
+restart, existing complete records, and mixed repository inventories.
+SQLite-backed executor and service tests cover resume and workspace restore.
+Use isolated fixtures and replace only external provider startup with a
+recording runtime. Never copy a live task or edit its recovery records.
+
 ## Security
 
 The legacy clone is a read-only object source for this operation. Relocation
@@ -373,13 +436,26 @@ metric labels.
 
 ## Related decisions
 
+- [Proposed recovery operation storage](../../../decisions/2026-10-05-managed-clone-recovery-operation-storage.md)
 - [Managed clone relocation boundary](../../../decisions/2026-09-27-managed-clone-relocation-boundary.md)
 - [Worktree metadata recovery boundary](../../../decisions/2026-09-10-worktree-metadata-recovery-boundary.md)
 
 ## Implementation plans
 
+- [Recovery progress and workspace presentation](../../../plans/managed-clone-recovery-experience/plan.md) (draft)
 - [Snapshot permissions and blocked retry](../../../plans/workspace-recovery-permissions/plan.md)
 
 - [Original relocation package](../../../plans/managed-clone-relocation/plan.md)
 - [Unchanged legacy clone admission](../../../plans/legacy-clone-resume/plan.md)
 - [Resume and workspace recovery convergence](../../../plans/managed-clone-recovery-convergence/plan.md)
+- [Completed relocation continuity](../../../plans/completed-relocation-continuity/plan.md)
+
+## Proposed operation storage and presentation extension
+
+The [draft extension](managed-clone-relocation-experience.md) defines private
+artifact placement, durable progress, and repository labels for this same
+capability. When accepted and implemented, it changes adjacent artifact placement
+for new clone-relocation operations only. Existing adjacent records remain
+readable, including permission-only retry provenance. The extension adds progress
+storage; earlier statements about no new schema describe the existing error and
+permission fixes. This proposal does not weaken admission or preservation.

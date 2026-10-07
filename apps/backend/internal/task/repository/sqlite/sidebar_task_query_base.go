@@ -12,7 +12,7 @@ import (
 
 type sidebarBaseNeeds struct {
 	state, activity, executor                  bool
-	running, color                             bool
+	color                                      bool
 	repositoryGroup, repositoryFilter          bool
 	diff, pullRequest, reviewWatch, issueWatch bool
 	workflowNames, summary                     bool
@@ -22,7 +22,6 @@ func sidebarBaseNeedsFor(query models.SidebarTaskViewQuery) sidebarBaseNeeds {
 	needs := sidebarBaseNeeds{
 		state:            query.Group == sidebarStateKey || sidebarQueryHasSort(query, sidebarStateKey) || sidebarQueryHasFilter(query, sidebarStateKey),
 		activity:         sidebarQueryHasSort(query, sidebarActivitySortField),
-		running:          sidebarQueryHasSort(query, "running"),
 		color:            sidebarQueryHasSort(query, "color"),
 		repositoryGroup:  query.Group == sidebarRepositoryKey,
 		repositoryFilter: sidebarQueryHasFilter(query, sidebarRepositoryKey),
@@ -33,7 +32,7 @@ func sidebarBaseNeedsFor(query models.SidebarTaskViewQuery) sidebarBaseNeeds {
 		issueWatch:       sidebarQueryHasFilter(query, "isIssueWatch"),
 		workflowNames:    query.Group == sidebarWorkflowKey || query.Group == sidebarWorkflowStepKey,
 	}
-	needs.summary = needs.state || needs.activity || needs.running || needs.diff || needs.pullRequest
+	needs.summary = needs.state || needs.activity || needs.diff || needs.pullRequest
 	return needs
 }
 
@@ -115,19 +114,14 @@ func sidebarBaseCandidateFields(driver string, needs sidebarBaseNeeds) []string 
 }
 
 func sidebarStateFields(driver string, needs sidebarBaseNeeds) []string {
-	if !needs.state && !needs.running {
+	if !needs.state {
 		return nil
 	}
 	primary := `COALESCE(NULLIF(` + dialect.JSONExtractPath(driver, "summary.summary", "primary_session", sidebarStateKey) + `, ''), '')`
 	fields := []string{}
 	if needs.state {
 		fields = append(fields, "t.state")
-	}
-	if needs.state || needs.running {
 		fields = append(fields, primary+" AS primary_session_state")
-	}
-	if !needs.state {
-		return fields
 	}
 	bucket := `CASE
 		WHEN COALESCE(` + primary + `, '') IN ('WAITING_FOR_INPUT', 'COMPLETED', 'FAILED', 'CANCELLED') THEN 'review'
@@ -140,6 +134,23 @@ func sidebarStateFields(driver string, needs sidebarBaseNeeds) []string {
 		WHEN t.state IN ('IN_PROGRESS', 'SCHEDULING') THEN 'in_progress'
 		ELSE 'backlog' END`
 	return append(fields, bucket+" AS state_bucket")
+}
+
+func sidebarRunningFlagExpression(driver, summaryAlias, taskIDExpression string) string {
+	// A valid summary boolean is authoritative; legacy rows probe only this task's sessions.
+	fallback := `EXISTS (
+		SELECT 1 FROM task_sessions running_session
+		WHERE running_session.task_id = ` + taskIDExpression + ` AND running_session.state = 'RUNNING'
+	)`
+	running := `CASE WHEN json_type(` + summaryAlias + `.summary, '$.has_running_session') IN ('true', 'false')
+		THEN json_extract(` + summaryAlias + `.summary, '$.has_running_session') ELSE ` + fallback + ` END`
+	if dialect.IsPostgres(driver) {
+		path := dialect.JSONExtractPath(driver, summaryAlias+".summary", "has_running_session")
+		running = `CASE WHEN jsonb_typeof(` + summaryAlias + `.summary::jsonb->'has_running_session') = 'boolean'
+			THEN (` + path + ` = 'true')::int
+			ELSE (` + fallback + `)::int END`
+	}
+	return running
 }
 
 func sidebarActivityFields(driver string, needs sidebarBaseNeeds) []string {

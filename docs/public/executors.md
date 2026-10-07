@@ -263,6 +263,10 @@ Repository settings control base branch, branch naming, pull-before-create, repo
 
 Normal stop keeps the task environment available. Task deletion or **Reset Environment** removes the tracked worktree when configured to clean worktrees. Preserve or push valuable changes first; see [Git Operations](git-operations.md).
 
+If a managed repository clone changes while a task worktree has local changes, Kandev offers a confirmed recovery action to move those files into worktrees from the current clone and resume the same session. The recovery card reports the current repository, phase, and last update. That progress survives page reloads and reconnects, and it blocks another transfer while the recovery runner is live. If Kandev cannot confirm the recovery status, use **Check status** before choosing another recovery action.
+
+The original repository clone and a recovery snapshot remain on disk. Git staging choices do not transfer. After every selected repository's files have moved, Kandev reports session startup separately; moved files do not mean the agent is ready. Review the changes before committing. Recovery preserves ignored files as part of the worktree contents and does not promise a faster copy or show a time estimate.
+
 Typical failures:
 
 - dirty or conflicting source repository state;

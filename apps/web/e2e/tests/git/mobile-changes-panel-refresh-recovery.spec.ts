@@ -91,7 +91,7 @@ test.describe("Mobile Changes panel Git refresh recovery", () => {
       const diffSheet = testPage.getByTestId("mobile-diff-sheet");
       await expect(diffSheet).toBeVisible();
       await expect(diffSheet.getByTestId("mobile-diff-sheet-close")).toBeVisible();
-      await expect(diffSheet.getByText("Diff is loading")).toBeVisible();
+      await expect(diffSheet.getByText("Diff is unavailable", { exact: true })).toBeVisible();
       const viewportHeight = testPage.viewportSize()?.height ?? 0;
       expect(viewportHeight).toBeGreaterThan(0);
       await expect
@@ -122,7 +122,7 @@ test.describe("Mobile Changes panel Git refresh recovery", () => {
       await expect(refreshStatus).toContainText("Loading changes...");
 
       await expect(fileRow).toBeVisible();
-      await expect(diffSheet.getByText("Diff is loading")).toBeVisible();
+      await expect(diffSheet.getByText("Diff is loading", { exact: true })).toBeVisible();
       await prCapture.screenshot("git-refresh-recovery-mobile-pending", {
         caption: "The selected pending diff stays full-height while automatic Git recovery runs",
       });

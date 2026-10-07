@@ -1,12 +1,18 @@
 import type { TaskSwitcherItem } from "@/components/task/task-switcher-types";
 
-/** Aggregates strict primary-session RUNNING state from included descendants. */
+function taskIsRunning(task: TaskSwitcherItem): boolean {
+  return typeof task.hasRunningSession === "boolean"
+    ? task.hasRunningSession
+    : task.sessionState === "RUNNING";
+}
+
+/** Aggregates task-wide RUNNING state from included descendants. */
 export function resolveTaskTreeRunning(
   tasks: TaskSwitcherItem[],
   subTasksByParentId: Map<string, TaskSwitcherItem[]>,
 ): Map<string, boolean> {
   const taskIds = new Set(tasks.map((task) => task.id));
-  const runningById = new Map(tasks.map((task) => [task.id, task.sessionState === "RUNNING"]));
+  const runningById = new Map(tasks.map((task) => [task.id, taskIsRunning(task)]));
   const parentsById = new Map<string, string[]>();
   for (const task of tasks) parentsById.set(task.id, []);
   for (const [parentId, children] of subTasksByParentId) {
@@ -18,7 +24,7 @@ export function resolveTaskTreeRunning(
     }
   }
 
-  const pending = tasks.filter((task) => task.sessionState === "RUNNING").map((task) => task.id);
+  const pending = tasks.filter(taskIsRunning).map((task) => task.id);
   for (let index = 0; index < pending.length; index += 1) {
     for (const parentId of parentsById.get(pending[index]) ?? []) {
       if (runningById.get(parentId)) continue;

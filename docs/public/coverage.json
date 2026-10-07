@@ -317,6 +317,12 @@
         "apps/web/components/task/editors-menu.tsx",
         "apps/backend/internal/agentctl/server/process/workspace_git_status.go",
         "apps/backend/internal/task/service/workspace_recovery_projection.go",
+        "apps/backend/internal/worktree/managed_clone_relocation_archive.go",
+        "apps/backend/internal/worktree/recovery_admission.go",
+        "apps/backend/internal/orchestrator/executor/executor_resume.go",
+        "apps/backend/internal/orchestrator/executor/executor_worktree_recovery.go",
+        "apps/backend/internal/orchestrator/session_launch.go",
+        "apps/backend/internal/orchestrator/task_operations.go",
         "apps/web/hooks/domains/session/use-session-recovery-actions.ts"
       ],
       "tests": [
@@ -328,6 +334,10 @@
         "apps/backend/internal/task/repository/sqlite/workspace_recovery_error_cas_test.go",
         "apps/backend/internal/task/service/workspace_recovery_projection_test.go",
         "apps/backend/internal/orchestrator/handlers/workspace_recovery_projection_test.go",
+        "apps/backend/internal/worktree/managed_clone_completed_reuse_test.go",
+        "apps/backend/internal/worktree/managed_clone_completed_bookkeeping_test.go",
+        "apps/backend/internal/orchestrator/executor/executor_completed_relocation_integration_test.go",
+        "apps/backend/internal/orchestrator/session_completed_relocation_integration_test.go",
         "apps/web/hooks/domains/session/use-session-recovery-actions.test.ts",
         "apps/web/e2e/tests/session/multi-repo-session-resume-recovery.spec.ts",
         "apps/web/e2e/tests/session/mobile-multi-repo-session-resume-recovery.spec.ts"

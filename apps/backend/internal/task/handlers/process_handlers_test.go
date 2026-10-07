@@ -83,6 +83,9 @@ func (m *mockRepository) CreateWorkspace(ctx context.Context, workspace *models.
 func (m *mockRepository) GetWorkspace(ctx context.Context, id string) (*models.Workspace, error) {
 	return nil, nil
 }
+func (m *mockRepository) UpdateWorkspaceFields(_ context.Context, _ string, _ models.WorkspaceFieldUpdate, _ *time.Time) (*models.Workspace, error) {
+	return nil, nil
+}
 func (m *mockRepository) UpdateWorkspace(ctx context.Context, workspace *models.Workspace) error {
 	return nil
 }
@@ -287,6 +290,9 @@ func (m *mockRepository) GetWorkflow(ctx context.Context, id string) (*models.Wo
 }
 func (m *mockRepository) UpdateWorkflow(ctx context.Context, workflow *models.Workflow) error {
 	return nil
+}
+func (m *mockRepository) UpdateWorkflowFields(ctx context.Context, id string, update models.WorkflowFieldUpdate) (*models.Workflow, error) {
+	return nil, fmt.Errorf("workflow field updates are not configured in this fixture")
 }
 func (m *mockRepository) DeleteWorkflow(ctx context.Context, id string) error {
 	return nil
