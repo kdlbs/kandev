@@ -181,6 +181,32 @@ if the independent regression shows one is required.
 
 ## Results
 
+ROOT released a bounded corrective fixture update after native Windows process
+CI failed at published `f3003d34409607f9444e41d81931f4914dd171e2`.
+All 24 matrix cases (including root controls) and five compatibility cases
+received CRLF after Git apply; exact LF byte/hash assertions failed. Event
+envelopes hid the received fields, so their cause was not established.
+The fixtures now provide an owned Git config with `core.autocrlf=false` to
+initialization and the real tracker/Manager Git environment, canonicalize their
+temporary root as existing save tests do, and expose received event fields.
+Strict path, byte, hash, neighbor and native symlink assertions remain.
+Production behavior is unchanged. Corrective anchored race-enabled process and
+registered API regressions each passed all 24 target cases and compatibility
+controls without Linux skips. Scoped lint passed with zero issues against live
+PR base `aad793bfa93e637e74d5d74d4cf194bc3d02f23b`. The one full changed-code
+lint reached its six-minute outer timeout, exit124, without diagnostic output;
+native46243/334336→56d8ff was actually joined at 2026-10-07T05:27:06.499502Z,
+and its command group and wrapper were observed gone. No passing lint verdict,
+commit or push followed. ROOT subsequently authorized exactly one identical
+recovery using retained caches, the same captured base and resource/time bounds.
+That recovery, native13207/bc4270→6447ab, passed with zero issues and joined
+exit0 at 2026-10-07T05:34:49.992631Z (273.541s); its group and wrapper were
+observed gone. The original timeout remains failed with unknown cause.
+No third attempt ran. Normal-hook fixup publication is authorized; corrected
+native Windows and hosted gates remain required.
+Current-head native Windows gates remain pending; the old hosted failure
+remains a failure.
+
 Executed sequentially on Linux after ROOT reviewed the SHA256-sealed package and
 released implementation plus the exclusive local-heavy lease. Commands use the
 exact Verification selectors and resource bounds. Permanent tests were authored
@@ -204,4 +230,5 @@ plan. Each completed test original is actually joined and its command group
 observed gone. Linux results do not establish native Windows execution, browser
 or WebSocket-network behavior. No public-doc change is needed: existing editing
 and saving instructions stay accurate; only internal docs changed. Normal hook
-publication and hosted current-head gates remain pending.
+publication completed at the initial head; corrected-head publication and
+hosted current-head gates remain pending.

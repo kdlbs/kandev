@@ -75,7 +75,8 @@ docs assessments. Existing public editing/saving instructions remain accurate.
 ## Work orders
 
 - [x] [Task 01: Correct the repository save target](task-01-correct-save-target.md)
-  (`done`, sequential; no internal dependency)
+  (`done`, including the bounded Windows fixture correction;
+  sequential; no internal dependency)
 
 ## Verification results
 
@@ -97,6 +98,19 @@ spec-linter tests, full specification lint, actual changed-path coverage
 Exact actual results and original handles are in the work order and platform plan.
 
 ## Risks and delivery
+
+The Windows fixture correction is uncommitted. Its affected process/API race
+regressions passed all 24 target cases and compatibility controls, with no Linux
+skips, and scoped lint reported zero issues. Required full changed-code lint
+against live base `aad793bfa93e637e74d5d74d4cf194bc3d02f23b` timed out at the
+six-minute outer bound with exit124 and no diagnostics. Its original was joined
+and all four corrective local command groups/wrappers are gone. ROOT authorized
+exactly one identical recovery with retained caches; it passed with zero issues
+and joined exit0 at 2026-10-07T05:34:49.992631Z. Its group and wrapper are gone;
+the first timeout remains failed with unknown cause. Normal-hook fixup
+publication is authorized. The original hosted collector then joined exit1 with
+53 passed, two failed, 18 skipped, one neutral and no pending checks. Its handle
+and original deadline receipts remain retained; no successor is authorized.
 
 The real formatter includes empty tab suffixes; comparing whole header lines
 would miss them. Hunk text must remain unchanged. Switching to a repository

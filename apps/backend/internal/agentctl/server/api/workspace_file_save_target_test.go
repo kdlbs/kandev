@@ -209,7 +209,16 @@ func apiSaveTargetPatch(path string, editor bool) string {
 
 func newAPISaveTargetFixture(t *testing.T, path string, initialized bool) (*Server, string, *process.WorkspaceTracker) {
 	t.Helper()
-	dir := t.TempDir()
+	gitConfig := filepath.Join(t.TempDir(), "gitconfig")
+	if err := os.WriteFile(gitConfig, []byte("[core]\n\tautocrlf = false\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
+	t.Setenv("GIT_CONFIG_GLOBAL", gitConfig)
+	dir, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
 	for _, scope := range []string{"", "alpha", "beta"} {
 		repo := filepath.Join(dir, scope)
 		if err := os.MkdirAll(filepath.Dir(filepath.Join(repo, path)), 0o755); err != nil {
@@ -225,7 +234,7 @@ func newAPISaveTargetFixture(t *testing.T, path string, initialized bool) (*Serv
 	if err != nil {
 		t.Fatal(err)
 	}
-	cfg := &config.InstanceConfig{WorkDir: dir}
+	cfg := &config.InstanceConfig{WorkDir: dir, AgentEnv: os.Environ()}
 	manager := process.NewManager(cfg, log)
 	tracker := manager.GetWorkspaceTracker()
 	t.Cleanup(tracker.Stop)
@@ -250,7 +259,7 @@ func assertAPISaveTargetEvent(t *testing.T, sub types.WorkspaceStreamSubscriber,
 	case msg := <-sub:
 		got := msg.FileChange
 		if got == nil || filepath.ToSlash(got.Path) != filepath.ToSlash(path) || got.Operation != types.FileOpWrite || got.RepositoryName != "" {
-			t.Errorf("write event = %+v; want root tracker write for %s", msg, path)
+			t.Errorf("write event fields = %+v; envelope = %+v; want root tracker write for %s", got, msg, path)
 		}
 	default:
 		t.Error("save returned without the immediate write event")
