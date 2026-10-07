@@ -135,10 +135,16 @@ test.describe("Agents browse page", () => {
   test("renders the saved fallback summary after the model badge", async ({
     testPage,
     apiClient,
+    seedData,
   }) => {
     const { agents } = await apiClient.listAgents();
-    const agent = agents[0];
-    if (!agent || agent.profiles.length === 0) {
+    // Virtual agent families may precede the configured, launchable fixture agent.
+    agents.sort((left, right) => Number(right.id === "dynamic") - Number(left.id === "dynamic"));
+    const agent = agents.find((candidate) =>
+      candidate.profiles.some((profile) => profile.id === seedData.agentProfileId),
+    );
+    const seededProfile = agent?.profiles.find((profile) => profile.id === seedData.agentProfileId);
+    if (!agent || !seededProfile) {
       throw new Error("The E2E fixture must provide a configured agent profile");
     }
 
@@ -150,11 +156,11 @@ test.describe("Agents browse page", () => {
       await testPage.goto("/settings/agents");
       const seededRow = testPage
         .getByTestId("agent-profile-row")
-        .filter({ hasText: agent.profiles[0].name });
+        .filter({ hasText: seededProfile.name });
       await expect(seededRow).toBeVisible({ timeout: 15_000 });
 
       const profile = await apiClient.createAgentProfile(agent.id, profileName, {
-        model: agent.profiles[0].model,
+        model: seededProfile.model,
         fallback_model: fallbackModel,
       });
       profileId = profile.id;

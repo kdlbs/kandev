@@ -988,14 +988,24 @@ test.describe("Plugins — gRPC plugin install/load/live-update/uninstall", () =
     await uploadPackage(testPage, PACKAGE_PATH);
     await expect(testPage.getByTestId(`plugin-row-${PLUGIN_ID}`)).toBeVisible({ timeout: 15_000 });
 
+    const baseline = (await apiClient.getUserSettings()).settings.sidebar_layouts_by_workspace?.[
+      seedData.workspaceId
+    ];
+    // Other scenarios may leave navigation expanded; this case tests the collapsed-to-open action.
+    await apiClient.saveUserSettings({
+      sidebar_layout_state: {
+        workspace_id: seedData.workspaceId,
+        expected_revision: baseline?.revision ?? 0,
+        layout: { ...baseline, navigation_height: 0, navigation_expanded: false },
+      },
+    });
+
     await testPage.goto("/");
     await testPage.reload();
 
     const navItem = testPage.getByTestId("plugin-nav-item-e2e-insights-tools");
     await expect(navItem).toBeVisible({ timeout: 15_000 });
-    const baseline = (await apiClient.getUserSettings()).settings.sidebar_layouts_by_workspace?.[
-      seedData.workspaceId
-    ];
+
     try {
       const expand = testPage.getByTestId("sidebar-navigation-expand");
       if ((await expand.getAttribute("aria-expanded")) === "true") {

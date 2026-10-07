@@ -1,7 +1,7 @@
 import { test, expect } from "../../fixtures/test-base";
+import { openCreateTaskDialog } from "../../helpers/create-task-dialog";
 import { useRegularMode } from "../../helpers/regular-mode";
 import { restoreSidebarLayout } from "../../helpers/sidebar-layout";
-import { AppSidebarPage } from "../../pages/app-sidebar-page";
 import { KanbanPage } from "../../pages/kanban-page";
 
 useRegularMode();
@@ -30,10 +30,19 @@ test.describe("Agent-generated task titles", () => {
         )
         .toBe(true);
 
+      const { settings } = await apiClient.getUserSettings();
+      const layout = settings.sidebar_layouts_by_workspace![seedData.workspaceId];
+      await apiClient.saveUserSettings({
+        sidebar_layout_state: {
+          workspace_id: seedData.workspaceId,
+          expected_revision: layout.revision,
+          layout: { ...layout, navigation_height: 0, navigation_expanded: false },
+        },
+      });
+
       const kanban = new KanbanPage(testPage);
       await kanban.goto();
-      await new AppSidebarPage(testPage).expandNavigationIfCollapsed();
-      await kanban.createTaskButton.first().click();
+      await openCreateTaskDialog(testPage);
 
       const dialog = testPage.getByTestId("create-task-dialog");
       await expect(dialog).toBeVisible();
