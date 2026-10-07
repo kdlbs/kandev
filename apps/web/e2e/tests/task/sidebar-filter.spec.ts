@@ -28,10 +28,12 @@
 import path from "node:path";
 import fs from "node:fs";
 import { execSync } from "node:child_process";
+import type { Locator } from "@playwright/test";
 import { test, expect } from "../../fixtures/test-base";
 import { makeGitEnv } from "../../helpers/git-helper";
 import { SessionPage } from "../../pages/session-page";
 import { SidebarFilterPopoverPage } from "../../pages/sidebar-filter-popover";
+import type { SidebarTaskColorAutomation } from "../../../lib/task-color-automation-settings";
 
 async function openWithSeed(
   testPage: import("@playwright/test").Page,
@@ -93,6 +95,91 @@ async function taskActivityAt(
   const result = await apiClient.listTasks(workspaceId);
   return result.tasks.find((task) => task.id === taskId)?.status_summary?.last_activity_at ?? null;
 }
+
+async function expectTouchControlsInCard(card: Locator, controls: Locator[]): Promise<void> {
+  await card.scrollIntoViewIfNeeded();
+  const cardBox = await card.boundingBox();
+  expect(cardBox).not.toBeNull();
+  for (const control of controls) {
+    const controlBox = await control.boundingBox();
+    expect(controlBox?.height).toBeGreaterThanOrEqual(44);
+    expect(controlBox?.width).toBeGreaterThanOrEqual(44);
+    expect(controlBox?.x).toBeGreaterThanOrEqual(cardBox!.x);
+    expect(controlBox!.x + controlBox!.width).toBeLessThanOrEqual(cardBox!.x + cardBox!.width);
+    expect(controlBox?.y).toBeGreaterThanOrEqual(cardBox!.y);
+    expect(controlBox!.y + controlBox!.height).toBeLessThanOrEqual(cardBox!.y + cardBox!.height);
+  }
+}
+
+test("fine-pointer phone viewport keeps reorder controls touch-sized", async ({
+  testPage,
+  apiClient,
+  seedData,
+}) => {
+  const previousColors = (await apiClient.getUserSettings()).settings
+    .sidebar_task_color_automation as SidebarTaskColorAutomation | undefined;
+  await testPage.setViewportSize({ width: 390, height: 844 });
+  expect(await testPage.evaluate(() => matchMedia("(pointer: fine)").matches)).toBe(true);
+  const navigation = await apiClient.seedTask(seedData.workspaceId, "Fine pointer phone nav", {
+    workflow_id: seedData.workflowId,
+    workflow_step_id: seedData.startStepId,
+  });
+  const session = new SessionPage(testPage);
+
+  try {
+    await testPage.goto(`/t/${navigation.task_id}`);
+    await session.waitForLoad();
+    await testPage.getByTestId("mobile-task-picker-trigger").click();
+    const sheet = testPage.getByRole("dialog", { name: "Tasks" });
+    await expect(sheet).toBeVisible();
+    const filters = new SidebarFilterPopoverPage(testPage);
+    await filters.open();
+    const editor = filters.popover;
+    await expect(editor).toBeVisible();
+
+    await editor.getByTestId("sidebar-sort-settings-toggle").click();
+    const sortCard = editor.getByTestId("sort-rule-card-0");
+    await expectTouchControlsInCard(sortCard, [
+      editor.getByTestId("sort-rule-handle-0"),
+      editor.getByTestId("sort-rule-more-0"),
+      editor.getByTestId("sort-rule-remove-0"),
+    ]);
+
+    const automaticSettings = editor.getByTestId("automatic-color-settings");
+    await automaticSettings.getByTestId("automatic-color-settings-toggle").click();
+    const addRule = automaticSettings.getByTestId("automatic-color-add-rule");
+    await addRule.scrollIntoViewIfNeeded();
+    await addRule.click();
+    const colorHandle = automaticSettings.locator("[data-testid^='automatic-color-rule-handle-']");
+    const colorRuleId = (await colorHandle.getAttribute("data-testid"))!.replace(
+      "automatic-color-rule-handle-",
+      "",
+    );
+    const colorCard = automaticSettings.getByTestId(`automatic-color-rule-${colorRuleId}`);
+    await expectTouchControlsInCard(colorCard, [
+      colorHandle,
+      automaticSettings.getByTestId(`automatic-color-rule-more-${colorRuleId}`),
+      automaticSettings.getByTestId(`automatic-color-rule-remove-${colorRuleId}`),
+    ]);
+    await automaticSettings.getByTestId(`automatic-color-rule-remove-${colorRuleId}`).click();
+
+    const taskRowSettings = editor.getByTestId("task-row-settings");
+    await taskRowSettings.getByTestId("task-row-settings-toggle").click();
+    const detailRow = taskRowSettings.getByTestId("task-row-detail-relative_time");
+    await expectTouchControlsInCard(detailRow, [
+      taskRowSettings.getByTestId("task-row-detail-handle-relative_time"),
+      taskRowSettings.getByTestId("task-row-detail-more-relative_time"),
+      taskRowSettings.getByTestId("task-row-detail-toggle-relative_time"),
+    ]);
+    expect(await testPage.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(
+      true,
+    );
+  } finally {
+    await apiClient.saveUserSettings({
+      sidebar_task_color_automation: previousColors ?? { enabled: false, rules: [] },
+    });
+  }
+});
 
 test.describe("Sidebar filter bar — popover basics", () => {
   test("gear opens popover; ESC closes it", async ({ testPage, apiClient, seedData }) => {
@@ -835,6 +922,20 @@ test.describe("Sidebar filter — task-row presentation", () => {
     await expect
       .poll(() => filters.taskRowDetailOrder())
       .toEqual(["pull_request_number", "relative_time", "repository"]);
+    const relativeTimeMore = filters.taskRowSettings.getByTestId(
+      "task-row-detail-more-relative_time",
+    );
+    const relativeTimeMoreBox = await relativeTimeMore.boundingBox();
+    const relativeTimeHandleBox = await relativeTimeHandle.boundingBox();
+    expect(relativeTimeMoreBox?.height).toBe(28);
+    expect(relativeTimeMoreBox?.width).toBe(28);
+    expect(relativeTimeHandleBox?.height).toBe(28);
+    expect(relativeTimeHandleBox?.width).toBe(28);
+    await relativeTimeMore.click();
+    await testPage.getByTestId("task-row-detail-more-relative_time-move-up").click();
+    await expect
+      .poll(() => filters.taskRowDetailOrder())
+      .toEqual(["relative_time", "pull_request_number", "repository"]);
     await filters.toggleTaskRowDetail("repository");
     await expect(row.getByTestId("sidebar-task-repository")).toHaveCount(0);
 

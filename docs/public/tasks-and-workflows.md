@@ -705,7 +705,7 @@ The **TASKS** list in the left sidebar can combine up to ten sort rules. Each la
 | **Last activity** | The last real user or agent action. Opening or focusing a task and background provider polling do not change this time. When a view includes this rule, each row shows its own activity time, while included subtasks help order parents. |
 | **Created, Title, Status** | These fields can also order tasks in either direction. Manual order remains available as a standalone choice.                                                                                                    |
 
-On desktop, open **Sort** from the sidebar filter button. On a phone, open **Tasks**, tap **Sidebar filters**, then expand **Sort**. Each field can be set to its first or last order. The saved view keeps the rule sequence. With no later rule, the sidebar's usual tie order applies.
+On desktop, open **Sort** from the sidebar filter button. On a phone, open **Tasks**, tap **Sidebar filters**, then expand **Sort**. Each field can be set to its first or last order. Drag a rule by its grip to change its priority, or open **More** and choose **Move up** or **Move down**. The saved view keeps the rule sequence. With no later rule, the sidebar's usual tie order applies. Automatic color rules and task-row details use the same grip and **More** menu. Color-rule changes apply immediately; sort and task-row changes follow the view's save or discard controls.
 
 When tasks are grouped, expand **Group by** and use **Indent grouped tasks** to align the rows with the normal sidebar inset. It is enabled by default. Turning it off removes only the group inset; headings, counts, collapse controls, and subtask nesting remain.
 

@@ -1,6 +1,7 @@
 import { expect, type Locator, type Page } from "@playwright/test";
 import type { SeedData } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
+import { touchDragBetween } from "../../helpers/touch-drag";
 import { SidebarFilterPopoverPage } from "../../pages/sidebar-filter-popover";
 
 type SidebarSortScenario = {
@@ -158,10 +159,45 @@ export async function addColorAfterActivity(page: Page, popover: Locator): Promi
   await chooseSortField(page, popover, "sort-rule-key-2", "Color");
   await popover.getByTestId("sort-rule-color-2").click();
   await page.getByRole("option", { name: "Red", exact: true }).click();
-  await popover.getByTestId("sort-rule-up-2").click();
+  await moveSortRuleWithMenu(page, popover, 3, "up");
   await expect(popover.getByTestId("sort-key-select")).toContainText("Running");
   await expect(popover.getByTestId("sort-rule-key-1")).toContainText("Color");
   await expect(popover.getByTestId("sort-rule-key-2")).toContainText("Last activity");
+}
+
+export async function moveSortRuleWithMenu(
+  page: Page,
+  popover: Locator,
+  position: number,
+  direction: "up" | "down",
+): Promise<void> {
+  const trigger = popover.getByTestId(`sort-rule-more-${position - 1}`);
+  const move = page.getByTestId(`sort-rule-more-${position - 1}-move-${direction}`);
+  if (await page.evaluate(() => matchMedia("(pointer: coarse)").matches)) {
+    await trigger.tap();
+    await move.tap();
+  } else {
+    await trigger.click();
+    await move.click();
+  }
+}
+
+export async function touchDragSortRule(
+  page: Page,
+  source: Locator,
+  target: Locator,
+): Promise<void> {
+  await source.scrollIntoViewIfNeeded();
+  await target.scrollIntoViewIfNeeded();
+  const sourceBox = await source.boundingBox();
+  const targetBox = await target.boundingBox();
+  expect(sourceBox).not.toBeNull();
+  expect(targetBox).not.toBeNull();
+  await touchDragBetween(
+    page,
+    { x: sourceBox!.x + sourceBox!.width / 2, y: sourceBox!.y + sourceBox!.height / 2 },
+    { x: targetBox!.x + targetBox!.width / 2, y: targetBox!.y + 2 },
+  );
 }
 
 export async function sidebarRootOrder(surface: Locator, ids: string[]): Promise<string[]> {
