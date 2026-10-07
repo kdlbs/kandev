@@ -93,6 +93,18 @@ Detailed command/results are in the work order. Implementation catalog validatio
 all 36 spec-linter tests, full spec lint, diff whitespace checks and actual-diff
 exported-evaluator coverage passed with no coverage errors.
 
+Hosted Windows process compilation at initial head `b96495a` failed with
+four undefined `waitForAnyGitWaiter` references: that reused fixture helper is
+excluded by `!windows`. The focused correction gives the save fixture its own
+portable context-bound admission waiter. Verification is limited to the two
+affected process tests and the mandatory full changed-code backend lint in the work order;
+the earlier Linux checks do not prove corrected native Windows execution. The
+affected race tests passed; the single full changed-code lint hit its six-minute
+outer timeout (exit124, no diagnostics), so publication was checkpointed to
+ROOT without an automatic retry. ROOT explicitly released one identical
+recovery; it passed with zero issues and both originals are joined with their
+groups gone. The original failed timeout and unproved cause remain recorded.
+
 ## Risks and delivery
 
 The admission cap is process-global: run the anchored tests serially and restore

@@ -122,6 +122,13 @@ overlap, fresh sequential controls, empty overwrite fallback, cancellation with
 a successful peer, cleanup and unchanged neighboring bytes. The independent RED
 failed on alpha's actual disk bytes and applied hash before the correction.
 
+These Linux checks did not establish native Windows compatibility. Hosted
+Windows process compilation at initial head `b96495a` failed because the new
+tests reused an admission-wait helper from a `!windows` test file. The save
+fixture now owns a portable context-bound waiter over
+`AdmissionSnapshot().Waiters`, preserving the deliberate queue interleaving.
+Native Windows success must come from the corrected head's hosted execution.
+
 Exact selectors, actual results and serial bounds live in the
 [single work order](../../../plans/prevent-overlapping-file-saves/task-01-isolate-save-patches.md).
 

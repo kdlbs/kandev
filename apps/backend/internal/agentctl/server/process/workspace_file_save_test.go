@@ -64,6 +64,19 @@ func holdFileSaveAdmission(t *testing.T) (context.Context, func(), *sync.WaitGro
 	return ctx, release, requests
 }
 
+func awaitQueuedFileSaves(t *testing.T, ctx context.Context, want int) {
+	t.Helper()
+	ticker := time.NewTicker(time.Millisecond)
+	defer ticker.Stop()
+	for subproc.AdmissionSnapshot().Waiters != want {
+		select {
+		case <-ctx.Done():
+			t.Fatalf("expected %d queued file saves: %v", want, ctx.Err())
+		case <-ticker.C:
+		}
+	}
+}
+
 func startFileSave(ctx context.Context, tracker *WorkspaceTracker, save fileSaveCase, requests *sync.WaitGroup) <-chan fileSaveResult {
 	result := make(chan fileSaveResult, 1)
 	requests.Add(1)
@@ -126,9 +139,9 @@ func TestApplyFileDiff_ConcurrentDistinctFiles(t *testing.T) {
 			ctx, release, requests := holdFileSaveAdmission(t)
 			saves := distinctFileSaves()
 			alpha := startFileSave(ctx, first, saves[0], requests)
-			waitForAnyGitWaiter(t, 1)
+			awaitQueuedFileSaves(t, ctx, 1)
 			beta := startFileSave(ctx, second, saves[1], requests)
-			waitForAnyGitWaiter(t, 2)
+			awaitQueuedFileSaves(t, ctx, 2)
 			release()
 			a := awaitFileSaveResult(t, ctx, alpha)
 			b := awaitFileSaveResult(t, ctx, beta)
@@ -207,9 +220,9 @@ func TestApplyFileDiff_CancelledQueuedSave(t *testing.T) {
 	t.Cleanup(cancel)
 	saves := distinctFileSaves()
 	alpha := startFileSave(cancelledCtx, tracker, saves[0], requests)
-	waitForAnyGitWaiter(t, 1)
+	awaitQueuedFileSaves(t, ctx, 1)
 	beta := startFileSave(ctx, tracker, saves[1], requests)
-	waitForAnyGitWaiter(t, 2)
+	awaitQueuedFileSaves(t, ctx, 2)
 	cancel()
 	a := awaitFileSaveResult(t, ctx, alpha)
 	if !errors.Is(a.err, context.Canceled) || a.hash != "" || a.resolution != "" {

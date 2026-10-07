@@ -202,8 +202,7 @@ scoped lint includes the explicitly released `--allow-serial-runners` option.
 
 Receipts: `/tmp/kandev-child61-implementation-receipts.jsonl`, with per-original
 logs and native-handle join records in the platform task plan. RED/GREEN/process/
-API/lint originals are actually joined and their groups gone. No code changed
-after the final product checks. No broad suite, build, browser, E2E, network save,
+API/lint originals are actually joined and their groups gone. These results describe the initial Linux implementation checks. No broad suite, build, browser, E2E, network save,
 WebSocket, Windows execution, or backend database persistence claim.
 
 Design originally encountered `node` missing from PATH. ROOT's single bounded
@@ -214,3 +213,33 @@ final gate. Normal hooks were confirmed active; the single allowed pnpm 9.15.9
 frozen workspace install was required because this worktree lacked commitlint.
 Publication and hosted review remain governed by ROOT's separate delivery
 checkpoints; no merge authorization was granted.
+
+## Windows fixture correction
+
+Hosted job `112569366176` at initial head `b96495a` failed compilation with
+four undefined `waitForAnyGitWaiter` references. Its existing definition is in
+a `!windows` fixture. The correction adds the save fixture's own portable
+context-bound `AdmissionSnapshot().Waiters` ticker helper and replaces only
+the four calls. The real Git admission, disk and hash assertions remain intact.
+
+ROOT released a second exclusive local-heavy slot for these two serial commands
+from `apps/backend`; no unchanged selector or install is replayed:
+
+```bash
+env GOMAXPROCS=2 GOMEMLIMIT=512MiB timeout --kill-after=10s 5m go test -trimpath -tags fts5 -race -p=1 -parallel=1 ./internal/agentctl/server/process -run '^TestApplyFileDiff_(ConcurrentDistinctFiles|CancelledQueuedSave)$' -count=1 -timeout=90s -v
+env GOMAXPROCS=2 GOMEMLIMIT=1GiB timeout --kill-after=10s 6m golangci-lint run ./... --new-from-rev=62b39941214ffe63ce72d307b6e599a7bd2a7b63 --concurrency=2 --allow-serial-runners --timeout=5m
+```
+
+The two affected race-enabled tests passed on Linux, including both tracker
+variants and queued cancellation. The single full changed-code lint invocation
+ended at its six-minute outer timeout with exit124 and no diagnostic output;
+its process was actually joined and its group was gone. ROOT was checkpointed
+without an automatic retry, commit or push. ROOT then explicitly authorized
+exactly one identical recovery: it passed with exit0 and zero issues in
+236.839s, actually joined with its group gone. The original timeout remains
+failed with cause unproved. The previous Linux checks did not prove Windows
+compilation or execution; the actual corrected-head hosted Windows process job
+must pass. Corrective catalog validation, full specification lint, whitespace
+checks and exported actual-diff coverage also passed with errors[]. Preserve the
+original hosted observer and deadline across
+the normal corrective commit/push. Merge remains separately gated by ROOT.
