@@ -253,6 +253,14 @@ below. PostgreSQL parity remains unverified because this environment has no
 - Review remediation `go vet` passed for the five affected backend packages, and
   `make -C apps/backend build` passed. PostgreSQL parity remains unverified
   because `KANDEV_TEST_POSTGRES_DSN` is unset.
+- The first post-review CI attempt exposed
+  `TestPromptTask_QueuedAcceptedTurnIdentityReadFailurePreservesExecution`.
+  Local full-package reproduction traced it to a direct-prompt guard that also
+  matched unrelated accepted queue work. The guard now checks the dedicated
+  initial-brief marker, while queue draining keeps its accepted-dispatch guard.
+  The full orchestrator package and focused work-order and race suites pass
+  after this correction; fresh remote checks for the resulting commit remain
+  the delivery gate.
 
 Design validation on 2026-10-07:
 

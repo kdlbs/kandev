@@ -4201,12 +4201,12 @@ func (s *Service) isInitialTaskBriefDispatchPending(sessionID string) bool {
 		return false
 	}
 	_, pending := s.initialTaskBriefDispatches.Load(sessionID)
-	return pending || s.isQueuedDispatchInFlight(sessionID)
+	return pending
 }
 
 // InitialTaskBriefDispatchPending reports whether the accepted first prompt
-// still owns the session's first dispatch boundary, including its reserved
-// queue dispatch while that prompt reaches provider acceptance.
+// still owns the session's first dispatch boundary. Queued dispatch ownership
+// is tracked separately so it does not block prompts after that first boundary.
 func (s *Service) InitialTaskBriefDispatchPending(sessionID string) bool {
 	return s.isInitialTaskBriefDispatchPending(sessionID)
 }
@@ -4297,7 +4297,7 @@ func (s *Service) MaxQueuedPromptsPerSession() int {
 // that another repository committed atomically with its user-message record.
 func (s *Service) NotifyQueuedUserPrompt(ctx context.Context, taskID, sessionID string) {
 	s.publishQueueStatusEvent(ctx, sessionID)
-	if s.isInitialTaskBriefDispatchPending(sessionID) {
+	if s.isInitialTaskBriefDispatchPending(sessionID) || s.isQueuedDispatchInFlight(sessionID) {
 		return
 	}
 	session, err := s.repo.GetTaskSession(ctx, sessionID)

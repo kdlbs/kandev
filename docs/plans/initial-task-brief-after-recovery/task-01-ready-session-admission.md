@@ -194,5 +194,15 @@ Remediation verification passed on 2026-10-07:
 - `golangci-lint run ./... --new-from-rev=8feffe1e17fd5ac1b079fc52469bdfff780e5ad0 --timeout=5m` from `apps/backend`; 0 issues.
 - `make -C apps/backend build` and `git diff --check`.
 
+The first CI attempt after review remediation exposed
+`TestPromptTask_QueuedAcceptedTurnIdentityReadFailurePreservesExecution`.
+Local full-package reproduction showed that the direct-prompt guard was
+treating any accepted queued turn as a pending initial brief. The guard now
+checks only the dedicated first-brief marker; queue-drain paths keep their
+separate accepted-dispatch checks. The regression, the full orchestrator
+package, the focused work-order suite, and the focused race suite pass after
+this correction. Fresh remote checks for the resulting commit must be reviewed
+before delivery is complete.
+
 PostgreSQL parity remains unverified because `KANDEV_TEST_POSTGRES_DSN` is
 unset; no skipped run is counted as a pass.
