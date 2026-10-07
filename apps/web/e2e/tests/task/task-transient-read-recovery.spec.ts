@@ -153,6 +153,10 @@ test.describe("Task transient read recovery", () => {
       )
       .toBe(selectedSessionId);
 
+    const workspaceLayout = testPage.getByTestId("dockview-task-layout");
+    const beforeRefresh = await workspaceLayout.boundingBox();
+    expect(beforeRefresh).not.toBeNull();
+
     const taskPath = new RegExp(`/api/v1/tasks/${task.id}$`);
     let failedReads = 0;
     let markFailuresReturned: () => void = () => {};
@@ -182,6 +186,12 @@ test.describe("Task transient read recovery", () => {
       const retryNotice = testPage.getByTestId("task-read-recovery-notice");
       await expect(retryNotice).toBeVisible();
       await expect(retryNotice).toContainText("Task details could not be refreshed");
+      await expect
+        .poll(async () => (await workspaceLayout.boundingBox())?.y)
+        .toBeCloseTo(beforeRefresh!.y, 1);
+      await expect
+        .poll(async () => (await workspaceLayout.boundingBox())?.height)
+        .toBeCloseTo(beforeRefresh!.height, 1);
       await expect(testPage.getByTestId("dockview-task-layout")).toBeVisible();
       expect(failedReads).toBe(3);
       await testInfo.attach("desktop-task-temporary-refresh-failure", {
@@ -194,6 +204,12 @@ test.describe("Task transient read recovery", () => {
       const recoveredTaskResponse = await recoveredTaskRead;
       expect(recoveredTaskResponse.ok()).toBe(true);
       await expect(retryNotice).toHaveCount(0);
+      await expect
+        .poll(async () => (await workspaceLayout.boundingBox())?.y)
+        .toBeCloseTo(beforeRefresh!.y, 1);
+      await expect
+        .poll(async () => (await workspaceLayout.boundingBox())?.height)
+        .toBeCloseTo(beforeRefresh!.height, 1);
       await expect
         .poll(() =>
           testPage.evaluate(
