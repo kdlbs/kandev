@@ -286,6 +286,19 @@ func (r *fakeSettingsRepo) UpdateAgentProfile(_ context.Context, profile *models
 	return nil
 }
 
+func (r *fakeSettingsRepo) UpdateAgentProfileWithEnabledIntent(ctx context.Context, profile *models.AgentProfile, enabled *bool) error {
+	if enabled == nil {
+		current, err := r.GetAgentProfile(ctx, profile.ID)
+		if err != nil {
+			return err
+		}
+		profile.Enabled = current.Enabled
+	} else {
+		profile.Enabled = *enabled
+	}
+	return r.UpdateAgentProfile(ctx, profile)
+}
+
 // DeleteAgentProfile implements the settings store interface for the handler tests.
 func (r *fakeSettingsRepo) DeleteAgentProfile(_ context.Context, id string) error {
 	if err := r.errs["DeleteAgentProfile"]; err != nil {
