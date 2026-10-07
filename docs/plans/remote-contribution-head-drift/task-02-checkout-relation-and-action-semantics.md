@@ -108,3 +108,25 @@ any compatibility choices. Update this task and the plan checkbox when complete.
   existing base-relative divergence fields. Fan-out Push gating uses the upstream count when one is
   configured.
 - Focused relation, summary, and session Git tests passed. Web typecheck and lint passed.
+
+## CI correction: connection readiness
+
+The provider-history hook waits for the WebSocket client and connection readiness.
+Connection startup preserves the provider retry budget. Reconnection reloads unresolved history.
+The source key, cached successful history, and one shared request remain unchanged.
+
+A new startup regression failed before the correction. After the correction,
+59 focused hook, workspace-scope, and relation tests passed. Six mobile PR-only
+commit-detail repetitions passed with browser retries disabled. The E2E frontend
+build, strict ESLint, and TypeScript checks passed.
+
+```bash
+cd apps/web
+pnpm exec vitest run hooks/domains/github/use-pr-commits.test.ts hooks/domains/github/use-pr-workspace-scope.test.ts hooks/domains/session/use-remote-contribution-relation.test.tsx hooks/domains/session/remote-contribution-relation.test.ts
+pnpm build:e2e
+E2E_PORT_OFFSET=18 pnpm e2e:raw --project=mobile-chrome e2e/tests/task/mobile-changes-panel.spec.ts --grep 'PR-only commit opens' --workers=1 --retries=0 --repeat-each=6
+pnpm exec eslint hooks/domains/github/use-pr-commits.ts hooks/domains/github/use-pr-commits.test.ts hooks/domains/github/use-pr-workspace-scope.test.ts --max-warnings=0
+pnpm typecheck
+```
+
+The full hosted CI run and browser artifact audit remain pending for delivery.
