@@ -76,6 +76,21 @@ async function createReadyTask(
   });
 }
 
+async function waitForAgentExecutionId(page: Page, sessionId: string): Promise<string> {
+  let executionId: string | null = null;
+  await expect
+    .poll(
+      async () => {
+        executionId = await getSessionAgentExecutionId(page, sessionId);
+        return executionId;
+      },
+      { message: "Wait for the live agent execution snapshot", timeout: 15_000 },
+    )
+    .not.toBeNull();
+  if (!executionId) throw new Error("The live session has no agent execution ID");
+  return executionId;
+}
+
 async function openTaskChat(page: Page, taskId: string): Promise<SessionPage> {
   await page.goto(`/t/${taskId}`);
   const session = new SessionPage(page);
@@ -198,8 +213,7 @@ test.describe("Slash command composer", () => {
       )
       .toBe(true);
     await seedAvailableCommands(testPage, task.session_id, [PLAN_COMMAND]);
-    const executionId = await getSessionAgentExecutionId(testPage, task.session_id);
-    if (!executionId) throw new Error("The live session has no agent execution ID");
+    const executionId = await waitForAgentExecutionId(testPage, task.session_id);
     const sendModels = (
       value: string,
       executionId: string,
@@ -286,8 +300,7 @@ test.describe("Slash command composer", () => {
       )
       .toBe(true);
     await seedAvailableCommands(testPage, task.session_id, [PLAN_COMMAND]);
-    const previousExecutionId = await getSessionAgentExecutionId(testPage, task.session_id);
-    if (!previousExecutionId) throw new Error("The live session has no agent execution ID");
+    const previousExecutionId = await waitForAgentExecutionId(testPage, task.session_id);
     const planSnapshot = (executionId: string) => ({
       task_id: task.id,
       session_id: task.session_id,
