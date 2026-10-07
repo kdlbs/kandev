@@ -60,19 +60,20 @@ test.describe("deleted task client state", () => {
     const deletedSessionId = await settledSessionId(deleted.id);
 
     const session = new SessionPage(testPage);
-    for (const [taskId, sessionId] of [
-      [kept.id, keptSessionId],
-      [deleted.id, deletedSessionId],
-    ] as const) {
-      await testPage.goto(`/t/${taskId}`);
-      await session.waitForLoad();
-      await expect
+    const waitForCachedMessages = (sessionId: string) =>
+      expect
         .poll(async () => (await cachedSessionState(testPage, sessionId)).messages ?? 0)
         .toBeGreaterThan(0);
-    }
 
-    await testPage.goto(`/t/${kept.id}`);
+    await testPage.goto(`/t/${deleted.id}`);
     await session.waitForLoad();
+    await waitForCachedMessages(deletedSessionId);
+
+    await session.sidebarTaskItem("Kept task").click();
+    await expect(session.activeSidebarTaskItem("Kept task")).toBeVisible();
+    await waitForCachedMessages(keptSessionId);
+    expect((await cachedSessionState(testPage, deletedSessionId)).messages).toBeGreaterThan(0);
+
     await apiClient.deleteTask(deleted.id);
 
     await expect
