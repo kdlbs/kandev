@@ -192,6 +192,20 @@ export async function exerciseSharedFirstResponse(
     trailing = gate();
   let requests = 0;
   await page.route("**/sidebar/query", async (route) => {
+    const query = route.request().postDataJSON() as {
+      filters: Array<{ dimension: string; value: unknown }>;
+    };
+    // Bootstrap may read the default view before saved views arrive. Only
+    // gate the archived fixture view whose shared ownership is under test.
+    if (
+      !query.filters.some((filter) => filter.dimension === "archived" && filter.value === true) ||
+      !query.filters.some(
+        (filter) => filter.dimension === "titleMatch" && filter.value === "Shared fixture",
+      )
+    ) {
+      await route.continue();
+      return;
+    }
     requests++;
     if (requests === 1) {
       const response = await route.fetch();
