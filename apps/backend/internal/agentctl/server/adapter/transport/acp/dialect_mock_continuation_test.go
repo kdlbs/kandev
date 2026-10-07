@@ -11,15 +11,13 @@ import (
 
 func TestMockInterruptionContinuationWireError(t *testing.T) {
 	for _, tc := range []struct {
-		name, agentID         string
-		enabled, attested     bool
-		orderedFailureAfterIO bool
-		emitOutput            bool
+		name, agentID                                                       string
+		enabled, attested, terminalEvent, orderedFailureAfterIO, emitOutput bool
 	}{
-		{"enabled mock", mockAgentID, true, true, false, true},
-		{"disabled mock after output", mockAgentID, false, false, true, true},
-		{"disabled mock before output", mockAgentID, false, false, false, false},
-		{"untrusted provider marker", "other-acp", true, false, false, true},
+		{"enabled mock", mockAgentID, true, true, true, true, true},
+		{"disabled mock after output", mockAgentID, false, false, true, true, true},
+		{"disabled mock before output", mockAgentID, false, false, true, false, false},
+		{"untrusted provider marker", "other-acp", true, false, false, false, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			a, fake, conn := setupHandoffFakeAgent(t)
@@ -44,21 +42,23 @@ func TestMockInterruptionContinuationWireError(t *testing.T) {
 			fake.releasePrompts()
 			select {
 			case err := <-done:
-				if !tc.attested && !tc.orderedFailureAfterIO {
+				if !tc.terminalEvent {
 					require.Error(t, err)
 					return
 				}
-				if tc.attested {
-					require.NoError(t, err, "attested error is delivered once through the terminal event")
-				} else {
-					require.NoError(t, err, "error after prompt output is ordered after that output")
-				}
+				require.NoError(t, err, "recognized interruption is delivered once through the terminal event")
 			case <-time.After(2 * time.Second):
 				t.Fatal("prompt did not settle")
 			}
 			events := drainEvents(a)
+			require.NotEmpty(t, events)
+			require.Equal(t, streams.EventTypeError, events[len(events)-1].Type)
 			failures := 0
+			toolCalls := 0
 			for _, event := range events {
+				if event.Type == streams.EventTypeToolCall {
+					toolCalls++
+				}
 				if event.Type == streams.EventTypeError {
 					failures++
 					if tc.attested {
@@ -72,6 +72,11 @@ func TestMockInterruptionContinuationWireError(t *testing.T) {
 				}
 				require.NotEqual(t, streams.EventTypeComplete, event.Type)
 			}
+			expectedToolCalls := 0
+			if tc.emitOutput {
+				expectedToolCalls = 1
+			}
+			require.Equal(t, expectedToolCalls, toolCalls)
 			require.Equal(t, 1, failures)
 			if tc.orderedFailureAfterIO {
 				toolCallIndex, errorIndex := -1, -1

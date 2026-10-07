@@ -11,6 +11,31 @@ import (
 
 const sidebarPreferenceTable = "temp.kandev_sidebar_preferences"
 
+func (s *sidebarQuerySnapshot) prepareColorPreferences(
+	ctx context.Context,
+	query models.SidebarTaskViewQuery,
+	prefs models.SidebarTaskViewPreferences,
+) error {
+	if !s.sqlite || !sidebarQueryHasSort(query, "color") {
+		return nil
+	}
+	if _, err := s.tx.ExecContext(ctx, "CREATE TEMP TABLE "+sidebarTaskColorScratchTable+` (
+		task_id TEXT PRIMARY KEY, color TEXT NOT NULL
+	) WITHOUT ROWID`); err != nil {
+		return fmt.Errorf("stage sidebar color schema: %w", err)
+	}
+	encoded, err := json.Marshal(sidebarColorSettings(prefs).ManualColors)
+	if err != nil {
+		return fmt.Errorf("encode sidebar manual colors: %w", err)
+	}
+	_, err = s.tx.ExecContext(ctx, s.tx.Rebind("INSERT INTO "+sidebarTaskColorScratchTable+`
+		SELECT key, value FROM json_each(?) WHERE type = 'text' AND value <> ''`), string(encoded))
+	if err != nil {
+		return fmt.Errorf("stage sidebar manual colors: %w", err)
+	}
+	return nil
+}
+
 // Preference rows keep statement preparation independent of saved-list length.
 func (s *sidebarQuerySnapshot) preparePreferences(ctx context.Context, prefs models.SidebarTaskViewPreferences) error {
 	if !s.sqlite {

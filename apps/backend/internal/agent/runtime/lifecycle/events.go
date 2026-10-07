@@ -339,6 +339,7 @@ func buildAgentStreamEventData(event agentctl.AgentEvent) *AgentStreamEventData 
 		Type:                        event.Type,
 		ACPSessionID:                event.SessionID,
 		OperationID:                 event.OperationID,
+		ProtocolMessageID:           event.ProtocolMessageID,
 		Text:                        event.Text,
 		ProviderDiagnosticCandidate: event.ProviderDiagnosticCandidate,
 		ToolCallID:                  event.ToolCallID,

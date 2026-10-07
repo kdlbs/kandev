@@ -1,3 +1,5 @@
+import { mapLatestUserSettingsResponse } from "./user-settings";
+import type { UserSettingsResponse } from "@/lib/types/http-user-settings";
 /* eslint-disable max-lines -- User-settings hydration cases share one contract test file. */
 
 import { describe, it, expect } from "vitest";
@@ -19,6 +21,37 @@ import type { SidebarTaskColorAutomation } from "@/lib/types/http-user-settings"
 
 const UPDATED_AT = "2026-01-01T00:00:00Z";
 const DEFAULT_USER_ID = "default-user";
+
+// @covers AC-UI-NAV-HIERARCHY-004.2, AC-UI-NAV-HIERARCHY-004.6
+it("ignores older preference responses after a newer settings event", () => {
+  const current = { ...createDefaultUserSettings(), revision: 8, sidebarFastActionsEnabled: true };
+  expect(
+    mapLatestUserSettingsResponse(
+      { settings: { revision: 7, sidebar_fast_actions_enabled: false } } as UserSettingsResponse,
+      current,
+    ),
+  ).toBe(current);
+});
+
+it("hydrates sidebar presentation defaults and preserves partial updates", () => {
+  const fresh = createDefaultUserSettings();
+  expect(fresh).toMatchObject({ sidebarFastActionsEnabled: false, sidebarNewTaskStyle: "simple" });
+  const legacy = mapUserSettingsData(
+    Object.assign(
+      {},
+      { sidebar_fast_actions_enabled: true, sidebar_new_task_style: "compact" as const },
+    ),
+    fresh,
+  );
+  expect(legacy).toMatchObject({ sidebarFastActionsEnabled: true, sidebarNewTaskStyle: "compact" });
+  expect(mapUserSettingsData({ app_status_bar_enabled: true }, legacy)).toMatchObject({
+    sidebarFastActionsEnabled: true,
+    sidebarNewTaskStyle: "compact",
+  });
+  expect(
+    mapUserSettingsData(Object.assign({}, { sidebar_fast_actions_enabled: false }), legacy),
+  ).toMatchObject({ sidebarFastActionsEnabled: false, sidebarNewTaskStyle: "compact" });
+});
 
 // @covers AC-UI-LIST-STEP-GROUPING-001.5
 it("hydrates legacy state grouping as workflow step without changing sort", () => {
@@ -610,6 +643,7 @@ describe("mapUserSettingsResponse", () => {
       filters: [],
       sort: { key: "updatedAt", direction: "desc" },
       group: "workflow",
+      groupIndent: true,
       taskRow: {
         detailsEnabled: true,
         detailOrder: ["relative_time", "repository", "pull_request_number"],

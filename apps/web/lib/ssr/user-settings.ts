@@ -104,6 +104,8 @@ export function createDefaultUserSettings(): UserSettingsState {
     messageTimeDisplay: "relative",
     systemMetricsDisplay: { showInTopbar: false, simplified: false },
     appStatusBarEnabled: false,
+    sidebarFastActionsEnabled: false,
+    sidebarNewTaskStyle: "simple",
     sidebarHoverEnabled: true,
     sidebarHoverDelayMs: 500,
     resolveSessionHostnames: false,
@@ -407,6 +409,8 @@ export function buildCoreFields(
       parseAppStatusBarOrder,
     ),
     appStatusBarEnabled: s.app_status_bar_enabled ?? current.appStatusBarEnabled,
+    sidebarFastActionsEnabled: s.sidebar_fast_actions_enabled ?? current.sidebarFastActionsEnabled,
+    sidebarNewTaskStyle: s.sidebar_new_task_style ?? current.sidebarNewTaskStyle,
     sidebarHoverEnabled: s.sidebar_hover_enabled ?? current.sidebarHoverEnabled,
     sidebarHoverDelayMs: s.sidebar_hover_delay_ms ?? current.sidebarHoverDelayMs,
     quickChatTabOrderByWorkspace:
@@ -473,4 +477,13 @@ export function mapUserSettingsResponse(
     revision: s.revision ?? null,
     shellOptions,
   };
+}
+
+/** An older HTTP response must not replace a newer settings event. */
+export function mapLatestUserSettingsResponse(
+  response: UserSettingsResponse,
+  current: UserSettingsState,
+): UserSettingsState {
+  if ((response.settings.revision ?? 0) < (current.revision ?? 0)) return current;
+  return mapUserSettingsResponse(response, current);
 }

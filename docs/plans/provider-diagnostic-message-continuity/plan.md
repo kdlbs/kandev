@@ -1,0 +1,347 @@
+---
+created: 2026-10-06
+status: complete
+requirements:
+  - REQ-PLATFORM-PROVIDER-ERROR-RECOVERY-001
+system_design:
+  - ../../specs/platform/system-design/provider-error-recovery-03.md
+legacy_specs: []
+---
+
+# Implementation Plan: Provider Diagnostic Message Continuity
+
+## Overview
+
+Preserve one assistant message when ordinary prose contains a provider-error
+signature, while retaining per-event recovery evidence. Platform owns this
+repair because its active provider-recovery contract controls diagnostic
+admission and runtime output delivery. Reuse the existing requirement,
+especially acceptance criteria `.20`, `.21`, `.16` and `.23`; no new product
+requirement or classifier policy is needed.
+
+The lifecycle-to-orchestrator separation is implemented as one atomic backend
+slice, and the real ACP, persistence and rendered chat path is proven on desktop
+and phone. The existing design package defines the contract for this work.
+
+## Evidence and assumption check
+
+- The supplied investigation identifies task
+  `69b1f974-3b49-4792-ad2f-8365afb4b355` and session
+  `071361f2-1936-4bc7-a268-97f698bbe4f0`. Its raw trace and SQLite rows were
+  supplied as findings, not independently inspected in this checkout.
+- Historical baseline source confirmed that `convertMessageChunkWithProtocolID`
+  marked assistant chunks using the shared classifier. The classifier accepted
+  `i/o timeout`; `flushMessageBufferOnDiagnosticChange` then cleared
+  `currentMessageID` both before and after publishing the prior segment.
+- Historical temporary real-lifecycle test named
+  `TestReproDiagnosticMarkerKeepsAssistantMessageIdentity` fed four chunks:
+  `934 ` followed by an opening backtick and `dial tcp`, ` <ip>:6379:`,
+  ` i/o timeout` followed by a closing backtick and ` err`, and
+  `ors, meaning the TCP connect failed.`. Markers were false, false, true,
+  false. It failed with **three message IDs instead of one**, with exact
+  concatenated content preserved. It was removed after reproduction.
+- Historical reproduction command for the removed temporary test:
+  `(cd apps/backend && go test -tags fts5
+  ./internal/agent/runtime/lifecycle -run
+  '^TestReproDiagnosticMarkerKeepsAssistantMessageIdentity$' -count=1 -v)`.
+- Historical baseline: `TestHandleMessageChunkEvent_LegacyBufferSplitsOnDiagnosticChange`
+  asserted the accidental split. The implementation removed that contract and
+  replaced it with the permanent identity regression below.
+- Intended outcome: diagnostic candidates remain recovery evidence, and never
+  become message boundaries. Repair only future output. Historical row repair
+  is excluded because rows alone do not prove which splits were accidental.
+- The active criterion `.20` is authoritative over the current buffer-aware
+  implementation. Restore that boundary rather than narrowing a network rule
+  or weakening recovery's matching-error and effect fences.
+
+## Scope
+
+### In scope
+
+- Original, unbuffered assistant and reasoning observations for recovery and
+  foreground progress, under the existing execution/prompt guards.
+- Marker-independent transcript accumulation, coalescing and identity.
+- Genuine-diagnostic, mixed-output, effect, stale-identity and terminal-ordering
+  regressions, plus desktop/mobile live and reloaded transcript evidence.
+
+### Out of scope
+
+- Historical database edits, automatic row merging, markdown parser changes,
+  new transcript metadata or schema, classifier signatures, retry budgets,
+  flag rollout, new providers, and runtime restart of the user's instance.
+- Frontend composition or copy changes. Existing task-chat surfaces render
+  the corrected persisted record; no translation catalog changes are needed.
+- Changes to the completed provider-error-policies and dynamic-routing packages.
+  This repair references their shared contract without reopening their scope.
+
+## Technical approach
+
+### Original-event evidence
+
+In `manager_events.go`, publish eligible `message_chunk` and `reasoning`
+evidence copies through `EventPublisher.PublishAgentStreamEvent` before
+buffering. Retain role, candidate, original text and immutable correlation
+identity. Fill only missing prompt generation at intake. Reasoning copies
+carry `ReasoningText` as `Text`. These backend-only copies have no message ID
+and use the existing session agent-stream carrier and watcher.
+
+In `event_handlers_streaming.go`, observe these original event types under the
+existing guards, update foreground progress only for ordinary output, and
+return without transcript writes or browser broadcasts. Tools retain their
+existing effect observation. Keep lifecycle's terminal evidence snapshot and
+the terminal-ordering reconciliation for asynchronous event-bus delivery.
+
+### Transcript projection
+
+Remove `flushMessageBufferOnDiagnosticChange`, `messageBufferDiagnostic`, and
+marker arguments/state throughout `manager_streaming.go`, `types.go` and
+`stream_coalescer.go`. Stop observing recovery/progress from visible
+`message_streaming` and `thinking_streaming` events: those projections can
+combine differently marked original chunks. Preserve all existing tool,
+completion, response-attempt-reset and explicit protocol-ID boundaries.
+
+| Provider / transport | Identity shape | Intended result | Evidence / unsupported shape |
+| --- | --- | --- | --- |
+| Cursor ACP, ordinary message chunks | No protocol message ID | One assistant record across marker changes | Four-chunk lifecycle regression and inline ACP E2E; no Cursor-specific branch |
+| Shared ACP assistant output | Explicit protocol message ID | Existing stable record mapping across marker changes | Protocol-ID lifecycle table; a changed ID retains its real boundary |
+| Claude / gateway diagnostic | Current execution and prompt generation | Visible diagnostic plus existing matched-error recovery fence | Existing transport replay matrix and orchestrator correlation tests |
+| Native and other normalized output | With or without a protocol ID | Ordinary output observation and established transcript boundaries | Lifecycle table includes absent marker; no new provider capability claim |
+| Old/unmarked agentctl output | Candidate absent | Ordinary output, including error-like prose | Preserve `.20`'s fail-closed direction; do not reclassify downstream |
+| Stale, cancelled or superseded execution | Wrong attempt or generation | Existing guards reject evidence side effects | Terminal-ordering and stale-identity tests |
+
+### Documentation and compatibility
+
+The requirement remains active and unchanged. Update its part-3 design with
+the separation, and record execution results in this package. No new ADR is
+needed: this restores the already documented evidence/transcript boundary.
+Public commands, configuration, terminology and recovery policy do not change,
+so no public documentation edit is required.
+
+## ASCII UI preview
+
+UI-01: Existing task chat at `/t/<task-id>`, after the assistant finishes.
+Content is illustrative; the single message record and complete code span are
+required by `.20`. Existing chat owns scrolling; existing header, composer,
+mobile safe-area handling and actions keep their shipped behavior.
+
+```text
+Current defect (desktop and phone):
+[Assistant] 934 `dial tcp <ip>:6379:
+[Assistant]  i/o timeout` err
+[Assistant] ors, meaning the TCP connect failed.
+
+Corrected desktop:
+[Assistant]
+934 <code>dial tcp <ip>:6379: i/o timeout</code> errors,
+meaning the TCP connect failed.
+[existing message actions]
+
+Corrected phone (existing dedicated Chat surface):
+[Assistant]
+934 <code>dial tcp <ip>:6379:
+i/o timeout</code> errors,
+meaning the TCP connect failed.
+[existing message actions]
+```
+
+The phone still has one card and both complete inline code elements; wrapping
+uses existing markdown styles. The nearest exemplar is
+`mobile-markdown-separators.spec.ts`, which proves direct task navigation,
+rendering, reload and document containment without introducing a new surface.
+The drawing specifies structure, not exact line breaks or pixels.
+
+## Tests
+
+| Acceptance | Required test and evidence |
+| --- | --- |
+| `.20` | `provider_diagnostic_transition_test.go`: new `TestHandleMessageChunkEvent_DiagnosticMarkerKeepsMessageIdentity`, with ID-less/protocol-ID, newline and repeated-marker cases; exact joined text, one create and stable append IDs |
+| `.20`, `.21` | `provider_diagnostic_accumulation_test.go`: original-event markers/text/order survive exactly; transcript projection carries no candidate and does not generate duplicate evidence |
+| `.16`, `.21`, `.23` | `event_handlers_streaming_provider_diagnostic_test.go`: raw marked diagnostic followed by matching terminal error, ordinary assistant/thought clearing, earlier output and tool effects; transcript-only projection does not clear a genuine diagnostic |
+| `.16`, `.20`, `.23` | Existing `dynamic_evidence_diagnostic_correlation_test.go` and `replay_fixture_evidence_test.go`: containment, first diagnostic retained, mismatched and stale failures remain unsafe |
+| `.16`, `.20`, `.21` | `dynamic_evidence_terminal_ordering_test.go`: delayed bus consumption and immutable terminal evidence remain safe; no assumption of synchronous publication |
+| `.20` | `stream_coalescer_test.go` and existing lifecycle streaming tests: preserve order and prompt/attempt/message correlation keys after removing diagnostic key |
+| `.17` to `.19` | Existing ACP `replay_fixture_test.go` and `replay_fixture_queued_test.go`: original classifier and prompt drain remain unchanged |
+
+## E2E tests
+
+Add desktop `tests/chat/provider-diagnostic-continuity.spec.ts` and phone
+`tests/chat/mobile-provider-diagnostic-continuity.spec.ts`, with a shared
+`provider-diagnostic-continuity-helpers.ts`. Use existing multiline
+`e2e:message(...)` commands to emit exact separate ACP chunks; do not seed an
+already combined assistant row. Create a disposable task, open its route
+directly, and check the completed message and API storage before and after
+reload. Assert one relevant assistant row/card, both full inline code elements,
+intact `errors`, and absence of a retry notice on this successful turn. Phone
+also checks document containment. This proves `.20` and the visible part of
+`.21`; backend tests prove actual recovery admission under `.16` and `.23`.
+
+## Work orders
+
+- [x] [Task 01: Separate output evidence from transcript buffering](task-01-separate-evidence-and-transcript.md)
+- [x] [Task 02: Prove desktop and phone continuity through ACP](task-02-prove-chat-continuity.md)
+
+Both run sequentially. Task 02 depends on Task 01. Each work order owns its
+exact commands; no extra broad audit is scheduled.
+
+## Verification results
+
+The permanent test `TestHandleMessageChunkEvent_DiagnosticMarkerKeepsMessageIdentity`
+first failed before production changes with three IDs for one assistant
+message and exact joined text. It now passes with one stable identity, while
+protocol IDs, newline flushes, and real tool boundaries retain their own
+identity behavior.
+
+The named regression passed on the host with task-owned `GOCACHE`. The exact
+three-package race suite passed in a task-owned writable Linux container using
+the Go 1.26 CI builder image, a byte-verified no-local checkout, a private Git
+config, and `TMPDIR=/tmp`:
+
+- `(cd apps/backend && go test -tags fts5 ./internal/agent/runtime/lifecycle -run '^TestHandleMessageChunkEvent_DiagnosticMarkerKeepsMessageIdentity$' -count=1 -v)` with `GOCACHE=/private/tmp/kandev-provider-diagnostic-go-cache`: passed.
+- `(cd apps/backend && go test -race -tags fts5 ./internal/agent/runtime/lifecycle ./internal/orchestrator ./internal/agentctl/server/adapter/transport/acp -count=1)`: passed; lifecycle 219.463s, orchestrator 105.202s, ACP transport 21.881s.
+
+Initial full race attempts found lifecycle fixtures that still expected
+transcript-only events. They were updated to assert original evidence alongside
+transcript projections and to check the reset's retracted message identities.
+The remaining runner attempts exposed environment constraints: the macOS
+sandbox blocked writes to the shared Git config, represented its temporary
+root through a noncanonical `/var` path, and restricted process inspection and
+`/dev/fd/3` in retained-worktree tests. The first Linux attempt used a read-only
+worktree mount with an external host `.git` pointer, so Git fixture tests could
+not access or update checkout metadata; its nested helper build also exceeded
+its two-minute timeout while compiling cold. The final Linux run used a
+writable, self-contained clone and warmed the nested helper build. It ran the
+unfiltered required package command to pass; no tests were excluded or
+suppressed by the command.
+
+Desktop and phone E2E passed sequentially after Prettier and focused ESLint:
+
+- `(cd apps/web && pnpm e2e:run --project chromium tests/chat/provider-diagnostic-continuity.spec.ts)`: passed, 26.2s.
+- `(cd apps/web && pnpm e2e:run --project mobile-chrome tests/chat/mobile-provider-diagnostic-continuity.spec.ts)`: passed, 29.9s.
+
+Design-package validation on 2026-10-06:
+
+- `python3 scripts/list-docs.py validate`: passed, 355 decisions and 1394
+  specifications validated.
+- `python3 scripts/lint-spec-files.py --all`: passed.
+- `python3 scripts/lint-spec-files.test.py`: passed, 36 tests.
+- Historical pre-implementation `.github/scripts/pr-docs.cjs`
+  `validateCoverage` preflight: `covered`, both work orders accepted with no
+  errors. It included the planned `manager_events.go` path as a synthetic
+  trigger to validate REQ/AC/design/plan linkage before production changes.
+- Final checks after implementation and status edits: `python3
+  scripts/list-docs.py validate` passed (355 decisions and 1394 specifications);
+  `python3 scripts/lint-spec-files.py --all` passed; `gofmt -l` reported no
+  changed Go files; `git diff --check` passed; focused Prettier and ESLint
+  checks passed for all three new E2E files.
+
+## Earlier stream-reset PR review remediation at head 542ab1d
+
+The exact-head review found that raw provider-stream events synchronously
+performed route-state reads and writes to clear the dynamic unclassified
+streak. A persistence failure left the reset retryable, so each later chunk
+could repeat database work and stall transcript delivery. The fix keeps output
+and effect evidence synchronous and in memory, while coalescing one reset
+intent per session. It persists only at tool-call, terminal-failure,
+completion, explicit-stop, or replacement-prompt boundaries. Failed resets
+remain pending and prevent automatic fallback until safely cleared; route,
+prompt-generation, and manager-owned completion checks prevent stale writes.
+Successful session deletion retires pending state only after the repository
+delete succeeds.
+
+Focused race regressions cover zero repository access on raw chunks while a
+read is blocked, stable joined transcript content, boundary retry after
+persistence failure, same-route carryover across prompt replacement, stale
+route/profile rejection, generation-owned completion, and pending-state
+retention on failed deletion. The deletion test first failed because the
+successful-delete path retained its intent, then passed after cleanup was
+added. CI reported a process-goroutine reap timeout in
+`TestHandleWSInitializeCarriesExactProcessEvidence`. The named test passed in
+the complete count-one package run, and a targeted count-20 run also passed.
+Two count-three package attempts exceeded Go's default ten-minute suite timeout
+while continuing through independent Git tests. The count-one package run below
+used the same race and coverage flags with a test-only 20-minute timeout and
+passed in 736.225s with 77.7% statement coverage, so the earlier timeouts do
+not indicate a cleanup defect.
+
+The first post-review three-package attempt hit the two-minute helper-build
+guard in `TestCheckoutCredentialEnvironmentRealGitPath` because its nested
+`agentctl` build cache was cold. The test's next helper build passed after
+warming that cache. A standalone warm build with the exact helper flags and
+task-owned environment passed; the final unfiltered three-package rerun then
+passed without changing test timeouts or excluding tests.
+
+Stream-reset PR-fixup verification at head 542ab1d:
+
+- In the retained Go 1.26 Linux container, `go test -json -race -trimpath -tags fts5 ./internal/agent/runtime/lifecycle ./internal/orchestrator ./internal/agentctl/server/adapter/transport/acp -count=1` passed: lifecycle 228.145s, orchestrator 109.508s, ACP transport 22.028s. JSON receipt: `/private/tmp/kpd-provider-diagnostic-backend-final2.jsonl`. The one cold-helper attempt is retained separately at `/private/tmp/kpd-provider-diagnostic-backend-cold-helper.jsonl`.
+- With `GOCACHE=/tmp/kpd-api-cache`, `TMPDIR=/tmp`, and task-owned `GIT_CONFIG_GLOBAL`, `go test -json -race -coverprofile=/tmp/kpd-api-package-count1.out -covermode=atomic -timeout=20m -count=1 ./internal/agentctl/server/api` passed in 736.225s with 77.7% coverage. Its JSON and coverage are retained at `/private/tmp/kpd-api-package-count1.jsonl` and `/private/tmp/kpd-api-package-count1.out`.
+- `go test -race -trimpath -run '^(TestSessionDeletionRetiresPendingStreakResetOnlyAfterDeleteSucceeds|TestPendingStreakResetSurvivesPromptReplacementBeforeNoOutputFailure|TestStalePendingStreakResetDoesNotWriteSuccessorRoute|TestUncapturedResetCannotCrossReusedExecutionPromptOrRoute|TestUncapturedResetReadFailureRetainsManualRecoveryFence|TestOwnedSuccessfulCompletionClearsUncapturedPriorReset|TestCompletedGenerationOwnsStreakResetAfterStreamEvidenceRetires|TestCompletionResetPersistenceFailureRetainsPendingIntent|TestRawOutputChunksDeferUnclassifiedStreakResetAndKeepTranscriptIdentity)$' -count=1 ./internal/orchestrator`: passed in 4.093s.
+- `golangci-lint run ./... --new-from-rev=d62824ad2895616e1b97f876c9546786565f61d1 --timeout=5m`: passed with 0 issues using task-owned cache `/private/tmp/kandev-provider-diagnostic-golangci-cache`. Delivery-checkout lint against the captured live main tip `95c040e84951773dc8ed6f684fff0425d7b63f96` at that run also passed with 0 issues; receipt `/private/tmp/kpd-delivery-golangci.log`.
+- `python3 scripts/list-docs.py validate`, `python3 scripts/lint-spec-files.py --all`, `git diff --check`, and `gofmt -l` on changed Go files: passed after the final receipt update. Focused Prettier and ESLint passed for all three E2E files.
+
+## Cancelled-startup teardown remediation after head 542ab1d
+
+The next backend CI attempt failed
+`TestDynamicRelaunchCreatedSessionCarriesRecoveryAttemptIdentity`: service
+cancellation and a late successful `StartAgentProcess` result each stopped the
+same execution. The test now forces that order with a startup barrier and joins
+the executor's completion signal before asserting exactly one stop. Both
+cancellation and late-startup cleanup use the same exact-execution teardown
+claim. A failed stop releases only its captured claim for retry; successful
+cleanup completes the claim. The attempt identity is rechecked while holding
+the session guard, preventing a queued stale cleanup from stopping a successor
+that reused the execution ID.
+
+The initial behavior RED passed through both cleanup paths and produced two
+stops. A separate RED proved a failed stop left a claim that blocked retry:
+`/private/tmp/kpd-dynamic-attempt-red.json` and
+`/private/tmp/kpd-cleanup-retry-red.json`. A queued cleanup also reproduced a
+same-execution replacement race after waiting on the session guard
+(`/private/tmp/kpd-cleanup-toctou-red.json`). Another RED showed that a resume
+could replace the cancelled owner while its claimed `StopExecution` was still
+blocked (`/private/tmp/kpd-cleanup-admission-red.json`). The fix revalidates
+attempt ownership under the guard, registers a per-session in-flight fence with
+the exact teardown claim, releases the guard during runtime stop, and makes
+normal resume admission wait outside the guard before revalidating. Failed
+stops release only their exact claim and fence, allowing retry. The fence adds
+no UI cancellation projection and never grants an old cleanup authority over a
+successor.
+
+Focused cleanup regressions passed in the retained Linux container with
+`-race -trimpath -tags fts5 -covermode=atomic -count=1`, covering duplicate
+startup cleanup, failed-stop retry, same-ID replacement, stale callback
+revalidation after guard wait, admission during blocked teardown, exact cleanup
+delegation, and Office terminal-failure ownership. JSON receipt:
+`/private/tmp/kpd-cleanup-focused-current.json`
+(SHA-256 `f07a3d04c09e4c1293dac9959dcf3fadf7e12d31ff33f74e36b9839409298d11`).
+The complete orchestrator and executor packages then passed the current-tree
+race/coverage run with no excluded tests. Orchestrator passed in 112.020s at
+77.4% statement coverage; executor passed in 85.141s. Command:
+`go test -race -trimpath -tags fts5 -coverprofile=/tmp/kpd-cleanup-full-current.cover -covermode=atomic -json -count=1 ./internal/orchestrator ./internal/orchestrator/executor`.
+JSON receipt: `/private/tmp/kpd-cleanup-full-current.json` (SHA-256
+`17d0e02b30685ae54536a0d5d969d68e7095b6258882067d33d7da86a4a2b49e`); coverage
+receipt: `/private/tmp/kpd-cleanup-full-current.cover` (SHA-256
+`2df11d672a58c1241668491f4d3263faa0e66d9accdd6ab22a730cddce18f08d`).
+
+An earlier full-package run exposed an asynchronous Office cleanup assertion
+that inspected stop calls before joining the successor worker. The regression
+now joins that owned worker before asserting the terminal owner and no-fallback
+contract; the current complete suite passed. Captured-base lint against
+`05c41b11e830a9861534200949c3bbac473b57f7` passed with 0 issues. Final docs,
+format, and whitespace checks passed: `python3 scripts/list-docs.py validate`
+(355 decisions and 1394 specifications), `python3 scripts/lint-spec-files.py
+--all`, `git diff --check`, and `gofmt -l` on changed Go files. The previous
+section's API, lifecycle and browser receipts describe only the stream-reset
+fix at head `542ab1d`; the cleanup receipts here are subsequent CI fixup work.
+
+## Risks
+
+- Observing both raw evidence and transcript projections would count output
+  twice and clear a real diagnostic. Switch producers and consumers atomically.
+- The additional uncoalesced evidence traffic stays backend-only. Keep it free
+  of persistence, generic text logs and browser broadcasts; retain streaming
+  teardown and correlation-key tests.
+- Async terminal delivery can precede stream consumption. Preserve immutable
+  terminal snapshots and prove this ordering, rather than relying on the
+  synchronous tracking test bus.
+- Historical broken records remain broken. No data repair is authorized by this
+  package; future response correctness is independently verifiable.

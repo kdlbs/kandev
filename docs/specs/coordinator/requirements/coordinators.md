@@ -6,7 +6,7 @@ system: coordinator
 owners:
   - kandev
 created: 2026-09-26
-last_updated: 2026-09-28
+last_updated: 2026-10-06
 ---
 
 # Coordinators in a workspace Requirements
@@ -179,6 +179,16 @@ Mockup:
   shall not say or imply that a manager approves every action a coordinator
   takes, because the MCP guard enforces only the Kandev surface
   (`AC-COORDINATOR-PROPOSALS-002.15`).
+- **AC-COORDINATOR-COORDINATORS-004.8:** When the settings list loads or
+  refreshes, only the newest read belonging to its current workspace and live
+  settings-state owner shall update its rows, loaded state, error or loading
+  state. A read superseded by another read, a workspace change (including a
+  return to a previously loaded workspace), removal of the list consumer or
+  replacement of its state owner shall have no effect when it later succeeds
+  or fails. Coordinator links shall never combine another workspace's rows
+  with the current workspace's URL. Cached current rows shall remain usable;
+  a current load failure shall retain the error and Retry behavior rather than
+  become a successful empty list. This applies equally on desktop and phone.
 
 ### REQ-COORDINATOR-COORDINATORS-005: Missing profile
 

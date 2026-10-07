@@ -360,15 +360,13 @@ type Adapter struct {
 
 // promptTurnState holds synchronization for one in-flight session/prompt RPC.
 type promptTurnState struct {
-	endTurn          context.CancelCauseFunc
-	rpcDone          chan struct{}
-	abortCh          chan struct{}
-	handoffCh        chan struct{}
-	providerErrorCh  chan openCodeStderrDiagnostic
-	promptGeneration uint64
-	evidenceMu       sync.Mutex
-	// observedOutputOrEffect marks a turn whose failure must follow stream activity.
-	observedOutputOrEffect      bool
+	endTurn                     context.CancelCauseFunc
+	rpcDone                     chan struct{}
+	abortCh                     chan struct{}
+	handoffCh                   chan struct{}
+	providerErrorCh             chan openCodeStderrDiagnostic
+	promptGeneration            uint64
+	evidenceMu                  sync.Mutex
 	codexSystemError            bool
 	codexCapacity               bool
 	codexUsageLimit             *streams.ProviderError
@@ -387,24 +385,6 @@ type promptTurnState struct {
 	handedOff                   bool
 	gateOwned                   bool
 	finishing                   bool
-}
-
-func (t *promptTurnState) observeOutputOrEffect() {
-	if t == nil {
-		return
-	}
-	t.evidenceMu.Lock()
-	t.observedOutputOrEffect = true
-	t.evidenceMu.Unlock()
-}
-
-func (t *promptTurnState) outputOrEffectObserved() bool {
-	if t == nil {
-		return false
-	}
-	t.evidenceMu.Lock()
-	defer t.evidenceMu.Unlock()
-	return t.observedOutputOrEffect
 }
 
 func (t *promptTurnState) observeCodexEvidence(systemError, capacity bool) {

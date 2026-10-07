@@ -249,6 +249,7 @@ export function useContextFiles(resolvedSessionId: string | null) {
   const removeContextFile = useContextFilesStore((s) => s.removeFile);
   const unpinFile = useContextFilesStore((s) => s.unpinFile);
   const clearEphemeral = useContextFilesStore((s) => s.clearEphemeral);
+  const consumeSubmittedEphemeral = useContextFilesStore((s) => s.consumeSubmittedEphemeral);
 
   useEffect(() => {
     if (resolvedSessionId) hydrateContextFiles(resolvedSessionId);
@@ -274,6 +275,7 @@ export function useContextFiles(resolvedSessionId: string | null) {
     removeContextFile,
     unpinFile,
     clearEphemeral,
+    consumeSubmittedEphemeral,
     handleToggleContextFile,
     handleAddContextFile,
   };

@@ -185,9 +185,8 @@ func TestForegroundActivitySignal_PublishesOnFlips(t *testing.T) {
 		TaskID:    taskID,
 		SessionID: sessionID,
 		Data: &lifecycle.AgentStreamEventData{
-			Type:      "message_streaming",
-			MessageID: "m1",
-			Text:      "still working on it",
+			Type: "message_chunk",
+			Text: "still working on it",
 		},
 	})
 
@@ -439,9 +438,8 @@ func TestForegroundActivitySignal_PropagatesToTaskLevel(t *testing.T) {
 		TaskID:    taskID,
 		SessionID: sessionID,
 		Data: &lifecycle.AgentStreamEventData{
-			Type:      "message_streaming",
-			MessageID: "m1",
-			Text:      "still working on it",
+			Type: "message_chunk",
+			Text: "still working on it",
 		},
 	})
 
@@ -537,20 +535,18 @@ func TestForegroundActivitySignal_SamePromptOutputAfterIdleDoesNotInvalidateComp
 	}{
 		{
 			name:       "final assistant output",
-			outputType: "message_streaming",
+			outputType: "message_chunk",
 			outputData: &lifecycle.AgentStreamEventData{
-				Type:      "message_streaming",
-				MessageID: "message-1",
-				Text:      "final answer",
+				Type: "message_chunk",
+				Text: "final answer",
 			},
 		},
 		{
 			name:       "final thinking output",
-			outputType: "thinking_streaming",
+			outputType: "reasoning",
 			outputData: &lifecycle.AgentStreamEventData{
-				Type:      "thinking_streaming",
-				MessageID: "thinking-1",
-				Text:      "final reasoning",
+				Type: "reasoning",
+				Text: "final reasoning",
 			},
 		},
 		{

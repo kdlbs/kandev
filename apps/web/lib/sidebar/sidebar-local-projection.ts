@@ -6,9 +6,18 @@ import { repositoryId } from "@/lib/types/ids";
 import { getStateBucket } from "./effective-task-tree-state";
 import { matchesSidebarClause } from "./sidebar-local-filter";
 import { sqliteBinary } from "./sidebar-local-order";
+import { repositoryIdentityForSavedRepository } from "./repository-rule-identity";
 
 export type LocalSidebarMetadata = Pick<AppState, "repositories" | "workflows" | "kanbanMulti">;
 export type LocalSidebarTask = TaskSwitcherItem & { overview: TaskOverview };
+type LocalSidebarLookups = {
+  repos: Map<
+    string,
+    NonNullable<LocalSidebarMetadata["repositories"]["itemsByWorkspaceId"][string]>[number]
+  >;
+  workflows: Map<string, LocalSidebarMetadata["workflows"]["items"][number]>;
+  metadata: LocalSidebarMetadata;
+};
 
 export function sidebarCandidate(task: TaskOverview): boolean {
   const config = task.metadata?.config_mode;
@@ -24,48 +33,76 @@ export function projectLocalSidebarTasks(
     (metadata.repositories.itemsByWorkspaceId[workspaceId] ?? []).map((repo) => [repo.id, repo]),
   );
   const workflows = new Map(metadata.workflows.items.map((workflow) => [workflow.id, workflow]));
-  return tasks.filter(sidebarCandidate).map((task) => {
-    const links = [...(task.repositories ?? [])].sort(
-      (a, b) => a.position - b.position || sqliteBinary(a.id, b.id),
-    );
-    const ids = [...new Set(links.map((link) => link.repository_id))];
-    const names = ids.flatMap((id) => {
-      const repo = repos.get(repositoryId(id));
-      return repo
-        ? [
-            repo.provider_owner && repo.provider_name
-              ? `${repo.provider_owner}/${repo.provider_name}`
-              : repo.name,
-          ]
-        : [];
-    });
-    const summary = task.statusSummary;
-    const step = metadata.kanbanMulti.snapshots[task.workflowId]?.steps.find(
-      (candidate) => candidate.id === task.workflowStepId,
-    );
-    return {
-      overview: task,
-      id: task.id,
-      title: task.title,
-      state: task.state,
-      workspaceId: task.workspaceId,
-      workflowId: task.workflowId,
-      workflowName: workflows.get(task.workflowId)?.name || "undefined",
-      workflowStepId: task.workflowStepId,
-      workflowStepTitle: step?.title || "undefined",
-      workflowStepColor: step?.color,
-      parentTaskId: task.parentTaskId ?? undefined,
-      isArchived: task.isArchived,
-      sessionState: summary?.primary_session?.state,
-      remoteExecutorType: task.primaryExecutorType ?? undefined,
-      repositoryLinks: links,
-      repositories: names,
-      repositoryPath: names[0],
-      createdAt: task.createdAt,
-      updatedAt: task.updatedAt,
-      lastActivityAt: summary?.last_activity_at || task.updatedAt || task.createdAt,
-    };
+  const lookups = { repos, workflows, metadata };
+  return tasks.filter(sidebarCandidate).map((task) => projectLocalSidebarTask(task, lookups));
+}
+
+function repositoryNames(ids: string[], repos: LocalSidebarLookups["repos"]): string[] {
+  return ids.flatMap((id) => {
+    const repo = repos.get(repositoryId(id));
+    if (!repo) return [];
+    return [
+      repo.provider_owner && repo.provider_name
+        ? `${repo.provider_owner}/${repo.provider_name}`
+        : repo.name,
+    ];
   });
+}
+
+function repositoryIdentities(ids: string[], repos: LocalSidebarLookups["repos"]) {
+  return ids.flatMap((id) => {
+    const repository = repos.get(repositoryId(id));
+    return repository ? [repositoryIdentityForSavedRepository(repository)] : [];
+  });
+}
+
+function localRepositoryLinks(task: TaskOverview) {
+  return [...(task.repositories ?? [])].sort(
+    (a, b) => a.position - b.position || sqliteBinary(a.id, b.id),
+  );
+}
+
+function localTaskLastActivity(task: TaskOverview): string | undefined {
+  return task.statusSummary?.last_activity_at || task.updatedAt || task.createdAt;
+}
+
+function projectLocalSidebarTask(
+  task: TaskOverview,
+  lookups: LocalSidebarLookups,
+): LocalSidebarTask {
+  const links = localRepositoryLinks(task);
+  const ids = [...new Set(links.map((link) => link.repository_id))];
+  const names = repositoryNames(ids, lookups.repos);
+  const summary = task.statusSummary;
+  const step = lookups.metadata.kanbanMulti.snapshots[task.workflowId]?.steps.find(
+    (candidate) => candidate.id === task.workflowStepId,
+  );
+  return {
+    overview: task,
+    id: task.id,
+    title: task.title,
+    state: task.state,
+    workspaceId: task.workspaceId,
+    workflowId: task.workflowId,
+    workflowName: lookups.workflows.get(task.workflowId)?.name || "undefined",
+    workflowStepId: task.workflowStepId,
+    workflowStepTitle: step?.title || "undefined",
+    workflowStepColor: step?.color,
+    priority: task.priority,
+    origin: task.origin,
+    primaryExecutorProfileId: task.primaryExecutorProfileId ?? undefined,
+    parentTaskId: task.parentTaskId ?? undefined,
+    isArchived: task.isArchived,
+    sessionState: summary?.primary_session?.state,
+    remoteExecutorType: task.primaryExecutorType ?? undefined,
+    repositoryLinks: links,
+    repositoryRuleIdentities: repositoryIdentities(ids, lookups.repos),
+    repositories: names,
+    repositoryPath: names[0],
+    createdAt: task.createdAt,
+    updatedAt: task.updatedAt,
+    lastActivityAt: localTaskLastActivity(task),
+  };
 }
 
 export function matchesLocalSidebarTask(

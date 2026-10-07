@@ -38,18 +38,22 @@ The first proposed milestone contains three independent outcomes:
 The milestone is complete when those outcomes have merged evidence or an explicit deferred decision with a reason.
 Backups and disk usage follow the database result. Broad task/session migration is not part of this milestone.
 
-| Priority | Item                                  | Status   | Next action                                                         |
-| -------- | ------------------------------------- | -------- | ------------------------------------------------------------------- |
-| 1        | `QUERY-02`: database statistics       | Proposed | Map consumers and approve a mutable-resource cache design           |
-| 2        | `DEP-01`: next typed slice            | Proposed | Select one small slice after reading its setter/getter dependencies |
-| 3        | `DEP-02`: Office alias consumers      | Proposed | Group consumers and record removal evidence per alias               |
-| 4        | `LINT-01`: library Query checks       | Proposed | Evaluate existing plugin rules before custom scanners               |
-| 5        | `QUERY-03`: backup list and mutations | Proposed | Inventory mutation invalidation and reload callers                  |
-| 6        | `QUERY-04`: disk usage and job events | Proposed | Design the first bounded Query/WS reconciliation path               |
+| Priority | Item                                  | Status      | Next action                                                                     |
+| -------- | ------------------------------------- | ----------- | ------------------------------------------------------------------------------- |
+| 1        | `QUERY-02`: database statistics       | In progress | Assigned to [Carlos Florêncio][query02-assignee]; complete [#4225][query02-pr]. |
+| 2        | `DEP-01`: next typed slice            | Proposed    | Select one small slice after reading its setter/getter dependencies             |
+| 3        | `DEP-02`: Office alias consumers      | Proposed    | Group consumers and record removal evidence per alias                           |
+| 4        | `LINT-01`: library Query checks       | Proposed    | Evaluate existing plugin rules before custom scanners                           |
+| 5        | `QUERY-03`: backup list and mutations | Proposed    | Inventory mutation invalidation and reload callers                              |
+| 6        | `QUERY-04`: disk usage and job events | Proposed    | Design the first bounded Query/WS reconciliation path                           |
 
 These IDs identify backlog entries, not requirements or work orders.
 `Proposed` means no implementation assignment exists.
 Use `planned` only with a reviewed delivery package, `in_progress` with an assignee, and `done` with a merged PR.
+
+[query02-assignee]: https://github.com/carlosflorencio
+[query02-pr]: https://github.com/kdlbs/kandev/pull/4225
+
 Use `blocked` or `deferred` with a reason and a next review date.
 
 ## Maintenance procedure

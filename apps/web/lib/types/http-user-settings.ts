@@ -18,8 +18,14 @@ export type SidebarViewApi = {
   id: string;
   name: string;
   filters: Array<{ id: string; dimension: string; op: string; value: unknown }>;
-  sort: { key: string; direction: string };
+  sort: {
+    key: string;
+    direction: string;
+    color?: string;
+    then_by?: Array<{ key: string; direction: string; color?: string }>;
+  };
   group: string;
+  group_indent?: boolean;
   collapsed_groups: string[];
   task_row?: SidebarTaskRowPresentationApi | null;
 };
@@ -27,8 +33,14 @@ export type SidebarViewApi = {
 export type SidebarViewDraftApi = {
   base_view_id: string;
   filters: Array<{ id: string; dimension: string; op: string; value: unknown }>;
-  sort: { key: string; direction: string };
+  sort: {
+    key: string;
+    direction: string;
+    color?: string;
+    then_by?: Array<{ key: string; direction: string; color?: string }>;
+  };
   group: string;
+  group_indent?: boolean;
   task_row?: SidebarTaskRowPresentationApi | null;
 };
 
@@ -173,6 +185,8 @@ export type SidebarLayoutNodeApi = {
 };
 
 export type SidebarLayoutApi = {
+  navigation_height?: number;
+  navigation_expanded?: boolean;
   version: number;
   revision: number;
   nodes: SidebarLayoutNodeApi[];
@@ -246,6 +260,8 @@ export type UserSettings = {
   message_time_display?: MessageTimeDisplay;
   system_metrics_display?: { show_in_topbar?: boolean; simplified?: boolean };
   app_status_bar_enabled?: boolean;
+  sidebar_fast_actions_enabled?: boolean;
+  sidebar_new_task_style?: "simple" | "compact";
   sidebar_hover_enabled?: boolean;
   sidebar_hover_delay_ms?: number;
   resolve_session_hostnames?: boolean;
@@ -338,6 +354,8 @@ export type UserSettingsUpdatePayload = {
   message_time_display?: MessageTimeDisplay;
   system_metrics_display?: { show_in_topbar?: boolean; simplified?: boolean };
   app_status_bar_enabled?: boolean;
+  sidebar_fast_actions_enabled?: boolean;
+  sidebar_new_task_style?: "simple" | "compact";
   sidebar_hover_enabled?: boolean;
   sidebar_hover_delay_ms?: number;
   resolve_session_hostnames?: boolean;
