@@ -1142,7 +1142,7 @@ func (h *TaskHandlers) httpCreateTask(c *gin.Context) {
 		Autopilot:                             body.Autopilot,
 		Priority:                              body.Priority,
 		State:                                 body.State,
-		Repositories:                          convertToServiceRepos(repos),
+		Repositories:                          convertCreateServiceRepositories(body.Repositories != nil, repos),
 		Position:                              body.Position,
 		Metadata:                              metadata,
 		DeferredLaunch:                        deferredLaunch,

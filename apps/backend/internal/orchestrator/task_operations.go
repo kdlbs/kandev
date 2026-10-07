@@ -476,6 +476,7 @@ func (s *Service) PrepareTaskSession(ctx context.Context, taskID string, agentPr
 				return
 			}
 			launchOwned = true
+			s.markWorkspaceGroupMaterialized(bgCtx, taskID)
 			if prepExec != nil {
 				s.ensureSessionPRWatch(bgCtx, taskID, prepExec.SessionID, prepExec.WorktreeBranch)
 			}
@@ -1950,6 +1951,7 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 		return nil, s.handleSessionLaunchFailure(ctx, taskID, sessionID, failPreparedLaunch(err))
 	}
 
+	s.markWorkspaceGroupMaterialized(ctx, taskID)
 	s.postLaunchStart(ctx, taskID, execution, effectivePrompt, planModeActive || configMode, planModeActive, autoStart, attachments)
 	execution.TurnID = initialTurnID
 	s.clearTaskLaunchErrorIfStamp(ctx, taskID, launchErrorStamp)

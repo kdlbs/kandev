@@ -196,7 +196,7 @@ func (h *TaskHandlers) wsCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 		Autopilot:                   req.Autopilot,
 		Priority:                    req.Priority,
 		State:                       req.State,
-		Repositories:                convertToServiceRepos(repos),
+		Repositories:                convertCreateServiceRepositories(req.Repositories != nil, repos),
 		Position:                    req.Position,
 		Metadata:                    req.Metadata,
 		DeferredLaunch:              deferredLaunch,

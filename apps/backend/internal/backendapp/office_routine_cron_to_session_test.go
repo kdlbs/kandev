@@ -593,11 +593,13 @@ func TestRoutine_CronFire_LightweightReachesSession(t *testing.T) {
 }
 
 // stubAgentManager implements executor.AgentManagerClient with just enough
-// behavior for LaunchAgent: capture the request and let the test proceed.
-// Every other method is a mechanical zero-value stub — the launch path this
-// test drives never reaches them.
+// behavior for LaunchAgent: capture the request and optionally delegate to a
+// real lifecycle adapter. Every other method is a mechanical zero-value stub.
 type stubAgentManager struct {
-	launched chan *executor.LaunchAgentRequest
+	launched       chan *executor.LaunchAgentRequest
+	launchDelegate interface {
+		LaunchAgent(context.Context, *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error)
+	}
 }
 
 func newStubAgentManager() *stubAgentManager {
@@ -615,8 +617,11 @@ func (m *stubAgentManager) awaitLaunch(t *testing.T) *executor.LaunchAgentReques
 	}
 }
 
-func (m *stubAgentManager) LaunchAgent(_ context.Context, req *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error) {
+func (m *stubAgentManager) LaunchAgent(ctx context.Context, req *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error) {
 	m.launched <- req
+	if m.launchDelegate != nil {
+		return m.launchDelegate.LaunchAgent(ctx, req)
+	}
 	return &executor.LaunchAgentResponse{AgentExecutionID: "exec-" + req.SessionID}, nil
 }
 

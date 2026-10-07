@@ -396,6 +396,9 @@ func (a *lifecycleAdapter) LaunchAgent(ctx context.Context, req *executor.Launch
 		requestedBaseBranch = execution.PrepareResult.RequestedBaseBranch
 		baseBranch = execution.PrepareResult.BaseBranch
 		baseBranchFallbackWarning = execution.PrepareResult.BaseBranchFallbackWarning
+		if worktreePath == "" && execution.PrepareResult.WorktreeID != "" && len(execution.PrepareResult.Worktrees) == 0 {
+			worktreePath = execution.PrepareResult.WorkspacePath
+		}
 	}
 	if execution.PrepareResult != nil && len(execution.PrepareResult.Worktrees) > 0 {
 		worktrees = make([]executor.RepoWorktreeResult, 0, len(execution.PrepareResult.Worktrees))

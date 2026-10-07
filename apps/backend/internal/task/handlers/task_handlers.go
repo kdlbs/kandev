@@ -375,3 +375,13 @@ func convertUpdateRepositories(provided bool, repos []dto.TaskRepositoryInput) [
 	}
 	return convertToServiceRepos(repos)
 }
+
+// convertCreateRepositories keeps an omitted selection distinct from an
+// explicitly empty one. Omission allows project defaults to apply; an empty
+// selection creates a task without repositories.
+func convertCreateServiceRepositories(provided bool, repos []dto.TaskRepositoryInput) []service.TaskRepositoryInput {
+	if !provided {
+		return nil
+	}
+	return convertToServiceRepos(repos)
+}
