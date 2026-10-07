@@ -155,7 +155,9 @@ Use a small Discard-local parser. Porcelain v1 NUL records are `XY SP destinatio
 rename/copy records additionally carry `source NUL`, in that order. Preserve bytes without
 trimming, newline splitting, C-unquoting or arrow interpretation. Consume both paths for
 R/C records, but authorize source restoration only for index-status R; a selected worktree-only
-rename is unsupported. Detect malformed
+rename is unsupported. Count both endpoints of every R/C record when checking overlap, so
+a copy sharing a selected rename endpoint refuses the request. Copy-only endpoints do not
+trigger rename alias discovery or authorize source restoration. Detect malformed
 framing, empty endpoints and duplicate/conflicting endpoint associations rather than
 falling through to an added-file removal. The existing runner combines stdout/stderr;
 unexpected diagnostic bytes must fail framing, not become filenames or a successful pair.

@@ -65,7 +65,7 @@ func (g *GitOperator) discardRenamePathIdentities(ctx context.Context, paths []s
 	identities := make(map[string]string, len(paths))
 	for _, rawPath := range paths {
 		identity := filepath.ToSlash(filepath.Clean(rawPath))
-		if identity == rawPath || status.uses[identity] == 0 {
+		if identity == rawPath || !status.hasRenameEndpoint(identity) {
 			identities[rawPath] = rawPath
 			continue
 		}
@@ -85,6 +85,15 @@ func (g *GitOperator) discardRenamePathIdentities(ctx context.Context, paths []s
 		identities[rawPath] = identity
 	}
 	return identities, nil
+}
+
+func (status discardRenameStatus) hasRenameEndpoint(path string) bool {
+	for destination, pair := range status.renamed {
+		if path == destination || path == pair.source {
+			return true
+		}
+	}
+	return false
 }
 
 func parseDiscardRenameStatus(output string) (discardRenameStatus, error) {
@@ -108,11 +117,11 @@ func parseDiscardRenameStatus(output string) (discardRenameStatus, error) {
 			return status, fmt.Errorf("invalid Discard rename framing")
 		}
 		output = remaining
+		status.uses[path]++
+		status.uses[source]++
 		if strings.ContainsRune(record[:2], 'R') {
 			status.renamed[path] = discardRename{source: source, destination: path,
 				staged: record[0] == 'R' && strings.ContainsRune(" MDT", rune(record[1]))}
-			status.uses[path]++
-			status.uses[source]++
 		}
 	}
 	return status, nil

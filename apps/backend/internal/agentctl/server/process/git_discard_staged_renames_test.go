@@ -198,6 +198,55 @@ func TestGitOperatorDiscardStagedRenameRefusals(t *testing.T) {
 	}
 }
 
+// @covers AC-PLATFORM-WORKSPACE-GIT-STATUS-001.44, AC-PLATFORM-WORKSPACE-GIT-STATUS-001.47
+func TestGitOperatorDiscardCopyEndpointEvidence(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the status-boundary fault executable requires POSIX")
+	}
+	for _, shape := range []string{"copy-shared-source", "copy-shared-destination"} {
+		t.Run(shape, func(t *testing.T) {
+			f := newRenameDiscardFixture(t, "old.txt", "new.txt", "mixed")
+			op := newFaultedRenameDiscardOperator(t, f, shape)
+			ambient := os.Environ()
+			assertRenameDiscardRefusal(t, f, op)
+			assert.Equal(t, ambient, os.Environ())
+		})
+	}
+	t.Run("independent-copy", func(t *testing.T) {
+		f := newRenameDiscardFixture(t, "old.txt", "new.txt", "mixed")
+		op := newFaultedRenameDiscardOperator(t, f, "copy-independent")
+		before := renameDiscardRepositoryEvidence(t, f.dir)
+		result, err := op.Discard(context.Background(), f.paths)
+		require.NoError(t, err)
+		assert.True(t, result.Success, "result=%+v", result)
+		assert.Empty(t, result.Error)
+		assertRenameDiscardState(t, f.dir, f.want)
+		assert.Equal(t, before, renameDiscardRepositoryEvidence(t, f.dir))
+	})
+	t.Run("standalone-copy-literal-aliases", func(t *testing.T) {
+		f := newRenameDiscardFixture(t, "old.txt", "new.txt", "mixed")
+		committedSource := f.want["copy-source.txt"]
+		for path := range f.want {
+			f.want[path] = readRenameDiscardState(t, f.dir, path)
+		}
+		writeFile(t, f.dir, "copy-source.txt", "ordinary staged source edit\n")
+		runGit(t, f.dir, "add", "--", "copy-source.txt")
+		writeFile(t, f.dir, "copy-source.txt", "ordinary working source edit\n")
+		f.want["copy-source.txt"], f.want["copied.txt"] = committedSource, renameDiscardState{}
+		f.paths = []string{"./copied.txt", "./copy-source.txt"}
+		op := newFaultedRenameDiscardOperator(t, f, "copy-standalone")
+		before := renameDiscardRepositoryEvidence(t, f.dir)
+		ambient := os.Environ()
+		result, err := op.Discard(context.Background(), f.paths)
+		require.NoError(t, err)
+		assert.True(t, result.Success, "result=%+v", result)
+		assert.Empty(t, result.Error)
+		assertRenameDiscardState(t, f.dir, f.want)
+		assert.Equal(t, before, renameDiscardRepositoryEvidence(t, f.dir))
+		assert.Equal(t, ambient, os.Environ())
+	})
+}
+
 func assertRenameDiscardRefusal(t *testing.T, f renameDiscardFixture, op *GitOperator) {
 	t.Helper()
 	for path := range f.want {
@@ -228,6 +277,14 @@ func newFaultedRenameDiscardOperator(t *testing.T, f renameDiscardFixture, shape
 		output += "unexpected Git diagnostic\n"
 	case "overlap":
 		output += "R  extra.txt\x00new.txt\x00"
+	case "copy-shared-source":
+		output += "C  copied.txt\x00old.txt\x00"
+	case "copy-shared-destination":
+		output += "C  copied.txt\x00new.txt\x00"
+	case "copy-independent":
+		output += "C  copied.txt\x00copy-source.txt\x00"
+	case "copy-standalone":
+		output = "C  copied.txt\x00copy-source.txt\x00"
 	case "worktree-only":
 		output = " R new.txt\x00old.txt\x00"
 	case "committed-destination":

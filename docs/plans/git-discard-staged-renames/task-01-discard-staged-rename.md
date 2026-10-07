@@ -343,3 +343,51 @@ its actual join/physical closure, the one identical ROOT-authorized recovery pas
 failed timeout. No passing initial securityutil/public-doc/install checks were replayed.
 Normal active hooks and corrected-head publication follow; current-head hosted CI, substantive
 full-file review and separate ROOT merge authorization remain pending.
+
+### Grouped copy-endpoint review correction
+
+CodeRabbit review 5437366168 identified that parsed C endpoints did not contribute to the
+shared-endpoint refusal count. ROOT confirmed this violates the existing `.47` contract and
+released the smallest accounting correction in this order. C records remain ordinary copy
+evidence, with no pair restoration or copy-discard feature. Alias discovery stays limited
+to recognized R endpoints so ordinary copy-source spellings retain literal behavior.
+
+Before production edits, add actual GitOperator refusal RED using correctly framed R/C
+shared-source and shared-destination evidence at the existing controlled full-status command
+boundary. All filesystem/index/ordinary-neighbor snapshots and mutation commands remain real
+Git. Label this as boundary-fault evidence, not native-generated copy evidence. Include
+independent-copy and standalone-copy raw/alias controls, HEAD/refs/config and environments.
+The new exact selector is `^TestGitOperatorDiscardCopyEndpointEvidence$`, using the same
+trimpath/fts5/race/p1/parallel2/GOMAX2/GOMEM512MiB/3mkill10 envelope. No API production or
+transport branch changes; operator evidence owns the new parser boundary. Run only the new
+anchored operator GREEN, scoped changed process lint against parent f08285d, then one new
+full `./...` CHANGED lint against the freshly API-confirmed a5f6 base with the existing
+GOMAX2/GOMEM1GiB/concurrency2/serial/CLI5m/GNU6mkill10 bounds. This is a new actual-code
+correction allowance, not a third invocation of the prior unchanged recovery. Failure
+requires ROOT checkpoint, with no automatic retry. No passing aliases/security/public-doc/
+install/broad suite replay. Normal active hooks, corrective commit/push, grouped finding and
+three informational dispositions, final-head FULL review and physical heavy return follow.
+
+The new copy-endpoint operator RED failed causally for shared source/destination mutation;
+independent and standalone-copy alias controls passed. GREEN passed all four cases in 1.586s,
+and scoped changed process lint returned 0 issues. The new mandatory full CHANGED original
+then timed out at six minutes (exit 124, empty log, cause unknown), supplying no lint verdict.
+It was actually joined and its wrapper/PID/process group verified gone. Current production,
+test and documentation changes stay uncommitted at published parent f08285d; no automatic
+retry, commit, push, review-gap request or gate substitution follows this failure. ROOT
+timeout/resource decision is required before further local-heavy work. The same observer
+and original cutoffs remain live. No physical-return or merge-ready claim is made.
+
+After reviewing that failed original and physical closure, ROOT explicitly authorized one
+identical bounded recovery for this copy correction, retaining caches and all original
+limits. The earlier failed run remains a timeout with no verdict and unknown cause. No
+cache-population explanation, affected-test replay, resource increase or third invocation
+is authorized. A clean recovery permits normal hooks and publication; another failure
+requires a ROOT checkpoint without publication or a hosted substitute.
+
+The one identical ROOT-authorized copy recovery passed with 0 issues in 191.081s. Its original
+native handle was joined and wrapper/PID/process groups verified gone. The original exit-124
+timeout remains recorded separately with unknown cause. Together with new operator GREEN
+and scoped lint, this completes local checks for the five-path correction. Normal active
+hooks/publication and grouped review disposition follow; no prior passing checks were
+replayed. Final-head hosted CI/FULL review and separate ROOT merge authorization remain gates.

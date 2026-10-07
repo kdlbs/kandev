@@ -262,3 +262,30 @@ lint passed with 0 issues. These checks preserve ordinary controls, rejected raw
 occupied-source refusal and selected-repository isolation. The raw-spelling correction is
 ready for normal active hooks and corrected-head publication; hosted review/merge gates
 remain separate.
+
+CodeRabbit's completed initial FULL review also identified missing C endpoint counts in the
+existing shared-endpoint refusal. ROOT confirmed that finding against `.47` and released a
+second bounded actual-code correction in the same order. Independent real operator refusal
+RED at the controlled status-command boundary precedes the smallest count correction, with
+ordinary copy and alias controls. No native-generated copy shape is claimed by that fault
+evidence. Keep rename alias discovery limited to R endpoints. Exact new/affected checks,
+one new full CHANGED invocation and normal hooks/publication precede final-head review;
+the same original observer and separate merge gate remain unchanged.
+
+Copy-endpoint GREEN passed all four new operator cases (1.586s), and scoped changed process
+lint passed with 0 issues. The new mandatory full CHANGED run timed out at six minutes
+(exit 124, empty log, cause unknown). Its original was joined and physically closed. This
+supplies no full lint verdict; the one order is blocked on ROOT's timeout/resource decision.
+Five scoped paths remain uncommitted at f08285d. No automatic retry, head change, final-head
+FULL request or physical-return claim follows the failed gate.
+
+ROOT subsequently reviewed the failed original and physical closure and explicitly released
+one identical bounded recovery for this copy correction. The order returns to in_progress.
+All prior failure evidence remains; no cause/cache-population claim or bound increase is
+made. Another failure requires a ROOT checkpoint, with no third invocation or publication.
+
+The copy correction's one identical recovery passed with 0 issues in 191.081s, then its
+native original and process group were joined/gone. The original timeout remains failed
+with unknown cause. New operator GREEN (1.586s) and scoped changed lint also passed. The
+five-path correction is ready for normal active hooks/publication and grouped disposition;
+final-head substantive FULL review, hosted CI and separate ROOT merge release remain gates.
