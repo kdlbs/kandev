@@ -287,7 +287,13 @@ func sidebarFirstURLDelimiterEnd(driver, value string, delimiters []string) stri
 
 func sidebarSQLPosition(driver, value, needle string) string {
 	if dialect.IsPostgres(driver) {
+		if needle == "?" {
+			return "POSITION(CHR(63) IN " + value + ")"
+		}
 		return "POSITION('" + needle + "' IN " + value + ")"
+	}
+	if needle == "?" {
+		return "INSTR(" + value + ", CHAR(63))"
 	}
 	return "INSTR(" + value + ", '" + needle + "')"
 }
