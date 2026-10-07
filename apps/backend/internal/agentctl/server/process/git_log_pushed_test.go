@@ -35,7 +35,7 @@ func newPushedLogFixture(t *testing.T) *pushedLogFixture {
 	runGit(t, dir, "config", "core.autocrlf", "false")
 	f := &pushedLogFixture{dir: dir}
 	f.base = f.commit(t, "base.txt", "2025-12-01T00:00:00Z")
-	runGit(t, dir, "remote", "add", "origin", localGitRemotePath(bare))
+	runGit(t, dir, "remote", "add", "origin", localGitRemoteURL(bare))
 	runGit(t, dir, "push", "-u", "origin", "main")
 	runGit(t, dir, "checkout", "-b", "feature")
 	runGit(t, dir, "push", "-u", "origin", "feature")
