@@ -510,3 +510,42 @@ No Go/PostgreSQL/backend lint replay is required solely for those upstream
 bytes. Remaining bounded documentation/reference/18-path coverage/whitespace
 checks, normal active merge hooks, commit and push are recorded separately;
 new-head HOSTED and serial MERGE still require later ROOT releases.
+
+### Current aggregate review: durable design provenance
+
+CodeRabbit App `347564` completed substantive full review `5442207743` at
+head `ca09e52749d084375e87b1fbb592d342535ccaad`, covering all 18 initiative
+files. Aggregate comment `6036333535` has matching source/covered head and
+`kind: reviewed`. Its concrete request to remove machine-local evidence from
+the living design is valid traceability hygiene. ROOT reclassified the
+initial deferred nitpick disposition and released this two-file docs-only
+correction. The design now retains the durable two-service stale-snapshot
+cause in both orderings. Source/test references and product contracts remain
+unchanged. Preserve the exact qualification provenance here:
+
+The ROOT qualification at baseline
+`1204f0e5488418d0d9aa9aaaf6a31988ccdfcd8f` proves this service/SQLite cause
+with two services and independent handles in both held-read directions. Its
+receipt, native result, qualification, and log are under
+`/tmp/kandev-root-workspace-settings-discovery-20261007/`. The protected candidate
+is `/tmp/kandev-root-workspace-settings-overlap-candidate_test.go`, mode `0400`,
+SHA256 `3305080be7e81392cf56003631ff9de92a66322497b32f09b0bc9a10640dc26b`.
+Native session `40825`, chunks `8c5a88` / `8f83cd`, was actually joined at exit
+1; qualification records empty groups `1854400` / `1854404`. Sequential and
+explicit-false controls had no failures. This is not executed REST, WebSocket,
+PostgreSQL, or browser proof. Keep these artifacts read-only and independently
+author permanent tests after release; never replay or import the candidate.
+
+Current observer `35199` was stopped only through its verified owned child
+group `2552235`, then actually joined at terminal chunk `d32036`, exit 143
+and no all-terminal verdict. Wrapper `2552234` and child group `2552235` were
+freshly empty. No hosted workflow was cancelled. Current-head native,
+PostgreSQL and product-parent successes were not inferred from progress.
+The prior completed semantic review and aggregate finding remain historical
+after the docs correction; the finding is addressed by this bounded change.
+There is no inline finding thread to fabricate or resolve. The separate
+docstring coverage warning is optional/nonrequired and receives a grounded
+no-change disposition; no comment sweep or product validation replay is
+authorized. Affected documentation/catalog/reference coverage/whitespace,
+normal active docs-only hooks and publication results are recorded in the
+primary task plan. New-head HOSTED and serial MERGE require later releases.

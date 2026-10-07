@@ -45,18 +45,11 @@ snapshot. Successful unrelated requests can therefore overwrite one another.
 `Visibility` on the service request is unused; it is not a persisted permission
 field. `task_sequence` is absent from this UPDATE.
 
-The ROOT qualification at baseline
-`1204f0e5488418d0d9aa9aaaf6a31988ccdfcd8f` proves this service/SQLite cause
-with two services and independent handles in both held-read directions. Its
-receipt, native result, qualification, and log are under
-`/tmp/kandev-root-workspace-settings-discovery-20261007/`. The protected candidate
-is `/tmp/kandev-root-workspace-settings-overlap-candidate_test.go`, mode `0400`,
-SHA256 `3305080be7e81392cf56003631ff9de92a66322497b32f09b0bc9a10640dc26b`.
-Native session `40825`, chunks `8c5a88` / `8f83cd`, was actually joined at exit
-1; qualification records empty groups `1854400` / `1854404`. Sequential and
-explicit-false controls had no failures. This is not executed REST, WebSocket,
-PostgreSQL, or browser proof. Keep these artifacts read-only and independently
-author permanent tests after release; never replay or import the candidate.
+Two independent service instances can read the same workspace, then both
+successfully persist disjoint settings changes. If either instance later
+writes its stale whole-row snapshot, it overwrites the other instance's
+successful change. This occurs in either ordering; sequential updates and
+explicit-false values do not by themselves produce the lost update.
 
 ## Admission and presence
 
