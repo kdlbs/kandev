@@ -295,7 +295,13 @@ test.describe("Directory browser hidden folders", () => {
       .toBeTruthy();
 
     if (!task.session_id) throw new Error("directory browser task has no session_id");
-    await waitForSessionDone(apiClient, task.id, task.session_id, 45_000);
+    await waitForSessionDone(
+      apiClient,
+      task.id,
+      task.session_id,
+      "Waiting for the directory browser task's initial turn",
+      45_000,
+    );
 
     const drawer = await openNarrowFolderSourceDrawer(testPage, task.id);
     await drawer.getByTestId("folder-picker-trigger").last().click();
