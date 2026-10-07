@@ -83,7 +83,9 @@ function BootstrapRecoveryControls({
     handleRecover,
   } = recovery;
   const needsManagedCloneRelocation =
-    error.category === "managed_clone_relocation_required" || managedCloneRecoveryStamp !== null;
+    recovery.workspaceRecovery?.kind === "managed_clone_relocation" ||
+    error.category === "managed_clone_relocation_required" ||
+    managedCloneRecoveryStamp !== null;
   const profileExists = useSessionProfileExists(sessionId);
   const automaticBusy = Boolean(
     automaticRecovery && isSessionRecoveryBusy(automaticRecovery.resumptionState),
@@ -163,6 +165,7 @@ function BootstrapRecoveryView({
   copy,
   t,
 }: BootstrapRecoveryViewProps) {
+  if (needsManagedCloneRelocation && recovery.workspaceRecovery?.agent_ready) return null;
   const { taskId, sessionId, workspaceId, error, automaticRecovery } = props;
   const { busyAction, branchDetails, guardDetails, managedCloneRecoveryStamp } = recovery;
   const cardClassName = recoveryCardClassName(model.isReadOnly);
@@ -194,6 +197,12 @@ function BootstrapRecoveryView({
         blocked={Boolean(guardDetails && !guardDetails.retryable)}
         canRestore={!guardDetails}
         needsManagedCloneRelocation={needsManagedCloneRelocation}
+        workspaceRecovery={needsManagedCloneRelocation ? recovery.workspaceRecovery : null}
+        workspaceRecoveryRepositoryName={recovery.workspaceRecoveryRepositoryName}
+        workspaceRecoveryStatusCheck={
+          needsManagedCloneRelocation ? recovery.workspaceRecoveryStatusCheck : "idle"
+        }
+        onCheckWorkspaceRecoveryStatus={() => void recovery.checkWorkspaceRecoveryStatus()}
         onResume={handleResume}
         onRestore={() => void recovery.handleRestore()}
         onFreshStart={handleFreshStart}

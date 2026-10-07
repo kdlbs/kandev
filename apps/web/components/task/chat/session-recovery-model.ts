@@ -131,7 +131,8 @@ export function useRecoveryChoices(
     .filter((kind) => kind !== null);
   const managedCloneRelocation =
     model.kind === "managed_clone_relocation_required" ||
-    Boolean(actions.managedCloneRecoveryStamp);
+    Boolean(actions.managedCloneRecoveryStamp) ||
+    actions.workspaceRecovery?.kind === "managed_clone_relocation";
   const kinds = recoveryActionKinds(model, supplied, managedCloneRelocation);
   const choices: RecoveryChoice[] = kinds.map((kind) =>
     createRecoveryChoice({
@@ -272,7 +273,9 @@ function useRecoveryAgentDisplayName(sessionId: string) {
 
 function isManagedCloneRelocation(model: ActiveSessionRecovery, actions: SessionRecoveryActions) {
   return (
-    model.kind === "managed_clone_relocation_required" || Boolean(actions.managedCloneRecoveryStamp)
+    model.kind === "managed_clone_relocation_required" ||
+    Boolean(actions.managedCloneRecoveryStamp) ||
+    actions.workspaceRecovery?.kind === "managed_clone_relocation"
   );
 }
 

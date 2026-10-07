@@ -15,7 +15,7 @@ func TestCompletedRelocationRejectsInvalidInventory(t *testing.T) {
 	t.Run("invalid completed sibling", func(t *testing.T) {
 		fixture := newCompletedRelocationFixture(t, "github", "github.com")
 		addCompletedRelocationSibling(t, &fixture, "widget-two")
-		firstRecord := fixture.request.Slots[0].Worktree.Path + ".kandev-clone-relocation.json"
+		firstRecord := fixture.recordPath
 		firstBefore, err := os.ReadFile(firstRecord)
 		if err != nil {
 			t.Fatalf("read first journal: %v", err)
@@ -155,7 +155,7 @@ func TestCompletedRelocationClaimBookkeeping(t *testing.T) {
 			Original: record.OriginalWorkspacePath, Snapshot: "snapshot", Replacement: record.Replacement,
 			State: RecoveryStateRematerializing,
 		}
-		primaryPath := record.OriginalWorkspacePath + ".kandev-recovery.json"
+		primaryPath := filepath.Join(filepath.Dir(fixture.recordPath), managedCloneRecoveryRecordFilename)
 		if err := writeRecoveryRecord(primaryPath, companion); err != nil {
 			t.Fatalf("write interrupted companion fixture: %v", err)
 		}

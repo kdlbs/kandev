@@ -8,6 +8,7 @@ import type { TaskSession } from "@/lib/types/http";
 import {
   asRecoveryError,
   branchRecoveryDetails,
+  getWorkspaceRecoveryStatus,
   managedCloneRelocationRecoveryDetails,
   requestSessionRecover,
   restoreSessionWorkspace,
@@ -19,6 +20,7 @@ import {
 } from "@/lib/services/session-recovery-service";
 
 export type SessionRecoveryBusyAction = SessionRecoveryAction | "restore" | null;
+export type WorkspaceRecoveryStatusCheck = "idle" | "checking" | "unresolved";
 
 export type ManualSessionRecoveryFailure = {
   operation: "resume" | "restore_workspace";
@@ -61,6 +63,40 @@ function guardOrFallbackError(
 }
 
 type RecoveryOperation = { requestKey: string; sessionKey: string; operationId: number };
+type WorkspaceRecoveryStatusRead = {
+  resolved: boolean;
+  projection: import("@/lib/types/http").WorkspaceRecoveryProjection | null;
+};
+
+type WorkspaceRecoveryProjection = import("@/lib/types/http").WorkspaceRecoveryProjection;
+
+function compareDecimalIdentity(left: string, right: string): number | null {
+  if (!/^\d+$/.test(left) || !/^\d+$/.test(right)) return left === right ? 0 : null;
+  const normalizedLeft = left.replace(/^0+(?=\d)/, "");
+  const normalizedRight = right.replace(/^0+(?=\d)/, "");
+  if (normalizedLeft.length !== normalizedRight.length)
+    return normalizedLeft.length < normalizedRight.length ? -1 : 1;
+  if (normalizedLeft === normalizedRight) return 0;
+  return normalizedLeft < normalizedRight ? -1 : 1;
+}
+
+function isOlderWorkspaceRecoveryProjection(
+  incoming: WorkspaceRecoveryProjection,
+  current: WorkspaceRecoveryProjection | null,
+): boolean {
+  if (!current || incoming.environment_id !== current.environment_id) return false;
+  const generationOrder = compareDecimalIdentity(
+    incoming.ownership_generation,
+    current.ownership_generation,
+  );
+  if (generationOrder !== null && generationOrder !== 0) return generationOrder < 0;
+  if (incoming.ownership_generation !== current.ownership_generation) return true;
+  const revisionOrder = compareDecimalIdentity(incoming.revision, current.revision);
+  const sameAttempt =
+    incoming.operation_id === current.operation_id && incoming.attempt_id === current.attempt_id;
+  if (!sameAttempt) return revisionOrder === null || revisionOrder <= 0;
+  return revisionOrder !== null && revisionOrder < 0;
+}
 
 type RecoveryFailureAssociation = {
   managedClone: ReturnType<typeof managedCloneRelocationRecoveryDetails>;
@@ -205,6 +241,38 @@ export function useSessionRecoveryActions({
   const providerRestoredResumeEligible = useAppStore((state) =>
     isProviderRestoredResumeEligible(state, taskId, sessionId),
   );
+  const taskEnvironmentId = useAppStore(
+    (state) =>
+      state.taskSessions.items[sessionId]?.task_environment_id ??
+      state.taskSessions.items[sessionId]?.environment_id,
+  );
+  const workspaceRecovery = useAppStore((state) => {
+    const session = state.taskSessions.items[sessionId];
+    const projection = session?.workspace_recovery;
+    const selectedEnvironmentId = session?.task_environment_id ?? session?.environment_id;
+    if (
+      !session ||
+      session.task_id !== taskId ||
+      projection?.task_id !== taskId ||
+      !selectedEnvironmentId ||
+      projection.environment_id !== selectedEnvironmentId
+    ) {
+      return null;
+    }
+    return projection;
+  });
+  const workspaceRecoveryRepositoryName = useAppStore((state) => {
+    const repositoryId = state.taskSessions.items[sessionId]?.workspace_recovery?.repository_id;
+    if (!repositoryId) return null;
+    return (
+      Object.values(state.repositories?.itemsByWorkspaceId ?? {})
+        .flat()
+        .find((repository) => repository.id === repositoryId)?.name ?? null
+    );
+  });
+  const setWorkspaceRecoveryProjection = useAppStore(
+    (state) => state.setWorkspaceRecoveryProjection,
+  );
   const pendingKey = `${taskId}\u0000${sessionId}`;
   const sharedBusyAction = usePendingSessionRecovery(pendingKey);
   const sessionKey = pendingKey;
@@ -222,6 +290,8 @@ export function useSessionRecoveryActions({
   const [manualRecoveryFailure, setManualRecoveryFailure] =
     useState<ManualSessionRecoveryFailure | null>(null);
   const [localResultRequestKey, setLocalResultRequestKey] = useState<string | null>(null);
+  const [workspaceRecoveryStatusCheck, setWorkspaceRecoveryStatusCheck] =
+    useState<WorkspaceRecoveryStatusCheck>("idle");
 
   useEffect(() => {
     setBusyAction(null);
@@ -234,12 +304,64 @@ export function useSessionRecoveryActions({
     setRecoveryNotice(null);
     setManualRecoveryFailure(null);
     setLocalResultRequestKey(null);
+    setWorkspaceRecoveryStatusCheck("idle");
   }, [requestKey]);
 
   const localResultIsCurrent = localResultRequestKey === requestKey;
   const recoveryError = localResultIsCurrent
     ? combineRecoveryErrors(resumeError, restoreError, t)
     : null;
+
+  const reconcileWorkspaceRecoveryStatus = useCallback(
+    async (operation: RecoveryOperation): Promise<WorkspaceRecoveryStatusRead> => {
+      setWorkspaceRecoveryStatusCheck("checking");
+      try {
+        const projection = await getWorkspaceRecoveryStatus(
+          taskId,
+          sessionId,
+          t("task:workspaceRecoveryStatusUnavailable"),
+        );
+        if (!isCurrentOperation(operation)) return { resolved: false, projection: null };
+        const matchesBinding =
+          projection?.task_id === taskId &&
+          Boolean(projection.session_id) &&
+          Boolean(taskEnvironmentId) &&
+          projection.environment_id === taskEnvironmentId;
+        if (
+          projection &&
+          (!matchesBinding || isOlderWorkspaceRecoveryProjection(projection, workspaceRecovery))
+        ) {
+          setWorkspaceRecoveryStatusCheck("unresolved");
+          return { resolved: false, projection: null };
+        }
+        const current = matchesBinding ? projection : null;
+        if (current) setWorkspaceRecoveryProjection([sessionId], current);
+        setWorkspaceRecoveryStatusCheck("idle");
+        return { resolved: true, projection: current };
+      } catch {
+        if (isCurrentOperation(operation)) setWorkspaceRecoveryStatusCheck("unresolved");
+        return { resolved: false, projection: null };
+      }
+    },
+    [
+      isCurrentOperation,
+      sessionId,
+      setWorkspaceRecoveryProjection,
+      t,
+      taskEnvironmentId,
+      taskId,
+      workspaceRecovery,
+    ],
+  );
+
+  useEffect(() => {
+    if (workspaceRecovery) setWorkspaceRecoveryStatusCheck("idle");
+  }, [workspaceRecovery]);
+
+  const checkWorkspaceRecoveryStatus = useCallback(() => {
+    const operation = beginOperation();
+    return reconcileWorkspaceRecoveryStatus(operation);
+  }, [beginOperation, reconcileWorkspaceRecoveryStatus]);
 
   const handleRecoveryFailure = useCallback(
     (cause: unknown, operation: RecoveryOperation, action: SessionRecoveryAction) => {
@@ -287,49 +409,84 @@ export function useSessionRecoveryActions({
     ],
   );
 
+  const requestRecovery = useCallback(
+    (action: SessionRecoveryAction) => {
+      const request = {
+        taskId,
+        sessionId,
+        action,
+        failureMessage: t(FAILED_TO_RESUME_MESSAGE_KEY),
+      };
+      if (action === "relocate_and_resume") {
+        return requestSessionRecover({
+          ...request,
+          errorStamp: managedCloneRecoveryStamp ?? errorStamp,
+        });
+      }
+      if (action === "resume" && providerRestoredResumeEligible) {
+        return requestSessionRecover({ ...request, settingsPolicy: "provider_restored" });
+      }
+      return requestSessionRecover(request);
+    },
+    [errorStamp, managedCloneRecoveryStamp, providerRestoredResumeEligible, sessionId, taskId, t],
+  );
+
+  const clearRecoveryResult = useCallback((operation: RecoveryOperation) => {
+    setLocalResultRequestKey(operation.requestKey);
+    setResumeError(null);
+    setRestoreError(null);
+    setBranchDetails(null);
+    setGuardDetails(null);
+    setManagedCloneRecoveryStamp(null);
+    setLastFailedAction(null);
+    setRecoveryNotice(null);
+    setManualRecoveryFailure(null);
+  }, []);
+
+  const reconcileFailedRelocation = useCallback(
+    async (operation: RecoveryOperation): Promise<boolean> => {
+      const status = await reconcileWorkspaceRecoveryStatus(operation);
+      if (!status.resolved) return true;
+      const projection = status.projection;
+      const currentErrorStamp = managedCloneRecoveryStamp ?? errorStamp;
+      if (
+        !projection ||
+        projection.session_id !== sessionId ||
+        !currentErrorStamp ||
+        projection.error_stamp !== currentErrorStamp ||
+        (!projection.runner_live &&
+          projection.state !== "interrupted" &&
+          !projection.workspace_complete)
+      ) {
+        return false;
+      }
+      if (isCurrentOperation(operation)) clearRecoveryResult(operation);
+      return true;
+    },
+    [
+      clearRecoveryResult,
+      errorStamp,
+      isCurrentOperation,
+      managedCloneRecoveryStamp,
+      reconcileWorkspaceRecoveryStatus,
+      sessionId,
+    ],
+  );
+
   const handleRecover = useCallback(
     async (action: SessionRecoveryAction) => {
       const release = claimSessionRecovery(pendingKey, action);
       if (!release) return false;
       const operation = beginOperation();
+      setWorkspaceRecoveryStatusCheck("idle");
       setBusyAction(action);
       try {
-        const recoveryStamp = managedCloneRecoveryStamp ?? errorStamp;
-        if (action === "relocate_and_resume") {
-          await requestSessionRecover({
-            taskId,
-            sessionId,
-            action,
-            failureMessage: t(FAILED_TO_RESUME_MESSAGE_KEY),
-            errorStamp: recoveryStamp,
-          });
-        } else if (action === "resume" && providerRestoredResumeEligible) {
-          await requestSessionRecover({
-            taskId,
-            sessionId,
-            action,
-            failureMessage: t(FAILED_TO_RESUME_MESSAGE_KEY),
-            settingsPolicy: "provider_restored",
-          });
-        } else {
-          await requestSessionRecover({
-            taskId,
-            sessionId,
-            action,
-            failureMessage: t(FAILED_TO_RESUME_MESSAGE_KEY),
-          });
-        }
+        await requestRecovery(action);
         if (!isCurrentOperation(operation)) return false;
-        setLocalResultRequestKey(operation.requestKey);
-        setResumeError(null);
-        setRestoreError(null);
-        setBranchDetails(null);
-        setGuardDetails(null);
-        setManagedCloneRecoveryStamp(null);
-        setLastFailedAction(null);
-        setRecoveryNotice(null);
-        setManualRecoveryFailure(null);
+        clearRecoveryResult(operation);
       } catch (cause) {
+        if (action === "relocate_and_resume" && (await reconcileFailedRelocation(operation)))
+          return false;
         handleRecoveryFailure(cause, operation, action);
         return false;
       } finally {
@@ -340,15 +497,12 @@ export function useSessionRecoveryActions({
     },
     [
       beginOperation,
-      errorStamp,
+      clearRecoveryResult,
       handleRecoveryFailure,
       isCurrentOperation,
-      managedCloneRecoveryStamp,
       pendingKey,
-      providerRestoredResumeEligible,
-      sessionId,
-      taskId,
-      t,
+      reconcileFailedRelocation,
+      requestRecovery,
     ],
   );
 
@@ -362,6 +516,7 @@ export function useSessionRecoveryActions({
       await restoreSessionWorkspace(taskId, sessionId, t("task:failedToRestoreWorkspace"));
       if (!isCurrentOperation(operation)) return;
       setLocalResultRequestKey(operation.requestKey);
+      setWorkspaceRecoveryStatusCheck("idle");
       setResumeError(null);
       setRestoreError(null);
       setBranchDetails(null);
@@ -435,6 +590,17 @@ export function useSessionRecoveryActions({
     branchDetails: localResultIsCurrent ? branchDetails : null,
     guardDetails: localResultIsCurrent ? guardDetails : null,
     managedCloneRecoveryStamp: localResultIsCurrent ? managedCloneRecoveryStamp : null,
+    workspaceRecovery,
+    workspaceRecoveryMatchesCurrentFailure: Boolean(
+      workspaceRecovery?.session_id === sessionId &&
+      errorStamp &&
+      workspaceRecovery.error_stamp === errorStamp &&
+      !workspaceRecovery.workspace_complete &&
+      !workspaceRecovery.agent_ready,
+    ),
+    workspaceRecoveryRepositoryName,
+    workspaceRecoveryStatusCheck,
+    checkWorkspaceRecoveryStatus,
     lastFailedAction: localResultIsCurrent ? lastFailedAction : null,
     recoveryNotice: localResultIsCurrent ? recoveryNotice : null,
     manualRecoveryFailure: localResultIsCurrent ? manualRecoveryFailure : null,
@@ -447,4 +613,7 @@ export function useSessionRecoveryActions({
   };
 }
 
-export type SessionRecoveryActions = ReturnType<typeof useSessionRecoveryActions>;
+export type SessionRecoveryActions = Omit<
+  ReturnType<typeof useSessionRecoveryActions>,
+  "workspaceRecoveryMatchesCurrentFailure"
+> & { workspaceRecoveryMatchesCurrentFailure?: boolean };

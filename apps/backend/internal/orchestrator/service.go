@@ -905,6 +905,7 @@ type Service struct {
 	// which would bypass the gate.
 	officeTaskStatusUpdater        OfficeTaskStatusUpdater
 	workspaceRecoveryErrorReporter workspaceRecoveryErrorReporter
+	workspaceRecoveryStatusReader  workspaceRecoveryStatusReader
 
 	// Resolves the agent family names written in configure_session rules onto
 	// canonical agent IDs. Nil-safe: when unset, rule matching falls back to an
@@ -1495,9 +1496,12 @@ type Service struct {
 	resumeAttempts   *resumeAttemptRegistry
 
 	// Service state
-	mu        sync.RWMutex
-	running   bool
-	startedAt time.Time
+	mu                      sync.RWMutex
+	running                 bool
+	startedAt               time.Time
+	recoveryLifecycleCtx    context.Context
+	recoveryLifecycleCancel context.CancelFunc
+	stopRecoveryParent      func() bool
 
 	// sendNowWorkers owns one generation of asynchronous replacement handoffs.
 	// Stop cancels the generation and waits only for a bounded interval; a late
@@ -3200,7 +3204,16 @@ func (s *Service) reconcileDurableQueueStateOnStartup(ctx context.Context) error
 }
 
 // Start starts all orchestrator components
-func (s *Service) Start(ctx context.Context) error {
+func (s *Service) recoveryLifecycleContext() context.Context {
+	if s == nil {
+		return nil
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.recoveryLifecycleCtx
+}
+
+func (s *Service) Start(ctx context.Context) (startErr error) {
 	s.mu.Lock()
 	if s.running {
 		s.mu.Unlock()
@@ -3214,23 +3227,51 @@ func (s *Service) Start(ctx context.Context) error {
 	s.resetLifecycleSweepWorkers()
 	s.running = true
 	s.startedAt = time.Now()
+	recoveryLifecycleCtx, recoveryLifecycleCancel := context.WithCancel(context.WithoutCancel(ctx))
+	stopRecoveryParent := context.AfterFunc(ctx, recoveryLifecycleCancel)
+	s.recoveryLifecycleCtx = recoveryLifecycleCtx
+	s.recoveryLifecycleCancel = recoveryLifecycleCancel
+	s.stopRecoveryParent = stopRecoveryParent
 	s.mu.Unlock()
+	defer func() {
+		if startErr == nil {
+			return
+		}
+		stopRecoveryParent()
+		recoveryLifecycleCancel()
+		s.mu.Lock()
+		if s.recoveryLifecycleCtx == recoveryLifecycleCtx {
+			s.recoveryLifecycleCtx = nil
+			s.recoveryLifecycleCancel = nil
+			s.stopRecoveryParent = nil
+		}
+		s.mu.Unlock()
+	}()
 
 	s.logger.Info("starting orchestrator service")
+	if err := s.reconcileStartupState(ctx); err != nil {
+		s.setNotRunning()
+		return err
+	}
+	if err := s.startWatcherAndScheduler(ctx); err != nil {
+		s.setNotRunning()
+		return err
+	}
+	s.subscribeStartupEvents()
+	s.startBackgroundRecovery(ctx)
+	s.logger.Info("orchestrator service started successfully")
+	return nil
+}
+
+func (s *Service) reconcileStartupState(ctx context.Context) error {
 	s.resetReservedPromptCallbacks()
 	if err := s.resetSendNowWorkers(); err != nil {
-		s.mu.Lock()
-		s.running = false
-		s.mu.Unlock()
 		return err
 	}
 	s.resetCIAutomationWorkers()
 	s.resetDynamicSuccessorWorkers()
 	if err := s.reconcileDurableQueueStateOnStartup(ctx); err != nil {
 		s.logger.Error("failed to reconcile durable queue state on startup", zap.Error(err))
-		s.mu.Lock()
-		s.running = false
-		s.mu.Unlock()
 		return err
 	}
 	s.resetParkedSamplingWorkers()
@@ -3240,16 +3281,10 @@ func (s *Service) Start(ctx context.Context) error {
 	if s.turnService == nil {
 		err := errors.New("reconcile unpublished prompt turns on startup: turn service is unavailable")
 		s.logger.Error("failed to reconcile unpublished prompt turns on startup", zap.Error(err))
-		s.mu.Lock()
-		s.running = false
-		s.mu.Unlock()
 		return err
 	}
 	if err := s.reconcileUnpublishedPromptTurnsOnStartup(ctx); err != nil {
 		s.logger.Error("failed to reconcile unpublished prompt turns on startup", zap.Error(err))
-		s.mu.Lock()
-		s.running = false
-		s.mu.Unlock()
 		return err
 	}
 	s.reconcileCIAutoFixAttemptsOnStartup(ctx)
@@ -3270,12 +3305,12 @@ func (s *Service) Start(ctx context.Context) error {
 	if s.workflowStore != nil {
 		s.workflowStore.ReconcileQueuedTasks(ctx)
 	}
+	return nil
+}
 
+func (s *Service) startWatcherAndScheduler(ctx context.Context) error {
 	// Start the watcher first to begin receiving events
 	if err := s.watcher.Start(ctx); err != nil {
-		s.mu.Lock()
-		s.running = false
-		s.mu.Unlock()
 		return err
 	}
 
@@ -3284,9 +3319,6 @@ func (s *Service) Start(ctx context.Context) error {
 		if stopErr := s.watcher.Stop(); stopErr != nil {
 			s.logger.Warn("failed to stop watcher after scheduler start failure", zap.Error(stopErr))
 		}
-		s.mu.Lock()
-		s.running = false
-		s.mu.Unlock()
 		return err
 	}
 	s.reconcileDurablePlanCommentDeliveriesOnStartup(ctx)
@@ -3310,7 +3342,10 @@ func (s *Service) Start(ctx context.Context) error {
 	// docs/specs/startup-listener-before-recovery/spec.md. Service.Stop
 	// joins this goroutine (bounded) via stopLifecycleSweepAsync.
 	s.startLifecycleSweepAsync(ctx)
+	return nil
+}
 
+func (s *Service) subscribeStartupEvents() {
 	// Subscribe to GitHub integration events
 	s.subscribeGitHubEvents()
 
@@ -3347,7 +3382,9 @@ func (s *Service) Start(ctx context.Context) error {
 
 	// Invalidate the compiled-step cache when workflow steps change.
 	s.subscribeWorkflowStepCacheEvents()
+}
 
+func (s *Service) startBackgroundRecovery(ctx context.Context) {
 	// Restore durable dynamic policy waits after the route and lifecycle
 	// services are ready. Only un-dispatched pending states are scheduled.
 	s.startDynamicPolicyRecovery(ctx)
@@ -3360,9 +3397,12 @@ func (s *Service) Start(ctx context.Context) error {
 	// before tearing down repo / agentManager.
 	s.startIdleSessionReaper(ctx)
 	s.startCeilingSweeper(ctx)
+}
 
-	s.logger.Info("orchestrator service started successfully")
-	return nil
+func (s *Service) setNotRunning() {
+	s.mu.Lock()
+	s.running = false
+	s.mu.Unlock()
 }
 
 // StartEventWatcher subscribes the orchestrator before lifecycle recovery.
@@ -3394,7 +3434,18 @@ func (s *Service) Stop() error {
 		return ErrServiceNotRunning
 	}
 	s.running = false
+	recoveryLifecycleCancel := s.recoveryLifecycleCancel
+	stopRecoveryParent := s.stopRecoveryParent
+	s.recoveryLifecycleCtx = nil
+	s.recoveryLifecycleCancel = nil
+	s.stopRecoveryParent = nil
 	s.mu.Unlock()
+	if stopRecoveryParent != nil {
+		stopRecoveryParent()
+	}
+	if recoveryLifecycleCancel != nil {
+		recoveryLifecycleCancel()
+	}
 
 	s.logger.Info("stopping orchestrator service")
 	// Stop owns every in-flight resume attempt. Its detached request context

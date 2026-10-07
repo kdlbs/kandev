@@ -187,7 +187,7 @@ func newCompletedRelocationFixture(t *testing.T, provider, host string) complete
 	request.Slots[0].WorktreeID = replacement.ID
 	request.Slots[0].RepositoryID = replacement.RepositoryID
 	request.Slots[0].BranchSlug = replacement.BranchSlug
-	recordPath := replacement.Path + ".kandev-clone-relocation.json"
+	recordPath := completedRelocationJournalPath(t, store, replacement)
 	record, err := readManagedCloneRelocationRecord(recordPath)
 	if err != nil || record.State != string(RecoveryStateComplete) {
 		t.Fatalf("published relocation journal = %+v, %v", record, err)
@@ -200,6 +200,27 @@ func newCompletedRelocationFixture(t *testing.T, provider, host string) complete
 		replacement: replacement, store: store, manager: manager, request: request,
 		recordPath: recordPath, historicalID: record.Head,
 	}
+}
+
+func completedRelocationJournalPath(
+	t *testing.T,
+	store *managedCloneRelocationStore,
+	replacement *Worktree,
+) string {
+	t.Helper()
+	for _, artifact := range store.artifacts {
+		if artifact.LayoutVersion != 2 || artifact.ReplacementID != replacement.ID || artifact.ReplacementPath != replacement.Path {
+			continue
+		}
+		for _, path := range artifact.ArtifactPaths {
+			if filepath.Base(path) == managedCloneRelocationRecordFilename &&
+				filepath.Base(filepath.Dir(path)) == managedCloneRecoveryRecordsDirectory {
+				return path
+			}
+		}
+	}
+	t.Fatal("private relocation journal was not registered")
+	return ""
 }
 
 func applyCompletedRelocationChange(t *testing.T, path, branch, change string) {

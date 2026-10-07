@@ -529,11 +529,13 @@ export function useFileRename(
 /** Inline rename input or static file name */
 export function TreeNodeName({
   node,
+  displayName,
   isActive,
   gitStatus,
   rename,
 }: {
   node: FileTreeNode;
+  displayName?: string;
   isActive: boolean;
   gitStatus: GitFileStatus;
   rename: ReturnType<typeof useFileRename>;
@@ -583,7 +585,7 @@ export function TreeNodeName({
         node.is_dir ? "font-medium" : getGitStatusTextClass(gitStatus),
       )}
     >
-      {node.name}
+      {displayName ?? node.name}
     </span>
   );
 }

@@ -140,9 +140,11 @@ desktop and phone.
 - [Worktree metadata recovery](worktree-metadata-recovery.md)
 - [Task launch failure recovery](task-launch-failure-recovery.md)
 - [System design](../system-design/managed-clone-relocation.md)
+- [Proposed progress and workspace presentation extension](managed-clone-relocation-experience.md)
 
 ## Implementation plans
 
+- [Recovery progress and workspace presentation](../../../plans/managed-clone-recovery-experience/plan.md) (draft)
 - [Snapshot permissions and blocked retry](../../../plans/workspace-recovery-permissions/plan.md)
 
 - [Original relocation package](../../../plans/managed-clone-relocation/plan.md)

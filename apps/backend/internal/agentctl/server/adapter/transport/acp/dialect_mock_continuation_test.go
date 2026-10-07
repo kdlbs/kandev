@@ -55,12 +55,16 @@ func TestMockInterruptionContinuationWireError(t *testing.T) {
 			require.Equal(t, streams.EventTypeError, events[len(events)-1].Type)
 			failures := 0
 			toolCalls := 0
-			for _, event := range events {
+			errorIndex := -1
+			toolIndex := -1
+			for i, event := range events {
 				if event.Type == streams.EventTypeToolCall {
 					toolCalls++
+					toolIndex = i
 				}
 				if event.Type == streams.EventTypeError {
 					failures++
+					errorIndex = i
 					if tc.attested {
 						require.True(t, event.ContinuationSafety.SafeFor(7))
 						require.Equal(t, uint16(1), event.ContinuationSafety.CompletedTools)
@@ -78,18 +82,13 @@ func TestMockInterruptionContinuationWireError(t *testing.T) {
 			}
 			require.Equal(t, expectedToolCalls, toolCalls)
 			require.Equal(t, 1, failures)
+			if tc.emitOutput {
+				require.NotEqual(t, -1, toolIndex, "completed tool activity must be delivered")
+			} else {
+				require.Equal(t, -1, toolIndex, "no tool activity should be delivered before output")
+			}
 			if tc.orderedFailureAfterIO {
-				toolCallIndex, errorIndex := -1, -1
-				for i, event := range events {
-					if event.Type == streams.EventTypeToolCall {
-						toolCallIndex = i
-					}
-					if event.Type == streams.EventTypeError {
-						errorIndex = i
-					}
-				}
-				require.GreaterOrEqual(t, toolCallIndex, 0)
-				require.Greater(t, errorIndex, toolCallIndex)
+				require.Greater(t, errorIndex, toolIndex, "activity events must precede the terminal failure")
 			}
 		})
 	}
